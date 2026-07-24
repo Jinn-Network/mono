@@ -20,6 +20,12 @@ import {
 import { ClaudeCodeHarnessAdapter, CodexCodeHarnessAdapter } from './learner/index.js';
 import { SweRebenchV2EvaluatorHarness } from './swe-rebench-v2-evaluator/harness.js';
 import { JinnRepoEvaluatorHarness } from './jinn-repo-evaluator/harness.js';
+import type {
+  SemanticAgentRunnerResolver,
+} from './jinn-repo-evaluator/autopilot-semantic.js';
+import type {
+  ImmutableMechanicalVerifier,
+} from './jinn-repo-evaluator/autopilot-mechanical-runner.js';
 import { HermesHarness, HermesHarnessAdapter } from './hermes-agent/index.js';
 import { maybeCreateStubHarnessFromEnv } from './stub.js';
 import {
@@ -124,6 +130,13 @@ export interface HarnessEnv {
   hermesBaseUrl?: string;
   /** Timeout (ms) for the `hermes doctor` probe in HermesHarness.isReady. */
   hermesDoctorTimeoutMs?: number;
+  /**
+   * Provider-and-model-configured semantic evaluator runtime. The registry
+   * never guesses a provider from a SolverNet model identifier.
+   */
+  semanticEvaluatorRunnerResolver?: SemanticAgentRunnerResolver;
+  /** Isolated immutable verifier for Autopilot exact-head evaluation. */
+  immutableMechanicalVerifier?: ImmutableMechanicalVerifier;
 }
 
 /**
@@ -234,6 +247,8 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   out.push(
     new JinnRepoEvaluatorHarness({
       stub: isStub,
+      semanticAgentRunnerResolver: env.semanticEvaluatorRunnerResolver,
+      immutableMechanicalVerifier: env.immutableMechanicalVerifier,
       implStateDir: env.implStateDirRoot
         ? `${env.implStateDirRoot}/jinn-repo-evaluator`
         : undefined,

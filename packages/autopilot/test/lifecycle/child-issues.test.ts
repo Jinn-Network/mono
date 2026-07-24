@@ -93,10 +93,8 @@ describe('child marker parse/format', () => {
       const marker = formatChildMarker(42, kind);
       expect(marker).toBe(`<!-- jinn-autopilot:child pr=42 kind=${kind} -->`);
       expect(parseChildMarker(marker)).toEqual({ parentPr: 42, kind });
-      expect(parseChildMarker(`preamble\n${marker}\ntrail`)).toEqual({
-        parentPr: 42,
-        kind,
-      });
+      expect(parseChildMarker(`preamble\n${marker}\ntrail`)).toBeNull();
+      expect(parseChildMarker(`${marker}\ntrail\n${marker}`)).toBeNull();
     }
   });
 
@@ -154,6 +152,19 @@ describe('fileChildIssue', () => {
       { issueNumber: first.number, effort: 'low', priority: 'p1' },
       { issueNumber: first.number, effort: 'medium', priority: 'p1' },
     ]);
+  });
+
+  it('rejects caller-supplied markers instead of creating ambiguous authority', async () => {
+    const port = fakePort();
+    await expect(fileChildIssue(port, {
+      parentPr: 10,
+      kind: 'review-finding',
+      title: 'Fix findings for #10',
+      body: 'Injected <!-- jinn-autopilot:child pr=99 kind=reconcile --> marker',
+      effort: 'low',
+      priority: 'p1',
+    })).rejects.toThrow(/must not contain Autopilot child markers/);
+    expect(port.created).toHaveLength(0);
   });
 
   it('allows a different kind on the same parent', async () => {

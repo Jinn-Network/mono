@@ -30,6 +30,7 @@ import {
   freeDiskBytes,
   listRunnerLiveAttempts,
   markAttemptExited,
+  markMarketplaceAttemptRunning,
   markAttemptRunning,
   readAttemptManifest,
   sweepDeadAttempts,
@@ -602,6 +603,53 @@ describe('attempt workspace and manifest', () => {
       one.runnerId,
       (pid) => pid === 100 || pid === 200,
     ).map((attempt) => attempt.attemptId).sort()).toEqual([UUID_A, UUID_C]);
+  });
+
+  it('backward-decodes a v2 manifest without execution metadata as local', async () => {
+    const fixture = repositoryFixture();
+    const manifest = await createAttemptWorkspace(options(fixture), defaultRunner);
+    const raw = JSON.parse(
+      readFileSync(manifest.paths.manifest, 'utf8'),
+    ) as Record<string, unknown>;
+    delete raw.execution;
+    writeFileSync(manifest.paths.manifest, `${JSON.stringify(raw)}\n`);
+
+    expect(readAttemptManifest(manifest.paths.manifest).execution).toEqual({
+      backend: 'local',
+    });
+  });
+
+  it('persists and counts a running marketplace execution without a PID', async () => {
+    const fixture = repositoryFixture();
+    const manifest = await createAttemptWorkspace(options(fixture, {
+      executionBackend: 'marketplace',
+    }), defaultRunner);
+    const running = markMarketplaceAttemptRunning(
+      manifest.paths.manifest,
+      {
+        backend: 'marketplace',
+        taskId: '501',
+        taskCid: 'bafy-task',
+        deadline: '2026-07-20T01:00:00.000Z',
+        requestFile: join(manifest.paths.attemptDir, 'marketplace-request.json'),
+      },
+      () => new Date('2026-07-20T00:01:00.000Z'),
+    );
+
+    expect(running).toMatchObject({
+      processState: 'running',
+      pid: null,
+      execution: {
+        backend: 'marketplace',
+        taskId: '501',
+        taskCid: 'bafy-task',
+      },
+    });
+    expect(countRunnerLiveAttempts(
+      join(fixture.base, 'v2'),
+      manifest.runnerId,
+      () => false,
+    )).toBe(1);
   });
 });
 

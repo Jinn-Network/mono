@@ -51,6 +51,16 @@ export function isRecoverableTransactionError(error: unknown): boolean {
   const msg = flattenErrorMessage(error);
   const lower = msg.toLowerCase();
 
+  const errorName = error && typeof error === 'object'
+    ? (error as { name?: unknown }).name
+    : undefined;
+  if (
+    errorName === 'SafeBroadcastFenceError'
+    || errorName === 'SafePostBroadcastHookError'
+  ) {
+    return false;
+  }
+
   if (lower.includes('insufficient funds')) return false;
   if (lower.includes('user rejected') || lower.includes('user denied')) return false;
   if (lower.includes('rejected the request')) return false;

@@ -1,13 +1,11 @@
 /**
  * jinn-repo Solution + Verdict payload schemas.
  *
- * Solution: the unified-diff patch the Solver's harness produced for the
- * jinn-repo instance (a real merged Jinn-Network/mono PR, or a prospective
- * live GitHub issue — see `source` on the Task schema). Mirrors the
- * swe-rebench-v2 Solution shape; trajectory provenance is pinned via the
- * envelope, not the payload.
+ * Solution: either the legacy unified-diff patch produced for a merged-PR or
+ * live-issue task, or the strict typed mutation result produced for an
+ * Autopilot session.
  *
- * Verdict: two schema versions, keyed to the Task's `source`:
+ * Verdict: legacy mechanical versions plus the strict Autopilot review result:
  *   - v1: merged-pr grading — the repo-native gold FAIL_TO_PASS test runner's
  *     pass/fail, with an optional log excerpt for human inspection.
  *   - v2 (issue #1891): live-issue grading — no gold tests exist
@@ -16,17 +14,29 @@
  *     keeps `passed`/`test_log_excerpt` and adds `gates`. Mirrors the
  *     swe-rebench-v2-verdict.v1 → .v2 additive precedent in
  *     `./swe-rebench-v2.ts`.
+ *   - jinn-autopilot-review-result.v1: semantic exact-head review outcomes.
  *
  * The full test log is surfaced via the envelope's `artifacts[]` rather than
- * as a typed payload field on either version.
+ * as a typed payload field on the legacy mechanical versions.
  */
 
 import { z } from 'zod/v3';
+import {
+  AutopilotMutationResultSchema,
+  AutopilotReviewResultSchema,
+} from '../autopilot-session.js';
 
-export const JinnRepoSolutionPayloadSchema = z.object({
+export const JinnRepoLegacySolutionPayloadSchema = z.object({
   schemaVersion: z.literal('jinn-repo-solution.v1'),
   patch: z.string().min(1),
 });
+
+export const JinnRepoAutopilotSolutionPayloadSchema = AutopilotMutationResultSchema;
+
+export const JinnRepoSolutionPayloadSchema = z.union([
+  JinnRepoLegacySolutionPayloadSchema,
+  JinnRepoAutopilotSolutionPayloadSchema,
+]);
 
 export type JinnRepoSolutionPayload = z.infer<typeof JinnRepoSolutionPayloadSchema>;
 
@@ -60,6 +70,9 @@ export type JinnRepoVerdictV2Payload = z.infer<typeof JinnRepoVerdictV2PayloadSc
 export const JinnRepoVerdictPayloadSchema = z.union([
   JinnRepoVerdictV1PayloadSchema,
   JinnRepoVerdictV2PayloadSchema,
+  AutopilotReviewResultSchema,
 ]);
+
+export const JinnRepoAutopilotVerdictPayloadSchema = AutopilotReviewResultSchema;
 
 export type JinnRepoVerdictPayload = z.infer<typeof JinnRepoVerdictPayloadSchema>;

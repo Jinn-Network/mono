@@ -1,0 +1,100 @@
+{
+  "status": "verified",
+  "role": "verdict",
+  "task": {
+    "taskId": "501",
+    "taskCid": "bafy-task",
+    "taskCidDigest": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "createdAtBlock": 100,
+    "createdAtTx": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "attempt": {
+    "attemptIndex": 1,
+    "requestId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "operator": "0x3333333333333333333333333333333333333333",
+    "createdAtBlock": 111
+  },
+  "delivery": {
+    "envelopeCid": "bafy-envelope-verdict",
+    "envelopeDigest": "0xabababababababababababababababababababababababababababababababab",
+    "publisherAgentId": "43",
+    "transactionHash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    "blockNumber": 112
+  },
+  "envelope": {
+    "cid": "bafy-envelope-verdict",
+    "digest": "0xabababababababababababababababababababababababababababababababab",
+    "executionSchema": "jinn.execution.v1",
+    "solverType": "jinn-repo.v1",
+    "role": "verdict",
+    "participant": {
+      "safeAddress": "0x3333333333333333333333333333333333333333",
+      "agentEoa": "0x4444444444444444444444444444444444444444"
+    },
+    "signer": "0x4444444444444444444444444444444444444444"
+  },
+  "session": {
+    "schemaVersion": "jinn-autopilot-session.v1",
+    "workflow": "implement",
+    "repository": "Jinn-Network/mono",
+    "language": "typescript",
+    "verificationProfile": "jinn-mono.v1",
+    "issueNumber": 2001,
+    "prNumber": 2101,
+    "targetBase": "next",
+    "branch": "codex/issue-2001",
+    "claimOid": "1111111111111111111111111111111111111111",
+    "expectedHead": "2222222222222222222222222222222222222222",
+    "v2AttemptId": "123e4567-e89b-42d3-a456-426614174001",
+    "runnerId": "runner-1",
+    "taskSnapshot": {
+      "title": "Implement exact marketplace contracts",
+      "body": "Add the approved contract surface.",
+      "prBody": "Draft implementation PR.",
+      "baseSha": "3333333333333333333333333333333333333333",
+      "targetBaseOid": "3333333333333333333333333333333333333333"
+    },
+    "workflowContract": {
+      "skill": "implement-issue",
+      "version": "v2",
+      "resultSchema": "jinn-autopilot-mutation-result.v1"
+    },
+    "deadline": "2026-07-23T23:00:00.000Z",
+    "receiptAuthors": [
+      "jinn-autopilot"
+    ]
+  },
+  "result": {
+    "schemaVersion": "jinn-autopilot-review-result.v1",
+    "outcome": "approve",
+    "correlation": {
+      "taskId": "501",
+      "attemptIndex": 1,
+      "requestId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "deliveryEnvelopeCid": "bafy-envelope-verdict",
+      "v2AttemptId": "123e4567-e89b-42d3-a456-426614174001",
+      "claimOid": "1111111111111111111111111111111111111111",
+      "prNumber": 2101,
+      "expectedHead": "2222222222222222222222222222222222222222",
+      "resultingHead": "4444444444444444444444444444444444444444",
+      "reviewedHead": "4444444444444444444444444444444444444444",
+      "reviewGeneration": "123e4567-e89b-42d3-a456-426614174010",
+      "reviewRefOid": "5555555555555555555555555555555555555555"
+    },
+    "body": "The exact head is ready."
+  },
+  "correlation": {
+    "taskId": "501",
+    "attemptIndex": 1,
+    "requestId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "deliveryEnvelopeCid": "bafy-envelope-verdict",
+    "v2AttemptId": "123e4567-e89b-42d3-a456-426614174001",
+    "claimOid": "1111111111111111111111111111111111111111",
+    "prNumber": 2101,
+    "expectedHead": "2222222222222222222222222222222222222222",
+    "resultingHead": "4444444444444444444444444444444444444444",
+    "reviewedHead": "4444444444444444444444444444444444444444",
+    "reviewGeneration": "123e4567-e89b-42d3-a456-426614174010",
+    "reviewRefOid": "5555555555555555555555555555555555555555"
+  }
+}

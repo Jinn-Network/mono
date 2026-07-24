@@ -20,6 +20,8 @@ describe('state machine', () => {
         TaskRunState.POST_SNAPSHOT,
         TaskRunState.PACKAGING,
         TaskRunState.DELIVERING,
+        TaskRunState.AWAITING_ADOPTION,
+        TaskRunState.CLAIMING_DELIVERY,
         TaskRunState.COMPLETE,
       ];
       for (let i = 0; i < chain.length - 1; i++) {
@@ -103,16 +105,18 @@ describe('state machine', () => {
     it('contains all non-terminal states', () => {
       expect(IN_FLIGHT_STATES.has(TaskRunState.DISCOVERED)).toBe(true);
       expect(IN_FLIGHT_STATES.has(TaskRunState.DELIVERING)).toBe(true);
+      expect(IN_FLIGHT_STATES.has(TaskRunState.AWAITING_ADOPTION)).toBe(true);
+      expect(IN_FLIGHT_STATES.has(TaskRunState.CLAIMING_DELIVERY)).toBe(true);
       expect(IN_FLIGHT_STATES.has(TaskRunState.COMPLETE)).toBe(false);
       expect(IN_FLIGHT_STATES.has(TaskRunState.FAILED)).toBe(false);
       expect(IN_FLIGHT_STATES.has(TaskRunState.RACE_LOST)).toBe(false);
-      expect(IN_FLIGHT_STATES.size).toBe(8);
+      expect(IN_FLIGHT_STATES.size).toBe(10);
     });
   });
 
   describe('ALL_STATES', () => {
-    it('has 11 states total', () => {
-      expect(ALL_STATES).toHaveLength(11);
+    it('has 13 states total', () => {
+      expect(ALL_STATES).toHaveLength(13);
     });
   });
 });

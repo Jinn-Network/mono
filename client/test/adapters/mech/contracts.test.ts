@@ -9,6 +9,7 @@ import {
   ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT,
   ROUTER_DISCOVERY_EVENTS,
   MECH_DELIVER_EVENT,
+  findLatestDeliveryForRequest,
   scanLatestDeliveryDataByRid,
 } from '../../../src/adapters/mech/contracts.js';
 
@@ -220,5 +221,53 @@ describe('event-specific router log filters (#116)', () => {
     const arg = getLogs.mock.calls[0][0];
     expect(arg.address).toBe(mech);
     expect(arg.event).toBe(MECH_DELIVER_EVENT);
+  });
+
+  it('findLatestDeliveryForRequest returns the exact event transaction metadata', async () => {
+    const mech = ('0x' + 'ab'.repeat(20)) as `0x${string}`;
+    const serviceMultisig = ('0x' + 'cd'.repeat(20)) as `0x${string}`;
+    const requestId = ('0x' + '11'.repeat(32)) as `0x${string}`;
+    const deliveryDigest = ('0x' + '22'.repeat(32)) as `0x${string}`;
+    const transactionHash = ('0x' + '33'.repeat(32)) as `0x${string}`;
+    const topics = encodeEventTopics({
+      abi: [MECH_DELIVER_EVENT],
+      eventName: 'Deliver',
+      args: {
+        mech,
+        mechServiceMultisig: serviceMultisig,
+      },
+    });
+    const data = encodeAbiParameters(
+      [
+        { name: 'requestId', type: 'bytes32' },
+        { name: 'deliveryRate', type: 'uint256' },
+        { name: 'data', type: 'bytes' },
+      ],
+      [requestId, 1n, deliveryDigest],
+    );
+    const getLogs = vi.fn().mockResolvedValue([{
+      address: mech,
+      topics,
+      data,
+      transactionHash,
+      blockNumber: 10n,
+    }]);
+
+    const recovered = await findLatestDeliveryForRequest(
+      { getLogs } as any,
+      mech,
+      requestId,
+      0n,
+      10n,
+    );
+    expect(recovered).toMatchObject({
+      requestId,
+      deliveryDataHex: deliveryDigest,
+      transactionHash,
+      blockNumber: 10n,
+    });
+    expect(recovered?.mechAddress.toLowerCase()).toBe(
+      serviceMultisig.toLowerCase(),
+    );
   });
 });

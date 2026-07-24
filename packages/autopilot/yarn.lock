@@ -361,6 +361,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/autopilot@workspace:."
   dependencies:
+    "@jinn-network/sdk": "portal:../sdk"
     "@types/node": "npm:^22"
     tsx: "npm:^4.23.1"
     typescript: "npm:^5.6.0"
@@ -371,6 +372,15 @@ __metadata:
     jinn-run-stage: ./bin/jinn-run-stage.ts
     jinn-triage-check: ./bin/jinn-triage-check.ts
   languageName: unknown
+  linkType: soft
+
+"@jinn-network/sdk@portal:../sdk::locator=%40jinn-network%2Fautopilot%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/sdk@portal:../sdk::locator=%40jinn-network%2Fautopilot%40workspace%3A."
+  dependencies:
+    zod: "npm:^4.4.3"
+    zod-to-json-schema: "npm:^3.23.0"
+  languageName: node
   linkType: soft
 
 "@jridgewell/sourcemap-codec@npm:^1.5.5":
@@ -1471,6 +1481,15 @@ __metadata:
   version: 5.0.0
   resolution: "yallist@npm:5.0.0"
   checksum: 10c0/a499c81ce6d4a1d260d4ea0f6d49ab4da09681e32c3f0472dee16667ed69d01dae63a3b81745a24bd78476ec4fcf856114cb4896ace738e01da34b2c42235416
+  languageName: node
+  linkType: hard
+
+"zod-to-json-schema@npm:^3.23.0":
+  version: 3.25.2
+  resolution: "zod-to-json-schema@npm:3.25.2"
+  peerDependencies:
+    zod: ^3.25.28 || ^4
+  checksum: 10c0/dd300554393903022487688af14fbda5c719ba8179702bb55b3aa86318830467f0f7beb7d654036975ac963dc4843b72e59636448bfff9a0608f277bb6a14939
   languageName: node
   linkType: hard
 

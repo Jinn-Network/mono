@@ -110,6 +110,72 @@ export interface InstanceClaimCount {
   maxClaims: number;
 }
 
+/**
+ * Exact indexer candidates used to recover an Autopilot marketplace delivery.
+ *
+ * This read is intentionally narrower than the ordinary discovery surfaces:
+ * one chain, one marketplace task id, one role.  A successful result preserves
+ * every on-chain/indexed join key needed by the delivery observer; absence is
+ * pending and ambiguity is a contradiction.
+ */
+export type AutopilotDeliveryRole = 'solution' | 'verdict';
+
+export interface AutopilotDeliveryTaskCandidate {
+  taskId: string;
+  taskCidDigest: `0x${string}`;
+  createdAtBlock: number;
+  createdAtTx: `0x${string}`;
+}
+
+export interface AutopilotDeliveryAttemptCandidate {
+  taskId: string;
+  attemptIndex: number;
+  requestId: `0x${string}`;
+  operator: `0x${string}`;
+  /** Indexed attempt/delivery block when present; null for pre-adoption verdict metadata. */
+  createdAtBlock: number | null;
+}
+
+export interface AutopilotDeliveryEnvelopeCandidate {
+  requestId: `0x${string}`;
+  manifestCid: string;
+  publisherAgentId: string;
+  manifestHash: `0x${string}`;
+  enrichedAtBlock: number;
+}
+
+export type AutopilotDeliveryCandidateLookup =
+  | {
+      status: 'pending';
+      reason:
+        | 'task-not-indexed'
+        | 'attempt-not-indexed'
+        | 'envelope-not-indexed'
+        | 'exact-indexer-required';
+      taskId: string;
+      role: AutopilotDeliveryRole;
+    }
+  | {
+      status: 'contradiction';
+      reason:
+        | 'multiple-tasks'
+        | 'multiple-attempts'
+        | 'multiple-verdicts'
+        | 'multiple-envelopes'
+        | 'inconsistent-indexer-data';
+      taskId: string;
+      role: AutopilotDeliveryRole;
+    }
+  | {
+      status: 'ready';
+      role: AutopilotDeliveryRole;
+      task: AutopilotDeliveryTaskCandidate;
+      attempt: AutopilotDeliveryAttemptCandidate;
+      /** Safe that authored the solution attempt; distinct from a verdict evaluator. */
+      solutionOperator: `0x${string}`;
+      envelope: AutopilotDeliveryEnvelopeCandidate;
+    };
+
 // ── PublishedArtifact base (attd) ────────────────────────────────────────────
 //
 // A common read-shape for builder-published artifacts. Today only plug-ins
@@ -304,6 +370,18 @@ export interface CodeDigestRewardRow {
 }
 
 export interface DiscoveryAPI {
+  /**
+   * Resolve the exact indexed task/attempt/envelope rows for an Autopilot
+   * marketplace delivery. Implementations must not substitute recent/global
+   * scans: a missing exact row is pending and multiple/inconsistent rows are a
+   * contradiction. Verdict discovery is additive and unsupported in v1.
+   */
+  getAutopilotDeliveryCandidates(args: {
+    chainId: number;
+    taskId: string;
+    role: AutopilotDeliveryRole;
+  }): Promise<AutopilotDeliveryCandidateLookup>;
+
   /**
    * Returns claimable task candidates for a set of SolverNet manifests,
    * filtered to tasks the given operator has not yet attempted.

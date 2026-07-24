@@ -23,7 +23,10 @@
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  JinnRepoSolutionPayloadSchema,
+  AutopilotEvaluationContextSchema,
+  JinnRepoAutopilotSessionTaskSchema,
+  JinnRepoAutopilotSolutionPayloadSchema,
+  JinnRepoLegacySolutionPayloadSchema,
   type JinnRepoVerdictPayload,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 import {
@@ -42,6 +45,24 @@ import {
 import { JinnRepoEvaluator } from './evaluator.js';
 import type { JinnRepoEvalResult } from './eval-runner.js';
 import { runJinnRepoLiveEval, type JinnRepoLiveEvalResult } from './live-eval-runner.js';
+import {
+  runAutopilotSemanticReview,
+  type AutopilotMechanicalRunner,
+  type SemanticAgentRunner,
+  type SemanticAgentRunnerResolver,
+  type SemanticRuntimeReadiness,
+} from './autopilot-semantic.js';
+import { ExactHeadMechanicalRunner } from './autopilot-mechanical-runner.js';
+import type {
+  ImmutableMechanicalVerifier,
+} from './autopilot-mechanical-runner.js';
+import {
+  admitAutopilotEvaluationOpportunity,
+} from './autopilot-evaluation-context.js';
+import {
+  AUTOPILOT_EVALUATION_CONTEXT_KEY,
+  resolveSolutionEnvelopeCid,
+} from '../evaluation-context.js';
 
 /** The two verdict values emitted by this evaluator. jinn-repo grades are
  *  binary: the gold tests either resolve or they don't (unscorable runs throw
@@ -61,6 +82,13 @@ type LiveGradeFn = (args: {
 }) => Promise<JinnRepoLiveEvalResult>;
 
 const DEFAULT_MONO_REPO_URL = 'https://github.com/Jinn-Network/mono.git';
+const AUTOPILOT_READINESS_CACHE_MS = 30_000;
+
+interface AutopilotReadinessCache {
+  checkedAt?: number;
+  status?: SemanticRuntimeReadiness;
+  inFlight?: Promise<SemanticRuntimeReadiness>;
+}
 
 /**
  * The raw `source` field straight off an unparsed task spec — issue #1891
@@ -96,6 +124,90 @@ function summarizeZodError(error: {
   return error.issues.map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`).join('; ');
 }
 
+function parseAutopilotEvaluationTask(task: Task):
+  | {
+      ok: true;
+      context: ReturnType<typeof AutopilotEvaluationContextSchema.parse>;
+    }
+  | {
+      ok: false;
+      reason: string;
+    } {
+  const parsedTask = JinnRepoAutopilotSessionTaskSchema.safeParse(task.spec);
+  if (!parsedTask.success) {
+    return {
+      ok: false,
+      reason: `malformed Autopilot source Task: ${summarizeZodError(parsedTask.error)}`,
+    };
+  }
+  const parsedContext = AutopilotEvaluationContextSchema.safeParse(
+    task.context?.[AUTOPILOT_EVALUATION_CONTEXT_KEY],
+  );
+  if (!parsedContext.success) {
+    return {
+      ok: false,
+      reason: `context.${AUTOPILOT_EVALUATION_CONTEXT_KEY} must be an accepted strict evaluation context`,
+    };
+  }
+  const resultJson = task.context?.['restorationResult'];
+  if (typeof resultJson !== 'string') {
+    return { ok: false, reason: 'context.restorationResult required' };
+  }
+
+  let envelope: ReturnType<typeof SignedEnvelopeSchema.parse>;
+  try {
+    envelope = SignedEnvelopeSchema.parse(JSON.parse(resultJson));
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `malformed Autopilot Solution envelope: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  if (
+    envelope.solverType !== 'jinn-repo.v1'
+    || normalizeEnvelopeRole(envelope.role) !== 'solution'
+  ) {
+    return {
+      ok: false,
+      reason: `expected jinn-repo.v1/solution envelope, got ${envelope.solverType}/${envelope.role}`,
+    };
+  }
+  const parsedSolution = JinnRepoAutopilotSolutionPayloadSchema.safeParse(
+    envelope.payload,
+  );
+  if (!parsedSolution.success) {
+    return {
+      ok: false,
+      reason: `malformed Autopilot mutation result: ${summarizeZodError(parsedSolution.error)}`,
+    };
+  }
+  const solutionEnvelopeCid = resolveSolutionEnvelopeCid(task);
+  if (!solutionEnvelopeCid) {
+    return {
+      ok: false,
+      reason: 'context.solutionEnvelopeCid required for Autopilot evaluation',
+    };
+  }
+  const admission = admitAutopilotEvaluationOpportunity({
+    task: parsedTask.data,
+    solution: parsedSolution.data,
+    taskId: parsedContext.data.correlation.taskId,
+    attemptIndex: task.attemptNumber ?? -1,
+    requestId: task.restorationRequestId ?? '',
+    solutionEnvelopeCid,
+    solutionOperatorSafe: envelope.participant.safeAddress,
+    evaluatorOperatorSafe: parsedContext.data.operators.evaluatorSafe,
+    observation: {
+      state: 'accepted',
+      context: parsedContext.data,
+    },
+  });
+  if (admission.kind !== 'accepted') {
+    return { ok: false, reason: admission.reason };
+  }
+  return { ok: true, context: admission.context };
+}
+
 export interface JinnRepoEvaluatorHarnessOptions {
   /** Marks a stub registry — `isReady()` reports requires-live-daemon. */
   stub?: boolean;
@@ -122,6 +234,12 @@ export interface JinnRepoEvaluatorHarnessOptions {
    * public GitHub URL), mirroring {@link JinnRepoEvaluator}'s resolution order.
    */
   gradeLive?: LiveGradeFn;
+  /** Deterministic exact-head checks, injectable for hermetic tests. */
+  mechanicalRunner?: AutopilotMechanicalRunner;
+  /** Isolated deterministic verifier used by the default exact-head runner. */
+  immutableMechanicalVerifier?: ImmutableMechanicalVerifier;
+  /** Per-SolverNet semantic runtime resolver, injectable for hermetic tests. */
+  semanticAgentRunnerResolver?: SemanticAgentRunnerResolver;
 }
 
 export class JinnRepoEvaluatorHarness implements Harness {
@@ -133,6 +251,12 @@ export class JinnRepoEvaluatorHarness implements Harness {
   private readonly loadPool: () => JinnRepoPoolItem[];
   private readonly grade: GradeFn;
   private readonly gradeLive: LiveGradeFn;
+  private readonly mechanicalRunner: AutopilotMechanicalRunner;
+  private readonly immutableMechanicalVerifier: ImmutableMechanicalVerifier | undefined;
+  private readonly semanticAgentRunnerResolver: SemanticAgentRunnerResolver | undefined;
+  private readonly verifierReadinessCache: AutopilotReadinessCache = {};
+  private readonly semanticReadinessCache =
+    new WeakMap<SemanticAgentRunner, AutopilotReadinessCache>();
 
   constructor(opts: JinnRepoEvaluatorHarnessOptions = {}) {
     this.stub = opts.stub ?? false;
@@ -147,10 +271,43 @@ export class JinnRepoEvaluatorHarness implements Harness {
           patch: args.solution.patch,
           monoRepoUrl: process.env['JINN_MONO_REPO_URL'] ?? DEFAULT_MONO_REPO_URL,
         }));
+    this.immutableMechanicalVerifier = opts.immutableMechanicalVerifier;
+    this.mechanicalRunner =
+      opts.mechanicalRunner
+      ?? new ExactHeadMechanicalRunner({
+        monoRepoUrl: process.env['JINN_MONO_REPO_URL'] ?? DEFAULT_MONO_REPO_URL,
+        immutableVerifier: opts.immutableMechanicalVerifier,
+      });
+    this.semanticAgentRunnerResolver = opts.semanticAgentRunnerResolver;
   }
 
   supports(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
     return ctx.solverType === 'jinn-repo.v1' && ctx.role === 'evaluation';
+  }
+
+  private async cachedReadiness(
+    cache: AutopilotReadinessCache,
+    probe: () => Promise<SemanticRuntimeReadiness>,
+  ): Promise<SemanticRuntimeReadiness> {
+    if (
+      cache.status
+      && cache.checkedAt !== undefined
+      && Date.now() - cache.checkedAt < AUTOPILOT_READINESS_CACHE_MS
+    ) {
+      return cache.status;
+    }
+    if (cache.inFlight) return await cache.inFlight;
+
+    const inFlight = probe();
+    cache.inFlight = inFlight;
+    try {
+      const status = await inFlight;
+      cache.status = status;
+      cache.checkedAt = Date.now();
+      return status;
+    } finally {
+      if (cache.inFlight === inFlight) cache.inFlight = undefined;
+    }
   }
 
   async canAttempt(task: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
@@ -159,6 +316,64 @@ export class JinnRepoEvaluatorHarness implements Harness {
     }
     if (task.role !== 'evaluation') {
       return { ok: false, reason: 'role is not evaluation' };
+    }
+    if (rawTaskSpecSource(task.spec) === 'autopilot-session') {
+      const parsed = parseAutopilotEvaluationTask(task);
+      if (!parsed.ok) return { ok: false, reason: parsed.reason };
+      if (!this.semanticAgentRunnerResolver) {
+        return {
+          ok: false,
+          reason: 'Autopilot semantic evaluator runtime is not configured',
+        };
+      }
+      const semanticRuntime = await this.semanticAgentRunnerResolver.resolve({
+        ...(task.solverNetManifestCid
+          ? { manifestCid: task.solverNetManifestCid }
+          : {}),
+      });
+      if (!semanticRuntime) {
+        return {
+          ok: false,
+          reason:
+            'Autopilot semantic evaluator runtime is not configured for SolverNet '
+            + (task.solverNetManifestCid ?? '<unknown>'),
+        };
+      }
+      const verifierReadiness = this.immutableMechanicalVerifier?.isReady
+        ? await this.cachedReadiness(
+            this.verifierReadinessCache,
+            () => this.immutableMechanicalVerifier!.isReady!(),
+          )
+        : undefined;
+      if (verifierReadiness && !verifierReadiness.ready) {
+        return {
+          ok: false,
+          reason:
+            verifierReadiness.reason
+            ?? 'Autopilot immutable mechanical verifier is unavailable',
+        };
+      }
+      let semanticReadiness: SemanticRuntimeReadiness | undefined;
+      if (semanticRuntime.runner.isReady) {
+        let cache = this.semanticReadinessCache.get(semanticRuntime.runner);
+        if (!cache) {
+          cache = {};
+          this.semanticReadinessCache.set(semanticRuntime.runner, cache);
+        }
+        semanticReadiness = await this.cachedReadiness(
+          cache,
+          () => semanticRuntime.runner.isReady!(),
+        );
+      }
+      if (semanticReadiness && !semanticReadiness.ready) {
+        return {
+          ok: false,
+          reason:
+            semanticReadiness.reason
+            ?? 'Autopilot semantic evaluator runtime is unavailable',
+        };
+      }
+      return { ok: true };
     }
     // A live-issue spec with a field defect (missing `issue_number`, a
     // malformed `base_commit`, etc.) is rejected here with a specific reason
@@ -186,8 +401,10 @@ export class JinnRepoEvaluatorHarness implements Harness {
 
   async isReady(): Promise<ReadyStatus> {
     if (this.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
-    // No Docker, no enable marker: the repo-native evaluator only needs git +
-    // the bundled pool, both present in any real daemon. Always ready when live.
+    // Docker and semantic runtimes are Autopilot-only prerequisites. Probing
+    // them here would disable legacy merged-pr/live-issue evaluations through
+    // the harness-wide readiness gate. canAttempt() probes and caches them only
+    // for an admitted Autopilot evaluation Task.
     return { ready: true };
   }
 
@@ -220,8 +437,6 @@ export class JinnRepoEvaluatorHarness implements Harness {
         `jinn-repo-evaluator: expected jinn-repo.v1/solution envelope, got ${envelope.solverType}/${envelope.role}`,
       );
     }
-    const solutionPayload = JinnRepoSolutionPayloadSchema.parse(envelope.payload);
-
     // Route on the RAW `source` field, not full-parse success (issue #1891
     // Finding 2). A merged-pr evaluation task's spec is the leak-controlled
     // solverView() projection (see `_jinn-repo-pool.ts`), which has no raw
@@ -237,6 +452,79 @@ export class JinnRepoEvaluatorHarness implements Harness {
     // path below (where it would surface a misleading `instance_not_in_pool`
     // SkippableError and be re-attempted forever).
     const rawSource = rawTaskSpecSource(ctx.task.spec);
+    if (rawSource === 'autopilot-session') {
+      const parsed = parseAutopilotEvaluationTask(ctx.task);
+      if (!parsed.ok) {
+        throw new SkippableError(
+          'autopilot_eval_pending',
+          `jinn-repo-evaluator: ${parsed.reason}`,
+        );
+      }
+      const semanticAgentRunnerResolver = this.semanticAgentRunnerResolver;
+      if (!semanticAgentRunnerResolver) {
+        throw new SkippableError(
+          'autopilot_eval_pending',
+          'jinn-repo-evaluator: Autopilot semantic evaluator runtime is not configured',
+        );
+      }
+      const semanticRuntime = await semanticAgentRunnerResolver.resolve({
+        ...(ctx.task.solverNetManifestCid
+          ? { manifestCid: ctx.task.solverNetManifestCid }
+          : {}),
+        ...(ctx.solverNet ? { solverNet: ctx.solverNet } : {}),
+      });
+      if (!semanticRuntime) {
+        const solverNetIdentity =
+          ctx.solverNet?.name
+          ?? ctx.task.solverNetManifestCid
+          ?? '<unknown>';
+        throw new SkippableError(
+          'autopilot_eval_pending',
+          `jinn-repo-evaluator: semantic evaluator runtime is not configured for SolverNet ${solverNetIdentity}`,
+        );
+      }
+      const result = await runAutopilotSemanticReview({
+        context: parsed.context,
+        mechanicalRunner: this.mechanicalRunner,
+        agentRunner: semanticRuntime.runner,
+        ...(semanticRuntime.model ? { model: semanticRuntime.model } : {}),
+        abort: ctx.abort,
+      });
+      const artifactPath = 'jinn-autopilot-review-result.json';
+      await writeFile(
+        join(ctx.workingDir, artifactPath),
+        `${JSON.stringify(result.review, null, 2)}\n`,
+        'utf8',
+      );
+      return {
+        venueRef: { name: 'jinn-repo' },
+        gating: result.gating,
+        informational: {
+          instance_id: instanceId,
+          reviewTarget: parsed.context.reviewTarget,
+          correlation: parsed.context.correlation,
+          mechanical: result.mechanical,
+          semanticRuntime: {
+            provider: semanticRuntime.provider,
+            ...(semanticRuntime.model ? { model: semanticRuntime.model } : {}),
+          },
+        },
+        verdictPayload: result.review as unknown as Record<string, unknown>,
+        artifacts: [{
+          path: artifactPath,
+          artifactType: 'jinn_autopilot_review_result',
+          metadata: {
+            outcome: result.review.outcome,
+            reviewedHead: parsed.context.correlation.reviewedHead,
+          },
+          access: { priceUsdc: '0' },
+        }],
+      };
+    }
+
+    const solutionPayload = JinnRepoLegacySolutionPayloadSchema.parse(
+      envelope.payload,
+    );
     if (rawSource === 'live-issue') {
       const parsedSpec = JinnRepoTaskSchema.safeParse(ctx.task.spec);
       if (!parsedSpec.success || !isLiveIssueTask(parsedSpec.data)) {

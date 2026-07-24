@@ -97,6 +97,137 @@ describe('executeSafeTransaction nonce refresh', () => {
   });
 });
 
+describe('executeSafeTransaction wallet-bound hooks', () => {
+  function clients(writeContract: ReturnType<typeof vi.fn>) {
+    const waitForTransactionReceipt = vi.fn();
+    const publicClient = {
+      getChainId: vi.fn().mockResolvedValue(baseSepolia.id),
+      getTransactionCount: vi.fn().mockResolvedValue(7),
+      readContract: vi.fn(async (args: { functionName: string }) => {
+        if (args.functionName === 'nonce') return 0n;
+        if (args.functionName === 'getTransactionHash') return TEST_SAFE_TX_HASH;
+        throw new Error(`unexpected readContract call: ${args.functionName}`);
+      }),
+      estimateFeesPerGas: vi.fn().mockResolvedValue({
+        maxFeePerGas: 100n,
+        maxPriorityFeePerGas: 10n,
+      }),
+      getGasPrice: vi.fn(),
+      waitForTransactionReceipt,
+    };
+    const walletClient = {
+      account: { address: TEST_SIGNER_ADDRESS },
+      chain: baseSepolia,
+      signMessage: vi.fn().mockResolvedValue(TEST_SAFE_SIGNATURE),
+      writeContract,
+    };
+    return { publicClient, walletClient, waitForTransactionReceipt };
+  }
+
+  it('awaits transaction-hash persistence after ledger record and before receipt waiting', async () => {
+    const writeContract = vi.fn().mockResolvedValue(TEST_SUCCESS_HASH);
+    const { publicClient, walletClient, waitForTransactionReceipt } = clients(writeContract);
+    const ledger = createMemoryTxSubmissionLedger();
+    const originalRecord = ledger.recordTxSubmission.bind(ledger);
+    const order: string[] = [];
+    vi.spyOn(ledger, 'recordTxSubmission').mockImplementation(async (entry) => {
+      await originalRecord(entry);
+      order.push('ledger');
+    });
+    let releasePersistence!: () => void;
+    const persistenceGate = new Promise<void>((resolve) => {
+      releasePersistence = resolve;
+    });
+    const onBroadcast = vi.fn(async () => {
+      order.push('hook');
+      await persistenceGate;
+    });
+    waitForTransactionReceipt.mockImplementation(() => new Promise((resolve) => {
+      order.push('receipt');
+      setTimeout(() => resolve({ status: 'success' }), 100);
+    }));
+
+    const pending = executeSafeTransaction(
+      publicClient as never,
+      walletClient as never,
+      {
+        safeAddress: TEST_SAFE_ADDRESS,
+        to: TEST_TARGET_ADDRESS,
+        value: 0n,
+        data: TEST_CALL_DATA,
+      },
+      {
+        ledger,
+        onBroadcast,
+      },
+    );
+    await vi.waitFor(() => expect(onBroadcast).toHaveBeenCalledWith(TEST_SUCCESS_HASH));
+    expect(order).toEqual(['ledger', 'hook']);
+    expect(waitForTransactionReceipt).not.toHaveBeenCalled();
+
+    releasePersistence();
+    await vi.waitFor(() => expect(waitForTransactionReceipt).toHaveBeenCalledWith({
+      hash: TEST_SUCCESS_HASH,
+    }));
+    await expect(pending).resolves.toBe(TEST_SUCCESS_HASH);
+  });
+
+  it('surfaces a post-broadcast persistence failure with the hash and never retries', async () => {
+    const writeContract = vi.fn().mockResolvedValue(TEST_SUCCESS_HASH);
+    const { publicClient, walletClient, waitForTransactionReceipt } = clients(writeContract);
+
+    await expect(executeSafeTransaction(
+      publicClient as never,
+      walletClient as never,
+      {
+        safeAddress: TEST_SAFE_ADDRESS,
+        to: TEST_TARGET_ADDRESS,
+        value: 0n,
+        data: TEST_CALL_DATA,
+      },
+      {
+        ledger: createMemoryTxSubmissionLedger(),
+        onBroadcast: async () => {
+          throw new Error('503 persistence failed');
+        },
+      },
+    )).rejects.toMatchObject({
+      name: 'SafePostBroadcastHookError',
+      txHash: TEST_SUCCESS_HASH,
+    });
+    expect(writeContract).toHaveBeenCalledOnce();
+    expect(waitForTransactionReceipt).not.toHaveBeenCalled();
+  });
+
+  it('checks the broadcast fence on every retry attempt and stops before a lost-owner write', async () => {
+    const writeContract = vi.fn()
+      .mockRejectedValueOnce(new Error('503 service unavailable'))
+      .mockResolvedValueOnce(TEST_SUCCESS_HASH);
+    const { publicClient, walletClient, waitForTransactionReceipt } = clients(writeContract);
+    const beforeBroadcast = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('ownership lost'));
+
+    await expect(executeSafeTransaction(
+      publicClient as never,
+      walletClient as never,
+      {
+        safeAddress: TEST_SAFE_ADDRESS,
+        to: TEST_TARGET_ADDRESS,
+        value: 0n,
+        data: TEST_CALL_DATA,
+      },
+      {
+        ledger: createMemoryTxSubmissionLedger(),
+        beforeBroadcast,
+      },
+    )).rejects.toMatchObject({ name: 'SafeBroadcastFenceError' });
+    expect(beforeBroadcast).toHaveBeenCalledTimes(2);
+    expect(writeContract).toHaveBeenCalledOnce();
+    expect(waitForTransactionReceipt).not.toHaveBeenCalled();
+  });
+});
+
 describe('executeSafeTransaction reconcile-first (issue #897)', () => {
   const ORIGINAL_HASH = `0x${'11'.repeat(32)}` as Hex;
   const CHAIN_ID = baseSepolia.id;

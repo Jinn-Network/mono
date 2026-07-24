@@ -1,6 +1,6 @@
 {
   "name": "@jinn-network/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Stable SDK surface for Jinn SolverNets, Harnesses, plugins, and typed payloads.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
@@ -41,6 +41,11 @@
       "import": "./dist/solvernets/jinn-repo.js",
       "types": "./dist/solvernets/jinn-repo.d.ts"
     },
+    "./autopilot": {
+      "import": "./dist/autopilot.js",
+      "types": "./dist/autopilot.d.ts"
+    },
+    "./fixtures/autopilot/*": "./fixtures/autopilot/*",
     "./solvernets/swe-rebench-v2-held-out-slate": {
       "import": "./dist/solvernets/swe-rebench-v2-held-out-slate.js",
       "types": "./dist/solvernets/swe-rebench-v2-held-out-slate.d.ts"
@@ -56,6 +61,7 @@
   },
   "files": [
     "dist/",
+    "fixtures/",
     "README.md"
   ],
   "publishConfig": {

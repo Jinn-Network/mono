@@ -19,6 +19,8 @@ import {
 import {
   callDeliverToMarketplace,
   claimDelivery,
+  findLatestDeliveryForRequest,
+  isDeliveryAlreadyClaimed,
 } from '../../adapters/mech/contracts.js';
 
 // ── Deps ──────────────────────────────────────────────────────────────────────
@@ -49,9 +51,184 @@ export interface DeliveryResult {
   claimTxHash: Hex;
 }
 
+export interface MarketplaceDeliveryResult {
+  deliveryTxHash: Hex;
+  deliveryDigest: Hex;
+}
+
 export interface DeliveryClaimOptions {
   kind?: 'solution' | 'verdict';
   verdictCode?: VerdictCode;
+}
+
+export interface MarketplaceDeliveryExpectation {
+  requestId: Hex;
+  manifestCid: string;
+  deliveryDigest: Hex;
+  evidenceHash: Hex;
+  role: 'solution' | 'verdict';
+  fromBlock: bigint;
+}
+
+export type MarketplaceDeliveryRecoveryResult =
+  | { state: 'absent' }
+  | { state: 'contradictory'; detail: string }
+  | (
+    { state: 'matching'; deliveryTxHash: Hex }
+    & MarketplaceDeliveryExpectation
+  );
+
+export interface MarketplaceDeliveryRecovery {
+  resolveExistingDelivery(
+    expected: MarketplaceDeliveryExpectation,
+  ): Promise<MarketplaceDeliveryRecoveryResult>;
+}
+
+interface EnvelopeProjectionLookup {
+  queryEnvelopeProjections(query: {
+    requestId: string;
+    envelopeRefs: readonly string[];
+    limit: number;
+  }): Array<{
+    requestId: string | null;
+    envelopeCid: string | null;
+    signatureHash: string;
+    role: 'solution' | 'verdict' | 'capture';
+  }>;
+}
+
+export function createMarketplaceDeliveryRecovery(deps: {
+  publicClient: PublicClient;
+  mechContractAddress: Address;
+  safeAddress: Address;
+  store: EnvelopeProjectionLookup;
+}): MarketplaceDeliveryRecovery {
+  return {
+    async resolveExistingDelivery(
+      expected: MarketplaceDeliveryExpectation,
+    ): Promise<MarketplaceDeliveryRecoveryResult> {
+      const expectedDigest = cidToDigestHex(expected.manifestCid);
+      if (expectedDigest.toLowerCase() !== expected.deliveryDigest.toLowerCase()) {
+        return {
+          state: 'contradictory',
+          detail: 'persisted delivery digest does not match the envelope CID',
+        };
+      }
+
+      const projections = deps.store.queryEnvelopeProjections({
+        requestId: expected.requestId,
+        envelopeRefs: [expected.manifestCid],
+        limit: 2,
+      });
+      if (projections.length !== 1) {
+        return {
+          state: 'contradictory',
+          detail: `expected one persisted envelope projection, found ${projections.length}`,
+        };
+      }
+      const projection = projections[0]!;
+      if (
+        projection.requestId !== expected.requestId
+        || projection.envelopeCid !== expected.manifestCid
+        || projection.signatureHash.toLowerCase() !== expected.evidenceHash.toLowerCase()
+        || projection.role !== expected.role
+      ) {
+        return {
+          state: 'contradictory',
+          detail: 'persisted envelope request, evidence, or role differs',
+        };
+      }
+
+      const latestBlock = await deps.publicClient.getBlockNumber();
+      const delivery = await findLatestDeliveryForRequest(
+        deps.publicClient,
+        deps.mechContractAddress,
+        expected.requestId,
+        expected.fromBlock,
+        latestBlock,
+      );
+      if (!delivery) return { state: 'absent' };
+      if (
+        delivery.requestId.toLowerCase() !== expected.requestId.toLowerCase()
+        || delivery.deliveryDataHex.toLowerCase() !== expected.deliveryDigest.toLowerCase()
+        || delivery.mechAddress.toLowerCase() !== deps.safeAddress.toLowerCase()
+        || !delivery.transactionHash
+      ) {
+        return {
+          state: 'contradictory',
+          detail: 'on-chain Deliver event request, envelope digest, operator, or transaction differs',
+        };
+      }
+
+      return {
+        state: 'matching',
+        ...expected,
+        deliveryTxHash: delivery.transactionHash,
+      };
+    },
+  };
+}
+
+/** Deliver an envelope through Mech without recording it on JinnRouter. */
+export async function deliverToMarketplace(
+  requestId: Hex,
+  manifestCid: string,
+  deps: DeliveryDeps,
+  requireExactRecovery = false,
+): Promise<MarketplaceDeliveryResult> {
+  const deliveryDigest = cidToDigestHex(manifestCid);
+  console.log(`[harness-engine] deliverToMarketplace requestId=${requestId}`);
+  const deliveryTxHash = await callDeliverToMarketplace(
+    deps.publicClient,
+    deps.walletClient,
+    deps.safeAddress,
+    deps.mechContractAddress,
+    [requestId],
+    [deliveryDigest],
+    deps.evictionRecovery,
+    requireExactRecovery,
+  );
+  console.log(`[harness-engine] deliverToMarketplace tx=${deliveryTxHash}`);
+  return { deliveryTxHash, deliveryDigest };
+}
+
+/** Record an already Mech-delivered envelope on JinnRouter. */
+export async function claimRouterDelivery(
+  requestId: Hex,
+  evidenceHash: Hex,
+  deps: DeliveryDeps,
+  claimOptions: DeliveryClaimOptions = {},
+): Promise<Hex> {
+  console.log(`[harness-engine] claimDelivery requestId=${requestId}`);
+  const claimTxHash = await claimDelivery(
+    deps.publicClient,
+    deps.walletClient,
+    deps.safeAddress,
+    deps.routerAddress,
+    requestId,
+    {
+      variant: deps.claimDeliveryVariant,
+      kind: claimOptions.kind ?? 'solution',
+      evidenceHash: deps.claimDeliveryVariant === 'v2' || deps.claimDeliveryVariant === 'v3'
+        ? evidenceHash
+        : undefined,
+      verdictCode: claimOptions.verdictCode,
+    },
+    deps.evictionRecovery,
+  );
+  console.log(`[harness-engine] claimDelivery tx=${claimTxHash}`);
+  return claimTxHash;
+}
+
+export async function isRouterDeliveryClaimed(
+  requestId: Hex,
+  deps: DeliveryDeps,
+): Promise<boolean> {
+  return isDeliveryAlreadyClaimed(
+    deps.publicClient,
+    deps.routerAddress,
+    requestId,
+  );
 }
 
 /**
@@ -89,21 +266,8 @@ export async function deliverAndClaim(
     console.log(`[harness-engine] deliverToMarketplace already done (recovery), tx=${preExistingDeliveryTxHash}`);
     deliveryTxHash = preExistingDeliveryTxHash;
   } else {
-    // 1. Convert manifest CID to 32-byte digest for on-chain delivery data
-    const deliveryDigest = cidToDigestHex(manifestCid);
-
-    // 2. deliverToMarketplace via Safe
-    console.log(`[harness-engine] deliverToMarketplace requestId=${requestId}`);
-    deliveryTxHash = await callDeliverToMarketplace(
-      deps.publicClient,
-      deps.walletClient,
-      deps.safeAddress,
-      deps.mechContractAddress,
-      [requestId],
-      [deliveryDigest],
-      deps.evictionRecovery,
-    );
-    console.log(`[harness-engine] deliverToMarketplace tx=${deliveryTxHash}`);
+    const delivery = await deliverToMarketplace(requestId, manifestCid, deps);
+    deliveryTxHash = delivery.deliveryTxHash;
 
     // Persist the tx hash before proceeding to claimDelivery. If the process
     // crashes between here and the COMPLETE transition, recovery will read this
@@ -113,25 +277,12 @@ export async function deliverAndClaim(
     }
   }
 
-  // 3. claim delivery on JinnRouter
-  console.log(`[harness-engine] claimDelivery requestId=${requestId}`);
-  const claimTxHash = await claimDelivery(
-    deps.publicClient,
-    deps.walletClient,
-    deps.safeAddress,
-    deps.routerAddress,
+  const claimTxHash = await claimRouterDelivery(
     requestId,
-    {
-      variant: deps.claimDeliveryVariant,
-      kind: claimOptions.kind ?? 'solution',
-      evidenceHash: deps.claimDeliveryVariant === 'v2' || deps.claimDeliveryVariant === 'v3'
-        ? evidenceHash
-        : undefined,
-      verdictCode: claimOptions.verdictCode,
-    },
-    deps.evictionRecovery,
+    evidenceHash,
+    deps,
+    claimOptions,
   );
-  console.log(`[harness-engine] claimDelivery tx=${claimTxHash}`);
 
   return { deliveryTxHash, claimTxHash };
 }

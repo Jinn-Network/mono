@@ -1,0 +1,187 @@
+{
+  "schemaVersion": "jinn-autopilot-fixtures.v1",
+  "fixtures": [
+    {
+      "path": "correlation-failure.json",
+      "schema": "AutopilotDeliveryObservationSchema",
+      "disposition": "correlation-failure",
+      "sha256": "f37e9f58b1e42c0b805eaa14bb78e940e9a363474b0de721ec433abe9e454e48",
+      "decode": "reject"
+    },
+    {
+      "path": "correlation-mismatch.json",
+      "schema": "AutopilotCorrelationSchema",
+      "disposition": "correlation-failure",
+      "sha256": "1af115aee9c4afdba8e90da0f410efcc280023c8a1bb7118c5b4b25fa43de318",
+      "decode": "reject"
+    },
+    {
+      "path": "delivery-contradiction.json",
+      "schema": "AutopilotDeliveryObservationSchema",
+      "disposition": "contradiction",
+      "sha256": "9043a3ef4cdcb3195b53921cf520a0d6c052f9655fc6e300bc93bddd14671d61",
+      "decode": "accept"
+    },
+    {
+      "path": "delivery-pending.json",
+      "schema": "AutopilotDeliveryObservationSchema",
+      "disposition": "pending",
+      "sha256": "4775b822b8c321a42c122e341ddee472adf47d3585dfba6468d24fa52a0b194e",
+      "decode": "accept"
+    },
+    {
+      "path": "malformed-submit-request.json",
+      "schema": "TaskSubmitRequestV1Schema",
+      "disposition": "malformed",
+      "sha256": "d5f8ee931d53f55fdafe178f32058a9baa3b5d05f1d803d869426f0a80c51e03",
+      "decode": "reject"
+    },
+    {
+      "path": "mutation-complete.json",
+      "schema": "AutopilotMutationResultSchema",
+      "disposition": "mutation-complete",
+      "sha256": "44e60bc96b5e3135d737023b1a251bf56d0158243f119fffba5176622028fa0f",
+      "decode": "accept"
+    },
+    {
+      "path": "mutation-human.json",
+      "schema": "AutopilotMutationResultSchema",
+      "disposition": "human",
+      "sha256": "d2f6b8c7674db5044f361cb8f7b8c28e8d36e776551817b9fa72ee24e502a14f",
+      "decode": "accept"
+    },
+    {
+      "path": "receipt-solution-accepted-comment.txt",
+      "schema": "AutopilotAdoptionReceiptComment",
+      "disposition": "accepted",
+      "sha256": "515bdabd35d647854f2ebd679f854b185af330d2c835fd7f6ba20a19129edd96",
+      "decode": "accept"
+    },
+    {
+      "path": "receipt-solution-accepted.json",
+      "schema": "AutopilotAdoptionReceiptSchema",
+      "disposition": "accepted",
+      "sha256": "09f1735e77a7f8c42d1ed84509c6617bd2d5b6e7d5c1e4db6c16fb8ac34d40fa",
+      "decode": "accept"
+    },
+    {
+      "path": "receipt-solution-rejected.json",
+      "schema": "AutopilotAdoptionReceiptSchema",
+      "disposition": "rejected",
+      "sha256": "6159a7731d0b6ed689d31da79179c3d5d478f7d48adec6c4c18ebc97b72a23a5",
+      "decode": "accept"
+    },
+    {
+      "path": "receipt-verdict-accepted.json",
+      "schema": "AutopilotAdoptionReceiptSchema",
+      "disposition": "accepted",
+      "sha256": "36261937a6dd6d5ddb82affb03d5443c892cee34f75caa7a079b8a64a5998090",
+      "decode": "accept"
+    },
+    {
+      "path": "receipt-verdict-findings-accepted.json",
+      "schema": "AutopilotAdoptionReceiptSchema",
+      "disposition": "accepted",
+      "sha256": "ff5e589b59fd63c0477345a48d835e58e3e858a49aecdfc738b4acabcdc5936d",
+      "decode": "accept"
+    },
+    {
+      "path": "receipt-verdict-rejected.json",
+      "schema": "AutopilotAdoptionReceiptSchema",
+      "disposition": "rejected",
+      "sha256": "764a5dd75415bb4fc02f5f7c1fc8c7c950d7d614779e7469362cb90cea0231b8",
+      "decode": "accept"
+    },
+    {
+      "path": "review-approve.json",
+      "schema": "AutopilotReviewResultSchema",
+      "disposition": "approve",
+      "sha256": "b8f1cfc1bf927d79ec02dc8e39e676d7bb0c64d19dbf839bcfec67699fd06314",
+      "decode": "accept"
+    },
+    {
+      "path": "review-human.json",
+      "schema": "AutopilotReviewResultSchema",
+      "disposition": "human",
+      "sha256": "66a35cf6db046b918bb864753b3653b38e5b088aa55faa679fac5f17a7d28e7e",
+      "decode": "accept"
+    },
+    {
+      "path": "review-request-changes.json",
+      "schema": "AutopilotReviewResultSchema",
+      "disposition": "request-changes",
+      "sha256": "644eefe2b5cfaee5dc8addf6189bb047a70b01f99ffa7984f776ec106381557c",
+      "decode": "accept"
+    },
+    {
+      "path": "session-ci-failure.json",
+      "schema": "AutopilotSessionCapsuleSchema",
+      "disposition": "ci-failure",
+      "sha256": "9c0ecb195a705c6fc5d60048afcd133e97abd21151aeff4edeee1fac3ff5b4c9",
+      "decode": "accept"
+    },
+    {
+      "path": "session-fix-child.json",
+      "schema": "AutopilotSessionCapsuleSchema",
+      "disposition": "fix-child",
+      "sha256": "a8fd175e2b23d6008f61432dec165cf077a32dddcb6c033450a629911b59aefd",
+      "decode": "accept"
+    },
+    {
+      "path": "session-implement.json",
+      "schema": "AutopilotSessionCapsuleSchema",
+      "disposition": "implement",
+      "sha256": "f2c410f2dd2cd695e4bda3ed8f4533abd995f43224baf6322d129d2206845fbc",
+      "decode": "accept"
+    },
+    {
+      "path": "session-reconcile.json",
+      "schema": "AutopilotSessionCapsuleSchema",
+      "disposition": "reconcile",
+      "sha256": "5af4a813054ad76fc8450b2714bc3fbb0277b5ce1d83b6637bae57b85d4d551b",
+      "decode": "accept"
+    },
+    {
+      "path": "solution-expectation.json",
+      "schema": "AutopilotDeliveryExpectationSchema",
+      "disposition": "solution",
+      "sha256": "7e3f2312337050c3f520baaf0616462659461bbb1ed1952001f31c4747cbabd4",
+      "decode": "accept"
+    },
+    {
+      "path": "submit-request.json",
+      "schema": "TaskSubmitRequestV1Schema",
+      "disposition": "accepted",
+      "sha256": "a67247d79d43195c740c4f8e899861e67e58ab029a6754d6e625f5dd5193bb18",
+      "decode": "accept"
+    },
+    {
+      "path": "submit-result.json",
+      "schema": "TaskSubmitResultV1Schema",
+      "disposition": "submitted",
+      "sha256": "096c6f3f2b50ab42b1a7aeffc3cc819e553ccdc49475a088f4abd11302a97bc7",
+      "decode": "accept"
+    },
+    {
+      "path": "verdict-expectation.json",
+      "schema": "AutopilotDeliveryExpectationSchema",
+      "disposition": "verdict",
+      "sha256": "b2aa7979a303afff626da1bd341b550f11ca2989ac4d846b818b77b2fe6c1cbb",
+      "decode": "accept"
+    },
+    {
+      "path": "verified-solution.json",
+      "schema": "AutopilotDeliveryObservationSchema",
+      "disposition": "verified-solution",
+      "sha256": "1a2ee406820832a9afc3ea34ee4d06e6071fe280622fef9d279e806515c64110",
+      "decode": "accept"
+    },
+    {
+      "path": "verified-verdict.json",
+      "schema": "AutopilotDeliveryObservationSchema",
+      "disposition": "verified-verdict",
+      "sha256": "08abfde0368cedb0d38aa3f44a000d07991a404f359b5b7db494488b7940d6e2",
+      "decode": "accept"
+    }
+  ]
+}

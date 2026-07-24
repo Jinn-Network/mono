@@ -40,6 +40,29 @@ export interface SafeTransactionParams {
 
 export interface SafeExecutionOptions {
   ledger?: TxSubmissionLedger;
+  beforeBroadcast?: () => void | Promise<void>;
+  onBroadcast?: (txHash: Hex) => void | Promise<void>;
+}
+
+export class SafeBroadcastFenceError extends Error {
+  readonly name = 'SafeBroadcastFenceError';
+
+  constructor(cause: unknown) {
+    super('Safe transaction broadcast fence rejected the wallet write', { cause });
+  }
+}
+
+export class SafePostBroadcastHookError extends Error {
+  readonly name = 'SafePostBroadcastHookError';
+
+  constructor(
+    readonly txHash: Hex,
+    cause: unknown,
+  ) {
+    super(`Safe transaction ${txHash} was broadcast but post-broadcast persistence failed`, {
+      cause,
+    });
+  }
 }
 
 // Per-Safe transaction lock to prevent nonce races when concurrent
@@ -126,6 +149,12 @@ async function executeSafeTransactionInner(
       const feeResult = await nonceLedger.feeResultForAttempt(attemptIndex, {
         forceEstimate: true,
       });
+
+      try {
+        await options.beforeBroadcast?.();
+      } catch (fenceError) {
+        throw new SafeBroadcastFenceError(fenceError);
+      }
 
       let hash: Hex;
       try {
@@ -258,6 +287,11 @@ async function executeSafeTransactionInner(
         value: params.value,
         data,
       });
+      try {
+        await options.onBroadcast?.(hash);
+      } catch (hookError) {
+        throw new SafePostBroadcastHookError(hash, hookError);
+      }
       // Wait inside the retry attempt so reverted Safe executions caused by
       // stale nonce signatures (GS026/GS013) re-read nonce and re-sign.
       const receipt = await publicClient.waitForTransactionReceipt({ hash });

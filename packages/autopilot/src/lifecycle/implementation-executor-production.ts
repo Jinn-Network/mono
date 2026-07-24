@@ -232,6 +232,7 @@ export function makeProductionImplementationActionPort(
       return {
         number: source.number,
         title: source.title,
+        body: source.body ?? '',
         open: true,
         eligible,
         targetBase: gitRefName(
@@ -447,6 +448,7 @@ export function makeProductionImplementationActionPort(
         claimOid: input.claimOid,
         selectedLogin: input.selectedLogin,
         credential: input.credential,
+        executionBackend: input.executionBackend ?? 'local',
         attemptId: input.attemptId,
         remoteName: options.remoteName ?? 'jinn-autopilot-v2',
       }, runner);

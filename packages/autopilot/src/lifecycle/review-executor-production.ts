@@ -218,6 +218,10 @@ export function makeProductionReviewActionPort(
         body: review.body,
         submittedAt: review.submittedAt,
       })),
+      openChildKinds:
+        lifecycle?.kind === 'pull-request'
+          ? [...(lifecycle.openChildKinds ?? [])]
+          : [],
       ...(reviewClaim === undefined
         ? {}
         : { reviewRef: { oid: reviewClaim.oid, record: reviewClaim.record } }),
@@ -310,6 +314,7 @@ export function makeProductionReviewActionPort(
         reviewApprovalPolicy: input.approvalPolicy,
         selectedLogin: input.selectedLogin,
         credential: input.credential,
+        executionBackend: input.executionBackend ?? 'local',
         attemptId: input.attemptId,
         remoteName: options.remoteName ?? 'jinn-autopilot-v2',
       }, runner);
