@@ -70,7 +70,9 @@ The signal shape, v3 schema, null semantics, and carry path are accepted as writ
 
 1. Non-Vitest fallback scripts keep their authoritative boolean gate result and omit counts.
 2. The jinn-repo task-body fetch generalization is part of F3 so handler and enrichment-worker joins remain in lockstep.
-3. F4 uses the verified corpus-local association path. It does not restore shape-parsed GraphQL projections as reward evidence; a verified discovery route may be designed separately.
+3. F4 uses authenticated signed envelopes and signed evaluation tasks for both
+   local and discovery-returned records. It does not restore shape-parsed
+   GraphQL projections as reward evidence.
 
 Implementation is filed as [#2113](https://github.com/Jinn-Network/mono/issues/2113) → ([#2114](https://github.com/Jinn-Network/mono/issues/2114) ∥ [#2115](https://github.com/Jinn-Network/mono/issues/2115)) → [#2116](https://github.com/Jinn-Network/mono/issues/2116).
 
@@ -184,14 +186,16 @@ live-eval-runner
             │    • materialize passedCount/totalCount onto verdictEnvelopeMeta
             │    • generalize task-body fetch for solutionRequestId +
             │      solverNetManifestCid (today swe-rebench-only)
-            │    └─ Discovery returns the manifest refs and join metadata;
+            │    └─ Discovery returns bounded manifest refs and join metadata;
             │         it does not turn shape-parsed rows into reward truth
-            └─ verified corpus-local learning path:
-                 • fetch/schema-check the signed envelope or use its local projection
-                 • project payload counts plus task.spec.restorationRequestId as
+            └─ authenticated corpus learning path:
+                 • local: use engine-authored projections
+                 • network: fetch + authenticate each signed envelope, then fetch +
+                   authenticate its envelope.task.cid signed evaluation task
+                 • project payload counts plus task.restorationRequestId as
                    metadata.solutionRequestId
                  • join verdict.metadata.solutionRequestId
-                     = solution.requestId in the local projection store
+                     = solution.requestId in local or in-memory projections
                  • overlay counts/derived grade on the solution RecordSummary.scoreMetadata
                    consumed by corpus knowledge
 ```
@@ -215,13 +219,17 @@ Per-hop assertions (implementation must make these fail the build if broken):
    populates indexer `solutionRequestId`; discovery can locate the verdict and
    solution manifest refs without asserting that shape-parsed rows are trusted
    reward evidence.
-7. **Corpus association** — projecting a schema-checked signed v3 verdict copies
-   `passedCount`/`totalCount` and the evaluation task's
-   `spec.restorationRequestId` into projection metadata. A bounded local join
-   matches that `solutionRequestId` to a solution projection's `requestId` and
-   overlays the counts plus a derived grade on that solution's
-   `RecordSummary.scoreMetadata`. Mixed v1/v2/short-circuit records contribute
-   no grade. `HttpDiscoveryAPI.getCodeDigestRewards` remains empty.
+7. **Corpus association** — projecting an authenticated signed v3 verdict
+   copies `passedCount`/`totalCount` and the authenticated signed evaluation
+   task's top-level `restorationRequestId` into projection metadata. Locally,
+   the engine already supplies that task when persisting projections. For
+   network refs, corpus fetch authenticates the envelope, follows
+   `envelope.task.cid`, authenticates the signed task, and constructs the same
+   projections in memory. A bounded join matches `solutionRequestId` to a
+   solution projection's `requestId` and overlays the counts plus derived grade
+   on that solution's `RecordSummary.scoreMetadata`. Mixed
+   v1/v2/short-circuit, failed-authentication, and missing-task records
+   contribute no grade. `HttpDiscoveryAPI.getCodeDigestRewards` remains empty.
 8. **Boundary** — no emissions / reward-claim / distributor module reads
    jinn-repo graded fields (same invariant test spirit as Lever A §5.5).
 
@@ -234,7 +242,7 @@ Each unit is sized for one implementation session:
 | **F1 / [#2113](https://github.com/Jinn-Network/mono/issues/2113)** | `feat(sdk): add jinn-repo-verdict.v3 graded counts` | Zod schemas + union + SDK unit tests (mirror swe-rebench v2 tests) | — |
 | **F2 / [#2114](https://github.com/Jinn-Network/mono/issues/2114)** | `feat(evaluator): emit jinn-repo v3 passedCount/totalCount` | `live-eval-runner` + harness: JSON reporter, reuse `parseVitestJsonV1`, all-packages-or-omit aggregation, omit-on-short-circuit; unit tests with fixtures | F1 |
 | **F3 / [#2115](https://github.com/Jinn-Network/mono/issues/2115)** | `feat(indexer): carry jinn-repo graded counts + join keys` | `enrichment-parse` jinn-repo branch (`payload.passed` → `actualPassed`, counts); generalize task-body fetch beyond swe-rebench for `solutionRequestId` / `solverNetManifestCid`; handler + enrichment-worker parity tests | F1 |
-| **F4 / [#2116](https://github.com/Jinn-Network/mono/issues/2116)** | `feat(corpus): surface jinn-repo graded scores for learning` | Project counts + `solutionRequestId` from signed verdict envelopes; boundedly join verdict projections to solution projections and overlay `scoreMetadata`; keep unverified HTTP reward projections empty; boundary test that emissions code does not import graded fields | F2 + F3 |
+| **F4 / [#2116](https://github.com/Jinn-Network/mono/issues/2116)** | `feat(corpus): surface jinn-repo graded scores for learning` | Project counts + top-level `restorationRequestId` from authenticated signed verdict/task pairs; hydrate discovery-returned refs into the same in-memory projections; boundedly join verdicts to solutions and overlay `scoreMetadata`; keep unverified HTTP reward projections empty; emissions boundary test | F2 + F3 |
 
 Optional sequenced (not blocking #1976 ACs): per-package count arrays; merged-pr
 v1 gold-test counts; a separately verified discovery reward route; and
@@ -303,14 +311,14 @@ Consolidator Tier-2 sensitivity for jinn-repo specifically.
 - Reuse existing `verdictEnvelopeMeta.passedCount` / `totalCount` columns —
   no new schema columns required for the graded scalar.
 
-### 4.4 Discovery and verified corpus-local association
+### 4.4 Discovery and authenticated corpus association
 
 - The indexer materialization in §4.3 exists for public lookup, inspection, and
   locating signed envelope refs. Its shape-parsed rows are not promoted into
   reward or learning truth. `HttpDiscoveryAPI.getCodeDigestRewards` stays empty.
-- `projectEnvelope` projects a schema-checked signed jinn-repo verdict's
+- `projectEnvelope` projects an authenticated signed jinn-repo verdict's
   `passedCount` and `totalCount`. With the evaluation `Task` supplied by the
-  engine, it also projects `task.spec.restorationRequestId` as
+  engine, it also projects top-level `task.restorationRequestId` as
   `metadata.solutionRequestId`.
 - A pure bounded association helper (for example
   `client/src/corpus/jinn-repo-graded-association.ts`) accepts local
@@ -324,10 +332,19 @@ Consolidator Tier-2 sensitivity for jinn-repo specifically.
   `gradedScore = passedCount / totalCount` (only when `totalCount > 0`) onto
   the solution `RecordSummary.scoreMetadata`. `loadCorpusKnowledge` already
   passes that field through to revision consumers.
-- Network discovery remains useful for locating manifest refs. Counts become
-  learning input only after the signed envelope is fetched/schema-checked and
-  represented by the same local projection contract; raw GraphQL count columns
-  never enter `scoreMetadata`.
+- The corpus interface adds authenticated signed-task hydration by CID.
+  `handleSearchRecords` retains the bounded set of discovery-returned manifest
+  previews before role filtering. It authenticates network solution/verdict
+  envelopes with the existing execution-envelope authenticator; for each
+  verdict it follows `envelope.task.cid`, fetches the signed evaluation task,
+  verifies its canonical hash/signature and `creator.agentEoa`, requires
+  `role=evaluation` plus jinn-repo identity, and projects the top-level
+  `restorationRequestId`. It then runs the same association helper over those
+  in-memory network projections before returning solution records.
+- A missing or invalid task CID, failed envelope/task authentication, identity
+  mismatch, or unmatched request ID produces a warning and no grade. Counts
+  always come from the authenticated verdict payload; raw GraphQL count
+  columns never enter `scoreMetadata`.
 
 ### 4.5 Backward compatibility
 
@@ -377,9 +394,10 @@ paths. Documented in F4 as a regression assertion.
    `gates.tests` result remains authoritative.
 2. **F3 task-body fetch generalization:** in scope for the indexer feat,
    because the `#1433` jinn-repo join requires it.
-3. **Discovery auth posture:** use the verified corpus-local graded path in
-   F4. `HttpDiscoveryAPI.getCodeDigestRewards` stays empty until a separately
-   verified route exists.
+3. **Discovery auth posture:** use authenticated corpus association in F4:
+   engine-authored projections locally, and authenticated envelope/task
+   hydration for discovery-returned refs. `HttpDiscoveryAPI.getCodeDigestRewards`
+   stays empty until a separately authenticated reward route exists.
 
 No open ratification blockers remain: signal shape, null semantics, schema
 bump, hop assertions, and the F1–F4 split are locked above.
