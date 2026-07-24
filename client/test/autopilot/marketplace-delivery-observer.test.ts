@@ -403,7 +403,7 @@ describe('Autopilot marketplace delivery observer', () => {
     }));
     expect(fixture.getLogs).toHaveBeenCalledWith(expect.objectContaining({
       address: ROUTER,
-      fromBlock: 90n,
+      fromBlock: 100n,
       toBlock: 150n,
     }));
     expect(fixture.fetchEnvelopeBytes).toHaveBeenCalledWith(ENVELOPE_CID);
@@ -441,6 +441,21 @@ describe('Autopilot marketplace delivery observer', () => {
   ] as const)('rejects an indexer join with mismatched Router %s provenance', async (_label, mismatch) => {
     const fixture = await harness({
       routerLogs: [routerAttemptLog(mismatch)],
+    });
+
+    await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
+      status: 'contradiction',
+      reason: 'discovery-mismatch',
+    });
+  });
+
+  it('rejects a verdict join with a mismatched Router evaluator', async () => {
+    const fixture = await harness({
+      role: 'verdict',
+      routerLogs: [routerAttemptLog({
+        role: 'verdict',
+        operator: `0x${'88'.repeat(20)}` as Address,
+      })],
     });
 
     await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({

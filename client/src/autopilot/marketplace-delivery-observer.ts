@@ -412,7 +412,7 @@ export function createAutopilotMarketplaceDeliveryObserver(
             requestId: lookup.attempt.requestId,
             operator: lookup.attempt.operator,
           },
-          BigInt(lookup.task.createdAtBlock),
+          expected.fromBlock,
           expected.toBlock,
         );
       } catch (error) {

@@ -876,8 +876,9 @@ export type RouterAttemptProvenanceVerification =
 
 /**
  * Verify that exactly one Router attempt event binds a request to its expected
- * Task, role-specific attempt index, and operator. The bounded scan begins at
- * the TaskCreated block so indexer rows remain acceleration data only.
+ * Task, role-specific attempt index, and operator. The caller supplies the
+ * persisted observation lower bound so indexer rows remain acceleration data
+ * only.
  */
 export async function verifyRouterAttemptProvenance(
   publicClient: PublicClient,
