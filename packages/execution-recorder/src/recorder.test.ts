@@ -3,6 +3,7 @@
 import {
   mkdtemp,
   readFile,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -26,7 +27,9 @@ const decoder = new TextDecoder();
 const roots: string[] = [];
 
 async function workspace(name = "recording"): Promise<string> {
-  const parent = await mkdtemp(join(tmpdir(), "jinn-recorder-lifecycle-"));
+  const parent = await realpath(
+    await mkdtemp(join(tmpdir(), "jinn-recorder-lifecycle-")),
+  );
   roots.push(parent);
   return join(parent, name);
 }
@@ -157,7 +160,9 @@ describe("execution recorder lifecycle", () => {
 
   test("snapshots path bytes before start returns", async () => {
     const workspaceDir = await workspace();
-    const sourceDir = await mkdtemp(join(tmpdir(), "jinn-recorder-sources-"));
+    const sourceDir = await realpath(
+      await mkdtemp(join(tmpdir(), "jinn-recorder-sources-")),
+    );
     roots.push(sourceDir);
     const sourcePath = join(sourceDir, "task.md");
     await writeFile(sourcePath, "before\n");

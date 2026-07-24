@@ -4,6 +4,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  realpath,
   readdir,
   rm,
   symlink,
@@ -39,7 +40,9 @@ afterEach(async () => {
 });
 
 beforeEach(async () => {
-  const parent = await mkdtemp(join(tmpdir(), "jinn-recorder-objects-"));
+  const parent = await realpath(
+    await mkdtemp(join(tmpdir(), "jinn-recorder-objects-")),
+  );
   temporaryDirectories.push(parent);
   paths = workspacePaths(join(parent, "recording"));
   await prepareWorkspaceDirectories(paths);

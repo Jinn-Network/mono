@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -42,7 +48,9 @@ afterEach(async () => {
 });
 
 async function temporaryWorkspace(): Promise<string> {
-  const parent = await mkdtemp(join(tmpdir(), "jinn-recorder-state-"));
+  const parent = await realpath(
+    await mkdtemp(join(tmpdir(), "jinn-recorder-state-")),
+  );
   temporaryDirectories.push(parent);
   return join(parent, "recording");
 }
