@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+
 export type SessionEchoLiveMode = 'borrow-mismatch' | 'borrow-aligned';
 
 export type SessionEchoLiveClassification =
@@ -21,6 +23,49 @@ export interface SessionEchoLiveClassifyResult {
   redFlag?: string;
 }
 
+export const DOCKER_INFO_TIMEOUT_MS = 20_000;
+
+export interface DockerInfoProbeOptions {
+  stdio: 'ignore';
+  timeout: number;
+}
+
+export interface DockerInfoProbeResult {
+  status: number | null;
+  error?: { code?: string };
+}
+
+export type DockerInfoProbe = (
+  args: string[],
+  options: DockerInfoProbeOptions,
+) => DockerInfoProbeResult;
+
+export function dockerPreflightError(probe: DockerInfoProbe): string | null {
+  let result: DockerInfoProbeResult;
+  try {
+    result = probe(['info'], {
+      stdio: 'ignore',
+      timeout: DOCKER_INFO_TIMEOUT_MS,
+    });
+  } catch (err) {
+    return `Docker daemon probe failed: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  if (result.error?.code === 'ETIMEDOUT') {
+    return `Docker daemon did not respond within ${DOCKER_INFO_TIMEOUT_MS / 1000}s`;
+  }
+  if (result.status !== 0) return 'Docker daemon not reachable';
+  return null;
+}
+
+export function seedIsolatedValidatedPool(
+  operatorPoolPath: string,
+  stateDir: string,
+  copyFile: (source: string, destination: string) => void,
+): string {
+  copyFile(operatorPoolPath, join(stateDir, 'validated-pool.json'));
+  return stateDir;
+}
+
 const EMPIRICAL_DEAD_RE = /empirical-dead/i;
 
 /**
@@ -34,7 +79,7 @@ const EMPIRICAL_DEAD_RE = /empirical-dead/i;
  * `rejected:other`.
  */
 const INFRA_REASON_RE =
-  /(?:^|[\s(:])(?:ungradeable:|transient:|error:)?(?:docker_(?:unavailable|credentials_error|storage_io_error|run_failed)|image_pull_failed|image_arch_mismatch|venv_(?:missing|collision))(?:\b|$)|insufficient disk/i;
+  /(?:^|[\s(:])(?:ungradeable:|transient:|error:)?(?:docker_(?:unavailable|credentials_error|storage_io_error|run_failed)|image_pull_failed|image_arch_mismatch|venv_(?:missing|collision)|eval_timeout)(?:\b|$)|insufficient disk|Docker daemon (?:not reachable|did not respond)/i;
 
 function looksLikeInfra(text: string | undefined): boolean {
   if (!text) return false;
@@ -45,7 +90,10 @@ export function classifySessionEchoLiveResult(
   input: SessionEchoLiveClassifyInput,
 ): SessionEchoLiveClassifyResult {
   if (input.infraError) {
-    return { classification: 'infra-blocked', hypothesisHolds: null };
+    return {
+      classification: looksLikeInfra(input.infraError) ? 'infra-blocked' : 'rejected:other',
+      hypothesisHolds: null,
+    };
   }
   if (input.admitted.length > 0) {
     if (input.mode === 'borrow-mismatch') {
@@ -65,7 +113,7 @@ export function classifySessionEchoLiveResult(
   if (EMPIRICAL_DEAD_RE.test(reason)) {
     return {
       classification: 'rejected:empirical-dead',
-      hypothesisHolds: input.mode === 'borrow-mismatch' ? true : false,
+      hypothesisHolds: input.mode === 'borrow-mismatch' ? true : null,
     };
   }
   return {

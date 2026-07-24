@@ -1,8 +1,8 @@
 # Session-echo borrowed-image live verify — findings (#1644)
 
-**Date:** 2026-07-22  
-**Issue:** [#1644](https://github.com/Jinn-Network/mono/issues/1644)  
-**Shape:** `test` — verification / findings, not a product change to mint policy  
+**Date:** 2026-07-22
+**Issue:** [#1644](https://github.com/Jinn-Network/mono/issues/1644)
+**Shape:** `test` — verification / findings, not a product change to mint policy
 **Raw result path:** `~/.jinn-client/swe-rebench-v2/session-echo-live-result.json`
 
 ---
@@ -35,7 +35,7 @@ outcome.
 | Borrowed image | `swerebench/sweb.eval.x86_64.conan-io_1776_conan-18327:latest` |
 | Donor gold (mismatch) | `conan-io__conan-18444` |
 | Host arch | `arm64` (amd64 image via emulation) |
-| Disk-floor override | `JINN_EVAL_DISK_FLOOR_GB=10` on retry (default gate is 20 GB) |
+| Historical disk-floor override | `JINN_EVAL_DISK_FLOOR_GB=10` on the 2026-07-22 retry; this is recorded as evidence, not recommended practice (default gate is 20 GB) |
 | Publish | `false` (admission only) |
 | Eval wiring | production `mineSessionEchoes` → real `PythonEvalRunner` + `HttpHfFetcher` |
 
@@ -81,6 +81,18 @@ Earlier attempts (a)/(b) were **infra-blocked** (disk floor →
 `docker_credentials_error` on pull). The latest recorded run completed Docker
 grading far enough to emit an admission-path product reason, not infra.
 
+### (d) 2026-07-24 exact-head re-verification — Docker daemon infra-block
+
+After reclaiming space, the host had 21 GiB free and therefore cleared the
+unmodified 20 GB disk floor. Both configured local Docker contexts resolve to
+the same Docker Desktop socket; bounded 20-second `docker info` probes against
+each context timed out with no daemon response. No alternative Colima,
+OrbStack, Podman, or Rancher context was configured.
+
+Classification: **infra-blocked** at preflight. No image was pulled, no
+container ran, no publication path ran, and the prior result artifact was not
+overwritten. The 2026-07-22 graded artifact remains the campaign SoR.
+
 Not product-red for the red-flag sense (no admit under mismatch). Not
 `rejected:empirical-dead` either — so AC2’s review hypothesis is still
 unconfirmed.
@@ -110,26 +122,27 @@ No red-flag admit was observed on the runs that reached classification JSON.
   default live repo is `conan-io/conan`.
 - Outcome classifier + opt-in yarn script + harvest smoke runbook section shipped
   and are re-runnable without reading the PR thread.
-- Disk-floor override path is documented for constrained hosts.
+- Docker preflight is bounded to 20 seconds, so an unresponsive daemon fails
+  closed rather than hanging the operator session.
+- The default 20 GB disk floor remains the documented safety requirement.
 
 ---
 
 ## Follow-up
 
 Re-run on a clean host when aiming to confirm empirical-dead specifically
-(current SoR already graded past Docker pull and landed `gold-patch-not-resolved`).
-Prereqs that blocked earlier attempts:
+(current SoR already graded past Docker pull and landed
+`gold-patch-not-resolved`). Prerequisites that have blocked attempts:
 
 1. Docker Hub credentials / image pull for the borrowed source image, and
-2. Host has ≥20 GB free **or** a documented `JINN_EVAL_DISK_FLOOR_GB` override.
+2. a responsive Docker daemon, and
+3. host has at least the default 20 GB free-disk floor.
 
 Expected under the review hypothesis (borrow-mismatch): `rejected:empirical-dead`.
 Any `admitted` under mismatch is a red flag.
 
 ```bash
 cd client
-# optional if free disk < 20 GB:
-# export JINN_EVAL_DISK_FLOOR_GB=10
 yarn task-creator:session-echo-live
 cat ~/.jinn-client/swe-rebench-v2/session-echo-live-result.json
 ```

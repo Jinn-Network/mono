@@ -66,28 +66,30 @@ Optional control:
 JINN_SESSION_ECHO_LIVE_MODE=borrow-aligned yarn task-creator:session-echo-live
 ```
 
-Constrained hosts (~16–18 GB free) may need a lower disk floor than the default
-20 GB gate (`JINN_EVAL_DISK_FLOOR_GB`):
-
-```bash
-JINN_EVAL_DISK_FLOOR_GB=10 yarn task-creator:session-echo-live
-```
+Keep the evaluator's default 20 GB free-disk floor. If the host is below it,
+reclaim unused state before running; do not lower the floor merely to make this
+verification fit. The floor exists because a single eval image has peaked at
+about 12.6 GB of transient use.
 
 ### Prerequisites (same family as harvest live)
 
 - Docker daemon (`docker info`)
+- The Docker preflight is bounded to 20 seconds; an unresponsive daemon fails
+  closed instead of leaving the verifier hung
 - `jinn harnesses enable swe-rebench-v2-evaluator`
 - Validated pool with ≥2 scorable instances for the target repo (default
   `conan-io/conan`) so mismatch can pick a donor gold patch
 - Network for HF row fetch + eval image pull if missing
 - arm64 hosts emulate `linux/amd64` images — expect multi-minute runs
-- Disk: default floor 20 GB free (`JINN_EVAL_DISK_FLOOR_GB`); override on
-  constrained hosts as above
+- Disk: at least the default 20 GB free floor
 
 ### Pass / classify criteria
 
-Script writes `~/.jinn-client/swe-rebench-v2/session-echo-live-result.json` and
-prints `classification`:
+After preflight succeeds, the script writes
+`~/.jinn-client/swe-rebench-v2/session-echo-live-result.json` and prints
+`classification`. A Docker/precondition failure exits non-zero without
+overwriting a prior result artifact; record that attempt as `infra-blocked` in
+the findings:
 
 | Classification | Meaning |
 |---|---|

@@ -17,7 +17,7 @@
  *     (default ~/.jinn-client/swe-rebench-v2)
  */
 
-import { mkdtempSync, writeFileSync, existsSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -48,6 +48,8 @@ import { createGitHubPublicRepoChecker } from '../src/solver-types/_swe-rebench-
 import { loadConfig } from '../src/config.js';
 import {
   classifySessionEchoLiveResult,
+  dockerPreflightError,
+  seedIsolatedValidatedPool,
   type SessionEchoLiveMode,
 } from '../src/solver-types/_swe-rebench-v2-session-echo-live-classify.js';
 
@@ -60,8 +62,9 @@ function fail(msg: string): never {
 }
 
 function requireDocker(): void {
-  const r = spawnSync('docker', ['info'], { stdio: 'ignore' });
-  if (r.status !== 0) fail('Docker daemon not reachable');
+  const error = dockerPreflightError((args, options) =>
+    spawnSync('docker', args, options));
+  if (error) fail(error);
 }
 
 function parseMode(raw: string): SessionEchoLiveMode {
@@ -144,12 +147,10 @@ async function main(): Promise<void> {
     fail(`missing validated pool at ${validatedPath}`);
   }
 
-  const workDir = mkdtempSync(join(tmpdir(), 'session-echo-live-'));
-  const episodesDir = join(workDir, 'episodes');
   const outPath = join(operatorStateDir, 'session-echo-live-result.json');
 
-  const validatedStore = getSweRebenchV2ValidatedPoolStore(operatorStateDir);
-  const scorableIds = await validatedStore.getScorableIds(EVAL_SEMANTICS_VERSION);
+  const operatorValidatedStore = getSweRebenchV2ValidatedPoolStore(operatorStateDir);
+  const scorableIds = await operatorValidatedStore.getScorableIds(EVAL_SEMANTICS_VERSION);
   if (!scorableIds || scorableIds.size === 0) {
     fail('validated pool has no scorable ids');
   }
@@ -189,6 +190,12 @@ async function main(): Promise<void> {
     baseCommit = donor.base_commit ?? source.base_commit ?? 'unknown-base';
     donorInstanceId = donor.instance_id;
   }
+
+  const workDir = mkdtempSync(join(tmpdir(), 'session-echo-live-'));
+  const episodesDir = join(workDir, 'episodes');
+  const validatedStore = getSweRebenchV2ValidatedPoolStore(
+    seedIsolatedValidatedPool(validatedPath, workDir, copyFileSync),
+  );
 
   const record: MineableTraceRecord = {
     sourceId: `session-echo-live-${Date.now()}`,
