@@ -10,6 +10,7 @@ import { TASK_RUNS_SCHEMA, TaskRunPersistence } from '../harnesses/engine/persis
 import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 import type { TxSubmissionKey, TxSubmissionLedgerEntry } from '../tx-retry.js';
 import { normalizeEnvelopeRole, type Role } from '../types/envelope.js';
+import { SEVEN_DAY_MS } from '../spend/ai-units.js';
 
 export interface ActivityEventInput {
   ts: string | null;
@@ -1481,6 +1482,57 @@ export class Store {
   ): { usdMicros: number; estimated: boolean } {
     const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000).toISOString();
     return this.sumUsdMicros(credentialId, weekStart, undefined);
+  }
+
+  /**
+   * The true "claims resume at" instant for the rolling 7-day window
+   * (issue #830, item 1). `weekResetsAtUtc(now)` (`now + 7d`) is a fixed
+   * instant that overstates the wait — a rolling window sheds its oldest
+   * rows continuously, not all at once. This walks the in-window rows
+   * oldest-to-newest, subtracting each from the running total, and returns
+   * the instant `remaining + projectedUsdMicros` first falls to or below
+   * `capUsdMicros` (that row's `ts + 7d`). The `<=` boundary exactly mirrors
+   * the gate, which blocks only on `current + projected > cap`. Returns
+   * `null` when the prospective claim is already allowed or when the
+   * projection alone exceeds the cap, so no in-window row expiry can make
+   * the claim eligible.
+   */
+  weekWindowResumeAt(
+    credentialId: string,
+    capUsdMicros: number,
+    now: Date = new Date(),
+    projectedUsdMicros = 0,
+  ): string | null {
+    if (projectedUsdMicros > capUsdMicros) return null;
+
+    const weekStart = new Date(now.getTime() - SEVEN_DAY_MS).toISOString();
+    const rows = this.db
+      .prepare(
+        `SELECT ts, COALESCE(actual_cost_usd_micros, estimated_cost_usd_micros, 0) AS usdMicros
+         FROM activity_events
+         WHERE credential_id = @cid
+           AND ts IS NOT NULL AND ts >= @weekStart AND ts < @now
+           AND claim_status IN ('claimed', 'delivered')
+         ORDER BY ts ASC`,
+      )
+      .all({ cid: credentialId, weekStart, now: now.toISOString() }) as {
+      ts: string;
+      usdMicros: number;
+    }[];
+
+    let remaining = rows.reduce((sum, r) => sum + r.usdMicros, 0);
+    if (remaining + projectedUsdMicros <= capUsdMicros) return null;
+
+    // Guaranteed to return inside this loop for a non-negative projection no
+    // larger than the cap: after the last row, remaining is zero and the
+    // prospective debit is within the cap.
+    for (const row of rows) {
+      remaining -= row.usdMicros;
+      if (remaining + projectedUsdMicros <= capUsdMicros) {
+        return new Date(new Date(row.ts).getTime() + SEVEN_DAY_MS).toISOString();
+      }
+    }
+    return null;
   }
 
   /** Shared COALESCE-sum + estimate-flag query for the USD accumulators. */
