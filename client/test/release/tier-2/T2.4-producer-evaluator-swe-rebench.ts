@@ -158,9 +158,9 @@ async function runScenarioBody(
     mockIpfs = await startMockIpfsServer();
     log(`  mock IPFS:  ${mockIpfs.baseUrl}`);
 
-    // Eval state dir: seed the admission record HERE and point the evaluator
-    // harness at the same dir so getEntry() finds it (harness.ts:667-670 resolves
-    // stateDir = deps.stateDir ?? JINN_SWE_REBENCH_V2_STATE_DIR ?? default).
+    // Eval state dir: seed admission here, then set JINN_SWE_REBENCH_V2_STATE_DIR
+    // before startDaemon so buildHarnesses forwards sweRebenchV2StateDir into the
+    // swe-rebench-v2 evaluator harness (main.ts parity; #2097).
     const evalStateDir = pathJoin(fixture.implStateRoot, 'op-b-eval-state');
     await fsp.mkdir(evalStateDir, { recursive: true });
     process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] = evalStateDir;
