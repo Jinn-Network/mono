@@ -201,6 +201,9 @@ export interface DaemonConfig {
    */
   creatorSafeAddress?: string;
 
+  /** Resolved swe-rebench-v2 state dir from loadConfig; threaded to creator/delivery hooks. */
+  sweRebenchV2StateDir?: string;
+
   /**
    * TaskEngine — sole path for marketplace request → claim → run → deliver.
    * Evaluation tasks (`role === 'evaluation'`) dispatch via `supports()` to
@@ -301,8 +304,13 @@ export class Daemon {
       taskSources,
       this.store,
       config.creatorSafeAddress,
+      config.sweRebenchV2StateDir,
     );
-    this.deliveryWatcherLoop = new DeliveryWatcherLoop(this.adapter, this.store);
+    this.deliveryWatcherLoop = new DeliveryWatcherLoop(
+      this.adapter,
+      this.store,
+      config.sweRebenchV2StateDir,
+    );
 
     this.restorationEngine = new TaskEngine({
       ...config.restorationEngine,

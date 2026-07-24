@@ -54,7 +54,7 @@ export const JinnConfigSchema = z.object({
   /**
    * Single volume-aware durable-state root. When set (env JINN_STATE_DIR or
    * this file field), `earningDir`, `dbPath`, `engine.implStateDirRoot`, and
-   * the swe-rebench-v2 pool dir derive from it as `<stateDir>/<subdir>` —
+   * `sweRebenchV2StateDir` derive from it as `<stateDir>/<subdir>` —
    * UNLESS each is individually overridden, in which case the per-key value
    * wins (derive-don't-collapse). With `stateDir` unset, every default is
    * byte-identical to the legacy `~/.jinn-client/<subdir>` paths. Hosted
@@ -69,6 +69,15 @@ export const JinnConfigSchema = z.object({
 
   /** SQLite database path */
   dbPath: z.string().default(join(homedir(), '.jinn-client', 'jinn.db')),
+
+  /**
+   * SWE-rebench v2 durable state (validated pool, generator ledger, harvest).
+   * Derived from `stateDir` / `JINN_STATE_DIR` as `<stateDir>/swe-rebench-v2`
+   * unless overridden by this field or `JINN_SWE_REBENCH_V2_STATE_DIR`.
+   */
+  sweRebenchV2StateDir: z
+    .string()
+    .default(join(homedir(), '.jinn-client', 'swe-rebench-v2')),
 
   /** Chain poll interval in ms */
   pollIntervalMs: z.number().int().positive().default(5000),
@@ -923,6 +932,9 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_NETWORK'])           merged.network = env['JINN_NETWORK'];
   if (env['JINN_EARNING_DIR'])       merged.earningDir = env['JINN_EARNING_DIR'];
   if (env['JINN_DB_PATH'])           merged.dbPath = env['JINN_DB_PATH'];
+  if (env['JINN_SWE_REBENCH_V2_STATE_DIR']) {
+    merged.sweRebenchV2StateDir = env['JINN_SWE_REBENCH_V2_STATE_DIR'];
+  }
   if (env['JINN_POLL_INTERVAL_MS'])  merged.pollIntervalMs = parseInt(env['JINN_POLL_INTERVAL_MS'], 10);
   if (env['JINN_REWARD_CLAIM_INTERVAL_MS'] !== undefined) {
     merged.rewardClaimIntervalMs = parseInt(env['JINN_REWARD_CLAIM_INTERVAL_MS'], 10);
@@ -1180,6 +1192,9 @@ export function loadConfig(configPath?: string): JinnConfig {
     merged['stateDir'] = stateDir;
     if (merged['earningDir'] === undefined) merged['earningDir'] = join(stateDir, 'earning');
     if (merged['dbPath'] === undefined) merged['dbPath'] = join(stateDir, 'jinn.db');
+    if (merged['sweRebenchV2StateDir'] === undefined) {
+      merged['sweRebenchV2StateDir'] = join(stateDir, 'swe-rebench-v2');
+    }
     const engineObj = (typeof merged['engine'] === 'object' && merged['engine'] !== null)
       ? (merged['engine'] as Record<string, unknown>)
       : {};
