@@ -143,7 +143,15 @@ async function readWorkspaceFile(
 ): Promise<Uint8Array | null> {
   let handle;
   try {
-    await validateWorkspaceParentChain(paths, path);
+    if (
+      !(await validateWorkspaceParentChain(
+        paths,
+        path,
+        missingAllowed,
+      ))
+    ) {
+      return null;
+    }
     const before = await lstat(path);
     if (!before.isFile() || before.isSymbolicLink()) {
       throw new ExecutionRecorderError(

@@ -272,5 +272,6 @@ describe("execution recorder contracts", () => {
       "NATIVE_TRACE_MISSING",
       "COMPLETED_RESULT_MISSING",
     ]);
+    expect(publicApi.createExecutionRecorder).toBeTypeOf("function");
   });
 });
