@@ -1303,7 +1303,7 @@ describe('POST /v1/operator/join/:cid', () => {
         roles: ['solver'],
         harness: 'hermes-agent',
         model: 'anthropic/claude-opus-4.7',
-        provider: 'openrouter',
+        provider: '  openrouter  ',
       }),
     });
 
@@ -1328,7 +1328,11 @@ describe('POST /v1/operator/join/:cid', () => {
         roles: ['solver'],
         harness: 'hermes-agent',
         model: 'my-model',
-        provider: { name: 'my-endpoint', baseUrl: 'http://127.0.0.1:9000/v1', authVar: 'MY_CRED' },
+        provider: {
+          name: '  my-endpoint  ',
+          baseUrl: '  http://127.0.0.1:9000/v1  ',
+          authVar: '  MY_CRED  ',
+        },
       }),
     });
 
@@ -1361,6 +1365,31 @@ describe('POST /v1/operator/join/:cid', () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe('invalid_body');
+  });
+
+  it.each([
+    ['', 'empty named provider'],
+    ['   ', 'whitespace named provider'],
+    [{ name: '   ' }, 'whitespace object name'],
+    [{ name: 'custom', baseUrl: '   ' }, 'whitespace object baseUrl'],
+    [{ name: 'custom', authVar: '   ' }, 'whitespace object authVar'],
+  ])('rejects %s (%s)', async (provider) => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-prov-invalid-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {});
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+    const res = await app.request('/v1/operator/join/bafybeiinvalid', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roles: ['solver'], provider }),
+    });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({
+      error: 'invalid_body',
+    });
   });
 
   it('deduplicates roles in the canonical order', async () => {

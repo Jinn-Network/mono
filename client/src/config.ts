@@ -427,11 +427,11 @@ export const JinnConfigSchema = z.object({
         // entries are backfilled at load time (see `backfillJoinedProviders`).
         provider: z
           .union([
-            z.string(),
+            z.string().trim().min(1),
             z.object({
-              name: z.string().min(1),
-              baseUrl: z.string().optional(),
-              authVar: z.string().optional(),
+              name: z.string().trim().min(1),
+              baseUrl: z.string().trim().min(1).optional(),
+              authVar: z.string().trim().min(1).optional(),
             }),
           ])
           .optional(),

@@ -1034,7 +1034,11 @@ describe('joinedSolverNets provider backfill (issue #1243)', () => {
           roles: ['solver'],
           harness: 'hermes-agent',
           model: 'my-model',
-          provider: { name: 'my-endpoint', baseUrl: 'http://127.0.0.1:9000/v1', authVar: 'MY_CRED' },
+          provider: {
+            name: '  my-endpoint  ',
+            baseUrl: '  http://127.0.0.1:9000/v1  ',
+            authVar: '  MY_CRED  ',
+          },
           plugins: [],
           disabledDefaultPlugins: [],
         },
@@ -1046,6 +1050,44 @@ describe('joinedSolverNets provider backfill (issue #1243)', () => {
       baseUrl: 'http://127.0.0.1:9000/v1',
       authVar: 'MY_CRED',
     });
+  });
+
+  it('normalizes an explicit string-form provider on load', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      joinedSolverNets: {
+        bafnamed: {
+          manifestCid: 'bafnamed',
+          roles: ['solver'],
+          model: 'local-model',
+          provider: '  openrouter  ',
+        },
+      },
+    });
+
+    const cfg = loadConfig(configPath);
+    expect(cfg.joinedSolverNets?.['bafnamed']?.provider).toBe('openrouter');
+  });
+
+  it.each([
+    ['', 'empty named provider'],
+    ['   ', 'whitespace named provider'],
+    [{ name: '   ' }, 'whitespace object name'],
+    [{ name: 'custom', baseUrl: '   ' }, 'whitespace object baseUrl'],
+    [{ name: 'custom', authVar: '   ' }, 'whitespace object authVar'],
+  ])('rejects %s (%s)', async (provider) => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      joinedSolverNets: {
+        bafinvalid: {
+          manifestCid: 'bafinvalid',
+          roles: ['solver'],
+          provider,
+        },
+      },
+    });
+
+    expect(() => loadConfig(configPath)).toThrow();
   });
 });
 
