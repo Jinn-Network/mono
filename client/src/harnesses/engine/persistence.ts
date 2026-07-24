@@ -857,6 +857,28 @@ export class TaskRunPersistence {
     `).run(error, Date.now(), requestId);
   }
 
+  /** Refresh the adoption observation at the final Router-claim boundary. */
+  setClaimingAdoptionObservation(
+    requestId: string,
+    observation: AdoptionObservation,
+  ): void {
+    this.db.prepare(`
+      UPDATE task_runs
+      SET adoption_last_observation = ?, adoption_last_error = NULL,
+          state_updated_at = ?
+      WHERE request_id = ? AND state = 'CLAIMING_DELIVERY'
+    `).run(JSON.stringify(observation), Date.now(), requestId);
+  }
+
+  /** Keep a claim retryable when the claim-boundary observer is unavailable. */
+  setClaimingAdoptionError(requestId: string, error: string): void {
+    this.db.prepare(`
+      UPDATE task_runs
+      SET adoption_last_error = ?, state_updated_at = ?
+      WHERE request_id = ? AND state = 'CLAIMING_DELIVERY'
+    `).run(error, Date.now(), requestId);
+  }
+
   /**
    * Persist `consumedRefsJson` without triggering a state transition (state
    * remains RUNNING). Called by runImpl right after the corpus-knowledge

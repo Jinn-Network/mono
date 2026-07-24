@@ -547,7 +547,10 @@ describe('Autopilot adoption-aware delivery', () => {
     const identityPublisher = makeIdentityPublisher();
     const engine = new TaskEngine(makeOptions(
       store,
-      makeObserver({ state: 'accepted', receipt: acceptedReceipt() }),
+      makeObserver(
+        { state: 'accepted', receipt: acceptedReceipt() },
+        { state: 'accepted', receipt: acceptedReceipt() },
+      ),
       identityPublisher,
     ));
 
@@ -826,16 +829,105 @@ describe('Autopilot adoption-aware delivery', () => {
     await firstEngine.process(REQUEST_ID);
     vi.clearAllMocks();
 
-    const restartedObserver = makeObserver();
+    const restartedObserver = makeObserver({
+      state: 'accepted',
+      receipt: acceptedReceipt(),
+    });
     const restartedEngine = new TaskEngine(makeOptions(store, restartedObserver));
     const { callDeliverToMarketplace, claimDelivery } = await import('../../../src/adapters/mech/contracts.js');
 
     await restartedEngine.recoverInFlight();
 
     expect(persistence.getOrThrow(REQUEST_ID).state).toBe(TaskRunState.COMPLETE);
-    expect(restartedObserver.observe).not.toHaveBeenCalled();
+    expect(restartedObserver.observe).toHaveBeenCalledOnce();
     expect(callDeliverToMarketplace).not.toHaveBeenCalled();
     expect(claimDelivery).toHaveBeenCalledOnce();
+  });
+
+  it('does not claim when an accepted receipt is no longer fresh at the Router boundary', async () => {
+    seedDelivering(persistence);
+    const observer = makeObserver(
+      { state: 'accepted', receipt: acceptedReceipt() },
+      {
+        state: 'pending',
+        observedAt: '2026-07-23T12:02:00.000Z',
+        detail: 'The exact-head native approval is no longer present.',
+      },
+    );
+    const engine = new TaskEngine(makeOptions(store, observer));
+
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+
+    const run = persistence.getOrThrow(REQUEST_ID);
+    expect(run.state).toBe(TaskRunState.CLAIMING_DELIVERY);
+    expect(run.failureReason).toBeNull();
+    expect(run.adoptionLastObservation).toEqual({
+      state: 'pending',
+      observedAt: '2026-07-23T12:02:00.000Z',
+      detail: 'The exact-head native approval is no longer present.',
+    });
+    expect(claimDelivery).not.toHaveBeenCalled();
+  });
+
+  it('does not claim when claim-time receipt observation is unavailable', async () => {
+    seedDelivering(persistence);
+    const observer = makeObserver(
+      { state: 'accepted', receipt: acceptedReceipt() },
+    );
+    const engine = new TaskEngine(makeOptions(store, observer));
+
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+
+    const run = persistence.getOrThrow(REQUEST_ID);
+    expect(run.state).toBe(TaskRunState.CLAIMING_DELIVERY);
+    expect(run.adoptionLastError).toBe('unexpected observer call');
+    expect(claimDelivery).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the accepted receipt changes before the Router claim', async () => {
+    seedDelivering(persistence);
+    const changedReceipt = {
+      ...acceptedReceipt(),
+      recordedAt: '2026-07-23T12:03:00.000Z',
+    };
+    const observer = makeObserver(
+      { state: 'accepted', receipt: acceptedReceipt() },
+      { state: 'accepted', receipt: changedReceipt },
+    );
+    const engine = new TaskEngine(makeOptions(store, observer));
+
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+
+    const run = persistence.getOrThrow(REQUEST_ID);
+    expect(run.state).toBe(TaskRunState.FAILED);
+    expect(run.failureReason).toBe(
+      'adoption-contradiction:persisted accepted receipt mismatch',
+    );
+    expect(claimDelivery).not.toHaveBeenCalled();
+  });
+
+  it('fails with the stable rejection when claim-time observation rejects adoption', async () => {
+    seedDelivering(persistence);
+    const observer = makeObserver(
+      { state: 'accepted', receipt: acceptedReceipt() },
+      { state: 'rejected', receipt: rejectedReceipt() },
+    );
+    const engine = new TaskEngine(makeOptions(store, observer));
+
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+
+    const run = persistence.getOrThrow(REQUEST_ID);
+    expect(run.state).toBe(TaskRunState.FAILED);
+    expect(run.failureReason).toBe('adoption-rejected:stale-head');
+    expect(claimDelivery).not.toHaveBeenCalled();
   });
 
   it('recovers the exact crash after Mech delivery without submitting a second delivery', async () => {

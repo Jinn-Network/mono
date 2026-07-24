@@ -109,6 +109,7 @@ import {
   type JinnRepoAutopilotSessionTask,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 import type {
+  AdoptionObservation,
   AdoptionReceiptObserver,
 } from '../../types/task-run.js';
 
@@ -2621,7 +2622,7 @@ export class TaskEngine {
     }
   }
 
-  /** Retry only the Router claim for a previously accepted adoption receipt. */
+  /** Re-observe the accepted receipt, then retry only the Router claim. */
   protected async claimAdoptedDelivery(task: PersistedTaskRun): Promise<void> {
     if (!this.deliveryDeps) {
       throw new NotImplementedError('claimAdoptedDelivery');
@@ -2630,14 +2631,77 @@ export class TaskEngine {
       task,
       task.adoptionAcceptedReceipt,
     );
-    const observedValidation = task.adoptionLastObservation?.state === 'accepted'
-      ? this.validateAdoptionReceipt(task, task.adoptionLastObservation.receipt)
-      : null;
     if (
       !persistedValidation.ok
       || persistedValidation.receipt.disposition !== 'accepted'
-      || !observedValidation?.ok
-      || observedValidation.receipt.disposition !== 'accepted'
+    ) {
+      this.persistence.markFailed(
+        task.requestId,
+        'adoption-contradiction:persisted accepted receipt mismatch',
+      );
+      return;
+    }
+
+    if (!this.adoptionReceiptObserver) {
+      this.persistence.setClaimingAdoptionError(
+        task.requestId,
+        'adoption receipt observer is not configured',
+      );
+      return;
+    }
+
+    let observation: AdoptionObservation;
+    try {
+      observation = await this.adoptionReceiptObserver.observe(task);
+    } catch (err) {
+      this.persistence.setClaimingAdoptionError(
+        task.requestId,
+        err instanceof Error ? err.message : String(err),
+      );
+      return;
+    }
+
+    if (observation.state === 'pending') {
+      this.persistence.setClaimingAdoptionObservation(task.requestId, observation);
+      return;
+    }
+    if (observation.state === 'contradictory') {
+      this.persistence.setClaimingAdoptionObservation(task.requestId, observation);
+      this.persistence.markFailed(
+        task.requestId,
+        `adoption-contradiction:${observation.detail}`,
+      );
+      return;
+    }
+
+    const observedValidation = this.validateAdoptionReceipt(
+      task,
+      observation.receipt,
+    );
+    if (!observedValidation.ok) {
+      this.persistence.markFailed(task.requestId, observedValidation.reason);
+      return;
+    }
+    if (observation.state === 'rejected') {
+      if (observedValidation.receipt.disposition !== 'rejected') {
+        this.persistence.markFailed(
+          task.requestId,
+          'adoption-contradiction:rejected observation carried an accepted receipt',
+        );
+        return;
+      }
+      this.persistence.setClaimingAdoptionObservation(task.requestId, {
+        state: 'rejected',
+        receipt: observedValidation.receipt,
+      });
+      this.persistence.markFailed(
+        task.requestId,
+        `adoption-rejected:${observedValidation.receipt.reason}`,
+      );
+      return;
+    }
+    if (
+      observedValidation.receipt.disposition !== 'accepted'
       || !autopilotCorrelationMatches(
         persistedValidation.receipt,
         observedValidation.receipt,
@@ -2651,6 +2715,11 @@ export class TaskEngine {
       );
       return;
     }
+    this.persistence.setClaimingAdoptionObservation(task.requestId, {
+      state: 'accepted',
+      receipt: observedValidation.receipt,
+    });
+
     const manifestCid = task.manifestCid;
     if (!manifestCid) {
       throw new Error(`claimAdoptedDelivery: manifestCid missing for ${task.requestId}`);
@@ -3423,7 +3492,8 @@ export class TaskEngine {
         break;
 
       case TaskRunState.CLAIMING_DELIVERY:
-        // Router claim only. Never rechecks adoption or repeats Mech delivery.
+        // Recheck adoption freshness, then retry only the Router claim.
+        // Never repeat Mech delivery.
         await this.claimAdoptedDelivery(task);
         break;
 
