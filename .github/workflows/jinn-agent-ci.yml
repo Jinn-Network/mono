@@ -55,7 +55,7 @@ jobs:
 
       - name: Restore duration cache
         id: durations
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: apps/jinn-agent/test_durations.json
           key: jinn-agent-test-durations-${{ github.run_id }}
@@ -180,7 +180,7 @@ jobs:
           durations apps/jinn-agent/test_durations.json
 
       - name: Save merged duration cache
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: apps/jinn-agent/test_durations.json
           key: jinn-agent-test-durations-${{ github.run_id }}
