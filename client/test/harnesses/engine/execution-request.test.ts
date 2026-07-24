@@ -69,6 +69,7 @@ describe('execution request (issue #2039)', () => {
   }
 
   function buildEngine(opts: {
+    implRegistry?: HarnessRegistry;
     solverNetRegistry?: SolverNetRegistryLike;
     manifestResolver: ManifestResolver;
     joinedSolverNets?: JoinedSolverNetsView;
@@ -76,7 +77,7 @@ describe('execution request (issue #2039)', () => {
     return new TaskEngine({
       store,
       paths: { workingDirRoot: join(dir, 'work'), implStateDirRoot: join(dir, 'impl-state') },
-      implRegistry: makeImplRegistry(),
+      implRegistry: opts.implRegistry ?? makeImplRegistry(),
       manifestResolver: opts.manifestResolver,
       ...(opts.solverNetRegistry ? { solverNetRegistry: opts.solverNetRegistry } : {}),
       ...(opts.joinedSolverNets ? { joinedSolverNets: opts.joinedSolverNets } : {}),
@@ -342,6 +343,38 @@ describe('execution request (issue #2039)', () => {
 
       expect(accept).toEqual({ ok: true });
       expect(claudeCanAttempt).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not invoke an alternative Harness when the manifest-pinned Harness is unavailable and the request omits harness', async () => {
+      const solverNetRegistry = new SolverNetRegistry();
+      await registerJoinedNet(solverNetRegistry, CID_A, {
+        manifestCid: CID_A,
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+        harness: 'missing-harness',
+        model: 'gpt-5-codex',
+        plugins: [],
+      });
+      const implRegistry = new HarnessRegistry({ default: 'codex' });
+      implRegistry.register(stubHarness('codex', '1.0.0', codexCanAttempt));
+      const engine = buildEngine({
+        implRegistry,
+        solverNetRegistry,
+        manifestResolver: makeStubManifestResolver({
+          [CID_A]: buildPredictionV1ManifestStub(),
+        }),
+      });
+      const task: Task = {
+        ...makePredictionV1Task({ solverNetManifestCid: CID_A }),
+        executionRequest: { model: 'gpt-5-codex' },
+      };
+      expect(task.executionRequest?.harness).toBeUndefined();
+
+      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+
+      expect(accept.ok).toBe(false);
+      expect(codexCanAttempt).not.toHaveBeenCalled();
+      expect(claudeCanAttempt).not.toHaveBeenCalled();
     });
 
     it('does not validate loadoutRef/isolation — Core carries them opaquely', async () => {

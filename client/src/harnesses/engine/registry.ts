@@ -5,7 +5,8 @@
  *
  * Dispatch priority:
  *   0. ctx.harnessName — manifest-pinned Harness resolved by the caller from
- *      a specific joined SolverNet (by manifestCid, issue #2039)
+ *      a specific joined SolverNet (by manifestCid, issue #2039). This is an
+ *      exact binding: missing, disabled, or unsupported returns undefined.
  *   1. solverTypeHarnesses[task.solverType] — SolverNet-selected Harness
  *   2. config.default — named fallback impl
  *   3. First-match — iterate registered Harnesses, return first whose supports()
@@ -84,6 +85,7 @@ export class HarnessRegistry implements ImplRegistry {
     if (ctx.harnessName) {
       const pinned = active.find((harness) => harnessNameMatches(harness.name, ctx.harnessName!));
       if (pinned && pinned.supports(ctx)) return pinned;
+      return undefined;
     }
 
     // 1. SolverNet-selected Harness — but ONLY honor it if the named Harness supports

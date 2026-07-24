@@ -117,20 +117,20 @@ describe('HarnessRegistry', () => {
     expect(reg.findFor({ solverType: 'prediction.v1', harnessName: 'codex' })?.name).toBe('codex');
   });
 
-  it('falls through from ctx.harnessName when it is missing, disabled, or unsupported', () => {
+  it('fails closed when ctx.harnessName is missing, disabled, or unsupported', () => {
     const missing = new HarnessRegistry({ solverTypeHarnesses: { 'prediction.v1': 'claude-code' } });
     missing.register(makeHarness('claude-code', ['prediction.v1']));
-    expect(missing.findFor({ solverType: 'prediction.v1', harnessName: 'nonexistent' })?.name).toBe('claude-code');
+    expect(missing.findFor({ solverType: 'prediction.v1', harnessName: 'nonexistent' })).toBeUndefined();
 
     const disabled = new HarnessRegistry({ disabled: ['codex'], default: 'claude-code' });
     disabled.register(makeHarness('claude-code', ['prediction.v1']));
     disabled.register(makeHarness('codex', ['prediction.v1']));
-    expect(disabled.findFor({ solverType: 'prediction.v1', harnessName: 'codex' })?.name).toBe('claude-code');
+    expect(disabled.findFor({ solverType: 'prediction.v1', harnessName: 'codex' })).toBeUndefined();
 
     const unsupported = new HarnessRegistry({ default: 'claude-code' });
     unsupported.register(makeHarness('claude-code', ['prediction.v1']));
     unsupported.register(makeHarness('codex', ['swe-rebench-v2.v1']));
-    expect(unsupported.findFor({ solverType: 'prediction.v1', harnessName: 'codex' })?.name).toBe('claude-code');
+    expect(unsupported.findFor({ solverType: 'prediction.v1', harnessName: 'codex' })).toBeUndefined();
   });
 
   it('matches legacy learner aliases via ctx.harnessName', () => {
