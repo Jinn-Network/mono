@@ -18,12 +18,13 @@ import { emitEvent } from '../observability/emit-event.js';
 export const LOOP_HEARTBEAT_PREFIX = 'loop_heartbeat:';
 
 /**
- * The nine canonical long-running loops the watchdog supervises, with their
+ * The ten canonical long-running loops the watchdog supervises, with their
  * default poll intervals and (for the for-await polling loops) a staleness
  * floor. The two for-await adapter loops (engine-watcher, delivery-watcher)
  * heartbeat at the poll-cycle tail inside the mech adapter so an
- * idle-but-polling loop never looks stale. Checkpointing remains in
- * FleetStateStore; eviction-check and harvest use this observability Store.
+ * idle-but-polling loop never looks stale. Fleet state (checkpoint txs,
+ * eviction checks) stays in FleetStateStore; eviction-check, checkpoint, and
+ * harvest heartbeats use this observability Store.
  *
  * This registry is the single source of truth: LOOP_NAMES, the LoopName union,
  * and the daemon's watchdog registrations are all derived from it. Order is
@@ -37,6 +38,7 @@ export const LOOP_REGISTRY = [
   { name: 'reward-claim', intervalMs: 5000 },
   { name: 'balance-topup', intervalMs: 5000 },
   { name: 'eviction-check', intervalMs: 60_000 },
+  { name: 'checkpoint', intervalMs: 300_000 },
   // Commit-echo harvest loop (task-creator v0). Interval mirrors the config
   // default (config.ts `harvest.intervalMs`); the daemon only registers it
   // with the watchdog when config.harvest is enabled with repos.

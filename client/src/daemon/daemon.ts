@@ -339,7 +339,7 @@ export class Daemon {
       this.harvestLoop = new HarvestLoop({ ...config.harvest, store: this.store });
     }
     if (config.checkpoint && config.checkpoint.intervalMs > 0) {
-      this.checkpointLoop = new CheckpointLoop(config.checkpoint);
+      this.checkpointLoop = new CheckpointLoop({ ...config.checkpoint, jinnStore: this.store });
     }
   }
 
@@ -549,6 +549,7 @@ export class Daemon {
       if (this.rewardClaimLoop) started.add('reward-claim');
       if (this.balanceTopupLoop) started.add('balance-topup');
       if (this.evictionLoop) started.add('eviction-check');
+      if (this.checkpointLoop) started.add('checkpoint');
       if (this.harvestLoop) started.add('harvest');
       if (peers.length > 0) started.add('peer-sync');
       const overrides: Partial<Record<LoopName, number>> = {
@@ -556,6 +557,7 @@ export class Daemon {
         'reward-claim': this.config.rewardClaim?.intervalMs,
         'balance-topup': this.config.balanceTopup?.intervalMs,
         'eviction-check': this.config.evictionCheck?.intervalMs,
+        checkpoint: this.config.checkpoint?.intervalMs,
         harvest: this.config.harvest?.intervalMs,
       };
       const registrations: WatchdogLoopRegistration[] = LOOP_REGISTRY
