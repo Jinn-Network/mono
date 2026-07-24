@@ -25,6 +25,8 @@ jobs:
     environment: npm-publish
     env:
       JINN_BUILD_COMMIT: ${{ github.sha }}
+      ONNXRUNTIME_NODE_INSTALL: skip
+      ONNXRUNTIME_NODE_INSTALL_CUDA: skip
     steps:
       - uses: actions/checkout@v7
         with:

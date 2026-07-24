@@ -52,6 +52,8 @@ jobs:
     environment: npm-publish
     env:
       JINN_BUILD_COMMIT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.event_name == 'workflow_dispatch' && inputs.release_sha || github.sha }}
+      ONNXRUNTIME_NODE_INSTALL: skip
+      ONNXRUNTIME_NODE_INSTALL_CUDA: skip
       # Use the high-quota Tenderly Base Sepolia gateway for CI e2e gates.
       # Without this, the e2e falls back to the public `https://sepolia.base.org`
       # which is heavily rate-limited and bites the `Base Sepolia fork
