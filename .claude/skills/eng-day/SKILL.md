@@ -31,11 +31,14 @@ yarn --cwd packages/autopilot autopilot --mode observe --once --json status
 
 Issue Type still comes from GraphQL because the ordinary issue-list JSON does
 not expose it. Use the Project view for Sprint, Status, Blocked on, Effort, and
-Priority. Use a board limit above the current item count.
+Priority — including machine-created child issues (review findings and
+reconciles), which are triaged onto the board at filing time. Use a board limit
+above the current item count.
 
 The v2 observer is the authoritative lifecycle explanation. It includes draft
-PRs because draft may mean implementation, review-fix, merge-prep, or Human
-hold. Do not infer lifecycle from a ready-only PR query.
+PRs because draft may mean implementation, a child fix/reconcile session, or a
+Human hold. Do not infer lifecycle from a ready-only PR query. Status on the
+board is paint-only — never treat it as authority.
 
 For a disputed item, use:
 
@@ -59,10 +62,10 @@ The initial stale threshold is a generous two-hour period without real
 progress. Comments, CI activity, Project edits, and local logs do not refresh
 it. A missing local worktree is never proof that another host abandoned work.
 
-Capacity is per-runner: implementation, review, and merge-prep caps belong to
-each process. Report this runner’s configured caps and active local children
-separately from the GitHub queue. There is no global capacity, shared license
-signal, heartbeat registry, or runner-to-runner coordination service.
+Capacity is per-runner: implementation and review caps belong to each process.
+Report this runner’s configured caps and active local children separately from
+the GitHub queue. There is no global capacity, shared license signal, heartbeat
+registry, or runner-to-runner coordination service.
 
 ## Attention lanes
 
@@ -79,8 +82,7 @@ Classify each current-sprint item into one lane:
    - eligible Todo issue;
    - actively implementing draft;
    - ready for independent review;
-   - review-fix draft;
-   - merge-prep draft;
+   - open review-finding or reconcile child issues (marker-bearing fixes);
    - merge candidate waiting on ordinary native gates;
    - stale item eligible for recovery.
 3. **Non-Autopilot**
@@ -99,8 +101,9 @@ Return five compact sections:
 1. **Sprint** — date window, closed/open count, priority mix.
 2. **Needs Human today** — highest-priority explicit holds and native gate
    blockers, with exact reason.
-3. **Autopilot lifecycle** — counts by phase, stale candidates, and proposed
-   recovery; include exact issue/PR and head/ref identity for anomalies.
+3. **Autopilot lifecycle** — counts by phase, open review-finding and reconcile
+   children, stale candidates, and proposed recovery; include exact issue/PR
+   and head/ref identity for anomalies.
 4. **This runner** — mode, runtime, local per-phase capacity, active children,
    backpressure, rate-limit state, and retained cleanup exceptions.
 5. **Shipped and drift** — merged/closed in the last 24 hours plus only active
@@ -125,8 +128,8 @@ Explain controls without running them:
 - `observe` — zero-write status and explanations; this is the default.
 - `recover` — reconcile projections and recover stale v2 work, but create no
   new claims.
-- `active` — recover, claim new work within this runner’s caps, review,
-  merge-prep, and merge through ordinary gates.
+- `active` — recover, claim new work within this runner’s caps, review, and
+  merge through the children ladder and ordinary gates.
 
 Do not start any mode from this skill. Do not recommend running legacy and v2
 dispatch together. If activation or recovery is needed, link the cutover

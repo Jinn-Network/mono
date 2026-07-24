@@ -179,9 +179,11 @@ yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session implementation-complete --
 ```
 
 This command checkpoints the exact head, writes durable summary evidence,
-projects `In Review`, and makes the existing PR non-draft only after the
-implementation session ends. It enforces ready-last ordering. Do nothing
-after successful completion except return the result; v2 owns cleanup.
+runs the three-op finalize (completion marker → `engine:review` label →
+undraft), and makes the existing PR non-draft only after the implementation
+session ends. It enforces ready-last ordering. Project Status is paint-only —
+the session never reads or writes it. Do nothing after successful completion
+except return the result; v2 owns cleanup.
 
 ## Finding handling
 
@@ -208,8 +210,9 @@ Then invoke:
 yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
 ```
 
-The early draft PR remains the recovery surface. Do not close it, ready it, or
-clean the worktree yourself.
+Escalation authority is the PR label `review:needs-human` plus the structured
+marker comment — not Project Status. The early draft PR remains the recovery
+surface. Do not close it, ready it, or clean the worktree yourself.
 
 ## Shape variants
 

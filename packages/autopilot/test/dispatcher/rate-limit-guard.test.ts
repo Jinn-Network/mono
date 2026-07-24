@@ -32,6 +32,8 @@ function buildReport(): CycleReport {
     paused: [],
     skippedForAuthor: [],
     collected: [],
+    routedToMarketplace: [],
+    readyIssueNumbers: [],
   };
 }
 

@@ -25,17 +25,7 @@ export interface GitProtocolPort {
     expectedRemoteRecordOid: GitOid | null;
     recordOid: GitOid;
   }): Promise<PublicationOutcome>;
-  publishReviewFix(input: {
-    branch: GitRefName;
-    newHeadParent: GitOid;
-    expectedRemoteHead: GitOid;
-    newHead: GitOid;
-    prNumber: number;
-    recordParent: GitOid | null;
-    expectedRemoteRecordOid: GitOid | null;
-    recordOid: GitOid;
-  }): Promise<PublicationOutcome>;
-  publishMergePrep(input: {
+  publishBranchHead(input: {
     branch: GitRefName;
     expectedRemoteHead: GitOid;
     newHead: GitOid;
@@ -193,20 +183,6 @@ function assertReviewRecordRelation(
   }
 }
 
-function assertReviewFixRelation(input: {
-  readonly newHeadParent: GitOid;
-  readonly expectedRemoteHead: GitOid;
-  readonly recordParent: GitOid | null;
-  readonly expectedRemoteRecordOid: GitOid | null;
-}): void {
-  if (input.newHeadParent !== input.expectedRemoteHead) {
-    throw new Error('Review fix new head parent must equal expected remote head');
-  }
-  assertReviewRecordRelation(input.recordParent, input.expectedRemoteRecordOid);
-  if (input.recordParent === null || input.expectedRemoteRecordOid === null) {
-    throw new Error('Review fix requires an existing authoritative review claim');
-  }
-}
 
 export function makeGitProtocolPort(
   runner: GitCommandRunner,
@@ -241,84 +217,7 @@ export function makeGitProtocolPort(
       );
     },
 
-    async publishReviewFix(input) {
-      assertReviewFixRelation(input);
-      const branch = branchRef(input.branch);
-      const review = reviewClaimRef(input.prNumber);
-      const expected = {
-        branch: input.expectedRemoteHead,
-        review: input.expectedRemoteRecordOid,
-      };
-      const published = {
-        branch: input.newHead,
-        review: input.recordOid,
-      };
-      await assertCandidateParent(runner, input.newHead, input.newHeadParent);
-      await assertCandidateParent(runner, input.recordOid, input.recordParent);
-      const [branchBefore, reviewBefore] = await Promise.all([
-        readRef(runner, remote, branch),
-        readRef(runner, remote, review),
-      ]);
-      const before = {
-        branch: branchBefore.oid,
-        review: reviewBefore.oid,
-      };
-      if (!branchBefore.succeeded || !reviewBefore.succeeded) {
-        return { status: 'ambiguous', expected, published, observed: before };
-      }
-      if (before.branch === published.branch && before.review === published.review) {
-        return { status: 'already-applied', expected, published, observed: before };
-      }
-      if (before.branch !== expected.branch || before.review !== expected.review) {
-        return { status: 'lost', expected, published, observed: before };
-      }
-      try {
-        await runner('git', [
-          'push',
-          '--atomic',
-          exactLease(branch, input.expectedRemoteHead),
-          exactLease(review, input.expectedRemoteRecordOid),
-          remote,
-          `${input.newHead}:${branch}`,
-          `${input.recordOid}:${review}`,
-        ]);
-        return {
-          status: 'won',
-          expected,
-          published,
-          observed: published,
-        };
-      } catch {
-        const [branchReadback, reviewReadback] = await Promise.all([
-          readRef(runner, remote, branch),
-          readRef(runner, remote, review),
-        ]);
-        const observed = {
-          branch: branchReadback.oid,
-          review: reviewReadback.oid,
-        };
-        if (!branchReadback.succeeded || !reviewReadback.succeeded) {
-          return { status: 'ambiguous', expected, published, observed };
-        }
-        if (observed.branch === published.branch && observed.review === published.review) {
-          return { status: 'already-applied', expected, published, observed };
-        }
-        if (observed.branch === expected.branch && observed.review === expected.review) {
-          // Both refs are exactly where they were before our push attempt --
-          // nobody else won the exact-lease race on either ref, our atomic
-          // push simply failed (network blip, transient auth failure,
-          // etc.). Same false-loss fix as the scalar path above: fail safe
-          // as `ambiguous` (retryable), not `lost` (terminal). A partial
-          // match (only one ref unchanged) is left as a genuine `lost` --
-          // the atomic push guarantees all-or-nothing, so anything else
-          // observed on either ref is a real foreign write.
-          return { status: 'ambiguous', expected, published, observed };
-        }
-        return { status: 'lost', expected, published, observed };
-      }
-    },
-
-    async publishMergePrep(input) {
+    async publishBranchHead(input) {
       const ref = branchRef(input.branch);
       return publishLeasedScalar(
         runner,

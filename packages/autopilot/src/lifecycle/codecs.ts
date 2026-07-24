@@ -17,7 +17,6 @@ const SAFE_TEXT_PATTERN = /^[^\u0000-\u001f\u007f:][^\u0000-\u001f\u007f]*$/;
 const REVIEW_STATES: readonly ReviewClaimState[] = [
   'active',
   'verdict-intent',
-  'fixing',
   'terminal-approved',
   'human',
   'stale',
@@ -95,22 +94,26 @@ function validateBranchClaim(claim: BranchClaim): BranchClaim {
   if (claim.protocolVersion !== 2) throw new Error('Unsupported protocol version');
   positiveNumber(claim.issueNumber, 'issue number');
   if (claim.prNumber !== undefined) positiveNumber(claim.prNumber, 'PR number');
-  if (claim.phase !== 'implement' && claim.phase !== 'merge-prep') throw new Error('Invalid branch claim phase');
-  if (claim.phase === 'merge-prep' && claim.prNumber === undefined) {
-    throw new Error('Contradictory phase fields: merge-prep requires PR');
+  if (
+    claim.phase !== 'implement'
+    && claim.phase !== 'fix'
+    && claim.phase !== 'reconcile'
+  ) {
+    throw new Error('Invalid branch claim phase');
+  }
+  if (
+    (claim.phase === 'fix' || claim.phase === 'reconcile')
+    && claim.prNumber === undefined
+  ) {
+    throw new Error(`Contradictory phase fields: ${claim.phase} requires parent PR`);
   }
   uuid(claim.attempt, 'attempt');
   safeText(claim.runner, 'runner');
   safeText(claim.login, 'login');
   gitOid(claim.expectedHead);
   gitRefName(claim.targetBase);
-  if (claim.phase === 'merge-prep') {
-    if (claim.targetBaseOid === undefined) {
-      throw new Error('Contradictory phase fields: merge-prep requires target base OID');
-    }
-    gitOid(claim.targetBaseOid);
-  } else if ('targetBaseOid' in claim && claim.targetBaseOid !== undefined) {
-    throw new Error('Contradictory phase fields: implementation cannot bind target base OID');
+  if ('targetBaseOid' in claim && (claim as { targetBaseOid?: unknown }).targetBaseOid !== undefined) {
+    throw new Error('Contradictory phase fields: target base OID is not valid');
   }
   isoTimestamp(claim.claimedAt);
   if (claim.phaseComplete !== undefined && claim.phaseComplete !== true) {
@@ -133,9 +136,6 @@ export function encodeBranchClaimTrailers(claim: BranchClaim): string {
     `${BRANCH_TRAILERS.login}: ${claim.login}`,
     `${BRANCH_TRAILERS.expectedHead}: ${claim.expectedHead}`,
     `${BRANCH_TRAILERS.targetBase}: ${claim.targetBase}`,
-    ...(claim.phase === 'merge-prep'
-      ? [`${BRANCH_TRAILERS.targetBaseOid}: ${claim.targetBaseOid}`]
-      : []),
     `${BRANCH_TRAILERS.claimedAt}: ${claim.claimedAt}`,
   );
   if (claim.phaseComplete === true) lines.push(`${BRANCH_TRAILERS.phaseComplete}: true`);
@@ -171,20 +171,6 @@ export function extractImplementationCompletionSummary(
   return normalized.slice(prefix.length, -suffix.length);
 }
 
-export function extractMergePrepCompletionSummary(
-  message: string,
-  trailers: string,
-): string | null {
-  const claim = decodeBranchClaimTrailers(trailers);
-  if (claim.phase !== 'merge-prep' || claim.phaseComplete !== true) return null;
-  const normalized = message.replace(/\r\n/g, '\n').replace(/\n+$/, '');
-  const prefix = 'Autopilot merge-prep phase complete\n\n';
-  const suffix = `\n\n${trailers}`;
-  if (!normalized.startsWith(prefix) || !normalized.endsWith(suffix)) {
-    throw new Error('Merge-prep completion commit is missing its durable summary envelope');
-  }
-  return normalized.slice(prefix.length, -suffix.length);
-}
 
 export function decodeBranchClaimTrailers(value: string): BranchClaim {
   const fields = new Map<string, string>();
@@ -208,7 +194,13 @@ export function decodeBranchClaimTrailers(value: string): BranchClaim {
     throw new Error('Unsupported protocol version');
   }
   const phase = required(BRANCH_TRAILERS.phase);
-  if (phase !== 'implement' && phase !== 'merge-prep') throw new Error('Invalid branch claim phase');
+  if (
+    phase !== 'implement'
+    && phase !== 'fix'
+    && phase !== 'reconcile'
+  ) {
+    throw new Error('Invalid branch claim phase');
+  }
   const prRaw = fields.get(BRANCH_TRAILERS.prNumber);
   const phaseComplete = fields.get(BRANCH_TRAILERS.phaseComplete);
   if (phaseComplete !== undefined && phaseComplete !== 'true') {
@@ -226,13 +218,14 @@ export function decodeBranchClaimTrailers(value: string): BranchClaim {
     claimedAt: isoTimestamp(required(BRANCH_TRAILERS.claimedAt)),
     ...(phaseComplete === undefined ? {} : { phaseComplete: true as const }),
   };
-  if (phase === 'merge-prep') {
-    if (prRaw === undefined) throw new Error('Contradictory phase fields: merge-prep requires PR');
+  if (phase === 'fix' || phase === 'reconcile') {
+    if (prRaw === undefined) {
+      throw new Error(`Contradictory phase fields: ${phase} requires parent PR`);
+    }
     return validateBranchClaim({
       ...common,
       phase,
       prNumber: positiveInteger(prRaw, 'PR number'),
-      targetBaseOid: gitOid(required(BRANCH_TRAILERS.targetBaseOid)),
     });
   }
   return validateBranchClaim({
@@ -433,7 +426,7 @@ function humanReason(phase: string, code: string, detail: string): HumanReason {
     return { phase, code: code as Extract<HumanReason, { phase: typeof phase }>['code'], detail };
   }
   if (
-    (phase === 'awaiting-review' || phase === 'reviewing' || phase === 'review-fixing')
+    (phase === 'awaiting-review' || phase === 'reviewing')
     && [
       'review-escalation',
       'reviewer-identity-unavailable',
@@ -443,11 +436,12 @@ function humanReason(phase: string, code: string, detail: string): HumanReason {
     return { phase, code: code as Extract<HumanReason, { phase: typeof phase }>['code'], detail };
   }
   if (
-    (phase === 'merge-prep' || phase === 'merge-ready')
+    (phase === 'merge-ready')
     && [
       'semantic-conflict',
       'codeowner-sensitive-conflict',
       'invalid-merge-progress-time',
+      'runaway-child',
     ].includes(code)
   ) {
     return { phase, code: code as Extract<HumanReason, { phase: typeof phase }>['code'], detail };

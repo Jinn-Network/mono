@@ -7,6 +7,10 @@ import type {
   GitOid,
   GitRefName,
 } from './types.js';
+import {
+  classifyCiChecks,
+  isCiGreen,
+} from './ci-classifier.js';
 
 export interface MergeEffectiveReview {
   readonly reviewer: string;
@@ -49,8 +53,6 @@ export interface MergeGateResult {
   readonly reasons: readonly string[];
 }
 
-const SUCCESSFUL_CHECK_CONCLUSIONS = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
-
 export function evaluateMergeGate(candidate: MergeCandidate): MergeGateResult {
   const reasons: string[] = [];
   if (!candidate.open || candidate.merged) reasons.push('pull-request-not-open');
@@ -72,13 +74,10 @@ export function evaluateMergeGate(candidate: MergeCandidate): MergeGateResult {
   ))) {
     reasons.push('changes-requested');
   }
-  if (candidate.checks.length === 0) reasons.push('checks-missing');
-  if (candidate.checks.some((check) => (
-    check.status !== 'COMPLETED'
-    || check.conclusion === null
-    || !SUCCESSFUL_CHECK_CONCLUSIONS.has(check.conclusion)
-  ))) {
-    reasons.push('checks-not-green');
+  if (!isCiGreen(candidate.checks)) {
+    const classification = classifyCiChecks(candidate.checks);
+    if (classification.state === 'missing') reasons.push('checks-missing');
+    else reasons.push('checks-not-green');
   }
   if (
     candidate.mergeable !== 'MERGEABLE'
@@ -123,6 +122,19 @@ export interface MergeExecutorDeps {
     readonly expectedHead: GitOid;
     readonly credential: SelectedCredential;
   }): Promise<void>;
+  updateBranch?(input: {
+    readonly prNumber: number;
+    readonly expectedHead: GitOid;
+    readonly credential: SelectedCredential;
+  }): Promise<{ readonly status: 'updated' | 'changed-head' | 'rejected'; readonly head: GitOid }>;
+  fileReconcileChild?(input: {
+    readonly prNumber: number;
+    readonly effort: 'low' | 'medium' | 'high';
+    readonly credential: SelectedCredential;
+  }): Promise<
+    | { readonly number: number; readonly created: boolean; readonly runawayHold?: undefined }
+    | { readonly runawayHold: true; readonly priorCount: number }
+  >;
 }
 
 export type MergeExecutionResult =
@@ -254,5 +266,100 @@ export async function executeMergeAction(
     prNumber: action.prNumber,
     head: action.expectedHead,
     mergeCommitOid: outcome.mergeCommitOid,
+  };
+}
+
+export type UpdateBranchResult =
+  | { readonly status: 'updated'; readonly prNumber: number; readonly head: GitOid }
+  | { readonly status: 'changed-head'; readonly prNumber: number; readonly head: GitOid }
+  | { readonly status: 'ineligible' | 'rejected'; readonly prNumber: number; readonly reason: string };
+
+export async function executeUpdateBranchAction(
+  action: { readonly prNumber: number; readonly expectedHead: GitOid },
+  deps: MergeExecutorDeps,
+): Promise<UpdateBranchResult> {
+  if (deps.updateBranch === undefined) {
+    return { status: 'ineligible', prNumber: action.prNumber, reason: 'update-branch-unavailable' };
+  }
+  const candidate = await deps.readCandidate(action.prNumber);
+  if (candidate === null) {
+    return { status: 'ineligible', prNumber: action.prNumber, reason: 'pull-request-missing' };
+  }
+  if (candidate.head !== action.expectedHead) {
+    return { status: 'changed-head', prNumber: action.prNumber, head: candidate.head };
+  }
+  const selection = selectCredential(deps.credentials, { phase: 'merge' });
+  if (selection.status !== 'selected') {
+    return { status: 'ineligible', prNumber: action.prNumber, reason: 'credential-unavailable' };
+  }
+  const outcome = await deps.updateBranch({
+    prNumber: action.prNumber,
+    expectedHead: action.expectedHead,
+    credential: selection.credential,
+  });
+  if (outcome.status === 'changed-head') {
+    return { status: 'changed-head', prNumber: action.prNumber, head: outcome.head };
+  }
+  if (outcome.status === 'rejected') {
+    return { status: 'rejected', prNumber: action.prNumber, reason: 'update-branch-rejected' };
+  }
+  return { status: 'updated', prNumber: action.prNumber, head: outcome.head };
+}
+
+export type FileReconcileChildResult =
+  | {
+      readonly status: 'filed' | 'already-open';
+      readonly prNumber: number;
+      readonly childNumber: number;
+    }
+  | {
+      readonly status: 'runaway-hold';
+      readonly prNumber: number;
+      readonly priorCount: number;
+    }
+  | { readonly status: 'ineligible'; readonly prNumber: number; readonly reason: string };
+
+export async function executeFileReconcileChildAction(
+  action: {
+    readonly prNumber: number;
+    readonly expectedHead: GitOid;
+    readonly effort: 'low' | 'medium' | 'high';
+  },
+  deps: MergeExecutorDeps,
+): Promise<FileReconcileChildResult> {
+  if (deps.fileReconcileChild === undefined) {
+    return {
+      status: 'ineligible',
+      prNumber: action.prNumber,
+      reason: 'file-reconcile-child-unavailable',
+    };
+  }
+  const candidate = await deps.readCandidate(action.prNumber);
+  if (candidate === null) {
+    return { status: 'ineligible', prNumber: action.prNumber, reason: 'pull-request-missing' };
+  }
+  if (candidate.head !== action.expectedHead) {
+    return { status: 'ineligible', prNumber: action.prNumber, reason: 'changed-head' };
+  }
+  const selection = selectCredential(deps.credentials, { phase: 'merge' });
+  if (selection.status !== 'selected') {
+    return { status: 'ineligible', prNumber: action.prNumber, reason: 'credential-unavailable' };
+  }
+  const filed = await deps.fileReconcileChild({
+    prNumber: action.prNumber,
+    effort: action.effort,
+    credential: selection.credential,
+  });
+  if (filed.runawayHold === true) {
+    return {
+      status: 'runaway-hold',
+      prNumber: action.prNumber,
+      priorCount: filed.priorCount,
+    };
+  }
+  return {
+    status: filed.created ? 'filed' : 'already-open',
+    prNumber: action.prNumber,
+    childNumber: filed.number,
   };
 }

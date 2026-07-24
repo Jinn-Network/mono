@@ -88,25 +88,3 @@ export async function assertReviewIdentities(
   console.log(`[autopilot] dual identity OK: implementer=${implLogin}, reviewer=${reviewLogin}`);
 }
 
-/**
- * Fail-loud arming check for the merge-prep loop (DR-2026-07-16).
- *
- * A merge-prep session re-drafts a PR before pushing its resolution — it relies
- * on the REVIEW loop to re-approve + un-draft the new head so the sweep can
- * merge it. With `mergePrepEnabled` but the review loop disabled
- * (`reviewBotLogin` empty), every prepped PR would be re-drafted and never
- * re-approved — permanently wedged in draft. Refuse to start rather than wedge
- * silently. (The token presence needed to push as the implementer identity is
- * already enforced by `assertReviewIdentities`, which the review loop's own
- * arming requires.)
- */
-export function assertMergePrepArming(cfg: DispatcherConfig): void {
-  if (!cfg.mergePrepEnabled) return;
-  if (cfg.reviewBotLogin.length === 0) {
-    throw new Error(
-      '[autopilot] merge-prep enabled (JINN_MERGE_PREP=1) but the review loop is disabled ' +
-        '(JINN_REVIEW_BOT_LOGIN unset) — a prepped PR is re-drafted and would never be re-approved/un-drafted, ' +
-        'wedging it in draft forever. Arm the review loop, or disable merge-prep.',
-    );
-  }
-}

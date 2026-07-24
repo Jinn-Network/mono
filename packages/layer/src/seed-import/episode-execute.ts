@@ -152,7 +152,9 @@ export async function seedEpisodePrivacyRedactionCount(
   episode: SeedEpisode,
 ): Promise<number> {
   const scrub = await buildSeedScrubPipeline().run(episodePrivacyAttributes(episode));
-  return scrub.redactions.length;
+  // Ignore allowlist-pass audit records — they are intentional Legibility
+  // receipts, not privacy hits (#1971 / scrub redesign review).
+  return scrub.redactions.filter((r) => r.kind !== 'allowlist-pass').length;
 }
 
 export async function executeEpisodes(
@@ -209,20 +211,23 @@ export async function executeEpisodes(
       }
 
       const privacy = await episodeScrubPipeline.run(episodePrivacyAttributes(episode));
-      if (privacy.redactions.length > 0) {
+      const privacyHits = privacy.redactions.filter((r) => r.kind !== 'allowlist-pass');
+      if (privacy.rejected || privacyHits.length > 0) {
         const detectors = [
-          ...new Set(privacy.redactions.map((redaction) =>
+          ...new Set(privacyHits.map((redaction) =>
             `${redaction.stage}${redaction.detail ? `:${redaction.detail}` : ''}`)),
         ];
         throw new Error(
-          `sensitive content detected (${detectors.join(', ')}); refusing to publish evidence episode ${row.id}`,
+          `sensitive content detected (${detectors.join(', ') || 'reject-publish'}); refusing to publish evidence episode ${row.id}`,
         );
       }
 
       const pending = await capture(toCapturedTask(episode, now, prior?.envelopeRef), {
         pipeline: episodeScrubPipeline,
       });
-      const sensitiveRedactions = pending.redactions.filter((redaction) => redaction.stage !== 'fit');
+      const sensitiveRedactions = pending.redactions.filter(
+        (redaction) => redaction.stage !== 'fit' && redaction.kind !== 'allowlist-pass',
+      );
       if (sensitiveRedactions.length > 0) {
         const detectors = [
           ...new Set(sensitiveRedactions.map((redaction) =>

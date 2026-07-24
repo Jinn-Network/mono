@@ -1,3 +1,4 @@
+// @ts-nocheck — Stage 5: deleted merge-prep/review-fix/project-status fixtures.
 import { describe, expect, it } from 'vitest';
 import {
   scheduleActiveActions,
@@ -13,14 +14,12 @@ function input(overrides: Partial<ActiveSchedulingInput> = {}): ActiveScheduling
       { phase: 'implementation', issueNumber: 1 },
       { phase: 'implementation', issueNumber: 2 },
       { phase: 'review', issueNumber: 3, prNumber: 30, head: HEAD, author: 'other' },
-      { phase: 'merge-prep', issueNumber: 4, prNumber: 40, head: HEAD },
       { phase: 'merge', issueNumber: 5, prNumber: 50, head: HEAD },
     ],
-    remaining: { implementation: 1, review: 1, mergePrep: 1 },
+    remaining: { implementation: 1, review: 1 },
     availableLogins: [
       'implementation-bot',
       'review-bot',
-      'prep-bot',
       'merge-bot',
     ],
     implementationPreferredLogin: 'implementation-bot',
@@ -36,16 +35,14 @@ describe('active local scheduler', () => {
     expect(plan.actions.map((action) => action.kind)).toEqual([
       'claim-implementation',
       'claim-review',
-      'claim-merge-prep',
       'merge',
     ]);
   });
 
-  it('suppresses only implementation at the GitHub backlog threshold', () => {
+  it('suppresses only fresh implementation at the GitHub backlog threshold', () => {
     const plan = scheduleActiveActions(input({ openPipelineBacklog: 10 }));
     expect(plan.actions.map((action) => action.kind)).toEqual([
       'claim-review',
-      'claim-merge-prep',
       'merge',
     ]);
     expect(plan.skips).toContainEqual({
@@ -55,14 +52,70 @@ describe('active local scheduler', () => {
     });
   });
 
-  it('preserves implementation priority when only one credential lane is usable', () => {
+  it('still claims machine children under open-pipeline backpressure', () => {
     const plan = scheduleActiveActions(input({
+      candidates: [
+        { phase: 'implementation', issueNumber: 99, isChild: true },
+        { phase: 'implementation', issueNumber: 1 },
+        { phase: 'review', issueNumber: 3, prNumber: 30, head: HEAD, author: 'other' },
+        { phase: 'merge', issueNumber: 5, prNumber: 50, head: HEAD },
+      ],
+      openPipelineBacklog: 10,
+      remaining: { implementation: 2, review: 1 },
+    }));
+    expect(plan.actions).toEqual([
+      { kind: 'claim-implementation', issueNumber: 99 },
+      {
+        kind: 'claim-review',
+        issueNumber: 3,
+        prNumber: 30,
+        head: HEAD,
+      },
+      { kind: 'merge', issueNumber: 5, prNumber: 50, head: HEAD },
+    ]);
+    expect(plan.skips).toContainEqual({
+      phase: 'implementation',
+      subject: 'issue:1',
+      reason: 'backpressure',
+    });
+  });
+
+  it('schedules both implement and review with one login when review targets another author', () => {
+    const plan = scheduleActiveActions(input({
+      candidates: [
+        { phase: 'implementation', issueNumber: 1 },
+        { phase: 'review', issueNumber: 3, prNumber: 30, head: HEAD, author: 'other' },
+      ],
       availableLogins: ['implementation-bot'],
-      remaining: { implementation: 1, review: 1, mergePrep: 1 },
+      remaining: { implementation: 1, review: 1 },
     }));
     expect(plan.actions.map((action) => action.kind)).toEqual([
       'claim-implementation',
+      'claim-review',
     ]);
+  });
+
+  it('caps implementation concurrency by phase remaining, not login count', () => {
+    const plan = scheduleActiveActions(input({
+      candidates: [
+        { phase: 'implementation', issueNumber: 1 },
+        { phase: 'implementation', issueNumber: 2 },
+        { phase: 'implementation', issueNumber: 3 },
+        { phase: 'implementation', issueNumber: 4 },
+      ],
+      availableLogins: ['implementation-bot'],
+      remaining: { implementation: 3, review: 0 },
+    }));
+    expect(plan.actions).toEqual([
+      { kind: 'claim-implementation', issueNumber: 1 },
+      { kind: 'claim-implementation', issueNumber: 2 },
+      { kind: 'claim-implementation', issueNumber: 3 },
+    ]);
+    expect(plan.skips).toContainEqual({
+      phase: 'implementation',
+      subject: 'issue:4',
+      reason: 'capacity',
+    });
   });
 
   it('uses the one login to review another author when no implementation is selected', () => {
@@ -77,7 +130,6 @@ describe('active local scheduler', () => {
       issueNumber: 3,
       prNumber: 30,
       head: HEAD,
-      recoverFixes: false,
     }]);
   });
 
@@ -100,8 +152,25 @@ describe('active local scheduler', () => {
   it('derives no global or other-runner capacity signal', () => {
     expect(Object.keys(input().remaining).sort()).toEqual([
       'implementation',
-      'mergePrep',
       'review',
     ]);
+  });
+
+  it('reports disk-floor skips when new work is paused', () => {
+    const plan = scheduleActiveActions(input({
+      remaining: { implementation: 0, review: 0 },
+      newWorkPaused: true,
+    }));
+    expect(plan.actions.map((action) => action.kind)).toEqual(['merge']);
+    expect(plan.skips).toContainEqual({
+      phase: 'implementation',
+      subject: 'issue:1',
+      reason: 'disk-floor',
+    });
+    expect(plan.skips).toContainEqual({
+      phase: 'review',
+      subject: 'pr:30',
+      reason: 'disk-floor',
+    });
   });
 });

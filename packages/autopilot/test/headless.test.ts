@@ -32,6 +32,13 @@ describe('headlessOverrideFor', () => {
     expect(block).not.toContain('`claude -p` / `--print`');
   });
 
+  it('reframes the shared override for Cursor agent', () => {
+    const block = headlessOverrideFor('cursor');
+
+    expect(block).toContain('`agent -p`');
+    expect(block).not.toContain('`claude -p` / `--print`');
+  });
+
   it('preserves the Claude override verbatim', () => {
     expect(headlessOverrideFor('claude')).toBe(headlessOverride());
   });
