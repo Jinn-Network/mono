@@ -764,7 +764,7 @@ describe('ValidatedPoolStore — targeted v3→v4 carry-forward migration (#493)
   });
 });
 
-describe('isPublicationStale + readVettedPoolArtifactPublicationUnfiltered (#493)', () => {
+describe('isPublicationStale + readVettedPoolArtifactPublicationUnfiltered (#796)', () => {
   function makeArtifact(version: string) {
     return parseVettedPoolArtifact({
       schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
