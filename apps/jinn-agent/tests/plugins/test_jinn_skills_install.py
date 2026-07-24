@@ -10,9 +10,8 @@ The module is retained as a quarantined Stage-3 surface (rescope plan §2):
 the `/jinn skills install|list|uninstall` command branch that used to call
 these functions is removed (Stage 1 rescope R3; skills are Stage 3), and
 pickup's own auto-adopt path (which also called `install()`) is gone with
-it. `skills_dir()`/`_extract_skill()`/`_extract_trace()`/`_skill_md_and_slug()`
-stay live, consumed by `/jinn distill`'s staging dir and the `corpus_fetch`
-agent tool.
+it. `skills_dir()`/`_extract_trace()`/`_skill_md_and_slug()` stay live,
+consumed by `/jinn distill`'s staging dir and retained reader compatibility.
 These tests cover the module's own functions directly, independent of any
 command surface.
 """

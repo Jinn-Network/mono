@@ -9,8 +9,8 @@ on a fresh install.
 Two invariants:
   1. With ``plugins.enabled: [jinn]`` the real
      ``PluginManager.discover_and_load`` loads the
-     plugin, registers the ``/jinn`` + ``/corpus`` commands and the corpus
-     tools.
+     plugin, registers ``/jinn`` and ``jinn-doctor``, and does not expose raw
+     corpus commands or agent tools that bypass automatic pickup eligibility.
   2. The entrypoint's config-ensure block enables the bundled Jinn plugins
      from a fresh home, is idempotent, and respects an explicit
      ``plugins.disabled`` opt-out.
@@ -54,9 +54,10 @@ def test_jinn_plugin_loads_through_the_real_manager(isolated_manager):
     assert jinn.enabled, f"jinn plugin discovered but not enabled: {jinn.error}"
     assert jinn.error is None
     assert "jinn" in jinn.commands_registered
-    assert "corpus" in jinn.commands_registered
-    assert "corpus_search" in jinn.tools_registered
-    assert "corpus_fetch" in jinn.tools_registered
+    assert "jinn-doctor" in isolated_manager._cli_commands
+    assert "corpus" not in jinn.commands_registered
+    assert "corpus_search" not in jinn.tools_registered
+    assert "corpus_fetch" not in jinn.tools_registered
 
 
 def test_disabled_plugin_registers_nothing_and_creates_no_state(tmp_path, monkeypatch, capsys):

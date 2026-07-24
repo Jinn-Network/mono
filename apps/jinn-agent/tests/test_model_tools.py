@@ -51,6 +51,7 @@ class TestHandleFunctionCall:
                 task_id="task-1",
                 tool_call_id="call-1",
                 session_id="session-1",
+                turn_id="turn-1",
             )
 
         assert result == '{"ok":true}'
@@ -62,7 +63,7 @@ class TestHandleFunctionCall:
                 task_id="task-1",
                 session_id="session-1",
                 tool_call_id="call-1",
-                turn_id="",
+                turn_id="turn-1",
                 api_request_id="",
                 middleware_trace=[],
             ),
@@ -74,7 +75,7 @@ class TestHandleFunctionCall:
                 task_id="task-1",
                 session_id="session-1",
                 tool_call_id="call-1",
-                turn_id="",
+                turn_id="turn-1",
                 api_request_id="",
                 duration_ms=ANY,
                 status="ok",
@@ -90,7 +91,7 @@ class TestHandleFunctionCall:
                 task_id="task-1",
                 session_id="session-1",
                 tool_call_id="call-1",
-                turn_id="",
+                turn_id="turn-1",
                 api_request_id="",
                 duration_ms=ANY,
                 status="ok",
@@ -98,6 +99,65 @@ class TestHandleFunctionCall:
                 error_message=None,
             ),
         ]
+
+    def test_tool_call_bridge_preserves_turn_and_request_ids(self):
+        with (
+            patch(
+                "model_tools.get_tool_definitions",
+                return_value=[],
+            ),
+            patch(
+                "tools.tool_search.resolve_underlying_call",
+                return_value=(
+                    "web_search",
+                    {"q": "test"},
+                    None,
+                ),
+            ),
+            patch(
+                "tools.tool_search.scoped_deferrable_names",
+                return_value={"web_search"},
+            ),
+            patch(
+                "model_tools.registry.dispatch",
+                return_value='{"ok":true}',
+            ),
+            patch(
+                "hermes_cli.plugins.has_hook",
+                return_value=True,
+            ),
+            patch(
+                "hermes_cli.plugins.invoke_hook",
+            ) as mock_invoke_hook,
+        ):
+            result = handle_function_call(
+                "tool_call",
+                {
+                    "name": "web_search",
+                    "arguments": {"q": "test"},
+                },
+                task_id="task-1",
+                tool_call_id="call-1",
+                session_id="session-1",
+                turn_id="turn-1",
+                api_request_id="request-1",
+            )
+
+        assert result == '{"ok":true}'
+        kwargs_by_hook = {
+            hook.args[0]: hook.kwargs
+            for hook in mock_invoke_hook.call_args_list
+        }
+        assert kwargs_by_hook["pre_tool_call"]["turn_id"] == "turn-1"
+        assert (
+            kwargs_by_hook["pre_tool_call"]["api_request_id"]
+            == "request-1"
+        )
+        assert kwargs_by_hook["post_tool_call"]["turn_id"] == "turn-1"
+        assert (
+            kwargs_by_hook["post_tool_call"]["api_request_id"]
+            == "request-1"
+        )
 
     def test_post_tool_call_receives_non_negative_integer_duration_ms(self):
         """Regression: post_tool_call and transform_tool_result hooks must

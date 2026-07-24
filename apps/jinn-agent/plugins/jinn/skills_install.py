@@ -68,10 +68,9 @@ def _sanitise_slug(raw: str) -> str:
 
 
 # RESIDUAL (flagged cross-repo, 2026-07-08 design): these read-only envelope
-# helpers (_extract_skill, _extract_trace) still serve corpus_fetch for DISPLAY.
-# They no longer gate any install write (install() defers to the layer). Fully
-# removing them needs an interpreted `jinn-layer corpus get` projection — a
-# layer follow-up, tracked separately.
+# helpers preserve the additive episode-reader compatibility contract. They no
+# longer gate any install write (install() defers to the layer). Fully removing
+# them remains a separate cleanup from the Hermes retrieval surface.
 def _episode_error(path: str, expected: str) -> None:
     raise ValueError(f"jinn.episode.v1 field {path} must be {expected}")
 
@@ -932,7 +931,7 @@ def _validate_episode(parsed: Dict[str, Any]) -> None:
 def _extract_skill(record: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
     """Return (skill_view, verified sha256) for a first-class jinn.skill.v1 artifact.
 
-    Thin in-session reader for corpus_fetch. Install trust path remains
+    Retained reader compatibility only. The install trust path remains
     ``jinn-layer skills install``. A present-but-corrupt skill artifact is an
     error (no fall-through to evidence envelopes).
     """

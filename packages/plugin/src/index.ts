@@ -56,6 +56,7 @@ export type {
   JinnPlugin,
   JinnPluginDeps,
   SessionMeta,
+  FirstTurnPickupOptions,
   FirstTurnPickupResult,
   ToolCallEvent,
   SessionOutcome,

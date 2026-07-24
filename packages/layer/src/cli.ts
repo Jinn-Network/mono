@@ -1172,7 +1172,9 @@ export async function runJinnLayerCli(
         const tracked = trackingCorpus(deps);
         const result = await createJinnPlugin(tracked.deps)
           .session(request.meta)
-          .firstTurnPickup(request.firstMessage);
+          .firstTurnPickup(request.firstMessage, {
+            excludeCanonicalEpisodeIds: request.excludeCanonicalEpisodeIds,
+          });
         writer.write(`${JSON.stringify(sessionPickupEnvelope(
           result,
           tracked.status(),

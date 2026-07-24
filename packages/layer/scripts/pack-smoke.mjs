@@ -176,6 +176,7 @@ try {
           pickup: { enabled: false },
         },
         firstMessage: 'No network lookup is required for this rehearsal.',
+        excludeCanonicalEpisodeIds: ['episode-already-delivered'],
       }),
     ).stdout.trim(),
   );

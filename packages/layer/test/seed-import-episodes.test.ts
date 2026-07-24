@@ -352,19 +352,16 @@ describe('executeEpisodes()', () => {
     ['government-identity identifier', 'Passport: A1234567.'],
     ['financial-account identifier', 'Bank account: 1234 5678.'],
   ])('accepts a %s under the seed profile (documented residual, #1409/#1784)', async (_label, residualText) => {
-    // The seed profile deliberately does not run openredaction or the
-    // entropy fallback (build.ts's buildSeedScrubPipeline doc comment,
-    // #1409): seeds are public, transformed, human-reviewed prose, and those
-    // probabilistic stages false-positive on ordinary words and hex-looking
-    // ids in that content (#1784). Every structured identifier or PII class
-    // detected only by openredaction is therefore residual risk — not just
-    // the representative contact, government identity, medical, and
-    // financial cases sampled here. Luhn-valid cards are no longer residual:
-    // the shared Tier-1 checksummed-instruments detector catches them in every
-    // lane (#1972). JWTs and unprefixed high-entropy blobs remain residuals
-    // from the omitted entropy fallback. Seed curators must catch the remaining
-    // classes by review. This test pins that trade-off as intentional, not a
-    // complete enumeration of openredaction's former 570+ pattern surface.
+    // The seed profile deliberately omits the optional GLiNER detector and the
+    // entropy fallback (buildSeedScrubPipeline, #1409): seeds are public,
+    // transformed, human-reviewed prose, and probabilistic stages
+    // false-positive on ordinary words and hex-looking ids (#1784). Every
+    // structured identifier or PII class detected only by those omitted stages
+    // is therefore residual risk. Luhn-valid cards are not residual: the shared
+    // Tier-1 checksummed-instruments detector catches them in every lane
+    // (#1972). JWTs and unprefixed high-entropy blobs remain residuals from the
+    // omitted entropy fallback. Seed curators must catch the remaining classes
+    // by review; this test pins that trade-off as intentional, not exhaustive.
     const source = mockEpisodeSource([
       episode({
         steps: [{ label: 'note', title: 'residual fixture', text: residualText }],

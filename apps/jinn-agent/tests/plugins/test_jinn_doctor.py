@@ -896,7 +896,13 @@ def test_degraded_never_disables_python_pickup_or_local_episode_fallback(wired, 
     runner = ContractRunner()
     jinn._runner = runner
     jinn._degraded = "contract v2 (expected v1)"
-    monkeypatch.setattr(jinn.pickup, "pickup", lambda *_a, **_k: {"context": "python pickup"})
+    monkeypatch.setattr(
+        jinn.pickup,
+        "pickup_with_outcome",
+        lambda *_a, **_k: jinn.pickup.PickupOutcome(
+            context={"context": "python pickup"},
+        ),
+    )
     local: list[dict] = []
     monkeypatch.setattr(jinn.distill, "write_episode_fallback", lambda episode: local.append(episode))
 
