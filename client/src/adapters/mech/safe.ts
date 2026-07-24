@@ -280,6 +280,22 @@ async function executeSafeTransactionInner(
       // stale nonce / signature races re-read nonce and re-sign.
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
       if (receipt.status !== 'success') {
+        // Probe ownership before re-simulation or the stale-nonce fallback.
+        // A broadcast that later reverts because the signer was removed (or
+        // never was an owner) must not surface as a retryable nonce race —
+        // same terminal diagnosis as estimate-path GS026. Issue #1986 / #2090.
+        const signerIsOwner = await publicClient.readContract({
+          address: safeAddress,
+          abi: SAFE_ABI,
+          functionName: 'isOwner',
+          args: [from],
+        });
+        if (!signerIsOwner) {
+          throw new Error(
+            'Safe execTransaction rejected (GS026: invalid owner — signing key is not a Safe owner). ' +
+              'Repair the Safe owner set or repoint the agent signing key to a current owner.',
+          );
+        }
         // Safe v1.3 wraps inner reverts as GS013 — re-simulate to recover
         // the actual selector + args for diagnostics and to let tx-retry
         // mark known-permanent inner errors as non-recoverable.

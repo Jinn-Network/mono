@@ -448,12 +448,14 @@ describe('executeSafeTransaction GS026 owner mismatch (issue #1986)', () => {
     }));
   });
 
-  it('keeps receipt-path stale-nonce races retryable without embedding GS026', async () => {
+  it('treats receipt-path reverts as terminal when the signer is not a Safe owner', async () => {
     const REVERT_HASH = `0x${'dd'.repeat(32)}` as Hex;
-    const { publicClient, walletClient } = makeClients();
+    const { publicClient, walletClient } = makeClients(false);
     const writeContract = vi.fn().mockResolvedValue(REVERT_HASH);
     const waitForTransactionReceipt = vi.fn().mockResolvedValue({ status: 'reverted' });
-    const call = vi.fn().mockResolvedValue({ data: '0x' });
+    const call = vi.fn().mockRejectedValue(
+      Object.assign(new Error('target call reverted'), { data: '0x33f626d3' }),
+    );
 
     await expect(
       executeSafeTransaction(
@@ -467,7 +469,46 @@ describe('executeSafeTransaction GS026 owner mismatch (issue #1986)', () => {
         },
         { ledger: createMemoryTxSubmissionLedger() },
       ),
-    ).rejects.toThrow(/possible stale Safe nonce or signature race/);
+    ).rejects.toThrow(/GS026.*owner/i);
+
+    expect(call).not.toHaveBeenCalled();
+    expect(publicClient.readContract).toHaveBeenCalledWith(expect.objectContaining({
+      functionName: 'isOwner',
+      args: [TEST_SIGNER_ADDRESS],
+    }));
+  });
+
+  it('keeps receipt-path stale-nonce races retryable when the signer is still a Safe owner', async () => {
+    const REVERT_HASH = `0x${'dd'.repeat(32)}` as Hex;
+    const { publicClient, walletClient } = makeClients(true);
+    const writeContract = vi
+      .fn()
+      .mockResolvedValueOnce(REVERT_HASH)
+      .mockResolvedValueOnce(TEST_SUCCESS_HASH);
+    const waitForTransactionReceipt = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'reverted' })
+      .mockResolvedValueOnce({ status: 'success' });
+    const call = vi.fn().mockResolvedValue({ data: '0x' });
+
+    const hash = await executeSafeTransaction(
+      { ...publicClient, call, waitForTransactionReceipt } as never,
+      { ...walletClient, writeContract } as never,
+      {
+        safeAddress: TEST_SAFE_ADDRESS,
+        to: TEST_TARGET_ADDRESS,
+        value: 0n,
+        data: TEST_CALL_DATA,
+      },
+      { ledger: createMemoryTxSubmissionLedger() },
+    );
+
+    expect(hash).toBe(TEST_SUCCESS_HASH);
+    expect(writeContract).toHaveBeenCalledTimes(2);
+    expect(publicClient.readContract).toHaveBeenCalledWith(expect.objectContaining({
+      functionName: 'isOwner',
+      args: [TEST_SIGNER_ADDRESS],
+    }));
 
     const err = new Error(
       'Safe execTransaction reverted (possible stale Safe nonce or signature race, txHash=0xdead)',
