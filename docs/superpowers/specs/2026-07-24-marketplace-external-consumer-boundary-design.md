@@ -249,8 +249,8 @@ configuration and are never forwarded to the CLI.
 
 The release versions become:
 
-- `@jinn-network/sdk@0.2.0`;
-- `@jinn-network/client@0.3.0`.
+- `@jinn-network/sdk@0.1.1`;
+- `@jinn-network/client@0.2.1`.
 
 The SDK package includes `dist/`, `fixtures/`, and its README. Its export map
 contains every public subpath named by this design.

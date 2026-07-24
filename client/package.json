@@ -1,6 +1,6 @@
 {
   "name": "@jinn-network/client",
-  "version": "0.3.0",
+  "version": "0.2.1",
   "description": "Jinn protocol client — headless daemon for the restoration training loop",
   "type": "module",
   "packageManager": "yarn@4.13.0",

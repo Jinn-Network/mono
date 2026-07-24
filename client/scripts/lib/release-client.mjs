@@ -17,7 +17,7 @@ import {
 export const REPO_FULL_NAME = 'Jinn-Network/mono';
 export const PACKAGE_NAME = '@jinn-network/client';
 export const SDK_PACKAGE_NAME = '@jinn-network/sdk';
-export const REQUIRED_SDK_VERSION = '0.2.0';
+export const REQUIRED_SDK_VERSION = '0.1.1';
 export const REPORT_SCHEMA_VERSION = 1;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

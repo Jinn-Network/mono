@@ -82,8 +82,8 @@ function makeRunner(overrides: Record<string, MockOverride> = {}) {
       return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
     }
     if (command === 'git' && args[0] === 'ls-remote') return { status: 0, stdout: '', stderr: '' };
-    if (command === 'npm' && args.join(' ') === 'view @jinn-network/sdk@0.2.0 version') {
-      return { status: 0, stdout: '0.2.0\n', stderr: '' };
+    if (command === 'npm' && args.join(' ') === 'view @jinn-network/sdk@0.1.1 version') {
+      return { status: 0, stdout: '0.1.1\n', stderr: '' };
     }
     if (command === 'npm' && args[0] === 'view') return { status: 1, stdout: '', stderr: 'not found' };
     if (command === 'gh' && args[0] === 'auth') return { status: 0, stdout: '', stderr: '' };
@@ -167,11 +167,11 @@ describe('release-client runner', () => {
     expect(report.tag).toBe('client-v1.2.3');
     expect(report.sdkVerification).toEqual({
       package: '@jinn-network/sdk',
-      version: '0.2.0',
+      version: '0.1.1',
     });
     expect(report.consumerGate).toEqual({
       mode: 'local',
-      sdkVersion: '0.2.0',
+      sdkVersion: '0.1.1',
       stepId: 'gate-pack-smoke',
     });
     expect(existsSync(report.reportPath)).toBe(true);
@@ -217,11 +217,11 @@ describe('release-client runner', () => {
     )).toBe(true);
   });
 
-  it('fails before release gates until SDK 0.2.0 exists on npm', async () => {
+  it('fails before release gates until SDK 0.1.1 exists on npm', async () => {
     const { repoRoot, clientRoot } = makeRoots();
     writeClientPackage(clientRoot);
     const { calls, commandRunner } = makeRunner({
-      'npm view @jinn-network/sdk@0.2.0 version': {
+      'npm view @jinn-network/sdk@0.1.1 version': {
         status: 1,
         stderr: 'npm error E404',
       },
@@ -235,7 +235,7 @@ describe('release-client runner', () => {
       commandRunner,
       now: new Date('2026-04-26T12:00:00.000Z'),
       sleep: async () => undefined,
-    })).rejects.toThrow(/@jinn-network\/sdk@0\.2\.0/);
+    })).rejects.toThrow(/@jinn-network\/sdk@0\.1\.1/);
 
     expect(calls.some((call) => call.command === 'yarn')).toBe(false);
   });
@@ -395,7 +395,7 @@ describe('release-client runner', () => {
     expect(resumed.status).toBe('completed');
     expect(resumed.consumerGate).toEqual({
       mode: 'registry',
-      sdkVersion: '0.2.0',
+      sdkVersion: '0.1.1',
       clientVersion: '1.2.3',
       stepId: 'verify-external-consumer',
     });
