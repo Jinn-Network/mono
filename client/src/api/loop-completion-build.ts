@@ -66,6 +66,16 @@ export interface ImplStateCadenceStatus {
   error?: string;
 }
 
+/** Short-TTL memo budget for the loop-completion rollup (#999). Matches the
+ *  balance-cache TTL on the same `/v1/status` assemble path. */
+export const LOOP_COMPLETION_TTL_MS = 30_000;
+
+type LoopCompletionCacheEntry = { at: number; value: LoopCompletionStatus };
+
+/** Per-db identity → last rollup. Keyed by object identity (prefer `store.db`);
+ *  never by the ephemeral `taskRunReadModel()` instance. */
+const loopCompletionCache = new WeakMap<object, LoopCompletionCacheEntry>();
+
 /**
  * Aggregate loop-completion across all task_runs. A row's phases come from the
  * `gating.phasesCompleted` array, which `getGatingRows` extracts in SQL via
@@ -74,8 +84,27 @@ export interface ImplStateCadenceStatus {
  * text of that array (absent path / malformed ⇒ `[]`). Never throws — a
  * malformed array yields `[]` for that row, a store read failure yields an
  * all-zero rollup.
+ *
+ * Optional `opts.cacheKey` (production: `store.db`) memoizes the finished
+ * rollup for `opts.ttlMs ?? LOOP_COMPLETION_TTL_MS`. On hit, skips
+ * `getGatingRows` entirely. Omit `cacheKey` to always recompute (unit fakes).
+ * `now` / `ttlMs` are test seams only.
  */
-export function gatherLoopCompletion(runs: TaskRunReadModel): LoopCompletionStatus {
+export function gatherLoopCompletion(
+  runs: TaskRunReadModel,
+  opts?: { cacheKey?: object; now?: number; ttlMs?: number },
+): LoopCompletionStatus {
+  const cacheKey = opts?.cacheKey;
+  const ttlMs = opts?.ttlMs ?? LOOP_COMPLETION_TTL_MS;
+  const now = opts?.now ?? Date.now();
+
+  if (cacheKey) {
+    const hit = loopCompletionCache.get(cacheKey);
+    if (hit && now - hit.at < ttlMs) {
+      return hit.value;
+    }
+  }
+
   const empty: LoopCompletionStatus = {
     total: 0,
     delivered: 0,
@@ -109,6 +138,10 @@ export function gatherLoopCompletion(runs: TaskRunReadModel): LoopCompletionStat
     if (phases.includes('improve')) acc.reachedImprove += 1;
     if (phases.includes('memory-consolidation')) acc.reachedMemoryConsolidation += 1;
     if (FULL_LOOP_PHASES.every((p) => phases.includes(p))) acc.fullLoop += 1;
+  }
+
+  if (cacheKey) {
+    loopCompletionCache.set(cacheKey, { at: now, value: acc });
   }
   return acc;
 }

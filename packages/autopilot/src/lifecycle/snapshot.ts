@@ -57,11 +57,8 @@ export interface NativeReviewSnapshot {
   readonly submittedAt: string;
 }
 
-export interface CheckSummary {
-  readonly name: string;
-  readonly status: string;
-  readonly conclusion: string | null;
-}
+export type { CheckSummary } from './types.js';
+import type { CheckSummary } from './types.js';
 
 export interface ReviewClaimSnapshot {
   readonly oid: GitOid;
@@ -102,6 +99,7 @@ export interface PullRequestSnapshot {
   readonly mergeability: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN';
   readonly mergeStateStatus: string;
   readonly checks: readonly CheckSummary[];
+  readonly ciRerunRecorded?: boolean;
   readonly reviews: readonly NativeReviewSnapshot[];
   readonly branchClaim?: BranchClaim;
   readonly implementationCompletionSummary?: string;
@@ -136,6 +134,7 @@ export interface RawPullRequest {
   readonly mergeability: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN';
   readonly mergeStateStatus: string;
   readonly checks: readonly CheckSummary[];
+  readonly ciRerunRecorded?: boolean;
   readonly reviews: readonly RawNativeReview[];
   readonly branchClaimTrailers: string | null;
   readonly implementationCompletionSummary?: string | null;
@@ -314,6 +313,7 @@ export function decodePullRequestSnapshot(raw: RawPullRequest): PullRequestSnaps
       mergeability: raw.mergeability,
       mergeStateStatus: raw.mergeStateStatus,
       checks: raw.checks.map((check) => ({ ...check })),
+      ...(raw.ciRerunRecorded === true ? { ciRerunRecorded: true } : {}),
       reviews,
       ...(branchClaim === undefined ? {} : { branchClaim }),
       ...(raw.implementationCompletionSummary === undefined
@@ -473,6 +473,8 @@ function lifecyclePr(
     needsReview: decisive?.state !== 'APPROVED',
     approved: decisive?.state === 'APPROVED',
     mergeState: mergeState(pr),
+    checks: [...pr.checks],
+    ...(pr.ciRerunRecorded === true ? { ciRerunRecorded: true } : {}),
     ...(openChildKinds.length === 0 ? {} : { openChildKinds: [...openChildKinds] }),
     ...(pr.branchClaim === undefined ? {} : { branchClaim: pr.branchClaim }),
     ...(pr.implementationCompletionSummary === undefined

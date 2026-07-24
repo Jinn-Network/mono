@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import subprocess
+import sys
 
 import yaml
 
@@ -140,12 +143,74 @@ def test_jinn_agent_suite_includes_destructive_cleanup_regressions():
             encoding="utf-8"
         )
     )
-    test_steps = workflow["jobs"]["test"]["steps"]
+    generate_steps = workflow["jobs"]["generate"]["steps"]
     rendered_steps = "\n".join(
-        str(step.get("run", "")) for step in test_steps
+        str(step.get("run", "")) for step in generate_steps
     )
 
     assert "tests/scripts/test_clean_jinn_test_pollution.py" in rendered_steps
+
+
+def test_duration_download_keeps_each_slice_in_its_own_directory():
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "jinn-agent-ci.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    steps = workflow["jobs"]["save-durations"]["steps"]
+    download_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Download all slice durations"
+    )
+    merge_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Merge into single durations file"
+    )
+    merge_step_index = steps.index(merge_step)
+
+    assert "merge-multiple" not in download_step["with"]
+    assert any(
+        step.get("uses", "").startswith("actions/checkout@")
+        for step in steps[:merge_step_index]
+    )
+    assert (
+        "python3 apps/jinn-agent/scripts/merge_test_durations.py "
+        "durations apps/jinn-agent/test_durations.json"
+        in merge_step["run"]
+    )
+
+
+def test_duration_merger_reads_all_four_same_named_slice_files(tmp_path):
+    durations_dir = tmp_path / "durations"
+    expected = {}
+    for index in range(1, 5):
+        artifact_dir = durations_dir / f"test-durations-slice-{index}"
+        artifact_dir.mkdir(parents=True)
+        duration = {f"tests/test_slice_{index}.py": float(index)}
+        (artifact_dir / "test_durations.json").write_text(
+            json.dumps(duration),
+            encoding="utf-8",
+        )
+        expected.update(duration)
+
+    output_path = tmp_path / "apps" / "jinn-agent" / "test_durations.json"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(AGENT_ROOT / "scripts" / "merge_test_durations.py"),
+            str(durations_dir),
+            str(output_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(output_path.read_text(encoding="utf-8")) == expected
+    assert "from 4 artifacts" in completed.stdout
 
 
 def test_acceptance_drivers_are_repo_owned_executables():

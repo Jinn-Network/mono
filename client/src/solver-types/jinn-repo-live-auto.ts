@@ -97,6 +97,7 @@ import type { Task } from '../types/task.js';
 import type { TaskClaimPolicy } from '../types/task-document.js';
 import type { LaunchedSolverNetRecord } from '../solvernets/store.js';
 import { JinnRepoLiveIssueTaskSchema } from './jinn-repo.js';
+import { resolvePostingWindowMs } from './_jinn-repo-posting-window.js';
 
 const SOLVER_TYPE = 'jinn-repo.v1';
 const CONTRACT_ID = 'jinn-repo';
@@ -105,8 +106,6 @@ const CONTRACT_VERSION = 'v1';
 const DEFAULT_LABEL = 'engine:marketplace';
 const DEFAULT_REPO = 'Jinn-Network/mono';
 const DEFAULT_MAX_PER_TICK = 5;
-/** On-chain claim-window deadline applied to each posted Task. */
-const DEFAULT_POSTING_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 /** Claim lease, mirrors the jinn-repo contract default (coding tasks need more time). */
 const DEFAULT_CLAIM_LEASE_TTL_SECONDS = 60 * 60;
 
@@ -300,12 +299,15 @@ export interface JinnRepoLiveGeneratorConfig {
    * authorship trust".
    */
   markerTrustedAssociations?: string[];
+  /** Solve / posting window duration in ms (default: six hours). */
+  postingWindowMs?: number;
 }
 
 export function makeJinnRepoLiveGenerator(config: JinnRepoLiveGeneratorConfig): TaskGenerator {
   const label = config.label ?? DEFAULT_LABEL;
   const repo = config.repo ?? DEFAULT_REPO;
   const maxPerTick = config.maxPerTick ?? DEFAULT_MAX_PER_TICK;
+  const postingWindowMs = resolvePostingWindowMs(config.postingWindowMs);
   const fetchImpl = config.fetchImpl ?? fetch;
   const claimPolicy = jinnRepoLiveClaimPolicy(config.claimLeaseTtlSeconds ?? DEFAULT_CLAIM_LEASE_TTL_SECONDS);
   const markerAuthorLogin = config.markerAuthorLogin;
@@ -333,7 +335,7 @@ export function makeJinnRepoLiveGenerator(config: JinnRepoLiveGeneratorConfig): 
     }
 
     const now = Date.now();
-    const windowEndTs = now + DEFAULT_POSTING_WINDOW_MS;
+    const windowEndTs = now + postingWindowMs;
     const tasks: Task[] = [];
 
     for (const entry of labeled) {
@@ -437,6 +439,7 @@ export interface MakeJinnRepoLiveGeneratorForLaunchedRecordOpts {
     markerAuthorLogin?: string;
     /** See `JinnRepoLiveGeneratorConfig.markerTrustedAssociations` — issue #1893 Finding 1. */
     markerTrustedAssociations?: string[];
+    postingWindowMs?: number;
   };
 }
 
@@ -453,6 +456,11 @@ export function makeJinnRepoLiveGeneratorForLaunchedRecord(
   const stateDir =
     staticConfig.stateDir ?? process.env['JINN_JINN_REPO_LIVE_STATE_DIR'] ?? defaultStateDir();
 
+  const postingWindowMs = resolvePostingWindowMs(
+    staticConfig.postingWindowMs ??
+      recordRef.current.generatorConfig?.['posting_window_ms'],
+  );
+
   const generator = makeJinnRepoLiveGenerator({
     stateDir,
     solverNetManifestCid: recordRef.current.manifestCid,
@@ -463,6 +471,7 @@ export function makeJinnRepoLiveGeneratorForLaunchedRecord(
     token: staticConfig.token,
     markerAuthorLogin: staticConfig.markerAuthorLogin,
     markerTrustedAssociations: staticConfig.markerTrustedAssociations,
+    postingWindowMs,
   });
 
   return async (): Promise<Task | Task[] | null> => {

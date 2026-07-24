@@ -15,7 +15,7 @@ import { CODEX_HARNESS } from '../harnesses/names.js';
 import { runHarnessForEval, resolveRuntimePluginsForSolverType } from './eval-harness-run.js';
 import { corpusEnvFromConfig } from '../cli/commands/eval.js';
 import {
-  loadSweRebenchV2Pool, defaultStateDir, getSweRebenchV2ValidatedPoolStore,
+  loadSweRebenchV2Pool, getSweRebenchV2ValidatedPoolStore,
 } from '../solver-types/swe-rebench-v2.js';
 import { PoolCacheStore, loadPoolWithCacheFallback } from '../solver-types/_swe-rebench-v2-pool-cache.js';
 import {
@@ -91,10 +91,10 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
   }
   const upstreamRepoDir = enabled.upstreamRepoDir;
 
-  const stateDir = process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? defaultStateDir();
+  const stateDir = config.sweRebenchV2StateDir;
   const fetcher = new HttpHfFetcher();
   const evaluator = new SweRebenchV2Evaluator({ fetcher, runner: new PythonEvalRunner({ upstreamRepoDir }) });
-  const validatedStore = getSweRebenchV2ValidatedPoolStore();
+  const validatedStore = getSweRebenchV2ValidatedPoolStore(stateDir);
   const runtimePlugins: RuntimePlugin[] = await resolveRuntimePluginsForSolverType(
     DISPATCH_SOLVER_TYPE, config.joinedSolverNets,
   );

@@ -30,6 +30,8 @@ export interface LaunchedRecordGeneratorStaticConfig {
   /** IPFS gateway, passed through to the swe-rebench-v2 generator for the
    *  fresh-volume vetted-pool recovery fetch (#957). */
   ipfsGatewayUrl?: string;
+  /** From `config.sweRebenchV2StateDir` — swe-rebench-v2 generator root. */
+  stateDir?: string;
 }
 
 export interface LaunchedRecordGeneratorFactories {

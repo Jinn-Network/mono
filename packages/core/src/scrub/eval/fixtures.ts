@@ -145,6 +145,23 @@ export function syntheticFixtures(): EvalFixture[] {
       profile: 'seed',
       mustSurvive: true,
     },
+    // Hazard: GIT_CONFIG tutorial blocks are env-shaped but not secret dumps (#2005).
+    {
+      id: 'hazard-git-config-tutorial-survive',
+      text: [
+        'export GIT_CONFIG_GLOBAL=/dev/null',
+        'export GIT_CONFIG_SYSTEM=/dev/null',
+        'export GIT_CONFIG_NOSYSTEM=1',
+        'export GIT_CONFIG_COUNT=2',
+        'export GIT_CONFIG_KEY_0=credential.helper',
+        'export GIT_CONFIG_VALUE_0=',
+        'export GIT_CONFIG_KEY_1=core.askPass',
+        'export GIT_CONFIG_VALUE_1=/attempt/askpass',
+      ].join('\n'),
+      labels: [],
+      profile: 'seed',
+      mustSurvive: true,
+    },
     // Hazard: loopback IP must survive (illustrative config knowledge).
     {
       id: 'hazard-loopback-ip-survive',

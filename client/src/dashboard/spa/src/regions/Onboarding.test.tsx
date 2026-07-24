@@ -387,6 +387,37 @@ describe('Onboarding action steps (#983)', () => {
     await waitFor(() => expect(completeOnboarding).toHaveBeenCalledTimes(1));
   });
 
+  it('persists the selected OpenRouter provider when entering the dashboard', async () => {
+    bootstrapOverride = {
+      ...terminal,
+      joinedSolverNets: {
+        [SWE_CID]: { manifestCid: SWE_CID, roles: ['solver'] },
+      },
+    };
+    render(withQueryClient(<Onboarding />));
+    await waitFor(() => screen.getByTestId('onboarding-harness-card'));
+
+    fireEvent.click(screen.getByTestId('onboarding-harness-row-hermes-agent'));
+    await waitFor(() =>
+      expect((screen.getByTestId('onboarding-model-select') as HTMLSelectElement).value)
+        .toBe('anthropic/claude-opus-4.7'),
+    );
+    await waitFor(() => {
+      const enter = screen.getByTestId('onboarding-enter-dashboard') as HTMLButtonElement;
+      expect(enter.disabled).toBe(false);
+    });
+
+    fireEvent.click(screen.getByTestId('onboarding-enter-dashboard'));
+    await waitFor(() =>
+      expect(operatorJoin).toHaveBeenCalledWith(SWE_CID, {
+        roles: ['solver'],
+        harness: 'hermes-agent',
+        model: 'anthropic/claude-opus-4.7',
+        provider: 'openrouter',
+      }),
+    );
+  });
+
   it('surfaces an error when the Enter-dashboard mutation rejects', async () => {
     operatorJoin.mockReset();
     operatorJoin.mockRejectedValue(new Error('join_failed'));
