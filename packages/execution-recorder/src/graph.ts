@@ -1,0 +1,678 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import {
+  ABANDONED_ACTION_STATUS,
+  EXECUTION_EVIDENCE_PROFILE_URI,
+  validateExecutionEvidence,
+} from "@jinn-network/evidence-protocol";
+
+import { serializeCanonicalJson } from "./canonical-json.js";
+import { ExecutionRecorderError } from "./errors.js";
+import type {
+  PersistedArtifactCapture,
+  PersistedArtifactSource,
+  PersistedNativeTraceCapture,
+  PersistedRuntimeObservationCapture,
+  PersistedStartRecording,
+} from "./journal-types.js";
+import type {
+  AgentCapture,
+  CaptureOrigin,
+  IdentifierCapture,
+  JsonLdExtensions,
+  JsonValue,
+} from "./types.js";
+
+const RO_CRATE_CONTEXT = "https://w3id.org/ro/crate/1.3/context";
+const WORKFLOW_RUN_CONTEXT =
+  "https://w3id.org/ro/terms/workflow-run/context";
+const RO_CRATE_PROFILE = "https://w3id.org/ro/crate/1.3";
+const DURATION_PROPERTY = "https://jinn.network/terms/durationMs";
+
+const ORIGIN_ROLES = {
+  "producer-observed": {
+    observer: {
+      id: "urn:jinn:execution-recorder:role:producer-observer",
+      name: "Producer observer",
+    },
+  },
+  "executor-reported": {
+    reporter: {
+      id: "urn:jinn:execution-recorder:role:executor-reporter",
+      name: "Executor reporter",
+    },
+    capturedBy: {
+      id: "urn:jinn:execution-recorder:role:capture-agent",
+      name: "Capture agent",
+    },
+  },
+  "external-observed": {
+    observer: {
+      id: "urn:jinn:execution-recorder:role:external-observer",
+      name: "External observer",
+    },
+    capturedBy: {
+      id: "urn:jinn:execution-recorder:role:capture-agent",
+      name: "Capture agent",
+    },
+  },
+} as const;
+
+type Entity = { readonly [key: string]: JsonValue };
+type MutableEntity = { [key: string]: JsonValue };
+
+function compareStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+export interface ExecutionEvidenceMapperInput {
+  readonly recording: PersistedStartRecording;
+  readonly additionalInputs: readonly PersistedArtifactCapture[];
+  readonly runtimeObservations: readonly PersistedRuntimeObservationCapture[];
+  readonly outcome: "completed" | "failed" | "abandoned";
+  readonly endedAt: string;
+  readonly finalizedAt: string;
+  readonly results: readonly PersistedArtifactCapture[];
+  readonly nativeTrace: PersistedNativeTraceCapture;
+}
+
+interface RankedEntity {
+  rank: number;
+  readonly entity: MutableEntity;
+}
+
+function reference(id: string): Entity {
+  return { "@id": id };
+}
+
+function references(ids: readonly string[]): Entity | readonly Entity[] {
+  const values = ids.map(reference);
+  return values.length === 1 ? values[0]! : values;
+}
+
+function digest(source: PersistedArtifactSource): string {
+  return source.digest.slice("sha256:".length);
+}
+
+function identifiers(
+  values: readonly IdentifierCapture[] | undefined,
+): Entity | readonly Entity[] | undefined {
+  if (values === undefined || values.length === 0) return undefined;
+  const mapped = [...values]
+    .sort(
+      (left, right) =>
+        compareStrings(left.propertyId, right.propertyId) ||
+        compareStrings(left.value, right.value),
+    )
+    .map((identifier) => ({
+      "@type": "PropertyValue",
+      propertyID: identifier.propertyId,
+      value: identifier.value,
+    }));
+  return mapped.length === 1 ? mapped[0]! : mapped;
+}
+
+function types(base: readonly string[], additional?: readonly string[]): JsonValue {
+  const combined = [
+    ...base,
+    ...[...(additional ?? [])].sort(compareStrings),
+  ].filter((value, index, values) => values.indexOf(value) === index);
+  return combined.length === 1 ? combined[0]! : combined;
+}
+
+function sourceFields(source: PersistedArtifactSource): MutableEntity {
+  return {
+    contentSize: source.size,
+    encodingFormat: source.mediaType,
+    ...(source.name === undefined ? {} : { name: source.name }),
+    sha256: digest(source),
+  };
+}
+
+class GraphBuilder {
+  readonly entities = new Map<string, RankedEntity>();
+  readonly contentIds = new Set<string>();
+  readonly roles = new Map<string, string>();
+  readonly attributed = new Set<string>();
+  attributionOrdinal = 0;
+
+  add(entity: MutableEntity, rank: number): MutableEntity {
+    const id = entity["@id"];
+    if (typeof id !== "string") {
+      throw new TypeError("Graph entities require an @id.");
+    }
+    const current = this.entities.get(id);
+    if (current) {
+      current.rank = Math.min(current.rank, rank);
+      Object.assign(current.entity, entity);
+      return current.entity;
+    }
+    this.entities.set(id, { rank, entity });
+    return entity;
+  }
+
+  contextualAgent(id: string): void {
+    if (!this.entities.has(id)) {
+      this.add(
+        {
+          "@id": id,
+          "@type": "prov:Agent",
+        },
+        160,
+      );
+    }
+  }
+
+  addOrigin(target: MutableEntity, origin: CaptureOrigin): void {
+    const targetId = target["@id"];
+    if (typeof targetId !== "string" || this.attributed.has(targetId)) return;
+    this.attributed.add(targetId);
+
+    const attributions: { agent: string; role: { id: string; name: string } }[] =
+      [];
+    if (origin.kind === "producer-observed") {
+      attributions.push({
+        agent: origin.observer,
+        role: ORIGIN_ROLES["producer-observed"].observer,
+      });
+    } else if (origin.kind === "executor-reported") {
+      attributions.push({
+        agent: origin.reporter,
+        role: ORIGIN_ROLES["executor-reported"].reporter,
+      });
+      attributions.push({
+        agent: origin.capturedBy,
+        role: ORIGIN_ROLES["executor-reported"].capturedBy,
+      });
+    } else {
+      attributions.push({
+        agent: origin.observer,
+        role: ORIGIN_ROLES["external-observed"].observer,
+      });
+      attributions.push({
+        agent: origin.capturedBy,
+        role: ORIGIN_ROLES["external-observed"].capturedBy,
+      });
+    }
+
+    const attributionIds = attributions.map(({ agent, role }) => {
+      this.contextualAgent(agent);
+      this.roles.set(role.id, role.name);
+      this.attributionOrdinal += 1;
+      const id = `#attribution-${this.attributionOrdinal}`;
+      this.add(
+        {
+          "@id": id,
+          "@type": "prov:Attribution",
+          "prov:agent": reference(agent),
+          "prov:hadRole": reference(role.id),
+        },
+        170,
+      );
+      return id;
+    });
+    target["prov:qualifiedAttribution"] = references(attributionIds);
+  }
+
+  addArtifact(
+    artifact: PersistedArtifactCapture,
+    rank: number,
+  ): string[] {
+    const directMemberIds: string[] = [];
+    const descendantIds: string[] = [];
+    if (artifact.kind !== "file") {
+      for (const member of [...artifact.members].sort((left, right) =>
+        compareStrings(left.entityId, right.entityId),
+      )) {
+        directMemberIds.push(member.entityId);
+        descendantIds.push(...this.addArtifact(member, rank));
+      }
+    }
+    const source =
+      artifact.kind === "file" ? artifact.source : artifact.manifest;
+    const baseTypes =
+      artifact.kind === "file"
+        ? ["File"]
+        : ["File", artifact.kind === "dataset" ? "Dataset" : "Collection"];
+    const mapped = this.add(
+      {
+        ...(artifact.extensions ?? {}),
+        "@id": artifact.entityId,
+        "@type": types(baseTypes, artifact.additionalTypes),
+        ...sourceFields(source),
+        ...(identifiers(artifact.identifiers) === undefined
+          ? {}
+          : { identifier: identifiers(artifact.identifiers)! }),
+        ...(directMemberIds.length === 0
+          ? {}
+          : { hasPart: directMemberIds.map(reference) }),
+      },
+      rank,
+    );
+    this.contentIds.add(artifact.entityId);
+    this.addOrigin(mapped, artifact.origin);
+    return [artifact.entityId, ...descendantIds];
+  }
+
+  addAgent(agent: AgentCapture, rank: number): void {
+    const type =
+      agent.kind === "person"
+        ? ["Person", "prov:Agent"]
+        : agent.kind === "organization"
+          ? ["Organization", "prov:Agent"]
+          : ["SoftwareApplication", "prov:SoftwareAgent"];
+    const mapped = this.add(
+      {
+        ...(agent.extensions ?? {}),
+        "@id": agent.entityId,
+        "@type": type,
+        name: agent.name,
+        ...(agent.softwareVersion === undefined
+          ? {}
+          : { softwareVersion: agent.softwareVersion }),
+        ...(identifiers(agent.identifiers) === undefined
+          ? {}
+          : { identifier: identifiers(agent.identifiers)! }),
+      },
+      rank,
+    );
+    this.addOrigin(mapped, agent.origin);
+  }
+
+  ordered(): readonly Entity[] {
+    for (const [id, name] of this.roles) {
+      this.add(
+        {
+          "@id": id,
+          "@type": "prov:Role",
+          name,
+        },
+        180,
+      );
+    }
+    return [...this.entities.values()]
+      .sort(
+        (left, right) =>
+          left.rank - right.rank ||
+          compareStrings(
+            String(left.entity["@id"]),
+            String(right.entity["@id"]),
+          ),
+      )
+      .map(({ entity }) => entity);
+  }
+}
+
+function status(outcome: ExecutionEvidenceMapperInput["outcome"]): string {
+  switch (outcome) {
+    case "completed":
+      return "https://schema.org/CompletedActionStatus";
+    case "failed":
+      return "https://schema.org/FailedActionStatus";
+    case "abandoned":
+      return ABANDONED_ACTION_STATUS;
+  }
+}
+
+function withExtensions(
+  extensions: JsonLdExtensions | undefined,
+  entity: MutableEntity,
+): MutableEntity {
+  return {
+    ...(extensions ?? {}),
+    ...entity,
+  };
+}
+
+export function buildExecutionEvidence(
+  input: ExecutionEvidenceMapperInput,
+): Uint8Array {
+  const { recording } = input;
+  const builder = new GraphBuilder();
+
+  builder.add(
+    {
+      "@id": "ro-crate-metadata.json",
+      "@type": "CreativeWork",
+      about: reference("./"),
+      conformsTo: reference(RO_CRATE_PROFILE),
+    },
+    0,
+  );
+  builder.add(
+    {
+      "@id": EXECUTION_EVIDENCE_PROFILE_URI,
+      "@type": ["CreativeWork", "Profile"],
+      name: "Jinn Execution Evidence Profile 1.0",
+    },
+    20,
+  );
+  builder.add(
+    {
+      "@id": recording.record.license,
+      "@type": "CreativeWork",
+    },
+    30,
+  );
+
+  const task = builder.add(
+    withExtensions(recording.task.extensions, {
+      "@id": recording.task.entityId,
+      "@type": ["File", "CreativeWork", "prov:Plan"],
+      ...sourceFields(recording.task.source),
+      name: recording.task.name,
+      ...(identifiers(recording.task.identifiers) === undefined
+        ? {}
+        : { identifier: identifiers(recording.task.identifiers)! }),
+    }),
+    40,
+  );
+  builder.contentIds.add(recording.task.entityId);
+  builder.addOrigin(task, recording.task.origin);
+
+  const inputArtifacts = [
+    ...recording.initialInputs,
+    ...input.additionalInputs,
+    ...(recording.repositoryState === undefined
+      ? []
+      : [recording.repositoryState.artifact]),
+  ];
+  const inputIds: string[] = [];
+  const inputContentIds: string[] = [];
+  for (const artifact of [...inputArtifacts].sort((left, right) =>
+    compareStrings(left.entityId, right.entityId),
+  )) {
+    inputIds.push(artifact.entityId);
+    inputContentIds.push(...builder.addArtifact(artifact, 50));
+  }
+  if (recording.repositoryState) {
+    const repository = recording.repositoryState;
+    const mapped = builder.entities.get(repository.artifact.entityId)!.entity;
+    Object.assign(
+      mapped,
+      repository.extensions ?? {},
+      {
+        identifier: identifiers(repository.identifiers)!,
+      },
+      repository.repository === undefined
+        ? {}
+        : { codeRepository: repository.repository },
+    );
+  }
+
+  const runtimePartIds: string[] = [];
+  const runtimeContentIds: string[] = [];
+  const opaqueComponentIds: string[] = [];
+  for (const component of [...recording.runtime.components].sort(
+    (left, right) => {
+      const leftId =
+        left.kind === "controlled"
+          ? left.artifact.entityId
+          : left.descriptor.entityId;
+      const rightId =
+        right.kind === "controlled"
+          ? right.artifact.entityId
+          : right.descriptor.entityId;
+      return compareStrings(leftId, rightId);
+    },
+  )) {
+    if (component.kind === "controlled") {
+      runtimeContentIds.push(...builder.addArtifact(component.artifact, 70));
+      runtimePartIds.push(component.artifact.entityId);
+    } else {
+      runtimeContentIds.push(...builder.addArtifact(component.descriptor, 70));
+      runtimePartIds.push(component.descriptor.entityId);
+      opaqueComponentIds.push(component.component.entityId);
+      const descriptor =
+        builder.entities.get(component.descriptor.entityId)!.entity;
+      descriptor.about = reference(component.component.entityId);
+      builder.add(
+        withExtensions(component.component.extensions, {
+          "@id": component.component.entityId,
+          "@type": "SoftwareApplication",
+          name: component.component.name,
+          ...(component.component.softwareVersion === undefined
+            ? {}
+            : { softwareVersion: component.component.softwareVersion }),
+          ...(component.component.provider === undefined
+            ? {}
+            : { provider: reference(component.component.provider) }),
+        }),
+        160,
+      );
+      if (component.component.provider) {
+        builder.contextualAgent(component.component.provider);
+      }
+    }
+  }
+
+  const environmentIds: string[] = [];
+  const environmentContentIds: string[] = [];
+  const resourceIds: string[] = [];
+  for (const observation of [...input.runtimeObservations].sort(
+    (left, right) => {
+      const leftId =
+        left.kind === "resource"
+          ? left.entityId
+          : left.kind === "environment"
+            ? left.artifact.entityId
+            : left.component.descriptor.entityId;
+      const rightId =
+        right.kind === "resource"
+          ? right.entityId
+          : right.kind === "environment"
+            ? right.artifact.entityId
+            : right.component.descriptor.entityId;
+      return compareStrings(leftId, rightId);
+    },
+  )) {
+    if (observation.kind === "resource") {
+      const mapped = builder.add(
+        withExtensions(observation.extensions, {
+          "@id": observation.entityId,
+          "@type": "PropertyValue",
+          name: observation.name,
+          value: observation.value,
+          ...(observation.propertyId === undefined
+            ? {}
+            : { propertyID: observation.propertyId }),
+          ...(observation.unitCode === undefined
+            ? {}
+            : { unitCode: observation.unitCode }),
+          ...(observation.unitText === undefined
+            ? {}
+            : { unitText: observation.unitText }),
+        }),
+        130,
+      );
+      builder.addOrigin(mapped, observation.origin);
+      resourceIds.push(observation.entityId);
+    } else if (observation.kind === "environment") {
+      environmentContentIds.push(
+        ...builder.addArtifact(observation.artifact, 130),
+      );
+      environmentIds.push(observation.artifact.entityId);
+    } else {
+      const component = observation.component;
+      runtimeContentIds.push(...builder.addArtifact(component.descriptor, 70));
+      runtimePartIds.push(component.descriptor.entityId);
+      opaqueComponentIds.push(component.component.entityId);
+      builder.entities.get(component.descriptor.entityId)!.entity.about =
+        reference(component.component.entityId);
+      builder.add(
+        withExtensions(component.component.extensions, {
+          "@id": component.component.entityId,
+          "@type": "SoftwareApplication",
+          name: component.component.name,
+          ...(component.component.softwareVersion === undefined
+            ? {}
+            : { softwareVersion: component.component.softwareVersion }),
+          ...(component.component.provider === undefined
+            ? {}
+            : { provider: reference(component.component.provider) }),
+        }),
+        160,
+      );
+      if (component.component.provider) {
+        builder.contextualAgent(component.component.provider);
+      }
+    }
+  }
+
+  const runtime = builder.add(
+    withExtensions(recording.runtime.extensions, {
+      "@id": recording.runtime.entityId,
+      "@type": ["File", "SoftwareApplication"],
+      ...sourceFields(recording.runtime.specification),
+      name: recording.runtime.name,
+      ...(recording.runtime.softwareVersion === undefined
+        ? {}
+        : { softwareVersion: recording.runtime.softwareVersion }),
+      hasPart: [...new Set(runtimePartIds)].sort().map(reference),
+      ...(opaqueComponentIds.length === 0
+        ? {}
+        : {
+            softwareRequirements: references(
+              [...new Set(opaqueComponentIds)].sort(),
+            ),
+          }),
+    }),
+    60,
+  );
+  builder.contentIds.add(recording.runtime.entityId);
+  builder.addOrigin(runtime, recording.runtime.origin);
+
+  builder.addAgent(recording.executor, 90);
+
+  const resultIds: string[] = [];
+  const resultContentIds: string[] = [];
+  for (const result of [...input.results].sort((left, right) =>
+    compareStrings(left.entityId, right.entityId),
+  )) {
+    resultIds.push(result.entityId);
+    resultContentIds.push(...builder.addArtifact(result, 100));
+    builder.entities.get(result.entityId)!.entity["prov:wasGeneratedBy"] =
+      reference(recording.executionId);
+  }
+
+  const traceContentIds = builder.addArtifact(input.nativeTrace.artifact, 110);
+  const trace = builder.entities.get(input.nativeTrace.artifact.entityId)!.entity;
+  trace.about = reference(recording.executionId);
+  trace.conformsTo = reference(input.nativeTrace.format.entityId);
+  builder.add(
+    {
+      "@id": input.nativeTrace.format.entityId,
+      "@type": ["CreativeWork", "Profile"],
+      ...(input.nativeTrace.format.name === undefined
+        ? {}
+        : { name: input.nativeTrace.format.name }),
+    },
+    120,
+  );
+
+  const execution = withExtensions(recording.record.executionExtensions, {
+    "@id": recording.executionId,
+    "@type": ["CreateAction", "prov:Activity"],
+    name: recording.record.executionName ?? recording.record.name,
+    actionStatus: reference(status(input.outcome)),
+    agent: reference(recording.executor.entityId),
+    endTime: input.endedAt,
+    ...(environmentIds.length === 0
+      ? {}
+      : { environment: references([...new Set(environmentIds)].sort()) }),
+    instrument: reference(recording.runtime.entityId),
+    ...(identifiers(recording.record.executionIdentifiers) === undefined
+      ? {}
+      : {
+          identifier: identifiers(recording.record.executionIdentifiers)!,
+        }),
+    object: references([recording.task.entityId, ...inputIds]),
+    resourceUsage: references([
+      "#duration-ms",
+      ...[...new Set(resourceIds)].sort(),
+    ]),
+    ...(resultIds.length === 0
+      ? {}
+      : { result: references([...new Set(resultIds)].sort()) }),
+    startTime: recording.startedAt,
+    subjectOf: reference(input.nativeTrace.artifact.entityId),
+  });
+  builder.add(execution, 80);
+
+  builder.addAgent(recording.producer, 140);
+  builder.add(
+    {
+      "@id": "#capture",
+      "@type": "prov:Activity",
+      name: "Execution Recorder capture and sealing",
+      endTime: input.finalizedAt,
+      agent: reference(recording.producer.entityId),
+    },
+    150,
+  );
+  builder.add(
+    {
+      "@id": "#duration-ms",
+      "@type": "PropertyValue",
+      name: "durationMs",
+      propertyID: DURATION_PROPERTY,
+      value: Date.parse(input.endedAt) - Date.parse(recording.startedAt),
+      unitCode: "ms",
+    },
+    150,
+  );
+
+  const contentOrder = [
+    recording.task.entityId,
+    ...inputContentIds,
+    recording.runtime.entityId,
+    ...runtimeContentIds,
+    ...environmentContentIds,
+    ...resultContentIds,
+    ...traceContentIds,
+  ].filter((id, index, values) => values.indexOf(id) === index);
+  for (const id of [...builder.contentIds].sort()) {
+    if (!contentOrder.includes(id)) contentOrder.push(id);
+  }
+
+  builder.add(
+    withExtensions(recording.record.rootExtensions, {
+      "@id": "./",
+      "@type": "Dataset",
+      name: recording.record.name,
+      description: recording.record.description,
+      dateCreated: input.finalizedAt,
+      datePublished: input.finalizedAt,
+      license: reference(recording.record.license),
+      conformsTo: reference(EXECUTION_EVIDENCE_PROFILE_URI),
+      creator: reference(recording.producer.entityId),
+      hasPart: contentOrder.map(reference),
+      mentions: reference(recording.executionId),
+      "prov:wasGeneratedBy": reference("#capture"),
+    }),
+    10,
+  );
+
+  const document = {
+    ...(recording.record.documentExtensions ?? {}),
+    "@context": [
+      RO_CRATE_CONTEXT,
+      WORKFLOW_RUN_CONTEXT,
+      {
+        prov: "http://www.w3.org/ns/prov#",
+        jinn: "https://jinn.network/terms/",
+      },
+    ],
+    "@graph": builder.ordered(),
+  } as JsonValue;
+  const bytes = serializeCanonicalJson(document);
+  const report = validateExecutionEvidence(bytes);
+  if (!report.conforms) {
+    throw new ExecutionRecorderError(
+      "PROTOCOL_CONFORMANCE_FAILED",
+      "Constructed Execution Evidence does not conform to the protocol.",
+      { diagnostics: report.diagnostics },
+    );
+  }
+  return bytes;
+}
