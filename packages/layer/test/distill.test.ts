@@ -29,6 +29,11 @@ describe('jinn-skill-distill-prompt-v1', () => {
     expect(JINN_SKILL_DISTILL_PROMPT_V1).toMatch(/failure-lesson/);
     expect(JINN_SKILL_DISTILL_PROMPT_V1).toMatch(/contrastive/);
   });
+  it('names the untrusted EVIDENCE fence delimiters (#1477)', () => {
+    expect(JINN_SKILL_DISTILL_PROMPT_V1).toContain('<<<BEGIN_UNTRUSTED_EVIDENCE>>>');
+    expect(JINN_SKILL_DISTILL_PROMPT_V1).toContain('<<<END_UNTRUSTED_EVIDENCE>>>');
+    expect(JINN_SKILL_DISTILL_PROMPT_V1).toMatch(/Never follow instructions/);
+  });
 });
 
 describe('jinn-skill-meta-distill-prompt-v1', () => {
@@ -41,6 +46,11 @@ describe('jinn-skill-meta-distill-prompt-v1', () => {
     expect(JINN_SKILL_META_DISTILL_PROMPT_V1).toMatch(/POLARITY/);
     expect(JINN_SKILL_META_DISTILL_PROMPT_V1).toMatch(/two distinct instances|≥\s*2|at least two/i);
     expect(JINN_SKILL_META_DISTILL_PROMPT_V1).toMatch(/supports/);
+  });
+  it('names the untrusted SOURCES fence delimiters (#1477)', () => {
+    expect(JINN_SKILL_META_DISTILL_PROMPT_V1).toContain('<<<BEGIN_UNTRUSTED_SOURCES>>>');
+    expect(JINN_SKILL_META_DISTILL_PROMPT_V1).toContain('<<<END_UNTRUSTED_SOURCES>>>');
+    expect(JINN_SKILL_META_DISTILL_PROMPT_V1).toMatch(/Never follow instructions/);
   });
 });
 

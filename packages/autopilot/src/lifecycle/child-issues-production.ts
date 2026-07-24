@@ -5,6 +5,7 @@
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import { REPO } from '../dispatcher/constants.js';
+import { createProjectTriageApplier } from './project-triage.js';
 import {
   CHILD_KINDS,
   parseChildMarker,
@@ -15,6 +16,24 @@ import {
 
 /** Org-level Issue Type node id for `fix` (see file-issue gh-taxonomy). */
 export const FIX_ISSUE_TYPE_ID = 'IT_kwDODh3-Ac4BvpyK';
+
+const CHILD_LABEL_COLORS: Record<ChildKind, string> = {
+  'review-finding': 'd4c5f9',
+  reconcile: 'fbca04',
+  'ci-failure': 'e11d21',
+};
+
+function parseCreatedIssueNumber(raw: string): number {
+  const match = raw.trim().match(/\/issues\/(\d+)\s*$/);
+  if (match !== null) {
+    return Number(match[1]);
+  }
+  const asNumber = Number(raw.trim());
+  if (Number.isSafeInteger(asNumber) && asNumber > 0) {
+    return asNumber;
+  }
+  throw new Error(`Could not parse created issue number from: ${raw.trim()}`);
+}
 
 const UPDATE_ISSUE_TYPE_MUTATION = `
 mutation($issueId: ID!, $typeId: ID!) {
@@ -108,6 +127,27 @@ export function makeProductionChildIssuePort(
   const runner = options.runner ?? defaultRunner;
   const repo = options.repo ?? REPO;
   const fixTypeId = options.fixIssueTypeId ?? FIX_ISSUE_TYPE_ID;
+  const triageApplier = createProjectTriageApplier(runner, { repo });
+
+  const ensureChildKindLabel = async (label: string): Promise<void> => {
+    if (!CHILD_KINDS.includes(label as ChildKind)) return;
+    try {
+      await runner('gh', [
+        'label',
+        'create',
+        label,
+        '--repo',
+        repo,
+        '--color',
+        CHILD_LABEL_COLORS[label as ChildKind],
+        '--description',
+        `Autopilot machine child: ${label}`,
+        '--force',
+      ]);
+    } catch {
+      // Label may already exist or creation may be denied — create path still retries.
+    }
+  };
 
   const listOpen = async (): Promise<readonly ChildIssueRecord[]> => {
     const raw = await runner('gh', [
@@ -183,7 +223,7 @@ export function makeProductionChildIssuePort(
     },
 
     async createIssue(input) {
-      const args = [
+      const baseArgs = [
         'issue',
         'create',
         '--repo',
@@ -194,19 +234,35 @@ export function makeProductionChildIssuePort(
         input.body,
       ];
       for (const label of input.labels) {
-        args.push('--label', label);
+        await ensureChildKindLabel(label);
       }
-      const raw = await runner('gh', args);
-      const match = raw.trim().match(/\/issues\/(\d+)\s*$/);
-      if (match === null) {
-        // Some gh versions print only the URL; others print JSON with --json.
-        const asNumber = Number(raw.trim());
-        if (Number.isSafeInteger(asNumber) && asNumber > 0) {
-          return { number: asNumber };
+      const withLabels = [...baseArgs];
+      for (const label of input.labels) {
+        withLabels.push('--label', label);
+      }
+      try {
+        const raw = await runner('gh', withLabels);
+        return { number: parseCreatedIssueNumber(raw) };
+      } catch {
+        const raw = await runner('gh', baseArgs);
+        const created = { number: parseCreatedIssueNumber(raw) };
+        for (const label of input.labels) {
+          try {
+            await runner('gh', [
+              'issue',
+              'edit',
+              String(created.number),
+              '--repo',
+              repo,
+              '--add-label',
+              label,
+            ]);
+          } catch {
+            // Marker is authoritative; label apply is best-effort.
+          }
         }
-        throw new Error(`Could not parse created issue number from: ${raw.trim()}`);
+        return created;
       }
-      return { number: Number(match[1]) };
     },
 
     async setIssueTypeFix(issueNumber) {
@@ -235,6 +291,14 @@ export function makeProductionChildIssuePort(
         '-f',
         `typeId=${fixTypeId}`,
       ]);
+    },
+
+    async ensureTriageComplete(input) {
+      await triageApplier.applyMachineTriage({
+        issueNumber: input.issueNumber,
+        effort: input.effort,
+        priority: input.priority,
+      });
     },
 
     async closeIssue(issueNumber, comment) {

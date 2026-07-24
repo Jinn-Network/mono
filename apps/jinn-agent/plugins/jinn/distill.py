@@ -644,8 +644,14 @@ def _drain_events(state: Dict[str, Any]) -> bool:
         text = ""
         if path is not None and path.exists():
             raw = path.read_bytes()
-            text = raw[state["offset"] :].decode("utf-8", errors="replace")
-            state["offset"] = len(raw)
+            chunk = raw[state["offset"] :]
+            last_newline = chunk.rfind(b"\n")
+            if last_newline == -1:
+                text = ""
+            else:
+                consumed = last_newline + 1
+                state["offset"] += consumed
+                text = chunk[:consumed].decode("utf-8", errors="replace")
         done_outcome: Optional[str] = None
         for line in text.split("\n"):
             line = line.strip()

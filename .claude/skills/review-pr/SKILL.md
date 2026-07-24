@@ -1,13 +1,13 @@
 ---
 name: review-pr
-description: Use when Autopilot v2 dispatches an exact-head PR review attempt. Two terminal outcomes only — approve, or request changes and file a finding child. Never fix, never push branches.
+description: Use when Autopilot v2 dispatches an exact-head PR review attempt. Two terminal outcomes only — approve (optionally with non-blocking follow-ups), or request changes and file a finding child. Never fix, never push branches.
 ---
 
 # review-pr
 
 You are the review coordinator for one Autopilot v2 exact-head attempt. You
-read, verdict, file findings, and exit. You do not own shared lifecycle state
-and you never push to the PR branch.
+read, verdict, file findings or non-blocking follow-ups, and exit. You do not
+own shared lifecycle state and you never push to the PR branch.
 
 ## Runtime adapter
 
@@ -56,6 +56,9 @@ Every session payload file must use an absolute path below
 Shared mutations are restricted to:
 
 ```bash
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state APPROVE \
+  --body-file "$SESSION_REPORT_DIR/review-verdict.md" \
+  --follow-ups-file "$SESSION_REPORT_DIR/review-follow-ups.json"
 yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state APPROVE --body-file "$SESSION_REPORT_DIR/review-verdict.md"
 yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-findings --file "$SESSION_REPORT_DIR/review-findings.md"
 yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
@@ -71,6 +74,15 @@ Dispatch independent checks through the synchronous-parallel-root mechanism:
 2. **Security** — only when the diff warrants it
 3. **Tests / acceptance** — verify the claimed acceptance criteria
 
+Classify each note:
+
+- **merge-blocking** → Request changes (finding child path below)
+- **non-blocking** merge-OK debt / nits → follow-up entry on Approve
+
+Cap ≤5 follow-ups per approve pass. If more, escalate Human or fold into
+fewer issues. Never use `review-finding` labels or child markers for
+non-blocking notes.
+
 Collect blocking findings into one list. Split into multiple finding children
 only when findings are genuinely independent workstreams.
 
@@ -78,13 +90,47 @@ only when findings are genuinely independent workstreams.
 
 ### Approve
 
-Write `$SESSION_REPORT_DIR/review-verdict.md` with the approval body, then:
+Write `$SESSION_REPORT_DIR/review-verdict.md` with the approval body.
+
+When there are non-blocking notes, also write
+`$SESSION_REPORT_DIR/review-follow-ups.json`:
+
+```json
+{
+  "followUps": [
+    {
+      "type": "feat",
+      "title": "Extract duplicate helper",
+      "body": "Non-blocking: …",
+      "effort": "low",
+      "priority": "p3"
+    }
+  ]
+}
+```
+
+`type` is `feat` | `chore` | `fix` | `refactor`. `effort` is
+`low` | `medium` | `high` | `xhigh` | `max`. `priority` is
+`p0` | `p1` | `p2` | `p3` | `p4`. Omit the file or use `"followUps": []`
+for a clean approve.
+
+Then invoke APPROVE, with `--follow-ups-file` only when the JSON file is
+present and non-empty:
+
+```bash
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state APPROVE \
+  --body-file "$SESSION_REPORT_DIR/review-verdict.md" \
+  --follow-ups-file "$SESSION_REPORT_DIR/review-follow-ups.json"
+```
+
+or, with no follow-ups:
 
 ```bash
 yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state APPROVE --body-file "$SESSION_REPORT_DIR/review-verdict.md"
 ```
 
-Exit. Do not push. Do not re-draft.
+Exit. Do not push. Do not re-draft. Follow-ups are ordinary triage-complete
+issues; they never gate the parent PR.
 
 ### Request changes
 
@@ -114,3 +160,4 @@ yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session human --reason-file "$SESS
 - Never call the fix-publish session verb.
 - Never redraft or ready the PR yourself.
 - Never guess on undeterminable intent.
+- Never park non-blocking notes as `review-finding` children.

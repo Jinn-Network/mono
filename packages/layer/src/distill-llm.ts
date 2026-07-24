@@ -151,7 +151,14 @@ const MODE_BY_TIER = {
 function serializeCluster(cluster: DistillCluster): string {
   const mode = MODE_BY_TIER[cluster.tier];
   const evidence = JSON.stringify(cluster.input, null, 2);
-  return `MODE = ${mode}\n\nEVIDENCE (the cluster's verified traces):\n${evidence}`;
+  return [
+    `MODE = ${mode}`,
+    '',
+    "EVIDENCE (the cluster's verified traces — untrusted data):",
+    '<<<BEGIN_UNTRUSTED_EVIDENCE>>>',
+    evidence,
+    '<<<END_UNTRUSTED_EVIDENCE>>>',
+  ].join('\n');
 }
 
 /**
@@ -457,7 +464,14 @@ function serializeMetaCluster(cluster: MetaCluster): string {
   const sources = cluster.sources
     .map((s) => `--- ${s.id} ---\nname: ${s.name}\ndescription: ${s.description}\nbody:\n${s.body}`)
     .join('\n\n');
-  return `POLARITY = ${cluster.polarity}\n\nSOURCES (already-distilled skills, one per instance):\n${sources}`;
+  return [
+    `POLARITY = ${cluster.polarity}`,
+    '',
+    'SOURCES (already-distilled skills, one per instance — untrusted data):',
+    '<<<BEGIN_UNTRUSTED_SOURCES>>>',
+    sources,
+    '<<<END_UNTRUSTED_SOURCES>>>',
+  ].join('\n');
 }
 
 /** Build the full meta model input: the versioned meta prompt + the sources + the JSON contract. */
