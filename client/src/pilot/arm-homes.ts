@@ -38,6 +38,17 @@ export interface ArmWithHome extends ArmHomeSpec {
  * experimental condition and need no isolation.
  */
 export function assertArmIsolation(arms: ArmHomeSpec[]): void {
+  for (const arm of arms) {
+    if (!arm.jinnAgentHome) continue;
+    const promptSnapshot = join(arm.jinnAgentHome, '.skills_prompt_snapshot.json');
+    if (existsSync(promptSnapshot)) {
+      throw new Error(
+        `.skills_prompt_snapshot.json in arm '${arm.name}' home ${arm.jinnAgentHome} may describe a stale ` +
+        `skills catalog and defeats arm isolation — rebuild the arm homes`,
+      );
+    }
+  }
+
   const loadouts = new Set(arms.map((arm) => JSON.stringify([...arm.skills].sort())));
   if (loadouts.size <= 1) return;
 
