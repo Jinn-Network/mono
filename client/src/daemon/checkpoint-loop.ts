@@ -29,6 +29,8 @@ import type { FleetStateStore } from '../earning/store.js';
 import type { JinnOnchainNetwork } from '../earning/viem-clients.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 import { isStakedLikeServiceStep } from '../earning/types.js';
+import type { Store } from '../store/store.js';
+import { recordLoopTick } from './loop-heartbeat.js';
 
 export type CheckpointLoopWriter = (opts: {
   stakingProxy: `0x${string}`;
@@ -41,6 +43,8 @@ export interface CheckpointLoopConfig {
   chain: JinnOnchainNetwork;
   /** Sends bare `checkpoint()` to the given staking proxy. */
   writeCheckpoint: CheckpointLoopWriter;
+  /** Daemon observability store used by the loop watchdog. */
+  jinnStore?: Store;
 }
 
 export class CheckpointLoop {
@@ -93,6 +97,7 @@ export class CheckpointLoop {
           err instanceof Error ? err.message : err,
         );
       }
+      if (this.config.jinnStore) recordLoopTick(this.config.jinnStore, 'checkpoint');
       await new Promise<void>(r => setTimeout(r, this.config.intervalMs));
     }
   }

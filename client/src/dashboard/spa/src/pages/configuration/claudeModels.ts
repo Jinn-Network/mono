@@ -9,12 +9,20 @@
  * Harness because Claude Code and Codex use different model families.
  */
 import { canonicalHarnessName, CODEX_HARNESS, HERMES_AGENT_HARNESS } from './harnessNames.js';
+import type { ProviderRef } from '../../../../../harnesses/provider-ref.js';
 
 export interface LearnerModelOption {
   /** Friendly tier label shown in the dropdown. */
   label: string;
   /** Pinned model id persisted to config. */
   id: string;
+  /**
+   * Provider route for this entry. First-class on Hermes catalog entries (issue
+   * #1243) so a non-OpenRouter model routes through its declared provider
+   * instead of relying on `<org>/<model>` id-shape inference at runtime. Claude
+   * Code / Codex options leave this unset (their provider is the harness).
+   */
+  provider?: ProviderRef;
 }
 
 export const CLAUDE_MODELS: readonly LearnerModelOption[] = [
@@ -47,15 +55,15 @@ export const CODEX_MODELS: readonly LearnerModelOption[] = [
 // an older config) still work — `resolveModelOption` surfaces them as
 // `Custom (<id>)`.
 export const HERMES_MODELS: readonly LearnerModelOption[] = [
-  { label: 'Claude Opus 4.7 (OpenRouter)',   id: 'anthropic/claude-opus-4.7'    },
-  { label: 'Claude Sonnet 4.6 (OpenRouter)', id: 'anthropic/claude-sonnet-4.6'  },
-  { label: 'Hy3 Preview',                    id: 'tencent/hy3-preview'          },
-  { label: 'DeepSeek V4 Pro',                id: 'deepseek/deepseek-v4-pro'     },
-  { label: 'DeepSeek V4 Flash',              id: 'deepseek/deepseek-v4-flash'   },
-  { label: 'Gemini 3.1 Flash Lite',          id: 'google/gemini-3.1-flash-lite' },
-  { label: 'Kimi K2.6',                      id: 'moonshotai/kimi-k2.6'         },
-  { label: 'Owl Alpha',                      id: 'openrouter/owl-alpha'         },
-  { label: 'MiniMax M2.7',                   id: 'minimax/minimax-m2.7'         },
+  { label: 'Claude Opus 4.7 (OpenRouter)',   id: 'anthropic/claude-opus-4.7',    provider: 'openrouter' },
+  { label: 'Claude Sonnet 4.6 (OpenRouter)', id: 'anthropic/claude-sonnet-4.6',  provider: 'openrouter' },
+  { label: 'Hy3 Preview',                    id: 'tencent/hy3-preview',          provider: 'openrouter' },
+  { label: 'DeepSeek V4 Pro',                id: 'deepseek/deepseek-v4-pro',     provider: 'openrouter' },
+  { label: 'DeepSeek V4 Flash',              id: 'deepseek/deepseek-v4-flash',   provider: 'openrouter' },
+  { label: 'Gemini 3.1 Flash Lite',          id: 'google/gemini-3.1-flash-lite', provider: 'openrouter' },
+  { label: 'Kimi K2.6',                      id: 'moonshotai/kimi-k2.6',         provider: 'openrouter' },
+  { label: 'Owl Alpha',                      id: 'openrouter/owl-alpha',         provider: 'openrouter' },
+  { label: 'MiniMax M2.7',                   id: 'minimax/minimax-m2.7',         provider: 'openrouter' },
 ] as const;
 
 function isCodexHarness(harness: string | undefined): boolean {
@@ -82,6 +90,22 @@ export interface ResolvedModelOption {
   label: string;
   /** Whether the id is outside the canonical set. */
   isCustom: boolean;
+}
+
+/**
+ * Provider route declared for a model id in the (harness-scoped) catalog, or
+ * `undefined` when the matched entry declares none. Used by the join flow to
+ * persist the selected model's provider first-class (issue #1243) so the
+ * adapter routes through it instead of inferring from the id shape.
+ */
+export function providerForModel(id: string, harness?: string): ProviderRef | undefined {
+  const local = modelOptionsForHarness(harness).find((m) => m.id === id);
+  if (local) return local.provider;
+  const anywhere =
+    CLAUDE_MODELS.find((m) => m.id === id)
+    ?? CODEX_MODELS.find((m) => m.id === id)
+    ?? HERMES_MODELS.find((m) => m.id === id);
+  return anywhere?.provider;
 }
 
 export function resolveModelOption(id: string, harness?: string): ResolvedModelOption {

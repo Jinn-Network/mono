@@ -21,6 +21,13 @@ export interface TaskSessionInputs {
   solverType?: string;
   /** Optional per-SolverNet model override. */
   model?: string;
+  /**
+   * Optional per-SolverNet provider route for {@link model} (issue #1243).
+   * A named provider (string) or a custom OpenAI-compatible endpoint object.
+   * The Hermes adapter prefers this over its daemon-global provider and over
+   * legacy id-shape inference.
+   */
+  provider?: import('../../provider-ref.js').ProviderRef;
   /** Optional per-SolverNet Claude model override. Deprecated; use model. */
   claudeModel?: string;
   /** Operator-private impl-state directory; passed to the plugin via env IMPL_STATE_DIR */

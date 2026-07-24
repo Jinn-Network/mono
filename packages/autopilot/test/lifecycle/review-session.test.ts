@@ -538,4 +538,123 @@ describe('review session protocol', () => {
     expect(h.events).not.toContain(`native:APPROVE:${HEAD}`);
   });
 
+  it('approves and files follow-ups before terminal publish without child labels', async () => {
+    const h = harness({ draft: true });
+    const followUpsFiled: unknown[] = [];
+    h.port.fileReviewFollowUps = async (input) => {
+      followUpsFiled.push(input);
+      h.events.push('follow-ups:filed');
+      return [{ number: 501, created: true, index: 0 }];
+    };
+
+    const result = await h.protocol.reviewVerdict(
+      h.manifest,
+      'APPROVE',
+      'LGTM',
+      [{
+        type: 'chore',
+        title: 'Rename helper',
+        body: 'Non-blocking',
+        effort: 'low',
+        priority: 'p3',
+      }],
+    );
+
+    expect(result).toMatchObject({
+      status: 'approved',
+      head: HEAD,
+      followUpNumbers: [501],
+    });
+    expect(followUpsFiled).toHaveLength(1);
+    expect(h.events.indexOf('follow-ups:filed'))
+      .toBeLessThan(h.events.indexOf('claim:terminal-approved'));
+    expect(h.native.some((review) => review.body.includes('#501'))).toBe(true);
+    expect(h.events.some((event) => event.startsWith('child:'))).toBe(false);
+  });
+
+  it('rejects follow-ups on REQUEST_CHANGES verdict', async () => {
+    const h = harness();
+    await expect(h.protocol.reviewVerdict(
+      h.manifest,
+      'REQUEST_CHANGES',
+      'needs work',
+      [{ type: 'fix', title: 'x', body: 'y', effort: 'low', priority: 'p1' }],
+    )).rejects.toThrow(/only valid with APPROVE/i);
+  });
+
+  it('retries approve with same head reuse follow-ups then re-confirms APPROVE', async () => {
+    const h = harness({ draft: true });
+    let fileCalls = 0;
+    h.port.fileReviewFollowUps = async () => {
+      fileCalls += 1;
+      h.events.push('follow-ups:filed');
+      return [{ number: 502, created: fileCalls === 1, index: 0 }];
+    };
+    const entries = [{
+      type: 'feat' as const,
+      title: 'Debt',
+      body: 'note',
+      effort: 'medium' as const,
+      priority: 'p2' as const,
+    }];
+
+    await expect(h.protocol.reviewVerdict(h.manifest, 'APPROVE', 'LGTM', entries))
+      .resolves.toMatchObject({ status: 'approved', followUpNumbers: [502] });
+
+    const second = harness({
+      state: 'terminal-approved',
+      verdictState: 'APPROVE',
+      draft: false,
+      nativeExists: true,
+    });
+    second.port.fileReviewFollowUps = async () => {
+      fileCalls += 1;
+      second.events.push('follow-ups:filed');
+      return [{ number: 502, created: false, index: 0 }];
+    };
+
+    await expect(second.protocol.reviewVerdict(
+      second.manifest,
+      'APPROVE',
+      'LGTM again',
+      entries,
+    )).resolves.toMatchObject({
+      status: 'approved',
+      followUpNumbers: [502],
+    });
+    expect(fileCalls).toBe(2);
+    expect(second.events).toContain('follow-ups:filed');
+  });
+
+  it('throws when follow-ups are supplied without a filing port', async () => {
+    const h = harness({ draft: true });
+    await expect(h.protocol.reviewVerdict(
+      h.manifest,
+      'APPROVE',
+      'LGTM',
+      [{ type: 'chore', title: 'x', body: 'y', effort: 'low', priority: 'p3' }],
+    )).rejects.toThrow(/follow-up filing port/i);
+  });
+
+  it('approves without filing when follow-ups are empty or omitted', async () => {
+    let filed = false;
+    const omitted = harness({ draft: true });
+    omitted.port.fileReviewFollowUps = async () => {
+      filed = true;
+      return [];
+    };
+    await expect(omitted.protocol.reviewVerdict(omitted.manifest, 'APPROVE', 'Clean.'))
+      .resolves.toMatchObject({ status: 'approved', head: HEAD });
+    expect(filed).toBe(false);
+
+    const empty = harness({ draft: true });
+    empty.port.fileReviewFollowUps = async () => {
+      filed = true;
+      return [];
+    };
+    await expect(empty.protocol.reviewVerdict(empty.manifest, 'APPROVE', 'Clean.', []))
+      .resolves.toMatchObject({ status: 'approved', head: HEAD });
+    expect(filed).toBe(false);
+  });
+
 });

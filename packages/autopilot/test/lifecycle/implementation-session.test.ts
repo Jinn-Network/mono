@@ -79,8 +79,12 @@ function harness(options: {
   latestClaimOid?: GitOid;
   realTreeChange?: boolean;
   draft?: boolean;
+  manifestOverrides?: Partial<AttemptManifest>;
 } = {}) {
-  let currentManifest = manifest(options.expectedHead ?? CLAIM);
+  let currentManifest = {
+    ...manifest(options.expectedHead ?? CLAIM),
+    ...options.manifestOverrides,
+  };
   let localHead = options.localHead ?? WORK;
   let authority: ImplementationAuthority = {
     remoteHead: options.remoteHead ?? currentManifest.expectedHead as GitOid,
@@ -91,7 +95,9 @@ function harness(options: {
   const comments = new Set<string>();
   let draft = options.draft ?? true;
   let labels = new Set(['engine:review']);
-  let body = `Closes #42\n\n<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->`;
+  let body = options.manifestOverrides?.issueNumber === 2069
+    ? 'Closes #2044\n\n<!-- jinn-autopilot:v2 issue=2044 branch=autopilot/2044 -->'
+    : `Closes #42\n\n<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->`;
   let completeCommits = 0;
 
   const port: ImplementationSessionPort = {
@@ -163,10 +169,10 @@ function harness(options: {
       return COMPLETE;
     },
     readPullRequest: async () => ({
-      number: 84,
+      number: currentManifest.prNumber!,
       head: authority.remoteHead,
-      headRefName: 'autopilot/42',
-      baseRefName: 'next',
+      headRefName: currentManifest.branch,
+      baseRefName: currentManifest.targetBase,
       draft,
       labels: [...labels],
       body,
@@ -306,6 +312,77 @@ describe('implementation session protocol', () => {
     });
     expect(h.manifest.expectedHead).toBe(CLAIM);
     expect(h.events).toEqual([]);
+  });
+
+  it('checkpoints a fix-phase child claim on a non-draft parent PR', async () => {
+    const h = harness({
+      draft: false,
+      latestClaim: claim({
+        phase: 'fix',
+        issueNumber: 2069,
+        prNumber: 2065,
+        expectedHead: CLAIM,
+      }),
+      manifestOverrides: {
+        issueNumber: 2069,
+        prNumber: 2065,
+        branch: 'autopilot/2044',
+        subject: 'issue-2069',
+      },
+    });
+
+    await expect(h.protocol.checkpoint(h.manifest)).resolves.toEqual({
+      status: 'published',
+      head: WORK,
+    });
+    expect(h.events).toEqual([
+      `push:${CLAIM}->${WORK}`,
+      `manifest:${CLAIM}->${WORK}`,
+    ]);
+  });
+
+  it('rejects checkpoint when a fix-phase child claim belongs to another attempt', async () => {
+    const h = harness({
+      latestClaim: claim({
+        phase: 'fix',
+        issueNumber: 2069,
+        prNumber: 2065,
+        attempt: 'other-attempt',
+      }),
+      manifestOverrides: {
+        issueNumber: 2069,
+        prNumber: 2065,
+        branch: 'autopilot/2044',
+      },
+    });
+
+    await expect(h.protocol.checkpoint(h.manifest))
+      .rejects.toThrow(/no longer owns the latest claim/i);
+  });
+
+  it('escalates a fix-phase child claim to Human without requiring the child-issue PR marker', async () => {
+    const h = harness({
+      localHead: CLAIM,
+      realTreeChange: false,
+      draft: false,
+      latestClaim: claim({
+        phase: 'fix',
+        issueNumber: 2069,
+        prNumber: 2065,
+      }),
+      manifestOverrides: {
+        issueNumber: 2069,
+        prNumber: 2065,
+        branch: 'autopilot/2044',
+      },
+    });
+    h.labels.delete('engine:review');
+
+    await expect(
+      h.protocol.human(h.manifest, 'Publication blocked by session authority gate.'),
+    ).resolves.toEqual({ status: 'human', head: CLAIM });
+    expect(h.labels).toContain('review:needs-human');
+    expect(h.comments.size).toBe(1);
   });
 
   it('pushes a durable completion marker and makes ready the final mutation', async () => {

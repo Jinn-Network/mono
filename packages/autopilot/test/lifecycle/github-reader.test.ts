@@ -12,6 +12,7 @@ import {
 const OPEN_HEAD = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const MERGED_HEAD = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const REVIEW_CLAIM_GLOB = 'refs/jinn-autopilot/review-claims/v1/*';
+const CI_RERUN_REF_GLOB = 'refs/jinn-autopilot/ci-reruns/v1/pr-*';
 const AUTOPILOT_BRANCH_GLOB = 'refs/heads/autopilot/*';
 
 /**
@@ -1365,6 +1366,7 @@ describe('GhLifecycleReader', () => {
         const rest = args.slice(2);
         gitCalls.push(rest);
         if (rest[0] === 'ls-remote' && rest[2] === REVIEW_CLAIM_GLOB) return `${oid}\t${ref}\n`;
+        if (rest[0] === 'ls-remote' && rest[2] === CI_RERUN_REF_GLOB) return '';
         if (rest[0] === 'cat-file' && rest[1] === '-e') return ''; // object already present locally
         if (rest[0] === 'cat-file' && rest[1] === '-p') return payload;
         throw new Error(`unexpected git call: ${rest.join(' ')}`);
@@ -1392,6 +1394,7 @@ describe('GhLifecycleReader', () => {
         if (rest[0] === 'ls-remote' && rest[2] === REVIEW_CLAIM_GLOB) {
           return `${currentOid}\t${ref}\n`;
         }
+        if (rest[0] === 'ls-remote' && rest[2] === CI_RERUN_REF_GLOB) return '';
         if (rest[0] === 'cat-file' && rest[1] === '-e') {
           if (localObjects.has(rest[2] ?? '')) return '';
           throw new Error('object not found locally');

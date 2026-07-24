@@ -389,10 +389,8 @@ describe('CreatorLoop — swe-rebench-v2 last_task_id ledger (#802)', () => {
   let stateDir: string;
   beforeEach(() => {
     stateDir = mkdtempSync(join(tmpdir(), 'jinn-creator-802-'));
-    process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] = stateDir;
   });
   afterEach(() => {
-    delete process.env['JINN_SWE_REBENCH_V2_STATE_DIR'];
     rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -432,7 +430,7 @@ describe('CreatorLoop — swe-rebench-v2 last_task_id ledger (#802)', () => {
         spec: { instance_id: 'org__repo-1' },
       },
     ];
-    const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(tasks)], store);
+    const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(tasks)], store, undefined, stateDir);
 
     const postedIds = await loop.tick();
     expect(postedIds).toHaveLength(1);
@@ -459,7 +457,7 @@ describe('CreatorLoop — swe-rebench-v2 last_task_id ledger (#802)', () => {
         spec: { instance_id: 'x' },
       },
     ];
-    const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(tasks)], store);
+    const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(tasks)], store, undefined, stateDir);
 
     await loop.tick();
     await Promise.all(writes);

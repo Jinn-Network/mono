@@ -94,7 +94,7 @@ jobs:
       # deltas against it instead of a cold CDN fetch (a genuinely bumped
       # onnxruntime version would still re-fetch, which is unavoidable).
       - name: Cache client node_modules (holds onnxruntime-node prebuilt binary)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: client/node_modules
           key: ${{ runner.os }}-client-nodemodules-${{ hashFiles('client/yarn.lock') }}
