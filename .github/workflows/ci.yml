@@ -52,11 +52,11 @@ jobs:
       # the live Hyperliquid testnet. Without it, transient 429/503/ECONNREFUSED
       # from that endpoint red-gate unrelated PRs (it flaked 4 PRs on 2026-06-03).
       # The test file documents this var as the offline-CI gate.
-      - run: yarn test
+      # Unit tests must not inherit agent credentials. Remove them rather than
+      # assigning empty values, which would override explicit test env files.
+      - run: env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY yarn test
         env:
           SKIP_HL_TESTS: '1'
-          CLAUDE_CODE_OAUTH_TOKEN: ''
-          ANTHROPIC_API_KEY: ''
       - run: yarn build
 
   pack-smoke:
