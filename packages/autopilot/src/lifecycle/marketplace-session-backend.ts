@@ -25,6 +25,8 @@ const DEFAULT_CLI = 'jinn';
 export const MARKETPLACE_CLAIM_WINDOW_MS = 15 * 60 * 1000;
 export const MARKETPLACE_ADOPTION_RESERVE_MS = 30 * 60 * 1000;
 export const MARKETPLACE_AGENT_SOFT_DEADLINE_MS = 60 * 60 * 1000;
+export const MARKETPLACE_EVALUATOR_SOFT_DEADLINE_MS = 60 * 60 * 1000;
+export const MARKETPLACE_VERDICT_ADOPTION_RESERVE_MS = 30 * 60 * 1000;
 const PRE_FLIGHT_ATTEMPT =
   '00000000-0000-4000-8000-000000000001';
 
@@ -79,7 +81,10 @@ function machineRequest(
   }
   const claimWindowEnd = createdAt + MARKETPLACE_CLAIM_WINDOW_MS;
   const submissionDeadline =
-    agentDeadline + MARKETPLACE_ADOPTION_RESERVE_MS;
+    agentDeadline
+    + MARKETPLACE_ADOPTION_RESERVE_MS
+    + MARKETPLACE_EVALUATOR_SOFT_DEADLINE_MS
+    + MARKETPLACE_VERDICT_ADOPTION_RESERVE_MS;
   if (agentDeadline <= claimWindowEnd) {
     throw new Error(
       'Marketplace session deadline must follow the claim window',
@@ -159,7 +164,12 @@ function submissionDeadline(deadline: string): string {
   if (!Number.isFinite(parsed)) {
     throw new Error('Marketplace session deadline is invalid');
   }
-  return new Date(parsed + MARKETPLACE_ADOPTION_RESERVE_MS).toISOString();
+  return new Date(
+    parsed
+    + MARKETPLACE_ADOPTION_RESERVE_MS
+    + MARKETPLACE_EVALUATOR_SOFT_DEADLINE_MS
+    + MARKETPLACE_VERDICT_ADOPTION_RESERVE_MS,
+  ).toISOString();
 }
 
 function immutableJson(path: string, value: unknown): void {

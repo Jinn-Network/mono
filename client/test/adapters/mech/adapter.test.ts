@@ -2500,6 +2500,55 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('leaves Autopilot delivery settlement exclusively to the TaskEngine adoption gate', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
+      requestId: REQUEST_ID,
+      deliveryDataHex: TASK_CID_DIGEST,
+      mechAddress: TEST_CONFIG.safeAddress,
+    }]);
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({
+      schemaVersion: 'jinn.execution.v1',
+      role: 'solution',
+      signature: { hash: `0x${'ef'.repeat(32)}` },
+    });
+
+    const adapter = new MechAdapter(
+      TEST_CONFIG,
+      makeConfigStore() as never,
+    );
+    (adapter as any).taskRuns = {
+      getByRequestId: vi.fn().mockReturnValue({
+        solverType: 'jinn-repo.v1',
+        task: {
+          contractId: 'jinn-repo',
+          contractVersion: 'v1',
+          spec: { source: 'autopilot-session' },
+        },
+      }),
+    };
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber =
+      vi.fn().mockResolvedValue(101n);
+    (adapter as any).publicClient.getLogs =
+      vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+    (adapter as any).deliveryBlockCursor = 100n;
+    (adapter as any).originalStates.set(
+      REQUEST_ID,
+      { id: 'autopilot-task', description: 'test' },
+    );
+
+    const iterator = adapter.watchForDeliveries()[Symbol.asyncIterator]();
+    const { value } = await iterator.next();
+
+    expect(claimDelivery).not.toHaveBeenCalled();
+    expect(value).toMatchObject({ requestId: REQUEST_ID });
+    await adapter.stop();
+  });
+
   it('watchForDeliveries still claims recovery deliveries while the submission deadline remains open', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-05-18T12:30:00.000Z'));

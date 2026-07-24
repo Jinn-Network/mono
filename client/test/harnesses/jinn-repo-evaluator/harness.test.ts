@@ -401,6 +401,84 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
     });
   });
 
+  it('refuses an Autopilot claim when immutable verification is unavailable', async () => {
+    const { task } = autopilotHarnessFixtures();
+    const h = new JinnRepoEvaluatorHarness({
+      immutableMechanicalVerifier: {
+        isReady: vi.fn().mockResolvedValue({
+          ready: false,
+          reason: 'Docker immutable verifier unavailable',
+        }),
+        verify: vi.fn(),
+      },
+      semanticAgentRunnerResolver: {
+        resolve: vi.fn().mockReturnValue({
+          provider: 'anthropic',
+          runner: { run: vi.fn() },
+        }),
+      },
+    });
+
+    await expect(h.canAttempt(task)).resolves.toEqual({
+      ok: false,
+      reason: 'Docker immutable verifier unavailable',
+    });
+  });
+
+  it('refuses an Autopilot claim when its exact semantic runtime is unavailable', async () => {
+    const { task } = autopilotHarnessFixtures();
+    const h = new JinnRepoEvaluatorHarness({
+      immutableMechanicalVerifier: {
+        isReady: vi.fn().mockResolvedValue({ ready: true }),
+        verify: vi.fn(),
+      },
+      semanticAgentRunnerResolver: {
+        resolve: vi.fn().mockReturnValue({
+          provider: 'anthropic',
+          runner: {
+            isReady: vi.fn().mockResolvedValue({
+              ready: false,
+              reason: 'Claude semantic evaluator is not authenticated',
+            }),
+            run: vi.fn(),
+          },
+        }),
+      },
+    });
+
+    await expect(h.canAttempt(task)).resolves.toEqual({
+      ok: false,
+      reason: 'Claude semantic evaluator is not authenticated',
+    });
+  });
+
+  it('caches immutable and semantic readiness across repeated claim checks', async () => {
+    const { task } = autopilotHarnessFixtures();
+    const verifierReady = vi.fn().mockResolvedValue({ ready: true });
+    const semanticReady = vi.fn().mockResolvedValue({ ready: true });
+    const h = new JinnRepoEvaluatorHarness({
+      immutableMechanicalVerifier: {
+        isReady: verifierReady,
+        verify: vi.fn(),
+      },
+      semanticAgentRunnerResolver: {
+        resolve: vi.fn().mockReturnValue({
+          provider: 'anthropic',
+          runner: {
+            isReady: semanticReady,
+            run: vi.fn(),
+          },
+        }),
+      },
+    });
+
+    await expect(h.canAttempt(task)).resolves.toEqual({ ok: true });
+    await expect(h.canAttempt(task)).resolves.toEqual({ ok: true });
+
+    expect(verifierReady).toHaveBeenCalledOnce();
+    expect(semanticReady).toHaveBeenCalledOnce();
+  });
+
   it('resolves provider and model independently for each exact SolverNet invocation', async () => {
     const { task, context } = autopilotHarnessFixtures();
     const cleanup = vi.fn().mockResolvedValue(undefined);
@@ -435,8 +513,16 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
         manifestCid?: string;
         solverNet?: HarnessContext['solverNet'];
       }) => input.manifestCid === 'bafy-autopilot-net'
-        ? { provider: 'anthropic', runner: firstAgentRunner }
-        : { provider: 'other-provider', runner: secondAgentRunner }),
+        ? {
+            provider: 'anthropic',
+            runner: firstAgentRunner,
+            model: 'exact-review-a',
+          }
+        : {
+            provider: 'other-provider',
+            runner: secondAgentRunner,
+            model: 'exact-review-b',
+          }),
     };
     const grade = vi.fn();
     const gradeLive = vi.fn();
@@ -474,13 +560,13 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
       solverNet: firstSolverNet,
     });
     expect(firstAgentRunner.run).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'claude-review-a',
+      model: 'exact-review-a',
     }));
     expect(firstAgentRunner.run.mock.calls[0]![0]).not.toHaveProperty('cwd');
     expect(result.informational).toMatchObject({
       semanticRuntime: {
         provider: 'anthropic',
-        model: 'claude-review-a',
+        model: 'exact-review-a',
       },
     });
 
@@ -499,7 +585,7 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
       solverNet: secondSolverNet,
     });
     expect(secondAgentRunner.run).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'review-model-b',
+      model: 'exact-review-b',
     }));
     expect(cleanup).toHaveBeenCalledTimes(2);
     expect(grade).not.toHaveBeenCalled();
@@ -731,5 +817,24 @@ describe('JinnRepoEvaluatorHarness — isReady', () => {
     const h = new JinnRepoEvaluatorHarness();
     const r = await h.isReady!();
     expect(r.ready).toBe(true);
+  });
+
+  it('does not let Autopilot-only Docker readiness block legacy evaluations', async () => {
+    const verifierReady = vi.fn().mockResolvedValue({
+      ready: false,
+      reason: 'Docker daemon unavailable',
+    });
+    const h = new JinnRepoEvaluatorHarness({
+      immutableMechanicalVerifier: {
+        isReady: verifierReady,
+        verify: vi.fn(),
+      },
+    });
+
+    await expect(h.isReady!()).resolves.toEqual({ ready: true });
+    await expect(
+      h.canAttempt(buildEvaluationTask(buildSolverEnvelope())),
+    ).resolves.toEqual({ ok: true });
+    expect(verifierReady).not.toHaveBeenCalled();
   });
 });

@@ -213,6 +213,8 @@ describe('production active runtime preflight', () => {
   it('uses marketplace one-shot preflight while retaining host GitHub authority checks', async () => {
     const marketplacePreflight = vi.fn(async () => ({ ok: true as const }));
     const marketplaceRecovery = vi.fn(async () => ({ ok: true as const }));
+    const marketplaceVerificationPreflight =
+      vi.fn(async () => ({ ok: true as const }));
     const remoteReads: string[][] = [];
     const preflight = makeProductionCapabilityPreflight({
       repositoryPath: '/repo',
@@ -225,6 +227,7 @@ describe('production active runtime preflight', () => {
       executionBackendKind: 'marketplace',
       marketplacePreflight,
       marketplaceRecovery,
+      marketplaceVerificationPreflight,
       environment: {
         JINN_AUTOPILOT_CAPABILITY_ATTESTATION: '/attestation.json',
       },
@@ -242,6 +245,7 @@ describe('production active runtime preflight', () => {
     ]]);
     expect(marketplacePreflight).toHaveBeenCalledOnce();
     expect(marketplaceRecovery).toHaveBeenCalledOnce();
+    expect(marketplaceVerificationPreflight).toHaveBeenCalledOnce();
   });
 
   it('rejects marketplace deadlines that do not precede V2 staleness', async () => {
@@ -254,6 +258,8 @@ describe('production active runtime preflight', () => {
       executionBackendKind: 'marketplace',
       marketplacePreflight,
       marketplaceRecovery,
+      marketplaceVerificationPreflight:
+        vi.fn(async () => ({ ok: true as const })),
       staleAfterMs: 90 * 60 * 1000,
       environment: {
         JINN_AUTOPILOT_CAPABILITY_ATTESTATION: '/attestation.json',
@@ -304,10 +310,12 @@ describe('production active runtime preflight', () => {
         config: DEFAULT_CONFIG,
         spawn: vi.fn(),
         executionBackendKind: 'marketplace',
+        marketplaceVerificationPreflight:
+          vi.fn(async () => ({ ok: true as const })),
         marketplaceSolverNetManifestCid: 'bafy-production-manifest',
         caps: { implementation: 1, review: 1 },
         implementationBackpressureThreshold: 1,
-        staleAfterMs: 120 * 60 * 1000,
+        staleAfterMs: 240 * 60 * 1000,
         environment: {
           PATH: '/usr/bin',
           HOME: '/operator/home',
@@ -425,10 +433,12 @@ describe('production active runtime preflight', () => {
         config: DEFAULT_CONFIG,
         spawn: vi.fn(),
         executionBackendKind: 'marketplace',
+        marketplaceVerificationPreflight:
+          vi.fn(async () => ({ ok: true as const })),
         marketplaceBackend,
         caps: { implementation: 1, review: 1 },
         implementationBackpressureThreshold: 1,
-        staleAfterMs: 120 * 60 * 1000,
+        staleAfterMs: 240 * 60 * 1000,
         environment: {
           JINN_AUTOPILOT_CAPABILITY_ATTESTATION: '/attestation.json',
         },
@@ -468,7 +478,7 @@ describe('production active runtime preflight', () => {
       });
       expect(runtime.readLocalState().remaining.implementation).toBe(0);
 
-      currentNow = new Date('2026-07-20T13:59:59.999Z');
+      currentNow = new Date('2026-07-20T15:59:59.999Z');
       await expect(runtime.preflight()).resolves.toEqual({ ok: true });
       expect(marketplaceBackend.recover).toHaveBeenCalledTimes(3);
       expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toMatchObject({
@@ -477,7 +487,7 @@ describe('production active runtime preflight', () => {
       });
       expect(runtime.readLocalState().remaining.implementation).toBe(0);
 
-      currentNow = new Date('2026-07-20T14:00:00.000Z');
+      currentNow = new Date('2026-07-20T16:00:00.000Z');
       await expect(runtime.preflight()).resolves.toEqual({ ok: true });
       expect(marketplaceBackend.recover).toHaveBeenCalledTimes(4);
       expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toMatchObject({
@@ -493,6 +503,7 @@ describe('production active runtime preflight', () => {
   it('observes and adopts an exact marketplace Solution before Router-deadline recovery', async () => {
     const root = mkdtempSync(join(tmpdir(), 'autopilot-marketplace-adoption-'));
     try {
+      let currentNow = NOW;
       const attemptId = '33333333-3333-4333-8333-333333333333';
       const attemptDir = join(
         root,
@@ -555,7 +566,10 @@ describe('production active runtime preflight', () => {
       const marketplaceBackend = {
         start: vi.fn(),
         recoverPreparing: vi.fn(),
-        recover: vi.fn(),
+        recover: vi.fn(async () => ({
+          state: 'failed' as const,
+          detail: 'Marketplace task deadline expired',
+        })),
         cancel: vi.fn(),
         preflight: vi.fn(async () => ({ ok: true as const })),
       };
@@ -590,16 +604,18 @@ describe('production active runtime preflight', () => {
         config: DEFAULT_CONFIG,
         spawn: vi.fn(),
         executionBackendKind: 'marketplace',
+        marketplaceVerificationPreflight:
+          vi.fn(async () => ({ ok: true as const })),
         marketplaceBackend,
         marketplaceSolutionObserver,
         marketplaceMutationAdopter,
         caps: { implementation: 1, review: 1 },
         implementationBackpressureThreshold: 1,
-        staleAfterMs: 120 * 60 * 1000,
+        staleAfterMs: 240 * 60 * 1000,
         environment: {
           JINN_AUTOPILOT_CAPABILITY_ATTESTATION: '/attestation.json',
         },
-        now: () => NOW,
+        now: () => currentNow,
         readCapabilityAttestation: () => ({}) as never,
         runner: async () => 'https://github.com/Jinn-Network/mono.git\n',
       });
@@ -613,6 +629,7 @@ describe('production active runtime preflight', () => {
       expect(marketplaceBackend.recover).not.toHaveBeenCalled();
       expect(JSON.parse(readFileSync(manifestPath, 'utf8')))
         .toMatchObject({ processState: 'running' });
+
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -753,6 +770,13 @@ describe('production active runtime preflight', () => {
         operation: 'review-verdict' as const,
         head: '4'.repeat(40),
       }));
+      let crashAfterOriginExit = true;
+      const marketplaceRecoveryBoundary = vi.fn(async (boundary) => {
+        if (boundary === 'verdict-origin-exited' && crashAfterOriginExit) {
+          crashAfterOriginExit = false;
+          throw new Error('simulated crash after origin exit');
+        }
+      });
       const runtime = makeProductionActiveRuntime({
         repositoryPath: '/repo',
         worktreeBase: root,
@@ -770,12 +794,15 @@ describe('production active runtime preflight', () => {
         config: DEFAULT_CONFIG,
         spawn: vi.fn(),
         executionBackendKind: 'marketplace',
+        marketplaceVerificationPreflight:
+          vi.fn(async () => ({ ok: true as const })),
         marketplaceBackend,
         marketplaceVerdictObserver,
         marketplaceReviewAdopter,
+        marketplaceRecoveryBoundary,
         caps: { implementation: 1, review: 1 },
         implementationBackpressureThreshold: 1,
-        staleAfterMs: 120 * 60 * 1000,
+        staleAfterMs: 240 * 60 * 1000,
         environment: {
           JINN_AUTOPILOT_CAPABILITY_ATTESTATION: '/attestation.json',
         },
@@ -784,12 +811,25 @@ describe('production active runtime preflight', () => {
         runner: async () => 'https://github.com/Jinn-Network/mono.git\n',
       });
 
+      await expect(runtime.preflight()).resolves.toEqual({
+        ok: false,
+        detail: 'simulated crash after origin exit',
+      });
+      expect(JSON.parse(readFileSync(originManifestPath, 'utf8'))).toMatchObject({
+        processState: 'exited',
+        terminalHead: '4'.repeat(40),
+      });
+      expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toMatchObject({
+        processState: 'running',
+      });
+
       await expect(runtime.preflight()).resolves.toEqual({ ok: true });
       expect(marketplaceVerdictObserver).toHaveBeenCalledWith(
         originManifestPath,
         manifestPath,
       );
       expect(marketplaceReviewAdopter).toHaveBeenCalledWith(verdict);
+      expect(marketplaceReviewAdopter).toHaveBeenCalledTimes(2);
       expect(marketplaceBackend.recover).not.toHaveBeenCalled();
       expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toMatchObject({
         processState: 'exited',
@@ -889,10 +929,12 @@ describe('production active runtime preflight', () => {
         config: DEFAULT_CONFIG,
         spawn: vi.fn(),
         executionBackendKind: 'marketplace',
+        marketplaceVerificationPreflight:
+          vi.fn(async () => ({ ok: true as const })),
         marketplaceBackend,
         caps: { implementation: 1, review: 1 },
         implementationBackpressureThreshold: 1,
-        staleAfterMs: 120 * 60 * 1000,
+        staleAfterMs: 240 * 60 * 1000,
         environment: {
           JINN_AUTOPILOT_CAPABILITY_ATTESTATION: '/attestation.json',
         },
@@ -911,13 +953,13 @@ describe('production active runtime preflight', () => {
       });
       expect(runtime.readLocalState().remaining.implementation).toBe(0);
 
-      currentNow = new Date('2026-07-20T14:00:00.000Z');
+      currentNow = new Date('2026-07-20T16:00:00.000Z');
       await expect(runtime.preflight()).resolves.toEqual({ ok: true });
       expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toMatchObject({
         processState: 'exited',
         timestamps: {
           createdAt: '2026-07-20T12:00:00.000Z',
-          childExitedAt: '2026-07-20T14:00:00.000Z',
+          childExitedAt: '2026-07-20T16:00:00.000Z',
         },
       });
       expect(runtime.readLocalState().remaining.implementation).toBe(1);

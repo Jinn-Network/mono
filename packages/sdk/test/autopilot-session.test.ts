@@ -169,6 +169,138 @@ describe('Autopilot result schemas', () => {
     })).toThrow();
   });
 
+  it('bounds mutation summaries and aggregate evidence before host mutation', () => {
+    const value = fixture('mutation-complete') as Record<string, unknown>;
+    expect(() => AutopilotMutationResultSchema.parse({
+      ...value,
+      summary: 'é'.repeat(4_097),
+    })).toThrow(/Mutation summary/);
+    expect(() => AutopilotMutationResultSchema.parse({
+      ...value,
+      evidence: {
+        commands: Array.from({ length: 9 }, () => 'x'.repeat(4_000)),
+        tests: [],
+      },
+    })).toThrow(/Mutation evidence/);
+  });
+
+  it('rejects unsafe process and GitHub text at the result boundary', () => {
+    const mutation = fixture('mutation-complete') as Record<string, unknown>;
+    for (const summary of ['line one\nline two', 'line one\rline two', 'bad\u0000summary']) {
+      expect(() => AutopilotMutationResultSchema.parse({
+        ...mutation,
+        summary,
+      })).toThrow(/Mutation summary/);
+    }
+
+    const approval = fixture('review-approve') as Record<string, unknown>;
+    expect(() => AutopilotReviewResultSchema.parse({
+      ...approval,
+      body: 'bad\u0000approval',
+    })).toThrow(/Approval body/);
+    expect(() => AutopilotReviewResultSchema.parse({
+      ...approval,
+      followUps: [{
+        type: 'fix',
+        title: 'two\nlines',
+        body: 'bounded',
+        effort: 'low',
+        priority: 'p2',
+      }],
+    })).toThrow(/Follow-up title/);
+    expect(() => AutopilotReviewResultSchema.parse({
+      ...approval,
+      followUps: [{
+        type: 'fix',
+        title: 'safe title',
+        body: 'bad\u0000body',
+        effort: 'low',
+        priority: 'p2',
+      }],
+    })).toThrow(/Follow-up body/);
+
+    const changes =
+      fixture('review-request-changes') as Record<string, unknown>;
+    for (const finding of [
+      { title: 'two\nlines', body: 'bounded' },
+      { title: 'bad\u0000title', body: 'bounded' },
+      { title: 'safe title', body: 'bad\u0000body' },
+      { title: 'safe title', body: 'bounded', path: 'bad\u0000path.ts' },
+    ]) {
+      expect(() => AutopilotReviewResultSchema.parse({
+        ...changes,
+        findings: [finding],
+      })).toThrow();
+    }
+
+    for (const name of ['mutation-human', 'review-human']) {
+      const human = fixture(name) as Record<string, unknown>;
+      const reason = human.reason as Record<string, unknown>;
+      expect(() => (
+        name === 'mutation-human'
+          ? AutopilotMutationResultSchema
+          : AutopilotReviewResultSchema
+      ).parse({
+        ...human,
+        reason: { ...reason, detail: 'bad\u0000detail' },
+      })).toThrow(/Human detail/);
+    }
+  });
+
+  it('rejects child lifecycle marker injection in every finding field', () => {
+    const changes =
+      fixture('review-request-changes') as Record<string, unknown>;
+    for (const finding of [
+      {
+        title: 'jinn-autopilot:child',
+        body: 'bounded',
+      },
+      {
+        title: 'safe title',
+        body: '<!-- jinn-autopilot:child pr=999 kind=reconcile -->',
+      },
+      {
+        title: 'safe title',
+        body: 'bounded',
+        path: 'jinn-autopilot:child',
+      },
+    ]) {
+      expect(() => AutopilotReviewResultSchema.parse({
+        ...changes,
+        findings: [finding],
+      })).toThrow(/child markers/);
+    }
+  });
+
+  it('bounds every GitHub-bound review field and aggregate payload', () => {
+    const approval = fixture('review-approve') as Record<string, unknown>;
+    expect(() => AutopilotReviewResultSchema.parse({
+      ...approval,
+      body: 'é'.repeat((48 * 1024 / 2) + 1),
+    })).toThrow(/Approval body/);
+
+    const changes =
+      fixture('review-request-changes') as Record<string, unknown>;
+    expect(() => AutopilotReviewResultSchema.parse({
+      ...changes,
+      findings: Array.from({ length: 13 }, (_, index) => ({
+        title: `Finding ${index}`,
+        body: 'x'.repeat(4_000),
+      })),
+    })).toThrow(/Review findings/);
+
+    expect(() => AutopilotReviewResultSchema.parse({
+      ...approval,
+      followUps: [{
+        type: 'fix',
+        title: 'x'.repeat(241),
+        body: 'bounded',
+        effort: 'low',
+        priority: 'p2',
+      }],
+    })).toThrow(/Follow-up title/);
+  });
+
   it('requires the complete review target correlation for every review outcome', () => {
     for (const outcome of ['approve', 'request-changes', 'human']) {
       const value = fixture(`review-${outcome}`) as Record<string, unknown>;
@@ -448,6 +580,19 @@ describe('AutopilotAdoptionReceiptSchema', () => {
     })).toThrow();
   });
 
+  it('bounds rejection detail and rejects NUL before GitHub publication', () => {
+    const value =
+      fixture('receipt-solution-rejected') as Record<string, unknown>;
+    expect(() => AutopilotAdoptionReceiptSchema.parse({
+      ...value,
+      detail: 'bad\u0000detail',
+    })).toThrow(/Rejection detail/);
+    expect(() => AutopilotAdoptionReceiptSchema.parse({
+      ...value,
+      detail: 'é'.repeat(4_097),
+    })).toThrow(/Rejection detail/);
+  });
+
   it('requires exact-head review correlation on accepted and rejected Verdict receipts', () => {
     for (const disposition of ['accepted', 'rejected']) {
       const value = fixture(`receipt-verdict-${disposition}`) as Record<string, unknown>;
@@ -461,6 +606,31 @@ describe('AutopilotAdoptionReceiptSchema', () => {
           .toThrow();
       }
     }
+  });
+
+  it('binds accepted review findings to one exact child issue', () => {
+    const value = fixture('receipt-verdict-accepted') as Record<string, unknown>;
+    expect(() => AutopilotAdoptionReceiptSchema.parse({
+      ...value,
+      operation: 'review-findings',
+    })).toThrow();
+    expect(AutopilotAdoptionReceiptSchema.parse({
+      ...value,
+      operation: 'review-findings',
+      childIssueNumber: 2201,
+    })).toMatchObject({
+      operation: 'review-findings',
+      childIssueNumber: 2201,
+    });
+    expect(() => AutopilotAdoptionReceiptSchema.parse({
+      ...value,
+      childIssueNumber: 2201,
+    })).toThrow();
+  });
+
+  it('round-trips the accepted review-findings receipt fixture', () => {
+    const value = fixture('receipt-verdict-findings-accepted');
+    expect(AutopilotAdoptionReceiptSchema.parse(value)).toEqual(value);
   });
 
   it('requires resulting-head review-claim correlation on accepted Solution receipts', () => {

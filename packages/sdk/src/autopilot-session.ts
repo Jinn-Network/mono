@@ -5,6 +5,12 @@ const MAX_EVIDENCE_ENTRIES = 100;
 const MAX_REVIEW_FINDINGS = 50;
 const MAX_REVIEW_FOLLOW_UPS = 5;
 const MAX_RECEIPT_AUTHORS = 50;
+const MAX_MUTATION_SUMMARY_BYTES = 8 * 1024;
+const MAX_MUTATION_EVIDENCE_BYTES = 32 * 1024;
+const MAX_REVIEW_BODY_BYTES = 48 * 1024;
+const MAX_REVIEW_TITLE_BYTES = 240;
+const MAX_REVIEW_PATH_BYTES = 1024;
+const MAX_HUMAN_DETAIL_BYTES = 8 * 1024;
 
 const PrintableStringSchema = z.string().min(1).regex(/^[\x20-\x7e]+$/);
 const GitOidSchema = z.string().regex(/^[0-9a-f]{40}$/);
@@ -15,6 +21,29 @@ const PatchSchema = z.string().min(1).refine(
   (patch) => new TextEncoder().encode(patch).byteLength <= MAX_PATCH_BYTES,
   'Patch must be no larger than 2 MiB when UTF-8 encoded',
 );
+
+function boundedText(maxBytes: number, label: string) {
+  return z.string().min(1)
+    .refine(
+      (value) => !value.includes('\u0000'),
+      `${label} must not contain NUL`,
+    )
+    .refine(
+      (value) => new TextEncoder().encode(value).byteLength <= maxBytes,
+      `${label} must be no larger than ${maxBytes} UTF-8 bytes`,
+    );
+}
+
+function boundedSingleLine(maxBytes: number, label: string) {
+  return boundedText(maxBytes, label).refine(
+    (value) => !/[\r\n]/.test(value),
+    `${label} must be a single line`,
+  );
+}
+
+function aggregateUtf8Within(value: unknown, maxBytes: number): boolean {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength <= maxBytes;
+}
 
 export const AutopilotWorkflowSchema = z.enum([
   'implement',
@@ -141,21 +170,27 @@ export function autopilotCorrelationMatches(
 
 const AutopilotHumanReasonSchema = z.object({
   code: PrintableStringSchema,
-  detail: z.string().min(1),
+  detail: boundedText(MAX_HUMAN_DETAIL_BYTES, 'Human detail'),
 }).strict();
 
 export const AutopilotMutationEvidenceSchema = z.object({
-  commands: z.array(z.string().min(1)).max(MAX_EVIDENCE_ENTRIES),
-  tests: z.array(z.string().min(1)).max(MAX_EVIDENCE_ENTRIES),
-  notes: z.array(z.string().min(1)).max(MAX_EVIDENCE_ENTRIES).optional(),
-}).strict();
+  commands: z.array(boundedText(4 * 1024, 'Evidence command'))
+    .max(MAX_EVIDENCE_ENTRIES),
+  tests: z.array(boundedText(4 * 1024, 'Evidence test'))
+    .max(MAX_EVIDENCE_ENTRIES),
+  notes: z.array(boundedText(4 * 1024, 'Evidence note'))
+    .max(MAX_EVIDENCE_ENTRIES).optional(),
+}).strict().refine(
+  (value) => aggregateUtf8Within(value, MAX_MUTATION_EVIDENCE_BYTES),
+  `Mutation evidence must be no larger than ${MAX_MUTATION_EVIDENCE_BYTES} UTF-8 bytes`,
+);
 
 const AutopilotMutationCompleteResultSchema = z.object({
   schemaVersion: z.literal('jinn-autopilot-mutation-result.v1'),
   outcome: z.literal('mutation-complete'),
   correlation: AutopilotCorrelationSchema,
   patch: PatchSchema,
-  summary: z.string().min(1),
+  summary: boundedSingleLine(MAX_MUTATION_SUMMARY_BYTES, 'Mutation summary'),
   evidence: AutopilotMutationEvidenceSchema,
 }).strict();
 
@@ -175,16 +210,16 @@ export type AutopilotMutationResult = z.infer<typeof AutopilotMutationResultSche
 
 const AutopilotReviewFollowUpSchema = z.object({
   type: z.enum(['feat', 'chore', 'fix', 'refactor']),
-  title: z.string().min(1),
-  body: z.string().min(1),
+  title: boundedSingleLine(MAX_REVIEW_TITLE_BYTES, 'Follow-up title'),
+  body: boundedText(MAX_REVIEW_BODY_BYTES, 'Follow-up body'),
   effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']),
   priority: z.enum(['p0', 'p1', 'p2', 'p3', 'p4']),
 }).strict();
 
 const AutopilotReviewFindingSchema = z.object({
-  title: z.string().min(1),
-  body: z.string().min(1),
-  path: z.string().min(1).optional(),
+  title: boundedSingleLine(MAX_REVIEW_TITLE_BYTES, 'Finding title'),
+  body: boundedText(MAX_REVIEW_BODY_BYTES, 'Finding body'),
+  path: boundedText(MAX_REVIEW_PATH_BYTES, 'Finding path').optional(),
   line: PositiveIntegerSchema.optional(),
 }).strict();
 
@@ -192,15 +227,35 @@ const AutopilotReviewApproveResultSchema = z.object({
   schemaVersion: z.literal('jinn-autopilot-review-result.v1'),
   outcome: z.literal('approve'),
   correlation: AutopilotReviewCorrelationSchema,
-  body: z.string().min(1),
-  followUps: z.array(AutopilotReviewFollowUpSchema).max(MAX_REVIEW_FOLLOW_UPS).optional(),
+  body: boundedText(MAX_REVIEW_BODY_BYTES, 'Approval body'),
+  followUps: z.array(AutopilotReviewFollowUpSchema)
+    .max(MAX_REVIEW_FOLLOW_UPS)
+    .refine(
+      (value) => aggregateUtf8Within(value, MAX_REVIEW_BODY_BYTES),
+      `Review follow-ups must be no larger than ${MAX_REVIEW_BODY_BYTES} UTF-8 bytes`,
+    )
+    .optional(),
 }).strict();
 
 const AutopilotReviewRequestChangesResultSchema = z.object({
   schemaVersion: z.literal('jinn-autopilot-review-result.v1'),
   outcome: z.literal('request-changes'),
   correlation: AutopilotReviewCorrelationSchema,
-  findings: z.array(AutopilotReviewFindingSchema).min(1).max(MAX_REVIEW_FINDINGS),
+  findings: z.array(AutopilotReviewFindingSchema)
+    .min(1)
+    .max(MAX_REVIEW_FINDINGS)
+    .refine(
+      (value) => !value.some((finding) => (
+        finding.title.includes('jinn-autopilot:child')
+        || finding.body.includes('jinn-autopilot:child')
+        || finding.path?.includes('jinn-autopilot:child') === true
+      )),
+      'Review findings must not contain Autopilot child markers',
+    )
+    .refine(
+      (value) => aggregateUtf8Within(value, MAX_REVIEW_BODY_BYTES),
+      `Review findings must be no larger than ${MAX_REVIEW_BODY_BYTES} UTF-8 bytes`,
+    ),
 }).strict();
 
 const AutopilotReviewHumanResultSchema = z.object({
@@ -258,22 +313,33 @@ const RejectedSolutionAdoptionReceiptSchema = z.object({
   disposition: z.literal('rejected'),
   role: z.literal('solution'),
   reason: AutopilotAdoptionRejectionReasonSchema,
-  detail: z.string().min(1),
+  detail: boundedText(MAX_HUMAN_DETAIL_BYTES, 'Rejection detail'),
   resultingHead: GitOidSchema.optional(),
   reviewedHead: z.never().optional(),
   reviewGeneration: UuidSchema.optional(),
   reviewRefOid: GitOidSchema.optional(),
 }).strict();
 
-const AcceptedVerdictAdoptionReceiptSchema = z.object({
+const acceptedVerdictAdoptionReceiptCommon = {
   ...adoptionReceiptCommonFields,
   disposition: z.literal('accepted'),
   role: z.literal('verdict'),
-  operation: z.enum(['review-verdict', 'review-findings', 'human']),
   resultingHead: GitOidSchema,
   reviewedHead: GitOidSchema,
   reviewGeneration: UuidSchema,
   reviewRefOid: GitOidSchema,
+};
+
+const AcceptedReviewVerdictAdoptionReceiptSchema = z.object({
+  ...acceptedVerdictAdoptionReceiptCommon,
+  operation: z.enum(['review-verdict', 'human']),
+  childIssueNumber: z.never().optional(),
+}).strict();
+
+const AcceptedReviewFindingsAdoptionReceiptSchema = z.object({
+  ...acceptedVerdictAdoptionReceiptCommon,
+  operation: z.literal('review-findings'),
+  childIssueNumber: z.number().int().positive(),
 }).strict();
 
 const RejectedVerdictAdoptionReceiptSchema = z.object({
@@ -281,7 +347,7 @@ const RejectedVerdictAdoptionReceiptSchema = z.object({
   disposition: z.literal('rejected'),
   role: z.literal('verdict'),
   reason: AutopilotAdoptionRejectionReasonSchema,
-  detail: z.string().min(1),
+  detail: boundedText(MAX_HUMAN_DETAIL_BYTES, 'Rejection detail'),
   resultingHead: GitOidSchema,
   reviewedHead: GitOidSchema,
   reviewGeneration: UuidSchema,
@@ -291,7 +357,8 @@ const RejectedVerdictAdoptionReceiptSchema = z.object({
 export const AutopilotAdoptionReceiptSchema = z.union([
   AcceptedSolutionAdoptionReceiptSchema,
   RejectedSolutionAdoptionReceiptSchema,
-  AcceptedVerdictAdoptionReceiptSchema,
+  AcceptedReviewVerdictAdoptionReceiptSchema,
+  AcceptedReviewFindingsAdoptionReceiptSchema,
   RejectedVerdictAdoptionReceiptSchema,
 ]);
 
@@ -331,7 +398,7 @@ export const AutopilotEvaluationContextSchema = z.object({
   session: AutopilotSessionCapsuleSchema,
   correlation: AutopilotEvaluationCorrelationSchema,
   solution: z.object({
-    summary: z.string().min(1),
+    summary: boundedSingleLine(MAX_MUTATION_SUMMARY_BYTES, 'Mutation summary'),
     evidence: AutopilotMutationEvidenceSchema,
     adoptionReceipt: AcceptedSolutionAdoptionReceiptSchema,
   }).strict(),

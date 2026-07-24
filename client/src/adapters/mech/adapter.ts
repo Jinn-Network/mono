@@ -68,6 +68,7 @@ import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
 import type { Store } from '../../store/store.js';
+import { TaskRunPersistence } from '../../harnesses/engine/persistence.js';
 import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
 import { emitStructured } from '../../events/emitter.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
@@ -291,6 +292,7 @@ export class MechAdapter implements ExecutionAdapter {
   // so we can yield accurate Task in DeliveredResult
   private originalStates = new Map<string, Task>();
   private store?: Store;
+  private taskRuns: TaskRunPersistence | undefined;
 
   constructor(config: MechAdapterConfig, store?: Store) {
     this.config = config;
@@ -994,7 +996,23 @@ export class MechAdapter implements ExecutionAdapter {
    * backlog scan) must skip these before spending a claim tx on a doomed run.
    */
   private hasExpiredExecutionWindow(announcement: TaskAnnouncement): boolean {
-    const windowEndTs = announcement.task.window?.endTs;
+    let windowEndTs = announcement.task.window?.endTs;
+    const spec = announcement.task.spec;
+    if (
+      spec?.['source'] === 'autopilot-session'
+      && typeof spec['session'] === 'object'
+      && spec['session'] !== null
+      && typeof (spec['session'] as { deadline?: unknown }).deadline === 'string'
+    ) {
+      const sessionDeadline = Date.parse(
+        (spec['session'] as { deadline: string }).deadline,
+      );
+      if (Number.isFinite(sessionDeadline)) {
+        windowEndTs = windowEndTs === undefined
+          ? sessionDeadline
+          : Math.min(windowEndTs, sessionDeadline);
+      }
+    }
     return windowEndTs !== undefined && windowEndTs <= Date.now();
   }
 
@@ -1717,6 +1735,30 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
+  private engineOwnsAutopilotSettlement(requestId: string): boolean {
+    if (this.store === undefined) return false;
+    try {
+      this.taskRuns ??= new TaskRunPersistence(this.store.db);
+      const run = this.taskRuns.getByRequestId(requestId);
+      const spec = run?.task?.spec;
+      return (
+        run?.solverType === 'jinn-repo.v1'
+        && spec !== null
+        && typeof spec === 'object'
+        && (spec as Record<string, unknown>)['source']
+          === 'autopilot-session'
+      );
+    } catch (error) {
+      console.error(
+        `[mech] refusing legacy delivery settlement for ${requestId}: `
+        + `Autopilot ownership lookup failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return true;
+    }
+  }
+
   /**
    * Paginate `getLogs` over `[deliveryBlockCursor+1, currentBlock]` chunked by
    * `DEFAULT_ROUTER_LOG_CHUNK_BLOCKS` to honor RPC provider block-range limits
@@ -1774,6 +1816,8 @@ export class MechAdapter implements ExecutionAdapter {
             const iDelivered = mechAddress.toLowerCase() === this.config.safeAddress.toLowerCase();
             const iCreatedRestoration = this.pendingEvaluations.has(requestId);
             if (!iDelivered && !iCreatedRestoration) continue;
+            const engineOwnsSettlement =
+              this.engineOwnsAutopilotSettlement(requestId);
             if (iCreatedRestoration) {
               const recoveryExpirySeconds = this.recoveryDeliveryExpirySeconds(requestId);
               if (recoveryExpirySeconds != null) {
@@ -1807,14 +1851,19 @@ export class MechAdapter implements ExecutionAdapter {
             // (a) Deliverer-side claim path: if this Safe delivered the request,
             //     claim it first so router counters credit the deliverer.
             let deliveryClaimStatus: Awaited<ReturnType<MechAdapter['ensureDeliveryClaimed']>> | undefined;
-            if (iDelivered) {
+            if (iDelivered && !engineOwnsSettlement) {
               deliveryClaimStatus = await this.ensureDeliveryClaimed(requestId, deliveryDataHex);
               if (deliveryClaimStatus === 'retry') continue;
             }
 
             // (b) Task-side claim path: if this request came from our Task
             //     claim, make sure JinnRouterV3 records the Solution submission.
-            if (iCreatedRestoration && deliveryClaimStatus !== 'claimed' && deliveryClaimStatus !== 'already-claimed') {
+            if (
+              iCreatedRestoration
+              && !engineOwnsSettlement
+              && deliveryClaimStatus !== 'claimed'
+              && deliveryClaimStatus !== 'already-claimed'
+            ) {
               const creatorClaimStatus = await this.ensureDeliveryClaimed(requestId, deliveryDataHex);
               if (creatorClaimStatus === 'retry') continue;
             }

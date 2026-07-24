@@ -48,9 +48,14 @@ import { runJinnRepoLiveEval, type JinnRepoLiveEvalResult } from './live-eval-ru
 import {
   runAutopilotSemanticReview,
   type AutopilotMechanicalRunner,
+  type SemanticAgentRunner,
   type SemanticAgentRunnerResolver,
+  type SemanticRuntimeReadiness,
 } from './autopilot-semantic.js';
 import { ExactHeadMechanicalRunner } from './autopilot-mechanical-runner.js';
+import type {
+  ImmutableMechanicalVerifier,
+} from './autopilot-mechanical-runner.js';
 import {
   admitAutopilotEvaluationOpportunity,
 } from './autopilot-evaluation-context.js';
@@ -77,6 +82,13 @@ type LiveGradeFn = (args: {
 }) => Promise<JinnRepoLiveEvalResult>;
 
 const DEFAULT_MONO_REPO_URL = 'https://github.com/Jinn-Network/mono.git';
+const AUTOPILOT_READINESS_CACHE_MS = 30_000;
+
+interface AutopilotReadinessCache {
+  checkedAt?: number;
+  status?: SemanticRuntimeReadiness;
+  inFlight?: Promise<SemanticRuntimeReadiness>;
+}
 
 /**
  * The raw `source` field straight off an unparsed task spec — issue #1891
@@ -224,6 +236,8 @@ export interface JinnRepoEvaluatorHarnessOptions {
   gradeLive?: LiveGradeFn;
   /** Deterministic exact-head checks, injectable for hermetic tests. */
   mechanicalRunner?: AutopilotMechanicalRunner;
+  /** Isolated deterministic verifier used by the default exact-head runner. */
+  immutableMechanicalVerifier?: ImmutableMechanicalVerifier;
   /** Per-SolverNet semantic runtime resolver, injectable for hermetic tests. */
   semanticAgentRunnerResolver?: SemanticAgentRunnerResolver;
 }
@@ -238,7 +252,11 @@ export class JinnRepoEvaluatorHarness implements Harness {
   private readonly grade: GradeFn;
   private readonly gradeLive: LiveGradeFn;
   private readonly mechanicalRunner: AutopilotMechanicalRunner;
+  private readonly immutableMechanicalVerifier: ImmutableMechanicalVerifier | undefined;
   private readonly semanticAgentRunnerResolver: SemanticAgentRunnerResolver | undefined;
+  private readonly verifierReadinessCache: AutopilotReadinessCache = {};
+  private readonly semanticReadinessCache =
+    new WeakMap<SemanticAgentRunner, AutopilotReadinessCache>();
 
   constructor(opts: JinnRepoEvaluatorHarnessOptions = {}) {
     this.stub = opts.stub ?? false;
@@ -253,16 +271,43 @@ export class JinnRepoEvaluatorHarness implements Harness {
           patch: args.solution.patch,
           monoRepoUrl: process.env['JINN_MONO_REPO_URL'] ?? DEFAULT_MONO_REPO_URL,
         }));
+    this.immutableMechanicalVerifier = opts.immutableMechanicalVerifier;
     this.mechanicalRunner =
       opts.mechanicalRunner
       ?? new ExactHeadMechanicalRunner({
         monoRepoUrl: process.env['JINN_MONO_REPO_URL'] ?? DEFAULT_MONO_REPO_URL,
+        immutableVerifier: opts.immutableMechanicalVerifier,
       });
     this.semanticAgentRunnerResolver = opts.semanticAgentRunnerResolver;
   }
 
   supports(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
     return ctx.solverType === 'jinn-repo.v1' && ctx.role === 'evaluation';
+  }
+
+  private async cachedReadiness(
+    cache: AutopilotReadinessCache,
+    probe: () => Promise<SemanticRuntimeReadiness>,
+  ): Promise<SemanticRuntimeReadiness> {
+    if (
+      cache.status
+      && cache.checkedAt !== undefined
+      && Date.now() - cache.checkedAt < AUTOPILOT_READINESS_CACHE_MS
+    ) {
+      return cache.status;
+    }
+    if (cache.inFlight) return await cache.inFlight;
+
+    const inFlight = probe();
+    cache.inFlight = inFlight;
+    try {
+      const status = await inFlight;
+      cache.status = status;
+      cache.checkedAt = Date.now();
+      return status;
+    } finally {
+      if (cache.inFlight === inFlight) cache.inFlight = undefined;
+    }
   }
 
   async canAttempt(task: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
@@ -294,6 +339,40 @@ export class JinnRepoEvaluatorHarness implements Harness {
             + (task.solverNetManifestCid ?? '<unknown>'),
         };
       }
+      const verifierReadiness = this.immutableMechanicalVerifier?.isReady
+        ? await this.cachedReadiness(
+            this.verifierReadinessCache,
+            () => this.immutableMechanicalVerifier!.isReady!(),
+          )
+        : undefined;
+      if (verifierReadiness && !verifierReadiness.ready) {
+        return {
+          ok: false,
+          reason:
+            verifierReadiness.reason
+            ?? 'Autopilot immutable mechanical verifier is unavailable',
+        };
+      }
+      let semanticReadiness: SemanticRuntimeReadiness | undefined;
+      if (semanticRuntime.runner.isReady) {
+        let cache = this.semanticReadinessCache.get(semanticRuntime.runner);
+        if (!cache) {
+          cache = {};
+          this.semanticReadinessCache.set(semanticRuntime.runner, cache);
+        }
+        semanticReadiness = await this.cachedReadiness(
+          cache,
+          () => semanticRuntime.runner.isReady!(),
+        );
+      }
+      if (semanticReadiness && !semanticReadiness.ready) {
+        return {
+          ok: false,
+          reason:
+            semanticReadiness.reason
+            ?? 'Autopilot semantic evaluator runtime is unavailable',
+        };
+      }
       return { ok: true };
     }
     // A live-issue spec with a field defect (missing `issue_number`, a
@@ -322,8 +401,10 @@ export class JinnRepoEvaluatorHarness implements Harness {
 
   async isReady(): Promise<ReadyStatus> {
     if (this.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
-    // No Docker, no enable marker: the repo-native evaluator only needs git +
-    // the bundled pool, both present in any real daemon. Always ready when live.
+    // Docker and semantic runtimes are Autopilot-only prerequisites. Probing
+    // them here would disable legacy merged-pr/live-issue evaluations through
+    // the harness-wide readiness gate. canAttempt() probes and caches them only
+    // for an admitted Autopilot evaluation Task.
     return { ready: true };
   }
 
@@ -406,7 +487,7 @@ export class JinnRepoEvaluatorHarness implements Harness {
         context: parsed.context,
         mechanicalRunner: this.mechanicalRunner,
         agentRunner: semanticRuntime.runner,
-        ...(ctx.solverNet?.model ? { model: ctx.solverNet.model } : {}),
+        ...(semanticRuntime.model ? { model: semanticRuntime.model } : {}),
         abort: ctx.abort,
       });
       const artifactPath = 'jinn-autopilot-review-result.json';
@@ -425,7 +506,7 @@ export class JinnRepoEvaluatorHarness implements Harness {
           mechanical: result.mechanical,
           semanticRuntime: {
             provider: semanticRuntime.provider,
-            ...(ctx.solverNet?.model ? { model: ctx.solverNet.model } : {}),
+            ...(semanticRuntime.model ? { model: semanticRuntime.model } : {}),
           },
         },
         verdictPayload: result.review as unknown as Record<string, unknown>,

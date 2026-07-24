@@ -208,6 +208,31 @@ describe('review action executor', () => {
     expect(h.human).toEqual([]);
   });
 
+  it('does not dispatch when a child opens during post-CAS confirmation', async () => {
+    const h = harness({
+      confirmAcquisition: async ({
+        expectedHead,
+        expectedReviewRefOid,
+      }) => candidate({
+        head: expectedHead,
+        openChildKinds: ['ci-failure'],
+        reviewRef: {
+          oid: expectedReviewRefOid,
+          record: claim(),
+        },
+      }),
+    });
+
+    await expect(executeReviewAction({ prNumber: 84 }, h.deps))
+      .resolves.toEqual({ status: 'lost', prNumber: 84 });
+    expect(h.events).toEqual([
+      'record',
+      'claim',
+      'attempt',
+      'projection',
+    ]);
+  });
+
   it.skip('fails closed when the scheduled exact head changes before acquisition', async () => {
     const { deps, events } = harness();
 

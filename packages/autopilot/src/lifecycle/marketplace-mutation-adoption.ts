@@ -108,6 +108,13 @@ export interface MarketplaceMutationPullRequestFacts {
   readonly labels: readonly string[];
   readonly body: string;
   readonly implementationSummary?: string;
+  readonly openChildKinds: readonly (
+    'review-finding' | 'reconcile' | 'ci-failure'
+  )[];
+  readonly terminalVerdict?: {
+    readonly head: GitOid;
+    readonly state: 'APPROVE' | 'REQUEST_CHANGES';
+  };
   readonly human: {
     readonly active: boolean;
     readonly draft: boolean;
@@ -283,6 +290,31 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const TRANSACTION_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
+const SOLUTION_ADOPTION_RESERVE_MS = 30 * 60 * 1000;
+const MAX_RECEIPT_DETAIL_BYTES = 8 * 1024;
+
+function receiptSafeDetail(detail: string): string {
+  const sanitized = detail.replaceAll('\u0000', '\ufffd');
+  const source = sanitized.length === 0
+    ? 'Unspecified marketplace adoption failure'
+    : sanitized;
+  const encoder = new TextEncoder();
+  if (encoder.encode(source).byteLength <= MAX_RECEIPT_DETAIL_BYTES) {
+    return source;
+  }
+  const suffix = '\n… [truncated for adoption receipt]';
+  const available =
+    MAX_RECEIPT_DETAIL_BYTES - encoder.encode(suffix).byteLength;
+  let truncated = '';
+  let bytes = 0;
+  for (const character of source) {
+    const size = encoder.encode(character).byteLength;
+    if (bytes + size > available) break;
+    truncated += character;
+    bytes += size;
+  }
+  return `${truncated}${suffix}`;
+}
 
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -622,7 +654,7 @@ function rejectedReceipt(
     disposition: 'rejected',
     role: 'solution',
     reason: failure.reason,
-    detail: failure.detail,
+    detail: receiptSafeDetail(failure.detail),
     ...parsed.correlation,
     ...(extras.resultingHead === undefined
       ? {}
@@ -744,9 +776,6 @@ async function stableReject(
     readonly reviewClaim?: ConfirmedMarketplaceReviewClaim;
   },
 ): Promise<MarketplaceMutationAdoptionResult> {
-  if (extras?.reviewClaim !== undefined) {
-    await deps.reviewClaims.release(extras.reviewClaim);
-  }
   let publicationAuthority = authority;
   if (failure.reason === 'receipt-contradiction') {
     publicationAuthority = await requireHumanAuthority(
@@ -771,6 +800,9 @@ async function stableReject(
     );
     await deps.onBoundary?.('receipt-published');
     await persistReceipt(publication, parsed, extras?.reviewClaim, deps);
+    if (extras?.reviewClaim !== undefined) {
+      await deps.reviewClaims.release(extras.reviewClaim);
+    }
     return {
       status: 'rejected',
       reason: failure.reason,
@@ -789,6 +821,9 @@ async function stableReject(
     ) {
       if (failure.reason !== 'receipt-contradiction') {
         await requireHumanAuthority(parsed, authority, error.message, deps);
+      }
+      if (extras?.reviewClaim !== undefined) {
+        await deps.reviewClaims.release(extras.reviewClaim);
       }
       return {
         status: 'rejected',
@@ -908,6 +943,18 @@ async function adoptParsed(
     );
   }
   const parsed = validation.parsed;
+  const sessionDeadline = Date.parse(parsed.session.deadline);
+  const adoptionCutoff = sessionDeadline + SOLUTION_ADOPTION_RESERVE_MS;
+  const now = deps.now ?? (() => new Date());
+  const deadlineExceeded = () =>
+    !Number.isFinite(sessionDeadline)
+    || now().getTime() >= adoptionCutoff;
+  if (!Number.isFinite(sessionDeadline)) {
+    return stableReject(parsed, {
+      reason: 'internal-adoption-failure',
+      detail: 'solution-adoption-deadline-exceeded',
+    }, authority, deps);
+  }
   const allowHuman = parsed.result.outcome === 'human';
   let failure = authorityFailure(parsed, authority, {
     allowHuman,
@@ -975,6 +1022,15 @@ async function adoptParsed(
         'Child is already closed without an exact recoverable marketplace host commit',
     }, authority, deps);
   }
+  const recoveringDurableEffects =
+    gitState.status === 'committed'
+    || protocolCompletion !== undefined;
+  if (deadlineExceeded() && !recoveringDurableEffects) {
+    return stableReject(parsed, {
+      reason: 'internal-adoption-failure',
+      detail: 'solution-adoption-deadline-exceeded',
+    }, authority, deps);
+  }
   if (gitState.status === 'clean') {
     try {
       const applied = await (deps.applyPatch ?? applyMarketplacePatchToWorktree)({
@@ -1031,12 +1087,19 @@ async function adoptParsed(
     }, authority, deps);
   }
   if (gitState.status === 'pending-change') {
+    if (deadlineExceeded()) {
+      return stableReject(parsed, {
+        reason: 'internal-adoption-failure',
+        detail: 'solution-adoption-deadline-exceeded',
+      }, authority, deps);
+    }
     let verification: MarketplaceMutationVerificationResult;
     try {
       verification = await deps.verification.verify({
         profile: JINN_MONO_VERIFICATION_PROFILE,
         repositoryPath: authority.manifest.paths.worktree,
         touchedPaths: patch.touchedPaths,
+        deadline: new Date(adoptionCutoff).toISOString(),
       });
     } catch (error) {
       if (
@@ -1054,6 +1117,12 @@ async function adoptParsed(
       return stableReject(parsed, {
         reason: 'verification-failed',
         detail: `${verification.failedCommand}: ${verification.detail}`,
+      }, authority, deps);
+    }
+    if (deadlineExceeded()) {
+      return stableReject(parsed, {
+        reason: 'internal-adoption-failure',
+        detail: 'solution-adoption-deadline-exceeded',
       }, authority, deps);
     }
     await deps.onBoundary?.('verified');
@@ -1138,6 +1207,30 @@ async function adoptParsed(
   failure = completionReadbackFailure(parsed, authority, resultingHead);
   if (failure !== null) {
     return stableReject(parsed, failure, authority, deps, { resultingHead });
+  }
+  if (authority.pullRequest.openChildKinds.length > 0) {
+    return {
+      status: 'recoverable',
+      stage: 'review-eligibility',
+      detail:
+        'Exact-head review is blocked by open child work: '
+        + authority.pullRequest.openChildKinds.join(', '),
+    };
+  }
+  if (!authority.pullRequest.open || authority.pullRequest.draft) {
+    return {
+      status: 'recoverable',
+      stage: 'review-eligibility',
+      detail: 'Exact-head review requires an open, non-draft pull request',
+    };
+  }
+  if (
+    authority.pullRequest.terminalVerdict?.head === resultingHead
+  ) {
+    return stableReject(parsed, {
+      reason: 'receipt-contradiction',
+      detail: 'Exact adopted head already has a terminal review verdict',
+    }, authority, deps, { resultingHead });
   }
 
   const acquired = await deps.reviewClaims.acquireOrRecover({
@@ -1233,8 +1326,8 @@ async function adoptParsed(
         || error.code === 'different-receipt'
       )
     ) {
-      await deps.reviewClaims.release(reviewClaim);
       await requireHumanAuthority(parsed, authority, error.message, deps);
+      await deps.reviewClaims.release(reviewClaim);
       const failure = {
         reason: 'receipt-contradiction',
         detail: error.message,

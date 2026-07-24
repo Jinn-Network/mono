@@ -352,4 +352,3 @@ backend-discriminated execution record; missing backend decodes as local.
 - [ ] Record the pre-existing unrelated `packages/layer` lockfile baseline
       failure if it still prevents the monolithic client test command.
 - [ ] Commit as `test: prove Autopilot marketplace closed loop`.
-

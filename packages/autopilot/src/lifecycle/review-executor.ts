@@ -47,6 +47,9 @@ export interface ReviewActionCandidate {
   readonly humanHold: boolean;
   readonly approvalPolicy: ReviewApprovalPolicy;
   readonly nativeReviews: readonly ReviewNativeReview[];
+  readonly openChildKinds?: readonly (
+    'review-finding' | 'reconcile' | 'ci-failure'
+  )[];
   readonly terminalApprovalMatches?: boolean;
   readonly mappingProblem?: string;
   readonly reviewRef?: {
@@ -244,6 +247,7 @@ async function confirmReviewAcquisition(
       || confirmed.baseRefName !== input.candidate.baseRefName
       || confirmed.mappingProblem !== undefined
       || confirmed.approvalPolicy !== input.candidate.approvalPolicy
+      || (confirmed.openChildKinds ?? []).length > 0
     ) {
       if (
         confirmed !== null
@@ -372,6 +376,15 @@ export async function executeReviewAction(
       status: 'human',
       prNumber: candidate.number,
       code: 'review-escalation',
+    };
+  }
+  if ((candidate.openChildKinds ?? []).length > 0) {
+    return {
+      status: 'ineligible',
+      prNumber: candidate.number,
+      detail:
+        'Pull request has open child work: '
+        + candidate.openChildKinds!.join(', '),
     };
   }
   const current = candidate.reviewRef;

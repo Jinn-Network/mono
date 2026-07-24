@@ -106,6 +106,9 @@ function commandRunner(overrides: {
     if (args.includes('rev-parse')) {
       return { stdout: `${overrides.head ?? '4'.repeat(40)}\n`, stderr: '' };
     }
+    if (args.includes('merge-base')) {
+      return { stdout: `${'9'.repeat(40)}\n`, stderr: '' };
+    }
     if (args.includes('--name-only')) {
       if (overrides.rename) {
         return {
@@ -192,6 +195,16 @@ describe('ExactHeadMechanicalRunner', () => {
     expect(command).toHaveBeenCalledWith('git', [
       '-C',
       '/tmp/eval-root/repo',
+      'merge-base',
+      '3'.repeat(40),
+      '4'.repeat(40),
+    ], expect.objectContaining({ env: expect.any(Object) }));
+    expect(command).not.toHaveBeenCalledWith('git', expect.arrayContaining([
+      '--is-ancestor',
+    ]), expect.anything());
+    expect(command).toHaveBeenCalledWith('git', [
+      '-C',
+      '/tmp/eval-root/repo',
       'diff',
       '--name-only',
       '-z',
@@ -246,14 +259,31 @@ describe('ExactHeadMechanicalRunner', () => {
 
   it('marks a non-empty diff outside every supported package unscorable', async () => {
     const command = commandRunner({
-      changedFiles: 'contracts/src/Autopilot.sol\0',
+      changedFiles: 'docs/unsupported.md\0',
     });
     const result = await runner(command).run(context());
     expect(result).toEqual({
       kind: 'unscorable',
-      detail: 'unsupported-diff-scope: no deterministic checks cover contracts/src/Autopilot.sol',
+      detail: 'unsupported-diff-scope: no deterministic checks cover docs/unsupported.md',
     });
     expect(command.mock.calls.some(([, args]) => args[0] === 'yarn')).toBe(false);
+  });
+
+  it('admits a non-client jinn-mono workspace to immutable verification', async () => {
+    const immutableVerifier = passingVerifier();
+    const result = await runner(commandRunner({
+      changedFiles: 'packages/core/src/index.ts\0',
+    }), immutableVerifier).run(context());
+
+    expect(result).toMatchObject({
+      kind: 'passed',
+      changedFiles: ['packages/core/src/index.ts'],
+    });
+    expect(immutableVerifier.verify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        changedFiles: ['packages/core/src/index.ts'],
+      }),
+    );
   });
 
   it('rejects unsupported paths hidden inside an otherwise supported mixed diff', async () => {
@@ -372,6 +402,30 @@ describe('ExactHeadMechanicalRunner', () => {
       detail: expect.stringContaining('prohibited-path'),
     });
     expect(command.mock.calls.some(([, args]) => args[0] === 'typecheck')).toBe(false);
+  });
+
+  it.each([
+    ['package scripts', 'client/package.json'],
+    ['TypeScript control', 'client/tsconfig.json'],
+    ['Vitest control', 'client/vitest.config.ts'],
+    ['existing test', 'client/test/security.test.ts'],
+    ['co-located test', 'client/src/security.test.ts'],
+    ['test snapshot', 'client/src/__snapshots__/security.test.ts.snap'],
+  ])('rejects changed trusted %s before immutable verification', async (
+    _name,
+    changedFile,
+  ) => {
+    const immutableVerifier = passingVerifier();
+    const result = await runner(
+      commandRunner({ changedFiles: `${changedFile}\0` }),
+      immutableVerifier,
+    ).run(context());
+
+    expect(result).toMatchObject({
+      kind: 'unscorable',
+      detail: expect.stringContaining('prohibited-path'),
+    });
+    expect(immutableVerifier.verify).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -84,6 +84,10 @@ export interface PersistedTaskRun {
   adoptionReceiptAuthors: string[] | null;
   /** Unix ms timestamp when this run first entered AWAITING_ADOPTION. */
   adoptionWaitStartedAt: number | null;
+  /** Durable poll count used to compute bounded adoption-observation backoff. */
+  adoptionObservationAttempts: number;
+  /** Earliest wall-clock millisecond at which GitHub may be observed again. */
+  adoptionNextObservationAt: number | null;
   /** Most recent durable receipt observation, including an accepted receipt. */
   adoptionLastObservation: AdoptionObservation | null;
   /** Strictly validated accepted receipt required again at Router claim time. */

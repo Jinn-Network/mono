@@ -104,6 +104,21 @@ describe('buildHarnesses — external impls + disabledNames', () => {
       semanticAgentRunnerResolver?: unknown;
     }).semanticAgentRunnerResolver).toBe(semanticEvaluatorRunnerResolver);
   });
+
+  it('wires the production immutable verifier into the exact-head evaluator', () => {
+    const immutableMechanicalVerifier = {
+      verify: vi.fn(),
+    };
+    const impls = buildHarnesses({
+      ...ENV,
+      immutableMechanicalVerifier,
+    });
+    const evaluator = impls.find((impl) => impl.name === 'jinn-repo-evaluator');
+    const mechanicalRunner = (evaluator as unknown as {
+      mechanicalRunner: { immutableVerifier?: unknown };
+    }).mechanicalRunner;
+    expect(mechanicalRunner.immutableVerifier).toBe(immutableMechanicalVerifier);
+  });
 });
 
 describe('buildHarnesses — testHarnessReplacements', () => {

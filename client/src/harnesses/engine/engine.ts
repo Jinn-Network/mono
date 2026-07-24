@@ -44,6 +44,7 @@ import {
 } from './envelope-assembly.js';
 import {
   claimRouterDelivery,
+  isRouterDeliveryClaimed,
   createMarketplaceDeliveryRecovery,
   deliverToMarketplace,
   deliverAndClaim,
@@ -603,6 +604,9 @@ export class TaskEngine {
   private readonly lastTransientTickErrorAt = new Map<string, number>();
 
   private readonly processingByRequestId = new Map<string, Promise<void>>();
+  private static readonly ADOPTION_CLAIM_RETRY_BACKOFF_MS = 5 * 60_000;
+  private static readonly ADOPTION_OBSERVATION_BASE_BACKOFF_MS = 10_000;
+  private static readonly ADOPTION_OBSERVATION_MAX_BACKOFF_MS = 5 * 60_000;
 
   /** Set by stop(); causes runTickLoop to exit at the next iteration. */
   private stopped = false;
@@ -1575,7 +1579,7 @@ export class TaskEngine {
         ? join(this.paths.implStateDirRoot, harnessStateDirName(impl.name), kindSeg)
         : join(this.paths.implStateDirRoot, harnessStateDirName(impl.name))
     );
-    const windowEndTs = task.windowEndTs;
+    const windowEndTs = effectiveHarnessDeadline(task, role);
 
     const abort = new AbortController();
     const msUntilEndTs = () => Math.max(0, windowEndTs - Date.now());
@@ -2322,6 +2326,8 @@ export class TaskEngine {
         },
         adoptionReceiptAuthors: autopilotTask.session.receiptAuthors,
         adoptionWaitStartedAt: task.adoptionWaitStartedAt ?? Date.now(),
+        adoptionObservationAttempts: 0,
+        adoptionNextObservationAt: Date.now(),
         adoptionLastObservation: null,
         adoptionLastError: null,
       });
@@ -2540,14 +2546,20 @@ export class TaskEngine {
 
   /** Observe adoption without repeating delivery or claiming settlement. */
   protected async awaitAdoption(task: PersistedTaskRun): Promise<void> {
+    if (
+      task.adoptionNextObservationAt !== null
+      && task.adoptionNextObservationAt > Date.now()
+    ) {
+      return;
+    }
+    const nextObservationAt = this.nextAdoptionObservationAt(task);
     if (!this.adoptionReceiptObserver) {
-      if (Date.now() >= task.windowEndTs) {
-        this.persistence.markFailed(task.requestId, 'adoption-timeout');
-        return;
-      }
       this.persistence.setAdoptionError(
         task.requestId,
-        'adoption receipt observer is not configured',
+        Date.now() >= task.windowEndTs
+          ? 'adoption-overdue:adoption receipt observer is not configured'
+          : 'adoption receipt observer is not configured',
+        nextObservationAt,
       );
       return;
     }
@@ -2556,25 +2568,31 @@ export class TaskEngine {
     try {
       observation = await this.adoptionReceiptObserver.observe(task);
     } catch (err) {
-      if (Date.now() >= task.windowEndTs) {
-        this.persistence.markFailed(task.requestId, 'adoption-timeout');
-        return;
-      }
+      const detail = err instanceof Error ? err.message : String(err);
       this.persistence.setAdoptionError(
         task.requestId,
-        err instanceof Error ? err.message : String(err),
+        Date.now() >= task.windowEndTs
+          ? `adoption-overdue:${detail}`
+          : detail,
+        nextObservationAt,
       );
       return;
     }
 
     switch (observation.state) {
       case 'pending':
+        this.persistence.setAdoptionObservation(
+          task.requestId,
+          observation,
+          nextObservationAt,
+        );
         if (Date.now() >= task.windowEndTs) {
-          this.persistence.setAdoptionObservation(task.requestId, observation);
-          this.persistence.markFailed(task.requestId, 'adoption-timeout');
-          return;
+          this.persistence.setAdoptionError(
+            task.requestId,
+            `adoption-overdue:${observation.detail}`,
+            nextObservationAt,
+          );
         }
-        this.persistence.setAdoptionObservation(task.requestId, observation);
         return;
       case 'accepted': {
         const validation = this.validateAdoptionReceipt(task, observation.receipt);
@@ -2597,6 +2615,8 @@ export class TaskEngine {
           adoptionLastObservation: acceptedObservation,
           adoptionAcceptedReceipt: validation.receipt,
           adoptionLastError: null,
+          adoptionObservationAttempts: 0,
+          adoptionNextObservationAt: Date.now(),
         });
         console.log(
           `[harness-engine] ${task.requestId} AWAITING_ADOPTION → CLAIMING_DELIVERY`,
@@ -2619,7 +2639,7 @@ export class TaskEngine {
         this.persistence.setAdoptionObservation(task.requestId, {
           state: 'rejected',
           receipt: validation.receipt,
-        });
+        }, nextObservationAt);
         this.persistence.markFailed(
           task.requestId,
           `adoption-rejected:${validation.receipt.reason}`,
@@ -2627,12 +2647,31 @@ export class TaskEngine {
         return;
       }
       case 'contradictory':
-        this.persistence.setAdoptionObservation(task.requestId, observation);
+        this.persistence.setAdoptionObservation(
+          task.requestId,
+          observation,
+          nextObservationAt,
+        );
         this.persistence.markFailed(
           task.requestId,
           `adoption-contradiction:${observation.detail}`,
         );
     }
+  }
+
+  private nextAdoptionObservationAt(task: PersistedTaskRun): number {
+    const exponent = Math.min(task.adoptionObservationAttempts, 8);
+    const delay = Math.min(
+      TaskEngine.ADOPTION_OBSERVATION_MAX_BACKOFF_MS,
+      TaskEngine.ADOPTION_OBSERVATION_BASE_BACKOFF_MS * (2 ** exponent),
+    );
+    const digest = createHash('sha256')
+      .update(`${task.requestId}:${task.adoptionObservationAttempts}`)
+      .digest();
+    const jitter = Math.floor(
+      delay * 0.2 * (digest.readUInt16BE(0) / 0xffff),
+    );
+    return Date.now() + delay + jitter;
   }
 
   /** Re-observe the accepted receipt, then retry only the Router claim. */
@@ -2654,11 +2693,63 @@ export class TaskEngine {
       );
       return;
     }
+    const manifestCid = task.manifestCid;
+    if (!manifestCid) {
+      throw new Error(
+        `claimAdoptedDelivery: manifestCid missing for ${task.requestId}`,
+      );
+    }
+    const evidenceHash =
+      task.evidenceHash as `0x${string}` | null | undefined;
+    if (
+      !evidenceHash
+      && (
+        this.deliveryDeps.claimDeliveryVariant === 'v2'
+        || this.deliveryDeps.claimDeliveryVariant === 'v3'
+      )
+    ) {
+      throw new MissingEvidenceHashError(task.requestId);
+    }
+    try {
+      if (await isRouterDeliveryClaimed(
+        task.requestId as `0x${string}`,
+        this.deliveryDeps,
+      )) {
+        this.persistence.transition(task.requestId, TaskRunState.COMPLETE);
+        await this.afterDeliveryClaimed(task, manifestCid, evidenceHash);
+        return;
+      }
+    } catch (error) {
+      this.persistence.setClaimingAdoptionError(
+        task.requestId,
+        `router-claim-read:`
+        + (error instanceof Error ? error.message : String(error)),
+        this.nextAdoptionObservationAt(task),
+      );
+      return;
+    }
+    const retryMatch = task.adoptionLastError?.match(
+      /^router-claim-retry-after:(\d+):/,
+    );
+    if (
+      retryMatch !== null
+      && Number(retryMatch?.[1]) > Date.now()
+    ) {
+      return;
+    }
+    if (
+      task.adoptionNextObservationAt !== null
+      && task.adoptionNextObservationAt > Date.now()
+    ) {
+      return;
+    }
+    const nextObservationAt = this.nextAdoptionObservationAt(task);
 
     if (!this.adoptionReceiptObserver) {
       this.persistence.setClaimingAdoptionError(
         task.requestId,
         'adoption receipt observer is not configured',
+        nextObservationAt,
       );
       return;
     }
@@ -2670,16 +2761,25 @@ export class TaskEngine {
       this.persistence.setClaimingAdoptionError(
         task.requestId,
         err instanceof Error ? err.message : String(err),
+        nextObservationAt,
       );
       return;
     }
 
     if (observation.state === 'pending') {
-      this.persistence.setClaimingAdoptionObservation(task.requestId, observation);
+      this.persistence.setClaimingAdoptionObservation(
+        task.requestId,
+        observation,
+        nextObservationAt,
+      );
       return;
     }
     if (observation.state === 'contradictory') {
-      this.persistence.setClaimingAdoptionObservation(task.requestId, observation);
+      this.persistence.setClaimingAdoptionObservation(
+        task.requestId,
+        observation,
+        null,
+      );
       this.persistence.markFailed(
         task.requestId,
         `adoption-contradiction:${observation.detail}`,
@@ -2706,7 +2806,7 @@ export class TaskEngine {
       this.persistence.setClaimingAdoptionObservation(task.requestId, {
         state: 'rejected',
         receipt: observedValidation.receipt,
-      });
+      }, null);
       this.persistence.markFailed(
         task.requestId,
         `adoption-rejected:${observedValidation.receipt.reason}`,
@@ -2731,23 +2831,30 @@ export class TaskEngine {
     this.persistence.setClaimingAdoptionObservation(task.requestId, {
       state: 'accepted',
       receipt: observedValidation.receipt,
-    });
+    }, null);
 
-    const manifestCid = task.manifestCid;
-    if (!manifestCid) {
-      throw new Error(`claimAdoptedDelivery: manifestCid missing for ${task.requestId}`);
+    let claimTxHash: `0x${string}`;
+    try {
+      claimTxHash = await claimRouterDelivery(
+        task.requestId as `0x${string}`,
+        evidenceHash as `0x${string}`,
+        this.deliveryDeps,
+        this.deliveryClaimOptions(task),
+      );
+    } catch (error) {
+      if (isRecoverableTransactionError(error)) {
+        const retryAt =
+          Date.now() + TaskEngine.ADOPTION_CLAIM_RETRY_BACKOFF_MS;
+        this.persistence.setClaimingAdoptionError(
+          task.requestId,
+          `router-claim-retry-after:${retryAt}:${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          retryAt,
+        );
+      }
+      throw error;
     }
-    const evidenceHash = task.evidenceHash as `0x${string}` | null | undefined;
-    if (!evidenceHash && (this.deliveryDeps.claimDeliveryVariant === 'v2' || this.deliveryDeps.claimDeliveryVariant === 'v3')) {
-      throw new MissingEvidenceHashError(task.requestId);
-    }
-
-    const claimTxHash = await claimRouterDelivery(
-      task.requestId as `0x${string}`,
-      evidenceHash as `0x${string}`,
-      this.deliveryDeps,
-      this.deliveryClaimOptions(task),
-    );
     this.persistence.transition(task.requestId, TaskRunState.COMPLETE);
     console.log(
       `[harness-engine] ${task.requestId} CLAIMING_DELIVERY → COMPLETE claimTx=${claimTxHash}`,
@@ -3338,8 +3445,11 @@ export class TaskEngine {
     const recoverablePrerequisite =
       err instanceof TaskCreationTimestampUnavailableError
       || err instanceof DeliveryDiscoveryAnchorUnavailableError;
+    const postDeliveryRecovery =
+      task.state === TaskRunState.AWAITING_ADOPTION
+      || task.state === TaskRunState.CLAIMING_DELIVERY;
     if (
-      task.windowEndTs > Date.now()
+      (postDeliveryRecovery || task.windowEndTs > Date.now())
       && (recoverablePrerequisite || isRecoverableTransactionError(err))
     ) {
       const now = Date.now();
@@ -3581,4 +3691,34 @@ export async function runHarnessOnce(params: {
       },
     },
   };
+}
+export function effectiveHarnessDeadline(
+  task: PersistedTaskRun,
+  role: 'restoration' | 'evaluation',
+  nowMs = Date.now(),
+): number {
+  const runtimeTask = task.task;
+  let deadline = task.windowEndTs;
+  if (
+    runtimeTask?.spec?.['source'] !== 'autopilot-session'
+  ) {
+    return deadline;
+  }
+  if (role === 'restoration') {
+    const session = runtimeTask.spec['session'];
+    const sessionDeadline = typeof session === 'object'
+      && session !== null
+      && typeof (session as { deadline?: unknown }).deadline === 'string'
+      ? Date.parse((session as { deadline: string }).deadline)
+      : Number.NaN;
+    return Number.isFinite(sessionDeadline)
+      ? Math.min(deadline, sessionDeadline)
+      : deadline;
+  }
+  const EVALUATOR_SOFT_DEADLINE_MS = 60 * 60 * 1000;
+  const VERDICT_ADOPTION_RESERVE_MS = 30 * 60 * 1000;
+  return Math.min(
+    nowMs + EVALUATOR_SOFT_DEADLINE_MS,
+    deadline - VERDICT_ADOPTION_RESERVE_MS,
+  );
 }

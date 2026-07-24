@@ -162,7 +162,7 @@ function buildContext(
         : { childIssueNumber: session.childIssueNumber }),
       prNumber: session.prNumber,
       targetBase: session.targetBase,
-      baseOid: session.taskSnapshot.baseSha,
+      baseOid: session.taskSnapshot.targetBaseOid,
       headRef: session.branch,
       resultingHead: receipt.resultingHead,
       reviewGeneration: receipt.reviewGeneration,

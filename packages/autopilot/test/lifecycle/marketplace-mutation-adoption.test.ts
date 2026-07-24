@@ -351,8 +351,12 @@ class Harness implements
   child?: MarketplaceMutationAuthority['child'];
   workflow: MutationWorkflow;
   verificationStatus: 'passed' | 'failed' = 'passed';
+  verificationDetail = 'typecheck failed';
   verificationError?: Error;
   readonly verificationRepositoryPaths: string[] = [];
+  readonly verificationDeadlines: string[] = [];
+  afterVerification?: () => void;
+  afterPatchApplication?: () => void;
   codeOwnerRequired = false;
   trustedOperatorIds = ['operator-1'];
   crashBoundary?: MarketplaceMutationAdoptionBoundary;
@@ -368,6 +372,9 @@ class Harness implements
   humanMutations = 0;
   reviewClaimMutations = 0;
   reviewClaimReleases = 0;
+  reviewClaimReleaseErrorOnce?: Error;
+  otherOpenChildKinds: Array<'review-finding' | 'reconcile' | 'ci-failure'> = [];
+  contradictReviewClaimReadbackOnce = false;
   nextCommentId = 9001;
   clock: () => Date = () => new Date(NOW);
 
@@ -397,6 +404,10 @@ class Harness implements
 
   async readExactAuthority(): Promise<MarketplaceMutationAuthority> {
     this.authorityReads += 1;
+    const omitReviewClaim =
+      this.reviewClaim !== undefined
+      && this.contradictReviewClaimReadbackOnce;
+    if (omitReviewClaim) this.contradictReviewClaimReadbackOnce = false;
     if (this.staleOnAuthorityRead === this.authorityReads) {
       this.remoteHead = STALE;
       this.prHead = STALE;
@@ -412,7 +423,9 @@ class Harness implements
         headRefName: 'autopilot/issue-501',
         baseRefName: 'next',
         open: true,
-        draft: this.currentClaim.phaseComplete !== true,
+        draft:
+          this.workflow === 'implement'
+          && this.currentClaim.phaseComplete !== true,
         labels: [
           'engine:review',
           ...(this.currentClaim.phaseComplete === true ? [] : []),
@@ -422,6 +435,7 @@ class Harness implements
         implementationSummary: this.currentClaim.phaseComplete === true
           ? 'Adopt the verified marketplace mutation.'
           : undefined,
+        openChildKinds: [...this.otherOpenChildKinds],
         human: {
           active: this.humanMutations > 0,
           draft: this.humanMutations > 0,
@@ -435,6 +449,7 @@ class Harness implements
       },
       ...(this.child === undefined ? {} : { child: this.child }),
       ...(this.reviewClaim === undefined
+        || omitReviewClaim
         ? {}
         : { reviewClaim: this.reviewClaim }),
       trustedOperatorIds: this.trustedOperatorIds,
@@ -473,14 +488,18 @@ class Harness implements
   }
 
   async verify(
-    input: { readonly repositoryPath: string },
+    input: { readonly repositoryPath: string; readonly deadline?: string },
   ): Promise<MarketplaceMutationVerificationResult> {
     this.verificationRepositoryPaths.push(input.repositoryPath);
+    if (input.deadline !== undefined) {
+      this.verificationDeadlines.push(input.deadline);
+    }
     if (this.verificationError !== undefined) throw this.verificationError;
+    this.afterVerification?.();
     const common = {
       profile: 'jinn-mono.v1' as const,
       workspaces: ['packages/autopilot'] as const,
-      commands: ['packages/autopilot:install'],
+          commands: ['packages/autopilot:install'],
     };
     return this.verificationStatus === 'passed'
       ? { ...common, status: 'passed' }
@@ -488,7 +507,7 @@ class Harness implements
           ...common,
           status: 'failed',
           failedCommand: 'packages/autopilot:typecheck',
-          detail: 'typecheck failed',
+          detail: this.verificationDetail,
         };
   }
 
@@ -520,6 +539,11 @@ class Harness implements
   async release(claim: ConfirmedMarketplaceReviewClaim): Promise<void> {
     expect(claim).toBe(this.reviewClaim);
     this.reviewClaimReleases += 1;
+    if (this.reviewClaimReleaseErrorOnce !== undefined) {
+      const error = this.reviewClaimReleaseErrorOnce;
+      this.reviewClaimReleaseErrorOnce = undefined;
+      throw error;
+    }
   }
 
   readonly protocol: ImplementationSessionProtocol = {
@@ -626,6 +650,7 @@ class Harness implements
       tree: HOST_TREE,
       changedPaths: ['value.txt'],
     };
+    this.afterPatchApplication?.();
     return { byteLength: new TextEncoder().encode(PATCH).byteLength, touchedPaths: ['value.txt'] };
   }
 
@@ -807,6 +832,26 @@ describe('marketplace mutation adoption workflows', () => {
     expect(harness.childCloseMutations).toBe(1);
   });
 
+  it('waits for every other open child before acquiring the exact-head review', async () => {
+    const harness = new Harness('fix-child');
+    harness.otherOpenChildKinds = ['ci-failure'];
+
+    await expect(adopt(harness)).resolves.toEqual({
+      status: 'recoverable',
+      stage: 'review-eligibility',
+      detail:
+        'Exact-head review is blocked by open child work: ci-failure',
+    });
+    expect(harness.reviewClaimMutations).toBe(0);
+
+    harness.otherOpenChildKinds = [];
+    await expect(adopt(harness)).resolves.toMatchObject({
+      status: 'accepted',
+      operation: 'child-complete',
+    });
+    expect(harness.reviewClaimMutations).toBe(1);
+  });
+
   it('turns a Human mutation result into a durable Human hold and rejected receipt', async () => {
     const harness = new Harness();
     harness.deliveryValue = delivery('implement', mutationResult('human'));
@@ -838,6 +883,57 @@ describe('marketplace mutation adoption workflows', () => {
 });
 
 describe('marketplace mutation adoption rejection policy', () => {
+  it('rejects at the exact Solution-adoption cutoff before worktree mutation', async () => {
+    const harness = new Harness();
+    harness.clock = () => new Date('2026-07-24T13:30:00.000Z');
+
+    await expect(adopt(harness)).resolves.toMatchObject({
+      status: 'rejected',
+      reason: 'internal-adoption-failure',
+      detail: 'solution-adoption-deadline-exceeded',
+    });
+    expect(harness.applyMutations).toBe(0);
+    expect(harness.commitMutations).toBe(0);
+  });
+
+  it('does not commit when verification consumes the remaining adoption budget', async () => {
+    const harness = new Harness();
+    let now = new Date('2026-07-24T13:29:59.000Z');
+    harness.clock = () => now;
+    harness.afterVerification = () => {
+      now = new Date('2026-07-24T13:30:00.000Z');
+    };
+
+    await expect(adopt(harness)).resolves.toMatchObject({
+      status: 'rejected',
+      reason: 'internal-adoption-failure',
+      detail: 'solution-adoption-deadline-exceeded',
+    });
+    expect(harness.verificationDeadlines).toEqual([
+      '2026-07-24T13:30:00.000Z',
+    ]);
+    expect(harness.applyMutations).toBe(1);
+    expect(harness.commitMutations).toBe(0);
+  });
+
+  it('durably rejects when patch application consumes the remaining adoption budget', async () => {
+    const harness = new Harness();
+    let now = new Date('2026-07-24T13:29:59.000Z');
+    harness.clock = () => now;
+    harness.afterPatchApplication = () => {
+      now = new Date('2026-07-24T13:30:00.000Z');
+    };
+
+    await expect(adopt(harness)).resolves.toMatchObject({
+      status: 'rejected',
+      reason: 'internal-adoption-failure',
+      publication: 'published',
+    });
+    expect(harness.verificationRepositoryPaths).toHaveLength(0);
+    expect(harness.commitMutations).toBe(0);
+    expect(harness.comments).toHaveLength(1);
+  });
+
   it('rejects a full-correlation mismatch before effects', async () => {
     const harness = new Harness();
     harness.deliveryValue = delivery('implement', {
@@ -955,6 +1051,33 @@ describe('marketplace mutation adoption rejection policy', () => {
     expect(harness.applyMutations).toBe(0);
   });
 
+  it.each([
+    ['newline', 'unsafe\nsummary'],
+    ['carriage return', 'unsafe\rsummary'],
+    ['NUL', 'unsafe\u0000summary'],
+  ])(
+    'rejects a mutation summary containing %s before touching the worktree',
+    async (_name, summary) => {
+      const harness = new Harness();
+      const result = mutationResult() as Extract<
+        AutopilotMutationResult,
+        { readonly outcome: 'mutation-complete' }
+      >;
+      harness.deliveryValue = delivery('implement', {
+        ...result,
+        summary,
+      });
+
+      await expect(adopt(harness)).resolves.toMatchObject({
+        status: 'rejected',
+        reason: 'invalid-artifact',
+      });
+      expect(harness.applyMutations).toBe(0);
+      expect(harness.verificationRepositoryPaths).toHaveLength(0);
+      expect(harness.commitMutations).toBe(0);
+    },
+  );
+
   it('maps apply-check failure to patch-does-not-apply', async () => {
     const harness = new Harness();
     harness.patchError = new MarketplacePatchCheckError(new Error('does not apply'));
@@ -977,6 +1100,33 @@ describe('marketplace mutation adoption rejection policy', () => {
     expect(harness.applyMutations).toBe(1);
     expect(harness.commitMutations).toBe(0);
     expect(harness.checkpointMutations).toBe(0);
+  });
+
+  it('publishes a bounded valid receipt for oversized verification output', async () => {
+    const harness = new Harness();
+    harness.verificationStatus = 'failed';
+    harness.verificationDetail = `${'é'.repeat(6_000)}\u0000tail`;
+
+    const result = await adopt(harness);
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'verification-failed',
+      detail: `packages/autopilot:typecheck: ${harness.verificationDetail}`,
+    });
+    expect(harness.comments).toHaveLength(1);
+    const receipt = parseAdoptionReceiptComment(harness.comments[0]!.body)?.receipt;
+    expect(receipt).toMatchObject({
+      disposition: 'rejected',
+      reason: 'verification-failed',
+    });
+    if (receipt?.disposition !== 'rejected') {
+      throw new Error('expected rejected receipt');
+    }
+    expect(receipt.detail).not.toContain('\u0000');
+    expect(new TextEncoder().encode(receipt.detail).byteLength)
+      .toBeLessThanOrEqual(8 * 1024);
+    expect(receipt.detail).toContain('[truncated for adoption receipt]');
   });
 
   it.each(['invalid-path', 'unsupported-path'] as const)(
@@ -1054,6 +1204,25 @@ describe('marketplace mutation adoption rejection policy', () => {
     expect(harness.humanMutations).toBe(1);
     expect(harness.reviewClaimReleases).toBe(1);
     expect(harness.comments).toHaveLength(1);
+  });
+
+  it('persists a rejection before releasing its linked review claim and retries release idempotently', async () => {
+    const harness = new Harness();
+    harness.contradictReviewClaimReadbackOnce = true;
+    harness.reviewClaimReleaseErrorOnce =
+      new Error('simulated release transport failure');
+
+    await expect(adopt(harness)).resolves.toMatchObject({
+      status: 'recoverable',
+      detail: 'simulated release transport failure',
+    });
+    expect(harness.receiptRecords).toHaveLength(1);
+    expect(harness.humanMutations).toBe(1);
+    expect(harness.reviewClaimReleases).toBe(1);
+
+    expect(harness.receiptRecords).toHaveLength(1);
+    expect(harness.comments).toHaveLength(1);
+    expect(harness.reviewClaimReleases).toBe(1);
   });
 });
 
@@ -1158,6 +1327,25 @@ describe('marketplace mutation adoption crash recovery', () => {
     expect(harness.completionMutations).toBe(1);
     expect(harness.reviewClaimMutations).toBe(1);
     expect(harness.comments).toHaveLength(1);
+  });
+
+  it('reconstructs completed durable effects after the adoption cutoff', async () => {
+    const harness = new Harness();
+    harness.crashBoundary = 'completed';
+
+    await expect(adopt(harness)).resolves.toMatchObject({
+      status: 'recoverable',
+      detail: 'crash after completed',
+    });
+    harness.clock = () => new Date('2026-07-24T14:00:00.000Z');
+    await expect(adopt(harness)).resolves.toMatchObject({
+      status: 'accepted',
+      publication: 'published',
+    });
+    expect(harness.applyMutations).toBe(1);
+    expect(harness.commitMutations).toBe(1);
+    expect(harness.completionMutations).toBe(1);
+    expect(harness.reviewClaimMutations).toBe(1);
   });
 });
 

@@ -57,6 +57,8 @@ export interface MarketplaceMutationVerificationInput {
   readonly profile: JinnMonoVerificationProfile;
   readonly repositoryPath: string;
   readonly touchedPaths: readonly string[];
+  /** End-to-end Solution adoption cutoff; verification must finish before it. */
+  readonly deadline?: string;
 }
 
 export type MarketplaceMutationVerificationResult =
@@ -76,6 +78,10 @@ export type MarketplaceMutationVerificationResult =
     };
 
 export interface MarketplaceMutationVerificationPort {
+  preflight?(): Promise<{
+    readonly ok: boolean;
+    readonly detail?: string;
+  }>;
   verify(
     input: MarketplaceMutationVerificationInput,
   ): Promise<MarketplaceMutationVerificationResult>;

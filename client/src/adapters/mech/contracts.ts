@@ -564,7 +564,7 @@ export interface ClaimDeliveryOptions {
   verdictCode?: VerdictCode;
 }
 
-async function isDeliveryAlreadyClaimed(
+export async function isDeliveryAlreadyClaimed(
   publicClient: PublicClient,
   routerAddress: Address,
   requestId: Hex,

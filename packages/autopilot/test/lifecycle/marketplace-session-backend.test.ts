@@ -121,7 +121,7 @@ describe('marketplace SessionExecutionBackend', () => {
       backend: 'marketplace',
       taskId: '501',
       taskCid: 'bafy-task',
-      deadline: '2026-07-23T13:30:00.000Z',
+      deadline: '2026-07-23T15:00:00.000Z',
       creationTransactionHash: `0x${'a'.repeat(64)}`,
       creationBlockNumber: 123,
       solverNetManifestCid: 'bafy-manifest',
@@ -156,12 +156,12 @@ describe('marketplace SessionExecutionBackend', () => {
         maxClaimsPerOperator: 1,
         claimWindowStartTs: Date.parse('2026-07-23T12:00:00.000Z'),
         claimWindowEndTs: Date.parse('2026-07-23T12:15:00.000Z'),
-        submissionDeadlineTs: Date.parse('2026-07-23T13:30:00.000Z'),
+        submissionDeadlineTs: Date.parse('2026-07-23T15:00:00.000Z'),
         requiredVerdicts: 1,
       },
       window: {
         startTs: Date.parse('2026-07-23T12:00:00.000Z'),
-        endTs: Date.parse('2026-07-23T13:30:00.000Z'),
+        endTs: Date.parse('2026-07-23T15:00:00.000Z'),
       },
       spec: {
         schemaVersion: 'jinn-repo.v1',
@@ -182,6 +182,10 @@ describe('marketplace SessionExecutionBackend', () => {
         },
       },
     });
+    expect(
+      (request.window as { endTs: number }).endTs
+      - Date.parse('2026-07-23T13:00:00.000Z'),
+    ).toBe(2 * 60 * 60 * 1000);
     expect(request).not.toHaveProperty('solverNet');
     expect(request).not.toHaveProperty('solverNetManifestCid');
     expect(requestText).not.toContain('must-not-leak');
@@ -339,7 +343,7 @@ describe('marketplace SessionExecutionBackend', () => {
         backend: 'marketplace',
         taskId: '501',
         taskCid: 'bafy-task',
-        deadline: '2026-07-23T13:30:00.000Z',
+        deadline: '2026-07-23T15:00:00.000Z',
         requestFile: join(root, 'marketplace-request.json'),
         creationTransactionHash: `0x${'b'.repeat(64)}`,
         creationBlockNumber: 456,

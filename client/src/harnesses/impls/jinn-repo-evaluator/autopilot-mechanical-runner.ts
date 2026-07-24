@@ -66,6 +66,30 @@ function prohibitedPath(path: string): boolean {
   ) {
     return true;
   }
+  const components = path.split('/');
+  const basename = components.at(-1)!.toLowerCase();
+  if (
+    [
+      'package.json',
+      'yarn.lock',
+      'package-lock.json',
+      'pnpm-lock.yaml',
+      '.yarnrc.yml',
+      '.pnp.cjs',
+      '.pnp.loader.mjs',
+    ].includes(basename)
+    || components.some((component) =>
+      ['.yarn', 'node_modules', 'test', 'tests', '__tests__', '__snapshots__']
+        .includes(component.toLowerCase()))
+    || /^tsconfig(?:\.[a-z0-9_-]+)*\.json$/u.test(basename)
+    || /^(?:vitest|vite|jest|hardhat|playwright|eslint|babel|rollup|webpack)(?:\.[a-z0-9_-]+)*\.config\.[a-z0-9]+$/u
+      .test(basename)
+    || /^\.eslintrc(?:\.[a-z0-9]+)?$/u.test(basename)
+    || /\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(basename)
+    || basename.endsWith('.snap')
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -98,6 +122,7 @@ export type ImmutableMechanicalVerification =
   | { kind: 'unscorable'; detail: string };
 
 export interface ImmutableMechanicalVerifier {
+  isReady?(): Promise<{ ready: boolean; reason?: string }>;
   verify(input: {
     context: AutopilotEvaluationContext;
     checkoutDir: string;
@@ -221,14 +246,18 @@ export class ExactHeadMechanicalRunner implements AutopilotMechanicalRunner {
       }
 
       try {
-        await runCommand('git', [
+        const mergeBase = await runCommand('git', [
           '-C',
           repoDir,
           'merge-base',
-          '--is-ancestor',
           context.reviewTarget.baseOid,
           context.reviewTarget.resultingHead,
         ]);
+        if (!/^[0-9a-f]{40,64}$/i.test(mergeBase.stdout.trim())) {
+          return await unscorable(
+            'base-head-mismatch: Git returned no valid common ancestor',
+          );
+        }
       } catch (error) {
         if (cancelled(error)) return await unscorable('evaluation-cancelled');
         return await unscorable(

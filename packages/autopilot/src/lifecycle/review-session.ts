@@ -23,6 +23,59 @@ export interface ReviewSessionAuthority {
   readonly record: ReviewClaimRecord;
 }
 
+export function assertReviewClaimTransition(
+  child: ReviewClaimRecord,
+  parent: ReviewClaimRecord,
+): void {
+  if (child.prNumber !== parent.prNumber) {
+    throw new Error('Review authority changed PR identity');
+  }
+  if (Date.parse(child.recordedAt) < Date.parse(parent.recordedAt)) {
+    throw new Error('Review authority timestamp moved backwards');
+  }
+  if (child.generation !== parent.generation) {
+    if (
+      child.state !== 'active'
+      || child.attempt === parent.attempt
+      || !['stale', 'terminal-approved'].includes(parent.state)
+    ) {
+      throw new Error('Review authority has an invalid generation transition');
+    }
+    return;
+  }
+  if (
+    child.attempt !== parent.attempt
+    || child.reviewer.toLowerCase() !== parent.reviewer.toLowerCase()
+    || child.head !== parent.head
+  ) {
+    throw new Error('Review authority changed identity within a generation');
+  }
+  const allowed = new Set<string>(
+    parent.state === 'active'
+      ? ['verdict-intent', 'stale', 'human']
+      : parent.state === 'verdict-intent'
+        ? ['terminal-approved', 'stale', 'human']
+        : parent.state === 'terminal-approved' || parent.state === 'stale'
+          ? ['human']
+          : [],
+  );
+  if (!allowed.has(child.state)) {
+    throw new Error(
+      `Review authority has invalid ${parent.state} -> ${child.state} transition`,
+    );
+  }
+  if (
+    parent.state === 'verdict-intent'
+    && child.state === 'terminal-approved'
+    && (
+      child.verdict.state !== parent.verdict.state
+      || child.verdict.marker !== parent.verdict.marker
+    )
+  ) {
+    throw new Error('Review authority changed verdict intent at terminalization');
+  }
+}
+
 export interface ReviewSessionPullRequest {
   readonly number: number;
   readonly issueNumber: number;
@@ -482,8 +535,23 @@ async function releaseRequestedChangesProjection(
     );
   }
   if (pullRequest.labels.includes('review:approved')) {
-    if (await humanIsActive(manifest, port)) return { status: 'human', head };
+    if (await humanIsActive(manifest, port)) {
+      return enterHuman(
+        manifest,
+        'An existing Human hold remains authoritative for this review.',
+        port,
+        pullRequest,
+      );
+    }
     await port.setPullRequestLabel(manifest.prNumber!, head, 'review:approved', false);
+  }
+  if (await humanIsActive(manifest, port)) {
+    return enterHuman(
+      manifest,
+      'An existing Human hold remains authoritative for this review.',
+      port,
+      pullRequest,
+    );
   }
   return { status: 'requested-changes', head };
 }
@@ -507,7 +575,14 @@ async function reviewVerdict(
   if (authorityProblem !== undefined) {
     return enterHuman(manifest, authorityProblem, port, pullRequest);
   }
-  if (await humanIsActive(manifest, port)) return { status: 'human', head };
+  if (await humanIsActive(manifest, port)) {
+    return enterHuman(
+      manifest,
+      'An existing Human hold remains authoritative for this review.',
+      port,
+      pullRequest,
+    );
+  }
   if (state === 'APPROVE' && manifest.reviewApprovalPolicy === 'human-codeowner') {
     return enterHuman(manifest, 'Human CODEOWNER approval is required.', port);
   }
@@ -623,7 +698,14 @@ async function reviewVerdict(
     await port.setPullRequestLabel(manifest.prNumber!, head, 'review:approved', true);
   }
   if (pullRequest.labels.includes('review:changes-requested')) {
-    if (await humanIsActive(manifest, port)) return { status: 'human', head };
+    if (await humanIsActive(manifest, port)) {
+      return enterHuman(
+        manifest,
+        'An existing Human hold remains authoritative for this review.',
+        port,
+        pullRequest,
+      );
+    }
     await port.setPullRequestLabel(
       manifest.prNumber!,
       head,
@@ -631,11 +713,25 @@ async function reviewVerdict(
       false,
     );
   }
-  if (await humanIsActive(manifest, port)) return { status: 'human', head };
+  if (await humanIsActive(manifest, port)) {
+    return enterHuman(
+      manifest,
+      'An existing Human hold remains authoritative for this review.',
+      port,
+      pullRequest,
+    );
+  }
   // Stage 3: In Review Status paint is painter-owned (no setProjectStatus).
   await requireNoNativeChangeRequests(manifest, port);
   pullRequest = await requirePullRequest(manifest, port);
-  if (await humanIsActive(manifest, port)) return { status: 'human', head };
+  if (await humanIsActive(manifest, port)) {
+    return enterHuman(
+      manifest,
+      'An existing Human hold remains authoritative for this review.',
+      port,
+      pullRequest,
+    );
+  }
   if (pullRequest.draft) {
     await port.setPullRequestDraft(manifest.prNumber!, head, false);
   }
@@ -664,8 +760,19 @@ async function reviewFindings(
   if (authorityProblem !== undefined) {
     return enterHuman(manifest, authorityProblem, port, pullRequest);
   }
-  if (await humanIsActive(manifest, port)) return { status: 'human', head };
-  if (authority.record.state !== 'active' && authority.record.state !== 'verdict-intent') {
+  if (await humanIsActive(manifest, port)) {
+    return enterHuman(
+      manifest,
+      'An existing Human hold remains authoritative for this review.',
+      port,
+      pullRequest,
+    );
+  }
+  if (
+    authority.record.state !== 'active'
+    && authority.record.state !== 'verdict-intent'
+    && authority.record.state !== 'stale'
+  ) {
     throw new Error(`Review findings are invalid from ${authority.record.state} authority`);
   }
 
@@ -685,8 +792,13 @@ async function reviewFindings(
     );
   }
 
-  let intent: Extract<ReviewClaimRecord, { readonly state: 'verdict-intent' }>;
-  if (authority.record.state === 'verdict-intent') {
+  let intent: Extract<ReviewClaimRecord, { readonly state: 'verdict-intent' }>
+    | undefined;
+  if (authority.record.state === 'stale') {
+    // Crash recovery after the finding child, native review, and claim release:
+    // the immutable child is re-read idempotently above and receipt fact
+    // verification proves the intent/native marker before publication.
+  } else if (authority.record.state === 'verdict-intent') {
     if (authority.record.verdict.state !== 'REQUEST_CHANGES') {
       throw new Error('Review findings retry contradicts the current intent');
     }
@@ -704,8 +816,10 @@ async function reviewFindings(
     authority = await requireAuthority(manifest, port);
   }
 
-  let confirmed = await matchingNativeReview(manifest, intent.verdict, port);
-  if (confirmed === undefined) {
+  let confirmed = intent === undefined
+    ? undefined
+    : await matchingNativeReview(manifest, intent.verdict, port);
+  if (intent !== undefined && confirmed === undefined) {
     const marker = canonicalMarker(manifest, intent.verdict);
     let submissionError: unknown;
     try {
@@ -725,7 +839,9 @@ async function reviewFindings(
       throw submissionError;
     }
   }
-  if (confirmed === undefined) return { status: 'ambiguous', head };
+  if (intent !== undefined && confirmed === undefined) {
+    return { status: 'ambiguous', head };
+  }
 
   // Release claim (stale) — children path does not enter fixing / redraft.
   if (authority.record.state !== 'stale') {
@@ -744,6 +860,15 @@ async function reviewFindings(
   }
   if (pullRequest.labels.includes('review:approved')) {
     await port.setPullRequestLabel(manifest.prNumber!, head, 'review:approved', false);
+  }
+  pullRequest = await requirePullRequest(manifest, port);
+  if (await humanIsActive(manifest, port)) {
+    return enterHuman(
+      manifest,
+      'An existing Human hold remains authoritative for this review.',
+      port,
+      pullRequest,
+    );
   }
   return {
     status: 'filed',

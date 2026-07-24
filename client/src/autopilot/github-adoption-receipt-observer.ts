@@ -39,6 +39,14 @@ export interface GitHubPullRequestFacts {
   readonly labels: readonly string[];
 }
 
+export interface GitHubIssueFacts {
+  readonly number: number;
+  readonly state: 'OPEN' | 'CLOSED';
+  readonly body: string;
+  readonly labels: readonly string[];
+  readonly isPullRequest: boolean;
+}
+
 export type GitHubNativeReviewState =
   | 'APPROVED'
   | 'CHANGES_REQUESTED'
@@ -60,16 +68,52 @@ export interface GitHubNativeReviewPage {
   readonly nextCursor?: string;
 }
 
+export type GitHubReviewClaimState =
+  | 'active'
+  | 'verdict-intent'
+  | 'terminal-approved'
+  | 'human'
+  | 'stale';
+
+export interface GitHubReviewClaimRecord {
+  readonly protocolVersion: 2;
+  readonly prNumber: number;
+  readonly generation: string;
+  readonly attempt: string;
+  readonly reviewer: string;
+  readonly head: string;
+  readonly state: GitHubReviewClaimState;
+  readonly recordedAt: string;
+  readonly verdict?: {
+    readonly state: 'APPROVE' | 'REQUEST_CHANGES';
+    readonly marker: string;
+  };
+}
+
+export interface GitHubReviewAuthority {
+  readonly oid: string;
+  /** Current record first, followed by its bounded first-parent history. */
+  readonly history: readonly {
+    readonly oid: string;
+    readonly record: GitHubReviewClaimRecord;
+  }[];
+}
+
 export interface AutopilotGitHubReadPort {
   listPrIssueComments(input: {
     readonly prNumber: number;
     readonly cursor?: string;
   }): Promise<GitHubIssueCommentPage>;
   readPullRequest(prNumber: number): Promise<GitHubPullRequestFacts>;
+  readIssue(issueNumber: number): Promise<GitHubIssueFacts>;
   listPullRequestReviews(input: {
     readonly prNumber: number;
     readonly cursor?: string;
   }): Promise<GitHubNativeReviewPage>;
+  readReviewAuthority(
+    prNumber: number,
+    expectedRootOid?: string,
+  ): Promise<GitHubReviewAuthority>;
 }
 
 type ReceiptRole = AutopilotAdoptionReceipt['role'];
@@ -286,6 +330,131 @@ function effectiveReviews(
   return [...latest.values()];
 }
 
+function expectedReviewClaimState(
+  operation: AcceptedOperation,
+): GitHubReviewClaimState {
+  if (operation === 'review-verdict') return 'terminal-approved';
+  if (operation === 'review-findings') return 'stale';
+  return 'human';
+}
+
+function automatedReviewMarker(record: GitHubReviewClaimRecord): string | undefined {
+  if (record.verdict === undefined) return undefined;
+  return `<!-- jinn-autopilot-review:v2 generation=${record.generation} `
+    + `attempt=${record.attempt} intent=${record.verdict.marker} `
+    + `reviewer=${record.reviewer} head=${record.head} `
+    + `verdict=${record.verdict.state} -->`;
+}
+
+async function verifyReviewAuthority(
+  receipt: Extract<AutopilotAdoptionReceipt, { disposition: 'accepted' }>,
+  input: ObserveExactAutopilotAdoptionReceiptInput,
+): Promise<{
+  readonly problem: string | null;
+  readonly verdictRecord?: GitHubReviewClaimRecord;
+  readonly currentRecord?: GitHubReviewClaimRecord;
+  readonly advancedBeyondReceipt?: boolean;
+}> {
+  if (
+    receipt.reviewGeneration === undefined
+    || receipt.reviewRefOid === undefined
+  ) {
+    return {
+      problem: 'accepted receipt omitted exact review generation authority',
+    };
+  }
+  const authority = await input.github.readReviewAuthority(
+    receipt.prNumber,
+    receipt.reviewRefOid,
+  );
+  const current = authority.history[0];
+  if (current === undefined || current.oid !== authority.oid) {
+    return { problem: 'current review authority is not observable' };
+  }
+  const authors = new Set(input.receiptAuthors.map(normalizedLogin));
+  if (receipt.role === 'solution') {
+    const exactCurrent =
+      authority.oid === receipt.reviewRefOid
+      && current.record.protocolVersion === 2
+      && current.record.prNumber === receipt.prNumber
+      && current.record.generation === receipt.reviewGeneration
+      && current.record.head === receipt.resultingHead
+      && current.record.state === 'active'
+      && authors.has(normalizedLogin(current.record.reviewer));
+    return exactCurrent
+      ? {
+          problem: null,
+          currentRecord: current.record,
+          advancedBeyondReceipt: false,
+        }
+      : { problem: 'Solution review generation is not the exact active root' };
+  }
+
+  const rootIndex = authority.history.findIndex(({ oid }) =>
+    oid === receipt.reviewRefOid);
+  const root = authority.history[rootIndex];
+  if (
+    root === undefined
+    || root.record.state !== 'active'
+    || root.record.protocolVersion !== 2
+    || root.record.prNumber !== receipt.prNumber
+    || root.record.generation !== receipt.reviewGeneration
+    || root.record.head !== receipt.reviewedHead
+    || !authors.has(normalizedLogin(root.record.reviewer))
+  ) {
+    return {
+      problem:
+        'Verdict review generation root differs from the receipt',
+    };
+  }
+  const terminalState = expectedReviewClaimState(receipt.operation);
+  const terminalIndex = authority.history.findIndex(({ record }, index) =>
+    index < rootIndex
+    && record.generation === root.record.generation
+    && record.attempt === root.record.attempt
+    && normalizedLogin(record.reviewer)
+      === normalizedLogin(root.record.reviewer)
+    && record.head === root.record.head
+    && record.state === terminalState);
+  const terminal = authority.history[terminalIndex];
+  if (terminal === undefined) {
+    return {
+      problem:
+        'Verdict review generation is not an operation-compatible descendant',
+    };
+  }
+  const advancedBeyondReceipt = terminal.oid !== current.oid;
+  if (receipt.operation === 'human') {
+    return {
+      problem: null,
+      currentRecord: current.record,
+      advancedBeyondReceipt,
+    };
+  }
+  const verdictState = receipt.operation === 'review-verdict'
+    ? 'APPROVE'
+    : 'REQUEST_CHANGES';
+  const verdictRecord = authority.history.find(({ record }, index) =>
+    index >= terminalIndex
+    && index < rootIndex
+    && record.state === 'verdict-intent'
+    && record.generation === receipt.reviewGeneration
+    && record.attempt === root.record.attempt
+    && normalizedLogin(record.reviewer)
+      === normalizedLogin(root.record.reviewer)
+    && record.head === root.record.head
+    && record.verdict?.state === verdictState
+  )?.record;
+  return verdictRecord === undefined
+    ? { problem: 'Verdict review intent is not observable in exact ancestry' }
+    : {
+        problem: null,
+        verdictRecord,
+        currentRecord: current.record,
+        advancedBeyondReceipt,
+      };
+}
+
 async function verifyAcceptedReceiptFacts(
   receipt: Extract<AutopilotAdoptionReceipt, { disposition: 'accepted' }>,
   input: ObserveExactAutopilotAdoptionReceiptInput,
@@ -300,20 +469,36 @@ async function verifyAcceptedReceiptFacts(
     return `accepted operation ${receipt.operation} does not match delivered output`;
   }
 
+  const reviewAuthority = await verifyReviewAuthority(receipt, input);
+  if (reviewAuthority.problem !== null) return reviewAuthority.problem;
   const pr = await input.github.readPullRequest(receipt.prNumber);
   const exactHead = receipt.role === 'solution'
     ? receipt.resultingHead
     : receipt.reviewedHead;
-  if (pr.headSha !== exactHead) {
-    return `current PR head ${pr.headSha} does not match adopted head ${exactHead}`;
+  const historicalVerdict =
+    receipt.role === 'verdict'
+    && reviewAuthority.advancedBeyondReceipt === true;
+  if (
+    pr.headSha !== exactHead
+    && !(
+      historicalVerdict
+      && reviewAuthority.currentRecord?.head === pr.headSha
+    )
+  ) {
+    return `current PR head ${pr.headSha} does not match adopted or proven descendant head ${exactHead}`;
   }
-
   if (receipt.role === 'solution') return null;
   const label = expectedLabel(receipt.operation);
-  if (label !== undefined && !pr.labels.includes(label)) {
+  if (
+    !historicalVerdict
+    && label !== undefined
+    && !pr.labels.includes(label)
+  ) {
     return `native ${receipt.operation} label ${label} is not observable`;
   }
   if (
+    !historicalVerdict
+    &&
     receipt.operation === 'review-verdict'
     && (
       pr.labels.includes('review:changes-requested')
@@ -323,6 +508,8 @@ async function verifyAcceptedReceiptFacts(
     return 'native approval projection conflicts with requested-changes or Human';
   }
   if (
+    !historicalVerdict
+    &&
     receipt.operation === 'review-findings'
     && (
       pr.labels.includes('review:approved')
@@ -331,17 +518,47 @@ async function verifyAcceptedReceiptFacts(
   ) {
     return 'native requested-changes projection conflicts with approval or Human';
   }
+  if (receipt.operation === 'review-findings') {
+    const child = await input.github.readIssue(receipt.childIssueNumber);
+    const marker =
+      `<!-- jinn-autopilot:child pr=${receipt.prNumber} kind=review-finding -->`;
+    const canonicalChildMarkers = child.body.match(
+      /<!-- jinn-autopilot:child pr=\d+ kind=(?:review-finding|reconcile|ci-failure) -->/g,
+    ) ?? [];
+    if (
+      child.number !== receipt.childIssueNumber
+      || (!historicalVerdict && child.state !== 'OPEN')
+      || child.isPullRequest
+      || !(child.body === marker || child.body.startsWith(`${marker}\n`))
+      || canonicalChildMarkers.length !== 1
+      || !child.labels.includes('review-finding')
+      || !child.labels.includes('effort:medium')
+      || !child.labels.includes('priority:p1')
+    ) {
+      return 'exact review-finding child is not observable';
+    }
+  }
   const state = expectedReviewState(receipt.operation);
   if (state === undefined) return null;
 
-  const authors = new Set(input.receiptAuthors.map(normalizedLogin));
-  const reviews = effectiveReviews(await listAllReviews(input));
+  const allReviews = await listAllReviews(input);
+  const reviews = historicalVerdict ? allReviews : effectiveReviews(allReviews);
+  const exactReviewer = reviewAuthority.verdictRecord?.reviewer;
   const matching = reviews.some((review) => (
-    authors.has(normalizedLogin(review.authorLogin))
+    exactReviewer !== undefined
+    && normalizedLogin(review.authorLogin) === normalizedLogin(exactReviewer)
     && review.state === state
     && review.commitId === receipt.reviewedHead
+    && (
+      reviewAuthority.verdictRecord === undefined
+      || review.body.includes(
+        automatedReviewMarker(reviewAuthority.verdictRecord)!,
+      )
+    )
   ));
   if (
+    !historicalVerdict
+    &&
     receipt.operation === 'review-verdict'
     && reviews.some((review) => review.state === 'CHANGES_REQUESTED')
   ) {

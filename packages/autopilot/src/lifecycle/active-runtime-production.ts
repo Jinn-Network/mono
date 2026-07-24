@@ -75,6 +75,8 @@ import {
   makeMarketplaceSessionBackend,
   MARKETPLACE_AGENT_SOFT_DEADLINE_MS,
   MARKETPLACE_ADOPTION_RESERVE_MS,
+  MARKETPLACE_EVALUATOR_SOFT_DEADLINE_MS,
+  MARKETPLACE_VERDICT_ADOPTION_RESERVE_MS,
   type MarketplaceSessionBackend,
 } from './marketplace-session-backend.js';
 import {
@@ -85,6 +87,7 @@ import {
 } from './marketplace-delivery-client.js';
 import {
   makeProductionMarketplaceMutationAdoptionCoordinator,
+  makeProductionMarketplaceVerificationPort,
 } from './marketplace-mutation-adoption-production.js';
 import type {
   ConfirmedMarketplaceReviewClaim,
@@ -139,6 +142,10 @@ export interface ProductionActiveRuntimeOptions {
     readonly ok: boolean;
     readonly detail?: string;
   }>;
+  readonly marketplaceVerificationPreflight?: () => Promise<{
+    readonly ok: boolean;
+    readonly detail?: string;
+  }>;
   /** Injectable exact-delivery observer for production recovery tests. */
   readonly marketplaceSolutionObserver?: (
     manifestPath: string,
@@ -151,6 +158,8 @@ export interface ProductionActiveRuntimeOptions {
     >;
     readonly reviewClaims: MarketplaceReviewClaimPort;
   }) => Promise<MarketplaceMutationAdoptionResult>;
+  /** Injectable anchored claim authority for marketplace recovery tests. */
+  readonly marketplaceReviewClaims?: MarketplaceReviewClaimPort;
   /** Injectable exact Verdict observer for production recovery tests. */
   readonly marketplaceVerdictObserver?: (
     originManifestPath: string,
@@ -163,6 +172,10 @@ export interface ProductionActiveRuntimeOptions {
       { readonly status: 'verified' }
     >,
   ) => Promise<MarketplaceReviewAdoptionResult>;
+  /** Injectable crash boundary for two-manifest marketplace recovery tests. */
+  readonly marketplaceRecoveryBoundary?: (
+    boundary: 'verdict-origin-exited' | 'verdict-review-exited',
+  ) => Promise<void> | void;
   readonly caps: {
     readonly implementation: number;
     readonly review: number;
@@ -219,6 +232,7 @@ export function makeProductionCapabilityPreflight(
   | 'executionBackendKind'
   | 'marketplacePreflight'
   | 'marketplaceRecovery'
+  | 'marketplaceVerificationPreflight'
   | 'staleAfterMs'
   >,
 ): () => Promise<{ readonly ok: boolean; readonly detail?: string }> {
@@ -256,7 +270,9 @@ export function makeProductionCapabilityPreflight(
       if (options.executionBackendKind === 'marketplace') {
         const remoteDeadlineMs =
           MARKETPLACE_AGENT_SOFT_DEADLINE_MS
-          + MARKETPLACE_ADOPTION_RESERVE_MS;
+          + MARKETPLACE_ADOPTION_RESERVE_MS
+          + MARKETPLACE_EVALUATOR_SOFT_DEADLINE_MS
+          + MARKETPLACE_VERDICT_ADOPTION_RESERVE_MS;
         if (
           options.staleAfterMs !== undefined
           && options.staleAfterMs <= remoteDeadlineMs
@@ -281,6 +297,19 @@ export function makeProductionCapabilityPreflight(
         if (!recovery.ok) {
           throw new Error(
             recovery.detail ?? 'marketplace attempt recovery failed',
+          );
+        }
+        if (options.marketplaceVerificationPreflight === undefined) {
+          throw new Error(
+            'marketplace immutable verification preflight is unavailable',
+          );
+        }
+        const verification =
+          await options.marketplaceVerificationPreflight();
+        if (!verification.ok) {
+          throw new Error(
+            verification.detail
+            ?? 'marketplace immutable verification preflight failed',
           );
         }
       } else if (options.config.runtime === 'hermes') {
@@ -317,6 +346,8 @@ export function makeProductionActiveRuntime(
   const remoteName = options.remoteName ?? AUTOPILOT_V2_REMOTE;
   const alive = options.isPidAlive ?? isPidAlive;
   const executionBackendKind = options.executionBackendKind ?? 'local';
+  const marketplaceVerification =
+    makeProductionMarketplaceVerificationPort(ambient);
   const implementationPreferred = selectCredential(
     options.credentials,
     { phase: 'implement' },
@@ -641,11 +672,6 @@ export function makeProductionActiveRuntime(
                       'Marketplace Verdict adoption returned a non-terminal state',
                     );
                   }
-                  markAttemptExited(
-                    attempt.paths.manifest,
-                    now,
-                    adoption.head,
-                  );
                   const origin = readAttemptManifest(originManifestPath);
                   if (origin.processState === 'running') {
                     markAttemptExited(
@@ -654,6 +680,17 @@ export function makeProductionActiveRuntime(
                       adoption.head,
                     );
                   }
+                  await options.marketplaceRecoveryBoundary?.(
+                    'verdict-origin-exited',
+                  );
+                  markAttemptExited(
+                    attempt.paths.manifest,
+                    now,
+                    adoption.head,
+                  );
+                  await options.marketplaceRecoveryBoundary?.(
+                    'verdict-review-exited',
+                  );
                 }
                 continue;
               }
@@ -712,6 +749,36 @@ export function makeProductionActiveRuntime(
               ) {
                 if (
                   attempt.execution.adoptionReceiptState?.disposition
+                    === 'rejected'
+                ) {
+                  const reviewManifestPath =
+                    attempt.execution.adoptionReceiptState.reviewManifestPath;
+                  if (reviewManifestPath !== undefined) {
+                    const reviewManifest =
+                      readAttemptManifest(reviewManifestPath);
+                    if (reviewManifest.processState === 'running') {
+                      const claim = confirmedReviewClaim(reviewManifest);
+                      if (claim === undefined) {
+                        throw new Error(
+                          'Rejected Solution has an invalid linked review attempt',
+                        );
+                      }
+                      await (
+                        options.marketplaceReviewClaims
+                        ?? makeAnchoredReviewClaimPort()
+                      ).release(claim);
+                      markAttemptExited(
+                        reviewManifestPath,
+                        now,
+                        reviewManifest.expectedHead,
+                      );
+                    }
+                  }
+                  markAttemptExited(attempt.paths.manifest, now);
+                  continue;
+                }
+                if (
+                  attempt.execution.adoptionReceiptState?.disposition
                     === 'accepted'
                 ) {
                   const reviewManifestPath =
@@ -735,7 +802,9 @@ export function makeProductionActiveRuntime(
                   );
                 }
                 if (delivery.status === 'verified') {
-                  const reviewClaims = makeAnchoredReviewClaimPort();
+                  const reviewClaims =
+                    options.marketplaceReviewClaims
+                    ?? makeAnchoredReviewClaimPort();
                   const adoption = options.marketplaceMutationAdopter === undefined
                     ? await makeProductionMarketplaceMutationAdoptionCoordinator({
                         originManifestPath: attempt.paths.manifest,
@@ -749,6 +818,7 @@ export function makeProductionActiveRuntime(
                         runner,
                         environment: ambient,
                         now,
+                        verification: marketplaceVerification,
                       }).adopt(delivery.reference)
                     : await options.marketplaceMutationAdopter({
                         observation: delivery,
@@ -872,6 +942,9 @@ export function makeProductionActiveRuntime(
       marketplacePreflight: options.marketplacePreflight
         ?? marketplaceBackend?.preflight,
       marketplaceRecovery: recoverMarketplaceAttempts,
+      marketplaceVerificationPreflight:
+        options.marketplaceVerificationPreflight
+        ?? marketplaceVerification.preflight,
     }),
     ...(options.newWorkPaused === undefined
       ? {}

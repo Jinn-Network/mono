@@ -20,6 +20,7 @@ import {
   callDeliverToMarketplace,
   claimDelivery,
   findLatestDeliveryForRequest,
+  isDeliveryAlreadyClaimed,
 } from '../../adapters/mech/contracts.js';
 
 // ── Deps ──────────────────────────────────────────────────────────────────────
@@ -217,6 +218,17 @@ export async function claimRouterDelivery(
   );
   console.log(`[harness-engine] claimDelivery tx=${claimTxHash}`);
   return claimTxHash;
+}
+
+export async function isRouterDeliveryClaimed(
+  requestId: Hex,
+  deps: DeliveryDeps,
+): Promise<boolean> {
+  return isDeliveryAlreadyClaimed(
+    deps.publicClient,
+    deps.routerAddress,
+    requestId,
+  );
 }
 
 /**

@@ -218,6 +218,10 @@ export function makeProductionReviewActionPort(
         body: review.body,
         submittedAt: review.submittedAt,
       })),
+      openChildKinds:
+        lifecycle?.kind === 'pull-request'
+          ? [...(lifecycle.openChildKinds ?? [])]
+          : [],
       ...(reviewClaim === undefined
         ? {}
         : { reviewRef: { oid: reviewClaim.oid, record: reviewClaim.record } }),

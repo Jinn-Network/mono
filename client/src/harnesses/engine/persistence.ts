@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS task_runs (
   adoption_receipt_location TEXT,
   adoption_receipt_authors  TEXT,
   adoption_wait_started_at  INTEGER,
+  adoption_observation_attempts INTEGER NOT NULL DEFAULT 0,
+  adoption_next_observation_at INTEGER,
   adoption_last_observation TEXT,
   adoption_accepted_receipt TEXT,
   adoption_last_error       TEXT,
@@ -206,6 +208,8 @@ export type TaskRunPatch = Partial<{
   adoptionReceiptLocation: AdoptionReceiptLocation | null;
   adoptionReceiptAuthors: string[] | null;
   adoptionWaitStartedAt: number | null;
+  adoptionObservationAttempts: number;
+  adoptionNextObservationAt: number | null;
   adoptionLastObservation: AdoptionObservation | null;
   adoptionAcceptedReceipt: AutopilotAdoptionReceipt | null;
   adoptionLastError: string | null;
@@ -266,6 +270,8 @@ interface RawRow {
   adoption_receipt_location: string | null;
   adoption_receipt_authors: string | null;
   adoption_wait_started_at: number | null;
+  adoption_observation_attempts: number;
+  adoption_next_observation_at: number | null;
   adoption_last_observation: string | null;
   adoption_accepted_receipt: string | null;
   adoption_last_error: string | null;
@@ -325,6 +331,8 @@ function runAdditiveMigrations(db: Database.Database): void {
     { column: 'adoption_receipt_location', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_receipt_location TEXT' },
     { column: 'adoption_receipt_authors', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_receipt_authors TEXT' },
     { column: 'adoption_wait_started_at', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_wait_started_at INTEGER' },
+    { column: 'adoption_observation_attempts', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_observation_attempts INTEGER NOT NULL DEFAULT 0' },
+    { column: 'adoption_next_observation_at', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_next_observation_at INTEGER' },
     { column: 'adoption_last_observation', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_last_observation TEXT' },
     { column: 'adoption_accepted_receipt', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_accepted_receipt TEXT' },
     { column: 'adoption_last_error', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_last_error TEXT' },
@@ -413,6 +421,8 @@ function rowToTaskRun(row: RawRow): PersistedTaskRun {
     adoptionReceiptLocation: parseJson<AdoptionReceiptLocation>(row.adoption_receipt_location),
     adoptionReceiptAuthors: parseJson<string[]>(row.adoption_receipt_authors),
     adoptionWaitStartedAt: row.adoption_wait_started_at,
+    adoptionObservationAttempts: row.adoption_observation_attempts ?? 0,
+    adoptionNextObservationAt: row.adoption_next_observation_at,
     adoptionLastObservation: parseJson<AdoptionObservation>(row.adoption_last_observation),
     adoptionAcceptedReceipt: parseJson<AutopilotAdoptionReceipt>(row.adoption_accepted_receipt),
     adoptionLastError: row.adoption_last_error,
@@ -582,6 +592,20 @@ export class TaskRunPersistence {
     if (patch.adoptionWaitStartedAt !== undefined) {
       setClauses.push('adoption_wait_started_at = @adoptionWaitStartedAt');
       params['adoptionWaitStartedAt'] = patch.adoptionWaitStartedAt;
+    }
+    if (patch.adoptionObservationAttempts !== undefined) {
+      setClauses.push(
+        'adoption_observation_attempts = @adoptionObservationAttempts',
+      );
+      params['adoptionObservationAttempts'] =
+        patch.adoptionObservationAttempts;
+    }
+    if (patch.adoptionNextObservationAt !== undefined) {
+      setClauses.push(
+        'adoption_next_observation_at = @adoptionNextObservationAt',
+      );
+      params['adoptionNextObservationAt'] =
+        patch.adoptionNextObservationAt;
     }
     if (patch.adoptionLastObservation !== undefined) {
       setClauses.push('adoption_last_observation = @adoptionLastObservation');
@@ -839,44 +863,74 @@ export class TaskRunPersistence {
   setAdoptionObservation(
     requestId: string,
     observation: AdoptionObservation,
+    nextObservationAt: number,
   ): void {
     this.db.prepare(`
       UPDATE task_runs
       SET adoption_last_observation = ?, adoption_last_error = NULL,
+          adoption_observation_attempts = adoption_observation_attempts + 1,
+          adoption_next_observation_at = ?,
           state_updated_at = ?
       WHERE request_id = ? AND state = 'AWAITING_ADOPTION'
-    `).run(JSON.stringify(observation), Date.now(), requestId);
+    `).run(
+      JSON.stringify(observation),
+      nextObservationAt,
+      Date.now(),
+      requestId,
+    );
   }
 
   /** Persist a retryable observer error without failing or advancing the run. */
-  setAdoptionError(requestId: string, error: string): void {
+  setAdoptionError(
+    requestId: string,
+    error: string,
+    nextObservationAt: number,
+  ): void {
     this.db.prepare(`
       UPDATE task_runs
-      SET adoption_last_error = ?, state_updated_at = ?
+      SET adoption_last_error = ?,
+          adoption_observation_attempts = adoption_observation_attempts + 1,
+          adoption_next_observation_at = ?,
+          state_updated_at = ?
       WHERE request_id = ? AND state = 'AWAITING_ADOPTION'
-    `).run(error, Date.now(), requestId);
+    `).run(error, nextObservationAt, Date.now(), requestId);
   }
 
   /** Refresh the adoption observation at the final Router-claim boundary. */
   setClaimingAdoptionObservation(
     requestId: string,
     observation: AdoptionObservation,
+    nextObservationAt: number | null,
   ): void {
     this.db.prepare(`
       UPDATE task_runs
       SET adoption_last_observation = ?, adoption_last_error = NULL,
+          adoption_observation_attempts = adoption_observation_attempts + 1,
+          adoption_next_observation_at = ?,
           state_updated_at = ?
       WHERE request_id = ? AND state = 'CLAIMING_DELIVERY'
-    `).run(JSON.stringify(observation), Date.now(), requestId);
+    `).run(
+      JSON.stringify(observation),
+      nextObservationAt,
+      Date.now(),
+      requestId,
+    );
   }
 
   /** Keep a claim retryable when the claim-boundary observer is unavailable. */
-  setClaimingAdoptionError(requestId: string, error: string): void {
+  setClaimingAdoptionError(
+    requestId: string,
+    error: string,
+    nextObservationAt: number,
+  ): void {
     this.db.prepare(`
       UPDATE task_runs
-      SET adoption_last_error = ?, state_updated_at = ?
+      SET adoption_last_error = ?,
+          adoption_observation_attempts = adoption_observation_attempts + 1,
+          adoption_next_observation_at = ?,
+          state_updated_at = ?
       WHERE request_id = ? AND state = 'CLAIMING_DELIVERY'
-    `).run(error, Date.now(), requestId);
+    `).run(error, nextObservationAt, Date.now(), requestId);
   }
 
   /**

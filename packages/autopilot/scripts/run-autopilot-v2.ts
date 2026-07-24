@@ -68,10 +68,11 @@ import {
 } from '../src/lifecycle/index.js';
 
 const DEFAULT_INTERVAL_MS = 10 * 60_000;
-const DEFAULT_STALE_AFTER_MS = 2 * 60 * 60_000;
+const DEFAULT_STALE_AFTER_MS = 4 * 60 * 60_000;
 // Staleness threshold for reaping unchanged claims. Overridable via
 // JINN_AUTOPILOT_STALE_AFTER_MS so the runbook's takeover canary (§8) can
-// exercise recovery without a two-hour wait; production leaves it at 2h.
+// exercise recovery without a four-hour wait; production leaves enough room
+// for the full solver/adoption/evaluator/adoption marketplace loop.
 const STALE_AFTER_MS = positiveEnvironmentInteger(
   env.JINN_AUTOPILOT_STALE_AFTER_MS,
   DEFAULT_STALE_AFTER_MS,

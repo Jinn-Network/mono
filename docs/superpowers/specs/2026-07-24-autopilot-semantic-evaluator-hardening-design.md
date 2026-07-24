@@ -6,9 +6,9 @@
 
 Make the marketplace semantic evaluator fail closed at every trust boundary while
 preserving exact accepted-Solution correlation, full effective-PR review
-semantics, and per-SolverNet runtime choice. This branch prepares the APIs but
-does not wire the daemon's adoption-receipt observer, evaluation-context
-resolver, or semantic runtime composition.
+semantics, and per-SolverNet runtime choice. The daemon composition wires the
+adoption-receipt observer, evaluation-context resolver, immutable verifier, and
+semantic runtime resolver so Autopilot Tasks use the hardened path end to end.
 
 ## Mechanical trust boundary
 
@@ -23,11 +23,19 @@ package policy, including mixed supported/unsupported diffs. It never runs
 candidate-controlled dependency installation, lifecycle hooks, package scripts,
 test files, or configuration on the host.
 
-A typed `ImmutableMechanicalVerifier` port may be supplied by a future
-production composition that owns a genuinely isolated, immutable verifier. In
-its absence, a mechanically eligible code change is unscorable. This is
-intentional: repository identity and path checks alone cannot justify a
-mechanical pass.
+Production supplies a typed `ImmutableMechanicalVerifier` backed by a pinned
+Docker image. It disconnects the verification container from the network,
+installs with lifecycle scripts disabled, rebuilds the trusted native
+dependencies explicitly, runs with bounded memory and process limits, and uses
+an ephemeral filesystem. The host performs a readiness preflight before
+claiming evaluator work. If the immutable verifier is unavailable, a
+mechanically eligible code change is unscorable: repository identity and path
+checks alone cannot justify a mechanical pass.
+
+The compose deployment gives the daemon a dedicated Docker-in-Docker sidecar
+rather than the host Docker socket. The sidecar is pinned by digest and exposes
+only the private compose network, keeping candidate verification outside the
+host daemon's trust domain.
 
 After immutable verification passes, the trusted host captures a bounded
 complete `base...head` diff with external diff drivers and text-conversion
@@ -53,6 +61,11 @@ prompt injection cannot read a host path, follow a checkout symlink, or turn a
 Git inspection command into a write because the semantic process has no file or
 shell tools and never receives the checkout as its working directory.
 
+Because the isolation intentionally hides the host CLI credential store,
+semantic evaluator daemons require an explicit `CLAUDE_CODE_OAUTH_TOKEN` or
+`ANTHROPIC_API_KEY`. A normal host `claude auth login` remains sufficient for
+ordinary local Claude harnesses, but is not treated as evaluator readiness.
+
 ## Per-SolverNet runtime resolution
 
 `JinnRepoEvaluatorHarness` receives a resolver rather than one global semantic
@@ -63,7 +76,8 @@ returns a provider-labelled runtime and runner for that exact SolverNet.
 The harness fails closed when the resolver is absent or returns no runtime.
 The chosen model is passed per invocation, so one daemon can evaluate distinct
 SolverNets with different provider/model configurations without mutating a
-singleton runner. Production resolver construction remains outside this branch.
+singleton runner. Production constructs this resolver from each SolverNet's
+configured provider and model and passes it into the evaluator harness.
 
 ## Full-head base OID
 

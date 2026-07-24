@@ -5,6 +5,7 @@ import type { IdentityPublisher } from '../../../src/erc8004/index.js';
 import type { AutopilotAdoptionReceipt } from '@jinn-network/sdk/solvernets/jinn-repo';
 import { Store } from '../../../src/store/store.js';
 import {
+  effectiveHarnessDeadline,
   TaskEngine,
   type TaskEngineOptions,
 } from '../../../src/harnesses/engine/engine.js';
@@ -20,6 +21,7 @@ import type {
 import {
   callDeliverToMarketplace,
   claimDelivery,
+  isDeliveryAlreadyClaimed,
 } from '../../../src/adapters/mech/contracts.js';
 
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
@@ -33,6 +35,7 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
 vi.mock('../../../src/adapters/mech/contracts.js', () => ({
   callDeliverToMarketplace: vi.fn().mockResolvedValue(`0x${'cd'.repeat(32)}` as Hex),
   claimDelivery: vi.fn().mockResolvedValue(`0x${'ef'.repeat(32)}` as Hex),
+  isDeliveryAlreadyClaimed: vi.fn().mockResolvedValue(false),
   submitTask: vi.fn(),
   submitEvaluationJob: vi.fn(),
   claimJob: vi.fn(),
@@ -386,6 +389,26 @@ class DirectDeliveryEngine extends TaskEngine {
 }
 
 describe('Autopilot adoption-aware delivery', () => {
+  it('reserves independent solver, evaluator, and Verdict-adoption stages', () => {
+    const now = Date.parse('2026-07-24T11:00:00.000Z');
+    seedDelivering(persistence, {
+      ...taskInput(),
+      windowEndTs: Date.parse('2026-07-24T14:00:00.000Z'),
+    });
+    const run = persistence.getOrThrow(REQUEST_ID);
+
+    expect(effectiveHarnessDeadline(run, 'restoration', now)).toBe(
+      Date.parse('2026-07-24T12:00:00.000Z'),
+    );
+    expect(effectiveHarnessDeadline(run, 'evaluation', now)).toBe(
+      Date.parse('2026-07-24T12:00:00.000Z'),
+    );
+    expect(effectiveHarnessDeadline(
+      run,
+      'evaluation',
+      Date.parse('2026-07-24T13:20:00.000Z'),
+    )).toBe(Date.parse('2026-07-24T13:30:00.000Z'));
+  });
   let store: Store;
   let persistence: TaskRunPersistence;
 
@@ -401,6 +424,7 @@ describe('Autopilot adoption-aware delivery', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     store.close();
   });
 
@@ -524,7 +548,42 @@ describe('Autopilot adoption-aware delivery', () => {
     });
   });
 
-  it('fails a still-missing adoption receipt once the Task deadline expires', async () => {
+  it('persists adoption polling backoff across rapid ticks and restart', async () => {
+    let now = Date.parse('2026-07-23T12:00:00.000Z');
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      seedDelivering(persistence);
+      const pending = {
+        state: 'pending' as const,
+        observedAt: '2026-07-23T12:01:00.000Z',
+        detail: 'Receipt not published yet.',
+      };
+      const observer = makeObserver(pending, pending);
+      const engine = new TaskEngine(makeOptions(store, observer));
+
+      await engine.process(REQUEST_ID);
+      await engine.process(REQUEST_ID);
+      const scheduled = persistence.getOrThrow(REQUEST_ID)
+        .adoptionNextObservationAt!;
+      expect(scheduled).toBeGreaterThan(now);
+
+      const restarted = new TaskEngine(makeOptions(store, observer));
+      await restarted.recoverInFlight();
+      await restarted.process(REQUEST_ID);
+      expect(observer.observe).toHaveBeenCalledOnce();
+
+      now = scheduled;
+      await restarted.process(REQUEST_ID);
+      expect(observer.observe).toHaveBeenCalledTimes(2);
+      expect(
+        persistence.getOrThrow(REQUEST_ID).adoptionObservationAttempts,
+      ).toBe(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('keeps polling a still-missing adoption receipt after the Task deadline', async () => {
     const expired = {
       ...taskInput(),
       windowEndTs: Date.now() - 1,
@@ -541,8 +600,11 @@ describe('Autopilot adoption-aware delivery', () => {
     await engine.process(REQUEST_ID);
 
     const run = persistence.getOrThrow(REQUEST_ID);
-    expect(run.state).toBe(TaskRunState.FAILED);
-    expect(run.failureReason).toBe('adoption-timeout');
+    expect(run.state).toBe(TaskRunState.AWAITING_ADOPTION);
+    expect(run.failureReason).toBeNull();
+    expect(run.adoptionLastError).toBe(
+      'adoption-overdue:Receipt not published yet.',
+    );
     expect(claimDelivery).not.toHaveBeenCalled();
   });
 
@@ -867,6 +929,70 @@ describe('Autopilot adoption-aware delivery', () => {
     expect(claimDelivery).toHaveBeenCalledOnce();
   });
 
+  it('completes crash recovery from the committed Router claim before re-reading mutable GitHub state', async () => {
+    seedDelivering(persistence);
+    const firstObserver = makeObserver({
+      state: 'accepted',
+      receipt: acceptedReceipt(),
+    });
+    const firstEngine = new TaskEngine(makeOptions(store, firstObserver));
+    await firstEngine.process(REQUEST_ID);
+    await firstEngine.process(REQUEST_ID);
+    expect(persistence.getOrThrow(REQUEST_ID).state)
+      .toBe(TaskRunState.CLAIMING_DELIVERY);
+
+    vi.mocked(isDeliveryAlreadyClaimed).mockResolvedValueOnce(true);
+    const advancedAuthorityObserver = makeObserver({
+      state: 'pending',
+      observedAt: '2026-07-23T12:02:00.000Z',
+      detail: 'review authority advanced after the claim committed',
+    });
+    const restarted = new TaskEngine(
+      makeOptions(store, advancedAuthorityObserver),
+    );
+
+    await restarted.recoverInFlight();
+
+    expect(persistence.getOrThrow(REQUEST_ID).state)
+      .toBe(TaskRunState.COMPLETE);
+    expect(advancedAuthorityObserver.observe).not.toHaveBeenCalled();
+    expect(claimDelivery).not.toHaveBeenCalled();
+  });
+
+  it('retries an overdue accepted Router claim after a transient failure', async () => {
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    seedDelivering(persistence, {
+      ...taskInput(),
+      windowEndTs: now - 1,
+    });
+    const accepted = {
+      state: 'accepted' as const,
+      receipt: acceptedReceipt(),
+    };
+    const observer = makeObserver(accepted, accepted, accepted);
+    vi.mocked(claimDelivery)
+      .mockRejectedValueOnce(new Error('ECONNRESET'))
+      .mockResolvedValueOnce(`0x${'ef'.repeat(32)}` as Hex);
+    const engine = new TaskEngine(makeOptions(store, observer));
+
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+    await expect(engine.process(REQUEST_ID)).rejects.toThrow('ECONNRESET');
+    expect(persistence.getOrThrow(REQUEST_ID).state)
+      .toBe(TaskRunState.CLAIMING_DELIVERY);
+    expect(persistence.getOrThrow(REQUEST_ID).failureReason).toBeNull();
+
+    await engine.process(REQUEST_ID);
+    expect(claimDelivery).toHaveBeenCalledOnce();
+    now += 5 * 60_000;
+    await engine.process(REQUEST_ID);
+    expect(persistence.getOrThrow(REQUEST_ID).state)
+      .toBe(TaskRunState.COMPLETE);
+    expect(claimDelivery).toHaveBeenCalledTimes(2);
+    clock.mockRestore();
+  });
+
   it('does not claim when an accepted receipt is no longer fresh at the Router boundary', async () => {
     seedDelivering(persistence);
     const observer = makeObserver(
@@ -892,6 +1018,11 @@ describe('Autopilot adoption-aware delivery', () => {
       detail: 'The exact-head native approval is no longer present.',
     });
     expect(claimDelivery).not.toHaveBeenCalled();
+    const restarted = new TaskEngine(makeOptions(store, observer));
+    await restarted.recoverInFlight();
+    expect(observer.observe).toHaveBeenCalledTimes(2);
+    expect(persistence.getOrThrow(REQUEST_ID).adoptionNextObservationAt)
+      .toBeGreaterThan(Date.now());
   });
 
   it('does not claim when claim-time receipt observation is unavailable', async () => {

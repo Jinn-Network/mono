@@ -11,6 +11,9 @@ all of the following:
 - the issue is open, on the engineering Project, and has **Effort = Low**;
 - the issue and its likely patch do not touch a path matched by
   `.github/CODEOWNERS`;
+- the likely patch does not add or change tests, package manifests, lockfiles,
+  build configuration, or other package-control surfaces excluded by the V1
+  patch policy;
 - the issue does not require Human judgment, secrets, production operations,
   or an external side effect;
 - the issue number is the sole **initial** value in
@@ -53,8 +56,8 @@ yarn autopilot --mode active --once --json status
 
 Startup preflight uses the one-shot `jinn tasks submit --dry-run` path. Stop if
 preflight reports missing creator identity, funds, contracts, SolverNet,
-indexer, gateway, or RPC connectivity. Do not work around a failed preflight
-by enabling the local backend.
+indexer, gateway, RPC connectivity, or immutable Docker verifier readiness. Do
+not work around a failed preflight by enabling the local backend.
 
 After the first cycle posts the Task, keep the same environment and run active
 mode normally. Do not remove the parent issue or add unrelated issues to

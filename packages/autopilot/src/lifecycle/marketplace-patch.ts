@@ -333,6 +333,41 @@ function normalizePath(rawPath: string, surface: PathSurface): string | null {
   if (components.some((component) => component.toLowerCase() === '.git')) {
     return validationError('unsafe-path', 'Patch paths may not address Git metadata');
   }
+  const packageManagerControlNames = new Set([
+    'package.json',
+    'yarn.lock',
+    'package-lock.json',
+    'pnpm-lock.yaml',
+    '.yarnrc.yml',
+    '.pnp.cjs',
+    '.pnp.loader.mjs',
+    'jinn-autopilot-trusted.yml',
+  ]);
+  const basename = components.at(-1)!.toLowerCase();
+  const verificationControl =
+    /^tsconfig(?:\.[a-z0-9_-]+)*\.json$/u.test(basename)
+    || /^(?:vitest|vite|jest|hardhat|playwright|eslint|babel|rollup|webpack)(?:\.[a-z0-9_-]+)*\.config\.[a-z0-9]+$/u
+      .test(basename)
+    || /^\.eslintrc(?:\.[a-z0-9]+)?$/u.test(basename);
+  const testSurface =
+    components.some((component) =>
+      ['test', 'tests', '__tests__', '__snapshots__']
+        .includes(component.toLowerCase()))
+    || /\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(basename)
+    || basename.endsWith('.snap');
+  if (
+    packageManagerControlNames.has(basename)
+    || components.some((component) => component.toLowerCase() === '.yarn')
+    || components.some((component) =>
+      component.toLowerCase() === 'node_modules')
+    || verificationControl
+    || testSurface
+  ) {
+    return validationError(
+      'unsafe-path',
+      'Marketplace patches may not change trusted verification controls or tests',
+    );
+  }
   return path;
 }
 

@@ -9,6 +9,7 @@ import {
 import {
   publishAdoptionReceipt,
   readAdoptionReceiptState,
+  type AdoptionReceiptPorts,
 } from './marketplace-adoption-receipt.js';
 import {
   makeProductionMarketplaceAdoptionReceiptPorts,
@@ -22,6 +23,7 @@ import type {
 } from './marketplace-delivery-client.js';
 import {
   makeReviewSessionProtocol,
+  type ReviewSessionPort,
 } from './review-session.js';
 import {
   makeProductionReviewSessionPort,
@@ -32,6 +34,10 @@ export interface ProductionMarketplaceReviewAdoptionOptions {
   readonly runner?: CommandRunner;
   readonly environment?: NodeJS.ProcessEnv;
   readonly now?: () => Date;
+  /** Test seams for the production recovery composition. */
+  readonly readManifest?: (path: string) => ReturnType<typeof readAttemptManifest>;
+  readonly sessionPort?: ReviewSessionPort;
+  readonly receiptPorts?: AdoptionReceiptPorts;
 }
 
 export async function adoptProductionMarketplaceReview(
@@ -39,7 +45,8 @@ export async function adoptProductionMarketplaceReview(
 ): Promise<MarketplaceReviewAdoptionResult> {
   const runner = options.runner ?? defaultRunner;
   const ambient = options.environment ?? process.env;
-  const manifest = readAttemptManifest(
+  const readManifest = options.readManifest ?? readAttemptManifest;
+  let manifest = readManifest(
     options.delivery.review.manifestPath,
   );
   const reviewEnvironment = { ...ambient };
@@ -47,16 +54,27 @@ export async function adoptProductionMarketplaceReview(
   delete reviewEnvironment.GITHUB_TOKEN;
   reviewEnvironment.JINN_AUTOPILOT_SESSION_MANIFEST =
     manifest.paths.manifest;
-  const sessionPort = makeProductionReviewSessionPort({
-    runner,
-    environment: reviewEnvironment,
-    now: options.now,
-  });
-  const receiptPorts = makeProductionMarketplaceAdoptionReceiptPorts({
-    manifestPath: manifest.paths.manifest,
-    runner,
-    environment: ambient,
-  });
+  const sessionPort =
+    options.sessionPort
+    ?? makeProductionReviewSessionPort({
+      runner,
+      environment: reviewEnvironment,
+      now: options.now,
+    });
+  // A previous process may have won the append-only review-ref CAS and
+  // crashed before advancing its local manifest. The production port repairs
+  // only a direct, same-attempt descendant. Refresh before constructing the
+  // adoption input so a valid recovered Verdict is never classified against
+  // the stale in-memory pair.
+  await sessionPort.readAuthority(manifest);
+  manifest = readManifest(manifest.paths.manifest);
+  const receiptPorts =
+    options.receiptPorts
+    ?? makeProductionMarketplaceAdoptionReceiptPorts({
+      manifestPath: manifest.paths.manifest,
+      runner,
+      environment: ambient,
+    });
   const expectedCorrelation = AutopilotCorrelationSchema.parse({
     taskId: options.delivery.task.id,
     attemptIndex: options.delivery.attempt.index,

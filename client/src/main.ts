@@ -83,6 +83,9 @@ import { buildHarnesses } from './harnesses/impls/index.js';
 import {
   makeConfiguredSemanticEvaluatorRunnerResolver,
 } from './harnesses/impls/jinn-repo-evaluator/semantic-runner-resolver.js';
+import {
+  makeDockerImmutableMechanicalVerifier,
+} from './harnesses/impls/jinn-repo-evaluator/docker-immutable-verifier.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS, harnessStateDirName } from './harnesses/names.js';
 import { resolveContractFromSolverNetId } from './solvernets/launched-record-dispatcher.js';
@@ -1548,9 +1551,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     codexDoctorTimeoutMs: config.codexDoctorTimeoutMs,
     semanticEvaluatorRunnerResolver:
       makeConfiguredSemanticEvaluatorRunnerResolver({
-        joinedSolverNets: config.joinedSolverNets,
-        claudePath: activeClaudePath,
+        getJoinedSolverNets: () => config.joinedSolverNets,
+        getClaudePath: () => activeClaudePath,
       }),
+    immutableMechanicalVerifier: makeDockerImmutableMechanicalVerifier(),
   })) {
     implRegistry.register(impl);
   }

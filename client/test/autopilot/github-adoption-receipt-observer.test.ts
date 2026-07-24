@@ -20,6 +20,7 @@ import {
   createAutopilotGitHubAdoptionReceiptObserver,
   observeExactAutopilotAdoptionReceipt,
   type AutopilotGitHubReadPort,
+  type GitHubReviewAuthority,
   type GitHubIssueCommentPage,
   type GitHubNativeReview,
 } from '../../src/autopilot/github-adoption-receipt-observer.js';
@@ -80,6 +81,14 @@ function githubPort(input: {
   head?: string;
   labels?: readonly string[];
   reviews?: readonly GitHubNativeReview[];
+  reviewAuthority?: GitHubReviewAuthority;
+  child?: {
+    number: number;
+    state: 'OPEN' | 'CLOSED';
+    body: string;
+    labels: readonly string[];
+    isPullRequest: boolean;
+  };
 } = {}): AutopilotGitHubReadPort & {
   listPrIssueComments: ReturnType<typeof vi.fn>;
 } {
@@ -94,9 +103,158 @@ function githubPort(input: {
       headSha: input.head ?? acceptedSolution.resultingHead!,
       labels: input.labels ?? [],
     }),
+    readIssue: async (issueNumber) => input.child ?? ({
+      number: issueNumber,
+      state: 'OPEN',
+      body: '<!-- jinn-autopilot:child pr=2101 kind=review-finding -->',
+      labels: ['review-finding', 'effort:medium', 'priority:p1'],
+      isPullRequest: false,
+    }),
     listPullRequestReviews: async ({ cursor }) => ({
       reviews: cursor === undefined ? input.reviews ?? [] : [],
     }),
+    readReviewAuthority: async () => input.reviewAuthority ?? {
+      oid: acceptedSolution.reviewRefOid!,
+      history: [{
+        oid: acceptedSolution.reviewRefOid!,
+        record: {
+          protocolVersion: 2,
+          prNumber: acceptedSolution.prNumber,
+          generation: acceptedSolution.reviewGeneration!,
+          attempt: '123e4567-e89b-42d3-a456-426614174099',
+          reviewer: 'jinn-autopilot',
+          head: acceptedSolution.resultingHead!,
+          state: 'active',
+          recordedAt: '2026-07-23T22:00:00.000Z',
+        },
+      }],
+    },
+  };
+}
+
+function verdictAuthority(
+  operation: 'review-verdict' | 'review-findings' | 'human',
+): {
+  authority: GitHubReviewAuthority;
+  marker?: string;
+} {
+  const attempt = '123e4567-e89b-42d3-a456-426614174099';
+  const intent = '123e4567-e89b-42d3-a456-426614174098';
+  const reviewer = 'jinn-autopilot';
+  const head = acceptedVerdict.reviewedHead!;
+  const common = {
+    protocolVersion: 2 as const,
+    prNumber: acceptedVerdict.prNumber,
+    generation: acceptedVerdict.reviewGeneration!,
+    attempt,
+    reviewer,
+    head,
+    recordedAt: '2026-07-23T22:00:00.000Z',
+  };
+  const root = {
+    oid: acceptedVerdict.reviewRefOid!,
+    record: { ...common, state: 'active' as const },
+  };
+  if (operation === 'human') {
+    return {
+      authority: {
+        oid: '6'.repeat(40),
+        history: [{
+          oid: '6'.repeat(40),
+          record: { ...common, state: 'human' as const },
+        }, root],
+      },
+    };
+  }
+  const verdict = {
+    state: operation === 'review-verdict'
+      ? 'APPROVE' as const
+      : 'REQUEST_CHANGES' as const,
+    marker: intent,
+  };
+  const intentRecord = {
+    oid: '7'.repeat(40),
+    record: { ...common, state: 'verdict-intent' as const, verdict },
+  };
+  const current = {
+    oid: '6'.repeat(40),
+    record: {
+      ...common,
+      state: operation === 'review-verdict'
+        ? 'terminal-approved' as const
+        : 'stale' as const,
+      ...(operation === 'review-verdict' ? { verdict } : {}),
+    },
+  };
+  return {
+    authority: {
+      oid: current.oid,
+      history: [current, intentRecord, root],
+    },
+    marker:
+      `<!-- jinn-autopilot-review:v2 generation=${common.generation} `
+      + `attempt=${attempt} intent=${intent} reviewer=${reviewer} `
+      + `head=${head} verdict=${verdict.state} -->`,
+  };
+}
+
+function advanceFindingsAuthority(
+  base: GitHubReviewAuthority,
+  completedGenerations: number,
+): GitHubReviewAuthority {
+  let history = [...base.history];
+  for (let index = 0; index < completedGenerations; index += 1) {
+    const suffix = String(20 + index).padStart(2, '0');
+    const common = {
+      protocolVersion: 2 as const,
+      prNumber: acceptedVerdict.prNumber,
+      generation: `123e4567-e89b-42d3-a456-4266141740${suffix}`,
+      attempt: `123e4567-e89b-42d3-a456-4266141741${suffix}`,
+      reviewer: 'jinn-autopilot',
+      head: String(index + 8).repeat(40),
+      recordedAt: `2026-07-23T23:0${index}:00.000Z`,
+    };
+    const intent = {
+      state: 'REQUEST_CHANGES' as const,
+      marker: `123e4567-e89b-42d3-a456-4266141742${suffix}`,
+    };
+    history = [
+      {
+        oid: String(100 + (index * 3) + 2).padStart(40, '0'),
+        record: { ...common, state: 'stale' as const },
+      },
+      {
+        oid: String(100 + (index * 3) + 1).padStart(40, '0'),
+        record: {
+          ...common,
+          state: 'verdict-intent' as const,
+          verdict: intent,
+        },
+      },
+      {
+        oid: String(100 + (index * 3)).padStart(40, '0'),
+        record: { ...common, state: 'active' as const },
+      },
+      ...history,
+    ];
+  }
+  const current = {
+    protocolVersion: 2 as const,
+    prNumber: acceptedVerdict.prNumber,
+    generation: '123e4567-e89b-42d3-a456-426614174090',
+    attempt: '123e4567-e89b-42d3-a456-426614174091',
+    reviewer: 'jinn-autopilot',
+    head: 'e'.repeat(40),
+    state: 'active' as const,
+    recordedAt: '2026-07-23T23:59:00.000Z',
+  };
+  const currentEntry = {
+    oid: 'f'.repeat(40),
+    record: current,
+  };
+  return {
+    oid: currentEntry.oid,
+    history: [currentEntry, ...history],
   };
 }
 
@@ -294,19 +452,24 @@ describe('observeExactAutopilotAdoptionReceipt', () => {
       const receipt = AutopilotAdoptionReceiptSchema.parse({
         ...acceptedVerdict,
         operation,
+        ...(operation === 'review-findings'
+          ? { childIssueNumber: 2201 }
+          : {}),
       });
+      const exactAuthority = verdictAuthority(operation);
       const reviews: GitHubNativeReview[] = reviewState === undefined ? [] : [{
         id: 91,
         authorLogin: 'jinn-autopilot',
         state: reviewState,
         commitId: acceptedVerdict.reviewedHead!,
-        body: 'Exact Autopilot review.',
+        body: `Exact Autopilot review.\n\n${exactAuthority.marker}`,
         submittedAt: '2026-07-23T22:09:00.000Z',
       }];
       const port = githubPort({
         head: acceptedVerdict.reviewedHead!,
         labels,
         reviews,
+        reviewAuthority: exactAuthority.authority,
         pages: { first: { comments: [comment(receipt)] } },
       });
 
@@ -323,6 +486,7 @@ describe('observeExactAutopilotAdoptionReceipt', () => {
   );
 
   it('keeps an accepted Verdict pending when native review authority is not observable', async () => {
+    const exactAuthority = verdictAuthority('review-verdict');
     const port = githubPort({
       head: acceptedVerdict.reviewedHead!,
       labels: ['review:approved'],
@@ -335,6 +499,7 @@ describe('observeExactAutopilotAdoptionReceipt', () => {
         submittedAt: '2026-07-23T22:09:00.000Z',
       }],
       pages: { first: { comments: [comment(acceptedVerdict)] } },
+      reviewAuthority: exactAuthority.authority,
     });
 
     await expect(observeExactAutopilotAdoptionReceipt({
@@ -345,6 +510,216 @@ describe('observeExactAutopilotAdoptionReceipt', () => {
     })).resolves.toMatchObject({
       state: 'pending',
       detail: expect.stringMatching(/APPROVED/),
+    });
+  });
+
+  it('keeps approval pending when an ambiguous same-login change request exists', async () => {
+    const exactAuthority = verdictAuthority('review-verdict');
+    const port = githubPort({
+      head: acceptedVerdict.reviewedHead!,
+      labels: ['review:approved'],
+      reviews: [
+        {
+          id: 91,
+          authorLogin: 'jinn-autopilot',
+          state: 'APPROVED',
+          commitId: acceptedVerdict.reviewedHead!,
+          body: `Approved.\n\n${exactAuthority.marker}`,
+          submittedAt: '2026-07-23T22:09:00.000Z',
+        },
+        {
+          id: 92,
+          authorLogin: '@unattributed-review:92',
+          state: 'CHANGES_REQUESTED',
+          commitId: '0'.repeat(40),
+          body: '',
+          submittedAt: '0001-01-01T00:00:00.000Z',
+        },
+      ],
+      pages: { first: { comments: [comment(acceptedVerdict)] } },
+      reviewAuthority: exactAuthority.authority,
+    });
+
+    await expect(observeExactAutopilotAdoptionReceipt({
+      expectedRole: 'verdict',
+      expectedCorrelation: reviewApprove.correlation,
+      receiptAuthors: session.receiptAuthors,
+      github: port,
+    })).resolves.toMatchObject({
+      state: 'pending',
+      detail: expect.stringMatching(/requested-changes/i),
+    });
+  });
+
+  it('uses the unique intent marker and rejects terminal marker substitution', async () => {
+    const exactAuthority = verdictAuthority('review-verdict');
+    const substituted = '123e4567-e89b-42d3-a456-426614174097';
+    const history = exactAuthority.authority.history.map((entry, index) => (
+      index === 0
+        ? {
+            ...entry,
+            record: {
+              ...entry.record,
+              verdict: { state: 'APPROVE' as const, marker: substituted },
+            },
+          }
+        : entry
+    ));
+    const port = githubPort({
+      head: acceptedVerdict.reviewedHead!,
+      labels: ['review:approved'],
+      reviews: [{
+        id: 91,
+        authorLogin: 'jinn-autopilot',
+        state: 'APPROVED',
+        commitId: acceptedVerdict.reviewedHead!,
+        body:
+          `<!-- jinn-autopilot-review:v2 generation=${acceptedVerdict.reviewGeneration} `
+          + 'attempt=123e4567-e89b-42d3-a456-426614174099 '
+          + `intent=${substituted} reviewer=jinn-autopilot `
+          + `head=${acceptedVerdict.reviewedHead} verdict=APPROVE -->`,
+        submittedAt: '2026-07-23T22:09:00.000Z',
+      }],
+      pages: { first: { comments: [comment(acceptedVerdict)] } },
+      reviewAuthority: {
+        oid: exactAuthority.authority.oid,
+        history,
+      },
+    });
+
+    await expect(observeExactAutopilotAdoptionReceipt({
+      expectedRole: 'verdict',
+      expectedCorrelation: reviewApprove.correlation,
+      receiptAuthors: session.receiptAuthors,
+      github: port,
+    })).resolves.toMatchObject({
+      state: 'pending',
+      detail: expect.stringMatching(/APPROVED/),
+    });
+  });
+
+  it('recovers accepted findings after the child closes and several later generations advance', async () => {
+    const receipt = AutopilotAdoptionReceiptSchema.parse({
+      ...acceptedVerdict,
+      operation: 'review-findings',
+      childIssueNumber: 2201,
+    });
+    const original = verdictAuthority('review-findings');
+    const advanced = advanceFindingsAuthority(original.authority, 3);
+    expect(advanced.history.length).toBeGreaterThan(8);
+    const port = githubPort({
+      head: advanced.history[0]!.record.head,
+      labels: [],
+      reviews: [{
+        id: 93,
+        authorLogin: 'jinn-autopilot',
+        state: 'CHANGES_REQUESTED',
+        commitId: acceptedVerdict.reviewedHead!,
+        body: `Findings.\n\n${original.marker}`,
+        submittedAt: '2026-07-23T22:09:00.000Z',
+      }],
+      child: {
+        number: 2201,
+        state: 'CLOSED',
+        body: '<!-- jinn-autopilot:child pr=2101 kind=review-finding -->',
+        labels: ['review-finding', 'effort:medium', 'priority:p1'],
+        isPullRequest: false,
+      },
+      pages: { first: { comments: [comment(receipt)] } },
+      reviewAuthority: advanced,
+    });
+
+    await expect(observeExactAutopilotAdoptionReceipt({
+      expectedRole: 'verdict',
+      expectedCorrelation: reviewApprove.correlation,
+      receiptAuthors: session.receiptAuthors,
+      github: port,
+    })).resolves.toEqual({
+      state: 'accepted',
+      receipt,
+    });
+  });
+
+  it('requires the exact intent reviewer when multiple receipt authors are allowed', async () => {
+    const exactAuthority = verdictAuthority('review-verdict');
+    const port = githubPort({
+      head: acceptedVerdict.reviewedHead!,
+      labels: ['review:approved'],
+      reviews: [{
+        id: 92,
+        authorLogin: 'other-authorized-bot',
+        state: 'APPROVED',
+        commitId: acceptedVerdict.reviewedHead!,
+        body: `Copied marker.\n\n${exactAuthority.marker}`,
+        submittedAt: '2026-07-23T22:09:00.000Z',
+      }],
+      pages: { first: { comments: [comment(acceptedVerdict)] } },
+      reviewAuthority: exactAuthority.authority,
+    });
+
+    await expect(observeExactAutopilotAdoptionReceipt({
+      expectedRole: 'verdict',
+      expectedCorrelation: reviewApprove.correlation,
+      receiptAuthors: ['jinn-autopilot', 'other-authorized-bot'],
+      github: port,
+    })).resolves.toMatchObject({
+      state: 'pending',
+      detail: expect.stringMatching(/APPROVED/),
+    });
+  });
+
+  it.each([
+    ['closed', {
+      state: 'CLOSED' as const,
+      body: '<!-- jinn-autopilot:child pr=2101 kind=review-finding -->',
+    }],
+    ['wrong parent', {
+      state: 'OPEN' as const,
+      body: '<!-- jinn-autopilot:child pr=9999 kind=review-finding -->',
+    }],
+    ['injected marker before the canonical marker', {
+      state: 'OPEN' as const,
+      body: [
+        '<!-- jinn-autopilot:child pr=9999 kind=reconcile -->',
+        '<!-- jinn-autopilot:child pr=2101 kind=review-finding -->',
+      ].join('\n'),
+    }],
+  ])('does not claim review findings with a %s child', async (_name, child) => {
+    const receipt = AutopilotAdoptionReceiptSchema.parse({
+      ...acceptedVerdict,
+      operation: 'review-findings',
+      childIssueNumber: 2201,
+    });
+    const exactAuthority = verdictAuthority('review-findings');
+    const port = githubPort({
+      head: acceptedVerdict.reviewedHead!,
+      labels: ['review:changes-requested'],
+      reviews: [{
+        id: 93,
+        authorLogin: 'jinn-autopilot',
+        state: 'CHANGES_REQUESTED',
+        commitId: acceptedVerdict.reviewedHead!,
+        body: `Findings.\n\n${exactAuthority.marker}`,
+        submittedAt: '2026-07-23T22:09:00.000Z',
+      }],
+      child: {
+        number: 2201,
+        ...child,
+        labels: ['review-finding', 'effort:medium', 'priority:p1'],
+        isPullRequest: false,
+      },
+      pages: { first: { comments: [comment(receipt)] } },
+      reviewAuthority: exactAuthority.authority,
+    });
+
+    await expect(observeExactAutopilotAdoptionReceipt({
+      expectedRole: 'verdict',
+      expectedCorrelation: reviewApprove.correlation,
+      receiptAuthors: session.receiptAuthors,
+      github: port,
+    })).resolves.toMatchObject({
+      state: 'pending',
+      detail: expect.stringMatching(/child/i),
     });
   });
 });
@@ -373,6 +748,7 @@ describe('TaskEngine AdoptionReceiptObserver', () => {
   });
 
   it('derives Verdict operation and exact full correlation from the delivered review', async () => {
+    const exactAuthority = verdictAuthority('review-verdict');
     const port = githubPort({
       head: acceptedVerdict.reviewedHead!,
       labels: ['review:approved'],
@@ -381,10 +757,11 @@ describe('TaskEngine AdoptionReceiptObserver', () => {
         authorLogin: 'jinn-autopilot',
         state: 'APPROVED',
         commitId: acceptedVerdict.reviewedHead!,
-        body: 'Approved.',
+        body: `Approved.\n\n${exactAuthority.marker}`,
         submittedAt: '2026-07-23T22:09:00.000Z',
       }],
       pages: { first: { comments: [comment(acceptedVerdict)] } },
+      reviewAuthority: exactAuthority.authority,
     });
     const observer = createAutopilotGitHubAdoptionReceiptObserver({
       github: port,
@@ -433,11 +810,19 @@ describe('autopilotEvaluationContextResolver', () => {
   const evaluatorSafe = `0x${'22'.repeat(20)}`;
 
   it('builds the strict full-head context only from an exact accepted Solution', async () => {
+    const fullHeadSession = AutopilotSessionCapsuleSchema.parse({
+      ...session,
+      taskSnapshot: {
+        ...session.taskSnapshot,
+        baseSha: '7'.repeat(40),
+        targetBaseOid: '8'.repeat(40),
+      },
+    });
     const resolver = createAutopilotEvaluationContextResolver({
       github: githubPort(),
     });
     const observation = await resolver.resolve({
-      task: taskSpec(),
+      task: taskSpec(fullHeadSession),
       solution: mutation,
       taskId: mutation.correlation.taskId,
       attemptIndex: mutation.correlation.attemptIndex,
@@ -455,6 +840,7 @@ describe('autopilotEvaluationContextResolver', () => {
         reviewTarget: {
           repository: 'Jinn-Network/mono',
           prNumber: session.prNumber,
+          baseOid: fullHeadSession.taskSnapshot.targetBaseOid,
           resultingHead: acceptedSolution.resultingHead,
         },
         solution: {

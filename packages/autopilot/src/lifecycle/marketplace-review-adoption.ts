@@ -256,13 +256,40 @@ async function existingAdoptionResult(
     && state.receipt.disposition === 'rejected'
   ) {
     const authority = await ports.readAuthority(input.manifest);
+    const head = await settleRejectedAuthority(
+      input,
+      authority,
+      state.receipt.reason,
+      ports,
+    );
     return {
       status: 'rejected',
       reason: state.receipt.reason,
-      head: authority.head,
+      head,
     };
   }
   return undefined;
+}
+
+async function settleRejectedAuthority(
+  input: AdoptMarketplaceReviewInput,
+  authority: MarketplaceReviewAuthority,
+  reason: AutopilotAdoptionRejectionReason,
+  ports: MarketplaceReviewAdoptionPorts,
+): Promise<string> {
+  const manifest = input.manifest;
+  const ownsExactReview =
+    authority.claimOid === manifest.claimOid
+    && authority.head === manifest.expectedHead
+    && authority.reviewGeneration === manifest.reviewGeneration
+    && authority.reviewRefOid === manifest.reviewRefOid;
+  if (!ownsExactReview) return authority.head;
+
+  const human = await ports.protocol.human(
+    manifest,
+    `Marketplace Verdict rejected (${reason}): ${rejectionDetail(reason)}`,
+  );
+  return human.head;
 }
 
 function sameReceiptWithoutTimestamp(
@@ -331,14 +358,20 @@ async function publishRejected(
     reason,
     detail: rejectionDetail(reason),
   }), input, correlation, ports);
+  const settledHead = await settleRejectedAuthority(
+    input,
+    authority,
+    reason,
+    ports,
+  );
   await ports.publishReceipt({
     receipt,
     exactFacts: receiptExactFacts(correlation),
-    expectedPublicationHead: authority.head,
+    expectedPublicationHead: settledHead,
     allowedAuthors: input.receiptAuthors,
     publisherLogin: input.publisherLogin,
   });
-  return { status: 'rejected', reason, head: authority.head };
+  return { status: 'rejected', reason, head: settledHead };
 }
 
 async function publishAccepted(
@@ -347,12 +380,27 @@ async function publishAccepted(
   authority: MarketplaceReviewAuthority,
   operation: 'review-verdict' | 'review-findings' | 'human',
   ports: MarketplaceReviewAdoptionPorts,
+  childIssueNumber?: number,
 ): Promise<void> {
+  if (
+    operation === 'review-findings'
+    && (childIssueNumber === undefined
+      || !Number.isSafeInteger(childIssueNumber)
+      || childIssueNumber <= 0)
+  ) {
+    throw new MarketplaceReviewAdoptionError(
+      'unexpected-protocol-outcome',
+      'Review findings adoption requires the exact child issue identity',
+    );
+  }
   const receipt = await recoverDurableReceipt(AutopilotAdoptionReceiptSchema.parse({
     ...receiptCommon(correlation, ports.now().toISOString()),
     disposition: 'accepted',
     role: 'verdict',
     operation,
+    ...(operation === 'review-findings'
+      ? { childIssueNumber }
+      : {}),
   }), input, correlation, ports);
   await ports.publishReceipt({
     receipt,
@@ -415,32 +463,35 @@ async function adoptParsedResult(
     }
     const findings = formatMarketplaceReviewFindings(result.findings);
     if (authority.reviewState === 'stale') {
-      const recovered = await ports.protocol.reviewVerdict(
+      const recovered = await ports.protocol.reviewFindings(
         input.manifest,
-        'REQUEST_CHANGES',
         findings,
       );
-      if (recovered.status === 'requested-changes') {
+      if (recovered.status === 'filed') {
         await publishAccepted(
           input,
           correlation,
           authority,
           'review-findings',
           ports,
+          recovered.childNumber,
         );
         return {
           status: 'adopted',
           operation: 'review-findings',
           head: recovered.head,
+          childNumber: recovered.childNumber,
+          childCreated: recovered.created,
         };
       }
       if (recovered.status === 'human') {
-        await publishAccepted(input, correlation, authority, 'human', ports);
-        return {
-          status: 'adopted',
-          operation: 'human',
-          head: recovered.head,
-        };
+        return publishRejected(
+          input,
+          correlation,
+          authority,
+          'policy-human',
+          ports,
+        );
       }
       if (recovered.status === 'ambiguous') {
         throw new MarketplaceReviewAdoptionError(
@@ -470,10 +521,22 @@ async function adoptParsedResult(
       if (adopted.status === 'stale') {
         return rejectLostProtocolAuthority(input, correlation, ports);
       }
-      await publishAccepted(input, correlation, authority, 'human', ports);
-      return { status: 'adopted', operation: 'human', head: adopted.head };
+      return publishRejected(
+        input,
+        correlation,
+        authority,
+        'policy-human',
+        ports,
+      );
     }
-    await publishAccepted(input, correlation, authority, 'review-findings', ports);
+    await publishAccepted(
+      input,
+      correlation,
+      authority,
+      'review-findings',
+      ports,
+      adopted.childNumber,
+    );
     return {
       status: 'adopted',
       operation: 'review-findings',
@@ -499,8 +562,13 @@ async function adoptParsedResult(
     return rejectLostProtocolAuthority(input, correlation, ports);
   }
   if (adopted.status === 'human') {
-    await publishAccepted(input, correlation, authority, 'human', ports);
-    return { status: 'adopted', operation: 'human', head: adopted.head };
+    return publishRejected(
+      input,
+      correlation,
+      authority,
+      'policy-human',
+      ports,
+    );
   }
   if (adopted.status !== 'approved') {
     throw new MarketplaceReviewAdoptionError(

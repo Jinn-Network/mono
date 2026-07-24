@@ -11,19 +11,19 @@ import {
 const SEMANTIC_EVALUATOR_HARNESS = 'jinn-repo-evaluator';
 
 export function makeConfiguredSemanticEvaluatorRunnerResolver(options: {
-  readonly joinedSolverNets:
+  readonly getJoinedSolverNets: () =>
     | Readonly<Record<string, JoinedSolverNetConfig>>
     | undefined;
-  readonly claudePath: string;
+  readonly getClaudePath: () => string;
   readonly createClaudeRunner?: (
     options: ClaudeSemanticAgentRunnerOptions,
   ) => SemanticAgentRunner;
 }): SemanticAgentRunnerResolver {
-  let runner: SemanticAgentRunner | undefined;
+  const runners = new Map<string, SemanticAgentRunner>();
   return {
     resolve({ manifestCid }) {
       if (manifestCid === undefined) return undefined;
-      const joined = options.joinedSolverNets?.[manifestCid];
+      const joined = options.getJoinedSolverNets()?.[manifestCid];
       if (
         joined === undefined
         || joined.manifestCid !== manifestCid
@@ -32,12 +32,19 @@ export function makeConfiguredSemanticEvaluatorRunnerResolver(options: {
       ) {
         return undefined;
       }
+      const claudePath = options.getClaudePath();
+      let runner = runners.get(claudePath);
       runner ??= (options.createClaudeRunner ?? (
         (runnerOptions) => new ClaudeSemanticAgentRunner(runnerOptions)
       ))({
-        claudePath: options.claudePath,
+        claudePath,
       });
-      return { provider: 'anthropic', runner };
+      runners.set(claudePath, runner);
+      return {
+        provider: 'anthropic',
+        runner,
+        ...(joined.model === undefined ? {} : { model: joined.model }),
+      };
     },
   };
 }
