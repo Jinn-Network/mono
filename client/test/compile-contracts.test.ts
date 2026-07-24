@@ -75,7 +75,13 @@ describe('compileContracts', () => {
   });
 
   it('joins in-flight compile when the canary appears mid-build (#2107)', async () => {
-    mockCompileChild(50);
+    const exitDelayMs = 50;
+    let compileExited = false;
+    const child = mockCompileChild(exitDelayMs);
+    child.on('exit', () => {
+      compileExited = true;
+    });
+
     let accessCount = 0;
     accessMock.mockImplementation(() => {
       accessCount += 1;
@@ -88,9 +94,20 @@ describe('compileContracts', () => {
     const { compileContracts } = await import('./e2e/task-first-helpers.js');
     const first = compileContracts();
     await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(compileExited).toBe(false);
+
     const second = compileContracts();
+    let secondSettled = false;
+    void second.then(() => {
+      secondSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(secondSettled).toBe(false);
+
     await Promise.all([first, second]);
 
+    expect(compileExited).toBe(true);
+    expect(accessMock).toHaveBeenCalledTimes(1);
     const compileCalls = spawnMock.mock.calls.filter(
       ([command, args]) => command === 'yarn' && (args as string[]).includes('compile'),
     );
