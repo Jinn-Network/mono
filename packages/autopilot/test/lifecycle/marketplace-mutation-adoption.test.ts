@@ -1168,7 +1168,7 @@ describe('marketplace closed-fleet child loop', () => {
     const firstManifest: AttemptManifest = {
       ...reviewManifest(),
       attemptId: firstAttempt,
-      expectedHead: EXPECTED,
+      expectedHead: COMPLETION,
       claimOid: firstRef,
       reviewGeneration: firstGeneration,
       reviewRefOid: firstRef,
@@ -1187,9 +1187,9 @@ describe('marketplace closed-fleet child loop', () => {
       v2AttemptId: '123e4567-e89b-42d3-a456-426614174089',
       claimOid: CLAIM,
       prNumber: 2101,
-      expectedHead: EXPECTED,
-      resultingHead: EXPECTED,
-      reviewedHead: EXPECTED,
+      expectedHead: CLAIM,
+      resultingHead: COMPLETION,
+      reviewedHead: COMPLETION,
       reviewGeneration: firstGeneration,
       reviewRefOid: firstRef,
     } satisfies AutopilotCorrelation;
@@ -1214,7 +1214,7 @@ describe('marketplace closed-fleet child loop', () => {
       ],
     };
     const firstReviewPorts = makeCrashRecoveringReviewPorts({
-      head: EXPECTED,
+      head: COMPLETION,
       generation: firstGeneration,
       refOid: firstRef,
       childNumber: 701,
@@ -1237,7 +1237,7 @@ describe('marketplace closed-fleet child loop', () => {
     ).resolves.toMatchObject({
       status: 'adopted',
       operation: 'review-findings',
-      head: EXPECTED,
+      head: COMPLETION,
       childNumber: 701,
       childCreated: false,
     });
@@ -1283,9 +1283,9 @@ describe('marketplace closed-fleet child loop', () => {
         },
         targetBase: gitRefName('next'),
         branch: gitRefName('autopilot/issue-501'),
-        claimOid: CLAIM,
+        claimOid: EXPECTED,
         expectedHead: EXPECTED,
-        baseSha: EXPECTED,
+        baseSha: COMPLETION,
         v2AttemptId: ATTEMPT,
         runnerId: 'runner-1',
         selectedLogin: 'jinn-autopilot',
@@ -1325,7 +1325,11 @@ describe('marketplace closed-fleet child loop', () => {
             parentPrNumber: 2101,
             prNumber: 2101,
             branch: 'autopilot/issue-501',
+            claimOid: EXPECTED,
             expectedHead: EXPECTED,
+            taskSnapshot: {
+              baseSha: COMPLETION,
+            },
           },
         },
       });
@@ -1334,6 +1338,29 @@ describe('marketplace closed-fleet child loop', () => {
     }
 
     const fix = new Harness('fix-child');
+    fix.currentManifest = {
+      ...fix.currentManifest,
+      claimOid: EXPECTED,
+    };
+    fix.currentClaimOid = EXPECTED;
+    const alignedFixResult = mutationResult();
+    if (alignedFixResult.outcome !== 'mutation-complete') {
+      throw new Error('test fixture did not produce a completed mutation');
+    }
+    const alignedFixDelivery = delivery('fix-child', {
+      ...alignedFixResult,
+      correlation: {
+        ...alignedFixResult.correlation,
+        claimOid: EXPECTED,
+      },
+    });
+    fix.deliveryValue = {
+      ...alignedFixDelivery,
+      session: {
+        ...alignedFixDelivery.session,
+        claimOid: EXPECTED,
+      },
+    };
     const fixed = await adopt(fix);
     expect(fixed.status).toBe('accepted');
     if (fixed.status !== 'accepted') {
