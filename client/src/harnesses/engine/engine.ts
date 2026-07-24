@@ -2541,6 +2541,10 @@ export class TaskEngine {
   /** Observe adoption without repeating delivery or claiming settlement. */
   protected async awaitAdoption(task: PersistedTaskRun): Promise<void> {
     if (!this.adoptionReceiptObserver) {
+      if (Date.now() >= task.windowEndTs) {
+        this.persistence.markFailed(task.requestId, 'adoption-timeout');
+        return;
+      }
       this.persistence.setAdoptionError(
         task.requestId,
         'adoption receipt observer is not configured',
@@ -2552,6 +2556,10 @@ export class TaskEngine {
     try {
       observation = await this.adoptionReceiptObserver.observe(task);
     } catch (err) {
+      if (Date.now() >= task.windowEndTs) {
+        this.persistence.markFailed(task.requestId, 'adoption-timeout');
+        return;
+      }
       this.persistence.setAdoptionError(
         task.requestId,
         err instanceof Error ? err.message : String(err),
@@ -2561,6 +2569,11 @@ export class TaskEngine {
 
     switch (observation.state) {
       case 'pending':
+        if (Date.now() >= task.windowEndTs) {
+          this.persistence.setAdoptionObservation(task.requestId, observation);
+          this.persistence.markFailed(task.requestId, 'adoption-timeout');
+          return;
+        }
         this.persistence.setAdoptionObservation(task.requestId, observation);
         return;
       case 'accepted': {

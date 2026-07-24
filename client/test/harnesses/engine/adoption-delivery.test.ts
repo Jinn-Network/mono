@@ -523,6 +523,28 @@ describe('Autopilot adoption-aware delivery', () => {
     });
   });
 
+  it('fails a still-missing adoption receipt once the Task deadline expires', async () => {
+    const expired = {
+      ...taskInput(),
+      windowEndTs: Date.now() - 1,
+    };
+    seedDelivering(persistence, expired);
+    const observer = makeObserver({
+      state: 'pending',
+      observedAt: '2026-07-23T12:01:00.000Z',
+      detail: 'Receipt not published yet.',
+    });
+    const engine = new TaskEngine(makeOptions(store, observer));
+
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+
+    const run = persistence.getOrThrow(REQUEST_ID);
+    expect(run.state).toBe(TaskRunState.FAILED);
+    expect(run.failureReason).toBe('adoption-timeout');
+    expect(claimDelivery).not.toHaveBeenCalled();
+  });
+
   it('moves an accepted receipt to CLAIMING_DELIVERY without claiming in the observation operation', async () => {
     seedDelivering(persistence);
     const observer = makeObserver({ state: 'accepted', receipt: acceptedReceipt() });

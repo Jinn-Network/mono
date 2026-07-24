@@ -149,6 +149,12 @@ export interface ReviewSessionProtocol {
     manifest: AttemptManifest,
     reason: string,
   ): Promise<{ readonly status: 'human'; readonly head: GitOid }>;
+  release(
+    manifest: AttemptManifest,
+  ): Promise<
+    | { readonly status: 'released' | 'human'; readonly head: GitOid }
+    | { readonly status: 'stale' | 'ambiguous'; readonly head: GitOid }
+  >;
 }
 
 function requireReviewManifest(
@@ -747,6 +753,39 @@ async function reviewFindings(
   };
 }
 
+/**
+ * Abandon an exact review generation before any evaluator verdict is adopted.
+ * This is used when the originating marketplace Solution is rejected after the
+ * deterministic review claim was acquired. It releases only review metadata;
+ * it never creates a native review, child issue, or approval.
+ */
+async function releaseReviewClaim(
+  supplied: AttemptManifest,
+  port: ReviewSessionPort,
+): Promise<
+  | { readonly status: 'released' | 'human'; readonly head: GitOid }
+  | { readonly status: 'stale' | 'ambiguous'; readonly head: GitOid }
+> {
+  let manifest = requireReviewManifest(supplied, port);
+  let authority = await requireAuthority(manifest, port);
+  const head = manifest.expectedHead as GitOid;
+  if (authority.record.state === 'human') return { status: 'human', head };
+  if (authority.record.state === 'stale') return { status: 'released', head };
+  if (authority.record.state !== 'active') {
+    throw new Error(
+      `Review claim cannot be released from ${authority.record.state} authority`,
+    );
+  }
+  const released = nextRecord(manifest, 'stale', port.now());
+  const published = await publishRecord(manifest, authority, released, port);
+  if (published.status !== 'published') return { status: published.status, head };
+  manifest = requireReviewManifest(manifest, port);
+  authority = await requireAuthority(manifest, port);
+  return authority.record.state === 'stale'
+    ? { status: 'released', head }
+    : { status: 'ambiguous', head };
+}
+
 export function makeReviewSessionProtocol(
   port: ReviewSessionPort,
 ): ReviewSessionProtocol {
@@ -755,5 +794,6 @@ export function makeReviewSessionProtocol(
       reviewVerdict(manifest, state, body, port, followUps),
     reviewFindings: (manifest, findings) => reviewFindings(manifest, findings, port),
     human: (manifest, reason) => enterHuman(manifest, reason, port),
+    release: (manifest) => releaseReviewClaim(manifest, port),
   };
 }

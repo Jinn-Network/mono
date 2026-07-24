@@ -442,7 +442,7 @@ function verdictObservationRequest(
     || adoption.reviewManifestPath !== review.paths.manifest
     || adoption.reviewAttemptId !== review.attemptId
     || adoption.reviewGeneration !== review.reviewGeneration
-    || adoption.reviewRefOid !== review.reviewRefOid
+    || adoption.reviewRefOid !== review.claimOid
     || review.expectedHead !== adoption.resultingHead
     || reviewExecution.solutionOperatorAddress === undefined
   ) {
@@ -497,7 +497,6 @@ function verifiedVerdictDelivery(
     || originExecution.creationBlockNumber === undefined
     || reviewExecution.solutionOperatorAddress === undefined
     || review.reviewGeneration === undefined
-    || review.reviewRefOid === undefined
   ) {
     throw new Error('Marketplace review attempt lost Task provenance');
   }
@@ -580,7 +579,7 @@ function verifiedVerdictDelivery(
       manifestPath: review.paths.manifest,
       head: review.expectedHead,
       generation: review.reviewGeneration,
-      refOid: review.reviewRefOid,
+      refOid: review.claimOid,
       reviewer: review.selectedLogin,
     },
     attempt: {

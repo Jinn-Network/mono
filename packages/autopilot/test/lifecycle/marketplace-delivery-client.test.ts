@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  advanceAttemptReviewPair,
   decodeAttemptManifest,
   readAttemptManifest,
 } from '../../src/lifecycle/attempt-workspace.js';
@@ -266,6 +267,14 @@ describe('Autopilot marketplace delivery client', () => {
         refOid: review.reviewRefOid!,
       },
     });
+    const advancedReviewRef = '6'.repeat(40);
+    advanceAttemptReviewPair(
+      reviewManifestPath,
+      review.expectedHead,
+      review.reviewRefOid!,
+      review.expectedHead,
+      advancedReviewRef,
+    );
     const runner = vi.fn(async () => JSON.stringify({
       schemaVersion: 1,
       verb: 'tasks observe-autopilot-delivery',
@@ -306,6 +315,7 @@ describe('Autopilot marketplace delivery client', () => {
         review: {
           manifestPath: reviewManifestPath,
           head: '4'.repeat(40),
+          refOid: review.reviewRefOid,
         },
         solutionOperator: `0x${'1'.repeat(40)}`,
         evaluator: {
@@ -329,6 +339,8 @@ describe('Autopilot marketplace delivery client', () => {
         reviewRefOid: review.reviewRefOid,
       },
     });
+    expect(readAttemptManifest(reviewManifestPath).reviewRefOid)
+      .toBe(advancedReviewRef);
     expect(readAttemptManifest(reviewManifestPath).execution).toMatchObject({
       attemptIndex: 0,
       requestId: '0xreview',

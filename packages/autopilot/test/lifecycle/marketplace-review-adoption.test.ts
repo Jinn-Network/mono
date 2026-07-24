@@ -128,6 +128,10 @@ function makePorts() {
       reviewVerdict,
       reviewFindings,
       human,
+      release: vi.fn(async () => ({
+        status: 'released' as const,
+        head: gitOid(HEAD),
+      })),
     },
     publishReceipt,
     readReceiptState: async () => ({

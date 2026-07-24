@@ -40,6 +40,10 @@ import {
 } from './implementation-executor-production.js';
 import { executeReviewAction } from './review-executor.js';
 import { makeProductionReviewActionPort } from './review-executor-production.js';
+import { makeReviewSessionProtocol } from './review-session.js';
+import {
+  makeProductionReviewSessionPort,
+} from './review-session-production.js';
 import {
   executeMergeAction,
   executeFileReconcileChildAction,
@@ -452,6 +456,29 @@ export function makeProductionActiveRuntime(
       return exact[0];
     };
     return {
+      async release(claim) {
+        const protocol = makeReviewSessionProtocol(
+          makeProductionReviewSessionPort({
+            runner,
+            environment: {
+              ...ambient,
+              JINN_AUTOPILOT_SESSION_MANIFEST:
+                claim.manifest.paths.manifest,
+            },
+            now,
+          }),
+        );
+        const released = await protocol.release(claim.manifest);
+        if (
+          released.status === 'stale'
+          || released.status === 'ambiguous'
+        ) {
+          throw new Error(
+            `Anchored review claim release was ${released.status}`,
+          );
+        }
+        markAttemptExited(claim.manifest.paths.manifest, now);
+      },
       async acquireOrRecover(input) {
         const expectedHead = input.expectedHead;
         const recovered = await recoverExact(input.prNumber, expectedHead);
@@ -571,7 +598,14 @@ export function makeProductionActiveRuntime(
               options.runnerId,
               alive,
             );
-            for (const attempt of attempts) {
+            for (const listedAttempt of attempts) {
+              // A preceding evaluator-leg recovery may have terminalized its
+              // originating mutation attempt. Always refresh the manifest
+              // before acting so recovery is independent of directory order.
+              const attempt = readAttemptManifest(
+                listedAttempt.paths.manifest,
+              );
+              if (attempt.processState === 'exited') continue;
               if (attempt.execution.backend !== 'marketplace') continue;
               // Review attempts represent the evaluator leg of their
               // originating Task. They must never submit or recover a second

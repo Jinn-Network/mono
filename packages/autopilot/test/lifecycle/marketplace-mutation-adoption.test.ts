@@ -347,6 +347,7 @@ class Harness implements
   childCloseMutations = 0;
   humanMutations = 0;
   reviewClaimMutations = 0;
+  reviewClaimReleases = 0;
   nextCommentId = 9001;
   clock: () => Date = () => new Date(NOW);
 
@@ -494,6 +495,11 @@ class Harness implements
       };
     }
     return { status: 'confirmed', claim: this.reviewClaim };
+  }
+
+  async release(claim: ConfirmedMarketplaceReviewClaim): Promise<void> {
+    expect(claim).toBe(this.reviewClaim);
+    this.reviewClaimReleases += 1;
   }
 
   readonly protocol: ImplementationSessionProtocol = {
@@ -952,6 +958,7 @@ describe('marketplace mutation adoption rejection policy', () => {
       publication: 'not-published',
     });
     expect(harness.humanMutations).toBe(1);
+    expect(harness.reviewClaimReleases).toBe(1);
     expect(harness.comments).toHaveLength(1);
   });
 });

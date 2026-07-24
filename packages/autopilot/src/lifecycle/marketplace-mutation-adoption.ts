@@ -172,6 +172,9 @@ export interface MarketplaceReviewClaimPort {
     };
     readonly priorReviewRefOid?: GitOid;
   }): Promise<MarketplaceReviewClaimAcquisition>;
+  release(
+    claim: ConfirmedMarketplaceReviewClaim,
+  ): Promise<void>;
 }
 
 export interface MarketplaceMutationManifestReceiptPort {
@@ -741,6 +744,9 @@ async function stableReject(
     readonly reviewClaim?: ConfirmedMarketplaceReviewClaim;
   },
 ): Promise<MarketplaceMutationAdoptionResult> {
+  if (extras?.reviewClaim !== undefined) {
+    await deps.reviewClaims.release(extras.reviewClaim);
+  }
   let publicationAuthority = authority;
   if (failure.reason === 'receipt-contradiction') {
     publicationAuthority = await requireHumanAuthority(
@@ -1227,6 +1233,7 @@ async function adoptParsed(
         || error.code === 'different-receipt'
       )
     ) {
+      await deps.reviewClaims.release(reviewClaim);
       await requireHumanAuthority(parsed, authority, error.message, deps);
       const failure = {
         reason: 'receipt-contradiction',
