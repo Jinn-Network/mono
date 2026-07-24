@@ -4,7 +4,7 @@
 
 **Goal:** Close handoff WP2/WP3 for public-repo minting outside `validated-pool.json` by completing the live admission AC on the shipped Jinn Buildx path, then bootstrap harvest without `findSourceInstanceForRepo` when a recipe resolves, then add the deterministic recipe resolver — deferring agentic discovery.
 
-**Architecture:** Per [DR-2026-07-22](../../log/decisions/2026-07-22-on-demand-eval-image.md): execution stays `EnvironmentBuildRecipeV1` → Buildx → digest-qualified publish → explicitRecipe / minted v2. Discovery ladder is explicit → deterministic → agentic. No second image-builder substrate; do not vendor SWE-rebench builders; do not build images inside the long-running daemon.
+**Architecture:** Per [DR-2026-07-22](../../../log/decisions/2026-07-22-on-demand-eval-image.md): execution stays `EnvironmentBuildRecipeV1` → Buildx → digest-qualified publish → explicitRecipe / minted v2. Discovery ladder is explicit → deterministic → agentic. No second image-builder substrate; do not vendor SWE-rebench builders; do not build images inside the long-running daemon.
 
 **Tech Stack:** TypeScript, Docker Buildx (linux/amd64), GHCR, IPFS, EIP-191 attestation, Vitest, existing harvest / minted-pool v2 paths.
 
