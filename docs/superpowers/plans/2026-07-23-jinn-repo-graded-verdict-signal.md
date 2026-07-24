@@ -6,7 +6,7 @@
 
 **Goal:** Carry Lever A–identical observational `passedCount`/`totalCount` on live-issue jinn-repo verdicts (`jinn-repo-verdict.v3`), through evaluator → SDK → indexer/discovery and an authenticated corpus association, without changing binary settlement or sizing emissions.
 
-**Architecture:** Additive-only plumbing. Keep v2 `gates` for stage diagnosis; emit within-tests-gate assertion counts only when every executed package has parseable Vitest JSON; omit both counts on applies/typecheck short-circuit, any unparseable package, and any non-Vitest package-script fallback. Indexer reuses existing `verdictEnvelopeMeta.passedCount`/`totalCount` columns and generalizes the task-body fetch so jinn-repo evaluations populate `solutionRequestId` for public lookup. Learning uses engine-authored local projections or authenticates discovery-returned signed envelopes and their signed evaluation tasks, projects top-level `restorationRequestId`, joins verdict to solution by request ID, and overlays `scoreMetadata`; shape-parsed HTTP reward projections stay empty. Emissions paths never read the fields.
+**Architecture:** Additive-only plumbing. Keep v2 `gates` for stage diagnosis; emit within-tests-gate assertion counts only when every executed package has parseable Vitest JSON; omit both counts on applies/typecheck short-circuit, any unparseable package, and any non-Vitest package-script fallback. Indexer reuses existing `verdictEnvelopeMeta.passedCount`/`totalCount` columns and generalizes the task-body fetch so jinn-repo evaluations populate `solutionRequestId` for public lookup. Learning uses engine-authored local projections or authenticates discovery-returned signed envelopes and their signed evaluation tasks. Network authentication binds `envelope.signature.hash` to the authoritative discovery `manifestHash` and binds `sha256(JCS(rawSignedTask))` to the sha2-256 digest encoded by `envelope.task.cid`, preventing substitution by a gateway or injected fetch port. The path then projects top-level `restorationRequestId`, joins verdict to solution by request ID, and overlays `scoreMetadata`; shape-parsed HTTP reward projections stay empty. Emissions paths never read the fields.
 
 **Tech Stack:** TypeScript, Zod (SDK), Vitest, Ponder/Drizzle (indexer), local signed-envelope projections. Yarn workspaces: `packages/sdk`, `packages/indexer`, `packages/indexer-enrichment`, `client`.
 
@@ -21,6 +21,9 @@
 - Unscorable (infra / no gated package) publishes **no** verdict (existing `SkippableError`).
 - Schema bump is additive `jinn-repo-verdict.v3`; read path `z.union([v1, v2, v3])`.
 - Reuse `parseVitestJsonV1` contract; do not invent a parallel vitest JSON parser.
+- A valid signature in isolation is insufficient for network data: require the
+  envelope/discovery-manifest binding and raw-task/task-CID content binding
+  before projection.
 - American English identifiers (`distill`, never `distil`).
 - Each F* Issue is one Autopilot implementation session; PR title prefix matches the F* Conventional Commit shape.
 
@@ -88,9 +91,10 @@ These shape or gate F* scope; they do **not** block writing this plan. Record th
 - `packages/indexer/src/enrichment-parse.ts` — jinn-repo branch in `parseVerdictEnvelopeLite`
 - `packages/indexer/src/handlers.ts` — widen task-body fetch gate beyond `swe-rebench-v2`
 - `packages/indexer-enrichment/src/enrich.ts` — same fetch-gate widen (must stay in lockstep)
-- `client/src/conformance/execution-envelope-authenticator.ts` — authenticate network envelope bytes before projection (reuse)
+- `client/src/conformance/execution-envelope-authenticator.ts` — authenticate network envelope bytes before projection (reuse), then compare `signature.hash` with the discovery ref's `manifestHash`
 - `client/src/tasks/authenticate-signed-task.ts` — shared canonical hash/signature/creator check extracted from the existing verifier-facts implementation
 - `client/src/corpus/types.ts`, `client/src/corpus/fetch.ts`, `client/src/corpus/index.ts` — authenticated signed-task hydration by CID
+- `client/src/adapters/mech/ipfs.ts` + `client/src/harnesses/engine/canonical-json.ts` — reuse `cidToDigestHex` and canonical JSON for the raw task/CID binding
 - `client/src/corpus/envelope-projection.ts` — project jinn-repo verdict counts + top-level evaluation task `restorationRequestId`
 - `client/src/corpus/jinn-repo-graded-association.ts` (new small pure helper) — bounded verdict-to-solution projection join
 - `client/src/mcp/search-records.ts` — overlay verified local graded fields onto solution `scoreMetadata`
@@ -730,7 +734,9 @@ EOF
 **Session sizing:** one Autopilot implement session
 **Proposed Issue title:** `feat(corpus): surface verified jinn-repo graded scores for learning`
 **Q3 lock:** implement only the authenticated corpus path. Keep
-`HttpDiscoveryAPI.getCodeDigestRewards` empty.
+`HttpDiscoveryAPI.getCodeDigestRewards` empty. Authentication must bind network
+objects to the references that selected them; validating each signature in
+isolation is not enough.
 
 ### Task F4.1: Project and associate signed verdict grades
 
@@ -808,19 +814,26 @@ In `handleSearchRecords`, when returning jinn-repo solution projections:
 - query the local store for bounded matching verdict projections, call the
   helper, and merge the result into the solution's `scoreMetadata`;
 - for the bounded discovery result window, retain fetched manifest previews
-  before role filtering, authenticate their signed envelopes with
-  `authenticateExecutionEnvelope`, and build in-memory solution projections;
+  before role filtering, require each `preview.ref.manifestHash` to be a
+  well-formed non-empty hash, authenticate its signed envelope with
+  `authenticateExecutionEnvelope`, require
+  `envelope.signature.hash === preview.ref.manifestHash` (case-insensitive),
+  and only then build an in-memory projection;
 - for each authenticated verdict, follow `envelope.task.cid` through the new
-  corpus signed-task fetch, verify the task's canonical hash/signature and
-  `creator.agentEoa`, require `role=evaluation` plus matching jinn-repo
-  identity, then project top-level `restorationRequestId`;
+  corpus signed-task fetch, require a canonical sha2-256 content CID, compute
+  `sha256(toBytes(canonicalJson(rawSignedTask)))`, and require it to equal
+  `cidToDigestHex(envelope.task.cid)` before accepting the task. Separately
+  verify the task's canonical signature/hash and `creator.agentEoa`, require
+  `role=evaluation` plus matching jinn-repo identity, then project top-level
+  `restorationRequestId`;
 - run the same helper over those in-memory network projections and attach only
   authenticated payload-derived counts to matching network solution records.
 
 Do not persist failed-authentication data. Emit a bounded warning and leave the
-solution ungraded on missing task refs, failed authentication, identity
-mismatch, or unmatched IDs. `loadCorpusKnowledge` should keep passing the
-enriched field through verbatim.
+solution ungraded on missing task refs, failed authentication, discovery
+manifest-hash mismatch, task-CID content mismatch, identity mismatch, or
+unmatched IDs. `loadCorpusKnowledge` should keep passing the enriched field
+through verbatim.
 
 - [ ] **Step 4: Add end-to-end read-seam regressions**
 
@@ -829,9 +842,16 @@ Assert:
 - `search_records` returns the grade on the matching solution, not as a
   standalone verdict record;
 - discovery-returned solution + verdict refs are associated only after both
-  envelopes and the verdict's signed evaluation task authenticate;
-- a tampered envelope/task, wrong-role task, missing task CID, or mismatched
-  solver identity yields a warning and no network grade;
+  envelopes authenticate, each envelope hash equals its authoritative
+  discovery `manifestHash`, and the verdict's signed evaluation task both
+  authenticates and hashes to its `envelope.task.cid`;
+- a gateway/injected fetch returning a different validly signed envelope under
+  another ref is rejected by the manifest-hash binding;
+- a gateway/injected fetch returning a different validly signed evaluation
+  task under another CID is rejected by the raw canonical-content/CID binding;
+- a tampered envelope/task, malformed or missing authoritative hash/CID,
+  wrong-role task, or mismatched solver identity yields a warning and no
+  network grade;
 - `loadCorpusKnowledge` preserves it;
 - mismatched request IDs, missing counts, zero totals, and mixed v1/v2 records
   remain ungraded;

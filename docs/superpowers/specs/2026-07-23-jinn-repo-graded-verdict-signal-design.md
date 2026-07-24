@@ -71,8 +71,11 @@ The signal shape, v3 schema, null semantics, and carry path are accepted as writ
 1. Non-Vitest fallback scripts keep their authoritative boolean gate result and omit counts.
 2. The jinn-repo task-body fetch generalization is part of F3 so handler and enrichment-worker joins remain in lockstep.
 3. F4 uses authenticated signed envelopes and signed evaluation tasks for both
-   local and discovery-returned records. It does not restore shape-parsed
-   GraphQL projections as reward evidence.
+   local and discovery-returned records. For network records, authentication
+   also binds each envelope to its authoritative discovery `manifestHash` and
+   each signed task's canonical bytes to `envelope.task.cid`; a different
+   validly signed object cannot be substituted at either fetch boundary. It
+   does not restore shape-parsed GraphQL projections as reward evidence.
 
 Implementation is filed as [#2113](https://github.com/Jinn-Network/mono/issues/2113) → ([#2114](https://github.com/Jinn-Network/mono/issues/2114) ∥ [#2115](https://github.com/Jinn-Network/mono/issues/2115)) → [#2116](https://github.com/Jinn-Network/mono/issues/2116).
 
@@ -192,6 +195,9 @@ live-eval-runner
                  • local: use engine-authored projections
                  • network: fetch + authenticate each signed envelope, then fetch +
                    authenticate its envelope.task.cid signed evaluation task
+                 • bind envelope.signature.hash to the authoritative discovery
+                   ref.manifestHash and sha256(JCS(raw signed task)) to the
+                   sha2-256 digest encoded by envelope.task.cid
                  • project payload counts plus task.restorationRequestId as
                    metadata.solutionRequestId
                  • join verdict.metadata.solutionRequestId
@@ -225,7 +231,12 @@ Per-hop assertions (implementation must make these fail the build if broken):
    the engine already supplies that task when persisting projections. For
    network refs, corpus fetch authenticates the envelope, follows
    `envelope.task.cid`, authenticates the signed task, and constructs the same
-   projections in memory. A bounded join matches `solutionRequestId` to a
+   projections in memory. Authentication also requires
+   `envelope.signature.hash === preview.ref.manifestHash` and
+   `sha256(JCS(rawSignedTask)) === cidToDigestHex(envelope.task.cid)`; these
+   bindings reject a different otherwise-valid signed envelope or task
+   returned by a gateway/injected fetch port. A bounded join matches
+   `solutionRequestId` to a
    solution projection's `requestId` and overlays the counts plus derived grade
    on that solution's `RecordSummary.scoreMetadata`. Mixed
    v1/v2/short-circuit, failed-authentication, and missing-task records
@@ -334,15 +345,27 @@ Consolidator Tier-2 sensitivity for jinn-repo specifically.
   passes that field through to revision consumers.
 - The corpus interface adds authenticated signed-task hydration by CID.
   `handleSearchRecords` retains the bounded set of discovery-returned manifest
-  previews before role filtering. It authenticates network solution/verdict
-  envelopes with the existing execution-envelope authenticator; for each
-  verdict it follows `envelope.task.cid`, fetches the signed evaluation task,
-  verifies its canonical hash/signature and `creator.agentEoa`, requires
+  previews before role filtering. For every network solution/verdict preview,
+  it requires a well-formed non-empty authoritative `ref.manifestHash`,
+  authenticates the signed envelope bytes with the existing execution-envelope
+  authenticator, and then requires the authenticated
+  `envelope.signature.hash` to equal `ref.manifestHash`. This second check is
+  the discovery-reference binding that prevents a gateway or injected fetch
+  port from returning a different valid signed envelope.
+- For each bound verdict envelope, it follows `envelope.task.cid`, requires a
+  canonical sha2-256 content CID, fetches the raw signed evaluation task, and
+  before projection requires
+  `sha256(toBytes(canonicalJson(rawSignedTask)))` to equal
+  `cidToDigestHex(envelope.task.cid)`. It separately verifies the signed task's
+  canonical signature/hash and `creator.agentEoa`, requires
   `role=evaluation` plus jinn-repo identity, and projects the top-level
-  `restorationRequestId`. It then runs the same association helper over those
-  in-memory network projections before returning solution records.
+  `restorationRequestId`. This mirrors the substitution defense already used
+  in `_swe-rebench-v2-verifier-facts.ts`.
+- The same association helper then runs over those in-memory network
+  projections before returning solution records.
 - A missing or invalid task CID, failed envelope/task authentication, identity
-  mismatch, or unmatched request ID produces a warning and no grade. Counts
+  mismatch, discovery-reference mismatch, task-CID content mismatch, or
+  unmatched request ID produces a warning and no grade. Counts
   always come from the authenticated verdict payload; raw GraphQL count
   columns never enter `scoreMetadata`.
 
@@ -396,8 +419,11 @@ paths. Documented in F4 as a regression assertion.
    because the `#1433` jinn-repo join requires it.
 3. **Discovery auth posture:** use authenticated corpus association in F4:
    engine-authored projections locally, and authenticated envelope/task
-   hydration for discovery-returned refs. `HttpDiscoveryAPI.getCodeDigestRewards`
-   stays empty until a separately authenticated reward route exists.
+   hydration for discovery-returned refs. Bind the network envelope hash to the
+   discovery manifest hash and the raw task's canonical SHA-256 to the digest
+   encoded by `envelope.task.cid`; isolated signature validity is insufficient.
+   `HttpDiscoveryAPI.getCodeDigestRewards` stays empty until a separately
+   authenticated reward route exists.
 
 No open ratification blockers remain: signal shape, null semantics, schema
 bump, hop assertions, and the F1–F4 split are locked above.
