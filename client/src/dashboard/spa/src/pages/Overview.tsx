@@ -137,6 +137,11 @@ interface OverviewStatusV1 {
       unitsThisWeek: number;
       capPerBlock: number;
       capPerWeek: number;
+      usdMicrosThisBlock?: number;
+      usdMicrosThisWeek?: number;
+      capPerBlockUsdMicros?: number;
+      capPerWeekUsdMicros?: number;
+      estimated?: boolean;
       paused: boolean;
       /** True when the credential has spend this 7d window (issue #891). Optional for backward-compat. */
       active?: boolean;

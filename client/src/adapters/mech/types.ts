@@ -22,6 +22,13 @@ export interface MechAdapterConfig {
   agentEoaPrivateKey: `0x${string}`;
   ipfsRegistryUrl: string;  // Upload endpoint (e.g., https://registry.autonolas.tech)
   ipfsGatewayUrl: string;   // Read endpoint (e.g., https://gateway.autonolas.tech)
+  /**
+   * Controls the public IPFS fallback used by JSON/raw IPFS reads.
+   * - omit → production default (`ipfs.io` via `fetchFromIpfs`)
+   * - false → primary gateway only (hermetic e2e / mock IPFS)
+   * - string → alternate fallback gateway base
+   */
+  ipfsFallbackGatewayUrl?: string | false;
   pollIntervalMs: number;
   /** Optional cap for delivery-log scans; omit for full-history recovery. */
   mechDeliverBackfillLookbackBlocks?: bigint;

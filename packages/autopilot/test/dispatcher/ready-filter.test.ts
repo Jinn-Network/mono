@@ -202,4 +202,36 @@ describe('selectReady', () => {
       expect(ready[0].stackBase).toBeUndefined();
     });
   });
+
+  describe('machine child issues', () => {
+    const childMarker = '<!-- jinn-autopilot:child pr=42 kind=review-finding -->';
+    const childBase: PolledIssue = {
+      ...base,
+      number: 42,
+      body: `${childMarker}\n\nfindings`,
+      labels: ['review-finding'],
+      shape: 'fix',
+      priority: 'P1',
+      blockedOn: 'Nothing',
+      onBoard: true,
+      projectItemId: 'PVTI_child42',
+    };
+
+    it('admits a Project-triaged machine child without effort/priority labels', () => {
+      const { ready } = selectReady([childBase], new Set(), ALLOW_ALICE);
+      expect(ready.map((i) => i.number)).toEqual([42]);
+    });
+
+    it('drops a label-only machine child missing Project triage', () => {
+      const { ready } = selectReady([
+        {
+          ...childBase,
+          priority: null,
+          onBoard: false,
+          projectItemId: null,
+        },
+      ], new Set(), ALLOW_ALICE);
+      expect(ready).toEqual([]);
+    });
+  });
 });

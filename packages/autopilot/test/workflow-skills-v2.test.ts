@@ -39,9 +39,8 @@ describe('single-surface workflow skill pins', () => {
     expect(reconcile).not.toMatch(/rebase onto/i);
   });
 
-  it('eng-day reads label triage and surfaces child work', () => {
-    expect(engDay).toContain('effort:*');
-    expect(engDay).toContain('priority:*');
+  it('eng-day reads Project triage and surfaces child work', () => {
+    expect(engDay).toContain('Blocked on, Effort');
     expect(engDay).toContain('review-finding');
     expect(engDay).toContain('reconcile');
     expect(engDay).toContain('paint-only');
@@ -53,7 +52,16 @@ describe('single-surface workflow skill pins', () => {
     expect(autopilotRuntime).toContain('child-complete');
     expect(autopilotRuntime).toContain('fix-child');
     expect(autopilotRuntime).toContain('reconcile');
+    expect(autopilotRuntime).toMatch(/follow-ups-file/);
     expect(autopilotRuntime).toMatch(/Deleted verbs/);
+  });
+
+  it('§5.1 documents approve with optional non-blocking follow-ups', () => {
+    const spec = read('docs/superpowers/specs/2026-07-21-single-surface-lifecycle.md');
+    expect(spec).toContain('### 5.1');
+    expect(spec).toMatch(/follow-ups-file/);
+    expect(spec).toContain('jinn-autopilot:review-follow-up');
+    expect(spec).toMatch(/does not enter BLOCKED-BY-CHILD|never.*openChildKinds/i);
   });
 
   it('merge-batch does not route v2 work through merge-prep or Status authority', () => {
@@ -147,7 +155,8 @@ describe('v2 operator entry point and migration', () => {
     expect(runbook).toContain('dirty worktrees');
     expect(runbook).toContain('ahead commits');
     expect(runbook).toContain('existing branches');
-    expect(runbook).toContain('cleanup remains disabled');
+    expect(runbook).toContain('is on by default in active mode');
+    expect(runbook).toContain('ci-blocked');
     expect(runbook).toMatch(/same-host/i);
     expect(runbook).toMatch(/cross-host/i);
     expect(runbook).toContain('Hermes');
