@@ -329,6 +329,44 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     return;
   }
 
+  let frozenMachineSelection: ReturnType<typeof readMarketplaceTaskSelection> = null;
+  if (machineRequest) {
+    try {
+      frozenMachineSelection = readMarketplaceTaskSelection({
+        requestPath: requestFilePath!,
+        request: machineRequest,
+      });
+    } catch (err) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: err instanceof Error ? err.message : String(err),
+          exampleCli: 'jinn tasks submit --request-file request.json --dry-run --json',
+          details: { field: 'solverNetManifestCid' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    if (machineRequestFreshnessError && !frozenMachineSelection) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: errorMessage(machineRequestFreshnessError),
+          hint: 'Create a fresh marketplace Task request before retrying.',
+          exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+          details: {
+            field: 'freshness',
+            reason: 'policy_expired',
+            cause: errorMessage(machineRequestFreshnessError),
+          },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+  }
+
   // ── claim-policy override: --max-claims ─────────────────────────────────────
   // The on-chain `claimPolicy` defaults to a single attempt slot
   // (`maxClaims: 1`). That is correct for one-shot SolverTypes, but it makes a
@@ -414,11 +452,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   let selectedMachineManifestCid: string | undefined;
   if (machineRequest) {
     try {
-      const frozenSelection = readMarketplaceTaskSelection({
-        requestPath: requestFilePath!,
-        request: machineRequest,
-      });
-      selectedMachineManifestCid = frozenSelection?.solverNetManifestCid
+      selectedMachineManifestCid = frozenMachineSelection?.solverNetManifestCid
         ?? await resolveMarketplaceTaskSolverNet({
           config,
           explicitManifestCid: machineRequest.solverNetManifestCid,
