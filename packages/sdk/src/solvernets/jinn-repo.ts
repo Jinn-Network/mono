@@ -53,3 +53,11 @@ export type {
   AutopilotSessionCapsule,
   AutopilotWorkflow,
 } from '../autopilot-session.js';
+
+export {
+  formatAutopilotAdoptionReceiptComment,
+  parseAutopilotAdoptionReceiptComment,
+} from '../autopilot-adoption-comment.js';
+export type {
+  ParsedAutopilotAdoptionReceiptComment,
+} from '../autopilot-adoption-comment.js';

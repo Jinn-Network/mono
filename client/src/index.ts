@@ -29,6 +29,29 @@ export {
   type VerifiedAutopilotMarketplaceDelivery,
 } from './autopilot/marketplace-delivery-observer.js';
 export {
+  createAutopilotGitHubAdoptionReceiptObserver,
+  observeExactAutopilotAdoptionReceipt,
+  type AutopilotGitHubReadPort,
+  type GitHubIssueComment,
+  type GitHubIssueCommentPage,
+  type GitHubNativeReview,
+  type GitHubNativeReviewPage,
+  type GitHubNativeReviewState,
+  type GitHubPullRequestFacts,
+  type ObserveExactAutopilotAdoptionReceiptInput,
+} from './autopilot/github-adoption-receipt-observer.js';
+export {
+  createJinnMonoGitHubAdoptionReadPort,
+  type JinnMonoGitHubAdoptionReadOptions,
+} from './autopilot/github-rest-adoption-read.js';
+export {
+  createAutopilotEvaluationContextResolver,
+  type AutopilotEvaluationContextObservation,
+  type AutopilotEvaluationContextResolver,
+  type AutopilotEvaluationContextResolverInput,
+  type AutopilotEvaluationContextValue,
+} from './autopilot/autopilot-evaluation-context-resolver.js';
+export {
   createPublisherSafeResolver,
   type PublisherSafeResolverOptions,
   type RegistryReadClient,
