@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type {
-  EvidenceRepository,
+import {
+  createArtifactReference,
+  createRecordReference,
+  type EvidenceRepository,
 } from "@jinn-network/evidence-repository";
 import {
   validateExecutionEvidence,
@@ -108,6 +110,8 @@ export type ExecutionProducerContractDriverFactory = () =>
 
 type GraphEntity = ExecutionEvidenceDocument["@graph"][number];
 
+const SHA256 = /^[a-f0-9]{64}$/;
+
 function values(value: unknown): readonly unknown[] {
   return value === undefined ? [] : Array.isArray(value) ? value : [value];
 }
@@ -144,22 +148,51 @@ function entityById(
 function artifactReference(entity: GraphEntity): {
   readonly digest: `sha256:${string}`;
 } {
-  expect(entity.sha256).toMatch(/^[a-f0-9]{64}$/);
+  expect(entity.sha256).toMatch(SHA256);
   return {
     digest: `sha256:${String(entity.sha256)}`,
   };
 }
 
-async function retrieveArtifact(
+function byteBearingEntities(
+  document: ExecutionEvidenceDocument,
+): readonly GraphEntity[] {
+  return document["@graph"]
+    .filter(
+      (entity) =>
+        typeof entity.sha256 === "string" && SHA256.test(entity.sha256),
+    )
+    .sort((left, right) => left["@id"].localeCompare(right["@id"]));
+}
+
+async function retrieveAllArtifacts(
   observation: ExecutionProducerContractObservation,
+  entities: readonly GraphEntity[],
+): Promise<ReadonlyMap<string, Uint8Array>> {
+  const retrieved = new Map<string, Uint8Array>();
+  for (const entity of entities) {
+    const reference = artifactReference(entity);
+    const bytes = await observation.repository.getArtifact(reference);
+    expect(bytes, `missing artifact bytes for ${entity["@id"]}`).not.toBeNull();
+    if (bytes === null) {
+      throw new Error(`Missing artifact bytes for ${entity["@id"]}`);
+    }
+    expect(
+      createArtifactReference(bytes),
+      `artifact bytes do not match the evidence metadata digest for ${entity["@id"]}`,
+    ).toEqual(reference);
+    retrieved.set(entity["@id"], bytes);
+  }
+  return retrieved;
+}
+
+function retrievedArtifact(
+  artifacts: ReadonlyMap<string, Uint8Array>,
   entity: GraphEntity,
-): Promise<Uint8Array> {
-  const bytes = await observation.repository.getArtifact(
-    artifactReference(entity),
-  );
-  expect(bytes, `missing artifact bytes for ${entity["@id"]}`).not.toBeNull();
-  if (bytes === null) {
-    throw new Error(`Missing artifact bytes for ${entity["@id"]}`);
+): Uint8Array {
+  const bytes = artifacts.get(entity["@id"]);
+  if (bytes === undefined) {
+    throw new Error(`Artifact ${entity["@id"]} was not retrieved`);
   }
   return bytes;
 }
@@ -185,7 +218,7 @@ function expectedStatus(
   }
 }
 
-async function verifyObservation(
+export async function verifyExecutionProducerContractObservation(
   requestedScenario: ExecutionProducerContractScenario,
   observation: ExecutionProducerContractObservation,
 ): Promise<void> {
@@ -205,6 +238,10 @@ async function verifyObservation(
   if (recordBytes === null) {
     throw new Error("Finalized evidence record was not durable");
   }
+  expect(
+    createRecordReference("execution-evidence", recordBytes),
+    "record reference does not match the retrieved exact bytes",
+  ).toEqual(observation.receipt.record);
 
   const report = validateExecutionEvidence(recordBytes);
   expect(
@@ -215,6 +252,21 @@ async function verifyObservation(
   if (report.value === undefined) {
     throw new Error("Conforming evidence did not include a parsed document");
   }
+
+  const artifactEntities = byteBearingEntities(report.value);
+  const metadataArtifactDigests = [
+    ...new Set(
+      artifactEntities.map((entity) => artifactReference(entity).digest),
+    ),
+  ].sort();
+  expect(
+    observation.receipt.artifacts.map(({ digest }) => digest),
+    "receipt artifacts do not exactly match the evidence metadata",
+  ).toEqual(metadataArtifactDigests);
+  const retrievedArtifacts = await retrieveAllArtifacts(
+    observation,
+    artifactEntities,
+  );
 
   const root = entityById(report.value, "./");
   expect(root).toBeDefined();
@@ -247,7 +299,7 @@ async function verifyObservation(
     );
   expect(tasks).toHaveLength(1);
   expectExactBytes(
-    await retrieveArtifact(observation, tasks[0]!),
+    retrievedArtifact(retrievedArtifacts, tasks[0]!),
     observation.expectedTaskBytes,
   );
 
@@ -257,7 +309,7 @@ async function verifyObservation(
   expect(trace).toBeDefined();
   if (trace === undefined) throw new Error("Missing selected native trace");
   expectExactBytes(
-    await retrieveArtifact(observation, trace),
+    retrievedArtifact(retrievedArtifacts, trace),
     observation.expectedTraceBytes,
   );
 
@@ -272,7 +324,7 @@ async function verifyObservation(
         const result = entityById(report.value!, id);
         expect(result).toBeDefined();
         if (result === undefined) throw new Error(`Missing Result ${id}`);
-        return retrieveArtifact(observation, result);
+        return retrievedArtifact(retrievedArtifacts, result);
       }),
     );
     expect(
@@ -300,7 +352,10 @@ export function describeExecutionProducerContract(
       const driver = await driverFactory();
       const observation = await driver.run(scenario);
       try {
-        await verifyObservation(scenario, observation);
+        await verifyExecutionProducerContractObservation(
+          scenario,
+          observation,
+        );
       } finally {
         await observation.cleanup?.();
       }
@@ -325,7 +380,7 @@ export function describeExecutionProducerContract(
 
         const recoveredObservation = await driver.recoverFinalization();
         try {
-          await verifyObservation(
+          await verifyExecutionProducerContractObservation(
             "interrupted-finalization",
             recoveredObservation,
           );
