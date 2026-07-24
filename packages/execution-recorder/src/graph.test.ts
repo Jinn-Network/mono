@@ -665,6 +665,43 @@ describe("execution evidence graph", () => {
     );
   });
 
+  test("merges extension keys that shadow Object prototype properties", () => {
+    const baseline = minimalInput();
+    const extensions = JSON.parse(
+      '{"constructor":{"retained":true},"toString":"retained","__proto__":["retained"]}',
+    ) as NonNullable<PersistedAggregateArtifactCapture["extensions"]>;
+    const repository: PersistedAggregateArtifactCapture = {
+      kind: "dataset",
+      entityId: "inputs/repository.json",
+      manifest: source("1", "application/json", "Repository manifest"),
+      members: [],
+      origin: producerOrigin,
+    };
+    const mapped = entity(
+      graph(
+        buildExecutionEvidence({
+          ...baseline,
+          recording: {
+            ...baseline.recording,
+            repositoryState: {
+              artifact: repository,
+              identifiers: [],
+              extensions,
+            },
+          },
+        }),
+      ),
+      repository.entityId,
+    );
+
+    expect(Object.hasOwn(mapped, "constructor")).toBe(true);
+    expect(mapped["constructor"]).toEqual({ retained: true });
+    expect(Object.hasOwn(mapped, "toString")).toBe(true);
+    expect(mapped["toString"]).toBe("retained");
+    expect(Object.hasOwn(mapped, "__proto__")).toBe(true);
+    expect(mapped["__proto__"]).toEqual(["retained"]);
+  });
+
   test("emits identical bytes when unordered captures are permuted", () => {
     const baseline = minimalInput();
     const left = file("inputs/a.txt", "1", "text/plain");
@@ -837,6 +874,118 @@ describe("execution evidence graph", () => {
         details: {
           entityId: baseline.recording.initialInputs[0]!.entityId,
         },
+      }),
+    );
+  });
+
+  test("rejects an identical artifact reused across capture roles", () => {
+    const cases: readonly {
+      readonly role: string;
+      readonly reuse: (
+        baseline: ExecutionEvidenceMapperInput,
+      ) => ExecutionEvidenceMapperInput;
+    }[] = [
+      {
+        role: "result",
+        reuse: (baseline) => ({
+          ...baseline,
+          results: [baseline.recording.initialInputs[0]!],
+        }),
+      },
+      {
+        role: "runtime",
+        reuse: (baseline) => ({
+          ...baseline,
+          recording: {
+            ...baseline.recording,
+            runtime: {
+              ...baseline.recording.runtime,
+              components: [
+                {
+                  kind: "controlled",
+                  artifact: baseline.recording.initialInputs[0]!,
+                },
+              ],
+            },
+          },
+        }),
+      },
+      {
+        role: "environment",
+        reuse: (baseline) => ({
+          ...baseline,
+          runtimeObservations: [
+            {
+              kind: "environment",
+              artifact: baseline.recording.initialInputs[0]!,
+            },
+          ],
+        }),
+      },
+      {
+        role: "native trace",
+        reuse: (baseline) => ({
+          ...baseline,
+          nativeTrace: {
+            ...baseline.nativeTrace,
+            artifact: baseline.recording.initialInputs[0]!,
+          },
+        }),
+      },
+    ];
+
+    for (const { role, reuse } of cases) {
+      const baseline = minimalInput();
+      expect(
+        () => buildExecutionEvidence(reuse(baseline)),
+        role,
+      ).toThrowError(
+        expect.objectContaining<Partial<ExecutionRecorderError>>({
+          code: "RECORDING_CONFLICT",
+          details: {
+            entityId: baseline.recording.initialInputs[0]!.entityId,
+          },
+        }),
+      );
+    }
+  });
+
+  test("emits identical bytes when an artifact repeats in one capture role", () => {
+    const baseline = minimalInput();
+
+    expect(
+      buildExecutionEvidence({
+        ...baseline,
+        additionalInputs: [baseline.recording.initialInputs[0]!],
+      }),
+    ).toEqual(buildExecutionEvidence(baseline));
+  });
+
+  test("deduplicates repeated relationship IDs within one capture role", () => {
+    const baseline = minimalInput();
+    const member = file("inputs/archive/member.txt", "1", "text/plain");
+    const aggregate: PersistedAggregateArtifactCapture = {
+      kind: "dataset",
+      entityId: "inputs/archive.json",
+      manifest: source("2", "application/json"),
+      members: [member],
+      origin: producerOrigin,
+    };
+
+    expect(
+      buildExecutionEvidence({
+        ...baseline,
+        additionalInputs: [
+          {
+            ...aggregate,
+            members: [member, member],
+          },
+        ],
+      }),
+    ).toEqual(
+      buildExecutionEvidence({
+        ...baseline,
+        additionalInputs: [aggregate],
       }),
     );
   });

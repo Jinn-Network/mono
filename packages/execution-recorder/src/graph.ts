@@ -81,6 +81,14 @@ interface RankedEntity {
   readonly entity: MutableEntity;
 }
 
+type CaptureRole =
+  | "task"
+  | "input"
+  | "runtime"
+  | "environment"
+  | "result"
+  | "native-trace";
+
 function jsonEqual(left: JsonValue, right: JsonValue): boolean {
   if (
     left === null ||
@@ -190,15 +198,15 @@ function mergeExtensions(
   right: JsonLdExtensions | undefined,
 ): JsonLdExtensions | undefined {
   if (left === undefined && right === undefined) return undefined;
-  const merged: Record<string, JsonValue> = { ...(left ?? {}) };
+  const merged = new Map<string, JsonValue>(Object.entries(left ?? {}));
   for (const [key, value] of Object.entries(right ?? {})) {
-    const current = merged[key];
-    if (current !== undefined && !jsonEqual(current, value)) {
+    const current = merged.get(key);
+    if (merged.has(key) && !jsonEqual(current!, value)) {
       builder.conflict(entityId, `values for extension ${key}`);
     }
-    merged[key] = value;
+    merged.set(key, value);
   }
-  return merged;
+  return Object.fromEntries(merged);
 }
 
 function types(base: readonly string[], additional?: readonly string[]): JsonValue {
@@ -222,6 +230,7 @@ class GraphBuilder {
   readonly entities = new Map<string, RankedEntity>();
   readonly declarations = new Map<string, MutableEntity>();
   readonly contextualAgents = new Set<string>();
+  readonly captureRoles = new Map<string, CaptureRole>();
   readonly contentIds = new Set<string>();
   readonly roles = new Map<string, string>();
   readonly origins = new Map<string, CaptureOrigin>();
@@ -233,6 +242,14 @@ class GraphBuilder {
       `Graph entity ${id} has incompatible ${detail}.`,
       { entityId: id },
     );
+  }
+
+  claimCaptureRole(id: string, role: CaptureRole): void {
+    const current = this.captureRoles.get(id);
+    if (current !== undefined && current !== role) {
+      this.conflict(id, `capture roles ${current} and ${role}`);
+    }
+    this.captureRoles.set(id, role);
   }
 
   add(entity: MutableEntity, rank: number): MutableEntity {
@@ -357,15 +374,17 @@ class GraphBuilder {
   addArtifact(
     artifact: PersistedArtifactCapture,
     rank: number,
+    role: CaptureRole,
   ): string[] {
-    const directMemberIds: string[] = [];
+    this.claimCaptureRole(artifact.entityId, role);
+    const directMemberIds = new Set<string>();
     const descendantIds: string[] = [];
     if (artifact.kind !== "file") {
       for (const member of [...artifact.members].sort((left, right) =>
         compareStrings(left.entityId, right.entityId),
       )) {
-        directMemberIds.push(member.entityId);
-        descendantIds.push(...this.addArtifact(member, rank));
+        directMemberIds.add(member.entityId);
+        descendantIds.push(...this.addArtifact(member, rank, role));
       }
     }
     const source =
@@ -383,9 +402,13 @@ class GraphBuilder {
         ...(identifiers(artifact.identifiers) === undefined
           ? {}
           : { identifier: identifiers(artifact.identifiers)! }),
-        ...(directMemberIds.length === 0
+        ...(directMemberIds.size === 0
           ? {}
-          : { hasPart: directMemberIds.map(reference) }),
+          : {
+              hasPart: [...directMemberIds]
+                .sort(compareStrings)
+                .map(reference),
+            }),
       },
       rank,
     );
@@ -495,6 +518,7 @@ export function buildExecutionEvidence(
     30,
   );
 
+  builder.claimCaptureRole(recording.task.entityId, "task");
   const task = builder.add(
     withExtensions(recording.task.extensions, {
       "@id": recording.task.entityId,
@@ -531,13 +555,13 @@ export function buildExecutionEvidence(
     ...input.additionalInputs,
     ...(repositoryArtifact === undefined ? [] : [repositoryArtifact]),
   ];
-  const inputIds: string[] = [];
+  const inputIds = new Set<string>();
   const inputContentIds: string[] = [];
   for (const artifact of [...inputArtifacts].sort((left, right) =>
     compareStrings(left.entityId, right.entityId),
   )) {
-    inputIds.push(artifact.entityId);
-    inputContentIds.push(...builder.addArtifact(artifact, 50));
+    inputIds.add(artifact.entityId);
+    inputContentIds.push(...builder.addArtifact(artifact, 50, "input"));
   }
   if (recording.repositoryState) {
     const repository = recording.repositoryState;
@@ -567,10 +591,14 @@ export function buildExecutionEvidence(
     },
   )) {
     if (component.kind === "controlled") {
-      runtimeContentIds.push(...builder.addArtifact(component.artifact, 70));
+      runtimeContentIds.push(
+        ...builder.addArtifact(component.artifact, 70, "runtime"),
+      );
       runtimePartIds.push(component.artifact.entityId);
     } else {
-      runtimeContentIds.push(...builder.addArtifact(component.descriptor, 70));
+      runtimeContentIds.push(
+        ...builder.addArtifact(component.descriptor, 70, "runtime"),
+      );
       runtimePartIds.push(component.descriptor.entityId);
       opaqueComponentIds.push(component.component.entityId);
       builder.setProperty(
@@ -641,12 +669,14 @@ export function buildExecutionEvidence(
       resourceIds.push(observation.entityId);
     } else if (observation.kind === "environment") {
       environmentContentIds.push(
-        ...builder.addArtifact(observation.artifact, 130),
+        ...builder.addArtifact(observation.artifact, 130, "environment"),
       );
       environmentIds.push(observation.artifact.entityId);
     } else {
       const component = observation.component;
-      runtimeContentIds.push(...builder.addArtifact(component.descriptor, 70));
+      runtimeContentIds.push(
+        ...builder.addArtifact(component.descriptor, 70, "runtime"),
+      );
       runtimePartIds.push(component.descriptor.entityId);
       opaqueComponentIds.push(component.component.entityId);
       builder.setProperty(
@@ -674,6 +704,7 @@ export function buildExecutionEvidence(
     }
   }
 
+  builder.claimCaptureRole(recording.runtime.entityId, "runtime");
   const runtime = builder.add(
     withExtensions(recording.runtime.extensions, {
       "@id": recording.runtime.entityId,
@@ -705,7 +736,7 @@ export function buildExecutionEvidence(
     compareStrings(left.entityId, right.entityId),
   )) {
     resultIds.push(result.entityId);
-    resultContentIds.push(...builder.addArtifact(result, 100));
+    resultContentIds.push(...builder.addArtifact(result, 100, "result"));
     builder.setProperty(
       result.entityId,
       "prov:wasGeneratedBy",
@@ -713,7 +744,11 @@ export function buildExecutionEvidence(
     );
   }
 
-  const traceContentIds = builder.addArtifact(input.nativeTrace.artifact, 110);
+  const traceContentIds = builder.addArtifact(
+    input.nativeTrace.artifact,
+    110,
+    "native-trace",
+  );
   builder.setProperty(
     input.nativeTrace.artifact.entityId,
     "about",
@@ -751,7 +786,10 @@ export function buildExecutionEvidence(
       : {
           identifier: identifiers(recording.record.executionIdentifiers)!,
         }),
-    object: references([recording.task.entityId, ...inputIds]),
+    object: references([
+      recording.task.entityId,
+      ...[...inputIds].sort(compareStrings),
+    ]),
     resourceUsage: references([
       "#duration-ms",
       ...[...new Set(resourceIds)].sort(),
