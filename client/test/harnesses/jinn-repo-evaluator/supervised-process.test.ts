@@ -32,6 +32,9 @@ describe('semantic evaluator process supervision', () => {
       reapTimeoutMs: 100,
       makeTempDir: vi.fn().mockResolvedValue('/tmp/jinn-semantic-home'),
       remove,
+      environment: {
+        ANTHROPIC_API_KEY: 'test-only',
+      },
     });
     const controller = new AbortController();
     const pending = runner.run({
@@ -41,7 +44,9 @@ describe('semantic evaluator process supervision', () => {
     });
     const observed = pending.catch((error: unknown) => error);
 
-    while (spawnFn.mock.calls.length === 0) await Promise.resolve();
+    await vi.waitFor(() => {
+      expect(spawnFn).toHaveBeenCalledOnce();
+    });
     controller.abort();
     await Promise.resolve();
     expect(killProcessGroup).toHaveBeenCalledWith(4321, 'SIGTERM');
@@ -68,6 +73,9 @@ describe('semantic evaluator process supervision', () => {
       reapTimeoutMs: 100,
       makeTempDir: vi.fn().mockResolvedValue('/tmp/jinn-semantic-home'),
       remove,
+      environment: {
+        ANTHROPIC_API_KEY: 'test-only',
+      },
     });
     const controller = new AbortController();
     const observed = runner.run({
@@ -76,7 +84,9 @@ describe('semantic evaluator process supervision', () => {
       model: 'claude-review-model',
     }).catch((error: unknown) => error);
 
-    while (spawnFn.mock.calls.length === 0) await Promise.resolve();
+    await vi.waitFor(() => {
+      expect(spawnFn).toHaveBeenCalledOnce();
+    });
     controller.abort();
     await vi.advanceTimersByTimeAsync(200);
 

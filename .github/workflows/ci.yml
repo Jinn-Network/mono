@@ -28,6 +28,7 @@ jobs:
   check:
     name: Typecheck & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -54,6 +55,8 @@ jobs:
       - run: yarn test
         env:
           SKIP_HL_TESTS: '1'
+          CLAUDE_CODE_OAUTH_TOKEN: ''
+          ANTHROPIC_API_KEY: ''
       - run: yarn build
 
   pack-smoke:
