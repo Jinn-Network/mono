@@ -322,6 +322,7 @@ describe('Autopilot marketplace delivery observer', () => {
       delivery: {
         envelopeCid: ENVELOPE_CID,
         envelopeDigest: ENVELOPE_DIGEST,
+        publisherAgentId: '7',
         transactionHash: DELIVERY_TX,
         blockNumber: 120n,
       },

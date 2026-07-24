@@ -104,6 +104,7 @@ describe('Autopilot marketplace delivery observation command', () => {
         delivery: {
           envelopeCid: 'bafy-envelope',
           envelopeDigest: `0x${'5'.repeat(64)}`,
+          publisherAgentId: '7',
           transactionHash: `0x${'6'.repeat(64)}`,
           blockNumber: 125n,
         },

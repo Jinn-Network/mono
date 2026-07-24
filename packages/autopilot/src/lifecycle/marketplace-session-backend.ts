@@ -215,7 +215,7 @@ function readCancellation(
   return parsed as unknown as MarketplaceCancellation;
 }
 
-function marketplaceEnvironment(
+export function marketplaceCommandEnvironment(
   ambient: NodeJS.ProcessEnv,
 ): Record<string, string> {
   return Object.fromEntries(
@@ -365,7 +365,7 @@ export function makeMarketplaceSessionBackend(
     '--json',
     ...(dryRun ? ['--dry-run'] : []),
   ], {
-    env: marketplaceEnvironment(ambient),
+    env: marketplaceCommandEnvironment(ambient),
     replaceEnv: true,
   });
 

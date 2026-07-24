@@ -119,6 +119,8 @@ export interface VerifiedAutopilotMarketplaceDelivery {
   delivery: {
     envelopeCid: string;
     envelopeDigest: Hex;
+    /** Historical ERC-8004 publisher agent resolved to the attempt Safe. */
+    publisherAgentId: string;
     transactionHash: Hex;
     blockNumber: bigint;
   };
@@ -524,6 +526,7 @@ export function createAutopilotMarketplaceDeliveryObserver(
         delivery: {
           envelopeCid: lookup.envelope.manifestCid,
           envelopeDigest,
+          publisherAgentId: lookup.envelope.publisherAgentId,
           transactionHash: delivery.transactionHash,
           blockNumber: delivery.blockNumber,
         },

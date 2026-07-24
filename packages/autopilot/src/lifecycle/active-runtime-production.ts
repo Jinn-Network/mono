@@ -347,6 +347,19 @@ export function makeProductionActiveRuntime(
                   taskCid: execution.taskCid,
                   deadline: execution.deadline,
                   requestFile: execution.requestFile,
+                  ...(execution.creationTransactionHash === undefined
+                    ? {}
+                    : {
+                        creationTransactionHash:
+                          execution.creationTransactionHash,
+                        creationBlockNumber: execution.creationBlockNumber!,
+                      }),
+                  ...(execution.solverNetManifestCid === undefined
+                    ? {}
+                    : {
+                        solverNetManifestCid:
+                          execution.solverNetManifestCid,
+                      }),
                   ...(execution.attemptIndex === undefined
                     ? {}
                     : {

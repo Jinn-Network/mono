@@ -48,3 +48,4 @@ export * from './marketplace-mutation-verification.js';
 export * from './marketplace-mutation-git.js';
 export * from './marketplace-mutation-manifest.js';
 export * from './marketplace-mutation-adoption.js';
+export * from './marketplace-delivery-client.js';
