@@ -1,4 +1,5 @@
 import {
+  AutopilotAdoptionReceiptSchema,
   AutopilotCorrelationSchema,
   AutopilotReviewResultSchema,
   autopilotCorrelationMatches,
@@ -9,16 +10,22 @@ import {
 } from '../../../sdk/src/autopilot-session.js';
 import type { AttemptManifest } from './attempt-workspace.js';
 import type {
+  AdoptionReceiptExactFacts,
+  AdoptionReceiptState,
   PublishAdoptionReceiptInput,
   PublishAdoptionReceiptResult,
 } from './marketplace-adoption-receipt.js';
 import type { ReviewSessionProtocol } from './review-session.js';
+import type { ReviewClaimRecord } from './types.js';
 
 export interface MarketplaceReviewAuthority {
+  /** Immutable review-claim root captured by the attempt manifest. */
   readonly claimOid: string;
   readonly head: string;
   readonly reviewGeneration: string;
+  /** Current descendant review record; advances through intent and terminal states. */
   readonly reviewRefOid: string;
+  readonly reviewState: ReviewClaimRecord['state'];
 }
 
 export interface MarketplaceReviewAdoptionPorts {
@@ -29,6 +36,10 @@ export interface MarketplaceReviewAdoptionPorts {
   publishReceipt(
     input: PublishAdoptionReceiptInput,
   ): Promise<PublishAdoptionReceiptResult>;
+  readReceiptState(
+    exactFacts: AdoptionReceiptExactFacts,
+    allowedAuthors: readonly string[],
+  ): Promise<AdoptionReceiptState>;
   readonly now: () => Date;
 }
 
@@ -108,8 +119,8 @@ function requireManifest(
     manifest.phase !== 'review'
     || manifest.prNumber !== correlation.prNumber
     || manifest.expectedHead !== correlation.reviewedHead
+    || manifest.claimOid !== correlation.reviewRefOid
     || manifest.reviewGeneration !== correlation.reviewGeneration
-    || manifest.reviewRefOid !== correlation.reviewRefOid
   ) {
     throw new MarketplaceReviewAdoptionError(
       'invalid-review-manifest',
@@ -153,11 +164,27 @@ function authorityFailure(
   if (authority.head !== expected.reviewedHead) return 'stale-head';
   if (
     authority.reviewGeneration !== expected.reviewGeneration
-    || authority.reviewRefOid !== expected.reviewRefOid
+    || authority.reviewRefOid !== manifest.reviewRefOid
   ) {
     return 'stale-review-generation';
   }
   return undefined;
+}
+
+async function rejectLostProtocolAuthority(
+  input: AdoptMarketplaceReviewInput,
+  correlation: ReviewCorrelation,
+  ports: MarketplaceReviewAdoptionPorts,
+): Promise<MarketplaceReviewAdoptionResult> {
+  const current = await ports.readAuthority(input.manifest);
+  const failure = authorityFailure(input.manifest, correlation, current);
+  if (failure === undefined) {
+    throw new MarketplaceReviewAdoptionError(
+      'retryable-github-state',
+      'The review protocol reported lost authority, but fresh authority did not expose the loss',
+    );
+  }
+  return publishRejected(input, correlation, current, failure, ports);
 }
 
 function receiptCommon(
@@ -180,6 +207,97 @@ function receiptCommon(
     reviewRefOid: correlation.reviewRefOid,
     recordedAt,
   };
+}
+
+function receiptExactFacts(
+  correlation: ReviewCorrelation,
+): AdoptionReceiptExactFacts {
+  return {
+    role: 'verdict',
+    correlation,
+    prHead: correlation.reviewedHead,
+  };
+}
+
+async function existingAdoptionResult(
+  input: AdoptMarketplaceReviewInput,
+  correlation: ReviewCorrelation,
+  ports: MarketplaceReviewAdoptionPorts,
+): Promise<MarketplaceReviewAdoptionResult | undefined> {
+  const state = await ports.readReceiptState(
+    receiptExactFacts(correlation),
+    input.receiptAuthors,
+  );
+  if (state.status === 'contradiction') {
+    const human = await ports.protocol.human(
+      input.manifest,
+      `Authorized marketplace Verdict receipts contradict: ${state.reason}`,
+    );
+    return {
+      status: 'rejected',
+      reason: 'receipt-contradiction',
+      head: human.head,
+    };
+  }
+  if (
+    state.status === 'exact-accepted'
+    && state.receipt.role === 'verdict'
+    && state.receipt.disposition === 'accepted'
+  ) {
+    return {
+      status: 'adopted',
+      operation: state.receipt.operation,
+      head: state.receipt.reviewedHead,
+    };
+  }
+  if (
+    state.status === 'exact-rejected'
+    && state.receipt.role === 'verdict'
+    && state.receipt.disposition === 'rejected'
+  ) {
+    const authority = await ports.readAuthority(input.manifest);
+    return {
+      status: 'rejected',
+      reason: state.receipt.reason,
+      head: authority.head,
+    };
+  }
+  return undefined;
+}
+
+function sameReceiptWithoutTimestamp(
+  left: AutopilotAdoptionReceipt,
+  right: AutopilotAdoptionReceipt,
+): boolean {
+  const stable = (receipt: AutopilotAdoptionReceipt) =>
+    Object.fromEntries(
+      Object.entries(receipt).filter(([key]) => key !== 'recordedAt'),
+    );
+  return JSON.stringify(stable(left)) === JSON.stringify(stable(right));
+}
+
+async function recoverDurableReceipt(
+  candidate: AutopilotAdoptionReceipt,
+  input: AdoptMarketplaceReviewInput,
+  correlation: ReviewCorrelation,
+  ports: MarketplaceReviewAdoptionPorts,
+): Promise<AutopilotAdoptionReceipt> {
+  const state = await ports.readReceiptState(
+    receiptExactFacts(correlation),
+    input.receiptAuthors,
+  );
+  if (
+    (
+      candidate.disposition === 'accepted'
+        ? state.status === 'exact-accepted'
+        : state.status === 'exact-rejected'
+    )
+    && 'receipt' in state
+    && sameReceiptWithoutTimestamp(candidate, state.receipt)
+  ) {
+    return state.receipt;
+  }
+  return candidate;
 }
 
 function rejectionDetail(reason: AutopilotAdoptionRejectionReason): string {
@@ -206,20 +324,16 @@ async function publishRejected(
   reason: AutopilotAdoptionRejectionReason,
   ports: MarketplaceReviewAdoptionPorts,
 ): Promise<MarketplaceReviewAdoptionResult> {
-  const receipt: AutopilotAdoptionReceipt = {
+  const receipt = await recoverDurableReceipt(AutopilotAdoptionReceiptSchema.parse({
     ...receiptCommon(correlation, ports.now().toISOString()),
     disposition: 'rejected',
     role: 'verdict',
     reason,
     detail: rejectionDetail(reason),
-  };
+  }), input, correlation, ports);
   await ports.publishReceipt({
     receipt,
-    exactFacts: {
-      role: 'verdict',
-      correlation,
-      prHead: correlation.reviewedHead,
-    },
+    exactFacts: receiptExactFacts(correlation),
     expectedPublicationHead: authority.head,
     allowedAuthors: input.receiptAuthors,
     publisherLogin: input.publisherLogin,
@@ -234,19 +348,15 @@ async function publishAccepted(
   operation: 'review-verdict' | 'review-findings' | 'human',
   ports: MarketplaceReviewAdoptionPorts,
 ): Promise<void> {
-  const receipt: AutopilotAdoptionReceipt = {
+  const receipt = await recoverDurableReceipt(AutopilotAdoptionReceiptSchema.parse({
     ...receiptCommon(correlation, ports.now().toISOString()),
     disposition: 'accepted',
     role: 'verdict',
     operation,
-  };
+  }), input, correlation, ports);
   await ports.publishReceipt({
     receipt,
-    exactFacts: {
-      role: 'verdict',
-      correlation,
-      prHead: correlation.reviewedHead,
-    },
+    exactFacts: receiptExactFacts(correlation),
     expectedPublicationHead: authority.head,
     allowedAuthors: input.receiptAuthors,
     publisherLogin: input.publisherLogin,
@@ -303,9 +413,52 @@ async function adoptParsedResult(
         'The aggregated review-finding protocol is unavailable',
       );
     }
+    const findings = formatMarketplaceReviewFindings(result.findings);
+    if (authority.reviewState === 'stale') {
+      const recovered = await ports.protocol.reviewVerdict(
+        input.manifest,
+        'REQUEST_CHANGES',
+        findings,
+      );
+      if (recovered.status === 'requested-changes') {
+        await publishAccepted(
+          input,
+          correlation,
+          authority,
+          'review-findings',
+          ports,
+        );
+        return {
+          status: 'adopted',
+          operation: 'review-findings',
+          head: recovered.head,
+        };
+      }
+      if (recovered.status === 'human') {
+        await publishAccepted(input, correlation, authority, 'human', ports);
+        return {
+          status: 'adopted',
+          operation: 'human',
+          head: recovered.head,
+        };
+      }
+      if (recovered.status === 'ambiguous') {
+        throw new MarketplaceReviewAdoptionError(
+          'retryable-github-state',
+          'The prior review findings have not converged yet',
+        );
+      }
+      if (recovered.status === 'stale') {
+        return rejectLostProtocolAuthority(input, correlation, ports);
+      }
+      throw new MarketplaceReviewAdoptionError(
+        'unexpected-protocol-outcome',
+        `REQUEST_CHANGES recovery unexpectedly produced ${recovered.status}`,
+      );
+    }
     const adopted = await ports.protocol.reviewFindings(
       input.manifest,
-      formatMarketplaceReviewFindings(result.findings),
+      findings,
     );
     if (adopted.status !== 'filed') {
       if (adopted.status === 'ambiguous') {
@@ -315,7 +468,7 @@ async function adoptParsedResult(
         );
       }
       if (adopted.status === 'stale') {
-        return publishRejected(input, correlation, authority, 'stale-head', ports);
+        return rejectLostProtocolAuthority(input, correlation, ports);
       }
       await publishAccepted(input, correlation, authority, 'human', ports);
       return { status: 'adopted', operation: 'human', head: adopted.head };
@@ -343,7 +496,7 @@ async function adoptParsedResult(
     );
   }
   if (adopted.status === 'stale') {
-    return publishRejected(input, correlation, authority, 'stale-head', ports);
+    return rejectLostProtocolAuthority(input, correlation, ports);
   }
   if (adopted.status === 'human') {
     await publishAccepted(input, correlation, authority, 'human', ports);
@@ -365,6 +518,8 @@ export async function adoptMarketplaceReview(
 ): Promise<MarketplaceReviewAdoptionResult> {
   const correlation = requireExpectedCorrelation(input);
   requireManifest(input.manifest, correlation);
+  const existing = await existingAdoptionResult(input, correlation, ports);
+  if (existing !== undefined) return existing;
   const authority = await ports.readAuthority(input.manifest);
 
   if (
