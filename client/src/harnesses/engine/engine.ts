@@ -1089,6 +1089,25 @@ export class TaskEngine {
   }
 
   /**
+   * Whether this task must resolve its manifest CID through the live SolverNet
+   * registry before any Harness dispatch or profile-sensitive state change.
+   *
+   * A wired registry makes the manifest binding authoritative even for legacy
+   * tasks. An execution request also requires exact resolution because its
+   * Harness/model/version assertions cannot be validated without the joined
+   * SolverNet profile. Legacy tasks with no execution request retain the
+   * pre-registry dispatch path when no registry is wired (issue #2039 AC4).
+   */
+  private requiresExactSolverNetResolution(
+    fullTask: Task | null | undefined,
+  ): fullTask is Task & { solverNetManifestCid: string } {
+    return Boolean(
+      fullTask?.solverNetManifestCid
+      && (this.solverNetRegistry || fullTask.executionRequest),
+    );
+  }
+
+  /**
    * Checks a task's execution-profile pin (issue #2039 AC3) against the
    * already-resolved SolverNet/Harness for this task. `executionRequest` is
    * an ASSERTION the task carries, not an override — it never widens what
@@ -1329,7 +1348,7 @@ export class TaskEngine {
       return `another ${routingKey}/${role} task is already in flight`;
     }
     const solverNet = this.resolveSolverNetForTask(task, routingKey, role);
-    if (task?.solverNetManifestCid && !solverNet) {
+    if (this.requiresExactSolverNetResolution(task) && !solverNet) {
       return (
         `no exact enabled SolverNet for manifest CID '${task.solverNetManifestCid}', ` +
         `solverType '${routingKey ?? '<unknown>'}', and role '${role}'`
@@ -1411,7 +1430,7 @@ export class TaskEngine {
     const preSnapshotSolverNet = run.solverType
       ? this.resolveSolverNetForTask(run.task, run.solverType, run.taskRole ?? 'restoration')
       : undefined;
-    if (run.task?.solverNetManifestCid && !preSnapshotSolverNet) {
+    if (this.requiresExactSolverNetResolution(run.task) && !preSnapshotSolverNet) {
       throw new Error(
         `no exact enabled SolverNet for manifest CID '${run.task.solverNetManifestCid}' during pre-snapshot`,
       );
@@ -1475,7 +1494,7 @@ export class TaskEngine {
     const solverType = task.solverType ?? '';
     const role = task.taskRole ?? 'restoration';
     const solverNet = this.resolveSolverNetForTask(task.task, solverType, role);
-    if (task.task?.solverNetManifestCid && !solverNet) {
+    if (this.requiresExactSolverNetResolution(task.task) && !solverNet) {
       throw new Error(
         `no exact enabled SolverNet for manifest CID '${task.task.solverNetManifestCid}' during execution`,
       );
@@ -2070,7 +2089,7 @@ export class TaskEngine {
         .sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`));
     const implNameForEnvelope = task.implName ?? solverType;
     const solverNet = this.resolveSolverNetForTask(task.task, solverType, task.taskRole ?? 'restoration');
-    if (task.task?.solverNetManifestCid && !solverNet) {
+    if (this.requiresExactSolverNetResolution(task.task) && !solverNet) {
       throw new Error(
         `no exact enabled SolverNet for manifest CID '${task.task.solverNetManifestCid}' during packaging`,
       );

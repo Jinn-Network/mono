@@ -262,14 +262,19 @@ describe('execution request (issue #2039)', () => {
       expect(claudeCanAttempt).not.toHaveBeenCalled();
     });
 
-    it('rejects a manifest-bound task when no SolverNet registry is wired', async () => {
+  });
+
+  describe('AC3 — unsupported execution-request combinations are rejected', () => {
+    it('rejects an execution request when no SolverNet registry is wired', async () => {
       const engine = buildEngine({
         manifestResolver: makeStubManifestResolver({
           [CID_A]: buildPredictionV1ManifestStub(),
         }),
       });
-      const task = makePredictionV1Task({ solverNetManifestCid: CID_A });
-      expect(task.executionRequest).toBeUndefined();
+      const task: Task = {
+        ...makePredictionV1Task({ solverNetManifestCid: CID_A }),
+        executionRequest: { harness: 'codex' },
+      };
 
       const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
 
@@ -277,9 +282,7 @@ describe('execution request (issue #2039)', () => {
       expect(codexCanAttempt).not.toHaveBeenCalled();
       expect(claudeCanAttempt).not.toHaveBeenCalled();
     });
-  });
 
-  describe('AC3 — unsupported execution-request combinations are rejected', () => {
     it('rejects a harness pin that does not match the resolved SolverNet', async () => {
       const engine = await makeEngine();
       const task: Task = {
@@ -391,6 +394,22 @@ describe('execution request (issue #2039)', () => {
   });
 
   describe('AC4 — existing tasks without an execution request are unaffected', () => {
+    it('keeps a manifest-bound task dispatchable when no SolverNet registry is wired', async () => {
+      const engine = buildEngine({
+        manifestResolver: makeStubManifestResolver({
+          [CID_A]: buildPredictionV1ManifestStub(),
+        }),
+      });
+      const task = makePredictionV1Task({ solverNetManifestCid: CID_A });
+      expect(task.executionRequest).toBeUndefined();
+
+      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+
+      expect(accept).toEqual({ ok: true });
+      expect(codexCanAttempt).toHaveBeenCalledTimes(1);
+      expect(claudeCanAttempt).not.toHaveBeenCalled();
+    });
+
     it('accepts a task with no executionRequest field exactly as before', async () => {
       const engine = await makeEngine();
       const task = makePredictionV1Task({ solverNetManifestCid: CID_A });
