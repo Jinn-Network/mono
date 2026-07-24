@@ -14,9 +14,9 @@ Conventions used throughout:
   label `autopilot:human`; plus the existing structured marker comment. Board
   `Blocked on: Human` remains respected as *human* intent (read-only) and
   painted as view.
-- **Machine triage without the board**: labels `effort:<low|medium|high>` and
-  `priority:<p1|p2>` on machine-created issues; the effort/priority resolvers
-  read board fields for human-created work, labels as fallback.
+- **Machine triage**: Project Blocked on / Effort / Priority on all
+  machine-created issues (children and follow-ups). Kind labels on children
+  (`review-finding`, `reconcile`, `ci-failure`) are flat tags only.
 
 ---
 
@@ -90,7 +90,8 @@ outrank and pre-empt them).
    `fileChildIssue({parentPr, kind, title, body, effort, priority})` —
    idempotent (search open issues for the child marker; no-op if present),
    creates via REST with type `fix` (GraphQL `updateIssue` for Issue Type),
-   kind + `effort:*`/`priority:*` labels, child marker in body.
+   kind label + child marker in body, then Project triage (Blocked on /
+   Effort / Priority).
    `findOpenChildren(parentPr)`, `closeChildrenFor(parentPr)`.
 2. **Review terminal outcomes** — `review-session.ts` /
    `review-session-production.ts` + `src/cli/session.ts`:
@@ -134,9 +135,9 @@ outrank and pre-empt them).
 6. **Scheduler ordering** — `active-scheduler.ts` / `controller.ts`
    candidates: children (marker-bearing issues) order before fresh
    implementation claims.
-7. **`eng-day` skill** — reads machine triage from `effort:*`/`priority:*`
-   labels so children are not reported as untriaged drift; surfaces open
-   finding/reconcile children as first-class items in the brief.
+7. **`eng-day` skill** — reads Project triage for machine-created children
+   and follow-ups; surfaces open finding/reconcile children as first-class
+   items in the brief.
 
 ### Tests
 

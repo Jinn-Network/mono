@@ -221,14 +221,24 @@ describe('ConditionalPullRequestEvidenceProbe', () => {
     },
   );
 
-  it('fails closed when the exact PR detail identity or head does not match', async () => {
+  it('treats live PR head drift as changed evidence without aborting the cycle', async () => {
     const bodies = equalBodies();
     bodies.detail = {
       ...(bodies.detail as Record<string, unknown>),
       head: { ref: 'autopilot/42', sha: 'b'.repeat(40) },
     };
 
-    await expect(probeWith(bodies).probe.changed(pr())).rejects.toThrow(/head|identity/i);
+    await expect(probeWith(bodies).probe.changed(pr())).resolves.toBe(true);
+  });
+
+  it('fails closed when the exact PR detail identity does not match', async () => {
+    const bodies = equalBodies();
+    bodies.detail = {
+      ...(bodies.detail as Record<string, unknown>),
+      number: 999,
+    };
+
+    await expect(probeWith(bodies).probe.changed(pr())).rejects.toThrow(/identity/i);
   });
 
   it.each([

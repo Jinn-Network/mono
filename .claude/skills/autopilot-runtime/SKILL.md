@@ -71,7 +71,7 @@ The v2 session surface (see `packages/autopilot/src/cli/session.ts`) is:
 
 - `checkpoint`
 - `implementation-complete --summary-file <path>`
-- `review-verdict --state <APPROVE|REQUEST_CHANGES> --body-file <path>`
+- `review-verdict --state <APPROVE|REQUEST_CHANGES> --body-file <path> [--follow-ups-file <path>]`
 - `review-findings --file <path>`
 - `child-complete`
 - `human --reason-file <path>`

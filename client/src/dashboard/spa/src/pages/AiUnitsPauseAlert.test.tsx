@@ -28,6 +28,11 @@ describe('AiUnitsPauseAlert', () => {
               unitsThisWeek: 200,
               capPerBlock: 100,
               capPerWeek: 2800,
+              usdMicrosThisBlock: 300000,
+              usdMicrosThisWeek: 2000000,
+              capPerBlockUsdMicros: 1000000,
+              capPerWeekUsdMicros: 14000000,
+              estimated: false,
               paused: false,
               blockResetsAt: '2026-05-28T18:00:00.000Z',
               weekResetsAt: '2026-06-04T13:00:00.000Z',
@@ -39,7 +44,7 @@ describe('AiUnitsPauseAlert', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders a banner per paused credential with the reset time', () => {
+  it('renders USD spend and metered status for a paused credential', () => {
     render(
       <AiUnitsPauseAlert
         aiUnits={{
@@ -50,6 +55,11 @@ describe('AiUnitsPauseAlert', () => {
               unitsThisWeek: 200,
               capPerBlock: 100,
               capPerWeek: 2800,
+              usdMicrosThisBlock: 1000000,
+              usdMicrosThisWeek: 2000000,
+              capPerBlockUsdMicros: 1000000,
+              capPerWeekUsdMicros: 14000000,
+              estimated: false,
               paused: true,
               blockResetsAt: '2026-05-28T18:00:00.000Z',
               weekResetsAt: '2026-06-04T13:00:00.000Z',
@@ -61,7 +71,9 @@ describe('AiUnitsPauseAlert', () => {
     const alert = screen.getByTestId('ai-units-pause-alert-anthropic:api-key');
     expect(alert.textContent).toContain('anthropic:api-key');
     expect(alert.textContent).toContain('Paused');
-    expect(alert.textContent).toContain('AI-unit');
+    expect(alert.textContent).toContain('spend cap');
+    expect(alert.textContent).toContain('metered');
+    expect(alert.textContent).toContain('$1.0000 / $1.0000');
   });
 
   it('does not render an idle credential as active (#891)', () => {
@@ -76,6 +88,11 @@ describe('AiUnitsPauseAlert', () => {
               unitsThisWeek: 0,
               capPerBlock: 100,
               capPerWeek: 2800,
+              usdMicrosThisBlock: 0,
+              usdMicrosThisWeek: 0,
+              capPerBlockUsdMicros: 1000000,
+              capPerWeekUsdMicros: 14000000,
+              estimated: false,
               paused: false,
               active: false,
               blockResetsAt: '2026-05-28T18:00:00.000Z',
@@ -101,6 +118,11 @@ describe('AiUnitsPauseAlert', () => {
               unitsThisWeek: 200,
               capPerBlock: 100,
               capPerWeek: 2800,
+              usdMicrosThisBlock: 1000000,
+              usdMicrosThisWeek: 2000000,
+              capPerBlockUsdMicros: 1000000,
+              capPerWeekUsdMicros: 14000000,
+              estimated: false,
               paused: true,
               active: true,
               blockResetsAt: '2026-05-28T18:00:00.000Z',
@@ -125,6 +147,11 @@ describe('AiUnitsPauseAlert', () => {
               unitsThisWeek: 500,
               capPerBlock: 100,
               capPerWeek: 2800,
+              usdMicrosThisBlock: 1000000,
+              usdMicrosThisWeek: 5000000,
+              capPerBlockUsdMicros: 1000000,
+              capPerWeekUsdMicros: 14000000,
+              estimated: false,
               paused: true,
               blockResetsAt: '2026-05-28T18:00:00.000Z',
               weekResetsAt: '2026-06-04T13:00:00.000Z',
@@ -135,6 +162,11 @@ describe('AiUnitsPauseAlert', () => {
               unitsThisWeek: 2800,
               capPerBlock: 100,
               capPerWeek: 2800,
+              usdMicrosThisBlock: 50000,
+              usdMicrosThisWeek: 14000000,
+              capPerBlockUsdMicros: 1000000,
+              capPerWeekUsdMicros: 14000000,
+              estimated: true,
               paused: true,
               blockResetsAt: '2026-05-28T18:00:00.000Z',
               weekResetsAt: '2026-06-04T13:00:00.000Z',
@@ -145,5 +177,6 @@ describe('AiUnitsPauseAlert', () => {
     );
     expect(screen.getByTestId('ai-units-pause-alert-a:k').textContent).toMatch(/6h/);
     expect(screen.getByTestId('ai-units-pause-alert-b:k').textContent).toMatch(/7d|week/i);
+    expect(screen.getByTestId('ai-units-pause-alert-b:k').textContent).toContain('estimated');
   });
 });

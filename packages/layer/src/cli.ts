@@ -1978,6 +1978,15 @@ export async function runJinnLayerCli(
             `error: --install "${installFlag}" — no distilled skill by that name ` +
               `(available: ${publishedNames.join(', ')}; or "all" / "none")\n`,
           );
+          progress?.runEnd({
+            outcome: 'ok',
+            clusterCount: result.clusterCount,
+            published: publishedNames,
+            rejectedCount: result.distilled.rejected.length,
+            errorCount: 0,
+            installed: [],
+            stagingDir,
+          });
           return 2;
         }
       } else {
