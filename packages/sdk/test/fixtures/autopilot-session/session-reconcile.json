@@ -16,7 +16,8 @@
     "title": "Reconcile the parent branch",
     "body": "Resolve the semantic conflict.",
     "prBody": "Parent implementation PR.",
-    "baseSha": "3333333333333333333333333333333333333333"
+    "baseSha": "3333333333333333333333333333333333333333",
+    "targetBaseOid": "9999999999999999999999999999999999999999"
   },
   "workflowContract": {
     "skill": "reconcile",

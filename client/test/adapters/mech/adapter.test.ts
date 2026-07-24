@@ -226,6 +226,7 @@ function autopilotEvaluationFixtures() {
       body: 'Body.',
       prBody: 'PR body.',
       baseSha: '3'.repeat(40),
+      targetBaseOid: '3'.repeat(40),
     },
     workflowContract: {
       skill: 'implement-issue' as const,

@@ -14,7 +14,8 @@
     "title": "Implement exact marketplace contracts",
     "body": "Add the approved contract surface.",
     "prBody": "Draft implementation PR.",
-    "baseSha": "3333333333333333333333333333333333333333"
+    "baseSha": "3333333333333333333333333333333333333333",
+    "targetBaseOid": "3333333333333333333333333333333333333333"
   },
   "workflowContract": {
     "skill": "implement-issue",

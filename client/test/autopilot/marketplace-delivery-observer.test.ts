@@ -65,6 +65,7 @@ const session: AutopilotSessionCapsule = {
     body: 'Use exact marketplace facts.',
     prBody: 'Closes the issue.',
     baseSha: '1'.repeat(40),
+    targetBaseOid: '1'.repeat(40),
   },
   workflowContract: {
     skill: 'implement-issue',

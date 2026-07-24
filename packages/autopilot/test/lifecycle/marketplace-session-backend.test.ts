@@ -38,6 +38,7 @@ function input(root: string): ClaimedSessionInput {
     claimOid: gitOid('1'.repeat(40)),
     expectedHead: gitOid('1'.repeat(40)),
     baseSha: gitOid('0'.repeat(40)),
+    targetBaseOid: gitOid('9'.repeat(40)),
     v2AttemptId: '11111111-1111-4111-8111-111111111111',
     runnerId: 'runner-a',
     selectedLogin: 'implementation-bot',
@@ -174,6 +175,10 @@ describe('marketplace SessionExecutionBackend', () => {
           workflow: 'implement',
           v2AttemptId: '11111111-1111-4111-8111-111111111111',
           deadline: '2026-07-23T13:00:00.000Z',
+          taskSnapshot: {
+            baseSha: '0'.repeat(40),
+            targetBaseOid: '9'.repeat(40),
+          },
         },
       },
     });

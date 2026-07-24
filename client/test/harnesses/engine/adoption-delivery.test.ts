@@ -95,6 +95,7 @@ function autopilotSpec() {
         body: 'Issue body',
         prBody: 'PR body',
         baseSha: '4'.repeat(40),
+        targetBaseOid: '4'.repeat(40),
       },
       workflowContract: {
         skill: 'implement-issue',

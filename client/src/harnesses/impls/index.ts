@@ -20,7 +20,9 @@ import {
 import { ClaudeCodeHarnessAdapter, CodexCodeHarnessAdapter } from './learner/index.js';
 import { SweRebenchV2EvaluatorHarness } from './swe-rebench-v2-evaluator/harness.js';
 import { JinnRepoEvaluatorHarness } from './jinn-repo-evaluator/harness.js';
-import type { SemanticAgentRunner } from './jinn-repo-evaluator/autopilot-semantic.js';
+import type {
+  SemanticAgentRunnerResolver,
+} from './jinn-repo-evaluator/autopilot-semantic.js';
 import { HermesHarness, HermesHarnessAdapter } from './hermes-agent/index.js';
 import { maybeCreateStubHarnessFromEnv } from './stub.js';
 import {
@@ -129,7 +131,7 @@ export interface HarnessEnv {
    * Provider-and-model-configured semantic evaluator runtime. The registry
    * never guesses a provider from a SolverNet model identifier.
    */
-  semanticEvaluatorRunner?: SemanticAgentRunner;
+  semanticEvaluatorRunnerResolver?: SemanticAgentRunnerResolver;
 }
 
 /**
@@ -240,7 +242,7 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   out.push(
     new JinnRepoEvaluatorHarness({
       stub: isStub,
-      semanticAgentRunner: env.semanticEvaluatorRunner,
+      semanticAgentRunnerResolver: env.semanticEvaluatorRunnerResolver,
       implStateDir: env.implStateDirRoot
         ? `${env.implStateDirRoot}/jinn-repo-evaluator`
         : undefined,

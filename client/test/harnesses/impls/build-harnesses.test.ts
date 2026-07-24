@@ -91,18 +91,18 @@ describe('buildHarnesses — external impls + disabledNames', () => {
     expect(impls.some((impl) => impl.name === CLAUDE_CODE_HARNESS)).toBe(true);
   });
 
-  it('inherits an explicitly configured semantic evaluator runtime without choosing a provider', () => {
-    const semanticEvaluatorRunner = {
-      run: vi.fn().mockResolvedValue('{}'),
+  it('inherits a per-SolverNet semantic runtime resolver without choosing a provider', () => {
+    const semanticEvaluatorRunnerResolver = {
+      resolve: vi.fn().mockReturnValue(undefined),
     };
     const impls = buildHarnesses({
       ...ENV,
-      semanticEvaluatorRunner,
+      semanticEvaluatorRunnerResolver,
     });
     const evaluator = impls.find((impl) => impl.name === 'jinn-repo-evaluator');
     expect((evaluator as unknown as {
-      semanticAgentRunner?: unknown;
-    }).semanticAgentRunner).toBe(semanticEvaluatorRunner);
+      semanticAgentRunnerResolver?: unknown;
+    }).semanticAgentRunnerResolver).toBe(semanticEvaluatorRunnerResolver);
   });
 });
 

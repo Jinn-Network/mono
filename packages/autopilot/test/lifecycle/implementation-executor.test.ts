@@ -679,4 +679,43 @@ describe('implementation action executor', () => {
     }]);
     expect(events).toEqual(['claim', 'pr', 'project', 'attempt']);
   });
+
+  it('keeps the prior PR head as child mutation parent but reviews from target-base OID', async () => {
+    const starts: unknown[] = [];
+    const targetBaseOid = gitOid('9'.repeat(40));
+    const parent = pr();
+    const { deps } = harness({
+      readIssue: async () => issue({
+        number: 701,
+        child: { parentPr: parent.number, kind: 'review-finding' },
+      }),
+      readParentPullRequest: async () => parent,
+      readTargetBaseHead: async () => targetBaseOid,
+      executionBackendKind: 'marketplace',
+      executionBackend: {
+        start: async (input) => {
+          starts.push(input);
+          return {
+            backend: 'marketplace',
+            taskId: '501',
+            taskCid: 'bafy-task',
+            deadline: input.deadline,
+            requestFile: '/tmp/request.json',
+          };
+        },
+        recover: async () => ({ state: 'running' }),
+        cancel: async () => {},
+      },
+      persistExecutionHandle: () => {},
+      sessionDeadline: () => '2026-07-20T13:00:00.000Z',
+    });
+
+    await expect(executeImplementationAction({ issueNumber: 701 }, deps))
+      .resolves.toMatchObject({ status: 'spawned', prNumber: parent.number });
+    expect(starts).toEqual([expect.objectContaining({
+      workflow: 'fix-child',
+      baseSha: parent.head,
+      targetBaseOid,
+    })]);
+  });
 });

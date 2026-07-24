@@ -50,6 +50,7 @@ function context(): AutopilotEvaluationContext {
         body: 'Review the full cumulative pull request.',
         prBody: 'Implements the issue and its review child.',
         baseSha: '3'.repeat(40),
+        targetBaseOid: '3'.repeat(40),
       },
       workflowContract: {
         skill: 'fix-child',
@@ -127,7 +128,7 @@ function agent(output: unknown): SemanticAgentRunner & { run: ReturnType<typeof 
 }
 
 describe('runAutopilotSemanticReview', () => {
-  it('reviews the complete exact head through the injected runtime and review-pr contract', async () => {
+  it('reviews the complete exact head through the injected trusted runtime policy', async () => {
     const mechanicalRunner = mechanical();
     const agentRunner = agent({
       schemaVersion: 'jinn-autopilot-review-result.v1',
@@ -174,7 +175,13 @@ describe('runAutopilotSemanticReview', () => {
     }));
     expect(agentRunner.run.mock.calls[0]![0]).not.toHaveProperty('model');
     const prompt = agentRunner.run.mock.calls[0]![0].prompt as string;
-    expect(prompt).toContain('review-pr');
+    expect(prompt).not.toContain('review-pr');
+    expect(prompt).toContain('Trusted evaluator checklist');
+    expect(prompt).toContain('Correctness and issue intent');
+    expect(prompt).toContain('Correlation and exact-head integrity');
+    expect(prompt).toContain('Security and trust boundaries');
+    expect(prompt).toContain('Cancellation, cleanup, and failure behavior');
+    expect(prompt).toContain('Ordinary non-Autopilot compatibility');
     expect(prompt).toContain('complete effective PR diff');
     expect(prompt).toContain('4444444444444444444444444444444444444444');
     expect(prompt).toContain('"reviewGeneration": "123e4567-e89b-42d3-a456-426614174010"');

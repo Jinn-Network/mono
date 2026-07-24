@@ -43,6 +43,7 @@ const INPUT: ClaimedSessionInput = {
   claimOid: gitOid('1'.repeat(40)),
   expectedHead: gitOid('1'.repeat(40)),
   baseSha: gitOid('0'.repeat(40)),
+  targetBaseOid: gitOid('0'.repeat(40)),
   v2AttemptId: '11111111-1111-4111-8111-111111111111',
   runnerId: 'runner-a',
   selectedLogin: 'implementation-bot',

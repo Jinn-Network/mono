@@ -30,6 +30,7 @@ function request(overrides: Record<string, unknown> = {}) {
         body: 'Use the approved backend-neutral contract.',
         prBody: 'Closes #42',
         baseSha: '0'.repeat(40),
+        targetBaseOid: '0'.repeat(40),
       },
       workflowContract: {
         skill: 'implement-issue',

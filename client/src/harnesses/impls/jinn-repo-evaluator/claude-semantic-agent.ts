@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +6,10 @@ import type {
   SemanticAgentRunner,
   SemanticAgentRunnerInput,
 } from './autopilot-semantic.js';
+import {
+  runSupervisedProcess,
+  SupervisedProcessUnreapedError,
+} from './supervised-process.js';
 
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const ENV_ALLOWLIST = [
@@ -18,9 +22,10 @@ const ENV_ALLOWLIST = [
 
 export interface ClaudeSemanticAgentRunnerOptions {
   claudePath?: string;
-  model?: string;
   spawn?: typeof spawn;
   killProcessGroup?: (pid: number, signal: NodeJS.Signals) => void;
+  terminationGraceMs?: number;
+  reapTimeoutMs?: number;
   makeTempDir?: () => Promise<string>;
   remove?: (path: string) => Promise<void>;
 }
@@ -46,7 +51,6 @@ function agentEnv(isolatedHome: string): NodeJS.ProcessEnv {
 /** Generic configured Claude runtime behind the typed semantic-runner port. */
 export class ClaudeSemanticAgentRunner implements SemanticAgentRunner {
   private readonly claudePath: string;
-  private readonly model: string | undefined;
   private readonly spawnFn: typeof spawn;
   private readonly killProcessGroup: (
     pid: number,
@@ -54,14 +58,17 @@ export class ClaudeSemanticAgentRunner implements SemanticAgentRunner {
   ) => void;
   private readonly makeTempDir: () => Promise<string>;
   private readonly remove: (path: string) => Promise<void>;
+  private readonly terminationGraceMs: number | undefined;
+  private readonly reapTimeoutMs: number | undefined;
 
   constructor(options: ClaudeSemanticAgentRunnerOptions = {}) {
     this.claudePath = options.claudePath ?? 'claude';
-    this.model = options.model;
     this.spawnFn = options.spawn ?? spawn;
     this.killProcessGroup =
       options.killProcessGroup
       ?? ((pid, signal) => process.kill(-pid, signal));
+    this.terminationGraceMs = options.terminationGraceMs;
+    this.reapTimeoutMs = options.reapTimeoutMs;
     this.makeTempDir =
       options.makeTempDir
       ?? (() => mkdtemp(join(tmpdir(), 'jinn-semantic-home-')));
@@ -73,8 +80,12 @@ export class ClaudeSemanticAgentRunner implements SemanticAgentRunner {
   async run(input: SemanticAgentRunnerInput): Promise<string> {
     const isolatedHome = await this.makeTempDir();
     const args = [
-      '--setting-sources',
-      'project',
+      '--safe-mode',
+      '--disable-slash-commands',
+      '--strict-mcp-config',
+      '--mcp-config',
+      '{"mcpServers":{}}',
+      '--no-session-persistence',
       '--permission-mode',
       'dontAsk',
       '--output-format',
@@ -90,6 +101,11 @@ export class ClaudeSemanticAgentRunner implements SemanticAgentRunner {
       'Bash(git rev-parse:*)',
       'Bash(git blame:*)',
       '--disallowedTools',
+      'Edit',
+      'Write',
+      'NotebookEdit',
+      'WebFetch',
+      'WebSearch',
       'Bash(gh:*)',
       'Bash(git push:*)',
       'Bash(git commit:*)',
@@ -98,71 +114,35 @@ export class ClaudeSemanticAgentRunner implements SemanticAgentRunner {
       '-p',
       input.prompt,
     ];
-    if (this.model) args.push('--model', this.model);
+    if (input.model) args.push('--model', input.model);
 
+    let cleanupSafe = true;
     try {
-      return await new Promise<string>((resolve, reject) => {
-        let settled = false;
-        let stdout = '';
-        let stderr = '';
-        const child: ChildProcess = this.spawnFn(this.claudePath, args, {
-          cwd: input.cwd,
-          env: agentEnv(isolatedHome),
-          detached: true,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
-        const finish = (error?: Error): void => {
-          if (settled) return;
-          settled = true;
-          input.abort.removeEventListener('abort', onAbort);
-          if (error) reject(error);
-          else resolve(stdout.trim());
-        };
-        const onAbort = (): void => {
-          if (child.pid !== undefined) {
-            try {
-              this.killProcessGroup(child.pid, 'SIGTERM');
-            } catch {
-              child.kill('SIGTERM');
-            }
-          }
-          finish(new Error('Semantic review aborted'));
-        };
-        input.abort.addEventListener('abort', onAbort, { once: true });
-        if (input.abort.aborted) {
-          onAbort();
-          return;
-        }
-
-        child.stdout?.on('data', (chunk: Buffer | string) => {
-          stdout += chunk.toString();
-          if (Buffer.byteLength(stdout) > MAX_OUTPUT_BYTES) {
-            onAbort();
-          }
-        });
-        child.stderr?.on('data', (chunk: Buffer | string) => {
-          stderr += chunk.toString();
-          if (Buffer.byteLength(stderr) > MAX_OUTPUT_BYTES) {
-            onAbort();
-          }
-        });
-        child.once('error', (error) => finish(error));
-        child.once('exit', (code, signal) => {
-          if (code === 0) {
-            finish();
-          } else {
-            finish(new Error(
-              `Semantic agent exited with code ${String(code)}`
-              + `${signal ? ` (${signal})` : ''}: ${stderr.slice(0, 4000)}`,
-            ));
-          }
-        });
+      const result = await runSupervisedProcess(this.claudePath, args, {
+        cwd: input.cwd,
+        env: agentEnv(isolatedHome),
+        abort: input.abort,
+        maxOutputBytes: MAX_OUTPUT_BYTES,
+        spawn: this.spawnFn,
+        killProcessGroup: this.killProcessGroup,
+        ...(this.terminationGraceMs === undefined
+          ? {}
+          : { terminationGraceMs: this.terminationGraceMs }),
+        ...(this.reapTimeoutMs === undefined
+          ? {}
+          : { reapTimeoutMs: this.reapTimeoutMs }),
       });
+      return result.stdout.trim();
+    } catch (error) {
+      if (error instanceof SupervisedProcessUnreapedError) cleanupSafe = false;
+      throw error;
     } finally {
-      try {
-        await this.remove(isolatedHome);
-      } catch {
-        // Isolated-home disposal cannot replace a semantic result.
+      if (cleanupSafe) {
+        try {
+          await this.remove(isolatedHome);
+        } catch {
+          // Isolated-home disposal cannot replace a semantic result.
+        }
       }
     }
   }

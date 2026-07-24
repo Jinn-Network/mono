@@ -50,6 +50,8 @@ interface ClaimedSessionCommon {
 export interface ClaimedMutationSessionInput extends ClaimedSessionCommon {
   readonly kind: 'mutation';
   readonly workflow: MutationWorkflow;
+  /** Target-branch OID used for the evaluator's complete effective-PR diff. */
+  readonly targetBaseOid: GitOid;
   readonly childIssueNumber?: number;
   readonly parentPrNumber?: number;
   readonly effort: Effort | null;

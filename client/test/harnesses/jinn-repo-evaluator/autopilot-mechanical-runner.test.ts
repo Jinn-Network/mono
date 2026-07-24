@@ -5,6 +5,7 @@ import {
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 import {
   ExactHeadMechanicalRunner,
+  type ImmutableMechanicalVerifier,
   type RepositoryCommandRunner,
 } from '../../../src/harnesses/impls/jinn-repo-evaluator/autopilot-mechanical-runner.js';
 
@@ -43,6 +44,7 @@ function context(): AutopilotEvaluationContext {
         body: 'Review full head.',
         prBody: 'PR.',
         baseSha: '3'.repeat(40),
+        targetBaseOid: '3'.repeat(40),
       },
       workflowContract: {
         skill: 'implement-issue',
@@ -113,12 +115,24 @@ function commandRunner(overrides: {
   }) as RepositoryCommandRunner & ReturnType<typeof vi.fn>;
 }
 
-function runner(command: RepositoryCommandRunner) {
+function passingVerifier(): ImmutableMechanicalVerifier {
+  return {
+    verify: vi.fn().mockResolvedValue({
+      kind: 'passed',
+      checks: ['trusted-verifier'],
+    }),
+  };
+}
+
+function runner(
+  command: RepositoryCommandRunner,
+  immutableVerifier: ImmutableMechanicalVerifier = passingVerifier(),
+) {
   return new ExactHeadMechanicalRunner({
     command,
+    immutableVerifier,
     makeTempDir: vi.fn().mockResolvedValue('/tmp/eval-root'),
     remove: vi.fn().mockResolvedValue(undefined),
-    pathExists: vi.fn().mockResolvedValue(true),
   });
 }
 
@@ -134,7 +148,7 @@ describe('ExactHeadMechanicalRunner', () => {
         'packages/sdk/src/autopilot-session.ts',
         'client/src/harnesses/engine/engine.ts',
       ],
-      checks: ['repository', 'exact-head', 'policy', 'typecheck', 'tests'],
+      checks: ['repository', 'exact-head', 'policy', 'trusted-verifier'],
     });
     expect(command).toHaveBeenCalledWith('git', [
       'clone',
@@ -142,31 +156,51 @@ describe('ExactHeadMechanicalRunner', () => {
       '--no-checkout',
       'https://github.com/Jinn-Network/mono.git',
       '/tmp/eval-root/repo',
-    ], {});
+    ], expect.objectContaining({
+      env: expect.objectContaining({
+        HOME: '/tmp/eval-root',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_TERMINAL_PROMPT: '0',
+      }),
+    }));
     expect(command).toHaveBeenCalledWith('git', [
       '-C',
       '/tmp/eval-root/repo',
       'checkout',
       '--detach',
       '4'.repeat(40),
-    ], {});
+    ], expect.objectContaining({ env: expect.any(Object) }));
     expect(command).toHaveBeenCalledWith('git', [
       '-C',
       '/tmp/eval-root/repo',
       'diff',
       '--name-only',
       `${'3'.repeat(40)}...${'4'.repeat(40)}`,
-    ], {});
-    expect(command).toHaveBeenCalledWith(
-      'yarn',
-      ['typecheck'],
-      { cwd: '/tmp/eval-root/repo/packages/sdk' },
-    );
-    expect(command).toHaveBeenCalledWith(
-      'yarn',
-      ['typecheck'],
-      { cwd: '/tmp/eval-root/repo/client' },
-    );
+    ], expect.objectContaining({ env: expect.any(Object) }));
+    expect(command.mock.calls.some(([commandName]) =>
+      commandName === 'yarn' || commandName === 'corepack'
+    )).toBe(false);
+  });
+
+  it('never exposes ambient daemon credentials to repository commands', async () => {
+    process.env['GH_TOKEN'] = 'must-not-leak';
+    process.env['JINN_PASSWORD'] = 'must-not-leak';
+    process.env['ANTHROPIC_API_KEY'] = 'must-not-leak';
+    try {
+      const command = commandRunner();
+      await runner(command).run(context());
+
+      for (const [, , options] of command.mock.calls) {
+        expect(options.env).not.toHaveProperty('GH_TOKEN');
+        expect(options.env).not.toHaveProperty('JINN_PASSWORD');
+        expect(options.env).not.toHaveProperty('ANTHROPIC_API_KEY');
+      }
+    } finally {
+      delete process.env['GH_TOKEN'];
+      delete process.env['JINN_PASSWORD'];
+      delete process.env['ANTHROPIC_API_KEY'];
+    }
   });
 
   it('rejects a stale checkout before typecheck or agent execution can occur', async () => {
@@ -189,6 +223,39 @@ describe('ExactHeadMechanicalRunner', () => {
       detail: 'unsupported-diff-scope: no deterministic checks cover contracts/src/Autopilot.sol',
     });
     expect(command.mock.calls.some(([, args]) => args[0] === 'yarn')).toBe(false);
+  });
+
+  it('rejects unsupported paths hidden inside an otherwise supported mixed diff', async () => {
+    const command = commandRunner({
+      changedFiles: 'client/src/main.ts\n.claude/settings.json\n',
+    });
+    const immutableVerifier = passingVerifier();
+    const result = await runner(command, immutableVerifier).run(context());
+
+    expect(result).toEqual({
+      kind: 'unscorable',
+      detail: 'unsupported-diff-scope: no deterministic checks cover .claude/settings.json',
+    });
+    expect(immutableVerifier.verify).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when no immutable verifier is configured', async () => {
+    const command = commandRunner({
+      changedFiles: 'client/src/harnesses/engine/engine.ts\n',
+    });
+    const exactHeadRunner = new ExactHeadMechanicalRunner({
+      command,
+      makeTempDir: vi.fn().mockResolvedValue('/tmp/eval-root'),
+      remove: vi.fn().mockResolvedValue(undefined),
+    });
+
+    await expect(exactHeadRunner.run(context())).resolves.toEqual({
+      kind: 'unscorable',
+      detail: 'immutable-verifier-unavailable',
+    });
+    expect(command.mock.calls.some(([commandName]) =>
+      commandName === 'yarn' || commandName === 'corepack'
+    )).toBe(false);
   });
 
   it('propagates cancellation to an in-flight repository command', async () => {
@@ -216,19 +283,25 @@ describe('ExactHeadMechanicalRunner', () => {
     });
   });
 
-  it('returns a deterministic typecheck failure instead of continuing to tests', async () => {
-    const failure = Object.assign(new Error('typecheck red'), { code: 1, stderr: 'TS2322' });
+  it('returns a deterministic immutable-verifier failure without executing candidate tests', async () => {
     const command = commandRunner({
       changedFiles: 'client/src/harnesses/engine/engine.ts\n',
-      reject: (args) => args[0] === 'typecheck' ? failure : undefined,
     });
-    const result = await runner(command).run(context());
+    const result = await runner(command, {
+      verify: vi.fn().mockResolvedValue({
+        kind: 'failed',
+        check: 'trusted-tests',
+        detail: 'TS2322',
+      }),
+    }).run(context());
     expect(result).toMatchObject({
       kind: 'failed',
-      check: 'typecheck',
+      check: 'trusted-tests',
       detail: expect.stringContaining('TS2322'),
     });
-    expect(command.mock.calls.some(([, args]) => args[0] === 'test')).toBe(false);
+    expect(command.mock.calls.some(([commandName]) =>
+      commandName === 'yarn' || commandName === 'corepack'
+    )).toBe(false);
   });
 
   it('classifies clone/spawn infrastructure errors as unscorable, never a graded failure', async () => {

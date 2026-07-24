@@ -43,6 +43,7 @@ const autopilotSessionCommonFields = {
     body: z.string(),
     prBody: z.string(),
     baseSha: GitOidSchema,
+    targetBaseOid: GitOidSchema,
   }).strict(),
   deadline: IsoTimestampSchema,
   receiptAuthors: z.array(PrintableStringSchema).min(1).max(MAX_RECEIPT_AUTHORS),
@@ -351,7 +352,7 @@ export const AutopilotEvaluationContextSchema = z.object({
     [reviewTarget.childIssueNumber, session.childIssueNumber, ['reviewTarget', 'childIssueNumber'], 'child issue number'],
     [reviewTarget.prNumber, session.prNumber, ['reviewTarget', 'prNumber'], 'PR number'],
     [reviewTarget.targetBase, session.targetBase, ['reviewTarget', 'targetBase'], 'target base'],
-    [reviewTarget.baseOid, session.taskSnapshot.baseSha, ['reviewTarget', 'baseOid'], 'base OID'],
+    [reviewTarget.baseOid, session.taskSnapshot.targetBaseOid, ['reviewTarget', 'baseOid'], 'base OID'],
     [reviewTarget.headRef, session.branch, ['reviewTarget', 'headRef'], 'head ref'],
   ];
   for (const [actual, expected, path, label] of targetBindings) {

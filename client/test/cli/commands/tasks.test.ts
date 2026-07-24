@@ -161,6 +161,7 @@ function request(overrides: Record<string, unknown> = {}) {
           body: 'Implement it',
           prBody: 'Draft',
           baseSha: 'd'.repeat(40),
+          targetBaseOid: 'd'.repeat(40),
         },
         workflowContract: {
           skill: 'implement-issue',

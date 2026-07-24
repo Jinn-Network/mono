@@ -508,8 +508,11 @@ export async function executeImplementationAction(
   const remoteUrl = validateCanonicalGitHubHttpsRemote(deps.remoteUrl);
   const adopted = openPullRequests[0];
   const branch = adopted?.headRefName ?? gitRefName(`autopilot/${issueNumber}`);
-  const candidateParent = adopted?.head
-    ?? await deps.readTargetBaseHead(issue.targetBase, selection.credential);
+  const targetBaseOid = await deps.readTargetBaseHead(
+    issue.targetBase,
+    selection.credential,
+  );
+  const candidateParent = adopted?.head ?? targetBaseOid;
   const expectedRemoteHead = adopted?.head ?? null;
   const attemptId = deps.nextAttemptId();
   const claimedAt = deps.now().toISOString();
@@ -625,6 +628,7 @@ export async function executeImplementationAction(
     claimOid,
     expectedHead: claimOid,
     baseSha: candidateParent,
+    targetBaseOid,
     v2AttemptId: attemptId,
     runnerId: deps.runnerId,
     selectedLogin: selection.login,
@@ -686,6 +690,10 @@ async function executeChildImplementationAction(
   const remoteUrl = validateCanonicalGitHubHttpsRemote(deps.remoteUrl);
   const branch = parent.headRefName;
   const candidateParent = parent.head;
+  const targetBaseOid = await deps.readTargetBaseHead(
+    issue.targetBase,
+    selection.credential,
+  );
   const attemptId = deps.nextAttemptId();
   const claimedAt = deps.now().toISOString();
   const phase = issue.child.kind === 'reconcile' ? 'reconcile' as const : 'fix' as const;
@@ -772,6 +780,7 @@ async function executeChildImplementationAction(
     claimOid,
     expectedHead: claimOid,
     baseSha: candidateParent,
+    targetBaseOid,
     v2AttemptId: attemptId,
     runnerId: deps.runnerId,
     selectedLogin: selection.login,

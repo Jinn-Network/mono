@@ -115,6 +115,7 @@ function session(workflow: MutationWorkflow): AutopilotSessionCapsule {
       prBody:
         '<!-- jinn-autopilot:v2 issue=501 branch=autopilot/issue-501 -->',
       baseSha: gitOid('a'.repeat(40)),
+      targetBaseOid: gitOid('a'.repeat(40)),
     },
     deadline: '2026-07-24T13:00:00.000Z',
     receiptAuthors: ['jinn-autopilot'],

@@ -48,7 +48,7 @@ import { runJinnRepoLiveEval, type JinnRepoLiveEvalResult } from './live-eval-ru
 import {
   runAutopilotSemanticReview,
   type AutopilotMechanicalRunner,
-  type SemanticAgentRunner,
+  type SemanticAgentRunnerResolver,
 } from './autopilot-semantic.js';
 import { ExactHeadMechanicalRunner } from './autopilot-mechanical-runner.js';
 import {
@@ -224,8 +224,8 @@ export interface JinnRepoEvaluatorHarnessOptions {
   gradeLive?: LiveGradeFn;
   /** Deterministic exact-head checks, injectable for hermetic tests. */
   mechanicalRunner?: AutopilotMechanicalRunner;
-  /** Configured generic semantic runtime, injectable for hermetic tests. */
-  semanticAgentRunner?: SemanticAgentRunner;
+  /** Per-SolverNet semantic runtime resolver, injectable for hermetic tests. */
+  semanticAgentRunnerResolver?: SemanticAgentRunnerResolver;
 }
 
 export class JinnRepoEvaluatorHarness implements Harness {
@@ -238,7 +238,7 @@ export class JinnRepoEvaluatorHarness implements Harness {
   private readonly grade: GradeFn;
   private readonly gradeLive: LiveGradeFn;
   private readonly mechanicalRunner: AutopilotMechanicalRunner;
-  private readonly semanticAgentRunner: SemanticAgentRunner | undefined;
+  private readonly semanticAgentRunnerResolver: SemanticAgentRunnerResolver | undefined;
 
   constructor(opts: JinnRepoEvaluatorHarnessOptions = {}) {
     this.stub = opts.stub ?? false;
@@ -258,7 +258,7 @@ export class JinnRepoEvaluatorHarness implements Harness {
       ?? new ExactHeadMechanicalRunner({
         monoRepoUrl: process.env['JINN_MONO_REPO_URL'] ?? DEFAULT_MONO_REPO_URL,
       });
-    this.semanticAgentRunner = opts.semanticAgentRunner;
+    this.semanticAgentRunnerResolver = opts.semanticAgentRunnerResolver;
   }
 
   supports(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
@@ -275,7 +275,7 @@ export class JinnRepoEvaluatorHarness implements Harness {
     if (rawTaskSpecSource(task.spec) === 'autopilot-session') {
       const parsed = parseAutopilotEvaluationTask(task);
       if (!parsed.ok) return { ok: false, reason: parsed.reason };
-      if (!this.semanticAgentRunner) {
+      if (!this.semanticAgentRunnerResolver) {
         return {
           ok: false,
           reason: 'Autopilot semantic evaluator runtime is not configured',
@@ -366,17 +366,34 @@ export class JinnRepoEvaluatorHarness implements Harness {
           `jinn-repo-evaluator: ${parsed.reason}`,
         );
       }
-      const semanticAgentRunner = this.semanticAgentRunner;
-      if (!semanticAgentRunner) {
+      const semanticAgentRunnerResolver = this.semanticAgentRunnerResolver;
+      if (!semanticAgentRunnerResolver) {
         throw new SkippableError(
           'autopilot_eval_pending',
           'jinn-repo-evaluator: Autopilot semantic evaluator runtime is not configured',
         );
       }
+      const semanticRuntime = await semanticAgentRunnerResolver.resolve({
+        ...(ctx.task.solverNetManifestCid
+          ? { manifestCid: ctx.task.solverNetManifestCid }
+          : {}),
+        ...(ctx.solverNet ? { solverNet: ctx.solverNet } : {}),
+      });
+      if (!semanticRuntime) {
+        const solverNetIdentity =
+          ctx.solverNet?.name
+          ?? ctx.task.solverNetManifestCid
+          ?? '<unknown>';
+        throw new SkippableError(
+          'autopilot_eval_pending',
+          `jinn-repo-evaluator: semantic evaluator runtime is not configured for SolverNet ${solverNetIdentity}`,
+        );
+      }
       const result = await runAutopilotSemanticReview({
         context: parsed.context,
         mechanicalRunner: this.mechanicalRunner,
-        agentRunner: semanticAgentRunner,
+        agentRunner: semanticRuntime.runner,
+        ...(ctx.solverNet?.model ? { model: ctx.solverNet.model } : {}),
         abort: ctx.abort,
       });
       const artifactPath = 'jinn-autopilot-review-result.json';
@@ -393,6 +410,10 @@ export class JinnRepoEvaluatorHarness implements Harness {
           reviewTarget: parsed.context.reviewTarget,
           correlation: parsed.context.correlation,
           mechanical: result.mechanical,
+          semanticRuntime: {
+            provider: semanticRuntime.provider,
+            ...(ctx.solverNet?.model ? { model: ctx.solverNet.model } : {}),
+          },
         },
         verdictPayload: result.review as unknown as Record<string, unknown>,
         artifacts: [{

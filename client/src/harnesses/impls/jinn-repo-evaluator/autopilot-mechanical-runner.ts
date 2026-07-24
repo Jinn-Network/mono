@@ -1,8 +1,6 @@
-import { access, mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type { AutopilotEvaluationContext } from '@jinn-network/sdk/solvernets/jinn-repo';
 import type {
   AutopilotMechanicalResult,
@@ -10,11 +8,13 @@ import type {
 } from './autopilot-semantic.js';
 import {
   KNOWN_LIVE_EVAL_PACKAGES,
-  scopeTestsForChangedFiles,
   type PackageSpec,
 } from './scope-tests.js';
+import {
+  runSupervisedProcess,
+  SupervisedProcessUnreapedError,
+} from './supervised-process.js';
 
-const execFileAsync = promisify(execFile);
 const MAX_BUFFER = 64 * 1024 * 1024;
 const LOG_LIMIT = 4000;
 const DEFAULT_MONO_REPO_URL = 'https://github.com/Jinn-Network/mono.git';
@@ -23,32 +23,27 @@ export interface RepositoryCommandRunner {
   (
     command: string,
     args: string[],
-    options: { cwd?: string; signal?: AbortSignal },
+    options: {
+      cwd?: string;
+      signal?: AbortSignal;
+      env: NodeJS.ProcessEnv;
+    },
   ): Promise<{ stdout: string; stderr: string }>;
 }
 
 async function defaultCommand(
   command: string,
   args: string[],
-  options: { cwd?: string; signal?: AbortSignal },
+  options: {
+    cwd?: string;
+    signal?: AbortSignal;
+    env: NodeJS.ProcessEnv;
+  },
 ): Promise<{ stdout: string; stderr: string }> {
-  const result = await execFileAsync(command, args, {
+  return await runSupervisedProcess(command, args, {
     ...options,
-    maxBuffer: MAX_BUFFER,
+    maxOutputBytes: MAX_BUFFER,
   });
-  return {
-    stdout: result.stdout,
-    stderr: result.stderr,
-  };
-}
-
-async function defaultPathExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function commandErrorDetail(error: unknown): string {
@@ -56,10 +51,6 @@ function commandErrorDetail(error: unknown): string {
   const output = `${String(value?.stdout ?? '')}\n${String(value?.stderr ?? '')}`.trim();
   const message = error instanceof Error ? error.message : String(error);
   return `${message}${output ? `\n${output}` : ''}`.slice(0, LOG_LIMIT);
-}
-
-function isDeterministicCommandFailure(error: unknown): boolean {
-  return typeof (error as { code?: unknown } | undefined)?.code === 'number';
 }
 
 function prohibitedPath(path: string): boolean {
@@ -74,13 +65,50 @@ function prohibitedPath(path: string): boolean {
   return false;
 }
 
+function repositoryCommandEnv(isolatedHome: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    HOME: isolatedHome,
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_TERMINAL_PROMPT: '0',
+  };
+  for (const key of ['PATH', 'LANG', 'LC_ALL', 'TMPDIR'] as const) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
+
+function supportedPackageFor(
+  path: string,
+  packages: readonly PackageSpec[],
+): boolean {
+  return packages.some((pkg) =>
+    path === pkg.root || path.startsWith(`${pkg.root}/`)
+  );
+}
+
+export type ImmutableMechanicalVerification =
+  | { kind: 'passed'; checks: string[] }
+  | { kind: 'failed'; check: string; detail: string }
+  | { kind: 'unscorable'; detail: string };
+
+export interface ImmutableMechanicalVerifier {
+  verify(input: {
+    context: AutopilotEvaluationContext;
+    checkoutDir: string;
+    changedFiles: string[];
+    abort?: AbortSignal;
+  }): Promise<ImmutableMechanicalVerification>;
+}
+
 export interface ExactHeadMechanicalRunnerOptions {
   monoRepoUrl?: string;
   packages?: readonly PackageSpec[];
   command?: RepositoryCommandRunner;
+  immutableVerifier?: ImmutableMechanicalVerifier;
   makeTempDir?: () => Promise<string>;
   remove?: (path: string) => Promise<void>;
-  pathExists?: (path: string) => Promise<boolean>;
 }
 
 /**
@@ -93,19 +121,19 @@ export class ExactHeadMechanicalRunner implements AutopilotMechanicalRunner {
   private readonly monoRepoUrl: string;
   private readonly packages: readonly PackageSpec[];
   private readonly command: RepositoryCommandRunner;
+  private readonly immutableVerifier: ImmutableMechanicalVerifier | undefined;
   private readonly makeTempDir: () => Promise<string>;
   private readonly remove: (path: string) => Promise<void>;
-  private readonly pathExists: (path: string) => Promise<boolean>;
 
   constructor(options: ExactHeadMechanicalRunnerOptions = {}) {
     this.monoRepoUrl = options.monoRepoUrl ?? DEFAULT_MONO_REPO_URL;
     this.packages = options.packages ?? KNOWN_LIVE_EVAL_PACKAGES;
     this.command = options.command ?? defaultCommand;
+    this.immutableVerifier = options.immutableVerifier;
     this.makeTempDir = options.makeTempDir
       ?? (() => mkdtemp(join(tmpdir(), 'jinn-autopilot-evaluator-')));
     this.remove = options.remove
       ?? ((path) => rm(path, { recursive: true, force: true }));
-    this.pathExists = options.pathExists ?? defaultPathExists;
   }
 
   async run(
@@ -120,17 +148,21 @@ export class ExactHeadMechanicalRunner implements AutopilotMechanicalRunner {
     let cleaned = false;
     const cleanup = async (): Promise<void> => {
       if (cleaned) return;
-      cleaned = true;
       await this.remove(root);
+      cleaned = true;
     };
-    const unscorable = async (detail: string): Promise<AutopilotMechanicalResult> => {
-      await cleanup();
+    const unscorable = async (
+      detail: string,
+      cleanupSafe = true,
+    ): Promise<AutopilotMechanicalResult> => {
+      if (cleanupSafe) await cleanup();
       return { kind: 'unscorable', detail: detail.slice(0, LOG_LIMIT) };
     };
     const cancelled = (error?: unknown): boolean => (
       abort?.aborted === true
       || (error as { name?: unknown } | undefined)?.name === 'AbortError'
     );
+    const env = repositoryCommandEnv(root);
     const runCommand = (
       command: string,
       args: string[],
@@ -141,6 +173,7 @@ export class ExactHeadMechanicalRunner implements AutopilotMechanicalRunner {
       {
         ...(cwd ? { cwd } : {}),
         ...(abort ? { signal: abort } : {}),
+        env,
       },
     );
 
@@ -215,92 +248,68 @@ export class ExactHeadMechanicalRunner implements AutopilotMechanicalRunner {
         return await unscorable(`prohibited-path in exact PR diff: ${badPath}`);
       }
 
-      const scopes = scopeTestsForChangedFiles(changedFiles, this.packages);
-      if (changedFiles.length > 0 && scopes.length === 0) {
+      const unsupported = changedFiles.filter(
+        (path) => !supportedPackageFor(path, this.packages),
+      );
+      if (unsupported.length > 0) {
         return await unscorable(
-          `unsupported-diff-scope: no deterministic checks cover ${changedFiles.join(', ')}`,
+          `unsupported-diff-scope: no deterministic checks cover ${unsupported.join(', ')}`,
         );
       }
-      for (const scope of scopes) {
-        const pkgDir = join(repoDir, scope.pkg.root);
-        try {
-          await runCommand('corepack', ['enable'], pkgDir);
-        } catch (error) {
-          if (cancelled(error)) return await unscorable('evaluation-cancelled');
-          // Non-fatal; the pinned `yarn install` command is authoritative.
-        }
-        try {
-          await runCommand('yarn', ['install', '--immutable'], pkgDir);
-        } catch (error) {
-          if (cancelled(error)) return await unscorable('evaluation-cancelled');
-          return await unscorable(
-            `install-failed[${scope.pkg.root}]: ${commandErrorDetail(error)}`,
-          );
-        }
-        try {
-          await runCommand('yarn', [scope.pkg.typecheckScript], pkgDir);
-        } catch (error) {
-          if (cancelled(error)) return await unscorable('evaluation-cancelled');
-          if (!isDeterministicCommandFailure(error)) {
-            return await unscorable(
-              `typecheck-spawn-failed[${scope.pkg.root}]: ${commandErrorDetail(error)}`,
-            );
-          }
-          return {
-            kind: 'failed',
-            checkoutDir: repoDir,
-            changedFiles,
-            check: 'typecheck',
-            detail: `typecheck-failed[${scope.pkg.root}]: ${commandErrorDetail(error)}`,
-            cleanup,
-          };
-        }
+
+      const immutableVerifier = this.immutableVerifier;
+      if (!immutableVerifier) {
+        return await unscorable('immutable-verifier-unavailable');
       }
 
-      for (const scope of scopes) {
-        const pkgDir = join(repoDir, scope.pkg.root);
-        const existingTests: string[] = [];
-        for (const candidate of scope.candidateTestFiles) {
-          if (await this.pathExists(join(repoDir, candidate))) {
-            existingTests.push(candidate);
-          }
+      let verification: ImmutableMechanicalVerification;
+      try {
+        verification = await immutableVerifier.verify({
+          context,
+          checkoutDir: repoDir,
+          changedFiles,
+          ...(abort ? { abort } : {}),
+        });
+      } catch (error) {
+        if (cancelled(error)) return await unscorable('evaluation-cancelled');
+        if (error instanceof SupervisedProcessUnreapedError) {
+          return await unscorable(error.message, false);
         }
-        const testArgs = existingTests.length > 0
-          ? [
-              'vitest',
-              'run',
-              ...existingTests.map((path) => path.slice(scope.pkg.root.length + 1)),
-            ]
-          : [scope.pkg.testScript];
-        try {
-          await runCommand('yarn', testArgs, pkgDir);
-        } catch (error) {
-          if (cancelled(error)) return await unscorable('evaluation-cancelled');
-          if (!isDeterministicCommandFailure(error)) {
-            return await unscorable(
-              `test-spawn-failed[${scope.pkg.root}]: ${commandErrorDetail(error)}`,
-            );
-          }
-          return {
-            kind: 'failed',
-            checkoutDir: repoDir,
-            changedFiles,
-            check: 'tests',
-            detail: `tests-failed[${scope.pkg.root}]: ${commandErrorDetail(error)}`,
-            cleanup,
-          };
-        }
+        return await unscorable(
+          `immutable-verifier-failed: ${commandErrorDetail(error)}`,
+        );
+      }
+      if (verification.kind === 'unscorable') {
+        return await unscorable(verification.detail);
+      }
+      if (verification.kind === 'failed') {
+        return {
+          kind: 'failed',
+          checkoutDir: repoDir,
+          changedFiles,
+          check: verification.check,
+          detail: verification.detail,
+          cleanup,
+        };
       }
 
       return {
         kind: 'passed',
         checkoutDir: repoDir,
         changedFiles,
-        checks: ['repository', 'exact-head', 'policy', 'typecheck', 'tests'],
+        checks: [
+          'repository',
+          'exact-head',
+          'policy',
+          ...verification.checks,
+        ],
         cleanup,
       };
     } catch (error) {
       if (cancelled(error)) return await unscorable('evaluation-cancelled');
+      if (error instanceof SupervisedProcessUnreapedError) {
+        return await unscorable(error.message, false);
+      }
       return await unscorable(`repository-precheck-failed: ${commandErrorDetail(error)}`);
     }
   }

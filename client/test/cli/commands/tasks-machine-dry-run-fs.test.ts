@@ -67,6 +67,7 @@ function machineRequest(startTs = 1_900_000_000_000) {
           body: 'Implement it',
           prBody: 'Draft',
           baseSha: 'd'.repeat(40),
+          targetBaseOid: 'd'.repeat(40),
         },
         workflowContract: {
           skill: 'implement-issue',

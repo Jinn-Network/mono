@@ -31,7 +31,6 @@ describe('ClaudeSemanticAgentRunner', () => {
     const remove = vi.fn().mockResolvedValue(undefined);
     const runner = new ClaudeSemanticAgentRunner({
       claudePath: '/opt/claude',
-      model: 'claude-review-model',
       spawn: spawnFn as unknown as typeof spawn,
       makeTempDir: vi.fn().mockResolvedValue('/tmp/jinn-semantic-home'),
       remove,
@@ -41,10 +40,12 @@ describe('ClaudeSemanticAgentRunner', () => {
       prompt: 'Review the exact head.',
       cwd: '/tmp/exact-head',
       abort: new AbortController().signal,
+      model: 'claude-review-model',
     });
     queueMicrotask(() => {
       child.stdout.write('{"outcome":"approve"}');
       child.emit('exit', 0, null);
+      child.emit('close', 0, null);
     });
     await expect(pending).resolves.toBe('{"outcome":"approve"}');
 
@@ -52,6 +53,12 @@ describe('ClaudeSemanticAgentRunner', () => {
     expect(command).toBe('/opt/claude');
     expect(args).toContain('dontAsk');
     expect(args).not.toContain('bypassPermissions');
+    expect(args).toContain('--safe-mode');
+    expect(args).toContain('--disable-slash-commands');
+    expect(args).toContain('--strict-mcp-config');
+    expect(args).toContain('--mcp-config');
+    expect(args).toContain('{"mcpServers":{}}');
+    expect(args).not.toContain('project');
     expect(args).toContain('Bash(gh:*)');
     expect(args).toContain('Bash(git push:*)');
     expect(args).toContain('claude-review-model');

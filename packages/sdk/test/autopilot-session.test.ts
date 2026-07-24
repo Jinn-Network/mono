@@ -205,6 +205,42 @@ describe('AutopilotEvaluationContextSchema', () => {
     expect(AutopilotEvaluationContextSchema.parse(value)).toEqual(value);
   });
 
+  it('binds full-head review to the target-base OID rather than a child mutation parent', () => {
+    const value = evaluationContext();
+    const session = value.session as Record<string, unknown>;
+    const taskSnapshot = session.taskSnapshot as Record<string, unknown>;
+    const childMutationParent = '8'.repeat(40);
+    const targetBaseOid = '3'.repeat(40);
+    const childContext = {
+      ...value,
+      session: {
+        ...session,
+        workflow: 'fix-child',
+        childIssueNumber: 2002,
+        parentPrNumber: 2101,
+        taskSnapshot: {
+          ...taskSnapshot,
+          baseSha: childMutationParent,
+          targetBaseOid,
+        },
+        workflowContract: {
+          skill: 'fix-child',
+          version: 'v2',
+          resultSchema: 'jinn-autopilot-mutation-result.v1',
+        },
+      },
+      reviewTarget: {
+        ...(value.reviewTarget as Record<string, unknown>),
+        childIssueNumber: 2002,
+        baseOid: targetBaseOid,
+      },
+    };
+
+    const parsed = AutopilotEvaluationContextSchema.parse(childContext);
+    expect(parsed.session.taskSnapshot.baseSha).toBe(childMutationParent);
+    expect(parsed.reviewTarget.baseOid).toBe(targetBaseOid);
+  });
+
   it('rejects missing or rejected Solution receipts', () => {
     const value = evaluationContext();
     const solution = value.solution as Record<string, unknown>;

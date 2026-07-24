@@ -139,9 +139,14 @@ function buildSolverEnvelope(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify(base);
 }
 
-function buildHarnessContext(task: Task, dir: string): HarnessContext {
+function buildHarnessContext(
+  task: Task,
+  dir: string,
+  solverNet?: HarnessContext['solverNet'],
+): HarnessContext {
   return {
     task,
+    ...(solverNet ? { solverNet } : {}),
     implStateDir: dir,
     workingDir: dir,
     log: () => undefined,
@@ -176,6 +181,7 @@ function autopilotHarnessFixtures() {
       body: 'Body.',
       prBody: 'PR body.',
       baseSha: '3'.repeat(40),
+      targetBaseOid: '3'.repeat(40),
     },
     workflowContract: {
       skill: 'implement-issue',
@@ -267,6 +273,7 @@ function autopilotHarnessFixtures() {
     role: 'evaluation',
     attemptNumber: 0,
     restorationRequestId: requestId,
+    solverNetManifestCid: 'bafy-autopilot-net',
     spec,
     context: {
       restorationResult: envelope,
@@ -385,7 +392,7 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
     });
   });
 
-  it('requires an explicitly injected semantic evaluator runtime', async () => {
+  it('requires an explicitly injected per-SolverNet semantic runtime resolver', async () => {
     const { task } = autopilotHarnessFixtures();
     const h = new JinnRepoEvaluatorHarness();
     await expect(h.canAttempt(task)).resolves.toEqual({
@@ -394,7 +401,7 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
     });
   });
 
-  it('emits the typed semantic review payload through the injected runtime without legacy patch grading', async () => {
+  it('resolves provider and model independently for each exact SolverNet invocation', async () => {
     const { task, context } = autopilotHarnessFixtures();
     const cleanup = vi.fn().mockResolvedValue(undefined);
     const mechanicalRunner = {
@@ -406,7 +413,7 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
         cleanup,
       }),
     };
-    const agentRunner = {
+    const firstAgentRunner = {
       run: vi.fn().mockResolvedValue(JSON.stringify({
         schemaVersion: 'jinn-autopilot-review-result.v1',
         outcome: 'approve',
@@ -414,15 +421,36 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
         body: 'The complete exact-head diff is correct.',
       })),
     };
+    const secondAgentRunner = {
+      run: vi.fn().mockResolvedValue(JSON.stringify({
+        schemaVersion: 'jinn-autopilot-review-result.v1',
+        outcome: 'approve',
+        correlation: context.correlation,
+        body: 'The second SolverNet exact-head diff is correct.',
+      })),
+    };
+    const semanticAgentRunnerResolver = {
+      resolve: vi.fn((input: {
+        manifestCid?: string;
+        solverNet?: HarnessContext['solverNet'];
+      }) => input.manifestCid === 'bafy-autopilot-net'
+        ? { provider: 'anthropic', runner: firstAgentRunner }
+        : { provider: 'other-provider', runner: secondAgentRunner }),
+    };
     const grade = vi.fn();
     const gradeLive = vi.fn();
     const h = new JinnRepoEvaluatorHarness({
       mechanicalRunner,
-      semanticAgentRunner: agentRunner,
+      semanticAgentRunnerResolver,
       grade,
       gradeLive,
     });
-    const result = await h.run(buildHarnessContext(task, dir));
+    const firstSolverNet = {
+      name: 'Autopilot reviewers A',
+      solverType: 'jinn-repo.v1',
+      model: 'claude-review-a',
+    };
+    const result = await h.run(buildHarnessContext(task, dir, firstSolverNet));
 
     expect(result.verdictPayload).toMatchObject({
       schemaVersion: 'jinn-autopilot-review-result.v1',
@@ -440,13 +468,61 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
         artifactType: 'jinn_autopilot_review_result',
       }),
     ]);
-    expect(agentRunner.run).toHaveBeenCalledWith(expect.objectContaining({
+    expect(semanticAgentRunnerResolver.resolve).toHaveBeenCalledWith({
+      manifestCid: 'bafy-autopilot-net',
+      solverNet: firstSolverNet,
+    });
+    expect(firstAgentRunner.run).toHaveBeenCalledWith(expect.objectContaining({
       cwd: '/tmp/exact-head',
+      model: 'claude-review-a',
     }));
-    expect(agentRunner.run.mock.calls[0]![0]).not.toHaveProperty('model');
-    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(result.informational).toMatchObject({
+      semanticRuntime: {
+        provider: 'anthropic',
+        model: 'claude-review-a',
+      },
+    });
+
+    const secondTask = {
+      ...task,
+      solverNetManifestCid: 'bafy-autopilot-net-2',
+    };
+    const secondSolverNet = {
+      name: 'Autopilot reviewers B',
+      solverType: 'jinn-repo.v1',
+      model: 'review-model-b',
+    };
+    await h.run(buildHarnessContext(secondTask, dir, secondSolverNet));
+    expect(semanticAgentRunnerResolver.resolve).toHaveBeenLastCalledWith({
+      manifestCid: 'bafy-autopilot-net-2',
+      solverNet: secondSolverNet,
+    });
+    expect(secondAgentRunner.run).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'review-model-b',
+    }));
+    expect(cleanup).toHaveBeenCalledTimes(2);
     expect(grade).not.toHaveBeenCalled();
     expect(gradeLive).not.toHaveBeenCalled();
+  });
+
+  it('keeps an Autopilot task pending when its exact SolverNet has no runtime', async () => {
+    const { task } = autopilotHarnessFixtures();
+    const h = new JinnRepoEvaluatorHarness({
+      semanticAgentRunnerResolver: {
+        resolve: vi.fn().mockReturnValue(undefined),
+      },
+    });
+    const ctx = buildHarnessContext(task, dir, {
+      name: 'Unconfigured evaluator net',
+      solverType: 'jinn-repo.v1',
+      model: 'missing-model',
+    });
+
+    await expect(h.canAttempt(task)).resolves.toEqual({ ok: true });
+    await expect(h.run(ctx)).rejects.toMatchObject({
+      reason: 'autopilot_eval_pending',
+      message: expect.stringContaining('not configured for SolverNet'),
+    });
   });
 });
 
