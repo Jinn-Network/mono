@@ -26,6 +26,7 @@ describe('review-pr v2 authority contract', () => {
     expect(skill).toContain(
       'autopilot session review-verdict --state APPROVE --body-file',
     );
+    expect(skill).toContain('--follow-ups-file');
     expect(skill).toContain('autopilot session review-findings --file');
     expect(skill).toContain('autopilot session human --reason-file');
     expect(skill).not.toContain('autopilot session review-fix-publish');
@@ -63,6 +64,10 @@ describe('review-pr method contract', () => {
     expect(skill).toContain('### Approve');
     expect(skill).toContain('### Request changes');
     expect(skill).toContain('review-findings.md');
+    expect(skill).toContain('review-follow-ups.json');
+    expect(skill).toMatch(/merge-blocking/i);
+    expect(skill).toMatch(/non-blocking/i);
+    expect(skill).not.toContain('jinn-autopilot:child');
     expect(skill).not.toContain('review → fix → re-review');
   });
 

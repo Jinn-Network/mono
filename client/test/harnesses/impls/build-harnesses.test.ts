@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildHarnesses } from '../../../src/harnesses/impls/index.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../../src/harnesses/names.js';
+import { HarnessRegistry } from '../../../src/harnesses/engine/registry.js';
 import type { Harness } from '../../../src/harnesses/types.js';
 
 const ENV = {
@@ -18,6 +19,19 @@ function makeFake(name: string): Harness {
     isReady: async () => ({ ok: true }),
     async run() {
       throw new Error('stub');
+    },
+  } as unknown as Harness;
+}
+
+function makeEvaluatorFake(name: string): Harness {
+  return {
+    name,
+    version: '0.0.0-test',
+    supports: (ctx: { solverType: string; role?: 'restoration' | 'evaluation' }) =>
+      ctx.solverType === 'swe-rebench-v2.v1' && ctx.role === 'evaluation',
+    isReady: async () => ({ ok: true }),
+    async run() {
+      throw new Error('test evaluator fake: run not used');
     },
   } as unknown as Harness;
 }
@@ -75,5 +89,116 @@ describe('buildHarnesses — external impls + disabledNames', () => {
     });
     expect(impls.some((impl) => impl.name === CODEX_HARNESS)).toBe(false);
     expect(impls.some((impl) => impl.name === CLAUDE_CODE_HARNESS)).toBe(true);
+  });
+});
+
+describe('buildHarnesses — testHarnessReplacements', () => {
+  it('displaces swe-rebench-v2-evaluator at the same index when JINN_TEST_MODE=1', () => {
+    const saved = process.env['JINN_TEST_MODE'];
+    try {
+      process.env['JINN_TEST_MODE'] = '1';
+      const baseline = buildHarnesses({ ...ENV });
+      const idx = baseline.findIndex((h) => h.name === 'swe-rebench-v2-evaluator');
+      expect(idx).toBeGreaterThanOrEqual(0);
+
+      const fake = makeEvaluatorFake('swe-rebench-v2-evaluator');
+      const replaced = buildHarnesses({
+        ...ENV,
+        testHarnessReplacements: [fake],
+      });
+
+      const matches = replaced.filter((h) => h.name === 'swe-rebench-v2-evaluator');
+      expect(matches).toHaveLength(1);
+      expect(matches[0]).toBe(fake);
+      expect(replaced[idx]).toBe(fake);
+      expect(fake.supports({ solverType: 'swe-rebench-v2.v1', role: 'evaluation' })).toBe(true);
+      expect(replaced.length).toBe(baseline.length);
+    } finally {
+      if (saved === undefined) delete process.env['JINN_TEST_MODE'];
+      else process.env['JINN_TEST_MODE'] = saved;
+    }
+  });
+
+  it('HarnessRegistry first-match picks the replacement for swe-rebench-v2 evaluation', () => {
+    const saved = process.env['JINN_TEST_MODE'];
+    try {
+      process.env['JINN_TEST_MODE'] = '1';
+      const fake = makeEvaluatorFake('swe-rebench-v2-evaluator');
+      const list = buildHarnesses({
+        ...ENV,
+        testHarnessReplacements: [fake],
+      });
+      const registry = new HarnessRegistry({});
+      for (const h of list) registry.register(h);
+      expect(registry.findFor({ solverType: 'swe-rebench-v2.v1', role: 'evaluation' })).toBe(fake);
+    } finally {
+      if (saved === undefined) delete process.env['JINN_TEST_MODE'];
+      else process.env['JINN_TEST_MODE'] = saved;
+    }
+  });
+
+  it('throws when replacements are non-empty and JINN_TEST_MODE is not "1"', () => {
+    const saved = process.env['JINN_TEST_MODE'];
+    try {
+      delete process.env['JINN_TEST_MODE'];
+      expect(() =>
+        buildHarnesses({
+          ...ENV,
+          testHarnessReplacements: [makeEvaluatorFake('swe-rebench-v2-evaluator')],
+        }),
+      ).toThrow(/JINN_TEST_MODE/);
+
+      process.env['JINN_TEST_MODE'] = 'true';
+      expect(() =>
+        buildHarnesses({
+          ...ENV,
+          testHarnessReplacements: [makeEvaluatorFake('swe-rebench-v2-evaluator')],
+        }),
+      ).toThrow(/JINN_TEST_MODE/);
+    } finally {
+      if (saved === undefined) delete process.env['JINN_TEST_MODE'];
+      else process.env['JINN_TEST_MODE'] = saved;
+    }
+  });
+
+  it('throws when a replacement name matches no in-repo harness', () => {
+    const saved = process.env['JINN_TEST_MODE'];
+    try {
+      process.env['JINN_TEST_MODE'] = '1';
+      expect(() =>
+        buildHarnesses({
+          ...ENV,
+          testHarnessReplacements: [makeFake('@example/does-not-exist')],
+        }),
+      ).toThrow(/testHarnessReplacements/);
+    } finally {
+      if (saved === undefined) delete process.env['JINN_TEST_MODE'];
+      else process.env['JINN_TEST_MODE'] = saved;
+    }
+  });
+
+  it('omitting testHarnessReplacements leaves baseline names and length unchanged', () => {
+    const a = buildHarnesses({ ...ENV });
+    const b = buildHarnesses({ ...ENV, testHarnessReplacements: [] });
+    expect(a.map((h) => h.name)).toEqual(b.map((h) => h.name));
+    expect(a.length).toBe(b.length);
+  });
+
+  it('applies replacements before disabledNames (replaced stub can still be disabled)', () => {
+    const saved = process.env['JINN_TEST_MODE'];
+    try {
+      process.env['JINN_TEST_MODE'] = '1';
+      const fake = makeEvaluatorFake('swe-rebench-v2-evaluator');
+      const list = buildHarnesses({
+        ...ENV,
+        testHarnessReplacements: [fake],
+        disabledNames: ['swe-rebench-v2-evaluator'],
+      });
+      expect(list.some((h) => h.name === 'swe-rebench-v2-evaluator')).toBe(false);
+      expect(list.includes(fake)).toBe(false);
+    } finally {
+      if (saved === undefined) delete process.env['JINN_TEST_MODE'];
+      else process.env['JINN_TEST_MODE'] = saved;
+    }
   });
 });

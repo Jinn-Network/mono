@@ -2,7 +2,16 @@ import type { NewWorkAction } from './types.js';
 import type { GitOid } from './types.js';
 
 export type ActiveCandidate =
-  | { readonly phase: 'implementation'; readonly issueNumber: number }
+  | {
+      readonly phase: 'implementation';
+      readonly issueNumber: number;
+      /**
+       * Machine child (review-finding / reconcile / ci-failure). Children
+       * drain the open-PR backlog; open-pipeline backpressure must not block
+       * them or the loop deadlocks.
+       */
+      readonly isChild?: boolean;
+    }
   | {
       readonly phase: 'review';
       readonly issueNumber: number;
@@ -24,6 +33,18 @@ export type ActiveCandidate =
       readonly effort: 'low' | 'medium' | 'high';
     }
   | {
+      readonly phase: 'rerun-failed-checks';
+      readonly issueNumber: number;
+      readonly prNumber: number;
+      readonly head: GitOid;
+    }
+  | {
+      readonly phase: 'file-ci-failure-child';
+      readonly issueNumber: number;
+      readonly prNumber: number;
+      readonly head: GitOid;
+    }
+  | {
       readonly phase: 'merge';
       readonly issueNumber: number;
       readonly prNumber: number;
@@ -40,12 +61,13 @@ export interface ActiveSchedulingInput {
   readonly implementationPreferredLogin: string;
   readonly openPipelineBacklog: number;
   readonly implementationBackpressureThreshold: number;
+  readonly newWorkPaused?: boolean;
 }
 
 export interface ActiveSchedulingSkip {
   readonly phase: ActiveCandidate['phase'];
   readonly subject: string;
-  readonly reason: 'capacity' | 'credential-lane' | 'identity' | 'backpressure';
+  readonly reason: 'capacity' | 'credential-lane' | 'identity' | 'backpressure' | 'disk-floor';
 }
 
 export interface ActiveSchedulingPlan {
@@ -57,6 +79,10 @@ function subject(candidate: ActiveCandidate): string {
   return candidate.phase === 'implementation'
     ? `issue:${candidate.issueNumber}`
     : `pr:${candidate.prNumber}`;
+}
+
+function capacitySkipReason(input: ActiveSchedulingInput): ActiveSchedulingSkip['reason'] {
+  return input.newWorkPaused === true ? 'disk-floor' : 'capacity';
 }
 
 export function scheduleActiveActions(
@@ -74,10 +100,19 @@ export function scheduleActiveActions(
   for (const candidate of implementation) {
     if (actions.filter((action) => action.kind === 'claim-implementation').length
       >= input.remaining.implementation) {
-      skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'capacity' });
+      skips.push({
+        phase: candidate.phase,
+        subject: subject(candidate),
+        reason: capacitySkipReason(input),
+      });
       continue;
     }
-    if (input.openPipelineBacklog >= input.implementationBackpressureThreshold) {
+    // Fresh work only: child fixes/reconciles/ci-failures reduce backlog and
+    // must still claim under backpressure (capacity remaining still applies).
+    if (
+      candidate.isChild !== true
+      && input.openPipelineBacklog >= input.implementationBackpressureThreshold
+    ) {
       skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'backpressure' });
       continue;
     }
@@ -91,7 +126,11 @@ export function scheduleActiveActions(
   for (const candidate of input.candidates) {
     if (candidate.phase !== 'review') continue;
     if (actions.filter((action) => action.kind === 'claim-review').length >= input.remaining.review) {
-      skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'capacity' });
+      skips.push({
+        phase: candidate.phase,
+        subject: subject(candidate),
+        reason: capacitySkipReason(input),
+      });
       continue;
     }
     const reviewer = [...configuredLogins].find(
@@ -130,6 +169,24 @@ export function scheduleActiveActions(
         prNumber: candidate.prNumber,
         head: candidate.head,
         effort: candidate.effort,
+      });
+      continue;
+    }
+    if (candidate.phase === 'rerun-failed-checks') {
+      actions.push({
+        kind: 'rerun-failed-checks',
+        issueNumber: candidate.issueNumber,
+        prNumber: candidate.prNumber,
+        head: candidate.head,
+      });
+      continue;
+    }
+    if (candidate.phase === 'file-ci-failure-child') {
+      actions.push({
+        kind: 'file-ci-failure-child',
+        issueNumber: candidate.issueNumber,
+        prNumber: candidate.prNumber,
+        head: candidate.head,
       });
     }
   }
