@@ -61,8 +61,12 @@ def test_stock_driver_asserts_the_installed_plugin_local_runtime():
     assert "from jinn_plugin import jinn_layer" in driver
     assert 'resolution.source == "plugin-local"' in driver
     assert "resolution.argv == (str(LAYER_BIN),)" in driver
-    assert 'resolution.package == "@jinn-network/jinn-layer"' in driver
-    assert 'resolution.version == "0.1.0"' in driver
+    assert 'runtime_manifest["package"] == "@jinn-network/jinn-layer"' in driver
+    assert 'resolution.package == runtime_manifest["package"]' in driver
+    assert 'plugin_dir / "layer-runtime.json"' in driver
+    assert 'resolution.version == expected_layer_version' in driver
+    assert 'installed_layer_manifest["version"] == expected_layer_version' in driver
+    assert 'resolution.version == "0.1.0"' not in driver
     assert "os.access(LAYER_BIN, os.X_OK)" in driver
     assert 'os.environ.pop("JINN_LAYER_BIN", None)' in driver
 

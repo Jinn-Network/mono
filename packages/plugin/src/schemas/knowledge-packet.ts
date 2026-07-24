@@ -85,6 +85,10 @@ function stepNote(step: CorpusRecordStep): string | undefined {
   return attrString(step.attributes, 'note') ?? attrString(step.attributes, 'turn.text');
 }
 
+function isAssistantTurn(step: CorpusRecordStep): boolean {
+  return attrString(step.attributes, 'role') === 'assistant';
+}
+
 const EXCERPT_LABELS = new Set<KnowledgePacketExcerpt['label']>([
   'failure', 'fix', 'command', 'diff', 'note',
 ]);
@@ -116,7 +120,9 @@ function seedStepExcerpt(step: CorpusRecordStep): ExcerptCandidate | undefined {
  * output, the next command after it that is not itself a failure (the
  * correction), the last passing command overall (the final backstop), and a
  * diff step when present. Falls back to a single free-form note when
- * nothing command-shaped is found. Selects only — never paraphrases.
+ * nothing command-shaped is found, preferring an assistant turn so a
+ * conversational episode supplies the retained answer rather than merely
+ * repeating the user's prompt. Selects only — never paraphrases.
  */
 function selectExcerpts(steps: CorpusRecordStep[]): ExcerptCandidate[] {
   const seedExcerpts = steps
@@ -163,7 +169,9 @@ function selectExcerpts(steps: CorpusRecordStep[]): ExcerptCandidate[] {
   if (diffStep !== undefined) excerpts.push({ label: 'diff', text: stepDiff(diffStep)! });
 
   if (excerpts.length === 0) {
-    const noteStep = steps.find((step) => stepNote(step) !== undefined);
+    const noteStep =
+      steps.find((step) => isAssistantTurn(step) && stepNote(step) !== undefined)
+      ?? steps.find((step) => stepNote(step) !== undefined);
     if (noteStep !== undefined) excerpts.push({ label: 'note', text: stepNote(noteStep)! });
   }
 
