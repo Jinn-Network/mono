@@ -6,6 +6,7 @@ import {
   EXECUTION_RECORDER_ERROR_CODES,
   ExecutionRecorderError,
 } from "./errors.js";
+import * as publicApi from "./index.js";
 import {
   validateFinalizeExecutionInput,
   validateStartExecutionRecordingInput,
@@ -190,6 +191,32 @@ describe("execution recorder contracts", () => {
     );
   });
 
+  test("normalizes a missing opaque descriptor to a stable input error", () => {
+    const input = validStart();
+    expect(() =>
+      validateStartExecutionRecordingInput({
+        ...input,
+        runtime: {
+          ...input.runtime,
+          components: [
+            {
+              kind: "opaque",
+              component: {
+                entityId:
+                  "urn:uuid:33333333-3333-4333-8333-333333333333",
+                name: "Hosted fixture",
+              },
+            } as never,
+          ],
+        },
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        code: "INVALID_CAPTURE_INPUT",
+      }),
+    );
+  });
+
   test("validates finalization timestamps and outcome", () => {
     expect(() =>
       validateFinalizeExecutionInput(
@@ -238,5 +265,12 @@ describe("execution recorder contracts", () => {
       code: "RECORDING_CONFLICT",
       details: { entityId: "task/task.md" },
     });
+    expect(publicApi.EXECUTION_RECORDER_ERROR_CODES).toBe(
+      EXECUTION_RECORDER_ERROR_CODES,
+    );
+    expect(publicApi.CAPTURE_DIAGNOSTIC_CODES).toEqual([
+      "NATIVE_TRACE_MISSING",
+      "COMPLETED_RESULT_MISSING",
+    ]);
   });
 });

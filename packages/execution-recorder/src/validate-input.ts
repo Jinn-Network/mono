@@ -332,7 +332,11 @@ function validateOpaqueComponent(
   if (!component || component.kind !== "opaque") {
     invalidCaptureInput(`${field}/kind must be opaque.`);
   }
-  if (component.descriptor.kind !== "file") {
+  if (
+    !component.descriptor ||
+    typeof component.descriptor !== "object" ||
+    component.descriptor.kind !== "file"
+  ) {
     invalidCaptureInput(`${field}/descriptor must be a file artifact.`);
   }
   validateArtifact(
