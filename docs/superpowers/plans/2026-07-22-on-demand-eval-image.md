@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Docker Buildx (linux/amd64), GHCR, IPFS, EIP-191 attestation, Vitest, existing harvest / minted-pool v2 paths.
 
-**Authority:** Ratified by DR-2026-07-22 (#1640 spike). Implements substrate milestones remaining after A–D (explicit proof + E deterministic; F deferred).
+**Authority:** Human-ratified on 2026-07-24 by DR-2026-07-22 (#1640 spike). Implements substrate milestones remaining after A–D (explicit proof + E deterministic; F deferred).
 
 ## Global Constraints
 
@@ -43,12 +43,12 @@
 
 | Issue | Type | Scope |
 |---|---|---|
-| **Feat A — Live explicit AC** | `feat` | Tasks 1–2 below (proof script + runbook + recorded metrics on jinn-mono). Closes #1640 AC empirically. |
-| **Feat B — Harvest bootstrap without source row** | `feat` | Task 3 (WP3). Depends on Feat A environment binding existing or publish-on-demand reuse. |
-| **Feat C — Deterministic resolver** | `feat` | Tasks 4–5 (milestone E). Depends on Feat A proof pattern; optional after Feat B. |
+| **[#2110](https://github.com/Jinn-Network/mono/issues/2110) — Live explicit AC** | `feat` | Tasks 1–2 below (proof script + runbook + recorded metrics on jinn-mono). Closes #1640 AC empirically. |
+| **[#2112](https://github.com/Jinn-Network/mono/issues/2112) — Harvest bootstrap without source row** | `feat` | Task 3 (WP3). Depends on #2110's environment binding existing or publish-on-demand reuse. |
+| **[#2111](https://github.com/Jinn-Network/mono/issues/2111) — Deterministic resolver** | `feat` | Tasks 4–5 (milestone E). Depends on #2110's proof pattern; optional after #2112. |
 | **Defer — Agentic resolver** | `spike` or later `feat` | Milestone F / option C. **Out of this plan's merge scope.** |
 
-File separate Issues at implementation time; do not reopen #1640's three options casually (DR stands).
+The three bounded Issues were filed at ratification time. Do not reopen #1640's three options casually (DR stands), and do not file the agentic resolver until the revisit trigger is met.
 
 ---
 

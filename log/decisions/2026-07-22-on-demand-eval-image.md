@@ -2,7 +2,7 @@
 
 - **ID:** DR-2026-07-22
 - **Date:** 2026-07-22
-- **Status:** accepted (architecture); live empirical AC deferred to follow-on `feat`
+- **Status:** human-ratified (architecture); live empirical AC deferred to follow-on `feat`
 - **Issue:** [#1640](https://github.com/Jinn-Network/mono/issues/1640)
 - **Shape:** spike finding (Stages 1–2 only; no product merge from this session)
 
@@ -21,6 +21,16 @@ Discovery order (same ladder as the approved public-repo substrate design):
 3. **Agentic** SWE-smith-class / RepoLaunch env machinery — deferred to substrate milestone F / rung 4.
 
 The three handoff options (extend Rebench builder / generic Python + loose `install_config` / fork SWE-smith env) mainly differ on **discovery**. The **execution** half is already in-tree; this DR locks that split.
+
+## Human ratification (2026-07-24)
+
+The explicit → deterministic → agentic discovery ladder is accepted as written:
+
+- explicit recipes remain the first proof path;
+- deterministic, fail-closed recipe discovery is the next product rung;
+- agentic discovery remains deferred until deterministic yield justifies its spend and review surface.
+
+The bounded implementation train is filed as [#2110](https://github.com/Jinn-Network/mono/issues/2110) (live explicit proof), [#2112](https://github.com/Jinn-Network/mono/issues/2112) (harvest bootstrap without a source row), and [#2111](https://github.com/Jinn-Network/mono/issues/2111) (deterministic resolver). No agentic-resolver Issue is filed by this decision.
 
 ## Decision criteria (issue order)
 
@@ -46,9 +56,9 @@ Invariant retained: builder never receives gold / fix commit — recipe source i
 
 ## What remains (follow-on `feat`, not this spike)
 
-1. **Live AC gate** — admit a minted instance for a public repo ∉ `validated-pool.json` with a freshly built image + pinned digest, and record wall-clock + image size (primary target: jinn-mono via explicit recipe).
-2. **Harvest bootstrap without `findSourceInstanceForRepo`** when a recipe can be resolved (handoff WP3).
-3. **Deterministic resolver** (milestone E) after the explicit proof.
+1. **Live AC gate ([#2110](https://github.com/Jinn-Network/mono/issues/2110))** — admit a minted instance for a public repo ∉ `validated-pool.json` with a freshly built image + pinned digest, and record wall-clock + image size (primary target: jinn-mono via explicit recipe).
+2. **Harvest bootstrap without `findSourceInstanceForRepo` ([#2112](https://github.com/Jinn-Network/mono/issues/2112))** when a recipe can be resolved (handoff WP3).
+3. **Deterministic resolver ([#2111](https://github.com/Jinn-Network/mono/issues/2111))** (milestone E) after the explicit proof.
 4. **Agentic resolver** (milestone F / option C) deferred.
 
 Plan: [`docs/superpowers/plans/2026-07-22-on-demand-eval-image.md`](../../docs/superpowers/plans/2026-07-22-on-demand-eval-image.md).
