@@ -950,7 +950,7 @@ async function adoptParsed(
     v2AttemptId: parsed.session.v2AttemptId,
     ...(childIssueNumber === undefined ? {} : { childIssueNumber }),
     ...(parsed.session.workflow === 'reconcile'
-      ? { reconcileBase: parsed.session.taskSnapshot.baseSha as GitOid }
+      ? { reconcileBase: parsed.session.taskSnapshot.targetBaseOid as GitOid }
       : {}),
     ...(protocolCompletion === undefined
       ? {}

@@ -115,7 +115,7 @@ function session(workflow: MutationWorkflow): AutopilotSessionCapsule {
       prBody:
         '<!-- jinn-autopilot:v2 issue=501 branch=autopilot/issue-501 -->',
       baseSha: gitOid('a'.repeat(40)),
-      targetBaseOid: gitOid('a'.repeat(40)),
+      targetBaseOid: gitOid('b'.repeat(40)),
     },
     deadline: '2026-07-24T13:00:00.000Z',
     receiptAuthors: ['jinn-autopilot'],
@@ -435,7 +435,7 @@ class Harness implements
     expect(input.workflow).toBe(this.workflow);
     expect(input.reconcileBase).toBe(
       this.workflow === 'reconcile'
-        ? session('reconcile').taskSnapshot.baseSha
+        ? session('reconcile').taskSnapshot.targetBaseOid
         : undefined,
     );
     this.commitMutations += 1;
