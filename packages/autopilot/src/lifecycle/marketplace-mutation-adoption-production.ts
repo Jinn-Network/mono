@@ -1,10 +1,6 @@
 import { spawn } from 'node:child_process';
-import {
-  mkdtempSync,
-  rmSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { relative } from 'node:path';
 import type {
   AutopilotCorrelation,
   AutopilotSessionCapsule,
@@ -49,7 +45,9 @@ import {
   makeMarketplaceMutationManifestReceiptPort,
 } from './marketplace-mutation-manifest.js';
 import {
-  makeJinnMonoV1VerificationPort,
+  buildJinnMonoV1VerificationPlan,
+  type MarketplaceMutationVerificationInput,
+  type MarketplaceMutationVerificationPort,
   type VerificationCommand,
   type VerificationCommandResult,
 } from './marketplace-mutation-verification.js';
@@ -62,6 +60,8 @@ import { gitOid } from './types.js';
 const GITHUB_PAGE_SIZE = 100;
 const VERIFICATION_TIMEOUT_MS = 15 * 60_000;
 const VERIFICATION_OUTPUT_LIMIT = 1024 * 1024;
+const VERIFICATION_IMAGE =
+  'node:22-bookworm-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732';
 
 function record(value: unknown, name: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -190,44 +190,33 @@ export function makeProductionMarketplaceAdoptionReceiptPorts(options: {
   };
 }
 
-function verificationEnvironment(
-  directory: string,
+function dockerEnvironment(
   ambient: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   const allow = [
     'PATH',
+    'HOME',
     'LANG',
     'LC_ALL',
     'TMPDIR',
-    'HTTP_PROXY',
-    'HTTPS_PROXY',
-    'NO_PROXY',
-    'SSL_CERT_FILE',
-    'NODE_EXTRA_CA_CERTS',
+    'DOCKER_HOST',
+    'DOCKER_CONTEXT',
+    'DOCKER_CONFIG',
   ] as const;
-  const environment: NodeJS.ProcessEnv = {
-    HOME: directory,
-    XDG_CONFIG_HOME: join(directory, 'config'),
-    XDG_CACHE_HOME: join(directory, 'cache'),
-    XDG_DATA_HOME: join(directory, 'data'),
-    CI: '1',
-    COREPACK_ENABLE_DOWNLOAD_PROMPT: '0',
-  };
+  const environment: NodeJS.ProcessEnv = {};
   for (const key of allow) {
     if (ambient[key] !== undefined) environment[key] = ambient[key];
   }
   return environment;
 }
 
-function runVerificationCommand(
-  command: VerificationCommand,
+function runDockerCommand(
+  args: readonly string[],
   ambient: NodeJS.ProcessEnv,
 ): Promise<VerificationCommandResult> {
-  const directory = mkdtempSync(join(tmpdir(), 'jinn-marketplace-verify-'));
   return new Promise((resolve) => {
-    const child = spawn(command.command, [...command.args], {
-      cwd: command.cwd,
-      env: verificationEnvironment(directory, ambient),
+    const child = spawn('docker', [...args], {
+      env: dockerEnvironment(ambient),
       detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -250,7 +239,6 @@ function runVerificationCommand(
       settled = true;
       clearTimeout(timeout);
       if (forcedKill !== undefined) clearTimeout(forcedKill);
-      rmSync(directory, { recursive: true, force: true });
       resolve(result);
     };
     const stop = (detail: string): void => {
@@ -296,12 +284,170 @@ function runVerificationCommand(
   });
 }
 
+export type VerificationDockerRunner = (
+  args: readonly string[],
+  label: string,
+) => Promise<VerificationCommandResult>;
+
+function dockerRunBase(input: {
+  readonly name: string;
+  readonly volume: string;
+  readonly network: 'bridge' | 'none';
+}): string[] {
+  return [
+    'run',
+    '--rm',
+    '--name', input.name,
+    '--network', input.network,
+    '--read-only',
+    '--cap-drop', 'ALL',
+    '--security-opt', 'no-new-privileges:true',
+    '--pids-limit', '512',
+    '--memory', '4g',
+    '--cpus', '4',
+    '--tmpfs', '/tmp:rw,noexec,nosuid,size=67108864',
+    '--mount', `type=volume,src=${input.volume},dst=/workspace`,
+    '--env', 'HOME=/workspace/.jinn-home',
+    '--env', 'XDG_CACHE_HOME=/workspace/.jinn-home/cache',
+    '--env', 'COREPACK_HOME=/workspace/.jinn-corepack',
+    '--env', 'COREPACK_ENABLE_DOWNLOAD_PROMPT=0',
+    '--env', 'CI=1',
+  ];
+}
+
+function containerWorkingDirectory(
+  repositoryPath: string,
+  command: VerificationCommand,
+): string {
+  const workspace = relative(repositoryPath, command.cwd);
+  if (
+    workspace.length === 0
+    || workspace === '..'
+    || workspace.startsWith('../')
+    || workspace.includes('\\')
+  ) {
+    throw new Error(
+      `Verification command escaped the immutable repository snapshot: ${command.label}`,
+    );
+  }
+  return `/workspace/${workspace}`;
+}
+
 export function makeProductionMarketplaceVerificationPort(
   environment: NodeJS.ProcessEnv = process.env,
-) {
-  return makeJinnMonoV1VerificationPort({
-    run: (command) => runVerificationCommand(command, environment),
-  });
+  options: {
+    readonly runDocker?: VerificationDockerRunner;
+    readonly volumeName?: () => string;
+  } = {},
+): MarketplaceMutationVerificationPort {
+  const runDocker: VerificationDockerRunner =
+    options.runDocker
+    ?? ((args) => runDockerCommand(args, environment));
+  const makeVolumeName =
+    options.volumeName
+    ?? (() => `jinn-autopilot-verify-${randomUUID()}`);
+  return {
+    async verify(input: MarketplaceMutationVerificationInput) {
+      const plan = buildJinnMonoV1VerificationPlan(input);
+      const volume = makeVolumeName();
+      if (!/^jinn-autopilot-verify-[a-zA-Z0-9_.-]+$/.test(volume)) {
+        throw new Error('Invalid marketplace verification volume name');
+      }
+      let volumeCreated = false;
+      const create = await runDocker(
+        ['volume', 'create', volume],
+        'sandbox-volume-create',
+      );
+      if (create.status === 'failed') {
+        throw new Error(`Docker verification volume creation failed: ${create.detail}`);
+      }
+      volumeCreated = true;
+      let commandOrdinal = 0;
+      try {
+        const seedName = `${volume}-seed`;
+        const seed = await runDocker([
+          ...dockerRunBase({
+            name: seedName,
+            volume,
+            network: 'none',
+          }),
+          '--mount',
+          `type=bind,src=${input.repositoryPath},dst=/source,readonly`,
+          VERIFICATION_IMAGE,
+          'sh',
+          '-ceu',
+          'cp -a /source/. /workspace/',
+        ], 'sandbox-source-copy');
+        if (seed.status === 'failed') {
+          await runDocker(
+            ['rm', '-f', seedName],
+            'sandbox-container-remove',
+          );
+          throw new Error(`Docker verification snapshot failed: ${seed.detail}`);
+        }
+
+        const commands: string[] = [];
+        for (const command of plan.commands) {
+          commandOrdinal += 1;
+          commands.push(command.label);
+          const isInstall = command.label.endsWith(':install');
+          const containerName = `${volume}-${commandOrdinal}`;
+          const commandArgs = isInstall
+            ? [
+                'yarn',
+                'install',
+                '--immutable',
+                '--mode=skip-builds',
+              ]
+            : [...command.args];
+          const result = await runDocker([
+            ...dockerRunBase({
+              name: containerName,
+              volume,
+              network: isInstall ? 'bridge' : 'none',
+            }),
+            '--workdir',
+            containerWorkingDirectory(input.repositoryPath, command),
+            VERIFICATION_IMAGE,
+            command.command,
+            ...commandArgs,
+          ], command.label);
+          if (result.status === 'failed') {
+            await runDocker(
+              ['rm', '-f', containerName],
+              'sandbox-container-remove',
+            );
+            return {
+              profile: plan.profile,
+              status: 'failed' as const,
+              workspaces: plan.workspaces,
+              commands,
+              failedCommand: command.label,
+              detail: result.detail,
+            };
+          }
+        }
+        return {
+          profile: plan.profile,
+          status: 'passed' as const,
+          workspaces: plan.workspaces,
+          commands,
+        };
+      } finally {
+        if (volumeCreated) {
+          const removed = await runDocker(
+            ['volume', 'rm', '-f', volume],
+            'sandbox-volume-remove',
+          );
+          if (removed.status === 'failed') {
+            throw new Error(
+              `Docker verification volume cleanup failed: ${removed.detail}`,
+            );
+          }
+        }
+      }
+    },
+  };
 }
 
 function implementationSummary(body: string): string | undefined {
