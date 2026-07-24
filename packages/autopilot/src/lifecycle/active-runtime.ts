@@ -32,6 +32,16 @@ export interface ActiveRuntimeHandlers {
     credentials: CredentialPool,
     snapshot: GitHubLifecycleSnapshot,
   ): Promise<ActiveRuntimeResult>;
+  rerunFailedChecks?(
+    action: Extract<NewWorkAction, { kind: 'rerun-failed-checks' }>,
+    credentials: CredentialPool,
+    snapshot: GitHubLifecycleSnapshot,
+  ): Promise<ActiveRuntimeResult>;
+  fileCiFailureChild?(
+    action: Extract<NewWorkAction, { kind: 'file-ci-failure-child' }>,
+    credentials: CredentialPool,
+    snapshot: GitHubLifecycleSnapshot,
+  ): Promise<ActiveRuntimeResult>;
   merge(
     action: Extract<NewWorkAction, { kind: 'merge' }>,
     credentials: CredentialPool,
@@ -59,6 +69,7 @@ export interface ActiveRuntimeOptions {
     readonly ok: boolean;
     readonly detail?: string;
   }>;
+  readonly newWorkPaused?: () => boolean;
   readonly handlers: ActiveRuntimeHandlers;
 }
 
@@ -86,16 +97,20 @@ export function makeActiveRuntime(
     review: nonNegative(options.caps.review, 'review cap'),
   };
   const readLocalState = () => {
+    const newWorkPaused = options.newWorkPaused?.() ?? false;
     const attempts = options.readLocalAttempts();
     const activeByPhase = {
       implementation: attempts.filter((attempt) => attempt.phase === 'implement').length,
       review: attempts.filter((attempt) => attempt.phase === 'review').length,
     };
     return {
-      remaining: {
-        implementation: Math.max(0, caps.implementation - activeByPhase.implementation),
-        review: Math.max(0, caps.review - activeByPhase.review),
-      },
+      remaining: newWorkPaused
+        ? { implementation: 0, review: 0 }
+        : {
+            implementation: Math.max(0, caps.implementation - activeByPhase.implementation),
+            review: Math.max(0, caps.review - activeByPhase.review),
+          },
+      newWorkPaused,
       availableLogins: options.credentials.logins(),
       implementationPreferredLogin: options.implementationPreferredLogin,
     };
@@ -133,6 +148,14 @@ export function makeActiveRuntime(
               ? options.handlers.fileReconcileChild === undefined
                 ? { status: 'skipped', detail: 'file-reconcile-child handler unavailable' }
                 : await options.handlers.fileReconcileChild(action, credentials, snapshot)
+              : action.kind === 'rerun-failed-checks'
+                ? options.handlers.rerunFailedChecks === undefined
+                  ? { status: 'skipped', detail: 'rerun-failed-checks handler unavailable' }
+                  : await options.handlers.rerunFailedChecks(action, credentials, snapshot)
+                : action.kind === 'file-ci-failure-child'
+                  ? options.handlers.fileCiFailureChild === undefined
+                    ? { status: 'skipped', detail: 'file-ci-failure-child handler unavailable' }
+                    : await options.handlers.fileCiFailureChild(action, credentials, snapshot)
               : action.kind === 'merge'
                 ? await options.handlers.merge(action, credentials, snapshot)
                 : {
