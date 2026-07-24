@@ -31,7 +31,7 @@ It may not:
 - bypass branch protection or any review/check/CODEOWNER gate;
 - merge to `main`;
 - rebase, force-update, or otherwise modify a PR branch;
-- claim/release v2 implementation, review, or merge-prep authority;
+- claim/release v2 implementation or review authority;
 - merge a v2-managed PR;
 - mutate draft state, labels, Project lifecycle fields, comments, or cleanup;
 - use another runner’s local artifacts as evidence.
@@ -76,9 +76,10 @@ current branch head, obtains a complete paginated changed-file set, applies
 CODEOWNERS and identity separation, checks native gates, and performs the
 exact-head merge.
 
-If a v2-managed PR is behind or conflicting, report it for v2 merge-prep.
-Human owns semantic or CODEOWNER-sensitive conflicts. This skill neither
-prepares nor merges the branch.
+If a v2-managed PR is behind or conflicting, report it for the v2 children
+ladder (tier-0 update-branch or reconcile child). Human owns semantic or
+CODEOWNER-sensitive conflicts. This skill neither prepares nor merges the
+branch.
 
 ## Legacy/unmanaged PRs
 
@@ -133,7 +134,7 @@ Return:
 - merged PRs with the exact head used;
 - skipped PRs grouped by draft/Human/review/CODEOWNER/CI/mergeability/head
   blocker;
-- v2-managed behind/conflicting PRs left to merge-prep;
+- v2-managed behind/conflicting PRs left to the v2 children ladder;
 - legacy ambiguous work left intact;
 - remaining stack order after the final `next` head.
 

@@ -1,5 +1,4 @@
 import { DEFAULT_FLOOR } from '../dispatcher/rate-limit-guard.js';
-import type { BoardArchiveSweepResult } from './board-archive-executor-production.js';
 import {
   deriveLifecycle,
   deriveOrphanImplementationState,
@@ -18,12 +17,17 @@ import {
 import {
   LifecycleRateLimitError,
   type GitHubLifecycleSnapshot,
+  type LifecycleParityDifference,
+  type SnapshotReadMode,
 } from './snapshot.js';
 import {
   scheduleActiveActions,
   type ActiveCandidate,
   type ActiveSchedulingSkip,
 } from './active-scheduler.js';
+import { childrenPathEnabled, isMachineChildIssue } from './child-issues.js';
+import { classifyCiChecks, isCiGreen } from './ci-classifier.js';
+import { chooseIntegrationLadderAction } from './integration-ladder.js';
 import type {
   AutopilotMode,
   GitOid,
@@ -35,6 +39,8 @@ import type {
   LifecycleViewItem,
   NewWorkAction,
 } from './types.js';
+import { EMPTY_GITHUB_USAGE, type GitHubUsage } from './github-usage.js';
+import { exactUtcTimestampMs } from './exact-utc-time.js';
 
 export type LifecycleCliCommand =
   | { readonly kind: 'status' }
@@ -46,36 +52,36 @@ export interface LifecycleCliOptions {
   readonly once: boolean;
   readonly command: LifecycleCliCommand;
   readonly json: boolean;
+  readonly fullReconcile: boolean;
 }
 
 export interface LifecycleControllerDeps {
   readSnapshot(rateLimitFloor?: number): Promise<GitHubLifecycleSnapshot>;
+  /**
+   * Optional end-of-cycle GraphQL remaining probe. When set, the cycle report
+   * includes `budget.pointsSpent` (start remaining − end remaining).
+   */
+  readRateLimitRemaining?(): Promise<number>;
+  /** Reset/read the shared meter at cycle boundaries and report completion. */
+  readonly resetGitHubUsage?: () => void;
+  readonly readGitHubUsage?: () => GitHubUsage;
   readonly writer?: ReconciliationWriter;
+  readonly writerForSnapshot?: (snapshot: GitHubLifecycleSnapshot) => ReconciliationWriter;
   readonly now: () => Date;
   readonly staleAfterMs: number;
   readonly runnerId: string;
   readonly cycleId: () => string;
   readonly rateLimitFloor?: number;
-  /**
-   * Board-archive sweep (jinn-mono#1883): archives Done, non-current-sprint
-   * Project board items. Optional — omitting it simply skips the sweep.
-   * Wired only for `recover`/`active` (see `runLifecycleCycle`); `observe`'s
-   * zero-write contract never calls it, matching how `writer`/`active` are
-   * gated. Production wiring is `makeProductionBoardArchiveSweep` in
-   * `board-archive-executor-production.ts`.
-   */
-  readonly boardArchiveSweep?: (
-    snapshot: GitHubLifecycleSnapshot,
-    now: Date,
-  ) => Promise<BoardArchiveSweepResult>;
+  /** Persistent runners report pre-mutation snapshot failures and retry next cadence. */
+  readonly snapshotFailureMode?: 'throw' | 'report';
   readonly active?: {
     preflight(): Promise<{ readonly ok: boolean; readonly detail?: string }>;
     readLocalState(): {
       readonly remaining: {
         readonly implementation: number;
         readonly review: number;
-        readonly mergePrep: number;
       };
+      readonly newWorkPaused: boolean;
       readonly availableLogins: readonly string[];
       readonly implementationPreferredLogin: string;
     };
@@ -84,14 +90,16 @@ export interface LifecycleControllerDeps {
      * jinn-mono#1883: canary safety knob (`JINN_AUTOPILOT_ONLY_ISSUES`).
      * `undefined` means unrestricted — exactly current behavior. When set,
      * `runLifecycleCycle` restricts NEW-WORK claim scheduling (implement,
-     * review, merge-prep, merge candidates) to issue numbers in this set.
+     * review, merge candidates) to issue numbers in this set.
      * It does not affect reconciliation/projection of existing items,
-     * Human-overlay handling, the board-archive sweep, or observe/recover
-     * output — those all run unfiltered before this is consulted.
+     * Human-overlay handling, or observe/recover output — those all run
+     * unfiltered before this is consulted. Board archive lives in the
+     * scheduled painter (Stage 3), not the cycle.
      */
     readonly onlyIssues?: ReadonlySet<number>;
     executeAction(
       action: NewWorkAction,
+      snapshot: GitHubLifecycleSnapshot,
     ): Promise<{ readonly outcome: string; readonly reason?: string }>;
   };
 }
@@ -150,11 +158,36 @@ export interface LifecycleLogEvent {
   readonly reason?: string;
 }
 
+type LifecycleFailedUsage =
+  | {
+      readonly usageAccounting: { readonly complete: true };
+      readonly githubUsage: GitHubUsage;
+    }
+  | {
+      readonly usageAccounting: {
+        readonly complete: false;
+        readonly reason: string;
+      };
+      readonly githubUsage?: never;
+    };
+
+type LifecycleFailedReport = {
+  readonly status: 'failed';
+  readonly mode: AutopilotMode;
+  readonly message: string;
+  readonly mutationFree: true;
+  readonly items: readonly [];
+  readonly orphanBranchClaims: readonly [];
+  readonly diagnostics: readonly [];
+  readonly events: readonly [];
+} & LifecycleFailedUsage;
+
 export type LifecycleCycleReport =
   | {
       readonly status: 'rejected';
       readonly mode: AutopilotMode;
       readonly message: string;
+      readonly githubUsage: GitHubUsage;
       readonly items: readonly [];
       readonly orphanBranchClaims: readonly [];
       readonly diagnostics: readonly [];
@@ -164,24 +197,79 @@ export type LifecycleCycleReport =
       readonly status: 'rate-limited';
       readonly mode: AutopilotMode;
       readonly message: string;
+      readonly githubUsage: GitHubUsage;
       readonly items: readonly [];
       readonly orphanBranchClaims: readonly [];
       readonly diagnostics: readonly [];
       readonly events: readonly [];
     }
+  | LifecycleFailedReport
   | {
       readonly status: 'ok';
       readonly mode: AutopilotMode;
       readonly cycleId: string;
       readonly runnerId: string;
       readonly capturedAt: string;
+      readonly snapshotMode: SnapshotReadMode;
+      readonly snapshotComplete: boolean;
+      readonly lastFullReconciliationAt: string | null;
+      readonly partialReason?: string;
+      readonly snapshotWarning?: string;
+      readonly parityDifferences?: readonly LifecycleParityDifference[];
+      readonly parityUnavailableReason?: string;
+      readonly githubUsage: GitHubUsage;
       readonly items: readonly LifecycleStatusItem[];
       readonly orphanBranchClaims: readonly LifecycleOrphanBranchClaimStatus[];
       readonly diagnostics: readonly LifecycleStatusDiagnostic[];
       readonly events: readonly LifecycleLogEvent[];
       readonly reconciliation?: ReconciliationReport;
-      readonly boardArchive?: BoardArchiveSweepResult;
+      /** Stage 4: GraphQL points spent this cycle (start remaining − end). */
+      readonly budget?: {
+        readonly remainingStart: number;
+        readonly remainingEnd: number;
+        readonly pointsSpent: number;
+      };
     };
+
+function snapshotReportMetadata(snapshot: GitHubLifecycleSnapshot): {
+  readonly snapshotMode: SnapshotReadMode;
+  readonly snapshotComplete: boolean;
+  readonly lastFullReconciliationAt: string | null;
+  readonly partialReason?: string;
+  readonly snapshotWarning?: string;
+  readonly parityDifferences?: readonly LifecycleParityDifference[];
+  readonly parityUnavailableReason?: string;
+} {
+  return {
+    snapshotMode: snapshot.snapshotMode ?? 'full',
+    snapshotComplete: snapshot.snapshotComplete ?? false,
+    lastFullReconciliationAt: snapshot.lastFullReconciliationAt ?? null,
+    ...(snapshot.partialReason === undefined ? {} : { partialReason: snapshot.partialReason }),
+    ...(snapshot.snapshotWarning === undefined
+      ? {}
+      : { snapshotWarning: snapshot.snapshotWarning }),
+    ...(snapshot.parityDifferences === undefined
+      ? {}
+      : { parityDifferences: snapshot.parityDifferences }),
+    ...(snapshot.parityUnavailableReason === undefined
+      ? {}
+      : { parityUnavailableReason: snapshot.parityUnavailableReason }),
+  };
+}
+
+function finalGitHubUsage(
+  deps: LifecycleControllerDeps,
+  snapshot?: GitHubLifecycleSnapshot,
+): GitHubUsage {
+  return deps.readGitHubUsage?.() ?? snapshot?.githubUsage ?? EMPTY_GITHUB_USAGE;
+}
+
+function failedCycleGitHubUsage(deps: LifecycleControllerDeps): GitHubUsage {
+  if (deps.readGitHubUsage === undefined) {
+    throw new Error('GitHub cycle usage meter is unavailable after snapshot failure');
+  }
+  return deps.readGitHubUsage();
+}
 
 function positiveNumber(raw: string | undefined, label: string): number {
   if (raw === undefined || !/^[1-9][0-9]*$/.test(raw)) throw new Error(`Invalid ${label}`);
@@ -195,6 +283,7 @@ export function parseLifecycleCli(args: readonly string[]): LifecycleCliOptions 
   let once = false;
   let dryRun = false;
   let json = false;
+  let fullReconcile = false;
   const positional: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
@@ -204,6 +293,9 @@ export function parseLifecycleCli(args: readonly string[]): LifecycleCliOptions 
       dryRun = true;
     } else if (arg === '--json') {
       json = true;
+    } else if (arg === '--full-reconcile') {
+      fullReconcile = true;
+      once = true;
     } else if (arg === '--mode') {
       const value = args[index + 1];
       if (value !== 'observe' && value !== 'recover' && value !== 'active') {
@@ -221,6 +313,9 @@ export function parseLifecycleCli(args: readonly string[]): LifecycleCliOptions 
     mode = 'observe';
     once = true;
   }
+  if (fullReconcile && mode !== 'observe') {
+    throw new Error('--full-reconcile is an authoritative observe-only read');
+  }
   let command: LifecycleCliCommand = { kind: 'status' };
   if (positional.length === 1 && (positional[0] === 'status' || positional[0] === 'sessions')) {
     // Both names intentionally render the same GitHub-derived lifecycle view.
@@ -236,7 +331,7 @@ export function parseLifecycleCli(args: readonly string[]): LifecycleCliOptions 
       throw new Error('Expected explain issue <N> or explain pr <N>');
     }
   }
-  return { mode, once, command, json };
+  return { mode, once, command, json, fullReconcile };
 }
 
 function projectionContext(
@@ -275,9 +370,9 @@ function projectionContext(
         item.kind === 'issue' && item.issueNumber === branch.issueNumber
       ));
       const humanHold = projectIssue?.blockedOn === 'Human'
-        || projectIssue?.status === 'Human'
         || lifecycleIssue?.humanHold === true
-        || lifecycleIssue?.labels.includes('review:needs-human') === true;
+        || lifecycleIssue?.labels.includes('review:needs-human') === true
+        || lifecycleIssue?.labels.includes('autopilot:human') === true;
       const issueHumanReason = lifecycleIssue?.humanReason;
       const humanReason: HumanReason | undefined = issueHumanReason !== undefined
         ? issueHumanReason.phase === 'eligible'
@@ -289,8 +384,8 @@ function projectionContext(
               code: 'implementation-escalation' as const,
               detail: projectIssue?.blockedOn === 'Human'
                 ? 'Project Blocked on: Human'
-                : projectIssue?.status === 'Human'
-                  ? 'Project status: Human'
+                : lifecycleIssue?.labels.includes('autopilot:human') === true
+                  ? 'Issue label: autopilot:human'
                   : 'Issue label: review:needs-human',
             }
           : undefined;
@@ -474,7 +569,9 @@ function activeCandidates(
   view: ReturnType<typeof deriveLifecycle>,
 ): ActiveCandidate[] {
   const byPr = new Map(snapshot.pullRequests.map((pr) => [pr.number, pr]));
-  const candidates: ActiveCandidate[] = [];
+  const childImplementation: ActiveCandidate[] = [];
+  const freshImplementation: ActiveCandidate[] = [];
+  const other: ActiveCandidate[] = [];
   for (const entry of view.items) {
     const item = entry.item;
     if (
@@ -483,7 +580,17 @@ function activeCandidates(
       && item.eligible
       && !item.humanHold
     ) {
-      candidates.push({ phase: 'implementation', issueNumber: item.issueNumber });
+      const issueSource = snapshot.issues.find((candidate) =>
+        candidate.number === item.issueNumber);
+      const isChild = isMachineChildIssue({
+        body: issueSource?.body,
+        labels: item.labels,
+      });
+      (isChild ? childImplementation : freshImplementation).push({
+        phase: 'implementation',
+        issueNumber: item.issueNumber,
+        ...(isChild ? { isChild: true } : {}),
+      });
       continue;
     }
     if (item.kind !== 'pull-request' || item.humanHold || item.merged) continue;
@@ -492,10 +599,9 @@ function activeCandidates(
     if (
       entry.phase === 'implementing'
       && entry.stale
-      && item.projectStatus === 'Todo'
       && item.isDraft
     ) {
-      candidates.push({
+      freshImplementation.push({
         phase: 'implementation',
         issueNumber: item.issueNumber,
       });
@@ -505,62 +611,119 @@ function activeCandidates(
       && item.reviewClaim?.head === item.head
       && item.reviewClaim.state === 'stale'
     ) {
-      candidates.push({
+      other.push({
         phase: 'review',
         issueNumber: item.issueNumber,
         prNumber: item.prNumber,
         head: item.head,
         author: pr.author,
-        recoverFixes: true,
-      });
-    } else if (entry.phase === 'awaiting-review') {
-      candidates.push({
-        phase: 'review',
-        issueNumber: item.issueNumber,
-        prNumber: item.prNumber,
-        head: item.head,
-        author: pr.author,
-      });
-    } else if (entry.phase === 'review-fixing' && entry.stale) {
-      candidates.push({
-        phase: 'review',
-        issueNumber: item.issueNumber,
-        prNumber: item.prNumber,
-        head: item.head,
-        author: pr.author,
-        recoverFixes: true,
       });
     } else if (
-      entry.phase === 'merge-prep'
-      && (
-        item.branchClaim?.phase !== 'merge-prep'
-        || item.branchClaim.phaseComplete === true
-        || entry.stale
-      )
+      // DELIVERED → IN REVIEW (single-surface §4): a non-draft PR that still
+      // needs a verdict and has no active review claim for its head must be
+      // enrolled for a fresh review. Mirrors reviewEnrollmentEligible's
+      // non-draft branch; the awaiting-review phase already excludes PRs with
+      // an active claim for the current head (those derive to `reviewing`).
+      entry.phase === 'awaiting-review'
+      && !item.isDraft
+      && item.needsReview
+      && !item.approved
     ) {
-      candidates.push({
-        phase: 'merge-prep',
+      other.push({
+        phase: 'review',
         issueNumber: item.issueNumber,
         prNumber: item.prNumber,
         head: item.head,
-        recoverStale: entry.stale,
+        author: pr.author,
       });
+    } else if (
+      entry.phase === 'awaiting-review'
+      && item.approved
+      && !item.needsReview
+      && (item.mergeState === 'behind' || item.mergeState === 'conflict')
+      && !(item.openChildKinds ?? []).includes('reconcile')
+    ) {
+      const childrenOn = childrenPathEnabled();
+      const ciGreen = isCiGreen(pr.checks);
+      const ladder = chooseIntegrationLadderAction({
+        approved: true,
+        ciGreen,
+        draft: item.isDraft,
+        humanHold: false,
+        mergeable: pr.mergeability,
+        mergeStateStatus: pr.mergeStateStatus,
+        compareStatus: item.mergeState === 'behind'
+          ? 'behind'
+          : item.mergeState === 'conflict'
+            ? 'diverged'
+            : item.mergeState === 'clean'
+              ? 'ahead'
+              : 'unknown',
+        openReconcileChild: (item.openChildKinds ?? []).includes('reconcile'),
+        openFindingChild: (item.openChildKinds ?? []).includes('review-finding'),
+        childrenEnabled: childrenOn,
+      });
+      if (ladder.kind === 'update-branch') {
+        other.push({
+          phase: 'update-branch',
+          issueNumber: item.issueNumber,
+          prNumber: item.prNumber,
+          head: item.head,
+        });
+      } else if (ladder.kind === 'file-reconcile-child') {
+        other.push({
+          phase: 'file-reconcile-child',
+          issueNumber: item.issueNumber,
+          prNumber: item.prNumber,
+          head: item.head,
+          effort: ladder.effort,
+        });
+      }
+    } else if (entry.phase === 'ci-blocked') {
+      const classification = classifyCiChecks(pr.checks);
+      if (classification.state === 'failed') {
+        const rerunRecorded = item.ciRerunRecorded === true;
+        if (!rerunRecorded && classification.rerunnableRunIds.length > 0) {
+          other.push({
+            phase: 'rerun-failed-checks',
+            issueNumber: item.issueNumber,
+            prNumber: item.prNumber,
+            head: item.head,
+          });
+        } else {
+          other.push({
+            phase: 'file-ci-failure-child',
+            issueNumber: item.issueNumber,
+            prNumber: item.prNumber,
+            head: item.head,
+          });
+        }
+      }
     } else if (entry.phase === 'merge-ready') {
-      candidates.push({
+      other.push({
         phase: 'merge',
         issueNumber: item.issueNumber,
         prNumber: item.prNumber,
         head: item.head,
       });
+    } else if (entry.phase === 'blocked-by-child') {
+      // No new work while a child is open or head-bound RC stands; child
+      // implementation claims are scheduled from the child issue itself.
     }
   }
-  return candidates;
+  // Children outrank fresh implementation claims for the remaining slots.
+  return [...childImplementation, ...freshImplementation, ...other];
 }
 
 function phaseForAction(action: NewWorkAction): LifecyclePhase {
   if (action.kind === 'claim-implementation') return 'eligible';
-  if (action.kind === 'claim-review') return action.recoverFixes ? 'review-fixing' : 'awaiting-review';
-  if (action.kind === 'claim-merge-prep') return 'merge-prep';
+  if (action.kind === 'claim-review') return 'awaiting-review';
+  if (action.kind === 'update-branch' || action.kind === 'file-reconcile-child') {
+    return 'awaiting-review';
+  }
+  if (action.kind === 'rerun-failed-checks' || action.kind === 'file-ci-failure-child') {
+    return 'ci-blocked';
+  }
   return 'merge-ready';
 }
 
@@ -571,11 +734,22 @@ function subjectForAction(action: NewWorkAction): string {
 }
 
 function phaseForSchedulingSkip(
-  skip: ActiveSchedulingSkip,
+  skip: Pick<ActiveSchedulingSkip, 'phase'>,
 ): LifecyclePhase {
   if (skip.phase === 'implementation') return 'eligible';
   if (skip.phase === 'review') return 'awaiting-review';
-  if (skip.phase === 'merge-prep') return 'merge-prep';
+  if (
+    skip.phase === 'update-branch'
+    || skip.phase === 'file-reconcile-child'
+  ) {
+    return 'awaiting-review';
+  }
+  if (
+    skip.phase === 'rerun-failed-checks'
+    || skip.phase === 'file-ci-failure-child'
+  ) {
+    return 'ci-blocked';
+  }
   return 'merge-ready';
 }
 
@@ -584,19 +758,18 @@ function phaseForSchedulingSkip(
 // write just attempted this cycle, or a permanently-unappliable action like
 // a comment on a locked conversation) must defer a new claim for X, but must
 // never suppress claim scheduling for an unrelated issue/PR Y. Derived from
-// the plan (same "any action other than expose-merge-prep still pending"
-// signal as before) so an item whose reconciliation was just corrected this
-// cycle still waits for a fresh snapshot next cycle before claiming — only
-// the *scope* narrows from the whole cycle to the specific item.
+// so an item whose reconciliation was just corrected this cycle still waits
+// for a fresh snapshot next cycle before claiming — only the *scope* narrows
+// from the whole cycle to the specific item.
 //
-// `ensure-implementation-summary` is excluded alongside `expose-merge-prep`
-// (jinn-mono#1883 follow-up): it is a benign, idempotent PR-body content
-// sync (the writer no-ops once the body already matches) that is orthogonal
-// to claiming — a review or merge-prep claim advances a dedicated ref, never
-// the PR body. `implementationComplete && item.implementationSummary !==
-// undefined` is permanently true once implementation finishes, so without
-// this exclusion the action is emitted every cycle for every finalized PR
-// and its issue is blocked forever, so `claim-review` is never scheduled.
+// `ensure-implementation-summary` is excluded (jinn-mono#1883 follow-up): it
+// is a benign, idempotent PR-body content sync (the writer no-ops once the
+// body already matches) that is orthogonal to claiming — a review claim
+// advances a dedicated ref, never the PR body. `implementationComplete &&
+// item.implementationSummary !== undefined` is permanently true once
+// implementation finishes, so without this exclusion the action is emitted
+// every cycle for every finalized PR and its issue is blocked forever, so
+// `claim-review` is never scheduled.
 function blockedIssueNumbers(
   actions: readonly ProjectionAction[],
   view: LifecycleView,
@@ -609,7 +782,6 @@ function blockedIssueNumbers(
   }
   const blocked = new Set<number>();
   for (const action of actions) {
-    if (action.kind === 'expose-merge-prep') continue;
     if (action.kind === 'ensure-implementation-summary') continue;
     if ('issueNumber' in action && action.issueNumber !== undefined) {
       blocked.add(action.issueNumber);
@@ -639,26 +811,46 @@ export function matchesOnlyIssuesAllowlist(
   return issueNumber !== undefined && onlyIssues.has(issueNumber);
 }
 
+export const MAX_FULL_RECONCILIATION_AGE_MS = 2 * 60 * 60_000;
+
+export function fullReconciliationAllowsNewClaims(
+  lastFullReconciliationAt: string | null | undefined,
+  now: Date,
+): boolean {
+  if (lastFullReconciliationAt === null || lastFullReconciliationAt === undefined) return false;
+  const timestamp = exactUtcTimestampMs(lastFullReconciliationAt);
+  if (timestamp === null) return false;
+  const age = now.getTime() - timestamp;
+  return age >= 0 && age <= MAX_FULL_RECONCILIATION_AGE_MS;
+}
+
 export async function runLifecycleCycle(
   mode: AutopilotMode,
   deps: LifecycleControllerDeps,
 ): Promise<LifecycleCycleReport> {
+  deps.resetGitHubUsage?.();
   if (mode === 'active' && deps.active === undefined) {
     return {
       status: 'rejected',
       mode,
       message: 'active executor not configured',
+      githubUsage: finalGitHubUsage(deps),
       items: [],
       orphanBranchClaims: [],
       diagnostics: [],
       events: [],
     };
   }
-  if ((mode === 'recover' || mode === 'active') && deps.writer === undefined) {
+  if (
+    (mode === 'recover' || mode === 'active')
+    && deps.writer === undefined
+    && deps.writerForSnapshot === undefined
+  ) {
     return {
       status: 'rejected',
       mode,
       message: 'recover writer not configured',
+      githubUsage: finalGitHubUsage(deps),
       items: [],
       orphanBranchClaims: [],
       diagnostics: [],
@@ -674,6 +866,7 @@ export async function runLifecycleCycle(
         message: `active capability preflight failed: ${
           preflight.detail ?? 'required capability is unverified'
         }`,
+        githubUsage: finalGitHubUsage(deps),
         items: [],
         orphanBranchClaims: [],
         diagnostics: [],
@@ -681,7 +874,7 @@ export async function runLifecycleCycle(
       };
     }
   }
-  const rateLimitFloor = deps.rateLimitFloor ?? DEFAULT_FLOOR;
+  const rateLimitFloor = Math.max(DEFAULT_FLOOR, deps.rateLimitFloor ?? DEFAULT_FLOOR);
   let snapshot: GitHubLifecycleSnapshot;
   try {
     snapshot = await deps.readSnapshot(rateLimitFloor);
@@ -691,25 +884,107 @@ export async function runLifecycleCycle(
         status: 'rate-limited',
         mode,
         message: error.message,
+        githubUsage: finalGitHubUsage(deps),
         items: [],
         orphanBranchClaims: [],
         diagnostics: [],
         events: [],
       };
     }
+    if (deps.snapshotFailureMode === 'report') {
+      const failed = {
+        status: 'failed' as const,
+        mode,
+        message: `Lifecycle snapshot failed before mutations: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        mutationFree: true as const,
+        items: [] as const,
+        orphanBranchClaims: [] as const,
+        diagnostics: [] as const,
+        events: [] as const,
+      };
+      try {
+        return {
+          ...failed,
+          usageAccounting: { complete: true as const },
+          githubUsage: failedCycleGitHubUsage(deps),
+        };
+      } catch (usageError) {
+        return {
+          ...failed,
+          usageAccounting: {
+            complete: false as const,
+            reason: usageError instanceof Error ? usageError.message : String(usageError),
+          },
+        };
+      }
+    }
     throw error;
   }
-  if (snapshot.project.rateLimit.remaining < rateLimitFloor) {
+  if (snapshot.snapshotComplete !== true) {
+    if (mode !== 'observe') {
+      return {
+        status: 'rejected',
+        mode,
+        message: 'complete lifecycle snapshot is unavailable; mutations are suppressed',
+        githubUsage: finalGitHubUsage(deps, snapshot),
+        items: [],
+        orphanBranchClaims: [],
+        diagnostics: [],
+        events: [],
+      };
+    }
     return {
-      status: 'rate-limited',
+      status: 'ok',
       mode,
-      message: `GitHub rate-limit budget low: ${snapshot.project.rateLimit.remaining} remaining`,
+      cycleId: deps.cycleId(),
+      runnerId: deps.runnerId,
+      capturedAt: snapshot.capturedAt,
+      ...snapshotReportMetadata(snapshot),
+      githubUsage: finalGitHubUsage(deps, snapshot),
       items: [],
       orphanBranchClaims: [],
       diagnostics: [],
       events: [],
     };
   }
+  const graphqlRemaining = snapshot.githubUsage?.graphqlRemaining ?? null;
+  if (graphqlRemaining === null || graphqlRemaining < rateLimitFloor) {
+    return {
+      status: 'rate-limited',
+      mode,
+      message: graphqlRemaining === null
+        ? 'GitHub GraphQL rate-limit evidence is unavailable'
+        : `GitHub rate-limit budget low: ${graphqlRemaining} remaining`,
+      githubUsage: finalGitHubUsage(deps, snapshot),
+      items: [],
+      orphanBranchClaims: [],
+      diagnostics: [],
+      events: [],
+    };
+  }
+  const remainingStart = snapshot.project.rateLimit.remaining;
+  const attachBudget = async <Report extends { readonly status: 'ok' }>(
+    report: Report,
+  ): Promise<Report & {
+    readonly budget?: {
+      readonly remainingStart: number;
+      readonly remainingEnd: number;
+      readonly pointsSpent: number;
+    };
+  }> => {
+    if (deps.readRateLimitRemaining === undefined) return report;
+    const remainingEnd = await deps.readRateLimitRemaining();
+    return {
+      ...report,
+      budget: {
+        remainingStart,
+        remainingEnd,
+        pointsSpent: Math.max(0, remainingStart - remainingEnd),
+      },
+    };
+  };
   const now = deps.now();
   const view = deriveLifecycle(snapshot.lifecycle, now, deps.staleAfterMs);
   const context = projectionContext(snapshot, view, now, deps.staleAfterMs);
@@ -732,19 +1007,22 @@ export async function runLifecycleCycle(
     )),
   }));
   if (mode === 'observe') {
-    return {
+    return attachBudget({
       status: 'ok',
       mode,
       cycleId,
       runnerId: deps.runnerId,
       capturedAt: snapshot.capturedAt,
+      ...snapshotReportMetadata(snapshot),
+      githubUsage: finalGitHubUsage(deps, snapshot),
       items,
       orphanBranchClaims,
       diagnostics,
       events: [],
-    };
+    });
   }
-  const reconciliation = await executeProjectionPlan(plan, deps.writer!);
+  const writer = deps.writerForSnapshot?.(snapshot) ?? deps.writer!;
+  const reconciliation = await executeProjectionPlan(plan, writer);
   const reconciliationEvents = reconciliation.results.map((result) => (
     eventFor(
       result,
@@ -756,12 +1034,9 @@ export async function runLifecycleCycle(
       mode === 'active' ? 'active' : 'recover',
     )
   ));
-  // Board-archive sweep (jinn-mono#1883): after reconciliation, never in
-  // `observe` (already returned above) — the sweep itself never throws (see
-  // `runBoardArchiveSweep`), so no try/catch is needed at this call site.
-  const boardArchive = deps.boardArchiveSweep === undefined
-    ? undefined
-    : await deps.boardArchiveSweep(snapshot, now);
+  // Stage 3: board-archive relocated to the scheduled painter
+  // (`scripts/paint-board.ts`); the cycle no longer mutates Project Status
+  // or archives Done items.
   if (mode === 'active') {
     const actionEvents: LifecycleLogEvent[] = [];
     const blockedIssues = blockedIssueNumbers(plan.actions, view);
@@ -769,17 +1044,37 @@ export async function runLifecycleCycle(
     const openPipelineBacklog = snapshot.pullRequests.filter((pr) => (
       pr.state === 'OPEN' && pr.labels.includes('engine:review')
     )).length;
+    const candidates = activeCandidates(snapshot, view).filter((candidate) => (
+      !blockedIssues.has(candidate.issueNumber)
+      && matchesOnlyIssuesAllowlist(candidate.issueNumber, deps.active!.onlyIssues)
+    ));
+    const reconciliationFresh = fullReconciliationAllowsNewClaims(
+      snapshot.lastFullReconciliationAt,
+      now,
+    );
+    if (!reconciliationFresh) {
+      actionEvents.push(...candidates.map((candidate): LifecycleLogEvent => ({
+        cycleId,
+        runnerId: deps.runnerId,
+        mode: 'active',
+        phase: phaseForSchedulingSkip(candidate),
+        subject: candidate.phase === 'implementation'
+          ? `issue:${candidate.issueNumber}`
+          : `issue:${candidate.issueNumber}/pr:${candidate.prNumber}`,
+        action: 'schedule',
+        outcome: 'skipped',
+        reason: 'full-reconciliation-stale',
+      })));
+    }
     const scheduling = scheduleActiveActions({
-      candidates: activeCandidates(snapshot, view).filter((candidate) => (
-        !blockedIssues.has(candidate.issueNumber)
-        && matchesOnlyIssuesAllowlist(candidate.issueNumber, deps.active!.onlyIssues)
-      )),
+      candidates: reconciliationFresh ? candidates : [],
       remaining: local.remaining,
       availableLogins: local.availableLogins,
       implementationPreferredLogin: local.implementationPreferredLogin,
       openPipelineBacklog,
       implementationBackpressureThreshold:
         deps.active!.implementationBackpressureThreshold,
+      ...(local.newWorkPaused ? { newWorkPaused: true } : {}),
     });
     actionEvents.push(...scheduling.skips.map((skip): LifecycleLogEvent => ({
       cycleId,
@@ -793,7 +1088,7 @@ export async function runLifecycleCycle(
     })));
     for (const action of scheduling.actions) {
       try {
-        const result = await deps.active!.executeAction(action);
+        const result = await deps.active!.executeAction(action, snapshot);
         actionEvents.push({
           cycleId,
           runnerId: deps.runnerId,
@@ -819,37 +1114,56 @@ export async function runLifecycleCycle(
         });
       }
     }
-    return {
+    return attachBudget({
       status: 'ok',
       mode,
       cycleId,
       runnerId: deps.runnerId,
       capturedAt: snapshot.capturedAt,
+      ...snapshotReportMetadata(snapshot),
+      githubUsage: finalGitHubUsage(deps, snapshot),
       items,
       orphanBranchClaims,
       diagnostics,
       events: [...reconciliationEvents, ...actionEvents],
       reconciliation,
-      ...(boardArchive === undefined ? {} : { boardArchive }),
-    };
+    });
   }
-  return {
+  return attachBudget({
     status: 'ok',
     mode,
     cycleId,
     runnerId: deps.runnerId,
     capturedAt: snapshot.capturedAt,
+    ...snapshotReportMetadata(snapshot),
+    githubUsage: finalGitHubUsage(deps, snapshot),
     items,
     orphanBranchClaims,
     diagnostics,
     events: reconciliationEvents,
     reconciliation,
-    ...(boardArchive === undefined ? {} : { boardArchive }),
-  };
+  });
 }
 
 export function renderLifecycleJson(report: LifecycleCycleReport): string {
-  return JSON.stringify(report, null, 2);
+  const githubUsage = report.githubUsage;
+  const lastFullReconciliationAt = 'lastFullReconciliationAt' in report
+    ? report.lastFullReconciliationAt
+    : undefined;
+  return JSON.stringify({
+    ...report,
+    ...(lastFullReconciliationAt === undefined
+      ? {}
+      : { lastFullReconciledAt: lastFullReconciliationAt }),
+    ...(githubUsage === undefined
+      ? {}
+      : {
+          githubUsage: {
+            ...githubUsage,
+            graphqlPoints: githubUsage.graphqlCost,
+          },
+        }),
+  }, null, 2);
 }
 
 function explanation(item: LifecycleStatusItem): string {
@@ -873,8 +1187,6 @@ function explanation(item: LifecycleStatusItem): string {
   }
   if (item.phase === 'awaiting-review') return `${identity} is awaiting an exact-head review claim.`;
   if (item.phase === 'reviewing') return `${identity} is reviewing the current exact head.`;
-  if (item.phase === 'review-fixing') return `${identity} is awaiting review fixes and re-review.`;
-  if (item.phase === 'merge-prep') return `${identity} is awaiting mechanical merge preparation.`;
   if (item.phase === 'merge-ready') return `${identity} is awaiting the native merge gate.`;
   return `${identity} is merged and awaiting no lifecycle gate.`;
 }
@@ -926,30 +1238,105 @@ export function explainPullRequest(report: LifecycleCycleReport, prNumber: numbe
     : explanation(item);
 }
 
-function boardArchiveSummary(result: BoardArchiveSweepResult): string {
-  if (result.status === 'skipped-throttled') return 'Board archive sweep: skipped (throttled).';
-  if (result.status === 'failed') return `Board archive sweep: failed (${result.reason}).`;
-  return result.capped
-    ? `Board archive sweep: archived ${result.archived} (capped).`
-    : `Board archive sweep: archived ${result.archived}.`;
+function githubUsageSummary(usage: GitHubUsage): string {
+  return `GitHub usage: GraphQL ${usage.graphqlCost} points across `
+    + `${usage.graphqlRequests} evidence requests, `
+    + `${usage.graphqlRemaining ?? 'unknown'} remaining; `
+    + `REST ${usage.restRequests} requests, ${usage.restNotModified} not modified, `
+    + `${usage.cacheHits} cache hits.`;
+}
+
+// Accounting incompleteness is observability, not failure: GitHub's
+// used/remaining counters are eventually consistent under concurrency, so a
+// cycle whose commands all succeeded can still report incomplete accounting.
+// Surface it as a warning line, never let it gate or crash the cycle.
+function accountingWarningLines(usage: GitHubUsage | undefined): readonly string[] {
+  if (usage === undefined || usage.accountingComplete !== false) return [];
+  return [
+    'WARNING: GitHub usage accounting is incomplete '
+      + `(${usage.incompleteReason ?? 'eventually-consistent rate-limit counter skew'}); `
+      + 'reported quota numbers are best-effort.',
+  ];
+}
+
+function paritySummary(
+  differences: readonly LifecycleParityDifference[] | undefined,
+  complete: boolean,
+  unavailableReason?: string,
+): readonly string[] {
+  if (!complete) return ['Parity comparison: unavailable for a partial view.'];
+  if (unavailableReason !== undefined) {
+    return [`Parity comparison: unavailable (${unavailableReason}).`];
+  }
+  if (differences === undefined) return ['Parity comparison: not run for this snapshot.'];
+  if (differences.length === 0) return ['Parity differences: 0.'];
+  return [
+    `Parity differences: ${differences.length} (${
+      differences.map((difference) => difference.subject).join(', ')
+    }).`,
+    ...differences.map((difference) => (
+      `Parity ${difference.subject}: incremental=${difference.incremental ?? 'absent'}; `
+        + `full=${difference.full ?? 'absent'}.`
+    )),
+  ];
 }
 
 export function renderLifecycleHuman(report: LifecycleCycleReport): string {
-  if (report.status !== 'ok') return report.message;
-  const boardArchiveLines = report.boardArchive === undefined
+  if (report.status === 'failed') {
+    if (report.usageAccounting.complete === false) {
+      return `${report.message}\nGitHub usage: unavailable (${report.usageAccounting.reason}).`;
+    }
+    const usage = report.githubUsage;
+    if (usage === undefined) {
+      return `${report.message}\nGitHub usage: unavailable (complete usage evidence is missing).`;
+    }
+    return [report.message, githubUsageSummary(usage), ...accountingWarningLines(usage)].join('\n');
+  }
+  const usageLine = githubUsageSummary(report.githubUsage);
+  const accountingLines = accountingWarningLines(report.githubUsage);
+  if (report.status !== 'ok') {
+    return [report.message, usageLine, ...accountingLines].join('\n');
+  }
+  const snapshotLine = `Snapshot: ${report.snapshotMode} (${
+    report.snapshotComplete ? 'complete' : 'partial'
+  }), captured ${report.capturedAt}, last full reconciliation ${
+    report.lastFullReconciliationAt ?? 'never'
+  }.`;
+  const partialLines = report.partialReason === undefined
     ? []
-    : [boardArchiveSummary(report.boardArchive)];
+    : [`PARTIAL: ${report.partialReason}.`];
+  const warningLines = report.snapshotWarning === undefined
+    ? []
+    : [`WARNING: ${report.snapshotWarning}.`];
+  const parityLines = paritySummary(
+    report.parityDifferences,
+    report.snapshotComplete,
+    report.parityUnavailableReason,
+  );
   if (
     report.items.length === 0
     && report.orphanBranchClaims.length === 0
     && report.diagnostics.length === 0
+    && report.events.length === 0
+    && report.budget === undefined
   ) {
     return [
+      snapshotLine,
+      ...partialLines,
+      ...warningLines,
+      usageLine,
+      ...accountingLines,
+      ...parityLines,
       'No lifecycle items.',
-      ...boardArchiveLines,
     ].join('\n');
   }
   return [
+    snapshotLine,
+    ...partialLines,
+    ...warningLines,
+    usageLine,
+    ...accountingLines,
+    ...parityLines,
     ...report.items.map(explanation),
     ...report.orphanBranchClaims.map(orphanExplanation),
     ...report.diagnostics.map((diagnostic) => `Human diagnostic: ${diagnostic.detail}.`),
@@ -957,6 +1344,11 @@ export function renderLifecycleHuman(report: LifecycleCycleReport): string {
       `${event.action} ${event.subject}: ${event.outcome}${
         event.reason === undefined ? '' : ` (${event.reason})`
       }.`),
-    ...boardArchiveLines,
+    ...(report.budget === undefined
+      ? []
+      : [
+          `points-spent: ${report.budget.pointsSpent} `
+          + `(remaining ${report.budget.remainingStart} → ${report.budget.remainingEnd})`,
+        ]),
   ].join('\n');
 }

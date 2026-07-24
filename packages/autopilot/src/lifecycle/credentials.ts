@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 
-export type CredentialPhase = 'implement' | 'review' | 'merge-prep' | 'merge';
+export type CredentialPhase = 'implement' | 'review' | 'merge';
 export type CredentialPreference = 'implementation' | 'review';
 
 /**

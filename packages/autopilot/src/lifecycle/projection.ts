@@ -48,16 +48,9 @@ interface HeadPinned {
 
 export type ProjectionAction =
   | ({
-      readonly kind: 'set-project-status';
-      readonly issueNumber: number;
-      readonly status: ProjectStatus;
-      readonly requiresPreviousSuccess?: true;
-    } & Partial<HeadPinned>)
-  | ({
       readonly kind: 'set-pr-draft';
       readonly prNumber: number;
       readonly draft: boolean;
-      readonly requiresReviewState?: 'fixing' | 'terminal-approved';
       readonly requiresPreviousSuccess?: true;
     } & HeadPinned)
   | ({
@@ -80,10 +73,6 @@ export type ProjectionAction =
       readonly summary: string;
     } & HeadPinned)
   | ({
-      readonly kind: 'requeue-implementation';
-      readonly issueNumber: number;
-    } & HeadPinned)
-  | ({
       readonly kind: 'mark-review-stale';
       readonly prNumber: number;
       readonly expectedReviewRefOid: GitOid;
@@ -92,11 +81,7 @@ export type ProjectionAction =
       readonly kind: 'complete-verdict-intent';
       readonly prNumber: number;
       readonly expectedReviewRefOid: GitOid;
-      readonly state: 'fixing' | 'terminal-approved';
-    } & HeadPinned)
-  | ({
-      readonly kind: 'expose-merge-prep';
-      readonly prNumber: number;
+      readonly state: 'terminal-approved';
     } & HeadPinned)
   | ({
       readonly kind: 'ensure-draft-pr';
@@ -109,25 +94,9 @@ export interface ProjectionPlan {
   readonly actions: readonly ProjectionAction[];
 }
 
-function desiredStatus(item: LifecycleViewItem): ProjectStatus {
-  if (item.phase === 'human') return 'Human';
-  if (item.stale && item.phase === 'implementing') return 'Todo';
-  switch (item.phase) {
-    case 'eligible': return 'Todo';
-    case 'implementing': return 'In Progress';
-    case 'merged': return 'Done';
-    case 'awaiting-review':
-    case 'reviewing':
-    case 'review-fixing':
-    case 'merge-prep':
-    case 'merge-ready':
-      return 'In Review';
-  }
-}
-
 function activeMutation(view: LifecycleViewItem): boolean {
   if (view.phase === 'human') return true;
-  if (view.phase === 'implementing' || view.phase === 'review-fixing' || view.phase === 'merge-prep') {
+  if (view.phase === 'implementing') {
     return true;
   }
   const item = view.item;
@@ -171,23 +140,12 @@ function planItem(
 ): ProjectionAction[] {
   const item = view.item;
   if (!item.v2Marked && view.phase !== 'human') return [];
-  const desired = desiredStatus(view);
+  // Stage 3: Project Status is painter-owned. Cycle projection never emits
+  // `set-project-status` / `requeue-implementation` (Status-only) actions.
   const actions: ProjectionAction[] = [];
   const implementationComplete = item.kind === 'pull-request'
     && item.branchClaim?.phase === 'implement'
     && item.branchClaim.phaseComplete === true;
-  if (
-    !implementationComplete
-    && item.projectStatus !== desired
-    && !(view.stale && view.phase === 'implementing')
-  ) {
-    actions.push({
-      kind: 'set-project-status',
-      issueNumber: item.issueNumber,
-      ...(item.kind === 'pull-request' ? { expectedHead: item.head } : {}),
-      status: desired,
-    });
-  }
   if (item.kind !== 'pull-request') return actions;
 
   if (implementationComplete && item.implementationSummary !== undefined) {
@@ -199,10 +157,11 @@ function planItem(
     });
   }
 
-  let completedReviewState: 'fixing' | 'terminal-approved' | undefined;
+  let completedReviewState: 'terminal-approved' | undefined;
   if (
     item.v2Marked
     && item.reviewClaim?.state === 'verdict-intent'
+    && item.reviewClaim.verdict.state === 'APPROVE'
     && item.terminalVerdict !== undefined
     && item.terminalVerdict.head === item.head
     && item.terminalVerdict.marker === item.reviewClaim.verdict.marker
@@ -210,9 +169,7 @@ function planItem(
   ) {
     const refOid = reviewRefByPr.get(item.prNumber);
     if (refOid !== undefined) {
-      completedReviewState = item.reviewClaim.verdict.state === 'APPROVE'
-        ? 'terminal-approved'
-        : 'fixing';
+      completedReviewState = 'terminal-approved';
       actions.push({
         kind: 'complete-verdict-intent',
         prNumber: item.prNumber,
@@ -231,9 +188,6 @@ function planItem(
         prNumber: item.prNumber,
         expectedHead: item.head,
         draft,
-        ...(completedReviewState === undefined
-          ? {}
-          : { requiresReviewState: completedReviewState }),
       });
     }
     const wantsReviewLabel = true;
@@ -286,15 +240,6 @@ function planItem(
         ...requiresPreviousSuccess,
       });
     }
-    if (item.projectStatus !== desired) {
-      actions.push({
-        kind: 'set-project-status',
-        issueNumber: item.issueNumber,
-        expectedHead: item.head,
-        status: desired,
-        ...requiresPreviousSuccess,
-      });
-    }
     const draft = activeMutation(view);
     if (item.isDraft !== draft) {
       actions.push({
@@ -308,17 +253,9 @@ function planItem(
   }
 
   if (view.phase === 'human' || !item.v2Marked) return actions;
-  if (
-    view.stale
-    && view.phase === 'implementing'
-    && item.projectStatus !== 'Todo'
-  ) {
-    actions.push({
-      kind: 'requeue-implementation',
-      issueNumber: item.issueNumber,
-      expectedHead: item.head,
-    });
-  } else if (view.stale && (view.phase === 'reviewing' || view.phase === 'review-fixing')) {
+  // Stage 3: stale implementation reclaim is claim-branch / scheduler driven;
+  // Status Todo paint moved to the board painter (no requeue-implementation).
+  if (view.stale && view.phase === 'reviewing') {
     const refOid = reviewRefByPr.get(item.prNumber);
     if (refOid !== undefined) {
       actions.push({
@@ -328,12 +265,6 @@ function planItem(
         expectedReviewRefOid: refOid,
       });
     }
-  } else if (view.stale && view.phase === 'merge-prep') {
-    actions.push({
-      kind: 'expose-merge-prep',
-      prNumber: item.prNumber,
-      expectedHead: item.head,
-    });
   }
 
   return actions;
@@ -365,19 +296,7 @@ export function planProjection(
   for (const claim of context.orphanBranchClaims) {
     if (existingPrIssues.has(claim.issueNumber)) continue;
     if (claim.phase === 'human') {
-      const alreadyProjectsHuman = actions.some((action) => (
-        action.kind === 'set-project-status'
-        && action.issueNumber === claim.issueNumber
-        && action.status === 'Human'
-      ));
-      if (claim.projectStatus !== 'Human' && !alreadyProjectsHuman) {
-        actions.push({
-          kind: 'set-project-status',
-          issueNumber: claim.issueNumber,
-          expectedHead: claim.head,
-          status: 'Human',
-        });
-      }
+      // Stage 3: Human Status paint is painter-owned (label/marker authority).
       continue;
     }
     if (claim.phase === 'awaiting-review') {
@@ -388,23 +307,7 @@ export function planProjection(
         headRefName: claim.headRefName,
         baseRefName: claim.baseRefName,
       });
-      if (claim.projectStatus !== 'In Review') {
-        actions.push({
-          kind: 'set-project-status',
-          issueNumber: claim.issueNumber,
-          expectedHead: claim.head,
-          status: 'In Review',
-        });
-      }
       continue;
-    }
-    if (!claim.stale && claim.projectStatus !== 'In Progress') {
-      actions.push({
-        kind: 'set-project-status',
-        issueNumber: claim.issueNumber,
-        expectedHead: claim.head,
-        status: 'In Progress',
-      });
     }
     actions.push({
       kind: 'ensure-draft-pr',
@@ -413,13 +316,6 @@ export function planProjection(
       headRefName: claim.headRefName,
       baseRefName: claim.baseRefName,
     });
-    if (claim.stale && claim.projectStatus !== 'Todo') {
-      actions.push({
-        kind: 'requeue-implementation',
-        issueNumber: claim.issueNumber,
-        expectedHead: claim.head,
-      });
-    }
   }
   for (const diagnostic of context.mappingDiagnostics ?? []) {
     const reason: HumanReason = {
@@ -427,14 +323,6 @@ export function planProjection(
       code: 'branch-mapping-ambiguous',
       detail: diagnostic.detail,
     };
-    for (const issue of diagnostic.issues) {
-      if (issue.projectStatus === 'Human') continue;
-      actions.push({
-        kind: 'set-project-status',
-        issueNumber: issue.number,
-        status: 'Human',
-      });
-    }
     for (const pr of diagnostic.pullRequests) {
       if (!pr.labels.includes(labels.review)) {
         actions.push({
@@ -480,5 +368,6 @@ export function phaseStatus(phase: LifecyclePhase): ProjectStatus {
   if (phase === 'eligible') return 'Todo';
   if (phase === 'implementing') return 'In Progress';
   if (phase === 'merged') return 'Done';
+  // blocked-by-child paints In Review for now (Stage 2); painter owns Status in Stage 3.
   return 'In Review';
 }

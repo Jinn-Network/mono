@@ -310,6 +310,12 @@ export interface SweRebenchV2EvaluatorHarnessOptions {
   /** IPFS gateway URL used to fetch launcher-published vetted pool artifacts. */
   ipfsGatewayUrl?: string;
   /**
+   * Durable swe-rebench-v2 state dir (validated pool substrate). Wired from
+   * `config.sweRebenchV2StateDir` via `buildHarnesses`. Falls back to
+   * `defaultStateDir()` when omitted (tests / stub registries).
+   */
+  stateDir?: string;
+  /**
    * Test-only injection points. Production runs use Node's child_process
    * + node:fs + the bundled HFFetcher / PythonEvalRunner.
    */
@@ -337,8 +343,9 @@ export interface SweRebenchV2EvaluatorHarnessOptions {
     fetchFromIpfs?: typeof fetchFromIpfs;
     /**
      * Override the state directory used for the {@link ValidatedPoolStore}
-     * substrate-recheck. Defaults to `JINN_SWE_REBENCH_V2_STATE_DIR` env
-     * var or `~/.jinn-client/swe-rebench-v2`.
+     * substrate-recheck. Production prefers the first-class `stateDir`
+     * option on {@link SweRebenchV2EvaluatorHarnessOptions}; this remains
+     * for tests. Falls back to `defaultStateDir()` when both are omitted.
      */
     stateDir?: string;
     /**
@@ -358,6 +365,7 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
   private readonly implStateDir: string | undefined;
   private readonly ipfsRegistryUrl: string;
   private readonly ipfsGatewayUrl: string;
+  private readonly stateDir: string | undefined;
   private readonly deps: NonNullable<SweRebenchV2EvaluatorHarnessOptions['_testDeps']>;
   /** The engine's claim-eligibility check calls `isReady()` per candidate
    *  task per tick (~17 Hz potential). Cache the live `docker info` result
@@ -384,6 +392,7 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
     this.implStateDir = opts.implStateDir;
     this.ipfsRegistryUrl = opts.ipfsRegistryUrl ?? DEFAULT_IPFS_REGISTRY_URL;
     this.ipfsGatewayUrl = opts.ipfsGatewayUrl ?? process.env['JINN_IPFS_GATEWAY_URL'] ?? DEFAULT_IPFS_GATEWAY_URL;
+    this.stateDir = opts.stateDir ?? opts._testDeps?.stateDir;
     this.deps = opts._testDeps ?? {};
   }
 
@@ -1320,10 +1329,7 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
     // scorable, and that the HF row + image haven't drifted since admission.
     // Any mismatch throws SkippableError — never fails open to a misclassified
     // FAIL verdict. (jinn-mono-fufn Task 9)
-    const stateDir =
-      this.deps.stateDir ??
-      process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ??
-      defaultSolverTypeStateDir();
+    const stateDir = this.stateDir ?? defaultSolverTypeStateDir();
     const fetcher: HfFetcher = this.getFetcher();
     const mintedV2Row = await this.recheckMintedV2(task, ctx.task, fetcher, state);
     const publishedPoolRow = mintedV2Row

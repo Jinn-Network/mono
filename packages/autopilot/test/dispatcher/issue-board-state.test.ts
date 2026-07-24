@@ -23,26 +23,26 @@ import type {
 const ISSUE_ON_BOARD = 403;
 const ISSUE_OFF_BOARD = 471;
 
-/** Canned gh issue list response — includes both fixture issues. */
+/** Canned REST issue response — includes both fixture issues. */
 const ISSUE_LIST_JSON = JSON.stringify([
   {
     labels: [],
     number: ISSUE_ON_BOARD,
     title: 'fix(client): test-gated TaskClaimEmitter redeploy',
-    author: { login: 'alice' },
+    user: { login: 'alice' },
   },
   {
     labels: [],
     number: ISSUE_OFF_BOARD,
     title: 'feat(operator-app): expose generator health',
-    author: { login: 'carol' },
+    user: { login: 'carol' },
   },
 ]);
 
-/** `gh issue list` runner — the only command `GhIssueSource.poll` issues. */
+/** Explicit REST page runner — the only command `GhIssueSource.poll` issues. */
 function makeFakeRunner(): CommandRunner {
   return async (cmd: string, args: string[]): Promise<string> => {
-    if (cmd === 'gh' && args[0] === 'issue') {
+    if (cmd === 'gh' && args[0] === 'api' && args[1]?.includes('/issues?')) {
       return ISSUE_LIST_JSON;
     }
     throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);

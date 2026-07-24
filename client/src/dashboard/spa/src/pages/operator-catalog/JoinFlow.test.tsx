@@ -1192,6 +1192,95 @@ describe('JoinFlow — Hermes Agent precheck panel', () => {
   });
 });
 
+describe('JoinFlow — provider carried in join request (issue #1243)', () => {
+  /** Catalog with hermes-agent listed as compatible so it appears in the select. */
+  const hermesCompatibleCatalog = {
+    ...baseCatalog,
+    nets: [
+      {
+        ...baseCatalog.nets[0]!,
+        compatibleHarnesses: [
+          { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+          { name: 'hermes-agent', version: '0.1.0', supportsRoles: ['solving' as const] },
+        ],
+      },
+    ],
+  };
+
+  it('sends provider "openrouter" in the solver body for a default Hermes model join', async () => {
+    apiMock.getSolverNets.mockResolvedValue(hermesCompatibleCatalog);
+    // Selecting Hermes fires the precheck before the mutation; a passing
+    // doctor lets the join proceed.
+    apiMock.hermesDoctor.mockResolvedValue({
+      installed: true,
+      exitCode: 0,
+      stdout: 'all checks passed',
+      stderr: '',
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
+    await waitFor(() =>
+      expect(Array.from(harnessSelect.options).some((o) => o.value === 'hermes-agent')).toBe(true),
+    );
+    fireEvent.change(harnessSelect, { target: { value: 'hermes-agent' } });
+    await waitFor(() => expect(harnessSelect.value).toBe('hermes-agent'));
+
+    // Default Hermes model (Opus 4.7 via OpenRouter) is above the $1/task
+    // gate — acknowledge it so the submit isn't blocked.
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-cost-confirmation')).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByTestId('join-flow-cost-confirmation-checkbox'));
+
+    // Submit → precheck passes → join fires.
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() => expect(apiMock.operatorJoin).toHaveBeenCalled());
+    expect(apiMock.operatorJoin).toHaveBeenCalledWith(
+      'bafybeiaaa',
+      expect.objectContaining({
+        harness: 'hermes-agent',
+        model: 'anthropic/claude-opus-4.7',
+        provider: 'openrouter',
+        roles: ['solver'],
+      }),
+    );
+  });
+
+  it('omits provider for a Claude Code join (no provider on Claude catalog entries)', async () => {
+    apiMock.getSolverNets.mockResolvedValue(hermesCompatibleCatalog);
+
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
+    await waitFor(() =>
+      expect(Array.from(harnessSelect.options).some((o) => o.value === 'claude-code')).toBe(true),
+    );
+    fireEvent.change(harnessSelect, { target: { value: 'claude-code' } });
+    await waitFor(() => expect(harnessSelect.value).toBe('claude-code'));
+
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() => expect(apiMock.operatorJoin).toHaveBeenCalled());
+    const body = apiMock.operatorJoin.mock.calls[0]![1] as Record<string, unknown>;
+    expect(body.harness).toBe('claude-code');
+    expect(body.model).toBe('claude-haiku-4-5-20251001');
+    expect(body.provider).toBeUndefined();
+  });
+});
+
 describe('JoinFlow — cost surfacing + confirmation gate', () => {
   /**
    * Catalog with Hermes + Claude Code, both compatible. The default solver

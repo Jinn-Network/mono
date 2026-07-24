@@ -6,6 +6,7 @@ import type {
   RedactionManifest,
   Span,
 } from '../trajectory/schema.js';
+import { mergePerClassCounts } from './provenance.js';
 import type { ScrubPipeline } from './pipeline.js';
 
 /**
@@ -13,7 +14,8 @@ import type { ScrubPipeline } from './pipeline.js';
  * published. Runs every span's attributes (and each event's attributes) through
  * the pipeline, rebuilds the prev-span hash chain over the scrubbed spans, and
  * produces the redaction manifest (one entry per span listing the keys touched;
- * `event.<key>` for event-attribute redactions).
+ * `event.<key>` for event-attribute redactions). Populates additive provenance
+ * fields (#1974): `schemaVersion`, optional `policyHash`, `perClassCounts`.
  */
 export async function scrubSpansForEmit(
   spans: Span[],
@@ -24,12 +26,15 @@ export async function scrubSpansForEmit(
   const manifestSpans: RedactionManifest['spans'] = [];
   let total = 0;
   let prev = computeGenesisHash(taskCid);
+  let perClassCounts: Record<string, number> = {};
 
   for (const span of spans) {
     const redactedKeys = new Set<string>();
 
     const attrResult = await pipeline.run(span.attributes ?? {});
     for (const r of attrResult.redactions) redactedKeys.add(r.key);
+    perClassCounts =
+      mergePerClassCounts(perClassCounts, attrResult.perClassCounts) ?? perClassCounts;
 
     const events: Span['events'] = [];
     for (const event of span.events) {
@@ -37,6 +42,8 @@ export async function scrubSpansForEmit(
         const evResult = await pipeline.run(event.attributes);
         events.push({ ...event, attributes: evResult.attributes });
         for (const r of evResult.redactions) redactedKeys.add(`event.${r.key}`);
+        perClassCounts =
+          mergePerClassCounts(perClassCounts, evResult.perClassCounts) ?? perClassCounts;
       } else {
         events.push(event);
       }
@@ -57,7 +64,14 @@ export async function scrubSpansForEmit(
     }
   }
 
-  return { spans: out, redactionManifest: { spans: manifestSpans, totalRedactions: total } };
+  return {
+    spans: out,
+    redactionManifest: {
+      spans: manifestSpans,
+      totalRedactions: total,
+      ...pipeline.manifestProvenance(perClassCounts),
+    },
+  };
 }
 
 /**
@@ -69,6 +83,15 @@ export async function scrubSpansForEmit(
 export interface ScrubbableCaptureSpan {
   attributes: Record<string, unknown>;
   redactedKeys: string[];
+}
+
+export interface ScrubCaptureSpansOptions {
+  /**
+   * Optional mutable tally bag. When provided, applied disposition counts from
+   * each span are merged in (#1974) so callers can attach `perClassCounts` to
+   * a capture redaction manifest.
+   */
+  perClassCounts?: Record<string, number>;
 }
 
 /**
@@ -84,12 +107,20 @@ export interface ScrubbableCaptureSpan {
 export async function scrubCaptureSpans<T extends ScrubbableCaptureSpan>(
   spans: T[],
   pipeline: ScrubPipeline,
+  opts: ScrubCaptureSpansOptions = {},
 ): Promise<T[]> {
   const out: T[] = [];
   for (const span of spans) {
     const result = await pipeline.run(span.attributes ?? {});
     const redactedKeys = new Set(span.redactedKeys);
     for (const r of result.redactions) redactedKeys.add(r.key);
+    if (opts.perClassCounts && result.perClassCounts) {
+      const merged = mergePerClassCounts(opts.perClassCounts, result.perClassCounts);
+      if (merged) {
+        for (const key of Object.keys(opts.perClassCounts)) delete opts.perClassCounts[key];
+        Object.assign(opts.perClassCounts, merged);
+      }
+    }
     out.push({ ...span, attributes: result.attributes, redactedKeys: [...redactedKeys] });
   }
   return out;
@@ -100,6 +131,8 @@ export async function scrubCaptureSpans<T extends ScrubbableCaptureSpan>(
  * when an ingestion-time manifest (e.g. a capture's stored redactedKeys) is
  * combined with the emit-time pipeline manifest. Keeps the
  * `totalRedactions === sum(redactedKeys)` invariant the schema enforces.
+ * Provenance fields (#1974): prefer the higher `schemaVersion`, take the first
+ * defined `policyHash`, and sum `perClassCounts`.
  */
 export function mergeRedactionManifests(a: RedactionManifest, b: RedactionManifest): RedactionManifest {
   const bySpan = new Map<string, Set<string>>();
@@ -113,5 +146,17 @@ export function mergeRedactionManifests(a: RedactionManifest, b: RedactionManife
   const spans = [...bySpan]
     .map(([spanId, keys]) => ({ spanId, redactedKeys: [...keys] }))
     .filter((s) => s.redactedKeys.length > 0);
-  return { spans, totalRedactions: spans.reduce((n, s) => n + s.redactedKeys.length, 0) };
+  const perClassCounts = mergePerClassCounts(a.perClassCounts, b.perClassCounts);
+  const schemaVersion =
+    a.schemaVersion !== undefined || b.schemaVersion !== undefined
+      ? Math.max(a.schemaVersion ?? 0, b.schemaVersion ?? 0)
+      : undefined;
+  const policyHash = a.policyHash ?? b.policyHash;
+  return {
+    spans,
+    totalRedactions: spans.reduce((n, s) => n + s.redactedKeys.length, 0),
+    ...(schemaVersion !== undefined ? { schemaVersion } : {}),
+    ...(policyHash !== undefined ? { policyHash } : {}),
+    ...(perClassCounts !== undefined ? { perClassCounts } : {}),
+  };
 }

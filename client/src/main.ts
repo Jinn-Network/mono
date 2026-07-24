@@ -1508,6 +1508,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     daemonApiToken: apiToken,
     implStateDirRoot: config.engine.implStateDirRoot,
     ipfsRegistryUrl: config.ipfsRegistryUrl,
+    sweRebenchV2StateDir: config.sweRebenchV2StateDir,
     ...(process.env['JINN_POLYMARKET_GAMMA_BASE_URL']
       ? { polymarketGammaBaseUrl: process.env['JINN_POLYMARKET_GAMMA_BASE_URL'] }
       : {}),
@@ -1680,9 +1681,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // ── Seller-side scrub pipeline (publish-time) ─────────────────────────────
   // One pipeline shared by the task engine and the live capture publisher so
   // every published trajectory passes through the same maintained scrub stack
-  // (structural key policy → openredaction → secretlint/entropy → optional ML
-  // PII). The OTLP receiver above runs best-effort ingest-time scrubbers; this
-  // is the authoritative final gate before a trajectory becomes public/sellable.
+  // (structural key policy → owned detectors → secretlint/entropy → GLiNER ML
+  // PII on by default). The OTLP receiver above runs best-effort ingest-time
+  // scrubbers; this is the authoritative final gate before a trajectory becomes
+  // public/sellable.
   const sellerPiiDetector = await maybeBuildPiiDetector(config.captures.piiDetection);
   const sellerScrubPipeline = buildScrubPipeline(
     sellerPiiDetector ? { piiDetector: sellerPiiDetector } : {},
@@ -1951,6 +1953,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         safeAddress,
         agentPrivateKey,
         ipfsGatewayUrl: config.ipfsGatewayUrl,
+        stateDir: config.sweRebenchV2StateDir,
         ...(sharedDiscoveryApi ? { discoveryApi: sharedDiscoveryApi } : {}),
       },
       logger: {
@@ -1980,11 +1983,25 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     ...launchedRecordGenerators.map(({ solverType, generator }, idx) =>
       new GeneratedTaskSource(`launched:${solverType}:${idx}`, generator, {
         bucketKeyForTask: (task) => {
-          if (task.solverType !== 'swe-rebench-v2.v1') return undefined;
-          const instanceId = task.spec?.['instance_id'];
-          const postedCount = task.eligibility?.['posted_count_after_record'];
-          if (typeof instanceId !== 'string' || typeof postedCount !== 'number') return undefined;
-          return `swe-rebench-v2:${instanceId}:${postedCount}`;
+          if (task.solverType === 'swe-rebench-v2.v1') {
+            const instanceId = task.spec?.['instance_id'];
+            const postedCount = task.eligibility?.['posted_count_after_record'];
+            if (typeof instanceId !== 'string' || typeof postedCount !== 'number') return undefined;
+            return `swe-rebench-v2:${instanceId}:${postedCount}`;
+          }
+          // Issue #1893: jinn-repo.v1 live-issue tasks bucket on
+          // <issueNumber>:<snapshotHash> (carried on `eligibility` by
+          // `jinn-repo-live-auto.ts`) rather than the default window-based
+          // key — the window's startTs/endTs changes every tick, which would
+          // defeat once-per-bucket dedup for a generator whose own re-post
+          // signal is a material issue edit, not the passage of time.
+          if (task.solverType === 'jinn-repo.v1' && task.spec?.['source'] === 'live-issue') {
+            const issueNumber = task.eligibility?.['issue_number'];
+            const snapshotHash = task.eligibility?.['snapshot_hash'];
+            if (typeof issueNumber !== 'number' || typeof snapshotHash !== 'string') return undefined;
+            return `jinn-repo-live:${issueNumber}:${snapshotHash}`;
+          }
+          return undefined;
         },
       }),
     ),
@@ -2057,13 +2074,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // A sessions-only operator legitimately has zero repos. The loop remains
     // schedulable so it can report the explicit Stage 2 parked marker.
     if (harvestRepos.length > 0 || harvestMinesSessions) {
-      const { defaultStateDir } = await import('./solver-types/swe-rebench-v2.js');
-      const harvestStateDir = defaultStateDir();
+      const harvestStateDir = config.sweRebenchV2StateDir;
       const baseHarvestLoopConfig = {
         intervalMs: config.harvest.intervalMs,
         stateDir: harvestStateDir,
         repos: harvestRepos,
         limitPerRepo: config.harvest.limitPerRepo,
+        limitPerTick: config.harvest.limitPerTick,
         publish: config.harvest.publish,
         minterSafe: safeAddress,
         sources: config.harvest.sources,
@@ -2128,6 +2145,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     peers: config.peers.length > 0 ? config.peers : undefined,
     nodeEndpoint: config.nodeEndpoint,
     creatorSafeAddress: safeAddress,
+    sweRebenchV2StateDir: config.sweRebenchV2StateDir,
     corpusFactory,
     harnessReadinessRegistry,
     spendCap,
