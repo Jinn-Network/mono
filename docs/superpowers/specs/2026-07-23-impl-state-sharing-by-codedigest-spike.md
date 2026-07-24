@@ -35,7 +35,10 @@ The recommendation is accepted with the following implementation defaults:
 - `.git/`, `secrets/`, `transcripts/`, and `operator-requests/` are outside both the learner freeze identity and package, while every other supported learner top-level path is explicitly classified;
 - unknown top-level paths fail closed before hashing or pinning, with no v0 override;
 - consumers verify the materialized tree against the advertised digest using the manifest's supported profile;
+- every production digest surface, including daemon status, resolves that same profile;
 - the immutable, signed, pinned `harness.checkpoint.v2` manifest contains no transaction receipt; its CID is anchored on-chain and the receipt is derived from the event, avoiding a content-addressing cycle;
+- install validates content-addresses and archive metadata before writing, extracts only into a unique owner-only staging directory under fixed byte/file limits, and commits only a verified tree to a contained destination;
+- `jinn checkpoint publish|install|list` are registered CLI subcommands with production dependencies and CLI-level round-trip coverage, not factory-only helpers;
 - v0 is free and attributed; automatic delivery sharing and x402 pricing remain deferred.
 
 The ordered implementation train is filed as [#2117](https://github.com/Jinn-Network/mono/issues/2117) (canonical §7 / DR-d amendment) → [#2118](https://github.com/Jinn-Network/mono/issues/2118) (`learner-public.v1` parity) → [#2119](https://github.com/Jinn-Network/mono/issues/2119) (real publish/install) → [#2120](https://github.com/Jinn-Network/mono/issues/2120) (digest discovery/MCP). The optional on-delivery F4 remains deliberately unfiled until F1–F3 have soak evidence.
@@ -170,14 +173,23 @@ publication therefore writes a new wire version with these invariants:
 
 A consumer who fetches bytes for digest `D` must:
 
-1. Materialise a directory tree (IPFS DAG → local dir; preserve relative paths).
-2. Resolve `manifest.hashProfile.id` from the local, versioned profile registry
+1. Validate the checkpoint and impl-state CIDs before building a gateway URL or
+   path. Verify the raw manifest bytes against `checkpointCid`; fetch the
+   package as a bounded CAR whose root equals `implStateDirCid`, and verify
+   every reachable block multihash before reconstructing package bytes.
+2. Preflight the deterministic package without writing: reject unsafe paths,
+   links/special files, duplicates, and declared or observed size/count limit
+   violations.
+3. Materialise into a fresh owner-only temporary directory while enforcing the
+   same streaming limits and destination containment.
+4. Resolve `manifest.hashProfile.id` from the local, versioned profile registry
    and require its canonical `ignoreRelPaths` to exactly equal the manifest
    copy. Unknown profile ids or mismatched lists are rejected; there is no
    inferred/default policy for v2.
-3. Validate every top-level path against that profile before hashing.
-4. Call `hashImplStateDir(dir, { ignoreRelPaths: profile.ignoreRelPaths })`.
-5. Accept iff `sha256:${result} === D` (or raw 32-byte form matches on-chain).
+5. Validate every top-level path against that profile before hashing.
+6. Call `hashImplStateDir(dir, { ignoreRelPaths: profile.ignoreRelPaths })`.
+7. Accept iff `sha256:${result} === D` (or raw 32-byte form matches on-chain),
+   then atomically stage the fork root into a validated contained destination.
 
 This is exactly Layer 4 of the trust stack (DR-2026-05-06-d): source publication enables independent re-derivation. Cross-operator forks running the same checkpoint in frozen mode produce matching digests (Layer 3).
 
@@ -207,8 +219,8 @@ dropping them only while packaging breaks digest parity.
 
 The array order above is canonical. It uses the existing exact-path-or-directory-
 prefix semantics. The profile, not a caller-supplied raw array, feeds the
-learner freeze fence, commit-to-digest helper, checkpoint hash, package walker,
-and installer. `harness.checkpoint.v2` requires
+learner freeze fence, commit-to-digest helper, daemon/operator status,
+checkpoint hash, package walker, and installer. `harness.checkpoint.v2` requires
 `hashProfile: { id, ignoreRelPaths }`; there is no optional field and no
 publisher-harness default for v2. Consumers reject unknown ids or a manifest
 list that differs from their registered copy. A future policy is a new id, not
@@ -277,6 +289,49 @@ Train envelopes already advertise unstable digests. Sharing train state remains
 a possible later protocol version, but v0 publication refuses it
 unconditionally: there is no `--i-know-this-mutates` or warning-only path.
 Frozen checkpoints are the initial Prestige surface.
+
+### 4.4 Untrusted install boundary
+
+Checkpoint manifests, CIDs, harness names, and impl-state packages are
+attacker-controlled until verified. v0 install therefore locks these rules:
+
+1. Both `checkpointCid` and `implStateDirCid` must be canonical CIDv1
+   raw/dag-pb sha2-256 values accepted by a shared CID parser. The manifest is
+   a raw block whose exact bytes must hash to `checkpointCid`. The impl-state
+   package is exported as a CAR: its declared root must equal
+   `implStateDirCid`, every reachable block multihash is verified, missing or
+   duplicate/conflicting blocks fail, and unreachable extra blocks are
+   rejected. An injected fetch port cannot substitute content.
+2. v0 package bytes are a deterministic **uncompressed POSIX ustar** archive;
+   compression and extended/PAX records are refused. Manifest fetch is capped
+   at 1 MiB, CAR transfer at 320 MiB, and reconstructed tar/expanded bytes at
+   256 MiB. The archive may contain at most 10,000 regular files, 16 MiB per
+   file, and 255 UTF-8 bytes per relative path (the ustar name+prefix bound).
+   These named constants are
+   shared by production and tests; limit overflow aborts and cleans staging.
+3. A package preflight pass completes before any entry is written. Paths must
+   be normalized relative POSIX paths. Absolute paths, drive/UNC forms, NUL,
+   backslashes, empty/dot/`..` segments, duplicate or case-fold-colliding
+   paths, and file/directory prefix collisions are rejected.
+4. Only regular files and directories are accepted. Symlinks, hardlinks,
+   devices, FIFOs, sockets, sparse/extended entries, and other special archive
+   records are rejected.
+5. Extraction never shells out to `tar`. It creates a unique staging directory
+   with `mkdtemp` under a trusted parent, verifies owner-only `0700`
+   permissions, streams with the same byte/file counters, prevents link
+   following/existing-target replacement, and proves every resolved output
+   remains beneath that staging root.
+6. Free-form CIDs and `implName` are never interpolated into temporary paths.
+   `implName` must match the canonical harness-name grammar before it can
+   select a final location. The final target is resolved beneath the configured
+   impl-state root, rechecked for containment and unsafe parent links, and
+   committed atomically only after signature, profile, root-policy, scrub, and
+   `codeDigest` verification. Existing state is not overwritten by default.
+
+Malicious-package tests cover CAR root/block substitution, traversal,
+absolute/Windows paths, links, special/extended records, collisions,
+transfer/archive/file-count/per-file limits, unsafe final parents, cleanup,
+and no writes outside staging.
 
 ---
 
@@ -349,19 +404,23 @@ Optional later: link from attempt envelopes that *claim* a digest to the checkpo
 ### 7.1 Smallest viable path
 
 1. **Profile prerequisite** — register `learner-public.v1`, route the learner
-   freeze fence and commit-to-digest helper through it, and exclude all four
-   private/runtime roots from both the digest and package.
+   freeze fence, commit-to-digest helper, and daemon status through it, and
+   exclude all four private/runtime roots from both the digest and package.
 2. **Make `jinn checkpoint publish` real** — frozen-only; validate the complete
    root policy; scrub; walk/pin the exact public tree; emit the immutable
    `harness.checkpoint.v2`; anchor its CID; return the receipt separately.
-3. **Make `jinn checkpoint install` verify** — fetch the exact CID bytes →
-   schema/signature check → supported-profile check → materialise → validate
-   roots → `hashImplStateDir` → match `manifest.codeDigest` → stage.
+3. **Make `jinn checkpoint install` verify safely** — validate CIDs → bounded
+   fetch/content binding → preflight archive → owner-only contained extraction
+   → schema/signature/profile/root checks → `hashImplStateDir` → match
+   `manifest.codeDigest` → atomic contained stage.
 4. **Digest discovery** — project profile id/list plus the event-derived anchor
    receipt in `harness_checkpoint`; expose MCP
    `get_checkpoint_by_codedigest` (or extend `inspect_record`) + explorer
    “source” affordance on digest boards.
-5. **Do not** extend `ExecutionPayloadV2` or auto-pin on every delivery in v0.
+5. **Register the product surface** — `jinn checkpoint publish|install|list`
+   must be real CLI commands with production wiring, argument validation, help,
+   and a CLI-level publish/install round trip.
+6. **Do not** extend `ExecutionPayloadV2` or auto-pin on every delivery in v0.
 
 ### 7.2 Spec / DR warrant
 
@@ -392,9 +451,9 @@ Summary (Issue Types match handbook shapes):
 
 1. **[#2117](https://github.com/Jinn-Network/mono/issues/2117) (`docs`)** — short DR-amend under DR-2026-05-06-d + light §7 amend (v2 immutable manifest/anchor split, named profile, exhaustive roots, frozen-only publish, scrub, digest discovery).
 2. **[#2118](https://github.com/Jinn-Network/mono/issues/2118) — `feat(client): lock learner-public.v1 hash/package profile`**
-   Acceptance: the four ignored roots never affect learner digests; allowed/unknown roots are classified; freeze, revert, package, and install share one immutable profile resolver; migration note records the digest break.
+   Acceptance: the four ignored roots never affect learner digests; allowed/unknown roots are classified; freeze, revert, daemon status, package, and install share one immutable profile resolver; migration note records the digest break.
 3. **[#2119](https://github.com/Jinn-Network/mono/issues/2119) — `feat(client): real HarnessCheckpoint publish/install with re-hash verify`**
-   Acceptance: frozen-only publish pins the actual tree and exact v2 manifest bytes; anchor receipt is separate; install refuses profile/digest mismatch; root/scrub gates fail closed; unit + one integration test with local IPFS mock.
+   Acceptance: frozen-only publish pins the actual tree and exact v2 manifest bytes; anchor receipt is separate; registered CLI verbs are reachable; install uses validated CIDs, bounded malicious-archive-safe staging, and refuses profile/digest mismatch; unit + CLI integration round trip.
 4. **[#2120](https://github.com/Jinn-Network/mono/issues/2120) — `feat(discovery/mcp): resolve impl-state by codeDigest via harness_checkpoint`**
    Acceptance: given `sha256:<hex>`, return checkpoint CID, impl-state CID, profile id/list, and event-derived anchor receipt when enriched row exists; MCP tool usable from consolidator/Improve; graceful empty when unpublished.
 

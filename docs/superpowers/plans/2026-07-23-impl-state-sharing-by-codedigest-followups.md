@@ -20,8 +20,11 @@
 - Economics v0 = **free + attributed**; no x402 checkpoint pricing in the first feat train.
 - Integrity always means resolve a supported named profile, require the manifest's canonical ignore list to match it, validate roots, and re-run `hashImplStateDir` — never trust CID alone.
 - `learner-public.v1` is frozen: ignore `.git`, `operator-requests`, `secrets`, and `transcripts`; hash/package only the roots classified in the finding; reject unknown roots and special files without an override.
+- Every learner digest surface, including daemon status and commit export, resolves the same profile.
 - v0 checkpoint publication is frozen-only. Train mode, scrub findings, unknown roots, and profile mismatches refuse before pinning.
 - The pinned/signed v2 manifest never contains its own CID-derived key or transaction receipt. The CLI returns the receipt separately and the indexer derives it from the anchor event.
+- Install treats all remote values as untrusted: canonical CID/content binding, bounded archive preflight/extraction in owner-only staging, and contained atomic destination commit are mandatory.
+- `checkpoint.ts` must ship as registered `jinn checkpoint publish|install|list` CLI verbs with production dependencies and CLI-level tests.
 - American English in identifiers and Issue titles (`digest`, `distill`, ` favor` not British variants).
 
 ---
@@ -77,8 +80,11 @@ blocker edges; closing #945 does **not** require their implementation.
 | `client/src/harnesses/impls/learner/harness.ts` | Today: `freezeStateHashIgnore = ['.git']` — replace raw learner defaults with registered `learner-public.v1` |
 | `client/src/harnesses/types.ts` | Add named public-profile selection; do not expose an ad hoc publish ignore list |
 | `client/src/daemon/freeze-fence.ts` | Resolve the same profile used by packaging |
+| `client/src/main.ts` harness status | Resolve the same profile so operator status equals envelope/checkpoint identity |
 | `client/src/cli/commands/codedigest-revert-check.ts` | Use the learner profile when hashing exported commits |
-| `client/src/cli/commands/checkpoint.ts` | **Stub:** `pinToIpfs({ kind: 'implStateDir', data: '' })` — must become real walk/pin |
+| `client/src/cli/commands/checkpoint.ts` | Replace empty pin; add safe package install and a production `CommandModule` |
+| `client/src/cli/index.ts` | Register `jinn checkpoint`; include help/registry regressions |
+| Shared CID/archive/path-safety helpers | Canonical content binding, fixed limits, preflight, owner-only contained extraction/commit |
 | `packages/sdk/src/checkpoint.ts` | Add immutable `harness.checkpoint.v2` with mandatory `hashProfile`; keep the anchor receipt outside the manifest |
 | `packages/indexer/ponder.schema.ts` + checkpoint enrichment | Project `hashProfileId` / canonical ignore list and derive tx/block from the event |
 | `client/src/discovery/*` + `client/src/mcp/server.ts` | Digest→checkpoint lookup + MCP tool |
@@ -124,9 +130,11 @@ blocker edges; closing #945 does **not** require their implementation.
 
 - [ ] A single registry defines `learner-public.v1` with canonical ordered ignores `['.git', 'operator-requests', 'secrets', 'transcripts']` and the complete allowed-root table from the finding.
 - [ ] The learner freeze fence and `codeDigestForCommit` resolve that profile; no duplicated raw defaults remain.
+- [ ] `client/src/main.ts` harness status resolves the default harness's profile before hashing; status, a stamped envelope, commit export, and checkpoint publish report the same digest for one tree.
 - [ ] A shared classifier rejects unknown top-level paths, wrong file/directory kinds, symlinks, and special files. There is no v0 bypass.
 - [ ] Tests prove differences under each ignored root do not change the digest, while changes under each public root do; without the profile, private-root changes differ.
 - [ ] Tests prove the future package walker receives the exact same selected path set and ignore semantics as the hasher.
+- [ ] A status-versus-envelope equivalence regression includes private-root content and proves those bytes change neither surface.
 - [ ] Other harnesses do not inherit learner defaults; checkpoint publication refuses them until they register a reviewed public profile.
 - [ ] Operator migration note calls out that historical learner digests including private roots will not match post-change digests, including L1 / leaderboard continuity.
 
@@ -170,8 +178,14 @@ it('private learner roots do not change codeDigest under learner-public.v1', asy
 - [ ] The exact signed JSON bytes are pinned and schema-parse when fetched by `checkpointCid`; no registry-populated variant is constructed.
 - [ ] `IdentityRegistry.setMetadata("harness.checkpoint:<checkpointCid>", checkpointCid)` anchors the immutable CID. The CLI returns `{ checkpointCid, manifest, anchorReceipt }`, with the receipt outside the manifest.
 - [ ] v1 compatibility is read-only: valid historical v1 may parse, but no new v1 is emitted and install never invents receipt fields absent from fetched bytes.
-- [ ] `jinn checkpoint install`: fetch exact CID bytes → schema/signature verify → supported-profile/id-list equality → materialise → root/kind validation → re-hash → refuse on mismatch → stage as fork root.
-- [ ] Tests cover train refusal, unknown/special-file refusal, scrub refusal, CID-byte/schema equality, receipt separation, profile tampering/unknown id, package/hash parity, signature/digest mismatch, and one mocked-IPFS round trip.
+- [ ] `checkpointCid` and `implStateDirCid` pass a shared canonical CIDv1 raw/dag-pb sha2-256 parser before use. Exact raw manifest bytes match `checkpointCid`; a bounded CAR has root `implStateDirCid`, verifies every reachable block multihash, and rejects missing, conflicting/duplicate, or unreachable extra blocks.
+- [ ] v0 package bytes are deterministic uncompressed POSIX ustar; compression and PAX/extended records are refused. Exported ceilings are 1 MiB manifest, 320 MiB CAR transfer, 256 MiB reconstructed tar/expanded bytes, 10,000 regular files, 16 MiB/file, and 255 UTF-8 path bytes (the ustar name+prefix bound).
+- [ ] A full archive preflight occurs before writes and rejects absolute/drive/UNC paths, NUL/backslash/dot/`..` segments, duplicate/case-fold/prefix collisions, links, devices, FIFOs, sockets, sparse/extended entries, and all non-file/directory records.
+- [ ] Extraction uses no shell command. It streams into a unique trusted-parent `mkdtemp` directory verified `0700`, re-enforces limits, prevents link following or replacement, proves containment for every output, cleans on failure, and never interpolates remote CIDs or names into its path.
+- [ ] Manifest `implName` is validated before final path selection. The destination is contained beneath configured `implStateDirRoot`, unsafe parent links are rejected, existing state is not overwritten by default, and verified staging is committed atomically.
+- [ ] `client/src/cli/commands/checkpoint.ts` exports a production-wired `CommandModule` for `jinn checkpoint publish|install|list`; `client/src/cli/index.ts` registers it and help/argument errors follow the standard envelope.
+- [ ] CLI validates subcommands, required arguments, canonical names/versions/CIDs, frozen mode, configured IPFS/wallet dependencies, and destination policy before mutation.
+- [ ] Tests cover train refusal, unknown/special-file refusal, scrub refusal, CID-byte/schema equality, receipt separation, profile tampering/unknown id, package/hash parity, signature/digest mismatch, every malicious-archive class/limit/cleanup rule, CLI registry/help/arguments, and a CLI-level mocked-IPFS publish→install round trip.
 
 **Verification (implementer):**
 
@@ -181,7 +195,8 @@ cd packages/sdk && yarn test  # v2 manifest/hashProfile schema
 ```
 
 Expected: publish no longer pins an empty buffer or a different pre-anchor
-manifest; install rejects tampered trees and unsupported/tampered profiles.
+manifest; install rejects tampered trees, unsupported/tampered profiles, unsafe
+archives, and unsafe destinations; the product CLI reaches the complete flow.
 
 **Key stub to delete (must not ship as success path):**
 
@@ -190,10 +205,10 @@ manifest; install rejects tampered trees and unsupported/tampered profiles.
 const implStateDirCid = await args.deps.pinToIpfs({ kind: 'implStateDir', data: '' });
 ```
 
-Replace with profile resolve → validate/scrub → walk → serialize (tar/CAR per
-existing IPFS helpers) → pin bytes that re-hash to `args.codeDigest`. Pin the
-immutable v2 manifest exactly once, then anchor that CID and keep the receipt
-outside it.
+Replace with profile resolve → validate/scrub → walk → deterministic
+uncompressed ustar → pin as the verified CAR/DAG package whose materialized
+files re-hash to `args.codeDigest`. Pin the immutable v2 manifest exactly once,
+then anchor that CID and keep the receipt outside it.
 
 ---
 
