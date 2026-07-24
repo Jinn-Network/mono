@@ -7,6 +7,7 @@ import {
 } from '../../../src/harnesses/impls/jinn-repo-evaluator/claude-semantic-agent.js';
 
 class FakeChild extends EventEmitter {
+  readonly stdin = new PassThrough();
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
   readonly pid = 4321;
@@ -35,7 +36,6 @@ describe('semantic evaluator process supervision', () => {
     const controller = new AbortController();
     const pending = runner.run({
       prompt: 'Review.',
-      cwd: '/tmp/exact-head',
       abort: controller.signal,
       model: 'claude-review-model',
     });
@@ -72,7 +72,6 @@ describe('semantic evaluator process supervision', () => {
     const controller = new AbortController();
     const observed = runner.run({
       prompt: 'Review.',
-      cwd: '/tmp/exact-head',
       abort: controller.signal,
       model: 'claude-review-model',
     }).catch((error: unknown) => error);

@@ -112,6 +112,7 @@ function mechanical(
     kind: 'passed',
     checkoutDir: '/tmp/exact-head',
     changedFiles: ['client/src/a.ts', 'client/test/a.test.ts'],
+    reviewDiff: 'diff --git a/client/src/a.ts b/client/src/a.ts\n+const fixed = true;\n',
     checks: ['head', 'policy', 'typecheck', 'tests'],
     cleanup: vi.fn().mockResolvedValue(undefined),
   },
@@ -170,12 +171,13 @@ describe('runAutopilotSemanticReview', () => {
       expect.any(AbortSignal),
     );
     expect(agentRunner.run).toHaveBeenCalledWith(expect.objectContaining({
-      cwd: '/tmp/exact-head',
       abort: expect.any(AbortSignal),
     }));
+    expect(agentRunner.run.mock.calls[0]![0]).not.toHaveProperty('cwd');
     expect(agentRunner.run.mock.calls[0]![0]).not.toHaveProperty('model');
     const prompt = agentRunner.run.mock.calls[0]![0].prompt as string;
     expect(prompt).not.toContain('review-pr');
+    expect(prompt).toContain('untrusted review data');
     expect(prompt).toContain('Trusted evaluator checklist');
     expect(prompt).toContain('Correctness and issue intent');
     expect(prompt).toContain('Correlation and exact-head integrity');
@@ -183,6 +185,8 @@ describe('runAutopilotSemanticReview', () => {
     expect(prompt).toContain('Cancellation, cleanup, and failure behavior');
     expect(prompt).toContain('Ordinary non-Autopilot compatibility');
     expect(prompt).toContain('complete effective PR diff');
+    expect(prompt).toContain('Trusted complete effective PR diff');
+    expect(prompt).toContain('+const fixed = true;');
     expect(prompt).toContain('4444444444444444444444444444444444444444');
     expect(prompt).toContain('"reviewGeneration": "123e4567-e89b-42d3-a456-426614174010"');
     expect(prompt).toContain('"adoptionReceipt"');
@@ -317,6 +321,7 @@ describe('runAutopilotSemanticReview', () => {
         kind: 'passed',
         checkoutDir: '/tmp/exact-head',
         changedFiles: ['client/src/a.ts'],
+        reviewDiff: 'diff --git a/client/src/a.ts b/client/src/a.ts\n+fixed\n',
         checks: ['exact-head', 'typecheck', 'tests'],
         cleanup: vi.fn().mockRejectedValue(new Error('temporary cleanup failure')),
       }),
@@ -330,6 +335,37 @@ describe('runAutopilotSemanticReview', () => {
     });
     expect(result.review).toMatchObject({ outcome: 'approve' });
     expect(result.gating.verdict).toBe('PASS');
+  });
+
+  it('preserves the checkout when an unreaped semantic process makes cleanup unsafe', async () => {
+    const cleanup = vi.fn().mockResolvedValue(undefined);
+    const result = await runAutopilotSemanticReview({
+      context: context(),
+      mechanicalRunner: mechanical({
+        kind: 'passed',
+        checkoutDir: '/tmp/exact-head',
+        changedFiles: ['client/src/a.ts'],
+        reviewDiff: 'diff --git a/client/src/a.ts b/client/src/a.ts\n+fixed\n',
+        checks: ['exact-head', 'trusted-verifier'],
+        cleanup,
+      }),
+      agentRunner: {
+        run: vi.fn().mockRejectedValue(Object.assign(
+          new Error('semantic process did not close'),
+          { cleanupUnsafe: true as const },
+        )),
+      },
+      abort: new AbortController().signal,
+    });
+
+    expect(result.review).toMatchObject({
+      outcome: 'human',
+      reason: {
+        code: 'semantic-runner-failed',
+        detail: 'semantic process did not close',
+      },
+    });
+    expect(cleanup).not.toHaveBeenCalled();
   });
 
   it.each([

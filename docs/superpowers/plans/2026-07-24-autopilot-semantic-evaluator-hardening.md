@@ -130,7 +130,7 @@ a value distinct from `baseSha`. Rerun the two commands from Step 2.
 **Interfaces:**
 - Produces: `ImmutableMechanicalVerifier.verify(input): Promise<ImmutableMechanicalVerification>`.
 - Changes: `RepositoryCommandRunner` options include an explicit `env`.
-- Preserves: successful verifier output keeps the exact-head checkout alive for semantic review.
+- Produces: a bounded trusted complete diff after successful immutable verification.
 
 - [ ] **Step 1: Write failing trust-boundary tests**
 
@@ -187,6 +187,11 @@ Reject if any changed file has no owner in `KNOWN_LIVE_EVAL_PACKAGES`, even
 when another path is supported. Delete all package-manager/typecheck/test
 execution. Invoke the immutable verifier only after exact-head and total-path
 policy checks. Without it, clean up and return unscorable.
+
+After verification passes, capture the complete diff with NUL-delimited raw
+path discovery and with external/text-conversion diff drivers disabled. Reject
+raw whitespace/control-character paths without normalization and fail
+unscorable if the full diff exceeds its explicit byte bound.
 
 - [ ] **Step 4: Verify GREEN**
 
@@ -264,7 +269,9 @@ Rerun the focused command from Step 2.
 
 **Interfaces:**
 - Changes: `SemanticAgentRunnerInput` includes the exact resolved `model`.
-- Preserves: fixed read-only repository inspection tools.
+- Changes: semantic input contains the bounded trusted full diff rather than a
+  candidate checkout path.
+- Removes: all semantic file, shell, network, and extension tools.
 
 - [ ] **Step 1: Write failing safe-mode tests**
 
@@ -276,11 +283,14 @@ expect(args).toContain('--disable-slash-commands');
 expect(args).toContain('--strict-mcp-config');
 expect(args).toContain('{"mcpServers":{}}');
 expect(args).not.toContain('project');
+expect(args).toContain('--tools');
+expect(args[args.indexOf('--tools') + 1]).toBe('');
 ```
 
 Assert the prompt does not direct the model to load `review-pr`, and does
 contain an embedded checklist covering correctness, correlation, security,
-cleanup, and compatibility.
+cleanup, and compatibility. Assert the process uses its isolated HOME as cwd,
+receives the trusted prompt through stdin, and has no checkout/file/shell tools.
 
 - [ ] **Step 2: Run tests and confirm RED**
 
@@ -296,11 +306,12 @@ the candidate-controlled review skill.
 - [ ] **Step 3: Implement safe mode and trusted prompt**
 
 Replace `--setting-sources project` with the safe-mode flags and empty strict
-MCP config. Retain `dontAsk`, the allowlisted read/search/Git tools, and explicit
-write/network disallow rules. Select `--model` from the per-invocation input.
+MCP config. Retain `dontAsk`, disable every tool, and select `--model` from the
+per-invocation input. Run from the isolated HOME rather than the checkout.
 
-Replace the first prompt instruction with a fixed evaluator methodology that
-does not reference checkout instructions.
+Replace the first prompt instruction with a fixed evaluator methodology plus
+the trusted host-captured bounded full diff. Do not reference checkout
+instructions.
 
 - [ ] **Step 4: Verify GREEN**
 

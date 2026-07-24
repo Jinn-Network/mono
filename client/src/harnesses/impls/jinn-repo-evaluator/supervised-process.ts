@@ -8,6 +8,8 @@ const DEFAULT_TERMINATION_GRACE_MS = 2_000;
 const DEFAULT_REAP_TIMEOUT_MS = 2_000;
 
 export class SupervisedProcessUnreapedError extends Error {
+  readonly cleanupUnsafe = true;
+
   constructor(command: string) {
     super(`Process group did not close after SIGKILL: ${command}`);
     this.name = 'SupervisedProcessUnreapedError';
@@ -17,6 +19,8 @@ export class SupervisedProcessUnreapedError extends Error {
 export interface SupervisedProcessOptions {
   cwd?: string;
   env: NodeJS.ProcessEnv;
+  /** Optional stdin payload, used to keep large trusted prompts out of argv. */
+  input?: string;
   abort?: AbortSignal;
   maxOutputBytes: number;
   terminationGraceMs?: number;
@@ -55,7 +59,7 @@ export async function runSupervisedProcess(
     ...(options.cwd ? { cwd: options.cwd } : {}),
     env: options.env,
     detached: process.platform !== 'win32',
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
   };
   const child: ChildProcess = spawnFn(command, args, spawnOptions);
   const terminationGraceMs =
@@ -138,13 +142,15 @@ export async function runSupervisedProcess(
     child.stderr?.on('data', (chunk: Buffer | string) => {
       stderr = appendOutput(stderr, chunk);
     });
-    child.once('error', (error) => {
+    const onProcessError = (error: Error): void => {
       if (child.pid === undefined) {
         finish(undefined, error);
         return;
       }
       beginTermination(error);
-    });
+    };
+    child.once('error', onProcessError);
+    child.stdin?.once('error', onProcessError);
     child.once('close', (code, signalValue) => {
       if (stoppingError) {
         finish(undefined, stoppingError);
@@ -162,5 +168,12 @@ export async function runSupervisedProcess(
 
     options.abort?.addEventListener('abort', onAbort, { once: true });
     if (options.abort?.aborted) onAbort();
+    if (options.input !== undefined && !stoppingError) {
+      if (!child.stdin) {
+        beginTermination(new Error(`Process stdin is unavailable: ${command}`));
+      } else {
+        child.stdin.end(options.input);
+      }
+    }
   });
 }

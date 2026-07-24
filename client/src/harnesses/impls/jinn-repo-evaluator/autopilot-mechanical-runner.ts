@@ -16,6 +16,7 @@ import {
 } from './supervised-process.js';
 
 const MAX_BUFFER = 64 * 1024 * 1024;
+const MAX_REVIEW_DIFF_BYTES = 8 * 1024 * 1024;
 const LOG_LIMIT = 4000;
 const DEFAULT_MONO_REPO_URL = 'https://github.com/Jinn-Network/mono.git';
 
@@ -57,7 +58,10 @@ function prohibitedPath(path: string): boolean {
   if (
     path.length === 0
     || path.startsWith('/')
+    || path.trim() !== path
     || path.includes('\0')
+    || path.includes('\ufffd')
+    || /[\x00-\x1f\x7f]/u.test(path)
     || path.split('/').some((segment) => segment === '..' || segment === '.git')
   ) {
     return true;
@@ -237,12 +241,15 @@ export class ExactHeadMechanicalRunner implements AutopilotMechanicalRunner {
         repoDir,
         'diff',
         '--name-only',
+        '-z',
         `${context.reviewTarget.baseOid}...${context.reviewTarget.resultingHead}`,
       ]);
-      const changedFiles = diff.stdout
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
+      if (diff.stdout.length > 0 && !diff.stdout.endsWith('\0')) {
+        return await unscorable('malformed-path-list: expected NUL-delimited Git output');
+      }
+      const changedFiles = diff.stdout.length === 0
+        ? []
+        : diff.stdout.slice(0, -1).split('\0');
       const badPath = changedFiles.find(prohibitedPath);
       if (badPath) {
         return await unscorable(`prohibited-path in exact PR diff: ${badPath}`);
@@ -293,10 +300,29 @@ export class ExactHeadMechanicalRunner implements AutopilotMechanicalRunner {
         };
       }
 
+      const trustedDiff = await runCommand('git', [
+        '-C',
+        repoDir,
+        'diff',
+        '--no-ext-diff',
+        '--no-textconv',
+        '--binary',
+        '--full-index',
+        `${context.reviewTarget.baseOid}...${context.reviewTarget.resultingHead}`,
+        '--',
+      ]);
+      const reviewDiffBytes = Buffer.byteLength(trustedDiff.stdout);
+      if (reviewDiffBytes > MAX_REVIEW_DIFF_BYTES) {
+        return await unscorable(
+          `review-diff-too-large: ${reviewDiffBytes} bytes exceeds ${MAX_REVIEW_DIFF_BYTES}`,
+        );
+      }
+
       return {
         kind: 'passed',
         checkoutDir: repoDir,
         changedFiles,
+        reviewDiff: trustedDiff.stdout,
         checks: [
           'repository',
           'exact-head',

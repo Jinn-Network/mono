@@ -29,18 +29,27 @@ its absence, a mechanically eligible code change is unscorable. This is
 intentional: repository identity and path checks alone cannot justify a
 mechanical pass.
 
+After immutable verification passes, the trusted host captures a bounded
+complete `base...head` diff with external diff drivers and text-conversion
+drivers disabled. Git path discovery is NUL-delimited and validates the exact
+raw paths before package policy checks; paths are never trimmed or normalized.
+
 ## Semantic trust boundary
 
 The Claude semantic adapter runs from an isolated HOME with a credential
-allowlist and the repository checkout as read-only review input. It enables
-Claude safe mode, disables slash-command skills, supplies an empty strict MCP
-configuration, and does not load project settings. Its fixed tool policy permits
-file reads, search, and read-only Git inspection only.
+allowlist and an empty isolated working directory. It enables Claude safe mode,
+disables slash-command skills, supplies an empty strict MCP configuration, does
+not load project settings, and disables every tool. The bounded trusted
+`base...head` diff and strict evaluation context are supplied through stdin,
+never through an argv path or candidate checkout.
 
 The review prompt embeds the trusted review methodology. It does not ask the
 agent to discover or execute a `review-pr` skill from the candidate checkout.
 Candidate `CLAUDE.md`, settings, hooks, agents, skills, plugins, MCP servers, and
-commands therefore cannot become evaluator control-plane input.
+commands therefore cannot become evaluator control-plane input. Candidate
+prompt injection cannot read a host path, follow a checkout symlink, or turn a
+Git inspection command into a write because the semantic process has no file or
+shell tools and never receives the checkout as its working directory.
 
 ## Per-SolverNet runtime resolution
 
@@ -76,7 +85,8 @@ SIGTERM to the group, waits a bounded grace period, escalates to SIGKILL, and
 waits a second bounded period for the child close event. Cleanup occurs only
 after the child is reaped. Failure to reap is an infrastructure failure and
 must not become a graded result or race deletion of a live process's HOME or
-checkout.
+checkout. Cleanup-unsafety is propagated through the semantic-runner port so
+orchestration preserves both resources after an unreaped timeout.
 
 ## Verification
 

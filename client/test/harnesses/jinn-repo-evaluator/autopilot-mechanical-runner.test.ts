@@ -96,6 +96,7 @@ function context(): AutopilotEvaluationContext {
 function commandRunner(overrides: {
   head?: string;
   changedFiles?: string;
+  reviewDiff?: string;
   reject?: (args: string[]) => unknown;
 } = {}): RepositoryCommandRunner & ReturnType<typeof vi.fn> {
   return vi.fn(async (_command: string, args: string[]) => {
@@ -107,7 +108,14 @@ function commandRunner(overrides: {
     if (args.includes('--name-only')) {
       return {
         stdout: overrides.changedFiles
-          ?? 'packages/sdk/src/autopilot-session.ts\nclient/src/harnesses/engine/engine.ts\n',
+          ?? 'packages/sdk/src/autopilot-session.ts\0client/src/harnesses/engine/engine.ts\0',
+        stderr: '',
+      };
+    }
+    if (args.includes('--binary')) {
+      return {
+        stdout: overrides.reviewDiff
+          ?? 'diff --git a/client/src/a.ts b/client/src/a.ts\n+trusted change\n',
         stderr: '',
       };
     }
@@ -148,6 +156,7 @@ describe('ExactHeadMechanicalRunner', () => {
         'packages/sdk/src/autopilot-session.ts',
         'client/src/harnesses/engine/engine.ts',
       ],
+      reviewDiff: 'diff --git a/client/src/a.ts b/client/src/a.ts\n+trusted change\n',
       checks: ['repository', 'exact-head', 'policy', 'trusted-verifier'],
     });
     expect(command).toHaveBeenCalledWith('git', [
@@ -176,7 +185,19 @@ describe('ExactHeadMechanicalRunner', () => {
       '/tmp/eval-root/repo',
       'diff',
       '--name-only',
+      '-z',
       `${'3'.repeat(40)}...${'4'.repeat(40)}`,
+    ], expect.objectContaining({ env: expect.any(Object) }));
+    expect(command).toHaveBeenCalledWith('git', [
+      '-C',
+      '/tmp/eval-root/repo',
+      'diff',
+      '--no-ext-diff',
+      '--no-textconv',
+      '--binary',
+      '--full-index',
+      `${'3'.repeat(40)}...${'4'.repeat(40)}`,
+      '--',
     ], expect.objectContaining({ env: expect.any(Object) }));
     expect(command.mock.calls.some(([commandName]) =>
       commandName === 'yarn' || commandName === 'corepack'
@@ -215,7 +236,7 @@ describe('ExactHeadMechanicalRunner', () => {
 
   it('marks a non-empty diff outside every supported package unscorable', async () => {
     const command = commandRunner({
-      changedFiles: 'contracts/src/Autopilot.sol\n',
+      changedFiles: 'contracts/src/Autopilot.sol\0',
     });
     const result = await runner(command).run(context());
     expect(result).toEqual({
@@ -227,7 +248,7 @@ describe('ExactHeadMechanicalRunner', () => {
 
   it('rejects unsupported paths hidden inside an otherwise supported mixed diff', async () => {
     const command = commandRunner({
-      changedFiles: 'client/src/main.ts\n.claude/settings.json\n',
+      changedFiles: 'client/src/main.ts\0.claude/settings.json\0',
     });
     const immutableVerifier = passingVerifier();
     const result = await runner(command, immutableVerifier).run(context());
@@ -241,7 +262,7 @@ describe('ExactHeadMechanicalRunner', () => {
 
   it('fails closed when no immutable verifier is configured', async () => {
     const command = commandRunner({
-      changedFiles: 'client/src/harnesses/engine/engine.ts\n',
+      changedFiles: 'client/src/harnesses/engine/engine.ts\0',
     });
     const exactHeadRunner = new ExactHeadMechanicalRunner({
       command,
@@ -285,7 +306,7 @@ describe('ExactHeadMechanicalRunner', () => {
 
   it('returns a deterministic immutable-verifier failure without executing candidate tests', async () => {
     const command = commandRunner({
-      changedFiles: 'client/src/harnesses/engine/engine.ts\n',
+      changedFiles: 'client/src/harnesses/engine/engine.ts\0',
     });
     const result = await runner(command, {
       verify: vi.fn().mockResolvedValue({
@@ -318,12 +339,41 @@ describe('ExactHeadMechanicalRunner', () => {
   });
 
   it('rejects prohibited traversal paths from the full diff before package commands', async () => {
-    const command = commandRunner({ changedFiles: '../outside.ts\n' });
+    const command = commandRunner({ changedFiles: '../outside.ts\0' });
     const result = await runner(command).run(context());
     expect(result).toMatchObject({
       kind: 'unscorable',
       detail: expect.stringContaining('prohibited-path'),
     });
     expect(command.mock.calls.some(([, args]) => args[0] === 'typecheck')).toBe(false);
+  });
+
+  it.each([
+    ['leading whitespace', ' client/src/main.ts\0'],
+    ['control character', 'client/src/main.ts\ninjected.ts\0'],
+  ])('rejects raw Git paths containing %s without normalization', async (_name, changedFiles) => {
+    const immutableVerifier = passingVerifier();
+    const result = await runner(
+      commandRunner({ changedFiles }),
+      immutableVerifier,
+    ).run(context());
+
+    expect(result).toMatchObject({
+      kind: 'unscorable',
+      detail: expect.stringContaining('prohibited-path'),
+    });
+    expect(immutableVerifier.verify).not.toHaveBeenCalled();
+  });
+
+  it('rejects an oversized trusted full diff before semantic review', async () => {
+    const result = await runner(commandRunner({
+      changedFiles: 'client/src/main.ts\0',
+      reviewDiff: 'x'.repeat(8 * 1024 * 1024 + 1),
+    })).run(context());
+
+    expect(result).toMatchObject({
+      kind: 'unscorable',
+      detail: expect.stringContaining('review-diff-too-large'),
+    });
   });
 });

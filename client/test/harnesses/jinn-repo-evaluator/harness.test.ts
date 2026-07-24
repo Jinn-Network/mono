@@ -409,6 +409,7 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
         kind: 'passed',
         checkoutDir: '/tmp/exact-head',
         changedFiles: ['client/src/a.ts'],
+        reviewDiff: 'diff --git a/client/src/a.ts b/client/src/a.ts\n+fixed\n',
         checks: ['exact-head', 'typecheck', 'tests'],
         cleanup,
       }),
@@ -473,9 +474,9 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
       solverNet: firstSolverNet,
     });
     expect(firstAgentRunner.run).toHaveBeenCalledWith(expect.objectContaining({
-      cwd: '/tmp/exact-head',
       model: 'claude-review-a',
     }));
+    expect(firstAgentRunner.run.mock.calls[0]![0]).not.toHaveProperty('cwd');
     expect(result.informational).toMatchObject({
       semanticRuntime: {
         provider: 'anthropic',
