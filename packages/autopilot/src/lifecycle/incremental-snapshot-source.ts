@@ -104,6 +104,7 @@ function polledIssues(
     return {
       number: issue.number,
       title: issue.title,
+      body: issue.body,
       labels: [...issue.labels],
       shape: entry?.issueType ?? null,
       blockedOn: entry?.blockedOn ?? null,

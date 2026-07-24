@@ -148,6 +148,7 @@ export interface SolverNetRegistryLike {
     solverType: string;
     harness: string;
     model?: string;
+    provider?: import('../provider-ref.js').ProviderRef;
     runtimePlugins: RuntimePlugin[];
   } | undefined;
 }
@@ -458,6 +459,9 @@ export interface TaskEngineOptions {
 
 const TASK_CREATION_TIMESTAMP_LOOKUP_ATTEMPTS = 3;
 
+/** Min interval between transient-RPC tick_error emits per requestId (#934). */
+export const TRANSIENT_TICK_ERROR_HEARTBEAT_MS = 5 * 60_000;
+
 // ── Recovery report ───────────────────────────────────────────────────────────
 
 /** Per-task outcome from a recovery pass. */
@@ -545,6 +549,9 @@ export class TaskEngine {
   // out of RUNNING) reuses this instead of re-querying the corpus and
   // re-emitting the corpus_knowledge event. Cleared after successful pack.
   private readonly consumedRefsByRequest = new Map<string, string | null>();
+
+  /** requestId → epoch ms of last transient tick_error emit (#934) */
+  private readonly lastTransientTickErrorAt = new Map<string, number>();
 
   private readonly processingRequestIds = new Set<string>();
 
@@ -908,6 +915,9 @@ export class TaskEngine {
         // Terminal — nothing to do.
         break;
     }
+
+    // Successful progress: allow a future outage to emit a fresh first tick_error (#934).
+    this.lastTransientTickErrorAt.delete(requestId);
   }
 
   // ── Transition stubs ────────────────────────────────────────────────────────
@@ -1507,6 +1517,9 @@ export class TaskEngine {
               name: solverNet.name,
               solverType: solverNet.solverType,
               ...(solverNet.model ? { model: solverNet.model } : {}),
+              // Provider route travels alongside model (issue #1243) so the
+              // Hermes adapter can route first-class instead of inferring.
+              ...(solverNet.provider !== undefined ? { provider: solverNet.provider } : {}),
             }
           : undefined,
         runtimePlugins,
@@ -2581,11 +2594,13 @@ export class TaskEngine {
    *   in the L2 fallback chain failed at once) on a task whose delivery window
    *   is still open: leave the row in its current in-flight state so the next
    *   tick re-drives it once the RPCs recover, and emit a `tick_error` (warn)
-   *   event instead of inflating the FAILED counter. Without this the daemon
-   *   stamped the row FAILED, dropping it from `getInFlight()` permanently, so
-   *   L2 work went silent until a manual restart (#912). Past-window transient
-   *   errors still terminalize to avoid churning on work that can no longer
-   *   settle.
+   *   on first occurrence plus every `TRANSIENT_TICK_ERROR_HEARTBEAT_MS`
+   *   thereafter for that requestId (#934) — not once per failing tick —
+   *   instead of inflating the FAILED counter. Without the leave-in-flight
+   *   path the daemon stamped the row FAILED, dropping it from
+   *   `getInFlight()` permanently, so L2 work went silent until a manual
+   *   restart (#912). Past-window transient errors still terminalize to avoid
+   *   churning on work that can no longer settle.
    * - Everything else: existing markFailed behaviour. When invoked from
    *   recovery, `contextLabel === 'recovery'` so the failure_reason
    *   carries the `recovery:` prefix the original code path used.
@@ -2611,6 +2626,7 @@ export class TaskEngine {
         outcome: 'ok',
         detail,
       }, 'harness-engine');
+      this.lastTransientTickErrorAt.delete(task.requestId);
       return 'race_lost';
     }
     const reason = err instanceof Error ? err.message : String(err);
@@ -2628,19 +2644,28 @@ export class TaskEngine {
       task.windowEndTs > Date.now()
       && (recoverablePrerequisite || isRecoverableTransactionError(err))
     ) {
-      emitEvent(this.store, {
-        kind: 'tick_error',
-        requestId: task.requestId,
-        solverType: task.solverType ?? undefined,
-        outcome: 'warn',
-        detail:
-          `${recoverablePrerequisite ? 'recoverable prerequisite failure' : 'transient RPC failure'} `
-          + `in ${contextLabel}; left ${task.state} for retry: ${reason}`,
-      }, 'harness-engine');
+      const now = Date.now();
+      const last = this.lastTransientTickErrorAt.get(task.requestId);
+      if (
+        last === undefined
+        || now - last >= TRANSIENT_TICK_ERROR_HEARTBEAT_MS
+      ) {
+        emitEvent(this.store, {
+          kind: 'tick_error',
+          requestId: task.requestId,
+          solverType: task.solverType ?? undefined,
+          outcome: 'warn',
+          detail:
+            `${recoverablePrerequisite ? 'recoverable prerequisite failure' : 'transient RPC failure'} `
+            + `in ${contextLabel}; left ${task.state} for retry: ${reason}`,
+        }, 'harness-engine');
+        this.lastTransientTickErrorAt.set(task.requestId, now);
+      }
       return 'transient';
     }
     const stamped = contextLabel === 'recovery' ? `recovery: ${reason}` : reason;
     this.persistence.markFailed(task.requestId, stamped);
+    this.lastTransientTickErrorAt.delete(task.requestId);
     return 'failed';
   }
 

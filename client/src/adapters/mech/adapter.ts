@@ -296,6 +296,13 @@ export class MechAdapter implements ExecutionAdapter {
     return this.config.evaluatorEnabled !== false;
   }
 
+  /** Maps config pin → core `FetchFromIpfsOptions` (omit when unset = production ipfs.io). */
+  private ipfsFetchOpts(): { fallbackGatewayBase?: string | false } | undefined {
+    const fallback = this.config.ipfsFallbackGatewayUrl;
+    if (fallback === undefined) return undefined;
+    return { fallbackGatewayBase: fallback };
+  }
+
   /**
    * Enable the evaluator role at runtime after a live SolverNet join (a join
    * never removes a role, so turning it back off is never needed). #547.
@@ -837,7 +844,11 @@ export class MechAdapter implements ExecutionAdapter {
     );
     const digest = taskCidDigest.startsWith('0x') ? taskCidDigest.slice(2) : taskCidDigest;
     const taskCid = `f01551220${digest}`;
-    const signed = await fetchSignedTaskFromIpfs(this.config.ipfsGatewayUrl, taskCid);
+    const signed = await fetchSignedTaskFromIpfs(
+      this.config.ipfsGatewayUrl,
+      taskCid,
+      this.ipfsFetchOpts(),
+    );
     const task = parseTask({ signedTask: signed });
     const announcement: TaskAnnouncement = {
       taskId,
@@ -901,7 +912,11 @@ export class MechAdapter implements ExecutionAdapter {
       ? params.taskCidDigest.slice(2)
       : params.taskCidDigest;
     const taskCid = `f01551220${digest}`;
-    const signed = await fetchSignedTaskFromIpfs(this.config.ipfsGatewayUrl, taskCid);
+    const signed = await fetchSignedTaskFromIpfs(
+      this.config.ipfsGatewayUrl,
+      taskCid,
+      this.ipfsFetchOpts(),
+    );
     const task = parseTask({ signedTask: signed });
     const announcement: TaskAnnouncement = {
       taskId: params.taskId,
@@ -1124,6 +1139,7 @@ export class MechAdapter implements ExecutionAdapter {
     const resultPayload = await fetchFromIpfs(
       this.config.ipfsGatewayUrl,
       solutionEnvelopeCid,
+      this.ipfsFetchOpts(),
     ) as Record<string, unknown>;
     let creationProvenance = taskCreationProvenanceFromSolutionEnvelope(resultPayload);
     if (!creationProvenance && typeof resultPayload.data === 'string') {
@@ -1455,6 +1471,7 @@ export class MechAdapter implements ExecutionAdapter {
     const rawEnvelope = await fetchSignedEnvelopeFromIpfs(
       this.config.ipfsGatewayUrl,
       envelopeCid,
+      this.ipfsFetchOpts(),
     );
     const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
     const rawSigned = rawEnvelope as Record<string, unknown>;
@@ -1675,7 +1692,11 @@ export class MechAdapter implements ExecutionAdapter {
             // (c) Yield the delivery result.
             try {
               const deliveryDigest = deliveryDataHex.startsWith('0x') ? deliveryDataHex.slice(2) : deliveryDataHex;
-              const resultPayload = await fetchFromIpfs(this.config.ipfsGatewayUrl, `f01551220${deliveryDigest}`) as Record<string, unknown>;
+              const resultPayload = await fetchFromIpfs(
+                this.config.ipfsGatewayUrl,
+                `f01551220${deliveryDigest}`,
+                this.ipfsFetchOpts(),
+              ) as Record<string, unknown>;
 
               const restorationResult: TaskResult = {
                 data: (resultPayload.data as string) ?? JSON.stringify(resultPayload),

@@ -6,12 +6,19 @@ import {
 import type { AutopilotRuntime } from '../autopilot-runtime.js';
 
 /** The nine work-shape Issue Types (DR-2026-05-20-b). */
-export type IssueShape =
-  | 'feat' | 'fix' | 'refactor' | 'spike'
-  | 'chore' | 'docs' | 'test' | 'incident' | 'design';
+export const ISSUE_SHAPES = [
+  'feat', 'fix', 'refactor', 'spike',
+  'chore', 'docs', 'test', 'incident', 'design',
+] as const;
+export type IssueShape = (typeof ISSUE_SHAPES)[number];
+/** Runtime validation set — derive parsers from `ISSUE_SHAPES`, never re-list literals. */
+export const ISSUE_SHAPE_SET: ReadonlySet<IssueShape> = new Set(ISSUE_SHAPES);
 
 export type BlockedOn = 'Nothing' | 'Human' | 'Another issue';
-export type Effort = 'Low' | 'Medium' | 'High' | 'XHigh' | 'Max';
+export const EFFORTS = ['Low', 'Medium', 'High', 'XHigh', 'Max'] as const;
+export type Effort = (typeof EFFORTS)[number];
+/** Runtime validation set — derive parsers from `EFFORTS`, never re-list literals. */
+export const EFFORT_SET: ReadonlySet<Effort> = new Set(EFFORTS);
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3' | 'P4';
 // 'Human' is a parked lane: the dispatcher promotes escalated (Blocked on:
 // Human) sessions into it so they leave the active "In Progress" column and
@@ -73,12 +80,9 @@ export interface PolledIssue {
 /** An issue that passed the ready-filter — safe to dispatch. */
 export interface ReadyIssue extends PolledIssue {
   shape: IssueShape;          // non-null: ready issues are triage-complete (children default to fix)
-  priority: Priority;         // non-null: needed for ordering (children may resolve from labels)
-  /**
-   * Project item id when on the board. Machine children may be off-board
-   * (`null`) and still ready (Stage 2).
-   */
-  projectItemId: string | null;
+  priority: Priority;         // non-null: needed for ordering
+  /** Project item id — non-null for ready issues (machine children included). */
+  projectItemId: string;
   /**
    * Git ref to branch the worktree off and target the PR at. Set only when the
    * issue was admitted despite `Blocked on: Another issue` because its single

@@ -24,14 +24,23 @@ export class RejectPublishError extends Error {
   }
 }
 
-/** Findings whose policy disposition is reject-publish. */
+/**
+ * Findings whose policy disposition is reject-publish.
+ *
+ * A5 `drop-key` findings are structural removals, not catastrophic content:
+ * the key-policy detector has already removed the entire attribute before
+ * this guard runs. Only content-level A5 findings (such as an env-block
+ * embedded in tool output) must abort the publish.
+ */
 export function rejectPublishFindings(
   findings: Finding[] | undefined,
   policy: PolicyTable = DEFAULT_POLICY,
 ): Finding[] {
   if (!findings?.length) return [];
   return findings.filter(
-    (f) => resolveDisposition(f.class, f.confidence, policy) === 'reject-publish',
+    (f) =>
+      !f.evidence.includes('drop-key') &&
+      resolveDisposition(f.class, f.confidence, policy) === 'reject-publish',
   );
 }
 

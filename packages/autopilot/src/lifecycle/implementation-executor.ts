@@ -46,7 +46,7 @@ export interface ImplementationIssue {
   /** Present when this issue is a Stage 2 machine child targeting a parent PR. */
   readonly child?: {
     readonly parentPr: number;
-    readonly kind: 'review-finding' | 'reconcile';
+    readonly kind: 'review-finding' | 'reconcile' | 'ci-failure';
   };
 }
 
@@ -292,13 +292,14 @@ function canonicalScenario(
   worktreePath: string,
 ): string {
   if (issue.child !== undefined) {
-    const skill = issue.child.kind === 'reconcile' ? 'reconcile' : 'fix-child';
+    const skill = issue.child.kind === 'reconcile'
+      ? 'reconcile'
+      : 'fix-child';
+    const phase = issue.child.kind === 'reconcile' ? 'reconcile' : 'fix';
     return [
       `Use the ${skill} skill on child issue #${issue.number} for parent PR #${prNumber}.`,
       `Issue: #${issue.number} — ${issue.title}`,
-      `The v2 lifecycle already claimed parent branch \`${branch}\` (phase ${
-        issue.child.kind === 'reconcile' ? 'reconcile' : 'fix'
-      }) and created the detached worktree at \`${worktreePath}\`.`,
+      `The v2 lifecycle already claimed parent branch \`${branch}\` (phase ${phase}) and created the detached worktree at \`${worktreePath}\`.`,
       'Do not open a new PR. Work lands as append-only commits on the parent branch.',
       'Finish with `autopilot session child-complete` or park with `autopilot session human --reason-file <path>`.',
     ].join('\n');
@@ -320,6 +321,7 @@ export function makeCanonicalImplementationSpawner(
     const skill = input.issue.child?.kind === 'reconcile'
       ? 'reconcile'
       : input.issue.child?.kind === 'review-finding'
+        || input.issue.child?.kind === 'ci-failure'
         ? 'fix-child'
         : 'implement-issue';
     return spawnCoordinatorSession(
@@ -538,7 +540,7 @@ export async function executeImplementationAction(
 
 async function executeChildImplementationAction(
   issue: ImplementationIssue & {
-    readonly child: { readonly parentPr: number; readonly kind: 'review-finding' | 'reconcile' };
+    readonly child: { readonly parentPr: number; readonly kind: 'review-finding' | 'reconcile' | 'ci-failure' };
   },
   deps: ImplementationExecutorDeps,
 ): Promise<ImplementationExecutionResult> {

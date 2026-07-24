@@ -28,7 +28,6 @@ import {
 } from '../../solver-types/_swe-rebench-v2-validated-pool.js';
 import { parseMintedEnvironmentBindingV1 } from '../../solver-types/_swe-rebench-v2-minted-pool.js';
 import type { MintTasksInput } from '../../solver-types/_swe-rebench-v2-mint-cli.js';
-import { defaultStateDir as sweRebenchV2DefaultStateDir } from '../../solver-types/swe-rebench-v2.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -555,7 +554,7 @@ Output flags:
         fail(ctx, 'solver-nets validate-pool-report currently supports only `swe-rebench-v2`');
         return;
       }
-      const stateDir = ctx.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? sweRebenchV2DefaultStateDir();
+      const stateDir = loadConfig(configPath).sweRebenchV2StateDir;
       const path = join(stateDir, 'validated-pool.json');
       let raw: unknown;
       try {
@@ -574,7 +573,12 @@ Output flags:
       const evalSemanticsVersion = (raw as { evalSemanticsVersion?: string }).evalSemanticsVersion ?? 'unknown';
       const freshness = await describeSweRebenchV2PoolFreshness({ stateDir });
       const highestYieldBlocker = summary.byReason.find((b) => b.reason !== 'gold-patch-resolves')?.reason ?? null;
-      const weakSuite = summarizeWeakSuite(raw);
+      const { PoolCacheStore } = await import('../../solver-types/_swe-rebench-v2-pool-cache.js');
+      const cachedPool = await new PoolCacheStore({ stateDir }).read();
+      const poolInstanceIds = cachedPool && cachedPool.tasks.length > 0
+        ? new Set(cachedPool.tasks.map((t) => t.instance_id))
+        : undefined;
+      const weakSuite = summarizeWeakSuite(raw, poolInstanceIds);
       const value = {
         verb: 'solver-nets validate-pool-report',
         solverNet: 'swe-rebench-v2',
@@ -609,8 +613,12 @@ Output flags:
         // separately as unchecked, never folded into the rate.
         const pct = s.weakSuite.rate !== null ? (s.weakSuite.rate * 100).toFixed(1) : 'n/a';
         lines.push(`weak-suite rate: ${s.weakSuite.flagged}/${s.weakSuite.checked} checked (${pct}%)`);
-        if (s.weakSuite.unchecked > 0) {
-          lines.push(`  ${s.weakSuite.unchecked} scorable entr${s.weakSuite.unchecked === 1 ? 'y' : 'ies'} unchecked — run \`validate-pool --recheck-discrimination\``);
+        const uncheckedTotal = s.weakSuite.unchecked.backlog + s.weakSuite.unchecked.orphaned;
+        if (uncheckedTotal > 0) {
+          lines.push(`  ${uncheckedTotal} scorable entr${uncheckedTotal === 1 ? 'y' : 'ies'} unchecked — backlog=${s.weakSuite.unchecked.backlog}  orphaned=${s.weakSuite.unchecked.orphaned}`);
+          if (s.weakSuite.unchecked.backlog > 0) {
+            lines.push(`  run \`validate-pool --recheck-discrimination\` for the backlog`);
+          }
         }
         // #806: gold-patch-not-resolved entries whose PASS_TO_PASS tests broke
         // (p2p_broke > 0) are usually an environment/setup problem, not a
@@ -677,7 +685,9 @@ Output flags:
         poolTasks = poolTasks.filter((t) => wanted.has(t.instance_id));
         process.stderr.write(`[validate-pool] restricted to ${poolTasks.length} of ${wanted.size} requested instance ids\n`);
       }
-      const store = getSweRebenchV2ValidatedPoolStore();
+      const store = getSweRebenchV2ValidatedPoolStore(
+        loadConfig(configPath).sweRebenchV2StateDir,
+      );
 
       if (Boolean(parsed.values['recheck-discrimination'])) {
         const result = await recheckDiscrimination({
@@ -695,8 +705,12 @@ Output flags:
           human,
           json,
           (v) => {
-            const s = v as { checked: number; flagged: string[]; skipped: number };
-            return `recheck-discrimination: checked=${s.checked}  flagged=${s.flagged.length}  skipped=${s.skipped}`;
+            const s = v as { checked: number; flagged: string[]; skipped: { alreadyVerdicted: number; limitExceeded: number; orphanedPoolTask: number; evalError: number } };
+            const sk = s.skipped;
+            return [
+              `recheck-discrimination: checked=${s.checked}  flagged=${s.flagged.length}`,
+              `  skipped: alreadyVerdicted=${sk.alreadyVerdicted}  limitExceeded=${sk.limitExceeded}  orphanedPoolTask=${sk.orphanedPoolTask}  evalError=${sk.evalError}`,
+            ].join('\n');
           },
         );
         return;
@@ -856,7 +870,7 @@ Output flags:
         return;
       }
       if (net.solverType === 'swe-rebench-v2.v1') {
-        const stateDir = process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? sweRebenchV2DefaultStateDir();
+        const stateDir = loadConfig(configPath).sweRebenchV2StateDir;
         const freshness = await describeSweRebenchV2PoolFreshness({ stateDir });
         const sanitized = sanitizeLegacySolverNet(net);
         emit(
@@ -1008,7 +1022,7 @@ Output flags:
       }
 
       const loaded = loadConfig(configPath);
-      const stateDir = sweRebenchV2DefaultStateDir();
+      const stateDir = loaded.sweRebenchV2StateDir;
       const raw = JSON.parse(readFileSync(resolvePath(candidatesPath), 'utf8')) as unknown;
       const noPost = Boolean(parsed.values['no-post']);
       const candidates = parseMintTaskCandidates(raw, noPost);

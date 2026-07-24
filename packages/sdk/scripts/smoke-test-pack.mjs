@@ -44,6 +44,11 @@ try {
         PredictionV1TaskSchema,
         buildSolutionOutput,
       } from '@jinn-network/sdk/solvernets/prediction-v1';
+      import {
+        validateBenchmarkRunV1,
+        hashBenchmarkRunV1,
+        computeRunHash,
+      } from '@jinn-network/sdk/benchmarking';
 
       if (typeof SkippableError !== 'function') throw new Error('missing root export');
       if (REQUIRES_LIVE_DAEMON_READINESS?.reason !== 'requires live daemon') throw new Error('missing harness export');
@@ -51,6 +56,9 @@ try {
       if (typeof getSolverNetContract !== 'function') throw new Error('missing solvernets export');
       if (typeof PredictionV1TaskSchema?.parse !== 'function') throw new Error('missing prediction-v1 schema export');
       if (typeof buildSolutionOutput !== 'function') throw new Error('missing prediction-v1 builder export');
+      if (typeof validateBenchmarkRunV1 !== 'function') throw new Error('missing benchmarking validate export');
+      if (typeof hashBenchmarkRunV1 !== 'function') throw new Error('missing benchmarking hash export');
+      if (computeRunHash !== hashBenchmarkRunV1) throw new Error('computeRunHash must alias hashBenchmarkRunV1');
     `,
   );
   run('node', ['smoke.mjs']);

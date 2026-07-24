@@ -417,8 +417,10 @@ Downstream components may rely on the following invariants.
 
 26. **C1 — Local capacity:** every process enforces only its own implementation,
     review, and merge-prep caps.
-27. **C2 — Shared backpressure:** the GitHub-visible queue may suppress new
-    implementation, but no global scheduler or license pool exists.
+27. **C2 — Shared backpressure:** the GitHub-visible queue may suppress *fresh*
+    implementation, but machine children (`review-finding` / `reconcile` /
+    `ci-failure`) remain claimable because they drain that queue. No global
+    scheduler or license pool exists.
 28. **H1 — Global runtime:** when Hermes is configured, it remains the selected
     process-wide runtime for implementation, review, merge-prep, and root
     stages.
@@ -939,7 +941,7 @@ boundary.
 | Inputs and outputs | Inputs: eligible candidates, local active children, per-phase caps, GitHub backlog, rate-limit health. Output: ordered claim attempts or skips with reasons. |
 | Durable source of truth | GitHub backlog for shared pressure; configuration for local caps. |
 | Local versus shared | Capacity counters, ordering, and resource measurements are local. Backlog and rate limits are shared observations. |
-| Authority and prohibitions | May defer or attempt a claim. It cannot reserve global capacity or suppress another process. |
+| Authority and prohibitions | May defer or attempt a claim. It cannot reserve global capacity or suppress another process. Open-pipeline backpressure suppresses only fresh implementation candidates; machine children still claim under local phase remaining. |
 | Idempotency | Re-evaluation may choose again; only the claim transition has external effect. |
 | Concurrent behavior | Runners schedule independently and may race. Losing a claim immediately returns local capacity. |
 | Failure and recovery | Scheduler crash loses only local choices. Restart derives GitHub work and local children again. |

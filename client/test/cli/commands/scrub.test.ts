@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createScrubCommand } from '../../src/cli/commands/scrub.js';
+import { createScrubCommand } from '../../../src/cli/commands/scrub.js';
 
 describe('jinn scrub bench (#1968)', () => {
   it('emits metrics-only JSON with zero corruption failures', async () => {

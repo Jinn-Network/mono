@@ -47,6 +47,10 @@ import {
 } from './merge-executor.js';
 import { makeProductionMergeActionPort } from './merge-executor-production.js';
 import {
+  executeProductionFileCiFailureChild,
+  executeProductionRerunFailedChecks,
+} from './ci-rerun-production.js';
+import {
   makeProductionReconciliationWriter,
   type ReconciliationProjectItemNode,
   type ReconciliationPullRequestNode,
@@ -112,6 +116,7 @@ export interface ProductionActiveRuntimeOptions {
    * real `setTimeout`-based sleep.
    */
   readonly sleep?: (ms: number) => Promise<void>;
+  readonly newWorkPaused?: () => boolean;
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -333,6 +338,9 @@ export function makeProductionActiveRuntime(
       alive,
     ),
     preflight: makeProductionCapabilityPreflight(options),
+    ...(options.newWorkPaused === undefined
+      ? {}
+      : { newWorkPaused: options.newWorkPaused }),
     handlers: {
       implementation: (action, credentials) => {
         const port = makeProductionImplementationActionPort({
@@ -460,6 +468,58 @@ export function makeProductionActiveRuntime(
             ? { reason: result.reason }
             : { detail: `child:${result.childNumber}` }),
         };
+      },
+
+      rerunFailedChecks: async (action, credentials) => {
+        const selection = selectCredential(credentials, { phase: 'merge' });
+        if (selection.status !== 'selected') {
+          return { status: 'skipped', reason: 'credential-unavailable' };
+        }
+        return executeProductionRerunFailedChecks(
+          { prNumber: action.prNumber, head: action.head },
+          {
+            readSnapshot: options.readSnapshot,
+            repositoryPath: options.repositoryPath,
+            runner,
+            environment: ambient,
+          },
+          selection.credential,
+        );
+      },
+
+      fileCiFailureChild: async (action, credentials, cycleSnapshot) => {
+        const selection = selectCredential(credentials, { phase: 'merge' });
+        if (selection.status !== 'selected') {
+          return { status: 'skipped', reason: 'credential-unavailable' };
+        }
+        const result = await executeProductionFileCiFailureChild(
+          { prNumber: action.prNumber, head: action.head },
+          {
+            readSnapshot: options.readSnapshot,
+            repositoryPath: options.repositoryPath,
+            runner,
+            environment: ambient,
+          },
+          selection.credential,
+        );
+        if (result.status === 'runaway-hold') {
+          await escalateReview({
+            candidate: {
+              issueNumber: action.issueNumber,
+              number: action.prNumber,
+              head: action.head,
+            },
+            reason: {
+              phase: 'merge-ready',
+              code: 'runaway-child',
+              detail:
+                `Runaway child guard: ${result.detail ?? 'unknown'} prior ci-failure children `
+                + `on PR #${action.prNumber}; parking for Human.`,
+            },
+          }, credentials, cycleSnapshot);
+          return { status: 'human', detail: 'runaway-child-hold' };
+        }
+        return result;
       },
     },
   });

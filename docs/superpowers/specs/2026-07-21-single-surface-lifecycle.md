@@ -65,9 +65,11 @@ Project field for lifecycle state, and no machine path ever writes one.**
   Status from derived facts on a relaxed cadence. Drift is cosmetic and
   self-corrects; nothing consumes the painted value. The painter also archives
   stale Done items (relocating the board-archive sweep).
-- **Machine-created work never touches the board.** Child issues (§5) are born
-  triaged via labels/body and are eligible without board membership. The
-  painter may add them for visibility.
+- **Machine-created work uses the same Project triage surface.** Child issues
+  (§5) are added to the board at filing with Blocked on / Effort / Priority set
+  via the production port. Kind labels (`review-finding`, `reconcile`,
+  `ci-failure`) remain flat tags. The painter may still repaint Status for
+  visibility.
 
 ## 3. States
 
@@ -81,6 +83,7 @@ Each state is a predicate, never a stored value. HUMAN overrides everything.
 | DELIVERED | non-draft ∧ `engine:review` ∧ completion marker ∧ no verdict for head |
 | IN REVIEW | review ref `active` for exact head, reviewer ≠ author |
 | BLOCKED-BY-CHILD | open child issue targeting the PR ∨ `REQUEST_CHANGES` on current head |
+| CI-BLOCKED | non-draft ∧ terminal approval for head ∧ CI not green ∧ no human hold ∧ no open child |
 | MERGE-READY | non-draft ∧ terminal approval for head ∧ CI green ∧ clean vs base ∧ no open children |
 | DONE | PR merged (issue auto-closes via `Closes #N`; zero writes) |
 | HUMAN (overlay) | hold label + structured marker comment |
@@ -105,6 +108,11 @@ write to verify, race on, or reconcile.
 | BLOCKED-BY-CHILD → DELIVERED | child session | fix commits land on parent branch (head moves → head-bound RC stales; child closes) |
 | gate: behind+clean → MERGE-READY | deterministic gate | update-branch API + approval carry-over (§6.1) |
 | gate: conflicting → BLOCKED-BY-CHILD | deterministic gate | file reconcile child (idempotent) |
+| gate: approved+CI not green → CI-BLOCKED | derivation | no mutation; visible stall state |
+| CI-BLOCKED → CI-BLOCKED | scheduler | wait while checks are pending/missing (no retry consumed) |
+| CI-BLOCKED → CI-BLOCKED | scheduler | one exact-head CAS-fenced `rerun-failed-jobs` per head |
+| CI-BLOCKED → MERGE-READY | gate | rerun passes ∧ integration ladder satisfied |
+| CI-BLOCKED → BLOCKED-BY-CHILD | scheduler | persistent failure after rerun, or external-only failure → file `ci-failure` child |
 | MERGE-READY → DONE | any process | claimless head-pinned squash merge |
 
 Session finalization is three PR-surface operations. The `pending: project`
@@ -118,16 +126,22 @@ interrupted prep) are deleted along with the states that required them.
 ## 5. Children: the only loop
 
 A **child issue** is an ordinary issue created by the machine against a parent
-PR. It carries: type `fix`, a kind label (`review-finding` or `reconcile`), a
-structured body marker naming the parent (`<!-- jinn-autopilot:child pr=<N>
-kind=<kind> -->`), and machine triage (Priority high — children unblock
+PR. It carries: type `fix`, a kind label (`review-finding`, `reconcile`, or
+`ci-failure` — best-effort discovery tag), and a structured body marker naming
+the parent (`<!-- jinn-autopilot:child pr=<N>
+kind=<kind> -->`). The body marker is the source of truth for machine-child
+identity and scheduling; CI-red on the parent PR drives `ci-failure` filing, not
+the child label. Machine triage (Priority high — children unblock
 delivered work and **outrank fresh claims** in scheduling; Effort routed per
 §6.2).
 
 Children run the ordinary pipeline — ELIGIBLE → CLAIMED → IN PROGRESS — with
 one difference: their claim commit lands on the **parent's branch** (phase
 `fix`/`reconcile`), work lands as append-only checkpoints there, and the child
-closes by landing commits rather than by opening its own PR. The parent's
+closes by landing commits rather than by opening its own PR. Session
+`checkpoint` / `human` accept `fix|reconcile` branch claims and validate the
+parent PR by branch, base, and exact head — not by child-issue body markers or
+draft state. The parent's
 fresh re-review reviews the child's work; children need no independent review.
 
 Filing is idempotent: at most one open child per parent per kind (keyed by the
@@ -135,17 +149,30 @@ body marker). Children auto-close when the parent merges or closes.
 
 ### 5.1 Review findings become children
 
-The review session has exactly two terminal outcomes:
+The review session still has exactly two **native** terminal verdicts
+(APPROVE vs REQUEST_CHANGES). Approve may optionally file non-blocking
+follow-ups in the same session command:
 
-- **Approve:** native APPROVE + terminal ref, as today.
-- **Request changes:** native REQUEST_CHANGES (head-bound) + one child issue
-  per round listing all blocking findings (reviewer may split genuinely
-  independent findings) + release the claim + exit.
+- **Approve:** native APPROVE + terminal ref, as today. Optional
+  `--follow-ups-file` on `autopilot session review-verdict --state APPROVE`
+  files zero-or-more **ordinary** issues (not children) with body marker
+  `<!-- jinn-autopilot:review-follow-up pr=<N> head=<sha> index=<i> -->`,
+  Issue Type `feat|chore|fix|refactor`, and machine triage on the Project
+  (Blocked on / Effort / Priority; default Blocked on: Nothing). Cap ≤5 per
+  exact head. Filing is
+  idempotent on `pr+head+index` and runs before terminal publish. These
+  issues never carry `review-finding`/`reconcile` labels or the child
+  marker, never appear in `openChildKinds`, and **do not** move the parent
+  into BLOCKED-BY-CHILD.
+- **Request changes:** native REQUEST_CHANGES (head-bound) + one
+  `review-finding` child per round listing all **blocking** findings
+  (reviewer may split genuinely independent findings) + release the claim
+  + exit.
 
 The REVIEW-FIXING state, the atomic two-ref fix publication, the
-redraft-before-fix ordering, and the fix-loop recovery carve-out are deleted.
-The reviewer credential loses branch-push authority entirely: reviewers read,
-verdict, file, and exit.
+redraft-before-fix ordering, and the fix-loop recovery carve-out remain
+deleted. The reviewer credential still has no branch-push authority:
+reviewers read, verdict, file, and exit.
 
 ### 5.2 Integration becomes a ladder
 
@@ -233,7 +260,7 @@ it. Dispositions:
 | `merge-prep` | Deleted with its state (§8). |
 | `reconcile` (new) | Successor to merge-prep's irreducible core: merge-from-base method, the conflict taxonomy as routing (§6.2), canonical lockfile regeneration, flagged-hunk summary, `child-complete`; escalation only by confidence or policy (§6.3). |
 | `fix-child` (new) | implement-issue variant for finding children: work on the parent's branch, append-only checkpoints, no PR of its own, close via `child-complete`. |
-| `eng-day` | The observe-mode derivation remains its authoritative lifecycle source (painter lag is harmless to its conclusions). It must read machine triage from labels so children are not reported as untriaged drift, and it gains review findings and pending reconciliations as visible work items in the brief. |
+| `eng-day` | The observe-mode derivation remains its authoritative lifecycle source (painter lag is harmless to its conclusions). Machine-created children and follow-ups use the same Project triage fields as human work; it gains review findings and pending reconciliations as visible work items in the brief. |
 | `merge-batch` | Authority unchanged (human-invoked, same gates); merge-prep and Status-field references cleaned up. |
 | `autopilot-runtime` | Mechanics unchanged; verb roster updates only (+`review-findings`, +`child-complete`, −`review-fix-publish`, −`merge-prep-complete`). |
 

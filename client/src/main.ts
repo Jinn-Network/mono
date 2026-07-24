@@ -1508,6 +1508,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     daemonApiToken: apiToken,
     implStateDirRoot: config.engine.implStateDirRoot,
     ipfsRegistryUrl: config.ipfsRegistryUrl,
+    sweRebenchV2StateDir: config.sweRebenchV2StateDir,
     ...(process.env['JINN_POLYMARKET_GAMMA_BASE_URL']
       ? { polymarketGammaBaseUrl: process.env['JINN_POLYMARKET_GAMMA_BASE_URL'] }
       : {}),
@@ -1952,6 +1953,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         safeAddress,
         agentPrivateKey,
         ipfsGatewayUrl: config.ipfsGatewayUrl,
+        stateDir: config.sweRebenchV2StateDir,
         ...(sharedDiscoveryApi ? { discoveryApi: sharedDiscoveryApi } : {}),
       },
       logger: {
@@ -2072,13 +2074,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // A sessions-only operator legitimately has zero repos. The loop remains
     // schedulable so it can report the explicit Stage 2 parked marker.
     if (harvestRepos.length > 0 || harvestMinesSessions) {
-      const { defaultStateDir } = await import('./solver-types/swe-rebench-v2.js');
-      const harvestStateDir = defaultStateDir();
+      const harvestStateDir = config.sweRebenchV2StateDir;
       const baseHarvestLoopConfig = {
         intervalMs: config.harvest.intervalMs,
         stateDir: harvestStateDir,
         repos: harvestRepos,
         limitPerRepo: config.harvest.limitPerRepo,
+        limitPerTick: config.harvest.limitPerTick,
         publish: config.harvest.publish,
         minterSafe: safeAddress,
         sources: config.harvest.sources,
@@ -2143,6 +2145,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     peers: config.peers.length > 0 ? config.peers : undefined,
     nodeEndpoint: config.nodeEndpoint,
     creatorSafeAddress: safeAddress,
+    sweRebenchV2StateDir: config.sweRebenchV2StateDir,
     corpusFactory,
     harnessReadinessRegistry,
     spendCap,
