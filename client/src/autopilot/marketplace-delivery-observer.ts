@@ -12,7 +12,11 @@ import {
 } from '@jinn-network/sdk/autopilot';
 
 import { cidToDigestHex } from '../adapters/mech/ipfs.js';
-import { findLatestDeliveryForRequest } from '../adapters/mech/contracts.js';
+import {
+  findLatestDeliveryForRequest,
+  getMarketplaceRequestDeliveryMech,
+  verifyRouterAttemptProvenance,
+} from '../adapters/mech/contracts.js';
 import { authenticateExecutionEnvelope } from '../conformance/execution-envelope-authenticator.js';
 import type {
   AutopilotDeliveryCandidateLookup,
@@ -24,7 +28,8 @@ import type { SignedEnvelope } from '../types/envelope.js';
 export interface AutopilotMarketplaceDeliveryObserverDeps {
   discovery: Pick<DiscoveryAPI, 'getAutopilotDeliveryCandidates'>;
   publicClient: PublicClient;
-  mechContractAddress: Address;
+  mechMarketplaceAddress: Address;
+  routerAddress: Address;
   /** Fetch the exact bytes stored for one IPFS CID. */
   fetchEnvelopeBytes(cid: string): Promise<Uint8Array>;
   /** Resolve the publisher agent's Safe at the exact metadata anchor block. */
@@ -395,11 +400,42 @@ export function createAutopilotMarketplaceDeliveryObserver(
         );
       }
 
-      let delivery: Awaited<ReturnType<typeof findLatestDeliveryForRequest>>;
+      let provenance: Awaited<ReturnType<typeof verifyRouterAttemptProvenance>>;
       try {
+        provenance = await verifyRouterAttemptProvenance(
+          deps.publicClient,
+          deps.routerAddress,
+          {
+            role: expected.role,
+            taskId: expected.taskId,
+            attemptIndex: lookup.attempt.attemptIndex,
+            requestId: lookup.attempt.requestId,
+            operator: lookup.attempt.operator,
+          },
+          BigInt(lookup.task.createdAtBlock),
+          expected.toBlock,
+        );
+      } catch (error) {
+        return pending('rpc-unavailable', errorDetail(error));
+      }
+      if (provenance !== 'verified') {
+        return contradiction(
+          'discovery-mismatch',
+          `Router ${expected.role} attempt provenance is ${provenance}`,
+        );
+      }
+
+      let delivery: Awaited<ReturnType<typeof findLatestDeliveryForRequest>>;
+      let deliveryMech: Address;
+      try {
+        deliveryMech = await getMarketplaceRequestDeliveryMech(
+          deps.publicClient,
+          deps.mechMarketplaceAddress,
+          lookup.attempt.requestId,
+        );
         delivery = await findLatestDeliveryForRequest(
           deps.publicClient,
-          deps.mechContractAddress,
+          deliveryMech,
           lookup.attempt.requestId,
           expected.fromBlock,
           expected.toBlock,

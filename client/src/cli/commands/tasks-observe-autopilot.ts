@@ -17,13 +17,13 @@ import {
 } from '../../autopilot/marketplace-delivery-command.js';
 import { fetchRawBytesFromIpfs } from '../../adapters/mech/ipfs.js';
 import { loadConfig, getConfigPathFromArgs } from '../../config.js';
+import { getJinnRouterAddress } from '../../contracts/addresses.js';
 import { createHttpDiscoveryAPI } from '../../discovery/http.js';
 import { createPublisherSafeResolver } from '../../erc8004/publisher-safe-resolver.js';
-import { FleetStateStore } from '../../earning/store.js';
+import { getChainConfig } from '../../earning/contracts.js';
 import { createJinnPublicClient } from '../../earning/viem-clients.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { COMMON_FLAGS, type CommandContext } from '../command.js';
-import { pickPrimaryMechService } from '../execution-context.js';
 import { emitResult } from '../output.js';
 
 function message(error: unknown): string {
@@ -107,22 +107,25 @@ export async function runObserveAutopilotDelivery(
         'Exact HTTP discovery indexer is required for Autopilot delivery observation',
       );
     }
-    const fleet = await new FleetStateStore(config.earningDir).tryLoadExisting();
-    const service = fleet === null
-      ? undefined
-      : pickPrimaryMechService(fleet.services);
-    if (!service?.mech_address) {
-      throw new Error(
-        'Existing Jinn Mech configuration is required for delivery observation',
-      );
-    }
     const network = config.network === 'testnet' ? 'base-sepolia' : 'base';
-    const chainId = config.network === 'testnet' ? 84532 : 8453;
+    const chainConfig = getChainConfig(network, {
+      testnetL2DeploymentPath: config.testnetL2DeploymentPath,
+      testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
+      testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+      testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+    });
+    const chainId = chainConfig.chainId;
+    const routerAddress = chainConfig.jinnRouter
+      ?? getJinnRouterAddress(chainId);
+    if (!routerAddress) {
+      throw new Error(`No Jinn Router address is configured for chain ${chainId}`);
+    }
     const publicClient = createJinnPublicClient(config.rpcUrls, network);
     const observer = createAutopilotMarketplaceDeliveryObserver({
       discovery: createHttpDiscoveryAPI({ url: config.discovery.url }),
       publicClient,
-      mechContractAddress: getAddress(service.mech_address),
+      mechMarketplaceAddress: getAddress(chainConfig.mechMarketplace),
+      routerAddress: getAddress(routerAddress),
       fetchEnvelopeBytes: (cid) =>
         fetchRawBytesFromIpfs(config.ipfsGatewayUrl, cid),
       resolvePublisherSafe: createPublisherSafeResolver({

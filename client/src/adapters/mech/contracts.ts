@@ -851,6 +851,10 @@ export const ROUTER_TASK_ATTEMPT_CREATED_EVENT = getAbiItem({
   abi: JINN_ROUTER_ABI,
   name: 'TaskAttemptCreated',
 });
+export const ROUTER_EVALUATION_ATTEMPT_CREATED_EVENT = getAbiItem({
+  abi: JINN_ROUTER_ABI,
+  name: 'EvaluationAttemptCreated',
+});
 export const ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT = getAbiItem({
   abi: JINN_ROUTER_ABI,
   name: 'SolutionDeliveryClaimed',
@@ -861,6 +865,97 @@ export const ROUTER_DISCOVERY_EVENTS = [
   ROUTER_TASK_CREATED_EVENT,
   ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT,
 ] as const;
+
+export type RouterAttemptProvenanceRole = 'solution' | 'verdict';
+
+export type RouterAttemptProvenanceVerification =
+  | 'verified'
+  | 'missing'
+  | 'multiple'
+  | 'mismatch';
+
+/**
+ * Verify that exactly one Router attempt event binds a request to its expected
+ * Task, role-specific attempt index, and operator. The bounded scan begins at
+ * the TaskCreated block so indexer rows remain acceleration data only.
+ */
+export async function verifyRouterAttemptProvenance(
+  publicClient: PublicClient,
+  routerAddress: Address,
+  expected: {
+    role: RouterAttemptProvenanceRole;
+    taskId: string;
+    attemptIndex: number;
+    requestId: string;
+    operator: string;
+  },
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<RouterAttemptProvenanceVerification> {
+  let exactMatches = 0;
+  let relatedMismatches = 0;
+  const event = expected.role === 'solution'
+    ? ROUTER_TASK_ATTEMPT_CREATED_EVENT
+    : ROUTER_EVALUATION_ATTEMPT_CREATED_EVENT;
+
+  for (let start = fromBlock; start <= toBlock; start += LOG_SCAN_CHUNK + 1n) {
+    const end = start + LOG_SCAN_CHUNK > toBlock ? toBlock : start + LOG_SCAN_CHUNK;
+    const logs = await publicClient.getLogs({
+      address: routerAddress,
+      event,
+      fromBlock: start,
+      toBlock: end,
+    });
+    for (const log of logs) {
+      try {
+        const decoded = decodeEventLog({
+          abi: JINN_ROUTER_ABI,
+          data: log.data,
+          topics: log.topics,
+        });
+        if (
+          (expected.role === 'solution' && decoded.eventName !== 'TaskAttemptCreated')
+          || (expected.role === 'verdict' && decoded.eventName !== 'EvaluationAttemptCreated')
+        ) {
+          continue;
+        }
+        const args = decoded.args as {
+          taskId: bigint;
+          attemptIndex: number;
+          requestId: Hex;
+          operator?: Address;
+          evaluator?: Address;
+        };
+        const taskId = String(args.taskId);
+        const attemptIndex = Number(args.attemptIndex);
+        const requestId = String(args.requestId);
+        const operator = expected.role === 'solution'
+          ? String(args.operator)
+          : String(args.evaluator);
+        const sameTaskAttempt = taskId === expected.taskId
+          && attemptIndex === expected.attemptIndex;
+        const sameRequest = requestId.toLowerCase() === expected.requestId.toLowerCase();
+        if (!sameTaskAttempt && !sameRequest) continue;
+
+        if (
+          sameTaskAttempt
+          && sameRequest
+          && operator.toLowerCase() === expected.operator.toLowerCase()
+        ) {
+          exactMatches += 1;
+        } else {
+          relatedMismatches += 1;
+        }
+      } catch {
+        // The topic filter already selects the role event; skip malformed logs.
+      }
+    }
+  }
+
+  if (exactMatches === 1 && relatedMismatches === 0) return 'verified';
+  if (exactMatches > 1) return 'multiple';
+  return relatedMismatches > 0 ? 'mismatch' : 'missing';
+}
 
 export async function scanTasks(
   publicClient: PublicClient,

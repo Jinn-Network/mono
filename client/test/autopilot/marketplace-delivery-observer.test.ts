@@ -19,6 +19,7 @@ import {
   type AutopilotMarketplaceDeliveryExpectation,
 } from '../../src/autopilot/marketplace-delivery-observer.js';
 import { MECH_DELIVER_EVENT } from '../../src/adapters/mech/contracts.js';
+import { JINN_ROUTER_ABI } from '../../src/adapters/mech/types.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import type {
   AutopilotDeliveryCandidateLookup,
@@ -36,6 +37,9 @@ const ENVELOPE_CID = `f01551220${'55'.repeat(32)}`;
 const OPERATOR = `0x${'22'.repeat(20)}` as Address;
 const EVALUATOR = `0x${'23'.repeat(20)}` as Address;
 const MECH = `0x${'aa'.repeat(20)}` as Address;
+const MARKETPLACE = `0x${'ab'.repeat(20)}` as Address;
+const ROUTER = `0x${'ac'.repeat(20)}` as Address;
+const REMOTE_MECH = `0x${'ad'.repeat(20)}` as Address;
 const DELIVERY_TX = `0x${'77'.repeat(32)}` as Hex;
 const PRIVATE_KEY =
   '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex;
@@ -211,6 +215,43 @@ function deliverLog(args: {
   };
 }
 
+function routerAttemptLog(args: {
+  role?: 'solution' | 'verdict';
+  taskId?: bigint;
+  attemptIndex?: number;
+  requestId?: Hex;
+  operator?: Address;
+} = {}) {
+  const role = args.role ?? 'solution';
+  const topics = encodeEventTopics({
+    abi: JINN_ROUTER_ABI,
+    eventName: role === 'solution' ? 'TaskAttemptCreated' : 'EvaluationAttemptCreated',
+    args: {
+      taskId: args.taskId ?? BigInt(TASK_ID),
+      attemptIndex: args.attemptIndex ?? 0,
+      ...(role === 'solution' ? { requestId: args.requestId ?? REQUEST_ID } : { verdictIndex: 0 }),
+    },
+  });
+  const data = encodeAbiParameters(
+    role === 'solution'
+      ? [
+          { name: 'operator', type: 'address' },
+          { name: 'priorityMech', type: 'address' },
+          { name: 'deliveryRate', type: 'uint256' },
+        ]
+      : [
+          { name: 'requestId', type: 'bytes32' },
+          { name: 'evaluator', type: 'address' },
+          { name: 'priorityMech', type: 'address' },
+          { name: 'deliveryRate', type: 'uint256' },
+        ],
+    role === 'solution'
+      ? [args.operator ?? OPERATOR, MECH, 1n]
+      : [args.requestId ?? REQUEST_ID, args.operator ?? EVALUATOR, MECH, 1n],
+  );
+  return { address: ROUTER, topics, data };
+}
+
 interface HarnessOptions {
   role?: 'solution' | 'verdict';
   payload?: unknown;
@@ -219,6 +260,8 @@ interface HarnessOptions {
   discoveryResult?: AutopilotDeliveryCandidateLookup;
   discoveryError?: Error;
   logs?: unknown[];
+  routerLogs?: unknown[];
+  deliveryMech?: Address;
   rpcError?: Error;
   ipfsError?: Error;
   publisherSafe?: Address;
@@ -264,9 +307,21 @@ async function harness(options: HarnessOptions = {}) {
       ? vi.fn().mockRejectedValue(options.discoveryError)
       : vi.fn().mockResolvedValue(options.discoveryResult ?? ready),
   } as unknown as DiscoveryAPI;
+  const deliveryMech = options.deliveryMech ?? MECH;
   const getLogs = options.rpcError
     ? vi.fn().mockRejectedValue(options.rpcError)
-    : vi.fn().mockResolvedValue(options.logs ?? [deliverLog()]);
+    : vi.fn().mockImplementation(({ address }) => {
+        if (address === ROUTER) return options.routerLogs ?? [routerAttemptLog({
+          role,
+          operator: role === 'verdict' ? EVALUATOR : OPERATOR,
+        })];
+        return address === deliveryMech
+          ? options.logs ?? [deliverLog({
+              operator: role === 'verdict' ? EVALUATOR : OPERATOR,
+            })]
+          : [];
+      });
+  const readContract = vi.fn().mockResolvedValue({ deliveryMech });
   const fetchEnvelopeBytes = options.ipfsError
     ? vi.fn().mockRejectedValue(options.ipfsError)
     : vi.fn().mockResolvedValue(new TextEncoder().encode(JSON.stringify(envelope)));
@@ -277,8 +332,9 @@ async function harness(options: HarnessOptions = {}) {
       );
   const observer = createAutopilotMarketplaceDeliveryObserver({
     discovery,
-    publicClient: { getLogs } as unknown as PublicClient,
-    mechContractAddress: MECH,
+    publicClient: { getLogs, readContract } as unknown as PublicClient,
+    mechMarketplaceAddress: MARKETPLACE,
+    routerAddress: ROUTER,
     fetchEnvelopeBytes,
     resolvePublisherSafe,
   });
@@ -307,6 +363,7 @@ async function harness(options: HarnessOptions = {}) {
     expectation,
     discovery,
     getLogs,
+    readContract,
     fetchEnvelopeBytes,
     resolvePublisherSafe,
     envelope,
@@ -344,12 +401,64 @@ describe('Autopilot marketplace delivery observer', () => {
       fromBlock: 100n,
       toBlock: 150n,
     }));
+    expect(fixture.getLogs).toHaveBeenCalledWith(expect.objectContaining({
+      address: ROUTER,
+      fromBlock: 90n,
+      toBlock: 150n,
+    }));
     expect(fixture.fetchEnvelopeBytes).toHaveBeenCalledWith(ENVELOPE_CID);
     expect(fixture.resolvePublisherSafe).toHaveBeenCalledWith(
       CHAIN_ID,
       '7',
       121n,
     );
+  });
+
+  it('resolves and scans the marketplace delivery Mech instead of the local service Mech', async () => {
+    const fixture = await harness({ deliveryMech: REMOTE_MECH });
+
+    await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
+      status: 'verified',
+      attempt: { requestId: REQUEST_ID, operator: OPERATOR },
+    });
+    expect(fixture.readContract).toHaveBeenCalledWith(expect.objectContaining({
+      address: MARKETPLACE,
+      functionName: 'mapRequestIdInfos',
+      args: [REQUEST_ID],
+    }));
+    expect(fixture.getLogs).toHaveBeenCalledWith(expect.objectContaining({
+      address: REMOTE_MECH,
+      fromBlock: 100n,
+      toBlock: 150n,
+    }));
+  });
+
+  it.each([
+    ['Task', { taskId: 999n }],
+    ['attempt index', { attemptIndex: 1 }],
+    ['request ID', { requestId: `0x${'88'.repeat(32)}` as Hex }],
+    ['operator', { operator: `0x${'88'.repeat(20)}` as Address }],
+  ] as const)('rejects an indexer join with mismatched Router %s provenance', async (_label, mismatch) => {
+    const fixture = await harness({
+      routerLogs: [routerAttemptLog(mismatch)],
+    });
+
+    await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
+      status: 'contradiction',
+      reason: 'discovery-mismatch',
+    });
+  });
+
+  it.each([
+    ['missing', []],
+    ['ambiguous', [routerAttemptLog(), routerAttemptLog()]],
+  ] as const)('rejects %s exact Router provenance', async (_label, routerLogs) => {
+    const fixture = await harness({ routerLogs });
+
+    await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
+      status: 'contradiction',
+      reason: 'discovery-mismatch',
+    });
   });
 
   it('keeps not-yet-observable and transport failures pending', async () => {
@@ -546,7 +655,6 @@ describe('Autopilot marketplace delivery observer', () => {
 
   it('validates the additive Verdict result schema and review correlation', async () => {
     const fixture = await harness({ role: 'verdict' });
-    fixture.getLogs.mockResolvedValue([deliverLog({ operator: EVALUATOR })]);
 
     await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
       status: 'verified',
