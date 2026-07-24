@@ -81,6 +81,61 @@ interface RankedEntity {
   readonly entity: MutableEntity;
 }
 
+function jsonEqual(left: JsonValue, right: JsonValue): boolean {
+  if (
+    left === null ||
+    right === null ||
+    typeof left !== "object" ||
+    typeof right !== "object"
+  ) {
+    return left === right;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => jsonEqual(value, right[index]!))
+    );
+  }
+  const leftObject = left as Readonly<Record<string, JsonValue>>;
+  const rightObject = right as Readonly<Record<string, JsonValue>>;
+  const leftKeys = Object.keys(leftObject).sort(compareStrings);
+  const rightKeys = Object.keys(rightObject).sort(compareStrings);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key, index) =>
+        key === rightKeys[index] &&
+        jsonEqual(leftObject[key]!, rightObject[key]!),
+    )
+  );
+}
+
+function cloneJson<T extends JsonValue>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((entry) => cloneJson(entry)) as unknown as T;
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, cloneJson(entry)]),
+    ) as T;
+  }
+  return value;
+}
+
+function hasAgentType(entity: MutableEntity): boolean {
+  const value = entity["@type"];
+  const values = Array.isArray(value) ? value : [value];
+  return values.some(
+    (type) =>
+      type === "Person" ||
+      type === "Organization" ||
+      type === "prov:Agent" ||
+      type === "prov:SoftwareAgent",
+  );
+}
+
 function reference(id: string): Entity {
   return { "@id": id };
 }
@@ -98,7 +153,15 @@ function identifiers(
   values: readonly IdentifierCapture[] | undefined,
 ): Entity | readonly Entity[] | undefined {
   if (values === undefined || values.length === 0) return undefined;
-  const mapped = [...values]
+  const mapped = values
+    .filter(
+      (identifier, index) =>
+        values.findIndex(
+          (candidate) =>
+            candidate.propertyId === identifier.propertyId &&
+            candidate.value === identifier.value,
+        ) === index,
+    )
     .sort(
       (left, right) =>
         compareStrings(left.propertyId, right.propertyId) ||
@@ -110,6 +173,32 @@ function identifiers(
       value: identifier.value,
     }));
   return mapped.length === 1 ? mapped[0]! : mapped;
+}
+
+function mergeIdentifiers(
+  left: readonly IdentifierCapture[] | undefined,
+  right: readonly IdentifierCapture[] | undefined,
+): readonly IdentifierCapture[] | undefined {
+  const merged = [...(left ?? []), ...(right ?? [])];
+  return merged.length === 0 ? undefined : merged;
+}
+
+function mergeExtensions(
+  builder: GraphBuilder,
+  entityId: string,
+  left: JsonLdExtensions | undefined,
+  right: JsonLdExtensions | undefined,
+): JsonLdExtensions | undefined {
+  if (left === undefined && right === undefined) return undefined;
+  const merged: Record<string, JsonValue> = { ...(left ?? {}) };
+  for (const [key, value] of Object.entries(right ?? {})) {
+    const current = merged[key];
+    if (current !== undefined && !jsonEqual(current, value)) {
+      builder.conflict(entityId, `values for extension ${key}`);
+    }
+    merged[key] = value;
+  }
+  return merged;
 }
 
 function types(base: readonly string[], additional?: readonly string[]): JsonValue {
@@ -131,10 +220,20 @@ function sourceFields(source: PersistedArtifactSource): MutableEntity {
 
 class GraphBuilder {
   readonly entities = new Map<string, RankedEntity>();
+  readonly declarations = new Map<string, MutableEntity>();
+  readonly contextualAgents = new Set<string>();
   readonly contentIds = new Set<string>();
   readonly roles = new Map<string, string>();
-  readonly attributed = new Set<string>();
+  readonly origins = new Map<string, CaptureOrigin>();
   attributionOrdinal = 0;
+
+  conflict(id: string, detail: string): never {
+    throw new ExecutionRecorderError(
+      "RECORDING_CONFLICT",
+      `Graph entity ${id} has incompatible ${detail}.`,
+      { entityId: id },
+    );
+  }
 
   add(entity: MutableEntity, rank: number): MutableEntity {
     const id = entity["@id"];
@@ -143,30 +242,71 @@ class GraphBuilder {
     }
     const current = this.entities.get(id);
     if (current) {
+      if (this.contextualAgents.has(id)) {
+        if (!hasAgentType(entity)) {
+          this.conflict(id, "substantive declarations");
+        }
+        this.contextualAgents.delete(id);
+        for (const key of Object.keys(current.entity)) {
+          delete current.entity[key];
+        }
+        Object.assign(current.entity, entity);
+        this.declarations.set(id, cloneJson(entity));
+        current.rank = Math.min(current.rank, rank);
+        return current.entity;
+      }
+      const declaration = this.declarations.get(id);
+      if (declaration === undefined || !jsonEqual(declaration, entity)) {
+        this.conflict(id, "substantive declarations");
+      }
       current.rank = Math.min(current.rank, rank);
-      Object.assign(current.entity, entity);
       return current.entity;
     }
     this.entities.set(id, { rank, entity });
+    this.declarations.set(id, cloneJson(entity));
     return entity;
   }
 
   contextualAgent(id: string): void {
-    if (!this.entities.has(id)) {
-      this.add(
-        {
-          "@id": id,
-          "@type": "prov:Agent",
-        },
-        160,
-      );
+    const current = this.entities.get(id);
+    if (current) {
+      if (!hasAgentType(current.entity)) {
+        this.conflict(id, "Agent and non-Agent declarations");
+      }
+      return;
     }
+    const entity = {
+      "@id": id,
+      "@type": "prov:Agent",
+    };
+    this.entities.set(id, { rank: 160, entity });
+    this.declarations.set(id, cloneJson(entity));
+    this.contextualAgents.add(id);
+  }
+
+  setProperty(id: string, property: string, value: JsonValue): void {
+    const target = this.entities.get(id)?.entity;
+    if (target === undefined) {
+      throw new TypeError(`Graph entity ${id} has not been declared.`);
+    }
+    const current = target[property];
+    if (current !== undefined && !jsonEqual(current, value)) {
+      this.conflict(id, `values for ${property}`);
+    }
+    target[property] = value;
   }
 
   addOrigin(target: MutableEntity, origin: CaptureOrigin): void {
     const targetId = target["@id"];
-    if (typeof targetId !== "string" || this.attributed.has(targetId)) return;
-    this.attributed.add(targetId);
+    if (typeof targetId !== "string") return;
+    const currentOrigin = this.origins.get(targetId);
+    if (currentOrigin !== undefined) {
+      if (!jsonEqual(currentOrigin, origin)) {
+        this.conflict(targetId, "capture origins");
+      }
+      return;
+    }
+    this.origins.set(targetId, cloneJson(origin));
 
     const attributions: { agent: string; role: { id: string; name: string } }[] =
       [];
@@ -370,12 +510,26 @@ export function buildExecutionEvidence(
   builder.contentIds.add(recording.task.entityId);
   builder.addOrigin(task, recording.task.origin);
 
+  const repositoryArtifact =
+    recording.repositoryState === undefined
+      ? undefined
+      : {
+          ...recording.repositoryState.artifact,
+          identifiers: mergeIdentifiers(
+            recording.repositoryState.artifact.identifiers,
+            recording.repositoryState.identifiers,
+          ),
+          extensions: mergeExtensions(
+            builder,
+            recording.repositoryState.artifact.entityId,
+            recording.repositoryState.artifact.extensions,
+            recording.repositoryState.extensions,
+          ),
+        };
   const inputArtifacts = [
     ...recording.initialInputs,
     ...input.additionalInputs,
-    ...(recording.repositoryState === undefined
-      ? []
-      : [recording.repositoryState.artifact]),
+    ...(repositoryArtifact === undefined ? [] : [repositoryArtifact]),
   ];
   const inputIds: string[] = [];
   const inputContentIds: string[] = [];
@@ -387,17 +541,13 @@ export function buildExecutionEvidence(
   }
   if (recording.repositoryState) {
     const repository = recording.repositoryState;
-    const mapped = builder.entities.get(repository.artifact.entityId)!.entity;
-    Object.assign(
-      mapped,
-      repository.extensions ?? {},
-      {
-        identifier: identifiers(repository.identifiers)!,
-      },
-      repository.repository === undefined
-        ? {}
-        : { codeRepository: repository.repository },
-    );
+    if (repository.repository !== undefined) {
+      builder.setProperty(
+        repository.artifact.entityId,
+        "codeRepository",
+        repository.repository,
+      );
+    }
   }
 
   const runtimePartIds: string[] = [];
@@ -423,9 +573,11 @@ export function buildExecutionEvidence(
       runtimeContentIds.push(...builder.addArtifact(component.descriptor, 70));
       runtimePartIds.push(component.descriptor.entityId);
       opaqueComponentIds.push(component.component.entityId);
-      const descriptor =
-        builder.entities.get(component.descriptor.entityId)!.entity;
-      descriptor.about = reference(component.component.entityId);
+      builder.setProperty(
+        component.descriptor.entityId,
+        "about",
+        reference(component.component.entityId),
+      );
       builder.add(
         withExtensions(component.component.extensions, {
           "@id": component.component.entityId,
@@ -497,8 +649,11 @@ export function buildExecutionEvidence(
       runtimeContentIds.push(...builder.addArtifact(component.descriptor, 70));
       runtimePartIds.push(component.descriptor.entityId);
       opaqueComponentIds.push(component.component.entityId);
-      builder.entities.get(component.descriptor.entityId)!.entity.about =
-        reference(component.component.entityId);
+      builder.setProperty(
+        component.descriptor.entityId,
+        "about",
+        reference(component.component.entityId),
+      );
       builder.add(
         withExtensions(component.component.extensions, {
           "@id": component.component.entityId,
@@ -551,14 +706,24 @@ export function buildExecutionEvidence(
   )) {
     resultIds.push(result.entityId);
     resultContentIds.push(...builder.addArtifact(result, 100));
-    builder.entities.get(result.entityId)!.entity["prov:wasGeneratedBy"] =
-      reference(recording.executionId);
+    builder.setProperty(
+      result.entityId,
+      "prov:wasGeneratedBy",
+      reference(recording.executionId),
+    );
   }
 
   const traceContentIds = builder.addArtifact(input.nativeTrace.artifact, 110);
-  const trace = builder.entities.get(input.nativeTrace.artifact.entityId)!.entity;
-  trace.about = reference(recording.executionId);
-  trace.conformsTo = reference(input.nativeTrace.format.entityId);
+  builder.setProperty(
+    input.nativeTrace.artifact.entityId,
+    "about",
+    reference(recording.executionId),
+  );
+  builder.setProperty(
+    input.nativeTrace.artifact.entityId,
+    "conformsTo",
+    reference(input.nativeTrace.format.entityId),
+  );
   builder.add(
     {
       "@id": input.nativeTrace.format.entityId,

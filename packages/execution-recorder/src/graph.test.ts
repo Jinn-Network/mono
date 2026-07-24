@@ -551,6 +551,120 @@ describe("execution evidence graph", () => {
     });
   });
 
+  test("merges compatible repository and artifact metadata without loss", () => {
+    const baseline = minimalInput();
+    const repository: PersistedAggregateArtifactCapture = {
+      kind: "dataset",
+      entityId: "inputs/repository.json",
+      manifest: source("1", "application/json", "Repository manifest"),
+      members: [],
+      origin: producerOrigin,
+      identifiers: [
+        {
+          propertyId: "https://example.test/shared-id",
+          value: "same",
+        },
+        {
+          propertyId: "https://example.test/content-id",
+          value: "tree123",
+        },
+      ],
+      extensions: {
+        "x-artifact": { retained: true },
+        "x-shared": ["same"],
+      },
+    };
+    const bytes = buildExecutionEvidence({
+      ...baseline,
+      recording: {
+        ...baseline.recording,
+        repositoryState: {
+          artifact: repository,
+          identifiers: [
+            {
+              propertyId: "https://example.test/shared-id",
+              value: "same",
+            },
+            {
+              propertyId: "https://example.test/revision-id",
+              value: "abc123",
+            },
+          ],
+          repository: "https://example.test/repository",
+          extensions: {
+            "x-repository-state": true,
+            "x-shared": ["same"],
+          },
+        },
+      },
+    });
+
+    expect(entity(graph(bytes), repository.entityId)).toMatchObject({
+      codeRepository: "https://example.test/repository",
+      "x-artifact": { retained: true },
+      "x-repository-state": true,
+      "x-shared": ["same"],
+      identifier: [
+        {
+          "@type": "PropertyValue",
+          propertyID: "https://example.test/content-id",
+          value: "tree123",
+        },
+        {
+          "@type": "PropertyValue",
+          propertyID: "https://example.test/revision-id",
+          value: "abc123",
+        },
+        {
+          "@type": "PropertyValue",
+          propertyID: "https://example.test/shared-id",
+          value: "same",
+        },
+      ],
+    });
+    expect(validateExecutionEvidence(bytes)).toMatchObject({
+      conforms: true,
+      diagnostics: [],
+    });
+  });
+
+  test("rejects conflicting repository and artifact extensions", () => {
+    const baseline = minimalInput();
+    const repository = {
+      kind: "dataset" as const,
+      entityId: "inputs/repository.json",
+      manifest: source("1", "application/json", "Repository manifest"),
+      members: [],
+      origin: producerOrigin,
+      extensions: {
+        "x-repository-metadata": { source: "artifact" },
+      },
+    };
+
+    expect(() =>
+      buildExecutionEvidence({
+        ...baseline,
+        recording: {
+          ...baseline.recording,
+          repositoryState: {
+            artifact: repository,
+            identifiers: [],
+            extensions: {
+              "x-repository-metadata": { source: "repository-state" },
+            },
+          },
+        },
+      }),
+    ).toThrowError(
+      expect.objectContaining<Partial<ExecutionRecorderError>>({
+        code: "RECORDING_CONFLICT",
+        details: {
+          entityId: repository.entityId,
+        },
+      }),
+    );
+  });
+
   test("emits identical bytes when unordered captures are permuted", () => {
     const baseline = minimalInput();
     const left = file("inputs/a.txt", "1", "text/plain");
@@ -647,5 +761,106 @@ describe("execution evidence graph", () => {
         }),
       }),
     );
+  });
+
+  test("rejects incompatible declarations that reuse one graph entity ID", () => {
+    const baseline = minimalInput();
+
+    expect(() =>
+      buildExecutionEvidence({
+        ...baseline,
+        recording: {
+          ...baseline.recording,
+          producer: {
+            ...baseline.recording.producer,
+            entityId: baseline.recording.executor.entityId,
+          },
+        },
+      }),
+    ).toThrowError(
+      expect.objectContaining<Partial<ExecutionRecorderError>>({
+        code: "RECORDING_CONFLICT",
+        details: {
+          entityId: baseline.recording.executor.entityId,
+        },
+      }),
+    );
+
+    expect(() =>
+      buildExecutionEvidence({
+        ...baseline,
+        results: [
+          {
+            ...baseline.results[0]!,
+            entityId: baseline.recording.initialInputs[0]!.entityId,
+          },
+        ],
+      }),
+    ).toThrowError(
+      expect.objectContaining<Partial<ExecutionRecorderError>>({
+        code: "RECORDING_CONFLICT",
+        details: {
+          entityId: baseline.recording.initialInputs[0]!.entityId,
+        },
+      }),
+    );
+
+    expect(() =>
+      buildExecutionEvidence({
+        ...baseline,
+        recording: {
+          ...baseline.recording,
+          runtime: {
+            ...baseline.recording.runtime,
+            components: [
+              {
+                kind: "opaque",
+                descriptor: file(
+                  "runtime/provider.json",
+                  "9",
+                  "application/json",
+                ),
+                component: {
+                  entityId: "urn:component:hosted",
+                  name: "Hosted component",
+                  provider:
+                    baseline.recording.initialInputs[0]!.entityId as `urn:${string}`,
+                },
+              },
+            ],
+          },
+        },
+      }),
+    ).toThrowError(
+      expect.objectContaining<Partial<ExecutionRecorderError>>({
+        code: "RECORDING_CONFLICT",
+        details: {
+          entityId: baseline.recording.initialInputs[0]!.entityId,
+        },
+      }),
+    );
+  });
+
+  test("deduplicates identical declarations that reuse one graph entity ID", () => {
+    const baseline = minimalInput();
+    const bytes = buildExecutionEvidence({
+      ...baseline,
+      recording: {
+        ...baseline.recording,
+        producer: baseline.recording.executor,
+      },
+    });
+    const entities = graph(bytes);
+
+    expect(
+      entities.filter(
+        (candidate) =>
+          candidate["@id"] === baseline.recording.executor.entityId,
+      ),
+    ).toHaveLength(1);
+    expect(validateExecutionEvidence(bytes)).toMatchObject({
+      conforms: true,
+      diagnostics: [],
+    });
   });
 });
