@@ -16,7 +16,7 @@ import { createExecutionRecorder } from "./recorder.js";
 import { readStoredObject } from "./object-store.js";
 import { openWorkspaceState } from "./state.js";
 import type {
-  ArtifactCapture,
+  FileArtifactCapture,
   RuntimeObservationCapture,
   StartExecutionRecordingInput,
 } from "./types.js";
@@ -46,7 +46,7 @@ function file(
   entityId: string,
   text: string,
   mediaType = "text/plain",
-): ArtifactCapture {
+): FileArtifactCapture {
   return {
     kind: "file",
     entityId,
@@ -263,6 +263,52 @@ describe("execution recorder lifecycle", () => {
     ).rejects.toMatchObject({ code: "RECORDING_CONFLICT" });
   });
 
+  test("allows compatible opaque-component observations with distinct descriptors", async () => {
+    const workspaceDir = await workspace();
+    const component = {
+      entityId: "https://components.example/hosted-model",
+      name: "Hosted model",
+      softwareVersion: "2026-07",
+      provider: "https://provider.example/organization",
+    } as const;
+    const input = startInput(workspaceDir);
+    const recorder = createExecutionRecorder({
+      repository: new InMemoryEvidenceRepository(),
+    });
+    const recording = await recorder.start({
+      ...input,
+      runtime: {
+        ...input.runtime,
+        components: [
+          {
+            kind: "opaque",
+            descriptor: file(
+              "runtime/hosted-start.json",
+              '{"observed":"start"}\n',
+              "application/json",
+            ),
+            component,
+          },
+        ],
+      },
+    });
+
+    await recording.captureRuntimeObservation({
+      kind: "opaque-component",
+      component: {
+        kind: "opaque",
+        descriptor: file(
+          "runtime/hosted-end.json",
+          '{"observed":"end"}\n',
+          "application/json",
+        ),
+        component,
+      },
+    });
+
+    expect((await openWorkspaceState(workspaceDir)).head.revision).toBe(2);
+  });
+
   test("selects exactly one native trace", async () => {
     const workspaceDir = await workspace();
     const recorder = createExecutionRecorder({
@@ -369,6 +415,26 @@ describe("execution recorder lifecycle", () => {
     await expect(recorder.resume(undefined as never)).rejects.toMatchObject({
       code: "INVALID_CAPTURE_INPUT",
     });
+  });
+
+  test("rejects supplied identities reserved for recorder provenance", async () => {
+    const workspaceDir = await workspace();
+    const input = startInput(workspaceDir);
+    const recorder = createExecutionRecorder({
+      repository: new InMemoryEvidenceRepository(),
+    });
+
+    await expect(
+      recorder.start({
+        ...input,
+        executor: {
+          ...input.executor,
+          entityId:
+            "urn:jinn:execution-recorder:role:producer-observer",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "RECORDING_CONFLICT" });
+    expect((await openWorkspaceState(workspaceDir)).head.revision).toBe(0);
   });
 
   test("detects a last-entry payload mutation through its declaration fingerprint", async () => {

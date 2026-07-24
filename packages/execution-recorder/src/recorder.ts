@@ -2,6 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 
+import { EXECUTION_EVIDENCE_PROFILE_URI } from "@jinn-network/evidence-protocol";
 import type { EvidenceRepository } from "@jinn-network/evidence-repository";
 
 import {
@@ -84,7 +85,6 @@ function observationIds(
   }
   return [
     ...artifactIds(observation.component.descriptor),
-    observation.component.component.entityId,
   ];
 }
 
@@ -96,8 +96,6 @@ function startIds(recording: PersistedStartRecording): readonly string[] {
   return [
     recording.task.entityId,
     recording.runtime.entityId,
-    recording.executor.entityId,
-    recording.producer.entityId,
     ...recording.initialInputs.flatMap(artifactIds),
     ...(recording.repositoryState === undefined
       ? []
@@ -107,7 +105,6 @@ function startIds(recording: PersistedStartRecording): readonly string[] {
         ? artifactIds(component.artifact)
         : [
             ...artifactIds(component.descriptor),
-            component.component.entityId,
           ],
     ),
   ];
@@ -146,6 +143,7 @@ type ContextualIdentityKind =
   | "component"
   | "execution"
   | "license"
+  | "reserved"
   | "trace-format";
 
 interface ContextualIdentityClaim {
@@ -234,6 +232,15 @@ function contextualClaims(
   state: WorkspaceState,
 ): Map<string, ContextualIdentityClaim> {
   const claims = new Map<string, ContextualIdentityClaim>();
+  for (const id of [
+    EXECUTION_EVIDENCE_PROFILE_URI,
+    "urn:jinn:execution-recorder:role:producer-observer",
+    "urn:jinn:execution-recorder:role:executor-reporter",
+    "urn:jinn:execution-recorder:role:external-observer",
+    "urn:jinn:execution-recorder:role:capture-agent",
+  ]) {
+    registerContextualClaim(state, claims, id, "reserved");
+  }
   const recording = state.recording;
   if (recording === undefined) return claims;
   registerContextualClaim(
