@@ -23,7 +23,12 @@
 - Every learner digest surface, including daemon status and commit export, resolves the same profile.
 - v0 checkpoint publication is frozen-only. Train mode, scrub findings, unknown roots, and profile mismatches refuse before pinning.
 - The pinned/signed v2 manifest never contains its own CID-derived key or transaction receipt. The CLI returns the receipt separately and the indexer derives it from the anchor event.
-- Install treats all remote values as untrusted: canonical CID/content binding, bounded archive preflight/extraction in owner-only staging, and contained atomic destination commit are mandatory.
+- Install treats all remote values as untrusted: both artifact CIDs are
+  canonical CIDv1 `raw` + `sha2-256`, the package CID addresses the exact ustar
+  bytes, bounded archive preflight/extraction runs in owner-only staging, and
+  contained atomic destination commit is mandatory.
+- The signed v2 core carries a mandatory `redactionManifestHash` over the
+  RFC 8785 JCS form of the registered scrub report; install recomputes it.
 - `checkpoint.ts` must ship as registered `jinn checkpoint publish|install|list` CLI verbs with production dependencies and CLI-level tests.
 - American English in identifiers and Issue titles (`digest`, `distill`, ` favor` not British variants).
 
@@ -174,18 +179,52 @@ it('private learner roots do not change codeDigest under learner-public.v1', asy
 - [ ] `jinn checkpoint publish` is opt-in and refuses `mode === 'train'` unconditionally; no warning-only or acknowledgement flag exists in v0.
 - [ ] Publish resolves the harness's registered profile, validates roots/kinds, and runs the fail-closed scrub before any pin.
 - [ ] Publish pins the actual public tree selected by `learner-public.v1`, replacing `data: ''`; the packaged path set is exactly the hasher's non-ignored path set.
-- [ ] `harness.checkpoint.v2` requires `hashProfile: { id, ignoreRelPaths }`, and the signature covers it. New writers emit v2.
+- [ ] `harness.checkpoint.v2` requires
+  `hashProfile: { id, ignoreRelPaths }` and `redactionManifestHash`; the
+  signature covers both. The hash is `sha256:<hex>` over the RFC 8785 JCS UTF-8
+  bytes of the registered `jinn.checkpoint-redaction.v1` report defined in the
+  finding; publish returns that report locally, and install recomputes it.
+  Unknown scanner profiles or a report-hash mismatch refuse. New writers emit
+  v2.
 - [ ] The exact signed JSON bytes are pinned and schema-parse when fetched by `checkpointCid`; no registry-populated variant is constructed.
 - [ ] `IdentityRegistry.setMetadata("harness.checkpoint:<checkpointCid>", checkpointCid)` anchors the immutable CID. The CLI returns `{ checkpointCid, manifest, anchorReceipt }`, with the receipt outside the manifest.
 - [ ] v1 compatibility is read-only: valid historical v1 may parse, but no new v1 is emitted and install never invents receipt fields absent from fetched bytes.
-- [ ] `checkpointCid` and `implStateDirCid` pass a shared canonical CIDv1 raw/dag-pb sha2-256 parser before use. Exact raw manifest bytes match `checkpointCid`; a bounded CAR has root `implStateDirCid`, verifies every reachable block multihash, and rejects missing, conflicting/duplicate, or unreachable extra blocks.
-- [ ] v0 package bytes are deterministic uncompressed POSIX ustar; compression and PAX/extended records are refused. Exported ceilings are 1 MiB manifest, 320 MiB CAR transfer, 256 MiB reconstructed tar/expanded bytes, 10,000 regular files, 16 MiB/file, and 255 UTF-8 path bytes (the ustar name+prefix bound).
-- [ ] A full archive preflight occurs before writes and rejects absolute/drive/UNC paths, NUL/backslash/dot/`..` segments, duplicate/case-fold/prefix collisions, links, devices, FIFOs, sockets, sparse/extended entries, and all non-file/directory records.
-- [ ] Extraction uses no shell command. It streams into a unique trusted-parent `mkdtemp` directory verified `0700`, re-enforces limits, prevents link following or replacement, proves containment for every output, cleans on failure, and never interpolates remote CIDs or names into its path.
+- [ ] `checkpointCid` and `implStateDirCid` pass a shared canonical CIDv1
+  `raw` + `sha2-256` parser before use. Exact raw manifest bytes match
+  `checkpointCid`; `implStateDirCid` addresses the exact uncompressed ustar
+  bytes. Transport is either that raw block or a bounded single-root,
+  single-block CARv1 whose root/block CID is `implStateDirCid`; missing,
+  conflicting/duplicate, or extra blocks fail. v0 accepts no dag-pb/UnixFS
+  package or implicit reconstruction.
+- [ ] v0 package bytes are deterministic uncompressed POSIX ustar; compression
+  and PAX/extended records are refused. Exported ceilings are 1 MiB manifest,
+  320 MiB CAR transfer, 256 MiB tar/expanded bytes, 20,000 total entries,
+  10,000 regular files, 10,000 directories, depth 32, 16 MiB/file, and 255
+  UTF-8 path bytes.
+- [ ] A full archive preflight occurs before writes and rejects
+  absolute/drive/UNC paths, invalid UTF-8 or non-NFC paths,
+  NUL/backslash/dot/`..` segments, duplicate/Unicode-case-fold/prefix
+  collisions, missing/out-of-order parent directories, links, devices, FIFOs,
+  sockets, sparse/extended entries, and all non-file/directory records. It
+  verifies canonical ustar name/prefix splitting, logical ordering, types,
+  zero owner/time fields, normalized archive modes, checksums, padding, and end
+  blocks.
+- [ ] Extraction uses no shell command. It streams into a unique trusted-parent
+  `mkdtemp` directory verified `0700`, re-enforces byte/entry/file/directory/
+  depth limits, prevents link following or replacement, proves containment for
+  every output, ignores remote ownership/mode, creates current-process-owned
+  directories `0700` and files `0600`, cleans on failure, and never
+  interpolates remote CIDs or names into its path.
 - [ ] Manifest `implName` is validated before final path selection. The destination is contained beneath configured `implStateDirRoot`, unsafe parent links are rejected, existing state is not overwritten by default, and verified staging is committed atomically.
 - [ ] `client/src/cli/commands/checkpoint.ts` exports a production-wired `CommandModule` for `jinn checkpoint publish|install|list`; `client/src/cli/index.ts` registers it and help/argument errors follow the standard envelope.
 - [ ] CLI validates subcommands, required arguments, canonical names/versions/CIDs, frozen mode, configured IPFS/wallet dependencies, and destination policy before mutation.
-- [ ] Tests cover train refusal, unknown/special-file refusal, scrub refusal, CID-byte/schema equality, receipt separation, profile tampering/unknown id, package/hash parity, signature/digest mismatch, every malicious-archive class/limit/cleanup rule, CLI registry/help/arguments, and a CLI-level mocked-IPFS publish→install round trip.
+- [ ] Tests cover train refusal, unknown/special-file refusal, scrub refusal,
+  scrub-report canonicalization/recomputation/tampering, CID-byte/schema
+  equality, receipt separation, profile tampering/unknown id, package/hash
+  parity, signature/digest mismatch, every malicious-archive class plus
+  directory/depth floods, non-canonical header/path-split/checksum rejection,
+  every limit/cleanup rule, CLI registry/help/arguments, and a CLI-level
+  mocked-IPFS publish→install round trip.
 
 **Verification (implementer):**
 
@@ -206,7 +245,7 @@ const implStateDirCid = await args.deps.pinToIpfs({ kind: 'implStateDir', data: 
 ```
 
 Replace with profile resolve → validate/scrub → walk → deterministic
-uncompressed ustar → pin as the verified CAR/DAG package whose materialized
+uncompressed ustar → pin the exact bytes as a raw-CID block whose materialized
 files re-hash to `args.codeDigest`. Pin the immutable v2 manifest exactly once,
 then anchor that CID and keep the receipt outside it.
 
