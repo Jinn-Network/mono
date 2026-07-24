@@ -60,6 +60,12 @@ function identifiers(
       (left, right) =>
         compareStrings(left.propertyId, right.propertyId) ||
         compareStrings(left.value, right.value),
+    )
+    .filter(
+      (value, index, sorted) =>
+        index === 0 ||
+        value.propertyId !== sorted[index - 1]!.propertyId ||
+        value.value !== sorted[index - 1]!.value,
     );
 }
 

@@ -14,6 +14,7 @@ import type {
   NativeTraceCapture,
   OpaqueRuntimeComponentCapture,
   RuntimeObservationCapture,
+  ResumeExecutionRecordingInput,
   StartExecutionRecordingInput,
 } from "./types.js";
 
@@ -551,6 +552,15 @@ export function validateStartExecutionRecordingInput(
       invalidCaptureInput(`runtime/components/${index}/kind is invalid.`);
     }
   });
+}
+
+export function validateResumeExecutionRecordingInput(
+  input: ResumeExecutionRecordingInput,
+): void {
+  if (!input || typeof input !== "object") {
+    invalidCaptureInput("resume input is required.");
+  }
+  nonEmptyString(input.workspaceDir, "workspaceDir");
 }
 
 export function validateFinalizeExecutionInput(

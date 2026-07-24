@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -201,6 +206,33 @@ describe("execution recorder lifecycle", () => {
     ).rejects.toMatchObject({ code: "RECORDING_CONFLICT" });
   });
 
+  test("normalizes duplicate identifiers for idempotent capture", async () => {
+    const workspaceDir = await workspace();
+    const recorder = createExecutionRecorder({
+      repository: new InMemoryEvidenceRepository(),
+    });
+    const recording = await recorder.start(startInput(workspaceDir));
+    const identifier = {
+      propertyId: "https://example.test/terms/content-id" as const,
+      value: "same",
+    };
+    const once = {
+      ...file("inputs/identified.txt", "same\n"),
+      identifiers: [identifier],
+    } as const;
+
+    await recording.captureInput(once);
+    const captured = await openWorkspaceState(workspaceDir);
+    await recording.captureInput({
+      ...once,
+      identifiers: [identifier, identifier],
+    });
+
+    expect((await openWorkspaceState(workspaceDir)).head).toEqual(
+      captured.head,
+    );
+  });
+
   test("captures runtime observations idempotently", async () => {
     const workspaceDir = await workspace();
     const recorder = createExecutionRecorder({
@@ -268,6 +300,30 @@ describe("execution recorder lifecycle", () => {
     ).rejects.toMatchObject({ code: "RECORDING_CONFLICT" });
   });
 
+  test("rejects a trace format that collides with an existing graph identity", async () => {
+    const workspaceDir = await workspace();
+    const input = startInput(workspaceDir);
+    const recorder = createExecutionRecorder({
+      repository: new InMemoryEvidenceRepository(),
+    });
+    const recording = await recorder.start(input);
+
+    await expect(
+      recording.attachNativeTrace({
+        artifact: file(
+          "trace/native.jsonl",
+          '{"event":"done"}\n',
+          "application/x-ndjson",
+        ),
+        format: {
+          entityId: input.executor.entityId,
+          name: "Conflicting profile",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "RECORDING_CONFLICT" });
+    expect((await openWorkspaceState(workspaceDir)).head.revision).toBe(1);
+  });
+
   test("rejects stale handles and leaves the winning transition intact", async () => {
     const workspaceDir = await workspace();
     const recorder = createExecutionRecorder({
@@ -310,6 +366,35 @@ describe("execution recorder lifecycle", () => {
     await expect(
       recorder.resume({ workspaceDir: await workspace("missing") }),
     ).rejects.toMatchObject({ code: "RECORDING_NOT_FOUND" });
+    await expect(recorder.resume(undefined as never)).rejects.toMatchObject({
+      code: "INVALID_CAPTURE_INPUT",
+    });
+  });
+
+  test("detects a last-entry payload mutation through its declaration fingerprint", async () => {
+    const workspaceDir = await workspace();
+    const recorder = createExecutionRecorder({
+      repository: new InMemoryEvidenceRepository(),
+    });
+    await recorder.start(startInput(workspaceDir));
+    const entryPath = join(
+      workspaceDir,
+      "journal",
+      "000000000001.json",
+    );
+    const entry = JSON.parse(await readFile(entryPath, "utf8")) as {
+      event: {
+        recording: {
+          record: { name: string };
+        };
+      };
+    };
+    entry.event.recording.record.name = "mutated after publication";
+    await writeFile(entryPath, `${JSON.stringify(entry)}\n`);
+
+    await expect(recorder.resume({ workspaceDir })).rejects.toMatchObject({
+      code: "WORKSPACE_CORRUPT",
+    });
   });
 
   test("honors cancellation without advancing the journal", async () => {

@@ -31,6 +31,7 @@ import type {
   ExecutionRecorder,
   ExecutionRecorderOptions,
   ExecutionRecording,
+  CaptureOrigin,
   FinalizeExecutionInput,
   FinalizeExecutionResult,
   InputCapture,
@@ -43,6 +44,7 @@ import type {
 import {
   validateFinalizeExecutionInput,
   validateNativeTraceCapture,
+  validateResumeExecutionRecordingInput,
   validateRuntimeObservationCapture,
   validateStartExecutionRecordingInput,
 } from "./validate-input.js";
@@ -87,7 +89,7 @@ function observationIds(
 }
 
 function traceIds(trace: PersistedNativeTraceCapture): readonly string[] {
-  return artifactIds(trace.artifact);
+  return [trace.artifact.entityId, ...artifactIds(trace.artifact).slice(1)];
 }
 
 function startIds(recording: PersistedStartRecording): readonly string[] {
@@ -136,6 +138,213 @@ function sameHead(left: WorkspaceState, right: WorkspaceState): boolean {
     left.head.revision === right.head.revision &&
     left.head.digest === right.head.digest
   );
+}
+
+type ContextualIdentityKind =
+  | "agent"
+  | "contextual-agent"
+  | "component"
+  | "execution"
+  | "license"
+  | "trace-format";
+
+interface ContextualIdentityClaim {
+  readonly kind: ContextualIdentityKind;
+  readonly fingerprint?: string;
+}
+
+function originActorIds(origin: CaptureOrigin): readonly string[] {
+  switch (origin.kind) {
+    case "producer-observed":
+      return [origin.observer];
+    case "executor-reported":
+      return [origin.reporter, origin.capturedBy];
+    case "external-observed":
+      return [origin.observer, origin.capturedBy];
+  }
+}
+
+function artifactOrigins(
+  artifact: PersistedArtifactCapture,
+): readonly CaptureOrigin[] {
+  return [
+    artifact.origin,
+    ...(artifact.kind === "file"
+      ? []
+      : artifact.members.flatMap(artifactOrigins)),
+  ];
+}
+
+function registerContextualClaim(
+  state: WorkspaceState,
+  claims: Map<string, ContextualIdentityClaim>,
+  id: string,
+  kind: ContextualIdentityKind,
+  value?: unknown,
+): void {
+  const fingerprint =
+    value === undefined
+      ? undefined
+      : captureFingerprint(`graph-identity:${kind}`, value);
+  const current = claims.get(id);
+  if (current === undefined) {
+    claims.set(id, { kind, fingerprint });
+    return;
+  }
+  if (
+    (current.kind === "agent" && kind === "contextual-agent") ||
+    (current.kind === "contextual-agent" && kind === "agent") ||
+    (current.kind === "contextual-agent" &&
+      kind === "contextual-agent")
+  ) {
+    if (kind === "agent") claims.set(id, { kind, fingerprint });
+    return;
+  }
+  if (
+    current.kind === kind &&
+    current.fingerprint === fingerprint
+  ) {
+    return;
+  }
+  conflict(
+    state,
+    `Graph identity ${id} is reused for incompatible contextual roles.`,
+    id,
+  );
+}
+
+function registerOrigins(
+  state: WorkspaceState,
+  claims: Map<string, ContextualIdentityClaim>,
+  origins: readonly CaptureOrigin[],
+): void {
+  for (const origin of origins) {
+    for (const id of originActorIds(origin)) {
+      registerContextualClaim(
+        state,
+        claims,
+        id,
+        "contextual-agent",
+      );
+    }
+  }
+}
+
+function contextualClaims(
+  state: WorkspaceState,
+): Map<string, ContextualIdentityClaim> {
+  const claims = new Map<string, ContextualIdentityClaim>();
+  const recording = state.recording;
+  if (recording === undefined) return claims;
+  registerContextualClaim(
+    state,
+    claims,
+    recording.executionId,
+    "execution",
+  );
+  registerContextualClaim(
+    state,
+    claims,
+    recording.record.license,
+    "license",
+  );
+  for (const value of [recording.executor, recording.producer]) {
+    registerContextualClaim(
+      state,
+      claims,
+      value.entityId,
+      "agent",
+      value,
+    );
+    registerOrigins(state, claims, [value.origin]);
+  }
+  registerOrigins(state, claims, [
+    recording.task.origin,
+    recording.runtime.origin,
+    ...recording.initialInputs.flatMap(artifactOrigins),
+    ...(recording.repositoryState === undefined
+      ? []
+      : artifactOrigins(recording.repositoryState.artifact)),
+  ]);
+  for (const component of recording.runtime.components) {
+    if (component.kind === "controlled") {
+      registerOrigins(state, claims, artifactOrigins(component.artifact));
+      continue;
+    }
+    registerOrigins(state, claims, artifactOrigins(component.descriptor));
+    registerContextualClaim(
+      state,
+      claims,
+      component.component.entityId,
+      "component",
+      component.component,
+    );
+    if (component.component.provider !== undefined) {
+      registerContextualClaim(
+        state,
+        claims,
+        component.component.provider,
+        "contextual-agent",
+      );
+    }
+  }
+  for (const input of state.inputs) {
+    registerOrigins(state, claims, artifactOrigins(input));
+  }
+  for (const observation of state.runtimeObservations) {
+    if (observation.kind === "resource") {
+      registerOrigins(state, claims, [observation.origin]);
+    } else if (observation.kind === "environment") {
+      registerOrigins(
+        state,
+        claims,
+        artifactOrigins(observation.artifact),
+      );
+    } else {
+      registerOrigins(
+        state,
+        claims,
+        artifactOrigins(observation.component.descriptor),
+      );
+      registerContextualClaim(
+        state,
+        claims,
+        observation.component.component.entityId,
+        "component",
+        observation.component.component,
+      );
+      if (observation.component.component.provider !== undefined) {
+        registerContextualClaim(
+          state,
+          claims,
+          observation.component.component.provider,
+          "contextual-agent",
+        );
+      }
+    }
+  }
+  if (state.nativeTrace !== undefined) {
+    registerOrigins(
+      state,
+      claims,
+      artifactOrigins(state.nativeTrace.artifact),
+    );
+    registerContextualClaim(
+      state,
+      claims,
+      state.nativeTrace.format.entityId,
+      "trace-format",
+      state.nativeTrace.format,
+    );
+  }
+  return claims;
+}
+
+function assertArtifactOriginsCompatible(
+  state: WorkspaceState,
+  artifact: PersistedArtifactCapture,
+): void {
+  registerOrigins(state, contextualClaims(state), artifactOrigins(artifact));
 }
 
 class ExecutionRecordingHandle implements ExecutionRecording {
@@ -192,6 +401,7 @@ class ExecutionRecordingHandle implements ExecutionRecording {
       input,
       options?.signal,
     );
+    assertArtifactOriginsCompatible(this.state, persisted);
     const fingerprint = captureFingerprint("input", persisted);
     const sameIdentity = this.state.inputs.find(
       ({ entityId }) => entityId === persisted.entityId,
@@ -242,6 +452,37 @@ class ExecutionRecordingHandle implements ExecutionRecording {
       observation,
       options?.signal,
     );
+    const claims = contextualClaims(this.state);
+    if (persisted.kind === "resource") {
+      registerOrigins(this.state, claims, [persisted.origin]);
+    } else if (persisted.kind === "environment") {
+      registerOrigins(
+        this.state,
+        claims,
+        artifactOrigins(persisted.artifact),
+      );
+    } else {
+      registerOrigins(
+        this.state,
+        claims,
+        artifactOrigins(persisted.component.descriptor),
+      );
+      registerContextualClaim(
+        this.state,
+        claims,
+        persisted.component.component.entityId,
+        "component",
+        persisted.component.component,
+      );
+      if (persisted.component.component.provider !== undefined) {
+        registerContextualClaim(
+          this.state,
+          claims,
+          persisted.component.component.provider,
+          "contextual-agent",
+        );
+      }
+    }
     const identity = identityForObservation(persisted);
     const fingerprint = captureFingerprint(
       "runtime-observation",
@@ -298,6 +539,19 @@ class ExecutionRecordingHandle implements ExecutionRecording {
       this.state.paths,
       trace,
       options?.signal,
+    );
+    const claims = contextualClaims(this.state);
+    registerOrigins(
+      this.state,
+      claims,
+      artifactOrigins(persisted.artifact),
+    );
+    registerContextualClaim(
+      this.state,
+      claims,
+      persisted.format.entityId,
+      "trace-format",
+      persisted.format,
     );
     const fingerprint = captureFingerprint("native-trace", persisted);
     if (this.state.nativeTrace !== undefined) {
@@ -405,6 +659,11 @@ class ExecutionRecorderImpl implements ExecutionRecorder {
       state.executionId,
       input.signal,
     );
+    contextualClaims({
+      ...state,
+      recording: persisted,
+      inputs: persisted.initialInputs,
+    });
     const fingerprint = captureFingerprint("initialized", persisted);
     if (state.recording !== undefined) {
       if (
@@ -435,6 +694,7 @@ class ExecutionRecorderImpl implements ExecutionRecorder {
   async resume(
     input: ResumeExecutionRecordingInput,
   ): Promise<ExecutionRecording> {
+    validateResumeExecutionRecordingInput(input);
     assertRecorderOperationActive(input.signal);
     const state = await openWorkspaceState(
       input.workspaceDir,

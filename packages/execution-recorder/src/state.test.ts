@@ -14,6 +14,7 @@ import type {
   StoredObjectReference,
 } from "./journal-types.js";
 import { objectPath, storeObject } from "./object-store.js";
+import { captureFingerprint } from "./persist-capture.js";
 import {
   appendWorkspaceEvent,
   createWorkspaceState,
@@ -109,8 +110,24 @@ function initialized(
   return {
     type: "initialized",
     recording,
-    declarationFingerprint:
-      `sha256:${"1".repeat(64)}` as Sha256Digest,
+    declarationFingerprint: captureFingerprint(
+      "initialized",
+      recording,
+    ),
+  };
+}
+
+function withInitializedRecording(
+  event: Extract<JournalEvent, { type: "initialized" }>,
+  recording: PersistedStartRecording,
+): Extract<JournalEvent, { type: "initialized" }> {
+  return {
+    ...event,
+    recording,
+    declarationFingerprint: captureFingerprint(
+      "initialized",
+      recording,
+    ),
   };
 }
 
@@ -127,15 +144,12 @@ async function finalizingState(
   const start = initialized(artifacts[0]);
   state = await appendWorkspaceEvent(
     state,
-    {
-      ...start,
-      recording: {
-        ...start.recording,
-        initialInputs: artifacts.map((artifact, index) =>
-          file(`inputs/fixture-${index}.bin`, artifact),
-        ),
-      },
-    },
+    withInitializedRecording(start, {
+      ...start.recording,
+      initialInputs: artifacts.map((artifact, index) =>
+        file(`inputs/fixture-${index}.bin`, artifact),
+      ),
+    }),
     "2026-07-24T10:00:00Z",
   );
   state = await appendWorkspaceEvent(
@@ -237,16 +251,13 @@ async function initializedConformingMetadataState(
   const start = initialized(fixture.artifacts[0]);
   state = await appendWorkspaceEvent(
     state,
-    {
-      ...start,
-      recording: {
-        ...start.recording,
-        initialInputs: [...fixture.artifacts, fixture.extra].map(
-          (artifact, index) =>
-            file(`inputs/fixture-${index}.bin`, artifact),
-        ),
-      },
-    },
+    withInitializedRecording(start, {
+      ...start.recording,
+      initialInputs: [...fixture.artifacts, fixture.extra].map(
+        (artifact, index) =>
+          file(`inputs/fixture-${index}.bin`, artifact),
+      ),
+    }),
     "2026-07-24T10:00:00Z",
   );
   return {
@@ -295,24 +306,26 @@ describe("replayed workspace state", () => {
       {
         type: "input-captured",
         input,
-        declarationFingerprint:
-          `sha256:${"2".repeat(64)}` as Sha256Digest,
+        declarationFingerprint: captureFingerprint("input", input),
       },
       "2026-07-24T10:00:01Z",
     );
+    const observation = {
+      kind: "resource" as const,
+      entityId: "observations/tokens",
+      name: "Tokens",
+      value: 12,
+      origin: ORIGIN,
+    };
     state = await appendWorkspaceEvent(
       state,
       {
         type: "runtime-observation-captured",
-        observation: {
-          kind: "resource",
-          entityId: "observations/tokens",
-          name: "Tokens",
-          value: 12,
-          origin: ORIGIN,
-        },
-        declarationFingerprint:
-          `sha256:${"3".repeat(64)}` as Sha256Digest,
+        observation,
+        declarationFingerprint: captureFingerprint(
+          "runtime-observation",
+          observation,
+        ),
       },
       "2026-07-24T10:00:02Z",
     );

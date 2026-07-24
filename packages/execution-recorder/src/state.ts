@@ -24,6 +24,7 @@ import type {
 } from "./journal-types.js";
 import { readStoredObject } from "./object-store.js";
 import { workspacePaths, type WorkspacePaths } from "./paths.js";
+import { captureFingerprint } from "./persist-capture.js";
 import type {
   ExecutionId,
   ExecutionRecordingStatus,
@@ -122,6 +123,43 @@ async function verifyEventObjects(
   event: JournalEvent,
   signal?: AbortSignal,
 ): Promise<void> {
+  const declaration =
+    event.type === "initialized"
+      ? {
+          expected: event.declarationFingerprint,
+          actual: captureFingerprint("initialized", event.recording),
+        }
+      : event.type === "input-captured"
+        ? {
+            expected: event.declarationFingerprint,
+            actual: captureFingerprint("input", event.input),
+          }
+        : event.type === "runtime-observation-captured"
+          ? {
+              expected: event.declarationFingerprint,
+              actual: captureFingerprint(
+                "runtime-observation",
+                event.observation,
+              ),
+            }
+          : event.type === "native-trace-attached"
+            ? {
+                expected: event.declarationFingerprint,
+                actual: captureFingerprint(
+                  "native-trace",
+                  event.trace,
+                ),
+              }
+            : undefined;
+  if (
+    declaration !== undefined &&
+    declaration.expected !== declaration.actual
+  ) {
+    throw corruptState(
+      state,
+      "Journal declaration fingerprint does not match its payload.",
+    );
+  }
   const unique = new Map<Sha256Digest, StoredObjectReference>();
   for (const reference of eventObjectReferences(event)) {
     const previous = unique.get(reference.digest);
