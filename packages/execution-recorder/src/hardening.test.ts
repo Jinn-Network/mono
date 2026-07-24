@@ -6,6 +6,7 @@ import {
   open,
   readFile,
   readdir,
+  realpath,
   rm,
   writeFile,
   type FileHandle,
@@ -161,8 +162,10 @@ const origin = {
 } as const;
 
 async function workspace(): Promise<string> {
-  const parent = await mkdtemp(
-    join(tmpdir(), "jinn-recorder-hardening-"),
+  const parent = await realpath(
+    await mkdtemp(
+      join(tmpdir(), "jinn-recorder-hardening-"),
+    ),
   );
   roots.push(parent);
   return join(parent, "recording");

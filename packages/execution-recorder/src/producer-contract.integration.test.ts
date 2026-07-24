@@ -3,6 +3,7 @@
 import {
   mkdtemp,
   readFile,
+  realpath,
   rm,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -185,8 +186,10 @@ async function createScenarioContext(
   fixtures: ProducerContractFixtures,
   repository: EvidenceRepository,
 ): Promise<ScenarioContext> {
-  const parent = await mkdtemp(
-    join(tmpdir(), `jinn-producer-contract-${scenario}-`),
+  const parent = await realpath(
+    await mkdtemp(
+      join(tmpdir(), `jinn-producer-contract-${scenario}-`),
+    ),
   );
   const workspaceDir = join(parent, "recording");
   let cleaned = false;
