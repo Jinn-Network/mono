@@ -106,6 +106,34 @@ describe('packed client workflow coverage', () => {
     );
   });
 
+  it('restarts the exact-SHA publish chain when either trusted-publisher workflow changes', () => {
+    const sdkPublish = workflow('.github/workflows/sdk-npm-publish.yml');
+
+    expect(sdkPublish).toContain("'.github/workflows/sdk-npm-publish.yml'");
+    expect(sdkPublish).toContain("'.github/workflows/npm-publish.yml'");
+  });
+
+  it('validates source before canary rewriting and rechecks built layouts before packing', () => {
+    const clientPublish = workflow('.github/workflows/npm-publish.yml');
+    const typecheck = clientPublish.indexOf('- run: yarn typecheck');
+    const test = clientPublish.indexOf('- run: yarn test');
+    const patch = clientPublish.indexOf(
+      '- name: Patch package version for canary publish',
+    );
+    const build = clientPublish.indexOf('- run: yarn build');
+    const builtLayouts = clientPublish.indexOf(
+      '- name: Verify build-dependent client layouts',
+    );
+    const pack = clientPublish.indexOf('- run: yarn pack:smoke');
+
+    expect(typecheck).toBeGreaterThan(-1);
+    expect(test).toBeGreaterThan(typecheck);
+    expect(patch).toBeGreaterThan(test);
+    expect(build).toBeGreaterThan(patch);
+    expect(builtLayouts).toBeGreaterThan(build);
+    expect(pack).toBeGreaterThan(builtLayouts);
+  });
+
   it('preserves stable release/manual entry points and requires SDK 0.1.1', () => {
     const clientPublish = workflow('.github/workflows/npm-publish.yml');
     const sdkPublish = workflow('.github/workflows/sdk-npm-publish.yml');
