@@ -700,6 +700,7 @@ function makeCrashRecoveringReviewPorts(input: {
         };
       },
       human: async () => ({ status: 'human', head: input.head }),
+      release: async () => ({ status: 'released', head: input.head }),
     },
     publishReceipt: async (
       receipt: PublishAdoptionReceiptInput,
@@ -1286,6 +1287,7 @@ describe('marketplace closed-fleet child loop', () => {
         claimOid: EXPECTED,
         expectedHead: EXPECTED,
         baseSha: COMPLETION,
+        targetBaseOid: gitOid('a'.repeat(40)),
         v2AttemptId: ATTEMPT,
         runnerId: 'runner-1',
         selectedLogin: 'jinn-autopilot',
