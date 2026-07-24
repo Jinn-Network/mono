@@ -35,6 +35,7 @@ import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import type { LauncherGeneratorStateSnapshot } from './api/launcher-status.js';
 import { ensureUiToken } from './api/ui-token.js';
+import { decideUiAutoOpen } from './cli/ui-auto-open-gate.js';
 import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
 import { emitProgress } from './observability/progress.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
@@ -99,8 +100,10 @@ import { CredentialScrubProcessor } from './trajectory/processors/credential-scr
 import { TranscriptContentScrubProcessor } from './trajectory/processors/transcript-content-scrub.js';
 import { IdentityScrubProcessor } from './trajectory/processors/identity-scrub.js';
 import { PathScrubProcessor } from './trajectory/processors/path-scrub.js';
-import { buildScrubPipeline } from './trajectory/scrub/build.js';
-import { maybeBuildPiiDetector } from './trajectory/scrub/pii-build.js';
+import {
+  buildScrubPipeline,
+  maybeBuildPiiDetector,
+} from '@jinn-network/core/scrub';
 import { SqliteExporterProcessor } from './trajectory/processors/sqlite-exporter.js';
 import {
   startTranscriptWatcher,
@@ -120,6 +123,14 @@ import {
   summarizeFallbackChain,
 } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
+import {
+  fetchLatestVersion,
+  getRunningVersion,
+  isNewerVersion,
+  isVersionCheckEnabled,
+  formatUpdateLogLine,
+  VERSION_CHECK_INTERVAL_MS,
+} from './preflight/version-check.js';
 import { openBrowser } from './cli/open-browser.js';
 
 if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'development') {
@@ -543,6 +554,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const joinApplierHolder: {
     current: import('./daemon/join-applier.js').JoinApplier | undefined;
   } = { current: undefined };
+
+  // #641: latest published `@jinn-network/client` version, back-filled by the
+  // start-time npm-registry check below. `/v1/status.latestVersion` reads this
+  // via the `latestVersion` getter threaded into the ApiServer status config.
+  const latestVersionHolder: { current: string | null } = { current: null };
 
   // hjex.6: retry signal for the bootstrap halt-and-resume loop.
   // When a SetupBootstrapHalted is caught (fatal non-funding error or funding
@@ -994,10 +1010,37 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     `http://127.0.0.1:${setupApiServer.port}/?k=${handshakeKey}`;
   // Auto-open the operator panel as soon as the setup-mode API is up so the
   // operator can watch bootstrap progress (including the funding wait, which
-  // is the whole point of starting the API early). Suppressed by setting
-  // JINN_NO_UI=1 — `jinn run --no-ui` translates the flag into this env var.
-  if (process.env['JINN_NO_UI'] !== '1') {
+  // is the whole point of starting the API early). Only on the first-ever
+  // launch (tracked by a marker file) — otherwise every restart during a
+  // dogfooding session opens a fresh browser tab and stale tabs accumulate
+  // (issue #804). `jinn run --no-ui` / JINN_NO_UI=1 always suppresses;
+  // `jinn run --ui` / JINN_FORCE_UI=1 forces a reopen even past first launch.
+  const uiOpenedMarkerPath = join(config.earningDir, '.ui-opened');
+  const noUi = process.env['JINN_NO_UI'] === '1';
+  const forceUi = process.env['JINN_FORCE_UI'] === '1';
+  const uiAutoOpenDecision = decideUiAutoOpen({
+    noUi,
+    forceUi,
+    markerExists: existsSync(uiOpenedMarkerPath),
+  });
+  if (uiAutoOpenDecision.shouldOpen) {
     openBrowser(process.env['JINN_UI_HANDSHAKE_URL']!);
+  } else if (!noUi) {
+    console.log(
+      `[main] Dashboard ready at http://127.0.0.1:${setupApiServer.port} — ` +
+        `run 'jinn ui' to open it (auto-open suppressed after first launch; use --ui to force)`,
+    );
+  }
+  if (uiAutoOpenDecision.shouldWriteMarker) {
+    try {
+      mkdirSync(dirname(uiOpenedMarkerPath), { recursive: true });
+      writeFileSyncMain(uiOpenedMarkerPath, new Date().toISOString() + '\n');
+    } catch (err) {
+      console.warn(
+        `[main] Failed to write UI-opened marker at ${uiOpenedMarkerPath}: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
   }
   console.log(
     `[main] Setup-mode API up (mode=${setupController.mode()}). ` +
@@ -1278,6 +1321,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     .filter((entry) => entry.roles.includes('solver'))
     .map((entry) => entry.manifestCid);
 
+  // #547: only scan/ingest evaluation opportunities when this operator holds the
+  // evaluator role in at least one joined SolverNet. The join applier flips this
+  // on live via adapter.setEvaluatorEnabled(true).
+  const evaluatorEnabled = Object.values(config.joinedSolverNets ?? {})
+    .some((entry) => entry.roles.includes('evaluator'));
+
   // ── DiscoveryAPI construction ─────────────────────────────────────────────
   // Build the shared DiscoveryAPI used by MechAdapter (task discovery),
   // the SolverNet registry client (lifecycle status), and the corpus library
@@ -1359,6 +1408,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
     evictionRecovery,
     taskDiscovery,
+    evaluatorEnabled,
   }, sharedStore);
 
   // ── TaskEngine wiring ─────────────────────────────────────────────────
@@ -1458,6 +1508,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     daemonApiToken: apiToken,
     implStateDirRoot: config.engine.implStateDirRoot,
     ipfsRegistryUrl: config.ipfsRegistryUrl,
+    sweRebenchV2StateDir: config.sweRebenchV2StateDir,
     ...(process.env['JINN_POLYMARKET_GAMMA_BASE_URL']
       ? { polymarketGammaBaseUrl: process.env['JINN_POLYMARKET_GAMMA_BASE_URL'] }
       : {}),
@@ -1588,17 +1639,18 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     evictionRecovery,
   };
 
-  // ── Mineable-trace store (task-creator spec §10) ──────────────────────────
+  // ── Contribution reference queue (task-creator spec §10) ─────────────────
   //
-  // ALWAYS constructed (mono#1714): local retention/mining/distillation happen
-  // by default and never leave the machine. Whether a mined task is published
-  // off the box is gated separately by `config.mineableTraces.share`.
-  const { MineableTraceStore } = await import('./solver-types/_swe-rebench-v2-mineable-store.js');
-  const mineableStore = new MineableTraceStore({
-    stateDir: join(homedir(), '.jinn-client', 'mineable'),
+  // ALWAYS constructed so legacy v1/v2 files migrate once to the reference-only
+  // v3 schema. Stage 2 keeps every unpublished reference explicitly disabled;
+  // canonical Episode persistence is owned by the harness layer.
+  const { ContributionStore, resolveContributionStateDir } = await import('@jinn-network/core');
+  const contributionStore = new ContributionStore({
+    stateDir: resolveContributionStateDir(),
   });
+  await contributionStore.disableUnpublished();
   console.log(
-    `[main] mineable-trace retention: local (always on) — share=${config.mineableTraces.share}`,
+    '[main] contribution references: local eligibility queue — publication=parked',
   );
 
   // ── IdentityPublisher (jinn-mono-3zk) ───────────────────────────────────────
@@ -1629,9 +1681,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // ── Seller-side scrub pipeline (publish-time) ─────────────────────────────
   // One pipeline shared by the task engine and the live capture publisher so
   // every published trajectory passes through the same maintained scrub stack
-  // (structural key policy → openredaction → secretlint/entropy → optional ML
-  // PII). The OTLP receiver above runs best-effort ingest-time scrubbers; this
-  // is the authoritative final gate before a trajectory becomes public/sellable.
+  // (structural key policy → owned detectors → secretlint/entropy → GLiNER ML
+  // PII on by default). The OTLP receiver above runs best-effort ingest-time
+  // scrubbers; this is the authoritative final gate before a trajectory becomes
+  // public/sellable.
   const sellerPiiDetector = await maybeBuildPiiDetector(config.captures.piiDetection);
   const sellerScrubPipeline = buildScrubPipeline(
     sellerPiiDetector ? { piiDetector: sellerPiiDetector } : {},
@@ -1900,6 +1953,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         safeAddress,
         agentPrivateKey,
         ipfsGatewayUrl: config.ipfsGatewayUrl,
+        stateDir: config.sweRebenchV2StateDir,
         ...(sharedDiscoveryApi ? { discoveryApi: sharedDiscoveryApi } : {}),
       },
       logger: {
@@ -1929,11 +1983,25 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     ...launchedRecordGenerators.map(({ solverType, generator }, idx) =>
       new GeneratedTaskSource(`launched:${solverType}:${idx}`, generator, {
         bucketKeyForTask: (task) => {
-          if (task.solverType !== 'swe-rebench-v2.v1') return undefined;
-          const instanceId = task.spec?.['instance_id'];
-          const postedCount = task.eligibility?.['posted_count_after_record'];
-          if (typeof instanceId !== 'string' || typeof postedCount !== 'number') return undefined;
-          return `swe-rebench-v2:${instanceId}:${postedCount}`;
+          if (task.solverType === 'swe-rebench-v2.v1') {
+            const instanceId = task.spec?.['instance_id'];
+            const postedCount = task.eligibility?.['posted_count_after_record'];
+            if (typeof instanceId !== 'string' || typeof postedCount !== 'number') return undefined;
+            return `swe-rebench-v2:${instanceId}:${postedCount}`;
+          }
+          // Issue #1893: jinn-repo.v1 live-issue tasks bucket on
+          // <issueNumber>:<snapshotHash> (carried on `eligibility` by
+          // `jinn-repo-live-auto.ts`) rather than the default window-based
+          // key — the window's startTs/endTs changes every tick, which would
+          // defeat once-per-bucket dedup for a generator whose own re-post
+          // signal is a material issue edit, not the passage of time.
+          if (task.solverType === 'jinn-repo.v1' && task.spec?.['source'] === 'live-issue') {
+            const issueNumber = task.eligibility?.['issue_number'];
+            const snapshotHash = task.eligibility?.['snapshot_hash'];
+            if (typeof issueNumber !== 'number' || typeof snapshotHash !== 'string') return undefined;
+            return `jinn-repo-live:${issueNumber}:${snapshotHash}`;
+          }
+          return undefined;
         },
       }),
     ),
@@ -2003,56 +2071,62 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   ) {
     const { resolveHarvestRepoConfigs } = await import('./daemon/harvest-loop.js');
     const harvestRepos = await resolveHarvestRepoConfigs(config.harvest.repos);
-    // A sessions-only operator legitimately has zero repos — the commit
-    // walker is then a no-op (unchanged), but the loop still needs to build
-    // below so the session-echo miner can run.
+    // A sessions-only operator legitimately has zero repos. The loop remains
+    // schedulable so it can report the explicit Stage 2 parked marker.
     if (harvestRepos.length > 0 || harvestMinesSessions) {
-      const { readEnabledState, defaultSweRebenchV2EvaluatorImplStateDir } =
-        await import('./harnesses/impls/swe-rebench-v2-evaluator/harness.js');
-      const { existsSync } = await import('node:fs');
-      const enabled = readEnabledState(defaultSweRebenchV2EvaluatorImplStateDir());
-      if (!enabled || !existsSync(enabled.upstreamRepoDir)) {
-        console.warn(
-          '[main] harvest enabled but swe-rebench-v2 evaluator is not set up — run `jinn harnesses enable swe-rebench-v2-evaluator`',
+      const harvestStateDir = config.sweRebenchV2StateDir;
+      const baseHarvestLoopConfig = {
+        intervalMs: config.harvest.intervalMs,
+        stateDir: harvestStateDir,
+        repos: harvestRepos,
+        limitPerRepo: config.harvest.limitPerRepo,
+        limitPerTick: config.harvest.limitPerTick,
+        publish: config.harvest.publish,
+        minterSafe: safeAddress,
+        sources: config.harvest.sources,
+      };
+      const hasCommitWork = config.harvest.sources.includes('commits') && harvestRepos.length > 0;
+      if (!hasCommitWork) {
+        harvestLoopConfig = baseHarvestLoopConfig;
+        console.log(
+          `[main] harvest loop enabled: 0 repo(s), sources=${config.harvest.sources.join(',')}, interval=${config.harvest.intervalMs}ms (sessions parked)`,
         );
       } else {
-        const { defaultStateDir, getSweRebenchV2ValidatedPoolStore } =
-          await import('./solver-types/swe-rebench-v2.js');
-        const { getDefaultMintedPoolStore } = await import('./solver-types/_swe-rebench-v2-minted-pool.js');
-        const { HttpHfFetcher } = await import('./harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js');
-        const { PythonEvalRunner } = await import('./harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js');
-        const { createGitHubPublicRepoChecker } = await import('./solver-types/_swe-rebench-v2-guards.js');
-        const harvestStateDir = defaultStateDir();
-        harvestLoopConfig = {
-          intervalMs: config.harvest.intervalMs,
-          stateDir: harvestStateDir,
-          repos: harvestRepos,
-          limitPerRepo: config.harvest.limitPerRepo,
-          publish: config.harvest.publish,
-          minterSafe: safeAddress,
-          sources: config.harvest.sources,
-          // Reuse the same mineable-trace store instance constructed above
-          // (always present per mono#1714 — local retention is unconditional),
-          // not a second store pointing elsewhere.
-          mineableStore,
-          operatorSafe: safeAddress,
-          mintDeps: {
-            stateDir: harvestStateDir,
-            ipfsRegistryUrl: config.ipfsRegistryUrl,
-            ipfsGatewayUrl: config.ipfsGatewayUrl,
-            validatedStore: getSweRebenchV2ValidatedPoolStore(harvestStateDir),
-            mintedStore: getDefaultMintedPoolStore(harvestStateDir),
-            hfFetcher: new HttpHfFetcher(),
-            runner: new PythonEvalRunner({ upstreamRepoDir: enabled.upstreamRepoDir }),
-            upstreamRepoDir: enabled.upstreamRepoDir,
-            publicRepoChecker: createGitHubPublicRepoChecker({
-              token: process.env.GITHUB_TOKEN,
-            }),
-          },
-        };
-        console.log(
-          `[main] harvest loop enabled: ${harvestRepos.length} repo(s), sources=${config.harvest.sources.join(',')}, interval=${config.harvest.intervalMs}ms`,
-        );
+        const { readEnabledState, defaultSweRebenchV2EvaluatorImplStateDir } =
+          await import('./harnesses/impls/swe-rebench-v2-evaluator/harness.js');
+        const { existsSync } = await import('node:fs');
+        const enabled = readEnabledState(defaultSweRebenchV2EvaluatorImplStateDir());
+        if (!enabled || !existsSync(enabled.upstreamRepoDir)) {
+          console.warn(
+            '[main] harvest enabled but swe-rebench-v2 evaluator is not set up — run `jinn harnesses enable swe-rebench-v2-evaluator`',
+          );
+        } else {
+          const { getSweRebenchV2ValidatedPoolStore } =
+            await import('./solver-types/swe-rebench-v2.js');
+          const { getDefaultMintedPoolStore } = await import('./solver-types/_swe-rebench-v2-minted-pool.js');
+          const { HttpHfFetcher } = await import('./harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js');
+          const { PythonEvalRunner } = await import('./harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js');
+          const { createGitHubPublicRepoChecker } = await import('./solver-types/_swe-rebench-v2-guards.js');
+          harvestLoopConfig = {
+            ...baseHarvestLoopConfig,
+            mintDeps: {
+              stateDir: harvestStateDir,
+              ipfsRegistryUrl: config.ipfsRegistryUrl,
+              ipfsGatewayUrl: config.ipfsGatewayUrl,
+              validatedStore: getSweRebenchV2ValidatedPoolStore(harvestStateDir),
+              mintedStore: getDefaultMintedPoolStore(harvestStateDir),
+              hfFetcher: new HttpHfFetcher(),
+              runner: new PythonEvalRunner({ upstreamRepoDir: enabled.upstreamRepoDir }),
+              upstreamRepoDir: enabled.upstreamRepoDir,
+              publicRepoChecker: createGitHubPublicRepoChecker({
+                token: process.env.GITHUB_TOKEN,
+              }),
+            },
+          };
+          console.log(
+            `[main] harvest loop enabled: ${harvestRepos.length} repo(s), sources=${config.harvest.sources.join(',')}, interval=${config.harvest.intervalMs}ms`,
+          );
+        }
       }
     }
   }
@@ -2071,6 +2145,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     peers: config.peers.length > 0 ? config.peers : undefined,
     nodeEndpoint: config.nodeEndpoint,
     creatorSafeAddress: safeAddress,
+    sweRebenchV2StateDir: config.sweRebenchV2StateDir,
     corpusFactory,
     harnessReadinessRegistry,
     spendCap,
@@ -2098,6 +2173,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         source: passwordResolution.source,
         filePath: passwordResolution.filePath,
       },
+      // #641: back-fills /v1/status.latestVersion from the start-time
+      // npm-registry check (populated after the daemon-running line below).
+      latestVersion: () => latestVersionHolder.current,
       spendCaps: spendCap?.caps,
       aiUnits,
     },
@@ -2122,6 +2200,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       deliveryDeps,
       implRegistry,
       solverNetRegistry,
+      // #1827: resolves envelope.task.createdAt at claim() time. getBlock
+      // errors propagate deliberately — engine.ts retries a bounded number of
+      // times and keeps/fails the task before signing rather than emitting a
+      // provenance tuple without its authoritative creation timestamp.
+      blockTimestamp: {
+        getBlockTimestamp: async (blockNumber: number): Promise<number | undefined> => {
+          const block = await publicClient.getBlock({ blockNumber: BigInt(blockNumber) });
+          return Number(block.timestamp);
+        },
+        configuredRpcUrls: config.rpcUrls,
+      },
       // Spec §14, Task 28: per-launch claim eligibility filter. Operators
       // populate `joinedSolverNets[<manifestCid>]` via the SPA's join flow;
       // the engine refuses tasks whose `manifestDigest = keccak256(cid)`
@@ -2142,13 +2231,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       operatorConfig,
       operatorSafeAddress: safeAddress,
       harnessMode: config.harness.mode,
+      // #1393: corpus knowledge autoload — operator opt-out flag. The corpus
+      // instance itself is injected by the Daemon (built from corpusFactory).
+      knowledge: { enabled: config.engine.knowledgeAutoload },
       // Share the one maintained scrub pipeline (incl. optional ML PII) so task
       // trajectories and captures are scrubbed by the same stack before publish.
       scrubPipeline: sellerScrubPipeline,
-      // Task-creator spec §10 (D2): absent unless the operator opted into
-      // tier-1 local retention above.
-      mineableStore,
-      mineablePublishConsent: config.mineableTraces.share,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0
@@ -2241,6 +2329,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     readiness: harnessReadinessRegistry,
     registry: solverNetRegistry,
     config,
+    enableEvaluator: () => adapter.setEvaluatorEnabled(true),
   });
 
   if (config.watchdogAutoRestart) {
@@ -2289,12 +2378,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // flow (they were created in setup-mode before bootstrap), so we close
   // them explicitly after Daemon.stop() completes.
   let shutdownPromise: Promise<void> | null = null;
+  // #641: recurring npm-registry version check; cleared on shutdown.
+  let versionCheckTimer: ReturnType<typeof setInterval> | null = null;
   const shutdown = async (signal: string) => {
     if (shutdownPromise) return shutdownPromise;
     shutdownPromise = (async () => {
       let exitCode = 0;
       console.log(`\n[main] Received ${signal}, shutting down...`);
       try {
+        if (versionCheckTimer) clearInterval(versionCheckTimer);
         harnessReadinessRegistry.stop();
         await daemon.stop();
         await setupApiServer.close().catch(() => undefined);
@@ -2348,6 +2440,38 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     throw error;
   }
   console.log(`[main] Daemon running. Dashboard: http://127.0.0.1:${config.apiPort}`);
+
+  // #641: start-time (and recurring) npm-registry version check. Fire-and-forget
+  // — never awaited, never rejects into boot. When a newer client is published
+  // it logs one line and back-fills the dashboard's update_available banner via
+  // `latestVersionHolder`. Opt out with JINN_VERSION_CHECK=0.
+  if (isVersionCheckEnabled(process.env)) {
+    const refreshVersionCheck = async (): Promise<void> => {
+      try {
+        const latest = await fetchLatestVersion();
+        if (latest && isNewerVersion(getRunningVersion(), latest)) {
+          // Only surface a value when the published latest is genuinely newer
+          // than the running build. The dashboard banner derives directly from
+          // a non-null `latestVersion`, so this keeps the log and the banner on
+          // the same semver strictly-greater check.
+          latestVersionHolder.current = latest;
+          console.log(formatUpdateLogLine(latest));
+        } else {
+          // Not newer (equal, older, or unfetchable) — clear any prior value so
+          // a stale tick can't linger as a false upgrade signal.
+          latestVersionHolder.current = null;
+        }
+      } catch {
+        // Advisory only — a registry hiccup must never disturb the daemon.
+      }
+    };
+    void refreshVersionCheck();
+    versionCheckTimer = setInterval(() => {
+      void refreshVersionCheck();
+    }, VERSION_CHECK_INTERVAL_MS);
+    versionCheckTimer.unref();
+  }
+
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),

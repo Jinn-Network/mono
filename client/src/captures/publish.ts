@@ -73,11 +73,21 @@ export interface CaptureEnvelopeAnchorInput {
   envelopeCid: string;
   envelopeHash: `0x${string}`;
   envelope: SignedEnvelope;
+  /** Measurement controls require a mined successful receipt, not best effort. */
+  requireSuccessfulReceipt?: boolean;
+  /** Persist an irreversible broadcast before receipt confirmation begins. */
+  onBroadcast?: (txHash: `0x${string}`) => void;
+  /** Persist the deterministic payload before its transaction is sent. */
+  onPrepared?: (payloadHex: `0x${string}`) => void;
 }
 
 export interface CaptureEnvelopeAnchorResult {
   txHash?: `0x${string}`;
   blockNumber?: number | null;
+  gasUsed?: bigint | null;
+  feeWei?: bigint | null;
+  /** Exact ABI payload written on chain, for durable control-row recording. */
+  payloadHex?: `0x${string}`;
 }
 
 export interface PublishCaptureResult {
@@ -276,7 +286,8 @@ async function buildCaptureTrajectoryPayload(
   // the last gate before a trajectory becomes public/sellable. Scrubbing here
   // both sanitises the span attributes and grows each span's redactedKeys, which
   // the manifest below is derived from.
-  const scrubbed = await scrubCaptureSpans(spans, scrubPipeline);
+  const perClassCounts: Record<string, number> = {};
+  const scrubbed = await scrubCaptureSpans(spans, scrubPipeline, { perClassCounts });
   const unsigned = {
     schemaVersion: CAPTURE_TRAJECTORY_ARTIFACT_TYPE,
     sessionId: capture.sessionId,
@@ -286,6 +297,7 @@ async function buildCaptureTrajectoryPayload(
     redactionManifest: {
       spans: scrubbed.map((span) => ({ spanId: span.spanId, redactedKeys: span.redactedKeys })),
       totalRedactions: scrubbed.reduce((sum, span) => sum + span.redactedKeys.length, 0),
+      ...scrubPipeline.manifestProvenance(perClassCounts),
     },
   };
   return unsigned;

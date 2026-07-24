@@ -30,6 +30,8 @@ def test_empty_first_message_does_not_crash_and_keeps_model():
     assert task is not None
     # Model survives even when the first message carried no summary text.
     assert task["environment"]["model"] == "step-3.7-flash"
+    assert task["outcome"]["verifiabilityTier"] == "user-accepted"
+    assert "verificationStrength" not in task["outcome"]
 
 
 def test_empty_first_message_lets_a_later_message_set_the_summary():
@@ -68,6 +70,13 @@ def test_records_user_and_assistant_turns_in_order():
     ep = capture_buffer.assemble_episode("s", "s", completed=True, interrupted=False)
     capture_buffer.reset()
     assert ep is not None
+    assert ep["session"]["kind"] == "user"
+    assert ep["origin"] == {
+        "writer": ep["environment"]["harness"]["name"],
+        "build": ep["environment"]["harness"]["version"],
+    }
+    assert ep["outcome"]["verificationStrength"] == "user-accepted"
+    assert "verifiabilityTier" not in ep["outcome"]
     traj = ep["trajectory"]
     assert [step["kind"] for step in traj] == [
         "jinn.agent_turn",

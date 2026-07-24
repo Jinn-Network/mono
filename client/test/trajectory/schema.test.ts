@@ -83,6 +83,22 @@ describe('RedactionManifestSchema', () => {
     };
     expect(() => RedactionManifestSchema.parse(m)).toThrow();
   });
+
+  it('accepts additive v2 provenance fields and still parses legacy manifests', () => {
+    const legacy = {
+      spans: [{ spanId: '1'.repeat(16), redactedKeys: ['a'] }],
+      totalRedactions: 1,
+    };
+    expect(() => RedactionManifestSchema.parse(legacy)).not.toThrow();
+    expect(() =>
+      RedactionManifestSchema.parse({
+        ...legacy,
+        schemaVersion: 2,
+        policyHash: 'ab'.repeat(32),
+        perClassCounts: { 'A1:redact': 1 },
+      }),
+    ).not.toThrow();
+  });
 });
 
 describe('JinnTrajectoryV1Schema', () => {
@@ -110,16 +126,8 @@ describe('JinnTrajectoryV1Schema', () => {
     ).toThrow();
   });
 
-  // #1672: `derivedFrom` is a new optional field. A live-path blob that omits
-  // it must still validate (additive/non-breaking — AC2); a backfill blob that
-  // carries it must round-trip.
-  it('accepts a live-path blob that omits derivedFrom', () => {
-    const parsed = JinnTrajectoryV1Schema.parse(valid);
-    expect(parsed.derivedFrom).toBeUndefined();
-  });
-
-  it('accepts and round-trips a derived blob carrying derivedFrom', () => {
+  it('strips the retired backfill-only derivedFrom field', () => {
     const parsed = JinnTrajectoryV1Schema.parse({ ...valid, derivedFrom: 'bafy-source-cid' });
-    expect(parsed.derivedFrom).toBe('bafy-source-cid');
+    expect('derivedFrom' in parsed).toBe(false);
   });
 });

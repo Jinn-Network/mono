@@ -130,6 +130,8 @@ export async function enrichBatch(
       taskId: meta.taskId,
       evaluator: meta.evaluator,
       manifestCid: anchor.manifestCid,
+      publisherAgentId: anchor.publisherAgentId,
+      manifestHash: anchor.manifestHash,
       solverType: meta.solverType,
       evidenceTier: meta.evidenceTier,
       actualPassed: meta.actualPassed,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   SolverNetRegistry,
   loadSolverNets,
@@ -34,5 +34,50 @@ describe('registerJoinedNet', () => {
     const live = new SolverNetRegistry();
     await registerJoinedNet(live, CID, { ...joined, contract: undefined });
     expect(live.list()).toEqual([]);
+  });
+
+  describe('diagnostic warnings on silent skip', () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    it('warns (missing contract field) and does not register when contract is absent', async () => {
+      const live = new SolverNetRegistry();
+      await registerJoinedNet(live, CID, { ...joined, contract: undefined });
+
+      expect(live.list()).toEqual([]);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const msg = String(warnSpy.mock.calls[0][0]);
+      expect(msg).toMatch(/missing contract field/);
+      expect(msg).toContain(CID);
+    });
+
+    it('warns (did not resolve) and does not register when contract is unknown', async () => {
+      const live = new SolverNetRegistry();
+      await registerJoinedNet(live, CID, {
+        ...joined,
+        contract: { id: 'not-a-real-solvernet', version: 'v99' },
+      });
+
+      expect(live.list()).toEqual([]);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const msg = String(warnSpy.mock.calls[0][0]);
+      expect(msg).toMatch(/did not resolve/);
+      expect(msg).toContain(CID);
+    });
+
+    it('does not warn on the happy path with a resolvable contract', async () => {
+      const live = new SolverNetRegistry();
+      await registerJoinedNet(live, CID, joined);
+
+      expect(live.list().length).toBeGreaterThan(0);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
   });
 });

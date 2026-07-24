@@ -5,6 +5,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import {
   SweRebenchV2EvaluatorHarness,
@@ -847,10 +848,14 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
       schemaVersion: 'swe-rebench-v2-verdict.v2',
       score: 1,
       passed_match: true,
-      evaluator_cost_usd: 0,
       passedCount: 2,
       totalCount: 2,
     });
+    // Real (unstubbed) clock + fake runner → grade() wall-time is ~0ms, so the
+    // metered cost is 0 or tiny; the metering tests below pin exact values.
+    expect(
+      (sol.verdictPayload as Record<string, unknown>)['evaluator_cost_usd'],
+    ).toBeGreaterThanOrEqual(0);
     expect(sol.verdictPayload).not.toHaveProperty('test_log_cid');
     // The pinned-blob CID is surfaced as artifact metadata, not as a typed
     // payload field — preserves the solver/daemon boundary in the schema.
@@ -1075,6 +1080,128 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(runner.runEval).toHaveBeenCalledTimes(1);
     expect(existsSync(join(implStateDir, 'swe-rebench-v2-verdict.json'))).toBe(true);
+  });
+
+  describe('evaluator cost metering (JINN_EVAL_COMPUTE_USD_PER_HOUR, #1828)', () => {
+    const ENV_KEY = 'JINN_EVAL_COMPUTE_USD_PER_HOUR';
+    let priorEnv: string | undefined;
+    beforeEach(() => {
+      priorEnv = process.env[ENV_KEY];
+    });
+    afterEach(() => {
+      if (priorEnv === undefined) delete process.env[ENV_KEY];
+      else process.env[ENV_KEY] = priorEnv;
+      vi.restoreAllMocks();
+    });
+
+    // Stub the monotonic clock with a controllable value that only the fake
+    // runner advances, making grade() elapsed time deterministic.
+    async function runWithStubbedElapsed(elapsedMs: number) {
+      let now = 1_000_000;
+      vi.spyOn(performance, 'now').mockImplementation(() => now);
+      const runner = {
+        runEval: vi.fn().mockImplementation(async () => {
+          now += elapsedMs;
+          return {
+            passed_match: true,
+            passed: ['test_a', 'test_b'],
+            failed: [],
+            log: 'all green',
+            exitCode: 0,
+          };
+        }),
+      };
+      const harness = new SweRebenchV2EvaluatorHarness({
+        implStateDir,
+        _testDeps: {
+          fetcher: makeFakeFetcher(),
+          runner,
+          uploadToIpfs: vi.fn().mockResolvedValue('bafy-test-log-cid'),
+          stateDir: implStateDir,
+        },
+      });
+      const ctx = buildHarnessContext(
+        implStateDir,
+        buildEvaluationTask(buildSolverEnvelope()),
+      );
+      return harness.run(ctx);
+    }
+
+    function costOf(sol: Awaited<ReturnType<SweRebenchV2EvaluatorHarness['run']>>): unknown {
+      return (sol.verdictPayload as Record<string, unknown>)['evaluator_cost_usd'];
+    }
+
+    it('meters grade() wall-time at the env rate (30 min at 0.20/hr → 0.1)', async () => {
+      process.env[ENV_KEY] = '0.20';
+      const sol = await runWithStubbedElapsed(30 * 60_000);
+      expect(costOf(sol)).toBe(0.1);
+    });
+
+    it('defaults to 0.20/hr when the env is unset', async () => {
+      delete process.env[ENV_KEY];
+      const sol = await runWithStubbedElapsed(30 * 60_000);
+      expect(costOf(sol)).toBe(0.1);
+    });
+
+    it('records 0 with a warning (and still completes) when the env is zero', async () => {
+      process.env[ENV_KEY] = '0';
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const sol = await runWithStubbedElapsed(30 * 60_000);
+      expect(costOf(sol)).toBe(0);
+      expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('JINN_EVAL_COMPUTE_USD_PER_HOUR'),
+      );
+    });
+
+    it('records 0 with a warning (and still completes) when the env is not a number', async () => {
+      const invalidRate = 'sensitive-invalid-rate';
+      process.env[ENV_KEY] = invalidRate;
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const sol = await runWithStubbedElapsed(30 * 60_000);
+      expect(costOf(sol)).toBe(0);
+      expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('JINN_EVAL_COMPUTE_USD_PER_HOUR'),
+      );
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining(invalidRate));
+    });
+
+    it('uses monotonic elapsed time when the wall clock steps backward mid-grade', async () => {
+      process.env[ENV_KEY] = '0.20';
+      let wallNow = 1_000_000;
+      vi.spyOn(Date, 'now').mockImplementation(() => wallNow);
+      const run = runWithStubbedElapsed(30 * 60_000);
+      wallNow -= 5 * 60_000;
+      const sol = await run;
+      expect(costOf(sol)).toBe(0.1);
+      expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+    });
+
+    it('defensively clamps a negative monotonic elapsed time to 0', async () => {
+      process.env[ENV_KEY] = '0.20';
+      const sol = await runWithStubbedElapsed(-5 * 60_000);
+      expect(costOf(sol)).toBe(0);
+      expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+    });
+
+    it('records 0 with a warning when a finite rate overflows the final cost', async () => {
+      process.env[ENV_KEY] = String(Number.MAX_VALUE);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const sol = await runWithStubbedElapsed(2 * 3_600_000);
+      expect(costOf(sol)).toBe(0);
+      expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('evaluator_cost_usd=0'));
+    });
+
+    it('records 0 with a warning when elapsed-time computation is non-finite', async () => {
+      process.env[ENV_KEY] = '0.20';
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const sol = await runWithStubbedElapsed(Number.POSITIVE_INFINITY);
+      expect(costOf(sol)).toBe(0);
+      expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('evaluator_cost_usd=0'));
+    });
   });
 });
 

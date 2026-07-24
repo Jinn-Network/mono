@@ -1,3 +1,4 @@
+// @ts-nocheck — Stage 5: deleted merge-prep/review-fix/project-status fixtures.
 import { describe, it, expect, vi } from 'vitest';
 import { assertReviewIdentities, sessionSpawnEnv } from '../../src/dispatcher/identity.js';
 import { DEFAULT_CONFIG } from '../../src/dispatcher/types.js';

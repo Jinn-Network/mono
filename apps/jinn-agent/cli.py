@@ -1188,6 +1188,10 @@ def _emit_interrupted_session_end(cli, *, reason: str = "keyboard_interrupt") ->
             model=getattr(agent, "model", None),
             platform=getattr(agent, "platform", None) or "cli",
             reason=reason,
+            # Forward session token counters so the jinn plugin populates
+            # cost.tokens on interrupted -p runs too (mono #1662, #1840).
+            input_tokens=getattr(agent, "session_input_tokens", 0),
+            output_tokens=getattr(agent, "session_output_tokens", 0),
         )
     except Exception:
         pass
@@ -15511,6 +15515,10 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
                         model=getattr(self.agent, 'model', None),
                         platform=getattr(self.agent, 'platform', None) or "cli",
                         reason="shutdown",
+                        # Forward session token counters so cost.tokens
+                        # populates on mid-turn shutdown too (mono #1662, #1840).
+                        input_tokens=getattr(self.agent, 'session_input_tokens', 0),
+                        output_tokens=getattr(self.agent, 'session_output_tokens', 0),
                     )
                 except Exception:
                     pass

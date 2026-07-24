@@ -22,6 +22,7 @@ import bootstrapCommand from './commands/bootstrap.js';
 import fundRequirementsCommand from './commands/fund-requirements.js';
 import runCommand from './commands/run.js';
 import stopCommand from './commands/stop.js';
+import killCommand from './commands/kill.js';
 import statusCommand from './commands/status.js';
 import fleetCommand from './commands/fleet.js';
 import balanceCommand from './commands/balance.js';
@@ -35,6 +36,7 @@ import keysCommand from './commands/keys-backup.js';
 import updateCommand from './commands/update.js';
 import mcpCommand from './commands/mcp.js';
 import migrateAgentIdCommand from './commands/migrate-agent-id.js';
+import backfillFailedDeliveriesCommand from './commands/backfill-failed-deliveries.js';
 import conformanceCommand from './commands/conformance.js';
 import createCommand from './commands/create.js';
 import uiCommand from './commands/ui.js';
@@ -47,6 +49,7 @@ import predictionScoreboardCommand from './commands/prediction-scoreboard.js';
 import captureCommand from './commands/capture.js';
 import codedigestRevertCheckCommand from './commands/codedigest-revert-check.js';
 import evalCommand from './commands/eval.js';
+import scrubCommand from './commands/scrub.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -58,6 +61,7 @@ const COMMANDS: CommandModule[] = [
   fundRequirementsCommand,
   runCommand,
   stopCommand,
+  killCommand,
   statusCommand,
   fleetCommand,
   balanceCommand,
@@ -71,6 +75,7 @@ const COMMANDS: CommandModule[] = [
   updateCommand,
   mcpCommand,
   migrateAgentIdCommand,
+  backfillFailedDeliveriesCommand,
   conformanceCommand,
   createCommand,
   uiCommand,
@@ -83,6 +88,7 @@ const COMMANDS: CommandModule[] = [
   integrationsCommand,
   codedigestRevertCheckCommand,
   evalCommand,
+  scrubCommand,
 ];
 
 /**

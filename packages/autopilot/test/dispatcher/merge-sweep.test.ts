@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   classifyCandidate,
+  classifyStuck,
   rollupVerdict,
   syncMerges,
   type MergeCandidate,
@@ -15,6 +16,7 @@ const GREEN: RollupEntry[] = [{ status: 'COMPLETED', conclusion: 'SUCCESS' }];
 function candidate(over: Partial<MergeCandidate> = {}): MergeCandidate {
   return {
     number: 10,
+    title: 'a stuck PR',
     isDraft: false,
     author: 'ritsukai',
     labels: ['engine:review', 'review:approved'],
@@ -22,6 +24,7 @@ function candidate(over: Partial<MergeCandidate> = {}): MergeCandidate {
     mergeable: 'MERGEABLE',
     mergeStateStatus: 'CLEAN',
     headRefName: 'feat/10-x',
+    headRefOid: 'abc123def456',
     statusChecks: GREEN,
     ...over,
   };
@@ -109,6 +112,47 @@ describe('classifyCandidate', () => {
   });
 });
 
+describe('classifyStuck', () => {
+  it('APPROVED + green + CONFLICTING → conflicting', () => {
+    expect(classifyStuck(candidate({ mergeable: 'CONFLICTING' }), ALLOWLIST)).toBe('conflicting');
+  });
+
+  it('mergeStateStatus DIRTY alone → conflicting', () => {
+    expect(
+      classifyStuck(candidate({ mergeable: 'UNKNOWN', mergeStateStatus: 'DIRTY' }), ALLOWLIST),
+    ).toBe('conflicting');
+  });
+
+  it('LABEL-BLIND: stays conflicting even carrying review:needs-human (survives its own escalation)', () => {
+    const c = candidate({
+      mergeable: 'CONFLICTING',
+      labels: ['engine:review', 'review:needs-human'],
+    });
+    // classifyCandidate short-circuits on the label; classifyStuck must not.
+    expect(classifyCandidate(c, ALLOWLIST)).toContain('review:needs-human');
+    expect(classifyStuck(c, ALLOWLIST)).toBe('conflicting');
+  });
+
+  it('clean/mergeable → null (not stuck)', () => {
+    expect(classifyStuck(candidate(), ALLOWLIST)).toBeNull();
+  });
+
+  it('UNKNOWN mergeable with no DIRTY → null (transient, GitHub still computing)', () => {
+    expect(classifyStuck(candidate({ mergeable: 'UNKNOWN' }), ALLOWLIST)).toBeNull();
+  });
+
+  it('not-yet-cleared PRs are never stuck (draft / not-approved / pending / non-allowlisted)', () => {
+    expect(classifyStuck(candidate({ mergeable: 'CONFLICTING', isDraft: true }), ALLOWLIST)).toBeNull();
+    expect(
+      classifyStuck(candidate({ mergeable: 'CONFLICTING', reviewDecision: 'CHANGES_REQUESTED' }), ALLOWLIST),
+    ).toBeNull();
+    expect(
+      classifyStuck(candidate({ mergeable: 'CONFLICTING', statusChecks: [{ status: 'IN_PROGRESS' }] }), ALLOWLIST),
+    ).toBeNull();
+    expect(classifyStuck(candidate({ mergeable: 'CONFLICTING', author: 'outsider' }), ALLOWLIST)).toBeNull();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // syncMerges — scripted end-to-end over the gh seam
 // ---------------------------------------------------------------------------
@@ -146,6 +190,7 @@ function scriptedRunner(cfg: {
 function ghEntry(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     number: 10,
+    title: 'a stuck PR',
     isDraft: false,
     author: { login: 'ritsukai' },
     labels: [{ name: 'engine:review' }],
@@ -153,6 +198,7 @@ function ghEntry(over: Record<string, unknown> = {}): Record<string, unknown> {
     mergeable: 'MERGEABLE',
     mergeStateStatus: 'CLEAN',
     headRefName: 'feat/10-x',
+    headRefOid: 'abc123def456',
     statusCheckRollup: GREEN,
     ...over,
   };
@@ -166,6 +212,76 @@ describe('syncMerges', () => {
     const merge = calls.find((c) => c.args[1] === 'merge');
     expect(merge?.args).toContain('--squash');
     expect(merge?.args).not.toContain('--admin');
+    // TOCTOU pin: the merge is scoped to the exact head the sweep validated.
+    expect(merge?.args).toContain('--match-head-commit');
+    expect(merge?.args).toContain('abc123def456');
+  });
+
+  it('a CONFLICTING PR is reported as stuck (conflicting) and never merged', async () => {
+    const { runner, calls } = scriptedRunner({
+      list: [ghEntry({ mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' })],
+    });
+    const report = await syncMerges(runner, ALLOWLIST, new Set());
+    expect(report.merged).toEqual([]);
+    expect(report.stuck).toEqual([
+      {
+        number: 10,
+        title: 'a stuck PR',
+        reason: 'conflicting',
+        headRefName: 'feat/10-x',
+        headRefOid: 'abc123def456',
+        escalated: false,
+      },
+    ]);
+    expect(calls.some((c) => c.args[1] === 'merge')).toBe(false);
+  });
+
+  it('a CONFLICTING PR already labeled needs-human is stuck with escalated:true', async () => {
+    const { runner } = scriptedRunner({
+      list: [ghEntry({ mergeable: 'CONFLICTING', labels: [{ name: 'engine:review' }, { name: 'review:needs-human' }] })],
+    });
+    const report = await syncMerges(runner, ALLOWLIST, new Set());
+    expect(report.stuck).toHaveLength(1);
+    expect(report.stuck[0]).toMatchObject({ reason: 'conflicting', escalated: true });
+  });
+
+  it('still-BEHIND after update-branch is reported as stuck, keeping the legacy skipped string', async () => {
+    const attempted = new Set<number>([10]); // one update-branch already spent this process
+    const { runner } = scriptedRunner({ list: [ghEntry({ mergeStateStatus: 'BEHIND' })] });
+    const report = await syncMerges(runner, ALLOWLIST, attempted);
+    expect(report.skipped.some((s) => s.includes('still BEHIND'))).toBe(true); // back-compat
+    expect(report.stuck).toEqual([
+      {
+        number: 10, title: 'a stuck PR', reason: 'still-behind',
+        headRefName: 'feat/10-x', headRefOid: 'abc123def456', escalated: false,
+      },
+    ]);
+  });
+
+  it('an update-branch failure is reported as stuck (update-branch-failed)', async () => {
+    const calls: { cmd: string; args: string[] }[] = [];
+    const runner: CommandRunner = async (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === 'gh' && args[1] === 'list') return JSON.stringify([ghEntry({ mergeStateStatus: 'BEHIND' })]);
+      if (cmd === 'gh' && args[1] === 'update-branch') throw new Error('update would conflict');
+      return '';
+    };
+    const report = await syncMerges(runner, ALLOWLIST, new Set());
+    expect(report.stuck.map((s) => s.reason)).toEqual(['update-branch-failed']);
+  });
+
+  it('a clean sweep reports no stuck PRs', async () => {
+    const { runner } = scriptedRunner({ list: [ghEntry()] });
+    const report = await syncMerges(runner, ALLOWLIST, new Set());
+    expect(report.stuck).toEqual([]);
+  });
+
+  it('refuses to merge an eligible PR with an empty headRefOid (no blind merge)', async () => {
+    const { runner, calls } = scriptedRunner({ list: [ghEntry({ headRefOid: '' })] });
+    const report = await syncMerges(runner, ALLOWLIST, new Set());
+    expect(report.merged).toEqual([]);
+    expect(report.skipped.some((s) => s.includes('missing headRefOid'))).toBe(true);
+    expect(calls.some((c) => c.args[1] === 'merge')).toBe(false);
   });
 
   it('code-owned PR is never merged (DR-2026-06-03)', async () => {

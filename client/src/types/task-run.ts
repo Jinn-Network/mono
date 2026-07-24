@@ -21,6 +21,13 @@ export interface PersistedTaskRun {
   taskCid: string;
   onchainCreationTx: string;
   onchainCreationBlock: number;
+  /**
+   * Unix-seconds timestamp of the on-chain creation block (#1827). Resolved
+   * once at claim() time via `publicClient.getBlock`; null when the RPC
+   * lookup failed or hasn't run yet — never backfilled with a guess.
+   * Threaded into `envelope.task.createdAt` by pack().
+   */
+  onchainCreationTimestamp: number | null;
   solverType: string | null;
   /** SolverNet manifest CID this task was posted under; null for legacy rows. */
   solverNetManifestCid: string | null;
@@ -67,6 +74,13 @@ export interface PersistedTaskRun {
    */
   solutionOutputsJson: string | null;
   runtimePluginsJson: string | null;
+
+  /**
+   * JSON array of corpus knowledge refs injected into
+   * task.context.corpusKnowledge for this run (#1393). Null when the
+   * autoload was disabled, found nothing, or the run predates the column.
+   */
+  consumedRefsJson: string | null;
 
   /**
    * Executor mode declared on this run ('train' | 'frozen').

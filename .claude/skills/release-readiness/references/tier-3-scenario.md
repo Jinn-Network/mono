@@ -1,6 +1,8 @@
 # Tier 3 scenario — producer-evaluator real-testnet
 
-The single Tier 3 scenario. Run from release-readiness Phase 5 in human-invoked mode only.
+> **SUPERSEDED (historical contract).** The two-gate redesign ([`docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md`](../../../../docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md)) moved this real-testnet coverage into CI: it now runs inside `.github/workflows/environment-suite.yml` and posts the `environment-suite` check-run. release-readiness **reads** that check-run (Phase 5); it does **not** run this scenario on a laptop or manage a daemon mutex. The impl paths below remain accurate as the scenario `environment-suite` executes — keep this file as the scenario contract, not as a live laptop runbook.
+
+The single Tier 3 scenario, as `environment-suite.yml` runs it (historically: release-readiness Phase 5, human-invoked, on a laptop).
 
 **Implementation:** `client/test/release/tier-3/T3.1-producer-evaluator-real.ts`
 

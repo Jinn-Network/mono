@@ -1,11 +1,15 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+// @ts-nocheck — Stage 5 leftover fixtures for deleted merge-prep/review-fix/project APIs.
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readFileSync, rmSync } from 'node:fs';
+import { HERMES_HOMES_DIR } from '../../src/dispatcher/hermes-home.js';
+import { HERMES_STATELESS_LAUNCHER } from '../../src/dispatcher/hermes-runtime.js';
 import { dispatchIssue, WORKTREES_BASE } from '../../src/dispatcher/dispatch.js';
 import type { ReadyIssue, DispatcherConfig } from '../../src/dispatcher/types.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 import type { SpawnFn } from '../../src/dispatcher/dispatch.js';
-import { SESSIONS_LOG_DIR, sessionLogPath } from '../../src/dispatcher/session-log.js';
+import { SESSIONS_LOG_DIR, sessionLogPath, sessionStartedAtPath } from '../../src/dispatcher/session-log.js';
 import {
   fetchFieldIds,
   resetFieldCache,
@@ -25,6 +29,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 // test/dispatcher → test → packages/autopilot → packages → repo root
 const REPO_ROOT = join(HERE, '..', '..', '..', '..');
+const EXPECTED_AUTOPILOT_PACKAGE_DIR = join(REPO_ROOT, 'packages', 'autopilot');
 const EXPECTED_WORKTREE_PATH = join(WORKTREES_BASE, '418');
 
 // ---------------------------------------------------------------------------
@@ -47,17 +52,26 @@ const ISSUE: ReadyIssue = {
 };
 
 const CFG: DispatcherConfig = {
+  runtime: 'claude',
   concurrencyCap: 3,
   openPrBackpressure: 5,
   wallClockMs: 4 * 60 * 60 * 1000,
-  defaultImplementer: 'claude',
-  implementerRules: [],
   authorAllowlist: ['alice'],
   reviewCap: 3,
   engineReviewLabel: 'engine:review',
   reviewBotLogin: '',
   implGhToken: '',
   reviewGhToken: '',
+  mergePrepEnabled: false,
+  mergePrepCap: 1,
+  hermesModel: 'gpt-5.6-sol',
+  hermesProvider: 'openai-codex',
+  hermesPythonPath: '/opt/hermes/python',
+  cursorModel: 'composer-2.5',
+  cursorBin: 'agent',
+  marketplaceBridgeEnabled: false,
+  marketplaceIndexerUrl: '',
+  marketplaceIpfsGatewayUrl: 'https://gateway.autonolas.tech', executionMode: 'local',
 };
 
 /**
@@ -581,6 +595,16 @@ describe('dispatchIssue', () => {
     expect(spawnCall.opts.stdio).not.toBe('ignore');
   });
 
+  it('passes the per-session startedAtMarkerPath (sessions/<N>.started-at) through the spawn opts (jinn-mono#1296/#1393)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    const [spawnCall] = calls;
+    expect(spawnCall.opts.startedAtMarkerPath).toBe(sessionStartedAtPath(418));
+  });
+
   it('returns an InFlightSession whose logPath is deterministic from the issue number (#533 AC#2)', async () => {
     const { runner } = makeRunner();
     const { spawn } = makeSpawn();
@@ -608,49 +632,27 @@ describe('dispatchIssue', () => {
   });
 
   // -------------------------------------------------------------------------
-  // #887 — implementer routing surfaced on the dispatch log line
+  // Global runtime surfaced on the dispatch log line and child environment
   // -------------------------------------------------------------------------
 
-  it('with DEFAULT_CONFIG (empty rules) logs impl=claude and leaves scenario/spawn unchanged (AC#2 regression)', async () => {
+  it('logs the selected Claude runtime and propagates it to the canonical workflow', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    // CFG carries no implementerRules (empty), so resolution falls through to
-    // defaultImplementer: 'claude'.
     await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const line = logSpy.mock.calls.map((c) => String(c[0])).find((s) => s.includes('[dispatch]'));
     expect(line).toBeDefined();
-    expect(line).toContain('impl=claude');
-
-    // Scenario prompt unchanged: default implementer is claude.
-    const [spawnCall] = calls;
-    const prompt = promptOf(spawnCall);
-    expect(prompt).toContain('The default implementer for the inner pipeline is: claude.');
-
-    logSpy.mockRestore();
-  });
-
-  it('routes to codex when a rule matches the issue effort/shape (impl=codex in log + scenario)', async () => {
-    const { runner } = makeRunner();
-    const { spawn, calls } = makeSpawn();
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    // ISSUE is shape 'feat', effort 'Medium' — route it to codex.
-    const cfg: DispatcherConfig = {
-      ...CFG,
-      implementerRules: [{ shape: 'feat', effort: 'Medium', implementer: 'codex' }],
-    };
-    await dispatchIssue(ISSUE, cfg, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
-
-    const line = logSpy.mock.calls.map((c) => String(c[0])).find((s) => s.includes('[dispatch]'));
-    expect(line).toBeDefined();
-    expect(line).toContain('impl=codex');
+    expect(line).toContain('runtime=claude');
 
     const [spawnCall] = calls;
     const prompt = promptOf(spawnCall);
-    expect(prompt).toContain('The default implementer for the inner pipeline is: codex.');
+    const env = spawnCall.opts.env as Record<string, string>;
+    expect(prompt).toContain('Use the implement-issue skill');
+    expect(prompt).toContain('Global Autopilot runtime: claude');
+    expect(env.JINN_AUTOPILOT_RUNTIME).toBe('claude');
+    expect(env.JINN_AUTOPILOT_PACKAGE_DIR).toBe(EXPECTED_AUTOPILOT_PACKAGE_DIR);
 
     logSpy.mockRestore();
   });
@@ -927,5 +929,219 @@ describe('dispatchIssue — branch-ref collision', () => {
     const { spawn } = makeSpawn();
     await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
     expect(branchOf(calls)).toBe('feat/418-feat-operator-app-expose-generator-health');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hermes coordinator — a REAL second CLI, not a prompt directive
+// ---------------------------------------------------------------------------
+
+describe('dispatchIssue — global Hermes runtime', () => {
+  const HERMES_CFG: DispatcherConfig = {
+    ...CFG,
+    runtime: 'hermes',
+  };
+  /** hermes prompt is `chat -q <prompt> …` — the arg after -q, NOT the last one. */
+  const hermesPromptOf = (c: SpawnCall): string => c.args[c.args.indexOf('-q') + 1];
+
+  afterEach(() => {
+    rmSync(join(HERMES_HOMES_DIR, 'implement-418'), { recursive: true, force: true });
+  });
+
+  it('spawns Hermes through the stateless launcher with the non-interactive contract and configured model', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cmd).toBe('/opt/hermes/python');
+    expect(calls[0].args[0]).toBe(HERMES_STATELESS_LAUNCHER);
+    expect(calls[0].args[1]).toBe('chat');
+    expect(calls[0].args).toContain('-q');          // single non-interactive query
+    expect(calls[0].args).toContain('-Q');          // quiet / machine-readable
+    expect(calls[0].args).toContain('--yolo');      // no human to approve commands
+    expect(calls[0].args).toContain('--accept-hooks');
+    expect(calls[0].args).toContain('--model');
+    expect(calls[0].args[calls[0].args.indexOf('--model') + 1]).toBe('gpt-5.6-sol');
+  });
+
+  it('BILLING GUARD: passes --provider openai-codex explicitly, and the model id stays bare', async () => {
+    // Hermes infers the provider from the model id's shape: anything
+    // `<org>/<model>` infers `openrouter`, which would bill an API key instead
+    // of the operator's ChatGPT/Codex subscription. The provider must be
+    // explicit and the id must never be org-prefixed.
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    expect(calls[0].args).toContain('--provider');
+    expect(calls[0].args[calls[0].args.indexOf('--provider') + 1]).toBe('openai-codex');
+    expect(calls[0].args[calls[0].args.indexOf('--model') + 1]).not.toContain('/');
+  });
+
+  it('never passes claude-only flags (--effort is a claude flag; hermes takes effort via config)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    expect(calls[0].args).not.toContain('--effort');
+    expect(calls[0].args).not.toContain('-p');
+    expect(calls[0].args).not.toContain('--mode');
+    expect(calls[0].args).not.toContain('--permission-mode');
+  });
+
+  it('never routes to openrouter (the inference default) — the subscription provider wins', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    expect(calls[0].args.join(' ')).not.toContain('openrouter');
+    // …and the generated config pins the provider too, so a session cannot fall
+    // back to inference even if the flag path changes.
+    const env = calls[0].opts.env as Record<string, string>;
+    const yaml = readFileSync(join(env.HERMES_HOME, 'config.yaml'), 'utf8');
+    expect(yaml).toContain('provider: "openai-codex"');
+    expect(yaml).toContain('default: "gpt-5.6-sol"');
+  });
+
+  it('passes the explicit Hermes runtime environment and keeps the implementer GH identity', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(
+      ISSUE,
+      { ...HERMES_CFG, implGhToken: 'impl-token' },
+      { runner, spawn, fieldCache: { ...FIELD_CACHE } },
+    );
+    const env = calls[0].opts.env as Record<string, string>;
+    expect(env.HERMES_HOME).toBe(join(HERMES_HOMES_DIR, 'implement-418'));
+    expect(env.GH_TOKEN).toBe('impl-token');
+    expect(env.JINN_AUTOPILOT_RUNTIME).toBe('hermes');
+    expect(env.JINN_DISPATCHER_HERMES_PYTHON).toBe('/opt/hermes/python');
+    expect(env.JINN_DISPATCHER_HERMES_MODEL).toBe('gpt-5.6-sol');
+    expect(env.JINN_DISPATCHER_HERMES_PROVIDER).toBe('openai-codex');
+    // The generated config is what actually carries the effort.
+    const yaml = readFileSync(join(env.HERMES_HOME, 'config.yaml'), 'utf8');
+    expect(yaml).toContain('reasoning_effort: "medium"'); // ISSUE.effort = Medium
+  });
+
+  it('passes the installed autopilot package dir for the coordinator triage gate', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    const env = calls[0].opts.env as Record<string, string>;
+    expect(env.JINN_AUTOPILOT_PACKAGE_DIR).toBe(EXPECTED_AUTOPILOT_PACKAGE_DIR);
+  });
+
+  it('invokes the canonical skill with the shared runtime adapter and reuses the worktree', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    const prompt = hermesPromptOf(calls[0]);
+    expect(prompt).toContain('Use the implement-issue skill');
+    expect(prompt).toContain('autopilot-runtime');
+    expect(prompt).not.toContain('implement-issue-hermes');
+    expect(prompt).toContain('CLAUDE.md');            // canon still prepended
+    expect(prompt).toContain(EXPECTED_WORKTREE_PATH); // pre-created worktree
+    expect(prompt).toContain('do not create a new worktree');
+    expect(calls[0].opts.cwd).toBe(EXPECTED_WORKTREE_PATH);
+    expect(calls[0].opts.detached).toBe(true);
+  });
+
+  it('reframes the headless block for hermes (no stale `claude -p` framing)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    const prompt = hermesPromptOf(calls[0]);
+    expect(prompt).toContain('hermes chat -q');
+    expect(prompt).not.toContain('`claude -p` / `--print`');
+    expect(prompt).toContain('Global Autopilot runtime: hermes');
+  });
+
+  it('still moves the board to In Progress and captures a session log (parity with claude)', async () => {
+    const { runner, calls: runnerCalls } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    const session = await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    expect(runnerCalls.some((c) => c.cmd === 'gh' && c.args[1] === 'item-edit')).toBe(true);
+    expect(calls[0].opts.logPath).toBe(sessionLogPath(418));
+    expect(calls[0].opts.startedAtMarkerPath).toBe(sessionStartedAtPath(418));
+    expect(session).toMatchObject({ issueNumber: 418, worktreePath: EXPECTED_WORKTREE_PATH, pid: 99999 });
+  });
+
+  it('REGRESSION: the Claude runtime still spawns claude -p with --effort', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(
+      ISSUE,
+      CFG,
+      { runner, spawn, fieldCache: { ...FIELD_CACHE } },
+    );
+    expect(calls[0].cmd).toBe('claude');
+    expect(calls[0].args).toContain('-p');
+    expect(calls[0].args).toContain('--effort');
+    expect(promptOf(calls[0])).toContain('Global Autopilot runtime: claude');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cursor coordinator — Cursor Agent CLI via agent -p
+// ---------------------------------------------------------------------------
+
+describe('dispatchIssue — global Cursor runtime', () => {
+  const CURSOR_CFG: DispatcherConfig = {
+    ...CFG,
+    runtime: 'cursor',
+  };
+  const cursorPromptOf = (c: SpawnCall): string => c.args[c.args.length - 1];
+  const modelArg = (c: SpawnCall): string =>
+    c.args[c.args.indexOf('--model') + 1];
+
+  it('spawns agent -p with Effort-routed model for implement (Low → composer)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    const lowEffortIssue = { ...ISSUE, effort: 'Low' as const };
+    await dispatchIssue(lowEffortIssue, CURSOR_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cmd).toBe('agent');
+    expect(calls[0].args).toContain('-p');
+    expect(calls[0].args).toContain('--approve-mcps');
+    expect(calls[0].args).toContain('--workspace');
+    expect(calls[0].args[calls[0].args.indexOf('--workspace') + 1])
+      .toBe(EXPECTED_WORKTREE_PATH);
+    expect(modelArg(calls[0])).toBe('composer-2.5');
+  });
+
+  it('routes unset Effort to Grok high for implement sessions', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    const issueNoEffort = { ...ISSUE, effort: null };
+    await dispatchIssue(issueNoEffort, CURSOR_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    expect(modelArg(calls[0])).toBe('cursor-grok-4.5-high');
+  });
+
+  it('never passes claude-only flags (--effort is claude-only; cursor uses --model)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, CURSOR_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    expect(calls[0].args).not.toContain('--effort');
+  });
+
+  it('passes resolved model in env for stage:run children', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    const lowEffortIssue = { ...ISSUE, effort: 'Low' as const };
+    await dispatchIssue(lowEffortIssue, CURSOR_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    const env = calls[0].opts.env as Record<string, string>;
+    expect(env.JINN_AUTOPILOT_RUNTIME).toBe('cursor');
+    expect(env.JINN_DISPATCHER_CURSOR_MODEL).toBe('composer-2.5');
+    expect(env.JINN_DISPATCHER_CURSOR_BIN).toBe('agent');
+  });
+
+  it('reframes the headless block for agent -p (no stale claude framing)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, CURSOR_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    const prompt = cursorPromptOf(calls[0]);
+    expect(prompt).toContain('`agent -p`');
+    expect(prompt).not.toContain('`claude -p` / `--print`');
+    expect(prompt).toContain('Global Autopilot runtime: cursor');
   });
 });

@@ -1,0 +1,76 @@
+name: Core CI
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - 'packages/core/**'
+      - '.github/workflows/core-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/core/**'
+      - '.github/workflows/core-ci.yml'
+
+defaults:
+  run:
+    working-directory: packages/core
+
+jobs:
+  check:
+    name: Typecheck, Test & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout without credentials
+        working-directory: ${{ github.workspace }}
+        env:
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref }}
+        run: |
+          git init .
+          git remote add origin "https://github.com/${REPOSITORY}.git"
+          git -c protocol.version=2 fetch --no-tags --depth=1 origin "${REF}"
+          git checkout --detach FETCH_HEAD
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn --cwd ../plugin install --immutable
+      - run: yarn --cwd ../plugin build
+      - run: yarn install --immutable
+      - run: yarn build
+      - run: yarn typecheck
+      - run: yarn test
+
+  client-compat:
+    name: Client Typecheck & Extracted-Boundary Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - name: Checkout without credentials
+        working-directory: ${{ github.workspace }}
+        env:
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref }}
+        run: |
+          git init .
+          git remote add origin "https://github.com/${REPOSITORY}.git"
+          git -c protocol.version=2 fetch --no-tags --depth=1 origin "${REF}"
+          git checkout --detach FETCH_HEAD
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn build:plugin
+      - run: yarn build:core
+      - run: yarn build:layer
+      - run: yarn typecheck
+      - run: >-
+          yarn vitest run
+          test/architecture/golden-envelope.test.ts
+          test/bin/jinn-layer-composition.test.ts

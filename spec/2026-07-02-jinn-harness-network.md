@@ -9,7 +9,12 @@
   Stage 1 gate-lane note added (§14).**
   **v0.6, 2026-07-15, mono#1714: consent collapsed to ONE `shareConsent` (default decline)
   gating only mint-leaves-machine; local retention/mining/distillation unconditional; trace
-  publication is no longer a distinct sharing prompt (D3, §14 amendment).**)
+  publication is no longer a distinct sharing prompt (D3, §14 amendment).**
+  **v0.7, 2026-07-17, DR-2026-07-17 (Stage 2 charter): D3's consent ask and D5's
+  earn-for-contribution lane sequenced behind the outbound un-park boundary (re-decided no
+  earlier than the Stage 3 boundary, with attribution evidence in hand); local capture/mining/
+  distillation unconditional throughout; D8's skills.sh seeds become substrate-only under the
+  W2 retrieval allowlist (retirement from retrieval, not deletion).**)
 - **Date:** 2026-07-14
 - **Author:** Oak (design session)
 - **Shape:** `design` — output is this spec; implementation lands as per-phase plans and Issues
@@ -93,6 +98,11 @@ decisions rather than re-argued:
 | D10 | **Rung 1 — local single-player distillation** ships first: own scrubbed captures → frontier-distilled skills → cheaper open-weight runs, private by default, no publish. Surface is the **harness CLI** (`jinn-layer`), not the operator dashboard SPA (§4.2) | Day-one solo usefulness with zero network dependency; the frontier-distil → cheap-run arbitrage is value the user keeps whether or not they contribute outward |
 | D11 | **One Distiller interface, two backends** (§5.2): `LocalDistiller` runs the merged distillation engine in-process over own captures (private sink, no anchor); `NetworkDistiller` (rung 3) rebinds source + sink to the bonded network's verified evidence and the public anchored corpus | Local and network distillation stay symmetric; rung 3 is a drop-in behind a proven local one (Gall's Law), deferred until rung 1 earns adoption |
 | D12 | **Rung 2 (selling distilled skills) rejected** | A skill is a non-excludable information good — public-domain on first sale; paywalling leaks immediately and breaks corpus-as-public-good (§2 No enclosure) |
+
+> **Sequencing note (v0.7, DR-2026-07-17):** D3's onboarding consent ask and D5's
+> earn-for-contribution lane do not run while outbound contribution is parked (through Jinn
+> Plugin Stage 2); the un-park decision is re-taken no earlier than the Stage 3 boundary.
+> D8's skills.sh seeds are substrate-resident only under the W2 retrieval allowlist.
 
 ## 4. Architecture
 
@@ -298,6 +308,12 @@ VoteWeighting today, no new infrastructure. Steering ships in two stages:
   run the seed-profile scrub (deterministic secret patterns only — key policy, plain-patterns,
   secretlint preset rules; no probabilistic openredaction/entropy stages) because they are public,
   licence-checked content, not operator trace data (#1409).
+- **Stage 1 note (2026-07-16, mono rescope):** Stage 1 acceptance requires **evidence seeds** —
+  canonical prior-work episodes published through the same scrub → publish path — because the
+  plugin's Stage 1 retrieval serves evidence records only. skills.sh skill imports remain in the
+  corpus for later stages (and distillation measurement) but are excluded from Stage 1
+  auto-pickup. Evidence-seed imports must be idempotent and set `supersedes` on re-import. See
+  `docs/superpowers/plans/2026-07-16-jinn-plugin-stage-1-rescope-plan.md` §4.
 
 ## 8. Phasing
 

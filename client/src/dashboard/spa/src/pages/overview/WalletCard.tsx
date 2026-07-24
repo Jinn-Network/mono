@@ -31,6 +31,14 @@ export interface WalletCardProps {
   totalEth: string;
   /** Estimated days of runway at current burn rate. Accept string to allow "—" when unknown. */
   runwayDays: number | string;
+  /**
+   * Severity tint for the runway line (#1296). `warning` when runway is below
+   * the low threshold, `blocking` when the wallet can no longer cover the next
+   * transaction, `null`/absent for the flat default. Reads in greyscale via the
+   * shared severity tokens — the banner is the primary surface, this is the
+   * in-card echo.
+   */
+  runwaySeverity?: 'warning' | 'blocking' | null;
   // perRole stays in the props so re-enabling the drill-down later is a
   // one-block restore. Real values are wired via #430; the drill-down rows
   // are commented out pending a follow-up Issue.
@@ -118,6 +126,7 @@ function olasDisplay(
 export function WalletCard({
   totalEth,
   runwayDays,
+  runwaySeverity = null,
   olasPending,
   olasClaimed,
   olasClaimedLast24h,
@@ -259,7 +268,20 @@ export function WalletCard({
             <span className={statBig}>{totalEth}</span>
             <span className={statUnit}>ETH</span>
             <span className={statAux}>·</span>
-            <span className={statAux}>{runwayDays}d runway</span>
+            <span
+              data-testid="wallet-runway"
+              data-runway-severity={runwaySeverity ?? 'none'}
+              className={statAux}
+              style={
+                runwaySeverity === 'blocking'
+                  ? { color: 'var(--severity-blocking-fg)' }
+                  : runwaySeverity === 'warning'
+                    ? { color: 'var(--severity-warning-fg)' }
+                    : undefined
+              }
+            >
+              {runwayDays}d runway
+            </span>
           </div>
           <Button
             variant="outline"

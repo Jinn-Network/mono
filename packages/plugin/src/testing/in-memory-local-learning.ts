@@ -1,8 +1,13 @@
-import type { LocalLearningPort, LocalLearningRun } from '../ports/local-learning-port.js';
+import type {
+  LocalLearningPort,
+  LocalLearningRun,
+  LocalLearningSkill,
+} from '../ports/local-learning-port.js';
 import { ok, unavailable } from '../outcome.js';
 
 export class InMemoryLocalLearningPort implements LocalLearningPort {
   private readonly runs = new Map<string, LocalLearningRun>();
+  private readonly learnedSkills = new Map<string, LocalLearningSkill>();
   private counter = 0;
 
   async run(_input: { episodeIds: string[] }) {
@@ -20,5 +25,16 @@ export class InMemoryLocalLearningPort implements LocalLearningPort {
 
   async list() {
     return ok([...this.runs.values()]);
+  }
+
+  recordSkill(skill: LocalLearningSkill): void {
+    this.learnedSkills.set(skill.ref, {
+      ...skill,
+      sourceSessionIds: [...skill.sourceSessionIds],
+    });
+  }
+
+  async skills() {
+    return ok([...this.learnedSkills.values()]);
   }
 }

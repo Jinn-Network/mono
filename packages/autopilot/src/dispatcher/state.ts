@@ -1,127 +1,24 @@
-import { statSync } from 'node:fs';
 import type { CommandRunner, ProjectSnapshot } from './project-snapshot.js';
 import type { InFlightSession } from './types.js';
-import { sessionLogPath } from './session-log.js';
+import { sessionLogPath, sessionStartedAtPath } from './session-log.js';
+import {
+  type ParsedWorktree,
+  parseWorktreePorcelain,
+  extractWorktreeNumber,
+  shortBranch,
+  recoverStartedAt,
+} from './worktree-porcelain.js';
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/**
- * Path component that identifies a task worktree's parent directory.
- *
- * Per CLAUDE.md AI rule #1, multi-agent worktrees live in
- * `../jinn-mono_worktrees/<name>` — sibling of the main repo checkout.
- * Task worktrees use the issue number as `<name>`, so the full shape is
- * `…/jinn-mono_worktrees/<N>`.
- */
-const WORKTREE_PARENT_COMPONENT = 'jinn-mono_worktrees';
-
-// ---------------------------------------------------------------------------
-// Parser: git worktree list --porcelain
-// ---------------------------------------------------------------------------
-
-/**
- * One parsed worktree block from `git worktree list --porcelain`.
- *
- * Real output shape (observed 2026-05-21):
- *
- *   worktree /path/to/worktree
- *   HEAD <sha>
- *   branch refs/heads/<branch>   ← present for checked-out branch
- *   detached                     ← present instead of branch for detached HEAD
- *
- * Blocks are separated by blank lines.
- */
-interface ParsedWorktree {
-  worktreePath: string;
-  /** Full branch ref, e.g. "refs/heads/feat/418-something". Null if detached. */
-  branchRef: string | null;
-}
-
-function parseWorktreePorcelain(output: string): ParsedWorktree[] {
-  const result: ParsedWorktree[] = [];
-  // Split on blank lines to get blocks; trim trailing whitespace per line
-  const blocks = output.split(/\n\n+/);
-
-  for (const block of blocks) {
-    const lines = block.trim().split('\n');
-    if (lines.length === 0 || lines[0] === '') continue;
-
-    let worktreePath: string | null = null;
-    let branchRef: string | null = null;
-
-    for (const line of lines) {
-      if (line.startsWith('worktree ')) {
-        worktreePath = line.slice('worktree '.length);
-      } else if (line.startsWith('branch ')) {
-        branchRef = line.slice('branch '.length);
-      }
-      // 'detached' line → branchRef stays null
-    }
-
-    if (worktreePath != null) {
-      result.push({ worktreePath, branchRef });
-    }
-  }
-
-  return result;
-}
+// Re-exported so existing consumers (test/dispatcher/recover-started-at.test.ts)
+// keep importing from state.ts.
+export { recoverStartedAt } from './worktree-porcelain.js';
 
 /**
  * Extract the issue number from a `jinn-mono_worktrees/<N>` worktree path.
  * Returns null if the path is not a task worktree.
- *
- * Matches `jinn-mono_worktrees/<N>` as proper path components (split on `/`)
- * so that a repo mounted under a path whose directory name itself contains
- * the fragment (e.g. `/home/user/jinn-mono_worktrees-backup/foo/jinn-mono_worktrees/418`)
- * is not misidentified — only the single component before the issue number
- * is examined.
  */
 function extractTaskIssueNumber(worktreePath: string): number | null {
-  // Split on '/' into proper path components (filter leading '' from absolute paths).
-  const parts = worktreePath.split('/').filter((p, i) => i > 0 || p !== '');
-  // Find the `jinn-mono_worktrees/<N>` sequence as proper components.
-  for (let i = 0; i < parts.length - 1; i++) {
-    if (parts[i] === WORKTREE_PARENT_COMPONENT) {
-      const candidate = parts[i + 1];
-      if (candidate == null) return null;
-      // Must be the final component (no trailing path segments after the issue number).
-      if (i + 2 !== parts.length) return null;
-      const n = parseInt(candidate, 10);
-      if (isNaN(n) || String(n) !== candidate) return null;
-      return n;
-    }
-  }
-  return null;
-}
-
-/**
- * Strip the "refs/heads/" prefix from a branch ref.
- * Returns the ref unchanged if it doesn't start with that prefix.
- */
-function shortBranch(branchRef: string): string {
-  const prefix = 'refs/heads/';
-  return branchRef.startsWith(prefix) ? branchRef.slice(prefix.length) : branchRef;
-}
-
-/**
- * Recover the best-available proxy for when a worktree session was started.
- *
- * Uses the worktree directory's creation time (`birthtimeMs`) as a proxy for
- * the session's `startedAt`. Falls back to `mtimeMs` when `birthtimeMs` is 0
- * (common on Linux where birthtime is not tracked by the filesystem). Returns 0
- * (unknown-age sentinel) if the path cannot be stat-ed — the WallClock guards
- * against `startedAt <= 0` and will not force-pause an unknown-age session.
- */
-function recoverStartedAt(worktreePath: string): number {
-  try {
-    const st = statSync(worktreePath);
-    const birth = st.birthtimeMs;
-    return birth > 0 ? birth : st.mtimeMs;
-  } catch {
-    return 0;
-  }
+  return extractWorktreeNumber(worktreePath, '');
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +138,7 @@ export async function deriveInFlight(
         branch: branchRef != null ? shortBranch(branchRef) : '',
         worktreePath: wt.worktreePath,
         pid: null,
-        startedAt: recoverStartedAt(wt.worktreePath),
+        startedAt: recoverStartedAt(wt.worktreePath, sessionStartedAtPath(issueNumber)),
         // #533: deterministic per-session log path, so a recovered session is
         // still tailable by the same `sessions/<N>.log` scheme.
         logPath: sessionLogPath(issueNumber),

@@ -9,6 +9,7 @@ import {
   loadConfig,
   buildConfigProvenance,
   migrateLegacySolverNets,
+  backfillJoinedProviders,
 } from '../src/config.js';
 
 /**
@@ -958,6 +959,138 @@ describe('loadConfig legacy solverNets migration via loader', () => {
   });
 });
 
+describe('joinedSolverNets provider backfill (issue #1243)', () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  async function writeConfigFile(contents: Record<string, unknown>): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-provider-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(contents, null, 2));
+    return configPath;
+  }
+
+  // Acceptance #2: a v0.1.6 `{ model }`-only joined SolverNet config backfills
+  // to `openrouter` without breaking load.
+  it('backfills provider=openrouter onto a {model}-only OpenRouter-shaped joined entry at load', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      joinedSolverNets: {
+        bafkreireal: {
+          manifestCid: 'bafkreireal',
+          name: 'real-net',
+          roles: ['solver'],
+          harness: 'hermes-agent',
+          model: 'anthropic/claude-opus-4.7',
+          plugins: [],
+          disabledDefaultPlugins: [],
+        },
+      },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.joinedSolverNets?.['bafkreireal']?.provider).toBe('openrouter');
+  });
+
+  it('does not backfill a non-OpenRouter-shaped model id', () => {
+    const merged: Record<string, unknown> = {
+      joinedSolverNets: {
+        x: { manifestCid: 'x', roles: ['solver'], model: 'qwen2.5-coder' },
+      },
+    };
+    expect(backfillJoinedProviders(merged)).toBe(0);
+    const entry = (merged.joinedSolverNets as Record<string, Record<string, unknown>>)['x'];
+    expect(entry['provider']).toBeUndefined();
+  });
+
+  it('leaves an entry with an explicit provider untouched', () => {
+    const merged: Record<string, unknown> = {
+      joinedSolverNets: {
+        x: { manifestCid: 'x', roles: ['solver'], model: 'anthropic/claude-opus-4.7', provider: 'nous-portal' },
+      },
+    };
+    expect(backfillJoinedProviders(merged)).toBe(0);
+    const entry = (merged.joinedSolverNets as Record<string, Record<string, unknown>>)['x'];
+    expect(entry['provider']).toBe('nous-portal');
+  });
+
+  it('is a no-op when the model is absent', () => {
+    const merged: Record<string, unknown> = {
+      joinedSolverNets: { x: { manifestCid: 'x', roles: ['solver'] } },
+    };
+    expect(backfillJoinedProviders(merged)).toBe(0);
+  });
+
+  it('preserves an explicit object-form provider on load (custom endpoint)', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      joinedSolverNets: {
+        bafcustom: {
+          manifestCid: 'bafcustom',
+          name: 'custom-net',
+          roles: ['solver'],
+          harness: 'hermes-agent',
+          model: 'my-model',
+          provider: {
+            name: '  my-endpoint  ',
+            baseUrl: '  http://127.0.0.1:9000/v1  ',
+            authVar: '  MY_CRED  ',
+          },
+          plugins: [],
+          disabledDefaultPlugins: [],
+        },
+      },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.joinedSolverNets?.['bafcustom']?.provider).toEqual({
+      name: 'my-endpoint',
+      baseUrl: 'http://127.0.0.1:9000/v1',
+      authVar: 'MY_CRED',
+    });
+  });
+
+  it('normalizes an explicit string-form provider on load', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      joinedSolverNets: {
+        bafnamed: {
+          manifestCid: 'bafnamed',
+          roles: ['solver'],
+          model: 'local-model',
+          provider: '  openrouter  ',
+        },
+      },
+    });
+
+    const cfg = loadConfig(configPath);
+    expect(cfg.joinedSolverNets?.['bafnamed']?.provider).toBe('openrouter');
+  });
+
+  it.each([
+    ['', 'empty named provider'],
+    ['   ', 'whitespace named provider'],
+    [{ name: '   ' }, 'whitespace object name'],
+    [{ name: 'custom', baseUrl: '   ' }, 'whitespace object baseUrl'],
+    [{ name: 'custom', authVar: '   ' }, 'whitespace object authVar'],
+  ])('rejects %s (%s)', async (provider) => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      joinedSolverNets: {
+        bafinvalid: {
+          manifestCid: 'bafinvalid',
+          roles: ['solver'],
+          provider,
+        },
+      },
+    });
+
+    expect(() => loadConfig(configPath)).toThrow();
+  });
+});
+
 describe('buildConfigProvenance', () => {
   const dirs: string[] = [];
 
@@ -1542,5 +1675,52 @@ describe('migrateLegacySolverNets', () => {
     migrateLegacySolverNets(raw);
     expect((raw.joinedSolverNets as Record<string, { contract: unknown }>)['legacy:broken-net'].contract)
       .toEqual({ id: 'broken-net', version: 'v1' });
+  });
+});
+
+describe('engine.knowledgeAutoload (#1393)', () => {
+  const dirs: string[] = [];
+  const originalEnv = process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'];
+
+  afterEach(async () => {
+    if (originalEnv === undefined) {
+      delete process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'];
+    } else {
+      process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] = originalEnv;
+    }
+    await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
+    dirs.length = 0;
+  });
+
+  const writeConfig = async (body: Record<string, unknown>): Promise<string> => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-test-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(body));
+    return configPath;
+  };
+
+  it('defaults to true when neither file nor env sets it', async () => {
+    delete process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'];
+    const config = loadConfig(await writeConfig({}));
+    expect(config.engine.knowledgeAutoload).toBe(true);
+  });
+
+  it('respects engine.knowledgeAutoload: false from the config file', async () => {
+    delete process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'];
+    const config = loadConfig(await writeConfig({ engine: { knowledgeAutoload: false } }));
+    expect(config.engine.knowledgeAutoload).toBe(false);
+  });
+
+  it('JINN_ENGINE_KNOWLEDGE_AUTOLOAD=0 overrides a file-set true', async () => {
+    process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] = '0';
+    const config = loadConfig(await writeConfig({ engine: { knowledgeAutoload: true } }));
+    expect(config.engine.knowledgeAutoload).toBe(false);
+  });
+
+  it('JINN_ENGINE_KNOWLEDGE_AUTOLOAD=true enables it over a file-set false', async () => {
+    process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] = 'true';
+    const config = loadConfig(await writeConfig({ engine: { knowledgeAutoload: false } }));
+    expect(config.engine.knowledgeAutoload).toBe(true);
   });
 });

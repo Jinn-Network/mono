@@ -62,14 +62,14 @@ Seven shapes plus one emergency sub-flow plus one meta-shape (`design`, for desi
 
 If an Issue does not fit one of these shapes, it is mis-scoped — split or reshape it. Per-shape SOPs (v0 flows) live in the handbook §The shapes of work; they evolve via iterative refinement (file a GitHub Issue under the engineering handbook umbrella when friction surfaces).
 
-Routing is governed by three Project (v2) single-select fields set at Friday triage: **Blocked on** (`Nothing` / `Human` / `Another issue`), **Effort** (`Low` / `Medium` / `High` / `XHigh` / `Max` — the model-routing signal), and **Priority** (`P0` … `P4`).
+Routing is governed by three Project (v2) single-select fields set at Friday triage: **Blocked on** (`Nothing` / `Human` / `Another issue`), **Effort** (`Low` / `Medium` / `High` / `XHigh` / `Max` — the implementation reasoning-depth signal), and **Priority** (`P0` … `P4`). Autopilot's AI runtime is process-wide (`JINN_AUTOPILOT_RUNTIME=claude|hermes`), not selected per issue.
 
 ### Ten ratified AI workflow rules
 
 1. **Worktree-for-multi-agent.** Multi-agent or speculative subagent work uses a separate git worktree (current convention: `git worktree add ../jinn-mono_worktrees/<name>`), not the primary checkout.
 2. **Issues frame problems, not solutions.** GitHub Issue body = context + impact + acceptance criteria. Solutions go in design sessions or implementation plans, not the Issue body.
 3. **GitHub Issues are the single SoR for engineering work.** Per DR-2026-05-18, `bd` retires; all new engineering work originates as a GitHub Issue on `Jinn-Network/mono`. Per DR-2026-05-20-b, each axis has one canonical surface: shape is the native **Issue Type**; parent/child and epic are native **sub-issues**; Sprint and Status live on the "Jinn engineering" Project (v2); **Blocked on / Effort / Priority** are Project single-select fields. The `epic:*`, `sprint:*`, `agent:*`, `priority:*`, and redundant GitHub default labels are retired. The `.beads/` checkout stays in-tree as read-only archive of historical `jinn-mono-<id>` references.
-4. **Agent PR review parity.** Codex / Opus / Sonnet / Claude PRs reviewed like human PRs. No agent self-merge. Exceptions: `fix(incident)` with reviewer justification; and Autopilot auto-merge of engine-reviewed, approved, CI-green, non-code-owned pipeline PRs (#1735 — the independent review still happens; human-surface/code-owned PRs always wait for a human per DR-2026-06-03).
+4. **Agent PR review parity.** Codex / Opus / Sonnet / Claude PRs are reviewed like human PRs. No agent self-merge. Exceptions: `fix(incident)` with reviewer justification; and Autopilot's exact-head ordinary merge of a ready, independently reviewed, approved, CI-green, cleanly mergeable, non-code-owned pipeline PR (#1735). Autopilot never supplies a missing approval or weakens protection; human-surface/code-owned PRs always wait for a human per DR-2026-06-03. Mechanical merge preparation must make the PR draft before mutation and the resulting head re-enters every review and merge gate.
 5. _(Deferred — supervised-diff for the self-modifying learner. Mechanism open.)_
 6. **Integration tests > mocks for migration / contract surfaces.**
 7. **TDD for new features, regression test for fixes.**
@@ -287,6 +287,8 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 |------------------|--------------------------|-----------------------------------|
 | rpcUrl           | BASE_RPC_URL/JINN_RPC_URL| mainnet (default fallback chain): `["https://mainnet.base.org", …4 more]` · testnet (default fallback chain): `["https://base-sepolia.publicnode.com", …3 more, "https://sepolia.base.org"]` (≥5 free providers per chain, #911) |
 | claudeModel      | JINN_CLAUDE_MODEL        | claude-haiku-4-5-20251001         |
+| hermesModel      | JINN_HERMES_MODEL        | per-SolverNet config (env wins over SolverNet config) |
+| hermesProvider   | JINN_HERMES_PROVIDER     | per-SolverNet config (env wins; ignored when a base_url/custom endpoint is set) |
 | claudePath       | JINN_CLAUDE_PATH         | claude                            |
 | pollIntervalMs   | JINN_POLL_INTERVAL_MS    | 5000                              |
 | apiPort          | JINN_API_PORT            | 7331                              |
@@ -301,12 +303,18 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
 | engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
 | engine.implStateDirRoot | JINN_ENGINE_IMPL_STATE_DIR_ROOT | ~/.jinn-client/engine/impl-state |
+| engine.knowledgeAutoload | JINN_ENGINE_KNOWLEDGE_AUTOLOAD | true — before each restoration harness spawn, auto-load the top-3 corpus solution records for the task's solverType into `task.context.corpusKnowledge` (higher evidence tiers preferred: attested > committed > self-signed; full content acquirable via MCP `inspect_record` / `acquire_artifact`). Corpus failure never blocks the solve path (#1393). |
 | watchdogAutoRestart | JINN_WATCHDOG_AUTO_RESTART | false — loop watchdog (#1043). Off: a stale loop is detected, loud-logged, and emits a `loop_watchdog_stale` event. On: a stale loop also triggers a non-zero `process.exit` so Railway's ON_FAILURE policy restarts the daemon through its existing idempotent boot path. |
 | faucetDailyTopupCap | JINN_FAUCET_DAILY_TOPUP_CAP | 10 — max faucet drips one "Top up from faucet" click issues in a batch, and the per-24h ceiling per wallet (#560) |
 | faucetTopupCooldownMs | JINN_FAUCET_TOPUP_COOLDOWN_MS | 86400000 (24h) — once the daily cap is reached, the top-up action stays disabled until this window elapses since the first call of that batch (#560) |
 | _(none — env-only)_  | JINN_EVAL_DISK_FLOOR_GB | 20 (free-disk floor in GB before each swe-rebench-v2 eval round; below it the runner prunes Docker and aborts the run cleanly if still short) |
+| _(none — env-only)_  | JINN_AUTOPILOT_CLEANUP_ENABLED | enabled in active mode (default on). Opt out with `false`. Each active cycle sweeps dead attempt worktrees under `~/.jinn-client/autopilot/attempts/v2/`. |
+| _(none — env-only)_  | JINN_AUTOPILOT_ATTEMPT_GRACE_MS | 1800000 (30 minutes). Dead dirty/ahead/preparing attempts are removed after this grace; clean+pushed attempts are removed immediately. |
+| _(none — env-only)_  | JINN_AUTOPILOT_DISK_FLOOR_GB | 10. Below this free-disk floor on the attempts directory, autopilot force-evicts oldest dead attempts and pauses new worktree-creating claims until space recovers. |
+| _(none — env-only)_  | JINN_EVAL_COMPUTE_USD_PER_HOUR | 0.20 — USD/hr compute rate; evaluator_cost_usd = monotonic grade() elapsed time × rate. Unset → default; invalid/zero or a non-finite computed cost → 0 with a warning. Never blocks an eval. |
 | _(none — env-only)_  | JINN_NET_LIVENESS_WEBHOOK_URL | unset — generic incoming-webhook URL (Slack-compatible) for the cron-driven net-liveness probe (#1044, `yarn net-liveness`, `docs/runbooks/net-liveness.md`). Unset → NO-OP: the probe still classifies and logs, it just never posts. |
 | _(none — env-only)_  | JINN_NET_LIVENESS_THRESHOLD_MINUTES | 30 — staleness threshold (minutes) for the net-liveness probe; converted to Base block-space at 30 blocks/min. |
+| _(none — env-only)_  | JINN_VERSION_CHECK | enabled (default). Gates the start-time npm-registry check (#641) that logs one line when a newer `@jinn-network/client` has been published and backs the dashboard's `update_available` banner. Opt out with `0` / `false` / `no` / empty. Best-effort — a registry outage degrades silently, never gates boot. |
 
 `JINN_PASSWORD` is env-only — never in config files.
 

@@ -262,4 +262,164 @@ describe('TaskEngine.claim — impl gate', () => {
       expect(engine.db.getByRequestId(input.requestId)!.state).toBe(TaskRunState.CLAIMED);
     });
   });
+
+  describe('claim() — onchainCreationTimestamp resolution (#1827)', () => {
+    it('resolves and persists the block timestamp via blockTimestamp.getBlockTimestamp on successful claim', async () => {
+      const getBlockTimestamp = vi.fn().mockResolvedValue(1752000000);
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady: async () => ({ ready: true }) }) },
+        blockTimestamp: { getBlockTimestamp },
+      });
+      const input = makeInput('req-createdat-claim-1');
+      engine.db.insertDiscovered(input);
+
+      await engine.callClaim(engine.db.getByRequestId(input.requestId)!);
+
+      expect(getBlockTimestamp).toHaveBeenCalledWith(1); // matches makeInput's onchainCreationBlock: 1
+      const row = engine.db.getByRequestId(input.requestId)!;
+      expect(row.state).toBe(TaskRunState.CLAIMED);
+      expect(row.onchainCreationTimestamp).toBe(1752000000);
+    });
+
+    it('retries a transient block lookup and persists task.createdAt before advancing', async () => {
+      const getBlockTimestamp = vi.fn()
+        .mockRejectedValueOnce(new Error('fetch failed'))
+        .mockResolvedValueOnce(1752000001);
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady: async () => ({ ready: true }) }) },
+        blockTimestamp: { getBlockTimestamp },
+      });
+      const input = makeInput('req-createdat-claim-2');
+      engine.db.insertDiscovered(input);
+
+      await engine.callClaim(engine.db.getByRequestId(input.requestId)!);
+
+      const row = engine.db.getByRequestId(input.requestId)!;
+      expect(getBlockTimestamp).toHaveBeenCalledTimes(2);
+      expect(row.state).toBe(TaskRunState.CLAIMED);
+      expect(row.onchainCreationTimestamp).toBe(1752000001);
+    });
+
+    it('parks the discovered row when all bounded attempts hit a transient RPC failure', async () => {
+      const getBlockTimestamp = vi.fn().mockRejectedValue(new Error('fetch failed'));
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady: async () => ({ ready: true }) }) },
+        blockTimestamp: { getBlockTimestamp },
+      });
+      const input = makeInput('req-createdat-transient-park');
+      engine.db.insertDiscovered(input);
+
+      await expect(engine.process(input.requestId)).rejects.toThrow(
+        'authoritative task creation timestamp',
+      );
+
+      const row = engine.db.getByRequestId(input.requestId)!;
+      expect(getBlockTimestamp).toHaveBeenCalledTimes(3);
+      expect(row.state).toBe(TaskRunState.DISCOVERED);
+      expect(row.onchainCreationTimestamp).toBeNull();
+    });
+
+    it('parks an invalid lookup result and re-resolves it successfully on the next process pass', async () => {
+      const getBlockTimestamp = vi.fn()
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(1752000002);
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady: async () => ({ ready: true }) }) },
+        blockTimestamp: { getBlockTimestamp },
+      });
+      const input = makeInput('req-createdat-invalid-park-retry');
+      engine.db.insertDiscovered(input);
+
+      await expect(engine.process(input.requestId)).rejects.toMatchObject({
+        name: 'TaskCreationTimestampUnavailableError',
+      });
+      expect(engine.db.getByRequestId(input.requestId)).toMatchObject({
+        state: TaskRunState.DISCOVERED,
+        onchainCreationTimestamp: null,
+      });
+
+      await engine.process(input.requestId);
+
+      expect(getBlockTimestamp).toHaveBeenCalledTimes(4);
+      expect(engine.db.getByRequestId(input.requestId)).toMatchObject({
+        state: TaskRunState.CLAIMED,
+        onchainCreationTimestamp: 1752000002,
+      });
+    });
+
+    it('redacts configured RPC URL and API-key material from lookup failure logs', async () => {
+      const rpcSecret = 'super-secret-rpc-key-123456';
+      const rpcUrl = `https://base.example.test/v2/${rpcSecret}`;
+      const getBlockTimestamp = vi.fn().mockRejectedValue(
+        new Error(`HTTP 401 from ${rpcUrl}; rejected api key ${rpcSecret}`),
+      );
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady: async () => ({ ready: true }) }) },
+        blockTimestamp: { getBlockTimestamp, configuredRpcUrls: [rpcUrl] },
+      });
+      const input = makeInput('req-createdat-redaction');
+      engine.db.insertDiscovered(input);
+
+      await expect(
+        engine.callClaim(engine.db.getByRequestId(input.requestId)!),
+      ).rejects.toThrow('authoritative task creation timestamp');
+
+      const warning = warn.mock.calls.flat().join(' ');
+      expect(getBlockTimestamp).toHaveBeenCalledTimes(3);
+      expect(warning).not.toContain(rpcUrl);
+      expect(warning).not.toContain(rpcSecret);
+      expect(warning).toContain('<rpc-');
+      warn.mockRestore();
+    });
+
+    it('refuses to advance when every bounded lookup returns no authoritative timestamp', async () => {
+      const getBlockTimestamp = vi.fn().mockResolvedValue(undefined);
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady: async () => ({ ready: true }) }) },
+        blockTimestamp: { getBlockTimestamp },
+      });
+      const input = makeInput('req-createdat-claim-3');
+      engine.db.insertDiscovered(input);
+
+      await expect(
+        engine.callClaim(engine.db.getByRequestId(input.requestId)!),
+      ).rejects.toThrow('authoritative task creation timestamp');
+
+      const row = engine.db.getByRequestId(input.requestId)!;
+      expect(getBlockTimestamp).toHaveBeenCalledTimes(3);
+      expect(row.state).toBe(TaskRunState.DISCOVERED);
+      expect(row.onchainCreationTimestamp).toBeNull();
+    });
+
+    it('skips createdAt resolution entirely when blockTimestamp dependency is absent (back-compat)', async () => {
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady: async () => ({ ready: true }) }) },
+      });
+      const input = makeInput('req-createdat-claim-4');
+      engine.db.insertDiscovered(input);
+
+      await engine.callClaim(engine.db.getByRequestId(input.requestId)!);
+
+      const row = engine.db.getByRequestId(input.requestId)!;
+      expect(row.state).toBe(TaskRunState.CLAIMED);
+      expect(row.onchainCreationTimestamp).toBeNull();
+    });
+  });
 });

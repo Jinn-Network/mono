@@ -21,6 +21,7 @@ import { z } from 'zod/v3';
 import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js';
+import { isOpenRouterModelId } from './harnesses/provider-ref.js';
 import { parseRpcUrls } from './rpc/transport.js';
 import { canonicalLocalHttpBaseUrl } from './local-provider-url.js';
 
@@ -54,7 +55,7 @@ export const JinnConfigSchema = z.object({
   /**
    * Single volume-aware durable-state root. When set (env JINN_STATE_DIR or
    * this file field), `earningDir`, `dbPath`, `engine.implStateDirRoot`, and
-   * the swe-rebench-v2 pool dir derive from it as `<stateDir>/<subdir>` —
+   * `sweRebenchV2StateDir` derive from it as `<stateDir>/<subdir>` —
    * UNLESS each is individually overridden, in which case the per-key value
    * wins (derive-don't-collapse). With `stateDir` unset, every default is
    * byte-identical to the legacy `~/.jinn-client/<subdir>` paths. Hosted
@@ -69,6 +70,15 @@ export const JinnConfigSchema = z.object({
 
   /** SQLite database path */
   dbPath: z.string().default(join(homedir(), '.jinn-client', 'jinn.db')),
+
+  /**
+   * SWE-rebench v2 durable state (validated pool, generator ledger, harvest).
+   * Derived from `stateDir` / `JINN_STATE_DIR` as `<stateDir>/swe-rebench-v2`
+   * unless overridden by this field or `JINN_SWE_REBENCH_V2_STATE_DIR`.
+   */
+  sweRebenchV2StateDir: z
+    .string()
+    .default(join(homedir(), '.jinn-client', 'swe-rebench-v2')),
 
   /** Chain poll interval in ms */
   pollIntervalMs: z.number().int().positive().default(5000),
@@ -421,6 +431,19 @@ export const JinnConfigSchema = z.object({
           .min(1, 'each joined SolverNet must enable at least one role'),
         harness: HarnessNameSchema.optional(),
         model: z.string().optional(),
+        // Provider route (issue #1243): a named provider (string) or a custom
+        // OpenAI-compatible endpoint object. Optional — legacy `{model}`-only
+        // entries are backfilled at load time (see `backfillJoinedProviders`).
+        provider: z
+          .union([
+            z.string().trim().min(1),
+            z.object({
+              name: z.string().trim().min(1),
+              baseUrl: z.string().trim().min(1).optional(),
+              authVar: z.string().trim().min(1).optional(),
+            }),
+          ])
+          .optional(),
         plugins: z.array(z.string()).default([]),
         disabledDefaultPlugins: z.array(z.string()).default([]),
       }),
@@ -467,6 +490,12 @@ export const JinnConfigSchema = z.object({
     .object({
       workingDirRoot: z.string().optional(),
       implStateDirRoot: z.string().optional(),
+      /**
+       * Auto-load top-3 corpus solution records for the task's solverType
+       * into task.context.corpusKnowledge before each restoration harness
+       * spawn (#1393). Default true; env JINN_ENGINE_KNOWLEDGE_AUTOLOAD.
+       */
+      knowledgeAutoload: z.boolean().optional(),
     })
     .optional(),
 
@@ -532,24 +561,26 @@ export const JinnConfigSchema = z.object({
         })
         .default({ enabled: false, port: 7342 }),
       /**
-       * Seller-side ML PII detection (Transformers.js NER, in-process) applied
-       * before captures (and task trajectories) are published. Off by default:
-       * the structural key policy + openredaction + secretlint/entropy stages
-       * always scrub (the non-ML guarantee); this adds person/org/location NER
-       * at the cost of a one-time model download. When enabled, a model-load
+       * Seller-side ML PII detection (GLiNER ONNX, in-process) applied before
+       * captures (and task trajectories) are published. **On by default** for
+       * publish lanes (#1973): free-prose names have no reliable regex shape.
+       * Set `enabled: false` explicitly to disable. When enabled, a model-load
        * failure fails closed at the publish altitude — the trajectory is not
-       * published — while the daemon's other loops keep running.
-       * Env: JINN_CAPTURES_PII_DETECTION_ENABLED=1|true|yes,
+       * published — while the daemon's other loops keep running. Unresolved
+       * flag dispositions also hold unattended publishes until
+       * `jinn scrub review` resolves them.
+       * Env: JINN_CAPTURES_PII_DETECTION_ENABLED=0|false|no to disable,
        *      JINN_CAPTURES_PII_DETECTION_MODEL=<hf-model-id>
+       * Default model: urchade/gliner_multi_pii-v1 (ONNX via onnx-community).
        */
       piiDetection: z
         .object({
-          enabled: z.boolean().default(false),
+          enabled: z.boolean().default(true),
           model: z.string().optional(),
         })
-        .default({ enabled: false }),
+        .default({ enabled: true }),
     })
-    .default({ llmProxy: { enabled: false, port: 7342 }, piiDetection: { enabled: false } }),
+    .default({ llmProxy: { enabled: false, port: 7342 }, piiDetection: { enabled: true } }),
 
   /**
    * Run idempotent legacy migrations at daemon startup (jinn-mono-jgp:
@@ -638,6 +669,8 @@ export const JinnConfigSchema = z.object({
       enabled: z.boolean().default(false),
       intervalMs: z.number().int().positive().default(60 * 60 * 1000),
       limitPerRepo: z.number().int().positive().default(3),
+      /** Max session-echo records mined per harvest tick (sibling of limitPerRepo). */
+      limitPerTick: z.number().int().positive().default(3),
       publish: z.boolean().default(true),
       repos: z
         .array(
@@ -660,6 +693,7 @@ export const JinnConfigSchema = z.object({
       enabled: false,
       intervalMs: 60 * 60 * 1000,
       limitPerRepo: 3,
+      limitPerTick: 3,
       publish: true,
       repos: [],
       sources: ['commits'],
@@ -694,7 +728,7 @@ export type JinnConfig = Omit<
   archiveRpcUrl?: string;
   archiveRpcUrls?: readonly string[];
   tasks: Task[];
-  engine: { workingDirRoot: string; implStateDirRoot: string };
+  engine: { workingDirRoot: string; implStateDirRoot: string; knowledgeAutoload: boolean };
 };
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -860,6 +894,12 @@ export function migrateLegacySolverNets(raw: Record<string, unknown>): number {
       roles: Array.from(new Set(roles)),
       ...(typeof entry.harness === 'string' ? { harness: entry.harness } : {}),
       ...(typeof entry.model === 'string' ? { model: entry.model } : {}),
+      // Stamp the OpenRouter provider first-class when the migrated model is
+      // OpenRouter-shaped (issue #1243) so the synthetic entry matches what a
+      // fresh join would persist and the adapter routes without inference.
+      ...(typeof entry.model === 'string' && isOpenRouterModelId(entry.model)
+        ? { provider: 'openrouter' as const }
+        : {}),
       plugins: Array.isArray(entry.plugins) ? entry.plugins : [],
       disabledDefaultPlugins: [],
     };
@@ -871,6 +911,32 @@ export function migrateLegacySolverNets(raw: Record<string, unknown>): number {
   }
   delete raw['solverNets'];
   return migrated;
+}
+
+/**
+ * Backfill `provider: 'openrouter'` onto legacy `joinedSolverNets` entries that
+ * carry an OpenRouter-shaped `model` id but no `provider` (issue #1243). A
+ * v0.1.6 config only persisted `{ model }` and relied on the adapter inferring
+ * the provider from the id shape at runtime; stamping it here makes the route
+ * first-class so pre-provider configs migrate silently.
+ *
+ * Mutates `merged` in place. Idempotent — entries that already carry a
+ * `provider`, or whose `model` is absent / not OpenRouter-shaped, are untouched.
+ * Returns the number of entries backfilled.
+ */
+export function backfillJoinedProviders(merged: Record<string, unknown>): number {
+  const joined = merged['joinedSolverNets'];
+  if (!joined || typeof joined !== 'object' || Array.isArray(joined)) return 0;
+  let backfilled = 0;
+  for (const entry of Object.values(joined as Record<string, unknown>)) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const e = entry as Record<string, unknown>;
+    if (e['provider'] !== undefined) continue;
+    if (!isOpenRouterModelId(e['model'] as string | undefined)) continue;
+    e['provider'] = 'openrouter';
+    backfilled += 1;
+  }
+  return backfilled;
 }
 
 /**
@@ -912,6 +978,9 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_NETWORK'])           merged.network = env['JINN_NETWORK'];
   if (env['JINN_EARNING_DIR'])       merged.earningDir = env['JINN_EARNING_DIR'];
   if (env['JINN_DB_PATH'])           merged.dbPath = env['JINN_DB_PATH'];
+  if (env['JINN_SWE_REBENCH_V2_STATE_DIR']) {
+    merged.sweRebenchV2StateDir = env['JINN_SWE_REBENCH_V2_STATE_DIR'];
+  }
   if (env['JINN_POLL_INTERVAL_MS'])  merged.pollIntervalMs = parseInt(env['JINN_POLL_INTERVAL_MS'], 10);
   if (env['JINN_REWARD_CLAIM_INTERVAL_MS'] !== undefined) {
     merged.rewardClaimIntervalMs = parseInt(env['JINN_REWARD_CLAIM_INTERVAL_MS'], 10);
@@ -1139,7 +1208,11 @@ export function loadConfig(configPath?: string): JinnConfig {
     };
   }
 
-  if (env['JINN_ENGINE_WORKING_DIR_ROOT'] || env['JINN_ENGINE_IMPL_STATE_DIR_ROOT']) {
+  if (
+    env['JINN_ENGINE_WORKING_DIR_ROOT'] ||
+    env['JINN_ENGINE_IMPL_STATE_DIR_ROOT'] ||
+    env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] !== undefined
+  ) {
     const prev = typeof merged['engine'] === 'object' && merged['engine'] !== null
       ? (merged['engine'] as Record<string, unknown>)
       : {};
@@ -1147,6 +1220,9 @@ export function loadConfig(configPath?: string): JinnConfig {
       ...prev,
       ...(env['JINN_ENGINE_WORKING_DIR_ROOT'] ? { workingDirRoot: env['JINN_ENGINE_WORKING_DIR_ROOT'] } : {}),
       ...(env['JINN_ENGINE_IMPL_STATE_DIR_ROOT'] ? { implStateDirRoot: env['JINN_ENGINE_IMPL_STATE_DIR_ROOT'] } : {}),
+      ...(env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] !== undefined
+        ? { knowledgeAutoload: ['1', 'true', 'yes'].includes(env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'].trim().toLowerCase()) }
+        : {}),
     };
   }
 
@@ -1162,6 +1238,9 @@ export function loadConfig(configPath?: string): JinnConfig {
     merged['stateDir'] = stateDir;
     if (merged['earningDir'] === undefined) merged['earningDir'] = join(stateDir, 'earning');
     if (merged['dbPath'] === undefined) merged['dbPath'] = join(stateDir, 'jinn.db');
+    if (merged['sweRebenchV2StateDir'] === undefined) {
+      merged['sweRebenchV2StateDir'] = join(stateDir, 'swe-rebench-v2');
+    }
     const engineObj = (typeof merged['engine'] === 'object' && merged['engine'] !== null)
       ? (merged['engine'] as Record<string, unknown>)
       : {};
@@ -1280,6 +1359,13 @@ export function loadConfig(configPath?: string): JinnConfig {
     // the schema's non-strict parse — no explicit reshape needed.
   }
 
+  // Backfill `provider: 'openrouter'` onto legacy `{model}`-only joined entries
+  // whose model id is OpenRouter-shaped (issue #1243). Runs after the legacy
+  // migration so synthetic `legacy:*` entries are covered too. In-memory only —
+  // the on-disk config re-persists provider first-class on the operator's next
+  // join via the SPA; a load-time-only backfill keeps existing files loading.
+  backfillJoinedProviders(merged);
+
   // 3. Validate
   const result = JinnConfigSchema.safeParse(merged);
   if (!result.success) {
@@ -1338,6 +1424,7 @@ export function loadConfig(configPath?: string): JinnConfig {
     engine: {
       workingDirRoot: parsed.engine?.workingDirRoot ?? DEFAULT_ENGINE.workingDirRoot,
       implStateDirRoot: parsed.engine?.implStateDirRoot ?? DEFAULT_ENGINE.implStateDirRoot,
+      knowledgeAutoload: parsed.engine?.knowledgeAutoload ?? true,
     },
   };
 }
@@ -1453,6 +1540,7 @@ const TRACKED_ENV_VARS = [
   'JINN_TASKS',
   'JINN_ENGINE_WORKING_DIR_ROOT',
   'JINN_ENGINE_IMPL_STATE_DIR_ROOT',
+  'JINN_ENGINE_KNOWLEDGE_AUTOLOAD',
   'JINN_SWE_REBENCH_V2_STATE_DIR',
   'JINN_OPERATOR_PUBLIC_ENDPOINT',
   'JINN_OPERATOR_DEFAULT_PRICE_USDC',

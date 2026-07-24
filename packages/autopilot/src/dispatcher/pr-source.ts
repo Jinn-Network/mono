@@ -22,20 +22,38 @@ interface GhPrView {
   commits: Array<{ committedDate: string }>;
 }
 
-/**
- * True iff a review by `botLogin` was submitted at or after the PR's latest
- * commit. Used to decide `needsReview = !currentReviewExists`.
- */
-function hasCurrentReview(view: GhPrView, botLogin: string): boolean {
-  if (view.commits.length === 0) return false;
+function currentBotReviews(
+  view: GhPrView,
+  botLogin: string,
+): GhPrView['reviews'] {
+  if (view.commits.length === 0) return [];
   const latestCommitMs = Math.max(...view.commits.map((c) => Date.parse(c.committedDate)));
   // Case-fold: GitHub logins are case-insensitive, and the dual-identity boot
   // check (identity.ts) also compares case-insensitively — keep them consistent
   // so a configured-login casing difference can't cause endless re-review.
   const bot = botLogin.toLowerCase();
-  return view.reviews.some(
+  return view.reviews.filter(
     (r) => (r.author?.login ?? '').toLowerCase() === bot && Date.parse(r.submittedAt) >= latestCommitMs,
   );
+}
+
+/** True iff the bot posted any review at or after the latest commit. */
+function hasCurrentReview(view: GhPrView, botLogin: string): boolean {
+  return currentBotReviews(view, botLogin).length > 0;
+}
+
+/**
+ * True iff the bot's latest current decisive verdict is APPROVED. COMMENTED
+ * reviews do not supersede GitHub's approval/changes-requested decision.
+ */
+function hasCurrentApproval(view: GhPrView, botLogin: string): boolean {
+  const decisive = currentBotReviews(view, botLogin)
+    .filter((review) => (
+      review.state === 'APPROVED' ||
+      review.state === 'CHANGES_REQUESTED'
+    ))
+    .sort((a, b) => Date.parse(b.submittedAt) - Date.parse(a.submittedAt));
+  return decisive[0]?.state === 'APPROVED';
 }
 
 export class GhPrSource implements PrSource {
@@ -66,6 +84,7 @@ export class GhPrSource implements PrSource {
         '--json', 'reviews,commits',
       ]);
       const view: GhPrView = JSON.parse(viewRaw) as GhPrView;
+      const currentReviewExists = hasCurrentReview(view, this.botLogin);
       out.push({
         number: pr.number,
         title: pr.title,
@@ -74,7 +93,13 @@ export class GhPrSource implements PrSource {
         isDraft: pr.isDraft,
         author: pr.author?.login ?? '',
         hasReviewLabel: true,
-        needsReview: !hasCurrentReview(view, this.botLogin),
+        // A current approval on a draft is an incomplete clean-flow
+        // transaction: the final `gh pr ready` never happened. Redispatch it
+        // for reconciliation instead of letting the approval suppress review
+        // forever. Once non-draft, that same current approval is complete.
+        needsReview:
+          !currentReviewExists ||
+          (pr.isDraft && hasCurrentApproval(view, this.botLogin)),
       });
     }
     return out;

@@ -8,13 +8,18 @@ import { join } from 'node:path';
 
 /** Narrow RPC surface for balance fan-out (avoids PublicClient / chain-specific getBlock incompatibilities). */
 type StatusBalanceRpc = Pick<PublicClient, 'getBalance' | 'readContract'>;
-import { base, baseSepolia } from 'viem/chains';
+import { base, baseSepolia, sepolia } from 'viem/chains';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
 import type { CredentialId } from '../spend/credential.js';
 import { isOverSpendCap } from '../spend/spend-cap.js';
 import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
-import { blockResetsAtUtc, weekResetsAtUtc, GPT_5_4_MINI_USD_PER_BLOCK } from '../spend/ai-units.js';
+import {
+  blockResetsAtUtc,
+  classifyAiUnitsSpend,
+  weekResetsAtUtc,
+  GPT_5_4_MINI_USD_PER_BLOCK,
+} from '../spend/ai-units.js';
 import { FleetStateStore } from '../earning/store.js';
 import {
   getChainConfig,
@@ -25,6 +30,7 @@ import type { FleetState } from '../earning/types.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 import {
   assembleStatusV1,
+  type AiUnitsPausedWindow,
   type GatheredStatusRaw,
   type ServiceBalanceErrorEntry,
   type StatusV1Response,
@@ -43,6 +49,7 @@ import {
 import { gatherTaskRunsStatus, applyOutcomes } from './task-runs-build.js';
 import type { DiscoveryAPI, VerdictTallyResult } from '../discovery/types.js';
 import { gatherLoopCompletion, gatherImplStateCadence } from './loop-completion-build.js';
+import { buildInfo } from '../build-info.js';
 import type { BalanceCacheEntry } from '../store/store.js';
 import {
   buildPredictionOperatorStatus,
@@ -69,6 +76,12 @@ const ERC20_BALANCE_OF_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
 ] as const;
+
+// The tokenless-OLAS configuration no longer carries an Ethereum-L1 RPC
+// surface. The operator dashboard still needs the Sepolia master-gas runway on
+// testnet, so this read uses the public endpoint directly; failures remain
+// status-only and suppress runway severity rather than blocking the daemon.
+const TESTNET_ETHEREUM_RPC_URL = 'https://ethereum-sepolia-rpc.publicnode.com';
 
 function readDaemonRuntime(earningDir: string | undefined): GatheredStatusRaw['daemonRuntime'] | undefined {
   if (!earningDir) return undefined;
@@ -158,8 +171,9 @@ export interface StatusGatherConfig {
   spendCaps?: Record<CredentialId, number>;
   /**
    * AI-units gate config (issue #815). When present, /v1/status carries an
-   * `aiUnits` block keyed per credential — surfaces unitsThisBlock /
-   * unitsThisWeek vs caps + paused flag + reset instants.
+   * `aiUnits` block keyed per credential — surfaces current spend/caps,
+   * whether any known configured task projection is gated, the binding
+   * window, and reset instants.
    */
   aiUnits?: AiUnitsDaemonConfig;
   /**
@@ -180,6 +194,14 @@ export interface StatusGatherConfig {
    * and sqlite-only contexts omit it ⇒ `null` (issue #441).
    */
   passwordRotation?: PasswordRotationConfig;
+  /**
+   * Optional getter for the latest published `@jinn-network/client` version
+   * (issue #641). Threaded by `main.ts` as a holder deref so the start-time
+   * npm-registry check can back-fill `/v1/status.latestVersion` once it
+   * resolves. Best-effort: returning `null` (or throwing) leaves
+   * `latestVersion` null — the SPA simply doesn't show the update banner.
+   */
+  latestVersion?: () => string | null;
   /**
    * Resolved DiscoveryAPI, threaded by `server.ts`. When present, the async
    * status path enriches each COMPLETE solve run's task-relative `outcome`
@@ -653,8 +675,20 @@ export async function gatherGatheredStatusRaw(
     );
   }
 
+  // Version-check surface (issue #641). `version` is always this build's
+  // implVersion; `latestVersion` is a best-effort deref of the npm-registry
+  // getter — any failure degrades to null (no banner), never throws.
+  let latestVersion: string | null = null;
+  try {
+    latestVersion = status?.latestVersion?.() ?? null;
+  } catch {
+    latestVersion = null;
+  }
+
   const baseRaw: GatheredStatusRaw = {
     shutdownState,
+    version: buildInfo.implVersion,
+    latestVersion,
     daemonRuntime: readDaemonRuntime(status?.earningDir),
     daemonStartedAt,
     passwordRotationAt: resolvePasswordRotationAt(status?.passwordRotation),
@@ -779,6 +813,36 @@ export async function gatherGatheredStatusRaw(
     }
   }
 
+  // L1 (Ethereum Sepolia) master gas runway (#1296). Same master key as L2;
+  // balance read on the L1 chain. Testnet-only — mainnet has no L1 gas surface
+  // here. Error-safe: a failed L1 read sets `error`, it never throws the
+  // endpoint. The L1 daily estimate reuses the resolved `daily` (env
+  // JINN_MASTER_ETH_DAILY_WEI — no new config key); the L1 floor reuses the
+  // per-chain `minEoaGasEth`, the same EOA gas floor that sizes the L2 master
+  // gate above.
+  if (
+    status.network === 'testnet' &&
+    fleet?.master_address
+  ) {
+    raw.l1MasterDailyEstimateWei = daily.toString();
+    raw.minL1MasterEthWei = chainCfg.minEoaGasEth.toString();
+    try {
+      const l1Client = createPublicClient({
+        chain: sepolia,
+        transport: http(TESTNET_ETHEREUM_RPC_URL),
+      });
+      const l1Bal = await l1Client.getBalance({
+        address: fleet.master_address as `0x${string}`,
+      });
+      raw.l1Master = { address: fleet.master_address, balanceWei: l1Bal.toString() };
+    } catch (e) {
+      raw.l1Master = {
+        address: fleet.master_address,
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+  }
+
   if (fleet) {
     const per: Record<
       number,
@@ -810,7 +874,9 @@ export async function gatherStatusForApi(
   const body = assembleStatusV1(raw);
   // Loop-completion + impl-state commit cadence (#959). Both are read-only and
   // degrade to zeroes / an empty list — they never throw the status endpoint.
-  body.loopCompletion = gatherLoopCompletion(store.taskRunReadModel());
+  body.loopCompletion = gatherLoopCompletion(store.taskRunReadModel(), {
+    cacheKey: store.db,
+  });
   if (status?.engine?.implStateDirRoot) {
     body.implStateCadence = gatherImplStateCadence(status.engine.implStateDirRoot);
   }
@@ -831,21 +897,65 @@ export async function gatherStatusForApi(
   if (aiUnitsCfg) {
     const now = new Date();
     const blockResetsAt = blockResetsAtUtc(now).toISOString();
-    const weekResetsAt = weekResetsAtUtc(now).toISOString();
-    // Dedupe credentials across manifests — multiple SolverNets on the same
-    // credential share one row.
-    const uniqueCredentials = new Set(Object.values(aiUnitsCfg.manifestCredentials));
+    const weekResetsAtFallback = weekResetsAtUtc(now).toISOString();
+    // Group every configured task projection by credential. Multiple
+    // SolverNets can share one credential but carry different models/costs;
+    // status must report paused when any known prospective task would be
+    // blocked by the same classifier the daemon gate uses. Unknown
+    // projections remain fail-open individually.
+    const projectionsByCredential = new Map<CredentialId, Array<number | null>>();
+    for (const [manifestCid, credentialId] of Object.entries(
+      aiUnitsCfg.manifestCredentials,
+    )) {
+      const projections = projectionsByCredential.get(credentialId) ?? [];
+      projections.push(aiUnitsCfg.manifestProjectedUsdMicros[manifestCid] ?? null);
+      projectionsByCredential.set(credentialId, projections);
+    }
     // Peg: usd_micros = units / 100 * GPT_5_4_MINI_USD_PER_BLOCK * 1e6.
     // Inverse (USD micros -> units) for the legacy unit surface (#1006).
     const usdMicrosToUnits = (usdMicros: number): number =>
       (usdMicros / 1_000_000 / GPT_5_4_MINI_USD_PER_BLOCK) * 100;
     body.aiUnits = {
-      credentials: [...uniqueCredentials].map((credentialId) => {
+      credentials: [...projectionsByCredential].map(([credentialId, projections]) => {
         const block = store.usdMicrosThisBlock(credentialId, now);
         const week = store.usdMicrosThisWeek(credentialId, now);
-        const paused =
-          block.usdMicros >= aiUnitsCfg.capPerBlockUsdMicros ||
-          week.usdMicros >= aiUnitsCfg.capPerWeekUsdMicros;
+        const blockedWindows = projections.flatMap((projectedUsdMicros) => {
+          const decision = classifyAiUnitsSpend({
+            projectedUsdMicros,
+            usdMicrosThisBlock: block.usdMicros,
+            usdMicrosThisWeek: week.usdMicros,
+            capPerBlockUsdMicros: aiUnitsCfg.capPerBlockUsdMicros,
+            capPerWeekUsdMicros: aiUnitsCfg.capPerWeekUsdMicros,
+          });
+          return decision.proceed ? [] : [decision.window];
+        });
+        // Credential-level block preference: if any configured task is
+        // block-gated, surface block; otherwise surface week when any task is
+        // week-gated. Null projections contribute no blocked decision.
+        const pausedWindow: AiUnitsPausedWindow = blockedWindows.includes('block')
+          ? 'block'
+          : blockedWindows.includes('week')
+            ? 'week'
+            : null;
+        const paused = pausedWindow !== null;
+        const maximumKnownProjection = projections.reduce<number>(
+          (maximum, projection) =>
+            projection == null ? maximum : Math.max(maximum, projection),
+          0,
+        );
+        // The true "claims resume at" instant for the week window (issue
+        // #830, item 1) — only computed when the reported binding window is
+        // week. Use the largest known configured debit so the reported
+        // instant is safe for every known task sharing this credential.
+        const weekResetsAt =
+          pausedWindow === 'week'
+            ? store.weekWindowResumeAt(
+                credentialId,
+                aiUnitsCfg.capPerWeekUsdMicros,
+                now,
+                maximumKnownProjection,
+              )
+            : weekResetsAtFallback;
         return {
           credentialId,
           // #1006: legacy unit fields, derived from USD via the peg.
@@ -871,6 +981,7 @@ export async function gatherStatusForApi(
           // first cost row lands in the window (fresh node or just-reset 7d
           // window), so this can transiently under-report the live credential.
           active: week.usdMicros > 0,
+          pausedWindow,
           blockResetsAt,
           weekResetsAt,
         };

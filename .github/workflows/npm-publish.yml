@@ -6,7 +6,13 @@ name: npm Publish
 on:
   push:
     branches: [next]
-    paths: ['client/**']
+    # Invariant: every path bundled into the published client — audit against
+    # client/scripts/vendor-private-packages.mjs and
+    # client/scripts/materialize-bundled-workspaces.mjs (packages/core +
+    # packages/plugin), and client/scripts/vendor-sdk.mjs (packages/sdk) +
+    # client portal deps when
+    # adding a bundled package (#1797).
+    paths: ['client/**', 'packages/core/**', 'packages/plugin/**', 'packages/sdk/**']
   release:
     types: [published]
   workflow_dispatch:
@@ -66,9 +72,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.ref }}
+          # Always resolve the immutable event commit. In a manual recovery the
+          # operator-supplied release_sha is the immutable publish input.
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.sha }}
 
-      - uses: actions/setup-node@v6
+      - name: Verify exact publish commit
+        shell: bash
+        run: |
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          if [ "${ACTUAL_SHA}" != "${JINN_BUILD_COMMIT}" ]; then
+            echo "::error::Checked out ${ACTUAL_SHA}, expected publish commit ${JINN_BUILD_COMMIT}"
+            exit 1
+          fi
+          echo "::notice::Publish source pinned to ${JINN_BUILD_COMMIT}"
+
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
 
@@ -93,7 +111,7 @@ jobs:
           MANUAL_RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
           PACKAGE_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
-          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
+          SHORT_SHA=$(echo "${JINN_BUILD_COMMIT}" | cut -c1-8)
 
           if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
             PUBLISH_VERSION="${PACKAGE_VERSION}-canary.${SHORT_SHA}"
@@ -176,6 +194,7 @@ jobs:
       - run: yarn typecheck
       - run: yarn build
       - run: yarn test
+      - run: yarn pack:smoke
 
       - name: Publish canary
         if: steps.meta.outputs.dist_tag == 'canary'

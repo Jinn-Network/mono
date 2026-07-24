@@ -61,4 +61,26 @@ describe('searchCaptureMeta', () => {
     expect(hits[0]!.tags).toContain('test-driven-development');
     expect(hits[0]!.provenance).toBe('imported');
   });
+
+  it('returns named repository, synthesis, and retrieval visibility metadata', () => {
+    const [hit] = searchCaptureMeta([meta({
+      repositorySlug: 'Jinn-Network/mono',
+      synthesis: 'The focused test now passes.',
+      retrievalVisible: false,
+    })], 'vitest');
+
+    expect(hit).toMatchObject({
+      repositorySlug: 'Jinn-Network/mono',
+      synthesis: 'The focused test now passes.',
+      retrievalVisible: false,
+    });
+  });
+
+  it('leaves named metadata absent for legacy rows', () => {
+    const [hit] = searchCaptureMeta([meta()], 'vitest');
+
+    expect(hit).not.toHaveProperty('repositorySlug');
+    expect(hit).not.toHaveProperty('synthesis');
+    expect(hit).not.toHaveProperty('retrievalVisible');
+  });
 });

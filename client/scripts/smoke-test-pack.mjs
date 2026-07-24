@@ -2,40 +2,53 @@
 /**
  * Validates the tarball shape produced by npm, matching `npm publish`.
  * Installs the pack with npm (same shape as consumers) then validates:
- * 1) local bin execution via `npm exec jinn ...`
- * 2) no-install package execution via package-name bin alias (`npm exec --package <tarball> -- client ...`)
- * 3) legacy `npx -p <tarball> jinn ...`
+ * 1) private runtime packages are bundled and their public modules import
+ * 2) local bin execution via `npm exec jinn ...`
+ * 3) no-install package execution via package-name bin alias (`npm exec --package <tarball> -- client ...`)
+ * 4) legacy `npx -p <tarball> jinn ...`
  * Expects cwd to be client/ (see package.json pack:smoke).
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { assertSafeTarballEntries } from './lib/bundled-workspaces.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = join(__dirname, '..');
 const smokeDir = mkdtempSync(join(tmpdir(), 'jinn-pack-smoke-'));
 const smokeEnv = { ...process.env, HOME: smokeDir, NO_COLOR: '1' };
 const installedPackageRoot = join(smokeDir, 'node_modules', '@jinn-network', 'client');
-const pack = spawnSync('npm', ['pack', '--json', '--pack-destination', smokeDir], {
+const outputArgIndex = process.argv.indexOf('--output');
+const outputArg = outputArgIndex === -1 ? undefined : process.argv[outputArgIndex + 1];
+if (outputArgIndex !== -1 && (!outputArg || outputArg.startsWith('--'))) {
+  console.error('smoke-test-pack: --output requires a path');
+  process.exit(1);
+}
+const outputPath = outputArg ? resolve(clientRoot, outputArg) : undefined;
+const pack = spawnSync('npm', ['pack', '--silent', '--pack-destination', smokeDir], {
   cwd: clientRoot,
   encoding: 'utf8',
 });
 if (pack.status !== 0) {
   console.error('smoke-test-pack: npm pack failed');
-  console.error(pack.stderr || pack.stdout);
+  console.error(pack.error?.message || pack.stderr || pack.stdout);
   process.exit(pack.status ?? 1);
 }
-let tarball;
-try {
-  const packed = JSON.parse(pack.stdout)[0];
-  tarball = join(smokeDir, packed.filename);
-} catch {
-  console.error('smoke-test-pack: npm pack did not return JSON');
+const packedFilename = pack.stdout.trim();
+if (!packedFilename || packedFilename.includes('\n')) {
+  console.error('smoke-test-pack: npm pack did not return one archive filename');
   console.error(pack.stdout);
   process.exit(1);
 }
+const tarball = join(smokeDir, packedFilename);
 
 function parseJsonOrExit(stdout, context) {
   try {
@@ -58,7 +71,7 @@ function assertVersionPayload(payload, context) {
   }
 }
 
-function assertTarballClean() {
+function assertTarballCleanAndComplete() {
   const result = spawnSync('tar', ['-tzf', tarball], {
     cwd: smokeDir,
     encoding: 'utf8',
@@ -68,18 +81,36 @@ function assertTarballClean() {
     console.error(result.stderr || result.stdout);
     process.exit(result.status ?? 1);
   }
-  const forbidden = result.stdout
-    .split('\n')
+  const entries = result.stdout.split('\n');
+  try {
+    assertSafeTarballEntries(entries);
+  } catch (error) {
+    console.error(`smoke-test-pack: ${error?.message ?? String(error)}`);
+    process.exit(1);
+  }
+  const forbidden = entries
     .filter((entry) => (
       entry.startsWith('package/.acceptance/') ||
       entry.startsWith('package/acceptance-runs/') ||
       entry.startsWith('package/.local/') ||
       entry.includes('/.env')
+      || entry === 'package/dist/bin/jinn-layer.js'
+      || entry === 'package/dist/bin/jinn-distill-mcp.js'
+      || entry.startsWith('package/plugins/local-trace-distiller')
     ));
   if (forbidden.length > 0) {
     console.error('smoke-test-pack: tarball includes local acceptance or secret-bearing state');
     console.error(forbidden.slice(0, 20).join('\n'));
     process.exit(1);
+  }
+  for (const required of [
+    'package/node_modules/@jinn-network/core/dist/corpus-read/index.js',
+    'package/node_modules/@jinn-network/plugin/dist/index.js',
+  ]) {
+    if (!entries.includes(required)) {
+      console.error(`smoke-test-pack: tarball is missing bundled runtime ${required}`);
+      process.exit(1);
+    }
   }
 }
 
@@ -99,7 +130,7 @@ function runOrExit(command, args, context, options = {}) {
 }
 
 try {
-  assertTarballClean();
+  assertTarballCleanAndComplete();
 
   const init = spawnSync('npm', ['init', '-y'], {
     cwd: smokeDir,
@@ -108,52 +139,73 @@ try {
   });
   if (init.status !== 0) process.exit(init.status ?? 1);
 
-  const install = spawnSync('npm', ['install', tarball], {
+  const install = spawnSync('npm', ['install', '--loglevel=error', tarball], {
     cwd: smokeDir,
     stdio: 'inherit',
     encoding: 'utf8',
   });
   if (install.status !== 0) process.exit(install.status ?? 1);
 
-  const donationGate = join(installedPackageRoot, 'dist', 'scripts', 'donation-consumption-acceptance.js');
-  const nodePtyFix = join(installedPackageRoot, 'dist', 'scripts', 'fix-node-pty.mjs');
-  if (!existsSync(donationGate)) {
-    console.error(`smoke-test-pack: missing compiled donation gate ${donationGate}`);
-    process.exit(1);
+  runOrExit(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      [
+        "const trajectory = await import('@jinn-network/client/dist/trajectory/schema.js');",
+        "const corpus = await import('@jinn-network/client/dist/corpus/index.js');",
+        `const plugin = await import(${JSON.stringify(pathToFileURL(
+          join(installedPackageRoot, 'node_modules', '@jinn-network', 'plugin', 'dist', 'index.js'),
+        ).href)});`,
+        "if (typeof trajectory.JinnTrajectoryV1Schema?.safeParse !== 'function') throw new Error('trajectory shim unavailable');",
+        "if (typeof corpus.createCorpus !== 'function') throw new Error('corpus shim unavailable');",
+        "if (typeof plugin.createJinnPlugin !== 'function') throw new Error('bundled plugin unavailable');",
+      ].join('\n'),
+    ],
+    'client core-backed public imports',
+  );
+  console.log('smoke-test-pack: client-only install and core-backed imports ok');
+
+  if (!process.argv.includes('--client-only')) {
+    const nodePtyFix = join(installedPackageRoot, 'dist', 'scripts', 'fix-node-pty.mjs');
+    if (!existsSync(nodePtyFix)) {
+      console.error(`smoke-test-pack: missing node-pty fix script ${nodePtyFix}`);
+      process.exit(1);
+    }
+
+    const run = runOrExit('npm', ['exec', '--', 'jinn', 'version', '--json'], 'npm exec');
+    const payload = parseJsonOrExit(run.stdout, 'npm exec');
+    assertVersionPayload(payload, 'npm exec');
+
+    runOrExit('npm', ['exec', '--', 'jinn', '--help'], 'packed jinn --help');
+    const doctor = spawnSync('npm', ['exec', '--', 'jinn', 'doctor', '--json'], {
+      cwd: smokeDir,
+      encoding: 'utf8',
+      env: smokeEnv,
+      timeout: 60_000,
+    });
+    if (doctor.error || doctor.status === 50) {
+      console.error('smoke-test-pack: packed jinn doctor crashed');
+      console.error(doctor.error ?? doctor.stderr ?? doctor.stdout);
+      process.exit(doctor.status ?? 1);
+    }
+    parseJsonOrExit(doctor.stdout, 'packed jinn doctor');
+
+    runOrExit(process.execPath, [nodePtyFix, '--verify'], 'node-pty verification');
+
+    const npxDirect = runOrExit('npm', ['exec', '--yes', '--package', tarball, '--', 'client', 'version', '--json'], 'npx direct');
+    assertVersionPayload(parseJsonOrExit(npxDirect.stdout, 'npx direct'), 'npx direct');
+
+    const npxLegacy = runOrExit('npx', ['-p', tarball, 'jinn', 'version', '--json'], 'npx -p');
+    assertVersionPayload(parseJsonOrExit(npxLegacy.stdout, 'npx -p'), 'npx -p');
+
+    console.log('smoke-test-pack: ok', payload.client.version);
   }
-  if (!existsSync(nodePtyFix)) {
-    console.error(`smoke-test-pack: missing node-pty fix script ${nodePtyFix}`);
-    process.exit(1);
+
+  if (outputPath) {
+    copyFileSync(tarball, outputPath);
+    console.log(`smoke-test-pack: artifact written to ${outputPath}`);
   }
-
-  const run = runOrExit('npm', ['exec', '--', 'jinn', 'version', '--json'], 'npm exec');
-  const payload = parseJsonOrExit(run.stdout, 'npm exec');
-  assertVersionPayload(payload, 'npm exec');
-
-  const gateHelp = runOrExit(process.execPath, [donationGate, '--help'], 'compiled donation gate --help');
-  if (!gateHelp.stdout.includes('Strict release gate for cross-operator donated SWE execution data consumption')) {
-    console.error('smoke-test-pack: compiled donation gate help text was not recognized');
-    console.error(gateHelp.stdout);
-    process.exit(1);
-  }
-
-  runOrExit(process.execPath, [nodePtyFix, '--verify'], 'node-pty verification');
-
-  // jinn-layer bin (#1356): usage must print from the packed tarball's bin.
-  const layerUsage = runOrExit('npm', ['exec', '--', 'jinn-layer'], 'jinn-layer usage');
-  if (!layerUsage.stdout.includes('Usage: jinn-layer')) {
-    console.error('smoke-test-pack: jinn-layer bin did not print usage');
-    console.error(layerUsage.stdout);
-    process.exit(1);
-  }
-
-  const npxDirect = runOrExit('npm', ['exec', '--yes', '--package', tarball, '--', 'client', 'version', '--json'], 'npx direct');
-  assertVersionPayload(parseJsonOrExit(npxDirect.stdout, 'npx direct'), 'npx direct');
-
-  const npxLegacy = runOrExit('npx', ['-p', tarball, 'jinn', 'version', '--json'], 'npx -p');
-  assertVersionPayload(parseJsonOrExit(npxLegacy.stdout, 'npx -p'), 'npx -p');
-
-  console.log('smoke-test-pack: ok', payload.client.version);
 } finally {
   rmSync(smokeDir, { recursive: true, force: true });
 }

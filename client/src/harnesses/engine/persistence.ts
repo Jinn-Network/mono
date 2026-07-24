@@ -104,6 +104,13 @@ CREATE TABLE IF NOT EXISTS task_runs (
   solution_outputs_json       TEXT,
   runtime_plugins_json        TEXT,
 
+  -- Additive column (#1393, corpus knowledge autoload):
+  -- consumed_refs_json: JSON array of corpus knowledge record refs injected
+  --   into task.context.corpusKnowledge for this run (envelopeCid + artifact
+  --   sha256s). NULL when no knowledge was injected. Read by the #1397
+  --   consumed-refs hook and the daemon-harness e2e.
+  consumed_refs_json          TEXT,
+
   -- Additive columns for ERC-8004 payload v2 (jinn-mono-9fe5):
   --   executor_mode: 'train' | 'frozen', captured by pack() from the freeze-fence
   --     and reused by deliver() to emit a payload v2 setMetadata.
@@ -189,6 +196,8 @@ export type TaskRunPatch = Partial<{
    */
   solutionOutputsJson: string | null;
   runtimePluginsJson: string | null;
+  /** Corpus knowledge refs consumed by this run (#1393). */
+  consumedRefsJson: string | null;
   /** Executor mode captured from freeze-fence. Reused by deliver() for v2 setMetadata. */
   executorMode: 'train' | 'frozen' | null;
   /** Executor codeDigest captured from freeze-fence. Reused by deliver() for v2 setMetadata. */
@@ -204,6 +213,7 @@ interface RawRow {
   task_cid: string;
   onchain_creation_tx: string;
   onchain_creation_block: number;
+  onchain_creation_timestamp: number | null;
   solver_type: string | null;
   solver_net_manifest_cid: string | null;
   task_role: string | null;
@@ -230,6 +240,7 @@ interface RawRow {
   task_payload: string | null;
   solution_outputs_json: string | null;
   runtime_plugins_json: string | null;
+  consumed_refs_json: string | null;
   executor_mode: string | null;
   executor_code_digest: string | null;
   failure_reason: string | null;
@@ -254,6 +265,7 @@ function runAdditiveMigrations(db: Database.Database): void {
     // after a process restart (otherwise in-memory solutionOutputs is lost).
     { column: 'solution_outputs_json',     ddl: 'ALTER TABLE task_runs ADD COLUMN solution_outputs_json TEXT' },
     { column: 'runtime_plugins_json',      ddl: 'ALTER TABLE task_runs ADD COLUMN runtime_plugins_json TEXT' },
+    { column: 'consumed_refs_json',      ddl: 'ALTER TABLE task_runs ADD COLUMN consumed_refs_json TEXT' },
     { column: 'task_role',           ddl: 'ALTER TABLE task_runs ADD COLUMN task_role TEXT' },
     { column: 'task_id',             ddl: 'ALTER TABLE task_runs ADD COLUMN task_id TEXT' },
     { column: 'attempt_index',       ddl: 'ALTER TABLE task_runs ADD COLUMN attempt_index INTEGER' },
@@ -268,6 +280,11 @@ function runAdditiveMigrations(db: Database.Database): void {
     // own in-flight slot, otherwise a task in SolverNet B is silently
     // rejected while SolverNet A is busy. See `hasInFlightFor`.
     { column: 'solver_net_manifest_cid', ddl: 'ALTER TABLE task_runs ADD COLUMN solver_net_manifest_cid TEXT' },
+    // On-chain creation-block timestamp (#1827), resolved once at claim()
+    // time via publicClient.getBlock and threaded to pack() for
+    // envelope.task.createdAt. NULL when the RPC lookup failed or hasn't
+    // run yet — never backfilled with a guess.
+    { column: 'onchain_creation_timestamp', ddl: 'ALTER TABLE task_runs ADD COLUMN onchain_creation_timestamp INTEGER' },
   ];
 
   // Fetch existing column names once so each ALTER is a no-op if the column
@@ -325,6 +342,7 @@ function rowToTaskRun(row: RawRow): PersistedTaskRun {
     taskCid: row.task_cid,
     onchainCreationTx: row.onchain_creation_tx,
     onchainCreationBlock: row.onchain_creation_block,
+    onchainCreationTimestamp: row.onchain_creation_timestamp ?? null,
     solverType: row.solver_type,
     solverNetManifestCid: row.solver_net_manifest_cid,
     taskRole: (row.task_role ?? null) as 'restoration' | 'evaluation' | null,
@@ -351,6 +369,7 @@ function rowToTaskRun(row: RawRow): PersistedTaskRun {
     task: parseJson<Task>(row.task_payload),
     solutionOutputsJson: row.solution_outputs_json,
     runtimePluginsJson: row.runtime_plugins_json,
+    consumedRefsJson: row.consumed_refs_json,
     executorMode: (row.executor_mode === 'train' || row.executor_mode === 'frozen')
       ? row.executor_mode
       : null,
@@ -499,6 +518,10 @@ export class TaskRunPersistence {
     if (patch.runtimePluginsJson !== undefined) {
       setClauses.push('runtime_plugins_json = @runtimePluginsJson');
       params['runtimePluginsJson'] = patch.runtimePluginsJson;
+    }
+    if (patch.consumedRefsJson !== undefined) {
+      setClauses.push('consumed_refs_json = @consumedRefsJson');
+      params['consumedRefsJson'] = patch.consumedRefsJson;
     }
     if (patch.executorMode !== undefined) {
       setClauses.push('executor_mode = @executorMode');
@@ -703,6 +726,21 @@ export class TaskRunPersistence {
   }
 
   /**
+   * Persist `consumedRefsJson` without triggering a state transition (state
+   * remains RUNNING). Called by runImpl right after the corpus-knowledge
+   * lookup resolves — BEFORE harness spawn — so that a crash between the
+   * lookup and the RUNNING → POST_SNAPSHOT transition still leaves the
+   * result durably recorded (#1393 review finding 1). Without this, a
+   * restarted process (empty in-memory cache, DB column still null) would
+   * re-query the corpus and re-emit a duplicate `corpus_knowledge` event.
+   */
+  setConsumedRefsJson(requestId: string, consumedRefsJson: string | null): void {
+    this.db.prepare(
+      'UPDATE task_runs SET consumed_refs_json = ? WHERE request_id = ?',
+    ).run(consumedRefsJson, requestId);
+  }
+
+  /**
    * Persist `manifestGeneratedAt` for the first time without triggering a
    * state transition. Used by pack() to lock in the generatedAt timestamp
    * before assembling the manifest, ensuring idempotent CID on retry.
@@ -712,6 +750,18 @@ export class TaskRunPersistence {
     this.db.prepare(
       'UPDATE task_runs SET manifest_generated_at = ? WHERE request_id = ? AND manifest_generated_at IS NULL',
     ).run(generatedAt, requestId);
+  }
+
+  /**
+   * Persist the on-chain creation-block timestamp for a task (#1827).
+   * Called once per claimed task from `claim()`. Idempotent — safe to call
+   * repeatedly with the same value (e.g. on retry after a crash between
+   * the RPC call and the CLAIMED transition).
+   */
+  setOnchainCreationTimestamp(requestId: string, timestampSec: number): void {
+    this.db.prepare(
+      'UPDATE task_runs SET onchain_creation_timestamp = ? WHERE request_id = ?',
+    ).run(timestampSec, requestId);
   }
 
   /** Mark an task FAILED with a reason (valid from any non-terminal state). */
@@ -738,6 +788,32 @@ export class TaskRunPersistence {
     if (result.changes === 0) {
       throw new ConcurrentTransitionError(requestId, existing.state, 'FAILED');
     }
+  }
+
+  /**
+   * Administrative backfill (#506): reclassify a FAILED row as COMPLETE when
+   * its on-chain delivery actually landed — the run failed only because a
+   * downstream persistence step (e.g. the legacy `desired_state_id` NOT NULL
+   * insertArtifact throw, fixed in #511) threw after the delivery tx was
+   * already broadcast and confirmed.
+   *
+   * Deliberately bypasses `assertValidTransition` — there is no FAILED →
+   * COMPLETE edge in the state machine, and there shouldn't be one; this is
+   * an out-of-band operator-invoked correction driven by on-chain evidence
+   * (a successful transaction receipt), not a transition the engine itself
+   * would ever perform. Idempotent: returns `false` and makes no change if
+   * the row is missing or not currently FAILED.
+   */
+  reclassifyFailedAsComplete(requestId: string): boolean {
+    const existing = this.getByRequestId(requestId);
+    if (!existing || existing.state !== 'FAILED') return false;
+    const now = Date.now();
+    const result = this.db.prepare(`
+      UPDATE task_runs
+      SET state = 'COMPLETE', state_updated_at = ?, failure_reason = NULL, failure_at = NULL
+      WHERE request_id = ? AND state = 'FAILED'
+    `).run(now, requestId);
+    return result.changes > 0;
   }
 
   /**

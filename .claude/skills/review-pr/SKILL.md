@@ -1,75 +1,163 @@
 ---
 name: review-pr
-description: Use when asked to review a specific GitHub PR through Autopilot — e.g. "review PR #N", "run review-pr on this PR". The coordinating agent for one open PR carrying the `engine:review` label: dispatches independent review subagents (code-review + security + app-test), then owns the review→fix→re-review loop on the PR branch until the PR is approved or escalated. Mirrors implement-issue.
+description: Use when Autopilot v2 dispatches an exact-head PR review attempt. Two terminal outcomes only — approve (optionally with non-blocking follow-ups), or request changes and file a finding child. Never fix, never push branches.
 ---
 
 # review-pr
 
-You are the coordinating agent for exactly one open GitHub PR that carries the `engine:review` label. Your job: run an independent review, and if there are blocking findings, drive fixes on the PR branch until the PR is clean (approve + un-draft) or a human is needed (escalate). You dispatch a fresh subagent per stage; you never review or fix directly. This mirrors implement-issue — the review→fix loop is the same machinery, re-rooted on a PR.
+You are the review coordinator for one Autopilot v2 exact-head attempt. You
+read, verdict, file findings or non-blocking follow-ups, and exit. You do not
+own shared lifecycle state and you never push to the PR branch.
 
-## Read first
-- `docs/engineering/handbook.md`, `CLAUDE.md`
-- `docs/superpowers/specs/2026-05-29-pr-review-loop-design.md` — this skill's design.
-- `.claude/skills/implement-issue/SKILL.md` §Step 4 (subagent-dispatch discipline) and §Step 5 (finding handling) — reused verbatim here.
+## Runtime adapter
 
-## Step 1 — Read the PR
-Input: a PR number (`#N`). Fetch it:
+Before doing work, read
+[`autopilot-runtime`](../autopilot-runtime/SKILL.md) completely. It selects the
+mechanics for the one process-wide
+`JINN_AUTOPILOT_RUNTIME=claude|hermes` setting. Never switch runtime within the
+attempt.
+
+Also read:
+
+- [`CLAUDE.md`](../../../CLAUDE.md)
+- [`docs/engineering/handbook.md`](../../../docs/engineering/handbook.md)
+- [`single-surface lifecycle`](../../../docs/superpowers/specs/2026-07-21-single-surface-lifecycle.md)
+
+## Input contract
+
+Autopilot v2 has already won the exact-head review claim, selected a reviewer
+identity that is distinct from the PR author, and created a detached attempt
+worktree at the claimed head. The prompt supplies the PR, linked issue, exact
+head, target base, approval policy, worktree, and attempt. The environment
+contains `JINN_AUTOPILOT_SESSION_MANIFEST`.
+
+Fail closed if that context is missing or contradictory. Do not:
+
+- claim or release review authority yourself;
+- select or replace credentials;
+- create or remove worktrees;
+- check out the logical branch;
+- publish branch changes;
+- mutate labels, Project state, comments, or draft state yourself.
+
+Resolve the package command once:
+
 ```bash
-gh pr view <N> --repo Jinn-Network/mono --json number,title,headRefName,headRefOid,isDraft,files,body
+AUTOPILOT_PACKAGE_DIR="${JINN_AUTOPILOT_PACKAGE_DIR:-<repo-root>/packages/autopilot}"
+SESSION_REPORT_DIR="$(dirname -- "$JINN_AUTOPILOT_SESSION_MANIFEST")/reports"
+mkdir -p -- "$SESSION_REPORT_DIR"
+chmod 700 -- "$SESSION_REPORT_DIR"
 ```
-The dispatcher's prompt states the pre-created worktree path (on the PR head branch). Compute the diff from the merge-base:
+
+The reports directory is attempt-scoped and outside the supplied worktree.
+Every session payload file must use an absolute path below
+`"$SESSION_REPORT_DIR"`; never write session payloads into the worktree.
+
+Shared mutations are restricted to:
+
 ```bash
-git diff $(git merge-base origin/next HEAD)..HEAD
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state APPROVE \
+  --body-file "$SESSION_REPORT_DIR/review-verdict.md" \
+  --follow-ups-file "$SESSION_REPORT_DIR/review-follow-ups.json"
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state APPROVE --body-file "$SESSION_REPORT_DIR/review-verdict.md"
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-findings --file "$SESSION_REPORT_DIR/review-findings.md"
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
 ```
 
-## Step 2 — Dispatch the review subagents (in parallel)
-Dispatch fresh subagents — each different from any fix subagent (independence invariant, as implement-issue Stage 3 ≠ Stage 5):
-- **code-review** — run `superpowers:requesting-code-review` with the code-reviewer template, given the diff + PR body.
-- **security** — run `/security-review` on the diff.
-- **app-test** — ONLY if the diff touches `client/src/dashboard/` (or other operator-visible surface): run `testing-jinn-app`.
+Do **not** call the fix-publish session verb. Reviewers have no branch-push authority.
 
-Collect findings; classify each **blocking** vs **advisory/nit** (reuse implement-issue's two-finding-kind table).
+## Review pass
 
-## Step 3 — Verdict + loop
+Dispatch independent checks through the synchronous-parallel-root mechanism:
 
-**First, check the dispatcher's verdict directive in the prompt.** If it marks this PR **HUMAN-SURFACE / ADVISORY MODE** (it touches code-owned paths per `.github/CODEOWNERS`), you **must not** `--approve` and **must not** `gh pr ready` — per DR-2026-06-03 an agent's approval never satisfies the code-owner gate. Still run the full review and drive fixes for blocking findings as below; but when the review is clean *from the engine's view*, finish with a **COMMENT** review and hand off to a human code owner instead of approving:
+1. **Code review** — requesting-code-review / code-reviewer with PR context
+2. **Security** — only when the diff warrants it
+3. **Tests / acceptance** — verify the claimed acceptance criteria
+
+Classify each note:
+
+- **merge-blocking** → Request changes (finding child path below)
+- **non-blocking** merge-OK debt / nits → follow-up entry on Approve
+
+Cap ≤5 follow-ups per approve pass. If more, escalate Human or fold into
+fewer issues. Never use `review-finding` labels or child markers for
+non-blocking notes.
+
+Collect blocking findings into one list. Split into multiple finding children
+only when findings are genuinely independent workstreams.
+
+## Terminal outcomes (exactly two)
+
+### Approve
+
+Write `$SESSION_REPORT_DIR/review-verdict.md` with the approval body.
+
+When there are non-blocking notes, also write
+`$SESSION_REPORT_DIR/review-follow-ups.json`:
+
+```json
+{
+  "followUps": [
+    {
+      "type": "feat",
+      "title": "Extract duplicate helper",
+      "body": "Non-blocking: …",
+      "effort": "low",
+      "priority": "p3"
+    }
+  ]
+}
+```
+
+`type` is `feat` | `chore` | `fix` | `refactor`. `effort` is
+`low` | `medium` | `high` | `xhigh` | `max`. `priority` is
+`p0` | `p1` | `p2` | `p3` | `p4`. Omit the file or use `"followUps": []`
+for a clean approve.
+
+Then invoke APPROVE, with `--follow-ups-file` only when the JSON file is
+present and non-empty:
+
 ```bash
-gh pr review <N> --repo Jinn-Network/mono --comment --body "<engine review summary — human code-owner approval required (human-surface)>"
-gh pr edit <N> --repo Jinn-Network/mono --add-label "review:needs-human"
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state APPROVE \
+  --body-file "$SESSION_REPORT_DIR/review-verdict.md" \
+  --follow-ups-file "$SESSION_REPORT_DIR/review-follow-ups.json"
 ```
-Do not approve, do not un-draft, do not merge. Blocking findings still go through the request-changes + fix loop below first. If the prompt marks the PR **APPROVE-ELIGIBLE**, use the standard verdict flow:
 
-- **No blocking findings** → post an approving review and the verdict label, then un-draft:
-  ```bash
-  gh pr review <N> --repo Jinn-Network/mono --approve --body "<summary>"
-  gh pr edit <N> --repo Jinn-Network/mono --add-label "review:approved" --remove-label "review:changes-requested"
-  gh pr ready <N> --repo Jinn-Network/mono   # un-draft → enters the merge queue
-  ```
-  Done.
-- **Blocking findings** → post a request-changes review with inline findings + the changes-requested label:
-  ```bash
-  gh pr review <N> --repo Jinn-Network/mono --request-changes --body "<findings>"
-  gh pr edit <N> --repo Jinn-Network/mono --add-label "review:changes-requested" --remove-label "review:approved"
-  ```
-  Then dispatch a **fix subagent** (different from the reviewers) seeded with the findings. It implements fixes on the PR branch, commits, and pushes:
-  ```bash
-  git push origin HEAD:<headRefName>
-  ```
-  Then **re-run Step 2** on the new diff. Loop. There is **no round-count bound** — escalate on judgment (see Step 4).
+or, with no follow-ups:
 
-## Step 4 — Finding handling & escalation
-Reuse implement-issue §Step 5 verbatim: fixable findings → fix subagent + re-run; scope/design findings, non-converging findings, or an unpushable branch (e.g. a fork PR you cannot push to) → escalate. Escalation = post the structured note as a PR comment and set the PR's linked issue (if any) `Blocked on: Human`; for a PR with no linked issue, post the note and stop (the request-changes review stands as advisory). Never force-merge.
+```bash
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state APPROVE --body-file "$SESSION_REPORT_DIR/review-verdict.md"
+```
 
-## Step 5 — Subagent-dispatch discipline & headless mode
-Identical to implement-issue §Step 4 and §Step 7: curated prompts (never forward coordinator history), the independence invariant (reviewer ≠ fixer), the headless-override block injected by the dispatcher, no plan-posture flags.
+Exit. Do not push. Do not re-draft. Follow-ups are ordinary triage-complete
+issues; they never gate the parent PR.
 
-## Failure modes
-| Failure | Action |
-|---|---|
-| PR lacks the `engine:review` label | Stop — not in scope (the dispatcher should not have spawned this). |
-| Cannot push to the PR branch (fork) | Post advisory review; escalate `Blocked on: Human`. |
-| Fix subagent reports done but no new commit | Re-dispatch; verify with `git log origin/<headRefName>..HEAD`. |
-| Findings not converging | Escalate `stuck`. |
+### Request changes
 
-## Composition
-Composes: `superpowers:requesting-code-review` + code-reviewer template, `/security-review`, `testing-jinn-app`. Downstream of: the engine's draft PR (or any human PR labelled `engine:review`). Upstream of: the merge skill (consumes `review:approved`). Dispatched by: Autopilot's review pass (the headless-override block is injected by the dispatcher).
+Write `$SESSION_REPORT_DIR/review-findings.md` listing every blocking finding
+(markdown). Then:
+
+```bash
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-findings --file "$SESSION_REPORT_DIR/review-findings.md"
+```
+
+The session files one `review-finding` child, publishes native REQUEST_CHANGES,
+releases the review claim, and exits. A separate fix-child session lands the
+fixes on the parent branch.
+
+## Human escalation
+
+If intent is undeterminable from the record, or the surface is CODEOWNER-
+reserved:
+
+```bash
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
+```
+
+## Non-negotiables
+
+- Never push to the PR branch.
+- Never call the fix-publish session verb.
+- Never redraft or ready the PR yourself.
+- Never guess on undeterminable intent.
+- Never park non-blocking notes as `review-finding` children.

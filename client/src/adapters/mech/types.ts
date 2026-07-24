@@ -22,6 +22,13 @@ export interface MechAdapterConfig {
   agentEoaPrivateKey: `0x${string}`;
   ipfsRegistryUrl: string;  // Upload endpoint (e.g., https://registry.autonolas.tech)
   ipfsGatewayUrl: string;   // Read endpoint (e.g., https://gateway.autonolas.tech)
+  /**
+   * Controls the public IPFS fallback used by JSON/raw IPFS reads.
+   * - omit → production default (`ipfs.io` via `fetchFromIpfs`)
+   * - false → primary gateway only (hermetic e2e / mock IPFS)
+   * - string → alternate fallback gateway base
+   */
+  ipfsFallbackGatewayUrl?: string | false;
   pollIntervalMs: number;
   /** Optional cap for delivery-log scans; omit for full-history recovery. */
   mechDeliverBackfillLookbackBlocks?: bigint;
@@ -51,6 +58,16 @@ export interface MechAdapterConfig {
   /** Base mainnet V1, Phase 1b V2, or Task-native V3 delivery claim ABI. */
   routerClaimDeliveryVariant: 'v1' | 'v2' | 'v3';
   evictionRecovery?: EvictionRecoveryConfig;
+  /**
+   * Whether this operator holds the `evaluator` role in a joined SolverNet.
+   * Omitted ⇒ enabled (opt-out default): a bare construction site keeps the
+   * historical scan-everything behaviour. Production callers (main.ts,
+   * join-applier.ts) always pass an explicit boolean. Gates three surfaces:
+   * ingest of delivery-claimed logs into the pending-evaluation set, the boot
+   * rehydrate of that set, and the per-cycle scan of evaluation opportunities.
+   * Ref #547.
+   */
+  evaluatorEnabled?: boolean;
 }
 
 export const MECH_MARKETPLACE_ABI = [

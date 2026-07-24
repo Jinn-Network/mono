@@ -6,12 +6,20 @@
  * daemon_started_at / activity_events even when EADDRINUSE later kills the
  * race.
  *
- * Strategy: provide a `corpusFactory` that pushes a marker into a shared call
- * log. The factory is invoked immediately before the `startApiServer({ … })`
- * block in `Daemon.start()` — so its position in the call log is a faithful
- * proxy for "the moment the API server is about to bind". Spy on every store
- * mutator and the `startup` activity emission, then assert that the corpus /
- * apiServer marker is recorded BEFORE all three store-touching steps.
+ * Strategy: mock `startApiServer` (the real port-bind call inside
+ * `Daemon.start()`) to push a marker into a shared call log before
+ * delegating to the real implementation — so its position in the call log is
+ * a faithful proxy for "the moment the API server is about to bind". Spy on
+ * every store mutator and the `startup` activity emission, then assert that
+ * the apiServer marker is recorded BEFORE all three store-touching steps.
+ *
+ * #1393 review finding 5: this test used to use a `corpusFactory` marker,
+ * but #1393 hoisted corpus construction into the Daemon *constructor* (so the
+ * TaskEngine and the API server can share one instance) — which runs before
+ * `start()` is ever called, making the old marker fire unconditionally
+ * before the ordering it was meant to prove. Mocking startApiServer keeps
+ * the marker inside `start()`, at the exact call this test is about, so it
+ * still varies with (and falsifies) the #649 ordering constraint.
  */
 
 import { mkdtempSync } from 'node:fs';
@@ -24,6 +32,23 @@ import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { SimpleRunner } from '../../src/runner/simple.js';
 import { HarnessRegistry } from '../../src/harnesses/engine/registry.js';
 import { Store } from '../../src/store/store.js';
+
+const marker = vi.hoisted(() => ({ calls: [] as string[] }));
+
+// MOCK_JUSTIFICATION: wraps the real startApiServer (still called through —
+// the port really binds) to record when the port-bind call happens, which is
+// the marker this test's ordering assertions depend on. Not mocking
+// network/chain I/O.
+vi.mock('../../src/api/server.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/api/server.js')>();
+  return {
+    ...actual,
+    startApiServer: vi.fn(async (opts: Parameters<typeof actual.startApiServer>[0]) => {
+      marker.calls.push('apiServer:ready');
+      return actual.startApiServer(opts);
+    }),
+  };
+});
 
 function minimalEngineConfig(root: string): DaemonConfig['restorationEngine'] {
   const implRegistry = new HarnessRegistry({ default: 'legacy-claude' });
@@ -44,6 +69,7 @@ describe('#649 — Daemon.start binds API before mutating store', () => {
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), 'jinn-649-start-order-'));
     store = new Store(':memory:');
+    marker.calls.length = 0;
   });
 
   afterEach(async () => {
@@ -51,18 +77,22 @@ describe('#649 — Daemon.start binds API before mutating store', () => {
     store.close();
   });
 
-  it('invokes corpusFactory (api-server prep) BEFORE setShutdownState / setDaemonStartedAt / startup event', async () => {
-    const calls: string[] = [];
-
+  it('invokes startApiServer (port bind) BEFORE setShutdownState / setDaemonStartedAt / startup event', async () => {
+    // The 'apiServer:ready' marker (pushed by the mocked startApiServer,
+    // above) shares this same array with the store-mutation spies below, so
+    // their relative order in `marker.calls` is a faithful proxy for the
+    // #649 ordering constraint. Under the fixed Daemon.start() ordering the
+    // marker fires BEFORE the store mutations; under the broken (pre-#649)
+    // ordering it would fire after them.
     vi.spyOn(store, 'setShutdownState').mockImplementation((s) => {
-      calls.push(`setShutdownState:${s}`);
+      marker.calls.push(`setShutdownState:${s}`);
     });
     vi.spyOn(store, 'setDaemonStartedAt').mockImplementation(() => {
-      calls.push('setDaemonStartedAt');
+      marker.calls.push('setDaemonStartedAt');
     });
     const realRecord = store.recordActivityEvent.bind(store);
     vi.spyOn(store, 'recordActivityEvent').mockImplementation((e) => {
-      calls.push(`activity:${e.kind}`);
+      marker.calls.push(`activity:${e.kind}`);
       return realRecord(e);
     });
 
@@ -75,28 +105,14 @@ describe('#649 — Daemon.start binds API before mutating store', () => {
       pollIntervalMs: 60_000,
       taskSources: [],
       restorationEngine: minimalEngineConfig(tmp),
-      // The factory is invoked at exactly the moment the API-server block runs.
-      // Under the fixed Daemon.start() ordering it runs BEFORE store mutations;
-      // under the broken (pre-#649) ordering it runs AFTER them.
-      corpusFactory: (s) => {
-        calls.push('apiServer:ready');
-        // Return a stub Corpus — Daemon only wires it through to startApiServer,
-        // which itself does not call into it during start().
-        return {
-          publish: async () => undefined,
-          search: async () => [],
-          getDocument: async () => undefined,
-          acquireDocument: async () => undefined,
-        } as never;
-      },
     });
 
     await daemon.start();
 
-    const apiIdx = calls.indexOf('apiServer:ready');
-    const shutdownIdx = calls.indexOf('setShutdownState:running');
-    const startedAtIdx = calls.indexOf('setDaemonStartedAt');
-    const startupIdx = calls.indexOf('activity:startup');
+    const apiIdx = marker.calls.indexOf('apiServer:ready');
+    const shutdownIdx = marker.calls.indexOf('setShutdownState:running');
+    const startedAtIdx = marker.calls.indexOf('setDaemonStartedAt');
+    const startupIdx = marker.calls.indexOf('activity:startup');
 
     expect(apiIdx).toBeGreaterThanOrEqual(0);
     expect(shutdownIdx).toBeGreaterThan(apiIdx);

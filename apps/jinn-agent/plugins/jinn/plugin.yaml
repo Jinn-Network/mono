@@ -1,9 +1,4 @@
 name: jinn
 version: 0.1.0
-description: "Jinn layer — first-run contribution consent, capture on task completion (scrubbed locally, fail-closed), contribution ledger, corpus search. The fork's single integration surface (thin-fork discipline)."
+description: "Jinn layer — capture on task completion (scrubbed locally, fail-closed), local distillation, corpus search. The fork's single integration surface (thin-fork discipline)."
 author: "Jinn Network"
-hooks:
-  - on_session_start
-  - pre_llm_call
-  - post_tool_call
-  - on_session_end

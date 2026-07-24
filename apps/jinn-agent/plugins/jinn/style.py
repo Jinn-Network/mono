@@ -76,6 +76,7 @@ __all__ = [
     "box_line",
     "no_color",
     "sanitise",
+    "strip_ansi",
 ]
 
 
@@ -90,6 +91,24 @@ _CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 def sanitise(s: str) -> str:
     return _CTRL.sub("", s)
+
+
+# Strip complete ANSI/CSI escape sequences (SGR colour codes, incl. the
+# truecolor `\033[38;2;r;g;bm` form this module emits, and resets) rather
+# than the lone ESC byte: `sanitise` above removes `\x1b` but leaves the
+# rest of a sequence — `[38;2;122;167;220m` — behind as literal text. That
+# half-strip is exactly the `?[38;2;…m` noise mono issue #1798 reported:
+# prompt_toolkit's `patch_stdout` proxies the TUI's stderr channel and
+# renders the orphaned ESC byte as `?` without interpreting the sequence
+# that follows it. Channels that must render plain regardless of the active
+# palette (`_user_line` in __init__.py, the pickup evidence-signal sink)
+# strip with this before printing. Mirrors the CSI pattern already used
+# privately in history_view.py.
+_ANSI_SEQUENCE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def strip_ansi(text: str) -> str:
+    return _ANSI_SEQUENCE.sub("", text)
 
 
 def no_color() -> bool:

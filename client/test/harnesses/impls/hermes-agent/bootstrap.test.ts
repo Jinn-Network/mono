@@ -446,6 +446,111 @@ describe('writePerTaskHermesConfig', () => {
     });
   });
 
+  // JINN_HERMES_MODEL / JINN_HERMES_PROVIDER (daemon OS env) must win over the
+  // per-SolverNet config value (`inputs.model` / `inputs.provider`), which wins
+  // over ~/.hermes/config.yaml. Precedence bug #543: the SolverNet config value
+  // silently won because writePerTaskHermesConfig stamped `inputs.model` directly.
+  describe('JINN_HERMES_MODEL / JINN_HERMES_PROVIDER env precedence', () => {
+    it('uses the env vars when no per-SolverNet model/provider is supplied', () => {
+      const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+      try {
+        writePerTaskHermesConfig({
+          hermesHome: home,
+          workingDir: '/work',
+          solverPluginRoots: [],
+          env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+          processEnv: { JINN_HERMES_MODEL: 'env-model', JINN_HERMES_PROVIDER: 'env-provider' },
+        });
+        const cfg = readConfig(home);
+        expect(cfg.model.default).toBe('env-model');
+        expect(cfg.model.provider).toBe('env-provider');
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it('uses the per-SolverNet config value when no env vars are set', () => {
+      const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+      try {
+        writePerTaskHermesConfig({
+          hermesHome: home,
+          workingDir: '/work',
+          model: 'config-model',
+          provider: 'config-provider',
+          solverPluginRoots: [],
+          env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+          processEnv: {},
+        });
+        const cfg = readConfig(home);
+        expect(cfg.model.default).toBe('config-model');
+        expect(cfg.model.provider).toBe('config-provider');
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it('prefers the env vars over the per-SolverNet config value', () => {
+      const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+      try {
+        writePerTaskHermesConfig({
+          hermesHome: home,
+          workingDir: '/work',
+          model: 'config-model',
+          provider: 'config-provider',
+          solverPluginRoots: [],
+          env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+          processEnv: { JINN_HERMES_MODEL: 'env-model', JINN_HERMES_PROVIDER: 'env-provider' },
+        });
+        const cfg = readConfig(home);
+        expect(cfg.model.default).toBe('env-model');
+        expect(cfg.model.provider).toBe('env-provider');
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it('ignores empty/whitespace env vars and preserves the per-SolverNet config value', () => {
+      const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+      try {
+        writePerTaskHermesConfig({
+          hermesHome: home,
+          workingDir: '/work',
+          model: 'config-model',
+          provider: 'config-provider',
+          solverPluginRoots: [],
+          env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+          processEnv: { JINN_HERMES_MODEL: '   ', JINN_HERMES_PROVIDER: '' },
+        });
+        const cfg = readConfig(home);
+        expect(cfg.model.default).toBe('config-model');
+        expect(cfg.model.provider).toBe('config-provider');
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it('keeps the custom-endpoint provider when a base_url is set (env provider does not override)', () => {
+      const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+      try {
+        writePerTaskHermesConfig({
+          hermesHome: home,
+          workingDir: '/work',
+          model: 'qwen2.5-coder:7b',
+          provider: 'custom',
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          solverPluginRoots: [],
+          env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+          processEnv: { JINN_HERMES_PROVIDER: 'env-provider' },
+        });
+        const cfg = readConfig(home);
+        expect(cfg.model.provider).toBe('custom');
+        expect(cfg.model.base_url).toBe('http://127.0.0.1:11434/v1');
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+  });
+
   it('skips seeding when seedFrom equals hermesHome or does not exist', () => {
     const taskHome = mkdtempSync(join(tmpdir(), 'hermes-task-'));
     try {

@@ -19,7 +19,11 @@ import { deriveInFlight, listTaskWorktrees } from '../src/dispatcher/state.js';
 import { syncReviewLabels } from '../src/dispatcher/label-sweep.js';
 import { syncDrift } from '../src/dispatcher/drift-sweep.js';
 import { syncMerges } from '../src/dispatcher/merge-sweep.js';
-import { dispatchIssue } from '../src/dispatcher/dispatch.js';
+import { escalateStuckPrs } from '../src/dispatcher/stuck-escalation.js';
+import { dispatchIssue, REPO_ROOT, WORKTREES_BASE } from '../src/dispatcher/dispatch.js';
+import { runDeliveryBridge } from '../src/dispatcher/delivery-pr-bridge.js';
+import { HttpDeliveryReader } from '../src/dispatcher/delivery-reader.js';
+import { routeToMarketplace, retractStaleMarketplaceRoutes } from '../src/dispatcher/marketplace-route.js';
 import { SESSIONS_LOG_DIR } from '../src/dispatcher/session-log.js';
 import { GhPrSource } from '../src/dispatcher/pr-source.js';
 import { fetchIssuePrMap } from '../src/dispatcher/pr-links.js';
@@ -27,6 +31,15 @@ import type { PrLink } from '../src/dispatcher/pr-links.js';
 import { deriveReviewInFlight } from '../src/dispatcher/review-state.js';
 import { dispatchReview } from '../src/dispatcher/review-dispatch.js';
 import { runReviewCycle } from '../src/dispatcher/review-loop.js';
+import {
+  cleanupReviewWorktree,
+  type ReviewCleanupOptions,
+} from '../src/dispatcher/review-cleanup.js';
+import {
+  makeFileReviewLeaseStore,
+  reviewWorktreePath,
+  type ReviewLeaseStore,
+} from '../src/dispatcher/review-lease.js';
 import { assertReviewIdentities } from '../src/dispatcher/identity.js';
 import type { SpawnFn } from '../src/dispatcher/dispatch.js';
 import type { ReviewablePr } from '../src/dispatcher/types.js';
@@ -47,12 +60,28 @@ import { classifyRateLimitError } from '../src/dispatcher/rate-limit-error.js';
 import { GhPrSink } from '../src/dispatcher/delivery-sink.js';
 import type { DeliverySink } from '../src/dispatcher/delivery-sink.js';
 import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
-import type { DispatcherConfig, ReadyIssue, InFlightSession, SessionResult, ImplementerRule } from '../src/dispatcher/types.js';
+import type { DispatcherConfig, ReadyIssue, InFlightSession, SessionResult } from '../src/dispatcher/types.js';
+import {
+  AUTOPILOT_RUNTIME_ENV,
+  parseAutopilotRuntime,
+} from '../src/autopilot-runtime.js';
+import {
+  assertHermesBillingRoute,
+  assertHermesRuntimeReady,
+} from '../src/dispatcher/hermes-runtime.js';
+import {
+  assertCursorRuntimeReady,
+  CURSOR_BIN_ENV,
+  CURSOR_MODEL_ENV,
+} from '../src/dispatcher/cursor-runtime.js';
 import { WallClock } from '../src/dispatcher/wall-clock.js';
-import { shouldRouteToSessions } from '../src/cli/routing.js';
+import {
+  shouldRouteToSession,
+  shouldRouteToSessions,
+} from '../src/cli/routing.js';
 import { spawn } from 'node:child_process';
-import type { SpawnOptions } from 'node:child_process';
-import { mkdirSync, openSync, closeSync, writeSync } from 'node:fs';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
+import { mkdirSync, openSync, closeSync, writeSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { argv } from 'node:process';
@@ -85,32 +114,97 @@ const AUTHOR_ALLOWLIST_ENV = 'JINN_DISPATCHER_AUTHOR_ALLOWLIST';
 const REVIEW_BOT_LOGIN_ENV = 'JINN_REVIEW_BOT_LOGIN';
 const IMPL_GH_TOKEN_ENV = 'JINN_IMPL_GH_TOKEN';
 const REVIEW_GH_TOKEN_ENV = 'JINN_REVIEW_GH_TOKEN';
+/** Arm the merge-prep session loop (DR-2026-07-16). '1' = on. Default off. */
+/** Arm the delivery→PR bridge (issue #1892). '1' = on. Default off. */
+const MARKETPLACE_BRIDGE_ENV = 'JINN_MARKETPLACE_BRIDGE';
+/** Indexer base URL the delivery→PR bridge queries. Empty disables it regardless of the flag above. */
+const MARKETPLACE_INDEXER_URL_ENV = 'JINN_MARKETPLACE_INDEXER_URL';
+/** IPFS gateway base URL for the delivery→PR bridge. */
+const MARKETPLACE_IPFS_GATEWAY_ENV = 'JINN_MARKETPLACE_IPFS_GATEWAY_URL';
+/**
+ * Creation-automation execution-mode switch (issue #1893). `'marketplace'`
+ * arms it; anything else (unset, typo, empty) is the fail-safe `'local'`
+ * default — mirrors the `mergePrepEnabled` / `marketplaceBridgeEnabled`
+ * fail-safe-off convention.
+ */
+const EXECUTION_MODE_ENV = 'JINN_EXECUTION_MODE';
 
 /**
- * Env var carrying the JSON implementer-routing policy (#887). Unset / blank /
- * malformed degrades to [] (fall through to defaultImplementer) with a warning.
+ * Model / provider / Python interpreter for Hermes coordinator sessions.
+ * Hermes is active only when JINN_AUTOPILOT_RUNTIME=hermes. Defaults mirror
+ * the operator's own Codex setup (bare `gpt-5.6-sol` + `openai-codex`), which
+ * runs on the ChatGPT/Codex subscription — NOT OpenRouter.
  */
-const IMPLEMENTER_RULES_ENV = 'JINN_DISPATCHER_IMPLEMENTER_RULES';
+const HERMES_MODEL_ENV = 'JINN_DISPATCHER_HERMES_MODEL';
+const HERMES_PROVIDER_ENV = 'JINN_DISPATCHER_HERMES_PROVIDER';
+const HERMES_PYTHON_ENV = 'JINN_DISPATCHER_HERMES_PYTHON';
 
-/** Valid `implementer` values (mirrors the `Implementer` union in types.ts). */
-const IMPLEMENTERS = ['claude', 'codex', 'cursor'] as const;
-/** Valid `effort` values (mirrors the `Effort` union in types.ts). */
-const EFFORTS = ['Low', 'Medium', 'High'] as const;
-/** Valid `shape` values (mirrors the `IssueShape` union in types.ts). */
-const SHAPES = [
-  'feat', 'fix', 'refactor', 'spike',
-  'chore', 'docs', 'test', 'incident', 'design',
-] as const;
+/**
+ * Cursor Agent CLI binary and fixed review model. Active only when
+ * JINN_AUTOPILOT_RUNTIME=cursor. Implement sessions use cursorModelForEffort.
+ */
+const CURSOR_MODEL_ENV_NAME = CURSOR_MODEL_ENV;
+const CURSOR_BIN_ENV_NAME = CURSOR_BIN_ENV;
 
-/** The optional predicate fields on an implementer rule and their allowed values. */
-const OPTIONAL_RULE_FIELDS = [
-  { key: 'effort', valid: EFFORTS },
-  { key: 'shape', valid: SHAPES },
-] as const;
+function attachTerminalCleanup(
+  child: ChildProcess,
+  onExit: Parameters<SpawnFn>[2]['onExit'],
+): void {
+  if (onExit == null) return;
+  let handled = false;
+  const finish = (
+    code: number | null,
+    signal: NodeJS.Signals | null,
+  ): void => {
+    if (handled) return;
+    handled = true;
+    try {
+      onExit(code, signal);
+    } catch (err) {
+      console.error('[autopilot] detached child terminal cleanup failed:', err);
+    }
+  };
+  child.once('error', () => finish(null, null));
+  child.once('exit', finish);
+}
 
-/** Whether `v` is one of the recognised literal values in `valid`. */
-const isMember = (valid: readonly string[], v: unknown): v is string =>
-  typeof v === 'string' && valid.includes(v);
+/**
+ * Build the production logging `SpawnFn` (#533): open the per-session log in
+ * append mode wired to stdout+stderr, write the dispatch delimiter and (when
+ * supplied) the started-at marker, then spawn detached + unref. Shared by the
+ * implement-dispatch and merge-prep-dispatch call sites so both get identical
+ * per-session log capture. Extracted verbatim from the former inline lambda.
+ */
+function makeLoggingSpawn(): SpawnFn {
+  return (cmd, args, opts) => {
+    const logPath = opts.logPath;
+    let fd: number | undefined;
+    let stdio = opts.stdio;
+    if (typeof logPath === 'string') {
+      mkdirSync(SESSIONS_LOG_DIR, { recursive: true });
+      // Owner-only (0o600) on create: session logs may contain secrets surfaced
+      // by the spawned session (tokens in gh/git error output, env echoes).
+      fd = openSync(logPath, 'a', 0o600);
+      const delimiter =
+        `\n===== dispatch ${new Date().toISOString()} ` +
+        `pid=pending cwd=${opts.cwd} =====\n`;
+      writeSync(fd, delimiter);
+      stdio = ['ignore', fd, fd];
+    }
+    // #1296/#1393: rewrite (truncate) the started-at marker so its mtime records
+    // the LATEST dispatch (only implement sessions supply this path).
+    if (typeof opts.startedAtMarkerPath === 'string') {
+      writeFileSync(opts.startedAtMarkerPath, `${new Date().toISOString()}\n`, { mode: 0o600 });
+    }
+    const { onExit, ...spawnOpts } = opts;
+    const child = spawn(cmd, args, { ...spawnOpts, stdio } as SpawnOptions);
+    attachTerminalCleanup(child, onExit);
+    if (child.pid != null) child.unref();
+    // Close the parent's dup of the fd; the detached child kept its own.
+    if (fd != null) closeSync(fd);
+    return { pid: child.pid };
+  };
+}
 
 /** Parse the allowlist env var into a trimmed, non-empty string array. */
 function parseAuthorAllowlist(raw: string | undefined): string[] {
@@ -119,62 +213,6 @@ function parseAuthorAllowlist(raw: string | undefined): string[] {
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-}
-
-/**
- * Parse the implementer-routing policy env var (#887) into a validated
- * `ImplementerRule[]`. Any input that is null/blank, not valid JSON, or not a
- * JSON array degrades to `[]` (fall through to `defaultImplementer`) with a
- * `console.warn`. Within a valid array, each entry is validated independently:
- * an entry whose `implementer` is missing/unknown, or whose *present* `effort`
- * or `shape` is not a recognised value, is dropped (with a warning naming the
- * bad rule); surviving entries keep only `{ effort?, shape?, implementer }`.
- */
-export function parseImplementerRules(raw: string | undefined): ImplementerRule[] {
-  if (raw == null || raw.trim().length === 0) return [];
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    console.warn(
-      `[autopilot] WARNING: ${IMPLEMENTER_RULES_ENV} is not valid JSON — ignoring (0 rules).`,
-    );
-    return [];
-  }
-
-  if (!Array.isArray(parsed)) {
-    console.warn(
-      `[autopilot] WARNING: ${IMPLEMENTER_RULES_ENV} must be a JSON array — ignoring (0 rules).`,
-    );
-    return [];
-  }
-
-  const out: ImplementerRule[] = [];
-  for (const entry of parsed) {
-    const e = entry as Record<string, unknown>;
-    if (!isMember(IMPLEMENTERS, e?.implementer)) {
-      console.warn(
-        `[autopilot] WARNING: dropping implementer rule with missing/unknown implementer: ${JSON.stringify(entry)}`,
-      );
-      continue;
-    }
-    const bad = OPTIONAL_RULE_FIELDS.find(
-      ({ key, valid }) => e[key] !== undefined && !isMember(valid, e[key]),
-    );
-    if (bad) {
-      console.warn(
-        `[autopilot] WARNING: dropping implementer rule with invalid ${bad.key}: ${JSON.stringify(entry)}`,
-      );
-      continue;
-    }
-    const rule: ImplementerRule = { implementer: e.implementer as ImplementerRule['implementer'] };
-    for (const { key } of OPTIONAL_RULE_FIELDS) {
-      if (e[key] !== undefined) rule[key] = e[key] as never;
-    }
-    out.push(rule);
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +264,13 @@ export function printReport(report: CycleReport, label: string): void {
     for (const s of report.dispatched) {
       const pid = s.pid === null ? 'unknown' : String(s.pid);
       console.log(`     #${s.issueNumber} pid=${pid} log=${s.logPath}`);
+    }
+  }
+
+  if (report.routedToMarketplace.length > 0) {
+    console.log('   routed to marketplace:');
+    for (const r of report.routedToMarketplace) {
+      console.log(`     #${r.issueNumber} (${r.action})`);
     }
   }
 
@@ -317,6 +362,17 @@ export async function runDryRun(opts: RunDryRunOpts): Promise<void> {
       console.log(`[dry-run] would pause #${issueNumber} (wall-clock ceiling) — no board mutation.`);
     };
 
+    // Dry-run stub for routeToMarketplace (issue #1893) — logs the intent but
+    // makes NO gh mutation (no label, no comment), same promise as dryDispatch.
+    const wouldRouteToMarketplace: number[] = [];
+    const dryRouteToMarketplace = async (
+      issue: ReadyIssue,
+    ): Promise<import('../src/dispatcher/loop.js').MarketplaceRoutedIssue> => {
+      wouldRouteToMarketplace.push(issue.number);
+      console.log(`[dry-run] would route #${issue.number} to the marketplace — no label/comment mutation.`);
+      return { issueNumber: issue.number, action: 'created' };
+    };
+
     // Fetch the per-cycle Project snapshot once and share with deriveInFlight
     // (and, after step 5 of the #585 plan, source.poll). Costs ≤2 GraphQL pts
     // versus ~192 in the pre-#585 code.
@@ -326,6 +382,7 @@ export async function runDryRun(opts: RunDryRunOpts): Promise<void> {
       cfg,
       deriveInFlight: () => deriveInFlight(snapshot, runner),
       dispatchIssue: dryDispatch,
+      routeToMarketplace: dryRouteToMarketplace,
       countOpenReadyPrs,
       // Dry-run still polls the live PR map so the "would dispatch" list
       // includes dependency-stacked issues (read-only, no mutation).
@@ -342,8 +399,11 @@ export async function runDryRun(opts: RunDryRunOpts): Promise<void> {
 
     if (wouldDispatch.length > 0) {
       console.log(`\n[dry-run] Would have dispatched: ${wouldDispatch.map((n) => `#${n}`).join(', ')}`);
-    } else {
+    } else if (wouldRouteToMarketplace.length === 0) {
       console.log('\n[dry-run] No issues would be dispatched this cycle.');
+    }
+    if (wouldRouteToMarketplace.length > 0) {
+      console.log(`\n[dry-run] Would have routed to the marketplace: ${wouldRouteToMarketplace.map((n) => `#${n}`).join(', ')}`);
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -360,24 +420,77 @@ export async function runReviewPass(
   cfg: DispatcherConfig,
   runner: CommandRunner = realRunner,
   spawnFn?: SpawnFn,
+  reviewLeaseStore?: ReviewLeaseStore,
+  cleanupOptions?: ReviewCleanupOptions,
 ): Promise<void> {
   if (cfg.reviewBotLogin.length === 0) return; // disabled — fail-safe
   const spawnImpl: SpawnFn =
     spawnFn ??
     ((cmd, args, opts) => {
-      const child = spawn(cmd, args, opts as SpawnOptions);
+      const { onExit, ...spawnOpts } = opts;
+      const child = spawn(cmd, args, spawnOpts as SpawnOptions);
+      attachTerminalCleanup(child, onExit);
       if (child.pid != null) child.unref();
       return { pid: child.pid };
     });
   const prSource = new GhPrSource(runner, cfg.engineReviewLabel, cfg.reviewBotLogin);
+  const leaseStore = reviewLeaseStore ?? makeFileReviewLeaseStore();
+  // Exclude PRs with a live merge-prep session from review dispatch (symmetric
+  // to the prep loop's reviewInFlight guard) so the two never push to the same
+  // branch at once. Only relevant when merge-prep is armed.
+  const busyPrNumbers = new Set<number>();
   const report = await runReviewCycle({
     prSource,
     cfg,
-    deriveReviewInFlight: () => deriveReviewInFlight(runner),
-    dispatchReview: (pr: ReviewablePr) => dispatchReview(pr, cfg, { runner, spawn: spawnImpl }),
+    deriveReviewInFlight: () => deriveReviewInFlight(runner, leaseStore),
+    isProcessAlive: (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (err) {
+        return !(
+          typeof err === 'object' &&
+          err != null &&
+          'code' in err &&
+          err.code === 'ESRCH'
+        );
+      }
+    },
+    removeWorktree: async (review) => {
+      const canonicalPath = reviewWorktreePath(review.prNumber);
+      if (review.worktreePath !== canonicalPath) {
+        throw new Error(
+          `Refusing non-canonical review worktree cleanup: ${review.worktreePath}`,
+        );
+      }
+      if (review.leaseId == null || review.pid == null) {
+        throw new Error(
+          `Refusing review cleanup without persisted ownership generation: PR #${review.prNumber}`,
+        );
+      }
+      await cleanupReviewWorktree({
+        version: 2,
+        leaseId: review.leaseId,
+        prNumber: review.prNumber,
+        worktreePath: canonicalPath,
+        pid: review.pid,
+        startedAt: review.startedAt,
+      }, runner, leaseStore, cleanupOptions);
+    },
+    dispatchReview: (pr: ReviewablePr) => dispatchReview(
+      pr,
+      cfg,
+      { runner, spawn: spawnImpl, leaseStore, cleanupOptions },
+    ),
+    busyPrNumbers,
   });
   if (report.dispatched.length > 0) {
     console.log(`[autopilot] review-pr dispatched: PR #${report.dispatched.join(', #')}`);
+  }
+  if (report.reaped.length > 0) {
+    console.log(
+      `[autopilot] review reaped stale worktree → PR #${report.reaped.join(', #')}`,
+    );
   }
 }
 
@@ -489,6 +602,11 @@ export function makeCollectCompletions(
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
+  if (shouldRouteToSession(process.argv)) {
+    const { runSessionCli } = await import('../src/cli/session.js');
+    await runSessionCli(process.argv.slice(3));
+    return;
+  }
   if (shouldRouteToSessions(process.argv)) {
     const { runSessionsCli } = await import('../src/cli/sessions.js');
     await runSessionsCli(process.argv.slice(3));
@@ -513,14 +631,33 @@ async function main(): Promise<void> {
   const bpOk = Number.isInteger(bpOverride) && bpOverride > 0;
   const cfg: DispatcherConfig = {
     ...DEFAULT_CONFIG,
+    runtime: parseAutopilotRuntime(process.env[AUTOPILOT_RUNTIME_ENV]),
     ...(capOk ? { concurrencyCap: capOverride } : {}),
     ...(bpOk ? { openPrBackpressure: bpOverride } : {}),
     authorAllowlist,
-    implementerRules: parseImplementerRules(process.env[IMPLEMENTER_RULES_ENV]),
     reviewBotLogin: process.env[REVIEW_BOT_LOGIN_ENV] ?? '',
     implGhToken: process.env[IMPL_GH_TOKEN_ENV] ?? '',
     reviewGhToken: process.env[REVIEW_GH_TOKEN_ENV] ?? '',
+    executionMode: process.env[EXECUTION_MODE_ENV] === 'marketplace' ? 'marketplace' : 'local',
+    marketplaceBridgeEnabled: (process.env[MARKETPLACE_BRIDGE_ENV] ?? '') === '1',
+    marketplaceIndexerUrl: process.env[MARKETPLACE_INDEXER_URL_ENV] ?? '',
+    ...(process.env[MARKETPLACE_IPFS_GATEWAY_ENV]
+      ? { marketplaceIpfsGatewayUrl: process.env[MARKETPLACE_IPFS_GATEWAY_ENV] }
+      : {}),
+    ...(process.env[HERMES_MODEL_ENV] ? { hermesModel: process.env[HERMES_MODEL_ENV] } : {}),
+    ...(process.env[HERMES_PROVIDER_ENV] ? { hermesProvider: process.env[HERMES_PROVIDER_ENV] } : {}),
+    ...(process.env[HERMES_PYTHON_ENV]
+      ? { hermesPythonPath: process.env[HERMES_PYTHON_ENV] }
+      : {}),
+    ...(process.env[CURSOR_MODEL_ENV_NAME]
+      ? { cursorModel: process.env[CURSOR_MODEL_ENV_NAME] }
+      : {}),
+    ...(process.env[CURSOR_BIN_ENV_NAME]
+      ? { cursorBin: process.env[CURSOR_BIN_ENV_NAME] }
+      : {}),
   };
+
+  console.log(`[autopilot] runtime=${cfg.runtime}`);
 
   if (cfg.authorAllowlist.length === 0) {
     // Fail-safe per spec 2026-05-23-author-allowlist-design.md: empty
@@ -550,6 +687,56 @@ async function main(): Promise<void> {
   // not match reviewBotLogin, or missing tokens — rather than spinning silently
   // or posting self-approvals that GitHub rejects. No-op when review is off.
   await assertReviewIdentities(cfg, realRunner);
+
+  // Fail-loud merge-prep arming (DR-2026-07-16): a prepped PR is re-drafted and
+  // relies on the review loop to re-approve/un-draft it — refuse to arm
+  // merge-prep without the review loop, or every prep wedges its PR in draft.
+
+  // Creation automation (issue #1893): 'marketplace' routes ready issues to
+  // the marketplace (label + snapshot marker) instead of a local session.
+  // Default 'local' — every existing local-mode behavior is unchanged.
+  if (cfg.executionMode === 'marketplace') {
+    console.log(
+      '[autopilot] executionMode=marketplace — ready issues are routed to the marketplace, ' +
+        'not dispatched to local sessions',
+    );
+  }
+
+  // Hermes is a process-wide runtime. Refuse to boot unless its interpreter,
+  // imports, bare model, and subscription provider are all valid.
+  if (cfg.runtime === 'hermes') {
+    assertHermesBillingRoute(cfg.hermesModel, cfg.hermesProvider);
+    assertHermesRuntimeReady(cfg.hermesPythonPath);
+    console.log(
+      `[autopilot] hermes runtime ready (model=${cfg.hermesModel}, provider=${cfg.hermesProvider}, ` +
+        `python=${cfg.hermesPythonPath})`,
+    );
+  }
+
+  if (cfg.runtime === 'cursor') {
+    assertCursorRuntimeReady(cfg.cursorBin);
+    console.log(
+      `[autopilot] cursor runtime ready (bin=${cfg.cursorBin}, reviewModel=${cfg.cursorModel})`,
+    );
+  }
+
+  // Delivery→PR bridge (issue #1892): both the flag AND the indexer URL must
+  // be set — an empty URL disables the bridge even if the flag is on
+  // (fail-safe, mirrors the reviewBotLogin/authorAllowlist convention).
+  const deliveryReader = cfg.marketplaceBridgeEnabled && cfg.marketplaceIndexerUrl !== ''
+    ? new HttpDeliveryReader({
+        indexerUrl: cfg.marketplaceIndexerUrl,
+        ipfsGatewayUrl: cfg.marketplaceIpfsGatewayUrl,
+      })
+    : null;
+  if (cfg.marketplaceBridgeEnabled && deliveryReader == null) {
+    console.warn(
+      `[autopilot] WARNING: ${MARKETPLACE_BRIDGE_ENV}=1 but ${MARKETPLACE_INDEXER_URL_ENV} is unset — ` +
+        'the delivery→PR bridge is disabled this run.',
+    );
+  } else if (deliveryReader != null) {
+    console.log(`[autopilot] delivery-pr-bridge enabled (indexer=${cfg.marketplaceIndexerUrl})`);
+  }
 
   const source = new GhIssueSource(realRunner);
   const wallClock = new WallClock(cfg.wallClockMs);
@@ -741,8 +928,53 @@ async function main(): Promise<void> {
           for (const s of mr.skipped) {
             console.log(`[autopilot] merge (waiting/needs a human): ${s}`);
           }
+          // Stuck PRs (conflict / still-behind): Stage A deterministic
+          // escalation only (label review:needs-human + linked-issue
+          // Blocked on: Human + one comment). Merge-prep sessions were
+          // deleted in single-surface Stage 5 — reconcile children own
+          // integration work. Idempotent via StuckPr.escalated.
+          if (mr.stuck.length > 0) {
+            const esc = await escalateStuckPrs(
+              mr.stuck, snapshot, cyclePrByIssue, cycleFieldCache, realRunner,
+            );
+            if (esc.escalated.length > 0) {
+              console.log(
+                `[autopilot] merge: stuck → escalated (needs-human) → PR #${esc.escalated.join(', PR #')}`,
+              );
+            }
+            for (const sk of esc.skipped) {
+              console.log(`[autopilot] merge: stuck escalation skipped: ${sk}`);
+            }
+          }
         } catch (err) {
           console.error('[autopilot] merge sweep error (cycle unaffected):', err);
+        }
+      }
+
+      // Delivery→PR bridge (issue #1892): marketplace-delivered jinn-repo.v1
+      // solution envelopes become draft PRs. Best-effort — a failure here
+      // never affects the rest of the cycle. No-op when disabled or
+      // unconfigured (deliveryReader is null).
+      if (deliveryReader != null) {
+        try {
+          const br = await runDeliveryBridge(deliveryReader, realRunner, {
+            enabled: cfg.marketplaceBridgeEnabled,
+            repoRoot: REPO_ROOT,
+            worktreesBase: WORKTREES_BASE,
+            ipfsGatewayUrl: cfg.marketplaceIpfsGatewayUrl,
+            reviewLabel: cfg.engineReviewLabel,
+          });
+          for (const o of br.opened) {
+            console.log(`[autopilot] delivery-bridge: opened PR #${o.prNumber ?? '?'} for #${o.issueNumber} (${o.branch})`);
+          }
+          for (const s of br.stalled) {
+            console.log(`[autopilot] delivery-bridge: stalled #${s.issueNumber} — ${s.reason}`);
+          }
+          for (const sk of br.skipped) {
+            console.log(`[autopilot] delivery-bridge: ${sk}`);
+          }
+        } catch (err) {
+          console.error('[autopilot] delivery-bridge error (cycle unaffected):', err);
         }
       }
 
@@ -772,44 +1004,10 @@ async function main(): Promise<void> {
         dispatchIssue: (issue) =>
           dispatchIssue(issue, cfg, {
             runner: realRunner,
-            spawn: (cmd, args, opts) => {
-              // #533: open the per-session log in append mode and wire it to
-              // BOTH stdout(1) and stderr(2) so the two streams interleave in
-              // one tailable file. Append (not truncate, not timestamp) keeps
-              // the path stable for `tail -f` while never clobbering a prior
-              // run's output. `dispatchIssue` supplied opts.logPath; if it is
-              // somehow absent we fall back to the opts.stdio it set.
-              const logPath = opts.logPath;
-              let fd: number | undefined;
-              let stdio = opts.stdio;
-              if (typeof logPath === 'string') {
-                mkdirSync(SESSIONS_LOG_DIR, { recursive: true });
-                // Owner-only (0o600) on create: session logs may contain
-                // secrets surfaced by the spawned session (tokens in gh/git
-                // error output, env echoes, prompt material). The mode only
-                // applies when the file is created; an existing log (re-dispatch)
-                // is not chmod'd — that's fine, the append target is unchanged.
-                fd = openSync(logPath, 'a', 0o600);
-                // Visual delimiter so successive append runs are separable.
-                const delimiter =
-                  `\n===== dispatch ${new Date().toISOString()} ` +
-                  `pid=pending cwd=${opts.cwd} =====\n`;
-                writeSync(fd, delimiter);
-                stdio = ['ignore', fd, fd];
-              }
-              const child = spawn(cmd, args, { ...opts, stdio } as SpawnOptions);
-              if (child.pid != null) {
-                child.unref();
-              }
-              // Close the parent's copy of the fd: the detached child inherited
-              // its own dup, so closing here avoids leaking an fd per dispatch.
-              if (fd != null) {
-                closeSync(fd);
-              }
-              return { pid: child.pid };
-            },
+            spawn: makeLoggingSpawn(),
             fieldCache: cycleFieldCache,
           }),
+        routeToMarketplace: (issue) => routeToMarketplace(issue, realRunner),
         countOpenReadyPrs,
         // Reuse the map fetched once above (shared with the stacked-base sweep).
         fetchIssuePrMap: () => Promise.resolve(cyclePrByIssue),
@@ -834,6 +1032,31 @@ async function main(): Promise<void> {
       }
 
       printReport(result, 'Cycle report');
+
+      // Marketplace retract sweep (issue #1893): runs over ALL currently
+      // labeled OPEN issues (its own targeted `gh issue list --label` scan —
+      // not the board snapshot), independent of this cycle's
+      // concurrency/backpressure budget. `result.readyIssueNumbers` is the
+      // FULL (unsliced) ready set, so an issue merely excluded by budget is
+      // never mistaken for "no longer ready". No-op (and no `gh` calls) when
+      // executionMode is `local` (the default).
+      if (cfg.executionMode === 'marketplace') {
+        try {
+          const rr = await retractStaleMarketplaceRoutes(
+            new Set(result.readyIssueNumbers),
+            realRunner,
+          );
+          if (rr.retracted.length > 0) {
+            console.log(`[autopilot] marketplace: retracted → #${rr.retracted.join(', #')}`);
+          }
+          for (const sk of rr.skipped) {
+            console.log(`[autopilot] marketplace retract-sweep: ${sk}`);
+          }
+        } catch (err) {
+          console.error('[autopilot] marketplace retract-sweep error (cycle unaffected):', err);
+        }
+      }
+
       // Live cycle ran: this cycle's in-flight set becomes next cycle's
       // baseline for the finished-session diff. (#489)
       previousInFlight = inFlight;

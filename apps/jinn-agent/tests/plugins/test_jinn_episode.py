@@ -18,6 +18,7 @@ _EPISODE_TOP_KEYS = {
     "schemaVersion",
     "episodeId",
     "session",
+    "origin",
     "task",
     "trajectory",
     "environment",
@@ -47,6 +48,7 @@ def test_assemble_episode_shape():
     assert ep["schemaVersion"] == "jinn.episode.v1"
     assert ep["episodeId"]
     assert ep["session"]["sessionId"] == "s"
+    assert ep["session"]["kind"] == "user"
     # ISO-8601 with a Z suffix (mirrors capturedAt in assemble()).
     assert ep["session"]["capturedAt"].endswith("Z")
 
@@ -65,12 +67,17 @@ def test_assemble_episode_shape():
     assert env["harness"]["name"]
     assert env["harness"]["version"]
     assert env["model"] == "gpt-4o-mini"
+    assert ep["origin"] == {
+        "writer": env["harness"]["name"],
+        "build": env["harness"]["version"],
+    }
 
     assert isinstance(ep["cost"]["durationMs"], int) and ep["cost"]["durationMs"] >= 0
     assert ep["cost"]["tokens"] == {"input": 100, "output": 50}
 
     assert ep["outcome"]["status"] == "completed"
-    assert ep["outcome"]["verifiabilityTier"] == "user-accepted"
+    assert ep["outcome"]["verificationStrength"] == "user-accepted"
+    assert "verifiabilityTier" not in ep["outcome"]
 
     assert ep["retention"]["policy"] == "local-private"
     assert ep["provenance"] == "contributed"

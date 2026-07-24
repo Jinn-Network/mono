@@ -1,15 +1,14 @@
-"""Jinn plugin tests — the consent gate is the product's trust surface.
+"""Jinn plugin tests — local capture plus the versioned process bridge.
 
-The two acceptance criteria from mono issue #1312:
-  - consent declined (or unset) ⇒ ZERO capture calls — no jinn-layer
-    invocation, no pending file, nothing buffered;
-  - consent accepted ⇒ capture on task completion, preview-gated first
-    publish, per-task veto recorded locally.
+Local capture is unconditional.  At session end the plugin delegates one
+complete EpisodeV1 to ``jinn-layer session end``; it never creates, publishes,
+or automatically drains the retired raw pending-task queue.
 """
 
 from __future__ import annotations
 
 import importlib
+import hashlib
 import json
 from pathlib import Path
 
@@ -18,27 +17,77 @@ import pytest
 jinn = importlib.import_module("plugins.jinn")
 consent = importlib.import_module("plugins.jinn.consent")
 capture_buffer = importlib.import_module("plugins.jinn.capture_buffer")
+session_bridge = importlib.import_module("plugins.jinn.session_bridge")
+jinn_layer = importlib.import_module("plugins.jinn.jinn_layer")
+skill_provenance = importlib.import_module("tools.skill_provenance")
 
 
 class RunnerSpy:
-    """Records every jinn-layer invocation; returns a canned success."""
+    """Records every invocation and canonically persists session-end input."""
 
     def __init__(self, code: int = 0, out: str = "ok"):
         self.calls: list[list[str]] = []
+        self.inputs: list[str | None] = []
         self.code = code
         self.out = out
+        self.contribution: dict | None = None
 
-    def __call__(self, argv: list[str]) -> tuple[int, str]:
+    def __call__(self, argv: list[str], *, input: str | None = None) -> tuple[int, str]:
         self.calls.append(argv)
+        self.inputs.append(input)
+        if self.code == 0 and self.out == "ok" and argv[1:3] == ["session", "end"]:
+            request = json.loads(input or "{}")
+            episode_id = request["episode"]["episodeId"]
+            eligibility = {
+                "eligible": False,
+                "reason": "test fixture",
+                "checkedAt": "2026-07-15T00:00:00Z",
+            }
+            value = {
+                "episodeRef": episode_id,
+                "persistence": {"status": "ok", "value": {"episodeId": episode_id}},
+                "eligibility": eligibility,
+                "summary": {
+                    "episodeRef": episode_id,
+                    "searchedTerms": [],
+                    "providedPackets": [],
+                    "eligibility": eligibility,
+                    "nothingFound": True,
+                },
+            }
+            if self.contribution is not None:
+                value["contribution"] = self.contribution
+            return 0, json.dumps({"contractVersion": 1, "status": "ok", "value": value})
         return self.code, self.out
 
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("JINN_CLI_NAME", "jinn-agent")
+    monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path / "episodes"))
+    monkeypatch.setenv("JINN_MINEABLE_STATE_DIR", str(tmp_path / "mineable"))
     capture_buffer.reset()
+    jinn._reset_session_state()
+    jinn._degraded = None
     jinn._vetoed_tasks.clear()
-    jinn._session_hint_shown.clear()
+    snapshot = session_bridge.RepositorySnapshot(
+        session_id="s1",
+        root=tmp_path,
+        origin="https://github.com/Jinn-Network/example.git",
+        repository_slug="Jinn-Network/example",
+        base_head="0123456789abcdef",
+    )
+    monkeypatch.setattr(
+        session_bridge,
+        "snapshot_repository",
+        lambda session_id, cwd=None: snapshot,
+    )
+    monkeypatch.setattr(
+        session_bridge,
+        "accepted_diff",
+        lambda repository_snapshot: "diff --git a/example.py b/example.py\n+fixed\n",
+    )
     spy = RunnerSpy()
     jinn._runner = spy
     yield spy
@@ -83,48 +132,76 @@ def _pending_files(tmp_home: Path) -> list[Path]:
     return sorted(d.glob("*.json")) if d.exists() else []
 
 
-# ── The gate ─────────────────────────────────────────────────────────────────
+def _session_requests(spy: RunnerSpy) -> list[dict]:
+    return [
+        json.loads(input)
+        for call, input in zip(spy.calls, spy.inputs)
+        if call[1:3] == ["session", "end"] and input is not None
+    ]
 
-def test_unset_consent_captures_nothing(isolated_home, tmp_path):
+
+# ── Local capture and process delegation ─────────────────────────────────────
+
+def test_unset_consent_never_uses_legacy_raw_publication(isolated_home, tmp_path):
     _run_session()
     assert _write_calls(isolated_home) == []
     assert _pending_files(tmp_path) == []
+    assert _session_requests(isolated_home)[0]["contributionVetoed"] is False
 
 
-def test_declined_consent_captures_nothing(isolated_home, tmp_path):
+def test_declined_consent_never_uses_legacy_raw_publication(isolated_home, tmp_path):
     consent.save_state(False)
     _run_session()
     assert _write_calls(isolated_home) == []
     assert _pending_files(tmp_path) == []
+    assert _session_requests(isolated_home)[0]["contributionCandidate"][
+        "publishMinedTasksConsent"
+    ] is False
 
 
-def test_accepted_but_unpreviewed_holds_locally(isolated_home, tmp_path, monkeypatch):
+def test_retained_stage1_share_consent_cannot_authorize_stage2_candidate(
+    isolated_home, tmp_path, monkeypatch
+):
     # Fork behaviour: bin/jinn-agent exports JINN_HARNESS_NAME=jinn-agent.
     monkeypatch.setenv("JINN_HARNESS_NAME", "jinn-agent")
     consent.save_state(True)
     _run_session()
-    # Held for the preview-first rule: a pending file exists, nothing published.
     assert _write_calls(isolated_home) == []
-    files = _pending_files(tmp_path)
-    assert len(files) == 1
-    task = json.loads(files[0].read_text())
-    assert task["provenance"] == "contributed"
-    assert task["outcome"] == {"status": "completed", "verifiabilityTier": "user-accepted"}
-    assert task["task"]["summary"] == "Fix the failing test suite"
-    assert task["environment"]["harness"]["name"] == "jinn-agent"
-    assert task["steps"][0]["name"] == "tool:terminal"
+    assert _pending_files(tmp_path) == []
+    request = _session_requests(isolated_home)[0]
+    episode = request["episode"]
+    assert episode["schemaVersion"] == "jinn.episode.v1"
+    assert episode["retention"]["policy"] == "local-private"
+    assert episode["provenance"] == "contributed"
+    assert request["contributionCandidate"]["publishMinedTasksConsent"] is False
+    assert episode["outcome"] == {
+        "status": "completed",
+        "verificationStrength": "user-accepted",
+        "acceptedDiff": True,
+        "testRuns": {"passed": 0, "failed": 0},
+    }
+    assert episode["task"]["summary"] == "Fix the failing test suite"
+    assert episode["environment"]["harness"]["name"] == "jinn-agent"
+    assert episode["trajectory"][1]["name"] == "tool:terminal"
 
 
-def test_accepted_and_previewed_publishes(isolated_home, tmp_path):
+def test_session_start_quarantines_existing_publication_state_even_with_retained_consent(
+    isolated_home, tmp_path
+):
+    consent.save_state(True, previewed=True)
+
+    jinn._on_session_start(session_id="s1", platform="cli")
+
+    assert (tmp_path / "mineable" / session_bridge.PUBLICATION_DISABLED_FILE).is_file()
+    assert any(call[1:3] == ["contribution", "disable"] for call in isolated_home.calls)
+
+
+def test_preview_state_does_not_restore_legacy_publish(isolated_home, tmp_path):
     consent.save_state(True, previewed=True)
     _run_session()
-    writes = _write_calls(isolated_home)
-    assert len(writes) == 1
-    argv = writes[0]
-    assert argv[1] == "publish"
-    assert "--veto" not in argv
-    # Published pending file is cleaned up.
+    assert _write_calls(isolated_home) == []
     assert _pending_files(tmp_path) == []
+    assert len(_session_requests(isolated_home)) == 1
 
 
 def test_summary_and_model_captured_when_not_flagged_first_turn(isolated_home, tmp_path):
@@ -153,11 +230,105 @@ def test_summary_and_model_captured_when_not_flagged_first_turn(isolated_home, t
         duration_ms=10,
     )
     jinn._on_session_end(session_id="s1", task_id="t1", completed=True, interrupted=False)
-    files = _pending_files(tmp_path)
-    assert len(files) == 1
-    task = json.loads(files[0].read_text())
-    assert task["task"]["summary"] == "Search the web for X"
-    assert task["environment"]["model"] == "step-3.7-flash"
+    episode = _session_requests(isolated_home)[0]["episode"]
+    assert episode["task"]["summary"] == "Search the web for X"
+    assert episode["environment"]["model"] == "step-3.7-flash"
+
+
+def test_background_review_is_linked_isolated_and_never_creates_a_candidate(isolated_home):
+    _start_session(session_id="parent", task_id="parent-task")
+
+    token = skill_provenance.set_current_write_origin(
+        skill_provenance.BACKGROUND_REVIEW
+    )
+    try:
+        _run_session(session_id="parent", task_id="review-task")
+    finally:
+        skill_provenance.reset_current_write_origin(token)
+
+    jinn._on_session_end(
+        session_id="parent",
+        task_id="parent-task",
+        completed=True,
+        interrupted=False,
+    )
+
+    requests = _session_requests(isolated_home)
+    assert len(requests) == 2
+    child = next(
+        request for request in requests
+        if request["episode"]["session"]["kind"] == "host-internal"
+    )
+    parent = next(
+        request for request in requests
+        if request["episode"]["session"]["kind"] == "user"
+    )
+    assert child["episode"]["session"]["parentSessionId"] == "parent"
+    assert child["episode"]["session"]["sessionId"] != parent["episode"]["session"]["sessionId"]
+    assert child["episode"]["episodeId"] != parent["episode"]["episodeId"]
+    assert "contributionCandidate" not in child
+    assert parent["contributionCandidate"]["sourceId"] == parent["episode"]["episodeId"]
+
+
+def test_episode_persists_repository_diff_and_test_run_observables(isolated_home):
+    jinn._on_pre_llm_call(
+        session_id="s1",
+        task_id="t1",
+        user_message="Fix the failing test suite",
+        is_first_turn=False,
+        model="test-model",
+    )
+    for call_id, exit_code in (("passing", 0), ("failing", 1)):
+        jinn._on_post_tool_call(
+            tool_name="terminal",
+            args={"command": "yarn test"},
+            session_id="s1",
+            task_id="t1",
+            tool_call_id=call_id,
+            result={"exit_code": exit_code, "output": "done"},
+            duration_ms=1,
+        )
+    jinn._on_session_end(
+        session_id="s1", task_id="t1", completed=True, interrupted=False
+    )
+
+    episode = _session_requests(isolated_home)[0]["episode"]
+    assert episode["task"]["repositorySlug"] == "Jinn-Network/example"
+    assert episode["task"]["baseCommit"] == "0123456789abcdef"
+    assert episode["outcome"]["acceptedDiff"] is True
+    assert episode["outcome"]["testRuns"] == {"passed": 1, "failed": 1}
+
+
+def test_episode_retains_exact_delivery_hash_and_refs_without_injected_bytes(
+    isolated_home, monkeypatch
+):
+    context = "[jinn corpus] exact private delivery bytes"
+
+    def fake_pickup(_message, **kwargs):
+        activity = kwargs["activity"]
+        activity.update({
+            "retrievalFired": True,
+            "eligibleRefs": ["bafy-eligible"],
+            "deliveredRefs": ["bafy-delivered"],
+            "deliveryMode": "delivered",
+            "deliveredContentHash": (
+                "sha256:" + hashlib.sha256(context.encode("utf-8")).hexdigest()
+            ),
+            "searchedTerms": ["delivery"],
+            "providedRefs": ["bafy-delivered"],
+        })
+        return {"context": context}
+
+    monkeypatch.setattr(jinn.pickup, "pickup", fake_pickup)
+    _run_session()
+
+    request = _session_requests(isolated_home)[0]
+    assert request["episode"]["activity"] == request["activity"]
+    assert request["episode"]["activity"]["deliveredContentHash"] == (
+        "sha256:" + hashlib.sha256(context.encode("utf-8")).hexdigest()
+    )
+    assert request["episode"]["activity"]["deliveredRefs"] == ["bafy-delivered"]
+    assert context not in json.dumps(request)
 
 
 def test_veto_records_locally_and_never_publishes_content(isolated_home, tmp_path):
@@ -165,12 +336,13 @@ def test_veto_records_locally_and_never_publishes_content(isolated_home, tmp_pat
     # Veto is issued mid-session, once the task under capture has steps.
     _start_session()
     out = jinn._handle_jinn(command_args="veto", session_id="s1", task_id="t1")
-    assert "This task is vetoed" in out
+    assert "Session s1 is vetoed" in out
+    assert "already published is immutable" in out
     jinn._on_session_end(session_id="s1", task_id="t1", completed=True, interrupted=False)
-    writes = _write_calls(isolated_home)
-    assert len(writes) == 1
-    assert writes[0][1] == "publish"
-    assert "--veto" in writes[0]
+    request = _session_requests(isolated_home)[0]
+    assert request["contributionVetoed"] is True
+    assert request["contributionCandidate"]["sourceId"] == request["episode"]["episodeId"]
+    assert _write_calls(isolated_home) == []
 
 
 def test_veto_with_no_active_task_reports_nothing_to_veto(isolated_home):
@@ -184,7 +356,9 @@ def test_veto_with_no_active_task_reports_nothing_to_veto(isolated_home):
     assert not jinn._vetoed_tasks
 
 
-def test_publish_failure_retains_the_trace_locally(tmp_path, monkeypatch):
+def test_process_failure_persists_episode_fallback_without_pending_file(
+    tmp_path, monkeypatch, capsys
+):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     capture_buffer.reset()
     consent.save_state(True, previewed=True)
@@ -194,8 +368,16 @@ def test_publish_failure_retains_the_trace_locally(tmp_path, monkeypatch):
         _run_session()
     finally:
         jinn._runner = None
-    assert len(_write_calls(failing)) == 1
-    assert len(_pending_files(tmp_path)) == 1  # retained locally
+    assert _write_calls(failing) == []
+    assert _pending_files(tmp_path) == []
+    episodes = sorted((tmp_path / "episodes").glob("*.json"))
+    assert len(episodes) == 1
+    assert json.loads(episodes[0].read_text())["schemaVersion"] == "jinn.episode.v1"
+    err = capsys.readouterr().err
+    assert "episode captured locally — process bridge degraded" in err
+    assert "local learning pending" in err
+    assert "eligibility unavailable" in err
+    assert "contribution unavailable" in err
 
 
 def test_abandoned_session_is_marked_abandoned(isolated_home, tmp_path):
@@ -208,134 +390,60 @@ def test_abandoned_session_is_marked_abandoned(isolated_home, tmp_path):
         tool_call_id="c", result="", duration_ms=1,
     )
     jinn._on_session_end(session_id="s2", task_id="t2", completed=False, interrupted=True)
-    task = json.loads(_pending_files(tmp_path)[0].read_text())
-    assert task["outcome"]["status"] == "abandoned"
+    episode = _session_requests(isolated_home)[0]["episode"]
+    assert episode["outcome"]["status"] == "abandoned"
 
 
-# ── Draining held pending traces (mono issue #1370) ─────────────────────────
-#
-# The preview gate's own copy promises "then it publishes on future task
-# ends" — so a task held before the preview must drain at the next
-# publishing session end, not stay orphaned in the pending dir forever.
+# ── Retired pending files ────────────────────────────────────────────────────
 
-def test_unpreviewed_task_is_held_then_drained_by_next_session_end(isolated_home, tmp_path):
-    consent.save_state(True)
-    _run_session(session_id="sA", task_id="tA")
-    # (1) Held: file exists, nothing published.
-    assert _write_calls(isolated_home) == []
-    held = _pending_files(tmp_path)
-    assert len(held) == 1
-    held_name = held[0].name
+def test_existing_pending_files_are_preserved_and_never_auto_drained(isolated_home, tmp_path):
+    pending = tmp_path / "jinn" / "pending"
+    pending.mkdir(parents=True)
+    first = pending / "old-a.json"
+    second = pending / "old-b.json"
+    first.write_text('{"legacy":1}\n')
+    second.write_text('{"legacy":2}\n')
 
-    # (2) Preview, then a later task completes — BOTH publish.
-    consent.mark_previewed()
+    consent.save_state(True, previewed=True)
     _run_session(session_id="sB", task_id="tB")
-    publishes = [c for c in _write_calls(isolated_home) if c[1] == "publish"]
-    published_names = [Path(c[2]).name for c in publishes]
-    assert len(publishes) == 2
-    assert held_name in published_names
-    assert _pending_files(tmp_path) == []  # pending dir fully drained
+
+    assert first.read_text() == '{"legacy":1}\n'
+    assert second.read_text() == '{"legacy":2}\n'
+    assert _write_calls(isolated_home) == []
 
 
-def test_drain_failure_leaves_file_and_still_drains_the_rest(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    capture_buffer.reset()
-    consent.save_state(True)
+# ── Session-end feedback ─────────────────────────────────────────────────────
 
-    class SelectiveRunner(RunnerSpy):
-        """Fails publish only for files whose name contains 'sA1'."""
-
-        def __call__(self, argv: list[str]) -> tuple[int, str]:
-            self.calls.append(argv)
-            if len(argv) > 2 and argv[1] == "publish" and "sA1" in argv[2]:
-                return 1, "anchor tx reverted"
-            return 0, "ok"
-
-    runner = SelectiveRunner()
-    jinn._runner = runner
-    try:
-        # Two held tasks before the preview.
-        _run_session(session_id="sA1", task_id="tA1")
-        _run_session(session_id="sA2", task_id="tA2")
-        assert len(_pending_files(tmp_path)) == 2
-        consent.mark_previewed()
-        # Must not raise despite the sA1 drain failure.
-        _run_session(session_id="sB", task_id="tB")
-    finally:
-        jinn._runner = None
-
-    publishes = [c for c in _write_calls(runner) if c[1] == "publish"]
-    published_names = {Path(c[2]).name for c in publishes}
-    # All three were attempted…
-    assert published_names == {"sA1.json", "sA2.json", "sB.json"}
-    # …the failed one is retained for a later retry, the rest unlinked.
-    remaining = [p.name for p in _pending_files(tmp_path)]
-    assert remaining == ["sA1.json"]
-
-
-# ── Session-end feedback lines (mono issue #1385) ───────────────────────────
-#
-# Capture/publish outcomes were logger.info-only (~/.jinn-agent/logs/
-# agent.log) — terminal-silent in both the TUI and -q modes. One concise
-# stderr line per outcome; the TUI's patch_stdout proxy renders stderr
-# above the input area, plain stderr everywhere else.
-
-def test_session_end_held_outcome_prints_stderr_line(isolated_home, capsys):
-    consent.save_state(True)
+def test_session_end_published_outcome_says_contribution_is_immutable(
+    isolated_home, capsys
+):
+    consent.save_state(True, previewed=True)
+    isolated_home.contribution = {
+        "status": "ok",
+        "value": {"recordId": "episode-1", "status": "published"},
+    }
     _run_session()
     err = capsys.readouterr().err
-    assert "jinn: trace held locally — /jinn preview to see what would publish" in err
+    assert "jinn: contribution published — immutable" in err
 
 
-def test_session_end_published_outcome_prints_stderr_line_with_ref(isolated_home, capsys):
-    consent.save_state(True, previewed=True)
-    isolated_home.out = (
-        "Published.\n"
-        "  ref       bafyTESTREF\n"
-        "  anchor    - (anchor tx pending)\n"
-        "  fetch it  jinn-layer corpus get bafyTESTREF"
-    )
+def test_session_end_without_corpus_result_prints_complete_summary(isolated_home, capsys):
     _run_session()
     err = capsys.readouterr().err
-    assert "jinn: contribution published — bafyTESTREF (/jinn ledger for the anchor)" in err
-
-
-def test_session_end_publish_failure_prints_stderr_line_with_path(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    capture_buffer.reset()
-    consent.save_state(True, previewed=True)
-    jinn._runner = RunnerSpy(code=1, out="anchor tx reverted")
-    try:
-        _run_session()
-    finally:
-        jinn._runner = None
-    err = capsys.readouterr().err
-    kept = _pending_files(tmp_path)[0]
-    assert f"jinn: publish failed — trace kept at {kept}" in err
-
-
-def test_session_end_drain_prints_one_summary_line(isolated_home, capsys):
-    consent.save_state(True)
-    _run_session(session_id="sA", task_id="tA")  # held
-    consent.mark_previewed()
-    capsys.readouterr()  # discard the held line
-    _run_session(session_id="sB", task_id="tB")  # publishes sB + drains sA
-    err = capsys.readouterr().err
-    assert "jinn: 1 held trace(s) published" in err
-    # At most 2 user-visible lines per session end.
-    assert len([l for l in err.splitlines() if l.startswith("jinn:")]) <= 2
-
-
-def test_session_end_without_capture_prints_nothing(isolated_home, capsys):
-    _run_session()  # consent unset — zero capture, zero terminal noise
-    assert capsys.readouterr().err == ""
+    assert "Jinn session complete" in err
+    assert "nothing relevant found" in err
+    assert "episode captured" in err
+    assert "local learning pending" in err
+    assert "eligibility not eligible — test fixture" in err
+    assert "contribution unavailable" in err
 
 
 # ── Consent flow ─────────────────────────────────────────────────────────────
 
 def test_consent_flow_bare_enter_defaults_to_decline(isolated_home):
-    # explainer -> decline confirm -> node stub skip
-    answers = iter(["", "y", ""])
+    # explainer -> decline confirm. The single sharing question — no second,
+    # unrelated question follows it.
+    answers = iter(["", "y"])
     printed: list[str] = []
     share = consent.run_consent_flow(lambda _: next(answers), printed.append)
     assert share is False
@@ -343,8 +451,8 @@ def test_consent_flow_bare_enter_defaults_to_decline(isolated_home):
 
 
 def test_consent_flow_accept_requires_deliberate_confirm(isolated_home):
-    # accept -> back out -> accept -> confirm -> skip stub
-    answers = iter(["a", "n", "a", "y", ""])
+    # accept -> back out -> accept -> confirm
+    answers = iter(["a", "n", "a", "y"])
     printed: list[str] = []
     share = consent.run_consent_flow(lambda _: next(answers), printed.append)
     assert share is True
@@ -362,20 +470,13 @@ def test_consent_state_survives_reload(isolated_home):
 
 # ── Slash surface ────────────────────────────────────────────────────────────
 
-def test_status_states_capture_off_by_default(isolated_home):
+def test_status_reports_contribution_parked_and_no_sharing_lines(isolated_home):
     out = jinn._handle_jinn(command_args="status")
-    assert "sharing: OFF" in out
-    assert "share: OFF" in out
-
-
-def test_preview_marks_previewed_and_unlocks_publish(isolated_home, tmp_path):
-    consent.save_state(True)
-    _run_session()  # held pending
-    out = jinn._handle_jinn(command_args="preview")
-    assert "preview recorded" in out
-    assert consent.load_state()["previewed"] is True
-    # Preview invoked jinn-layer capture preview on the pending file.
-    assert any(c[1:3] == ["capture", "preview"] for c in isolated_home.calls)
+    assert "contribution: parked — nothing leaves this machine" in out
+    # The removed outbound surface leaves no sharing/preview/pending lines.
+    assert "sharing:" not in out
+    assert "previewed:" not in out
+    assert "pending trace:" not in out
 
 
 def test_corpus_command_delegates_to_layer(isolated_home):
@@ -384,124 +485,22 @@ def test_corpus_command_delegates_to_layer(isolated_home):
     assert isolated_home.calls[0][1:4] == ["corpus", "search", "prediction"]
 
 
-# ── Ledger: structured render vs degrade (mono#1418) ─────────────────────────
-
-def test_ledger_renders_structured_rows_from_json(isolated_home):
-    # `jinn-layer ledger --json` yields rows → the design 1b table.
-    rows = [
-        {"time": "05-26 06:41", "task": "fix retry", "envelope": "env-8f21c2",
-         "anchor": "0x7a2f…c019", "tier": "tests-passed"},
-        {"time": "05-25 22:41", "task": "refactor auth", "state": "vetoed"},
-    ]
-    isolated_home.out = json.dumps(rows)
-    out = jinn._handle_jinn(command_args="ledger")
-    assert isolated_home.calls[0][1:3] == ["ledger", "--json"]
-    assert "TIER" in out
-    assert "tests-passed" in out
-    assert "vetoed (local only)" in out
+def test_removed_surfaces_fall_through_to_help(isolated_home):
+    # consent / preview / ledger are deleted verbs: they no longer dispatch a
+    # branch and fall through to the help text (no outbound call is made).
+    for verb in ("consent", "preview", "ledger"):
+        out = jinn._handle_jinn(command_args=verb)
+        assert "/jinn — Jinn layer" in out
+    assert isolated_home.calls == []
 
 
-def test_ledger_degrades_to_raw_text_when_json_unavailable(isolated_home):
-    # A layer that predates `--json`: the JSON call succeeds but is not JSON,
-    # so the fork degrades to the plain `ledger` text pass-through.
-    isolated_home.out = "PLAIN LEDGER TEXT (no --json support)"
-    out = jinn._handle_jinn(command_args="ledger")
-    assert out == "PLAIN LEDGER TEXT (no --json support)"
-    # Both the --json probe and the plain ledger were attempted.
-    assert ["ledger", "--json"] in [c[1:3] for c in isolated_home.calls]
-    assert any(c[1:] == ["ledger"] for c in isolated_home.calls)
-
-
-def test_preview_with_no_pending_shows_example_fixture(isolated_home):
-    # Design requirement iv: preview is reachable before any publish. With no
-    # task yet, /jinn preview shows the labelled example fixture.
-    consent.save_state(True)
-    out = jinn._handle_jinn(command_args="preview")
-    assert "example — no task run yet" in out
-    assert "NOTHING IS SHARED FROM THIS SCREEN" in out
-    # It must NOT mark previewed (the real gate stays on a real trace).
-    assert consent.load_state()["previewed"] is False
-
-
-# ── TUI-safe consent commands (no blocking reads) ────────────────────────────
-
-def test_slash_consent_shows_explainer_with_command_keys(isolated_home, monkeypatch):
-    # Fork behaviour: bin/jinn-agent exports JINN_HARNESS_NAME=jinn-agent.
-    monkeypatch.setenv("JINN_HARNESS_NAME", "jinn-agent")
-    out = jinn._handle_jinn(command_args="consent")
-    assert "Contribute tasks from your work?" in out
-    assert "/jinn consent accept" in out
-    assert consent.consent_decided() is False  # nothing recorded
-
-
-def test_slash_consent_accept_requires_deliberate_confirm(isolated_home):
-    out = jinn._handle_jinn(command_args="consent accept")
-    assert "To confirm: /jinn consent accept confirm" in out
-    assert consent.consent_decided() is False
-    out = jinn._handle_jinn(command_args="consent accept confirm")
-    assert "Sharing is ON" in out
-    assert consent.share_enabled() is True
-
-
-def test_slash_consent_decline_records_reader_only(isolated_home):
-    out = jinn._handle_jinn(command_args="consent decline confirm")
-    assert "Sharing is OFF" in out
-    assert consent.consent_decided() is True
-    assert consent.share_enabled() is False
-
-
-def test_slash_consent_never_calls_blocking_input(isolated_home, monkeypatch):
-    def boom(*_a, **_k):
-        raise AssertionError("blocking input() called from the slash surface")
-    monkeypatch.setattr("builtins.input", boom)
-    for args in ("consent", "consent accept", "consent accept confirm",
-                 "consent decline", "consent decline confirm"):
-        jinn._handle_jinn(command_args=args)
-
-
-def test_jinn_layer_not_found_points_at_canary_tag():
-    """mono#1382: bare `npm install -g @jinn-network/client` installs latest,
-    which has no jinn-layer bin until stable >= 0.1.10 — the error must name
-    the canary tag."""
-    jinn_layer = importlib.import_module("plugins.jinn.jinn_layer")
-    code, out = jinn_layer._default_runner(["definitely-not-a-real-binary-xyz"])
+def test_jinn_layer_not_found_points_at_plugin_update():
+    """The jinn-layer bin arrives with the plugin; a missing bin names the
+    `jinn-agent plugins update jinn` refresh (mono#1818) and the JINN_LAYER_BIN
+    override. The diagnostic lives on stderr (stdout/stderr reported
+    separately)."""
+    code, out, err = jinn_layer._default_runner(["definitely-not-a-real-binary-xyz"])
     assert code == 127
-    assert "@jinn-network/client@canary" in out
-    assert "JINN_LAYER_BIN" in out
-
-
-# ── Consent copy: current state + preview next-step (mono#1384) ──────────────
-
-def test_slash_consent_states_current_state_unset(isolated_home, monkeypatch):
-    # Fork behaviour: bin/jinn-agent exports JINN_HARNESS_NAME=jinn-agent.
-    monkeypatch.setenv("JINN_HARNESS_NAME", "jinn-agent")
-    out = jinn._handle_jinn(command_args="consent")
-    first_line = out.splitlines()[0]
-    assert first_line == "Sharing is currently OFF."
-    assert "Contribute tasks from your work?" in out
-
-
-def test_slash_consent_states_current_state_accepted(isolated_home, monkeypatch):
-    # Fork behaviour: bin/jinn-agent exports JINN_HARNESS_NAME=jinn-agent.
-    monkeypatch.setenv("JINN_HARNESS_NAME", "jinn-agent")
-    consent.save_state(True)
-    out = jinn._handle_jinn(command_args="consent")
-    assert out.splitlines()[0] == "Sharing is currently ON."
-    assert "Contribute tasks from your work?" in out
-
-
-def test_slash_consent_states_current_state_declined(isolated_home, monkeypatch):
-    # Fork behaviour: bin/jinn-agent exports JINN_HARNESS_NAME=jinn-agent.
-    monkeypatch.setenv("JINN_HARNESS_NAME", "jinn-agent")
-    consent.save_state(False)
-    out = jinn._handle_jinn(command_args="consent")
-    assert out.splitlines()[0] == "Sharing is currently OFF."
-    assert "Contribute tasks from your work?" in out
-
-
-def test_accept_confirm_names_preview_as_next_step(isolated_home):
-    out = jinn._handle_jinn(command_args="consent accept confirm")
-    assert "Sharing is ON" in out
-    assert "Run /jinn preview" in out
-    assert "run-a-node" not in out
-    assert "Nothing to do now" not in out
+    assert out == ""
+    assert "jinn-agent plugins update jinn" in err
+    assert "JINN_LAYER_BIN" in err

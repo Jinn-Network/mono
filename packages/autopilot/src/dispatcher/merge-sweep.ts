@@ -34,6 +34,7 @@ import { REPO } from './constants.js';
 
 export interface MergeCandidate {
   number: number;
+  title: string;
   isDraft: boolean;
   author: string;
   labels: string[];
@@ -41,6 +42,7 @@ export interface MergeCandidate {
   mergeable: string;
   mergeStateStatus: string;
   headRefName: string;
+  headRefOid: string;
   statusChecks: RollupEntry[];
 }
 
@@ -51,7 +53,7 @@ export interface RollupEntry {
   state?: string; // StatusContext: SUCCESS | FAILURE | PENDING | …
 }
 
-const NEEDS_HUMAN_LABEL = 'review:needs-human';
+export const NEEDS_HUMAN_LABEL = 'review:needs-human';
 const GREEN_CONCLUSIONS = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 const MERGEABLE_STATES = new Set(['CLEAN', 'HAS_HOOKS']);
 
@@ -103,8 +105,60 @@ export function classifyCandidate(
   return 'eligible';
 }
 
+/**
+ * Why a PR that already cleared review can no longer be merged by the sweep.
+ * `conflicting` — GitHub reports a textual conflict against `next`.
+ * `still-behind` — behind `next` and its one `update-branch` attempt did not
+ *   catch it up (a conflicting update-branch, or the base advanced again).
+ * `update-branch-failed` — the `update-branch` call itself errored (commonly
+ *   because the update would conflict).
+ */
+export type StuckReason = 'conflicting' | 'still-behind' | 'update-branch-failed';
+
+/** A merge candidate the sweep cannot merge and cannot self-heal — the input
+ *  to deterministic needs-human escalation (Stage A) and to the merge-prep
+ *  session (Stage B). */
+export interface StuckPr {
+  number: number;
+  title: string;
+  reason: StuckReason;
+  headRefName: string;
+  headRefOid: string;
+  /** `review:needs-human` is already on the PR — already escalated (or an
+   *  advisory-mode PR); do not re-escalate and do not prep. */
+  escalated: boolean;
+}
+
+/**
+ * Detect a *conflicting* stuck PR, INDEPENDENTLY of the `review:needs-human`
+ * label. This is deliberate and load-bearing: `classifyCandidate` short-circuits
+ * on that label BEFORE the mergeable check, so once escalation applies the label
+ * a naive re-classify would go blind to the very conflict that is still stuck.
+ * `classifyStuck` re-derives stuckness from the objective merge state so the
+ * signal survives its own escalation.
+ *
+ * A conflicting PR is one that already cleared the review gate — non-draft,
+ * allowlist-authored, APPROVED, CI-green — but GitHub reports
+ * `mergeable=CONFLICTING` (or `mergeStateStatus=DIRTY`). `mergeable=UNKNOWN` is
+ * transient (GitHub still computing) and is never stuck. The `still-behind` and
+ * `update-branch-failed` reasons are runtime states, populated inside
+ * `syncMerges`, not here.
+ */
+export function classifyStuck(
+  c: MergeCandidate,
+  authorAllowlist: ReadonlySet<string>,
+): StuckReason | null {
+  if (c.isDraft) return null;
+  if (!authorAllowlist.has(c.author.toLowerCase())) return null;
+  if (c.reviewDecision !== 'APPROVED') return null;
+  if (rollupVerdict(c.statusChecks) !== 'green') return null;
+  if (c.mergeable === 'CONFLICTING' || c.mergeStateStatus === 'DIRTY') return 'conflicting';
+  return null;
+}
+
 interface GhListEntry {
   number: number;
+  title?: string;
   isDraft: boolean;
   author?: { login?: string };
   labels?: Array<{ name?: string }>;
@@ -112,6 +166,7 @@ interface GhListEntry {
   mergeable?: string;
   mergeStateStatus?: string;
   headRefName?: string;
+  headRefOid?: string;
   statusCheckRollup?: RollupEntry[];
 }
 
@@ -126,12 +181,13 @@ export async function fetchMergeCandidates(
     '--base', 'next',
     '--label', reviewLabel,
     '--json',
-    'number,isDraft,author,labels,reviewDecision,mergeable,mergeStateStatus,headRefName,statusCheckRollup',
+    'number,title,isDraft,author,labels,reviewDecision,mergeable,mergeStateStatus,headRefName,headRefOid,statusCheckRollup',
     '--limit', '100',
   ]);
   const entries = JSON.parse(raw) as GhListEntry[];
   return entries.map((e) => ({
     number: e.number,
+    title: e.title ?? '',
     isDraft: Boolean(e.isDraft),
     author: e.author?.login ?? '',
     labels: (e.labels ?? []).map((l) => l.name ?? '').filter((n) => n !== ''),
@@ -139,6 +195,7 @@ export async function fetchMergeCandidates(
     mergeable: e.mergeable ?? 'UNKNOWN',
     mergeStateStatus: e.mergeStateStatus ?? 'UNKNOWN',
     headRefName: e.headRefName ?? '',
+    headRefOid: e.headRefOid ?? '',
     statusChecks: e.statusCheckRollup ?? [],
   }));
 }
@@ -171,7 +228,7 @@ async function isBehindNext(headRefName: string, runner: CommandRunner): Promise
  * determined (fail-safe: uncertainty routes to a human, mirrors
  * review-dispatch).
  */
-async function touchesOwned(prNumber: number, runner: CommandRunner): Promise<boolean> {
+export async function touchesOwned(prNumber: number, runner: CommandRunner): Promise<boolean> {
   try {
     const [filesRaw, codeowners] = await Promise.all([
       runner('gh', ['pr', 'view', String(prNumber), '--repo', REPO, '--json', 'files']),
@@ -190,6 +247,22 @@ export interface MergeSweepReport {
   merged: number[];
   updatedBranch: number[];
   skipped: string[];
+  /** PRs that cleared review but cannot be merged and cannot self-heal —
+   *  structured so the orchestrator can escalate (Stage A) or dispatch a
+   *  merge-prep session (Stage B) rather than parse the free-text `skipped`. */
+  stuck: StuckPr[];
+}
+
+/** Build a StuckPr from a candidate; `escalated` reflects the current label. */
+function toStuck(c: MergeCandidate, reason: StuckReason): StuckPr {
+  return {
+    number: c.number,
+    title: c.title,
+    reason,
+    headRefName: c.headRefName,
+    headRefOid: c.headRefOid,
+    escalated: c.labels.includes(NEEDS_HUMAN_LABEL),
+  };
 }
 
 export async function syncMerges(
@@ -198,7 +271,7 @@ export async function syncMerges(
   attemptedUpdateBranch: Set<number>,
   reviewLabel = 'engine:review',
 ): Promise<MergeSweepReport> {
-  const report: MergeSweepReport = { merged: [], updatedBranch: [], skipped: [] };
+  const report: MergeSweepReport = { merged: [], updatedBranch: [], skipped: [], stuck: [] };
 
   let candidates: MergeCandidate[];
   try {
@@ -209,6 +282,12 @@ export async function syncMerges(
   }
 
   for (const c of candidates) {
+    // Conflict detection runs independently of classifyCandidate (which is
+    // label-blinded by review:needs-human, see classifyStuck).
+    if (classifyStuck(c, authorAllowlist) === 'conflicting') {
+      report.stuck.push(toStuck(c, 'conflicting'));
+    }
+
     let verdict = classifyCandidate(c, authorAllowlist);
 
     // Independent stale-base gate: `next` runs strict=false branch protection,
@@ -221,6 +300,7 @@ export async function syncMerges(
     if (verdict === 'behind') {
       if (attemptedUpdateBranch.has(c.number)) {
         report.skipped.push(`PR #${c.number}: still BEHIND after update-branch — needs a human`);
+        report.stuck.push(toStuck(c, 'still-behind'));
         continue;
       }
       try {
@@ -229,6 +309,7 @@ export async function syncMerges(
         report.updatedBranch.push(c.number);
       } catch (err) {
         console.error(`[merge-sweep] update-branch failed for #${c.number} (continuing):`, err);
+        report.stuck.push(toStuck(c, 'update-branch-failed'));
       }
       continue;
     }
@@ -245,8 +326,24 @@ export async function syncMerges(
       continue;
     }
 
+    // Refuse to merge without a head to pin: gh silently drops an empty
+    // `--match-head-commit ''`, which would merge unvalidated — the exact
+    // "merge blind" the pin exists to prevent. An eligible OPEN PR always
+    // carries a headRefOid, so this is a fail-safe for a malformed payload.
+    if (c.headRefOid === '') {
+      report.skipped.push(`PR #${c.number}: missing headRefOid — refusing to merge without a validated head pin`);
+      continue;
+    }
+
     try {
-      await runner('gh', ['pr', 'merge', String(c.number), '--repo', REPO, '--squash']);
+      // Pin the head we validated: a push landing between the list fetch above
+      // and this merge (e.g. a merge-prep session's resolution) must not be
+      // merged unvalidated. GitHub rejects the merge if the head has moved.
+      await runner('gh', [
+        'pr', 'merge', String(c.number),
+        '--repo', REPO, '--squash',
+        '--match-head-commit', c.headRefOid,
+      ]);
       report.merged.push(c.number);
     } catch (err) {
       console.error(`[merge-sweep] merge failed for #${c.number} (continuing):`, err);

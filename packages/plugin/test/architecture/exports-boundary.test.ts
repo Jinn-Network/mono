@@ -20,6 +20,11 @@ describe('package exports boundary (#1658)', () => {
   it('resolves the "." entry', async () => {
     const mod = await import('@jinn-network/plugin');
     expect(typeof mod.createJinnPlugin).toBe('function');
+    expect(typeof mod.ContributionCandidateV1Schema?.parse).toBe('function');
+    expect(typeof mod.deriveContributionStatus).toBe('function');
+    expect(mod.JINN_PLUGIN_CONTRACT_VERSION).toBe(1);
+    const plugin = mod.createJinnPlugin;
+    expect(typeof plugin).toBe('function');
   });
 
   it('resolves the "./testing" entry', async () => {

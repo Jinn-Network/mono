@@ -812,9 +812,14 @@ export interface WeakSuiteSummary {
   checked: number;
   /** Of those, `discrimination === 'fail'` — the weak-suite count. */
   flagged: number;
-  /** Scorable entries with `discrimination === undefined` — not yet
-   *  discrimination-checked (predates the check, or awaiting a recheck). */
-  unchecked: number;
+  /** Scorable entries with `discrimination === undefined`, split by whether a
+   *  current pool row exists to re-fetch for recheck. */
+  unchecked: {
+    /** Awaiting recheck and present in the current pool. */
+    backlog: number;
+    /** Awaiting recheck but absent from the current pool — permanently skipped. */
+    orphaned: number;
+  };
   /** `flagged / checked`, or `null` when `checked === 0`. */
   rate: number | null;
 }
@@ -827,21 +832,28 @@ export interface WeakSuiteSummary {
  * {@link recheckDiscrimination}); unscorable entries never carry a
  * discrimination verdict for the benchmark pool and are excluded entirely.
  */
-export function summarizeWeakSuite(file: unknown): WeakSuiteSummary {
+export function summarizeWeakSuite(file: unknown, poolInstanceIds?: ReadonlySet<string>): WeakSuiteSummary {
   if (!isObject(file) || !isObject(file['entries'])) {
     throw new Error('summarizeWeakSuite: file must include an `entries` object');
   }
   let flagged = 0;
   let passed = 0;
-  let unchecked = 0;
-  for (const entry of Object.values(file['entries'])) {
+  let uncheckedBacklog = 0;
+  let uncheckedOrphaned = 0;
+  for (const [instanceId, entry] of Object.entries(file['entries'])) {
     if (!isObject(entry) || entry['scorable'] !== true) continue;
     if (entry['discrimination'] === 'fail') flagged += 1;
     else if (entry['discrimination'] === 'pass') passed += 1;
-    else unchecked += 1;
+    else if (poolInstanceIds === undefined || poolInstanceIds.has(instanceId)) uncheckedBacklog += 1;
+    else uncheckedOrphaned += 1;
   }
   const checked = flagged + passed;
-  return { checked, flagged, unchecked, rate: checked > 0 ? flagged / checked : null };
+  return {
+    checked,
+    flagged,
+    unchecked: { backlog: uncheckedBacklog, orphaned: uncheckedOrphaned },
+    rate: checked > 0 ? flagged / checked : null,
+  };
 }
 
 export async function exportScorableVettedPoolArtifact(
@@ -1096,10 +1108,25 @@ export interface RecheckDiscriminationOpts {
   log?: (msg: string) => void;
 }
 
+export interface RecheckDiscriminationSkipped {
+  /** Entry already carries `discrimination: 'pass' | 'fail'`. */
+  alreadyVerdicted: number;
+  /** Batch bound (`opts.limit`) reached before this entry was reached. */
+  limitExceeded: number;
+  /** No matching `PoolTask` in `opts.pool` — nothing to re-fetch. */
+  orphanedPoolTask: number;
+  /** Fetch or eval failed; entry stays unchecked for a future retry. */
+  evalError: number;
+}
+
+export function emptyRecheckDiscriminationSkipped(): RecheckDiscriminationSkipped {
+  return { alreadyVerdicted: 0, limitExceeded: 0, orphanedPoolTask: 0, evalError: 0 };
+}
+
 export interface RecheckDiscriminationSummary {
   checked: number;
   flagged: string[];
-  skipped: number;
+  skipped: RecheckDiscriminationSkipped;
 }
 
 /**
@@ -1124,15 +1151,15 @@ export async function recheckDiscrimination(opts: RecheckDiscriminationOpts): Pr
   const scorable = await opts.store.getScorableEntries(opts.semanticsVersion);
   const flagged: string[] = [];
   let checked = 0;
-  let skipped = 0;
+  const skipped = emptyRecheckDiscriminationSkipped();
   if (!scorable) return { checked, flagged, skipped };
 
   const taskById = new Map(opts.pool.map((t) => [t.instance_id, t]));
   for (const [instanceId, entry] of Object.entries(scorable.entries)) {
-    if (entry.discrimination !== undefined) { skipped += 1; continue; }
-    if (opts.limit !== undefined && checked >= opts.limit) { skipped += 1; continue; }
+    if (entry.discrimination !== undefined) { skipped.alreadyVerdicted += 1; continue; }
     const task = taskById.get(instanceId);
-    if (!task) { skipped += 1; continue; }
+    if (!task) { skipped.orphanedPoolTask += 1; continue; }
+    if (opts.limit !== undefined && checked >= opts.limit) { skipped.limitExceeded += 1; continue; }
     try {
       const row = await opts.fetcher.fetchTaskRow({ hf_dataset: task.hf_dataset, hf_split: task.hf_split, instance_id: instanceId });
       const disc = await runDiscriminationCheck({
@@ -1147,7 +1174,7 @@ export async function recheckDiscrimination(opts: RecheckDiscriminationOpts): Pr
       await opts.store.record(instanceId, { ...entry, discrimination: disc.discrimination }, opts.semanticsVersion);
       log(`[recheck-discrimination] ${instanceId} → ${disc.discrimination}`);
     } catch (err) {
-      skipped += 1;
+      skipped.evalError += 1;
       log(`[recheck-discrimination] ${instanceId} error: ${err instanceof Error ? err.message : String(err)}`);
     }
   }

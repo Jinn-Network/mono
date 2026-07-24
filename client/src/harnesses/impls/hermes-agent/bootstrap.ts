@@ -92,6 +92,12 @@ export interface WritePerTaskConfigInputs {
    * in tests.
    */
   seedFrom?: string;
+  /**
+   * OS environment for reading JINN_HERMES_MODEL / JINN_HERMES_PROVIDER
+   * precedence overrides. Defaults to process.env at the read site; injected
+   * in tests to set precedence cases without mutating global env.
+   */
+  processEnv?: NodeJS.ProcessEnv;
 }
 
 function seedOperatorState(hermesHome: string, seedFrom: string): void {
@@ -265,9 +271,14 @@ export function writePerTaskHermesConfig(inputs: WritePerTaskConfigInputs): void
 
   const operator = inputs.seedFrom ? readOperatorConfigYaml(inputs.seedFrom) : {};
   const snippet = hermesConfigFromSolverPlugins(inputs.solverPluginRoots, inputs.env);
+  const envSource = inputs.processEnv ?? process.env;
+  const envModel = envSource['JINN_HERMES_MODEL']?.trim() || undefined;
+  const envProvider = envSource['JINN_HERMES_PROVIDER']?.trim() || undefined;
+  const model = envModel ?? inputs.model;
+  const provider = inputs.baseUrl ? inputs.provider : (envProvider ?? inputs.provider);
   const merged = mergePerTaskConfig(operator, snippet, {
-    model: inputs.model,
-    provider: inputs.provider,
+    model,
+    provider,
     baseUrl: inputs.baseUrl,
     workingDir: inputs.workingDir,
   });

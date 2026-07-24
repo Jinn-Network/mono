@@ -20,9 +20,13 @@
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { distillClusters, type DistillCluster } from '../packages/harness-layer/src/distill.js';
-import { createClaudeDistiller } from '../packages/harness-layer/src/distill-llm.js';
-import { buildSkillMarkdown, type SkillPackage } from '../packages/harness-layer/src/skill.js';
+import {
+  buildSkillMarkdown,
+  createClaudeDistiller,
+  distillClusters,
+  type DistillCluster,
+  type SkillPackage,
+} from '@jinn-network/jinn-layer';
 import { loadActiveHeldOutSlateIds, ACTIVE_HELD_OUT_SLATE_VERSIONS } from '../src/solver-types/_swe-rebench-v2-held-out-slate.js';
 
 const GRAPHQL = 'https://jinn-indexer-production.up.railway.app/graphql';

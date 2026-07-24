@@ -5,11 +5,12 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   assertPublicRepoForPublish,
   assertRepoAllowedForMint,
   contestedBandDistance,
+  createGitHubPublicRepoChecker,
   inInformativeBand,
   loadMintRepoDenylist,
   type PublicRepoChecker,
@@ -86,6 +87,38 @@ describe('task-creator guards', () => {
     await expect(
       assertPublicRepoForPublish('pandas-dev/pandas', publicChecker),
     ).resolves.toBeUndefined();
+  });
+
+  it('does not cache repository visibility across publication checks', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ private: false }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ private: true }) });
+    const checker = createGitHubPublicRepoChecker({ fetchImpl: fetchImpl as unknown as typeof fetch });
+
+    await expect(checker.isPublic('acme/widget')).resolves.toBe(true);
+    await expect(checker.isPublic('acme/widget')).resolves.toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['malformed JSON', async () => { throw new SyntaxError('bad JSON'); }],
+    ['missing private field', async () => ({ full_name: 'acme/widget' })],
+    ['non-object JSON', async () => null],
+  ])('fails closed on a successful GitHub response with %s', async (_label, json) => {
+    const checker = createGitHubPublicRepoChecker({
+      fetchImpl: (async () => ({ ok: true, json })) as unknown as typeof fetch,
+    });
+
+    await expect(checker.isPublic('acme/widget')).resolves.toBe(false);
+  });
+
+  it('rejects non-canonical repository slugs without making an API request', async () => {
+    const fetchImpl = vi.fn();
+    const checker = createGitHubPublicRepoChecker({ fetchImpl: fetchImpl as unknown as typeof fetch });
+
+    await expect(checker.isPublic('acme/widget/extra')).resolves.toBe(false);
+    await expect(checker.isPublic('acme')).resolves.toBe(false);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('contested band prefers 50% solve rate', () => {

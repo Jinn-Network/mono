@@ -3,7 +3,7 @@
 The plugin records the first user message (``pre_llm_call``) and every tool
 call (``post_tool_call``) into an in-memory buffer keyed by task/session,
 then assembles the ``CapturedTask`` JSON that ``jinn-layer`` consumes
-(``client/packages/harness-layer/src/capture.ts`` ``CapturedTaskSchema`` in
+(``packages/core/src/captured-task.ts`` ``CapturedTaskSchema`` in
 the mono repo). Attributes are recorded RAW here — the mandatory,
 fail-closed scrub happens inside ``jinn-layer capture``/``publish`` on this
 machine, before anything can leave it.
@@ -160,6 +160,13 @@ def has_steps(task_id: str, session_id: str) -> bool:
         return bool(buf and buf["steps"])
 
 
+def has_capture(task_id: str, session_id: str) -> bool:
+    """Whether any ordinary agent activity is currently captured locally."""
+    with _lock:
+        buf = _buffers.get(_key(task_id, session_id))
+        return bool(buf and (buf["steps"] or buf.get("turns")))
+
+
 def _pop(task_id: str, session_id: str) -> Optional[Dict[str, Any]]:
     """Pop the buffer once (None if absent or wholly empty).
 
@@ -259,7 +266,9 @@ def _build_episode(
         "session": {
             "sessionId": session_id,
             "capturedAt": buf["capturedAt"],
+            "kind": "user",
         },
+        "origin": {"writer": h_name, "build": h_version},
         "task": {
             "summary": buf.get("summary") or "(no summary)",
             "distributionTags": [],
@@ -273,7 +282,7 @@ def _build_episode(
         },
         "outcome": {
             "status": status,
-            "verifiabilityTier": "user-accepted",
+            "verificationStrength": "user-accepted",
         },
         "cost": cost,
         "retention": {
