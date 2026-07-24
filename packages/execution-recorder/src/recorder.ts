@@ -26,6 +26,7 @@ import {
   persistRuntimeObservation,
   persistStartRecording,
 } from "./persist-capture.js";
+import { copyFinalizedExecutionReceipt } from "./receipt.js";
 import {
   appendWorkspaceEvent,
   createWorkspaceState,
@@ -162,7 +163,9 @@ class ExecutionRecordingHandle implements ExecutionRecording {
   }
 
   get receipt(): ExecutionRecording["receipt"] {
-    return this.state.receipt;
+    return this.state.receipt === undefined
+      ? undefined
+      : copyFinalizedExecutionReceipt(this.state.receipt);
   }
 
   private async assertCurrent(signal?: AbortSignal): Promise<void> {

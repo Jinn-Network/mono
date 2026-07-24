@@ -249,6 +249,49 @@ class ReceiptMutatingRepository implements EvidenceRepository {
   }
 }
 
+class ByteMutatingRepository implements EvidenceRepository {
+  readonly delegate = new FinalizationFaultRepository();
+
+  constructor(
+    private readonly target: "artifact" | "record",
+  ) {}
+
+  async putRecord(
+    family: EvidenceRecordFamily,
+    value: Uint8Array,
+    options?: RepositoryOperationOptions,
+  ): Promise<RepositoryWriteReceipt<EvidenceRecordReference>> {
+    if (this.target === "record") {
+      value[0] = value[0]! ^ 0xff;
+    }
+    return this.delegate.putRecord(family, value, options);
+  }
+
+  getRecord(
+    reference: EvidenceRecordReference,
+    options?: RepositoryOperationOptions,
+  ): Promise<Uint8Array | null> {
+    return this.delegate.getRecord(reference, options);
+  }
+
+  async putArtifact(
+    value: Uint8Array,
+    options?: RepositoryOperationOptions,
+  ): Promise<RepositoryWriteReceipt<EvidenceArtifactReference>> {
+    if (this.target === "artifact") {
+      value[0] = value[0]! ^ 0xff;
+    }
+    return this.delegate.putArtifact(value, options);
+  }
+
+  getArtifact(
+    reference: EvidenceArtifactReference,
+    options?: RepositoryOperationOptions,
+  ): Promise<Uint8Array | null> {
+    return this.delegate.getArtifact(reference, options);
+  }
+}
+
 async function initializedState(): Promise<WorkspaceState> {
   const parent = await mkdtemp(join(tmpdir(), "jinn-recorder-finalization-"));
   temporaryDirectories.push(parent);
@@ -905,6 +948,51 @@ describe("execution finalization", () => {
       expect(pending.repositoryArtifactDigests).toEqual(
         pending.finalization!.artifactDigests,
       );
+    },
+  );
+
+  test.each(["artifact", "record"] as const)(
+    "rejects a repository that mutates %s bytes before acknowledging them",
+    async (target) => {
+      const repository = new ByteMutatingRepository(target);
+      const state = await initializedState();
+
+      await expect(
+        finalizeWorkspaceState(
+          repository,
+          state,
+          {
+            outcome: "completed",
+            endedAt: "2026-07-24T10:00:01Z",
+            results: [
+              file(
+                "results/result.txt",
+                "fixture result",
+                "text/plain",
+              ),
+            ],
+            nativeTrace: nativeTrace(),
+          },
+          {
+            now: () => new Date("2026-07-24T10:00:02Z"),
+          },
+        ),
+      ).rejects.toMatchObject({
+        name: "EvidenceRepositoryError",
+        code: "CONTENT_CORRUPT",
+      });
+
+      const pending = await openWorkspaceState(state.paths.root);
+      expect(pending.status).toBe("finalizing");
+      expect(pending.repositoryRecord).toBeUndefined();
+      expect(pending.receipt).toBeUndefined();
+      if (target === "artifact") {
+        expect(pending.repositoryArtifactDigests).toEqual([]);
+      } else {
+        expect(pending.repositoryArtifactDigests).toEqual(
+          pending.finalization!.artifactDigests,
+        );
+      }
     },
   );
 

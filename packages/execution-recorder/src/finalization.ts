@@ -30,6 +30,7 @@ import {
   persistArtifactCapture,
   persistNativeTrace,
 } from "./persist-capture.js";
+import { copyFinalizedExecutionReceipt } from "./receipt.js";
 import { readStoredObject, storeObject } from "./object-store.js";
 import {
   appendWorkspaceEvent,
@@ -77,13 +78,13 @@ function invalidRepositoryReceipt(message: string): never {
 }
 
 function validateArtifactReceipt(
-  value: Uint8Array,
+  expectedReference: EvidenceArtifactReference,
+  expectedSize: number,
   receipt: RepositoryWriteReceipt<EvidenceArtifactReference>,
 ): void {
-  const expected = createArtifactReference(value);
   if (
-    receipt.reference.digest !== expected.digest ||
-    receipt.size !== value.byteLength
+    receipt.reference.digest !== expectedReference.digest ||
+    receipt.size !== expectedSize
   ) {
     return invalidRepositoryReceipt(
       "Repository artifact acknowledgement does not match the exact requested bytes.",
@@ -92,17 +93,14 @@ function validateArtifactReceipt(
 }
 
 function validateRecordReceipt(
-  value: Uint8Array,
+  expectedReference: EvidenceRecordReference,
+  expectedSize: number,
   receipt: RepositoryWriteReceipt<EvidenceRecordReference>,
 ): void {
-  const expected = createRecordReference(
-    "execution-evidence",
-    value,
-  );
   if (
-    receipt.reference.family !== expected.family ||
-    receipt.reference.digest !== expected.digest ||
-    receipt.size !== value.byteLength
+    receipt.reference.family !== expectedReference.family ||
+    receipt.reference.digest !== expectedReference.digest ||
+    receipt.size !== expectedSize
   ) {
     return invalidRepositoryReceipt(
       "Repository record acknowledgement does not match the exact execution-evidence metadata.",
@@ -436,7 +434,7 @@ function finalizedOutcome(
     state,
     result: {
       finalized: true,
-      receipt: state.receipt,
+      receipt: copyFinalizedExecutionReceipt(state.receipt),
     },
   };
 }
@@ -473,10 +471,15 @@ export async function resumePendingFinalization(
       reference,
       options.signal,
     );
-    const receipt = await repository.putArtifact(value, {
-      signal: options.signal,
-    });
-    validateArtifactReceipt(value, receipt);
+    const expectedReference = createArtifactReference(value);
+    const expectedSize = value.byteLength;
+    const receipt = await repository.putArtifact(
+      Uint8Array.from(value),
+      {
+        signal: options.signal,
+      },
+    );
+    validateArtifactReceipt(expectedReference, expectedSize, receipt);
     current = await appendWorkspaceEvent(
       current,
       { type: "repository-artifact-written", digest },
@@ -491,17 +494,22 @@ export async function resumePendingFinalization(
       intent.metadata,
       options.signal,
     );
-    const receipt = await repository.putRecord(
+    const expectedReference = createRecordReference(
       "execution-evidence",
       metadata,
+    );
+    const expectedSize = metadata.byteLength;
+    const receipt = await repository.putRecord(
+      "execution-evidence",
+      Uint8Array.from(metadata),
       { signal: options.signal },
     );
-    validateRecordReceipt(metadata, receipt);
+    validateRecordReceipt(expectedReference, expectedSize, receipt);
     current = await appendWorkspaceEvent(
       current,
       {
         type: "repository-record-written",
-        reference: receipt.reference,
+        reference: expectedReference,
       },
       undefined,
       options.signal,

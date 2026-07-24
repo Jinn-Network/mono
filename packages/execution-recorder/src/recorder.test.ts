@@ -566,6 +566,76 @@ describe("execution recorder finalization lifecycle", () => {
     expect(repeated).toEqual(outcome);
   });
 
+  test("caller mutation of a finalize result cannot change the persisted receipt", async () => {
+    const workspaceDir = await workspace();
+    const repository = new InMemoryEvidenceRepository();
+    const recording = await createExecutionRecorder({
+      repository,
+    }).start(startInput(workspaceDir));
+    const input = {
+      outcome: "completed" as const,
+      endedAt: "2026-07-24T10:01:00Z",
+      results: [file("results/result.txt", "result\n")],
+      nativeTrace: nativeTrace(),
+    };
+    const outcome = await recording.finalize(input);
+    if (!outcome.finalized) throw new Error("Expected finalization.");
+    const expected = structuredClone(outcome.receipt);
+    const exposed = outcome.receipt as unknown as {
+      executionId: string;
+      record: { family: string; digest: string };
+      artifacts: Array<{ digest: string }>;
+      finalizedAt: string;
+    };
+
+    exposed.executionId =
+      "urn:uuid:00000000-0000-4000-8000-000000000000";
+    exposed.record.family = "result-evaluation";
+    exposed.record.digest = `sha256:${"0".repeat(64)}`;
+    exposed.artifacts[0]!.digest = `sha256:${"1".repeat(64)}`;
+    exposed.artifacts.splice(1);
+    exposed.finalizedAt = "2030-01-01T00:00:00.000Z";
+
+    const repeated = await recording.finalize(input);
+    expect(repeated).toEqual({
+      finalized: true,
+      receipt: expected,
+    });
+    expect(recording.receipt).toEqual(expected);
+  });
+
+  test("caller mutation of the receipt getter cannot change later views", async () => {
+    const workspaceDir = await workspace();
+    const recording = await createExecutionRecorder({
+      repository: new InMemoryEvidenceRepository(),
+    }).start(startInput(workspaceDir));
+    const outcome = await recording.finalize({
+      outcome: "completed",
+      endedAt: "2026-07-24T10:01:00Z",
+      results: [file("results/result.txt", "result\n")],
+      nativeTrace: nativeTrace(),
+    });
+    if (!outcome.finalized) throw new Error("Expected finalization.");
+    const expected = structuredClone(outcome.receipt);
+    const receiptView = recording.receipt;
+    if (receiptView === undefined) {
+      throw new Error("Expected the recording receipt.");
+    }
+    const exposed = receiptView as unknown as {
+      record: { digest: string };
+      artifacts: Array<{ digest: string }>;
+    };
+
+    exposed.record.digest = `sha256:${"0".repeat(64)}`;
+    exposed.artifacts.splice(0);
+
+    const later = recording.receipt;
+    expect(later).toEqual(expected);
+    expect(later).not.toBe(exposed);
+    expect(later?.record).not.toBe(exposed.record);
+    expect(later?.artifacts).not.toBe(exposed.artifacts);
+  });
+
   test("durably snapshots incomplete finalization material for a later retry", async () => {
     const workspaceDir = await workspace();
     const sourceDir = await mkdtemp(join(tmpdir(), "jinn-recorder-result-"));
