@@ -156,6 +156,7 @@
     "@huggingface/transformers": "^4.2.0",
     "@jinn-network/core": "0.1.0",
     "@jinn-network/plugin": "0.1.0",
+    "@lmoe/gliner-onnx": "0.1.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@msgpack/msgpack": "^3.0.0",
     "@noble/ed25519": "^3.1.0",
