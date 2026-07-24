@@ -5,7 +5,7 @@ import type {
   AutopilotAdoptionReceipt,
   AutopilotCorrelation,
   AutopilotSessionCapsule,
-} from '../../../sdk/src/autopilot-session.js';
+} from '@jinn-network/sdk/autopilot';
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import { REPO } from '../dispatcher/constants.js';

@@ -113,6 +113,38 @@ import type {
   AdoptionObservation,
   AdoptionReceiptObserver,
 } from '../../types/task-run.js';
+import { officialAutopilotProfileFailure } from '../../autopilot/official-profile-policy.js';
+
+function officialAutopilotTaskProfileFailure(
+  task: Task,
+  resolvedContract?: { readonly id: string; readonly version: string },
+): string | null {
+  const contract = resolvedContract ?? (
+    task.contractId !== undefined && task.contractVersion !== undefined
+      ? { id: task.contractId, version: task.contractVersion }
+      : task.solverType === 'jinn-repo.v1'
+        ? { id: 'jinn-repo', version: 'v1' }
+        : undefined
+  );
+  if (
+    contract?.id !== 'jinn-repo'
+    || contract.version !== 'v1'
+    || task.spec?.['source'] !== 'autopilot-session'
+  ) {
+    return null;
+  }
+  const spec = task.spec as {
+    repo?: unknown;
+    verificationProfile?: unknown;
+  };
+  return officialAutopilotProfileFailure({
+    repository: typeof spec.repo === 'string' ? spec.repo : '<missing>',
+    verificationProfile:
+      typeof spec.verificationProfile === 'string'
+        ? spec.verificationProfile
+        : undefined,
+  });
+}
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
 
@@ -1143,6 +1175,9 @@ export class TaskEngine {
    * See `spec/2026-05-05-solvernet-creation-and-launch.md` §14.
    */
   private async manifestBackedValidation(task: Task): Promise<string | null> {
+    const taskProfileFailure = officialAutopilotTaskProfileFailure(task);
+    if (taskProfileFailure) return taskProfileFailure;
+
     const cid = task.solverNetManifestCid;
     if (!cid) {
       // Without a manifest CID, schema validation can't run via the §14
@@ -1191,21 +1226,25 @@ export class TaskEngine {
       const parsedSpec = task.spec !== undefined
         ? sdkContract.schemas.task.zod.safeParse(task.spec)
         : undefined;
-      if (parsedSpec?.success) return null;
-
-      const specIssuesLookLikeWholeTask =
-        parsedSpec !== undefined &&
-        parsedSpec.error.issues.some((issue: ZodIssue) => {
-          const head = issue.path[0];
-          return typeof head === 'string' && ['id', 'description', 'solverType', 'window', 'claimPolicy', 'spec'].includes(head);
-        });
-      const selected = parsedSpec !== undefined && !specIssuesLookLikeWholeTask ? parsedSpec : parsed;
-      const issues = selected.error.issues
-        .map((issue: ZodIssue) => `${issue.path.length > 0 ? issue.path.join('.') : '<root>'}: ${issue.message}`)
-        .join('; ');
-      const scope = selected === parsedSpec ? 'task.spec' : 'task';
-      return `${ref.id}.${ref.version} ${scope} failed validation: ${issues}`;
+      if (!parsedSpec?.success) {
+        const specIssuesLookLikeWholeTask =
+          parsedSpec !== undefined &&
+          parsedSpec.error.issues.some((issue: ZodIssue) => {
+            const head = issue.path[0];
+            return typeof head === 'string' && ['id', 'description', 'solverType', 'window', 'claimPolicy', 'spec'].includes(head);
+          });
+        const selected = parsedSpec !== undefined && !specIssuesLookLikeWholeTask ? parsedSpec : parsed;
+        const issues = selected.error.issues
+          .map((issue: ZodIssue) => `${issue.path.length > 0 ? issue.path.join('.') : '<root>'}: ${issue.message}`)
+          .join('; ');
+        const scope = selected === parsedSpec ? 'task.spec' : 'task';
+        return `${ref.id}.${ref.version} ${scope} failed validation: ${issues}`;
+      }
     }
+
+    const resolvedProfileFailure =
+      officialAutopilotTaskProfileFailure(task, ref);
+    if (resolvedProfileFailure) return resolvedProfileFailure;
     return null;
   }
 

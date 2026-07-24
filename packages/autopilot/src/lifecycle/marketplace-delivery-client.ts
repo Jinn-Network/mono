@@ -6,12 +6,16 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
+  AutopilotDeliveryCommandResultV1Schema,
+  AutopilotDeliveryExpectationSchema,
   AutopilotMutationResultSchema,
   AutopilotReviewResultSchema,
   AutopilotSessionCapsuleSchema,
+  TaskSubmitRequestV1Schema,
+  type AutopilotDeliveryObservation,
   type AutopilotReviewResult,
   type AutopilotSessionCapsule,
-} from '../../../sdk/src/autopilot-session.js';
+} from '@jinn-network/sdk/autopilot';
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import {
@@ -148,12 +152,10 @@ function sessionFromRequest(manifest: AttemptManifest): AutopilotSessionCapsule 
   ) {
     throw new Error('Marketplace attempt has no immutable request file');
   }
-  const request = record(
+  const request = TaskSubmitRequestV1Schema.parse(
     JSON.parse(readFileSync(manifest.execution.requestFile, 'utf8')),
-    'marketplace request',
   );
-  const spec = record(request.spec, 'marketplace request spec');
-  return AutopilotSessionCapsuleSchema.parse(spec.session);
+  return AutopilotSessionCapsuleSchema.parse(request.spec.session);
 }
 
 function observationRequest(
@@ -172,7 +174,7 @@ function observationRequest(
       'Marketplace attempt is missing its Task identity or creation provenance',
     );
   }
-  return {
+  return AutopilotDeliveryExpectationSchema.parse({
     schemaVersion: OBSERVATION_SCHEMA,
     role: 'solution',
     taskId: execution.taskId,
@@ -194,7 +196,7 @@ function observationRequest(
           deliveryTransactionHash: execution.deliveryTx,
           deliveryBlockNumber: execution.deliveryBlockNumber,
         }),
-  };
+  });
 }
 
 function writeObservationRequest(
@@ -216,24 +218,27 @@ function writeObservationRequest(
   return target;
 }
 
-function parseMachineObservation(raw: string): Record<string, unknown> {
+function parseMachineObservation(raw: string): AutopilotDeliveryObservation {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
     throw new Error('Autopilot delivery observation returned malformed JSON');
   }
-  const envelope = record(parsed, 'Autopilot delivery observation response');
-  return record(
-    envelope.observation,
-    'Autopilot delivery observation result',
-  );
+  const decoded = AutopilotDeliveryCommandResultV1Schema.safeParse(parsed);
+  if (!decoded.success) {
+    throw new Error(
+      'Autopilot delivery observation response is outside the SDK contract',
+      { cause: decoded.error },
+    );
+  }
+  return decoded.data.observation;
 }
 
 function verifiedDelivery(
   manifest: AttemptManifest,
   session: AutopilotSessionCapsule,
-  observation: Record<string, unknown>,
+  observation: Extract<AutopilotDeliveryObservation, { status: 'verified' }>,
 ): VerifiedMarketplaceSolutionDelivery {
   const execution = manifest.execution;
   if (
@@ -448,7 +453,7 @@ function verdictObservationRequest(
   ) {
     throw new Error('Marketplace Verdict observation lacks an exact adopted review');
   }
-  return {
+  return AutopilotDeliveryExpectationSchema.parse({
     schemaVersion: OBSERVATION_SCHEMA,
     role: 'verdict',
     taskId: originExecution.taskId,
@@ -477,14 +482,14 @@ function verdictObservationRequest(
           deliveryTransactionHash: reviewExecution.deliveryTx,
           deliveryBlockNumber: reviewExecution.deliveryBlockNumber,
         }),
-  };
+  });
 }
 
 function verifiedVerdictDelivery(
   origin: AttemptManifest,
   review: AttemptManifest,
   session: AutopilotSessionCapsule,
-  observation: Record<string, unknown>,
+  observation: Extract<AutopilotDeliveryObservation, { status: 'verified' }>,
 ): VerifiedMarketplaceVerdictDelivery {
   const originExecution = origin.execution;
   const reviewExecution = review.execution;

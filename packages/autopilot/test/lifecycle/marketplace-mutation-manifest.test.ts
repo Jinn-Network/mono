@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   AutopilotAdoptionReceiptSchema,
   type AutopilotAdoptionReceipt,
-} from '../../../sdk/src/autopilot-session.js';
+} from '@jinn-network/sdk/autopilot';
 import {
   decodeAttemptManifest,
   readAttemptManifest,

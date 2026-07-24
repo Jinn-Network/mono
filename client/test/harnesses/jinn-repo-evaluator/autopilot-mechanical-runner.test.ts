@@ -31,6 +31,8 @@ function context(): AutopilotEvaluationContext {
       schemaVersion: 'jinn-autopilot-session.v1',
       workflow: 'implement',
       repository: 'Jinn-Network/mono',
+      language: 'typescript',
+      verificationProfile: 'jinn-mono.v1',
       issueNumber: 2001,
       prNumber: 2101,
       targetBase: 'next',

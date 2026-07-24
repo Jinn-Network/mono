@@ -13,7 +13,7 @@ const REVIEW_GENERATION = '123e4567-e89b-42d3-a456-426614174010';
 const V2_ATTEMPT_ID = '123e4567-e89b-42d3-a456-426614174001';
 
 function context(): AutopilotEvaluationContext {
-  return AutopilotEvaluationContextSchema.parse({
+  const parsed = AutopilotEvaluationContextSchema.parse({
     schemaVersion: 'jinn-autopilot-evaluation-context.v1',
     operators: {
       solutionSafe: `0x${'a'.repeat(40)}`,
@@ -35,6 +35,8 @@ function context(): AutopilotEvaluationContext {
       schemaVersion: 'jinn-autopilot-session.v1',
       workflow: 'fix-child',
       repository: 'Jinn-Network/mono',
+      language: 'typescript',
+      verificationProfile: 'jinn-mono.v1',
       issueNumber: 2001,
       childIssueNumber: 2002,
       parentPrNumber: 2101,
@@ -101,6 +103,7 @@ function context(): AutopilotEvaluationContext {
       },
     },
   });
+  return parsed;
 }
 
 function correlation() {
@@ -129,6 +132,68 @@ function agent(output: unknown): SemanticAgentRunner & { run: ReturnType<typeof 
 }
 
 describe('runAutopilotSemanticReview', () => {
+  it.each([
+    {
+      name: 'an unsupported profile',
+      repository: 'Jinn-Network/mono',
+      verificationProfile: 'other-repository.v1',
+    },
+    {
+      name: 'the mono profile paired with another repository',
+      repository: 'example/other-repository',
+      verificationProfile: 'jinn-mono.v1',
+    },
+  ])('rejects $name before either evaluator runner is invoked', async ({
+    repository,
+    verificationProfile,
+  }) => {
+    const guardedContext = context();
+    Object.assign(guardedContext.session, {
+      repository,
+      language: 'typescript',
+      verificationProfile,
+    });
+    const mechanicalRunner = mechanical();
+    const agentRunner = agent({
+      schemaVersion: 'jinn-autopilot-review-result.v1',
+      outcome: 'approve',
+      correlation: guardedContext.correlation,
+      body: 'Must not run.',
+    });
+
+    await expect(runAutopilotSemanticReview({
+      context: guardedContext,
+      mechanicalRunner,
+      agentRunner,
+      abort: new AbortController().signal,
+    })).rejects.toThrow(/verification profile|repository/i);
+
+    expect(mechanicalRunner.run).not.toHaveBeenCalled();
+    expect(agentRunner.run).not.toHaveBeenCalled();
+  });
+
+  it('rejects a mismatched review-target repository before either evaluator runner is invoked', async () => {
+    const guardedContext = context();
+    guardedContext.reviewTarget.repository = 'example/other-repository';
+    const mechanicalRunner = mechanical();
+    const agentRunner = agent({
+      schemaVersion: 'jinn-autopilot-review-result.v1',
+      outcome: 'approve',
+      correlation: guardedContext.correlation,
+      body: 'Must not run.',
+    });
+
+    await expect(runAutopilotSemanticReview({
+      context: guardedContext,
+      mechanicalRunner,
+      agentRunner,
+      abort: new AbortController().signal,
+    })).rejects.toThrow(/review target.*repository/i);
+
+    expect(mechanicalRunner.run).not.toHaveBeenCalled();
+    expect(agentRunner.run).not.toHaveBeenCalled();
+  });
+
   it('classifies issue, PR, path, and diff text as inert untrusted data and omits solver claims', async () => {
     const hostileContext = context();
     hostileContext.session.taskSnapshot.title =

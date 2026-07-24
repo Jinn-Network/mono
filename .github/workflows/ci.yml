@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - 'client/**'
+      - 'packages/sdk/**'
       - 'packages/core/**'
       - 'packages/plugin/**'
   push:
     branches: [main]
     paths:
       - 'client/**'
+      - 'packages/sdk/**'
       - 'packages/core/**'
       - 'packages/plugin/**'
   # Manual trigger for the soft-gate e2e jobs (task-creator-marketplace-e2e).

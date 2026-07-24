@@ -25,7 +25,7 @@ export interface AutopilotEvaluationContextValue {
     readonly evaluatorSafe: string;
   };
   readonly reviewTarget: {
-    readonly repository: 'Jinn-Network/mono';
+    readonly repository: AutopilotSessionCapsule['repository'];
     readonly issueNumber: number;
     readonly childIssueNumber?: number;
     readonly prNumber: number;

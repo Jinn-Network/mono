@@ -3,7 +3,7 @@ import type {
   AutopilotAdoptionReceipt,
   AutopilotCorrelation,
   AutopilotReviewResult,
-} from '../../../sdk/src/autopilot-session.js';
+} from '@jinn-network/sdk/autopilot';
 import type { AttemptManifest } from '../../src/lifecycle/attempt-workspace.js';
 import {
   MarketplaceReviewAdoptionError,

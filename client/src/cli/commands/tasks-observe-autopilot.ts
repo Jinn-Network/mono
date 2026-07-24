@@ -2,6 +2,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { getAddress } from 'viem';
+import {
+  AutopilotDeliveryCommandResultV1Schema,
+  AutopilotDeliveryExpectationSchema,
+  type AutopilotDeliveryCommandResultV1,
+  type AutopilotDeliveryExpectation,
+} from '@jinn-network/sdk/autopilot';
 
 import {
   createAutopilotMarketplaceDeliveryObserver,
@@ -22,6 +28,12 @@ import { emitResult } from '../output.js';
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export function parseAutopilotDeliveryCommandResult(
+  input: unknown,
+): AutopilotDeliveryCommandResultV1 {
+  return AutopilotDeliveryCommandResultV1Schema.parse(input);
 }
 
 export async function runObserveAutopilotDelivery(
@@ -46,6 +58,22 @@ export async function runObserveAutopilotDelivery(
     }, { writer: ctx.writer, exit: ctx.exit });
     return;
   }
+  if (parsed.values.json !== true || parsed.values.human === true) {
+    const human = parsed.values.human === true;
+    emitEnvelope({
+      code: 'invalid_invocation',
+      message: human
+        ? '--human is not supported for Autopilot delivery observation'
+        : '--json is required for Autopilot delivery observation',
+      exampleCli:
+        'jinn tasks observe-autopilot-delivery --expectation-file request.json --json',
+      details: {
+        field: human ? '--human' : '--json',
+        expected: human ? 'omit --human' : '--json',
+      },
+    }, { writer: ctx.writer, exit: ctx.exit });
+    return;
+  }
   const expectationFile = parsed.values['expectation-file'];
   if (typeof expectationFile !== 'string' || expectationFile.length === 0) {
     emitEnvelope({
@@ -58,9 +86,11 @@ export async function runObserveAutopilotDelivery(
     return;
   }
 
-  let request: unknown;
+  let request: AutopilotDeliveryExpectation;
   try {
-    request = JSON.parse(readFileSync(resolve(expectationFile), 'utf8'));
+    request = AutopilotDeliveryExpectationSchema.parse(
+      JSON.parse(readFileSync(resolve(expectationFile), 'utf8')),
+    );
   } catch (error) {
     emitEnvelope({
       code: 'invalid_invocation',
@@ -109,12 +139,13 @@ export async function runObserveAutopilotDelivery(
       observer,
       latestBlockNumber: () => publicClient.getBlockNumber(),
     });
-    emitResult({
+    const result = parseAutopilotDeliveryCommandResult({
       schemaVersion: 1,
       generatedAt: new Date().toISOString(),
       verb: 'tasks observe-autopilot-delivery',
       observation,
-    }, (value) => JSON.stringify(value, null, 2), {
+    });
+    emitResult(result, (value) => JSON.stringify(value, null, 2), {
       json: Boolean(parsed.values.json),
       human: Boolean(parsed.values.human),
       writer: ctx.writer,

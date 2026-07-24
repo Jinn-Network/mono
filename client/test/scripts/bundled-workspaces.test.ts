@@ -12,11 +12,13 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
+import * as bundledWorkspaces from '../../scripts/lib/bundled-workspaces.mjs';
+
+const {
   assertSafeTarballEntries,
   materializeBundledWorkspaces,
   restoreBundledWorkspaces,
-} from '../../scripts/lib/bundled-workspaces.mjs';
+} = bundledWorkspaces;
 
 describe('bundled workspace packaging', () => {
   const dirs: string[] = [];
@@ -51,6 +53,8 @@ describe('bundled workspace packaging', () => {
         name: '@jinn-network/core',
         files: ['dist/'],
         dependencies: { zod: '^4.4.3' },
+        devDependencies: { local: 'workspace:*' },
+        resolutions: { local: 'portal:../local' },
       }),
     );
     await writeFile(path.join(coreRoot, 'dist', 'index.js'), 'export const core = true;\n');
@@ -74,9 +78,12 @@ describe('bundled workspace packaging', () => {
 
     expect((await lstat(path.join(scopeRoot, 'core'))).isDirectory()).toBe(true);
     expect(await readFile(path.join(scopeRoot, 'core', 'dist', 'index.js'), 'utf8')).toContain('core');
-    expect(
-      JSON.parse(await readFile(path.join(scopeRoot, 'core', 'package.json'), 'utf8')).dependencies,
-    ).toBeUndefined();
+    const packagedCore = JSON.parse(
+      await readFile(path.join(scopeRoot, 'core', 'package.json'), 'utf8'),
+    );
+    expect(packagedCore.dependencies).toBeUndefined();
+    expect(packagedCore.devDependencies).toBeUndefined();
+    expect(packagedCore.resolutions).toBeUndefined();
     await expect(lstat(path.join(scopeRoot, 'core', 'src'))).rejects.toThrow();
     await expect(lstat(path.join(scopeRoot, 'core', 'node_modules'))).rejects.toThrow();
     expect(await readFile(path.join(scopeRoot, 'plugin', 'process-contract.json'), 'utf8')).toBe('{}\n');
@@ -85,6 +92,175 @@ describe('bundled workspace packaging', () => {
 
     expect((await lstat(path.join(scopeRoot, 'core'))).isSymbolicLink()).toBe(true);
     expect(await readlink(path.join(scopeRoot, 'core'))).toBe(originalCoreLink);
+  });
+
+  it('publishes an allowlisted manifest and restores the source bytes after links', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'jinn-bundled-workspaces-manifest-'));
+    dirs.push(root);
+    const clientRoot = path.join(root, 'client');
+    const coreRoot = path.join(root, 'packages', 'core');
+    const scopeRoot = path.join(clientRoot, 'node_modules', '@jinn-network');
+    const packagePath = path.join(clientRoot, 'package.json');
+    const sourceBytes = Buffer.from(`{
+  "name": "@jinn-network/client",
+  "version": "0.3.0",
+  "description": "fixture",
+  "type": "module",
+  "license": "MIT",
+  "repository": {"type":"git","url":"https://example.test/repo.git"},
+  "engines": {"node":">=22"},
+  "bin": {"jinn":"./dist/bin/jinn.js"},
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist/"],
+  "publishConfig": {"access":"public"},
+  "bundledDependencies": ["@jinn-network/core"],
+  "scripts": {"postinstall":"node dist/postinstall.mjs","test":"vitest"},
+  "dependencies": {"zod":"^4.4.3"},
+  "optionalDependencies": {"native":"^1.0.0"},
+  "workspaces": ["packages/*"],
+  "devDependencies": {"vitest":"^4.1.8"},
+  "resolutions": {"zod":"4.4.3"},
+  "privateField": "must not publish"
+}
+`);
+
+    await mkdir(path.join(coreRoot, 'dist'), { recursive: true });
+    await mkdir(scopeRoot, { recursive: true });
+    await writeFile(packagePath, sourceBytes);
+    await writeFile(
+      path.join(coreRoot, 'package.json'),
+      JSON.stringify({ name: '@jinn-network/core', files: ['dist/'] }),
+    );
+    await writeFile(path.join(coreRoot, 'dist', 'index.js'), 'export const core = true;\n');
+    await symlink(path.relative(scopeRoot, coreRoot), path.join(scopeRoot, 'core'));
+
+    await materializeBundledWorkspaces({ clientRoot });
+
+    const published = JSON.parse(await readFile(packagePath, 'utf8'));
+    expect(Object.keys(published)).toEqual([
+      'name',
+      'version',
+      'description',
+      'type',
+      'license',
+      'repository',
+      'engines',
+      'bin',
+      'main',
+      'types',
+      'files',
+      'publishConfig',
+      'bundledDependencies',
+      'scripts',
+      'dependencies',
+      'optionalDependencies',
+    ]);
+    expect(published.scripts).toEqual({ postinstall: 'node dist/postinstall.mjs' });
+    expect(published).not.toHaveProperty('workspaces');
+    expect(published).not.toHaveProperty('devDependencies');
+    expect(published).not.toHaveProperty('resolutions');
+    expect(published).not.toHaveProperty('privateField');
+
+    await restoreBundledWorkspaces({ clientRoot });
+
+    expect(await readFile(packagePath)).toEqual(sourceBytes);
+    expect((await lstat(path.join(scopeRoot, 'core'))).isSymbolicLink()).toBe(true);
+  });
+
+  it('restores manifest bytes and earlier links when a later workspace fails to materialize', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'jinn-bundled-workspaces-recovery-'));
+    dirs.push(root);
+    const clientRoot = path.join(root, 'client');
+    const coreRoot = path.join(root, 'packages', 'core');
+    const scopeRoot = path.join(clientRoot, 'node_modules', '@jinn-network');
+    const packagePath = path.join(clientRoot, 'package.json');
+    const sourceBytes = Buffer.from(
+      '{"name":"@jinn-network/client","bundledDependencies":["@jinn-network/core","@jinn-network/plugin"],"scripts":{"postinstall":"node postinstall.mjs"}}\n',
+    );
+
+    await mkdir(path.join(coreRoot, 'dist'), { recursive: true });
+    await mkdir(scopeRoot, { recursive: true });
+    await writeFile(packagePath, sourceBytes);
+    await writeFile(
+      path.join(coreRoot, 'package.json'),
+      JSON.stringify({ name: '@jinn-network/core', files: ['dist/'] }),
+    );
+    await writeFile(path.join(coreRoot, 'dist', 'index.js'), 'export const core = true;\n');
+    await symlink(path.relative(scopeRoot, coreRoot), path.join(scopeRoot, 'core'));
+    await mkdir(path.join(scopeRoot, 'plugin'));
+
+    await expect(materializeBundledWorkspaces({ clientRoot })).rejects.toThrow(
+      /@jinn-network\/plugin must be a workspace link/,
+    );
+
+    expect(await readFile(packagePath)).toEqual(sourceBytes);
+    expect((await lstat(path.join(scopeRoot, 'core'))).isSymbolicLink()).toBe(true);
+    expect((await lstat(path.join(scopeRoot, 'plugin'))).isDirectory()).toBe(true);
+    await expect(lstat(path.join(clientRoot, '.jinn-pack-bundled-workspaces'))).rejects.toThrow();
+  });
+
+  it('recursively rejects local dependency references in every dependency section', () => {
+    const assertPackageManifestDependencyValues = (
+      bundledWorkspaces as typeof bundledWorkspaces & {
+        assertPackageManifestDependencyValues?: (
+          manifest: unknown,
+          manifestPath: string,
+        ) => void;
+      }
+    ).assertPackageManifestDependencyValues;
+
+    expect(assertPackageManifestDependencyValues).toBeTypeOf('function');
+    expect(() => assertPackageManifestDependencyValues!({
+      dependencies: {
+        safe: '^1.0.0',
+        nested: {
+          optional: ['npm:alias@1.0.0', { bad: 'workspace:*' }],
+        },
+      },
+    }, 'package/node_modules/nested/package.json')).toThrow(
+      /package\/node_modules\/nested\/package\.json.*workspace:\*/,
+    );
+    expect(() => assertPackageManifestDependencyValues!({
+      optionalDependencies: { bad: 'portal:../local' },
+    }, 'package/package.json')).toThrow(/portal:\.\.\/local/);
+    expect(() => assertPackageManifestDependencyValues!({
+      peerDependencies: { bad: 'file:../local.tgz' },
+    }, 'package/package.json')).toThrow(/file:\.\.\/local\.tgz/);
+    expect(() => assertPackageManifestDependencyValues!({
+      dependencies: { bad: path.resolve('/tmp/checkout/package') },
+    }, 'package/package.json')).toThrow(/absolute checkout dependency/);
+    expect(() => assertPackageManifestDependencyValues!({
+      dependencies: { safe: 'https://registry.npmjs.org/safe/-/safe-1.0.0.tgz' },
+    }, 'package/package.json')).not.toThrow();
+  });
+
+  it('validates every package manifest listed in the packed archive', () => {
+    const assertSafeTarballPackageManifests = (
+      bundledWorkspaces as typeof bundledWorkspaces & {
+        assertSafeTarballPackageManifests?: (
+          entries: string[],
+          readEntry: (entry: string) => string,
+        ) => void;
+      }
+    ).assertSafeTarballPackageManifests;
+    const manifests = new Map([
+      ['package/package.json', JSON.stringify({ dependencies: { safe: '^1.0.0' } })],
+      [
+        'package/node_modules/safe/package.json',
+        JSON.stringify({ optionalDependencies: { nested: 'workspace:*' } }),
+      ],
+    ]);
+
+    expect(assertSafeTarballPackageManifests).toBeTypeOf('function');
+    expect(() => assertSafeTarballPackageManifests!(
+      [
+        'package/dist/index.js',
+        'package/package.json',
+        'package/node_modules/safe/package.json',
+      ],
+      (entry) => manifests.get(entry) ?? '',
+    )).toThrow(/package\/node_modules\/safe\/package\.json.*workspace:\*/);
   });
 
   it('rejects archive traversal and source/test leakage', () => {

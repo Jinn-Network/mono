@@ -31,9 +31,10 @@ import {
   solverTypeFromJoinedContract,
 } from '../../solver-nets/registry.js';
 import {
-  parseMarketplaceTaskSubmitRequest,
-  type MarketplaceTaskSubmitRequest,
-} from '../../tasks/submit-request.js';
+  TaskSubmitRequestV1Schema,
+  TaskSubmitResultV1Schema,
+  type TaskSubmitRequestV1,
+} from '@jinn-network/sdk/autopilot';
 import {
   assertMarketplaceTaskFunding,
   assertMarketplaceTaskRequestFreshness,
@@ -215,6 +216,32 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   }
 
   const requestFilePath = parsed.values['request-file'] as string | undefined;
+  if (
+    requestFilePath
+    && (
+      parsed.values.json !== true
+      || parsed.values.human === true
+    )
+  ) {
+    const field = parsed.values.human === true ? '--human' : '--json';
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: parsed.values.human === true
+          ? '--human is not supported for request-file submission'
+          : '--json is required for request-file submission',
+        exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+        details: {
+          field,
+          expected: parsed.values.human === true
+            ? 'omit --human'
+            : '--json',
+        },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
   const legacyLooseFlags = [
     'id', 'description', 'solver-net', 'solver-type', 'spec-file',
     'manifest-cid', 'max-claims', 'required-verdicts',
@@ -231,10 +258,10 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     );
     return;
   }
-  let machineRequest: MarketplaceTaskSubmitRequest | undefined;
+  let machineRequest: TaskSubmitRequestV1 | undefined;
   if (requestFilePath) {
     try {
-      machineRequest = parseMarketplaceTaskSubmitRequest(
+      machineRequest = TaskSubmitRequestV1Schema.parse(
         JSON.parse(readFileSync(resolve(requestFilePath), 'utf8')),
       );
     } catch (err) {
@@ -711,23 +738,27 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
           : {}),
       },
     );
+    const rawResult = {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      verb: 'tasks submit',
+      id,
+      creatorMultisig: getAddress(safe),
+      taskId: postResult.taskId,
+      taskCid: postResult.taskCid,
+      creationTx: postResult.txHash,
+      creationBlock: postResult.blockNumber,
+      solverNetManifestCid,
+      status: postResult.idempotent ? 'already_submitted' : 'submitted',
+      attemptId: postResult.attemptId,
+      attemptNumber: postResult.attemptNumber,
+      idempotent: postResult.idempotent,
+    };
+    const result = machineRequest
+      ? TaskSubmitResultV1Schema.parse(rawResult)
+      : rawResult;
     emitResult(
-      {
-        schemaVersion: 1,
-        generatedAt: new Date().toISOString(),
-        verb: 'tasks submit',
-        id,
-        creatorMultisig: getAddress(safe),
-        taskId: postResult.taskId,
-        taskCid: postResult.taskCid,
-        creationTx: postResult.txHash,
-        creationBlock: postResult.blockNumber,
-        solverNetManifestCid,
-        status: postResult.idempotent ? 'already_submitted' : 'submitted',
-        attemptId: postResult.attemptId,
-        attemptNumber: postResult.attemptNumber,
-        idempotent: postResult.idempotent,
-      },
+      result,
       (v) => {
         const value = v as { id: string; taskId: string; creatorMultisig: string };
         return postResult.idempotent

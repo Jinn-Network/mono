@@ -22,6 +22,21 @@ const PatchSchema = z.string().min(1).refine(
   'Patch must be no larger than 2 MiB when UTF-8 encoded',
 );
 
+export const GitHubRepositorySlugSchema = z.string()
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/,
+    'Repository must be a safe GitHub owner/name slug',
+  )
+  .refine(
+    (repository) => !repository.toLowerCase().endsWith('.git'),
+    'Repository must not use a .git suffix',
+  );
+
+export const AutopilotSafeTokenSchema = z.string().regex(
+  /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/,
+  'Value must be a lowercase safe token',
+);
+
 function boundedText(maxBytes: number, label: string) {
   return z.string().min(1)
     .refine(
@@ -56,7 +71,9 @@ export type AutopilotWorkflow = z.infer<typeof AutopilotWorkflowSchema>;
 
 const autopilotSessionCommonFields = {
   schemaVersion: z.literal('jinn-autopilot-session.v1'),
-  repository: z.literal('Jinn-Network/mono'),
+  repository: GitHubRepositorySlugSchema,
+  language: AutopilotSafeTokenSchema,
+  verificationProfile: AutopilotSafeTokenSchema,
   issueNumber: PositiveIntegerSchema,
   childIssueNumber: PositiveIntegerSchema.optional(),
   parentPrNumber: PositiveIntegerSchema.optional(),
@@ -146,6 +163,10 @@ export const AutopilotReviewCorrelationSchema = z.object({
   reviewRefOid: GitOidSchema,
 }).strict();
 
+export type AutopilotReviewCorrelation = z.infer<
+  typeof AutopilotReviewCorrelationSchema
+>;
+
 const correlationKeys = [
   'taskId',
   'attemptIndex',
@@ -184,6 +205,10 @@ export const AutopilotMutationEvidenceSchema = z.object({
   (value) => aggregateUtf8Within(value, MAX_MUTATION_EVIDENCE_BYTES),
   `Mutation evidence must be no larger than ${MAX_MUTATION_EVIDENCE_BYTES} UTF-8 bytes`,
 );
+
+export type AutopilotMutationEvidence = z.infer<
+  typeof AutopilotMutationEvidenceSchema
+>;
 
 const AutopilotMutationCompleteResultSchema = z.object({
   schemaVersion: z.literal('jinn-autopilot-mutation-result.v1'),
@@ -308,6 +333,10 @@ export const AcceptedSolutionAdoptionReceiptSchema = z.object({
   reviewRefOid: GitOidSchema,
 }).strict();
 
+export type AcceptedSolutionAdoptionReceipt = z.infer<
+  typeof AcceptedSolutionAdoptionReceiptSchema
+>;
+
 const RejectedSolutionAdoptionReceiptSchema = z.object({
   ...adoptionReceiptCommonFields,
   disposition: z.literal('rejected'),
@@ -384,7 +413,7 @@ export const AutopilotEvaluationContextSchema = z.object({
     evaluatorSafe: SafeAddressSchema,
   }).strict(),
   reviewTarget: z.object({
-    repository: z.literal('Jinn-Network/mono'),
+    repository: GitHubRepositorySlugSchema,
     issueNumber: PositiveIntegerSchema,
     childIssueNumber: PositiveIntegerSchema.optional(),
     prNumber: PositiveIntegerSchema,

@@ -55,6 +55,26 @@ function input(root: string): ClaimedSessionInput {
   };
 }
 
+function submitResult(overrides: Record<string, unknown> = {}) {
+  return {
+    schemaVersion: 1,
+    generatedAt: '2026-07-23T12:00:00.000Z',
+    verb: 'tasks submit',
+    id: 'autopilot:11111111-1111-4111-8111-111111111111',
+    creatorMultisig: `0x${'1'.repeat(40)}`,
+    taskId: '501',
+    taskCid: 'bafy-task',
+    creationTx: `0x${'a'.repeat(64)}`,
+    creationBlock: 123,
+    solverNetManifestCid: 'bafy-manifest',
+    status: 'submitted',
+    attemptId: 'attempt-1',
+    attemptNumber: 0,
+    idempotent: false,
+    ...overrides,
+  };
+}
+
 describe('marketplace SessionExecutionBackend', () => {
   it('writes one immutable request and invokes only the one-shot machine submit command', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-marketplace-backend-'));
@@ -77,14 +97,7 @@ describe('marketplace SessionExecutionBackend', () => {
         env: options?.env,
         replaceEnv: options?.replaceEnv,
       });
-      return JSON.stringify({
-        taskId: '501',
-        taskCid: 'bafy-task',
-        creationTx: `0x${'a'.repeat(64)}`,
-        creationBlock: 123,
-        solverNetManifestCid: 'bafy-manifest',
-        idempotent: false,
-      });
+      return JSON.stringify(submitResult());
     });
     const backend = makeMarketplaceSessionBackend({
       runner,
@@ -170,9 +183,13 @@ describe('marketplace SessionExecutionBackend', () => {
         repo: 'Jinn-Network/mono',
         base_commit: '1'.repeat(40),
         language: 'typescript',
+        verificationProfile: 'jinn-mono.v1',
         session: {
           schemaVersion: 'jinn-autopilot-session.v1',
           workflow: 'implement',
+          repository: 'Jinn-Network/mono',
+          language: 'typescript',
+          verificationProfile: 'jinn-mono.v1',
           v2AttemptId: '11111111-1111-4111-8111-111111111111',
           deadline: '2026-07-23T13:00:00.000Z',
           taskSnapshot: {
@@ -230,6 +247,20 @@ describe('marketplace SessionExecutionBackend', () => {
     );
   });
 
+  it('rejects a submit response outside the published SDK result contract', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-marketplace-backend-'));
+    roots.push(root);
+    writeFileSync(join(root, 'manifest.json'), '{}');
+    const backend = makeMarketplaceSessionBackend({
+      runner: async () => JSON.stringify(submitResult({
+        unexpected: 'not-in-the-machine-contract',
+      })),
+      now: () => new Date('2026-07-23T12:00:00.000Z'),
+    });
+
+    await expect(backend.start(input(root))).rejects.toThrow();
+  });
+
   it('includes an explicit manifest override without requiring a local joined net', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-marketplace-backend-'));
     roots.push(root);
@@ -237,13 +268,11 @@ describe('marketplace SessionExecutionBackend', () => {
     const runner = vi.fn(async (
       _command: string,
       _args: string[],
-    ) => JSON.stringify({
-        taskId: '501',
-        taskCid: 'bafy-task',
+    ) => JSON.stringify(submitResult({
         creationTx: `0x${'c'.repeat(64)}`,
         creationBlock: 321,
         solverNetManifestCid: 'bafy-explicit-manifest',
-      }));
+      })));
     const backend = makeMarketplaceSessionBackend({
       runner,
       solverNetManifestCid: 'bafy-explicit-manifest',
@@ -321,14 +350,13 @@ describe('marketplace SessionExecutionBackend', () => {
     const backend = makeMarketplaceSessionBackend({
       runner: async (_command, args) => {
         calls.push(args);
-        return JSON.stringify({
-          taskId: '501',
-          taskCid: 'bafy-task',
+        return JSON.stringify(submitResult({
           creationTx: `0x${'b'.repeat(64)}`,
           creationBlock: 456,
           solverNetManifestCid: 'bafy-manifest',
+          status: calls.length > 1 ? 'already_submitted' : 'submitted',
           idempotent: calls.length > 1,
-        });
+        }));
       },
       now: () => new Date('2026-07-23T12:00:00.000Z'),
     });

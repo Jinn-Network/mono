@@ -12,7 +12,7 @@ import {
 } from '../src/autopilot-session.js';
 
 const fixtureDirectory = fileURLToPath(
-  new URL('./fixtures/autopilot-session/', import.meta.url),
+  new URL('../fixtures/autopilot/', import.meta.url),
 );
 
 function fixture(name: string): unknown {
@@ -335,6 +335,26 @@ describe('AutopilotEvaluationContextSchema', () => {
   it('parses a strict full-head evaluator context bound to an accepted Solution receipt', () => {
     const value = evaluationContext();
     expect(AutopilotEvaluationContextSchema.parse(value)).toEqual(value);
+  });
+
+  it('accepts a generic review repository matching the generalized session', () => {
+    const value = evaluationContext();
+    const session = value.session as Record<string, unknown>;
+    const reviewTarget = value.reviewTarget as Record<string, unknown>;
+    const generic = {
+      ...value,
+      session: {
+        ...session,
+        repository: 'example-org/example-repo',
+        language: 'rust',
+        verificationProfile: 'cargo-nextest.v1',
+      },
+      reviewTarget: {
+        ...reviewTarget,
+        repository: 'example-org/example-repo',
+      },
+    };
+    expect(AutopilotEvaluationContextSchema.parse(generic)).toEqual(generic);
   });
 
   it('binds full-head review to the target-base OID rather than a child mutation parent', () => {

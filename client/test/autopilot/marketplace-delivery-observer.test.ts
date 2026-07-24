@@ -52,6 +52,8 @@ const session: AutopilotSessionCapsule = {
   schemaVersion: 'jinn-autopilot-session.v1',
   workflow: 'implement',
   repository: 'Jinn-Network/mono',
+  language: 'typescript',
+  verificationProfile: 'jinn-mono.v1',
   issueNumber: 1901,
   prNumber: 1902,
   targetBase: 'next',

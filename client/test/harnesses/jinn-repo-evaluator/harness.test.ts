@@ -168,6 +168,8 @@ function autopilotHarnessFixtures() {
     schemaVersion: 'jinn-autopilot-session.v1',
     workflow: 'implement',
     repository: 'Jinn-Network/mono',
+    language: 'typescript',
+    verificationProfile: 'jinn-mono.v1',
     issueNumber: 2001,
     prNumber: 2101,
     targetBase: 'next',
@@ -198,6 +200,7 @@ function autopilotHarnessFixtures() {
     repo: 'Jinn-Network/mono',
     base_commit: '3'.repeat(40),
     language: 'typescript',
+    verificationProfile: 'jinn-mono.v1',
     problem_statement: 'Implement the exact session.',
     session,
   };

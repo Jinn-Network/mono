@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type {
   AutopilotAdoptionReceipt,
   AutopilotCorrelation,
-} from '../../../sdk/src/autopilot-session.js';
+} from '@jinn-network/sdk/autopilot';
 import {
   AdoptionReceiptPublicationError,
   formatAdoptionReceiptComment,

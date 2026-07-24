@@ -11,7 +11,7 @@ import {
 } from '../src/autopilot-session.js';
 
 const fixtureDirectory = fileURLToPath(
-  new URL('./fixtures/autopilot-session/', import.meta.url),
+  new URL('../fixtures/autopilot/', import.meta.url),
 );
 
 function receiptFixture() {

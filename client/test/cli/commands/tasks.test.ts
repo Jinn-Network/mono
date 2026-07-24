@@ -19,6 +19,10 @@ import {
 import { createMemoryTxSubmissionLedger } from '@/tx-retry.js';
 import { baseSepolia } from 'viem/chains';
 import Database from 'better-sqlite3';
+import {
+  TaskSubmitRequestV1Schema,
+  TaskSubmitResultV1Schema,
+} from '@jinn-network/sdk/autopilot';
 
 const createCliExecutionContext = vi.hoisted(() => vi.fn());
 const createCliReadOnlySignerContext = vi.hoisted(() => vi.fn(async () => ({
@@ -143,11 +147,14 @@ function request(overrides: Record<string, unknown> = {}) {
       repo: 'Jinn-Network/mono',
       base_commit: 'a'.repeat(40),
       language: 'typescript',
+      verificationProfile: 'jinn-mono.v1',
       problem_statement: 'Implement issue 42',
       session: {
         schemaVersion: 'jinn-autopilot-session.v1',
         workflow: 'implement',
         repository: 'Jinn-Network/mono',
+        language: 'typescript',
+        verificationProfile: 'jinn-mono.v1',
         issueNumber: 42,
         prNumber: 314,
         targetBase: 'next',
@@ -177,6 +184,10 @@ function request(overrides: Record<string, unknown> = {}) {
 }
 
 describe('MarketplaceTaskSubmitRequestSchema', () => {
+  it('is a compatibility alias of the SDK request validator', () => {
+    expect(MarketplaceTaskSubmitRequestSchema).toBe(TaskSubmitRequestV1Schema);
+  });
+
   it('accepts the exact machine submission contract', () => {
     expect(MarketplaceTaskSubmitRequestSchema.parse(request()).id)
       .toBe(`autopilot:${V2_ATTEMPT_ID}`);
@@ -249,6 +260,41 @@ describe('tasks submit machine contract', () => {
         input.explicitManifestCid ?? 'bafy-auto-selected',
     );
     vi.useRealTimers();
+  });
+
+  it.each([
+    {
+      name: 'requires --json',
+      extraFlags: [] as string[],
+      message: '--json is required',
+    },
+    {
+      name: 'rejects --human',
+      extraFlags: ['--json', '--human'],
+      message: '--human is not supported',
+    },
+  ])('$name for request-file submission', async ({ extraFlags, message }) => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-machine-mode-'));
+    const file = join(dir, 'request.json');
+    writeFileSync(file, JSON.stringify(request()));
+    const made = makeCommandCtx({
+      argv: [
+        'submit',
+        '--request-file',
+        file,
+        '--dry-run',
+        ...extraFlags,
+      ],
+    });
+
+    await tasksCommand.run(made.ctx);
+
+    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
+      code: 'invalid_invocation',
+      message: expect.stringContaining(message),
+    });
+    expect(made.exits).toEqual([11]);
+    expect(createCliReadOnlySignerContext).not.toHaveBeenCalled();
   });
 
   it('rejects request-file combined with legacy loose flags', async () => {
@@ -427,6 +473,7 @@ describe('tasks submit machine contract', () => {
   });
 
   it('emits Task CID, chain origin, manifest, and idempotency in JSON', async () => {
+    const parseResult = vi.spyOn(TaskSubmitResultV1Schema, 'parse');
     const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-'));
     const file = join(dir, 'request.json');
     const config = join(dir, 'config.json');
@@ -475,6 +522,10 @@ describe('tasks submit machine contract', () => {
       solverNetManifestCid: first.solverNetManifestCid,
       idempotent: true,
     });
+    expect(parseResult).toHaveBeenCalledTimes(2);
+    expect(TaskSubmitResultV1Schema.parse(first)).toEqual(first);
+    expect(TaskSubmitResultV1Schema.parse(retry)).toEqual(retry);
+    parseResult.mockRestore();
     store.close();
     await adapter.stop();
   });

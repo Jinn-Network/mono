@@ -9,7 +9,7 @@ import {
   type AutopilotMutationResult,
   type AutopilotReviewResult,
   type AutopilotSessionCapsule,
-} from '@jinn-network/sdk/solvernets/jinn-repo';
+} from '@jinn-network/sdk/autopilot';
 
 import { cidToDigestHex } from '../adapters/mech/ipfs.js';
 import { findLatestDeliveryForRequest } from '../adapters/mech/contracts.js';

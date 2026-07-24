@@ -16,6 +16,8 @@ import {
 
 export const REPO_FULL_NAME = 'Jinn-Network/mono';
 export const PACKAGE_NAME = '@jinn-network/client';
+export const SDK_PACKAGE_NAME = '@jinn-network/sdk';
+export const REQUIRED_SDK_VERSION = '0.2.0';
 export const REPORT_SCHEMA_VERSION = 1;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -177,6 +179,8 @@ export function makeInitialReport({
     acceptanceEvidenceDir: null,
     githubReleaseUrl: null,
     npmVerification: null,
+    sdkVerification: null,
+    consumerGate: null,
     dockerVerification: null,
     steps: [],
   };
@@ -493,6 +497,28 @@ export function releaseGateSteps(skipAcceptance = false) {
   return steps.map(([id, label, command, args, cwdKey]) => ({ id, label, command, args, cwdKey }));
 }
 
+export function verifyStableSdkRelease(context) {
+  const spec = `${SDK_PACKAGE_NAME}@${REQUIRED_SDK_VERSION}`;
+  const verification = runStep(context, {
+    id: 'preflight-sdk-release',
+    label: `verify npm ${spec}`,
+    command: 'npm',
+    args: ['view', spec, 'version'],
+    cwd: context.clientRoot,
+  });
+  const version = verification.result
+    ? expectStdout(verification.result, `npm view ${spec}`)
+    : REQUIRED_SDK_VERSION;
+  if (version !== REQUIRED_SDK_VERSION) {
+    throw new Error(`${spec} is required before releasing the client; got ${version}`);
+  }
+  context.report.sdkVerification = {
+    package: SDK_PACKAGE_NAME,
+    version,
+  };
+  saveReport(context.report);
+}
+
 export function runGateSequence(context) {
   for (const step of releaseGateSteps(context.skipAcceptance)) {
     const result = runStep(context, {
@@ -505,6 +531,14 @@ export function runGateSequence(context) {
         context.report.acceptanceEvidenceDir = match[0];
         saveReport(context.report);
       }
+    }
+    if (step.id === 'gate-pack-smoke') {
+      context.report.consumerGate = {
+        mode: 'local',
+        sdkVersion: REQUIRED_SDK_VERSION,
+        stepId: step.id,
+      };
+      saveReport(context.report);
     }
   }
 }
@@ -653,6 +687,27 @@ export function runPublishVerifications(context) {
   saveReport(context.report);
 
   runStep(context, {
+    id: 'verify-external-consumer',
+    label: `verify external consumer with SDK ${REQUIRED_SDK_VERSION} and client ${version}`,
+    command: 'node',
+    args: [
+      'scripts/external-consumer-acceptance.mjs',
+      '--registry',
+      '--sdk-spec',
+      `${SDK_PACKAGE_NAME}@${REQUIRED_SDK_VERSION}`,
+      '--client-spec',
+      `${PACKAGE_NAME}@${version}`,
+    ],
+  });
+  context.report.consumerGate = {
+    mode: 'registry',
+    sdkVersion: REQUIRED_SDK_VERSION,
+    clientVersion: version,
+    stepId: 'verify-external-consumer',
+  };
+  saveReport(context.report);
+
+  runStep(context, {
     id: 'verify-npx-version',
     label: `verify npx ${PACKAGE_NAME}@${version}`,
     command: 'npx',
@@ -691,6 +746,7 @@ export async function runRelease(options = {}) {
   }
 
   runPreflights(context);
+  verifyStableSdkRelease(context);
   runGateSequence(context);
 
   if (context.report.mode === 'publish') {

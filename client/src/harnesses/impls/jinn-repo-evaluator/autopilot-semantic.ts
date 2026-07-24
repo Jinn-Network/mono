@@ -5,6 +5,7 @@ import {
   type AutopilotReviewResult,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 import { VerdictCode, type VerdictCode as RouterVerdictCode } from '../../../adapters/mech/verdict-code.js';
+import { assertOfficialAutopilotProfile } from '../../../autopilot/official-profile-policy.js';
 
 export type AutopilotMechanicalResult =
   | {
@@ -244,6 +245,21 @@ export async function runAutopilotSemanticReview(args: {
   model?: string;
   abort: AbortSignal;
 }): Promise<AutopilotSemanticReviewResult> {
+  if (
+    args.context.reviewTarget.repository
+    !== args.context.session.repository
+  ) {
+    throw new Error(
+      `Autopilot review target repository `
+      + `'${args.context.reviewTarget.repository}' does not match session `
+      + `repository '${args.context.session.repository}'`,
+    );
+  }
+  assertOfficialAutopilotProfile({
+    repository: args.context.reviewTarget.repository,
+    verificationProfile: args.context.session.verificationProfile,
+  });
+
   let mechanical: AutopilotMechanicalResult;
   try {
     mechanical = await args.mechanicalRunner.run(args.context, args.abort);

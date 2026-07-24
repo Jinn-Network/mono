@@ -27,7 +27,7 @@ import {
 import type { PersistedTaskRun } from '../../src/types/task-run.js';
 
 const FIXTURES = new URL(
-  '../../../packages/sdk/test/fixtures/autopilot-session/',
+  '../../../packages/sdk/fixtures/autopilot/',
   import.meta.url,
 );
 
@@ -268,6 +268,7 @@ function taskSpec(
     repo: 'Jinn-Network/mono',
     base_commit: value.expectedHead,
     language: 'typescript',
+    verificationProfile: value.verificationProfile,
     problem_statement: value.taskSnapshot.body,
     session: value,
   };

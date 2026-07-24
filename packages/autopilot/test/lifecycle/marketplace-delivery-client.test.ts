@@ -25,29 +25,49 @@ import {
 
 const directories: string[] = [];
 const CREATION_TX = `0x${'a'.repeat(64)}`;
-const DELIVERY_TX = `0x${'b'.repeat(64)}`;
+const SOLUTION_REQUEST_ID = `0x${'1'.repeat(64)}`;
+const SOLUTION_ENVELOPE_CID = 'bafy-envelope-solution';
+const SOLUTION_DELIVERY_TX = `0x${'d'.repeat(64)}`;
+const VERDICT_REQUEST_ID = `0x${'2'.repeat(64)}`;
+const VERDICT_ENVELOPE_CID = 'bafy-envelope-verdict';
+const VERDICT_DELIVERY_TX = `0x${'cd'.repeat(32)}`;
 
 function sdkFixture(name: string): unknown {
   return JSON.parse(readFileSync(
     join(
       import.meta.dirname,
-      '../../../sdk/test/fixtures/autopilot-session',
+      '../../../sdk/fixtures/autopilot',
       `${name}.json`,
     ),
     'utf8',
   ));
 }
 
+function observationResult(
+  observation: unknown,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    schemaVersion: 1,
+    generatedAt: '2026-07-24T12:05:00.000Z',
+    verb: 'tasks observe-autopilot-delivery',
+    observation,
+    ...overrides,
+  };
+}
+
 function attempt() {
   const root = mkdtempSync(join(tmpdir(), 'jinn-marketplace-observer-'));
   directories.push(root);
-  const session = sdkFixture('session-implement');
+  const request = sdkFixture('submit-request') as {
+    spec: { session: unknown };
+  };
+  const session = request.spec.session;
   const requestFile = join(root, 'marketplace-request.json');
   const manifestPath = join(root, 'manifest.json');
-  writeFileSync(requestFile, `${JSON.stringify({
-    schemaVersion: 'jinn-task-submit-request.v1',
-    spec: { session },
-  }, null, 2)}\n`, { mode: 0o600 });
+  writeFileSync(requestFile, `${JSON.stringify(request, null, 2)}\n`, {
+    mode: 0o600,
+  });
   const manifest = decodeAttemptManifest({
     version: 2,
     attemptId: '123e4567-e89b-42d3-a456-426614174001',
@@ -110,32 +130,9 @@ afterEach(() => {
 describe('Autopilot marketplace delivery client', () => {
   it('invokes exact observation and durably records verified Solution provenance', async () => {
     const fixture = attempt();
-    const runner = vi.fn(async () => JSON.stringify({
-      schemaVersion: 1,
-      verb: 'tasks observe-autopilot-delivery',
-      observation: {
-        status: 'verified',
-        role: 'solution',
-        task: {
-          taskId: '501',
-          taskCid: 'bafy-task',
-          createdAtBlock: 100,
-          createdAtTx: CREATION_TX,
-        },
-        attempt: {
-          attemptIndex: 0,
-          requestId: '0xrequest',
-          operator: `0x${'1'.repeat(40)}`,
-        },
-        delivery: {
-          envelopeCid: 'bafy-envelope',
-          publisherAgentId: '7',
-          transactionHash: DELIVERY_TX,
-          blockNumber: 120,
-        },
-        result: sdkFixture('mutation-complete'),
-      },
-    }));
+    const runner = vi.fn(async () => JSON.stringify(observationResult(
+      sdkFixture('verified-solution'),
+    )));
 
     const result = await observeMarketplaceSolutionDelivery(
       fixture.manifest.paths.manifest,
@@ -151,12 +148,12 @@ describe('Autopilot marketplace delivery client', () => {
       reference: {
         taskId: '501',
         attemptIndex: 0,
-        requestId: '0xrequest',
-        deliveryEnvelopeCid: 'bafy-envelope',
+        requestId: SOLUTION_REQUEST_ID,
+        deliveryEnvelopeCid: SOLUTION_ENVELOPE_CID,
       },
       delivery: {
         operator: {
-          id: '7',
+          id: '42',
           address: `0x${'1'.repeat(40)}`,
         },
       },
@@ -175,10 +172,10 @@ describe('Autopilot marketplace delivery client', () => {
       .toMatchObject({
         backend: 'marketplace',
         attemptIndex: 0,
-        requestId: '0xrequest',
-        deliveryTx: DELIVERY_TX,
-        deliveryBlockNumber: 120,
-        deliveryEnvelopeCid: 'bafy-envelope',
+        requestId: SOLUTION_REQUEST_ID,
+        deliveryTx: SOLUTION_DELIVERY_TX,
+        deliveryBlockNumber: 102,
+        deliveryEnvelopeCid: SOLUTION_ENVELOPE_CID,
       });
   });
 
@@ -189,12 +186,12 @@ describe('Autopilot marketplace delivery client', () => {
       taskId: '501',
       taskCid: 'bafy-task',
       attemptIndex: 0,
-      requestId: '0xrequest',
-      deliveryEnvelopeCid: 'bafy-envelope',
-      deliveryTransactionHash: DELIVERY_TX,
-      deliveryBlockNumber: 120,
+      requestId: SOLUTION_REQUEST_ID,
+      deliveryEnvelopeCid: SOLUTION_ENVELOPE_CID,
+      deliveryTransactionHash: SOLUTION_DELIVERY_TX,
+      deliveryBlockNumber: 102,
       solutionOperatorAddress: `0x${'1'.repeat(40)}`,
-      solutionPublisherAgentId: '7',
+      solutionPublisherAgentId: '42',
       taskProvenance: {
         creationTransactionHash: CREATION_TX,
         creationBlockNumber: 100,
@@ -250,9 +247,16 @@ describe('Autopilot marketplace delivery client', () => {
       reviewGeneration: review.reviewGeneration!,
       reviewRefOid: review.reviewRefOid!,
     });
+    const acceptedSolutionReceipt = sdkFixture(
+      'receipt-solution-accepted',
+    ) as Record<string, unknown>;
     recordMarketplaceMutationAdoptionReceipt({
       manifestPath: fixture.manifest.paths.manifest,
-      receipt: sdkFixture('receipt-solution-accepted') as never,
+      receipt: {
+        ...acceptedSolutionReceipt,
+        requestId: SOLUTION_REQUEST_ID,
+        deliveryEnvelopeCid: SOLUTION_ENVELOPE_CID,
+      } as never,
       commentId: 91,
       taskProvenance: {
         creationTransactionHash: CREATION_TX,
@@ -275,32 +279,9 @@ describe('Autopilot marketplace delivery client', () => {
       review.expectedHead,
       advancedReviewRef,
     );
-    const runner = vi.fn(async () => JSON.stringify({
-      schemaVersion: 1,
-      verb: 'tasks observe-autopilot-delivery',
-      observation: {
-        status: 'verified',
-        role: 'verdict',
-        task: {
-          taskId: '501',
-          taskCid: 'bafy-task',
-          createdAtBlock: 100,
-          createdAtTx: CREATION_TX,
-        },
-        attempt: {
-          attemptIndex: 0,
-          requestId: '0xreview',
-          operator: `0x${'2'.repeat(40)}`,
-        },
-        delivery: {
-          envelopeCid: 'bafy-review',
-          publisherAgentId: '8',
-          transactionHash: `0x${'c'.repeat(64)}`,
-          blockNumber: 130,
-        },
-        result: sdkFixture('review-approve'),
-      },
-    }));
+    const runner = vi.fn(async () => JSON.stringify(observationResult(
+      sdkFixture('verified-verdict'),
+    )));
 
     const result = await observeMarketplaceVerdictDelivery(
       fixture.manifest.paths.manifest,
@@ -319,8 +300,8 @@ describe('Autopilot marketplace delivery client', () => {
         },
         solutionOperator: `0x${'1'.repeat(40)}`,
         evaluator: {
-          publisherAgentId: '8',
-          address: `0x${'2'.repeat(40)}`,
+          publisherAgentId: '43',
+          address: `0x${'3'.repeat(40)}`,
         },
       },
     });
@@ -342,11 +323,11 @@ describe('Autopilot marketplace delivery client', () => {
     expect(readAttemptManifest(reviewManifestPath).reviewRefOid)
       .toBe(advancedReviewRef);
     expect(readAttemptManifest(reviewManifestPath).execution).toMatchObject({
-      attemptIndex: 0,
-      requestId: '0xreview',
-      deliveryEnvelopeCid: 'bafy-review',
-      deliveryTx: `0x${'c'.repeat(64)}`,
-      deliveryBlockNumber: 130,
+      attemptIndex: 1,
+      requestId: VERDICT_REQUEST_ID,
+      deliveryEnvelopeCid: VERDICT_ENVELOPE_CID,
+      deliveryTx: VERDICT_DELIVERY_TX,
+      deliveryBlockNumber: 112,
     });
   });
 
@@ -355,50 +336,46 @@ describe('Autopilot marketplace delivery client', () => {
     await expect(observeMarketplaceSolutionDelivery(
       fixture.manifest.paths.manifest,
       {
-        runner: async () => JSON.stringify({
-          observation: {
-            status: 'pending',
-            reason: 'attempt-not-indexed',
-          },
-        }),
+        runner: async () => JSON.stringify(observationResult(
+          sdkFixture('delivery-pending'),
+        )),
       },
     )).resolves.toEqual({
       status: 'pending',
-      reason: 'attempt-not-indexed',
+      reason: 'envelope-not-indexed',
+      detail: 'The exact envelope row has not reached the indexer.',
     });
     expect(readAttemptManifest(fixture.manifest.paths.manifest).execution)
       .not.toHaveProperty('attemptIndex');
   });
 
-  it('fails closed when verified Task creation provenance contradicts the manifest', async () => {
+  it('rejects an observation response outside the published SDK wrapper contract', async () => {
     const fixture = attempt();
     await expect(observeMarketplaceSolutionDelivery(
       fixture.manifest.paths.manifest,
       {
-        runner: async () => JSON.stringify({
-          observation: {
-            status: 'verified',
-            role: 'solution',
-            task: {
-              taskId: '501',
-              taskCid: 'bafy-task',
-              createdAtBlock: 100,
-              createdAtTx: `0x${'f'.repeat(64)}`,
-            },
-            attempt: {
-              attemptIndex: 0,
-              requestId: '0xrequest',
-              operator: `0x${'1'.repeat(40)}`,
-            },
-            delivery: {
-              envelopeCid: 'bafy-envelope',
-              publisherAgentId: '7',
-              transactionHash: DELIVERY_TX,
-              blockNumber: 120,
-            },
-            result: sdkFixture('mutation-complete'),
+        runner: async () => JSON.stringify(observationResult(
+          sdkFixture('delivery-pending'),
+          { unexpected: 'not-in-the-machine-contract' },
+        )),
+      },
+    )).rejects.toThrow();
+  });
+
+  it('fails closed when verified Task creation provenance contradicts the manifest', async () => {
+    const fixture = attempt();
+    const observation =
+      sdkFixture('verified-solution') as Record<string, any>;
+    await expect(observeMarketplaceSolutionDelivery(
+      fixture.manifest.paths.manifest,
+      {
+        runner: async () => JSON.stringify(observationResult({
+          ...observation,
+          task: {
+            ...observation.task,
+            createdAtTx: `0x${'f'.repeat(64)}`,
           },
-        }),
+        })),
       },
     )).rejects.toThrow('contradicts');
   });

@@ -7,7 +7,7 @@ import {
   type AutopilotAdoptionRejectionReason,
   type AutopilotCorrelation,
   type AutopilotReviewResult,
-} from '../../../sdk/src/autopilot-session.js';
+} from '@jinn-network/sdk/autopilot';
 import type { AttemptManifest } from './attempt-workspace.js';
 import type {
   AdoptionReceiptExactFacts,

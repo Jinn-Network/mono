@@ -9,6 +9,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import {
+  TaskSubmitRequestV1Schema,
+  TaskSubmitResultV1Schema,
+} from '@jinn-network/sdk/autopilot';
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import type {
@@ -91,7 +95,7 @@ function machineRequest(
     );
   }
   const agentDurationMs = agentDeadline - createdAt;
-  return {
+  return TaskSubmitRequestV1Schema.parse({
     schemaVersion: 'jinn-task-submit-request.v1',
     id: `autopilot:${input.v2AttemptId}`,
     description:
@@ -125,11 +129,14 @@ function machineRequest(
       repo: 'Jinn-Network/mono',
       base_commit: input.expectedHead,
       language: 'typescript',
+      verificationProfile: 'jinn-mono.v1',
       problem_statement: `${input.issue.title}\n\n${input.issue.body}`,
       session: {
         schemaVersion: 'jinn-autopilot-session.v1',
         workflow: input.workflow,
         repository: 'Jinn-Network/mono',
+        language: 'typescript',
+        verificationProfile: 'jinn-mono.v1',
         issueNumber: input.issue.number,
         ...(input.childIssueNumber === undefined
           ? {}
@@ -156,7 +163,7 @@ function machineRequest(
         receiptAuthors: [...input.receiptAuthors],
       },
     },
-  } as const;
+  });
 }
 
 function submissionDeadline(deadline: string): string {
@@ -291,27 +298,14 @@ function submitOutput(raw: string): MarketplaceSubmitOutput {
   } catch {
     throw new Error('Marketplace task submission returned malformed JSON');
   }
-  const output = parsed as Record<string, unknown>;
-  if (
-    typeof parsed !== 'object'
-    || parsed === null
-    || Array.isArray(parsed)
-    || typeof output.taskId !== 'string'
-    || output.taskId === ''
-    || typeof output.taskCid !== 'string'
-    || output.taskCid === ''
-    || typeof output.creationTx !== 'string'
-    || !/^0x[0-9a-fA-F]{64}$/.test(output.creationTx)
-    || typeof output.creationBlock !== 'number'
-    || !Number.isSafeInteger(output.creationBlock)
-    || output.creationBlock < 0
-    || typeof output.solverNetManifestCid !== 'string'
-    || output.solverNetManifestCid === ''
-  ) {
+  const decoded = TaskSubmitResultV1Schema.safeParse(parsed);
+  if (!decoded.success) {
     throw new Error(
       'Marketplace task submission omitted Task identity or creation provenance',
+      { cause: decoded.error },
     );
   }
+  const output = decoded.data;
   return {
     taskId: output.taskId,
     taskCid: output.taskCid,
@@ -495,16 +489,14 @@ export function makeMarketplaceSessionBackend(
           'Preparing marketplace attempt is missing its immutable request',
         );
       }
-      const sessionDeadline = (
-        request as {
-          spec?: { session?: { deadline?: unknown } };
-        }
-      ).spec?.session?.deadline;
-      if (typeof sessionDeadline !== 'string') {
+      const decodedRequest = TaskSubmitRequestV1Schema.safeParse(request);
+      if (!decodedRequest.success) {
         throw new Error(
           'Preparing marketplace request omitted its session deadline',
+          { cause: decodedRequest.error },
         );
       }
+      const sessionDeadline = decodedRequest.data.spec.session.deadline;
       const submitted = submitOutput(await runRequest(requestFile, false));
       return {
         backend: 'marketplace',

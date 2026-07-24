@@ -213,6 +213,8 @@ function autopilotEvaluationFixtures() {
     schemaVersion: 'jinn-autopilot-session.v1' as const,
     workflow: 'implement' as const,
     repository: 'Jinn-Network/mono' as const,
+    language: 'typescript' as const,
+    verificationProfile: 'jinn-mono.v1' as const,
     issueNumber: 2001,
     prNumber: 2101,
     targetBase: 'next',
@@ -243,6 +245,7 @@ function autopilotEvaluationFixtures() {
     repo: 'Jinn-Network/mono' as const,
     base_commit: '3'.repeat(40),
     language: 'typescript' as const,
+    verificationProfile: 'jinn-mono.v1' as const,
     problem_statement: 'Implement the exact session.',
     session,
   };

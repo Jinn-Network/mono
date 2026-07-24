@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  AutopilotDeliveryObservationRequestSchema,
   observeAutopilotMarketplaceDelivery,
 } from '../../src/autopilot/marketplace-delivery-command.js';
 import type {
   AutopilotMarketplaceDeliveryObserver,
 } from '../../src/autopilot/marketplace-delivery-observer.js';
+import {
+  AutopilotDeliveryExpectationSchema,
+  AutopilotDeliveryObservationSchema,
+} from '@jinn-network/sdk/autopilot';
 
 function request(overrides: Record<string, unknown> = {}) {
   return {
@@ -17,6 +22,8 @@ function request(overrides: Record<string, unknown> = {}) {
       schemaVersion: 'jinn-autopilot-session.v1',
       workflow: 'implement',
       repository: 'Jinn-Network/mono',
+      language: 'typescript',
+      verificationProfile: 'jinn-mono.v1',
       issueNumber: 42,
       prNumber: 84,
       targetBase: 'next',
@@ -45,6 +52,11 @@ function request(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Autopilot marketplace delivery observation command', () => {
+  it('uses the SDK expectation validator as its compatibility request export', () => {
+    expect(AutopilotDeliveryObservationRequestSchema)
+      .toBe(AutopilotDeliveryExpectationSchema);
+  });
+
   it('anchors exact observation at Task creation and the latest chain block', async () => {
     const observe = vi.fn().mockResolvedValue({
       status: 'pending',
@@ -85,6 +97,19 @@ describe('Autopilot marketplace delivery observation command', () => {
   });
 
   it('serializes the verified delivery block without losing precision', async () => {
+    const expected = request();
+    const requestId = `0x${'3'.repeat(64)}`;
+    const envelopeCid = 'bafy-envelope';
+    const correlation = {
+      taskId: '501',
+      attemptIndex: 0,
+      requestId,
+      deliveryEnvelopeCid: envelopeCid,
+      v2AttemptId: expected.session.v2AttemptId,
+      claimOid: expected.session.claimOid,
+      prNumber: expected.session.prNumber,
+      expectedHead: expected.session.expectedHead,
+    };
     const observer: AutopilotMarketplaceDeliveryObserver = {
       observe: vi.fn().mockResolvedValue({
         status: 'verified',
@@ -98,23 +123,43 @@ describe('Autopilot marketplace delivery observation command', () => {
         },
         attempt: {
           attemptIndex: 0,
-          requestId: `0x${'3'.repeat(64)}`,
+          requestId,
           operator: `0x${'4'.repeat(40)}`,
           createdAtBlock: 124,
         },
         delivery: {
-          envelopeCid: 'bafy-envelope',
+          envelopeCid,
           envelopeDigest: `0x${'5'.repeat(64)}`,
           publisherAgentId: '7',
           transactionHash: `0x${'6'.repeat(64)}`,
           blockNumber: 125n,
         },
-        envelope: {},
-        result: {},
-        correlation: {},
+        envelope: {
+          schemaVersion: 'jinn.execution.v1',
+          solverType: 'jinn-repo.v1',
+          role: 'solution',
+          participant: {
+            safeAddress: `0x${'4'.repeat(40)}`,
+            agentEoa: `0x${'8'.repeat(40)}`,
+          },
+          signature: {
+            signer: `0x${'8'.repeat(40)}`,
+          },
+          payload: { candidateControlled: true },
+        },
+        result: {
+          schemaVersion: 'jinn-autopilot-mutation-result.v1',
+          outcome: 'human',
+          correlation,
+          reason: {
+            code: 'test-human',
+            detail: 'Human intervention is required.',
+          },
+        },
+        correlation,
       }),
     };
-    const observation = await observeAutopilotMarketplaceDelivery(request(), {
+    const observation = await observeAutopilotMarketplaceDelivery(expected, {
       chainId: 84532,
       observer,
       latestBlockNumber: async () => 456n,
@@ -123,7 +168,23 @@ describe('Autopilot marketplace delivery observation command', () => {
     expect(observation).toMatchObject({
       status: 'verified',
       delivery: { blockNumber: 125 },
+      session: expected.session,
+      envelope: {
+        cid: envelopeCid,
+        digest: `0x${'5'.repeat(64)}`,
+        executionSchema: 'jinn.execution.v1',
+        solverType: 'jinn-repo.v1',
+        role: 'solution',
+        participant: {
+          safeAddress: `0x${'4'.repeat(40)}`,
+          agentEoa: `0x${'8'.repeat(40)}`,
+        },
+        signer: `0x${'8'.repeat(40)}`,
+      },
     });
+    expect(observation.envelope).not.toHaveProperty('payload');
+    expect(AutopilotDeliveryObservationSchema.parse(observation))
+      .toEqual(observation);
     expect(() => JSON.stringify(observation)).not.toThrow();
   });
 });

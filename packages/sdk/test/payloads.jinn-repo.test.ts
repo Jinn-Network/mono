@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const autopilotFixtureDirectory = fileURLToPath(
-  new URL('./fixtures/autopilot-session/', import.meta.url),
+  new URL('../fixtures/autopilot/', import.meta.url),
 );
 
 function autopilotFixture(name: string): unknown {

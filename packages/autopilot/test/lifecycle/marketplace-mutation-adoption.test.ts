@@ -5,7 +5,7 @@ import type {
   AutopilotMutationResult,
   AutopilotReviewResult,
   AutopilotSessionCapsule,
-} from '../../../sdk/src/autopilot-session.js';
+} from '@jinn-network/sdk/autopilot';
 import {
   formatAdoptionReceiptComment,
   parseAdoptionReceiptComment,
@@ -117,6 +117,8 @@ function session(workflow: MutationWorkflow): AutopilotSessionCapsule {
     schemaVersion: 'jinn-autopilot-session.v1',
     workflow,
     repository: 'Jinn-Network/mono',
+    language: 'typescript',
+    verificationProfile: 'jinn-mono.v1',
     issueNumber: 501,
     ...(workflow === 'implement'
       ? {}
@@ -1443,13 +1445,20 @@ describe('marketplace closed-fleet child loop', () => {
       const backend = makeMarketplaceSessionBackend({
         runner: async (_command, args) => {
           submitCalls.push(args);
+          const idempotent = submitCalls.length > 1;
           return JSON.stringify({
+            schemaVersion: 1,
+            generatedAt: '2026-07-24T12:00:00.000Z',
+            verb: 'tasks submit',
+            id: `autopilot:${ATTEMPT}`,
+            creatorMultisig: `0x${'1'.repeat(40)}`,
             taskId: 'task-501',
             taskCid: 'bafybeitask',
             creationTx: `0x${'c'.repeat(64)}`,
             creationBlock: 123400,
             solverNetManifestCid: 'bafybeisolvernet',
-            idempotent: submitCalls.length > 1,
+            status: idempotent ? 'already_submitted' : 'submitted',
+            idempotent,
           });
         },
         now: () => new Date(NOW),

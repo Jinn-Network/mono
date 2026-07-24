@@ -1,24 +1,28 @@
 {
   "schemaVersion": "jinn-autopilot-session.v1",
-  "workflow": "implement",
+  "workflow": "reconcile",
   "repository": "Jinn-Network/mono",
-  "issueNumber": 2001,
-  "prNumber": 2101,
+  "language": "typescript",
+  "verificationProfile": "jinn-mono.v1",
+  "issueNumber": 2004,
+  "childIssueNumber": 2005,
+  "parentPrNumber": 2104,
+  "prNumber": 2104,
   "targetBase": "next",
-  "branch": "codex/issue-2001",
+  "branch": "codex/issue-2004",
   "claimOid": "1111111111111111111111111111111111111111",
   "expectedHead": "2222222222222222222222222222222222222222",
-  "v2AttemptId": "123e4567-e89b-42d3-a456-426614174001",
+  "v2AttemptId": "123e4567-e89b-42d3-a456-426614174003",
   "runnerId": "runner-1",
   "taskSnapshot": {
-    "title": "Implement exact marketplace contracts",
-    "body": "Add the approved contract surface.",
-    "prBody": "Draft implementation PR.",
+    "title": "Reconcile the parent branch",
+    "body": "Resolve the semantic conflict.",
+    "prBody": "Parent implementation PR.",
     "baseSha": "3333333333333333333333333333333333333333",
-    "targetBaseOid": "3333333333333333333333333333333333333333"
+    "targetBaseOid": "9999999999999999999999999999999999999999"
   },
   "workflowContract": {
-    "skill": "implement-issue",
+    "skill": "reconcile",
     "version": "v2",
     "resultSchema": "jinn-autopilot-mutation-result.v1"
   },

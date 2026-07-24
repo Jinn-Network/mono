@@ -59,7 +59,7 @@ const DELIVERY_DIGEST = `0x${'ab'.repeat(32)}`;
 const DELIVERY_TX_HASH = `0x${'cd'.repeat(32)}`;
 const ANCHOR_TX_HASH = `0x${'ad'.repeat(32)}` as Hex;
 const SDK_FIXTURE_DIRECTORY = new URL(
-  '../../../../packages/sdk/test/fixtures/autopilot-session/',
+  '../../../../packages/sdk/fixtures/autopilot/',
   import.meta.url,
 );
 
@@ -80,11 +80,14 @@ function autopilotSpec() {
     repo: 'Jinn-Network/mono',
     base_commit: '1'.repeat(40),
     language: 'typescript',
+    verificationProfile: 'jinn-mono.v1',
     problem_statement: 'Implement the claimed issue.',
     session: {
       schemaVersion: 'jinn-autopilot-session.v1',
       workflow: 'implement',
       repository: 'Jinn-Network/mono',
+      language: 'typescript',
+      verificationProfile: 'jinn-mono.v1',
       issueNumber: 1900,
       prNumber: PR_NUMBER,
       targetBase: 'next',

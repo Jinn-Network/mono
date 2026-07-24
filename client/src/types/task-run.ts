@@ -10,7 +10,10 @@
  * neutral access.
  */
 import type { Task } from './task.js';
-import type { AutopilotAdoptionReceipt } from '@jinn-network/sdk/solvernets/jinn-repo';
+import type {
+  AutopilotAdoptionReceipt,
+  AutopilotSessionCapsule,
+} from '@jinn-network/sdk/autopilot';
 
 export type { TaskRunState } from '../harnesses/engine/state.js';
 import type { TaskRunState } from '../harnesses/engine/state.js';
@@ -26,7 +29,7 @@ export interface AdoptionReceiptObserver {
 }
 
 export interface AdoptionReceiptLocation {
-  repository: 'Jinn-Network/mono';
+  repository: AutopilotSessionCapsule['repository'];
   prNumber: number;
 }
 

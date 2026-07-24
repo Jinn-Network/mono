@@ -10,7 +10,7 @@ import {
   type AutopilotMutationResult,
   type AutopilotSessionCapsule,
   type AutopilotWorkflow,
-} from '../../../sdk/src/autopilot-session.js';
+} from '@jinn-network/sdk/autopilot';
 import type {
   AttemptManifest,
   MarketplaceTaskProvenance,

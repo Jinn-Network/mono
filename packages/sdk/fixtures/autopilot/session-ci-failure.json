@@ -2,6 +2,8 @@
   "schemaVersion": "jinn-autopilot-session.v1",
   "workflow": "ci-failure",
   "repository": "Jinn-Network/mono",
+  "language": "typescript",
+  "verificationProfile": "jinn-mono.v1",
   "issueNumber": 2006,
   "childIssueNumber": 2007,
   "parentPrNumber": 2106,

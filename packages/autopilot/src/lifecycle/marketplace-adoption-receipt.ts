@@ -4,7 +4,7 @@ import {
   autopilotCorrelationMatches,
   type AutopilotAdoptionReceipt,
   type AutopilotCorrelation,
-} from '../../../sdk/src/autopilot-session.js';
+} from '@jinn-network/sdk/autopilot';
 
 const MARKER_PREFIX = '<!-- jinn-autopilot:marketplace-adoption-receipt:v1 key=';
 const MARKER_SUFFIX = ' -->';
