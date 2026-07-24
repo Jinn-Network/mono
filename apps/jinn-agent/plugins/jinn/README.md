@@ -26,24 +26,39 @@ You are ready when the doctor ends with `all checks passed`.
 If you use the Hermes gateway, restart it with `hermes gateway restart`. A new
 terminal chat loads Jinn without this step.
 
-## Talk to Hermes normally
+## Try your first pickup
 
-Start a fresh chat and describe the task you want help with:
+Start a fresh chat:
 
 ```bash
 hermes chat
 ```
 
-No slash command is required. Jinn checks retained local episodes and the
-public Jinn corpus for evidence relevant to the first message before Hermes
-answers. When it has evidence it can retrieve for the task, you will see a line
-like:
+Then describe the task normally. Include the concrete problem and repository
+when they matter; there is no Jinn slash command to run.
+
+Jinn checks retained local episodes and the public Jinn corpus when a new task
+starts or its stable task/repository context changes. When it finds evidence it
+can actually deliver, you will see:
 
 ```text
-◇ corpus  provided 1 evidence packet  ·  searched: dashboard, version, test
+◇ corpus  provided 2 evidence packets  ·  searched: score-zero, jinn, evaluator, docker, eval
 ```
 
-Hermes receives that evidence as context and can use it in its answer.
+For example, a clean test with matching retained episodes began with a normal
+question:
+
+```text
+You: In the Jinn evaluator, a Docker eval run that aborts partway is recorded
+as an ordinary score-zero failure. What is the root cause and specific fix?
+
+Hermes: The evaluator's Docker-abort handling is incorrectly gated on
+`noTestPassed`. Remove that requirement and classify known container-abort
+signals as `EvalCouldNotGradeError`, even after partial test progress.
+```
+
+Hermes received the evidence automatically and used its concrete diagnosis.
+Your result will depend on what relevant local or public evidence exists.
 
 If no retrievable evidence matches the task, Jinn stays out of the way. At the
 end of the session, Hermes reports:
