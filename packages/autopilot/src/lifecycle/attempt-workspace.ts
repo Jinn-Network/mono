@@ -24,6 +24,10 @@ import {
   sanitizedGitHubCommandOverlay,
   type SelectedCredential,
 } from './credentials.js';
+import type {
+  MarketplaceExecutionHandle,
+} from './session-execution-backend.js';
+import type { AutopilotExecutionBackend } from './active-config.js';
 
 export type AttemptPhase = 'implement' | 'review';
 export type AttemptProcessState = 'preparing' | 'running' | 'exited';
@@ -65,6 +69,56 @@ export interface AttemptRepositoryIdentity {
   readonly remoteUrlHash: string;
 }
 
+export interface MarketplaceTaskProvenance {
+  readonly creationTransactionHash: string;
+  readonly creationBlockNumber: number;
+  readonly solverNetManifestCid?: string;
+}
+
+export interface MarketplaceAdoptionReceiptState
+  extends MarketplaceTaskProvenance {
+  readonly schemaVersion: 'jinn-autopilot-marketplace-adoption-state.v1';
+  readonly role: 'solution';
+  readonly taskId: string;
+  readonly attemptIndex: number;
+  readonly requestId: string;
+  readonly deliveryEnvelopeCid: string;
+  readonly disposition: 'accepted' | 'rejected';
+  readonly commentId: number;
+  readonly resultingHead?: string;
+  readonly reviewAttemptId?: string;
+  readonly reviewManifestPath?: string;
+  readonly reviewGeneration?: string;
+  readonly reviewRefOid?: string;
+  readonly recordedAt: string;
+}
+
+export type AttemptExecution =
+  | { readonly backend: 'local' }
+  | {
+      readonly backend: 'marketplace';
+      readonly taskId?: string;
+      readonly taskCid?: string;
+      readonly deadline?: string;
+      readonly requestFile?: string;
+      readonly attemptIndex?: number;
+      readonly requestId?: string;
+      readonly deliveryTx?: string;
+      readonly deliveryBlockNumber?: number;
+      readonly deliveryEnvelopeCid?: string;
+      readonly creationTransactionHash?: string;
+      readonly creationBlockNumber?: number;
+      readonly solverNetManifestCid?: string;
+      /** Reverse link from an evaluator-leg review attempt to its mutation attempt. */
+      readonly originManifestPath?: string;
+      /** Exact solver Safe authenticated by the Solution delivery observer. */
+      readonly solutionOperatorAddress?: string;
+      /** Historical ERC-8004 publisher identity bound to the solver Safe. */
+      readonly solutionPublisherAgentId?: string;
+      readonly adoptionReceipt?: string;
+      readonly adoptionReceiptState?: MarketplaceAdoptionReceiptState;
+    };
+
 export interface AttemptManifest {
   readonly version: 2;
   readonly attemptId: string;
@@ -84,6 +138,7 @@ export interface AttemptManifest {
   readonly reviewApprovalPolicy?: ReviewApprovalPolicy;
   readonly selectedLogin: string;
   readonly repository: AttemptRepositoryIdentity;
+  readonly execution: AttemptExecution;
   readonly processState: AttemptProcessState;
   readonly pid: number | null;
   readonly terminalHead?: string;
@@ -116,6 +171,7 @@ export interface CreateAttemptOptions {
    * without depending on any inherited environment variable.
    */
   readonly credential: SelectedCredential;
+  readonly executionBackend?: AutopilotExecutionBackend;
   readonly remoteName?: string;
   readonly pid?: number | null;
   readonly attemptId?: string;
@@ -194,6 +250,27 @@ function exactKeys(
       'reviewApprovalPolicy',
       'targetBaseOid',
       'terminalHead',
+      'execution',
+      'taskId',
+      'taskCid',
+      'deadline',
+      'requestFile',
+      'attemptIndex',
+      'requestId',
+      'deliveryTx',
+      'deliveryBlockNumber',
+      'deliveryEnvelopeCid',
+      'creationTransactionHash',
+      'creationBlockNumber',
+      'solverNetManifestCid',
+      'originManifestPath',
+      'solutionOperatorAddress',
+      'solutionPublisherAgentId',
+      'adoptionReceipt',
+      'adoptionReceiptState',
+      'resultingHead',
+      'reviewAttemptId',
+      'reviewManifestPath',
       'childStartedAt',
       'childExitedAt',
     ].includes(key));
@@ -293,6 +370,355 @@ function processState(value: unknown): AttemptProcessState {
   return value;
 }
 
+function nonNegativeInteger(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Invalid ${name}`);
+  }
+  return value;
+}
+
+function transactionHash(value: unknown, name: string): string {
+  const hash = stringField(value, name);
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error(`Invalid ${name}`);
+  return hash;
+}
+
+function decodeAdoptionReceiptState(
+  value: unknown,
+): MarketplaceAdoptionReceiptState {
+  const state = record(value, 'marketplace adoption receipt state');
+  exactKeys(state, [
+    'schemaVersion',
+    'role',
+    'taskId',
+    'attemptIndex',
+    'requestId',
+    'deliveryEnvelopeCid',
+    'creationTransactionHash',
+    'creationBlockNumber',
+    'solverNetManifestCid',
+    'originManifestPath',
+    'solutionOperatorAddress',
+    'solutionPublisherAgentId',
+    'disposition',
+    'commentId',
+    'resultingHead',
+    'reviewAttemptId',
+    'reviewManifestPath',
+    'reviewGeneration',
+    'reviewRefOid',
+    'recordedAt',
+  ], 'marketplace adoption receipt state');
+  if (
+    state.schemaVersion !== 'jinn-autopilot-marketplace-adoption-state.v1'
+    || state.role !== 'solution'
+    || (state.disposition !== 'accepted' && state.disposition !== 'rejected')
+  ) {
+    throw new Error('Invalid marketplace adoption receipt state');
+  }
+  const resultingHead = state.resultingHead === undefined
+    ? undefined
+    : gitOid(stringField(state.resultingHead, 'adoption resulting head'));
+  const reviewAttemptId = state.reviewAttemptId === undefined
+    ? undefined
+    : uuid(
+      stringField(state.reviewAttemptId, 'adoption review attempt ID'),
+      'adoption review attempt ID',
+    );
+  const reviewManifestPath = state.reviewManifestPath === undefined
+    ? undefined
+    : absolutePath(state.reviewManifestPath, 'adoption review manifest path');
+  const reviewGeneration = state.reviewGeneration === undefined
+    ? undefined
+    : uuid(
+      stringField(state.reviewGeneration, 'adoption review generation'),
+      'adoption review generation',
+    );
+  const reviewRefOid = state.reviewRefOid === undefined
+    ? undefined
+    : gitOid(stringField(state.reviewRefOid, 'adoption review ref OID'));
+  const reviewFields = [
+    reviewAttemptId,
+    reviewManifestPath,
+    reviewGeneration,
+    reviewRefOid,
+  ].filter((field) => field !== undefined).length;
+  if (
+    (reviewFields !== 0 && reviewFields !== 4)
+    || (
+      state.disposition === 'accepted'
+      && (resultingHead === undefined || reviewFields !== 4)
+    )
+  ) {
+    throw new Error('Marketplace adoption review identity is incomplete');
+  }
+  return {
+    schemaVersion: state.schemaVersion,
+    role: state.role,
+    taskId: stringField(state.taskId, 'adoption task ID'),
+    attemptIndex: nonNegativeInteger(
+      state.attemptIndex,
+      'adoption attempt index',
+    ),
+    requestId: stringField(state.requestId, 'adoption request ID'),
+    deliveryEnvelopeCid: stringField(
+      state.deliveryEnvelopeCid,
+      'adoption delivery envelope CID',
+    ),
+    creationTransactionHash: transactionHash(
+      state.creationTransactionHash,
+      'adoption Task creation transaction',
+    ),
+    creationBlockNumber: nonNegativeInteger(
+      state.creationBlockNumber,
+      'adoption Task creation block number',
+    ),
+    ...(state.solverNetManifestCid === undefined
+      ? {}
+      : {
+          solverNetManifestCid: stringField(
+            state.solverNetManifestCid,
+            'adoption SolverNet manifest CID',
+          ),
+        }),
+    disposition: state.disposition,
+    commentId: positiveInteger(state.commentId, 'adoption comment ID'),
+    ...(resultingHead === undefined ? {} : { resultingHead }),
+    ...(reviewAttemptId === undefined
+      ? {}
+      : {
+          reviewAttemptId,
+          reviewManifestPath: reviewManifestPath!,
+          reviewGeneration: reviewGeneration!,
+          reviewRefOid: reviewRefOid!,
+        }),
+    recordedAt: isoTimestamp(
+      stringField(state.recordedAt, 'adoption recorded timestamp'),
+    ),
+  };
+}
+
+function decodeExecution(value: unknown): AttemptExecution {
+  if (value === undefined) return { backend: 'local' };
+  const execution = record(value, 'attempt execution');
+  const backend = execution.backend;
+  if (backend === 'local') {
+    exactKeys(execution, ['backend'], 'local attempt execution');
+    return { backend };
+  }
+  if (backend !== 'marketplace') {
+    throw new Error('Invalid attempt execution backend');
+  }
+  exactKeys(execution, [
+    'backend',
+    'taskId',
+    'taskCid',
+    'deadline',
+    'requestFile',
+    'attemptIndex',
+    'requestId',
+    'deliveryTx',
+    'deliveryBlockNumber',
+    'deliveryEnvelopeCid',
+    'creationTransactionHash',
+    'creationBlockNumber',
+    'solverNetManifestCid',
+    'originManifestPath',
+    'solutionOperatorAddress',
+    'solutionPublisherAgentId',
+    'adoptionReceipt',
+    'adoptionReceiptState',
+  ], 'marketplace attempt execution');
+  const taskId = execution.taskId === undefined
+    ? undefined
+    : stringField(execution.taskId, 'marketplace task ID');
+  const taskCid = execution.taskCid === undefined
+    ? undefined
+    : stringField(execution.taskCid, 'marketplace task CID');
+  const deadline = execution.deadline === undefined
+    ? undefined
+    : isoTimestamp(stringField(execution.deadline, 'marketplace deadline'));
+  const requestFile = execution.requestFile === undefined
+    ? undefined
+    : absolutePath(execution.requestFile, 'marketplace request file');
+  const attemptIndex = execution.attemptIndex === undefined
+    ? undefined
+    : nonNegativeInteger(execution.attemptIndex, 'marketplace attempt index');
+  const requestId = execution.requestId === undefined
+    ? undefined
+    : stringField(execution.requestId, 'marketplace request ID');
+  const deliveryTx = execution.deliveryTx === undefined
+    ? undefined
+    : transactionHash(
+        execution.deliveryTx,
+        'marketplace delivery transaction',
+      );
+  const deliveryBlockNumber = execution.deliveryBlockNumber === undefined
+    ? undefined
+    : nonNegativeInteger(
+        execution.deliveryBlockNumber,
+        'marketplace delivery block number',
+      );
+  const deliveryEnvelopeCid = execution.deliveryEnvelopeCid === undefined
+    ? undefined
+    : stringField(
+      execution.deliveryEnvelopeCid,
+      'marketplace delivery envelope CID',
+    );
+  const creationTransactionHash =
+    execution.creationTransactionHash === undefined
+      ? undefined
+      : transactionHash(
+          execution.creationTransactionHash,
+          'marketplace Task creation transaction',
+        );
+  const creationBlockNumber = execution.creationBlockNumber === undefined
+    ? undefined
+    : nonNegativeInteger(
+        execution.creationBlockNumber,
+        'marketplace Task creation block number',
+      );
+  const solverNetManifestCid = execution.solverNetManifestCid === undefined
+    ? undefined
+    : stringField(
+        execution.solverNetManifestCid,
+        'marketplace SolverNet manifest CID',
+      );
+  const originManifestPath = execution.originManifestPath === undefined
+    ? undefined
+    : absolutePath(
+        execution.originManifestPath,
+        'marketplace origin manifest path',
+      );
+  const solutionOperatorAddress =
+    execution.solutionOperatorAddress === undefined
+      ? undefined
+      : stringField(
+          execution.solutionOperatorAddress,
+          'marketplace Solution operator address',
+        );
+  if (
+    solutionOperatorAddress !== undefined
+    && !/^0x[0-9a-fA-F]{40}$/.test(solutionOperatorAddress)
+  ) {
+    throw new Error('Invalid marketplace Solution operator address');
+  }
+  const solutionPublisherAgentId =
+    execution.solutionPublisherAgentId === undefined
+      ? undefined
+      : stringField(
+          execution.solutionPublisherAgentId,
+          'marketplace Solution publisher agent ID',
+        );
+  if (
+    solutionPublisherAgentId !== undefined
+    && !/^[1-9][0-9]*$/.test(solutionPublisherAgentId)
+  ) {
+    throw new Error('Invalid marketplace Solution publisher agent ID');
+  }
+  if (
+    (solutionOperatorAddress === undefined)
+      !== (solutionPublisherAgentId === undefined)
+  ) {
+    throw new Error('Marketplace Solution operator provenance is incomplete');
+  }
+  const adoptionReceipt = execution.adoptionReceipt === undefined
+    ? undefined
+    : stringField(execution.adoptionReceipt, 'marketplace adoption receipt');
+  const adoptionReceiptState = execution.adoptionReceiptState === undefined
+    ? undefined
+    : decodeAdoptionReceiptState(execution.adoptionReceiptState);
+  const submitted = [
+    taskId,
+    taskCid,
+    deadline,
+    requestFile,
+  ].filter((field) => field !== undefined).length;
+  if (submitted !== 0 && submitted !== 4) {
+    throw new Error('Marketplace execution handle is incomplete');
+  }
+  if ((attemptIndex === undefined) !== (requestId === undefined)) {
+    throw new Error(
+      'Marketplace attempt index and request ID must appear together',
+    );
+  }
+  if (
+    (deliveryTx === undefined) !== (deliveryBlockNumber === undefined)
+    || (
+      deliveryEnvelopeCid !== undefined
+      && deliveryTx === undefined
+    )
+  ) {
+    throw new Error('Marketplace delivery provenance is incomplete');
+  }
+  if (
+    (creationTransactionHash === undefined)
+      !== (creationBlockNumber === undefined)
+    || (
+      solverNetManifestCid !== undefined
+      && creationTransactionHash === undefined
+    )
+  ) {
+    throw new Error('Marketplace Task creation provenance is incomplete');
+  }
+  if (attemptIndex !== undefined && submitted !== 4) {
+    throw new Error('Marketplace request correlation requires a submitted handle');
+  }
+  if (
+    adoptionReceiptState !== undefined
+    && (
+      adoptionReceipt === undefined
+      || taskId !== adoptionReceiptState.taskId
+      || attemptIndex !== adoptionReceiptState.attemptIndex
+      || requestId !== adoptionReceiptState.requestId
+      || deliveryEnvelopeCid !== adoptionReceiptState.deliveryEnvelopeCid
+      || creationTransactionHash
+        !== adoptionReceiptState.creationTransactionHash
+      || creationBlockNumber !== adoptionReceiptState.creationBlockNumber
+      || solverNetManifestCid !== adoptionReceiptState.solverNetManifestCid
+    )
+  ) {
+    throw new Error('Marketplace adoption receipt state does not match execution');
+  }
+  return {
+    backend,
+    ...(taskId === undefined
+      ? {}
+      : {
+          taskId,
+          taskCid: taskCid!,
+          deadline: deadline!,
+          requestFile: requestFile!,
+        }),
+    ...(attemptIndex === undefined
+      ? {}
+      : { attemptIndex, requestId: requestId! }),
+    ...(deliveryTx === undefined ? {} : { deliveryTx }),
+    ...(deliveryBlockNumber === undefined ? {} : { deliveryBlockNumber }),
+    ...(deliveryEnvelopeCid === undefined ? {} : { deliveryEnvelopeCid }),
+    ...(creationTransactionHash === undefined
+      ? {}
+      : {
+          creationTransactionHash,
+          creationBlockNumber: creationBlockNumber!,
+        }),
+    ...(solverNetManifestCid === undefined
+      ? {}
+      : { solverNetManifestCid }),
+    ...(originManifestPath === undefined
+      ? {}
+      : { originManifestPath }),
+    ...(solutionOperatorAddress === undefined
+      ? {}
+      : {
+          solutionOperatorAddress,
+          solutionPublisherAgentId: solutionPublisherAgentId!,
+        }),
+    ...(adoptionReceipt === undefined ? {} : { adoptionReceipt }),
+    ...(adoptionReceiptState === undefined ? {} : { adoptionReceiptState }),
+  };
+}
+
 export function decodeAttemptManifest(value: unknown): AttemptManifest {
   const manifest = record(value, 'attempt manifest');
   exactKeys(manifest, [
@@ -314,6 +740,7 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
     'reviewApprovalPolicy',
     'selectedLogin',
     'repository',
+    'execution',
     'processState',
     'pid',
     'terminalHead',
@@ -380,12 +807,13 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
     throw new Error('Review generation metadata is valid only for review attempts');
   }
   const decodedProcessState = processState(manifest.processState);
+  const execution = decodeExecution(manifest.execution);
   const pid = nullablePid(manifest.pid);
   const terminalHead = manifest.terminalHead === undefined
     ? undefined
     : gitOid(stringField(manifest.terminalHead, 'terminal head'));
   const timestamps = decodeTimestamps(manifest.timestamps);
-  if (
+  const localStateDisagrees = execution.backend === 'local' && (
     (decodedProcessState === 'preparing'
       && (pid !== null
         || timestamps.childStartedAt !== undefined
@@ -398,7 +826,25 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
       && (pid === null
         || timestamps.childStartedAt === undefined
         || timestamps.childExitedAt === undefined))
-  ) {
+  );
+  const marketplaceSubmitted = execution.backend === 'marketplace'
+    && execution.taskId !== undefined;
+  const marketplaceStateDisagrees = execution.backend === 'marketplace' && (
+    pid !== null
+    || (decodedProcessState === 'preparing'
+      && (marketplaceSubmitted
+        || timestamps.childStartedAt !== undefined
+        || timestamps.childExitedAt !== undefined))
+    || (decodedProcessState === 'running'
+      && (!marketplaceSubmitted
+        || timestamps.childStartedAt === undefined
+        || timestamps.childExitedAt !== undefined))
+    || (decodedProcessState === 'exited'
+      && (!marketplaceSubmitted
+        || timestamps.childStartedAt === undefined
+        || timestamps.childExitedAt === undefined))
+  );
+  if (localStateDisagrees || marketplaceStateDisagrees) {
     throw new Error('Attempt process state, PID, and timestamps disagree');
   }
   if (decodedProcessState !== 'exited' && terminalHead !== undefined) {
@@ -427,6 +873,7 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
         }),
     selectedLogin: stringField(manifest.selectedLogin, 'selected login'),
     repository: decodeRepositoryIdentity(manifest.repository),
+    execution,
     processState: decodedProcessState,
     pid,
     ...(terminalHead === undefined ? {} : { terminalHead }),
@@ -486,6 +933,7 @@ export function updateAttemptManifest(
 ): AttemptManifest {
   const previous = readAttemptManifest(path);
   const progressiveManifestFields = new Set([
+    'execution',
     'processState',
     'pid',
     'terminalHead',
@@ -595,13 +1043,52 @@ export function markAttemptRunning(
   const validPid = positiveInteger(pid, 'PID');
   const timestamp = transitionTimestamp(now);
   return updateAttemptManifest(manifestPath, (current) => {
-    if (current.processState !== 'preparing') {
+    if (
+      current.execution.backend !== 'local'
+      || current.processState !== 'preparing'
+    ) {
       throw new Error('Only a preparing attempt may transition to running');
     }
     return {
       ...current,
       processState: 'running',
       pid: validPid,
+      timestamps: {
+        ...current.timestamps,
+        updatedAt: timestamp,
+        childStartedAt: timestamp,
+      },
+    };
+  });
+}
+
+export function markMarketplaceAttemptRunning(
+  manifestPath: string,
+  handle: MarketplaceExecutionHandle,
+  now: () => Date = () => new Date(),
+): AttemptManifest {
+  const execution = decodeExecution(handle);
+  if (
+    execution.backend !== 'marketplace'
+    || execution.taskId === undefined
+  ) {
+    throw new Error('Marketplace attempt requires a complete execution handle');
+  }
+  const timestamp = transitionTimestamp(now);
+  return updateAttemptManifest(manifestPath, (current) => {
+    if (
+      current.execution.backend !== 'marketplace'
+      || current.processState !== 'preparing'
+    ) {
+      throw new Error(
+        'Only a preparing marketplace attempt may transition to running',
+      );
+    }
+    return {
+      ...current,
+      execution,
+      processState: 'running',
+      pid: null,
       timestamps: {
         ...current.timestamps,
         updatedAt: timestamp,
@@ -909,6 +1396,9 @@ export async function createAttemptWorkspace(
         }),
     selectedLogin: options.selectedLogin,
     repository,
+    execution: {
+      backend: options.executionBackend ?? 'local',
+    },
     processState: options.pid === undefined || options.pid === null
       ? 'preparing'
       : 'running',
@@ -1028,8 +1518,13 @@ export function listRunnerLiveAttempts(
             manifest.processState === 'preparing'
             || (
               manifest.processState === 'running'
-              && manifest.pid !== null
-              && isPidAlive(manifest.pid)
+              && (
+                manifest.execution.backend === 'marketplace'
+                || (
+                  manifest.pid !== null
+                  && isPidAlive(manifest.pid)
+                )
+              )
             )
           )
         ) {
@@ -1104,9 +1599,9 @@ function isAttemptChildLive(
   manifest: AttemptManifest,
   isPidAlive: (pid: number) => boolean,
 ): boolean {
-  return manifest.processState === 'running'
-    && manifest.pid !== null
-    && isPidAlive(manifest.pid);
+  if (manifest.processState !== 'running') return false;
+  if (manifest.execution.backend === 'marketplace') return true;
+  return manifest.pid !== null && isPidAlive(manifest.pid);
 }
 
 function retained(

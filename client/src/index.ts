@@ -16,6 +16,47 @@ export { ClaudeRunner } from './runner/claude.js';
 export { Daemon, type DaemonConfig } from './daemon/daemon.js';
 export { DeliveryWatcherLoop } from './daemon/delivery-watcher.js';
 
+// Autopilot marketplace read-side verification
+export {
+  createAutopilotMarketplaceDeliveryObserver,
+  type AutopilotExpectedCorrelationExtension,
+  type AutopilotMarketplaceDeliveryContradictionReason,
+  type AutopilotMarketplaceDeliveryExpectation,
+  type AutopilotMarketplaceDeliveryObservation,
+  type AutopilotMarketplaceDeliveryObserver,
+  type AutopilotMarketplaceDeliveryObserverDeps,
+  type AutopilotMarketplaceDeliveryPendingReason,
+  type VerifiedAutopilotMarketplaceDelivery,
+} from './autopilot/marketplace-delivery-observer.js';
+export {
+  createAutopilotGitHubAdoptionReceiptObserver,
+  observeExactAutopilotAdoptionReceipt,
+  type AutopilotGitHubReadPort,
+  type GitHubIssueComment,
+  type GitHubIssueCommentPage,
+  type GitHubNativeReview,
+  type GitHubNativeReviewPage,
+  type GitHubNativeReviewState,
+  type GitHubPullRequestFacts,
+  type ObserveExactAutopilotAdoptionReceiptInput,
+} from './autopilot/github-adoption-receipt-observer.js';
+export {
+  createJinnMonoGitHubAdoptionReadPort,
+  type JinnMonoGitHubAdoptionReadOptions,
+} from './autopilot/github-rest-adoption-read.js';
+export {
+  createAutopilotEvaluationContextResolver,
+  type AutopilotEvaluationContextObservation,
+  type AutopilotEvaluationContextResolver,
+  type AutopilotEvaluationContextResolverInput,
+  type AutopilotEvaluationContextValue,
+} from './autopilot/autopilot-evaluation-context-resolver.js';
+export {
+  createPublisherSafeResolver,
+  type PublisherSafeResolverOptions,
+  type RegistryReadClient,
+} from './erc8004/publisher-safe-resolver.js';
+
 // Store
 export { Store } from './store/store.js';
 

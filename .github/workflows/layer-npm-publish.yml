@@ -30,6 +30,10 @@ concurrency:
   group: layer-packages-canary-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  ONNXRUNTIME_NODE_INSTALL: skip
+  ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
 jobs:
   plugin-canary:
     name: Publish plugin canary

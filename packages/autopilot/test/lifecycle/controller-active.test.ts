@@ -584,6 +584,51 @@ describe('active lifecycle controller — JINN_AUTOPILOT_ONLY_ISSUES allowlist (
     ]);
   });
 
+  it('admits a generated review-finding child only after its exact issue number is allowlisted', async () => {
+    const childSnapshot: GitHubLifecycleSnapshot = {
+      ...twoEligibleIssuesSnapshot(),
+      lifecycle: {
+        items: [{
+          kind: 'issue',
+          issueNumber: 701,
+          v2Marked: true,
+          projectStatus: 'Todo',
+          labels: ['review-finding', 'effort:low', 'priority:p1'],
+          eligible: true,
+          eligibilityReason: 'eligible',
+        }],
+      },
+    };
+    const actionsWithParentOnly: unknown[] = [];
+    const parentOnly = deps({
+      readSnapshot: async () => childSnapshot,
+      active: twoSlotActive(new Set([42])),
+    });
+    parentOnly.active!.executeAction = async (action) => {
+      actionsWithParentOnly.push(action);
+      return { outcome: 'spawned' };
+    };
+
+    await runLifecycleCycle('active', parentOnly);
+    expect(actionsWithParentOnly).toEqual([]);
+
+    const actionsWithExactChild: unknown[] = [];
+    const exactChild = deps({
+      readSnapshot: async () => childSnapshot,
+      active: twoSlotActive(new Set([42, 701])),
+    });
+    exactChild.active!.executeAction = async (action) => {
+      actionsWithExactChild.push(action);
+      return { outcome: 'spawned' };
+    };
+
+    await runLifecycleCycle('active', exactChild);
+    expect(actionsWithExactChild).toEqual([{
+      kind: 'claim-implementation',
+      issueNumber: 701,
+    }]);
+  });
+
   // #99 deliberately has no project status yet, so reconciliation has a
   // `set-project-status` action to run for it every cycle regardless of
   // whether the allowlist below excludes it from claiming. The filter must

@@ -2,12 +2,12 @@ name: SDK npm Publish
 
 on:
   push:
-    branches: [main]
-    paths: ['packages/sdk/**']
+    branches: [next]
+    paths: ['client/**', 'packages/core/**', 'packages/plugin/**', 'packages/sdk/**']
   release:
     types: [published]
 
-# Trusted publishing (OIDC): register this workflow on npmjs for
+# Trusted publishing (OIDC): keep this filename registered for
 # @jinn-network/sdk.
 permissions:
   contents: read
@@ -23,14 +23,20 @@ jobs:
     if: github.event_name == 'push' || startsWith(github.event.release.tag_name, 'sdk-v')
     runs-on: ubuntu-latest
     environment: npm-publish
+    env:
+      JINN_BUILD_COMMIT: ${{ github.sha }}
+      ONNXRUNTIME_NODE_INSTALL: skip
+      ONNXRUNTIME_NODE_INSTALL_CUDA: skip
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
 
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
 
-      - run: npm install -g npm@11.5.1
+      - run: npm install -g npm@11.16.0
       - run: corepack enable
       - run: yarn install --immutable
 
@@ -39,37 +45,53 @@ jobs:
         shell: bash
         run: |
           PACKAGE_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
-          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
-
           if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
-            PUBLISH_VERSION="${PACKAGE_VERSION}-canary.${SHORT_SHA}"
+            PUBLISH_VERSION="${PACKAGE_VERSION}-canary.sha.${JINN_BUILD_COMMIT}"
             DIST_TAG="canary"
           else
             RELEASE_TAG="${{ github.event.release.tag_name }}"
             case "${RELEASE_TAG}" in
-              sdk-v*)
-                PUBLISH_VERSION="${RELEASE_TAG#sdk-v}"
-                ;;
-              *)
-                echo "::notice::Skipping non-SDK release tag ${RELEASE_TAG}"
-                exit 0
-                ;;
+              sdk-v*) PUBLISH_VERSION="${RELEASE_TAG#sdk-v}" ;;
+              *) echo "::error::Stable SDK releases must use sdk-v<semver>"; exit 1 ;;
             esac
-
             if [ "${PUBLISH_VERSION}" != "${PACKAGE_VERSION}" ]; then
               echo "::error::Release tag version ${PUBLISH_VERSION} does not match packages/sdk/package.json version ${PACKAGE_VERSION}"
               exit 1
             fi
-
             DIST_TAG="latest"
           fi
+          {
+            echo "package_version=${PACKAGE_VERSION}"
+            echo "publish_version=${PUBLISH_VERSION}"
+            echo "dist_tag=${DIST_TAG}"
+          } >> "${GITHUB_OUTPUT}"
 
-          echo "package_version=${PACKAGE_VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "publish_version=${PUBLISH_VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "dist_tag=${DIST_TAG}" >> "${GITHUB_OUTPUT}"
+      - name: Check immutable canary
+        id: existing
+        if: steps.meta.outputs.dist_tag == 'canary'
+        shell: bash
+        env:
+          PACKAGE_SPEC: '@jinn-network/sdk@${{ steps.meta.outputs.publish_version }}'
+        run: |
+          VIEW_ERROR="${RUNNER_TEMP}/sdk-canary-view.stderr"
+          if npm view "${PACKAGE_SPEC}" version >/dev/null 2>"${VIEW_ERROR}"; then
+            EXISTING_HEAD="$(npm view "${PACKAGE_SPEC}" gitHead)"
+            if [ "${EXISTING_HEAD}" != "${JINN_BUILD_COMMIT}" ]; then
+              echo "::error::${PACKAGE_SPEC} exists with gitHead ${EXISTING_HEAD}, expected ${JINN_BUILD_COMMIT}"
+              exit 1
+            fi
+            echo "published=true" >> "${GITHUB_OUTPUT}"
+            echo "::notice::${PACKAGE_SPEC} already exists at the expected immutable commit"
+          elif grep -Eq 'E404|404 Not Found' "${VIEW_ERROR}"; then
+            echo "published=false" >> "${GITHUB_OUTPUT}"
+          else
+            cat "${VIEW_ERROR}" >&2
+            echo "::error::Could not determine whether ${PACKAGE_SPEC} already exists"
+            exit 1
+          fi
 
       - name: Patch package version for canary publish
-        if: github.event_name == 'push'
+        if: steps.meta.outputs.dist_tag == 'canary'
         run: |
           node -e "
             const fs = require('fs');
@@ -81,12 +103,29 @@ jobs:
       - run: yarn typecheck
       - run: yarn test
       - run: yarn build
+      - run: yarn pack:smoke
 
       - name: Publish canary
-        if: steps.meta.outputs.dist_tag == 'canary'
+        if: steps.meta.outputs.dist_tag == 'canary' && steps.existing.outputs.published != 'true'
         run: |
           unset NODE_AUTH_TOKEN
           npm publish --access public --tag canary
+
+      - name: Validate canary gitHead
+        if: steps.meta.outputs.dist_tag == 'canary'
+        shell: bash
+        env:
+          PACKAGE_SPEC: '@jinn-network/sdk@${{ steps.meta.outputs.publish_version }}'
+        run: |
+          for _ in 1 2 3 4 5; do
+            PUBLISHED_HEAD="$(npm view "${PACKAGE_SPEC}" gitHead 2>/dev/null || true)"
+            if [ "${PUBLISHED_HEAD}" = "${JINN_BUILD_COMMIT}" ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::${PACKAGE_SPEC} gitHead did not resolve to ${JINN_BUILD_COMMIT}"
+          exit 1
 
       - name: Publish stable
         if: steps.meta.outputs.dist_tag == 'latest'

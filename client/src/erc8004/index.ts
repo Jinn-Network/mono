@@ -52,6 +52,11 @@ export {
   type ResolveAgentIdArgs,
   type ResolvedAgent,
 } from './identity.js';
+export {
+  createPublisherSafeResolver,
+  type PublisherSafeResolverOptions,
+  type RegistryReadClient,
+} from './publisher-safe-resolver.js';
 
 // ── Manifest batch anchors ───────────────────────────────────────────────────
 export {

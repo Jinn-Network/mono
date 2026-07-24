@@ -1,0 +1,5 @@
+{
+  "status": "pending",
+  "reason": "envelope-not-indexed",
+  "detail": "The exact envelope row has not reached the indexer."
+}

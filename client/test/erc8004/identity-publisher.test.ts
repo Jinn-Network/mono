@@ -378,6 +378,32 @@ describe('IdentityPublisher.publishContent', () => {
     expect(call.args[2]).toBe(VECTOR_A_EXPECTED);
   });
 
+  it('journals v1 broadcasts and fails closed on a reverted required receipt', async () => {
+    const { walletClient, publicClient } = makeMocks({
+      waitImpl: () => Promise.resolve({ status: 'reverted' }),
+    });
+    const publisher = new IdentityPublisher({
+      identityRegistryAddress: REGISTRY,
+      agentId: AGENT_ID,
+      walletClient,
+      publicClient,
+    });
+    const onBroadcast = vi.fn();
+
+    await expect(publisher.publishContent({
+      kind: 'envelope',
+      cid: 'bafy-required-receipt',
+      payload: VECTOR_A_INPUT,
+      requireSuccessfulReceipt: true,
+      onBroadcast,
+    })).rejects.toThrow('manifest receipt reverted');
+
+    expect(onBroadcast).toHaveBeenCalledOnce();
+    expect(onBroadcast).toHaveBeenCalledWith(
+      '0xfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed',
+    );
+  });
+
   it('propagates PayloadValidationError on bad payload (no contract call)', async () => {
     const { walletClient, publicClient, sendTransaction } = makeMocks();
     const publisher = new IdentityPublisher({

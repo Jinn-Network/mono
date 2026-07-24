@@ -25,10 +25,11 @@ export function formatChildMarker(parentPr: number, kind: ChildKind): string {
 export function parseChildMarker(
   body: string,
 ): { readonly parentPr: number; readonly kind: ChildKind } | null {
-  const match = body.match(
-    /<!--\s*jinn-autopilot:child\s+pr=(\d+)\s+kind=(review-finding|reconcile|ci-failure)\s*-->/,
-  );
-  if (match === null) return null;
+  const markerPattern =
+    /<!-- jinn-autopilot:child pr=(\d+) kind=(review-finding|reconcile|ci-failure) -->/g;
+  const matches = [...body.matchAll(markerPattern)];
+  if (matches.length !== 1 || matches[0]!.index !== 0) return null;
+  const match = matches[0]!;
   const parentPr = Number(match[1]);
   const kind = match[2] as ChildKind;
   if (!Number.isSafeInteger(parentPr) || parentPr <= 0) return null;
@@ -127,9 +128,10 @@ export async function fileChildIssue(
     return { runawayHold: true, priorCount };
   }
 
-  const body = input.body.includes(marker)
-    ? input.body
-    : `${marker}\n\n${input.body.trim()}`;
+  if (input.body.includes('jinn-autopilot:child')) {
+    throw new Error('Child issue body must not contain Autopilot child markers');
+  }
+  const body = `${marker}\n\n${input.body.trim()}`;
   const created = await port.createIssue({
     title: input.title,
     body,

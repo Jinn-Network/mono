@@ -23,6 +23,7 @@ export interface TaskCandidate {
     solverType?: string;
     bucketKey?: string;
     note?: string;
+    request?: unknown;
   };
 }
 

@@ -16,10 +16,24 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  JinnRepoAutopilotSessionTaskSchema,
   JinnRepoTaskSchema,
+  isAutopilotSessionTask,
   isMergedPrTask,
   isLiveIssueTask,
 } from '../src/jinn-repo.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const autopilotFixtureDirectory = fileURLToPath(
+  new URL('../fixtures/autopilot/', import.meta.url),
+);
+
+function autopilotFixture(name: string): unknown {
+  return JSON.parse(
+    readFileSync(`${autopilotFixtureDirectory}${name}.json`, 'utf8'),
+  ) as unknown;
+}
 
 describe('JinnRepoTaskSchema (SDK) — merged-pr branch (retrospective)', () => {
   // A legacy document — no `source` field, exactly as every jinn-repo task
@@ -42,6 +56,13 @@ describe('JinnRepoTaskSchema (SDK) — merged-pr branch (retrospective)', () => 
 
   it('rejects a merged-pr task carrying live-issue-only fields', () => {
     expect(() => JinnRepoTaskSchema.parse({ ...legacyValid, issue_number: 5 })).toThrow();
+  });
+
+  it('rejects a merged-pr task carrying an Autopilot session capsule', () => {
+    expect(() => JinnRepoTaskSchema.parse({
+      ...legacyValid,
+      session: autopilotFixture('session-implement'),
+    })).toThrow();
   });
 });
 
@@ -76,6 +97,13 @@ describe('JinnRepoTaskSchema (SDK) — live-issue branch (prospective)', () => {
     expect(() =>
       JinnRepoTaskSchema.parse({ ...validLiveIssue, test_cmd: 'yarn vitest run t.test.ts' }),
     ).toThrow();
+  });
+
+  it('rejects a live-issue task carrying an Autopilot session capsule', () => {
+    expect(() => JinnRepoTaskSchema.parse({
+      ...validLiveIssue,
+      session: autopilotFixture('session-implement'),
+    })).toThrow();
   });
 
   it('rejects an unknown `source` value', () => {
@@ -113,5 +141,183 @@ describe('isMergedPrTask / isLiveIssueTask (SDK)', () => {
     });
     expect(isMergedPrTask(task)).toBe(false);
     expect(isLiveIssueTask(task)).toBe(true);
+  });
+});
+
+describe('JinnRepoTaskSchema (SDK) — autopilot-session branch', () => {
+  const valid = {
+    schemaVersion: 'jinn-repo.v1',
+    source: 'autopilot-session' as const,
+    instance_id: 'autopilot:123e4567-e89b-42d3-a456-426614174001',
+    repo: 'Jinn-Network/mono',
+    base_commit: 'a'.repeat(40),
+    language: 'typescript',
+    verificationProfile: 'jinn-mono.v1',
+    problem_statement: 'Implement exact marketplace contracts.',
+    session: autopilotFixture('session-implement'),
+  };
+
+  it('accepts a well-formed Autopilot session task and narrows it', () => {
+    const parsed = JinnRepoTaskSchema.parse(valid);
+    expect(parsed).toEqual(valid);
+    expect(isAutopilotSessionTask(parsed)).toBe(true);
+    expect(isMergedPrTask(parsed)).toBe(false);
+    expect(isLiveIssueTask(parsed)).toBe(false);
+  });
+
+  it('rejects missing or malformed strict session capsules', () => {
+    const { session: _session, ...missing } = valid;
+    expect(() => JinnRepoTaskSchema.parse(missing)).toThrow();
+
+    expect(() => JinnRepoTaskSchema.parse({
+      ...valid,
+      session: { ...(valid.session as object), surprise: true },
+    })).toThrow();
+  });
+
+  it('keeps legacy task wrappers permissive while the new nested codec is strict', () => {
+    expect(JinnRepoTaskSchema.parse({ ...valid, wrapperMetadata: 'kept-compatible' }))
+      .toEqual(valid);
+  });
+
+  it('accepts a generic safe GitHub repository and lowercase profile binding', () => {
+    const session = valid.session as Record<string, unknown>;
+    const generic = {
+      ...valid,
+      repo: 'example-org/example_repo',
+      language: 'rust',
+      verificationProfile: 'cargo-nextest.v1',
+      session: {
+        ...session,
+        repository: 'example-org/example_repo',
+        language: 'rust',
+        verificationProfile: 'cargo-nextest.v1',
+      },
+    };
+
+    expect(JinnRepoTaskSchema.parse(generic)).toEqual(generic);
+  });
+
+  it.each([
+    ' leading/repo',
+    'owner/repo ',
+    'https://github.com/owner/repo',
+    'owner//repo',
+    'owner/../repo',
+    '../owner/repo',
+    'owner/repo.git',
+    'owner/repo/extra',
+  ])('rejects unsafe Autopilot repository slug %s', (repo) => {
+    const session = valid.session as Record<string, unknown>;
+    expect(JinnRepoTaskSchema.safeParse({
+      ...valid,
+      repo,
+      verificationProfile: 'jinn-mono.v1',
+      session: {
+        ...session,
+        repository: repo,
+        language: 'typescript',
+        verificationProfile: 'jinn-mono.v1',
+      },
+    }).success).toBe(false);
+  });
+
+  it.each([
+    ['language', 'TypeScript'],
+    ['language', 'type script'],
+    ['language', '../typescript'],
+    ['verificationProfile', 'Jinn-Mono.v1'],
+    ['verificationProfile', 'jinn mono.v1'],
+    ['verificationProfile', '../jinn-mono.v1'],
+  ] as const)('rejects unsafe lowercase token %s=%s', (field, value) => {
+    const session = valid.session as Record<string, unknown>;
+    expect(JinnRepoTaskSchema.safeParse({
+      ...valid,
+      language: field === 'language' ? value : 'typescript',
+      verificationProfile:
+        field === 'verificationProfile' ? value : 'jinn-mono.v1',
+      session: {
+        ...session,
+        language: field === 'language' ? value : 'typescript',
+        verificationProfile:
+          field === 'verificationProfile' ? value : 'jinn-mono.v1',
+      },
+    }).success).toBe(false);
+  });
+
+  it.each([
+    ['repo', 'other/repo'],
+    ['language', 'rust'],
+    ['verificationProfile', 'cargo.v1'],
+  ] as const)('rejects outer/inner %s mismatch', (field, inner) => {
+    const session = valid.session as Record<string, unknown>;
+    expect(JinnRepoTaskSchema.safeParse({
+      ...valid,
+      verificationProfile: 'jinn-mono.v1',
+      session: {
+        ...session,
+        language: 'typescript',
+        verificationProfile: 'jinn-mono.v1',
+        [field === 'repo' ? 'repository' : field]: inner,
+      },
+    }).success).toBe(false);
+  });
+
+  it.each([
+    ['repo', 'other/repo'],
+    ['language', 'rust'],
+    ['verificationProfile', 'cargo.v1'],
+  ] as const)('rejects direct-branch outer/inner %s mismatch', (
+    field,
+    inner,
+  ) => {
+    const session = valid.session as Record<string, unknown>;
+    expect(JinnRepoAutopilotSessionTaskSchema.safeParse({
+      ...valid,
+      session: {
+        ...session,
+        [field === 'repo' ? 'repository' : field]: inner,
+      },
+    }).success).toBe(false);
+  });
+});
+
+describe('JinnRepoTaskSchema (SDK) — legacy profile isolation', () => {
+  it('keeps merged-pr and live-issue mono/TypeScript-only and rejects verificationProfile', () => {
+    const merged = {
+      schemaVersion: 'jinn-repo.v1',
+      instance_id: 'Jinn-Network__mono-1042',
+      repo: 'Jinn-Network/mono',
+      base_commit: 'a'.repeat(40),
+      merged_pr: 1042,
+      language: 'typescript',
+      problem_statement: 'p',
+      test_files: ['t.test.ts'],
+      test_cmd: 'yarn vitest run t.test.ts',
+    };
+    const live = {
+      schemaVersion: 'jinn-repo.v1',
+      source: 'live-issue',
+      instance_id: 'Jinn-Network__mono-1889',
+      repo: 'Jinn-Network/mono',
+      base_commit: 'a'.repeat(40),
+      language: 'typescript',
+      problem_statement: 'p',
+      issue_number: 1889,
+    };
+    for (const value of [merged, live]) {
+      expect(JinnRepoTaskSchema.safeParse({
+        ...value,
+        verificationProfile: 'jinn-mono.v1',
+      }).success).toBe(false);
+      expect(JinnRepoTaskSchema.safeParse({
+        ...value,
+        repo: 'other/repo',
+      }).success).toBe(false);
+      expect(JinnRepoTaskSchema.safeParse({
+        ...value,
+        language: 'rust',
+      }).success).toBe(false);
+    }
   });
 });

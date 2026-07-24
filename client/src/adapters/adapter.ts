@@ -9,6 +9,18 @@ import type {
 } from '../types/index.js';
 import type { Hex } from 'viem';
 import type { VerdictCode } from './mech/verdict-code.js';
+import type { SignedTaskV1 } from '../types/task-document.js';
+
+export interface RecoverTaskPostInput {
+  creatorSafeAddress: string;
+  signedTask: SignedTaskV1;
+  pendingTxHash?: Hex;
+}
+
+export interface PostTaskOptions {
+  beforeBroadcast?: () => void | Promise<void>;
+  onTransactionHash?: (txHash: Hex) => void | Promise<void>;
+}
 
 export interface ExecutionAdapter {
   readonly name: string;
@@ -16,7 +28,8 @@ export interface ExecutionAdapter {
   initialize(): Promise<void>;
 
   // Creator
-  postTask(state: Task): Promise<PostedTask>;
+  postTask(state: Task, options?: PostTaskOptions): Promise<PostedTask>;
+  recoverTaskPost?(input: RecoverTaskPostInput): Promise<PostedTask | null>;
 
   /**
    * Optional: returns the IPFS CID of the most recently posted Task payload.

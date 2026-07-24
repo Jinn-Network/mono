@@ -9,10 +9,15 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
-import { createCliExecutionContext } from '../execution-context.js';
+import {
+  createCliExecutionContext,
+  createCliReadOnlySignerContext,
+  pickPrimaryMechService,
+  type CliSignerContext,
+} from '../execution-context.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
 import type { Task } from '../../types/task.js';
-import type { TaskV1 } from '../../types/task-document.js';
+import { parseTaskV1, type TaskV1 } from '../../types/task-document.js';
 import { SOLVER_TYPES, unknownSolverTypeMessage } from '../../solver-types/index.js';
 import { signTaskV1 } from '../../tasks/signing.js';
 import { TaskPostingService } from '../../tasks/posting-service.js';
@@ -25,6 +30,156 @@ import {
   joinedDisplayName,
   solverTypeFromJoinedContract,
 } from '../../solver-nets/registry.js';
+import {
+  TaskSubmitRequestV1Schema,
+  TaskSubmitResultV1Schema,
+  type TaskSubmitRequestV1,
+} from '@jinn-network/sdk/autopilot';
+import {
+  assertMarketplaceTaskFunding,
+  assertMarketplaceTaskRequestFreshness,
+  resolveMarketplaceTaskSolverNet,
+  runMarketplaceTaskSubmitPreflight,
+} from '../../tasks/submit-preflight.js';
+import {
+  readMarketplaceTaskSelection,
+  writeMarketplaceTaskSelection,
+} from '../../tasks/submit-selection.js';
+import { createHttpDiscoveryAPI } from '../../discovery/http.js';
+import { fetchFromIpfs } from '../../adapters/mech/ipfs.js';
+import { getJinnRouterAddress } from '../../contracts/addresses.js';
+import {
+  getMechDeliveryRate,
+  getTimeoutBounds,
+} from '../../adapters/mech/contracts.js';
+import { runObserveAutopilotDelivery } from './tasks-observe-autopilot.js';
+
+function findNamedErrorCause(
+  error: unknown,
+  name: string,
+): Record<string, unknown> | undefined {
+  const seen = new Set<object>();
+  let current = error;
+  for (let depth = 0; depth < 8 && current && typeof current === 'object'; depth++) {
+    if (seen.has(current)) return undefined;
+    seen.add(current);
+    const value = current as Record<string, unknown>;
+    if (value['name'] === name) return value;
+    current = value['cause'];
+  }
+  return undefined;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : typeof error === 'object' && error !== null
+      && typeof (error as { message?: unknown }).message === 'string'
+      ? (error as { message: string }).message
+      : String(error);
+}
+
+function machinePreflightChecks(args: {
+  ctx: CommandContext;
+  config: ReturnType<typeof loadConfig>;
+  manifestCid: string;
+  signerContext: CliSignerContext;
+}) {
+  const signer = async () => args.signerContext;
+  let launchedPromise: ReturnType<ReturnType<typeof createHttpDiscoveryAPI>['listLaunchedSolverNets']> | undefined;
+  const launched = async () => {
+    const discovery = args.config.discovery;
+    if (discovery?.mode !== 'http' || !discovery.url) {
+      throw new Error('HTTP discovery indexer must be configured for machine Task submission');
+    }
+    launchedPromise ??= createHttpDiscoveryAPI({
+      url: discovery.url,
+    }).listLaunchedSolverNets({ status: ['launched'] });
+    return launchedPromise;
+  };
+  const primary = async () => {
+    const built = await signer();
+    const service = pickPrimaryMechService(built.fleetState.services);
+    if (!service?.safe_address || !service.mech_address) {
+      throw new Error('no operational creator Safe and Mech service is configured');
+    }
+    return service;
+  };
+  return {
+    creator: async () => {
+      await primary();
+    },
+    funds: async () => {
+      const [built, service] = await Promise.all([signer(), primary()]);
+      const agentAddress = privateKeyToAccount(
+        walletPrivateKeyAtIndex(built.mnemonic, service.index),
+      ).address;
+      const [balance, agentBalance, deliveryRate] = await Promise.all([
+        built.publicClient.getBalance({
+          address: getAddress(service.safe_address!),
+        }),
+        built.publicClient.getBalance({ address: agentAddress }),
+        getMechDeliveryRate(
+          built.publicClient,
+          getAddress(service.mech_address!),
+        ),
+      ]);
+      assertMarketplaceTaskFunding({
+        safeBalanceWei: balance,
+        agentBalanceWei: agentBalance,
+        solutionMaxDeliveryRateWei: deliveryRate,
+        verdictMaxDeliveryRateWei: deliveryRate,
+        maxClaims: 1,
+        agentGasReserveWei: built.chainConfig.minEoaGasEth,
+      });
+    },
+    rpc: async () => {
+      const built = await signer();
+      const [chainId] = await Promise.all([
+        built.publicClient.getChainId(),
+        built.publicClient.getBlockNumber(),
+      ]);
+      if (chainId !== built.chainConfig.chainId) {
+        throw new Error(`RPC chain ${chainId} does not match configured chain ${built.chainConfig.chainId}`);
+      }
+    },
+    contracts: async () => {
+      const [built, service] = await Promise.all([signer(), primary()]);
+      const router = (built.chainConfig.jinnRouter
+        ?? getJinnRouterAddress(built.chainConfig.chainId)) as `0x${string}`;
+      const [routerCode, mechCode] = await Promise.all([
+        built.publicClient.getBytecode({ address: router }),
+        built.publicClient.getBytecode({ address: getAddress(service.mech_address!) }),
+        getTimeoutBounds(
+          built.publicClient,
+          built.chainConfig.mechMarketplace as `0x${string}`,
+        ),
+      ]);
+      if (!routerCode || routerCode === '0x') throw new Error(`Router contract missing at ${router}`);
+      if (!mechCode || mechCode === '0x') {
+        throw new Error(`Mech contract missing at ${service.mech_address}`);
+      }
+    },
+    indexer: async () => {
+      await launched();
+    },
+    gateway: async () => {
+      await fetchFromIpfs(args.config.ipfsGatewayUrl, args.manifestCid);
+    },
+    solverNet: async () => {
+      const summaries = await launched();
+      const target = summaries.find((entry) => entry.manifestCid === args.manifestCid);
+      if (!target || target.status !== 'launched') {
+        throw new Error(`SolverNet ${args.manifestCid} is not live`);
+      }
+      if (target.contractId !== 'jinn-repo' || target.contractVersion !== 'v1') {
+        throw new Error(
+          `SolverNet ${args.manifestCid} is not compatible with jinn-repo.v1`,
+        );
+      }
+    },
+  };
+}
 
 async function runSubmit(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -38,6 +193,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
         'solver-net': { type: 'string' },
         'solver-type': { type: 'string' },
         'spec-file': { type: 'string' },
+        'request-file': { type: 'string' },
         'manifest-cid': { type: 'string' },
         'max-claims': { type: 'string' },
         'required-verdicts': { type: 'string' },
@@ -59,10 +215,81 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     return;
   }
 
-  const id = parsed.values.id as string | undefined;
-  const description = parsed.values.description as string | undefined;
-  const requestedSolverNet = parsed.values['solver-net'] as string | undefined;
-  const requestedSolverType = parsed.values['solver-type'] as string | undefined;
+  const requestFilePath = parsed.values['request-file'] as string | undefined;
+  if (
+    requestFilePath
+    && (
+      parsed.values.json !== true
+      || parsed.values.human === true
+    )
+  ) {
+    const field = parsed.values.human === true ? '--human' : '--json';
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: parsed.values.human === true
+          ? '--human is not supported for request-file submission'
+          : '--json is required for request-file submission',
+        exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+        details: {
+          field,
+          expected: parsed.values.human === true
+            ? 'omit --human'
+            : '--json',
+        },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+  const legacyLooseFlags = [
+    'id', 'description', 'solver-net', 'solver-type', 'spec-file',
+    'manifest-cid', 'max-claims', 'required-verdicts',
+  ] as const;
+  if (requestFilePath && legacyLooseFlags.some((flag) => parsed.values[flag] !== undefined)) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: '--request-file is mutually exclusive with legacy loose task flags',
+        exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+        details: { field: '--request-file', expected: 'no legacy task flags' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+  const dryRun = parsed.values['dry-run'] as boolean;
+  const yes = parsed.values.yes as boolean;
+  let machineRequest: TaskSubmitRequestV1 | undefined;
+  let machineRequestFreshnessError: unknown;
+  if (requestFilePath) {
+    try {
+      machineRequest = TaskSubmitRequestV1Schema.parse(
+        JSON.parse(readFileSync(resolve(requestFilePath), 'utf8')),
+      );
+    } catch (err) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: `Invalid request file: ${err instanceof Error ? err.message : String(err)}`,
+          exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+          details: { field: '--request-file' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    try {
+      assertMarketplaceTaskRequestFreshness(machineRequest);
+    } catch (err) {
+      machineRequestFreshnessError = err;
+    }
+  }
+
+  const id = machineRequest?.id ?? parsed.values.id as string | undefined;
+  const description = machineRequest?.description ?? parsed.values.description as string | undefined;
+  const requestedSolverNet = machineRequest?.solverNet ?? parsed.values['solver-net'] as string | undefined;
+  const requestedSolverType = machineRequest?.solverType ?? parsed.values['solver-type'] as string | undefined;
 
   if (!id) {
     emitEnvelope(
@@ -89,8 +316,56 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     return;
   }
 
-  const dryRun = parsed.values['dry-run'] as boolean;
-  const yes = parsed.values.yes as boolean;
+  if (machineRequestFreshnessError && dryRun) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: errorMessage(machineRequestFreshnessError),
+        exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+        details: { field: 'freshness' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  let frozenMachineSelection: ReturnType<typeof readMarketplaceTaskSelection> = null;
+  if (machineRequest) {
+    try {
+      frozenMachineSelection = readMarketplaceTaskSelection({
+        requestPath: requestFilePath!,
+        request: machineRequest,
+      });
+    } catch (err) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: err instanceof Error ? err.message : String(err),
+          exampleCli: 'jinn tasks submit --request-file request.json --dry-run --json',
+          details: { field: 'solverNetManifestCid' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    if (machineRequestFreshnessError && !frozenMachineSelection) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: errorMessage(machineRequestFreshnessError),
+          hint: 'Create a fresh marketplace Task request before retrying.',
+          exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+          details: {
+            field: 'freshness',
+            reason: 'policy_expired',
+            cause: errorMessage(machineRequestFreshnessError),
+          },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+  }
 
   // ── claim-policy override: --max-claims ─────────────────────────────────────
   // The on-chain `claimPolicy` defaults to a single attempt slot
@@ -159,7 +434,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   const solverTypeFromNet = matchedJoined
     ? solverTypeFromJoinedContract(matchedJoined)
     : undefined;
-  if (requestedSolverNet && !solverTypeFromNet) {
+  if (!machineRequest && requestedSolverNet && !solverTypeFromNet) {
     const available = Object.entries(config.joinedSolverNets ?? {})
       .map(([cid, entry]) => joinedDisplayName(cid, entry))
       .join('|');
@@ -173,6 +448,28 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       { writer: ctx.writer, exit: ctx.exit },
     );
     return;
+  }
+  let selectedMachineManifestCid: string | undefined;
+  if (machineRequest) {
+    try {
+      selectedMachineManifestCid = frozenMachineSelection?.solverNetManifestCid
+        ?? await resolveMarketplaceTaskSolverNet({
+          config,
+          explicitManifestCid: machineRequest.solverNetManifestCid,
+          requestedName: machineRequest.solverNet,
+        });
+    } catch (err) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: err instanceof Error ? err.message : String(err),
+          exampleCli: 'jinn tasks submit --request-file request.json --dry-run --json',
+          details: { field: 'solverNetManifestCid' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
   }
 
   const specFilePath = parsed.values['spec-file'] as string | undefined;
@@ -262,8 +559,20 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   }
 
   if (dryRun) {
-    const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
-    const service = raw.fleet?.services.find(s => isOperationalServiceStep(s.step));
+    let service: { safe_address?: string | null } | undefined;
+    let machineSignerContext: CliSignerContext | undefined;
+    if (machineRequest) {
+      const built = await createCliReadOnlySignerContext({ argv: ctx.argv, env: ctx.env });
+      if (!built.ok) {
+        emitEnvelope(built.envelope, { writer: ctx.writer, exit: ctx.exit });
+        return;
+      }
+      machineSignerContext = built.ctx;
+      service = pickPrimaryMechService(built.ctx.fleetState.services);
+    } else {
+      const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
+      service = raw.fleet?.services.find(s => isOperationalServiceStep(s.step));
+    }
     if (!service?.safe_address) {
       emitEnvelope(
         {
@@ -279,6 +588,28 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       return;
     }
     const creatorMultisig = getAddress(service.safe_address);
+    if (machineRequest) {
+      try {
+        await runMarketplaceTaskSubmitPreflight(machinePreflightChecks({
+          ctx,
+          config,
+          manifestCid: selectedMachineManifestCid!,
+          signerContext: machineSignerContext!,
+        }));
+      } catch (err) {
+        emitEnvelope(
+          {
+            code: 'transient_error',
+            message: err instanceof Error ? err.message : String(err),
+            hint: 'Resolve every failed machine Task submission dependency and retry the dry-run.',
+            exampleCli: 'jinn tasks submit --request-file request.json --dry-run --json',
+            details: { field: 'preflight' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+    }
     emitDryRun(ctx, {
       verb: 'tasks submit',
       description: `Would post task '${id}' from ${creatorMultisig}`,
@@ -289,6 +620,9 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
           creatorMultisig,
           asset: 'native',
           txCount: 1,
+          ...(selectedMachineManifestCid
+            ? { solverNetManifestCid: selectedMachineManifestCid }
+            : {}),
           ...(specOverlay ? { solverType: specOverlay.solverType, spec: specOverlay.spec } : {}),
         },
       ],
@@ -297,9 +631,47 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   }
 
   if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
+  if (machineRequest) {
+    try {
+      writeMarketplaceTaskSelection({
+        requestPath: requestFilePath!,
+        request: machineRequest,
+        solverNetManifestCid: selectedMachineManifestCid!,
+        ...(machineRequest.solverNet ? { solverNetName: machineRequest.solverNet } : {}),
+      });
+    } catch (err) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: err instanceof Error ? err.message : String(err),
+          exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+          details: { field: '--request-file' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+  }
 
   const built = await createCliExecutionContext({ argv: ctx.argv, env: ctx.env });
   if (!built.ok) {
+    if (machineRequestFreshnessError) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: errorMessage(machineRequestFreshnessError),
+          hint: 'Create a fresh marketplace Task request before retrying.',
+          exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+          details: {
+            field: 'freshness',
+            reason: 'policy_expired',
+            cause: errorMessage(machineRequestFreshnessError),
+          },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
     emitEnvelope(built.envelope, { writer: ctx.writer, exit: ctx.exit });
     return;
   }
@@ -312,7 +684,9 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     // canonical task envelope rather than a loose TaskPayload.
     const agentEoaPrivateKey = walletPrivateKeyAtIndex(mnemonic, primaryService.index);
     const agentEoaAddress = privateKeyToAccount(agentEoaPrivateKey).address;
-    const overlay = specOverlay ?? {};
+    const overlay = machineRequest
+      ? { solverType: machineRequest.solverType, window: machineRequest.window, spec: machineRequest.spec }
+      : (specOverlay ?? {});
     const taskKind = overlay.solverType ?? requestedSolverType ?? solverTypeFromNet ?? 'prediction.v1';
     const taskWindow = overlay.window ?? { startTs: Date.now(), endTs: Date.now() + 86_400_000 };
     // Task 24 (spec/2026-05-05-solvernet-creation-and-launch.md §14): the
@@ -321,10 +695,9 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     // --manifest-cid flag → joinedSolverNets[--solver-net].manifestCid.
     // Without one we refuse to submit; admin paths posting orphan tasks
     // need to supply a cid.
-    const explicitManifestCid = parsed.values['manifest-cid'] as string | undefined;
-    const joinedManifestCid = requestedSolverNet
-      ? config.joinedSolverNets?.[requestedSolverNet]?.manifestCid
-      : undefined;
+    const explicitManifestCid = selectedMachineManifestCid
+      ?? parsed.values['manifest-cid'] as string | undefined;
+    const joinedManifestCid = matchedJoined?.manifestCid;
     const solverNetManifestCid = explicitManifestCid ?? joinedManifestCid;
     if (!solverNetManifestCid) {
       emitEnvelope(
@@ -351,7 +724,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     // auto-generator's policy (parallel, maxClaims = maxClaimsPerOperator). The
     // default (no flag) stays single-attempt exclusive — unchanged production
     // behaviour for one-shot SolverTypes.
-    const claimPolicy: TaskV1['claimPolicy'] = {
+    const claimPolicy: TaskV1['claimPolicy'] = machineRequest?.claimPolicy ?? {
       mode: maxClaimsOverride && maxClaimsOverride > 1 ? 'parallel' : 'exclusive',
       maxClaims: maxClaimsOverride ?? 1,
       maxClaimsPerOperator: maxClaimsOverride ?? 1,
@@ -363,7 +736,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
         ? { requiredVerdicts: requiredVerdictsOverride }
         : {}),
     };
-    const taskDoc: TaskV1 = {
+    const taskDoc = parseTaskV1({
       schemaVersion: 'task.v1',
       id,
       solverType: taskKind,
@@ -380,8 +753,8 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
         safeAddress: getAddress(safe),
         agentEoa: agentEoaAddress,
       },
-      createdAt: Date.now(),
-    };
+      createdAt: machineRequest?.createdAt ?? Date.now(),
+    });
     const signedTask = await signTaskV1(taskDoc, agentEoaPrivateKey);
     const task: Task = {
       id,
@@ -402,27 +775,48 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     const postResult = await postingService.postCandidate(
       {
         task,
-        sourceKey: `manual:${id}`,
+        sourceKey: machineRequest ? machineRequest.id : `manual:${id}`,
         postingPolicy: { kind: 'once_per_safe' },
-        sourceMeta: { solverType: task.solverType, note: 'manual' },
+        sourceMeta: {
+          solverType: task.solverType,
+          note: machineRequest ? 'machine' : 'manual',
+          ...(machineRequest ? { request: machineRequest } : {}),
+        },
       },
       {
         creatorSafeAddress: safe,
+        ...(machineRequest && machineRequestFreshnessError
+          ? { recoveryOnly: true }
+          : {}),
+        ...(machineRequest
+          ? {
+              beforeBroadcast: () =>
+                assertMarketplaceTaskRequestFreshness(machineRequest),
+            }
+          : {}),
       },
     );
+    const rawResult = {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      verb: 'tasks submit',
+      id,
+      creatorMultisig: getAddress(safe),
+      taskId: postResult.taskId,
+      taskCid: postResult.taskCid,
+      creationTx: postResult.txHash,
+      creationBlock: postResult.blockNumber,
+      solverNetManifestCid,
+      status: postResult.idempotent ? 'already_submitted' : 'submitted',
+      attemptId: postResult.attemptId,
+      attemptNumber: postResult.attemptNumber,
+      idempotent: postResult.idempotent,
+    };
+    const result = machineRequest
+      ? TaskSubmitResultV1Schema.parse(rawResult)
+      : rawResult;
     emitResult(
-      {
-        schemaVersion: 1,
-        generatedAt: new Date().toISOString(),
-        verb: 'tasks submit',
-        id,
-        creatorMultisig: getAddress(safe),
-        taskId: postResult.taskId,
-        status: postResult.idempotent ? 'already_submitted' : 'submitted',
-        attemptId: postResult.attemptId,
-        attemptNumber: postResult.attemptNumber,
-        idempotent: postResult.idempotent,
-      },
+      result,
       (v) => {
         const value = v as { id: string; taskId: string; creatorMultisig: string };
         return postResult.idempotent
@@ -438,14 +832,95 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       },
     );
   } catch (e) {
-    if (isRecoverableTransactionError(e)) {
+    const policyExpiration = findNamedErrorCause(
+      e,
+      'MarketplaceTaskRequestExpiredError',
+    );
+    const recoveryOnly = findNamedErrorCause(e, 'TaskPostRecoveryOnlyError');
+    const immutableMismatch = findNamedErrorCause(
+      e,
+      'TaskPostImmutableCandidateMismatchError',
+    );
+    if (
+      policyExpiration
+      || recoveryOnly
+      || (machineRequestFreshnessError && immutableMismatch)
+    ) {
+      const freshnessError =
+        policyExpiration
+        ?? immutableMismatch
+        ?? machineRequestFreshnessError
+        ?? recoveryOnly;
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: errorMessage(freshnessError),
+          hint: 'Create a fresh marketplace Task request before retrying.',
+          exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+          details: {
+            field: 'freshness',
+            reason: 'policy_expired',
+            cause: errorMessage(freshnessError),
+          },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    const broadcastUncertain = findNamedErrorCause(
+      e,
+      'TaskPostBroadcastUncertainError',
+    );
+    if (broadcastUncertain) {
+      emitEnvelope(
+        {
+          code: 'transient_error',
+          message: errorMessage(broadcastUncertain),
+          hint:
+            'Retry later to recover the exact TaskCreated event; this request will not broadcast again while its outcome is uncertain.',
+          exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+          details: {
+            reason: 'broadcast_uncertain',
+            cause: errorMessage(broadcastUncertain),
+            ...(typeof broadcastUncertain['broadcastIntentAt'] === 'string'
+              ? { broadcastIntentAt: broadcastUncertain['broadcastIntentAt'] }
+              : {}),
+          },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    const ownershipLost = findNamedErrorCause(e, 'TaskPostOwnershipLostError');
+    const pendingTxHash =
+      e && typeof e === 'object'
+      && (
+        (e as { name?: unknown }).name === 'PendingTaskSubmissionError'
+        || (e as { name?: unknown }).name === 'SafePostBroadcastHookError'
+      )
+      && typeof (e as { txHash?: unknown }).txHash === 'string'
+        ? (e as { txHash: string }).txHash
+        : undefined;
+    if (ownershipLost || pendingTxHash || isRecoverableTransactionError(e)) {
       emitEnvelope(
         {
           code: 'transient_error',
           message: e instanceof Error ? e.message : String(e),
-          hint: 'Retry when the RPC endpoint is healthy or fees clear.',
-          exampleCli: 'jinn tasks submit --id my-task --description "..." --yes',
-          details: { cause: e instanceof Error ? e.message : String(e) },
+          hint: ownershipLost
+            ? 'Retry after the competing Task submission owner finishes or its lease expires.'
+            : pendingTxHash
+              ? 'Retry to reconcile this exact submitted transaction; a new Safe transaction will not be broadcast while it remains pending.'
+              : 'Retry when the RPC endpoint is healthy or fees clear.',
+          exampleCli: machineRequest
+            ? 'jinn tasks submit --request-file request.json --yes --json'
+            : 'jinn tasks submit --id my-task --description "..." --yes',
+          details: {
+            cause: e instanceof Error ? e.message : String(e),
+            ...(ownershipLost ? { reason: 'ownership_lost' } : {}),
+            ...(pendingTxHash ? { txHash: pendingTxHash } : {}),
+          },
         },
         { writer: ctx.writer, exit: ctx.exit },
       );
@@ -470,6 +945,9 @@ async function run(ctx: CommandContext): Promise<void> {
   }
   if (subverb === 'submit') {
     return runSubmit({ ...ctx, argv: rest });
+  }
+  if (subverb === 'observe-autopilot-delivery') {
+    return runObserveAutopilotDelivery({ ...ctx, argv: rest });
   }
   if (subverb === 'list') {
     const config = loadConfig(getConfigPathFromArgs(rest));
@@ -521,7 +999,10 @@ async function run(ctx: CommandContext): Promise<void> {
       code: 'invalid_invocation',
       message: `Unknown tasks subverb: ${subverb}`,
       exampleCli: 'jinn tasks submit --id my-task --description "..." --solver-net prediction',
-      details: { field: 'subverb', expected: 'submit|list|show' },
+      details: {
+        field: 'subverb',
+        expected: 'submit|observe-autopilot-delivery|list|show',
+      },
     },
     { writer: ctx.writer, exit: ctx.exit },
   );
@@ -532,6 +1013,8 @@ const command: CommandModule = {
   summary: 'Submit and inspect Tasks',
   helpText: `Usage:
   jinn tasks submit --id <id> --description <text> (--solver-net <name> | --solver-type <type>) [--spec-file <path>] [--dry-run] [--yes] [--human]
+  jinn tasks submit --request-file <path> [--dry-run] --yes --json
+  jinn tasks observe-autopilot-delivery --expectation-file <path> --json
   jinn tasks list
   jinn tasks show <id>
 

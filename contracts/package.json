@@ -6,6 +6,7 @@
   "packageManager": "yarn@4.13.0",
   "type": "module",
   "scripts": {
+    "typecheck": "hardhat compile",
     "compile": "hardhat build",
     "test": "hardhat test"
   },

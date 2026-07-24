@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "jinn-autopilot-marketplace-adoption.v1",
+  "disposition": "rejected",
+  "role": "solution",
+  "reason": "stale-head",
+  "detail": "The branch head moved before adoption.",
+  "taskId": "501",
+  "attemptIndex": 0,
+  "requestId": "0xrequest",
+  "deliveryEnvelopeCid": "bafy-envelope",
+  "v2AttemptId": "123e4567-e89b-42d3-a456-426614174001",
+  "prNumber": 2101,
+  "claimOid": "1111111111111111111111111111111111111111",
+  "expectedHead": "2222222222222222222222222222222222222222",
+  "recordedAt": "2026-07-23T22:00:00.000Z"
+}

@@ -40,7 +40,7 @@ import {
   type PublicClient,
 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
-import type { DiscoveryAPI, ClaimableTaskCandidate, InstanceClaimCount, TaskStatusSnapshot, VerdictTallyResult, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow, TaskPostCounts } from './types.js';
+import type { DiscoveryAPI, ClaimableTaskCandidate, InstanceClaimCount, TaskStatusSnapshot, VerdictTallyResult, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow, TaskPostCounts, AutopilotDeliveryRole, AutopilotDeliveryCandidateLookup } from './types.js';
 import { DiscoveryUnavailableError, TASK_POST_WINDOW_BLOCKS, bucketTaskPostCounts } from './types.js';
 import type { EnvelopeRef, CorpusQuery } from '../corpus/types.js';
 import { runOnchainCorpusQuery, DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK } from '../corpus/onchain-query.js';
@@ -588,6 +588,19 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     return opts.publicClient ?? createPublicClient({
       chain: chainForId(opts.chainId),
       transport: http(opts.rpcUrl),
+    });
+  }
+
+  function getAutopilotDeliveryCandidates(args: {
+    chainId: number;
+    taskId: string;
+    role: AutopilotDeliveryRole;
+  }): Promise<AutopilotDeliveryCandidateLookup> {
+    return Promise.resolve({
+      status: 'pending',
+      reason: 'exact-indexer-required',
+      taskId: args.taskId,
+      role: args.role,
     });
   }
 
@@ -1543,6 +1556,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
   }
 
   return {
+    getAutopilotDeliveryCandidates,
     findClaimableTasks,
     listLaunchedSolverNets,
     getLifecycleStatus,

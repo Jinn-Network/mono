@@ -28,6 +28,8 @@ import type {
   PublishedArtifact,
   CodeDigestRewardRow,
   TaskPostCounts,
+  AutopilotDeliveryCandidateLookup,
+  AutopilotDeliveryRole,
 } from './types.js';
 import { DiscoveryUnavailableError, TASK_POST_WINDOW_BLOCKS, bucketTaskPostCounts } from './types.js';
 import { manifestDigestForCid } from '../adapters/mech/digest.js';
@@ -107,6 +109,106 @@ const ATTEMPTS_PAGE_LIMIT = 1000;
  * the resulting count is a lower bound; see `getSolverNetOperatorCount`.
  */
 const MAX_OPERATOR_COUNT_TASK_PAGES = 50;
+
+/**
+ * Exact Autopilot recovery queries. Each leg is bounded at two rows so the
+ * client can distinguish a unique join from contradictory indexer state
+ * without a recent/global scan.
+ */
+const EXACT_AUTOPILOT_TASK_QUERY = `
+query ExactAutopilotTask($taskId: String!, $chainId: Int!) {
+  tasks(
+    where: { id: $taskId, chainId: $chainId },
+    limit: 2
+  ) {
+    items {
+      id
+      chainId
+      taskCidDigest
+      createdAtBlock
+      createdAtTx
+    }
+  }
+}
+`;
+
+const EXACT_AUTOPILOT_SOLUTION_ATTEMPTS_QUERY = `
+query ExactAutopilotSolutionAttempts($taskId: String!, $chainId: Int!) {
+  attempts(
+    where: { taskId: $taskId, chainId: $chainId },
+    limit: 2
+  ) {
+    items {
+      taskId
+      chainId
+      attemptIndex
+      requestId
+      operator
+      createdAtBlock
+    }
+  }
+}
+`;
+
+const EXACT_AUTOPILOT_ENVELOPES_QUERY = `
+query ExactAutopilotEnvelopeMetadata($requestId: String!, $chainId: Int!) {
+  attemptEnvelopeMetas(
+    where: { requestId: $requestId, chainId: $chainId },
+    limit: 2
+  ) {
+    items {
+      requestId
+      chainId
+      manifestCid
+      publisherAgentId
+      manifestHash
+      enrichedAtBlock
+    }
+  }
+}
+`;
+
+const EXACT_AUTOPILOT_VERDICTS_QUERY = `
+query ExactAutopilotVerdicts($taskId: String!, $chainId: Int!) {
+  verdicts(
+    where: { taskId: $taskId, chainId: $chainId },
+    limit: 2
+  ) {
+    items {
+      taskId
+      chainId
+      attemptIndex
+      verdictIndex
+      requestId
+      evaluator
+      verdictCode
+      createdAtBlock
+    }
+  }
+}
+`;
+
+const EXACT_AUTOPILOT_VERDICT_ENVELOPES_QUERY = `
+query ExactAutopilotVerdictEnvelopeMetadata($taskId: String!, $chainId: Int!) {
+  verdictEnvelopeMetas(
+    where: { taskId: $taskId, chainId: $chainId },
+    limit: 2
+  ) {
+    items {
+      taskId
+      chainId
+      attemptIndex
+      verdictIndex
+      requestId
+      evaluator
+      manifestCid
+      publisherAgentId
+      manifestHash
+      enrichedAtBlock
+    }
+  }
+}
+`;
 
 /** Page cap for the task-post-rate scan (1000 rows/page → 50k recent tasks). */
 const MAX_TASK_POST_PAGES = 50;
@@ -512,6 +614,76 @@ interface MostRecentTaskPage {
   };
 }
 
+interface ExactAutopilotTaskPage {
+  tasks: {
+    items: Array<{
+      id: string;
+      chainId: number;
+      taskCidDigest: string;
+      createdAtBlock: string | number;
+      createdAtTx: string;
+    }>;
+  };
+}
+
+interface ExactAutopilotAttemptsPage {
+  attempts: {
+    items: Array<{
+      taskId: string;
+      chainId: number;
+      attemptIndex: number;
+      requestId: string;
+      operator: string;
+      createdAtBlock: string | number;
+    }>;
+  };
+}
+
+interface ExactAutopilotEnvelopesPage {
+  attemptEnvelopeMetas: {
+    items: Array<{
+      requestId: string;
+      chainId: number;
+      manifestCid: string;
+      publisherAgentId: string;
+      manifestHash: string;
+      enrichedAtBlock: string | number;
+    }>;
+  };
+}
+
+interface ExactAutopilotVerdictsPage {
+  verdicts: {
+    items: Array<{
+      taskId: string;
+      chainId: number;
+      attemptIndex: number;
+      verdictIndex: number;
+      requestId: string;
+      evaluator: string;
+      verdictCode: number;
+      createdAtBlock: string | number;
+    }>;
+  };
+}
+
+interface ExactAutopilotVerdictEnvelopesPage {
+  verdictEnvelopeMetas: {
+    items: Array<{
+      taskId: string;
+      chainId: number;
+      attemptIndex: number;
+      verdictIndex: number;
+      requestId: string;
+      evaluator: string;
+      manifestCid: string;
+      publisherAgentId: string;
+      manifestHash: string;
+      enrichedAtBlock: string | number;
+    }>;
+  };
+}
+
 // ── Plug-in publication queries (attd) ───────────────────────────────────────
 
 const LIST_PLUGIN_PUBLICATIONS_QUERY = `
@@ -689,6 +861,21 @@ function isHex(value: string | undefined): value is `0x${string}` {
   return typeof value === 'string' && /^0x[0-9a-fA-F]+$/.test(value);
 }
 
+function isBytes32(value: string | undefined): value is `0x${string}` {
+  return typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value);
+}
+
+function isAddress(value: string | undefined): value is `0x${string}` {
+  return typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value);
+}
+
+function parseExactBlock(value: string | number | null | undefined): number | undefined {
+  const parsed = parseOptionalNumber(value);
+  return parsed !== undefined && Number.isSafeInteger(parsed) && parsed >= 0
+    ? parsed
+    : undefined;
+}
+
 async function postGql<T>(
   url: string,
   fetchImpl: typeof fetch,
@@ -809,6 +996,225 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     if (!res.ok) {
       throw new DiscoveryUnavailableError(`indexer not ready: ${res.status}`);
     }
+  }
+
+  async function getAutopilotDeliveryCandidates(args: {
+    chainId: number;
+    taskId: string;
+    role: AutopilotDeliveryRole;
+  }): Promise<AutopilotDeliveryCandidateLookup> {
+    const pending = (
+      reason: Extract<AutopilotDeliveryCandidateLookup, { status: 'pending' }>['reason'],
+    ): AutopilotDeliveryCandidateLookup => ({
+      status: 'pending',
+      reason,
+      taskId: args.taskId,
+      role: args.role,
+    });
+    const contradiction = (
+      reason: Extract<AutopilotDeliveryCandidateLookup, { status: 'contradiction' }>['reason'],
+    ): AutopilotDeliveryCandidateLookup => ({
+      status: 'contradiction',
+      reason,
+      taskId: args.taskId,
+      role: args.role,
+    });
+
+    if (
+      !Number.isSafeInteger(args.chainId)
+      || args.chainId < 0
+      || !/^(0|[1-9][0-9]*)$/.test(args.taskId)
+    ) {
+      return contradiction('inconsistent-indexer-data');
+    }
+
+    await ensureReady();
+
+    const taskData = await postGql<ExactAutopilotTaskPage>(
+      gqlUrl,
+      fetchImpl,
+      EXACT_AUTOPILOT_TASK_QUERY,
+      { taskId: args.taskId, chainId: args.chainId },
+    );
+    const taskRows = taskData.tasks?.items ?? [];
+    if (taskRows.length === 0) return pending('task-not-indexed');
+    if (taskRows.length !== 1) return contradiction('multiple-tasks');
+    const taskRow = taskRows[0];
+    const taskCreatedAtBlock = parseExactBlock(taskRow.createdAtBlock);
+    if (
+      taskRow.id !== args.taskId
+      || taskRow.chainId !== args.chainId
+      || !isBytes32(taskRow.taskCidDigest)
+      || !isBytes32(taskRow.createdAtTx)
+      || taskCreatedAtBlock === undefined
+    ) {
+      return contradiction('inconsistent-indexer-data');
+    }
+
+    const attemptData = await postGql<ExactAutopilotAttemptsPage>(
+      gqlUrl,
+      fetchImpl,
+      EXACT_AUTOPILOT_SOLUTION_ATTEMPTS_QUERY,
+      { taskId: args.taskId, chainId: args.chainId },
+    );
+    const attemptRows = attemptData.attempts?.items ?? [];
+    if (attemptRows.length === 0) return pending('attempt-not-indexed');
+    if (attemptRows.length !== 1) return contradiction('multiple-attempts');
+    const attemptRow = attemptRows[0];
+    const attemptCreatedAtBlock = parseExactBlock(attemptRow.createdAtBlock);
+    if (
+      attemptRow.taskId !== args.taskId
+      || attemptRow.chainId !== args.chainId
+      || !Number.isSafeInteger(attemptRow.attemptIndex)
+      || attemptRow.attemptIndex < 0
+      || !isBytes32(attemptRow.requestId)
+      || !isAddress(attemptRow.operator)
+      || attemptCreatedAtBlock === undefined
+      || attemptCreatedAtBlock < taskCreatedAtBlock
+    ) {
+      return contradiction('inconsistent-indexer-data');
+    }
+
+    if (args.role === 'verdict') {
+      // The evaluation metadata anchor exists before adoption and Router
+      // settlement. It is therefore the authoritative pre-adoption source for
+      // the evaluation request and evaluator Safe. A verdict row is only an
+      // optional postcondition cross-check once claimDelivery has happened.
+      const envelopeData = await postGql<ExactAutopilotVerdictEnvelopesPage>(
+        gqlUrl,
+        fetchImpl,
+        EXACT_AUTOPILOT_VERDICT_ENVELOPES_QUERY,
+        { taskId: args.taskId, chainId: args.chainId },
+      );
+      const envelopeRows = envelopeData.verdictEnvelopeMetas?.items ?? [];
+      if (envelopeRows.length === 0) return pending('envelope-not-indexed');
+      if (envelopeRows.length !== 1) return contradiction('multiple-envelopes');
+      const envelopeRow = envelopeRows[0];
+      const enrichedAtBlock = parseExactBlock(envelopeRow.enrichedAtBlock);
+      if (
+        envelopeRow.taskId !== args.taskId
+        || envelopeRow.chainId !== args.chainId
+        || envelopeRow.attemptIndex !== attemptRow.attemptIndex
+        || !Number.isSafeInteger(envelopeRow.verdictIndex)
+        || envelopeRow.verdictIndex < 0
+        || !isBytes32(envelopeRow.requestId)
+        || envelopeRow.requestId.toLowerCase() === attemptRow.requestId.toLowerCase()
+        || !isAddress(envelopeRow.evaluator)
+        || typeof envelopeRow.manifestCid !== 'string'
+        || envelopeRow.manifestCid.length === 0
+        || !/^[1-9][0-9]*$/.test(envelopeRow.publisherAgentId)
+        || !isBytes32(envelopeRow.manifestHash)
+        || enrichedAtBlock === undefined
+        || enrichedAtBlock < attemptCreatedAtBlock
+      ) {
+        return contradiction('inconsistent-indexer-data');
+      }
+
+      const verdictData = await postGql<ExactAutopilotVerdictsPage>(
+        gqlUrl,
+        fetchImpl,
+        EXACT_AUTOPILOT_VERDICTS_QUERY,
+        { taskId: args.taskId, chainId: args.chainId },
+      );
+      const verdictRows = verdictData.verdicts?.items ?? [];
+      if (verdictRows.length > 1) return contradiction('multiple-verdicts');
+      let verdictCreatedAtBlock: number | null = null;
+      if (verdictRows.length === 1) {
+        const verdictRow = verdictRows[0];
+        verdictCreatedAtBlock = parseExactBlock(verdictRow.createdAtBlock) ?? null;
+        if (
+          verdictRow.taskId !== args.taskId
+          || verdictRow.chainId !== args.chainId
+          || verdictRow.attemptIndex !== envelopeRow.attemptIndex
+          || verdictRow.verdictIndex !== envelopeRow.verdictIndex
+          || !isBytes32(verdictRow.requestId)
+          || verdictRow.requestId.toLowerCase() !== envelopeRow.requestId.toLowerCase()
+          || !isAddress(verdictRow.evaluator)
+          || verdictRow.evaluator.toLowerCase() !== envelopeRow.evaluator.toLowerCase()
+          || !Number.isSafeInteger(verdictRow.verdictCode)
+          || verdictCreatedAtBlock === null
+          || verdictCreatedAtBlock < attemptCreatedAtBlock
+        ) {
+          return contradiction('inconsistent-indexer-data');
+        }
+      }
+
+      return {
+        status: 'ready',
+        role: args.role,
+        task: {
+          taskId: taskRow.id,
+          taskCidDigest: taskRow.taskCidDigest,
+          createdAtBlock: taskCreatedAtBlock,
+          createdAtTx: taskRow.createdAtTx,
+        },
+        attempt: {
+          taskId: attemptRow.taskId,
+          attemptIndex: envelopeRow.attemptIndex,
+          requestId: envelopeRow.requestId,
+          operator: envelopeRow.evaluator,
+          createdAtBlock: verdictCreatedAtBlock,
+        },
+        solutionOperator: attemptRow.operator,
+        envelope: {
+          requestId: envelopeRow.requestId,
+          manifestCid: envelopeRow.manifestCid,
+          publisherAgentId: envelopeRow.publisherAgentId,
+          manifestHash: envelopeRow.manifestHash,
+          enrichedAtBlock,
+        },
+      };
+    }
+
+    const envelopeData = await postGql<ExactAutopilotEnvelopesPage>(
+      gqlUrl,
+      fetchImpl,
+      EXACT_AUTOPILOT_ENVELOPES_QUERY,
+      { requestId: attemptRow.requestId, chainId: args.chainId },
+    );
+    const envelopeRows = envelopeData.attemptEnvelopeMetas?.items ?? [];
+    if (envelopeRows.length === 0) return pending('envelope-not-indexed');
+    if (envelopeRows.length !== 1) return contradiction('multiple-envelopes');
+    const envelopeRow = envelopeRows[0];
+    const enrichedAtBlock = parseExactBlock(envelopeRow.enrichedAtBlock);
+    if (
+      !isBytes32(envelopeRow.requestId)
+      || envelopeRow.requestId.toLowerCase() !== attemptRow.requestId.toLowerCase()
+      || envelopeRow.chainId !== args.chainId
+      || typeof envelopeRow.manifestCid !== 'string'
+      || envelopeRow.manifestCid.length === 0
+      || !/^(0|[1-9][0-9]*)$/.test(envelopeRow.publisherAgentId)
+      || !isBytes32(envelopeRow.manifestHash)
+      || enrichedAtBlock === undefined
+      || enrichedAtBlock < attemptCreatedAtBlock
+    ) {
+      return contradiction('inconsistent-indexer-data');
+    }
+    return {
+      status: 'ready',
+      role: args.role,
+      task: {
+        taskId: taskRow.id,
+        taskCidDigest: taskRow.taskCidDigest,
+        createdAtBlock: taskCreatedAtBlock,
+        createdAtTx: taskRow.createdAtTx,
+      },
+      attempt: {
+        taskId: attemptRow.taskId,
+        attemptIndex: attemptRow.attemptIndex,
+        requestId: attemptRow.requestId,
+        operator: attemptRow.operator,
+        createdAtBlock: attemptCreatedAtBlock,
+      },
+      solutionOperator: attemptRow.operator,
+      envelope: {
+        requestId: envelopeRow.requestId,
+        manifestCid: envelopeRow.manifestCid,
+        publisherAgentId: envelopeRow.publisherAgentId,
+        manifestHash: envelopeRow.manifestHash,
+        enrichedAtBlock,
+      },
+    };
   }
 
   // ── findClaimableTasks ────────────────────────────────────────────────────
@@ -1448,6 +1854,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   }
 
   return {
+    getAutopilotDeliveryCandidates,
     findClaimableTasks,
     listLaunchedSolverNets,
     getLifecycleStatus,

@@ -125,6 +125,14 @@ function buildScriptClosure(): string[] {
 }
 
 describe('client Docker build context', () => {
+  it('ships the verified Claude safe-mode release and probes its capability at build time', () => {
+    expect(dockerfile).toContain(
+      'npm install -g @anthropic-ai/claude-code@2.1.216',
+    );
+    expect(dockerfile).toContain('claude --version');
+    expect(dockerfile).toContain("grep -F -- '--safe-mode'");
+  });
+
   it('does not retain the extracted harness-layer workspace', () => {
     expect(
       clientLockfile.includes(
