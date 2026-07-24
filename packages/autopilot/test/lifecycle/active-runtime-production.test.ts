@@ -571,7 +571,7 @@ describe('production active runtime preflight', () => {
       };
       const marketplaceSolutionObserver = vi.fn(async () => observation);
       const marketplaceMutationAdopter = vi.fn(async () => ({
-        status: 'rejected' as const,
+        status: 'accepted' as const,
       }));
       const runtime = makeProductionActiveRuntime({
         repositoryPath: '/repo',
@@ -612,7 +612,193 @@ describe('production active runtime preflight', () => {
       });
       expect(marketplaceBackend.recover).not.toHaveBeenCalled();
       expect(JSON.parse(readFileSync(manifestPath, 'utf8')))
-        .toMatchObject({ processState: 'exited' });
+        .toMatchObject({ processState: 'running' });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('adopts the evaluator Verdict without recovering or submitting a second Task', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'autopilot-marketplace-verdict-'));
+    try {
+      const attemptId = '44444444-4444-4444-8444-444444444444';
+      const attemptDir = join(
+        root,
+        'v2',
+        'runner-a',
+        'review',
+        `pr-84-${attemptId}`,
+      );
+      mkdirSync(attemptDir, { recursive: true });
+      const manifestPath = join(attemptDir, 'manifest.json');
+      const originManifestPath = join(root, 'origin-manifest.json');
+      const requestFile = join(attemptDir, 'marketplace-request.json');
+      writeFileSync(requestFile, '{}\n');
+      writeFileSync(originManifestPath, `${JSON.stringify({
+        version: 2,
+        attemptId: '66666666-6666-4666-8666-666666666666',
+        runnerId: 'runner-a',
+        host: 'host-a',
+        phase: 'implement',
+        subject: 'issue-42',
+        issueNumber: 42,
+        prNumber: 84,
+        branch: 'autopilot/issue-42',
+        targetBase: 'next',
+        expectedHead: '1'.repeat(40),
+        claimOid: '1'.repeat(40),
+        selectedLogin: 'implementation-bot',
+        repository: {
+          root: '/repo',
+          gitCommonDir: '/repo/.git',
+          remoteName: 'jinn-autopilot-v2',
+          remoteUrlHash: '2'.repeat(64),
+        },
+        execution: {
+          backend: 'marketplace',
+          taskId: 'task-42',
+          taskCid: 'bafy-task-42',
+          deadline: '2026-07-20T13:30:00.000Z',
+          requestFile,
+          creationTransactionHash: `0x${'a'.repeat(64)}`,
+          creationBlockNumber: 120,
+          solverNetManifestCid: 'bafy-solvernet',
+          solutionOperatorAddress: `0x${'1'.repeat(40)}`,
+          solutionPublisherAgentId: '7',
+        },
+        processState: 'running',
+        pid: null,
+        paths: {
+          attemptDir: root,
+          worktree: join(root, 'origin-worktree'),
+          manifest: originManifestPath,
+          log: join(root, 'origin.log'),
+          ghConfigDir: join(root, 'origin-gh-config'),
+          askpass: join(root, 'origin-askpass'),
+          tokenFile: join(root, 'origin-token'),
+        },
+        timestamps: {
+          createdAt: NOW.toISOString(),
+          updatedAt: NOW.toISOString(),
+          childStartedAt: NOW.toISOString(),
+        },
+      }, null, 2)}\n`);
+      writeFileSync(manifestPath, `${JSON.stringify({
+        version: 2,
+        attemptId,
+        runnerId: 'runner-a',
+        host: 'host-a',
+        phase: 'review',
+        subject: 'pr-84',
+        issueNumber: 42,
+        prNumber: 84,
+        branch: 'autopilot/issue-42',
+        targetBase: 'next',
+        expectedHead: '4'.repeat(40),
+        claimOid: '5'.repeat(40),
+        reviewGeneration: '55555555-5555-4555-8555-555555555555',
+        reviewRefOid: '5'.repeat(40),
+        reviewApprovalPolicy: 'approve-eligible',
+        selectedLogin: 'implementation-bot',
+        repository: {
+          root: '/repo',
+          gitCommonDir: '/repo/.git',
+          remoteName: 'jinn-autopilot-v2',
+          remoteUrlHash: '2'.repeat(64),
+        },
+        execution: {
+          backend: 'marketplace',
+          taskId: 'task-42',
+          taskCid: 'bafy-task-42',
+          deadline: '2026-07-20T13:30:00.000Z',
+          requestFile,
+          creationTransactionHash: `0x${'a'.repeat(64)}`,
+          creationBlockNumber: 120,
+          solverNetManifestCid: 'bafy-solvernet',
+          originManifestPath,
+          solutionOperatorAddress: `0x${'1'.repeat(40)}`,
+          solutionPublisherAgentId: '7',
+        },
+        processState: 'running',
+        pid: null,
+        paths: {
+          attemptDir,
+          worktree: join(attemptDir, 'worktree'),
+          manifest: manifestPath,
+          log: join(attemptDir, 'session.log'),
+          ghConfigDir: join(attemptDir, 'gh-config'),
+          askpass: join(attemptDir, 'askpass'),
+          tokenFile: join(attemptDir, 'gh-token'),
+        },
+        timestamps: {
+          createdAt: NOW.toISOString(),
+          updatedAt: NOW.toISOString(),
+          childStartedAt: NOW.toISOString(),
+        },
+      }, null, 2)}\n`);
+      const marketplaceBackend = {
+        start: vi.fn(),
+        recoverPreparing: vi.fn(),
+        recover: vi.fn(),
+        cancel: vi.fn(),
+        preflight: vi.fn(async () => ({ ok: true as const })),
+      };
+      const verdict = {
+        status: 'verified' as const,
+        delivery: {},
+      };
+      const marketplaceVerdictObserver = vi.fn(async () => verdict);
+      const marketplaceReviewAdopter = vi.fn(async () => ({
+        status: 'adopted' as const,
+        operation: 'review-verdict' as const,
+        head: '4'.repeat(40),
+      }));
+      const runtime = makeProductionActiveRuntime({
+        repositoryPath: '/repo',
+        worktreeBase: root,
+        runnerId: 'runner-a',
+        credentials: pool(),
+        authorAllowlist: new Set(['implementation-bot']),
+        readSnapshot: vi.fn(),
+        readPullRequestByNumber: vi.fn(),
+        readProjectItemForReconciliation: vi.fn(),
+        readBranchHeadByName: vi.fn(),
+        readIssueByNumber: vi.fn(),
+        readBlockedByIssueNumbers: vi.fn(),
+        readOpenPullRequestsByIssue: vi.fn(),
+        readIssueActionContext: vi.fn(),
+        config: DEFAULT_CONFIG,
+        spawn: vi.fn(),
+        executionBackendKind: 'marketplace',
+        marketplaceBackend,
+        marketplaceVerdictObserver,
+        marketplaceReviewAdopter,
+        caps: { implementation: 1, review: 1 },
+        implementationBackpressureThreshold: 1,
+        staleAfterMs: 120 * 60 * 1000,
+        environment: {
+          JINN_AUTOPILOT_CAPABILITY_ATTESTATION: '/attestation.json',
+        },
+        now: () => NOW,
+        readCapabilityAttestation: () => ({}) as never,
+        runner: async () => 'https://github.com/Jinn-Network/mono.git\n',
+      });
+
+      await expect(runtime.preflight()).resolves.toEqual({ ok: true });
+      expect(marketplaceVerdictObserver).toHaveBeenCalledWith(
+        originManifestPath,
+        manifestPath,
+      );
+      expect(marketplaceReviewAdopter).toHaveBeenCalledWith(verdict);
+      expect(marketplaceBackend.recover).not.toHaveBeenCalled();
+      expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toMatchObject({
+        processState: 'exited',
+        terminalHead: '4'.repeat(40),
+      });
+      expect(JSON.parse(readFileSync(originManifestPath, 'utf8'))).toMatchObject({
+        processState: 'exited',
+        terminalHead: '4'.repeat(40),
+      });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

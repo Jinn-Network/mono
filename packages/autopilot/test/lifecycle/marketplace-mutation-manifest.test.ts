@@ -148,6 +148,8 @@ describe('marketplace mutation adoption manifest state', () => {
       deliveryEnvelopeCid: 'bafybeimutation',
       deliveryTransactionHash: DELIVERY_TX,
       deliveryBlockNumber: 812_350,
+      solutionOperatorAddress: `0x${'1'.repeat(40)}`,
+      solutionPublisherAgentId: '7',
       taskProvenance,
       now: () => new Date('2026-07-24T12:05:00.000Z'),
     } as const;
@@ -189,6 +191,8 @@ describe('marketplace mutation adoption manifest state', () => {
       deliveryEnvelopeCid: 'bafybeidifferent',
       deliveryTransactionHash: `0x${'c'.repeat(64)}`,
       deliveryBlockNumber: 812_351,
+      solutionOperatorAddress: `0x${'1'.repeat(40)}`,
+      solutionPublisherAgentId: '7',
       taskProvenance,
     })).toThrow('different marketplace delivery');
   });

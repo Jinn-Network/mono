@@ -75,7 +75,9 @@ import {
 } from './marketplace-session-backend.js';
 import {
   observeMarketplaceSolutionDelivery,
+  observeMarketplaceVerdictDelivery,
   type MarketplaceSolutionObservation,
+  type MarketplaceVerdictObservation,
 } from './marketplace-delivery-client.js';
 import {
   makeProductionMarketplaceMutationAdoptionCoordinator,
@@ -85,6 +87,15 @@ import type {
   MarketplaceMutationAdoptionResult,
   MarketplaceReviewClaimPort,
 } from './marketplace-mutation-adoption.js';
+import {
+  linkMarketplaceReviewAttemptToOriginTask,
+} from './marketplace-mutation-manifest.js';
+import {
+  adoptProductionMarketplaceReview,
+} from './marketplace-review-adoption-production.js';
+import type {
+  MarketplaceReviewAdoptionResult,
+} from './marketplace-review-adoption.js';
 
 export const AUTOPILOT_V2_REMOTE = 'jinn-autopilot-v2';
 
@@ -136,6 +147,18 @@ export interface ProductionActiveRuntimeOptions {
     >;
     readonly reviewClaims: MarketplaceReviewClaimPort;
   }) => Promise<MarketplaceMutationAdoptionResult>;
+  /** Injectable exact Verdict observer for production recovery tests. */
+  readonly marketplaceVerdictObserver?: (
+    originManifestPath: string,
+    reviewManifestPath: string,
+  ) => Promise<MarketplaceVerdictObservation>;
+  /** Injectable deterministic review adoption boundary for recovery tests. */
+  readonly marketplaceReviewAdopter?: (
+    observation: Extract<
+      MarketplaceVerdictObservation,
+      { readonly status: 'verified' }
+    >,
+  ) => Promise<MarketplaceReviewAdoptionResult>;
   readonly caps: {
     readonly implementation: number;
     readonly review: number;
@@ -341,6 +364,19 @@ export function makeProductionActiveRuntime(
         now,
       },
     ));
+  const observeVerdict = options.marketplaceVerdictObserver
+    ?? ((
+      originManifestPath: string,
+      reviewManifestPath: string,
+    ) => observeMarketplaceVerdictDelivery(
+      originManifestPath,
+      reviewManifestPath,
+      {
+        runner,
+        environment: ambient,
+        now,
+      },
+    ));
   const confirmedReviewClaim = (
     manifest: ReturnType<typeof readAttemptManifest>,
   ): ConfirmedMarketplaceReviewClaim | undefined => {
@@ -420,7 +456,19 @@ export function makeProductionActiveRuntime(
         const expectedHead = input.expectedHead;
         const recovered = await recoverExact(input.prNumber, expectedHead);
         if (recovered !== undefined) {
-          return { status: 'confirmed', claim: recovered };
+          const linked = linkMarketplaceReviewAttemptToOriginTask({
+            originManifestPath: input.origin.manifestPath,
+            reviewManifestPath: recovered.manifest.paths.manifest,
+            reviewAttemptId: recovered.attemptId,
+            expectedHead: recovered.head,
+            reviewGeneration: recovered.generation,
+            reviewRefOid: recovered.refOid,
+            now,
+          });
+          return {
+            status: 'confirmed',
+            claim: confirmedReviewClaim(linked)!,
+          };
         }
         const candidate = await reviewPort.readCandidate(input.prNumber);
         if (candidate === null || candidate.head !== expectedHead) {
@@ -478,7 +526,19 @@ export function makeProductionActiveRuntime(
               detail: 'Anchored review claim did not read back exactly',
             };
           }
-          return { status: 'confirmed', claim: claimed };
+          const linked = linkMarketplaceReviewAttemptToOriginTask({
+            originManifestPath: input.origin.manifestPath,
+            reviewManifestPath: claimed.manifest.paths.manifest,
+            reviewAttemptId: claimed.attemptId,
+            expectedHead: claimed.head,
+            reviewGeneration: claimed.generation,
+            reviewRefOid: claimed.refOid,
+            now,
+          });
+          return {
+            status: 'confirmed',
+            claim: confirmedReviewClaim(linked)!,
+          };
         }
         if (result.status === 'human') {
           return {
@@ -516,7 +576,53 @@ export function makeProductionActiveRuntime(
               // Review attempts represent the evaluator leg of their
               // originating Task. They must never submit or recover a second
               // marketplace Task.
-              if (attempt.phase === 'review') continue;
+              if (attempt.phase === 'review') {
+                const originManifestPath =
+                  attempt.execution.originManifestPath;
+                if (originManifestPath === undefined) continue;
+                const verdict = await observeVerdict(
+                  originManifestPath,
+                  attempt.paths.manifest,
+                );
+                if (verdict.status === 'contradiction') {
+                  throw new Error(
+                    `Marketplace Verdict delivery contradiction: `
+                    + `${verdict.reason}: ${verdict.detail}`,
+                  );
+                }
+                if (verdict.status === 'verified') {
+                  const adoption = options.marketplaceReviewAdopter === undefined
+                    ? await adoptProductionMarketplaceReview({
+                        delivery: verdict.delivery,
+                        runner,
+                        environment: ambient,
+                        now,
+                      })
+                    : await options.marketplaceReviewAdopter(verdict);
+                  if (
+                    adoption.status !== 'adopted'
+                    && adoption.status !== 'rejected'
+                  ) {
+                    throw new Error(
+                      'Marketplace Verdict adoption returned a non-terminal state',
+                    );
+                  }
+                  markAttemptExited(
+                    attempt.paths.manifest,
+                    now,
+                    adoption.head,
+                  );
+                  const origin = readAttemptManifest(originManifestPath);
+                  if (origin.processState === 'running') {
+                    markAttemptExited(
+                      originManifestPath,
+                      now,
+                      adoption.head,
+                    );
+                  }
+                }
+                continue;
+              }
               let handle: MarketplaceExecutionHandle;
               if (attempt.processState === 'preparing') {
                 handle = await marketplaceBackend.recoverPreparing(
@@ -570,6 +676,23 @@ export function makeProductionActiveRuntime(
                 attempt.execution.creationTransactionHash !== undefined
                 && attempt.execution.creationBlockNumber !== undefined
               ) {
+                if (
+                  attempt.execution.adoptionReceiptState?.disposition
+                    === 'accepted'
+                ) {
+                  const reviewManifestPath =
+                    attempt.execution.adoptionReceiptState.reviewManifestPath;
+                  if (
+                    reviewManifestPath === undefined
+                    || readAttemptManifest(reviewManifestPath).processState
+                      === 'exited'
+                  ) {
+                    throw new Error(
+                      'Accepted Solution has no live evaluator-leg attempt',
+                    );
+                  }
+                  continue;
+                }
                 const delivery = await observeSolution(attempt.paths.manifest);
                 if (delivery.status === 'contradiction') {
                   throw new Error(
@@ -603,7 +726,9 @@ export function makeProductionActiveRuntime(
                       + `${adoption.stage}: ${adoption.detail}`,
                     );
                   }
-                  markAttemptExited(attempt.paths.manifest, now);
+                  if (adoption.status === 'rejected') {
+                    markAttemptExited(attempt.paths.manifest, now);
+                  }
                   continue;
                 }
               }

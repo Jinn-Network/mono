@@ -43,6 +43,7 @@ export * from './board-archive-executor-production.js';
 export * from './board-painter.js';
 export * from './marketplace-adoption-receipt.js';
 export * from './marketplace-review-adoption.js';
+export * from './marketplace-review-adoption-production.js';
 export * from './marketplace-patch.js';
 export * from './marketplace-mutation-verification.js';
 export * from './marketplace-mutation-git.js';

@@ -4,6 +4,7 @@ import {
   type AutopilotAdoptionReceipt,
 } from '../../../sdk/src/autopilot-session.js';
 import {
+  readAttemptManifest,
   updateAttemptManifest,
   type AttemptManifest,
   type MarketplaceAdoptionReceiptState,
@@ -23,6 +24,8 @@ export interface RecordMarketplaceSolutionDeliveryInput {
   readonly deliveryEnvelopeCid: string;
   readonly deliveryTransactionHash: string;
   readonly deliveryBlockNumber: number;
+  readonly solutionOperatorAddress: string;
+  readonly solutionPublisherAgentId: string;
   readonly taskProvenance: MarketplaceTaskProvenance;
   readonly now?: () => Date;
 }
@@ -44,9 +47,35 @@ export interface RecordMarketplaceMutationAdoptionReceiptInput {
   readonly now?: () => Date;
 }
 
+export interface LinkMarketplaceReviewAttemptInput {
+  readonly originManifestPath: string;
+  readonly reviewManifestPath: string;
+  readonly reviewAttemptId: string;
+  readonly expectedHead: string;
+  readonly reviewGeneration: string;
+  readonly reviewRefOid: string;
+  readonly now?: () => Date;
+}
+
+export interface RecordMarketplaceVerdictDeliveryInput {
+  readonly reviewManifestPath: string;
+  readonly taskId: string;
+  readonly taskCid: string;
+  readonly attemptIndex: number;
+  readonly requestId: string;
+  readonly deliveryEnvelopeCid: string;
+  readonly deliveryTransactionHash: string;
+  readonly deliveryBlockNumber: number;
+  readonly evaluatorOperatorAddress: string;
+  readonly evaluatorPublisherAgentId: string;
+  readonly taskProvenance: MarketplaceTaskProvenance;
+  readonly now?: () => Date;
+}
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const TRANSACTION_PATTERN = /^0x[0-9a-fA-F]{64}$/;
+const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 
 export function recordMarketplaceSolutionDelivery(
   input: RecordMarketplaceSolutionDeliveryInput,
@@ -61,6 +90,8 @@ export function recordMarketplaceSolutionDelivery(
     || !TRANSACTION_PATTERN.test(input.deliveryTransactionHash)
     || !Number.isSafeInteger(input.deliveryBlockNumber)
     || input.deliveryBlockNumber < 0
+    || !/^0x[0-9a-fA-F]{40}$/.test(input.solutionOperatorAddress)
+    || !/^[1-9][0-9]*$/.test(input.solutionPublisherAgentId)
     || !TRANSACTION_PATTERN.test(input.taskProvenance.creationTransactionHash)
     || !Number.isSafeInteger(input.taskProvenance.creationBlockNumber)
     || input.taskProvenance.creationBlockNumber < 0
@@ -102,6 +133,8 @@ export function recordMarketplaceSolutionDelivery(
       deliveryTx: execution.deliveryTx,
       deliveryBlockNumber: execution.deliveryBlockNumber,
       deliveryEnvelopeCid: execution.deliveryEnvelopeCid,
+      solutionOperatorAddress: execution.solutionOperatorAddress,
+      solutionPublisherAgentId: execution.solutionPublisherAgentId,
     };
     const next = {
       attemptIndex: input.attemptIndex,
@@ -109,6 +142,8 @@ export function recordMarketplaceSolutionDelivery(
       deliveryTx: input.deliveryTransactionHash,
       deliveryBlockNumber: input.deliveryBlockNumber,
       deliveryEnvelopeCid: input.deliveryEnvelopeCid,
+      solutionOperatorAddress: input.solutionOperatorAddress,
+      solutionPublisherAgentId: input.solutionPublisherAgentId,
     };
     const hasCurrent = Object.values(current).some(
       (value) => value !== undefined,
@@ -124,6 +159,152 @@ export function recordMarketplaceSolutionDelivery(
       execution: {
         ...execution,
         ...input.taskProvenance,
+        ...next,
+        solutionOperatorAddress: input.solutionOperatorAddress,
+        solutionPublisherAgentId: input.solutionPublisherAgentId,
+      },
+      timestamps: {
+        ...manifest.timestamps,
+        updatedAt: timestamp,
+      },
+    };
+  });
+}
+
+export function linkMarketplaceReviewAttemptToOriginTask(
+  input: LinkMarketplaceReviewAttemptInput,
+): AttemptManifest {
+  const origin = readAttemptManifest(input.originManifestPath);
+  const execution = origin.execution;
+  if (
+    origin.phase !== 'implement'
+    || execution.backend !== 'marketplace'
+    || execution.taskId === undefined
+    || execution.taskCid === undefined
+    || execution.deadline === undefined
+    || execution.requestFile === undefined
+    || execution.creationTransactionHash === undefined
+    || execution.creationBlockNumber === undefined
+    || execution.solutionOperatorAddress === undefined
+    || execution.solutionPublisherAgentId === undefined
+  ) {
+    throw new Error('Origin marketplace Task is incomplete');
+  }
+  const timestamp = isoTimestamp(
+    (input.now ?? (() => new Date()))().toISOString(),
+  );
+  return updateAttemptManifest(input.reviewManifestPath, (review) => {
+    if (
+      review.phase !== 'review'
+      || review.attemptId !== input.reviewAttemptId
+      || review.expectedHead !== input.expectedHead
+      || review.reviewGeneration !== input.reviewGeneration
+      || review.reviewRefOid !== input.reviewRefOid
+      || review.processState === 'exited'
+      || review.execution.backend !== 'marketplace'
+    ) {
+      throw new Error('Anchored review attempt does not match the origin Task');
+    }
+    const linkedExecution = {
+      backend: 'marketplace' as const,
+      taskId: execution.taskId,
+      taskCid: execution.taskCid,
+      deadline: execution.deadline,
+      requestFile: execution.requestFile,
+      creationTransactionHash: execution.creationTransactionHash,
+      creationBlockNumber: execution.creationBlockNumber,
+      ...(execution.solverNetManifestCid === undefined
+        ? {}
+        : { solverNetManifestCid: execution.solverNetManifestCid }),
+      originManifestPath: input.originManifestPath,
+      solutionOperatorAddress: execution.solutionOperatorAddress,
+      solutionPublisherAgentId: execution.solutionPublisherAgentId,
+    };
+    if (review.processState === 'running') {
+      if (!isDeepStrictEqual(review.execution, linkedExecution)) {
+        throw new Error('Anchored review attempt already links a different Task');
+      }
+      return review;
+    }
+    return {
+      ...review,
+      execution: linkedExecution,
+      processState: 'running',
+      pid: null,
+      timestamps: {
+        ...review.timestamps,
+        updatedAt: timestamp,
+        childStartedAt: timestamp,
+      },
+    };
+  });
+}
+
+export function recordMarketplaceVerdictDelivery(
+  input: RecordMarketplaceVerdictDeliveryInput,
+): AttemptManifest {
+  if (
+    input.taskId.length === 0
+    || input.taskCid.length === 0
+    || !Number.isSafeInteger(input.attemptIndex)
+    || input.attemptIndex < 0
+    || input.requestId.length === 0
+    || input.deliveryEnvelopeCid.length === 0
+    || !TRANSACTION_PATTERN.test(input.deliveryTransactionHash)
+    || !Number.isSafeInteger(input.deliveryBlockNumber)
+    || input.deliveryBlockNumber < input.taskProvenance.creationBlockNumber
+    || !ADDRESS_PATTERN.test(input.evaluatorOperatorAddress)
+    || !/^[1-9][0-9]*$/.test(input.evaluatorPublisherAgentId)
+  ) {
+    throw new Error('Marketplace Verdict delivery provenance is invalid');
+  }
+  const timestamp = isoTimestamp(
+    (input.now ?? (() => new Date()))().toISOString(),
+  );
+  return updateAttemptManifest(input.reviewManifestPath, (manifest) => {
+    const execution = manifest.execution;
+    if (
+      manifest.phase !== 'review'
+      || manifest.processState !== 'running'
+      || execution.backend !== 'marketplace'
+      || execution.originManifestPath === undefined
+      || execution.solutionOperatorAddress === undefined
+      || execution.solutionPublisherAgentId === undefined
+      || execution.taskId !== input.taskId
+      || execution.taskCid !== input.taskCid
+      || execution.creationTransactionHash
+        !== input.taskProvenance.creationTransactionHash
+      || execution.creationBlockNumber
+        !== input.taskProvenance.creationBlockNumber
+      || execution.solverNetManifestCid
+        !== input.taskProvenance.solverNetManifestCid
+      || execution.solutionOperatorAddress.toLowerCase()
+        === input.evaluatorOperatorAddress.toLowerCase()
+    ) {
+      throw new Error('Verdict delivery does not match the anchored review Task');
+    }
+    const current = {
+      attemptIndex: execution.attemptIndex,
+      requestId: execution.requestId,
+      deliveryTx: execution.deliveryTx,
+      deliveryBlockNumber: execution.deliveryBlockNumber,
+      deliveryEnvelopeCid: execution.deliveryEnvelopeCid,
+    };
+    const next = {
+      attemptIndex: input.attemptIndex,
+      requestId: input.requestId,
+      deliveryTx: input.deliveryTransactionHash,
+      deliveryBlockNumber: input.deliveryBlockNumber,
+      deliveryEnvelopeCid: input.deliveryEnvelopeCid,
+    };
+    if (Object.values(current).some((value) => value !== undefined)) {
+      if (isDeepStrictEqual(current, next)) return manifest;
+      throw new Error('Review manifest already records a different Verdict delivery');
+    }
+    return {
+      ...manifest,
+      execution: {
+        ...execution,
         ...next,
       },
       timestamps: {

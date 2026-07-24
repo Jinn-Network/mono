@@ -109,6 +109,12 @@ export type AttemptExecution =
       readonly creationTransactionHash?: string;
       readonly creationBlockNumber?: number;
       readonly solverNetManifestCid?: string;
+      /** Reverse link from an evaluator-leg review attempt to its mutation attempt. */
+      readonly originManifestPath?: string;
+      /** Exact solver Safe authenticated by the Solution delivery observer. */
+      readonly solutionOperatorAddress?: string;
+      /** Historical ERC-8004 publisher identity bound to the solver Safe. */
+      readonly solutionPublisherAgentId?: string;
       readonly adoptionReceipt?: string;
       readonly adoptionReceiptState?: MarketplaceAdoptionReceiptState;
     };
@@ -257,6 +263,9 @@ function exactKeys(
       'creationTransactionHash',
       'creationBlockNumber',
       'solverNetManifestCid',
+      'originManifestPath',
+      'solutionOperatorAddress',
+      'solutionPublisherAgentId',
       'adoptionReceipt',
       'adoptionReceiptState',
       'resultingHead',
@@ -388,6 +397,9 @@ function decodeAdoptionReceiptState(
     'creationTransactionHash',
     'creationBlockNumber',
     'solverNetManifestCid',
+    'originManifestPath',
+    'solutionOperatorAddress',
+    'solutionPublisherAgentId',
     'disposition',
     'commentId',
     'resultingHead',
@@ -511,6 +523,9 @@ function decodeExecution(value: unknown): AttemptExecution {
     'creationTransactionHash',
     'creationBlockNumber',
     'solverNetManifestCid',
+    'originManifestPath',
+    'solutionOperatorAddress',
+    'solutionPublisherAgentId',
     'adoptionReceipt',
     'adoptionReceiptState',
   ], 'marketplace attempt execution');
@@ -569,6 +584,44 @@ function decodeExecution(value: unknown): AttemptExecution {
         execution.solverNetManifestCid,
         'marketplace SolverNet manifest CID',
       );
+  const originManifestPath = execution.originManifestPath === undefined
+    ? undefined
+    : absolutePath(
+        execution.originManifestPath,
+        'marketplace origin manifest path',
+      );
+  const solutionOperatorAddress =
+    execution.solutionOperatorAddress === undefined
+      ? undefined
+      : stringField(
+          execution.solutionOperatorAddress,
+          'marketplace Solution operator address',
+        );
+  if (
+    solutionOperatorAddress !== undefined
+    && !/^0x[0-9a-fA-F]{40}$/.test(solutionOperatorAddress)
+  ) {
+    throw new Error('Invalid marketplace Solution operator address');
+  }
+  const solutionPublisherAgentId =
+    execution.solutionPublisherAgentId === undefined
+      ? undefined
+      : stringField(
+          execution.solutionPublisherAgentId,
+          'marketplace Solution publisher agent ID',
+        );
+  if (
+    solutionPublisherAgentId !== undefined
+    && !/^[1-9][0-9]*$/.test(solutionPublisherAgentId)
+  ) {
+    throw new Error('Invalid marketplace Solution publisher agent ID');
+  }
+  if (
+    (solutionOperatorAddress === undefined)
+      !== (solutionPublisherAgentId === undefined)
+  ) {
+    throw new Error('Marketplace Solution operator provenance is incomplete');
+  }
   const adoptionReceipt = execution.adoptionReceipt === undefined
     ? undefined
     : stringField(execution.adoptionReceipt, 'marketplace adoption receipt');
@@ -652,6 +705,15 @@ function decodeExecution(value: unknown): AttemptExecution {
     ...(solverNetManifestCid === undefined
       ? {}
       : { solverNetManifestCid }),
+    ...(originManifestPath === undefined
+      ? {}
+      : { originManifestPath }),
+    ...(solutionOperatorAddress === undefined
+      ? {}
+      : {
+          solutionOperatorAddress,
+          solutionPublisherAgentId: solutionPublisherAgentId!,
+        }),
     ...(adoptionReceipt === undefined ? {} : { adoptionReceipt }),
     ...(adoptionReceiptState === undefined ? {} : { adoptionReceiptState }),
   };
