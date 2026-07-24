@@ -936,7 +936,12 @@ export async function verifyRouterAttemptProvenance(
         const sameTaskAttempt = taskId === expected.taskId
           && attemptIndex === expected.attemptIndex;
         const sameRequest = requestId.toLowerCase() === expected.requestId.toLowerCase();
-        if (!sameTaskAttempt && !sameRequest) continue;
+        if (
+          (expected.role === 'verdict' && !sameRequest)
+          || (expected.role === 'solution' && !sameTaskAttempt && !sameRequest)
+        ) {
+          continue;
+        }
 
         if (
           sameTaskAttempt

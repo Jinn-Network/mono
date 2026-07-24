@@ -803,8 +803,20 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       'MarketplaceTaskRequestExpiredError',
     );
     const recoveryOnly = findNamedErrorCause(e, 'TaskPostRecoveryOnlyError');
-    if (policyExpiration || recoveryOnly) {
-      const freshnessError = policyExpiration ?? machineRequestFreshnessError ?? recoveryOnly;
+    const immutableMismatch = findNamedErrorCause(
+      e,
+      'TaskPostImmutableCandidateMismatchError',
+    );
+    if (
+      policyExpiration
+      || recoveryOnly
+      || (machineRequestFreshnessError && immutableMismatch)
+    ) {
+      const freshnessError =
+        policyExpiration
+        ?? immutableMismatch
+        ?? machineRequestFreshnessError
+        ?? recoveryOnly;
       emitEnvelope(
         {
           code: 'invalid_invocation',

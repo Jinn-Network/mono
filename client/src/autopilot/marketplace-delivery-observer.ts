@@ -1,4 +1,4 @@
-import type { Address, Hex, PublicClient } from 'viem';
+import type { Address, Hex, Log, PublicClient } from 'viem';
 import {
   AutopilotCorrelationSchema,
   AutopilotMutationResultSchema,
@@ -13,9 +13,12 @@ import {
 
 import { cidToDigestHex } from '../adapters/mech/ipfs.js';
 import {
+  decodeTaskCreatedLogs,
   findLatestDeliveryForRequest,
   getMarketplaceRequestDeliveryMech,
+  ROUTER_TASK_CREATED_EVENT,
   verifyRouterAttemptProvenance,
+  type DecodedTaskCreated,
 } from '../adapters/mech/contracts.js';
 import { authenticateExecutionEnvelope } from '../conformance/execution-envelope-authenticator.js';
 import type {
@@ -180,6 +183,38 @@ function pending(
 function parseEnvelopeBytes(bytes: Uint8Array): unknown {
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   return JSON.parse(text) as unknown;
+}
+
+const TASK_CREATED_SCAN_CHUNK = 1000n;
+
+async function findExactTaskCreated(
+  publicClient: PublicClient,
+  routerAddress: Address,
+  taskId: string,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<DecodedTaskCreated[]> {
+  const matches: DecodedTaskCreated[] = [];
+  for (
+    let start = fromBlock;
+    start <= toBlock;
+    start += TASK_CREATED_SCAN_CHUNK + 1n
+  ) {
+    const end = start + TASK_CREATED_SCAN_CHUNK > toBlock
+      ? toBlock
+      : start + TASK_CREATED_SCAN_CHUNK;
+    const logs = await publicClient.getLogs({
+      address: routerAddress,
+      event: ROUTER_TASK_CREATED_EVENT,
+      args: { taskId: BigInt(taskId) },
+      fromBlock: start,
+      toBlock: end,
+    });
+    matches.push(
+      ...decodeTaskCreatedLogs(logs as Log[]).filter((event) => event.taskId === taskId),
+    );
+  }
+  return matches;
 }
 
 function validateExpectation(
@@ -385,10 +420,38 @@ export function createAutopilotMarketplaceDeliveryObserver(
       } catch (error) {
         return contradiction('task-mismatch', `invalid expected Task CID: ${errorDetail(error)}`);
       }
-      if (!sameHex(taskCidDigest, lookup.task.taskCidDigest)) {
+      let taskCreatedMatches: DecodedTaskCreated[];
+      try {
+        taskCreatedMatches = await findExactTaskCreated(
+          deps.publicClient,
+          deps.routerAddress,
+          expected.taskId,
+          expected.fromBlock,
+          expected.toBlock,
+        );
+      } catch (error) {
+        return pending('rpc-unavailable', errorDetail(error));
+      }
+      if (taskCreatedMatches.length !== 1) {
         return contradiction(
           'task-mismatch',
-          'expected Task CID digest differs from indexed TaskCreated',
+          `Router TaskCreated provenance count is ${taskCreatedMatches.length}; expected exactly one`,
+        );
+      }
+      const taskCreated = taskCreatedMatches[0]!;
+      if (
+        taskCreated.transactionHash === undefined
+        || taskCreated.blockNumber === undefined
+        || taskCreated.blockNumber < expected.fromBlock
+        || taskCreated.blockNumber > expected.toBlock
+        || !sameHex(taskCidDigest, taskCreated.taskCidDigest)
+        || !sameHex(lookup.task.taskCidDigest, taskCreated.taskCidDigest)
+        || lookup.task.createdAtBlock !== taskCreated.blockNumber
+        || !sameHex(lookup.task.createdAtTx, taskCreated.transactionHash)
+      ) {
+        return contradiction(
+          'task-mismatch',
+          'expected CID or indexed Task provenance differs from Router TaskCreated',
         );
       }
       try {
@@ -505,8 +568,8 @@ export function createAutopilotMarketplaceDeliveryObserver(
         || envelope.role !== expected.role
         || envelopeTask === undefined
         || envelopeTask.cid !== expected.taskCid
-        || !sameHex(envelopeTask.onchainCreationTx, lookup.task.createdAtTx)
-        || envelopeTask.onchainCreationBlock !== lookup.task.createdAtBlock
+        || !sameHex(envelopeTask.onchainCreationTx, taskCreated.transactionHash)
+        || envelopeTask.onchainCreationBlock !== taskCreated.blockNumber
         || !sameHex(envelopeTask.requestId, lookup.attempt.requestId)
         || !sameHex(envelope.participant.safeAddress, lookup.attempt.operator)
         || !sameHex(envelope.signature.hash, lookup.envelope.manifestHash)
@@ -550,8 +613,8 @@ export function createAutopilotMarketplaceDeliveryObserver(
           taskId: lookup.task.taskId,
           taskCid: expected.taskCid,
           taskCidDigest,
-          createdAtBlock: lookup.task.createdAtBlock,
-          createdAtTx: lookup.task.createdAtTx,
+          createdAtBlock: taskCreated.blockNumber,
+          createdAtTx: taskCreated.transactionHash,
         },
         attempt: {
           attemptIndex: lookup.attempt.attemptIndex,

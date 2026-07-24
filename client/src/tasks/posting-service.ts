@@ -71,6 +71,10 @@ export class TaskPostRecoveryOnlyError extends Error {
   }
 }
 
+class TaskPostImmutableCandidateMismatchError extends Error {
+  readonly name = 'TaskPostImmutableCandidateMismatchError';
+}
+
 function normalizeCreatorSafeAddress(safeAddress?: string): string {
   return safeAddress ? getAddress(safeAddress) : GLOBAL_CREATOR_SCOPE;
 }
@@ -121,7 +125,7 @@ function assertImmutableCandidate(
     record.canonicalTaskJson !== current.canonicalTaskJson
     || record.requestJson !== current.requestJson
   ) {
-    throw new Error(
+    throw new TaskPostImmutableCandidateMismatchError(
       `Task post recovery content mismatch for ${candidate.sourceKey}; refusing to overwrite or broadcast different content`,
     );
   }

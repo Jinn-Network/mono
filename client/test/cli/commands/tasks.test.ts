@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -502,6 +502,91 @@ describe('tasks submit machine contract', () => {
       idempotent: true,
     });
     expect(recoverTaskPost).toHaveBeenCalledOnce();
+    expect(secondBroadcast).not.toHaveBeenCalled();
+    secondStore.close();
+    await secondAdapter.stop();
+  });
+
+  it('classifies an expired recovery-only immutable mismatch as invalid without broadcasting', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-expired-mismatch-'));
+    const file = join(dir, 'request.json');
+    const config = join(dir, 'config.json');
+    const dbPath = join(dir, 'jinn.db');
+    const value = request();
+    writeFileSync(file, JSON.stringify(value));
+    writeFileSync(config, '{}');
+    vi.useFakeTimers();
+    vi.setSystemTime(value.claimPolicy.claimWindowEndTs - 60_001);
+
+    const firstAdapter = new LocalAdapter();
+    await firstAdapter.initialize();
+    const firstStore = new Store(dbPath);
+    const firstBroadcast = vi.fn();
+    Object.assign(firstAdapter, {
+      postTask: vi.fn(async (_task: unknown, options?: {
+        beforeBroadcast?: () => void | Promise<void>;
+      }) => {
+        await options?.beforeBroadcast?.();
+        firstBroadcast();
+        throw new Error('simulated crash after first transaction broadcast');
+      }),
+    });
+    createCliExecutionContext.mockResolvedValueOnce({
+      ok: true,
+      ctx: {
+        adapter: firstAdapter,
+        jinnStore: firstStore,
+        primaryService: {
+          index: 0,
+          safe_address: '0x00112233445566778899aabbccddeeff00112233',
+        },
+        mnemonic: 'test test test test test test test test test test test junk',
+      },
+    });
+    const first = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--yes', '--json'],
+    });
+    await tasksCommand.run(first.ctx);
+    expect(firstBroadcast).toHaveBeenCalledOnce();
+    firstStore.close();
+    await firstAdapter.stop();
+
+    writeFileSync(file, JSON.stringify({
+      ...value,
+      description: 'Forged replacement content',
+    }));
+    unlinkSync(marketplaceTaskSelectionSidecarPath(file));
+    vi.setSystemTime(value.claimPolicy.claimWindowEndTs + 1);
+
+    const secondAdapter = new LocalAdapter();
+    await secondAdapter.initialize();
+    const secondBroadcast = vi.spyOn(secondAdapter, 'postTask');
+    const recoverTaskPost = vi.fn();
+    Object.assign(secondAdapter, { recoverTaskPost });
+    const secondStore = new Store(dbPath);
+    createCliExecutionContext.mockResolvedValueOnce({
+      ok: true,
+      ctx: {
+        adapter: secondAdapter,
+        jinnStore: secondStore,
+        primaryService: {
+          index: 0,
+          safe_address: '0x00112233445566778899aabbccddeeff00112233',
+        },
+        mnemonic: 'test test test test test test test test test test test junk',
+      },
+    });
+    const second = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--yes', '--json'],
+    });
+
+    await tasksCommand.run(second.ctx);
+
+    expect(JSON.parse(second.writes.at(-1)!)).toMatchObject({
+      code: 'invalid_invocation',
+      details: { field: 'freshness', reason: 'policy_expired' },
+    });
+    expect(recoverTaskPost).not.toHaveBeenCalled();
     expect(secondBroadcast).not.toHaveBeenCalled();
     secondStore.close();
     await secondAdapter.stop();

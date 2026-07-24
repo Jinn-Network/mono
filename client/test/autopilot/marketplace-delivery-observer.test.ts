@@ -18,7 +18,10 @@ import {
   createAutopilotMarketplaceDeliveryObserver,
   type AutopilotMarketplaceDeliveryExpectation,
 } from '../../src/autopilot/marketplace-delivery-observer.js';
-import { MECH_DELIVER_EVENT } from '../../src/adapters/mech/contracts.js';
+import {
+  MECH_DELIVER_EVENT,
+  ROUTER_TASK_CREATED_EVENT,
+} from '../../src/adapters/mech/contracts.js';
 import { JINN_ROUTER_ABI } from '../../src/adapters/mech/types.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import type {
@@ -31,6 +34,7 @@ const TASK_ID = '501';
 const TASK_CID_DIGEST = `0x${'33'.repeat(32)}` as Hex;
 const TASK_CID = `f01551220${'33'.repeat(32)}`;
 const TASK_TX = `0x${'44'.repeat(32)}` as Hex;
+const TASK_BLOCK = 100;
 const REQUEST_ID = `0x${'11'.repeat(32)}` as Hex;
 const ENVELOPE_DIGEST = `0x${'55'.repeat(32)}` as Hex;
 const ENVELOPE_CID = `f01551220${'55'.repeat(32)}`;
@@ -146,7 +150,7 @@ async function signedEnvelope(
     task: {
       cid: TASK_CID,
       onchainCreationTx: TASK_TX,
-      onchainCreationBlock: 90,
+      onchainCreationBlock: TASK_BLOCK,
       requestId: REQUEST_ID,
     },
     participant: {
@@ -215,6 +219,39 @@ function deliverLog(args: {
   };
 }
 
+function taskCreatedLog(args: {
+  taskId?: bigint;
+  taskCidDigest?: Hex;
+  transactionHash?: Hex | null;
+  blockNumber?: bigint | null;
+} = {}) {
+  const topics = encodeEventTopics({
+    abi: [ROUTER_TASK_CREATED_EVENT],
+    eventName: 'TaskCreated',
+    args: {
+      creator: OPERATOR,
+      taskId: args.taskId ?? BigInt(TASK_ID),
+      manifestDigest: `0x${'99'.repeat(32)}`,
+    },
+  });
+  const data = encodeAbiParameters(
+    [
+      { name: 'taskCidDigest', type: 'bytes32' },
+      { name: 'maxClaims', type: 'uint32' },
+      { name: 'solutionBudget', type: 'uint256' },
+      { name: 'verdictBudget', type: 'uint256' },
+    ],
+    [args.taskCidDigest ?? TASK_CID_DIGEST, 1, 1n, 1n],
+  );
+  return {
+    address: ROUTER,
+    topics,
+    data,
+    transactionHash: args.transactionHash === undefined ? TASK_TX : args.transactionHash,
+    blockNumber: args.blockNumber === undefined ? BigInt(TASK_BLOCK) : args.blockNumber,
+  };
+}
+
 function routerAttemptLog(args: {
   role?: 'solution' | 'verdict';
   taskId?: bigint;
@@ -261,6 +298,11 @@ interface HarnessOptions {
   discoveryError?: Error;
   logs?: unknown[];
   routerLogs?: unknown[];
+  taskLogs?: unknown[];
+  indexedTask?: Partial<Extract<
+    AutopilotDeliveryCandidateLookup,
+    { status: 'ready' }
+  >['task']>;
   deliveryMech?: Address;
   rpcError?: Error;
   ipfsError?: Error;
@@ -283,15 +325,16 @@ async function harness(options: HarnessOptions = {}) {
     task: {
       taskId: TASK_ID,
       taskCidDigest: TASK_CID_DIGEST,
-      createdAtBlock: 90,
+      createdAtBlock: TASK_BLOCK,
       createdAtTx: TASK_TX,
+      ...options.indexedTask,
     },
     attempt: {
       taskId: TASK_ID,
       attemptIndex: 0,
       requestId: REQUEST_ID,
       operator: role === 'verdict' ? EVALUATOR : OPERATOR,
-      createdAtBlock: role === 'verdict' ? null : 100,
+      createdAtBlock: role === 'verdict' ? null : 110,
     },
     solutionOperator: OPERATOR,
     envelope: {
@@ -310,7 +353,10 @@ async function harness(options: HarnessOptions = {}) {
   const deliveryMech = options.deliveryMech ?? MECH;
   const getLogs = options.rpcError
     ? vi.fn().mockRejectedValue(options.rpcError)
-    : vi.fn().mockImplementation(({ address }) => {
+    : vi.fn().mockImplementation(({ address, event }) => {
+        if (address === ROUTER && event?.name === 'TaskCreated') {
+          return options.taskLogs ?? [taskCreatedLog()];
+        }
         if (address === ROUTER) return options.routerLogs ?? [routerAttemptLog({
           role,
           operator: role === 'verdict' ? EVALUATOR : OPERATOR,
@@ -377,7 +423,13 @@ describe('Autopilot marketplace delivery observer', () => {
     await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
       status: 'verified',
       role: 'solution',
-      task: { taskId: TASK_ID, taskCid: TASK_CID },
+      task: {
+        taskId: TASK_ID,
+        taskCid: TASK_CID,
+        taskCidDigest: TASK_CID_DIGEST,
+        createdAtBlock: TASK_BLOCK,
+        createdAtTx: TASK_TX,
+      },
       attempt: { attemptIndex: 0, requestId: REQUEST_ID, operator: OPERATOR },
       delivery: {
         envelopeCid: ENVELOPE_CID,
@@ -403,6 +455,7 @@ describe('Autopilot marketplace delivery observer', () => {
     }));
     expect(fixture.getLogs).toHaveBeenCalledWith(expect.objectContaining({
       address: ROUTER,
+      event: ROUTER_TASK_CREATED_EVENT,
       fromBlock: 100n,
       toBlock: 150n,
     }));
@@ -456,6 +509,49 @@ describe('Autopilot marketplace delivery observer', () => {
         role: 'verdict',
         operator: `0x${'88'.repeat(20)}` as Address,
       })],
+    });
+
+    await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
+      status: 'contradiction',
+      reason: 'discovery-mismatch',
+    });
+  });
+
+  it('accepts the exact verdict request alongside a legitimate sibling verdict request', async () => {
+    const siblingRequestId = `0x${'88'.repeat(32)}` as Hex;
+    const siblingEvaluator = `0x${'89'.repeat(20)}` as Address;
+    const fixture = await harness({
+      role: 'verdict',
+      routerLogs: [
+        routerAttemptLog({ role: 'verdict', operator: EVALUATOR }),
+        routerAttemptLog({
+          role: 'verdict',
+          requestId: siblingRequestId,
+          operator: siblingEvaluator,
+        }),
+      ],
+    });
+
+    await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
+      status: 'verified',
+      role: 'verdict',
+      attempt: { requestId: REQUEST_ID, operator: EVALUATOR },
+    });
+  });
+
+  it('rejects reuse of the expected verdict request for another Task, attempt, or evaluator', async () => {
+    const fixture = await harness({
+      role: 'verdict',
+      routerLogs: [
+        routerAttemptLog({ role: 'verdict', operator: EVALUATOR }),
+        routerAttemptLog({
+          role: 'verdict',
+          taskId: BigInt(TASK_ID) + 1n,
+          attemptIndex: 1,
+          requestId: REQUEST_ID,
+          operator: `0x${'88'.repeat(20)}` as Address,
+        }),
+      ],
     });
 
     await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
@@ -577,12 +673,77 @@ describe('Autopilot marketplace delivery observer', () => {
   });
 
   it.each([
+    ['missing', []],
+    ['duplicate', [taskCreatedLog(), taskCreatedLog()]],
+    ['digest-mismatched', [taskCreatedLog({
+      taskCidDigest: `0x${'88'.repeat(32)}`,
+    })]],
+    ['transaction-incomplete', [taskCreatedLog({ transactionHash: null })]],
+    ['block-incomplete', [taskCreatedLog({ blockNumber: null })]],
+  ] as const)(
+    'rejects %s on-chain TaskCreated provenance',
+    async (_label, taskLogs) => {
+      const fixture = await harness({ taskLogs: [...taskLogs] });
+
+      await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
+        status: 'contradiction',
+        reason: 'task-mismatch',
+      });
+    },
+  );
+
+  it.each([
+    [
+      'CID digest',
+      { taskCidDigest: `0x${'88'.repeat(32)}` as Hex },
+      undefined,
+    ],
+    [
+      'block',
+      { createdAtBlock: TASK_BLOCK + 1 },
+      {
+        task: {
+          cid: TASK_CID,
+          onchainCreationTx: TASK_TX,
+          onchainCreationBlock: TASK_BLOCK + 1,
+          requestId: REQUEST_ID,
+        },
+      },
+    ],
+    [
+      'transaction',
+      { createdAtTx: `0x${'88'.repeat(32)}` as Hex },
+      {
+        task: {
+          cid: TASK_CID,
+          onchainCreationTx: `0x${'88'.repeat(32)}`,
+          onchainCreationBlock: TASK_BLOCK,
+          requestId: REQUEST_ID,
+        },
+      },
+    ],
+  ] as const)(
+    'rejects forged indexed Task %s even when the authenticated envelope agrees',
+    async (_label, indexedTask, envelopeOverride) => {
+      const fixture = await harness({
+        indexedTask,
+        ...(envelopeOverride === undefined ? {} : { envelopeOverride }),
+      });
+
+      await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
+        status: 'contradiction',
+        reason: 'task-mismatch',
+      });
+    },
+  );
+
+  it.each([
     ['solver type', { solverType: 'prediction.v0' }],
     ['role', { role: 'verdict' }],
-    ['task CID', { task: { cid: `f01551220${'88'.repeat(32)}`, onchainCreationTx: TASK_TX, onchainCreationBlock: 90, requestId: REQUEST_ID } }],
-    ['task transaction', { task: { cid: TASK_CID, onchainCreationTx: `0x${'88'.repeat(32)}`, onchainCreationBlock: 90, requestId: REQUEST_ID } }],
-    ['task block', { task: { cid: TASK_CID, onchainCreationTx: TASK_TX, onchainCreationBlock: 91, requestId: REQUEST_ID } }],
-    ['task request', { task: { cid: TASK_CID, onchainCreationTx: TASK_TX, onchainCreationBlock: 90, requestId: `0x${'88'.repeat(32)}` } }],
+    ['task CID', { task: { cid: `f01551220${'88'.repeat(32)}`, onchainCreationTx: TASK_TX, onchainCreationBlock: TASK_BLOCK, requestId: REQUEST_ID } }],
+    ['task transaction', { task: { cid: TASK_CID, onchainCreationTx: `0x${'88'.repeat(32)}`, onchainCreationBlock: TASK_BLOCK, requestId: REQUEST_ID } }],
+    ['task block', { task: { cid: TASK_CID, onchainCreationTx: TASK_TX, onchainCreationBlock: TASK_BLOCK + 1, requestId: REQUEST_ID } }],
+    ['task request', { task: { cid: TASK_CID, onchainCreationTx: TASK_TX, onchainCreationBlock: TASK_BLOCK, requestId: `0x${'88'.repeat(32)}` } }],
     ['participant Safe', { participant: { safeAddress: `0x${'88'.repeat(20)}`, agentEoa: AGENT_EOA } }],
   ] as const)(
     'rejects an authenticated envelope with mismatched %s',
