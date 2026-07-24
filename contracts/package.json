@@ -31,7 +31,7 @@
     "@types/mocha": "^10.0.10",
     "chai": "^6",
     "ethers": "^6.17.0",
-    "hardhat": "3.10.0",
+    "hardhat": "3.11.1",
     "mocha": "^11.7.6",
     "typescript": "6.0"
   },
