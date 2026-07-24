@@ -39,9 +39,8 @@ describe('single-surface workflow skill pins', () => {
     expect(reconcile).not.toMatch(/rebase onto/i);
   });
 
-  it('eng-day reads label triage and surfaces child work', () => {
-    expect(engDay).toContain('effort:*');
-    expect(engDay).toContain('priority:*');
+  it('eng-day reads Project triage and surfaces child work', () => {
+    expect(engDay).toContain('Blocked on, Effort');
     expect(engDay).toContain('review-finding');
     expect(engDay).toContain('reconcile');
     expect(engDay).toContain('paint-only');

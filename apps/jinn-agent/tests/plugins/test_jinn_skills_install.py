@@ -63,6 +63,38 @@ def test_install_shells_to_layer_and_drops_marker(tmp_path, monkeypatch):
     assert ref == "abc123"
 
 
+def test_install_skill_only_ref_still_shells_to_layer(tmp_path, monkeypatch):
+    """AC1: skill-only refs use the same layer shell path as seeded installs."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    skills_root = tmp_path / "skills"
+    skill_only_ref = "bafyDistilledSkillOnly"
+
+    def fake_runner(argv):
+        assert argv[1:4] == ["skills", "install", skill_only_ref]
+        assert "--json" in argv
+        target = skills_root / "retry-budget-tuning"
+        target.mkdir(parents=True)
+        (target / "SKILL.md").write_text(
+            "# retry-budget-tuning\n\nCap retries at three.\n",
+            encoding="utf-8",
+        )
+        return 0, json.dumps({
+            "dir": str(target),
+            "name": "retry-budget-tuning",
+            "shape": "jinn.skill.v1",
+            "files": [],
+            "provenance": {"kind": "distilled"},
+        })
+
+    path = skills_install.install(skill_only_ref, runner=fake_runner)
+    installed = Path(path)
+    assert installed.name == "SKILL.md"
+    assert "Cap retries at three." in installed.read_text(encoding="utf-8")
+    marker = installed.parent / ".jinn-ref"
+    assert marker.exists()
+    assert json.loads(marker.read_text(encoding="utf-8"))["ref"] == skill_only_ref
+
+
 def test_install_raises_on_layer_failure(tmp_path):
     def fake_runner(argv):
         return 1, "sha256 mismatch — refusing to install"
@@ -763,3 +795,58 @@ def test_list_and_uninstall_only_touch_jinn_installed(tmp_path):
 
     skills_install.uninstall("test-driven-development")
     assert not (tmp_path / "skills" / "test-driven-development").exists()
+
+
+def _valid_skill_artifact_payload(**overrides):
+    payload = {
+        "schemaVersion": "jinn.skill.v1",
+        "skill": {
+            "name": "retry-budget-tuning",
+            "skillMd": "# retry-budget-tuning\n\nCap retries at three.",
+        },
+        "files": [],
+        "provenance": {
+            "kind": "distilled",
+            "sourceEnvelopeCids": ["bafySourceEpisode1"],
+            "operator": {"safeAddress": "0x" + "a" * 40},
+            "verifiabilityTier": "evaluator-verified",
+            "skillKind": "strategic-pattern",
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_extract_skill_returns_skill_md_and_provenance_tier():
+    skill = _valid_skill_artifact_payload()
+    view, digest = skills_install._extract_skill({
+        "artifacts": [_artifact("jinn.skill.v1", skill)],
+    })
+    assert view["shape"] == "jinn.skill.v1"
+    assert view["name"] == "retry-budget-tuning"
+    assert "Cap retries at three." in view["skillMd"]
+    assert view["provenance"]["verifiabilityTier"] == "evaluator-verified"
+    assert view["provenance"]["kind"] == "distilled"
+    assert digest == hashlib.sha256(json.dumps(skill).encode("utf-8")).hexdigest()
+
+
+def test_extract_skill_refuses_sha256_mismatch():
+    skill = _valid_skill_artifact_payload()
+    with pytest.raises(ValueError, match="sha256 mismatch"):
+        skills_install._extract_skill({
+            "artifacts": [_artifact("jinn.skill.v1", skill, sha256="0" * 64)],
+        })
+
+
+def test_extract_skill_refuses_empty_skill_md():
+    skill = _valid_skill_artifact_payload()
+    skill["skill"]["skillMd"] = "   "
+    with pytest.raises(ValueError, match="skillMd"):
+        skills_install._extract_skill({
+            "artifacts": [_artifact("jinn.skill.v1", skill)],
+        })
+
+
+def test_extract_skill_raises_when_no_skill_artifact():
+    with pytest.raises(ValueError, match="jinn.skill.v1"):
+        skills_install._extract_skill({"artifacts": []})

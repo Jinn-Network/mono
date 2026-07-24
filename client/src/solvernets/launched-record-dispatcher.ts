@@ -30,6 +30,8 @@ export interface LaunchedRecordGeneratorStaticConfig {
   /** IPFS gateway, passed through to the swe-rebench-v2 generator for the
    *  fresh-volume vetted-pool recovery fetch (#957). */
   ipfsGatewayUrl?: string;
+  /** From `config.sweRebenchV2StateDir` — swe-rebench-v2 generator root. */
+  stateDir?: string;
 }
 
 export interface LaunchedRecordGeneratorFactories {
@@ -240,6 +242,7 @@ function projectLauncherGeneratorState(raw: unknown): LauncherGeneratorStateSnap
   if (poolPublicationPriorSize !== undefined) projected.poolPublicationPriorSize = poolPublicationPriorSize;
   const poolPublicationCurrentSize = finiteNumber(snapshot['poolPublicationCurrentSize']);
   if (poolPublicationCurrentSize !== undefined) projected.poolPublicationCurrentSize = poolPublicationCurrentSize;
+  if (snapshot['poolPublicationStale'] === true) projected.poolPublicationStale = true;
 
   const totalPosted = finiteNumber(snapshot['totalPosted']);
   if (totalPosted !== undefined) projected.totalPosted = totalPosted;

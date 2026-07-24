@@ -34,6 +34,9 @@ const HEX64 = /\b(?:0x)?([a-fA-F0-9]{64})\b/g;
 
 /** ENV-style assignment line. */
 const ENV_LINE = /^[A-Z][A-Z0-9_]*=.*$/;
+const ENV_KEY = /^([A-Z][A-Z0-9_]*)=/;
+/** Git's GIT_CONFIG_* override tutorial shape — not a secret dump (#2005). */
+const GIT_CONFIG_ENV_KEY = /^GIT_CONFIG(?:_|$)/i;
 const MIN_ENV_RUN = 3;
 
 export function rejectClassesDetector(policy: KeyPolicy): Detector {
@@ -178,16 +181,16 @@ function scanEnvBlocks(
     const trimmed = line.trim();
     // Allow optional leading export / whitespace.
     const candidate = trimmed.replace(/^export\s+/, '');
-    if (ENV_LINE.test(candidate)) {
+    if (isEnvBlockAssignment(candidate)) {
       if (runStart < 0) {
         runStart = i;
         runStartOffset = offset + (line.length - line.trimStart().length);
       }
       runCount += 1;
       runEndOffset = offset + line.length;
-    } else if (trimmed === '' && runCount > 0) {
-      // Blank line inside a dump still counts as continuing the block visually,
-      // but does not increment — only flush on a non-env non-blank line.
+    } else if ((trimmed === '' || isGitConfigEnvAssignment(candidate)) && runCount > 0) {
+      // Blank and GIT_CONFIG tutorial lines inside a dump keep the run open,
+      // but do not increment it — only flush on another non-env line.
     } else {
       flush();
     }
@@ -195,4 +198,17 @@ function scanEnvBlocks(
   }
   flush();
   return findings;
+}
+
+function isEnvBlockAssignment(candidate: string): boolean {
+  if (!ENV_LINE.test(candidate)) return false;
+  const keyMatch = ENV_KEY.exec(candidate);
+  if (!keyMatch) return false;
+  return !GIT_CONFIG_ENV_KEY.test(keyMatch[1]!);
+}
+
+function isGitConfigEnvAssignment(candidate: string): boolean {
+  if (!ENV_LINE.test(candidate)) return false;
+  const keyMatch = ENV_KEY.exec(candidate);
+  return keyMatch !== null && GIT_CONFIG_ENV_KEY.test(keyMatch[1]!);
 }

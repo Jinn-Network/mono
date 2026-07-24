@@ -29,12 +29,10 @@ async function writeTranscript(rawText: string): Promise<string> {
 }
 
 function withoutTimestamps(spans: TranscriptSpanInput[]): unknown[] {
-  return spans.map(
-    ({ startTimeUnixNano: _start, endTimeUnixNano: _end, events, ...span }) => ({
-      ...span,
-      events: events.map(({ timeUnixNano: _time, ...event }) => event),
-    }),
-  );
+  return spans.map(({ startTimeUnixNano: _start, endTimeUnixNano: _end, events, ...span }) => ({
+    ...span,
+    events: events.map(({ timeUnixNano: _time, ...event }) => event),
+  }));
 }
 
 const claudeTranscript = [
@@ -126,17 +124,20 @@ describe.each([
   });
 
   it('keeps file and in-memory parsing behavior equivalent', async () => {
-    const path = await writeTranscript(rawText);
-    const now = hasSyntheticTime
-      ? vi.spyOn(Date, 'now').mockReturnValueOnce(1_000).mockReturnValueOnce(1_001)
+    const dateNow = hasSyntheticTime
+      ? vi.spyOn(Date, 'now').mockReturnValueOnce(1_000).mockReturnValueOnce(2_000)
       : undefined;
-    const fromFile = await parser.parse(path);
-    const fromMemory = parser.parseText(rawText);
-    now?.mockRestore();
+    try {
+      const path = await writeTranscript(rawText);
+      const fromFile = await parser.parse(path);
+      const fromMemory = parser.parseText(rawText);
 
-    expect(hasSyntheticTime ? withoutTimestamps(fromFile) : fromFile).toEqual(
-      hasSyntheticTime ? withoutTimestamps(fromMemory) : fromMemory,
-    );
+      expect(hasSyntheticTime ? withoutTimestamps(fromFile) : fromFile).toEqual(
+        hasSyntheticTime ? withoutTimestamps(fromMemory) : fromMemory,
+      );
+    } finally {
+      dateNow?.mockRestore();
+    }
   });
 });
 

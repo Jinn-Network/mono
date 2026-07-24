@@ -42,6 +42,9 @@ export interface SpendStatus {
   credentials: SpendCredentialRow[];
 }
 
+/** The AI-units window a paused credential is binding on, or `null` when not paused. */
+export type AiUnitsPausedWindow = 'block' | 'week' | null;
+
 /** Per-credential AI-units row exposed on /v1/status (issues #815, #1004). */
 export interface AiUnitsCredentialRow {
   credentialId: string;
@@ -67,7 +70,10 @@ export interface AiUnitsCredentialRow {
    * telemetry. Issue #1004 (AC4).
    */
   estimated: boolean;
-  /** True when block or week sum has reached its cap and claims are paused. */
+  /**
+   * True when at least one known configured task projection would make the
+   * block or week sum exceed its cap. Unknown projections fail open.
+   */
   paused: boolean;
   /**
    * True when this credential has recorded spend in the current 7d window —
@@ -76,10 +82,29 @@ export interface AiUnitsCredentialRow {
    * enrolled one in the /v1/status footprint (issue #891).
    */
   active: boolean;
+  /**
+   * The binding window when `paused` is true, using the daemon gate's shared
+   * projected-debit classifier. Across multiple tasks on one credential,
+   * block wins if any known projection is block-gated; otherwise week wins
+   * when any known projection is week-gated. `null` when no known projection
+   * is blocked. Lets the SPA render the pause reason without re-deriving the
+   * decision locally (issue #830, item 2).
+   */
+  pausedWindow: AiUnitsPausedWindow;
   /** ISO timestamp of the next 6h block boundary (00:00 / 06:00 / 12:00 / 18:00 UTC). */
   blockResetsAt: string;
-  /** ISO timestamp of the next 7d window reset. */
-  weekResetsAt: string;
+  /**
+   * ISO timestamp claims resume for the 7d window. When the week window is
+   * binding, this is the accurate rolling-window resume instant for the
+   * credential's largest known configured projection (the moment enough
+   * in-window spend expires that `remaining + projected <= cap`; see
+   * `Store.weekWindowResumeAt`). `null` means the projection alone exceeds
+   * the weekly cap, so no spend expiry can schedule a resume without a model
+   * or cap change. Otherwise this falls back to the coarse
+   * `weekResetsAtUtc(now)` (`now + 7d`) instant, which is not
+   * operator-relevant in that case (issue #830, item 1).
+   */
+  weekResetsAt: string | null;
 }
 
 /** Per-credential AI-units block; present on /v1/status when AI-units gating is on. */

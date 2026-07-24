@@ -188,6 +188,14 @@ function latestHuman(value: unknown, prNumber: number): {
   };
 }
 
+function workflowRunIdFromDetailsUrl(url: unknown): number | undefined {
+  if (typeof url !== 'string') return undefined;
+  const match = url.match(/\/actions\/runs\/(\d+)(?:\/|$)/);
+  if (match === null) return undefined;
+  const id = Number(match[1]);
+  return Number.isSafeInteger(id) && id > 0 ? id : undefined;
+}
+
 function checkRuns(value: unknown): readonly CheckSummary[] {
   const response = record(value, 'check-runs response');
   const parsed = rows(response.check_runs, 'check-runs response.check_runs').map((raw, index) => {
@@ -200,15 +208,16 @@ function checkRuns(value: unknown): readonly CheckSummary[] {
     const suite = check.check_suite === null || check.check_suite === undefined
       ? null
       : record(check.check_suite, `check run ${index}.check_suite`);
-    const runId = check.id;
+    const workflowRunId = workflowRunIdFromDetailsUrl(check.details_url)
+      ?? workflowRunIdFromDetailsUrl(
+        suite === null ? undefined : (suite as { workflow_run?: { html_url?: unknown } }).workflow_run?.html_url,
+      );
     return {
       name: nonEmptyString(check.name, `check run ${index}.name`),
       status: nonEmptyString(check.status, `check run ${index}.status`).toUpperCase(),
       conclusion: conclusion?.toUpperCase() ?? null,
       source: 'check-run' as const,
-      ...(typeof runId === 'number' && Number.isSafeInteger(runId) && runId > 0
-        ? { runId }
-        : {}),
+      ...(workflowRunId === undefined ? {} : { runId: workflowRunId }),
       ...(suite === null ? {} : {
         checkSuiteId: nonNegativeInteger(suite.id, `check run ${index}.check_suite.id`),
       }),
@@ -269,6 +278,21 @@ export class ConditionalPullRequestEvidenceProbe implements PullRequestEvidenceP
   async changed(pr: PullRequestSnapshot): Promise<boolean> {
     if (pr.state !== 'OPEN') return false;
     const detailResponse = await this.rest.getJson(`repos/${REPO}/pulls/${pr.number}`);
+    const detailRaw = completeBody(detailResponse, 'PR detail');
+    const detailRecord = record(detailRaw, 'PR detail');
+    if (detailRecord.number !== pr.number) {
+      throw new GitHubRestSchemaError(
+        `PR detail identity #${String(detailRecord.number)} does not match #${pr.number}`,
+      );
+    }
+    const head = record(detailRecord.head, 'PR detail.head');
+    const liveHeadOid = nonEmptyString(head.sha, 'PR detail.head.sha');
+    gitOid(liveHeadOid);
+    if (liveHeadOid !== pr.headOid) {
+      // Index/cache head can lag a push; treat as changed so incremental refresh
+      // continues instead of aborting the lifecycle cycle.
+      return true;
+    }
     const reviewResponse = await this.rest.getJson(
       `repos/${REPO}/pulls/${pr.number}/reviews?per_page=100&page=1`,
     );
@@ -281,10 +305,7 @@ export class ConditionalPullRequestEvidenceProbe implements PullRequestEvidenceP
     const statusResponse = await this.rest.getJson(
       `repos/${REPO}/commits/${pr.headOid}/status?per_page=100&page=1`,
     );
-    const detail = exactPullRequestDetail(
-      completeBody(detailResponse, 'PR detail'),
-      pr,
-    );
+    const detail = exactPullRequestDetail(detailRaw, pr);
     const currentReviews = reviews(completeBody(reviewResponse, 'PR reviews'));
     const currentHuman = latestHuman(
       completeBody(commentResponse, 'PR comments'),

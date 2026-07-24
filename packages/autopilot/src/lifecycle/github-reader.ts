@@ -75,7 +75,13 @@ const PR_FIELDS = `
             pageInfo { hasNextPage }
             nodes {
               __typename
-              ... on CheckRun { name status conclusion databaseId }
+              ... on CheckRun {
+                name
+                status
+                conclusion
+                databaseId
+                checkSuite { workflowRun { databaseId } }
+              }
               ... on StatusContext { context state }
             }
           }
@@ -417,6 +423,9 @@ interface GraphQlPr {
         databaseId?: number | null;
         context?: string;
         state?: string;
+        checkSuite?: {
+          workflowRun?: { databaseId?: number | null } | null;
+        } | null;
       }>;
     };
   } | null;
@@ -627,9 +636,10 @@ function checks(pr: GraphQlPr): RawPullRequest['checks'] {
           status: node.status ?? 'UNKNOWN',
           conclusion: node.conclusion ?? null,
           source: 'check-run' as const,
-          ...(node.databaseId === undefined || node.databaseId === null ? {} : {
-            runId: node.databaseId,
-          }),
+          ...(node.checkSuite?.workflowRun?.databaseId === undefined
+            || node.checkSuite?.workflowRun?.databaseId === null
+            ? {}
+            : { runId: node.checkSuite.workflowRun.databaseId }),
         }
       : {
           name: node.context ?? '',

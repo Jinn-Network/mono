@@ -33,7 +33,6 @@ export interface ReviewFollowUpPort {
   createIssue(input: {
     readonly title: string;
     readonly body: string;
-    readonly labels: readonly string[];
     readonly type: ReviewFollowUpType;
   }): Promise<{ readonly number: number }>;
   ensureTriageComplete(input: {
@@ -192,11 +191,9 @@ export async function fileReviewFollowUps(
     const prose =
       `${entry.body.trim()}\n\nFiled from Autopilot review of PR #${input.parentPr} @ \`${input.head.toLowerCase()}\`.`;
     const body = `${marker}\n\n${prose}`;
-    const labels = [`effort:${entry.effort}`, `priority:${entry.priority}`];
     const created = await port.createIssue({
       title: entry.title,
       body,
-      labels,
       type: entry.type,
     });
     await port.ensureTriageComplete({

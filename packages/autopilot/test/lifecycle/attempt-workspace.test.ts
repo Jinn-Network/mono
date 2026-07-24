@@ -78,6 +78,26 @@ function repositoryFixture(): {
   return { root, repo, remote, base, oid: git(repo, ['rev-parse', 'HEAD']) };
 }
 
+function sparseCloneFixture(
+  fixture: ReturnType<typeof repositoryFixture>,
+): { repo: string; head: string; branch: string } {
+  writeFileSync(join(fixture.repo, 'feature.md'), 'feature\n');
+  git(fixture.repo, ['checkout', '-b', 'feature']);
+  git(fixture.repo, ['add', 'feature.md']);
+  git(fixture.repo, ['commit', '-m', 'feature']);
+  git(fixture.repo, ['push', '-u', 'origin', 'feature']);
+  const head = git(fixture.repo, ['rev-parse', 'HEAD']);
+  const sparseRepo = join(fixture.root, 'sparse');
+  execFileSync('git', [
+    'clone',
+    '--single-branch',
+    '--branch', 'main',
+    fixture.remote,
+    sparseRepo,
+  ]);
+  return { repo: sparseRepo, head, branch: 'feature' };
+}
+
 function options(
   fixture: ReturnType<typeof repositoryFixture>,
   overrides: Partial<CreateAttemptOptions> = {},
@@ -137,6 +157,33 @@ describe('attempt workspace and manifest', () => {
     expect(git(two.paths.worktree, ['rev-parse', 'HEAD'])).toBe(fixture.oid);
     expect(readFileSync(one.paths.askpass, 'utf8')).not.toContain('selected-secret');
     expect(readdirSync(one.paths.ghConfigDir)).toEqual(['hosts.yml']);
+  });
+
+  it('fetches a missing expected head before creating the detached worktree', async () => {
+    const fixture = repositoryFixture();
+    const sparse = sparseCloneFixture(fixture);
+    const manifest = await createAttemptWorkspace(options(fixture, {
+      repositoryPath: sparse.repo,
+      branch: sparse.branch,
+      expectedHead: sparse.head,
+      claimOid: sparse.head,
+      prNumber: 2075,
+    }), defaultRunner);
+
+    expect(git(manifest.paths.worktree, ['rev-parse', 'HEAD'])).toBe(sparse.head);
+  });
+
+  it('fails closed when the expected head is still missing after fetch', async () => {
+    const fixture = repositoryFixture();
+    const missingHead = '4dcd7a7f9d3f92e1eb13c77a6af2f522f6969b17';
+
+    await expect(createAttemptWorkspace(options(fixture, {
+      branch: 'missing-branch',
+      expectedHead: missingHead,
+      claimOid: missingHead,
+      prNumber: 2075,
+    }), defaultRunner)).rejects.toThrow(/not available after fetching/i);
+    expect(existsSync(join(fixture.base, 'v2'))).toBe(false);
   });
 
   it('writes the runtime-independent gh-config hosts.yml and token file at creation, and points the askpass helper at the file instead of $GH_TOKEN (#1883)', async () => {

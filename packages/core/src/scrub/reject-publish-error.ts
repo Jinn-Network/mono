@@ -25,9 +25,12 @@ export class RejectPublishError extends Error {
 }
 
 /**
- * Content findings whose policy disposition is reject-publish.
- * Structural `drop-key` findings are already removed by applyDispositions and
- * intentionally continue through redact-mode publish lanes.
+ * Findings whose policy disposition is reject-publish.
+ *
+ * A5 `drop-key` findings are structural removals, not catastrophic content:
+ * the key-policy detector has already removed the entire attribute before
+ * this guard runs. Only content-level A5 findings (such as an env-block
+ * embedded in tool output) must abort the publish.
  */
 export function rejectPublishFindings(
   findings: Finding[] | undefined,

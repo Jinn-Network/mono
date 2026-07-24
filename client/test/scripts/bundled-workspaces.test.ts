@@ -11,6 +11,7 @@ import {
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   assertSafeTarballEntries,
   materializeBundledWorkspaces,
@@ -95,5 +96,34 @@ describe('bundled workspace packaging', () => {
       'package/dist/index.js',
       'package/test/private.test.js',
     ])).toThrow(/source or test/);
+  });
+
+  it('declares every bundled workspace runtime dependency in the client manifest', async () => {
+    const clientRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+    const repoRoot = path.dirname(clientRoot);
+    const clientManifest = JSON.parse(
+      await readFile(path.join(clientRoot, 'package.json'), 'utf8'),
+    ) as {
+      dependencies?: Record<string, string>;
+      bundledDependencies?: string[];
+    };
+
+    for (const packageName of clientManifest.bundledDependencies ?? []) {
+      const workspaceName = packageName.split('/').at(-1);
+      expect(workspaceName, `unsupported bundled workspace name ${packageName}`).toBeTruthy();
+      const workspaceManifest = JSON.parse(
+        await readFile(
+          path.join(repoRoot, 'packages', workspaceName!, 'package.json'),
+          'utf8',
+        ),
+      ) as { dependencies?: Record<string, string> };
+
+      for (const dependency of Object.keys(workspaceManifest.dependencies ?? {})) {
+        expect(
+          clientManifest.dependencies?.[dependency],
+          `${packageName} runtime dependency ${dependency} must also be a client dependency`,
+        ).toBeTruthy();
+      }
+    }
   });
 });

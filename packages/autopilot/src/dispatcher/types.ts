@@ -80,12 +80,9 @@ export interface PolledIssue {
 /** An issue that passed the ready-filter — safe to dispatch. */
 export interface ReadyIssue extends PolledIssue {
   shape: IssueShape;          // non-null: ready issues are triage-complete (children default to fix)
-  priority: Priority;         // non-null: needed for ordering (children may resolve from labels)
-  /**
-   * Project item id when on the board. Machine children may be off-board
-   * (`null`) and still ready (Stage 2).
-   */
-  projectItemId: string | null;
+  priority: Priority;         // non-null: needed for ordering
+  /** Project item id — non-null for ready issues (machine children included). */
+  projectItemId: string;
   /**
    * Git ref to branch the worktree off and target the PR at. Set only when the
    * issue was admitted despite `Blocked on: Another issue` because its single

@@ -94,8 +94,8 @@ describe('parseReviewFollowUpsPayload', () => {
 });
 
 describe('fileReviewFollowUps', () => {
-  it('is idempotent per pr+head+index and applies triage labels without child labels', async () => {
-    const created: Array<{ title: string; body: string; labels: string[]; type: string }> = [];
+  it('is idempotent per pr+head+index and applies Project triage without child labels', async () => {
+    const created: Array<{ title: string; body: string; type: string }> = [];
     const triageCalls: Array<{ issueNumber: number; type: string; effort: string; priority: string }> = [];
     const issues: Array<{ number: number; body: string; state: 'open' | 'closed' }> = [];
     let next = 100;
@@ -106,7 +106,7 @@ describe('fileReviewFollowUps', () => {
           .map((i) => ({ number: i.number }));
       },
       async createIssue(input) {
-        created.push({ ...input, labels: [...input.labels], type: input.type });
+        created.push({ title: input.title, body: input.body, type: input.type });
         const number = next++;
         issues.push({ number, body: input.body, state: 'open' });
         return { number };
@@ -140,11 +140,6 @@ describe('fileReviewFollowUps', () => {
       { issueNumber: 100, type: 'feat', effort: 'medium', priority: 'p2' },
       { issueNumber: 100, type: 'feat', effort: 'medium', priority: 'p2' },
     ]);
-    expect(created[0]!.labels).toEqual(
-      expect.arrayContaining(['effort:medium', 'priority:p2']),
-    );
-    expect(created[0]!.labels).not.toContain('review-finding');
-    expect(created[0]!.labels).not.toContain('reconcile');
     expect(created[0]!.body).toContain(formatReviewFollowUpMarker(84, HEAD, 0));
     expect(created[0]!.body).not.toContain('jinn-autopilot:child');
     expect(created[0]!.type).toBe('feat');
