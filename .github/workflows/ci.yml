@@ -24,6 +24,13 @@ defaults:
   run:
     working-directory: client
 
+# Every job in this workflow is CPU-only. Both the current and nested legacy
+# onnxruntime-node installers otherwise fetch optional CUDA binaries during a
+# cold install, making release gates depend on GitHub/NuGet availability.
+env:
+  ONNXRUNTIME_NODE_INSTALL: skip
+  ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
 jobs:
   check:
     name: Typecheck & Test
