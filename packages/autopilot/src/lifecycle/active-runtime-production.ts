@@ -14,6 +14,7 @@ import {
   assertCursorRuntimeReady,
 } from '../dispatcher/cursor-runtime.js';
 import {
+  readAttemptManifest,
   listRunnerLiveAttempts,
   markAttemptExited,
   markMarketplaceAttemptRunning,
@@ -72,6 +73,18 @@ import {
   MARKETPLACE_ADOPTION_RESERVE_MS,
   type MarketplaceSessionBackend,
 } from './marketplace-session-backend.js';
+import {
+  observeMarketplaceSolutionDelivery,
+  type MarketplaceSolutionObservation,
+} from './marketplace-delivery-client.js';
+import {
+  makeProductionMarketplaceMutationAdoptionCoordinator,
+} from './marketplace-mutation-adoption-production.js';
+import type {
+  ConfirmedMarketplaceReviewClaim,
+  MarketplaceMutationAdoptionResult,
+  MarketplaceReviewClaimPort,
+} from './marketplace-mutation-adoption.js';
 
 export const AUTOPILOT_V2_REMOTE = 'jinn-autopilot-v2';
 
@@ -111,6 +124,18 @@ export interface ProductionActiveRuntimeOptions {
     readonly ok: boolean;
     readonly detail?: string;
   }>;
+  /** Injectable exact-delivery observer for production recovery tests. */
+  readonly marketplaceSolutionObserver?: (
+    manifestPath: string,
+  ) => Promise<MarketplaceSolutionObservation>;
+  /** Injectable deterministic adoption boundary for production recovery tests. */
+  readonly marketplaceMutationAdopter?: (input: {
+    readonly observation: Extract<
+      MarketplaceSolutionObservation,
+      { readonly status: 'verified' }
+    >;
+    readonly reviewClaims: MarketplaceReviewClaimPort;
+  }) => Promise<MarketplaceMutationAdoptionResult>;
   readonly caps: {
     readonly implementation: number;
     readonly review: number;
@@ -307,6 +332,175 @@ export function makeProductionActiveRuntime(
     now().getTime() + MARKETPLACE_AGENT_SOFT_DEADLINE_MS,
   ).toISOString();
   const receiptAuthors = options.credentials.logins();
+  const observeSolution = options.marketplaceSolutionObserver
+    ?? ((manifestPath: string) => observeMarketplaceSolutionDelivery(
+      manifestPath,
+      {
+        runner,
+        environment: ambient,
+        now,
+      },
+    ));
+  const confirmedReviewClaim = (
+    manifest: ReturnType<typeof readAttemptManifest>,
+  ): ConfirmedMarketplaceReviewClaim | undefined => {
+    if (
+      manifest.phase !== 'review'
+      || manifest.prNumber === undefined
+      || manifest.reviewGeneration === undefined
+      || manifest.reviewRefOid === undefined
+      || manifest.reviewApprovalPolicy === undefined
+    ) {
+      return undefined;
+    }
+    return {
+      head: manifest.expectedHead as GitOid,
+      generation: manifest.reviewGeneration,
+      refOid: manifest.reviewRefOid as GitOid,
+      attemptId: manifest.attemptId,
+      manifest,
+      reviewer: manifest.selectedLogin,
+      approvalPolicy: manifest.reviewApprovalPolicy,
+      state: 'active',
+    };
+  };
+  const makeAnchoredReviewClaimPort = (): MarketplaceReviewClaimPort => {
+    const reviewPort = makeProductionReviewActionPort({
+      repositoryPath: options.repositoryPath,
+      worktreeBase: options.worktreeBase,
+      runnerId: options.runnerId,
+      remoteName,
+      readSnapshot: options.readSnapshot,
+      runner,
+      environment: ambient,
+    });
+    const recoverExact = async (
+      prNumber: number,
+      expectedHead: GitOid,
+    ): Promise<ConfirmedMarketplaceReviewClaim | undefined> => {
+      const candidate = await reviewPort.readCandidate(prNumber);
+      if (
+        candidate === null
+        || candidate.head !== expectedHead
+        || candidate.reviewRef === undefined
+        || candidate.reviewRef.record.state !== 'active'
+      ) {
+        return undefined;
+      }
+      const attempts = listRunnerLiveAttempts(
+        join(options.worktreeBase, 'v2'),
+        options.runnerId,
+        alive,
+      );
+      const exact = attempts.flatMap((attempt) => {
+        if (
+          attempt.phase !== 'review'
+          || attempt.prNumber !== prNumber
+          || attempt.expectedHead !== expectedHead
+        ) {
+          return [];
+        }
+        const claim = confirmedReviewClaim(attempt);
+        return claim !== undefined
+          && claim.refOid === candidate.reviewRef!.oid
+          && claim.generation === candidate.reviewRef!.record.generation
+          && claim.attemptId === candidate.reviewRef!.record.attempt
+          && claim.reviewer.toLowerCase()
+            === candidate.reviewRef!.record.reviewer.toLowerCase()
+          ? [claim]
+          : [];
+      });
+      if (exact.length > 1) {
+        throw new Error('Multiple exact anchored review manifests are live');
+      }
+      return exact[0];
+    };
+    return {
+      async acquireOrRecover(input) {
+        const expectedHead = input.expectedHead;
+        const recovered = await recoverExact(input.prNumber, expectedHead);
+        if (recovered !== undefined) {
+          return { status: 'confirmed', claim: recovered };
+        }
+        const candidate = await reviewPort.readCandidate(input.prNumber);
+        if (candidate === null || candidate.head !== expectedHead) {
+          return {
+            status: 'lost',
+            detail: 'Pull request head changed before anchored review claim',
+          };
+        }
+        if (
+          candidate.humanHold
+          || candidate.approvalPolicy === 'human-codeowner'
+        ) {
+          return {
+            status: 'human',
+            detail:
+              candidate.humanHold
+                ? 'Human authority is active on the review target'
+                : 'Current-head CODEOWNER policy excludes marketplace v1',
+          };
+        }
+        const result = await executeReviewAction({
+          prNumber: input.prNumber,
+          expectedHead,
+        }, {
+          ...reviewPort,
+          credentials: options.credentials,
+          ambientEnvironment: ambient,
+          nextAttemptId: nextId,
+          nextGeneration: nextId,
+          runnerId: options.runnerId,
+          now,
+          sleep,
+          staleAfterMs: options.staleAfterMs,
+          executionBackendKind: 'marketplace',
+          anchoredMarketplaceReview: true,
+          receiptAuthors,
+          escalateHuman: async ({ candidate: current, reason }) => {
+            await escalateReview(
+              { candidate: current, reason },
+              options.credentials,
+              await options.readSnapshot(),
+            );
+          },
+        });
+        if (result.status === 'spawned') {
+          const claimed = await recoverExact(input.prNumber, expectedHead);
+          if (
+            claimed === undefined
+            || claimed.attemptId !== result.attemptId
+            || claimed.refOid !== result.reviewRefOid
+            || claimed.generation !== result.generation
+          ) {
+            return {
+              status: 'ambiguous',
+              detail: 'Anchored review claim did not read back exactly',
+            };
+          }
+          return { status: 'confirmed', claim: claimed };
+        }
+        if (result.status === 'human') {
+          return {
+            status: 'human',
+            detail: 'Anchored review claim entered Human authority',
+          };
+        }
+        if (result.status === 'lost' || result.status === 'ambiguous') {
+          return { status: result.status };
+        }
+        return {
+          status: 'ineligible',
+          detail:
+            result.status === 'already-approved'
+              ? 'Exact head is already terminally approved'
+              : result.status === 'ineligible'
+                ? result.detail
+                : 'Anchored review claim did not converge',
+        };
+      },
+    };
+  };
   const recoverMarketplaceAttempts = options.marketplaceRecovery ?? (
     marketplaceBackend === undefined
       ? undefined
@@ -319,6 +513,10 @@ export function makeProductionActiveRuntime(
             );
             for (const attempt of attempts) {
               if (attempt.execution.backend !== 'marketplace') continue;
+              // Review attempts represent the evaluator leg of their
+              // originating Task. They must never submit or recover a second
+              // marketplace Task.
+              if (attempt.phase === 'review') continue;
               let handle: MarketplaceExecutionHandle;
               if (attempt.processState === 'preparing') {
                 handle = await marketplaceBackend.recoverPreparing(
@@ -367,6 +565,47 @@ export function makeProductionActiveRuntime(
                         requestId: execution.requestId!,
                       }),
                 };
+              }
+              if (
+                attempt.execution.creationTransactionHash !== undefined
+                && attempt.execution.creationBlockNumber !== undefined
+              ) {
+                const delivery = await observeSolution(attempt.paths.manifest);
+                if (delivery.status === 'contradiction') {
+                  throw new Error(
+                    `Marketplace Solution delivery contradiction: `
+                    + `${delivery.reason}: ${delivery.detail}`,
+                  );
+                }
+                if (delivery.status === 'verified') {
+                  const reviewClaims = makeAnchoredReviewClaimPort();
+                  const adoption = options.marketplaceMutationAdopter === undefined
+                    ? await makeProductionMarketplaceMutationAdoptionCoordinator({
+                        originManifestPath: attempt.paths.manifest,
+                        session: delivery.delivery.session,
+                        delivery: delivery.delivery,
+                        repositoryPath: options.repositoryPath,
+                        worktreeBase: options.worktreeBase,
+                        runnerId: options.runnerId,
+                        readSnapshot: options.readSnapshot,
+                        reviewClaims,
+                        runner,
+                        environment: ambient,
+                        now,
+                      }).adopt(delivery.reference)
+                    : await options.marketplaceMutationAdopter({
+                        observation: delivery,
+                        reviewClaims,
+                      });
+                  if (adoption.status === 'recoverable') {
+                    throw new Error(
+                      `Marketplace Solution adoption is recoverable at `
+                      + `${adoption.stage}: ${adoption.detail}`,
+                    );
+                  }
+                  markAttemptExited(attempt.paths.manifest, now);
+                  continue;
+                }
               }
               const observation = await marketplaceBackend.recover(handle);
               if (observation.state === 'completed') {

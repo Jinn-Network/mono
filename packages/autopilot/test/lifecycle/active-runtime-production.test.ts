@@ -490,6 +490,134 @@ describe('production active runtime preflight', () => {
     }
   });
 
+  it('observes and adopts an exact marketplace Solution before Router-deadline recovery', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'autopilot-marketplace-adoption-'));
+    try {
+      const attemptId = '33333333-3333-4333-8333-333333333333';
+      const attemptDir = join(
+        root,
+        'v2',
+        'runner-a',
+        'implement',
+        `issue-42-${attemptId}`,
+      );
+      mkdirSync(attemptDir, { recursive: true });
+      const manifestPath = join(attemptDir, 'manifest.json');
+      const requestFile = join(attemptDir, 'marketplace-request.json');
+      writeFileSync(requestFile, '{}\n');
+      writeFileSync(manifestPath, `${JSON.stringify({
+        version: 2,
+        attemptId,
+        runnerId: 'runner-a',
+        host: 'host-a',
+        phase: 'implement',
+        subject: 'issue-42',
+        issueNumber: 42,
+        prNumber: 84,
+        branch: 'autopilot/issue-42',
+        targetBase: 'next',
+        expectedHead: '1'.repeat(40),
+        claimOid: '1'.repeat(40),
+        selectedLogin: 'implementation-bot',
+        repository: {
+          root: '/repo',
+          gitCommonDir: '/repo/.git',
+          remoteName: 'jinn-autopilot-v2',
+          remoteUrlHash: '2'.repeat(64),
+        },
+        execution: {
+          backend: 'marketplace',
+          taskId: 'task-42',
+          taskCid: 'bafy-task-42',
+          deadline: '2026-07-20T13:30:00.000Z',
+          requestFile,
+          creationTransactionHash: `0x${'a'.repeat(64)}`,
+          creationBlockNumber: 120,
+          solverNetManifestCid: 'bafy-solvernet',
+        },
+        processState: 'running',
+        pid: null,
+        paths: {
+          attemptDir,
+          worktree: join(attemptDir, 'worktree'),
+          manifest: manifestPath,
+          log: join(attemptDir, 'session.log'),
+          ghConfigDir: join(attemptDir, 'gh-config'),
+          askpass: join(attemptDir, 'askpass'),
+          tokenFile: join(attemptDir, 'gh-token'),
+        },
+        timestamps: {
+          createdAt: NOW.toISOString(),
+          updatedAt: NOW.toISOString(),
+          childStartedAt: NOW.toISOString(),
+        },
+      }, null, 2)}\n`);
+      const marketplaceBackend = {
+        start: vi.fn(),
+        recoverPreparing: vi.fn(),
+        recover: vi.fn(),
+        cancel: vi.fn(),
+        preflight: vi.fn(async () => ({ ok: true as const })),
+      };
+      const observation = {
+        status: 'verified' as const,
+        reference: {
+          taskId: 'task-42',
+          attemptIndex: 0,
+          requestId: 'request-42',
+          deliveryEnvelopeCid: 'bafy-envelope',
+        },
+        delivery: { session: {} },
+      };
+      const marketplaceSolutionObserver = vi.fn(async () => observation);
+      const marketplaceMutationAdopter = vi.fn(async () => ({
+        status: 'rejected' as const,
+      }));
+      const runtime = makeProductionActiveRuntime({
+        repositoryPath: '/repo',
+        worktreeBase: root,
+        runnerId: 'runner-a',
+        credentials: pool(),
+        authorAllowlist: new Set(['implementation-bot']),
+        readSnapshot: vi.fn(),
+        readPullRequestByNumber: vi.fn(),
+        readProjectItemForReconciliation: vi.fn(),
+        readBranchHeadByName: vi.fn(),
+        readIssueByNumber: vi.fn(),
+        readBlockedByIssueNumbers: vi.fn(),
+        readOpenPullRequestsByIssue: vi.fn(),
+        readIssueActionContext: vi.fn(),
+        config: DEFAULT_CONFIG,
+        spawn: vi.fn(),
+        executionBackendKind: 'marketplace',
+        marketplaceBackend,
+        marketplaceSolutionObserver,
+        marketplaceMutationAdopter,
+        caps: { implementation: 1, review: 1 },
+        implementationBackpressureThreshold: 1,
+        staleAfterMs: 120 * 60 * 1000,
+        environment: {
+          JINN_AUTOPILOT_CAPABILITY_ATTESTATION: '/attestation.json',
+        },
+        now: () => NOW,
+        readCapabilityAttestation: () => ({}) as never,
+        runner: async () => 'https://github.com/Jinn-Network/mono.git\n',
+      });
+
+      await expect(runtime.preflight()).resolves.toEqual({ ok: true });
+      expect(marketplaceSolutionObserver).toHaveBeenCalledWith(manifestPath);
+      expect(marketplaceMutationAdopter).toHaveBeenCalledWith({
+        observation,
+        reviewClaims: expect.any(Object),
+      });
+      expect(marketplaceBackend.recover).not.toHaveBeenCalled();
+      expect(JSON.parse(readFileSync(manifestPath, 'utf8')))
+        .toMatchObject({ processState: 'exited' });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('does not extend V2 staleness when preparing recovery happens late', async () => {
     const root = mkdtempSync(join(tmpdir(), 'autopilot-marketplace-late-recovery-'));
     try {

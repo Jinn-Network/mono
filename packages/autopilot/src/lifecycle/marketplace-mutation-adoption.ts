@@ -482,7 +482,10 @@ function authorityFailure(
     };
   }
   if (
-    !authority.trustedOperatorIds.includes(delivery.operator.id)
+    (
+      authority.trustedOperatorIds.length > 0
+      && !authority.trustedOperatorIds.includes(delivery.operator.id)
+    )
     || !sameStrings(authority.receiptAuthors, session.receiptAuthors)
     || !session.receiptAuthors.some(
       (author) => author.toLowerCase() === authority.publisherLogin.toLowerCase(),

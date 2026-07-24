@@ -671,6 +671,16 @@ describe('marketplace mutation adoption workflows', () => {
     expect(harness.verificationRepositoryPaths).toEqual([WORKTREE]);
   });
 
+  it('uses closed-SolverNet delivery verification without a second operator allowlist', async () => {
+    const harness = new Harness();
+    harness.trustedOperatorIds = [];
+
+    await expect(adopt(harness)).resolves.toMatchObject({
+      status: 'accepted',
+      operation: 'implementation-complete',
+    });
+  });
+
   it.each([
     ['fix-child', 'review-finding'],
     ['reconcile', 'reconcile'],
