@@ -9,8 +9,9 @@ import { describe, expect, test } from "vitest";
 import {
   describeExecutionProducerContract,
   type ExecutionProducerContractDriver,
-  type ExecutionProducerContractObservation,
+  type ExecutionProducerContractFinalizedObservation,
   type ExecutionProducerContractScenario,
+  type InterruptedFinalizationExecutionProducerContractObservation,
 } from "./testing.js";
 import type {
   ExecutionId,
@@ -56,11 +57,16 @@ async function literalFixtureDriver(): Promise<ExecutionProducerContractDriver> 
   const resultBytes = await readFile(fixtureUrl("result.txt"));
   const runtimeBytes = await readFile(fixtureUrl("runtime.json"));
   const runnerBytes = await readFile(fixtureUrl("runner.mjs"));
+  let interruptedRepository: InMemoryEvidenceRepository | undefined;
+  let interruptedArtifactReferences:
+    | FinalizedExecutionReceipt["artifacts"]
+    | undefined;
+  let interruptedRecordBytes: Uint8Array | undefined;
 
   return {
     async run(
       scenario,
-    ): Promise<ExecutionProducerContractObservation> {
+    ): Promise<ExecutionProducerContractFinalizedObservation> {
       const fixture = scenarioFixtures[scenario];
       const repository = new InMemoryEvidenceRepository();
       const artifactReceipts = await Promise.all(
@@ -95,18 +101,6 @@ async function literalFixtureDriver(): Promise<ExecutionProducerContractDriver> 
         expectedTraceBytes: traceBytes,
       };
 
-      if (scenario === "interrupted-finalization") {
-        return {
-          ...common,
-          scenario,
-          expectedResultBytes: resultBytes,
-          recovery: {
-            finalizationInterrupted: true,
-            resumedFromWorkspace: true,
-            receipt,
-          },
-        };
-      }
       if (scenario === "completed") {
         return {
           ...common,
@@ -117,6 +111,60 @@ async function literalFixtureDriver(): Promise<ExecutionProducerContractDriver> 
       return {
         ...common,
         scenario,
+      };
+    },
+    async runUntilFinalizationInterrupted(
+      interruptFinalization,
+    ): Promise<never> {
+      const fixture = scenarioFixtures["interrupted-finalization"];
+      interruptedRepository = new InMemoryEvidenceRepository();
+      const artifactReceipts = await Promise.all(
+        [
+          taskBytes,
+          traceBytes,
+          runtimeBytes,
+          runnerBytes,
+          resultBytes,
+        ].map((bytes) => interruptedRepository!.putArtifact(bytes)),
+      );
+      interruptedArtifactReferences = artifactReceipts.map(
+        ({ reference }) => reference,
+      );
+      interruptedRecordBytes = await readFile(fixtureUrl(fixture.record));
+
+      return interruptFinalization();
+    },
+    async recoverFinalization(): Promise<InterruptedFinalizationExecutionProducerContractObservation> {
+      const fixture = scenarioFixtures["interrupted-finalization"];
+      if (
+        interruptedRepository === undefined ||
+        interruptedArtifactReferences === undefined ||
+        interruptedRecordBytes === undefined
+      ) {
+        throw new Error("No interrupted finalization is available to recover");
+      }
+      const recordReceipt = await interruptedRepository.putRecord(
+        "execution-evidence",
+        interruptedRecordBytes,
+      );
+      const receipt: FinalizedExecutionReceipt = {
+        executionId: fixture.executionId,
+        record: recordReceipt.reference,
+        artifacts: interruptedArtifactReferences,
+        finalizedAt: "2026-07-24T10:00:02Z",
+      };
+
+      return {
+        scenario: "interrupted-finalization",
+        executionId: fixture.executionId,
+        workspaceDir: "/tmp/producer-contract/interrupted-finalization",
+        captureStartedAt: "2026-07-24T09:59:59.900Z",
+        executorStartedAt: "2026-07-24T10:00:00Z",
+        repository: interruptedRepository,
+        receipt,
+        expectedTaskBytes: taskBytes,
+        expectedTraceBytes: traceBytes,
+        expectedResultBytes: resultBytes,
       };
     },
   };

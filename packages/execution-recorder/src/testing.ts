@@ -30,13 +30,17 @@ export type ExecutionProducerContractScenario =
   | AbandonedExecutionProducerContractScenario
   | InterruptedFinalizationExecutionProducerContractScenario;
 
+export type ExecutionProducerContractFinalizedScenario =
+  | CompletedExecutionProducerContractScenario
+  | FailedExecutionProducerContractScenario
+  | AbandonedExecutionProducerContractScenario;
+
 export interface ExecutionProducerContractResult {
   readonly repository: EvidenceRepository;
   readonly receipt: FinalizedExecutionReceipt;
 }
 
-interface ExecutionProducerContractObservationBase
-  extends ExecutionProducerContractResult {
+interface ExecutionProducerContractObservationBase {
   readonly scenario: ExecutionProducerContractScenario;
   readonly executionId: ExecutionId;
   readonly workspaceDir: string;
@@ -47,47 +51,55 @@ interface ExecutionProducerContractObservationBase
   readonly cleanup?: () => Promise<void> | void;
 }
 
+interface ExecutionProducerContractFinalizedObservationBase
+  extends ExecutionProducerContractObservationBase,
+    ExecutionProducerContractResult {}
+
 export interface CompletedExecutionProducerContractObservation
-  extends ExecutionProducerContractObservationBase {
+  extends ExecutionProducerContractFinalizedObservationBase {
   readonly scenario: CompletedExecutionProducerContractScenario;
   readonly expectedResultBytes: Uint8Array;
 }
 
 export interface FailedExecutionProducerContractObservation
-  extends ExecutionProducerContractObservationBase {
+  extends ExecutionProducerContractFinalizedObservationBase {
   readonly scenario: FailedExecutionProducerContractScenario;
   readonly expectedResultBytes?: Uint8Array;
 }
 
 export interface AbandonedExecutionProducerContractObservation
-  extends ExecutionProducerContractObservationBase {
+  extends ExecutionProducerContractFinalizedObservationBase {
   readonly scenario: AbandonedExecutionProducerContractScenario;
   readonly expectedResultBytes?: Uint8Array;
 }
 
-export interface InterruptedFinalizationRecoveryObservation {
-  readonly finalizationInterrupted: true;
-  readonly resumedFromWorkspace: true;
-  readonly receipt: FinalizedExecutionReceipt;
-}
-
 export interface InterruptedFinalizationExecutionProducerContractObservation
-  extends ExecutionProducerContractObservationBase {
+  extends ExecutionProducerContractFinalizedObservationBase {
   readonly scenario: InterruptedFinalizationExecutionProducerContractScenario;
   readonly expectedResultBytes: Uint8Array;
-  readonly recovery: InterruptedFinalizationRecoveryObservation;
 }
 
-export type ExecutionProducerContractObservation =
+export type ExecutionProducerContractFinalizedObservation =
   | CompletedExecutionProducerContractObservation
   | FailedExecutionProducerContractObservation
-  | AbandonedExecutionProducerContractObservation
+  | AbandonedExecutionProducerContractObservation;
+
+export type ExecutionProducerContractObservation =
+  | ExecutionProducerContractFinalizedObservation
   | InterruptedFinalizationExecutionProducerContractObservation;
+
+export type ExecutionProducerContractFinalizationInterruption = () => never;
 
 export interface ExecutionProducerContractDriver {
   run(
-    scenario: ExecutionProducerContractScenario,
-  ): Promise<ExecutionProducerContractObservation>;
+    scenario: ExecutionProducerContractFinalizedScenario,
+  ): Promise<ExecutionProducerContractFinalizedObservation>;
+
+  runUntilFinalizationInterrupted(
+    interruptFinalization: ExecutionProducerContractFinalizationInterruption,
+  ): Promise<never>;
+
+  recoverFinalization(): Promise<InterruptedFinalizationExecutionProducerContractObservation>;
 }
 
 export type ExecutionProducerContractDriverFactory = () =>
@@ -274,35 +286,16 @@ async function verifyObservation(
     ).toBe(true);
   }
 
-  if (observation.scenario === "interrupted-finalization") {
-    expect(observation.recovery).toMatchObject({
-      finalizationInterrupted: true,
-      resumedFromWorkspace: true,
-      receipt: observation.receipt,
-    });
-    const recoveredRecordBytes = await observation.repository.getRecord(
-      observation.recovery.receipt.record,
-    );
-    expect(
-      recoveredRecordBytes,
-      "recovery receipt did not resolve after producer recovery",
-    ).not.toBeNull();
-    if (recoveredRecordBytes === null) {
-      throw new Error("Recovery receipt did not resolve after producer recovery");
-    }
-    expectExactBytes(recoveredRecordBytes, recordBytes);
-  }
 }
 
 export function describeExecutionProducerContract(
   driverFactory: ExecutionProducerContractDriverFactory,
 ): void {
   describe("ExecutionProducerContract", () => {
-    test.each<ExecutionProducerContractScenario>([
+    test.each<ExecutionProducerContractFinalizedScenario>([
       "completed",
       "failed",
       "abandoned",
-      "interrupted-finalization",
     ])("satisfies the %s scenario", async (scenario) => {
       const driver = await driverFactory();
       const observation = await driver.run(scenario);
@@ -312,5 +305,34 @@ export function describeExecutionProducerContract(
         await observation.cleanup?.();
       }
     });
+
+    test(
+      "surfaces an injected finalization interruption before recovering",
+      async () => {
+        const driver = await driverFactory();
+        const injectedInterruption = new Error(
+          "execution producer contract finalization interruption",
+        );
+        let interruptionCount = 0;
+
+        await expect(
+          driver.runUntilFinalizationInterrupted(() => {
+            interruptionCount += 1;
+            throw injectedInterruption;
+          }),
+        ).rejects.toBe(injectedInterruption);
+        expect(interruptionCount).toBe(1);
+
+        const recoveredObservation = await driver.recoverFinalization();
+        try {
+          await verifyObservation(
+            "interrupted-finalization",
+            recoveredObservation,
+          );
+        } finally {
+          await recoveredObservation.cleanup?.();
+        }
+      },
+    );
   });
 }
