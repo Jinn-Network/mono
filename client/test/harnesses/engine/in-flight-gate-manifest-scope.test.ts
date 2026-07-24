@@ -25,6 +25,8 @@ import {
   TaskRunPersistence,
   type PersistedTaskRunInput,
 } from '../../../src/harnesses/engine/persistence.js';
+import { getSolverNetContract } from '../../../src/solver-nets/contracts.js';
+import { SolverNetRegistry } from '../../../src/solver-nets/registry.js';
 import type { Task } from '../../../src/types/task.js';
 import type { Harness, Solution, ReadyStatus } from '../../../src/harnesses/types.js';
 
@@ -41,6 +43,26 @@ function stubImpl(): Harness {
     isReady: async (): Promise<ReadyStatus> => ({ ready: true }),
     run: async (): Promise<Solution> => ({ venueRef: { name: 'stub' }, gating: {} }),
   };
+}
+
+function fixtureSolverNetRegistry(): SolverNetRegistry {
+  const contract = getSolverNetContract({ id: 'swe-rebench-v2', version: 'v1' });
+  if (!contract) throw new Error('fixture SolverNet contract missing');
+  const registry = new SolverNetRegistry();
+  for (const manifestCid of [MANIFEST_A, MANIFEST_B, MANIFEST_C]) {
+    registry.register({
+      name: manifestCid,
+      manifestCid,
+      enabled: true,
+      solverType: ROUTING_KEY,
+      roles: ['solving'],
+      contract,
+      harness: 'stub-impl',
+      runtimePlugins: [],
+      taskGenerator: { enabled: false },
+    });
+  }
+  return registry;
 }
 
 function makeTask(opts: { id: string; manifestCid: string }): Task {
@@ -95,6 +117,7 @@ describe('TaskEngine — single-flight gate scoped by solverNetManifestCid', () 
       store,
       paths: { workingDirRoot: join(dir, 'work'), implStateDirRoot: join(dir, 'impl-state') },
       implRegistry: { findFor: () => stubImpl() },
+      solverNetRegistry: fixtureSolverNetRegistry(),
     });
   }
 

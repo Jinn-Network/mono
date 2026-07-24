@@ -7,6 +7,8 @@ import { Store } from '../../../src/store/store.js';
 import { TaskEngine, type ManifestResolver } from '../../../src/harnesses/engine/engine.js';
 import { buildHarnesses } from '../../../src/harnesses/impls/index.js';
 import type { Harness, Solution } from '../../../src/harnesses/types.js';
+import { PREDICTION_V1_SOLVER_NET_CONTRACT } from '../../../src/solver-nets/contracts.js';
+import { SolverNetRegistry } from '../../../src/solver-nets/registry.js';
 import type { Task } from '../../../src/types/task.js';
 import {
   makePredictionV1Task,
@@ -22,6 +24,25 @@ function stubHarness(overrides: Partial<Harness> = {}): Harness {
     run: async (): Promise<Solution> => ({ venueRef: { name: 'stub' }, gating: {} }),
     ...overrides,
   };
+}
+
+function fixtureSolverNetRegistry(
+  manifestCid = TEST_PREDICTION_V1_MANIFEST_CID,
+  solverType = 'prediction.v1',
+): SolverNetRegistry {
+  const registry = new SolverNetRegistry();
+  registry.register({
+    name: manifestCid,
+    manifestCid,
+    enabled: true,
+    solverType,
+    roles: ['solving'],
+    contract: PREDICTION_V1_SOLVER_NET_CONTRACT,
+    harness: 'prediction-v1-test-harness',
+    runtimePlugins: [],
+    taskGenerator: { enabled: false },
+  });
+  return registry;
 }
 
 describe('prediction.v1 runtime gate', () => {
@@ -67,6 +88,7 @@ describe('prediction.v1 runtime gate', () => {
       store,
       paths: { workingDirRoot: join(dir, 'work'), implStateDirRoot: join(dir, 'impl-state') },
       implRegistry: { findFor: () => stubHarness({ canAttempt }) },
+      solverNetRegistry: fixtureSolverNetRegistry(),
       manifestResolver: makeStubManifestResolver(),
     });
     const task = {
@@ -94,6 +116,7 @@ describe('prediction.v1 runtime gate', () => {
       store,
       paths: { workingDirRoot: join(dir, 'work'), implStateDirRoot: join(dir, 'impl-state') },
       implRegistry: { findFor: () => stubHarness({ canAttempt }) },
+      solverNetRegistry: fixtureSolverNetRegistry(),
       manifestResolver: makeStubManifestResolver(),
     });
     const task = makePredictionV1Task();
@@ -117,12 +140,15 @@ describe('prediction.v1 runtime gate', () => {
     function makeEngine(opts: {
       manifestResolver?: ManifestResolver;
       canAttempt?: (task: Task) => Promise<{ ok: true } | { ok: false; reason: string }>;
+      manifestCid?: string;
+      solverType?: string;
     } = {}): TaskEngine {
       const canAttempt = opts.canAttempt ?? (async () => ({ ok: true as const }));
       return new TaskEngine({
         store,
         paths: { workingDirRoot: join(dir, 'work'), implStateDirRoot: join(dir, 'impl-state') },
         implRegistry: { findFor: () => stubHarness({ canAttempt }) },
+        solverNetRegistry: fixtureSolverNetRegistry(opts.manifestCid, opts.solverType),
         ...(opts.manifestResolver ? { manifestResolver: opts.manifestResolver } : {}),
       });
     }
@@ -140,6 +166,7 @@ describe('prediction.v1 runtime gate', () => {
         store,
         paths: { workingDirRoot: join(dir, 'work'), implStateDirRoot: join(dir, 'impl-state') },
         implRegistry: { findFor },
+        solverNetRegistry: fixtureSolverNetRegistry(),
         manifestResolver: resolver,
       });
       const task = makePredictionV1Task();
@@ -159,6 +186,7 @@ describe('prediction.v1 runtime gate', () => {
       expect(findFor).toHaveBeenCalledWith({
         solverType: 'prediction.v1',
         role: 'restoration',
+        harnessName: 'prediction-v1-test-harness',
       });
       expect(canAttempt).toHaveBeenCalledWith(task);
     });
@@ -169,7 +197,10 @@ describe('prediction.v1 runtime gate', () => {
           throw new Error('manifest not found for cid');
         }),
       };
-      const engine = makeEngine({ manifestResolver: failingResolver });
+      const engine = makeEngine({
+        manifestResolver: failingResolver,
+        manifestCid: 'bafy-does-not-exist',
+      });
       const task = makePredictionV1Task({
         solverNetManifestCid: 'bafy-does-not-exist',
       });
@@ -188,7 +219,10 @@ describe('prediction.v1 runtime gate', () => {
     });
 
     it('rejects a task when contractId disagrees with the manifest', async () => {
-      const engine = makeEngine({ manifestResolver: makeStubManifestResolver() });
+      const engine = makeEngine({
+        manifestResolver: makeStubManifestResolver(),
+        solverType: 'forecasting.v1',
+      });
       const task = makePredictionV1Task({
         contractId: 'forecasting' as 'prediction',
       });

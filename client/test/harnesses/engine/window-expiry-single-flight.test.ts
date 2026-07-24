@@ -42,6 +42,8 @@ import { Store } from '../../../src/store/store.js';
 import { TaskEngine, type TaskEngineOptions } from '../../../src/harnesses/engine/engine.js';
 import { TaskRunPersistence } from '../../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../../src/harnesses/engine/state.js';
+import { getSolverNetContract } from '../../../src/solver-nets/contracts.js';
+import { SolverNetRegistry } from '../../../src/solver-nets/registry.js';
 import type { Task } from '../../../src/types/task.js';
 import type { Harness, HarnessContext, ReadyStatus, Solution } from '../../../src/harnesses/types.js';
 
@@ -144,6 +146,24 @@ function makePartialAbortHarness(started: ReturnType<typeof deferred<'started'>>
   };
 }
 
+function fixtureSolverNetRegistry(harness: string): SolverNetRegistry {
+  const contract = getSolverNetContract({ id: 'swe-rebench-v2', version: 'v1' });
+  if (!contract) throw new Error('fixture SolverNet contract missing');
+  const registry = new SolverNetRegistry();
+  registry.register({
+    name: MANIFEST_CID,
+    manifestCid: MANIFEST_CID,
+    enabled: true,
+    solverType: ROUTING_KEY,
+    roles: ['solving'],
+    contract,
+    harness,
+    runtimePlugins: [],
+    taskGenerator: { enabled: false },
+  });
+  return registry;
+}
+
 function packagingOpts(store: Store, dir: string, impl: Harness): TaskEngineOptions {
   return {
     store,
@@ -152,6 +172,7 @@ function packagingOpts(store: Store, dir: string, impl: Harness): TaskEngineOpti
       implStateDirRoot: join(dir, 'impl-state'),
     },
     implRegistry: { findFor: () => impl },
+    solverNetRegistry: fixtureSolverNetRegistry(impl.name),
     packagingDeps: {
       store,
       operatorEndpoint: 'https://op.test',
@@ -271,6 +292,7 @@ describe('TaskEngine — windowEndTs abort terminalizes and releases single-flig
         implStateDirRoot: join(dir, 'impl-state'),
       },
       implRegistry: { findFor: () => impl },
+      solverNetRegistry: fixtureSolverNetRegistry(impl.name),
     });
     const persistence = new TaskRunPersistence(store.db);
     const requestId = 'win-exp-empty-1';
