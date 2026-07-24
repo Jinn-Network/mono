@@ -27,8 +27,10 @@
   canonical CIDv1 `raw` + `sha2-256`, the package CID addresses the exact ustar
   bytes, bounded archive preflight/extraction runs in owner-only staging, and
   contained atomic destination commit is mandatory.
-- The signed v2 core carries a mandatory `redactionManifestHash` over the
-  RFC 8785 JCS form of the registered scrub report; install recomputes it.
+- The signed v2 core carries mandatory
+  `redactionManifest: { schema, scannerProfile, reportHash }`; the hash covers
+  the RFC 8785 JCS form of the registered scrub report, and install resolves
+  the signed scanner then recomputes it.
 - `checkpoint.ts` must ship as registered `jinn checkpoint publish|install|list` CLI verbs with production dependencies and CLI-level tests.
 - American English in identifiers and Issue titles (`digest`, `distill`, ` favor` not British variants).
 
@@ -180,11 +182,14 @@ it('private learner roots do not change codeDigest under learner-public.v1', asy
 - [ ] Publish resolves the harness's registered profile, validates roots/kinds, and runs the fail-closed scrub before any pin.
 - [ ] Publish pins the actual public tree selected by `learner-public.v1`, replacing `data: ''`; the packaged path set is exactly the hasher's non-ignored path set.
 - [ ] `harness.checkpoint.v2` requires
-  `hashProfile: { id, ignoreRelPaths }` and `redactionManifestHash`; the
-  signature covers both. The hash is `sha256:<hex>` over the RFC 8785 JCS UTF-8
-  bytes of the registered `jinn.checkpoint-redaction.v1` report defined in the
-  finding; publish returns that report locally, and install recomputes it.
-  Unknown scanner profiles or a report-hash mismatch refuse. New writers emit
+  `hashProfile: { id, ignoreRelPaths }` and
+  `redactionManifest: { schema, scannerProfile, reportHash }`; the signature
+  covers both structures. The hash is `sha256:<hex>` over the RFC 8785 JCS
+  UTF-8 bytes of the registered `jinn.checkpoint-redaction.v1` report defined
+  in the finding; publish returns that report locally. Install resolves the
+  signed `scannerProfile`, requires it to be registered for the signed hash
+  profile and schema, and recomputes the report. Unknown/mismatched
+  schema/scanner profiles or a report-hash mismatch refuse. New writers emit
   v2.
 - [ ] The exact signed JSON bytes are pinned and schema-parse when fetched by `checkpointCid`; no registry-populated variant is constructed.
 - [ ] `IdentityRegistry.setMetadata("harness.checkpoint:<checkpointCid>", checkpointCid)` anchors the immutable CID. The CLI returns `{ checkpointCid, manifest, anchorReceipt }`, with the receipt outside the manifest.
@@ -207,24 +212,27 @@ it('private learner roots do not change codeDigest under learner-public.v1', asy
   collisions, missing/out-of-order parent directories, links, devices, FIFOs,
   sockets, sparse/extended entries, and all non-file/directory records. It
   verifies canonical ustar name/prefix splitting, logical ordering, types,
-  zero owner/time fields, normalized archive modes, checksums, padding, and end
-  blocks.
+  zero owner/time fields, path-derived archive modes (`0755` below `hooks/`
+  and `tools/`, `0644` for other files, `0755` directories), checksums,
+  padding, and end blocks.
 - [ ] Extraction uses no shell command. It streams into a unique trusted-parent
   `mkdtemp` directory verified `0700`, re-enforces byte/entry/file/directory/
   depth limits, prevents link following or replacement, proves containment for
   every output, ignores remote ownership/mode, creates current-process-owned
-  directories `0700` and files `0600`, cleans on failure, and never
-  interpolates remote CIDs or names into its path.
+  directories `0700`, hook/tool files `0700`, and other files `0600`, cleans
+  on failure, and never interpolates remote CIDs or names into its path.
 - [ ] Manifest `implName` is validated before final path selection. The destination is contained beneath configured `implStateDirRoot`, unsafe parent links are rejected, existing state is not overwritten by default, and verified staging is committed atomically.
 - [ ] `client/src/cli/commands/checkpoint.ts` exports a production-wired `CommandModule` for `jinn checkpoint publish|install|list`; `client/src/cli/index.ts` registers it and help/argument errors follow the standard envelope.
 - [ ] CLI validates subcommands, required arguments, canonical names/versions/CIDs, frozen mode, configured IPFS/wallet dependencies, and destination policy before mutation.
 - [ ] Tests cover train refusal, unknown/special-file refusal, scrub refusal,
-  scrub-report canonicalization/recomputation/tampering, CID-byte/schema
+  scrub-report schema/scanner resolution/canonicalization/recomputation/
+  tampering, CID-byte/schema
   equality, receipt separation, profile tampering/unknown id, package/hash
   parity, signature/digest mismatch, every malicious-archive class plus
   directory/depth floods, non-canonical header/path-split/checksum rejection,
-  every limit/cleanup rule, CLI registry/help/arguments, and a CLI-level
-  mocked-IPFS publish→install round trip.
+  executable hook/tool plus non-executable state behavior, every
+  limit/cleanup rule, CLI registry/help/arguments, and a CLI-level mocked-IPFS
+  publish→install round trip.
 
 **Verification (implementer):**
 
