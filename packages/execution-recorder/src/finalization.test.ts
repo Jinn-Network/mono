@@ -201,6 +201,54 @@ class FinalizationFaultRepository implements EvidenceRepository {
   }
 }
 
+class ReceiptMutatingRepository implements EvidenceRepository {
+  readonly delegate = new FinalizationFaultRepository();
+
+  constructor(
+    private readonly mutateArtifact?: (
+      receipt: RepositoryWriteReceipt<EvidenceArtifactReference>,
+    ) => RepositoryWriteReceipt<EvidenceArtifactReference>,
+    private readonly mutateRecord?: (
+      receipt: RepositoryWriteReceipt<EvidenceRecordReference>,
+    ) => RepositoryWriteReceipt<EvidenceRecordReference>,
+  ) {}
+
+  async putRecord(
+    family: EvidenceRecordFamily,
+    value: Uint8Array,
+    options?: RepositoryOperationOptions,
+  ): Promise<RepositoryWriteReceipt<EvidenceRecordReference>> {
+    const receipt = await this.delegate.putRecord(
+      family,
+      value,
+      options,
+    );
+    return this.mutateRecord?.(receipt) ?? receipt;
+  }
+
+  getRecord(
+    reference: EvidenceRecordReference,
+    options?: RepositoryOperationOptions,
+  ): Promise<Uint8Array | null> {
+    return this.delegate.getRecord(reference, options);
+  }
+
+  async putArtifact(
+    value: Uint8Array,
+    options?: RepositoryOperationOptions,
+  ): Promise<RepositoryWriteReceipt<EvidenceArtifactReference>> {
+    const receipt = await this.delegate.putArtifact(value, options);
+    return this.mutateArtifact?.(receipt) ?? receipt;
+  }
+
+  getArtifact(
+    reference: EvidenceArtifactReference,
+    options?: RepositoryOperationOptions,
+  ): Promise<Uint8Array | null> {
+    return this.delegate.getArtifact(reference, options);
+  }
+}
+
 async function initializedState(): Promise<WorkspaceState> {
   const parent = await mkdtemp(join(tmpdir(), "jinn-recorder-finalization-"));
   temporaryDirectories.push(parent);
@@ -384,6 +432,123 @@ describe("execution finalization", () => {
     expect(repeated.state).toBe(first.state);
     expect(repository.events).toEqual(repositoryEvents);
     expect(clockCalls).toBe(0);
+  });
+
+  test("binds repeated finalization to the complete persisted intent and exact candidate metadata", async () => {
+    const repository = new FinalizationFaultRepository();
+    const state = await initializedState();
+    const input: FinalizeExecutionInput = {
+      outcome: "completed",
+      endedAt: "2026-07-24T10:00:01Z",
+      results: [
+        file("results/result.txt", "fixture result", "text/plain"),
+      ],
+      nativeTrace: nativeTrace(),
+    };
+    const finalized = await finalizeWorkspaceState(
+      repository,
+      state,
+      input,
+      {
+        now: () => new Date("2026-07-24T10:00:02Z"),
+      },
+    );
+    const repositoryEvents = [...repository.events];
+    const cases: readonly {
+      readonly name: string;
+      readonly expectedCode:
+        | "RECORDING_CONFLICT"
+        | "WORKSPACE_CORRUPT";
+      readonly mutate: (value: WorkspaceState) => WorkspaceState;
+    }[] = [
+      {
+        name: "candidate metadata bytes",
+        expectedCode: "RECORDING_CONFLICT",
+        mutate: (value) => ({
+          ...value,
+          recording: {
+            ...value.recording!,
+            record: {
+              ...value.recording!.record,
+              description: "Changed after intent persistence.",
+            },
+          },
+        }),
+      },
+      {
+        name: "persisted finalizedAt",
+        expectedCode: "WORKSPACE_CORRUPT",
+        mutate: (value) => ({
+          ...value,
+          finalization: {
+            ...value.finalization!,
+            finalizedAt: "2026-07-24T10:00:03.000Z",
+          },
+        }),
+      },
+      {
+        name: "persisted metadata digest",
+        expectedCode: "WORKSPACE_CORRUPT",
+        mutate: (value) => ({
+          ...value,
+          finalization: {
+            ...value.finalization!,
+            metadata: {
+              ...value.finalization!.metadata,
+              digest: `sha256:${"0".repeat(64)}`,
+            },
+          },
+        }),
+      },
+      {
+        name: "persisted metadata size",
+        expectedCode: "WORKSPACE_CORRUPT",
+        mutate: (value) => ({
+          ...value,
+          finalization: {
+            ...value.finalization!,
+            metadata: {
+              ...value.finalization!.metadata,
+              size: value.finalization!.metadata.size + 1,
+            },
+          },
+        }),
+      },
+      {
+        name: "persisted artifact digests",
+        expectedCode: "WORKSPACE_CORRUPT",
+        mutate: (value) => ({
+          ...value,
+          finalization: {
+            ...value.finalization!,
+            artifactDigests:
+              value.finalization!.artifactDigests.slice(1),
+          },
+        }),
+      },
+    ];
+
+    for (const candidate of cases) {
+      let clockCalls = 0;
+      await expect(
+        finalizeWorkspaceState(
+          repository,
+          candidate.mutate(finalized.state),
+          input,
+          {
+            now: () => {
+              clockCalls += 1;
+              return new Date("2030-01-01T00:00:00Z");
+            },
+          },
+        ),
+        candidate.name,
+      ).rejects.toMatchObject({
+        code: candidate.expectedCode,
+      });
+      expect(clockCalls, candidate.name).toBe(0);
+    }
+    expect(repository.events).toEqual(repositoryEvents);
   });
 
   test("resumes matching pending intent and rejects changed material before repository writes", async () => {
@@ -596,6 +761,150 @@ describe("execution finalization", () => {
         conforms: true,
         diagnostics: [],
       });
+    },
+  );
+
+  test.each([
+    {
+      name: "digest",
+      mutate: (
+        receipt: RepositoryWriteReceipt<EvidenceArtifactReference>,
+      ) => ({
+        ...receipt,
+        reference: {
+          digest:
+            `sha256:${"0".repeat(64)}` as EvidenceArtifactReference["digest"],
+        },
+      }),
+    },
+    {
+      name: "size",
+      mutate: (
+        receipt: RepositoryWriteReceipt<EvidenceArtifactReference>,
+      ) => ({
+        ...receipt,
+        size: receipt.size + 1,
+      }),
+    },
+  ])(
+    "rejects an artifact acknowledgement with the wrong $name before checkpointing it",
+    async ({ mutate }) => {
+      const repository = new ReceiptMutatingRepository(mutate);
+      const state = await initializedState();
+
+      await expect(
+        finalizeWorkspaceState(
+          repository,
+          state,
+          {
+            outcome: "completed",
+            endedAt: "2026-07-24T10:00:01Z",
+            results: [
+              file(
+                "results/result.txt",
+                "fixture result",
+                "text/plain",
+              ),
+            ],
+            nativeTrace: nativeTrace(),
+          },
+          {
+            now: () => new Date("2026-07-24T10:00:02Z"),
+          },
+        ),
+      ).rejects.toMatchObject({
+        name: "EvidenceRepositoryError",
+        code: "CONTENT_CORRUPT",
+      });
+
+      const pending = await openWorkspaceState(state.paths.root);
+      expect(pending).toMatchObject({
+        status: "finalizing",
+        repositoryArtifactDigests: [],
+      });
+      expect(pending.repositoryRecord).toBeUndefined();
+      expect(pending.receipt).toBeUndefined();
+    },
+  );
+
+  test.each([
+    {
+      name: "family",
+      mutate: (
+        receipt: RepositoryWriteReceipt<EvidenceRecordReference>,
+      ) => ({
+        ...receipt,
+        reference: {
+          ...receipt.reference,
+          family: "result-evaluation" as const,
+        },
+      }),
+    },
+    {
+      name: "digest",
+      mutate: (
+        receipt: RepositoryWriteReceipt<EvidenceRecordReference>,
+      ) => ({
+        ...receipt,
+        reference: {
+          ...receipt.reference,
+          digest:
+            `sha256:${"0".repeat(64)}` as EvidenceRecordReference["digest"],
+        },
+      }),
+    },
+    {
+      name: "size",
+      mutate: (
+        receipt: RepositoryWriteReceipt<EvidenceRecordReference>,
+      ) => ({
+        ...receipt,
+        size: receipt.size + 1,
+      }),
+    },
+  ])(
+    "rejects a record acknowledgement with the wrong $name before finalizing",
+    async ({ mutate }) => {
+      const repository = new ReceiptMutatingRepository(
+        undefined,
+        mutate,
+      );
+      const state = await initializedState();
+
+      await expect(
+        finalizeWorkspaceState(
+          repository,
+          state,
+          {
+            outcome: "completed",
+            endedAt: "2026-07-24T10:00:01Z",
+            results: [
+              file(
+                "results/result.txt",
+                "fixture result",
+                "text/plain",
+              ),
+            ],
+            nativeTrace: nativeTrace(),
+          },
+          {
+            now: () => new Date("2026-07-24T10:00:02Z"),
+          },
+        ),
+      ).rejects.toMatchObject({
+        name: "EvidenceRepositoryError",
+        code: "CONTENT_CORRUPT",
+      });
+
+      const pending = await openWorkspaceState(state.paths.root);
+      expect(pending).toMatchObject({
+        status: "finalizing",
+      });
+      expect(pending.repositoryRecord).toBeUndefined();
+      expect(pending.receipt).toBeUndefined();
+      expect(pending.repositoryArtifactDigests).toEqual(
+        pending.finalization!.artifactDigests,
+      );
     },
   );
 

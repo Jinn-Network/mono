@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { validateExecutionEvidence } from "@jinn-network/evidence-protocol";
-import type {
-  EvidenceRepository,
-  Sha256Digest,
+import {
+  createArtifactReference,
+  createRecordReference,
+  EvidenceRepositoryError,
+  type EvidenceArtifactReference,
+  type EvidenceRecordReference,
+  type EvidenceRepository,
+  type RepositoryWriteReceipt,
+  type Sha256Digest,
 } from "@jinn-network/evidence-repository";
 
 import {
   assertRecorderOperationActive,
   ExecutionRecorderError,
 } from "./errors.js";
+import { finalizationIntentFingerprint } from "./finalization-intent.js";
 import { buildExecutionEvidence } from "./graph.js";
 import type {
   PersistedArtifactCapture,
@@ -23,7 +30,11 @@ import {
   persistArtifactCapture,
   persistNativeTrace,
 } from "./persist-capture.js";
-import { readStoredObject, storeObject } from "./object-store.js";
+import {
+  objectDigest,
+  readStoredObject,
+  storeObject,
+} from "./object-store.js";
 import {
   appendWorkspaceEvent,
   type WorkspaceState,
@@ -63,6 +74,44 @@ function corrupt(state: WorkspaceState, message: string): never {
     message,
     { workspaceDir: state.paths.root },
   );
+}
+
+function invalidRepositoryReceipt(message: string): never {
+  throw new EvidenceRepositoryError("CONTENT_CORRUPT", message);
+}
+
+function validateArtifactReceipt(
+  value: Uint8Array,
+  receipt: RepositoryWriteReceipt<EvidenceArtifactReference>,
+): void {
+  const expected = createArtifactReference(value);
+  if (
+    receipt.reference.digest !== expected.digest ||
+    receipt.size !== value.byteLength
+  ) {
+    return invalidRepositoryReceipt(
+      "Repository artifact acknowledgement does not match the exact requested bytes.",
+    );
+  }
+}
+
+function validateRecordReceipt(
+  value: Uint8Array,
+  receipt: RepositoryWriteReceipt<EvidenceRecordReference>,
+): void {
+  const expected = createRecordReference(
+    "execution-evidence",
+    value,
+  );
+  if (
+    receipt.reference.family !== expected.family ||
+    receipt.reference.digest !== expected.digest ||
+    receipt.size !== value.byteLength
+  ) {
+    return invalidRepositoryReceipt(
+      "Repository record acknowledgement does not match the exact execution-evidence metadata.",
+    );
+  }
 }
 
 function artifactReferences(
@@ -207,19 +256,6 @@ function missingDiagnostics(
   );
 }
 
-function finalizationFingerprint(
-  input: FinalizeExecutionInput,
-  results: readonly PersistedArtifactCapture[],
-  nativeTrace: PersistedNativeTraceCapture | undefined,
-): Sha256Digest {
-  return captureFingerprint("finalization", {
-    outcome: input.outcome,
-    endedAt: input.endedAt,
-    results,
-    nativeTrace,
-  });
-}
-
 function metadataArtifactDigests(
   state: WorkspaceState,
   bytes: Uint8Array,
@@ -253,6 +289,71 @@ function metadataArtifactDigests(
   ].sort(compareStrings);
 }
 
+function assertPersistedIntent(
+  state: WorkspaceState,
+): void {
+  if (state.finalization === undefined) {
+    return corrupt(state, "Execution recording has no finalization intent.");
+  }
+  if (
+    finalizationIntentFingerprint(state.finalization) !==
+    state.finalization.intentFingerprint
+  ) {
+    return corrupt(
+      state,
+      "Persisted finalization intent fingerprint does not match its material.",
+    );
+  }
+}
+
+function buildFinalizationCandidate(
+  state: WorkspaceState,
+  input: FinalizeExecutionInput,
+  results: readonly PersistedArtifactCapture[],
+  nativeTrace: PersistedNativeTraceCapture,
+  finalizedAt: string,
+): {
+  readonly intentFingerprint: Sha256Digest;
+  readonly metadataBytes: Uint8Array;
+  readonly metadata: StoredObjectReference;
+  readonly artifactDigests: readonly Sha256Digest[];
+} {
+  const metadataBytes = buildExecutionEvidence({
+    recording: state.recording!,
+    additionalInputs: state.inputs.slice(
+      state.recording!.initialInputs.length,
+    ),
+    runtimeObservations: state.runtimeObservations,
+    outcome: input.outcome,
+    endedAt: input.endedAt,
+    finalizedAt,
+    results,
+    nativeTrace,
+  });
+  const artifactDigests = metadataArtifactDigests(
+    state,
+    metadataBytes,
+  );
+  const metadata = {
+    digest: objectDigest(metadataBytes),
+    size: metadataBytes.byteLength,
+  };
+  return {
+    intentFingerprint: finalizationIntentFingerprint({
+      outcome: input.outcome,
+      endedAt: input.endedAt,
+      results,
+      nativeTrace,
+      finalizedAt,
+      metadata,
+      artifactDigests,
+    }),
+    metadataBytes,
+    metadata,
+    artifactDigests,
+  };
+}
+
 function finalizedOutcome(
   state: WorkspaceState,
 ): WorkspaceFinalizationOutcome {
@@ -274,11 +375,15 @@ export async function resumePendingFinalization(
   options: Pick<FinalizeWorkspaceStateOptions, "signal"> = {},
 ): Promise<WorkspaceFinalizationOutcome> {
   assertRecorderOperationActive(options.signal);
-  if (state.status === "finalized") return finalizedOutcome(state);
+  if (state.status === "finalized") {
+    assertPersistedIntent(state);
+    return finalizedOutcome(state);
+  }
   if (state.status !== "finalizing" || state.finalization === undefined) {
     return conflict(state, "Execution recording has no pending finalization.");
   }
 
+  assertPersistedIntent(state);
   const intent = state.finalization;
   let current = state;
   const references = capturedReferences(current);
@@ -296,7 +401,10 @@ export async function resumePendingFinalization(
       reference,
       options.signal,
     );
-    await repository.putArtifact(value, { signal: options.signal });
+    const receipt = await repository.putArtifact(value, {
+      signal: options.signal,
+    });
+    validateArtifactReceipt(value, receipt);
     current = await appendWorkspaceEvent(
       current,
       { type: "repository-artifact-written", digest },
@@ -316,6 +424,7 @@ export async function resumePendingFinalization(
       metadata,
       { signal: options.signal },
     );
+    validateRecordReceipt(metadata, receipt);
     current = await appendWorkspaceEvent(
       current,
       {
@@ -364,13 +473,25 @@ export async function finalizeWorkspaceState(
     input,
     options.signal,
   );
-  const intentFingerprint = finalizationFingerprint(
-    input,
-    results,
-    nativeTrace,
-  );
   if (state.finalization !== undefined) {
-    if (state.finalization.intentFingerprint !== intentFingerprint) {
+    assertPersistedIntent(state);
+    if (nativeTrace === undefined) {
+      return corrupt(
+        state,
+        "Persisted finalization intent has no primary native trace.",
+      );
+    }
+    const candidate = buildFinalizationCandidate(
+      state,
+      input,
+      results,
+      nativeTrace,
+      state.finalization.finalizedAt,
+    );
+    if (
+      state.finalization.intentFingerprint !==
+      candidate.intentFingerprint
+    ) {
       return conflict(
         state,
         "Finalization material conflicts with the persisted intent.",
@@ -403,39 +524,39 @@ export async function finalizeWorkspaceState(
   const finalizedAt = (
     options.now?.() ?? new Date()
   ).toISOString();
-  const metadataBytes = buildExecutionEvidence({
-    recording: state.recording,
-    additionalInputs: state.inputs.slice(
-      state.recording.initialInputs.length,
-    ),
-    runtimeObservations: state.runtimeObservations,
-    outcome: input.outcome,
-    endedAt: input.endedAt,
-    finalizedAt,
-    results,
-    nativeTrace: nativeTrace!,
-  });
-  const artifactDigests = metadataArtifactDigests(
+  const candidate = buildFinalizationCandidate(
     state,
-    metadataBytes,
+    input,
+    results,
+    nativeTrace!,
+    finalizedAt,
   );
   const metadata = await storeObject(
     state.paths,
-    metadataBytes,
+    candidate.metadataBytes,
     options.signal,
   );
+  if (
+    metadata.digest !== candidate.metadata.digest ||
+    metadata.size !== candidate.metadata.size
+  ) {
+    return corrupt(
+      state,
+      "Stored finalization metadata does not match its candidate reference.",
+    );
+  }
   const prepared = await appendWorkspaceEvent(
     state,
     {
       type: "finalization-prepared",
-      intentFingerprint,
+      intentFingerprint: candidate.intentFingerprint,
       finalizedAt,
       outcome: input.outcome,
       endedAt: input.endedAt,
       results,
       nativeTrace: nativeTrace!,
       metadata,
-      artifactDigests,
+      artifactDigests: candidate.artifactDigests,
     },
     finalizedAt,
     options.signal,
