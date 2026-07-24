@@ -1069,7 +1069,7 @@ __metadata:
     "@safe-global/safe-deployments": "npm:^1.37.56"
     "@safe-global/types-kit": "npm:^4.0.1"
     "@scure/bip32": "npm:^2.2.0"
-    "@scure/bip39": "npm:^1.4.0"
+    "@scure/bip39": "npm:^2.2.0"
     "@secretlint/core": "npm:^13.0.2"
     "@secretlint/secretlint-rule-preset-recommend": "npm:^13.0.2"
     "@slicekit/erc8128": "npm:^0.3.3"
@@ -2811,13 +2811,23 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@scure/bip39@npm:1.6.0, @scure/bip39@npm:^1.4.0, @scure/bip39@npm:^1.6.0":
+"@scure/bip39@npm:1.6.0, @scure/bip39@npm:^1.6.0":
   version: 1.6.0
   resolution: "@scure/bip39@npm:1.6.0"
   dependencies:
     "@noble/hashes": "npm:~1.8.0"
     "@scure/base": "npm:~1.2.5"
   checksum: 10c0/73a54b5566a50a3f8348a5cfd74d2092efeefc485efbed83d7a7374ffd9a75defddf446e8e5ea0385e4adb49a94b8ae83c5bad3e16333af400e932f7da3aaff8
+  languageName: node
+  linkType: hard
+
+"@scure/bip39@npm:^2.2.0":
+  version: 2.2.0
+  resolution: "@scure/bip39@npm:2.2.0"
+  dependencies:
+    "@noble/hashes": "npm:2.2.0"
+    "@scure/base": "npm:2.2.0"
+  checksum: 10c0/932caf62a0eebf64a07801fcf735309b96a68f1605ecabed8d4b1a6533945180bea2e0f19eff49d95e206e68b7c55cca536a700f7593d758a2c824df299fceda
   languageName: node
   linkType: hard
 
