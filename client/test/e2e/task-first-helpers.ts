@@ -960,15 +960,21 @@ async function contractsArtifactsPresent(): Promise<boolean> {
 }
 
 export async function compileContracts(): Promise<void> {
-  if (await contractsArtifactsPresent()) {
+  if (compileContractsInFlight) {
+    await compileContractsInFlight;
     return;
   }
-  if (!compileContractsInFlight) {
-    compileContractsInFlight = runChild('yarn', ['compile'], { cwd: CONTRACTS_DIR }).catch((err) => {
-      compileContractsInFlight = null;
-      throw err;
-    });
-  }
+
+  compileContractsInFlight = (async () => {
+    if (await contractsArtifactsPresent()) {
+      return;
+    }
+    await runChild('yarn', ['compile'], { cwd: CONTRACTS_DIR });
+  })().catch((err) => {
+    compileContractsInFlight = null;
+    throw err;
+  });
+
   await compileContractsInFlight;
 }
 
