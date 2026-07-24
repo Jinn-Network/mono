@@ -321,7 +321,7 @@ describe('makeJinnRepoLiveGenerator', () => {
   });
 
   it('postingWindowMs override appears as emitted window duration', async () => {
-    const override = 2 * 60 * 60 * 1000;
+    const override = 7 * 60 * 60 * 1000;
     const hash = 'f'.repeat(64);
     const fetchImpl = makeFakeFetch([
       {
@@ -531,14 +531,14 @@ describe('makeJinnRepoLiveGeneratorForLaunchedRecord', () => {
         staticConfig: {
           stateDir,
           fetchImpl: makeFakeFetch([]),
-          postingWindowMs: 2 * 60 * 60 * 1000,
+          postingWindowMs: 8 * 60 * 60 * 1000,
         },
       }),
     ).not.toThrow();
   });
 
   it('generatorConfig.posting_window_ms override appears on emitted window when static omits it', async () => {
-    const override = 3 * 60 * 60 * 1000;
+    const override = 7 * 60 * 60 * 1000;
     const hash = 'a2'.repeat(32);
     const gen = makeJinnRepoLiveGeneratorForLaunchedRecord({
       recordRef: {

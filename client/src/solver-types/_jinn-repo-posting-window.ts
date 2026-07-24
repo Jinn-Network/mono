@@ -13,11 +13,11 @@ export function resolvePostingWindowMs(raw: unknown): number {
     typeof raw === 'number' &&
     Number.isFinite(raw) &&
     Number.isInteger(raw) &&
-    raw > 0
+    raw >= DEFAULT_POSTING_WINDOW_MS
   ) {
     return raw;
   }
   throw new Error(
-    `jinn-repo postingWindowMs must be a positive integer (ms), got ${String(raw)}`,
+    `jinn-repo postingWindowMs must be an integer of at least six hours (${DEFAULT_POSTING_WINDOW_MS} ms), got ${String(raw)}`,
   );
 }

@@ -125,7 +125,7 @@ describe('makeJinnRepoGenerator', () => {
   });
 
   it('(g) postingWindowMs override appears as emitted window duration', async () => {
-    const override = 2 * 60 * 60 * 1000;
+    const override = 7 * 60 * 60 * 1000;
     const pool = [poolItem(1)];
     const gen = makeJinnRepoGenerator({
       stateDir,
@@ -208,7 +208,7 @@ describe('makeJinnRepoGeneratorForLaunchedRecord — posting window wiring', () 
         recordRef: {
           current: record({ generatorConfig: { posting_window_ms: 0 } }),
         },
-        staticConfig: { stateDir, postingWindowMs: 2 * 60 * 60 * 1000 },
+        staticConfig: { stateDir, postingWindowMs: 8 * 60 * 60 * 1000 },
       }),
     ).not.toThrow();
   });
