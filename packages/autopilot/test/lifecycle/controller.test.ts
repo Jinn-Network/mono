@@ -269,6 +269,42 @@ describe('lifecycle controller', () => {
     expect(json).not.toContain('"graphqlCost": 0');
   });
 
+  it('surfaces incomplete cycle usage accounting as a warning without crashing the loop', async () => {
+    // Regression (PR #2001): GitHub used/remaining counters are eventually
+    // consistent, so under concurrent reads a cycle's usage accounting can be
+    // incomplete even though every command succeeded. read() must not throw and
+    // the cycle must still produce a report — otherwise the closing opaque probe
+    // skew propagates out of runLifecycleCycle and kills the continuous loop.
+    const meter = new GitHubUsageMeter();
+    let probe = 0;
+    const raw: CommandRunner = async (_command, args) => {
+      if (args[0] !== 'api' || args[1] !== 'graphql') return 'edited';
+      probe += 1;
+      return JSON.stringify({
+        data: {
+          rateLimit: probe === 1
+            ? { cost: 1, remaining: 1_000, resetAt: '2026-07-20T13:00:00.000Z', used: 0, limit: 5_000 }
+            : { cost: 1, remaining: 990, resetAt: '2026-07-20T13:00:00.000Z', used: 12, limit: 5_000 },
+        },
+      });
+    };
+    const run = makeGitHubUsageCommandRunner(raw, meter);
+    await expect(run('gh', ['project', 'item-edit'])).resolves.toBe('edited');
+    expect(meter.read().accountingComplete).toBe(false);
+
+    const report = await runLifecycleCycle('observe', {
+      ...deps(implementation(), []),
+      readGitHubUsage: () => meter.read(),
+    });
+
+    expect(report.status).toBe('ok');
+    expect(report.githubUsage.accountingComplete).toBe(false);
+    const human = renderLifecycleHuman(report);
+    expect(human).toMatch(/usage accounting.*incomplete/i);
+    const json = JSON.parse(renderLifecycleJson(report));
+    expect(json.githubUsage.accountingComplete).toBe(false);
+  });
+
   it('cannot claim work from a fallback that forges a fresh full-reconciliation marker', async () => {
     const eligible: LifecycleItem = {
       kind: 'issue',
@@ -619,6 +655,64 @@ describe('lifecycle controller', () => {
       outcome: 'skipped',
       reason: 'full-reconciliation-stale',
     }));
+  });
+
+  it('enrolls a fresh review for a delivered non-draft PR (DELIVERED → IN REVIEW)', async () => {
+    // Regression: single-surface lifecycle §4 mandates the active loop schedule
+    // a review claim (review-ref CAS) for a DELIVERED PR — non-draft ∧
+    // engine:review ∧ needsReview ∧ no verdict for the head. activeCandidates
+    // only enrolled stale-draft recovery and the approved integration ladder,
+    // so a freshly delivered non-draft PR sat at awaiting-review forever and the
+    // review → approve → merge half never ran. The correct predicate already
+    // lived in reviewEnrollmentEligible (planCycle), but planCycle is unused by
+    // the v2 controller.
+    const delivered = implementation({
+      branchClaim: {
+        kind: 'branch-claim',
+        protocolVersion: 2,
+        phase: 'implement',
+        issueNumber: 42,
+        prNumber: 101,
+        attempt: '11111111-1111-4111-8111-111111111111',
+        runner: 'runner-a',
+        login: 'implementer',
+        expectedHead: HEAD,
+        targetBase: gitRefName('next'),
+        claimedAt: '2026-07-20T11:00:00.000Z',
+        phaseComplete: true,
+      },
+      isDraft: false,
+      needsReview: true,
+      approved: false,
+    });
+
+    // Fixture self-check: a phase-complete, non-draft PR with no verdict must
+    // derive to awaiting-review (the DELIVERED state), not implementing.
+    const observed = await runLifecycleCycle('observe', deps(delivered, []));
+    expect(observed.items[0]).toMatchObject({ prNumber: 101, phase: 'awaiting-review' });
+
+    const scheduled: { kind: string; prNumber?: number }[] = [];
+    const report = await runLifecycleCycle('active', {
+      ...deps(delivered, []),
+      active: {
+        preflight: async () => ({ ok: true }),
+        readLocalState: () => ({
+          remaining: { implementation: 1, review: 1 },
+          availableLogins: ['reviewer-bot'], // ≠ pr.author ('trusted')
+          implementationPreferredLogin: 'reviewer-bot',
+        }),
+        implementationBackpressureThreshold: 10,
+        executeAction: async (action: { kind: string; prNumber?: number }) => {
+          scheduled.push({ kind: action.kind, prNumber: action.prNumber });
+          return { outcome: 'spawned' };
+        },
+      },
+    });
+
+    expect(report.status).toBe('ok');
+    expect(scheduled).toContainEqual(
+      expect.objectContaining({ kind: 'claim-review', prNumber: 101 }),
+    );
   });
 
   it.skip('reports legacy stale-looking items without reaping them', async () => {

@@ -123,6 +123,7 @@ function issueIndex(): OpenIssueIndexEntry {
   return {
     number: 42,
     title: 'Incremental lifecycle',
+    body: '',
     updatedAt: '2026-07-22T09:00:00.000Z',
     author: 'oaksprout',
     labels: [],
@@ -137,6 +138,7 @@ const EMPTY_USAGE: GitHubUsage = {
   restRequests: 0,
   restNotModified: 0,
   cacheHits: 0,
+  accountingComplete: true,
 };
 
 class FakeLifecycleReader implements GitHubLifecycleReader {

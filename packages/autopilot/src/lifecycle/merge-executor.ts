@@ -7,6 +7,10 @@ import type {
   GitOid,
   GitRefName,
 } from './types.js';
+import {
+  classifyCiChecks,
+  isCiGreen,
+} from './ci-classifier.js';
 
 export interface MergeEffectiveReview {
   readonly reviewer: string;
@@ -49,8 +53,6 @@ export interface MergeGateResult {
   readonly reasons: readonly string[];
 }
 
-const SUCCESSFUL_CHECK_CONCLUSIONS = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
-
 export function evaluateMergeGate(candidate: MergeCandidate): MergeGateResult {
   const reasons: string[] = [];
   if (!candidate.open || candidate.merged) reasons.push('pull-request-not-open');
@@ -72,13 +74,10 @@ export function evaluateMergeGate(candidate: MergeCandidate): MergeGateResult {
   ))) {
     reasons.push('changes-requested');
   }
-  if (candidate.checks.length === 0) reasons.push('checks-missing');
-  if (candidate.checks.some((check) => (
-    check.status !== 'COMPLETED'
-    || check.conclusion === null
-    || !SUCCESSFUL_CHECK_CONCLUSIONS.has(check.conclusion)
-  ))) {
-    reasons.push('checks-not-green');
+  if (!isCiGreen(candidate.checks)) {
+    const classification = classifyCiChecks(candidate.checks);
+    if (classification.state === 'missing') reasons.push('checks-missing');
+    else reasons.push('checks-not-green');
   }
   if (
     candidate.mergeable !== 'MERGEABLE'

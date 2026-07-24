@@ -60,6 +60,7 @@ function cycleSnapshot(): GitHubLifecycleSnapshot {
       restRequests: 0,
       restNotModified: 0,
       cacheHits: 0,
+      accountingComplete: true,
     },
   };
 }

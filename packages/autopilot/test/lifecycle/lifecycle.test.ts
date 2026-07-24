@@ -428,6 +428,23 @@ describe('deriveLifecycle', () => {
     });
   });
 
+  it('derives ci-blocked before merge-ready when approval is exact-head but CI is not green', () => {
+    const item = implementation({
+      branchClaim: undefined,
+      isDraft: false,
+      needsReview: false,
+      approved: true,
+      mergeState: 'clean',
+      checks: [{
+        name: 'test',
+        status: 'COMPLETED',
+        conclusion: 'FAILURE',
+      }],
+    });
+    const [view] = deriveLifecycle(snapshot(item), NOW, STALE_AFTER).items;
+    expect(view).toMatchObject({ phase: 'ci-blocked' });
+  });
+
   it('validates matching terminal verdict time before merge-ready planning', () => {
     const reviewClaim = {
       kind: 'review-claim' as const,
@@ -450,6 +467,7 @@ describe('deriveLifecycle', () => {
       needsReview: false,
       approved: true,
       mergeState: 'clean',
+      checks: [{ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }],
       reviewClaim,
     });
     const view = deriveLifecycle(snapshot(

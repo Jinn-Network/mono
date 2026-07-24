@@ -83,6 +83,7 @@ function state(): LifecycleDiscoveryState {
         restRequests: 0,
         restNotModified: 0,
         cacheHits: 0,
+        accountingComplete: true,
       },
     },
     openPullRequestEvidence: [pullRequest],

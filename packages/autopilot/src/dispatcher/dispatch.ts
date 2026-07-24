@@ -129,10 +129,10 @@ export async function dispatchIssue(
   const worktreePath = join(WORKTREES_BASE, String(number));
 
   // 2. Set Status → In Progress FIRST (board items only).
-  //    Machine children may be off-board (`projectItemId === null`, Stage 2);
-  //    Stage 3's painter owns Status for view purposes. When present, this
-  //    still runs before the worktree so a failed later step leaves the
-  //    issue In Progress (not Todo) and selectReady skips it.
+  //    Skipped when `projectItemId` is absent. Stage 3's painter owns Status
+  //    for view purposes. When present, this still runs before the worktree so
+  //    a failed later step leaves the issue In Progress (not Todo) and
+  //    selectReady skips it.
   //    Field id + "In Progress" option id come from the boot-time cache
   //    (jinn-mono#599 — see `./field-cache.ts`); item id arrives on
   //    ReadyIssue.projectItemId from the per-cycle snapshot (jinn-mono#585).

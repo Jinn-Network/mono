@@ -31,10 +31,9 @@ yarn --cwd packages/autopilot autopilot --mode observe --once --json status
 
 Issue Type still comes from GraphQL because the ordinary issue-list JSON does
 not expose it. Use the Project view for Sprint, Status, Blocked on, Effort, and
-Priority on human-created work. For machine-created child issues (review
-findings and reconciles), read `effort:*` and `priority:*` labels when the
-Project fields are absent — children are born triaged via labels and must not
-appear as untriaged drift. Use a board limit above the current item count.
+Priority — including machine-created child issues (review findings and
+reconciles), which are triaged onto the board at filing time. Use a board limit
+above the current item count.
 
 The v2 observer is the authoritative lifecycle explanation. It includes draft
 PRs because draft may mean implementation, a child fix/reconcile session, or a
