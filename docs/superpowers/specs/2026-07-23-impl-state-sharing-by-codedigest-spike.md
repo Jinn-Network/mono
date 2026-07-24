@@ -128,7 +128,8 @@ publication therefore writes a new wire version with these invariants:
 
 1. `harness.checkpoint.v2` is the immutable signed and pinned artifact. It has
    no `registry.txHash`, `registry.blockNumber`, or CID-derived metadata key.
-2. The signature covers the canonical v2 core, including `hashProfile`.
+2. The signature covers the canonical v2 core, including `hashProfile` and
+   `redactionManifestHash`.
 3. `checkpointCid` is the CID of exactly the bytes an installer fetches and
    parses.
 4. `IdentityRegistry.setMetadata("harness.checkpoint:<checkpointCid>",
@@ -173,10 +174,13 @@ publication therefore writes a new wire version with these invariants:
 
 A consumer who fetches bytes for digest `D` must:
 
-1. Validate the checkpoint and impl-state CIDs before building a gateway URL or
-   path. Verify the raw manifest bytes against `checkpointCid`; fetch the
-   package as a bounded CAR whose root equals `implStateDirCid`, and verify
-   every reachable block multihash before reconstructing package bytes.
+1. Validate both CIDs before building a gateway URL or path. Both are canonical
+   CIDv1 `raw` + `sha2-256` values. Verify the manifest's exact bytes against
+   `checkpointCid`; fetch the package as either the raw block or a bounded
+   single-root CARv1 whose sole block is the exact uncompressed ustar byte
+   stream, require that block's CID to equal `implStateDirCid`, and reject
+   missing, duplicate, conflicting, or extra blocks. No dag-pb/UnixFS
+   reconstruction is accepted in v0.
 2. Preflight the deterministic package without writing: reject unsafe paths,
    links/special files, duplicates, and declared or observed size/count limit
    violations.
@@ -279,7 +283,30 @@ produce a new digest.
 2. **One named profile** — no raw ignore-list or allowlist flags.
 3. **Fail closed** — unknown roots, special files, profile mismatches, and scrub findings stop before pinning; v0 has no bypass flag.
 4. **Frozen-only** — CLI refuses `mode === 'train'`; v0 has no mutation-acknowledgement override.
-5. **Scrub gate** — same fail-closed spirit as corpus publish; attach a redaction manifest hash on the checkpoint for Legibility.
+5. **Scrub gate** — same fail-closed spirit as corpus publish. The scanner runs
+   over the exact path-sorted package input and emits this report:
+
+   ```json
+   {
+     "schema": "jinn.checkpoint-redaction.v1",
+     "scannerProfile": "learner-public-scrub.v1",
+     "hashProfileId": "learner-public.v1",
+     "codeDigest": "sha256:<64 lowercase hex>",
+     "filesScanned": 0,
+     "bytesScanned": 0,
+     "findings": []
+   }
+   ```
+
+   `filesScanned` and `bytesScanned` are non-negative safe integers calculated
+   from the selected regular files. Any finding aborts, so a published report's
+   `findings` array is exactly empty. `redactionManifestHash` is
+   `sha256:<64 lowercase hex>` over the RFC 8785 JCS UTF-8 bytes of this report
+   and is a required field in the signed `harness.checkpoint.v2` core. Publish
+   returns the report beside the manifest for local audit; it is not inserted
+   into the packaged learner tree. Install reruns the same registered scanner
+   on the verified staging tree and requires an identical report hash before
+   commit. Unknown scanner profiles fail closed.
 
 Capture `harness-bundle` prior art (`allowedDirectories` + coarse enable toggle) is the right UX shape; reuse vocabulary where possible so operators learn one mental model.
 
@@ -296,31 +323,50 @@ Checkpoint manifests, CIDs, harness names, and impl-state packages are
 attacker-controlled until verified. v0 install therefore locks these rules:
 
 1. Both `checkpointCid` and `implStateDirCid` must be canonical CIDv1
-   raw/dag-pb sha2-256 values accepted by a shared CID parser. The manifest is
-   a raw block whose exact bytes must hash to `checkpointCid`. The impl-state
-   package is exported as a CAR: its declared root must equal
-   `implStateDirCid`, every reachable block multihash is verified, missing or
-   duplicate/conflicting blocks fail, and unreachable extra blocks are
-   rejected. An injected fetch port cannot substitute content.
+   `raw` + `sha2-256` values accepted by a shared CID parser. The manifest is a
+   raw block whose exact bytes must hash to `checkpointCid`. The impl-state
+   package CID addresses the exact deterministic uncompressed ustar bytes. A
+   gateway may return that raw block directly or a CARv1 with exactly one
+   declared root and one block; in the CAR form, the root and block CID must
+   both equal `implStateDirCid`. The installer hashes the exact block bytes and
+   rejects missing, duplicate, conflicting, or extra blocks. v0 accepts no
+   dag-pb/UnixFS package and performs no implicit DAG reconstruction. An
+   injected fetch port cannot substitute content.
 2. v0 package bytes are a deterministic **uncompressed POSIX ustar** archive;
    compression and extended/PAX records are refused. Manifest fetch is capped
-   at 1 MiB, CAR transfer at 320 MiB, and reconstructed tar/expanded bytes at
-   256 MiB. The archive may contain at most 10,000 regular files, 16 MiB per
+   at 1 MiB, CAR transfer at 320 MiB, and tar/expanded bytes at
+   256 MiB. The archive may contain at most 20,000 total entries, 10,000
+   regular files, 10,000 explicit directories, nesting depth 32, 16 MiB per
    file, and 255 UTF-8 bytes per relative path (the ustar name+prefix bound).
-   These named constants are
-   shared by production and tests; limit overflow aborts and cleans staging.
+   These named constants are shared by preflight, extraction, production, and
+   tests; every header, including directories, consumes the total-entry budget,
+   and limit overflow aborts and cleans staging.
 3. A package preflight pass completes before any entry is written. Paths must
-   be normalized relative POSIX paths. Absolute paths, drive/UNC forms, NUL,
-   backslashes, empty/dot/`..` segments, duplicate or case-fold-colliding
-   paths, and file/directory prefix collisions are rejected.
+   be valid UTF-8 NFC normalized relative POSIX paths. Absolute paths,
+   drive/UNC forms, NUL, backslashes, empty/dot/`..` segments, duplicate or
+   Unicode case-fold-colliding paths, and file/directory prefix collisions are
+   rejected. Every parent directory must have appeared as an explicit earlier
+   directory entry, and logical paths must be in ascending UTF-8 byte order.
 4. Only regular files and directories are accepted. Symlinks, hardlinks,
    devices, FIFOs, sockets, sparse/extended entries, and other special archive
-   records are rejected.
+   records are rejected. The canonical ustar encoder uses `ustar\0` / `00`,
+   zero uid/gid/mtime, empty owner/group names, regular-file type `0` with mode
+   `0644`, and directory type `5` with mode `0755`. Directory header names end
+   in exactly one slash; their logical path removes it. File names never end in
+   a slash. Paths up to 100 bytes use an empty prefix; longer paths use the
+   rightmost slash whose prefix is at most 155 bytes and name is at most 100
+   bytes. Numeric fields use minimal zero-padded octal with the POSIX
+   terminator. The installer verifies each header checksum (checksum bytes
+   treated as spaces), all canonical/reserved fields, 512-byte padding, exactly
+   two zero end blocks, and the absence of non-zero trailing bytes before it
+   interprets an entry.
 5. Extraction never shells out to `tar`. It creates a unique staging directory
    with `mkdtemp` under a trusted parent, verifies owner-only `0700`
-   permissions, streams with the same byte/file counters, prevents link
-   following/existing-target replacement, and proves every resolved output
-   remains beneath that staging root.
+   permissions, streams with the same byte/file/directory/depth counters,
+   prevents link following/existing-target replacement, and proves every
+   resolved output remains beneath that staging root. Archive ownership and
+   mode are never trusted: outputs are owned by the current process, staging
+   directories remain `0700`, and regular files are created `0600`.
 6. Free-form CIDs and `implName` are never interpolated into temporary paths.
    `implName` must match the canonical harness-name grammar before it can
    select a final location. The final target is resolved beneath the configured
@@ -329,9 +375,11 @@ attacker-controlled until verified. v0 install therefore locks these rules:
    `codeDigest` verification. Existing state is not overwritten by default.
 
 Malicious-package tests cover CAR root/block substitution, traversal,
-absolute/Windows paths, links, special/extended records, collisions,
-transfer/archive/file-count/per-file limits, unsafe final parents, cleanup,
-and no writes outside staging.
+absolute/Windows paths, links, special/extended records, malformed or
+non-canonical headers/checksums/path splits, duplicate/case-fold/prefix
+collisions, directory and depth floods, every transfer/archive/entry/file/
+directory/per-file limit, unsafe final parents, cleanup, and no writes outside
+staging.
 
 ---
 
@@ -384,7 +432,8 @@ Risk to watch: a popular weak digest could attract cargo-cult installs. Mitigati
 2. `publisher.safeAddress` / agent id.
 3. `parentCheckpointCid` nullable.
 4. `codeDigest` + `implStateDirCid` + mandatory
-   `hashProfile: { id, ignoreRelPaths }`.
+   `hashProfile: { id, ignoreRelPaths }` + mandatory
+   `redactionManifestHash`.
 5. On-chain `harness.checkpoint:<cid>` anchor, whose event supplies the
    authoritative receipt outside the immutable manifest.
 
@@ -487,5 +536,6 @@ Optional later: `feat` opt-in `implStateShare.onDelivery: frozen` (Option A) onc
 - **Learning Maximised** — high-performing self-state becomes forkable substrate, not a private dead-end hash.
 - **Permissionless** — anyone can install a published checkpoint; no privileged shortcut beyond public pin + re-hash.
 - **Prestige** — publisher attribution + verified-frozen badge; runners earn their own scores.
-- **Legible** — re-hash + on-chain checkpoint anchor + optional redaction manifest.
+- **Legible** — re-hash + on-chain checkpoint anchor + mandatory signed
+  redaction-manifest hash.
 - **Neutral / Governance Minimal** — reuse existing artifact; no new fee or committee; opt-in publish.
