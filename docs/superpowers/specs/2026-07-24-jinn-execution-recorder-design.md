@@ -83,6 +83,32 @@ Autopilot consumes released package versions in the same way as any third-party 
 local plugin or marketplace operator can implement the same integration without acquiring
 Autopilot semantics.
 
+### 2.2 Control-plane placement
+
+The recorder belongs to the producer's supervising control plane, outside the executor whose work
+it records. This follows the supply-chain separation in the
+[SLSA build model](https://slsa.dev/spec/v1.2/terminology), where the control plane initializes the
+execution and produces provenance while tenant-controlled steps run in a separate environment.
+
+```text
+Producer-controlled supervisor
+  |-- producer adapter
+  |-- Execution Recorder
+  |-- private recording workspace
+  `-- executor boundary
+        `-- agent or worker process
+```
+
+The executor may report trace data, observations, and Results through producer-controlled
+channels. It must not be treated as the authority for facts directly observed by the supervisor
+and, in an isolated deployment, must not be able to mutate the recorder workspace.
+
+The recorder does not claim that every deployment provides strong process or operating-system
+isolation. Local tools may run the supervisor and executor under the same user. The captured
+provenance must therefore distinguish supervisor-observed facts from executor-reported or
+externally observed facts so that later verification policy can assess the actual boundary rather
+than infer one from the use of this package.
+
 ## 3. Ownership boundary
 
 ### 3.1 The recorder owns
@@ -106,6 +132,8 @@ Autopilot semantics.
 - describing the effective runtime and every controlled component available to it;
 - identifying opaque hosted components without inventing unavailable implementation bytes;
 - generating or locating the native trace;
+- declaring whether each captured fact was observed by the producer, reported by the executor, or
+  obtained from an external observer;
 - deciding whether the execution completed, failed, or was abandoned;
 - selecting exact Results;
 - mapping producer lifecycle identifiers to the protocol Execution ID;
@@ -236,7 +264,38 @@ The recorder does not shell out to Git or archive a directory implicitly. A prod
 an exact Git tree supplies a content-bound representation of that tree and its declared Git
 identity.
 
-### 4.2 Idempotence keys and conflicts
+### 4.2 Capture origin
+
+Every capture declaration identifies how the producer obtained the fact. The public capture types
+carry an origin equivalent to:
+
+```ts
+export type CaptureOrigin =
+  | {
+      readonly kind: "producer-observed";
+      readonly observer: AbsoluteIri;
+    }
+  | {
+      readonly kind: "executor-reported";
+      readonly reporter: AbsoluteIri;
+      readonly capturedBy: AbsoluteIri;
+    }
+  | {
+      readonly kind: "external-observed";
+      readonly observer: AbsoluteIri;
+      readonly capturedBy: AbsoluteIri;
+    };
+```
+
+This is capture provenance, not a trust score. The recorder maps it to the protocol's existing
+Agent and provenance relationships; it does not add a new record family or decide whether an
+observer is trustworthy.
+
+For example, the operator can directly observe the Task bytes it supplied and the container digest
+it launched, while a token count reported only by the hosted model remains executor- or
+external-reported. A verification policy can treat those signals differently later.
+
+### 4.3 Idempotence keys and conflicts
 
 Every repeatable capture operation identifies its intended protocol entity. Repeating an operation
 with the same entity identity, role, and bytes succeeds without changing the workspace. Reusing an
@@ -274,6 +333,25 @@ The workspace contains, conceptually:
 Its exact layout is an implementation detail, not an interchange standard. Versioning exists only
 to let compatible recorder releases resume their own durable state. Other implementations
 interoperate through finalized Evidence Protocol records, not by exchanging recorder workspaces.
+
+Mutable workspace state uses an append-only journal or an equivalent transactional mechanism. This
+follows the same durability principle as a persistent write-ahead log used by resilient collection
+pipelines; OpenTelemetry recommends persistent WAL-backed storage when losing captured data during
+a restart is unacceptable. See
+[OpenTelemetry Collector resiliency](https://opentelemetry.io/docs/collector/resiliency/).
+
+Before a successful capture operation returns, the recorder:
+
+1. writes the captured bytes to a same-workspace temporary object;
+2. flushes the bytes;
+3. atomically publishes the content-addressed object;
+4. appends or atomically publishes a monotonically revisioned state transition;
+5. flushes the transition and relevant directory metadata where the platform supports it; and
+6. only then reports success.
+
+Recovery replays committed transitions, verifies their referenced object digests, and ignores
+incomplete temporary objects or transitions. The implementation must not use an in-place mutable
+JSON document as the sole durable state.
 
 New directories and files default to owner-only permissions. The recorder rejects symbolic-link
 traversal, path escapes, non-regular artifact inputs, incompatible workspace versions, and
@@ -446,7 +524,9 @@ Public derivation remains a separate transformation that creates safe derived ar
 metadata record under the protocol's derivation rules. Copying exact private bytes from a
 filesystem repository to OCI is transport, not scrubbing.
 
-## 9. Autopilot integration
+## 9. Producer integrations
+
+### 9.1 Autopilot
 
 The first external integration follows this sequence:
 
@@ -484,6 +564,38 @@ Its acceptance criterion is:
 > Execution Evidence record whose exact artifacts and metadata round-trip through a filesystem
 > Evidence Repository.
 
+### 9.2 Task marketplace operator
+
+A task marketplace operator uses the same recorder without a marketplace-specific package change:
+
+| Marketplace concept | Recorder or protocol role |
+| --- | --- |
+| Task listing or accepted assignment | Task and initial inputs |
+| Marketplace attempt | External product record referencing one or more Execution IDs |
+| Operator daemon or supervisor | Evidence producer and recorder control plane |
+| Solver or agent | Executor Agent |
+| Harness, container, model, and effective configuration | Runtime Specification |
+| Worker logs or OpenTelemetry | Native trace |
+| Patch, answer, artifact, or effect receipt | Result |
+| Success, failure, or cancellation | Completed, failed, or abandoned outcome |
+| Marketplace evaluator | Later Result Evaluation issuer |
+| Execution auditor | Later Execution Verification issuer |
+| Settlement rules | Consumer policy above the evidence records |
+
+The operator starts recording before launching the worker, finalizes one Execution Evidence record
+for each execution, and preserves the returned reference in its attempt state. One marketplace
+attempt may reference several Execution IDs when it contains retries or subordinate executions;
+the recorder still handles one execution at a time.
+
+Wallet, ERC-8004, assignment, and settlement identities remain marketplace concerns mapped to
+protocol IRIs through a later marketplace profile. A distributed operator runs the recorder on or
+near the worker where exact bytes can be captured, while the injected repository may be remote.
+Signed evidence required for settlement comes from later Evaluation or Verification issuers, not
+from the unsigned recorder receipt.
+
+This pressure test requires an adapter and application policy, but no change to the recorder's
+TypeScript lifecycle, workspace, protocol output, or repository interface.
+
 ## 10. Historical transcripts
 
 Transcript mining is not routed through the successful live-recorder guarantee.
@@ -510,6 +622,8 @@ The package test suite covers:
 
 - start-time capture before mutable source files change;
 - exact byte and digest preservation;
+- preservation of producer-observed, executor-reported, and externally observed capture origins;
+- correct provenance mapping without treating capture origin as a trust verdict;
 - generated and caller-supplied Execution IDs;
 - start, resume, and finalized workspace reopening;
 - completed, failed, and abandoned execution outcomes;
@@ -518,6 +632,8 @@ The package test suite covers:
 - primary native-trace selection;
 - idempotent and conflicting repeated capture;
 - missing-material diagnostics without closing the recording;
+- crash recovery before and after object publication and journal transition persistence;
+- journal replay that ignores incomplete temporary state and detects digest corruption;
 - interruption before and after every repository write;
 - identical and conflicting repeated finalization;
 - workspace version and corruption failures;
@@ -550,11 +666,17 @@ package APIs rather than coordinated monorepo source changes.
 - Capture is durable and resumable from v1.
 - The producer supplies an attempt-scoped workspace.
 - The recorder handles Execution Evidence only.
+- The recorder belongs to the producer-controlled supervisor, not the executor.
+- Capture provenance distinguishes producer-observed, executor-reported, and externally observed
+  facts without assigning trust.
+- Workspace mutation uses an append-only journal or equivalent atomic transactional mechanism.
 - The lifecycle operation is named `finalize()`, not `seal()`.
 - A successful finalization always references a conforming record.
 - Finalization is not evaluation, verification, signing, or a truth claim.
 - The receipt is operational and unsigned.
 - Repository selection is injected and policy-free.
 - The first external integration is Autopilot using the filesystem repository.
+- A task marketplace operator uses the same recorder through its own adapter; attempts may map to
+  one or more Execution IDs.
 - Historical transcript import, public derivation, discovery, and consumer integration remain
   separate work.
