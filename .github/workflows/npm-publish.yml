@@ -223,6 +223,9 @@ jobs:
             exit 1
           fi
 
+      - run: yarn typecheck
+      - run: yarn test
+
       - name: Patch package version for canary publish
         if: steps.meta.outputs.dist_tag == 'canary'
         run: |
@@ -237,9 +240,9 @@ jobs:
             fs.writeFileSync(sdkPath, JSON.stringify(sdk, null, 2) + '\n');
           "
 
-      - run: yarn typecheck
       - run: yarn build
-      - run: yarn test
+      - name: Verify build-dependent client layouts
+        run: yarn vitest run test/cli/commands/create.test.ts test/harnesses/impls/learner/plugin-path.test.ts
       - run: yarn pack:smoke
 
       - name: Publish canary
