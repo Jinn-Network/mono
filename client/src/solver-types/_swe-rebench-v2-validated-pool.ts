@@ -1125,9 +1125,9 @@ export async function recheckDiscrimination(opts: RecheckDiscriminationOpts): Pr
   const taskById = new Map(opts.pool.map((t) => [t.instance_id, t]));
   for (const [instanceId, entry] of Object.entries(scorable.entries)) {
     if (entry.discrimination !== undefined) { skipped.alreadyVerdicted += 1; continue; }
-    if (opts.limit !== undefined && checked >= opts.limit) { skipped.limitExceeded += 1; continue; }
     const task = taskById.get(instanceId);
     if (!task) { skipped.orphanedPoolTask += 1; continue; }
+    if (opts.limit !== undefined && checked >= opts.limit) { skipped.limitExceeded += 1; continue; }
     try {
       const row = await opts.fetcher.fetchTaskRow({ hf_dataset: task.hf_dataset, hf_split: task.hf_split, instance_id: instanceId });
       const disc = await runDiscriminationCheck({

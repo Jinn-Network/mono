@@ -573,15 +573,10 @@ Output flags:
       const evalSemanticsVersion = (raw as { evalSemanticsVersion?: string }).evalSemanticsVersion ?? 'unknown';
       const freshness = await describeSweRebenchV2PoolFreshness({ stateDir });
       const highestYieldBlocker = summary.byReason.find((b) => b.reason !== 'gold-patch-resolves')?.reason ?? null;
-      const { loadSweRebenchV2Pool } = await import('../../solver-types/swe-rebench-v2.js');
-      const { PoolCacheStore, loadPoolWithCacheFallback } = await import('../../solver-types/_swe-rebench-v2-pool-cache.js');
-      const poolResult = await loadPoolWithCacheFallback({
-        loadPool: loadSweRebenchV2Pool,
-        cache: new PoolCacheStore({ stateDir }),
-        currentPool: [],
-      });
-      const poolInstanceIds = poolResult.pool.length > 0
-        ? new Set(poolResult.pool.map((t) => t.instance_id))
+      const { PoolCacheStore } = await import('../../solver-types/_swe-rebench-v2-pool-cache.js');
+      const cachedPool = await new PoolCacheStore({ stateDir }).read();
+      const poolInstanceIds = cachedPool && cachedPool.tasks.length > 0
+        ? new Set(cachedPool.tasks.map((t) => t.instance_id))
         : undefined;
       const weakSuite = summarizeWeakSuite(raw, poolInstanceIds);
       const value = {

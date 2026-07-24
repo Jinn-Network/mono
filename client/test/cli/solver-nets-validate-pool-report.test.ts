@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,6 +35,7 @@ function withSweStateDirEnv(dir: string): () => void {
 }
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   for (const d of tmps.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -155,7 +156,7 @@ describe('solver-nets validate-pool-report', () => {
     }
   });
 
-  it('emits weakSuite.unchecked split into backlog vs orphaned when pool cache is present', async () => {
+  it('uses seeded cache membership without calling a live loader that would succeed', async () => {
     const dir = tmpDir();
     seedValidatedPool(dir, {
       'in-pool__1': { scorable: true, reason: 'gold-patch-resolves' },
@@ -174,15 +175,45 @@ describe('solver-nets validate-pool-report', () => {
         language: 'python',
       }],
     }));
-    const made = makeCommandCtx({
-      argv: ['validate-pool-report', 'swe-rebench-v2', '--json'],
-      env: { JINN_SWE_REBENCH_V2_STATE_DIR: dir },
+    const liveFetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/splits?')) {
+        return new Response(JSON.stringify({ splits: [{ split: '2026_01' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({
+        rows: [{
+          row: {
+            instance_id: 'live-only__1',
+            repo: 'live/repo',
+            base_commit: 'abc123',
+            language: 'python',
+            patch: 'live gold',
+            test_patch: 'live test',
+          },
+        }],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
     });
-    await solverNetsCommand.run(made.ctx);
-    expect(made.exits).toEqual([]);
-    const envelope = JSON.parse(made.writes.join('').trim()) as Record<string, unknown>;
-    const weakSuite = envelope['weakSuite'] as { unchecked: { backlog: number; orphaned: number } };
-    expect(weakSuite.unchecked).toEqual({ backlog: 1, orphaned: 1 });
+    vi.stubGlobal('fetch', liveFetch);
+    const restore = withSweStateDirEnv(dir);
+    try {
+      const made = makeCommandCtx({
+        argv: ['validate-pool-report', 'swe-rebench-v2', '--json'],
+      });
+      await solverNetsCommand.run(made.ctx);
+      expect(made.exits).toEqual([]);
+      const envelope = JSON.parse(made.writes.join('').trim()) as Record<string, unknown>;
+      const weakSuite = envelope['weakSuite'] as { unchecked: { backlog: number; orphaned: number } };
+      expect(weakSuite.unchecked).toEqual({ backlog: 1, orphaned: 1 });
+      expect(liveFetch).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
   });
 
   it('fails cleanly with a "stale" / "absent" message when validated-pool.json is missing', async () => {

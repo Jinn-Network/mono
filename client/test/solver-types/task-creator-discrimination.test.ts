@@ -226,6 +226,38 @@ describe('recheckDiscrimination', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it('keeps post-limit orphaned pool tasks visible instead of folding them into the batch bound', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jinn-disc-recheck-'));
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    await store.record('repo__pkg-1', { scorable: true, reason: 'gold-patch-resolves', checkedAt: new Date().toISOString() }, EVAL_SEMANTICS_VERSION);
+    await store.record('repo__orphan', { scorable: true, reason: 'gold-patch-resolves', checkedAt: new Date().toISOString() }, EVAL_SEMANTICS_VERSION);
+    const fetcher = {
+      fetchTaskRow: async () => ({
+        instance_id: 'repo__pkg-1',
+        repo: 'acme/widget',
+        image_name: 'img:tag',
+        FAIL_TO_PASS: ['t1'],
+        PASS_TO_PASS: [],
+        test_patch: '',
+        install_config: { test_cmd: 'pytest', log_parser: 'parse_log_pytest' },
+      }),
+    };
+    const runner = {
+      runEval: vi.fn().mockResolvedValue({ passed_match: true, passed: ['t1'], failed: [] }),
+    };
+    const result = await recheckDiscrimination({
+      pool: [poolTask('repo__pkg-1')],
+      store,
+      fetcher,
+      runner,
+      semanticsVersion: EVAL_SEMANTICS_VERSION,
+      limit: 1,
+    });
+    expect(result.checked).toBe(1);
+    expect(result.skipped).toEqual({ alreadyVerdicted: 0, limitExceeded: 0, orphanedPoolTask: 1, evalError: 0 });
+    await rm(dir, { recursive: true, force: true });
+  });
+
   it('counts fetch/eval errors separately so a retryable backlog stays visible', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'jinn-disc-recheck-'));
     const store = new ValidatedPoolStore({ stateDir: dir });
