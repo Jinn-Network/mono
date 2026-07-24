@@ -21,6 +21,23 @@ const MANIFEST_PATH = '/attempt/manifest.json';
 const SUMMARY_PATH = '/attempt/reports/summary.md';
 const BODY_PATH = '/attempt/reports/body.md';
 const REASON_PATH = '/attempt/reports/reason.md';
+const FOLLOW_UPS_PATH = '/attempt/reports/review-follow-ups.json';
+const FOLLOW_UPS_JSON = JSON.stringify({
+  followUps: [{
+    type: 'chore',
+    title: 'Rename helper',
+    body: 'Non-blocking',
+    effort: 'low',
+    priority: 'p3',
+  }],
+});
+const FOLLOW_UPS_PARSED = [{
+  type: 'chore',
+  title: 'Rename helper',
+  body: 'Non-blocking',
+  effort: 'low',
+  priority: 'p3',
+}];
 const SUCCESS_HEAD = gitOid('a'.repeat(40));
 const NONTERMINAL_HEAD = gitOid('d'.repeat(40));
 const REVIEW_REF = gitOid('c'.repeat(40));
@@ -79,8 +96,13 @@ function protocol(): SessionProtocol & {
       calls.push({ operation: 'implementation-complete', payload: summary });
       return { status: 'complete', head: SUCCESS_HEAD };
     },
-    reviewVerdict: async (_manifest, state, body) => {
-      calls.push({ operation: 'review-verdict', payload: { state, body } });
+    reviewVerdict: async (_manifest, state, body, followUps) => {
+      calls.push({
+        operation: 'review-verdict',
+        payload: followUps === undefined
+          ? { state, body }
+          : { state, body, followUps },
+      });
       return state === 'APPROVE'
         ? { status: 'approved', head: SUCCESS_HEAD }
         : { status: 'requested-changes', head: SUCCESS_HEAD };
@@ -118,6 +140,7 @@ function deps(
       if (path === SUMMARY_PATH) return 'summary text\n';
       if (path === BODY_PATH) return 'review body\n';
       if (path === REASON_PATH) return 'human reason\n';
+      if (path === FOLLOW_UPS_PATH) return FOLLOW_UPS_JSON;
       throw new Error('unexpected file');
     }),
   };
@@ -139,6 +162,39 @@ describe('session CLI grammar', () => {
       argv: ['review-verdict', '--state', 'APPROVE', '--body-file', BODY_PATH],
       manifest: MANIFEST,
       expected: { operation: 'review-verdict', payload: { state: 'APPROVE', body: 'review body\n' } },
+    },
+    {
+      argv: [
+        'review-verdict', '--state', 'APPROVE',
+        '--body-file', BODY_PATH,
+        '--follow-ups-file', FOLLOW_UPS_PATH,
+      ],
+      manifest: MANIFEST,
+      expected: {
+        operation: 'review-verdict',
+        payload: {
+          state: 'APPROVE',
+          body: 'review body\n',
+          followUps: FOLLOW_UPS_PARSED,
+        },
+      },
+    },
+    {
+      argv: [
+        'review-verdict',
+        '--body-file', BODY_PATH,
+        '--follow-ups-file', FOLLOW_UPS_PATH,
+        '--state', 'APPROVE',
+      ],
+      manifest: MANIFEST,
+      expected: {
+        operation: 'review-verdict',
+        payload: {
+          state: 'APPROVE',
+          body: 'review body\n',
+          followUps: FOLLOW_UPS_PARSED,
+        },
+      },
     },
     {
       argv: ['review-verdict', '--state', 'REQUEST_CHANGES', '--body-file', BODY_PATH],
@@ -179,7 +235,28 @@ describe('session CLI grammar', () => {
     { argv: ['implementation-complete', '--wrong', SUMMARY_PATH] },
     { argv: ['review-verdict', '--state', 'COMMENT', '--body-file', BODY_PATH] },
     { argv: ['review-verdict', '--state', 'APPROVE'] },
-    { argv: ['review-verdict', '--body-file', BODY_PATH, '--state', 'APPROVE'] },
+    { argv: ['review-verdict', '--follow-ups-file', FOLLOW_UPS_PATH] },
+    {
+      argv: [
+        'review-verdict', '--state', 'REQUEST_CHANGES',
+        '--body-file', BODY_PATH,
+        '--follow-ups-file', FOLLOW_UPS_PATH,
+      ],
+    },
+    {
+      argv: [
+        'review-verdict', '--state', 'APPROVE',
+        '--body-file', BODY_PATH,
+        '--follow-ups-file',
+      ],
+    },
+    {
+      argv: [
+        'review-verdict', '--state', 'APPROVE',
+        '--body-file', BODY_PATH,
+        '--unknown-flag', 'x',
+      ],
+    },
     { argv: ['human', '--reason-file', REASON_PATH, '--extra'] },
   ])('rejects unknown, trailing, missing, or malformed input: $argv', async ({ argv }) => {
     const handler = protocol();
@@ -218,6 +295,61 @@ describe('session CLI grammar', () => {
     expect(handler.calls).toEqual([
       { operation: 'human', payload: 'human reason\n' },
     ]);
+  });
+
+  it('accepts an empty follow-ups array on APPROVE', async () => {
+    const emptyPath = '/attempt/reports/empty-follow-ups.json';
+    const handler = protocol();
+    const injected = {
+      ...deps(MANIFEST, handler),
+      readTextFile: vi.fn((path: string): string => {
+        if (path === BODY_PATH) return 'review body\n';
+        if (path === emptyPath) return '{"followUps":[]}';
+        throw new Error('unexpected file');
+      }),
+    };
+    await runSessionCli([
+      'review-verdict', '--state', 'APPROVE',
+      '--body-file', BODY_PATH,
+      '--follow-ups-file', emptyPath,
+    ], injected);
+    expect(handler.calls).toEqual([{
+      operation: 'review-verdict',
+      payload: {
+        state: 'APPROVE',
+        body: 'review body\n',
+        followUps: [],
+      },
+    }]);
+  });
+
+  it('rejects a malformed follow-ups file payload', async () => {
+    const badPath = '/attempt/reports/bad-follow-ups.json';
+    const handler = protocol();
+    const injected = {
+      ...deps(MANIFEST, handler),
+      readTextFile: vi.fn((path: string): string => {
+        if (path === BODY_PATH) return 'review body\n';
+        if (path === badPath) {
+          return JSON.stringify({
+            followUps: Array.from({ length: 6 }, (_, i) => ({
+              type: 'fix',
+              title: `Item ${i}`,
+              body: 'x',
+              effort: 'low',
+              priority: 'p2',
+            })),
+          });
+        }
+        throw new Error('unexpected file');
+      }),
+    };
+    await expect(runSessionCli([
+      'review-verdict', '--state', 'APPROVE',
+      '--body-file', BODY_PATH,
+      '--follow-ups-file', badPath,
+    ], injected)).rejects.toThrow(/at most 5/i);
+    expect(handler.calls).toEqual([]);
   });
 
   it('wires checkpoints only for implementation manifests in this task', async () => {

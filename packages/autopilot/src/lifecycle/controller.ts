@@ -25,7 +25,8 @@ import {
   type ActiveCandidate,
   type ActiveSchedulingSkip,
 } from './active-scheduler.js';
-import { childrenPathEnabled } from './child-issues.js';
+import { childrenPathEnabled, isMachineChildIssue } from './child-issues.js';
+import { classifyCiChecks, isCiGreen } from './ci-classifier.js';
 import { chooseIntegrationLadderAction } from './integration-ladder.js';
 import type {
   AutopilotMode,
@@ -80,6 +81,7 @@ export interface LifecycleControllerDeps {
         readonly implementation: number;
         readonly review: number;
       };
+      readonly newWorkPaused: boolean;
       readonly availableLogins: readonly string[];
       readonly implementationPreferredLogin: string;
     };
@@ -578,11 +580,16 @@ function activeCandidates(
       && item.eligible
       && !item.humanHold
     ) {
-      const isChild = item.labels.includes('review-finding')
-        || item.labels.includes('reconcile');
+      const issueSource = snapshot.issues.find((candidate) =>
+        candidate.number === item.issueNumber);
+      const isChild = isMachineChildIssue({
+        body: issueSource?.body,
+        labels: item.labels,
+      });
       (isChild ? childImplementation : freshImplementation).push({
         phase: 'implementation',
         issueNumber: item.issueNumber,
+        ...(isChild ? { isChild: true } : {}),
       });
       continue;
     }
@@ -637,11 +644,7 @@ function activeCandidates(
       && !(item.openChildKinds ?? []).includes('reconcile')
     ) {
       const childrenOn = childrenPathEnabled();
-      const ciGreen = pr.checks.length > 0 && pr.checks.every((check) => (
-        check.status === 'COMPLETED'
-        && check.conclusion !== null
-        && ['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(check.conclusion)
-      ));
+      const ciGreen = isCiGreen(pr.checks);
       const ladder = chooseIntegrationLadderAction({
         approved: true,
         ciGreen,
@@ -676,6 +679,26 @@ function activeCandidates(
           effort: ladder.effort,
         });
       }
+    } else if (entry.phase === 'ci-blocked') {
+      const classification = classifyCiChecks(pr.checks);
+      if (classification.state === 'failed') {
+        const rerunRecorded = item.ciRerunRecorded === true;
+        if (!rerunRecorded && classification.rerunnableRunIds.length > 0) {
+          other.push({
+            phase: 'rerun-failed-checks',
+            issueNumber: item.issueNumber,
+            prNumber: item.prNumber,
+            head: item.head,
+          });
+        } else {
+          other.push({
+            phase: 'file-ci-failure-child',
+            issueNumber: item.issueNumber,
+            prNumber: item.prNumber,
+            head: item.head,
+          });
+        }
+      }
     } else if (entry.phase === 'merge-ready') {
       other.push({
         phase: 'merge',
@@ -698,6 +721,9 @@ function phaseForAction(action: NewWorkAction): LifecyclePhase {
   if (action.kind === 'update-branch' || action.kind === 'file-reconcile-child') {
     return 'awaiting-review';
   }
+  if (action.kind === 'rerun-failed-checks' || action.kind === 'file-ci-failure-child') {
+    return 'ci-blocked';
+  }
   return 'merge-ready';
 }
 
@@ -717,6 +743,12 @@ function phaseForSchedulingSkip(
     || skip.phase === 'file-reconcile-child'
   ) {
     return 'awaiting-review';
+  }
+  if (
+    skip.phase === 'rerun-failed-checks'
+    || skip.phase === 'file-ci-failure-child'
+  ) {
+    return 'ci-blocked';
   }
   return 'merge-ready';
 }
@@ -1042,6 +1074,7 @@ export async function runLifecycleCycle(
       openPipelineBacklog,
       implementationBackpressureThreshold:
         deps.active!.implementationBackpressureThreshold,
+      ...(local.newWorkPaused ? { newWorkPaused: true } : {}),
     });
     actionEvents.push(...scheduling.skips.map((skip): LifecycleLogEvent => ({
       cycleId,

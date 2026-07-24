@@ -4,6 +4,10 @@ import {
   formatHumanCommentMarker,
   parseAutomatedReviewMarker,
 } from './codecs.js';
+import type {
+  FiledReviewFollowUp,
+  ReviewFollowUpEntry,
+} from './review-follow-ups.js';
 import type { ReviewNativeReview } from './review-executor.js';
 import type {
   GitOid,
@@ -101,13 +105,22 @@ export interface ReviewSessionPort {
     | { readonly number: number; readonly created: boolean; readonly runawayHold?: undefined }
     | { readonly runawayHold: true; readonly priorCount: number }
   >;
+  fileReviewFollowUps?(input: {
+    readonly parentPr: number;
+    readonly head: GitOid;
+    readonly entries: readonly ReviewFollowUpEntry[];
+  }): Promise<readonly FiledReviewFollowUp[]>;
   nextMarker(): string;
   now(): Date;
 }
 
 export type ReviewVerdictResult =
   | { readonly status: 'requested-changes'; readonly head: GitOid }
-  | { readonly status: 'approved'; readonly head: GitOid }
+  | {
+      readonly status: 'approved';
+      readonly head: GitOid;
+      readonly followUpNumbers?: readonly number[];
+    }
   | { readonly status: 'human'; readonly head: GitOid }
   | { readonly status: 'stale' | 'ambiguous'; readonly head: GitOid };
 
@@ -126,6 +139,7 @@ export interface ReviewSessionProtocol {
     manifest: AttemptManifest,
     state: ReviewVerdictState,
     body: string,
+    followUps?: readonly ReviewFollowUpEntry[],
   ): Promise<ReviewVerdictResult>;
   reviewFindings?(
     manifest: AttemptManifest,
@@ -473,7 +487,12 @@ async function reviewVerdict(
   state: ReviewVerdictState,
   body: string,
   port: ReviewSessionPort,
+  followUps?: readonly ReviewFollowUpEntry[],
 ): Promise<ReviewVerdictResult> {
+  if (followUps !== undefined && followUps.length > 0 && state !== 'APPROVE') {
+    throw new Error('Follow-ups are only valid with APPROVE');
+  }
+
   let manifest = requireReviewManifest(supplied, port);
   let authority = await requireAuthority(manifest, port);
   let pullRequest = await readExactPullRequest(manifest, port);
@@ -489,6 +508,23 @@ async function reviewVerdict(
   if (state === 'APPROVE') {
     await requireNoNativeChangeRequests(manifest, port, true);
   }
+
+  let followUpNumbers: number[] | undefined;
+  if (followUps !== undefined && followUps.length > 0) {
+    if (port.fileReviewFollowUps === undefined) {
+      throw new Error('Review follow-ups require a follow-up filing port');
+    }
+    const filed = await port.fileReviewFollowUps({
+      parentPr: manifest.prNumber!,
+      head,
+      entries: followUps,
+    });
+    followUpNumbers = filed.map((entry) => entry.number);
+  }
+  const bodyWithFollowUps =
+    followUpNumbers === undefined || followUpNumbers.length === 0
+      ? body
+      : `${body.trim()}\n\nFollow-up issues: ${followUpNumbers.map((n) => `#${n}`).join(', ')}`;
 
   let intent: Extract<ReviewClaimRecord, { readonly state: 'verdict-intent' }>;
   if (authority.record.state === 'verdict-intent') {
@@ -535,7 +571,7 @@ async function reviewVerdict(
         commitId: head,
         reviewer: manifest.selectedLogin,
         state,
-        body: `${body.trim()}\n\n${marker}`,
+        body: `${bodyWithFollowUps.trim()}\n\n${marker}`,
       });
     } catch (error) {
       submissionError = error;
@@ -597,7 +633,9 @@ async function reviewVerdict(
   if (pullRequest.draft) {
     await port.setPullRequestDraft(manifest.prNumber!, head, false);
   }
-  return { status: 'approved', head };
+  return followUpNumbers === undefined || followUpNumbers.length === 0
+    ? { status: 'approved', head }
+    : { status: 'approved', head, followUpNumbers };
 }
 
 /**
@@ -713,8 +751,8 @@ export function makeReviewSessionProtocol(
   port: ReviewSessionPort,
 ): ReviewSessionProtocol {
   return {
-    reviewVerdict: (manifest, state, body) =>
-      reviewVerdict(manifest, state, body, port),
+    reviewVerdict: (manifest, state, body, followUps) =>
+      reviewVerdict(manifest, state, body, port, followUps),
     reviewFindings: (manifest, findings) => reviewFindings(manifest, findings, port),
     human: (manifest, reason) => enterHuman(manifest, reason, port),
   };

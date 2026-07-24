@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EvictionLoop } from '../../src/daemon/eviction-loop.js';
 import { Store } from '../../src/store/store.js';
 import { getLoopTick } from '../../src/daemon/loop-heartbeat.js';
+import { WatchdogLoop } from '../../src/daemon/watchdog-loop.js';
+import { getEventBuffer } from '../../src/events/emitter.js';
 
 // Valid checksummed Ethereum addresses
 const STAKING_ADDR = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
@@ -234,6 +236,50 @@ describe('EvictionLoop', () => {
       loop.stop();
       await vi.advanceTimersByTimeAsync(60_000);
       await running;
+    });
+
+    it('freezes the heartbeat when runOnce hangs', async () => {
+      const loop = new EvictionLoop({
+        intervalMs: 60_000,
+        store: mockStore([]),
+        chain: 'base-sepolia',
+        readContract: vi.fn(),
+        recoverEvictedService: vi.fn(),
+        jinnStore,
+      });
+      vi.spyOn(loop, 'runOnce').mockImplementation(() => new Promise<void>(() => {}));
+
+      void loop.run();
+      await vi.advanceTimersByTimeAsync(60_000 * 5);
+      expect(getLoopTick(jinnStore, 'eviction-check')).toBeNull();
+
+      loop.stop();
+    });
+
+    it('is detected by the watchdog when the heartbeat goes stale', () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      getEventBuffer().clear();
+
+      const INTERVAL = 60_000;
+      const now = 1_000_000_000;
+      jinnStore.setConfigValue('loop_heartbeat:eviction-check', String(now - INTERVAL * 100));
+
+      const wd = new WatchdogLoop({
+        store: jinnStore,
+        loops: [{ name: 'eviction-check', intervalMs: INTERVAL }],
+        stalenessFactor: 3,
+        checkIntervalMs: 10_000,
+        autoRestart: false,
+        isActive: () => true,
+        now: () => now,
+      });
+      wd.check();
+
+      const stale = getEventBuffer()
+        .snapshot({ limit: 10 })
+        .find((e) => e.errorCode === 'loop_watchdog_stale');
+      expect(stale?.details?.['loopName']).toBe('eviction-check');
+      wd.stop();
     });
   });
 });

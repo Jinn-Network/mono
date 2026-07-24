@@ -867,7 +867,9 @@ export async function gatherStatusForApi(
   const body = assembleStatusV1(raw);
   // Loop-completion + impl-state commit cadence (#959). Both are read-only and
   // degrade to zeroes / an empty list — they never throw the status endpoint.
-  body.loopCompletion = gatherLoopCompletion(store.taskRunReadModel());
+  body.loopCompletion = gatherLoopCompletion(store.taskRunReadModel(), {
+    cacheKey: store.db,
+  });
   if (status?.engine?.implStateDirRoot) {
     body.implStateCadence = gatherImplStateCadence(status.engine.implStateDirRoot);
   }

@@ -30,6 +30,8 @@ import { makeGitProtocolPort } from './git-protocol.js';
 import { validateCanonicalGitHubHttpsRemote } from './implementation-executor.js';
 import { fileChildIssue } from './child-issues.js';
 import { makeProductionChildIssuePort } from './child-issues-production.js';
+import { fileReviewFollowUps } from './review-follow-ups.js';
+import { makeProductionReviewFollowUpPort } from './review-follow-ups-production.js';
 import type { ReviewSessionPort } from './review-session.js';
 import type { ReviewNativeReview } from './review-executor.js';
 import {
@@ -687,6 +689,18 @@ export function makeProductionReviewSessionPort(
         );
       }
       return { number: filed.number, created: filed.created };
+    },
+
+    async fileReviewFollowUps(input) {
+      const manifest = currentManifest();
+      const port = makeProductionReviewFollowUpPort({
+        runner: (command, args) => run(manifest, command, args),
+      });
+      return fileReviewFollowUps(port, {
+        parentPr: input.parentPr,
+        head: String(input.head),
+        entries: input.entries,
+      });
     },
 
     nextMarker: randomUUID,

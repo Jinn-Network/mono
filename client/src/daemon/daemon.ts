@@ -201,6 +201,9 @@ export interface DaemonConfig {
    */
   creatorSafeAddress?: string;
 
+  /** Resolved swe-rebench-v2 state dir from loadConfig; threaded to creator/delivery hooks. */
+  sweRebenchV2StateDir?: string;
+
   /**
    * TaskEngine — sole path for marketplace request → claim → run → deliver.
    * Evaluation tasks (`role === 'evaluation'`) dispatch via `supports()` to
@@ -301,8 +304,13 @@ export class Daemon {
       taskSources,
       this.store,
       config.creatorSafeAddress,
+      config.sweRebenchV2StateDir,
     );
-    this.deliveryWatcherLoop = new DeliveryWatcherLoop(this.adapter, this.store);
+    this.deliveryWatcherLoop = new DeliveryWatcherLoop(
+      this.adapter,
+      this.store,
+      config.sweRebenchV2StateDir,
+    );
 
     this.restorationEngine = new TaskEngine({
       ...config.restorationEngine,
@@ -339,7 +347,7 @@ export class Daemon {
       this.harvestLoop = new HarvestLoop({ ...config.harvest, store: this.store });
     }
     if (config.checkpoint && config.checkpoint.intervalMs > 0) {
-      this.checkpointLoop = new CheckpointLoop(config.checkpoint);
+      this.checkpointLoop = new CheckpointLoop({ ...config.checkpoint, jinnStore: this.store });
     }
   }
 
@@ -549,6 +557,7 @@ export class Daemon {
       if (this.rewardClaimLoop) started.add('reward-claim');
       if (this.balanceTopupLoop) started.add('balance-topup');
       if (this.evictionLoop) started.add('eviction-check');
+      if (this.checkpointLoop) started.add('checkpoint');
       if (this.harvestLoop) started.add('harvest');
       if (peers.length > 0) started.add('peer-sync');
       const overrides: Partial<Record<LoopName, number>> = {
@@ -556,6 +565,7 @@ export class Daemon {
         'reward-claim': this.config.rewardClaim?.intervalMs,
         'balance-topup': this.config.balanceTopup?.intervalMs,
         'eviction-check': this.config.evictionCheck?.intervalMs,
+        checkpoint: this.config.checkpoint?.intervalMs,
         harvest: this.config.harvest?.intervalMs,
       };
       const registrations: WatchdogLoopRegistration[] = LOOP_REGISTRY
