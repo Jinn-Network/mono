@@ -4,11 +4,11 @@
 >
 > **Scope of issue #1976:** This issue is **shape `design`**. Its done bar is the ratified design + this plan — **not** shipping F1–F4. Human ratification was recorded on 2026-07-24; implementation is filed as #2113–#2116.
 
-**Goal:** Carry Lever A–identical observational `passedCount`/`totalCount` on live-issue jinn-repo verdicts (`jinn-repo-verdict.v3`), through evaluator → SDK → indexer → discovery/corpus, without changing binary settlement or sizing emissions.
+**Goal:** Carry Lever A–identical observational `passedCount`/`totalCount` on live-issue jinn-repo verdicts (`jinn-repo-verdict.v3`), through evaluator → SDK → indexer/discovery and a verified corpus-local association, without changing binary settlement or sizing emissions.
 
-**Architecture:** Additive-only plumbing. Keep v2 `gates` for stage diagnosis; emit within-tests-gate assertion counts when vitest JSON is parseable; omit counts on applies/typecheck short-circuit, unparseable JSON, and non-vitest package-script fallback. Indexer reuses existing `verdictEnvelopeMeta.passedCount`/`totalCount` columns and generalizes the task-body fetch so jinn-repo evaluations populate `solutionRequestId`. Discovery surfaces `gradedScores[]` for learning; emissions paths never read the fields.
+**Architecture:** Additive-only plumbing. Keep v2 `gates` for stage diagnosis; emit within-tests-gate assertion counts only when every executed package has parseable Vitest JSON; omit both counts on applies/typecheck short-circuit, any unparseable package, and any non-Vitest package-script fallback. Indexer reuses existing `verdictEnvelopeMeta.passedCount`/`totalCount` columns and generalizes the task-body fetch so jinn-repo evaluations populate `solutionRequestId` for public lookup. Learning separately projects the signed verdict payload and evaluation task into the local envelope store, joins it to the solution projection by request ID, and overlays `scoreMetadata`; shape-parsed HTTP reward projections stay empty. Emissions paths never read the fields.
 
-**Tech Stack:** TypeScript, Zod (SDK), Vitest, Ponder/Drizzle (indexer), GraphQL (discovery). Yarn workspaces: `packages/sdk`, `packages/indexer`, `packages/indexer-enrichment`, `client`.
+**Tech Stack:** TypeScript, Zod (SDK), Vitest, Ponder/Drizzle (indexer), local signed-envelope projections. Yarn workspaces: `packages/sdk`, `packages/indexer`, `packages/indexer-enrichment`, `client`.
 
 **Spec:** `docs/superpowers/specs/2026-07-23-jinn-repo-graded-verdict-signal-design.md` · **Issue:** #1976 · **Precedent:** `docs/superpowers/plans/2026-06-03-graded-reward-signal-lever-a.md` (#1019)
 
@@ -51,15 +51,14 @@ This design Issue's ACs are satisfied by the locked design (+ this plan). Verifi
 
 ```
 F1 (SDK v3 schema)
- ├──► F2 (evaluator emit)     [requires F1 types/union]
- └──► F3 (indexer carry+join) [requires F1 field names; can parallel F2 after F1]
-         └──► F4 (discovery+corpus+boundary) [requires F3 columns populated]
+ ├──► F2 (evaluator emit) ─────────┐
+ └──► F3 (indexer carry+join) ─────┴──► F4 (corpus association+boundary)
 ```
 
 - **F1 before F2 and F3** — hard. F2 publishes `schemaVersion: 'jinn-repo-verdict.v3'`; F3 parses those fields.
 - **F2 ∥ F3** after F1 — allowed. Prefer merging F1 first so both land against a released schema.
-- **F4 after F3** — hard for the discovery path that reads indexer meta. Corpus `scoreMetadata` wiring can start once F1 payload shape is known, but end-to-end gradedScores needs F3.
-- Optional sequenced work (not blocking #1976 ACs): per-package count arrays; merged-pr v1 gold-test counts; jinn-repo-specific Consolidator Tier-2 policy (Lever A already consumes `gradedScores` generically).
+- **F4 after F2 and F3** — hard. F2 supplies real count-bearing signed verdicts; F3 completes the public lookup/join-metadata leg. F4 then adds the trusted local projection join used by learning.
+- Optional sequenced work (not blocking #1976 ACs): per-package count arrays; merged-pr v1 gold-test counts; a separately verified discovery reward route; jinn-repo-specific Consolidator Tier-2 policy.
 
 ---
 
@@ -89,8 +88,10 @@ These shape or gate F* scope; they do **not** block writing this plan. Record th
 - `packages/indexer/src/enrichment-parse.ts` — jinn-repo branch in `parseVerdictEnvelopeLite`
 - `packages/indexer/src/handlers.ts` — widen task-body fetch gate beyond `swe-rebench-v2`
 - `packages/indexer-enrichment/src/enrich.ts` — same fetch-gate widen (must stay in lockstep)
-- `client/src/discovery/http.ts` (and/or corpus path) — surface jinn-repo `gradedScores`
-- `client/src/mcp/search-records.ts` / corpus knowledge seam — pass graded fields into `scoreMetadata` (or documented sibling)
+- `client/src/corpus/envelope-projection.ts` — project jinn-repo verdict counts + evaluation task `restorationRequestId`
+- `client/src/corpus/jinn-repo-graded-association.ts` (new small pure helper) — bounded verdict-to-solution projection join
+- `client/src/mcp/search-records.ts` — overlay verified local graded fields onto solution `scoreMetadata`
+- `client/src/harnesses/engine/corpus-knowledge.ts` — retain/pass through the enriched `scoreMetadata` seam (production change only if needed)
 
 **Test:**
 - `packages/sdk/test/payloads.jinn-repo.test.ts`
@@ -98,7 +99,10 @@ These shape or gate F* scope; they do **not** block writing this plan. Record th
 - `client/test/harnesses/jinn-repo-evaluator/live-eval-runner.integration.test.ts` (and/or new unit file with JSON fixtures)
 - `packages/indexer/test/handlers.test.ts` (`parseVerdictEnvelopeLite` describe)
 - `packages/indexer-enrichment/test/enrich.test.ts`
-- `client/test/discovery/*` (extend Lever A codedigest-rewards tests if present; else add)
+- `client/test/corpus/envelope-projection.test.ts`
+- `client/test/corpus/jinn-repo-graded-association.test.ts`
+- `client/test/mcp/search-records-corpus.test.ts`
+- `client/test/harnesses/engine/corpus-knowledge.test.ts` (pass-through regression)
 - `client/test/learner/emissions-boundary.test.ts` (confirm still green; extend if jinn-repo-specific identifiers appear)
 
 ---
@@ -112,7 +116,7 @@ These shape or gate F* scope; they do **not** block writing this plan. Record th
 - [x] **Step 1:** Human ratified `docs/superpowers/specs/2026-07-23-jinn-repo-graded-verdict-signal-design.md`.
 - [x] **Step 2:** Q1–Q3 answers are recorded on the design and in the matching Issue bodies.
 - [x] **Step 3:** Filed four `feat` Issues: F1 [#2113](https://github.com/Jinn-Network/mono/issues/2113), F2 [#2114](https://github.com/Jinn-Network/mono/issues/2114), F3 [#2115](https://github.com/Jinn-Network/mono/issues/2115), and F4 [#2116](https://github.com/Jinn-Network/mono/issues/2116), with native blocker edges.
-- [x] **Step 4:** Merge of PR #2027 closes #1976 and leaves the implementation train live.
+- [x] **Step 4:** Configure PR #2027 to close #1976 on merge and leave the implementation train live.
 
 **Success criteria:** #1976 closed; F1–F4 open; no production code required from #1976 itself.
 
@@ -382,13 +386,18 @@ export function aggregateAssertionCounts(
 
 3. In the tests gate loop:
    - Prefer `yarn vitest run --reporter=json ...` (dual reporter OK if human logs must stay — e.g. default + json). Capture stdout/stderr; on success **and** on real failure (`isRealFailure`), attempt `parseVitestJsonV1` on the combined log.
-   - On successful parse, push `{ passed, failed }` into an array; on throw from parser, mark that package as "no counts" for aggregation (do not invent counts).
+   - On successful parse, push `{ passed, failed }` into an array; on throw from parser, mark the whole aggregate as unavailable (do not emit partial counts).
    - For the package-script fallback branch (`yarn [testScript]`): keep boolean gate behavior; **do not** attempt counts unless the script is known to emit vitest JSON (Q1: omit).
-   - After the loop: if **at least one** package produced a parseable report, set `passedCount`/`totalCount` from `aggregateAssertionCounts`; if tests ran but **no** package parsed, omit both fields.
+   - After the loop: set `passedCount`/`totalCount` only if **every executed package** produced a parseable assertion report. If any executed package used the fallback or failed parsing, omit both fields.
    - Applies-fail and typecheck-fail early returns: **do not** set count fields.
    - Unscorable returns: unchanged (no counts; harness skips publish).
 
 Skipped/pending/todo assertions stay out of both numerator and denominator (`parseVitestJsonV1` already ignores them).
+
+Add a mixed-package regression: one package produces parseable Vitest JSON and
+another executes through a non-Vitest fallback (or produces unparseable JSON).
+The boolean gate result remains authoritative and the published payload contains
+neither count key.
 
 - [ ] **Step 4: Run unit tests**
 
@@ -711,73 +720,115 @@ EOF
 
 ---
 
-## Phase F4 — `feat(discovery+corpus): surface jinn-repo gradedScores for learning`
+## Phase F4 — `feat(corpus): surface verified jinn-repo graded scores for learning`
 
-**Depends on:** F3  
-**Session sizing:** one Autopilot implement session  
-**Proposed Issue title:** `feat(discovery+corpus): surface jinn-repo gradedScores for learning`  
-**Q3:** human chooses verified GraphQL rewards route vs corpus-local graded path; implement the chosen path only.
+**Depends on:** F2 + F3
+**Session sizing:** one Autopilot implement session
+**Proposed Issue title:** `feat(corpus): surface verified jinn-repo graded scores for learning`
+**Q3 lock:** implement only the verified corpus-local path. Keep
+`HttpDiscoveryAPI.getCodeDigestRewards` empty.
 
-### Task F4.1: Discovery / learning read path
+### Task F4.1: Project and associate signed verdict grades
 
-**Files (choose path per Q3):**
-- If restoring GraphQL rewards: `client/src/discovery/http.ts` (`getCodeDigestRewards`), types already have `gradedScores: number[]` on `CodeDigestRewardRow`
-- If corpus-local: `client/src/mcp/search-records.ts` and/or `client/src/harnesses/engine/corpus-knowledge.ts` — document that graded counts flow via `scoreMetadata` from verdict payload / meta join, not via unverified reward rows
-- Test: extend `client/test/discovery/http.codedigest-rewards.test.ts` if present; else add corpus/search-records tests for graded fields
+**Files:**
+- Modify: `client/src/corpus/envelope-projection.ts`
+- Create: `client/src/corpus/jinn-repo-graded-association.ts`
+- Modify: `client/src/mcp/search-records.ts`
+- Modify only if needed: `client/src/harnesses/engine/corpus-knowledge.ts`
+- Test: `client/test/corpus/envelope-projection.test.ts`
+- Test: `client/test/corpus/jinn-repo-graded-association.test.ts`
+- Test: `client/test/mcp/search-records-corpus.test.ts`
+- Test: `client/test/harnesses/engine/corpus-knowledge.test.ts`
 
 **Interfaces:**
-- Consumes: indexer `passedCount`/`totalCount` (or payload fields on corpus inspect)
-- Produces: `gradedScores` entries where `totalCount > 0` → `passedCount / totalCount`; omit/null when `totalCount === 0` (Lever A convention)
+- Consumes: schema-checked signed `jinn-repo-verdict.v3` payload plus the evaluation `Task` supplied to `projectEnvelope`
+- Projects: `passedCount`, `totalCount`, and
+  `task.spec.restorationRequestId` as `metadata.solutionRequestId`
+- Joins: verdict `metadata.solutionRequestId` to solution projection `requestId`
+- Produces: solution `RecordSummary.scoreMetadata` with counts and
+  `gradedScore` only when `totalCount > 0`
 
-- [ ] **Step 1: Write failing tests for the chosen path**
-
-Example for GraphQL path (if Q3 restores it):
-
-```typescript
-it('includes gradedScores for jinn-repo attempts when totalCount > 0', async () => {
-  // mock GQL rows: one jinn-repo verdict meta passedCount=18 totalCount=20
-  const rows = await api.getCodeDigestRewards({ codeDigests: ['0xdigest'] });
-  expect(rows[0].gradedScores).toContain(0.9);
-});
-
-it('omits graded entry when totalCount is 0 (pre-v3 / short-circuit)', async () => {
-  // mock totalCount 0 → gradedScores does not invent 0 from absent
-});
-```
-
-Example for corpus-local path:
+- [ ] **Step 1: Write failing projection and association tests**
 
 ```typescript
-it('exposes passedCount/totalCount on scoreMetadata for a jinn-repo verdict record', () => {
-  // given a projected verdict envelope / meta with counts
-  // expect scoreMetadata.passedCount === 18 && scoreMetadata.totalCount === 20
+it('projects counts and the restored solution request id from a signed verdict', () => {
+  const projection = projectEnvelope(verdictEnvelopeV3, { task: evaluationTask });
+  expect(projection.metadata).toMatchObject({
+    passedCount: 18,
+    totalCount: 20,
+    solutionRequestId: 'solution-request-1',
+  });
+});
+
+it('overlays a matching verdict grade on the solution summary', () => {
+  const scores = associateJinnRepoVerdicts([solutionProjection], [verdictProjection]);
+  expect(scores.get(solutionProjection.envelopeId)).toEqual({
+    passedCount: 18,
+    totalCount: 20,
+    gradedScore: 0.9,
+  });
+});
+
+it('does not associate mismatched, pre-v3, partial, or zero-total verdicts', () => {
+  // Assert no invented grade and no cross-request leakage.
 });
 ```
 
 - [ ] **Step 2: Run to verify fail**
 
-Run the new/extended discovery or corpus test file.
+Run the new/extended projection and association test files.
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the minimal read path**
+- [ ] **Step 3: Implement the pure bounded association**
 
-Derive score only when `totalCount > 0`. Do not treat column `0/0` as a real grade. Keep `onchain.ts` stub returning `gradedScores: []` unless a floor path is intentionally added (out of scope unless already patterned for Lever A).
+In `projectEnvelope`, only for jinn-repo verdicts:
 
-Wire corpus association: consumers join
-`verdictEnvelopeMeta.solutionRequestId === attemptEnvelopeMeta.requestId`
-(already the #1433 contract once F3 populates the field). Document in a short code comment at the read site — no new canonical doc required for #1976.
+- copy payload counts only when both are valid integers and
+  `0 <= passedCount <= totalCount`;
+- read the supplied evaluation task's `spec.restorationRequestId` and project it
+  as `metadata.solutionRequestId`;
+- do not use indexer count columns or `CodeDigestRewardRow` as the value source.
 
-- [ ] **Step 4: Run tests**
+In the pure helper:
 
-Run the F4 discovery/corpus tests + `cd client && yarn typecheck` if types change.
+- accept only jinn-repo `role=verdict` projections;
+- require both valid counts, `totalCount > 0`, and a non-empty
+  `metadata.solutionRequestId`;
+- join to a jinn-repo `role=solution` projection whose `requestId` matches;
+- bound queries/result processing to the caller's search limit;
+- define deterministic handling for duplicate verdicts (newest `generatedAt`,
+  then stable `envelopeId` tie-break).
+
+In `handleSearchRecords`, when returning jinn-repo solution projections, query
+the local store for bounded matching verdict projections, call the helper, and
+merge the result into the solution's `scoreMetadata`. Do not mutate or infer a
+grade for network rows until their signed envelopes have been fetched and
+projected locally. `loadCorpusKnowledge` should keep passing the enriched field
+through verbatim.
+
+- [ ] **Step 4: Add end-to-end read-seam regressions**
+
+Assert:
+
+- `search_records` returns the grade on the matching solution, not as a
+  standalone verdict record;
+- `loadCorpusKnowledge` preserves it;
+- mismatched request IDs, missing counts, zero totals, and mixed v1/v2 records
+  remain ungraded;
+- `HttpDiscoveryAPI.getCodeDigestRewards` continues returning no shape-parsed
+  reward evidence.
+
+- [ ] **Step 5: Run tests**
+
+Run the F4 corpus/search/corpus-knowledge tests + `cd client && yarn typecheck`.
 Expected: PASS. Design hop assertion 7.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add client/src/discovery/ client/src/mcp/ client/src/harnesses/engine/ client/test/
+git add client/src/corpus/ client/src/mcp/search-records.ts client/src/harnesses/engine/corpus-knowledge.ts client/test/corpus/ client/test/mcp/ client/test/harnesses/engine/
 git commit -m "$(cat <<'EOF'
-feat(discovery): surface jinn-repo gradedScores for learning consumers
+feat(corpus): associate verified jinn-repo grades with solutions
 
 EOF
 )"
@@ -808,7 +859,11 @@ EOF
 )"
 ```
 
-**F4 success criteria:** learning surfaces see non-null graded scores for v3 counts; pre-v3 / short-circuit degrade honestly; emissions boundary still green (hop assertion 8).
+**F4 success criteria:** learning surfaces see a grade only after a valid signed
+v3 verdict projection joins the matching solution request; pre-v3,
+short-circuit, zero-total, and unmatched records degrade honestly; unverified
+HTTP reward projections stay empty; emissions boundary remains green (hop
+assertion 8).
 
 ---
 
@@ -825,7 +880,7 @@ EOF
 | #1976 does not ship F* code | Phase 0 + header callout |
 | Q1–Q3 ratification | Open questions table |
 
-**Placeholder scan:** none intentional — Q3 branches are explicit alternative implementations, not TBDs.
+**Placeholder scan:** none intentional — Q3 is resolved to the corpus-local implementation.
 
 **Type consistency:** `passedCount`/`totalCount` optional on payload; indexer columns int default 0; discovery derives float only when `totalCount > 0`.
 
