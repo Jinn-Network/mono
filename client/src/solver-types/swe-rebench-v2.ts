@@ -643,6 +643,8 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
         }
       }
     }
+    // Best-effort status only. Publication parse failures are already surfaced
+    // by resolvePublishedVettedPool above as the generator's lastError.
     await refreshPoolStale().catch(() => {});
     if (publishedPool === null) {
       lastPollSummary = {
@@ -944,8 +946,8 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
     return signed.length > 0 ? signed : null;
   };
 
-  // Construction-time lazy refresh so a cold getState() (before the first
-  // tick) can already report a stale on-disk publication.
+  // Construction-time lazy refresh lets a subsequent cold getState() report a
+  // stale on-disk publication without making the synchronous state API async.
   void refreshPoolStale().catch(() => {});
 
   return Object.assign(tick, {

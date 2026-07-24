@@ -513,6 +513,29 @@ describe('GeneratorPanel — vetted-pool stale notice (#796)', () => {
     ).toBeNull();
   });
 
+  it('keeps the stale and re-published notices independently renderable when both states are present', () => {
+    render(
+      <GeneratorPanel
+        record={buildSweRebenchRecord({
+          generatorState: {
+            poolPublicationStale: true,
+            poolPublicationUpdatedAt: '2026-05-25T00:00:00.000Z',
+            poolPublicationPriorSize: 20,
+            poolPublicationCurrentSize: 112,
+          },
+        })}
+        onSave={async () => undefined}
+      />,
+    );
+
+    expect(
+      screen.getByTestId('launcher-launched-generator-pool-stale'),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId('launcher-launched-generator-pool-republished'),
+    ).toBeTruthy();
+  });
+
   it('shows neither notice for the no-publication case (distinct from stale)', () => {
     render(
       <GeneratorPanel

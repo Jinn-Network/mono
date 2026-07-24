@@ -921,7 +921,7 @@ function parsePublication(raw: unknown): VettedPoolArtifactPublication {
  * dashboard cannot otherwise distinguish "no publication yet" from "stale
  * publication blocked by version mismatch". Surface that distinction with
  * this helper so downstream callers can render a one-line "re-publish
- * needed" hint (#493).
+ * needed" hint (#796).
  */
 export function isPublicationStale(
   publication: VettedPoolArtifactPublication | null,
