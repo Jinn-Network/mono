@@ -21,20 +21,24 @@
 
 `codeDigest` is already a network-legible, one-way fingerprint of `implStateDir`, stamped on every delivery via `ExecutionPayloadV2` and indexed for per-digest pass-rate (`get_codedigest_reward`, explorer boards). **Contents behind a high-performing digest are not retrievable today** — the delivery envelope carries no impl-state CID, and the designed `HarnessCheckpoint` publish path is scaffolded but not a real upload (`pinToIpfs({ kind: 'implStateDir', data: '' })`).
 
-**Recommendation:** do **not** auto-upload impl-state on every train delivery. Complete the existing voluntary **HarnessCheckpoint** path (opt-in, frozen-preferred), make published state discoverable **by `codeDigest`**, and require consumers to re-run `hashImplStateDir` with the same ignore list. Before that is safe, **exclude `secrets/` (and equivalent sensitive bags) from the freeze hash** so publishable bytes can match the advertised digest without leaking credentials.
+**Recommendation:** do **not** auto-upload impl-state on every train delivery. Complete the existing voluntary **HarnessCheckpoint** path (opt-in and frozen-only in v0), make published state discoverable **by `codeDigest`**, and require consumers to re-run `hashImplStateDir` with the manifest's named hash profile. Before that is safe, the learner's `learner-public.v1` profile must exclude `.git/`, `secrets/`, `transcripts/`, and `operator-requests/` from both the freeze identity and the published package so publishable bytes match the advertised digest without leaking credentials or operator-private history.
 
 Smallest viable path is a thin amendment to the existing §7 design + 2–3 follow-up `feat` Issues — not a greenfield artifact type, and not a new DR unless the hash-ignore change is treated as a trust-stack amendment (recommended: short DR-amend note under DR-2026-05-06-d).
 
 ### Human ratification (2026-07-24)
 
-The recommendation is accepted as written:
+The recommendation is accepted with the following implementation defaults:
 
 - publication is voluntary through `HarnessCheckpoint`, never automatic on every train delivery;
-- secret bags must be outside the canonical hash before real publication can ship;
-- consumers verify the materialized tree against the advertised digest using the same versioned ignore policy;
+- v0 publication refuses train-mode state and has no override;
+- the named `learner-public.v1` profile is mandatory for learner checkpoints; callers cannot supply an ad hoc ignore list;
+- `.git/`, `secrets/`, `transcripts/`, and `operator-requests/` are outside both the learner freeze identity and package, while every other supported learner top-level path is explicitly classified;
+- unknown top-level paths fail closed before hashing or pinning, with no v0 override;
+- consumers verify the materialized tree against the advertised digest using the manifest's supported profile;
+- the immutable, signed, pinned `harness.checkpoint.v2` manifest contains no transaction receipt; its CID is anchored on-chain and the receipt is derived from the event, avoiding a content-addressing cycle;
 - v0 is free and attributed; automatic delivery sharing and x402 pricing remain deferred.
 
-The ordered implementation train is filed as [#2117](https://github.com/Jinn-Network/mono/issues/2117) (canonical §7 / DR-d amendment) → [#2118](https://github.com/Jinn-Network/mono/issues/2118) (secrets-out-of-hash parity) → [#2119](https://github.com/Jinn-Network/mono/issues/2119) (real publish/install) → [#2120](https://github.com/Jinn-Network/mono/issues/2120) (digest discovery/MCP). The optional on-delivery F4 remains deliberately unfiled until F1–F3 have soak evidence.
+The ordered implementation train is filed as [#2117](https://github.com/Jinn-Network/mono/issues/2117) (canonical §7 / DR-d amendment) → [#2118](https://github.com/Jinn-Network/mono/issues/2118) (`learner-public.v1` parity) → [#2119](https://github.com/Jinn-Network/mono/issues/2119) (real publish/install) → [#2120](https://github.com/Jinn-Network/mono/issues/2120) (digest discovery/MCP). The optional on-delivery F4 remains deliberately unfiled until F1–F3 have soak evidence.
 
 ---
 
@@ -57,7 +61,7 @@ Today the answer is no, except the incomplete checkpoint CLI design that was mea
 | `hashImplStateDir` + freeze-fence | Shipped | Integrity primitive consumers must re-run |
 | `ExecutionPayloadV2.codeDigest` | Shipped | Network advertisement of digest (no source CID) |
 | Envelope `executor.source` (build bundle) | Schema exists | Pattern for “CID + sha256 + measurement” — for **client/harness source**, not operator `implStateDir` |
-| `HarnessCheckpointManifest` (`implStateDirCid` + `codeDigest` + `parentCheckpointCid`) | Schema + CLI scaffold | **Intended** forkable self-state artifact |
+| `HarnessCheckpointManifest` (`implStateDirCid` + `codeDigest` + `parentCheckpointCid`) | v1 schema + CLI scaffold | **Intended** forkable self-state artifact; the current writer pins `registry: null` but returns a different registry-populated object, so the pinned bytes do not pass the current schema |
 | Indexer `harness_checkpoint` (indexed `codeDigest`, `implStateDirCid`) | Schema live; enrichment path designed | Digest → CID join surface |
 | `jinn checkpoint publish` / `install` | Scaffold; **impl-state pin is empty-buffer stub** | Gap between design and usable sharing |
 | Capture `harness-bundle.v1` | Specced for captures | Sibling pattern: opt-in bundle whose sha256 **is** `codeDigest` — different tree (resolved harness config), useful prior art for allowlists/redaction |
@@ -96,7 +100,7 @@ Three plausible ways to make contents retrievable by `codeDigest`. They are not 
 
 ### Option B — Complete voluntary HarnessCheckpoint; discover by codeDigest (recommended)
 
-**Idea:** Finish what §7 already specifies: operator runs `jinn checkpoint publish` (frozen window preferred) → pin real impl-state tree → sign manifest `{implStateDirCid, codeDigest, parentCheckpointCid, …}` → `IdentityRegistry.setMetadata(harness.checkpoint:<cid>)`. Indexer enrichment already has columns for digest and CID. Discovery = query checkpoints (and/or MCP) **by codeDigest**.
+**Idea:** Finish what §7 already specifies: operator runs `jinn checkpoint publish` from a frozen learner state → pin the real public impl-state tree → sign and pin an immutable `harness.checkpoint.v2` manifest `{implStateDirCid, codeDigest, hashProfile, parentCheckpointCid, …}` → `IdentityRegistry.setMetadata(harness.checkpoint:<cid>)`. The manifest does not contain the transaction receipt: the CID selects immutable bytes, while the indexer derives `txHash`, block, and publisher from the anchoring event. Indexer enrichment already has columns for digest and CID. Discovery = query checkpoints (and/or MCP) **by codeDigest**.
 
 | Pros | Cons |
 |---|---|
@@ -111,6 +115,27 @@ Three plausible ways to make contents retrievable by `codeDigest`. They are not 
 - **B2 (later):** Also mint a corpus-visible projection record so `search_records` ranks checkpoints alongside donations — only if retrieval ranking needs them in the same index.
 
 **Verdict:** **smallest viable path.** Closes #945’s retrieval gap for digests operators care to share, without taxing the delivery hot path.
+
+#### Canonical checkpoint and anchor contract
+
+The current v1 scaffold cannot make its returned object content-addressed: it
+pins a manifest with `registry: null`, uses that CID in the metadata key, then
+returns a different object containing the transaction receipt. v0 real
+publication therefore writes a new wire version with these invariants:
+
+1. `harness.checkpoint.v2` is the immutable signed and pinned artifact. It has
+   no `registry.txHash`, `registry.blockNumber`, or CID-derived metadata key.
+2. The signature covers the canonical v2 core, including `hashProfile`.
+3. `checkpointCid` is the CID of exactly the bytes an installer fetches and
+   parses.
+4. `IdentityRegistry.setMetadata("harness.checkpoint:<checkpointCid>",
+   checkpointCid)` anchors that CID.
+5. The CLI may return an `anchorReceipt` beside the manifest. It is local
+   response metadata, not part of the signed/pinned manifest. The indexer
+   projects the authoritative transaction hash and block from the event.
+6. Readers may continue to parse already-produced valid v1 objects for
+   compatibility, but new writers emit v2 and install/discovery never
+   synthesize a registry-populated manifest different from the CID bytes.
 
 ### Option C — Sidecar registry / MCP-only `fetch_impl_state` without checkpoint manifests
 
@@ -146,12 +171,17 @@ Three plausible ways to make contents retrievable by `codeDigest`. They are not 
 A consumer who fetches bytes for digest `D` must:
 
 1. Materialise a directory tree (IPFS DAG → local dir; preserve relative paths).
-2. Call `hashImplStateDir(dir, { ignoreRelPaths })` with the **same ignore set** the publisher used when advertising `D`.
-3. Accept iff `sha256:${result} === D` (or raw 32-byte form matches on-chain).
+2. Resolve `manifest.hashProfile.id` from the local, versioned profile registry
+   and require its canonical `ignoreRelPaths` to exactly equal the manifest
+   copy. Unknown profile ids or mismatched lists are rejected; there is no
+   inferred/default policy for v2.
+3. Validate every top-level path against that profile before hashing.
+4. Call `hashImplStateDir(dir, { ignoreRelPaths: profile.ignoreRelPaths })`.
+5. Accept iff `sha256:${result} === D` (or raw 32-byte form matches on-chain).
 
 This is exactly Layer 4 of the trust stack (DR-2026-05-06-d): source publication enables independent re-derivation. Cross-operator forks running the same checkpoint in frozen mode produce matching digests (Layer 3).
 
-### 3.2 Ignore-list parity is load-bearing
+### 3.2 The named hash/package profile is load-bearing
 
 Today the learner harness sets `freezeStateHashIgnore = ['.git']` so git metadata does not break commit↔digest mapping for L1 revert (#764). **`secrets/` is not ignored.** Per `spec/2026-05-executor-trust-boundary.md`, per-impl secrets live under `implStateDir/secrets/`.
 
@@ -160,12 +190,37 @@ Consequence:
 - If secrets are present and hashed into `D`, a correct publish of `D` **must include secret bytes** → unacceptable leak.
 - If publish strips secrets, re-hash **cannot** equal `D` → integrity fails.
 
-**Prerequisite for any sharing feat:** extend the freeze ignore set (protocol default and/or harness declare) to exclude at least:
+The learner also deliberately migrates operator-private session material to
+`implStateDir/transcripts/` and `implStateDir/operator-requests/`. Those paths
+have the same contradiction as `secrets/`: including them leaks private data;
+dropping them only while packaging breaks digest parity.
 
-- `secrets/` (and any harness-declared secret bags)
-- ephemeral runtime caches that must not define identity (if any remain under `implStateDir`)
+**Prerequisite for any sharing feat:** introduce a single registered
+`learner-public.v1` hash/package profile:
 
-Publish packaging must pin **exactly the hashed tree** (apply the same ignores when walking for tar/CAR). Document the ignore set in the checkpoint manifest (new optional field `hashIgnoreRelPaths: string[]`, defaulting to publisher harness ignores) so verifiers do not guess.
+```json
+{
+  "id": "learner-public.v1",
+  "ignoreRelPaths": [".git", "operator-requests", "secrets", "transcripts"]
+}
+```
+
+The array order above is canonical. It uses the existing exact-path-or-directory-
+prefix semantics. The profile, not a caller-supplied raw array, feeds the
+learner freeze fence, commit-to-digest helper, checkpoint hash, package walker,
+and installer. `harness.checkpoint.v2` requires
+`hashProfile: { id, ignoreRelPaths }`; there is no optional field and no
+publisher-harness default for v2. Consumers reject unknown ids or a manifest
+list that differs from their registered copy. A future policy is a new id, not
+an in-place mutation.
+
+Other harnesses do not inherit the learner profile. A real checkpoint writer
+must refuse a harness without its own registered public profile; this train
+ships only the learner profile.
+
+Publish packaging pins **exactly the non-ignored, validated tree**. The hasher
+and packager share the profile resolver and top-level classifier so neither can
+silently gain a different default.
 
 ### 3.3 What not to do
 
@@ -177,29 +232,51 @@ Publish packaging must pin **exactly the hashed tree** (apply the same ignores w
 
 ## 4. Safety / redaction (acceptance §3)
 
-### 4.1 Must strip or never hash
+### 4.1 Exhaustive learner-public.v1 top-level classification
 
-| Class | Rule |
-|---|---|
-| `secrets/` and credential bags | **Never hash, never publish** (ignore-list) |
-| Absolute home paths / usernames in skill text | Run public-knowledge scrub (trajectory scrub redesign lineage: #1784/#1959 / 2026-07-22 scrub spec) before pin; fail closed on reject-class hits |
-| Train-mode working residue | Prefer publish from **frozen** windows only; train `workingDir` is already out of scope (not in `implStateDir`) |
-| Operator-private notes that are not skills | Allowlist publish roots: e.g. `skills/`, `hooks/`, `configs/`, `tunables/`, `tools/`, `agents/` (align with harness-as-policy tiers 1–5). Refuse or quarantine unknown top-level dirs until classified |
+| Top-level path | Class | Hash/package rule |
+|---|---|---|
+| `.git/` | local repository metadata | Ignore and exclude |
+| `secrets/` | credentials | Ignore and exclude |
+| `transcripts/` | operator-private reasoning history | Ignore and exclude |
+| `operator-requests/` | operator-private access requests | Ignore and exclude |
+| `.archive/` | archived durable learner state | Hash, scrub, and package |
+| `skills/`, `hooks/`, `configs/`, `tools/` | executable/durable capability state written by Improve | Hash, scrub, and package |
+| `plans/`, `strategies/`, `notes/`, `runs/`, `patterns/`, `tests/` | durable learner memory referenced by the current learn loop | Hash, scrub, and package |
+| `policy.json` | learner policy and revert thresholds | Hash, scrub, and package |
+| `tunables/`, `agents/` | reserved harness-policy capability roots | Hash, scrub, and package |
+| Anything else | unclassified | Refuse before digest computation or pinning; no v0 override |
+
+This table is the complete `learner-public.v1` root policy. Empty allowed
+directories are harmless; regular files are allowed only where the table names
+a file. Symlinks and special files fail closed rather than inheriting the
+hasher's current skip behavior. Adding a root requires a new reviewed profile
+version.
+
+The fail-closed public-knowledge scrub runs over every packaged file before
+pinning and rejects credential patterns, absolute home paths/usernames, and
+other reject-class findings. It does not redact in place: mutation would change
+the advertised digest. The operator must remove or relocate the finding and
+produce a new digest.
 
 ### 4.2 Opt-in vs allowlist
 
 **v0 posture (recommended):**
 
 1. **Opt-in publish** — no automatic pin on delivery.
-2. **Directory allowlist** inside the hashed tree (skills/hooks/configs/…) — deny unknown paths at publish time.
-3. **Frozen-preferred** — CLI warns or refuses `mode === 'train'` unless `--i-know-this-mutates` (train digests are short-lived and harder to attribute).
-4. **Scrub gate** — same fail-closed spirit as corpus publish; attach a redaction manifest hash on the checkpoint for Legibility.
+2. **One named profile** — no raw ignore-list or allowlist flags.
+3. **Fail closed** — unknown roots, special files, profile mismatches, and scrub findings stop before pinning; v0 has no bypass flag.
+4. **Frozen-only** — CLI refuses `mode === 'train'`; v0 has no mutation-acknowledgement override.
+5. **Scrub gate** — same fail-closed spirit as corpus publish; attach a redaction manifest hash on the checkpoint for Legibility.
 
 Capture `harness-bundle` prior art (`allowedDirectories` + coarse enable toggle) is the right UX shape; reuse vocabulary where possible so operators learn one mental model.
 
 ### 4.3 Train-mode material
 
-Train envelopes already advertise unstable digests. Sharing train state is allowed in principle (Permissionless) but is a poor default: high churn, harder peer validation, easier accidental secret inclusion. Keep train share behind explicit flags; market the frozen checkpoint as the Prestige surface.
+Train envelopes already advertise unstable digests. Sharing train state remains
+a possible later protocol version, but v0 publication refuses it
+unconditionally: there is no `--i-know-this-mutates` or warning-only path.
+Frozen checkpoints are the initial Prestige surface.
 
 ---
 
@@ -251,8 +328,10 @@ Risk to watch: a popular weak digest could attract cargo-cult installs. Mitigati
 1. Manifest signature over canonical checkpoint fields.
 2. `publisher.safeAddress` / agent id.
 3. `parentCheckpointCid` nullable.
-4. `codeDigest` + `implStateDirCid` + `hashIgnoreRelPaths`.
-5. On-chain `harness.checkpoint:<cid>` anchor (already designed).
+4. `codeDigest` + `implStateDirCid` + mandatory
+   `hashProfile: { id, ignoreRelPaths }`.
+5. On-chain `harness.checkpoint:<cid>` anchor, whose event supplies the
+   authoritative receipt outside the immutable manifest.
 
 Optional later: link from attempt envelopes that *claim* a digest to the checkpoint CID when one exists (indexer join), so explorers can show “source available.”
 
@@ -269,10 +348,19 @@ Optional later: link from attempt envelopes that *claim* a digest to the checkpo
 
 ### 7.1 Smallest viable path
 
-1. **Hash-ignore prerequisite** — exclude `secrets/` (and document harness `freezeStateHashIgnore` contract) so publishable trees can equal advertised digests.
-2. **Make `jinn checkpoint publish` real** — walk/pin the hashed tree (not `data: ''`); run allowlist + scrub; write `hashIgnoreRelPaths` into manifest; keep `IdentityRegistry.setMetadata` anchor.
-3. **Make `jinn checkpoint install` verify** — fetch → signature check → materialise → `hashImplStateDir` → match `manifest.codeDigest` → stage.
-4. **Digest discovery** — indexer/GraphQL already indexes `harness_checkpoint.codeDigest`; expose MCP `get_checkpoint_by_codedigest` (or extend `inspect_record`) + explorer “source” affordance on digest boards.
+1. **Profile prerequisite** — register `learner-public.v1`, route the learner
+   freeze fence and commit-to-digest helper through it, and exclude all four
+   private/runtime roots from both the digest and package.
+2. **Make `jinn checkpoint publish` real** — frozen-only; validate the complete
+   root policy; scrub; walk/pin the exact public tree; emit the immutable
+   `harness.checkpoint.v2`; anchor its CID; return the receipt separately.
+3. **Make `jinn checkpoint install` verify** — fetch the exact CID bytes →
+   schema/signature check → supported-profile check → materialise → validate
+   roots → `hashImplStateDir` → match `manifest.codeDigest` → stage.
+4. **Digest discovery** — project profile id/list plus the event-derived anchor
+   receipt in `harness_checkpoint`; expose MCP
+   `get_checkpoint_by_codedigest` (or extend `inspect_record`) + explorer
+   “source” affordance on digest boards.
 5. **Do not** extend `ExecutionPayloadV2` or auto-pin on every delivery in v0.
 
 ### 7.2 Spec / DR warrant
@@ -280,7 +368,7 @@ Optional later: link from attempt envelopes that *claim* a digest to the checkpo
 | Artifact | Needed? | Why |
 |---|---|---|
 | New greenfield design spec | **No** | §7 already specifies the artifact |
-| Amend `2026-05-06-agent-harness-solvernet-design.md` §7 | **Yes (light)** | Add hashIgnore field, allowlist, scrub gate, digest-discovery, stub-removal acceptance |
+| Amend `2026-05-06-agent-harness-solvernet-design.md` §7 | **Yes (light)** | Lock v2 manifest/anchor separation, named profile, exhaustive root policy, frozen-only publish, scrub gate, digest-discovery, and stub-removal acceptance |
 | DR amend under DR-2026-05-06-d (trust stack) | **Yes (short)** | Changing default hash ignores is a trust-boundary change; record it |
 | New DR for x402 pricing of checkpoints | **No for v0** | Defer |
 | Follow-up `feat` Issues | **Yes** | See §8 |
@@ -302,13 +390,13 @@ Canonical ordering, acceptance criteria, dependencies, and verification live in 
 
 Summary (Issue Types match handbook shapes):
 
-1. **[#2117](https://github.com/Jinn-Network/mono/issues/2117) (`docs`)** — short DR-amend under DR-2026-05-06-d + light §7 amend (hashIgnore, allowlist, scrub, digest discovery).
-2. **[#2118](https://github.com/Jinn-Network/mono/issues/2118) — `feat(client): exclude secrets from freeze codeDigest + document hashIgnore contract`**
-   Acceptance: `secrets/` never affects `hashImplStateDir` for learner (and default policy for other harnesses); tests for ignore parity; migration note for operators whose historical digests included secrets.
+1. **[#2117](https://github.com/Jinn-Network/mono/issues/2117) (`docs`)** — short DR-amend under DR-2026-05-06-d + light §7 amend (v2 immutable manifest/anchor split, named profile, exhaustive roots, frozen-only publish, scrub, digest discovery).
+2. **[#2118](https://github.com/Jinn-Network/mono/issues/2118) — `feat(client): lock learner-public.v1 hash/package profile`**
+   Acceptance: the four ignored roots never affect learner digests; allowed/unknown roots are classified; freeze, revert, package, and install share one immutable profile resolver; migration note records the digest break.
 3. **[#2119](https://github.com/Jinn-Network/mono/issues/2119) — `feat(client): real HarnessCheckpoint publish/install with re-hash verify`**
-   Acceptance: publish pins actual tree; install refuses digest mismatch; allowlist + scrub gate; replaces empty-buffer stub; unit + one integration test with local IPFS mock.
+   Acceptance: frozen-only publish pins the actual tree and exact v2 manifest bytes; anchor receipt is separate; install refuses profile/digest mismatch; root/scrub gates fail closed; unit + one integration test with local IPFS mock.
 4. **[#2120](https://github.com/Jinn-Network/mono/issues/2120) — `feat(discovery/mcp): resolve impl-state by codeDigest via harness_checkpoint`**
-   Acceptance: given `sha256:<hex>`, return checkpoint CID + `implStateDirCid` when enriched row exists; MCP tool usable from consolidator/Improve; graceful empty when unpublished.
+   Acceptance: given `sha256:<hex>`, return checkpoint CID, impl-state CID, profile id/list, and event-derived anchor receipt when enriched row exists; MCP tool usable from consolidator/Improve; graceful empty when unpublished.
 
 Optional later: `feat` opt-in `implStateShare.onDelivery: frozen` (Option A) once (2)–(4) are stable.
 
@@ -320,7 +408,7 @@ Optional later: `feat` opt-in `implStateShare.onDelivery: frozen` (Option A) onc
 |---|---|---|
 | Mechanism options (snapshot/CID-in-envelope vs sidecar vs MCP; corpus fit) | §2 | Yes — A / B / C + matrix; B recommended |
 | Integrity (re-run `hashImplStateDir`) | §3 | Yes — verify contract + ignore-list parity prerequisite |
-| Safety / redaction (secrets, paths, train; opt-in vs allowlist) | §4 | Yes — never-hash secrets; allowlist; frozen-preferred; scrub gate |
+| Safety / redaction (secrets, paths, train; opt-in vs allowlist) | §4 | Yes — exhaustive learner root classification; four private/runtime roots excluded; unknown/scrub/special files fail closed; frozen-only |
 | Economics (free / attributed / x402; M2 / shared digest) | §5 | Yes — free+attributed v0; x402 later; federated L1 densification |
 | Trust / lineage (import vs revert-check; provenance) | §6 | Yes — fork model; parentCheckpointCid; install verify |
 | Recommendation (smallest path + spec/DR + follow-up feat) | §7–§8 + Stage-2 plan | Yes — complete HarnessCheckpoint; amend §7 + short DR-d note; ordered Issues |
