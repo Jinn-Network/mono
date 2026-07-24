@@ -10,9 +10,9 @@ import type {
 import { InMemoryEvidenceRepository } from "@jinn-network/evidence-repository/testing";
 import { describe, expect, test } from "vitest";
 
+import { verifyExecutionProducerContractObservation } from "./producer-contract-verifier.js";
 import {
   describeExecutionProducerContract,
-  verifyExecutionProducerContractObservation,
   type CompletedExecutionProducerContractObservation,
   type ExecutionProducerContractDriver,
   type ExecutionProducerContractFinalizedObservation,
@@ -26,6 +26,8 @@ import type {
 
 const fixtureUrl = (name: string) =>
   new URL(`../fixtures/producer-contract-v1/${name}`, import.meta.url);
+
+const finalizedAt = "2026-07-24T10:00:02Z";
 
 const fixtureDigests = {
   task: "sha256:e45052641fe323b2d3af30b66faedfa5639fbaefc5f98bcf30c6d39181ba24ae",
@@ -69,6 +71,30 @@ const scenarioFixtures = {
   }
 >;
 
+async function fixtureRecordBytes(name: string): Promise<Uint8Array> {
+  const document = JSON.parse(
+    await readFile(fixtureUrl(name), "utf8"),
+  ) as {
+    "@graph": Array<Record<string, unknown> & { "@id": string }>;
+  };
+  const root = document["@graph"].find((entity) => entity["@id"] === "./");
+  if (root === undefined) {
+    throw new Error(`Fixture ${name} is missing its Root Dataset`);
+  }
+  root.datePublished = finalizedAt;
+  root["prov:wasGeneratedBy"] = { "@id": "#capture" };
+  document["@graph"].push({
+    "@id": "#capture",
+    "@type": "prov:Activity",
+    name: "Execution Recorder capture and sealing",
+    endTime: finalizedAt,
+    agent: {
+      "@id": "urn:uuid:99999999-9999-4999-8999-999999999999",
+    },
+  });
+  return new TextEncoder().encode(`${JSON.stringify(document, null, 2)}\n`);
+}
+
 async function literalFixtureDriver(): Promise<ExecutionProducerContractDriver> {
   const taskBytes = await readFile(fixtureUrl("task.md"));
   const traceBytes = await readFile(fixtureUrl("trace.jsonl"));
@@ -96,7 +122,7 @@ async function literalFixtureDriver(): Promise<ExecutionProducerContractDriver> 
           ...(fixture.result ? [resultBytes] : []),
         ].map((bytes) => repository.putArtifact(bytes)),
       );
-      const recordBytes = await readFile(fixtureUrl(fixture.record));
+      const recordBytes = await fixtureRecordBytes(fixture.record);
       const recordReceipt = await repository.putRecord(
         "execution-evidence",
         recordBytes,
@@ -107,7 +133,7 @@ async function literalFixtureDriver(): Promise<ExecutionProducerContractDriver> 
         artifacts: artifactReceipts
           .map(({ reference }) => reference)
           .sort((left, right) => left.digest.localeCompare(right.digest)),
-        finalizedAt: "2026-07-24T10:00:02Z",
+        finalizedAt,
       };
       const common = {
         scenario,
@@ -150,7 +176,7 @@ async function literalFixtureDriver(): Promise<ExecutionProducerContractDriver> 
       interruptedArtifactReferences = artifactReceipts.map(
         ({ reference }) => reference,
       ).sort((left, right) => left.digest.localeCompare(right.digest));
-      interruptedRecordBytes = await readFile(fixtureUrl(fixture.record));
+      interruptedRecordBytes = await fixtureRecordBytes(fixture.record);
 
       return interruptFinalization();
     },
@@ -171,7 +197,7 @@ async function literalFixtureDriver(): Promise<ExecutionProducerContractDriver> 
         executionId: fixture.executionId,
         record: recordReceipt.reference,
         artifacts: interruptedArtifactReferences,
-        finalizedAt: "2026-07-24T10:00:02Z",
+        finalizedAt,
       };
 
       return {
@@ -236,6 +262,38 @@ function withoutReceiptArtifact(
       artifacts: observation.receipt.artifacts.filter(
         (reference) => reference.digest !== digest,
       ),
+    },
+  };
+}
+
+async function withMutatedRecord(
+  observation: CompletedExecutionProducerContractObservation,
+  mutate: (
+    graph: Array<Record<string, unknown> & { "@id": string }>,
+  ) => void,
+): Promise<CompletedExecutionProducerContractObservation> {
+  const bytes = await observation.repository.getRecord(
+    observation.receipt.record,
+  );
+  if (bytes === null) {
+    throw new Error("Completed observation record is missing");
+  }
+  const document = JSON.parse(new TextDecoder().decode(bytes)) as {
+    "@graph": Array<Record<string, unknown> & { "@id": string }>;
+  };
+  mutate(document["@graph"]);
+  const mutatedBytes = new TextEncoder().encode(
+    `${JSON.stringify(document, null, 2)}\n`,
+  );
+  const record = await observation.repository.putRecord(
+    "execution-evidence",
+    mutatedBytes,
+  );
+  return {
+    ...observation,
+    receipt: {
+      ...observation.receipt,
+      record: record.reference,
     },
   };
 }
@@ -315,6 +373,62 @@ describe("producer contract integrity failures", () => {
       ).rejects.toThrow(
         "record reference does not match the retrieved exact bytes",
       );
+    } finally {
+      await observation.cleanup?.();
+    }
+  });
+
+  test("rejects a receipt finalization time not bound to its record", async () => {
+    const observation = await completedObservation();
+    try {
+      await expect(
+        verifyExecutionProducerContractObservation("completed", {
+          ...observation,
+          receipt: {
+            ...observation.receipt,
+            finalizedAt: "2026-07-24T10:00:03Z",
+          },
+        }),
+      ).rejects.toThrow(
+        "receipt finalization time does not match the evidence metadata",
+      );
+    } finally {
+      await observation.cleanup?.();
+    }
+  });
+
+  test("rejects a capture completion time not bound to its receipt", async () => {
+    const observation = await completedObservation();
+    const mutated = await withMutatedRecord(observation, (graph) => {
+      const capture = graph.find((entity) => entity["@id"] === "#capture");
+      if (capture === undefined) {
+        throw new Error("Completed observation capture Activity is missing");
+      }
+      capture.endTime = "2026-07-24T10:00:03Z";
+    });
+    try {
+      await expect(
+        verifyExecutionProducerContractObservation("completed", mutated),
+      ).rejects.toThrow(
+        "receipt finalization time does not match the capture completion time",
+      );
+    } finally {
+      await observation.cleanup?.();
+    }
+  });
+
+  test("rejects a non-RFC-3339 receipt finalization time", async () => {
+    const observation = await completedObservation();
+    try {
+      await expect(
+        verifyExecutionProducerContractObservation("completed", {
+          ...observation,
+          receipt: {
+            ...observation.receipt,
+            finalizedAt: "2026-02-30T10:00:02Z",
+          },
+        }),
+      ).rejects.toThrow("receipt finalization time is not strict RFC 3339");
     } finally {
       await observation.cleanup?.();
     }
