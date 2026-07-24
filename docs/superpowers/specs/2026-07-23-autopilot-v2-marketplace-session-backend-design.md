@@ -792,8 +792,9 @@ In `marketplace` mode:
 - unsupported workflow/result versions enter Human;
 - loss of marketplace connectivity degrades capacity rather than selecting a
   local fallback; and
-- the configured SolverNet, launcher, indexer/gateway, receipt authors, and
-  deadlines must pass preflight before new work is claimed.
+- the configured SolverNet, creator wallet, network/indexer/gateway
+  connectivity, receipt authors, and deadlines must pass preflight before new
+  work is claimed. No client-side launcher or daemon is part of this flow.
 
 ### 13.2 V1 fleet policy
 
