@@ -19,8 +19,9 @@
 
 import { copyFileSync, mkdtempSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { rm } from 'node:fs/promises';
 import { createEvidenceAdapter } from '@jinn-network/core';
 import type { ContributionCandidateV1, EpisodeV1 } from '@jinn-network/plugin';
@@ -39,8 +40,9 @@ import {
 } from '../src/solver-types/swe-rebench-v2.js';
 import type { PoolTask } from '../src/solver-types/_swe-rebench-v2-pool.js';
 import {
-  readEnabledState,
   defaultSweRebenchV2EvaluatorImplStateDir,
+  inspectCurrentSweRebenchV2EvaluatorEnableContract,
+  type CurrentSweRebenchV2EvaluatorEnableContract,
 } from '../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js';
 import { HttpHfFetcher } from '../src/harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 import { PythonEvalRunner } from '../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
@@ -65,6 +67,15 @@ function requireDocker(): void {
   const error = dockerPreflightError((args, options) =>
     spawnSync('docker', args, options));
   if (error) fail(error);
+}
+
+export function requireCurrentEvaluatorEnableContract(
+  contract: CurrentSweRebenchV2EvaluatorEnableContract,
+): string {
+  if (!contract.ok) {
+    throw new Error(`${contract.reason}. ${contract.nextStep}`);
+  }
+  return contract.upstreamRepoDir;
 }
 
 function parseMode(raw: string): SessionEchoLiveMode {
@@ -136,9 +147,13 @@ async function main(): Promise<void> {
   const mode = parseMode(MODE_RAW);
 
   const implStateDir = defaultSweRebenchV2EvaluatorImplStateDir();
-  const enabled = readEnabledState(implStateDir);
-  if (!enabled?.upstreamRepoDir || !existsSync(enabled.upstreamRepoDir)) {
-    fail('swe-rebench-v2 evaluator not enabled — run `jinn harnesses enable swe-rebench-v2-evaluator`');
+  let upstreamRepoDir: string;
+  try {
+    upstreamRepoDir = requireCurrentEvaluatorEnableContract(
+      inspectCurrentSweRebenchV2EvaluatorEnableContract(implStateDir),
+    );
+  } catch (err) {
+    fail(err instanceof Error ? err.message : String(err));
   }
 
   const operatorStateDir = process.env.JINN_SWE_REBENCH_V2_STATE_DIR ?? defaultStateDir();
@@ -219,7 +234,7 @@ async function main(): Promise<void> {
   const mintedStore = getDefaultMintedPoolStore(workDir);
 
   const config = loadConfig();
-  const runner = new PythonEvalRunner({ upstreamRepoDir: enabled.upstreamRepoDir });
+  const runner = new PythonEvalRunner({ upstreamRepoDir });
 
   console.log('[session-echo-live] fixture', JSON.stringify({
     mode,
@@ -243,7 +258,7 @@ async function main(): Promise<void> {
       mintedStore,
       hfFetcher,
       runner,
-      upstreamRepoDir: enabled.upstreamRepoDir,
+      upstreamRepoDir,
       publicRepoChecker: createGitHubPublicRepoChecker({ token: process.env.GITHUB_TOKEN }),
       publish: false,
       mineableStore,
@@ -291,7 +306,9 @@ async function main(): Promise<void> {
   await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-main().catch((err) => {
-  console.error('[session-echo-live] error:', err);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().catch((err) => {
+    console.error('[session-echo-live] error:', err);
+    process.exit(1);
+  });
+}

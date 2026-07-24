@@ -76,7 +76,11 @@ about 12.6 GB of transient use.
 - Docker daemon (`docker info`)
 - The Docker preflight is bounded to 20 seconds; an unresponsive daemon fails
   closed instead of leaving the verifier hung
-- `jinn harnesses enable swe-rebench-v2-evaluator`
+- `jinn harnesses enable swe-rebench-v2-evaluator`. The verifier requires the
+  current v2 enable contract: managed checkout path, pinned upstream metadata,
+  current patch-bundle digest, and trusted-parser binding. A legacy or stale
+  marker fails closed with the re-enable instruction before constructing the
+  Python evaluator.
 - Validated pool with ≥2 scorable instances for the target repo (default
   `conan-io/conan`) so mismatch can pick a donor gold patch
 - Network for HF row fetch + eval image pull if missing

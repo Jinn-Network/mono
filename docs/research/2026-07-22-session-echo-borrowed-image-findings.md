@@ -124,6 +124,11 @@ No red-flag admit was observed on the runs that reached classification JSON.
   and are re-runnable without reading the PR thread.
 - Docker preflight is bounded to 20 seconds, so an unresponsive daemon fails
   closed rather than hanging the operator session.
+- Evaluator setup is checked against the production current-enable contract
+  without invoking the harness's Docker readiness probe. Legacy v1 markers,
+  stale pinned commit/bundle/parser metadata, unmanaged checkout paths, and
+  missing checkouts fail closed with the re-enable instruction before
+  `PythonEvalRunner` is constructed.
 - The default 20 GB disk floor remains the documented safety requirement.
 
 ---
