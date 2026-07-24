@@ -208,4 +208,31 @@ describe('AiUnitsPauseAlert', () => {
     expect(alert.textContent).not.toMatch(/6h/);
     expect(alert.textContent).toContain('13:00 UTC'); // formatUtc(weekResetsAt)
   });
+
+  it('explains when a weekly pause has no scheduled resume', () => {
+    render(
+      <AiUnitsPauseAlert
+        aiUnits={{
+          credentials: [
+            {
+              credentialId: 'c:k',
+              unitsThisBlock: 0,
+              unitsThisWeek: 0,
+              capPerBlock: 100,
+              capPerWeek: 100,
+              paused: true,
+              pausedWindow: 'week',
+              blockResetsAt: '2026-05-28T18:00:00.000Z',
+              weekResetsAt: null,
+            },
+          ],
+        }}
+      />,
+    );
+
+    const alert = screen.getByTestId('ai-units-pause-alert-c:k');
+    expect(alert.textContent).toContain('cannot resume under the current weekly cap');
+    expect(alert.textContent).toContain('projection or cap configuration changes');
+    expect(alert.textContent).not.toContain('Claims resume at');
+  });
 });

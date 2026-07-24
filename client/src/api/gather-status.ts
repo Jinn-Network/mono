@@ -947,15 +947,15 @@ export async function gatherStatusForApi(
         // #830, item 1) — only computed when the reported binding window is
         // week. Use the largest known configured debit so the reported
         // instant is safe for every known task sharing this credential.
-        const weekResetsAt = pausedWindow === 'week'
-          ? (store.weekWindowResumeAt(
-              credentialId,
-              aiUnitsCfg.capPerWeekUsdMicros,
-              now,
-              maximumKnownProjection,
-            ) ??
-            weekResetsAtFallback)
-          : weekResetsAtFallback;
+        const weekResetsAt =
+          pausedWindow === 'week'
+            ? store.weekWindowResumeAt(
+                credentialId,
+                aiUnitsCfg.capPerWeekUsdMicros,
+                now,
+                maximumKnownProjection,
+              )
+            : weekResetsAtFallback;
         return {
           credentialId,
           // #1006: legacy unit fields, derived from USD via the peg.

@@ -98,11 +98,13 @@ export interface AiUnitsCredentialRow {
    * binding, this is the accurate rolling-window resume instant for the
    * credential's largest known configured projection (the moment enough
    * in-window spend expires that `remaining + projected <= cap`; see
-   * `Store.weekWindowResumeAt`). Otherwise this falls back to the coarse
+   * `Store.weekWindowResumeAt`). `null` means the projection alone exceeds
+   * the weekly cap, so no spend expiry can schedule a resume without a model
+   * or cap change. Otherwise this falls back to the coarse
    * `weekResetsAtUtc(now)` (`now + 7d`) instant, which is not
    * operator-relevant in that case (issue #830, item 1).
    */
-  weekResetsAt: string;
+  weekResetsAt: string | null;
 }
 
 /** Per-credential AI-units block; present on /v1/status when AI-units gating is on. */

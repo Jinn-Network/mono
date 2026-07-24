@@ -44,7 +44,7 @@ export interface AiUnitsStatusRow {
    */
   pausedWindow?: 'block' | 'week' | null;
   blockResetsAt: string;
-  weekResetsAt: string;
+  weekResetsAt: string | null;
 }
 
 export interface AiUnitsStatusBlock {
@@ -129,7 +129,17 @@ export function AiUnitsPauseAlert({ aiUnits }: AiUnitsPauseAlertProps): JSX.Elem
               <span>
                 Credential <span className="text-foreground">{row.credentialId}</span> used{' '}
                 {usageLabel} {periodLabel}
-                . Claims resume at <span className="text-foreground">{formatUtc(resumeAt)}</span>.
+                {resumeAt == null ? (
+                  <>
+                    . Claims cannot resume under the current weekly cap until the task projection
+                    or cap configuration changes.
+                  </>
+                ) : (
+                  <>
+                    . Claims resume at{' '}
+                    <span className="text-foreground">{formatUtc(resumeAt)}</span>.
+                  </>
+                )}
               </span>
             </AlertDescription>
           </Alert>

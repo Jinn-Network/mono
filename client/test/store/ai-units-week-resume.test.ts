@@ -131,4 +131,13 @@ describe('weekWindowResumeAt', () => {
     // allows.
     expect(resumeAt).toBe(new Date(middle.getTime() + SEVEN_DAY_MS).toISOString());
   });
+
+  it('returns null when the projection alone exceeds the weekly cap', () => {
+    store = freshStore();
+    const now = new Date('2026-05-28T13:00:00.000Z');
+
+    expect(
+      store.weekWindowResumeAt('anthropic:api-key', 500_000, now, 600_000),
+    ).toBeNull();
+  });
 });

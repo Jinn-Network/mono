@@ -1493,7 +1493,9 @@ export class Store {
    * the instant `remaining + projectedUsdMicros` first falls to or below
    * `capUsdMicros` (that row's `ts + 7d`). The `<=` boundary exactly mirrors
    * the gate, which blocks only on `current + projected > cap`. Returns
-   * `null` when the prospective claim is already allowed.
+   * `null` when the prospective claim is already allowed or when the
+   * projection alone exceeds the cap, so no in-window row expiry can make
+   * the claim eligible.
    */
   weekWindowResumeAt(
     credentialId: string,
@@ -1501,6 +1503,8 @@ export class Store {
     now: Date = new Date(),
     projectedUsdMicros = 0,
   ): string | null {
+    if (projectedUsdMicros > capUsdMicros) return null;
+
     const weekStart = new Date(now.getTime() - SEVEN_DAY_MS).toISOString();
     const rows = this.db
       .prepare(
@@ -1528,7 +1532,7 @@ export class Store {
         return new Date(new Date(row.ts).getTime() + SEVEN_DAY_MS).toISOString();
       }
     }
-    throw new Error('unreachable: weekWindowResumeAt loop must return before exhausting rows');
+    return null;
   }
 
   /** Shared COALESCE-sum + estimate-flag query for the USD accumulators. */

@@ -145,8 +145,9 @@ interface OverviewStatusV1 {
       paused: boolean;
       /** True when the credential has spend this 7d window (issue #891). Optional for backward-compat. */
       active?: boolean;
+      pausedWindow?: 'block' | 'week' | null;
       blockResetsAt: string;
-      weekResetsAt: string;
+      weekResetsAt: string | null;
     }>;
   };
   predictionV1?: {

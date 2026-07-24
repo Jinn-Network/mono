@@ -206,6 +206,28 @@ describe('/v1/status aiUnits block', () => {
     );
   });
 
+  it('reports no scheduled weekly resume when the projection alone exceeds the cap', async () => {
+    store = freshStore();
+
+    const body = await gatherStatusForApi(store, {
+      aiUnits: {
+        capPerBlock: 2_000,
+        capPerWeek: 100,
+        capPerBlockUsdMicros: 1_000_000,
+        capPerWeekUsdMicros: 500_000,
+        manifestCredentials: { 'cid-1': 'anthropic:api-key' },
+        manifestProjectedAiUnits: { 'cid-1': 120 },
+        manifestProjectedUsdMicros: { 'cid-1': 600_000 },
+        manifestModels: { 'cid-1': 'claude-opus-4-7' },
+      },
+    });
+
+    const row = body.aiUnits?.credentials[0];
+    expect(row?.paused).toBe(true);
+    expect(row?.pausedWindow).toBe('week');
+    expect(row?.weekResetsAt).toBeNull();
+  });
+
   it('marks a credential with recorded weekly spend as active (#891)', async () => {
     store = freshStore();
     const now = new Date();
