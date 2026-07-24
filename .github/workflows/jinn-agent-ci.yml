@@ -166,32 +166,18 @@ jobs:
       run:
         working-directory: .   # override workflow default (apps/jinn-agent)
     steps:
+      - uses: actions/checkout@v7
+
       - name: Download all slice durations
         uses: actions/download-artifact@v4
         with:
           pattern: test-durations-slice-*
           path: durations
-          merge-multiple: true
 
       - name: Merge into single durations file
-        run: |
-          python3 - <<'PY'
-          import json, glob, os
-          from pathlib import Path
-          merged = {}
-          # download-artifact may nest as durations/<artifact>/test_durations.json
-          # or flat durations/test_durations.json depending on merge-multiple.
-          paths = glob.glob('durations/**/test_durations.json', recursive=True)
-          if not paths:
-              paths = glob.glob('durations/*test_durations.json')
-          for f in paths:
-              with open(f) as fh:
-                  merged.update(json.load(fh))
-          out = Path('apps/jinn-agent/test_durations.json')
-          out.parent.mkdir(parents=True, exist_ok=True)
-          out.write_text(json.dumps(merged, indent=2, sort_keys=True) + '\n')
-          print(f'Merged {len(merged)} file durations from {len(paths)} artifacts -> {out}')
-          PY
+        run: >-
+          python3 apps/jinn-agent/scripts/merge_test_durations.py
+          durations apps/jinn-agent/test_durations.json
 
       - name: Save merged duration cache
         uses: actions/cache/save@v5
