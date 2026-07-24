@@ -129,7 +129,7 @@ publication therefore writes a new wire version with these invariants:
 1. `harness.checkpoint.v2` is the immutable signed and pinned artifact. It has
    no `registry.txHash`, `registry.blockNumber`, or CID-derived metadata key.
 2. The signature covers the canonical v2 core, including `hashProfile` and
-   `redactionManifestHash`.
+   `redactionManifest: { schema, scannerProfile, reportHash }`.
 3. `checkpointCid` is the CID of exactly the bytes an installer fetches and
    parses.
 4. `IdentityRegistry.setMetadata("harness.checkpoint:<checkpointCid>",
@@ -300,13 +300,27 @@ produce a new digest.
 
    `filesScanned` and `bytesScanned` are non-negative safe integers calculated
    from the selected regular files. Any finding aborts, so a published report's
-   `findings` array is exactly empty. `redactionManifestHash` is
-   `sha256:<64 lowercase hex>` over the RFC 8785 JCS UTF-8 bytes of this report
-   and is a required field in the signed `harness.checkpoint.v2` core. Publish
+   `findings` array is exactly empty. The required signed
+   `harness.checkpoint.v2` field is:
+
+   ```json
+   {
+     "redactionManifest": {
+       "schema": "jinn.checkpoint-redaction.v1",
+       "scannerProfile": "learner-public-scrub.v1",
+       "reportHash": "sha256:<64 lowercase hex>"
+     }
+   }
+   ```
+
+   `reportHash` covers the RFC 8785 JCS UTF-8 bytes of the report. Publish
    returns the report beside the manifest for local audit; it is not inserted
-   into the packaged learner tree. Install reruns the same registered scanner
-   on the verified staging tree and requires an identical report hash before
-   commit. Unknown scanner profiles fail closed.
+   into the packaged learner tree. Install resolves the signed
+   `scannerProfile` from its immutable scanner registry, requires the scanner's
+   report schema to equal the signed `schema`, reruns it on the verified
+   staging tree, and requires an identical report hash before commit. Unknown
+   schemas/scanner profiles, or a scanner profile not registered for
+   `hashProfile.id`, fail closed.
 
 Capture `harness-bundle` prior art (`allowedDirectories` + coarse enable toggle) is the right UX shape; reuse vocabulary where possible so operators learn one mental model.
 
@@ -349,24 +363,31 @@ attacker-controlled until verified. v0 install therefore locks these rules:
    directory entry, and logical paths must be in ascending UTF-8 byte order.
 4. Only regular files and directories are accepted. Symlinks, hardlinks,
    devices, FIFOs, sockets, sparse/extended entries, and other special archive
-   records are rejected. The canonical ustar encoder uses `ustar\0` / `00`,
-   zero uid/gid/mtime, empty owner/group names, regular-file type `0` with mode
-   `0644`, and directory type `5` with mode `0755`. Directory header names end
-   in exactly one slash; their logical path removes it. File names never end in
-   a slash. Paths up to 100 bytes use an empty prefix; longer paths use the
-   rightmost slash whose prefix is at most 155 bytes and name is at most 100
-   bytes. Numeric fields use minimal zero-padded octal with the POSIX
-   terminator. The installer verifies each header checksum (checksum bytes
-   treated as spaces), all canonical/reserved fields, 512-byte padding, exactly
-   two zero end blocks, and the absence of non-zero trailing bytes before it
-   interprets an entry.
+   records are rejected. The `learner-public.v1` mode policy is path-derived
+   and independent of publisher filesystem bits: regular files below
+   top-level `hooks/` or `tools/` are executable; every other regular file is
+   non-executable. The canonical ustar encoder uses `ustar\0` / `00`, zero
+   uid/gid/mtime, empty owner/group names, regular-file type `0` with mode
+   `0755` for the executable class or `0644` otherwise, and directory type `5`
+   with mode `0755`. Directory header names end in exactly one slash; their
+   logical path removes it. File names never end in a slash. Paths up to 100
+   bytes use an empty prefix; longer paths use the rightmost slash whose prefix
+   is at most 155 bytes and name is at most 100 bytes. Numeric fields use
+   minimal zero-padded octal with the POSIX terminator. The installer verifies
+   each header checksum (checksum bytes treated as spaces), the path-derived
+   canonical mode and all other canonical/reserved fields, 512-byte padding,
+   exactly two zero end blocks, and the absence of non-zero trailing bytes
+   before it interprets an entry.
 5. Extraction never shells out to `tar`. It creates a unique staging directory
    with `mkdtemp` under a trusted parent, verifies owner-only `0700`
    permissions, streams with the same byte/file/directory/depth counters,
    prevents link following/existing-target replacement, and proves every
    resolved output remains beneath that staging root. Archive ownership and
    mode are never trusted: outputs are owned by the current process, staging
-   directories remain `0700`, and regular files are created `0600`.
+   directories remain `0700`, regular files under `hooks/` and `tools/` are
+   created `0700`, and all other regular files are created `0600`. Tests
+   directly execute representative packaged hook/tool files and read
+   representative non-executable state files after install.
 6. Free-form CIDs and `implName` are never interpolated into temporary paths.
    `implName` must match the canonical harness-name grammar before it can
    select a final location. The final target is resolved beneath the configured
@@ -433,7 +454,7 @@ Risk to watch: a popular weak digest could attract cargo-cult installs. Mitigati
 3. `parentCheckpointCid` nullable.
 4. `codeDigest` + `implStateDirCid` + mandatory
    `hashProfile: { id, ignoreRelPaths }` + mandatory
-   `redactionManifestHash`.
+   `redactionManifest: { schema, scannerProfile, reportHash }`.
 5. On-chain `harness.checkpoint:<cid>` anchor, whose event supplies the
    authoritative receipt outside the immutable manifest.
 
