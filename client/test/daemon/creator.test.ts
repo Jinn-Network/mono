@@ -34,6 +34,10 @@ describe('CreatorLoop', () => {
         attemptId: 'ds-1/1',
         attemptNumber: 1,
       }),
+      expect.objectContaining({
+        beforeBroadcast: expect.any(Function),
+        onTransactionHash: expect.any(Function),
+      }),
     );
     store.close();
     await adapter.stop();
@@ -103,7 +107,13 @@ describe('CreatorLoop', () => {
 
     await loop.tick();
     expect(generator).toHaveBeenCalledTimes(1);
-    expect(postSpy).toHaveBeenCalledWith(expect.objectContaining({ id: 'auto-1', role: 'restoration' }));
+    expect(postSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'auto-1', role: 'restoration' }),
+      expect.objectContaining({
+        beforeBroadcast: expect.any(Function),
+        onTransactionHash: expect.any(Function),
+      }),
+    );
 
     store.close();
     await adapter.stop();
