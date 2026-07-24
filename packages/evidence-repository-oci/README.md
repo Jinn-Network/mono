@@ -1,0 +1,41 @@
+# `@jinn-network/evidence-repository-oci`
+
+Deterministic OCI distribution binding for the Jinn Evidence Repository
+contract.
+
+The package maps one exact repository record or artifact to an OCI Image
+Manifest 1.1.1. The manifest has a standard empty JSON config, exactly one
+content layer, a versioned Jinn artifact type, and no mutable timestamp,
+platform, subject, or referrer metadata. RFC 8785 canonicalization makes its
+manifest bytes and transport digest reproducible across implementations.
+
+```ts
+import {
+  buildEvidenceOciManifest,
+  canonicalizeEvidenceOciManifest,
+  recordLookupTag,
+} from "@jinn-network/evidence-repository-oci";
+
+const manifest = buildEvidenceOciManifest(reference, bytes.byteLength);
+const manifestBytes = canonicalizeEvidenceOciManifest(manifest);
+const tag = recordLookupTag(reference);
+```
+
+Tags are digest-derived lookup aliases, not identity. Retrieval validates the
+manifest artifact type, exact layer digest and size, and downloaded bytes
+against the Evidence Repository reference.
+
+The normative profile, JSON Schema, and golden manifest vectors ship under
+`profiles/` and `fixtures/`.
+
+## Development
+
+Use Node 22, Yarn 4.13.0, and ORAS 1.3.2 for registry integration:
+
+```sh
+yarn install --immutable
+yarn check:profile
+yarn typecheck
+yarn test
+yarn build
+```
