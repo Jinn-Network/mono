@@ -351,6 +351,7 @@ Runtime-specific typed errors use stable codes covering:
 - `UNSAFE_PATH`;
 - `RUNTIME_CLOSING`;
 - `RUNTIME_CLOSED`;
+- `INVALID_QUERY`;
 - `OPERATION_ABORTED`;
 - `SYNCHRONIZATION_UNAVAILABLE`; and
 - `IO_FAILURE`.
