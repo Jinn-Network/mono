@@ -104,6 +104,7 @@ export type AttemptExecution =
       readonly attemptIndex?: number;
       readonly requestId?: string;
       readonly deliveryTx?: string;
+      readonly deliveryBlockNumber?: number;
       readonly deliveryEnvelopeCid?: string;
       readonly creationTransactionHash?: string;
       readonly creationBlockNumber?: number;
@@ -251,6 +252,7 @@ function exactKeys(
       'attemptIndex',
       'requestId',
       'deliveryTx',
+      'deliveryBlockNumber',
       'deliveryEnvelopeCid',
       'creationTransactionHash',
       'creationBlockNumber',
@@ -504,6 +506,7 @@ function decodeExecution(value: unknown): AttemptExecution {
     'attemptIndex',
     'requestId',
     'deliveryTx',
+    'deliveryBlockNumber',
     'deliveryEnvelopeCid',
     'creationTransactionHash',
     'creationBlockNumber',
@@ -531,7 +534,16 @@ function decodeExecution(value: unknown): AttemptExecution {
     : stringField(execution.requestId, 'marketplace request ID');
   const deliveryTx = execution.deliveryTx === undefined
     ? undefined
-    : stringField(execution.deliveryTx, 'marketplace delivery transaction');
+    : transactionHash(
+        execution.deliveryTx,
+        'marketplace delivery transaction',
+      );
+  const deliveryBlockNumber = execution.deliveryBlockNumber === undefined
+    ? undefined
+    : nonNegativeInteger(
+        execution.deliveryBlockNumber,
+        'marketplace delivery block number',
+      );
   const deliveryEnvelopeCid = execution.deliveryEnvelopeCid === undefined
     ? undefined
     : stringField(
@@ -578,6 +590,15 @@ function decodeExecution(value: unknown): AttemptExecution {
     );
   }
   if (
+    (deliveryTx === undefined) !== (deliveryBlockNumber === undefined)
+    || (
+      deliveryEnvelopeCid !== undefined
+      && deliveryTx === undefined
+    )
+  ) {
+    throw new Error('Marketplace delivery provenance is incomplete');
+  }
+  if (
     (creationTransactionHash === undefined)
       !== (creationBlockNumber === undefined)
     || (
@@ -620,6 +641,7 @@ function decodeExecution(value: unknown): AttemptExecution {
       ? {}
       : { attemptIndex, requestId: requestId! }),
     ...(deliveryTx === undefined ? {} : { deliveryTx }),
+    ...(deliveryBlockNumber === undefined ? {} : { deliveryBlockNumber }),
     ...(deliveryEnvelopeCid === undefined ? {} : { deliveryEnvelopeCid }),
     ...(creationTransactionHash === undefined
       ? {}

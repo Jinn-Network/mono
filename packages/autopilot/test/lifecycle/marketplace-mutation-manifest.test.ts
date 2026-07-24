@@ -17,6 +17,7 @@ import {
   type AttemptManifest,
 } from '../../src/lifecycle/attempt-workspace.js';
 import {
+  recordMarketplaceSolutionDelivery,
   recordMarketplaceMutationAdoptionReceipt,
 } from '../../src/lifecycle/marketplace-mutation-manifest.js';
 
@@ -29,6 +30,7 @@ const GENERATION = '123e4567-e89b-42d3-a456-426614174001';
 const REVIEW_ATTEMPT = '123e4567-e89b-42d3-a456-426614174002';
 const CREATED = '2026-07-24T12:00:00.000Z';
 const CREATION_TX = `0x${'b'.repeat(64)}`;
+const DELIVERY_TX = `0x${'a'.repeat(64)}`;
 const directories: string[] = [];
 
 const taskProvenance = {
@@ -66,7 +68,8 @@ function manifest(root: string): AttemptManifest {
       requestFile: join(root, 'request.json'),
       attemptIndex: 0,
       requestId: 'request-abc',
-      deliveryTx: `0x${'a'.repeat(64)}`,
+      deliveryTx: DELIVERY_TX,
+      deliveryBlockNumber: 812_350,
       deliveryEnvelopeCid: 'bafybeimutation',
     },
     processState: 'running',
@@ -116,6 +119,80 @@ afterEach(() => {
 });
 
 describe('marketplace mutation adoption manifest state', () => {
+  it('records exact Solution delivery provenance once and recovers it idempotently', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-adoption-manifest-'));
+    directories.push(root);
+    const initial = manifest(root);
+    const preparing = {
+      ...initial,
+      execution: {
+        backend: 'marketplace' as const,
+        taskId: 'task-501',
+        taskCid: 'bafybeitask',
+        deadline: '2026-07-24T13:00:00.000Z',
+        requestFile: join(root, 'request.json'),
+        ...taskProvenance,
+      },
+    };
+    writeFileSync(
+      initial.paths.manifest,
+      `${JSON.stringify(preparing, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+    const delivery = {
+      manifestPath: initial.paths.manifest,
+      taskId: 'task-501',
+      taskCid: 'bafybeitask',
+      attemptIndex: 0,
+      requestId: 'request-abc',
+      deliveryEnvelopeCid: 'bafybeimutation',
+      deliveryTransactionHash: DELIVERY_TX,
+      deliveryBlockNumber: 812_350,
+      taskProvenance,
+      now: () => new Date('2026-07-24T12:05:00.000Z'),
+    } as const;
+
+    const first = recordMarketplaceSolutionDelivery(delivery);
+    const second = recordMarketplaceSolutionDelivery({
+      ...delivery,
+      now: () => new Date('2026-07-24T12:06:00.000Z'),
+    });
+
+    expect(second).toEqual(first);
+    expect(second.execution).toMatchObject({
+      backend: 'marketplace',
+      attemptIndex: 0,
+      requestId: 'request-abc',
+      deliveryTx: DELIVERY_TX,
+      deliveryBlockNumber: 812_350,
+      deliveryEnvelopeCid: 'bafybeimutation',
+      ...taskProvenance,
+    });
+  });
+
+  it('refuses to overwrite a different observed Solution delivery', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-adoption-manifest-'));
+    directories.push(root);
+    const initial = manifest(root);
+    writeFileSync(
+      initial.paths.manifest,
+      `${JSON.stringify(initial, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+
+    expect(() => recordMarketplaceSolutionDelivery({
+      manifestPath: initial.paths.manifest,
+      taskId: 'task-501',
+      taskCid: 'bafybeitask',
+      attemptIndex: 1,
+      requestId: 'different-request',
+      deliveryEnvelopeCid: 'bafybeidifferent',
+      deliveryTransactionHash: `0x${'c'.repeat(64)}`,
+      deliveryBlockNumber: 812_351,
+      taskProvenance,
+    })).toThrow('different marketplace delivery');
+  });
+
   it('keeps pre-adoption attempt manifests backward compatible', () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-adoption-manifest-'));
     directories.push(root);

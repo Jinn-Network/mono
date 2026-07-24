@@ -14,6 +14,19 @@ import type {
 } from './marketplace-mutation-adoption.js';
 import { gitOid, isoTimestamp } from './types.js';
 
+export interface RecordMarketplaceSolutionDeliveryInput {
+  readonly manifestPath: string;
+  readonly taskId: string;
+  readonly taskCid: string;
+  readonly attemptIndex: number;
+  readonly requestId: string;
+  readonly deliveryEnvelopeCid: string;
+  readonly deliveryTransactionHash: string;
+  readonly deliveryBlockNumber: number;
+  readonly taskProvenance: MarketplaceTaskProvenance;
+  readonly now?: () => Date;
+}
+
 export interface MarketplaceAdoptedReviewClaimIdentity {
   readonly attemptId: string;
   readonly manifestPath: string;
@@ -33,6 +46,93 @@ export interface RecordMarketplaceMutationAdoptionReceiptInput {
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const TRANSACTION_PATTERN = /^0x[0-9a-fA-F]{64}$/;
+
+export function recordMarketplaceSolutionDelivery(
+  input: RecordMarketplaceSolutionDeliveryInput,
+): AttemptManifest {
+  if (
+    input.taskId.length === 0
+    || input.taskCid.length === 0
+    || !Number.isSafeInteger(input.attemptIndex)
+    || input.attemptIndex < 0
+    || input.requestId.length === 0
+    || input.deliveryEnvelopeCid.length === 0
+    || !TRANSACTION_PATTERN.test(input.deliveryTransactionHash)
+    || !Number.isSafeInteger(input.deliveryBlockNumber)
+    || input.deliveryBlockNumber < 0
+    || !TRANSACTION_PATTERN.test(input.taskProvenance.creationTransactionHash)
+    || !Number.isSafeInteger(input.taskProvenance.creationBlockNumber)
+    || input.taskProvenance.creationBlockNumber < 0
+    || input.deliveryBlockNumber < input.taskProvenance.creationBlockNumber
+  ) {
+    throw new Error('Marketplace Solution delivery provenance is invalid');
+  }
+  const timestamp = isoTimestamp(
+    (input.now ?? (() => new Date()))().toISOString(),
+  );
+  return updateAttemptManifest(input.manifestPath, (manifest) => {
+    const execution = manifest.execution;
+    if (
+      execution.backend !== 'marketplace'
+      || manifest.processState !== 'running'
+      || execution.taskId !== input.taskId
+      || execution.taskCid !== input.taskCid
+      || (
+        execution.creationTransactionHash !== undefined
+        && execution.creationTransactionHash
+          !== input.taskProvenance.creationTransactionHash
+      )
+      || (
+        execution.creationBlockNumber !== undefined
+        && execution.creationBlockNumber
+          !== input.taskProvenance.creationBlockNumber
+      )
+      || (
+        execution.solverNetManifestCid !== undefined
+        && execution.solverNetManifestCid
+          !== input.taskProvenance.solverNetManifestCid
+      )
+    ) {
+      throw new Error('Solution delivery does not match the marketplace attempt');
+    }
+    const current = {
+      attemptIndex: execution.attemptIndex,
+      requestId: execution.requestId,
+      deliveryTx: execution.deliveryTx,
+      deliveryBlockNumber: execution.deliveryBlockNumber,
+      deliveryEnvelopeCid: execution.deliveryEnvelopeCid,
+    };
+    const next = {
+      attemptIndex: input.attemptIndex,
+      requestId: input.requestId,
+      deliveryTx: input.deliveryTransactionHash,
+      deliveryBlockNumber: input.deliveryBlockNumber,
+      deliveryEnvelopeCid: input.deliveryEnvelopeCid,
+    };
+    const hasCurrent = Object.values(current).some(
+      (value) => value !== undefined,
+    );
+    if (hasCurrent) {
+      if (isDeepStrictEqual(current, next)) return manifest;
+      throw new Error(
+        'Attempt manifest already records a different marketplace delivery',
+      );
+    }
+    return {
+      ...manifest,
+      execution: {
+        ...execution,
+        ...input.taskProvenance,
+        ...next,
+      },
+      timestamps: {
+        ...manifest.timestamps,
+        updatedAt: timestamp,
+      },
+    };
+  });
+}
 
 function receiptMatchesAttempt(
   receipt: AutopilotAdoptionReceipt,

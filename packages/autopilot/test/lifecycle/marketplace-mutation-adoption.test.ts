@@ -193,6 +193,7 @@ function manifest(workflow: MutationWorkflow): AttemptManifest {
       attemptIndex: 0,
       requestId: 'request-abc',
       deliveryTx: `0x${'a'.repeat(64)}`,
+      deliveryBlockNumber: 812_350,
       deliveryEnvelopeCid: 'bafybeimutation',
     },
     processState: 'running',
