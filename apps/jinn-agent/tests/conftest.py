@@ -393,6 +393,31 @@ def _hermetic_environment(tmp_path, monkeypatch):
     monkeypatch.delenv("GMI_API_KEY", raising=False)
     monkeypatch.delenv("GMI_BASE_URL", raising=False)
 
+    # 6. Redirect the jinn plugin's store env vars to per-test tempdirs, the
+    #    exact parallel to HERMES_HOME (step 3): the jinn plugin persists
+    #    layer/session state under ``~/.jinn-client/*``, so point the three
+    #    store vars at a tempdir and no suite writes to the real store tree.
+    #    The ``_jinn_store_write_guard`` fixture below fails loud if a
+    #    resolver escapes back to ``~/.jinn-client``. See
+    #    ``tests/support/jinn_store.py`` and Jinn-Network/mono#1841.
+    # Use a fixture-owned patcher for these safety-critical redirects. Some
+    # existing tests call the ordinary ``monkeypatch.undo()`` mid-test; that
+    # must not dismantle the Jinn sandbox or its resolver guard.
+    jinn_store_patch = pytest.MonkeyPatch()
+    try:
+        jinn_store_root = tmp_path / "jinn-store"
+        for name, sub in (
+            ("JINN_LAYER_CAPTURES_DIR", "captures"),
+            ("JINN_LAYER_EPISODES_DIR", "episodes"),
+            ("JINN_MINEABLE_STATE_DIR", "mineable"),
+        ):
+            target = jinn_store_root / sub
+            target.mkdir(parents=True, exist_ok=True)
+            jinn_store_patch.setenv(name, str(target))
+        yield
+    finally:
+        jinn_store_patch.undo()
+
 
 # Backward-compat alias — old tests reference this fixture name. Keep it
 # as a no-op wrapper so imports don't break.
@@ -400,6 +425,37 @@ def _hermetic_environment(tmp_path, monkeypatch):
 def _isolate_hermes_home(_hermetic_environment):
     """Alias preserved for any test that yields this name explicitly."""
     return None
+
+
+@pytest.fixture(autouse=True)
+def _jinn_store_write_guard(request, _hermetic_environment):
+    """Fail loud if any jinn store resolver points at the real store tree.
+
+    ``_hermetic_environment`` (step 6) redirects the store env vars to a
+    per-test tempdir; this guard verifies no resolver escaped back to the
+    real ``~/.jinn-client`` tree. Opt out with
+    ``@pytest.mark.jinn_store_guard_bypass`` for the handful of tests that
+    deliberately probe the un-sandboxed resolvers.
+    """
+    if request.node.get_closest_marker("jinn_store_guard_bypass"):
+        yield
+        return
+    from tests.support.jinn_store import (
+        assert_jinn_store_sandboxed,
+        install_jinn_store_resolver_guards,
+    )
+
+    guard_patch = pytest.MonkeyPatch()
+    try:
+        assert_jinn_store_sandboxed()
+        install_jinn_store_resolver_guards(guard_patch)
+        yield
+        # Tests can mutate or unset the environment after fixture setup.
+        # Re-check before their patcher restores it so those writes fail the
+        # owning test.
+        assert_jinn_store_sandboxed()
+    finally:
+        guard_patch.undo()
 
 
 # ── Module-level state reset — replaced by per-file process isolation ──────
@@ -533,6 +589,12 @@ def pytest_configure(config):  # noqa: D401 — pytest hook
         f"{_LIVE_SYSTEM_GUARD_BYPASS_MARK}: bypass the live-system guard "
         "(only for tests that genuinely need real os.kill / subprocess "
         "behaviour — e.g. PTY tests that signal their own child).",
+    )
+    config.addinivalue_line(
+        "markers",
+        "jinn_store_guard_bypass: bypass the jinn store-path write guard "
+        "(only for tests that deliberately probe the un-sandboxed store "
+        "resolvers — see tests/support/jinn_store.py).",
     )
 
     # The pyproject addopts pin ``--timeout-method=signal`` relies on

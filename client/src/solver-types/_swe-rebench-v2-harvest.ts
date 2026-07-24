@@ -12,7 +12,7 @@ import {
   type MintedEnvironmentBindingV1,
   type MintedProvenance,
 } from './_swe-rebench-v2-minted-pool.js';
-import type { MineableTraceRecord } from './_swe-rebench-v2-mineable-store.js';
+import type { MineableTraceRecord } from './_swe-rebench-v2-mineable-store-port.js';
 import { lineageHash } from './_swe-rebench-v2-hunk-echo.js';
 import type { EvalRunner, HfFetcher, HfRow } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import {
@@ -635,6 +635,7 @@ export interface HarvestMintDeps {
   minterSafe?: string;
   publish?: boolean;
   progress?: MintTasksInput['progress'];
+  withPublicationAuthorization?: MintTasksInput['withPublicationAuthorization'];
 }
 
 export async function admitBuiltMintCandidates(
@@ -674,6 +675,7 @@ export async function admitBuiltMintCandidates(
     publicRepoChecker: deps.publicRepoChecker,
     environmentVerifier: deps.environmentVerifier,
     progress: deps.progress,
+    withPublicationAuthorization: deps.withPublicationAuthorization,
   };
   return runMintTasksPipeline(input);
 }

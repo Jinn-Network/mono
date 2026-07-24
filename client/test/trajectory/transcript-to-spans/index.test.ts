@@ -9,7 +9,8 @@ import {
 } from '../../../src/trajectory/transcript-to-spans/index.js';
 import { ClaudeCodeStreamJsonParser } from '../../../src/trajectory/transcript-to-spans/claude-code-stream-json.js';
 import { CodexExecJsonParser } from '../../../src/trajectory/transcript-to-spans/codex-exec-json.js';
-import { CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../../src/harnesses/names.js';
+import { HermesSessionJsonParser } from '../../../src/trajectory/transcript-to-spans/hermes-session-json.js';
+import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS } from '../../../src/harnesses/names.js';
 import { TrajectoryCollector } from '../../../src/trajectory/collector.js';
 
 const WORKING_DIR = '/tmp/example-working-dir';
@@ -37,8 +38,16 @@ describe('getTranscriptSpanParser', () => {
     expect(getTranscriptSpanParser('codex-code', WORKING_DIR)).toBeNull();
   });
 
+  it('resolves HERMES_AGENT_HARNESS to HermesSessionJsonParser + .hermes-agent/session.json', () => {
+    expect(HERMES_AGENT_HARNESS).toBe('hermes-agent');
+    const resolution = getTranscriptSpanParser(HERMES_AGENT_HARNESS, WORKING_DIR);
+    expect(resolution).not.toBeNull();
+    expect(resolution!.parser).toBeInstanceOf(HermesSessionJsonParser);
+    expect(resolution!.transcriptPath).toBe(join(WORKING_DIR, '.hermes-agent', 'session.json'));
+  });
+
   it('returns null for an unknown impl name', () => {
-    expect(getTranscriptSpanParser('hermes-agent', WORKING_DIR)).toBeNull();
+    expect(getTranscriptSpanParser('aider', WORKING_DIR)).toBeNull();
   });
 
   it('returns null for a null/undefined impl name', () => {
@@ -113,7 +122,18 @@ describe('addTranscriptSpans (idempotent transcript-to-spans hook, #1473 finding
     const workingDir = writeWorkingDir();
     const collector = new TrajectoryCollector({ taskCid: 'bafyidempotent3', runId: 'run-idempotent-3' });
 
-    await expect(addTranscriptSpans(collector, 'hermes-agent', workingDir)).resolves.not.toThrow();
+    await expect(addTranscriptSpans(collector, 'aider', workingDir)).resolves.not.toThrow();
+    expect(collector.snapshot().spans).toEqual([]);
+  });
+
+  it('degrades to a no-op (no throw) for a resolvable parser whose transcript is absent (AC-3)', async () => {
+    // hermes-agent NOW resolves a parser, but the working dir written above
+    // has no .hermes-agent/session.json — the parser returns [] and no spans
+    // are added: degradation, not failure.
+    const workingDir = writeWorkingDir();
+    const collector = new TrajectoryCollector({ taskCid: 'bafyidempotent4', runId: 'run-idempotent-4' });
+
+    await expect(addTranscriptSpans(collector, HERMES_AGENT_HARNESS, workingDir)).resolves.not.toThrow();
     expect(collector.snapshot().spans).toEqual([]);
   });
 });

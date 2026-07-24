@@ -168,10 +168,13 @@ textarea:focus-visible {
 }
 
 /* `data-status="active"` row treatment for the Onboarding phase list —
-   the active phase row gets a subtle gold gradient wash. Co-located with
-   the keyframes since they share the same surface. */
+   the active phase row is marked with a flat low-opacity gold tint plus a
+   gold left-border accent (a deliberate active-state signal, not a decorative
+   gradient wash — see BRAND.md content non-negotiables). Co-located with the
+   keyframes since they share the same surface. */
 .phase-row[data-status='active'] {
-  background: linear-gradient(90deg, rgba(220, 184, 102, 0.04) 0%, transparent 60%);
+  background: rgba(220, 184, 102, 0.05);
+  box-shadow: inset 2px 0 0 0 var(--accent-gold);
   transition: background 320ms ease;
 }
 

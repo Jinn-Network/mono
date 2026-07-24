@@ -1,4 +1,4 @@
-# Static checklist (C1-C11)
+# Static checklist (C1-C12)
 
 Mechanical checks that fire deterministically against the diff. Each item is either grep/AST-based (runs in main) or judgmental (dispatched to the judgmental audit subagent).
 
@@ -30,7 +30,7 @@ Mechanical checks that fire deterministically against the diff. Each item is eit
 
 ## C4 — eval admission / verdict recheck
 
-**Triggers when:** diff touches eval admission or substrate hashing (`client/src/eval/admission/`, `client/src/eval/substrate-hash/`).
+**Triggers when:** diff touches eval admission or substrate hashing (`client/src/solver-types/_swe-rebench-v2-differential-admission.ts`, `client/src/solver-types/_swe-rebench-v2-substrate.ts`).
 
 **Where:** judgmental subagent.
 
@@ -79,7 +79,7 @@ Mechanical checks that fire deterministically against the diff. Each item is eit
 **Action:** verify the contract holds end-to-end —
 
 - The publish guard queries exactly the two contexts `hermetic-gate` **and** `environment-suite` (no other names), bound to the release SHA, and requires both `success`. It must NOT re-run any test or parse a marker.
-- The `environment-suite` requirement may be waived ONLY via the transitional repo variable `JINN_ENVIRONMENT_SUITE_WAIVED == 'true'`, and the waiver must be logged loudly. `hermetic-gate` is never waivable.
+- The `environment-suite` requirement may be waived ONLY via the transitional repo variable `JINN_ENVIRONMENT_SUITE_WAIVED == 'true'`, and the waiver must be logged loudly. `hermetic-gate` is likewise waivable ONLY via the transitional repo variable `JINN_HERMETIC_GATE_WAIVED == 'true'` (in place until the Anvil snapshot fixture lands); both waivers default unset and, when unset, both check-runs are hard-required.
 - The two workflows post their verdicts through the single shared poster `client/scripts/release/post-check-run-verdict.mjs` with the locked verdict-JSON shape (`{ context, headSha, conclusion, scenarios[], summary }`) and the exact context names above.
 
 Any drift — a third context name, a re-introduced marker parse, a re-run step, a waiver that isn't gated on the repo variable, or a poster bypass — is a finding.
@@ -115,7 +115,7 @@ or `client/scripts/release/**` (Tier 1/2/3 scenarios, orchestrators, helpers).
 against an *imagined* interface rather than the real one. T2.2 assumed an HTTP task
 control plane (`POST /v1/tasks`, `GET /v1/verdicts`) — none of it existed (issue #350,
 rewritten). T3.1 shipped the identical bug and never passed (#526). The Phase 2 audit
-had both in its diff and did not catch them: the C1-C11 checks target the *product*
+had both in its diff and did not catch them: the C1-C12 checks target the *product*
 against canon, not the soundness of the *gate infrastructure* itself.
 
 **Check:** for each new/changed gate scenario, cross-reference every external interface

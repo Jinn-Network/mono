@@ -1,12 +1,16 @@
 """Consent state + first-run flow for the Jinn layer.
 
-Consent is a three-value machine: ``unset -> accepted | declined``.
-``unset`` and ``declined`` behave identically at capture time — nothing
-leaves the machine. The safe default (bare Enter) is decline.
+There is exactly ONE contribution-consent question: may a task derived from
+your work be shared so other agents can attempt it. It persists a single
+boolean, ``shareConsent`` (default ``False`` — bare Enter declines). Local
+capture, mining, and distillation happen unconditionally and are never gated
+on this flag; the flag governs only whether a mined task leaves the machine.
+Preview remains informational, while per-session veto and the ledger remain
+available on top.
 
-Copy is verbatim from the design artifact
-(mono: docs/design/artifacts/2026-07-02-1312-fork-consent-ledger/):
-plain language wherever data leaves the machine, no emoji, no metaphor.
+Copy is the single sharing question from mono#1714: plain language, no
+"trace/mining/corpus" jargon, and it never claims your code or history is
+shared.
 """
 
 from __future__ import annotations
@@ -31,108 +35,50 @@ except Exception:  # pragma: no cover — plugin may load before constants resol
         return Path(val).resolve() if val else (Path.home() / ".hermes").resolve()
 
 
-UNSET = "unset"
-ACCEPTED = "accepted"
-DECLINED = "declined"
+# ── Exact copy (mono#1714 single sharing question) ───────────────────────────
 
-# ── Exact copy (design artifact) ─────────────────────────────────────────────
+HEADER = "Contribute tasks from your work?"
 
-def opening() -> str:
-    return (
-        f"{_harness.harness_name()} is an open coding harness. When it finishes a "
-        "task it can publish a scrubbed trace of that task to a public corpus — "
-        "the shared record that trains the harness everyone runs."
-    )
-
-WHY = [
-    "Build the open harness — your tasks improve the agent no one company owns.",
-    "Earn rewards — verified contributions earn OLAS.",
-    "Two-way — you read from the same corpus you feed.",
-]
-
-WHAT_LEAVES = [
-    "Only traces of tasks this harness runs — never your machine, shell, files, "
-    "or anything outside a task.",
-    "Every trace is scrubbed of secrets and personal data here, first. If "
-    "scrubbing can't finish, nothing sends. It fails closed.",
-    "You can veto any task, and preview the exact payload before the first send.",
-]
-
-def decline_line() -> str:
-    return f"Decline and {_harness.harness_name()} still works fully — as a reader."
-
-MINEABLE_TRACE_HEADER = "LOCAL TRACE MINING (OPTIONAL, TIER 1)"
-MINEABLE_TRACE_BODY = (
-    "Keep a copy of task traces on this machine so Jinn can mine new "
-    "tasks from your work. Nothing is published unless you also consent to "
-    "corpus contribution and pass the public-repo publish gate."
-)
-MINEABLE_TRACE_ACCEPT = (
-    "Retain mineable traces locally? Repo, commit, diff, and test "
-    "outcomes are kept on this machine for mining only. [Y] Yes · [N] No"
-)
-MINEABLE_TRACE_DECLINE = (
-    "Skip local mining retention? Only standard scrubbed corpus traces apply "
-    "when contribution is on. [Y] Yes · [N] No"
+BODY = (
+    "When you solve something on a public project, Jinn can turn it into a "
+    "task other agents can attempt — a reproducible problem based on your "
+    "work. Your actual code and history stay on your machine."
 )
 
-MINEABLE_PUBLISH_HEADER = "PUBLISH MINED TASKS (OPTIONAL, TIER 2)"
-MINEABLE_PUBLISH_BODY = (
-    "Even with local mining on, publishing a mined task as public work needs "
-    "its own consent — separate from local retention and from corpus "
-    "contribution. Only tasks from public repos are ever eligible."
-)
-MINEABLE_PUBLISH_ACCEPT = (
-    "Allow mined tasks to be published when eligible? Nothing publishes "
-    "without this. [Y] Yes · [N] No"
-)
+KEYS = "[Y] Yes · [N] No"
+EITHER_WAY = "Jinn works fully either way."
 
 CONFIRM_ACCEPT = (
-    "Turn on contribution? Every task this harness runs will be scrubbed and "
-    "published to the public corpus. You can veto any task and turn this off "
-    "any time. [Y] Yes · [N] No"
+    "Share tasks from your work? A reproducible problem based on your work "
+    "may be shared for other agents to attempt. Your actual code and history "
+    "stay on your machine. You can turn this off any time. [Y] Yes · [N] No"
 )
 CONFIRM_DECLINE = (
-    "Decline contribution? The harness stays fully functional — it will read "
-    "the corpus and publish nothing. [Y] Yes · [N] No"
+    "Keep everything on your machine? Nothing derived from your work will be "
+    "shared. Jinn stays fully functional. [Y] Yes · [N] No"
 )
 RECORDED_ON = (
-    "Contribution is ON. Scrubbed task traces will publish to the public "
-    "corpus. Next: run /jinn preview after your first task to see exactly "
-    "what would publish. Nothing publishes until you do."
+    "Sharing is ON. A reproducible problem based on your work may be shared "
+    "for other agents to attempt. Run /jinn preview to see a labelled example "
+    "of what may be shared."
 )
 RECORDED_OFF = (
-    "Contribution is OFF — reader only. No trace leaves this machine. "
+    "Sharing is OFF. Nothing derived from your work leaves this machine. "
     "Turn on any time: /jinn consent"
 )
-NODE_STUB = (
-    "Run a network node? Running a node executes tasks for others and earns "
-    "rewards. Separate setup; not needed to contribute or read. "
-    "[L] Later — show docs · [Enter] Skip"
-)
-NODE_STUB_LATER = (
-    "See docs.jinn.network/run-a-node when you're ready. Nothing to do now."
-)
 
-KEYS_LINE = "[A] Accept · [D] Decline · [P] Preview a scrubbed envelope · [?] Docs"
-
-# Section headers (design 1a): benefits first, then the safety mechanics.
-WHY_HEADER = "WHY TURN IT ON"
-WHAT_LEAVES_HEADER = "WHAT LEAVES THIS MACHINE"
+KEYS_LINE = "[Y] Yes · [N] No · [P] Preview what would be shared · [?] Docs"
 
 # Current-state line shown above the pitch, so /jinn consent always tells the
 # operator where they stand before re-pitching (mono#1384).
-STATE_LINES = {
-    UNSET: "Contribution is currently OFF (never asked).",
-    ACCEPTED: "Contribution is currently ON.",
-    DECLINED: "Contribution is currently OFF (declined).",
-}
+STATE_LINE_ON = "Sharing is currently ON."
+STATE_LINE_OFF = "Sharing is currently OFF."
 
 # The slash-command surface (TUI-safe: no blocking reads — see run_consent_flow's
 # docstring). Same deliberate two-step as the keyboard flow.
 COMMANDS_LINE = (
-    "Accept: /jinn consent accept · Decline: /jinn consent decline · "
-    "Preview a scrubbed envelope first: /jinn preview · Docs: docs.jinn.network/harness"
+    "Yes: /jinn consent accept · No: /jinn consent decline · "
+    "Preview what would be shared: /jinn preview · Docs: docs.jinn.network/harness"
 )
 
 
@@ -142,32 +88,42 @@ def state_path() -> Path:
     return get_hermes_home() / "jinn" / "consent.json"
 
 
+def _migrate_legacy(data: Dict[str, object]) -> Optional[bool]:
+    """Derive shareConsent from legacy fields (read-then-drop, one release).
+
+    Only the old *publish* bit ever meant "a task may leave this machine";
+    the tier-1 retention bit is discarded (retention is now unconditional).
+    Returns the derived value, or None when the file carries no legacy keys.
+    """
+    if "publishMinedTasksConsent" in data or "status" in data:
+        return bool(data.get("publishMinedTasksConsent"))
+    return None
+
+
 def load_state() -> Dict[str, object]:
     path = state_path()
     if not path.exists():
-        return {"status": UNSET, "previewed": False, "mineableTraceConsent": "off", "publishMinedTasksConsent": False}
+        return {"shareConsent": False, "previewed": False}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        if data.get("status") not in (UNSET, ACCEPTED, DECLINED):
-            return {"status": UNSET, "previewed": False, "mineableTraceConsent": "off", "publishMinedTasksConsent": False}
-        data.setdefault("previewed", False)
-        data.setdefault("mineableTraceConsent", "off")
-        data.setdefault("publishMinedTasksConsent", False)
-        return data
     except Exception:
         logger.warning("jinn: unreadable consent state at %s — treating as unset", path)
-        return {"status": UNSET, "previewed": False}
+        return {"shareConsent": False, "previewed": False}
+    if not isinstance(data, dict):
+        return {"shareConsent": False, "previewed": False}
+    if "shareConsent" in data:
+        share = bool(data.get("shareConsent"))
+    else:
+        migrated = _migrate_legacy(data)
+        share = bool(migrated) if migrated is not None else False
+    return {"shareConsent": share, "previewed": bool(data.get("previewed", False))}
 
 
-def save_state(status: str, *, previewed: Optional[bool] = None, mineable_trace_consent: Optional[str] = None, publish_mined_tasks_consent: Optional[bool] = None) -> Dict[str, object]:
-    if status not in (UNSET, ACCEPTED, DECLINED):
-        raise ValueError(f"invalid consent status: {status}")
+def save_state(share: bool, *, previewed: Optional[bool] = None) -> Dict[str, object]:
     current = load_state()
     state: Dict[str, object] = {
-        "status": status,
+        "shareConsent": bool(share),
         "previewed": bool(current.get("previewed") if previewed is None else previewed),
-        "mineableTraceConsent": mineable_trace_consent if mineable_trace_consent is not None else current.get("mineableTraceConsent", "off"),
-        "publishMinedTasksConsent": publish_mined_tasks_consent if publish_mined_tasks_consent is not None else current.get("publishMinedTasksConsent", False),
         "recordedAt": datetime.now(timezone.utc).isoformat(),
     }
     path = state_path()
@@ -178,49 +134,56 @@ def save_state(status: str, *, previewed: Optional[bool] = None, mineable_trace_
 
 def mark_previewed() -> None:
     current = load_state()
-    save_state(str(current.get("status", UNSET)), previewed=True)
+    save_state(bool(current.get("shareConsent")), previewed=True)
 
 
-def capture_enabled() -> bool:
-    """True only when the operator explicitly accepted. unset == declined."""
-    return load_state().get("status") == ACCEPTED
+def share_enabled() -> bool:
+    """True only when the operator explicitly opted into sharing."""
+    return load_state().get("shareConsent") is True
 
 
-def mineable_trace_enabled() -> bool:
-    """Tier-1: retain mineable fields locally for task mining (D2)."""
-    return load_state().get("mineableTraceConsent") == "retain_local"
-
-
-def render_mineable_trace_prompt() -> str:
-    return "\n".join([MINEABLE_TRACE_HEADER + ":", MINEABLE_TRACE_BODY, "", MINEABLE_TRACE_ACCEPT])
-
-
-def render_mineable_publish_prompt() -> str:
-    return "\n".join([MINEABLE_PUBLISH_HEADER + ":", MINEABLE_PUBLISH_BODY, "", MINEABLE_PUBLISH_ACCEPT])
+def consent_decided() -> bool:
+    """True once the operator has recorded a decision (either way)."""
+    return state_path().exists()
 
 
 # ── The flow ─────────────────────────────────────────────────────────────────
 
 def state_line() -> str:
-    return STATE_LINES[str(load_state().get("status", UNSET))]
+    return STATE_LINE_ON if share_enabled() else STATE_LINE_OFF
+
+
+def _sigil_head_plain() -> str:
+    """Plain (NO_COLOR) sigil head carrying fork identity — the configured
+    harness name, and on a fork the upstream it forked from. Mirrors the styled
+    ``_sigil_head`` so the plain explainer keeps the same fork identity; the
+    single-question copy collapse (mono#1714) must not drop it, since headless
+    forks re-skin by name (test_jinn_harness_identity).
+    """
+    suffix = "  ·  first run" + ("  ·  fork of hermes-agent" if _harness.is_fork() else "")
+    return f"◇ {_harness.harness_name()}{suffix}"
 
 
 def render_explainer(keys_line: str = KEYS_LINE) -> str:
     """Plain-text explainer (NO_COLOR / tests / blocking-terminal path).
 
-    Leads with the three benefits (design ``WHY TURN IT ON``) then the safety
-    mechanics (``WHAT LEAVES THIS MACHINE``). The styled TUI variant is
-    ``render_explainer_styled``; both carry identical visible text.
+    The single sharing question. The styled TUI variant is
+    ``render_explainer_styled``; both open with the fork-identity sigil head
+    and carry the same sharing copy.
     """
-    lines = [state_line(), "", opening(), "", f"{WHY_HEADER}:"]
-    lines += [f"  · {s}" for s in WHY]
-    lines.append("")
-    lines.append(f"{WHAT_LEAVES_HEADER}:")
-    lines += [f"  · {s}" for s in WHAT_LEAVES]
-    lines.append("")
-    lines.append(decline_line())
-    lines.append("")
-    lines.append(keys_line)
+    lines = [
+        state_line(),
+        "",
+        _sigil_head_plain(),
+        "",
+        HEADER,
+        "",
+        BODY,
+        "",
+        f"{KEYS} — {EITHER_WAY}",
+        "",
+        keys_line,
+    ]
     return "\n".join(lines)
 
 
@@ -233,12 +196,12 @@ def confirm_decline_command() -> str:
 
 
 def record_accept() -> str:
-    save_state(ACCEPTED)
+    save_state(True)
     return RECORDED_ON
 
 
 def record_decline() -> str:
-    save_state(DECLINED)
+    save_state(False)
     return RECORDED_OFF
 
 
@@ -246,7 +209,7 @@ def run_consent_flow(
     input_fn: Callable[[str], str],
     print_fn: Callable[[str], None],
     preview_fn: Optional[Callable[[], None]] = None,
-) -> str:
+) -> bool:
     """The first-run consent flow for a PLAIN TERMINAL (blocking reads).
 
     Do NOT call from a TUI slash-command handler — ``input()`` blocks on
@@ -254,78 +217,50 @@ def run_consent_flow(
     finding, 2026-07-03). The slash surface uses the stateless
     ``/jinn consent accept|decline [confirm]`` commands instead.
 
-    Returns the recorded status.
+    Returns the recorded shareConsent (True when sharing was accepted).
 
-    ``unset -> accepted | declined``; per-action lifecycle
-    ``idle -> confirming -> recorded``. Bare Enter defaults to decline —
-    the safe default never publishes.
+    Per-action lifecycle ``idle -> confirming -> recorded``. Bare Enter
+    defaults to decline — the safe default shares nothing. This is the ONE
+    sharing question (mono#1714 copy collapse) — no second, unrelated
+    question follows it.
     """
     print_fn(render_explainer_styled())
     while True:
         choice = input_fn("> ").strip().lower()
         if choice == "p":
-            # Preview is reachable before any publish. A real scrubbed
-            # envelope when preview_fn is wired; otherwise the labelled
-            # example fixture (design requirement iv — fresh machine).
+            # Preview is reachable before any share. A real preview when
+            # preview_fn is wired; otherwise the labelled example fixture
+            # (fresh machine).
             if preview_fn is not None:
                 preview_fn()
             else:
                 print_fn(render_preview_example())
-            print_fn("[A] Accept · [B] Back")
+            print_fn("[Y] Yes · [B] Back")
             continue
         if choice == "?":
             print_fn(render_docs_styled())
             continue
-        if choice == "a":
+        if choice in ("a", "y"):
             print_fn(render_confirm_styled(accept=True))
             confirm = input_fn("> ").strip().lower()
             if confirm == "y":
-                save_state(ACCEPTED)
+                save_state(True)
                 print_fn(render_recorded_styled(on=True))
                 break
             continue
-        # Bare Enter, 'd', or anything unrecognised routes to decline —
+        # Bare Enter, 'n', 'd', or anything unrecognised routes to decline —
         # but decline still takes one deliberate confirmation.
         print_fn(render_confirm_styled(accept=False))
         confirm = input_fn("> ").strip().lower()
         if confirm == "y":
-            save_state(DECLINED)
+            save_state(False)
             print_fn(render_recorded_styled(on=False))
             break
 
-    status = str(load_state().get("status"))
-
-    # Mineable-trace consent (task-creator spec §10, D2) — two deliberate
-    # tiers, asked here regardless of the contribution decision above. Bare
-    # Enter (or anything but 'y') declines each tier; the safe default
-    # retains and publishes nothing. Tier-2 is CONDITIONAL on tier-1: with
-    # local retention declined there is nothing that could ever be
-    # published, so the publish question is skipped entirely (never asked —
-    # not asked-and-ignored) and publish consent is forced off.
-    print_fn(render_mineable_trace_prompt())
-    mineable_choice = input_fn("> ").strip().lower()
-    mineable_trace_consent = "retain_local" if mineable_choice == "y" else "off"
-
-    publish_mined_tasks_consent = False
-    if mineable_trace_consent == "retain_local":
-        print_fn(render_mineable_publish_prompt())
-        publish_choice = input_fn("> ").strip().lower()
-        publish_mined_tasks_consent = publish_choice == "y"
-
-    save_state(
-        status,
-        mineable_trace_consent=mineable_trace_consent,
-        publish_mined_tasks_consent=publish_mined_tasks_consent,
-    )
-
-    print_fn(render_node_stub_styled())
-    node = input_fn("> ").strip().lower()
-    if node == "l":
-        print_fn(NODE_STUB_LATER)
-    return status
+    return share_enabled()
 
 
-# ── Styled renderers (design 1a) — reuse the #1417 splash palette ─────────────
+# ── Styled renderers — reuse the #1417 splash palette ────────────────────────
 #
 # Pure ANSI strings, snapshot-testable, NO_COLOR-safe (style.palette yields
 # empty codes). Each carries the same visible text as its plain constant, so
@@ -349,41 +284,28 @@ def _rule(pal, rst: str, n: int = 66) -> str:
     return _style.wrap(pal, rst, "dim", "─" * n)
 
 
-def render_explainer_styled(keys_line: str = KEYS_LINE) -> str:
-    """The design 1a explainer, styled. Benefits (why) then safety (what
-    leaves the machine), with the plain-language guarantees. Default decline."""
+def render_explainer_styled() -> str:
+    """The single sharing question, styled. Plain language; default decline."""
     pal, rst = _style.palette()
     dim = lambda s: _style.wrap(pal, rst, "dim", s)
     fg = lambda s: _style.wrap(pal, rst, "fg", s)
-    sky = lambda s: _style.wrap(pal, rst, "sky", s)
-    gold = lambda s: _style.wrap(pal, rst, "gold", s)
     amber = lambda s: _style.wrap(pal, rst, "amber", s)
     kbd = lambda s: _style.wrap(pal, rst, "gold", s)
 
     out = [
         _sigil_head(pal, rst),
         "",
-        fg("  Contribute to the open corpus?"),
+        fg("  " + HEADER),
         "",
-        dim("  " + opening()),
+        dim("  " + BODY),
         "",
-        sky("  " + WHY_HEADER),
-    ]
-    out += [dim("  · ") + fg(s.split(" — ")[0]) + dim(" — " + s.split(" — ", 1)[1] if " — " in s else s) for s in WHY]
-    out += [
-        "",
-        sky("  " + WHAT_LEAVES_HEADER),
-    ]
-    out += [dim("  · " + s) for s in WHAT_LEAVES]
-    out += [
-        "",
-        dim("  " + decline_line()),
+        dim("  " + EITHER_WAY),
         "",
         _rule(pal, rst),
-        "  " + kbd("[A]") + fg(" Accept & contribute") + "      " + kbd("[P]") + fg(" Preview a real payload"),
-        "  " + kbd("[D]") + dim(" Decline · read only") + "      " + kbd("[?]") + dim(" Docs"),
+        "  " + kbd("[Y]") + fg(" Yes, share tasks") + "      " + kbd("[P]") + fg(" Preview what would be shared"),
+        "  " + kbd("[N]") + dim(" No · keep everything local") + "      " + kbd("[?]") + dim(" Docs"),
         "",
-        dim("  consent: ") + amber(str(load_state().get("status", UNSET))) + dim("   ·   default is decline"),
+        dim("  sharing: ") + amber("ON" if share_enabled() else "OFF") + dim("   ·   default is no"),
     ]
     return "\n".join(out)
 
@@ -398,12 +320,12 @@ def render_docs_styled() -> str:
         _sigil_head(pal, rst),
         "",
         gold("  DOCS"),
-        dim("  Full detail on what is published, how scrubbing works, and how to"),
-        dim("  audit the corpus:"),
+        dim("  Full detail on what a shared task is, how provenance is blinded,"),
+        dim("  and what stays on your machine:"),
         "",
-        "  " + sky("docs.jinn.network/harness") + dim("   — consent, scrubbing, and the corpus"),
+        "  " + sky("docs.jinn.network/harness") + dim("   — sharing, safety, and how it works"),
         "",
-        dim("  Nothing has been decided. Consent is still ") + amber("unset") + dim("."),
+        dim("  Nothing has been decided. Sharing is ") + amber("OFF") + dim("."),
     ])
 
 
@@ -416,26 +338,27 @@ def render_confirm_styled(accept: bool) -> str:
     kbd = lambda s: _style.wrap(pal, rst, "gold", s)
     if accept:
         body = [
-            fg("  Turn on contribution?"),
+            fg("  Share tasks from your work?"),
             "",
-            dim("  Every task this harness runs will be scrubbed and published to the"),
-            dim("  public corpus. You can veto any task and turn this off any time."),
+            dim("  A reproducible problem based on your work may be shared for other"),
+            dim("  agents to attempt. Your actual code and history stay on your machine."),
+            dim("  You can turn this off any time."),
             "",
-            "  " + kbd("[Y]") + fg(" Yes, turn on contribution") + "     " + kbd("[N]") + dim(" No, go back"),
+            "  " + kbd("[Y]") + fg(" Yes, share") + "     " + kbd("[N]") + dim(" No, go back"),
         ]
     else:
         body = [
-            fg("  Decline contribution?"),
+            fg("  Keep everything on your machine?"),
             "",
-            dim("  The harness stays fully functional — it will read the corpus and"),
-            dim("  publish nothing. No trace will leave this machine."),
+            dim("  Nothing derived from your work will be shared. Jinn stays fully"),
+            dim("  functional."),
             "",
-            "  " + kbd("[Y]") + fg(" Yes, decline") + "     " + kbd("[N]") + dim(" No, go back"),
+            "  " + kbd("[Y]") + fg(" Yes, keep local") + "     " + kbd("[N]") + dim(" No, go back"),
         ]
     return "\n".join([
         _sigil_head(pal, rst), "", gold("  CONFIRM"), "",
         *body, "",
-        dim("  consent: ") + amber("unset") + dim("  →  action: ") + gold("confirming"),
+        dim("  sharing: ") + amber("OFF") + dim("  →  action: ") + gold("confirming"),
     ])
 
 
@@ -444,51 +367,29 @@ def render_recorded_styled(on: bool) -> str:
     dim = lambda s: _style.wrap(pal, rst, "dim", s)
     fg = lambda s: _style.wrap(pal, rst, "fg", s)
     sky = lambda s: _style.wrap(pal, rst, "sky", s)
-    gold = lambda s: _style.wrap(pal, rst, "gold", s)
     green = lambda s: _style.wrap(pal, rst, "green", s)
     if on:
         body = [
-            green("  recorded") + dim(" — contribution is ") + green("ON"),
+            green("  recorded") + dim(" — sharing is ") + green("ON"),
             "",
             dim("  " + RECORDED_ON),
             "",
-            dim("  Verified traces earn ") + gold("OLAS") + dim(" as the corpus is trained on them."),
-            "",
-            dim("  Manage:  ") + sky("/jinn consent") + dim("  |  ") + sky("/jinn veto") + dim("  |  ") + sky("/jinn ledger"),
+            dim("  Manage:  ") + sky("/jinn veto"),
         ]
     else:
         body = [
-            sky("  recorded") + dim(" — contribution is ") + fg("OFF · reader only"),
+            sky("  recorded") + dim(" — sharing is ") + fg("OFF"),
             "",
             dim("  " + RECORDED_OFF),
         ]
     return "\n".join([_sigil_head(pal, rst), "", *body])
 
 
-def render_node_stub_styled() -> str:
-    pal, rst = _style.palette()
-    dim = lambda s: _style.wrap(pal, rst, "dim", s)
-    fg = lambda s: _style.wrap(pal, rst, "fg", s)
-    gold = lambda s: _style.wrap(pal, rst, "gold", s)
-    kbd = lambda s: _style.wrap(pal, rst, "gold", s)
-    return "\n".join([
-        _sigil_head(pal, rst),
-        "",
-        dim("  One more, optional —"),
-        "",
-        gold("  RUN A NETWORK NODE?"),
-        dim("  Running a node executes tasks for others and earns rewards. It is a"),
-        dim("  separate setup and is not needed to contribute or to read."),
-        "",
-        "  " + kbd("[L]") + fg(" Later — show me the docs") + dim("  (recommended)") + "     " + kbd("[Enter]") + dim(" Skip for now"),
-    ])
-
-
 def render_preview_example() -> str:
-    """A labelled example envelope for a fresh machine with no task run yet
-    (design requirement iv). Real previews go through jinn-layer; this is the
-    fallback so ``P`` is reachable before any task exists. Every field is
-    marked ``example`` so it can never be mistaken for a real trace."""
+    """A labelled example of a shared task for a fresh machine with no task run
+    yet. Real previews go through jinn-layer; this is the fallback so ``P`` is
+    reachable before any task exists. Every field is marked ``example`` so it
+    can never be mistaken for a real shared task."""
     pal, rst = _style.palette()
     dim = lambda s: _style.wrap(pal, rst, "dim", s)
     gold = lambda s: _style.wrap(pal, rst, "gold", s)
@@ -499,29 +400,24 @@ def render_preview_example() -> str:
     bl = lambda segs: _style.box_line(pal, rst, iw, segs)
     box = "\n".join([
         bt("example — no task run yet"),
-        bl([("schema      ", None), ("jinn.trace/v1", "sky")]),
         bl([("task        ", None), ("(example) fix flaky retry in http client", "fg")]),
-        bl([("harness     ", None), (_harness.harness_name(), "fg")]),
-        bl([("tier        ", None), ("tests-passed", "green")]),
-        bl([("scrub       ", None), ("12 secrets removed · 3 paths anonymised · ", "dim"), ("ok", "green")]),
-        bm("redacted before send"),
-        bl([("  export OPENAI_API_KEY=", None), ("«redacted:secret»", "amber")]),
-        bl([("  /home/", None), ("«redacted:user»", "amber"), ("/work/http/client.py", None)]),
-        bm("content that ships (scrubbed)"),
-        bl([("  prompt   \"the retry loop drops the 429 backoff…\"", "dim")]),
-        bl([("  diff     +14 −6  http/client.py", "dim")]),
-        bl([("  result   3 tests added · suite green", "dim")]),
+        bl([("repo        ", None), ("acme/http @ a1b2c3d (public)", "fg")]),
+        bl([("problem     ", None), ("the retry loop drops the 429 backoff", "dim")]),
+        bl([("check       ", None), ("suite green after fix", "green")]),
+        bm("stays on your machine — never shared"),
+        bl([("  your code and history", "dim")]),
         bb(),
     ])
     return "\n".join([
         _sigil_head(pal, rst),
         "",
-        gold("  PREVIEW — NOTHING IS SENT FROM THIS SCREEN"),
-        dim("  This is an example envelope: no task has run on this machine yet."),
-        dim("  After your first task, /jinn preview shows the real scrubbed payload"),
-        dim("  that would be published — the whole thing, before anything sends."),
+        gold("  PREVIEW — NOTHING IS SHARED FROM THIS SCREEN"),
+        dim("  This is an example: no task has run on this machine yet."),
+        dim("  After your first task, /jinn preview shows the real reproducible"),
+        dim("  problem that would be shared — the whole thing, before anything leaves."),
         "",
         box,
         "",
-        dim("  Everything inside the box is what would leave the machine. Nothing else."),
+        dim("  Everything inside the box is what would be shared. Your code and"),
+        dim("  history stay on your machine."),
     ])

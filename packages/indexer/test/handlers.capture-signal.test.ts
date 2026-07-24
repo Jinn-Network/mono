@@ -26,8 +26,10 @@ import { buildDistributionSignal, type CaptureEnvelopeMetaRow } from '../src/api
 const CHAIN_ID = 84532;
 const WRAPPER_CID = 'bafywrapper';
 const ARTIFACT_CID = 'bafytraceartifact';
+const EPISODE_ARTIFACT_CID = 'bafyepisodeartifact';
 const MANIFEST_HASH = `0x${'ab'.repeat(32)}` as `0x${string}`;
 const CONTRIBUTOR = '0x1111111111111111111111111111111111111111';
+const RETRIEVAL_VISIBLE_TAG = 'retrieval:visible.v1';
 
 const PKS: PkMap = new Map<unknown, string[]>([
   [solverNetManifest, ['id']],
@@ -58,27 +60,103 @@ function traceEnvelope(overrides: Record<string, unknown> = {}): Record<string, 
   };
 }
 
-/** The wrapper envelope body as published by harness-layer publish(). */
+function episode(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    schemaVersion: 'jinn.episode.v1',
+    episodeId: 'episode-1',
+    session: {
+      sessionId: 'session-1',
+      capturedAt: '2026-07-20T12:00:00.000Z',
+      kind: 'user',
+    },
+    origin: { writer: 'jinn-agent', build: '0.5.0' },
+    task: {
+      summary: 'Fix failing vitest suite',
+      distributionTags: ['typescript', 'testing', RETRIEVAL_VISIBLE_TAG],
+      repositorySlug: 'Jinn-Network/mono',
+    },
+    environment: {
+      harness: { name: 'jinn-agent', version: '0.5.0' },
+      model: 'gpt-5.4-mini',
+      tools: ['read', 'edit', 'bash'],
+      skillsLoadout: [],
+    },
+    trajectory: [
+      {
+        spanId: '1',
+        parentSpanId: null,
+        kind: 'jinn.tool_call',
+        name: 'read',
+        startTimeUnixNano: '1',
+        endTimeUnixNano: '2',
+        attributes: {},
+        redactedKeys: [],
+      },
+      {
+        spanId: '2',
+        parentSpanId: '1',
+        kind: 'jinn.agent_turn',
+        name: 'summarize',
+        startTimeUnixNano: '3',
+        endTimeUnixNano: '4',
+        attributes: { 'seed.synthesis': 'Step fallback synthesis.' },
+        redactedKeys: [],
+      },
+    ],
+    outcome: {
+      status: 'completed',
+      verificationStrength: 'evaluator-verified',
+      summary: 'Canonical outcome synthesis.',
+    },
+    retrievalVisible: true,
+    cost: { durationMs: 3 },
+    retention: { policy: 'contribution-eligible' },
+    provenance: 'contributed',
+    ...overrides,
+  };
+}
+
+function artifact(
+  artifactType: 'jinn.episode.v1' | 'jinn.trace-envelope.v0',
+  cid: string,
+): Record<string, unknown> {
+  return {
+    artifactType,
+    sha256: 'a'.repeat(64),
+    sources: [{ kind: 'ipfs', cid, sha256: 'a'.repeat(64) }],
+  };
+}
+
+/** The legacy wrapper envelope body retained for frozen read compatibility. */
 function wrapperBody(): Record<string, unknown> {
   return {
     schemaVersion: 'jinn.execution.v1',
     participant: { safeAddress: CONTRIBUTOR },
+    artifacts: [artifact('jinn.trace-envelope.v0', ARTIFACT_CID)],
+  };
+}
+
+/** A canonical wrapper; the legacy artifact is included to pin canonical preference. */
+function episodeWrapperBody(): Record<string, unknown> {
+  return {
+    schemaVersion: 'jinn.execution.v1',
+    participant: { safeAddress: CONTRIBUTOR },
     artifacts: [
-      {
-        artifactType: 'jinn.trace-envelope.v0',
-        sha256: 'a'.repeat(64),
-        sources: [{ kind: 'ipfs', cid: ARTIFACT_CID, sha256: 'a'.repeat(64) }],
-      },
+      artifact('jinn.trace-envelope.v0', ARTIFACT_CID),
+      artifact('jinn.episode.v1', EPISODE_ARTIFACT_CID),
     ],
   };
 }
 
-/** The donation-encoded artifact body (base64 `data` carries the trace). */
-function artifactBody(trace: Record<string, unknown>): Record<string, unknown> {
+/** The donation-encoded artifact body (base64 `data` carries the evidence payload). */
+function artifactBody(
+  payload: Record<string, unknown>,
+  artifactType: 'jinn.episode.v1' | 'jinn.trace-envelope.v0' = 'jinn.trace-envelope.v0',
+): Record<string, unknown> {
   return {
     schemaVersion: 'jinn.artifact.donation.v1',
-    artifactType: 'jinn.trace-envelope.v0',
-    data: Buffer.from(JSON.stringify(trace), 'utf-8').toString('base64'),
+    artifactType,
+    data: Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64'),
   };
 }
 
@@ -136,6 +214,28 @@ async function runCaptureEvent(
 }
 
 describe('capture envelope enrichment → captureEnvelopeMeta', () => {
+  it('enriches a canonical episode publication through the wrapper', async () => {
+    await runCaptureEvent({
+      [WRAPPER_CID]: episodeWrapperBody(),
+      [EPISODE_ARTIFACT_CID]: artifactBody(episode(), 'jinn.episode.v1'),
+    });
+
+    expect(db.rows(captureEnvelopeMeta)).toEqual([
+      expect.objectContaining({
+        manifestCid: WRAPPER_CID,
+        contributor: CONTRIBUTOR,
+        taskSummary: 'Fix failing vitest suite',
+        tagsJson: JSON.stringify(['typescript', 'testing', RETRIEVAL_VISIBLE_TAG]),
+        repositorySlug: 'Jinn-Network/mono',
+        synthesis: 'Canonical outcome synthesis.',
+        retrievalVisible: true,
+        verifiabilityTier: 'evaluator-verified',
+        harness: 'jinn-agent 0.5.0',
+        stepCount: 2,
+      }),
+    ]);
+  });
+
   it('writes tags, provenance, contributor and summary from the two-hop fetch', async () => {
     await runCaptureEvent({
       [WRAPPER_CID]: wrapperBody(),
@@ -183,6 +283,25 @@ describe('capture envelope enrichment → captureEnvelopeMeta', () => {
     expect(db.rows(captureEnvelopeMeta)[0]).toMatchObject({ provenance: 'imported' });
   });
 
+  it.each([
+    [
+      'an Episode donation wrapper around a trace body',
+      artifactBody(traceEnvelope(), 'jinn.episode.v1'),
+    ],
+    [
+      'a trace donation wrapper around an Episode body',
+      artifactBody(episode(), 'jinn.trace-envelope.v0'),
+    ],
+  ])('writes no meta row for %s', async (_name, mismatchedBody) => {
+    await runCaptureEvent({
+      [WRAPPER_CID]: episodeWrapperBody(),
+      [EPISODE_ARTIFACT_CID]: mismatchedBody,
+    });
+
+    expect(db.rows(captureEnvelopeMeta)).toHaveLength(0);
+    expect(db.rows(envelope)).toHaveLength(1);
+  });
+
   it('writes no meta row when IPFS fetch fails (anchor row still lands)', async () => {
     await runCaptureEvent({}); // 404 everywhere
     expect(db.rows(captureEnvelopeMeta)).toHaveLength(0);
@@ -224,22 +343,123 @@ describe('capture envelope enrichment → captureEnvelopeMeta', () => {
 });
 
 describe('parseCaptureWrapperLite', () => {
-  it('extracts contributor + trace artifact cid', () => {
-    expect(parseCaptureWrapperLite(wrapperBody())).toEqual({
+  it('prefers the canonical episode artifact when both payload versions are present', () => {
+    expect(parseCaptureWrapperLite(episodeWrapperBody())).toEqual({
       contributor: CONTRIBUTOR,
-      traceArtifactCid: ARTIFACT_CID,
+      artifactType: 'jinn.episode.v1',
+      evidenceArtifactCid: EPISODE_ARTIFACT_CID,
     });
   });
 
-  it('returns null when no trace-envelope artifact is present', () => {
+  it('retains frozen trace-envelope read compatibility', () => {
+    expect(parseCaptureWrapperLite(wrapperBody())).toEqual({
+      contributor: CONTRIBUTOR,
+      artifactType: 'jinn.trace-envelope.v0',
+      evidenceArtifactCid: ARTIFACT_CID,
+    });
+  });
+
+  it('returns null when no evidence artifact is present', () => {
     expect(parseCaptureWrapperLite({ participant: {}, artifacts: [] })).toBeNull();
     expect(parseCaptureWrapperLite(null)).toBeNull();
   });
 });
 
 describe('parseTraceEnvelopeSignalLite', () => {
+  it('preserves derived historical provenance without collapsing it', () => {
+    expect(
+      parseTraceEnvelopeSignalLite(
+        episode({ provenance: 'derived-from-history', retrievalVisible: false }),
+        'jinn.episode.v1',
+      )?.provenance,
+    ).toBe('derived-from-history');
+  });
+
+  it('reads canonical episode fields without dropping repository, W2, or synthesis metadata', () => {
+    const lite = parseTraceEnvelopeSignalLite(episode(), 'jinn.episode.v1');
+    expect(lite).toMatchObject({
+      taskSummary: 'Fix failing vitest suite',
+      tagsJson: JSON.stringify(['typescript', 'testing', RETRIEVAL_VISIBLE_TAG]),
+      repositorySlug: 'Jinn-Network/mono',
+      synthesis: 'Canonical outcome synthesis.',
+      retrievalVisible: true,
+      provenance: 'contributed',
+      verifiabilityTier: 'evaluator-verified',
+      harness: 'jinn-agent 0.5.0',
+      model: 'gpt-5.4-mini',
+      toolsJson: JSON.stringify(['read', 'edit', 'bash']),
+      stepCount: 2,
+    });
+  });
+
+  it('decodes a donation-encoded canonical episode', () => {
+    expect(
+      parseTraceEnvelopeSignalLite(
+        artifactBody(episode(), 'jinn.episode.v1'),
+        'jinn.episode.v1',
+      ),
+    ).toMatchObject({
+      repositorySlug: 'Jinn-Network/mono',
+      verifiabilityTier: 'evaluator-verified',
+      stepCount: 2,
+    });
+  });
+
+  it('retains the pre-unification Episode tag as read compatibility', () => {
+    const legacyMarkedEpisode = episode();
+    delete legacyMarkedEpisode['retrievalVisible'];
+    expect(
+      parseTraceEnvelopeSignalLite(legacyMarkedEpisode, 'jinn.episode.v1')?.retrievalVisible,
+    ).toBe(true);
+  });
+
+  it('keeps an explicit canonical false authoritative over a stale legacy tag', () => {
+    expect(
+      parseTraceEnvelopeSignalLite(
+        episode({ retrievalVisible: false }),
+        'jinn.episode.v1',
+      )?.retrievalVisible,
+    ).toBe(false);
+  });
+
+  it('falls back to the seeded synthesis trajectory attribute', () => {
+    const lite = parseTraceEnvelopeSignalLite(
+      episode({
+        outcome: { status: 'completed', verificationStrength: 'tests-passed' },
+      }),
+      'jinn.episode.v1',
+    );
+    expect(lite?.synthesis).toBe('Step fallback synthesis.');
+  });
+
+  it('derives retrieval visibility from the frozen trace tag', () => {
+    const lite = parseTraceEnvelopeSignalLite(
+      traceEnvelope({
+        task: {
+          summary: 'Legacy visible trace',
+          distributionTags: ['testing', RETRIEVAL_VISIBLE_TAG],
+          repositorySlug: 'Jinn-Network/mono',
+        },
+        outcome: {
+          status: 'completed',
+          verifiabilityTier: 'tests-passed',
+          summary: 'Legacy outcome synthesis.',
+        },
+      }),
+      'jinn.trace-envelope.v0',
+    );
+    expect(lite).toMatchObject({
+      repositorySlug: 'Jinn-Network/mono',
+      synthesis: 'Legacy outcome synthesis.',
+      retrievalVisible: true,
+    });
+  });
+
   it('decodes the donation encoding', () => {
-    const lite = parseTraceEnvelopeSignalLite(artifactBody(traceEnvelope()));
+    const lite = parseTraceEnvelopeSignalLite(
+      artifactBody(traceEnvelope()),
+      'jinn.trace-envelope.v0',
+    );
     expect(lite).toMatchObject({
       taskSummary: 'Fix failing vitest suite',
       provenance: 'contributed',
@@ -248,13 +468,19 @@ describe('parseTraceEnvelopeSignalLite', () => {
   });
 
   it('tolerates a raw trace body and defaults provenance to contributed', () => {
-    const lite = parseTraceEnvelopeSignalLite(traceEnvelope());
+    const lite = parseTraceEnvelopeSignalLite(
+      traceEnvelope(),
+      'jinn.trace-envelope.v0',
+    );
     expect(lite?.tagsJson).toBe(JSON.stringify(['typescript', 'testing']));
     expect(lite?.provenance).toBe('contributed');
   });
 
   it('extracts the #1406 detail fields from environment + steps', () => {
-    const lite = parseTraceEnvelopeSignalLite(artifactBody(traceEnvelope()));
+    const lite = parseTraceEnvelopeSignalLite(
+      artifactBody(traceEnvelope()),
+      'jinn.trace-envelope.v0',
+    );
     expect(lite).toMatchObject({
       harness: 'jinn-agent 0.4.2',
       model: 'gpt-5.4-mini',
@@ -264,17 +490,25 @@ describe('parseTraceEnvelopeSignalLite', () => {
   });
 
   it('defaults the detail fields when environment/steps are absent', () => {
-    const lite = parseTraceEnvelopeSignalLite({
-      schemaVersion: 'jinn.trace-envelope.v0',
-      task: { summary: 's', distributionTags: ['x'] },
-      outcome: { verifiabilityTier: 'user-accepted' },
-      provenance: 'contributed',
-    });
+    const lite = parseTraceEnvelopeSignalLite(
+      {
+        schemaVersion: 'jinn.trace-envelope.v0',
+        task: { summary: 's', distributionTags: ['x'] },
+        outcome: { verifiabilityTier: 'user-accepted' },
+        provenance: 'contributed',
+      },
+      'jinn.trace-envelope.v0',
+    );
     expect(lite).toMatchObject({ harness: '', model: '', toolsJson: '[]', stepCount: 0 });
   });
 
   it('rejects undecodable data', () => {
-    expect(parseTraceEnvelopeSignalLite({ data: '!!!not-base64-json!!!' })).toBeNull();
+    expect(
+      parseTraceEnvelopeSignalLite(
+        { artifactType: 'jinn.trace-envelope.v0', data: '!!!not-base64-json!!!' },
+        'jinn.trace-envelope.v0',
+      ),
+    ).toBeNull();
   });
 });
 

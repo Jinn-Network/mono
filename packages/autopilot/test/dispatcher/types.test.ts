@@ -1,6 +1,19 @@
 import { describe, it, expect } from 'vitest';
+import {
+  EFFORTS,
+  EFFORT_SET,
+  ISSUE_SHAPES,
+  ISSUE_SHAPE_SET,
+} from '../../src/dispatcher/types.js';
 import { DEFAULT_CONFIG } from '../../src/dispatcher/types.js';
 import type { PolledPr, ReviewablePr, InFlightReview } from '../../src/dispatcher/types.js';
+
+describe('dispatcher taxonomy literals', () => {
+  it('derives validation sets from the canonical shape/effort arrays', () => {
+    expect([...ISSUE_SHAPE_SET]).toEqual([...ISSUE_SHAPES]);
+    expect([...EFFORT_SET]).toEqual([...EFFORTS]);
+  });
+});
 
 describe('review-loop types', () => {
   it('DEFAULT_CONFIG carries review-loop fields', () => {
@@ -23,7 +36,7 @@ describe('review-loop types', () => {
     expect(s.prNumber).toBe(42);
   });
 
-  it('DEFAULT_CONFIG.implementerRules is empty (no policy = single-implementer)', () => {
-    expect(DEFAULT_CONFIG.implementerRules).toEqual([]);
+  it('DEFAULT_CONFIG uses one process-wide Claude runtime', () => {
+    expect(DEFAULT_CONFIG.runtime).toBe('claude');
   });
 });

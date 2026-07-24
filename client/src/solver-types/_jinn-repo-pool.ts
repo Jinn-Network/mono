@@ -1,10 +1,17 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { z } from 'zod';
-import { JinnRepoTaskSchema } from './jinn-repo.js';
+// zod/v3, not zod: `JinnRepoMergedPrTaskSchema` is re-exported from the SDK's
+// zod/v3-authored schema (see ./jinn-repo.ts), and `.extend()` needs its shape
+// values to be zod/v3 ZodType instances to interop correctly with the base
+// schema's zod/v3 ZodObject.
+import { z } from 'zod/v3';
+import { JinnRepoMergedPrTaskSchema } from './jinn-repo.js';
 
+// Pool items are mined exclusively from merged PRs (see jinn-repo-extract.ts) —
+// gold tests and a reference solution only exist retrospectively, so the pool
+// item extends the merged-pr branch, never the live-issue branch.
 // Pool item = the solver-visible task + evaluator-side secrets (gold tests, reference solution).
-export const JinnRepoPoolItemSchema = JinnRepoTaskSchema.extend({
+export const JinnRepoPoolItemSchema = JinnRepoMergedPrTaskSchema.extend({
   gold_tests: z.record(z.string(), z.string()),  // relpath -> file contents (evaluator-side)
   solution_patch: z.string(),                     // reference fix (admission only; never shown to solver)
 });

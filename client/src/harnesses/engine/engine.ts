@@ -19,10 +19,6 @@ import {
   type SyntheticTaskProvenance,
 } from '../../solver-types/_swe-rebench-v2-synthetic-claim.js';
 import {
-  buildMineableRecord,
-  type MineableTraceStore,
-} from '../../solver-types/_swe-rebench-v2-mineable-store.js';
-import {
   reapWorkDirs,
   DEFAULT_ORPHAN_MAX_AGE_MS,
   type ReapWorkDirsReport,
@@ -35,6 +31,12 @@ import {
   type PackagingDeps,
 } from './packaging.js';
 import { DONATION_ARTIFACT_ENCODING } from './artifact-scrub.js';
+import { loadCorpusKnowledge, buildCorpusKnowledgePayload } from './corpus-knowledge.js';
+import { harvestGeneratorModel } from './generator-model.js';
+import type { CorpusKnowledgeRecordRef } from './corpus-knowledge.js';
+import { projectEnvelope } from '../../corpus/envelope-projection.js';
+import type { ReadOnlyCorpus } from '../../mcp/search-records.js';
+import { redactRpcUrls } from '../../util/redact-rpc-urls.js';
 import {
   assembleAndSignEnvelope,
   type EnvelopeAssemblyDeps,
@@ -74,8 +76,10 @@ import type { ArtifactSource, Role } from '../../types/envelope.js';
 import type { Task } from '../../types/task.js';
 import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
 import { addTranscriptSpans } from '../../trajectory/transcript-to-spans/index.js';
-import { buildScrubPipeline } from '../../trajectory/scrub/build.js';
-import type { ScrubPipeline } from '../../trajectory/scrub/pipeline.js';
+import {
+  buildScrubPipeline,
+  type ScrubPipeline,
+} from '@jinn-network/core/scrub';
 import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
 import { VerdictCode } from '../../adapters/mech/verdict-code.js';
 import { buildInfo } from '../../build-info.js';
@@ -98,6 +102,28 @@ export class NotImplementedError extends Error {
     super(`[NotImplemented] ${transitionName} — fill in via subsequent task`);
     this.name = 'NotImplementedError';
     this.transitionName = transitionName;
+  }
+}
+
+/**
+ * A task cannot leave DISCOVERED until its canonical TaskCreated block has a
+ * valid timestamp. Exhausting the bounded lookup is recoverable: a later
+ * engine pass can query a healthy/caught-up RPC and continue the same row.
+ */
+export class TaskCreationTimestampUnavailableError extends Error {
+  readonly requestId: string;
+  readonly blockNumber: number;
+  readonly cause: unknown;
+
+  constructor(requestId: string, blockNumber: number, cause: unknown) {
+    super(
+      `authoritative task creation timestamp unavailable for ${requestId} `
+      + `(block ${blockNumber})`,
+    );
+    this.name = 'TaskCreationTimestampUnavailableError';
+    this.requestId = requestId;
+    this.blockNumber = blockNumber;
+    this.cause = cause;
   }
 }
 
@@ -277,23 +303,6 @@ export interface TaskEngineOptions {
    */
   deliveryDeps?: DeliveryDeps;
   /**
-   * Mineable-trace store (task-creator spec §10, decision D2, tier-1). When
-   * provided, pack() best-effort-appends a MineableTraceRecord for
-   * restoration tasks whose spec carries repo identity (repo + baseCommit)
-   * and whose impl produced a solution patch — other solver types are
-   * skipped rather than fabricating values. Absent by default: no record is
-   * ever written unless the daemon constructed this store under explicit
-   * `'retain_local'` consent (see `config.mineableTraces.consent` in
-   * `client/src/config.ts`). Store errors are logged and never fail the task.
-   */
-  mineableStore?: MineableTraceStore;
-  /**
-   * Tier-2 (D2) "publish/admit as a task" consent, stamped onto every record
-   * this engine appends via `mineableStore`. Independent of the tier-1 gate
-   * above — see `config.mineableTraces.publishConsent`. Defaults to false.
-   */
-  mineablePublishConsent?: boolean;
-  /**
    * Impl registry for resolving which Harness to run.
    * When provided and findFor() returns an impl, runImpl() dispatches to it.
    */
@@ -431,7 +440,48 @@ export interface TaskEngineOptions {
      */
     disabled?: boolean;
   };
+
+  /**
+   * Corpus knowledge autoload (#1393). Before each restoration harness
+   * spawn, the engine queries the corpus for prior solution records of the
+   * task's solverType and injects the top few into
+   * task.context.corpusKnowledge. The injection exists only in the in-memory
+   * ctx.task handed to the harness — unlike context.restorationResult (which
+   * the adapter attaches at task construction and which persists in
+   * task_payload), it is never persisted into the signed Task and never
+   * re-hashed. The durable record of what was injected is the run's
+   * consumed_refs_json column.
+   *
+   * - `corpus`: read-only corpus for network results; when absent/null the
+   *   lookup is store-only (local envelope projections + served artifacts).
+   * - `enabled`: opt-out; defaults to true (config: engine.knowledgeAutoload).
+   *
+   * Failures never block the solve path: the lookup is time-bounded and
+   * error-swallowing (loadCorpusKnowledge never throws).
+   */
+  knowledge?: { corpus?: ReadOnlyCorpus | null; enabled?: boolean };
+
+  /**
+   * Resolves the on-chain block timestamp for a task's creation block
+   * (#1827). Production wires this for every new task. It remains optional so
+   * historical/test callers can parse and exercise pre-field rows without
+   * fabricating a value.
+   *
+   * Returns `undefined` on a resolvable-but-unknown block. Undefined values
+   * and thrown transport errors are retried; a new envelope is never signed
+   * without the authoritative timestamp.
+   */
+  blockTimestamp?: {
+    getBlockTimestamp(blockNumber: number): Promise<number | undefined>;
+    /** Configured URLs let the redactor also strip detached API-key material. */
+    configuredRpcUrls?: readonly string[];
+  };
 }
+
+const TASK_CREATION_TIMESTAMP_LOOKUP_ATTEMPTS = 3;
+
+/** Min interval between transient-RPC tick_error emits per requestId (#934). */
+export const TRANSIENT_TICK_ERROR_HEARTBEAT_MS = 5 * 60_000;
 
 // ── Recovery report ───────────────────────────────────────────────────────────
 
@@ -466,14 +516,13 @@ export class TaskEngine {
   protected readonly packagingDeps: TaskEngineOptions['packagingDeps'];
   protected readonly envelopeDeps: TaskEngineOptions['envelopeDeps'];
   protected readonly deliveryDeps: TaskEngineOptions['deliveryDeps'];
-  protected readonly mineableStore: TaskEngineOptions['mineableStore'];
-  protected readonly mineablePublishConsent: boolean;
   protected readonly implRegistry: TaskEngineOptions['implRegistry'];
   protected readonly solverNetRegistry: TaskEngineOptions['solverNetRegistry'];
   protected readonly scrubPipeline: ScrubPipeline;
   protected readonly joinedSolverNets: TaskEngineOptions['joinedSolverNets'];
   protected readonly operatorSafeAddress: TaskEngineOptions['operatorSafeAddress'];
   protected readonly manifestResolver: TaskEngineOptions['manifestResolver'];
+  protected readonly blockTimestamp: TaskEngineOptions['blockTimestamp'];
   protected readonly identityPublisher: TaskEngineOptions['identityPublisher'];
   protected readonly reputationFeedback: TaskEngineOptions['reputationFeedback'];
   protected readonly operatorConfig: TaskEngineOptions['operatorConfig'];
@@ -511,6 +560,20 @@ export class TaskEngine {
   // Keyed by requestId; cleared after successful pack.
   private readonly trajectoryRefs = new Map<string, { cid: string; sha256: string; sources?: ArtifactSource[] } | null>();
   private readonly runtimePluginsByRequest = new Map<string, RuntimePlugin[]>();
+
+  // Corpus knowledge already resolved for this requestId's current run
+  // (#1393 review finding 3). A value (string) means knowledge was found and
+  // injected; `null` means the lookup ran and genuinely found nothing.
+  // Presence in the map (checked via .has) means "already resolved" either
+  // way, so a RUNNING retry/recovery re-drive (transient harness/RPC error,
+  // or crash-recovery via _recoverDispatch — neither transitions the task
+  // out of RUNNING) reuses this instead of re-querying the corpus and
+  // re-emitting the corpus_knowledge event. Cleared after successful pack.
+  private readonly consumedRefsByRequest = new Map<string, string | null>();
+
+  /** requestId → epoch ms of last transient tick_error emit (#934) */
+  private readonly lastTransientTickErrorAt = new Map<string, number>();
+
   private readonly processingRequestIds = new Set<string>();
 
   /** Set by stop(); causes runTickLoop to exit at the next iteration. */
@@ -523,6 +586,9 @@ export class TaskEngine {
   /** Working-dir reaper tuning (issue #320). */
   protected readonly workDirReaperOpts: { orphanMaxAgeMs: number; disabled: boolean };
 
+  /** Corpus knowledge autoload options (#1393). */
+  protected readonly knowledge: TaskEngineOptions['knowledge'];
+
   constructor(opts: TaskEngineOptions) {
     this.persistence = new TaskRunPersistence(opts.store.db);
     this.store = opts.store;
@@ -530,18 +596,18 @@ export class TaskEngine {
     this.packagingDeps = opts.packagingDeps;
     this.envelopeDeps = opts.envelopeDeps;
     this.deliveryDeps = opts.deliveryDeps;
-    this.mineableStore = opts.mineableStore;
-    this.mineablePublishConsent = opts.mineablePublishConsent ?? false;
     this.implRegistry = opts.implRegistry;
     this.solverNetRegistry = opts.solverNetRegistry;
     this.scrubPipeline = opts.scrubPipeline ?? buildScrubPipeline();
     this.joinedSolverNets = opts.joinedSolverNets;
     this.operatorSafeAddress = opts.operatorSafeAddress;
     this.manifestResolver = opts.manifestResolver;
+    this.blockTimestamp = opts.blockTimestamp;
     this.identityPublisher = opts.identityPublisher;
     this.reputationFeedback = opts.reputationFeedback;
     this.operatorConfig = opts.operatorConfig;
     this.harnessMode = opts.harnessMode ?? 'train';
+    this.knowledge = opts.knowledge;
     this.workDirReaperOpts = {
       orphanMaxAgeMs: opts.workDirReaper?.orphanMaxAgeMs ?? DEFAULT_ORPHAN_MAX_AGE_MS,
       disabled: opts.workDirReaper?.disabled ?? false,
@@ -870,6 +936,9 @@ export class TaskEngine {
         // Terminal — nothing to do.
         break;
     }
+
+    // Successful progress: allow a future outage to emit a fresh first tick_error (#934).
+    this.lastTransientTickErrorAt.delete(requestId);
   }
 
   // ── Transition stubs ────────────────────────────────────────────────────────
@@ -896,6 +965,15 @@ export class TaskEngine {
       throw new Error(reason);
     }
 
+    // A new envelope must carry the authoritative TaskCreated block timestamp.
+    // Resolve it before leaving DISCOVERED; a transient RPC failure gets a
+    // bounded in-call retry and then remains in-flight through the engine's
+    // existing recoverable-error classifier. Never advance with a missing
+    // value and later fabricate or omit task.createdAt.
+    if (this.blockTimestamp && task.onchainCreationTimestamp == null) {
+      await this.resolveTaskCreationTimestamp(task);
+    }
+
     // The event path and tick loop can race on the same DISCOVERED row; if
     // another caller already advanced it, treat this as idempotent.
     const current = this.persistence.getByRequestId(task.requestId);
@@ -910,6 +988,50 @@ export class TaskEngine {
         `[harness-engine] ${task.requestId}: claim completed but state is already ${current.state}; skipping CLAIMED transition`,
       );
     }
+  }
+
+  private async resolveTaskCreationTimestamp(task: PersistedTaskRun): Promise<number> {
+    if (!this.blockTimestamp) {
+      throw new Error(
+        `authoritative task creation timestamp resolver is unavailable for ${task.requestId}`,
+      );
+    }
+
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= TASK_CREATION_TIMESTAMP_LOOKUP_ATTEMPTS; attempt++) {
+      try {
+        const timestampSec = await this.blockTimestamp.getBlockTimestamp(
+          task.onchainCreationBlock,
+        );
+        if (
+          timestampSec !== undefined
+          && Number.isSafeInteger(timestampSec)
+          && timestampSec >= 0
+        ) {
+          this.persistence.setOnchainCreationTimestamp(task.requestId, timestampSec);
+          return timestampSec;
+        }
+        lastError = new Error(
+          `RPC returned no valid timestamp for block ${task.onchainCreationBlock}`,
+        );
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    const safeError = redactRpcUrls(
+      lastError,
+      this.blockTimestamp.configuredRpcUrls ?? [],
+    );
+    console.warn(
+      `[harness-engine] ${task.requestId}: authoritative task creation timestamp unavailable `
+      + `after ${TASK_CREATION_TIMESTAMP_LOOKUP_ATTEMPTS} attempts: ${safeError}`,
+    );
+    throw new TaskCreationTimestampUnavailableError(
+      task.requestId,
+      task.onchainCreationBlock,
+      lastError,
+    );
   }
 
   async releaseClaimedNotStarted(): Promise<string[]> {
@@ -1359,6 +1481,98 @@ export class TaskEngine {
     ];
     this.runtimePluginsByRequest.set(task.requestId, attributedPlugins);
 
+    // #1393: corpus knowledge autoload. Restoration runs only — never bias
+    // evaluators with prior solutions. The lookup is bounded (10 s) and
+    // never throws; failure or an empty result simply injects nothing.
+    // consumedRefsJson is ALSO persisted at the RUNNING → POST_SNAPSHOT
+    // transition below (harmless re-write of the same value — see
+    // resolveFreshKnowledge) so a crash-free run still gets a single,
+    // consistent column write; it stays null when nothing was injected.
+    let taskForCtx = task.task;
+    let consumedRefsJson: string | null = null;
+
+    // #1393 review finding 3 (fresh lookup + immediate persist) and finding
+    // 1/2 of the follow-up review (cross-restart durability + malformed-JSON
+    // guard). Runs the corpus query, injects the result, emits the
+    // corpus_knowledge event, and — critically — persists consumedRefsJson
+    // to the DB immediately (setConsumedRefsJson), BEFORE harness spawn.
+    // Without the immediate persist, a crash between the lookup and the
+    // RUNNING → POST_SNAPSHOT transition would leave consumed_refs_json
+    // null; a restarted process (empty in-memory cache) would then re-query
+    // the corpus and re-emit a duplicate corpus_knowledge event.
+    const resolveFreshKnowledge = async (): Promise<void> => {
+      if (!taskForCtx) return;
+      const knowledgePayload = await loadCorpusKnowledge({
+        corpus: this.knowledge?.corpus ?? null,
+        store: this.store,
+        solverType,
+      });
+      if (knowledgePayload) {
+        // Shallow clone: the injected context lives only in the runtime Task
+        // handed to the harness. Envelope integrity references taskCid, so
+        // nothing signed or hashed changes.
+        taskForCtx = {
+          ...taskForCtx,
+          context: { ...taskForCtx.context, corpusKnowledge: knowledgePayload },
+        };
+        consumedRefsJson = JSON.stringify(knowledgePayload.records);
+        emitEvent(this.store, {
+          kind: 'corpus_knowledge',
+          requestId: task.requestId,
+          solverType,
+          outcome: 'ok',
+          detail: JSON.stringify(knowledgePayload.records.map((record) => ({
+            envelopeCid: record.envelopeCid,
+            artifacts: record.artifacts.map((artifact) => artifact.sha256),
+          }))),
+        }, 'harness-engine');
+      }
+      this.consumedRefsByRequest.set(task.requestId, consumedRefsJson);
+      this.persistence.setConsumedRefsJson(task.requestId, consumedRefsJson);
+    };
+
+    if (role === 'restoration' && solverType && this.knowledge?.enabled !== false && taskForCtx) {
+      // A RUNNING retry/recovery re-drive (transient harness/RPC error left
+      // the row at RUNNING, or crash-recovery via _recoverDispatch) must not
+      // re-query the corpus or re-emit corpus_knowledge — reuse whatever
+      // this run already resolved, found or not. Prefer the in-memory map
+      // (same-process retries); fall back to the persisted column (the
+      // cross-restart case — a fresh TaskEngine instance has no in-memory
+      // record of a prior process's resolution).
+      const alreadyResolved = this.consumedRefsByRequest.has(task.requestId)
+        ? this.consumedRefsByRequest.get(task.requestId)!
+        : task.consumedRefsJson;
+      const seenBefore = this.consumedRefsByRequest.has(task.requestId) || task.consumedRefsJson !== null;
+
+      if (seenBefore) {
+        try {
+          consumedRefsJson = alreadyResolved;
+          if (consumedRefsJson) {
+            const cachedRecords = JSON.parse(consumedRefsJson) as CorpusKnowledgeRecordRef[];
+            taskForCtx = {
+              ...taskForCtx,
+              context: { ...taskForCtx.context, corpusKnowledge: buildCorpusKnowledgePayload(solverType, cachedRecords) },
+            };
+          }
+        } catch (err) {
+          // #1393 review finding 2 (follow-up): a malformed persisted value
+          // must never wedge the run — corpus problems can never block the
+          // solve path (AC3). Log and fall through to a fresh lookup, which
+          // also overwrites the bad value so subsequent retries don't hit it
+          // again.
+          console.warn(
+            `[harness-engine] ${task.requestId}: malformed persisted consumedRefsJson `
+            + `(${err instanceof Error ? err.message : String(err)}) — treating as not-yet-resolved`,
+          );
+          taskForCtx = task.task;
+          consumedRefsJson = null;
+          await resolveFreshKnowledge();
+        }
+      } else {
+        await resolveFreshKnowledge();
+      }
+    }
+
     const workingDir = task.workingDir ?? join(this.paths.workingDirRoot, task.requestId);
     const kindSeg = solverType.replace(/[.:]/g, '_');
     const implStateDir = task.implStateDir ?? (
@@ -1380,7 +1594,7 @@ export class TaskEngine {
 
     try {
       const ctx: HarnessContext = {
-        task: (task.task ?? {
+        task: (taskForCtx ?? {
           id: task.requestId,
           description: '',
           ...(task.solverType ? { solverType: task.solverType, spec: {} } : {}),
@@ -1454,6 +1668,7 @@ export class TaskEngine {
             solutionOutputsJson: JSON.stringify(skippedOutput),
             implName: impl.name,
             runtimePluginsJson: JSON.stringify(attributedPlugins),
+            consumedRefsJson,
           });
           console.log(`[harness-engine] ${task.requestId} RUNNING → POST_SNAPSHOT via impl=${impl.name} (skipped)`);
           return;
@@ -1506,6 +1721,7 @@ export class TaskEngine {
         solutionOutputsJson: JSON.stringify(output),
         implName: impl.name,
         runtimePluginsJson: JSON.stringify(attributedPlugins),
+        consumedRefsJson,
       });
     } finally {
       clearTimeout(endTimer);
@@ -1777,59 +1993,15 @@ export class TaskEngine {
       };
     }
 
-    // 3b. Mineable-trace record (task-creator spec §10, D2 tier-1). Best-effort
-    // and never fatal — a store failure must not fail the task. Only records
-    // for restoration tasks whose spec carries repo identity (repo +
-    // baseCommit) and whose impl produced a solution patch; other solver
-    // types are skipped rather than fabricating values (§10 contract fields
-    // 1-2). `intermediateFailureDiffs` is always [] here — the engine has no
-    // retry-loop plumbing at this hook point today, an honest gap against
-    // contract field 4, not invented data.
-    if (this.mineableStore && !isEvaluation) {
-      try {
-        // Synthetic tasks (minted echoes) must never be re-recorded as mineable
-        // traces — that would let a future harvest mint an echo of an echo,
-        // severing lineage (spec §7: no second-generation echoes).
-        const synthetic = task.task?.eligibility?.['syntheticProvenance'] as
-          | SyntheticTaskProvenance
-          | undefined;
-        const spec = task.task?.spec as Record<string, unknown> | undefined;
-        const repo = typeof spec?.['repo'] === 'string' ? spec['repo'] : undefined;
-        const baseCommit = typeof spec?.['base_commit'] === 'string' ? spec['base_commit'] : undefined;
-        const sourceInstanceId = typeof spec?.['instance_id'] === 'string' ? spec['instance_id'] : undefined;
-        const acceptedDiff =
-          typeof implOutput?.solutionPayload?.['patch'] === 'string'
-            ? (implOutput.solutionPayload['patch'] as string)
-            : undefined;
-        if (synthetic?.synthetic) {
-          console.debug(
-            `[harness-engine] ${task.requestId}: mineable-trace record skipped — task is a synthetic mint (no second-generation echoes)`,
-          );
-        } else if (repo && baseCommit && acceptedDiff) {
-          const record = buildMineableRecord({
-            sourceId: task.requestId,
-            kind: 'solvernet-execution',
-            repo,
-            baseCommit,
-            acceptedDiff,
-            intermediateFailureDiffs: [],
-            ...(sourceInstanceId !== undefined ? { sourceInstanceId } : {}),
-            publishMinedTasksConsent: this.mineablePublishConsent,
-            now: () => new Date().toISOString(),
-          });
-          await this.mineableStore.append(record, 'retain_local');
-        } else {
-          console.debug(
-            `[harness-engine] ${task.requestId}: mineable-trace record skipped — repo/baseCommit/patch not present for this solver type`,
-          );
-        }
-      } catch (err) {
-        console.warn(
-          `[harness-engine] ${task.requestId}: mineable-trace record failed (non-fatal):`,
-          err instanceof Error ? err.message : err,
-        );
-      }
-    }
+    // Task-doc repo identity (#1827), read once for the envelope's task
+    // provenance fields. Contribution refs are produced only from canonical
+    // Episodes by the plugin boundary, never from this requestId-based engine.
+    // Correctly absent for solver types without repo identity (e.g.
+    // prediction.*) — not a fabricated default.
+    const taskSpec = task.task?.spec as Record<string, unknown> | undefined;
+    const specRepo = typeof taskSpec?.['repo'] === 'string' ? taskSpec['repo'] : undefined;
+    const specBaseCommit = typeof taskSpec?.['base_commit'] === 'string' ? taskSpec['base_commit'] : undefined;
+    const specInstanceId = typeof taskSpec?.['instance_id'] === 'string' ? taskSpec['instance_id'] : undefined;
 
     // 4. Persist generatedAt once (first pack); reuse on retry for CID determinism.
     const generatedAt: number = task.manifestGeneratedAt ?? Date.now();
@@ -1901,6 +2073,24 @@ export class TaskEngine {
     const executorMode = this.modesByRequest.get(task.requestId) ?? 'train';
     const fenceCodeDigest = this.codeDigestsByRequest.get(task.requestId) ?? buildInfo.codeDigest;
 
+    // #1827: generatorModel — harvested from the harness's own transcript
+    // when possible (source: 'stream'), else falls back to the same
+    // SolverNet/daemon-config model string used for executor.model below
+    // (source: 'config'). Never throws.
+    const generatorModelForEnvelope = harvestGeneratorModel(
+      implNameForEnvelope,
+      workingDir,
+      solverNet?.model ?? this.operatorConfig?.claudeModel,
+    );
+
+    let taskCreationTimestamp = task.onchainCreationTimestamp ?? undefined;
+    if (taskCreationTimestamp === undefined && this.blockTimestamp) {
+      // Recovery can resume an older CLAIMED/PACKAGING row that never passed
+      // through today's claim-time resolver. Re-resolve before signing so the
+      // new writer still cannot emit a provenance tuple without createdAt.
+      taskCreationTimestamp = await this.resolveTaskCreationTimestamp(task);
+    }
+
     const envelopeInputs: EnvelopeInputs = {
       solverType,
       role,
@@ -1909,6 +2099,13 @@ export class TaskEngine {
         onchainCreationTx: task.onchainCreationTx,
         onchainCreationBlock: task.onchainCreationBlock,
         requestId: task.requestId,
+        // #1827: authoritative TaskCreated block timestamp. Production
+        // resolves or parks/fails before this new envelope is signed; it is
+        // absent only for historical/test callers without the resolver.
+        ...(taskCreationTimestamp !== undefined ? { createdAt: taskCreationTimestamp } : {}),
+        ...(specInstanceId ? { instanceId: specInstanceId } : {}),
+        ...(specRepo ? { repo: specRepo } : {}),
+        ...(specBaseCommit ? { baseCommit: specBaseCommit } : {}),
       },
       participant: { safeAddress, agentEoa },
       window: { startTs: task.windowStartTs, endTs: task.windowEndTs },
@@ -1930,6 +2127,10 @@ export class TaskEngine {
         // default from operatorConfig.claudeModel (jinn-mono-gbut, gh#191).
         // Left undefined when neither is set — the field is optional in the schema.
         model: solverNet?.model ?? this.operatorConfig?.claudeModel,
+        // #1827: structured, honesty-flagged model provenance alongside the
+        // existing plain `model` string (which stays untouched for the
+        // indexer's composition.byModel facet).
+        generatorModel: generatorModelForEnvelope,
       },
       evidenceTier,
       trajectory: envelopeTrajectory,
@@ -1938,12 +2139,42 @@ export class TaskEngine {
       generatedAt,
     };
 
-    const { envelopeCid, envelopeHash } = await assembleAndSignEnvelope(
+    const { envelope, envelopeCid, envelopeHash } = await assembleAndSignEnvelope(
       envelopeInputs,
       this.envelopeDeps,
     );
     const manifestCid = envelopeCid;
     const signatureHash = envelopeHash;
+
+    // #1393: project the just-published envelope into the local corpus index
+    // so the operator's own work is discoverable as knowledge on the next
+    // run (and by MCP search_records). Upsert keyed on envelope_id — a
+    // pack() retry overwrites idempotently. Never fatal: a projection
+    // failure must not fail packaging.
+    // NOTE: taskCid is deliberately NOT passed — projectEnvelope resolves it
+    // from options.task.context.solutionTaskCid (verdicts) or
+    // envelope.task.cid (solutions), both already correct here.
+    //
+    // #1393 review finding 1: the envelope's own evidenceTier (above) is
+    // aspirational for v2/v3 flows — 'committed' is stamped at sign time,
+    // before deliver() has actually landed evidenceHash on chain. Saving
+    // that optimistic tier straight into the corpus-ranking projection means
+    // a race-lost or failed delivery would leave a 'committed' projection
+    // outranking genuinely delivered 'self-signed' work. Save 'self-signed'
+    // here unconditionally; deliver() upgrades it to the real tier only once
+    // on-chain evidence is confirmed (mirrors the ERC-8004 setMetadata move
+    // below — 'committed' must mean observable evidence exists, not intent).
+    try {
+      this.store.saveEnvelopeProjection({
+        ...projectEnvelope(envelope, { envelopeCid, task: task.task }),
+        evidenceTier: 'self-signed',
+      });
+    } catch (err) {
+      console.warn(
+        `[harness-engine] ${task.requestId}: envelope projection failed (non-fatal): `
+        + `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
 
     // 6. ERC-8004 IdentityRegistry per-execution `setMetadata` fires in
     //    deliver() AFTER claimDelivery succeeds. 'committed' must mean
@@ -1990,6 +2221,7 @@ export class TaskEngine {
     this.trajectoryRefs.delete(task.requestId);
     this.modesByRequest.delete(task.requestId);
     this.codeDigestsByRequest.delete(task.requestId);
+    this.consumedRefsByRequest.delete(task.requestId);
   }
 
   /**
@@ -2043,6 +2275,25 @@ export class TaskEngine {
       deliveryTxHash,
     });
     console.log(`[harness-engine] ${requestId} DELIVERING → COMPLETE deliveryTx=${deliveryTxHash} claimTx=${claimTxHash}`);
+
+    // #1393 review finding 1: now that claimDelivery has actually succeeded
+    // (on-chain evidenceHash confirmed), upgrade the local corpus projection
+    // — saved as 'self-signed' by pack() regardless of intent — to the tier
+    // the v2/v3 envelope was really entitled to. A race-lost or failed
+    // delivery never reaches this line, so the projection simply stays
+    // 'self-signed', which is the whole point of the downgrade in pack().
+    // Non-fatal: a projection-tier upgrade failure must not fail an already-
+    // successful delivery.
+    if (this.deliveryDeps.claimDeliveryVariant === 'v2' || this.deliveryDeps.claimDeliveryVariant === 'v3') {
+      try {
+        this.store.upgradeEnvelopeProjectionEvidenceTier(manifestCid, 'committed');
+      } catch (err) {
+        console.warn(
+          `[harness-engine] ${requestId}: envelope projection tier upgrade failed (non-fatal): `
+          + `${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     // Emit a SQLite artifact row so consumers (release acceptance gate, search
     // API) see this cycle alongside legacy-claude / MCP-emitted rows. The
@@ -2432,11 +2683,13 @@ export class TaskEngine {
    *   in the L2 fallback chain failed at once) on a task whose delivery window
    *   is still open: leave the row in its current in-flight state so the next
    *   tick re-drives it once the RPCs recover, and emit a `tick_error` (warn)
-   *   event instead of inflating the FAILED counter. Without this the daemon
-   *   stamped the row FAILED, dropping it from `getInFlight()` permanently, so
-   *   L2 work went silent until a manual restart (#912). Past-window transient
-   *   errors still terminalize to avoid churning on work that can no longer
-   *   settle.
+   *   on first occurrence plus every `TRANSIENT_TICK_ERROR_HEARTBEAT_MS`
+   *   thereafter for that requestId (#934) — not once per failing tick —
+   *   instead of inflating the FAILED counter. Without the leave-in-flight
+   *   path the daemon stamped the row FAILED, dropping it from
+   *   `getInFlight()` permanently, so L2 work went silent until a manual
+   *   restart (#912). Past-window transient errors still terminalize to avoid
+   *   churning on work that can no longer settle.
    * - Everything else: existing markFailed behaviour. When invoked from
    *   recovery, `contextLabel === 'recovery'` so the failure_reason
    *   carries the `recovery:` prefix the original code path used.
@@ -2462,6 +2715,7 @@ export class TaskEngine {
         outcome: 'ok',
         detail,
       }, 'harness-engine');
+      this.lastTransientTickErrorAt.delete(task.requestId);
       return 'race_lost';
     }
     const reason = err instanceof Error ? err.message : String(err);
@@ -2473,18 +2727,34 @@ export class TaskEngine {
     // IS the retry; there is no per-task attempt counter. Skip this only once
     // the delivery window has closed, so we never churn on work that can no
     // longer settle on-chain.
-    if (task.windowEndTs > Date.now() && isRecoverableTransactionError(err)) {
-      emitEvent(this.store, {
-        kind: 'tick_error',
-        requestId: task.requestId,
-        solverType: task.solverType ?? undefined,
-        outcome: 'warn',
-        detail: `transient RPC failure in ${contextLabel}; left ${task.state} for retry: ${reason}`,
-      }, 'harness-engine');
+    const recoverablePrerequisite =
+      err instanceof TaskCreationTimestampUnavailableError;
+    if (
+      task.windowEndTs > Date.now()
+      && (recoverablePrerequisite || isRecoverableTransactionError(err))
+    ) {
+      const now = Date.now();
+      const last = this.lastTransientTickErrorAt.get(task.requestId);
+      if (
+        last === undefined
+        || now - last >= TRANSIENT_TICK_ERROR_HEARTBEAT_MS
+      ) {
+        emitEvent(this.store, {
+          kind: 'tick_error',
+          requestId: task.requestId,
+          solverType: task.solverType ?? undefined,
+          outcome: 'warn',
+          detail:
+            `${recoverablePrerequisite ? 'recoverable prerequisite failure' : 'transient RPC failure'} `
+            + `in ${contextLabel}; left ${task.state} for retry: ${reason}`,
+        }, 'harness-engine');
+        this.lastTransientTickErrorAt.set(task.requestId, now);
+      }
       return 'transient';
     }
     const stamped = contextLabel === 'recovery' ? `recovery: ${reason}` : reason;
     this.persistence.markFailed(task.requestId, stamped);
+    this.lastTransientTickErrorAt.delete(task.requestId);
     return 'failed';
   }
 

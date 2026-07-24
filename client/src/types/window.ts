@@ -1,8 +1,2 @@
-import { z } from 'zod/v3';
-
-export const WindowSchema = z.object({
-  startTs: z.number().int(),
-  endTs: z.number().int(),
-});
-
-export type Window = z.infer<typeof WindowSchema>;
+/** Compatibility export for the core-owned execution window contract. */
+export { WindowSchema, type Window } from '@jinn-network/core';

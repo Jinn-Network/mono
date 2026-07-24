@@ -84,7 +84,8 @@ ETH actually lives across three roles — the **agent address** (gas float for t
     - amount
     - explorer URL
 - **State messages**
-  - runway low
+  - runway low — **warning**. Native ETH runway is below the low threshold (under 3 days at the daily burn estimate) on a given chain. Raised per chain — both the L2 (Base Sepolia) and L1 (Ethereum Sepolia) master wallets carry their own threshold. Names the wallet and chain. Maps to the faucet top-up action.
+  - cannot cover next transaction — **blocking**. The wallet's balance has fallen below the configured minimum (`balanceWei < minEthWei`) on a given chain, so it can no longer fund the next transaction. Distinct, higher-severity counterpart to *runway low*; surfaces `funding_empty` (§2.10).
   - password rotation due
   - faucet rate-limited
   - daily cap reached · resets in &lt;T&gt; — informational; the daily faucet top-up cap is spent and the "request funds from faucet" action is disabled until the cooldown elapses (issue #560)
@@ -291,11 +292,12 @@ Components raise state messages locally. The Notifications component is the unio
 **Canonical notification taxonomy.** New notifications are added to this list, not invented ad-hoc. The list is the source of truth for what a "kind of thing being wrong" is.
 
 - `funding_low`
+- `funding_empty` — a wallet's native balance can no longer cover the next transaction (`balanceWei < minEthWei`), per chain (L2 Base Sepolia and L1 Ethereum Sepolia). Severity: **blocking**. Distinct higher-severity counterpart to `funding_low`. Names the wallet and chain. Derived from `/v1/status` `masterGas` / `l1MasterGas`; clears on the next poll after top-up (§3.4).
 - `password_rotation_due`
 - `harness_not_ready`
 - `bootstrap_blocked`
 - `restart_required`
-- `update_available`
+- `update_available` — a newer `@jinn-network/client` has been published. Backed by the daemon's start-time (and 6-hourly) npm-registry check (#641), surfaced on `/v1/status` as `latestVersion` (with the running `version`). The daemon makes the semver comparison: `latestVersion` holds the latest published version **only when it is strictly newer than the running `version`, else `null`**. The banner derives directly from a non-null `latestVersion`. Gated by `JINN_VERSION_CHECK` (default enabled; opt out with `0`/`false`/`no`/empty). Severity: info.
 - `rpc_unreachable`
 - `rpc_all_failed` — every slot in the RPC fallback chain has failed (`AllRpcsFailedError`). Severity: action_required. The masked host list is included.
 - `rpc_primary_degraded` — slot 0 returned HTTP 429 / 5xx during the boot probe or steady-state traffic; a secondary slot served. Severity: informational.

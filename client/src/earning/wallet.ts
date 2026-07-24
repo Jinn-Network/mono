@@ -11,7 +11,7 @@
 
 import { Wallet } from '@ethereumjs/wallet';
 import { generateMnemonic as scureGenerateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english';
+import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { HDKey } from '@scure/bip32';
 import { Buffer } from 'node:buffer';
 import { getAddress, toHex, type Hex } from 'viem';

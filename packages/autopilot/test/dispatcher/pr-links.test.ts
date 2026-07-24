@@ -25,7 +25,7 @@ describe('fetchIssuePrMap', () => {
     ]);
     const map = await fetchIssuePrMap(runner);
     expect(map.get(50)).toEqual([
-      { prNumber: 500, headRefName: 'feat/50-a', baseRefName: 'next', state: 'OPEN', isDraft: true, author: 'ritsukai' },
+      { prNumber: 500, headRefName: 'feat/50-a', baseRefName: 'next', state: 'OPEN', isDraft: true, author: 'ritsukai', labels: [] },
     ]);
     expect(map.get(60)?.[0].state).toBe('MERGED');
     expect(map.get(61)?.[0].prNumber).toBe(501);

@@ -1,0 +1,7 @@
+{
+  "skill": "distractor/skill-tdd/test-driven-development",
+  "source": "https://github.com/distractor/skill-tdd",
+  "licence": "MIT",
+  "description": "Write a failing test before writing the code that makes it pass.",
+  "skillMd": "---\nname: test-driven-development\ndescription: Write a failing test before writing the code that makes it pass.\n---\n\n# Test-Driven Development\n\n1. Write a failing test that captures the behavior you want.\n2. Run it and confirm it fails for the expected reason.\n3. Write the minimum code needed to make it pass.\n4. Run it again and confirm it passes.\n5. Refactor with the passing test as a safety net.\n\nNever write production code before a failing test proves it is needed.\n"
+}

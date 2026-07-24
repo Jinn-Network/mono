@@ -142,28 +142,8 @@ export class CorpusQueryError extends Error {
   }
 }
 
-export class ManifestFetchError extends Error {
-  constructor(public readonly manifestCid: string, message: string, public readonly cause?: unknown) {
-    super(`manifest ${manifestCid}: ${message}`);
-    this.name = 'ManifestFetchError';
-  }
-}
-
-export class AcquireError extends Error {
-  constructor(public readonly sha256: string, message: string, public readonly cause?: unknown) {
-    super(`acquire ${sha256}: ${message}`);
-    this.name = 'AcquireError';
-  }
-}
-
-export class HashMismatchError extends Error {
-  constructor(
-    public readonly sha256Expected: string,
-    public readonly sha256Actual: string,
-    public readonly source: string,
-    public readonly sourceOperator?: string,
-  ) {
-    super(`hash mismatch: expected ${sha256Expected}, got ${sha256Actual} from ${source}`);
-    this.name = 'HashMismatchError';
-  }
-}
+export {
+  ManifestFetchError,
+  AcquireError,
+  HashMismatchError,
+} from '@jinn-network/core/corpus-read';

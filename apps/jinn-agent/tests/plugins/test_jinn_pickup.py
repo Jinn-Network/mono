@@ -1,202 +1,326 @@
-"""Payload-agnostic auto-pickup tests (mono #1345, tier-keyed design).
+"""Evidence-first auto-pickup tests (Stage 1 rescope R3, closes mono #1732).
 
-The policy under test: adoption is gated by VERIFICATION TIER, not by a
-human keystroke — `evaluator-verified` payloads adopt automatically;
-unverified ones are suggested to the agent as injected context; unknown
-payload types are never adopted; and none of it is consent-gated
-(consuming is always allowed).
+The policy under test lives in `packages/plugin` now (rescope R1) — pickup.py
+is a thin delegation to `jinn-layer session pickup`. These tests cover the
+delegation itself: request shape, verbatim contextBlock rendering, activity
+recording, the evidence signal line, and every fail-open path (missing
+binary, malformed response, contract mismatch, disabled config, a stale
+layer whose response predates the `packets` field).
 """
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import importlib
 import json
-from pathlib import Path
+import importlib
+import hashlib
 
 import pytest
 
 jinn = importlib.import_module("plugins.jinn")
-consent = importlib.import_module("plugins.jinn.consent")
 pickup = importlib.import_module("plugins.jinn.pickup")
-skills_install = importlib.import_module("plugins.jinn.skills_install")
+jinn_layer = importlib.import_module("plugins.jinn.jinn_layer")
 
-REF = "bafyPickupSkill"
+MSG = "The client dashboard vitest suite is flaky again — the update_available check races the version status fetch"
+
+CONTEXT_BLOCK = (
+    "[jinn corpus] Prior evidence relevant to this task:\n"
+    "Fix the dashboard flake · completed/tests-passed\n"
+    "- failure: FAIL version-status.test.ts\n"
+    "  source: bafySourceEpisode · operator-recorded-session · captured 2026-07-04 · "
+    "full episode: corpus_fetch bafySourceEpisode"
+)
 
 
-def trace(tier: str = "user-accepted", payload: str = "skill", slug: str = "tdd") -> dict:
-    step_attrs: dict = {"seed.attribution": {"skill": f"acme/skills/{slug}"}}
-    if payload == "skill":
-        step_attrs["skill.md"] = f"# {slug}\n\nRed, green, refactor."
-    return {
-        "schemaVersion": "jinn.trace-envelope.v0",
-        "task": {"summary": f"Seed import: acme/skills/{slug}", "distributionTags": ["seed-import", slug]},
-        "steps": [{"spanId": "s1", "name": "seed:skill-md", "attributes": step_attrs}],
-        "outcome": {"status": "completed", "verifiabilityTier": tier},
-        "provenance": "imported",
+def ok_response(**value_overrides) -> str:
+    value = {
+        "contextBlock": CONTEXT_BLOCK,
+        "packets": [{"ref": "bafySourceEpisode"}],
+        "searchedTerms": ["dashboard", "vitest", "update_available"],
+        "eligibleRefs": ["bafySourceEpisode"],
+        "deliveredRefs": ["bafySourceEpisode"],
+        "deliveryMode": "delivered",
+        **value_overrides,
     }
+    return json.dumps({"contractVersion": 1, "status": "ok", "value": value})
 
 
-def record_for(t: dict) -> dict:
-    content = json.dumps(t).encode("utf-8")
-    return {
-        "ref": REF,
-        "artifacts": [{
-            "artifactType": "jinn.trace-envelope.v0",
-            "sha256": hashlib.sha256(content).hexdigest(),
-            "contentBase64": base64.b64encode(content).decode("ascii"),
-        }],
-    }
+class PickupRunner:
+    """Serves `jinn-layer session pickup` with one canned response."""
 
+    def __init__(self, code: int = 0, out: str = "", raw_value: dict | None = None):
+        self.code = code
+        self.out = out or ok_response()
+        self.calls: list[tuple[list[str], str | None]] = []
+        if raw_value is not None:
+            self.out = json.dumps({"contractVersion": 1, "status": "ok", "value": raw_value})
 
-class CorpusRunner:
-    """Serves corpus search + corpus get for one canned record."""
-
-    def __init__(self, t: dict, search_hit: bool = True):
-        self.record = record_for(t)
-        self.search_hit = search_hit
-        self.calls: list[list[str]] = []
-
-    def __call__(self, argv: list[str]) -> tuple[int, str]:
-        self.calls.append(argv)
-        if argv[1] == "corpus" and argv[2] == "search":
-            hits = [{"ref": REF, "tags": ["tdd"], "summary": "Seed import: acme/skills/tdd"}] if self.search_hit else []
-            return 0, json.dumps(hits)
-        if argv[1] == "corpus" and argv[2] == "get":
-            return 0, json.dumps(self.record)
-        return 1, f"unexpected: {argv}"
+    def __call__(self, argv: list[str], *, input: str | None = None) -> tuple[int, str]:
+        self.calls.append((argv, input))
+        return self.code, self.out
 
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    jinn._reset_session_state()
     yield tmp_path
+    jinn._reset_session_state()
 
 
-MSG = "Help me with tdd-style refactoring of this suite"
+# ── Delegation ────────────────────────────────────────────────────────────────
+
+def test_pickup_delegates_to_session_pickup_with_the_v1_request_shape():
+    runner = PickupRunner()
+    pickup.pickup(MSG, runner=runner, session_id="s1", model="claude-test", repository_slug="acme/widget")
+
+    assert len(runner.calls) == 1
+    argv, raw_input = runner.calls[0]
+    assert argv == [jinn_layer.binary(), "session", "pickup"]
+    request = json.loads(raw_input)
+    assert request["contractVersion"] == jinn_layer.CONTRACT_VERSION
+    assert request["firstMessage"] == MSG
+    assert request["meta"]["sessionId"] == "s1"
+    assert request["meta"]["model"] == "claude-test"
+    assert request["meta"]["repositorySlug"] == "acme/widget"
+    assert request["meta"]["harness"]["name"]
+    assert isinstance(request["meta"]["taskSummary"], str) and request["meta"]["taskSummary"]
+    assert request["meta"]["tools"] == []
 
 
-def _fake_install(tmp_path, slug: str = "tdd"):
-    """Stand in for skills_install.install(): the adopt DECISION is under
-    test here, not the layer shell-out (that's covered in
-    test_jinn_skills_install.py). Writes the SKILL.md + .jinn-ref marker so
-    on-disk assertions and list_installed()-based dedup still hold."""
-    def fake(ref, runner=None):
-        target = tmp_path / "skills" / slug
-        target.mkdir(parents=True, exist_ok=True)
-        (target / "SKILL.md").write_text(f"# {slug}\n")
-        (target / ".jinn-ref").write_text(json.dumps({"ref": ref}) + "\n")
-        return str(target / "SKILL.md")
-    return fake
+def test_pickup_omits_repository_slug_when_unknown():
+    runner = PickupRunner()
+    pickup.pickup(MSG, runner=runner, session_id="s1")
+    request = json.loads(runner.calls[0][1])
+    assert "repositorySlug" not in request["meta"]
 
 
-def test_verified_candidate_is_suggested_not_adopted_by_default(tmp_path):
-    # Ratified: remote skills are manual-approval by default. With no
-    # pickup.json (autoAdopt defaults to False), even an evaluator-verified
-    # candidate is only suggested — never installed without a keystroke.
-    runner = CorpusRunner(trace(tier="evaluator-verified"))
+def test_pickup_renders_the_context_block_verbatim():
+    runner = PickupRunner()
     result = pickup.pickup(MSG, runner=runner)
+    assert result == {"context": CONTEXT_BLOCK}
+
+
+def test_pickup_consumes_successful_packets_from_a_degraded_partial_response():
+    response = json.loads(ok_response())
+    response["status"] = "degraded"
+    response["reason"] = "one near-miss unavailable"
+    runner = PickupRunner(out=json.dumps(response))
+    activity: dict = {}
+
+    result = pickup.pickup(MSG, runner=runner, activity=activity)
+
+    assert result == {"context": CONTEXT_BLOCK}
+    assert activity["providedRefs"] == ["bafySourceEpisode"]
+
+
+def test_pickup_returns_none_when_nothing_is_provided():
+    runner = PickupRunner(out=ok_response(contextBlock=None, packets=[]))
+    activity: dict = {}
+    assert pickup.pickup(MSG, runner=runner, activity=activity) is None
+    assert activity["deliveredRefs"] == []
+    assert activity["deliveryMode"] == "withheld"
+    assert "deliveredContentHash" not in activity
+
+
+def test_pickup_returns_none_when_context_block_is_blank():
+    runner = PickupRunner(out=ok_response(contextBlock="   "))
+    activity: dict = {}
+    assert pickup.pickup(MSG, runner=runner, activity=activity) is None
+    assert activity["deliveredRefs"] == []
+    assert activity["deliveryMode"] == "withheld"
+    assert "deliveredContentHash" not in activity
+
+
+# ── Activity recording (rescope §3.6) ───────────────────────────────────────
+
+def test_pickup_records_searched_terms_and_provided_refs():
+    runner = PickupRunner()
+    activity = {"searchedTerms": [], "providedRefs": [], "surfacedRefs": [], "fetchedRefs": []}
+
+    pickup.pickup(MSG, runner=runner, activity=activity)
+
+    assert activity["searchedTerms"] == ["dashboard", "vitest", "update_available"]
+    assert activity["providedRefs"] == ["bafySourceEpisode"]
+    assert activity["retrievalFired"] is True
+    assert activity["eligibleRefs"] == ["bafySourceEpisode"]
+    assert activity["deliveredRefs"] == ["bafySourceEpisode"]
+    assert activity["deliveryMode"] == "delivered"
+    assert activity["deliveredContentHash"] == (
+        "sha256:" + hashlib.sha256(CONTEXT_BLOCK.encode("utf-8")).hexdigest()
+    )
+    # Internal fetch-attempt fields are untouched by pickup itself.
+    assert activity["surfacedRefs"] == []
+    assert activity["fetchedRefs"] == []
+
+
+def test_pickup_records_searched_terms_even_when_nothing_is_provided():
+    # Honest legibility: a search that found nothing still records what was
+    # searched — only the injection (and the derived nothing-found summary
+    # line) omits the terms.
+    runner = PickupRunner(out=ok_response(contextBlock=None, packets=[], searchedTerms=["quasar", "unobtainium"]))
+    activity: dict = {}
+
+    pickup.pickup(MSG, runner=runner, activity=activity)
+
+    assert activity["searchedTerms"] == ["quasar", "unobtainium"]
+    assert activity["providedRefs"] == []
+
+
+def test_pickup_surfaces_a_fired_but_degraded_retrieval_when_the_call_fails():
+    runner = PickupRunner(code=1, out="boom")
+    activity = {"searchedTerms": ["stale"], "providedRefs": ["stale-ref"]}
+
+    pickup.pickup(MSG, runner=runner, activity=activity)
+
+    assert activity == {
+        "searchedTerms": ["stale"],
+        "providedRefs": ["stale-ref"],
+        "retrievalFired": True,
+        "deliveryMode": "degraded",
+    }
+
+
+# ── The evidence signal line (rescope §3.4) ─────────────────────────────────
+
+def test_pickup_emits_exactly_one_evidence_signal_when_provided():
+    runner = PickupRunner()
+    lines: list[str] = []
+
+    result = pickup.pickup(MSG, runner=runner, signal_sink=lines.append)
+
     assert result is not None
-    ctx = result["context"]
-    assert "install: /jinn skills install" in ctx      # suggested
-    assert "Adopted automatically" not in ctx          # NOT adopted
-    assert not (tmp_path / "skills").exists()
+    assert len(lines) == 1
+    assert "◇ corpus" in lines[0]
+    assert "provided" in lines[0]
+    assert "dashboard" in lines[0]
 
 
-def test_opt_in_auto_adopts(tmp_path, monkeypatch):
-    monkeypatch.setattr(skills_install, "install", _fake_install(tmp_path))
-    cfg = tmp_path / "jinn" / "pickup.json"
-    cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(json.dumps({"autoAdopt": True}))
-    runner = CorpusRunner(trace(tier="evaluator-verified"))
+def test_pickup_emits_no_signal_when_nothing_is_provided():
+    runner = PickupRunner(out=ok_response(contextBlock=None, packets=[]))
+    lines: list[str] = []
+
+    pickup.pickup(MSG, runner=runner, signal_sink=lines.append)
+
+    assert lines == []
+
+
+def test_pickup_default_signal_sink_prints_the_marker_byte_plain(monkeypatch, capsys):
+    # mono #1798: the default sink (used whenever the host doesn't override
+    # signal_sink, i.e. the real TUI path) must strip ANSI before printing —
+    # prompt_toolkit's patch_stdout proxy renders raw ESC bytes as `?` noise
+    # rather than colour. Force the exact palette the live bug report showed.
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    monkeypatch.setenv("COLUMNS", "120")
+    runner = PickupRunner()
+
     result = pickup.pickup(MSG, runner=runner)
+
     assert result is not None
-    assert "Adopted automatically (verified)" in result["context"]
-    # The skill landed where Hermes's native loader reads it — no confirm step.
-    assert (tmp_path / "skills" / "tdd" / "SKILL.md").exists()
+    err = capsys.readouterr().err
+    assert "\x1b" not in err
+    assert "◇ corpus" in err
+    assert "provided 1 evidence packet" in err
+    assert "dashboard" in err
 
 
-def test_unverified_payload_suggests_but_never_installs(tmp_path):
-    runner = CorpusRunner(trace(tier="user-accepted"))
-    result = pickup.pickup(MSG, runner=runner)
-    assert result is not None
-    assert "unverified" in result["context"]
-    assert "/jinn skills install" in result["context"]
-    assert not (tmp_path / "skills").exists()
+# ── Fail-open paths ──────────────────────────────────────────────────────────
+
+def test_pickup_fails_open_on_broken_layer():
+    def broken(argv, **_kw):
+        raise RuntimeError("boom")
+    assert pickup.pickup(MSG, runner=broken) is None
 
 
-def test_tests_passed_tier_respects_configured_threshold(tmp_path, monkeypatch):
-    monkeypatch.setattr(skills_install, "install", _fake_install(tmp_path))
-    # Default threshold is evaluator-verified: tests-passed only suggests…
-    runner = CorpusRunner(trace(tier="tests-passed"))
-    result = pickup.pickup(MSG, runner=runner)
-    assert not (tmp_path / "skills").exists()
-    assert result is not None
-    # …but an operator who opts into auto-adopt and lowers the threshold
-    # gets auto-adoption.
-    cfg = tmp_path / "jinn" / "pickup.json"
-    cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(json.dumps({"autoAdopt": True, "autoAdoptTier": "tests-passed"}))
-    runner2 = CorpusRunner(trace(tier="tests-passed"))
-    pickup.pickup(MSG, runner=runner2)
-    assert (tmp_path / "skills" / "tdd" / "SKILL.md").exists()
+def test_pickup_fails_open_on_missing_binary():
+    runner = PickupRunner(code=127, out="jinn-layer: not found")
+    assert pickup.pickup(MSG, runner=runner) is None
 
 
-def test_unknown_payload_type_is_never_adopted(tmp_path):
-    runner = CorpusRunner(trace(tier="evaluator-verified", payload="opaque"))
-    result = pickup.pickup(MSG, runner=runner)
-    # Verified unknown payloads are surfaced (suggest-only default must not
-    # swallow them into silence) but never adopted.
-    assert result is not None
-    ctx = result["context"]
-    assert "unknown" in ctx
-    assert REF in ctx
-    assert "Adopted automatically" not in ctx
-    assert not (tmp_path / "skills").exists()
+def test_pickup_fails_open_on_malformed_json():
+    runner = PickupRunner(out="not json")
+    assert pickup.pickup(MSG, runner=runner) is None
 
 
-def test_pickup_is_not_consent_gated(tmp_path, monkeypatch):
-    monkeypatch.setattr(skills_install, "install", _fake_install(tmp_path))
-    cfg = tmp_path / "jinn" / "pickup.json"
-    cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(json.dumps({"autoAdopt": True}))
-    consent.save_state(consent.DECLINED)
-    runner = CorpusRunner(trace(tier="evaluator-verified"))
-    result = pickup.pickup(MSG, runner=runner)
-    assert result is not None
-    assert (tmp_path / "skills" / "tdd" / "SKILL.md").exists()
+def test_pickup_fails_open_on_contract_version_mismatch():
+    runner = PickupRunner(out=json.dumps({"contractVersion": 2, "status": "ok", "value": {}}))
+    assert pickup.pickup(MSG, runner=runner) is None
+
+
+def test_pickup_returns_none_on_unavailable_status():
+    runner = PickupRunner(out=json.dumps({
+        "contractVersion": 1, "status": "unavailable", "reason": "jinn-layer unreachable",
+    }))
+    assert pickup.pickup(MSG, runner=runner) is None
+
+
+# ── Stream separation (mono #1787) ──────────────────────────────────────────
+
+def test_pickup_parses_normally_when_stderr_carries_a_warning(monkeypatch):
+    """A stderr diagnostic on the real subprocess path (e.g. the harness's
+    "skipping malformed legacy capture" warning) must never corrupt a
+    structurally valid stdout v1 envelope."""
+    def fake_default_runner(argv, cwd=None, input=None, timeout_s=jinn_layer._SESSION_PICKUP_TIMEOUT_S):
+        return (
+            0,
+            ok_response(),
+            "[evidence] skipping malformed legacy capture "
+            "s1-1784122564637021000.json: some warning",
+        )
+
+    monkeypatch.setattr(jinn_layer, "_default_runner", fake_default_runner)
+
+    result = pickup.pickup(MSG, runner=None)
+
+    assert result == {"context": CONTEXT_BLOCK}
+
+
+def test_stale_layer_response_without_packets_is_treated_as_degraded_nothing():
+    """A v1 response without `packets` (a stale jinn-layer predating the
+    rescope) must never reintroduce the old suggestion/install shape via
+    contextBlock — treated as degraded-nothing (R3 AC)."""
+    runner = PickupRunner(out=json.dumps({
+        "contractVersion": 1,
+        "status": "ok",
+        "value": {
+            # Old shape: no "packets" key, but still carries a contextBlock —
+            # must not be rendered.
+            "contextBlock": "[jinn corpus] Relevant to this task:\n- old skill suggestion",
+            "suggestions": ["- old skill suggestion"],
+        },
+    }))
+    activity: dict = {}
+
+    result = pickup.pickup(MSG, runner=runner, activity=activity)
+
+    assert result is None
+    assert activity == {"retrievalFired": True, "deliveryMode": "degraded"}
 
 
 def test_disabled_config_is_a_no_op(tmp_path):
     cfg = tmp_path / "jinn" / "pickup.json"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(json.dumps({"enabled": False}))
-    runner = CorpusRunner(trace(tier="evaluator-verified"))
+    runner = PickupRunner()
     assert pickup.pickup(MSG, runner=runner) is None
     assert runner.calls == []
 
 
-def test_already_installed_skill_is_skipped(tmp_path, monkeypatch):
-    monkeypatch.setattr(skills_install, "install", _fake_install(tmp_path))
+def test_load_config_defaults_to_enabled_when_absent(tmp_path):
+    assert pickup.load_config() == {"enabled": True}
+
+
+def test_load_config_ignores_unreadable_file(tmp_path):
     cfg = tmp_path / "jinn" / "pickup.json"
     cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(json.dumps({"autoAdopt": True}))
-    runner = CorpusRunner(trace(tier="evaluator-verified"))
-    pickup.pickup(MSG, runner=runner)
-    runner2 = CorpusRunner(trace(tier="evaluator-verified"))
-    result = pickup.pickup(MSG, runner=runner2)
-    assert result is None  # nothing new to say
+    cfg.write_text("not json")
+    assert pickup.load_config() == {"enabled": True}
 
 
-def test_pickup_fails_open_on_broken_layer(tmp_path):
-    def broken(argv):
-        raise RuntimeError("boom")
-    assert pickup.pickup(MSG, runner=broken) is None
+# ── Hook wiring ──────────────────────────────────────────────────────────────
 
-
-def test_hook_returns_pickup_context_on_first_turn(tmp_path):
-    runner = CorpusRunner(trace(tier="user-accepted"))
+def test_hook_returns_pickup_context_on_first_turn():
+    runner = PickupRunner()
     jinn._runner = runner
     try:
         result = jinn._on_pre_llm_call(
@@ -208,30 +332,279 @@ def test_hook_returns_pickup_context_on_first_turn(tmp_path):
     assert jinn._on_pre_llm_call(session_id="s1", user_message=MSG, is_first_turn=False) is None
 
 
-def test_derive_terms_skips_stopwords():
-    assert pickup.derive_terms("Help me with tdd-style refactoring")[0] == "tdd-style"
-    assert pickup.derive_terms("") == []
+# ── Agent tools (unaffected by the pickup delegation) ───────────────────────
 
+def test_corpus_search_tool_formats_hits_and_records_surfaced_refs(tmp_path):
+    ref = "bafyPickupSkill"
 
-# ── Agent tools ──────────────────────────────────────────────────────────────
+    def runner(argv):
+        if argv[1] == "corpus" and argv[2] == "search":
+            return 0, json.dumps([{"ref": ref, "tags": ["tdd"], "summary": "Seed import: acme/skills/tdd"}])
+        return 1, f"unexpected: {argv}"
 
-def test_corpus_search_tool_formats_hits(tmp_path):
-    runner = CorpusRunner(trace())
     jinn._runner = runner
     try:
-        out = jinn._tool_corpus_search({"query": "tdd"})
+        out = jinn._tool_corpus_search({"query": "tdd"}, session_id="s1")
     finally:
         jinn._runner = None
-    assert f"ref={REF}" in out
+    assert f"ref={ref}" in out
     assert "tags=[tdd]" in out
+    assert jinn._state_for("s1")["activity"]["surfacedRefs"] == [ref]
 
 
-def test_corpus_fetch_tool_returns_skill_content(tmp_path):
-    runner = CorpusRunner(trace(tier="user-accepted"))
+def test_corpus_fetch_tool_returns_skill_content_and_records_fetched_ref(tmp_path):
+    import base64
+    import hashlib
+
+    ref = "bafyPickupSkill"
+    trace = {
+        "schemaVersion": "jinn.trace-envelope.v0",
+        "task": {"summary": "Seed import: acme/skills/tdd", "distributionTags": ["seed-import", "tdd"]},
+        "steps": [{"spanId": "s1", "name": "seed:skill-md", "attributes": {
+            "skill.md": "# tdd\n\nRed, green, refactor.",
+            "seed.attribution": {"skill": "acme/skills/tdd"},
+        }}],
+        "outcome": {"status": "completed", "verifiabilityTier": "user-accepted"},
+        "provenance": "imported",
+    }
+    content = json.dumps(trace).encode("utf-8")
+    record = {
+        "ref": ref,
+        "artifacts": [{
+            "artifactType": "jinn.trace-envelope.v0",
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "contentBase64": base64.b64encode(content).decode("ascii"),
+        }],
+    }
+
+    def runner(argv):
+        if argv[1] == "corpus" and argv[2] == "get":
+            return 0, json.dumps(record)
+        return 1, f"unexpected: {argv}"
+
     jinn._runner = runner
     try:
-        out = jinn._tool_corpus_fetch({"ref": REF})
+        out = jinn._tool_corpus_fetch({"ref": ref}, session_id="s1")
     finally:
         jinn._runner = None
     assert "[user-accepted]" in out
     assert "Red, green, refactor." in out
+    assert jinn._state_for("s1")["activity"]["fetchedRefs"] == [ref]
+
+
+def test_corpus_fetch_tool_reads_canonical_episode_content(tmp_path):
+    import base64
+    import hashlib
+
+    ref = "bafyCanonicalEpisode"
+    episode = {
+        "schemaVersion": "jinn.episode.v1",
+        "episodeId": "episode:canonical",
+        "retrievalVisible": True,
+        "session": {
+            "sessionId": "session:canonical",
+            "capturedAt": "2026-07-20T00:00:00.000Z",
+            "kind": "user",
+        },
+        "origin": {"writer": "jinn-agent", "build": "0.18.0"},
+        "task": {
+            "summary": "Seed import: acme/skills/tdd",
+            "distributionTags": ["seed-import", "tdd"],
+        },
+        "trajectory": [{
+            "spanId": "s1",
+            "parentSpanId": None,
+            "kind": "jinn.tool_call",
+            "name": "seed:skill-md",
+            "startTimeUnixNano": "1000000000",
+            "endTimeUnixNano": "1000000000",
+            "attributes": {
+                "skill.md": "# canonical tdd\n\nRed, green, project.",
+                "seed.attribution": {"skill": "acme/skills/tdd"},
+            },
+            "redactedKeys": [],
+        }],
+        "environment": {
+            "harness": {"name": "hermes-agent", "version": "0.1.0"},
+            "model": "test-model",
+            "tools": [],
+            "skillsLoadout": [],
+        },
+        "outcome": {
+            "status": "completed",
+            "verificationStrength": "tests-passed",
+        },
+        "cost": {"durationMs": 0},
+        "retention": {"policy": "contribution-eligible"},
+        "provenance": "imported",
+    }
+    content = json.dumps(episode).encode("utf-8")
+    record = {
+        "ref": ref,
+        "artifacts": [{
+            "artifactType": "jinn.episode.v1",
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "contentBase64": base64.b64encode(content).decode("ascii"),
+        }],
+    }
+
+    def runner(argv):
+        if argv[1] == "corpus" and argv[2] == "get":
+            return 0, json.dumps(record)
+        return 1, f"unexpected: {argv}"
+
+    jinn._runner = runner
+    try:
+        out = jinn._tool_corpus_fetch({"ref": ref}, session_id="s1")
+    finally:
+        jinn._runner = None
+    assert "[tests-passed]" in out
+    assert "Red, green, project." in out
+    assert jinn._state_for("s1")["activity"]["fetchedRefs"] == [ref]
+
+
+def test_corpus_fetch_tool_returns_skill_only_jinn_skill_v1_content(tmp_path):
+    import base64
+    import hashlib
+
+    ref = "bafyDistilledSkillOnly"
+    skill = {
+        "schemaVersion": "jinn.skill.v1",
+        "skill": {
+            "name": "retry-budget-tuning",
+            "skillMd": "# retry-budget-tuning\n\nCap retries at three.",
+        },
+        "files": [],
+        "provenance": {
+            "kind": "distilled",
+            "sourceEnvelopeCids": ["bafySourceEpisode1"],
+            "operator": {"safeAddress": "0x" + "a" * 40},
+            "verifiabilityTier": "evaluator-verified",
+        },
+    }
+    content = json.dumps(skill).encode("utf-8")
+    record = {
+        "ref": ref,
+        "artifacts": [{
+            "artifactType": "jinn.skill.v1",
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "contentBase64": base64.b64encode(content).decode("ascii"),
+        }],
+    }
+
+    def runner(argv):
+        if argv[1] == "corpus" and argv[2] == "get":
+            return 0, json.dumps(record)
+        return 1, f"unexpected: {argv}"
+
+    jinn._runner = runner
+    try:
+        out = jinn._tool_corpus_fetch({"ref": ref}, session_id="s1")
+    finally:
+        jinn._runner = None
+
+    assert "[evaluator-verified]" in out
+    assert "retry-budget-tuning" in out
+    assert "Cap retries at three." in out
+    assert "not readable as an evidence envelope" not in out
+    assert jinn._state_for("s1")["activity"]["fetchedRefs"] == [ref]
+
+
+def test_corpus_fetch_corrupt_skill_does_not_fall_through_to_evidence(tmp_path):
+    """Layer extractSkill trust posture: present-but-corrupt skill is an error.
+
+    A co-located valid episode must not be returned when jinn.skill.v1 is
+    present with a sha256 mismatch.
+    """
+    import base64
+    import hashlib
+
+    ref = "bafyCorruptSkillWithEpisode"
+    skill = {
+        "schemaVersion": "jinn.skill.v1",
+        "skill": {
+            "name": "retry-budget-tuning",
+            "skillMd": "# retry-budget-tuning\n\nCap retries at three.",
+        },
+        "files": [],
+        "provenance": {
+            "kind": "distilled",
+            "sourceEnvelopeCids": ["bafySourceEpisode1"],
+            "operator": {"safeAddress": "0x" + "a" * 40},
+            "verifiabilityTier": "evaluator-verified",
+        },
+    }
+    skill_bytes = json.dumps(skill).encode("utf-8")
+    episode = {
+        "schemaVersion": "jinn.episode.v1",
+        "episodeId": "episode:distractor",
+        "retrievalVisible": True,
+        "session": {
+            "sessionId": "session:distractor",
+            "capturedAt": "2026-07-20T00:00:00.000Z",
+            "kind": "user",
+        },
+        "origin": {"writer": "jinn-agent", "build": "0.18.0"},
+        "task": {
+            "summary": "Distractor episode that must not leak",
+            "distributionTags": ["seed-import"],
+        },
+        "trajectory": [{
+            "spanId": "s1",
+            "parentSpanId": None,
+            "kind": "jinn.tool_call",
+            "name": "seed:skill-md",
+            "startTimeUnixNano": "1000000000",
+            "endTimeUnixNano": "1000000000",
+            "attributes": {
+                "skill.md": "# distractor\n\nMust not appear in fetch output.",
+            },
+            "redactedKeys": [],
+        }],
+        "environment": {
+            "harness": {"name": "hermes-agent", "version": "0.1.0"},
+            "model": "test-model",
+            "tools": [],
+            "skillsLoadout": [],
+        },
+        "outcome": {
+            "status": "completed",
+            "verificationStrength": "tests-passed",
+        },
+        "cost": {"durationMs": 0},
+        "retention": {"policy": "contribution-eligible"},
+        "provenance": "imported",
+    }
+    episode_bytes = json.dumps(episode).encode("utf-8")
+    record = {
+        "ref": ref,
+        "artifacts": [
+            {
+                "artifactType": "jinn.skill.v1",
+                "sha256": "0" * 64,
+                "contentBase64": base64.b64encode(skill_bytes).decode("ascii"),
+            },
+            {
+                "artifactType": "jinn.episode.v1",
+                "sha256": hashlib.sha256(episode_bytes).hexdigest(),
+                "contentBase64": base64.b64encode(episode_bytes).decode("ascii"),
+            },
+        ],
+    }
+
+    def runner(argv):
+        if argv[1] == "corpus" and argv[2] == "get":
+            return 0, json.dumps(record)
+        return 1, f"unexpected: {argv}"
+
+    jinn._runner = runner
+    try:
+        out = jinn._tool_corpus_fetch({"ref": ref}, session_id="s1")
+    finally:
+        jinn._runner = None
+
+    assert "not readable as an evidence envelope" in out
+    assert "sha256 mismatch" in out
+    assert "Must not appear in fetch output." not in out
+    assert "Cap retries at three." not in out
+    assert jinn._state_for("s1")["activity"].get("fetchedRefs") in (None, [])

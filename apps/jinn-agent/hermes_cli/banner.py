@@ -92,7 +92,7 @@ HERMES_CADUCEUS = """[#CD7F32]⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⡀⠀⣀⣀�
 # An instant one-paint greeting for the jinn-agent fork: the Vessel sigil
 # (circle · inscribed triangle · horizon · centre point), a lower-case
 # ``jinn`` wordmark under a gold rule, the version, and live status lines
-# (network, corpus, contribution; node is render-supported but omitted by the
+# (network, corpus, parked contribution; node is render-supported but omitted by the
 # fork — it has no local node concept). Design artifact:
 # ``docs/design/artifacts/2026-07-06-corpus-onboarding/1319-terminal-splash.html``.
 #
@@ -174,10 +174,11 @@ def _thousands(n: int) -> str:
 def _status_lines(state: Dict[str, object], pal: Dict[str, str]) -> List[str]:
     """Render the status lines (network, corpus, contribution, node).
 
-    Fixed order. Pre-consent (``contribution`` is ``None``/unset) omits the
-    contribution line entirely; likewise an absent ``node`` key omits the node
-    line (the fork has no node source — see the node block below). Unresolved
-    network/corpus values render ``checking…`` dim.
+    Fixed order. Contribution is unconditionally parked/local-only in Stage 2;
+    retained Stage-1 consent is migration data, never live publication state.
+    An absent ``node`` key omits the node line (the fork has no node source —
+    see the node block below). Unresolved network/corpus values render
+    ``checking…`` dim.
     """
     rst = _RST
     dim, sky, gold, green, red = (
@@ -211,20 +212,15 @@ def _status_lines(state: Dict[str, object], pal: Dict[str, str]) -> List[str]:
     else:
         lines.append(label("corpus") + f"{dim}checking…{rst}")
 
-    # contribution — omitted entirely pre-consent (state == None / 'unset').
-    contrib = state.get("contribution")
-    if contrib == "on":
-        count = state.get("contribution_count")
-        tail = f"{_thousands(int(count))} traces published" if isinstance(count, int) else "traces published"
-        lines.append(label("contribution") + f"{green}on{sep}{tail}{rst}")
-    elif contrib == "off":
-        lines.append(label("contribution") + f"{dim}off{sep}reader only{rst}")
-    # else: unset — line omitted.
+    # Stage 2: the outbound lane is structurally parked. This copy does not
+    # inspect retained consent or ledger state, so old Stage-1 files cannot
+    # resurrect an "on" or "traces published" claim.
+    lines.append(label("contribution") + f"{dim}parked{sep}local only{rst}")
 
     # node — running(green) / not running(dim). Omitted entirely when the
-    # key is absent (same rule as the pre-consent contribution line): the
-    # jinn-agent harness has no local node/vessel concept (node operation is
-    # the separate mono client daemon), so an unresolved node line would show
+    # key is absent: the jinn-agent harness has no local node/vessel concept
+    # (node operation is the separate mono client daemon), so an unresolved
+    # node line would show
     # ``checking…`` forever and can never resolve — misleading. The fork's
     # gather_splash_state never sets ``node``, so the fork never renders this
     # line; the render path is retained for callers that do have a node source.
@@ -294,7 +290,7 @@ def render_jinn_splash(
     ``state`` keys (all optional; missing → ``checking…`` or omitted):
       network: 'testnet' | 'mainnet'
       corpus: 'connected' | 'unreachable'   corpus_count: int
-      contribution: 'on' | 'off'            contribution_count: int
+      contribution: 'parked' (display invariant; legacy values are ignored)
       node: 'running' | 'not_running'       node_vessel: str
       version: 'v0.4.2'  network_label: 'testnet'  update_available: bool
     """
@@ -362,14 +358,14 @@ def gather_splash_state() -> Dict[str, object]:
         Rich banner uses.
       - network / network_label: ``$JINN_NETWORK`` (default ``testnet`` —
         the fork's only sync network source; there is no chain config).
-      - contribution: real consent state — ``unset`` omits the line,
-        ``accepted`` → on, ``declined`` → off.
+      - contribution: always ``parked`` — Stage-1 consent retained on disk is
+        inert migration data and never changes this live Stage-2 state.
 
-    Degraded (no cheap sync fork source — see the PR data-wiring notes):
-      - corpus reachability + count: needs a ``jinn-layer corpus`` call.
-        A real source exists but not synchronously; wiring it is follow-up
-        Jinn-Network/mono#1420, so this stays ``checking…`` for now (not a bug).
-      - contribution_count: needs a ``jinn-layer ledger`` call.
+    Wired via the background prefetch (non-blocking, ``timeout=0.0``):
+      - corpus reachability + count come from ``prefetch_splash_reads()``
+        (jinn-layer corpus search). Until
+        the prefetch resolves the read yields None and corpus honestly stays
+        ``checking…`` — the settle can't shift layout (label-column-fixed).
 
     Omitted (no source at all in the fork — the line is not rendered):
       - node status + vessel: the harness has no local node/vessel concept
@@ -392,23 +388,23 @@ def gather_splash_state() -> Dict[str, object]:
     except Exception:
         state["update_available"] = False
 
-    # Consent — synchronous, real. Drives the contribution line's presence.
-    try:
-        from plugins.jinn import consent as _consent
-        status = str(_consent.load_state().get("status", _consent.UNSET))
-        if status == _consent.ACCEPTED:
-            state["contribution"] = "on"  # count stays unresolved (ledger call)
-        elif status == _consent.DECLINED:
-            state["contribution"] = "off"
-        # UNSET → key absent → contribution line omitted (pre-consent).
-    except Exception:
-        pass  # No consent module → treat as pre-consent, omit the line.
+    # Publication is structurally parked in Stage 2. Do not consult retained
+    # Stage-1 consent: it is preserved only for conservative migration.
+    state["contribution"] = "parked"
 
-    # corpus: no cheap synchronous source yet → left unresolved (checking…).
-    # A real corpus source exists but not synchronously; wiring it (reachability
-    # + envelope count without blocking the paint) is follow-up
-    # Jinn-Network/mono#1420. Until then this line honestly reads checking… —
-    # it is not a bug. node: key never set → line omitted (see _status_lines).
+    # Corpus — reuse the prefetched read; never block.
+    # Un-prefetched / not-yet-resolved → None → corpus stays checking… (paint
+    # never shifts layout: the status strings are label-column-fixed). node:
+    # key never set → line omitted (see _status_lines).
+    try:
+        reads = get_splash_reads(timeout=0.0)
+    except Exception:
+        reads = None
+    if reads is not None:
+        if "corpus" in reads:
+            state["corpus"] = reads["corpus"]
+        if "corpus_count" in reads:
+            state["corpus_count"] = reads["corpus_count"]
     return state
 
 
@@ -888,6 +884,56 @@ def get_update_result(timeout: float = 0.5) -> Optional[int]:
     """Get result of prefetched check. Returns None if not ready."""
     _update_check_done.wait(timeout=timeout)
     return _update_result
+
+
+# =========================================================================
+# Non-blocking splash read (corpus reachability + count)
+# =========================================================================
+
+_splash_result: Optional[Dict[str, object]] = None
+_splash_reads_done = threading.Event()
+
+
+def _read_corpus() -> Dict[str, object]:
+    """Corpus reachability+count via ``corpus search '' --limit 500 --json``.
+
+    exit 0 + a parseable JSON array → connected + len(hits); anything else →
+    unreachable. NOTE: corpus_count is capped at the ``--limit`` (500) — the
+    only corpus verb is ``search`` (no total-count/stats verb in harness-layer),
+    so this is exact at testnet scale and under-reports past 500 records. A real
+    total-count verb is the follow-up if/when mainnet scale demands it.
+    """
+    try:
+        from plugins.jinn import jinn_layer
+        code, out, _err = jinn_layer.corpus_search("", limit=500, as_json=True)
+        if code == 0:
+            hits = json.loads(out)
+            if isinstance(hits, list):
+                return {"corpus": "connected", "corpus_count": len(hits)}
+    except Exception:
+        pass
+    return {"corpus": "unreachable"}
+
+
+def prefetch_splash_reads():
+    """Kick the corpus splash read in a background daemon thread."""
+    def _run():
+        global _splash_result
+        result: Dict[str, object] = {}
+        try:
+            result.update(_read_corpus())
+        except Exception:
+            pass  # never raise — publish whatever resolved, honest checking… for the rest
+        _splash_result = result
+        _splash_reads_done.set()
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+
+def get_splash_reads(timeout: float = 0.0) -> Optional[Dict[str, object]]:
+    """Result of the prefetched reads, or None if unresolved. Never blocks at 0.0."""
+    _splash_reads_done.wait(timeout=timeout)
+    return _splash_result
 
 
 # =========================================================================

@@ -8,7 +8,15 @@ export interface DeriveInput {
   now?: number;
   bootstrap: { mode: string; blockingReason?: string };
   status: {
-    funds: { eth: string; runwayDays: number };
+    funds: {
+      eth: string;
+      chains: Array<{
+        chain: string;
+        wallet: string | null;
+        runwayDays: number;
+        empty: boolean;
+      }>;
+    };
     harness: { ready: boolean; name: string | null; reason: string | null };
     rpc: { reachable: boolean };
     restartPending: boolean;
@@ -23,6 +31,32 @@ export interface DeriveInput {
 const RUNWAY_LOW_THRESHOLD_DAYS = 3;
 const PASSWORD_ROTATION_INTERVAL_MS = 1000 * 60 * 60 * 24 * 90;
 
+/**
+ * Single source of the gas-runway severity rule (#1296): blocking when the
+ * balance can't cover the next tx (`balanceWei < minEthWei`), warning when
+ * the remaining runway is under {@link RUNWAY_LOW_THRESHOLD_DAYS}. Consumed
+ * by both the notifications deriver's chain mapping (`gasChain` in
+ * `useNotifications.ts`) and the Wallet card's tint on Overview — previously
+ * each restated this threshold independently.
+ */
+export function gasSeverity(gas: {
+  balanceWei?: string;
+  runwayDaysExcess?: string | number | null;
+  minEthWei?: string;
+}): 'warning' | 'blocking' | null {
+  if (!gas || gas.balanceWei === undefined) return null;
+  try {
+    if (gas.minEthWei !== undefined && BigInt(gas.balanceWei) < BigInt(gas.minEthWei)) {
+      return 'blocking';
+    }
+  } catch {
+    /* non-numeric */
+  }
+  const days = Number(gas.runwayDaysExcess);
+  if (Number.isFinite(days) && days < RUNWAY_LOW_THRESHOLD_DAYS) return 'warning';
+  return null;
+}
+
 export function deriveNotifications(input: DeriveInput): OperatorNotification[] {
   const out: OperatorNotification[] = [];
   const s = input.status;
@@ -36,13 +70,25 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
     });
   }
 
-  if (s.funds.runwayDays < RUNWAY_LOW_THRESHOLD_DAYS) {
-    out.push({
-      kind: 'funding_low',
-      severity: 'warning',
-      message: `Runway is ${s.funds.runwayDays} day(s). Top up gas to keep claiming work.`,
-      jumpTo: '/overview',
-    });
+  for (const c of s.funds.chains) {
+    const walletLabel = c.wallet ?? 'wallet';
+    if (c.empty) {
+      out.push({
+        kind: 'funding_empty',
+        severity: 'blocking',
+        message: `Gas exhausted — ${walletLabel} on ${c.chain} can't cover the next transaction.`,
+        jumpTo: '/overview',
+      });
+      continue; // empty supersedes low for this chain
+    }
+    if (c.runwayDays < RUNWAY_LOW_THRESHOLD_DAYS) {
+      out.push({
+        kind: 'funding_low',
+        severity: 'warning',
+        message: `Gas runway low — ${walletLabel} on ${c.chain} below threshold; top up soon.`,
+        jumpTo: '/overview',
+      });
+    }
   }
 
   if (!s.harness.ready) {

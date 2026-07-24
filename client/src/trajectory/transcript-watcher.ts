@@ -45,7 +45,7 @@
 import * as fs from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
 import { once } from 'node:events';
-import chokidar, { type FSWatcher } from 'chokidar';
+import chokidar, { type FSWatcher, type ChokidarOptions } from 'chokidar';
 import type { TranscriptEvent, TranscriptParser } from './transcript-parsers/types.js';
 import { ClaudeCodeJsonlParser } from './transcript-parsers/claude-code-jsonl.js';
 import { CodexSessionParser } from './transcript-parsers/codex-session.js';
@@ -96,6 +96,20 @@ export interface TranscriptWatcherConfig {
   /** Standard session directories (Codex, Claude Code, …). */
   directories?: WatchedDirectory[];
   onEvent: (envelope: DispatchEnvelope) => void;
+  /**
+   * Test/CI seam only. Extra chokidar watch options merged over this module's
+   * hardcoded defaults (see the `chokidar.watch` call). Caller-supplied keys
+   * override defaults; keys the caller omits keep their operator-critical
+   * defaults (`awaitWriteFinish`, `ignoreInitial`, `ignored`, `persistent`).
+   *
+   * Production callers pass nothing, so the daemon stays on native fs.watch —
+   * this preserves the #1422 native-handle minimization. Polling is
+   * deliberately NOT the production default: tests pass
+   * `{ usePolling: true, interval: 20 }` to make the pre-existing-file `change`
+   * (append) path deterministic under CI, where native fs.watch drops appends
+   * to files that already existed when the directory watch started (#832).
+   */
+  watchOptions?: Partial<ChokidarOptions>;
   /**
    * #1422: skip `directories`-mode session files whose mtime is older than
    * this many ms — dormant sessions are done growing and don't need a live
@@ -256,6 +270,7 @@ export async function startTranscriptWatcher(
       if (explicitSourcePaths.has(resolvePath(candidatePath))) return false;
       return !shouldWatchDirectoryFile(candidatePath, stats, maxDirectoryFileAgeMs);
     },
+    ...cfg.watchOptions,
   });
 
   const resolveDirectoryForPath = (filepath: string): WatchedDirectory | undefined => {

@@ -8,18 +8,12 @@
  * throws past the caller (see getTranscriptSpanParser callers in engine.ts).
  */
 
-import type { SpanInput } from '../collector.js';
+import type { TranscriptSpanParser } from '@jinn-network/core/trajectory';
 
-export interface TranscriptSpanParser {
-  /** Provenance tag recorded on every span's jinn.transcript.sourceFormat attribute. */
-  readonly sourceFormat: string;
-  /** Parser identity recorded on jinn.transcript.parser. */
-  readonly parserName: string;
-  /** Parser version recorded on jinn.transcript.parserVersion. */
-  readonly parserVersion: string;
-  /** Parse a complete transcript file into spans. Never throws — returns [] on failure. */
-  parse(transcriptPath: string): Promise<SpanInput[]>;
-}
+export type {
+  TranscriptSpanInput,
+  TranscriptSpanParser,
+} from '@jinn-network/core/trajectory';
 
 /** Result of resolving a harness impl name to its transcript parser + expected file path. */
 export interface TranscriptSpanParserResolution {

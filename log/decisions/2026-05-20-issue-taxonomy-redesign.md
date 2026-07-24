@@ -40,7 +40,7 @@ The per-axis assignment:
 | Axis | What it answers | Canonical surface | Tier |
 |------|-----------------|-------------------|------|
 | Work shape | What kind of work / which SOP | **Issue Type** (org-level, single-select) | issue-native |
-| Status | Where in the workflow | **Project Status field** (Todo / In Progress / In Review / Done) | Project |
+| Status | Where in the workflow | **Project Status field** (Todo / In Progress / In Review / Done) — **view only for Autopilot lifecycle decisions** per [`2026-07-21-single-surface-lifecycle.md`](../../docs/superpowers/specs/2026-07-21-single-surface-lifecycle.md) (amends this axis for machine paths; triage fields remain board-canonical) | Project |
 | Sprint | Which week | **Project Iteration field** | Project |
 | Epic / parent | Which program; parent issue | **Native sub-issues** | issue-native |
 | Area | Which part of the system | **Area label** (`engineering`, `operator-app`, `ux`, …) | issue-native |
@@ -135,3 +135,9 @@ No implementation lands under #422 (acceptance criterion 4). Implementation is t
 ## Status
 
 Proposed by opus on 2026-05-20 as the output of #422 (INTERACTIVE DESIGN). The taxonomy model — native-maximal surface assignment, the "Blocked on" axis name, Effort as Low / Medium / High, Priority moving to a Project field — was co-designed in-session with Captain oak on 2026-05-20, and ratified by Captain oak on 2026-05-20. The two follow-up implementation issues — #424 (`docs`) and #425 (`chore`) — are filed as sub-issues of #422 and unblocked for execution.
+
+**Amendment (2026-07-21, single-surface lifecycle):** For Autopilot lifecycle
+*decisions*, Project **Status** is outbound paint only (scheduled board painter).
+Effort, Priority, Blocked on, Sprint, and Issue Type assignments in this DR are
+unchanged. See `docs/superpowers/specs/2026-07-21-single-surface-lifecycle.md`
+§2 and §9.

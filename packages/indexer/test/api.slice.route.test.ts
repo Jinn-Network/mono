@@ -300,6 +300,24 @@ function collectEqs(cond: unknown): EqNode[] {
   return out;
 }
 
+function collectSqlNodes(cond: unknown): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  const visit = (n: unknown) => {
+    if (!n || typeof n !== 'object') return;
+    const node = n as Record<string, unknown>;
+    if (node.__sql === true) out.push(node);
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item);
+      } else {
+        visit(value);
+      }
+    }
+  };
+  visit(cond);
+  return out;
+}
+
 function findSliceJoinQuery(): QueryRecord | undefined {
   return mockState.recordedQueries.find(
     (q) =>
@@ -483,6 +501,29 @@ describe('GET /explorer/slice — route integration', () => {
       requestIdEq,
       'verdict⇒attempt join must NOT key on requestId',
     ).toBeUndefined();
+  });
+
+  it('disables both permissionless metadata joins until canonical authentication exists', async () => {
+    const res = await explorerApp.request(
+      `/slice?manifestDigest=${MANIFEST_CID}&group=operator`,
+    );
+    expect(res.status).toBe(200);
+
+    const sliceQuery = findSliceJoinQuery();
+    expect(sliceQuery).toBeDefined();
+    for (const tableName of ['verdictEnvelopeMeta', 'attemptEnvelopeMeta']) {
+      const join = sliceQuery!.joins.find((candidate) => candidate.tableName === tableName);
+      expect(join, `expected a ${tableName} join`).toBeDefined();
+      const sqlNodes = collectSqlNodes(join!.condition);
+      expect(
+        sqlNodes.some((node) =>
+          [...((node.strings as string[] | undefined) ?? []), String(node.raw ?? '')]
+            .join(' ')
+            .includes('false'),
+        ),
+        `${tableName} must fail closed instead of trusting an exact-one projection`,
+      ).toBe(true);
+    }
   });
 
   // ── Regression: chronological ORDER BY on the slice verdict query ────────────

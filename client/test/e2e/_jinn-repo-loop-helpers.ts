@@ -19,6 +19,7 @@ import {
   solverView,
   type JinnRepoPoolItem,
 } from '../../src/solver-types/_jinn-repo-pool.js';
+import type { JinnRepoLiveIssueTask } from '../../src/solver-types/jinn-repo.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { getMechDeliveryRate, getTimeoutBounds } from '../../src/adapters/mech/contracts.js';
 import { JINN_ROUTER_ABI } from '../../src/adapters/mech/types.js';
@@ -139,6 +140,115 @@ export async function postJinnRepoTask(
   // ── Step 6: Post task on-chain via the locally-deployed V3 JinnRouter ──────
   // Trimmed createTask escrows rate*maxClaims per side (solution + verdict); no
   // requiredVerdicts multiplier.
+  const MAX_CLAIMS = 10n;
+  const rateArg = deliveryRate > 0n ? deliveryRate : parseEther('0.0001');
+  const solutionBudget = rateArg * MAX_CLAIMS;
+  const verdictBudget = rateArg * MAX_CLAIMS;
+  const value = solutionBudget + verdictBudget;
+
+  const created = await writeContractTx({
+    publicClient: fixture.publicClient,
+    rpcUrl,
+    account: creator,
+    address: routerAddress,
+    abi: JINN_ROUTER_ABI,
+    functionName: 'createTask',
+    args: [taskCidDigest, manifestDigest, onchainPolicy, rateArg, rateArg, responseTimeout],
+    value,
+  });
+
+  const taskCreated = decodeFirstEvent(created.receipt, JINN_ROUTER_ABI, 'TaskCreated');
+  const taskId = BigInt(String(taskCreated['taskId']));
+  const createdAtBlock = BigInt(created.receipt.blockNumber ?? 0n);
+
+  return { taskId, taskCidDigest, manifestDigest, createdAtBlock };
+}
+
+/**
+ * Live-issue variant of {@link postJinnRepoTask} (issue #1891). Identical
+ * on-chain mechanics — the only domain difference is `spec`: a live-issue
+ * task has no gold to leak-protect, so the FULL `JinnRepoLiveIssueTask` is
+ * posted directly as `spec` rather than a `solverView()` projection of a
+ * pool item (there is no separate pool item for live-issue tasks — see
+ * `_jinn-repo-pool.ts`'s module doc).
+ */
+export async function postJinnRepoLiveTask(
+  fixture: DaemonHarnessFixture,
+  operator: BootstrappedOperator,
+  creatorPrivKey: `0x${string}`,
+  mockIpfs: MockIpfsServer,
+  v3Env: TaskV3Env,
+  liveTask: JinnRepoLiveIssueTask,
+): Promise<PostedPredictionTask> {
+  const rpcUrl = fixture.anvil.rpcUrl;
+  const routerAddress = v3Env.routerAddress;
+  const marketplaceAddress = v3Env.mockMarketplaceAddress;
+
+  const creator = privateKeyToAccount(creatorPrivKey);
+  const now = Date.now();
+  const nowSec = Math.floor(now / 1000);
+
+  const MANIFEST_CID = 'jinn-repo.v1';
+  const unsignedTaskDoc = {
+    schemaVersion: 'task.v1' as const,
+    id: `jinn-repo-live-loop-${liveTask.instance_id}`,
+    solverType: 'jinn-repo.v1',
+    solverNetManifestCid: MANIFEST_CID,
+    contractId: 'jinn-repo',
+    contractVersion: 'v1',
+    role: 'restoration' as const,
+    description: liveTask.problem_statement.split('\n')[0] ?? liveTask.problem_statement,
+    window: {
+      startTs: now - 5_000,
+      endTs: now + 3_600_000,
+    },
+    // No leak-control needed — nothing gold-oracle exists for a live-issue
+    // task. This IS what canAttempt/run expect the evaluation task's spec to
+    // parse as (see harness.ts's routing check).
+    spec: liveTask,
+    eligibility: {},
+    claimPolicy: {
+      mode: 'parallel' as const,
+      maxClaims: 10,
+      maxClaimsPerOperator: 1,
+      claimLeaseTtlSeconds: 3600,
+      claimWindowStartTs: nowSec - 5,
+      claimWindowEndTs: nowSec + 3_600,
+      submissionDeadlineTs: nowSec + 7_200,
+    },
+    creator: {
+      safeAddress: operator.safeAddress as `0x${string}`,
+      agentEoa: operator.agentAddress as `0x${string}`,
+    },
+    createdAt: now,
+  };
+
+  const signed = await signCanonical(unsignedTaskDoc, creatorPrivKey, creator.address);
+  const signedTaskDoc = {
+    ...unsignedTaskDoc,
+    signature: {
+      algo: 'secp256k1' as const,
+      signer: creator.address,
+      hash: signed.hash,
+      sig: signed.sig,
+    },
+  };
+
+  const taskJson = JSON.stringify(signedTaskDoc);
+  const taskCidDigest = keccak256(toBytes(taskJson)) as `0x${string}`;
+  mockIpfs.register(taskCidDigest, signedTaskDoc);
+
+  const manifestDigest = keccak256(toBytes(MANIFEST_CID)) as `0x${string}`;
+
+  const deliveryRate = await getMechDeliveryRate(
+    fixture.publicClient,
+    v3Env.mockMechAddress as Address,
+  );
+  const timeoutBounds = await getTimeoutBounds(fixture.publicClient, marketplaceAddress);
+  const responseTimeout = timeoutBounds.min > 0n ? timeoutBounds.min : 3600n;
+
+  const onchainPolicy = { maxClaims: 10 };
+
   const MAX_CLAIMS = 10n;
   const rateArg = deliveryRate > 0n ? deliveryRate : parseEther('0.0001');
   const solutionBudget = rateArg * MAX_CLAIMS;

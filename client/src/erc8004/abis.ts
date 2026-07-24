@@ -101,6 +101,9 @@ export const REVOCATION_PAYLOAD_TUPLE = [
   { name: 'reason', type: 'string' },
 ] as const;
 
+/** Shared client-independent manifest tuple; re-exported for API compatibility. */
+export { MANIFEST_PAYLOAD_TUPLE } from '@jinn-network/core';
+
 /** ERC-8004 IdentityRegistry — only the function the publisher calls. */
 export const IDENTITY_REGISTRY_SET_METADATA_ABI = [
   {
@@ -113,6 +116,17 @@ export const IDENTITY_REGISTRY_SET_METADATA_ABI = [
       { name: 'metadataValue', type: 'bytes' },
     ],
     outputs: [],
+  },
+] as const;
+
+/** ERC-8004 IdentityRegistry — publisher-agent Safe binding read. */
+export const IDENTITY_REGISTRY_GET_AGENT_WALLET_ABI = [
+  {
+    type: 'function',
+    name: 'getAgentWallet',
+    stateMutability: 'view',
+    inputs: [{ name: 'agentId', type: 'uint256' }],
+    outputs: [{ name: '', type: 'address' }],
   },
 ] as const;
 

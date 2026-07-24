@@ -10,9 +10,13 @@ Jinn protocol client. Runs a headless daemon that participates in the Jinn train
 Running `jinn run` opens a browser to `http://127.0.0.1:7331`
 with the operator panel — Status, Visibility (live event stream), Setup
 (bootstrap state machine), and an embedded Claude Code session in Auto Mode
-(when available).
+(when available). Auto-open only happens on the first-ever launch (tracked
+by a marker file), so restarting the daemon doesn't accumulate fresh
+browser tabs.
 
-To suppress auto-open: `jinn run --no-ui`.
+To force the panel open on a later launch: `jinn run --ui`.
+
+To suppress auto-open entirely: `jinn run --no-ui` (wins over `--ui`).
 
 To open the panel manually for an already-running daemon: `jinn ui`.
 
@@ -264,6 +268,7 @@ docker run --rm ghcr.io/jinn-network/client:latest version --json
 | `jinn bootstrap` | Advance toward a running fleet | Yes |
 | `jinn fund-requirements` | List what needs funding | Yes |
 | `jinn stop` | Signal a running daemon to stop | Yes |
+| `jinn kill` | Force-terminate jinn daemon processes by cmdline enumeration (`--all` for multiple) | Yes |
 | `jinn version` | Version, phase, deployment digest | Yes |
 | `jinn update` | Update the client package + refresh integrations | Yes |
 | `jinn integrations install` | Wire Jinn into Claude Code / Codex / other AI tools | Yes |

@@ -21,23 +21,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency manifests first for layer caching. The client depends on the
-# mono checkout's SDK package through a Yarn portal, so Docker builds use the
-# repository root as their build context.
+# Copy dependency manifests first for layer caching. The client resolves the
+# mono checkout's SDK, core, plugin, and layer packages through Yarn portals,
+# so Docker builds use the repository root as their build context.
 COPY client/package.json client/yarn.lock client/.yarnrc.yml ./client/
 COPY client/src/dashboard/spa/package.json ./client/src/dashboard/spa/package.json
-COPY client/packages/harness-layer/package.json ./client/packages/harness-layer/package.json
-COPY packages/sdk/package.json packages/sdk/yarn.lock packages/sdk/README.md ./packages/sdk/
+COPY packages/sdk/package.json packages/sdk/yarn.lock packages/sdk/.yarnrc.yml packages/sdk/README.md ./packages/sdk/
+COPY packages/core/package.json packages/core/yarn.lock packages/core/.yarnrc.yml ./packages/core/
+COPY packages/plugin/package.json packages/plugin/yarn.lock packages/plugin/.yarnrc.yml packages/plugin/process-contract.json ./packages/plugin/
+COPY packages/layer/package.json packages/layer/yarn.lock packages/layer/.yarnrc.yml ./packages/layer/
 RUN corepack enable && cd client && yarn install --immutable
 
-# Copy SDK sources before the client build; `yarn build` builds the SDK first.
+# Copy portal-package sources before the client build; `yarn build` builds them
+# in dependency order before compiling the client.
 COPY packages/sdk/tsconfig.json ./packages/sdk/
 COPY packages/sdk/src/ ./packages/sdk/src/
-
-# client/packages/harness-layer is a client-local workspace (bundled into
-# dist/scripts/jinn-layer.mjs by scripts/bundle-jinn-layer.mjs and type-checked
-# by `yarn build`/`yarn typecheck`) — needs its own source ahead of the build.
-COPY client/packages/harness-layer/ ./client/packages/harness-layer/
+COPY packages/plugin/tsconfig.json ./packages/plugin/
+COPY packages/plugin/src/ ./packages/plugin/src/
+COPY packages/core/tsconfig.json ./packages/core/
+COPY packages/core/src/ ./packages/core/src/
+COPY packages/layer/tsconfig.json ./packages/layer/
+COPY packages/layer/src/ ./packages/layer/src/
 
 # Copy source and bundled deployment artifacts. `client/docs/` is needed at
 # build time because the /build SPA page (hfmf) embeds `quickstart.md` via a
@@ -55,6 +59,15 @@ COPY client/tsconfig.json ./client/
 # Build TypeScript
 WORKDIR /app/client
 RUN yarn build
+
+# Remove development-only portals (including the extracted layer) and their
+# generated .bin shims before node_modules leaves the repository layout.
+RUN yarn workspaces focus @jinn-network/client --production
+
+# Replace the remaining production core/plugin portals with their
+# publish-shaped runtime directories before node_modules crosses into the
+# final image.
+RUN node scripts/materialize-bundled-workspaces.mjs prepare
 
 # ── Runtime stage ────────────────────────────────────────────────────────────
 FROM node:22-slim

@@ -22,13 +22,13 @@ The Monday cadence opens a standing **release-review PR** (`base: main`, `head: 
 
 > **Guard recognition.** The `Main base guard` required check on `main` (`.github/workflows/main-base-guard.yml`) recognises the hotfix shape by either of two signals: a head branch matching `hotfix/*`, or a PR title beginning with `fix(incident)`. Both are produced by following the steps below verbatim; if the guard fails on a hotfix PR, neither signal is present — fix the branch name or rename the PR title and the check re-runs.
 
-1. **Branch from `main`:** `git fetch origin && git checkout -b hotfix/<bd-id>-<slug> origin/main`.
+1. **Branch from `main`:** `git fetch origin && git checkout -b hotfix/<issue-#>-<slug> origin/main`.
 2. **Write the regression test first** (rule 7 — deferred-not-waived on incident). Reproduce the failure.
 3. **Implement the smallest patch.** Do not bundle unrelated work.
-4. **PR against `main`.** Title: `fix(incident)(<bd-id>): <one-line summary>`. Body: incident link, root cause, blast radius, evidence.
+4. **PR against `main`.** Title: `fix(incident)(<issue-#>): <one-line summary>`. Body: incident link, root cause, blast radius, evidence.
 5. **Relaxed review (rule 4 + emergency sub-flow):** one reviewer; reviewer documents justification in the PR body. Reviewer may be the same human/agent who shipped if escalation requires it — document this.
 6. **Merge to `main`.** `gh pr merge --squash --delete-branch`.
-7. **Manually cut a named release on `main` HEAD:** `gh release create v<x.y.z> --target main --title "v<x.y.z> — Hotfix (<one-line>)" --notes-file <evidence-body>`. **Hotfix evidence is the same two SHA-bound check-runs as the regular cut** — `hermetic-gate=success` and `environment-suite=success` bound to the hotfix SHA — not a hand-typed marker (two-gate redesign, [`docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md`](../superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md) §15). The hotfix SHA lands on `main` via the merge in step 6; `hermetic-gate` runs on it per-push, and the authoritative `environment-suite` run is dispatched on that SHA. The transitional `JINN_ENVIRONMENT_SUITE_WAIVED == 'true'` repo variable waives the `environment-suite` requirement until the testnet-gate secrets are provisioned; `hermetic-gate` is never waived. The release notes body is free-form (incident link, root cause, blast radius) — no `jinn-release-evidence:v1` marker is required or parsed.
+7. **Manually cut a named release on `main` HEAD:** `gh release create v<x.y.z> --target main --title "v<x.y.z> — Hotfix (<one-line>)" --notes-file <evidence-body>`. **Hotfix evidence is the same two SHA-bound check-runs as the regular cut** — `hermetic-gate=success` and `environment-suite=success` bound to the hotfix SHA — not a hand-typed marker (two-gate redesign, [`docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md`](../superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md) §15). The hotfix SHA lands on `main` via the merge in step 6; `hermetic-gate` runs on it per-push, and the authoritative `environment-suite` run is dispatched on that SHA. The transitional `JINN_ENVIRONMENT_SUITE_WAIVED == 'true'` repo variable waives the `environment-suite` requirement until the testnet-gate secrets are provisioned, and `JINN_HERMETIC_GATE_WAIVED == 'true'` likewise waives `hermetic-gate` until the Anvil snapshot fixture lands; both default unset, and when unset both check-runs are hard-required. The release notes body is free-form (incident link, root cause, blast radius) — no `jinn-release-evidence:v1` marker is required or parsed.
 8. **Publish triggers** `npm-publish.yml` → publish guard verifies the two check-runs on the release SHA (re-runs nothing, §7) → `@latest`, `promote-main.yml` (no-op — main already at the release SHA), `changelog-mirror.yml`.
 9. **Back-merge `main → next` (MANDATORY):**
 
@@ -42,10 +42,10 @@ The Monday cadence opens a standing **release-review PR** (`base: main`, `head: 
 
    If the back-merge has conflicts, open a `chore` PR titled `chore: back-merge hotfix v<x.y.z>` against `next` and resolve there.
 
-10. **File the post-hoc beads** (incident sub-flow):
-    - regression-test follow-up (if the regression test in step 2 was minimal-only)
-    - proper-fix bead (if the patch was a workaround)
-    Both blocked-by the incident bd; both must close before the incident bd closes.
+10. **File the post-hoc follow-up Issues** (incident sub-flow):
+    - regression-test follow-up Issue (if the regression test in step 2 was minimal-only)
+    - proper-fix Issue (if the patch was a workaround)
+    Both are sub-issues of the incident Issue; both must close before the incident Issue closes.
 
 ## Anti-patterns
 

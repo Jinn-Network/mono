@@ -1,6 +1,27 @@
 import { spawn as nodeSpawn } from 'node:child_process';
-import { headlessOverride } from '../headless.js';
-import { loadCanon } from './dispatch.js';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  headlessOverrideFor,
+} from '../headless.js';
+import {
+  AUTOPILOT_RUNTIME_ENV,
+  parseAutopilotRuntime,
+  type AutopilotRuntime,
+} from '../autopilot-runtime.js';
+import {
+  isGitHubSecretEnvironmentKey,
+} from '../lifecycle/credentials.js';
+import { loadCanon } from './coordinator-session.js';
+import {
+  assertHermesBillingRoute,
+  hermesChatArgs,
+} from './hermes-runtime.js';
+import {
+  CURSOR_BIN_ENV,
+  CURSOR_MODEL_ENV,
+  cursorAgentArgs,
+} from './cursor-runtime.js';
 
 /**
  * A minimal child handle the stage runner needs: stdout/stderr streams to
@@ -24,7 +45,11 @@ export interface StageChild {
 export type StageSpawnFn = (
   cmd: string,
   args: string[],
-  opts: { cwd: string; stdio: Array<'ignore' | 'pipe'> },
+  opts: {
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    stdio: Array<'ignore' | 'pipe'>;
+  },
 ) => StageChild;
 
 /** Result of a stage session — same shape as SkillRunResult. */
@@ -48,8 +73,16 @@ export interface StageRunOpts {
   worktreePath: string;
   /** Optional model override for this stage session. */
   model?: string;
+  /** Hermes venv Python interpreter. */
+  hermesPythonPath?: string;
+  /** Explicit Hermes provider (for example, the subscription-backed provider). */
+  provider?: string;
+  /** Cursor Agent CLI binary override. */
+  cursorBin?: string;
   /** Wall-clock ceiling; default 10 minutes (pressure-suite starting value). */
   timeoutMs?: number;
+  /** Coordinator environment to reduce to a non-authoritative stage view. */
+  environment?: NodeJS.ProcessEnv;
 }
 
 const DEFAULT_TIMEOUT_MS = 600_000;
@@ -60,23 +93,26 @@ const DEFAULT_TIMEOUT_MS = 600_000;
  * coordinator's curated stage prompt. Plain string join, mirroring
  * dispatch.ts's coordinator prompt (canon first, then the headless part).
  *
- * Canon is prepended because a stage runs as its own `claude -p` root session,
- * and `-p` mode does not auto-load CLAUDE.md — same reason dispatch.ts prepends
- * it for the coordinator. We reuse dispatch.ts's `loadCanon` so both call sites
- * stay in lockstep (and the repo-root derivation lives in one place).
+ * Canon is prepended because each stage runs as its own runtime root session.
+ * In particular, Claude `-p` mode does not auto-load CLAUDE.md. We reuse
+ * dispatch.ts's `loadCanon` so all runtimes and both call sites stay in
+ * lockstep (and the repo-root derivation lives in one place).
  *
- * NOTE: this prepends BOTH canon and `headlessOverride()`. The `stageTask`
- * passed in is already curated (the CLI shim reads it from the prompt-file), so
- * it must NOT include canon OR the override block itself — either would
- * double-inject.
+ * NOTE: this prepends BOTH canon and the runtime-specific headless override.
+ * The `stageTask` passed in is already curated (the CLI shim reads it from the
+ * prompt-file), so it must NOT include canon OR the override block itself —
+ * either would double-inject.
  */
 export function buildStagePrompt(
   opts: Pick<StageRunOpts, 'stageTask' | 'worktreePath'>,
+  runtime: AutopilotRuntime = parseAutopilotRuntime(
+    process.env[AUTOPILOT_RUNTIME_ENV],
+  ),
 ): string {
   return [
     loadCanon(),
     '',
-    headlessOverride(),
+    headlessOverrideFor(runtime),
     '',
     opts.stageTask.trim(),
     '',
@@ -84,27 +120,135 @@ export function buildStagePrompt(
   ].join('\n');
 }
 
-/** Production spawn: real `claude -p` root session with captured stdout/stderr. */
+/** Production spawn with captured stdout/stderr for either runtime. */
 const defaultStageSpawn: StageSpawnFn = (cmd, args, opts) =>
   nodeSpawn(cmd, args, opts) as unknown as StageChild;
 
+function requireHermesValue(
+  value: string | undefined,
+  envName: string,
+): string {
+  if (value == null || value === '') {
+    throw new Error(`[autopilot] Hermes runtime is missing ${envName}.`);
+  }
+  return value;
+}
+
+function requireCursorValue(
+  value: string | undefined,
+  envName: string,
+): string {
+  if (value == null || value === '') {
+    throw new Error(`[autopilot] Cursor runtime is missing ${envName}.`);
+  }
+  return value;
+}
+
+function isGitConfigEnvironmentKey(key: string): boolean {
+  return /^GIT_CONFIG(?:_|$)/i.test(key);
+}
+
+function isSshCredentialEnvironmentKey(key: string): boolean {
+  return /^(?:SSH_AUTH_SOCK|SSH_AGENT_PID|GIT_SSH|GIT_SSH_COMMAND)$/i.test(key);
+}
+
+const STAGE_AUTHORITY_ENVIRONMENT_KEYS = new Set([
+  'GH_CONFIG_DIR',
+  'GIT_ASKPASS',
+  'SSH_ASKPASS',
+  'GIT_TERMINAL_PROMPT',
+  'JINN_AUTOPILOT_SESSION_MANIFEST',
+  'JINN_AUTOPILOT_CAPABILITY_ATTESTATION',
+]);
+
 /**
- * Run a pipeline stage as a fresh `claude -p` ROOT session in the issue
- * worktree. Depth-0, so the stage's composed skill can fan out sub-agents at
- * depth-1 (the whole point — an Agent-tool dispatch would sit at depth-1 and
- * its inner fan-out would silently no-op).
+ * Stage roots need model/runtime configuration, but never the coordinator's
+ * GitHub identity or manifest-bound lifecycle authority.
+ */
+export function buildUnprivilegedStageEnvironment(
+  ambient: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(ambient)) {
+    if (
+      !isGitHubSecretEnvironmentKey(key)
+      && !isGitConfigEnvironmentKey(key)
+      && !isSshCredentialEnvironmentKey(key)
+      && !STAGE_AUTHORITY_ENVIRONMENT_KEYS.has(key.toUpperCase())
+    ) {
+      environment[key] = value;
+    }
+  }
+  return {
+    ...environment,
+    GH_CONFIG_DIR: join(
+      tmpdir(),
+      `jinn-autopilot-stage-no-auth-${process.pid}`,
+    ),
+    GIT_CONFIG_COUNT: '3',
+    GIT_CONFIG_KEY_0: 'credential.helper',
+    GIT_CONFIG_VALUE_0: '',
+    GIT_CONFIG_KEY_1: 'credential.interactive',
+    GIT_CONFIG_VALUE_1: 'never',
+    GIT_CONFIG_KEY_2: 'core.askPass',
+    GIT_CONFIG_VALUE_2: 'false',
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_ASKPASS: 'false',
+    SSH_ASKPASS: 'false',
+    GIT_SSH_COMMAND: 'false',
+  };
+}
+
+/**
+ * Run a pipeline stage as a fresh root session in the issue worktree.
+ * Depth-0 lets the stage's composed skill fan out sub-agents at depth-1.
  */
 export function runStageHeadless(
   opts: StageRunOpts,
   spawn: StageSpawnFn = defaultStageSpawn,
 ): Promise<StageRunResult> {
-  const prompt = buildStagePrompt(opts);
-  const args = ['-p', ...(opts.model ? ['--model', opts.model] : []), prompt];
+  const ambient = opts.environment ?? process.env;
+  const runtime = parseAutopilotRuntime(ambient[AUTOPILOT_RUNTIME_ENV]);
+  const prompt = buildStagePrompt(opts, runtime);
+  let cmd: string;
+  let args: string[];
+  if (runtime === 'hermes') {
+    const pythonPath = requireHermesValue(
+      opts.hermesPythonPath ?? ambient.JINN_DISPATCHER_HERMES_PYTHON,
+      'JINN_DISPATCHER_HERMES_PYTHON',
+    );
+    const model = requireHermesValue(
+      opts.model ?? ambient.JINN_DISPATCHER_HERMES_MODEL,
+      'JINN_DISPATCHER_HERMES_MODEL',
+    );
+    const provider = requireHermesValue(
+      opts.provider ?? ambient.JINN_DISPATCHER_HERMES_PROVIDER,
+      'JINN_DISPATCHER_HERMES_PROVIDER',
+    );
+    assertHermesBillingRoute(model, provider);
+    cmd = pythonPath;
+    args = hermesChatArgs(prompt, { model, provider });
+  } else if (runtime === 'cursor') {
+    const binPath = requireCursorValue(
+      opts.cursorBin ?? ambient[CURSOR_BIN_ENV],
+      CURSOR_BIN_ENV,
+    );
+    const model = requireCursorValue(
+      opts.model ?? ambient[CURSOR_MODEL_ENV],
+      CURSOR_MODEL_ENV,
+    );
+    cmd = binPath;
+    args = cursorAgentArgs(prompt, { model, workspace: opts.worktreePath });
+  } else {
+    cmd = 'claude';
+    args = ['-p', ...(opts.model ? ['--model', opts.model] : []), prompt];
+  }
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   return new Promise((resolve) => {
-    const proc = spawn('claude', args, {
+    const proc = spawn(cmd, args, {
       cwd: opts.worktreePath,
+      env: buildUnprivilegedStageEnvironment(ambient),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';

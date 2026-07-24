@@ -7,9 +7,9 @@
  * Gold patches remain local-only in both versions.
  */
 
-import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
-import { resolve as resolvePath, join } from 'node:path';
+import { chmod, readFile, writeFile, mkdir, rename, rm } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { dirname, resolve as resolvePath, join } from 'node:path';
 import { z } from 'zod/v3';
 import type { HfRow } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
@@ -248,10 +248,20 @@ const MintedPoolArtifactV2Schema = z.object({
 }).strict();
 
 async function writeJsonAtomic(file: string, data: unknown): Promise<void> {
-  await mkdir(resolvePath(join(file, '..')), { recursive: true });
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
-  await rename(tmp, file);
+  const directory = dirname(file);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') await chmod(directory, 0o700);
+  const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    await rename(tmp, file);
+    if (process.platform !== 'win32') await chmod(file, 0o600);
+  } finally {
+    await rm(tmp, { force: true });
+  }
 }
 
 /**

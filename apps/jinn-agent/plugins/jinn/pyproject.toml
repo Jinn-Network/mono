@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "jinn-plugin"
 version = "0.1.0"
-description = "Jinn layer as a Hermes plugin — consent-gated contribution, corpus consumption, skill install. Installs into stock upstream Hermes or the jinn-agent fork."
+description = "Jinn for Hermes — public corpus evidence, local capture and distillation, with contribution parked local-only in Stage 2."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["pyyaml"]
@@ -18,4 +18,4 @@ package-dir = {"jinn_plugin" = "."}
 packages = ["jinn_plugin"]
 
 [tool.setuptools.package-data]
-jinn_plugin = ["plugin.yaml", "skin/*.yaml", "soul/*.md"]
+jinn_plugin = ["plugin.yaml", "layer-runtime.json", "skin/*.yaml", "soul/*.md"]

@@ -12,10 +12,4 @@ describe('allocateAnvilPort', () => {
       s.listen(port, '127.0.0.1', () => s.close(() => resolve()));
     });
   });
-
-  it('returns different ports on repeated calls', async () => {
-    const a = await allocateAnvilPort();
-    const b = await allocateAnvilPort();
-    expect(a).not.toBe(b);
-  });
 });

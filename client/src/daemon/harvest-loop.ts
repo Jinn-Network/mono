@@ -39,8 +39,6 @@ import { emitEvent } from '../observability/emit-event.js';
 import { recordLoopTick } from './loop-heartbeat.js';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 import { uploadToIpfs } from '../adapters/mech/ipfs.js';
-import { mineSessionEchoes } from '../solver-types/_swe-rebench-v2-session-echo.js';
-import type { MineableTraceStore } from '../solver-types/_swe-rebench-v2-mineable-store.js';
 
 export type HarvestSource = 'commits' | 'sessions';
 
@@ -57,9 +55,12 @@ export interface HarvestLoopConfig {
   stateDir: string;
   repos: HarvestRepoConfig[];
   limitPerRepo: number;
+  /** Max session-echo records mined per tick (sibling of limitPerRepo). */
+  limitPerTick: number;
   publish: boolean;
   minterSafe?: string;
-  mintDeps: Omit<HarvestMintDeps, 'publish' | 'minterSafe'>;
+  /** Required only when at least one commit repo is configured. */
+  mintDeps?: Omit<HarvestMintDeps, 'publish' | 'minterSafe'>;
   loadPool?: () => Promise<PoolTask[]>;
   validatedStore?: ValidatedPoolStore;
   harvestState?: HarvestStateStore;
@@ -67,20 +68,11 @@ export interface HarvestLoopConfig {
   store?: Store;
   now?: () => number;
   /**
-   * Which harvest sources this tick mines. Absent ⇒ `['commits']` — existing
-   * configs behave byte-identically. `'sessions'` mines locally-captured
-   * task-creator sessions via {@link mineSessionEchoes} (Task 8); it needs
-   * `mineableStore` set, otherwise that source is skipped (non-fatal).
+   * Which harvest sources this tick considers. Absent ⇒ `['commits']`.
+   * The `'sessions'` source is explicitly parked during Stage 2 until a
+   * canonical publication policy is ratified.
    */
   sources?: HarvestSource[];
-  /** Mineable-trace store to drain when `sources` includes `'sessions'`.
-   *  Constructed only when the operator opted into `mineableTraces.consent
-   *  === 'retain_local'` — see `main.ts`. */
-  mineableStore?: MineableTraceStore;
-  /** Recording operator's Safe, stamped into session-echo provenance as
-   *  `sourceSolverSafe` so the operator's own claim on their own echo is
-   *  refused (spec §7). Same value as `minterSafe` in practice. */
-  operatorSafe?: string;
 }
 
 export interface HarvestTickResult {
@@ -95,6 +87,8 @@ export interface HarvestTickResult {
 function defaultDockerCheck(): boolean {
   return spawnSync('docker', ['info'], { stdio: 'ignore' }).status === 0;
 }
+
+export const SESSIONS_SOURCE_PARKED_STAGE_2 = 'sessions-source-parked-stage-2';
 
 const STAGE_RANK: Record<string, number> = {
   discovered: 0,
@@ -199,10 +193,26 @@ async function publishBoundAdmission(args: {
 
 export async function runHarvestTick(config: HarvestLoopConfig): Promise<HarvestTickResult> {
   const sources = config.sources ?? ['commits'];
+  const skipped = sources.includes('sessions') ? [SESSIONS_SOURCE_PARKED_STAGE_2] : [];
+  if (!sources.includes('commits') || config.repos.length === 0) {
+    return { discovered: 0, admitted: [], rejected: [], awaitingInput: [], quarantined: [], skipped };
+  }
+
   const dockerOk = (config.isDockerAvailable ?? defaultDockerCheck)();
   if (!dockerOk) {
-    return { discovered: 0, admitted: [], rejected: [], awaitingInput: [], quarantined: [], skipped: ['docker-unavailable'] };
+    return {
+      discovered: 0,
+      admitted: [],
+      rejected: [],
+      awaitingInput: [],
+      quarantined: [],
+      skipped: [...skipped, 'docker-unavailable'],
+    };
   }
+  if (!config.mintDeps) {
+    throw new Error('commit harvest requires mintDeps when repos are configured');
+  }
+  const mintDeps = config.mintDeps;
 
   const validatedStore = config.validatedStore ?? new ValidatedPoolStore({ stateDir: config.stateDir });
   const harvestState = config.harvestState ?? new HarvestStateStore({ stateDir: config.stateDir });
@@ -213,7 +223,6 @@ export async function runHarvestTick(config: HarvestLoopConfig): Promise<Harvest
   const rejected: Array<{ instance_id: string; reason: string }> = [];
   const awaitingInput: Array<{ instance_id: string; reason: string }> = [];
   const quarantined: Array<{ instance_id: string; reason: string }> = [];
-  const skipped: string[] = [];
   let discovered = 0;
 
   for (const repoCfg of sources.includes('commits') ? config.repos : []) {
@@ -289,11 +298,11 @@ export async function runHarvestTick(config: HarvestLoopConfig): Promise<Harvest
     if (job.stage === 'ipfs') {
       const checkpointCid = job.artifactRefs['mintedArtifactCid'];
       const entry = checkpointCid
-        ? await config.mintDeps.mintedStore.getEntry(candidate.instance_id, EVAL_SEMANTICS_VERSION)
+        ? await mintDeps.mintedStore.getEntry(candidate.instance_id, EVAL_SEMANTICS_VERSION)
         : null;
       const rowHashVersion = entry && (entry.rowHashVersion === 2 || isMintedPoolRowV2(entry.row)) ? 2 : 1;
       const publishedCid = entry
-        ? await config.mintDeps.mintedStore.getPublishedArtifactCid(EVAL_SEMANTICS_VERSION, rowHashVersion)
+        ? await mintDeps.mintedStore.getPublishedArtifactCid(EVAL_SEMANTICS_VERSION, rowHashVersion)
         : null;
       if (checkpointCid && entry && publishedCid === checkpointCid) {
         await harvestState.markJobAdmitted(job.taskKey);
@@ -358,8 +367,8 @@ export async function runHarvestTick(config: HarvestLoopConfig): Promise<Harvest
         candidate,
         ...(source ? { source } : {}),
         ...(repoCfg.explicitRecipe ? { explicitRecipe: repoCfg.explicitRecipe } : {}),
-        fetcher: config.mintDeps.hfFetcher,
-        runner: config.mintDeps.runner,
+        fetcher: mintDeps.hfFetcher,
+        runner: mintDeps.runner,
         minterSafe: config.minterSafe,
         empiricalEvidenceStore: harvestState,
         differentialAdmissionEvidence: job.differentialAdmission,
@@ -410,14 +419,14 @@ export async function runHarvestTick(config: HarvestLoopConfig): Promise<Harvest
         const boundAdmission = await loadBoundAdmission({
           built,
           validatedStore,
-          mintedStore: config.mintDeps.mintedStore,
+          mintedStore: mintDeps.mintedStore,
         });
         if (boundAdmission) {
           if (config.publish) {
             const artifactCid = await publishBoundAdmission({
               instanceId: candidate.instance_id,
               rowHashVersion: boundAdmission.rowHashVersion,
-              mintDeps: config.mintDeps,
+              mintDeps,
             });
             await harvestState.updateJob(job.taskKey, {
               stage: 'ipfs',
@@ -438,12 +447,12 @@ export async function runHarvestTick(config: HarvestLoopConfig): Promise<Harvest
       }
 
       const mintResult = await admitBuiltMintCandidates([built], {
-        ...config.mintDeps,
+        ...mintDeps,
         publish: config.publish,
         minterSafe: config.minterSafe,
         progress: {
           onAdmissionStored: async ({ instanceId, rowHashVersion, differentialAdmission }) => {
-            const entry = await config.mintDeps.mintedStore.getEntry(instanceId, EVAL_SEMANTICS_VERSION);
+            const entry = await mintDeps.mintedStore.getEntry(instanceId, EVAL_SEMANTICS_VERSION);
             await harvestState.updateJob(job.taskKey, {
               stage: 'admission',
               artifactRefs: {
@@ -508,26 +517,6 @@ export async function runHarvestTick(config: HarvestLoopConfig): Promise<Harvest
     }
   }
 
-  if (sources.includes('sessions')) {
-    if (config.mineableStore) {
-      const sessionsResult = await mineSessionEchoes({
-        ...config.mintDeps,
-        validatedStore,
-        minterSafe: config.minterSafe,
-        publish: config.publish,
-        mineableStore: config.mineableStore,
-        operatorSafe: config.operatorSafe,
-        pool,
-      });
-      discovered += sessionsResult.discovered;
-      admitted.push(...sessionsResult.admitted);
-      rejected.push(...sessionsResult.rejected);
-      skipped.push(...sessionsResult.skipped);
-    } else {
-      skipped.push('sessions-source-missing-mineable-store');
-    }
-  }
-
   return { discovered, admitted, rejected, awaitingInput, quarantined, skipped };
 }
 
@@ -570,6 +559,9 @@ export class HarvestLoop {
 
   async runOnce(): Promise<HarvestTickResult> {
     const result = await runHarvestTick(this.config);
+    if (result.skipped.includes(SESSIONS_SOURCE_PARKED_STAGE_2)) {
+      console.log(`[harvest-loop] ${SESSIONS_SOURCE_PARKED_STAGE_2}`);
+    }
     if (this.config.store) {
       recordLoopTick(this.config.store, 'harvest');
       if (result.admitted.length > 0 || result.rejected.length > 0) {

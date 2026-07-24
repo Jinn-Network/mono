@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "jinn-repo.v1 live-issue Task template — the prospective branch of the",
+    "jinn-repo discriminated union (source: 'live-issue'). Unlike the",
+    "retrospective merged-pr branch (which carries merged_pr / test_files /",
+    "test_cmd gold), a live issue has no fix yet, so it carries issue_number",
+    "instead and an optional effort tier (the board's Effort field). See",
+    "spec/2026-07-20-autopilot-marketplace-execution.md",
+    "§\"No new SolverType: a live variant of jinn-repo\".",
+    "",
+    "base_commit pins origin/next at task-post time; problem_statement is a",
+    "frozen snapshot of the issue body — material issue edits cancel and",
+    "re-post the task rather than mutating it in place."
+  ],
+  "solverType": "jinn-repo.v1",
+  "schemaVersion": "jinn-repo.v1",
+  "source": "live-issue",
+  "instance_id": "Jinn-Network__mono-1889",
+  "repo": "Jinn-Network/mono",
+  "base_commit": "2b3d608aa8c9b7f90e493c834aa3cb7e6ffe5420",
+  "language": "typescript",
+  "problem_statement": "jinn-repo live-issue spec variant (schema + SDK payloads + registry)\n\njinn-repo.v1 is retrospective-only: its schema requires merged_pr, test_files (FAIL_TO_PASS gold), and test_cmd -- fields a live issue cannot have, because the fix doesn't exist yet. Live-issue tasks need a schema variant: a discriminated union (source: 'merged-pr' | 'live-issue') where the live branch replaces the oracle fields with issue_number, an issue-body snapshot reference, and effort.",
+  "issue_number": 1889,
+  "effort": "low"
+}

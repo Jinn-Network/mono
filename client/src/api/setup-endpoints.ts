@@ -700,25 +700,48 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     let provider: string | { name: string; baseUrl?: string; authVar?: string } | undefined;
     if (body.provider !== undefined) {
       if (typeof body.provider === 'string') {
-        provider = body.provider;
+        provider = body.provider.trim();
+        if (provider.length === 0) {
+          return c.json({
+            error: 'invalid_body',
+            detail: '`provider` must be a non-empty string',
+          }, 400);
+        }
       } else if (isRecord(body.provider)) {
         const p = body.provider;
-        if (typeof p['name'] !== 'string' || p['name'].length === 0) {
+        const name = typeof p['name'] === 'string' ? p['name'].trim() : '';
+        if (name.length === 0) {
           return c.json({
             error: 'invalid_body',
             detail: '`provider` object must have a non-empty string `name`',
           }, 400);
         }
-        if (p['baseUrl'] !== undefined && typeof p['baseUrl'] !== 'string') {
-          return c.json({ error: 'invalid_body', detail: '`provider.baseUrl` must be a string' }, 400);
+        const baseUrl =
+          typeof p['baseUrl'] === 'string' ? p['baseUrl'].trim() : undefined;
+        if (
+          p['baseUrl'] !== undefined
+          && (baseUrl === undefined || baseUrl.length === 0)
+        ) {
+          return c.json({
+            error: 'invalid_body',
+            detail: '`provider.baseUrl` must be a non-empty string',
+          }, 400);
         }
-        if (p['authVar'] !== undefined && typeof p['authVar'] !== 'string') {
-          return c.json({ error: 'invalid_body', detail: '`provider.authVar` must be a string' }, 400);
+        const authVar =
+          typeof p['authVar'] === 'string' ? p['authVar'].trim() : undefined;
+        if (
+          p['authVar'] !== undefined
+          && (authVar === undefined || authVar.length === 0)
+        ) {
+          return c.json({
+            error: 'invalid_body',
+            detail: '`provider.authVar` must be a non-empty string',
+          }, 400);
         }
         provider = {
-          name: p['name'],
-          ...(typeof p['baseUrl'] === 'string' ? { baseUrl: p['baseUrl'] } : {}),
-          ...(typeof p['authVar'] === 'string' ? { authVar: p['authVar'] } : {}),
+          name,
+          ...(baseUrl !== undefined ? { baseUrl } : {}),
+          ...(authVar !== undefined ? { authVar } : {}),
         };
       } else {
         return c.json({

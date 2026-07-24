@@ -55,7 +55,14 @@ describe('useNotifications', () => {
     apiMocks.getStatus.mockReset();
     apiMocks.getBootstrap.mockReset();
     apiMocks.getStatus.mockResolvedValue({
-      masterGas: { balanceWei: '0' }, // zero balance → runway 0 → funding_low fires
+      // Low-but-nonzero runway → funding_low fires (#1296). The adapter reads
+      // the real runwayDaysExcess; runway 1 < 3-day threshold.
+      masterGas: {
+        address: '0xL2MASTER',
+        balanceWei: '5000000000000000',
+        runwayDaysExcess: '1',
+        minEthWei: '1000000000000000',
+      },
       services: [],
       version: '0.1.5',
     });
@@ -108,9 +115,70 @@ describe('useNotifications', () => {
     expect(() => result.current).not.toThrow();
   });
 
-  it('does not create claim notifications from collector pending rewards', async () => {
+  // ── update_available wire mapping (issue #641) ─────────────────────────
+  // The daemon reports the running build as `/v1/status.version` and the newest
+  // published `@jinn-network/client` as `/v1/status.latestVersion` (string when
+  // strictly newer, null otherwise). `mapStatusToDeriveInput` normalises these
+  // into the deriver's `daemonVersion` / `latestVersion`. These tests pin the
+  // wire mapping against the real /v1/status shape (the deriver's own emit rule
+  // is pinned separately in derive.test.ts).
+
+  it('emits update_available when /v1/status.latestVersion is strictly newer than version', async () => {
     apiMocks.getStatus.mockResolvedValue({
       masterGas: { balanceWei: '0' },
+      fleet: { services: [] },
+      version: '0.1.6',
+      latestVersion: '0.1.8',
+    });
+    apiMocks.getBootstrap.mockResolvedValue({
+      mode: 'running',
+      joinedSolverNets: { 'bafkreic-x': {} },
+    });
+
+    const { result } = renderHook(() => useNotifications(), {
+      wrapper: makeWrapper(),
+    });
+
+    await waitFor(() =>
+      expect(result.current.map(n => n.kind)).toContain('update_available'),
+    );
+    const update = result.current.find(n => n.kind === 'update_available');
+    expect(update?.severity).toBe('info');
+    expect(update?.message).toContain('0.1.8');
+    expect(update?.message).toContain('0.1.6');
+  });
+
+  it('does not emit update_available when /v1/status.latestVersion is null', async () => {
+    apiMocks.getStatus.mockResolvedValue({
+      masterGas: { balanceWei: '0' },
+      fleet: { services: [] },
+      version: '0.1.6',
+      latestVersion: null,
+    });
+    apiMocks.getBootstrap.mockResolvedValue({
+      mode: 'running',
+      joinedSolverNets: { 'bafkreic-x': {} },
+    });
+
+    const { result } = renderHook(() => useNotifications(), {
+      wrapper: makeWrapper(),
+    });
+
+    // Wait until the status fetch has settled before asserting the negative.
+    // Current gas-runway semantics do not manufacture a funding notification
+    // from a status fixture that omits the threshold/runway fields.
+    await waitFor(() => expect(apiMocks.getStatus).toHaveBeenCalled());
+    expect(result.current.map(n => n.kind)).not.toContain('update_available');
+  });
+
+  it('does not create claim notifications from collector pending rewards', async () => {
+    apiMocks.getStatus.mockResolvedValue({
+      masterGas: {
+        address: '0xL2MASTER',
+        balanceWei: '5000000000000000',
+        runwayDaysExcess: '1',
+        minEthWei: '1000000000000000',
+      },
       fleet: { services: [] },
       version: '0.1.5',
     });

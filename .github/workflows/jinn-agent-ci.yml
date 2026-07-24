@@ -2,10 +2,32 @@ name: jinn-agent CI
 
 on:
   pull_request:
-    paths: ['apps/jinn-agent/**']
+    paths:
+      - 'apps/jinn-agent/**'
+      - 'packages/plugin/**'
+      - 'packages/core/**'
+      - 'packages/layer/**'
+      - 'client/src/solver-types/_swe-rebench-v2-*.ts'
+      - 'client/src/adapters/mech/ipfs.ts'
+      - 'client/src/harnesses/impls/swe-rebench-v2-evaluator/**'
+      - 'client/scripts/stage1-task-creator-acceptance.mjs'
+      - 'client/package.json'
+      - 'client/yarn.lock'
+      - '.github/workflows/jinn-agent-ci.yml'
   push:
     branches: [next, main]
-    paths: ['apps/jinn-agent/**']
+    paths:
+      - 'apps/jinn-agent/**'
+      - 'packages/plugin/**'
+      - 'packages/core/**'
+      - 'packages/layer/**'
+      - 'client/src/solver-types/_swe-rebench-v2-*.ts'
+      - 'client/src/adapters/mech/ipfs.ts'
+      - 'client/src/harnesses/impls/swe-rebench-v2-evaluator/**'
+      - 'client/scripts/stage1-task-creator-acceptance.mjs'
+      - 'client/package.json'
+      - 'client/yarn.lock'
+      - '.github/workflows/jinn-agent-ci.yml'
   workflow_dispatch:
   schedule:
     - cron: '0 7 * * *'
@@ -57,19 +79,56 @@ jobs:
         run: |
           FILES=$( { find tests/hermes_cli tests/dehermes -name 'test_*.py' \
             ! -name 'test_main_path_acceptance.py'; \
-            find tests/plugins -maxdepth 1 -name 'test_jinn_*.py'; } | sort | paste -sd: )
+            find tests/plugins -maxdepth 1 -name 'test_jinn_*.py'; \
+            printf '%s\n' tests/scripts/test_clean_jinn_test_pollution.py; \
+          } | sort | paste -sd: )
           ./scripts/run_tests.sh --files "$FILES" -j 4 --file-timeout 1200 -q
 
   cold-stock-e2e:
-    name: Cold-stock e2e (advisory)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    name: Cold-stock Stage 1 product gate
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    continue-on-error: true
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - name: Cold-stock e2e (network clone; advisory, never pages)
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Enable Corepack
+        working-directory: client
+        run: corepack enable
+      - name: Install client dependencies
+        working-directory: client
+        run: yarn install --immutable
+      - name: Plugin package boundary, schema, type, test, and build gates
+        working-directory: packages/plugin
+        run: yarn install --immutable && yarn typecheck && yarn build && yarn test
+      - name: Core package and contribution-store gates
+        working-directory: packages/core
+        run: >-
+          yarn install --immutable &&
+          yarn typecheck &&
+          yarn build &&
+          yarn vitest run test/contribution-store.test.ts
+      - name: Layer package, process-contract, and build gates
+        working-directory: packages/layer
+        run: >-
+          yarn install --immutable &&
+          yarn typecheck &&
+          yarn build &&
+          yarn vitest run
+          test/process-contract.test.ts
+          test/contract-parity.test.ts
+      - name: Build the daemon and run task-creator privacy gate
+        working-directory: client
+        run: >-
+          yarn build &&
+          yarn vitest run
+          test/solver-types/task-creator-session-echo.test.ts
+      - name: Pinned stock-Hermes Stage 1 product journey
+        env:
+          JINN_STAGE1_SKIP_CLIENT_BUILD: '1'
         run: bash scripts/cold-stock-e2e.sh

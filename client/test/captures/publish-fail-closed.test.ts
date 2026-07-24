@@ -1,19 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Force the Transformers.js model load to fail so maybeBuildPiiDetector returns
-// the fail-closed detector (no real model download). This mock is file-local.
-vi.mock('../../src/trajectory/scrub/transformers-detector.js', () => ({
-  DEFAULT_NER_MODEL: 'Xenova/bert-base-NER',
-  TransformersPiiDetector: class {
-    async init() {
-      throw new Error('model download failed');
-    }
-    async detect() {
-      return [];
-    }
-  },
-}));
-
 import { Store } from '../../src/store/store.js';
 import { CapturesStore } from '../../src/store/captures.js';
 import { publishCaptureEnvelope, type CapturePublishDeps } from '../../src/captures/publish.js';
@@ -65,7 +51,22 @@ describe('publishCaptureEnvelope fails closed when ML PII enabled but model fail
   afterEach(() => store.close());
 
   it('aborts the publish and uploads nothing (no raw trajectory)', async () => {
-    const piiDetector = await maybeBuildPiiDetector({ enabled: true }, () => {});
+    const piiDetector = await maybeBuildPiiDetector(
+      { enabled: true },
+      () => {},
+      {
+        create() {
+          return {
+            async init() {
+              throw new Error('model download failed');
+            },
+            async detect() {
+              return [];
+            },
+          };
+        },
+      },
+    );
     expect(piiDetector).toBeDefined(); // fail-closed detector, not undefined
     const scrubPipeline = buildScrubPipeline({ piiDetector });
 

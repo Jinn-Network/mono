@@ -12,9 +12,9 @@
  *                           2026-05-13-plug-in-builder-entry-point-design.md
  *   HarnessCheckpoint     — from IdentityRegistry.MetadataSet (key prefix harness.checkpoint:)
  *   AttemptEnvelopeMeta   — IPFS-enriched executor/provenance fields for execution envelopes,
- *                           keyed by (requestId, chainId), joined from Envelope via IPFS fetch
+ *                           keyed by (requestId, publisherAgentId, manifestCid, chainId)
  *   VerdictEnvelopeMeta   — IPFS-enriched actual outcome fields for evaluation envelopes (ebu7.X),
- *                           keyed by (requestId, chainId). The on-chain verdictCode
+ *                           keyed by (requestId, publisherAgentId, manifestCid, chainId). The on-chain verdictCode
  *                           defaults to Pass(1) for failed evaluations (daemon bug); this table
  *                           holds the evaluator's real judgment from the off-chain envelope.
  *   RewardDistribution    — from Base Sepolia ExternalStakingDistributor.RewardsDistributed;
@@ -612,7 +612,10 @@ export const harnessCheckpoint = onchainTable(
  * without the body); Ponder reprocesses on the next sync giving a natural retry.
  * `mode`: 'train' (default when the envelope omits executor.mode) | 'frozen' | 'unknown'.
  *
- * Primary key: (requestId, chainId).
+ * Primary key: (requestId, publisherAgentId, manifestCid, chainId). A request
+ * may have competing MetadataSet candidates; retaining each publisher/CID
+ * anchor lets authenticated consumers reject ambiguity instead of accepting
+ * whichever event happened to arrive last.
  */
 export const attemptEnvelopeMeta = onchainTable(
   'attempt_envelope_meta',
@@ -621,6 +624,10 @@ export const attemptEnvelopeMeta = onchainTable(
     requestId: t.hex().notNull(),
     /** The envelope CID this metadata came from. */
     manifestCid: t.text().notNull(),
+    /** ERC-8004 agentId whose MetadataSet event published this envelope. */
+    publisherAgentId: t.text().notNull().default(''),
+    /** Manifest hash committed in that MetadataSet event. */
+    manifestHash: t.hex().notNull().default('0x'),
     /** solverType from the envelope. */
     solverType: t.text().notNull().default(''),
     /** executor.implName (harness). */
@@ -649,7 +656,8 @@ export const attemptEnvelopeMeta = onchainTable(
     chainId: t.integer().notNull(),
   }),
   (table) => ({
-    pk: primaryKey({ columns: [table.requestId, table.chainId] }),
+    pk: primaryKey({ columns: [table.requestId, table.publisherAgentId, table.manifestCid, table.chainId] }),
+    requestChainIdx: index().on(table.requestId, table.chainId),
     manifestCidIdx: index().on(table.manifestCid),
     implNameIdx: index().on(table.implName),
     modeIdx: index().on(table.mode),
@@ -683,7 +691,10 @@ export const attemptEnvelopeMeta = onchainTable(
  * submitted on-chain (often defaulted to Pass). When both are present and
  * disagree, prefer `actualPassed` in UI and metrics.
  *
- * Primary key: (requestId, chainId).
+ * Primary key: (requestId, publisherAgentId, manifestCid, chainId). A request
+ * may have competing MetadataSet candidates; retaining each publisher/CID
+ * anchor lets authenticated consumers reject ambiguity instead of accepting
+ * whichever event happened to arrive last.
  * Index on manifestCid, evaluator, actualPassed, evaluatorVerdict, taskId.
  */
 export const verdictEnvelopeMeta = onchainTable(
@@ -704,6 +715,10 @@ export const verdictEnvelopeMeta = onchainTable(
     evaluator: t.hex().notNull().default('0x'),
     /** The envelope IPFS CID (from the metadata key `evaluation:<cid>`). */
     manifestCid: t.text().notNull(),
+    /** ERC-8004 agentId whose MetadataSet event published this envelope. */
+    publisherAgentId: t.text().notNull().default(''),
+    /** Manifest hash committed in that MetadataSet event. */
+    manifestHash: t.hex().notNull().default('0x'),
     /** solverType from the envelope. */
     solverType: t.text().notNull().default(''),
     /** evidenceTier from the envelope. */
@@ -806,7 +821,8 @@ export const verdictEnvelopeMeta = onchainTable(
     chainId: t.integer().notNull(),
   }),
   (table) => ({
-    pk: primaryKey({ columns: [table.requestId, table.chainId] }),
+    pk: primaryKey({ columns: [table.requestId, table.publisherAgentId, table.manifestCid, table.chainId] }),
+    requestChainIdx: index().on(table.requestId, table.chainId),
     manifestCidIdx: index().on(table.manifestCid),
     evaluatorIdx: index().on(table.evaluator),
     actualPassedIdx: index().on(table.actualPassed),
@@ -833,11 +849,11 @@ export const verdictEnvelopeMeta = onchainTable(
 
 // ── CaptureEnvelopeMeta ──────────────────────────────────────────────────────
 /**
- * Envelope-sourced metadata for a published capture (harness trace), populated
+ * Envelope-sourced metadata for a published capture, populated
  * by the IPFS enrichment pass (issue #1314): for each indexed `capture:<cid>`
- * MetadataSet event, fetch the wrapper envelope body, then the
- * `jinn.trace-envelope.v0` artifact it carries, and project the fields the
- * distribution signal reads: distribution tags, provenance, contributor.
+ * MetadataSet event, fetch the wrapper envelope body, then its canonical
+ * `jinn.episode.v1` artifact (or frozen `jinn.trace-envelope.v0` compatibility
+ * artifact), and project the fields the distribution signal and corpus read.
  *
  * Seeds (`provenance: 'imported'`) are stored but EXCLUDED from the signal's
  * default counts — the API filters on this column (spec §7).
@@ -859,13 +875,19 @@ export const captureEnvelopeMeta = onchainTable(
     agentId: t.text().notNull(),
     /** Contributor identity: participant.safeAddress from the wrapper envelope. */
     contributor: t.text().notNull().default(''),
-    /** Scrubbed one-line task summary from the trace envelope. */
+    /** Scrubbed one-line task summary from the evidence payload. */
     taskSummary: t.text().notNull().default(''),
     /** JSON.stringify(task.distributionTags) — first tag is the primary (v0 cluster key). */
     tagsJson: t.text().notNull().default('[]'),
+    /** task.repositorySlug — retained for tuple joins and corpus attribution (#1842). */
+    repositorySlug: t.text().notNull().default(''),
+    /** Authored outcome/seed synthesis retained as record metadata (#1842). */
+    synthesis: t.text().notNull().default(''),
+    /** Named W2 retrieval-visibility projection; false for substrate-only records. */
+    retrievalVisible: t.boolean().notNull().default(false),
     /** 'contributed' | 'imported' — the signal's seed-exclusion filter column. */
     provenance: t.text().notNull().default('contributed'),
-    /** outcome.verifiabilityTier from the trace envelope. */
+    /** Compatibility column: Episode verificationStrength or trace verifiabilityTier. */
     verifiabilityTier: t.text().notNull().default(''),
     /** environment.harness — "<name> <version>", empty when absent. Corpus detail (#1406). */
     harness: t.text().notNull().default(''),
@@ -873,7 +895,7 @@ export const captureEnvelopeMeta = onchainTable(
     model: t.text().notNull().default(''),
     /** JSON.stringify(environment.tools) — tool names only. Corpus detail (#1406). */
     toolsJson: t.text().notNull().default('[]'),
-    /** steps.length — the trace's step count. Corpus index + detail (#1406). */
+    /** trajectory.length / legacy steps.length. Corpus index + detail (#1406). */
     stepCount: t.integer().notNull().default(0),
     /** Transaction hash of the MetadataSet anchor event — the on-chain anchor link (#1406). */
     anchorTx: t.hex().notNull().default('0x'),
