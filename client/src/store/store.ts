@@ -1490,12 +1490,17 @@ export class Store {
    * instant that overstates the wait — a rolling window sheds its oldest
    * rows continuously, not all at once. This walks the in-window rows
    * oldest-to-newest, subtracting each from the running total, and returns
-   * the instant the remaining sum first drops below `capUsdMicros` (that
-   * row's `ts + 7d`). Returns `null` when the window is already under cap
-   * (not paused on the week window — the fixed-instant fallback is used by
-   * the caller in that case, since the value isn't operator-relevant).
+   * the instant `remaining + projectedUsdMicros` first falls to or below
+   * `capUsdMicros` (that row's `ts + 7d`). The `<=` boundary exactly mirrors
+   * the gate, which blocks only on `current + projected > cap`. Returns
+   * `null` when the prospective claim is already allowed.
    */
-  weekWindowResumeAt(credentialId: string, capUsdMicros: number, now: Date = new Date()): string | null {
+  weekWindowResumeAt(
+    credentialId: string,
+    capUsdMicros: number,
+    now: Date = new Date(),
+    projectedUsdMicros = 0,
+  ): string | null {
     const weekStart = new Date(now.getTime() - SEVEN_DAY_MS).toISOString();
     const rows = this.db
       .prepare(
@@ -1512,14 +1517,14 @@ export class Store {
     }[];
 
     let remaining = rows.reduce((sum, r) => sum + r.usdMicros, 0);
-    if (remaining < capUsdMicros) return null;
+    if (remaining + projectedUsdMicros <= capUsdMicros) return null;
 
-    // Guaranteed to return inside this loop: `remaining` starts >=
-    // `capUsdMicros` (checked above) and strictly decreases each iteration,
-    // reaching 0 after the last row — which is always < capUsdMicros.
+    // Guaranteed to return inside this loop for a non-negative projection no
+    // larger than the cap: after the last row, remaining is zero and the
+    // prospective debit is within the cap.
     for (const row of rows) {
       remaining -= row.usdMicros;
-      if (remaining < capUsdMicros) {
+      if (remaining + projectedUsdMicros <= capUsdMicros) {
         return new Date(new Date(row.ts).getTime() + SEVEN_DAY_MS).toISOString();
       }
     }

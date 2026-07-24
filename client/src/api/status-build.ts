@@ -70,7 +70,10 @@ export interface AiUnitsCredentialRow {
    * telemetry. Issue #1004 (AC4).
    */
   estimated: boolean;
-  /** True when block or week sum has reached its cap and claims are paused. */
+  /**
+   * True when at least one known configured task projection would make the
+   * block or week sum exceed its cap. Unknown projections fail open.
+   */
   paused: boolean;
   /**
    * True when this credential has recorded spend in the current 7d window —
@@ -80,23 +83,24 @@ export interface AiUnitsCredentialRow {
    */
   active: boolean;
   /**
-   * The binding window when `paused` is true, using the same
-   * block-preferred precedence as the daemon gate
-   * (`src/daemon/ai-units-gate.ts`: block wins when both windows are over
-   * cap). `null` when not paused. Lets the SPA render the pause reason
-   * without re-deriving the precedence locally (issue #830, item 2).
+   * The binding window when `paused` is true, using the daemon gate's shared
+   * projected-debit classifier. Across multiple tasks on one credential,
+   * block wins if any known projection is block-gated; otherwise week wins
+   * when any known projection is week-gated. `null` when no known projection
+   * is blocked. Lets the SPA render the pause reason without re-deriving the
+   * decision locally (issue #830, item 2).
    */
   pausedWindow: AiUnitsPausedWindow;
   /** ISO timestamp of the next 6h block boundary (00:00 / 06:00 / 12:00 / 18:00 UTC). */
   blockResetsAt: string;
   /**
    * ISO timestamp claims resume for the 7d window. When the week window is
-   * over cap, this is the accurate rolling-window resume instant (the
-   * moment the oldest in-window spend ages out enough to drop the sum back
-   * under the cap — see `Store.weekWindowResumeAt`). When the week window
-   * is under cap, this falls back to the coarse `weekResetsAtUtc(now)`
-   * (`now + 7d`) instant, which is not operator-relevant in that case
-   * (issue #830, item 1).
+   * binding, this is the accurate rolling-window resume instant for the
+   * credential's largest known configured projection (the moment enough
+   * in-window spend expires that `remaining + projected <= cap`; see
+   * `Store.weekWindowResumeAt`). Otherwise this falls back to the coarse
+   * `weekResetsAtUtc(now)` (`now + 7d`) instant, which is not
+   * operator-relevant in that case (issue #830, item 1).
    */
   weekResetsAt: string;
 }

@@ -14,7 +14,12 @@ import type { JinnConfig } from '../config.js';
 import type { CredentialId } from '../spend/credential.js';
 import { isOverSpendCap } from '../spend/spend-cap.js';
 import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
-import { blockResetsAtUtc, weekResetsAtUtc, GPT_5_4_MINI_USD_PER_BLOCK } from '../spend/ai-units.js';
+import {
+  blockResetsAtUtc,
+  classifyAiUnitsSpend,
+  weekResetsAtUtc,
+  GPT_5_4_MINI_USD_PER_BLOCK,
+} from '../spend/ai-units.js';
 import { FleetStateStore } from '../earning/store.js';
 import {
   getChainConfig,
@@ -166,8 +171,9 @@ export interface StatusGatherConfig {
   spendCaps?: Record<CredentialId, number>;
   /**
    * AI-units gate config (issue #815). When present, /v1/status carries an
-   * `aiUnits` block keyed per credential — surfaces unitsThisBlock /
-   * unitsThisWeek vs caps + paused flag + reset instants.
+   * `aiUnits` block keyed per credential — surfaces current spend/caps,
+   * whether any known configured task projection is gated, the binding
+   * window, and reset instants.
    */
   aiUnits?: AiUnitsDaemonConfig;
   /**
@@ -892,31 +898,62 @@ export async function gatherStatusForApi(
     const now = new Date();
     const blockResetsAt = blockResetsAtUtc(now).toISOString();
     const weekResetsAtFallback = weekResetsAtUtc(now).toISOString();
-    // Dedupe credentials across manifests — multiple SolverNets on the same
-    // credential share one row.
-    const uniqueCredentials = new Set(Object.values(aiUnitsCfg.manifestCredentials));
+    // Group every configured task projection by credential. Multiple
+    // SolverNets can share one credential but carry different models/costs;
+    // status must report paused when any known prospective task would be
+    // blocked by the same classifier the daemon gate uses. Unknown
+    // projections remain fail-open individually.
+    const projectionsByCredential = new Map<CredentialId, Array<number | null>>();
+    for (const [manifestCid, credentialId] of Object.entries(
+      aiUnitsCfg.manifestCredentials,
+    )) {
+      const projections = projectionsByCredential.get(credentialId) ?? [];
+      projections.push(aiUnitsCfg.manifestProjectedUsdMicros[manifestCid] ?? null);
+      projectionsByCredential.set(credentialId, projections);
+    }
     // Peg: usd_micros = units / 100 * GPT_5_4_MINI_USD_PER_BLOCK * 1e6.
     // Inverse (USD micros -> units) for the legacy unit surface (#1006).
     const usdMicrosToUnits = (usdMicros: number): number =>
       (usdMicros / 1_000_000 / GPT_5_4_MINI_USD_PER_BLOCK) * 100;
     body.aiUnits = {
-      credentials: [...uniqueCredentials].map((credentialId) => {
+      credentials: [...projectionsByCredential].map(([credentialId, projections]) => {
         const block = store.usdMicrosThisBlock(credentialId, now);
         const week = store.usdMicrosThisWeek(credentialId, now);
-        const overBlock = block.usdMicros >= aiUnitsCfg.capPerBlockUsdMicros;
-        const overWeek = week.usdMicros >= aiUnitsCfg.capPerWeekUsdMicros;
-        const paused = overBlock || overWeek;
-        // Block-preferred precedence — mirrors the daemon gate
-        // (`src/daemon/ai-units-gate.ts`): when both windows are over, the
-        // binding window is the block (issue #830, item 2).
-        const pausedWindow: AiUnitsPausedWindow = overBlock ? 'block' : overWeek ? 'week' : null;
+        const blockedWindows = projections.flatMap((projectedUsdMicros) => {
+          const decision = classifyAiUnitsSpend({
+            projectedUsdMicros,
+            usdMicrosThisBlock: block.usdMicros,
+            usdMicrosThisWeek: week.usdMicros,
+            capPerBlockUsdMicros: aiUnitsCfg.capPerBlockUsdMicros,
+            capPerWeekUsdMicros: aiUnitsCfg.capPerWeekUsdMicros,
+          });
+          return decision.proceed ? [] : [decision.window];
+        });
+        // Credential-level block preference: if any configured task is
+        // block-gated, surface block; otherwise surface week when any task is
+        // week-gated. Null projections contribute no blocked decision.
+        const pausedWindow: AiUnitsPausedWindow = blockedWindows.includes('block')
+          ? 'block'
+          : blockedWindows.includes('week')
+            ? 'week'
+            : null;
+        const paused = pausedWindow !== null;
+        const maximumKnownProjection = projections.reduce<number>(
+          (maximum, projection) =>
+            projection == null ? maximum : Math.max(maximum, projection),
+          0,
+        );
         // The true "claims resume at" instant for the week window (issue
-        // #830, item 1) — only computed when actually paused on the week
-        // window; otherwise the fixed `now + 7d` fallback is used since the
-        // value isn't operator-relevant (and querying it would cost an
-        // unconditional per-credential row scan on every status poll).
-        const weekResetsAt = overWeek
-          ? (store.weekWindowResumeAt(credentialId, aiUnitsCfg.capPerWeekUsdMicros, now) ??
+        // #830, item 1) — only computed when the reported binding window is
+        // week. Use the largest known configured debit so the reported
+        // instant is safe for every known task sharing this credential.
+        const weekResetsAt = pausedWindow === 'week'
+          ? (store.weekWindowResumeAt(
+              credentialId,
+              aiUnitsCfg.capPerWeekUsdMicros,
+              now,
+              maximumKnownProjection,
+            ) ??
             weekResetsAtFallback)
           : weekResetsAtFallback;
         return {

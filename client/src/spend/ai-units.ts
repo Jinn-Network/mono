@@ -92,6 +92,45 @@ const SIX_HOUR_BLOCK_MS = 6 * 60 * 60 * 1_000;
 /** 7 days in milliseconds — UTC-aligned. */
 export const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1_000;
 
+export type AiUnitsSpendWindow = 'block' | 'week';
+
+export interface AiUnitsSpendClassificationArgs {
+  /** USD micros projected for the next claim, or `null` when unknown. */
+  projectedUsdMicros: number | null;
+  usdMicrosThisBlock: number;
+  usdMicrosThisWeek: number;
+  capPerBlockUsdMicros: number;
+  capPerWeekUsdMicros: number;
+}
+
+export type AiUnitsSpendClassification =
+  | { proceed: true }
+  | { proceed: false; window: AiUnitsSpendWindow };
+
+/**
+ * Classify one prospective claim against the AI-spend ceilings.
+ *
+ * This is the shared, side-effect-free source of truth used by both the
+ * daemon gate and `/v1/status`: compare current spend plus the prospective
+ * debit using the gate's strict `>` boundary, fail open when the projection
+ * is unknown, and prefer the block window when both ceilings would be
+ * exceeded.
+ */
+export function classifyAiUnitsSpend(
+  args: AiUnitsSpendClassificationArgs,
+): AiUnitsSpendClassification {
+  if (args.projectedUsdMicros == null) return { proceed: true };
+
+  const overBlock =
+    args.usdMicrosThisBlock + args.projectedUsdMicros > args.capPerBlockUsdMicros;
+  const overWeek =
+    args.usdMicrosThisWeek + args.projectedUsdMicros > args.capPerWeekUsdMicros;
+
+  if (overBlock) return { proceed: false, window: 'block' };
+  if (overWeek) return { proceed: false, window: 'week' };
+  return { proceed: true };
+}
+
 /**
  * Project the AI-unit cost of one task for a harness/model combination.
  *
@@ -259,11 +298,10 @@ export function blockIdUtc(now: Date): string {
  * window is rolling, so it sheds its oldest rows continuously rather than
  * resetting all at once at a fixed point 7 days out. When a credential is
  * actually paused on the week window, `Store.weekWindowResumeAt` computes
- * the accurate resume instant (the moment the oldest in-window spend ages
- * out enough to drop the sum back under the cap); callers should prefer
- * that and fall back to this fixed instant only when the week window is
- * under cap (in which case the value isn't operator-relevant). See issue
- * #830.
+ * the accurate resume instant (the moment enough in-window spend expires
+ * that `remaining + projected <= cap`); callers should prefer that and fall
+ * back to this fixed instant only when the week window is not binding (in
+ * which case the value isn't operator-relevant). See issue #830.
  */
 export function weekResetsAtUtc(now: Date): Date {
   return new Date(now.getTime() + SEVEN_DAY_MS);

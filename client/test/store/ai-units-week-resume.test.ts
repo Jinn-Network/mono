@@ -3,8 +3,8 @@
  * 7-day AI-units window (issue #830, item 1). Unlike `weekResetsAtUtc`
  * (always `now + 7d`, a fixed instant that doesn't reflect the rolling
  * window shedding its oldest rows continuously), this walks the in-window
- * rows oldest-to-newest and returns the instant the running total first
- * drops back under the cap.
+ * rows oldest-to-newest and returns the instant the running total plus the
+ * next projected debit first falls to or below the cap.
  */
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -97,5 +97,38 @@ describe('weekWindowResumeAt', () => {
     // Drop middle too -> remaining 150_000 < 380_000 -> resume = middle + 7d.
     const resumeAt2 = store.weekWindowResumeAt('anthropic:api-key', 380_000, now);
     expect(resumeAt2).toBe(new Date(middle.getTime() + SEVEN_DAY_MS).toISOString());
+  });
+
+  it('includes the projected debit and waits until remaining + projected is within cap', () => {
+    store = freshStore();
+    const now = new Date('2026-05-28T13:00:00.000Z');
+    const oldest = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1_000);
+    const middle = new Date(now.getTime() - 4 * 24 * 60 * 60 * 1_000);
+    const newest = new Date(now.getTime() - 1 * 24 * 60 * 60 * 1_000);
+    for (const [requestId, ts, actualCostUsdMicros] of [
+      ['projected-oldest', oldest, 200_000],
+      ['projected-middle', middle, 50_000],
+      ['projected-newest', newest, 350_000],
+    ] as const) {
+      store.recordActivityEvent({
+        ts: ts.toISOString(),
+        kind: 'claimed',
+        requestId,
+        credentialId: 'anthropic:api-key',
+        claimStatus: 'delivered',
+        actualCostUsdMicros,
+      });
+    }
+
+    const resumeAt = store.weekWindowResumeAt(
+      'anthropic:api-key',
+      500_000,
+      now,
+      150_000,
+    );
+    // total 600k + projected 150k. Expiring 200k leaves 550k, still blocked;
+    // expiring the next 50k leaves exactly 500k, which the strict-`>` gate
+    // allows.
+    expect(resumeAt).toBe(new Date(middle.getTime() + SEVEN_DAY_MS).toISOString());
   });
 });
