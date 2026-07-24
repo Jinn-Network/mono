@@ -36,6 +36,56 @@ Modes:
 No command in this runbook should be executed merely because the code was
 installed. Activation is an explicit operator decision.
 
+## 0. Quick start (Claude runtime)
+
+For a new operator who only needs to run active autopilot with Claude on a
+current `next` checkout, work through this section plus §1 (preflight), §7
+(capability attestation), and §12 (supervisor). Hand this runbook to Claude
+and ask it to execute those sections in order.
+
+Prerequisites:
+
+- Node 22 + Yarn (`corepack enable`)
+- `gh` authenticated against `Jinn-Network/mono`
+- Claude Code CLI in `PATH` as `claude` (autopilot spawns `claude -p` per stage)
+
+```bash
+cd packages/autopilot
+yarn install
+yarn typecheck
+
+git remote add jinn-autopilot-v2 https://github.com/Jinn-Network/mono.git
+# skip if the remote already exists — URL must be exactly the line above
+
+export JINN_IMPL_GH_TOKEN=<implementation-bot-pat>
+export JINN_DISPATCHER_AUTHOR_ALLOWLIST=<comma-separated-github-logins>
+export JINN_AUTOPILOT_RUNNER_ID="${JINN_AUTOPILOT_RUNNER_ID:-$(hostname)-1}"
+export JINN_AUTOPILOT_RUNTIME=claude   # default when unset; set explicitly
+
+# Optional but recommended for review:
+# export JINN_REVIEW_GH_TOKEN=<review-bot-pat>
+# export JINN_REVIEW_BOT_LOGIN=<review-bot-login>
+
+# §7 — required before active mode:
+CAPABILITY_DIR="$HOME/.jinn-client/autopilot"
+mkdir -p "$CAPABILITY_DIR" && chmod 700 "$CAPABILITY_DIR"
+CAPABILITY_ATTESTATION="$(mktemp "$CAPABILITY_DIR/capability-attestation.json.XXXXXX")"
+yarn autopilot:capability-probe --output "$CAPABILITY_ATTESTATION"
+chmod 600 "$CAPABILITY_ATTESTATION"
+export JINN_AUTOPILOT_CAPABILITY_ATTESTATION="$CAPABILITY_ATTESTATION"
+
+yarn autopilot --mode observe --once status
+yarn autopilot --mode active --once status   # one cycle
+# yarn autopilot --mode active              # continuous (10 min cadence)
+```
+
+Start with low caps during first production use:
+
+```bash
+export JINN_AUTOPILOT_IMPLEMENTATION_CAP=1
+export JINN_AUTOPILOT_REVIEW_CAP=1
+```
+
 ## 1. Preflight the release
 
 Before touching a supervisor:
@@ -78,15 +128,39 @@ The implementer and reviewer GitHub identities must remain distinct for a PR.
 With only one credential, the process prioritizes implementation and may
 review only PRs authored by a different identity.
 
-Runtime selection is process-wide:
+Runtime selection is process-wide (`JINN_AUTOPILOT_RUNTIME`). Unset defaults
+to **Claude**. Supported values: `claude`, `hermes`, `cursor`. There is no
+per-stage override.
 
 ```bash
-export JINN_AUTOPILOT_RUNTIME=hermes   # or claude
+export JINN_AUTOPILOT_RUNTIME=claude   # default
+# export JINN_AUTOPILOT_RUNTIME=hermes
+# export JINN_AUTOPILOT_RUNTIME=cursor
 ```
 
-When Hermes is configured, keep it selected for the coordinator and every
-stage. Use the existing stateless Hermes launcher and configured model/provider;
-no upstream Hermes change is part of this cutover.
+Runtime-specific prerequisites:
+
+- **Claude** — `claude` in `PATH`; non-interactive `claude -p` must work.
+- **Hermes** — configured stateless launcher; set `JINN_DISPATCHER_HERMES_MODEL`,
+  `JINN_DISPATCHER_HERMES_PROVIDER`, and `JINN_DISPATCHER_HERMES_PYTHON` as
+  needed. Keep Hermes selected for the coordinator and every stage.
+- **Cursor** — Cursor Agent CLI; set `JINN_CURSOR_BIN` and `JINN_CURSOR_MODEL`
+  when not using defaults.
+
+Optional tuning (see also `CLAUDE.md`):
+
+| Env | Default | Purpose |
+|---|---|---|
+| `JINN_AUTOPILOT_IMPLEMENTATION_CAP` | dispatcher default | Max concurrent implement sessions per process |
+| `JINN_AUTOPILOT_REVIEW_CAP` | dispatcher default | Max concurrent review sessions per process |
+| `JINN_AUTOPILOT_WORKTREE_BASE` | `~/.jinn-client/autopilot/attempts` | Attempt worktree root |
+| `JINN_AUTOPILOT_ONLY_ISSUES` | unset (unrestricted) | Canary: comma-separated issue numbers |
+| `JINN_AUTOPILOT_STALE_AFTER_MS` | `7200000` (2 h) | Staleness threshold for claim takeover |
+| `JINN_AUTOPILOT_CHILDREN` | on | Children ladder (`0`/`false` to disable) |
+| `JINN_AUTOPILOT_CARRYOVER` | on | Integration-ladder carryover (`0`/`false` to disable) |
+| `JINN_AUTOPILOT_CLEANUP_ENABLED` | on in active mode | Opt out with `false` |
+| `JINN_AUTOPILOT_ATTEMPT_GRACE_MS` | `1800000` (30 min) | Grace before removing dead dirty/ahead/preparing worktrees |
+| `JINN_AUTOPILOT_DISK_FLOOR_GB` | `10` | Free-disk floor; below it, force-evict oldest dead attempts and pause new worktree claims |
 
 ## 2. Quiesce legacy dispatch
 
@@ -143,9 +217,10 @@ Use this table:
 | Ready In Review PR | Eligible for a new exact-head review claim |
 | Draft review-fix PR | Preserve/finish the legacy reviewer or park Human before v2 recovery |
 | Human-held draft | Preserve and exclude |
-| Current-head native approval | Preserve the native gate |
-| Conflicting approved PR | File reconcile child (children ladder; merge-prep deleted Stage 5) |
-| Merged PR | Reconcile Done; local cleanup remains disabled |
+| Current-head native approval, CI green | Eligible for merge when integration ladder satisfied |
+| Current-head native approval, CI not green | `ci-blocked`: one exact-head CAS-fenced rerun, then `ci-failure` child if still red |
+| Conflicting approved PR | File reconcile child (children ladder) |
+| Merged PR | Reconcile Done; dead attempt worktrees cleaned per §10 |
 
 Do not rename existing branches, synthesize historical review refs, rewrite
 commits, or close/reopen PRs merely to look v2-native. New implementations use
@@ -170,7 +245,7 @@ Compare GitHub-derived conclusions, not local path text. They must agree on:
 - eligible issues;
 - active/stale implementation and review;
 - Human holds;
-- merge-prep/merge candidates;
+- `ci-blocked`, merge-ready, and children-ladder candidates;
 - native gate blockers;
 - proposed recovery.
 
@@ -300,26 +375,40 @@ from GitHub without deleting the first host’s recoverable local work.
 At least one disposable canary should remain unchanged for the full two-hour
 threshold before takeover is tested.
 
-## 10. Progressive activation
+## 10. Progressive activation and worktree cleanup
 
 Enable in this order:
 
 1. one production implementation slot;
 2. a second independent implementation process;
 3. review with distinct identities;
-4. children ladder (finding/reconcile children + tier-0 update-branch);
-5. higher per-process caps after backlog/rate-limit health is demonstrated;
-6. cleanup last.
+4. children ladder (finding/reconcile/reconcile-child, `ci-failure` child,
+   tier-0 `update-branch`);
+5. higher per-process caps after backlog/rate-limit health is demonstrated.
 
-During initial rollout, cleanup remains disabled:
+**Worktree cleanup** is on by default in active mode. Each active cycle sweeps
+dead attempt directories under `JINN_AUTOPILOT_WORKTREE_BASE/v2/` (default
+`~/.jinn-client/autopilot/attempts/v2/`). Opt out only when debugging:
 
 ```bash
-unset JINN_AUTOPILOT_CLEANUP_ENABLED
+export JINN_AUTOPILOT_CLEANUP_ENABLED=false
 ```
 
-Enable it only after the crash campaign proves that clean, GitHub-reachable
-attempts are removed and dirty, ahead, missing, unknown, or ambiguous attempts
-are retained. Cleanup is host-local and exact-path only.
+Cleanup rules (host-local, PID-liveness-guarded, exact-path only):
+
+- **Live child PID** — never removed.
+- **Clean + pushed** — removed immediately on the next cycle.
+- **Dead dirty/ahead/preparing** — removed after `JINN_AUTOPILOT_ATTEMPT_GRACE_MS`
+  (default 30 min). Durable work is on the pushed branch; the worktree is a
+  disposable cache.
+- **Malformed orphan dirs** — removed after the same grace period.
+- **Escaped paths** — never removed.
+- **Below `JINN_AUTOPILOT_DISK_FLOOR_GB`** (default 10 GB free) — oldest dead
+  attempts are force-evicted first; new worktree-creating claims pause until
+  space recovers. Merge, update-branch, reconcile-child, rerun-failed-checks,
+  and file-ci-failure-child still run.
+
+Verify cleanup behavior during the crash campaign in §8–§9 before raising caps.
 
 ## 11. Rollback
 
@@ -348,6 +437,7 @@ launch **only** the v2 entry point:
 set -euo pipefail
 cd /path/to/jinn-mono/packages/autopilot
 export JINN_AUTOPILOT_RUNNER_ID="${JINN_AUTOPILOT_RUNNER_ID:-$(hostname)-1}"
+export JINN_AUTOPILOT_RUNTIME="${JINN_AUTOPILOT_RUNTIME:-claude}"
 # Required: JINN_IMPL_GH_TOKEN, JINN_DISPATCHER_AUTHOR_ALLOWLIST,
 # JINN_AUTOPILOT_CAPABILITY_ATTESTATION (active mode).
 unset JINN_MERGE_PREP   # deleted — children ladder only

@@ -101,6 +101,7 @@ async function main(): Promise<void> {
     stateDir,
     repos: [{ path: repoPath, repo: REPO }],
     limitPerRepo: 1,
+    limitPerTick: 3,
     publish: true,
     minterSafe,
     harvestState,

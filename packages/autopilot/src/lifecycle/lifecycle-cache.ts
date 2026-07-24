@@ -270,6 +270,10 @@ const pullRequestSchema = z.object({
     name: z.string(),
     status: z.string(),
     conclusion: z.string().nullable(),
+    source: z.enum(['check-run', 'commit-status']).optional(),
+    runId: z.number().int().positive().optional(),
+    checkSuiteId: z.number().int().positive().optional(),
+    runAttempt: z.number().int().positive().optional(),
   }).strict()),
   reviews: z.array(z.object({
     reviewer: z.string(),

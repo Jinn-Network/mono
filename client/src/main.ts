@@ -2079,6 +2079,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         stateDir: harvestStateDir,
         repos: harvestRepos,
         limitPerRepo: config.harvest.limitPerRepo,
+        limitPerTick: config.harvest.limitPerTick,
         publish: config.harvest.publish,
         minterSafe: safeAddress,
         sources: config.harvest.sources,
