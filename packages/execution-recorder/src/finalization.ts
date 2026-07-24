@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { validateExecutionEvidence } from "@jinn-network/evidence-protocol";
 import {
   createArtifactReference,
   createRecordReference,
@@ -16,8 +15,8 @@ import {
   assertRecorderOperationActive,
   ExecutionRecorderError,
 } from "./errors.js";
+import { buildFinalizationCandidate } from "./finalization-candidate.js";
 import { finalizationIntentFingerprint } from "./finalization-intent.js";
-import { buildExecutionEvidence } from "./graph.js";
 import type {
   PersistedArtifactCapture,
   PersistedNativeTraceCapture,
@@ -30,11 +29,7 @@ import {
   persistArtifactCapture,
   persistNativeTrace,
 } from "./persist-capture.js";
-import {
-  objectDigest,
-  readStoredObject,
-  storeObject,
-} from "./object-store.js";
+import { readStoredObject, storeObject } from "./object-store.js";
 import {
   appendWorkspaceEvent,
   type WorkspaceState,
@@ -164,6 +159,7 @@ function capturedReferences(
     ...recordingReferences(state.recording),
     ...state.inputs.flatMap(artifactReferences),
     ...state.runtimeObservations.flatMap(observationReferences),
+    ...state.results.flatMap(artifactReferences),
     ...(state.nativeTrace === undefined
       ? []
       : artifactReferences(state.nativeTrace.artifact)),
@@ -202,6 +198,125 @@ async function persistResults(
     );
   }
   return results;
+}
+
+function artifactEntityIds(
+  artifact: PersistedArtifactCapture,
+): readonly string[] {
+  return [
+    artifact.entityId,
+    ...(artifact.kind === "file"
+      ? []
+      : artifact.members.flatMap(artifactEntityIds)),
+  ];
+}
+
+function recordingEntityIds(
+  recording: PersistedStartRecording,
+): readonly string[] {
+  return [
+    recording.task.entityId,
+    recording.runtime.entityId,
+    ...recording.initialInputs.flatMap(artifactEntityIds),
+    ...(recording.repositoryState === undefined
+      ? []
+      : artifactEntityIds(recording.repositoryState.artifact)),
+    ...recording.runtime.components.flatMap((component) =>
+      component.kind === "controlled"
+        ? artifactEntityIds(component.artifact)
+        : artifactEntityIds(component.descriptor),
+    ),
+  ];
+}
+
+function capturedEntityIds(state: WorkspaceState): Set<string> {
+  if (state.recording === undefined) return new Set();
+  return new Set([
+    ...recordingEntityIds(state.recording),
+    ...state.inputs.flatMap(artifactEntityIds),
+    ...state.results.flatMap(artifactEntityIds),
+    ...state.runtimeObservations.flatMap((observation) =>
+      observation.kind === "resource"
+        ? [observation.entityId]
+        : observation.kind === "environment"
+          ? artifactEntityIds(observation.artifact)
+          : artifactEntityIds(observation.component.descriptor),
+    ),
+    ...(state.nativeTrace === undefined
+      ? []
+      : artifactEntityIds(state.nativeTrace.artifact)),
+  ]);
+}
+
+function mergeResults(
+  state: WorkspaceState,
+  incoming: readonly PersistedArtifactCapture[],
+): {
+  readonly results: readonly PersistedArtifactCapture[];
+  readonly added: readonly PersistedArtifactCapture[];
+} {
+  const results = [...state.results];
+  const added: PersistedArtifactCapture[] = [];
+  const identities = capturedEntityIds(state);
+  for (const result of incoming) {
+    const current = results.find(
+      ({ entityId }) => entityId === result.entityId,
+    );
+    if (current !== undefined) {
+      if (
+        captureFingerprint("result", current) ===
+        captureFingerprint("result", result)
+      ) {
+        continue;
+      }
+      conflict(
+        state,
+        "Result entity identity was reused with incompatible capture data.",
+      );
+    }
+    for (const entityId of artifactEntityIds(result)) {
+      if (identities.has(entityId)) {
+        conflict(
+          state,
+          `Result capture reuses an existing entity identity: ${entityId}`,
+        );
+      }
+      identities.add(entityId);
+    }
+    results.push(result);
+    added.push(result);
+  }
+  return {
+    results: results.sort((left, right) =>
+      compareStrings(left.entityId, right.entityId),
+    ),
+    added: added.sort((left, right) =>
+      compareStrings(left.entityId, right.entityId),
+    ),
+  };
+}
+
+function assertTraceEntityIdsAvailable(
+  state: WorkspaceState,
+  trace: PersistedNativeTraceCapture | undefined,
+  addedResults: readonly PersistedArtifactCapture[],
+): void {
+  if (trace === undefined || state.nativeTrace !== undefined) return;
+  const identities = capturedEntityIds(state);
+  for (const result of addedResults) {
+    for (const entityId of artifactEntityIds(result)) {
+      identities.add(entityId);
+    }
+  }
+  for (const entityId of artifactEntityIds(trace.artifact)) {
+    if (identities.has(entityId)) {
+      conflict(
+        state,
+        `Native trace reuses an existing entity identity: ${entityId}`,
+      );
+    }
+    identities.add(entityId);
+  }
 }
 
 async function selectNativeTrace(
@@ -256,39 +371,6 @@ function missingDiagnostics(
   );
 }
 
-function metadataArtifactDigests(
-  state: WorkspaceState,
-  bytes: Uint8Array,
-): readonly Sha256Digest[] {
-  const report = validateExecutionEvidence(bytes);
-  if (!report.conforms || report.value === undefined) {
-    throw new ExecutionRecorderError(
-      "PROTOCOL_CONFORMANCE_FAILED",
-      "Constructed Execution Evidence does not conform to the protocol.",
-      {
-        workspaceDir: state.paths.root,
-        diagnostics: report.diagnostics,
-      },
-    );
-  }
-  return [
-    ...new Set(
-      report.value["@graph"]
-        .filter(
-          (entity) => entity["@id"] !== "ro-crate-metadata.json",
-        )
-        .map((entity) =>
-          typeof entity.sha256 === "string"
-            ? (`sha256:${entity.sha256}` as Sha256Digest)
-            : null,
-        )
-        .filter(
-          (digest): digest is Sha256Digest => digest !== null,
-        ),
-    ),
-  ].sort(compareStrings);
-}
-
 function assertPersistedIntent(
   state: WorkspaceState,
 ): void {
@@ -306,7 +388,7 @@ function assertPersistedIntent(
   }
 }
 
-function buildFinalizationCandidate(
+function prepareFinalizationCandidate(
   state: WorkspaceState,
   input: FinalizeExecutionInput,
   results: readonly PersistedArtifactCapture[],
@@ -318,7 +400,7 @@ function buildFinalizationCandidate(
   readonly metadata: StoredObjectReference;
   readonly artifactDigests: readonly Sha256Digest[];
 } {
-  const metadataBytes = buildExecutionEvidence({
+  const candidate = buildFinalizationCandidate({
     recording: state.recording!,
     additionalInputs: state.inputs.slice(
       state.recording!.initialInputs.length,
@@ -330,28 +412,17 @@ function buildFinalizationCandidate(
     results,
     nativeTrace,
   });
-  const artifactDigests = metadataArtifactDigests(
-    state,
-    metadataBytes,
-  );
-  const metadata = {
-    digest: objectDigest(metadataBytes),
-    size: metadataBytes.byteLength,
-  };
-  return {
-    intentFingerprint: finalizationIntentFingerprint({
-      outcome: input.outcome,
-      endedAt: input.endedAt,
-      results,
-      nativeTrace,
-      finalizedAt,
-      metadata,
-      artifactDigests,
-    }),
-    metadataBytes,
-    metadata,
-    artifactDigests,
-  };
+  if (!candidate.validation.conforms) {
+    throw new ExecutionRecorderError(
+      "PROTOCOL_CONFORMANCE_FAILED",
+      "Constructed Execution Evidence does not conform to the protocol.",
+      {
+        workspaceDir: state.paths.root,
+        diagnostics: candidate.validation.diagnostics,
+      },
+    );
+  }
+  return candidate;
 }
 
 function finalizedOutcome(
@@ -467,7 +538,11 @@ export async function finalizeWorkspaceState(
     );
   }
   validateFinalizeExecutionInput(input, state.recording.startedAt);
-  const results = await persistResults(state, input, options.signal);
+  const persistedResults = await persistResults(
+    state,
+    input,
+    options.signal,
+  );
   const nativeTrace = await selectNativeTrace(
     state,
     input,
@@ -481,10 +556,14 @@ export async function finalizeWorkspaceState(
         "Persisted finalization intent has no primary native trace.",
       );
     }
-    const candidate = buildFinalizationCandidate(
+    const repeatedResults =
+      input.results === undefined
+        ? state.finalization.results
+        : mergeResults(state, persistedResults).results;
+    const candidate = prepareFinalizationCandidate(
       state,
       input,
-      results,
+      repeatedResults,
       nativeTrace,
       state.finalization.finalizedAt,
     );
@@ -499,11 +578,42 @@ export async function finalizeWorkspaceState(
     }
     return resumePendingFinalization(repository, state, options);
   }
+  const mergedResults = mergeResults(state, persistedResults);
+  assertTraceEntityIdsAvailable(
+    state,
+    nativeTrace,
+    mergedResults.added,
+  );
+  const addedTrace =
+    state.nativeTrace === undefined ? nativeTrace : undefined;
+  if (mergedResults.added.length > 0 || addedTrace !== undefined) {
+    const material = {
+      results: mergedResults.added,
+      ...(addedTrace === undefined
+        ? {}
+        : { nativeTrace: addedTrace }),
+    };
+    state = await appendWorkspaceEvent(
+      state,
+      {
+        type: "finalization-material-captured",
+        ...material,
+        declarationFingerprint: captureFingerprint(
+          "finalization-material",
+          material,
+        ),
+      },
+      undefined,
+      options.signal,
+    );
+  }
+  const results = state.results;
+  const selectedTrace = state.nativeTrace;
   const diagnostics = missingDiagnostics(
     state,
     input,
     results,
-    nativeTrace,
+    selectedTrace,
   );
   if (diagnostics.length > 0) {
     return {
@@ -524,11 +634,11 @@ export async function finalizeWorkspaceState(
   const finalizedAt = (
     options.now?.() ?? new Date()
   ).toISOString();
-  const candidate = buildFinalizationCandidate(
+  const candidate = prepareFinalizationCandidate(
     state,
     input,
     results,
-    nativeTrace!,
+    selectedTrace!,
     finalizedAt,
   );
   const metadata = await storeObject(
@@ -554,7 +664,7 @@ export async function finalizeWorkspaceState(
       outcome: input.outcome,
       endedAt: input.endedAt,
       results,
-      nativeTrace: nativeTrace!,
+      nativeTrace: selectedTrace!,
       metadata,
       artifactDigests: candidate.artifactDigests,
     },

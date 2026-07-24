@@ -1090,7 +1090,15 @@ describe("execution finalization", () => {
     expect(repository.events).toEqual([]);
     expect(await openWorkspaceState(state.paths.root)).toMatchObject({
       status: "open",
-      head: state.head,
+      head: { revision: state.head.revision + 1 },
+      results: [
+        expect.objectContaining({ entityId: "results/result.txt" }),
+      ],
+      nativeTrace: expect.objectContaining({
+        artifact: expect.objectContaining({
+          entityId: "trace/native.jsonl",
+        }),
+      }),
     });
   });
 });

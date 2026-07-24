@@ -9,6 +9,10 @@ import {
   assertRecorderOperationActive,
   ExecutionRecorderError,
 } from "./errors.js";
+import {
+  finalizeWorkspaceState,
+  resumePendingFinalization,
+} from "./finalization.js";
 import type {
   PersistedArtifactCapture,
   PersistedNativeTraceCapture,
@@ -43,7 +47,6 @@ import type {
   StartExecutionRecordingInput,
 } from "./types.js";
 import {
-  validateFinalizeExecutionInput,
   validateNativeTraceCapture,
   validateResumeExecutionRecordingInput,
   validateRuntimeObservationCapture,
@@ -115,6 +118,7 @@ function allCapturedIds(state: WorkspaceState): ReadonlySet<string> {
   return new Set([
     ...startIds(state.recording),
     ...state.inputs.flatMap(artifactIds),
+    ...state.results.flatMap(artifactIds),
     ...state.runtimeObservations.flatMap(observationIds),
     ...(state.nativeTrace === undefined ? [] : traceIds(state.nativeTrace)),
   ]);
@@ -297,6 +301,9 @@ function contextualClaims(
   }
   for (const input of state.inputs) {
     registerOrigins(state, claims, artifactOrigins(input));
+  }
+  for (const result of state.results) {
+    registerOrigins(state, claims, artifactOrigins(result));
   }
   for (const observation of state.runtimeObservations) {
     if (observation.kind === "resource") {
@@ -602,23 +609,25 @@ class ExecutionRecordingHandle implements ExecutionRecording {
     input: FinalizeExecutionInput,
     options?: RecordingOperationOptions,
   ): Promise<FinalizeExecutionResult> {
-    assertRecorderOperationActive(options?.signal);
-    if (this.state.recording === undefined) {
-      throw new ExecutionRecorderError(
-        "WORKSPACE_CORRUPT",
-        "Execution recording has no initialization state.",
-        { workspaceDir: this.state.paths.root },
+    await this.assertCurrent(options?.signal);
+    try {
+      const outcome = await finalizeWorkspaceState(
+        this.repository,
+        this.state,
+        input,
+        { signal: options?.signal },
       );
+      this.state = outcome.state;
+      return outcome.result;
+    } catch (error) {
+      try {
+        this.state = await openWorkspaceState(this.state.paths.root);
+      } catch {
+        // Preserve the operation's original typed failure. A later resume
+        // performs the authoritative workspace replay and integrity check.
+      }
+      throw error;
     }
-    validateFinalizeExecutionInput(
-      input,
-      this.state.recording.startedAt,
-    );
-    throw new ExecutionRecorderError(
-      "PROTOCOL_CONFORMANCE_FAILED",
-      "Execution finalization is not available in the lifecycle layer.",
-      { workspaceDir: this.state.paths.root },
-    );
   }
 }
 
@@ -703,7 +712,7 @@ class ExecutionRecorderImpl implements ExecutionRecorder {
   ): Promise<ExecutionRecording> {
     validateResumeExecutionRecordingInput(input);
     assertRecorderOperationActive(input.signal);
-    const state = await openWorkspaceState(
+    let state = await openWorkspaceState(
       input.workspaceDir,
       input.signal,
     );
@@ -713,6 +722,13 @@ class ExecutionRecorderImpl implements ExecutionRecorder {
         "Execution recording workspace has no initialization transition.",
         { workspaceDir: state.paths.root },
       );
+    }
+    if (state.status === "finalizing") {
+      state = (
+        await resumePendingFinalization(this.repository, state, {
+          signal: input.signal,
+        })
+      ).state;
     }
     return new ExecutionRecordingHandle(this.repository, state);
   }

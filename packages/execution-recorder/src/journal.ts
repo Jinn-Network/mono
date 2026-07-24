@@ -59,6 +59,7 @@ const JOURNAL_EVENT_TYPES = new Set<JournalEvent["type"]>([
   "input-captured",
   "runtime-observation-captured",
   "native-trace-attached",
+  "finalization-material-captured",
   "finalization-prepared",
   "repository-artifact-written",
   "repository-record-written",
@@ -765,6 +766,32 @@ function validJournalEventPayload(
           event.trace as unknown as PersistedNativeTraceCapture,
         ),
       );
+      return true;
+    case "finalization-material-captured":
+      if (
+        !Array.isArray(event.results) ||
+        !event.results.every(isPersistedArtifact) ||
+        (event.nativeTrace !== undefined &&
+          !isPersistedNativeTrace(event.nativeTrace)) ||
+        !isDigest(event.declarationFingerprint)
+      ) {
+        return false;
+      }
+      for (const result of event.results) {
+        validateRuntimeObservationCapture({
+          kind: "environment",
+          artifact: artifactForValidation(
+            result as unknown as PersistedArtifactCapture,
+          ),
+        });
+      }
+      if (event.nativeTrace !== undefined) {
+        validateNativeTraceCapture(
+          nativeTraceForValidation(
+            event.nativeTrace as unknown as PersistedNativeTraceCapture,
+          ),
+        );
+      }
       return true;
     case "finalization-prepared":
       if (
