@@ -202,6 +202,11 @@ jobs:
         working-directory: ${{ github.workspace }}/contracts
         run: yarn install --immutable
 
+      - name: Compile contracts (for tier-2 harness)
+        if: steps.resolve.outputs.skip != 'true'
+        working-directory: ${{ github.workspace }}/contracts
+        run: yarn compile
+
       # Foundry: the real-harness loop spawns a local Anvil for the deterministic
       # settlement scaffolding inside the consolidated suite, and `cast` is used
       # by the top-up path. Required just like CI / npm-publish.
