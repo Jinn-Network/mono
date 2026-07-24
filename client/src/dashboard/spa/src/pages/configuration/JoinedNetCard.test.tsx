@@ -79,8 +79,19 @@ const SWE_CATALOG: SolverNetCatalogEntry = {
   ],
 };
 
+const PROVIDER_CATALOG: SolverNetCatalogEntry = {
+  ...CATALOG,
+  compatibleHarnesses: [
+    { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving'] },
+    { name: 'hermes-agent', version: '0.1.0', supportsRoles: ['solving'] },
+  ],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(api.getStatus).mockResolvedValue({
+    costSurface: { harnesses: {} },
+  } as never);
   // Reset the suite-level fail-fast defaults so per-test overrides don't
   // leak across cases.
   vi.mocked(api.solvernets.getManifest).mockRejectedValue(
@@ -333,6 +344,129 @@ describe('<JoinedNetCard />', () => {
       }),
     );
     await waitFor(() => expect(onRestart).toHaveBeenCalled());
+  });
+
+  it('preserves a custom provider when a non-route field changes', async () => {
+    vi.mocked(api.operator.join).mockResolvedValue({
+      ok: true,
+      restartRequired: true,
+      manifestCid: 'bafybeiaaa',
+      config: { manifestCid: 'bafybeiaaa', roles: ['solver', 'evaluator'] },
+    });
+    const provider = {
+      name: 'private-endpoint',
+      baseUrl: 'http://127.0.0.1:9000/v1',
+      authVar: 'PRIVATE_KEY',
+    };
+    wrap(
+      <JoinedNetCard
+        joined={{ ...ENTRY, provider }}
+        catalogEntry={CATALOG}
+        defaultExpanded
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('joined-net-card-plugin-row-trigger'));
+    const plugA = screen
+      .getAllByTestId('joined-net-card-plugin-row')
+      .find((el) => el.getAttribute('data-plugin') === 'plug-a')!;
+    fireEvent.click(plugA);
+    fireEvent.click(screen.getByTestId('joined-net-card-save'));
+
+    await waitFor(() =>
+      expect(api.operator.join).toHaveBeenCalledWith(
+        'bafybeiaaa',
+        expect.objectContaining({ provider }),
+      ),
+    );
+  });
+
+  it('derives the catalog provider when the harness/model route changes', async () => {
+    vi.mocked(api.getStatus).mockResolvedValue({
+      costSurface: {
+        harnesses: {
+          'hermes-agent': {
+            credentialId: 'openrouter:api-key',
+            usesPaidApiKey: false,
+          },
+        },
+      },
+    } as never);
+    vi.mocked(api.operator.join).mockResolvedValue({
+      ok: true,
+      restartRequired: true,
+      manifestCid: 'bafybeiaaa',
+      config: { manifestCid: 'bafybeiaaa', roles: ['solver', 'evaluator'] },
+    });
+    wrap(
+      <JoinedNetCard
+        joined={{
+          ...ENTRY,
+          provider: {
+            name: 'private-endpoint',
+            baseUrl: 'http://127.0.0.1:9000/v1',
+          },
+        }}
+        catalogEntry={PROVIDER_CATALOG}
+        defaultExpanded
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('joined-net-card-harness-select'), {
+      target: { value: 'hermes-agent' },
+    });
+    await waitFor(() =>
+      expect((screen.getByTestId('joined-net-card-model-select') as HTMLSelectElement).value)
+        .toBe('anthropic/claude-opus-4.7'),
+    );
+    const save = screen.getByTestId('joined-net-card-save') as HTMLButtonElement;
+    await waitFor(() => expect(save.disabled).toBe(false));
+    fireEvent.click(save);
+
+    await waitFor(() =>
+      expect(api.operator.join).toHaveBeenCalledWith(
+        'bafybeiaaa',
+        expect.objectContaining({
+          harness: 'hermes-agent',
+          model: 'anthropic/claude-opus-4.7',
+          provider: 'openrouter',
+        }),
+      ),
+    );
+  });
+
+  it('removes the old provider when the route changes to a catalog entry without one', async () => {
+    vi.mocked(api.operator.join).mockResolvedValue({
+      ok: true,
+      restartRequired: true,
+      manifestCid: 'bafybeiaaa',
+      config: { manifestCid: 'bafybeiaaa', roles: ['solver', 'evaluator'] },
+    });
+    wrap(
+      <JoinedNetCard
+        joined={{
+          ...ENTRY,
+          harness: 'hermes-agent',
+          model: 'anthropic/claude-opus-4.7',
+          provider: 'openrouter',
+        }}
+        catalogEntry={PROVIDER_CATALOG}
+        defaultExpanded
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('joined-net-card-harness-select'), {
+      target: { value: 'claude-code' },
+    });
+    fireEvent.click(screen.getByTestId('joined-net-card-save'));
+
+    await waitFor(() => expect(api.operator.join).toHaveBeenCalled());
+    const body = vi.mocked(api.operator.join).mock.calls.at(-1)?.[1] as Record<string, unknown>;
+    expect(body).toMatchObject({
+      harness: 'claude-code',
+      model: 'claude-haiku-4-5-20251001',
+    });
+    expect(body).not.toHaveProperty('provider');
   });
 
   it('active cards expose Leave in the expanded form (Danger zone), even when manifest is healthy', () => {

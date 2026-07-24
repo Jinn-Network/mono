@@ -113,10 +113,7 @@ describe('makeProductionReviewFollowUpPort', () => {
 
     const createCall = calls.find((args) => args[0] === 'issue' && args[1] === 'create');
     expect(createCall).toBeDefined();
-    expect(createCall).toEqual(expect.arrayContaining([
-      '--label', 'effort:medium',
-      '--label', 'priority:p2',
-    ]));
+    expect(createCall!.join(' ')).not.toContain('--label');
     expect(createCall!.join(' ')).not.toContain('review-finding');
     expect(createCall!.join(' ')).not.toContain('reconcile');
     expect(createCall!.join(' ')).toContain('jinn-autopilot:review-follow-up');

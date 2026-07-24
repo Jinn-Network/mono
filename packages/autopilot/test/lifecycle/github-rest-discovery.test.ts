@@ -625,6 +625,7 @@ describe('GitHubRestDiscoveryReader issue and PR indexes', () => {
     await expect(reader.readOpenIssueIndex()).resolves.toEqual([{
       number: 42,
       title: 'Issue',
+      body: '',
       updatedAt: '2026-07-22T10:00:00Z',
       author: 'trusted',
       labels: ['area:autopilot'],

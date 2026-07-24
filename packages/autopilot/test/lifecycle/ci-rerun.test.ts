@@ -57,6 +57,36 @@ describe('ci-rerun', () => {
     expect(publishRecord).toHaveBeenCalledOnce();
   });
 
+  it('skips stale workflow-run ids and still publishes a rerun record', async () => {
+    const rerunFailedJobs = vi.fn(async () => {
+      throw new Error('Command failed: gh api ... -X POST\ngh: Not Found (HTTP 404)');
+    });
+    const publishRecord = vi.fn(async () => ({
+      status: 'won' as const,
+      expected: null,
+      published: HEAD,
+      observed: HEAD,
+    }));
+    const result = await executeRerunFailedChecksAction(
+      { prNumber: 101, head: HEAD },
+      {
+        readChecks: async () => [
+          check({ name: 'test', source: 'check-run', runId: 55 }),
+        ],
+        readRecord: async () => null,
+        rerunFailedJobs,
+        publishRecord,
+        fileCiFailureChild: async () => ({
+          status: 'filed',
+          childNumber: 1,
+        }),
+      },
+    );
+    expect(result).toMatchObject({ status: 'rerun-requested', prNumber: 101, head: HEAD });
+    expect(rerunFailedJobs).toHaveBeenCalledWith(55);
+    expect(publishRecord).toHaveBeenCalledOnce();
+  });
+
   it('does not spend a retry when a record already exists', async () => {
     const rerunFailedJobs = vi.fn(async () => {});
     const result = await executeRerunFailedChecksAction(

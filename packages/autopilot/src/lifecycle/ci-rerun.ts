@@ -87,6 +87,11 @@ function failedClassification(
   return classification.state === 'failed' ? classification : null;
 }
 
+function isUnavailableWorkflowRunError(error: unknown): boolean {
+  const detail = error instanceof Error ? error.message : String(error);
+  return /(?:\b404\b|Not Found|\b410\b|Gone)/i.test(detail);
+}
+
 export async function executeRerunFailedChecksAction(
   action: { readonly prNumber: number; readonly head: GitOid },
   deps: CiRerunDeps,
@@ -145,7 +150,11 @@ export async function executeRerunFailedChecksAction(
     };
   }
   for (const runId of failed.rerunnableRunIds) {
-    await deps.rerunFailedJobs(runId);
+    try {
+      await deps.rerunFailedJobs(runId);
+    } catch (error) {
+      if (!isUnavailableWorkflowRunError(error)) throw error;
+    }
   }
   const record: CiRerunRecord = {
     prNumber: action.prNumber,
