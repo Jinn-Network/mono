@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type {
   AutopilotAdoptionReceipt,
+  AutopilotCorrelation,
   AutopilotMutationResult,
+  AutopilotReviewResult,
   AutopilotSessionCapsule,
 } from '../../../sdk/src/autopilot-session.js';
 import {
@@ -10,7 +12,13 @@ import {
   type AdoptionReceiptComment,
   type AdoptionReceiptPorts,
   type CreateAdoptionReceiptCommentInput,
+  type PublishAdoptionReceiptInput,
+  type PublishAdoptionReceiptResult,
 } from '../../src/lifecycle/marketplace-adoption-receipt.js';
+import {
+  adoptMarketplaceReview,
+  type MarketplaceReviewAdoptionPorts,
+} from '../../src/lifecycle/marketplace-review-adoption.js';
 import {
   makeMarketplaceMutationAdoptionCoordinator,
   type ConfirmedMarketplaceReviewClaim,
@@ -50,6 +58,17 @@ import {
   type BranchClaim,
   type GitOid,
 } from '../../src/lifecycle/types.js';
+import {
+  makeMarketplaceSessionBackend,
+} from '../../src/lifecycle/marketplace-session-backend.js';
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const CLAIM = gitOid('1'.repeat(40));
 const EXPECTED = gitOid('2'.repeat(40));
@@ -639,6 +658,79 @@ async function adopt(harness: Harness) {
   return harness.coordinator().adopt(harness.reference);
 }
 
+function makeCrashRecoveringReviewPorts(input: {
+  readonly head: GitOid;
+  readonly generation: string;
+  readonly refOid: GitOid;
+  readonly childNumber?: number;
+}) {
+  let child: number | undefined;
+  let childCreations = 0;
+  let approvalCreations = 0;
+  let receiptAttempts = 0;
+  const receipts: PublishAdoptionReceiptInput[] = [];
+  const ports: MarketplaceReviewAdoptionPorts = {
+    readAuthority: async () => ({
+      claimOid: input.refOid,
+      head: input.head,
+      reviewGeneration: input.generation,
+      reviewRefOid: input.refOid,
+      reviewState: 'active',
+    }),
+    protocol: {
+      reviewVerdict: async (_manifest, state) => {
+        if (state === 'APPROVE' && approvalCreations === 0) {
+          approvalCreations += 1;
+        }
+        return state === 'APPROVE'
+          ? { status: 'approved', head: input.head }
+          : { status: 'requested-changes', head: input.head };
+      },
+      reviewFindings: async () => {
+        const created = child === undefined;
+        if (created) {
+          child = input.childNumber ?? 701;
+          childCreations += 1;
+        }
+        return {
+          status: 'filed',
+          head: input.head,
+          childNumber: child!,
+          created,
+        };
+      },
+      human: async () => ({ status: 'human', head: input.head }),
+    },
+    publishReceipt: async (
+      receipt: PublishAdoptionReceiptInput,
+    ): Promise<PublishAdoptionReceiptResult> => {
+      receiptAttempts += 1;
+      if (receiptAttempts === 1) {
+        throw new Error('injected crash before Verdict receipt storage');
+      }
+      receipts.push(receipt);
+      return {
+        status: 'already-published',
+        receipt: receipt.receipt,
+        comments: [],
+      };
+    },
+    readReceiptState: async () => ({
+      status: 'pending',
+      reason: 'not-found',
+    }),
+    now: () => new Date(NOW),
+  };
+  return {
+    ports,
+    receipts,
+    get childNumber() { return child; },
+    get childCreations() { return childCreations; },
+    get approvalCreations() { return approvalCreations; },
+    get receiptAttempts() { return receiptAttempts; },
+  };
+}
+
 describe('marketplace mutation adoption workflows', () => {
   it('adopts an implementation result through completion, review claim, and receipt readback', async () => {
     const harness = new Harness();
@@ -1065,5 +1157,251 @@ describe('marketplace mutation adoption crash recovery', () => {
     expect(harness.completionMutations).toBe(1);
     expect(harness.reviewClaimMutations).toBe(1);
     expect(harness.comments).toHaveLength(1);
+  });
+});
+
+describe('marketplace closed-fleet child loop', () => {
+  it('recovers requested changes into one child Task and freshly approves its adopted full head', async () => {
+    const firstGeneration = '123e4567-e89b-42d3-a456-426614174091';
+    const firstRef = gitOid('7'.repeat(40));
+    const firstAttempt = '123e4567-e89b-42d3-a456-426614174090';
+    const firstManifest: AttemptManifest = {
+      ...reviewManifest(),
+      attemptId: firstAttempt,
+      expectedHead: EXPECTED,
+      claimOid: firstRef,
+      reviewGeneration: firstGeneration,
+      reviewRefOid: firstRef,
+      paths: {
+        ...reviewManifest().paths,
+        attemptDir: '/trusted/first-review',
+        worktree: '/trusted/first-review/worktree',
+        manifest: '/trusted/first-review/manifest.json',
+      },
+    };
+    const firstCorrelation = {
+      taskId: 'task-original',
+      attemptIndex: 0,
+      requestId: 'request-original',
+      deliveryEnvelopeCid: 'bafy-original-verdict',
+      v2AttemptId: '123e4567-e89b-42d3-a456-426614174089',
+      claimOid: CLAIM,
+      prNumber: 2101,
+      expectedHead: EXPECTED,
+      resultingHead: EXPECTED,
+      reviewedHead: EXPECTED,
+      reviewGeneration: firstGeneration,
+      reviewRefOid: firstRef,
+    } satisfies AutopilotCorrelation;
+    const firstReview: Extract<
+      AutopilotReviewResult,
+      { readonly outcome: 'request-changes' }
+    > = {
+      schemaVersion: 'jinn-autopilot-review-result.v1',
+      outcome: 'request-changes',
+      correlation: firstCorrelation,
+      findings: [
+        {
+          title: 'Serialize adoption',
+          body: 'Make the receipt boundary recoverable.',
+          path: 'packages/autopilot/src/lifecycle/adoption.ts',
+          line: 42,
+        },
+        {
+          title: 'Prove restart behavior',
+          body: 'Cover the crash after the native review mutation.',
+        },
+      ],
+    };
+    const firstReviewPorts = makeCrashRecoveringReviewPorts({
+      head: EXPECTED,
+      generation: firstGeneration,
+      refOid: firstRef,
+      childNumber: 701,
+    });
+    const firstInput = {
+      manifest: firstManifest,
+      expectedCorrelation: firstCorrelation,
+      solverOperator: `0x${'a'.repeat(40)}`,
+      evaluatorOperator: `0x${'d'.repeat(40)}`,
+      result: firstReview,
+      receiptAuthors: ['jinn-autopilot'],
+      publisherLogin: 'jinn-autopilot',
+    } as const;
+
+    await expect(
+      adoptMarketplaceReview(firstInput, firstReviewPorts.ports),
+    ).rejects.toThrow('injected crash before Verdict receipt storage');
+    await expect(
+      adoptMarketplaceReview(firstInput, firstReviewPorts.ports),
+    ).resolves.toMatchObject({
+      status: 'adopted',
+      operation: 'review-findings',
+      head: EXPECTED,
+      childNumber: 701,
+      childCreated: false,
+    });
+    expect(firstReviewPorts.childCreations).toBe(1);
+    expect(firstReviewPorts.childNumber).toBe(701);
+    expect(firstReviewPorts.receiptAttempts).toBe(2);
+    expect(firstReviewPorts.receipts).toHaveLength(1);
+
+    const root = mkdtempSync(join(tmpdir(), 'autopilot-closed-loop-'));
+    try {
+      const manifestPath = join(root, 'manifest.json');
+      writeFileSync(manifestPath, '{}\n');
+      const submitCalls: string[][] = [];
+      const backend = makeMarketplaceSessionBackend({
+        runner: async (_command, args) => {
+          submitCalls.push(args);
+          return JSON.stringify({
+            taskId: 'task-501',
+            taskCid: 'bafybeitask',
+            creationTx: `0x${'c'.repeat(64)}`,
+            creationBlock: 123400,
+            solverNetManifestCid: 'bafybeisolvernet',
+            idempotent: submitCalls.length > 1,
+          });
+        },
+        now: () => new Date(NOW),
+      });
+      const childInput = {
+        kind: 'mutation',
+        workflow: 'fix-child',
+        issue: {
+          number: 501,
+          title: 'Resolve the aggregated review findings',
+          body: 'Land one append-only fix on the parent PR branch.',
+        },
+        childIssueNumber: 701,
+        parentPrNumber: 2101,
+        pr: {
+          number: 2101,
+          body:
+            '<!-- jinn-autopilot:v2 '
+            + 'issue=501 branch=autopilot/issue-501 -->',
+        },
+        targetBase: gitRefName('next'),
+        branch: gitRefName('autopilot/issue-501'),
+        claimOid: CLAIM,
+        expectedHead: EXPECTED,
+        baseSha: EXPECTED,
+        v2AttemptId: ATTEMPT,
+        runnerId: 'runner-1',
+        selectedLogin: 'jinn-autopilot',
+        effort: 'Low',
+        deadline: '2026-07-24T13:00:00.000Z',
+        receiptAuthors: ['jinn-autopilot'],
+        attempt: {
+          manifestPath,
+          worktreePath: join(root, 'worktree'),
+          logPath: join(root, 'session.log'),
+          ghConfigDir: join(root, 'gh-config'),
+          askpassPath: join(root, 'askpass'),
+        },
+      } as const;
+
+      const posted = await backend.start(childInput);
+      const requestBefore = readFileSync(
+        join(root, 'marketplace-request.json'),
+        'utf8',
+      );
+      const recovered = await backend.recoverPreparing(manifestPath);
+      expect(recovered).toEqual(posted);
+      expect(submitCalls).toHaveLength(2);
+      expect(submitCalls[1]).toEqual(submitCalls[0]);
+      expect(readFileSync(
+        join(root, 'marketplace-request.json'),
+        'utf8',
+      )).toBe(requestBefore);
+      expect(JSON.parse(requestBefore)).toMatchObject({
+        id: `autopilot:${ATTEMPT}`,
+        spec: {
+          base_commit: EXPECTED,
+          session: {
+            workflow: 'fix-child',
+            issueNumber: 501,
+            childIssueNumber: 701,
+            parentPrNumber: 2101,
+            prNumber: 2101,
+            branch: 'autopilot/issue-501',
+            expectedHead: EXPECTED,
+          },
+        },
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+
+    const fix = new Harness('fix-child');
+    const fixed = await adopt(fix);
+    expect(fixed.status).toBe('accepted');
+    if (fixed.status !== 'accepted') {
+      throw new Error('child fix adoption did not reach an accepted state');
+    }
+    expect(fixed).toMatchObject({
+      operation: 'child-complete',
+      resultingHead: HOST_COMMIT,
+      reviewClaim: {
+        head: HOST_COMMIT,
+        generation: GENERATION,
+        refOid: REVIEW_REF,
+      },
+    });
+    expect(fix.applyMutations).toBe(1);
+    expect(fix.commitMutations).toBe(1);
+    expect(fix.childCloseMutations).toBe(1);
+    expect(fix.reviewClaimMutations).toBe(1);
+    expect(fixed.resultingHead).not.toBe(firstCorrelation.reviewedHead);
+    expect(fixed.reviewClaim.generation).not.toBe(firstGeneration);
+    expect(fixed.reviewClaim.refOid).not.toBe(firstRef);
+
+    const secondCorrelation = {
+      ...fixed.origin.correlation,
+      resultingHead: fixed.resultingHead,
+      reviewedHead: fixed.resultingHead,
+      reviewGeneration: fixed.reviewClaim.generation,
+      reviewRefOid: fixed.reviewClaim.refOid,
+    } satisfies AutopilotCorrelation;
+    const secondReview: Extract<
+      AutopilotReviewResult,
+      { readonly outcome: 'approve' }
+    > = {
+      schemaVersion: 'jinn-autopilot-review-result.v1',
+      outcome: 'approve',
+      correlation: secondCorrelation,
+      body: 'The complete new parent head resolves every finding.',
+    };
+    const secondReviewPorts = makeCrashRecoveringReviewPorts({
+      head: fixed.resultingHead,
+      generation: fixed.reviewClaim.generation,
+      refOid: fixed.reviewClaim.refOid,
+    });
+    const secondInput = {
+      manifest: fixed.reviewClaim.manifest,
+      expectedCorrelation: secondCorrelation,
+      solverOperator: `0x${'b'.repeat(40)}`,
+      evaluatorOperator: `0x${'e'.repeat(40)}`,
+      result: secondReview,
+      receiptAuthors: ['jinn-autopilot'],
+      publisherLogin: 'jinn-autopilot',
+    } as const;
+
+    await expect(
+      adoptMarketplaceReview(secondInput, secondReviewPorts.ports),
+    ).rejects.toThrow('injected crash before Verdict receipt storage');
+    await expect(
+      adoptMarketplaceReview(secondInput, secondReviewPorts.ports),
+    ).resolves.toEqual({
+      status: 'adopted',
+      operation: 'review-verdict',
+      head: HOST_COMMIT,
+    });
+    expect(secondReviewPorts.approvalCreations).toBe(1);
+    expect(secondReviewPorts.receiptAttempts).toBe(2);
+    expect(secondReviewPorts.receipts).toHaveLength(1);
+    expect(secondReview.correlation.reviewedHead).toBe(HOST_COMMIT);
+    expect(firstInput.evaluatorOperator).not.toBe(secondInput.evaluatorOperator);
+    expect(secondInput.solverOperator).not.toBe(secondInput.evaluatorOperator);
   });
 });

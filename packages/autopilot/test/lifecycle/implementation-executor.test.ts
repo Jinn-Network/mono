@@ -718,4 +718,88 @@ describe('implementation action executor', () => {
       targetBaseOid,
     })]);
   });
+
+  it.each([
+    ['review-finding', 'fix-child'],
+    ['reconcile', 'reconcile'],
+    ['ci-failure', 'ci-failure'],
+  ] as const)(
+    'routes a %s child to its marketplace workflow on the existing parent branch',
+    async (childKind, workflow) => {
+      const starts: unknown[] = [];
+      const persisted: unknown[] = [];
+      const parent = pr({
+        number: 84,
+        headRefName: gitRefName('autopilot/42'),
+        head: ADOPTED_HEAD,
+        body:
+          'Closes #42\n\n'
+          + '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
+      });
+      const { deps, events } = harness({
+        readIssue: async () => issue({
+          number: 190,
+          title: `Resolve ${childKind}`,
+          body: 'Land an append-only fix on the parent PR.',
+          effort: 'Low',
+          child: { parentPr: parent.number, kind: childKind },
+        }),
+        readParentPullRequest: async () => parent,
+        executionBackendKind: 'marketplace',
+        executionBackend: {
+          start: async (input) => {
+            starts.push(input);
+            return {
+              backend: 'marketplace',
+              taskId: `task-${childKind}`,
+              taskCid: `bafy-${childKind}`,
+              deadline: input.deadline,
+              requestFile: `/tmp/${childKind}-request.json`,
+            };
+          },
+          recover: async () => ({ state: 'running' }),
+          cancel: async () => {},
+        },
+        sessionDeadline: () => '2026-07-20T13:00:00.000Z',
+        receiptAuthors: ['implementation-bot'],
+        persistExecutionHandle: (manifestPath, handle) => {
+          persisted.push({ manifestPath, handle });
+        },
+        spawnCoordinator: () => {
+          throw new Error('marketplace child must never spawn locally');
+        },
+      });
+
+      await expect(executeImplementationAction({ issueNumber: 190 }, deps))
+        .resolves.toMatchObject({
+          status: 'spawned',
+          issueNumber: 190,
+          prNumber: 84,
+          branch: 'autopilot/42',
+          attemptId: ATTEMPT_A,
+        });
+      expect(starts).toEqual([expect.objectContaining({
+        kind: 'mutation',
+        workflow,
+        issue: expect.objectContaining({ number: 42 }),
+        childIssueNumber: 190,
+        parentPrNumber: 84,
+        pr: expect.objectContaining({ number: 84 }),
+        branch: 'autopilot/42',
+        baseSha: ADOPTED_HEAD,
+        expectedHead: CLAIM_A,
+        v2AttemptId: ATTEMPT_A,
+      })]);
+      expect(persisted).toEqual([{
+        manifestPath: `/tmp/${ATTEMPT_A}/manifest.json`,
+        handle: expect.objectContaining({
+          backend: 'marketplace',
+          taskId: `task-${childKind}`,
+        }),
+      }]);
+      expect(events).toEqual(['claim', 'attempt']);
+      expect(events).not.toContain('spawn');
+      expect(events).not.toContain('track');
+    },
+  );
 });
