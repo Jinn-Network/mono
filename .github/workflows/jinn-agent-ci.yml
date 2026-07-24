@@ -147,7 +147,7 @@ jobs:
           NOUS_API_KEY: ""
 
       - name: Upload per-slice durations
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-durations-slice-${{ matrix.slice.index }}
           path: apps/jinn-agent/test_durations.json
