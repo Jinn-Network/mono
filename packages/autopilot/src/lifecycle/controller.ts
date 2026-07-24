@@ -25,7 +25,8 @@ import {
   type ActiveCandidate,
   type ActiveSchedulingSkip,
 } from './active-scheduler.js';
-import { childrenPathEnabled } from './child-issues.js';
+import { childrenPathEnabled, isMachineChildIssue } from './child-issues.js';
+import { classifyCiChecks, isCiGreen } from './ci-classifier.js';
 import { chooseIntegrationLadderAction } from './integration-ladder.js';
 import type {
   AutopilotMode,
@@ -80,6 +81,7 @@ export interface LifecycleControllerDeps {
         readonly implementation: number;
         readonly review: number;
       };
+      readonly newWorkPaused: boolean;
       readonly availableLogins: readonly string[];
       readonly implementationPreferredLogin: string;
     };
@@ -578,11 +580,16 @@ function activeCandidates(
       && item.eligible
       && !item.humanHold
     ) {
-      const isChild = item.labels.includes('review-finding')
-        || item.labels.includes('reconcile');
+      const issueSource = snapshot.issues.find((candidate) =>
+        candidate.number === item.issueNumber);
+      const isChild = isMachineChildIssue({
+        body: issueSource?.body,
+        labels: item.labels,
+      });
       (isChild ? childImplementation : freshImplementation).push({
         phase: 'implementation',
         issueNumber: item.issueNumber,
+        ...(isChild ? { isChild: true } : {}),
       });
       continue;
     }
@@ -612,6 +619,24 @@ function activeCandidates(
         author: pr.author,
       });
     } else if (
+      // DELIVERED → IN REVIEW (single-surface §4): a non-draft PR that still
+      // needs a verdict and has no active review claim for its head must be
+      // enrolled for a fresh review. Mirrors reviewEnrollmentEligible's
+      // non-draft branch; the awaiting-review phase already excludes PRs with
+      // an active claim for the current head (those derive to `reviewing`).
+      entry.phase === 'awaiting-review'
+      && !item.isDraft
+      && item.needsReview
+      && !item.approved
+    ) {
+      other.push({
+        phase: 'review',
+        issueNumber: item.issueNumber,
+        prNumber: item.prNumber,
+        head: item.head,
+        author: pr.author,
+      });
+    } else if (
       entry.phase === 'awaiting-review'
       && item.approved
       && !item.needsReview
@@ -619,11 +644,7 @@ function activeCandidates(
       && !(item.openChildKinds ?? []).includes('reconcile')
     ) {
       const childrenOn = childrenPathEnabled();
-      const ciGreen = pr.checks.length > 0 && pr.checks.every((check) => (
-        check.status === 'COMPLETED'
-        && check.conclusion !== null
-        && ['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(check.conclusion)
-      ));
+      const ciGreen = isCiGreen(pr.checks);
       const ladder = chooseIntegrationLadderAction({
         approved: true,
         ciGreen,
@@ -658,6 +679,26 @@ function activeCandidates(
           effort: ladder.effort,
         });
       }
+    } else if (entry.phase === 'ci-blocked') {
+      const classification = classifyCiChecks(pr.checks);
+      if (classification.state === 'failed') {
+        const rerunRecorded = item.ciRerunRecorded === true;
+        if (!rerunRecorded && classification.rerunnableRunIds.length > 0) {
+          other.push({
+            phase: 'rerun-failed-checks',
+            issueNumber: item.issueNumber,
+            prNumber: item.prNumber,
+            head: item.head,
+          });
+        } else {
+          other.push({
+            phase: 'file-ci-failure-child',
+            issueNumber: item.issueNumber,
+            prNumber: item.prNumber,
+            head: item.head,
+          });
+        }
+      }
     } else if (entry.phase === 'merge-ready') {
       other.push({
         phase: 'merge',
@@ -680,6 +721,9 @@ function phaseForAction(action: NewWorkAction): LifecyclePhase {
   if (action.kind === 'update-branch' || action.kind === 'file-reconcile-child') {
     return 'awaiting-review';
   }
+  if (action.kind === 'rerun-failed-checks' || action.kind === 'file-ci-failure-child') {
+    return 'ci-blocked';
+  }
   return 'merge-ready';
 }
 
@@ -699,6 +743,12 @@ function phaseForSchedulingSkip(
     || skip.phase === 'file-reconcile-child'
   ) {
     return 'awaiting-review';
+  }
+  if (
+    skip.phase === 'rerun-failed-checks'
+    || skip.phase === 'file-ci-failure-child'
+  ) {
+    return 'ci-blocked';
   }
   return 'merge-ready';
 }
@@ -1024,6 +1074,7 @@ export async function runLifecycleCycle(
       openPipelineBacklog,
       implementationBackpressureThreshold:
         deps.active!.implementationBackpressureThreshold,
+      ...(local.newWorkPaused ? { newWorkPaused: true } : {}),
     });
     actionEvents.push(...scheduling.skips.map((skip): LifecycleLogEvent => ({
       cycleId,
@@ -1195,6 +1246,19 @@ function githubUsageSummary(usage: GitHubUsage): string {
     + `${usage.cacheHits} cache hits.`;
 }
 
+// Accounting incompleteness is observability, not failure: GitHub's
+// used/remaining counters are eventually consistent under concurrency, so a
+// cycle whose commands all succeeded can still report incomplete accounting.
+// Surface it as a warning line, never let it gate or crash the cycle.
+function accountingWarningLines(usage: GitHubUsage | undefined): readonly string[] {
+  if (usage === undefined || usage.accountingComplete !== false) return [];
+  return [
+    'WARNING: GitHub usage accounting is incomplete '
+      + `(${usage.incompleteReason ?? 'eventually-consistent rate-limit counter skew'}); `
+      + 'reported quota numbers are best-effort.',
+  ];
+}
+
 function paritySummary(
   differences: readonly LifecycleParityDifference[] | undefined,
   complete: boolean,
@@ -1226,10 +1290,13 @@ export function renderLifecycleHuman(report: LifecycleCycleReport): string {
     if (usage === undefined) {
       return `${report.message}\nGitHub usage: unavailable (complete usage evidence is missing).`;
     }
-    return `${report.message}\n${githubUsageSummary(usage)}`;
+    return [report.message, githubUsageSummary(usage), ...accountingWarningLines(usage)].join('\n');
   }
   const usageLine = githubUsageSummary(report.githubUsage);
-  if (report.status !== 'ok') return `${report.message}\n${usageLine}`;
+  const accountingLines = accountingWarningLines(report.githubUsage);
+  if (report.status !== 'ok') {
+    return [report.message, usageLine, ...accountingLines].join('\n');
+  }
   const snapshotLine = `Snapshot: ${report.snapshotMode} (${
     report.snapshotComplete ? 'complete' : 'partial'
   }), captured ${report.capturedAt}, last full reconciliation ${
@@ -1258,6 +1325,7 @@ export function renderLifecycleHuman(report: LifecycleCycleReport): string {
       ...partialLines,
       ...warningLines,
       usageLine,
+      ...accountingLines,
       ...parityLines,
       'No lifecycle items.',
     ].join('\n');
@@ -1267,6 +1335,7 @@ export function renderLifecycleHuman(report: LifecycleCycleReport): string {
     ...partialLines,
     ...warningLines,
     usageLine,
+    ...accountingLines,
     ...parityLines,
     ...report.items.map(explanation),
     ...report.orphanBranchClaims.map(orphanExplanation),

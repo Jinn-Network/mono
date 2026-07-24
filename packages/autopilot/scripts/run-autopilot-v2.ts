@@ -31,11 +31,14 @@ import {
   ConditionalPullRequestEvidenceProbe,
   ConditionalRestClient,
   defaultRunnerId,
-  explicitEnvironmentFlag,
+  activeCleanupEnabled,
+  attemptGraceMs,
+  autopilotDiskFloorBytes,
   explainIssue,
   explainPullRequest,
   GhLifecycleReader,
   GitHubRestDiscoveryReader,
+  GitHubUsageIncompleteError,
   GitHubUsageMeter,
   createConfiguredIncrementalLifecycleSnapshotSource,
   isRoutineCachedStatus,
@@ -58,6 +61,7 @@ import {
   sanitizedGitHubCommandOverlay,
   selectCredential,
   sweepDeadAttempts,
+  freeDiskBytes,
   type SelectedCredential,
 } from '../src/lifecycle/index.js';
 
@@ -374,11 +378,16 @@ async function main(): Promise<void> {
   // Stage 3: board-archive + Status paint live in `yarn paint-board`
   // (scheduled workflow), not the autopilot cycle.
   const worktreeBase = env.JINN_AUTOPILOT_WORKTREE_BASE ?? DEFAULT_WORKTREE_BASE;
+  const v2AttemptsBase = join(worktreeBase, 'v2');
   const cleanupEnabled = options.mode === 'active'
-    && explicitEnvironmentFlag(
+    && activeCleanupEnabled(
       env.JINN_AUTOPILOT_CLEANUP_ENABLED,
       'JINN_AUTOPILOT_CLEANUP_ENABLED',
     );
+  const attemptGracePeriodMs = attemptGraceMs(env.JINN_AUTOPILOT_ATTEMPT_GRACE_MS);
+  const diskFloorBytes = autopilotDiskFloorBytes(env.JINN_AUTOPILOT_DISK_FLOOR_GB);
+  const diskBelowFloor = (): boolean =>
+    diskFloorBytes > 0 && freeDiskBytes(v2AttemptsBase) < diskFloorBytes;
 
   const writerForSnapshot = credentials === undefined
     ? undefined
@@ -428,35 +437,52 @@ async function main(): Promise<void> {
         staleAfterMs: STALE_AFTER_MS,
         runner,
         environment: env,
+        newWorkPaused: diskBelowFloor,
       });
 
   const runOnce = async (): Promise<void> => {
-    const report = await runLifecycleCycle(options.mode, {
-      readSnapshot: readCycleSnapshot,
-      resetGitHubUsage: () => reader.resetGitHubUsage(),
-      readGitHubUsage: () => reader.githubUsage(),
-      ...(writerForSnapshot === undefined ? {} : { writerForSnapshot }),
-      ...(active === undefined ? {} : { active }),
-      now: () => new Date(),
-      staleAfterMs: STALE_AFTER_MS,
-      runnerId,
-      cycleId: randomUUID,
-      snapshotFailureMode: options.once ? 'throw' : 'report',
-    });
+    let report: Awaited<ReturnType<typeof runLifecycleCycle>>;
+    try {
+      report = await runLifecycleCycle(options.mode, {
+        readSnapshot: readCycleSnapshot,
+        resetGitHubUsage: () => reader.resetGitHubUsage(),
+        readGitHubUsage: () => reader.githubUsage(),
+        ...(writerForSnapshot === undefined ? {} : { writerForSnapshot }),
+        ...(active === undefined ? {} : { active }),
+        now: () => new Date(),
+        staleAfterMs: STALE_AFTER_MS,
+        runnerId,
+        cycleId: randomUUID,
+        snapshotFailureMode: options.once ? 'throw' : 'report',
+      });
+    } catch (error) {
+      // Belt-and-suspenders: GitHub's used/remaining counters are eventually
+      // consistent, so usage-accounting incompleteness must never terminate the
+      // continuous cadence. The meter is already non-fatal (read() no longer
+      // throws on incomplete accounting); this guards any residual thrower so a
+      // one-shot still fails loud while a persistent loop survives to next cycle.
+      if (error instanceof GitHubUsageIncompleteError && !options.once) {
+        console.warn(`[autopilot:v2] ${error.message}; continuing to next cycle`);
+        return;
+      }
+      throw error;
+    }
     // A snapshot-failed cycle must remain mutation-free. Local attempt
     // cleanup therefore follows the same complete-snapshot boundary as all
     // GitHub reconciliation/archive/action mutations.
     if (
-      report.status === 'ok'
-      && report.snapshotComplete
-      && options.mode === 'active'
+      options.mode === 'active'
       && cleanupEnabled
       && maintenanceCredential !== undefined
     ) {
       const cleanup = await sweepDeadAttempts(runner, {
-        v2Base: join(worktreeBase, 'v2'),
+        v2Base: v2AttemptsBase,
         isPidAlive: childIsAlive,
         env: { GH_TOKEN: maintenanceCredential.secret() },
+        graceMs: attemptGracePeriodMs,
+        now: () => new Date(),
+        diskFloorBytes,
+        diskPath: v2AttemptsBase,
       });
       for (const result of cleanup) {
         if (result.status === 'retained' && result.reason.code !== 'live') {

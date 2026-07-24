@@ -56,6 +56,7 @@ export type LifecyclePhase =
   | 'awaiting-review'
   | 'reviewing'
   | 'blocked-by-child'
+  | 'ci-blocked'
   | 'merge-ready'
   | 'human'
   | 'merged';
@@ -181,6 +182,16 @@ export interface TerminalVerdictEvidence {
   readonly marker: string;
 }
 
+export interface CheckSummary {
+  readonly name: string;
+  readonly status: string;
+  readonly conclusion: string | null;
+  readonly source?: 'check-run' | 'commit-status';
+  readonly runId?: number;
+  readonly checkSuiteId?: number;
+  readonly runAttempt?: number;
+}
+
 export interface PullRequestLifecycleItem extends LifecycleItemBase {
   readonly kind: 'pull-request';
   readonly prNumber: number;
@@ -191,8 +202,11 @@ export interface PullRequestLifecycleItem extends LifecycleItemBase {
   readonly needsReview: boolean;
   readonly approved: boolean;
   readonly mergeState: 'clean' | 'behind' | 'conflict' | 'blocked';
+  readonly checks?: readonly CheckSummary[];
+  /** True when a CAS-fenced CI rerun record exists for this PR head. */
+  readonly ciRerunRecorded?: boolean;
   /** Open child issues targeting this PR (Stage 2 single-surface children). */
-  readonly openChildKinds?: readonly ('review-finding' | 'reconcile')[];
+  readonly openChildKinds?: readonly ('review-finding' | 'reconcile' | 'ci-failure')[];
   readonly branchClaim?: BranchClaim;
   readonly implementationSummary?: string;
   readonly reviewClaim?: ReviewClaimRecord;
@@ -262,6 +276,18 @@ export type NewWorkAction =
       readonly prNumber: number;
       readonly head: GitOid;
       readonly effort: 'low' | 'medium' | 'high';
+    }
+  | {
+      readonly kind: 'rerun-failed-checks';
+      readonly issueNumber: number;
+      readonly prNumber: number;
+      readonly head: GitOid;
+    }
+  | {
+      readonly kind: 'file-ci-failure-child';
+      readonly issueNumber: number;
+      readonly prNumber: number;
+      readonly head: GitOid;
     }
   | {
       readonly kind: 'merge';

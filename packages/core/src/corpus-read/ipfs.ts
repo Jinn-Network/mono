@@ -47,15 +47,40 @@ async function fetchJson(url: string, signal: AbortSignal): Promise<unknown> {
   }
 }
 
+export type FetchFromIpfsOptions = {
+  /**
+   * Extra gateway base after the primary fails.
+   * - omit / undefined → production default `https://ipfs.io/ipfs/`
+   * - false → primary gateway only (hermetic / pinned rigs)
+   * - string → alternate fallback (normalized via `normalizeIpfsGatewayBase`)
+   */
+  fallbackGatewayBase?: string | false;
+};
+
+function resolveFallbackGatewayBases(
+  opts?: FetchFromIpfsOptions,
+): Array<readonly [string, string]> {
+  if (opts?.fallbackGatewayBase === false) return [];
+  if (typeof opts?.fallbackGatewayBase === 'string') {
+    return [['fallback', normalizeIpfsGatewayBase(opts.fallbackGatewayBase)] as const];
+  }
+  return [['fallback', FALLBACK_IPFS_GATEWAY_BASE] as const];
+}
+
 /** Read-only multi-codec, primary-plus-fallback IPFS JSON fetch. */
-export async function fetchFromIpfs(gatewayUrl: string, cid: string): Promise<unknown> {
+export async function fetchFromIpfs(
+  gatewayUrl: string,
+  cid: string,
+  opts?: FetchFromIpfsOptions,
+): Promise<unknown> {
   const primary = normalizeIpfsGatewayBase(gatewayUrl);
+  const gateways: Array<readonly [string, string]> = [
+    ['primary', primary] as const,
+    ...resolveFallbackGatewayBases(opts),
+  ];
   const errors: string[] = [];
   for (const cidPath of buildIpfsFetchCidPathCandidates(cid)) {
-    for (const [name, baseUrl] of [
-      ['primary', primary] as const,
-      ['fallback', FALLBACK_IPFS_GATEWAY_BASE] as const,
-    ]) {
+    for (const [name, baseUrl] of gateways) {
       const url = `${baseUrl}${cidPath}`;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), IPFS_FETCH_TIMEOUT_MS);

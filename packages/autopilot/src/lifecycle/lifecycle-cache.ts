@@ -270,6 +270,10 @@ const pullRequestSchema = z.object({
     name: z.string(),
     status: z.string(),
     conclusion: z.string().nullable(),
+    source: z.enum(['check-run', 'commit-status']).optional(),
+    runId: z.number().int().positive().optional(),
+    checkSuiteId: z.number().int().positive().optional(),
+    runAttempt: z.number().int().positive().optional(),
   }).strict()),
   reviews: z.array(z.object({
     reviewer: z.string(),
@@ -304,6 +308,11 @@ const usageSchema = z.object({
   restRequests: nonNegativeInteger,
   restNotModified: nonNegativeInteger,
   cacheHits: nonNegativeInteger,
+  // Accounting completeness is observability, not a correctness gate: GitHub's
+  // used/remaining counters are eventually consistent under concurrency. Legacy
+  // caches predate the flag and are read as complete.
+  accountingComplete: z.boolean().default(true),
+  incompleteReason: z.string().optional(),
 }).strict();
 
 const evidenceSchema = z.object({
