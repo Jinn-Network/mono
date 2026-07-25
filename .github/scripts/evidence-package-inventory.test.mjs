@@ -1,40 +1,52 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
-const packageRoot = join(root, 'packages');
+const packageRoot = join(root, 'packages', 'evidence');
 const DEPENDENCY_SECTIONS = [
   'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
 ];
 
 const EVIDENCE_PACKAGES = [
-  ['evidence-protocol', '@jinn-network/evidence-protocol'],
-  ['evidence-repository', '@jinn-network/evidence-repository'],
-  ['evidence-repository-oci', '@jinn-network/evidence-repository-oci'],
-  ['evidence-discovery', '@jinn-network/evidence-discovery'],
-  ['evidence-catalog-sqlite', '@jinn-network/evidence-catalog-sqlite'],
+  ['protocol', '@jinn-network/evidence-protocol'],
+  ['repository', '@jinn-network/evidence-repository'],
+  ['repository-oci', '@jinn-network/evidence-repository-oci'],
+  ['discovery', '@jinn-network/evidence-discovery'],
+  ['catalog-sqlite', '@jinn-network/evidence-catalog-sqlite'],
   ['execution-recorder', '@jinn-network/execution-recorder'],
   ['attestation-issuer', '@jinn-network/attestation-issuer'],
-  ['evidence-local-runtime', '@jinn-network/evidence-local-runtime'],
+  ['local-runtime', '@jinn-network/evidence-local-runtime'],
 ];
 
 const JINN_DEPENDENCY_GRAPH = new Map([
-  ['evidence-protocol', { dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
-  ['evidence-repository', { dependencies: ['@jinn-network/evidence-protocol'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
-  ['evidence-repository-oci', { dependencies: ['@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
-  ['evidence-discovery', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
-  ['evidence-catalog-sqlite', { dependencies: ['@jinn-network/evidence-discovery', '@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
+  ['protocol', { dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
+  ['repository', { dependencies: ['@jinn-network/evidence-protocol'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
+  ['repository-oci', { dependencies: ['@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
+  ['discovery', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
+  ['catalog-sqlite', { dependencies: ['@jinn-network/evidence-discovery', '@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
   ['execution-recorder', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['attestation-issuer', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
-  ['evidence-local-runtime', { dependencies: ['@jinn-network/evidence-catalog-sqlite', '@jinn-network/evidence-discovery', '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/execution-recorder'], optionalDependencies: [], peerDependencies: [] }],
+  ['local-runtime', { dependencies: ['@jinn-network/evidence-catalog-sqlite', '@jinn-network/evidence-discovery', '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/execution-recorder'], optionalDependencies: [], peerDependencies: [] }],
 ]);
 
 function readPackage(directory) {
   const packageJson = join(packageRoot, directory, 'package.json');
   assert.ok(existsSync(packageJson), `missing package manifest: ${packageJson}`);
   return JSON.parse(readFileSync(packageJson, 'utf8'));
+}
+
+function packageManifests(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (!entry.isDirectory() || entry.name === 'node_modules') return [];
+    const child = join(directory, entry.name);
+    const packageJson = join(child, 'package.json');
+    return [
+      ...(existsSync(packageJson) ? [packageJson] : []),
+      ...packageManifests(child),
+    ];
+  });
 }
 
 function jinnDependencyNames(manifest, section) {
@@ -51,17 +63,22 @@ function expectedPortal(directory, dependencyName) {
 test('the evidence package inventory is explicit and has eight manifests', () => {
   assert.equal(EVIDENCE_PACKAGES.length, 8);
   for (const [directory, expectedName] of EVIDENCE_PACKAGES) {
-    assert.equal(readPackage(directory).name, expectedName);
+    const manifest = readPackage(directory);
+    assert.equal(manifest.name, expectedName);
+    assert.equal(
+      manifest.repository?.directory,
+      `packages/evidence/${directory}`,
+      `${expectedName} has a stale repository directory`,
+    );
   }
-  const actual = readdirSync(packageRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .flatMap((entry) => {
-      const packageJson = join(packageRoot, entry.name, 'package.json');
-      if (!existsSync(packageJson)) return [];
+  const actual = packageManifests(join(root, 'packages'))
+    .flatMap((packageJson) => {
       const { name } = JSON.parse(readFileSync(packageJson, 'utf8'));
       return /^@jinn-network\/evidence-/.test(name)
         || name === '@jinn-network/execution-recorder'
-        || name === '@jinn-network/attestation-issuer' ? [[entry.name, name]] : [];
+        || name === '@jinn-network/attestation-issuer'
+        ? [[relative(packageRoot, dirname(packageJson)), name]]
+        : [];
     }).sort(([left], [right]) => left.localeCompare(right));
   assert.deepEqual(actual, [...EVIDENCE_PACKAGES].sort(([left], [right]) => left.localeCompare(right)));
 });
