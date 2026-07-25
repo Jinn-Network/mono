@@ -35,14 +35,18 @@ function inside(child, parent) {
   return path === '' || (!path.startsWith('..') && !path.startsWith('/'));
 }
 
-function forbiddenImports(sourceRoot, forbiddenPackages, forbiddenRoots = []) {
-  return files(sourceRoot).flatMap((file) => specifiers(readFileSync(file, 'utf8')).flatMap((specifier) => {
+function forbiddenImportsInFiles(sourceFiles, forbiddenPackages, forbiddenRoots = []) {
+  return sourceFiles.flatMap((file) => specifiers(readFileSync(file, 'utf8')).flatMap((specifier) => {
     const packageMatch = forbiddenPackages.some((forbidden) => forbidden.endsWith('/')
       ? specifier.startsWith(forbidden) : specifier === forbidden || specifier.startsWith(`${forbidden}/`));
     const pathMatch = specifier.startsWith('.') && forbiddenRoots.some((forbiddenRoot) =>
       inside(resolve(dirname(file), specifier), forbiddenRoot));
     return packageMatch || pathMatch ? [`${relative(root, file)} -> ${specifier}`] : [];
   })).sort();
+}
+
+function forbiddenImports(sourceRoot, forbiddenPackages, forbiddenRoots = []) {
+  return forbiddenImportsInFiles(files(sourceRoot), forbiddenPackages, forbiddenRoots);
 }
 
 function assertBoundary(sourceRoot, forbiddenPackages, forbiddenRoots = []) {
@@ -89,12 +93,14 @@ test('the import scanner catches static, export, dynamic, require, and local-pat
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
-test('Discovery boundary checks catch bare and relative Journal escapes', () => {
+test('Discovery boundary checks catch bare, relative, and root-helper Journal escapes', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'jinn-discovery-boundary-'));
   try {
+    const source = join(fixture, 'src');
     const catalog = join(fixture, 'catalog');
+    const indexer = join(source, 'indexer');
     const journal = join(fixture, 'journal');
-    mkdirSync(catalog); mkdirSync(journal);
+    mkdirSync(source); mkdirSync(catalog); mkdirSync(indexer); mkdirSync(journal);
     writeFileSync(join(catalog, 'source.ts'), [
       'import "@jinn-network/evidence-discovery/journal";',
       'export * from "../journal/index.js";',
@@ -102,6 +108,16 @@ test('Discovery boundary checks catch bare and relative Journal escapes', () => 
     assert.equal(
       forbiddenImports(catalog, ['@jinn-network/evidence-discovery/journal'], [journal]).length,
       2,
+    );
+    writeFileSync(join(source, 'index.ts'), 'export * from "./bridge.js";');
+    writeFileSync(join(source, 'bridge.ts'), 'export * from "../journal/index.js";');
+    assert.equal(
+      forbiddenImportsInFiles(
+        files(source).filter((file) => !inside(file, indexer)),
+        ['@jinn-network/evidence-discovery/journal'],
+        [journal],
+      ).length,
+      1,
     );
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
@@ -128,20 +144,20 @@ test('evidence source boundaries remain one-way after discovery consolidation', 
   assertBoundary(catalog, ['@jinn-network/evidence-discovery/indexer', '@jinn-network/evidence-discovery/journal'], [indexer, journal]);
   assertBoundary(indexer, ['@jinn-network/evidence-discovery/journal', ...concreteBindings], [journal, repositoryFs, join(packages, 'repository-oci'), join(packages, 'catalog-sqlite')]);
   assertBoundary(journal, ['@jinn-network/evidence-discovery/indexer'], [indexer]);
-  for (const entrypoint of ['index.ts', 'testing.ts']) {
-    assert.deepEqual(
-      forbiddenImports(
-        join(discovery, entrypoint),
-        [
-          '@jinn-network/evidence-discovery/indexer',
-          '@jinn-network/evidence-discovery/journal',
-        ],
-        [indexer, journal],
-      ),
-      [],
-      `the Discovery ${entrypoint} entrypoint must not expose Indexer or Journal`,
-    );
-  }
+  const discoveryRootFiles = files(discovery)
+    .filter((file) => ![catalog, indexer, journal].some((ownedRoot) => inside(file, ownedRoot)));
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      discoveryRootFiles,
+      [
+        '@jinn-network/evidence-discovery/indexer',
+        '@jinn-network/evidence-discovery/journal',
+      ],
+      [indexer, journal],
+    ),
+    [],
+    'the Discovery root region must not expose Indexer or Journal',
+  );
 
   for (const producer of ['execution-recorder', 'attestation-issuer']) {
     assertBoundary(join(packages, producer, 'src'), [...concreteBindings, '@jinn-network/evidence-local-runtime'], [journal, repositoryFs, join(packages, 'repository-oci'), join(packages, 'catalog-sqlite'), join(packages, 'local-runtime')]);
