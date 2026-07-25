@@ -22,12 +22,12 @@ function files(directory) {
 }
 
 function specifiers(source) {
-  const comment = String.raw`(?:\/\*[\s\S]*?\*\/\s*)?`;
+  const trivia = String.raw`(?:(?:\s+)|(?:\/\*[\s\S]*?\*\/)|(?:\/\/[^\r\n]*(?:\r?\n|$)))*`;
   return [
-    new RegExp(String.raw`\bfrom\s*${comment}["']([^"']+)["']`, 'g'),
-    new RegExp(String.raw`\bimport\s*${comment}["']([^"']+)["']`, 'g'),
-    new RegExp(String.raw`\bimport\s*\(\s*${comment}["']([^"']+)["']\s*\)`, 'g'),
-    new RegExp(String.raw`\brequire\s*\(\s*${comment}["']([^"']+)["']\s*\)`, 'g'),
+    new RegExp(String.raw`\bfrom${trivia}["']([^"']+)["']`, 'g'),
+    new RegExp(String.raw`\bimport${trivia}["']([^"']+)["']`, 'g'),
+    new RegExp(String.raw`\bimport${trivia}\(${trivia}["']([^"']+)["']${trivia}\)`, 'g'),
+    new RegExp(String.raw`\brequire${trivia}\(${trivia}["']([^"']+)["']${trivia}\)`, 'g'),
   ].flatMap((pattern) => [...source.matchAll(pattern)].map((match) => match[1]));
 }
 
@@ -77,16 +77,21 @@ test('the import scanner catches static, export, dynamic, require, and local-pat
       'require("@jinn-network/forbidden/require");',
       'await import(/* webpackIgnore: true */ "@jinn-network/forbidden/commented-dynamic");',
       'export { value } from /* boundary */ "@jinn-network/forbidden/commented-export";',
+      'await import(// boundary',
+      '  "@jinn-network/forbidden/line-comment");',
+      'export { value } from /* first */ /* second */ "@jinn-network/forbidden/multiple-comments";',
       'import "../forbidden/local.js";',
     ].join('\n'));
     const findings = forbiddenImports(source, ['@jinn-network/'], [forbidden]);
-    assert.equal(findings.length, 7);
+    assert.equal(findings.length, 9);
     assert.ok(findings.some((finding) => finding.endsWith('-> @jinn-network/forbidden')));
     assert.ok(findings.some((finding) => finding.endsWith('-> @jinn-network/forbidden/export')));
     assert.ok(findings.some((finding) => finding.endsWith('-> @jinn-network/forbidden/dynamic')));
     assert.ok(findings.some((finding) => finding.endsWith('-> @jinn-network/forbidden/require')));
     assert.ok(findings.some((finding) => finding.endsWith('-> @jinn-network/forbidden/commented-dynamic')));
     assert.ok(findings.some((finding) => finding.endsWith('-> @jinn-network/forbidden/commented-export')));
+    assert.ok(findings.some((finding) => finding.endsWith('-> @jinn-network/forbidden/line-comment')));
+    assert.ok(findings.some((finding) => finding.endsWith('-> @jinn-network/forbidden/multiple-comments')));
     assert.ok(findings.some((finding) => finding.endsWith('-> ../forbidden/local.js')));
   } finally {
     rmSync(fixture, { recursive: true, force: true });
@@ -112,7 +117,8 @@ test('evidence source boundaries remain one-way', () => {
   assertBoundary('evidence-announcement-journal', ['@jinn-network/evidence-indexer'], ['evidence-indexer']);
   for (const producer of ['execution-recorder', 'attestation-issuer']) {
     assertBoundary(producer, [...concreteBindings, '@jinn-network/evidence-local-runtime'], [
-      'evidence-repository-fs', 'evidence-repository-oci', 'evidence-catalog-sqlite', 'evidence-local-runtime',
+      'evidence-announcement-journal', 'evidence-repository-fs', 'evidence-repository-oci',
+      'evidence-catalog-sqlite', 'evidence-local-runtime',
     ]);
   }
   for (const directory of evidenceDirectories) {
