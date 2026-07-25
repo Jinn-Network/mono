@@ -1556,7 +1556,6 @@ export class TaskEngine {
           // No codeDigest for skipped runs — leave map empty.
           // Fall through to persistence below via goto-equivalent pattern.
           const nextSolutionOutputsJson = JSON.stringify(skippedOutput);
-          this.persistence.recordPriorPatchOnOverwrite(task.requestId, nextSolutionOutputsJson);
           this.persistence.transition(task.requestId, TaskRunState.POST_SNAPSHOT, {
             postSnapshotCapturedAt: Date.now(),
             postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0, payload: null },
@@ -1609,10 +1608,8 @@ export class TaskEngine {
       // the transition (RUNNING → POST_SNAPSHOT) but before pack() runs will
       // find the serialised output in the DB on restart. pack() will hydrate the
       // in-memory map from solutionOutputsJson if the map entry is absent (#6).
-      // Capture post-snapshot from impl output so data-driven advance fires
-      // Retain prior failed patch before overwrite (#1643 / spec §10 field 4).
+      // Capture post-snapshot from impl output so data-driven advance fires.
       const nextSolutionOutputsJson = JSON.stringify(output);
-      this.persistence.recordPriorPatchOnOverwrite(task.requestId, nextSolutionOutputsJson);
       this.persistence.transition(task.requestId, TaskRunState.POST_SNAPSHOT, {
         postSnapshotCapturedAt: Date.now(),
         postSnapshotPayload: output.postSnapshot ?? { capturedAt: Date.now(), hlTime: 0, payload: null },

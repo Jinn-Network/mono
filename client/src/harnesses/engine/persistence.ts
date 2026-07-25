@@ -103,9 +103,9 @@ CREATE TABLE IF NOT EXISTS task_runs (
   --   after a crash without re-executing the impl. NULL once pack() succeeds.
   solution_outputs_json       TEXT,
   -- Additive column (#1643, intermediateFailureDiffs / spec §10 field 4):
-  -- intermediate_failure_diffs_json: JSON string[] of prior non-empty
-  --   solutionPayload.patch values retained when runImpl overwrites
-  --   solution_outputs_json (different patch, or no next patch). NULL when empty.
+  -- intermediate_failure_diffs_json: JSON string[] of harness-emitted
+  --   failed working-tree diffs from in-session attempt boundaries,
+  --   written once at RUNNING → POST_SNAPSHOT. NULL when empty / absent.
   intermediate_failure_diffs_json TEXT,
   runtime_plugins_json        TEXT,
 
@@ -339,19 +339,6 @@ function runAdditiveMigrations(db: Database.Database): void {
 function parseJson<T>(raw: string | null): T | null {
   if (raw === null) return null;
   return JSON.parse(raw) as T;
-}
-
-function extractSolutionPatch(solutionOutputsJson: string | null): string | null {
-  if (solutionOutputsJson == null || solutionOutputsJson === '') return null;
-  try {
-    const parsed = JSON.parse(solutionOutputsJson) as {
-      solutionPayload?: { patch?: unknown };
-    };
-    const patch = parsed.solutionPayload?.patch;
-    return typeof patch === 'string' && patch.length > 0 ? patch : null;
-  } catch {
-    return null;
-  }
 }
 
 function rowToTaskRun(row: RawRow): PersistedTaskRun {
@@ -759,40 +746,6 @@ export class TaskRunPersistence {
     this.db.prepare(
       'UPDATE task_runs SET consumed_refs_json = ? WHERE request_id = ?',
     ).run(consumedRefsJson, requestId);
-  }
-
-  /**
-   * Before overwriting solution_outputs_json, retain the prior non-empty
-   * solutionPayload.patch when it would be lost (#1643).
-   * Retains when next has no patch (e.g. skipped) or a different non-empty
-   * patch. Dedupes against the existing list. Never throws on malformed JSON.
-   */
-  recordPriorPatchOnOverwrite(requestId: string, nextSolutionOutputsJson: string): void {
-    const existing = this.getByRequestId(requestId);
-    if (!existing) return;
-    const prior = extractSolutionPatch(existing.solutionOutputsJson);
-    if (prior == null) return;
-    const next = extractSolutionPatch(nextSolutionOutputsJson);
-    // Identical non-empty next → nothing to archive. Missing/empty next still
-    // overwrites solution_outputs_json, so the prior must be retained.
-    if (next != null && prior === next) return;
-
-    let list: string[] = [];
-    if (existing.intermediateFailureDiffsJson) {
-      try {
-        const parsed = JSON.parse(existing.intermediateFailureDiffsJson) as unknown;
-        if (Array.isArray(parsed)) {
-          list = parsed.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
-        }
-      } catch {
-        list = [];
-      }
-    }
-    if (list.includes(prior)) return;
-    list.push(prior);
-    this.db.prepare(
-      'UPDATE task_runs SET intermediate_failure_diffs_json = ? WHERE request_id = ?',
-    ).run(JSON.stringify(list), requestId);
   }
 
   /**

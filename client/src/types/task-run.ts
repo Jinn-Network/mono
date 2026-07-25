@@ -74,9 +74,10 @@ export interface PersistedTaskRun {
    */
   solutionOutputsJson: string | null;
   /**
-   * JSON array of prior failed unified diffs retained when runImpl overwrites
-   * solution_outputs_json with a different patch (#1643 / spec §10 field 4).
-   * Null when none retained (first success, or pre-migration rows).
+   * JSON array of harness-emitted failed unified diffs from in-session
+   * attempt boundaries (#1643 / spec §10 field 4). Written once at
+   * RUNNING → POST_SNAPSHOT from `Solution.intermediateFailureDiffs`.
+   * Null when none (first success / no boundaries, or pre-migration rows).
    */
   intermediateFailureDiffsJson: string | null;
   runtimePluginsJson: string | null;
