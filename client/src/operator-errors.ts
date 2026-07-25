@@ -102,7 +102,7 @@ export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorPar
     return {
       summary:
         'Gnosis Safe rejected the transaction (GS026: invalid owner address or signature).',
-      hint: 'Confirm the signing key is a Safe owner and the Safe address matches your fleet state.',
+      hint: 'Repair the Safe owner set on chain, or set JINN_EARNING_DIR to the fleet directory whose master_keystore.json derives the agent address recorded for this Safe in earning_state.json.',
       rawMessage: msg,
     };
   }

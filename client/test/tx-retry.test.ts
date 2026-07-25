@@ -34,15 +34,16 @@ describe('tx-retry', () => {
   });
 
   describe('isRecoverableTransactionError', () => {
-    it('returns true for GS026', () => {
-      expect(isRecoverableTransactionError(new Error('GS026 invalid owner'))).toBe(true);
+    it('returns false for GS026 — invalid owner is deterministic (issue #1986)', () => {
+      expect(isRecoverableTransactionError(new Error('GS026 invalid owner'))).toBe(false);
     });
 
     it('returns false for a bare GS013 — the Safe inner call reverted (deterministic)', () => {
       // GS013 = require(success || safeTxGas != 0 || gasPrice != 0): the Safe's
       // INNER call reverted, which is deterministic — it reverts identically on
-      // every retry. (A stale-nonce / signature race surfaces as GS026, not
-      // GS013.) Retrying it forever wedges the loop; observed on testnet wrapping
+      // every retry. (An estimate-path GS026 is classified after checking Safe
+      // ownership; receipt-path races use a dedicated retryable message.)
+      // Retrying it forever wedges the loop; observed on testnet wrapping
       // TACTaskAlreadyCredited (selector 0x33f626d3). It must be terminal.
       const safeWrappedError = new Error(
         'The contract function "execTransaction" reverted with the following reason:\nGS013',
@@ -67,13 +68,13 @@ describe('tx-retry', () => {
       expect(isRecoverableTransactionError(error)).toBe(false);
     });
 
-    it('keeps the receipt-path "possible stale nonce" message retryable when no inner revert was found', () => {
-      // safe.ts emits this generic message ONLY when re-simulating the inner call
-      // SUCCEEDS — i.e. the on-chain revert was a GS026 signature/nonce race,
-      // which re-reading the nonce and re-signing self-heals. It must stay
-      // retryable (GS026 is checked before GS013 in the classifier).
+    it('keeps the receipt-path stale-nonce race message retryable when no inner revert was found', () => {
+      // safe.ts emits this ONLY when re-simulating the inner call SUCCEEDS — a
+      // signature/nonce race that re-reading the nonce and re-signing self-heals.
+      // The message must not embed GS026/GS013: bare GS026 is terminal (invalid
+      // owner) and bare GS013 is terminal (inner revert). Issue #1986.
       const error = new Error(
-        'Safe execTransaction reverted (GS026/GS013 possible stale nonce, txHash=0xdead)',
+        'Safe execTransaction reverted (possible stale Safe nonce or signature race, txHash=0xdead)',
       );
       expect(isRecoverableTransactionError(error)).toBe(true);
     });
@@ -194,7 +195,9 @@ describe('tx-retry', () => {
           async () => {
             calls++;
             if (calls < 3) {
-              throw new Error('GS026');
+              throw new Error(
+                'Safe execTransaction reverted (possible stale Safe nonce or signature race, txHash=0xdead)',
+              );
             }
             return 'ok';
           },
