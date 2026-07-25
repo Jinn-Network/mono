@@ -314,6 +314,13 @@ export const BenchMatrixV1Schema = z
       }
       seen.add(key);
     }
+    if (matrix.runId !== matrix.preRegistration.runId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `runId mismatch: matrix.runId=${matrix.runId} preRegistration.runId=${matrix.preRegistration.runId}`,
+        path: ['preRegistration', 'runId'],
+      });
+    }
   });
 
 export type BenchMatrixV1 = z.infer<typeof BenchMatrixV1Schema>;
