@@ -115,7 +115,7 @@ jobs:
           (cd packages/evidence/repository && yarn install --immutable)
       - name: Install ORAS 1.3.2
         if: matrix.component == 'repository-oci'
-        uses: oras-project/setup-oras@v1
+        uses: oras-project/setup-oras@v2
         with:
           version: 1.3.2
       - name: Install immutable dependencies
