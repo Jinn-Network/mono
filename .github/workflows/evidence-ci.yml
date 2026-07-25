@@ -85,11 +85,6 @@ jobs:
           - discovery
           - execution-recorder
           - attestation-issuer
-    services:
-      registry:
-        image: registry:3.0.0
-        ports:
-          - 5000:5000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -118,6 +113,20 @@ jobs:
         uses: oras-project/setup-oras@v2
         with:
           version: 1.3.2
+      - name: Start Distribution registry
+        if: matrix.component == 'repository-oci'
+        run: |
+          for attempt in $(seq 1 3); do
+            if docker pull registry:3.0.0; then
+              break
+            fi
+            if [ "$attempt" = "3" ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 5))"
+          done
+          docker run --detach --name jinn-evidence-registry \
+            --publish 5000:5000 registry:3.0.0
       - name: Install immutable dependencies
         working-directory: packages/evidence/${{ matrix.component }}
         run: yarn install --immutable
