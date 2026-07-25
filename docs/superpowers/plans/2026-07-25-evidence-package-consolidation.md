@@ -123,8 +123,9 @@ predecessor as its base.
 - Encode the complete allowed Jinn dependency graph.
 - Require every declared Jinn dependency to have exactly one matching
   `portal:` resolution and prohibit unmatched Jinn resolutions.
-- Remove the stale Evidence Protocol resolution from the announcement Journal
-  and regenerate its lockfile.
+- Fix the announcement Journal's stale Evidence Protocol resolution by matching
+  it with the direct dev dependency required for an independent portal-linked
+  install, then regenerate its lockfile.
 - Add executable source-import guards and canaries:
   - Protocol imports no Jinn package.
   - Repository root neither exposes nor imports filesystem implementation code.
