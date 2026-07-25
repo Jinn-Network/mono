@@ -1,11 +1,27 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { parse as parseYaml } from 'yaml';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 
 function workflow(path: string): string {
   return readFileSync(resolve(repoRoot, path), 'utf8');
+}
+
+function workflowStep(path: string, name: string): string {
+  const parsed = parseYaml(workflow(path)) as {
+    jobs: Record<string, { steps: Array<{ name?: string; run?: string }> }>;
+  };
+  const step = Object.values(parsed.jobs)
+    .flatMap((job) => job.steps)
+    .find((candidate) => candidate.name === name);
+
+  if (step?.run === undefined) {
+    throw new Error(`Workflow ${path} has no runnable step named ${name}`);
+  }
+
+  return step.run;
 }
 
 describe('packed client workflow coverage', () => {
@@ -111,6 +127,34 @@ describe('packed client workflow coverage', () => {
 
     expect(sdkPublish).toContain("'.github/workflows/sdk-npm-publish.yml'");
     expect(sdkPublish).toContain("'.github/workflows/npm-publish.yml'");
+  });
+
+  it.each([
+    [
+      '.github/workflows/sdk-npm-publish.yml',
+      'Validate canary gitHead',
+    ],
+    [
+      '.github/workflows/npm-publish.yml',
+      'Validate client canary gitHead',
+    ],
+  ])('%s allows a full minute for npm registry propagation', (path, stepName) => {
+    const run = workflowStep(path, stepName);
+
+    expect(run).toContain('for _ in $(seq 1 30); do');
+    expect(run).toContain('sleep 2');
+  });
+
+  it('waits for the client canary archive before registry consumer acceptance', () => {
+    const run = workflowStep(
+      '.github/workflows/npm-publish.yml',
+      'Wait for client canary tarball',
+    );
+
+    expect(run).toContain('for _ in $(seq 1 30); do');
+    expect(run).toContain('npm pack --silent --pack-destination');
+    expect(run).toContain('"${CLIENT_SPEC}"');
+    expect(run).toContain('sleep 2');
   });
 
   it('validates source before canary rewriting and rechecks built layouts before packing', () => {

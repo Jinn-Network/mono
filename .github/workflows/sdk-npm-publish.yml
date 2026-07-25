@@ -123,7 +123,7 @@ jobs:
         env:
           PACKAGE_SPEC: '@jinn-network/sdk@${{ steps.meta.outputs.publish_version }}'
         run: |
-          for _ in 1 2 3 4 5; do
+          for _ in $(seq 1 30); do
             PUBLISHED_HEAD="$(npm view "${PACKAGE_SPEC}" gitHead 2>/dev/null || true)"
             if [ "${PUBLISHED_HEAD}" = "${JINN_BUILD_COMMIT}" ]; then
               exit 0
