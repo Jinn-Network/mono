@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-export * from "./errors.js";
 export {
   createAnnouncementAwareRepository,
   recoverPendingPublications,
+  type CreateAnnouncementAwareRepositoryOptions,
+  type RecoverPendingPublicationsOptions,
 } from "./publication.js";
-export * from "./types.js";

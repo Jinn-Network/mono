@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: MIT
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 
-import type { EvidenceRecordReference } from "@jinn-network/evidence-repository";
+import {
+  createRecordReference,
+  parseEvidenceRecordFamily,
+  parseEvidenceRecordReference,
+  parseSha256Digest,
+  type EvidenceRecordReference,
+} from "@jinn-network/evidence-repository";
 
 import {
   LocalEvidenceRuntimeError,
@@ -67,29 +74,43 @@ export interface LocalOperationsSummary {
 
 export interface LocalOperationsStore {
   stagePublication(intent: PublicationIntent): Promise<"created" | "existing">;
-  listPendingPublications(): Promise<readonly PublicationIntent[]>;
+  listPendingPublications(options?: {
+    readonly validate?: boolean;
+  }): Promise<readonly PublicationIntent[]>;
   markPublicationStored(operationKey: string): Promise<void>;
   markPublicationAnnounced(operationKey: string): Promise<void>;
   completePublication(operationKey: string): Promise<void>;
   getCheckpoint(generationId: string, sourceId: string): Promise<string | undefined>;
+  validateGenerationState(
+    generationId: string,
+    sourceId: string,
+  ): Promise<string | undefined>;
+  getProcessedCursor(
+    generationId: string,
+    sourceId: string,
+    cursor: string,
+  ): Promise<{ readonly indexed: number; readonly failed: number } | null>;
   recordIndexedAndCheckpoint(input: IndexedCheckpointInput): Promise<void>;
   recordFailureAndCheckpoint(input: FailedCheckpointInput): Promise<void>;
   getOutcome(generationId: string, reference: EvidenceRecordReference): Promise<StoredIndexingOutcome | null>;
   setTransientFailure(generationId: string, failure: LocalTransientIndexingFailure): Promise<void>;
   clearTransientFailure(generationId: string): Promise<void>;
-  listFailures(query?: LocalIndexingFailureQuery): Promise<LocalIndexingFailurePage>;
+  listFailures(
+    generationId: string,
+    query?: LocalIndexingFailureQuery,
+  ): Promise<LocalIndexingFailurePage>;
   getSummary(generationId: string): Promise<LocalOperationsSummary>;
   close(): Promise<void>;
 }
 
 interface OutboxRow {
-  operation_key: string;
-  family: EvidenceRecordReference["family"];
-  digest: EvidenceRecordReference["digest"];
-  record_bytes: Buffer;
-  byte_size: number;
-  announcement_id: string;
-  state: PublicationIntent["state"];
+  readonly operation_key: string;
+  readonly family: EvidenceRecordReference["family"];
+  readonly digest: EvidenceRecordReference["digest"];
+  readonly record_bytes: Buffer;
+  readonly byte_size: number;
+  readonly announcement_id: string;
+  readonly state: PublicationIntent["state"];
 }
 
 interface OutcomeRow {
@@ -112,15 +133,281 @@ function parseJson<T>(value: string): T {
   }
 }
 
-function validateFailureQuery(query: LocalIndexingFailureQuery = {}): number {
-  const limit = query.limit ?? 50;
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
-    throw new LocalEvidenceRuntimeError(
-      "INVALID_QUERY",
-      "Failure query limit must be an integer from 1 through 100.",
-    );
+const FAILURE_CATEGORIES = new Set([
+  "protocol-nonconformance",
+  "content-corrupt",
+  "announcement-invalid",
+  "validated-record-inconsistent",
+  "catalog-conflict",
+]);
+const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
+const CANONICAL_BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/u;
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
   }
-  return limit;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+): boolean {
+  const keys = Object.keys(value);
+  return keys.length === allowed.length &&
+    keys.every((key) => allowed.includes(key));
+}
+
+function invalidQuery(message: string, cause?: unknown): never {
+  throw new LocalEvidenceRuntimeError(
+    "INVALID_QUERY",
+    message,
+    cause === undefined ? undefined : { cause },
+  );
+}
+
+function snapshotFailureQueryRecord(
+  value: unknown,
+  allowed: readonly string[],
+  role: string,
+): Record<string, unknown> {
+  let prototype: object | null;
+  let descriptors: Record<PropertyKey, PropertyDescriptor>;
+  try {
+    prototype = Object.getPrototypeOf(value);
+    descriptors = Object.getOwnPropertyDescriptors(value) as Record<
+      PropertyKey,
+      PropertyDescriptor
+    >;
+  } catch (error) {
+    invalidQuery(`${role} could not be inspected safely.`, error);
+  }
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    (prototype !== Object.prototype && prototype !== null)
+  ) {
+    invalidQuery(`${role} must be a plain object.`);
+  }
+  const accepted: Record<string, unknown> = Object.create(null) as Record<
+    string,
+    unknown
+  >;
+  for (const key of Reflect.ownKeys(descriptors)) {
+    const descriptor = descriptors[key]!;
+    if (
+      typeof key !== "string" ||
+      !allowed.includes(key) ||
+      !descriptor.enumerable ||
+      !("value" in descriptor)
+    ) {
+      invalidQuery(`${role} contains an unsupported or unsafe member.`);
+    }
+    accepted[key] = descriptor.value;
+  }
+  return accepted;
+}
+
+function validateFailureQuery(
+  untrustedQuery: unknown = {},
+): {
+  readonly query: LocalIndexingFailureQuery;
+  readonly limit: number;
+} {
+  const allowed = ["reference", "category", "limit", "cursor"] as const;
+  const raw = snapshotFailureQueryRecord(
+    untrustedQuery,
+    allowed,
+    "Failure query",
+  );
+  let reference: EvidenceRecordReference | undefined;
+  if (raw.reference !== undefined) {
+    let acceptedReference: Record<string, unknown>;
+    try {
+      acceptedReference = snapshotFailureQueryRecord(
+        raw.reference,
+        ["family", "digest"],
+        "Failure query reference",
+      );
+    } catch (error) {
+      if (error instanceof LocalEvidenceRuntimeError) throw error;
+      invalidQuery("Failure query reference is invalid.");
+    }
+    if (!hasExactKeys(acceptedReference, ["family", "digest"])) {
+      invalidQuery("Failure query reference is invalid.");
+    }
+    try {
+      reference = parseEvidenceRecordReference(acceptedReference);
+    } catch (error) {
+      invalidQuery("Failure query reference is invalid.", error);
+    }
+  }
+  if (
+    raw.category !== undefined &&
+    (typeof raw.category !== "string" ||
+      !FAILURE_CATEGORIES.has(raw.category))
+  ) {
+    invalidQuery("Failure query category is invalid.");
+  }
+  if (
+    raw.cursor !== undefined &&
+    typeof raw.cursor !== "string"
+  ) {
+    invalidQuery("Failure query cursor must be a string.");
+  }
+  const limit = raw.limit ?? 50;
+  if (
+    typeof limit !== "number" ||
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > 100
+  ) {
+    invalidQuery("Failure query limit must be an integer from 1 through 100.");
+  }
+  return {
+    query: {
+      ...(reference === undefined ? {} : { reference }),
+      ...(raw.category === undefined
+        ? {}
+        : { category: raw.category as LocalIndexingFailureQuery["category"] }),
+      ...(raw.cursor === undefined
+        ? {}
+        : { cursor: raw.cursor as string }),
+      limit,
+    },
+    limit,
+  };
+}
+
+function parseFailureCursor(
+  cursor: string,
+  queryHash: string,
+): {
+  readonly updatedAt: string;
+  readonly family: EvidenceRecordReference["family"];
+  readonly digest: EvidenceRecordReference["digest"];
+} {
+  if (
+    cursor.length === 0 ||
+    cursor.length > 4096 ||
+    !CANONICAL_BASE64URL_PATTERN.test(cursor)
+  ) {
+    invalidQuery("Failure cursor is not canonical base64url.");
+  }
+  let decodedBytes: Buffer;
+  let decoded: unknown;
+  try {
+    decodedBytes = Buffer.from(cursor, "base64url");
+    if (decodedBytes.toString("base64url") !== cursor) {
+      invalidQuery("Failure cursor is not canonical base64url.");
+    }
+    decoded = JSON.parse(decodedBytes.toString("utf8")) as unknown;
+  } catch (error) {
+    if (error instanceof LocalEvidenceRuntimeError) throw error;
+    invalidQuery("Failure cursor is invalid.", error);
+  }
+  let canonicalTimestamp = false;
+  if (isPlainRecord(decoded) && typeof decoded.updatedAt === "string") {
+    try {
+      canonicalTimestamp =
+        new Date(decoded.updatedAt).toISOString() === decoded.updatedAt;
+    } catch {
+      canonicalTimestamp = false;
+    }
+  }
+  if (
+    !isPlainRecord(decoded) ||
+    !hasExactKeys(decoded, [
+      "version",
+      "queryHash",
+      "updatedAt",
+      "family",
+      "digest",
+    ]) ||
+    decoded.version !== 1 ||
+    decoded.queryHash !== queryHash ||
+    typeof decoded.queryHash !== "string" ||
+    !SHA256_HEX_PATTERN.test(decoded.queryHash) ||
+    !canonicalTimestamp
+  ) {
+    invalidQuery("Failure cursor does not match this query.");
+  }
+  try {
+    const canonical = {
+      version: 1,
+      queryHash,
+      updatedAt: decoded.updatedAt as string,
+      family: parseEvidenceRecordFamily(decoded.family),
+      digest: parseSha256Digest(decoded.digest),
+    };
+    if (
+      !Buffer.from(JSON.stringify(canonical)).equals(decodedBytes)
+    ) {
+      invalidQuery("Failure cursor JSON is not canonical.");
+    }
+    return {
+      updatedAt: canonical.updatedAt,
+      family: canonical.family,
+      digest: canonical.digest,
+    };
+  } catch (error) {
+    if (error instanceof LocalEvidenceRuntimeError) throw error;
+    invalidQuery("Failure cursor contains an invalid record reference.", error);
+  }
+}
+
+function publicationCorrupt(message: string, cause?: unknown): never {
+  throw new LocalEvidenceRuntimeError(
+    "RUNTIME_CORRUPT",
+    message,
+    cause === undefined ? undefined : { cause },
+  );
+}
+
+function parseOutboxRow(row: unknown): PublicationIntent {
+  if (!isPlainRecord(row)) {
+    publicationCorrupt("A publication outbox row is not an object.");
+  }
+  let reference: EvidenceRecordReference;
+  try {
+    reference = {
+      family: parseEvidenceRecordFamily(row.family),
+      digest: parseSha256Digest(row.digest),
+    };
+  } catch (error) {
+    publicationCorrupt("A publication outbox row has an invalid record reference.", error);
+  }
+  if (
+    typeof row.operation_key !== "string" ||
+    !/^sha256:[0-9a-f]{64}$/u.test(row.operation_key) ||
+    typeof row.announcement_id !== "string" ||
+    !/^urn:jinn:local-announcement:sha256:[0-9a-f]{64}$/u.test(row.announcement_id) ||
+    !Buffer.isBuffer(row.record_bytes) ||
+    typeof row.byte_size !== "number" ||
+    !Number.isSafeInteger(row.byte_size) ||
+    row.byte_size < 0 ||
+    !["staged", "stored", "announced"].includes(String(row.state))
+  ) {
+    publicationCorrupt("A publication outbox row has invalid metadata.");
+  }
+  const recordBytes = Uint8Array.from(row.record_bytes);
+  if (
+    recordBytes.byteLength !== row.byte_size ||
+    createRecordReference(reference.family, recordBytes).digest !== reference.digest
+  ) {
+    publicationCorrupt("A publication outbox row does not match its exact record bytes.");
+  }
+  return {
+    operationKey: row.operation_key,
+    reference,
+    recordBytes,
+    byteSize: row.byte_size,
+    announcementId: row.announcement_id,
+    state: row.state as PublicationIntent["state"],
+  };
 }
 
 class SqliteLocalOperationsStore implements LocalOperationsStore {
@@ -166,14 +453,18 @@ class SqliteLocalOperationsStore implements LocalOperationsStore {
     return "existing";
   }
 
-  async listPendingPublications(): Promise<readonly PublicationIntent[]> {
-    return (this.#active().prepare(`
+  async listPendingPublications(options?: {
+    readonly validate?: boolean;
+  }): Promise<readonly PublicationIntent[]> {
+    const rows = this.#active().prepare(`
       SELECT operation_key,family,digest,record_bytes,byte_size,state,announcement_id
       FROM publication_outbox ORDER BY operation_key
-    `).all() as OutboxRow[]).map((row) => ({
+    `).all() as OutboxRow[];
+    if (options?.validate === true) return rows.map(parseOutboxRow);
+    return rows.map((row) => ({
       operationKey: row.operation_key,
       reference: { family: row.family, digest: row.digest },
-      recordBytes: new Uint8Array(row.record_bytes),
+      recordBytes: Uint8Array.from(row.record_bytes),
       byteSize: row.byte_size,
       announcementId: row.announcement_id,
       state: row.state,
@@ -197,6 +488,80 @@ class SqliteLocalOperationsStore implements LocalOperationsStore {
     return (this.#active().prepare(`
       SELECT cursor FROM indexer_checkpoints WHERE generation_id = ? AND source_id = ?
     `).get(generationId, sourceId) as { cursor: string } | undefined)?.cursor;
+  }
+  async validateGenerationState(
+    generationId: string,
+    sourceId: string,
+  ): Promise<string | undefined> {
+    const database = this.#active();
+    const checkpoint = database.prepare(`
+      SELECT cursor FROM indexer_checkpoints
+      WHERE generation_id = ? AND source_id = ?
+    `).get(generationId, sourceId) as { cursor: string } | undefined;
+    const processed = database.prepare(`
+      SELECT cursor,indexed_total,failed_total FROM processed_cursors
+      WHERE generation_id = ? AND source_id = ?
+    `).all(generationId, sourceId) as Array<{
+      cursor: string;
+      indexed_total: number;
+      failed_total: number;
+    }>;
+    const outcomes = database.prepare(`
+      SELECT status,count(*) AS count FROM indexing_outcomes
+      WHERE generation_id = ? AND source_id = ?
+      GROUP BY status
+    `).all(generationId, sourceId) as Array<{
+      status: string;
+      count: number;
+    }>;
+    const indexed = outcomes.find((row) => row.status === "indexed")?.count ?? 0;
+    const failed = outcomes.find((row) => row.status === "failed")?.count ?? 0;
+    const invalidCount = (value: number) =>
+      !Number.isSafeInteger(value) || value < 0;
+    if (checkpoint === undefined) {
+      if (processed.length !== 0 || indexed !== 0 || failed !== 0) {
+        publicationCorrupt(
+          "The active generation has outcomes without an exact checkpoint.",
+        );
+      }
+      return undefined;
+    }
+    const exact = processed.find((row) => row.cursor === checkpoint.cursor);
+    if (
+      exact === undefined ||
+      invalidCount(exact.indexed_total) ||
+      invalidCount(exact.failed_total) ||
+      exact.indexed_total !== indexed ||
+      exact.failed_total !== failed ||
+      processed.some((row) =>
+        typeof row.cursor !== "string" ||
+        invalidCount(row.indexed_total) ||
+        invalidCount(row.failed_total) ||
+        row.indexed_total > exact.indexed_total ||
+        row.failed_total > exact.failed_total
+      )
+    ) {
+      publicationCorrupt(
+        "The active generation checkpoint and indexing outcomes are inconsistent.",
+      );
+    }
+    return checkpoint.cursor;
+  }
+  async getProcessedCursor(
+    generationId: string,
+    sourceId: string,
+    cursor: string,
+  ): Promise<{ readonly indexed: number; readonly failed: number } | null> {
+    const row = this.#active().prepare(`
+      SELECT indexed_total,failed_total FROM processed_cursors
+      WHERE generation_id = ? AND source_id = ? AND cursor = ?
+    `).get(generationId, sourceId, cursor) as {
+      indexed_total: number;
+      failed_total: number;
+    } | undefined;
+    return row === undefined
+      ? null
+      : { indexed: row.indexed_total, failed: row.failed_total };
   }
 
   #record(input: IndexingCheckpointInput, failure?: LocalIndexingFailure): void {
@@ -262,10 +627,21 @@ class SqliteLocalOperationsStore implements LocalOperationsStore {
   async clearTransientFailure(generationId: string): Promise<void> {
     this.#active().prepare("DELETE FROM transient_indexing_failure WHERE generation_id = ?").run(generationId);
   }
-  async listFailures(query: LocalIndexingFailureQuery = {}): Promise<LocalIndexingFailurePage> {
-    const limit = validateFailureQuery(query);
-    const clauses = ["status = 'failed'"];
-    const values: unknown[] = [];
+  async listFailures(
+    generationId: string,
+    query: LocalIndexingFailureQuery = {},
+  ): Promise<LocalIndexingFailurePage> {
+    const validated = validateFailureQuery(query);
+    query = validated.query;
+    const { limit } = validated;
+    const queryHash = createHash("sha256").update(JSON.stringify({
+      version: 1,
+      generationId,
+      reference: query.reference ?? null,
+      category: query.category ?? null,
+    })).digest("hex");
+    const clauses = ["generation_id = ?", "status = 'failed'"];
+    const values: unknown[] = [generationId];
     if (query.reference !== undefined) {
       clauses.push("family = ?", "digest = ?");
       values.push(query.reference.family, query.reference.digest);
@@ -275,12 +651,7 @@ class SqliteLocalOperationsStore implements LocalOperationsStore {
       values.push(query.category);
     }
     if (query.cursor !== undefined) {
-      let decoded: { updatedAt: string; family: string; digest: string };
-      try {
-        decoded = JSON.parse(Buffer.from(query.cursor, "base64url").toString("utf8"));
-      } catch (error) {
-        throw new LocalEvidenceRuntimeError("INVALID_QUERY", "Failure cursor is invalid.", { cause: error });
-      }
+      const decoded = parseFailureCursor(query.cursor, queryHash);
       clauses.push("(updated_at < ? OR (updated_at = ? AND (family > ? OR (family = ? AND digest > ?))))");
       values.push(decoded.updatedAt, decoded.updatedAt, decoded.family, decoded.family, decoded.digest);
     }
@@ -297,7 +668,9 @@ class SqliteLocalOperationsStore implements LocalOperationsStore {
     return {
       items,
       ...(rows.length > limit && last !== undefined
-        ? { nextCursor: Buffer.from(JSON.stringify({
+          ? { nextCursor: Buffer.from(JSON.stringify({
+            version: 1,
+            queryHash,
             updatedAt: last.updated_at,
             family: last.family,
             digest: last.digest,
