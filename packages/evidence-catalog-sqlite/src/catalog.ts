@@ -24,7 +24,8 @@ import {
 import type Database from "better-sqlite3";
 
 import { openCatalogDatabase } from "./database.js";
-import { closedCatalogError } from "./errors.js";
+import { catalogIoError, closedCatalogError } from "./errors.js";
+import { SqliteCatalogReader } from "./reader.js";
 import {
   createSchema,
   quickCheck,
@@ -40,6 +41,7 @@ import { SqliteCatalogWriter } from "./writer.js";
 
 class SqliteEvidenceCatalogHandle implements SqliteEvidenceCatalog {
   #closed = false;
+  readonly #reader: SqliteCatalogReader;
   readonly #writer: SqliteCatalogWriter;
 
   constructor(
@@ -47,6 +49,10 @@ class SqliteEvidenceCatalogHandle implements SqliteEvidenceCatalog {
     readonly generation: SqliteEvidenceCatalog["generation"],
     private readonly database: Database.Database,
   ) {
+    this.#reader = new SqliteCatalogReader(
+      database,
+      (options) => this.#active(options),
+    );
     this.#writer = new SqliteCatalogWriter(
       database,
       (options) => this.#active(options),
@@ -56,14 +62,6 @@ class SqliteEvidenceCatalogHandle implements SqliteEvidenceCatalog {
   #active(options?: CatalogOperationOptions): void {
     if (this.#closed) throw closedCatalogError();
     assertCatalogOperationActive(options);
-  }
-
-  #notImplemented(options?: CatalogOperationOptions): never {
-    this.#active(options);
-    throw new EvidenceCatalogError(
-      "IO_FAILURE",
-      "SQLite Evidence Catalog Reader and Writer are not initialized.",
-    );
   }
 
   async putRecordProjection(
@@ -89,46 +87,46 @@ class SqliteEvidenceCatalogHandle implements SqliteEvidenceCatalog {
   }
 
   async getRecord(
-    _reference: EvidenceRecordReference,
+    reference: EvidenceRecordReference,
     options?: CatalogOperationOptions,
   ): Promise<CatalogRecordProjection | null> {
-    return this.#notImplemented(options);
+    return this.#reader.getRecord(reference, options);
   }
 
   async findRecordsForEntity(
-    _entityId: string,
-    _query: EntityRecordQuery = {},
+    entityId: string,
+    query: EntityRecordQuery = {},
     options?: CatalogOperationOptions,
   ): Promise<CatalogPage<CatalogRecordProjection>> {
-    return this.#notImplemented(options);
+    return this.#reader.findRecordsForEntity(entityId, query, options);
   }
 
   async findExecutions(
-    _query: ExecutionCatalogQuery,
+    query: ExecutionCatalogQuery,
     options?: CatalogOperationOptions,
   ): Promise<CatalogPage<ExecutionEvidenceProjection>> {
-    return this.#notImplemented(options);
+    return this.#reader.findExecutions(query, options);
   }
 
   async findEvaluations(
-    _query: EvaluationCatalogQuery,
+    query: EvaluationCatalogQuery,
     options?: CatalogOperationOptions,
   ): Promise<CatalogPage<ResultEvaluationProjection>> {
-    return this.#notImplemented(options);
+    return this.#reader.findEvaluations(query, options);
   }
 
   async findVerifications(
-    _query: VerificationCatalogQuery,
+    query: VerificationCatalogQuery,
     options?: CatalogOperationOptions,
   ): Promise<CatalogPage<ExecutionVerificationProjection>> {
-    return this.#notImplemented(options);
+    return this.#reader.findVerifications(query, options);
   }
 
   async getRecordLocations(
-    _reference: EvidenceRecordReference,
+    reference: EvidenceRecordReference,
     options?: CatalogOperationOptions,
   ): Promise<readonly EvidenceRecordLocation[]> {
-    return this.#notImplemented(options);
+    return this.#reader.getRecordLocations(reference, options);
   }
 
   async integrityCheck(
@@ -174,7 +172,10 @@ export async function createSqliteEvidenceCatalog(
     for (const suffix of ["", "-wal", "-shm"]) {
       await unlink(`${opened.databasePath}${suffix}`).catch(() => undefined);
     }
-    throw error;
+    throw catalogIoError(
+      error,
+      "Unable to create SQLite Evidence Catalog handle.",
+    );
   }
 }
 
@@ -195,6 +196,9 @@ export async function openSqliteEvidenceCatalog(
     } catch {
       // Preserve the opening failure.
     }
-    throw error;
+    throw catalogIoError(
+      error,
+      "Unable to open SQLite Evidence Catalog handle.",
+    );
   }
 }

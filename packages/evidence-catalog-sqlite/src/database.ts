@@ -51,12 +51,49 @@ async function ensureSafeParentChain(parentPath: string): Promise<void> {
 }
 
 async function assertSafeExistingDatabase(path: string): Promise<void> {
-  const stat = await lstat(path);
-  if (stat.isSymbolicLink() || !stat.isFile()) {
+  const pathStat = await lstat(path);
+  const currentUid = process.getuid?.();
+  if (
+    pathStat.isSymbolicLink() ||
+    !pathStat.isFile() ||
+    pathStat.nlink !== 1 ||
+    (currentUid !== undefined && pathStat.uid !== currentUid)
+  ) {
     throw catalogIoError(
       undefined,
-      `SQLite Catalog database must be a non-symlink regular file: ${path}`,
+      `SQLite Catalog database must be an owned, single-link regular file: ${path}`,
     );
+  }
+  const handle = await open(
+    path,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+  );
+  try {
+    const handleStat = await handle.stat();
+    if (
+      !handleStat.isFile() ||
+      handleStat.nlink !== 1 ||
+      (currentUid !== undefined && handleStat.uid !== currentUid) ||
+      handleStat.dev !== pathStat.dev ||
+      handleStat.ino !== pathStat.ino
+    ) {
+      throw catalogIoError(
+        undefined,
+        `SQLite Catalog database path changed while opening it: ${path}`,
+      );
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+async function assertSafeExistingSidecars(path: string): Promise<void> {
+  for (const suffix of ["-wal", "-shm"]) {
+    try {
+      await assertSafeExistingDatabase(`${path}${suffix}`);
+    } catch (error) {
+      if (nodeErrorCode(error) !== "ENOENT") throw error;
+    }
   }
 }
 
@@ -112,12 +149,16 @@ export async function openCatalogDatabase(
       await assertSafeExistingDatabase(databasePath);
     }
     await assertSafeExistingDatabase(databasePath);
+    await assertSafeExistingSidecars(databasePath);
     database = new Database(databasePath, {
       fileMustExist: true,
       timeout: 5_000,
     });
     await assertSafeExistingDatabase(databasePath);
+    await assertSafeExistingSidecars(databasePath);
     applyRequiredPragmas(database);
+    await assertSafeExistingDatabase(databasePath);
+    await assertSafeExistingSidecars(databasePath);
     return { database, databasePath, created };
   } catch (error) {
     try {

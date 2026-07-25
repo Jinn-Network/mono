@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { chmod, lstat, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -129,6 +129,34 @@ describe("SQLite Evidence Catalog schema", () => {
           databasePath: join(parentLink, "catalog.sqlite"),
         }),
       ).rejects.toMatchObject({ code: "IO_FAILURE" });
+    },
+  );
+
+  test.runIf(process.platform !== "win32")(
+    "rejects hardlinked databases and symlinked SQLite sidecars before opening",
+    async () => {
+      const root = await temporaryRoot();
+      const databasePath = join(root, "catalog.sqlite");
+      const catalog = await createSqliteEvidenceCatalog({
+        databasePath,
+        generation,
+      });
+      await catalog.close();
+
+      const hardlinkPath = join(root, "hardlink.sqlite");
+      await link(databasePath, hardlinkPath);
+      await expect(
+        openSqliteEvidenceCatalog({ databasePath }),
+      ).rejects.toMatchObject({ code: "IO_FAILURE" });
+      await rm(hardlinkPath);
+
+      const sidecarTarget = join(root, "sidecar-target");
+      await writeFile(sidecarTarget, "untouched");
+      await symlink(sidecarTarget, `${databasePath}-wal`);
+      await expect(
+        openSqliteEvidenceCatalog({ databasePath }),
+      ).rejects.toMatchObject({ code: "IO_FAILURE" });
+      expect(await readFile(sidecarTarget, "utf8")).toBe("untouched");
     },
   );
 

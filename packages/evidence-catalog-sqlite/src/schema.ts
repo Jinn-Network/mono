@@ -274,11 +274,25 @@ export function quickCheck(database: Database.Database): readonly string[] {
       string,
       unknown
     >[];
-    return rows
+    const messages = rows
       .flatMap((row) => Object.values(row))
       .filter((value): value is string => typeof value === "string")
-      .filter((message) => message !== "ok")
-      .sort();
+      .filter((message) => message !== "ok");
+    const foreignKeys = database.pragma("foreign_key_check") as readonly {
+      readonly table?: unknown;
+      readonly rowid?: unknown;
+      readonly parent?: unknown;
+      readonly fkid?: unknown;
+    }[];
+    messages.push(
+      ...foreignKeys.map(
+        (row) =>
+          `foreign key violation: table=${String(row.table)} rowid=${String(
+            row.rowid,
+          )} parent=${String(row.parent)} fkid=${String(row.fkid)}`,
+      ),
+    );
+    return messages.sort();
   } catch (error) {
     throw catalogIoError(error, "Unable to check SQLite Evidence Catalog integrity.");
   }
