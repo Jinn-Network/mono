@@ -127,11 +127,7 @@ type SlotKind = 'execution' | 'verdict';
 
 type Candidate = AttemptEnvelopeCandidate | VerdictEnvelopeCandidate;
 
-function eqAddr(a: string, b: string): boolean {
-  return a.toLowerCase() === b.toLowerCase();
-}
-
-function eqHex(a: string, b: string): boolean {
+function eqCi(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
 }
 
@@ -210,6 +206,10 @@ async function authenticateCandidate(args: {
   } catch {
     return { ok: false, rejected: reject(candidate, 'ipfs-fetch-failed') };
   }
+  // Plan: throw OR unusable return → ipfs-fetch-failed (do not fall through to crypto).
+  if (raw === null || raw === undefined) {
+    return { ok: false, rejected: reject(candidate, 'ipfs-fetch-failed') };
+  }
 
   let envelope: SignedEnvelope;
   try {
@@ -227,7 +227,7 @@ async function authenticateCandidate(args: {
   const envRequestId = envelope.task?.requestId;
   if (
     typeof envRequestId !== 'string'
-    || !eqHex(envRequestId, spineRequestId)
+    || !eqCi(envRequestId, spineRequestId)
   ) {
     return { ok: false, rejected: reject(candidate, 'request-id-mismatch') };
   }
@@ -239,7 +239,7 @@ async function authenticateCandidate(args: {
     return { ok: false, rejected: reject(candidate, 'chain-id-mismatch') };
   }
 
-  if (!eqAddr(envelope.participant.safeAddress, onchainRoleAddress)) {
+  if (!eqCi(envelope.participant.safeAddress, onchainRoleAddress)) {
     return { ok: false, rejected: reject(candidate, 'participant-safe-mismatch') };
   }
 
@@ -253,11 +253,11 @@ async function authenticateCandidate(args: {
   } catch {
     return { ok: false, rejected: reject(candidate, 'publisher-safe-mismatch') };
   }
-  if (!eqAddr(publisherSafe, onchainRoleAddress)) {
+  if (!eqCi(publisherSafe, onchainRoleAddress)) {
     return { ok: false, rejected: reject(candidate, 'publisher-safe-mismatch') };
   }
 
-  if (!eqHex(envelope.signature.hash, candidate.manifestHash)) {
+  if (!eqCi(envelope.signature.hash, candidate.manifestHash)) {
     return { ok: false, rejected: reject(candidate, 'manifest-hash-mismatch') };
   }
 
@@ -271,7 +271,7 @@ async function authenticateCandidate(args: {
   } catch {
     return { ok: false, rejected: reject(candidate, 'task-cid-digest-mismatch') };
   }
-  if (!eqHex(digest, task.taskCidDigest)) {
+  if (!eqCi(digest, task.taskCidDigest)) {
     return { ok: false, rejected: reject(candidate, 'task-cid-digest-mismatch') };
   }
 

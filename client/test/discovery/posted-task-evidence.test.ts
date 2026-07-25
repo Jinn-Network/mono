@@ -355,6 +355,96 @@ describe('authenticatePostedTaskEvidence', () => {
     expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('crypto-auth-failed');
   });
 
+  it('maps null IPFS returns to ipfs-fetch-failed (not crypto-auth-failed)', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [{
+        requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyNull',
+        publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 25,
+      }],
+    });
+    const authenticateEnvelope = vi.fn(async () => opaqueEnvelope({
+      role: 'solution', requestId: SOLVE_REQ, safe: OPERATOR, hash: SOLUTION_HASH,
+    }));
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => null,
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope,
+      },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('invalid');
+    if (report.attempts[0]!.execution.status !== 'invalid') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('ipfs-fetch-failed');
+    expect(authenticateEnvelope).not.toHaveBeenCalled();
+  });
+
+  it('rejects missing task.cid on solution envelopes', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [{
+        requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyNoCid',
+        publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 25,
+      }],
+    });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({}),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async () => {
+          const env = opaqueEnvelope({
+            role: 'solution', requestId: SOLVE_REQ, safe: OPERATOR, hash: SOLUTION_HASH,
+          });
+          delete (env.task as { cid?: string }).cid;
+          return env;
+        },
+      },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('invalid');
+    if (report.attempts[0]!.execution.status !== 'invalid') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('missing-task-cid');
+  });
+
+  it('continues the slot walk when an earlier candidate fails crypto', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [
+        {
+          requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyBad',
+          publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 25,
+        },
+        {
+          requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyGood',
+          publisherAgentId: '1', manifestHash: (`0x${'73'.repeat(32)}`) as `0x${string}`,
+          enrichedAtBlock: 26,
+        },
+      ],
+    });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async (cid) => ({ cid }),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async (value) => {
+          const cid = (value as { cid: string }).cid;
+          if (cid === 'bafyBad') {
+            throw new Error('forged');
+          }
+          return opaqueEnvelope({
+            role: 'solution',
+            requestId: SOLVE_REQ,
+            safe: OPERATOR,
+            hash: (`0x${'73'.repeat(32)}`) as `0x${string}`,
+          });
+        },
+      },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('valid');
+    if (report.attempts[0]!.execution.status !== 'valid') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.selected.envelopeCid).toBe('bafyGood');
+    expect(report.attempts[0]!.execution.rejected).toHaveLength(1);
+    expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('crypto-auth-failed');
+  });
+
   it('rejects candidates enriched after closeBoundary.blockNumber', async () => {
     const evidence = baseSpine({
       attemptCandidates: [{
@@ -400,6 +490,31 @@ describe('authenticatePostedTaskEvidence', () => {
     expect(report.attempts[0]!.execution.status).toBe('invalid');
     if (report.attempts[0]!.execution.status !== 'invalid') throw new Error('unreachable');
     expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('post-close-boundary-time');
+  });
+
+  it('accepts candidates equal to closeBoundary exclusive bounds', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [{
+        requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyOnBound',
+        publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 50,
+      }],
+    });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({}),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async () => opaqueEnvelope({
+          role: 'solution',
+          requestId: SOLVE_REQ,
+          safe: OPERATOR,
+          hash: SOLUTION_HASH,
+          generatedAt: 1_900_000_000,
+        }),
+      },
+      options: { closeBoundary: { blockNumber: 50, timestampSeconds: 1_900_000_000 } },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('valid');
   });
 
   it('returns missing when the spine row has zero candidates', async () => {
