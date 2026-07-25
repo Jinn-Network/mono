@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { createHash } from "node:crypto";
 
-import type { FilesystemEvidenceAnnouncementJournal } from "@jinn-network/evidence-announcement-journal";
+import type { FilesystemEvidenceAnnouncementJournal } from "@jinn-network/evidence-discovery/journal";
 import {
   EvidenceRepositoryError,
   assertRepositoryOperationActive,

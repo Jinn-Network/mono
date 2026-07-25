@@ -5,16 +5,14 @@ on:
     paths:
       - "packages/evidence-protocol/**"
       - "packages/evidence-repository/**"
-      - "packages/evidence-catalog/**"
-      - "packages/evidence-indexer/**"
+      - "packages/evidence-discovery/**"
       - ".github/workflows/evidence-discovery-ci.yml"
   push:
     branches: [next]
     paths:
       - "packages/evidence-protocol/**"
       - "packages/evidence-repository/**"
-      - "packages/evidence-catalog/**"
-      - "packages/evidence-indexer/**"
+      - "packages/evidence-discovery/**"
       - ".github/workflows/evidence-discovery-ci.yml"
 
 permissions:
@@ -53,17 +51,8 @@ jobs:
           yarn test
           yarn build
 
-      - name: Verify Evidence Catalog
-        working-directory: packages/evidence-catalog
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn pack:smoke
-
-      - name: Verify Evidence Indexer
-        working-directory: packages/evidence-indexer
+      - name: Verify Evidence Discovery
+        working-directory: packages/evidence-discovery
         run: |
           yarn install --immutable
           yarn typecheck

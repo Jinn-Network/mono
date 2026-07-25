@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { EvidenceCatalogError } from "@jinn-network/evidence-catalog";
+import { EvidenceCatalogError } from "@jinn-network/evidence-discovery";
 
 function nodeErrorCode(error: unknown): string | undefined {
   return error !== null && typeof error === "object" && "code" in error

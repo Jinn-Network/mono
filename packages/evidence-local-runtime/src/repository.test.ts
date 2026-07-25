@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import type { FilesystemEvidenceAnnouncementJournal } from "@jinn-network/evidence-announcement-journal";
+import type { FilesystemEvidenceAnnouncementJournal } from "@jinn-network/evidence-discovery/journal";
 import {
   EvidenceRepositoryError,
   createArtifactReference,

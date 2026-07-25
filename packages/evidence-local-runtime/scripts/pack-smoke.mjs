@@ -20,13 +20,8 @@ const consumer = join(temporaryRoot, "consumer");
 const packages = [
   ["evidence-protocol", "@jinn-network/evidence-protocol"],
   ["evidence-repository", "@jinn-network/evidence-repository"],
-  ["evidence-catalog", "@jinn-network/evidence-catalog"],
-  ["evidence-indexer", "@jinn-network/evidence-indexer"],
+  ["evidence-discovery", "@jinn-network/evidence-discovery"],
   ["evidence-catalog-sqlite", "@jinn-network/evidence-catalog-sqlite"],
-  [
-    "evidence-announcement-journal",
-    "@jinn-network/evidence-announcement-journal",
-  ],
   ["evidence-local-runtime", "@jinn-network/evidence-local-runtime"],
 ];
 
@@ -100,7 +95,7 @@ try {
 
   for (const directory of [
     "evidence-catalog-sqlite",
-    "evidence-announcement-journal",
+    "evidence-discovery",
     "evidence-local-runtime",
   ]) {
     const entries = (
@@ -141,7 +136,7 @@ import { join } from "node:path";
 
 import {
   openFilesystemEvidenceAnnouncementJournal,
-} from "@jinn-network/evidence-announcement-journal";
+} from "@jinn-network/evidence-discovery/journal";
 import {
   createSqliteEvidenceCatalog,
 } from "@jinn-network/evidence-catalog-sqlite";
@@ -198,7 +193,7 @@ try {
 
   for (const directory of [
     "evidence-catalog-sqlite",
-    "evidence-announcement-journal",
+    "evidence-discovery",
     "evidence-local-runtime",
   ]) {
     await readFile(

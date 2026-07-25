@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import Database from "better-sqlite3";
-import { openFilesystemEvidenceAnnouncementJournal } from "@jinn-network/evidence-announcement-journal";
+import { openFilesystemEvidenceAnnouncementJournal } from "@jinn-network/evidence-discovery/journal";
 import {
   EvidenceRepositoryError,
   createRecordReference,
@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   openFilesystemEvidenceAnnouncementJournalForTesting,
-} from "../../evidence-announcement-journal/dist/journal.js";
+} from "../../evidence-discovery/dist/journal/journal.js";
 import { openLocalOperationsStore } from "./operations-store.js";
 import {
   createAnnouncementAwareRepository,

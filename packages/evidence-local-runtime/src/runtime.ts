@@ -2,15 +2,15 @@
 import {
   EvidenceCatalogError,
   type EvidenceCatalogReader,
-} from "@jinn-network/evidence-catalog";
+} from "@jinn-network/evidence-discovery";
 import {
   EvidenceAnnouncementJournalError,
   openFilesystemEvidenceAnnouncementJournal,
   type FilesystemEvidenceAnnouncementJournal,
-} from "@jinn-network/evidence-announcement-journal";
+} from "@jinn-network/evidence-discovery/journal";
 import {
   createEvidenceIndexer,
-} from "@jinn-network/evidence-indexer";
+} from "@jinn-network/evidence-discovery/indexer";
 import {
   EvidenceRepositoryError,
   parseEvidenceRecordReference,

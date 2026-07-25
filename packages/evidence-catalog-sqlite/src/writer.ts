@@ -9,7 +9,7 @@ import {
   type EvidenceRecordReference,
   type RecordLocationObservation,
   type RecordLocationWithdrawal,
-} from "@jinn-network/evidence-catalog";
+} from "@jinn-network/evidence-discovery";
 import type Database from "better-sqlite3";
 
 import { catalogIoError } from "./errors.js";

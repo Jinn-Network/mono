@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: MIT
 import { setTimeout as delay } from "node:timers/promises";
 
-import type { FilesystemEvidenceAnnouncementJournal } from "@jinn-network/evidence-announcement-journal";
+import type { FilesystemEvidenceAnnouncementJournal } from "@jinn-network/evidence-discovery/journal";
 import {
   EvidenceCatalogError,
   type EvidenceCatalogReader,
   type EvidenceRepositoryResolver,
-} from "@jinn-network/evidence-catalog";
+} from "@jinn-network/evidence-discovery";
 import {
   EvidenceIndexerError,
   type EvidenceIndexer,
   type EvidenceIndexingResult,
-} from "@jinn-network/evidence-indexer";
+} from "@jinn-network/evidence-discovery/indexer";
 import {
   EvidenceRepositoryError,
   type EvidenceRecordReference,

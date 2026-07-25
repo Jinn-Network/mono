@@ -13,7 +13,7 @@ import { join } from "node:path";
 
 import {
   openFilesystemEvidenceAnnouncementJournal,
-} from "@jinn-network/evidence-announcement-journal";
+} from "@jinn-network/evidence-discovery/journal";
 import {
   createRecordReference,
   type EvidenceRecordReference,

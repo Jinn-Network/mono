@@ -2,7 +2,7 @@
 import type {
   CatalogRecordProjection,
   EvidenceCatalogReader,
-} from "@jinn-network/evidence-catalog";
+} from "@jinn-network/evidence-discovery";
 import type { ConformanceDiagnostic } from "@jinn-network/evidence-protocol";
 import type {
   EvidenceRecordReference,

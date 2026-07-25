@@ -5,13 +5,13 @@ import { basename, dirname, join } from "node:path";
 
 import {
   CATALOG_SCHEMA_VERSION,
-} from "@jinn-network/evidence-catalog";
+} from "@jinn-network/evidence-discovery";
 import {
   createSqliteEvidenceCatalog,
   openSqliteEvidenceCatalog,
   type SqliteEvidenceCatalog,
 } from "@jinn-network/evidence-catalog-sqlite";
-import { EVIDENCE_PROJECTOR_VERSION } from "@jinn-network/evidence-indexer";
+import { EVIDENCE_PROJECTOR_VERSION } from "@jinn-network/evidence-discovery/indexer";
 
 import {
   LocalEvidenceRuntimeError,

@@ -4,7 +4,7 @@ import type {
   CatalogOperationOptions,
   EvidenceCatalogReader,
   EvidenceCatalogWriter,
-} from "@jinn-network/evidence-catalog";
+} from "@jinn-network/evidence-discovery";
 
 export interface SqliteCatalogIntegrityReport {
   readonly valid: boolean;

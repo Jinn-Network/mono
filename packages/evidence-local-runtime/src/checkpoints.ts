@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import type { EvidenceIndexerCheckpointStore } from "@jinn-network/evidence-catalog";
+import type { EvidenceIndexerCheckpointStore } from "@jinn-network/evidence-discovery";
 
 import type { LocalOperationsStore } from "./operations-store.js";
 

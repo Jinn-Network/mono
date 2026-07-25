@@ -1,7 +1,7 @@
 {
-  "name": "@jinn-network/evidence-local-runtime",
+  "name": "@jinn-network/evidence-discovery",
   "version": "0.1.0",
-  "description": "Single-process local evidence repository, journal, index, and catalog runtime for Jinn.",
+  "description": "Catalog contracts, generic evidence indexing, and a local announcement journal for Jinn evidence.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {
@@ -11,7 +11,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/Jinn-Network/mono.git",
-    "directory": "packages/evidence-local-runtime"
+    "directory": "packages/evidence-discovery"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,11 +19,25 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+    },
+    "./indexer": {
+      "import": "./dist/indexer/index.js",
+      "types": "./dist/indexer/index.d.ts"
+    },
+    "./journal": {
+      "import": "./dist/journal/index.js",
+      "types": "./dist/journal/index.d.ts"
     }
   },
   "files": [
     "dist/",
-    "README.md"
+    "README.md",
+    "docs/",
+    "specifications/"
   ],
   "publishConfig": {
     "access": "public"
@@ -36,24 +50,24 @@
     "prepack": "yarn build"
   },
   "dependencies": {
-    "@jinn-network/evidence-catalog-sqlite": "0.1.0",
-    "@jinn-network/evidence-discovery": "0.1.0",
     "@jinn-network/evidence-protocol": "0.1.0",
-    "@jinn-network/evidence-repository": "0.1.0",
-    "better-sqlite3": "13.0.1"
+    "@jinn-network/evidence-repository": "0.1.0"
+  },
+  "peerDependencies": {
+    "vitest": "^4.1.8"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
   },
   "devDependencies": {
-    "@jinn-network/execution-recorder": "0.1.0",
-    "@types/better-sqlite3": "7.6.13",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"
   },
   "resolutions": {
-    "@jinn-network/evidence-discovery": "portal:../evidence-discovery",
-    "@jinn-network/evidence-catalog-sqlite": "portal:../evidence-catalog-sqlite",
     "@jinn-network/evidence-protocol": "portal:../evidence-protocol",
-    "@jinn-network/evidence-repository": "portal:../evidence-repository",
-    "@jinn-network/execution-recorder": "portal:../execution-recorder"
+    "@jinn-network/evidence-repository": "portal:../evidence-repository"
   }
 }
