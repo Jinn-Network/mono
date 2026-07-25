@@ -42,7 +42,6 @@
     "@jinn-network/evidence-indexer": "0.1.0",
     "@jinn-network/evidence-protocol": "0.1.0",
     "@jinn-network/evidence-repository": "0.1.0",
-    "@jinn-network/evidence-repository-fs": "0.1.0",
     "better-sqlite3": "13.0.1"
   },
   "devDependencies": {
@@ -59,7 +58,6 @@
     "@jinn-network/evidence-indexer": "portal:../evidence-indexer",
     "@jinn-network/evidence-protocol": "portal:../evidence-protocol",
     "@jinn-network/evidence-repository": "portal:../evidence-repository",
-    "@jinn-network/evidence-repository-fs": "portal:../evidence-repository-fs",
     "@jinn-network/execution-recorder": "portal:../execution-recorder"
   }
 }

@@ -6,7 +6,6 @@ on:
     paths:
       - "packages/evidence-protocol/**"
       - "packages/evidence-repository/**"
-      - "packages/evidence-repository-fs/**"
       - "packages/evidence-repository-oci/**"
       - ".github/workflows/evidence-repository-ci.yml"
   push:
@@ -14,7 +13,6 @@ on:
     paths:
       - "packages/evidence-protocol/**"
       - "packages/evidence-repository/**"
-      - "packages/evidence-repository-fs/**"
       - "packages/evidence-repository-oci/**"
       - ".github/workflows/evidence-repository-ci.yml"
 
@@ -58,15 +56,6 @@ jobs:
 
       - name: Verify repository contracts
         working-directory: packages/evidence-repository
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn pack:smoke
-
-      - name: Verify filesystem binding
-        working-directory: packages/evidence-repository-fs
         run: |
           yarn install --immutable
           yarn typecheck

@@ -14,9 +14,9 @@ import { dirname, join } from "node:path";
 import {
   createArtifactReference,
   createRecordReference,
-  type Sha256Digest,
-} from "@jinn-network/evidence-repository";
-import { describeEvidenceRepositoryContract } from "@jinn-network/evidence-repository/testing";
+} from "../references.js";
+import { describeEvidenceRepositoryContract } from "../testing.js";
+import type { Sha256Digest } from "../types.js";
 import {
   validateExecutionEvidence,
   validateExecutionVerification,
@@ -51,17 +51,17 @@ describe("filesystem evidence repository", () => {
     const fixtures = [
       {
         family: "execution-evidence",
-        path: "../../evidence-protocol/fixtures/golden-execution-evidence-v1/execution/ro-crate-metadata.json",
+        path: "../../../evidence-protocol/fixtures/golden-execution-evidence-v1/execution/ro-crate-metadata.json",
         validate: validateExecutionEvidence,
       },
       {
         family: "result-evaluation",
-        path: "../../evidence-protocol/fixtures/golden-execution-evidence-v1/claims/result-evaluation/result-evaluation.dsse.json",
+        path: "../../../evidence-protocol/fixtures/golden-execution-evidence-v1/claims/result-evaluation/result-evaluation.dsse.json",
         validate: validateResultEvaluation,
       },
       {
         family: "execution-verification",
-        path: "../../evidence-protocol/fixtures/golden-execution-evidence-v1/claims/execution-verification/execution-verification.dsse.json",
+        path: "../../../evidence-protocol/fixtures/golden-execution-evidence-v1/claims/execution-verification/execution-verification.dsse.json",
         validate: validateExecutionVerification,
       },
     ] as const;

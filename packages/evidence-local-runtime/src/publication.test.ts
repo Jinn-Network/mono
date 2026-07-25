@@ -10,7 +10,7 @@ import {
   createRecordReference,
   type EvidenceRepository,
 } from "@jinn-network/evidence-repository";
-import { createFilesystemEvidenceRepository } from "@jinn-network/evidence-repository-fs";
+import { createFilesystemEvidenceRepository } from "@jinn-network/evidence-repository/fs";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {

@@ -95,7 +95,6 @@ __metadata:
     "@jinn-network/evidence-indexer": "npm:0.1.0"
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
-    "@jinn-network/evidence-repository-fs": "npm:0.1.0"
     "@jinn-network/execution-recorder": "npm:0.1.0"
     "@types/better-sqlite3": "npm:7.6.13"
     "@types/node": "npm:^22.0.0"
@@ -111,14 +110,6 @@ __metadata:
   dependencies:
     "@noble/hashes": "npm:^2.2.0"
     zod: "npm:4.4.3"
-  languageName: node
-  linkType: soft
-
-"@jinn-network/evidence-repository-fs@portal:../evidence-repository-fs::locator=%40jinn-network%2Fevidence-local-runtime%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/evidence-repository-fs@portal:../evidence-repository-fs::locator=%40jinn-network%2Fevidence-local-runtime%40workspace%3A."
-  dependencies:
-    "@jinn-network/evidence-repository": "npm:0.1.0"
   languageName: node
   linkType: soft
 

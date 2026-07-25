@@ -7,7 +7,7 @@ import { test } from 'node:test';
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages');
 const evidenceDirectories = [
-  'evidence-protocol', 'evidence-repository', 'evidence-repository-fs',
+  'evidence-protocol', 'evidence-repository',
   'evidence-repository-oci', 'evidence-catalog', 'evidence-catalog-sqlite',
   'evidence-indexer', 'evidence-announcement-journal', 'execution-recorder',
   'attestation-issuer', 'evidence-local-runtime',
@@ -59,6 +59,30 @@ function assertBoundary(directory, forbiddenPackages, forbiddenDirectories = [])
   );
 }
 
+function assertPackageRootBoundary(directory, forbiddenPackages, forbiddenDirectories = []) {
+  const sourceRoot = join(packages, directory, 'src');
+  const implementationRoot = join(sourceRoot, 'fs');
+  const forbiddenRoots = forbiddenDirectories.map((forbidden) =>
+    join(packages, forbidden));
+  const findings = files(sourceRoot)
+    .filter((file) => !inside(file, implementationRoot))
+    .flatMap((file) =>
+      specifiers(readFileSync(file, 'utf8')).flatMap((specifier) => {
+        const packageMatch = forbiddenPackages.some((forbidden) =>
+          forbidden.endsWith('/')
+            ? specifier.startsWith(forbidden)
+            : specifier === forbidden || specifier.startsWith(`${forbidden}/`));
+        const pathMatch = specifier.startsWith('.') && forbiddenRoots.some((forbiddenRoot) =>
+          inside(resolve(dirname(file), specifier), forbiddenRoot));
+        return packageMatch || pathMatch ? [`${relative(root, file)} -> ${specifier}`] : [];
+      }));
+  assert.deepEqual(
+    findings.sort(),
+    [],
+    `${directory} package-root source crosses an evidence architecture boundary`,
+  );
+}
+
 function manifest(directory) {
   return JSON.parse(readFileSync(join(packages, directory, 'package.json'), 'utf8'));
 }
@@ -101,23 +125,30 @@ test('the import scanner catches static, export, dynamic, require, and local-pat
 test('evidence source boundaries remain one-way', () => {
   const concreteBindings = [
     '@jinn-network/evidence-announcement-journal',
-    '@jinn-network/evidence-repository-fs',
+    '@jinn-network/evidence-repository/fs',
     '@jinn-network/evidence-repository-oci',
     '@jinn-network/evidence-catalog-sqlite',
   ];
   assertBoundary('evidence-protocol', ['@jinn-network/']);
-  assertBoundary('evidence-repository', ['@jinn-network/evidence-repository-fs'], ['evidence-repository-fs']);
-  assert.equal(manifest('evidence-repository').exports['./fs'], undefined);
+  assertPackageRootBoundary(
+    'evidence-repository',
+    ['@jinn-network/evidence-repository/fs'],
+    ['evidence-repository/src/fs'],
+  );
+  assert.deepEqual(manifest('evidence-repository').exports['./fs'], {
+    import: './dist/fs/index.js',
+    types: './dist/fs/index.d.ts',
+  });
   assertBoundary('evidence-catalog', [
     '@jinn-network/evidence-indexer', '@jinn-network/evidence-announcement-journal',
   ], ['evidence-indexer', 'evidence-announcement-journal']);
   assertBoundary('evidence-indexer', [
     '@jinn-network/evidence-announcement-journal', ...concreteBindings,
-  ], ['evidence-announcement-journal', 'evidence-repository-fs', 'evidence-repository-oci', 'evidence-catalog-sqlite']);
+  ], ['evidence-announcement-journal', 'evidence-repository/src/fs', 'evidence-repository-oci', 'evidence-catalog-sqlite']);
   assertBoundary('evidence-announcement-journal', ['@jinn-network/evidence-indexer'], ['evidence-indexer']);
   for (const producer of ['execution-recorder', 'attestation-issuer']) {
     assertBoundary(producer, [...concreteBindings, '@jinn-network/evidence-local-runtime'], [
-      'evidence-announcement-journal', 'evidence-repository-fs', 'evidence-repository-oci',
+      'evidence-announcement-journal', 'evidence-repository/src/fs', 'evidence-repository-oci',
       'evidence-catalog-sqlite', 'evidence-local-runtime',
     ]);
   }
@@ -128,5 +159,9 @@ test('evidence source boundaries remain one-way', () => {
         `${directory} may not depend on concrete Catalog storage`);
     }
     assertBoundary(directory, ['@jinn-network/evidence-catalog-sqlite'], ['evidence-catalog-sqlite']);
+  }
+  for (const directory of evidenceDirectories) {
+    if (directory === 'evidence-local-runtime' || directory === 'evidence-repository') continue;
+    assertBoundary(directory, ['@jinn-network/evidence-repository/fs'], ['evidence-repository/src/fs']);
   }
 });
