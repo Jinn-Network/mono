@@ -461,4 +461,48 @@ describe('authenticatePostedTaskEvidence', () => {
     if (report.attempts[0]!.execution.status !== 'ambiguous') throw new Error('unreachable');
     expect(report.attempts[0]!.execution.valid).toHaveLength(2);
   });
+
+  it('rejects verdict-role bytes on an attempt slot', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [{
+        requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyWrongRole',
+        publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 25,
+      }],
+    });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({}),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async () => opaqueEnvelope({
+          role: 'verdict', requestId: SOLVE_REQ, safe: OPERATOR, hash: SOLUTION_HASH,
+        }),
+      },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('invalid');
+    if (report.attempts[0]!.execution.status !== 'invalid') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('wrong-role');
+  });
+
+  it('accepts wire role restoration as solution on attempt slots', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [{
+        requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyRest',
+        publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 25,
+      }],
+    });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({}),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async () => opaqueEnvelope({
+          role: 'restoration', requestId: SOLVE_REQ, safe: OPERATOR, hash: SOLUTION_HASH,
+        }),
+      },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('valid');
+    if (report.attempts[0]!.execution.status !== 'valid') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.selected.binding.role).toBe('solution');
+  });
 });
