@@ -7,9 +7,10 @@
  */
 
 /**
- * Gnosis Safe ABI — the `execTransaction` / `nonce` / `getTransactionHash`
- * surface the daemon calls. `execTransaction` is declared `payable` (superset;
- * both call-sites pass no `value`, so widening is safe), output name `success`.
+ * Gnosis Safe ABI — the `execTransaction` / `nonce` / `getTransactionHash` /
+ * `isOwner` surface the daemon calls. `execTransaction` is declared `payable`
+ * (superset; both call-sites pass no `value`, so widening is safe), output name
+ * `success`.
  */
 export const SAFE_ABI = [
   {
@@ -54,5 +55,12 @@ export const SAFE_ABI = [
       { name: '_nonce', type: 'uint256' },
     ],
     outputs: [{ name: '', type: 'bytes32' }],
+  },
+  {
+    name: 'isOwner',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'owner', type: 'address' }],
+    outputs: [{ name: '', type: 'bool' }],
   },
 ] as const;

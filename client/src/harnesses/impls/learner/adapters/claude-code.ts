@@ -360,7 +360,12 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
 
       let stderr = '';
       child.stdout?.on('data', (d: Buffer) => {
-        stdoutLog.write(d);
+        // Guard against ERR_STREAM_WRITE_AFTER_END: once the session settles,
+        // closeLogs() ends these streams, but the reaped child (SIGTERM, not
+        // instant) can still emit bytes — e.g. after onResult() fires on a
+        // mid-session tool-result envelope. An unguarded write here throws
+        // "write after end", which surfaces as an engine tick failure.
+        if (!stdoutLog.writableEnded) stdoutLog.write(d);
         if (settled) return;
         stdoutBuf += d.toString();
         let nl: number;
@@ -378,7 +383,7 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
         }
       });
       child.stderr?.on('data', (d: Buffer) => {
-        stderrLog.write(d);
+        if (!stderrLog.writableEnded) stderrLog.write(d);
         stderr += d.toString();
       });
 

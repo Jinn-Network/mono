@@ -48,13 +48,10 @@ export interface PackageScope {
   candidateTestFiles: string[];
 }
 
-/** The two TypeScript packages a jinn-repo live-issue patch can realistically
- *  touch and that this evaluator knows how to gate: `client` (the daemon —
- *  every jinn-repo pool instance mined so far is client/test-scoped, see
- *  `jinn-repo-extract.ts`'s `TEST_PATH` filter) and `packages/sdk` (the
- *  typed SolverNet contract layer `client` portals to). `packages/sdk` is
- *  ordered first: it is a dependency-free leaf package, so grading it before
- *  the heavier `client` gate fails fast on a broken contract surface. */
+/** Package descriptors for the complete supported `jinn-mono.v1` evaluator
+ * surface. `KNOWN_LIVE_EVAL_PACKAGES` below defines their deterministic
+ * verification order; these named exports keep the mapping explicit and
+ * independently testable. */
 export const SDK_PACKAGE: PackageSpec = {
   root: 'packages/sdk',
   srcDir: 'packages/sdk/src',
@@ -71,7 +68,84 @@ export const CLIENT_PACKAGE: PackageSpec = {
   testScript: 'test',
 };
 
-export const KNOWN_LIVE_EVAL_PACKAGES: readonly PackageSpec[] = [SDK_PACKAGE, CLIENT_PACKAGE];
+export const PLUGIN_PACKAGE: PackageSpec = {
+  root: 'packages/plugin',
+  srcDir: 'packages/plugin/src',
+  testDir: 'packages/plugin/test',
+  typecheckScript: 'typecheck',
+  testScript: 'test',
+};
+
+export const CORE_PACKAGE: PackageSpec = {
+  root: 'packages/core',
+  srcDir: 'packages/core/src',
+  testDir: 'packages/core/test',
+  typecheckScript: 'typecheck',
+  testScript: 'test',
+};
+
+export const LAYER_PACKAGE: PackageSpec = {
+  root: 'packages/layer',
+  srcDir: 'packages/layer/src',
+  testDir: 'packages/layer/test',
+  typecheckScript: 'typecheck',
+  testScript: 'test',
+};
+
+export const INDEXER_PACKAGE: PackageSpec = {
+  root: 'packages/indexer',
+  srcDir: 'packages/indexer/src',
+  testDir: 'packages/indexer/test',
+  typecheckScript: 'typecheck',
+  testScript: 'test',
+};
+
+export const INDEXER_ENRICHMENT_PACKAGE: PackageSpec = {
+  root: 'packages/indexer-enrichment',
+  srcDir: 'packages/indexer-enrichment/src',
+  testDir: 'packages/indexer-enrichment/test',
+  typecheckScript: 'typecheck',
+  testScript: 'test',
+};
+
+export const AUTOPILOT_PACKAGE: PackageSpec = {
+  root: 'packages/autopilot',
+  srcDir: 'packages/autopilot/src',
+  testDir: 'packages/autopilot/test',
+  typecheckScript: 'typecheck',
+  testScript: 'test',
+};
+
+export const CONTRACTS_PACKAGE: PackageSpec = {
+  root: 'contracts',
+  srcDir: 'contracts/contracts',
+  testDir: 'contracts/test',
+  typecheckScript: 'typecheck',
+  testScript: 'test',
+};
+
+export const BROADCAST_BOT_PACKAGE: PackageSpec = {
+  root: 'apps/broadcast-bot',
+  srcDir: 'apps/broadcast-bot/src',
+  testDir: 'apps/broadcast-bot/test',
+  typecheckScript: 'typecheck',
+  testScript: 'test',
+};
+
+/** Complete `jinn-mono.v1` evaluator surface, in the same deterministic order
+ * used by the Autopilot adoption verifier. */
+export const KNOWN_LIVE_EVAL_PACKAGES: readonly PackageSpec[] = [
+  PLUGIN_PACKAGE,
+  CORE_PACKAGE,
+  SDK_PACKAGE,
+  INDEXER_PACKAGE,
+  INDEXER_ENRICHMENT_PACKAGE,
+  LAYER_PACKAGE,
+  CLIENT_PACKAGE,
+  CONTRACTS_PACKAGE,
+  AUTOPILOT_PACKAGE,
+  BROADCAST_BOT_PACKAGE,
+];
 
 const TEST_FILE_RE = /\.test\.tsx?$/;
 const SOURCE_EXT_RE = /\.tsx?$/;

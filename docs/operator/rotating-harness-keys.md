@@ -27,6 +27,14 @@ Both are documented per harness below. Do **not** use the repo's `client/.env` f
 
 If you authenticated the `claude` CLI on this host (`claude auth login`), you have nothing more to do — the harness reads `~/.claude/` directly. Rotate via the commands in the table. Prefer OAuth over a raw `ANTHROPIC_API_KEY`: the key works as a pay-per-request fallback but skips the prompt-caching / subscription tiers.
 
+The Autopilot marketplace semantic evaluator is a deliberately stricter
+exception: it runs Claude with an isolated `HOME` so host settings, plugins,
+skills, and project instructions cannot affect a verdict. A host-only
+`claude auth login` session is therefore not visible to that evaluator.
+SolverNet evaluator daemons must provide `CLAUDE_CODE_OAUTH_TOKEN` (preferred)
+or `ANTHROPIC_API_KEY` in the daemon environment. Readiness fails before a
+marketplace claim when neither explicit credential is present.
+
 In headless containers the host keychain is unavailable, so the OAuth token must be forwarded as `CLAUDE_CODE_OAUTH_TOKEN`. The Docker path for this is documented in [`client/README.md`](../../client/README.md) (the "Docker" section) — note the distinction in the next section.
 
 ### codex

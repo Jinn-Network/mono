@@ -10,6 +10,7 @@ import {
   decodeReviewClaimPayload,
   formatAutomatedReviewMarker,
 } from './codecs.js';
+import { parseChildMarker, isMachineChildIssue, type ChildKind } from './child-issues.js';
 import {
   gitOid,
   isoTimestamp,
@@ -23,6 +24,23 @@ import {
   type ReviewClaimRecord,
   type ReviewVerdictState,
 } from './types.js';
+import {
+  FULL_SCAN_RESERVE,
+  GitHubRateLimitReserveError,
+  assertRateLimitReserve,
+  type GitHubUsage,
+} from './github-usage.js';
+
+export type SnapshotReadMode = 'incremental' | 'full';
+
+export interface LifecycleSnapshotSource {
+  read(options: {
+    readonly mode: SnapshotReadMode;
+    readonly rateLimitFloor: number;
+    /** Internal coordinator retry: preserve already-metered work in this cycle. */
+    readonly resetUsage?: boolean;
+  }): Promise<GitHubLifecycleSnapshot>;
+}
 
 export type NativeReviewState =
   | 'APPROVED'
@@ -39,11 +57,8 @@ export interface NativeReviewSnapshot {
   readonly submittedAt: string;
 }
 
-export interface CheckSummary {
-  readonly name: string;
-  readonly status: string;
-  readonly conclusion: string | null;
-}
+export type { CheckSummary } from './types.js';
+import type { CheckSummary } from './types.js';
 
 export interface ReviewClaimSnapshot {
   readonly oid: GitOid;
@@ -84,6 +99,7 @@ export interface PullRequestSnapshot {
   readonly mergeability: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN';
   readonly mergeStateStatus: string;
   readonly checks: readonly CheckSummary[];
+  readonly ciRerunRecorded?: boolean;
   readonly reviews: readonly NativeReviewSnapshot[];
   readonly branchClaim?: BranchClaim;
   readonly implementationCompletionSummary?: string;
@@ -118,6 +134,7 @@ export interface RawPullRequest {
   readonly mergeability: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN';
   readonly mergeStateStatus: string;
   readonly checks: readonly CheckSummary[];
+  readonly ciRerunRecorded?: boolean;
   readonly reviews: readonly RawNativeReview[];
   readonly branchClaimTrailers: string | null;
   readonly implementationCompletionSummary?: string | null;
@@ -144,6 +161,26 @@ export interface GitHubLifecycleReader {
     nonDoneIssueNumbers?: readonly number[],
   ): Promise<PullRequestPage>;
   readBranchClaims?(): Promise<readonly RawBranchClaim[]>;
+  /** Incremental stable-branch ref listing over the existing git transport. */
+  readIncrementalBranchClaims?(): Promise<readonly RawBranchClaim[]>;
+  /** Exact single-PR GraphQL hydration used by incremental discovery. */
+  readPullRequestForReconciliation?(prNumber: number): Promise<RawPullRequest | null>;
+  /** Git-transport review-claim ref listing, keyed by PR number. */
+  readReviewClaimRefs?(): Promise<ReadonlyMap<number, GitOid>>;
+  /** Cheap live GraphQL quota evidence read before a targeted hydration. */
+  readGraphQlRemaining?(): Promise<number>;
+  /** Lightweight targeted discovery for newly-active Project issues. */
+  readPullRequestNumbersClosingIssues?(
+    issueNumbers: readonly number[],
+  ): Promise<ReadonlySet<number>>;
+  resetGitHubUsage?(): void;
+  githubUsage(): GitHubUsage;
+}
+
+export interface LifecycleParityDifference {
+  readonly subject: string;
+  readonly incremental: string | null;
+  readonly full: string | null;
 }
 
 export interface GitHubLifecycleSnapshot {
@@ -154,9 +191,21 @@ export interface GitHubLifecycleSnapshot {
   readonly diagnostics: readonly LifecycleMappingDiagnostic[];
   readonly lifecycle: LifecycleSnapshot;
   readonly capturedAt: string;
+  /** Additive metadata; legacy/custom readers that omit it are treated as partial. */
+  readonly snapshotMode?: SnapshotReadMode;
+  readonly snapshotComplete?: boolean;
+  readonly lastFullReconciliationAt?: string | null;
+  readonly githubUsage?: GitHubUsage;
+  readonly parityDifferences?: readonly LifecycleParityDifference[];
+  /** Why a full oracle could not be compared to a same-boundary incremental candidate. */
+  readonly parityUnavailableReason?: string;
+  /** Present only for a deliberately non-authoritative routine status view. */
+  readonly partialReason?: string;
+  /** A complete cached/incremental view returned after a due full read failed. */
+  readonly snapshotWarning?: string;
 }
 
-function parseBranchClaim(raw: RawBranchClaim): BranchClaimSnapshot {
+export function decodeBranchClaimSnapshot(raw: RawBranchClaim): BranchClaimSnapshot {
   try {
     assertPositiveInteger(raw.issueNumber, 'issue number');
     isoTimestamp(raw.headCommittedAt);
@@ -188,8 +237,17 @@ export class SnapshotDecodeError extends Error {
 }
 
 export class LifecycleRateLimitError extends Error {
-  constructor(readonly remaining: number) {
-    super(`GitHub rate-limit budget low: ${remaining} remaining`);
+  constructor(
+    readonly remaining: number,
+    readonly required = DEFAULT_FLOOR,
+    readonly reserve = 0,
+  ) {
+    super(
+      reserve === 0
+        ? `GitHub rate-limit budget low: ${remaining} remaining`
+        : `GitHub rate-limit budget low: ${remaining} remaining; ${required} required `
+          + `(${required - reserve} floor + ${reserve} reserve)`,
+    );
     this.name = 'LifecycleRateLimitError';
   }
 }
@@ -204,7 +262,7 @@ function assertPositiveInteger(value: number, label: string): void {
   }
 }
 
-function parsePullRequest(raw: RawPullRequest): PullRequestSnapshot {
+export function decodePullRequestSnapshot(raw: RawPullRequest): PullRequestSnapshot {
   try {
     assertPositiveInteger(raw.number, 'PR number');
     const headOid = gitOid(raw.headOid);
@@ -216,9 +274,19 @@ function parsePullRequest(raw: RawPullRequest): PullRequestSnapshot {
         commitId: gitOid(review.commitId),
       };
     });
-    const branchClaim = raw.branchClaimTrailers === null
-      ? undefined
-      : decodeBranchClaimTrailers(raw.branchClaimTrailers);
+    const branchClaim = (() => {
+      if (raw.branchClaimTrailers === null) return undefined;
+      try {
+        return decodeBranchClaimTrailers(raw.branchClaimTrailers);
+      } catch (cause) {
+        console.warn(
+          `[snapshot] skipping undecodable PR branch claim on #${raw.number}: ${
+            errorMessage(cause)
+          }`,
+        );
+        return undefined;
+      }
+    })();
     const reviewClaim = raw.reviewClaim === null
       ? undefined
       : {
@@ -245,6 +313,7 @@ function parsePullRequest(raw: RawPullRequest): PullRequestSnapshot {
       mergeability: raw.mergeability,
       mergeStateStatus: raw.mergeStateStatus,
       checks: raw.checks.map((check) => ({ ...check })),
+      ...(raw.ciRerunRecorded === true ? { ciRerunRecorded: true } : {}),
       reviews,
       ...(branchClaim === undefined ? {} : { branchClaim }),
       ...(raw.implementationCompletionSummary === undefined
@@ -345,6 +414,7 @@ LifecycleItem,
 function lifecyclePr(
   pr: PullRequestSnapshot,
   issue: PolledIssue,
+  openChildKinds: readonly ChildKind[] = [],
 ): Extract<LifecycleItem, { kind: 'pull-request' }> {
   const decisive = latestDecisiveReview(pr);
   const reviewClaim = pr.reviewClaim?.record;
@@ -354,20 +424,18 @@ function lifecyclePr(
     ? 'Current-head Human review record'
     : issue.blockedOn === 'Human'
       ? 'Project Blocked on: Human'
-      : issue.status === 'Human'
-        ? 'Project status: Human'
-        : pr.labels.includes('review:needs-human')
-          ? 'PR label: review:needs-human'
-          : issueLabels.includes('review:needs-human')
-            ? 'Issue label: review:needs-human'
+      : pr.labels.includes('review:needs-human')
+        ? 'PR label: review:needs-human'
+        : issueLabels.includes('review:needs-human')
+          ? 'Issue label: review:needs-human'
+          : issueLabels.includes('autopilot:human')
+            ? 'Issue label: autopilot:human'
             : undefined;
   const implementationActive = pr.branchClaim?.phase === 'implement'
     && pr.branchClaim.phaseComplete !== true;
-  const reviewPhase = reviewClaim?.state === 'fixing'
-    ? 'review-fixing' as const
-    : reviewClaim !== undefined && reviewClaim.head === pr.headOid
-      ? 'reviewing' as const
-      : 'awaiting-review' as const;
+  const reviewPhase = reviewClaim !== undefined && reviewClaim.head === pr.headOid
+    ? 'reviewing' as const
+    : 'awaiting-review' as const;
   const synthesizedHumanReason: HumanReason | undefined = humanSource === undefined
     ? undefined
     : implementationActive
@@ -405,6 +473,9 @@ function lifecyclePr(
     needsReview: decisive?.state !== 'APPROVED',
     approved: decisive?.state === 'APPROVED',
     mergeState: mergeState(pr),
+    checks: [...pr.checks],
+    ...(pr.ciRerunRecorded === true ? { ciRerunRecorded: true } : {}),
+    ...(openChildKinds.length === 0 ? {} : { openChildKinds: [...openChildKinds] }),
     ...(pr.branchClaim === undefined ? {} : { branchClaim: pr.branchClaim }),
     ...(pr.implementationCompletionSummary === undefined
       ? {}
@@ -568,6 +639,7 @@ function eligibilityEvidence(
   eligible: boolean,
   authorDisallowed: boolean,
   stackReady: ReadonlyMap<number, unknown>,
+  hasClaimBranch = false,
 ): { readonly reason: IssueEligibilityReason; readonly detail: string } {
   if (eligible) return { reason: 'eligible', detail: 'All implementation admission gates pass' };
   if (issue.blockedOn === 'Another issue' && !stackReady.has(issue.number)) {
@@ -585,14 +657,39 @@ function eligibilityEvidence(
       detail: `Issue author ${issue.author || '(missing)'} is not selected by the author allowlist`,
     };
   }
+  if (hasClaimBranch) {
+    return {
+      reason: 'not-selected',
+      detail: `Issue has an in-flight claim branch autopilot/${issue.number}`,
+    };
+  }
+  if (isMachineChildIssue(issue)) {
+    return {
+      reason: 'not-selected',
+      detail: 'Machine child issue is not currently selectable',
+    };
+  }
   const sourceReason =
     issue.shape === null ? 'Issue Type is not set'
       : issue.priority === null ? 'Priority is not set'
         : !issue.onBoard || issue.projectItemId === null ? 'Issue is not on the Project'
-          : issue.status !== 'Todo' ? `Project status is ${issue.status ?? 'unset'}, not Todo`
-            : issue.blockedOn === 'Human' ? 'Project Blocked on is Human'
-              : `Project Blocked on is ${issue.blockedOn ?? 'unset'}`;
+          : issue.blockedOn === 'Human' ? 'Project Blocked on is Human'
+            : `Project Blocked on is ${issue.blockedOn ?? 'unset'}`;
   return { reason: 'not-selected', detail: sourceReason };
+}
+
+function openChildrenByParent(
+  issues: readonly PolledIssue[],
+): Map<number, ChildKind[]> {
+  const byParent = new Map<number, ChildKind[]>();
+  for (const issue of issues) {
+    const marker = parseChildMarker(issue.body ?? '');
+    if (marker === null) continue;
+    const current = byParent.get(marker.parentPr) ?? [];
+    if (!current.includes(marker.kind)) current.push(marker.kind);
+    byParent.set(marker.parentPr, current);
+  }
+  return byParent;
 }
 
 function lifecycleItems(
@@ -627,46 +724,67 @@ function lifecycleItems(
   const mappings = resolveMappings(prs, branches, byIssue);
   const links = prLinksByIssue(prs, mappings.issueByPr);
   const stackReady = resolveStackReady([...issues], links, authorAllowlist);
+  const claimBranchIssues = new Set(
+    branches
+      .filter((branch) => (
+        branch.claim.phase === 'implement'
+        && branch.headRefName === `autopilot/${branch.issueNumber}`
+      ))
+      .map((branch) => branch.issueNumber),
+  );
   const issuesWithPr = new Set([
     ...mappings.issueByPr.values(),
     ...mappings.affectedIssues,
   ]);
-  const selected = selectReady([...issues], issuesWithPr, authorAllowlist, stackReady);
+  const inFlight = new Set([
+    ...issuesWithPr,
+    ...claimBranchIssues,
+  ]);
+  const selected = selectReady([...issues], inFlight, authorAllowlist, stackReady);
   const ready = new Set(selected.ready.map((issue) => issue.number));
   const skippedForAuthor = new Set(selected.skippedForAuthor.map((issue) => issue.number));
+  const childrenByParent = openChildrenByParent([...byIssue.values()]);
   const out: LifecycleItem[] = [];
   for (const issue of issues) {
-    if (issuesWithPr.has(issue.number) || mappings.affectedIssues.has(issue.number)) continue;
-    const eligibility = eligibilityEvidence(
-      issue,
-      ready.has(issue.number),
-      skippedForAuthor.has(issue.number),
-      stackReady,
-    );
+    if (issuesWithPr.has(issue.number)) continue;
     const issueLabels = [...(issue.labels ?? [])];
     const sourceHumanHold = issue.blockedOn === 'Human'
-      || issue.status === 'Human'
-      || issueLabels.includes('review:needs-human');
+      || issueLabels.includes('review:needs-human')
+      || issueLabels.includes('autopilot:human');
+    const selectedReady = ready.has(issue.number);
+    const eligible = selectedReady && !sourceHumanHold;
+    const holdDetail = issue.blockedOn === 'Human'
+      ? 'Project Blocked on is Human'
+      : issueLabels.includes('autopilot:human')
+        ? 'Issue carries autopilot:human'
+        : issueLabels.includes('review:needs-human')
+          ? 'Issue carries review:needs-human'
+          : undefined;
+    const eligibility = sourceHumanHold && selectedReady && holdDetail !== undefined
+      ? { reason: 'not-selected' as const, detail: holdDetail }
+      : eligibilityEvidence(
+        issue,
+        eligible,
+        skippedForAuthor.has(issue.number),
+        stackReady,
+        claimBranchIssues.has(issue.number),
+      );
     const sourceHumanReason: HumanReason | undefined = sourceHumanHold
       ? {
           phase: 'eligible',
           code: 'implementation-escalation',
-          detail: issue.blockedOn === 'Human'
-            ? 'Project Blocked on is Human'
-            : issueLabels.includes('review:needs-human')
-              ? 'Issue carries review:needs-human'
-              : 'Project status is Human',
+          detail: holdDetail ?? 'Human hold',
         }
       : undefined;
     out.push({
       kind: 'issue',
       issueNumber: issue.number,
-      v2Marked: false,
+      v2Marked: isMachineChildIssue(issue),
       projectStatus: issue.status,
       labels: issueLabels,
       ...(sourceHumanHold ? { humanHold: true } : {}),
       ...(sourceHumanReason === undefined ? {} : { humanReason: sourceHumanReason }),
-      eligible: ready.has(issue.number),
+      eligible,
       eligibilityReason: eligibility.reason,
       eligibilityDetail: eligibility.detail,
     });
@@ -675,7 +793,9 @@ function lifecycleItems(
     const issueNumber = mappings.issueByPr.get(pr.number);
     if (issueNumber === undefined) continue;
     const issue = byIssue.get(issueNumber);
-    if (issue !== undefined) out.push(lifecyclePr(pr, issue));
+    if (issue !== undefined) {
+      out.push(lifecyclePr(pr, issue, childrenByParent.get(pr.number) ?? []));
+    }
   }
   return { items: out, diagnostics: mappings.diagnostics };
 }
@@ -689,6 +809,53 @@ function deepFreeze<Value>(value: Value): Value {
   return value;
 }
 
+export function composeGitHubLifecycleSnapshot(
+  evidence: {
+    readonly project: ProjectSnapshot;
+    readonly issues: readonly PolledIssue[];
+    readonly pullRequests: readonly PullRequestSnapshot[];
+    readonly branches: readonly BranchClaimSnapshot[];
+  },
+  options: {
+    readonly authorAllowlist: ReadonlySet<string>;
+    readonly capturedAt: string;
+    readonly snapshotMode: SnapshotReadMode;
+    readonly lastFullReconciliationAt: string;
+    readonly githubUsage: GitHubUsage;
+    readonly parityDifferences?: readonly LifecycleParityDifference[];
+    readonly parityUnavailableReason?: string;
+  },
+): GitHubLifecycleSnapshot {
+  isoTimestamp(options.capturedAt);
+  isoTimestamp(options.lastFullReconciliationAt);
+  const lifecycle = lifecycleItems(
+    evidence.issues,
+    evidence.pullRequests,
+    evidence.branches,
+    options.authorAllowlist,
+    evidence.project,
+  );
+  return deepFreeze({
+    project: evidence.project,
+    issues: [...evidence.issues],
+    pullRequests: [...evidence.pullRequests],
+    branches: [...evidence.branches],
+    diagnostics: lifecycle.diagnostics,
+    lifecycle: { items: lifecycle.items },
+    capturedAt: options.capturedAt,
+    snapshotMode: options.snapshotMode,
+    snapshotComplete: true,
+    lastFullReconciliationAt: options.lastFullReconciliationAt,
+    githubUsage: options.githubUsage,
+    ...(options.parityDifferences === undefined
+      ? {}
+      : { parityDifferences: [...options.parityDifferences] }),
+    ...(options.parityUnavailableReason === undefined
+      ? {}
+      : { parityUnavailableReason: options.parityUnavailableReason }),
+  });
+}
+
 export async function buildGitHubLifecycleSnapshot(
   reader: GitHubLifecycleReader,
   options: {
@@ -698,9 +865,39 @@ export async function buildGitHubLifecycleSnapshot(
     readonly rateLimitFloor?: number;
   },
 ): Promise<GitHubLifecycleSnapshot> {
+  if (typeof reader.githubUsage !== 'function') {
+    throw new Error('Full lifecycle snapshot requires a cycle usage meter');
+  }
+  if (reader.readGraphQlRemaining === undefined) {
+    throw new Error('Full lifecycle snapshot live rate-limit reader is unavailable');
+  }
+  const usageBeforeFull = reader.githubUsage();
+  const rateLimitFloor = options.rateLimitFloor ?? DEFAULT_FLOOR;
+  try {
+    assertRateLimitReserve(
+      await reader.readGraphQlRemaining(),
+      FULL_SCAN_RESERVE,
+      rateLimitFloor,
+    );
+  } catch (error) {
+    if (!(error instanceof GitHubRateLimitReserveError)) throw error;
+    throw new LifecycleRateLimitError(error.remaining, error.required, error.reserve);
+  }
   const project = await reader.readProjectSnapshot();
-  if (project.rateLimit.remaining < (options.rateLimitFloor ?? DEFAULT_FLOOR)) {
-    throw new LifecycleRateLimitError(project.rateLimit.remaining);
+  const usageAfterProject = reader.githubUsage();
+  const projectGraphQlCost = usageAfterProject.graphqlCost - usageBeforeFull.graphqlCost;
+  if (!Number.isSafeInteger(projectGraphQlCost) || projectGraphQlCost < 0) {
+    throw new Error('Full lifecycle Project read returned inconsistent GraphQL usage evidence');
+  }
+  try {
+    assertRateLimitReserve(
+      project.rateLimit.remaining,
+      Math.max(0, FULL_SCAN_RESERVE - projectGraphQlCost),
+      rateLimitFloor,
+    );
+  } catch (error) {
+    if (!(error instanceof GitHubRateLimitReserveError)) throw error;
+    throw new LifecycleRateLimitError(error.remaining, error.required, error.reserve);
   }
   const issues = await reader.readIssues(toIssueBoardState(project));
   const nonDoneIssueNumbers = project.items
@@ -722,29 +919,47 @@ export async function buildGitHubLifecycleSnapshot(
     seen.add(next);
     cursor = next;
   }
-  const pullRequests = rawPrs.map(parsePullRequest);
-  const branches = (await reader.readBranchClaims?.() ?? []).map(parseBranchClaim);
+  const pullRequests = rawPrs.map(decodePullRequestSnapshot);
+  const branchClaims = await reader.readBranchClaims?.() ?? [];
+  const branches: BranchClaimSnapshot[] = [];
+  for (const raw of branchClaims) {
+    try {
+      branches.push(decodeBranchClaimSnapshot(raw));
+    } catch (cause) {
+      console.warn(
+        `[snapshot] skipping undecodable branch claim ${raw.headRefName}: ${
+          errorMessage(cause)
+        }`,
+      );
+    }
+  }
   const now = (options.now ?? (() => new Date()))();
   isoTimestamp(now.toISOString());
-  const lifecycle = lifecycleItems(
-    issues,
-    pullRequests,
-    branches,
-    options.authorAllowlist,
-    project,
-  );
-  const snapshot: GitHubLifecycleSnapshot = {
-    project,
-    issues: [...issues],
-    pullRequests,
-    branches,
-    diagnostics: lifecycle.diagnostics,
-    lifecycle: {
-      items: lifecycle.items,
-    },
+  const githubUsage = reader.githubUsage();
+  if (
+    githubUsage.graphqlRequests < 1
+    || githubUsage.graphqlRemaining === null
+    || githubUsage.graphqlResetAt === null
+  ) {
+    throw new Error('Full lifecycle snapshot is missing metered GraphQL rate-limit evidence');
+  }
+  try {
+    assertRateLimitReserve(
+      githubUsage.graphqlRemaining,
+      0,
+      rateLimitFloor,
+    );
+  } catch (error) {
+    if (!(error instanceof GitHubRateLimitReserveError)) throw error;
+    throw new LifecycleRateLimitError(error.remaining, error.required, error.reserve);
+  }
+  return composeGitHubLifecycleSnapshot({ project, issues, pullRequests, branches }, {
+    authorAllowlist: options.authorAllowlist,
     capturedAt: now.toISOString(),
-  };
-  return deepFreeze(snapshot);
+    snapshotMode: 'full',
+    lastFullReconciliationAt: now.toISOString(),
+    githubUsage,
+  });
 }
 
 export function nativeStateForVerdict(

@@ -86,6 +86,15 @@ function scrubSnapshot(
     redactionManifest: {
       spans: [...redactionManifest.spans, ...extraManifestEntries],
       totalRedactions: redactionManifest.totalRedactions + extraRedactions,
+      ...(redactionManifest.schemaVersion !== undefined
+        ? { schemaVersion: redactionManifest.schemaVersion }
+        : {}),
+      ...(redactionManifest.policyHash !== undefined
+        ? { policyHash: redactionManifest.policyHash }
+        : {}),
+      ...(redactionManifest.perClassCounts !== undefined
+        ? { perClassCounts: redactionManifest.perClassCounts }
+        : {}),
     },
   };
 }

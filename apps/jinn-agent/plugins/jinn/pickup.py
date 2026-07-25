@@ -1,8 +1,8 @@
 """Evidence-first auto-pickup — thin delegation to ``jinn-layer session
 pickup`` (Stage 1 rescope R3, closes mono #1732).
 
-At the first turn the plugin sends the raw first message (plus session
-metadata) to the core's evidence-first retrieval policy
+At each new task/repository checkpoint the plugin sends the current raw
+message (plus session metadata) to the core's evidence-first retrieval policy
 (``docs/superpowers/plans/2026-07-16-jinn-plugin-stage-1-rescope-plan.md``
 §3, implemented once in ``packages/plugin``) and renders whatever
 ``contextBlock`` comes back, verbatim, into the injected context. Term
@@ -17,10 +17,11 @@ Consumption is never consent-gated. Consent gates contributing only.
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import logging
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -33,7 +34,7 @@ from .harness import harness_name, harness_version
 logger = logging.getLogger(__name__)
 
 # The point-of-use corpus signal (design 1c / #1405 step 4; rescope §3.4).
-# Emitted once per session, only when evidence was actually provided.
+# Emitted once per successful checkpoint, only when evidence was provided.
 # Default sink mirrors _user_line in __init__.py: stderr, which
 # prompt_toolkit proxies above the input area while the TUI runs — and,
 # like that channel, strips ANSI unconditionally before printing (mono
@@ -61,6 +62,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {"enabled": True}
 # task summary isn't assembled until session end). Generous but bounded —
 # never truncates a realistic message, never sends unbounded input.
 _MAX_TASK_SUMMARY_CHARS = 2000
+
+
+@dataclass(frozen=True)
+class PickupOutcome:
+    context: Optional[Dict[str, str]]
+    delivered_canonical_episode_ids: tuple[str, ...] = ()
 
 
 def config_path() -> Path:
@@ -97,6 +104,7 @@ def _build_request(
     session_id: str,
     model: str,
     repository_slug: Optional[str],
+    exclude_canonical_episode_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     meta: Dict[str, Any] = {
         "sessionId": session_id or "default",
@@ -111,6 +119,11 @@ def _build_request(
         "contractVersion": jinn_layer.CONTRACT_VERSION,
         "meta": meta,
         "firstMessage": user_message or "",
+        "excludeCanonicalEpisodeIds": [
+            value
+            for value in (exclude_canonical_episode_ids or [])
+            if isinstance(value, str) and value
+        ],
     }
 
 
@@ -124,8 +137,9 @@ def pickup(
     repository_slug: Optional[str] = None,
     session_kind: str = "user",
     parent_session_id: Optional[str] = None,
+    exclude_canonical_episode_ids: Optional[List[str]] = None,
 ) -> Optional[Dict[str, str]]:
-    """First-turn evidence pickup. Returns ``{"context": ...}`` for the
+    """Evidence pickup. Returns ``{"context": ...}`` for the
     pre_llm_call hook (rendered verbatim into the injected context; cache-safe,
     as today) or ``None`` when there is nothing worth injecting. Fails open:
     any error — missing binary, contract mismatch, timeout, malformed
@@ -138,6 +152,33 @@ def pickup(
     ``signal_sink`` receives the one ``◇ corpus`` line emitted when evidence
     is provided (rescope §3.4). Defaults to stderr; tests pass a collector.
     """
+    return pickup_with_outcome(
+        user_message,
+        runner=runner,
+        signal_sink=signal_sink,
+        activity=activity,
+        session_id=session_id,
+        model=model,
+        repository_slug=repository_slug,
+        session_kind=session_kind,
+        parent_session_id=parent_session_id,
+        exclude_canonical_episode_ids=exclude_canonical_episode_ids,
+    ).context
+
+
+def pickup_with_outcome(
+    user_message: str,
+    runner: Optional[jinn_layer.Runner] = None,
+    signal_sink: Optional[SignalSink] = None,
+    activity: Optional[Dict[str, Any]] = None,
+    session_id: str = "",
+    model: str = "",
+    repository_slug: Optional[str] = None,
+    session_kind: str = "user",
+    parent_session_id: Optional[str] = None,
+    exclude_canonical_episode_ids: Optional[List[str]] = None,
+) -> PickupOutcome:
+    """Run pickup while preserving canonical delivery metadata for the host."""
     try:
         return _pickup_inner(
             user_message,
@@ -149,10 +190,11 @@ def pickup(
             repository_slug,
             session_kind,
             parent_session_id,
+            exclude_canonical_episode_ids,
         )
     except Exception as exc:
         logger.warning("jinn: pickup failed open: %s", exc)
-        return None
+        return PickupOutcome(context=None)
 
 
 def _pickup_inner(
@@ -165,39 +207,46 @@ def _pickup_inner(
     repository_slug: Optional[str],
     session_kind: str,
     parent_session_id: Optional[str],
-) -> Optional[Dict[str, str]]:
+    exclude_canonical_episode_ids: Optional[List[str]],
+) -> PickupOutcome:
     config = load_config()
     if not config.get("enabled", True):
-        return None
+        return PickupOutcome(context=None)
 
     if activity is not None:
         activity["retrievalFired"] = True
         activity["deliveryMode"] = "degraded"
 
-    request = _build_request(user_message, session_id, model, repository_slug)
+    request = _build_request(
+        user_message,
+        session_id,
+        model,
+        repository_slug,
+        exclude_canonical_episode_ids,
+    )
     request["meta"]["kind"] = session_kind
     if parent_session_id:
         request["meta"]["parentSessionId"] = parent_session_id
     code, out, _err = jinn_layer.session_pickup(request, runner)
     if code != 0:
-        return None
+        return PickupOutcome(context=None)
 
     try:
         envelope = jinn_layer.parse_session_pickup_response(out)
     except ValueError:
-        return None
+        return PickupOutcome(context=None)
     if envelope.get("status") == "unavailable":
-        return None
+        return PickupOutcome(context=None)
 
     value = envelope.get("value")
     if not isinstance(value, dict):
-        return None
+        return PickupOutcome(context=None)
     # A v1 response without `packets` is treated as degraded-nothing: a stale
     # jinn-layer that predates this field would otherwise round-trip an old
     # `contextBlock` shape (skill suggestion/install text) through the new
     # rendering path unverified. Never reintroduce install hints (rescope R3 AC).
     if "packets" not in value:
-        return None
+        return PickupOutcome(context=None)
 
     searched_terms = [
         term for term in (value.get("searchedTerms") or [])
@@ -229,7 +278,7 @@ def _pickup_inner(
                 else "withheld"
             )
             activity.pop("deliveredContentHash", None)
-        return None
+        return PickupOutcome(context=None)
     if activity is not None:
         activity["providedRefs"] = provided_refs
         activity["deliveredRefs"] = provided_refs
@@ -244,4 +293,17 @@ def _pickup_inner(
         )
 
     _emit_evidence_signal(signal_sink, searched_terms, len(provided_refs))
-    return {"context": context_block}
+    raw_delivered_ids = value.get("deliveredCanonicalEpisodeIds")
+    delivered_canonical_episode_ids = (
+        tuple(
+            episode_id
+            for episode_id in raw_delivered_ids
+            if isinstance(episode_id, str) and episode_id
+        )
+        if isinstance(raw_delivered_ids, list)
+        else ()
+    )
+    return PickupOutcome(
+        context={"context": context_block},
+        delivered_canonical_episode_ids=delivered_canonical_episode_ids,
+    )

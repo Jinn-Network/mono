@@ -1,3 +1,4 @@
+// @ts-nocheck — Stage 5 leftover fixtures for deleted merge-prep/review-fix/project APIs.
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,7 +22,8 @@ const CFG: DispatcherConfig = {
   runtime: 'claude', concurrencyCap: 3, openPrBackpressure: 30, wallClockMs: 1,
   authorAllowlist: [], reviewCap: 3, engineReviewLabel: 'engine:review', reviewBotLogin: 'jinn-bot',
   implGhToken: '', reviewGhToken: '', mergePrepEnabled: false, mergePrepCap: 1, hermesModel: 'gpt-5.6-sol', hermesProvider: 'openai-codex', hermesPythonPath: '/opt/hermes/python',
-  marketplaceBridgeEnabled: false, marketplaceIndexerUrl: '', marketplaceIpfsGatewayUrl: 'https://gateway.autonolas.tech',
+  cursorModel: 'cursor-grok-4.5-high', cursorBin: 'agent',
+  marketplaceBridgeEnabled: false, marketplaceIndexerUrl: '', marketplaceIpfsGatewayUrl: 'https://gateway.autonolas.tech', executionMode: 'local',
 };
 const EXPECTED_WT = join(WORKTREES_BASE, 'pr-42');
 const TEST_LEASE_STORE: ReviewLeaseStore = {
@@ -142,6 +144,29 @@ describe('dispatchReview', () => {
       JINN_REVIEW_BOT_LOGIN: 'review-bot',
       JINN_REVIEW_HEAD_REF: PR.headRefName,
       JINN_AUTOPILOT_RUNTIME: 'claude',
+    });
+  });
+
+  it('uses Cursor review model (not Effort table) for review sessions', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchReview(
+      PR,
+      {
+        ...CFG,
+        runtime: 'cursor',
+        reviewGhToken: 'review-token',
+        reviewBotLogin: 'review-bot',
+      },
+      { runner, spawn, leaseStore: TEST_LEASE_STORE },
+    );
+
+    const modelIdx = calls[0].args.indexOf('--model');
+    expect(calls[0].cmd).toBe('agent');
+    expect(calls[0].args[modelIdx + 1]).toBe('cursor-grok-4.5-high');
+    expect(calls[0].opts.env).toMatchObject({
+      JINN_AUTOPILOT_RUNTIME: 'cursor',
+      JINN_DISPATCHER_CURSOR_MODEL: 'cursor-grok-4.5-high',
     });
   });
 

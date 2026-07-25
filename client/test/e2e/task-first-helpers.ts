@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -941,8 +941,41 @@ async function runChild(command: string, args: string[], options: { cwd: string;
   });
 }
 
+/** Canary artifact — if present, `yarn compile` already ran for this tree. */
+const CONTRACTS_COMPILE_CANARY = join(
+  CONTRACTS_DIR,
+  'artifacts/src/staking/JinnRouterV3.sol/JinnRouterV3.json',
+);
+
+/** Serializes concurrent compile callers (T2.2 + T2.4 in run-tier-2). */
+let compileContractsInFlight: Promise<void> | null = null;
+
+async function contractsArtifactsPresent(): Promise<boolean> {
+  try {
+    await access(CONTRACTS_COMPILE_CANARY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function compileContracts(): Promise<void> {
-  await runChild('yarn', ['compile'], { cwd: CONTRACTS_DIR });
+  if (compileContractsInFlight) {
+    await compileContractsInFlight;
+    return;
+  }
+
+  compileContractsInFlight = (async () => {
+    if (await contractsArtifactsPresent()) {
+      return;
+    }
+    await runChild('yarn', ['compile'], { cwd: CONTRACTS_DIR });
+  })().catch((err) => {
+    compileContractsInFlight = null;
+    throw err;
+  });
+
+  await compileContractsInFlight;
 }
 
 async function loadArtifact(pathFromContracts: string): Promise<ContractArtifact> {

@@ -19,7 +19,10 @@ import {
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { assertSafeTarballEntries } from './lib/bundled-workspaces.mjs';
+import {
+  assertSafeTarballEntries,
+  assertSafeTarballPackageManifests,
+} from './lib/bundled-workspaces.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = join(__dirname, '..');
@@ -84,6 +87,17 @@ function assertTarballCleanAndComplete() {
   const entries = result.stdout.split('\n');
   try {
     assertSafeTarballEntries(entries);
+    assertSafeTarballPackageManifests(entries, (entry) => {
+      const extracted = spawnSync('tar', ['-xOf', tarball, entry], {
+        cwd: smokeDir,
+        encoding: 'utf8',
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      if (extracted.status !== 0) {
+        throw new Error(extracted.stderr || extracted.stdout || `could not read ${entry}`);
+      }
+      return extracted.stdout;
+    });
   } catch (error) {
     console.error(`smoke-test-pack: ${error?.message ?? String(error)}`);
     process.exit(1);

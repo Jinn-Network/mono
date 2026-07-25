@@ -11,8 +11,6 @@ import {
   parseOwnedPrefixes,
   touchesCodeOwnedPath,
 } from '../dispatcher/code-owned.js';
-import { ensureFieldIds } from '../dispatcher/field-cache.js';
-import { fetchProjectSnapshot } from '../dispatcher/project-snapshot.js';
 import type { AttemptManifest } from './attempt-workspace.js';
 import {
   advanceAttemptReviewPair,
@@ -30,11 +28,17 @@ import {
 } from './credentials.js';
 import { makeGitProtocolPort } from './git-protocol.js';
 import { validateCanonicalGitHubHttpsRemote } from './implementation-executor.js';
-import type { ReviewSessionPort } from './review-session.js';
+import { fileChildIssue } from './child-issues.js';
+import { makeProductionChildIssuePort } from './child-issues-production.js';
+import { fileReviewFollowUps } from './review-follow-ups.js';
+import { makeProductionReviewFollowUpPort } from './review-follow-ups-production.js';
+import {
+  assertReviewClaimTransition,
+  type ReviewSessionPort,
+} from './review-session.js';
 import type { ReviewNativeReview } from './review-executor.js';
 import {
   gitOid,
-  gitRefName,
   type GitOid,
 } from './types.js';
 
@@ -45,6 +49,10 @@ export interface ProductionReviewSessionPortOptions {
   readonly readManifest?: (path: string) => AttemptManifest;
   readonly writeMetadataFile?: (payload: string) => string;
   readonly removeMetadataFile?: (path: string) => void;
+  readonly afterReviewClaimPublished?: (input: {
+    readonly manifest: AttemptManifest;
+    readonly recordOid: GitOid;
+  }) => Promise<void> | void;
 }
 
 export function makeProductionReviewSessionPort(
@@ -383,7 +391,41 @@ export function makeProductionReviewSessionPort(
     const payload = await runGit(manifest, [
       'show', `${oid}:jinn-autopilot-review.json`,
     ]);
-    return { reviewRefOid: oid, record: decodeReviewClaimPayload(payload.trim()) };
+    const record = decodeReviewClaimPayload(payload.trim());
+    if (
+      oid !== manifest.reviewRefOid
+      && record.prNumber === manifest.prNumber
+      && record.generation === manifest.reviewGeneration
+      && record.attempt === manifest.attemptId
+      && record.reviewer.toLowerCase() === manifest.selectedLogin.toLowerCase()
+      && record.head === manifest.expectedHead
+    ) {
+      const ancestry = (
+        await runGit(manifest, ['rev-list', '--parents', '-n', '1', oid])
+      ).trim().split(/\s+/u);
+      if (
+        ancestry.length === 2
+        && ancestry[0] === oid
+        && ancestry[1] === manifest.reviewRefOid
+      ) {
+        const parent = decodeReviewClaimPayload((
+          await runGit(manifest, [
+            'show',
+            `${manifest.reviewRefOid}:jinn-autopilot-review.json`,
+          ])
+        ).trim());
+        assertReviewClaimTransition(record, parent);
+        advanceAttemptReviewPair(
+          manifest.paths.manifest,
+          manifest.expectedHead,
+          manifest.reviewRefOid,
+          manifest.expectedHead,
+          oid,
+          options.now,
+        );
+      }
+    }
+    return { reviewRefOid: oid, record };
   };
   const readNativeReviews = async (
     manifest: AttemptManifest,
@@ -480,14 +522,6 @@ export function makeProductionReviewSessionPort(
     if (pullRequest.labels.includes('review:needs-human')) {
       throw new Error('Review ready boundary stopped because Human is dominant');
     }
-    const secureRunner: CommandRunner = (cmd, args) => run(manifest, cmd, args);
-    const project = await fetchProjectSnapshot(secureRunner);
-    const item = project.items.find((candidate) =>
-      candidate.contentType === 'Issue'
-      && candidate.number === manifest.issueNumber);
-    if (item?.status === 'Human' || item?.blockedOn === 'Human') {
-      throw new Error('Review ready boundary stopped because Human is dominant');
-    }
     const blocker = effectiveNativeBlocker(
       await readNativeReviews(manifest, prNumber, expectedHead),
     );
@@ -533,15 +567,12 @@ export function makeProductionReviewSessionPort(
       return readNativeReviews(currentManifest(), prNumber, expectedHead);
     },
 
-    async hasHumanHold(issueNumber, prNumber, expectedHead) {
+    async hasHumanHold(_issueNumber, prNumber, expectedHead) {
       const manifest = currentManifest();
       const pullRequest = await requireHead(manifest, prNumber, expectedHead);
-      if (pullRequest.labels.includes('review:needs-human')) return true;
-      const secureRunner: CommandRunner = (cmd, args) => run(manifest, cmd, args);
-      const project = await fetchProjectSnapshot(secureRunner);
-      const item = project.items.find((candidate) =>
-        candidate.contentType === 'Issue' && candidate.number === issueNumber);
-      return item?.status === 'Human' || item?.blockedOn === 'Human';
+      // Stage 1: hold authority is the PR label only. Project Status / Blocked
+      // on are paint or human-intent surfaces owned elsewhere.
+      return pullRequest.labels.includes('review:needs-human');
     },
 
     async createReviewRecord({ manifest, parent, record }) {
@@ -593,6 +624,7 @@ export function makeProductionReviewSessionPort(
         (outcome.status === 'won' || outcome.status === 'already-applied')
         && outcome.observed === recordOid
       ) {
+        await options.afterReviewClaimPublished?.({ manifest, recordOid });
         advanceAttemptReviewPair(
           manifest.paths.manifest,
           manifest.expectedHead,
@@ -636,40 +668,6 @@ export function makeProductionReviewSessionPort(
       );
     },
 
-    async setProjectStatus(issueNumber, expectedHead, status) {
-      const manifest = currentManifest();
-      await requireHead(manifest, manifest.prNumber!, expectedHead);
-      const secureRunner: CommandRunner = (cmd, args) => run(manifest, cmd, args);
-      const project = await fetchProjectSnapshot(secureRunner);
-      const item = project.items.find((candidate) =>
-        candidate.contentType === 'Issue' && candidate.number === issueNumber);
-      if (item === undefined) throw new Error('Review issue is missing from Project');
-      if (item.status === status) return;
-      if (
-        status === 'In Review'
-        && (item.status === 'Human' || item.blockedOn === 'Human')
-      ) {
-        throw new Error('Review Project mutation stopped because Human is dominant');
-      }
-      const fields = await ensureFieldIds(secureRunner);
-      await mutateWithExactReadback(
-        () => run(manifest, 'gh', [
-          'project', 'item-edit',
-          '--id', item.id,
-          '--project-id', fields.projectId,
-          '--field-id', fields.status.fieldId,
-          '--single-select-option-id', fields.status.options[status],
-        ]),
-        async () => {
-          await requireHead(manifest, manifest.prNumber!, expectedHead);
-          const after = await fetchProjectSnapshot(secureRunner);
-          return after.items.find((candidate) =>
-            candidate.contentType === 'Issue' && candidate.number === issueNumber
-          )?.status === status;
-        },
-        'Review Project projection was ambiguous',
-      );
-    },
 
     async setPullRequestDraft(prNumber, expectedHead, draft) {
       const manifest = currentManifest();
@@ -689,65 +687,6 @@ export function makeProductionReviewSessionPort(
         'Review draft mutation was ambiguous',
       );
     },
-
-    async readLocalFix(manifest) {
-      const status = await runGit(manifest, ['status', '--porcelain=v1', '-z']);
-      const head = gitOid((await runGit(manifest, [
-        'rev-parse', '--verify', 'HEAD^{commit}',
-      ])).trim());
-      let parentMatches = true;
-      try {
-        await runGit(manifest, [
-          'merge-base', '--is-ancestor', manifest.expectedHead, head,
-        ]);
-      } catch {
-        parentMatches = false;
-      }
-      const [oldTree, newTree] = await Promise.all([
-        runGit(manifest, ['rev-parse', '--verify', `${manifest.expectedHead}^{tree}`]),
-        runGit(manifest, ['rev-parse', '--verify', `${head}^{tree}`]),
-      ]);
-      return {
-        head,
-        clean: status.length === 0,
-        parentMatches,
-        treeChanged: oldTree.trim() !== newTree.trim(),
-      };
-    },
-
-    async publishReviewFix({
-      manifest,
-      expectedRemoteHead,
-      newHead,
-      expectedRemoteRecordOid,
-      recordOid,
-    }) {
-      await validateRemote(manifest);
-      await validateIdentity(manifest);
-      return makeGitProtocolPort(
-        secureGitRunner(manifest),
-        { remote: manifest.repository.remoteName },
-      ).publishReviewFix({
-        branch: gitRefName(manifest.branch),
-        newHeadParent: expectedRemoteHead,
-        expectedRemoteHead,
-        newHead,
-        prNumber: manifest.prNumber!,
-        recordParent: expectedRemoteRecordOid,
-        expectedRemoteRecordOid,
-        recordOid,
-      });
-    },
-
-    advanceManifestPair: (path, oldHead, oldReview, newHead, newReview) =>
-      advanceAttemptReviewPair(
-        path,
-        oldHead,
-        oldReview,
-        newHead,
-        newReview,
-        options.now,
-      ),
 
     async hasHumanComment(prNumber, expectedHead, body) {
       const manifest = currentManifest();
@@ -771,6 +710,40 @@ export function makeProductionReviewSessionPort(
         },
         'Review Human comment was ambiguous',
       );
+    },
+
+    async fileFindingChild(input) {
+      const manifest = currentManifest();
+      const port = makeProductionChildIssuePort({
+        runner: (command, args) => run(manifest, command, args),
+      });
+      const filed = await fileChildIssue(port, {
+        parentPr: input.parentPr,
+        kind: 'review-finding',
+        title: input.title,
+        body: input.body,
+        effort: input.effort,
+        priority: 'p1',
+      });
+      if ('runawayHold' in filed && filed.runawayHold) {
+        return {
+          runawayHold: true,
+          priorCount: filed.priorCount,
+        };
+      }
+      return { number: filed.number, created: filed.created };
+    },
+
+    async fileReviewFollowUps(input) {
+      const manifest = currentManifest();
+      const port = makeProductionReviewFollowUpPort({
+        runner: (command, args) => run(manifest, command, args),
+      });
+      return fileReviewFollowUps(port, {
+        parentPr: input.parentPr,
+        head: String(input.head),
+        entries: input.entries,
+      });
     },
 
     nextMarker: randomUUID,

@@ -26,6 +26,7 @@ await rm(targetRoot, { recursive: true, force: true });
 await rm(join(distRoot, 'node_modules/@jinn-network/sdk'), { recursive: true, force: true });
 await mkdir(targetRoot, { recursive: true });
 await cp(join(sdkRoot, 'dist'), join(targetRoot, 'dist'), { recursive: true });
+await cp(join(sdkRoot, 'fixtures'), join(targetRoot, 'fixtures'), { recursive: true });
 await cp(join(sdkRoot, 'README.md'), join(targetRoot, 'README.md'));
 await writeFile(
   join(targetRoot, 'package.json'),

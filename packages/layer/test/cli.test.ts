@@ -3279,6 +3279,33 @@ describe('jinn-layer distill --progress ndjson (#1533)', () => {
     expect(code).toBe(2);
     expect(out()).toMatch(/--progress/);
   });
+
+  it('emits run_end outcome=ok before exit 2 on an invalid --install name (#1555)', async () => {
+    const { writer } = capture();
+    const { stream, events } = progressSink();
+    const code = await runJinnLayerCli(
+      [
+        'distill',
+        '--captures',
+        capturesDirWith(ownCapture()),
+        '--out',
+        mkdtempSync(join(tmpdir(), 'jinn-distill-out-')),
+        '--install',
+        'no-such-skill',
+        '--progress',
+        'ndjson',
+        '--json',
+      ],
+      { writer, distillDeps: stubDistillDeps({ progressStream: stream }) },
+    );
+    expect(code).toBe(2);
+    const evs = events();
+    expect(evs.at(-1)?.['event']).toBe('run_end');
+    const runEnd = evs.at(-1)!;
+    expect(runEnd['outcome']).toBe('ok');
+    expect(runEnd['installed']).toEqual([]);
+    expect(runEnd['published']).toEqual(['orm-fanout-dedup']);
+  });
 });
 
 describe('jinn-layer distill --cluster-timeout (#1534)', () => {

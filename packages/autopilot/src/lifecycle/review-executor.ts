@@ -1,4 +1,5 @@
 import type { SpawnResult } from '../dispatcher/coordinator-session.js';
+import type { AutopilotExecutionBackend } from './active-config.js';
 import type {
   AttemptPaths,
   ReviewApprovalPolicy,
@@ -19,6 +20,9 @@ import type {
   PublicationOutcome,
   ReviewClaimRecord,
 } from './types.js';
+import type {
+  SessionExecutionBackend,
+} from './session-execution-backend.js';
 
 export interface ReviewNativeReview {
   readonly reviewer: string;
@@ -43,6 +47,9 @@ export interface ReviewActionCandidate {
   readonly humanHold: boolean;
   readonly approvalPolicy: ReviewApprovalPolicy;
   readonly nativeReviews: readonly ReviewNativeReview[];
+  readonly openChildKinds?: readonly (
+    'review-finding' | 'reconcile' | 'ci-failure'
+  )[];
   readonly terminalApprovalMatches?: boolean;
   readonly mappingProblem?: string;
   readonly reviewRef?: {
@@ -92,21 +99,31 @@ export interface ReviewExecutorDeps {
     readonly approvalPolicy: ReviewApprovalPolicy;
     readonly selectedLogin: string;
     readonly credential: SelectedCredential;
+    readonly executionBackend?: AutopilotExecutionBackend;
   }): Promise<ReviewAttemptBinding>;
   repairProjection(input: {
     readonly candidate: ReviewActionCandidate;
     readonly expectedReviewRefOid: GitOid;
     readonly credential: SelectedCredential;
   }): Promise<void>;
-  spawnCoordinator(input: {
+  spawnCoordinator?(input: {
     readonly attemptId: string;
     readonly candidate: ReviewActionCandidate;
-    readonly recoverFixes: boolean;
     readonly environment: NodeJS.ProcessEnv;
     readonly worktreePath: string;
     readonly logPath: string;
   }): SpawnResult;
-  trackChild(manifestPath: string, child: SpawnResult): void;
+  trackChild?(manifestPath: string, child: SpawnResult): void;
+  readonly executionBackendKind?: AutopilotExecutionBackend;
+  /**
+   * The review claim belongs to the evaluator leg of an already-created
+   * marketplace Task. Acquire its exact-head manifest without dispatching a
+   * second session. Normal marketplace review scheduling never sets this.
+   */
+  readonly anchoredMarketplaceReview?: boolean;
+  readonly executionBackend?: SessionExecutionBackend;
+  readonly sessionDeadline?: () => string;
+  readonly receiptAuthors?: readonly string[];
   escalateHuman(input: {
     readonly candidate: ReviewActionCandidate;
     readonly reason: HumanReason;
@@ -135,7 +152,6 @@ export type ReviewExecutionResult =
       readonly attemptId: string;
       readonly generation: string;
       readonly reviewer: string;
-      readonly recoverFixes: boolean;
       readonly approvalPolicy: ReviewApprovalPolicy;
     }
   | { readonly status: 'already-approved'; readonly prNumber: number; readonly head: GitOid }
@@ -201,10 +217,9 @@ async function confirmReviewAcquisition(
     readonly generation: string;
     readonly attemptId: string;
     readonly reviewerLogin: string;
-    readonly recoverFixes: boolean;
   },
 ): Promise<ReviewAcquisitionOutcome> {
-  const phase: HumanReason['phase'] = input.recoverFixes ? 'review-fixing' : 'reviewing';
+  const phase: HumanReason['phase'] = 'reviewing';
   for (let attempt = 1; attempt <= REVIEW_ACQUISITION_MAX_ATTEMPTS; attempt += 1) {
     const confirmed = await deps.confirmAcquisition({
       prNumber: input.candidate.number,
@@ -232,6 +247,7 @@ async function confirmReviewAcquisition(
       || confirmed.baseRefName !== input.candidate.baseRefName
       || confirmed.mappingProblem !== undefined
       || confirmed.approvalPolicy !== input.candidate.approvalPolicy
+      || (confirmed.openChildKinds ?? []).length > 0
     ) {
       if (
         confirmed !== null
@@ -282,7 +298,6 @@ export async function executeReviewAction(
   action: {
     readonly prNumber: number;
     readonly expectedHead?: GitOid;
-    readonly recoverFixes?: boolean;
   },
   deps: ReviewExecutorDeps,
 ): Promise<ReviewExecutionResult> {
@@ -306,6 +321,23 @@ export async function executeReviewAction(
       status: 'ineligible',
       prNumber: candidate.number,
       detail: 'Pull request head changed after scheduling.',
+    };
+  }
+  if (
+    deps.executionBackendKind === 'marketplace'
+    && deps.anchoredMarketplaceReview !== true
+  ) {
+    const reason: HumanReason = {
+      phase: 'awaiting-review',
+      code: 'review-escalation',
+      detail:
+        'Standalone marketplace review is unanchored; semantic review must be evaluator-anchored during Solution adoption.',
+    };
+    await deps.escalateHuman({ candidate, reason });
+    return {
+      status: 'human',
+      prNumber: candidate.number,
+      code: 'review-escalation',
     };
   }
   const lifecycleMarker =
@@ -344,6 +376,15 @@ export async function executeReviewAction(
       status: 'human',
       prNumber: candidate.number,
       code: 'review-escalation',
+    };
+  }
+  if ((candidate.openChildKinds ?? []).length > 0) {
+    return {
+      status: 'ineligible',
+      prNumber: candidate.number,
+      detail:
+        'Pull request has open child work: '
+        + candidate.openChildKinds!.join(', '),
     };
   }
   const current = candidate.reviewRef;
@@ -386,9 +427,9 @@ export async function executeReviewAction(
   }
   // Winning a review claim generation initializes its own progress clock (the
   // one permitted progress event for review, mirroring the branch claim commit
-  // for implement/merge-prep) — see staleEvidence in lifecycle.ts, the
-  // canonical definition this mirrors. Later metadata-only transitions
-  // (verdict-intent, fixing, ...) do not get their own fresh window.
+  // for implement) — see staleEvidence in lifecycle.ts, the canonical
+  // definition this mirrors. Later metadata-only transitions (verdict-intent,
+  // ...) do not get their own fresh window.
   let progressTime = headChangedAt;
   if (currentHeadClaim?.state === 'active') {
     const acquisitionTime = Date.parse(currentHeadClaim.recordedAt);
@@ -414,52 +455,19 @@ export async function executeReviewAction(
       detail: 'The exact PR head already has an active review generation.',
     };
   }
-  const recoverFixes = candidate.draft
-    && currentHeadClaim !== undefined
-    && ['fixing', 'stale', 'verdict-intent'].includes(currentHeadClaim.state)
-    && stale;
-  if (
-    action.recoverFixes !== undefined
-    && action.recoverFixes !== recoverFixes
-  ) {
+  if (candidate.draft) {
     return {
       status: 'ineligible',
       prNumber: candidate.number,
-      detail: 'Review recovery mode changed after scheduling.',
-    };
-  }
-  if (candidate.draft && !recoverFixes) {
-    return {
-      status: 'ineligible',
-      prNumber: candidate.number,
-      detail: 'A draft PR is reviewable only as stale review-fix recovery.',
+      detail: 'Draft pull requests are not claimable for review.',
     };
   }
 
   const selection = selectCredential(deps.credentials, {
     phase: 'review',
     prAuthor: candidate.author,
-    ...(recoverFixes
-      ? {
-          previousReviewerLogin: currentHeadClaim!.reviewer,
-          nativeRequestedChanges: true,
-        }
-      : {}),
   });
   if (selection.status !== 'selected') {
-    if (recoverFixes) {
-      const reason: HumanReason = {
-        phase: 'review-fixing',
-        code: 'reviewer-identity-unavailable',
-        detail: selection.detail,
-      };
-      await deps.escalateHuman({ candidate, reason });
-      return {
-        status: 'human',
-        prNumber: candidate.number,
-        code: 'reviewer-identity-unavailable',
-      };
-    }
     return {
       status: 'ineligible',
       prNumber: candidate.number,
@@ -518,6 +526,7 @@ export async function executeReviewAction(
     approvalPolicy: candidate.approvalPolicy,
     selectedLogin: selection.login,
     credential: selection.credential,
+    executionBackend: deps.executionBackendKind ?? 'local',
   });
   if (attempt.attemptId !== attemptId) {
     throw new Error('Detached review attempt does not match its claim');
@@ -534,7 +543,6 @@ export async function executeReviewAction(
     generation,
     attemptId,
     reviewerLogin: selection.login,
-    recoverFixes,
   });
   if (acquisition.outcome === 'human') {
     await deps.escalateHuman({ candidate: acquisition.candidate, reason: acquisition.reason });
@@ -551,6 +559,21 @@ export async function executeReviewAction(
     return { status: 'ambiguous', prNumber: candidate.number };
   }
   const confirmed = acquisition.confirmed;
+  if (
+    deps.executionBackendKind === 'marketplace'
+    && deps.anchoredMarketplaceReview === true
+  ) {
+    return {
+      status: 'spawned',
+      prNumber: candidate.number,
+      head: candidate.head,
+      reviewRefOid: recordOid,
+      attemptId,
+      generation,
+      reviewer: selection.login,
+      approvalPolicy: candidate.approvalPolicy,
+    };
+  }
   const environment = buildSanitizedChildEnv(
     deps.ambientEnvironment,
     selection.credential,
@@ -560,18 +583,59 @@ export async function executeReviewAction(
       manifestPath: attempt.paths.manifest,
     },
   );
-  const child = deps.spawnCoordinator({
-    attemptId,
-    candidate: confirmed,
-    recoverFixes,
-    environment,
-    worktreePath: attempt.paths.worktree,
-    logPath: attempt.paths.log,
-  });
-  if (child.pid === undefined) {
-    throw new Error('Review coordinator did not report a child PID');
+  if (deps.executionBackend !== undefined) {
+    await deps.executionBackend.start({
+      kind: 'review',
+      workflow: 'review',
+      issue: {
+        number: candidate.issueNumber,
+        title: `Review PR #${candidate.number}`,
+        body: candidate.body,
+      },
+      pr: {
+        number: candidate.number,
+        body: candidate.body,
+      },
+      targetBase: candidate.baseRefName,
+      branch: candidate.headRefName,
+      claimOid: recordOid,
+      expectedHead: candidate.head,
+      baseSha: candidate.head,
+      v2AttemptId: attemptId,
+      runnerId: deps.runnerId,
+      selectedLogin: selection.login,
+      effort: null,
+      deadline: deps.sessionDeadline?.()
+        ?? new Date(deps.now().getTime() + 60 * 60 * 1000).toISOString(),
+      receiptAuthors: deps.receiptAuthors ?? [selection.login],
+      reviewGeneration: generation,
+      reviewRefOid: recordOid,
+      approvalPolicy: candidate.approvalPolicy,
+      prAuthor: candidate.author,
+      attempt: {
+        manifestPath: attempt.paths.manifest,
+        worktreePath: attempt.paths.worktree,
+        logPath: attempt.paths.log,
+        ghConfigDir: attempt.paths.ghConfigDir,
+        askpassPath: attempt.paths.askpass,
+      },
+    });
+  } else {
+    if (deps.spawnCoordinator === undefined || deps.trackChild === undefined) {
+      throw new Error('Local execution backend is unavailable');
+    }
+    const child = deps.spawnCoordinator({
+      attemptId,
+      candidate: confirmed,
+      environment,
+      worktreePath: attempt.paths.worktree,
+      logPath: attempt.paths.log,
+    });
+    if (child.pid === undefined) {
+      throw new Error('Review coordinator did not report a child PID');
+    }
+    deps.trackChild(attempt.paths.manifest, child);
   }
-  deps.trackChild(attempt.paths.manifest, child);
   return {
     status: 'spawned',
     prNumber: candidate.number,
@@ -580,7 +644,6 @@ export async function executeReviewAction(
     attemptId,
     generation,
     reviewer: selection.login,
-    recoverFixes,
     approvalPolicy: candidate.approvalPolicy,
   };
 }

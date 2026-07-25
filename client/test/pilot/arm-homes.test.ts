@@ -123,6 +123,20 @@ describe('buildArmHomes', () => {
     expect(() => assertArmIsolation(arms)).toThrow(/opus-1/);
   });
 
+  it('rejects a hand-copied arm home that retains a skills prompt snapshot', () => {
+    const src = makeSourceHome();
+    const dest = mkdtempSync(join(tmpdir(), 'arm-homes-copied-'));
+    const arms = buildArmHomes({ armsFile: ARMS, sourceDir: src, destDir: dest });
+
+    writeFileSync(
+      join(arms[1]!.jinnAgentHome, '.skills_prompt_snapshot.json'),
+      '{"skills":["builtin-a","builtin-b","opus-1"]}',
+    );
+
+    expect(() => assertArmIsolation(arms)).toThrow(/skills_prompt_snapshot.*haiku/i);
+    expect(() => assertArmIsolation([arms[1]!])).toThrow(/skills_prompt_snapshot.*haiku/i);
+  });
+
   it('rebuilds a home from scratch on rerun (no stale skills from a previous build)', () => {
     const src = makeSourceHome();
     const dest = mkdtempSync(join(tmpdir(), 'arm-homes-dest-'));

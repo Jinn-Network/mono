@@ -65,25 +65,35 @@ export interface IssueSource {
 export type CommandRunner = (
   cmd: string,
   args: string[],
-  opts?: { env?: Record<string, string> },
+  opts?: {
+    readonly env?: Record<string, string>;
+    readonly replaceEnv?: boolean;
+  },
 ) => Promise<string>;
 
 // ---------------------------------------------------------------------------
 // Internal shapes that mirror real `gh` JSON output (observed 2026-05-21).
 // ---------------------------------------------------------------------------
 
-/** One entry from `gh issue list --json number,title,labels,author`. */
+/** One entry from `GET /repos/{owner}/{repo}/issues`. */
 interface GhIssue {
   number: number;
   title: string;
+  /** Issue body; used for child-marker admission (Stage 2). */
+  body?: string | null;
   labels: Array<{ name: string } | string>;
   /**
    * `gh` returns `{ login, ... }`. Optional so older `gh` versions or
    * unexpected payloads degrade to `''` rather than throwing — the empty
    * string never matches an allowlist entry, so the trust boundary fails safe.
    */
-  author?: { login?: string };
+  user?: { login?: string };
+  /** The REST issues endpoint also returns pull requests; those are excluded. */
+  pull_request?: unknown;
 }
+
+const ISSUE_PAGE_SIZE = 100;
+const MAX_ISSUE_PAGES = 100;
 
 // ---------------------------------------------------------------------------
 // Default real CommandRunner
@@ -93,9 +103,15 @@ export const defaultRunner: CommandRunner = async (cmd, args, opts) => {
   const { stdout } = await execFileAsync(cmd, args, {
     maxBuffer: 10 * 1024 * 1024,
     // Per-call env overlay (used to run `gh` as a specific identity via
-    // GH_TOKEN — the dual-identity boot check, DR-2026-06-15). Merged over the
-    // ambient env so PATH etc. survive.
-    ...(opts?.env ? { env: { ...process.env, ...opts.env } } : {}),
+    // GH_TOKEN — the dual-identity boot check, DR-2026-06-15). Callers that
+    // cross an authority boundary may instead request an exact replacement.
+    ...(opts?.env
+      ? {
+          env: opts.replaceEnv
+            ? opts.env
+            : { ...process.env, ...opts.env },
+        }
+      : {}),
   });
   return stdout;
 };
@@ -112,18 +128,20 @@ export class GhIssueSource implements IssueSource {
   }
 
   async poll(board: IssueBoardState): Promise<PolledIssue[]> {
-    // 1. Fetch open issues from the repo (REST — does not consume GraphQL budget).
-    const issueListRaw = await this.run('gh', [
-      'issue', 'list',
-      '--repo', REPO,
-      '--state', 'open',
-      // `labels` remains part of the issue record; runtime selection is
-      // deliberately process-wide.
-      // `author` powers the dispatcher author-allowlist trust boundary (#497).
-      '--json', 'number,title,labels,author',
-      '--limit', '200',
-    ]);
-    const ghIssues: GhIssue[] = JSON.parse(issueListRaw) as GhIssue[];
+    // 1. Fetch open issues through explicit REST pages. A CLI-level
+    // `--paginate` call hides how many HTTP responses GitHub returned, which
+    // makes cycle request accounting unknowable; one command per page keeps
+    // the meter exact. The endpoint also returns PRs, filtered below.
+    const ghIssues: GhIssue[] = [];
+    for (let page = 1; page <= MAX_ISSUE_PAGES; page += 1) {
+      const endpoint = `repos/${REPO}/issues?state=open&per_page=${ISSUE_PAGE_SIZE}&page=${page}`;
+      const raw = await this.run('gh', ['api', endpoint]);
+      const rows = JSON.parse(raw) as unknown;
+      if (!Array.isArray(rows)) throw new Error('Open issue REST page is malformed');
+      ghIssues.push(...(rows as GhIssue[]).filter((row) => row.pull_request === undefined));
+      if (rows.length < ISSUE_PAGE_SIZE || ghIssues.length >= 200) break;
+      if (page === MAX_ISSUE_PAGES) throw new Error('Open issue pagination exceeded safety limit');
+    }
 
     // 2. Hoist the active-sprint id; when null, every `inCurrentSprint` is
     //    false and the ready-filter's sprint sort becomes a no-op (#609).
@@ -131,7 +149,9 @@ export class GhIssueSource implements IssueSource {
 
     // 3. Map each gh issue to PolledIssue. Off-board issues get `onBoard: false`
     //    and null board-derived fields; `selectReady` then drops them (it
-    //    requires `onBoard: true` AND `status === 'Todo'`).
+    //    requires `onBoard: true`) unless they are marker-bearing machine
+    //    children (Stage 2 — label triage, no board required). Project Status
+    //    is paint-only and is not an admission gate.
     return ghIssues.map((ghIssue): PolledIssue => {
       const entry = board.getIssue(ghIssue.number);
       const onBoard = entry != null;
@@ -141,6 +161,7 @@ export class GhIssueSource implements IssueSource {
       return {
         number: ghIssue.number,
         title: ghIssue.title,
+        body: typeof ghIssue.body === 'string' ? ghIssue.body : '',
         labels: ghIssue.labels.map((label) => (
           typeof label === 'string' ? label : label.name
         )),
@@ -152,7 +173,7 @@ export class GhIssueSource implements IssueSource {
         status: entry?.status ?? null,
         onBoard,
         // Empty string is the unknown-author sentinel; never matches the allowlist (#497).
-        author: ghIssue.author?.login ?? '',
+        author: ghIssue.user?.login ?? '',
         projectItemId: entry?.id ?? null,
         inCurrentSprint,
       };

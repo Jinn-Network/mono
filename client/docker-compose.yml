@@ -28,6 +28,12 @@ services:
       - JINN_NETWORK=${JINN_NETWORK:-testnet}
       - JINN_POLL_INTERVAL_MS=${JINN_POLL_INTERVAL_MS:-5000}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Candidate verification is delegated to the isolated DinD service.
+      # Never replace this with a host /var/run/docker.sock mount.
+      - DOCKER_HOST=tcp://jinn-verifier-docker:2375
+    depends_on:
+      jinn-verifier-docker:
+        condition: service_healthy
     ports:
       - "7331:7331"
     volumes:
@@ -38,8 +44,36 @@ services:
       - jinn-claude-state:/home/node/.claude
     command: ["run"]
 
+  # Security boundary for Autopilot exact-head mechanical verification.
+  # This daemon is privileged only inside its own container and receives no
+  # host paths or Docker socket. Candidate source is streamed with `docker cp`;
+  # candidate checks run in a second quota-bounded container whose network is
+  # disconnected before any candidate-controlled code executes.
+  jinn-verifier-docker:
+    image: docker:27.5.1-dind@sha256:aa3df78ecf320f5fafdce71c659f1629e96e9de0968305fe1de670e0ca9176ce
+    container_name: jinn-verifier-docker
+    restart: unless-stopped
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=
+    command:
+      - --host=tcp://0.0.0.0:2375
+      - --tls=false
+    expose:
+      - "2375"
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+    volumes:
+      - jinn-verifier-docker-data:/var/lib/docker
+
 volumes:
   jinn-data:
     name: jinn-data-volume
   jinn-claude-state:
     name: jinn-claude-auth-volume
+  jinn-verifier-docker-data:
+    name: jinn-verifier-docker-data-volume

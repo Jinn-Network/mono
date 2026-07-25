@@ -15,6 +15,7 @@ import { cn } from '../../lib/utils.js';
 import {
   defaultModelForHarness,
   modelOptionsForHarness,
+  providerForModel,
   resolveModelOption,
 } from './claudeModels.js';
 import {
@@ -28,6 +29,7 @@ import { decideCostSurface } from '../../../../../harnesses/cost-estimates.js';
 import { CostEstimatePanel } from './CostEstimatePanel.js';
 import { HarnessFootprintPanel } from './HarnessFootprintPanel.js';
 import { useHarnessUsesPaidApiKey } from '../../hooks/useHarnessUsesPaidApiKey.js';
+import type { ProviderRef } from '../../../../../harnesses/provider-ref.js';
 
 /**
  * Per-SolverNet edit card on /operator → SolverNets → Joined.
@@ -52,6 +54,7 @@ export interface JoinedNetEntry {
   roles: Array<'solver' | 'evaluator'>;
   harness?: string;
   model?: string;
+  provider?: ProviderRef;
   plugins?: string[];
   disabledDefaultPlugins?: string[];
 }
@@ -200,8 +203,16 @@ export function JoinedNetCard({
   const modelOptions = modelOptionsForHarness(form.harness);
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      api.operator.join(joined.manifestCid, {
+    mutationFn: () => {
+      const joinedHarness = canonicalHarnessName(joined.harness);
+      const joinedModel = joined.model ?? defaultModelForHarness(joinedHarness);
+      const routeUnchanged =
+        form.harness === joinedHarness && form.model === joinedModel;
+      const provider = routeUnchanged
+        ? joined.provider
+        : providerForModel(form.model, form.harness);
+
+      return api.operator.join(joined.manifestCid, {
         ...(joined.name !== undefined ? { name: joined.name } : {}),
         ...(contractRef !== undefined
           ? { contract: { id: contractRef.id, version: contractRef.version } }
@@ -211,7 +222,9 @@ export function JoinedNetCard({
         plugins: form.plugins,
         disabledDefaultPlugins: form.disabledDefaultPlugins,
         ...(form.model ? { model: form.model } : {}),
-      }),
+        ...(provider !== undefined ? { provider } : {}),
+      });
+    },
     onSuccess: (res) => {
       void queryClient.invalidateQueries({ queryKey: ['operator', 'joined'] });
       if (res.restartRequired) onRestartPending?.();

@@ -1,0 +1,5 @@
+{
+  "status": "contradiction",
+  "reason": "multiple-envelopes",
+  "detail": "Exact discovery returned more than one envelope."
+}

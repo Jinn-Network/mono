@@ -65,6 +65,8 @@ describe('printReport — dispatched session log path + pid (#533 AC#2)', () => 
       paused: [],
       skippedForAuthor: [],
       collected: [],
+      routedToMarketplace: [],
+      readyIssueNumbers: [],
     };
   }
 

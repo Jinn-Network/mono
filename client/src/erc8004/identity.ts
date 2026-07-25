@@ -128,6 +128,10 @@ export interface PublishContentArgs {
   /** Textual CID embedded in the metadataKey (`<kind>:<cid>`). */
   cid: string;
   payload: ExecutionPayload;
+  /** Fail unless the transaction receipt is mined with status=success. */
+  requireSuccessfulReceipt?: boolean;
+  /** Called immediately after send and before receipt confirmation. */
+  onBroadcast?: (txHash: Hex) => void;
 }
 
 export interface PublishContentV2Args {
@@ -553,7 +557,12 @@ export class IdentityPublisher {
   async publishContent(args: PublishContentArgs): Promise<PublishContentResult> {
     const metadataKey = buildMetadataKey(args.kind, args.cid);
     const metadataValue = encodeExecutionPayload(args.payload);
-    return this._writeMetadata(metadataKey, metadataValue);
+    return this._writeMetadata(
+      metadataKey,
+      metadataValue,
+      args.requireSuccessfulReceipt ?? false,
+      args.onBroadcast,
+    );
   }
 
   /**

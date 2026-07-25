@@ -60,7 +60,7 @@ describe('scopeTestsForChangedFiles — fallback triggers', () => {
   });
 
   it('ignores files outside every known package root', () => {
-    const scopes = scopeTestsForChangedFiles(['docs/some-doc.md', 'contracts/src/Foo.sol']);
+    const scopes = scopeTestsForChangedFiles(['docs/some-doc.md', '.claude/settings.json']);
     expect(scopes).toEqual([]);
   });
 });
@@ -84,8 +84,21 @@ describe('scopeTestsForChangedFiles — multi-package', () => {
     expect(scopeFor(scopes, 'client')).toBeUndefined();
   });
 
-  it('defaults to KNOWN_LIVE_EVAL_PACKAGES = [sdk, client] in that order', () => {
-    expect(KNOWN_LIVE_EVAL_PACKAGES).toEqual([SDK_PACKAGE, CLIENT_PACKAGE]);
+  it('includes the complete jinn-mono.v1 verification surface', () => {
+    expect(KNOWN_LIVE_EVAL_PACKAGES.map(({ root }) => root)).toEqual([
+      'packages/plugin',
+      'packages/core',
+      'packages/sdk',
+      'packages/indexer',
+      'packages/indexer-enrichment',
+      'packages/layer',
+      'client',
+      'contracts',
+      'packages/autopilot',
+      'apps/broadcast-bot',
+    ]);
+    expect(KNOWN_LIVE_EVAL_PACKAGES).toContain(SDK_PACKAGE);
+    expect(KNOWN_LIVE_EVAL_PACKAGES).toContain(CLIENT_PACKAGE);
   });
 
   it('accepts a custom package list, ignoring files outside it', () => {

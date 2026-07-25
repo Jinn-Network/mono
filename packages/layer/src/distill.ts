@@ -297,8 +297,10 @@ async function finalizeSkill(
 ): Promise<FinalizeResult> {
   // (2) fail-closed output secret scrub.
   const scrubbed = await deps.pipeline.run({ 'skill.md': out.body });
-  if (scrubbed.redactions.length > 0 || String(scrubbed.attributes['skill.md']) !== out.body) {
-    const hits = [...new Set(scrubbed.redactions.map((r) => `${r.stage}/${r.detail ?? r.kind}`))];
+  const refusalHits = scrubbed.redactions.filter((r) => r.kind !== 'allowlist-pass');
+  const bodyChanged = String(scrubbed.attributes['skill.md']) !== out.body;
+  if (scrubbed.rejected || refusalHits.length > 0 || bodyChanged) {
+    const hits = [...new Set(refusalHits.map((r) => `${r.stage}/${r.detail ?? r.kind}`))];
     const detail = hits.length > 0 ? hits.join(', ') : 'body altered by scrub';
     return { ok: false, reason: `secret-in-output (dropped, fail-closed): ${detail}` };
   }

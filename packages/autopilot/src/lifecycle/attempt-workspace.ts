@@ -10,6 +10,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  statfsSync,
   writeFileSync,
 } from 'node:fs';
 import { hostname as systemHostname } from 'node:os';
@@ -23,8 +24,12 @@ import {
   sanitizedGitHubCommandOverlay,
   type SelectedCredential,
 } from './credentials.js';
+import type {
+  MarketplaceExecutionHandle,
+} from './session-execution-backend.js';
+import type { AutopilotExecutionBackend } from './active-config.js';
 
-export type AttemptPhase = 'implement' | 'review' | 'merge-prep';
+export type AttemptPhase = 'implement' | 'review';
 export type AttemptProcessState = 'preparing' | 'running' | 'exited';
 export type ReviewApprovalPolicy = 'approve-eligible' | 'human-codeowner';
 
@@ -64,6 +69,56 @@ export interface AttemptRepositoryIdentity {
   readonly remoteUrlHash: string;
 }
 
+export interface MarketplaceTaskProvenance {
+  readonly creationTransactionHash: string;
+  readonly creationBlockNumber: number;
+  readonly solverNetManifestCid?: string;
+}
+
+export interface MarketplaceAdoptionReceiptState
+  extends MarketplaceTaskProvenance {
+  readonly schemaVersion: 'jinn-autopilot-marketplace-adoption-state.v1';
+  readonly role: 'solution';
+  readonly taskId: string;
+  readonly attemptIndex: number;
+  readonly requestId: string;
+  readonly deliveryEnvelopeCid: string;
+  readonly disposition: 'accepted' | 'rejected';
+  readonly commentId: number;
+  readonly resultingHead?: string;
+  readonly reviewAttemptId?: string;
+  readonly reviewManifestPath?: string;
+  readonly reviewGeneration?: string;
+  readonly reviewRefOid?: string;
+  readonly recordedAt: string;
+}
+
+export type AttemptExecution =
+  | { readonly backend: 'local' }
+  | {
+      readonly backend: 'marketplace';
+      readonly taskId?: string;
+      readonly taskCid?: string;
+      readonly deadline?: string;
+      readonly requestFile?: string;
+      readonly attemptIndex?: number;
+      readonly requestId?: string;
+      readonly deliveryTx?: string;
+      readonly deliveryBlockNumber?: number;
+      readonly deliveryEnvelopeCid?: string;
+      readonly creationTransactionHash?: string;
+      readonly creationBlockNumber?: number;
+      readonly solverNetManifestCid?: string;
+      /** Reverse link from an evaluator-leg review attempt to its mutation attempt. */
+      readonly originManifestPath?: string;
+      /** Exact solver Safe authenticated by the Solution delivery observer. */
+      readonly solutionOperatorAddress?: string;
+      /** Historical ERC-8004 publisher identity bound to the solver Safe. */
+      readonly solutionPublisherAgentId?: string;
+      readonly adoptionReceipt?: string;
+      readonly adoptionReceiptState?: MarketplaceAdoptionReceiptState;
+    };
+
 export interface AttemptManifest {
   readonly version: 2;
   readonly attemptId: string;
@@ -83,6 +138,7 @@ export interface AttemptManifest {
   readonly reviewApprovalPolicy?: ReviewApprovalPolicy;
   readonly selectedLogin: string;
   readonly repository: AttemptRepositoryIdentity;
+  readonly execution: AttemptExecution;
   readonly processState: AttemptProcessState;
   readonly pid: number | null;
   readonly terminalHead?: string;
@@ -115,6 +171,7 @@ export interface CreateAttemptOptions {
    * without depending on any inherited environment variable.
    */
   readonly credential: SelectedCredential;
+  readonly executionBackend?: AutopilotExecutionBackend;
   readonly remoteName?: string;
   readonly pid?: number | null;
   readonly attemptId?: string;
@@ -193,6 +250,27 @@ function exactKeys(
       'reviewApprovalPolicy',
       'targetBaseOid',
       'terminalHead',
+      'execution',
+      'taskId',
+      'taskCid',
+      'deadline',
+      'requestFile',
+      'attemptIndex',
+      'requestId',
+      'deliveryTx',
+      'deliveryBlockNumber',
+      'deliveryEnvelopeCid',
+      'creationTransactionHash',
+      'creationBlockNumber',
+      'solverNetManifestCid',
+      'originManifestPath',
+      'solutionOperatorAddress',
+      'solutionPublisherAgentId',
+      'adoptionReceipt',
+      'adoptionReceiptState',
+      'resultingHead',
+      'reviewAttemptId',
+      'reviewManifestPath',
       'childStartedAt',
       'childExitedAt',
     ].includes(key));
@@ -292,6 +370,355 @@ function processState(value: unknown): AttemptProcessState {
   return value;
 }
 
+function nonNegativeInteger(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Invalid ${name}`);
+  }
+  return value;
+}
+
+function transactionHash(value: unknown, name: string): string {
+  const hash = stringField(value, name);
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error(`Invalid ${name}`);
+  return hash;
+}
+
+function decodeAdoptionReceiptState(
+  value: unknown,
+): MarketplaceAdoptionReceiptState {
+  const state = record(value, 'marketplace adoption receipt state');
+  exactKeys(state, [
+    'schemaVersion',
+    'role',
+    'taskId',
+    'attemptIndex',
+    'requestId',
+    'deliveryEnvelopeCid',
+    'creationTransactionHash',
+    'creationBlockNumber',
+    'solverNetManifestCid',
+    'originManifestPath',
+    'solutionOperatorAddress',
+    'solutionPublisherAgentId',
+    'disposition',
+    'commentId',
+    'resultingHead',
+    'reviewAttemptId',
+    'reviewManifestPath',
+    'reviewGeneration',
+    'reviewRefOid',
+    'recordedAt',
+  ], 'marketplace adoption receipt state');
+  if (
+    state.schemaVersion !== 'jinn-autopilot-marketplace-adoption-state.v1'
+    || state.role !== 'solution'
+    || (state.disposition !== 'accepted' && state.disposition !== 'rejected')
+  ) {
+    throw new Error('Invalid marketplace adoption receipt state');
+  }
+  const resultingHead = state.resultingHead === undefined
+    ? undefined
+    : gitOid(stringField(state.resultingHead, 'adoption resulting head'));
+  const reviewAttemptId = state.reviewAttemptId === undefined
+    ? undefined
+    : uuid(
+      stringField(state.reviewAttemptId, 'adoption review attempt ID'),
+      'adoption review attempt ID',
+    );
+  const reviewManifestPath = state.reviewManifestPath === undefined
+    ? undefined
+    : absolutePath(state.reviewManifestPath, 'adoption review manifest path');
+  const reviewGeneration = state.reviewGeneration === undefined
+    ? undefined
+    : uuid(
+      stringField(state.reviewGeneration, 'adoption review generation'),
+      'adoption review generation',
+    );
+  const reviewRefOid = state.reviewRefOid === undefined
+    ? undefined
+    : gitOid(stringField(state.reviewRefOid, 'adoption review ref OID'));
+  const reviewFields = [
+    reviewAttemptId,
+    reviewManifestPath,
+    reviewGeneration,
+    reviewRefOid,
+  ].filter((field) => field !== undefined).length;
+  if (
+    (reviewFields !== 0 && reviewFields !== 4)
+    || (
+      state.disposition === 'accepted'
+      && (resultingHead === undefined || reviewFields !== 4)
+    )
+  ) {
+    throw new Error('Marketplace adoption review identity is incomplete');
+  }
+  return {
+    schemaVersion: state.schemaVersion,
+    role: state.role,
+    taskId: stringField(state.taskId, 'adoption task ID'),
+    attemptIndex: nonNegativeInteger(
+      state.attemptIndex,
+      'adoption attempt index',
+    ),
+    requestId: stringField(state.requestId, 'adoption request ID'),
+    deliveryEnvelopeCid: stringField(
+      state.deliveryEnvelopeCid,
+      'adoption delivery envelope CID',
+    ),
+    creationTransactionHash: transactionHash(
+      state.creationTransactionHash,
+      'adoption Task creation transaction',
+    ),
+    creationBlockNumber: nonNegativeInteger(
+      state.creationBlockNumber,
+      'adoption Task creation block number',
+    ),
+    ...(state.solverNetManifestCid === undefined
+      ? {}
+      : {
+          solverNetManifestCid: stringField(
+            state.solverNetManifestCid,
+            'adoption SolverNet manifest CID',
+          ),
+        }),
+    disposition: state.disposition,
+    commentId: positiveInteger(state.commentId, 'adoption comment ID'),
+    ...(resultingHead === undefined ? {} : { resultingHead }),
+    ...(reviewAttemptId === undefined
+      ? {}
+      : {
+          reviewAttemptId,
+          reviewManifestPath: reviewManifestPath!,
+          reviewGeneration: reviewGeneration!,
+          reviewRefOid: reviewRefOid!,
+        }),
+    recordedAt: isoTimestamp(
+      stringField(state.recordedAt, 'adoption recorded timestamp'),
+    ),
+  };
+}
+
+function decodeExecution(value: unknown): AttemptExecution {
+  if (value === undefined) return { backend: 'local' };
+  const execution = record(value, 'attempt execution');
+  const backend = execution.backend;
+  if (backend === 'local') {
+    exactKeys(execution, ['backend'], 'local attempt execution');
+    return { backend };
+  }
+  if (backend !== 'marketplace') {
+    throw new Error('Invalid attempt execution backend');
+  }
+  exactKeys(execution, [
+    'backend',
+    'taskId',
+    'taskCid',
+    'deadline',
+    'requestFile',
+    'attemptIndex',
+    'requestId',
+    'deliveryTx',
+    'deliveryBlockNumber',
+    'deliveryEnvelopeCid',
+    'creationTransactionHash',
+    'creationBlockNumber',
+    'solverNetManifestCid',
+    'originManifestPath',
+    'solutionOperatorAddress',
+    'solutionPublisherAgentId',
+    'adoptionReceipt',
+    'adoptionReceiptState',
+  ], 'marketplace attempt execution');
+  const taskId = execution.taskId === undefined
+    ? undefined
+    : stringField(execution.taskId, 'marketplace task ID');
+  const taskCid = execution.taskCid === undefined
+    ? undefined
+    : stringField(execution.taskCid, 'marketplace task CID');
+  const deadline = execution.deadline === undefined
+    ? undefined
+    : isoTimestamp(stringField(execution.deadline, 'marketplace deadline'));
+  const requestFile = execution.requestFile === undefined
+    ? undefined
+    : absolutePath(execution.requestFile, 'marketplace request file');
+  const attemptIndex = execution.attemptIndex === undefined
+    ? undefined
+    : nonNegativeInteger(execution.attemptIndex, 'marketplace attempt index');
+  const requestId = execution.requestId === undefined
+    ? undefined
+    : stringField(execution.requestId, 'marketplace request ID');
+  const deliveryTx = execution.deliveryTx === undefined
+    ? undefined
+    : transactionHash(
+        execution.deliveryTx,
+        'marketplace delivery transaction',
+      );
+  const deliveryBlockNumber = execution.deliveryBlockNumber === undefined
+    ? undefined
+    : nonNegativeInteger(
+        execution.deliveryBlockNumber,
+        'marketplace delivery block number',
+      );
+  const deliveryEnvelopeCid = execution.deliveryEnvelopeCid === undefined
+    ? undefined
+    : stringField(
+      execution.deliveryEnvelopeCid,
+      'marketplace delivery envelope CID',
+    );
+  const creationTransactionHash =
+    execution.creationTransactionHash === undefined
+      ? undefined
+      : transactionHash(
+          execution.creationTransactionHash,
+          'marketplace Task creation transaction',
+        );
+  const creationBlockNumber = execution.creationBlockNumber === undefined
+    ? undefined
+    : nonNegativeInteger(
+        execution.creationBlockNumber,
+        'marketplace Task creation block number',
+      );
+  const solverNetManifestCid = execution.solverNetManifestCid === undefined
+    ? undefined
+    : stringField(
+        execution.solverNetManifestCid,
+        'marketplace SolverNet manifest CID',
+      );
+  const originManifestPath = execution.originManifestPath === undefined
+    ? undefined
+    : absolutePath(
+        execution.originManifestPath,
+        'marketplace origin manifest path',
+      );
+  const solutionOperatorAddress =
+    execution.solutionOperatorAddress === undefined
+      ? undefined
+      : stringField(
+          execution.solutionOperatorAddress,
+          'marketplace Solution operator address',
+        );
+  if (
+    solutionOperatorAddress !== undefined
+    && !/^0x[0-9a-fA-F]{40}$/.test(solutionOperatorAddress)
+  ) {
+    throw new Error('Invalid marketplace Solution operator address');
+  }
+  const solutionPublisherAgentId =
+    execution.solutionPublisherAgentId === undefined
+      ? undefined
+      : stringField(
+          execution.solutionPublisherAgentId,
+          'marketplace Solution publisher agent ID',
+        );
+  if (
+    solutionPublisherAgentId !== undefined
+    && !/^[1-9][0-9]*$/.test(solutionPublisherAgentId)
+  ) {
+    throw new Error('Invalid marketplace Solution publisher agent ID');
+  }
+  if (
+    (solutionOperatorAddress === undefined)
+      !== (solutionPublisherAgentId === undefined)
+  ) {
+    throw new Error('Marketplace Solution operator provenance is incomplete');
+  }
+  const adoptionReceipt = execution.adoptionReceipt === undefined
+    ? undefined
+    : stringField(execution.adoptionReceipt, 'marketplace adoption receipt');
+  const adoptionReceiptState = execution.adoptionReceiptState === undefined
+    ? undefined
+    : decodeAdoptionReceiptState(execution.adoptionReceiptState);
+  const submitted = [
+    taskId,
+    taskCid,
+    deadline,
+    requestFile,
+  ].filter((field) => field !== undefined).length;
+  if (submitted !== 0 && submitted !== 4) {
+    throw new Error('Marketplace execution handle is incomplete');
+  }
+  if ((attemptIndex === undefined) !== (requestId === undefined)) {
+    throw new Error(
+      'Marketplace attempt index and request ID must appear together',
+    );
+  }
+  if (
+    (deliveryTx === undefined) !== (deliveryBlockNumber === undefined)
+    || (
+      deliveryEnvelopeCid !== undefined
+      && deliveryTx === undefined
+    )
+  ) {
+    throw new Error('Marketplace delivery provenance is incomplete');
+  }
+  if (
+    (creationTransactionHash === undefined)
+      !== (creationBlockNumber === undefined)
+    || (
+      solverNetManifestCid !== undefined
+      && creationTransactionHash === undefined
+    )
+  ) {
+    throw new Error('Marketplace Task creation provenance is incomplete');
+  }
+  if (attemptIndex !== undefined && submitted !== 4) {
+    throw new Error('Marketplace request correlation requires a submitted handle');
+  }
+  if (
+    adoptionReceiptState !== undefined
+    && (
+      adoptionReceipt === undefined
+      || taskId !== adoptionReceiptState.taskId
+      || attemptIndex !== adoptionReceiptState.attemptIndex
+      || requestId !== adoptionReceiptState.requestId
+      || deliveryEnvelopeCid !== adoptionReceiptState.deliveryEnvelopeCid
+      || creationTransactionHash
+        !== adoptionReceiptState.creationTransactionHash
+      || creationBlockNumber !== adoptionReceiptState.creationBlockNumber
+      || solverNetManifestCid !== adoptionReceiptState.solverNetManifestCid
+    )
+  ) {
+    throw new Error('Marketplace adoption receipt state does not match execution');
+  }
+  return {
+    backend,
+    ...(taskId === undefined
+      ? {}
+      : {
+          taskId,
+          taskCid: taskCid!,
+          deadline: deadline!,
+          requestFile: requestFile!,
+        }),
+    ...(attemptIndex === undefined
+      ? {}
+      : { attemptIndex, requestId: requestId! }),
+    ...(deliveryTx === undefined ? {} : { deliveryTx }),
+    ...(deliveryBlockNumber === undefined ? {} : { deliveryBlockNumber }),
+    ...(deliveryEnvelopeCid === undefined ? {} : { deliveryEnvelopeCid }),
+    ...(creationTransactionHash === undefined
+      ? {}
+      : {
+          creationTransactionHash,
+          creationBlockNumber: creationBlockNumber!,
+        }),
+    ...(solverNetManifestCid === undefined
+      ? {}
+      : { solverNetManifestCid }),
+    ...(originManifestPath === undefined
+      ? {}
+      : { originManifestPath }),
+    ...(solutionOperatorAddress === undefined
+      ? {}
+      : {
+          solutionOperatorAddress,
+          solutionPublisherAgentId: solutionPublisherAgentId!,
+        }),
+    ...(adoptionReceipt === undefined ? {} : { adoptionReceipt }),
+    ...(adoptionReceiptState === undefined ? {} : { adoptionReceiptState }),
+  };
+}
+
 export function decodeAttemptManifest(value: unknown): AttemptManifest {
   const manifest = record(value, 'attempt manifest');
   exactKeys(manifest, [
@@ -313,6 +740,7 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
     'reviewApprovalPolicy',
     'selectedLogin',
     'repository',
+    'execution',
     'processState',
     'pid',
     'terminalHead',
@@ -321,7 +749,7 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
   ], 'attempt manifest');
   if (manifest.version !== 2) throw new Error('Unsupported attempt manifest version');
   const phase = manifest.phase;
-  if (phase !== 'implement' && phase !== 'review' && phase !== 'merge-prep') {
+  if (phase !== 'implement' && phase !== 'review') {
     throw new Error('Invalid attempt phase');
   }
   const attemptId = uuid(stringField(manifest.attemptId, 'attempt ID'), 'attempt ID');
@@ -341,11 +769,8 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
   const targetBaseOid = manifest.targetBaseOid === undefined
     ? undefined
     : gitOid(stringField(manifest.targetBaseOid, 'target base OID'));
-  if (phase === 'merge-prep' && targetBaseOid === undefined) {
-    throw new Error('Merge-prep attempts require an exact target base OID');
-  }
-  if (phase !== 'merge-prep' && targetBaseOid !== undefined) {
-    throw new Error('Target base OID is valid only for merge-prep attempts');
+  if (targetBaseOid !== undefined) {
+    throw new Error('Target base OID is not valid for attempt manifests');
   }
   const claimOid = gitOid(stringField(manifest.claimOid, 'claim OID'));
   const reviewGeneration = manifest.reviewGeneration === undefined
@@ -382,12 +807,13 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
     throw new Error('Review generation metadata is valid only for review attempts');
   }
   const decodedProcessState = processState(manifest.processState);
+  const execution = decodeExecution(manifest.execution);
   const pid = nullablePid(manifest.pid);
   const terminalHead = manifest.terminalHead === undefined
     ? undefined
     : gitOid(stringField(manifest.terminalHead, 'terminal head'));
   const timestamps = decodeTimestamps(manifest.timestamps);
-  if (
+  const localStateDisagrees = execution.backend === 'local' && (
     (decodedProcessState === 'preparing'
       && (pid !== null
         || timestamps.childStartedAt !== undefined
@@ -400,7 +826,25 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
       && (pid === null
         || timestamps.childStartedAt === undefined
         || timestamps.childExitedAt === undefined))
-  ) {
+  );
+  const marketplaceSubmitted = execution.backend === 'marketplace'
+    && execution.taskId !== undefined;
+  const marketplaceStateDisagrees = execution.backend === 'marketplace' && (
+    pid !== null
+    || (decodedProcessState === 'preparing'
+      && (marketplaceSubmitted
+        || timestamps.childStartedAt !== undefined
+        || timestamps.childExitedAt !== undefined))
+    || (decodedProcessState === 'running'
+      && (!marketplaceSubmitted
+        || timestamps.childStartedAt === undefined
+        || timestamps.childExitedAt !== undefined))
+    || (decodedProcessState === 'exited'
+      && (!marketplaceSubmitted
+        || timestamps.childStartedAt === undefined
+        || timestamps.childExitedAt === undefined))
+  );
+  if (localStateDisagrees || marketplaceStateDisagrees) {
     throw new Error('Attempt process state, PID, and timestamps disagree');
   }
   if (decodedProcessState !== 'exited' && terminalHead !== undefined) {
@@ -429,6 +873,7 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
         }),
     selectedLogin: stringField(manifest.selectedLogin, 'selected login'),
     repository: decodeRepositoryIdentity(manifest.repository),
+    execution,
     processState: decodedProcessState,
     pid,
     ...(terminalHead === undefined ? {} : { terminalHead }),
@@ -488,6 +933,7 @@ export function updateAttemptManifest(
 ): AttemptManifest {
   const previous = readAttemptManifest(path);
   const progressiveManifestFields = new Set([
+    'execution',
     'processState',
     'pid',
     'terminalHead',
@@ -597,13 +1043,52 @@ export function markAttemptRunning(
   const validPid = positiveInteger(pid, 'PID');
   const timestamp = transitionTimestamp(now);
   return updateAttemptManifest(manifestPath, (current) => {
-    if (current.processState !== 'preparing') {
+    if (
+      current.execution.backend !== 'local'
+      || current.processState !== 'preparing'
+    ) {
       throw new Error('Only a preparing attempt may transition to running');
     }
     return {
       ...current,
       processState: 'running',
       pid: validPid,
+      timestamps: {
+        ...current.timestamps,
+        updatedAt: timestamp,
+        childStartedAt: timestamp,
+      },
+    };
+  });
+}
+
+export function markMarketplaceAttemptRunning(
+  manifestPath: string,
+  handle: MarketplaceExecutionHandle,
+  now: () => Date = () => new Date(),
+): AttemptManifest {
+  const execution = decodeExecution(handle);
+  if (
+    execution.backend !== 'marketplace'
+    || execution.taskId === undefined
+  ) {
+    throw new Error('Marketplace attempt requires a complete execution handle');
+  }
+  const timestamp = transitionTimestamp(now);
+  return updateAttemptManifest(manifestPath, (current) => {
+    if (
+      current.execution.backend !== 'marketplace'
+      || current.processState !== 'preparing'
+    ) {
+      throw new Error(
+        'Only a preparing marketplace attempt may transition to running',
+      );
+    }
+    return {
+      ...current,
+      execution,
+      processState: 'running',
+      pid: null,
       timestamps: {
         ...current.timestamps,
         updatedAt: timestamp,
@@ -791,6 +1276,57 @@ function canonicalProspectivePath(path: string): string {
   return join(realpathSync(existing), ...suffix);
 }
 
+async function commitObjectExists(
+  runner: CommandRunner,
+  repositoryRoot: string,
+  oid: string,
+): Promise<boolean> {
+  try {
+    await runner('git', ['-C', repositoryRoot, 'cat-file', '-e', `${oid}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureExpectedHeadAvailable(
+  runner: CommandRunner,
+  repository: AttemptRepositoryIdentity,
+  input: {
+    readonly expectedHead: string;
+    readonly branch: string;
+    readonly prNumber?: number;
+  },
+): Promise<void> {
+  if (await commitObjectExists(runner, repository.root, input.expectedHead)) {
+    return;
+  }
+  const fetchSpecs = [input.branch];
+  if (input.prNumber !== undefined) {
+    fetchSpecs.push(`pull/${input.prNumber}/head`);
+  }
+  for (const spec of fetchSpecs) {
+    try {
+      await runner('git', [
+        '-C', repository.root,
+        'fetch', '--quiet', repository.remoteName, spec,
+      ]);
+    } catch {
+      // Best-effort: the branch or PR ref may not exist on the remote yet.
+    }
+  }
+  if (await commitObjectExists(runner, repository.root, input.expectedHead)) {
+    return;
+  }
+  const prRef = input.prNumber === undefined
+    ? ''
+    : ` and ${repository.remoteName}/pull/${input.prNumber}/head`;
+  throw new Error(
+    `Expected head ${input.expectedHead} is not available after fetching `
+    + `${repository.remoteName}/${input.branch}${prRef}`,
+  );
+}
+
 export async function createAttemptWorkspace(
   options: CreateAttemptOptions,
   runner: CommandRunner,
@@ -860,6 +1396,9 @@ export async function createAttemptWorkspace(
         }),
     selectedLogin: options.selectedLogin,
     repository,
+    execution: {
+      backend: options.executionBackend ?? 'local',
+    },
     processState: options.pid === undefined || options.pid === null
       ? 'preparing'
       : 'running',
@@ -881,6 +1420,11 @@ export async function createAttemptWorkspace(
   if (registeredBefore) {
     throw new Error('Attempt worktree path is already registered');
   }
+  await ensureExpectedHeadAvailable(runner, repository, {
+    expectedHead: options.expectedHead,
+    branch: options.branch,
+    prNumber: options.prNumber,
+  });
   mkdirSync(phaseDir, { recursive: true, mode: 0o700 });
   mkdirSync(attemptDir, { mode: 0o700 });
   mkdirSync(paths.ghConfigDir, { mode: 0o700 });
@@ -974,8 +1518,13 @@ export function listRunnerLiveAttempts(
             manifest.processState === 'preparing'
             || (
               manifest.processState === 'running'
-              && manifest.pid !== null
-              && isPidAlive(manifest.pid)
+              && (
+                manifest.execution.backend === 'marketplace'
+                || (
+                  manifest.pid !== null
+                  && isPidAlive(manifest.pid)
+                )
+              )
             )
           )
         ) {
@@ -1016,6 +1565,43 @@ export interface CleanupAttemptOptions {
   readonly v2Base: string;
   readonly isPidAlive: (pid: number) => boolean;
   readonly env?: Record<string, string>;
+  /** Grace period before dead dirty/ahead/preparing attempts may be removed. */
+  readonly graceMs?: number;
+  readonly now?: () => Date;
+  /** When true, skip grace and publication proof for dead attempts. */
+  readonly evictUnpublished?: boolean;
+}
+
+export function freeDiskBytes(path: string): number {
+  const stats = statfsSync(path);
+  return Number(stats.bavail) * Number(stats.bsize);
+}
+
+function attemptEndedAtMs(manifest: AttemptManifest): number {
+  const timestamp = manifest.timestamps.childExitedAt
+    ?? manifest.timestamps.updatedAt
+    ?? manifest.timestamps.createdAt;
+  return Date.parse(timestamp);
+}
+
+function graceAllowsForceRemoval(
+  manifest: AttemptManifest,
+  options: CleanupAttemptOptions,
+): boolean {
+  if (options.evictUnpublished === true) return true;
+  const graceMs = options.graceMs;
+  if (graceMs === undefined) return false;
+  const now = options.now?.() ?? new Date();
+  return now.getTime() - attemptEndedAtMs(manifest) >= graceMs;
+}
+
+function isAttemptChildLive(
+  manifest: AttemptManifest,
+  isPidAlive: (pid: number) => boolean,
+): boolean {
+  if (manifest.processState !== 'running') return false;
+  if (manifest.execution.backend === 'marketplace') return true;
+  return manifest.pid !== null && isPidAlive(manifest.pid);
 }
 
 function retained(
@@ -1192,6 +1778,32 @@ async function provePublicationReachability(
   return null;
 }
 
+async function removeAttemptWorktree(
+  manifest: AttemptManifest,
+  runner: CommandRunner,
+  force: boolean,
+): Promise<AttemptCleanupResult | null> {
+  if (!existsSync(manifest.paths.worktree)) return null;
+  try {
+    await runner('git', [
+      `--git-dir=${manifest.repository.gitCommonDir}`,
+      'worktree',
+      'remove',
+      ...(force ? ['--force'] : []),
+      manifest.paths.worktree,
+    ]);
+    return null;
+  } catch {
+    return retained(
+      'ambiguous',
+      force
+        ? 'Exact worktree force-removal failed.'
+        : 'Exact worktree removal failed.',
+      manifest.attemptId,
+    );
+  }
+}
+
 export async function cleanupAttempt(
   manifestPath: string,
   runner: CommandRunner,
@@ -1211,13 +1823,14 @@ export async function cleanupAttempt(
     );
   }
   if (manifest.processState === 'preparing') {
-    return retained(
-      'ambiguous',
-      'Attempt is still preparing and has no positive terminal process evidence.',
-      manifest.attemptId,
-    );
-  }
-  if (manifest.processState === 'running') {
+    if (!graceAllowsForceRemoval(manifest, options)) {
+      return retained(
+        'ambiguous',
+        'Attempt is still preparing and has no positive terminal process evidence.',
+        manifest.attemptId,
+      );
+    }
+  } else if (manifest.processState === 'running') {
     if (manifest.pid === null) {
       return retained(
         'ambiguous',
@@ -1228,6 +1841,8 @@ export async function cleanupAttempt(
     if (options.isPidAlive(manifest.pid)) {
       return retained('live', 'Attempt child PID is still live.', manifest.attemptId);
     }
+    markAttemptExited(manifestPath);
+    manifest = readAttemptManifest(manifestPath);
   }
   let actualRepository: AttemptRepositoryIdentity;
   try {
@@ -1273,11 +1888,14 @@ export async function cleanupAttempt(
   }
   if (!existsSync(manifest.paths.worktree)) {
     if (manifest.terminalHead === undefined) {
-      return retained(
-        'ambiguous',
-        'Missing worktree has no recorded terminal HEAD.',
-        manifest.attemptId,
-      );
+      if (!graceAllowsForceRemoval(manifest, options)) {
+        return retained(
+          'ambiguous',
+          'Missing worktree has no recorded terminal HEAD.',
+          manifest.attemptId,
+        );
+      }
+      return removeAttemptMetadata(manifest);
     }
     let registered: boolean;
     try {
@@ -1294,57 +1912,134 @@ export async function cleanupAttempt(
       );
     }
     if (registered) {
-      return retained(
-        'ambiguous',
-        'Missing worktree remains registered in the creating repository.',
-        manifest.attemptId,
-      );
+      if (!graceAllowsForceRemoval(manifest, options)) {
+        return retained(
+          'ambiguous',
+          'Missing worktree remains registered in the creating repository.',
+          manifest.attemptId,
+        );
+      }
+      const worktreeFailure = await removeAttemptWorktree(manifest, runner, true);
+      if (worktreeFailure !== null) return worktreeFailure;
+      return removeAttemptMetadata(manifest);
     }
+    if (!graceAllowsForceRemoval(manifest, options)) {
+      const proofFailure = await provePublicationReachability(
+        manifest,
+        runner,
+        options,
+        [`--git-dir=${manifest.repository.gitCommonDir}`],
+        manifest.terminalHead,
+      );
+      if (proofFailure !== null) return proofFailure;
+    }
+    return removeAttemptMetadata(manifest);
+  }
+
+  const forceRemoval = graceAllowsForceRemoval(manifest, options);
+  if (!forceRemoval) {
+    try {
+      const status = await runner('git', [
+        '-C', manifest.paths.worktree,
+        'status', '--porcelain', '--untracked-files=all',
+      ]);
+      if (status.trim() !== '') {
+        return retained('dirty', 'Worktree contains uncommitted changes.', manifest.attemptId);
+      }
+    } catch {
+      return retained('ambiguous', 'Git cleanliness inspection failed.', manifest.attemptId);
+    }
+  }
+
+  if (!forceRemoval) {
     const proofFailure = await provePublicationReachability(
       manifest,
       runner,
       options,
-      [`--git-dir=${manifest.repository.gitCommonDir}`],
-      manifest.terminalHead,
+      ['-C', manifest.paths.worktree],
+      'HEAD',
     );
     if (proofFailure !== null) return proofFailure;
-    return removeAttemptMetadata(manifest);
   }
 
-  try {
-    const status = await runner('git', [
-      '-C', manifest.paths.worktree,
-      'status', '--porcelain', '--untracked-files=all',
-    ]);
-    if (status.trim() !== '') {
-      return retained('dirty', 'Worktree contains uncommitted changes.', manifest.attemptId);
-    }
-  } catch {
-    return retained('ambiguous', 'Git cleanliness inspection failed.', manifest.attemptId);
-  }
-
-  const proofFailure = await provePublicationReachability(
-    manifest,
-    runner,
-    options,
-    ['-C', manifest.paths.worktree],
-    'HEAD',
-  );
-  if (proofFailure !== null) return proofFailure;
-
-  try {
-    await runner('git', [
-      `--git-dir=${manifest.repository.gitCommonDir}`,
-      'worktree', 'remove', manifest.paths.worktree,
-    ]);
-  } catch {
-    return retained('ambiguous', 'Exact worktree removal failed.', manifest.attemptId);
-  }
+  const worktreeFailure = await removeAttemptWorktree(manifest, runner, forceRemoval);
+  if (worktreeFailure !== null) return worktreeFailure;
   return removeAttemptMetadata(manifest);
 }
 
 export interface SweepDeadAttemptsOptions extends CleanupAttemptOptions {
   readonly host?: string;
+  readonly diskFloorBytes?: number;
+  readonly diskPath?: string;
+  readonly readFreeDiskBytes?: (path: string) => number;
+}
+
+interface CollectedAttempt {
+  readonly manifestPath: string;
+  readonly manifest: AttemptManifest;
+}
+
+function collectHostedAttempts(v2Base: string, host: string): CollectedAttempt[] {
+  const attempts: CollectedAttempt[] = [];
+  for (const runnerDir of directories(v2Base)) {
+    for (const phaseDir of directories(runnerDir)) {
+      for (const attemptDir of directories(phaseDir)) {
+        const manifestPath = join(attemptDir, 'manifest.json');
+        try {
+          const manifest = readAttemptManifest(manifestPath);
+          if (manifest.host !== host) continue;
+          attempts.push({ manifestPath, manifest });
+        } catch {
+          // Malformed manifests are handled by the orphan sweep.
+        }
+      }
+    }
+  }
+  return attempts;
+}
+
+function sweepOrphanAttemptDirs(
+  v2Base: string,
+  graceMs: number | undefined,
+  now: () => Date,
+): AttemptCleanupResult[] {
+  if (graceMs === undefined) return [];
+  const results: AttemptCleanupResult[] = [];
+  const cutoff = now().getTime() - graceMs;
+  for (const runnerDir of directories(v2Base)) {
+    for (const phaseDir of directories(runnerDir)) {
+      for (const attemptDir of directories(phaseDir)) {
+        if (!isBelow(v2Base, attemptDir)) continue;
+        const manifestPath = join(attemptDir, 'manifest.json');
+        try {
+          readAttemptManifest(manifestPath);
+          continue;
+        } catch {
+          // Orphan candidate.
+        }
+        try {
+          if (statSync(attemptDir).mtimeMs >= cutoff) {
+            results.push(retained(
+              'malformed',
+              'Malformed attempt directory is still inside the grace period.',
+            ));
+            continue;
+          }
+          rmSync(attemptDir, { recursive: true });
+          results.push({
+            status: 'removed',
+            attemptId: basename(attemptDir),
+          });
+        } catch {
+          results.push(retained(
+            'malformed',
+            'Malformed attempt directory could not be removed.',
+          ));
+        }
+      }
+    }
+  }
+  return results;
 }
 
 export async function sweepDeadAttempts(
@@ -1353,6 +2048,36 @@ export async function sweepDeadAttempts(
 ): Promise<AttemptCleanupResult[]> {
   const host = filesystemSafeHostname(options.host ?? systemHostname());
   const results: AttemptCleanupResult[] = [];
+  const diskPath = options.diskPath ?? options.v2Base;
+  const diskFloorBytes = options.diskFloorBytes;
+  const readFreeDiskBytes = options.readFreeDiskBytes ?? freeDiskBytes;
+
+  if (
+    diskFloorBytes !== undefined
+    && diskFloorBytes > 0
+    && readFreeDiskBytes(diskPath) < diskFloorBytes
+  ) {
+    const deadAttempts = collectHostedAttempts(options.v2Base, host)
+      .filter((attempt) => !isAttemptChildLive(attempt.manifest, options.isPidAlive))
+      .sort((left, right) =>
+        attemptEndedAtMs(left.manifest) - attemptEndedAtMs(right.manifest));
+    for (const attempt of deadAttempts) {
+      if (readFreeDiskBytes(diskPath) >= diskFloorBytes) break;
+      try {
+        results.push(await cleanupAttempt(attempt.manifestPath, runner, {
+          ...options,
+          evictUnpublished: true,
+        }));
+      } catch {
+        results.push(retained(
+          'ambiguous',
+          'Emergency disk-floor attempt cleanup failed unexpectedly and was isolated.',
+          attempt.manifest.attemptId,
+        ));
+      }
+    }
+  }
+
   for (const runnerDir of directories(options.v2Base)) {
     for (const phaseDir of directories(runnerDir)) {
       for (const attemptDir of directories(phaseDir)) {
@@ -1377,5 +2102,10 @@ export async function sweepDeadAttempts(
       }
     }
   }
+  results.push(...sweepOrphanAttemptDirs(
+    options.v2Base,
+    options.graceMs,
+    options.now ?? (() => new Date()),
+  ));
   return results;
 }

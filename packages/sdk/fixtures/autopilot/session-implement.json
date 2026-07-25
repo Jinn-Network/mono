@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "jinn-autopilot-session.v1",
+  "workflow": "implement",
+  "repository": "Jinn-Network/mono",
+  "language": "typescript",
+  "verificationProfile": "jinn-mono.v1",
+  "issueNumber": 2001,
+  "prNumber": 2101,
+  "targetBase": "next",
+  "branch": "codex/issue-2001",
+  "claimOid": "1111111111111111111111111111111111111111",
+  "expectedHead": "2222222222222222222222222222222222222222",
+  "v2AttemptId": "123e4567-e89b-42d3-a456-426614174001",
+  "runnerId": "runner-1",
+  "taskSnapshot": {
+    "title": "Implement exact marketplace contracts",
+    "body": "Add the approved contract surface.",
+    "prBody": "Draft implementation PR.",
+    "baseSha": "3333333333333333333333333333333333333333",
+    "targetBaseOid": "3333333333333333333333333333333333333333"
+  },
+  "workflowContract": {
+    "skill": "implement-issue",
+    "version": "v2",
+    "resultSchema": "jinn-autopilot-mutation-result.v1"
+  },
+  "deadline": "2026-07-23T23:00:00.000Z",
+  "receiptAuthors": ["jinn-autopilot"]
+}

@@ -627,6 +627,7 @@ export interface LaunchedGeneratorState {
   poolPublicationUpdatedAt?: Iso8601;
   poolPublicationPriorSize?: number;
   poolPublicationCurrentSize?: number;
+  poolPublicationStale?: boolean;
   totalPosted?: number;
   lastPostedInstanceId?: string;
 }

@@ -44,6 +44,8 @@ import {
   hashVettedPoolArtifact,
   loadVettedPoolArtifactScorableEntries,
   readVettedPoolArtifactPublication,
+  readVettedPoolArtifactPublicationUnfiltered,
+  isPublicationStale,
   writeVettedPoolArtifactPublication,
   type AdmissionMode,
   type SolverNetArtifactRef,
@@ -149,6 +151,7 @@ export interface SweRebenchV2GeneratorStateSnapshot {
   poolPublicationUpdatedAt?: string;
   poolPublicationPriorSize?: number;
   poolPublicationCurrentSize?: number;
+  poolPublicationStale?: boolean;
 }
 
 export type SweRebenchV2GeneratorTick = TaskGenerator & {
@@ -170,12 +173,11 @@ interface InternalSweRebenchV2GeneratorConfig extends SweRebenchV2AutoConfig {
 }
 
 export function defaultStateDir(): string {
-  // JINN_STATE_DIR: single volume-aware state root (config.ts). All 7 callers
-  // funnel through `process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? defaultStateDir()`,
-  // so the per-key env still wins; here the legacy fallback becomes root-aware.
-  const stateRoot = process.env['JINN_STATE_DIR'];
-  if (stateRoot) return join(stateRoot, 'swe-rebench-v2');
-  return join(process.env['HOME'] ?? homedir(), '.jinn-client', 'swe-rebench-v2');
+  // Legacy constant only. Volume / per-key resolution lives in loadConfig
+  // (`config.sweRebenchV2StateDir`). Callers must not use
+  // `process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? defaultStateDir()` in
+  // production — that idiom is retired (#1000).
+  return join(homedir(), '.jinn-client', 'swe-rebench-v2');
 }
 
 /**
@@ -466,6 +468,15 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
   let publishedPoolCache: PublishedVettedPool | null = null;
   let lastValidatedPoolMtimeMs = -1;
   let lastRepublication: PublishedVettedPool['republication'] | undefined;
+  let poolPublicationStale = false;
+
+  async function refreshPoolStale(): Promise<void> {
+    const pub = await readVettedPoolArtifactPublicationUnfiltered({
+      stateDir: config.stateDir,
+      manifestCid: config.solverNetManifestCid,
+    });
+    poolPublicationStale = isPublicationStale(pub, EVAL_SEMANTICS_VERSION);
+  }
 
   async function refreshPool(): Promise<void> {
     const result = await loadPoolWithCacheFallback({
@@ -632,6 +643,9 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
         }
       }
     }
+    // Best-effort status only. Publication parse failures are already surfaced
+    // by resolvePublishedVettedPool above as the generator's lastError.
+    await refreshPoolStale().catch(() => {});
     if (publishedPool === null) {
       lastPollSummary = {
         poolSize: 0,
@@ -932,6 +946,10 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
     return signed.length > 0 ? signed : null;
   };
 
+  // Construction-time lazy refresh lets a subsequent cold getState() report a
+  // stale on-disk publication without making the synchronous state API async.
+  void refreshPoolStale().catch(() => {});
+
   return Object.assign(tick, {
     getState(): SweRebenchV2GeneratorStateSnapshot {
       const liveConfig = normalizeGeneratorConfig(
@@ -952,6 +970,7 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
               poolPublicationCurrentSize: lastRepublication.currentSize,
             }
           : {}),
+        ...(poolPublicationStale ? { poolPublicationStale: true } : {}),
       };
     },
   });
@@ -973,9 +992,7 @@ export const sweRebenchV2: SolverTypeDefinition<SweRebenchV2AutoConfig> = {
     if (ctx.network !== 'testnet') return undefined;
     // Only activate when explicitly opted in via env flag
     if (process.env['JINN_SWE_REBENCH_V2_LAUNCHER_ENABLED'] !== '1') return undefined;
-    const stateDir =
-      process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ??
-      defaultStateDir();
+    const stateDir = ctx.sweRebenchV2StateDir ?? defaultStateDir();
     return { stateDir };
   },
   ui: {
@@ -988,10 +1005,7 @@ export function makeSweRebenchV2GeneratorForLaunchedRecord(
   opts: MakeSweRebenchV2GeneratorForLaunchedRecordOpts,
 ): SweRebenchV2GeneratorTick {
   const { recordRef, configRef, staticConfig = {} } = opts;
-  const stateDir =
-    staticConfig.stateDir ??
-    process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ??
-    defaultStateDir();
+  const stateDir = staticConfig.stateDir ?? defaultStateDir();
 
   const generator = makeSweRebenchV2Generator({
     stateDir,
@@ -1024,11 +1038,9 @@ export function makeSweRebenchV2GeneratorForLaunchedRecord(
 /**
  * Accessor for the GeneratorStateStore used by the delivery-watcher verdict hook.
  * Returns a store rooted at the same default stateDir as the generator.
+ * Pass the loadConfig-resolved dir in production; optional arg falls back to
+ * the legacy constant only (no env read — #1000).
  */
 export function getSweRebenchV2StateStore(stateDir?: string): GeneratorStateStore {
-  const dir =
-    stateDir ??
-    process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ??
-    defaultStateDir();
-  return new GeneratorStateStore({ stateDir: dir });
+  return new GeneratorStateStore({ stateDir: stateDir ?? defaultStateDir() });
 }

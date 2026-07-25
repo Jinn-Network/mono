@@ -791,6 +791,18 @@ export async function startMockIpfsServer(): Promise<MockIpfsServer> {
 
 // ── Daemon startup ─────────────────────────────────────────────────────────────
 
+/**
+ * Resolve swe-rebench-v2 substrate dir for daemon e2e harness construction.
+ * Production `main.ts` threads `config.sweRebenchV2StateDir`; T2.4 and peers
+ * set `JINN_SWE_REBENCH_V2_STATE_DIR` before `startDaemon` (#2097).
+ */
+export function sweRebenchV2StateDirFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const value = env['JINN_SWE_REBENCH_V2_STATE_DIR'];
+  return value === undefined || value === '' ? undefined : value;
+}
+
 export interface RunningDaemon {
   daemon: Daemon;
   store: Store;
@@ -945,6 +957,8 @@ export async function startDaemon(
     ?? process.env['JINN_IPFS_REGISTRY_URL']
     ?? 'https://registry.autonolas.tech';
 
+  const sweRebenchV2StateDir = sweRebenchV2StateDirFromEnv();
+
   const harnessList = buildHarnesses({
     rpcUrl,
     claudePath,
@@ -974,6 +988,7 @@ export async function startDaemon(
     ...(opts?.polymarketGammaBaseUrl
       ? { polymarketGammaBaseUrl: opts.polymarketGammaBaseUrl }
       : {}),
+    ...(sweRebenchV2StateDir ? { sweRebenchV2StateDir } : {}),
   });
 
   // 4. Wire the selected harness into HarnessRegistry dispatch.
@@ -1045,6 +1060,9 @@ export async function startDaemon(
     agentEoaPrivateKey: operator.agentPrivateKey,
     ipfsRegistryUrl: resolvedIpfsRegistryUrl,
     ipfsGatewayUrl: resolvedIpfsGatewayUrl,
+    // Hermetic Anvil+mock e2es always pass mockIpfs.baseUrl as ipfsGatewayUrl.
+    // Pin primary-only so a mock 404 cannot leak to public ipfs.io (#1648).
+    ...(ipfsGatewayUrl !== undefined ? { ipfsFallbackGatewayUrl: false as const } : {}),
     pollIntervalMs: 300,
     chainId: 8453,
     routerClaimDeliveryVariant,

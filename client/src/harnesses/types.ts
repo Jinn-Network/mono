@@ -29,7 +29,7 @@ export interface HarnessContext {
   task: Task;
   /** On-chain / persisted request id for this run. May differ from task.id. */
   requestId?: string;
-  solverNet?: { name: string; solverType: string; model?: string };
+  solverNet?: { name: string; solverType: string; model?: string; provider?: import('./provider-ref.js').ProviderRef };
   runtimePlugins?: RuntimePlugin[];
   solverPluginRoots?: string[];
   /**

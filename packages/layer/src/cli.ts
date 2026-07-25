@@ -1172,7 +1172,9 @@ export async function runJinnLayerCli(
         const tracked = trackingCorpus(deps);
         const result = await createJinnPlugin(tracked.deps)
           .session(request.meta)
-          .firstTurnPickup(request.firstMessage);
+          .firstTurnPickup(request.firstMessage, {
+            excludeCanonicalEpisodeIds: request.excludeCanonicalEpisodeIds,
+          });
         writer.write(`${JSON.stringify(sessionPickupEnvelope(
           result,
           tracked.status(),
@@ -1978,6 +1980,15 @@ export async function runJinnLayerCli(
             `error: --install "${installFlag}" — no distilled skill by that name ` +
               `(available: ${publishedNames.join(', ')}; or "all" / "none")\n`,
           );
+          progress?.runEnd({
+            outcome: 'ok',
+            clusterCount: result.clusterCount,
+            published: publishedNames,
+            rejectedCount: result.distilled.rejected.length,
+            errorCount: 0,
+            installed: [],
+            stagingDir,
+          });
           return 2;
         }
       } else {

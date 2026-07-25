@@ -34,6 +34,7 @@ from agent.model_metadata import (
     estimate_messages_tokens_rough,
     estimate_request_tokens_rough,
 )
+from agent.runtime_cwd import resolve_agent_cwd
 
 logger = logging.getLogger(__name__)
 
@@ -436,6 +437,11 @@ def build_turn_context(
             "pre_llm_call",
             session_id=agent.session_id,
             task_id=effective_task_id,
+            # Keep the execution/capture id stable with existing Hermes
+            # behavior while exposing the caller's optional logical identity
+            # separately. An omitted caller id must not become a fresh
+            # UUID-shaped task change at plugin boundaries.
+            stable_task_id=task_id,
             turn_id=turn_id,
             user_message=original_user_message,
             conversation_history=list(messages),
@@ -443,6 +449,7 @@ def build_turn_context(
             model=agent.model,
             platform=getattr(agent, "platform", None) or "",
             sender_id=getattr(agent, "_user_id", None) or "",
+            cwd=str(resolve_agent_cwd()),
         )
         _ctx_parts: list[str] = []
         for r in _pre_results:

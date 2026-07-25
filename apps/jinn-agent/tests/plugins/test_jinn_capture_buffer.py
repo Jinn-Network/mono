@@ -109,6 +109,51 @@ def test_tokens_omitted_when_never_recorded():
     assert "tokens" not in ep["cost"]
 
 
+def test_token_targeted_discard_preserves_fresh_same_id_capture():
+    capture_buffer.reset()
+    old_token = object()
+    fresh_token = object()
+    capture_buffer.record_user_turn(
+        "old-task",
+        "same-session",
+        "old token-owned capture",
+        lifecycle_token=old_token,
+    )
+    capture_buffer.record_user_turn(
+        "fresh-task",
+        "same-session",
+        "fresh token-owned capture",
+        lifecycle_token=fresh_token,
+    )
+    capture_buffer.record_user_turn(
+        "legacy-task",
+        "same-session",
+        "legacy tokenless capture",
+    )
+
+    capture_buffer.discard_session(
+        "same-session",
+        lifecycle_token=old_token,
+        include_legacy=True,
+    )
+
+    assert not capture_buffer.has_capture(
+        "old-task",
+        "same-session",
+        lifecycle_token=old_token,
+    )
+    assert capture_buffer.has_capture(
+        "fresh-task",
+        "same-session",
+        lifecycle_token=fresh_token,
+    )
+    assert not capture_buffer.has_capture(
+        "legacy-task",
+        "same-session",
+    )
+    capture_buffer.reset()
+
+
 def test_assemble_uses_resolved_harness_when_stock(monkeypatch):
     from plugins.jinn import capture_buffer as buf
     monkeypatch.delenv("JINN_HARNESS_NAME", raising=False)

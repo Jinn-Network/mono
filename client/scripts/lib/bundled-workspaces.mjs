@@ -13,6 +13,30 @@ import path from 'node:path';
 
 const STATE_DIR = '.jinn-pack-bundled-workspaces';
 const STATE_FILE = 'state.json';
+const MANIFEST_BACKUP_FILE = 'package.json.original';
+
+const PUBLISH_MANIFEST_FIELDS = [
+  'name',
+  'version',
+  'description',
+  'type',
+  'license',
+  'repository',
+  'engines',
+  'bin',
+  'main',
+  'module',
+  'browser',
+  'types',
+  'exports',
+  'imports',
+  'files',
+  'publishConfig',
+  'bundledDependencies',
+  'scripts',
+  'dependencies',
+  'optionalDependencies',
+];
 
 async function pathExists(filePath) {
   try {
@@ -26,6 +50,84 @@ async function pathExists(filePath) {
 
 async function readJson(filePath) {
   return JSON.parse(await readFile(filePath, 'utf8'));
+}
+
+function publishManifest(sourceManifest) {
+  const manifest = {};
+  for (const field of PUBLISH_MANIFEST_FIELDS) {
+    if (field === 'scripts') {
+      if (typeof sourceManifest.scripts?.postinstall === 'string') {
+        manifest.scripts = { postinstall: sourceManifest.scripts.postinstall };
+      }
+      continue;
+    }
+    if (Object.hasOwn(sourceManifest, field)) {
+      manifest[field] = sourceManifest[field];
+    }
+  }
+  return manifest;
+}
+
+function assertInstallableDependencyValue(value, manifestPath) {
+  if (typeof value === 'string') {
+    if (/^(?:portal|workspace|file):/i.test(value)) {
+      throw new Error(`${manifestPath} contains forbidden local dependency value ${value}`);
+    }
+    if (path.isAbsolute(value) || path.win32.isAbsolute(value)) {
+      throw new Error(
+        `${manifestPath} contains absolute checkout dependency value ${value}`,
+      );
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) assertInstallableDependencyValue(item, manifestPath);
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const nested of Object.values(value)) {
+      assertInstallableDependencyValue(nested, manifestPath);
+    }
+  }
+}
+
+export function assertPackageManifestDependencyValues(manifest, manifestPath = 'package.json') {
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    throw new Error(`${manifestPath} must contain a JSON object`);
+  }
+
+  const visit = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+    for (const [key, nested] of Object.entries(value)) {
+      if (
+        /dependencies$/i.test(key)
+        || key === 'resolutions'
+        || key === 'overrides'
+      ) {
+        assertInstallableDependencyValue(nested, manifestPath);
+      } else {
+        visit(nested);
+      }
+    }
+  };
+  visit(manifest);
+}
+
+export function assertSafeTarballPackageManifests(entries, readEntry) {
+  for (const rawEntry of entries) {
+    const entry = rawEntry.replaceAll('\\', '/');
+    if (!/(?:^|\/)package\.json$/.test(entry)) continue;
+
+    let manifest;
+    try {
+      manifest = JSON.parse(readEntry(rawEntry));
+    } catch (error) {
+      throw new Error(
+        `${entry} is not a valid package manifest: ${error?.message ?? String(error)}`,
+      );
+    }
+    assertPackageManifestDependencyValues(manifest, entry);
+  }
 }
 
 function packageDirectory(packageName) {
@@ -59,12 +161,22 @@ function safePackageEntry(workspaceRoot, entry) {
 
 async function copyPublishFiles(workspaceRoot, targetRoot, manifest) {
   await mkdir(targetRoot, { recursive: true });
-  const packagedManifest = { ...manifest };
+  const packagedManifest = {};
+  for (const field of PUBLISH_MANIFEST_FIELDS) {
+    if (
+      field === 'scripts'
+      || /dependencies$/i.test(field)
+    ) {
+      continue;
+    }
+    if (Object.hasOwn(manifest, field)) {
+      packagedManifest[field] = manifest[field];
+    }
+  }
   // These private packages are shipped only inside the client. Their runtime
   // dependencies are deliberately owned by the public client manifest (and
   // checked above); retaining this field would make npm recursively bundle
   // every transitive dependency, including upstream source and test files.
-  delete packagedManifest.dependencies;
   await writeFile(
     path.join(targetRoot, 'package.json'),
     `${JSON.stringify(packagedManifest, null, 2)}\n`,
@@ -103,14 +215,35 @@ export async function restoreBundledWorkspaces({ clientRoot }) {
   if (!await pathExists(statePath)) return;
 
   const state = await readJson(statePath);
+  let restoreError;
   for (const packageName of [...state.packageNames].reverse()) {
-    const parts = packageDirectory(packageName);
-    const target = path.join(clientRoot, 'node_modules', ...parts);
-    const backup = path.join(stateRoot, 'links', ...parts);
-    if (!await pathExists(backup)) continue;
-    await rm(target, { recursive: true, force: true });
-    await mkdir(path.dirname(target), { recursive: true });
-    await rename(backup, target);
+    try {
+      const parts = packageDirectory(packageName);
+      const target = path.join(clientRoot, 'node_modules', ...parts);
+      const backup = path.join(stateRoot, 'links', ...parts);
+      if (!await pathExists(backup)) continue;
+      await rm(target, { recursive: true, force: true });
+      await mkdir(path.dirname(target), { recursive: true });
+      await rename(backup, target);
+    } catch (error) {
+      restoreError ??= error;
+    }
+  }
+
+  const manifestBackup = path.join(stateRoot, MANIFEST_BACKUP_FILE);
+  if (state.manifestSnapshot && await pathExists(manifestBackup)) {
+    try {
+      await writeFile(
+        path.join(clientRoot, 'package.json'),
+        await readFile(manifestBackup),
+      );
+    } catch (error) {
+      restoreError ??= error;
+    }
+  }
+
+  if (restoreError) {
+    throw restoreError;
   }
   await rm(stateRoot, { recursive: true, force: true });
 }
@@ -118,7 +251,9 @@ export async function restoreBundledWorkspaces({ clientRoot }) {
 export async function materializeBundledWorkspaces({ clientRoot }) {
   await restoreBundledWorkspaces({ clientRoot });
 
-  const clientManifest = await readJson(path.join(clientRoot, 'package.json'));
+  const packagePath = path.join(clientRoot, 'package.json');
+  const sourceManifestBytes = await readFile(packagePath);
+  const clientManifest = JSON.parse(sourceManifestBytes.toString('utf8'));
   const packageNames = clientManifest.bundledDependencies;
   if (!Array.isArray(packageNames) || packageNames.length === 0) {
     throw new Error('client package.json must declare bundledDependencies');
@@ -126,12 +261,18 @@ export async function materializeBundledWorkspaces({ clientRoot }) {
 
   const stateRoot = path.join(clientRoot, STATE_DIR);
   await mkdir(stateRoot, { recursive: true });
+  await writeFile(path.join(stateRoot, MANIFEST_BACKUP_FILE), sourceManifestBytes);
   await writeFile(
     path.join(stateRoot, STATE_FILE),
-    `${JSON.stringify({ packageNames }, null, 2)}\n`,
+    `${JSON.stringify({ packageNames, manifestSnapshot: true }, null, 2)}\n`,
   );
 
   try {
+    await writeFile(
+      packagePath,
+      `${JSON.stringify(publishManifest(clientManifest), null, 2)}\n`,
+    );
+
     for (const packageName of packageNames) {
       const parts = packageDirectory(packageName);
       const target = path.join(clientRoot, 'node_modules', ...parts);

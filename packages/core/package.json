@@ -1,10 +1,15 @@
 {
   "name": "@jinn-network/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Domain core for Jinn — evidence/contribution stores, scrub, trajectory parsing, and corpus reads. Independent of client/src.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/core"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
@@ -38,13 +43,13 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
-    "@jinn-network/plugin": "0.1.0",
+    "@jinn-network/plugin": "0.1.1",
+    "@lmoe/gliner-onnx": "0.1.0",
     "@noble/hashes": "^2.2.0",
     "@secretlint/core": "^13.0.2",
     "@secretlint/secretlint-rule-preset-recommend": "^13.0.2",
     "better-sqlite3": "^12.10.0",
     "canonicalize": "^3.0.0",
-    "openredaction": "^1.1.2",
     "zod": "^4.4.3"
   },
   "peerDependencies": {

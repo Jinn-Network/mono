@@ -55,6 +55,8 @@ export interface HarvestLoopConfig {
   stateDir: string;
   repos: HarvestRepoConfig[];
   limitPerRepo: number;
+  /** Max session-echo records mined per tick (sibling of limitPerRepo). */
+  limitPerTick: number;
   publish: boolean;
   minterSafe?: string;
   /** Required only when at least one commit repo is configured. */

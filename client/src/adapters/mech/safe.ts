@@ -11,6 +11,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 import { SAFE_ABI } from './types.js';
 import {
+  SAFE_STALE_NONCE_ERROR_TOKEN,
   isNonceTooLowError,
   isReplacementUnderpricedError,
   type TxSubmissionLedger,
@@ -40,6 +41,29 @@ export interface SafeTransactionParams {
 
 export interface SafeExecutionOptions {
   ledger?: TxSubmissionLedger;
+  beforeBroadcast?: () => void | Promise<void>;
+  onBroadcast?: (txHash: Hex) => void | Promise<void>;
+}
+
+export class SafeBroadcastFenceError extends Error {
+  readonly name = 'SafeBroadcastFenceError';
+
+  constructor(cause: unknown) {
+    super('Safe transaction broadcast fence rejected the wallet write', { cause });
+  }
+}
+
+export class SafePostBroadcastHookError extends Error {
+  readonly name = 'SafePostBroadcastHookError';
+
+  constructor(
+    readonly txHash: Hex,
+    cause: unknown,
+  ) {
+    super(`Safe transaction ${txHash} was broadcast but post-broadcast persistence failed`, {
+      cause,
+    });
+  }
 }
 
 // Per-Safe transaction lock to prevent nonce races when concurrent
@@ -126,6 +150,12 @@ async function executeSafeTransactionInner(
       const feeResult = await nonceLedger.feeResultForAttempt(attemptIndex, {
         forceEstimate: true,
       });
+
+      try {
+        await options.beforeBroadcast?.();
+      } catch (fenceError) {
+        throw new SafeBroadcastFenceError(fenceError);
+      }
 
       let hash: Hex;
       try {
@@ -223,6 +253,20 @@ async function executeSafeTransactionInner(
         // can distinguish self-already-claimed from lost-race from transient.
         const msg = writeErr instanceof Error ? writeErr.message : String(writeErr);
         if (msg.includes('GS013') || msg.includes('GS026')) {
+          if (msg.includes('GS026')) {
+            const signerIsOwner = await publicClient.readContract({
+              address: safeAddress,
+              abi: SAFE_ABI,
+              functionName: 'isOwner',
+              args: [from],
+            });
+            if (!signerIsOwner) {
+              throw new Error(
+                'Safe execTransaction rejected (GS026: invalid owner — signing key is not a Safe owner). ' +
+                  'Repair the Safe owner set or repoint the agent signing key to a current owner.',
+              );
+            }
+          }
           const inner = await decodeSafeInnerRevert(publicClient, params);
           if (inner.decodedName) {
             const formatted = formatDecodedRevert(inner.decodedName, inner.decodedArgs);
@@ -247,6 +291,9 @@ async function executeSafeTransactionInner(
               null,
             );
           }
+          if (msg.includes('GS026')) {
+            throw new Error(`Safe execTransaction reverted (${SAFE_STALE_NONCE_ERROR_TOKEN})`);
+          }
         }
         throw writeErr;
       }
@@ -258,10 +305,31 @@ async function executeSafeTransactionInner(
         value: params.value,
         data,
       });
+      try {
+        await options.onBroadcast?.(hash);
+      } catch (hookError) {
+        throw new SafePostBroadcastHookError(hash, hookError);
+      }
       // Wait inside the retry attempt so reverted Safe executions caused by
-      // stale nonce signatures (GS026/GS013) re-read nonce and re-sign.
+      // stale nonce / signature races re-read nonce and re-sign.
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
       if (receipt.status !== 'success') {
+        // Probe ownership before re-simulation or the stale-nonce fallback.
+        // A broadcast that later reverts because the signer was removed (or
+        // never was an owner) must not surface as a retryable nonce race —
+        // same terminal diagnosis as estimate-path GS026. Issue #1986 / #2090.
+        const signerIsOwner = await publicClient.readContract({
+          address: safeAddress,
+          abi: SAFE_ABI,
+          functionName: 'isOwner',
+          args: [from],
+        });
+        if (!signerIsOwner) {
+          throw new Error(
+            'Safe execTransaction rejected (GS026: invalid owner — signing key is not a Safe owner). ' +
+              'Repair the Safe owner set or repoint the agent signing key to a current owner.',
+          );
+        }
         // Safe v1.3 wraps inner reverts as GS013 — re-simulate to recover
         // the actual selector + args for diagnostics and to let tx-retry
         // mark known-permanent inner errors as non-recoverable.
@@ -293,9 +361,13 @@ async function executeSafeTransactionInner(
             hash as Hex,
           );
         }
-        // No inner revert on re-simulation: the on-chain failure was a
-        // signature/owner (GS026) nonce race — retryable, self-heals on re-sign.
-        throw new Error(`Safe execTransaction reverted (GS026/GS013 possible stale nonce, txHash=${hash})`);
+        // No inner revert on re-simulation: likely a stale Safe nonce or
+        // signature race — retryable, self-heals on re-sign. Do not embed
+        // GS026/GS013 in the message: estimate-path GS026 is classified after
+        // probing Safe ownership, and bare GS013 is terminal. Issue #1986.
+        throw new Error(
+          `Safe execTransaction reverted (${SAFE_STALE_NONCE_ERROR_TOKEN}, txHash=${hash})`,
+        );
       }
       await nonceLedger.markResolved();
       return hash;

@@ -1,10 +1,15 @@
 {
   "name": "@jinn-network/plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Product core for the Jinn Plugin — ports, product schemas, and the createJinnPlugin factory. Stage 1 foundation package (contracts + in-memory kit only).",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/plugin"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [

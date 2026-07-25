@@ -1,27 +1,22 @@
 /**
- * plain-patterns stage — deterministic regex redaction for two shapes the
- * probabilistic stages demonstrably miss (issue #1330, found while building
- * the harness-layer capture path in #1310):
+ * plain-patterns detector — deterministic regex findings for shapes the
+ * probabilistic detectors miss (#1330 / #1415 / #1959 / #1969):
  *
- *  - plain email addresses: openredaction's EMAIL pattern is unreliable
- *    (misses e.g. `jane.doe@example-corp.com`);
- *  - POSIX home-directory paths carrying a username
- *    (`/Users/<name>/…`, `/home/<name>/…`) — nothing else touches paths.
+ *  - email (B1)
+ *  - POSIX home-directory paths (D1)
+ *  - AWS/GCP credential-ID prefixes (A1)
+ *  - Ethereum-style wallet addresses `0x`+40 hex (C1)
  *
- * Graduated here from the harness-layer's capture-local stages so the daemon
- * capture publish path and the harness layer share ONE implementation.
- * Deliberately broad: over-redacting an email or a username is cheap; leaking
- * one is not.
- *
- * An opt-in third set (`credentialIds`, #1415) adds deterministic cloud
- * credential-ID prefixes for the seed profile, which runs without the entropy
- * fallback that covers these shapes in the trace profile.
+ * Emits findings only — disposition owns stubs. Wallet + credential-ID shapes
+ * are always registered in the shared inventory (#1969); policy decides.
  */
 
+import { applyDispositions } from './apply-dispositions.js';
 import { classifyKey, type KeyPolicy } from './key-policy.js';
-import type { Attributes, RedactionRecord, ScrubResult, ScrubStage } from './types.js';
+import type { Detector, Finding } from './finding.js';
+import type { Attributes, ScrubStage } from './types.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 /** Plain email shape. */
 const EMAIL_PATTERN =
@@ -30,17 +25,9 @@ const EMAIL_PATTERN =
 /** POSIX home-dir path segment carrying a username. */
 const HOME_PATH_PATTERN = /\/(?:Users|home)\/[^/\s"'`]+/g;
 
-type PatternSpec = { pattern: RegExp; replacement: string; detail: string; kind: string };
-
-const PATTERNS: PatternSpec[] = [
-  { pattern: EMAIL_PATTERN, replacement: '[EMAIL]', detail: 'email', kind: 'pii' },
-  { pattern: HOME_PATH_PATTERN, replacement: '/users/anon', detail: 'home-path', kind: 'pii' },
-];
-
 /**
  * Bare AWS access-key ID — the fixed four-char prefixes + 16 key chars that
- * secretlint's aws rule only scans for under `enableIDScanRule: true`, which
- * preset-recommend leaves off (#1415).
+ * secretlint's aws rule only scans for under `enableIDScanRule: true`.
  */
 const AWS_KEY_ID_PATTERN =
   /\b(?:A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}\b/g;
@@ -51,58 +38,95 @@ const AWS_KEY_ID_PATTERN =
  */
 const GCP_API_KEY_PATTERN = /\bAIza[0-9A-Za-z_-]{35}/g;
 
-const CREDENTIAL_ID_PATTERNS: PatternSpec[] = [
-  {
-    pattern: AWS_KEY_ID_PATTERN,
-    replacement: '[SECRET:aws-access-key-id]',
-    detail: 'aws-access-key-id',
-    kind: 'secret',
-  },
-  {
-    pattern: GCP_API_KEY_PATTERN,
-    replacement: '[SECRET:gcp-api-key]',
-    detail: 'gcp-api-key',
-    kind: 'secret',
-  },
+/**
+ * Ethereum-style wallet address: `0x` + exactly 40 hex chars (#1959 / C1).
+ * Bare 40-hex git SHAs and `0x`+64 tx hashes must survive.
+ */
+const ETH_ADDRESS_PATTERN = /\b0x[a-fA-F0-9]{40}\b/g;
+
+type PatternRule = {
+  pattern: RegExp;
+  class: Finding['class'];
+  evidence: string;
+};
+
+const RULES: PatternRule[] = [
+  { pattern: EMAIL_PATTERN, class: 'B1', evidence: 'email' },
+  { pattern: HOME_PATH_PATTERN, class: 'D1', evidence: 'home-path' },
+  { pattern: AWS_KEY_ID_PATTERN, class: 'A1', evidence: 'aws-access-key-id' },
+  { pattern: GCP_API_KEY_PATTERN, class: 'A1', evidence: 'gcp-api-key' },
+  { pattern: ETH_ADDRESS_PATTERN, class: 'C1', evidence: 'eth-address' },
 ];
 
 export interface PlainPatternsOptions {
   /**
-   * Adds the deterministic credential-ID prefixes above (#1415). Default false:
-   * the trace profile already catches these via secretlint's entropy fallback
-   * and must stay byte-identical. The seed profile (which runs without the
-   * fallback) turns this on.
+   * @deprecated (#1969) Credential IDs are always in the shared inventory.
+   * Kept so call sites that pass `{ credentialIds: true }` still type-check.
    */
   credentialIds?: boolean;
+  /**
+   * @deprecated (#1969) Wallet addresses are always in the shared inventory.
+   * Kept so call sites that pass `{ walletAddresses: true }` still type-check.
+   */
+  walletAddresses?: boolean;
 }
 
-export function plainPatternsStage(policy: KeyPolicy, opts: PlainPatternsOptions = {}): ScrubStage {
-  const patterns = opts.credentialIds ? [...PATTERNS, ...CREDENTIAL_ID_PATTERNS] : PATTERNS;
+function collectMatches(
+  text: string,
+  key: string,
+  rule: PatternRule,
+  detector: { name: string; version: string },
+): Finding[] {
+  const findings: Finding[] = [];
+  const re = new RegExp(
+    rule.pattern.source,
+    rule.pattern.flags.includes('g') ? rule.pattern.flags : `${rule.pattern.flags}g`,
+  );
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    findings.push({
+      class: rule.class,
+      span: { key, start: match.index, end: match.index + match[0]!.length },
+      confidence: 'VERY_HIGH',
+      evidence: [rule.evidence],
+      detector,
+    });
+  }
+  return findings;
+}
+
+export function plainPatternsDetector(
+  policy: KeyPolicy,
+  _opts: PlainPatternsOptions = {},
+): Detector {
+  const meta = { name: 'plain-patterns', version: VERSION };
   return {
-    name: 'plain-patterns',
-    version: VERSION,
-    scrub(attributes: Attributes): ScrubResult {
-      const out: Attributes = {};
-      const redactions: RedactionRecord[] = [];
+    ...meta,
+    detect(attributes: Attributes): Finding[] {
+      const findings: Finding[] = [];
       for (const [key, value] of Object.entries(attributes)) {
-        if (typeof value !== 'string' || classifyKey(key, policy) !== 'content') {
-          out[key] = value;
-          continue;
+        if (typeof value !== 'string' || classifyKey(key, policy) !== 'content') continue;
+        for (const rule of RULES) {
+          findings.push(...collectMatches(value, key, rule, meta));
         }
-        let scrubbed = value;
-        for (const { pattern, replacement, detail, kind } of patterns) {
-          let hits = 0;
-          scrubbed = scrubbed.replace(pattern, () => {
-            hits += 1;
-            return replacement;
-          });
-          for (let i = 0; i < hits; i += 1) {
-            redactions.push({ key, stage: 'plain-patterns', kind, detail });
-          }
-        }
-        out[key] = scrubbed;
       }
-      return { attributes: out, redactions };
+      return findings;
+    },
+  };
+}
+
+/**
+ * Legacy ScrubStage wrapper: detect + apply default dispositions. New callers
+ * should use {@link plainPatternsDetector} via ScrubPipeline.
+ */
+export function plainPatternsStage(policy: KeyPolicy, opts: PlainPatternsOptions = {}): ScrubStage {
+  const detector = plainPatternsDetector(policy, opts);
+  return {
+    name: detector.name,
+    version: detector.version,
+    scrub(attributes: Attributes) {
+      const findings = detector.detect(attributes) as Finding[];
+      return applyDispositions(attributes, findings);
     },
   };
 }

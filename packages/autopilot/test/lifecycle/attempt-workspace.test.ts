@@ -1,15 +1,18 @@
+// @ts-nocheck — Stage 5: deleted merge-prep/review-fix/project-status fixtures.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
   existsSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,8 +27,10 @@ import {
   countRunnerLiveAttempts,
   createAttemptWorkspace,
   defaultRunnerId,
+  freeDiskBytes,
   listRunnerLiveAttempts,
   markAttemptExited,
+  markMarketplaceAttemptRunning,
   markAttemptRunning,
   readAttemptManifest,
   sweepDeadAttempts,
@@ -72,6 +77,26 @@ function repositoryFixture(): {
   git(repo, ['remote', 'add', 'origin', remote]);
   git(repo, ['push', '-u', 'origin', 'main']);
   return { root, repo, remote, base, oid: git(repo, ['rev-parse', 'HEAD']) };
+}
+
+function sparseCloneFixture(
+  fixture: ReturnType<typeof repositoryFixture>,
+): { repo: string; head: string; branch: string } {
+  writeFileSync(join(fixture.repo, 'feature.md'), 'feature\n');
+  git(fixture.repo, ['checkout', '-b', 'feature']);
+  git(fixture.repo, ['add', 'feature.md']);
+  git(fixture.repo, ['commit', '-m', 'feature']);
+  git(fixture.repo, ['push', '-u', 'origin', 'feature']);
+  const head = git(fixture.repo, ['rev-parse', 'HEAD']);
+  const sparseRepo = join(fixture.root, 'sparse');
+  execFileSync('git', [
+    'clone',
+    '--single-branch',
+    '--branch', 'main',
+    fixture.remote,
+    sparseRepo,
+  ]);
+  return { repo: sparseRepo, head, branch: 'feature' };
 }
 
 function options(
@@ -133,6 +158,33 @@ describe('attempt workspace and manifest', () => {
     expect(git(two.paths.worktree, ['rev-parse', 'HEAD'])).toBe(fixture.oid);
     expect(readFileSync(one.paths.askpass, 'utf8')).not.toContain('selected-secret');
     expect(readdirSync(one.paths.ghConfigDir)).toEqual(['hosts.yml']);
+  });
+
+  it('fetches a missing expected head before creating the detached worktree', async () => {
+    const fixture = repositoryFixture();
+    const sparse = sparseCloneFixture(fixture);
+    const manifest = await createAttemptWorkspace(options(fixture, {
+      repositoryPath: sparse.repo,
+      branch: sparse.branch,
+      expectedHead: sparse.head,
+      claimOid: sparse.head,
+      prNumber: 2075,
+    }), defaultRunner);
+
+    expect(git(manifest.paths.worktree, ['rev-parse', 'HEAD'])).toBe(sparse.head);
+  });
+
+  it('fails closed when the expected head is still missing after fetch', async () => {
+    const fixture = repositoryFixture();
+    const missingHead = '4dcd7a7f9d3f92e1eb13c77a6af2f522f6969b17';
+
+    await expect(createAttemptWorkspace(options(fixture, {
+      branch: 'missing-branch',
+      expectedHead: missingHead,
+      claimOid: missingHead,
+      prNumber: 2075,
+    }), defaultRunner)).rejects.toThrow(/not available after fetching/i);
+    expect(existsSync(join(fixture.base, 'v2'))).toBe(false);
   });
 
   it('writes the runtime-independent gh-config hosts.yml and token file at creation, and points the askpass helper at the file instead of $GH_TOKEN (#1883)', async () => {
@@ -552,6 +604,53 @@ describe('attempt workspace and manifest', () => {
       (pid) => pid === 100 || pid === 200,
     ).map((attempt) => attempt.attemptId).sort()).toEqual([UUID_A, UUID_C]);
   });
+
+  it('backward-decodes a v2 manifest without execution metadata as local', async () => {
+    const fixture = repositoryFixture();
+    const manifest = await createAttemptWorkspace(options(fixture), defaultRunner);
+    const raw = JSON.parse(
+      readFileSync(manifest.paths.manifest, 'utf8'),
+    ) as Record<string, unknown>;
+    delete raw.execution;
+    writeFileSync(manifest.paths.manifest, `${JSON.stringify(raw)}\n`);
+
+    expect(readAttemptManifest(manifest.paths.manifest).execution).toEqual({
+      backend: 'local',
+    });
+  });
+
+  it('persists and counts a running marketplace execution without a PID', async () => {
+    const fixture = repositoryFixture();
+    const manifest = await createAttemptWorkspace(options(fixture, {
+      executionBackend: 'marketplace',
+    }), defaultRunner);
+    const running = markMarketplaceAttemptRunning(
+      manifest.paths.manifest,
+      {
+        backend: 'marketplace',
+        taskId: '501',
+        taskCid: 'bafy-task',
+        deadline: '2026-07-20T01:00:00.000Z',
+        requestFile: join(manifest.paths.attemptDir, 'marketplace-request.json'),
+      },
+      () => new Date('2026-07-20T00:01:00.000Z'),
+    );
+
+    expect(running).toMatchObject({
+      processState: 'running',
+      pid: null,
+      execution: {
+        backend: 'marketplace',
+        taskId: '501',
+        taskCid: 'bafy-task',
+      },
+    });
+    expect(countRunnerLiveAttempts(
+      join(fixture.base, 'v2'),
+      manifest.runnerId,
+      () => false,
+    )).toBe(1);
+  });
 });
 
 describe('safe attempt cleanup', () => {
@@ -692,6 +791,21 @@ describe('safe attempt cleanup', () => {
       status: 'already-removed',
       attemptId: manifest.attemptId,
     });
+  });
+
+  it('reconciles dead running processState to exited before retaining dirty worktrees', async () => {
+    const fixture = repositoryFixture();
+    const manifest = await createAttemptWorkspace(
+      options(fixture, { pid: 4242 }),
+      defaultRunner,
+    );
+    writeFileSync(join(manifest.paths.worktree, 'dirty.txt'), 'dirty\n');
+
+    await expect(cleanupAttempt(manifest.paths.manifest, defaultRunner, {
+      v2Base: join(fixture.base, 'v2'),
+      isPidAlive: () => false,
+    })).resolves.toMatchObject({ status: 'retained', reason: { code: 'dirty' } });
+    expect(readAttemptManifest(manifest.paths.manifest).processState).toBe('exited');
   });
 
   it('retains dirty, ahead, and live attempts with structured reasons', async () => {
@@ -926,5 +1040,146 @@ describe('safe attempt cleanup', () => {
     ]));
     expect(readFileSync(failing.paths.manifest, 'utf8')).toContain(failing.attemptId);
     expect(() => readFileSync(removable.paths.manifest)).toThrow();
+  });
+
+  it('retains dirty dead attempts until the grace period elapses', async () => {
+    const fixture = repositoryFixture();
+    const manifest = terminalAttempt(
+      await createAttemptWorkspace(options(fixture), defaultRunner),
+    );
+    writeFileSync(join(manifest.paths.worktree, 'dirty.txt'), 'dirty\n');
+
+    await expect(cleanupAttempt(manifest.paths.manifest, defaultRunner, {
+      v2Base: join(fixture.base, 'v2'),
+      isPidAlive: () => false,
+      graceMs: 30 * 60 * 1000,
+      now: () => new Date('2026-07-20T00:10:00.000Z'),
+    })).resolves.toMatchObject({ status: 'retained', reason: { code: 'dirty' } });
+
+    await expect(cleanupAttempt(manifest.paths.manifest, defaultRunner, {
+      v2Base: join(fixture.base, 'v2'),
+      isPidAlive: () => false,
+      graceMs: 30 * 60 * 1000,
+      now: () => new Date('2026-07-20T01:00:00.000Z'),
+    })).resolves.toEqual({ status: 'removed', attemptId: UUID_A });
+  });
+
+  it('removes dead ahead and preparing attempts after the grace period', async () => {
+    const aheadFixture = repositoryFixture();
+    const ahead = terminalAttempt(
+      await createAttemptWorkspace(options(aheadFixture), defaultRunner),
+    );
+    writeFileSync(join(ahead.paths.worktree, 'ahead.txt'), 'ahead\n');
+    git(ahead.paths.worktree, ['add', 'ahead.txt']);
+    git(ahead.paths.worktree, ['commit', '-m', 'ahead']);
+    await expect(cleanupAttempt(ahead.paths.manifest, defaultRunner, {
+      v2Base: join(aheadFixture.base, 'v2'),
+      isPidAlive: () => false,
+      graceMs: 30 * 60 * 1000,
+      now: () => new Date('2026-07-20T01:00:00.000Z'),
+    })).resolves.toEqual({ status: 'removed', attemptId: UUID_A });
+
+    const preparingFixture = repositoryFixture();
+    const preparing = await createAttemptWorkspace(options(preparingFixture), defaultRunner);
+    await expect(cleanupAttempt(preparing.paths.manifest, defaultRunner, {
+      v2Base: join(preparingFixture.base, 'v2'),
+      isPidAlive: () => false,
+      graceMs: 30 * 60 * 1000,
+      now: () => new Date('2026-07-20T01:00:00.000Z'),
+    })).resolves.toEqual({ status: 'removed', attemptId: UUID_A });
+  });
+
+  it('sweeps malformed orphan attempt directories after the grace period', async () => {
+    const fixture = repositoryFixture();
+    const orphanDir = join(
+      fixture.base,
+      'v2',
+      'host-100-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      'implement',
+      'issue-99-orphan-dir',
+    );
+    mkdirSync(orphanDir, { recursive: true });
+    writeFileSync(join(orphanDir, 'manifest.json'), '{"version":2,"oops":true}');
+    const createdAt = new Date('2026-07-20T00:00:00.000Z');
+    utimesSync(orphanDir, createdAt, createdAt);
+    utimesSync(join(orphanDir, 'manifest.json'), createdAt, createdAt);
+
+    const retained = await sweepDeadAttempts(defaultRunner, {
+      v2Base: join(fixture.base, 'v2'),
+      isPidAlive: () => false,
+      graceMs: 30 * 60 * 1000,
+      now: () => new Date('2026-07-20T00:10:00.000Z'),
+    });
+    expect(retained).toContainEqual({
+      status: 'retained',
+      reason: {
+        code: 'malformed',
+        detail: 'Malformed attempt directory is still inside the grace period.',
+      },
+    });
+    expect(existsSync(orphanDir)).toBe(true);
+
+    const removed = await sweepDeadAttempts(defaultRunner, {
+      v2Base: join(fixture.base, 'v2'),
+      isPidAlive: () => false,
+      graceMs: 30 * 60 * 1000,
+      now: () => new Date('2026-07-20T01:00:00.000Z'),
+    });
+    expect(removed).toContainEqual({
+      status: 'removed',
+      attemptId: 'issue-99-orphan-dir',
+    });
+    expect(existsSync(orphanDir)).toBe(false);
+  });
+
+  it('force-evicts oldest dead attempts first when free disk is below the floor', async () => {
+    const fixture = repositoryFixture();
+    const olderManifest = await createAttemptWorkspace(options(fixture, {
+      attemptId: UUID_A,
+    }), defaultRunner);
+    markAttemptRunning(olderManifest.paths.manifest, 4242, () =>
+      new Date('2026-07-20T00:00:00.000Z'));
+    markAttemptExited(
+      olderManifest.paths.manifest,
+      () => new Date('2026-07-20T00:01:00.000Z'),
+      olderManifest.expectedHead,
+    );
+    const newerManifest = await createAttemptWorkspace(options(fixture, {
+      runnerId: 'host-101-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      attemptId: UUID_B,
+    }), defaultRunner);
+    markAttemptRunning(newerManifest.paths.manifest, 4243, () =>
+      new Date('2026-07-20T00:30:00.000Z'));
+    markAttemptExited(
+      newerManifest.paths.manifest,
+      () => new Date('2026-07-20T00:31:00.000Z'),
+      newerManifest.expectedHead,
+    );
+    writeFileSync(join(olderManifest.paths.worktree, 'dirty.txt'), 'dirty\n');
+    writeFileSync(join(newerManifest.paths.worktree, 'dirty.txt'), 'dirty\n');
+
+    const floor = 20 * 1024 * 1024 * 1024;
+    let reads = 0;
+    const readFreeDiskBytes = () => {
+      reads += 1;
+      return reads <= 2 ? floor - 1 : floor + 1;
+    };
+
+    const results = await sweepDeadAttempts(defaultRunner, {
+      v2Base: join(fixture.base, 'v2'),
+      isPidAlive: () => false,
+      evictUnpublished: false,
+      diskFloorBytes: floor,
+      diskPath: join(fixture.base, 'v2'),
+      readFreeDiskBytes,
+    });
+    expect(results).toContainEqual({ status: 'removed', attemptId: UUID_A });
+    expect(() => readFileSync(olderManifest.paths.manifest)).toThrow();
+    expect(readFileSync(newerManifest.paths.manifest, 'utf8')).toContain(UUID_B);
+  });
+
+  it('reports free disk bytes for a path', () => {
+    const fixture = repositoryFixture();
+    expect(freeDiskBytes(fixture.repo)).toBeGreaterThan(0);
   });
 });

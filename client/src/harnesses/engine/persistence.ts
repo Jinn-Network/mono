@@ -12,7 +12,14 @@
 import type Database from 'better-sqlite3';
 import { assertValidTransition, TERMINAL_STATES, type TaskRunState } from './state.js';
 import type { Task } from '../../types/task.js';
-import type { PersistedTaskRun } from '../../types/task-run.js';
+import type {
+  AdoptionObservation,
+  AdoptionReceiptLocation,
+  PersistedTaskRun,
+} from '../../types/task-run.js';
+import type {
+  AutopilotAdoptionReceipt,
+} from '@jinn-network/sdk/solvernets/jinn-repo';
 
 // ── Concurrency error ─────────────────────────────────────────────────────────
 
@@ -74,6 +81,17 @@ CREATE TABLE IF NOT EXISTS task_runs (
   artifact_cids           TEXT,
   manifest_cid            TEXT,
   delivery_tx_hash        TEXT,
+  delivery_digest         TEXT,
+  delivery_discovery_anchor_tx_hash TEXT,
+  delivery_discovery_anchor_block_number INTEGER,
+  adoption_receipt_location TEXT,
+  adoption_receipt_authors  TEXT,
+  adoption_wait_started_at  INTEGER,
+  adoption_observation_attempts INTEGER NOT NULL DEFAULT 0,
+  adoption_next_observation_at INTEGER,
+  adoption_last_observation TEXT,
+  adoption_accepted_receipt TEXT,
+  adoption_last_error       TEXT,
 
   -- Additive columns (schema migration 2026-04-17):
   -- manifest_generated_at: persisted once at first PACKAGING entry; reused on
@@ -189,6 +207,17 @@ export type TaskRunPatch = Partial<{
   artifactCids: Record<string, string> | null;
   manifestCid: string | null;
   deliveryTxHash: string | null;
+  deliveryDigest: string | null;
+  deliveryDiscoveryAnchorTxHash: string | null;
+  deliveryDiscoveryAnchorBlockNumber: number | null;
+  adoptionReceiptLocation: AdoptionReceiptLocation | null;
+  adoptionReceiptAuthors: string[] | null;
+  adoptionWaitStartedAt: number | null;
+  adoptionObservationAttempts: number;
+  adoptionNextObservationAt: number | null;
+  adoptionLastObservation: AdoptionObservation | null;
+  adoptionAcceptedReceipt: AutopilotAdoptionReceipt | null;
+  adoptionLastError: string | null;
   /** Persisted once at first PACKAGING entry; reused on retry. */
   manifestGeneratedAt: number | null;
   /** keccak256 of signed manifest canonical JSON (evidenceHash for claimDelivery). */
@@ -245,6 +274,17 @@ interface RawRow {
   artifact_cids: string | null;
   manifest_cid: string | null;
   delivery_tx_hash: string | null;
+  delivery_digest: string | null;
+  delivery_discovery_anchor_tx_hash: string | null;
+  delivery_discovery_anchor_block_number: number | null;
+  adoption_receipt_location: string | null;
+  adoption_receipt_authors: string | null;
+  adoption_wait_started_at: number | null;
+  adoption_observation_attempts: number;
+  adoption_next_observation_at: number | null;
+  adoption_last_observation: string | null;
+  adoption_accepted_receipt: string | null;
+  adoption_last_error: string | null;
   manifest_generated_at: number | null;
   evidence_hash: string | null;
   task_payload: string | null;
@@ -297,6 +337,17 @@ function runAdditiveMigrations(db: Database.Database): void {
     // envelope.task.createdAt. NULL when the RPC lookup failed or hasn't
     // run yet — never backfilled with a guess.
     { column: 'onchain_creation_timestamp', ddl: 'ALTER TABLE task_runs ADD COLUMN onchain_creation_timestamp INTEGER' },
+    { column: 'delivery_digest', ddl: 'ALTER TABLE task_runs ADD COLUMN delivery_digest TEXT' },
+    { column: 'delivery_discovery_anchor_tx_hash', ddl: 'ALTER TABLE task_runs ADD COLUMN delivery_discovery_anchor_tx_hash TEXT' },
+    { column: 'delivery_discovery_anchor_block_number', ddl: 'ALTER TABLE task_runs ADD COLUMN delivery_discovery_anchor_block_number INTEGER' },
+    { column: 'adoption_receipt_location', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_receipt_location TEXT' },
+    { column: 'adoption_receipt_authors', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_receipt_authors TEXT' },
+    { column: 'adoption_wait_started_at', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_wait_started_at INTEGER' },
+    { column: 'adoption_observation_attempts', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_observation_attempts INTEGER NOT NULL DEFAULT 0' },
+    { column: 'adoption_next_observation_at', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_next_observation_at INTEGER' },
+    { column: 'adoption_last_observation', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_last_observation TEXT' },
+    { column: 'adoption_accepted_receipt', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_accepted_receipt TEXT' },
+    { column: 'adoption_last_error', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_last_error TEXT' },
   ];
 
   // Fetch existing column names once so each ALTER is a no-op if the column
@@ -395,6 +446,17 @@ function rowToTaskRun(row: RawRow): PersistedTaskRun {
     artifactCids: parseJson(row.artifact_cids),
     manifestCid: row.manifest_cid,
     deliveryTxHash: row.delivery_tx_hash,
+    deliveryDigest: row.delivery_digest,
+    deliveryDiscoveryAnchorTxHash: row.delivery_discovery_anchor_tx_hash,
+    deliveryDiscoveryAnchorBlockNumber: row.delivery_discovery_anchor_block_number,
+    adoptionReceiptLocation: parseJson<AdoptionReceiptLocation>(row.adoption_receipt_location),
+    adoptionReceiptAuthors: parseJson<string[]>(row.adoption_receipt_authors),
+    adoptionWaitStartedAt: row.adoption_wait_started_at,
+    adoptionObservationAttempts: row.adoption_observation_attempts ?? 0,
+    adoptionNextObservationAt: row.adoption_next_observation_at,
+    adoptionLastObservation: parseJson<AdoptionObservation>(row.adoption_last_observation),
+    adoptionAcceptedReceipt: parseJson<AutopilotAdoptionReceipt>(row.adoption_accepted_receipt),
+    adoptionLastError: row.adoption_last_error,
     manifestGeneratedAt: row.manifest_generated_at,
     evidenceHash: row.evidence_hash,
     task: parseJson<Task>(row.task_payload),
@@ -534,6 +596,64 @@ export class TaskRunPersistence {
     if (patch.deliveryTxHash !== undefined) {
       setClauses.push('delivery_tx_hash = @deliveryTxHash');
       params['deliveryTxHash'] = patch.deliveryTxHash;
+    }
+    if (patch.deliveryDigest !== undefined) {
+      setClauses.push('delivery_digest = @deliveryDigest');
+      params['deliveryDigest'] = patch.deliveryDigest;
+    }
+    if (patch.deliveryDiscoveryAnchorTxHash !== undefined) {
+      setClauses.push('delivery_discovery_anchor_tx_hash = @deliveryDiscoveryAnchorTxHash');
+      params['deliveryDiscoveryAnchorTxHash'] = patch.deliveryDiscoveryAnchorTxHash;
+    }
+    if (patch.deliveryDiscoveryAnchorBlockNumber !== undefined) {
+      setClauses.push('delivery_discovery_anchor_block_number = @deliveryDiscoveryAnchorBlockNumber');
+      params['deliveryDiscoveryAnchorBlockNumber'] = patch.deliveryDiscoveryAnchorBlockNumber;
+    }
+    if (patch.adoptionReceiptLocation !== undefined) {
+      setClauses.push('adoption_receipt_location = @adoptionReceiptLocation');
+      params['adoptionReceiptLocation'] = patch.adoptionReceiptLocation === null
+        ? null
+        : JSON.stringify(patch.adoptionReceiptLocation);
+    }
+    if (patch.adoptionReceiptAuthors !== undefined) {
+      setClauses.push('adoption_receipt_authors = @adoptionReceiptAuthors');
+      params['adoptionReceiptAuthors'] = patch.adoptionReceiptAuthors === null
+        ? null
+        : JSON.stringify(patch.adoptionReceiptAuthors);
+    }
+    if (patch.adoptionWaitStartedAt !== undefined) {
+      setClauses.push('adoption_wait_started_at = @adoptionWaitStartedAt');
+      params['adoptionWaitStartedAt'] = patch.adoptionWaitStartedAt;
+    }
+    if (patch.adoptionObservationAttempts !== undefined) {
+      setClauses.push(
+        'adoption_observation_attempts = @adoptionObservationAttempts',
+      );
+      params['adoptionObservationAttempts'] =
+        patch.adoptionObservationAttempts;
+    }
+    if (patch.adoptionNextObservationAt !== undefined) {
+      setClauses.push(
+        'adoption_next_observation_at = @adoptionNextObservationAt',
+      );
+      params['adoptionNextObservationAt'] =
+        patch.adoptionNextObservationAt;
+    }
+    if (patch.adoptionLastObservation !== undefined) {
+      setClauses.push('adoption_last_observation = @adoptionLastObservation');
+      params['adoptionLastObservation'] = patch.adoptionLastObservation === null
+        ? null
+        : JSON.stringify(patch.adoptionLastObservation);
+    }
+    if (patch.adoptionAcceptedReceipt !== undefined) {
+      setClauses.push('adoption_accepted_receipt = @adoptionAcceptedReceipt');
+      params['adoptionAcceptedReceipt'] = patch.adoptionAcceptedReceipt === null
+        ? null
+        : JSON.stringify(patch.adoptionAcceptedReceipt);
+    }
+    if (patch.adoptionLastError !== undefined) {
+      setClauses.push('adoption_last_error = @adoptionLastError');
+      params['adoptionLastError'] = patch.adoptionLastError;
     }
     if (patch.manifestGeneratedAt !== undefined) {
       setClauses.push('manifest_generated_at = @manifestGeneratedAt');
@@ -759,6 +879,94 @@ export class TaskRunPersistence {
     this.db.prepare(
       'UPDATE task_runs SET delivery_tx_hash = ? WHERE request_id = ?',
     ).run(deliveryTxHash, requestId);
+  }
+
+  /** Journal and confirm the correctness-critical pre-adoption metadata anchor. */
+  setDeliveryDiscoveryAnchor(
+    requestId: string,
+    txHash: string | null,
+    blockNumber: number | null,
+  ): void {
+    this.db.prepare(`
+      UPDATE task_runs
+      SET delivery_discovery_anchor_tx_hash = ?,
+          delivery_discovery_anchor_block_number = ?
+      WHERE request_id = ? AND state = 'DELIVERING'
+    `).run(txHash, blockNumber, requestId);
+  }
+
+  /** Persist a receipt observation while the run remains AWAITING_ADOPTION. */
+  setAdoptionObservation(
+    requestId: string,
+    observation: AdoptionObservation,
+    nextObservationAt: number,
+  ): void {
+    this.db.prepare(`
+      UPDATE task_runs
+      SET adoption_last_observation = ?, adoption_last_error = NULL,
+          adoption_observation_attempts = adoption_observation_attempts + 1,
+          adoption_next_observation_at = ?,
+          state_updated_at = ?
+      WHERE request_id = ? AND state = 'AWAITING_ADOPTION'
+    `).run(
+      JSON.stringify(observation),
+      nextObservationAt,
+      Date.now(),
+      requestId,
+    );
+  }
+
+  /** Persist a retryable observer error without failing or advancing the run. */
+  setAdoptionError(
+    requestId: string,
+    error: string,
+    nextObservationAt: number,
+  ): void {
+    this.db.prepare(`
+      UPDATE task_runs
+      SET adoption_last_error = ?,
+          adoption_observation_attempts = adoption_observation_attempts + 1,
+          adoption_next_observation_at = ?,
+          state_updated_at = ?
+      WHERE request_id = ? AND state = 'AWAITING_ADOPTION'
+    `).run(error, nextObservationAt, Date.now(), requestId);
+  }
+
+  /** Refresh the adoption observation at the final Router-claim boundary. */
+  setClaimingAdoptionObservation(
+    requestId: string,
+    observation: AdoptionObservation,
+    nextObservationAt: number | null,
+  ): void {
+    this.db.prepare(`
+      UPDATE task_runs
+      SET adoption_last_observation = ?, adoption_last_error = NULL,
+          adoption_observation_attempts = adoption_observation_attempts + 1,
+          adoption_next_observation_at = ?,
+          state_updated_at = ?
+      WHERE request_id = ? AND state = 'CLAIMING_DELIVERY'
+    `).run(
+      JSON.stringify(observation),
+      nextObservationAt,
+      Date.now(),
+      requestId,
+    );
+  }
+
+  /** Keep a claim retryable when the claim-boundary observer is unavailable. */
+  setClaimingAdoptionError(
+    requestId: string,
+    error: string,
+    nextObservationAt: number,
+  ): void {
+    this.db.prepare(`
+      UPDATE task_runs
+      SET adoption_last_error = ?,
+          adoption_observation_attempts = adoption_observation_attempts + 1,
+          adoption_next_observation_at = ?,
+          state_updated_at = ?
+      WHERE request_id = ? AND state = 'CLAIMING_DELIVERY'
+    `).run(error, nextObservationAt, Date.now(), requestId);
   }
 
   /**

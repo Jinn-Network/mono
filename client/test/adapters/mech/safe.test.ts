@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Hex } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { buildSafeSignature, createClients, executeSafeTransaction } from '../../../src/adapters/mech/safe.js';
-import { createMemoryTxSubmissionLedger } from '../../../src/tx-retry.js';
+import { createMemoryTxSubmissionLedger, isRecoverableTransactionError } from '../../../src/tx-retry.js';
 
 const TEST_PRIVATE_KEY = `0x${'22'.repeat(32)}` as const;
 const TEST_SIGNER_ADDRESS = '0x000000000000000000000000000000000000bEEF' as const;
@@ -94,6 +94,137 @@ describe('executeSafeTransaction nonce refresh', () => {
     expect(writeContract).toHaveBeenCalledTimes(2);
     expect(writeContract.mock.calls[0]![0]).toMatchObject({ nonce: 2301 });
     expect(writeContract.mock.calls[1]![0]).toMatchObject({ nonce: 2302 });
+  });
+});
+
+describe('executeSafeTransaction wallet-bound hooks', () => {
+  function clients(writeContract: ReturnType<typeof vi.fn>) {
+    const waitForTransactionReceipt = vi.fn();
+    const publicClient = {
+      getChainId: vi.fn().mockResolvedValue(baseSepolia.id),
+      getTransactionCount: vi.fn().mockResolvedValue(7),
+      readContract: vi.fn(async (args: { functionName: string }) => {
+        if (args.functionName === 'nonce') return 0n;
+        if (args.functionName === 'getTransactionHash') return TEST_SAFE_TX_HASH;
+        throw new Error(`unexpected readContract call: ${args.functionName}`);
+      }),
+      estimateFeesPerGas: vi.fn().mockResolvedValue({
+        maxFeePerGas: 100n,
+        maxPriorityFeePerGas: 10n,
+      }),
+      getGasPrice: vi.fn(),
+      waitForTransactionReceipt,
+    };
+    const walletClient = {
+      account: { address: TEST_SIGNER_ADDRESS },
+      chain: baseSepolia,
+      signMessage: vi.fn().mockResolvedValue(TEST_SAFE_SIGNATURE),
+      writeContract,
+    };
+    return { publicClient, walletClient, waitForTransactionReceipt };
+  }
+
+  it('awaits transaction-hash persistence after ledger record and before receipt waiting', async () => {
+    const writeContract = vi.fn().mockResolvedValue(TEST_SUCCESS_HASH);
+    const { publicClient, walletClient, waitForTransactionReceipt } = clients(writeContract);
+    const ledger = createMemoryTxSubmissionLedger();
+    const originalRecord = ledger.recordTxSubmission.bind(ledger);
+    const order: string[] = [];
+    vi.spyOn(ledger, 'recordTxSubmission').mockImplementation(async (entry) => {
+      await originalRecord(entry);
+      order.push('ledger');
+    });
+    let releasePersistence!: () => void;
+    const persistenceGate = new Promise<void>((resolve) => {
+      releasePersistence = resolve;
+    });
+    const onBroadcast = vi.fn(async () => {
+      order.push('hook');
+      await persistenceGate;
+    });
+    waitForTransactionReceipt.mockImplementation(() => new Promise((resolve) => {
+      order.push('receipt');
+      setTimeout(() => resolve({ status: 'success' }), 100);
+    }));
+
+    const pending = executeSafeTransaction(
+      publicClient as never,
+      walletClient as never,
+      {
+        safeAddress: TEST_SAFE_ADDRESS,
+        to: TEST_TARGET_ADDRESS,
+        value: 0n,
+        data: TEST_CALL_DATA,
+      },
+      {
+        ledger,
+        onBroadcast,
+      },
+    );
+    await vi.waitFor(() => expect(onBroadcast).toHaveBeenCalledWith(TEST_SUCCESS_HASH));
+    expect(order).toEqual(['ledger', 'hook']);
+    expect(waitForTransactionReceipt).not.toHaveBeenCalled();
+
+    releasePersistence();
+    await vi.waitFor(() => expect(waitForTransactionReceipt).toHaveBeenCalledWith({
+      hash: TEST_SUCCESS_HASH,
+    }));
+    await expect(pending).resolves.toBe(TEST_SUCCESS_HASH);
+  });
+
+  it('surfaces a post-broadcast persistence failure with the hash and never retries', async () => {
+    const writeContract = vi.fn().mockResolvedValue(TEST_SUCCESS_HASH);
+    const { publicClient, walletClient, waitForTransactionReceipt } = clients(writeContract);
+
+    await expect(executeSafeTransaction(
+      publicClient as never,
+      walletClient as never,
+      {
+        safeAddress: TEST_SAFE_ADDRESS,
+        to: TEST_TARGET_ADDRESS,
+        value: 0n,
+        data: TEST_CALL_DATA,
+      },
+      {
+        ledger: createMemoryTxSubmissionLedger(),
+        onBroadcast: async () => {
+          throw new Error('503 persistence failed');
+        },
+      },
+    )).rejects.toMatchObject({
+      name: 'SafePostBroadcastHookError',
+      txHash: TEST_SUCCESS_HASH,
+    });
+    expect(writeContract).toHaveBeenCalledOnce();
+    expect(waitForTransactionReceipt).not.toHaveBeenCalled();
+  });
+
+  it('checks the broadcast fence on every retry attempt and stops before a lost-owner write', async () => {
+    const writeContract = vi.fn()
+      .mockRejectedValueOnce(new Error('503 service unavailable'))
+      .mockResolvedValueOnce(TEST_SUCCESS_HASH);
+    const { publicClient, walletClient, waitForTransactionReceipt } = clients(writeContract);
+    const beforeBroadcast = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('ownership lost'));
+
+    await expect(executeSafeTransaction(
+      publicClient as never,
+      walletClient as never,
+      {
+        safeAddress: TEST_SAFE_ADDRESS,
+        to: TEST_TARGET_ADDRESS,
+        value: 0n,
+        data: TEST_CALL_DATA,
+      },
+      {
+        ledger: createMemoryTxSubmissionLedger(),
+        beforeBroadcast,
+      },
+    )).rejects.toMatchObject({ name: 'SafeBroadcastFenceError' });
+    expect(beforeBroadcast).toHaveBeenCalledTimes(2);
+    expect(writeContract).toHaveBeenCalledOnce();
+    expect(waitForTransactionReceipt).not.toHaveBeenCalled();
   });
 });
 
@@ -352,5 +483,168 @@ describe('executeSafeTransaction reconcile-first (issue #897)', () => {
     expect(getTransactionReceipt).not.toHaveBeenCalledWith({ hash: FOREIGN_HASH });
     // Two write attempts: the failed underpriced one, then the fresh re-sign.
     expect(writeContract).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('executeSafeTransaction GS026 owner mismatch (issue #1986)', () => {
+  const makeClients = (isOwner = false) => {
+    const signMessage = vi.fn().mockResolvedValue(TEST_SAFE_SIGNATURE);
+    const readContract = vi.fn(async (args: { functionName: string }) => {
+      if (args.functionName === 'nonce') return 0n;
+      if (args.functionName === 'getTransactionHash') return TEST_SAFE_TX_HASH;
+      if (args.functionName === 'isOwner') return isOwner;
+      throw new Error(`unexpected readContract call: ${args.functionName}`);
+    });
+    const estimateFeesPerGas = vi.fn().mockResolvedValue({
+      maxFeePerGas: 100n,
+      maxPriorityFeePerGas: 10n,
+    });
+    const getGasPrice = vi.fn();
+    const getChainId = vi.fn().mockResolvedValue(baseSepolia.id);
+    const getTransactionCount = vi.fn().mockResolvedValue(2301);
+    return {
+      publicClient: {
+        getChainId,
+        getTransactionCount,
+        readContract,
+        estimateFeesPerGas,
+        getGasPrice,
+      } as never,
+      walletClient: {
+        account: { address: TEST_SIGNER_ADDRESS },
+        chain: baseSepolia,
+        signMessage,
+      } as never,
+      signMessage,
+      readContract,
+    };
+  };
+
+  it('prioritizes a GS026 owner mismatch over an unrelated inner revert', async () => {
+    const { publicClient, walletClient } = makeClients();
+    const writeContract = vi
+      .fn()
+      .mockRejectedValue(new Error('The contract function "execTransaction" reverted: GS026'));
+    const call = vi.fn().mockRejectedValue(
+      Object.assign(new Error('target call reverted'), { data: '0x33f626d3' }),
+    );
+
+    await expect(
+      executeSafeTransaction(
+        { ...publicClient, call } as never,
+        { ...walletClient, writeContract } as never,
+        {
+          safeAddress: TEST_SAFE_ADDRESS,
+          to: TEST_TARGET_ADDRESS,
+          value: 0n,
+          data: TEST_CALL_DATA,
+        },
+        { ledger: createMemoryTxSubmissionLedger() },
+      ),
+    ).rejects.toThrow(/GS026.*owner/i);
+
+    expect(call).not.toHaveBeenCalled();
+    expect(publicClient.readContract).toHaveBeenCalledWith(expect.objectContaining({
+      functionName: 'isOwner',
+      args: [TEST_SIGNER_ADDRESS],
+    }));
+  });
+
+  it('retries estimate-path GS026 when the signer is still a Safe owner', async () => {
+    const { publicClient, walletClient } = makeClients(true);
+    const writeContract = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('The contract function "execTransaction" reverted: GS026'))
+      .mockResolvedValueOnce(TEST_SUCCESS_HASH);
+    const waitForTransactionReceipt = vi.fn().mockResolvedValue({ status: 'success' });
+    const call = vi.fn().mockResolvedValue({ data: '0x' });
+
+    const hash = await executeSafeTransaction(
+      { ...publicClient, call, waitForTransactionReceipt } as never,
+      { ...walletClient, writeContract } as never,
+      {
+        safeAddress: TEST_SAFE_ADDRESS,
+        to: TEST_TARGET_ADDRESS,
+        value: 0n,
+        data: TEST_CALL_DATA,
+      },
+      { ledger: createMemoryTxSubmissionLedger() },
+    );
+
+    expect(hash).toBe(TEST_SUCCESS_HASH);
+    expect(writeContract).toHaveBeenCalledTimes(2);
+    expect(publicClient.readContract).toHaveBeenCalledWith(expect.objectContaining({
+      functionName: 'isOwner',
+      args: [TEST_SIGNER_ADDRESS],
+    }));
+  });
+
+  it('treats receipt-path reverts as terminal when the signer is not a Safe owner', async () => {
+    const REVERT_HASH = `0x${'dd'.repeat(32)}` as Hex;
+    const { publicClient, walletClient } = makeClients(false);
+    const writeContract = vi.fn().mockResolvedValue(REVERT_HASH);
+    const waitForTransactionReceipt = vi.fn().mockResolvedValue({ status: 'reverted' });
+    const call = vi.fn().mockRejectedValue(
+      Object.assign(new Error('target call reverted'), { data: '0x33f626d3' }),
+    );
+
+    await expect(
+      executeSafeTransaction(
+        { ...publicClient, call, waitForTransactionReceipt } as never,
+        { ...walletClient, writeContract } as never,
+        {
+          safeAddress: TEST_SAFE_ADDRESS,
+          to: TEST_TARGET_ADDRESS,
+          value: 0n,
+          data: TEST_CALL_DATA,
+        },
+        { ledger: createMemoryTxSubmissionLedger() },
+      ),
+    ).rejects.toThrow(/GS026.*owner/i);
+
+    expect(call).not.toHaveBeenCalled();
+    expect(publicClient.readContract).toHaveBeenCalledWith(expect.objectContaining({
+      functionName: 'isOwner',
+      args: [TEST_SIGNER_ADDRESS],
+    }));
+  });
+
+  it('keeps receipt-path stale-nonce races retryable when the signer is still a Safe owner', async () => {
+    const REVERT_HASH = `0x${'dd'.repeat(32)}` as Hex;
+    const { publicClient, walletClient } = makeClients(true);
+    const writeContract = vi
+      .fn()
+      .mockResolvedValueOnce(REVERT_HASH)
+      .mockResolvedValueOnce(TEST_SUCCESS_HASH);
+    const waitForTransactionReceipt = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'reverted' })
+      .mockResolvedValueOnce({ status: 'success' });
+    const call = vi.fn().mockResolvedValue({ data: '0x' });
+
+    const hash = await executeSafeTransaction(
+      { ...publicClient, call, waitForTransactionReceipt } as never,
+      { ...walletClient, writeContract } as never,
+      {
+        safeAddress: TEST_SAFE_ADDRESS,
+        to: TEST_TARGET_ADDRESS,
+        value: 0n,
+        data: TEST_CALL_DATA,
+      },
+      { ledger: createMemoryTxSubmissionLedger() },
+    );
+
+    expect(hash).toBe(TEST_SUCCESS_HASH);
+    expect(writeContract).toHaveBeenCalledTimes(2);
+    expect(publicClient.readContract).toHaveBeenCalledWith(expect.objectContaining({
+      functionName: 'isOwner',
+      args: [TEST_SIGNER_ADDRESS],
+    }));
+
+    const err = new Error(
+      'Safe execTransaction reverted (possible stale Safe nonce or signature race, txHash=0xdead)',
+    );
+    expect(isRecoverableTransactionError(err)).toBe(true);
+    expect(err.message).not.toContain('GS026');
   });
 });

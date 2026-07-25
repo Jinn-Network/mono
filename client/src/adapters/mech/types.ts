@@ -1,5 +1,12 @@
 import type { Address, WalletClient } from 'viem';
 import type { DiscoveryAPI } from '../../discovery/types.js';
+import type {
+  AutopilotMutationResult,
+  JinnRepoAutopilotSessionTask,
+} from '@jinn-network/sdk/solvernets/jinn-repo';
+import type {
+  AutopilotEvaluationContextObservation,
+} from '../../harnesses/impls/jinn-repo-evaluator/autopilot-evaluation-context.js';
 
 export interface EvictionRecoveryConfig {
   serviceId: number;
@@ -22,6 +29,13 @@ export interface MechAdapterConfig {
   agentEoaPrivateKey: `0x${string}`;
   ipfsRegistryUrl: string;  // Upload endpoint (e.g., https://registry.autonolas.tech)
   ipfsGatewayUrl: string;   // Read endpoint (e.g., https://gateway.autonolas.tech)
+  /**
+   * Controls the public IPFS fallback used by JSON/raw IPFS reads.
+   * - omit → production default (`ipfs.io` via `fetchFromIpfs`)
+   * - false → primary gateway only (hermetic e2e / mock IPFS)
+   * - string → alternate fallback gateway base
+   */
+  ipfsFallbackGatewayUrl?: string | false;
   pollIntervalMs: number;
   /** Optional cap for delivery-log scans; omit for full-history recovery. */
   mechDeliverBackfillLookbackBlocks?: bigint;
@@ -61,6 +75,23 @@ export interface MechAdapterConfig {
    * Ref #547.
    */
   evaluatorEnabled?: boolean;
+  /**
+   * Optional lifecycle read port for Autopilot evaluation admission. The
+   * adapter never fabricates an adoption receipt: without an accepted,
+   * correlation-exact observation the Solution remains pending.
+   */
+  autopilotEvaluationContextResolver?: {
+    resolve(input: {
+      task: JinnRepoAutopilotSessionTask;
+      solution: AutopilotMutationResult;
+      taskId: string;
+      attemptIndex: number;
+      requestId: string;
+      solutionEnvelopeCid: string;
+      solutionOperatorSafe: string;
+      evaluatorOperatorSafe: string;
+    }): Promise<AutopilotEvaluationContextObservation | undefined>;
+  };
 }
 
 export const MECH_MARKETPLACE_ABI = [

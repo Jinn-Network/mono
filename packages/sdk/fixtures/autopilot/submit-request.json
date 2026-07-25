@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "jinn-task-submit-request.v1",
+  "id": "autopilot:123e4567-e89b-42d3-a456-426614174001",
+  "description": "Implement exact marketplace contracts.",
+  "solverType": "jinn-repo.v1",
+  "solverNetManifestCid": "bafy-autopilot-manifest",
+  "createdAt": 1784840400000,
+  "window": {
+    "startTs": 1784840400000,
+    "endTs": 1784851200000
+  },
+  "claimPolicy": {
+    "mode": "exclusive",
+    "maxClaims": 1,
+    "maxClaimsPerOperator": 1,
+    "claimWindowStartTs": 1784840400000,
+    "claimWindowEndTs": 1784841300000,
+    "submissionDeadlineTs": 1784849400000,
+    "claimLeaseTtlSeconds": 1800,
+    "requiredVerdicts": 1
+  },
+  "spec": {
+    "schemaVersion": "jinn-repo.v1",
+    "source": "autopilot-session",
+    "instance_id": "autopilot:123e4567-e89b-42d3-a456-426614174001",
+    "repo": "Jinn-Network/mono",
+    "base_commit": "2222222222222222222222222222222222222222",
+    "language": "typescript",
+    "verificationProfile": "jinn-mono.v1",
+    "problem_statement": "Add the approved contract surface.",
+    "session": {
+      "schemaVersion": "jinn-autopilot-session.v1",
+      "workflow": "implement",
+      "repository": "Jinn-Network/mono",
+      "language": "typescript",
+      "verificationProfile": "jinn-mono.v1",
+      "issueNumber": 2001,
+      "prNumber": 2101,
+      "targetBase": "next",
+      "branch": "codex/issue-2001",
+      "claimOid": "1111111111111111111111111111111111111111",
+      "expectedHead": "2222222222222222222222222222222222222222",
+      "v2AttemptId": "123e4567-e89b-42d3-a456-426614174001",
+      "runnerId": "runner-1",
+      "taskSnapshot": {
+        "title": "Implement exact marketplace contracts",
+        "body": "Add the approved contract surface.",
+        "prBody": "Draft implementation PR.",
+        "baseSha": "3333333333333333333333333333333333333333",
+        "targetBaseOid": "3333333333333333333333333333333333333333"
+      },
+      "workflowContract": {
+        "skill": "implement-issue",
+        "version": "v2",
+        "resultSchema": "jinn-autopilot-mutation-result.v1"
+      },
+      "deadline": "2026-07-23T23:00:00.000Z",
+      "receiptAuthors": [
+        "jinn-autopilot"
+      ]
+    }
+  }
+}

@@ -34,7 +34,21 @@ import {
 const EVICTED_STAKING_STATE = 2;
 const restakeLocks = new Map<string, Promise<void>>();
 const TASK_CREATED_RECOVERY_WINDOW_BLOCKS = 64n;
-const TASK_CREATED_SUBMIT_ATTEMPTS = 3;
+const TASK_CREATED_RECONCILE_ATTEMPTS = 3;
+
+export class PendingTaskSubmissionError extends Error {
+  readonly name = 'PendingTaskSubmissionError';
+
+  constructor(
+    readonly txHash: Hex,
+    cause?: unknown,
+  ) {
+    super(
+      `Task submission ${txHash} is pending reconciliation; refusing to broadcast another Safe transaction`,
+      { cause },
+    );
+  }
+}
 
 const TASK_COORDINATOR_ABI = [
   {
@@ -216,6 +230,8 @@ export async function submitTask(
   verdictMaxDeliveryRateWei: bigint,
   responseTimeout: bigint,
   evictionRecovery?: EvictionRecoveryConfig,
+  onTransactionHash?: (txHash: Hex) => void | Promise<void>,
+  beforeBroadcast?: () => void | Promise<void>,
 ): Promise<{ taskId: string; txHash: Hex; receiptLogCount: number; blockNumber?: number }> {
   const calldata = encodeFunctionData({
     abi: JINN_ROUTER_ABI,
@@ -237,69 +253,88 @@ export async function submitTask(
     solutionMaxDeliveryRateWei * BigInt(policy.maxClaims) +
     verdictMaxDeliveryRateWei * BigInt(policy.maxClaims);
 
-  let lastError: unknown;
-  for (let attempt = 0; attempt < TASK_CREATED_SUBMIT_ATTEMPTS; attempt++) {
-    try {
-      const txHash = await withEvictionRecovery(
-        publicClient,
-        evictionRecovery,
-        'createTask',
-        () => executeSafeTransaction(publicClient, walletClient, {
-          safeAddress,
-          to: routerAddress,
-          value: taskBudget,
-          data: calldata,
-        }),
-      );
+  const txHash = await withEvictionRecovery(
+    publicClient,
+    evictionRecovery,
+    'createTask',
+    () => executeSafeTransaction(
+      publicClient,
+      walletClient,
+      {
+        safeAddress,
+        to: routerAddress,
+        value: taskBudget,
+        data: calldata,
+      },
+      {
+        beforeBroadcast,
+        onBroadcast: onTransactionHash,
+      },
+    ),
+  );
 
-      const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash, {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < TASK_CREATED_RECONCILE_ATTEMPTS; attempt++) {
+    let receipt: TransactionReceipt | undefined;
+    try {
+      receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash, {
         onRetry: ({ attempt: waitAttempt, message }) => {
           console.error(`[router] wait restoration receipt retry ${waitAttempt}: ${message}`);
         },
       });
+      if (receipt.status === 'reverted') {
+        const error = new Error(`Task submission reverted: ${txHash}`);
+        Object.assign(error, { txHash });
+        throw error;
+      }
+    } catch (err) {
+      lastError = err;
+      if (receipt?.status === 'reverted') {
+        throw err;
+      }
+    }
 
-      const created =
-        taskCreatedFromLogs(receipt.logs, safeAddress, taskCidDigest, manifestDigest) ??
-        await findTaskCreatedNearReceipt(
+    let created = receipt
+      ? taskCreatedFromLogs(receipt.logs, safeAddress, taskCidDigest, manifestDigest)
+      : null;
+    try {
+      created ??= receipt
+        ? await findTaskCreatedNearReceipt(
           publicClient,
           routerAddress,
           safeAddress,
           taskCidDigest,
           manifestDigest,
           receipt,
+        )
+        : await findTaskCreatedNearHead(
+          publicClient,
+          routerAddress,
+          safeAddress,
+          taskCidDigest,
+          manifestDigest,
         );
-      if (created) {
-        if (created.transactionHash && created.transactionHash.toLowerCase() !== txHash.toLowerCase()) {
-          console.error(
-            `[router] createTask recovered TaskCreated taskId=${created.taskId} ` +
-            `from tx=${created.transactionHash} after receipt tx=${txHash} had no matching event`,
-          );
-        }
-        return {
-          taskId: created.taskId,
-          txHash: (created.transactionHash ?? txHash) as Hex,
-          receiptLogCount: receipt.logs.length,
-          blockNumber: created.blockNumber,
-        };
-      }
-
-      throw new Error(`No TaskCreated event returned from router tx=${txHash}`);
     } catch (err) {
       lastError = err;
-      if (!isRecoverableTaskSubmitError(err) || attempt >= TASK_CREATED_SUBMIT_ATTEMPTS - 1) {
-        throw err;
-      }
-      console.error(`[router] createTask retry ${attempt + 1}: ${flattenErrorMessage(err)}`);
+    }
+    if (created) {
+      return {
+        taskId: created.taskId,
+        txHash: (created.transactionHash ?? txHash) as Hex,
+        receiptLogCount: receipt?.logs.length ?? 0,
+        blockNumber: created.blockNumber,
+      };
+    }
+    if (attempt < TASK_CREATED_RECONCILE_ATTEMPTS - 1) {
+      console.error(
+        `[router] reconcile createTask tx=${txHash} attempt ${attempt + 1}: ` +
+        `${lastError ? flattenErrorMessage(lastError) : 'TaskCreated not observed yet'}`,
+      );
       await backoffDelay(attempt, 1_000, 12_000);
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
-}
-
-function isRecoverableTaskSubmitError(err: unknown): boolean {
-  if (isRecoverableTransactionError(err)) return true;
-  return flattenErrorMessage(err).includes('No TaskCreated event returned from router tx=');
+  throw new PendingTaskSubmissionError(txHash, lastError);
 }
 
 function sameHex(a: string, b: string): boolean {
@@ -338,6 +373,25 @@ async function findTaskCreatedNearReceipt(
     toBlock,
   });
 
+  return taskCreatedFromLogs(logs, creator, taskCidDigest, manifestDigest);
+}
+
+async function findTaskCreatedNearHead(
+  publicClient: PublicClient,
+  routerAddress: Address,
+  creator: Address,
+  taskCidDigest: Hex,
+  manifestDigest: Hex,
+): Promise<DecodedTaskCreated | null> {
+  const toBlock = await publicClient.getBlockNumber();
+  const fromBlock = toBlock > TASK_CREATED_RECOVERY_WINDOW_BLOCKS
+    ? toBlock - TASK_CREATED_RECOVERY_WINDOW_BLOCKS
+    : 0n;
+  const logs = await publicClient.getLogs({
+    address: routerAddress,
+    fromBlock,
+    toBlock,
+  });
   return taskCreatedFromLogs(logs, creator, taskCidDigest, manifestDigest);
 }
 
@@ -510,7 +564,7 @@ export interface ClaimDeliveryOptions {
   verdictCode?: VerdictCode;
 }
 
-async function isDeliveryAlreadyClaimed(
+export async function isDeliveryAlreadyClaimed(
   publicClient: PublicClient,
   routerAddress: Address,
   requestId: Hex,
@@ -797,6 +851,10 @@ export const ROUTER_TASK_ATTEMPT_CREATED_EVENT = getAbiItem({
   abi: JINN_ROUTER_ABI,
   name: 'TaskAttemptCreated',
 });
+export const ROUTER_EVALUATION_ATTEMPT_CREATED_EVENT = getAbiItem({
+  abi: JINN_ROUTER_ABI,
+  name: 'EvaluationAttemptCreated',
+});
 export const ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT = getAbiItem({
   abi: JINN_ROUTER_ABI,
   name: 'SolutionDeliveryClaimed',
@@ -807,6 +865,103 @@ export const ROUTER_DISCOVERY_EVENTS = [
   ROUTER_TASK_CREATED_EVENT,
   ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT,
 ] as const;
+
+export type RouterAttemptProvenanceRole = 'solution' | 'verdict';
+
+export type RouterAttemptProvenanceVerification =
+  | 'verified'
+  | 'missing'
+  | 'multiple'
+  | 'mismatch';
+
+/**
+ * Verify that exactly one Router attempt event binds a request to its expected
+ * Task, role-specific attempt index, and operator. The caller supplies the
+ * persisted observation lower bound so indexer rows remain acceleration data
+ * only.
+ */
+export async function verifyRouterAttemptProvenance(
+  publicClient: PublicClient,
+  routerAddress: Address,
+  expected: {
+    role: RouterAttemptProvenanceRole;
+    taskId: string;
+    attemptIndex: number;
+    requestId: string;
+    operator: string;
+  },
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<RouterAttemptProvenanceVerification> {
+  let exactMatches = 0;
+  let relatedMismatches = 0;
+  const event = expected.role === 'solution'
+    ? ROUTER_TASK_ATTEMPT_CREATED_EVENT
+    : ROUTER_EVALUATION_ATTEMPT_CREATED_EVENT;
+
+  for (let start = fromBlock; start <= toBlock; start += LOG_SCAN_CHUNK + 1n) {
+    const end = start + LOG_SCAN_CHUNK > toBlock ? toBlock : start + LOG_SCAN_CHUNK;
+    const logs = await publicClient.getLogs({
+      address: routerAddress,
+      event,
+      fromBlock: start,
+      toBlock: end,
+    });
+    for (const log of logs) {
+      try {
+        const decoded = decodeEventLog({
+          abi: JINN_ROUTER_ABI,
+          data: log.data,
+          topics: log.topics,
+        });
+        if (
+          (expected.role === 'solution' && decoded.eventName !== 'TaskAttemptCreated')
+          || (expected.role === 'verdict' && decoded.eventName !== 'EvaluationAttemptCreated')
+        ) {
+          continue;
+        }
+        const args = decoded.args as {
+          taskId: bigint;
+          attemptIndex: number;
+          requestId: Hex;
+          operator?: Address;
+          evaluator?: Address;
+        };
+        const taskId = String(args.taskId);
+        const attemptIndex = Number(args.attemptIndex);
+        const requestId = String(args.requestId);
+        const operator = expected.role === 'solution'
+          ? String(args.operator)
+          : String(args.evaluator);
+        const sameTaskAttempt = taskId === expected.taskId
+          && attemptIndex === expected.attemptIndex;
+        const sameRequest = requestId.toLowerCase() === expected.requestId.toLowerCase();
+        if (
+          (expected.role === 'verdict' && !sameRequest)
+          || (expected.role === 'solution' && !sameTaskAttempt && !sameRequest)
+        ) {
+          continue;
+        }
+
+        if (
+          sameTaskAttempt
+          && sameRequest
+          && operator.toLowerCase() === expected.operator.toLowerCase()
+        ) {
+          exactMatches += 1;
+        } else {
+          relatedMismatches += 1;
+        }
+      } catch {
+        // The topic filter already selects the role event; skip malformed logs.
+      }
+    }
+  }
+
+  if (exactMatches === 1 && relatedMismatches === 0) return 'verified';
+  if (exactMatches > 1) return 'multiple';
+  return relatedMismatches > 0 ? 'mismatch' : 'missing';
+}
 
 export async function scanTasks(
   publicClient: PublicClient,
@@ -994,6 +1149,7 @@ export interface DecodedDeliverEvent {
   requestId: string;
   deliveryDataHex: string;
   mechAddress: string;
+  transactionHash?: Hex;
   blockNumber?: bigint;
 }
 
@@ -1018,6 +1174,7 @@ export function decodeDeliverLogs(logs: Log[]): DecodedDeliverEvent[] {
           requestId: String(args.requestId),
           deliveryDataHex: String(args.data),
           mechAddress: String(args.mechServiceMultisig),
+          transactionHash: log.transactionHash ?? undefined,
           blockNumber: log.blockNumber ?? undefined,
         });
       }
@@ -1122,10 +1279,41 @@ export async function findLatestDeliveryDataHexForRequest(
   return dataByRid.get(requestId.toLowerCase()) ?? null;
 }
 
+/**
+ * Most recent exact Deliver event for one request, including the originating
+ * transaction hash needed to close the engine's post-delivery crash window.
+ */
+export async function findLatestDeliveryForRequest(
+  publicClient: PublicClient,
+  mechContractAddress: Address,
+  requestId: string,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<DecodedDeliverEvent | null> {
+  let latest: DecodedDeliverEvent | null = null;
+  const normalizedRequestId = requestId.toLowerCase();
+  for (let start = fromBlock; start <= toBlock; start += LOG_SCAN_CHUNK + 1n) {
+    const end = start + LOG_SCAN_CHUNK > toBlock ? toBlock : start + LOG_SCAN_CHUNK;
+    const logs = await publicClient.getLogs({
+      address: mechContractAddress,
+      event: MECH_DELIVER_EVENT,
+      fromBlock: start,
+      toBlock: end,
+    });
+    for (const decoded of decodeDeliverLogs(logs)) {
+      if (decoded.requestId.toLowerCase() === normalizedRequestId) {
+        latest = decoded;
+      }
+    }
+  }
+  return latest;
+}
+
 // ── Delivery ─────────────────────────────────────────────────────────────────
 
-// Error names reported by the Mech Marketplace contract for duplicate delivery.
-// The exact name varies across contract versions; we match all known variants.
+// Legacy immediate-settlement callers historically accept these duplicate
+// reverts as idempotent. Adoption-aware callers opt into exact recovery and
+// must re-resolve the Deliver event instead of trusting revert text.
 const ALREADY_DELIVERED_PATTERNS = [
   'AlreadyDelivered',
   'DeliveryAlreadyCompleted',
@@ -1141,6 +1329,7 @@ export async function callDeliverToMarketplace(
   requestIds: Hex[],
   datas: Hex[],
   evictionRecovery?: EvictionRecoveryConfig,
+  requireExactRecovery = false,
 ): Promise<Hex> {
   const calldata = encodeFunctionData({
     abi: MECH_ABI,
@@ -1162,12 +1351,13 @@ export async function callDeliverToMarketplace(
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // Idempotent: if the mech already recorded this delivery (e.g. crash
-    // recovery re-entered this path), treat it as success. The tx hash is
-    // unavailable at this point, but the engine's deliveryTxHash column would
-    // have been set by the previous attempt's onDeliveryTxLanded callback.
-    if (ALREADY_DELIVERED_PATTERNS.some(p => message.includes(p))) {
-      console.error(`[mech] callDeliverToMarketplace: already delivered (idempotent), requestIds=${requestIds.join(',')}`);
+    if (
+      !requireExactRecovery
+      && ALREADY_DELIVERED_PATTERNS.some(pattern => message.includes(pattern))
+    ) {
+      console.error(
+        `[mech] callDeliverToMarketplace: already delivered (legacy idempotent), requestIds=${requestIds.join(',')}`,
+      );
       return '0x' as Hex;
     }
     throw err;

@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
@@ -133,10 +133,63 @@ describe('operator MCP server — tool registry', () => {
 });
 
 describe('operator MCP helpers', () => {
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
     vi.useRealTimers();
+    const { __resetExecSyncForTesting } = await import('@/lifecycle/process-discovery.js');
+    __resetExecSyncForTesting();
+  });
+
+  it('reclaims a stale pidfile when the recorded pid is alive but not a jinn daemon (#1686)', async () => {
+    vi.useFakeTimers();
+    spawnMock.mockReturnValue(new FakeChildProcess());
+
+    const { __setExecSyncForTesting } = await import('@/lifecycle/process-discovery.js');
+    const home = mkdtempSync(join(tmpdir(), 'jinn-mcp-recycled-pid-'));
+    const earningDir = join(home, '.jinn-client', 'earning');
+    mkdirSync(earningDir, { recursive: true });
+    writeFileSync(join(earningDir, 'daemon.pid'), '987654\n', 'utf-8');
+
+    __setExecSyncForTesting(() => 'python train.py\n');
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
+    try {
+      const { startDetachedDaemon } = await import('@/mcp/operator-server.js');
+      const promise = startDetachedDaemon({ HOME: home });
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await promise;
+
+      expect(result).toEqual({
+        ok: true,
+        payload: { pid: 4242, status: 'starting' },
+      });
+      expect(spawnMock).toHaveBeenCalled();
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it('returns already_running when the pidfile records a live jinn daemon', async () => {
+    const { __setExecSyncForTesting } = await import('@/lifecycle/process-discovery.js');
+    const home = mkdtempSync(join(tmpdir(), 'jinn-mcp-already-running-'));
+    const earningDir = join(home, '.jinn-client', 'earning');
+    mkdirSync(earningDir, { recursive: true });
+    writeFileSync(join(earningDir, 'daemon.pid'), '987654\n', 'utf-8');
+
+    __setExecSyncForTesting(() => 'node /opt/jinn/dist/bin/jinn.js run\n');
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
+    try {
+      const { startDetachedDaemon } = await import('@/mcp/operator-server.js');
+      const result = await startDetachedDaemon({ HOME: home });
+
+      expect(result).toEqual({
+        ok: true,
+        payload: { pid: 987654, status: 'already_running' },
+      });
+      expect(spawnMock).not.toHaveBeenCalled();
+    } finally {
+      killSpy.mockRestore();
+    }
   });
 
   it('returns starting until daemon startup creates a pidfile', async () => {

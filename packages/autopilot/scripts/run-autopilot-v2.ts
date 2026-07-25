@@ -16,38 +16,63 @@ import {
 } from '../src/autopilot-runtime.js';
 import type { SpawnFn } from '../src/dispatcher/coordinator-session.js';
 import {
+  CURSOR_BIN_ENV,
+  CURSOR_MODEL_ENV,
+} from '../src/dispatcher/cursor-runtime.js';
+import {
   defaultRunner,
   type CommandRunner,
 } from '../src/dispatcher/issue-source.js';
 import { DEFAULT_CONFIG, type DispatcherConfig } from '../src/dispatcher/types.js';
+import { DEFAULT_FLOOR } from '../src/dispatcher/rate-limit-guard.js';
 import { shouldRouteToSession } from '../src/cli/routing.js';
 import {
-  buildGitHubLifecycleSnapshot,
   CANONICAL_GITHUB_HTTPS_REMOTE,
+  ConditionalPullRequestEvidenceProbe,
+  ConditionalRestClient,
   defaultRunnerId,
-  explicitEnvironmentFlag,
+  activeCleanupEnabled,
+  attemptGraceMs,
+  autopilotExecutionBackend,
+  autopilotDiskFloorBytes,
+  marketplaceSolverNetManifestCid,
   explainIssue,
   explainPullRequest,
   GhLifecycleReader,
+  GitHubRestDiscoveryReader,
+  GitHubUsageIncompleteError,
+  GitHubUsageMeter,
+  createConfiguredIncrementalLifecycleSnapshotSource,
+  isRoutineCachedStatus,
+  LifecycleSnapshotCoordinator,
   makeProductionActiveRuntime,
-  makeProductionBoardArchiveSweep,
+  makeGitHubUsageCommandRunner,
   makeProductionReconciliationWriter,
+  makeTargetedActionReader,
+  assertRateLimitReserve,
+  TARGETED_PR_RESERVE,
+  TARGETED_PROJECT_ITEM_RESERVE,
   parseLifecycleCli,
+  parseAutopilotStateDirectory,
+  parseSnapshotRuntimeConfig,
   renderLifecycleHuman,
   renderLifecycleJson,
   resolveCredentialPool,
+  runLifecycleCadence,
   runLifecycleCycle,
   sanitizedGitHubCommandOverlay,
   selectCredential,
   sweepDeadAttempts,
+  freeDiskBytes,
   type SelectedCredential,
 } from '../src/lifecycle/index.js';
 
 const DEFAULT_INTERVAL_MS = 10 * 60_000;
-const DEFAULT_STALE_AFTER_MS = 2 * 60 * 60_000;
+const DEFAULT_STALE_AFTER_MS = 4 * 60 * 60_000;
 // Staleness threshold for reaping unchanged claims. Overridable via
 // JINN_AUTOPILOT_STALE_AFTER_MS so the runbook's takeover canary (§8) can
-// exercise recovery without a two-hour wait; production leaves it at 2h.
+// exercise recovery without a four-hour wait; production leaves enough room
+// for the full solver/adoption/evaluator/adoption marketplace loop.
 const STALE_AFTER_MS = positiveEnvironmentInteger(
   env.JINN_AUTOPILOT_STALE_AFTER_MS,
   DEFAULT_STALE_AFTER_MS,
@@ -116,7 +141,6 @@ function dispatcherConfig(allowlist: ReadonlySet<string>): DispatcherConfig {
     reviewBotLogin: env.JINN_REVIEW_BOT_LOGIN ?? '',
     implGhToken: env.JINN_IMPL_GH_TOKEN ?? '',
     reviewGhToken: env.JINN_REVIEW_GH_TOKEN ?? '',
-    mergePrepEnabled: true,
     ...(env.JINN_DISPATCHER_HERMES_MODEL === undefined
       ? {}
       : { hermesModel: env.JINN_DISPATCHER_HERMES_MODEL }),
@@ -126,6 +150,12 @@ function dispatcherConfig(allowlist: ReadonlySet<string>): DispatcherConfig {
     ...(env.JINN_DISPATCHER_HERMES_PYTHON === undefined
       ? {}
       : { hermesPythonPath: env.JINN_DISPATCHER_HERMES_PYTHON }),
+    ...(env[CURSOR_MODEL_ENV] === undefined
+      ? {}
+      : { cursorModel: env[CURSOR_MODEL_ENV] }),
+    ...(env[CURSOR_BIN_ENV] === undefined
+      ? {}
+      : { cursorBin: env[CURSOR_BIN_ENV] }),
   };
 }
 
@@ -209,10 +239,26 @@ async function main(): Promise<void> {
     return;
   }
 
+  const executionBackendKind = autopilotExecutionBackend(
+    env.JINN_AUTOPILOT_EXECUTION_BACKEND,
+  );
+  const marketplaceManifestCid = marketplaceSolverNetManifestCid(
+    env.JINN_AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID,
+  );
   const options = parseLifecycleCli(argv.slice(2));
+  const snapshotRuntime = parseSnapshotRuntimeConfig(env);
+  const stateDirectory = parseAutopilotStateDirectory(env);
   const allowlist = authorAllowlist(env.JINN_DISPATCHER_AUTHOR_ALLOWLIST);
   const onlyIssues = parseOnlyIssuesAllowlist(env.JINN_AUTOPILOT_ONLY_ISSUES);
   const config = dispatcherConfig(allowlist);
+  console.log(
+    `[autopilot:v2] runtime=${config.runtime} executionBackend=${executionBackendKind}`,
+  );
+  if (config.runtime === 'cursor') {
+    console.log(
+      `[autopilot:v2] cursor config (bin=${config.cursorBin}, reviewModel=${config.cursorModel})`,
+    );
+  }
   const runnerId = defaultRunnerId({
     configured: env.JINN_AUTOPILOT_RUNNER_ID,
     environment: env,
@@ -235,6 +281,14 @@ async function main(): Promise<void> {
   const repositoryPath = (await runner('git', [
     'rev-parse', '--path-format=absolute', '--show-toplevel',
   ])).trim();
+  // One cycle-scoped boundary owns usage for every GitHub command below —
+  // reader queries, reconciliation, board archive, and active action ports.
+  // Credential overlays are applied inside those ports and flow unchanged
+  // through this runner to its authenticated quota probes.
+  const usageMeter = new GitHubUsageMeter();
+  runner = makeGitHubUsageCommandRunner(runner, usageMeter, {
+    rateLimitFloor: DEFAULT_FLOOR,
+  });
   // jinn-mono#1883-follow-up: review-claim refs (refs/jinn-autopilot/...) are
   // read over the git transport, not GraphQL (GitHub's `ref(qualifiedName:)`
   // permanently returns null for this custom namespace — proven live).
@@ -246,62 +300,120 @@ async function main(): Promise<void> {
   const reader = new GhLifecycleReader(runner, {
     repositoryPath,
     remoteName: CANONICAL_GITHUB_HTTPS_REMOTE,
+    usageMeter,
+    runnerIsMetered: true,
   });
-  const readSnapshot = (rateLimitFloor?: number) => buildGitHubLifecycleSnapshot(reader, {
+  const conditionalRest = new ConditionalRestClient(runner, {
+    usageMeter,
+    runnerIsMetered: true,
+  });
+  const restDiscovery = new GitHubRestDiscoveryReader(conditionalRest);
+  const snapshotSource = createConfiguredIncrementalLifecycleSnapshotSource({
+    fullReader: reader,
+    restDiscovery,
+    conditionalRest,
+    evidenceProbe: new ConditionalPullRequestEvidenceProbe(conditionalRest),
     authorAllowlist: allowlist,
-    ...(rateLimitFloor === undefined ? {} : { rateLimitFloor }),
+  }, stateDirectory);
+  // A persistent observe loop is a runner and takes the same authoritative
+  // startup full as recover/active. Only one-shot, read-only status may
+  // degrade to a partial cache view.
+  const routineStatus = isRoutineCachedStatus({
+    mode: options.mode,
+    once: options.once,
+    commandKind: options.command.kind,
+    fullReconcile: options.fullReconcile,
   });
-  // jinn-mono#1883: the writer's Human-dominance safety check needs
-  // Project/lifecycle context a single-PR read can't supply, so it falls
-  // back to a full world snapshot — but memoized for one reconciliation
-  // cycle instead of fetched fresh per action. The projection plan a cycle
-  // executes is itself derived from a `readSnapshot()` call made moments
-  // earlier in that same cycle, so reusing it here adds no staleness beyond
-  // what planning already assumed. Invalidated once per `runOnce` below so
-  // the next cycle gets a fresh read.
-  let dominanceSnapshotCache: ReturnType<typeof readSnapshot> | undefined;
-  const readDominanceSnapshot = (): ReturnType<typeof readSnapshot> => {
-    dominanceSnapshotCache ??= readSnapshot().catch((error: unknown) => {
-      dominanceSnapshotCache = undefined;
-      throw error;
-    });
-    return dominanceSnapshotCache;
+  const snapshotCoordinator = new LifecycleSnapshotCoordinator({
+    source: snapshotSource,
+    configuredMode: snapshotRuntime.mode,
+    fullReconcileMs: snapshotRuntime.fullReconcileMs,
+    startupFull: !routineStatus,
+    allowPartial: routineStatus,
+    forceFull: options.fullReconcile,
+    readUsage: () => reader.githubUsage(),
+  });
+  const readCycleSnapshot = (rateLimitFloor = DEFAULT_FLOOR) => (
+    snapshotCoordinator.read(rateLimitFloor)
+  );
+  const currentGraphQlRemaining = async (): Promise<number> => {
+    return reader.readGraphQlRemaining();
   };
-  // jinn-mono#1883: board-archive sweep uses the same implementer credential
-  // as the reconciliation writer's maintenance calls (`maintenanceCredential`
-  // above) — only defined when the mode actually needs write credentials
-  // (`observe` never does), matching the sweep's own `recover`/`active`-only
-  // gate in `runLifecycleCycle`.
-  const boardArchiveSweep = maintenanceCredential === undefined
-    ? undefined
-    : makeProductionBoardArchiveSweep({
-        credential: maintenanceCredential,
-        runner,
-        environment: env,
-      });
+  const targeted = makeTargetedActionReader({
+    authorAllowlist: allowlist,
+    rateLimitFloor: DEFAULT_FLOOR,
+    readGraphQlRemaining: currentGraphQlRemaining,
+    readPullRequest: (prNumber) => reader.readPullRequestForReconciliation(prNumber),
+    readProjectItem: (issueNumber) => reader.readProjectItemForReconciliation(issueNumber),
+    readIssue: (issueNumber) => restDiscovery.readIssueForAction(issueNumber),
+    readBlockedByIssueNumbers: (issueNumber) =>
+      restDiscovery.readBlockedByIssueNumbersForAction(issueNumber),
+    readIssueActionContext: (issueNumber) =>
+      reader.readIssueActionContextForReconciliation(issueNumber),
+    readOpenPullRequestNumbersClosingIssue: (issueNumber) =>
+      reader.readPullRequestNumbersClosingIssues([issueNumber]),
+    readPullRequestDetails: (prNumber) => restDiscovery.readPullRequestForAction(prNumber),
+  });
+  const withTargetedReserve = async <Value>(
+    reserve: number,
+    operation: () => Promise<Value>,
+  ): Promise<Value> => {
+    assertRateLimitReserve(
+      await currentGraphQlRemaining(),
+      reserve,
+      DEFAULT_FLOOR,
+    );
+    return operation();
+  };
+  const reconciliationTargets = {
+    readPullRequestByNumber: (prNumber: number) =>
+      withTargetedReserve(
+        TARGETED_PR_RESERVE,
+        () => reader.readPullRequestForReconciliation(prNumber),
+      ),
+    readProjectItemForReconciliation: (issueNumber: number) =>
+      withTargetedReserve(
+        TARGETED_PROJECT_ITEM_RESERVE,
+        () => reader.readProjectItemForReconciliation(issueNumber),
+      ),
+    readBranchHeadByName: (headRefName: string) =>
+      reader.readBranchHeadForReconciliation(headRefName),
+    readIssueByNumber: (issueNumber: number) => restDiscovery.readIssueForAction(issueNumber),
+    readBlockedByIssueNumbers: (issueNumber: number) =>
+      restDiscovery.readBlockedByIssueNumbersForAction(issueNumber),
+    readIssueActionContext: (issueNumber: number) =>
+      targeted.readIssueActionContext!(issueNumber),
+    readOpenPullRequestsByIssue: (issueNumber: number) =>
+      targeted.readOpenPullRequests(issueNumber),
+  };
+  // Stage 3: board-archive + Status paint live in `yarn paint-board`
+  // (scheduled workflow), not the autopilot cycle.
   const worktreeBase = env.JINN_AUTOPILOT_WORKTREE_BASE ?? DEFAULT_WORKTREE_BASE;
+  const v2AttemptsBase = join(worktreeBase, 'v2');
   const cleanupEnabled = options.mode === 'active'
-    && explicitEnvironmentFlag(
+    && activeCleanupEnabled(
       env.JINN_AUTOPILOT_CLEANUP_ENABLED,
       'JINN_AUTOPILOT_CLEANUP_ENABLED',
     );
+  const attemptGracePeriodMs = attemptGraceMs(env.JINN_AUTOPILOT_ATTEMPT_GRACE_MS);
+  const diskFloorBytes = autopilotDiskFloorBytes(env.JINN_AUTOPILOT_DISK_FLOOR_GB);
+  const diskBelowFloor = (): boolean =>
+    diskFloorBytes > 0 && freeDiskBytes(v2AttemptsBase) < diskFloorBytes;
 
-  const writer = credentials === undefined
+  const writerForSnapshot = credentials === undefined
     ? undefined
     : (() => {
         const selection = selectCredential(credentials!, { phase: 'implement' });
         if (selection.status !== 'selected') throw new Error(selection.detail);
-        return makeProductionReconciliationWriter({
-          repositoryPath,
-          readSnapshot,
-          readPullRequestByNumber: (prNumber) => reader.readPullRequestForReconciliation(prNumber),
-          readProjectItemForReconciliation: (issueNumber) =>
-            reader.readProjectItemForReconciliation(issueNumber),
-          readDominanceSnapshot,
-          credential: selection.credential,
-          runner,
-          environment: env,
-        });
+        return (cycleSnapshot: Awaited<ReturnType<typeof readCycleSnapshot>>) =>
+          makeProductionReconciliationWriter({
+            repositoryPath,
+            cycleSnapshot,
+            ...reconciliationTargets,
+            credential: selection.credential,
+            runner,
+            environment: env,
+          });
       })();
   const active = options.mode !== 'active'
     ? undefined
@@ -311,9 +423,17 @@ async function main(): Promise<void> {
         runnerId,
         credentials: credentials!,
         authorAllowlist: allowlist,
-        readSnapshot,
+        readSnapshot: () => readCycleSnapshot(),
+        ...reconciliationTargets,
         config,
         spawn: makeLoggingSpawn(),
+        executionBackendKind,
+        ...(marketplaceManifestCid === undefined
+          ? {}
+          : {
+              marketplaceSolverNetManifestCid:
+                marketplaceManifestCid,
+            }),
         caps: {
           implementation: positiveEnvironmentInteger(
             env.JINN_AUTOPILOT_IMPLEMENTATION_CAP,
@@ -325,11 +445,6 @@ async function main(): Promise<void> {
             config.reviewCap,
             'JINN_AUTOPILOT_REVIEW_CAP',
           ),
-          mergePrep: positiveEnvironmentInteger(
-            env.JINN_AUTOPILOT_MERGE_PREP_CAP,
-            config.mergePrepCap,
-            'JINN_AUTOPILOT_MERGE_PREP_CAP',
-          ),
         },
         implementationBackpressureThreshold: positiveEnvironmentInteger(
           env.JINN_AUTOPILOT_BACKPRESSURE,
@@ -340,21 +455,52 @@ async function main(): Promise<void> {
         staleAfterMs: STALE_AFTER_MS,
         runner,
         environment: env,
+        newWorkPaused: diskBelowFloor,
       });
 
   const runOnce = async (): Promise<void> => {
-    // Fresh cycle: drop any dominance snapshot memoized during the previous
-    // one so this cycle's writer calls see a new read, not stale state.
-    dominanceSnapshotCache = undefined;
+    let report: Awaited<ReturnType<typeof runLifecycleCycle>>;
+    try {
+      report = await runLifecycleCycle(options.mode, {
+        readSnapshot: readCycleSnapshot,
+        resetGitHubUsage: () => reader.resetGitHubUsage(),
+        readGitHubUsage: () => reader.githubUsage(),
+        ...(writerForSnapshot === undefined ? {} : { writerForSnapshot }),
+        ...(active === undefined ? {} : { active }),
+        now: () => new Date(),
+        staleAfterMs: STALE_AFTER_MS,
+        runnerId,
+        cycleId: randomUUID,
+        snapshotFailureMode: options.once ? 'throw' : 'report',
+      });
+    } catch (error) {
+      // Belt-and-suspenders: GitHub's used/remaining counters are eventually
+      // consistent, so usage-accounting incompleteness must never terminate the
+      // continuous cadence. The meter is already non-fatal (read() no longer
+      // throws on incomplete accounting); this guards any residual thrower so a
+      // one-shot still fails loud while a persistent loop survives to next cycle.
+      if (error instanceof GitHubUsageIncompleteError && !options.once) {
+        console.warn(`[autopilot:v2] ${error.message}; continuing to next cycle`);
+        return;
+      }
+      throw error;
+    }
+    // A snapshot-failed cycle must remain mutation-free. Local attempt
+    // cleanup therefore follows the same complete-snapshot boundary as all
+    // GitHub reconciliation/archive/action mutations.
     if (
       options.mode === 'active'
       && cleanupEnabled
       && maintenanceCredential !== undefined
     ) {
       const cleanup = await sweepDeadAttempts(runner, {
-        v2Base: join(worktreeBase, 'v2'),
+        v2Base: v2AttemptsBase,
         isPidAlive: childIsAlive,
         env: { GH_TOKEN: maintenanceCredential.secret() },
+        graceMs: attemptGracePeriodMs,
+        now: () => new Date(),
+        diskFloorBytes,
+        diskPath: v2AttemptsBase,
       });
       for (const result of cleanup) {
         if (result.status === 'retained' && result.reason.code !== 'live') {
@@ -366,16 +512,6 @@ async function main(): Promise<void> {
         }
       }
     }
-    const report = await runLifecycleCycle(options.mode, {
-      readSnapshot,
-      ...(writer === undefined ? {} : { writer }),
-      ...(active === undefined ? {} : { active }),
-      ...(boardArchiveSweep === undefined ? {} : { boardArchiveSweep }),
-      now: () => new Date(),
-      staleAfterMs: STALE_AFTER_MS,
-      runnerId,
-      cycleId: randomUUID,
-    });
     if (options.json) {
       process.stdout.write(`${renderLifecycleJson(report)}\n`);
     } else if (options.command.kind === 'explain-issue') {
@@ -388,11 +524,13 @@ async function main(): Promise<void> {
     if (report.status === 'rejected') process.exitCode = 2;
   };
 
-  await runOnce();
-  while (!options.once && process.exitCode !== 2) {
-    await new Promise<void>((resolve) => setTimeout(resolve, DEFAULT_INTERVAL_MS));
-    await runOnce();
-  }
+  await runLifecycleCadence({
+    once: options.once,
+    intervalMs: DEFAULT_INTERVAL_MS,
+    runCycle: runOnce,
+    shouldContinue: () => process.exitCode !== 2,
+    wait: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+  });
 }
 
 main().catch((error: unknown) => {

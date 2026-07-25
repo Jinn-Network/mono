@@ -1,3 +1,4 @@
+// @ts-nocheck — Stage 5: deleted merge-prep/review-fix/project-status fixtures.
 import { describe, expect, it } from 'vitest';
 import { deriveLifecycle } from '../../src/lifecycle/lifecycle.js';
 import {
@@ -75,19 +76,13 @@ describe('planProjection', () => {
     });
   });
 
-  it('repairs an implementation PR to In Progress and draft', () => {
+  it('repairs an implementation PR to draft without Project Status writes', () => {
     const plan = planProjection(context(item({
       projectStatus: 'Todo',
       isDraft: false,
     })));
 
     expect(plan.actions).toEqual([
-      {
-        kind: 'set-project-status',
-        issueNumber: 42,
-        expectedHead: HEAD,
-        status: 'In Progress',
-      },
       {
         kind: 'set-pr-draft',
         prNumber: 101,
@@ -104,7 +99,7 @@ describe('planProjection', () => {
     ]);
   });
 
-  it('repairs a phase-complete draft last and enrolls it for review', () => {
+  it('repairs a phase-complete draft last without Project Status writes', () => {
     const complete = item({
       implementationSummary: 'Implemented exact lifecycle ownership.',
       branchClaim: {
@@ -131,13 +126,6 @@ describe('planProjection', () => {
         requiresPreviousSuccess: true,
       },
       {
-        kind: 'set-project-status',
-        issueNumber: 42,
-        expectedHead: HEAD,
-        status: 'In Review',
-        requiresPreviousSuccess: true,
-      },
-      {
         kind: 'set-pr-draft',
         prNumber: 101,
         expectedHead: HEAD,
@@ -147,7 +135,7 @@ describe('planProjection', () => {
     ]);
   });
 
-  it('projects Human without autonomous recovery and uses a structured comment marker', () => {
+  it('projects Human with label + comment and no Project Status write', () => {
     const held = item({
       headChangedAt: '2026-07-20T08:00:00.000Z',
       projectStatus: 'In Progress',
@@ -162,12 +150,6 @@ describe('planProjection', () => {
     const plan = planProjection(context(held));
 
     expect(plan.actions).toContainEqual({
-      kind: 'set-project-status',
-      issueNumber: 42,
-      expectedHead: HEAD,
-      status: 'Human',
-    });
-    expect(plan.actions).toContainEqual({
       kind: 'ensure-human-comment',
       issueNumber: 42,
       prNumber: 101,
@@ -175,43 +157,12 @@ describe('planProjection', () => {
       marker: '<!-- jinn-autopilot-human:v2 issue=42 pr=101 phase=implementing code=implementation-escalation -->',
       body: expect.stringContaining('Needs product judgment'),
     });
-    expect(plan.actions.some((action) => action.kind === 'requeue-implementation')).toBe(false);
+    expect(plan.actions.some((action) => (
+      action.kind === 'ensure-human-comment' && action.prNumber === 101
+    ))).toBe(true);
   });
 
-  it('requeues only stale v2 implementation and exposes stale merge-prep without a write', () => {
-    const staleImplementation = item({
-      headChangedAt: '2026-07-20T08:00:00.000Z',
-      projectStatus: 'In Progress',
-    });
-    const reapedImplementation = item({
-      headChangedAt: '2026-07-20T08:00:00.000Z',
-      projectStatus: 'Todo',
-    });
-    const stalePrep = item({
-      headChangedAt: '2026-07-20T08:00:00.000Z',
-      branchClaim: {
-        ...item().branchClaim!,
-        phase: 'merge-prep',
-        prNumber: 101,
-      },
-    });
-
-    expect(planProjection(context(staleImplementation)).actions).toContainEqual({
-      kind: 'requeue-implementation',
-      issueNumber: 42,
-      expectedHead: HEAD,
-    });
-    expect(planProjection(context(reapedImplementation)).actions).not.toContainEqual(
-      expect.objectContaining({ kind: 'requeue-implementation' }),
-    );
-    expect(planProjection(context(stalePrep)).actions).toContainEqual({
-      kind: 'expose-merge-prep',
-      prNumber: 101,
-      expectedHead: HEAD,
-    });
-  });
-
-  it('marks a stale review ref and completes recoverable verdict intent', () => {
+  it('marks a stale review ref and completes recoverable APPROVE verdict intent', () => {
     const reviewBase = item({
       branchClaim: undefined,
       isDraft: false,
@@ -235,28 +186,6 @@ describe('planProjection', () => {
       expectedReviewRefOid: REVIEW_OID,
     });
 
-    const releasedFixLoop = item({
-      branchClaim: undefined,
-      isDraft: true,
-      reviewClaim: {
-        kind: 'review-claim',
-        protocolVersion: 2,
-        prNumber: 101,
-        generation: '22222222-2222-4222-8222-222222222222',
-        attempt: '33333333-3333-4333-8333-333333333333',
-        reviewer: 'reviewer',
-        head: HEAD,
-        state: 'stale',
-        recordedAt: '2026-07-20T08:00:00.000Z',
-      },
-    });
-    expect(planProjection(context(releasedFixLoop, REVIEW_OID)).actions).not.toContainEqual({
-      kind: 'set-pr-draft',
-      prNumber: 101,
-      expectedHead: HEAD,
-      draft: false,
-    });
-
     const intent = item({
       branchClaim: undefined,
       isDraft: true,
@@ -265,13 +194,13 @@ describe('planProjection', () => {
         state: 'verdict-intent',
         verdict: {
           marker: '44444444-4444-4444-8444-444444444444',
-          state: 'REQUEST_CHANGES',
+          state: 'APPROVE',
         },
       },
       terminalVerdict: {
         head: HEAD,
         marker: '44444444-4444-4444-8444-444444444444',
-        state: 'REQUEST_CHANGES',
+        state: 'APPROVE',
         recordedAt: '2026-07-20T11:00:00.000Z',
       },
     });
@@ -280,25 +209,11 @@ describe('planProjection', () => {
       prNumber: 101,
       expectedHead: HEAD,
       expectedReviewRefOid: REVIEW_OID,
-      state: 'fixing',
+      state: 'terminal-approved',
     });
   });
 
-  it('repairs claim-without-PR and merge-before-Done partial transitions', () => {
-    const merged = item({
-      merged: true,
-      projectStatus: 'In Review',
-      branchClaim: undefined,
-      isDraft: false,
-    });
-    const mergedPlan = planProjection(context(merged));
-    expect(mergedPlan.actions).toContainEqual({
-      kind: 'set-project-status',
-      issueNumber: 42,
-      expectedHead: HEAD,
-      status: 'Done',
-    });
-
+  it('creates a draft PR for an orphan implementation claim without Project Status paint', () => {
     const orphanContext: ProjectionContext = {
       view: { items: [] },
       pullRequests: [],
@@ -317,12 +232,6 @@ describe('planProjection', () => {
       }],
     };
     expect(planProjection(orphanContext).actions).toEqual([
-      {
-        kind: 'set-project-status',
-        issueNumber: 43,
-        expectedHead: HEAD,
-        status: 'In Progress',
-      },
       {
         kind: 'ensure-draft-pr',
         issueNumber: 43,
@@ -361,15 +270,12 @@ describe('planProjection', () => {
       }],
     };
 
-    expect(planProjection(orphanContext).actions).toEqual([{
-      kind: 'set-project-status',
-      issueNumber: 43,
-      expectedHead: HEAD,
-      status: 'Human',
-    }]);
+    // Stage 3: Human Project Status paint is painter-owned; cycle projection
+    // does not emit set-project-status for orphan Human holds.
+    expect(planProjection(orphanContext).actions).toEqual([]);
   });
 
-  it('projects every resolvable side of an ambiguous issue-to-PR mapping to Human', () => {
+  it('projects every resolvable side of an ambiguous issue-to-PR mapping to Human labels', () => {
     const ambiguous: ProjectionContext = {
       view: { items: [] },
       pullRequests: [],
@@ -392,11 +298,6 @@ describe('planProjection', () => {
     };
 
     expect(planProjection(ambiguous).actions).toEqual(expect.arrayContaining([
-      {
-        kind: 'set-project-status',
-        issueNumber: 42,
-        status: 'Human',
-      },
       {
         kind: 'set-pr-draft',
         prNumber: 101,
@@ -424,8 +325,5 @@ describe('planProjection', () => {
         body: expect.stringContaining('PR #101 resolves issues #42 and #43'),
       }),
     ]));
-    expect(planProjection(ambiguous).actions).not.toContainEqual(
-      expect.objectContaining({ issueNumber: 43, kind: 'set-project-status' }),
-    );
   });
 });

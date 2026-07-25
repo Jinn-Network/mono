@@ -4,15 +4,10 @@ name: npm Publish
 # `main` is advanced only by the promote-main workflow on release: published — it stays
 # in lock-step with what's currently in npm @latest. See docs/engineering/handbook.md §Cadence.
 on:
-  push:
+  workflow_run:
+    workflows: [SDK npm Publish]
+    types: [completed]
     branches: [next]
-    # Invariant: every path bundled into the published client — audit against
-    # client/scripts/vendor-private-packages.mjs and
-    # client/scripts/materialize-bundled-workspaces.mjs (packages/core +
-    # packages/plugin), and client/scripts/vendor-sdk.mjs (packages/sdk) +
-    # client portal deps when
-    # adding a bundled package (#1797).
-    paths: ['client/**', 'packages/core/**', 'packages/plugin/**', 'packages/sdk/**']
   release:
     types: [published]
   workflow_dispatch:
@@ -47,7 +42,7 @@ defaults:
 jobs:
   publish:
     name: Publish package
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'client-v') || startsWith(github.event.release.tag_name, 'v')
+    if: (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success') || github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'client-v') || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     # Stable publish reruns the CI-safe release gates. The live olas-rails-smoke
     # execute mode and app-first testnet gates require local operator config and
@@ -56,7 +51,9 @@ jobs:
     timeout-minutes: 90
     environment: npm-publish
     env:
-      JINN_BUILD_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.sha }}
+      JINN_BUILD_COMMIT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.event_name == 'workflow_dispatch' && inputs.release_sha || github.sha }}
+      ONNXRUNTIME_NODE_INSTALL: skip
+      ONNXRUNTIME_NODE_INSTALL_CUDA: skip
       # Use the high-quota Tenderly Base Sepolia gateway for CI e2e gates.
       # Without this, the e2e falls back to the public `https://sepolia.base.org`
       # which is heavily rate-limited and bites the `Base Sepolia fork
@@ -74,7 +71,7 @@ jobs:
         with:
           # Always resolve the immutable event commit. In a manual recovery the
           # operator-supplied release_sha is the immutable publish input.
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.sha }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.event_name == 'workflow_dispatch' && inputs.release_sha || github.sha }}
 
       - name: Verify exact publish commit
         shell: bash
@@ -111,11 +108,10 @@ jobs:
           MANUAL_RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
           PACKAGE_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
-          SHORT_SHA=$(echo "${JINN_BUILD_COMMIT}" | cut -c1-8)
-
-          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
-            PUBLISH_VERSION="${PACKAGE_VERSION}-canary.${SHORT_SHA}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ]; then
+            PUBLISH_VERSION="${PACKAGE_VERSION}-canary.sha.${JINN_BUILD_COMMIT}"
             DIST_TAG="canary"
+            SDK_SPEC="@jinn-network/sdk@0.1.1-canary.sha.${JINN_BUILD_COMMIT}"
           else
             RELEASE_TAG="${MANUAL_RELEASE_TAG:-${{ github.event.release.tag_name }}}"
             if [ -z "${RELEASE_TAG}" ]; then
@@ -179,28 +175,122 @@ jobs:
             echo "publish_version=${PUBLISH_VERSION}"
             echo "dist_tag=${DIST_TAG}"
             echo "release_tag=${RELEASE_TAG:-}"
+            echo "sdk_spec=${SDK_SPEC:-@jinn-network/sdk@0.1.1}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Require published SDK
+        if: steps.meta.outputs.dist_tag == 'latest'
+        run: |
+          SDK_VERSION="$(npm view @jinn-network/sdk@0.1.1 version)"
+          if [ "${SDK_VERSION}" != "0.1.1" ]; then
+            echo "::error::Stable client release requires @jinn-network/sdk@0.1.1"
+            exit 1
+          fi
+
+      - name: Validate SDK canary gitHead
+        if: steps.meta.outputs.dist_tag == 'canary'
+        shell: bash
+        env:
+          SDK_SPEC: ${{ steps.meta.outputs.sdk_spec }}
+        run: |
+          SDK_HEAD="$(npm view "${SDK_SPEC}" gitHead)"
+          if [ "${SDK_HEAD}" != "${JINN_BUILD_COMMIT}" ]; then
+            echo "::error::${SDK_SPEC} gitHead ${SDK_HEAD} does not match ${JINN_BUILD_COMMIT}"
+            exit 1
+          fi
+
+      - name: Check immutable client canary
+        id: existing
+        if: steps.meta.outputs.dist_tag == 'canary'
+        shell: bash
+        env:
+          PACKAGE_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+        run: |
+          VIEW_ERROR="${RUNNER_TEMP}/client-canary-view.stderr"
+          if npm view "${PACKAGE_SPEC}" version >/dev/null 2>"${VIEW_ERROR}"; then
+            EXISTING_HEAD="$(npm view "${PACKAGE_SPEC}" gitHead)"
+            if [ "${EXISTING_HEAD}" != "${JINN_BUILD_COMMIT}" ]; then
+              echo "::error::${PACKAGE_SPEC} exists with gitHead ${EXISTING_HEAD}, expected ${JINN_BUILD_COMMIT}"
+              exit 1
+            fi
+            echo "published=true" >> "${GITHUB_OUTPUT}"
+            echo "::notice::${PACKAGE_SPEC} already exists at the expected immutable commit"
+          elif grep -Eq 'E404|404 Not Found' "${VIEW_ERROR}"; then
+            echo "published=false" >> "${GITHUB_OUTPUT}"
+          else
+            cat "${VIEW_ERROR}" >&2
+            echo "::error::Could not determine whether ${PACKAGE_SPEC} already exists"
+            exit 1
+          fi
+
+      - run: yarn typecheck
+      - run: yarn test
+
       - name: Patch package version for canary publish
-        if: github.event_name == 'push'
+        if: steps.meta.outputs.dist_tag == 'canary'
         run: |
           node -e "
             const fs = require('fs');
             const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
             pkg.version = '${{ steps.meta.outputs.publish_version }}';
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            const sdkPath = '../packages/sdk/package.json';
+            const sdk = JSON.parse(fs.readFileSync(sdkPath, 'utf8'));
+            sdk.version = '0.1.1-canary.sha.${JINN_BUILD_COMMIT}';
+            fs.writeFileSync(sdkPath, JSON.stringify(sdk, null, 2) + '\n');
           "
 
-      - run: yarn typecheck
       - run: yarn build
-      - run: yarn test
+      - name: Verify build-dependent client layouts
+        run: yarn vitest run test/cli/commands/create.test.ts test/harnesses/impls/learner/plugin-path.test.ts
       - run: yarn pack:smoke
 
       - name: Publish canary
-        if: steps.meta.outputs.dist_tag == 'canary'
+        if: steps.meta.outputs.dist_tag == 'canary' && steps.existing.outputs.published != 'true'
         run: |
           unset NODE_AUTH_TOKEN
           npm publish --access public --tag canary
+
+      - name: Validate client canary gitHead
+        if: steps.meta.outputs.dist_tag == 'canary'
+        shell: bash
+        env:
+          PACKAGE_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+        run: |
+          for _ in $(seq 1 30); do
+            PUBLISHED_HEAD="$(npm view "${PACKAGE_SPEC}" gitHead 2>/dev/null || true)"
+            if [ "${PUBLISHED_HEAD}" = "${JINN_BUILD_COMMIT}" ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::${PACKAGE_SPEC} gitHead did not resolve to ${JINN_BUILD_COMMIT}"
+          exit 1
+
+      - name: Wait for client canary tarball
+        if: steps.meta.outputs.dist_tag == 'canary'
+        shell: bash
+        env:
+          CLIENT_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+        run: |
+          PROBE_DIR="${RUNNER_TEMP}/client-canary-probe"
+          mkdir -p "${PROBE_DIR}"
+          for _ in $(seq 1 30); do
+            if npm pack --silent --pack-destination "${PROBE_DIR}" "${CLIENT_SPEC}" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::${CLIENT_SPEC} tarball did not become available"
+          exit 1
+
+      - name: Registry consumer acceptance (canary)
+        if: steps.meta.outputs.dist_tag == 'canary'
+        shell: bash
+        env:
+          SDK_SPEC: ${{ steps.meta.outputs.sdk_spec }}
+          CLIENT_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+        run: node scripts/external-consumer-acceptance.mjs --registry --sdk-spec "${SDK_SPEC}" --client-spec "${CLIENT_SPEC}"
 
       # Two-gate publish guard — verify, don't re-run (spec
       # docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md §7; #923).
@@ -337,6 +427,14 @@ jobs:
         run: |
           unset NODE_AUTH_TOKEN
           npm publish --access public
+
+      - name: Registry consumer acceptance (stable)
+        if: steps.meta.outputs.dist_tag == 'latest'
+        shell: bash
+        env:
+          SDK_SPEC: '@jinn-network/sdk@0.1.1'
+          CLIENT_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+        run: node scripts/external-consumer-acceptance.mjs --registry --sdk-spec "${SDK_SPEC}" --client-spec "${CLIENT_SPEC}"
 
       # Dual-tag policy (jinn-mono-2cl.6, per the engineering handbook §Cadence): the published
       # release commit also receives a v2026.MM.DD date tag for human-readable build identification

@@ -16,6 +16,8 @@ export const TX_RETRY_DEFAULTS = {
   stuckNonceAfterMs: 120_000,
 } as const;
 
+export const SAFE_STALE_NONCE_ERROR_TOKEN = 'possible stale Safe nonce or signature race';
+
 export function flattenErrorMessage(error: unknown): string {
   if (error === null || error === undefined) return String(error);
   if (typeof error === 'string') return error;
@@ -50,6 +52,16 @@ export function flattenErrorMessage(error: unknown): string {
 export function isRecoverableTransactionError(error: unknown): boolean {
   const msg = flattenErrorMessage(error);
   const lower = msg.toLowerCase();
+
+  const errorName = error && typeof error === 'object'
+    ? (error as { name?: unknown }).name
+    : undefined;
+  if (
+    errorName === 'SafeBroadcastFenceError'
+    || errorName === 'SafePostBroadcastHookError'
+  ) {
+    return false;
+  }
 
   if (lower.includes('insufficient funds')) return false;
   if (lower.includes('user rejected') || lower.includes('user denied')) return false;
@@ -131,24 +143,28 @@ export function isRecoverableTransactionError(error: unknown): boolean {
     // undecoded custom error such as TACTaskAlreadyCredited, 0x33f626d3) — it
     // will revert identically on every retry, so classify it terminal instead
     // of retrying the wrapping GS013 forever. Only when there is no selector
-    // (re-simulation found no inner revert = a signature/nonce race) do we fall
-    // through to the string checks, which keep GS026 retryable.
+    // (re-simulation found no inner revert) do we fall through to the string
+    // checks below.
     const innerSelector = (error as { innerSelector?: string | null }).innerSelector ?? null;
     if (innerSelector != null) return false;
   }
 
-  // Gnosis Safe 1.3.0 error codes. GS026 = the signature/owner set was rejected
-  // — typically a stale-nonce race that `executeSafeTransaction` self-heals by
-  // re-reading the nonce and re-signing, so it stays retryable. GS013 =
-  // require(success || safeTxGas != 0 || gasPrice != 0): the Safe's INNER call
-  // reverted, which is deterministic and never clears on retry. Decodable inner
-  // reverts are already classified above via SafeInnerRevertError; a bare GS013
-  // reaching here (e.g. an estimate-path revert whose custom-error selector we
-  // don't decode) must fail fast rather than wedge the loop. Check GS026 first
-  // so the receipt-path "GS026/GS013 possible stale nonce" message (emitted only
-  // when re-simulation found no inner revert) stays retryable.
-  if (msg.includes('GS026')) return true;
+  // Gnosis Safe 1.3.0 error codes. A bare GS026 reaching this shared classifier
+  // is terminal; safe.ts first distinguishes valid owners (stale signed nonce,
+  // retryable via SAFE_STALE_NONCE_ERROR_TOKEN) from non-owners (issue #1986).
+  // GS013 = require(success || safeTxGas != 0
+  // || gasPrice != 0): the Safe's INNER call reverted, which is deterministic
+  // and never clears on retry. Decodable inner reverts are already classified
+  // above via SafeInnerRevertError; a bare GS013 reaching here (e.g. an
+  // estimate-path revert whose custom-error selector we don't decode) must fail
+  // fast rather than wedge the loop.
+  if (msg.includes('GS026')) return false;
   if (msg.includes('GS013')) return false;
+
+  // Receipt path from safe.ts: inner re-simulation succeeded but the mined
+  // execTransaction reverted — a stale Safe nonce / signature race that
+  // re-read + re-sign self-heals within executeSafeTransaction's retry loop.
+  if (msg.includes(SAFE_STALE_NONCE_ERROR_TOKEN)) return true;
 
   if (
     isReplacementUnderpricedError(error) ||

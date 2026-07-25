@@ -44,17 +44,19 @@ describe('KnowledgeHitSchema', () => {
     ).toThrow();
   });
 
-  it('parses the evidence-first selection fields: tags, origin, publishedAt', () => {
+  it('parses the evidence-first selection fields and optional recency comparison domain', () => {
     const parsed = KnowledgeHitSchema.parse({
       ref: 'ipfs://abc',
       kind: 'trace',
       tags: ['dashboard', 'vitest'],
       origin: 'agent-42',
       publishedAt: 1_752_000_000_000,
+      recencyDomain: 'unix-ms',
     });
     expect(parsed.tags).toEqual(['dashboard', 'vitest']);
     expect(parsed.origin).toBe('agent-42');
     expect(parsed.publishedAt).toBe(1_752_000_000_000);
+    expect(parsed.recencyDomain).toBe('unix-ms');
   });
 
   it('parses the optional retrievalVisible allowlist field (#1824)', () => {
