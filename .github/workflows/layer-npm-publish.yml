@@ -205,6 +205,10 @@ jobs:
             exit 1
           fi
           echo "PUBLISH_VERSION=${PUBLISH_VERSION}" >> "${GITHUB_ENV}"
+      - name: Stage publisher from protected next
+        shell: bash
+        run: |
+          git show origin/next:.github/scripts/publish-layer-stable.mjs > /tmp/publish-layer-stable.mjs
       - name: Check out validated release commit
         shell: bash
         run: |
@@ -256,6 +260,6 @@ jobs:
       # transient partial-release window; the publisher resumes by exact SRI.
       - name: Publish coherent stable package set
         run: >-
-          node .github/scripts/publish-layer-stable.mjs
+          node /tmp/publish-layer-stable.mjs
           --root .
           --version "${PUBLISH_VERSION}"
