@@ -4,4 +4,5 @@ export {
   createAnnouncementAwareRepository,
   recoverPendingPublications,
 } from "./publication.js";
+export { openLocalEvidenceRuntime } from "./runtime.js";
 export * from "./types.js";
