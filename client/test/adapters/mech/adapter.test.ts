@@ -340,6 +340,39 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('buildEvaluationTask strips restoration executionRequest (issue #2165)', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+
+    const evaluationTask = (adapter as any).buildEvaluationTask({
+      task: {
+        id: 'prediction-task-1',
+        description: 'Will the test market resolve YES?',
+        solverType: 'prediction.v1',
+        contractId: 'prediction',
+        contractVersion: 'v1',
+        solverNetManifestCid: 'bafyfixturecid',
+        role: 'restoration',
+        executionRequest: { harness: 'codex', version: '1.0.0', model: 'gpt-5-codex' },
+        window: { startTs: 0, endTs: 1 },
+        spec: {},
+      },
+      solutionRequestId: '0xsol',
+      attemptIndex: 0,
+      resultData: '{}',
+      solutionEnvelopeCid: 'bafysolution',
+      taskCid: 'bafytask',
+    });
+
+    expect(evaluationTask.role).toBe('evaluation');
+    expect(evaluationTask.executionRequest).toBeUndefined();
+    expect(evaluationTask.solverNetManifestCid).toBe('bafyfixturecid');
+
+    await adapter.stop();
+  });
+
   it('postTask refuses to sign and post a Task without solverNetManifestCid', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { submitTask } = await import('../../../src/adapters/mech/contracts.js');

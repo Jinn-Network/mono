@@ -1151,6 +1151,10 @@ export class TaskEngine {
    * resolved execution doesn't match what was pinned. `loadoutRef`/
    * `isolation` are consumer-defined (e.g. a benchmark harness) and are not
    * validated here — Core carries them without interpreting them.
+   *
+   * Evaluation never asserts the pin: it names the *solver* harness/model/
+   * version. Evaluation resolves a different Harness (issue #2165). Callers
+   * must skip this helper when `role === 'evaluation'`.
    */
   private validateExecutionRequest(
     request: NonNullable<Task['executionRequest']>,
@@ -1423,7 +1427,8 @@ export class TaskEngine {
       return `no Harness registered or enabled for solverType '${routingKey}'; run \`${setHarnessHint}\``;
     }
     if (task) {
-      if (task.executionRequest) {
+      // Solver execution-profile pins do not apply to evaluation (issue #2165).
+      if (task.executionRequest && role !== 'evaluation') {
         const mismatch = this.validateExecutionRequest(task.executionRequest, solverNet, impl);
         if (mismatch) return mismatch;
       }
@@ -1558,8 +1563,9 @@ export class TaskEngine {
     // Re-check the profile pin at model-invocation time (issue #2039 AC3).
     // Claim already validates, but RUNNING recovery / re-drive skips claim —
     // a config change between claim and execution must still fail closed
-    // before Harness.run.
-    if (task.task?.executionRequest) {
+    // before Harness.run. Evaluation skips: the pin names the solver profile
+    // (issue #2165).
+    if (task.task?.executionRequest && role !== 'evaluation') {
       const mismatch = this.validateExecutionRequest(task.task.executionRequest, solverNet, impl);
       if (mismatch) throw new Error(mismatch);
     }

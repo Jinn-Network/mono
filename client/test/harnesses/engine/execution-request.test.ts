@@ -571,5 +571,95 @@ describe('execution request (issue #2039)', () => {
       expect(evaluation).toEqual({ ok: true });
       expect(evalCanAttempt).toHaveBeenCalledTimes(1);
     });
+
+    it('dual-role evaluation ignores inherited restoration executionRequest harness/version pins (issue #2165)', async () => {
+      // MechAdapter.buildEvaluationTask historically spread the restoration
+      // task, copying executionRequest. After dual-role fallthrough selects
+      // the evaluator, role-blind validateExecutionRequest compared the
+      // solver pin to the evaluator impl and false-rejected.
+      const evalRun = vi.fn(async (): Promise<Solution> => ({
+        venueRef: { name: 'stub' },
+        gating: {},
+      }));
+      const solverCanAttempt = vi.fn(async () => ({ ok: true as const }));
+      const evalCanAttempt = vi.fn(async () => ({ ok: true as const }));
+      const implRegistry = new HarnessRegistry();
+      implRegistry.register({
+        name: 'claude-code',
+        version: '2.0.0',
+        supports: ({ solverType, role }) =>
+          solverType === 'prediction.v1' && role !== 'evaluation',
+        canAttempt: solverCanAttempt,
+        run: async (): Promise<Solution> => ({ venueRef: { name: 'stub' }, gating: {} }),
+      });
+      implRegistry.register({
+        name: 'prediction-v1-evaluator',
+        version: '1.0.0',
+        supports: ({ solverType, role }) =>
+          solverType === 'prediction.v1' && role === 'evaluation',
+        canAttempt: evalCanAttempt,
+        run: evalRun,
+      });
+
+      const solverNetRegistry = new SolverNetRegistry();
+      await registerJoinedNet(solverNetRegistry, CID_A, {
+        manifestCid: CID_A,
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver', 'evaluator'],
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        plugins: [],
+      });
+
+      const engine = buildEngine({
+        implRegistry,
+        solverNetRegistry,
+        manifestResolver: makeStubManifestResolver({
+          [CID_A]: buildPredictionV1ManifestStub(),
+        }),
+        joinedSolverNets: joinedSolverNetsViewFromConfig({
+          [CID_A]: { manifestCid: CID_A, roles: ['solver', 'evaluator'] },
+        }),
+      });
+
+      // Simulate what a pre-#2165 buildEvaluationTask produced: evaluation
+      // role with the restoration solver profile still attached.
+      const evaluationTask: Task = {
+        ...makePredictionV1Task({ solverNetManifestCid: CID_A }),
+        role: 'evaluation',
+        executionRequest: { harness: 'claude-code', version: '2.0.0' },
+      };
+
+      const accept = await engine.canAcceptTask({
+        taskRole: 'evaluation',
+        task: evaluationTask,
+      });
+      expect(accept).toEqual({ ok: true });
+      expect(evalCanAttempt).toHaveBeenCalledTimes(1);
+      expect(solverCanAttempt).not.toHaveBeenCalled();
+
+      const requestId = 'eval-inherited-execution-request';
+      const now = Date.now();
+      await engine.observe(makeIntentInput({
+        requestId,
+        solverType: 'prediction.v1',
+        taskRole: 'evaluation',
+        windowStartTs: now - 1000,
+        windowEndTs: now + 86_400_000,
+        task: evaluationTask,
+      }));
+
+      const persistence = new TaskRunPersistence(store.db);
+      persistence.transition(requestId, TaskRunState.CLAIMED);
+      persistence.transition(requestId, TaskRunState.WAITING);
+      persistence.transition(requestId, TaskRunState.PRE_SNAPSHOT);
+
+      // process advances PRE_SNAPSHOT → RUNNING (provision) → runImpl. The
+      // inherited solver harness/version pin must not false-reject here.
+      await engine.process(requestId);
+
+      expect(evalRun).toHaveBeenCalledTimes(1);
+      expect(persistence.getByRequestId(requestId)?.state).not.toBe(TaskRunState.FAILED);
+    });
   });
 });
