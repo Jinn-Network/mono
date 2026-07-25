@@ -341,6 +341,21 @@ function parseJson<T>(raw: string | null): T | null {
   return JSON.parse(raw) as T;
 }
 
+/**
+ * Sanitize harness-emitted failed diffs for §10 field 4 (#1643).
+ * Keeps non-empty strings only; first-seen order; drops duplicates.
+ */
+export function normalizeIntermediateFailureDiffs(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string' || entry.length === 0) continue;
+    if (out.includes(entry)) continue;
+    out.push(entry);
+  }
+  return out;
+}
+
 function rowToTaskRun(row: RawRow): PersistedTaskRun {
   return {
     requestId: row.request_id,
