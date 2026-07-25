@@ -114,13 +114,15 @@ describe('transcript-to-spans secret scrub (AC-3)', () => {
     expect(scrubbedArgs.command).not.toContain(GH_TOKEN);
     // The owned gitleaks detector recognizes this exact GitHub PAT shape after
     // openredaction's retirement (#1972/#1973).
-    expect(redactions.some(
-      (r) =>
-        r.key === 'tool.args' &&
-        r.stage === 'gitleaks' &&
-        r.kind === 'secret' &&
-        r.detail === 'github-pat',
-    )).toBe(true);
+    expect(
+      redactions.some(
+        (r) =>
+          r.key === 'tool.args' &&
+          r.stage === 'gitleaks' &&
+          r.kind === 'secret' &&
+          r.detail === 'github-pat',
+      ),
+    ).toBe(true);
     // jinn.* structural attrs stay raw — the safe-key policy bypasses scrub for them.
     expect(attributes['jinn.transcript.sourceFormat']).toBe('codex-exec-json');
   });

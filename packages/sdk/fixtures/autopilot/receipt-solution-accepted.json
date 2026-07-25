@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "jinn-autopilot-marketplace-adoption.v1",
+  "disposition": "accepted",
+  "role": "solution",
+  "operation": "implementation-complete",
+  "taskId": "501",
+  "attemptIndex": 0,
+  "requestId": "0xrequest",
+  "deliveryEnvelopeCid": "bafy-envelope",
+  "v2AttemptId": "123e4567-e89b-42d3-a456-426614174001",
+  "prNumber": 2101,
+  "claimOid": "1111111111111111111111111111111111111111",
+  "expectedHead": "2222222222222222222222222222222222222222",
+  "resultingHead": "4444444444444444444444444444444444444444",
+  "reviewGeneration": "123e4567-e89b-42d3-a456-426614174010",
+  "reviewRefOid": "5555555555555555555555555555555555555555",
+  "recordedAt": "2026-07-23T22:00:00.000Z"
+}

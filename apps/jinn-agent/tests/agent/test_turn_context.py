@@ -197,6 +197,38 @@ def test_task_id_passthrough():
     assert agent._current_task_id == "fixed-task"
 
 
+def test_pre_llm_hook_receives_original_optional_task_identity_separately():
+    generated_agent = _FakeAgent()
+    with patch(
+        "hermes_cli.plugins.invoke_hook",
+        return_value=[],
+    ) as generated_hook:
+        _build(generated_agent, task_id=None)
+
+    generated_call = next(
+        call
+        for call in generated_hook.call_args_list
+        if call.args == ("pre_llm_call",)
+    )
+    assert generated_call.kwargs["task_id"] == generated_agent._current_task_id
+    assert generated_call.kwargs["stable_task_id"] is None
+
+    supplied_agent = _FakeAgent()
+    with patch(
+        "hermes_cli.plugins.invoke_hook",
+        return_value=[],
+    ) as supplied_hook:
+        _build(supplied_agent, task_id="caller-task")
+
+    supplied_call = next(
+        call
+        for call in supplied_hook.call_args_list
+        if call.args == ("pre_llm_call",)
+    )
+    assert supplied_call.kwargs["task_id"] == "caller-task"
+    assert supplied_call.kwargs["stable_task_id"] == "caller-task"
+
+
 def test_persist_user_message_becomes_original():
     agent = _FakeAgent()
     ctx = _build(agent, user_message="api-prefixed", persist_user_message="clean")
@@ -204,6 +236,25 @@ def test_persist_user_message_becomes_original():
     assert ctx.original_user_message == "clean"
     # but the appended user turn carries the full (sanitized) message.
     assert ctx.messages[-1]["content"] == "api-prefixed"
+
+
+def test_pre_llm_hook_receives_live_runtime_cwd(tmp_path, monkeypatch):
+    agent = _FakeAgent()
+    monkeypatch.setenv("TERMINAL_CWD", str(tmp_path))
+
+    with patch(
+        "hermes_cli.plugins.invoke_hook",
+        return_value=[],
+    ) as invoke_hook:
+        _build(agent, task_id="fixed-task")
+
+    pre_llm_call = next(
+        call
+        for call in invoke_hook.call_args_list
+        if call.args == ("pre_llm_call",)
+    )
+    assert pre_llm_call.kwargs.get("cwd") == str(tmp_path)
+    assert pre_llm_call.kwargs.get("turn_id") == agent._current_turn_id
 
 
 def test_memory_nudge_fires_at_interval():
@@ -363,4 +414,3 @@ def test_expired_cooldown_allows_preflight(tmp_path):
     assert isinstance(ctx, TurnContext)
     agent._emit_status.assert_called_once()
     agent._compress_context.assert_called()
-

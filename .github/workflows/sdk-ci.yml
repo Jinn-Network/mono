@@ -17,6 +17,10 @@ defaults:
   run:
     working-directory: packages/sdk
 
+env:
+  ONNXRUNTIME_NODE_INSTALL: skip
+  ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
 jobs:
   check:
     name: Typecheck, Test & Pack

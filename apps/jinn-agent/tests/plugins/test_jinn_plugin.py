@@ -299,6 +299,64 @@ def test_episode_persists_repository_diff_and_test_run_observables(isolated_home
     assert episode["outcome"]["testRuns"] == {"passed": 1, "failed": 1}
 
 
+def test_repository_pickup_probe_preserves_session_start_snapshot_for_accepted_diff(
+    isolated_home, tmp_path, monkeypatch
+):
+    state = jinn._state_for("s1")
+    session_start_snapshot = state["snapshot"]
+    first_cwd = tmp_path / "first"
+    second_cwd = tmp_path / "second"
+    first_cwd.mkdir()
+    second_cwd.mkdir()
+
+    def probe_snapshot(session_id, cwd=None):
+        resolved = Path(cwd).resolve()
+        slug = "acme/first" if resolved == first_cwd.resolve() else "acme/second"
+        return session_bridge.RepositorySnapshot(
+            session_id=session_id,
+            root=resolved,
+            origin=f"https://github.com/{slug}.git",
+            repository_slug=slug,
+            base_head="probe-head",
+        )
+
+    accepted_snapshots = []
+    monkeypatch.setattr(session_bridge, "snapshot_repository", probe_snapshot)
+    monkeypatch.setattr(
+        session_bridge,
+        "accepted_diff",
+        lambda snapshot: accepted_snapshots.append(snapshot) or "accepted diff",
+    )
+
+    jinn._on_pre_llm_call(
+        session_id="s1",
+        task_id="t1",
+        user_message="Fix the first repository",
+        is_first_turn=True,
+        cwd=str(first_cwd),
+    )
+    jinn._on_pre_llm_call(
+        session_id="s1",
+        task_id="t1",
+        user_message="Continue in the second repository",
+        is_first_turn=False,
+        cwd=str(second_cwd),
+    )
+    jinn._on_session_end(
+        session_id="s1",
+        task_id="t1",
+        completed=True,
+        interrupted=False,
+    )
+
+    assert accepted_snapshots == [session_start_snapshot]
+    request = _session_requests(isolated_home)[0]
+    assert request["episode"]["task"]["repositorySlug"] == (
+        session_start_snapshot.repository_slug
+    )
+    assert request["episode"]["task"]["baseCommit"] == session_start_snapshot.base_head
+
+
 def test_episode_retains_exact_delivery_hash_and_refs_without_injected_bytes(
     isolated_home, monkeypatch
 ):
@@ -317,9 +375,9 @@ def test_episode_retains_exact_delivery_hash_and_refs_without_injected_bytes(
             "searchedTerms": ["delivery"],
             "providedRefs": ["bafy-delivered"],
         })
-        return {"context": context}
+        return jinn.pickup.PickupOutcome(context={"context": context})
 
-    monkeypatch.setattr(jinn.pickup, "pickup", fake_pickup)
+    monkeypatch.setattr(jinn.pickup, "pickup_with_outcome", fake_pickup)
     _run_session()
 
     request = _session_requests(isolated_home)[0]
@@ -374,10 +432,10 @@ def test_process_failure_persists_episode_fallback_without_pending_file(
     assert len(episodes) == 1
     assert json.loads(episodes[0].read_text())["schemaVersion"] == "jinn.episode.v1"
     err = capsys.readouterr().err
-    assert "episode captured locally — process bridge degraded" in err
-    assert "local learning pending" in err
-    assert "eligibility unavailable" in err
-    assert "contribution unavailable" in err
+    assert "Saved this session locally" in err
+    assert "local learning pending" not in err
+    assert "eligibility unavailable" not in err
+    assert "contribution unavailable" not in err
 
 
 def test_abandoned_session_is_marked_abandoned(isolated_home, tmp_path):
@@ -430,12 +488,12 @@ def test_session_end_published_outcome_says_contribution_is_immutable(
 def test_session_end_without_corpus_result_prints_complete_summary(isolated_home, capsys):
     _run_session()
     err = capsys.readouterr().err
-    assert "Jinn session complete" in err
-    assert "nothing relevant found" in err
-    assert "episode captured" in err
-    assert "local learning pending" in err
-    assert "eligibility not eligible — test fixture" in err
-    assert "contribution unavailable" in err
+    assert "Jinn" in err
+    assert "no relevant prior notes found" in err.lower()
+    assert "Saved this session for next time" in err
+    assert "episode captured" not in err
+    assert "local learning pending" not in err
+    assert "contribution unavailable" not in err
 
 
 # ── Consent flow ─────────────────────────────────────────────────────────────
@@ -477,12 +535,6 @@ def test_status_reports_contribution_parked_and_no_sharing_lines(isolated_home):
     assert "sharing:" not in out
     assert "previewed:" not in out
     assert "pending trace:" not in out
-
-
-def test_corpus_command_delegates_to_layer(isolated_home):
-    out = jinn._handle_corpus(command_args="prediction")
-    assert out == "ok"
-    assert isolated_home.calls[0][1:4] == ["corpus", "search", "prediction"]
 
 
 def test_removed_surfaces_fall_through_to_help(isolated_home):

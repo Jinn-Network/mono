@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, Iterable, List
 
 from . import style
+
+
+def _verbose() -> bool:
+    """Protocol detail (eligibility, distillation, contribution) for operators."""
+    return (os.environ.get("JINN_VERBOSE") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 def _text(value: object, fallback: str = "unavailable") -> str:
@@ -32,12 +43,30 @@ def _refs(value: object) -> List[str]:
     return refs
 
 
-def _knowledge_lines(searched_terms: List[str], provided_refs: List[str], nothing_found: bool) -> List[str]:
+def _knowledge_line(provided_refs: List[str], nothing_found: bool) -> str:
+    if nothing_found:
+        return "No relevant prior notes found"
+    count = len(provided_refs)
+    noun = "note" if count == 1 else "notes"
+    return f"Used {count} prior {noun} from your local Jinn history"
+
+
+def _knowledge_lines_verbose(
+    searched_terms: List[str], provided_refs: List[str], nothing_found: bool
+) -> List[str]:
     if nothing_found:
         return ["knowledge searched · nothing relevant found"]
     terms = ", ".join(searched_terms) if searched_terms else "(none)"
     refs = ", ".join(provided_refs)
     return [f"knowledge searched {terms} · provided {len(provided_refs)} ({refs})"]
+
+
+def _capture_line(capture_status: str) -> str:
+    return {
+        "captured": "Saved this session for next time",
+        "captured-locally": "Saved this session locally",
+        "unavailable": "Could not save this session",
+    }.get(capture_status, "Could not save this session")
 
 
 def _render(title: str, lines: Iterable[str]) -> str:
@@ -50,21 +79,27 @@ def _render(title: str, lines: Iterable[str]) -> str:
 def render_current(
     *, activity: Dict[str, Any], capture_active: bool
 ) -> str:
-    """Render live state only; eligibility/contribution are end-of-session facts."""
+    """Render live state; default copy is operator-facing, not protocol jargon."""
     searched_terms = _terms(activity.get("searchedTerms"))
     provided_refs = _refs(activity.get("providedRefs"))
-    knowledge = (
-        ["knowledge nothing relevant found yet"]
-        if not searched_terms and not provided_refs
-        else _knowledge_lines(searched_terms, provided_refs, nothing_found=not provided_refs)
-    )
-    return _render("Jinn session", [
-        *knowledge,
-        "capture active" if capture_active else "capture waiting for ordinary work",
-        "local learning reserves this capture at session end",
-        "eligibility pending until session end",
-        "contribution parked · nothing leaves this machine",
-    ])
+    nothing_found = not provided_refs and bool(searched_terms)
+    if not searched_terms and not provided_refs:
+        knowledge = ["No relevant prior notes yet"]
+    elif _verbose():
+        knowledge = _knowledge_lines_verbose(
+            searched_terms, provided_refs, nothing_found=nothing_found
+        )
+    else:
+        knowledge = [_knowledge_line(provided_refs, nothing_found=nothing_found)]
+    lines = list(knowledge)
+    if _verbose():
+        lines.extend([
+            "capture active" if capture_active else "capture waiting for ordinary work",
+            "local learning reserves this capture at session end",
+            "eligibility pending until session end",
+            "contribution parked · nothing leaves this machine",
+        ])
+    return _render("Jinn", lines)
 
 
 def _eligibility(value: object) -> str:
@@ -73,6 +108,17 @@ def _eligibility(value: object) -> str:
     verdict = "eligible" if value["eligible"] else "not eligible"
     reason = _text(value.get("reason"), "")
     return f"eligibility {verdict}" + (f" — {reason}" if reason else "")
+
+
+def _published_contribution_line(contribution: object) -> str | None:
+    if not isinstance(contribution, dict):
+        return None
+    receipt = contribution.get("value")
+    if not isinstance(receipt, dict):
+        return None
+    if _text(receipt.get("status"), "") != "published":
+        return None
+    return "jinn: contribution published — immutable"
 
 
 def _contribution(value: object) -> str:
@@ -117,25 +163,29 @@ def render_complete(
         if isinstance(stated_nothing_found, bool)
         else not bool(provided_refs)
     )
-    learning = {
-        "pending": "local learning pending — capture reserved for distillation",
-        "off": "local learning off",
-        "unavailable": "local learning unavailable — capture was not reserved",
-    }.get(local_learning_status, "local learning unavailable")
-    capture = {
-        "captured": "episode captured",
-        "captured-locally": "episode captured locally — process bridge degraded",
-        "unavailable": "episode capture unavailable",
-    }.get(capture_status, "episode capture unavailable")
-    contribution_line = (
-        _contribution(contribution)
-        if candidate_created
-        else "contribution no reusable public-task candidate"
-    )
-    return _render("Jinn session complete", [
-        *_knowledge_lines(searched_terms, provided_refs, nothing_found),
-        capture,
-        learning,
-        _eligibility(core.get("eligibility")),
-        contribution_line,
-    ])
+    if _verbose():
+        knowledge = _knowledge_lines_verbose(searched_terms, provided_refs, nothing_found)
+    else:
+        knowledge = [_knowledge_line(provided_refs, nothing_found)]
+    lines = [*knowledge, _capture_line(capture_status)]
+    published = _published_contribution_line(contribution)
+    if published is not None:
+        lines.append(published)
+    if _verbose():
+        learning = {
+            "pending": "local learning pending — capture reserved for distillation",
+            "off": "local learning off",
+            "unavailable": "local learning unavailable — capture was not reserved",
+        }.get(local_learning_status, "local learning unavailable")
+        capture = {
+            "captured": "episode captured",
+            "captured-locally": "episode captured locally — process bridge degraded",
+            "unavailable": "episode capture unavailable",
+        }.get(capture_status, "episode capture unavailable")
+        contribution_line = (
+            _contribution(contribution)
+            if candidate_created
+            else "contribution no reusable public-task candidate"
+        )
+        lines.extend([capture, learning, _eligibility(core.get("eligibility")), contribution_line])
+    return _render("Jinn", lines)

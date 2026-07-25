@@ -52,6 +52,7 @@ export type CreateCliExecutionContextOptions = {
 
 async function buildCliSignerContext(
   opts: CreateCliExecutionContextOptions,
+  readOnlyFleet = false,
 ): Promise<{ ok: true; ctx: CliSignerContext } | { ok: false; envelope: BuildEnvelopeInput }> {
   const env = opts.env ?? process.env;
   const pw = resolveCliPassword(opts.argv, env);
@@ -106,7 +107,23 @@ async function buildCliSignerContext(
     };
   }
 
-  const fleetState = await fleetStore.load(networkChain);
+  const fleetState = readOnlyFleet
+    ? await fleetStore.tryLoadExisting()
+    : await fleetStore.load(networkChain);
+  if (!fleetState || (readOnlyFleet && fleetState.chain !== networkChain)) {
+    return {
+      ok: false,
+      envelope: {
+        code: 'bootstrap_incomplete',
+        message: !fleetState
+          ? 'No valid persisted fleet state is available for read-only validation.'
+          : `Persisted fleet state is for ${fleetState.chain}, not ${networkChain}.`,
+        hint: 'Run `jinn bootstrap` to create a valid fleet state before retrying.',
+        exampleCli: 'jinn bootstrap --human',
+        details: { field: 'fleet' },
+      },
+    };
+  }
   const publicClient = createJinnPublicClient(config.rpcUrl, networkChain);
   const masterAccount = deriveMasterSigner(mnemonic);
   const masterWallet = createJinnWalletClient(config.rpcUrl, networkChain, masterAccount);
@@ -131,6 +148,13 @@ export async function createCliSignerContext(
   opts: CreateCliExecutionContextOptions = {},
 ): Promise<{ ok: true; ctx: CliSignerContext } | { ok: false; envelope: BuildEnvelopeInput }> {
   return buildCliSignerContext(opts);
+}
+
+/** Password + signers + existing fleet JSON, with no fleet-file creation or migration. */
+export async function createCliReadOnlySignerContext(
+  opts: CreateCliExecutionContextOptions = {},
+): Promise<{ ok: true; ctx: CliSignerContext } | { ok: false; envelope: BuildEnvelopeInput }> {
+  return buildCliSignerContext(opts, true);
 }
 
 export async function createCliExecutionContext(

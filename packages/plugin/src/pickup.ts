@@ -317,18 +317,58 @@ function tierRank(tier: string | undefined): number {
   return (TIER_ORDER as readonly string[]).indexOf(tier);
 }
 
-function compareScoredKnowledgeHits(a: ScoredKnowledgeHit, b: ScoredKnowledgeHit): number {
+function compareScoreAndTier(a: ScoredKnowledgeHit, b: ScoredKnowledgeHit): number {
   if (b.score !== a.score) return b.score - a.score;
-  const tierDiff = tierRank(b.hit.tier) - tierRank(a.hit.tier);
-  if (tierDiff !== 0) return tierDiff;
-  return (b.hit.publishedAt ?? 0) - (a.hit.publishedAt ?? 0);
+  return tierRank(b.hit.tier) - tierRank(a.hit.tier);
 }
 
-/** Return a copied, deterministically ranked scored-candidate list. */
+function compareRef(a: ScoredKnowledgeHit, b: ScoredKnowledgeHit): number {
+  if (a.hit.ref < b.hit.ref) return -1;
+  if (a.hit.ref > b.hit.ref) return 1;
+  return 0;
+}
+
+/**
+ * Return a copied, deterministically ranked scored-candidate list.
+ *
+ * Recency is a group property, not a pairwise comparator: within each equal
+ * score+tier group, use recency only when every hit declares the same domain
+ * (including the all-omitted legacy group). A mixed-domain group preserves
+ * its stable score/tier input order rather than comparing incomparable
+ * recency values or inventing a source priority.
+ */
 export function rankScoredKnowledgeHits(
   candidates: ScoredKnowledgeHit[],
 ): ScoredKnowledgeHit[] {
-  return [...candidates].sort(compareScoredKnowledgeHits);
+  const grouped = [...candidates].sort(compareScoreAndTier);
+  const ranked: ScoredKnowledgeHit[] = [];
+  let start = 0;
+  while (start < grouped.length) {
+    let end = start + 1;
+    while (
+      end < grouped.length
+      && compareScoreAndTier(grouped[start]!, grouped[end]!) === 0
+    ) {
+      end += 1;
+    }
+
+    const tieGroup = grouped.slice(start, end);
+    const recencyDomain = tieGroup[0]!.hit.recencyDomain;
+    const comparableRecency = tieGroup.every(
+      (candidate) => candidate.hit.recencyDomain === recencyDomain,
+    );
+    if (comparableRecency) {
+      tieGroup.sort((a, b) => {
+        const recencyDiff =
+          (b.hit.publishedAt ?? 0) - (a.hit.publishedAt ?? 0);
+        if (recencyDiff !== 0) return recencyDiff;
+        return compareRef(a, b);
+      });
+    }
+    ranked.push(...tieGroup);
+    start = end;
+  }
+  return ranked;
 }
 
 /**
@@ -352,8 +392,9 @@ export function rankKnowledgeCandidates(
 /**
  * Full ranked candidate pool (rescope §3.3 selection policy): drop skill
  * hits, dedup, score, apply the relevance floor (honest nothing-found below
- * it), rank score desc → tier desc → recency desc — every candidate that
- * clears the floor, not sliced to `MAX_SELECTED_PACKETS`.
+ * it), rank score desc → tier desc → comparable-domain recency desc (or ref
+ * for a mixed-domain tie group) — every candidate that clears the floor, not
+ * sliced to `MAX_SELECTED_PACKETS`.
  *
  * Content-level guards that can only run after a candidate's content is
  * fetched (mono #1782: post-fetch skill-payload classification, empty-packet

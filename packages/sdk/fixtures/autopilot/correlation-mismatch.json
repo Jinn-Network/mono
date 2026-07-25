@@ -1,0 +1,22 @@
+{
+  "expected": {
+    "taskId": "501",
+    "attemptIndex": 0,
+    "requestId": "0xrequest",
+    "deliveryEnvelopeCid": "bafy-envelope",
+    "v2AttemptId": "123e4567-e89b-42d3-a456-426614174001",
+    "claimOid": "1111111111111111111111111111111111111111",
+    "prNumber": 2101,
+    "expectedHead": "2222222222222222222222222222222222222222"
+  },
+  "actual": {
+    "taskId": "501",
+    "attemptIndex": 0,
+    "requestId": "0xrequest",
+    "deliveryEnvelopeCid": "bafy-other-envelope",
+    "v2AttemptId": "123e4567-e89b-42d3-a456-426614174001",
+    "claimOid": "1111111111111111111111111111111111111111",
+    "prNumber": 2101,
+    "expectedHead": "2222222222222222222222222222222222222222"
+  }
+}

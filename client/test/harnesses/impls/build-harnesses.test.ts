@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { buildHarnesses } from '../../../src/harnesses/impls/index.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../../src/harnesses/names.js';
 import { HarnessRegistry } from '../../../src/harnesses/engine/registry.js';
@@ -89,6 +89,35 @@ describe('buildHarnesses — external impls + disabledNames', () => {
     });
     expect(impls.some((impl) => impl.name === CODEX_HARNESS)).toBe(false);
     expect(impls.some((impl) => impl.name === CLAUDE_CODE_HARNESS)).toBe(true);
+  });
+
+  it('inherits a per-SolverNet semantic runtime resolver without choosing a provider', () => {
+    const semanticEvaluatorRunnerResolver = {
+      resolve: vi.fn().mockReturnValue(undefined),
+    };
+    const impls = buildHarnesses({
+      ...ENV,
+      semanticEvaluatorRunnerResolver,
+    });
+    const evaluator = impls.find((impl) => impl.name === 'jinn-repo-evaluator');
+    expect((evaluator as unknown as {
+      semanticAgentRunnerResolver?: unknown;
+    }).semanticAgentRunnerResolver).toBe(semanticEvaluatorRunnerResolver);
+  });
+
+  it('wires the production immutable verifier into the exact-head evaluator', () => {
+    const immutableMechanicalVerifier = {
+      verify: vi.fn(),
+    };
+    const impls = buildHarnesses({
+      ...ENV,
+      immutableMechanicalVerifier,
+    });
+    const evaluator = impls.find((impl) => impl.name === 'jinn-repo-evaluator');
+    const mechanicalRunner = (evaluator as unknown as {
+      mechanicalRunner: { immutableVerifier?: unknown };
+    }).mechanicalRunner;
+    expect(mechanicalRunner.immutableVerifier).toBe(immutableMechanicalVerifier);
   });
 });
 

@@ -242,6 +242,7 @@ function projectLauncherGeneratorState(raw: unknown): LauncherGeneratorStateSnap
   if (poolPublicationPriorSize !== undefined) projected.poolPublicationPriorSize = poolPublicationPriorSize;
   const poolPublicationCurrentSize = finiteNumber(snapshot['poolPublicationCurrentSize']);
   if (poolPublicationCurrentSize !== undefined) projected.poolPublicationCurrentSize = poolPublicationCurrentSize;
+  if (snapshot['poolPublicationStale'] === true) projected.poolPublicationStale = true;
 
   const totalPosted = finiteNumber(snapshot['totalPosted']);
   if (totalPosted !== undefined) projected.totalPosted = totalPosted;

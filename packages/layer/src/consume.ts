@@ -110,6 +110,8 @@ export interface CorpusSearchHit {
   synthesis?: string;
   /** Named W2 allowlist decision; absent on legacy index rows. */
   retrievalVisible?: boolean;
+  /** Canonical capture verification strength from capture-meta, when present. */
+  verifiabilityTier?: string;
 }
 
 export interface CorpusArtifact {
@@ -346,6 +348,9 @@ export function createHarnessLayer(config: HarnessLayerConfig = {}): HarnessLaye
             : {}),
           ...(typeof metaHit.retrievalVisible === 'boolean'
             ? { retrievalVisible: metaHit.retrievalVisible }
+            : {}),
+          ...(typeof metaHit.verifiabilityTier === 'string'
+            ? { verifiabilityTier: metaHit.verifiabilityTier }
             : {}),
         });
         seen.add(metaHit.manifestCid);

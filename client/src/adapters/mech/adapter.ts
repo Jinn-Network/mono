@@ -2,7 +2,7 @@ import { getAddress, type Address, type Hex, type Log, type PublicClient, type W
 import { keccak256, toBytes } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base, baseSepolia } from 'viem/chains';
-import type { ExecutionAdapter } from '../adapter.js';
+import type { ExecutionAdapter, PostTaskOptions } from '../adapter.js';
 import type {
   Task,
   RequestId,
@@ -55,6 +55,8 @@ import {
   canClaimEvaluation,
   type RouterTaskPolicy,
   type DecodedTaskCreated,
+  scanTasks,
+  PendingTaskSubmissionError,
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
 import {
@@ -66,6 +68,7 @@ import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
 import type { Store } from '../../store/store.js';
+import { TaskRunPersistence } from '../../harnesses/engine/persistence.js';
 import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
 import { emitStructured } from '../../events/emitter.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
@@ -74,7 +77,15 @@ import {
   SOLUTION_ENVELOPE_CID_CONTEXT_KEY,
   SOLUTION_TASK_CID_CONTEXT_KEY,
   RESTORATION_TASK_CID_CONTEXT_KEY,
+  AUTOPILOT_EVALUATION_CONTEXT_KEY,
 } from '../../harnesses/impls/evaluation-context.js';
+import {
+  JinnRepoAutopilotSessionTaskSchema,
+  JinnRepoAutopilotSolutionPayloadSchema,
+} from '@jinn-network/sdk/solvernets/jinn-repo';
+import {
+  admitAutopilotEvaluationOpportunity,
+} from '../../harnesses/impls/jinn-repo-evaluator/autopilot-evaluation-context.js';
 import { signTaskV1 } from '../../tasks/signing.js';
 import type { SignedTaskV1, TaskClaimPolicy, TaskV1 } from '../../types/task-document.js';
 
@@ -281,6 +292,7 @@ export class MechAdapter implements ExecutionAdapter {
   // so we can yield accurate Task in DeliveredResult
   private originalStates = new Map<string, Task>();
   private store?: Store;
+  private taskRuns: TaskRunPersistence | undefined;
 
   constructor(config: MechAdapterConfig, store?: Store) {
     this.config = config;
@@ -651,7 +663,7 @@ export class MechAdapter implements ExecutionAdapter {
     return true;
   }
 
-  async postTask(state: Task): Promise<PostedTask> {
+  async postTask(state: Task, options?: PostTaskOptions): Promise<PostedTask> {
     const restorationState: Task = {
       ...state,
       role: state.role ?? 'restoration',
@@ -699,6 +711,8 @@ export class MechAdapter implements ExecutionAdapter {
       deliveryRate,
       maxTimeout,
       this.config.evictionRecovery,
+      options?.onTransactionHash,
+      options?.beforeBroadcast,
     );
     if (
       taskSubmission.txHash
@@ -730,6 +744,42 @@ export class MechAdapter implements ExecutionAdapter {
       taskCid: restorationTaskCid,
       txHash: taskSubmission.txHash,
       blockNumber: taskSubmission.blockNumber,
+    };
+  }
+
+  async recoverTaskPost(input: {
+    creatorSafeAddress: string;
+    signedTask: SignedTaskV1;
+    pendingTxHash?: Hex;
+  }): Promise<PostedTask | null> {
+    const cid = await uploadToIpfs(this.config.ipfsRegistryUrl, input.signedTask);
+    const taskCidDigest = cidToDigestHex(cid);
+    const manifestDigest = manifestDigestForCid(input.signedTask.solverNetManifestCid);
+    const head = await this.publicClient.getBlockNumber();
+    const fromBlock = DEFAULT_TASK_DISCOVERY_FROM_BLOCK[this.config.chainId] ?? 0n;
+    const matches = await scanTasks(
+      this.publicClient,
+      this.config.routerAddress,
+      getAddress(input.creatorSafeAddress),
+      fromBlock,
+      head,
+    );
+    const match = matches.find((event) =>
+      event.taskCidDigest.toLowerCase() === taskCidDigest.toLowerCase()
+      && event.manifestDigest?.toLowerCase() === manifestDigest.toLowerCase()
+    );
+    if (!match) {
+      if (input.pendingTxHash) {
+        throw new PendingTaskSubmissionError(input.pendingTxHash);
+      }
+      return null;
+    }
+    const digest = taskCidDigest.slice(2);
+    return {
+      taskId: match.taskId,
+      taskCid: `f01551220${digest}`,
+      txHash: match.transactionHash,
+      blockNumber: match.blockNumber,
     };
   }
 
@@ -811,6 +861,7 @@ export class MechAdapter implements ExecutionAdapter {
     resultData: string;
     solutionEnvelopeCid: string;
     taskCid?: string;
+    autopilotEvaluationContext?: Record<string, unknown>;
   }): Task {
     // Strip the restoration execution-profile pin. It asserts against the
     // solver harness/model/version; evaluation resolves a different Harness
@@ -829,6 +880,12 @@ export class MechAdapter implements ExecutionAdapter {
         [SOLUTION_TASK_CID_CONTEXT_KEY]:
           params.task.context?.[SOLUTION_TASK_CID_CONTEXT_KEY] ?? params.task.context?.[RESTORATION_TASK_CID_CONTEXT_KEY] ?? params.taskCid,
         [SOLUTION_ENVELOPE_CID_CONTEXT_KEY]: params.solutionEnvelopeCid,
+        ...(params.autopilotEvaluationContext
+          ? {
+              [AUTOPILOT_EVALUATION_CONTEXT_KEY]:
+                params.autopilotEvaluationContext,
+            }
+          : {}),
       },
     };
   }
@@ -944,7 +1001,23 @@ export class MechAdapter implements ExecutionAdapter {
    * backlog scan) must skip these before spending a claim tx on a doomed run.
    */
   private hasExpiredExecutionWindow(announcement: TaskAnnouncement): boolean {
-    const windowEndTs = announcement.task.window?.endTs;
+    let windowEndTs = announcement.task.window?.endTs;
+    const spec = announcement.task.spec;
+    if (
+      spec?.['source'] === 'autopilot-session'
+      && typeof spec['session'] === 'object'
+      && spec['session'] !== null
+      && typeof (spec['session'] as { deadline?: unknown }).deadline === 'string'
+    ) {
+      const sessionDeadline = Date.parse(
+        (spec['session'] as { deadline: string }).deadline,
+      );
+      if (Number.isFinite(sessionDeadline)) {
+        windowEndTs = windowEndTs === undefined
+          ? sessionDeadline
+          : Math.min(windowEndTs, sessionDeadline);
+      }
+    }
     return windowEndTs !== undefined && windowEndTs <= Date.now();
   }
 
@@ -1179,6 +1252,80 @@ export class MechAdapter implements ExecutionAdapter {
       );
     }
     const resultData = (resultPayload.data as string) ?? JSON.stringify(resultPayload);
+    let autopilotEvaluationContext: Record<string, unknown> | undefined;
+    if (
+      restoration.task.spec?.['source'] === 'autopilot-session'
+    ) {
+      const parsedTask = JinnRepoAutopilotSessionTaskSchema.safeParse(
+        restoration.task.spec,
+      );
+      if (!parsedTask.success) {
+        console.log(
+          `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: malformed source Task`,
+        );
+        return undefined;
+      }
+
+      let parsedEnvelope: ReturnType<typeof SignedEnvelopeSchema.safeParse>;
+      try {
+        parsedEnvelope = SignedEnvelopeSchema.safeParse(JSON.parse(resultData));
+      } catch {
+        console.log(
+          `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: malformed Solution envelope`,
+        );
+        return undefined;
+      }
+      if (
+        !parsedEnvelope.success
+        || parsedEnvelope.data.solverType !== 'jinn-repo.v1'
+        || normalizeEnvelopeRole(parsedEnvelope.data.role) !== 'solution'
+      ) {
+        console.log(
+          `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: invalid Solution envelope`,
+        );
+        return undefined;
+      }
+      const parsedSolution = JinnRepoAutopilotSolutionPayloadSchema.safeParse(
+        parsedEnvelope.data.payload,
+      );
+      if (!parsedSolution.success) {
+        console.log(
+          `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: invalid mutation result`,
+        );
+        return undefined;
+      }
+
+      const observation =
+        await this.config.autopilotEvaluationContextResolver?.resolve({
+          task: parsedTask.data,
+          solution: parsedSolution.data,
+          taskId: solution.taskId,
+          attemptIndex: solution.attemptIndex,
+          requestId: solution.requestId,
+          solutionEnvelopeCid,
+          solutionOperatorSafe: solution.operator,
+          evaluatorOperatorSafe: this.config.safeAddress,
+        });
+      const admission = admitAutopilotEvaluationOpportunity({
+        task: parsedTask.data,
+        solution: parsedSolution.data,
+        taskId: solution.taskId,
+        attemptIndex: solution.attemptIndex,
+        requestId: solution.requestId,
+        solutionEnvelopeCid,
+        solutionOperatorSafe: solution.operator,
+        evaluatorOperatorSafe: this.config.safeAddress,
+        observation,
+      });
+      if (admission.kind !== 'accepted') {
+        console.log(
+          `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: ${admission.reason}`,
+        );
+        return undefined;
+      }
+      autopilotEvaluationContext =
+        admission.context as unknown as Record<string, unknown>;
+    }
     const evaluationTask = this.buildEvaluationTask({
       task: restoration.task,
       solutionRequestId: solution.requestId,
@@ -1186,6 +1333,7 @@ export class MechAdapter implements ExecutionAdapter {
       resultData,
       solutionEnvelopeCid,
       taskCid: restoration.taskCid,
+      autopilotEvaluationContext,
     });
     const opportunityId = `evaluation:${solution.taskId}:${solution.attemptIndex}:${solution.requestId}`;
     const announcement: TaskAnnouncement = {
@@ -1592,6 +1740,30 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
+  private engineOwnsAutopilotSettlement(requestId: string): boolean {
+    if (this.store === undefined) return false;
+    try {
+      this.taskRuns ??= new TaskRunPersistence(this.store.db);
+      const run = this.taskRuns.getByRequestId(requestId);
+      const spec = run?.task?.spec;
+      return (
+        run?.solverType === 'jinn-repo.v1'
+        && spec !== null
+        && typeof spec === 'object'
+        && (spec as Record<string, unknown>)['source']
+          === 'autopilot-session'
+      );
+    } catch (error) {
+      console.error(
+        `[mech] refusing legacy delivery settlement for ${requestId}: `
+        + `Autopilot ownership lookup failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return true;
+    }
+  }
+
   /**
    * Paginate `getLogs` over `[deliveryBlockCursor+1, currentBlock]` chunked by
    * `DEFAULT_ROUTER_LOG_CHUNK_BLOCKS` to honor RPC provider block-range limits
@@ -1649,6 +1821,8 @@ export class MechAdapter implements ExecutionAdapter {
             const iDelivered = mechAddress.toLowerCase() === this.config.safeAddress.toLowerCase();
             const iCreatedRestoration = this.pendingEvaluations.has(requestId);
             if (!iDelivered && !iCreatedRestoration) continue;
+            const engineOwnsSettlement =
+              this.engineOwnsAutopilotSettlement(requestId);
             if (iCreatedRestoration) {
               const recoveryExpirySeconds = this.recoveryDeliveryExpirySeconds(requestId);
               if (recoveryExpirySeconds != null) {
@@ -1682,14 +1856,19 @@ export class MechAdapter implements ExecutionAdapter {
             // (a) Deliverer-side claim path: if this Safe delivered the request,
             //     claim it first so router counters credit the deliverer.
             let deliveryClaimStatus: Awaited<ReturnType<MechAdapter['ensureDeliveryClaimed']>> | undefined;
-            if (iDelivered) {
+            if (iDelivered && !engineOwnsSettlement) {
               deliveryClaimStatus = await this.ensureDeliveryClaimed(requestId, deliveryDataHex);
               if (deliveryClaimStatus === 'retry') continue;
             }
 
             // (b) Task-side claim path: if this request came from our Task
             //     claim, make sure JinnRouterV3 records the Solution submission.
-            if (iCreatedRestoration && deliveryClaimStatus !== 'claimed' && deliveryClaimStatus !== 'already-claimed') {
+            if (
+              iCreatedRestoration
+              && !engineOwnsSettlement
+              && deliveryClaimStatus !== 'claimed'
+              && deliveryClaimStatus !== 'already-claimed'
+            ) {
               const creatorClaimStatus = await this.ensureDeliveryClaimed(requestId, deliveryDataHex);
               if (creatorClaimStatus === 'retry') continue;
             }

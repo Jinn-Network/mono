@@ -13,6 +13,13 @@ import {
   getSweRebenchV2StateStore,
 } from '../../src/solver-types/swe-rebench-v2.js';
 import { loadHeldOutSlate } from '../../src/solver-types/_swe-rebench-v2-held-out-slate.js';
+import {
+  EVAL_SEMANTICS_VERSION,
+  writeVettedPoolArtifactPublication,
+  createVettedPoolArtifactRef,
+  parseVettedPoolArtifact,
+  hashVettedPoolArtifact,
+} from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import type { LaunchedSolverNetRecord } from '../../src/solvernets/store.js';
 import type { DiscoveryAPI } from '../../src/discovery/types.js';
 import type { Task } from '../../src/types/task.js';
@@ -776,4 +783,89 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — fresh-volume pool recov
       fetchSpy.mockRestore();
     }
   }, 120_000);
+});
+
+describe('makeSweRebenchV2GeneratorForLaunchedRecord — vetted-pool staleness (#796)', () => {
+  const MANIFEST_CID = 'bafymanifest796test';
+
+  function inertDiscovery(): DiscoveryAPI {
+    const notUsed = vi.fn(async () => { throw new Error('not used'); });
+    return {
+      getInstanceSuccessCounts: vi.fn(async () => new Map()),
+      getInstanceClaimCounts: vi.fn(async () => new Map()),
+      findClaimableTasks: notUsed,
+      listLaunchedSolverNets: notUsed,
+      getLifecycleStatus: notUsed,
+      getSolverNetOperatorCount: notUsed,
+      queryEnvelopes: notUsed,
+      listPluginPublications: notUsed,
+      getPluginScores: notUsed,
+      listBuilderArtifacts: notUsed,
+    } satisfies DiscoveryAPI;
+  }
+
+  async function seedPublication(stateDir: string, version: string): Promise<void> {
+    const artifact = parseVettedPoolArtifact({
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: version,
+      generatedAt: '2026-05-25T00:00:00Z',
+      entries: [
+        { instance_id: 'a__1', scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-25T00:00:00Z' },
+      ],
+    });
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: MANIFEST_CID,
+      artifactCid: 'bafkrei-test',
+      artifactHash: hashVettedPoolArtifact(artifact),
+      evalSemanticsVersion: version,
+      publishedAt: '2026-05-25T00:00:00Z',
+    });
+    await writeVettedPoolArtifactPublication({ stateDir, ref, artifact });
+  }
+
+  async function buildAndTick(stateDir: string) {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => { throw new Error('HF unreachable in test sandbox'); });
+    try {
+      const gen = makeSweRebenchV2GeneratorForLaunchedRecord({
+        recordRef: { current: launchedRecord({ status: 'launched', manifestCid: MANIFEST_CID }) },
+        configRef: {
+          current: {
+            N_target_successes: 5,
+            posting_window_ms: 300_000,
+            admissionMode: 'python-floor' as const,
+          },
+        },
+        staticConfig: { stateDir, discoveryApi: inertDiscovery() },
+      });
+      await gen();
+      return gen.getState();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  }
+
+  it('reports poolPublicationStale=true for a publication under an older eval-semantics version', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-796-stale-'));
+    await mkdir(stateDir, { recursive: true });
+    await seedPublication(stateDir, '3');
+    const state = await buildAndTick(stateDir);
+    expect(state.poolPublicationStale).toBe(true);
+  });
+
+  it('leaves poolPublicationStale absent for a current-version publication', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-796-current-'));
+    await mkdir(stateDir, { recursive: true });
+    await seedPublication(stateDir, EVAL_SEMANTICS_VERSION);
+    const state = await buildAndTick(stateDir);
+    expect(state.poolPublicationStale).toBeUndefined();
+  });
+
+  it('leaves poolPublicationStale absent when there is no publication (stale ≠ no-publication)', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-796-none-'));
+    await mkdir(stateDir, { recursive: true });
+    const state = await buildAndTick(stateDir);
+    expect(state.poolPublicationStale).toBeUndefined();
+  });
 });

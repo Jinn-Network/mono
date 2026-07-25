@@ -90,7 +90,46 @@ function unitsToUsdMicros(units: number): number {
 /** 6h block in milliseconds — UTC blocks start at 00:00 / 06:00 / 12:00 / 18:00. */
 const SIX_HOUR_BLOCK_MS = 6 * 60 * 60 * 1_000;
 /** 7 days in milliseconds — UTC-aligned. */
-const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1_000;
+export const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1_000;
+
+export type AiUnitsSpendWindow = 'block' | 'week';
+
+export interface AiUnitsSpendClassificationArgs {
+  /** USD micros projected for the next claim, or `null` when unknown. */
+  projectedUsdMicros: number | null;
+  usdMicrosThisBlock: number;
+  usdMicrosThisWeek: number;
+  capPerBlockUsdMicros: number;
+  capPerWeekUsdMicros: number;
+}
+
+export type AiUnitsSpendClassification =
+  | { proceed: true }
+  | { proceed: false; window: AiUnitsSpendWindow };
+
+/**
+ * Classify one prospective claim against the AI-spend ceilings.
+ *
+ * This is the shared, side-effect-free source of truth used by both the
+ * daemon gate and `/v1/status`: compare current spend plus the prospective
+ * debit using the gate's strict `>` boundary, fail open when the projection
+ * is unknown, and prefer the block window when both ceilings would be
+ * exceeded.
+ */
+export function classifyAiUnitsSpend(
+  args: AiUnitsSpendClassificationArgs,
+): AiUnitsSpendClassification {
+  if (args.projectedUsdMicros == null) return { proceed: true };
+
+  const overBlock =
+    args.usdMicrosThisBlock + args.projectedUsdMicros > args.capPerBlockUsdMicros;
+  const overWeek =
+    args.usdMicrosThisWeek + args.projectedUsdMicros > args.capPerWeekUsdMicros;
+
+  if (overBlock) return { proceed: false, window: 'block' };
+  if (overWeek) return { proceed: false, window: 'week' };
+  return { proceed: true };
+}
 
 /**
  * Project the AI-unit cost of one task for a harness/model combination.
@@ -253,7 +292,17 @@ export function blockIdUtc(now: Date): string {
   return blockStartUtc(now).toISOString();
 }
 
-/** Reset instant for the 7-day window — `now + (boundary - elapsed)`. We use rolling 7d here. */
+/**
+ * Coarse fallback reset instant for the 7-day window: `now + 7d`. This is
+ * NOT the true "claims resume at" instant for a paused week window — the
+ * window is rolling, so it sheds its oldest rows continuously rather than
+ * resetting all at once at a fixed point 7 days out. When a credential is
+ * actually paused on the week window, `Store.weekWindowResumeAt` computes
+ * the accurate resume instant (the moment enough in-window spend expires
+ * that `remaining + projected <= cap`); callers should prefer that and fall
+ * back to this fixed instant only when the week window is not binding (in
+ * which case the value isn't operator-relevant). See issue #830.
+ */
 export function weekResetsAtUtc(now: Date): Date {
   return new Date(now.getTime() + SEVEN_DAY_MS);
 }

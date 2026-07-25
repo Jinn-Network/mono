@@ -1,12 +1,12 @@
 # jinn-agent — the Jinn harness
 
 **jinn-agent** is an open coding harness plugged into the Jinn network: it
-reads relevant evidence from the public corpus, captures complete sessions
-locally, and distills local knowledge for reuse. Stage-2 contribution is
-parked: nothing derived from user work leaves the machine, regardless of any
-retained Stage-1 consent file. The product name is `jinn-agent`, everywhere a
-human looks; this repository is technically a thin fork of an upstream agent
-core
+reads relevant evidence from retained local episodes and the public corpus,
+captures complete sessions locally, and distills local knowledge for reuse.
+Stage-2 contribution is parked: nothing derived from user work leaves the
+machine, regardless of any retained Stage-1 consent file. The product name is
+`jinn-agent`, everywhere a human looks; this repository is technically a thin
+fork of an upstream agent core
 ([NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent))
 — that name is provenance, not product, and no user-facing surface should
 use it. Spec: `spec/2026-07-02-jinn-harness-network.md` in
@@ -20,10 +20,11 @@ issue #1312.
 bin/jinn-agent        # start the harness
 ```
 
-In-session: `/corpus <query>` searches network knowledge; `/jinn status`,
-`/jinn session`, and `/jinn history` make the local lifecycle visible; `/jinn
-distill` manages local learning. There is no contribution setup step in Stage
-2 because outbound publication is structurally disabled.
+Work normally; automatic pickup checks retained local episodes and eligible
+public evidence. `/jinn status`, `/jinn session`, and `/jinn history` make the
+local lifecycle visible; `/jinn distill` manages local learning. There is no
+contribution setup step in Stage 2 because outbound publication is structurally
+disabled.
 
 ## Coexists with a stock upstream install
 
@@ -31,8 +32,8 @@ Already running the upstream agent? No conflict:
 
 - **Separate state home.** jinn-agent defaults to `~/.jinn-agent` (config,
   auth, skills, memories, sessions) — it never reads or writes `~/.hermes`.
-  Corpus-installed skills therefore never leak into a stock install, and
-  version skew between the two cannot corrupt shared state. Override with
+  Local Jinn state therefore never leaks into a stock install, and version
+  skew between the two cannot corrupt shared state. Override with
   `JINN_AGENT_HOME`, or set `HERMES_HOME` explicitly to share state with a
   stock install on purpose.
 - **Repo-local install.** `setup.sh` builds a venv inside this repo — no
@@ -48,9 +49,10 @@ Provider keys go in the jinn-agent home on first run (`~/.jinn-agent/.env`).
 
 The Jinn layer also ships as a standalone **plugin** (`plugins/jinn/`) that
 installs into an *unmodified* upstream Hermes — the user keeps their harness and
-gains corpus evidence, local session capture, and local distillation. It is the
-**same artifact** the fork loads from its bundled path; the plugin is never
-forked per harness and its Stage-2 outbound lane remains parked in either host.
+gains automatic local-and-public evidence pickup, local session capture, and
+local distillation. It is the **same artifact** the fork loads from its bundled
+path; the plugin is never forked per harness and its Stage-2 outbound lane
+remains parked in either host.
 
 ```bash
 hermes plugins install Jinn-Network/jinn-plugin
@@ -90,7 +92,7 @@ Every other upstream file is unmodified.
 | Path | What it is |
 |---|---|
 | `bin/jinn-agent`, `setup.sh` | The human-facing entrypoints (run + one-time setup) |
-| `plugins/jinn/` | The integration surface: capture buffer + evidence pickup, Jinn layer subprocess wrapper, agent tools, `/jinn` + `/corpus` slash commands, and the fail-closed parked publication boundary |
+| `plugins/jinn/` | The integration surface: capture buffer + automatic evidence pickup, Jinn layer subprocess wrapper, `/jinn`, and the fail-closed parked publication boundary |
 | `plugins/jinn/skin/jinn.yaml` | The jinn-agent skin (branding strings + banner art); installed to `$HERMES_HOME/skins/` by `bin/jinn-agent`, defaulted for fresh installs, never overwrites an explicit skin choice |
 | `plugins/jinn/soul/SOUL.md` | The jinn-agent identity template (mono#1386) — the upstream default soul with the identity sentence rewritten; installed to `$HERMES_HOME/SOUL.md` by `bin/jinn-agent` ONLY when SOUL.md is absent. An existing soul (user-written or previously seeded) is never overwritten — unlike the skin sync |
 | `tests/plugins/test_jinn_plugin.py` | Plugin lifecycle and fail-closed privacy integration tests |
@@ -115,22 +117,20 @@ off the default cold-start path or explicit-invocation-only; owning the
 `cli.py` / `hermes_cli/main.py` argparse and help surfaces for them would
 violate thin-fork discipline.
 
-Corpus access, canonical evidence persistence, scrubbing, and local
-distillation live behind the Jinn layer package rather than in fork code. The
-plugin consumes its stable process contract. Retained outbound machinery is
-quarantined behind an unconditional disabled boundary in Stage 2; retained
-consent values do not cross it. That is the thin-fork discipline: the same
-layer serves other harnesses, and upstream merges stay cheap.
+Automatic local-and-public evidence pickup, canonical evidence persistence,
+scrubbing, and local distillation live behind the Jinn layer package rather
+than in fork code. The plugin consumes its stable process contract. Retained
+outbound machinery is quarantined behind an unconditional disabled boundary in
+Stage 2; retained consent values do not cross it. That is the thin-fork
+discipline: the same layer serves other harnesses, and upstream merges stay
+cheap.
 
 ## Behaviour
 
-- **Corpus evidence on the first turn.** The plugin derives bounded search
-  terms from the user's task and repository, excludes non-retrieval content,
-  fetches canonical evidence, and visibly labels anything it supplies. Finding
-  no relevant result is an honest, non-blocking outcome.
-- **Explicit corpus access.** `/corpus <query>` searches in-session.
-  `corpus_search` and `corpus_fetch` let the agent inspect hash-verified
-  evidence mid-task.
+- **Evidence on the first turn.** The plugin derives bounded search terms from
+  the user's task and repository, ranks retained local episodes with eligible
+  public evidence, and visibly labels anything it supplies. Finding no relevant
+  result is an honest, non-blocking outcome.
 - **One Hermes session becomes one canonical local episode.** Foreground user,
   assistant, and tool activity accumulates until the host's true session
   finalization boundary.

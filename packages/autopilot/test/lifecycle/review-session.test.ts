@@ -310,6 +310,27 @@ describe('review session protocol', () => {
     expect(h.events).not.toContain('draft:true');
   });
 
+  it('releases an unused exact-head claim without creating review or GitHub state', async () => {
+    const h = harness({ draft: true });
+
+    await expect(h.protocol.release(h.manifest)).resolves.toEqual({
+      status: 'released',
+      head: HEAD,
+    });
+
+    expect(h.events).toEqual(['record:stale', 'claim:stale']);
+    expect(h.authority.record.state).toBe('stale');
+    expect(h.native).toEqual([]);
+    expect(h.draft).toBe(true);
+    expect(h.labels).toEqual(new Set(['engine:review']));
+
+    await expect(h.protocol.release(h.manifest)).resolves.toEqual({
+      status: 'released',
+      head: HEAD,
+    });
+    expect(h.events).toEqual(['record:stale', 'claim:stale']);
+  });
+
   it.skip('never approves a human-codeowner surface and preserves a draft Human hold', async () => {
     const h = harness({ policy: 'human-codeowner', draft: true });
 

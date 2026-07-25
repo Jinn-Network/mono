@@ -432,6 +432,114 @@ describe('selectKnowledgeHits (rescope §3.3)', () => {
     expect(selected).toHaveLength(MAX_SELECTED_PACKETS);
   });
 
+  it('does not compare recency magnitudes from different domains', () => {
+    const publicBlock = hit({
+      ref: 'a-public-block',
+      snippet: 'dashboard vitest flake',
+      tier: 'tests-passed',
+      publishedAt: 22_000_000,
+      recencyDomain: 'block-number',
+      origin: 'public',
+    });
+    const localWallClock = hit({
+      ref: 'z-local-wall-clock',
+      snippet: 'dashboard vitest flake',
+      tier: 'tests-passed',
+      publishedAt: 1_753_286_400_000,
+      recencyDomain: 'unix-ms',
+      origin: 'local',
+    });
+
+    expect(selectKnowledgeHits(
+      [publicBlock, localWallClock],
+      ['dashboard', 'vitest', 'flake'],
+    ).map((candidate) => candidate.ref)).toEqual([
+      publicBlock.ref,
+      localWallClock.ref,
+    ]);
+  });
+
+  it('preserves local-then-public input order for an incomparable mixed-domain tie group', () => {
+    const local = hit({
+      ref: 'local-episode:z-local',
+      snippet: 'dashboard vitest flake',
+      tier: 'tests-passed',
+      publishedAt: 10,
+      recencyDomain: 'unix-ms',
+      origin: 'local',
+    });
+    const publicFirst = hit({
+      ref: 'a-public-first',
+      snippet: 'dashboard vitest flake',
+      tier: 'tests-passed',
+      publishedAt: 99,
+      recencyDomain: 'block-number',
+      origin: 'public-first',
+    });
+    const publicSecond = hit({
+      ref: 'b-public-second',
+      snippet: 'dashboard vitest flake',
+      tier: 'tests-passed',
+      publishedAt: 98,
+      recencyDomain: 'block-number',
+      origin: 'public-second',
+    });
+
+    expect(selectKnowledgeHits(
+      [local, publicFirst, publicSecond],
+      ['dashboard', 'vitest', 'flake'],
+    ).map((candidate) => candidate.ref)).toEqual([
+      local.ref,
+      publicFirst.ref,
+    ]);
+  });
+
+  it('still compares recency within one explicit domain', () => {
+    const older = hit({
+      ref: 'older',
+      snippet: 'dashboard vitest flake',
+      tier: 'tests-passed',
+      publishedAt: 10,
+      recencyDomain: 'block-number',
+      origin: 'older',
+    });
+    const newer = hit({
+      ref: 'newer',
+      snippet: 'dashboard vitest flake',
+      tier: 'tests-passed',
+      publishedAt: 11,
+      recencyDomain: 'block-number',
+      origin: 'newer',
+    });
+
+    expect(selectKnowledgeHits(
+      [older, newer],
+      ['dashboard', 'vitest', 'flake'],
+    ).map((candidate) => candidate.ref)).toEqual([newer.ref, older.ref]);
+  });
+
+  it('preserves raw-recency ordering when both legacy hits omit a domain', () => {
+    const older = hit({
+      ref: 'legacy-older',
+      snippet: 'dashboard vitest flake',
+      tier: 'tests-passed',
+      publishedAt: 10,
+      origin: 'legacy-older',
+    });
+    const newer = hit({
+      ref: 'legacy-newer',
+      snippet: 'dashboard vitest flake',
+      tier: 'tests-passed',
+      publishedAt: 11,
+      origin: 'legacy-newer',
+    });
+
+    expect(selectKnowledgeHits(
+      [older, newer],
+      ['dashboard', 'vitest', 'flake'],
+    ).map((candidate) => candidate.ref)).toEqual([newer.ref, older.ref]);
+  });
+
   it('dedupes and filters skills before scoring, so a duplicated skill seed never displaces evidence', () => {
     const d1 = hit({ ref: 'implement-dup-1', kind: 'skill', snippet: 'Seed import: acme/skills/implement', origin: 'agent-1', tags: ['implement'] });
     const d2 = hit({ ref: 'implement-dup-2', kind: 'skill', snippet: 'Seed import: acme/skills/implement', origin: 'agent-1', tags: ['implement'] });

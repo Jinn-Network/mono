@@ -36,8 +36,15 @@ export interface AiUnitsStatusRow {
    * field (see the `?? true` default at the use site).
    */
   active?: boolean;
+  /**
+   * The binding window the daemon gate is actually pausing on
+   * (block-preferred precedence), from the /v1/status feed. Optional for
+   * backward-compat with daemons that predate the field; the use site falls
+   * back to USD fields first, then legacy unit fields — issue #830, item 2.
+   */
+  pausedWindow?: 'block' | 'week' | null;
   blockResetsAt: string;
-  weekResetsAt: string;
+  weekResetsAt: string | null;
 }
 
 export interface AiUnitsStatusBlock {
@@ -77,11 +84,14 @@ export function AiUnitsPauseAlert({ aiUnits }: AiUnitsPauseAlertProps): JSX.Elem
         const usdMicrosThisWeek = row.usdMicrosThisWeek ?? 0;
         const capPerBlockUsdMicros = row.capPerBlockUsdMicros ?? 0;
         const capPerWeekUsdMicros = row.capPerWeekUsdMicros ?? 0;
-        // Pick the binding window — whichever sum has actually reached its cap.
+        // Prefer the gate-sourced binding window (issue #830, item 2). For
+        // older daemons, derive it from the USD gate fields when available,
+        // then fall back to the legacy unit fields.
         const blockHit = hasUsdFields
           ? usdMicrosThisBlock >= capPerBlockUsdMicros
           : row.unitsThisBlock >= row.capPerBlock;
-        const window: 'block' | 'week' = blockHit ? 'block' : 'week';
+        const window: 'block' | 'week' =
+          row.pausedWindow ?? (blockHit ? 'block' : 'week');
         const resumeAt = window === 'block' ? row.blockResetsAt : row.weekResetsAt;
         const windowLabel = window === 'block' ? '6h' : '7d';
         const usageLabel = hasUsdFields
@@ -119,7 +129,17 @@ export function AiUnitsPauseAlert({ aiUnits }: AiUnitsPauseAlertProps): JSX.Elem
               <span>
                 Credential <span className="text-foreground">{row.credentialId}</span> used{' '}
                 {usageLabel} {periodLabel}
-                . Claims resume at <span className="text-foreground">{formatUtc(resumeAt)}</span>.
+                {resumeAt == null ? (
+                  <>
+                    . Claims cannot resume under the current weekly cap until the task projection
+                    or cap configuration changes.
+                  </>
+                ) : (
+                  <>
+                    . Claims resume at{' '}
+                    <span className="text-foreground">{formatUtc(resumeAt)}</span>.
+                  </>
+                )}
               </span>
             </AlertDescription>
           </Alert>

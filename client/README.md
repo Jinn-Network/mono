@@ -208,6 +208,13 @@ encrypts OAuth tokens, so mounting `~/.claude` directly into Docker
 doesn't work — instead, run one `claude setup-token` on the host to mint
 a long-lived OAuth token, then pass it to the daemon via `.env`.
 
+The compose deployment also starts a pinned, isolated Docker-in-Docker sidecar
+for `jinn-repo.v1` mechanical verification. It does not mount the host Docker
+socket. Allow roughly 8 GiB for an active verifier in addition to the daemon,
+and make sure the deployment can pull the pinned verifier image. Keep the
+sidecar isolated; adding a host socket mount would defeat the evaluator trust
+boundary.
+
 ### Recommended path: `claude setup-token` + `.env`
 
 1. **Mint a long-lived OAuth token on the host** (one-time, opens browser):

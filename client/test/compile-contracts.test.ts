@@ -61,4 +61,56 @@ describe('compileContracts', () => {
     );
     expect(compileCalls).toHaveLength(1);
   });
+
+  it('skips yarn compile when the canary artifact is already present', async () => {
+    accessMock.mockResolvedValue(undefined);
+
+    const { compileContracts } = await import('./e2e/task-first-helpers.js');
+    await compileContracts();
+
+    const compileCalls = spawnMock.mock.calls.filter(
+      ([command, args]) => command === 'yarn' && (args as string[]).includes('compile'),
+    );
+    expect(compileCalls).toHaveLength(0);
+  });
+
+  it('joins in-flight compile when the canary appears mid-build (#2107)', async () => {
+    const exitDelayMs = 50;
+    let compileExited = false;
+    const child = mockCompileChild(exitDelayMs);
+    child.on('exit', () => {
+      compileExited = true;
+    });
+
+    let accessCount = 0;
+    accessMock.mockImplementation(() => {
+      accessCount += 1;
+      if (accessCount === 1) {
+        return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+      }
+      return Promise.resolve();
+    });
+
+    const { compileContracts } = await import('./e2e/task-first-helpers.js');
+    const first = compileContracts();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(compileExited).toBe(false);
+
+    const second = compileContracts();
+    let secondSettled = false;
+    void second.then(() => {
+      secondSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(secondSettled).toBe(false);
+
+    await Promise.all([first, second]);
+
+    expect(compileExited).toBe(true);
+    expect(accessMock).toHaveBeenCalledTimes(1);
+    const compileCalls = spawnMock.mock.calls.filter(
+      ([command, args]) => command === 'yarn' && (args as string[]).includes('compile'),
+    );
+    expect(compileCalls).toHaveLength(1);
+  });
 });

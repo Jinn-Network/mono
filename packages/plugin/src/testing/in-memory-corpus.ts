@@ -9,12 +9,15 @@ import { ok } from '../outcome.js';
  * fields not derivable from `CorpusRecord` alone).
  */
 export type InMemoryCorpusSeed = CorpusRecord & Pick<KnowledgeHit, 'kind'> & Partial<
-  Pick<KnowledgeHit, 'title' | 'tier' | 'payloadKind' | 'publishedAt'>
+  Pick<KnowledgeHit, 'title' | 'tier' | 'payloadKind' | 'publishedAt' | 'recencyDomain'>
 >;
 
 function toKnowledgeHit(seed: InMemoryCorpusSeed): KnowledgeHit {
   return {
     ref: seed.ref,
+    ...(seed.canonicalEpisodeId !== undefined
+      ? { canonicalEpisodeId: seed.canonicalEpisodeId }
+      : {}),
     kind: seed.kind,
     ...(seed.title !== undefined ? { title: seed.title } : {}),
     snippet: seed.task.summary,
@@ -23,6 +26,7 @@ function toKnowledgeHit(seed: InMemoryCorpusSeed): KnowledgeHit {
     tags: seed.tags,
     origin: seed.origin,
     ...(seed.publishedAt !== undefined ? { publishedAt: seed.publishedAt } : {}),
+    ...(seed.recencyDomain !== undefined ? { recencyDomain: seed.recencyDomain } : {}),
     retrievalVisible: seed.retrievalVisible,
   };
 }
@@ -64,7 +68,15 @@ export class InMemoryCorpusPort implements CorpusPort {
     const record = this.seed.find((r) => r.ref === ref);
     if (!record) return ok(null);
     // Strip the KnowledgeHit-only fields — get() returns the CorpusRecord shape.
-    const { kind: _kind, title: _title, tier: _tier, payloadKind: _payloadKind, publishedAt: _publishedAt, ...corpusRecord } = record;
+    const {
+      kind: _kind,
+      title: _title,
+      tier: _tier,
+      payloadKind: _payloadKind,
+      publishedAt: _publishedAt,
+      recencyDomain: _recencyDomain,
+      ...corpusRecord
+    } = record;
     return ok(corpusRecord as CorpusRecord);
   }
 }

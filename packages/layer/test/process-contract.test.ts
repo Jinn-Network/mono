@@ -13,12 +13,14 @@ import {
   ok,
   unavailable,
   type CorpusRecord,
+  type CorpusPort,
   type ContributionCandidateV1,
   type EpisodeV1,
   type JinnPluginDeps,
   type KnowledgeHit,
 } from '@jinn-network/plugin';
 import { runJinnLayerCli } from '../src/cli.js';
+import { SessionPickupRequestV1Schema } from '../src/process-contract.js';
 import {
   ContributionStore,
   EvidenceIndex,
@@ -26,6 +28,10 @@ import {
   defaultEvidenceIndexPath,
 } from '@jinn-network/core';
 import { buildSkillMarkdown } from '../src/skill-package.js';
+import {
+  createFederatedCorpusAdapter,
+  createLocalEpisodeCorpusAdapter,
+} from '../src/adapters/index.js';
 
 function capture() {
   let output = '';
@@ -220,6 +226,196 @@ describe('jinn-layer process contract v1', () => {
     expect(Array.isArray(reply.value.searchedTerms)).toBe(true);
     expect(reply.value).not.toHaveProperty('suggestions');
     expect(reply.value).not.toHaveProperty('markers');
+  });
+
+  it('defaults canonical pickup exclusions to an empty array', () => {
+    const parsed = SessionPickupRequestV1Schema.parse({
+      contractVersion: 1,
+      meta: {
+        sessionId: 'pickup-default-exclusions',
+        taskSummary: 'ordinary OSS work',
+        harness: { name: 'host', version: '1' },
+        model: 'test',
+        tools: [],
+      },
+      firstMessage: 'fix the retry tests',
+    });
+
+    expect(parsed.excludeCanonicalEpisodeIds).toEqual([]);
+  });
+
+  it('passes canonical exclusions to the plugin and returns delivered ids', async () => {
+    const corpus = new InMemoryCorpusPort([
+      {
+        ref: 'bafyAlreadyDelivered',
+        kind: 'trace',
+        task: { summary: 'Fix the dashboard retry failure' },
+        outcome: { status: 'completed', verifiabilityTier: 'tests-passed' },
+        synthesis: 'The old retry repair.',
+        steps: [],
+        tags: ['dashboard', 'retry', 'failure'],
+        provenance: 'imported',
+        origin: 'seed:already-delivered',
+        capturedAt: '2026-07-04T00:00:00.000Z',
+        tier: 'tests-passed',
+        canonicalEpisodeId: 'episode-already-delivered',
+      },
+      {
+        ref: 'bafyNewEpisode',
+        kind: 'trace',
+        task: { summary: 'Fix the dashboard retry failure' },
+        outcome: { status: 'completed', verifiabilityTier: 'tests-passed' },
+        synthesis: 'The new retry repair.',
+        steps: [],
+        tags: ['dashboard', 'retry', 'failure'],
+        provenance: 'imported',
+        origin: 'seed:new-episode',
+        capturedAt: '2026-07-05T00:00:00.000Z',
+        tier: 'tests-passed',
+        canonicalEpisodeId: 'episode-new',
+      },
+    ]);
+    const out = capture();
+
+    expect(await runJinnLayerCli(['session', 'pickup'], {
+      writer: out.writer,
+      reader: async () => JSON.stringify({
+        contractVersion: 1,
+        meta: {
+          sessionId: 'pickup-exclusions',
+          taskSummary: 'ordinary OSS work',
+          harness: { name: 'host', version: '1' },
+          model: 'test',
+          tools: [],
+        },
+        firstMessage: 'dashboard retry failure',
+        excludeCanonicalEpisodeIds: ['episode-already-delivered'],
+      }),
+      pluginOverrides: memoryDeps({ corpus }),
+    })).toBe(0);
+
+    const reply = JSON.parse(out.output());
+    expect(reply.contractVersion).toBe(1);
+    expect(reply.value.packets.map((packet: { ref: string }) => packet.ref)).toEqual(['bafyNewEpisode']);
+    expect(reply.value.deliveredCanonicalEpisodeIds).toEqual(['episode-new']);
+  });
+
+  it('delivers persisted local context when public retrieval is unavailable without rewriting visibility', async () => {
+    const episodesDir = mkdtempSync(join(tmpdir(), 'jinn-local-pickup-'));
+    const evidence = createEvidenceAdapter({ capturesDir: episodesDir });
+    const storedEpisode = {
+      ...episode(),
+      episodeId: 'local-pickup-episode',
+      retrievalVisible: false,
+      task: {
+        ...episode().task,
+        summary: 'Fix the session bridge',
+        distributionTags: ['bridge'],
+      },
+      trajectory: [{
+        ...episode().trajectory[0],
+        attributes: { 'seed.synthesis': 'Repair the session bridge before retrying pickup.' },
+      }],
+    };
+    const persisted = await evidence.put(storedEpisode);
+    expect(persisted.status).toBe('ok');
+    const publicCorpus: CorpusPort = {
+      search: async () => unavailable('public corpus offline'),
+      get: async () => unavailable('public corpus offline'),
+    };
+    const corpus = createFederatedCorpusAdapter({
+      local: createLocalEpisodeCorpusAdapter({ evidence }),
+      public: publicCorpus,
+    });
+    const out = capture();
+
+    try {
+      expect(await runJinnLayerCli(['session', 'pickup'], {
+        writer: out.writer,
+        reader: async () => JSON.stringify({
+          contractVersion: 1,
+          meta: {
+            sessionId: 'pickup-local-evidence',
+            taskSummary: 'Fix the session bridge',
+            harness: { name: 'host', version: '1' },
+            model: 'test',
+            tools: [],
+          },
+          firstMessage: 'session bridge',
+        }),
+        pluginOverrides: memoryDeps({ corpus, evidence }),
+      })).toBe(0);
+
+      const reply = JSON.parse(out.output());
+      expect(reply).toMatchObject({
+        contractVersion: 1,
+        status: 'degraded',
+        value: {
+          deliveryMode: 'degraded',
+          packets: [{ ref: 'local-episode:local-pickup-episode' }],
+        },
+      });
+      expect(reply.value.contextBlock).toContain('Fix the session bridge');
+      expect(JSON.parse(readFileSync(join(episodesDir, 'local-pickup-episode.episode.json'), 'utf8')))
+        .toMatchObject({ retrievalVisible: false });
+    } finally {
+      rmSync(episodesDir, { recursive: true, force: true });
+    }
+  });
+
+  it('delivers public context when the local episode store is empty', async () => {
+    const episodesDir = mkdtempSync(join(tmpdir(), 'jinn-empty-local-pickup-'));
+    const evidence = createEvidenceAdapter({ capturesDir: episodesDir });
+    const publicCorpus = new InMemoryCorpusPort([{
+      ref: 'bafyPublicOnlyEpisode',
+      kind: 'trace',
+      task: { summary: 'Fix the session bridge' },
+      outcome: { status: 'completed', verifiabilityTier: 'tests-passed' },
+      synthesis: 'Repair the public session bridge evidence.',
+      steps: [],
+      tags: ['session', 'bridge'],
+      provenance: 'imported',
+      origin: 'seed:public-session-bridge',
+      capturedAt: '2026-07-23T00:00:00.000Z',
+      tier: 'tests-passed',
+      retrievalVisible: true,
+    }]);
+    const corpus = createFederatedCorpusAdapter({
+      local: createLocalEpisodeCorpusAdapter({ evidence }),
+      public: publicCorpus,
+    });
+    const out = capture();
+
+    try {
+      expect(await runJinnLayerCli(['session', 'pickup'], {
+        writer: out.writer,
+        reader: async () => JSON.stringify({
+          contractVersion: 1,
+          meta: {
+            sessionId: 'pickup-empty-local',
+            taskSummary: 'Fix the session bridge',
+            harness: { name: 'host', version: '1' },
+            model: 'test',
+            tools: [],
+          },
+          firstMessage: 'session bridge',
+        }),
+        pluginOverrides: memoryDeps({ corpus, evidence }),
+      })).toBe(0);
+
+      const reply = JSON.parse(out.output());
+      expect(reply).toMatchObject({
+        contractVersion: 1,
+        status: 'ok',
+        value: {
+          deliveryMode: 'delivered',
+          packets: [{ ref: 'bafyPublicOnlyEpisode' }],
+        },
+      });
+      expect(reply.value.contextBlock).toContain('Fix the session bridge');
+    } finally {
+      rmSync(episodesDir, { recursive: true, force: true });
+    }
   });
 
   it('provides real evidence content end to end through the process contract (additive shape, rescope R2 #1772)', async () => {

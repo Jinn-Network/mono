@@ -10,6 +10,11 @@
 export type {
   DiscoveryAPI,
   ClaimableTaskCandidate,
+  AutopilotDeliveryRole,
+  AutopilotDeliveryTaskCandidate,
+  AutopilotDeliveryAttemptCandidate,
+  AutopilotDeliveryEnvelopeCandidate,
+  AutopilotDeliveryCandidateLookup,
   SolverNetLifecycleStatus,
   SolverNetManifestSummary,
   EnvelopeRef,

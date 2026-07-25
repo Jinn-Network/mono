@@ -3,6 +3,8 @@ import type { Task } from '../../types/task.js';
 /** Eval `Task.context` key for the solution job's intended-state IPFS CID (not the eval job's). */
 export const SOLUTION_TASK_CID_CONTEXT_KEY = 'solutionTaskCid' as const;
 export const RESTORATION_TASK_CID_CONTEXT_KEY = 'restorationTaskCid' as const;
+/** Strict, lifecycle-admitted context for the Autopilot semantic evaluator. */
+export const AUTOPILOT_EVALUATION_CONTEXT_KEY = 'autopilotEvaluation' as const;
 
 /**
  * Eval `Task.context` key for the solution envelope's IPFS CID.

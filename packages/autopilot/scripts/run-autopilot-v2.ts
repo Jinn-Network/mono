@@ -33,7 +33,9 @@ import {
   defaultRunnerId,
   activeCleanupEnabled,
   attemptGraceMs,
+  autopilotExecutionBackend,
   autopilotDiskFloorBytes,
+  marketplaceSolverNetManifestCid,
   explainIssue,
   explainPullRequest,
   GhLifecycleReader,
@@ -66,10 +68,11 @@ import {
 } from '../src/lifecycle/index.js';
 
 const DEFAULT_INTERVAL_MS = 10 * 60_000;
-const DEFAULT_STALE_AFTER_MS = 2 * 60 * 60_000;
+const DEFAULT_STALE_AFTER_MS = 4 * 60 * 60_000;
 // Staleness threshold for reaping unchanged claims. Overridable via
 // JINN_AUTOPILOT_STALE_AFTER_MS so the runbook's takeover canary (§8) can
-// exercise recovery without a two-hour wait; production leaves it at 2h.
+// exercise recovery without a four-hour wait; production leaves enough room
+// for the full solver/adoption/evaluator/adoption marketplace loop.
 const STALE_AFTER_MS = positiveEnvironmentInteger(
   env.JINN_AUTOPILOT_STALE_AFTER_MS,
   DEFAULT_STALE_AFTER_MS,
@@ -236,13 +239,21 @@ async function main(): Promise<void> {
     return;
   }
 
+  const executionBackendKind = autopilotExecutionBackend(
+    env.JINN_AUTOPILOT_EXECUTION_BACKEND,
+  );
+  const marketplaceManifestCid = marketplaceSolverNetManifestCid(
+    env.JINN_AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID,
+  );
   const options = parseLifecycleCli(argv.slice(2));
   const snapshotRuntime = parseSnapshotRuntimeConfig(env);
   const stateDirectory = parseAutopilotStateDirectory(env);
   const allowlist = authorAllowlist(env.JINN_DISPATCHER_AUTHOR_ALLOWLIST);
   const onlyIssues = parseOnlyIssuesAllowlist(env.JINN_AUTOPILOT_ONLY_ISSUES);
   const config = dispatcherConfig(allowlist);
-  console.log(`[autopilot:v2] runtime=${config.runtime}`);
+  console.log(
+    `[autopilot:v2] runtime=${config.runtime} executionBackend=${executionBackendKind}`,
+  );
   if (config.runtime === 'cursor') {
     console.log(
       `[autopilot:v2] cursor config (bin=${config.cursorBin}, reviewModel=${config.cursorModel})`,
@@ -416,6 +427,13 @@ async function main(): Promise<void> {
         ...reconciliationTargets,
         config,
         spawn: makeLoggingSpawn(),
+        executionBackendKind,
+        ...(marketplaceManifestCid === undefined
+          ? {}
+          : {
+              marketplaceSolverNetManifestCid:
+                marketplaceManifestCid,
+            }),
         caps: {
           implementation: positiveEnvironmentInteger(
             env.JINN_AUTOPILOT_IMPLEMENTATION_CAP,
