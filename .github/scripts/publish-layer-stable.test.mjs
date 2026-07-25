@@ -78,7 +78,19 @@ if (args[0] === 'pack') {
     process.stderr.write(JSON.stringify({ error: { code: 'E401', summary: 'unauthorized' } }) + '\\n');
     process.exitCode = 1;
   } else if (field === 'dist.integrity' && Object.hasOwn(state.registry, target)) {
-    process.stdout.write(JSON.stringify(state.registry[target]) + '\\n');
+    if ((state.delayedIntegrity?.[target] ?? 0) > 0) {
+      state.delayedIntegrity[target] -= 1;
+      save();
+      process.stderr.write(JSON.stringify({ error: { code: 'E404', summary: 'not found' } }) + '\\n');
+      process.exitCode = 1;
+    } else {
+      process.stdout.write(JSON.stringify(state.registry[target]) + '\\n');
+    }
+  } else if (field === 'dist.integrity' && (state.delayedIntegrity?.[target] ?? 0) > 0) {
+    state.delayedIntegrity[target] -= 1;
+    save();
+    process.stderr.write(JSON.stringify({ error: { code: 'E404', summary: 'not found' } }) + '\\n');
+    process.exitCode = 1;
   } else if (field === 'dist-tags.latest' && Object.hasOwn(state.tags, target)) {
     state.latestViews ??= {};
     state.latestViews[target] = (state.latestViews[target] ?? 0) + 1;
@@ -124,6 +136,7 @@ function runPublisher(context) {
         ...process.env,
         FAKE_NPM_STATE: context.statePath,
         FAKE_NPM_LOG: context.logPath,
+        JINN_NPM_REGISTRY_RETRY_DELAY_MS: '0',
       },
     },
   );
@@ -332,6 +345,28 @@ test('skips an existing version only when its exact local tarball integrity matc
     const publishes = callsFor(context).filter(({ args }) => args[0] === 'publish');
     assert.equal(publishes.length, 2);
     assert.ok(publishes.every(({ args }) => !basename(args[1]).includes('plugin')));
+  } finally {
+    cleanup(context);
+  }
+});
+
+test('retries post-publish registry reads when npm propagation is briefly delayed', () => {
+  const core = packages[1].name;
+  const coreSpec = `${core}@${version}`;
+  const context = createFixture({
+    registry: {},
+    tags: {},
+    delayedIntegrity: { [coreSpec]: 2 },
+  });
+  try {
+    const result = runPublisher(context);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const integrityViews = callsFor(context).filter(
+      ({ args }) => args[0] === 'view' && args[1] === coreSpec && args[2] === 'dist.integrity',
+    );
+    assert.ok(integrityViews.length >= 4);
+    const state = JSON.parse(readFileSync(context.statePath, 'utf8'));
+    assert.equal(state.registry[coreSpec], integrityFor(core));
   } finally {
     cleanup(context);
   }
