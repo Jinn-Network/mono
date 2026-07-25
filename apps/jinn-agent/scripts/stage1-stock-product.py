@@ -782,13 +782,12 @@ def main() -> None:
         # Boundary: no skill-install language in the injection, ever.
         assert "skills install" not in target_context.lower()
         assert "adopted automatically" not in target_context.lower()
-        # (5) Attribution visible in /jinn session mid-task — asserted on the
-        # mid-session text finish_session captured while the state was live
-        # (session end pops it; a re-query here would read empty state).
-        assert SOURCE_REF in target_mid_session, target_mid_session
-        assert "captured" in parked_summary.lower()
-        assert "contribution recorded" in parked_summary.lower(), parked_summary
-        assert SOURCE_REF in parked_summary, parked_summary
+        # (5) Mid-task /jinn session shows operator-facing pickup summary
+        # (refs live in injected context, asserted above — not repeated here).
+        assert "used 1 prior note" in target_mid_session.lower(), target_mid_session
+        assert "saved this session" in parked_summary.lower()
+        assert "contribution recorded" not in parked_summary.lower(), parked_summary
+        assert "used 1 prior note" in parked_summary.lower(), parked_summary
         assert list(EPISODES_DIR.glob("*.episode.json")), "canonical episode missing"
         assert not list(CAPTURES_DIR.glob("*.json")), "retired CapturedTask tee wrote a file"
         write_local_skill_provenance("stage1-target-task")
@@ -944,8 +943,7 @@ def main() -> None:
             expected_pickup=False,
         )
         assert incompatible_context is None
-        assert "captured locally" in incompatible_summary.lower()
-        assert "process bridge degraded" in incompatible_summary.lower()
+        assert "saved this session locally" in incompatible_summary.lower()
         jinn._runner = None
 
         # ── Boundary: no shared/network-skill install-or-adopt state anywhere
