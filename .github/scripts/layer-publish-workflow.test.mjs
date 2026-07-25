@@ -176,8 +176,11 @@ test('publish jobs build each package before running its tests', () => {
 
   const stable = jobBlock('stable-publish');
   for (const packageName of ['plugin', 'core', 'layer']) {
-    const build = stable.indexOf(`yarn --cwd packages/${packageName} build`);
-    const tests = stable.indexOf(`yarn --cwd packages/${packageName} test`);
+    const packageBlock = stable.slice(
+      stable.indexOf(`working-directory: packages/${packageName}`),
+    );
+    const build = packageBlock.indexOf('- run: yarn build');
+    const tests = packageBlock.indexOf('- run: yarn test');
     assert.ok(build >= 0, `stable publish must build ${packageName}`);
     assert.ok(tests > build, `stable publish must build ${packageName} before testing`);
   }
@@ -251,9 +254,9 @@ test('stable publication proves release ancestry from trusted next before releas
 
 test('stable publication builds the complete set before the retry-safe publisher runs', () => {
   const stable = jobBlock('stable-publish');
-  const pluginBuild = stable.indexOf('yarn --cwd packages/plugin build');
-  const coreBuild = stable.indexOf('yarn --cwd packages/core build');
-  const layerBuild = stable.indexOf('yarn --cwd packages/layer build');
+  const pluginBuild = stable.indexOf('working-directory: packages/plugin');
+  const coreBuild = stable.indexOf('working-directory: packages/core');
+  const layerBuild = stable.indexOf('working-directory: packages/layer');
   const publish = stable.indexOf('publish-layer-stable.mjs');
   assert.ok(pluginBuild >= 0);
   assert.ok(coreBuild > pluginBuild);
