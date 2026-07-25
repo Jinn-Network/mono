@@ -218,14 +218,20 @@ function validateAnnouncement(
   }
 }
 
+export function snapshotEvidenceRecordAnnouncement(
+  value: unknown,
+): EvidenceRecordAnnouncement {
+  validateAnnouncement(value);
+  return structuredClone(value);
+}
+
 export function createEvidenceIndexer(
   options: CreateEvidenceIndexerOptions,
 ): EvidenceIndexer {
   return {
     async index(announcement, operationOptions) {
       assertEvidenceIndexerOperationActive(operationOptions);
-      validateAnnouncement(announcement);
-      const accepted = structuredClone(announcement);
+      const accepted = snapshotEvidenceRecordAnnouncement(announcement);
 
       if (accepted.kind === "withdrawn") {
         const receipt =

@@ -14,6 +14,7 @@ import { InMemoryEvidenceRepository } from "@jinn-network/evidence-repository/te
 import { describe, expect, test, vi } from "vitest";
 
 import { createEvidenceIndexer } from "./index-announcement.js";
+import * as publicApi from "./index.js";
 
 const fixtureRoot = new URL(
   ".",
@@ -33,6 +34,10 @@ function resolver(
 }
 
 describe("single announcement indexing", () => {
+  test("does not expose internal snapshotting at the package root", () => {
+    expect(publicApi).not.toHaveProperty("snapshotEvidenceRecordAnnouncement");
+  });
+
   test.each([
     ["execution-evidence", "execution/ro-crate-metadata.json"],
     [
