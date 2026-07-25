@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
+import * as journalRoot from "./index.js";
 import {
   EVIDENCE_ANNOUNCEMENT_JOURNAL_ERROR_CODES,
   EVIDENCE_ANNOUNCEMENT_JOURNAL_FORMAT,
@@ -43,6 +44,10 @@ describe("announcement journal root contract", () => {
     expect(
       new EvidenceAnnouncementJournalError("IO_FAILURE", "fixture").code,
     ).toBe("IO_FAILURE");
+    expect("encodeJournalCursor" in journalRoot).toBe(false);
+    expect("replayJournal" in journalRoot).toBe(false);
+    expect("openFilesystemEvidenceAnnouncementJournalForTesting" in journalRoot)
+      .toBe(false);
   });
 
   test("opens empty and appends an idempotent replayable source", async () => {

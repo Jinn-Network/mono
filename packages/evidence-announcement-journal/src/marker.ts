@@ -1,94 +1,124 @@
 // SPDX-License-Identifier: MIT
+import { randomUUID } from "node:crypto";
+import { constants, lstat, rename, rm } from "node:fs/promises";
+
+import { EvidenceAnnouncementJournalError } from "./errors.js";
+import {
+  assertManagedRegularFile,
+  mapIoError,
+  openRegularNoFollow,
+  syncDirectory,
+  type JournalPaths,
+} from "./paths.js";
+import {
+  decodeUtf8,
+  deterministicBytes,
+  exactBytesEqual,
+} from "./serialization.js";
 import type {
   AppendAvailableAnnouncementInput,
   AnnouncementJournalMarkerV1,
 } from "./types.js";
-import { EvidenceAnnouncementJournalError } from "./errors.js";
 
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
 
-function invalid(message: string): never {
-  throw new EvidenceAnnouncementJournalError("INVALID_ANNOUNCEMENT", message);
+function invalid(message: string, cause?: unknown): never {
+  throw new EvidenceAnnouncementJournalError(
+    "INVALID_ANNOUNCEMENT",
+    message,
+    cause === undefined ? undefined : { cause },
+  );
 }
 
-function nonEmpty(value: unknown, role: string): asserts value is string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    invalid(`${role} must be a non-empty string.`);
-  }
-}
-
-function plainObject(
+function exactDataObject(
   value: unknown,
+  allowed: readonly string[],
   role: string,
-): asserts value is Record<string, unknown> {
+): Record<string, unknown> {
   if (
     typeof value !== "object" ||
     value === null ||
     Array.isArray(value) ||
     (Object.getPrototypeOf(value) !== Object.prototype &&
-      Object.getPrototypeOf(value) !== null)
+      Object.getPrototypeOf(value) !== null) ||
+    Object.getOwnPropertySymbols(value).length > 0
   ) {
     invalid(`${role} must be a safe plain object.`);
   }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const keys = Object.keys(descriptors);
+  if (
+    keys.some((key) => !allowed.includes(key)) ||
+    keys.some((key) => {
+      const descriptor = descriptors[key]!;
+      return !descriptor.enumerable || !("value" in descriptor);
+    })
+  ) {
+    invalid(`${role} contains unsupported or unsafe fields.`);
+  }
+  return Object.fromEntries(
+    keys.map((key) => [key, (descriptors[key] as PropertyDescriptor).value]),
+  );
 }
 
-function finiteJson(
+function nonEmpty(value: unknown, role: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    invalid(`${role} must be a non-empty string.`);
+  }
+  return value;
+}
+
+function arbitraryDataObject(
   value: unknown,
   role: string,
-  ancestors = new WeakSet<object>(),
-): void {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean"
-  ) return;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) invalid(`${role} must contain finite numbers.`);
-    return;
+): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    invalid(`${role} must be a safe plain object.`);
   }
-  if (Array.isArray(value)) {
-    if (Object.getPrototypeOf(value) !== Array.prototype || ancestors.has(value)) {
-      invalid(`${role} must contain safe acyclic arrays.`);
+  return exactDataObject(
+    value,
+    Object.keys(Object.getOwnPropertyDescriptors(value)),
+    role,
+  );
+}
+
+function snapshotJson<T>(value: T, role: string): T {
+  try {
+    return JSON.parse(new TextDecoder().decode(deterministicBytes(value))) as T;
+  } catch (error) {
+    if (
+      error instanceof EvidenceAnnouncementJournalError &&
+      error.code === "JOURNAL_CORRUPT"
+    ) {
+      return invalid(`${role} must contain only finite JSON data.`, error);
     }
-    ancestors.add(value);
-    for (let index = 0; index < value.length; index += 1) {
-      if (!Object.hasOwn(value, index)) invalid(`${role} must contain dense arrays.`);
-      finiteJson(value[index], `${role}[${index}]`, ancestors);
-    }
-    ancestors.delete(value);
-    return;
+    throw error;
   }
-  if (typeof value === "object") {
-    plainObject(value, role);
-    if (ancestors.has(value)) invalid(`${role} must not contain cycles.`);
-    ancestors.add(value);
-    for (const [key, child] of Object.entries(value)) {
-      finiteJson(child, `${role}.${key}`, ancestors);
-    }
-    ancestors.delete(value);
-    return;
-  }
-  invalid(`${role} must contain only finite JSON values.`);
 }
 
 export function createJournalMarker(sourceId: string): AnnouncementJournalMarkerV1 {
-  nonEmpty(sourceId, "sourceId");
   return {
     format: "jinn-evidence-announcement-journal",
     version: 1,
-    sourceId,
+    sourceId: nonEmpty(sourceId, "sourceId"),
   };
 }
 
-export function validateAppendInput(
+export function snapshotAppendInput(
   value: AppendAvailableAnnouncementInput,
-): void {
-  plainObject(value, "announcement");
-  nonEmpty(value.announcementId, "announcementId");
-  nonEmpty(value.repositoryId, "repositoryId");
-  plainObject(value.reference, "reference");
-  const family = value.reference.family;
-  const digest = value.reference.digest;
+): AppendAvailableAnnouncementInput {
+  const input = exactDataObject(
+    value,
+    ["announcementId", "reference", "repositoryId", "publishedLocation"],
+    "announcement",
+  );
+  const reference = exactDataObject(
+    input.reference,
+    ["family", "digest"],
+    "reference",
+  );
+  const family = reference.family;
+  const digest = reference.digest;
   if (
     typeof family !== "string" ||
     ![
@@ -101,15 +131,167 @@ export function validateAppendInput(
   ) {
     invalid("reference must identify a supported family and canonical digest.");
   }
-  if (value.publishedLocation !== undefined) {
-    plainObject(value.publishedLocation, "publishedLocation");
-    nonEmpty(value.publishedLocation.bindingProfile, "bindingProfile");
+  const accepted: AppendAvailableAnnouncementInput = {
+    announcementId: nonEmpty(input.announcementId, "announcementId"),
+    reference: {
+      family: family as AppendAvailableAnnouncementInput["reference"]["family"],
+      digest: digest as AppendAvailableAnnouncementInput["reference"]["digest"],
+    },
+    repositoryId: nonEmpty(input.repositoryId, "repositoryId"),
+  };
+  if (input.publishedLocation !== undefined) {
+    const published = exactDataObject(
+      input.publishedLocation,
+      ["bindingProfile", "locator"],
+      "publishedLocation",
+    );
+    const bindingProfile = nonEmpty(
+      published.bindingProfile,
+      "bindingProfile",
+    );
     try {
-      new URL(value.publishedLocation.bindingProfile);
-    } catch {
-      invalid("bindingProfile must be an absolute identifier.");
+      new URL(bindingProfile);
+    } catch (error) {
+      invalid("bindingProfile must be an absolute identifier.", error);
     }
-    plainObject(value.publishedLocation.locator, "locator");
-    finiteJson(value.publishedLocation.locator, "locator");
+    const locator = arbitraryDataObject(published.locator, "locator");
+    return snapshotJson({
+      ...accepted,
+      publishedLocation: {
+        bindingProfile,
+        locator: locator as NonNullable<
+          AppendAvailableAnnouncementInput["publishedLocation"]
+        >["locator"],
+      },
+    }, "publishedLocation");
+  }
+  return snapshotJson(accepted, "announcement");
+}
+
+function parseMarker(bytes: Uint8Array): AnnouncementJournalMarkerV1 {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decodeUtf8(bytes, "Journal marker"));
+  } catch (error) {
+    if (error instanceof EvidenceAnnouncementJournalError) throw error;
+    throw new EvidenceAnnouncementJournalError(
+      "JOURNAL_CORRUPT",
+      "The journal marker is not valid JSON.",
+      { cause: error },
+    );
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    Array.isArray(parsed) ||
+    Object.getPrototypeOf(parsed) !== Object.prototype
+  ) {
+    throw new EvidenceAnnouncementJournalError(
+      "JOURNAL_CORRUPT",
+      "The journal marker has an invalid shape.",
+    );
+  }
+  const keys = Object.keys(parsed).sort();
+  if (
+    keys.join("\0") !== ["format", "sourceId", "version"].join("\0") ||
+    (parsed as Record<string, unknown>).format !==
+      "jinn-evidence-announcement-journal" ||
+    typeof (parsed as Record<string, unknown>).version !== "number"
+  ) {
+    throw new EvidenceAnnouncementJournalError(
+      "JOURNAL_VERSION_UNSUPPORTED",
+      "The announcement journal marker format is unsupported.",
+    );
+  }
+  if ((parsed as Record<string, unknown>).version !== 1) {
+    throw new EvidenceAnnouncementJournalError(
+      "JOURNAL_VERSION_UNSUPPORTED",
+      "The announcement journal marker version is unsupported.",
+    );
+  }
+  const sourceId = (parsed as Record<string, unknown>).sourceId;
+  if (typeof sourceId !== "string" || sourceId.trim().length === 0) {
+    throw new EvidenceAnnouncementJournalError(
+      "JOURNAL_CORRUPT",
+      "The journal marker source identity is invalid.",
+    );
+  }
+  const marker = parsed as unknown as AnnouncementJournalMarkerV1;
+  if (!exactBytesEqual(bytes, deterministicBytes(marker))) {
+    throw new EvidenceAnnouncementJournalError(
+      "JOURNAL_CORRUPT",
+      "The journal marker is not deterministically serialized.",
+    );
+  }
+  return marker;
+}
+
+function isMissing(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT"
+  );
+}
+
+export async function openJournalMarker(
+  paths: JournalPaths,
+  sourceId: string,
+): Promise<AnnouncementJournalMarkerV1> {
+  const expected = createJournalMarker(sourceId);
+  try {
+    await lstat(paths.markerPath);
+  } catch (error) {
+    if (!isMissing(error)) {
+      return mapIoError(error, "Failed to inspect the journal marker.");
+    }
+    const temporaryPath = `${paths.markerPath}.tmp-${randomUUID()}`;
+    let handle: Awaited<ReturnType<typeof openRegularNoFollow>> | undefined;
+    try {
+      handle = await openRegularNoFollow(
+        temporaryPath,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
+        0o600,
+      );
+      await handle.writeFile(deterministicBytes(expected));
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await rename(temporaryPath, paths.markerPath);
+      await syncDirectory(paths.rootDir);
+    } catch (createError) {
+      await handle?.close().catch(() => undefined);
+      await rm(temporaryPath, { force: true }).catch(() => undefined);
+      if (createError instanceof EvidenceAnnouncementJournalError) {
+        throw createError;
+      }
+      return mapIoError(createError, "Failed to create the journal marker.");
+    }
+  }
+
+  try {
+    await assertManagedRegularFile(paths.markerPath, "Journal marker");
+    const handle = await openRegularNoFollow(
+      paths.markerPath,
+      constants.O_RDONLY,
+    );
+    let bytes: Uint8Array;
+    try {
+      bytes = await handle.readFile();
+    } finally {
+      await handle.close();
+    }
+    const marker = parseMarker(bytes);
+    if (marker.sourceId !== expected.sourceId) {
+      throw new EvidenceAnnouncementJournalError(
+        "JOURNAL_CORRUPT",
+        "The journal marker source identity does not match the requested source.",
+      );
+    }
+    return marker;
+  } catch (error) {
+    if (error instanceof EvidenceAnnouncementJournalError) throw error;
+    return mapIoError(error, "Failed to open the journal marker.");
   }
 }

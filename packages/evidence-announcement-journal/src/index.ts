@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: MIT
-export * from "./errors.js";
-export * from "./types.js";
-
-import { EvidenceAnnouncementJournalError } from "./errors.js";
-import type {
-  FilesystemEvidenceAnnouncementJournal,
-  OpenFilesystemEvidenceAnnouncementJournalOptions,
+export {
+  EVIDENCE_ANNOUNCEMENT_JOURNAL_ERROR_CODES,
+  EvidenceAnnouncementJournalError,
+  type EvidenceAnnouncementJournalErrorCode,
+} from "./errors.js";
+export {
+  openFilesystemEvidenceAnnouncementJournal,
+} from "./journal.js";
+export {
+  EVIDENCE_ANNOUNCEMENT_JOURNAL_FORMAT,
+  type AnnouncementJournalAppendReceipt,
+  type AppendAvailableAnnouncementInput,
+  type FilesystemEvidenceAnnouncementJournal,
+  type OpenFilesystemEvidenceAnnouncementJournalOptions,
 } from "./types.js";
-
-export async function openFilesystemEvidenceAnnouncementJournal(
-  _options: OpenFilesystemEvidenceAnnouncementJournalOptions,
-): Promise<FilesystemEvidenceAnnouncementJournal> {
-  throw new EvidenceAnnouncementJournalError(
-    "IO_FAILURE",
-    "The filesystem announcement journal is not implemented.",
-  );
-}
