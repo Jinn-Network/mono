@@ -41,6 +41,7 @@ export const SessionPickupRequestV1Schema = z.strictObject({
   contractVersion: z.literal(PROCESS_CONTRACT_VERSION),
   meta: SessionMetaSchema,
   firstMessage: z.string(),
+  excludeCanonicalEpisodeIds: z.array(z.string().min(1)).default([]),
 });
 
 export const SessionEndRequestV1Schema = z.strictObject({

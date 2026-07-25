@@ -9,11 +9,39 @@ function workflow(path: string): string {
 }
 
 describe('packed client workflow coverage', () => {
-  it.each(['.github/workflows/ci.yml', '.github/workflows/npm-publish.yml'])(
-    '%s is triggered by client, core, and plugin changes',
+  it('publishes client 0.2.1 with SDK 0.1.1 and wires the combined external consumer gate', () => {
+    const packageJson = JSON.parse(workflow('client/package.json')) as {
+      version: string;
+      scripts: Record<string, string>;
+    };
+    const sdkPackageJson = JSON.parse(workflow('packages/sdk/package.json')) as {
+      version: string;
+    };
+
+    expect(packageJson.version).toBe('0.2.1');
+    expect(sdkPackageJson.version).toBe('0.1.1');
+    expect(packageJson.scripts['consumer:acceptance']).toBe(
+      'node scripts/external-consumer-acceptance.mjs',
+    );
+    expect(packageJson.scripts['pack:smoke']).toContain('yarn consumer:acceptance');
+    expect(workflow('client/scripts/external-consumer-acceptance.mjs')).toContain(
+      '--sdk-spec',
+    );
+  });
+
+  it('vendors SDK fixtures alongside its public dist snapshot', () => {
+    const vendorSdk = workflow('client/scripts/vendor-sdk.mjs');
+
+    expect(vendorSdk).toContain("join(sdkRoot, 'fixtures')");
+    expect(vendorSdk).toContain("join(targetRoot, 'fixtures')");
+  });
+
+  it.each(['.github/workflows/ci.yml', '.github/workflows/sdk-npm-publish.yml'])(
+    '%s covers client, SDK, core, and plugin changes',
     (path) => {
       const source = workflow(path);
       expect(source).toContain("'client/**'");
+      expect(source).toContain("'packages/sdk/**'");
       expect(source).toContain("'packages/core/**'");
       expect(source).toContain("'packages/plugin/**'");
     },
@@ -24,6 +52,7 @@ describe('packed client workflow coverage', () => {
 
     expect(ci.match(/'packages\/core\/\*\*'/g)).toHaveLength(2);
     expect(ci.match(/'packages\/plugin\/\*\*'/g)).toHaveLength(2);
+    expect(ci.match(/'packages\/sdk\/\*\*'/g)).toHaveLength(2);
   });
 
   it('CI and publish run the current npm-shaped private-runtime smoke', () => {
@@ -53,5 +82,65 @@ describe('packed client workflow coverage', () => {
       "entry.startsWith('package/plugins/local-trace-distiller')",
     );
     expect(smoke).not.toContain("'jinn-layer',");
+  });
+
+  it('publishes exact-SHA SDK canaries before client canaries and validates gitHead', () => {
+    const sdkPublish = workflow('.github/workflows/sdk-npm-publish.yml');
+    const clientPublish = workflow('.github/workflows/npm-publish.yml');
+
+    expect(sdkPublish).toContain('branches: [next]');
+    expect(sdkPublish).toContain('${PACKAGE_VERSION}-canary.sha.${JINN_BUILD_COMMIT}');
+    expect(sdkPublish).toContain('npm view "${PACKAGE_SPEC}" gitHead');
+    expect(sdkPublish).toContain('steps.existing.outputs.published');
+    expect(clientPublish).toContain('workflow_run:');
+    expect(clientPublish).toContain('workflows: [SDK npm Publish]');
+    expect(clientPublish).toContain("github.event.workflow_run.event == 'push'");
+    expect(clientPublish).toContain("github.event.workflow_run.conclusion == 'success'");
+    expect(clientPublish).toContain('github.event.workflow_run.head_sha');
+    expect(clientPublish).toContain('@jinn-network/sdk@0.1.1-canary.sha.${JINN_BUILD_COMMIT}');
+    expect(clientPublish).toContain('${PACKAGE_VERSION}-canary.sha.${JINN_BUILD_COMMIT}');
+    expect(clientPublish).toContain('npm view "${PACKAGE_SPEC}" gitHead');
+    expect(clientPublish).toContain('steps.existing.outputs.published');
+    expect(clientPublish).toContain(
+      'external-consumer-acceptance.mjs --registry --sdk-spec "${SDK_SPEC}" --client-spec "${CLIENT_SPEC}"',
+    );
+  });
+
+  it('restarts the exact-SHA publish chain when either trusted-publisher workflow changes', () => {
+    const sdkPublish = workflow('.github/workflows/sdk-npm-publish.yml');
+
+    expect(sdkPublish).toContain("'.github/workflows/sdk-npm-publish.yml'");
+    expect(sdkPublish).toContain("'.github/workflows/npm-publish.yml'");
+  });
+
+  it('validates source before canary rewriting and rechecks built layouts before packing', () => {
+    const clientPublish = workflow('.github/workflows/npm-publish.yml');
+    const typecheck = clientPublish.indexOf('- run: yarn typecheck');
+    const test = clientPublish.indexOf('- run: yarn test');
+    const patch = clientPublish.indexOf(
+      '- name: Patch package version for canary publish',
+    );
+    const build = clientPublish.indexOf('- run: yarn build');
+    const builtLayouts = clientPublish.indexOf(
+      '- name: Verify build-dependent client layouts',
+    );
+    const pack = clientPublish.indexOf('- run: yarn pack:smoke');
+
+    expect(typecheck).toBeGreaterThan(-1);
+    expect(test).toBeGreaterThan(typecheck);
+    expect(patch).toBeGreaterThan(test);
+    expect(build).toBeGreaterThan(patch);
+    expect(builtLayouts).toBeGreaterThan(build);
+    expect(pack).toBeGreaterThan(builtLayouts);
+  });
+
+  it('preserves stable release/manual entry points and requires SDK 0.1.1', () => {
+    const clientPublish = workflow('.github/workflows/npm-publish.yml');
+    const sdkPublish = workflow('.github/workflows/sdk-npm-publish.yml');
+
+    expect(clientPublish).toContain('release:');
+    expect(clientPublish).toContain('workflow_dispatch:');
+    expect(sdkPublish).toContain('release:');
+    expect(clientPublish).toContain('npm view @jinn-network/sdk@0.1.1 version');
   });
 });

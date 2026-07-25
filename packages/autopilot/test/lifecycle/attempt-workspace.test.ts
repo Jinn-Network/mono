@@ -30,6 +30,7 @@ import {
   freeDiskBytes,
   listRunnerLiveAttempts,
   markAttemptExited,
+  markMarketplaceAttemptRunning,
   markAttemptRunning,
   readAttemptManifest,
   sweepDeadAttempts,
@@ -76,6 +77,26 @@ function repositoryFixture(): {
   git(repo, ['remote', 'add', 'origin', remote]);
   git(repo, ['push', '-u', 'origin', 'main']);
   return { root, repo, remote, base, oid: git(repo, ['rev-parse', 'HEAD']) };
+}
+
+function sparseCloneFixture(
+  fixture: ReturnType<typeof repositoryFixture>,
+): { repo: string; head: string; branch: string } {
+  writeFileSync(join(fixture.repo, 'feature.md'), 'feature\n');
+  git(fixture.repo, ['checkout', '-b', 'feature']);
+  git(fixture.repo, ['add', 'feature.md']);
+  git(fixture.repo, ['commit', '-m', 'feature']);
+  git(fixture.repo, ['push', '-u', 'origin', 'feature']);
+  const head = git(fixture.repo, ['rev-parse', 'HEAD']);
+  const sparseRepo = join(fixture.root, 'sparse');
+  execFileSync('git', [
+    'clone',
+    '--single-branch',
+    '--branch', 'main',
+    fixture.remote,
+    sparseRepo,
+  ]);
+  return { repo: sparseRepo, head, branch: 'feature' };
 }
 
 function options(
@@ -137,6 +158,33 @@ describe('attempt workspace and manifest', () => {
     expect(git(two.paths.worktree, ['rev-parse', 'HEAD'])).toBe(fixture.oid);
     expect(readFileSync(one.paths.askpass, 'utf8')).not.toContain('selected-secret');
     expect(readdirSync(one.paths.ghConfigDir)).toEqual(['hosts.yml']);
+  });
+
+  it('fetches a missing expected head before creating the detached worktree', async () => {
+    const fixture = repositoryFixture();
+    const sparse = sparseCloneFixture(fixture);
+    const manifest = await createAttemptWorkspace(options(fixture, {
+      repositoryPath: sparse.repo,
+      branch: sparse.branch,
+      expectedHead: sparse.head,
+      claimOid: sparse.head,
+      prNumber: 2075,
+    }), defaultRunner);
+
+    expect(git(manifest.paths.worktree, ['rev-parse', 'HEAD'])).toBe(sparse.head);
+  });
+
+  it('fails closed when the expected head is still missing after fetch', async () => {
+    const fixture = repositoryFixture();
+    const missingHead = '4dcd7a7f9d3f92e1eb13c77a6af2f522f6969b17';
+
+    await expect(createAttemptWorkspace(options(fixture, {
+      branch: 'missing-branch',
+      expectedHead: missingHead,
+      claimOid: missingHead,
+      prNumber: 2075,
+    }), defaultRunner)).rejects.toThrow(/not available after fetching/i);
+    expect(existsSync(join(fixture.base, 'v2'))).toBe(false);
   });
 
   it('writes the runtime-independent gh-config hosts.yml and token file at creation, and points the askpass helper at the file instead of $GH_TOKEN (#1883)', async () => {
@@ -555,6 +603,53 @@ describe('attempt workspace and manifest', () => {
       one.runnerId,
       (pid) => pid === 100 || pid === 200,
     ).map((attempt) => attempt.attemptId).sort()).toEqual([UUID_A, UUID_C]);
+  });
+
+  it('backward-decodes a v2 manifest without execution metadata as local', async () => {
+    const fixture = repositoryFixture();
+    const manifest = await createAttemptWorkspace(options(fixture), defaultRunner);
+    const raw = JSON.parse(
+      readFileSync(manifest.paths.manifest, 'utf8'),
+    ) as Record<string, unknown>;
+    delete raw.execution;
+    writeFileSync(manifest.paths.manifest, `${JSON.stringify(raw)}\n`);
+
+    expect(readAttemptManifest(manifest.paths.manifest).execution).toEqual({
+      backend: 'local',
+    });
+  });
+
+  it('persists and counts a running marketplace execution without a PID', async () => {
+    const fixture = repositoryFixture();
+    const manifest = await createAttemptWorkspace(options(fixture, {
+      executionBackend: 'marketplace',
+    }), defaultRunner);
+    const running = markMarketplaceAttemptRunning(
+      manifest.paths.manifest,
+      {
+        backend: 'marketplace',
+        taskId: '501',
+        taskCid: 'bafy-task',
+        deadline: '2026-07-20T01:00:00.000Z',
+        requestFile: join(manifest.paths.attemptDir, 'marketplace-request.json'),
+      },
+      () => new Date('2026-07-20T00:01:00.000Z'),
+    );
+
+    expect(running).toMatchObject({
+      processState: 'running',
+      pid: null,
+      execution: {
+        backend: 'marketplace',
+        taskId: '501',
+        taskCid: 'bafy-task',
+      },
+    });
+    expect(countRunnerLiveAttempts(
+      join(fixture.base, 'v2'),
+      manifest.runnerId,
+      () => false,
+    )).toBe(1);
   });
 });
 

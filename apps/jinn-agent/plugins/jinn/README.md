@@ -1,82 +1,104 @@
-# jinn-plugin
+# Jinn for Hermes
 
-The Jinn layer as a Hermes plugin. Install it into a stock upstream Hermes — or
-run the jinn-agent fork, which bundles it — to:
+Give Hermes relevant evidence from retained local episodes and the public Jinn
+corpus while you work.
 
-- **read the public corpus** — `/corpus <query>`, plus `corpus_search` /
-  `corpus_fetch` tools the agent can call mid-task;
-- **capture** task traces locally — scrubbed on this machine, fail-closed, and
-  distilled into reusable skills with `/jinn distill`.
+> Requires [Hermes](https://github.com/NousResearch/hermes-agent), Node.js 22+,
+> and npm.
 
-One artifact, two consumers: the same code serves the fork's bundled path and a
-stock Hermes install, unchanged.
-
-## Requires
-
-The exact `@jinn-network/jinn-layer` version pinned in `layer-runtime.json`.
-On first registration after install or update, the plugin acquires that exact
-published version into its npm-shaped
-`runtime/node_modules/.bin/jinn-layer` prefix; refresh it with
-`hermes plugins update jinn`. `JINN_LAYER_BIN` and a `jinn-layer` executable
-on `PATH` are development overrides, in that order, and suppress acquisition.
-Corpus reads, local capture, scrubbing, and distillation happen behind that
-layer boundary; this plugin is a thin adapter. Retained outbound machinery is
-forced disabled in Stage 2.
-
-## Install (stock Hermes)
-
-One command, total:
+## Install Jinn
 
 ```bash
 hermes plugins install Jinn-Network/jinn-plugin
 ```
 
-Answer `y` when Hermes offers to enable `jinn`. The install carries the Jinn
-layer; there is no separate package-manager step. Verify the resulting install
-from a terminal:
+Answer `y` when Hermes asks to enable `jinn`. Jinn installs its required layer
+automatically.
+
+Check the installation:
 
 ```bash
 hermes jinn-doctor
 ```
 
-Inside a Hermes session, `/jinn doctor` runs the same full check set. Both
-doctors are print-only: a failed check names one command to run but never
-executes it.
+You are ready when the doctor ends with `all checks passed`.
+
+If you use the Hermes gateway, restart it with `hermes gateway restart`. A new
+terminal chat loads Jinn without this step.
+
+## Try your first pickup
+
+Start a fresh chat:
+
+```bash
+hermes chat
+```
+
+Then describe the task normally. Include the concrete problem and repository
+when they matter; there is no Jinn slash command to run.
+
+Jinn checks retained local episodes and the public Jinn corpus when a new task
+starts or its stable task/repository context changes. When it finds evidence it
+can actually deliver, you will see:
+
+```text
+◇ corpus  provided 2 evidence packets  ·  searched: score-zero, jinn, evaluator, docker, eval
+```
+
+For example, a clean test with matching retained episodes began with a normal
+question:
+
+```text
+You: In the Jinn evaluator, a Docker eval run that aborts partway is recorded
+as an ordinary score-zero failure. What is the root cause and specific fix?
+
+Hermes: The evaluator's Docker-abort handling is incorrectly gated on
+`noTestPassed`. Remove that requirement and classify known container-abort
+signals as `EvalCouldNotGradeError`, even after partial test progress.
+```
+
+Hermes received the evidence automatically and used its concrete diagnosis.
+Your result will depend on what relevant local or public evidence exists.
+
+If no retrievable evidence matches the task, Jinn stays out of the way. At the
+end of the session, Hermes reports:
+
+```text
+knowledge searched · nothing relevant found
+```
+
+That is a successful search, not an installation problem. If Jinn reports a
+corpus access failure instead, run `hermes jinn-doctor`. The doctor names the
+failed check and prints the next command to run; it does not change your
+machine.
+
+## Local task capture
+
+Jinn keeps a scrubbed episode of each session locally so later tasks can reuse
+relevant evidence. Nothing is published to the Jinn network automatically.
 
 ## Update
 
 ```bash
 hermes plugins update jinn
+hermes jinn-doctor
 ```
 
-Run `hermes jinn-doctor` again after updating.
-
-The jinn-agent fork loads it automatically from its bundled path — no install
-step there.
-
-## What this does today
-
-Reading the corpus works now, and every session's evidence is captured and
-distilled locally — that is the live value. Nothing leaves this machine:
-contribution is parked (`/jinn status` shows `contribution: parked — nothing
-leaves this machine`). Earning OLAS is verification-gated and the verification
-economy is not live on testnet yet, so contribution and earning are the forward
-path, not a day-one return.
-
-## Disable, remove, or purge
-
-Disable Jinn to stop future hooks and state writes. Removing the plugin leaves
-its retained local state intact:
+## Disable or remove
 
 ```bash
 hermes plugins disable jinn
 hermes plugins remove jinn
 ```
 
-Jinn state spans **both**
-`${HERMES_HOME:-$HOME/.hermes}/jinn/` and `$HOME/.jinn-client/`. To make a
-reversible backup before a full purge, first end active Hermes sessions and
-disable the plugin, then run:
+Removing the plugin leaves its local Jinn data intact.
+
+<details>
+<summary>Permanently remove local Jinn data</summary>
+
+Jinn state is stored in both `${HERMES_HOME:-$HOME/.hermes}/jinn/` and
+`$HOME/.jinn-client/`. To back it up before deleting it, end active Hermes
+sessions, disable the plugin, then run:
 
 ```bash
 JINN_STATE_BACKUP="$HOME/jinn-state-backup-$(date +%Y%m%d-%H%M%S)"
@@ -87,15 +109,19 @@ done
 find "$JINN_STATE_BACKUP" -maxdepth 2 -print
 ```
 
-After checking that listing, purge both state roots:
+After confirming the backup, remove both state directories:
 
 ```bash
 rm -rf -- "${HERMES_HOME:-$HOME/.hermes}/jinn" "$HOME/.jinn-client"
 ```
 
-This permanently removes local captures, episodes, candidates, and other Jinn
-state from those roots. To roll back the purge, keep Jinn disabled and copy the
-two backed-up directories to their original paths before re-enabling it.
+This permanently deletes local Jinn data. To restore the backup, keep Jinn
+disabled and copy the directories back to their original paths before enabling
+it again.
 
-Full model, fork relationship, and upstream-merge discipline: see
+</details>
+
+## Maintainers
+
+For runtime versioning and upstream-merge discipline, see
 [JINN.md](../../JINN.md).

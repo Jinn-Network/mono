@@ -101,6 +101,7 @@ def test_post_llm_call_forwards_token_counters(monkeypatch):
     post = dict(calls)["post_llm_call"]
     assert post["input_tokens"] == 100
     assert post["output_tokens"] == 50
+    assert post["turn_id"] == "turn-1"
 
 
 def test_on_session_end_forwards_tokens_and_skills_loadout(monkeypatch):
@@ -109,6 +110,7 @@ def test_on_session_end_forwards_tokens_and_skills_loadout(monkeypatch):
     assert end["input_tokens"] == 100
     assert end["output_tokens"] == 50
     assert end["skills_loadout"] == ["tdd", "debugging"]
+    assert end["turn_id"] == "turn-1"
 
 
 def test_skills_loadout_defaults_to_empty_when_agent_lacks_it(monkeypatch):

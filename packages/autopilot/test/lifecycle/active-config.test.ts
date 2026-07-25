@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   activeCleanupEnabled,
   attemptGraceMs,
+  autopilotExecutionBackend,
   autopilotDiskFloorBytes,
   explicitEnvironmentFlag,
+  marketplaceSolverNetManifestCid,
 } from '../../src/lifecycle/active-config.js';
 
 describe('active runtime configuration', () => {
@@ -43,5 +45,30 @@ describe('active runtime configuration', () => {
       '1',
       'JINN_AUTOPILOT_CLEANUP_ENABLED',
     )).toThrow('must be true or false');
+  });
+
+  it('selects the V2 execution backend independently and defaults to local', () => {
+    expect(autopilotExecutionBackend(undefined)).toBe('local');
+    expect(autopilotExecutionBackend('')).toBe('local');
+    expect(autopilotExecutionBackend('local')).toBe('local');
+    expect(autopilotExecutionBackend('marketplace')).toBe('marketplace');
+    expect(() => autopilotExecutionBackend('daemon')).toThrow(
+      /JINN_AUTOPILOT_EXECUTION_BACKEND.*local.*marketplace/i,
+    );
+  });
+
+  it('parses an optional explicit marketplace manifest CID and rejects empty values', () => {
+    expect(marketplaceSolverNetManifestCid(undefined)).toBeUndefined();
+    expect(marketplaceSolverNetManifestCid('bafy-explicit-manifest'))
+      .toBe('bafy-explicit-manifest');
+    expect(() => marketplaceSolverNetManifestCid('')).toThrow(
+      /JINN_AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID.*non-empty/i,
+    );
+    expect(() => marketplaceSolverNetManifestCid('  ')).toThrow(
+      /JINN_AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID.*non-empty/i,
+    );
+    expect(() => marketplaceSolverNetManifestCid(' bafy-cid')).toThrow(
+      /JINN_AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID.*whitespace/i,
+    );
   });
 });

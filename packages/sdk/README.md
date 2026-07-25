@@ -54,11 +54,36 @@ export default function createHarness(env: ExternalHarnessEnv): Harness {
   generic typed output builders.
 - `@jinn-network/sdk/solvernets/prediction-v1` — first-party Prediction v1
   schemas, payload types, validation, and output helpers.
+- `@jinn-network/sdk/autopilot` — stable Autopilot session, result,
+  correlation, adoption-comment, Task submission, and delivery-observation
+  contracts.
+- `@jinn-network/sdk/fixtures/autopilot/*` — byte-stable golden fixtures and
+  their SHA-256 manifest for cross-repository consumer tests.
 - `@jinn-network/sdk/plugins` — SolverPlugin manifest types and validation
   helpers for normal AI tooling plugins.
 
 The daemon still performs final runtime validation, envelope assembly, signing,
 storage, and submission.
+
+## Autopilot marketplace consumers
+
+External Autopilot hosts validate immutable request and result files through
+the public protocol boundary:
+
+```ts
+import {
+  AutopilotDeliveryExpectationSchema,
+  AutopilotDeliveryObservationSchema,
+  TaskSubmitRequestV1Schema,
+  TaskSubmitResultV1Schema,
+} from '@jinn-network/sdk/autopilot';
+```
+
+The same schema objects remain available from
+`@jinn-network/sdk/solvernets/jinn-repo`. Golden inputs and expected failures
+are published under `@jinn-network/sdk/fixtures/autopilot/*`; consumers should
+hash raw fixture bytes and follow each entry's `decode` disposition in
+`manifest.json`.
 
 ## Frozen mode (the freeze contract)
 

@@ -141,14 +141,27 @@ def test_session_end_falls_back_to_activity_when_summary_is_absent():
 
 def test_jinn_session_reads_the_live_buffer_and_activity(monkeypatch):
     state = jinn._state_for("s1")
+    lifecycle_token = jinn._current_session_lifecycle_token("s1")
     state["activity"] = {
         "searchedTerms": ["dashboard"],
         "providedRefs": ["knowledge/ref-a"],
         "surfacedRefs": [],
         "fetchedRefs": [],
     }
-    buf.record_first_turn("t1", "s1", "fix retry", "model", "cli")
-    buf.record_user_turn("t1", "s1", "fix retry")
+    buf.record_first_turn(
+        "t1",
+        "s1",
+        "fix retry",
+        "model",
+        "cli",
+        lifecycle_token=lifecycle_token,
+    )
+    buf.record_user_turn(
+        "t1",
+        "s1",
+        "fix retry",
+        lifecycle_token=lifecycle_token,
+    )
     monkeypatch.setattr(jinn.consent, "share_enabled", lambda: False)
 
     out = _plain(jinn._handle_jinn(

@@ -75,8 +75,17 @@ import {
   HarnessRegistry,
 } from './harnesses/engine/registry.js';
 import { createMutableJoinedSolverNetsView } from './harnesses/engine/engine.js';
+import { createAutopilotEvaluationContextResolver } from './autopilot/autopilot-evaluation-context-resolver.js';
+import { createAutopilotGitHubAdoptionReceiptObserver } from './autopilot/github-adoption-receipt-observer.js';
+import { createJinnMonoGitHubAdoptionReadPort } from './autopilot/github-rest-adoption-read.js';
 import { createJoinApplier } from './daemon/join-applier.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
+import {
+  makeConfiguredSemanticEvaluatorRunnerResolver,
+} from './harnesses/impls/jinn-repo-evaluator/semantic-runner-resolver.js';
+import {
+  makeDockerImmutableMechanicalVerifier,
+} from './harnesses/impls/jinn-repo-evaluator/docker-immutable-verifier.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS, harnessStateDirName } from './harnesses/names.js';
 import { resolveContractFromSolverNetId } from './solvernets/launched-record-dispatcher.js';
@@ -1394,6 +1403,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       : {}),
   };
 
+  // Autopilot marketplace Tasks use GitHub only as the authenticated adoption
+  // surface. Reads remain available for the public repository without a token;
+  // an operator token raises rate limits and permits private-fork deployments.
+  const autopilotGitHubRead = createJinnMonoGitHubAdoptionReadPort({
+    token:
+      process.env['JINN_AUTOPILOT_GITHUB_TOKEN']
+      ?? process.env['GH_TOKEN']
+      ?? process.env['GITHUB_TOKEN'],
+  });
+  const autopilotEvaluationContextResolver =
+    createAutopilotEvaluationContextResolver({ github: autopilotGitHubRead });
+  const autopilotAdoptionReceiptObserver =
+    createAutopilotGitHubAdoptionReceiptObserver({ github: autopilotGitHubRead });
+
   const adapter = new MechAdapter({
     rpcUrl: config.rpcUrls,
     mechMarketplaceAddress: MARKETPLACE_ADDRESS,
@@ -1409,6 +1432,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     evictionRecovery,
     taskDiscovery,
     evaluatorEnabled,
+    autopilotEvaluationContextResolver,
   }, sharedStore);
 
   // ── TaskEngine wiring ─────────────────────────────────────────────────
@@ -1508,6 +1532,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     daemonApiToken: apiToken,
     implStateDirRoot: config.engine.implStateDirRoot,
     ipfsRegistryUrl: config.ipfsRegistryUrl,
+    sweRebenchV2StateDir: config.sweRebenchV2StateDir,
     ...(process.env['JINN_POLYMARKET_GAMMA_BASE_URL']
       ? { polymarketGammaBaseUrl: process.env['JINN_POLYMARKET_GAMMA_BASE_URL'] }
       : {}),
@@ -1524,6 +1549,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
     codexPath: config.codexPath,
     codexDoctorTimeoutMs: config.codexDoctorTimeoutMs,
+    semanticEvaluatorRunnerResolver:
+      makeConfiguredSemanticEvaluatorRunnerResolver({
+        getJoinedSolverNets: () => config.joinedSolverNets,
+        getClaudePath: () => activeClaudePath,
+      }),
+    immutableMechanicalVerifier: makeDockerImmutableMechanicalVerifier(),
   })) {
     implRegistry.register(impl);
   }
@@ -1952,6 +1983,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         safeAddress,
         agentPrivateKey,
         ipfsGatewayUrl: config.ipfsGatewayUrl,
+        stateDir: config.sweRebenchV2StateDir,
         ...(sharedDiscoveryApi ? { discoveryApi: sharedDiscoveryApi } : {}),
       },
       logger: {
@@ -2072,8 +2104,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // A sessions-only operator legitimately has zero repos. The loop remains
     // schedulable so it can report the explicit Stage 2 parked marker.
     if (harvestRepos.length > 0 || harvestMinesSessions) {
-      const { defaultStateDir } = await import('./solver-types/swe-rebench-v2.js');
-      const harvestStateDir = defaultStateDir();
+      const harvestStateDir = config.sweRebenchV2StateDir;
       const baseHarvestLoopConfig = {
         intervalMs: config.harvest.intervalMs,
         stateDir: harvestStateDir,
@@ -2144,6 +2175,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     peers: config.peers.length > 0 ? config.peers : undefined,
     nodeEndpoint: config.nodeEndpoint,
     creatorSafeAddress: safeAddress,
+    sweRebenchV2StateDir: config.sweRebenchV2StateDir,
     corpusFactory,
     harnessReadinessRegistry,
     spendCap,
@@ -2196,6 +2228,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       packagingDeps,
       envelopeDeps,
       deliveryDeps,
+      adoptionReceiptObserver: autopilotAdoptionReceiptObserver,
       implRegistry,
       solverNetRegistry,
       // #1827: resolves envelope.task.createdAt at claim() time. getBlock

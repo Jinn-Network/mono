@@ -11,7 +11,11 @@ describe('formatBootstrapOperatorMessage', () => {
   it('maps GS026', () => {
     const r = formatBootstrapOperatorMessage(new Error('GS026 invalid owner'));
     expect(r.summary).toContain('GS026');
-    expect(r.hint).toBeDefined();
+    expect(r.hint).toContain('JINN_EARNING_DIR');
+    expect(r.hint).toContain('master_keystore.json');
+    expect(r.hint).toContain('earning_state.json');
+    expect(r.hint).toContain('Safe owner set');
+    expect(r.hint).not.toContain('JINN_PASSWORD');
   });
 
   it('maps replacement underpriced', () => {

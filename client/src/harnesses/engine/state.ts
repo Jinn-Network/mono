@@ -17,6 +17,8 @@ export const TaskRunState = {
   POST_SNAPSHOT: 'POST_SNAPSHOT',
   PACKAGING: 'PACKAGING',
   DELIVERING: 'DELIVERING',
+  AWAITING_ADOPTION: 'AWAITING_ADOPTION',
+  CLAIMING_DELIVERY: 'CLAIMING_DELIVERY',
   COMPLETE: 'COMPLETE',
   FAILED: 'FAILED',
   /**
@@ -47,6 +49,8 @@ export const IN_FLIGHT_STATES: ReadonlySet<TaskRunState> = new Set([
   TaskRunState.POST_SNAPSHOT,
   TaskRunState.PACKAGING,
   TaskRunState.DELIVERING,
+  TaskRunState.AWAITING_ADOPTION,
+  TaskRunState.CLAIMING_DELIVERY,
 ]);
 
 // ── Transition table ──────────────────────────────────────────────────────────
@@ -65,7 +69,9 @@ const TRANSITIONS: ReadonlyMap<TaskRunState, ReadonlySet<TaskRunState>> = new Ma
   [TaskRunState.RUNNING,       new Set([TaskRunState.POST_SNAPSHOT, TaskRunState.FAILED, TaskRunState.RACE_LOST])],
   [TaskRunState.POST_SNAPSHOT, new Set([TaskRunState.PACKAGING,     TaskRunState.FAILED, TaskRunState.RACE_LOST])],
   [TaskRunState.PACKAGING,     new Set([TaskRunState.DELIVERING,    TaskRunState.FAILED, TaskRunState.RACE_LOST])],
-  [TaskRunState.DELIVERING,    new Set([TaskRunState.COMPLETE,      TaskRunState.FAILED, TaskRunState.RACE_LOST])],
+  [TaskRunState.DELIVERING,    new Set([TaskRunState.AWAITING_ADOPTION, TaskRunState.COMPLETE, TaskRunState.FAILED, TaskRunState.RACE_LOST])],
+  [TaskRunState.AWAITING_ADOPTION, new Set([TaskRunState.CLAIMING_DELIVERY, TaskRunState.FAILED, TaskRunState.RACE_LOST])],
+  [TaskRunState.CLAIMING_DELIVERY, new Set([TaskRunState.COMPLETE, TaskRunState.FAILED, TaskRunState.RACE_LOST])],
   [TaskRunState.COMPLETE,      new Set()],
   [TaskRunState.FAILED,        new Set()],
   [TaskRunState.RACE_LOST,     new Set()],

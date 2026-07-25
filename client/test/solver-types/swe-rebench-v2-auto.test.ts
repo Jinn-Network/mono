@@ -13,6 +13,13 @@ import {
   getSweRebenchV2StateStore,
 } from '../../src/solver-types/swe-rebench-v2.js';
 import { loadHeldOutSlate } from '../../src/solver-types/_swe-rebench-v2-held-out-slate.js';
+import {
+  EVAL_SEMANTICS_VERSION,
+  writeVettedPoolArtifactPublication,
+  createVettedPoolArtifactRef,
+  parseVettedPoolArtifact,
+  hashVettedPoolArtifact,
+} from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import type { LaunchedSolverNetRecord } from '../../src/solvernets/store.js';
 import type { DiscoveryAPI } from '../../src/discovery/types.js';
 import type { Task } from '../../src/types/task.js';
@@ -469,9 +476,9 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — held-out slate exclusio
 // the pool fast without the retry backoff — multiple ticks per test would
 // otherwise time out on the shared HF retry limiter.
 describe('makeSweRebenchV2GeneratorForLaunchedRecord — live post→record→repost cycle (#802)', () => {
-  // Mirror production: do NOT pass staticConfig.stateDir; both the generator and
-  // getSweRebenchV2StateStore() resolve via JINN_SWE_REBENCH_V2_STATE_DIR so they
-  // share one file (the equivalence that makes Blocker 1's reload load-bearing).
+  // Both the generator and getSweRebenchV2StateStore(stateDir) share one
+  // explicit stateDir so they see the same ledger file (the equivalence that
+  // makes Blocker 1's reload load-bearing). Env idiom retired in #1000.
   const SINGLE_INSTANCE_ROWS = [
     {
       row: {
@@ -498,9 +505,12 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — live post→record→re
   // lets us change what the indexer reports BETWEEN ticks on the SAME generator,
   // which is what exercises Blocker 1 (the long-lived in-memory cache must pick
   // up the creator's out-of-band disk write at tick start).
-  function liveGeneratorWithMutableClaims(claimsRef: {
-    current: Map<string, { taskId: string; consumed: number; maxClaims: number }>;
-  }) {
+  function liveGeneratorWithMutableClaims(
+    stateDir: string,
+    claimsRef: {
+      current: Map<string, { taskId: string; consumed: number; maxClaims: number }>;
+    },
+  ) {
     const notUsed = vi.fn(async () => { throw new Error('not used'); });
     const discoveryApi = {
       getInstanceSuccessCounts: vi.fn(async () => new Map<string, number>()),
@@ -513,19 +523,16 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — live post→record→re
     return makeSweRebenchV2GeneratorForLaunchedRecord({
       recordRef: { current: launchedRecord({ status: 'launched', manifestCid: 'bafy802live' }) },
       configRef: { current: { N_target_successes: 5, posting_window_ms: 300_000, admissionMode: 'python-floor' as const } },
-      // staticConfig deliberately omits stateDir — env var drives both the
-      // generator's store and getSweRebenchV2StateStore() (production path).
-      staticConfig: { discoveryApi },
+      staticConfig: { stateDir, discoveryApi },
     });
   }
 
   it('one instance does NOT re-post a live instance after the creator hook records its last_task_id (Blocker 1)', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'jinn-802-live-'));
-    process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] = stateDir;
     const fetchSpy = mockHfFetchSingleInstance();
     try {
       const claimsRef = { current: new Map<string, { taskId: string; consumed: number; maxClaims: number }>() };
-      const g = liveGeneratorWithMutableClaims(claimsRef);
+      const g = liveGeneratorWithMutableClaims(stateDir, claimsRef);
 
       // Tick 1: instance is unposted (no last_task_id) → posted. Indexer still
       // empty (brand-new task not yet seen).
@@ -534,7 +541,7 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — live post→record→re
 
       // Simulate the CreatorLoop hook via the SAME accessor daemon code uses —
       // a SEPARATE store instance writing last_task_id to the shared file.
-      await getSweRebenchV2StateStore().recordLastTaskId('org__repo-1', '777');
+      await getSweRebenchV2StateStore(stateDir).recordLastTaskId('org__repo-1', '777');
       // Indexer now reflects the task with slots remaining (live).
       claimsRef.current = new Map([['777', { taskId: '777', consumed: 2, maxClaims: 5 }]]);
 
@@ -546,21 +553,19 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — live post→record→re
       expect(g.getState().lastPollSummary).toMatchObject({ live: 1, posted: 0, repostable: 0 });
       expect(g.getState().totalPosted).toBe(1);
     } finally {
-      delete process.env['JINN_SWE_REBENCH_V2_STATE_DIR'];
       fetchSpy.mockRestore();
     }
   });
 
   it('one instance does NOT re-post when the indexer has not yet reflected the just-posted task (lag, Blocker 3)', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'jinn-802-lag-'));
-    process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] = stateDir;
     const fetchSpy = mockHfFetchSingleInstance();
     try {
       const claimsRef = { current: new Map<string, { taskId: string; consumed: number; maxClaims: number }>() };
-      const g = liveGeneratorWithMutableClaims(claimsRef);
+      const g = liveGeneratorWithMutableClaims(stateDir, claimsRef);
 
       await g(); // posts org__repo-1
-      await getSweRebenchV2StateStore().recordLastTaskId('org__repo-1', '888');
+      await getSweRebenchV2StateStore(stateDir).recordLastTaskId('org__repo-1', '888');
       // Indexer STILL missing '888' (lag): a known last_task_id absent from the
       // snapshot must classify `live` (not-yet-indexed), NOT repostable.
 
@@ -569,23 +574,21 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — live post→record→re
       expect(g.getState().lastPollSummary).toMatchObject({ live: 1, posted: 0, repostable: 0 });
       expect(g.getState().totalPosted).toBe(1);
     } finally {
-      delete process.env['JINN_SWE_REBENCH_V2_STATE_DIR'];
       fetchSpy.mockRestore();
     }
   });
 
   it('one instance goes inert (no per-tick storm) in onchain/empty-claim-map mode (Blocker 2)', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'jinn-802-onchain-'));
-    process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] = stateDir;
     const fetchSpy = mockHfFetchSingleInstance();
     try {
       // onchain floor returns an empty success map on EVERY tick.
       const claimsRef = { current: new Map<string, { taskId: string; consumed: number; maxClaims: number }>() };
-      const g = liveGeneratorWithMutableClaims(claimsRef);
+      const g = liveGeneratorWithMutableClaims(stateDir, claimsRef);
 
       const first = await g();
       expect((first as Task[])[0].spec).toMatchObject({ instance_id: 'org__repo-1' });
-      await getSweRebenchV2StateStore().recordLastTaskId('org__repo-1', '999');
+      await getSweRebenchV2StateStore(stateDir).recordLastTaskId('org__repo-1', '999');
 
       // Subsequent ticks: empty map + known last_task_id → live → no re-post.
       // (Pre-fix this storms a fresh post every tick.)
@@ -596,7 +599,6 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — live post→record→re
       expect(g.getState().lastPollSummary).toMatchObject({ live: 1, posted: 0, repostable: 0 });
       expect(g.getState().totalPosted).toBe(1);
     } finally {
-      delete process.env['JINN_SWE_REBENCH_V2_STATE_DIR'];
       fetchSpy.mockRestore();
     }
   });
@@ -781,4 +783,89 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — fresh-volume pool recov
       fetchSpy.mockRestore();
     }
   }, 120_000);
+});
+
+describe('makeSweRebenchV2GeneratorForLaunchedRecord — vetted-pool staleness (#796)', () => {
+  const MANIFEST_CID = 'bafymanifest796test';
+
+  function inertDiscovery(): DiscoveryAPI {
+    const notUsed = vi.fn(async () => { throw new Error('not used'); });
+    return {
+      getInstanceSuccessCounts: vi.fn(async () => new Map()),
+      getInstanceClaimCounts: vi.fn(async () => new Map()),
+      findClaimableTasks: notUsed,
+      listLaunchedSolverNets: notUsed,
+      getLifecycleStatus: notUsed,
+      getSolverNetOperatorCount: notUsed,
+      queryEnvelopes: notUsed,
+      listPluginPublications: notUsed,
+      getPluginScores: notUsed,
+      listBuilderArtifacts: notUsed,
+    } satisfies DiscoveryAPI;
+  }
+
+  async function seedPublication(stateDir: string, version: string): Promise<void> {
+    const artifact = parseVettedPoolArtifact({
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: version,
+      generatedAt: '2026-05-25T00:00:00Z',
+      entries: [
+        { instance_id: 'a__1', scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-25T00:00:00Z' },
+      ],
+    });
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: MANIFEST_CID,
+      artifactCid: 'bafkrei-test',
+      artifactHash: hashVettedPoolArtifact(artifact),
+      evalSemanticsVersion: version,
+      publishedAt: '2026-05-25T00:00:00Z',
+    });
+    await writeVettedPoolArtifactPublication({ stateDir, ref, artifact });
+  }
+
+  async function buildAndTick(stateDir: string) {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => { throw new Error('HF unreachable in test sandbox'); });
+    try {
+      const gen = makeSweRebenchV2GeneratorForLaunchedRecord({
+        recordRef: { current: launchedRecord({ status: 'launched', manifestCid: MANIFEST_CID }) },
+        configRef: {
+          current: {
+            N_target_successes: 5,
+            posting_window_ms: 300_000,
+            admissionMode: 'python-floor' as const,
+          },
+        },
+        staticConfig: { stateDir, discoveryApi: inertDiscovery() },
+      });
+      await gen();
+      return gen.getState();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  }
+
+  it('reports poolPublicationStale=true for a publication under an older eval-semantics version', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-796-stale-'));
+    await mkdir(stateDir, { recursive: true });
+    await seedPublication(stateDir, '3');
+    const state = await buildAndTick(stateDir);
+    expect(state.poolPublicationStale).toBe(true);
+  });
+
+  it('leaves poolPublicationStale absent for a current-version publication', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-796-current-'));
+    await mkdir(stateDir, { recursive: true });
+    await seedPublication(stateDir, EVAL_SEMANTICS_VERSION);
+    const state = await buildAndTick(stateDir);
+    expect(state.poolPublicationStale).toBeUndefined();
+  });
+
+  it('leaves poolPublicationStale absent when there is no publication (stale ≠ no-publication)', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-796-none-'));
+    await mkdir(stateDir, { recursive: true });
+    const state = await buildAndTick(stateDir);
+    expect(state.poolPublicationStale).toBeUndefined();
+  });
 });

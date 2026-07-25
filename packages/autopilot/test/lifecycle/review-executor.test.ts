@@ -143,6 +143,96 @@ function harness(overrides: Partial<ReviewExecutorDeps> = {}) {
 }
 
 describe('review action executor', () => {
+  it('durably escalates an unanchored standalone marketplace review before claiming', async () => {
+    const h = harness({
+      executionBackendKind: 'marketplace',
+      spawnCoordinator: () => {
+        throw new Error('standalone local review must never spawn');
+      },
+    });
+
+    await expect(executeReviewAction({ prNumber: 84 }, h.deps))
+      .resolves.toEqual({
+        status: 'human',
+        prNumber: 84,
+        code: 'review-escalation',
+      });
+    expect(h.events).toEqual([]);
+    expect(h.human).toEqual([{
+      candidate: expect.objectContaining({ number: 84 }),
+      reason: {
+        phase: 'awaiting-review',
+        code: 'review-escalation',
+        detail:
+          'Standalone marketplace review is unanchored; semantic review must be evaluator-anchored during Solution adoption.',
+      },
+    }]);
+  });
+
+  it('acquires an evaluator-anchored marketplace review claim without dispatching a session', async () => {
+    const executionBackend = {
+      start: async () => {
+        throw new Error('the evaluator leg must not submit a second Task');
+      },
+      recover: async () => ({ state: 'running' as const }),
+      cancel: async () => {},
+    };
+    const h = harness({
+      executionBackendKind: 'marketplace',
+      anchoredMarketplaceReview: true,
+      executionBackend,
+      spawnCoordinator: () => {
+        throw new Error('the evaluator leg must not spawn a local session');
+      },
+    });
+
+    await expect(executeReviewAction({
+      prNumber: 84,
+      expectedHead: HEAD,
+    }, h.deps)).resolves.toEqual({
+      status: 'spawned',
+      prNumber: 84,
+      head: HEAD,
+      reviewRefOid: RECORD_A,
+      attemptId: ATTEMPT_A,
+      generation: GENERATION_A,
+      reviewer: 'review-bot',
+      approvalPolicy: 'approve-eligible',
+    });
+    expect(h.events).toEqual([
+      'record',
+      'claim',
+      'attempt',
+      'projection',
+    ]);
+    expect(h.human).toEqual([]);
+  });
+
+  it('does not dispatch when a child opens during post-CAS confirmation', async () => {
+    const h = harness({
+      confirmAcquisition: async ({
+        expectedHead,
+        expectedReviewRefOid,
+      }) => candidate({
+        head: expectedHead,
+        openChildKinds: ['ci-failure'],
+        reviewRef: {
+          oid: expectedReviewRefOid,
+          record: claim(),
+        },
+      }),
+    });
+
+    await expect(executeReviewAction({ prNumber: 84 }, h.deps))
+      .resolves.toEqual({ status: 'lost', prNumber: 84 });
+    expect(h.events).toEqual([
+      'record',
+      'claim',
+      'attempt',
+      'projection',
+    ]);
+  });
+
   it.skip('fails closed when the scheduled exact head changes before acquisition', async () => {
     const { deps, events } = harness();
 

@@ -32,7 +32,10 @@ import { fileChildIssue } from './child-issues.js';
 import { makeProductionChildIssuePort } from './child-issues-production.js';
 import { fileReviewFollowUps } from './review-follow-ups.js';
 import { makeProductionReviewFollowUpPort } from './review-follow-ups-production.js';
-import type { ReviewSessionPort } from './review-session.js';
+import {
+  assertReviewClaimTransition,
+  type ReviewSessionPort,
+} from './review-session.js';
 import type { ReviewNativeReview } from './review-executor.js';
 import {
   gitOid,
@@ -46,6 +49,10 @@ export interface ProductionReviewSessionPortOptions {
   readonly readManifest?: (path: string) => AttemptManifest;
   readonly writeMetadataFile?: (payload: string) => string;
   readonly removeMetadataFile?: (path: string) => void;
+  readonly afterReviewClaimPublished?: (input: {
+    readonly manifest: AttemptManifest;
+    readonly recordOid: GitOid;
+  }) => Promise<void> | void;
 }
 
 export function makeProductionReviewSessionPort(
@@ -384,7 +391,41 @@ export function makeProductionReviewSessionPort(
     const payload = await runGit(manifest, [
       'show', `${oid}:jinn-autopilot-review.json`,
     ]);
-    return { reviewRefOid: oid, record: decodeReviewClaimPayload(payload.trim()) };
+    const record = decodeReviewClaimPayload(payload.trim());
+    if (
+      oid !== manifest.reviewRefOid
+      && record.prNumber === manifest.prNumber
+      && record.generation === manifest.reviewGeneration
+      && record.attempt === manifest.attemptId
+      && record.reviewer.toLowerCase() === manifest.selectedLogin.toLowerCase()
+      && record.head === manifest.expectedHead
+    ) {
+      const ancestry = (
+        await runGit(manifest, ['rev-list', '--parents', '-n', '1', oid])
+      ).trim().split(/\s+/u);
+      if (
+        ancestry.length === 2
+        && ancestry[0] === oid
+        && ancestry[1] === manifest.reviewRefOid
+      ) {
+        const parent = decodeReviewClaimPayload((
+          await runGit(manifest, [
+            'show',
+            `${manifest.reviewRefOid}:jinn-autopilot-review.json`,
+          ])
+        ).trim());
+        assertReviewClaimTransition(record, parent);
+        advanceAttemptReviewPair(
+          manifest.paths.manifest,
+          manifest.expectedHead,
+          manifest.reviewRefOid,
+          manifest.expectedHead,
+          oid,
+          options.now,
+        );
+      }
+    }
+    return { reviewRefOid: oid, record };
   };
   const readNativeReviews = async (
     manifest: AttemptManifest,
@@ -583,6 +624,7 @@ export function makeProductionReviewSessionPort(
         (outcome.status === 'won' || outcome.status === 'already-applied')
         && outcome.observed === recordOid
       ) {
+        await options.afterReviewClaimPublished?.({ manifest, recordOid });
         advanceAttemptReviewPair(
           manifest.paths.manifest,
           manifest.expectedHead,
@@ -684,9 +726,10 @@ export function makeProductionReviewSessionPort(
         priority: 'p1',
       });
       if ('runawayHold' in filed && filed.runawayHold) {
-        throw new Error(
-          `Finding child runaway hold for PR #${input.parentPr} (prior=${filed.priorCount})`,
-        );
+        return {
+          runawayHold: true,
+          priorCount: filed.priorCount,
+        };
       }
       return { number: filed.number, created: filed.created };
     },

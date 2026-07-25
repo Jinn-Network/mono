@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 TRACE_ENVELOPE_ARTIFACT_TYPE = "jinn.trace-envelope.v0"
 EPISODE_ARTIFACT_TYPE = "jinn.episode.v1"
+SKILL_ARTIFACT_TYPE = "jinn.skill.v1"
 MARKER_FILE = ".jinn-ref"
 
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9._-]+")
@@ -67,10 +68,9 @@ def _sanitise_slug(raw: str) -> str:
 
 
 # RESIDUAL (flagged cross-repo, 2026-07-08 design): these read-only envelope
-# helpers still serve corpus_fetch + pickup classification for DISPLAY. They no
+# helpers preserve the additive episode-reader compatibility contract. They no
 # longer gate any install write (install() defers to the layer). Fully removing
-# them needs an interpreted `jinn-layer corpus get` projection — a layer
-# follow-up, tracked separately.
+# them remains a separate cleanup from the Hermes retrieval surface.
 def _episode_error(path: str, expected: str) -> None:
     raise ValueError(f"jinn.episode.v1 field {path} must be {expected}")
 
@@ -926,6 +926,61 @@ def _validate_episode(parsed: Dict[str, Any]) -> None:
             eligibility.get("checkedAt"),
             "eligibility.checkedAt",
         )
+
+
+def _extract_skill(record: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
+    """Return (skill_view, verified sha256) for a first-class jinn.skill.v1 artifact.
+
+    Retained reader compatibility only. The install trust path remains
+    ``jinn-layer skills install``. A present-but-corrupt skill artifact is an
+    error (no fall-through to evidence envelopes).
+    """
+    artifacts = record.get("artifacts")
+    if not isinstance(artifacts, list):
+        raise ValueError("corpus record has no artifacts")
+    artifact = next(
+        (
+            candidate
+            for candidate in artifacts
+            if isinstance(candidate, dict)
+            and candidate.get("artifactType") == SKILL_ARTIFACT_TYPE
+        ),
+        None,
+    )
+    if artifact is None:
+        raise ValueError("no jinn.skill.v1 artifact in this record")
+
+    content_b64 = artifact.get("contentBase64")
+    expected = str(artifact.get("sha256") or "")
+    if not isinstance(content_b64, str) or not expected:
+        raise ValueError("jinn.skill.v1 artifact is missing content or sha256")
+    content = base64.b64decode(content_b64)
+    actual = hashlib.sha256(content).hexdigest()
+    if actual != expected:
+        raise ValueError(
+            f"sha256 mismatch — refusing to read (expected {expected[:12]}…, got {actual[:12]}…)"
+        )
+    parsed = json.loads(content.decode("utf-8"))
+    if not isinstance(parsed, dict) or parsed.get("schemaVersion") != SKILL_ARTIFACT_TYPE:
+        raise ValueError("jinn.skill.v1 artifact body has a mismatched schemaVersion")
+    skill = parsed.get("skill")
+    if not isinstance(skill, dict):
+        raise ValueError("jinn.skill.v1 artifact is missing skill object")
+    skill_md = skill.get("skillMd")
+    if not isinstance(skill_md, str) or not skill_md.strip():
+        raise ValueError("jinn.skill.v1 artifact has empty skillMd")
+    name = skill.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("jinn.skill.v1 artifact has empty skill name")
+    provenance = parsed.get("provenance")
+    if not isinstance(provenance, dict):
+        provenance = {}
+    return {
+        "skillMd": skill_md,
+        "name": name,
+        "provenance": provenance,
+        "shape": "jinn.skill.v1",
+    }, expected
 
 
 def _extract_trace(record: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:

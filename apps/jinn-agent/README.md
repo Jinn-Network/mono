@@ -1,9 +1,9 @@
 # jinn-agent
 
 **jinn-agent** is an open coding harness with the Jinn plugin built in. It
-brings relevant evidence from Jinn's public, on-chain-anchored corpus into
-ordinary agent work, then captures the resulting session as local evidence for
-reuse and local distillation.
+brings relevant evidence from retained local episodes and Jinn's public,
+on-chain-anchored corpus into ordinary agent work, then captures the resulting
+session as local evidence for reuse and local distillation.
 
 Stage 2 is deliberately local-only on the outbound side. Contribution is
 parked: nothing derived from your work leaves this machine. Old Stage-1 consent
@@ -26,19 +26,20 @@ jinn-agent state stays under `~/.jinn-agent/`.
 
 ## The product loop
 
-- Start normal work. On the first turn, Jinn searches the public corpus and
-  visibly supplies relevant evidence when it finds any.
-- `/corpus <query>` performs an explicit corpus search. The agent also has
-  `corpus_search` and `corpus_fetch` tools for evidence it needs mid-task.
-- The complete session is captured locally as canonical evidence.
+- Start normal work. On the first turn, Jinn searches retained local episodes
+  and the public corpus, then visibly supplies relevant evidence when it finds
+  any.
+- The complete session is captured locally as canonical evidence for later
+  automatic pickup.
 - Local distillation can turn captured evidence into reusable local knowledge.
   `/jinn distill` shows or runs that workflow.
 - `/jinn session` shows the active session; `/jinn history` shows finalized
   sessions; `/jinn status` shows capture, learning, and the parked contribution
   state.
 
-No account or wallet is required for this loop. Corpus failure degrades to
-nothing-found and never blocks the underlying agent.
+No account or wallet is required for this loop. A retrieval-source failure
+never blocks the underlying agent, and a healthy source can still provide
+evidence.
 
 ## Contribution is parked
 

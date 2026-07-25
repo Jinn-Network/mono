@@ -188,6 +188,13 @@ export function withFallback(
   }
 
   return {
+    getAutopilotDeliveryCandidates(args) {
+      // Exact Autopilot recovery is a correctness boundary. The on-chain floor
+      // cannot reconstruct indexed envelope metadata, so an outage must remain
+      // unavailable instead of being converted into a fabricated empty result.
+      return primary.getAutopilotDeliveryCandidates(args);
+    },
+
     findClaimableTasks(args) {
       return dispatch(
         () => primary.findClaimableTasks(args),

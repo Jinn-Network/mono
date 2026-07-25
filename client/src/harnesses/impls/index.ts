@@ -20,6 +20,12 @@ import {
 import { ClaudeCodeHarnessAdapter, CodexCodeHarnessAdapter } from './learner/index.js';
 import { SweRebenchV2EvaluatorHarness } from './swe-rebench-v2-evaluator/harness.js';
 import { JinnRepoEvaluatorHarness } from './jinn-repo-evaluator/harness.js';
+import type {
+  SemanticAgentRunnerResolver,
+} from './jinn-repo-evaluator/autopilot-semantic.js';
+import type {
+  ImmutableMechanicalVerifier,
+} from './jinn-repo-evaluator/autopilot-mechanical-runner.js';
 import { HermesHarness, HermesHarnessAdapter } from './hermes-agent/index.js';
 import { maybeCreateStubHarnessFromEnv } from './stub.js';
 import {
@@ -90,6 +96,8 @@ export interface HarnessEnv {
    * don't need IPFS leave this unused.
    */
   ipfsRegistryUrl?: string;
+  /** From `config.sweRebenchV2StateDir` — swe-rebench-v2 evaluator substrate. */
+  sweRebenchV2StateDir?: string;
   /**
    * Pre-loaded external (operator-supplied) Harnesses — produced by
    * `loadExternalImpl()` in `client/src/harnesses/external-impls/`. Appended to
@@ -105,6 +113,13 @@ export interface HarnessEnv {
    * impl that has external deps.
    */
   disabledNames?: readonly string[];
+  /**
+   * Test-only replacements keyed by harness identity: each entry displaces the
+   * in-repo harness with the same canonical name (registration index preserved).
+   * Fail-closed: if non-empty and `JINN_TEST_MODE !== '1'`, {@link buildHarnesses}
+   * throws. Never wire from operator config / `main.ts`.
+   */
+  testHarnessReplacements?: readonly Harness[];
   /** Path to the `hermes` executable. Defaults to `hermes`. */
   hermesPath?: string;
   /** Default Hermes model when a SolverNet does not specify one. */
@@ -115,6 +130,13 @@ export interface HarnessEnv {
   hermesBaseUrl?: string;
   /** Timeout (ms) for the `hermes doctor` probe in HermesHarness.isReady. */
   hermesDoctorTimeoutMs?: number;
+  /**
+   * Provider-and-model-configured semantic evaluator runtime. The registry
+   * never guesses a provider from a SolverNet model identifier.
+   */
+  semanticEvaluatorRunnerResolver?: SemanticAgentRunnerResolver;
+  /** Isolated immutable verifier for Autopilot exact-head evaluation. */
+  immutableMechanicalVerifier?: ImmutableMechanicalVerifier;
 }
 
 /**
@@ -219,11 +241,14 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
         ? `${env.implStateDirRoot}/swe-rebench-v2-evaluator`
         : undefined,
       ipfsRegistryUrl: env.ipfsRegistryUrl,
+      ...(env.sweRebenchV2StateDir ? { stateDir: env.sweRebenchV2StateDir } : {}),
     }),
   );
   out.push(
     new JinnRepoEvaluatorHarness({
       stub: isStub,
+      semanticAgentRunnerResolver: env.semanticEvaluatorRunnerResolver,
+      immutableMechanicalVerifier: env.immutableMechanicalVerifier,
       implStateDir: env.implStateDirRoot
         ? `${env.implStateDirRoot}/jinn-repo-evaluator`
         : undefined,
@@ -296,9 +321,43 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     ...(env.hermesDoctorTimeoutMs !== undefined ? { hermesDoctorTimeoutMs: env.hermesDoctorTimeoutMs } : {}),
   }));
 
+  applyTestHarnessReplacements(out, env.testHarnessReplacements);
+
   if (env.disabledNames && env.disabledNames.length > 0) {
     const disabled = canonicalHarnessNameSet(env.disabledNames);
     return out.filter((impl) => !disabled.has(canonicalHarnessName(impl.name)));
   }
   return out;
+}
+
+/**
+ * Mutates `out` in place: each replacement removes the matching canonical name
+ * and inserts at that index. Empty / omitted → no-op. Non-empty without
+ * JINN_TEST_MODE=1 → throw. Unknown name → throw.
+ */
+function applyTestHarnessReplacements(
+  out: Harness[],
+  replacements: readonly Harness[] | undefined,
+): void {
+  if (!replacements || replacements.length === 0) return;
+
+  if (process.env['JINN_TEST_MODE'] !== '1') {
+    throw new Error(
+      'testHarnessReplacements must never activate in a real operator run: ' +
+        'replacements were supplied but JINN_TEST_MODE is not "1". ' +
+        'Set JINN_TEST_MODE=1 for in-process tests / e2e; otherwise omit testHarnessReplacements.',
+    );
+  }
+
+  for (const replacement of replacements) {
+    const target = canonicalHarnessName(replacement.name);
+    const idx = out.findIndex((h) => canonicalHarnessName(h.name) === target);
+    if (idx < 0) {
+      throw new Error(
+        `testHarnessReplacements: no in-repo harness named "${replacement.name}" ` +
+          `(canonical: "${target}"). Refusing to append — replacement must displace an existing name.`,
+      );
+    }
+    out.splice(idx, 1, replacement);
+  }
 }

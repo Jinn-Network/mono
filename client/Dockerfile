@@ -81,15 +81,20 @@ WORKDIR /app
 # agent tools. gosu lets the base entrypoint drop root → node at boot (see
 # docker-entrypoint.sh); ca-certificates is needed for TLS once non-root.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libstdc++6 git curl ca-certificates gosu \
+    libstdc++6 git curl ca-certificates gosu docker.io \
     && rm -rf /var/lib/apt/lists/*
 
-# Claude CLI for the default claude-code harness. Pinned to the version verified
-# in the #952 launcher spike (env-only CLAUDE_CODE_OAUTH_TOKEN auth confirmed at
-# this version). claude-code stays in the base on purpose: this is the runnable
-# claude/compose default image, and the operator launches it directly. The codex
-# overlay (S8) adds its own CLI on top of this base.
-RUN npm install -g @anthropic-ai/claude-code@2.1.159
+# The CLI talks only to the isolated verifier daemon configured by Compose.
+# The host Docker socket is deliberately never mounted into this container.
+
+# Claude CLI for the default claude-code harness. This exact version is verified
+# to expose the semantic evaluator's required --safe-mode flag; the build fails
+# if that capability drifts. claude-code stays in the base on purpose: this is
+# the runnable claude/compose default image, and the operator launches it
+# directly. The codex overlay (S8) adds its own CLI on top of this base.
+RUN npm install -g @anthropic-ai/claude-code@2.1.216 \
+    && claude --version \
+    && claude --help | grep -F -- '--safe-mode'
 
 # The daemon runs as the non-root `node` user (uid 1000, already present in the
 # node:22-slim base): Claude Code refuses --dangerously-skip-permissions when

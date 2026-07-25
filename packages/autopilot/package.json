@@ -23,6 +23,7 @@
     "triage:check": "tsx bin/jinn-triage-check.ts"
   },
   "dependencies": {
+    "@jinn-network/sdk": "portal:../sdk",
     "zod": "^4.4.3"
   },
   "devDependencies": {

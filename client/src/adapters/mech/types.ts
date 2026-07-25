@@ -1,5 +1,12 @@
 import type { Address, WalletClient } from 'viem';
 import type { DiscoveryAPI } from '../../discovery/types.js';
+import type {
+  AutopilotMutationResult,
+  JinnRepoAutopilotSessionTask,
+} from '@jinn-network/sdk/solvernets/jinn-repo';
+import type {
+  AutopilotEvaluationContextObservation,
+} from '../../harnesses/impls/jinn-repo-evaluator/autopilot-evaluation-context.js';
 
 export interface EvictionRecoveryConfig {
   serviceId: number;
@@ -68,6 +75,23 @@ export interface MechAdapterConfig {
    * Ref #547.
    */
   evaluatorEnabled?: boolean;
+  /**
+   * Optional lifecycle read port for Autopilot evaluation admission. The
+   * adapter never fabricates an adoption receipt: without an accepted,
+   * correlation-exact observation the Solution remains pending.
+   */
+  autopilotEvaluationContextResolver?: {
+    resolve(input: {
+      task: JinnRepoAutopilotSessionTask;
+      solution: AutopilotMutationResult;
+      taskId: string;
+      attemptIndex: number;
+      requestId: string;
+      solutionEnvelopeCid: string;
+      solutionOperatorSafe: string;
+      evaluatorOperatorSafe: string;
+    }): Promise<AutopilotEvaluationContextObservation | undefined>;
+  };
 }
 
 export const MECH_MARKETPLACE_ABI = [

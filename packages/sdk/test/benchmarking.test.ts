@@ -334,6 +334,36 @@ describe('BenchMatrixV1', () => {
     }
   });
 
+  it('rejects Infinity in cost.reported (issue #2066)', () => {
+    const matrix = buildValidMatrix(makeValidRun());
+    const withInfiniteCost = {
+      ...matrix,
+      cells: [{ ...matrix.cells[0]!, cost: { reported: Infinity, source: 'harness' } }],
+    };
+    const parsed = BenchMatrixV1Schema.safeParse(withInfiniteCost);
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects Infinity in attrition counters (issue #2066)', () => {
+    const matrix = buildValidMatrix(makeValidRun());
+    const withInfiniteAttrition = {
+      ...matrix,
+      attrition: { perConfig: { 'config-0': Infinity }, perCapsule: {}, asymmetryFlags: [] },
+    };
+    const parsed = BenchMatrixV1Schema.safeParse(withInfiniteAttrition);
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects Infinity/-Infinity in completeness fields (issue #2066)', () => {
+    const matrix = buildValidMatrix(makeValidRun());
+    const withInfiniteCompleteness = {
+      ...matrix,
+      completeness: { achieved: Infinity, floor: -Infinity, runOutcome: 'complete' as const },
+    };
+    const parsed = BenchMatrixV1Schema.safeParse(withInfiniteCompleteness);
+    expect(parsed.success).toBe(false);
+  });
+
   for (const key of [
     'aggregate',
     'aggregates',

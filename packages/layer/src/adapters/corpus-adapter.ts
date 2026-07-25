@@ -16,6 +16,8 @@ import {
   ok,
   hasRetrievalMark,
   RETRIEVAL_VISIBLE_TAG,
+  TIER_ORDER,
+  type Tier,
 } from '@jinn-network/plugin';
 import {
   createHarnessLayer,
@@ -30,6 +32,7 @@ import {
   TRACE_ENVELOPE_ARTIFACT_TYPE,
 } from '../publish.js';
 import { SKILL_ARTIFACT_TYPE } from '@jinn-network/core';
+import { episodeToCorpusRecord } from './episode-record.js';
 
 export interface CorpusAdapterDeps {
   /** A ready HarnessLayer (test seam: a fake `{ corpus: { search, get } }`). */
@@ -38,6 +41,10 @@ export interface CorpusAdapterDeps {
 
 function isLayerDeps(deps: CorpusAdapterDeps | HarnessLayerConfig): deps is CorpusAdapterDeps {
   return 'layer' in deps;
+}
+
+function pickupTier(value: string | undefined): Tier | undefined {
+  return TIER_ORDER.includes(value as Tier) ? value as Tier : undefined;
 }
 
 /**
@@ -49,6 +56,7 @@ function isLayerDeps(deps: CorpusAdapterDeps | HarnessLayerConfig): deps is Corp
 function toKnowledgeHit(hit: CorpusSearchHit): KnowledgeHit {
   const origin = hit.operator.agentId || hit.ref;
   const tags = hit.tags ?? [];
+  const tier = pickupTier(hit.verifiabilityTier);
   // Named indexed metadata is authoritative when present. The legacy mark is
   // only a fallback for rows indexed before that field existed.
   const retrievalVisible = hit.retrievalVisible ?? hasRetrievalMark(tags);
@@ -60,7 +68,9 @@ function toKnowledgeHit(hit: CorpusSearchHit): KnowledgeHit {
     tags: tags.filter((tag) => tag !== RETRIEVAL_VISIBLE_TAG),
     ...(origin ? { origin } : {}),
     publishedAt: hit.publishedAt,
+    recencyDomain: 'block-number',
     retrievalVisible,
+    ...(tier ? { tier } : {}),
   };
 }
 
@@ -108,57 +118,6 @@ function detectSkillPayload(record: WireCorpusRecord, steps: readonly EvidenceSt
   return hasSkillMdAttribute(steps);
 }
 
-interface DecodedEvidencePayload {
-  task: { summary: string; distributionTags: string[]; repositorySlug?: string };
-  retrievalVisible?: boolean;
-  outcome: {
-    status: 'completed' | 'failed' | 'abandoned';
-    verificationStrength: 'user-accepted' | 'tests-passed' | 'evaluator-verified';
-    summary?: string;
-  };
-  steps: EvidenceStep[];
-  provenance: 'imported' | 'contributed' | 'derived-from-history';
-  capturedAt: string;
-}
-
-function decodeEvidencePayload(
-  artifactType: string,
-  content: Buffer,
-): DecodedEvidencePayload {
-  const body: unknown = JSON.parse(content.toString('utf-8'));
-  if (artifactType === EPISODE_ARTIFACT_TYPE) {
-    const declaresRetrievalVisible =
-      body !== null
-      && typeof body === 'object'
-      && Object.prototype.hasOwnProperty.call(body, 'retrievalVisible');
-    const episode = EpisodeV1Schema.parse(body);
-    return {
-      task: episode.task,
-      ...(declaresRetrievalVisible
-        ? { retrievalVisible: episode.retrievalVisible }
-        : {}),
-      outcome: episode.outcome,
-      steps: episode.trajectory,
-      provenance: episode.provenance,
-      capturedAt: episode.session.capturedAt,
-    };
-  }
-
-  const trace = parseTraceEnvelopeV0(body);
-  return {
-    task: trace.task,
-    retrievalVisible: hasRetrievalMark(trace.task.distributionTags),
-    outcome: {
-      status: trace.outcome.status,
-      verificationStrength: trace.outcome.verifiabilityTier,
-      ...(trace.outcome.summary ? { summary: trace.outcome.summary } : {}),
-    },
-    steps: trace.steps,
-    provenance: trace.provenance,
-    capturedAt: trace.session.capturedAt,
-  };
-}
-
 /**
  * Decode the record's canonical `jinn.episode.v1` artifact (or frozen
  * `jinn.trace-envelope.v0` read-compat artifact) into the plugin's
@@ -183,50 +142,71 @@ function decodeRecord(record: WireCorpusRecord): CorpusRecord | null {
     );
   }
 
-  const evidence = decodeEvidencePayload(artifact.artifactType, artifact.content);
+  const raw: unknown = JSON.parse(artifact.content.toString('utf-8'));
   // Packet attribution is display-only, so safeAddress remains an acceptable
   // fallback here after trustworthy agentId; it is never used for hit dedup.
   const origin = record.provenance.operator.agentId || record.provenance.operator.safeAddress || record.ref;
-  const synthesis = evidence.outcome.summary ?? seedStepSynthesis(evidence.steps);
+
+  if (artifact.artifactType === EPISODE_ARTIFACT_TYPE) {
+    const declaresRetrievalVisible =
+      raw !== null
+      && typeof raw === 'object'
+      && Object.prototype.hasOwnProperty.call(raw, 'retrievalVisible');
+    const episode = EpisodeV1Schema.parse(raw);
+
+    // Fails open (mono #1782): a detection error never blocks the rest of
+    // the record's content from being served — it just leaves the fact
+    // undetermined, exactly as if this guard did not exist for that record.
+    let isSkillPayload = false;
+    try {
+      isSkillPayload = detectSkillPayload(record, episode.trajectory);
+    } catch {
+      isSkillPayload = false;
+    }
+
+    return episodeToCorpusRecord(episode, {
+      ref: record.ref,
+      origin,
+      retrievalVisible: declaresRetrievalVisible
+        ? episode.retrievalVisible
+        : hasRetrievalMark(episode.task.distributionTags),
+      isSkillPayload,
+    });
+  }
+
+  const trace = parseTraceEnvelopeV0(raw);
+  const synthesis = trace.outcome.summary ?? seedStepSynthesis(trace.steps);
 
   // Fails open (mono #1782): a detection error never blocks the rest of the
   // record's content from being served — it just leaves the fact
   // undetermined, exactly as if this guard did not exist for that record.
   let isSkillPayload = false;
   try {
-    isSkillPayload = detectSkillPayload(record, evidence.steps);
+    isSkillPayload = detectSkillPayload(record, trace.steps);
   } catch {
     isSkillPayload = false;
   }
 
-  // Content remains the guard: a named canonical boolean is authoritative
-  // when the raw body declared it, and only legacy absence falls back to the
-  // compatibility mark.
-  const retrievalVisible =
-    evidence.retrievalVisible ?? hasRetrievalMark(evidence.task.distributionTags);
-
   return {
     ref: record.ref,
+    canonicalEpisodeId: trace.session.sessionId,
     task: {
-      summary: evidence.task.summary,
-      ...(evidence.task.repositorySlug
-        ? { repositorySlug: evidence.task.repositorySlug }
-        : {}),
+      summary: trace.task.summary,
     },
     outcome: {
-      status: evidence.outcome.status,
-      verifiabilityTier: evidence.outcome.verificationStrength,
+      status: trace.outcome.status,
+      verifiabilityTier: trace.outcome.verifiabilityTier,
     },
     ...(synthesis ? { synthesis } : {}),
-    steps: evidence.steps.map((step) => ({ name: step.name, attributes: step.attributes })),
+    steps: trace.steps.map((step) => ({ name: step.name, attributes: step.attributes })),
     // Deliberately un-stripped (unlike the search-hit path): CorpusRecord.tags
     // is provenance-adjacent display data on the fetched packet, never fed to
     // the scoring haystack — hiding the mark here would hide provenance.
-    tags: evidence.task.distributionTags,
-    retrievalVisible,
-    provenance: evidence.provenance,
+    tags: trace.task.distributionTags,
+    retrievalVisible: hasRetrievalMark(trace.task.distributionTags),
+    provenance: trace.provenance,
     origin,
-    capturedAt: evidence.capturedAt,
+    capturedAt: trace.session.capturedAt,
     ...(isSkillPayload ? { isSkillPayload: true } : {}),
   };
 }
@@ -238,12 +218,15 @@ function decodeRecord(record: WireCorpusRecord): CorpusRecord | null {
  */
 export function createCorpusAdapter(deps: CorpusAdapterDeps | HarnessLayerConfig): CorpusPort {
   const layer = isLayerDeps(deps) ? deps.layer : createHarnessLayer(deps);
+  const advertisedRefs = new Set<string>();
 
   return {
     async search(query: string): Promise<PortResult<KnowledgeHit[]>> {
       try {
         const hits = await layer.corpus.search(query);
-        return ok(hits.map(toKnowledgeHit));
+        const mapped = hits.map(toKnowledgeHit);
+        for (const hit of mapped) advertisedRefs.add(hit.ref);
+        return ok(mapped);
       } catch (e) {
         // Empty array keeps callers alive when discovery is unreachable.
         return degraded(`corpus search failed: ${String(e)}`, []);
@@ -254,12 +237,14 @@ export function createCorpusAdapter(deps: CorpusAdapterDeps | HarnessLayerConfig
       let record: WireCorpusRecord;
       try {
         record = await layer.corpus.get(ref);
-      } catch {
+      } catch (error) {
         // `corpus.get` throws on a missing manifest, and the contract requires
-        // `ok(null)` for that unknown-ref path (Stage 1). A genuine transport
-        // error is currently indistinguishable from not-found via the throw, so
-        // it also collapses to `ok(null)` here; distinguishing the two is a
-        // follow-up on `consume.ts`'s `corpus.get` surface, not this shim.
+        // `ok(null)` for a never-advertised unknown-ref path. Once a ref was
+        // advertised by this adapter invocation, a throwing acquisition is
+        // evidence of an unavailable record and must remain observable.
+        if (advertisedRefs.has(ref)) {
+          return degraded(`corpus get failed for ${ref}: ${String(error)}`, null);
+        }
         return ok(null);
       }
       try {

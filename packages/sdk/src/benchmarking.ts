@@ -206,6 +206,14 @@ export const BenchPreregistrationV1Schema = z
 
 export type BenchPreregistrationV1 = z.infer<typeof BenchPreregistrationV1Schema>;
 
+/**
+ * Shape + hash checks only — matches SolverNet manifest practice. This does
+ * NOT cryptographically verify `signature.value` against `signature.signer`.
+ * `ok: true` means the input parses and its content hashes match, not that
+ * the EIP-191 signature is valid; callers must not treat it as signature
+ * proof. A real `verifyBenchPreregistrationSignature` can land later if
+ * cryptographic verification is needed.
+ */
 export function validateBenchPreregistrationV1(
   value: unknown,
 ): BenchmarkValidationResult<BenchPreregistrationV1> {
@@ -234,7 +242,7 @@ const VerificationZ = z
 
 const CostZ = z
   .object({
-    reported: z.union([NumericStringZ, z.number()]),
+    reported: z.union([NumericStringZ, z.number().finite().nonnegative()]),
     source: z.string().min(1),
   })
   .strict();
@@ -278,15 +286,15 @@ export const BenchMatrixV1Schema = z
     ),
     attrition: z
       .object({
-        perConfig: z.record(z.string(), z.number()),
-        perCapsule: z.record(z.string(), z.number()),
+        perConfig: z.record(z.string(), z.number().finite().nonnegative()),
+        perCapsule: z.record(z.string(), z.number().finite().nonnegative()),
         asymmetryFlags: z.array(z.string()),
       })
       .strict(),
     completeness: z
       .object({
-        achieved: z.number(),
-        floor: z.number(),
+        achieved: z.number().finite().nonnegative(),
+        floor: z.number().finite().nonnegative(),
         runOutcome: z.enum(['complete', 'partial', 'cancelled']),
       })
       .strict(),

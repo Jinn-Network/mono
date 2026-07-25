@@ -2,8 +2,8 @@
  * /v1/status `aiUnits` block — issue #815.
  *
  * One row per credential configured in `aiUnits.manifestCredentials`,
- * each carrying the current 6h-block sum, 7d-window sum, the active
- * caps, paused flag, and the next reset instants for both windows.
+ * each carrying the current 6h-block sum, 7d-window sum, active caps,
+ * gate-parity projected-debit classification, and the next reset instants.
  */
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -87,6 +87,145 @@ describe('/v1/status aiUnits block', () => {
     });
     const row = body.aiUnits?.credentials.find((c) => c.credentialId === 'anthropic:api-key');
     expect(row?.paused).toBe(false);
+  });
+
+  it('reports the gate window when the next projected claim would exceed both caps', async () => {
+    store = freshStore();
+    const now = new Date();
+    const outsideBlock = new Date(now.getTime() - 24 * 60 * 60 * 1_000);
+    store.recordActivityEvent({
+      ts: outsideBlock.toISOString(),
+      kind: 'claimed',
+      requestId: 'projected-old',
+      credentialId: 'anthropic:api-key',
+      claimStatus: 'delivered',
+      actualCostUsdMicros: 450_000,
+    });
+    store.recordActivityEvent({
+      ts: now.toISOString(),
+      kind: 'claimed',
+      requestId: 'projected-current',
+      credentialId: 'anthropic:api-key',
+      claimStatus: 'delivered',
+      actualCostUsdMicros: 450_000,
+    });
+
+    const body = await gatherStatusForApi(store, {
+      aiUnits: {
+        capPerBlock: 100,
+        capPerWeek: 200,
+        capPerBlockUsdMicros: 500_000,
+        capPerWeekUsdMicros: 1_000_000,
+        manifestCredentials: { 'cid-1': 'anthropic:api-key' },
+        manifestProjectedAiUnits: { 'cid-1': 30 },
+        manifestProjectedUsdMicros: { 'cid-1': 150_000 },
+        manifestModels: { 'cid-1': 'claude-opus-4-7' },
+      },
+    });
+
+    const row = body.aiUnits?.credentials[0];
+    expect(row?.usdMicrosThisBlock).toBe(450_000);
+    expect(row?.usdMicrosThisWeek).toBe(900_000);
+    expect(row?.paused).toBe(true);
+    expect(row?.pausedWindow).toBe('block');
+  });
+
+  it('keeps an unknown projection fail-open even when current sums exceed caps', async () => {
+    store = freshStore();
+    store.recordActivityEvent({
+      ts: new Date().toISOString(),
+      kind: 'claimed',
+      requestId: 'unknown-projection',
+      credentialId: 'anthropic:api-key',
+      claimStatus: 'delivered',
+      actualCostUsdMicros: 600_000,
+    });
+
+    const body = await gatherStatusForApi(store, {
+      aiUnits: {
+        capPerBlock: 100,
+        capPerWeek: 200,
+        capPerBlockUsdMicros: 500_000,
+        capPerWeekUsdMicros: 500_000,
+        manifestCredentials: { 'cid-1': 'anthropic:api-key' },
+        manifestProjectedAiUnits: { 'cid-1': null },
+        manifestProjectedUsdMicros: { 'cid-1': null },
+        manifestModels: { 'cid-1': 'unknown-model' },
+      },
+    });
+
+    const row = body.aiUnits?.credentials[0];
+    expect(row?.paused).toBe(false);
+    expect(row?.pausedWindow).toBeNull();
+  });
+
+  it('uses the largest known week projection to report a safe rolling resume instant', async () => {
+    store = freshStore();
+    const now = new Date();
+    const oldest = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1_000);
+    const middle = new Date(now.getTime() - 4 * 24 * 60 * 60 * 1_000);
+    const newest = new Date(now.getTime() - 1 * 24 * 60 * 60 * 1_000);
+    for (const [requestId, ts, actualCostUsdMicros] of [
+      ['week-oldest', oldest, 200_000],
+      ['week-middle', middle, 50_000],
+      ['week-newest', newest, 350_000],
+    ] as const) {
+      store.recordActivityEvent({
+        ts: ts.toISOString(),
+        kind: 'claimed',
+        requestId,
+        credentialId: 'anthropic:api-key',
+        claimStatus: 'delivered',
+        actualCostUsdMicros,
+      });
+    }
+
+    const body = await gatherStatusForApi(store, {
+      aiUnits: {
+        capPerBlock: 2_000,
+        capPerWeek: 100,
+        capPerBlockUsdMicros: 10_000_000,
+        capPerWeekUsdMicros: 500_000,
+        manifestCredentials: {
+          'cid-small': 'anthropic:api-key',
+          'cid-large': 'anthropic:api-key',
+        },
+        manifestProjectedAiUnits: { 'cid-small': 10, 'cid-large': 30 },
+        manifestProjectedUsdMicros: { 'cid-small': 50_000, 'cid-large': 150_000 },
+        manifestModels: {
+          'cid-small': 'claude-haiku-4-5-20251001',
+          'cid-large': 'claude-opus-4-7',
+        },
+      },
+    });
+
+    const row = body.aiUnits?.credentials[0];
+    expect(row?.pausedWindow).toBe('week');
+    expect(row?.weekResetsAt).toBe(
+      new Date(middle.getTime() + 7 * 24 * 60 * 60 * 1_000).toISOString(),
+    );
+  });
+
+  it('reports no scheduled weekly resume when the projection alone exceeds the cap', async () => {
+    store = freshStore();
+
+    const body = await gatherStatusForApi(store, {
+      aiUnits: {
+        capPerBlock: 2_000,
+        capPerWeek: 100,
+        capPerBlockUsdMicros: 1_000_000,
+        capPerWeekUsdMicros: 500_000,
+        manifestCredentials: { 'cid-1': 'anthropic:api-key' },
+        manifestProjectedAiUnits: { 'cid-1': 120 },
+        manifestProjectedUsdMicros: { 'cid-1': 600_000 },
+        manifestModels: { 'cid-1': 'claude-opus-4-7' },
+      },
+    });
+
+    const row = body.aiUnits?.credentials[0];
+    expect(row?.paused).toBe(true);
+    expect(row?.pausedWindow).toBe('week');
+    expect(row?.weekResetsAt).toBeNull();
   });
 
   it('marks a credential with recorded weekly spend as active (#891)', async () => {
