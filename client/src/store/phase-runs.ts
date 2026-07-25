@@ -98,21 +98,27 @@ export class PhaseRunStore {
   }
 
   getRun(runKey: string): PhaseRun | null {
-    const row = this.db.prepare(
-      `SELECT * FROM phase_runs WHERE run_key = ?`
-    ).get(runKey) as Record<string, unknown> | undefined;
-    if (!row) return null;
-    const eventRows = this.db.prepare(
-      `SELECT event_json FROM phase_run_events WHERE run_key = ? ORDER BY id ASC`
-    ).all(runKey) as Array<{ event_json: string }>;
-    return {
-      runKey: row.run_key as string,
-      phase: row.phase as string,
-      revision: row.revision as number,
-      state: row.state_json ? JSON.parse(row.state_json as string) : null,
-      events: eventRows.map((r) => JSON.parse(r.event_json)),
-      createdAt: row.created_at as number,
-      updatedAt: row.updated_at as number,
-    };
+    // Both SELECTs must share one read transaction. Under WAL, a second
+    // connection can commit transition() between auto-commit statements and
+    // otherwise tear phase/revision from events (see TaskRunPersistence
+    // getReaperPartition docs for the same multi-statement hazard).
+    return this.db.transaction(() => {
+      const row = this.db.prepare(
+        `SELECT * FROM phase_runs WHERE run_key = ?`
+      ).get(runKey) as Record<string, unknown> | undefined;
+      if (!row) return null;
+      const eventRows = this.db.prepare(
+        `SELECT event_json FROM phase_run_events WHERE run_key = ? ORDER BY id ASC`
+      ).all(runKey) as Array<{ event_json: string }>;
+      return {
+        runKey: row.run_key as string,
+        phase: row.phase as string,
+        revision: row.revision as number,
+        state: row.state_json ? JSON.parse(row.state_json as string) : null,
+        events: eventRows.map((r) => JSON.parse(r.event_json)),
+        createdAt: row.created_at as number,
+        updatedAt: row.updated_at as number,
+      };
+    })();
   }
 }
