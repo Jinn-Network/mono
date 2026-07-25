@@ -200,6 +200,11 @@ export type TaskRunPatch = Partial<{
    * Added by WT-C for PACKAGING recovery fidelity.
    */
   solutionOutputsJson: string | null;
+  /**
+   * JSON string[] of harness-emitted intermediate failure diffs (#1643).
+   * Null clears / leaves empty (prefer null when no evidence).
+   */
+  intermediateFailureDiffsJson: string | null;
   runtimePluginsJson: string | null;
   /** Corpus knowledge refs consumed by this run (#1393). */
   consumedRefsJson: string | null;
@@ -537,6 +542,10 @@ export class TaskRunPersistence {
     if (patch.solutionOutputsJson !== undefined) {
       setClauses.push('solution_outputs_json = @solutionOutputsJson');
       params['solutionOutputsJson'] = patch.solutionOutputsJson;
+    }
+    if (patch.intermediateFailureDiffsJson !== undefined) {
+      setClauses.push('intermediate_failure_diffs_json = @intermediateFailureDiffsJson');
+      params['intermediateFailureDiffsJson'] = patch.intermediateFailureDiffsJson;
     }
     if (patch.runtimePluginsJson !== undefined) {
       setClauses.push('runtime_plugins_json = @runtimePluginsJson');
