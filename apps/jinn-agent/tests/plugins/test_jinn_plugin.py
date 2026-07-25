@@ -432,10 +432,10 @@ def test_process_failure_persists_episode_fallback_without_pending_file(
     assert len(episodes) == 1
     assert json.loads(episodes[0].read_text())["schemaVersion"] == "jinn.episode.v1"
     err = capsys.readouterr().err
-    assert "episode captured locally — process bridge degraded" in err
-    assert "local learning pending" in err
-    assert "eligibility unavailable" in err
-    assert "contribution unavailable" in err
+    assert "Saved this session locally" in err
+    assert "local learning pending" not in err
+    assert "eligibility unavailable" not in err
+    assert "contribution unavailable" not in err
 
 
 def test_abandoned_session_is_marked_abandoned(isolated_home, tmp_path):
@@ -488,12 +488,12 @@ def test_session_end_published_outcome_says_contribution_is_immutable(
 def test_session_end_without_corpus_result_prints_complete_summary(isolated_home, capsys):
     _run_session()
     err = capsys.readouterr().err
-    assert "Jinn session complete" in err
-    assert "nothing relevant found" in err
-    assert "episode captured" in err
-    assert "local learning pending" in err
-    assert "eligibility not eligible — test fixture" in err
-    assert "contribution unavailable" in err
+    assert "Jinn" in err
+    assert "no relevant prior notes found" in err.lower()
+    assert "Saved this session for next time" in err
+    assert "episode captured" not in err
+    assert "local learning pending" not in err
+    assert "contribution unavailable" not in err
 
 
 # ── Consent flow ─────────────────────────────────────────────────────────────

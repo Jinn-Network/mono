@@ -77,6 +77,21 @@ def test_current_session_verbose_includes_protocol_detail(monkeypatch):
     assert "contribution parked · nothing leaves this machine" in out
 
 
+def test_session_end_renders_published_contribution_in_default_mode():
+    out = _plain(session_view.render_complete(
+        summary=None,
+        activity={},
+        capture_status="captured",
+        local_learning_status="pending",
+        contribution={
+            "status": "ok",
+            "value": {"recordId": "episode-1", "status": "published"},
+        },
+    ))
+    assert "jinn: contribution published — immutable" in out
+    assert "episode captured" not in out
+
+
 def test_session_end_renders_operator_facing_outcome():
     out = _plain(session_view.render_complete(
         summary={

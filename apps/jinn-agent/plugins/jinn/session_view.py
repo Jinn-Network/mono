@@ -110,6 +110,17 @@ def _eligibility(value: object) -> str:
     return f"eligibility {verdict}" + (f" — {reason}" if reason else "")
 
 
+def _published_contribution_line(contribution: object) -> str | None:
+    if not isinstance(contribution, dict):
+        return None
+    receipt = contribution.get("value")
+    if not isinstance(receipt, dict):
+        return None
+    if _text(receipt.get("status"), "") != "published":
+        return None
+    return "jinn: contribution published — immutable"
+
+
 def _contribution(value: object) -> str:
     if value is None or not isinstance(value, dict):
         return "contribution unavailable"
@@ -157,6 +168,9 @@ def render_complete(
     else:
         knowledge = [_knowledge_line(provided_refs, nothing_found)]
     lines = [*knowledge, _capture_line(capture_status)]
+    published = _published_contribution_line(contribution)
+    if published is not None:
+        lines.append(published)
     if _verbose():
         learning = {
             "pending": "local learning pending — capture reserved for distillation",
