@@ -89,9 +89,9 @@ def test_session_end_summary_rendered_block_prints_byte_plain(capsys):
 
     err = capsys.readouterr().err
     assert "\x1b" not in err
-    assert "Jinn session complete" in err
-    assert "knowledge searched dashboard, vitest · provided 1 (bafySourceEpisode)" in err
-    assert "episode captured" in err
-    assert "local learning pending" in err
-    assert "eligibility eligible — accepted diff" in err
-    assert "contribution recorded" in err
+    assert "Jinn" in err
+    assert "Used 1 prior note from your local Jinn history" in err
+    assert "Saved this session for next time" in err
+    assert "episode captured" not in err
+    assert "local learning pending" not in err
+    assert "contribution recorded" not in err
