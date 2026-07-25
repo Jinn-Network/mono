@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -32,6 +32,18 @@ describe("catalog generations", () => {
     expect(reopened?.pointer).toEqual(created.pointer);
     await reopened?.catalog.close();
     await created.catalog.close();
+  });
+
+  it("treats a missing disposable generation as rebuild-required", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jinn-generation-missing-"));
+    roots.push(root);
+    const paths = await prepareRuntimePaths(root);
+    const created = await createCatalogGeneration(paths);
+    await publishCatalogPointer(paths, created.pointer);
+    await created.catalog.close();
+    await unlink(join(paths.generationsDir, created.pointer.databaseFile));
+
+    await expect(openCurrentCatalogGeneration(paths)).resolves.toBeNull();
   });
 
   it("switches new reader calls while preserving the public proxy", async () => {

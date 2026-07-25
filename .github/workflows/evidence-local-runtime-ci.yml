@@ -1,0 +1,129 @@
+name: Local Evidence Runtime CI
+
+on:
+  pull_request:
+    paths:
+      - "packages/evidence-protocol/**"
+      - "packages/evidence-repository/**"
+      - "packages/evidence-repository-fs/**"
+      - "packages/evidence-catalog/**"
+      - "packages/evidence-indexer/**"
+      - "packages/evidence-catalog-sqlite/**"
+      - "packages/evidence-announcement-journal/**"
+      - "packages/execution-recorder/**"
+      - "packages/evidence-local-runtime/**"
+      - ".github/workflows/evidence-local-runtime-ci.yml"
+  push:
+    branches: [next]
+    paths:
+      - "packages/evidence-protocol/**"
+      - "packages/evidence-repository/**"
+      - "packages/evidence-repository-fs/**"
+      - "packages/evidence-catalog/**"
+      - "packages/evidence-indexer/**"
+      - "packages/evidence-catalog-sqlite/**"
+      - "packages/evidence-announcement-journal/**"
+      - "packages/execution-recorder/**"
+      - "packages/evidence-local-runtime/**"
+      - ".github/workflows/evidence-local-runtime-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+
+      - name: Verify Evidence Protocol
+        working-directory: packages/evidence-protocol
+        run: |
+          yarn install --immutable
+          yarn check:profile
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+
+      - name: Verify Evidence Repository
+        working-directory: packages/evidence-repository
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+
+      - name: Verify filesystem Evidence Repository
+        working-directory: packages/evidence-repository-fs
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+
+      - name: Verify Evidence Catalog
+        working-directory: packages/evidence-catalog
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+
+      - name: Verify Evidence Indexer
+        working-directory: packages/evidence-indexer
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+
+      - name: Verify SQLite Evidence Catalog
+        working-directory: packages/evidence-catalog-sqlite
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+
+      - name: Verify local announcement journal
+        working-directory: packages/evidence-announcement-journal
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+
+      - name: Verify Execution Recorder integration dependency
+        working-directory: packages/execution-recorder
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+
+      - name: Verify Local Evidence Runtime
+        working-directory: packages/evidence-local-runtime
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke

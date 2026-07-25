@@ -4,6 +4,7 @@ import {
   type EvidenceCatalogReader,
 } from "@jinn-network/evidence-catalog";
 import {
+  EvidenceAnnouncementJournalError,
   openFilesystemEvidenceAnnouncementJournal,
   type FilesystemEvidenceAnnouncementJournal,
 } from "@jinn-network/evidence-announcement-journal";
@@ -11,6 +12,7 @@ import {
   createEvidenceIndexer,
 } from "@jinn-network/evidence-indexer";
 import {
+  EvidenceRepositoryError,
   parseEvidenceRecordReference,
   type EvidenceRepository,
 } from "@jinn-network/evidence-repository";
@@ -65,6 +67,29 @@ interface PublicationGate {
   readonly release: () => void;
 }
 
+export type LocalEvidenceRuntimeFaultPoint =
+  | "before-runtime-close"
+  | "during-runtime-close"
+  | "after-runtime-close";
+
+export interface LocalEvidenceRuntimeTestDependencies {
+  readonly acquireRuntimeLock?: typeof acquireRuntimeLock;
+  readonly createCatalogGeneration?: typeof createCatalogGeneration;
+  readonly createFilesystemEvidenceRepository?:
+    typeof createFilesystemEvidenceRepository;
+  readonly openCurrentCatalogGeneration?: typeof openCurrentCatalogGeneration;
+  readonly openFilesystemEvidenceAnnouncementJournal?:
+    typeof openFilesystemEvidenceAnnouncementJournal;
+  readonly openLocalOperationsStore?: typeof openLocalOperationsStore;
+  readonly openRuntimeMarker?: typeof openRuntimeMarker;
+  readonly prepareRuntimePaths?: typeof prepareRuntimePaths;
+  readonly publishCatalogPointer?: typeof publishCatalogPointer;
+  readonly recoverPendingPublications?: typeof recoverPendingPublications;
+  readonly faultHook?: (
+    point: LocalEvidenceRuntimeFaultPoint,
+  ) => void | Promise<void>;
+}
+
 function runtimeStateError(state: LocalRuntimeLifecycleState): never {
   throw new LocalEvidenceRuntimeError(
     state === "closing" ? "RUNTIME_CLOSING" : "RUNTIME_CLOSED",
@@ -83,11 +108,219 @@ async function closeQuietly(action: (() => Promise<void>) | undefined): Promise<
   try { await action?.(); } catch { /* preserve the primary lifecycle result */ }
 }
 
-export async function openLocalEvidenceRuntime(
+function errorCode(error: unknown): string | undefined {
+  return error !== null && typeof error === "object" && "code" in error
+    ? String((error as { readonly code?: unknown }).code)
+    : undefined;
+}
+
+function runtimeOpenError(error: unknown): LocalEvidenceRuntimeError {
+  if (error instanceof LocalEvidenceRuntimeError) return error;
+  const code = errorCode(error);
+  if (code === "OPERATION_ABORTED") {
+    return new LocalEvidenceRuntimeError(
+      "OPERATION_ABORTED",
+      "Opening the local evidence runtime was aborted.",
+      { cause: error },
+    );
+  }
+  if (
+    code === "ELOOP" ||
+    code === "ENOTDIR" ||
+    code === "UNSAFE_PATH"
+  ) {
+    return new LocalEvidenceRuntimeError(
+      "UNSAFE_PATH",
+      "A private local evidence runtime path is unsafe.",
+      { cause: error },
+    );
+  }
+  if (
+    error instanceof EvidenceAnnouncementJournalError &&
+    error.code === "JOURNAL_CORRUPT" &&
+    /symbolic link|non-symlink|not owned|escapes its root/iu.test(error.message)
+  ) {
+    return new LocalEvidenceRuntimeError(
+      "UNSAFE_PATH",
+      "A private local announcement journal path is unsafe.",
+      { cause: error },
+    );
+  }
+  if (
+    error instanceof EvidenceAnnouncementJournalError &&
+    [
+      "JOURNAL_CORRUPT",
+      "JOURNAL_VERSION_UNSUPPORTED",
+      "CURSOR_INVALID",
+    ].includes(error.code)
+  ) {
+    return new LocalEvidenceRuntimeError(
+      "RUNTIME_CORRUPT",
+      "The local announcement journal is corrupt.",
+      { cause: error },
+    );
+  }
+  if (
+    error instanceof EvidenceCatalogError &&
+    [
+      "PROJECTION_CONFLICT",
+      "LOCATION_CONFLICT",
+      "INVALID_PROJECTION",
+    ].includes(error.code)
+  ) {
+    return new LocalEvidenceRuntimeError(
+      "RUNTIME_CORRUPT",
+      "The active local evidence Catalog is corrupt.",
+      { cause: error },
+    );
+  }
+  if (
+    error instanceof EvidenceRepositoryError &&
+    error.code === "CONTENT_CORRUPT"
+  ) {
+    return new LocalEvidenceRuntimeError(
+      "RUNTIME_CORRUPT",
+      "The local evidence repository is corrupt.",
+      { cause: error },
+    );
+  }
+  if (
+    code === "SQLITE_CORRUPT" ||
+    code === "SQLITE_NOTADB" ||
+    code === "SQLITE_FORMAT"
+  ) {
+    return new LocalEvidenceRuntimeError(
+      "RUNTIME_CORRUPT",
+      "A private local evidence runtime database is corrupt.",
+      { cause: error },
+    );
+  }
+  return new LocalEvidenceRuntimeError(
+    "IO_FAILURE",
+    "Unable to open the local evidence runtime.",
+    { cause: error },
+  );
+}
+
+function runtimeOperationError(
+  error: unknown,
+  operation: string,
+): LocalEvidenceRuntimeError {
+  if (error instanceof LocalEvidenceRuntimeError) return error;
+  const code = errorCode(error);
+  if (code === "OPERATION_ABORTED") {
+    return new LocalEvidenceRuntimeError(
+      "OPERATION_ABORTED",
+      `${operation} was aborted.`,
+      { cause: error },
+    );
+  }
+  if (code === "INVALID_REFERENCE" || code === "INVALID_QUERY") {
+    return new LocalEvidenceRuntimeError(
+      "INVALID_QUERY",
+      `${operation} received invalid input.`,
+      { cause: error },
+    );
+  }
+  if (
+    error instanceof EvidenceAnnouncementJournalError &&
+    error.code === "JOURNAL_CORRUPT" &&
+    /symbolic link|non-symlink|not owned|escapes its root/iu.test(error.message)
+  ) {
+    return new LocalEvidenceRuntimeError(
+      "UNSAFE_PATH",
+      `${operation} encountered an unsafe private journal path.`,
+      { cause: error },
+    );
+  }
+  if (
+    error instanceof EvidenceAnnouncementJournalError &&
+    [
+      "JOURNAL_CORRUPT",
+      "JOURNAL_VERSION_UNSUPPORTED",
+      "CURSOR_INVALID",
+    ].includes(error.code)
+  ) {
+    return new LocalEvidenceRuntimeError(
+      "RUNTIME_CORRUPT",
+      `${operation} detected corrupt journal state.`,
+      { cause: error },
+    );
+  }
+  if (
+    error instanceof EvidenceCatalogError &&
+    [
+      "PROJECTION_CONFLICT",
+      "LOCATION_CONFLICT",
+      "INVALID_PROJECTION",
+    ].includes(error.code)
+  ) {
+    return new LocalEvidenceRuntimeError(
+      "RUNTIME_CORRUPT",
+      `${operation} detected corrupt Catalog state.`,
+      { cause: error },
+    );
+  }
+  if (
+    error instanceof EvidenceRepositoryError &&
+    error.code === "CONTENT_CORRUPT"
+  ) {
+    return new LocalEvidenceRuntimeError(
+      "RUNTIME_CORRUPT",
+      `${operation} detected corrupt Repository state.`,
+      { cause: error },
+    );
+  }
+  if (
+    ["SQLITE_CORRUPT", "SQLITE_NOTADB", "SQLITE_FORMAT"].includes(code ?? "") ||
+    (code === "SQLITE_ERROR" &&
+      /malformed|no such table|schema/iu.test(
+        error instanceof Error ? error.message : String(error),
+      ))
+  ) {
+    return new LocalEvidenceRuntimeError(
+      "RUNTIME_CORRUPT",
+      `${operation} detected corrupt private runtime state.`,
+      { cause: error },
+    );
+  }
+  return new LocalEvidenceRuntimeError(
+    "IO_FAILURE",
+    `${operation} could not access private runtime state.`,
+    { cause: error },
+  );
+}
+
+const PRODUCTION_DEPENDENCIES = {
+  acquireRuntimeLock,
+  createCatalogGeneration,
+  createFilesystemEvidenceRepository,
+  openCurrentCatalogGeneration,
+  openFilesystemEvidenceAnnouncementJournal,
+  openLocalOperationsStore,
+  openRuntimeMarker,
+  prepareRuntimePaths,
+  publishCatalogPointer,
+  recoverPendingPublications,
+} as const;
+
+export async function openLocalEvidenceRuntimeForTesting(
   options: OpenLocalEvidenceRuntimeOptions,
+  overrides: LocalEvidenceRuntimeTestDependencies,
+): Promise<LocalEvidenceRuntime> {
+  return openLocalEvidenceRuntimeWithDependencies(options, {
+    ...PRODUCTION_DEPENDENCIES,
+    ...overrides,
+  });
+}
+
+async function openLocalEvidenceRuntimeWithDependencies(
+  options: OpenLocalEvidenceRuntimeOptions,
+  dependencies: typeof PRODUCTION_DEPENDENCIES &
+    Pick<LocalEvidenceRuntimeTestDependencies, "faultHook">,
 ): Promise<LocalEvidenceRuntime> {
   assertLocalRuntimeOperationActive(options);
-  const paths = await prepareRuntimePaths(options.rootDir);
+  const paths = await dependencies.prepareRuntimePaths(options.rootDir);
   assertLocalRuntimeOperationActive(options);
 
   let lock: LocalRuntimeLock | undefined;
@@ -98,18 +331,21 @@ export async function openLocalEvidenceRuntime(
   let unownedGeneration: LocalCatalogGeneration | undefined;
   const workers = new Set<LocalEvidenceIndexingWorker>();
   try {
-    lock = await acquireRuntimeLock(paths.lockPath);
+    lock = await dependencies.acquireRuntimeLock(paths.lockPath);
     assertLocalRuntimeOperationActive(options);
-    const marker = await openRuntimeMarker(paths);
-    operations = await openLocalOperationsStore(paths.operationsDatabasePath);
-    const filesystemRepository = await createFilesystemEvidenceRepository({
+    const marker = await dependencies.openRuntimeMarker(paths);
+    operations = await dependencies.openLocalOperationsStore(
+      paths.operationsDatabasePath,
+    );
+    const filesystemRepository =
+      await dependencies.createFilesystemEvidenceRepository({
       rootDir: paths.repositoryDir,
     });
-    journal = await openFilesystemEvidenceAnnouncementJournal({
+    journal = await dependencies.openFilesystemEvidenceAnnouncementJournal({
       rootDir: paths.announcementsDir,
       sourceId: marker.sourceId,
     });
-    await recoverPendingPublications({
+    await dependencies.recoverPendingPublications({
       repository: filesystemRepository,
       journal,
       operations,
@@ -206,11 +442,11 @@ export async function openLocalEvidenceRuntime(
       });
     };
 
-    const current = await openCurrentCatalogGeneration(paths);
+    const current = await dependencies.openCurrentCatalogGeneration(paths);
     let selected: LocalCatalogGeneration;
     let worker: LocalEvidenceIndexingWorker;
     if (current === null) {
-      const created = await createCatalogGeneration(paths);
+      const created = await dependencies.createCatalogGeneration(paths);
       unownedGeneration = created;
       const bootstrapWorker = buildWorker(created);
       workers.add(bootstrapWorker);
@@ -220,13 +456,14 @@ export async function openLocalEvidenceRuntime(
       if (highWater !== undefined) {
         await bootstrapWorker.syncTo(highWater, { signal: options.signal });
       }
-      await publishCatalogPointer(paths, created.pointer);
+      await dependencies.publishCatalogPointer(paths, created.pointer);
       selected = created;
       worker = bootstrapWorker;
       unownedGeneration = undefined;
     } else {
       selected = current;
       worker = buildWorker(selected);
+      await worker.validateCheckpoint({ signal: options.signal });
       workers.add(worker);
     }
     active = { value: selected, worker };
@@ -247,13 +484,18 @@ export async function openLocalEvidenceRuntime(
       const summary = await operations!.getSummary(
         active!.value.pointer.generationId,
       );
-      const recent = await operations!.listFailures({ limit: 10 });
+      const recent = await operations!.listFailures(
+        active!.value.pointer.generationId,
+        { limit: 10 },
+      );
       const reportedState: LocalRuntimeLifecycleState =
         state === "closing" || state === "closed"
           ? state
           : rebuildRunning
             ? "rebuilding"
-            : rebuildFailed || workerStatus.transientFailure !== undefined
+            : rebuildFailed ||
+                workerStatus.transientFailure !== undefined ||
+                workerStatus.fatal !== undefined
               ? "degraded"
               : "ready";
       return {
@@ -291,7 +533,7 @@ export async function openLocalEvidenceRuntime(
         let releaseBarrier: (() => void) | undefined;
         let switched = false;
         try {
-          created = await createCatalogGeneration(paths);
+          created = await dependencies.createCatalogGeneration(paths);
           replacementWorker = buildWorker(created);
           workers.add(replacementWorker);
           const initialHighWater = await journal!.getHighWaterCursor({ signal });
@@ -310,7 +552,7 @@ export async function openLocalEvidenceRuntime(
             );
           }
 
-          await publishCatalogPointer(paths, created.pointer);
+          await dependencies.publishCatalogPointer(paths, created.pointer);
           await readerProxy!.switchTo(
             created.catalog,
             () => created!.catalog.close(),
@@ -353,24 +595,43 @@ export async function openLocalEvidenceRuntime(
       async sync(operationOptions) {
         assertReadable();
         assertLocalRuntimeOperationActive(operationOptions);
-        const captured = await journal!.getHighWaterCursor(operationOptions);
-        return active!.worker.syncTo(captured, operationOptions);
+        try {
+          const captured = await journal!.getHighWaterCursor(operationOptions);
+          return await active!.worker.syncTo(captured, operationOptions);
+        } catch (error) {
+          throw runtimeOperationError(error, "Local evidence synchronization");
+        }
       },
       async awaitIndexed(untrustedReference, operationOptions) {
         assertReadable();
         assertLocalRuntimeOperationActive(operationOptions);
-        const reference = parseEvidenceRecordReference(untrustedReference);
-        return active!.worker.awaitReference(reference, operationOptions);
+        try {
+          const reference = parseEvidenceRecordReference(untrustedReference);
+          return await active!.worker.awaitReference(reference, operationOptions);
+        } catch (error) {
+          throw runtimeOperationError(error, "Local evidence indexing");
+        }
       },
       async getStatus() {
         if (state === "closed") return lastStatus!;
-        lastStatus = await computeStatus();
-        return lastStatus;
+        try {
+          lastStatus = await computeStatus();
+          return lastStatus;
+        } catch (error) {
+          throw runtimeOperationError(error, "Local evidence status");
+        }
       },
       async listIndexingFailures(query, operationOptions) {
         assertReadable();
         assertLocalRuntimeOperationActive(operationOptions);
-        return operations!.listFailures(query);
+        try {
+          return await operations!.listFailures(
+            active!.value.pointer.generationId,
+            query,
+          );
+        } catch (error) {
+          throw runtimeOperationError(error, "Local indexing failure listing");
+        }
       },
       async close(operationOptions) {
         if (state === "closed") return;
@@ -379,6 +640,7 @@ export async function openLocalEvidenceRuntime(
         state = "closing";
         closePromise = (async () => {
           let primary: unknown;
+          await dependencies.faultHook?.("before-runtime-close");
           rebuildAbort?.abort();
           releasePublicationGate();
           await waitForPublications().catch((error: unknown) => { primary ??= error; });
@@ -389,6 +651,7 @@ export async function openLocalEvidenceRuntime(
           for (const worker of [...workers]) {
             await worker.stop().catch((error: unknown) => { primary ??= error; });
           }
+          await dependencies.faultHook?.("during-runtime-close");
           for (const close of [
             () => readerProxy!.close(),
             () => journal!.close(),
@@ -411,7 +674,10 @@ export async function openLocalEvidenceRuntime(
             }),
             state: "closed",
           };
-          if (primary !== undefined) throw primary;
+          await dependencies.faultHook?.("after-runtime-close");
+          if (primary !== undefined) {
+            throw runtimeOperationError(primary, "Closing the local evidence runtime");
+          }
         })();
         return closePromise;
       },
@@ -427,6 +693,15 @@ export async function openLocalEvidenceRuntime(
     await closeQuietly(() => journal?.close() ?? Promise.resolve());
     await closeQuietly(() => operations?.close() ?? Promise.resolve());
     await closeQuietly(() => lock?.close() ?? Promise.resolve());
-    throw error;
+    throw runtimeOpenError(error);
   }
+}
+
+export async function openLocalEvidenceRuntime(
+  options: OpenLocalEvidenceRuntimeOptions,
+): Promise<LocalEvidenceRuntime> {
+  return openLocalEvidenceRuntimeWithDependencies(
+    options,
+    PRODUCTION_DEPENDENCIES,
+  );
 }

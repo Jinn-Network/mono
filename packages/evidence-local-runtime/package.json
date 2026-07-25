@@ -32,6 +32,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
   },
   "dependencies": {
@@ -45,6 +46,7 @@
     "better-sqlite3": "13.0.1"
   },
   "devDependencies": {
+    "@jinn-network/execution-recorder": "0.1.0",
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3",
@@ -57,6 +59,7 @@
     "@jinn-network/evidence-indexer": "portal:../evidence-indexer",
     "@jinn-network/evidence-protocol": "portal:../evidence-protocol",
     "@jinn-network/evidence-repository": "portal:../evidence-repository",
-    "@jinn-network/evidence-repository-fs": "portal:../evidence-repository-fs"
+    "@jinn-network/evidence-repository-fs": "portal:../evidence-repository-fs",
+    "@jinn-network/execution-recorder": "portal:../execution-recorder"
   }
 }

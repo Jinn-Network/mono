@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
+import Database from "better-sqlite3";
 import {
-  chmod,
   mkdtemp,
   readFile,
-  readdir,
+  rename,
   rm,
   unlink,
   writeFile,
@@ -24,7 +24,10 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { openLocalOperationsStore } from "./operations-store.js";
-import { openLocalEvidenceRuntime } from "./runtime.js";
+import {
+  openLocalEvidenceRuntime,
+  openLocalEvidenceRuntimeForTesting,
+} from "./runtime.js";
 
 const protocolFixtureRoot = new URL(
   ".",
@@ -112,6 +115,158 @@ describe("local evidence runtime", () => {
     await runtime.close();
     await expect(runtime.repository.putArtifact(new Uint8Array([1])))
       .rejects.toMatchObject({ code: "IO_FAILURE" });
+  });
+
+  it("rejects a corrupt persisted checkpoint before reporting ready", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jinn-runtime-checkpoint-"));
+    roots.push(root);
+    const runtime = await openLocalEvidenceRuntime({ rootDir: root });
+    const receipt = await runtime.repository.putRecord(
+      "execution-evidence",
+      await fixture("execution/ro-crate-metadata.json"),
+    );
+    await expect(runtime.awaitIndexed(receipt.reference))
+      .resolves.toMatchObject({ status: "indexed" });
+    await runtime.close();
+
+    const database = new Database(
+      join(root, "operations", "runtime.sqlite"),
+    );
+    database.prepare("UPDATE indexer_checkpoints SET cursor = ?")
+      .run("not-a-journal-cursor");
+    database.close();
+
+    await expect(openLocalEvidenceRuntime({ rootDir: root }))
+      .rejects.toMatchObject({ code: "RUNTIME_CORRUPT" });
+  });
+
+  it.each([
+    "DELETE FROM processed_cursors",
+    "DELETE FROM indexer_checkpoints",
+  ])("rejects torn operational state before reporting ready: %s", async (sql) => {
+    const root = await mkdtemp(join(tmpdir(), "jinn-runtime-torn-state-"));
+    roots.push(root);
+    const runtime = await openLocalEvidenceRuntime({ rootDir: root });
+    const receipt = await runtime.repository.putRecord(
+      "execution-evidence",
+      await fixture("execution/ro-crate-metadata.json"),
+    );
+    await expect(runtime.awaitIndexed(receipt.reference))
+      .resolves.toMatchObject({ status: "indexed" });
+    await runtime.close();
+
+    const database = new Database(
+      join(root, "operations", "runtime.sqlite"),
+    );
+    database.exec(sql);
+    database.close();
+
+    await expect(openLocalEvidenceRuntime({ rootDir: root }))
+      .rejects.toMatchObject({ code: "RUNTIME_CORRUPT" });
+  });
+
+  it("rejects active-generation indexing state owned by a foreign source", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jinn-runtime-foreign-source-"));
+    roots.push(root);
+    const runtime = await openLocalEvidenceRuntime({ rootDir: root });
+    const receipt = await runtime.repository.putRecord(
+      "execution-evidence",
+      await fixture("execution/ro-crate-metadata.json"),
+    );
+    await expect(runtime.awaitIndexed(receipt.reference))
+      .resolves.toMatchObject({ status: "indexed" });
+    await runtime.close();
+
+    const database = new Database(
+      join(root, "operations", "runtime.sqlite"),
+    );
+    const foreignSource = "urn:uuid:99999999-9999-4999-8999-999999999999";
+    for (const table of [
+      "indexer_checkpoints",
+      "processed_cursors",
+      "indexing_outcomes",
+    ]) {
+      database.prepare(`UPDATE ${table} SET source_id = ?`).run(foreignSource);
+    }
+    database.close();
+
+    await expect(openLocalEvidenceRuntime({ rootDir: root }))
+      .rejects.toMatchObject({ code: "RUNTIME_CORRUPT" });
+  });
+
+  it("rebuilds an equivalent disposable Catalog after its active database is deleted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jinn-runtime-catalog-rebuild-"));
+    roots.push(root);
+    const bytes = await fixture("execution/ro-crate-metadata.json");
+    const runtime = await openLocalEvidenceRuntime({ rootDir: root });
+    const receipt = await runtime.repository.putRecord(
+      "execution-evidence",
+      bytes,
+    );
+    const indexed = await runtime.awaitIndexed(receipt.reference);
+    expect(indexed.status).toBe("indexed");
+    const projection = await runtime.catalog.getRecord(receipt.reference);
+    await runtime.close();
+
+    const pointer = JSON.parse(
+      await readFile(join(root, "catalog", "current.json"), "utf8"),
+    ) as { databaseFile: string };
+    await unlink(join(root, "catalog", "generations", pointer.databaseFile));
+
+    const rebuilt = await openLocalEvidenceRuntime({ rootDir: root });
+    expect(Array.from(
+      (await rebuilt.repository.getRecord(receipt.reference)) ?? [],
+    )).toEqual(Array.from(bytes));
+    expect(await rebuilt.catalog.getRecord(receipt.reference))
+      .toEqual(projection);
+    expect(await rebuilt.awaitIndexed(receipt.reference))
+      .toMatchObject({ status: "indexed" });
+    await rebuilt.close();
+  });
+
+  it("maps post-open private database failures at every status boundary", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jinn-runtime-private-error-"));
+    roots.push(root);
+    const runtime = await openLocalEvidenceRuntime({ rootDir: root });
+    const database = new Database(
+      join(root, "operations", "runtime.sqlite"),
+    );
+    database.exec("DROP TABLE indexing_outcomes");
+    database.close();
+
+    for (const operation of [
+      () => runtime.getStatus(),
+      () => runtime.listIndexingFailures(),
+    ]) {
+      await expect(operation()).rejects.toMatchObject({
+        name: "LocalEvidenceRuntimeError",
+        code: "RUNTIME_CORRUPT",
+        cause: expect.objectContaining({ name: "SqliteError" }),
+      });
+    }
+    await runtime.close().catch(() => undefined);
+  });
+
+  it("maps post-open journal corruption as terminal private-state corruption", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jinn-runtime-journal-error-"));
+    roots.push(root);
+    const runtime = await openLocalEvidenceRuntime({ rootDir: root });
+    const markerPath = join(root, "announcements", "journal.json");
+    const replacementPath = `${markerPath}.replacement`;
+    await writeFile(replacementPath, "{}\n");
+    await rename(replacementPath, markerPath);
+
+    for (const operation of [() => runtime.sync(), () => runtime.getStatus()]) {
+      await expect(operation()).rejects.toMatchObject({
+        name: "LocalEvidenceRuntimeError",
+        code: "RUNTIME_CORRUPT",
+        cause: expect.objectContaining({
+          name: "EvidenceAnnouncementJournalError",
+          code: "JOURNAL_CORRUPT",
+        }),
+      });
+    }
+    await runtime.close().catch(() => undefined);
   });
 
   it("returns the old reader while a mismatched generation rebuilds and catches concurrent publication", async () => {
@@ -250,35 +405,34 @@ describe("local evidence runtime", () => {
       const pointerBytes = await readFile(pointerPath);
       await unlink(recordMarkerPath(root, receipt.reference));
 
-      const rebuilding = await openLocalEvidenceRuntime({ rootDir: root });
+      const rebuilding = await openLocalEvidenceRuntimeForTesting(
+        { rootDir: root },
+        {
+          async publishCatalogPointer() {
+            throw Object.assign(
+              new Error("Injected replacement pointer publication failure."),
+              { code: "EACCES" },
+            );
+          },
+        },
+      );
       await vi.waitFor(async () => {
         expect((await rebuilding.getStatus()).state).toBe("rebuilding");
       });
-      const generationsDir = join(root, "catalog", "generations");
-      await vi.waitFor(async () => {
-        const databases = (await readdir(generationsDir))
-          .filter((name) => name.endsWith(".sqlite"));
-        expect(databases.length).toBeGreaterThanOrEqual(2);
+      const rawRepository = await createFilesystemEvidenceRepository({
+        rootDir: join(root, "repository"),
       });
-      await chmod(generationsDir, 0o500);
-      try {
-        const rawRepository = await createFilesystemEvidenceRepository({
-          rootDir: join(root, "repository"),
+      await rawRepository.putRecord("execution-evidence", bytes);
+      await vi.waitFor(async () => {
+        expect(await rebuilding.getStatus()).toMatchObject({
+          state: "degraded",
+          activeGenerationId: old.generationId,
         });
-        await rawRepository.putRecord("execution-evidence", bytes);
-        await vi.waitFor(async () => {
-          expect(await rebuilding.getStatus()).toMatchObject({
-            state: "degraded",
-            activeGenerationId: old.generationId,
-          });
-        }, { timeout: 10_000 });
-        expect(await readFile(pointerPath)).toEqual(pointerBytes);
-        expect(await rebuilding.catalog.getRecord(receipt.reference))
-          .not.toBeNull();
-      } finally {
-        await chmod(generationsDir, 0o700);
-        await rebuilding.close();
-      }
+      }, { timeout: 10_000 });
+      expect(await readFile(pointerPath)).toEqual(pointerBytes);
+      expect(await rebuilding.catalog.getRecord(receipt.reference))
+        .not.toBeNull();
+      await rebuilding.close();
     },
     15_000,
   );

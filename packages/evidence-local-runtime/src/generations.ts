@@ -175,6 +175,12 @@ export async function openCurrentCatalogGeneration(
       await pointerHandle.close();
     }
     const databasePath = join(paths.generationsDir, pointer.databaseFile);
+    try {
+      await lstat(databasePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
     const catalog = await openSqliteEvidenceCatalog({ databasePath });
     await enforcePrivateFile(databasePath);
     const integrity = await catalog.integrityCheck();
