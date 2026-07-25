@@ -119,7 +119,9 @@ export function buildMineableRecord(ctx: {
 }
 
 /**
- * Safe read of engine-retained failed patches for §10 field 4 assemblers (#1643).
+ * Safe read of harness-emitted failed diffs for §10 field 4 assemblers (#1643).
+ * Source column is written at RUNNING → POST_SNAPSHOT from
+ * Solution.intermediateFailureDiffs — not from solution overwrite archaeology.
  * Returns [] for null, empty, malformed, or non-array JSON.
  */
 export function intermediateFailureDiffsFromTaskRun(run: {
