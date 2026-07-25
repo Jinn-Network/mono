@@ -149,4 +149,182 @@ describe('authenticatePostedTaskEvidence', () => {
     expect(resolvePublisherSafe).toHaveBeenCalledWith(CHAIN, '2', 35n);
     expect(ipfs).toHaveBeenCalledWith('bafySol', 2_000_000);
   });
+
+  it('rejects mismatched requestId and marks the slot invalid', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [{
+        requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyBadReq',
+        publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 25,
+      }],
+    });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({}),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async () => opaqueEnvelope({
+          role: 'solution',
+          requestId: (`0x${'ff'.repeat(32)}`) as `0x${string}`,
+          safe: OPERATOR,
+          hash: SOLUTION_HASH,
+        }),
+      },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('invalid');
+    if (report.attempts[0]!.execution.status !== 'invalid') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('request-id-mismatch');
+  });
+
+  it('rejects mismatched participant Safe and marks the slot invalid', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [{
+        requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyBadSafe',
+        publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 25,
+      }],
+    });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({}),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async () => opaqueEnvelope({
+          role: 'solution',
+          requestId: SOLVE_REQ,
+          safe: (`0x${'12'.repeat(20)}`) as `0x${string}`,
+          hash: SOLUTION_HASH,
+        }),
+      },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('invalid');
+    if (report.attempts[0]!.execution.status !== 'invalid') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('participant-safe-mismatch');
+  });
+
+  it('rejects mismatched publisher Safe and marks the slot invalid', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [{
+        requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyBadPub',
+        publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 25,
+      }],
+    });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({}),
+        resolvePublisherSafe: async () => (`0x${'99'.repeat(20)}`) as `0x${string}`,
+        authenticateEnvelope: async () => opaqueEnvelope({
+          role: 'solution',
+          requestId: SOLVE_REQ,
+          safe: OPERATOR,
+          hash: SOLUTION_HASH,
+        }),
+      },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('invalid');
+    if (report.attempts[0]!.execution.status !== 'invalid') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('publisher-safe-mismatch');
+  });
+
+  it('rejects mismatched manifestHash and marks the slot invalid', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [{
+        requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyBadHash',
+        publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 25,
+      }],
+    });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({}),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async () => opaqueEnvelope({
+          role: 'solution',
+          requestId: SOLVE_REQ,
+          safe: OPERATOR,
+          hash: (`0x${'aa'.repeat(32)}`) as `0x${string}`,
+        }),
+      },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('invalid');
+    if (report.attempts[0]!.execution.status !== 'invalid') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('manifest-hash-mismatch');
+  });
+
+  it('rejects mismatched taskCidDigest and marks the slot invalid', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [{
+        requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyBadCid',
+        publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 25,
+      }],
+    });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({}),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async () => opaqueEnvelope({
+          role: 'solution',
+          requestId: SOLVE_REQ,
+          safe: OPERATOR,
+          hash: SOLUTION_HASH,
+          taskCid: `f01551220${'bb'.repeat(32)}`,
+        }),
+      },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('invalid');
+    if (report.attempts[0]!.execution.status !== 'invalid') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('task-cid-digest-mismatch');
+  });
+
+  it('rejects mismatched chainId and marks the slot invalid', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [{
+        requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyBadChain',
+        publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 25,
+      }],
+    });
+    // Mutate after assemble so the candidate still attaches by requestId.
+    evidence.authoritative.attempts[0]!.attemptEnvelopeCandidates[0]!.chainId = 999;
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({}),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async () => opaqueEnvelope({
+          role: 'solution',
+          requestId: SOLVE_REQ,
+          safe: OPERATOR,
+          hash: SOLUTION_HASH,
+        }),
+      },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('invalid');
+    if (report.attempts[0]!.execution.status !== 'invalid') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('chain-id-mismatch');
+  });
+
+  it('rejects mismatched verdict participant Safe and marks the slot invalid', async () => {
+    const evidence = baseSpine({
+      verdictCandidates: [{
+        requestId: EVAL_REQ, chainId: CHAIN, manifestCid: 'bafyBadEvalSafe',
+        publisherAgentId: '2', manifestHash: VERDICT_HASH, enrichedAtBlock: 35,
+      }],
+    });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({}),
+        resolvePublisherSafe: async () => EVALUATOR,
+        authenticateEnvelope: async () => opaqueEnvelope({
+          role: 'verdict',
+          requestId: EVAL_REQ,
+          safe: OPERATOR, // wrong — should be EVALUATOR
+          hash: VERDICT_HASH,
+        }),
+      },
+    });
+    expect(report.attempts[0]!.verdicts[0]!.verdict.status).toBe('invalid');
+    if (report.attempts[0]!.verdicts[0]!.verdict.status !== 'invalid') throw new Error('unreachable');
+    expect(report.attempts[0]!.verdicts[0]!.verdict.rejected[0]!.reason).toBe('participant-safe-mismatch');
+  });
 });
