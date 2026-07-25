@@ -1089,6 +1089,25 @@ export class TaskEngine {
   }
 
   /**
+   * Harness name to pass into `HarnessRegistry.findFor` for a resolved SolverNet.
+   *
+   * Restoration keeps the exact pin (issue #2039 AC2). Evaluation must not:
+   * `registerJoinedNet` stores the **solver** harness on `LoadedSolverNet.harness`
+   * whenever roles include `solver` (the common dual-role join). `findFor`
+   * treats `harnessName` as fail-closed with no fallthrough, and production
+   * solver harnesses return `supports(... role: 'evaluation') === false`, so
+   * pinning that name breaks evaluation claim/run. Omitting the pin restores
+   * fallthrough to the contract evaluator harness (AC4).
+   */
+  private harnessNameForFind(
+    solverNet: LoadedSolverNetView | undefined,
+    role: 'restoration' | 'evaluation',
+  ): string | undefined {
+    if (role === 'evaluation') return undefined;
+    return solverNet?.harness;
+  }
+
+  /**
    * Whether this task must resolve its manifest CID through the live SolverNet
    * registry before any Harness dispatch or profile-sensitive state change.
    *
@@ -1392,7 +1411,11 @@ export class TaskEngine {
     }
     if (!this.implRegistry || !routingKey) return null;
 
-    const impl = this.implRegistry.findFor({ solverType: routingKey, role, harnessName: solverNet?.harness });
+    const impl = this.implRegistry.findFor({
+      solverType: routingKey,
+      role,
+      harnessName: this.harnessNameForFind(solverNet, role),
+    });
     if (!impl) {
       const setHarnessHint = solverNet
         ? `jinn solver-nets set-harness ${solverNet.name} <harness>`
@@ -1455,11 +1478,12 @@ export class TaskEngine {
         `no exact enabled SolverNet for manifest CID '${run.task.solverNetManifestCid}' during pre-snapshot`,
       );
     }
+    const preSnapshotRole = run.taskRole ?? 'restoration';
     const resolvedImpl = run.solverType
       ? this.implRegistry?.findFor({
           solverType: run.solverType,
-          role: run.taskRole ?? 'restoration',
-          harnessName: preSnapshotSolverNet?.harness,
+          role: preSnapshotRole,
+          harnessName: this.harnessNameForFind(preSnapshotSolverNet, preSnapshotRole),
         }) ?? null
       : null;
     const implStateName = harnessStateDirName(run.implName ?? resolvedImpl?.name ?? run.solverType ?? 'default');
@@ -1523,7 +1547,11 @@ export class TaskEngine {
         `no exact enabled SolverNet for manifest CID '${task.task.solverNetManifestCid}' during execution`,
       );
     }
-    const impl = this.implRegistry?.findFor({ solverType, role, harnessName: solverNet?.harness });
+    const impl = this.implRegistry?.findFor({
+      solverType,
+      role,
+      harnessName: this.harnessNameForFind(solverNet, role),
+    });
     if (!impl) {
       throw new NotImplementedError('runImpl');
     }

@@ -504,5 +504,72 @@ describe('execution request (issue #2039)', () => {
 
       expect(accept).toEqual({ ok: true });
     });
+
+    it('dual-role join still dispatches evaluation via the evaluator harness (not the solver harness pin)', async () => {
+      // Reproduction of the review finding on PR #2081: registerJoinedNet stores
+      // the solver harness on LoadedSolverNet.harness when roles include
+      // 'solver'. Passing that name as harnessName for role=evaluation fails
+      // closed because production solver harnesses return
+      // supports(evaluation) === false. Stubs that ignore role mask this.
+      const solverCanAttempt = vi.fn(async () => ({ ok: true as const }));
+      const evalCanAttempt = vi.fn(async () => ({ ok: true as const }));
+      const implRegistry = new HarnessRegistry();
+      implRegistry.register({
+        name: 'claude-code',
+        version: '2.0.0',
+        supports: ({ solverType, role }) =>
+          solverType === 'prediction.v1' && role !== 'evaluation',
+        canAttempt: solverCanAttempt,
+        run: async (): Promise<Solution> => ({ venueRef: { name: 'stub' }, gating: {} }),
+      });
+      implRegistry.register({
+        name: 'prediction-v1-evaluator',
+        version: '1.0.0',
+        supports: ({ solverType, role }) =>
+          solverType === 'prediction.v1' && role === 'evaluation',
+        canAttempt: evalCanAttempt,
+        run: async (): Promise<Solution> => ({ venueRef: { name: 'stub' }, gating: {} }),
+      });
+
+      const solverNetRegistry = new SolverNetRegistry();
+      await registerJoinedNet(solverNetRegistry, CID_A, {
+        manifestCid: CID_A,
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver', 'evaluator'],
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        plugins: [],
+      });
+      expect(solverNetRegistry.forManifestCid(CID_A)?.harness).toBe('claude-code');
+
+      const engine = buildEngine({
+        implRegistry,
+        solverNetRegistry,
+        manifestResolver: makeStubManifestResolver({
+          [CID_A]: buildPredictionV1ManifestStub(),
+        }),
+        joinedSolverNets: joinedSolverNetsViewFromConfig({
+          [CID_A]: { manifestCid: CID_A, roles: ['solver', 'evaluator'] },
+        }),
+      });
+
+      const restoration = await engine.canAcceptTask({
+        taskRole: 'restoration',
+        task: makePredictionV1Task({ solverNetManifestCid: CID_A }),
+      });
+      expect(restoration).toEqual({ ok: true });
+      expect(solverCanAttempt).toHaveBeenCalledTimes(1);
+      expect(evalCanAttempt).not.toHaveBeenCalled();
+
+      const evaluation = await engine.canAcceptTask({
+        taskRole: 'evaluation',
+        task: {
+          ...makePredictionV1Task({ solverNetManifestCid: CID_A }),
+          role: 'evaluation',
+        },
+      });
+      expect(evaluation).toEqual({ ok: true });
+      expect(evalCanAttempt).toHaveBeenCalledTimes(1);
+    });
   });
 });
