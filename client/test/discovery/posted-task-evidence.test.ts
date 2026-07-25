@@ -396,4 +396,69 @@ describe('authenticatePostedTaskEvidence', () => {
     if (report.attempts[0]!.execution.status !== 'invalid') throw new Error('unreachable');
     expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('post-close-boundary-time');
   });
+
+  it('returns missing when the spine row has zero candidates', async () => {
+    const evidence = baseSpine();
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({}),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async () => { throw new Error('should not be called'); },
+      },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('missing');
+    expect(report.attempts[0]!.verdicts[0]!.verdict.status).toBe('missing');
+  });
+
+  it('returns ambiguous when two distinct CIDs both authenticate', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [
+        { requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyA',
+          publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 25 },
+        { requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyB',
+          publisherAgentId: '1', manifestHash: (`0x${'73'.repeat(32)}`) as `0x${string}`,
+          enrichedAtBlock: 26 },
+      ],
+    });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async (cid) => ({ cid }),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async (value) => {
+          const cid = (value as { cid: string }).cid;
+          return opaqueEnvelope({
+            role: 'solution', requestId: SOLVE_REQ, safe: OPERATOR,
+            hash: cid === 'bafyA' ? SOLUTION_HASH : (`0x${'73'.repeat(32)}`) as `0x${string}`,
+          });
+        },
+      },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('ambiguous');
+    if (report.attempts[0]!.execution.status !== 'ambiguous') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.valid).toHaveLength(2);
+    expect(report.attempts[0]!.execution).not.toHaveProperty('selected');
+  });
+
+  it('returns ambiguous when the same CID is listed twice and both pass', async () => {
+    const cand = {
+      requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyDup',
+      publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 25,
+    };
+    const evidence = baseSpine({ attemptCandidates: [cand, { ...cand }] });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({}),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async () => opaqueEnvelope({
+          role: 'solution', requestId: SOLVE_REQ, safe: OPERATOR, hash: SOLUTION_HASH,
+        }),
+      },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('ambiguous');
+    if (report.attempts[0]!.execution.status !== 'ambiguous') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.valid).toHaveLength(2);
+  });
 });
