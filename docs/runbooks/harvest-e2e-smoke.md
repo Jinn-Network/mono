@@ -33,6 +33,77 @@ harness or pull latest upstream if empirical runs return `empirical-dead`.
 Pass when the script prints `[harvest-e2e-live] PASS` and writes
 `~/.jinn-client/swe-rebench-v2/harvest-e2e-live-result.json`.
 
+## Session-echo borrowed-image live verify
+
+Opt-in real-Docker check for `mineSessionEchoes` borrowing eval infra
+(`image_name` / `install_config` / `test_patch`) from the first scorable
+same-repo validated-pool instance (`findSourceInstanceForRepo`). Unit tests
+mock `EvalRunner`; this script does not.
+
+```bash
+cd client && yarn task-creator:session-echo-live
+```
+
+Default mode `borrow-mismatch` seeds a session whose `acceptedDiff` is the gold
+patch of a *different* same-repo scorable instance than the borrowed source.
+Expected classification under the review hypothesis: `rejected:empirical-dead`.
+
+Held-out / capability-slate denylist applies (`assertRepoAllowedForMint`).
+`sympy/sympy` is held-out on current slates — mint refuses before Docker. Default
+repo is `conan-io/conan` (mintable, ≥2 scorable instances on typical pools).
+Override if needed:
+
+```bash
+JINN_SESSION_ECHO_LIVE_REPO=<owner/repo> yarn task-creator:session-echo-live
+```
+
+Pick any validated-pool repo with ≥2 scorable instances that is **not** on the
+mint denylist.
+
+Optional control:
+
+```bash
+JINN_SESSION_ECHO_LIVE_MODE=borrow-aligned yarn task-creator:session-echo-live
+```
+
+Keep the evaluator's default 20 GB free-disk floor. If the host is below it,
+reclaim unused state before running; do not lower the floor merely to make this
+verification fit. The floor exists because a single eval image has peaked at
+about 12.6 GB of transient use.
+
+### Prerequisites (same family as harvest live)
+
+- Docker daemon (`docker info`)
+- The Docker preflight is bounded to 20 seconds; an unresponsive daemon fails
+  closed instead of leaving the verifier hung
+- `jinn harnesses enable swe-rebench-v2-evaluator`. The verifier requires the
+  current v2 enable contract: managed checkout path, pinned upstream metadata,
+  current patch-bundle digest, and trusted-parser binding. A legacy or stale
+  marker fails closed with the re-enable instruction before constructing the
+  Python evaluator.
+- Validated pool with ≥2 scorable instances for the target repo (default
+  `conan-io/conan`) so mismatch can pick a donor gold patch
+- Network for HF row fetch + eval image pull if missing
+- arm64 hosts emulate `linux/amd64` images — expect multi-minute runs
+- Disk: at least the default 20 GB free floor
+
+### Pass / classify criteria
+
+After preflight succeeds, the script writes
+`~/.jinn-client/swe-rebench-v2/session-echo-live-result.json` and prints
+`classification`. A Docker/precondition failure exits non-zero without
+overwriting a prior result artifact; record that attempt as `infra-blocked` in
+the findings:
+
+| Classification | Meaning |
+|---|---|
+| `rejected:empirical-dead` | Hypothesis confirmed (default mismatch mode) |
+| `admitted` under mismatch | **Red flag** — worse than hypothesized |
+| `rejected:other` | Product/runner signal other than dead-mint — record `rejected[].reason` |
+| `infra-blocked` | Docker/image/timeout/prereq — not product-red; still record findings |
+
+Findings note: `docs/research/2026-07-22-session-echo-borrowed-image-findings.md`.
+
 ## Prerequisites
 
 - `jinn harnesses enable swe-rebench-v2-evaluator` (upstream repo + Docker)
