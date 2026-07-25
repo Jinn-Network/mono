@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 export * from "./errors.js";
+export * from "./index-announcement.js";
 export * from "./project-evaluation.js";
 export * from "./project-execution.js";
 export {
