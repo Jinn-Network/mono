@@ -15,6 +15,10 @@ export type ExecutionGraphEntity =
 const INCONSISTENT_GRAPH_MESSAGE =
   "Validated graph is missing a required primary relationship.";
 
+export function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function inconsistentGraph(): never {
   throw new EvidenceIndexerError(
     "VALIDATED_RECORD_INCONSISTENT",
@@ -124,9 +128,9 @@ export function projectDeclaredGraph(
 
   declaredRelationships.sort(
     (left, right) =>
-      left.sourceEntityId.localeCompare(right.sourceEntityId) ||
-      left.predicate.localeCompare(right.predicate) ||
-      left.targetEntityId.localeCompare(right.targetEntityId),
+      compareCodeUnits(left.sourceEntityId, right.sourceEntityId) ||
+      compareCodeUnits(left.predicate, right.predicate) ||
+      compareCodeUnits(left.targetEntityId, right.targetEntityId),
   );
 
   const declaredEntities = [...entityIds]
@@ -134,13 +138,11 @@ export function projectDeclaredGraph(
     .map(
       (entity): DeclaredEntityOccurrence => ({
         entityId: entity["@id"],
-        types: [...types(entity)].sort((left, right) =>
-          left.localeCompare(right),
-        ),
+        types: [...types(entity)].sort(compareCodeUnits),
         ...(typeof entity.name === "string" ? { name: entity.name } : {}),
       }),
     )
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
+    .sort((left, right) => compareCodeUnits(left.entityId, right.entityId));
 
   return {
     declaredEntities,

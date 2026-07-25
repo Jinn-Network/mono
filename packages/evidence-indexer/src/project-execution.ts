@@ -11,6 +11,7 @@ import type {
 import { EvidenceIndexerError } from "./errors.js";
 import {
   artifactProjection,
+  compareCodeUnits,
   createEntityMap,
   hasType,
   projectDeclaredGraph,
@@ -62,6 +63,44 @@ function executionOutcome(
   }
 }
 
+function requiredTimestamp(
+  entity: ExecutionEvidenceDocument["@graph"][number],
+  property: string,
+): string {
+  const value = requiredString(entity, property);
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/u
+      .exec(value);
+  if (match === null) inconsistentGraph();
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const offsetHour = Number(match[7] ?? 0);
+  const offsetMinute = Number(match[8] ?? 0);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const monthDays = [
+    31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+  ];
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > monthDays[month - 1]! ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    offsetHour > 23 ||
+    offsetMinute > 59 ||
+    !Number.isFinite(Date.parse(value))
+  ) {
+    inconsistentGraph();
+  }
+  return value;
+}
+
 export function projectExecutionEvidence(
   reference: EvidenceRecordReference & {
     readonly family: "execution-evidence";
@@ -105,7 +144,7 @@ export function projectExecutionEvidence(
   const results = references(execution, "result")
     .map((id) => requiredEntity(byId, id, "Result"))
     .map(artifactProjection)
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
+    .sort((left, right) => compareCodeUnits(left.entityId, right.entityId));
 
   const nativeTraceId = requiredSingleReference(
     execution,
@@ -132,8 +171,8 @@ export function projectExecutionEvidence(
     results,
     nativeTrace: artifactProjection(nativeTrace),
     outcome: executionOutcome(execution),
-    startedAt: requiredString(execution, "startTime"),
-    endedAt: requiredString(execution, "endTime"),
-    publishedAt: requiredString(root, "datePublished"),
+    startedAt: requiredTimestamp(execution, "startTime"),
+    endedAt: requiredTimestamp(execution, "endTime"),
+    publishedAt: requiredTimestamp(root, "datePublished"),
   };
 }

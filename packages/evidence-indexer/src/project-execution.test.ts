@@ -14,6 +14,7 @@ import type {
 import { describe, expect, it } from "vitest";
 
 import { projectExecutionEvidence } from "./project-execution.js";
+import { compareCodeUnits } from "./graph.js";
 import { EVIDENCE_PROJECTOR_VERSION } from "./projection-terms.js";
 
 const fixtureRoot = new URL(
@@ -271,12 +272,12 @@ const expectedPrivateEntities = [
   },
   {
     entityId: "urn:uuid:33333333-3333-4333-8333-333333333333",
-    types: ["prov:Agent", "SoftwareApplication"],
+    types: ["SoftwareApplication", "prov:Agent"],
     name: "Synthetic Autopilot operator agent",
   },
   {
     entityId: "urn:uuid:44444444-4444-4444-8444-444444444444",
-    types: ["prov:Agent", "SoftwareApplication"],
+    types: ["SoftwareApplication", "prov:Agent"],
     name: "Synthetic direct-capture producer",
   },
   {
@@ -459,15 +460,15 @@ describe("projectExecutionEvidence", () => {
     });
     expect(projection.declaredEntities).toEqual(
       [...expectedPrivateEntities].sort((left, right) =>
-        left.entityId.localeCompare(right.entityId),
+        compareCodeUnits(left.entityId, right.entityId),
       ),
     );
     expect(relationshipTuples(projection.declaredRelationships)).toEqual(
       [...expectedPrivateRelationships].sort(
         (left, right) =>
-          left[0].localeCompare(right[0]) ||
-          left[1].localeCompare(right[1]) ||
-          left[2].localeCompare(right[2]),
+          compareCodeUnits(left[0], right[0]) ||
+          compareCodeUnits(left[1], right[1]) ||
+          compareCodeUnits(left[2], right[2]),
       ),
     );
   });
@@ -492,6 +493,29 @@ describe("projectExecutionEvidence", () => {
         document,
       ),
     );
+  });
+
+  it("rejects Protocol-conforming timestamps outside the Catalog contract", async () => {
+    const { bytes, document } = await loadValidated(
+      "execution/ro-crate-metadata.json",
+    );
+    const malformed = mutableDocument(document);
+    const root = malformed["@graph"].find(({ "@id": id }) => id === "./");
+    if (root === undefined) throw new Error("Fixture root is missing.");
+    root.datePublished = "not-a-timestamp";
+    const report = validateExecutionEvidence(
+      new TextEncoder().encode(JSON.stringify(malformed)),
+    );
+    expect(report.conforms).toBe(true);
+    expect(() =>
+      projectExecutionEvidence(
+        reference(PRIVATE_DIGEST),
+        bytes.byteLength,
+        report.value!,
+      ),
+    ).toThrowError(expect.objectContaining({
+      code: "VALIDATED_RECORD_INCONSISTENT",
+    }));
   });
 
   it("does not share mutable values with the validated document", async () => {
@@ -612,7 +636,7 @@ describe("projectExecutionEvidence", () => {
     expect(publicProjection.reference).not.toEqual(privateProjection.reference);
     expect(publicProjection.declaredEntities.map(({ entityId }) => entityId)).toEqual(
       [...expectedPrivateEntities.map(({ entityId }) => entityId), ...publicOnlyEntityIds]
-        .sort((left, right) => left.localeCompare(right)),
+        .sort(compareCodeUnits),
     );
     expect(
       relationshipTuples(publicProjection.declaredRelationships),
@@ -629,9 +653,9 @@ describe("projectExecutionEvidence", () => {
         ...publicOnlyRelationships,
       ].sort(
         (left, right) =>
-          left[0].localeCompare(right[0]) ||
-          left[1].localeCompare(right[1]) ||
-          left[2].localeCompare(right[2]),
+          compareCodeUnits(left[0], right[0]) ||
+          compareCodeUnits(left[1], right[1]) ||
+          compareCodeUnits(left[2], right[2]),
       ),
     );
     expect(
@@ -683,7 +707,7 @@ describe("projectExecutionEvidence", () => {
       },
       {
         entityId: "urn:uuid:88888888-8888-4888-8888-888888888888",
-        types: ["prov:Agent", "SoftwareApplication"],
+        types: ["SoftwareApplication", "prov:Agent"],
         name: "Synthetic structure-aware scrubber",
       },
     ]);
