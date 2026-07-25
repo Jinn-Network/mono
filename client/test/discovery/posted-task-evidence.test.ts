@@ -327,4 +327,26 @@ describe('authenticatePostedTaskEvidence', () => {
     if (report.attempts[0]!.verdicts[0]!.verdict.status !== 'invalid') throw new Error('unreachable');
     expect(report.attempts[0]!.verdicts[0]!.verdict.rejected[0]!.reason).toBe('participant-safe-mismatch');
   });
+
+  it('marks slot invalid when authenticateEnvelope throws (forged/bad hash)', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [{
+        requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyForge',
+        publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 25,
+      }],
+    });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({ tampered: true }),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async () => {
+          throw new Error('bafyForge failed signature authentication: hash mismatch');
+        },
+      },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('invalid');
+    if (report.attempts[0]!.execution.status !== 'invalid') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('crypto-auth-failed');
+  });
 });
