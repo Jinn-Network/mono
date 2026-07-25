@@ -352,13 +352,17 @@ function parseJson<T>(raw: string | null): T | null {
  */
 export function normalizeIntermediateFailureDiffs(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
-  const out: string[] = [];
+  const seen = new Set<string>();
   for (const entry of raw) {
-    if (typeof entry !== 'string' || entry.length === 0) continue;
-    if (out.includes(entry)) continue;
-    out.push(entry);
+    if (typeof entry === 'string' && entry.length > 0) seen.add(entry);
   }
-  return out;
+  return [...seen];
+}
+
+/** JSON column value for POST_SNAPSHOT — null when no evidence after normalize. */
+export function serializeIntermediateFailureDiffsJson(raw: unknown): string | null {
+  const diffs = normalizeIntermediateFailureDiffs(raw);
+  return diffs.length > 0 ? JSON.stringify(diffs) : null;
 }
 
 function rowToTaskRun(row: RawRow): PersistedTaskRun {

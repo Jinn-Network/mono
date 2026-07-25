@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { keccak256, toBytes } from 'viem';
 import type { ZodIssue } from 'zod/v3';
-import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput, normalizeIntermediateFailureDiffs } from './persistence.js';
+import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput, serializeIntermediateFailureDiffsJson } from './persistence.js';
 import { TaskRunState, MissingEvidenceHashError } from './state.js';
 import type { Store } from '../../store/store.js';
 import {
@@ -1556,9 +1556,6 @@ export class TaskEngine {
           // No codeDigest for skipped runs — leave map empty.
           // Fall through to persistence below via goto-equivalent pattern.
           const nextSolutionOutputsJson = JSON.stringify(skippedOutput);
-          const intermediateFailureDiffs = normalizeIntermediateFailureDiffs(
-            skippedOutput.intermediateFailureDiffs,
-          );
           this.persistence.transition(task.requestId, TaskRunState.POST_SNAPSHOT, {
             postSnapshotCapturedAt: Date.now(),
             postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0, payload: null },
@@ -1566,10 +1563,9 @@ export class TaskEngine {
             gatingClaim: skippedOutput.gating,
             informationalClaim: skippedOutput.informational ?? null,
             solutionOutputsJson: nextSolutionOutputsJson,
-            intermediateFailureDiffsJson:
-              intermediateFailureDiffs.length > 0
-                ? JSON.stringify(intermediateFailureDiffs)
-                : null,
+            intermediateFailureDiffsJson: serializeIntermediateFailureDiffsJson(
+              skippedOutput.intermediateFailureDiffs,
+            ),
             implName: impl.name,
             runtimePluginsJson: JSON.stringify(attributedPlugins),
             consumedRefsJson,
@@ -1619,9 +1615,6 @@ export class TaskEngine {
       // Persist harness-emitted intermediateFailureDiffs in the same transition
       // (#1643 / spec §10 field 4).
       const nextSolutionOutputsJson = JSON.stringify(output);
-      const intermediateFailureDiffs = normalizeIntermediateFailureDiffs(
-        output.intermediateFailureDiffs,
-      );
       this.persistence.transition(task.requestId, TaskRunState.POST_SNAPSHOT, {
         postSnapshotCapturedAt: Date.now(),
         postSnapshotPayload: output.postSnapshot ?? { capturedAt: Date.now(), hlTime: 0, payload: null },
@@ -1629,10 +1622,9 @@ export class TaskEngine {
         gatingClaim: output.gating,
         informationalClaim: output.informational ?? null,
         solutionOutputsJson: nextSolutionOutputsJson,
-        intermediateFailureDiffsJson:
-          intermediateFailureDiffs.length > 0
-            ? JSON.stringify(intermediateFailureDiffs)
-            : null,
+        intermediateFailureDiffsJson: serializeIntermediateFailureDiffsJson(
+          output.intermediateFailureDiffs,
+        ),
         implName: impl.name,
         runtimePluginsJson: JSON.stringify(attributedPlugins),
         consumedRefsJson,
