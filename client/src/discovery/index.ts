@@ -37,3 +37,18 @@ export type { HttpDiscoveryAPIOptions } from './http.js';
 
 export { createDiscoveryAPI } from './factory.js';
 export type { DiscoveryFactoryDeps, DiscoveryConfig } from './factory.js';
+
+export {
+  authenticatePostedTaskEvidence,
+} from './posted-task-evidence.js';
+export type {
+  IpfsJsonPort,
+  PublisherSafeResolver,
+  PostedTaskEvidencePorts,
+  CloseBoundary,
+  PostedTaskEvidenceOptions,
+  CarrierSlotResult,
+  RejectedCandidate,
+  AuthenticatedOpaqueCarrier,
+  PostedTaskEvidenceReport,
+} from './posted-task-evidence.js';

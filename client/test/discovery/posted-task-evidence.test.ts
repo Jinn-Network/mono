@@ -145,6 +145,11 @@ describe('authenticatePostedTaskEvidence', () => {
     expect(verdict.verdict.selected.binding.role).toBe('verdict');
     expect(verdict.verdict.selected.binding.onchainRole).toBe('evaluator');
 
+    expect(attempt.execution.selected).not.toHaveProperty('run');
+    expect(attempt.execution.selected).not.toHaveProperty('cell');
+    expect(attempt.execution.selected).not.toHaveProperty('matrix');
+    expect(attempt.execution.selected).not.toHaveProperty('integrity');
+
     expect(resolvePublisherSafe).toHaveBeenCalledWith(CHAIN, '1', 25n);
     expect(resolvePublisherSafe).toHaveBeenCalledWith(CHAIN, '2', 35n);
     expect(ipfs).toHaveBeenCalledWith('bafySol', 2_000_000);
@@ -504,5 +509,26 @@ describe('authenticatePostedTaskEvidence', () => {
     expect(report.attempts[0]!.execution.status).toBe('valid');
     if (report.attempts[0]!.execution.status !== 'valid') throw new Error('unreachable');
     expect(report.attempts[0]!.execution.selected.binding.role).toBe('solution');
+  });
+
+  it('re-exports authenticatePostedTaskEvidence from discovery barrel', async () => {
+    const mod = await import('../../src/discovery/index.js');
+    expect(typeof mod.authenticatePostedTaskEvidence).toBe('function');
+  });
+
+  it('posted-task-evidence module source stays free of domain/bench identifiers', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const srcPath = fileURLToPath(
+      new URL('../../src/discovery/posted-task-evidence.ts', import.meta.url),
+    );
+    const src = readFileSync(srcPath, 'utf8');
+    for (const banned of [
+      'swe-rebench', 'polarity', 'trajectory', 'matrix', 'cell', 'bench',
+      'passed_match', 'integrity',
+    ]) {
+      expect(src.includes(banned), `banned token ${banned}`).toBe(false);
+    }
+    expect(/\bpatch\b/.test(src)).toBe(false);
   });
 });
