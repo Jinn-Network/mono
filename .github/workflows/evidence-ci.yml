@@ -2,12 +2,6 @@ name: Evidence CI
 
 on:
   pull_request:
-    paths:
-      - "packages/evidence/**"
-      - ".github/scripts/evidence-*.test.mjs"
-      - ".github/workflows/evidence-ci.yml"
-      - "docs/superpowers/specs/2026-07-23-jinn-execution-evidence-protocol-design.md"
-      - "docs/superpowers/specs/2026-07-24-jinn-attestation-issuer-design.md"
   push:
     branches: [next]
     paths:
