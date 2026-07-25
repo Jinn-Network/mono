@@ -349,4 +349,51 @@ describe('authenticatePostedTaskEvidence', () => {
     if (report.attempts[0]!.execution.status !== 'invalid') throw new Error('unreachable');
     expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('crypto-auth-failed');
   });
+
+  it('rejects candidates enriched after closeBoundary.blockNumber', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [{
+        requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyLate',
+        publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 100,
+      }],
+    });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({}),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async () => opaqueEnvelope({
+          role: 'solution', requestId: SOLVE_REQ, safe: OPERATOR, hash: SOLUTION_HASH,
+        }),
+      },
+      options: { closeBoundary: { blockNumber: 50 } },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('invalid');
+    if (report.attempts[0]!.execution.status !== 'invalid') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('post-close-boundary-block');
+  });
+
+  it('rejects candidates with generatedAt after closeBoundary.timestampSeconds', async () => {
+    const evidence = baseSpine({
+      attemptCandidates: [{
+        requestId: SOLVE_REQ, chainId: CHAIN, manifestCid: 'bafyLateTs',
+        publisherAgentId: '1', manifestHash: SOLUTION_HASH, enrichedAtBlock: 25,
+      }],
+    });
+    const report = await authenticatePostedTaskEvidence({
+      evidence,
+      ports: {
+        ipfs: async () => ({}),
+        resolvePublisherSafe: async () => OPERATOR,
+        authenticateEnvelope: async () => opaqueEnvelope({
+          role: 'solution', requestId: SOLVE_REQ, safe: OPERATOR, hash: SOLUTION_HASH,
+          generatedAt: 2_000_000_000,
+        }),
+      },
+      options: { closeBoundary: { timestampSeconds: 1_900_000_000 } },
+    });
+    expect(report.attempts[0]!.execution.status).toBe('invalid');
+    if (report.attempts[0]!.execution.status !== 'invalid') throw new Error('unreachable');
+    expect(report.attempts[0]!.execution.rejected[0]!.reason).toBe('post-close-boundary-time');
+  });
 });
