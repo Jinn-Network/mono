@@ -3,7 +3,13 @@ name: SDK npm Publish
 on:
   push:
     branches: [next]
-    paths: ['client/**', 'packages/core/**', 'packages/plugin/**', 'packages/sdk/**']
+    paths:
+      - 'client/**'
+      - 'packages/core/**'
+      - 'packages/plugin/**'
+      - 'packages/sdk/**'
+      - '.github/workflows/npm-publish.yml'
+      - '.github/workflows/sdk-npm-publish.yml'
   release:
     types: [published]
 
