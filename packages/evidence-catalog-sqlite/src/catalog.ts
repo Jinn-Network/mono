@@ -36,15 +36,22 @@ import type {
   SqliteCatalogIntegrityReport,
   SqliteEvidenceCatalog,
 } from "./types.js";
+import { SqliteCatalogWriter } from "./writer.js";
 
 class SqliteEvidenceCatalogHandle implements SqliteEvidenceCatalog {
   #closed = false;
+  readonly #writer: SqliteCatalogWriter;
 
   constructor(
     readonly databasePath: string,
     readonly generation: SqliteEvidenceCatalog["generation"],
     private readonly database: Database.Database,
-  ) {}
+  ) {
+    this.#writer = new SqliteCatalogWriter(
+      database,
+      (options) => this.#active(options),
+    );
+  }
 
   #active(options?: CatalogOperationOptions): void {
     if (this.#closed) throw closedCatalogError();
@@ -60,25 +67,25 @@ class SqliteEvidenceCatalogHandle implements SqliteEvidenceCatalog {
   }
 
   async putRecordProjection(
-    _projection: CatalogRecordProjection,
+    projection: CatalogRecordProjection,
     options?: CatalogOperationOptions,
   ): Promise<CatalogWriteReceipt> {
-    return this.#notImplemented(options);
+    return this.#writer.putRecordProjection(projection, options);
   }
 
   async observeRecordLocation(
-    _reference: EvidenceRecordReference,
-    _observation: RecordLocationObservation,
+    reference: EvidenceRecordReference,
+    observation: RecordLocationObservation,
     options?: CatalogOperationOptions,
   ): Promise<CatalogLocationReceipt> {
-    return this.#notImplemented(options);
+    return this.#writer.observeRecordLocation(reference, observation, options);
   }
 
   async withdrawRecordLocationObservation(
-    _withdrawal: RecordLocationWithdrawal,
+    withdrawal: RecordLocationWithdrawal,
     options?: CatalogOperationOptions,
   ): Promise<CatalogLocationReceipt> {
-    return this.#notImplemented(options);
+    return this.#writer.withdrawRecordLocationObservation(withdrawal, options);
   }
 
   async getRecord(
