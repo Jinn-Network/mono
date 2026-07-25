@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, test } from "vitest";
 
+import * as catalog from "./index.js";
 import {
   CATALOG_SCHEMA_VERSION,
   EVIDENCE_CATALOG_ERROR_CODES,
@@ -29,5 +30,12 @@ describe("Evidence Catalog root contracts", () => {
       "result-evaluation",
       "execution-verification",
     ]);
+  });
+
+  test("keeps storage keys and serializers package-private", () => {
+    expect("recordKey" in catalog).toBe(false);
+    expect("observationKey" in catalog).toBe(false);
+    expect("deterministicJson" in catalog).toBe(false);
+    expect("projectionKey" in catalog).toBe(false);
   });
 });

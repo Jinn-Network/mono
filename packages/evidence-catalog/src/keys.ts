@@ -6,13 +6,17 @@ import type {
 } from "./types.js";
 
 export function recordKey(reference: EvidenceRecordReference): string {
-  return `${reference.family}\0${reference.digest}`;
+  return deterministicJson([reference.family, reference.digest]);
 }
 
 export function observationKey(
   observation: Pick<RecordLocationObservation, "sourceId" | "announcementId">,
 ): string {
-  return `${observation.sourceId}\0${observation.announcementId}`;
+  return deterministicJson([observation.sourceId, observation.announcementId]);
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function normalized(value: unknown): unknown {
@@ -22,7 +26,7 @@ function normalized(value: unknown): unknown {
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
+        .sort(([left], [right]) => compareCodeUnits(left, right))
         .map(([key, child]) => [key, normalized(child)]),
     );
   }
