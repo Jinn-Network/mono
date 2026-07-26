@@ -209,13 +209,41 @@ assert.equal("sha256Digest" in root, false);
     `
 import { expect, test } from "vitest";
 import {
+  createBuiltinDerivationDetectors,
+} from "@jinn-network/evidence-derivation";
+import {
   describeDerivationDetectorContract,
   describeEvidenceDeriverContract,
 } from "@jinn-network/evidence-derivation/testing";
+import type {
+  DerivationDetectorContractContext,
+  DerivationDetectorContractFactory,
+} from "@jinn-network/evidence-derivation/testing";
 
-test("packed testing entrypoint imports with its explicit optional peer", () => {
+const [detector] = createBuiltinDerivationDetectors({
+  privateConfiguration: {
+    schemaVersion: "jinn.private-detector-configuration.v1",
+    nonce: "testing-consumer-private-nonce-0123456789abcdef",
+    knownIdentities: [],
+    privateAllowlist: [],
+  },
+});
+if (!detector) throw new Error("packed built-in detector is missing");
+
+const detectorFactory: DerivationDetectorContractFactory = () => {
+  const context: DerivationDetectorContractContext = {
+    detector,
+    ambientEffectCount: () => 0,
+    retainedSurfaceCount: () => 0,
+    cleanup: async () => {},
+  };
+  return context;
+};
+
+test("packed testing entrypoint imports with its corrected detector context", async () => {
   expect(typeof describeEvidenceDeriverContract).toBe("function");
   expect(typeof describeDerivationDetectorContract).toBe("function");
+  expect((await detectorFactory()).detector).toBe(detector);
 });
 `,
   );

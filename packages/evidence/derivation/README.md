@@ -73,8 +73,23 @@ import {
 describeEvidenceDeriverContract((detectors) =>
   createMyDeriver({ detectors }),
 );
-describeDerivationDetectorContract(() => myDetector, fixtures);
+describeDerivationDetectorContract(() => {
+  const harness = createMyDetectorTestHarness();
+  return {
+    detector: harness.detector,
+    ambientEffectCount: () => harness.ambientEffectCount(),
+    retainedSurfaceCount: () => harness.retainedSurfaceCount(),
+    cleanup: () => harness.cleanup(),
+  };
+}, fixtures);
 ```
+
+The detector factory creates a fresh context for each contract case. Its
+truthful test-only observers must report attempted ambient effects and retained
+surface plaintext; the kit checks both before and after every detector call and
+runs `cleanup` after each case. This provides conformance evidence, not a
+JavaScript sandbox or proof against dishonest detector code. Applications must
+inject only detectors they trust with private source text.
 
 This package does not ship ML inference, a review queue, repository access,
 publication, announcements, application wiring, or legacy cutover behavior.

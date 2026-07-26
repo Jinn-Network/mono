@@ -32,13 +32,53 @@ export type EvidenceDeriverContractFactory = (
   detectors?: readonly DerivationDetector[],
 ) => EvidenceDeriver | Promise<EvidenceDeriver>;
 
+export interface DerivationDetectorContractContext {
+  readonly detector: DerivationDetector;
+  readonly ambientEffectCount: () => number;
+  readonly retainedSurfaceCount: () => number;
+  readonly cleanup?: () => void | Promise<void>;
+}
+
 export type DerivationDetectorContractFactory = () =>
-  | DerivationDetector
-  | Promise<DerivationDetector>;
+  | DerivationDetectorContractContext
+  | Promise<DerivationDetectorContractContext>;
 
 export interface DerivationDetectorContractFixture {
   readonly surface: DerivationSurface;
   readonly expectedClasses?: readonly string[];
+}
+
+async function withDetectorContractContext<T>(
+  factory: DerivationDetectorContractFactory,
+  exercise: (
+    context: DerivationDetectorContractContext,
+  ) => T | Promise<T>,
+): Promise<T> {
+  const context = await factory();
+  try {
+    return await exercise(context);
+  } finally {
+    await context.cleanup?.();
+  }
+}
+
+async function invokeContractDetector(
+  context: DerivationDetectorContractContext,
+  surface: DerivationSurface,
+  options?: DerivationOperationOptions,
+): Promise<readonly DerivationFinding[]> {
+  const expectReleased = (): void => {
+    const ambientEffectCount = context.ambientEffectCount();
+    const retainedSurfaceCount = context.retainedSurfaceCount();
+    expect(ambientEffectCount).toBe(0);
+    expect(retainedSurfaceCount).toBe(0);
+  };
+  expectReleased();
+  try {
+    return await context.detector.detect(surface, options);
+  } finally {
+    expectReleased();
+  }
 }
 
 export interface SyntheticPrivateDetectorConfiguration {
@@ -89,14 +129,14 @@ export function createSyntheticDerivationDetectorFixtures(): Readonly<{
       Object.freeze({
         surface: detectorSurface(
           "contract:known-identity",
-          `operator ${SYNTHETIC_PRIVATE_VALUES.knownIdentity}`,
+          `private marker amber; operator ${SYNTHETIC_PRIVATE_VALUES.knownIdentity}`,
         ),
         expectedClasses: Object.freeze(["known-identity"]),
       }),
       Object.freeze({
         surface: detectorSurface(
           "contract:known-identity-safe",
-          "anonymous synthetic operator",
+          "private marker cobalt; anonymous synthetic operator",
         ),
         expectedClasses: Object.freeze([]),
       }),
@@ -105,14 +145,14 @@ export function createSyntheticDerivationDetectorFixtures(): Readonly<{
       Object.freeze({
         surface: detectorSurface(
           "contract:patterns",
-          "email ada@example.invalid and card 4111 1111 1111 1111",
+          "private marker saffron; email ada@example.invalid and card 4111 1111 1111 1111",
         ),
         expectedClasses: Object.freeze(["email", "payment-instrument"]),
       }),
       Object.freeze({
         surface: detectorSurface(
           "contract:technical-values",
-          `sha256:${"a".repeat(64)} bafkreibm6jg3ux5qu3hbutfqc3hdoclhwd3bk4ufuyt7xzhsg7cdqs2m7a`,
+          `private marker violet; sha256:${"a".repeat(64)} bafkreibm6jg3ux5qu3hbutfqc3hdoclhwd3bk4ufuyt7xzhsg7cdqs2m7a`,
         ),
         expectedClasses: Object.freeze([]),
       }),
@@ -465,104 +505,112 @@ export function describeDerivationDetectorContract(
 ): void {
   describe("DerivationDetector contract", () => {
     test("exposes one safe immutable closed descriptor", async () => {
-      const detector = await factory();
-      const descriptor = detector.descriptor;
-      const snapshot = structuredClone(descriptor);
-      expect(Object.isFrozen(descriptor)).toBe(true);
-      expect(Object.keys(descriptor).sort()).toEqual(
-        [
-          "configurationDigest",
-          "id",
-          "implementationDigest",
-          "reproducibility",
-          "version",
-        ].filter((key) =>
-          key !== "configurationDigest"
-            ? true
-            : descriptor.configurationDigest !== undefined,
-        ).sort(),
-      );
-      for (const property of Object.values(
-        Object.getOwnPropertyDescriptors(descriptor),
-      )) {
-        expect("value" in property).toBe(true);
-        expect(property.configurable).toBe(false);
-        expect(property.writable).toBe(false);
-      }
-      expect(descriptor.implementationDigest).toMatch(
-        /^sha256:[a-f0-9]{64}$/u,
-      );
-      if (descriptor.configurationDigest !== undefined) {
-        expect(descriptor.configurationDigest).toMatch(
+      await withDetectorContractContext(factory, async (context) => {
+        const { detector } = context;
+        const descriptor = detector.descriptor;
+        const snapshot = structuredClone(descriptor);
+        expect(Object.isFrozen(descriptor)).toBe(true);
+        expect(Object.keys(descriptor).sort()).toEqual(
+          [
+            "configurationDigest",
+            "id",
+            "implementationDigest",
+            "reproducibility",
+            "version",
+          ].filter((key) =>
+            key !== "configurationDigest"
+              ? true
+              : descriptor.configurationDigest !== undefined,
+          ).sort(),
+        );
+        for (const property of Object.values(
+          Object.getOwnPropertyDescriptors(descriptor),
+        )) {
+          expect("value" in property).toBe(true);
+          expect(property.configurable).toBe(false);
+          expect(property.writable).toBe(false);
+        }
+        expect(descriptor.implementationDigest).toMatch(
           /^sha256:[a-f0-9]{64}$/u,
         );
-      }
-      await detector.detect(fixtures[0]!.surface);
-      expect(detector.descriptor).toBe(descriptor);
-      expect(detector.descriptor).toEqual(snapshot);
+        if (descriptor.configurationDigest !== undefined) {
+          expect(descriptor.configurationDigest).toMatch(
+            /^sha256:[a-f0-9]{64}$/u,
+          );
+        }
+        await invokeContractDetector(context, fixtures[0]!.surface);
+        expect(detector.descriptor).toBe(descriptor);
+        expect(detector.descriptor).toEqual(snapshot);
+      });
     });
 
     test.each(fixtures)(
       "emits valid stable findings for $surface.surfaceId",
       async ({ surface, expectedClasses = [] }) => {
-        const detector = await factory();
-        const descriptor = detector.descriptor;
-        const before = structuredClone(surface);
-        const rawFirst = await detector.detect(surface);
-        const first = normalizeDetectorFindings(
-          surface,
-          rawFirst,
-          descriptor,
-        );
-        expect(surface).toEqual(before);
-        expect(detector.descriptor).toBe(descriptor);
-        expect(first.map((finding) => finding.class)).toEqual(
-          expect.arrayContaining([...expectedClasses]),
-        );
-        for (const finding of first) {
-          const plaintext = surface.text.slice(finding.start, finding.end);
-          expect(finding.evidence.join("\n")).not.toContain(plaintext);
-          expect(finding.detector).toEqual(descriptor);
-        }
-        const rawSecond = await detector.detect(surface);
-        const second = normalizeDetectorFindings(
-          surface,
-          rawSecond,
-          descriptor,
-        );
-        expect(detector.descriptor).toBe(descriptor);
-        if (descriptor.reproducibility === "byte-stable") {
-          expect(rawSecond).toEqual(rawFirst);
-          expect(second).toEqual(first);
-        } else {
-          for (const finding of second) {
-            expect(finding.detector.reproducibility).toBe("best-effort");
+        await withDetectorContractContext(factory, async (context) => {
+          const { detector } = context;
+          const descriptor = detector.descriptor;
+          const before = structuredClone(surface);
+          const rawFirst = await invokeContractDetector(context, surface);
+          const first = normalizeDetectorFindings(
+            surface,
+            rawFirst,
+            descriptor,
+          );
+          expect(surface).toEqual(before);
+          expect(detector.descriptor).toBe(descriptor);
+          expect(first.map((finding) => finding.class)).toEqual(
+            expect.arrayContaining([...expectedClasses]),
+          );
+          for (const finding of first) {
+            const plaintext = surface.text.slice(finding.start, finding.end);
+            expect(finding.evidence.join("\n")).not.toContain(plaintext);
+            expect(finding.detector).toEqual(descriptor);
           }
-        }
+          const rawSecond = await invokeContractDetector(context, surface);
+          const second = normalizeDetectorFindings(
+            surface,
+            rawSecond,
+            descriptor,
+          );
+          expect(detector.descriptor).toBe(descriptor);
+          if (descriptor.reproducibility === "byte-stable") {
+            expect(rawSecond).toEqual(rawFirst);
+            expect(second).toEqual(first);
+          } else {
+            for (const finding of second) {
+              expect(finding.detector.reproducibility).toBe("best-effort");
+            }
+          }
+        });
       },
     );
 
     test("honors an already-aborted operation", async () => {
-      const detector = await factory();
-      const controller = new AbortController();
-      controller.abort();
-      const operation: DerivationOperationOptions = {
-        signal: controller.signal,
-      };
-      await expect(
-        detector.detect(fixtures[0]!.surface, operation),
-      ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
+      await withDetectorContractContext(factory, async (context) => {
+        const controller = new AbortController();
+        controller.abort();
+        const operation: DerivationOperationOptions = {
+          signal: controller.signal,
+        };
+        await expect(
+          invokeContractDetector(context, fixtures[0]!.surface, operation),
+        ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
+      });
     });
 
     test("honors cancellation while detection is in flight", async () => {
-      const detector = await factory();
-      const controller = new AbortController();
-      const pending = detector.detect(fixtures[0]!.surface, {
-        signal: controller.signal,
-      });
-      controller.abort();
-      await expect(pending).rejects.toMatchObject({
-        code: "OPERATION_ABORTED",
+      await withDetectorContractContext(factory, async (context) => {
+        const controller = new AbortController();
+        const pending = invokeContractDetector(
+          context,
+          fixtures[0]!.surface,
+          { signal: controller.signal },
+        );
+        controller.abort();
+        await expect(pending).rejects.toMatchObject({
+          code: "OPERATION_ABORTED",
+        });
       });
     });
   });
