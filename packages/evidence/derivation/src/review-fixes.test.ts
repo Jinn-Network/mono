@@ -574,6 +574,109 @@ test("url-safe unpadded DSSE material participates in protected dispositions", (
   });
 });
 
+test("Protocol-valid extended DSSE envelopes remain wholly signed material", () => {
+  const input = syntheticDerivationInput();
+  replaceArtifact(
+    input,
+    "trace/trajectory.jsonl",
+    new TextEncoder().encode(
+      `${JSON.stringify({
+        event: "tool",
+        envelope: {
+          payloadType: "application/vnd.in-toto+json",
+          payload: "e30",
+          envelopeExtension: {
+            publicNote: "must-not-become-a-surface",
+          },
+          signatures: [
+            {
+              keyid: "",
+              sig: "__8",
+              signatureExtension: "must-also-stay-signed",
+            },
+            {
+              sig: "c2k=",
+            },
+          ],
+        },
+      })}\n`,
+    ),
+  );
+  const source = validateDerivationSource(input);
+  const policy = parseDerivationPolicy(input.policyBytes).value;
+  const extraction = extractDerivationSurfaces(source, policy);
+  expect(
+    extraction.surfaces.some(({ location }) =>
+      location.startsWith("/0/envelope"),
+    ),
+  ).toBe(false);
+  const protectedEnvelopeLocations = extraction.protectedLocations.filter(
+    ({ location }) => location.startsWith("/0/envelope"),
+  );
+  expect(protectedEnvelopeLocations).toEqual(
+    expect.arrayContaining([
+      {
+        location: "/0/envelope",
+        protectedClass: "signed-material",
+      },
+      {
+        location: "/0/envelope/envelopeExtension/publicNote",
+        protectedClass: "signed-material",
+      },
+      {
+        location: "/0/envelope/signatures/0/signatureExtension",
+        protectedClass: "signed-material",
+      },
+    ]),
+  );
+  expect(
+    protectedEnvelopeLocations.every(
+      ({ protectedClass }) => protectedClass === "signed-material",
+    ),
+  ).toBe(true);
+  const heldPolicy = structuredClone(policy);
+  (
+    heldPolicy.protectedValueDispositions as Record<
+      "signed-material",
+      "retain" | "withhold-record"
+    >
+  )["signed-material"] = "withhold-record";
+  expect(extractDerivationSurfaces(source, heldPolicy).hold).toEqual({
+    code: "protected-value-withheld",
+    protectedClass: "signed-material",
+  });
+});
+
+test("malformed RSA SPKI remains a scan surface", () => {
+  const malformed = [
+    "-----BEGIN PUBLIC KEY-----",
+    "MD4wDQYJKoZIhvcNAQEBBQADLQAwKgQobnBtX2FhYWFhYWFhYWFhYWFhYWFhYWFh",
+    "YWFhYWFhYWFhYWFhYWFhYQ==",
+    "-----END PUBLIC KEY-----",
+    "",
+  ].join("\n");
+  const input = syntheticDerivationInput();
+  replaceArtifact(
+    input,
+    "trace/trajectory.jsonl",
+    new TextEncoder().encode(
+      `${JSON.stringify({ event: "tool", publicKey: malformed })}\n`,
+    ),
+  );
+  const extraction = extractDerivationSurfaces(
+    validateDerivationSource(input),
+    parseDerivationPolicy(input.policyBytes).value,
+  );
+  expect(
+    extraction.surfaces.some(({ text }) => text === malformed),
+  ).toBe(true);
+  expect(
+    extraction.protectedLocations.some(
+      ({ protectedClass }) => protectedClass === "signed-material",
+    ),
+  ).toBe(false);
+});
+
 test.each([
   `owner/npm_${"a".repeat(36)}`,
   `owner/AIza${"a".repeat(35)}`,

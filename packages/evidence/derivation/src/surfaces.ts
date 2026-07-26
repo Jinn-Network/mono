@@ -438,28 +438,18 @@ function structuredSurfaces(
         value.forEach((child, index) => walk(child, `${path}/${index}`, field));
       } else if (value && typeof value === "object") {
         if (isStructurallyValidDsseEnvelope(value)) {
-          protectedLocations.push(
-            {
-              location: `${path}/payloadType`,
-              protectedClass: "profile-media-schema-identifier",
-            },
-            {
-              location: `${path}/payload`,
-              protectedClass: "signed-material",
-            },
-          );
-          value.signatures.forEach((signature, index) => {
-            if (signature.keyid !== undefined) {
-              protectedLocations.push({
-                location: `${path}/signatures/${index}/keyid`,
-                protectedClass: "signed-material",
-              });
-            }
-            protectedLocations.push({
-              location: `${path}/signatures/${index}/sig`,
-              protectedClass: "signed-material",
-            });
+          const protectedPath =
+            codec === "jsonl" ? `/${lineIndex}${path}` : path;
+          protectedLocations.push({
+            location: protectedPath,
+            protectedClass: "signed-material",
           });
+          markProtectedTree(
+            value,
+            protectedPath,
+            "signed-material",
+            protectedLocations,
+          );
           return;
         }
         for (const [key, child] of Object.entries(value)) {

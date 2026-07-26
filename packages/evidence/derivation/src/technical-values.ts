@@ -4,6 +4,7 @@ import {
   DETERMINISTIC_PUBLIC_RECIPE,
   type RegexRecipe,
 } from "./detectors/recipe.js";
+import { snapshotInertData } from "./inert.js";
 
 export type TechnicalValueClass =
   | "digest"
@@ -216,6 +217,79 @@ function bytesHex(bytes: Uint8Array): string {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function isCanonicalPositiveDerInteger(
+  bytes: Uint8Array,
+  element: DerElement,
+): boolean {
+  const recipe =
+    DETERMINISTIC_PUBLIC_RECIPE.technicalClassifier.publicKey;
+  const constraints = recipe.rsaSubject;
+  if (
+    element.tag !== recipe.derTags.integer ||
+    element.contentStart === element.contentEnd
+  ) {
+    return false;
+  }
+  const content = bytes.slice(element.contentStart, element.contentEnd);
+  const first = content[0]!;
+  if (
+    constraints.requireCanonicalPositiveIntegers &&
+    ((first & 0x80) !== 0 ||
+      (first === 0 &&
+        (content.length === 1 || (content[1]! & 0x80) === 0)))
+  ) {
+    return false;
+  }
+  return !constraints.rejectZero || content.some((byte) => byte !== 0);
+}
+
+function isRsaPublicKeySubject(keyBytes: Uint8Array): boolean {
+  const recipe =
+    DETERMINISTIC_PUBLIC_RECIPE.technicalClassifier.publicKey;
+  const sequence = readDerElement(keyBytes, 0);
+  if (
+    !sequence ||
+    sequence.tag !== recipe.derTags.sequence ||
+    sequence.next !== keyBytes.length
+  ) {
+    return false;
+  }
+  let cursor = sequence.contentStart;
+  for (let index = 0; index < recipe.rsaSubject.fields.length; index += 1) {
+    const integer = readDerElement(keyBytes, cursor);
+    if (
+      !integer ||
+      integer.next > sequence.contentEnd ||
+      !isCanonicalPositiveDerInteger(keyBytes, integer)
+    ) {
+      return false;
+    }
+    cursor = integer.next;
+  }
+  return cursor === sequence.contentEnd;
+}
+
+function isEcPublicKeySubject(
+  keyBytes: Uint8Array,
+  curveOidHex: string,
+): boolean {
+  const recipe =
+    DETERMINISTIC_PUBLIC_RECIPE.technicalClassifier.publicKey;
+  const point = recipe.ecPoint;
+  const curve = point.namedCurves.find(
+    (candidate) => candidate.oidHex === curveOidHex,
+  );
+  if (!curve) return false;
+  const prefix = keyBytes[0];
+  if (point.compressedPrefixes.some((candidate) => candidate === prefix)) {
+    return keyBytes.length === curve.coordinateBytes + 1;
+  }
+  return (
+    prefix === point.uncompressedPrefix &&
+    keyBytes.length === curve.coordinateBytes * 2 + 1
+  );
+}
+
 function isSupportedSpkiDer(bytes: Uint8Array): boolean {
   const recipe =
     DETERMINISTIC_PUBLIC_RECIPE.technicalClassifier.publicKey;
@@ -271,6 +345,10 @@ function isSupportedSpkiDer(bytes: Uint8Array): boolean {
   ) {
     return false;
   }
+  const parameterOidHex =
+    parameter?.tag === tags.objectIdentifier
+      ? bytesHex(bytes.slice(parameter.contentStart, parameter.contentEnd))
+      : "";
   const publicKey = readDerElement(bytes, algorithm.next);
   if (
     !publicKey ||
@@ -282,6 +360,7 @@ function isSupportedSpkiDer(bytes: Uint8Array): boolean {
   }
   const unusedBits = bytes[publicKey.contentStart]!;
   if (unusedBits > 7) return false;
+  if (recipe.requireZeroUnusedBits && unusedBits !== 0) return false;
   const keyBytes = bytes.slice(publicKey.contentStart + 1, publicKey.contentEnd);
   if (
     recipe.requireNonemptySubjectPublicKey &&
@@ -302,15 +381,14 @@ function isSupportedSpkiDer(bytes: Uint8Array): boolean {
     return false;
   }
   if (
-    supported.subject === "der-sequence" &&
-    readDerElement(keyBytes, 0)?.next !== keyBytes.length
+    supported.subject === "rsa-public-key" &&
+    !isRsaPublicKeySubject(keyBytes)
   ) {
     return false;
   }
   if (
     supported.subject === "ec-point" &&
-    (unusedBits !== 0 ||
-      ![0x02, 0x03, 0x04].includes(keyBytes[0]!))
+    !isEcPublicKeySubject(keyBytes, parameterOidHex)
   ) {
     return false;
   }
@@ -326,15 +404,11 @@ function isSpkiPublicKey(value: string): boolean {
   return bytes !== null && isSupportedSpkiDer(bytes);
 }
 
-function hasExactOwnKeys(
+function hasOwnDataField(
   value: Record<string, unknown>,
-  expected: readonly string[],
+  field: string,
 ): boolean {
-  const keys = Object.keys(value).sort();
-  return (
-    keys.length === expected.length &&
-    keys.every((key, index) => key === [...expected].sort()[index])
-  );
+  return Object.prototype.hasOwnProperty.call(value, field);
 }
 
 export function isStructurallyValidDsseEnvelope(
@@ -348,19 +422,24 @@ export function isStructurallyValidDsseEnvelope(
   }[];
 } {
   const recipe = DETERMINISTIC_PUBLIC_RECIPE.technicalClassifier.dsse;
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    !hasExactOwnKeys(
-      value as Record<string, unknown>,
-      recipe.envelopeKeys,
-    )
-  ) {
+  let envelope: Record<string, unknown>;
+  try {
+    const snapshot = snapshotInertData(value, "DSSE envelope");
+    if (
+      !snapshot ||
+      typeof snapshot !== "object" ||
+      Array.isArray(snapshot)
+    ) {
+      return false;
+    }
+    envelope = snapshot as Record<string, unknown>;
+  } catch {
     return false;
   }
-  const envelope = value as Record<string, unknown>;
   if (
+    !recipe.requiredEnvelopeFields.every((field) =>
+      hasOwnDataField(envelope, field),
+    ) ||
     envelope.payloadType !== recipe.payloadType ||
     typeof envelope.payload !== "string" ||
     decodeCanonicalBase64(envelope.payload) === null ||
@@ -379,11 +458,9 @@ export function isStructurallyValidDsseEnvelope(
       return false;
     }
     const signature = candidate as Record<string, unknown>;
-    const keys = Object.keys(signature).sort();
     if (
-      !(
-        hasExactOwnKeys(signature, recipe.signatureKeys) ||
-        hasExactOwnKeys(signature, recipe.keyedSignatureKeys)
+      !recipe.requiredSignatureFields.every((field) =>
+        hasOwnDataField(signature, field),
       ) ||
       typeof signature.sig !== "string" ||
       decodeCanonicalBase64(signature.sig) === null
@@ -391,10 +468,13 @@ export function isStructurallyValidDsseEnvelope(
       return false;
     }
     return (
-      keys.length === 1 ||
-      (typeof signature.keyid === "string" &&
-        (!recipe.requireNonemptyKeyIdWhenPresent ||
-          signature.keyid.length > 0))
+      recipe.extensions === "inert-own-data-allowed" &&
+      recipe.optionalKeyId === "string-including-empty" &&
+      recipe.optionalSignatureFields.every(
+        (field) =>
+          !hasOwnDataField(signature, field) ||
+          typeof signature[field] === "string",
+      )
     );
   });
 }
@@ -415,7 +495,7 @@ export function classifyTechnicalValue(
     context.structuralRole &&
     recipe.dsse.structuralRoles.includes(context.structuralRole)
   ) {
-    return decodeCanonicalBase64(value) ? "dsse-material" : null;
+    return decodeCanonicalBase64(value) !== null ? "dsse-material" : null;
   }
   if (
     context.field !== undefined &&

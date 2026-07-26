@@ -291,7 +291,7 @@ export const DETERMINISTIC_PUBLIC_RECIPE = deepFreeze({
         {
           oidHex: "2a864886f70d010101",
           parameters: "null",
-          subject: "der-sequence",
+          subject: "rsa-public-key",
         },
         {
           oidHex: "2a8648ce3d0201",
@@ -326,8 +326,37 @@ export const DETERMINISTIC_PUBLIC_RECIPE = deepFreeze({
       requireDer: true,
       requireSpkiSequence: true,
       requireNonemptySubjectPublicKey: true,
+      requireZeroUnusedBits: true,
+      rsaSubject: {
+        fields: ["modulus", "publicExponent"],
+        requireCanonicalPositiveIntegers: true,
+        rejectZero: true,
+      },
+      ecPoint: {
+        compressedPrefixes: [0x02, 0x03],
+        uncompressedPrefix: 0x04,
+        namedCurves: [
+          {
+            oidHex: "2a8648ce3d030107",
+            coordinateBytes: 32,
+          },
+          {
+            oidHex: "2b81040022",
+            coordinateBytes: 48,
+          },
+          {
+            oidHex: "2b81040023",
+            coordinateBytes: 66,
+          },
+          {
+            oidHex: "2b8104000a",
+            coordinateBytes: 32,
+          },
+        ],
+      },
       derTags: {
         sequence: 0x30,
+        integer: 0x02,
         objectIdentifier: 0x06,
         bitString: 0x03,
         null: 0x05,
@@ -336,11 +365,12 @@ export const DETERMINISTIC_PUBLIC_RECIPE = deepFreeze({
     dsse: {
       payloadType: "application/vnd.in-toto+json",
       structuralRoles: ["dsse-payload", "dsse-signature"],
-      envelopeKeys: ["payload", "payloadType", "signatures"],
-      signatureKeys: ["sig"],
-      keyedSignatureKeys: ["keyid", "sig"],
+      requiredEnvelopeFields: ["payload", "payloadType", "signatures"],
+      requiredSignatureFields: ["sig"],
+      optionalSignatureFields: ["keyid"],
+      extensions: "inert-own-data-allowed",
+      optionalKeyId: "string-including-empty",
       requireNonemptySignatures: true,
-      requireNonemptyKeyIdWhenPresent: true,
       acceptStandardAlphabet: true,
       acceptUrlSafeAlphabet: true,
       acceptPadded: true,
