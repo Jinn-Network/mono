@@ -204,6 +204,16 @@ export type ReconcileResult =
     };
 ```
 
+`frameBytes` and every `OpaqueSinkState.bytes` value contain only non-secret publication and
+recovery data. Credentials, private keys, bearer tokens, wallet authority, and other secrets are
+closed over by the injected sink capability and never serialized into prepared frames, pending
+state, placement state, journal entries, or receipts. The shared pipeline treats these bytes as
+opaque and cannot discover an arbitrary secret by inspection, so every concrete sink must run its
+contract tests with printable and binary synthetic authority markers. The tests recursively scan
+all returned and persisted sink fields, journal encodings, and logical receipts for the raw markers
+and their canonical hex, base64, base64url, and URL encodings. This is scoped conformance evidence
+for the tested implementation, not a sandbox or proof against dishonest authority-bearing code.
+
 `prepare` may be synchronous internally, but the contract is asynchronous for a uniform port. It
 must perform no network, repository, durable filesystem, clock, randomness, or other ambient I/O.
 All framing configuration must be frozen when the sink is constructed.
@@ -373,10 +383,49 @@ The root entrypoint cannot import or re-export filesystem implementation code.
 
 The filesystem binding uses a private versioned layout, `0700` roots, `0600` files, symlink and
 path-escape rejection, immutable revision files, same-directory temporary writes, flush,
-no-overwrite atomic publication, and CAS conflict detection. It follows the security posture
-already proven by
-`@jinn-network/evidence-repository/fs`, but it does not reuse that repository as an implicit
-journal.
+no-overwrite atomic publication, and CAS conflict detection. It mirrors the existing static
+hardening patterns of `@jinn-network/evidence-repository/fs`, but it does not reuse that repository
+as an implicit journal.
+
+### 8.1 Filesystem threat model
+
+The v1 filesystem journal is trusted local application state. The configured root and its
+unmanaged ancestors must be stable and not writable or replaceable by an untrusted peer. Unmanaged
+ancestors need not be owned by the application and may contain stable platform-managed symlinks,
+such as the macOS `/var` alias. The binding resolves the existing unmanaged ancestor prefix to a
+stable physical path before it creates or opens the configured root. The configured root itself
+and every component below it are managed journal state and cannot be symlinks.
+
+Within that trust boundary, the binding must reject lexical path escapes, pre-existing symlinks at
+every managed component, non-regular managed files, malformed or corrupt revisions, and stale or
+conflicting writers. Where the platform exposes POSIX ownership, a configured root, managed
+directory, or managed file owned by another user is rejected. New managed directories and files
+use exact modes `0700` and `0600`; an existing current-user-owned managed component is normalized
+to the corresponding exact private mode before use. Ancestors above the configured root are an
+operator-controlled precondition rather than managed journal state, so the binding neither changes
+their ownership or modes nor claims to defend against their hostile mutation.
+
+The binding must use non-following leaf opens where Node exposes them and revalidate managed
+components around pathname-based operations so detectable replacement or corruption fails closed.
+The journal contract and filesystem tests cover these static and accidental conditions,
+deterministically detected between-check replacement, concurrent journal writers, cancellation,
+and crash recovery. A detection test does not imply that pathname-based operations can contain the
+effect of a hostile replacement before the following validation.
+
+Node 22 does not expose descriptor-relative child operations such as `openat` and `linkat`.
+Therefore the portable v1 binding does not claim containment against an equally privileged local
+actor that wins an active time-of-check/time-of-use race by replacing a validated ancestor or
+managed directory between validation and a pathname-based filesystem operation. Native filesystem
+extensions, platform restrictions, and protection from hostile same-user mutation are out of scope
+for v1.
+
+This boundary does not weaken Evidence object integrity. Evidence bytes remain content-addressed
+and digest-checked, so modification is detectable. The journal is a durable recovery log, not a
+cryptographic trust anchor: it prevents duplicate or reordered publication effects after ordinary
+crashes and cancellation, but it is not tamper-proof against an operator or process that already
+controls the journal files. Its process-crash durability assumes a local filesystem that honors
+Node's successful file and directory `sync()` calls; it does not claim a portable hardware
+power-loss guarantee beyond the operating system and storage device's contract.
 
 ## 9. Publication algorithm
 
@@ -413,8 +462,10 @@ Content-addressed repository writes may safely remain after cancellation or fail
 rolled back.
 
 Every operation accepts `AbortSignal`. Cancellation is checked before and after each awaited
-boundary. It produces `OPERATION_ABORTED`, leaves the latest durable checkpoint intact, and never
-converts an uncertain placement into a blind retry.
+boundary except after a filesystem journal publication link succeeds: there it is latched while
+the non-interruptible directory-sync, temporary-unlink, and second-sync section finishes, then
+surfaced. Cancellation produces `OPERATION_ABORTED`, leaves the latest durable checkpoint intact,
+and never converts an uncertain placement into a blind retry.
 
 ## 10. Errors
 
@@ -511,7 +562,10 @@ announcement port.
   framing.
 - Prepared plans are frozen in the recovery journal.
 - The journal port is asynchronous and a durable filesystem binding ships in v1.
-- All external and durable operations are cancellable.
+- External and durable operations use cooperative cancellation checks before and after awaited
+  boundaries. After a filesystem journal publication link succeeds, cancellation is deferred until
+  the specified non-interruptible directory-sync, temporary-unlink, and second-sync section
+  completes.
 - Announcement interoperability requires a normative medium profile and round-trip tests.
 - Sink/source co-location is optional.
 - Credentials and trust remain outside the package.

@@ -40,6 +40,13 @@ Runtime dependencies are limited to `@jinn-network/evidence-repository` and Node
 library. Hash exact bytes with `node:crypto`. Do not depend on Evidence Protocol merely to obtain a
 hash helper, and do not add Discovery or a concrete repository binding.
 
+The filesystem journal's configured root and ancestors are trusted local application state. The
+portable v1 binding must handle static and accidental symlinks, path escapes, corruption,
+permission faults, concurrent journal writers, cancellation, and crashes. It does not claim
+containment against an equally privileged hostile local process that replaces a validated path
+component during a pathname-based Node filesystem operation. Do not add native extensions,
+platform restrictions, or tests that imply that stronger guarantee.
+
 ## Package layout
 
 ```text
@@ -197,6 +204,25 @@ self-consistent.
 
 Implement `describeAnnouncementSinkContract(factory)` under `/testing`.
 
+The factory returns:
+
+```ts
+export interface AnnouncementSinkContractContext {
+  readonly sink: AnnouncementSink;
+  readonly effectCount: () => number;
+  readonly authorityMarkers: readonly Uint8Array[];
+  readonly prepareFrameAtSize?: (
+    exactFrameBytes: number,
+  ) => Promise<PreparedAnnouncement>;
+  readonly cleanup?: () => Promise<void> | void;
+}
+```
+
+The context contains at least two unique synthetic secrets of at least 32 bytes: one printable
+UTF-8 marker and one binary non-UTF-8 marker. Both are closed over by the sink test fixture and are
+never passed as preparation, placement, or reconciliation arguments. The kit derives each
+marker's raw, lowercase-hex, base64, unpadded base64url, and percent/URL-encoded representations.
+
 The contract suite proves:
 
 - `prepare` performs no network, repository, durable filesystem, clock, randomness, or other
@@ -215,11 +241,19 @@ The contract suite proves:
 - a state-less pre-placement intent can be reconciled after a lost response;
 - `not-found` is returned only after authoritative absence;
 - pending placement is reconciled before retry;
+- no raw or derived authority-marker representation occurs in any inert own data field returned by
+  `prepare`, `place`, or `reconcile`, including frame bytes, opaque state, placement/reverted
+  `externalId`, and reverted `reason`;
 - cancellation maps to `OPERATION_ABORTED`; and
 - implementers can add their medium-specific sink-to-source golden round trip.
 
 Run the kit against an in-memory sink whose physical frame is a small versioned canonical JSON
-fixture. That frame is a test medium, not a public Jinn format.
+fixture. The in-memory harness closes over at least one non-UTF-8 synthetic authority marker and
+one printable marker and produces scoped conformance evidence that neither leaks. That frame is a
+test medium, not a public Jinn format. Every future concrete sink must configure its real
+authority-bearing capability with equivalent synthetic markers and run this contract requirement.
+Marker scans are evidence for the tested implementation, not a sandbox or proof against dishonest
+sink code.
 
 ### Task 4: Async journal contract and codecs
 
@@ -239,7 +273,14 @@ Reject unknown journal schema versions, malformed base64/JSON, duplicate checkpo
 frame mismatch, non-monotonic revisions, and states that skip required predecessors.
 
 Export `describePublicationJournalStoreContract(factory)` and run it against an in-memory CAS
-implementation in `/testing`.
+implementation in `/testing`. The contract kit must create, load, and compare-and-swap entries
+whose pending and confirmed placements carry nontrivial opaque state. It must prove that the exact
+format IRI and arbitrary opaque bytes survive every clone and codec boundary without
+reinterpretation. At least one fixture uses a non-JSON, non-UTF-8 byte sequence such as
+`Uint8Array.of(0xff, 0xfe, 0x00, 0x80)` and compares it byte-for-byte after replay.
+Reuse the same authority-marker fixture and scanner helper to encode and replay journal entries
+containing prepared, pending, and confirmed outputs, then recursively scan the canonical journal
+bytes and decoded entry for every raw and derived marker representation.
 
 ### Task 5: Filesystem journal binding
 
@@ -260,8 +301,26 @@ entries/sha256/<prefix>/<remaining-hex>/<zero-padded-revision>.json
 
 Requirements:
 
-- new root mode `0700`, files `0600`;
-- reject symlinks and path escapes at every component;
+- where POSIX modes are exposed, every new managed directory, including the configured root and
+  nested revision hierarchy, has exact mode `0700`; every new managed file has exact mode `0600`;
+- on POSIX platforms, reject a configured root, managed directory, or managed file whose `uid`
+  differs from `process.getuid()`; do not inspect or change ownership or modes above the configured
+  root;
+- before use, normalize every current-user-owned existing managed directory to exact mode `0700`
+  and every current-user-owned existing managed regular file to exact mode `0600`, whether its
+  prior mode was broader or narrower;
+- resolve a stable existing unmanaged ancestor prefix to its physical path before managing the
+  configured root; accept a stable symlink in that unmanaged prefix, including macOS `/var`, but
+  reject the configured root or any component below it when it is a symlink;
+- reject lexical path escapes and pre-existing symlinks at every managed component;
+- use `O_NOFOLLOW` for managed leaf opens where Node exposes it, reject non-regular files, and
+  revalidate the configured path anchors and managed directories around pathname-based operations;
+- document in `README.md` that unmanaged ancestors must be trusted and stable and that the root
+  must not be concurrently mutated by an equally privileged hostile process;
+- document that modes are defense in depth rather than encryption or secret scrubbing; backups,
+  retention, and deletion are operator responsibilities; exact frames and opaque sink state must
+  not contain credentials, private keys, bearer tokens, or other authority material; and concrete
+  sinks persist only non-secret recovery identifiers;
 - same-directory temporary file;
 - flush file before publication and the containing directory afterward where supported;
 - publish each immutable revision without overwrite, using a same-filesystem hard link or another
@@ -274,11 +333,44 @@ Requirements:
 - ignore only recognized temporary files;
 - reject gaps, duplicate/noncanonical revision names, and invalid predecessor transitions;
 - verify directory key, embedded key, revision, and full codec on replay;
-- cancellation before and after awaited I/O; and
+- check cancellation before and after every awaited I/O boundary in `load`, `create`, and
+  `compareAndSwap`, including immediately after closing a flushed temporary file and before its
+  no-overwrite publication link;
+- remove an unpublished temporary file when cancellation or another failure occurs;
+- after the no-overwrite link succeeds, defer cancellation while the store synchronizes the
+  revision directory, unlinks the temporary name, and synchronizes the directory again; surface a
+  pending cancellation only after this non-interruptible durability section;
+- if the first post-link sync fails, preserve the temp/final pair and return `IO_FAILURE`; if temp
+  unlink fails after that sync, still attempt the final directory sync and preserve the unlink
+  failure as the cause; never acknowledge the revision after any post-link durability error;
+- during replay, accept and repair one recognized temporary name sharing the highest final
+  revision's inode only when both names are current-user-owned regular files with `nlink === 2`;
+  reject symlinked, non-regular, foreign-owned, or excess-link variants; and
 - stable mapping to publication errors.
 
-Run the journal contract kit plus corruption, permission, traversal, stale-writer, race, and crash
-tests against temporary directories.
+Write the failing coverage in `src/fs/store.test.ts` and `src/fs/store-faults.test.ts` before
+changing `src/fs/store.ts`, `src/fs/paths.ts`, or `src/fs/validation.ts`. Run the journal contract
+kit plus corruption, permission, static traversal/symlink, stale-writer, concurrent-writer, and
+crash tests against temporary directories. POSIX-gated permission tests must prove exact
+normalization from representative broader modes (`0755`, `0644`) and narrower modes (`0500`,
+`0400`). Use focused filesystem test doubles to prove foreign ownership and injected `EACCES` or
+`EPERM` failures are mapped correctly without requiring elevated privileges. A positive macOS test
+must use a root beneath the stable `/var` alias; negative tests must retain configured-root and
+managed-component symlink rejection.
+
+Fault tests must interrupt after the publication link, after the first directory sync, after the
+temporary unlink, and before the second directory sync. Reopen the journal after each simulated
+process crash and prove the final revision is either absent or replayable, every recoverable
+temp/final link pair is repaired, and an acknowledged revision is never lost. These are
+process-crash and API-fault tests; they do not assert portable hardware power-loss behavior beyond
+successful Node file and directory `sync()` calls.
+
+Add one deterministic fault-injection test that replaces a managed component after one successful
+anchor validation and proves that the following validation returns `JOURNAL_CORRUPT`. The test
+proves detection only; it must not assert containment or absence of an outside effect during the
+replacement window. In this task, a concurrent-writer race means two legitimate journal writers
+competing for the same immutable revision. An active same-authority path-replacement race remains
+outside the v1 threat model.
 
 ### Task 6: PR 7 distribution gate
 
@@ -403,7 +495,9 @@ For each fault, create a fresh pipeline over the same durable journal and reposi
 - exact prepared frames are reused;
 - cancellation returns `OPERATION_ABORTED`;
 - repository errors retain their type/code/cause;
-- eventual receipt is stable; and
+- eventual receipt is stable;
+- final receipts and persisted journal bytes contain no raw or derived authority-marker
+  representation; and
 - conflicting concurrent publishers fail safely.
 
 ### Task 11: Final verification and review
@@ -446,7 +540,8 @@ ci(evidence-publication): integrate the evidence DAG
 - [ ] The frozen prepared plan is durable and reused on recovery.
 - [ ] The journal port is async and `/fs` is production-usable.
 - [ ] Root does not expose or import `/fs`.
-- [ ] Every awaited boundary is cancellable.
+- [ ] Awaited boundaries use cooperative cancellation checks, with cancellation deferred only
+      inside the specified post-link filesystem durability section.
 - [ ] Uncertain placement reconciles before retry.
 - [ ] Repository failures propagate unchanged.
 - [ ] No Evidence Protocol admission, Discovery dependency, concrete medium, credentials, or
