@@ -350,6 +350,53 @@ describe("IpfsEvidenceRepository writes", () => {
     }
   });
 
+  test("maps malformed local pin-list CIDs as dependency protocol failures", async () => {
+    const reader = new FakeIpfsBlockReader();
+    const kubo = new FakeKubo(reader);
+    kubo.localListCidOverride = "not-a-cid";
+    const repository = new IpfsEvidenceRepository({
+      client: kubo.asClient(),
+      reader,
+    });
+
+    await assert.rejects(
+      repository.putArtifact(encoder.encode("malformed local pin")),
+      hasCodeWithCause("IO_FAILURE", "INVALID_REFERENCE"),
+    );
+  });
+
+  test("maps malformed remote pin-add CIDs as dependency protocol failures", async () => {
+    const reader = new FakeIpfsBlockReader();
+    const kubo = new FakeKubo(reader);
+    kubo.remoteAddCidOverride = "not-a-cid";
+    const repository = new IpfsEvidenceRepository({
+      client: kubo.asClient(),
+      reader,
+      remotePinService: "operator-pins",
+    });
+
+    await assert.rejects(
+      repository.putArtifact(encoder.encode("malformed remote add")),
+      hasCodeWithCause("IO_FAILURE", "INVALID_REFERENCE"),
+    );
+  });
+
+  test("maps malformed remote pin-list CIDs as dependency protocol failures", async () => {
+    const reader = new FakeIpfsBlockReader();
+    const kubo = new FakeKubo(reader);
+    kubo.remoteListCidOverride = "not-a-cid";
+    const repository = new IpfsEvidenceRepository({
+      client: kubo.asClient(),
+      reader,
+      remotePinService: "operator-pins",
+    });
+
+    await assert.rejects(
+      repository.putArtifact(encoder.encode("malformed remote list")),
+      hasCodeWithCause("IO_FAILURE", "INVALID_REFERENCE"),
+    );
+  });
+
   test("repairs deterministic content-only partial state", async () => {
     const reader = new FakeIpfsBlockReader();
     const kubo = new FakeKubo(reader);
@@ -813,4 +860,14 @@ function hasCode(code: string): (error: unknown) => boolean {
     error !== null &&
     "code" in error &&
     error.code === code;
+}
+
+function hasCodeWithCause(
+  code: string,
+  causeCode: string,
+): (error: unknown) => boolean {
+  return (error: unknown) =>
+    hasCode(code)(error) &&
+    error instanceof Error &&
+    hasCode(causeCode)(error.cause);
 }

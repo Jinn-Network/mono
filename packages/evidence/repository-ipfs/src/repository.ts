@@ -376,7 +376,10 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
       })) {
         assertRepositoryOperationActive(options);
         if (
-          normalizeRawCid(pin.cid.toString()) === cid &&
+          normalizeDependencyRawCid(
+            pin.cid,
+            "Kubo returned a malformed CID from the local pin listing.",
+          ) === cid &&
           (pin.type === "direct" || pin.type === "recursive")
         ) {
           return true;
@@ -408,7 +411,10 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
       });
       assertRepositoryOperationActive(options);
       if (
-        normalizeRawCid(pin.cid.toString()) !== cid ||
+        normalizeDependencyRawCid(
+          pin.cid,
+          "The configured remote pin service returned a malformed CID after pinning.",
+        ) !== cid ||
         pin.status !== "pinned"
       ) {
         throw ipfsRepositoryError(
@@ -445,7 +451,10 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
       })) {
         assertRepositoryOperationActive(options);
         if (
-          normalizeRawCid(pin.cid.toString()) === cid &&
+          normalizeDependencyRawCid(
+            pin.cid,
+            "The configured remote pin service returned a malformed CID from its pin listing.",
+          ) === cid &&
           pin.status === "pinned"
         ) {
           return true;
@@ -665,6 +674,17 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
 function decodeRawCid(cid: string): CID {
   const canonical = normalizeRawCid(cid);
   return CID.decode(Buffer.from(canonical.slice(1), "hex"));
+}
+
+function normalizeDependencyRawCid(
+  cid: { toString(): string },
+  message: string,
+): string {
+  try {
+    return normalizeRawCid(cid.toString());
+  } catch (error) {
+    throw ipfsRepositoryError("IO_FAILURE", message, error);
+  }
 }
 
 function isKuboNotPinnedError(error: unknown, cid: string): boolean {

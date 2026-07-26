@@ -65,6 +65,9 @@ export class FakeKubo {
   readonly remotePins = new Set<string>();
   remoteStatus: "queued" | "pinning" | "pinned" | "failed" = "pinned";
   returnedCidOverride: string | undefined;
+  localListCidOverride: string | undefined;
+  remoteAddCidOverride: string | undefined;
+  remoteListCidOverride: string | undefined;
   failNextPut: Error | undefined;
   failNextPinList: Error | undefined;
   failNextRemoteAdd: Error | undefined;
@@ -136,7 +139,10 @@ export class FakeKubo {
               }
               found = true;
               yield {
-                cid: decodeRawCid(canonicalPath),
+                cid: overrideCid(
+                  decodeRawCid(canonicalPath),
+                  self.localListCidOverride,
+                ),
                 type,
               };
             }
@@ -177,7 +183,7 @@ export class FakeKubo {
             const text = cid.toString();
             if (self.remoteStatus === "pinned") self.remotePins.add(text);
             return {
-              cid,
+              cid: overrideCid(cid, self.remoteAddCidOverride),
               name: "",
               status: self.remoteStatus,
             };
@@ -197,7 +203,7 @@ export class FakeKubo {
               });
               if (self.remotePins.has(cid.toString())) {
                 yield {
-                  cid,
+                  cid: overrideCid(cid, self.remoteListCidOverride),
                   name: "",
                   status: "pinned" as const,
                 };
@@ -208,6 +214,12 @@ export class FakeKubo {
       },
     } as unknown as KuboRPCClient;
   }
+}
+
+function overrideCid(cid: CID, value: string | undefined): CID {
+  return value === undefined
+    ? cid
+    : ({ toString: () => value } as CID);
 }
 
 export function rawCidFor(bytes: Uint8Array): string {
