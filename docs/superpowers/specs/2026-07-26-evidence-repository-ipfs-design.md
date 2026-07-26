@@ -50,8 +50,9 @@ repair that would make this a different repository design.
 
 The 256 KiB value used by the legacy helper is Kubo's default UnixFS chunk size, not the largest
 standard raw block. This binding uses raw blocks directly, does not use UnixFS, and stays within
-the standard 2 MiB Bitswap/Kubo block limit. It never enables Kubo's `allow-big-block` escape
-hatch.
+the standard 2 MiB Bitswap block limit. Kubo v0.40.0 is the minimum supported writer because it is
+the first release whose standard `block.put` accepts that boundary. The binding never enables
+Kubo's `allow-big-block` escape hatch.
 
 ## 2. What this package refuses
 
@@ -382,7 +383,8 @@ The gateway reader requires an explicit base URL. It does not contain a fallback
 may compose a policy outside this package, but the repository gets one authoritative configured
 read capability so its success condition is unambiguous.
 
-The production-aligned composition is:
+After an operator-managed upgrade from the observed v0.32.1 node to a supported Kubo writer, the
+future production-aligned composition is:
 
 ```text
 writer: application-authenticated Autonolas registry Kubo RPC client
@@ -501,9 +503,11 @@ accepted. Content of 2 MiB plus one byte is rejected before any remote call with
 `EvidenceRepositoryError("CONTENT_TOO_LARGE")`.
 
 This is the standard transferable raw-block ceiling used by Kubo and Bitswap. The implementation
-pins its tested Kubo release and proves both boundary cases against real Kubo. If that executable
-test contradicts the inclusive boundary, implementation stops and corrects this specification
-before shipping; it does not quietly change the constant.
+pins its tested supported Kubo writer releases and proves both boundary cases against real Kubo.
+Kubo releases before v0.40.0 retained the older 1 MiB default and are not compatible writers for
+this repository profile. If a supported writer executable test contradicts the inclusive boundary,
+implementation stops and corrects this specification before shipping; it does not quietly change
+the constant.
 
 The limit applies independently to record and artifact content. Registration blocks are bounded
 by their fixed profile and are far smaller. Readers enforce a package-level accumulation ceiling
@@ -593,11 +597,18 @@ Additional tests cover behavior the shared kit cannot see:
 
 ### 11.3 Real-Kubo integration
 
-The integration suite exercises `block.put`, the shipped streamed Kubo reader, `pin.ls`, direct garbage collection
-protection, and gateway raw reads against:
+The full repository integration suite exercises `block.put`, the shipped streamed Kubo reader,
+`pin.ls`, direct garbage collection protection, and gateway raw reads against:
 
-1. Kubo 0.32.1, the version observed at the Autonolas registry RPC on 2026-07-26; and
-2. the current supported Kubo line used while implementing the package.
+1. Kubo v0.40.0, the minimum supported writer and first standard 2 MiB `block.put` release; and
+2. Kubo v0.42.0, the implementation-time current stable release on 2026-07-26.
+
+Kubo v0.32.1, the version observed at the Autonolas registry RPC on 2026-07-26, is retained only in
+the reader-compatibility lane. That lane captures and verifies its bounded missing-block error
+envelope and may read digest-verified raw blocks within the older node's limit. It does not run the
+Repository contract kit, does not claim writer compatibility, and never enables `allow-big-block`.
+The observed node requires an operator-managed upgrade before this repository writer can target it;
+that infrastructure change is outside this stack.
 
 The suite runs locally via Docker and in evidence CI. It never writes to the production Autonolas
 node. Remote-pin-service transitions use a deterministic fake at unit level unless CI supplies a
@@ -684,8 +695,8 @@ Source prior art read for this design:
   contract, conformance kit, family isolation, errors, and binding profiles;
 - `packages/layer/src/publish.ts` — compute-before-effect CID verification and bounded raw blocks;
 - the [Kubo RPC reference](https://docs.ipfs.tech/reference/kubo/rpc/) — raw `block.put`,
-  `block.get`, the default refusal of blocks over 2 MiB, direct pins, remote pins, and the
-  administrative-API warning;
+  `block.get`, the supported writer line's default refusal of blocks over 2 MiB, direct pins,
+  remote pins, and the administrative-API warning;
 - the [Kubo CLI reference](https://docs.ipfs.tech/reference/kubo/cli/) — the separate 256 KiB
   UnixFS default chunk size and standard 2 MiB block ceiling; and
 - the [IPFS pinning guide](https://docs.ipfs.tech/how-to/work-with-pinning-services/) — garbage
@@ -729,6 +740,8 @@ the explicit repository capability prerequisite rather than left as an applicati
 - Successful puts verify CIDs, configured pins, and configured-path readback.
 - A configured remote pin service is a hard success condition, not best effort.
 - The binding rejects content above the standard 2 MiB raw-block ceiling and does not chunk.
+- Kubo v0.40.0 is the minimum supported writer; v0.32.1 is reader/error-envelope compatibility
+  only.
 - The repository contract exposes `maxObjectBytes`; direct oversized puts use
   `CONTENT_TOO_LARGE`.
 - The updated contract kit is mandatory, with additional real-Kubo boundary tests.

@@ -108,6 +108,15 @@ Bindings without a smaller finite application-level limit expose `{}`. The IPFS 
 declares `2 * 1024 * 1024`. Publication preflights all supplied record and artifact bytes before
 external effects.
 
+That IPFS write capability requires Kubo v0.40.0 or newer. Kubo v0.40.0 is the first release whose
+standard `block.put` accepts 2 MiB without `allow-big-block`; the implementation-time current
+stable release is v0.42.0. The full write-conformance matrix pins v0.40.0 as the compatibility floor
+and v0.42.0 as current stable. The observed Autonolas Kubo v0.32.1 remains a bounded
+reader/error-envelope compatibility target only and is not a supported
+`IpfsEvidenceRepository` writer. Targeting that node for writes requires an operator-managed Kubo
+upgrade outside this stack. Do not reduce the repository capability or enable `allow-big-block` to
+claim compatibility with an older writer.
+
 The repository implementation object itself is not a Proxy, and its `capabilities` slot is an own
 data property rather than an accessor or inherited property. The contract kit rejects a repository
 Proxy before invoking any other reflection, inspects the slot descriptor before using its value,
@@ -162,7 +171,8 @@ copied code snippet is stale, correct the plan rather than implementing the stal
 - Evidence Protocol owns semantic conformance.
 - Repository owns exact-byte persistence and integrity, not listing or admission.
 - Derivation is a pure byte-in/byte-out transform with no repository or network I/O.
-- IPFS is one bounded repository binding, not the mandatory public rail.
+- IPFS is one bounded repository binding, not the mandatory public rail. Its writer requires Kubo
+  v0.40.0 or newer for the standard inclusive 2 MiB block boundary.
 - Publication stores exact artifacts, then exact records, then announces record references.
 - Publication does not validate Evidence Protocol conformance.
 - The sink owns exact physical framing and measurement; the pipeline owns deterministic partition
@@ -253,7 +263,8 @@ Stop and report rather than improvising if:
 - PR #2182's refreshed head materially changes the eight-package architecture;
 - any affected npm identity has been published;
 - the repository capability change requires another record or store semantic;
-- real Kubo rejects the specified 2 MiB inclusive boundary;
+- a pinned supported Kubo writer (v0.40.0 or v0.42.0) rejects exactly 2 MiB under standard
+  `block.put` with `allow-big-block` disabled;
 - a sink cannot prepare exact frame bytes without an external effect;
 - a plan requires credentials inside shared substrate;
 - a source-boundary guard must be weakened to make an import work; or
