@@ -74,6 +74,54 @@ function harness() {
 }
 
 describe("announcement-aware Repository delegation", () => {
+  it("rejects an oversized record before publication effects", async () => {
+    const value = harness();
+    const maxObjectBytes = 2;
+    const underlying: EvidenceRepository = {
+      ...value.underlying,
+      capabilities: Object.freeze({ maxObjectBytes }),
+    };
+    const beforePublication = vi.fn(async () => undefined);
+    const onPublicationStart = vi.fn();
+    const onPublicationEnd = vi.fn();
+    const onPublished = vi.fn();
+    const repository = createAnnouncementAwareRepository({
+      repository: underlying,
+      journal: value.journal,
+      operations: value.operations,
+      sourceId: value.sourceId,
+      repositoryId: value.repositoryId,
+      assertReadable() {},
+      assertWritable() {},
+      beforePublication,
+      onPublicationStart,
+      onPublicationEnd,
+      onPublished,
+    });
+
+    const error = await repository.putRecord(
+      "execution-evidence",
+      new Uint8Array(maxObjectBytes + 1),
+    ).catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(EvidenceRepositoryError);
+    expect(error).toMatchObject({
+      name: "EvidenceRepositoryError",
+      code: "CONTENT_TOO_LARGE",
+    });
+    expect(error).not.toHaveProperty("cause");
+    expect(underlying.putRecord).not.toHaveBeenCalled();
+    expect(value.operations.stagePublication).not.toHaveBeenCalled();
+    expect(value.operations.markPublicationStored).not.toHaveBeenCalled();
+    expect(value.operations.markPublicationAnnounced).not.toHaveBeenCalled();
+    expect(value.operations.completePublication).not.toHaveBeenCalled();
+    expect(value.journal.appendAvailable).not.toHaveBeenCalled();
+    expect(beforePublication).not.toHaveBeenCalled();
+    expect(onPublicationStart).not.toHaveBeenCalled();
+    expect(onPublicationEnd).not.toHaveBeenCalled();
+    expect(onPublished).not.toHaveBeenCalled();
+  });
+
   it("preserves the underlying repository capability object", () => {
     const value = harness();
     const repository = createAnnouncementAwareRepository({

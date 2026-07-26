@@ -97,6 +97,19 @@ export function assertEvidenceRepositoryCapabilitiesSlot(
   return capabilities;
 }
 
+export function assertUnchangedEvidenceRepositoryCapabilitiesSlot(
+  repository: unknown,
+  expectedCapabilities: EvidenceRepositoryCapabilities,
+): void {
+  const capabilities =
+    assertEvidenceRepositoryCapabilitiesSlot(repository);
+  if (!Object.is(capabilities, expectedCapabilities)) {
+    throw new TypeError(
+      "EvidenceRepository.capabilities must remain unchanged for the repository lifetime.",
+    );
+  }
+}
+
 function assertRepositoryContainer(
   value: unknown,
 ): asserts value is object {

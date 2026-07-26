@@ -108,14 +108,19 @@ describeEvidenceRepositoryContract(async () => ({
   }),
   createObjectAtDeclaredLimit: () =>
     new Uint8Array(DECLARED_MAX_OBJECT_BYTES),
+  createObjectAboveDeclaredLimit: () =>
+    new Uint8Array(DECLARED_MAX_OBJECT_BYTES + 1),
   cleanup: async () => closeRepository(),
 }));
 ```
 
-Bounded bindings must provide `createObjectAtDeclaredLimit`; it returns a
-fixture whose byte length is exactly the declared inclusive limit. Bindings
-without a declared finite limit omit it. The kit validates repository and
-capability representation before invoking repository behavior.
+Bounded bindings must provide both boundary factories. They return fixtures
+whose byte lengths are exactly the declared inclusive limit and that limit plus
+one. Requiring explicit fixtures prevents the generic kit from allocating an
+arbitrary capability value. Bindings without a declared finite limit omit both.
+The kit validates repository and capability representation before invoking
+repository behavior and revalidates the original capability slot after every
+behavior test.
 
 See [`specification.md`](./specification.md) for the complete v1 boundary.
 

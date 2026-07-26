@@ -229,4 +229,6 @@ describeEvidenceRepositoryContract(async () => ({
 describeEvidenceRepositoryContract(async () => ({
   repository: new BoundedInMemoryEvidenceRepository(),
   createObjectAtDeclaredLimit: () => new Uint8Array(BOUNDED_OBJECT_BYTES),
+  createObjectAboveDeclaredLimit: () =>
+    new Uint8Array(BOUNDED_OBJECT_BYTES + 1),
 }));
