@@ -12,7 +12,14 @@ export function setJsonPointer(
   root: unknown,
   pointer: string,
   value: string,
-): void {
+): unknown {
+  if (pointer === "") return value;
+  if (!pointer.startsWith("/")) {
+    throw new EvidenceDerivationError(
+      "INTERNAL_FAILURE",
+      "Transformation pointer does not resolve.",
+    );
+  }
   const segments = pointer
     .split("/")
     .slice(1)
@@ -28,13 +35,14 @@ export function setJsonPointer(
     parent = (parent as Record<string, unknown>)[segment];
   }
   const key = segments.at(-1);
-  if (!key || !parent || typeof parent !== "object") {
+  if (key === undefined || !parent || typeof parent !== "object") {
     throw new EvidenceDerivationError(
       "INTERNAL_FAILURE",
       "Transformation pointer does not resolve.",
     );
   }
   (parent as Record<string, unknown>)[key] = value;
+  return root;
 }
 
 export function transformJsonBytes(
@@ -57,7 +65,7 @@ export function transformJsonBytes(
   }
   if (replacements.size === 0) return copyBytes(bytes);
   for (const [pointer, value] of replacements) {
-    setJsonPointer(parsed, pointer, value);
+    parsed = setJsonPointer(parsed, pointer, value);
   }
   const transformed = canonicalJsonBytes(parsed);
   return bytesEqual(bytes, transformed) ? copyBytes(bytes) : transformed;

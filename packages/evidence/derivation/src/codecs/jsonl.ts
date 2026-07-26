@@ -39,6 +39,12 @@ export function transformJsonlBytes(
   if (replacements.size === 0) return copyBytes(bytes);
   for (const [location, value] of replacements) {
     const [, lineText, ...segments] = location.split("/");
+    if (!/^(?:0|[1-9]\d*)$/u.test(lineText ?? "")) {
+      throw new EvidenceDerivationError(
+        "INTERNAL_FAILURE",
+        "JSONL transformation coordinate does not resolve.",
+      );
+    }
     const line = Number(lineText);
     const row = values[line];
     if (!Number.isInteger(line) || row === null || row === undefined) {
@@ -47,7 +53,11 @@ export function transformJsonlBytes(
         "JSONL transformation coordinate does not resolve.",
       );
     }
-    setJsonPointer(row, `/${segments.join("/")}`, value);
+    values[line] = setJsonPointer(
+      row,
+      segments.length === 0 ? "" : `/${segments.join("/")}`,
+      value,
+    );
   }
   return new TextEncoder().encode(
     `${values

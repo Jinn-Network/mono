@@ -41,6 +41,18 @@ describe("derivation policy", () => {
     );
   });
 
+  test("rejects duplicate class/confidence disposition floors", () => {
+    const value = baselinePolicyValue();
+    (
+      value as unknown as {
+        dispositions: Array<(typeof value.dispositions)[number]>;
+      }
+    ).dispositions.push({ ...value.dispositions[0]! });
+    expect(() => parseDerivationPolicy(canonicalJsonBytes(value))).toThrow(
+      /disposition class\/confidence rows must be unique/,
+    );
+  });
+
   test("rejects private configuration material", () => {
     const value = {
       ...baselinePolicyValue(),

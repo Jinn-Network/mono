@@ -46,13 +46,26 @@ function dispositionFor(
   finding: DerivationFinding,
   policy: DerivationPolicy,
 ): DerivationDisposition | undefined {
-  const rule = policy.dispositions.find(
-    (candidate) =>
-      candidate.class === finding.class &&
-      CONFIDENCE[finding.confidence] >=
-        CONFIDENCE[candidate.minimumConfidence],
-  );
-  return rule?.disposition;
+  let selected: DerivationPolicy["dispositions"][number] | undefined;
+  for (const candidate of policy.dispositions) {
+    if (
+      candidate.class !== finding.class ||
+      CONFIDENCE[finding.confidence] <
+        CONFIDENCE[candidate.minimumConfidence]
+    ) {
+      continue;
+    }
+    if (
+      !selected ||
+      CONFIDENCE[candidate.minimumConfidence] >
+        CONFIDENCE[selected.minimumConfidence]
+    ) {
+      selected = candidate;
+    }
+  }
+  // Policy parsing rejects duplicate class/floor rows, so the highest floor
+  // has exactly one disposition and cannot require an order-dependent tie.
+  return selected?.disposition;
 }
 
 function counts(
