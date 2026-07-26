@@ -83,4 +83,3 @@ and the Evidence Protocol sections
 [§6.8](../protocol/profiles/execution-evidence/1.0/specification.md#68-public-representations-and-derivation)
 and
 [§10](../protocol/profiles/execution-evidence/1.0/specification.md#10-conformance).
-
