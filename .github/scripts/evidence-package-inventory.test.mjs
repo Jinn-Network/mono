@@ -17,6 +17,7 @@ const EVIDENCE_PACKAGES = [
   ['catalog-sqlite', '@jinn-network/evidence-catalog-sqlite'],
   ['execution-recorder', '@jinn-network/execution-recorder'],
   ['attestation-issuer', '@jinn-network/attestation-issuer'],
+  ['derivation', '@jinn-network/evidence-derivation'],
   ['local-runtime', '@jinn-network/evidence-local-runtime'],
 ];
 
@@ -28,6 +29,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['catalog-sqlite', { dependencies: ['@jinn-network/evidence-discovery', '@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
   ['execution-recorder', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['attestation-issuer', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
+  ['derivation', { dependencies: ['@jinn-network/evidence-protocol'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['local-runtime', { dependencies: ['@jinn-network/evidence-catalog-sqlite', '@jinn-network/evidence-discovery', '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/execution-recorder'], optionalDependencies: [], peerDependencies: [] }],
 ]);
 
@@ -60,8 +62,8 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;
 }
 
-test('the evidence package inventory is explicit and has eight manifests', () => {
-  assert.equal(EVIDENCE_PACKAGES.length, 8);
+test('the evidence package inventory is explicit and has nine manifests', () => {
+  assert.equal(EVIDENCE_PACKAGES.length, 9);
   for (const [directory, expectedName] of EVIDENCE_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);

@@ -18,6 +18,7 @@ const packages = [
   ['catalog-sqlite', '@jinn-network/evidence-catalog-sqlite'],
   ['execution-recorder', '@jinn-network/execution-recorder'],
   ['attestation-issuer', '@jinn-network/attestation-issuer'],
+  ['derivation', '@jinn-network/evidence-derivation'],
   ['local-runtime', '@jinn-network/evidence-local-runtime'],
 ];
 
@@ -36,6 +37,7 @@ const codeEntrypoints = [
   '@jinn-network/execution-recorder/testing',
   '@jinn-network/attestation-issuer',
   '@jinn-network/attestation-issuer/testing',
+  '@jinn-network/evidence-derivation',
   '@jinn-network/evidence-local-runtime',
 ];
 
@@ -136,7 +138,7 @@ try {
   }
 
   console.log(
-    `Compiled a packed TypeScript consumer against ${codeEntrypoints.length} public code entrypoints across all eight evidence packages.`,
+    `Compiled a packed TypeScript consumer against ${codeEntrypoints.length} public code entrypoints across all nine evidence packages.`,
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });

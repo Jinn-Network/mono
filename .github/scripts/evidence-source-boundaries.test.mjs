@@ -8,7 +8,23 @@ const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'evidence');
 const evidenceDirectories = [
   'protocol', 'repository', 'repository-oci', 'discovery', 'catalog-sqlite',
-  'execution-recorder', 'attestation-issuer', 'local-runtime',
+  'execution-recorder', 'attestation-issuer', 'derivation', 'local-runtime',
+];
+
+const DERIVATION_FORBIDDEN_PACKAGES = [
+  '@huggingface/transformers',
+  '@jinn-network/attestation-issuer',
+  '@jinn-network/evidence-catalog-sqlite',
+  '@jinn-network/evidence-derivation-ml',
+  '@jinn-network/evidence-discovery',
+  '@jinn-network/evidence-local-runtime',
+  '@jinn-network/evidence-publication',
+  '@jinn-network/evidence-repository',
+  '@jinn-network/execution-recorder',
+  '@lmoe/gliner-onnx',
+  'better-sqlite3',
+  'node:fs',
+  'viem',
 ];
 
 function files(directory) {
@@ -122,7 +138,29 @@ test('Discovery boundary checks catch bare, relative, and root-helper Journal es
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
-test('evidence source boundaries remain one-way after discovery consolidation', () => {
+test('Derivation boundary checks catch package, I/O, and local-path escapes', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-derivation-boundary-'));
+  try {
+    const source = join(fixture, 'src');
+    const forbidden = join(fixture, 'forbidden');
+    mkdirSync(source); mkdirSync(forbidden);
+    writeFileSync(join(source, 'source.ts'), [
+      'import "@jinn-network/evidence-repository";',
+      'export * from "@jinn-network/evidence-publication";',
+      'await import("@jinn-network/evidence-discovery");',
+      'require("@jinn-network/execution-recorder");',
+      'import "node:fs/promises";',
+      'import "@huggingface/transformers";',
+      'import "../forbidden/local.js";',
+    ].join('\n'));
+    assert.equal(
+      forbiddenImports(source, DERIVATION_FORBIDDEN_PACKAGES, [forbidden]).length,
+      7,
+    );
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('evidence source boundaries remain one-way across the approved graph', () => {
   const discovery = join(packages, 'discovery', 'src');
   const catalog = join(discovery, 'catalog');
   const indexer = join(discovery, 'indexer');
@@ -161,6 +199,26 @@ test('evidence source boundaries remain one-way after discovery consolidation', 
 
   for (const producer of ['execution-recorder', 'attestation-issuer']) {
     assertBoundary(join(packages, producer, 'src'), [...concreteBindings, '@jinn-network/evidence-local-runtime'], [journal, repositoryFs, join(packages, 'repository-oci'), join(packages, 'catalog-sqlite'), join(packages, 'local-runtime')]);
+  }
+  const derivation = join(packages, 'derivation');
+  const derivationManifest = manifest('derivation');
+  const derivationForbiddenRoots = evidenceDirectories
+    .filter((directory) => !['derivation', 'protocol'].includes(directory))
+    .map((directory) => join(packages, directory));
+  assertBoundary(
+    join(derivation, 'src'),
+    DERIVATION_FORBIDDEN_PACKAGES,
+    derivationForbiddenRoots,
+  );
+  for (const section of [
+    'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
+  ]) {
+    for (const dependency of DERIVATION_FORBIDDEN_PACKAGES) {
+      assert.ok(
+        !Object.hasOwn(derivationManifest[section] ?? {}, dependency),
+        `derivation may not declare ${dependency} in ${section}`,
+      );
+    }
   }
   for (const directory of evidenceDirectories) {
     if (directory === 'local-runtime' || directory === 'catalog-sqlite') continue;
