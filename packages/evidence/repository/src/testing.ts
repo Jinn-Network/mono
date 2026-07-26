@@ -8,6 +8,7 @@ import {
 
 import {
   assertEvidenceRepositoryCapabilitiesSlot,
+  assertUnchangedEvidenceRepositoryCapabilitiesSlot,
 } from "./capabilities.js";
 import { assertContentTooLargeRepositoryError } from "./contract-errors.js";
 import { assertRepositoryOperationActive } from "./errors.js";
@@ -17,6 +18,7 @@ import {
   parseEvidenceArtifactReference,
   parseEvidenceRecordReference,
 } from "./references.js";
+import { loadDeclaredLimitFixtures } from "./testing-fixtures.js";
 import {
   EVIDENCE_RECORD_FAMILIES,
   NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
@@ -105,6 +107,7 @@ export class InMemoryEvidenceRepository implements EvidenceRepository {
 export interface EvidenceRepositoryContractContext {
   readonly repository: EvidenceRepository;
   readonly createObjectAtDeclaredLimit?: () => Uint8Array;
+  readonly createObjectAboveDeclaredLimit?: () => Uint8Array;
   readonly cleanup?: () => Promise<void> | void;
 }
 
@@ -127,9 +130,21 @@ export function describeEvidenceRepositoryContract(
     });
 
     afterEach(async () => {
-      await context?.cleanup?.();
-      capabilities = undefined;
-      context = undefined;
+      try {
+        if (context !== undefined && capabilities !== undefined) {
+          assertUnchangedEvidenceRepositoryCapabilitiesSlot(
+            context.repository,
+            capabilities,
+          );
+        }
+      } finally {
+        try {
+          await context?.cleanup?.();
+        } finally {
+          capabilities = undefined;
+          context = undefined;
+        }
+      }
     });
 
     test("exposes valid, stable, immutable capabilities", () => {
@@ -145,9 +160,10 @@ export function describeEvidenceRepositoryContract(
       const maxObjectBytes = capabilities!.maxObjectBytes;
       if (maxObjectBytes === undefined) return;
 
-      expect(context!.createObjectAtDeclaredLimit).toBeTypeOf("function");
-      const atLimit = context!.createObjectAtDeclaredLimit!();
-      expect(atLimit.byteLength).toBe(maxObjectBytes);
+      const { atLimit, aboveLimit } = loadDeclaredLimitFixtures(
+        maxObjectBytes,
+        context!,
+      );
 
       const recordReceipt = await repository.putRecord(
         "execution-evidence",
@@ -161,17 +177,16 @@ export function describeEvidenceRepositoryContract(
         atLimit,
       );
 
-      const oversized = new Uint8Array(maxObjectBytes + 1);
       const oversizedRecord = createRecordReference(
         "execution-evidence",
-        oversized,
+        aboveLimit,
       );
-      const oversizedArtifact = createArtifactReference(oversized);
+      const oversizedArtifact = createArtifactReference(aboveLimit);
       await expectContentTooLarge(() =>
-        repository.putRecord("execution-evidence", oversized),
+        repository.putRecord("execution-evidence", aboveLimit),
       );
       await expectContentTooLarge(() =>
-        repository.putArtifact(oversized),
+        repository.putArtifact(aboveLimit),
       );
       expect(await repository.getRecord(oversizedRecord)).toBeNull();
       expect(await repository.getArtifact(oversizedArtifact)).toBeNull();

@@ -4,6 +4,7 @@ import {
   assertEvidenceRepositoryCapabilitiesSlot,
   assertEvidenceRepositoryCapabilities,
   assertStableImmutableEvidenceRepositoryCapabilities,
+  assertUnchangedEvidenceRepositoryCapabilitiesSlot,
 } from "./capabilities.js";
 
 const OBJECT_PROXY_TRAPS = [
@@ -83,6 +84,20 @@ function createTrapCountingProxy<T extends object>(target: T): {
 }
 
 describe("internal repository capability validation", () => {
+  test("rejects a capability slot replaced after repository activity", () => {
+    const original = Object.freeze({ maxObjectBytes: 1 });
+    const repository = { capabilities: original };
+
+    repository.capabilities = Object.freeze({ maxObjectBytes: 1 });
+
+    expect(() =>
+      assertUnchangedEvidenceRepositoryCapabilitiesSlot(
+        repository,
+        original,
+      ),
+    ).toThrowError(/must remain unchanged for the repository lifetime/u);
+  });
+
   test.each([
     null,
     [],
