@@ -160,6 +160,47 @@ describe("finding normalization", () => {
     );
   });
 
+  test.each([
+    ["fractional start", { start: 0.5 }],
+    ["fractional end", { end: 2.5 }],
+    ["negative start", { start: -1 }],
+    ["empty span", { start: 1, end: 1 }],
+    ["reversed span", { start: 2, end: 1 }],
+    ["out-of-range end", { end: 4 }],
+  ] as const)("rejects a %s", (_name, offsets) => {
+    expect(() =>
+      normalizeDetectorFindings(surface("abc"), [finding(offsets)]),
+    ).toThrowError(
+      expect.objectContaining({ code: "DETECTOR_CONTRACT_VIOLATION" }),
+    );
+  });
+
+  test.each([
+    ["start", { start: 1, end: 2 }],
+    ["end", { start: 0, end: 1 }],
+  ] as const)(
+    "rejects a finding whose %s boundary splits a valid surrogate pair",
+    (_name, offsets) => {
+      expect(() =>
+        normalizeDetectorFindings(surface("😀"), [finding(offsets)]),
+      ).toThrowError(
+        expect.objectContaining({ code: "DETECTOR_CONTRACT_VIOLATION" }),
+      );
+    },
+  );
+
+  test("normalizes exact UTF-16 spans after and around astral characters", () => {
+    expect(
+      normalizeDetectorFindings(surface("😀abc"), [
+        finding({ start: 2, end: 5 }),
+        finding({ start: 0, end: 2, class: "credential" }),
+      ]),
+    ).toEqual([
+      finding({ start: 0, end: 2, class: "credential" }),
+      finding({ start: 2, end: 5 }),
+    ]);
+  });
+
   test("rejects matched plaintext in evidence", () => {
     expect(() =>
       normalizeDetectorFindings(surface("abc"), [

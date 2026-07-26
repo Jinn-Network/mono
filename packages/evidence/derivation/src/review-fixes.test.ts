@@ -259,6 +259,34 @@ test("normalization rejects a finding carrying another detector descriptor", () 
   );
 });
 
+test("derivation rejects a detector span that splits an astral character without returning output", async () => {
+  const input = syntheticDerivationInput();
+  const text = "😀 private value";
+  replaceArtifact(input, "task/task.md", new TextEncoder().encode(text));
+  const detectors = createBuiltinDerivationDetectors({
+    privateConfiguration,
+  }).map((detector, index) => ({
+    descriptor: detector.descriptor,
+    async detect(candidate: DerivationSurface): Promise<DerivationFinding[]> {
+      if (index !== 0 || candidate.text !== text) return [];
+      return [
+        {
+          class: "email",
+          confidence: "HIGH",
+          surfaceId: candidate.surfaceId,
+          start: 1,
+          end: 2,
+          evidence: ["synthetic-astral-span"],
+          detector: detector.descriptor,
+        },
+      ];
+    },
+  }));
+  await expect(
+    createEvidenceDeriver({ detectors }).derive(input),
+  ).rejects.toMatchObject({ code: "DETECTOR_CONTRACT_VIOLATION" });
+});
+
 test("behavioral and proxy inputs fail before their traps or accessors execute", async () => {
   let trapCalls = 0;
   const proxied = new Proxy(syntheticDerivationInput(), {

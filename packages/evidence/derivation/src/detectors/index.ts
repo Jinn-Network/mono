@@ -627,6 +627,18 @@ function snapshotDescriptor(
   }
 }
 
+function splitsSurrogatePair(text: string, boundary: number): boolean {
+  if (boundary <= 0 || boundary >= text.length) return false;
+  const previous = text.charCodeAt(boundary - 1);
+  const next = text.charCodeAt(boundary);
+  return (
+    previous >= 0xd800 &&
+    previous <= 0xdbff &&
+    next >= 0xdc00 &&
+    next <= 0xdfff
+  );
+}
+
 export function normalizeDetectorFindings(
   surface: DerivationSurface,
   findings: readonly DerivationFinding[],
@@ -687,7 +699,9 @@ export function normalizeDetectorFindings(
       Number.isInteger(candidate.end) &&
       candidate.start >= 0 &&
       candidate.end > candidate.start &&
-      candidate.end <= surface.text.length;
+      candidate.end <= surface.text.length &&
+      !splitsSurrogatePair(surface.text, candidate.start) &&
+      !splitsSurrogatePair(surface.text, candidate.end);
     const matchedPlaintext = offsetsValid
       ? surface.text.slice(candidate.start, candidate.end).toLowerCase()
       : undefined;

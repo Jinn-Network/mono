@@ -77,7 +77,9 @@ export interface DerivationFinding {
   readonly class: string;
   readonly confidence: ConfidenceBand;
   readonly surfaceId: string;
+  /** Zero-based inclusive UTF-16 code-unit index into the exact surface text. */
   readonly start: number;
+  /** Zero-based exclusive UTF-16 code-unit index into the exact surface text. */
   readonly end: number;
   readonly evidence: readonly string[];
   readonly detector: DerivationDetectorDescriptor;
