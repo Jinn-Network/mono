@@ -985,6 +985,31 @@ export function describeEvidenceDeriverContract(
       ).toBe("content-addressed");
     });
 
+    test("withholds content-free when an injected required detector rejects", async () => {
+      const privateRejection = "contract-private-required-detector-rejection";
+      const detectors = baselinePolicyValue().requiredDetectors.map(
+        (descriptor, index) =>
+          Object.freeze({
+            descriptor: Object.freeze({ ...descriptor }),
+            async detect() {
+              if (index === 0) throw new Error(privateRejection);
+              return Object.freeze([] as DerivationFinding[]);
+            },
+          }),
+      );
+      const outcome = await (
+        await factory(detectors)
+      ).derive(syntheticDerivationInput());
+      expect(outcome).toEqual({
+        status: "withheld",
+        reasons: [{ code: "required-detector-failed" }],
+      });
+      expect("record" in outcome).toBe(false);
+      expect("artifacts" in outcome).toBe(false);
+      expect("receipt" in outcome).toBe(false);
+      expect(JSON.stringify(outcome)).not.toContain(privateRejection);
+    });
+
     test.each([
       ["task/task.md", true, false],
       ["results/result.patch", false, true],

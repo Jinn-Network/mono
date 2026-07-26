@@ -243,22 +243,25 @@ test('Derivation root and testing boundaries distinguish test-only dependencies'
   try {
     const source = join(fixture, 'src');
     const testing = join(source, 'testing.ts');
+    const testingFixtures = join(source, 'fixtures.ts');
     mkdirSync(source);
     writeFileSync(join(source, 'index.ts'), [
       'import "vitest";',
       'export * from "./testing.js";',
+      'export * from "./fixtures.js";',
     ].join('\n'));
     writeFileSync(testing, [
       'import "@jinn-network/evidence-repository";',
       'import "node:fs/promises";',
     ].join('\n'));
+    writeFileSync(testingFixtures, 'export const syntheticFixture = true;\n');
     assert.equal(
       forbiddenImportsInFiles(
         [join(source, 'index.ts')],
         ['vitest'],
-        [testing],
+        [testing, testingFixtures],
       ).length,
-      2,
+      3,
     );
     assert.equal(
       forbiddenImportsInFiles(
@@ -313,9 +316,15 @@ test('evidence source boundaries remain one-way across the approved graph', () =
   const derivation = join(packages, 'derivation');
   const derivationSource = join(derivation, 'src');
   const derivationTesting = join(derivationSource, 'testing.ts');
+  const derivationTestingFixtures = join(derivationSource, 'fixtures.ts');
+  const derivationTestingFiles = [
+    derivationTesting,
+    derivationTestingFixtures,
+  ];
   const derivationSourceFiles = files(derivationSource);
   const derivationProductionFiles = derivationSourceFiles.filter((file) =>
-    file !== derivationTesting && !/\.test\.[cm]?[jt]sx?$/u.test(file));
+    !derivationTestingFiles.includes(file)
+      && !/\.test\.[cm]?[jt]sx?$/u.test(file));
   const derivationManifest = manifest('derivation');
   const derivationForbiddenRoots = evidenceDirectories
     .filter((directory) => !['derivation', 'protocol'].includes(directory))
@@ -324,14 +333,14 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     forbiddenImportsInFiles(
       derivationProductionFiles,
       [...DERIVATION_FORBIDDEN_PACKAGES, 'vitest'],
-      [...derivationForbiddenRoots, derivationTesting],
+      [...derivationForbiddenRoots, ...derivationTestingFiles],
     ),
     [],
     'the Derivation root region must not expose /testing or test-only dependencies',
   );
   assert.deepEqual(
     forbiddenImportsInFiles(
-      [derivationTesting],
+      derivationTestingFiles,
       DERIVATION_FORBIDDEN_PACKAGES,
       derivationForbiddenRoots,
     ),
@@ -339,7 +348,10 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     'the Derivation /testing region crosses an evidence architecture boundary',
   );
   assert.deepEqual(
-    ambientNetworkUsesInFiles([...derivationProductionFiles, derivationTesting]),
+    ambientNetworkUsesInFiles([
+      ...derivationProductionFiles,
+      ...derivationTestingFiles,
+    ]),
     [],
     'Derivation production and /testing entrypoints may not use ambient network APIs',
   );
