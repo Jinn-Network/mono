@@ -325,6 +325,16 @@ if (CHILD_POINT !== undefined) {
     );
   });
 
+  it("preserves repository capability identity through the fault wrapper", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "jinn-local-capability-proxy-"));
+    temporaryRoots.push(rootDir);
+    const repository = await createFilesystemEvidenceRepository({ rootDir });
+    const wrapped = wrapRepository(repository, async () => undefined);
+
+    expect(wrapped.capabilities).toBe(repository.capabilities);
+    expect(wrapped.capabilities).toBe(repository.capabilities);
+  });
+
   async function openTrackedRuntime(rootDir: string): Promise<LocalEvidenceRuntime> {
     const runtime = await openLocalEvidenceRuntime({ rootDir });
     openRuntimes.push(runtime);

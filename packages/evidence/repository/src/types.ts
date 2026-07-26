@@ -27,7 +27,16 @@ export interface RepositoryWriteReceipt<TReference> {
   readonly status: "created" | "existing";
 }
 
+export interface EvidenceRepositoryCapabilities {
+  readonly maxObjectBytes?: number;
+}
+
+export const NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES:
+  EvidenceRepositoryCapabilities = Object.freeze({});
+
 export interface EvidenceRepository {
+  readonly capabilities: EvidenceRepositoryCapabilities;
+
   putRecord(
     family: EvidenceRecordFamily,
     bytes: Uint8Array,

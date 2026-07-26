@@ -19,6 +19,13 @@ Consumers validate retrieved record bytes with the Evidence Protocol package.
 Repository implementations may use local files, OCI registries, or another
 transport without changing the consumer-facing contract.
 
+Every repository exposes a stable, immutable `capabilities` object. The
+optional `maxObjectBytes` field is a positive safe integer when a binding
+declares a finite per-object limit. An absent field means that the binding
+declares no finite application-level limit; it does not guarantee infinite
+storage. The in-memory, filesystem, and OCI bindings use the shared frozen
+`NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES` object.
+
 ## Filesystem binding
 
 The native filesystem binding is deliberately opt-in through the `/fs` subpath;
@@ -73,7 +80,7 @@ async function readExecution(
 ```
 
 Missing content returns `null`. Malformed references, corruption, access
-failures, dependency failures, cancellation, and I/O failures throw
+failures, dependency failures, size-limit violations, cancellation, and I/O failures throw
 `EvidenceRepositoryError` with a stable error code.
 
 ## Implementation contract

@@ -232,6 +232,7 @@ function wrapRepository(
   >,
 ): EvidenceRepository {
   return {
+    capabilities: repository.capabilities,
     async putRecord(family, bytes, options) {
       return repository.putRecord(family, bytes, options);
     },

@@ -319,6 +319,7 @@ async function realExecutionRecorderDriver(): Promise<ExecutionProducerContractD
         | ExecutionProducerContractFinalizationInterruption
         | undefined = interruptFinalization;
       const repository: EvidenceRepository = {
+        capabilities: backing.capabilities,
         putArtifact: (...args) => backing.putArtifact(...args),
         getArtifact: (...args) => backing.getArtifact(...args),
         getRecord: (...args) => backing.getRecord(...args),

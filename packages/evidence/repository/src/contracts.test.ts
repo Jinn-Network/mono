@@ -2,7 +2,9 @@ import { describe, expect, test } from "vitest";
 
 import {
   EVIDENCE_RECORD_FAMILIES,
+  EVIDENCE_REPOSITORY_ERROR_CODES,
   EvidenceRepositoryError,
+  NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
   assertRepositoryOperationActive,
   createArtifactReference,
   createRecordReference,
@@ -10,6 +12,7 @@ import {
 } from "./index.js";
 import {
   InMemoryEvidenceRepository,
+  assertEvidenceRepositoryCapabilities,
   describeEvidenceRepositoryContract,
 } from "./testing.js";
 
@@ -64,6 +67,41 @@ describe("repository references", () => {
     expect(
       new EvidenceRepositoryError("IO_FAILURE", "failed").code,
     ).toBe("IO_FAILURE");
+  });
+});
+
+describe("repository capabilities", () => {
+  test("exports one stable frozen empty capability object", () => {
+    expect(NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES).toEqual({});
+    expect(
+      Object.isFrozen(NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES),
+    ).toBe(true);
+    expect(EVIDENCE_REPOSITORY_ERROR_CODES).toContain("CONTENT_TOO_LARGE");
+    expect(
+      new EvidenceRepositoryError("CONTENT_TOO_LARGE", "too large").code,
+    ).toBe("CONTENT_TOO_LARGE");
+  });
+
+  test.each([
+    0,
+    -1,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.MAX_SAFE_INTEGER + 1,
+    "1024",
+  ])("rejects invalid maxObjectBytes value %s", (maxObjectBytes) => {
+    expect(() =>
+      assertEvidenceRepositoryCapabilities({ maxObjectBytes }),
+    ).toThrowError(/maxObjectBytes/u);
+  });
+
+  test("accepts an absent limit and ignores future fields", () => {
+    expect(() =>
+      assertEvidenceRepositoryCapabilities(
+        Object.freeze({ futureCapability: "preserved" }),
+      ),
+    ).not.toThrow();
   });
 });
 

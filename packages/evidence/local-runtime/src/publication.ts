@@ -264,6 +264,7 @@ export function createAnnouncementAwareRepository(
 ): EvidenceRepository {
   const mutex = new KeyedMutex();
   return {
+    capabilities: options.repository.capabilities,
     async putRecord(family, callerBytes, operationOptions) {
       let publicationStarted = false;
       try {

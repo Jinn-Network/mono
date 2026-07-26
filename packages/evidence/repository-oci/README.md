@@ -50,6 +50,10 @@ Authentication remains entirely owned by ORAS through its registry config;
 passwords and tokens are intentionally not JavaScript options or command-line
 arguments.
 
+The OCI binding exposes the shared frozen empty Repository capability object.
+It does not infer a per-object maximum from mutable registry quota or local
+free-space observations.
+
 ## Development
 
 Use Node 22, Yarn 4.13.0, and ORAS 1.3.2 for registry integration:

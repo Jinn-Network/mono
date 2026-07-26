@@ -16,7 +16,10 @@ import {
   createRecordReference,
 } from "../references.js";
 import { describeEvidenceRepositoryContract } from "../testing.js";
-import type { Sha256Digest } from "../types.js";
+import {
+  NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
+  type Sha256Digest,
+} from "../types.js";
 import {
   validateExecutionEvidence,
   validateExecutionVerification,
@@ -46,6 +49,23 @@ describeEvidenceRepositoryContract(async () => {
 });
 
 describe("filesystem evidence repository", () => {
+  test("exposes one stable immutable no-limit capability object", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "jinn-evidence-fs-capability-"));
+    try {
+      const repository = await createFilesystemEvidenceRepository({ rootDir });
+      const capabilities = repository.capabilities;
+
+      expect(capabilities).toBe(
+        NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
+      );
+      expect(repository.capabilities).toBe(capabilities);
+      expect(Reflect.set(capabilities, "maxObjectBytes", 1)).toBe(false);
+      expect(repository.capabilities).toEqual({});
+    } finally {
+      await rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
   test("preserves conforming golden records for consumer validation", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "jinn-evidence-fs-golden-"));
     const fixtures = [

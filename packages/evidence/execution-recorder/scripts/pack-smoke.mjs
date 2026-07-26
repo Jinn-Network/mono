@@ -146,12 +146,16 @@ import {
   createExecutionRecorder,
 } from "@jinn-network/execution-recorder";
 import {
+  NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
+} from "@jinn-network/evidence-repository";
+import {
   describeExecutionProducerContract,
 } from "@jinn-network/execution-recorder/testing";
 import { test } from "vitest";
 
 test("packed execution recorder exposes its public distribution contract", async () => {
   const repository = {
+    capabilities: NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
     async putRecord() { throw new Error("not used"); },
     async getRecord() { return null; },
     async putArtifact() { throw new Error("not used"); },

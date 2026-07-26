@@ -15,9 +15,11 @@ import {
 } from "./references.js";
 import {
   EVIDENCE_RECORD_FAMILIES,
+  NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
   type EvidenceArtifactReference,
   type EvidenceRecordReference,
   type EvidenceRepository,
+  type EvidenceRepositoryCapabilities,
   type RepositoryOperationOptions,
   type RepositoryWriteReceipt,
 } from "./types.js";
@@ -31,6 +33,9 @@ function recordKey(reference: EvidenceRecordReference): string {
 }
 
 export class InMemoryEvidenceRepository implements EvidenceRepository {
+  readonly capabilities =
+    NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES;
+
   readonly #records = new Map<string, Uint8Array>();
   readonly #artifacts = new Map<string, Uint8Array>();
 
@@ -90,6 +95,35 @@ export class InMemoryEvidenceRepository implements EvidenceRepository {
     const reference = parseEvidenceArtifactReference(untrustedReference);
     const bytes = this.#artifacts.get(reference.digest);
     return bytes === undefined ? null : cloneBytes(bytes);
+  }
+}
+
+export function assertEvidenceRepositoryCapabilities(
+  value: unknown,
+): asserts value is EvidenceRepositoryCapabilities {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    throw new TypeError(
+      "EvidenceRepository.capabilities must be a non-null, non-array object.",
+    );
+  }
+  const maxObjectBytes = (
+    value as { readonly maxObjectBytes?: unknown }
+  ).maxObjectBytes;
+  if (
+    maxObjectBytes !== undefined &&
+    (
+      typeof maxObjectBytes !== "number" ||
+      !Number.isSafeInteger(maxObjectBytes) ||
+      maxObjectBytes <= 0
+    )
+  ) {
+    throw new TypeError(
+      "EvidenceRepository.capabilities.maxObjectBytes must be a positive safe integer when supplied.",
+    );
   }
 }
 

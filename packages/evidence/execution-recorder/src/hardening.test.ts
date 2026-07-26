@@ -52,6 +52,7 @@ interface RepositoryFault {
 
 class FaultInjectingRepository implements EvidenceRepository {
   readonly delegate = new InMemoryEvidenceRepository();
+  readonly capabilities = this.delegate.capabilities;
   readonly artifactCalls: Sha256Digest[] = [];
   readonly recordCalls: EvidenceRecordReference[] = [];
 

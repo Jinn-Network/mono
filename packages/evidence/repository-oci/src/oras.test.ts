@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
   createArtifactReference,
   createRecordReference,
 } from "@jinn-network/evidence-repository";
@@ -171,6 +172,26 @@ describeEvidenceRepositoryContract(async () => {
 });
 
 describe("ORAS CLI evidence repository", () => {
+  test("exposes one stable immutable no-limit capability object", async () => {
+    const fake = await createFakeOras();
+    try {
+      const repository = await createOrasCliEvidenceRepository({
+        repository: "registry.example.test/jinn/evidence",
+        orasPath: fake.executable,
+      });
+      const capabilities = repository.capabilities;
+
+      expect(capabilities).toBe(
+        NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
+      );
+      expect(repository.capabilities).toBe(capabilities);
+      expect(Reflect.set(capabilities, "maxObjectBytes", 1)).toBe(false);
+      expect(repository.capabilities).toEqual({});
+    } finally {
+      await fake.cleanup();
+    }
+  });
+
   test("publishes exact blobs and a Jinn-built canonical manifest", async () => {
     const fake = await createFakeOras();
     try {

@@ -27,14 +27,15 @@ import {
   parseEvidenceArtifactReference,
   parseEvidenceRecordReference,
 } from "../references.js";
-import type {
-  EvidenceArtifactReference,
-  EvidenceRecordFamily,
-  EvidenceRecordReference,
-  EvidenceRepository,
-  RepositoryOperationOptions,
-  RepositoryWriteReceipt,
-  Sha256Digest,
+import {
+  NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
+  type EvidenceArtifactReference,
+  type EvidenceRecordFamily,
+  type EvidenceRecordReference,
+  type EvidenceRepository,
+  type RepositoryOperationOptions,
+  type RepositoryWriteReceipt,
+  type Sha256Digest,
 } from "../types.js";
 
 export const FILESYSTEM_REPOSITORY_FORMAT = {
@@ -442,6 +443,9 @@ function assertMarker(
 }
 
 export class FilesystemEvidenceRepository implements EvidenceRepository {
+  readonly capabilities =
+    NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES;
+
   readonly #rootDir: string;
 
   constructor(rootDir: string) {

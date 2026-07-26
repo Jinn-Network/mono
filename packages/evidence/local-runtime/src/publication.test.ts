@@ -222,6 +222,7 @@ describe("announcement-aware repository", () => {
       "repository denied recovery",
     );
     const repository = {
+      capabilities: value.repository.capabilities,
       putRecord: value.repository.putRecord.bind(value.repository),
       async getRecord(): Promise<null> { throw expected; },
       putArtifact: value.repository.putArtifact.bind(value.repository),
