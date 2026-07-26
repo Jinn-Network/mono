@@ -156,6 +156,10 @@ describe('packed client workflow coverage', () => {
     expect(resolveBundled).toContain('JINN_BUILD_COMMIT');
     expect(patchCanary).toContain('steps.bundled.outputs.core_version');
     expect(patchCanary).toContain('steps.bundled.outputs.plugin_version');
+    expect(patchCanary).toContain("const corePath = '../packages/core/package.json'");
+    expect(patchCanary).toContain("const pluginPath = '../packages/plugin/package.json'");
+    expect(patchCanary).toContain('core.version =');
+    expect(patchCanary).toContain('plugin.version =');
   });
 
   it('runs postpublication registry acceptance through Yarn 4', () => {

@@ -280,6 +280,14 @@ jobs:
             pkg.dependencies['@jinn-network/core'] = '${{ steps.bundled.outputs.core_version }}';
             pkg.dependencies['@jinn-network/plugin'] = '${{ steps.bundled.outputs.plugin_version }}';
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            const corePath = '../packages/core/package.json';
+            const core = JSON.parse(fs.readFileSync(corePath, 'utf8'));
+            core.version = '${{ steps.bundled.outputs.core_version }}';
+            fs.writeFileSync(corePath, JSON.stringify(core, null, 2) + '\n');
+            const pluginPath = '../packages/plugin/package.json';
+            const plugin = JSON.parse(fs.readFileSync(pluginPath, 'utf8'));
+            plugin.version = '${{ steps.bundled.outputs.plugin_version }}';
+            fs.writeFileSync(pluginPath, JSON.stringify(plugin, null, 2) + '\n');
             const sdkPath = '../packages/sdk/package.json';
             const sdk = JSON.parse(fs.readFileSync(sdkPath, 'utf8'));
             sdk.version = '0.1.1-canary.sha.${JINN_BUILD_COMMIT}';
