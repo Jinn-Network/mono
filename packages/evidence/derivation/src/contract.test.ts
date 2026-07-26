@@ -7,6 +7,7 @@ import {
   rejectNextBuiltinDetection,
   retainedBuiltinSurfaceCount,
 } from "./detectors/index.js";
+import { invokeContractDetector } from "./detector-contract-invocation.js";
 import { createEvidenceDeriver } from "./derive.js";
 import {
   createSyntheticDerivationDetectorFixtures,
@@ -15,7 +16,11 @@ import {
   describeEvidenceDeriverContract,
 } from "./testing.js";
 import type { DerivationDetectorContractContext } from "./testing.js";
-import type { DerivationDetector } from "./types.js";
+import type {
+  DerivationDetector,
+  DerivationOperationOptions,
+  DerivationSurface,
+} from "./types.js";
 
 interface ContractLifecycle {
   ambientObserverCalls: number;
@@ -90,6 +95,34 @@ function installBuiltinAmbientCanaries(): {
       (..._arguments: unknown[]): never => fail(label),
       label,
     );
+  };
+  const propertyOwner = (target: object, key: string): object => {
+    for (
+      let candidate: object | null = target;
+      candidate !== null;
+      candidate = Object.getPrototypeOf(candidate)
+    ) {
+      if (Object.hasOwn(candidate, key)) return candidate;
+    }
+    throw new Error(`Cannot find ambient canary target for ${key}`);
+  };
+  const installGetter = (
+    target: object,
+    key: string,
+    label: string,
+  ): void => {
+    const owner = propertyOwner(target, key);
+    const descriptor = Object.getOwnPropertyDescriptor(owner, key);
+    if (!descriptor || typeof descriptor.get !== "function") {
+      throw new Error(`Cannot install ambient canary for ${label}`);
+    }
+    Object.defineProperty(owner, key, {
+      ...descriptor,
+      get: () => fail(label),
+    });
+    restorations.push(() => {
+      Object.defineProperty(owner, key, descriptor);
+    });
   };
 
   install(globalThis, "fetch", "fetch");
@@ -222,6 +255,14 @@ function installBuiltinAmbientCanaries(): {
   }
 
   install(process, "cwd", "process.cwd");
+  const hrtimeCanary = Object.assign(
+    (..._arguments: unknown[]): never => fail("process.hrtime"),
+    {
+      bigint: (): never => fail("process.hrtime.bigint"),
+    },
+  );
+  installValue(process, "hrtime", hrtimeCanary, "process.hrtime");
+  install(process, "uptime", "process.uptime");
   const environment = process.env;
   installValue(
     process,
@@ -260,7 +301,27 @@ function installBuiltinAmbientCanaries(): {
   );
   install(webCryptoPrototype, "randomUUID", "crypto.randomUUID");
 
-  install(Date, "now", "clock");
+  const dateConstructor = Date;
+  install(dateConstructor, "now", "Date.now");
+  installValue(
+    globalThis,
+    "Date",
+    new Proxy(dateConstructor, {
+      apply: (): never => fail("Date()"),
+      construct: (): never => fail("new Date()"),
+    }),
+    "Date constructor",
+  );
+  install(
+    propertyOwner(globalThis.performance, "now"),
+    "now",
+    "performance.now",
+  );
+  installGetter(
+    globalThis.performance,
+    "timeOrigin",
+    "performance.timeOrigin",
+  );
   install(Math, "random", "randomness");
 
   const moduleBuiltin = builtinModule("module");
@@ -288,25 +349,33 @@ function installBuiltinAmbientCanaries(): {
 }
 
 function createBuiltinContractContext(
-  detector: DerivationDetector,
+  detectorIndex: number,
   lifecycle: ContractLifecycle,
 ): DerivationDetectorContractContext {
   const canaries = installBuiltinAmbientCanaries();
-  return {
-    detector,
-    ambientEffectCount: () => {
-      lifecycle.ambientObserverCalls += 1;
-      return canaries.ambientEffectCount();
-    },
-    retainedSurfaceCount: () => {
-      lifecycle.retainedObserverCalls += 1;
-      return retainedBuiltinSurfaceCount(detector);
-    },
-    cleanup: () => {
-      lifecycle.cleanupCalls += 1;
-      canaries.cleanup();
-    },
-  };
+  try {
+    const detector = createBuiltinDerivationDetectors({
+      privateConfiguration,
+    })[detectorIndex]!;
+    return {
+      detector,
+      ambientEffectCount: () => {
+        lifecycle.ambientObserverCalls += 1;
+        return canaries.ambientEffectCount();
+      },
+      retainedSurfaceCount: () => {
+        lifecycle.retainedObserverCalls += 1;
+        return retainedBuiltinSurfaceCount(detector);
+      },
+      cleanup: () => {
+        lifecycle.cleanupCalls += 1;
+        canaries.cleanup();
+      },
+    };
+  } catch (error) {
+    canaries.cleanup();
+    throw error;
+  }
 }
 
 const privateConfiguration = createSyntheticPrivateDetectorConfiguration();
@@ -319,12 +388,96 @@ describeEvidenceDeriverContract((detectors) =>
   }),
 );
 
-const builtinDetectors = createBuiltinDerivationDetectors({
-  privateConfiguration,
-});
+const builtinDetectors = (() => {
+  const canaries = installBuiltinAmbientCanaries();
+  try {
+    return createBuiltinDerivationDetectors({
+      privateConfiguration,
+    });
+  } finally {
+    canaries.cleanup();
+  }
+})();
 const fixtures = createSyntheticDerivationDetectorFixtures();
 const knownIdentityLifecycle = createContractLifecycle();
 const deterministicPatternsLifecycle = createContractLifecycle();
+
+function mutableContractSurface(): DerivationSurface {
+  return {
+    ...fixtures.deterministicPatterns[0]!.surface,
+  };
+}
+
+function mutationProbeContext(
+  detect: DerivationDetector["detect"],
+): DerivationDetectorContractContext {
+  return {
+    detector: {
+      descriptor: builtinDetectors[1]!.descriptor,
+      detect,
+    },
+    ambientEffectCount: () => 0,
+    retainedSurfaceCount: () => 0,
+  };
+}
+
+test("the detector contract catches input mutation on a repeated fulfillment", async () => {
+  const surface = mutableContractSurface();
+  let calls = 0;
+  const context = mutationProbeContext(async (input) => {
+    calls += 1;
+    if (calls === 2) {
+      (input as { text: string }).text = "mutated on second fulfillment";
+    }
+    return [];
+  });
+
+  await invokeContractDetector(context, surface);
+  await expect(invokeContractDetector(context, surface)).rejects.toThrow(
+    /mutated its input surface/u,
+  );
+});
+
+test("the detector contract catches input mutation on a repeated rejection", async () => {
+  const surface = mutableContractSurface();
+  let calls = 0;
+  const context = mutationProbeContext(async (input) => {
+    calls += 1;
+    if (calls === 2) {
+      (input as { text: string }).text = "mutated on second rejection";
+      throw new Error("synthetic operational rejection");
+    }
+    return [];
+  });
+
+  await invokeContractDetector(context, surface);
+  await expect(invokeContractDetector(context, surface)).rejects.toThrow(
+    /mutated its input surface/u,
+  );
+});
+
+test("the detector contract catches input mutation during cancellation", async () => {
+  const surface = mutableContractSurface();
+  const context = mutationProbeContext(
+    async (input, options?: DerivationOperationOptions) => {
+      if (options?.signal?.aborted) {
+        (input as { text: string }).text = "mutated during cancellation";
+        throw Object.assign(new Error("synthetic cancellation"), {
+          code: "OPERATION_ABORTED",
+        });
+      }
+      return [];
+    },
+  );
+  const controller = new AbortController();
+  controller.abort();
+
+  await expect(
+    invokeContractDetector(context, surface, {
+      signal: controller.signal,
+    }),
+  ).rejects.toThrow(/mutated its input surface/u);
+});
 
 test("synthetic detector surfaces carry unique private markers", () => {
   const surfaces = [
@@ -362,9 +515,14 @@ test("ambient canaries fail every prohibited effect category", () => {
         ["/never-written", "private"],
       )
     ).toThrow(/ambient fs\.writeFileSync/u);
-    expect(() => Date.now()).toThrow(/ambient clock/u);
+    expect(() => Date.now()).toThrow(/ambient Date\.now/u);
+    expect(() => new Date()).toThrow(/ambient new Date\(\)/u);
+    expect(() => globalThis.performance.now()).toThrow(
+      /ambient performance\.now/u,
+    );
+    expect(() => process.hrtime()).toThrow(/ambient process\.hrtime/u);
     expect(() => Math.random()).toThrow(/ambient randomness/u);
-    expect(canaries.ambientEffectCount()).toBe(5);
+    expect(canaries.ambientEffectCount()).toBe(8);
   } finally {
     canaries.cleanup();
   }
@@ -489,6 +647,41 @@ test.each([
         [1],
       ),
   ],
+  [
+    "wall-clock construction",
+    /ambient new Date\(\)/u,
+    () => new Date(),
+  ],
+  [
+    "wall-clock function calls",
+    /ambient Date\(\)/u,
+    () => Reflect.apply(Date, undefined, []),
+  ],
+  [
+    "monotonic clock reads",
+    /ambient performance\.now/u,
+    () => globalThis.performance.now(),
+  ],
+  [
+    "clock-origin reads",
+    /ambient performance\.timeOrigin/u,
+    () => Reflect.get(globalThis.performance, "timeOrigin"),
+  ],
+  [
+    "high-resolution clock reads",
+    /ambient process\.hrtime/u,
+    () => process.hrtime(),
+  ],
+  [
+    "high-resolution bigint clock reads",
+    /ambient process\.hrtime\.bigint/u,
+    () => process.hrtime.bigint(),
+  ],
+  [
+    "process uptime clock reads",
+    /ambient process\.uptime/u,
+    () => process.uptime(),
+  ],
 ] as const)(
   "ambient canaries directly reject %s",
   (_name, expected, operation) => {
@@ -505,7 +698,7 @@ test.each([
 describeDerivationDetectorContract(
   () =>
     createBuiltinContractContext(
-      builtinDetectors[0]!,
+      0,
       knownIdentityLifecycle,
     ),
   fixtures.knownIdentity,
@@ -513,31 +706,31 @@ describeDerivationDetectorContract(
 describeDerivationDetectorContract(
   () =>
     createBuiltinContractContext(
-      builtinDetectors[1]!,
+      1,
       deterministicPatternsLifecycle,
     ),
   fixtures.deterministicPatterns,
 );
 
 test.each([
-  ["known identity", builtinDetectors[0]!, fixtures.knownIdentity[0]!.surface],
+  ["known identity", 0, fixtures.knownIdentity[0]!.surface],
   [
     "deterministic patterns",
-    builtinDetectors[1]!,
+    1,
     fixtures.deterministicPatterns[0]!.surface,
   ],
 ] as const)(
   "the %s detector releases observers after a non-abort operational rejection",
-  async (_name, detector, surface) => {
+  async (_name, detectorIndex, surface) => {
     const context = createBuiltinContractContext(
-      detector,
+      detectorIndex,
       createContractLifecycle(),
     );
     try {
       expect(context.ambientEffectCount()).toBe(0);
       expect(context.retainedSurfaceCount()).toBe(0);
-      rejectNextBuiltinDetection(detector);
-      await expect(detector.detect(surface)).rejects.toThrow(
+      rejectNextBuiltinDetection(context.detector);
+      await expect(context.detector.detect(surface)).rejects.toThrow(
         /synthetic operational rejection/u,
       );
       expect(context.ambientEffectCount()).toBe(0);

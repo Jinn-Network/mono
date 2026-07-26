@@ -513,6 +513,77 @@ test.each([
   },
 );
 
+test.each([
+  [
+    "@id",
+    { "@id": "urn:private:extension-identifier" },
+    "urn:private:extension-identifier",
+  ],
+  [
+    "@type",
+    { "@type": "PrivateExtensionType" },
+    "PrivateExtensionType",
+  ],
+  [
+    "sha256",
+    { sha256: "private-extension-digest-literal" },
+    "private-extension-digest-literal",
+  ],
+  [
+    "relationship reference",
+    { hasPart: { "@id": "urn:private:extension-part" } },
+    "urn:private:extension-part",
+  ],
+  [
+    "relationship reference array",
+    { mentions: [{ "@id": "urn:private:extension-mention" }] },
+    "urn:private:extension-mention",
+  ],
+  [
+    "media type",
+    { encodingFormat: "private/extension-format" },
+    "private/extension-format",
+  ],
+  [
+    "version",
+    { softwareVersion: "private-extension-version" },
+    "private-extension-version",
+  ],
+] as const)(
+  "protected-looking %s nested under an unknown extension requires an exact selector",
+  async (_name, extension, privateLiteral) => {
+    const input = syntheticDerivationInput();
+    rewriteRecord(input, (document) => {
+      const root = (document["@graph"] as Array<Record<string, unknown>>).find(
+        (entity) => entity["@id"] === "./",
+      )!;
+      root["x-private-extension"] = extension;
+    });
+
+    let detectorCalls = 0;
+    const detectors = builtins().map((detector) => ({
+      descriptor: detector.descriptor,
+      async detect(
+        surface: DerivationSurface,
+        options?: DerivationOperationOptions,
+      ) {
+        detectorCalls += 1;
+        return detector.detect(surface, options);
+      },
+    }));
+    const outcome = await createEvidenceDeriver({ detectors }).derive(input);
+    expect(outcome.status).toBe("withheld");
+    expect(outcome).toEqual({
+      status: "withheld",
+      reasons: [{ code: "unclassified-metadata" }],
+    });
+    expect(JSON.stringify(outcome)).not.toContain(privateLiteral);
+    expect(JSON.stringify(outcome)).not.toContain("x-private-extension");
+    expect("record" in outcome).toBe(false);
+    expect(detectorCalls).toBe(0);
+  },
+);
+
 test("mutating returned bytes never mutates a repeated derivation", async () => {
   const service = deriver();
   const first = await service.derive(syntheticDerivationInput());

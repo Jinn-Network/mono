@@ -8,6 +8,7 @@ import {
 import { describe, expect, test } from "vitest";
 
 import { canonicalJsonBytes, copyBytes, sha256Digest } from "./bytes.js";
+import { invokeContractDetector } from "./detector-contract-invocation.js";
 import { normalizeDetectorFindings } from "./detectors/index.js";
 import {
   baselinePolicyValue,
@@ -59,25 +60,6 @@ async function withDetectorContractContext<T>(
     return await exercise(context);
   } finally {
     await context.cleanup?.();
-  }
-}
-
-async function invokeContractDetector(
-  context: DerivationDetectorContractContext,
-  surface: DerivationSurface,
-  options?: DerivationOperationOptions,
-): Promise<readonly DerivationFinding[]> {
-  const expectReleased = (): void => {
-    const ambientEffectCount = context.ambientEffectCount();
-    const retainedSurfaceCount = context.retainedSurfaceCount();
-    expect(ambientEffectCount).toBe(0);
-    expect(retainedSurfaceCount).toBe(0);
-  };
-  expectReleased();
-  try {
-    return await context.detector.detect(surface, options);
-  } finally {
-    expectReleased();
   }
 }
 

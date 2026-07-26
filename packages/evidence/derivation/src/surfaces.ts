@@ -253,7 +253,7 @@ function walkMetadata(
     const child = descriptor.value;
     const childPointer = `${pointer}/${escapePointer(key)}`;
     const childSegmentKinds = [...segmentKinds, "object-property"] as const;
-    if (PROTECTED_KEYS.has(key)) {
+    if (!extensionContext && PROTECTED_KEYS.has(key)) {
       const protectedClass = protectedClassFor(key, child, source);
       protectedLocations.push({
         location: childPointer,

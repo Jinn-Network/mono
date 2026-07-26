@@ -2,7 +2,7 @@
 
 import { expect, test } from "vitest";
 
-import { sha256Digest } from "./bytes.js";
+import { canonicalJsonBytes, sha256Digest } from "./bytes.js";
 import { parseDerivationPolicy } from "./policy.js";
 import { syntheticDerivationInput } from "./fixtures.js";
 import { extractDerivationSurfaces } from "./surfaces.js";
@@ -42,6 +42,37 @@ test("fails closed on unclassified extension metadata before detection", () => {
     parseDerivationPolicy(input.policyBytes).value,
   );
   expect(extraction.hold).toEqual({ code: "unclassified-metadata" });
+});
+
+test("admits a protected-looking extension value only through its exact policy selector", () => {
+  const input = syntheticDerivationInput();
+  const privateIdentifier = "urn:private:explicitly-classified-extension";
+  const document = JSON.parse(new TextDecoder().decode(input.sourceRecord.bytes));
+  document["@graph"][1].unknownExtension = {
+    "@id": privateIdentifier,
+  };
+  (input.sourceRecord as { bytes: Uint8Array }).bytes = new TextEncoder().encode(
+    `${JSON.stringify(document, null, 2)}\n`,
+  );
+  (input.sourceRecord.reference as { digest: `sha256:${string}` }).digest =
+    sha256Digest(input.sourceRecord.bytes);
+  const policy = JSON.parse(new TextDecoder().decode(input.policyBytes));
+  policy.protectedMetadata.push("/@graph/*/unknownExtension/@id");
+  (input as { policyBytes: Uint8Array }).policyBytes =
+    canonicalJsonBytes(policy);
+
+  const extraction = extractDerivationSurfaces(
+    validateDerivationSource(input),
+    parseDerivationPolicy(input.policyBytes).value,
+  );
+  expect(extraction.hold).toBeUndefined();
+  expect(extraction.protectedLocations).toContainEqual({
+    location: "/@graph/1/unknownExtension/@id",
+    protectedClass: "policy-protected-property",
+  });
+  expect(extraction.surfaces.some(({ text }) => text === privateIdentifier)).toBe(
+    false,
+  );
 });
 
 test("throws for malformed declared JSONL", () => {
