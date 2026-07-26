@@ -126,6 +126,17 @@ export function parseDerivationPolicy(
   if (new Set(ids).size !== ids.length) {
     invalid("detector ids must be unique");
   }
+  if (
+    value.privateAllowlistConfigurationDigest !== undefined &&
+    !value.requiredDetectors.some(
+      ({ configurationDigest }) =>
+        configurationDigest === value.privateAllowlistConfigurationDigest,
+    )
+  ) {
+    invalid(
+      "private allowlist configuration digest must match a required detector commitment",
+    );
+  }
   const dispositionKeys = value.dispositions.map(
     ({ class: classification, minimumConfidence }) =>
       `${classification}\u0000${minimumConfidence}`,

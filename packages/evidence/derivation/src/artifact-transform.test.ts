@@ -185,6 +185,55 @@ test("withholds a transformed Result when policy requires it", () => {
   });
 });
 
+test("an explicit surface hold omits only that artifact even when the unsupported-codec default withholds the record", () => {
+  const input = syntheticDerivationInput();
+  const source = validateDerivationSource(input);
+  const policy = structuredClone(parseDerivationPolicy(input.policyBytes).value);
+  (
+    policy as {
+      defaultArtifactDisposition: "withhold-artifact" | "withhold-record";
+    }
+  ).defaultArtifactDisposition = "withhold-record";
+  const extraction = extractDerivationSurfaces(source, policy);
+  const task = extraction.surfaces.find(
+    ({ sourceEntityId }) => sourceEntityId === "task/task.md",
+  )!;
+  const transformed = transformSourceArtifacts(
+    source,
+    extraction,
+    new Map([
+      [
+        task.surfaceId,
+        {
+          status: "withhold-artifact",
+          counts: [
+            {
+              class: "credential",
+              disposition: "withhold-artifact",
+              count: 1,
+            },
+          ],
+        } as const,
+      ],
+    ]),
+    policy,
+  );
+  expect(transformed.status).toBe("transformed");
+  if (transformed.status !== "transformed") return;
+  expect(transformed.withheld).toEqual([
+    {
+      entityId: "task/task.md",
+      digest: `sha256:${String(source.entities.get("task/task.md")?.sha256)}`,
+      reason: "policy-withheld",
+    },
+  ]);
+  expect(
+    transformed.retained.some(
+      ({ entityId }) => entityId === "inputs/base-tree.txt",
+    ),
+  ).toBe(true);
+});
+
 test("retains signed and binary artifacts only through exact policy rules", () => {
   const input = syntheticDerivationInput();
   const source = validateDerivationSource(input);

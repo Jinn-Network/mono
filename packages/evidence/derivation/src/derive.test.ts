@@ -165,6 +165,35 @@ test("withholds when a required detector is unavailable or fails", async () => {
   });
 });
 
+test("rejects an unbound private allowlist commitment before detector effects", async () => {
+  const input = syntheticDerivationInput();
+  const policy = baselinePolicyValue();
+  (
+    policy as {
+      privateAllowlistConfigurationDigest: `sha256:${string}`;
+    }
+  ).privateAllowlistConfigurationDigest = `sha256:${"f".repeat(64)}`;
+  (input as { policyBytes: Uint8Array }).policyBytes =
+    canonicalJsonBytes(policy);
+  let detectorEffects = 0;
+  const detectors = createBuiltinDerivationDetectors({
+    privateConfiguration,
+  }).map((detector) => ({
+    descriptor: detector.descriptor,
+    async detect(
+      surface: Parameters<DerivationDetector["detect"]>[0],
+      options: Parameters<DerivationDetector["detect"]>[1],
+    ) {
+      detectorEffects += 1;
+      return detector.detect(surface, options);
+    },
+  }));
+  await expect(
+    createEvidenceDeriver({ detectors }).derive(input),
+  ).rejects.toMatchObject({ code: "POLICY_INVALID" });
+  expect(detectorEffects).toBe(0);
+});
+
 test("throws STRUCTURED_ARTIFACT_INVALID without output", async () => {
   const input = syntheticDerivationInput();
   const trace = input.sourceArtifacts.find(

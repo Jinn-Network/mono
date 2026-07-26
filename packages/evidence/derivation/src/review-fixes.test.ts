@@ -316,6 +316,113 @@ test("behavioral and proxy inputs fail before their traps or accessors execute",
   ).rejects.toMatchObject({ code: "INVALID_DERIVATION_INPUT" });
 });
 
+const PUBLIC_BYTE_SLOTS = [
+  {
+    name: "source record",
+    get(input: ReturnType<typeof syntheticDerivationInput>): Uint8Array {
+      return input.sourceRecord.bytes;
+    },
+    set(
+      input: ReturnType<typeof syntheticDerivationInput>,
+      bytes: Uint8Array,
+    ): void {
+      (input.sourceRecord as { bytes: Uint8Array }).bytes = bytes;
+    },
+  },
+  {
+    name: "source artifact",
+    get(input: ReturnType<typeof syntheticDerivationInput>): Uint8Array {
+      return input.sourceArtifacts[0]!.bytes;
+    },
+    set(
+      input: ReturnType<typeof syntheticDerivationInput>,
+      bytes: Uint8Array,
+    ): void {
+      (input.sourceArtifacts[0] as { bytes: Uint8Array }).bytes = bytes;
+    },
+  },
+  {
+    name: "policy",
+    get(input: ReturnType<typeof syntheticDerivationInput>): Uint8Array {
+      return input.policyBytes;
+    },
+    set(
+      input: ReturnType<typeof syntheticDerivationInput>,
+      bytes: Uint8Array,
+    ): void {
+      (input as { policyBytes: Uint8Array }).policyBytes = bytes;
+    },
+  },
+  {
+    name: "implementation descriptor",
+    get(input: ReturnType<typeof syntheticDerivationInput>): Uint8Array {
+      return input.scrubber.implementationDescriptorBytes;
+    },
+    set(
+      input: ReturnType<typeof syntheticDerivationInput>,
+      bytes: Uint8Array,
+    ): void {
+      (
+        input.scrubber as {
+          implementationDescriptorBytes: Uint8Array;
+        }
+      ).implementationDescriptorBytes = bytes;
+    },
+  },
+] as const;
+
+test.each(PUBLIC_BYTE_SLOTS)(
+  "copies $name bytes without executing an own iterator accessor",
+  async ({ get, set }) => {
+    const input = syntheticDerivationInput();
+    const bytes = get(input);
+    let accessorCalls = 0;
+    Object.defineProperty(bytes, Symbol.iterator, {
+      configurable: true,
+      get() {
+        accessorCalls += 1;
+        throw new Error("caller iterator must not execute");
+      },
+    });
+    set(input, bytes);
+    expect(
+      await createEvidenceDeriver({
+        detectors: createBuiltinDerivationDetectors({ privateConfiguration }),
+      }).derive(input),
+    ).toMatchObject({ status: "derived" });
+    expect(accessorCalls).toBe(0);
+  },
+);
+
+test.each(PUBLIC_BYTE_SLOTS)(
+  "rejects proxied $name bytes as INVALID_DERIVATION_INPUT without traps",
+  async ({ get, set }) => {
+    const input = syntheticDerivationInput();
+    let trapCalls = 0;
+    const bytes = new Proxy(get(input), {
+      get() {
+        trapCalls += 1;
+        throw new Error("byte proxy trap must not execute");
+      },
+      getOwnPropertyDescriptor() {
+        trapCalls += 1;
+        throw new Error("byte proxy trap must not execute");
+      },
+      ownKeys() {
+        trapCalls += 1;
+        throw new Error("byte proxy trap must not execute");
+      },
+    });
+    set(input, bytes);
+    await expect(
+      createEvidenceDeriver({
+        detectors: createBuiltinDerivationDetectors({ privateConfiguration }),
+      }).derive(input),
+    ).rejects.toMatchObject({ code: "INVALID_DERIVATION_INPUT" });
+    expect(trapCalls).toBe(0);
+  },
+);
+
 test("implementation descriptors reject ambient and operator-specific material", () => {
   const input = syntheticDerivationInput();
   const descriptor = JSON.parse(
@@ -404,6 +511,32 @@ test("declared JSON and JSONL reject duplicate keys and invalid UTF-8", () => {
   }
 });
 
+test.each([
+  ["JSON", "runtime/runtime-specification.json", '{"value":1e400}\n'],
+  ["JSONL", "trace/trajectory.jsonl", '{"value":1e400}\n'],
+] as const)(
+  "declared %s rejects non-finite parsed numbers before detector effects",
+  async (_format, entityId, text) => {
+    const input = syntheticDerivationInput();
+    replaceArtifact(input, entityId, new TextEncoder().encode(text));
+    let detectorEffects = 0;
+    const detectors = createBuiltinDerivationDetectors({
+      privateConfiguration,
+    }).map((detector): DerivationDetector => ({
+      descriptor: detector.descriptor,
+      async detect(surface, options) {
+        detectorEffects += 1;
+        return detector.detect(surface, options);
+      },
+    }));
+
+    await expect(
+      createEvidenceDeriver({ detectors }).derive(input),
+    ).rejects.toMatchObject({ code: "STRUCTURED_ARTIFACT_INVALID" });
+    expect(detectorEffects).toBe(0);
+  },
+);
+
 test("cancellation is checked immediately after every awaited detector call", async () => {
   const controller = new AbortController();
   const detectors = createBuiltinDerivationDetectors({ privateConfiguration });
@@ -422,14 +555,17 @@ test("cancellation is checked immediately after every awaited detector call", as
   ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
 });
 
-test("derived metadata is recursively canonical and lists only physical hasPart bytes", async () => {
+test("derived metadata is recursively key-sorted, pretty, and lists only physical hasPart bytes", async () => {
   const outcome = await createEvidenceDeriver({
     detectors: createBuiltinDerivationDetectors({ privateConfiguration }),
   }).derive(syntheticDerivationInput());
   expect(outcome.status).toBe("derived");
   if (outcome.status !== "derived") return;
-  const document = JSON.parse(new TextDecoder().decode(outcome.record.bytes));
-  expect(outcome.record.bytes).toEqual(canonicalJsonBytes(document));
+  const serialized = new TextDecoder().decode(outcome.record.bytes);
+  const document = JSON.parse(serialized);
+  expect(serialized.startsWith('{\n  "@context":')).toBe(true);
+  expect(serialized.endsWith("\n")).toBe(true);
+  expect(serialized.endsWith("\n\n")).toBe(false);
   const root = document["@graph"].find(
     (candidate: Record<string, unknown>) => candidate["@id"] === "./",
   );

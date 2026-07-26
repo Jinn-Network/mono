@@ -154,7 +154,15 @@ export function transformSourceArtifacts(
         allCounts.push(...result.counts);
       }
     }
-    if (!codec || artifactHold) {
+    if (artifactHold) {
+      withheld.push({
+        entityId,
+        digest: sourceDigest,
+        reason: "policy-withheld",
+      });
+      continue;
+    }
+    if (!codec) {
       if (policy.defaultArtifactDisposition === "withhold-record") {
         return {
           status: "withhold-record",

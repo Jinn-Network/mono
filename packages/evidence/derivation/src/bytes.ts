@@ -11,6 +11,12 @@ import type { DerivationSha256Digest } from "./types.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
+const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype);
+const typedArrayByteLength = Object.getOwnPropertyDescriptor(
+  typedArrayPrototype,
+  "byteLength",
+)!.get!;
+const typedArraySet = Uint8Array.prototype.set;
 
 export function canonicalJsonBytes(value: unknown): Uint8Array {
   const encoded = canonicalize(value);
@@ -44,7 +50,11 @@ export function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
 }
 
 export function copyBytes(bytes: Uint8Array): Uint8Array {
-  return Uint8Array.from(bytes);
+  const copy = new Uint8Array(
+    Reflect.apply(typedArrayByteLength, bytes, []) as number,
+  );
+  Reflect.apply(typedArraySet, copy, [bytes]);
+  return copy;
 }
 
 export function freezeBytes(bytes: Uint8Array): Uint8Array {

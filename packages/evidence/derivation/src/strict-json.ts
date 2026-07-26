@@ -50,6 +50,7 @@ class StrictJsonScanner {
       .slice(this.#offset)
       .match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/u)?.[0];
     if (!number) this.#invalid();
+    if (!Number.isFinite(Number(number))) this.#invalid();
     this.#offset += number.length;
   }
 

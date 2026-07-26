@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { isProxy } from "node:util/types";
+import { isProxy, isUint8Array } from "node:util/types";
 
+import { copyBytes } from "./bytes.js";
 import { EvidenceDerivationError } from "./errors.js";
 
 function invalid(message: string): never {
@@ -24,8 +25,12 @@ export function snapshotInertData<T>(value: T, label = "input"): T {
   ) {
     return value;
   }
-  if (value instanceof Uint8Array) {
-    return Uint8Array.from(value) as T;
+  if (isUint8Array(value)) {
+    try {
+      return copyBytes(value) as T;
+    } catch {
+      invalid(`${label} must be an attached Uint8Array.`);
+    }
   }
   if (Array.isArray(value)) {
     const descriptors = Object.getOwnPropertyDescriptors(value);

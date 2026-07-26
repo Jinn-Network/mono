@@ -6,6 +6,7 @@ import {
 import { expect, test } from "vitest";
 
 import { transformSourceArtifacts } from "./artifact-transform.js";
+import { sha256Digest } from "./bytes.js";
 import type { SurfaceDispositionResult } from "./disposition.js";
 import { syntheticDerivationInput } from "./fixtures.js";
 import { transformSourceMetadata } from "./metadata-transform.js";
@@ -17,6 +18,16 @@ import {
 } from "./receipt.js";
 import { validateDerivationSource } from "./source.js";
 import { extractDerivationSurfaces } from "./surfaces.js";
+
+function recursivelySorted(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(recursivelySorted);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, child]) => [key, recursivelySorted(child)]),
+  );
+}
 
 test("builds a conforming derivative without substituting historical roles", () => {
   const input = syntheticDerivationInput();
@@ -103,4 +114,12 @@ test("builds a conforming derivative without substituting historical roles", () 
     "Synthetic private execution",
   );
   expect(derivative.record.reference.digest).not.toBe(source.recordDigest);
+  const expectedBytes = new TextEncoder().encode(
+    `${JSON.stringify(recursivelySorted(document), null, 2)}\n`,
+  );
+  const expectedDigest =
+    "sha256:8544520d7b740f2bbc044cb1e29db20d99ab78b014f28497fd9cba3c096bf818";
+  expect(sha256Digest(expectedBytes)).toBe(expectedDigest);
+  expect(derivative.record.bytes).toEqual(expectedBytes);
+  expect(derivative.record.reference.digest).toBe(expectedDigest);
 });

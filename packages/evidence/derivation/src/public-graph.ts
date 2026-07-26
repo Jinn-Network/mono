@@ -9,7 +9,7 @@ import {
 import type {
   ArtifactTransformationSet,
 } from "./artifact-transform.js";
-import { canonicalJsonBytes, copyBytes } from "./bytes.js";
+import { copyBytes } from "./bytes.js";
 import { EvidenceDerivationError } from "./errors.js";
 import type { MetadataTransformationSet } from "./metadata-transform.js";
 import type { ParsedDerivationPolicy } from "./types.js";
@@ -73,8 +73,25 @@ function digestHex(digest: `sha256:${string}`): string {
   return digest.slice("sha256:".length);
 }
 
+function recursivelySorted(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(recursivelySorted);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, child]) => [key, recursivelySorted(child)]),
+  );
+}
+
 function prettyBytes(value: unknown): Uint8Array {
-  return canonicalJsonBytes(value);
+  const serialized = JSON.stringify(recursivelySorted(value), null, 2);
+  if (serialized === undefined) {
+    throw new EvidenceDerivationError(
+      "DERIVATIVE_NONCONFORMING",
+      "Constructed public derivative cannot be serialized.",
+    );
+  }
+  return new TextEncoder().encode(`${serialized}\n`);
 }
 
 export function buildPublicExecutionEvidence(
