@@ -190,7 +190,7 @@ try {
   writeFileSync(join(yarnConsumerDir, 'yarn.lock'), '');
   runOrExit(
     'corepack',
-    ['yarn', 'install'],
+    ['yarn', 'install', '--no-immutable'],
     'Yarn 4 node-modules consumer install',
     { cwd: yarnConsumerDir, stdio: 'inherit' },
   );

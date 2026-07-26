@@ -105,7 +105,7 @@ describe('packed client workflow coverage', () => {
 
     expect(smoke).toContain("packageManager: 'yarn@4.13.0'");
     expect(smoke).toContain("'nodeLinker: node-modules\\n'");
-    expect(smoke).toContain("['yarn', 'install']");
+    expect(smoke).toContain("['yarn', 'install', '--no-immutable']");
     expect(smoke).toContain('yarn consumer exact installed jinn --help');
     expect(smoke).toContain('yarn consumer exact installed jinn scrub --help');
   });
