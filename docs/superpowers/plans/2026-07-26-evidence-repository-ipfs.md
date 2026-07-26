@@ -355,10 +355,10 @@ For a new or repair write:
 
 1. `block/put` exact content as raw SHA2-256 CIDv1;
 2. require returned CID to equal expected;
-3. confirm local pin;
+3. confirm an explicit local `direct` or `recursive` pin, rejecting `indirect`-only state;
 4. `block/put` exact registration bytes;
 5. require returned registration CID to equal expected;
-6. confirm local pin;
+6. confirm an explicit local `direct` or `recursive` pin, rejecting `indirect`-only state;
 7. when `remotePinService` is configured, request/confirm both remote pins;
 8. read back registration and content through the configured reader before the deadline;
 9. verify exact bytes; and
@@ -369,6 +369,9 @@ A repaired missing pin/registration returns `created`. Concurrent identical writ
 `created` but must converge on the same two CIDs with no conflict.
 
 Do not unpin partial successes. A retry completes the deterministic object.
+Supported Kubo writers classify `block/put(pin=true)` as `recursive`; because these are raw blocks
+with no descendants, `direct` and `recursive` are equivalent explicit custody for this profile.
+Do not issue a second pin mutation merely to change the classification.
 
 ### Task 8: Error and cancellation matrix
 
@@ -388,6 +391,13 @@ Test:
 - retry repairs partial content-only state; and
 - underlying cause is preserved.
 
+Pin-class tests use deterministic client doubles to prove that:
+
+- an explicit `direct` pin is accepted;
+- an explicit `recursive` pin is accepted;
+- `indirect`-only state is rejected and repaired before success; and
+- an already accepted explicit pin causes no redundant pin mutation.
+
 ### Task 9: Shared contract kit against real Kubo
 
 Run the updated, unmodified Repository contract kit for:
@@ -399,6 +409,10 @@ Run the updated, unmodified Repository contract kit for:
 - exact-byte round trips;
 - declared capability behavior; and
 - direct and streamed 2 MiB accepted / 2 MiB + 1 rejected boundaries.
+
+On both supported writers, additionally assert that `block/put(pin=true)` leaves content and
+registration blocks explicitly `recursive`, that both blocks survive local garbage collection,
+and that exact reads still succeed without a second pin mutation.
 
 Use ephemeral Kubo containers in CI. Pin v0.40.0 and v0.42.0 by immutable official image digest
 for the full write-conformance matrix. Pin v0.32.1 separately by immutable official image digest
