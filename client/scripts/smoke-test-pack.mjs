@@ -161,6 +161,15 @@ try {
   if (install.status !== 0) process.exit(install.status ?? 1);
 
   runOrExit(
+    'npm',
+    ['ls', '--all', '@jinn-network/core', '@jinn-network/plugin'],
+    'installed bundled dependency graph',
+  );
+  const installedJinn = join(installedPackageRoot, 'dist', 'bin', 'jinn.js');
+  runOrExit(process.execPath, [installedJinn, '--help'], 'exact installed jinn --help');
+  runOrExit(process.execPath, [installedJinn, 'scrub', '--help'], 'exact installed jinn scrub --help');
+
+  runOrExit(
     process.execPath,
     [
       '--input-type=module',
