@@ -55,7 +55,7 @@ const ambientNetworkIdentifier = new RegExp(
   'g',
 );
 const ambientNetworkGlobal = new RegExp(
-  String.raw`\b(?:globalThis|global)\s*(?:\.\s*(?:${AMBIENT_NETWORK_APIS.join('|')})\b|\[\s*["'](?:${AMBIENT_NETWORK_APIS.join('|')})["']\s*\])`,
+  String.raw`\b(?:globalThis|global)\s*(?:(?:\.|\?\.)\s*(?:${AMBIENT_NETWORK_APIS.join('|')})\b|(?:\?\.)?\s*\[\s*["'](?:${AMBIENT_NETWORK_APIS.join('|')})["']\s*\])`,
   'g',
 );
 
@@ -212,13 +212,17 @@ test('Derivation boundary checks catch ambient network APIs without imports', ()
   try {
     const source = join(fixture, 'src');
     mkdirSync(source);
-    writeFileSync(join(source, 'source.ts'), [
-      'await fetch("https://example.invalid");',
-      'const socket = new WebSocket("wss://example.invalid");',
-      'globalThis.fetch;',
-      'globalThis["WebSocket"];',
-    ].join('\n'));
-    assert.equal(ambientNetworkUsesInFiles(files(source)).length, 4);
+    writeFileSync(join(source, 'source.ts'), AMBIENT_NETWORK_APIS.flatMap((api) => [
+      `${api};`,
+      `globalThis.${api};`,
+      `globalThis[${JSON.stringify(api)}];`,
+      `globalThis?.${api};`,
+      `globalThis?.[${JSON.stringify(api)}];`,
+    ]).join('\n'));
+    assert.equal(
+      ambientNetworkUsesInFiles(files(source)).length,
+      AMBIENT_NETWORK_APIS.length * 5,
+    );
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
