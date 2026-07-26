@@ -124,8 +124,8 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
     untrustedBytes: Uint8Array,
     options: RepositoryOperationOptions = {},
   ): Promise<IpfsRepositoryWriteReceipt<EvidenceRecordReference>> {
+    const bytes = copyPutBytes(untrustedBytes, options);
     const family = parseEvidenceRecordFamily(untrustedFamily);
-    const bytes = copyPutBytes(untrustedBytes);
     return this.#putRegisteredObject(
       createRecordReference(family, bytes),
       bytes,
@@ -137,7 +137,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
     untrustedBytes: Uint8Array,
     options: RepositoryOperationOptions = {},
   ): Promise<IpfsRepositoryWriteReceipt<EvidenceArtifactReference>> {
-    const bytes = copyPutBytes(untrustedBytes);
+    const bytes = copyPutBytes(untrustedBytes, options);
     return this.#putRegisteredObject(
       createArtifactReference(bytes),
       bytes,
@@ -467,10 +467,15 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
     while (true) {
       assertRepositoryOperationActive(options);
       try {
-        const object = await this.#readRegisteredObject(
-          reference,
+        const object = await runReadbackAttempt(
+          deadline,
           options,
-          true,
+          (attemptOptions) =>
+            this.#readRegisteredObject(
+              reference,
+              attemptOptions,
+              true,
+            ),
         );
         if (object !== null) {
           if (!bytesEqual(object.bytes, expectedBytes)) {
@@ -482,6 +487,13 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
           return;
         }
       } catch (error) {
+        if (error instanceof ReadbackDeadlineExpired) {
+          throw ipfsRepositoryError(
+            "DEPENDENCY_UNAVAILABLE",
+            "The configured IPFS readback deadline expired.",
+            lastTransient,
+          );
+        }
         if (
           !(error instanceof EvidenceRepositoryError) ||
           error.code !== "DEPENDENCY_UNAVAILABLE"
@@ -506,11 +518,74 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
   }
 }
 
-function copyPutBytes(value: Uint8Array): Uint8Array {
+class ReadbackDeadlineExpired extends Error {}
+
+async function runReadbackAttempt<T>(
+  deadline: number,
+  callerOptions: RepositoryOperationOptions,
+  operation: (options: RepositoryOperationOptions) => Promise<T>,
+): Promise<T> {
+  assertRepositoryOperationActive(callerOptions);
+  const controller = new AbortController();
+  const callerSignal = callerOptions.signal;
+  const deadlineError = new ReadbackDeadlineExpired(
+    "The IPFS readback deadline expired.",
+  );
+  let rejectStop!: (error: EvidenceRepositoryError | Error) => void;
+  const stop = new Promise<never>((_resolve, reject) => {
+    rejectStop = reject;
+  });
+  let deadlineExpired = false;
+  const onCallerAbort = () => {
+    const error = ipfsRepositoryError(
+      "OPERATION_ABORTED",
+      "The IPFS repository operation was aborted.",
+    );
+    rejectStop(error);
+    controller.abort(callerSignal?.reason);
+  };
+  callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
+  if (callerSignal?.aborted === true) onCallerAbort();
+
+  const timer = setTimeout(() => {
+    deadlineExpired = true;
+    rejectStop(deadlineError);
+    controller.abort(deadlineError);
+  }, Math.max(0, deadline - Date.now()));
+
+  try {
+    return await Promise.race([
+      operation({
+        ...callerOptions,
+        signal: controller.signal,
+      }),
+      stop,
+    ]);
+  } catch (error) {
+    assertRepositoryOperationActive(callerOptions);
+    if (deadlineExpired) throw deadlineError;
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    callerSignal?.removeEventListener("abort", onCallerAbort);
+  }
+}
+
+function copyPutBytes(
+  value: Uint8Array,
+  options: RepositoryOperationOptions,
+): Uint8Array {
   if (!(value instanceof Uint8Array)) {
     throw ipfsRepositoryError(
       "CONTENT_CORRUPT",
       "Repository content must be a Uint8Array.",
+    );
+  }
+  assertRepositoryOperationActive(options);
+  if (value.byteLength > MAX_STANDARD_IPFS_BLOCK_BYTES) {
+    throw ipfsRepositoryError(
+      "CONTENT_TOO_LARGE",
+      "IPFS repository objects must not exceed 2 MiB.",
     );
   }
   return Uint8Array.from(value);

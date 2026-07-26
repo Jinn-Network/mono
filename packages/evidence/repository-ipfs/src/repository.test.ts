@@ -7,7 +7,7 @@ import {
   createArtifactReference,
   createRecordReference,
 } from "@jinn-network/evidence-repository";
-import { describe, test } from "vitest";
+import { describe, test, vi } from "vitest";
 
 import {
   MAX_STANDARD_IPFS_BLOCK_BYTES,
@@ -15,6 +15,7 @@ import {
   buildRecordRegistrationBytes,
   digestToRawCid,
   registrationCidForReference,
+  type IpfsBlockReader,
 } from "./index.js";
 import {
   IpfsEvidenceRepository,
@@ -124,20 +125,44 @@ describe("IpfsEvidenceRepository writes", () => {
     );
   });
 
-  test("rejects 2 MiB plus one before every reader or Kubo effect", async () => {
+  test("rejects invalid, aborted, and oversized writes before copying or effects", async () => {
     const reader = new FakeIpfsBlockReader();
     const kubo = new FakeKubo(reader);
     const repository = new IpfsEvidenceRepository({
       client: kubo.asClient(),
       reader,
     });
-
-    await assert.rejects(
-      repository.putArtifact(
-        new Uint8Array(MAX_STANDARD_IPFS_BLOCK_BYTES + 1),
-      ),
-      hasCode("CONTENT_TOO_LARGE"),
+    const oversized = new Uint8Array(
+      MAX_STANDARD_IPFS_BLOCK_BYTES + 1,
     );
+    const small = new Uint8Array([1]);
+    const controller = new AbortController();
+    controller.abort();
+    const copySpy = vi.spyOn(Uint8Array, "from");
+
+    try {
+      await assert.rejects(
+        repository.putArtifact({} as Uint8Array, {
+          signal: controller.signal,
+        }),
+        hasCode("CONTENT_CORRUPT"),
+      );
+      await assert.rejects(
+        repository.putArtifact(small, { signal: controller.signal }),
+        hasCode("OPERATION_ABORTED"),
+      );
+      await assert.rejects(
+        repository.putArtifact(oversized),
+        hasCode("CONTENT_TOO_LARGE"),
+      );
+      await assert.rejects(
+        repository.putRecord("execution-evidence", oversized),
+        hasCode("CONTENT_TOO_LARGE"),
+      );
+      assert.equal(copySpy.mock.calls.length, 0);
+    } finally {
+      copySpy.mockRestore();
+    }
     assert.deepEqual(reader.calls, []);
     assert.deepEqual(kubo.events, []);
   });
@@ -408,12 +433,44 @@ describe("IpfsEvidenceRepository writes", () => {
         (error as Error & { cause?: unknown }).cause === cause,
     );
 
+    const dependencyAbort = new Error("dependency timed out");
+    dependencyAbort.name = "AbortError";
+    kubo.failNextPut = dependencyAbort;
+    await assert.rejects(
+      repository.putArtifact(encoder.encode("dependency abort")),
+      (error: unknown) =>
+        hasCode("DEPENDENCY_UNAVAILABLE")(error) &&
+        (error as Error & { cause?: unknown }).cause === dependencyAbort,
+    );
+
     const controller = new AbortController();
     controller.abort();
     await assert.rejects(
       repository.putArtifact(encoder.encode("abort"), {
         signal: controller.signal,
       }),
+      hasCode("OPERATION_ABORTED"),
+    );
+
+    const concurrentController = new AbortController();
+    const concurrentReader: IpfsBlockReader = {
+      async getBlock() {
+        concurrentController.abort();
+        throw new EvidenceRepositoryError(
+          "DEPENDENCY_UNAVAILABLE",
+          "dependency failed while caller aborted",
+        );
+      },
+    };
+    const concurrentRepository = new IpfsEvidenceRepository({
+      client: new FakeKubo().asClient(),
+      reader: concurrentReader,
+    });
+    await assert.rejects(
+      concurrentRepository.getArtifact(
+        createArtifactReference(encoder.encode("concurrent abort")),
+        { signal: concurrentController.signal },
+      ),
       hasCode("OPERATION_ABORTED"),
     );
   });
@@ -565,6 +622,48 @@ describe("IpfsEvidenceRepository writes", () => {
     );
   });
 
+  test("bounds every readback attempt and preserves caller-abort precedence", async () => {
+    const bytes = encoder.encode("bounded readback");
+    let deadlineCancellationObserved = false;
+    const deadlineReader = hangingReadbackReader(() => {
+      deadlineCancellationObserved = true;
+    });
+    const deadlineRepository = new IpfsEvidenceRepository({
+      client: new FakeKubo().asClient(),
+      reader: deadlineReader.reader,
+      readbackTimeoutMs: 10,
+    });
+
+    await assert.rejects(
+      Promise.race([
+        deadlineRepository.putArtifact(bytes),
+        rejectAfter(250, "readback deadline did not settle"),
+      ]),
+      hasCode("DEPENDENCY_UNAVAILABLE"),
+    );
+    assert.equal(deadlineReader.readbackStarted(), true);
+    assert.equal(deadlineCancellationObserved, true);
+
+    const controller = new AbortController();
+    let callerCancellationObserved = false;
+    const callerReader = hangingReadbackReader(() => {
+      callerCancellationObserved = true;
+    });
+    const callerRepository = new IpfsEvidenceRepository({
+      client: new FakeKubo().asClient(),
+      reader: callerReader.reader,
+      readbackTimeoutMs: 1_000,
+    });
+    const pending = callerRepository.putArtifact(bytes, {
+      signal: controller.signal,
+    });
+    await callerReader.started;
+    controller.abort();
+
+    await assert.rejects(pending, hasCode("OPERATION_ABORTED"));
+    assert.equal(callerCancellationObserved, true);
+  });
+
   test("concurrent identical puts converge on the same deterministic CIDs", async () => {
     const reader = new FakeIpfsBlockReader();
     const kubo = new FakeKubo(reader);
@@ -600,6 +699,54 @@ describe("IpfsEvidenceRepository writes", () => {
     );
   });
 });
+
+function hangingReadbackReader(
+  onCancellation: () => void,
+): {
+  readonly reader: IpfsBlockReader;
+  readonly readbackStarted: () => boolean;
+  readonly started: Promise<void>;
+} {
+  let calls = 0;
+  let readbackStarted = false;
+  let resolveStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    resolveStarted = resolve;
+  });
+  return {
+    reader: {
+      async getBlock(_cid, options) {
+        calls += 1;
+        if (calls === 1) return null;
+        readbackStarted = true;
+        resolveStarted();
+        return new Promise<Uint8Array | null>((_resolve, reject) => {
+          const onAbort = () => {
+            onCancellation();
+            const error = new Error("reader aborted");
+            error.name = "AbortError";
+            reject(error);
+          };
+          if (options.signal?.aborted === true) {
+            onAbort();
+            return;
+          }
+          options.signal?.addEventListener("abort", onAbort, {
+            once: true,
+          });
+        });
+      },
+    },
+    readbackStarted: () => readbackStarted,
+    started,
+  };
+}
+
+function rejectAfter(delayMs: number, message: string): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    setTimeout(() => reject(new Error(message)), delayMs);
+  });
+}
 
 function hasCode(code: string): (error: unknown) => boolean {
   return (error: unknown) =>
