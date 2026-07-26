@@ -40,6 +40,13 @@ Runtime dependencies are limited to `@jinn-network/evidence-repository` and Node
 library. Hash exact bytes with `node:crypto`. Do not depend on Evidence Protocol merely to obtain a
 hash helper, and do not add Discovery or a concrete repository binding.
 
+The filesystem journal's configured root and ancestors are trusted local application state. The
+portable v1 binding must handle static and accidental symlinks, path escapes, corruption,
+permission faults, concurrent journal writers, cancellation, and crashes. It does not claim
+containment against an equally privileged hostile local process that replaces a validated path
+component during a pathname-based Node filesystem operation. Do not add native extensions,
+platform restrictions, or tests that imply that stronger guarantee.
+
 ## Package layout
 
 ```text
@@ -239,7 +246,9 @@ Reject unknown journal schema versions, malformed base64/JSON, duplicate checkpo
 frame mismatch, non-monotonic revisions, and states that skip required predecessors.
 
 Export `describePublicationJournalStoreContract(factory)` and run it against an in-memory CAS
-implementation in `/testing`.
+implementation in `/testing`. The contract kit must create, load, and compare-and-swap entries
+whose pending and confirmed placements carry nontrivial opaque state. It must prove that the exact
+format IRI and opaque JSON value survive every clone and codec boundary without reinterpretation.
 
 ### Task 5: Filesystem journal binding
 
@@ -261,7 +270,11 @@ entries/sha256/<prefix>/<remaining-hex>/<zero-padded-revision>.json
 Requirements:
 
 - new root mode `0700`, files `0600`;
-- reject symlinks and path escapes at every component;
+- reject lexical path escapes and pre-existing symlinks at every managed component;
+- use `O_NOFOLLOW` for managed leaf opens where Node exposes it, reject non-regular files, and
+  revalidate the configured path anchors and managed directories around pathname-based operations;
+- document in `README.md` that the root and its ancestors must not be concurrently mutated by an
+  equally privileged hostile process;
 - same-directory temporary file;
 - flush file before publication and the containing directory afterward where supported;
 - publish each immutable revision without overwrite, using a same-filesystem hard link or another
@@ -274,11 +287,18 @@ Requirements:
 - ignore only recognized temporary files;
 - reject gaps, duplicate/noncanonical revision names, and invalid predecessor transitions;
 - verify directory key, embedded key, revision, and full codec on replay;
-- cancellation before and after awaited I/O; and
+- check cancellation before and after every awaited I/O boundary in `load`, `create`, and
+  `compareAndSwap`, including immediately after closing a flushed temporary file and before its
+  no-overwrite publication link;
+- remove an unpublished temporary file when cancellation or another failure occurs; and
 - stable mapping to publication errors.
 
-Run the journal contract kit plus corruption, permission, traversal, stale-writer, race, and crash
-tests against temporary directories.
+Write the failing coverage in `src/fs/store.test.ts` and `src/fs/store-faults.test.ts` before
+changing `src/fs/store.ts`, `src/fs/paths.ts`, or `src/fs/validation.ts`. Run the journal contract
+kit plus corruption, permission, static traversal/symlink, stale-writer, concurrent-writer, and
+crash tests against temporary directories. In this task, a race test means two legitimate journal
+writers competing for the same immutable revision; an active same-authority path-replacement race
+is outside the v1 threat model.
 
 ### Task 6: PR 7 distribution gate
 
