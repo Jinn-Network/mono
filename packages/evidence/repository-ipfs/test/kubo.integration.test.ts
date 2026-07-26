@@ -10,6 +10,7 @@ import { describe, test } from "vitest";
 import {
   IpfsEvidenceRepository,
   MAX_STANDARD_IPFS_BLOCK_BYTES,
+  buildArtifactRegistrationBytes,
   createKuboBlockReader,
   digestToRawCid,
   registrationCidForReference,
@@ -94,6 +95,45 @@ describe.skipIf(endpoint === undefined || expectedVersion === undefined)(
         ),
         hasCode("CONTENT_TOO_LARGE"),
       );
+    });
+
+    test("repairs a pinned registration whose content block is absent", async () => {
+      const configuredEndpoint = endpoint!;
+      const client = createKuboRPCClient({
+        url: new URL("/api/v0", configuredEndpoint),
+      });
+      const reader = createKuboBlockReader({
+        endpoint: configuredEndpoint,
+      });
+      const repository = new IpfsEvidenceRepository({ client, reader });
+      const bytes = new TextEncoder().encode(
+        `registration-only recovery ${expectedVersion}`,
+      );
+      const reference = createArtifactReference(bytes);
+      const registrationBytes = buildArtifactRegistrationBytes(reference);
+      const expectedRegistrationCid =
+        registrationCidForReference(reference);
+      const registrationCid = await client.block.put(registrationBytes, {
+        allowBigBlock: false,
+        format: "raw",
+        mhtype: "sha2-256",
+        pin: true,
+        version: 1,
+      });
+      assert.equal(
+        digestToRawCid(
+          `sha256:${Buffer.from(registrationCid.multihash.digest).toString("hex")}`,
+        ),
+        expectedRegistrationCid,
+      );
+
+      await assert.rejects(
+        repository.getArtifact(reference),
+        hasCode("CONTENT_CORRUPT"),
+      );
+      const receipt = await repository.putArtifact(bytes);
+      assert.equal(receipt.status, "created");
+      assert.deepEqual(await repository.getArtifact(reference), bytes);
     });
   },
 );

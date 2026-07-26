@@ -346,6 +346,34 @@ describe("IpfsEvidenceRepository writes", () => {
     );
   });
 
+  test("repairs registration-only partial state from exact supplied bytes", async () => {
+    const reader = new FakeIpfsBlockReader();
+    const kubo = new FakeKubo(reader);
+    const repository = new IpfsEvidenceRepository({
+      client: kubo.asClient(),
+      reader,
+    });
+    const bytes = encoder.encode("registration-only");
+    const reference = createArtifactReference(bytes);
+    const registrationCid = registrationCidForReference(reference);
+    reader.blocks.set(
+      registrationCid,
+      buildArtifactRegistrationBytes(reference),
+    );
+    kubo.localPins.add(registrationCid);
+    kubo.localPinTypes.set(registrationCid, "recursive");
+
+    await assert.rejects(
+      repository.getArtifact(reference),
+      hasCode("CONTENT_CORRUPT"),
+    );
+    const receipt = await repository.putArtifact(bytes);
+
+    assert.equal(receipt.status, "created");
+    assert.deepEqual(await repository.getArtifact(reference), bytes);
+    assert.equal(receipt.registrationCid, registrationCid);
+  });
+
   test("rejects a structurally valid wrong CID returned by Kubo", async () => {
     const reader = new FakeIpfsBlockReader();
     const kubo = new FakeKubo(reader);

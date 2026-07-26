@@ -48,21 +48,23 @@ for (const matrix of matrices) {
       "--offline",
     ]);
     const endpoint = await waitForEndpoint(name);
-    await run(
-      process.execPath,
-      [
-        "node_modules/vitest/vitest.mjs",
-        "run",
-        ...matrix.tests,
-      ],
-      {
-        env: {
-          ...process.env,
-          JINN_KUBO_API_URL: endpoint,
-          JINN_KUBO_EXPECTED_VERSION: matrix.version,
+    for (const testFile of matrix.tests) {
+      await run(
+        process.execPath,
+        [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          testFile,
+        ],
+        {
+          env: {
+            ...process.env,
+            JINN_KUBO_API_URL: endpoint,
+            JINN_KUBO_EXPECTED_VERSION: matrix.version,
+          },
         },
-      },
-    );
+      );
+    }
   } finally {
     await runAllowingFailure("docker", ["stop", "--time", "5", name]);
   }

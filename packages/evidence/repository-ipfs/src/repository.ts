@@ -254,7 +254,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
     const present = await this.#readRegisteredObject(
       reference,
       options,
-      false,
+      true,
     );
     if (
       present !== null &&
