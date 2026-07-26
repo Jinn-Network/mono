@@ -34,6 +34,42 @@ const DERIVATION_FORBIDDEN_PACKAGES = [
   'viem',
 ];
 
+const DERIVATION_ALLOWED_DEPENDENCIES = [
+  '@jinn-network/evidence-protocol',
+  '@noble/hashes',
+  '@secretlint/core',
+  '@secretlint/secretlint-rule-preset-recommend',
+  'canonicalize',
+  'zod',
+];
+
+const DERIVATION_ALLOWED_DEV_DEPENDENCIES = [
+  '@types/node',
+  'typescript',
+  'vitest',
+];
+
+const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
+const ambientNetworkIdentifier = new RegExp(
+  String.raw`(?<![\w$."'\x60])(?:${AMBIENT_NETWORK_APIS.join('|')})\b`,
+  'g',
+);
+const ambientNetworkGlobal = new RegExp(
+  String.raw`\b(?:globalThis|global)\s*(?:\.\s*(?:${AMBIENT_NETWORK_APIS.join('|')})\b|\[\s*["'](?:${AMBIENT_NETWORK_APIS.join('|')})["']\s*\])`,
+  'g',
+);
+
+function ambientNetworkUsesInFiles(sourceFiles) {
+  return sourceFiles.flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    const identifiers = [...source.matchAll(ambientNetworkIdentifier)]
+      .map((match) => `${relative(root, file)} -> ${match[0]}`);
+    const globals = [...source.matchAll(ambientNetworkGlobal)]
+      .map((match) => `${relative(root, file)} -> ${match[0]}`);
+    return [...identifiers, ...globals];
+  }).sort();
+}
+
 function files(directory) {
   if (!existsSync(directory)) return [];
   if (lstatSync(directory).isFile()) return /\.(?:[cm]?[jt]sx?)$/.test(directory) ? [directory] : [];
@@ -171,6 +207,21 @@ test('Derivation boundary checks catch package, I/O, and local-path escapes', ()
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
+test('Derivation boundary checks catch ambient network APIs without imports', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-derivation-network-boundary-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'source.ts'), [
+      'await fetch("https://example.invalid");',
+      'const socket = new WebSocket("wss://example.invalid");',
+      'globalThis.fetch;',
+      'globalThis["WebSocket"];',
+    ].join('\n'));
+    assert.equal(ambientNetworkUsesInFiles(files(source)).length, 4);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
 test('evidence source boundaries remain one-way across the approved graph', () => {
   const discovery = join(packages, 'discovery', 'src');
   const catalog = join(discovery, 'catalog');
@@ -220,6 +271,31 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     join(derivation, 'src'),
     DERIVATION_FORBIDDEN_PACKAGES,
     derivationForbiddenRoots,
+  );
+  assert.deepEqual(
+    ambientNetworkUsesInFiles(files(join(derivation, 'src'))),
+    [],
+    'derivation may not use ambient network APIs',
+  );
+  assert.deepEqual(
+    Object.keys(derivationManifest.dependencies ?? {}).sort(),
+    DERIVATION_ALLOWED_DEPENDENCIES,
+    'derivation production dependencies must match the approved design inventory',
+  );
+  assert.deepEqual(
+    Object.keys(derivationManifest.devDependencies ?? {}).sort(),
+    DERIVATION_ALLOWED_DEV_DEPENDENCIES,
+    'derivation development dependencies must match the approved toolchain',
+  );
+  assert.deepEqual(
+    Object.keys(derivationManifest.optionalDependencies ?? {}),
+    [],
+    'derivation may not declare optional dependencies',
+  );
+  assert.deepEqual(
+    Object.keys(derivationManifest.peerDependencies ?? {}),
+    [],
+    'derivation may not declare peer dependencies',
   );
   for (const section of [
     'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
