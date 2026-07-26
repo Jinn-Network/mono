@@ -96,6 +96,10 @@ publication, announcements, application wiring, or legacy cutover behavior.
 
 See the packaged Evidence Profile
 [§3.6, Capture and derivation provenance](https://github.com/Jinn-Network/mono/blob/main/packages/evidence/protocol/profiles/execution-evidence/1.0/specification.md#36-capture-and-derivation-provenance),
+the Evidence Protocol rationale for
+[§6.8, Capture and derivation provenance](https://github.com/Jinn-Network/mono/blob/main/docs/superpowers/specs/2026-07-23-jinn-execution-evidence-protocol-design.md#68-capture-and-derivation-provenance)
+and
+[§10, Scrubbing and public representation](https://github.com/Jinn-Network/mono/blob/main/docs/superpowers/specs/2026-07-23-jinn-execution-evidence-protocol-design.md#10-scrubbing-and-public-representation),
 the derivation design's
 [§10, Determinism and content addressing](https://github.com/Jinn-Network/mono/blob/main/docs/superpowers/specs/2026-07-26-evidence-derivation-design.md#10-determinism-and-content-addressing),
 and its

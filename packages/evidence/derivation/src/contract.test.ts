@@ -4,6 +4,7 @@ import { expect, test } from "vitest";
 
 import {
   createBuiltinDerivationDetectors,
+  rejectNextBuiltinDetection,
   retainedBuiltinSurfaceCount,
 } from "./detectors/index.js";
 import { createEvidenceDeriver } from "./derive.js";
@@ -32,7 +33,10 @@ function createContractLifecycle(): ContractLifecycle {
 
 function builtinModule(id: string): Record<string, unknown> {
   const value = process.getBuiltinModule(id);
-  if (!value || typeof value !== "object") {
+  if (
+    !value ||
+    (typeof value !== "object" && typeof value !== "function")
+  ) {
     throw new Error(`Node built-in module ${id} is unavailable`);
   }
   return value as Record<string, unknown>;
@@ -45,6 +49,28 @@ function installBuiltinAmbientCanaries(): {
   let ambientEffects = 0;
   let cleaned = false;
   const restorations: Array<() => void> = [];
+  const fail = (label: string): never => {
+    ambientEffects += 1;
+    throw new Error(`Built-in detector attempted ambient ${label}`);
+  };
+  const installValue = (
+    target: object,
+    key: string,
+    value: unknown,
+    label: string,
+  ): void => {
+    const descriptor = Object.getOwnPropertyDescriptor(target, key);
+    if (!descriptor || !("value" in descriptor)) {
+      throw new Error(`Cannot install ambient canary for ${label}`);
+    }
+    Object.defineProperty(target, key, {
+      ...descriptor,
+      value,
+    });
+    restorations.push(() => {
+      Object.defineProperty(target, key, descriptor);
+    });
+  };
   const install = (
     target: object,
     key: string,
@@ -58,16 +84,12 @@ function installBuiltinAmbientCanaries(): {
     ) {
       throw new Error(`Cannot install ambient canary for ${label}`);
     }
-    Object.defineProperty(target, key, {
-      ...descriptor,
-      value: (..._arguments: unknown[]): never => {
-        ambientEffects += 1;
-        throw new Error(`Built-in detector attempted ambient ${label}`);
-      },
-    });
-    restorations.push(() => {
-      Object.defineProperty(target, key, descriptor);
-    });
+    installValue(
+      target,
+      key,
+      (..._arguments: unknown[]): never => fail(label),
+      label,
+    );
   };
 
   install(globalThis, "fetch", "fetch");
@@ -81,9 +103,35 @@ function installBuiltinAmbientCanaries(): {
     const client = builtinModule(id);
     for (const key of keys) install(client, key, `${id}.${key}`);
   }
+  const dns = builtinModule("dns");
+  for (const key of [
+    "lookup",
+    "lookupService",
+    "resolve",
+    "resolve4",
+    "resolve6",
+    "reverse",
+  ]) {
+    install(dns, key, `dns.${key}`);
+  }
+  const dnsPromises = Reflect.get(dns, "promises");
+  if (!dnsPromises || typeof dnsPromises !== "object") {
+    throw new Error("Node DNS promises are unavailable");
+  }
+  for (const key of [
+    "lookup",
+    "resolve",
+    "resolve4",
+    "resolve6",
+    "reverse",
+  ]) {
+    install(dnsPromises, key, `dns.promises.${key}`);
+  }
 
   const filesystem = builtinModule("fs");
   for (const key of [
+    "access",
+    "accessSync",
     "appendFile",
     "appendFileSync",
     "chmod",
@@ -94,13 +142,31 @@ function installBuiltinAmbientCanaries(): {
     "copyFileSync",
     "cp",
     "cpSync",
+    "createReadStream",
     "createWriteStream",
+    "existsSync",
+    "fstat",
+    "fstatSync",
     "link",
     "linkSync",
+    "lstat",
+    "lstatSync",
     "mkdir",
     "mkdirSync",
     "open",
     "openSync",
+    "opendir",
+    "opendirSync",
+    "read",
+    "readFile",
+    "readFileSync",
+    "readlink",
+    "readlinkSync",
+    "readdir",
+    "readdirSync",
+    "readSync",
+    "realpath",
+    "realpathSync",
     "rename",
     "renameSync",
     "rm",
@@ -109,6 +175,8 @@ function installBuiltinAmbientCanaries(): {
     "rmdirSync",
     "symlink",
     "symlinkSync",
+    "stat",
+    "statSync",
     "truncate",
     "truncateSync",
     "unlink",
@@ -125,18 +193,26 @@ function installBuiltinAmbientCanaries(): {
     throw new Error("Node filesystem promises are unavailable");
   }
   for (const key of [
+    "access",
     "appendFile",
     "chmod",
     "chown",
     "copyFile",
     "cp",
     "link",
+    "lstat",
     "mkdir",
     "open",
+    "opendir",
+    "readFile",
+    "readlink",
+    "readdir",
+    "realpath",
     "rename",
     "rm",
     "rmdir",
     "symlink",
+    "stat",
     "truncate",
     "unlink",
     "utimes",
@@ -145,8 +221,60 @@ function installBuiltinAmbientCanaries(): {
     install(filesystemPromises, key, `fs.promises.${key}`);
   }
 
+  install(process, "cwd", "process.cwd");
+  const environment = process.env;
+  installValue(
+    process,
+    "env",
+    new Proxy(environment, {
+      deleteProperty: () => fail("process.env"),
+      get: () => fail("process.env"),
+      getOwnPropertyDescriptor: () => fail("process.env"),
+      has: () => fail("process.env"),
+      ownKeys: () => fail("process.env"),
+      set: () => fail("process.env"),
+    }),
+    "process.env",
+  );
+
+  const operatingSystem = builtinModule("os");
+  for (const key of ["homedir", "hostname", "userInfo"]) {
+    install(operatingSystem, key, `os.${key}`);
+  }
+
+  const crypto = builtinModule("crypto");
+  for (const key of [
+    "randomBytes",
+    "randomFill",
+    "randomFillSync",
+    "randomInt",
+    "randomUUID",
+  ]) {
+    install(crypto, key, `crypto.${key}`);
+  }
+  const webCryptoPrototype = Object.getPrototypeOf(globalThis.crypto);
+  install(
+    webCryptoPrototype,
+    "getRandomValues",
+    "crypto.getRandomValues",
+  );
+  install(webCryptoPrototype, "randomUUID", "crypto.randomUUID");
+
   install(Date, "now", "clock");
   install(Math, "random", "randomness");
+
+  const moduleBuiltin = builtinModule("module");
+  const syncBuiltinEsmExports = Reflect.get(
+    moduleBuiltin,
+    "syncBuiltinESMExports",
+  );
+  if (typeof syncBuiltinEsmExports !== "function") {
+    throw new Error("Node built-in export synchronization is unavailable");
+  }
+  const synchronizeBuiltinExports = (): void => {
+    Reflect.apply(syncBuiltinEsmExports, undefined, []);
+  };
+  synchronizeBuiltinExports();
 
   return {
     ambientEffectCount: () => ambientEffects,
@@ -154,6 +282,7 @@ function installBuiltinAmbientCanaries(): {
       if (cleaned) return;
       cleaned = true;
       for (const restore of restorations.reverse()) restore();
+      synchronizeBuiltinExports();
     },
   };
 }
@@ -241,6 +370,138 @@ test("ambient canaries fail every prohibited effect category", () => {
   }
 });
 
+test.each([
+  [
+    "filesystem reads",
+    /ambient fs\.readFileSync/u,
+    () =>
+      Reflect.apply(
+        Reflect.get(builtinModule("fs"), "readFileSync") as (
+          ...arguments_: unknown[]
+        ) => unknown,
+        undefined,
+        [undefined],
+      ),
+  ],
+  [
+    "filesystem read streams",
+    /ambient fs\.createReadStream/u,
+    () =>
+      Reflect.apply(
+        Reflect.get(builtinModule("fs"), "createReadStream") as (
+          ...arguments_: unknown[]
+        ) => unknown,
+        undefined,
+        [undefined],
+      ),
+  ],
+  [
+    "filesystem stat",
+    /ambient fs\.statSync/u,
+    () =>
+      Reflect.apply(
+        Reflect.get(builtinModule("fs"), "statSync") as (
+          ...arguments_: unknown[]
+        ) => unknown,
+        undefined,
+        [undefined],
+      ),
+  ],
+  [
+    "filesystem directory reads",
+    /ambient fs\.readdirSync/u,
+    () =>
+      Reflect.apply(
+        Reflect.get(builtinModule("fs"), "readdirSync") as (
+          ...arguments_: unknown[]
+        ) => unknown,
+        undefined,
+        [undefined],
+      ),
+  ],
+  [
+    "process environment reads",
+    /ambient process\.env/u,
+    () => Reflect.get(process.env, "JINN_DERIVATION_CANARY"),
+  ],
+  [
+    "process working-directory reads",
+    /ambient process\.cwd/u,
+    () => process.cwd(),
+  ],
+  [
+    "operating-system home discovery",
+    /ambient os\.homedir/u,
+    () =>
+      Reflect.apply(
+        Reflect.get(builtinModule("os"), "homedir") as (
+          ...arguments_: unknown[]
+        ) => unknown,
+        undefined,
+        [],
+      ),
+  ],
+  [
+    "operating-system hostname discovery",
+    /ambient os\.hostname/u,
+    () =>
+      Reflect.apply(
+        Reflect.get(builtinModule("os"), "hostname") as (
+          ...arguments_: unknown[]
+        ) => unknown,
+        undefined,
+        [],
+      ),
+  ],
+  [
+    "operating-system user discovery",
+    /ambient os\.userInfo/u,
+    () =>
+      Reflect.apply(
+        Reflect.get(builtinModule("os"), "userInfo") as (
+          ...arguments_: unknown[]
+        ) => unknown,
+        undefined,
+        [],
+      ),
+  ],
+  [
+    "DNS clients",
+    /ambient dns\.lookup/u,
+    () =>
+      Reflect.apply(
+        Reflect.get(builtinModule("dns"), "lookup") as (
+          ...arguments_: unknown[]
+        ) => unknown,
+        undefined,
+        [undefined],
+      ),
+  ],
+  [
+    "cryptographic randomness",
+    /ambient crypto\.randomBytes/u,
+    () =>
+      Reflect.apply(
+        Reflect.get(builtinModule("crypto"), "randomBytes") as (
+          ...arguments_: unknown[]
+        ) => unknown,
+        undefined,
+        [1],
+      ),
+  ],
+] as const)(
+  "ambient canaries directly reject %s",
+  (_name, expected, operation) => {
+    const canaries = installBuiltinAmbientCanaries();
+    try {
+      expect(operation).toThrow(expected);
+      expect(canaries.ambientEffectCount()).toBe(1);
+    } finally {
+      canaries.cleanup();
+    }
+  },
+);
+
 describeDerivationDetectorContract(
   () =>
     createBuiltinContractContext(
@@ -256,6 +517,35 @@ describeDerivationDetectorContract(
       deterministicPatternsLifecycle,
     ),
   fixtures.deterministicPatterns,
+);
+
+test.each([
+  ["known identity", builtinDetectors[0]!, fixtures.knownIdentity[0]!.surface],
+  [
+    "deterministic patterns",
+    builtinDetectors[1]!,
+    fixtures.deterministicPatterns[0]!.surface,
+  ],
+] as const)(
+  "the %s detector releases observers after a non-abort operational rejection",
+  async (_name, detector, surface) => {
+    const context = createBuiltinContractContext(
+      detector,
+      createContractLifecycle(),
+    );
+    try {
+      expect(context.ambientEffectCount()).toBe(0);
+      expect(context.retainedSurfaceCount()).toBe(0);
+      rejectNextBuiltinDetection(detector);
+      await expect(detector.detect(surface)).rejects.toThrow(
+        /synthetic operational rejection/u,
+      );
+      expect(context.ambientEffectCount()).toBe(0);
+      expect(context.retainedSurfaceCount()).toBe(0);
+    } finally {
+      await context.cleanup?.();
+    }
+  },
 );
 
 test.each([

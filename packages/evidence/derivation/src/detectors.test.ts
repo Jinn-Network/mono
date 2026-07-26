@@ -162,6 +162,33 @@ describe("built-in detectors", () => {
       expect(retainedSurfaceCount()).toBe(0);
     },
   );
+
+  test.each([
+    ["known identity", 0],
+    ["deterministic patterns", 1],
+  ] as const)(
+    "counts overlapping same-surface %s success and cancellation independently",
+    async (_name, detectorIndex) => {
+      const detector = createBuiltinDerivationDetectors({
+        privateConfiguration,
+      })[detectorIndex]!;
+      const sharedSurface = surface("Ada Example");
+      const controller = new AbortController();
+
+      const successful = detector.detect(sharedSurface);
+      const cancelled = detector.detect(sharedSurface, {
+        signal: controller.signal,
+      });
+      expect(retainedBuiltinSurfaceCount(detector)).toBe(2);
+
+      controller.abort();
+      await expect(cancelled).rejects.toMatchObject({
+        code: "OPERATION_ABORTED",
+      });
+      await successful;
+      expect(retainedBuiltinSurfaceCount(detector)).toBe(0);
+    },
+  );
 });
 
 describe("finding normalization", () => {
