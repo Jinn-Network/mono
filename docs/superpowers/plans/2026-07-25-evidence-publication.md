@@ -104,6 +104,7 @@ export interface PublishInput {
 }
 
 export interface PreparedAnnouncement {
+  readonly medium: string;
   readonly profile: string;
   readonly members: readonly AnnouncementMember[];
   readonly frameBytes: Uint8Array;
@@ -192,11 +193,12 @@ Implement and test:
   destination;
 - prepared-frame digest validation; and
 - exact prepared-member validation by canonical family/digest, length, and order;
-- exact equality between a prepared profile and the sink's immutable configured profile; and
+- exact equality between a prepared medium/profile pair and the sink's immutable configured
+  medium/profile pair; and
 - placement idempotency-key derivation.
 
 Do not use record body sizes for partitioning. Do not validate Evidence Protocol conformance.
-Omitted, substituted, reordered, or duplicated members and a changed profile are
+Omitted, substituted, reordered, or duplicated members and a changed medium or profile are
 `SINK_PROTOCOL_VIOLATION`, even when the returned frame bytes, digest, and size are otherwise
 self-consistent.
 
@@ -234,7 +236,7 @@ The contract suite proves:
 - returned digest matches exact frame bytes;
 - medium, the sink's immutable profile, destination, and opaque-state format identifiers are
   absolute IRIs;
-- every prepared result repeats the sink's exact configured profile;
+- every prepared result repeats the sink's exact configured medium and profile;
 - member and byte limits are enforced;
 - changed bytes under the same idempotency key conflict;
 - repeated placement is idempotent;
@@ -244,6 +246,9 @@ The contract suite proves:
 - no raw or derived authority-marker representation occurs in any inert own data field returned by
   `prepare`, `place`, or `reconcile`, including frame bytes, opaque state, placement/reverted
   `externalId`, and reverted `reason`;
+- failure cases for `prepare`, `place`, and `reconcile` recursively scan the mapped or propagated
+  error's message, inert own fields, and bounded cycle-safe `cause` chain for every raw or derived
+  authority-marker representation;
 - cancellation maps to `OPERATION_ABORTED`; and
 - implementers can add their medium-specific sink-to-source golden round trip.
 
@@ -263,7 +268,7 @@ Define versioned closed codecs for:
 - normalized record/artifact references;
 - repository capability snapshot;
 - stored-artifact and stored-record checkpoints;
-- exact prepared partitions, including frame bytes;
+- exact prepared partitions, including sink medium/profile and frame bytes;
 - opaque pending and placement state with absolute versioned format IRIs;
 - placement state;
 - completion state; and
@@ -433,7 +438,7 @@ Implement deterministic greedy partitioning over normalized record members:
 1. append the next member to the current candidate;
 2. call `sink.prepare(candidate, context)`;
 3. validate the prepared result, including exact candidate-member sequence and the sink's
-   immutable configured profile;
+   immutable configured medium and profile;
 4. retain it if it fits both declared sink capabilities;
 5. otherwise freeze the previous candidate and begin a new one; and
 6. fail if a single-member candidate cannot fit.
@@ -449,9 +454,9 @@ Tests must prove:
 - an invalid sink result fails with `SINK_PROTOCOL_VIOLATION`.
 
 Negative cases must return otherwise self-consistent frames that omit, substitute, reorder, or
-duplicate a candidate member, or change the configured profile. Every case must fail before a
-prepared-plan checkpoint or placement. A positive case must accept defensively cloned member
-objects with the same canonical family/digest sequence.
+duplicate a candidate member, or change the configured medium or profile. Every case must fail
+before a prepared-plan checkpoint or placement. A positive case must accept defensively cloned
+member objects with the same canonical family/digest sequence.
 
 ### Task 9: Placement and reconciliation
 
@@ -459,8 +464,8 @@ Implement `publish(input, deps)` and `reconcile(bundleKey, deps, options)`.
 
 For each frozen partition:
 
-- reject a journaled prepared profile that differs from the injected sink's immutable profile
-  before any sink effect;
+- reject a journaled prepared medium or profile that differs from the injected sink's immutable
+  medium or profile before any sink effect;
 - derive one stable placement idempotency key;
 - checkpoint a state-less pending intent before the first `place`;
 - after any interruption, call `reconcile(prepared, intent)` before another placement attempt;
@@ -472,6 +477,10 @@ For each frozen partition:
 - return the same logical receipt on an identical repeated call.
 
 Conflicting payload or destination for an existing bundle key fails without effects.
+
+Crash/resume tests must also prove that a prepared plan frozen under one sink cannot be recovered
+through a sink with the same profile but a different medium, or the same medium but a different
+profile. Both mismatches fail before `place` or `reconcile`.
 
 ### Task 10: Crash and cancellation matrix
 
@@ -537,7 +546,8 @@ ci(evidence-publication): integrate the evidence DAG
 - [ ] Artifacts precede records; records precede announcements.
 - [ ] Sink preparation owns exact physical framing and is effect-free.
 - [ ] The pipeline partitions using exact prepared frame size.
-- [ ] The frozen prepared plan is durable and reused on recovery.
+- [ ] The frozen prepared plan, including exact sink medium and profile, is durable and reused
+      only with the same configured sink identity on recovery.
 - [ ] The journal port is async and `/fs` is production-usable.
 - [ ] Root does not expose or import `/fs`.
 - [ ] Awaited boundaries use cooperative cancellation checks, with cancellation deferred only

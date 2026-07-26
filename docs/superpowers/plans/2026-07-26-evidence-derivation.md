@@ -347,7 +347,9 @@ export interface DerivationFinding {
   readonly class: string;
   readonly confidence: ConfidenceBand;
   readonly surfaceId: string;
+  /** Zero-based inclusive UTF-16 code-unit index into the exact surface text. */
   readonly start: number;
+  /** Zero-based exclusive UTF-16 code-unit index into the exact surface text. */
   readonly end: number;
   readonly evidence: readonly string[];
   readonly detector: DerivationDetectorDescriptor;
@@ -733,6 +735,8 @@ Cover:
 ```ts
 test("rejects a finding for a different surface");
 test("rejects negative, reversed, or out-of-range spans");
+test("rejects a span boundary that splits an astral character");
+test("normalizes an exact span after an astral character using UTF-16 indices");
 test("rejects matched plaintext embedded in evidence codes");
 test("deduplicates identical findings");
 test("sorts findings by surface, start, end, class, detector");
@@ -814,11 +818,15 @@ Text:
 
 - preserves UTF-8 exactly when retained;
 - applies redactions with exact offsets;
+- replaces the intended substring when an astral character precedes or participates in a match,
+  without splitting a surrogate pair;
 - rejects invalid UTF-8 instead of replacement decoding.
 
 JSON:
 
 - transforms only admitted string values;
+- preserves astral characters surrounding a transformed string span and removes the exact intended
+  UTF-16-indexed match;
 - keeps protected keys/values byte-semantically unchanged;
 - canonicalizes transformed JSON;
 - yields byte-identical source bytes when no transformation occurs;
@@ -829,6 +837,7 @@ JSONL:
 - validates each non-empty line independently;
 - reports the exact line in `STRUCTURED_ARTIFACT_INVALID`;
 - transforms admitted literals and joins with one newline;
+- applies UTF-16-indexed spans after astral characters on the intended line only;
 - returns exact source bytes on a no-op.
 
 Signed/binary:
@@ -1112,12 +1121,17 @@ both non-publishable variants.
 
 - [ ] **Step 2: Write failing cancellation tests**
 
-Inject detectors that stop on controlled promises. Abort:
+Inject detectors that stop on controlled promises. Cover:
 
-- before source validation;
-- between two detector calls;
-- after detection before transformation; and
-- before final graph serialization.
+- an already-aborted signal before source validation;
+- cancellation while each detector position is awaiting its controlled promise;
+- cancellation observed between two detector calls, before the next detector is invoked; and
+- cancellation observed immediately after the final awaited detector returns, before synchronous
+  transformation and serialization begin.
+
+There is no separate injectable checkpoint inside the final synchronous transformation and
+serialization section. The contract promises cooperative cancellation at observable asynchronous
+boundaries, not preemption between synchronous instructions.
 
 Expected: `EvidenceDerivationError` with `OPERATION_ABORTED`, no returned outcome, and no mutated
 input.
@@ -1294,16 +1308,25 @@ implements.
 
 - [ ] **Step 2: Implement `describeEvidenceDeriverContract` test-first**
 
-The suite accepts:
+The suite accepts a factory whose optional argument is a complete synthetic
+detector set owned by the contract kit:
 
 ```ts
-export type EvidenceDeriverContractFactory = () =>
-  | EvidenceDeriver
-  | Promise<EvidenceDeriver>;
+export type EvidenceDeriverContractFactory = (
+  detectors?: readonly DerivationDetector[],
+) => EvidenceDeriver | Promise<EvidenceDeriver>;
 ```
 
-It asserts every invariant in design §15 using only synthetic data. Run it against
-`createEvidenceDeriver`.
+The suite calls the factory without an argument for the ordinary built-in
+matrix. It also supplies closed, deterministic synthetic detector sets for
+best-effort grading, injected rejection, and cancellation cases that cannot be
+proved by a zero-argument factory. The factory must construct the deriver with
+the supplied set unchanged when one is present. This is test-only dependency
+injection through `/testing`; it does not add a production root dependency or
+ambient effect.
+
+The suite asserts every invariant in design §15 using only synthetic data. Run
+it against `createEvidenceDeriver`.
 
 - [ ] **Step 3: Add adversarial security tests**
 

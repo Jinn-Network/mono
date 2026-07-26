@@ -134,6 +134,7 @@ export interface AnnouncementPreparationContext {
 }
 
 export interface PreparedAnnouncement {
+  readonly medium: string;
   readonly profile: string;
   readonly members: readonly AnnouncementMember[];
   readonly frameBytes: Uint8Array;
@@ -210,22 +211,25 @@ closed over by the injected sink capability and never serialized into prepared f
 state, placement state, journal entries, or receipts. The shared pipeline treats these bytes as
 opaque and cannot discover an arbitrary secret by inspection, so every concrete sink must run its
 contract tests with printable and binary synthetic authority markers. The tests recursively scan
-all returned and persisted sink fields, journal encodings, and logical receipts for the raw markers
-and their canonical hex, base64, base64url, and URL encodings. This is scoped conformance evidence
-for the tested implementation, not a sandbox or proof against dishonest authority-bearing code.
+all returned and persisted sink fields, journal encodings, logical receipts, and thrown or mapped
+error graphs for the raw markers and their canonical hex, base64, base64url, and URL encodings.
+Error scans include messages plus every inert own field and recursively bounded `cause` chains;
+cycles are detected and do not terminate the test walk. This is scoped conformance evidence for
+the tested implementation, not a sandbox or proof against dishonest authority-bearing code.
 
 `prepare` may be synchronous internally, but the contract is asynchronous for a uniform port. It
 must perform no network, repository, durable filesystem, clock, randomness, or other ambient I/O.
 All framing configuration must be frozen when the sink is constructed.
 
 For the same normalized members and preparation context it must return identical frame bytes,
-digest, size, profile, and member sequence. `frameSize` must equal `frameBytes.byteLength`.
-`PreparedAnnouncement.profile` must equal the sink's immutable `profile`. Its `members` must equal
-the requested candidate element-for-element by canonical record family and digest, with the same
-length and order. Defensive clones are valid; omission, substitution, reordering, or duplication
-is not. The pipeline validates these invariants before accepting a size result, checkpointing a
-plan, placing, or reconciling. A member or profile mismatch is `SINK_PROTOCOL_VIOLATION` even when
-the returned frame bytes, digest, and size are otherwise self-consistent.
+digest, size, medium, profile, and member sequence. `frameSize` must equal
+`frameBytes.byteLength`. `PreparedAnnouncement.medium` and `.profile` must equal the sink's
+immutable `medium` and `profile`. Its `members` must equal the requested candidate
+element-for-element by canonical record family and digest, with the same length and order.
+Defensive clones are valid; omission, substitution, reordering, or duplication is not. The
+pipeline validates these invariants before accepting a size result, checkpointing a plan, placing,
+or reconciling. A member, medium, or profile mismatch is `SINK_PROTOCOL_VIOLATION` even when the
+returned frame bytes, digest, and size are otherwise self-consistent.
 
 If the medium cannot prepare an exact frame without creating an effect, it does not conform to
 this v1 sink contract. `medium`, `profile`, destination scope, and opaque-state format identifiers
@@ -235,8 +239,9 @@ The pipeline uses deterministic greedy partitioning in normalized record order. 
 candidate member set through `prepare` and freezes the largest candidate that satisfies both sink
 capabilities. A single member that cannot fit fails before placement.
 
-The resulting prepared plan — including exact frame bytes and digests — is journaled before the
-first placement. Recovery never repartitions an existing bundle with changed code or sink limits.
+The resulting prepared plan — including each partition's immutable sink medium and profile, exact
+frame bytes, and digests — is journaled before the first placement. Recovery never repartitions
+an existing bundle with changed code or sink limits.
 
 ## 5. Sink and source interoperability
 
@@ -303,8 +308,8 @@ effect exists; only then may the pipeline call `place`.
 If the same idempotency key is observed with incompatible prepared bytes, the sink throws
 `IDEMPOTENCY_CONFLICT`. Opaque sink state is byte-preserved in the journal and interpreted only by
 the same medium implementation/profile named by its absolute format IRI. Recovery rejects a
-journaled prepared partition whose profile differs from the injected sink's immutable profile
-before calling `place` or `reconcile`.
+journaled prepared partition whose medium or profile differs from the injected sink's immutable
+medium or profile before calling `place` or `reconcile`.
 
 ## 7. Repository capability preflight
 
@@ -369,7 +374,7 @@ The journal entry records:
 - repository capability snapshot used for preflight;
 - `storedArtifacts`;
 - `storedRecords`;
-- the frozen prepared partitions;
+- the frozen prepared partitions, including each partition's exact sink medium and profile;
 - each partition's placement status and any opaque pending/placement sink state;
 - completion status; and
 - monotonically increasing revision.
@@ -451,7 +456,8 @@ For an existing journal entry:
 1. require the same payload fingerprint and destination;
 2. recheck remaining bytes against the repository's current declared capabilities;
 3. resume the first uncheckpointed repository write;
-4. reuse the frozen prepared plan if present;
+4. reuse the frozen prepared plan if present, after requiring every journaled partition's medium
+   and profile to equal the injected sink's immutable medium and profile;
 5. reconcile any pending placement before calling `place`; call `place` only after authoritative
    `not-found`;
 6. continue from the first incomplete partition; and
@@ -499,7 +505,7 @@ The root package exports `describeAnnouncementSinkContract(...)` and
 Required sink contract scenarios:
 
 - deterministic `prepare`;
-- exact candidate member sequence and immutable configured profile;
+- exact candidate member sequence and immutable configured medium/profile pair;
 - exact frame size and digest;
 - size/member-limit rejection;
 - no effect during preparation;
@@ -529,9 +535,11 @@ Publication integration tests cover:
 - duplicate normalization and conflict;
 - exact sink-measured partition boundaries;
 - otherwise-valid prepared results that omit, substitute, reorder, or duplicate a member, or
-  change the sink profile, fail with `SINK_PROTOCOL_VIOLATION` before checkpoint or placement;
-- recovery rejects a journaled prepared profile that differs from the injected sink before any
-  sink effect;
+  change the sink medium or profile, fail with `SINK_PROTOCOL_VIOLATION` before checkpoint or
+  placement;
+- recovery rejects a journaled prepared medium or profile that differs from the injected sink
+  before any sink effect, including a same-profile/different-medium sink and a
+  same-medium/different-profile sink;
 - crash/cancellation before and after every journal, repository, preparation, placement, and
   reconciliation transition;
 - resume without repeated confirmed effects;
