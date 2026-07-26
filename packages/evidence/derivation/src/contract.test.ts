@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { createRequire } from "node:module";
+
 import { expect, test } from "vitest";
 
 import {
@@ -7,7 +9,10 @@ import {
   rejectNextBuiltinDetection,
   retainedBuiltinSurfaceCount,
 } from "./detectors/index.js";
-import { invokeContractDetector } from "./detector-contract-invocation.js";
+import {
+  invokeContractDetector,
+  snapshotDetectorContractSlot,
+} from "./detector-contract-invocation.js";
 import { createEvidenceDeriver } from "./derive.js";
 import {
   createSyntheticDerivationDetectorFixtures,
@@ -18,6 +23,7 @@ import {
 import type { DerivationDetectorContractContext } from "./testing.js";
 import type {
   DerivationDetector,
+  DerivationDetectorDescriptor,
   DerivationOperationOptions,
   DerivationSurface,
 } from "./types.js";
@@ -28,6 +34,218 @@ interface ContractLifecycle {
   cleanupCalls: number;
 }
 
+const requireBuiltin = createRequire(import.meta.url);
+
+const DETECTOR_PROXY_TRAPS = [
+  "apply",
+  "construct",
+  "defineProperty",
+  "deleteProperty",
+  "get",
+  "getOwnPropertyDescriptor",
+  "getPrototypeOf",
+  "has",
+  "isExtensible",
+  "ownKeys",
+  "preventExtensions",
+  "set",
+  "setPrototypeOf",
+] as const;
+
+function trapCountingDetectorProxy(
+  detector: DerivationDetector,
+): {
+  readonly detector: DerivationDetector;
+  readonly trapCalls: Readonly<Record<
+    (typeof DETECTOR_PROXY_TRAPS)[number],
+    number
+  >>;
+} {
+  const trapCalls = Object.fromEntries(
+    DETECTOR_PROXY_TRAPS.map((trap) => [trap, 0]),
+  ) as Record<(typeof DETECTOR_PROXY_TRAPS)[number], number>;
+  const count = (trap: (typeof DETECTOR_PROXY_TRAPS)[number]): void => {
+    trapCalls[trap] += 1;
+  };
+  return {
+    detector: new Proxy(detector, {
+      apply(target, thisArgument, argumentsList) {
+        count("apply");
+        return Reflect.apply(target as never, thisArgument, argumentsList);
+      },
+      construct(target, argumentsList, newTarget) {
+        count("construct");
+        return Reflect.construct(target as never, argumentsList, newTarget);
+      },
+      defineProperty(target, key, descriptor) {
+        count("defineProperty");
+        return Reflect.defineProperty(target, key, descriptor);
+      },
+      deleteProperty(target, key) {
+        count("deleteProperty");
+        return Reflect.deleteProperty(target, key);
+      },
+      get(target, key, receiver) {
+        count("get");
+        return Reflect.get(target, key, receiver);
+      },
+      getOwnPropertyDescriptor(target, key) {
+        count("getOwnPropertyDescriptor");
+        return Reflect.getOwnPropertyDescriptor(target, key);
+      },
+      getPrototypeOf(target) {
+        count("getPrototypeOf");
+        return Reflect.getPrototypeOf(target);
+      },
+      has(target, key) {
+        count("has");
+        return Reflect.has(target, key);
+      },
+      isExtensible(target) {
+        count("isExtensible");
+        return Reflect.isExtensible(target);
+      },
+      ownKeys(target) {
+        count("ownKeys");
+        return Reflect.ownKeys(target);
+      },
+      preventExtensions(target) {
+        count("preventExtensions");
+        return Reflect.preventExtensions(target);
+      },
+      set(target, key, value, receiver) {
+        count("set");
+        return Reflect.set(target, key, value, receiver);
+      },
+      setPrototypeOf(target, prototype) {
+        count("setPrototypeOf");
+        return Reflect.setPrototypeOf(target, prototype);
+      },
+    }),
+    trapCalls,
+  };
+}
+
+const CONTRACT_META_DESCRIPTOR: DerivationDetectorDescriptor = Object.freeze({
+  id: "contract-meta-detector",
+  version: "1.0.0",
+  implementationDigest: `sha256:${"a".repeat(64)}`,
+  reproducibility: "byte-stable",
+});
+
+function contractMetaDetector(
+  onDetect: () => void = () => undefined,
+): DerivationDetector {
+  return {
+    descriptor: CONTRACT_META_DESCRIPTOR,
+    async detect() {
+      onDetect();
+      return [];
+    },
+  };
+}
+
+test("the detector contract kit rejects a detector Proxy without invoking traps", () => {
+  let detectorCalls = 0;
+  const { detector, trapCalls } = trapCountingDetectorProxy(
+    contractMetaDetector(() => {
+      detectorCalls += 1;
+    }),
+  );
+
+  expect(() =>
+    snapshotDetectorContractSlot({ detector }),
+  ).toThrowError(/Detector must not be a Proxy/u);
+  expect(trapCalls).toEqual(
+    Object.fromEntries(DETECTOR_PROXY_TRAPS.map((trap) => [trap, 0])),
+  );
+  expect(detectorCalls).toBe(0);
+});
+
+test.each(["descriptor", "detect"] as const)(
+  "the detector contract kit rejects an own %s accessor without evaluating it",
+  (slot) => {
+    let getterCalls = 0;
+    let detectorCalls = 0;
+    const detector = {};
+    Object.defineProperties(detector, {
+      descriptor: slot === "descriptor"
+        ? {
+            enumerable: true,
+            get() {
+              getterCalls += 1;
+              return CONTRACT_META_DESCRIPTOR;
+            },
+          }
+        : {
+            enumerable: true,
+            value: CONTRACT_META_DESCRIPTOR,
+          },
+      detect: slot === "detect"
+        ? {
+            enumerable: true,
+            get() {
+              getterCalls += 1;
+              return async () => {
+                detectorCalls += 1;
+                return [];
+              };
+            },
+          }
+        : {
+            enumerable: true,
+            value: async () => {
+              detectorCalls += 1;
+              return [];
+            },
+          },
+    });
+
+    expect(() =>
+      snapshotDetectorContractSlot({
+        detector: detector as DerivationDetector,
+      }),
+    ).toThrowError(/own descriptor and detect data properties/u);
+    expect(getterCalls).toBe(0);
+    expect(detectorCalls).toBe(0);
+  },
+);
+
+test("the detector contract kit accepts class and null-prototype detectors with own data slots", async () => {
+  class ClassDetector implements DerivationDetector {
+    readonly descriptor = CONTRACT_META_DESCRIPTOR;
+    readonly detect = async (): Promise<readonly []> => [];
+  }
+  const nullPrototypeDetector = Object.create(null) as DerivationDetector;
+  Object.defineProperties(nullPrototypeDetector, {
+    descriptor: {
+      enumerable: true,
+      value: CONTRACT_META_DESCRIPTOR,
+    },
+    detect: {
+      enumerable: true,
+      value: async (): Promise<readonly []> => [],
+    },
+  });
+
+  for (const detector of [
+    new ClassDetector(),
+    nullPrototypeDetector,
+  ]) {
+    const snapshot = snapshotDetectorContractSlot({ detector });
+    expect(snapshot.descriptor).toEqual(CONTRACT_META_DESCRIPTOR);
+    await expect(snapshot.detect({
+      surfaceId: "contract:meta",
+      sourceEntityId: "contract-meta",
+      role: "other",
+      mediaType: "text/plain",
+      codec: "text",
+      location: "",
+      text: "synthetic",
+    })).resolves.toEqual([]);
+  }
+});
+
 function createContractLifecycle(): ContractLifecycle {
   return {
     ambientObserverCalls: 0,
@@ -37,7 +255,7 @@ function createContractLifecycle(): ContractLifecycle {
 }
 
 function builtinModule(id: string): Record<string, unknown> {
-  const value = process.getBuiltinModule(id);
+  const value: unknown = requireBuiltin(`node:${id}`);
   if (
     !value ||
     (typeof value !== "object" && typeof value !== "function")
@@ -66,7 +284,19 @@ function installBuiltinAmbientCanaries(): {
   ): void => {
     const descriptor = Object.getOwnPropertyDescriptor(target, key);
     if (!descriptor || !("value" in descriptor)) {
-      throw new Error(`Cannot install ambient canary for ${label}`);
+      if (!descriptor || typeof descriptor.get !== "function") {
+        throw new Error(`Cannot install ambient canary for ${label}`);
+      }
+      Object.defineProperty(target, key, {
+        configurable: descriptor.configurable,
+        enumerable: descriptor.enumerable,
+        writable: true,
+        value,
+      });
+      restorations.push(() => {
+        Object.defineProperty(target, key, descriptor);
+      });
+      return;
     }
     Object.defineProperty(target, key, {
       ...descriptor,
@@ -84,8 +314,9 @@ function installBuiltinAmbientCanaries(): {
     const descriptor = Object.getOwnPropertyDescriptor(target, key);
     if (
       !descriptor ||
-      !("value" in descriptor) ||
-      typeof descriptor.value !== "function"
+      ("value" in descriptor
+        ? typeof descriptor.value !== "function"
+        : typeof descriptor.get !== "function")
     ) {
       throw new Error(`Cannot install ambient canary for ${label}`);
     }
@@ -125,7 +356,7 @@ function installBuiltinAmbientCanaries(): {
     });
   };
 
-  install(globalThis, "fetch", "fetch");
+  install(propertyOwner(globalThis, "fetch"), "fetch", "fetch");
   for (const [id, keys] of [
     ["http", ["request", "get"]],
     ["https", ["request", "get"]],

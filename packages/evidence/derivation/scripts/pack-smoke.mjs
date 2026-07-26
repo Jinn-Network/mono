@@ -186,6 +186,7 @@ assert.equal("sha256Digest" in root, false);
         "@jinn-network/evidence-derivation": `file:${derivationArchive}`,
         "@jinn-network/evidence-protocol": `file:${protocolArchive}`,
         typescript: "5.9.3",
+        vite: "6.4.3",
         vitest: "4.1.8",
       },
     }),

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { bytesEqual, canonicalJsonBytes } from "./bytes.js";
-import { snapshotInertData } from "./inert.js";
+import { snapshotDetectors } from "./detectors/index.js";
+import { ownDataProperty, snapshotInertData } from "./inert.js";
 import type {
   DerivationDetector,
   DerivationFinding,
@@ -13,6 +14,17 @@ export interface DetectorContractInvocationContext {
   readonly detector: DerivationDetector;
   readonly ambientEffectCount: () => number;
   readonly retainedSurfaceCount: () => number;
+}
+
+export function snapshotDetectorContractSlot(
+  context: Pick<DetectorContractInvocationContext, "detector">,
+): DerivationDetector {
+  const detector = ownDataProperty(
+    context,
+    "detector",
+    "detector contract context",
+  ) as DerivationDetector;
+  return snapshotDetectors([detector])[0]!;
 }
 
 export async function invokeContractDetector(

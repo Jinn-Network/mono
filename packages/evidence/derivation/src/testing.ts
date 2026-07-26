@@ -8,7 +8,10 @@ import {
 import { describe, expect, test } from "vitest";
 
 import { canonicalJsonBytes, copyBytes, sha256Digest } from "./bytes.js";
-import { invokeContractDetector } from "./detector-contract-invocation.js";
+import {
+  invokeContractDetector,
+  snapshotDetectorContractSlot,
+} from "./detector-contract-invocation.js";
 import { normalizeDetectorFindings } from "./detectors/index.js";
 import {
   baselinePolicyValue,
@@ -55,7 +58,15 @@ async function withDetectorContractContext<T>(
     context: DerivationDetectorContractContext,
   ) => T | Promise<T>,
 ): Promise<T> {
-  const context = await factory();
+  const providedContext = await factory();
+  const context: DerivationDetectorContractContext = {
+    detector: snapshotDetectorContractSlot(providedContext),
+    ambientEffectCount: providedContext.ambientEffectCount,
+    retainedSurfaceCount: providedContext.retainedSurfaceCount,
+    ...(providedContext.cleanup
+      ? { cleanup: providedContext.cleanup }
+      : {}),
+  };
   try {
     return await exercise(context);
   } finally {

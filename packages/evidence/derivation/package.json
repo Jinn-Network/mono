@@ -61,6 +61,7 @@
     "vitest": "^4.1.8"
   },
   "resolutions": {
-    "@jinn-network/evidence-protocol": "portal:../protocol"
+    "@jinn-network/evidence-protocol": "portal:../protocol",
+    "vite": "6.4.3"
   }
 }
