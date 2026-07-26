@@ -271,17 +271,26 @@ entries/sha256/<prefix>/<remaining-hex>/<zero-padded-revision>.json
 
 Requirements:
 
-- new root mode `0700`, files `0600`;
+- where POSIX modes are exposed, every new managed directory, including the configured root and
+  nested revision hierarchy, has exact mode `0700`; every new managed file has exact mode `0600`;
 - on POSIX platforms, reject a configured root, managed directory, or managed file whose `uid`
   differs from `process.getuid()`; do not inspect or change ownership or modes above the configured
   root;
-- before use, tighten a current-user-owned existing managed root or directory from mode `0777` to
-  `0700` and a managed regular file from `0666` to `0600`;
+- before use, normalize every current-user-owned existing managed directory to exact mode `0700`
+  and every current-user-owned existing managed regular file to exact mode `0600`, whether its
+  prior mode was broader or narrower;
+- resolve a stable existing unmanaged ancestor prefix to its physical path before managing the
+  configured root; accept a stable symlink in that unmanaged prefix, including macOS `/var`, but
+  reject the configured root or any component below it when it is a symlink;
 - reject lexical path escapes and pre-existing symlinks at every managed component;
 - use `O_NOFOLLOW` for managed leaf opens where Node exposes it, reject non-regular files, and
   revalidate the configured path anchors and managed directories around pathname-based operations;
-- document in `README.md` that the root and its ancestors must not be concurrently mutated by an
-  equally privileged hostile process;
+- document in `README.md` that unmanaged ancestors must be trusted and stable and that the root
+  must not be concurrently mutated by an equally privileged hostile process;
+- document that modes are defense in depth rather than encryption or secret scrubbing; backups,
+  retention, and deletion are operator responsibilities; exact frames and opaque sink state must
+  not contain credentials, private keys, bearer tokens, or other authority material; and concrete
+  sinks persist only non-secret recovery identifiers;
 - same-directory temporary file;
 - flush file before publication and the containing directory afterward where supported;
 - publish each immutable revision without overwrite, using a same-filesystem hard link or another
@@ -297,15 +306,34 @@ Requirements:
 - check cancellation before and after every awaited I/O boundary in `load`, `create`, and
   `compareAndSwap`, including immediately after closing a flushed temporary file and before its
   no-overwrite publication link;
-- remove an unpublished temporary file when cancellation or another failure occurs; and
+- remove an unpublished temporary file when cancellation or another failure occurs;
+- after the no-overwrite link succeeds, defer cancellation while the store synchronizes the
+  revision directory, unlinks the temporary name, and synchronizes the directory again; surface a
+  pending cancellation only after this non-interruptible durability section;
+- if the first post-link sync fails, preserve the temp/final pair and return `IO_FAILURE`; if temp
+  unlink fails after that sync, still attempt the final directory sync and preserve the unlink
+  failure as the cause; never acknowledge the revision after any post-link durability error;
+- during replay, accept and repair one recognized temporary name sharing the highest final
+  revision's inode only when both names are current-user-owned regular files with `nlink === 2`;
+  reject symlinked, non-regular, foreign-owned, or excess-link variants; and
 - stable mapping to publication errors.
 
 Write the failing coverage in `src/fs/store.test.ts` and `src/fs/store-faults.test.ts` before
 changing `src/fs/store.ts`, `src/fs/paths.ts`, or `src/fs/validation.ts`. Run the journal contract
 kit plus corruption, permission, static traversal/symlink, stale-writer, concurrent-writer, and
-crash tests against temporary directories. POSIX-gated permission tests must prove the exact mode
-tightening above and use a focused filesystem-stat test double to prove foreign ownership is
-rejected without requiring elevated privileges.
+crash tests against temporary directories. POSIX-gated permission tests must prove exact
+normalization from representative broader modes (`0755`, `0644`) and narrower modes (`0500`,
+`0400`). Use focused filesystem test doubles to prove foreign ownership and injected `EACCES` or
+`EPERM` failures are mapped correctly without requiring elevated privileges. A positive macOS test
+must use a root beneath the stable `/var` alias; negative tests must retain configured-root and
+managed-component symlink rejection.
+
+Fault tests must interrupt after the publication link, after the first directory sync, after the
+temporary unlink, and before the second directory sync. Reopen the journal after each simulated
+process crash and prove the final revision is either absent or replayable, every recoverable
+temp/final link pair is repaired, and an acknowledged revision is never lost. These are
+process-crash and API-fault tests; they do not assert portable hardware power-loss behavior beyond
+successful Node file and directory `sync()` calls.
 
 Add one deterministic fault-injection test that replaces a managed component after one successful
 anchor validation and proves that the following validation returns `JOURNAL_CORRUPT`. The test
