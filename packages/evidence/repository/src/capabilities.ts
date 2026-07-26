@@ -10,9 +10,11 @@ export function assertEvidenceRepositoryCapabilities(
   value: unknown,
 ): asserts value is EvidenceRepositoryCapabilities {
   assertCapabilityContainer(value);
+  const prototype = Reflect.getPrototypeOf(value);
+  assertAllowedCapabilityPrototype(prototype);
   assertMaxObjectBytesDescriptor(
-    value,
     Reflect.getOwnPropertyDescriptor(value, MAX_OBJECT_BYTES),
+    prototype,
   );
 }
 
@@ -53,8 +55,8 @@ export function assertStableImmutableEvidenceRepositoryCapabilities(
   }
 
   assertMaxObjectBytesDescriptor(
-    capabilities,
     firstSnapshot.descriptors.get(MAX_OBJECT_BYTES),
+    firstSnapshot.prototype,
   );
   assertImmutableSnapshot(firstSnapshot);
   return capabilities;
@@ -132,15 +134,11 @@ function assertCapabilityContainer(
 }
 
 function assertMaxObjectBytesDescriptor(
-  capabilities: object,
   descriptor: PropertyDescriptor | undefined,
+  prototype: object | null,
 ): void {
   if (descriptor === undefined) {
-    if (Reflect.has(capabilities, MAX_OBJECT_BYTES)) {
-      throw new TypeError(
-        "EvidenceRepository.capabilities.maxObjectBytes must be an own data property.",
-      );
-    }
+    assertNoInheritedMaxObjectBytes(prototype);
     return;
   }
 
@@ -152,15 +150,42 @@ function assertMaxObjectBytesDescriptor(
 
   const maxObjectBytes = descriptor.value as unknown;
   if (
-    maxObjectBytes !== undefined &&
-    (
-      typeof maxObjectBytes !== "number" ||
-      !Number.isSafeInteger(maxObjectBytes) ||
-      maxObjectBytes <= 0
-    )
+    typeof maxObjectBytes !== "number" ||
+    !Number.isSafeInteger(maxObjectBytes) ||
+    maxObjectBytes <= 0
   ) {
     throw new TypeError(
-      "EvidenceRepository.capabilities.maxObjectBytes must be a positive safe integer when supplied.",
+      "EvidenceRepository.capabilities.maxObjectBytes must be a positive safe integer.",
+    );
+  }
+}
+
+function assertAllowedCapabilityPrototype(
+  prototype: object | null,
+): void {
+  if (prototype === Object.prototype || prototype === null) return;
+  if (isProxy(prototype)) {
+    throw new TypeError(
+      "EvidenceRepository.capabilities prototype must not be a Proxy.",
+    );
+  }
+  throw new TypeError(
+    "EvidenceRepository.capabilities must have a plain or null prototype.",
+  );
+}
+
+function assertNoInheritedMaxObjectBytes(
+  prototype: object | null,
+): void {
+  if (
+    prototype === Object.prototype &&
+    Reflect.getOwnPropertyDescriptor(
+      Object.prototype,
+      MAX_OBJECT_BYTES,
+    ) !== undefined
+  ) {
+    throw new TypeError(
+      "EvidenceRepository.capabilities.maxObjectBytes must be an own data property.",
     );
   }
 }

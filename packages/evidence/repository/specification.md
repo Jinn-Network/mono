@@ -11,17 +11,29 @@ protocol. Implementations can be local or remote.
 
 ## Repository capabilities
 
-Every repository exposes one stable, immutable `capabilities` object for its
-lifetime. The optional `maxObjectBytes` field, when present, is a positive safe
-integer declaring the inclusive maximum accepted byte length for either a record
-or an artifact. A repository must reject a larger object before external effects
-with `EvidenceRepositoryError("CONTENT_TOO_LARGE")`.
+The repository is not a Proxy. It exposes `capabilities` as a stable own data
+property for its lifetime; an inherited or accessor-backed slot is invalid. The
+slot descriptor may be writable or configurable to accommodate ordinary class
+fields, but repeated observations must retain the same capability object value.
 
-An absent `maxObjectBytes` means that the repository declares no finite
-application-level limit; it does not guarantee that arbitrarily large objects
-will succeed. Consumers of version 0.1 must ignore unknown capability fields.
-Implementations must nevertheless keep the entire capability snapshot,
-including unknown fields, immutable.
+The capability snapshot is not a Proxy. It has exactly `Object.prototype` or
+`null` as its prototype, is non-extensible, and exposes only own data
+descriptors that are non-writable and non-configurable. Accessor-backed fields
+are invalid. Consumers of version 0.1 semantically ignore unknown own keys, but
+those keys remain subject to the same representation and immutability rules.
+
+The optional `maxObjectBytes` field, when present as an own data descriptor, is
+a positive safe integer declaring the inclusive maximum accepted byte length
+for either a record or an artifact. A present value of `undefined` is invalid.
+Only an absent own descriptor means that the repository declares no finite
+application-level limit; absence does not guarantee that arbitrarily large
+objects will succeed. An inherited `maxObjectBytes` is invalid and is never
+evaluated. A repository must reject a larger object before external effects with
+`EvidenceRepositoryError("CONTENT_TOO_LARGE")`.
+
+The reusable contract kit validates these representations and rejects invalid
+behavior before invoking repository methods, capability accessors, or inherited
+behavior.
 
 ## Identity and integrity
 

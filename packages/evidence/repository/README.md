@@ -19,11 +19,19 @@ Consumers validate retrieved record bytes with the Evidence Protocol package.
 Repository implementations may use local files, OCI registries, or another
 transport without changing the consumer-facing contract.
 
-Every repository exposes a stable, immutable `capabilities` object. The
-optional `maxObjectBytes` field is a positive safe integer when a binding
-declares a finite per-object limit. An absent field means that the binding
-declares no finite application-level limit; it does not guarantee infinite
-storage. The in-memory, filesystem, and OCI bindings use the shared frozen
+Every repository is a non-Proxy object that exposes `capabilities` through a
+stable own data slot. The slot may use the writable and configurable descriptor
+of an ordinary class field, but its value remains stable. The capability
+snapshot is non-Proxy, non-extensible, has `Object.prototype` or `null` as its
+prototype, and contains only non-writable, non-configurable own data fields.
+Accessors and inherited `maxObjectBytes` values are rejected without evaluation.
+
+The optional own `maxObjectBytes` field is a positive safe integer when a
+binding declares a finite per-object limit. A present `undefined` value is
+invalid. Only an absent field means that the binding declares no finite
+application-level limit; it does not guarantee infinite storage. Unknown own
+fields are semantically ignored but follow the same representation rules. The
+in-memory, filesystem, and OCI bindings use the shared frozen, null-prototype
 `NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES` object.
 
 ## Filesystem binding
@@ -92,11 +100,22 @@ import {
   describeEvidenceRepositoryContract,
 } from "@jinn-network/evidence-repository/testing";
 
+const DECLARED_MAX_OBJECT_BYTES = 2 * 1024 * 1024;
+
 describeEvidenceRepositoryContract(async () => ({
-  repository: await createRepository(),
+  repository: await createRepository({
+    maxObjectBytes: DECLARED_MAX_OBJECT_BYTES,
+  }),
+  createObjectAtDeclaredLimit: () =>
+    new Uint8Array(DECLARED_MAX_OBJECT_BYTES),
   cleanup: async () => closeRepository(),
 }));
 ```
+
+Bounded bindings must provide `createObjectAtDeclaredLimit`; it returns a
+fixture whose byte length is exactly the declared inclusive limit. Bindings
+without a declared finite limit omit it. The kit validates repository and
+capability representation before invoking repository behavior.
 
 See [`specification.md`](./specification.md) for the complete v1 boundary.
 

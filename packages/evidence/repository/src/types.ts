@@ -32,7 +32,9 @@ export interface EvidenceRepositoryCapabilities {
 }
 
 export const NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES:
-  EvidenceRepositoryCapabilities = Object.freeze({});
+  EvidenceRepositoryCapabilities = Object.freeze(
+    Object.create(null) as EvidenceRepositoryCapabilities,
+  );
 
 export interface EvidenceRepository {
   readonly capabilities: EvidenceRepositoryCapabilities;

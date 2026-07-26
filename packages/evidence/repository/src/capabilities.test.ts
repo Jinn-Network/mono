@@ -117,6 +117,14 @@ describe("internal repository capability validation", () => {
     },
   );
 
+  test("rejects a present undefined maxObjectBytes field", () => {
+    expect(() =>
+      assertEvidenceRepositoryCapabilities({
+        maxObjectBytes: undefined,
+      }),
+    ).toThrowError(/positive safe integer/u);
+  });
+
   test("accepts and preserves unknown future fields semantically", () => {
     const capabilities = Object.freeze({
       maxObjectBytes: 1,
@@ -158,6 +166,34 @@ describe("internal repository capability validation", () => {
           () => capabilities,
         );
       }).toThrowError(/Proxy/u);
+      expect(trapCalls).toEqual(
+        Object.fromEntries(
+          OBJECT_PROXY_TRAPS.map((trap) => [trap, 0]),
+        ),
+      );
+    },
+  );
+
+  test.each(["shape", "stable snapshot", "repository slot"] as const)(
+    "rejects a Proxy prototype during %s validation without invoking traps",
+    (validation) => {
+      const { proxy: prototype, trapCalls } =
+        createTrapCountingProxy({ maxObjectBytes: 1 });
+      const capabilities = Object.freeze(Object.create(prototype));
+
+      expect(() => {
+        if (validation === "shape") {
+          assertEvidenceRepositoryCapabilities(capabilities);
+          return;
+        }
+        if (validation === "stable snapshot") {
+          assertStableImmutableEvidenceRepositoryCapabilities(
+            () => capabilities,
+          );
+          return;
+        }
+        assertEvidenceRepositoryCapabilitiesSlot({ capabilities });
+      }).toThrowError(/prototype.*Proxy/iu);
       expect(trapCalls).toEqual(
         Object.fromEntries(
           OBJECT_PROXY_TRAPS.map((trap) => [trap, 0]),
@@ -296,20 +332,37 @@ describe("internal repository capability validation", () => {
 
   test("rejects an inherited limit without evaluating it", () => {
     let getterCalls = 0;
-    const prototype = {};
-    Object.defineProperty(prototype, "maxObjectBytes", {
-      get() {
-        getterCalls += 1;
-        return 1;
-      },
-    });
-    const capabilities = Object.create(prototype);
+    const previousDescriptor = Object.getOwnPropertyDescriptor(
+      Object.prototype,
+      "maxObjectBytes",
+    );
 
-    expect(() =>
-      assertEvidenceRepositoryCapabilities(capabilities),
-    ).toThrowError(/own data property/u);
-    expect(getterCalls).toBe(0);
-    expect(Object.hasOwn(capabilities, "maxObjectBytes")).toBe(false);
+    try {
+      Object.defineProperty(Object.prototype, "maxObjectBytes", {
+        configurable: true,
+        get() {
+          getterCalls += 1;
+          return 1;
+        },
+      });
+      const capabilities = {};
+
+      expect(() =>
+        assertEvidenceRepositoryCapabilities(capabilities),
+      ).toThrowError(/own data property/u);
+      expect(getterCalls).toBe(0);
+      expect(Object.hasOwn(capabilities, "maxObjectBytes")).toBe(false);
+    } finally {
+      if (previousDescriptor === undefined) {
+        Reflect.deleteProperty(Object.prototype, "maxObjectBytes");
+      } else {
+        Object.defineProperty(
+          Object.prototype,
+          "maxObjectBytes",
+          previousDescriptor,
+        );
+      }
+    }
   });
 
   test("rejects unknown accessors without invoking or changing them", () => {
@@ -366,19 +419,26 @@ describe("internal repository capability validation", () => {
     ).toBe(true);
   });
 
-  test("rejects a frozen snapshot with a custom prototype", () => {
-    const capabilities = Object.freeze(
-      Object.assign(Object.create({ custom: true }), {
-        maxObjectBytes: 1,
-      }),
-    );
+  test.each(["shape", "stable snapshot"] as const)(
+    "rejects a frozen custom prototype during %s validation",
+    (validation) => {
+      const capabilities = Object.freeze(
+        Object.assign(Object.create({ custom: true }), {
+          maxObjectBytes: 1,
+        }),
+      );
 
-    expect(() =>
-      assertStableImmutableEvidenceRepositoryCapabilities(
-        () => capabilities,
-      ),
-    ).toThrowError(/plain or null prototype/u);
-  });
+      expect(() => {
+        if (validation === "shape") {
+          assertEvidenceRepositoryCapabilities(capabilities);
+          return;
+        }
+        assertStableImmutableEvidenceRepositoryCapabilities(
+          () => capabilities,
+        );
+      }).toThrowError(/plain or null prototype/u);
+    },
+  );
 
   test("rejects an unstable prototype", () => {
     let prototypeReads = 0;

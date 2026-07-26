@@ -12,6 +12,7 @@ import {
 } from "./index.js";
 import {
   assertEvidenceRepositoryCapabilities,
+  assertStableImmutableEvidenceRepositoryCapabilities,
 } from "./capabilities.js";
 import {
   InMemoryEvidenceRepository,
@@ -107,7 +108,16 @@ describe("repository references", () => {
 
 describe("repository capabilities", () => {
   test("exports one stable frozen empty capability object", () => {
-    expect(NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES).toEqual({});
+    expect(
+      Reflect.ownKeys(
+        NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
+      ),
+    ).toEqual([]);
+    expect(
+      Object.getPrototypeOf(
+        NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
+      ),
+    ).toBeNull();
     expect(
       Object.isFrozen(NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES),
     ).toBe(true);
@@ -115,6 +125,40 @@ describe("repository capabilities", () => {
     expect(
       new EvidenceRepositoryError("CONTENT_TOO_LARGE", "too large").code,
     ).toBe("CONTENT_TOO_LARGE");
+  });
+
+  test("the empty capability snapshot is immune to prototype pollution", () => {
+    const previousDescriptor = Object.getOwnPropertyDescriptor(
+      Object.prototype,
+      "maxObjectBytes",
+    );
+    let getterCalls = 0;
+
+    try {
+      Object.defineProperty(Object.prototype, "maxObjectBytes", {
+        configurable: true,
+        get() {
+          getterCalls += 1;
+          return 1;
+        },
+      });
+      expect(
+        assertStableImmutableEvidenceRepositoryCapabilities(
+          () => NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
+        ),
+      ).toBe(NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES);
+      expect(getterCalls).toBe(0);
+    } finally {
+      if (previousDescriptor === undefined) {
+        Reflect.deleteProperty(Object.prototype, "maxObjectBytes");
+      } else {
+        Object.defineProperty(
+          Object.prototype,
+          "maxObjectBytes",
+          previousDescriptor,
+        );
+      }
+    }
   });
 
   test("preserves the cause supplied to a content-too-large error", () => {
