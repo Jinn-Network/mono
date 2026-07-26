@@ -75,8 +75,9 @@ export type LocalEvidenceRuntimeFaultPoint =
 export interface LocalEvidenceRuntimeTestDependencies {
   readonly acquireRuntimeLock?: typeof acquireRuntimeLock;
   readonly createCatalogGeneration?: typeof createCatalogGeneration;
-  readonly createFilesystemEvidenceRepository?:
-    typeof createFilesystemEvidenceRepository;
+  readonly createFilesystemEvidenceRepository?: (
+    options: Parameters<typeof createFilesystemEvidenceRepository>[0],
+  ) => Promise<EvidenceRepository>;
   readonly openCurrentCatalogGeneration?: typeof openCurrentCatalogGeneration;
   readonly openFilesystemEvidenceAnnouncementJournal?:
     typeof openFilesystemEvidenceAnnouncementJournal;
@@ -304,6 +305,19 @@ const PRODUCTION_DEPENDENCIES = {
   recoverPendingPublications,
 } as const;
 
+type LocalEvidenceRuntimeDependencies =
+  Omit<
+    typeof PRODUCTION_DEPENDENCIES,
+    "createFilesystemEvidenceRepository"
+  > &
+  Required<
+    Pick<
+      LocalEvidenceRuntimeTestDependencies,
+      "createFilesystemEvidenceRepository"
+    >
+  > &
+  Pick<LocalEvidenceRuntimeTestDependencies, "faultHook">;
+
 export async function openLocalEvidenceRuntimeForTesting(
   options: OpenLocalEvidenceRuntimeOptions,
   overrides: LocalEvidenceRuntimeTestDependencies,
@@ -316,8 +330,7 @@ export async function openLocalEvidenceRuntimeForTesting(
 
 async function openLocalEvidenceRuntimeWithDependencies(
   options: OpenLocalEvidenceRuntimeOptions,
-  dependencies: typeof PRODUCTION_DEPENDENCIES &
-    Pick<LocalEvidenceRuntimeTestDependencies, "faultHook">,
+  dependencies: LocalEvidenceRuntimeDependencies,
 ): Promise<LocalEvidenceRuntime> {
   assertLocalRuntimeOperationActive(options);
   const paths = await dependencies.prepareRuntimePaths(options.rootDir);
