@@ -81,21 +81,35 @@ function escapePointer(value: string): string {
   return value.replaceAll("~", "~0").replaceAll("/", "~1");
 }
 
-function selectorMatches(selector: string, pointer: string): boolean {
+type PointerSegmentKind = "array-index" | "object-property";
+
+function selectorMatches(
+  selector: string,
+  pointer: string,
+  segmentKinds: readonly PointerSegmentKind[],
+): boolean {
   const expected = selector.split("/").slice(1);
   const actual = pointer.split("/").slice(1);
   return (
     expected.length === actual.length &&
+    actual.length === segmentKinds.length &&
     expected.every(
       (segment, index) =>
-        segment === actual[index] ||
-        (segment === "*" && /^\d+$/.test(actual[index] ?? "")),
+        segment === "*"
+          ? segmentKinds[index] === "array-index"
+          : segment === actual[index],
     )
   );
 }
 
-function matches(selectors: readonly string[], pointer: string): boolean {
-  return selectors.some((selector) => selectorMatches(selector, pointer));
+function matches(
+  selectors: readonly string[],
+  pointer: string,
+  segmentKinds: readonly PointerSegmentKind[],
+): boolean {
+  return selectors.some((selector) =>
+    selectorMatches(selector, pointer, segmentKinds),
+  );
 }
 
 function protectedClassFor(
@@ -179,6 +193,7 @@ function protectedClassFor(
 function walkMetadata(
   value: unknown,
   pointer: string,
+  segmentKinds: readonly PointerSegmentKind[],
   entityId: string,
   policy: DerivationPolicy,
   source: ValidatedDerivationSource,
@@ -190,6 +205,7 @@ function walkMetadata(
       walkMetadata(
         child,
         `${pointer}/${index}`,
+        [...segmentKinds, "array-index"],
         entityId,
         policy,
         source,
@@ -198,12 +214,43 @@ function walkMetadata(
       ),
     );
   }
-  if (!value || typeof value !== "object") return true;
+  if (
+    typeof value === "string" &&
+    matches(policy.transformableMetadata, pointer, segmentKinds)
+  ) {
+    surfaces.push(
+      Object.freeze({
+        surfaceId: `metadata:${entityId}:${pointer}`,
+        sourceEntityId: entityId,
+        role: "other",
+        mediaType: "application/ld+json",
+        codec: "json",
+        location: pointer,
+        text: value,
+      }),
+    );
+    return true;
+  }
+  if (
+    (typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean" ||
+      value === null) &&
+    matches(policy.protectedMetadata, pointer, segmentKinds)
+  ) {
+    protectedLocations.push({
+      location: pointer,
+      protectedClass: "policy-protected-property",
+    });
+    return true;
+  }
+  if (!value || typeof value !== "object") return false;
   const descriptors = Object.getOwnPropertyDescriptors(value);
   for (const [key, descriptor] of Object.entries(descriptors)) {
     if (!("value" in descriptor)) return false;
     const child = descriptor.value;
     const childPointer = `${pointer}/${escapePointer(key)}`;
+    const childSegmentKinds = [...segmentKinds, "object-property"] as const;
     if (PROTECTED_KEYS.has(key)) {
       const protectedClass = protectedClassFor(key, child, source);
       protectedLocations.push({
@@ -217,6 +264,7 @@ function walkMetadata(
           walkMetadata(
             child,
             childPointer,
+            childSegmentKinds,
             entityId,
             policy,
             source,
@@ -247,7 +295,11 @@ function walkMetadata(
     }
     if (
       typeof child === "string" &&
-      matches(policy.transformableMetadata, childPointer)
+      matches(
+        policy.transformableMetadata,
+        childPointer,
+        childSegmentKinds,
+      )
     ) {
       surfaces.push(
         Object.freeze({
@@ -267,7 +319,7 @@ function walkMetadata(
         typeof child === "number" ||
         typeof child === "boolean" ||
         child === null) &&
-      matches(policy.protectedMetadata, childPointer)
+      matches(policy.protectedMetadata, childPointer, childSegmentKinds)
     ) {
       protectedLocations.push({
         location: childPointer,
@@ -294,6 +346,7 @@ function walkMetadata(
         walkMetadata(
           child,
           childPointer,
+          childSegmentKinds,
           entityId,
           policy,
           source,
@@ -315,6 +368,7 @@ function walkMetadata(
       walkMetadata(
         child,
         childPointer,
+        childSegmentKinds,
         entityId,
         policy,
         source,
@@ -498,6 +552,7 @@ export function extractDerivationSurfaces(
     !walkMetadata(
       root,
       "",
+      [],
       "ro-crate-metadata.json",
       policy,
       source,

@@ -786,6 +786,75 @@ test("an exact nested extension leaf selector admits only that leaf", () => {
   ).toBe("nested-private-value");
 });
 
+test.each(["0", "*"])(
+  "an array wildcard never admits object-property segment %s",
+  (objectKey) => {
+    const input = syntheticDerivationInput();
+    const document = JSON.parse(
+      new TextDecoder().decode(input.sourceRecord.bytes),
+    );
+    document["@graph"][1].customExtension = {
+      [objectKey]: {
+        nested: "object-key-private-value",
+      },
+    };
+    (input.sourceRecord as { bytes: Uint8Array }).bytes =
+      new TextEncoder().encode(`${JSON.stringify(document, null, 2)}\n`);
+    (input.sourceRecord.reference as { digest: `sha256:${string}` }).digest =
+      sha256Digest(input.sourceRecord.bytes);
+    replacePolicy(input, (policy) => {
+      (
+        policy as unknown as {
+          transformableMetadata: string[];
+        }
+      ).transformableMetadata.push(
+        "/@graph/*/customExtension/*/nested",
+      );
+    });
+    const extraction = extractDerivationSurfaces(
+      validateDerivationSource(input),
+      parseDerivationPolicy(input.policyBytes).value,
+    );
+    expect(extraction.hold).toEqual({ code: "unclassified-metadata" });
+    expect(
+      extraction.surfaces.some(
+        ({ text }) => text === "object-key-private-value",
+      ),
+    ).toBe(false);
+  },
+);
+
+test("an array wildcard admits the corresponding actual array element", () => {
+  const input = syntheticDerivationInput();
+  const document = JSON.parse(new TextDecoder().decode(input.sourceRecord.bytes));
+  document["@graph"][1].customExtension = ["array-element-private-value"];
+  (input.sourceRecord as { bytes: Uint8Array }).bytes = new TextEncoder().encode(
+    `${JSON.stringify(document, null, 2)}\n`,
+  );
+  (input.sourceRecord.reference as { digest: `sha256:${string}` }).digest =
+    sha256Digest(input.sourceRecord.bytes);
+  replacePolicy(input, (policy) => {
+    (
+      policy as unknown as {
+        transformableMetadata: string[];
+      }
+    ).transformableMetadata.push(
+      "/@graph/*/customExtension/*",
+    );
+  });
+  const extraction = extractDerivationSurfaces(
+    validateDerivationSource(input),
+    parseDerivationPolicy(input.policyBytes).value,
+  );
+  expect(extraction.hold).toBeUndefined();
+  expect(
+    extraction.surfaces.find(
+      ({ location }) =>
+        location === "/@graph/1/customExtension/0",
+    )?.text,
+  ).toBe("array-element-private-value");
+});
+
 test("entropy and Git trailer carriers use their exact semantic classes", async () => {
   const detectors = createBuiltinDerivationDetectors({
     privateConfiguration,
