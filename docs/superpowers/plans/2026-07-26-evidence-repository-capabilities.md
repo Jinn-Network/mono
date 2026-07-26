@@ -65,14 +65,32 @@ methods, or existing error meanings.
 
 Write failing root contract tests first:
 
+- the repository object itself is not a Proxy;
+- `capabilities` is an own data property on the repository, never inherited or accessor-backed;
+- the contract kit rejects repository Proxies before any other repository reflection and reads the
+  capability value from its own descriptor without invoking a getter;
+- the repository's capability-slot descriptor value is stable for its lifetime; the slot is not
+  required to be runtime non-writable or non-configurable;
 - every repository exposes a non-null, non-array object;
-- the object is frozen or defensively immutable;
+- the object is an inert immutable snapshot with either `Object.prototype` or `null` as its
+  prototype;
+- the snapshot is non-extensible and every own field is a non-writable, non-configurable data
+  property;
 - the only v1 field is `maxObjectBytes`;
 - absent `maxObjectBytes` is accepted;
+- a present `maxObjectBytes` is an own data property; accessor-backed and inherited limits fail the
+  contract kit without invoking the getter or setter;
 - a present value must be a positive safe integer;
 - zero, negative, fractional, `NaN`, infinity, unsafe integers, and strings fail the contract kit;
-- unknown future capability fields are ignored by v1 consumers;
-- capability reads are stable for the repository lifetime; and
+- unknown future own data fields are ignored semantically by v1 consumers but obey the same
+  immutable snapshot representation;
+- the object reference, prototype, extensibility, keys, descriptors, and values are stable for the
+  repository lifetime;
+- validation is side-effect-free and never mutates, restores, or invokes behavior on the snapshot;
+- repository and capability-snapshot proxies fail before any other reflection; trap-counting tests
+  prove no proxy trap or capability getter is invoked;
+- descriptor-value stability uses `Object.is`, so an ignored immutable future field containing
+  `NaN` remains stable; and
 - `CONTENT_TOO_LARGE` is a valid stable error code.
 
 Export:
@@ -83,7 +101,8 @@ export const NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES:
 ```
 
 The shared empty constant is deeply frozen. Do not add a mutable capability negotiation API or a
-closed parser that would reject future capability fields.
+closed parser that rejects future field names. The representation validator rejects behavior or
+mutability, not unknown keys.
 
 ## Task 2: Update the contract kit and in-memory repository
 
@@ -186,6 +205,10 @@ doubles in Recorder, Issuer, Discovery, and Local Runtime.
 ## Acceptance
 
 - [ ] `EvidenceRepository.capabilities` is required and read-only.
+- [ ] A conforming repository is non-proxy and exposes `capabilities` as a stable own data slot
+      that the contract kit inspects without invoking behavior.
+- [ ] Every capability object is a side-effect-free plain-or-null, non-extensible snapshot of own
+      non-writable, non-configurable data fields; accessors and inherited limits are rejected.
 - [ ] `maxObjectBytes` has strict positive-safe-integer semantics.
 - [ ] `CONTENT_TOO_LARGE` is stable and exported.
 - [ ] Memory, filesystem, and OCI expose the frozen empty capability object.
