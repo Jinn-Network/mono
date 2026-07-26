@@ -176,7 +176,11 @@ copied code snippet is stale, correct the plan rather than implementing the stal
 
 - Evidence Protocol owns semantic conformance.
 - Repository owns exact-byte persistence and integrity, not listing or admission.
-- Derivation is a pure byte-in/byte-out transform with no repository or network I/O.
+- Derivation's functional core, built-in detectors, and every conforming injected detector form a
+  pure byte-in/byte-out transform with no repository, network, durable filesystem, clock,
+  randomness, or other ambient I/O. An injected detector receives private transformable plaintext
+  and is therefore trusted application code; JavaScript provides no sandbox, and the conformance
+  kit is evidence rather than isolation.
 - IPFS is one bounded repository binding, not the mandatory public rail. Its writer requires Kubo
   v0.40.0 or newer for the standard inclusive 2 MiB block boundary.
 - Publication stores exact artifacts, then exact records, then announces record references.

@@ -204,6 +204,14 @@ export type ReconcileResult =
     };
 ```
 
+`frameBytes` and every `OpaqueSinkState.bytes` value contain only non-secret publication and
+recovery data. Credentials, private keys, bearer tokens, wallet authority, and other secrets are
+closed over by the injected sink capability and never serialized into prepared frames, pending
+state, placement state, journal entries, or receipts. The shared pipeline treats these bytes as
+opaque and cannot discover an arbitrary secret by inspection, so every concrete sink must run its
+contract tests with synthetic authority markers and prove that none occur in any returned frame or
+state byte sequence.
+
 `prepare` may be synchronous internally, but the contract is asynchronous for a uniform port. It
 must perform no network, repository, durable filesystem, clock, randomness, or other ambient I/O.
 All framing configuration must be frozen when the sink is constructed.
@@ -550,7 +558,10 @@ announcement port.
   framing.
 - Prepared plans are frozen in the recovery journal.
 - The journal port is asynchronous and a durable filesystem binding ships in v1.
-- All external and durable operations are cancellable.
+- External and durable operations use cooperative cancellation checks before and after awaited
+  boundaries. After a filesystem journal publication link succeeds, cancellation is deferred until
+  the specified non-interruptible directory-sync, temporary-unlink, and second-sync section
+  completes.
 - Announcement interoperability requires a normative medium profile and round-trip tests.
 - Sink/source co-location is optional.
 - Credentials and trust remain outside the package.

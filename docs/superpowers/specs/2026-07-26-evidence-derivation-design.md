@@ -28,9 +28,12 @@ non-protocol safety machinery that the protocol deliberately refuses: structure-
 surfaces, detector contracts, detection rules, disposition policy, deterministic rewriting,
 withholding, review holds, and scrub-receipt construction.
 
-The package is a pure transform. It accepts exact source bytes and exact policy/configuration
-bytes, performs no repository or network I/O, and returns exact output bytes. It never mutates the
-source, writes a repository, publishes a record, invokes a signer, or blocks on a human.
+The package's functional core and built-in detectors form a pure transform. They accept exact
+source bytes and exact policy/configuration bytes, perform no repository, network, durable
+filesystem, clock, randomness, or other ambient I/O, and return exact output bytes. The pipeline
+never mutates the source, writes a repository, publishes a record, invokes a signer, or blocks on a
+human. The same purity claim applies to the complete derivation operation only when every injected
+detector conforms to the detector obligations in §6.1.
 
 The base package includes the deterministic safety floor adapted from `packages/core/src/scrub/`.
 GLiNER stays out of the base package and later ships as
@@ -282,16 +285,30 @@ protected structural value.
 A `DerivationFinding` contains class, confidence band, valid character offsets, stable evidence
 codes, and the detector descriptor. It contains no matched plaintext and no free-form snippet.
 
+An injected detector is a trusted private-data processor: `detect` receives transformable source
+plaintext. A conforming detector performs no network, repository, durable filesystem, clock,
+randomness, or other ambient I/O, and it retains no surface text after the returned promise
+settles, whether it fulfills, rejects, or observes cancellation. Configuration and reproducibility
+inputs are explicit.
+
+JavaScript provides no sandbox around an injected detector. Applications must inject only code
+they trust with the private source content. The detector contract kit supplies conformance
+evidence through test-only effect and retained-surface observers, but those observers cannot
+isolate malicious code or prove that a dishonest third-party harness reports its hidden behavior.
+
 `derivation/testing` exports:
 
 ```ts
 describeDerivationDetectorContract(factory, fixtures): void
 ```
 
-The suite checks input immutability, valid spans, stable descriptor identity, cancellation,
-duplicate/ordering normalization, absence of matched plaintext in findings, and the claimed
-reproducibility grade. A detector declaring `byte-stable` must return canonically identical
-findings on repeated calls.
+The factory returns the detector plus required test-only `ambientEffectCount()` and
+`retainedSurfaceCount()` observers. The generic suite checks that both counts remain zero after
+successful and cancelled detection, along with input immutability, valid spans, stable descriptor
+identity, duplicate/ordering normalization, absence of matched plaintext in findings, and the
+claimed reproducibility grade. Each concrete detector's own tests must apply the same assertions
+to every operational rejection path it implements. A detector declaring `byte-stable` must return
+canonically identical findings on repeated calls.
 
 ### 6.2 Policy is an exact artifact
 

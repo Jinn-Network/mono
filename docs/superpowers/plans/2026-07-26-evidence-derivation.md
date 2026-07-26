@@ -38,8 +38,13 @@ PR 4.
   the plugin, or `EpisodeV1`.
 - **No ML runtime.** This plan defines the detector port but does not add GLiNER, Transformers.js,
   Hugging Face, model downloads, model caches, or native inference dependencies.
-- **No I/O.** The package must have no `node:fs`, repository binding, network, wallet, viem,
-  SQLite, publication, discovery, recorder, issuer, or application dependency.
+- **No I/O.** The functional core, built-in detectors, and every conforming injected detector
+  perform no repository, network, durable filesystem, clock, randomness, or other ambient I/O.
+  The package has no `node:fs`, repository binding, network, wallet, viem, SQLite, publication,
+  discovery, recorder, issuer, or application dependency.
+- **Injected detectors are trusted.** A detector receives private transformable plaintext, retains
+  no surface text after `detect` settles, and must be trusted by the application. The JavaScript
+  port and conformance kit do not provide a sandbox or isolation from dishonest detector code.
 - **No hidden derivation defaults.** Every derivation receives exact canonical policy bytes,
   caller-supplied `completedAt`, and exact scrubber implementation-descriptor bytes.
 - **No configuration side channel.** Public policy, detector, implementation, and receipt
@@ -1249,9 +1254,16 @@ advertised by PR 3 before its implementation existed.
 The suite accepts:
 
 ```ts
+export interface DerivationDetectorContractContext {
+  readonly detector: DerivationDetector;
+  readonly ambientEffectCount: () => number;
+  readonly retainedSurfaceCount: () => number;
+  readonly cleanup?: () => void | Promise<void>;
+}
+
 export type DerivationDetectorContractFactory = () =>
-  | DerivationDetector
-  | Promise<DerivationDetector>;
+  | DerivationDetectorContractContext
+  | Promise<DerivationDetectorContractContext>;
 
 export interface DerivationDetectorContractFixture {
   readonly surface: DerivationSurface;
@@ -1267,10 +1279,18 @@ The suite asserts:
 - no plaintext in evidence;
 - stable normalized ordering;
 - cancellation;
+- zero ambient effects and zero retained surfaces after successful and cancelled calls;
 - repeated equality when `byte-stable`;
 - no equality claim when `best-effort`.
 
-Run it against every built-in detector.
+The contract kit calls both observers around every detector invocation and runs `cleanup` after
+each case. Built-in-detector tests additionally install failing canaries for `fetch`, network
+clients, durable filesystem operations, ambient clocks, and ambient randomness and use a unique
+private marker in each surface. Run the kit against every built-in detector. A third-party
+detector's own truthful observer harness provides conformance evidence but is not a sandbox or a
+proof against malicious code. Every concrete detector must add detector-owned coverage asserting
+the same zero-effect and zero-retention conditions after each operational rejection path it
+implements.
 
 - [ ] **Step 2: Implement `describeEvidenceDeriverContract` test-first**
 

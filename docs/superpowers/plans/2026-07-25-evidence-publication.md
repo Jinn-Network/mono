@@ -204,6 +204,23 @@ self-consistent.
 
 Implement `describeAnnouncementSinkContract(factory)` under `/testing`.
 
+The factory returns:
+
+```ts
+export interface AnnouncementSinkContractContext {
+  readonly sink: AnnouncementSink;
+  readonly effectCount: () => number;
+  readonly authorityMarkers: readonly Uint8Array[];
+  readonly prepareFrameAtSize?: (
+    exactFrameBytes: number,
+  ) => Promise<PreparedAnnouncement>;
+  readonly cleanup?: () => Promise<void> | void;
+}
+```
+
+Every marker is a unique synthetic secret of at least 32 bytes closed over by the sink test
+fixture. It is never passed as a preparation, placement, or reconciliation argument.
+
 The contract suite proves:
 
 - `prepare` performs no network, repository, durable filesystem, clock, randomness, or other
@@ -222,11 +239,16 @@ The contract suite proves:
 - a state-less pre-placement intent can be reconciled after a lost response;
 - `not-found` is returned only after authoritative absence;
 - pending placement is reconciled before retry;
+- no `authorityMarkers` byte sequence occurs in prepared frames or opaque state returned by
+  `place` or `reconcile`;
 - cancellation maps to `OPERATION_ABORTED`; and
 - implementers can add their medium-specific sink-to-source golden round trip.
 
 Run the kit against an in-memory sink whose physical frame is a small versioned canonical JSON
-fixture. That frame is a test medium, not a public Jinn format.
+fixture. The in-memory harness closes over at least one non-UTF-8 synthetic authority marker and
+proves it cannot leak. That frame is a test medium, not a public Jinn format. Every future concrete
+sink must configure its real authority-bearing capability with equivalent synthetic markers and
+run this contract requirement.
 
 ### Task 4: Async journal contract and codecs
 
@@ -508,7 +530,8 @@ ci(evidence-publication): integrate the evidence DAG
 - [ ] The frozen prepared plan is durable and reused on recovery.
 - [ ] The journal port is async and `/fs` is production-usable.
 - [ ] Root does not expose or import `/fs`.
-- [ ] Every awaited boundary is cancellable.
+- [ ] Awaited boundaries use cooperative cancellation checks, with cancellation deferred only
+      inside the specified post-link filesystem durability section.
 - [ ] Uncertain placement reconciles before retry.
 - [ ] Repository failures propagate unchanged.
 - [ ] No Evidence Protocol admission, Discovery dependency, concrete medium, credentials, or
