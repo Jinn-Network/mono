@@ -117,6 +117,12 @@ reader/error-envelope compatibility target only and is not a supported
 upgrade outside this stack. Do not reduce the repository capability or enable `allow-big-block` to
 claim compatibility with an older writer.
 
+Kubo v0.40.0 and v0.42.0 also establish that `block.put(pin=true)` records a raw block as an
+explicit `recursive` pin. The IPFS binding accepts an explicit `direct` or `recursive` local pin as
+custody and rejects `indirect`-only state. For a raw block there are no descendants, so both
+explicit pin classes protect the same single block from garbage collection. Do not add a second
+pin mutation merely to rewrite Kubo's pin class.
+
 The repository implementation object itself is not a Proxy, and its `capabilities` slot is an own
 data property rather than an accessor or inherited property. The contract kit rejects a repository
 Proxy before invoking any other reflection, inspects the slot descriptor before using its value,
