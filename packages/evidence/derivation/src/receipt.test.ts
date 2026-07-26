@@ -10,6 +10,53 @@ import {
   parseScrubberImplementationDescriptor,
 } from "./receipt.js";
 
+const HOSTILE_BYTE_ACCESSORS = [
+  { name: "byteLength", key: "byteLength" },
+  { name: "length", key: "length" },
+  { name: "iterator", key: Symbol.iterator },
+] as const;
+
+function validReceiptBytes(): Uint8Array {
+  return buildScrubReceipt({
+    sourceRecord: {
+      family: "execution-evidence",
+      digest: `sha256:${"a".repeat(64)}`,
+    },
+    scrubberAgentId: "https://example.com/scrubber",
+    implementationDigest: `sha256:${"b".repeat(64)}`,
+    policyDigest: `sha256:${"c".repeat(64)}`,
+    detectorDescriptors: [],
+    completedAt: "2026-07-26T00:00:00Z",
+    mappings: [],
+    artifactCounts: { retained: 0, derived: 0, withheld: 0 },
+    dispositions: [],
+    reproducibility: "byte-stable",
+    bindingImpact: {
+      executionVerification: "not-transferred-to-derived-record",
+      resultEvaluation: "preserved-for-exact-subjects",
+      taskDerived: false,
+      resultDerived: false,
+    },
+  }).bytes;
+}
+
+const BYTE_PARSERS = [
+  {
+    name: "scrub receipt",
+    bytes: validReceiptBytes,
+    parse: (bytes: Uint8Array): unknown => parseScrubReceipt(bytes),
+    errorCode: "INVALID_DERIVATION_INPUT",
+  },
+  {
+    name: "scrubber implementation descriptor",
+    bytes: (): Uint8Array =>
+      syntheticDerivationInput().scrubber.implementationDescriptorBytes,
+    parse: (bytes: Uint8Array): unknown =>
+      parseScrubberImplementationDescriptor(bytes),
+    errorCode: "SCRUBBER_DESCRIPTOR_INVALID",
+  },
+] as const;
+
 test("builds stable canonical receipt bytes without private values or circular digest", () => {
   const input = syntheticDerivationInput();
   const implementation = parseScrubberImplementationDescriptor(
@@ -87,3 +134,37 @@ test("accepts a public-safe independent implementation descriptor", () => {
       .name,
   ).toBe("@independent/evidence-deriver");
 });
+
+test.each(
+  BYTE_PARSERS.flatMap((parser) =>
+    HOSTILE_BYTE_ACCESSORS.map((accessor) => ({ parser, accessor })),
+  ),
+)(
+  "$parser.name snapshots valid bytes without executing an own $accessor.name accessor",
+  ({ parser, accessor }) => {
+    const expected = parser.bytes();
+    const bytes = parser.bytes();
+    let accessorCalls = 0;
+    Object.defineProperty(bytes, accessor.key, {
+      configurable: true,
+      get() {
+        accessorCalls += 1;
+        throw new Error("caller byte accessor must not execute");
+      },
+    });
+
+    parser.parse(bytes);
+
+    expect(accessorCalls).toBe(0);
+    expect(expected.byteLength).toBeGreaterThan(0);
+  },
+);
+
+test.each(BYTE_PARSERS)(
+  "$name maps an unsnapshotable byte input to $errorCode",
+  ({ bytes, parse, errorCode }) => {
+    expect(() => parse(new Proxy(bytes(), {}))).toThrowError(
+      expect.objectContaining({ code: errorCode }),
+    );
+  },
+);

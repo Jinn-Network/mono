@@ -107,10 +107,16 @@ function invalid(message: string, cause?: unknown): never {
 export function parseDerivationPolicy(
   bytes: Uint8Array,
 ): ParsedDerivationPolicy {
+  let snapshot: Uint8Array;
+  try {
+    snapshot = copyBytes(bytes);
+  } catch (cause) {
+    invalid("Policy bytes could not be snapshotted.", cause);
+  }
   let json: unknown;
   try {
     json = parseStrictJson(
-      decodeUtf8(bytes),
+      decodeUtf8(snapshot),
       "Policy must be unambiguous valid UTF-8 JSON.",
       "POLICY_INVALID",
     );
@@ -164,13 +170,13 @@ export function parseDerivationPolicy(
     }
   }
   const canonical = canonicalJsonBytes(value);
-  if (!bytesEqual(bytes, canonical)) {
+  if (!bytesEqual(snapshot, canonical)) {
     invalid("Policy bytes must be RFC 8785 canonical JSON.");
   }
   return Object.freeze({
     value: deepFreeze(value),
-    bytes: copyBytes(bytes),
-    digest: sha256Digest(bytes),
+    bytes: copyBytes(snapshot),
+    digest: sha256Digest(snapshot),
   });
 }
 

@@ -6,6 +6,12 @@ import { canonicalJsonBytes, sha256Digest } from "./bytes.js";
 import { baselinePolicyValue } from "./fixtures.js";
 import { parseDerivationPolicy } from "./index.js";
 
+const HOSTILE_BYTE_ACCESSORS = [
+  { name: "byteLength", key: "byteLength" },
+  { name: "length", key: "length" },
+  { name: "iterator", key: Symbol.iterator },
+] as const;
+
 describe("derivation policy", () => {
   test("accepts exact RFC 8785 policy bytes", () => {
     const bytes = canonicalJsonBytes(baselinePolicyValue());
@@ -70,5 +76,34 @@ describe("derivation policy", () => {
     expect(text).not.toContain("Ada Example");
     expect(text).not.toContain("private-test-nonce");
     expect(text).toContain("configurationDigest");
+  });
+
+  test.each(HOSTILE_BYTE_ACCESSORS)(
+    "snapshots valid bytes without executing an own $name accessor",
+    ({ key }) => {
+      const expected = canonicalJsonBytes(baselinePolicyValue());
+      const bytes = canonicalJsonBytes(baselinePolicyValue());
+      let accessorCalls = 0;
+      Object.defineProperty(bytes, key, {
+        configurable: true,
+        get() {
+          accessorCalls += 1;
+          throw new Error("caller byte accessor must not execute");
+        },
+      });
+
+      const parsed = parseDerivationPolicy(bytes);
+
+      expect(parsed.bytes).toEqual(expected);
+      expect(parsed.digest).toBe(sha256Digest(expected));
+      expect(accessorCalls).toBe(0);
+    },
+  );
+
+  test("maps an unsnapshotable byte input to POLICY_INVALID", () => {
+    const bytes = new Proxy(canonicalJsonBytes(baselinePolicyValue()), {});
+    expect(() => parseDerivationPolicy(bytes)).toThrowError(
+      expect.objectContaining({ code: "POLICY_INVALID" }),
+    );
   });
 });

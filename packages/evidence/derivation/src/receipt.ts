@@ -59,10 +59,20 @@ export interface ParsedScrubberImplementationDescriptor {
 export function parseScrubberImplementationDescriptor(
   bytes: Uint8Array,
 ): ParsedScrubberImplementationDescriptor {
+  let snapshot: Uint8Array;
+  try {
+    snapshot = copyBytes(bytes);
+  } catch (cause) {
+    throw new EvidenceDerivationError(
+      "SCRUBBER_DESCRIPTOR_INVALID",
+      "Scrubber implementation descriptor bytes could not be snapshotted.",
+      { cause },
+    );
+  }
   let value: unknown;
   try {
     value = parseStrictJson(
-      decodeUtf8(bytes),
+      decodeUtf8(snapshot),
       "Scrubber implementation descriptor must be unambiguous valid JSON.",
       "SCRUBBER_DESCRIPTOR_INVALID",
     );
@@ -89,7 +99,7 @@ export function parseScrubberImplementationDescriptor(
     );
   }
   const canonical = canonicalJsonBytes(result.data);
-  if (!bytesEqual(bytes, canonical)) {
+  if (!bytesEqual(snapshot, canonical)) {
     throw new EvidenceDerivationError(
       "SCRUBBER_DESCRIPTOR_INVALID",
       "Scrubber implementation descriptor must be canonical JSON.",
@@ -97,8 +107,8 @@ export function parseScrubberImplementationDescriptor(
   }
   return Object.freeze({
     value: result.data as ScrubberImplementationDescriptor,
-    bytes: copyBytes(bytes),
-    digest: sha256Digest(bytes),
+    bytes: copyBytes(snapshot),
+    digest: sha256Digest(snapshot),
   });
 }
 
@@ -282,10 +292,20 @@ export function buildScrubReceipt(
 }
 
 export function parseScrubReceipt(bytes: Uint8Array): PreparedScrubReceipt {
+  let snapshot: Uint8Array;
+  try {
+    snapshot = copyBytes(bytes);
+  } catch (cause) {
+    throw new EvidenceDerivationError(
+      "INVALID_DERIVATION_INPUT",
+      "Scrub receipt bytes could not be snapshotted.",
+      { cause },
+    );
+  }
   let value: unknown;
   try {
     value = parseStrictJson(
-      decodeUtf8(bytes),
+      decodeUtf8(snapshot),
       "Scrub receipt must be unambiguous valid JSON.",
       "INVALID_DERIVATION_INPUT",
     );
@@ -297,7 +317,10 @@ export function parseScrubReceipt(bytes: Uint8Array): PreparedScrubReceipt {
     );
   }
   const result = receiptSchema.safeParse(value);
-  if (!result.success || !bytesEqual(bytes, canonicalJsonBytes(result.data))) {
+  if (
+    !result.success ||
+    !bytesEqual(snapshot, canonicalJsonBytes(result.data))
+  ) {
     throw new EvidenceDerivationError(
       "INVALID_DERIVATION_INPUT",
       "Scrub receipt must have the v1 shape and canonical bytes.",
@@ -306,7 +329,7 @@ export function parseScrubReceipt(bytes: Uint8Array): PreparedScrubReceipt {
   }
   return Object.freeze({
     value: result.data as ScrubReceipt,
-    bytes: copyBytes(bytes),
-    digest: sha256Digest(bytes),
+    bytes: copyBytes(snapshot),
+    digest: sha256Digest(snapshot),
   });
 }
