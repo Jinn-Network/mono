@@ -2,9 +2,65 @@ import type {
   EvidenceRepositoryCapabilities,
 } from "./types.js";
 
+const MAX_OBJECT_BYTES = "maxObjectBytes";
+
 export function assertEvidenceRepositoryCapabilities(
   value: unknown,
 ): asserts value is EvidenceRepositoryCapabilities {
+  assertCapabilityContainer(value);
+  assertMaxObjectBytesDescriptor(
+    value,
+    Reflect.getOwnPropertyDescriptor(value, MAX_OBJECT_BYTES),
+  );
+}
+
+export function assertStableImmutableEvidenceRepositoryCapabilities(
+  readCapabilities: () => unknown,
+): EvidenceRepositoryCapabilities {
+  const capabilities = readCapabilities();
+  assertEvidenceRepositoryCapabilities(capabilities);
+
+  const firstSnapshot = captureSnapshot(capabilities);
+  const repeatedCapabilities = readCapabilities();
+  if (repeatedCapabilities !== capabilities) {
+    throw new TypeError(
+      "EvidenceRepository.capabilities must expose a stable object reference.",
+    );
+  }
+  const repeatedSnapshot = captureSnapshot(capabilities);
+
+  if (firstSnapshot.prototype !== repeatedSnapshot.prototype) {
+    throw new TypeError(
+      "EvidenceRepository.capabilities must expose a stable prototype.",
+    );
+  }
+  if (firstSnapshot.extensible !== repeatedSnapshot.extensible) {
+    throw new TypeError(
+      "EvidenceRepository.capabilities must expose stable extensibility.",
+    );
+  }
+  if (
+    !descriptorSnapshotsMatch(
+      firstSnapshot.descriptors,
+      repeatedSnapshot.descriptors,
+    )
+  ) {
+    throw new TypeError(
+      "EvidenceRepository.capabilities must expose stable own data descriptors.",
+    );
+  }
+
+  assertMaxObjectBytesDescriptor(
+    capabilities,
+    firstSnapshot.descriptors.get(MAX_OBJECT_BYTES),
+  );
+  assertImmutableSnapshot(firstSnapshot);
+  return capabilities;
+}
+
+function assertCapabilityContainer(
+  value: unknown,
+): asserts value is object {
   if (
     value === null ||
     typeof value !== "object" ||
@@ -14,9 +70,28 @@ export function assertEvidenceRepositoryCapabilities(
       "EvidenceRepository.capabilities must be a non-null, non-array object.",
     );
   }
-  const maxObjectBytes = (
-    value as { readonly maxObjectBytes?: unknown }
-  ).maxObjectBytes;
+}
+
+function assertMaxObjectBytesDescriptor(
+  capabilities: object,
+  descriptor: PropertyDescriptor | undefined,
+): void {
+  if (descriptor === undefined) {
+    if (Reflect.has(capabilities, MAX_OBJECT_BYTES)) {
+      throw new TypeError(
+        "EvidenceRepository.capabilities.maxObjectBytes must be an own data property.",
+      );
+    }
+    return;
+  }
+
+  if (!isDataDescriptor(descriptor)) {
+    throw new TypeError(
+      "EvidenceRepository.capabilities.maxObjectBytes must be an own data property.",
+    );
+  }
+
+  const maxObjectBytes = descriptor.value as unknown;
   if (
     maxObjectBytes !== undefined &&
     (
@@ -31,107 +106,91 @@ export function assertEvidenceRepositoryCapabilities(
   }
 }
 
-export function assertStableImmutableEvidenceRepositoryCapabilities(
-  readCapabilities: () => unknown,
-): EvidenceRepositoryCapabilities {
-  const capabilities = readCapabilities();
-  assertEvidenceRepositoryCapabilities(capabilities);
-  const maxObjectBytes = capabilities.maxObjectBytes;
-
-  if (readCapabilities() !== capabilities) {
-    throw new TypeError(
-      "EvidenceRepository.capabilities must expose a stable object reference.",
-    );
-  }
-  if (capabilities.maxObjectBytes !== maxObjectBytes) {
-    throw new TypeError(
-      "EvidenceRepository.capabilities must expose a stable maxObjectBytes value.",
-    );
-  }
-
-  const snapshot = snapshotDescriptors(capabilities);
-  const failures: string[] = [];
-  const futureKeys = Reflect.ownKeys(capabilities).filter(
-    (key) => key !== "maxObjectBytes",
-  );
-
-  probeMutation(
-    "add future property",
-    capabilities,
-    readCapabilities,
-    snapshot,
-    maxObjectBytes,
-    (value) => Reflect.set(value, Symbol("contractFutureCapability"), true),
-    failures,
-  );
-
-  if (Object.hasOwn(capabilities, "maxObjectBytes")) {
-    const attemptedValue = maxObjectBytes === 1 ? 2 : 1;
-    probeMutation(
-      "overwrite maxObjectBytes",
-      capabilities,
-      readCapabilities,
-      snapshot,
-      maxObjectBytes,
-      (value) => Reflect.set(value, "maxObjectBytes", attemptedValue),
-      failures,
-    );
-  }
-
-  for (const futureKey of futureKeys) {
-    probeMutation(
-      `overwrite ${String(futureKey)}`,
-      capabilities,
-      readCapabilities,
-      snapshot,
-      maxObjectBytes,
-      (value) => Reflect.set(value, futureKey, Symbol("changed")),
-      failures,
-    );
-  }
-
-  if (Object.hasOwn(capabilities, "maxObjectBytes")) {
-    probeDelete(
-      "delete maxObjectBytes",
-      capabilities,
-      readCapabilities,
-      snapshot,
-      maxObjectBytes,
-      "maxObjectBytes",
-      failures,
-    );
-  }
-
-  for (const futureKey of futureKeys) {
-    probeDelete(
-      `delete ${String(futureKey)}`,
-      capabilities,
-      readCapabilities,
-      snapshot,
-      maxObjectBytes,
-      futureKey,
-      failures,
-    );
-  }
-
-  if (failures.length > 0) {
-    throw new TypeError(
-      `EvidenceRepository.capabilities must be immutable: ${failures.join(", ")}.`,
-    );
-  }
-
-  return capabilities;
+interface CapabilitySnapshot {
+  readonly descriptors: DescriptorSnapshot;
+  readonly extensible: boolean;
+  readonly prototype: object | null;
 }
 
 type DescriptorSnapshot = ReadonlyMap<PropertyKey, PropertyDescriptor>;
 
-function snapshotDescriptors(value: object): DescriptorSnapshot {
-  return new Map(
-    Reflect.ownKeys(value).map((key) => [
-      key,
-      Object.getOwnPropertyDescriptor(value, key)!,
-    ]),
-  );
+function captureSnapshot(value: object): CapabilitySnapshot {
+  const prototype = Reflect.getPrototypeOf(value);
+  const extensible = Reflect.isExtensible(value);
+  const descriptors = new Map<PropertyKey, PropertyDescriptor>();
+
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined) {
+      throw new TypeError(
+        "EvidenceRepository.capabilities must expose stable own data descriptors.",
+      );
+    }
+    descriptors.set(key, descriptor);
+  }
+
+  return { descriptors, extensible, prototype };
+}
+
+function assertImmutableSnapshot(snapshot: CapabilitySnapshot): void {
+  const problems: string[] = [];
+  if (
+    snapshot.prototype !== Object.prototype &&
+    snapshot.prototype !== null
+  ) {
+    problems.push("must have a plain or null prototype");
+  }
+  if (snapshot.extensible) {
+    problems.push(
+      "must be non-extensible to prevent property addition and prototype mutation",
+    );
+  }
+
+  for (const [key, descriptor] of snapshot.descriptors) {
+    const label = formatPropertyKey(key);
+    if (!isDataDescriptor(descriptor)) {
+      problems.push(`${label} must be an own data descriptor`);
+      continue;
+    }
+    if (descriptor.writable !== false) {
+      problems.push(`${label} must be non-writable`);
+    }
+    if (descriptor.configurable !== false) {
+      problems.push(
+        `${label} must be non-configurable to prevent deletion and defineProperty mutation`,
+      );
+    }
+  }
+
+  if (problems.length > 0) {
+    throw new TypeError(
+      `EvidenceRepository.capabilities must be an immutable snapshot: ${problems.join("; ")}.`,
+    );
+  }
+}
+
+function isDataDescriptor(
+  descriptor: PropertyDescriptor,
+): descriptor is PropertyDescriptor & { readonly value: unknown } {
+  return Object.hasOwn(descriptor, "value");
+}
+
+function descriptorSnapshotsMatch(
+  left: DescriptorSnapshot,
+  right: DescriptorSnapshot,
+): boolean {
+  if (left.size !== right.size) return false;
+
+  for (const [key, leftDescriptor] of left) {
+    const rightDescriptor = right.get(key);
+    if (
+      rightDescriptor === undefined ||
+      !descriptorsMatch(leftDescriptor, rightDescriptor)
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function descriptorsMatch(
@@ -148,103 +207,6 @@ function descriptorsMatch(
   );
 }
 
-function matchesSnapshot(
-  value: object,
-  snapshot: DescriptorSnapshot,
-): boolean {
-  const keys = Reflect.ownKeys(value);
-  if (keys.length !== snapshot.size) return false;
-
-  return keys.every((key) => {
-    const expected = snapshot.get(key);
-    const actual = Object.getOwnPropertyDescriptor(value, key);
-    return (
-      expected !== undefined &&
-      actual !== undefined &&
-      descriptorsMatch(actual, expected)
-    );
-  });
-}
-
-function restoreSnapshot(
-  value: object,
-  snapshot: DescriptorSnapshot,
-): void {
-  for (const key of Reflect.ownKeys(value)) {
-    if (!snapshot.has(key)) {
-      try {
-        Reflect.deleteProperty(value, key);
-      } catch {
-        // Best effort keeps a failing implementation available for diagnostics.
-      }
-    }
-  }
-
-  for (const [key, descriptor] of snapshot) {
-    try {
-      Object.defineProperty(value, key, descriptor);
-    } catch {
-      // Best effort keeps a failing implementation available for diagnostics.
-    }
-  }
-}
-
-function probeMutation(
-  label: string,
-  capabilities: EvidenceRepositoryCapabilities,
-  readCapabilities: () => unknown,
-  snapshot: DescriptorSnapshot,
-  maxObjectBytes: number | undefined,
-  mutate: (value: object) => boolean,
-  failures: string[],
-): void {
-  try {
-    mutate(capabilities);
-    if (
-      readCapabilities() !== capabilities ||
-      capabilities.maxObjectBytes !== maxObjectBytes ||
-      !matchesSnapshot(capabilities, snapshot)
-    ) {
-      failures.push(label);
-    }
-  } catch {
-    if (
-      readCapabilities() !== capabilities ||
-      capabilities.maxObjectBytes !== maxObjectBytes ||
-      !matchesSnapshot(capabilities, snapshot)
-    ) {
-      failures.push(label);
-    }
-  } finally {
-    restoreSnapshot(capabilities, snapshot);
-  }
-}
-
-function probeDelete(
-  label: string,
-  capabilities: EvidenceRepositoryCapabilities,
-  readCapabilities: () => unknown,
-  snapshot: DescriptorSnapshot,
-  maxObjectBytes: number | undefined,
-  key: PropertyKey,
-  failures: string[],
-): void {
-  const descriptor = snapshot.get(key);
-  if (
-    descriptor?.configurable === true &&
-    !Object.isExtensible(capabilities)
-  ) {
-    failures.push(label);
-    return;
-  }
-
-  probeMutation(
-    label,
-    capabilities,
-    readCapabilities,
-    snapshot,
-    maxObjectBytes,
-    (value) => Reflect.deleteProperty(value, key),
-    failures,
-  );
+function formatPropertyKey(key: PropertyKey): string {
+  return String(key);
 }
