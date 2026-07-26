@@ -23,7 +23,14 @@ const DERIVATION_FORBIDDEN_PACKAGES = [
   '@jinn-network/execution-recorder',
   '@lmoe/gliner-onnx',
   'better-sqlite3',
+  'node:dgram',
+  'node:dns',
   'node:fs',
+  'node:http',
+  'node:http2',
+  'node:https',
+  'node:net',
+  'node:tls',
   'viem',
 ];
 
@@ -150,12 +157,16 @@ test('Derivation boundary checks catch package, I/O, and local-path escapes', ()
       'await import("@jinn-network/evidence-discovery");',
       'require("@jinn-network/execution-recorder");',
       'import "node:fs/promises";',
+      'import "node:http";',
+      'export * from "node:https";',
+      'await import("node:net");',
+      'require("node:dns/promises");',
       'import "@huggingface/transformers";',
       'import "../forbidden/local.js";',
     ].join('\n'));
     assert.equal(
       forbiddenImports(source, DERIVATION_FORBIDDEN_PACKAGES, [forbidden]).length,
-      7,
+      11,
     );
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
