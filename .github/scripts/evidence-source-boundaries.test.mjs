@@ -244,24 +244,33 @@ test('Derivation root and testing boundaries distinguish test-only dependencies'
     const source = join(fixture, 'src');
     const testing = join(source, 'testing.ts');
     const testingFixtures = join(source, 'fixtures.ts');
+    const testingInvocation = join(
+      source,
+      'detector-contract-invocation.ts',
+    );
     mkdirSync(source);
     writeFileSync(join(source, 'index.ts'), [
       'import "vitest";',
       'export * from "./testing.js";',
       'export * from "./fixtures.js";',
+      'export * from "./detector-contract-invocation.js";',
     ].join('\n'));
     writeFileSync(testing, [
       'import "@jinn-network/evidence-repository";',
       'import "node:fs/promises";',
     ].join('\n'));
     writeFileSync(testingFixtures, 'export const syntheticFixture = true;\n');
+    writeFileSync(
+      testingInvocation,
+      'export const invokeContractDetector = true;\n',
+    );
     assert.equal(
       forbiddenImportsInFiles(
         [join(source, 'index.ts')],
         ['vitest'],
-        [testing, testingFixtures],
+        [testing, testingFixtures, testingInvocation],
       ).length,
-      3,
+      4,
     );
     assert.equal(
       forbiddenImportsInFiles(
@@ -317,9 +326,14 @@ test('evidence source boundaries remain one-way across the approved graph', () =
   const derivationSource = join(derivation, 'src');
   const derivationTesting = join(derivationSource, 'testing.ts');
   const derivationTestingFixtures = join(derivationSource, 'fixtures.ts');
+  const derivationTestingInvocation = join(
+    derivationSource,
+    'detector-contract-invocation.ts',
+  );
   const derivationTestingFiles = [
     derivationTesting,
     derivationTestingFixtures,
+    derivationTestingInvocation,
   ];
   const derivationSourceFiles = files(derivationSource);
   const derivationProductionFiles = derivationSourceFiles.filter((file) =>
