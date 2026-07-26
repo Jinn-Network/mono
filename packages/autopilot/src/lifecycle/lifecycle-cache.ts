@@ -509,9 +509,6 @@ const stateSchema = z.object({
     if (pr.mergedAt !== null && Date.parse(pr.mergedAt) > closedMs) {
       issue(['recentlyClosedPullRequests'], `PR #${pr.number} merged after it closed`);
     }
-    if (Number.isFinite(closedMs) && Date.parse(pr.updatedAt) < closedMs) {
-      issue(['recentlyClosedPullRequests'], `PR #${pr.number} updated before it closed`);
-    }
     if (openIndex.has(pr.number)) {
       issue(['recentlyClosedPullRequests'], `PR #${pr.number} is also in the open index`);
     }
