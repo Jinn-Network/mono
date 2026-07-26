@@ -47,6 +47,35 @@ test("returns exact bytes and claim applicability when publishable unchanged", a
   );
 });
 
+test.each([
+  "2026-00-01T00:00:00Z",
+  "2026-13-01T00:00:00Z",
+  "2026-02-29T00:00:00Z",
+  "2026-02-31T00:00:00Z",
+  "2026-04-31T00:00:00Z",
+  "1900-02-29T00:00:00Z",
+  "2024-01-01T24:00:00Z",
+  "2024-01-01T23:59:59+24:00",
+])("rejects calendar-invalid completedAt %s", async (completedAt) => {
+  const input = syntheticDerivationInput();
+  (input as { completedAt: string }).completedAt = completedAt;
+  await expect(
+    createEvidenceDeriver({ detectors: silentDetectors() }).derive(input),
+  ).rejects.toMatchObject({ code: "INVALID_DERIVATION_INPUT" });
+});
+
+test.each([
+  "2000-02-29T00:00:00Z",
+  "2024-02-29T23:59:59.123456789-05:30",
+  "2026-02-28T23:59:59+23:59",
+])("accepts calendar-valid completedAt %s", async (completedAt) => {
+  const input = syntheticDerivationInput();
+  (input as { completedAt: string }).completedAt = completedAt;
+  expect(
+    await createEvidenceDeriver({ detectors: silentDetectors() }).derive(input),
+  ).toMatchObject({ status: "publishable-unchanged" });
+});
+
 test("returns a conforming derived record for deterministic redactions", async () => {
   const outcome = await createEvidenceDeriver({
     detectors: createBuiltinDerivationDetectors({ privateConfiguration }),
