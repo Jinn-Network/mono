@@ -378,6 +378,33 @@ already proven by
 `@jinn-network/evidence-repository/fs`, but it does not reuse that repository as an implicit
 journal.
 
+### 8.1 Filesystem threat model
+
+The v1 filesystem journal is trusted local application state. Its configured root and ancestors
+must be controlled by the application operator and must not be concurrently mutated by a hostile
+process with the same or greater filesystem authority.
+
+Within that trust boundary, the binding must reject lexical path escapes, pre-existing symlinks at
+every managed component, non-regular managed files, malformed or corrupt revisions, unsafe
+permissions where the platform exposes POSIX ownership and modes, and stale or conflicting
+writers. It must use non-following leaf opens where Node exposes them and revalidate managed
+components around pathname-based operations so detectable replacement or corruption fails closed.
+The journal contract and filesystem tests cover these static and accidental conditions, concurrent
+journal writers, cancellation, and crash recovery.
+
+Node 22 does not expose descriptor-relative child operations such as `openat` and `linkat`.
+Therefore the portable v1 binding does not claim containment against an equally privileged local
+actor that wins an active time-of-check/time-of-use race by replacing a validated ancestor or
+managed directory between validation and a pathname-based filesystem operation. Native filesystem
+extensions, platform restrictions, and protection from hostile same-user mutation are out of scope
+for v1.
+
+This boundary does not weaken Evidence object integrity. Evidence bytes remain content-addressed
+and digest-checked, so modification is detectable. The journal is a durable recovery log, not a
+cryptographic trust anchor: it prevents duplicate or reordered publication effects after ordinary
+crashes and cancellation, but it is not tamper-proof against an operator or process that already
+controls the journal files.
+
 ## 9. Publication algorithm
 
 For a new bundle:
