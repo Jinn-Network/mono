@@ -1,0 +1,149 @@
+import { z } from "zod";
+
+import {
+  bytesEqual,
+  canonicalJsonBytes,
+  copyBytes,
+  decodeUtf8,
+  sha256Digest,
+} from "./bytes.js";
+import { EvidenceDerivationError } from "./errors.js";
+import {
+  PROTECTED_VALUE_CLASSES,
+  type DerivationPolicy,
+  type ParsedDerivationPolicy,
+} from "./types.js";
+
+const digest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
+const detector = z.strictObject({
+  id: z.string().min(1),
+  version: z.string().min(1),
+  implementationDigest: digest,
+  reproducibility: z.enum(["byte-stable", "best-effort"]),
+  configurationDigest: digest.optional(),
+});
+const selector = z
+  .string()
+  .min(1)
+  .refine(
+    (value) =>
+      value.startsWith("/") &&
+      value
+        .slice(1)
+        .split("/")
+        .every((segment) => segment !== "" && segment !== "**"),
+    "invalid metadata selector",
+  );
+const protectedDispositions = z.strictObject(
+  Object.fromEntries(
+    PROTECTED_VALUE_CLASSES.map((name) => [
+      name,
+      z.enum(["retain", "withhold-record"]),
+    ]),
+  ) as Record<
+    (typeof PROTECTED_VALUE_CLASSES)[number],
+    z.ZodEnum<{ retain: "retain"; "withhold-record": "withhold-record" }>
+  >,
+);
+
+const policySchema = z.strictObject({
+  schemaVersion: z.literal("jinn.evidence-derivation-policy.v1"),
+  name: z.string().min(1),
+  version: z.string().min(1),
+  reproducibility: z.enum(["byte-stable", "content-addressed"]),
+  requiredDetectors: z.array(detector),
+  transformableMetadata: z.array(selector),
+  protectedMetadata: z.array(selector),
+  protectedValueDispositions: protectedDispositions,
+  artifactRules: z.array(
+    z.strictObject({
+      mediaType: z.string().min(1),
+      roles: z.array(
+        z.enum([
+          "task",
+          "result",
+          "runtime-specification",
+          "runtime-component",
+          "native-trace",
+          "input",
+          "evidence",
+          "other",
+        ]),
+      ),
+      codec: z.enum(["text", "json", "jsonl", "signed", "binary"]),
+      unavailable: z.enum(["retain-commitment", "withhold-record"]),
+    }),
+  ),
+  defaultArtifactDisposition: z.enum(["withhold-artifact", "withhold-record"]),
+  dispositions: z.array(
+    z.strictObject({
+      class: z.string().min(1),
+      minimumConfidence: z.enum([
+        "VERY_LOW",
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "VERY_HIGH",
+      ]),
+      disposition: z.enum([
+        "retain",
+        "redact",
+        "withhold-artifact",
+        "withhold-record",
+        "review",
+      ]),
+    }),
+  ),
+  stubs: z.record(z.string(), z.string()),
+  technicalAllowlist: z.array(z.string()),
+  privateAllowlistConfigurationDigest: digest.optional(),
+  resultTransform: z.enum(["derive-unassessed", "withhold-record"]),
+});
+
+function invalid(message: string, cause?: unknown): never {
+  throw new EvidenceDerivationError("POLICY_INVALID", message, { cause });
+}
+
+export function parseDerivationPolicy(
+  bytes: Uint8Array,
+): ParsedDerivationPolicy {
+  let json: unknown;
+  try {
+    json = JSON.parse(decodeUtf8(bytes));
+  } catch (cause) {
+    invalid("Policy must be valid UTF-8 JSON.", cause);
+  }
+  const result = policySchema.safeParse(json);
+  if (!result.success) {
+    invalid("Policy schema is invalid.", result.error.issues);
+  }
+  const value = result.data as DerivationPolicy;
+  const ids = value.requiredDetectors.map(({ id }) => id);
+  if (new Set(ids).size !== ids.length) {
+    invalid("detector ids must be unique");
+  }
+  for (const row of value.dispositions) {
+    if (row.disposition === "redact" && value.stubs[row.class] === undefined) {
+      invalid(`redact class ${row.class} requires a stub`);
+    }
+  }
+  const canonical = canonicalJsonBytes(value);
+  if (!bytesEqual(bytes, canonical)) {
+    invalid("Policy bytes must be RFC 8785 canonical JSON.");
+  }
+  return Object.freeze({
+    value: deepFreeze(value),
+    bytes: copyBytes(bytes),
+    digest: sha256Digest(bytes),
+  });
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const child of Object.values(value as Record<string, unknown>)) {
+      deepFreeze(child);
+    }
+    Object.freeze(value);
+  }
+  return value;
+}
