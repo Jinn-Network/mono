@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -65,8 +72,11 @@ try {
     .split(/\r?\n/u)
     .filter(Boolean);
   for (const required of [
+    "package/README.md",
     "package/dist/index.d.ts",
     "package/dist/index.js",
+    "package/dist/testing.d.ts",
+    "package/dist/testing.js",
     "package/package.json",
   ]) {
     if (!entries.includes(required)) {
@@ -78,7 +88,7 @@ try {
       /(?:^|\/)[^/]*\.(?:test|spec)\./u.test(entry) ||
       entry.endsWith(".map") ||
       entry.includes("/src/") ||
-      entry.includes("/fixtures."),
+      entry.includes("local-corpus"),
   );
   if (leaked.length > 0) {
     throw new Error(
@@ -95,6 +105,7 @@ try {
       dependencies: {
         "@jinn-network/evidence-derivation": `file:${derivationArchive}`,
         "@jinn-network/evidence-protocol": `file:${protocolArchive}`,
+        vitest: "4.1.8",
       },
     }),
   );
@@ -108,10 +119,13 @@ try {
     `
 import assert from "node:assert/strict";
 import * as root from "@jinn-network/evidence-derivation";
+import * as testing from "@jinn-network/evidence-derivation/testing";
 
 assert.equal(typeof root.createEvidenceDeriver, "function");
 assert.equal(typeof root.parseDerivationPolicy, "function");
 assert.equal(typeof root.parseScrubReceipt, "function");
+assert.equal(typeof testing.describeEvidenceDeriverContract, "function");
+assert.equal(typeof testing.describeDerivationDetectorContract, "function");
 assert.equal("canonicalJsonBytes" in root, false);
 assert.equal("sha256Digest" in root, false);
 `,
@@ -119,7 +133,41 @@ assert.equal("sha256Digest" in root, false);
   await run(process.execPath, [join(consumer, "smoke.mjs")], {
     cwd: consumer,
   });
-  console.log("Packed derivation root import and archive boundary verified.");
+  const installedManifest = JSON.parse(
+    await readFile(
+      join(
+        consumer,
+        "node_modules",
+        "@jinn-network",
+        "evidence-derivation",
+        "package.json",
+      ),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(installedManifest.peerDependencies, {
+    vitest: "^4.1.8",
+  });
+  assert.deepEqual(installedManifest.peerDependenciesMeta, {
+    vitest: { optional: true },
+  });
+  const forbiddenDependencies = [
+    "@huggingface/transformers",
+    "@lmoe/gliner-onnx",
+    "better-sqlite3",
+    "viem",
+  ];
+  for (const dependency of forbiddenDependencies) {
+    if (
+      dependency in (installedManifest.dependencies ?? {}) ||
+      dependency in (installedManifest.optionalDependencies ?? {})
+    ) {
+      throw new Error(`packed derivation includes forbidden ${dependency}`);
+    }
+  }
+  console.log(
+    "Packed derivation root/testing imports and archive boundary verified.",
+  );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
 }
