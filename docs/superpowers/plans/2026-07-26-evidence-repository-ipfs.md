@@ -63,6 +63,19 @@ Do not add `multiformats` independently if the pinned Kubo client already suppli
 implementation used by its public API. Do not add Helia, an HTTP client, or a canonical-JSON
 runtime.
 
+Pin the real-Kubo lanes exactly:
+
+- v0.40.0 is the minimum supported writer and compatibility floor;
+- v0.42.0 is the implementation-time current stable writer on 2026-07-26; and
+- v0.32.1 is a reader/error-envelope compatibility fixture only.
+
+The full unmodified Repository contract kit runs against v0.40.0 and v0.42.0. The v0.32.1 lane
+captures the strict bounded not-found envelope and may verify raw reads within its older block
+limit, but it never runs writer conformance or claims that the fixed 2 MiB capability is supported
+there. Do not enable `allow-big-block`, lower the package capability, or add version-dependent
+capability negotiation. The observed Autonolas v0.32.1 node requires an out-of-scope
+operator-managed upgrade before this writer can target it.
+
 ## Package layout
 
 ```text
@@ -387,16 +400,17 @@ Run the updated, unmodified Repository contract kit for:
 - declared capability behavior; and
 - direct and streamed 2 MiB accepted / 2 MiB + 1 rejected boundaries.
 
-Use ephemeral Kubo containers in CI. Pin:
+Use ephemeral Kubo containers in CI. Pin v0.40.0 and v0.42.0 by immutable official image digest
+for the full write-conformance matrix. Pin v0.32.1 separately by immutable official image digest
+for reader/error-envelope compatibility only.
 
-- one supported compatibility version; and
-- the exact implementation-time current stable version.
-
-Use official images by digest where practical. Do not depend on a public gateway for hermetic
-contract tests. A separate optional test may prove gateway reading against a local HTTP fixture.
+Do not depend on a public gateway for hermetic contract tests. A separate optional test may prove
+gateway reading against a local HTTP fixture.
 
 If real Kubo rejects exactly 2 MiB under standard `block put`, stop and correct the design before
-shipping. Never enable `allow-big-block`.
+shipping. This condition applies to the supported v0.40.0-or-newer writer matrix; v0.32.1's
+documented older 1 MiB default is the reason it is excluded as a writer. Never enable
+`allow-big-block`.
 
 ### Task 10: Distribution and final review
 
@@ -438,6 +452,9 @@ ci(evidence-repository-ipfs): integrate the evidence DAG
 - [ ] 256 KiB is never described as the raw-block ceiling.
 - [ ] `allow-big-block`, UnixFS, chunking, and mutable lookup indexes are absent.
 - [ ] Successful put confirms expected CIDs, configured pins, and exact readback.
+- [ ] Full Repository writer conformance passes on pinned Kubo v0.40.0 and v0.42.0.
+- [ ] Kubo v0.32.1 is tested only for bounded reader/error-envelope compatibility and is never
+      advertised as a supported writer.
 - [ ] Missing registration returns `null`; corrupt partial objects fail.
 - [ ] Reader buffering is bounded and all awaited boundaries are cancellable.
 - [ ] Contract kit passes unmodified against real Kubo.
