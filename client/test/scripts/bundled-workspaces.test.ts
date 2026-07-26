@@ -43,7 +43,11 @@ describe('bundled workspace packaging', () => {
     await writeFile(
       path.join(clientRoot, 'package.json'),
       JSON.stringify({
-        dependencies: { zod: '^4.4.3' },
+        dependencies: {
+          '@jinn-network/core': '1.0.0',
+          '@jinn-network/plugin': '1.0.0',
+          zod: '^4.4.3',
+        },
         bundledDependencies: ['@jinn-network/core', '@jinn-network/plugin'],
       }),
     );
@@ -51,6 +55,7 @@ describe('bundled workspace packaging', () => {
       path.join(coreRoot, 'package.json'),
       JSON.stringify({
         name: '@jinn-network/core',
+        version: '1.0.0',
         files: ['dist/'],
         dependencies: { zod: '^4.4.3' },
         devDependencies: { local: 'workspace:*' },
@@ -64,6 +69,7 @@ describe('bundled workspace packaging', () => {
       path.join(pluginRoot, 'package.json'),
       JSON.stringify({
         name: '@jinn-network/plugin',
+        version: '1.0.0',
         files: ['dist/', 'process-contract.json'],
         dependencies: { zod: '^4.4.3' },
       }),
@@ -116,7 +122,7 @@ describe('bundled workspace packaging', () => {
   "publishConfig": {"access":"public"},
   "bundledDependencies": ["@jinn-network/core"],
   "scripts": {"postinstall":"node dist/postinstall.mjs","test":"vitest"},
-  "dependencies": {"zod":"^4.4.3"},
+  "dependencies": {"@jinn-network/core":"1.0.0","zod":"^4.4.3"},
   "optionalDependencies": {"native":"^1.0.0"},
   "workspaces": ["packages/*"],
   "devDependencies": {"vitest":"^4.1.8"},
@@ -130,7 +136,7 @@ describe('bundled workspace packaging', () => {
     await writeFile(packagePath, sourceBytes);
     await writeFile(
       path.join(coreRoot, 'package.json'),
-      JSON.stringify({ name: '@jinn-network/core', files: ['dist/'] }),
+      JSON.stringify({ name: '@jinn-network/core', version: '1.0.0', files: ['dist/'] }),
     );
     await writeFile(path.join(coreRoot, 'dist', 'index.js'), 'export const core = true;\n');
     await symlink(path.relative(scopeRoot, coreRoot), path.join(scopeRoot, 'core'));
@@ -168,6 +174,40 @@ describe('bundled workspace packaging', () => {
     expect((await lstat(path.join(scopeRoot, 'core'))).isSymbolicLink()).toBe(true);
   });
 
+  it('rejects a bundled workspace whose client dependency does not exactly match its version', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'jinn-bundled-workspaces-version-'));
+    dirs.push(root);
+    const clientRoot = path.join(root, 'client');
+    const coreRoot = path.join(root, 'packages', 'core');
+    const scopeRoot = path.join(clientRoot, 'node_modules', '@jinn-network');
+    const packagePath = path.join(clientRoot, 'package.json');
+    const sourceBytes = Buffer.from(
+      '{"name":"@jinn-network/client","dependencies":{"@jinn-network/core":"0.1.0"},"bundledDependencies":["@jinn-network/core"]}\n',
+    );
+
+    await mkdir(path.join(coreRoot, 'dist'), { recursive: true });
+    await mkdir(scopeRoot, { recursive: true });
+    await writeFile(packagePath, sourceBytes);
+    await writeFile(
+      path.join(coreRoot, 'package.json'),
+      JSON.stringify({
+        name: '@jinn-network/core',
+        version: '0.1.1',
+        files: ['dist/'],
+      }),
+    );
+    await writeFile(path.join(coreRoot, 'dist', 'index.js'), 'export const core = true;\n');
+    await symlink(path.relative(scopeRoot, coreRoot), path.join(scopeRoot, 'core'));
+
+    await expect(materializeBundledWorkspaces({ clientRoot })).rejects.toThrow(
+      '@jinn-network/core bundled workspace version 0.1.1 must be declared as exact client dependency 0.1.1; found 0.1.0',
+    );
+
+    expect(await readFile(packagePath)).toEqual(sourceBytes);
+    expect((await lstat(path.join(scopeRoot, 'core'))).isSymbolicLink()).toBe(true);
+    await expect(lstat(path.join(clientRoot, '.jinn-pack-bundled-workspaces'))).rejects.toThrow();
+  });
+
   it('restores manifest bytes and earlier links when a later workspace fails to materialize', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'jinn-bundled-workspaces-recovery-'));
     dirs.push(root);
@@ -176,7 +216,7 @@ describe('bundled workspace packaging', () => {
     const scopeRoot = path.join(clientRoot, 'node_modules', '@jinn-network');
     const packagePath = path.join(clientRoot, 'package.json');
     const sourceBytes = Buffer.from(
-      '{"name":"@jinn-network/client","bundledDependencies":["@jinn-network/core","@jinn-network/plugin"],"scripts":{"postinstall":"node postinstall.mjs"}}\n',
+      '{"name":"@jinn-network/client","dependencies":{"@jinn-network/core":"1.0.0","@jinn-network/plugin":"1.0.0"},"bundledDependencies":["@jinn-network/core","@jinn-network/plugin"],"scripts":{"postinstall":"node postinstall.mjs"}}\n',
     );
 
     await mkdir(path.join(coreRoot, 'dist'), { recursive: true });
@@ -184,7 +224,7 @@ describe('bundled workspace packaging', () => {
     await writeFile(packagePath, sourceBytes);
     await writeFile(
       path.join(coreRoot, 'package.json'),
-      JSON.stringify({ name: '@jinn-network/core', files: ['dist/'] }),
+      JSON.stringify({ name: '@jinn-network/core', version: '1.0.0', files: ['dist/'] }),
     );
     await writeFile(path.join(coreRoot, 'dist', 'index.js'), 'export const core = true;\n');
     await symlink(path.relative(scopeRoot, coreRoot), path.join(scopeRoot, 'core'));
@@ -274,7 +314,7 @@ describe('bundled workspace packaging', () => {
     ])).toThrow(/source or test/);
   });
 
-  it('declares every bundled workspace runtime dependency in the client manifest', async () => {
+  it('declares every bundled workspace at its exact version with its runtime dependencies', async () => {
     const clientRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
     const repoRoot = path.dirname(clientRoot);
     const clientManifest = JSON.parse(
@@ -292,7 +332,12 @@ describe('bundled workspace packaging', () => {
           path.join(repoRoot, 'packages', workspaceName!, 'package.json'),
           'utf8',
         ),
-      ) as { dependencies?: Record<string, string> };
+      ) as { version?: string; dependencies?: Record<string, string> };
+
+      expect(
+        clientManifest.dependencies?.[packageName],
+        `${packageName} must be declared at exact workspace version ${workspaceManifest.version}`,
+      ).toBe(workspaceManifest.version);
 
       for (const dependency of Object.keys(workspaceManifest.dependencies ?? {})) {
         expect(
