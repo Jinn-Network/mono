@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import {
   recordDigest,
   validateExecutionEvidence,
@@ -7,7 +9,7 @@ import {
 import type {
   ArtifactTransformationSet,
 } from "./artifact-transform.js";
-import { copyBytes } from "./bytes.js";
+import { canonicalJsonBytes, copyBytes } from "./bytes.js";
 import { EvidenceDerivationError } from "./errors.js";
 import type { MetadataTransformationSet } from "./metadata-transform.js";
 import type { ParsedDerivationPolicy } from "./types.js";
@@ -72,7 +74,7 @@ function digestHex(digest: `sha256:${string}`): string {
 }
 
 function prettyBytes(value: unknown): Uint8Array {
-  return new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`);
+  return canonicalJsonBytes(value);
 }
 
 export function buildPublicExecutionEvidence(
@@ -139,10 +141,7 @@ export function buildPublicExecutionEvidence(
     softwareVersion: input.implementation.value.version,
     subjectOf: { "@id": IDS.implementation },
   };
-  const dispositionCounts =
-    input.receipt.value.dispositions.length > 0
-      ? input.receipt.value.dispositions
-      : [{ class: "derivation", disposition: "redact" as const, count: 0 }];
+  const dispositionCounts = input.receipt.value.dispositions;
   const countEntities: Entity[] = dispositionCounts.map((count, index) => ({
     "@id": `#derivation-disposition-${index}`,
     "@type": "PropertyValue",
@@ -181,7 +180,6 @@ export function buildPublicExecutionEvidence(
   const hasPartIds = [
     ...input.artifacts.retained.map(({ entityId }) => entityId),
     ...input.artifacts.derived.map(({ entityId }) => entityId),
-    IDS.source,
     IDS.policy,
     IDS.implementation,
     IDS.receipt,

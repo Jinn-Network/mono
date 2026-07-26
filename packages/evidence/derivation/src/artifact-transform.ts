@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { copyBytes, sha256Digest } from "./bytes.js";
 import { transformJsonBytes } from "./codecs/json.js";
 import { transformJsonlBytes } from "./codecs/jsonl.js";
@@ -45,18 +47,18 @@ export type ArtifactTransformationSet =
       readonly reasons: readonly DerivationHoldReason[];
     };
 
-function codecFor(
+function ruleFor(
   policy: DerivationPolicy,
   mediaType: string,
   role: string,
-): ArtifactCodec | undefined {
+): DerivationPolicy["artifactRules"][number] | undefined {
   return policy.artifactRules.find(
     (candidate) =>
       candidate.roles.includes(role as never) &&
       (candidate.mediaType === mediaType ||
         (candidate.mediaType.endsWith("/*") &&
           mediaType.startsWith(candidate.mediaType.slice(0, -1)))),
-  )?.codec;
+  );
 }
 
 function combineCounts(
@@ -92,7 +94,7 @@ export function transformSourceArtifacts(
   let taskDerived = false;
   let resultDerived = false;
 
-  for (const [entityId, sourceBytes] of source.artifacts) {
+  for (const entityId of [...source.roles.keys()].sort()) {
     const entity = source.entities.get(entityId);
     const sha = typeof entity?.sha256 === "string" ? entity.sha256 : "";
     const sourceDigest = `sha256:${sha}` as DerivationSha256Digest;
@@ -101,7 +103,26 @@ export function transformSourceArtifacts(
         ? entity.encodingFormat
         : "application/octet-stream";
     const role = source.roles.get(entityId) ?? "other";
-    const codec = codecFor(policy, mediaType, role);
+    const rule = ruleFor(policy, mediaType, role);
+    const codec: ArtifactCodec | undefined = rule?.codec;
+    const sourceBytes = source.artifacts.get(entityId);
+    if (!sourceBytes) {
+      if (
+        rule?.unavailable === "withhold-record" ||
+        (!rule && policy.defaultArtifactDisposition === "withhold-record")
+      ) {
+        return {
+          status: "withhold-record",
+          reasons: [{ code: "unavailable-artifact" }],
+        };
+      }
+      withheld.push({
+        entityId,
+        digest: sourceDigest,
+        reason: "unavailable",
+      });
+      continue;
+    }
     const surfaces = extraction.surfaces.filter(
       (surface) =>
         surface.sourceEntityId === entityId &&

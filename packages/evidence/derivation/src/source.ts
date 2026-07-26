@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import {
   checkArtifactIntegrity,
   recordDigest,
@@ -7,6 +9,7 @@ import {
 
 import { copyBytes } from "./bytes.js";
 import { EvidenceDerivationError } from "./errors.js";
+import { snapshotInertData } from "./inert.js";
 import type {
   DerivationRole,
   DeriveExecutionEvidenceInput,
@@ -22,6 +25,12 @@ export interface ValidatedDerivationSource {
   readonly roles: ReadonlyMap<string, DerivationRole>;
   readonly artifacts: ReadonlyMap<string, Uint8Array>;
   readonly executionId: string;
+}
+
+export function snapshotDerivationInput(
+  input: DeriveExecutionEvidenceInput,
+): DeriveExecutionEvidenceInput {
+  return snapshotInertData(input, "derivation input");
 }
 
 function references(value: unknown): string[] {
@@ -98,6 +107,7 @@ function rolesFor(
 export function validateDerivationSource(
   input: DeriveExecutionEvidenceInput,
 ): ValidatedDerivationSource {
+  input = snapshotDerivationInput(input);
   if (
     !input ||
     typeof input !== "object" ||

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { ExecutionEvidenceDocument } from "@jinn-network/evidence-protocol";
 
 import type { SurfaceDispositionResult } from "./disposition.js";

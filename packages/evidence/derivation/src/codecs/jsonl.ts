@@ -1,18 +1,33 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { canonicalJsonBytes, copyBytes, decodeUtf8 } from "../bytes.js";
 import { EvidenceDerivationError } from "../errors.js";
+import { parseStrictJson } from "../strict-json.js";
 import { setJsonPointer } from "./json.js";
 
 export function transformJsonlBytes(
   bytes: Uint8Array,
   replacements: ReadonlyMap<string, string>,
 ): Uint8Array {
-  if (replacements.size === 0) return copyBytes(bytes);
-  const source = decodeUtf8(bytes);
+  let source: string;
+  try {
+    source = decodeUtf8(bytes);
+  } catch (cause) {
+    throw new EvidenceDerivationError(
+      "STRUCTURED_ARTIFACT_INVALID",
+      "Structured artifact is not valid UTF-8.",
+      { cause },
+    );
+  }
   const lines = source.split("\n");
   const values = lines.map((line, index) => {
     if (line.trim() === "") return null;
     try {
-      return JSON.parse(line) as unknown;
+      return parseStrictJson(
+        line,
+        `Structured artifact is invalid at line ${index + 1}.`,
+        "STRUCTURED_ARTIFACT_INVALID",
+      );
     } catch (cause) {
       throw new EvidenceDerivationError(
         "STRUCTURED_ARTIFACT_INVALID",
@@ -21,6 +36,7 @@ export function transformJsonlBytes(
       );
     }
   });
+  if (replacements.size === 0) return copyBytes(bytes);
   for (const [location, value] of replacements) {
     const [, lineText, ...segments] = location.split("/");
     const line = Number(lineText);

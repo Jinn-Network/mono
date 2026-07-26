@@ -1,5 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { bytesEqual, canonicalJsonBytes, copyBytes, decodeUtf8 } from "../bytes.js";
 import { EvidenceDerivationError } from "../errors.js";
+import { parseStrictJson } from "../strict-json.js";
 
 function unescapePointer(segment: string): string {
   return segment.replaceAll("~1", "/").replaceAll("~0", "~");
@@ -38,10 +41,13 @@ export function transformJsonBytes(
   bytes: Uint8Array,
   replacements: ReadonlyMap<string, string>,
 ): Uint8Array {
-  if (replacements.size === 0) return copyBytes(bytes);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(decodeUtf8(bytes));
+    parsed = parseStrictJson(
+      decodeUtf8(bytes),
+      "Structured artifact is invalid or ambiguous.",
+      "STRUCTURED_ARTIFACT_INVALID",
+    );
   } catch (cause) {
     throw new EvidenceDerivationError(
       "STRUCTURED_ARTIFACT_INVALID",
@@ -49,6 +55,7 @@ export function transformJsonBytes(
       { cause },
     );
   }
+  if (replacements.size === 0) return copyBytes(bytes);
   for (const [pointer, value] of replacements) {
     setJsonPointer(parsed, pointer, value);
   }

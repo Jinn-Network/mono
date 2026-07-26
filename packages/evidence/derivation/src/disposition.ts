@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type {
   ConfidenceBand,
   DerivationDisposition,
@@ -43,14 +45,14 @@ const CONFIDENCE: Readonly<Record<ConfidenceBand, number>> = {
 function dispositionFor(
   finding: DerivationFinding,
   policy: DerivationPolicy,
-): DerivationDisposition {
+): DerivationDisposition | undefined {
   const rule = policy.dispositions.find(
     (candidate) =>
       candidate.class === finding.class &&
       CONFIDENCE[finding.confidence] >=
         CONFIDENCE[candidate.minimumConfidence],
   );
-  return rule?.disposition ?? "retain";
+  return rule?.disposition;
 }
 
 function counts(
@@ -86,15 +88,32 @@ export function applyDerivationDispositions(
     finding,
     disposition: dispositionFor(finding, policy),
   }));
-  if (decided.some(({ disposition }) => disposition === "withhold-record")) {
+  const unmatched = decided
+    .filter(({ disposition }) => disposition === undefined)
+    .map(({ finding }) => finding);
+  if (
+    decided.some(({ disposition }) => disposition === "withhold-record") ||
+    (unmatched.length > 0 &&
+      policy.unmatchedFindingDisposition === "withhold-record")
+  ) {
     return {
       status: "withhold-record",
-      reasons: [{ code: "finding-withheld-record" }],
+      reasons: [
+        {
+          code:
+            unmatched.length > 0
+              ? "finding-disposition-unavailable"
+              : "finding-withheld-record",
+        },
+      ],
     };
   }
   const review = decided
     .filter(({ disposition }) => disposition === "review")
-    .map(({ finding }) => finding);
+    .map(({ finding }) => finding)
+    .concat(
+      policy.unmatchedFindingDisposition === "review" ? unmatched : [],
+    );
   if (review.length > 0) {
     return { status: "review-required", findings: Object.freeze(review) };
   }

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { copyBytes, decodeUtf8 } from "../bytes.js";
 
 export function transformTextBytes(

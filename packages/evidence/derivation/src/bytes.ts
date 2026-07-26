@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { timingSafeEqual } from "node:crypto";
 
 import { sha256 } from "@noble/hashes/sha2.js";

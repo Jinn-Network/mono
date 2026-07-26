@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type ConfidenceBand =
   | "VERY_LOW"
   | "LOW"
@@ -122,6 +124,7 @@ export interface DerivationPolicy {
   readonly artifactRules: readonly DerivationArtifactRule[];
   readonly defaultArtifactDisposition: "withhold-artifact" | "withhold-record";
   readonly dispositions: readonly DerivationDispositionRule[];
+  readonly unmatchedFindingDisposition: "review" | "withhold-record";
   readonly stubs: Readonly<Record<string, string>>;
   readonly technicalAllowlist: readonly string[];
   readonly privateAllowlistConfigurationDigest?: DerivationSha256Digest;

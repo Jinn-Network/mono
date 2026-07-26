@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { z } from "zod";
 
 import {
@@ -8,6 +10,7 @@ import {
   sha256Digest,
 } from "./bytes.js";
 import { EvidenceDerivationError } from "./errors.js";
+import { parseStrictJson } from "./strict-json.js";
 import type {
   DerivationBindingImpact,
   DerivationDetectorDescriptor,
@@ -17,21 +20,25 @@ import type {
 } from "./types.js";
 
 const digest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
+const semanticId = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+const semanticVersion = z
+  .string()
+  .regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
 const detector = z.strictObject({
-  id: z.string().min(1),
-  version: z.string().min(1),
+  id: semanticId,
+  version: semanticVersion,
   implementationDigest: digest,
   reproducibility: z.enum(["byte-stable", "best-effort"]),
   configurationDigest: digest.optional(),
 });
 const implementationSchema = z.strictObject({
   schemaVersion: z.literal("jinn.evidence-derivation-implementation.v1"),
-  name: z.string().min(1),
-  version: z.string().min(1),
+  name: z.string().regex(/^@jinn-network\/[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  version: semanticVersion,
   buildDigest: digest,
   runtime: z.strictObject({
-    family: z.string().min(1),
-    version: z.string().min(1),
+    family: z.enum(["node", "deno", "bun", "browser", "wasm"]),
+    version: z.string().regex(/^\d+(?:\.\d+){0,2}$/),
   }),
   detectors: z.array(detector),
 });
@@ -59,7 +66,11 @@ export function parseScrubberImplementationDescriptor(
 ): ParsedScrubberImplementationDescriptor {
   let value: unknown;
   try {
-    value = JSON.parse(decodeUtf8(bytes));
+    value = parseStrictJson(
+      decodeUtf8(bytes),
+      "Scrubber implementation descriptor must be unambiguous valid JSON.",
+      "SCRUBBER_DESCRIPTOR_INVALID",
+    );
   } catch (cause) {
     throw new EvidenceDerivationError(
       "SCRUBBER_DESCRIPTOR_INVALID",
@@ -73,6 +84,13 @@ export function parseScrubberImplementationDescriptor(
       "SCRUBBER_DESCRIPTOR_INVALID",
       "Scrubber implementation descriptor schema is invalid.",
       { details: result.error.issues },
+    );
+  }
+  const detectorIds = result.data.detectors.map(({ id }) => id);
+  if (new Set(detectorIds).size !== detectorIds.length) {
+    throw new EvidenceDerivationError(
+      "SCRUBBER_DESCRIPTOR_INVALID",
+      "Scrubber implementation detector ids must be unique.",
     );
   }
   const canonical = canonicalJsonBytes(result.data);
@@ -271,7 +289,11 @@ export function buildScrubReceipt(
 export function parseScrubReceipt(bytes: Uint8Array): PreparedScrubReceipt {
   let value: unknown;
   try {
-    value = JSON.parse(decodeUtf8(bytes));
+    value = parseStrictJson(
+      decodeUtf8(bytes),
+      "Scrub receipt must be unambiguous valid JSON.",
+      "INVALID_DERIVATION_INPUT",
+    );
   } catch (cause) {
     throw new EvidenceDerivationError(
       "INVALID_DERIVATION_INPUT",

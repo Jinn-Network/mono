@@ -1,4 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { canonicalJsonBytes, sha256Digest } from "./bytes.js";
+import { createBuiltinDerivationDetectors } from "./detectors/index.js";
 import {
   PROTECTED_VALUE_CLASSES,
   type DeriveExecutionEvidenceInput,
@@ -18,40 +21,21 @@ export function baselinePolicyValue(): DerivationPolicy & {
   const protectedValueDispositions = Object.fromEntries(
     PROTECTED_VALUE_CLASSES.map((name) => [name, "retain"]),
   ) as DerivationPolicy["protectedValueDispositions"];
-  const configurationDigest = sha256Digest(
-    canonicalJsonBytes({
+  const requiredDetectors = createBuiltinDerivationDetectors({
+    privateConfiguration: {
       schemaVersion: "jinn.private-detector-configuration.v1",
       nonce: SYNTHETIC_PRIVATE_VALUES.nonce,
-      values: [SYNTHETIC_PRIVATE_VALUES.knownIdentity],
-    }),
-  );
+      knownIdentities: [SYNTHETIC_PRIVATE_VALUES.knownIdentity],
+      privateAllowlist: [SYNTHETIC_PRIVATE_VALUES.privateAllowlist],
+    },
+  }).map(({ descriptor }) => ({ ...descriptor }));
+  const configurationDigest = requiredDetectors[0]!.configurationDigest!;
   return {
     schemaVersion: "jinn.evidence-derivation-policy.v1",
     name: "synthetic-baseline",
     version: "1.0.0",
     reproducibility: "byte-stable",
-    requiredDetectors: [
-      {
-        id: "known-identity",
-        version: "1.0.0",
-        implementationDigest: sha256Digest(
-          canonicalJsonBytes({ id: "known-identity", version: "1.0.0" }),
-        ),
-        reproducibility: "byte-stable",
-        configurationDigest,
-      },
-      {
-        id: "deterministic-patterns",
-        version: "1.0.0",
-        implementationDigest: sha256Digest(
-          canonicalJsonBytes({
-            id: "deterministic-patterns",
-            version: "1.0.0",
-          }),
-        ),
-        reproducibility: "byte-stable",
-      },
-    ],
+    requiredDetectors,
     transformableMetadata: [
       "/@graph/*/name",
       "/@graph/*/description",
@@ -98,35 +82,45 @@ export function baselinePolicyValue(): DerivationPolicy & {
     ],
     defaultArtifactDisposition: "withhold-artifact",
     dispositions: [
+      ...[
+        "email",
+        "absolute-path",
+        "credential",
+        "url-credential",
+        "environment-dump",
+        "git-identity",
+        "known-identity",
+        "wallet-address",
+        "payment-instrument",
+        "ip-address",
+        "machine-identity",
+      ].map((classification) => ({
+        class: classification,
+        minimumConfidence: "VERY_LOW" as const,
+        disposition: "redact" as const,
+      })),
       {
-        class: "email",
-        minimumConfidence: "LOW",
-        disposition: "redact",
-      },
-      {
-        class: "credential",
-        minimumConfidence: "LOW",
-        disposition: "redact",
-      },
-      {
-        class: "known-identity",
-        minimumConfidence: "LOW",
-        disposition: "redact",
+        class: "funds-controlling-secret",
+        minimumConfidence: "VERY_LOW",
+        disposition: "withhold-record",
       },
     ],
+    unmatchedFindingDisposition: "withhold-record",
     stubs: {
       email: "[REDACTED_EMAIL]",
+      "absolute-path": "[REDACTED_PATH]",
       credential: "[REDACTED_CREDENTIAL]",
+      "url-credential": "[REDACTED_URL_CREDENTIAL]",
+      "environment-dump": "[REDACTED_ENVIRONMENT]",
+      "git-identity": "[REDACTED_GIT_IDENTITY]",
       "known-identity": "[REDACTED_IDENTITY]",
+      "wallet-address": "[REDACTED_WALLET]",
+      "payment-instrument": "[REDACTED_PAYMENT_INSTRUMENT]",
+      "ip-address": "[REDACTED_IP]",
+      "machine-identity": "[REDACTED_MACHINE]",
     },
     technicalAllowlist: [],
-    privateAllowlistConfigurationDigest: sha256Digest(
-      canonicalJsonBytes({
-        schemaVersion: "jinn.private-allowlist.v1",
-        nonce: SYNTHETIC_PRIVATE_VALUES.nonce,
-        values: [SYNTHETIC_PRIVATE_VALUES.privateAllowlist],
-      }),
-    ),
+    privateAllowlistConfigurationDigest: configurationDigest,
     resultTransform: "derive-unassessed",
   };
 }

@@ -1,5 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { lintSource } from "@secretlint/core";
+import { creator } from "@secretlint/secretlint-rule-preset-recommend";
+
 import { canonicalJsonBytes, sha256Digest } from "../bytes.js";
 import { EvidenceDerivationError } from "../errors.js";
+import {
+  assertNotProxy,
+  ownDataProperty,
+  snapshotInertData,
+} from "../inert.js";
+import { classifyTechnicalValue } from "../technical-values.js";
+import { BIP39_ENGLISH } from "./data/bip39-english.js";
+import { GITLEAKS_PACK } from "./data/gitleaks-rules.js";
 import type {
   ConfidenceBand,
   CreateEvidenceDeriverOptions,
@@ -31,13 +44,18 @@ type Match = {
 
 function descriptor(
   id: string,
+  controlledImplementation: unknown,
   configurationDigest?: `sha256:${string}`,
 ): DerivationDetectorDescriptor {
   return Object.freeze({
     id,
-    version: "1.0.0",
+    version: "1.1.0",
     implementationDigest: sha256Digest(
-      canonicalJsonBytes({ id, version: "1.0.0" }),
+      canonicalJsonBytes({
+        id,
+        version: "1.1.0",
+        controlledImplementation,
+      }),
     ),
     reproducibility: "byte-stable",
     ...(configurationDigest ? { configurationDigest } : {}),
@@ -92,6 +110,7 @@ function regexMatches(
 function luhn(candidate: string): boolean {
   const digits = candidate.replace(/\D/g, "");
   if (digits.length < 13 || digits.length > 19) return false;
+  if (/^(\d)\1+$/u.test(digits)) return false;
   let sum = 0;
   let alternate = false;
   for (let index = digits.length - 1; index >= 0; index -= 1) {
@@ -104,6 +123,146 @@ function luhn(candidate: string): boolean {
     alternate = !alternate;
   }
   return sum % 10 === 0;
+}
+
+function ibanMod97(candidate: string): boolean {
+  const compact = candidate.replace(/\s/gu, "").toUpperCase();
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/u.test(compact)) return false;
+  const rearranged = compact.slice(4) + compact.slice(0, 4);
+  let remainder = 0;
+  for (const character of rearranged) {
+    const expanded =
+      character >= "0" && character <= "9"
+        ? character
+        : String(character.charCodeAt(0) - 55);
+    for (const digit of expanded) {
+      remainder = (remainder * 10 + Number(digit)) % 97;
+    }
+  }
+  return remainder === 1;
+}
+
+const BIP39_WORDS = new Set(BIP39_ENGLISH);
+
+function bip39Matches(text: string): Match[] {
+  const tokens = [...text.matchAll(/[A-Za-z]+/gu)].map((match) => ({
+    word: match[0].toLowerCase(),
+    start: match.index,
+    end: match.index + match[0].length,
+  }));
+  const matches: Match[] = [];
+  for (let offset = 0; offset < tokens.length; offset += 1) {
+    for (const length of [24, 12] as const) {
+      const window = tokens.slice(offset, offset + length);
+      if (
+        window.length !== length ||
+        window.some(({ word }) => !BIP39_WORDS.has(word)) ||
+        window.slice(0, -1).some(({ end }, index) =>
+          !/^[\s,;|"'`]+$/u.test(
+            text.slice(end, window[index + 1]!.start),
+          ),
+        )
+      ) {
+        continue;
+      }
+      matches.push({
+        class: "funds-controlling-secret",
+        start: window[0]!.start,
+        end: window.at(-1)!.end,
+        evidence: `bip39-mnemonic-${length}`,
+      });
+      break;
+    }
+  }
+  return matches;
+}
+
+function entropy(value: string): number {
+  const frequencies = new Map<string, number>();
+  for (const character of value) {
+    frequencies.set(character, (frequencies.get(character) ?? 0) + 1);
+  }
+  let result = 0;
+  for (const count of frequencies.values()) {
+    const probability = count / value.length;
+    result -= probability * Math.log2(probability);
+  }
+  return result;
+}
+
+function entropyMatches(
+  text: string,
+  surface: DerivationSurface,
+): Match[] {
+  const matches: Match[] = [];
+  for (const candidate of text.matchAll(/\S+/gu)) {
+    const leading = candidate[0].match(/^[("'`[{},;:]*/u)?.[0].length ?? 0;
+    const token = candidate[0]
+      .slice(leading)
+      .replace(/[)"'`\]},;:.]*$/u, "");
+    if (
+      token.length < 16 ||
+      !/^[A-Za-z0-9+/=_-]+$/u.test(token) ||
+      entropy(token) < 4 ||
+      (token.length < 20 &&
+        !(/[a-z]/u.test(token) && /[A-Z0-9]/u.test(token))) ||
+      /^[a-z0-9][a-z0-9._-]*__[a-z0-9][a-z0-9._-]*-\d+$/u.test(token) ||
+      classifyTechnicalValue(token, {
+        field: surface.location.split("/").at(-1),
+      }) !== null
+    ) {
+      continue;
+    }
+    matches.push({
+      class: "credential",
+      start: candidate.index + leading,
+      end: candidate.index + leading + token.length,
+      confidence: "HIGH",
+      evidence: "secret-high-entropy",
+    });
+  }
+  return matches;
+}
+
+async function secretlintMatches(text: string): Promise<Match[]> {
+  const result = await lintSource({
+    source: {
+      filePath: "/span",
+      content: text,
+      ext: ".txt",
+      contentType: "text",
+    },
+    options: {
+      config: {
+        rules: [
+          {
+            id: "@secretlint/secretlint-rule-preset-recommend",
+            rule: creator,
+          },
+        ],
+      },
+    },
+  });
+  return result.messages.map((message) => ({
+    class: "credential",
+    start: message.range[0],
+    end: message.range[1],
+    evidence: `secretlint-${message.ruleId
+      .replace(/^@secretlint\/secretlint-rule-/u, "")
+      .replace(/[^a-z0-9:-]/giu, "-")
+      .toLowerCase()}`,
+  }));
+}
+
+function gitleaksMatches(text: string): Match[] {
+  return GITLEAKS_PACK.rules.flatMap((rule) =>
+    regexMatches(
+      text,
+      new RegExp(rule.regex, "giu"),
+      rule.id === "private-key" ? "funds-controlling-secret" : "credential",
+      `gitleaks-${rule.id}`,
+    ),
+  );
 }
 
 function ipRange(ip: string): "public" | "private" | "ignored" {
@@ -130,8 +289,13 @@ function ipRange(ip: string): "public" | "private" | "ignored" {
   return "public";
 }
 
-function patternMatches(text: string): Match[] {
+async function patternMatches(
+  text: string,
+  surface: DerivationSurface,
+): Promise<Match[]> {
   const matches = [
+    ...gitleaksMatches(text),
+    ...(await secretlintMatches(text)),
     ...regexMatches(
       text,
       /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,
@@ -193,6 +357,7 @@ function patternMatches(text: string): Match[] {
       ),
     );
   }
+  matches.push(...bip39Matches(text));
   const env = /(?:^|\n)(?:export\s+)?[A-Z][A-Z0-9_]*=[^\n]*(?:\n(?:export\s+)?[A-Z][A-Z0-9_]*=[^\n]*){2,}/g;
   matches.push(
     ...regexMatches(text, env, "environment-dump", "environment-assignment-run"),
@@ -205,6 +370,18 @@ function patternMatches(text: string): Match[] {
         start: candidate.index,
         end: candidate.index + candidate[0].length,
         evidence: "luhn-valid-card",
+      });
+    }
+  }
+  const iban =
+    /\b(?:[A-Z]{2}\d{2}[A-Z0-9]{11,30}|[A-Z]{2}\d{2}(?: [A-Z0-9]{4}){2,7}(?: [A-Z0-9]{1,4})?)\b/giu;
+  for (const candidate of text.matchAll(iban)) {
+    if (ibanMod97(candidate[0])) {
+      matches.push({
+        class: "payment-instrument",
+        start: candidate.index,
+        end: candidate.index + candidate[0].length,
+        evidence: "iban-mod97",
       });
     }
   }
@@ -222,12 +399,14 @@ function patternMatches(text: string): Match[] {
       });
     }
   }
+  matches.push(...entropyMatches(text, surface));
   return matches;
 }
 
 export function createBuiltinDerivationDetectors(
   options: BuiltinDetectorOptions,
 ): readonly DerivationDetector[] {
+  options = snapshotInertData(options, "built-in detector options");
   const configuration = options?.privateConfiguration;
   if (
     !configuration ||
@@ -247,11 +426,20 @@ export function createBuiltinDerivationDetectors(
     canonicalJsonBytes({
       schemaVersion: configuration.schemaVersion,
       nonce: configuration.nonce,
-      values: configuration.knownIdentities,
+      knownIdentities: configuration.knownIdentities,
+      privateAllowlist: configuration.privateAllowlist,
     }),
   );
-  const knownDescriptor = descriptor("known-identity", configurationDigest);
+  const knownDescriptor = descriptor(
+    "known-identity",
+    {
+      mechanism: "exact-code-point-substring",
+      privateConfigurationSchema: configuration.schemaVersion,
+    },
+    configurationDigest,
+  );
   const knownValues = Object.freeze([...configuration.knownIdentities]);
+  const privateAllowlist = Object.freeze([...configuration.privateAllowlist]);
   const knownIdentity: DerivationDetector = Object.freeze({
     descriptor: knownDescriptor,
     async detect(surface: DerivationSurface) {
@@ -278,7 +466,30 @@ export function createBuiltinDerivationDetectors(
       return results;
     },
   });
-  const patternsDescriptor = descriptor("deterministic-patterns");
+  const patternsDescriptor = descriptor(
+    "deterministic-patterns",
+    {
+      mechanisms: [
+        "plain-patterns",
+        "git-identity",
+        "secretlint-preset-recommend",
+        "gitleaks-subset",
+        "entropy-fallback",
+        "context-private-key",
+        "bip39-english",
+        "environment-block",
+        "luhn",
+        "iban-mod97",
+        "ip-range",
+      ],
+      secretlintVersion: "13.0.4",
+      gitleaks: GITLEAKS_PACK,
+      bip39WordlistDigest: sha256Digest(canonicalJsonBytes(BIP39_ENGLISH)),
+      entropy: { minimumLength: 16, strictLength: 20, bitsPerCharacter: 4 },
+      privateConfigurationSchema: configuration.schemaVersion,
+    },
+    configurationDigest,
+  );
   const patterns: DerivationDetector = Object.freeze({
     descriptor: patternsDescriptor,
     async detect(
@@ -291,9 +502,21 @@ export function createBuiltinDerivationDetectors(
           "Derivation was aborted.",
         );
       }
-      return patternMatches(surface.text).map((match) =>
-        finding(surface, match, patternsDescriptor),
-      );
+      const matches = await patternMatches(surface.text, surface);
+      if (operationOptions?.signal?.aborted) {
+        throw new EvidenceDerivationError(
+          "OPERATION_ABORTED",
+          "Derivation was aborted.",
+        );
+      }
+      return matches
+        .filter((match) => {
+          const matched = surface.text.slice(match.start, match.end);
+          return !privateAllowlist.some(
+            (allowed) => allowed.length > 0 && matched.includes(allowed),
+          );
+        })
+        .map((match) => finding(surface, match, patternsDescriptor));
     },
   });
   return Object.freeze([knownIdentity, patterns]);
@@ -304,16 +527,100 @@ function descriptorKey(descriptorValue: DerivationDetectorDescriptor): string {
     descriptorValue.id,
     descriptorValue.version,
     descriptorValue.implementationDigest,
+    descriptorValue.reproducibility,
     descriptorValue.configurationDigest ?? "",
   ].join("\u0000");
+}
+
+function snapshotDescriptor(
+  value: unknown,
+  errorCode: "INVALID_DERIVATION_INPUT" | "DETECTOR_CONTRACT_VIOLATION",
+): DerivationDetectorDescriptor {
+  try {
+    const snapshot = snapshotInertData(
+      value,
+      "detector descriptor",
+    ) as DerivationDetectorDescriptor;
+    const keys = Object.keys(snapshot).sort();
+    const expected = [
+      "id",
+      "implementationDigest",
+      "reproducibility",
+      "version",
+      ...(snapshot.configurationDigest ? ["configurationDigest"] : []),
+    ].sort();
+    if (
+      JSON.stringify(keys) !== JSON.stringify(expected) ||
+      typeof snapshot.id !== "string" ||
+      !/^[a-z0-9][a-z0-9._-]*$/u.test(snapshot.id) ||
+      typeof snapshot.version !== "string" ||
+      snapshot.version.length === 0 ||
+      !/^sha256:[a-f0-9]{64}$/u.test(snapshot.implementationDigest) ||
+      !["byte-stable", "best-effort"].includes(snapshot.reproducibility) ||
+      (snapshot.configurationDigest !== undefined &&
+        !/^sha256:[a-f0-9]{64}$/u.test(snapshot.configurationDigest))
+    ) {
+      throw new Error("invalid detector descriptor");
+    }
+    return Object.freeze({ ...snapshot });
+  } catch (cause) {
+    throw new EvidenceDerivationError(
+      errorCode,
+      "Detector descriptor is invalid.",
+      { cause },
+    );
+  }
 }
 
 export function normalizeDetectorFindings(
   surface: DerivationSurface,
   findings: readonly DerivationFinding[],
+  expectedDescriptor?: DerivationDetectorDescriptor,
 ): readonly DerivationFinding[] {
+  try {
+    assertNotProxy(findings, "Detector findings must not be a Proxy.");
+  } catch (cause) {
+    throw new EvidenceDerivationError(
+      "DETECTOR_CONTRACT_VIOLATION",
+      "Detector findings must be an inert array.",
+      { cause },
+    );
+  }
+  if (!Array.isArray(findings)) {
+    throw new EvidenceDerivationError(
+      "DETECTOR_CONTRACT_VIOLATION",
+      "Detector findings must be an array.",
+    );
+  }
+  const expected = expectedDescriptor
+    ? snapshotDescriptor(expectedDescriptor, "DETECTOR_CONTRACT_VIOLATION")
+    : undefined;
   const normalized: DerivationFinding[] = [];
-  for (const candidate of findings) {
+  for (const rawCandidate of findings) {
+    let candidate: DerivationFinding;
+    let detectorValue: DerivationDetectorDescriptor;
+    try {
+      candidate = snapshotInertData(
+        rawCandidate,
+        "detector finding",
+      ) as DerivationFinding;
+      detectorValue = snapshotDescriptor(
+        candidate.detector,
+        "DETECTOR_CONTRACT_VIOLATION",
+      );
+    } catch (cause) {
+      if (
+        cause instanceof EvidenceDerivationError &&
+        cause.code === "DETECTOR_CONTRACT_VIOLATION"
+      ) {
+        throw cause;
+      }
+      throw new EvidenceDerivationError(
+        "DETECTOR_CONTRACT_VIOLATION",
+        "Detector emitted a behavioral or invalid finding.",
+        { cause },
+      );
+    }
     if (
       candidate.surfaceId !== surface.surfaceId ||
       !Number.isInteger(candidate.start) ||
@@ -328,7 +635,8 @@ export function normalizeDetectorFindings(
           typeof code !== "string" ||
           !/^[a-z0-9][a-z0-9:-]*$/.test(code) ||
           code.includes(surface.text.slice(candidate.start, candidate.end)),
-      )
+      ) ||
+      (expected && descriptorKey(detectorValue) !== descriptorKey(expected))
     ) {
       throw new EvidenceDerivationError(
         "DETECTOR_CONTRACT_VIOLATION",
@@ -339,7 +647,7 @@ export function normalizeDetectorFindings(
       Object.freeze({
         ...candidate,
         evidence: Object.freeze([...candidate.evidence]),
-        detector: Object.freeze({ ...candidate.detector }),
+        detector: detectorValue,
       }),
     );
   }
@@ -362,17 +670,67 @@ export function normalizeDetectorFindings(
 export function snapshotDetectors(
   detectors: CreateEvidenceDeriverOptions["detectors"],
 ): readonly DerivationDetector[] {
+  assertNotProxy(detectors, "Detector array must not be a Proxy.");
+  if (!Array.isArray(detectors)) {
+    throw new EvidenceDerivationError(
+      "INVALID_DERIVATION_INPUT",
+      "Detectors must be an explicit array.",
+    );
+  }
   const ids = new Set<string>();
   return Object.freeze(
     detectors.map((detector) => {
-      if (ids.has(detector.descriptor.id)) {
+      assertNotProxy(detector, "Detector must not be a Proxy.");
+      if (!detector || typeof detector !== "object") {
+        throw new EvidenceDerivationError(
+          "INVALID_DERIVATION_INPUT",
+          "Detector must be an inert object.",
+        );
+      }
+      const own = Object.getOwnPropertyDescriptors(detector);
+      if (
+        Reflect.ownKeys(own).some(
+          (key) =>
+            typeof key !== "string" ||
+            !["descriptor", "detect"].includes(key) ||
+            !("value" in own[key]!),
+        )
+      ) {
+        throw new EvidenceDerivationError(
+          "INVALID_DERIVATION_INPUT",
+          "Detector must contain only own descriptor and detect data properties.",
+        );
+      }
+      const descriptorValue = snapshotDescriptor(
+        ownDataProperty(detector, "descriptor", "detector"),
+        "INVALID_DERIVATION_INPUT",
+      );
+      const detect = ownDataProperty(detector, "detect", "detector");
+      assertNotProxy(detect, "Detector callable must not be a Proxy.");
+      if (typeof detect !== "function") {
+        throw new EvidenceDerivationError(
+          "INVALID_DERIVATION_INPUT",
+          "Detector detect slot must be a callable data property.",
+        );
+      }
+      if (ids.has(descriptorValue.id)) {
         throw new EvidenceDerivationError(
           "INVALID_DERIVATION_INPUT",
           "Detector ids must be unique.",
         );
       }
-      ids.add(detector.descriptor.id);
-      return detector;
+      ids.add(descriptorValue.id);
+      return Object.freeze({
+        descriptor: descriptorValue,
+        async detect(
+          surface: DerivationSurface,
+          options?: DerivationOperationOptions,
+        ) {
+          return Reflect.apply(detect, undefined, [surface, options]) as Promise<
+            readonly DerivationFinding[]
+          >;
+        },
+      });
     }),
   );
 }

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, test } from "vitest";
 
 import { applyDerivationDispositions } from "./disposition.js";
@@ -82,13 +84,16 @@ describe("disposition", () => {
     });
   });
 
-  test("retains exact text when no policy disposition matches", () => {
+  test("fails closed when no policy disposition matches", () => {
     expect(
       applyDerivationDispositions(
         surface,
         [finding("unconfigured")],
         baselinePolicyValue(),
       ),
-    ).toEqual({ status: "retained", text: surface.text, counts: [] });
+    ).toEqual({
+      status: "withhold-record",
+      reasons: [{ code: "finding-disposition-unavailable" }],
+    });
   });
 });

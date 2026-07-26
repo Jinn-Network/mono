@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { DerivationDetectorDescriptor } from "./types.js";
 
 import { transformSourceArtifacts } from "./artifact-transform.js";
@@ -11,6 +13,7 @@ import {
   type SurfaceDispositionResult,
 } from "./disposition.js";
 import { EvidenceDerivationError } from "./errors.js";
+import { assertNotProxy, ownDataProperty } from "./inert.js";
 import { transformSourceMetadata } from "./metadata-transform.js";
 import { parseDerivationPolicy } from "./policy.js";
 import { buildPublicExecutionEvidence } from "./public-graph.js";
@@ -18,7 +21,10 @@ import {
   buildScrubReceipt,
   parseScrubberImplementationDescriptor,
 } from "./receipt.js";
-import { validateDerivationSource } from "./source.js";
+import {
+  snapshotDerivationInput,
+  validateDerivationSource,
+} from "./source.js";
 import { extractDerivationSurfaces } from "./surfaces.js";
 import type {
   CreateEvidenceDeriverOptions,
@@ -49,6 +55,51 @@ function abortIfNeeded(options?: DerivationOperationOptions): void {
       "Derivation was aborted.",
     );
   }
+}
+
+function snapshotOperationOptions(
+  options?: DerivationOperationOptions,
+): DerivationOperationOptions | undefined {
+  if (options === undefined) return undefined;
+  assertNotProxy(options, "Derivation operation options must not be a Proxy.");
+  if (!options || typeof options !== "object") {
+    throw new EvidenceDerivationError(
+      "INVALID_DERIVATION_INPUT",
+      "Derivation operation options are invalid.",
+    );
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(options);
+  if (
+    Reflect.ownKeys(descriptors).some(
+      (key) =>
+        key !== "signal" ||
+        !("value" in descriptors[key as keyof typeof descriptors]!),
+    )
+  ) {
+    throw new EvidenceDerivationError(
+      "INVALID_DERIVATION_INPUT",
+      "Derivation operation options must contain only an own signal data property.",
+    );
+  }
+  const signal = descriptors.signal?.value as unknown;
+  if (signal !== undefined) {
+    assertNotProxy(signal, "AbortSignal must not be a Proxy.");
+    if (!(signal instanceof AbortSignal)) {
+      throw new EvidenceDerivationError(
+        "INVALID_DERIVATION_INPUT",
+        "signal must be an AbortSignal.",
+      );
+    }
+  }
+  return signal === undefined ? Object.freeze({}) : Object.freeze({ signal });
+}
+
+function checkedOutcome<T>(
+  value: T,
+  options?: DerivationOperationOptions,
+): T {
+  abortIfNeeded(options);
+  return value;
 }
 
 function strictTimestamp(value: string): boolean {
@@ -90,19 +141,25 @@ function unchangedArtifacts(
 export function createEvidenceDeriver(
   options: CreateEvidenceDeriverOptions,
 ): EvidenceDeriver {
-  if (!options || !Array.isArray(options.detectors)) {
+  assertNotProxy(options, "Deriver construction options must not be a Proxy.");
+  if (!options || typeof options !== "object") {
     throw new EvidenceDerivationError(
       "INVALID_DERIVATION_INPUT",
       "Deriver construction requires an explicit detector array.",
     );
   }
-  const detectors = snapshotDetectors(options.detectors);
+  const detectors = snapshotDetectors(
+    ownDataProperty(options, "detectors", "deriver construction options") as
+      CreateEvidenceDeriverOptions["detectors"],
+  );
   return Object.freeze({
     async derive(
       input: DeriveExecutionEvidenceInput,
       operationOptions?: DerivationOperationOptions,
     ): Promise<EvidenceDerivationOutcome> {
+      operationOptions = snapshotOperationOptions(operationOptions);
       abortIfNeeded(operationOptions);
+      input = snapshotDerivationInput(input);
       const source = validateDerivationSource(input);
       const policy = parseDerivationPolicy(copyBytes(input.policyBytes));
       const implementation = parseScrubberImplementationDescriptor(
@@ -140,10 +197,10 @@ export function createEvidenceDeriver(
         ),
       }));
       if (required.some(({ detector }) => !detector)) {
-        return {
+        return checkedOutcome({
           status: "withheld",
           reasons: [{ code: "required-detector-unavailable" }],
-        };
+        } as const, operationOptions);
       }
       if (
         policy.value.reproducibility === "byte-stable" &&
@@ -151,15 +208,18 @@ export function createEvidenceDeriver(
           ({ requirement }) => requirement.reproducibility === "best-effort",
         )
       ) {
-        return {
+        return checkedOutcome({
           status: "withheld",
           reasons: [{ code: "byte-stability-unsatisfied" }],
-        };
+        } as const, operationOptions);
       }
       abortIfNeeded(operationOptions);
       const extraction = extractDerivationSurfaces(source, policy.value);
       if (extraction.hold) {
-        return { status: "withheld", reasons: [extraction.hold] };
+        return checkedOutcome(
+          { status: "withheld", reasons: [extraction.hold] } as const,
+          operationOptions,
+        );
       }
       const dispositions = new Map<string, SurfaceDispositionResult>();
       const reviewFindings: DerivationFinding[] = [];
@@ -169,7 +229,19 @@ export function createEvidenceDeriver(
           abortIfNeeded(operationOptions);
           try {
             const raw = await detector!.detect(surface, operationOptions);
-            findings.push(...normalizeDetectorFindings(surface, raw));
+            abortIfNeeded(operationOptions);
+            findings.push(
+              ...normalizeDetectorFindings(
+                surface,
+                raw,
+                detector!.descriptor,
+              ).filter(
+                (finding) =>
+                  !policy.value.technicalAllowlist.includes(
+                    surface.text.slice(finding.start, finding.end),
+                  ),
+              ),
+            );
           } catch (cause) {
             if (
               cause instanceof EvidenceDerivationError &&
@@ -178,10 +250,10 @@ export function createEvidenceDeriver(
             ) {
               throw cause;
             }
-            return {
+            return checkedOutcome({
               status: "withheld",
               reasons: [{ code: "required-detector-failed" }],
-            };
+            } as const, operationOptions);
           }
         }
         const result = applyDerivationDispositions(
@@ -191,17 +263,20 @@ export function createEvidenceDeriver(
         );
         dispositions.set(surface.surfaceId, result);
         if (result.status === "withhold-record") {
-          return { status: "withheld", reasons: result.reasons };
+          return checkedOutcome(
+            { status: "withheld", reasons: result.reasons } as const,
+            operationOptions,
+          );
         }
         if (result.status === "review-required") {
           reviewFindings.push(...result.findings);
         }
       }
       if (reviewFindings.length > 0) {
-        return {
+        return checkedOutcome({
           status: "review-required",
           findings: Object.freeze(reviewFindings),
-        };
+        } as const, operationOptions);
       }
       abortIfNeeded(operationOptions);
       const metadata = transformSourceMetadata(
@@ -210,10 +285,16 @@ export function createEvidenceDeriver(
         dispositions,
       );
       if (metadata.status === "withhold-record") {
-        return { status: "withheld", reasons: metadata.reasons };
+        return checkedOutcome(
+          { status: "withheld", reasons: metadata.reasons } as const,
+          operationOptions,
+        );
       }
       if (metadata.status === "review-required") {
-        return { status: "review-required", findings: [] };
+        return checkedOutcome(
+          { status: "review-required", findings: [] } as const,
+          operationOptions,
+        );
       }
       const artifacts = transformSourceArtifacts(
         source,
@@ -222,17 +303,23 @@ export function createEvidenceDeriver(
         policy.value,
       );
       if (artifacts.status === "withhold-record") {
-        return { status: "withheld", reasons: artifacts.reasons };
+        return checkedOutcome(
+          { status: "withheld", reasons: artifacts.reasons } as const,
+          operationOptions,
+        );
       }
       if (artifacts.status === "review-required") {
-        return { status: "review-required", findings: [] };
+        return checkedOutcome(
+          { status: "review-required", findings: [] } as const,
+          operationOptions,
+        );
       }
       if (
         !metadata.changed &&
         artifacts.derived.length === 0 &&
         artifacts.withheld.length === 0
       ) {
-        return {
+        return checkedOutcome({
           status: "publishable-unchanged",
           record: {
             reference: input.sourceRecord.reference,
@@ -245,7 +332,7 @@ export function createEvidenceDeriver(
             taskDerived: false,
             resultDerived: false,
           },
-        };
+        } as const, operationOptions);
       }
       abortIfNeeded(operationOptions);
       const receipt = buildScrubReceipt({
@@ -286,7 +373,7 @@ export function createEvidenceDeriver(
         scrubberAgentId: input.scrubber.agentId,
         completedAt: input.completedAt,
       });
-      return {
+      return checkedOutcome({
         status: "derived",
         record: derivative.record,
         artifacts: derivative.artifacts,
@@ -295,7 +382,7 @@ export function createEvidenceDeriver(
           bytes: copyBytes(receipt.bytes),
         },
         bindingImpact: artifacts.bindingImpact,
-      };
+      } as const, operationOptions);
     },
   });
 }

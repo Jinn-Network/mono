@@ -1,5 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { decodeUtf8 } from "./bytes.js";
 import { EvidenceDerivationError } from "./errors.js";
+import { parseStrictJson } from "./strict-json.js";
 import { classifyTechnicalValue } from "./technical-values.js";
 import type {
   ArtifactCodec,
@@ -86,26 +89,41 @@ function matches(selectors: readonly string[], pointer: string): boolean {
 function protectedClassFor(
   key: string,
   value: unknown,
+  source: ValidatedDerivationSource,
 ): ProtectedValueClass {
-  if (key === "agent" || key === "creator") return "agent-iri";
+  if (key === "agent" || key === "creator" || key === "provider") {
+    return "agent-iri";
+  }
+  if (["object", "result", "instrument", "subjectOf"].includes(key)) {
+    return "historical-role-identity";
+  }
+  if (
+    key === "about" &&
+    JSON.stringify(value).includes(source.executionId)
+  ) {
+    return "execution-iri";
+  }
+  if (key === "@id" && typeof value === "string") {
+    if (value === source.executionId) return "execution-iri";
+    if (source.roles.has(value)) return "historical-role-identity";
+    const target = source.entities.get(value);
+    const targetTypes = Array.isArray(target?.["@type"])
+      ? target["@type"]
+      : [target?.["@type"]];
+    if (targetTypes.includes("prov:Agent")) return "agent-iri";
+    return "content-identifier";
+  }
   if (key.startsWith("@")) return "jsonld-keyword";
   if (
     [
       "about",
-      "agent",
       "conformsTo",
-      "creator",
       "hasPart",
-      "instrument",
       "license",
       "mentions",
-      "object",
       "prov:wasDerivedFrom",
       "prov:wasGeneratedBy",
-      "provider",
       "resourceUsage",
-      "result",
-      "subjectOf",
     ].includes(key)
   ) {
     return "relationship-reference";
@@ -133,6 +151,7 @@ function walkMetadata(
   pointer: string,
   entityId: string,
   policy: DerivationPolicy,
+  source: ValidatedDerivationSource,
   surfaces: DerivationSurface[],
   protectedLocations: ProtectedLocation[],
 ): boolean {
@@ -143,6 +162,7 @@ function walkMetadata(
         `${pointer}/${index}`,
         entityId,
         policy,
+        source,
         surfaces,
         protectedLocations,
       ),
@@ -185,33 +205,44 @@ function walkMetadata(
       continue;
     }
     if (PROTECTED_KEYS.has(key)) {
+      const protectedClass = protectedClassFor(key, child, source);
       protectedLocations.push({
         location: childPointer,
-        protectedClass: protectedClassFor(key, child),
+        protectedClass,
       });
-      if (key === "@context") {
+      if (key === "@graph") {
+        if (
+          child &&
+          typeof child === "object" &&
+          walkMetadata(
+            child,
+            childPointer,
+            entityId,
+            policy,
+            source,
+            surfaces,
+            protectedLocations,
+          )
+        ) {
+          continue;
+        }
+        return false;
+      }
+      if (key === "@context" || key === "@type") {
         markProtectedTree(
           child,
           childPointer,
-          "jsonld-keyword",
+          protectedClass,
           protectedLocations,
         );
         continue;
       }
-      if (
-        child &&
-        typeof child === "object" &&
-        !walkMetadata(
-          child,
-          childPointer,
-          entityId,
-          policy,
-          surfaces,
-          protectedLocations,
-        )
-      ) {
-        return false;
-      }
+      markProtectedTree(
+        child,
+        childPointer,
+        protectedClass,
+        protectedLocations,
+      );
       continue;
     }
     if (PROTOCOL_SCALARS.has(key)) {
@@ -235,6 +266,7 @@ function walkMetadata(
           childPointer,
           entityId,
           policy,
+          source,
           surfaces,
           protectedLocations,
         )
@@ -296,14 +328,29 @@ function structuredSurfaces(
   codec: "json" | "jsonl",
   bytes: Uint8Array,
 ): DerivationSurface[] {
-  const text = decodeUtf8(bytes);
+  let text: string;
+  try {
+    text = decodeUtf8(bytes);
+  } catch (cause) {
+    throw new EvidenceDerivationError(
+      "STRUCTURED_ARTIFACT_INVALID",
+      "Structured artifact is not valid UTF-8.",
+      { cause },
+    );
+  }
   const rows = codec === "jsonl" ? text.split("\n") : [text];
   const surfaces: DerivationSurface[] = [];
   rows.forEach((row, lineIndex) => {
     if (codec === "jsonl" && row.trim() === "") return;
     let parsed: unknown;
     try {
-      parsed = JSON.parse(row);
+      parsed = parseStrictJson(
+        row,
+        codec === "jsonl"
+          ? `Structured artifact is invalid at line ${lineIndex + 1}.`
+          : "Structured artifact is invalid.",
+        "STRUCTURED_ARTIFACT_INVALID",
+      );
     } catch (cause) {
       throw new EvidenceDerivationError(
         "STRUCTURED_ARTIFACT_INVALID",
@@ -324,7 +371,7 @@ function structuredSurfaces(
         typeof value === "string" &&
         classifyTechnicalValue(value, { field }) === null
       ) {
-        surfaces.push({
+        surfaces.push(Object.freeze({
           surfaceId: `artifact:${entityId}:${codec === "jsonl" ? `line-${lineIndex + 1}` : "root"}${path}`,
           sourceEntityId: entityId,
           role,
@@ -332,7 +379,7 @@ function structuredSurfaces(
           codec,
           location: codec === "jsonl" ? `/${lineIndex}${path}` : path,
           text: value,
-        });
+        }));
       }
     };
     walk(parsed, "");
@@ -356,6 +403,7 @@ export function extractDerivationSurfaces(
       "",
       "ro-crate-metadata.json",
       policy,
+      source,
       surfaces,
       protectedLocations,
     )
@@ -387,7 +435,7 @@ export function extractDerivationSurfaces(
     const role = source.roles.get(entityId) ?? "other";
     const codec = ruleCodec(policy, mediaType, role);
     if (codec === "text") {
-      surfaces.push({
+      surfaces.push(Object.freeze({
         surfaceId: `artifact:${entityId}:text`,
         sourceEntityId: entityId,
         role,
@@ -395,7 +443,7 @@ export function extractDerivationSurfaces(
         codec,
         location: "",
         text: decodeUtf8(bytes),
-      });
+      }));
     } else if (codec === "json" || codec === "jsonl") {
       surfaces.push(
         ...structuredSurfaces(entityId, role, mediaType, codec, bytes),
@@ -408,6 +456,8 @@ export function extractDerivationSurfaces(
         left.surfaceId.localeCompare(right.surfaceId),
       ),
     ),
-    protectedLocations: Object.freeze(protectedLocations),
+    protectedLocations: Object.freeze(
+      protectedLocations.map((location) => Object.freeze({ ...location })),
+    ),
   };
 }

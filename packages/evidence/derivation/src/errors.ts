@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export const EVIDENCE_DERIVATION_ERROR_CODES = [
   "INVALID_DERIVATION_INPUT",
   "SOURCE_DIGEST_MISMATCH",

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { z } from "zod";
 
 import {
@@ -8,6 +10,7 @@ import {
   sha256Digest,
 } from "./bytes.js";
 import { EvidenceDerivationError } from "./errors.js";
+import { parseStrictJson } from "./strict-json.js";
 import {
   PROTECTED_VALUE_CLASSES,
   type DerivationPolicy,
@@ -94,6 +97,7 @@ const policySchema = z.strictObject({
       ]),
     }),
   ),
+  unmatchedFindingDisposition: z.enum(["review", "withhold-record"]),
   stubs: z.record(z.string(), z.string()),
   technicalAllowlist: z.array(z.string()),
   privateAllowlistConfigurationDigest: digest.optional(),
@@ -109,7 +113,11 @@ export function parseDerivationPolicy(
 ): ParsedDerivationPolicy {
   let json: unknown;
   try {
-    json = JSON.parse(decodeUtf8(bytes));
+    json = parseStrictJson(
+      decodeUtf8(bytes),
+      "Policy must be unambiguous valid UTF-8 JSON.",
+      "POLICY_INVALID",
+    );
   } catch (cause) {
     invalid("Policy must be valid UTF-8 JSON.", cause);
   }
@@ -121,6 +129,27 @@ export function parseDerivationPolicy(
   const ids = value.requiredDetectors.map(({ id }) => id);
   if (new Set(ids).size !== ids.length) {
     invalid("detector ids must be unique");
+  }
+  const dispositionKeys = value.dispositions.map(
+    ({ class: classification, minimumConfidence }) =>
+      `${classification}\u0000${minimumConfidence}`,
+  );
+  if (new Set(dispositionKeys).size !== dispositionKeys.length) {
+    invalid("disposition class/confidence rows must be unique");
+  }
+  const dispositionClasses = new Set(
+    value.dispositions.map(({ class: classification }) => classification),
+  );
+  for (const classification of dispositionClasses) {
+    if (
+      !value.dispositions.some(
+        (row) =>
+          row.class === classification &&
+          row.minimumConfidence === "VERY_LOW",
+      )
+    ) {
+      invalid(`disposition class ${classification} requires a VERY_LOW floor`);
+    }
   }
   for (const row of value.dispositions) {
     if (row.disposition === "redact" && value.stubs[row.class] === undefined) {
