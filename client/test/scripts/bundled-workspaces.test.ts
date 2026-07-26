@@ -213,6 +213,7 @@ describe('bundled workspace packaging', () => {
     dirs.push(root);
     const clientRoot = path.join(root, 'client');
     const coreRoot = path.join(root, 'packages', 'core');
+    const pluginRoot = path.join(root, 'packages', 'plugin');
     const scopeRoot = path.join(clientRoot, 'node_modules', '@jinn-network');
     const packagePath = path.join(clientRoot, 'package.json');
     const sourceBytes = Buffer.from(
@@ -220,6 +221,7 @@ describe('bundled workspace packaging', () => {
     );
 
     await mkdir(path.join(coreRoot, 'dist'), { recursive: true });
+    await mkdir(pluginRoot, { recursive: true });
     await mkdir(scopeRoot, { recursive: true });
     await writeFile(packagePath, sourceBytes);
     await writeFile(
@@ -227,16 +229,24 @@ describe('bundled workspace packaging', () => {
       JSON.stringify({ name: '@jinn-network/core', version: '1.0.0', files: ['dist/'] }),
     );
     await writeFile(path.join(coreRoot, 'dist', 'index.js'), 'export const core = true;\n');
+    await writeFile(
+      path.join(pluginRoot, 'package.json'),
+      JSON.stringify({
+        name: '@jinn-network/plugin',
+        version: '1.0.0',
+        files: ['missing-dist/'],
+      }),
+    );
     await symlink(path.relative(scopeRoot, coreRoot), path.join(scopeRoot, 'core'));
-    await mkdir(path.join(scopeRoot, 'plugin'));
+    await symlink(path.relative(scopeRoot, pluginRoot), path.join(scopeRoot, 'plugin'));
 
     await expect(materializeBundledWorkspaces({ clientRoot })).rejects.toThrow(
-      /@jinn-network\/plugin must be a workspace link/,
+      /@jinn-network\/plugin publish file does not exist: missing-dist\//,
     );
 
     expect(await readFile(packagePath)).toEqual(sourceBytes);
     expect((await lstat(path.join(scopeRoot, 'core'))).isSymbolicLink()).toBe(true);
-    expect((await lstat(path.join(scopeRoot, 'plugin'))).isDirectory()).toBe(true);
+    expect((await lstat(path.join(scopeRoot, 'plugin'))).isSymbolicLink()).toBe(true);
     await expect(lstat(path.join(clientRoot, '.jinn-pack-bundled-workspaces'))).rejects.toThrow();
   });
 

@@ -421,8 +421,32 @@ jobs:
                 (waivedNote ? ` (${waivedNote})` : ''),
             );
 
+      - name: Recheck immutable stable client package
+        id: stable_existing
+        if: steps.meta.outputs.dist_tag == 'latest'
+        shell: bash
+        env:
+          PACKAGE_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+        run: |
+          VIEW_ERROR="${RUNNER_TEMP}/client-stable-view.stderr"
+          if npm view "${PACKAGE_SPEC}" version >/dev/null 2>"${VIEW_ERROR}"; then
+            EXISTING_HEAD="$(npm view "${PACKAGE_SPEC}" gitHead)"
+            if [ "${EXISTING_HEAD}" != "${JINN_BUILD_COMMIT}" ]; then
+              echo "::error::${PACKAGE_SPEC} exists with gitHead ${EXISTING_HEAD}, expected ${JINN_BUILD_COMMIT}"
+              exit 1
+            fi
+            echo "published=true" >> "${GITHUB_OUTPUT}"
+            echo "::notice::${PACKAGE_SPEC} already exists at the expected immutable commit"
+          elif grep -Eq 'E404|404 Not Found' "${VIEW_ERROR}"; then
+            echo "published=false" >> "${GITHUB_OUTPUT}"
+          else
+            cat "${VIEW_ERROR}" >&2
+            echo "::error::Could not determine whether ${PACKAGE_SPEC} already exists"
+            exit 1
+          fi
+
       - name: Publish stable
-        if: steps.meta.outputs.dist_tag == 'latest' && steps.existing.outputs.published != 'true'
+        if: steps.meta.outputs.dist_tag == 'latest' && steps.stable_existing.outputs.published != 'true'
         run: |
           unset NODE_AUTH_TOKEN
           npm publish --access public
