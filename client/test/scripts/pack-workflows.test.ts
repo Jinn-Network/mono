@@ -25,7 +25,7 @@ function workflowStep(path: string, name: string): string {
 }
 
 describe('packed client workflow coverage', () => {
-  it('publishes client 0.2.1 with SDK 0.1.1 and wires the combined external consumer gate', () => {
+  it('publishes client 0.2.2 with SDK 0.1.1 and wires the combined external consumer gate', () => {
     const packageJson = JSON.parse(workflow('client/package.json')) as {
       version: string;
       scripts: Record<string, string>;
@@ -34,7 +34,7 @@ describe('packed client workflow coverage', () => {
       version: string;
     };
 
-    expect(packageJson.version).toBe('0.2.1');
+    expect(packageJson.version).toBe('0.2.2');
     expect(sdkPackageJson.version).toBe('0.1.1');
     expect(packageJson.scripts['consumer:acceptance']).toBe(
       'node scripts/external-consumer-acceptance.mjs',
