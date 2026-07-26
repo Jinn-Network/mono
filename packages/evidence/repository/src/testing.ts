@@ -129,6 +129,7 @@ export function assertEvidenceRepositoryCapabilities(
 
 export interface EvidenceRepositoryContractContext {
   readonly repository: EvidenceRepository;
+  readonly createObjectAtDeclaredLimit?: () => Uint8Array;
   readonly cleanup?: () => Promise<void> | void;
 }
 
@@ -149,6 +150,96 @@ export function describeEvidenceRepositoryContract(
     afterEach(async () => {
       await context?.cleanup?.();
       context = undefined;
+    });
+
+    test("exposes valid, stable, immutable capabilities", () => {
+      const repository = context!.repository;
+      const capabilities = repository.capabilities;
+      assertEvidenceRepositoryCapabilities(capabilities);
+      const maxObjectBytes = capabilities.maxObjectBytes;
+
+      expect(repository.capabilities).toBe(capabilities);
+      expect(capabilities.maxObjectBytes).toBe(maxObjectBytes);
+
+      const attemptedValue = maxObjectBytes === 1 ? 2 : 1;
+      try {
+        Reflect.set(capabilities, "maxObjectBytes", attemptedValue);
+      } catch {
+        // A defensive immutable object may throw instead of returning false.
+      }
+      try {
+        expect(repository.capabilities).toBe(capabilities);
+        expect(capabilities.maxObjectBytes).toBe(maxObjectBytes);
+      } finally {
+        if (capabilities.maxObjectBytes !== maxObjectBytes) {
+          if (maxObjectBytes === undefined) {
+            Reflect.deleteProperty(capabilities, "maxObjectBytes");
+          } else {
+            Reflect.set(capabilities, "maxObjectBytes", maxObjectBytes);
+          }
+        }
+      }
+
+      if (maxObjectBytes !== undefined) {
+        try {
+          Reflect.deleteProperty(capabilities, "maxObjectBytes");
+        } catch {
+          // A defensive immutable object may throw instead of returning false.
+        }
+        try {
+          expect(repository.capabilities).toBe(capabilities);
+          expect(capabilities.maxObjectBytes).toBe(maxObjectBytes);
+        } finally {
+          if (capabilities.maxObjectBytes !== maxObjectBytes) {
+            Reflect.set(capabilities, "maxObjectBytes", maxObjectBytes);
+          }
+        }
+      }
+    });
+
+    test("enforces a declared finite object limit", async () => {
+      const repository = context!.repository;
+      const maxObjectBytes = repository.capabilities.maxObjectBytes;
+      if (maxObjectBytes === undefined) return;
+
+      expect(context!.createObjectAtDeclaredLimit).toBeTypeOf("function");
+      const atLimit = context!.createObjectAtDeclaredLimit!();
+      expect(atLimit.byteLength).toBe(maxObjectBytes);
+
+      const recordReceipt = await repository.putRecord(
+        "execution-evidence",
+        atLimit,
+      );
+      const artifactReceipt = await repository.putArtifact(atLimit);
+      expect(await repository.getRecord(recordReceipt.reference)).toEqual(
+        atLimit,
+      );
+      expect(await repository.getArtifact(artifactReceipt.reference)).toEqual(
+        atLimit,
+      );
+
+      const oversized = new Uint8Array(maxObjectBytes + 1);
+      const oversizedRecord = createRecordReference(
+        "execution-evidence",
+        oversized,
+      );
+      const oversizedArtifact = createArtifactReference(oversized);
+      await expect(
+        Promise.resolve().then(() =>
+          repository.putRecord("execution-evidence", oversized),
+        ),
+      ).rejects.toMatchObject({
+        name: "EvidenceRepositoryError",
+        code: "CONTENT_TOO_LARGE",
+      });
+      await expect(
+        Promise.resolve().then(() => repository.putArtifact(oversized)),
+      ).rejects.toMatchObject({
+        name: "EvidenceRepositoryError",
+        code: "CONTENT_TOO_LARGE",
+      });
+      expect(await repository.getRecord(oversizedRecord)).toBeNull();
+      expect(await repository.getArtifact(oversizedArtifact)).toBeNull();
     });
 
     test.each(EVIDENCE_RECORD_FAMILIES)(

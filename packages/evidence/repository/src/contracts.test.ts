@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test } from "vitest";
 
 import {
   EVIDENCE_RECORD_FAMILIES,
@@ -15,6 +15,52 @@ import {
   assertEvidenceRepositoryCapabilities,
   describeEvidenceRepositoryContract,
 } from "./testing.js";
+
+const BOUNDED_OBJECT_BYTES = 64;
+const boundedContractObservations = {
+  artifactAtLimit: 0,
+  artifactOversize: 0,
+  fixture: 0,
+  recordAtLimit: 0,
+  recordOversize: 0,
+};
+
+class BoundedInMemoryEvidenceRepository extends InMemoryEvidenceRepository {
+  override readonly capabilities = Object.freeze({
+    maxObjectBytes: BOUNDED_OBJECT_BYTES,
+  });
+
+  #observe(kind: "artifact" | "record", bytes: Uint8Array): void {
+    if (bytes.byteLength === BOUNDED_OBJECT_BYTES) {
+      boundedContractObservations[
+        kind === "artifact" ? "artifactAtLimit" : "recordAtLimit"
+      ] += 1;
+    }
+    if (bytes.byteLength > BOUNDED_OBJECT_BYTES) {
+      boundedContractObservations[
+        kind === "artifact" ? "artifactOversize" : "recordOversize"
+      ] += 1;
+      throw new EvidenceRepositoryError(
+        "CONTENT_TOO_LARGE",
+        "The object exceeds the repository limit.",
+      );
+    }
+  }
+
+  override putRecord(
+    ...args: Parameters<InMemoryEvidenceRepository["putRecord"]>
+  ): ReturnType<InMemoryEvidenceRepository["putRecord"]> {
+    this.#observe("record", args[1]);
+    return super.putRecord(...args);
+  }
+
+  override putArtifact(
+    ...args: Parameters<InMemoryEvidenceRepository["putArtifact"]>
+  ): ReturnType<InMemoryEvidenceRepository["putArtifact"]> {
+    this.#observe("artifact", args[0]);
+    return super.putArtifact(...args);
+  }
+}
 
 describe("repository references", () => {
   test("computes exact lowercase SHA-256 references", () => {
@@ -96,6 +142,15 @@ describe("repository capabilities", () => {
     ).toThrowError(/maxObjectBytes/u);
   });
 
+  test.each([null, [], 1, "capabilities"])(
+    "rejects a non-object capability container %#",
+    (capabilities) => {
+      expect(() =>
+        assertEvidenceRepositoryCapabilities(capabilities),
+      ).toThrowError(/non-null, non-array object/u);
+    },
+  );
+
   test("accepts an absent limit and ignores future fields", () => {
     expect(() =>
       assertEvidenceRepositoryCapabilities(
@@ -108,3 +163,21 @@ describe("repository capabilities", () => {
 describeEvidenceRepositoryContract(async () => ({
   repository: new InMemoryEvidenceRepository(),
 }));
+
+describeEvidenceRepositoryContract(async () => ({
+  repository: new BoundedInMemoryEvidenceRepository(),
+  createObjectAtDeclaredLimit: () => {
+    boundedContractObservations.fixture += 1;
+    return new Uint8Array(BOUNDED_OBJECT_BYTES);
+  },
+}));
+
+afterAll(() => {
+  expect(boundedContractObservations).toEqual({
+    artifactAtLimit: 1,
+    artifactOversize: 1,
+    fixture: 1,
+    recordAtLimit: 1,
+    recordOversize: 1,
+  });
+});
