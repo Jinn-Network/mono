@@ -284,6 +284,11 @@ protected structural value.
 
 A `DerivationFinding` contains class, confidence band, valid character offsets, stable evidence
 codes, and the detector descriptor. It contains no matched plaintext and no free-form snippet.
+`start` and `end` are zero-based UTF-16 code-unit indices into the exact `DerivationSurface.text`;
+`start` is inclusive and `end` is exclusive, matching JavaScript `String.prototype.slice`.
+Both are integers, `0 <= start < end <= text.length`, and neither boundary may split an existing
+high/low surrogate pair. Detectors, normalization, disposition, and text/JSON/JSONL codecs use
+this one coordinate system without conversion.
 
 An injected detector is a trusted private-data processor: `detect` receives transformable source
 plaintext. A conforming detector performs no network, repository, durable filesystem, clock,

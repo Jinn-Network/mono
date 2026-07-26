@@ -534,8 +534,20 @@ a partition estimate.
 
 ## 10. Errors and failure semantics
 
-All public failures use the repository's stable error class and preserve the underlying failure as
-`cause`.
+All public failures use the repository's stable error class. Values thrown by injected Kubo
+clients or injected `fetch` capabilities are untrusted and potentially authority-bearing: their
+messages, URLs, headers, own fields, and nested causes may contain credentials. The binding never
+returns such a raw value as a public error or `cause`.
+
+When a dependency failure needs causal diagnostics, the public `EvidenceRepositoryError.cause` is
+a package-owned, frozen, closed data value containing only a stable operation class and failure
+kind selected by the binding. It contains no raw message, stack, endpoint, request/response
+object, header, body, client value, or nested injected cause. Validation failures that need no
+dependency diagnostics omit `cause`. Every adapter runs error-path conformance tests with
+printable and binary synthetic authority markers and recursively scans the public error graph,
+including messages, inert own fields, and bounded cycle-safe cause chains, for raw, lowercase-hex,
+base64, unpadded base64url, and percent/URL-encoded marker forms. This is scoped conformance
+evidence for the tested binding, not a sandbox around injected code.
 
 | Condition | Result |
 | --- | --- |

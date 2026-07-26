@@ -389,7 +389,13 @@ Test:
 - cancellation before/after every RPC and read boundary → `OPERATION_ABORTED`;
 - configured remote pin failure makes put fail;
 - retry repairs partial content-only state; and
-- underlying cause is preserved.
+- raw injected client/fetch failures are never exposed as the public cause;
+- dependency failures use only the package-owned closed sanitized cause containing a stable
+  operation class and failure kind; and
+- printable and binary synthetic authority markers placed in injected error messages, own fields,
+  and nested cyclic causes do not occur in the mapped public error or its recursively scanned
+  message, inert own fields, and bounded cycle-safe cause graph, in raw, lowercase-hex, base64,
+  unpadded base64url, or percent/URL-encoded form.
 
 Pin-class tests use deterministic client doubles to prove that:
 
