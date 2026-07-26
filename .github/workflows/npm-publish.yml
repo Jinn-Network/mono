@@ -199,9 +199,8 @@ jobs:
             exit 1
           fi
 
-      - name: Check immutable client canary
+      - name: Check immutable client package
         id: existing
-        if: steps.meta.outputs.dist_tag == 'canary'
         shell: bash
         env:
           PACKAGE_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
@@ -423,10 +422,43 @@ jobs:
             );
 
       - name: Publish stable
-        if: steps.meta.outputs.dist_tag == 'latest'
+        if: steps.meta.outputs.dist_tag == 'latest' && steps.existing.outputs.published != 'true'
         run: |
           unset NODE_AUTH_TOKEN
           npm publish --access public
+
+      - name: Validate stable client gitHead
+        if: steps.meta.outputs.dist_tag == 'latest'
+        shell: bash
+        env:
+          PACKAGE_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+        run: |
+          for _ in $(seq 1 30); do
+            PUBLISHED_HEAD="$(npm view "${PACKAGE_SPEC}" gitHead 2>/dev/null || true)"
+            if [ "${PUBLISHED_HEAD}" = "${JINN_BUILD_COMMIT}" ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::${PACKAGE_SPEC} gitHead did not resolve to ${JINN_BUILD_COMMIT}"
+          exit 1
+
+      - name: Wait for stable client tarball
+        if: steps.meta.outputs.dist_tag == 'latest'
+        shell: bash
+        env:
+          CLIENT_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+        run: |
+          PROBE_DIR="${RUNNER_TEMP}/client-stable-probe"
+          mkdir -p "${PROBE_DIR}"
+          for _ in $(seq 1 30); do
+            if npm pack --silent --pack-destination "${PROBE_DIR}" "${CLIENT_SPEC}" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::${CLIENT_SPEC} tarball did not become available"
+          exit 1
 
       - name: Registry consumer acceptance (stable)
         if: steps.meta.outputs.dist_tag == 'latest'
