@@ -206,10 +206,10 @@ Use this review order:
    packed install, root boundary guards, and provisional CI coverage.
 4. **Derivation hardening and distribution** — public conformance kits and `/testing`, adversarial
    tests, expanded packed install, and final CI coverage.
-5. **IPFS profile and pure mapping** — CID helpers, registration profile, schema, fixtures, and
-   drift tests.
-6. **IPFS adapter and distribution** — Kubo/gateway readers, exact writes, real-Kubo contract
-   tests, packed install, CI DAG update.
+5. **IPFS profile and pure mapping** — CID helpers, registration profile, schema, fixtures, drift
+   tests, and bounded Kubo/gateway readers with hermetic unit tests.
+6. **IPFS adapter and distribution** — exact writes, real-Kubo contract tests, packed install, and
+   CI DAG update.
 7. **Publication contracts and durable journal** — public API, identities, sink/journal kits, and
    `/fs`.
 8. **Publication pipeline and distribution** — repository preflight, exact frame planning,
