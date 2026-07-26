@@ -69,6 +69,7 @@
     "task-creator:proof:unjs-destr": "yarn task-creator:mint-preflight:unjs-destr",
     "jinn": "tsx src/bin/jinn.ts",
     "stage2:validate-curated-seeds": "yarn build:layer && tsx scripts/validate-curated-seed-batch.ts",
+    "stage2:publish-curated-seeds": "yarn build:layer && tsx scripts/publish-curated-seed-batch.ts",
     "dev": "yarn build && node dist/bin/jinn.js",
     "build:sdk": "yarn --cwd ../packages/sdk install --immutable && yarn --cwd ../packages/sdk build",
     "build:plugin": "yarn --cwd ../packages/plugin install --immutable && yarn --cwd ../packages/plugin build",
