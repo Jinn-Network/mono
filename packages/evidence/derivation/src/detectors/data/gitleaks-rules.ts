@@ -2,12 +2,14 @@
 
 /**
  * Manually pinned JavaScript adaptation of a small MIT-licensed Gitleaks rule
- * subset. Source: https://github.com/gitleaks/gitleaks at v8.28.0.
+ * subset. Source: https://github.com/gitleaks/gitleaks at the annotated tag
+ * v8.28.0, peeled commit 4fb43823ef3d152d239e92d7d5cb04783b548062.
  */
 export const GITLEAKS_PACK = Object.freeze({
   pin: Object.freeze({
     source: "https://github.com/gitleaks/gitleaks",
     ref: "v8.28.0",
+    commit: "4fb43823ef3d152d239e92d7d5cb04783b548062",
     license: "MIT",
     adaptation: "JavaScript RegExp without Go inline flag verbs",
   }),

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * BIP-39 English wordlist (2048 words), copied from the normative list at
- * https://github.com/bitcoin/bips/blob/master/bip-0039/english.txt.
+ * BIP-39 English wordlist (2048 words), copied from the MIT-licensed
+ * normative list at the immutable bitcoin/bips commit
+ * b289d016b99c81527623c10e995e0318f744ebf3:
+ * https://github.com/bitcoin/bips/blob/b289d016b99c81527623c10e995e0318f744ebf3/bip-0039/english.txt
  */
 export const BIP39_ENGLISH: readonly string[] = [
   "abandon",

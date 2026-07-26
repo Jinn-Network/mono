@@ -19,11 +19,13 @@ import { parseDerivationPolicy } from "./policy.js";
 import { parseScrubberImplementationDescriptor } from "./receipt.js";
 import { validateDerivationSource } from "./source.js";
 import { extractDerivationSurfaces } from "./surfaces.js";
+import { classifyTechnicalValue } from "./technical-values.js";
 import type {
   DerivationDetector,
   DerivationFinding,
   DerivationSurface,
 } from "./types.js";
+import { PROTECTED_VALUE_CLASSES } from "./types.js";
 
 const privateConfiguration = {
   schemaVersion: "jinn.private-detector-configuration.v1" as const,
@@ -84,7 +86,10 @@ test("the deterministic safety floor detects its required semantic classes", asy
     ],
     ["Wire GB82 WEST 1234 5698 7654 32", "payment-instrument"],
     [`npm_${"aB3".repeat(12)}`, "credential"],
-    ["opaque Ab3Def5Gh7Jk9Lm2Np4Qr6St8Uv0Xy1Z", "credential"],
+    [
+      "opaque Ab3Def5Gh7Jk9Lm2Np4Qr6St8Uv0Xy1Z",
+      "high-entropy-secret",
+    ],
   ] as const;
   for (const [text, findingClass] of examples) {
     const findings = (
@@ -362,4 +367,251 @@ test("derived metadata is recursively canonical and lists only physical hasPart 
         entry.disposition === "redact" && entry.count === 0,
     ),
   ).toBe(false);
+});
+
+test("policy selectors cannot override the fixed protected classifier", () => {
+  const input = syntheticDerivationInput();
+  replacePolicy(input, (policy) => {
+    (
+      policy as unknown as {
+        transformableMetadata: string[];
+      }
+    ).transformableMetadata.push("/@graph/*/@id", "/@graph/*/sha256");
+  });
+  const extraction = extractDerivationSurfaces(
+    validateDerivationSource(input),
+    parseDerivationPolicy(input.policyBytes).value,
+  );
+  expect(
+    extraction.surfaces.some(
+      ({ location }) =>
+        location.endsWith("/@id") || location.endsWith("/sha256"),
+    ),
+  ).toBe(false);
+  expect(
+    extraction.protectedLocations.some(
+      ({ protectedClass }) => protectedClass === "digest-reference",
+    ),
+  ).toBe(true);
+});
+
+test("finding arrays and objects are closed inert snapshots", () => {
+  const exactSurface = surface("secret");
+  const [detector] = createBuiltinDerivationDetectors({
+    privateConfiguration,
+  });
+  let getterCalls = 0;
+  const behavioral: DerivationFinding[] = [];
+  Object.defineProperty(behavioral, "0", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      throw new Error("getter must not run");
+    },
+  });
+  behavioral.length = 1;
+  expect(() =>
+    normalizeDetectorFindings(exactSurface, behavioral, detector!.descriptor),
+  ).toThrowError(
+    expect.objectContaining({ code: "DETECTOR_CONTRACT_VIOLATION" }),
+  );
+  expect(getterCalls).toBe(0);
+
+  const base = {
+    class: "credential",
+    confidence: "HIGH",
+    surfaceId: exactSurface.surfaceId,
+    start: 0,
+    end: exactSurface.text.length,
+    evidence: ["credential-shape"],
+    detector: detector!.descriptor,
+  };
+  for (const invalid of [
+    { ...base, confidence: "NOT_A_BAND" },
+    { ...base, snippet: "secret" },
+  ]) {
+    expect(() =>
+      normalizeDetectorFindings(
+        exactSurface,
+        [invalid as unknown as DerivationFinding],
+        detector!.descriptor,
+      ),
+    ).toThrowError(
+      expect.objectContaining({ code: "DETECTOR_CONTRACT_VIOLATION" }),
+    );
+  }
+});
+
+test("technical exemptions require complete structural validity", () => {
+  expect(
+    classifyTechnicalValue("bthisisnotavalidcidbutislongenough", {}),
+  ).toBeNull();
+  expect(
+    classifyTechnicalValue("-----BEGIN PUBLIC KEY-----", {}),
+  ).toBeNull();
+  expect(
+    classifyTechnicalValue("not-base64-secret", { field: "payload" }),
+  ).toBeNull();
+  expect(
+    classifyTechnicalValue(
+      "bafkreibm6jg3ux5qu3hbutfqc3hdoclhwd3bk4ufuyt7xzhsg7cdqs2m7a",
+      {},
+    ),
+  ).toBe("cid");
+});
+
+test("structured signed material participates in protected dispositions", () => {
+  const input = syntheticDerivationInput();
+  replacePolicy(input, (policy) => {
+    (
+      policy.protectedValueDispositions as Record<
+        "signed-material",
+        "retain" | "withhold-record"
+      >
+    )["signed-material"] = "withhold-record";
+  });
+  const extraction = extractDerivationSurfaces(
+    validateDerivationSource(input),
+    parseDerivationPolicy(input.policyBytes).value,
+  );
+  expect(extraction.hold).toEqual({
+    code: "protected-value-withheld",
+    protectedClass: "signed-material",
+  });
+});
+
+test("an exact nested extension leaf selector admits only that leaf", () => {
+  const input = syntheticDerivationInput();
+  const document = JSON.parse(new TextDecoder().decode(input.sourceRecord.bytes));
+  document["@graph"][1].customExtension = {
+    nested: "nested-private-value",
+  };
+  (input.sourceRecord as { bytes: Uint8Array }).bytes = new TextEncoder().encode(
+    `${JSON.stringify(document, null, 2)}\n`,
+  );
+  (input.sourceRecord.reference as { digest: `sha256:${string}` }).digest =
+    sha256Digest(input.sourceRecord.bytes);
+  replacePolicy(input, (policy) => {
+    (
+      policy as unknown as {
+        transformableMetadata: string[];
+      }
+    ).transformableMetadata.push(
+      "/@graph/*/customExtension/nested",
+    );
+  });
+  const extraction = extractDerivationSurfaces(
+    validateDerivationSource(input),
+    parseDerivationPolicy(input.policyBytes).value,
+  );
+  expect(extraction.hold).toBeUndefined();
+  expect(
+    extraction.surfaces.find(
+      ({ location }) =>
+        location === "/@graph/1/customExtension/nested",
+    )?.text,
+  ).toBe("nested-private-value");
+});
+
+test("entropy and Git trailer carriers use their exact semantic classes", async () => {
+  const detectors = createBuiltinDerivationDetectors({
+    privateConfiguration,
+  });
+  const findings = (
+    await Promise.all(
+      detectors.map((detector) =>
+        detector.detect(
+          surface(
+            `opaque Ab3Def5Gh7Jk9Lm2Np4Qr6St8Uv0Xy1Z\nSigned-off-by: Ada Example <ada@example.invalid>`,
+          ),
+        ),
+      ),
+    )
+  ).flat();
+  expect(findings.map(({ class: findingClass }) => findingClass)).toContain(
+    "high-entropy-secret",
+  );
+  expect(findings.map(({ class: findingClass }) => findingClass)).toContain(
+    "git-identity",
+  );
+});
+
+test("the protected classifier exhaustively represents and enforces every closed class", async () => {
+  const baseline = syntheticDerivationInput();
+  const baselineSource = validateDerivationSource(baseline);
+  const baselinePolicy = parseDerivationPolicy(baseline.policyBytes).value;
+
+  const custom = syntheticDerivationInput();
+  const customDocument = JSON.parse(
+    new TextDecoder().decode(custom.sourceRecord.bytes),
+  );
+  customDocument["@graph"][1].customApproved = "approved-private-property";
+  (custom.sourceRecord as { bytes: Uint8Array }).bytes =
+    new TextEncoder().encode(`${JSON.stringify(customDocument, null, 2)}\n`);
+  (custom.sourceRecord.reference as { digest: `sha256:${string}` }).digest =
+    sha256Digest(custom.sourceRecord.bytes);
+  replacePolicy(custom, (policy) => {
+    (
+      policy as unknown as {
+        protectedMetadata: string[];
+      }
+    ).protectedMetadata.push("/@graph/*/customApproved");
+  });
+  const customSource = validateDerivationSource(custom);
+  const customPolicy = parseDerivationPolicy(custom.policyBytes).value;
+
+  const outcome = await createEvidenceDeriver({
+    detectors: createBuiltinDerivationDetectors({ privateConfiguration }),
+  }).derive(syntheticDerivationInput());
+  expect(outcome.status).toBe("derived");
+  if (outcome.status !== "derived") return;
+  const derivedInput = syntheticDerivationInput();
+  (derivedInput as { sourceRecord: typeof derivedInput.sourceRecord })
+    .sourceRecord = outcome.record;
+  (
+    derivedInput as {
+      sourceArtifacts: typeof derivedInput.sourceArtifacts;
+    }
+  ).sourceArtifacts = outcome.artifacts;
+  const derivedSource = validateDerivationSource(derivedInput);
+  const derivedPolicy = parseDerivationPolicy(
+    derivedInput.policyBytes,
+  ).value;
+
+  const candidates = [
+    { source: baselineSource, policy: baselinePolicy },
+    { source: customSource, policy: customPolicy },
+    { source: derivedSource, policy: derivedPolicy },
+  ];
+  const represented = new Set(
+    candidates.flatMap(({ source, policy }) =>
+      extractDerivationSurfaces(source, policy).protectedLocations.map(
+        ({ protectedClass }) => protectedClass,
+      ),
+    ),
+  );
+  expect([...represented].sort()).toEqual(
+    [...PROTECTED_VALUE_CLASSES].sort(),
+  );
+
+  for (const protectedClass of PROTECTED_VALUE_CLASSES) {
+    const candidate = candidates.find(({ source, policy }) =>
+      extractDerivationSurfaces(source, policy).protectedLocations.some(
+        (location) => location.protectedClass === protectedClass,
+      ),
+    );
+    expect(candidate).toBeDefined();
+    if (!candidate) continue;
+    const policy = structuredClone(candidate.policy);
+    (
+      policy.protectedValueDispositions as Record<
+        typeof protectedClass,
+        "retain" | "withhold-record"
+      >
+    )[protectedClass] = "withhold-record";
+    expect(extractDerivationSurfaces(candidate.source, policy).hold).toEqual({
+      code: "protected-value-withheld",
+      protectedClass,
+    });
+  }
 });

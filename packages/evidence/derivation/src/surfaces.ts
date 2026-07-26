@@ -41,6 +41,7 @@ const PROTECTED_KEYS = new Set([
   "environment",
   "hasPart",
   "instrument",
+  "jinn:dispositionCount",
   "license",
   "mentions",
   "object",
@@ -63,6 +64,14 @@ const PROTOCOL_SCALARS = new Set([
   "description",
   "error",
   "value",
+]);
+
+const DERIVATION_COMMITMENT_IDS = new Set([
+  "private/ro-crate-metadata.json",
+  "provenance/derivation-policy.json",
+  "provenance/scrubber-implementation.json",
+  "provenance/scrub-receipt.json",
+  "#public-derivation",
 ]);
 
 function escapePointer(value: string): string {
@@ -91,6 +100,24 @@ function protectedClassFor(
   value: unknown,
   source: ValidatedDerivationSource,
 ): ProtectedValueClass {
+  const referencedIds = (() => {
+    if (typeof value === "string") return [value];
+    if (!value || typeof value !== "object") return [];
+    const candidates = Array.isArray(value) ? value : [value];
+    return candidates.flatMap((candidate) =>
+      candidate &&
+      typeof candidate === "object" &&
+      typeof (candidate as Record<string, unknown>)["@id"] === "string"
+        ? [(candidate as Record<string, string>)["@id"]]
+        : [],
+    );
+  })();
+  if (referencedIds.some((id) => DERIVATION_COMMITMENT_IDS.has(id))) {
+    return "derivation-commitment";
+  }
+  if (key === "jinn:dispositionCount") {
+    return "derivation-commitment";
+  }
   if (key === "agent" || key === "creator" || key === "provider") {
     return "agent-iri";
   }
@@ -174,36 +201,6 @@ function walkMetadata(
     if (!("value" in descriptor)) return false;
     const child = descriptor.value;
     const childPointer = `${pointer}/${escapePointer(key)}`;
-    if (
-      typeof child === "string" &&
-      matches(policy.transformableMetadata, childPointer)
-    ) {
-      surfaces.push(
-        Object.freeze({
-          surfaceId: `metadata:${entityId}:${childPointer}`,
-          sourceEntityId: entityId,
-          role: "other",
-          mediaType: "application/ld+json",
-          codec: "json",
-          location: childPointer,
-          text: child,
-        }),
-      );
-      continue;
-    }
-    if (
-      (typeof child === "string" ||
-        typeof child === "number" ||
-        typeof child === "boolean" ||
-        child === null) &&
-      matches(policy.protectedMetadata, childPointer)
-    ) {
-      protectedLocations.push({
-        location: childPointer,
-        protectedClass: "policy-protected-property",
-      });
-      continue;
-    }
     if (PROTECTED_KEYS.has(key)) {
       const protectedClass = protectedClassFor(key, child, source);
       protectedLocations.push({
@@ -245,6 +242,36 @@ function walkMetadata(
       );
       continue;
     }
+    if (
+      typeof child === "string" &&
+      matches(policy.transformableMetadata, childPointer)
+    ) {
+      surfaces.push(
+        Object.freeze({
+          surfaceId: `metadata:${entityId}:${childPointer}`,
+          sourceEntityId: entityId,
+          role: "other",
+          mediaType: "application/ld+json",
+          codec: "json",
+          location: childPointer,
+          text: child,
+        }),
+      );
+      continue;
+    }
+    if (
+      (typeof child === "string" ||
+        typeof child === "number" ||
+        typeof child === "boolean" ||
+        child === null) &&
+      matches(policy.protectedMetadata, childPointer)
+    ) {
+      protectedLocations.push({
+        location: childPointer,
+        protectedClass: "policy-protected-property",
+      });
+      continue;
+    }
     if (PROTOCOL_SCALARS.has(key)) {
       if (
         typeof child === "string" ||
@@ -274,6 +301,25 @@ function walkMetadata(
         continue;
       }
       return false;
+    }
+    if (
+      child &&
+      typeof child === "object" &&
+      (Array.isArray(child)
+        ? child.length > 0
+        : Reflect.ownKeys(Object.getOwnPropertyDescriptors(child)).length >
+          0) &&
+      walkMetadata(
+        child,
+        childPointer,
+        entityId,
+        policy,
+        source,
+        surfaces,
+        protectedLocations,
+      )
+    ) {
+      continue;
     }
     return false;
   }
@@ -321,13 +367,36 @@ function ruleCodec(
   return rule?.codec;
 }
 
+function technicalProtectedClass(
+  technicalClass: NonNullable<
+    ReturnType<typeof classifyTechnicalValue>
+  >,
+): ProtectedValueClass {
+  switch (technicalClass) {
+    case "digest":
+    case "transaction-digest":
+      return "digest-reference";
+    case "cid":
+      return "content-identifier";
+    case "dsse-material":
+    case "public-key":
+      return "signed-material";
+    case "version":
+    case "model-id":
+      return "version-model-identifier";
+  }
+}
+
 function structuredSurfaces(
   entityId: string,
   role: DerivationSurface["role"],
   mediaType: string,
   codec: "json" | "jsonl",
   bytes: Uint8Array,
-): DerivationSurface[] {
+): {
+  readonly surfaces: readonly DerivationSurface[];
+  readonly protectedLocations: readonly ProtectedLocation[];
+} {
   let text: string;
   try {
     text = decodeUtf8(bytes);
@@ -340,6 +409,7 @@ function structuredSurfaces(
   }
   const rows = codec === "jsonl" ? text.split("\n") : [text];
   const surfaces: DerivationSurface[] = [];
+  const protectedLocations: ProtectedLocation[] = [];
   rows.forEach((row, lineIndex) => {
     if (codec === "jsonl" && row.trim() === "") return;
     let parsed: unknown;
@@ -367,24 +437,33 @@ function structuredSurfaces(
         for (const [key, child] of Object.entries(value)) {
           walk(child, `${path}/${escapePointer(key)}`, key);
         }
-      } else if (
-        typeof value === "string" &&
-        classifyTechnicalValue(value, { field }) === null
-      ) {
-        surfaces.push(Object.freeze({
-          surfaceId: `artifact:${entityId}:${codec === "jsonl" ? `line-${lineIndex + 1}` : "root"}${path}`,
-          sourceEntityId: entityId,
-          role,
-          mediaType,
-          codec,
-          location: codec === "jsonl" ? `/${lineIndex}${path}` : path,
-          text: value,
-        }));
+      } else if (typeof value === "string") {
+        const location = codec === "jsonl" ? `/${lineIndex}${path}` : path;
+        const technicalClass = classifyTechnicalValue(value, { field });
+        if (technicalClass) {
+          protectedLocations.push({
+            location,
+            protectedClass: technicalProtectedClass(technicalClass),
+          });
+        } else {
+          surfaces.push(Object.freeze({
+            surfaceId: `artifact:${entityId}:${codec === "jsonl" ? `line-${lineIndex + 1}` : "root"}${path}`,
+            sourceEntityId: entityId,
+            role,
+            mediaType,
+            codec,
+            location,
+            text: value,
+          }));
+        }
       }
     };
     walk(parsed, "");
   });
-  return surfaces;
+  return {
+    surfaces: Object.freeze(surfaces),
+    protectedLocations: Object.freeze(protectedLocations),
+  };
 }
 
 export function extractDerivationSurfaces(
@@ -410,21 +489,6 @@ export function extractDerivationSurfaces(
   ) {
     return { surfaces: [], protectedLocations, hold: { code: "unclassified-metadata" } };
   }
-  for (const location of protectedLocations) {
-    if (
-      policy.protectedValueDispositions[location.protectedClass] ===
-      "withhold-record"
-    ) {
-      return {
-        surfaces: [],
-        protectedLocations,
-        hold: {
-          code: "protected-value-withheld",
-          protectedClass: location.protectedClass,
-        },
-      };
-    }
-  }
   for (const [entityId, bytes] of source.artifacts) {
     const entity = source.entities.get(entityId);
     if (!entity) continue;
@@ -445,9 +509,35 @@ export function extractDerivationSurfaces(
         text: decodeUtf8(bytes),
       }));
     } else if (codec === "json" || codec === "jsonl") {
-      surfaces.push(
-        ...structuredSurfaces(entityId, role, mediaType, codec, bytes),
+      const structured = structuredSurfaces(
+        entityId,
+        role,
+        mediaType,
+        codec,
+        bytes,
       );
+      surfaces.push(...structured.surfaces);
+      protectedLocations.push(...structured.protectedLocations);
+    } else if (codec === "signed") {
+      protectedLocations.push({
+        location: "",
+        protectedClass: "signed-material",
+      });
+    }
+  }
+  for (const location of protectedLocations) {
+    if (
+      policy.protectedValueDispositions[location.protectedClass] ===
+      "withhold-record"
+    ) {
+      return {
+        surfaces: [],
+        protectedLocations: Object.freeze(protectedLocations),
+        hold: {
+          code: "protected-value-withheld",
+          protectedClass: location.protectedClass,
+        },
+      };
     }
   }
   return {

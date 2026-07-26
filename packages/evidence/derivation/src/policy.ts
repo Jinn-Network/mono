@@ -9,6 +9,10 @@ import {
   decodeUtf8,
   sha256Digest,
 } from "./bytes.js";
+import {
+  derivationDetectorDescriptorSchema,
+  derivationDigestSchema,
+} from "./descriptor-schema.js";
 import { EvidenceDerivationError } from "./errors.js";
 import { parseStrictJson } from "./strict-json.js";
 import {
@@ -17,14 +21,6 @@ import {
   type ParsedDerivationPolicy,
 } from "./types.js";
 
-const digest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
-const detector = z.strictObject({
-  id: z.string().min(1),
-  version: z.string().min(1),
-  implementationDigest: digest,
-  reproducibility: z.enum(["byte-stable", "best-effort"]),
-  configurationDigest: digest.optional(),
-});
 const selector = z
   .string()
   .min(1)
@@ -54,7 +50,7 @@ const policySchema = z.strictObject({
   name: z.string().min(1),
   version: z.string().min(1),
   reproducibility: z.enum(["byte-stable", "content-addressed"]),
-  requiredDetectors: z.array(detector),
+  requiredDetectors: z.array(derivationDetectorDescriptorSchema),
   transformableMetadata: z.array(selector),
   protectedMetadata: z.array(selector),
   protectedValueDispositions: protectedDispositions,
@@ -100,7 +96,7 @@ const policySchema = z.strictObject({
   unmatchedFindingDisposition: z.enum(["review", "withhold-record"]),
   stubs: z.record(z.string(), z.string()),
   technicalAllowlist: z.array(z.string()),
-  privateAllowlistConfigurationDigest: digest.optional(),
+  privateAllowlistConfigurationDigest: derivationDigestSchema.optional(),
   resultTransform: z.enum(["derive-unassessed", "withhold-record"]),
 });
 

@@ -9,6 +9,12 @@ import {
   decodeUtf8,
   sha256Digest,
 } from "./bytes.js";
+import {
+  derivationDetectorDescriptorSchema,
+  derivationDigestSchema,
+  implementationPackageNameSchema,
+  publicVersionSchema,
+} from "./descriptor-schema.js";
 import { EvidenceDerivationError } from "./errors.js";
 import { parseStrictJson } from "./strict-json.js";
 import type {
@@ -19,28 +25,16 @@ import type {
   DispositionCount,
 } from "./types.js";
 
-const digest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
-const semanticId = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-const semanticVersion = z
-  .string()
-  .regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
-const detector = z.strictObject({
-  id: semanticId,
-  version: semanticVersion,
-  implementationDigest: digest,
-  reproducibility: z.enum(["byte-stable", "best-effort"]),
-  configurationDigest: digest.optional(),
-});
 const implementationSchema = z.strictObject({
   schemaVersion: z.literal("jinn.evidence-derivation-implementation.v1"),
-  name: z.string().regex(/^@jinn-network\/[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  version: semanticVersion,
-  buildDigest: digest,
+  name: implementationPackageNameSchema,
+  version: publicVersionSchema,
+  buildDigest: derivationDigestSchema,
   runtime: z.strictObject({
     family: z.enum(["node", "deno", "bun", "browser", "wasm"]),
-    version: z.string().regex(/^\d+(?:\.\d+){0,2}$/),
+    version: publicVersionSchema,
   }),
-  detectors: z.array(detector),
+  detectors: z.array(derivationDetectorDescriptorSchema),
 });
 
 export interface ScrubberImplementationDescriptor {
@@ -144,26 +138,26 @@ const receiptSchema = z.strictObject({
   schemaVersion: z.literal("jinn.evidence-derivation.scrub-receipt.v1"),
   sourceRecord: z.strictObject({
     family: z.literal("execution-evidence"),
-    digest,
+    digest: derivationDigestSchema,
   }),
   scrubber: z.strictObject({
     agentId: z.url(),
-    implementationDigest: digest,
+    implementationDigest: derivationDigestSchema,
   }),
-  policy: z.strictObject({ digest }),
+  policy: z.strictObject({ digest: derivationDigestSchema }),
   privateConfigurationDigests: z.array(
     z.strictObject({
       detectorId: z.string().min(1),
-      configurationDigest: digest,
+      configurationDigest: derivationDigestSchema,
     }),
   ),
   completedAt: z.iso.datetime({ offset: true }),
   mappings: z.array(
     z.strictObject({
       sourceEntityId: z.string().min(1),
-      sourceDigest: digest,
+      sourceDigest: derivationDigestSchema,
       derivedEntityId: z.string().min(1),
-      derivedDigest: digest,
+      derivedDigest: derivationDigestSchema,
     }),
   ),
   artifacts: z.strictObject({

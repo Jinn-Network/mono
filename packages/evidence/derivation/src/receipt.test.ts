@@ -72,3 +72,18 @@ test("rejects arbitrary implementation descriptor fields", () => {
     expect.objectContaining({ code: "SCRUBBER_DESCRIPTOR_INVALID" }),
   );
 });
+
+test("accepts a public-safe independent implementation descriptor", () => {
+  const input = syntheticDerivationInput();
+  const value = JSON.parse(
+    new TextDecoder().decode(input.scrubber.implementationDescriptorBytes),
+  );
+  value.name = "@independent/evidence-deriver";
+  value.version = "1";
+  value.runtime.version = "22.1.0-beta.1";
+  value.detectors[0].version = "1";
+  expect(
+    parseScrubberImplementationDescriptor(canonicalJsonBytes(value)).value
+      .name,
+  ).toBe("@independent/evidence-deriver");
+});
