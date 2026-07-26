@@ -38,6 +38,7 @@ import {
 } from "./registration.js";
 
 const DEFAULT_READBACK_TIMEOUT_MS = 60_000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const READBACK_RETRY_DELAY_MS = 25;
 const CAPABILITIES: EvidenceRepositoryCapabilities = Object.freeze({
   maxObjectBytes: MAX_STANDARD_IPFS_BLOCK_BYTES,
@@ -62,6 +63,10 @@ interface RegisteredObject {
   readonly bytes: Uint8Array;
   readonly contentCid: string;
   readonly registrationCid: string;
+}
+
+interface ReadbackDeadline {
+  readonly remainingMs: () => number;
 }
 
 export class IpfsEvidenceRepository implements EvidenceRepository {
@@ -462,7 +467,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
     expectedBytes: Uint8Array,
     options: RepositoryOperationOptions,
   ): Promise<void> {
-    const deadline = Date.now() + this.#readbackTimeoutMs;
+    const deadline = createReadbackDeadline(this.#readbackTimeoutMs);
     let lastTransient: EvidenceRepositoryError | undefined;
     while (true) {
       assertRepositoryOperationActive(options);
@@ -503,7 +508,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
         lastTransient = error;
       }
 
-      if (Date.now() >= deadline) {
+      if (deadline.remainingMs() <= 0) {
         throw ipfsRepositoryError(
           "DEPENDENCY_UNAVAILABLE",
           "The configured IPFS readback deadline expired.",
@@ -511,7 +516,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
         );
       }
       await waitForRetry(
-        Math.min(READBACK_RETRY_DELAY_MS, deadline - Date.now()),
+        Math.min(READBACK_RETRY_DELAY_MS, deadline.remainingMs()),
         options,
       );
     }
@@ -521,7 +526,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
 class ReadbackDeadlineExpired extends Error {}
 
 async function runReadbackAttempt<T>(
-  deadline: number,
+  deadline: ReadbackDeadline,
   callerOptions: RepositoryOperationOptions,
   operation: (options: RepositoryOperationOptions) => Promise<T>,
 ): Promise<T> {
@@ -547,11 +552,11 @@ async function runReadbackAttempt<T>(
   callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
   if (callerSignal?.aborted === true) onCallerAbort();
 
-  const timer = setTimeout(() => {
+  const cancelDeadlineTimer = scheduleReadbackDeadline(deadline, () => {
     deadlineExpired = true;
     rejectStop(deadlineError);
     controller.abort(deadlineError);
-  }, Math.max(0, deadline - Date.now()));
+  });
 
   try {
     return await Promise.race([
@@ -566,9 +571,42 @@ async function runReadbackAttempt<T>(
     if (deadlineExpired) throw deadlineError;
     throw error;
   } finally {
-    clearTimeout(timer);
+    cancelDeadlineTimer();
     callerSignal?.removeEventListener("abort", onCallerAbort);
   }
+}
+
+function createReadbackDeadline(timeoutMs: number): ReadbackDeadline {
+  const startedAt = Date.now();
+  return {
+    remainingMs: () =>
+      Math.max(0, timeoutMs - Math.max(0, Date.now() - startedAt)),
+  };
+}
+
+function scheduleReadbackDeadline(
+  deadline: ReadbackDeadline,
+  onExpired: () => void,
+): () => void {
+  let canceled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const scheduleNextChunk = () => {
+    if (canceled) return;
+    const remainingMs = deadline.remainingMs();
+    timer = setTimeout(() => {
+      timer = undefined;
+      if (deadline.remainingMs() <= 0) {
+        onExpired();
+      } else {
+        scheduleNextChunk();
+      }
+    }, Math.min(MAX_TIMER_DELAY_MS, Math.max(0, remainingMs)));
+  };
+  scheduleNextChunk();
+  return () => {
+    canceled = true;
+    if (timer !== undefined) clearTimeout(timer);
+  };
 }
 
 function copyPutBytes(

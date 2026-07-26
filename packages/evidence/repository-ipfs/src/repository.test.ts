@@ -664,6 +664,65 @@ describe("IpfsEvidenceRepository writes", () => {
     assert.equal(callerCancellationObserved, true);
   });
 
+  test("chunks long readback deadlines without narrowing the accepted range", async () => {
+    vi.useFakeTimers();
+    const warningSpy = vi.spyOn(process, "emitWarning");
+    const timerSpy = vi.spyOn(globalThis, "setTimeout");
+    try {
+      const bytes = encoder.encode("long readback deadline");
+      const controller = new AbortController();
+      const longReader = hangingReadbackReader(() => {});
+      const longRepository = new IpfsEvidenceRepository({
+        client: new FakeKubo().asClient(),
+        reader: longReader.reader,
+        readbackTimeoutMs: 2_147_483_648,
+      });
+      let settled = false;
+      const longPending = longRepository.putArtifact(bytes, {
+        signal: controller.signal,
+      });
+      void longPending.finally(() => {
+        settled = true;
+      }).catch(() => {});
+      await longReader.started;
+
+      const scheduledDelays = timerSpy.mock.calls
+        .map((call) => call[1])
+        .filter((delay): delay is number => typeof delay === "number");
+      assert.equal(scheduledDelays.at(-1), 2_147_483_647);
+      await vi.advanceTimersByTimeAsync(1);
+      assert.equal(settled, false);
+      assert.equal(warningSpy.mock.calls.length, 0);
+
+      controller.abort();
+      await assert.rejects(longPending, hasCode("OPERATION_ABORTED"));
+      assert.equal(vi.getTimerCount(), 0);
+
+      for (const timeoutMs of [0, 10]) {
+        const reader = hangingReadbackReader(() => {});
+        const repository = new IpfsEvidenceRepository({
+          client: new FakeKubo().asClient(),
+          reader: reader.reader,
+          readbackTimeoutMs: timeoutMs,
+        });
+        const pending = repository.putArtifact(bytes);
+        const rejection = assert.rejects(
+          pending,
+          hasCode("DEPENDENCY_UNAVAILABLE"),
+          String(timeoutMs),
+        );
+        await reader.started;
+        await vi.advanceTimersByTimeAsync(timeoutMs);
+        await rejection;
+        assert.equal(vi.getTimerCount(), 0);
+      }
+    } finally {
+      timerSpy.mockRestore();
+      warningSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   test("concurrent identical puts converge on the same deterministic CIDs", async () => {
     const reader = new FakeIpfsBlockReader();
     const kubo = new FakeKubo(reader);

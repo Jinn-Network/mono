@@ -4,6 +4,11 @@ import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
+const CHILD_FORCE_KILL_DELAY_MS = 1_000;
+const CLEANUP_TERM_DELAY_MS = 1_000;
+const CLEANUP_KILL_DELAY_MS = 2_000;
+const CLEANUP_GIVE_UP_DELAY_MS = 3_000;
+
 const DEFAULT_MATRICES = [
   {
     image:
@@ -80,9 +85,11 @@ export async function runKuboIntegration(options = {}) {
 }
 
 export function createCommandSupervisor(spawnCapability = spawn) {
-  let activeChild;
+  let activeCommandChild;
+  let activeCleanupChild;
   let interruptedBy;
-  let forceKillTimer;
+  let interruptForceKillTimer;
+  let interruptForceKillChild;
 
   const execute = (command, args, options = {}, cleanup = false) => {
     if (interruptedBy !== undefined && !cleanup) {
@@ -99,19 +106,29 @@ export function createCommandSupervisor(spawnCapability = spawn) {
         stdio: captureOutput ? ["ignore", "pipe", "pipe"] : "inherit",
         ...spawnOptions,
       });
-      activeChild = child;
+      if (cleanup) {
+        activeCleanupChild = child;
+      } else {
+        activeCommandChild = child;
+      }
       if (captureOutput) {
         child.stdout.on("data", (chunk) => stdout.push(chunk));
         child.stderr.on("data", (chunk) => stderr.push(chunk));
       }
       let settled = false;
+      const cleanupTimers = [];
       const settle = (result) => {
         if (settled) return;
         settled = true;
-        if (activeChild === child) activeChild = undefined;
-        if (forceKillTimer !== undefined) {
-          clearTimeout(forceKillTimer);
-          forceKillTimer = undefined;
+        if (activeCommandChild === child) activeCommandChild = undefined;
+        if (activeCleanupChild === child) activeCleanupChild = undefined;
+        for (const timer of cleanupTimers) clearTimeout(timer);
+        if (interruptForceKillChild === child) {
+          if (interruptForceKillTimer !== undefined) {
+            clearTimeout(interruptForceKillTimer);
+          }
+          interruptForceKillTimer = undefined;
+          interruptForceKillChild = undefined;
         }
         result();
       };
@@ -136,6 +153,28 @@ export function createCommandSupervisor(spawnCapability = spawn) {
           }
         });
       });
+      if (cleanup) {
+        cleanupTimers.push(
+          setTimeout(() => {
+            if (!settled) child.kill("SIGTERM");
+          }, CLEANUP_TERM_DELAY_MS),
+          setTimeout(() => {
+            if (!settled) child.kill("SIGKILL");
+          }, CLEANUP_KILL_DELAY_MS),
+          setTimeout(() => {
+            if (settled) return;
+            child.unref?.();
+            settle(() =>
+              reject(
+                new Error(
+                  `${command} cleanup did not exit after SIGTERM and SIGKILL`,
+                ),
+              ),
+            );
+          }, CLEANUP_GIVE_UP_DELAY_MS),
+        );
+        for (const timer of cleanupTimers) timer.unref();
+      }
     });
   };
 
@@ -148,14 +187,19 @@ export function createCommandSupervisor(spawnCapability = spawn) {
       }
     },
     interrupt(signal) {
-      if (interruptedBy !== undefined) return;
-      interruptedBy = signal;
-      const child = activeChild;
+      const repeated = interruptedBy !== undefined;
+      interruptedBy ??= signal;
+      const child = activeCleanupChild ?? activeCommandChild;
       if (child === undefined) return;
-      forceKillTimer = setTimeout(() => {
+      if (repeated) {
         child.kill("SIGKILL");
-      }, 1_000);
-      forceKillTimer.unref();
+        return;
+      }
+      interruptForceKillChild = child;
+      interruptForceKillTimer = setTimeout(() => {
+        child.kill("SIGKILL");
+      }, CHILD_FORCE_KILL_DELAY_MS);
+      interruptForceKillTimer.unref();
       child.kill(signal);
     },
     output: (command, args) =>
@@ -174,8 +218,8 @@ export async function main() {
   };
   const onSigint = () => receiveSignal("SIGINT");
   const onSigterm = () => receiveSignal("SIGTERM");
-  process.once("SIGINT", onSigint);
-  process.once("SIGTERM", onSigterm);
+  process.on("SIGINT", onSigint);
+  process.on("SIGTERM", onSigterm);
   try {
     await runKuboIntegration({ supervisor });
   } catch (error) {

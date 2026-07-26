@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 
-import { describe, test } from "vitest";
+import { describe, test, vi } from "vitest";
 
 import {
   createCommandSupervisor,
@@ -69,15 +69,81 @@ describe("Kubo integration process cleanup", () => {
       false,
     );
   });
+
+  test("bounds a never-exiting exact-name cleanup child", async () => {
+    vi.useFakeTimers();
+    try {
+      const calls = [];
+      const child = fakeChild({ exitOnKill: false });
+      const supervisor = createCommandSupervisor((command, args) => {
+        calls.push({ args, command });
+        return child;
+      });
+      let settled = false;
+      const pending = supervisor.cleanup("docker", [
+        "rm",
+        "-f",
+        "jinn-evidence-ipfs-exact",
+      ]);
+      void pending.then(() => {
+        settled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      assert.deepEqual(child.kills, ["SIGTERM"]);
+      await vi.advanceTimersByTimeAsync(1_000);
+      assert.deepEqual(child.kills, ["SIGTERM", "SIGKILL"]);
+      await vi.advanceTimersByTimeAsync(1_000);
+      assert.equal(settled, true);
+      assert.equal(child.unrefs, 1);
+      assert.equal(vi.getTimerCount(), 0);
+      assert.deepEqual(calls, [
+        {
+          args: ["rm", "-f", "jinn-evidence-ipfs-exact"],
+          command: "docker",
+        },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a repeated signal force-kills the current cleanup child", async () => {
+    vi.useFakeTimers();
+    try {
+      const child = fakeChild({ exitOnKill: false });
+      const supervisor = createCommandSupervisor(() => child);
+      supervisor.interrupt("SIGINT");
+      const pending = supervisor.cleanup("docker", [
+        "rm",
+        "-f",
+        "jinn-evidence-ipfs-exact",
+      ]);
+
+      supervisor.interrupt("SIGTERM");
+      assert.deepEqual(child.kills, ["SIGKILL"]);
+      await vi.advanceTimersByTimeAsync(3_000);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
-function fakeChild() {
+function fakeChild(options = {}) {
+  const exitOnKill = options.exitOnKill ?? true;
   const child = new EventEmitter();
   child.kills = [];
+  child.unrefs = 0;
   child.kill = (signal) => {
     child.kills.push(signal);
-    queueMicrotask(() => child.emit("exit", null, signal));
+    if (exitOnKill) {
+      queueMicrotask(() => child.emit("exit", null, signal));
+    }
     return true;
+  };
+  child.unref = () => {
+    child.unrefs += 1;
   };
   return child;
 }
