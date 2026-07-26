@@ -104,6 +104,12 @@ describe('packed client workflow coverage', () => {
     const smoke = workflow('client/scripts/smoke-test-pack.mjs');
 
     expect(smoke).toContain("packageManager: 'yarn@4.13.0'");
+    expect(smoke).toContain(
+      "'@jinn-network/core': `file:${join(installedBundledWorkspaceRoot, 'core')}`",
+    );
+    expect(smoke).toContain(
+      "'@jinn-network/plugin': `file:${join(installedBundledWorkspaceRoot, 'plugin')}`",
+    );
     expect(smoke).toContain("'nodeLinker: node-modules\\n'");
     expect(smoke).toContain("['yarn', 'install', '--no-immutable']");
     expect(smoke).toContain('yarn consumer exact installed jinn --help');
