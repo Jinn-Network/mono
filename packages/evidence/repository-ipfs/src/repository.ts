@@ -27,6 +27,7 @@ import {
   normalizeRawCid,
 } from "./cid.js";
 import {
+  ipfsDependencyError,
   ipfsRepositoryError,
   mapIpfsDependencyError,
 } from "./errors.js";
@@ -184,7 +185,6 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
       throw ipfsRepositoryError(
         "CONTENT_CORRUPT",
         "The IPFS registration block is invalid.",
-        error,
       );
     }
     if (!registrationsEqual(registration.reference, reference)) {
@@ -234,7 +234,9 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
       throw mapIpfsDependencyError(
         error,
         "The configured IPFS read path failed.",
+        "block-read",
         options.signal,
+        true,
       );
     }
   }
@@ -334,11 +336,12 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
       let returnedCanonical: string;
       try {
         returnedCanonical = normalizeRawCid(returnedCid.toString());
-      } catch (error) {
-        throw ipfsRepositoryError(
+      } catch {
+        throw ipfsDependencyError(
           "REFERENCE_CONFLICT",
           "Kubo returned a CID outside the required raw SHA2-256 profile.",
-          error,
+          "block-write",
+          "protocol-failure",
         );
       }
       if (returnedCanonical !== expectedCid) {
@@ -351,6 +354,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
       throw mapIpfsDependencyError(
         error,
         "Kubo failed to store the required IPFS block.",
+        "block-write",
         options.signal,
       );
     }
@@ -379,6 +383,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
           normalizeDependencyRawCid(
             pin.cid,
             "Kubo returned a malformed CID from the local pin listing.",
+            "local-pin-read",
           ) === cid &&
           (pin.type === "direct" || pin.type === "recursive")
         ) {
@@ -393,6 +398,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
       throw mapIpfsDependencyError(
         error,
         "Kubo failed to confirm an explicit local root pin.",
+        "local-pin-read",
         options.signal,
       );
     }
@@ -414,6 +420,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
         normalizeDependencyRawCid(
           pin.cid,
           "The configured remote pin service returned a malformed CID after pinning.",
+          "remote-pin-write",
         ) !== cid ||
         pin.status !== "pinned"
       ) {
@@ -432,6 +439,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
       throw mapIpfsDependencyError(
         error,
         "Kubo failed to establish the required remote pin.",
+        "remote-pin-write",
         options.signal,
       );
     }
@@ -454,6 +462,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
           normalizeDependencyRawCid(
             pin.cid,
             "The configured remote pin service returned a malformed CID from its pin listing.",
+            "remote-pin-read",
           ) === cid &&
           pin.status === "pinned"
         ) {
@@ -466,6 +475,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
       throw mapIpfsDependencyError(
         error,
         "Kubo failed to confirm the required remote pin.",
+        "remote-pin-read",
         options.signal,
       );
     }
@@ -477,7 +487,6 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
     options: RepositoryOperationOptions,
   ): Promise<void> {
     const deadline = createReadbackDeadline(this.#readbackTimeoutMs);
-    let lastTransient: EvidenceRepositoryError | undefined;
     while (true) {
       assertRepositoryOperationActive(options);
       try {
@@ -502,10 +511,11 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
         }
       } catch (error) {
         if (error instanceof ReadbackDeadlineExpired) {
-          throw ipfsRepositoryError(
+          throw ipfsDependencyError(
             "DEPENDENCY_UNAVAILABLE",
             "The configured IPFS readback deadline expired.",
-            lastTransient,
+            "readback",
+            "unavailable",
           );
         }
         if (
@@ -514,14 +524,14 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
         ) {
           throw error;
         }
-        lastTransient = error;
       }
 
       if (deadline.remainingMs() <= 0) {
-        throw ipfsRepositoryError(
+        throw ipfsDependencyError(
           "DEPENDENCY_UNAVAILABLE",
           "The configured IPFS readback deadline expired.",
-          lastTransient,
+          "readback",
+          "unavailable",
         );
       }
       await waitForRetry(
@@ -679,32 +689,57 @@ function decodeRawCid(cid: string): CID {
 function normalizeDependencyRawCid(
   cid: { toString(): string },
   message: string,
+  operation:
+    | "local-pin-read"
+    | "remote-pin-read"
+    | "remote-pin-write",
 ): string {
   try {
     return normalizeRawCid(cid.toString());
-  } catch (error) {
-    throw ipfsRepositoryError("IO_FAILURE", message, error);
+  } catch {
+    throw ipfsDependencyError(
+      "IO_FAILURE",
+      message,
+      operation,
+      "protocol-failure",
+    );
   }
 }
 
 function isKuboNotPinnedError(error: unknown, cid: string): boolean {
-  if (!(error instanceof Error) || typeof error !== "object") return false;
+  if (typeof error !== "object" || error === null) return false;
+  const responseValue = dependencyDataProperty(error, "response");
   const response =
-    "response" in error &&
-    typeof error.response === "object" &&
-    error.response !== null
-      ? error.response
+    typeof responseValue === "object" && responseValue !== null
+      ? responseValue
       : undefined;
+  const responseStatus =
+    response === undefined
+      ? undefined
+      : dependencyDataProperty(response, "status");
   const status =
-    response !== undefined &&
-    "status" in response &&
-    typeof response.status === "number"
-      ? response.status
+    typeof responseStatus === "number"
+      ? responseStatus
       : undefined;
+  const message = dependencyDataProperty(error, "message");
   return (
     status === 500 &&
-    error.message === `path '${decodeRawCid(cid).toString()}' is not pinned`
+    message === `path '${decodeRawCid(cid).toString()}' is not pinned`
   );
+}
+
+function dependencyDataProperty(
+  value: object,
+  key: string,
+): unknown {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor !== undefined && "value" in descriptor
+      ? descriptor.value
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function waitForRetry(

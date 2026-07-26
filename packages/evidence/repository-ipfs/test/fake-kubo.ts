@@ -71,6 +71,7 @@ export class FakeKubo {
   failNextPut: Error | undefined;
   failNextPinList: Error | undefined;
   failNextRemoteAdd: Error | undefined;
+  failNextRemoteList: Error | undefined;
   throwWhenPinMissing = false;
   onEvent: ((event: string) => void) | undefined;
 
@@ -196,6 +197,11 @@ export class FakeKubo {
           ) {
             self.events.push("pin.remote.ls");
             self.onEvent?.("pin.remote.ls");
+            if (self.failNextRemoteList !== undefined) {
+              const error = self.failNextRemoteList;
+              self.failNextRemoteList = undefined;
+              throw error;
+            }
             for (const cid of query.cid ?? []) {
               self.remoteListCalls.push({
                 cid: rawCidForDigest(cid.multihash.digest),

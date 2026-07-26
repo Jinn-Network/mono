@@ -25,6 +25,11 @@ import {
   FakeKubo,
   rawCidFor,
 } from "../test/fake-kubo.js";
+import {
+  assertSanitizedDependencyError,
+  createAuthorityBearingError,
+  type SanitizedOperation,
+} from "../test/authority-markers.js";
 
 const encoder = new TextEncoder();
 
@@ -315,6 +320,38 @@ describe("IpfsEvidenceRepository writes", () => {
     assert.equal(kubo.putCalls.length, 2);
   });
 
+  test("sanitizes errors whose not-pinned classification fields throw", async () => {
+    const reader = new FakeIpfsBlockReader();
+    const kubo = new FakeKubo(reader);
+    const injected = new Error();
+    Object.defineProperty(injected, "message", {
+      configurable: true,
+      get() {
+        throw createAuthorityBearingError("message getter failed");
+      },
+    });
+    Object.defineProperty(injected, "response", {
+      configurable: true,
+      value: { status: 500 },
+    });
+    kubo.failNextPinList = injected;
+    const repository = new IpfsEvidenceRepository({
+      client: kubo.asClient(),
+      reader,
+    });
+
+    await assert.rejects(
+      repository.putArtifact(encoder.encode("hostile classifier")),
+      (error: unknown) =>
+        assertSanitizedDependencyError(
+          error,
+          "DEPENDENCY_UNAVAILABLE",
+          "local-pin-read",
+          "unavailable",
+        ),
+    );
+  });
+
   test("passes exact remote service options and repairs expired remote custody", async () => {
     const reader = new FakeIpfsBlockReader();
     const kubo = new FakeKubo(reader);
@@ -361,7 +398,13 @@ describe("IpfsEvidenceRepository writes", () => {
 
     await assert.rejects(
       repository.putArtifact(encoder.encode("malformed local pin")),
-      hasCodeWithCause("IO_FAILURE", "INVALID_REFERENCE"),
+      (error: unknown) =>
+        assertSanitizedDependencyError(
+          error,
+          "IO_FAILURE",
+          "local-pin-read",
+          "protocol-failure",
+        ),
     );
   });
 
@@ -377,7 +420,13 @@ describe("IpfsEvidenceRepository writes", () => {
 
     await assert.rejects(
       repository.putArtifact(encoder.encode("malformed remote add")),
-      hasCodeWithCause("IO_FAILURE", "INVALID_REFERENCE"),
+      (error: unknown) =>
+        assertSanitizedDependencyError(
+          error,
+          "IO_FAILURE",
+          "remote-pin-write",
+          "protocol-failure",
+        ),
     );
   });
 
@@ -393,7 +442,13 @@ describe("IpfsEvidenceRepository writes", () => {
 
     await assert.rejects(
       repository.putArtifact(encoder.encode("malformed remote list")),
-      hasCodeWithCause("IO_FAILURE", "INVALID_REFERENCE"),
+      (error: unknown) =>
+        assertSanitizedDependencyError(
+          error,
+          "IO_FAILURE",
+          "remote-pin-read",
+          "protocol-failure",
+        ),
     );
   });
 
@@ -461,7 +516,7 @@ describe("IpfsEvidenceRepository writes", () => {
     );
   });
 
-  test("preserves dependency causes and maps aborts at awaited boundaries", async () => {
+  test("sanitizes dependency causes and maps aborts at awaited boundaries", async () => {
     const reader = new FakeIpfsBlockReader();
     const kubo = new FakeKubo(reader);
     const cause = Object.assign(new Error("connection refused"), {
@@ -476,8 +531,12 @@ describe("IpfsEvidenceRepository writes", () => {
     await assert.rejects(
       repository.putArtifact(encoder.encode("failure")),
       (error: unknown) =>
-        hasCode("DEPENDENCY_UNAVAILABLE")(error) &&
-        (error as Error & { cause?: unknown }).cause === cause,
+        assertSanitizedDependencyError(
+          error,
+          "DEPENDENCY_UNAVAILABLE",
+          "block-write",
+          "unavailable",
+        ),
     );
 
     const dependencyAbort = new Error("dependency timed out");
@@ -486,8 +545,12 @@ describe("IpfsEvidenceRepository writes", () => {
     await assert.rejects(
       repository.putArtifact(encoder.encode("dependency abort")),
       (error: unknown) =>
-        hasCode("DEPENDENCY_UNAVAILABLE")(error) &&
-        (error as Error & { cause?: unknown }).cause === dependencyAbort,
+        assertSanitizedDependencyError(
+          error,
+          "DEPENDENCY_UNAVAILABLE",
+          "block-write",
+          "unavailable",
+        ),
     );
 
     const controller = new AbortController();
@@ -522,7 +585,7 @@ describe("IpfsEvidenceRepository writes", () => {
     );
   });
 
-  test("maps explicit writer denial and quota failures without losing causes", async () => {
+  test("maps explicit writer denial and quota failures without exposing causes", async () => {
     for (const cause of [
       Object.assign(new Error("forbidden"), {
         response: { status: 403 },
@@ -539,8 +602,119 @@ describe("IpfsEvidenceRepository writes", () => {
       await assert.rejects(
         repository.putArtifact(encoder.encode("denied")),
         (error: unknown) =>
-          hasCode("ACCESS_DENIED")(error) &&
-          (error as Error & { cause?: unknown }).cause === cause,
+          assertSanitizedDependencyError(
+            error,
+            "ACCESS_DENIED",
+            "block-write",
+            "access-denied",
+          ),
+      );
+    }
+  });
+
+  test("sanitizes injected Kubo failures at every client boundary", async () => {
+    const cases: ReadonlyArray<{
+      readonly configure: (
+        kubo: FakeKubo,
+        error: Error,
+      ) => void;
+      readonly operation: SanitizedOperation;
+      readonly remotePinService?: string;
+    }> = [
+      {
+        configure: (kubo, error) => {
+          kubo.failNextPut = error;
+        },
+        operation: "block-write",
+      },
+      {
+        configure: (kubo, error) => {
+          kubo.failNextPinList = error;
+        },
+        operation: "local-pin-read",
+      },
+      {
+        configure: (kubo, error) => {
+          kubo.failNextRemoteAdd = error;
+        },
+        operation: "remote-pin-write",
+        remotePinService: "operator-pins",
+      },
+      {
+        configure: (kubo, error) => {
+          kubo.failNextRemoteList = error;
+        },
+        operation: "remote-pin-read",
+        remotePinService: "operator-pins",
+      },
+    ];
+
+    for (const item of cases) {
+      const reader = new FakeIpfsBlockReader();
+      const kubo = new FakeKubo(reader);
+      const injected = createAuthorityBearingError("forbidden");
+      Object.defineProperty(injected, "response", {
+        configurable: true,
+        enumerable: true,
+        value: {
+          status: 403,
+        },
+        writable: true,
+      });
+      item.configure(kubo, injected);
+      const repository = new IpfsEvidenceRepository({
+        client: kubo.asClient(),
+        reader,
+        remotePinService: item.remotePinService,
+      });
+
+      await assert.rejects(
+        repository.putArtifact(
+          encoder.encode(`authority-${item.operation}`),
+        ),
+        (error: unknown) =>
+          assertSanitizedDependencyError(
+            error,
+            "ACCESS_DENIED",
+            item.operation,
+            "access-denied",
+          ),
+        item.operation,
+      );
+    }
+  });
+
+  test("sanitizes failures thrown by an injected block reader", async () => {
+    const reference = createArtifactReference(
+      encoder.encode("injected reader"),
+    );
+    for (const injected of [
+      createAuthorityBearingError(),
+      new EvidenceRepositoryError(
+        "DEPENDENCY_UNAVAILABLE",
+        `reader failed: ${createAuthorityBearingError().message}`,
+        { cause: createAuthorityBearingError() },
+      ),
+    ]) {
+      const reader: IpfsBlockReader = {
+        async getBlock() {
+          throw injected;
+        },
+      };
+      const repository = new IpfsEvidenceRepository({
+        client: new FakeKubo().asClient(),
+        reader,
+      });
+
+      await assert.rejects(
+        repository.getArtifact(reference),
+        (error: unknown) =>
+          assertSanitizedDependencyError(
+            error,
+            "DEPENDENCY_UNAVAILABLE",
+            "block-read",
+            "unavailable",
+          ),
       );
     }
   });
@@ -664,8 +838,12 @@ describe("IpfsEvidenceRepository writes", () => {
     await assert.rejects(
       failingRepository.putArtifact(bytes),
       (error: unknown) =>
-        hasCode("DEPENDENCY_UNAVAILABLE")(error) &&
-        (error as Error & { cause?: unknown }).cause === transient,
+        assertSanitizedDependencyError(
+          error,
+          "DEPENDENCY_UNAVAILABLE",
+          "readback",
+          "unavailable",
+        ),
     );
   });
 
@@ -860,14 +1038,4 @@ function hasCode(code: string): (error: unknown) => boolean {
     error !== null &&
     "code" in error &&
     error.code === code;
-}
-
-function hasCodeWithCause(
-  code: string,
-  causeCode: string,
-): (error: unknown) => boolean {
-  return (error: unknown) =>
-    hasCode(code)(error) &&
-    error instanceof Error &&
-    hasCode(causeCode)(error.cause);
 }

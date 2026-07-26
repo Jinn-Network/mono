@@ -40,6 +40,10 @@ const repository = new IpfsEvidenceRepository({
 Applications construct the Kubo client or injected `fetch` capability and
 therefore retain all endpoint authentication authority. This package has no
 token, password, authorization-header, key, or pin-service credential option.
+Failures from those injected capabilities are mapped to stable Repository
+error codes. Raw dependency exceptions are never exposed as public causes;
+dependency diagnostics use only a frozen package-owned cause containing the
+stable operation class and failure kind.
 
 ## Profile
 
