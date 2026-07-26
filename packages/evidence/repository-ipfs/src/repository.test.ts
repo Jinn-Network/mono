@@ -684,6 +684,201 @@ describe("IpfsEvidenceRepository writes", () => {
     }
   });
 
+  test("sanitizes hostile prototype traps at every Kubo client boundary", async () => {
+    const cases: ReadonlyArray<{
+      readonly configure: (
+        kubo: FakeKubo,
+        error: Error,
+      ) => void;
+      readonly operation: SanitizedOperation;
+      readonly remotePinService?: string;
+    }> = [
+      {
+        configure: (kubo, error) => {
+          kubo.failNextPut = error;
+        },
+        operation: "block-write",
+      },
+      {
+        configure: (kubo, error) => {
+          kubo.failNextPinList = error;
+        },
+        operation: "local-pin-read",
+      },
+      {
+        configure: (kubo, error) => {
+          kubo.failNextRemoteAdd = error;
+        },
+        operation: "remote-pin-write",
+        remotePinService: "operator-pins",
+      },
+      {
+        configure: (kubo, error) => {
+          kubo.failNextRemoteList = error;
+        },
+        operation: "remote-pin-read",
+        remotePinService: "operator-pins",
+      },
+    ];
+
+    for (const item of cases) {
+      const reader = new FakeIpfsBlockReader();
+      const kubo = new FakeKubo(reader);
+      const injected = new Proxy(
+        createAuthorityBearingError("hostile prototype"),
+        {
+          getPrototypeOf() {
+            throw createAuthorityBearingError(
+              "hostile prototype inspection",
+            );
+          },
+        },
+      );
+      item.configure(kubo, injected);
+      const repository = new IpfsEvidenceRepository({
+        client: kubo.asClient(),
+        reader,
+        remotePinService: item.remotePinService,
+      });
+
+      await assert.rejects(
+        repository.putArtifact(
+          encoder.encode(`prototype-${item.operation}`),
+        ),
+        (error: unknown) =>
+          assertSanitizedDependencyError(
+            error,
+            "DEPENDENCY_UNAVAILABLE",
+            item.operation,
+            "unavailable",
+          ),
+        item.operation,
+      );
+    }
+  });
+
+  test("sanitizes hostile values returned by readers and Kubo iterators", async () => {
+    const reference = createArtifactReference(
+      encoder.encode("hostile returned bytes"),
+    );
+    const hostileBytes = new Proxy(new Uint8Array([1]), {
+      getPrototypeOf() {
+        throw createAuthorityBearingError(
+          "hostile returned bytes prototype",
+        );
+      },
+    });
+    const hostileReader: IpfsBlockReader = {
+      async getBlock() {
+        return hostileBytes;
+      },
+    };
+    const readerRepository = new IpfsEvidenceRepository({
+      client: new FakeKubo().asClient(),
+      reader: hostileReader,
+    });
+    await assert.rejects(
+      readerRepository.getArtifact(reference),
+      (error: unknown) =>
+        assertSanitizedDependencyError(
+          error,
+          "IO_FAILURE",
+          "block-read",
+          "protocol-failure",
+        ),
+    );
+
+    const reader = new FakeIpfsBlockReader();
+    const kubo = new FakeKubo(reader);
+    const client = kubo.asClient();
+    Object.defineProperty(client.pin, "ls", {
+      configurable: true,
+      value: async function* () {
+        yield Object.defineProperty({}, "cid", {
+          configurable: true,
+          get() {
+            throw createAuthorityBearingError(
+              "hostile local pin CID getter",
+            );
+          },
+        });
+      },
+    });
+    const kuboRepository = new IpfsEvidenceRepository({
+      client,
+      reader,
+    });
+    await assert.rejects(
+      kuboRepository.putArtifact(
+        encoder.encode("hostile Kubo value"),
+      ),
+      (error: unknown) =>
+        assertSanitizedDependencyError(
+          error,
+          "IO_FAILURE",
+          "local-pin-read",
+          "protocol-failure",
+        ),
+    );
+  });
+
+  test("freezes package errors so returned values cannot be mutated and reinjected", async () => {
+    const reader = new FakeIpfsBlockReader();
+    const kubo = new FakeKubo(reader);
+    kubo.failNextPut = Object.assign(
+      new Error("network unavailable"),
+      { code: "ECONNREFUSED" },
+    );
+    const repository = new IpfsEvidenceRepository({
+      client: kubo.asClient(),
+      reader,
+    });
+    let returnedError: unknown;
+    try {
+      await repository.putArtifact(encoder.encode("owned error"));
+    } catch (error) {
+      returnedError = error;
+    }
+    assert.ok(returnedError instanceof Error);
+
+    const mutationResults = [
+      Reflect.set(
+        returnedError,
+        "message",
+        createAuthorityBearingError("mutated message").message,
+      ),
+      Reflect.set(returnedError, "code", "ACCESS_DENIED"),
+      Reflect.set(
+        returnedError,
+        "cause",
+        createAuthorityBearingError("mutated cause"),
+      ),
+    ];
+    const injectedReader: IpfsBlockReader = {
+      async getBlock() {
+        throw returnedError;
+      },
+    };
+    const reinjectedRepository = new IpfsEvidenceRepository({
+      client: new FakeKubo().asClient(),
+      reader: injectedReader,
+    });
+    await assert.rejects(
+      reinjectedRepository.getArtifact(
+        createArtifactReference(encoder.encode("reinjected error")),
+      ),
+      (error: unknown) =>
+        assertSanitizedDependencyError(
+          error,
+          "DEPENDENCY_UNAVAILABLE",
+          "block-write",
+          "unavailable",
+        ),
+    );
+    assert.deepEqual(mutationResults, [false, false, false]);
+    assert.equal(Object.isFrozen(returnedError), true);
+  });
+
   test("sanitizes failures thrown by an injected block reader", async () => {
     const reference = createArtifactReference(
       encoder.encode("injected reader"),

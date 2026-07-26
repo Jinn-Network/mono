@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { isUint8Array } from "node:util/types";
+
 import {
-  EvidenceRepositoryError,
   assertRepositoryOperationActive,
   createArtifactReference,
   createRecordReference,
@@ -13,6 +14,7 @@ import {
   type EvidenceRecordReference,
   type EvidenceRepository,
   type EvidenceRepositoryCapabilities,
+  type EvidenceRepositoryError,
   type RepositoryOperationOptions,
   type RepositoryWriteReceipt,
 } from "@jinn-network/evidence-repository";
@@ -30,6 +32,7 @@ import {
   ipfsDependencyError,
   ipfsRepositoryError,
   mapIpfsDependencyError,
+  repositoryErrorCode,
 } from "./errors.js";
 import type { IpfsBlockReader } from "./readers.js";
 import {
@@ -180,8 +183,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
     let registration;
     try {
       registration = parseRegistrationBytes(registrationBytes);
-    } catch (error) {
-      if (error instanceof EvidenceRepositoryError) throw error;
+    } catch {
       throw ipfsRepositoryError(
         "CONTENT_CORRUPT",
         "The IPFS registration block is invalid.",
@@ -229,7 +231,16 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
         maxBytes: MAX_STANDARD_IPFS_BLOCK_BYTES,
       });
       assertRepositoryOperationActive(options);
-      return bytes;
+      if (bytes === null) return null;
+      if (!isUint8Array(bytes)) {
+        throw ipfsDependencyError(
+          "IO_FAILURE",
+          "The configured IPFS read path returned a non-byte value.",
+          "block-read",
+          "protocol-failure",
+        );
+      }
+      return Uint8Array.from(bytes);
     } catch (error) {
       throw mapIpfsDependencyError(
         error,
@@ -335,7 +346,11 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
 
       let returnedCanonical: string;
       try {
-        returnedCanonical = normalizeRawCid(returnedCid.toString());
+        returnedCanonical = normalizeDependencyRawCid(
+          returnedCid,
+          "Kubo returned a CID outside the required raw SHA2-256 profile.",
+          "block-write",
+        );
       } catch {
         throw ipfsDependencyError(
           "REFERENCE_CONFLICT",
@@ -379,13 +394,15 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
         type: "all",
       })) {
         assertRepositoryOperationActive(options);
+        const pinCid = dependencyDataProperty(pin, "cid");
+        const pinType = dependencyDataProperty(pin, "type");
         if (
           normalizeDependencyRawCid(
-            pin.cid,
+            pinCid,
             "Kubo returned a malformed CID from the local pin listing.",
             "local-pin-read",
           ) === cid &&
-          (pin.type === "direct" || pin.type === "recursive")
+          (pinType === "direct" || pinType === "recursive")
         ) {
           return true;
         }
@@ -416,13 +433,15 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
         signal: options.signal,
       });
       assertRepositoryOperationActive(options);
+      const pinCid = dependencyDataProperty(pin, "cid");
+      const pinStatus = dependencyDataProperty(pin, "status");
       if (
         normalizeDependencyRawCid(
-          pin.cid,
+          pinCid,
           "The configured remote pin service returned a malformed CID after pinning.",
           "remote-pin-write",
         ) !== cid ||
-        pin.status !== "pinned"
+        pinStatus !== "pinned"
       ) {
         throw ipfsRepositoryError(
           "DEPENDENCY_UNAVAILABLE",
@@ -458,13 +477,15 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
         status: ["pinned"],
       })) {
         assertRepositoryOperationActive(options);
+        const pinCid = dependencyDataProperty(pin, "cid");
+        const pinStatus = dependencyDataProperty(pin, "status");
         if (
           normalizeDependencyRawCid(
-            pin.cid,
+            pinCid,
             "The configured remote pin service returned a malformed CID from its pin listing.",
             "remote-pin-read",
           ) === cid &&
-          pin.status === "pinned"
+          pinStatus === "pinned"
         ) {
           return true;
         }
@@ -510,7 +531,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
           return;
         }
       } catch (error) {
-        if (error instanceof ReadbackDeadlineExpired) {
+        if (isReadbackDeadlineExpired(error)) {
           throw ipfsDependencyError(
             "DEPENDENCY_UNAVAILABLE",
             "The configured IPFS readback deadline expired.",
@@ -519,10 +540,15 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
           );
         }
         if (
-          !(error instanceof EvidenceRepositoryError) ||
-          error.code !== "DEPENDENCY_UNAVAILABLE"
+          repositoryErrorCode(error) !== "DEPENDENCY_UNAVAILABLE"
         ) {
-          throw error;
+          throw mapIpfsDependencyError(
+            error,
+            "The configured IPFS readback failed.",
+            "readback",
+            options.signal,
+            true,
+          );
         }
       }
 
@@ -544,6 +570,8 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
 
 class ReadbackDeadlineExpired extends Error {}
 
+const readbackDeadlineErrors = new WeakSet<object>();
+
 async function runReadbackAttempt<T>(
   deadline: ReadbackDeadline,
   callerOptions: RepositoryOperationOptions,
@@ -555,6 +583,7 @@ async function runReadbackAttempt<T>(
   const deadlineError = new ReadbackDeadlineExpired(
     "The IPFS readback deadline expired.",
   );
+  readbackDeadlineErrors.add(deadlineError);
   let rejectStop!: (error: EvidenceRepositoryError | Error) => void;
   const stop = new Promise<never>((_resolve, reject) => {
     rejectStop = reject;
@@ -632,7 +661,7 @@ function copyPutBytes(
   value: Uint8Array,
   options: RepositoryOperationOptions,
 ): Uint8Array {
-  if (!(value instanceof Uint8Array)) {
+  if (!isUint8Array(value)) {
     throw ipfsRepositoryError(
       "CONTENT_CORRUPT",
       "Repository content must be a Uint8Array.",
@@ -646,6 +675,14 @@ function copyPutBytes(
     );
   }
   return Uint8Array.from(value);
+}
+
+function isReadbackDeadlineExpired(error: unknown): boolean {
+  return (
+    ((typeof error === "object" && error !== null) ||
+      typeof error === "function") &&
+    readbackDeadlineErrors.has(error)
+  );
 }
 
 function registrationsEqual(
@@ -687,15 +724,30 @@ function decodeRawCid(cid: string): CID {
 }
 
 function normalizeDependencyRawCid(
-  cid: { toString(): string },
+  cid: unknown,
   message: string,
   operation:
+    | "block-write"
     | "local-pin-read"
     | "remote-pin-read"
     | "remote-pin-write",
 ): string {
   try {
-    return normalizeRawCid(cid.toString());
+    if (
+      (typeof cid !== "object" || cid === null) &&
+      typeof cid !== "function"
+    ) {
+      throw new TypeError("Kubo CID value was not an object.");
+    }
+    const toString = cid.toString;
+    if (typeof toString !== "function") {
+      throw new TypeError("Kubo CID value did not expose toString().");
+    }
+    const rendered = Reflect.apply(toString, cid, []) as unknown;
+    if (typeof rendered !== "string") {
+      throw new TypeError("Kubo CID value did not render as text.");
+    }
+    return normalizeRawCid(rendered);
   } catch {
     throw ipfsDependencyError(
       "IO_FAILURE",
@@ -707,10 +759,10 @@ function normalizeDependencyRawCid(
 }
 
 function isKuboNotPinnedError(error: unknown, cid: string): boolean {
-  if (typeof error !== "object" || error === null) return false;
   const responseValue = dependencyDataProperty(error, "response");
   const response =
-    typeof responseValue === "object" && responseValue !== null
+    (typeof responseValue === "object" && responseValue !== null) ||
+    typeof responseValue === "function"
       ? responseValue
       : undefined;
   const responseStatus =
@@ -729,9 +781,15 @@ function isKuboNotPinnedError(error: unknown, cid: string): boolean {
 }
 
 function dependencyDataProperty(
-  value: object,
+  value: unknown,
   key: string,
 ): unknown {
+  if (
+    (typeof value !== "object" || value === null) &&
+    typeof value !== "function"
+  ) {
+    return undefined;
+  }
   try {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     return descriptor !== undefined && "value" in descriptor

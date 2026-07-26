@@ -22,6 +22,8 @@ if (endpoint === undefined) {
   describeEvidenceRepositoryContract(() => ({
     createObjectAtDeclaredLimit: () =>
       new Uint8Array(MAX_STANDARD_IPFS_BLOCK_BYTES),
+    createObjectAboveDeclaredLimit: () =>
+      new Uint8Array(MAX_STANDARD_IPFS_BLOCK_BYTES + 1),
     repository: new IpfsEvidenceRepository({
       client: createKuboRPCClient({
         url: new URL("/api/v0", endpoint),

@@ -18,6 +18,8 @@ describeEvidenceRepositoryContract(() => {
   return {
     createObjectAtDeclaredLimit: () =>
       new Uint8Array(MAX_STANDARD_IPFS_BLOCK_BYTES),
+    createObjectAboveDeclaredLimit: () =>
+      new Uint8Array(MAX_STANDARD_IPFS_BLOCK_BYTES + 1),
     repository: new IpfsEvidenceRepository({
       client: new FakeKubo(reader).asClient(),
       reader,
