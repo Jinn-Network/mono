@@ -162,8 +162,10 @@ test("binds compressed and uncompressed EC point lengths to the named curve", ()
 test.each([
   ["c2ln", "dsse-payload"],
   ["c2k=", "dsse-payload"],
+  ["", "dsse-payload"],
   ["__8", "dsse-signature"],
   ["__8=", "dsse-signature"],
+  ["", "dsse-signature"],
 ] as const)(
   "accepts padded or unpadded standard/url-safe base64 only in DSSE context",
   (value, structuralRole) => {
@@ -198,6 +200,22 @@ test.each([
             signatureExtension: ["synthetic", 1],
           },
         ],
+      }),
+    ).toBe(true);
+  },
+);
+
+test.each([
+  { payload: "", sig: "c2k=" },
+  { payload: "e30", sig: "" },
+] as const)(
+  "accepts canonical zero-byte DSSE payload/signature fields: %j",
+  ({ payload, sig }) => {
+    expect(
+      isStructurallyValidDsseEnvelope({
+        payloadType: "application/vnd.in-toto+json",
+        payload,
+        signatures: [{ sig }],
       }),
     ).toBe(true);
   },

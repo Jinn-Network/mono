@@ -371,6 +371,7 @@ export const DETERMINISTIC_PUBLIC_RECIPE = deepFreeze({
       extensions: "inert-own-data-allowed",
       optionalKeyId: "string-including-empty",
       requireNonemptySignatures: true,
+      acceptEmptyByteString: true,
       acceptStandardAlphabet: true,
       acceptUrlSafeAlphabet: true,
       acceptPadded: true,

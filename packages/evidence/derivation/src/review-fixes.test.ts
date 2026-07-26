@@ -647,6 +647,51 @@ test("Protocol-valid extended DSSE envelopes remain wholly signed material", () 
   });
 });
 
+test.each([
+  { payload: "", sig: "c2k=" },
+  { payload: "e30", sig: "" },
+] as const)(
+  "canonical zero-byte DSSE fields remain signed material: %j",
+  ({ payload, sig }) => {
+    const input = syntheticDerivationInput();
+    replaceArtifact(
+      input,
+      "trace/trajectory.jsonl",
+      new TextEncoder().encode(
+        `${JSON.stringify({
+          event: "tool",
+          envelope: {
+            payloadType: "application/vnd.in-toto+json",
+            payload,
+            signatures: [{ sig }],
+          },
+        })}\n`,
+      ),
+    );
+    const extraction = extractDerivationSurfaces(
+      validateDerivationSource(input),
+      parseDerivationPolicy(input.policyBytes).value,
+    );
+    expect(
+      extraction.surfaces.some(({ location }) =>
+        location.startsWith("/0/envelope"),
+      ),
+    ).toBe(false);
+    expect(extraction.protectedLocations).toEqual(
+      expect.arrayContaining([
+        {
+          location: "/0/envelope/payload",
+          protectedClass: "signed-material",
+        },
+        {
+          location: "/0/envelope/signatures/0/sig",
+          protectedClass: "signed-material",
+        },
+      ]),
+    );
+  },
+);
+
 test("malformed RSA SPKI remains a scan surface", () => {
   const malformed = [
     "-----BEGIN PUBLIC KEY-----",

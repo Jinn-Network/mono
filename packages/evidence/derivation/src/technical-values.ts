@@ -126,7 +126,9 @@ function base64Sextet(character: string, urlSafe: boolean): number {
 
 function decodeCanonicalBase64(value: string): Uint8Array | null {
   const recipe = DETERMINISTIC_PUBLIC_RECIPE.technicalClassifier.dsse;
-  if (value.length === 0) return null;
+  if (value.length === 0) {
+    return recipe.acceptEmptyByteString ? new Uint8Array() : null;
+  }
   const padding = value.match(/=+$/u)?.[0].length ?? 0;
   if (padding > 2 || value.slice(0, -padding || undefined).includes("=")) {
     return null;
