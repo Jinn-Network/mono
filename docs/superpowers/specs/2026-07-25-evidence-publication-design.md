@@ -209,8 +209,10 @@ recovery data. Credentials, private keys, bearer tokens, wallet authority, and o
 closed over by the injected sink capability and never serialized into prepared frames, pending
 state, placement state, journal entries, or receipts. The shared pipeline treats these bytes as
 opaque and cannot discover an arbitrary secret by inspection, so every concrete sink must run its
-contract tests with synthetic authority markers and prove that none occur in any returned frame or
-state byte sequence.
+contract tests with printable and binary synthetic authority markers. The tests recursively scan
+all returned and persisted sink fields, journal encodings, and logical receipts for the raw markers
+and their canonical hex, base64, base64url, and URL encodings. This is scoped conformance evidence
+for the tested implementation, not a sandbox or proof against dishonest authority-bearing code.
 
 `prepare` may be synchronous internally, but the contract is asynchronous for a uniform port. It
 must perform no network, repository, durable filesystem, clock, randomness, or other ambient I/O.
@@ -460,8 +462,10 @@ Content-addressed repository writes may safely remain after cancellation or fail
 rolled back.
 
 Every operation accepts `AbortSignal`. Cancellation is checked before and after each awaited
-boundary. It produces `OPERATION_ABORTED`, leaves the latest durable checkpoint intact, and never
-converts an uncertain placement into a blind retry.
+boundary except after a filesystem journal publication link succeeds: there it is latched while
+the non-interruptible directory-sync, temporary-unlink, and second-sync section finishes, then
+surfaced. Cancellation produces `OPERATION_ABORTED`, leaves the latest durable checkpoint intact,
+and never converts an uncertain placement into a blind retry.
 
 ## 10. Errors
 

@@ -218,8 +218,10 @@ export interface AnnouncementSinkContractContext {
 }
 ```
 
-Every marker is a unique synthetic secret of at least 32 bytes closed over by the sink test
-fixture. It is never passed as a preparation, placement, or reconciliation argument.
+The context contains at least two unique synthetic secrets of at least 32 bytes: one printable
+UTF-8 marker and one binary non-UTF-8 marker. Both are closed over by the sink test fixture and are
+never passed as preparation, placement, or reconciliation arguments. The kit derives each
+marker's raw, lowercase-hex, base64, unpadded base64url, and percent/URL-encoded representations.
 
 The contract suite proves:
 
@@ -239,16 +241,19 @@ The contract suite proves:
 - a state-less pre-placement intent can be reconciled after a lost response;
 - `not-found` is returned only after authoritative absence;
 - pending placement is reconciled before retry;
-- no `authorityMarkers` byte sequence occurs in prepared frames or opaque state returned by
-  `place` or `reconcile`;
+- no raw or derived authority-marker representation occurs in any inert own data field returned by
+  `prepare`, `place`, or `reconcile`, including frame bytes, opaque state, placement/reverted
+  `externalId`, and reverted `reason`;
 - cancellation maps to `OPERATION_ABORTED`; and
 - implementers can add their medium-specific sink-to-source golden round trip.
 
 Run the kit against an in-memory sink whose physical frame is a small versioned canonical JSON
 fixture. The in-memory harness closes over at least one non-UTF-8 synthetic authority marker and
-proves it cannot leak. That frame is a test medium, not a public Jinn format. Every future concrete
-sink must configure its real authority-bearing capability with equivalent synthetic markers and
-run this contract requirement.
+one printable marker and produces scoped conformance evidence that neither leaks. That frame is a
+test medium, not a public Jinn format. Every future concrete sink must configure its real
+authority-bearing capability with equivalent synthetic markers and run this contract requirement.
+Marker scans are evidence for the tested implementation, not a sandbox or proof against dishonest
+sink code.
 
 ### Task 4: Async journal contract and codecs
 
@@ -273,6 +278,9 @@ whose pending and confirmed placements carry nontrivial opaque state. It must pr
 format IRI and arbitrary opaque bytes survive every clone and codec boundary without
 reinterpretation. At least one fixture uses a non-JSON, non-UTF-8 byte sequence such as
 `Uint8Array.of(0xff, 0xfe, 0x00, 0x80)` and compares it byte-for-byte after replay.
+Reuse the same authority-marker fixture and scanner helper to encode and replay journal entries
+containing prepared, pending, and confirmed outputs, then recursively scan the canonical journal
+bytes and decoded entry for every raw and derived marker representation.
 
 ### Task 5: Filesystem journal binding
 
@@ -487,7 +495,9 @@ For each fault, create a fresh pipeline over the same durable journal and reposi
 - exact prepared frames are reused;
 - cancellation returns `OPERATION_ABORTED`;
 - repository errors retain their type/code/cause;
-- eventual receipt is stable; and
+- eventual receipt is stable;
+- final receipts and persisted journal bytes contain no raw or derived authority-marker
+  representation; and
 - conflicting concurrent publishers fail safely.
 
 ### Task 11: Final verification and review
