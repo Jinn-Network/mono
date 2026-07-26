@@ -410,6 +410,8 @@ publishable bytes.
 - ordered artifact rules with media type, roles, and codec;
 - default artifact disposition;
 - class/band disposition rows;
+- `unmatchedFindingDisposition: "review" | "withhold-record"` as the content-bound fail-closed
+  outcome when an extensible detector class/band has no row;
 - redact stubs;
 - required private-configuration digests, including the known-identity detector descriptor;
 - only technical allowlist values explicitly safe to publish, plus the digest of any private
@@ -714,6 +716,11 @@ tests that a missing/short nonce is rejected, an exact policy/descriptor configu
 mismatch is rejected, different nonces produce different commitments, and no known identity,
 private allowlist value, nonce, path, or hostname survives descriptor serialization.
 
+For an optional detector binding, `implementationDigest` commits the binding's package-owned
+canonical public recipe bytes. A future ML binding puts its model id, immutable revision or
+weights digest, runtime/adapter versions, labels, threshold, and public provider class in those
+recipe bytes, not as new fields on the closed `DerivationDetectorDescriptor`.
+
 - [ ] **Step 3: Write failing detector-contract validation tests**
 
 Cover:
@@ -727,6 +734,7 @@ test("sorts findings by surface, start, end, class, detector");
 test("rejects a runtime descriptor that differs from the policy requirement");
 test("allows a policy-permitted best-effort descriptor");
 test("withholds when policy requires byte-stable and detector is best-effort");
+test("applies the exact unmatched-finding disposition for an unknown class/band");
 ```
 
 - [ ] **Step 4: Write failing disposition tests**
@@ -740,6 +748,8 @@ Assert:
 - `review` returns private findings and no transformed bytes;
 - `withhold-artifact` returns no artifact bytes;
 - `withhold-record` dominates every other disposition;
+- unmatched classes never implicitly retain and use only the policy's `review` or
+  `withhold-record` choice;
 - redaction stubs come only from exact policy bytes;
 - disposition counts omit `retain`;
 - output counts sort by class then disposition.
@@ -1444,8 +1454,8 @@ git commit -s -m "ci(evidence-derivation): integrate the evidence DAG"
 ## Follow-ups outside this plan
 
 1. **`@jinn-network/evidence-derivation-ml`.** GLiNER-only binding with
-   `@lmoe/gliner-onnx`, exact model/runtime descriptor, best-effort grade, and detector contract
-   suite.
+   `@lmoe/gliner-onnx`, a package-owned canonical public model/runtime recipe committed by the
+   closed descriptor's `implementationDigest`, best-effort grade, and detector contract suite.
 2. **Producer composition.** Load private source bytes, invoke derivation, apply application
    admission, then publish exact output.
 3. **Public claim composition.** Issue a new Execution Verification over public metadata and select

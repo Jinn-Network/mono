@@ -304,6 +304,8 @@ findings on repeated calls.
 - a complete disposition table for the package's closed protected-value classes;
 - media-type/role codec rules;
 - finding-class and confidence-to-disposition mappings;
+- an explicit unmatched-finding disposition limited to `review` or `withhold-record`, so an
+  optional detector's new class can never inherit a runtime default;
 - redaction stubs;
 - digests of private detector configurations, including known-identity packs;
 - public technical allowlist entries whose exact values are safe to disclose, plus a digest for
@@ -323,6 +325,10 @@ There are no hidden runtime defaults inside `derive()`. The package may ship a d
 baseline policy artifact for callers to copy, but the exact bytes are always supplied and
 content-bound. Changing a threshold, detector, label set, allowlist, stub, codec rule, or Result
 behavior changes the policy digest.
+
+Finding classes remain extensible at the detector port. If no class/confidence row matches a
+contract-valid finding, `derive()` applies the policy artifact's exact
+`unmatchedFindingDisposition`. It never implicitly retains or redacts an unmatched finding.
 
 Private known-identity values, review decisions, private paths, private allowlist values, and
 commitment nonces never appear in the attached policy. They configure a detector before
@@ -632,10 +638,13 @@ JSON keys have canonical order.
 ### 10.2 Best-effort external detectors
 
 A detector such as ML inference may declare `best-effort`. The policy must explicitly permit that
-grade. The exact policy artifact pins the public model id and immutable revision or weights
-digest, runtime and adapter versions, labels, threshold, and public provider class. Private
-provider, device, host, cache, and path configuration is represented only by a digest in the
-detector descriptor.
+grade. The detector binding owns a canonical public recipe descriptor containing the public model
+id and immutable revision or weights digest, runtime and adapter versions, labels, threshold, and
+public provider class. The closed `DerivationDetectorDescriptor.implementationDigest` is the
+SHA-256 commitment to those canonical recipe bytes; the exact policy pins that closed descriptor.
+The values do not become additional arbitrary fields on `DerivationDetectorDescriptor`. Private
+provider, device, host, cache, and path configuration is represented only by
+`configurationDigest`.
 
 That pins the recipe, not the model's output. Two runs may produce different findings and
 therefore different derivative digests. Both outputs remain valid, immutable derivatives of the
@@ -653,6 +662,10 @@ graph and receipt. The digest covers detector descriptors, model pin, labels, th
 public allowlists, private-configuration digests, structural rules, disposition table, stubs, and
 reproducibility requirement.
 
+For a detector binding, coverage of its model pin, labels, thresholds, runtime, adapter, and public
+provider class is transitive through the pinned `implementationDigest` of its package-owned
+canonical public recipe.
+
 It does not falsely claim that the same policy digest guarantees the same ML outcome. Exact
 derivative bytes and their record digest identify the outcome.
 
@@ -665,8 +678,10 @@ The later `@jinn-network/evidence-derivation-ml` package:
 - adapts GLiNER ONNX only;
 - depends on `@lmoe/gliner-onnx` as its one heavyweight runtime;
 - exposes a `DerivationDetector`;
-- supplies model id, immutable revision or weights digest, runtime version, labels, threshold, and
-  `best-effort` in its descriptor;
+- stores a package-owned canonical public recipe containing model id, immutable revision or
+  weights digest, runtime version, adapter version, labels, threshold, and public provider class;
+- commits those recipe bytes through the closed descriptor's `implementationDigest` and declares
+  `best-effort` through `reproducibility`;
 - has no policy, repository, publication, or review behavior; and
 - must pass `describeDerivationDetectorContract`.
 

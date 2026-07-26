@@ -359,7 +359,12 @@ allow-big-block=false
 ```
 
 The binding computes the expected CID before the call and verifies Kubo's returned CID afterward.
-It then confirms the CID appears in `pin.ls`.
+It then confirms the CID appears in `pin.ls` as an explicit `direct` or `recursive` pin.
+`block.put(pin=true)` creates a `recursive` pin on the supported Kubo writer line. For this raw
+block profile there are no descendants, so either explicit pin class protects the same single
+block from garbage collection. An `indirect`-only result does not establish custody and is
+rejected. The binding does not issue a second pin mutation merely to change this Kubo-managed
+classification.
 
 Kubo RPC is an administrative API and MUST NOT be exposed directly to the public internet. The
 application supplies an already-configured `KuboRPCClient`; the binding never constructs
@@ -432,7 +437,7 @@ Before returning a receipt, the binding MUST have:
 2. computed the expected content and registration CIDs locally;
 3. submitted both exact blocks to the writer as raw SHA2-256 CIDv1 blocks;
 4. verified both returned CIDs against the locally computed values;
-5. confirmed direct local pins for both CIDs on the writer;
+5. confirmed explicit local (`direct` or `recursive`) pins for both CIDs on the writer;
 6. satisfied every configured remote-pinning requirement; and
 7. fetched the complete repository object through the configured reader and compared the returned
    content byte-for-byte.
@@ -448,8 +453,8 @@ read path and held by its declared custody set**.
 
 | Configuration | Additional success condition |
 | --- | --- |
-| Local Kubo only | Both blocks are directly pinned by that node |
-| Local Kubo + remote pin service | Both blocks are directly pinned locally and reported `pinned` by that service |
+| Local Kubo only | Both blocks have explicit `direct` or `recursive` pins on that node |
+| Local Kubo + remote pin service | Both blocks have explicit local pins and are reported `pinned` by that service |
 | Gateway reader | Both registrations and content are retrievable and verified through that gateway before return |
 
 The remote service condition is required when configured, not best effort. A rejected, failed, or
@@ -598,7 +603,7 @@ Additional tests cover behavior the shared kit cannot see:
 ### 11.3 Real-Kubo integration
 
 The full repository integration suite exercises `block.put`, the shipped streamed Kubo reader,
-`pin.ls`, direct garbage collection protection, and gateway raw reads against:
+`pin.ls`, explicit local garbage collection protection, and gateway raw reads against:
 
 1. Kubo v0.40.0, the minimum supported writer and first standard 2 MiB `block.put` release; and
 2. Kubo v0.42.0, the implementation-time current stable release on 2026-07-26.
@@ -695,7 +700,7 @@ Source prior art read for this design:
   contract, conformance kit, family isolation, errors, and binding profiles;
 - `packages/layer/src/publish.ts` — compute-before-effect CID verification and bounded raw blocks;
 - the [Kubo RPC reference](https://docs.ipfs.tech/reference/kubo/rpc/) — raw `block.put`,
-  `block.get`, the supported writer line's default refusal of blocks over 2 MiB, direct pins,
+  `block.get`, the supported writer line's default refusal of blocks over 2 MiB, explicit pins,
   remote pins, and the administrative-API warning;
 - the [Kubo CLI reference](https://docs.ipfs.tech/reference/kubo/cli/) — the separate 256 KiB
   UnixFS default chunk size and standard 2 MiB block ceiling; and
