@@ -512,7 +512,13 @@ describe("IpfsEvidenceRepository writes", () => {
 
     await assert.rejects(
       repository.putArtifact(encoder.encode("expected")),
-      hasCode("REFERENCE_CONFLICT"),
+      (error: unknown) =>
+        assertSanitizedDependencyError(
+          error,
+          "REFERENCE_CONFLICT",
+          "block-write",
+          "protocol-failure",
+        ),
     );
   });
 
@@ -822,7 +828,7 @@ describe("IpfsEvidenceRepository writes", () => {
     );
   });
 
-  test("freezes package errors so returned values cannot be mutated and reinjected", async () => {
+  test("reconstructs a returned package error at a later dependency boundary", async () => {
     const reader = new FakeIpfsBlockReader();
     const kubo = new FakeKubo(reader);
     kubo.failNextPut = Object.assign(
@@ -863,17 +869,20 @@ describe("IpfsEvidenceRepository writes", () => {
       client: new FakeKubo().asClient(),
       reader: injectedReader,
     });
-    await assert.rejects(
-      reinjectedRepository.getArtifact(
+    let reconstructedError: unknown;
+    try {
+      await reinjectedRepository.getArtifact(
         createArtifactReference(encoder.encode("reinjected error")),
-      ),
-      (error: unknown) =>
-        assertSanitizedDependencyError(
-          error,
-          "DEPENDENCY_UNAVAILABLE",
-          "block-write",
-          "unavailable",
-        ),
+      );
+    } catch (error) {
+      reconstructedError = error;
+    }
+    assert.notEqual(reconstructedError, returnedError);
+    assertSanitizedDependencyError(
+      reconstructedError,
+      "DEPENDENCY_UNAVAILABLE",
+      "block-read",
+      "unavailable",
     );
     assert.deepEqual(mutationResults, [false, false, false]);
     assert.equal(Object.isFrozen(returnedError), true);
@@ -1039,6 +1048,41 @@ describe("IpfsEvidenceRepository writes", () => {
           "readback",
           "unavailable",
         ),
+    );
+  });
+
+  test("preserves a direct in-package readback corruption error", async () => {
+    const bytes = encoder.encode("corrupt direct readback");
+    const reference = createArtifactReference(bytes);
+    const registrationCid = registrationCidForReference(reference);
+    const reader = new FakeIpfsBlockReader();
+    let registrationReads = 0;
+    reader.onCall = (cid) => {
+      if (cid !== registrationCid) return;
+      registrationReads += 1;
+      if (registrationReads === 2) {
+        reader.blocks.set(
+          registrationCid,
+          encoder.encode("corrupt registration\n"),
+        );
+      }
+    };
+    const repository = new IpfsEvidenceRepository({
+      client: new FakeKubo(reader).asClient(),
+      reader,
+    });
+
+    await assert.rejects(
+      repository.putArtifact(bytes),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal(
+          (error as Error & { code?: unknown }).code,
+          "CONTENT_CORRUPT",
+        );
+        assert.equal(error.cause, undefined);
+        return true;
+      },
     );
   });
 

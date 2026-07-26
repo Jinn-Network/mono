@@ -31,6 +31,7 @@ import {
 import {
   ipfsDependencyError,
   ipfsRepositoryError,
+  isIpfsRepositoryError,
   mapIpfsDependencyError,
   repositoryErrorCode,
 } from "./errors.js";
@@ -448,18 +449,18 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
           "The configured remote pin service did not confirm the required pin.",
         );
       }
-      if (!(await this.#hasRemotePin(cid, options))) {
-        throw ipfsRepositoryError(
-          "DEPENDENCY_UNAVAILABLE",
-          "The configured remote pin service did not list the required pin.",
-        );
-      }
     } catch (error) {
       throw mapIpfsDependencyError(
         error,
         "Kubo failed to establish the required remote pin.",
         "remote-pin-write",
         options.signal,
+      );
+    }
+    if (!(await this.#hasRemotePin(cid, options))) {
+      throw ipfsRepositoryError(
+        "DEPENDENCY_UNAVAILABLE",
+        "The configured remote pin service did not list the required pin.",
       );
     }
   }
@@ -542,6 +543,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
         if (
           repositoryErrorCode(error) !== "DEPENDENCY_UNAVAILABLE"
         ) {
+          if (isIpfsRepositoryError(error)) throw error;
           throw mapIpfsDependencyError(
             error,
             "The configured IPFS readback failed.",
