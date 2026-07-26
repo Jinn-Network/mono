@@ -308,6 +308,57 @@ test("implementation descriptors reject ambient and operator-specific material",
       expect.objectContaining({ code: "SCRUBBER_DESCRIPTOR_INVALID" }),
     );
   }
+  for (const mutate of [
+    (candidate: typeof descriptor) => {
+      candidate.name = "example.internal.test";
+    },
+    (candidate: typeof descriptor) => {
+      candidate.version = "release-sk-live-credential";
+    },
+    (candidate: typeof descriptor) => {
+      candidate.runtime.family = "operator-runtime";
+    },
+    (candidate: typeof descriptor) => {
+      candidate.runtime.version = "private-release-22";
+    },
+    (candidate: typeof descriptor) => {
+      candidate.detectors[0].id = "example.internal.test";
+    },
+    (candidate: typeof descriptor) => {
+      candidate.detectors[0].version = `npm_${"a".repeat(36)}`;
+    },
+  ]) {
+    const candidate = structuredClone(descriptor);
+    mutate(candidate);
+    expect(() =>
+      parseScrubberImplementationDescriptor(canonicalJsonBytes(candidate)),
+    ).toThrowError(
+      expect.objectContaining({ code: "SCRUBBER_DESCRIPTOR_INVALID" }),
+    );
+  }
+});
+
+test("implementation descriptors accept safe independent package and runtime identities", () => {
+  const input = syntheticDerivationInput();
+  const descriptor = JSON.parse(
+    new TextDecoder().decode(input.scrubber.implementationDescriptorBytes),
+  );
+  descriptor.name = "independent-deriver";
+  descriptor.version = "release-1";
+  descriptor.runtime = {
+    family: "independent-runtime",
+    version: "release-22",
+  };
+  expect(
+    parseScrubberImplementationDescriptor(canonicalJsonBytes(descriptor)).value,
+  ).toMatchObject({
+    name: "independent-deriver",
+    version: "release-1",
+    runtime: {
+      family: "independent-runtime",
+      version: "release-22",
+    },
+  });
 });
 
 test("declared JSON and JSONL reject duplicate keys and invalid UTF-8", () => {
@@ -460,8 +511,51 @@ test("technical exemptions require complete structural validity", () => {
   ).toBe("cid");
 });
 
-test("structured signed material participates in protected dispositions", () => {
+test.each(["payload", "sig", "signature"])(
+  "arbitrary %s leaves outside a complete DSSE envelope remain scan surfaces",
+  (field) => {
+    const input = syntheticDerivationInput();
+    replaceArtifact(
+      input,
+      "trace/trajectory.jsonl",
+      new TextEncoder().encode(
+        `${JSON.stringify({ event: "tool", [field]: "c2VjcmV0" })}\n`,
+      ),
+    );
+    const extraction = extractDerivationSurfaces(
+      validateDerivationSource(input),
+      parseDerivationPolicy(input.policyBytes).value,
+    );
+    expect(
+      extraction.surfaces.some(
+        ({ location, text }) =>
+          location === `/0/${field}` && text === "c2VjcmV0",
+      ),
+    ).toBe(true);
+    expect(
+      extraction.protectedLocations.some(
+        ({ location }) => location === `/0/${field}`,
+      ),
+    ).toBe(false);
+  },
+);
+
+test("url-safe unpadded DSSE material participates in protected dispositions", () => {
   const input = syntheticDerivationInput();
+  replaceArtifact(
+    input,
+    "trace/trajectory.jsonl",
+    new TextEncoder().encode(
+      `${JSON.stringify({
+        event: "tool",
+        envelope: {
+          payloadType: "application/vnd.in-toto+json",
+          payload: "eyJzeW50aGV0aWMiOnRydWV9",
+          signatures: [{ keyid: "synthetic", sig: "__8" }],
+        },
+      })}\n`,
+    ),
+  );
   replacePolicy(input, (policy) => {
     (
       policy.protectedValueDispositions as Record<
@@ -479,6 +573,37 @@ test("structured signed material participates in protected dispositions", () => 
     protectedClass: "signed-material",
   });
 });
+
+test.each([
+  `owner/npm_${"a".repeat(36)}`,
+  `owner/AIza${"a".repeat(35)}`,
+  `owner/github_pat_${"a".repeat(82)}`,
+  `owner/rk_live_${"a".repeat(24)}`,
+  `owner/0x${"a".repeat(64)}`,
+])(
+  "JSONL modelId credentials are derived and never leak through publishable bytes: %s",
+  async (credential) => {
+    const input = syntheticDerivationInput();
+    replaceArtifact(
+      input,
+      "trace/trajectory.jsonl",
+      new TextEncoder().encode(
+        `${JSON.stringify({ event: "tool", modelId: credential })}\n`,
+      ),
+    );
+    const outcome = await createEvidenceDeriver({
+      detectors: createBuiltinDerivationDetectors({ privateConfiguration }),
+    }).derive(input);
+    expect(outcome.status).not.toBe("publishable-unchanged");
+    expect(JSON.stringify(outcome)).not.toContain(credential);
+    if (outcome.status !== "derived") return;
+    expect(
+      outcome.artifacts.some(({ bytes }) =>
+        new TextDecoder().decode(bytes).includes("[REDACTED_CREDENTIAL]"),
+      ),
+    ).toBe(true);
+  },
+);
 
 test("an exact nested extension leaf selector admits only that leaf", () => {
   const input = syntheticDerivationInput();

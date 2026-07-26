@@ -15,7 +15,12 @@ import {
 } from "../inert.js";
 import { classifyTechnicalValue } from "../technical-values.js";
 import { BIP39_ENGLISH } from "./data/bip39-english.js";
-import { GITLEAKS_PACK } from "./data/gitleaks-rules.js";
+import {
+  BUILTIN_DETECTOR_VERSION,
+  builtinDetectorImplementationDigest,
+  DETERMINISTIC_PUBLIC_RECIPE,
+  type RegexRecipe,
+} from "./recipe.js";
 import type {
   ConfidenceBand,
   CreateEvidenceDeriverOptions,
@@ -41,114 +46,12 @@ type Match = {
   readonly class: string;
   readonly start: number;
   readonly end: number;
-  readonly confidence?: ConfidenceBand;
+  readonly confidence: ConfidenceBand;
   readonly evidence: string;
 };
 
-function regexRecipe(value: RegExp): Readonly<{
-  source: string;
-  flags: string;
-}> {
-  return Object.freeze({ source: value.source, flags: value.flags });
-}
-
-const DETERMINISTIC_PUBLIC_RECIPE = Object.freeze({
-  schemaVersion: "jinn.evidence-derivation.detector-recipe.v1",
-  secretlint: Object.freeze({
-    package: "@secretlint/secretlint-rule-preset-recommend",
-    version: "13.0.4",
-  }),
-  gitleaks: GITLEAKS_PACK,
-  bip39: Object.freeze({
-    wordlistDigest: sha256Digest(canonicalJsonBytes(BIP39_ENGLISH)),
-    wordToken: regexRecipe(/[A-Za-z]+/gu),
-    separator: regexRecipe(/^[\s,;|"'`]+$/u),
-    wordCounts: Object.freeze([24, 12]),
-  }),
-  patterns: Object.freeze({
-    email: regexRecipe(
-      /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/gu,
-    ),
-    absolutePath: regexRecipe(/\/(?:Users|home)\/[^/\s"'`]+/gu),
-    credentialToken: regexRecipe(
-      /\b(?:ghp_|xox[baprs]-|npm_|sk-(?:proj-)?|rk_live_|sk_live_)[A-Za-z0-9_-]{16,}\b/gu,
-    ),
-    cloudCredential: regexRecipe(
-      /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b|\bAIza[0-9A-Za-z_-]{35}/gu,
-    ),
-    urlCredential: regexRecipe(
-      /https?:\/\/[^/\s:@]+:[^/\s@]+@[^/\s]+|[?&](?:token|key|secret|password)=[^&\s]+/giu,
-    ),
-    walletAddress: regexRecipe(/\b0x[a-fA-F0-9]{40}\b/gu),
-    gitIdentityCarrier: regexRecipe(
-      /(?:^|\n)(?:(?:Author|Committer|Signed-off-by|Co-authored-by|Reviewed-by|Acked-by):[^\n]+|(?:user\.name|user\.email|GIT_(?:AUTHOR|COMMITTER)_(?:NAME|EMAIL))\s*[:=][^\n]+)/giu,
-    ),
-    machineIdentityCarrier: regexRecipe(
-      /\b(?:hostname|machine(?:-name)?)\s*[:=]\s*[A-Za-z0-9._-]+/giu,
-    ),
-    privateKeyContext: regexRecipe(
-      /\b(?:private[_\s-]?key|privkey|secret[_\s-]?key|wallet[_\s-]?key|signing[_\s-]?key)\b/iu,
-    ),
-    privateKeyHex: regexRecipe(/(?<!0x)\b[a-fA-F0-9]{64}\b/gu),
-    environmentBlock: regexRecipe(
-      /(?:^|\n)(?:export\s+)?[A-Z][A-Z0-9_]*=[^\n]*(?:\n(?:export\s+)?[A-Z][A-Z0-9_]*=[^\n]*){2,}/gu,
-    ),
-    paymentCardCandidate: regexRecipe(/\b(?:\d[ -]*?){13,19}\b/gu),
-    ibanCandidate: regexRecipe(
-      /\b(?:[A-Z]{2}\d{2}[A-Z0-9]{11,30}|[A-Z]{2}\d{2}(?: [A-Z0-9]{4}){2,7}(?: [A-Z0-9]{1,4})?)\b/giu,
-    ),
-    ipv4Candidate: regexRecipe(
-      /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b/gu,
-    ),
-  }),
-  algorithms: Object.freeze({
-    luhn: Object.freeze({
-      name: "ISO/IEC-7812-Luhn",
-      minimumDigits: 13,
-      maximumDigits: 19,
-      rejectRepeatedDigit: true,
-    }),
-    iban: Object.freeze({
-      name: "ISO-13616-mod-97",
-      compactMinimumLength: 15,
-      compactMaximumLength: 34,
-      compactShape: regexRecipe(/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/u),
-    }),
-    ipRanges: Object.freeze({
-      ignore: Object.freeze([
-        "0/8",
-        "127/8",
-        "169.254/16",
-        "192.0.2/24",
-        "198.51.100/24",
-        "203.0.113/24",
-        "224/4",
-        "255/8",
-      ]),
-      private: Object.freeze(["10/8", "172.16/12", "192.168/16"]),
-    }),
-    entropy: Object.freeze({
-      minimumLength: 16,
-      strictLength: 20,
-      bitsPerCharacter: 4,
-      token: regexRecipe(/\S+/gu),
-      leadingTrim: regexRecipe(/^[("'`[{},;:]*/u),
-      trailingTrim: regexRecipe(/[)"'`\]},;:.]*$/u),
-      alphabet: regexRecipe(/^[A-Za-z0-9+/=_-]+$/u),
-      syntheticBenchmarkId: regexRecipe(
-        /^[a-z0-9][a-z0-9._-]*__[a-z0-9][a-z0-9._-]*-\d+$/u,
-      ),
-    }),
-  }),
-  privateConfiguration: Object.freeze({
-    schemaVersion: "jinn.private-detector-configuration.v1",
-    knownIdentityMechanism: "exact-code-point-substring",
-    privateAllowlistMechanism: "exact-matched-span-substring-exclusion",
-  }),
-});
-
 function recipeRegex(
-  recipe: Readonly<{ source: string; flags: string }>,
+  recipe: RegexRecipe,
 ): RegExp {
   return new RegExp(recipe.source, recipe.flags);
 }
@@ -160,13 +63,10 @@ function descriptor(
 ): DerivationDetectorDescriptor {
   return Object.freeze({
     id,
-    version: "1.2.0",
-    implementationDigest: sha256Digest(
-      canonicalJsonBytes({
-        id,
-        version: "1.2.0",
-        controlledImplementation,
-      }),
+    version: BUILTIN_DETECTOR_VERSION,
+    implementationDigest: builtinDetectorImplementationDigest(
+      id,
+      controlledImplementation,
     ),
     reproducibility: "byte-stable",
     ...(configurationDigest ? { configurationDigest } : {}),
@@ -180,7 +80,7 @@ function finding(
 ): DerivationFinding {
   return Object.freeze({
     class: match.class,
-    confidence: match.confidence ?? "VERY_HIGH",
+    confidence: match.confidence,
     surfaceId: surface.surfaceId,
     start: match.start,
     end: match.end,
@@ -194,17 +94,20 @@ function regexMatches(
   pattern: RegExp,
   classification: string,
   evidence: string,
-  confidence?: ConfidenceBand,
+  confidence: ConfidenceBand,
 ): Match[] {
   const matches: Match[] = [];
+  const execution = DETERMINISTIC_PUBLIC_RECIPE.regexExecution;
   const regex = new RegExp(
     pattern.source,
-    pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`,
+    execution.ensureGlobalFlag && !pattern.flags.includes("g")
+      ? `${pattern.flags}g`
+      : pattern.flags,
   );
   let result: RegExpExecArray | null;
   while ((result = regex.exec(text)) !== null) {
     if (result[0].length === 0) {
-      regex.lastIndex += 1;
+      regex.lastIndex += execution.zeroLengthAdvanceCodeUnits;
       continue;
     }
     matches.push({
@@ -212,55 +115,66 @@ function regexMatches(
       start: result.index,
       end: result.index + result[0].length,
       evidence,
-      ...(confidence ? { confidence } : {}),
+      confidence,
     });
   }
   return matches;
 }
 
 function luhn(candidate: string): boolean {
-  const { minimumDigits, maximumDigits } =
-    DETERMINISTIC_PUBLIC_RECIPE.algorithms.luhn;
-  const digits = candidate.replace(/\D/gu, "");
+  const recipe = DETERMINISTIC_PUBLIC_RECIPE.algorithms.luhn;
+  const digits = candidate.replace(recipeRegex(recipe.nonDigit), "");
+  const { minimumDigits, maximumDigits } = recipe;
   if (digits.length < minimumDigits || digits.length > maximumDigits) {
     return false;
   }
-  if (/^(\d)\1+$/u.test(digits)) return false;
+  if (
+    recipe.rejectRepeatedDigit &&
+    recipeRegex(recipe.repeatedDigit).test(digits)
+  ) {
+    return false;
+  }
   let sum = 0;
   let alternate = false;
   for (let index = digits.length - 1; index >= 0; index -= 1) {
     let value = Number(digits[index]);
-    if (alternate) {
+    if (alternate && recipe.doubleEverySecondFromRight) {
       value *= 2;
-      if (value > 9) value -= 9;
+      if (value > 9) value -= recipe.doubledDigitReduction;
     }
     sum += value;
     alternate = !alternate;
   }
-  return sum % 10 === 0;
+  return sum % recipe.modulus === recipe.validRemainder;
 }
 
 function ibanMod97(candidate: string): boolean {
-  const compact = candidate.replace(/\s/gu, "").toUpperCase();
+  const recipe = DETERMINISTIC_PUBLIC_RECIPE.algorithms.iban;
+  const compact = candidate
+    .replace(recipeRegex(recipe.whitespace), "")
+    .toUpperCase();
   if (
-    !recipeRegex(
-      DETERMINISTIC_PUBLIC_RECIPE.algorithms.iban.compactShape,
-    ).test(compact)
+    compact.length < recipe.compactMinimumLength ||
+    compact.length > recipe.compactMaximumLength ||
+    !recipeRegex(recipe.compactShape).test(compact)
   ) {
     return false;
   }
-  const rearranged = compact.slice(4) + compact.slice(0, 4);
+  const rearranged =
+    compact.slice(recipe.rearrangePrefixLength) +
+    compact.slice(0, recipe.rearrangePrefixLength);
   let remainder = 0;
   for (const character of rearranged) {
     const expanded =
       character >= "0" && character <= "9"
         ? character
-        : String(character.charCodeAt(0) - 55);
+        : String(character.charCodeAt(0) - recipe.alphaNumericOffset);
     for (const digit of expanded) {
-      remainder = (remainder * 10 + Number(digit)) % 97;
+      remainder =
+        (remainder * 10 + Number(digit)) % recipe.modulus;
     }
   }
-  return remainder === 1;
+  return remainder === recipe.validRemainder;
 }
 
 const BIP39_WORDS = new Set(BIP39_ENGLISH);
@@ -271,7 +185,10 @@ function bip39Matches(text: string): Match[] {
       recipeRegex(DETERMINISTIC_PUBLIC_RECIPE.bip39.wordToken),
     ),
   ].map((match) => ({
-    word: match[0].toLowerCase(),
+    word:
+      DETERMINISTIC_PUBLIC_RECIPE.bip39.wordNormalization === "lowercase"
+        ? match[0].toLowerCase()
+        : match[0],
     start: match.index,
     end: match.index + match[0].length,
   }));
@@ -291,10 +208,13 @@ function bip39Matches(text: string): Match[] {
         continue;
       }
       matches.push({
-        class: "funds-controlling-secret",
+        class: DETERMINISTIC_PUBLIC_RECIPE.bip39.finding.class,
         start: window[0]!.start,
         end: window.at(-1)!.end,
-        evidence: `bip39-mnemonic-${length}`,
+        confidence:
+          DETERMINISTIC_PUBLIC_RECIPE.bip39.finding.confidence,
+        evidence:
+          `${DETERMINISTIC_PUBLIC_RECIPE.bip39.finding.evidencePrefix}${length}`,
       });
       break;
     }
@@ -310,7 +230,12 @@ function entropy(value: string): number {
   let result = 0;
   for (const count of frequencies.values()) {
     const probability = count / value.length;
-    result -= probability * Math.log2(probability);
+    result -=
+      probability *
+      (Math.log(probability) /
+        Math.log(
+          DETERMINISTIC_PUBLIC_RECIPE.algorithms.entropy.logarithmBase,
+        ));
   }
   return result;
 }
@@ -332,7 +257,12 @@ function entropyMatches(
       !recipeRegex(recipe.alphabet).test(token) ||
       entropy(token) < recipe.bitsPerCharacter ||
       (token.length < recipe.strictLength &&
-        !(/[a-z]/u.test(token) && /[A-Z0-9]/u.test(token))) ||
+        !(
+          recipeRegex(recipe.lowercaseRequiredBelowStrictLength).test(token) &&
+          recipeRegex(
+            recipe.upperOrDigitRequiredBelowStrictLength,
+          ).test(token)
+        )) ||
       recipeRegex(recipe.syntheticBenchmarkId).test(token) ||
       classifyTechnicalValue(token, {
         field: surface.location.split("/").at(-1),
@@ -341,29 +271,30 @@ function entropyMatches(
       continue;
     }
     matches.push({
-      class: "high-entropy-secret",
+      class: recipe.finding.class,
       start: candidate.index + leading,
       end: candidate.index + leading + token.length,
-      confidence: "HIGH",
-      evidence: "secret-high-entropy",
+      confidence: recipe.finding.confidence,
+      evidence: recipe.finding.evidence,
     });
   }
   return matches;
 }
 
 async function secretlintMatches(text: string): Promise<Match[]> {
+  const recipe = DETERMINISTIC_PUBLIC_RECIPE.secretlint;
   const result = await lintSource({
     source: {
-      filePath: "/span",
+      filePath: recipe.invocation.source.filePath,
       content: text,
-      ext: ".txt",
-      contentType: "text",
+      ext: recipe.invocation.source.ext,
+      contentType: recipe.invocation.source.contentType,
     },
     options: {
       config: {
         rules: [
           {
-            id: "@secretlint/secretlint-rule-preset-recommend",
+            id: recipe.invocation.ruleId,
             rule: creator,
           },
         ],
@@ -371,23 +302,35 @@ async function secretlintMatches(text: string): Promise<Match[]> {
     },
   });
   return result.messages.map((message) => ({
-    class: "credential",
+    class: recipe.finding.class,
     start: message.range[0],
     end: message.range[1],
-    evidence: `secretlint-${message.ruleId
-      .replace(/^@secretlint\/secretlint-rule-/u, "")
-      .replace(/[^a-z0-9:-]/giu, "-")
-      .toLowerCase()}`,
+    confidence: recipe.finding.confidence,
+    evidence: `${recipe.finding.evidencePrefix}${
+      (recipe.finding.lowercase
+        ? message.ruleId
+            .replace(recipeRegex(recipe.finding.stripRuleId), "")
+            .replace(
+              recipeRegex(recipe.finding.unsafeEvidenceCharacters),
+              recipe.finding.unsafeEvidenceReplacement,
+            )
+            .toLowerCase()
+        : message.ruleId)
+    }`,
   }));
 }
 
 function gitleaksMatches(text: string): Match[] {
-  return GITLEAKS_PACK.rules.flatMap((rule) =>
+  const recipe = DETERMINISTIC_PUBLIC_RECIPE.gitleaks;
+  return recipe.pack.rules.flatMap((rule) =>
     regexMatches(
       text,
-      new RegExp(rule.regex, "giu"),
-      rule.id === "private-key" ? "funds-controlling-secret" : "credential",
-      `gitleaks-${rule.id}`,
+      new RegExp(rule.regex, recipe.invocation.flags),
+      recipe.finding.classByRuleId[
+        rule.id as keyof typeof recipe.finding.classByRuleId
+      ] ?? recipe.finding.defaultClass,
+      `${recipe.finding.evidencePrefix}${rule.id}`,
+      recipe.finding.confidence,
     ),
   );
 }
@@ -429,126 +372,80 @@ async function patternMatches(
   text: string,
   surface: DerivationSurface,
 ): Promise<Match[]> {
+  const patterns = DETERMINISTIC_PUBLIC_RECIPE.patterns;
+  const fromRule = (
+    rule: {
+      readonly regex: RegexRecipe;
+      readonly class: string;
+      readonly evidence: string;
+      readonly confidence: ConfidenceBand;
+    },
+  ): Match[] =>
+    regexMatches(
+      text,
+      recipeRegex(rule.regex),
+      rule.class,
+      rule.evidence,
+      rule.confidence,
+    );
   const matches = [
     ...gitleaksMatches(text),
     ...(await secretlintMatches(text)),
-    ...regexMatches(
-      text,
-      recipeRegex(DETERMINISTIC_PUBLIC_RECIPE.patterns.email),
-      "email",
-      "email-shape",
-    ),
-    ...regexMatches(
-      text,
-      recipeRegex(DETERMINISTIC_PUBLIC_RECIPE.patterns.absolutePath),
-      "absolute-path",
-      "home-path",
-    ),
-    ...regexMatches(
-      text,
-      recipeRegex(
-        DETERMINISTIC_PUBLIC_RECIPE.patterns.credentialToken,
-      ),
-      "credential",
-      "credential-token-shape",
-    ),
-    ...regexMatches(
-      text,
-      recipeRegex(
-        DETERMINISTIC_PUBLIC_RECIPE.patterns.cloudCredential,
-      ),
-      "credential",
-      "cloud-credential-id",
-    ),
-    ...regexMatches(
-      text,
-      recipeRegex(
-        DETERMINISTIC_PUBLIC_RECIPE.patterns.urlCredential,
-      ),
-      "url-credential",
-      "url-credential",
-    ),
-    ...regexMatches(
-      text,
-      recipeRegex(DETERMINISTIC_PUBLIC_RECIPE.patterns.walletAddress),
-      "wallet-address",
-      "wallet-address",
-    ),
-    ...regexMatches(
-      text,
-      recipeRegex(
-        DETERMINISTIC_PUBLIC_RECIPE.patterns.gitIdentityCarrier,
-      ),
-      "git-identity",
-      "git-identity-carrier",
-    ),
-    ...regexMatches(
-      text,
-      recipeRegex(
-        DETERMINISTIC_PUBLIC_RECIPE.patterns.machineIdentityCarrier,
-      ),
-      "machine-identity",
-      "machine-identity-carrier",
-    ),
+    ...fromRule(patterns.email),
+    ...fromRule(patterns.absolutePath),
+    ...DETERMINISTIC_PUBLIC_RECIPE.technicalClassifier
+      .credentialPrecedence.additional.flatMap(fromRule),
+    ...fromRule(patterns.urlCredential),
+    ...fromRule(patterns.walletAddress),
+    ...fromRule(patterns.gitIdentityCarrier),
+    ...fromRule(patterns.machineIdentityCarrier),
   ];
-  const keyContext = recipeRegex(
-    DETERMINISTIC_PUBLIC_RECIPE.patterns.privateKeyContext,
-  );
+  const keyContext = recipeRegex(patterns.privateKeyContext.regex);
   if (keyContext.test(text)) {
-    matches.push(
-      ...regexMatches(
-        text,
-        recipeRegex(DETERMINISTIC_PUBLIC_RECIPE.patterns.privateKeyHex),
-        "funds-controlling-secret",
-        "private-key-hex64",
-      ),
-    );
+    matches.push(...fromRule(patterns.privateKeyHex));
   }
   matches.push(...bip39Matches(text));
-  const env = recipeRegex(
-    DETERMINISTIC_PUBLIC_RECIPE.patterns.environmentBlock,
-  );
-  matches.push(
-    ...regexMatches(text, env, "environment-dump", "environment-assignment-run"),
-  );
-  const card = recipeRegex(
-    DETERMINISTIC_PUBLIC_RECIPE.patterns.paymentCardCandidate,
-  );
+  matches.push(...fromRule(patterns.environmentBlock));
+  const card = recipeRegex(patterns.paymentCardCandidate.regex);
+  const luhnRecipe = DETERMINISTIC_PUBLIC_RECIPE.algorithms.luhn;
   for (const candidate of text.matchAll(card)) {
     if (luhn(candidate[0])) {
       matches.push({
-        class: "payment-instrument",
+        class: luhnRecipe.finding.class,
         start: candidate.index,
         end: candidate.index + candidate[0].length,
-        evidence: "luhn-valid-card",
+        confidence: luhnRecipe.finding.confidence,
+        evidence: luhnRecipe.finding.evidence,
       });
     }
   }
-  const iban = recipeRegex(
-    DETERMINISTIC_PUBLIC_RECIPE.patterns.ibanCandidate,
-  );
+  const iban = recipeRegex(patterns.ibanCandidate.regex);
+  const ibanRecipe = DETERMINISTIC_PUBLIC_RECIPE.algorithms.iban;
   for (const candidate of text.matchAll(iban)) {
     if (ibanMod97(candidate[0])) {
       matches.push({
-        class: "payment-instrument",
+        class: ibanRecipe.finding.class,
         start: candidate.index,
         end: candidate.index + candidate[0].length,
-        evidence: "iban-mod97",
+        confidence: ibanRecipe.finding.confidence,
+        evidence: ibanRecipe.finding.evidence,
       });
     }
   }
-  const ipv4 = recipeRegex(
-    DETERMINISTIC_PUBLIC_RECIPE.patterns.ipv4Candidate,
-  );
+  const ipv4 = recipeRegex(patterns.ipv4Candidate.regex);
+  const ipRecipe = DETERMINISTIC_PUBLIC_RECIPE.algorithms.ipRanges;
   for (const candidate of text.matchAll(ipv4)) {
     const range = ipRange(candidate[0]);
     if (range !== "ignored") {
       matches.push({
-        class: "ip-address",
+        class: ipRecipe.finding.class,
         start: candidate.index,
         end: candidate.index + candidate[0].length,
-        confidence: range === "public" ? "VERY_HIGH" : "MEDIUM",
-        evidence: `ipv4-${range}`,
+        confidence:
+          range === "public"
+            ? ipRecipe.finding.publicConfidence
+            : ipRecipe.finding.privateConfidence,
+        evidence: `${ipRecipe.finding.evidencePrefix}${range}`,
       });
     }
   }
@@ -568,7 +465,13 @@ export function createBuiltinDerivationDetectors(
     typeof configuration.nonce !== "string" ||
     configuration.nonce.length < 32 ||
     !Array.isArray(configuration.knownIdentities) ||
-    !Array.isArray(configuration.privateAllowlist)
+    configuration.knownIdentities.some(
+      (value) => typeof value !== "string" || value.length === 0,
+    ) ||
+    !Array.isArray(configuration.privateAllowlist) ||
+    configuration.privateAllowlist.some(
+      (value) => typeof value !== "string" || value.length === 0,
+    )
   ) {
     throw new EvidenceDerivationError(
       "INVALID_DERIVATION_INPUT",
@@ -590,6 +493,12 @@ export function createBuiltinDerivationDetectors(
       mechanism:
         DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration
           .knownIdentityMechanism,
+      valueValidation:
+        DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration
+          .valueValidation,
+      finding:
+        DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration
+          .knownIdentityFinding,
       privateConfigurationSchema:
         DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration.schemaVersion,
     },
@@ -611,22 +520,36 @@ export function createBuiltinDerivationDetectors(
       }
       const results: DerivationFinding[] = [];
       for (const value of knownValues) {
-        if (!value) continue;
         let offset = surface.text.indexOf(value);
         while (offset >= 0) {
           results.push(
             finding(
               surface,
               {
-                class: "known-identity",
+                class:
+                  DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration
+                    .knownIdentityFinding.class,
                 start: offset,
                 end: offset + value.length,
-                evidence: "known-identity-exact",
+                confidence:
+                  DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration
+                    .knownIdentityFinding.confidence,
+                evidence:
+                  DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration
+                    .knownIdentityFinding.evidence,
               },
               knownDescriptor,
             ),
           );
-          offset = surface.text.indexOf(value, offset + value.length);
+          offset = surface.text.indexOf(
+            value,
+            offset +
+              (DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration
+                .knownIdentityMechanism.matchAdvance ===
+              "matched-length"
+                ? value.length
+                : 1),
+          );
         }
       }
       return results;
@@ -759,6 +682,18 @@ export function normalizeDetectorFindings(
       );
     }
     const candidateKeys = Object.keys(candidate).sort();
+    const offsetsValid =
+      Number.isInteger(candidate.start) &&
+      Number.isInteger(candidate.end) &&
+      candidate.start >= 0 &&
+      candidate.end > candidate.start &&
+      candidate.end <= surface.text.length;
+    const matchedPlaintext = offsetsValid
+      ? surface.text.slice(candidate.start, candidate.end).toLowerCase()
+      : undefined;
+    const reflectsMatchedPlaintext = (value: string): boolean =>
+      matchedPlaintext !== undefined &&
+      value.toLowerCase().includes(matchedPlaintext);
     if (
       JSON.stringify(candidateKeys) !==
         JSON.stringify([
@@ -771,13 +706,10 @@ export function normalizeDetectorFindings(
           "surfaceId",
         ]) ||
       candidate.surfaceId !== surface.surfaceId ||
-      !Number.isInteger(candidate.start) ||
-      !Number.isInteger(candidate.end) ||
-      candidate.start < 0 ||
-      candidate.end <= candidate.start ||
-      candidate.end > surface.text.length ||
+      !offsetsValid ||
       typeof candidate.class !== "string" ||
       !/^[a-z0-9][a-z0-9-]*$/u.test(candidate.class) ||
+      reflectsMatchedPlaintext(candidate.class) ||
       ![
         "VERY_LOW",
         "LOW",
@@ -790,8 +722,10 @@ export function normalizeDetectorFindings(
         (code) =>
           typeof code !== "string" ||
           !/^[a-z0-9][a-z0-9:-]*$/.test(code) ||
-          code.includes(surface.text.slice(candidate.start, candidate.end)),
+          reflectsMatchedPlaintext(code),
       ) ||
+      reflectsMatchedPlaintext(detectorValue.id) ||
+      reflectsMatchedPlaintext(detectorValue.version) ||
       (expected && descriptorKey(detectorValue) !== descriptorKey(expected))
     ) {
       throw new EvidenceDerivationError(

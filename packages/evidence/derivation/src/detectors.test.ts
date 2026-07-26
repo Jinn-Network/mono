@@ -7,6 +7,10 @@ import {
   createBuiltinDerivationDetectors,
   normalizeDetectorFindings,
 } from "./detectors/index.js";
+import {
+  builtinDetectorImplementationDigest,
+  DETERMINISTIC_PUBLIC_RECIPE,
+} from "./detectors/recipe.js";
 import type {
   DerivationDetectorDescriptor,
   DerivationFinding,
@@ -81,6 +85,43 @@ describe("built-in detectors", () => {
       }),
     ).toThrowError(expect.objectContaining({ code: "INVALID_DERIVATION_INPUT" }));
   });
+
+  test.each([
+    ["knownIdentities", [123]],
+    ["knownIdentities", [""]],
+    ["privateAllowlist", [123]],
+    ["privateAllowlist", [""]],
+  ] as const)("rejects invalid private configuration %s entries", (key, value) => {
+    expect(() =>
+      createBuiltinDerivationDetectors({
+        privateConfiguration: {
+          ...privateConfiguration,
+          [key]: value,
+        } as typeof privateConfiguration,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "INVALID_DERIVATION_INPUT" }));
+  });
+
+  test("content-binds every public recipe semantic used by the pattern detector", () => {
+    const detectors = createBuiltinDerivationDetectors({
+      privateConfiguration,
+    });
+    expect(detectors[1]!.descriptor.implementationDigest).toBe(
+      builtinDetectorImplementationDigest(
+        "deterministic-patterns",
+        DETERMINISTIC_PUBLIC_RECIPE,
+      ),
+    );
+    const mutated = structuredClone(DETERMINISTIC_PUBLIC_RECIPE);
+    (
+      mutated.patterns.email as {
+        class: string;
+      }
+    ).class = "credential";
+    expect(
+      builtinDetectorImplementationDigest("deterministic-patterns", mutated),
+    ).not.toBe(detectors[1]!.descriptor.implementationDigest);
+  });
 });
 
 describe("finding normalization", () => {
@@ -123,6 +164,16 @@ describe("finding normalization", () => {
     expect(() =>
       normalizeDetectorFindings(surface("abc"), [
         finding({ evidence: ["abc"] }),
+      ]),
+    ).toThrowError(
+      expect.objectContaining({ code: "DETECTOR_CONTRACT_VIOLATION" }),
+    );
+  });
+
+  test("rejects matched plaintext reflected through the semantic class", () => {
+    expect(() =>
+      normalizeDetectorFindings(surface("secret"), [
+        finding({ class: "secret", end: 6 }),
       ]),
     ).toThrowError(
       expect.objectContaining({ code: "DETECTOR_CONTRACT_VIOLATION" }),

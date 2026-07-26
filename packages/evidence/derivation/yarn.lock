@@ -47,14 +47,14 @@ __metadata:
   resolution: "@jinn-network/evidence-derivation@workspace:."
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
-    "@noble/hashes": "npm:^2.2.0"
-    "@secretlint/core": "npm:^13.0.2"
-    "@secretlint/secretlint-rule-preset-recommend": "npm:^13.0.2"
+    "@noble/hashes": "npm:2.2.0"
+    "@secretlint/core": "npm:13.0.4"
+    "@secretlint/secretlint-rule-preset-recommend": "npm:13.0.4"
     "@types/node": "npm:^22.0.0"
     canonicalize: "npm:3.0.0"
     typescript: "npm:^5.9.3"
     vitest: "npm:^4.1.8"
-    zod: "npm:^4.4.3"
+    zod: "npm:4.4.3"
   languageName: unknown
   linkType: soft
 
@@ -86,7 +86,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@noble/hashes@npm:^2.2.0":
+"@noble/hashes@npm:2.2.0, @noble/hashes@npm:^2.2.0":
   version: 2.2.0
   resolution: "@noble/hashes@npm:2.2.0"
   checksum: 10c0/cad8630c504d6b9271984f685cd0af9101b40988fc2dfbe17ccdf068a9941f95cc5c9957d89e9ca4b7ca94c15cb35f93510c5d53a09fbcc83ee503b93d0a1034
@@ -216,7 +216,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@secretlint/core@npm:^13.0.2":
+"@secretlint/core@npm:13.0.4":
   version: 13.0.4
   resolution: "@secretlint/core@npm:13.0.4"
   dependencies:
@@ -235,7 +235,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@secretlint/secretlint-rule-preset-recommend@npm:^13.0.2":
+"@secretlint/secretlint-rule-preset-recommend@npm:13.0.4":
   version: 13.0.4
   resolution: "@secretlint/secretlint-rule-preset-recommend@npm:13.0.4"
   checksum: 10c0/9b571baff73baa0d56e5cb31532dab88da4f5608ca378716a5c91da8c9c99b641486a029dd7a9b84d0218d8489b13a3b8ece6f2497646f2dfeb38bd24febde06
@@ -1114,7 +1114,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"zod@npm:4.4.3, zod@npm:^4.4.3":
+"zod@npm:4.4.3":
   version: 4.4.3
   resolution: "zod@npm:4.4.3"
   checksum: 10c0/7ea31b558e88f9faf44f31dd185e2e1cbf51fed3081787fb96cc2534749b50c0acfc6da7f0922a7353ed092dd358c7d50c28ea96c94d04af64191bd33152eca3

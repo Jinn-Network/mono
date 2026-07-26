@@ -3,7 +3,10 @@
 import { decodeUtf8 } from "./bytes.js";
 import { EvidenceDerivationError } from "./errors.js";
 import { parseStrictJson } from "./strict-json.js";
-import { classifyTechnicalValue } from "./technical-values.js";
+import {
+  classifyTechnicalValue,
+  isStructurallyValidDsseEnvelope,
+} from "./technical-values.js";
 import type {
   ArtifactCodec,
   DerivationHoldReason,
@@ -434,6 +437,31 @@ function structuredSurfaces(
       if (Array.isArray(value)) {
         value.forEach((child, index) => walk(child, `${path}/${index}`, field));
       } else if (value && typeof value === "object") {
+        if (isStructurallyValidDsseEnvelope(value)) {
+          protectedLocations.push(
+            {
+              location: `${path}/payloadType`,
+              protectedClass: "profile-media-schema-identifier",
+            },
+            {
+              location: `${path}/payload`,
+              protectedClass: "signed-material",
+            },
+          );
+          value.signatures.forEach((signature, index) => {
+            if (signature.keyid !== undefined) {
+              protectedLocations.push({
+                location: `${path}/signatures/${index}/keyid`,
+                protectedClass: "signed-material",
+              });
+            }
+            protectedLocations.push({
+              location: `${path}/signatures/${index}/sig`,
+              protectedClass: "signed-material",
+            });
+          });
+          return;
+        }
         for (const [key, child] of Object.entries(value)) {
           walk(child, `${path}/${escapePointer(key)}`, key);
         }

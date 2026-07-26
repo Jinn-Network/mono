@@ -13,6 +13,7 @@ import {
   derivationDetectorDescriptorSchema,
   derivationDigestSchema,
   implementationPackageNameSchema,
+  publicRuntimeFamilySchema,
   publicVersionSchema,
 } from "./descriptor-schema.js";
 import { EvidenceDerivationError } from "./errors.js";
@@ -31,7 +32,7 @@ const implementationSchema = z.strictObject({
   version: publicVersionSchema,
   buildDigest: derivationDigestSchema,
   runtime: z.strictObject({
-    family: z.enum(["node", "deno", "bun", "browser", "wasm"]),
+    family: publicRuntimeFamilySchema,
     version: publicVersionSchema,
   }),
   detectors: z.array(derivationDetectorDescriptorSchema),

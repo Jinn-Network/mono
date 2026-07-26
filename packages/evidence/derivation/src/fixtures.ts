@@ -187,7 +187,11 @@ export function syntheticDerivationInput(): DeriveExecutionEvidenceInput {
         digest: `sha256:${"a".repeat(64)}`,
         transaction: `0x${"b".repeat(64)}`,
         cid: "bafkreibm6jg3ux5qu3hbutfqc3hdoclhwd3bk4ufuyt7xzhsg7cdqs2m7a",
-        dsse: { payload: "eyJzeW50aGV0aWMiOnRydWV9", sig: "c2lnbmF0dXJl" },
+        dsse: {
+          payloadType: "application/vnd.in-toto+json",
+          payload: "eyJzeW50aGV0aWMiOnRydWV9",
+          signatures: [{ keyid: "synthetic", sig: "c2lnbmF0dXJl" }],
+        },
         packageVersion: "1.2.3",
         modelId: "example/model-v1",
       }),
