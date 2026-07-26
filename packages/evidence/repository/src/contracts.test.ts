@@ -172,6 +172,9 @@ describe("repository capabilities", () => {
     expect(testingApi).not.toHaveProperty(
       "assertEvidenceRepositoryCapabilities",
     );
+    expect(testingApi).not.toHaveProperty(
+      "assertEvidenceRepositoryCapabilitiesSlot",
+    );
   });
 });
 

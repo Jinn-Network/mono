@@ -1,3 +1,5 @@
+import { isProxy } from "node:util/types";
+
 import type {
   EvidenceRepositoryCapabilities,
 } from "./types.js";
@@ -58,9 +60,66 @@ export function assertStableImmutableEvidenceRepositoryCapabilities(
   return capabilities;
 }
 
+export function assertEvidenceRepositoryCapabilitiesSlot(
+  repository: unknown,
+): EvidenceRepositoryCapabilities {
+  assertRepositoryContainer(repository);
+  const descriptor = Reflect.getOwnPropertyDescriptor(
+    repository,
+    "capabilities",
+  );
+  if (descriptor === undefined || !isDataDescriptor(descriptor)) {
+    throw new TypeError(
+      "EvidenceRepository.capabilities must be an own data property.",
+    );
+  }
+
+  const capabilities =
+    assertStableImmutableEvidenceRepositoryCapabilities(
+      () => descriptor.value,
+    );
+  const repeatedDescriptor = Reflect.getOwnPropertyDescriptor(
+    repository,
+    "capabilities",
+  );
+  if (
+    repeatedDescriptor === undefined ||
+    !isDataDescriptor(repeatedDescriptor) ||
+    !Object.is(repeatedDescriptor.value, capabilities)
+  ) {
+    throw new TypeError(
+      "EvidenceRepository.capabilities must retain a stable own data property value.",
+    );
+  }
+
+  return capabilities;
+}
+
+function assertRepositoryContainer(
+  value: unknown,
+): asserts value is object {
+  if (isProxy(value)) {
+    throw new TypeError("EvidenceRepository must not be a Proxy.");
+  }
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    throw new TypeError(
+      "EvidenceRepository must be a non-null, non-array object.",
+    );
+  }
+}
+
 function assertCapabilityContainer(
   value: unknown,
 ): asserts value is object {
+  if (isProxy(value)) {
+    throw new TypeError(
+      "EvidenceRepository.capabilities must not be a Proxy.",
+    );
+  }
   if (
     value === null ||
     typeof value !== "object" ||
@@ -201,7 +260,7 @@ function descriptorsMatch(
     left.configurable === right.configurable &&
     left.enumerable === right.enumerable &&
     left.writable === right.writable &&
-    left.value === right.value &&
+    Object.is(left.value, right.value) &&
     left.get === right.get &&
     left.set === right.set
   );

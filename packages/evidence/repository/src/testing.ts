@@ -7,7 +7,7 @@ import {
 } from "vitest";
 
 import {
-  assertStableImmutableEvidenceRepositoryCapabilities,
+  assertEvidenceRepositoryCapabilitiesSlot,
 } from "./capabilities.js";
 import { assertContentTooLargeRepositoryError } from "./contract-errors.js";
 import { assertRepositoryOperationActive } from "./errors.js";
@@ -23,6 +23,7 @@ import {
   type EvidenceArtifactReference,
   type EvidenceRecordReference,
   type EvidenceRepository,
+  type EvidenceRepositoryCapabilities,
   type RepositoryOperationOptions,
   type RepositoryWriteReceipt,
 } from "./types.js";
@@ -115,29 +116,33 @@ export function describeEvidenceRepositoryContract(
   createContext: EvidenceRepositoryContractFactory,
 ): void {
   describe("EvidenceRepository contract", () => {
+    let capabilities: EvidenceRepositoryCapabilities | undefined;
     let context: EvidenceRepositoryContractContext | undefined;
 
     beforeEach(async (testContext) => {
       context = await createContext(testContext.task.name);
+      capabilities = assertEvidenceRepositoryCapabilitiesSlot(
+        context.repository,
+      );
     });
 
     afterEach(async () => {
       await context?.cleanup?.();
+      capabilities = undefined;
       context = undefined;
     });
 
     test("exposes valid, stable, immutable capabilities", () => {
-      const repository = context!.repository;
       expect(
-        assertStableImmutableEvidenceRepositoryCapabilities(
-          () => repository.capabilities,
+        assertEvidenceRepositoryCapabilitiesSlot(
+          context!.repository,
         ),
-      ).toBe(repository.capabilities);
+      ).toBe(capabilities);
     });
 
     test("enforces a declared finite object limit", async () => {
       const repository = context!.repository;
-      const maxObjectBytes = repository.capabilities.maxObjectBytes;
+      const maxObjectBytes = capabilities!.maxObjectBytes;
       if (maxObjectBytes === undefined) return;
 
       expect(context!.createObjectAtDeclaredLimit).toBeTypeOf("function");

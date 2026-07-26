@@ -1,9 +1,86 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  assertEvidenceRepositoryCapabilitiesSlot,
   assertEvidenceRepositoryCapabilities,
   assertStableImmutableEvidenceRepositoryCapabilities,
 } from "./capabilities.js";
+
+const OBJECT_PROXY_TRAPS = [
+  "defineProperty",
+  "deleteProperty",
+  "get",
+  "getOwnPropertyDescriptor",
+  "getPrototypeOf",
+  "has",
+  "isExtensible",
+  "ownKeys",
+  "preventExtensions",
+  "set",
+  "setPrototypeOf",
+] as const;
+
+type ObjectProxyTrap = (typeof OBJECT_PROXY_TRAPS)[number];
+
+function createTrapCountingProxy<T extends object>(target: T): {
+  readonly proxy: T;
+  readonly trapCalls: Readonly<Record<ObjectProxyTrap, number>>;
+} {
+  const trapCalls = Object.fromEntries(
+    OBJECT_PROXY_TRAPS.map((trap) => [trap, 0]),
+  ) as Record<ObjectProxyTrap, number>;
+  const count = (trap: ObjectProxyTrap): void => {
+    trapCalls[trap] += 1;
+  };
+  const proxy = new Proxy(target, {
+    defineProperty: (value, key, descriptor) => {
+      count("defineProperty");
+      return Reflect.defineProperty(value, key, descriptor);
+    },
+    deleteProperty: (value, key) => {
+      count("deleteProperty");
+      return Reflect.deleteProperty(value, key);
+    },
+    get: (value, key, receiver) => {
+      count("get");
+      return Reflect.get(value, key, receiver);
+    },
+    getOwnPropertyDescriptor: (value, key) => {
+      count("getOwnPropertyDescriptor");
+      return Reflect.getOwnPropertyDescriptor(value, key);
+    },
+    getPrototypeOf: (value) => {
+      count("getPrototypeOf");
+      return Reflect.getPrototypeOf(value);
+    },
+    has: (value, key) => {
+      count("has");
+      return Reflect.has(value, key);
+    },
+    isExtensible: (value) => {
+      count("isExtensible");
+      return Reflect.isExtensible(value);
+    },
+    ownKeys: (value) => {
+      count("ownKeys");
+      return Reflect.ownKeys(value);
+    },
+    preventExtensions: (value) => {
+      count("preventExtensions");
+      return Reflect.preventExtensions(value);
+    },
+    set: (value, key, newValue, receiver) => {
+      count("set");
+      return Reflect.set(value, key, newValue, receiver);
+    },
+    setPrototypeOf: (value, prototype) => {
+      count("setPrototypeOf");
+      return Reflect.setPrototypeOf(value, prototype);
+    },
+  });
+
+  return { proxy, trapCalls };
+}
 
 describe("internal repository capability validation", () => {
   test.each([
@@ -61,6 +138,101 @@ describe("internal repository capability validation", () => {
       assertStableImmutableEvidenceRepositoryCapabilities(
         () => capabilities,
       ),
+    ).toBe(capabilities);
+  });
+
+  test.each(["shape", "stable snapshot"] as const)(
+    "rejects a Proxy during %s validation without invoking traps",
+    (validation) => {
+      const { proxy: capabilities, trapCalls } =
+        createTrapCountingProxy(
+          Object.freeze({ maxObjectBytes: 1 }),
+        );
+
+      expect(() => {
+        if (validation === "shape") {
+          assertEvidenceRepositoryCapabilities(capabilities);
+          return;
+        }
+        assertStableImmutableEvidenceRepositoryCapabilities(
+          () => capabilities,
+        );
+      }).toThrowError(/Proxy/u);
+      expect(trapCalls).toEqual(
+        Object.fromEntries(
+          OBJECT_PROXY_TRAPS.map((trap) => [trap, 0]),
+        ),
+      );
+    },
+  );
+
+  test("rejects a repository Proxy before invoking any trap", () => {
+    const { proxy: repository, trapCalls } = createTrapCountingProxy({
+      capabilities: Object.freeze({ maxObjectBytes: 1 }),
+    });
+
+    expect(() =>
+      assertEvidenceRepositoryCapabilitiesSlot(repository),
+    ).toThrowError(/repository.*Proxy/iu);
+    expect(trapCalls).toEqual(
+      Object.fromEntries(
+        OBJECT_PROXY_TRAPS.map((trap) => [trap, 0]),
+      ),
+    );
+  });
+
+  test("rejects a repository capability getter without invoking it", () => {
+    let getterCalls = 0;
+    const repository = {};
+    Object.defineProperty(repository, "capabilities", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return Object.freeze({ maxObjectBytes: 1 });
+      },
+    });
+    const before = Object.getOwnPropertyDescriptors(repository);
+
+    expect(() =>
+      assertEvidenceRepositoryCapabilitiesSlot(repository),
+    ).toThrowError(/capabilities.*own data property/iu);
+    expect(getterCalls).toBe(0);
+    expect(Object.getOwnPropertyDescriptors(repository)).toEqual(before);
+  });
+
+  test("rejects an inherited repository capability slot without evaluation", () => {
+    let getterCalls = 0;
+    const prototype = {};
+    Object.defineProperty(prototype, "capabilities", {
+      get() {
+        getterCalls += 1;
+        return Object.freeze({ maxObjectBytes: 1 });
+      },
+    });
+    const repository = Object.create(prototype);
+
+    expect(() =>
+      assertEvidenceRepositoryCapabilitiesSlot(repository),
+    ).toThrowError(/capabilities.*own data property/iu);
+    expect(getterCalls).toBe(0);
+    expect(Object.hasOwn(repository, "capabilities")).toBe(false);
+  });
+
+  test("accepts an own writable repository capability data slot", () => {
+    const capabilities = Object.freeze({ maxObjectBytes: 1 });
+    const repository = { capabilities };
+    const descriptor = Object.getOwnPropertyDescriptor(
+      repository,
+      "capabilities",
+    );
+
+    expect(descriptor).toMatchObject({
+      configurable: true,
+      writable: true,
+    });
+    expect(
+      assertEvidenceRepositoryCapabilitiesSlot(repository),
     ).toBe(capabilities);
   });
 
@@ -182,7 +354,7 @@ describe("internal repository capability validation", () => {
       assertStableImmutableEvidenceRepositoryCapabilities(
         () => capabilities,
       ),
-    ).toThrowError(/non-extensible/u);
+    ).toThrowError(/Proxy/u);
     expect(target).toEqual({
       maxObjectBytes: 1,
       futureCapability: "mutable",
@@ -192,20 +364,6 @@ describe("internal repository capability validation", () => {
         value: "changed",
       }),
     ).toBe(true);
-  });
-
-  test("accepts a proxy only when reflective invariants remain provable", () => {
-    const target = Object.freeze({
-      maxObjectBytes: 1,
-      futureCapability: "stable",
-    });
-    const capabilities = new Proxy(target, {});
-
-    expect(
-      assertStableImmutableEvidenceRepositoryCapabilities(
-        () => capabilities,
-      ),
-    ).toBe(capabilities);
   });
 
   test("rejects a frozen snapshot with a custom prototype", () => {
@@ -236,7 +394,8 @@ describe("internal repository capability validation", () => {
       assertStableImmutableEvidenceRepositoryCapabilities(
         () => capabilities,
       ),
-    ).toThrowError(/stable prototype/u);
+    ).toThrowError(/Proxy/u);
+    expect(prototypeReads).toBe(0);
   });
 
   test("checks every unknown future data descriptor", () => {
@@ -313,5 +472,19 @@ describe("internal repository capability validation", () => {
         () => nullPrototype,
       ),
     ).toBe(nullPrototype);
+  });
+
+  test("accepts a stable frozen unknown NaN data field", () => {
+    const capabilities = Object.freeze({
+      maxObjectBytes: 1,
+      futureCapability: Number.NaN,
+    });
+
+    expect(
+      assertStableImmutableEvidenceRepositoryCapabilities(
+        () => capabilities,
+      ),
+    ).toBe(capabilities);
+    expect(Number.isNaN(capabilities.futureCapability)).toBe(true);
   });
 });
