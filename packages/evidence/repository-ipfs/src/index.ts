@@ -3,3 +3,4 @@
 export * from "./cid.js";
 export * from "./readers.js";
 export * from "./registration.js";
+export * from "./repository.js";

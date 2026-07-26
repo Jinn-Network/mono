@@ -38,6 +38,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "test:kubo": "node scripts/run-kubo-integration.mjs",
     "check:profile": "yarn build && node scripts/check-profile.mjs",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"

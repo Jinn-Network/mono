@@ -161,23 +161,29 @@ try {
     typeConsumer,
     `
 import type { EvidenceRepository } from "@jinn-network/evidence-repository";
+import type { KuboRPCClient } from "kubo-rpc-client";
 import {
+  IpfsEvidenceRepository,
   MAX_STANDARD_IPFS_BLOCK_BYTES,
   type IpfsBlockReader,
+  type IpfsRepositoryWriteReceipt,
 } from "@jinn-network/evidence-repository-ipfs";
 import {
   digestToRawCid,
   rawCidToDigest,
 } from "@jinn-network/evidence-repository-ipfs/cid";
 
+declare const client: KuboRPCClient;
 declare const reader: IpfsBlockReader;
-declare const repository: EvidenceRepository;
+const repository: EvidenceRepository = new IpfsEvidenceRepository({
+  client,
+  reader,
+});
 const limit: number = MAX_STANDARD_IPFS_BLOCK_BYTES;
-const digest = rawCidToDigest(digestToRawCid(
-  "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-));
-void repository;
-void reader;
+const receipt: IpfsRepositoryWriteReceipt<{ readonly digest: \`sha256:\${string}\` }> =
+  await repository.putArtifact(new Uint8Array()) as
+    IpfsRepositoryWriteReceipt<{ readonly digest: \`sha256:\${string}\` }>;
+const digest = rawCidToDigest(digestToRawCid(receipt.reference.digest));
 void limit;
 void digest;
 `,
@@ -214,6 +220,7 @@ import {
   createArtifactReference,
 } from "@jinn-network/evidence-repository";
 import {
+  IpfsEvidenceRepository,
   MAX_STANDARD_IPFS_BLOCK_BYTES,
   parseRegistrationBytes,
 } from "@jinn-network/evidence-repository-ipfs";
@@ -242,10 +249,15 @@ if (
 ) {
   throw new Error("packed registration fixture did not parse");
 }
+const repository = new IpfsEvidenceRepository({
+  client: {},
+  reader: { async getBlock() { return null; } },
+});
 if (
-  MAX_STANDARD_IPFS_BLOCK_BYTES !== 2 * 1024 * 1024
+  repository.capabilities.maxObjectBytes !== MAX_STANDARD_IPFS_BLOCK_BYTES ||
+  !Object.isFrozen(repository.capabilities)
 ) {
-  throw new Error("packed repository limit is invalid");
+  throw new Error("packed repository capability snapshot is invalid");
 }
 const reference = createArtifactReference(new Uint8Array());
 if (reference.digest !== emptyDigest) {
@@ -260,7 +272,7 @@ if (jinnDependencies.join(",") !== "@jinn-network/evidence-repository") {
   throw new Error("unexpected Jinn dependency boundary: " + jinnDependencies.join(", "));
 }
 await readFile(${JSON.stringify(join(installedRoot, "README.md"))});
-console.log("Installed IPFS root and CID subpath, profile assets, limit, and dependency boundary verified.");
+console.log("Installed IPFS root and CID subpath, profile assets, capabilities, and dependency boundary verified.");
 `,
   );
   await run(process.execPath, [smokeScript], { cwd: consumer });
