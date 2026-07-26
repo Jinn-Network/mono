@@ -54,12 +54,13 @@ function run(command, args, options = {}) {
     child.once('error', reject);
     child.once('exit', (code) => {
       const output = Buffer.concat(stdout).toString('utf8');
+      const errorOutput = Buffer.concat(stderr).toString('utf8');
       if (code === 0) {
         resolvePromise(output);
         return;
       }
       reject(new Error(
-        `${command} exited with ${code}: ${Buffer.concat(stderr).toString('utf8')}`,
+        `${command} exited with ${code}:\n${output}${errorOutput}`,
       ));
     });
   });
