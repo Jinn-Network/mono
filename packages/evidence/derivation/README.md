@@ -1,10 +1,10 @@
 # `@jinn-network/evidence-derivation`
 
 `evidence-derivation` is the side-effect-free, structure-aware transform from
-exact private Execution Evidence bytes to an admissible public representation.
-It validates protocol structure before scanning, applies one exact
-content-bound policy, and never reads a repository, filesystem, network,
-clock, environment, home directory, or host identity.
+exact private Execution Evidence bytes to a representation publishable under
+the supplied exact policy. It validates protocol structure before scanning,
+applies one content-bound policy, and never reads a repository, filesystem,
+network, clock, environment, home directory, or host identity.
 
 The operation has four outcomes:
 
@@ -70,16 +70,18 @@ import {
   describeEvidenceDeriverContract,
 } from "@jinn-network/evidence-derivation/testing";
 
-describeEvidenceDeriverContract(() => myDeriver);
+describeEvidenceDeriverContract((detectors) =>
+  createMyDeriver({ detectors }),
+);
 describeDerivationDetectorContract(() => myDetector, fixtures);
 ```
 
 This package does not ship ML inference, a review queue, repository access,
 publication, announcements, application wiring, or legacy cutover behavior.
 
-See the
-[derivation design](../../../docs/superpowers/specs/2026-07-26-evidence-derivation-design.md)
-and the Evidence Protocol sections
-[§6.8](../protocol/profiles/execution-evidence/1.0/specification.md#68-public-representations-and-derivation)
-and
-[§10](../protocol/profiles/execution-evidence/1.0/specification.md#10-conformance).
+See the packaged Evidence Profile
+[§3.6, Capture and derivation provenance](https://github.com/Jinn-Network/mono/blob/main/packages/evidence/protocol/profiles/execution-evidence/1.0/specification.md#36-capture-and-derivation-provenance),
+the derivation design's
+[§10, Determinism and content addressing](https://github.com/Jinn-Network/mono/blob/main/docs/superpowers/specs/2026-07-26-evidence-derivation-design.md#10-determinism-and-content-addressing),
+and its
+[source audit](https://github.com/Jinn-Network/mono/blob/main/docs/superpowers/specs/2026-07-26-evidence-derivation-design.md#175-source-audit).

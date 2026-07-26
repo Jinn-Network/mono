@@ -272,7 +272,7 @@ function walkMetadata(
             source,
             surfaces,
             protectedLocations,
-            false,
+            extensionContext,
           )
         ) {
           continue;

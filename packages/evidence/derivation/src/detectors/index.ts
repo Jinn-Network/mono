@@ -518,6 +518,13 @@ export function createBuiltinDerivationDetectors(
           "Derivation was aborted.",
         );
       }
+      await Promise.resolve();
+      if (operationOptions?.signal?.aborted) {
+        throw new EvidenceDerivationError(
+          "OPERATION_ABORTED",
+          "Derivation was aborted.",
+        );
+      }
       const results: DerivationFinding[] = [];
       for (const value of knownValues) {
         let offset = surface.text.indexOf(value);

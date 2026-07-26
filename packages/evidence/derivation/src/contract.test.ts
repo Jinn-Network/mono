@@ -11,9 +11,11 @@ import {
 
 const privateConfiguration = createSyntheticPrivateDetectorConfiguration();
 
-describeEvidenceDeriverContract(() =>
+describeEvidenceDeriverContract((detectors) =>
   createEvidenceDeriver({
-    detectors: createBuiltinDerivationDetectors({ privateConfiguration }),
+    detectors:
+      detectors ??
+      createBuiltinDerivationDetectors({ privateConfiguration }),
   }),
 );
 

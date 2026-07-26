@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import {
+  access,
   mkdir,
   mkdtemp,
   readFile,
@@ -18,7 +19,8 @@ const packagesRoot = join(packageRoot, "..");
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-derivation-"));
 const protocolArchive = join(temporaryRoot, "evidence-protocol.tgz");
 const derivationArchive = join(temporaryRoot, "evidence-derivation.tgz");
-const consumer = join(temporaryRoot, "consumer");
+const rootConsumer = join(temporaryRoot, "root-consumer");
+const testingConsumer = join(temporaryRoot, "testing-consumer");
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -96,47 +98,55 @@ try {
     );
   }
 
-  await mkdir(consumer);
+  await mkdir(rootConsumer);
   await writeFile(
-    join(consumer, "package.json"),
+    join(rootConsumer, "package.json"),
     JSON.stringify({
       private: true,
       type: "module",
       dependencies: {
         "@jinn-network/evidence-derivation": `file:${derivationArchive}`,
         "@jinn-network/evidence-protocol": `file:${protocolArchive}`,
-        vitest: "4.1.8",
       },
     }),
   );
   await run(
     "npm",
     ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
-    { cwd: consumer },
+    { cwd: rootConsumer },
   );
   await writeFile(
-    join(consumer, "smoke.mjs"),
+    join(rootConsumer, "smoke.mjs"),
     `
 import assert from "node:assert/strict";
 import * as root from "@jinn-network/evidence-derivation";
-import * as testing from "@jinn-network/evidence-derivation/testing";
 
 assert.equal(typeof root.createEvidenceDeriver, "function");
 assert.equal(typeof root.parseDerivationPolicy, "function");
 assert.equal(typeof root.parseScrubReceipt, "function");
-assert.equal(typeof testing.describeEvidenceDeriverContract, "function");
-assert.equal(typeof testing.describeDerivationDetectorContract, "function");
+assert.equal(root.createBuiltinDerivationDetectors({
+  privateConfiguration: {
+    schemaVersion: "jinn.private-detector-configuration.v1",
+    nonce: "root-consumer-private-nonce-0123456789abcdef",
+    knownIdentities: [],
+    privateAllowlist: [],
+  },
+}).length, 2);
 assert.equal("canonicalJsonBytes" in root, false);
 assert.equal("sha256Digest" in root, false);
 `,
   );
-  await run(process.execPath, [join(consumer, "smoke.mjs")], {
-    cwd: consumer,
+  await run(process.execPath, [join(rootConsumer, "smoke.mjs")], {
+    cwd: rootConsumer,
   });
+  await assert.rejects(
+    access(join(rootConsumer, "node_modules", "vitest", "package.json")),
+    { code: "ENOENT" },
+  );
   const installedManifest = JSON.parse(
     await readFile(
       join(
-        consumer,
+        rootConsumer,
         "node_modules",
         "@jinn-network",
         "evidence-derivation",
@@ -165,8 +175,67 @@ assert.equal("sha256Digest" in root, false);
       throw new Error(`packed derivation includes forbidden ${dependency}`);
     }
   }
+
+  await mkdir(testingConsumer);
+  await writeFile(
+    join(testingConsumer, "package.json"),
+    JSON.stringify({
+      private: true,
+      type: "module",
+      dependencies: {
+        "@jinn-network/evidence-derivation": `file:${derivationArchive}`,
+        "@jinn-network/evidence-protocol": `file:${protocolArchive}`,
+        typescript: "5.9.3",
+        vitest: "4.1.8",
+      },
+    }),
+  );
+  await writeFile(
+    join(testingConsumer, "tsconfig.json"),
+    JSON.stringify({
+      compilerOptions: {
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        target: "ES2022",
+        strict: true,
+        noEmit: true,
+        types: ["vitest/globals"],
+      },
+      include: ["smoke.test.ts"],
+    }),
+  );
+  await writeFile(
+    join(testingConsumer, "smoke.test.ts"),
+    `
+import { expect, test } from "vitest";
+import {
+  describeDerivationDetectorContract,
+  describeEvidenceDeriverContract,
+} from "@jinn-network/evidence-derivation/testing";
+
+test("packed testing entrypoint imports with its explicit optional peer", () => {
+  expect(typeof describeEvidenceDeriverContract).toBe("function");
+  expect(typeof describeDerivationDetectorContract).toBe("function");
+});
+`,
+  );
+  await run(
+    "npm",
+    ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
+    { cwd: testingConsumer },
+  );
+  await run(
+    "npm",
+    ["exec", "--", "tsc", "--noEmit", "-p", "tsconfig.json"],
+    { cwd: testingConsumer },
+  );
+  await run(
+    "npm",
+    ["exec", "--", "vitest", "run", "smoke.test.ts"],
+    { cwd: testingConsumer },
+  );
   console.log(
-    "Packed derivation root/testing imports and archive boundary verified.",
+    "Packed derivation root isolation, /testing consumer, and archive boundary verified.",
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });

@@ -477,6 +477,42 @@ test("nested unknown extension literals withhold without leaking value or locati
   expect("record" in outcome).toBe(false);
 });
 
+test.each([
+  ["nested graph", { "@graph": [{ value: "private-graph-value" }] }],
+  [
+    "list containing a nested graph",
+    {
+      "@list": [
+        { "@graph": [{ value: "private-list-graph-value" }] },
+      ],
+    },
+  ],
+  [
+    "set containing a nested graph",
+    {
+      "@set": [
+        { "@graph": [{ value: "private-set-graph-value" }] },
+      ],
+    },
+  ],
+] as const)(
+  "unknown extension %s preserves fail-closed context through JSON-LD containers",
+  async (_name, extension) => {
+    const input = syntheticDerivationInput();
+    rewriteRecord(input, (document) => {
+      const root = (document["@graph"] as Array<Record<string, unknown>>).find(
+        (entity) => entity["@id"] === "./",
+      )!;
+      root["x-private-extension"] = extension;
+    });
+    const outcome = await deriver().derive(input);
+    expect(outcome.status).toBe("withheld");
+    expect(JSON.stringify(outcome)).not.toContain("private-");
+    expect(JSON.stringify(outcome)).not.toContain("x-private-extension");
+    expect("record" in outcome).toBe(false);
+  },
+);
+
 test("mutating returned bytes never mutates a repeated derivation", async () => {
   const service = deriver();
   const first = await service.derive(syntheticDerivationInput());
