@@ -314,6 +314,13 @@ export interface EvidenceRepository {
 `undefined` means the binding declares no finite application-level maximum, not that every backend
 can accept infinite data.
 
+The Repository prerequisite guarantees that the repository is non-proxy, its `capabilities` slot
+is a stable own data property, and the value is an inert immutable snapshot with a plain or null
+prototype and own immutable data fields. Publication reads only `maxObjectBytes` and ignores
+unknown future fields. Repository and snapshot Proxies, accessors, and inherited slots/limits are
+nonconforming and rejected by the Repository contract kit. This keeps conforming preflight
+side-effect-free.
+
 Before any repository or sink effect, publication verifies that every supplied record and artifact
 fits the target repository's declared `maxObjectBytes`. This is essential for bounded bindings such
 as standard raw-block IPFS. An oversize input fails with `REPOSITORY_CAPABILITY_EXCEEDED`.

@@ -96,13 +96,19 @@ The filesystem, OCI, and test repositories implement the property, and the share
 tests capability syntax plus the declared boundary. Because the affected packages are unpublished,
 this correction lands before the IPFS package rather than preserving an ambiguous v1 contract.
 
+The Repository prerequisite defines `capabilities` as an inert immutable snapshot with a plain or
+null prototype and only own immutable data fields. Unknown future fields remain semantically
+ignored. The IPFS repository is an ordinary non-proxy class instance whose `capabilities` class
+field is an own data slot. The binding exposes a frozen data object; it does not use accessors,
+inheritance, or proxy behavior to compute the limit.
+
 The binding then implements the widened contract:
 
 ```ts
 class IpfsEvidenceRepository implements EvidenceRepository {
-  readonly capabilities = {
+  readonly capabilities = Object.freeze({
     maxObjectBytes: MAX_STANDARD_IPFS_BLOCK_BYTES,
-  } as const;
+  });
 
   putRecord(
     family: EvidenceRecordFamily,

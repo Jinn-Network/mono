@@ -317,6 +317,8 @@ Branch from PR 7's exact reviewed head.
 Write failing tests for:
 
 - every record and artifact digest checked before effects;
+- repository preflight reads the canonical inert capability snapshot without interpreting unknown
+  future fields;
 - a declared `maxObjectBytes` violation before journal creation or remote writes;
 - `undefined` capability treated as no declared finite limit;
 - artifact writes sorted by digest;

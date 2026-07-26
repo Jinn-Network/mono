@@ -45,6 +45,11 @@ EvidenceRepositoryErrorCode = ... | "CONTENT_TOO_LARGE"
 Its updated contract kit passes against memory, filesystem, and OCI repositories. The IPFS plan
 does not reopen that contract.
 
+The binding exposes its finite limit through the prerequisite's canonical inert capability
+snapshot: an own class-field slot containing a frozen own data property on a plain object. The
+repository is non-proxy and does not compute the limit through an accessor, inherited value, or
+proxy behavior.
+
 Verify current dependency versions from their official package/release sources during
 implementation, then pin exact versions in the package lockfile. The locked architecture is:
 

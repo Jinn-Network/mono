@@ -108,6 +108,25 @@ Bindings without a smaller finite application-level limit expose `{}`. The IPFS 
 declares `2 * 1024 * 1024`. Publication preflights all supplied record and artifact bytes before
 external effects.
 
+The repository implementation object itself is not a Proxy, and its `capabilities` slot is an own
+data property rather than an accessor or inherited property. The contract kit rejects a repository
+Proxy before invoking any other reflection, inspects the slot descriptor before using its value,
+and proves the descriptor value remains stable for the repository lifetime. The slot need not be
+runtime non-writable; TypeScript `readonly` plus the stable-value contract remains the public
+surface.
+
+The capability value is an inert immutable snapshot, not a negotiation object or behavior-bearing
+port. It has either `Object.prototype` or `null` as its prototype, is non-extensible, and exposes
+only own non-writable, non-configurable data properties. `maxObjectBytes`, when present, is such an
+own data property; accessors and inherited limits are invalid. Unknown future own data properties
+remain permitted and are ignored semantically by v1 consumers, but they obey the same immutable
+snapshot rules. The repository returns the same snapshot, prototype, keys, descriptors, and values
+for its lifetime. Proxy objects are invalid and must be rejected before any other reflection
+because reflection itself can invoke proxy traps.
+
+These repository-slot and snapshot rules ensure capability preflight cannot invoke getters,
+setters, inherited behavior, proxy traps, or ambient I/O before the caller's intended effects.
+
 This is the only planned change to an existing public evidence contract. If implementation
 discovers another necessary cross-package contract change, stop and update the design before
 proceeding.
