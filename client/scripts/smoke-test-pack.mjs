@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
  * Validates the tarball shape produced by npm, matching `npm publish`.
- * Installs the pack with npm (same shape as consumers) then validates:
+ * Installs the pack with npm and Yarn 4 node-modules consumers, then validates:
  * 1) private runtime packages are bundled and their public modules import
- * 2) local bin execution via `npm exec jinn ...`
- * 3) no-install package execution via package-name bin alias (`npm exec --package <tarball> -- client ...`)
- * 4) legacy `npx -p <tarball> jinn ...`
+ * 2) the exact installed CLI loads through both package-manager layouts
+ * 3) local bin execution via `npm exec jinn ...`
+ * 4) no-install package execution via package-name bin alias (`npm exec --package <tarball> -- client ...`)
+ * 5) legacy `npx -p <tarball> jinn ...`
  * Expects cwd to be client/ (see package.json pack:smoke).
  */
 import { spawnSync } from 'node:child_process';
@@ -15,6 +16,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -168,6 +170,51 @@ try {
   const installedJinn = join(installedPackageRoot, 'dist', 'bin', 'jinn.js');
   runOrExit(process.execPath, [installedJinn, '--help'], 'exact installed jinn --help');
   runOrExit(process.execPath, [installedJinn, 'scrub', '--help'], 'exact installed jinn scrub --help');
+
+  const yarnConsumerDir = join(smokeDir, 'yarn-consumer');
+  mkdirSync(yarnConsumerDir);
+  writeFileSync(
+    join(yarnConsumerDir, 'package.json'),
+    `${JSON.stringify({
+      private: true,
+      packageManager: 'yarn@4.13.0',
+      dependencies: {
+        '@jinn-network/client': `file:${tarball}`,
+      },
+    }, null, 2)}\n`,
+  );
+  writeFileSync(
+    join(yarnConsumerDir, '.yarnrc.yml'),
+    'nodeLinker: node-modules\n',
+  );
+  writeFileSync(join(yarnConsumerDir, 'yarn.lock'), '');
+  runOrExit(
+    'corepack',
+    ['yarn', 'install'],
+    'Yarn 4 node-modules consumer install',
+    { cwd: yarnConsumerDir, stdio: 'inherit' },
+  );
+  const yarnInstalledJinn = join(
+    yarnConsumerDir,
+    'node_modules',
+    '@jinn-network',
+    'client',
+    'dist',
+    'bin',
+    'jinn.js',
+  );
+  runOrExit(
+    process.execPath,
+    [yarnInstalledJinn, '--help'],
+    'yarn consumer exact installed jinn --help',
+    { cwd: yarnConsumerDir },
+  );
+  runOrExit(
+    process.execPath,
+    [yarnInstalledJinn, 'scrub', '--help'],
+    'yarn consumer exact installed jinn scrub --help',
+    { cwd: yarnConsumerDir },
+  );
 
   runOrExit(
     process.execPath,
