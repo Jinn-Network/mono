@@ -6,6 +6,10 @@ import {
   test,
 } from "vitest";
 
+import {
+  assertStableImmutableEvidenceRepositoryCapabilities,
+} from "./capabilities.js";
+import { assertContentTooLargeRepositoryError } from "./contract-errors.js";
 import { assertRepositoryOperationActive } from "./errors.js";
 import {
   createArtifactReference,
@@ -19,7 +23,6 @@ import {
   type EvidenceArtifactReference,
   type EvidenceRecordReference,
   type EvidenceRepository,
-  type EvidenceRepositoryCapabilities,
   type RepositoryOperationOptions,
   type RepositoryWriteReceipt,
 } from "./types.js";
@@ -98,35 +101,6 @@ export class InMemoryEvidenceRepository implements EvidenceRepository {
   }
 }
 
-export function assertEvidenceRepositoryCapabilities(
-  value: unknown,
-): asserts value is EvidenceRepositoryCapabilities {
-  if (
-    value === null ||
-    typeof value !== "object" ||
-    Array.isArray(value)
-  ) {
-    throw new TypeError(
-      "EvidenceRepository.capabilities must be a non-null, non-array object.",
-    );
-  }
-  const maxObjectBytes = (
-    value as { readonly maxObjectBytes?: unknown }
-  ).maxObjectBytes;
-  if (
-    maxObjectBytes !== undefined &&
-    (
-      typeof maxObjectBytes !== "number" ||
-      !Number.isSafeInteger(maxObjectBytes) ||
-      maxObjectBytes <= 0
-    )
-  ) {
-    throw new TypeError(
-      "EvidenceRepository.capabilities.maxObjectBytes must be a positive safe integer when supplied.",
-    );
-  }
-}
-
 export interface EvidenceRepositoryContractContext {
   readonly repository: EvidenceRepository;
   readonly createObjectAtDeclaredLimit?: () => Uint8Array;
@@ -154,47 +128,11 @@ export function describeEvidenceRepositoryContract(
 
     test("exposes valid, stable, immutable capabilities", () => {
       const repository = context!.repository;
-      const capabilities = repository.capabilities;
-      assertEvidenceRepositoryCapabilities(capabilities);
-      const maxObjectBytes = capabilities.maxObjectBytes;
-
-      expect(repository.capabilities).toBe(capabilities);
-      expect(capabilities.maxObjectBytes).toBe(maxObjectBytes);
-
-      const attemptedValue = maxObjectBytes === 1 ? 2 : 1;
-      try {
-        Reflect.set(capabilities, "maxObjectBytes", attemptedValue);
-      } catch {
-        // A defensive immutable object may throw instead of returning false.
-      }
-      try {
-        expect(repository.capabilities).toBe(capabilities);
-        expect(capabilities.maxObjectBytes).toBe(maxObjectBytes);
-      } finally {
-        if (capabilities.maxObjectBytes !== maxObjectBytes) {
-          if (maxObjectBytes === undefined) {
-            Reflect.deleteProperty(capabilities, "maxObjectBytes");
-          } else {
-            Reflect.set(capabilities, "maxObjectBytes", maxObjectBytes);
-          }
-        }
-      }
-
-      if (maxObjectBytes !== undefined) {
-        try {
-          Reflect.deleteProperty(capabilities, "maxObjectBytes");
-        } catch {
-          // A defensive immutable object may throw instead of returning false.
-        }
-        try {
-          expect(repository.capabilities).toBe(capabilities);
-          expect(capabilities.maxObjectBytes).toBe(maxObjectBytes);
-        } finally {
-          if (capabilities.maxObjectBytes !== maxObjectBytes) {
-            Reflect.set(capabilities, "maxObjectBytes", maxObjectBytes);
-          }
-        }
-      }
+      expect(
+        assertStableImmutableEvidenceRepositoryCapabilities(
+          () => repository.capabilities,
+        ),
+      ).toBe(repository.capabilities);
     });
 
     test("enforces a declared finite object limit", async () => {
@@ -224,20 +162,12 @@ export function describeEvidenceRepositoryContract(
         oversized,
       );
       const oversizedArtifact = createArtifactReference(oversized);
-      await expect(
-        Promise.resolve().then(() =>
-          repository.putRecord("execution-evidence", oversized),
-        ),
-      ).rejects.toMatchObject({
-        name: "EvidenceRepositoryError",
-        code: "CONTENT_TOO_LARGE",
-      });
-      await expect(
-        Promise.resolve().then(() => repository.putArtifact(oversized)),
-      ).rejects.toMatchObject({
-        name: "EvidenceRepositoryError",
-        code: "CONTENT_TOO_LARGE",
-      });
+      await expectContentTooLarge(() =>
+        repository.putRecord("execution-evidence", oversized),
+      );
+      await expectContentTooLarge(() =>
+        repository.putArtifact(oversized),
+      );
       expect(await repository.getRecord(oversizedRecord)).toBeNull();
       expect(await repository.getArtifact(oversizedArtifact)).toBeNull();
     });
@@ -245,7 +175,9 @@ export function describeEvidenceRepositoryContract(
     test.each(EVIDENCE_RECORD_FAMILIES)(
       "round-trips %s records byte-for-byte",
       async (family) => {
-        const bytes = new TextEncoder().encode(`record:${family}`);
+        const bytes = new Uint8Array([
+          EVIDENCE_RECORD_FAMILIES.indexOf(family) + 1,
+        ]);
         const receipt = await context!.repository.putRecord(family, bytes);
 
         expect(receipt).toMatchObject({
@@ -260,7 +192,7 @@ export function describeEvidenceRepositoryContract(
     );
 
     test("round-trips independent artifact bytes", async () => {
-      const bytes = new Uint8Array([0, 1, 127, 128, 255]);
+      const bytes = new Uint8Array([255]);
       const receipt = await context!.repository.putArtifact(bytes);
 
       expect(receipt).toMatchObject({
@@ -274,8 +206,8 @@ export function describeEvidenceRepositoryContract(
     });
 
     test("returns null for missing content", async () => {
-      const recordBytes = new TextEncoder().encode("missing record");
-      const artifactBytes = new TextEncoder().encode("missing artifact");
+      const recordBytes = new Uint8Array([16]);
+      const artifactBytes = new Uint8Array([17]);
 
       expect(
         await context!.repository.getRecord(
@@ -290,7 +222,7 @@ export function describeEvidenceRepositoryContract(
     });
 
     test("makes identical writes idempotent", async () => {
-      const bytes = new TextEncoder().encode("same content");
+      const bytes = new Uint8Array([32]);
 
       const firstRecord = await context!.repository.putRecord(
         "result-evaluation",
@@ -303,7 +235,7 @@ export function describeEvidenceRepositoryContract(
       expect(firstRecord.status).toBe("created");
       expect(secondRecord).toEqual({ ...firstRecord, status: "existing" });
 
-      const artifactBytes = new TextEncoder().encode("same artifact content");
+      const artifactBytes = new Uint8Array([33]);
       const firstArtifact = await context!.repository.putArtifact(artifactBytes);
       const secondArtifact = await context!.repository.putArtifact(artifactBytes);
       expect(firstArtifact.status).toBe("created");
@@ -314,7 +246,7 @@ export function describeEvidenceRepositoryContract(
     });
 
     test("does not expose mutable stored buffers", async () => {
-      const source = new Uint8Array([1, 2, 3]);
+      const source = new Uint8Array([1]);
       const recordReceipt = await context!.repository.putRecord(
         "execution-verification",
         source,
@@ -328,17 +260,17 @@ export function describeEvidenceRepositoryContract(
       const firstArtifact = await context!.repository.getArtifact(
         artifactReceipt.reference,
       );
-      expect(firstRecord).toEqual(new Uint8Array([1, 2, 3]));
-      expect(firstArtifact).toEqual(new Uint8Array([1, 2, 3]));
+      expect(firstRecord).toEqual(new Uint8Array([1]));
+      expect(firstArtifact).toEqual(new Uint8Array([1]));
 
-      firstRecord![1] = 98;
-      firstArtifact![1] = 98;
+      firstRecord![0] = 98;
+      firstArtifact![0] = 98;
       expect(
         await context!.repository.getRecord(recordReceipt.reference),
-      ).toEqual(new Uint8Array([1, 2, 3]));
+      ).toEqual(new Uint8Array([1]));
       expect(
         await context!.repository.getArtifact(artifactReceipt.reference),
-      ).toEqual(new Uint8Array([1, 2, 3]));
+      ).toEqual(new Uint8Array([1]));
     });
 
     test("honors an already-aborted signal", async () => {
@@ -352,4 +284,16 @@ export function describeEvidenceRepositoryContract(
       ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
     });
   });
+}
+
+async function expectContentTooLarge(
+  operation: () => Promise<unknown>,
+): Promise<void> {
+  let error: unknown;
+  try {
+    await Promise.resolve().then(operation);
+  } catch (caught) {
+    error = caught;
+  }
+  assertContentTooLargeRepositoryError(error);
 }

@@ -9,6 +9,20 @@ Protocol record families. Artifacts are stored independently.
 The contract standardizes persistence capabilities, not a storage layout or wire
 protocol. Implementations can be local or remote.
 
+## Repository capabilities
+
+Every repository exposes one stable, immutable `capabilities` object for its
+lifetime. The optional `maxObjectBytes` field, when present, is a positive safe
+integer declaring the inclusive maximum accepted byte length for either a record
+or an artifact. A repository must reject a larger object before external effects
+with `EvidenceRepositoryError("CONTENT_TOO_LARGE")`.
+
+An absent `maxObjectBytes` means that the repository declares no finite
+application-level limit; it does not guarantee that arbitrarily large objects
+will succeed. Consumers of version 0.1 must ignore unknown capability fields.
+Implementations must nevertheless keep the entire capability snapshot,
+including unknown fields, immutable.
+
 ## Identity and integrity
 
 - A digest is the lowercase string `sha256:` followed by exactly 64 hexadecimal
@@ -32,6 +46,7 @@ using one of these stable codes:
 - `REFERENCE_CONFLICT`
 - `DEPENDENCY_UNAVAILABLE`
 - `ACCESS_DENIED`
+- `CONTENT_TOO_LARGE`
 - `OPERATION_ABORTED`
 - `IO_FAILURE`
 

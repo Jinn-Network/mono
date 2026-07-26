@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 
 import {
   EVIDENCE_RECORD_FAMILIES,
@@ -11,35 +11,24 @@ import {
   parseSha256Digest,
 } from "./index.js";
 import {
-  InMemoryEvidenceRepository,
   assertEvidenceRepositoryCapabilities,
+} from "./capabilities.js";
+import {
+  InMemoryEvidenceRepository,
   describeEvidenceRepositoryContract,
 } from "./testing.js";
+import * as testingApi from "./testing.js";
 
-const BOUNDED_OBJECT_BYTES = 64;
-const boundedContractObservations = {
-  artifactAtLimit: 0,
-  artifactOversize: 0,
-  fixture: 0,
-  recordAtLimit: 0,
-  recordOversize: 0,
-};
+const BOUNDED_OBJECT_BYTES = 1;
 
 class BoundedInMemoryEvidenceRepository extends InMemoryEvidenceRepository {
   override readonly capabilities = Object.freeze({
     maxObjectBytes: BOUNDED_OBJECT_BYTES,
+    futureCapability: "stable",
   });
 
-  #observe(kind: "artifact" | "record", bytes: Uint8Array): void {
-    if (bytes.byteLength === BOUNDED_OBJECT_BYTES) {
-      boundedContractObservations[
-        kind === "artifact" ? "artifactAtLimit" : "recordAtLimit"
-      ] += 1;
-    }
+  #assertWithinLimit(bytes: Uint8Array): void {
     if (bytes.byteLength > BOUNDED_OBJECT_BYTES) {
-      boundedContractObservations[
-        kind === "artifact" ? "artifactOversize" : "recordOversize"
-      ] += 1;
       throw new EvidenceRepositoryError(
         "CONTENT_TOO_LARGE",
         "The object exceeds the repository limit.",
@@ -50,14 +39,14 @@ class BoundedInMemoryEvidenceRepository extends InMemoryEvidenceRepository {
   override putRecord(
     ...args: Parameters<InMemoryEvidenceRepository["putRecord"]>
   ): ReturnType<InMemoryEvidenceRepository["putRecord"]> {
-    this.#observe("record", args[1]);
+    this.#assertWithinLimit(args[1]);
     return super.putRecord(...args);
   }
 
   override putArtifact(
     ...args: Parameters<InMemoryEvidenceRepository["putArtifact"]>
   ): ReturnType<InMemoryEvidenceRepository["putArtifact"]> {
-    this.#observe("artifact", args[0]);
+    this.#assertWithinLimit(args[0]);
     return super.putArtifact(...args);
   }
 }
@@ -128,6 +117,17 @@ describe("repository capabilities", () => {
     ).toBe("CONTENT_TOO_LARGE");
   });
 
+  test("preserves the cause supplied to a content-too-large error", () => {
+    const cause = new Error("binding limit");
+    const error = new EvidenceRepositoryError(
+      "CONTENT_TOO_LARGE",
+      "too large",
+      { cause },
+    );
+
+    expect(error.cause).toBe(cause);
+  });
+
   test.each([
     0,
     -1,
@@ -158,6 +158,21 @@ describe("repository capabilities", () => {
       ),
     ).not.toThrow();
   });
+
+  test.each([1, Number.MAX_SAFE_INTEGER])(
+    "accepts valid declared limit %s without allocating it",
+    (maxObjectBytes) => {
+      expect(() =>
+        assertEvidenceRepositoryCapabilities({ maxObjectBytes }),
+      ).not.toThrow();
+    },
+  );
+
+  test("does not export capability validation from the testing subpath", () => {
+    expect(testingApi).not.toHaveProperty(
+      "assertEvidenceRepositoryCapabilities",
+    );
+  });
 });
 
 describeEvidenceRepositoryContract(async () => ({
@@ -166,18 +181,5 @@ describeEvidenceRepositoryContract(async () => ({
 
 describeEvidenceRepositoryContract(async () => ({
   repository: new BoundedInMemoryEvidenceRepository(),
-  createObjectAtDeclaredLimit: () => {
-    boundedContractObservations.fixture += 1;
-    return new Uint8Array(BOUNDED_OBJECT_BYTES);
-  },
+  createObjectAtDeclaredLimit: () => new Uint8Array(BOUNDED_OBJECT_BYTES),
 }));
-
-afterAll(() => {
-  expect(boundedContractObservations).toEqual({
-    artifactAtLimit: 1,
-    artifactOversize: 1,
-    fixture: 1,
-    recordAtLimit: 1,
-    recordOversize: 1,
-  });
-});
