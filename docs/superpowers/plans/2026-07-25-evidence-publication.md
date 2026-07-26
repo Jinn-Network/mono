@@ -248,7 +248,9 @@ frame mismatch, non-monotonic revisions, and states that skip required predecess
 Export `describePublicationJournalStoreContract(factory)` and run it against an in-memory CAS
 implementation in `/testing`. The contract kit must create, load, and compare-and-swap entries
 whose pending and confirmed placements carry nontrivial opaque state. It must prove that the exact
-format IRI and opaque JSON value survive every clone and codec boundary without reinterpretation.
+format IRI and arbitrary opaque bytes survive every clone and codec boundary without
+reinterpretation. At least one fixture uses a non-JSON, non-UTF-8 byte sequence such as
+`Uint8Array.of(0xff, 0xfe, 0x00, 0x80)` and compares it byte-for-byte after replay.
 
 ### Task 5: Filesystem journal binding
 
@@ -270,6 +272,11 @@ entries/sha256/<prefix>/<remaining-hex>/<zero-padded-revision>.json
 Requirements:
 
 - new root mode `0700`, files `0600`;
+- on POSIX platforms, reject a configured root, managed directory, or managed file whose `uid`
+  differs from `process.getuid()`; do not inspect or change ownership or modes above the configured
+  root;
+- before use, tighten a current-user-owned existing managed root or directory from mode `0777` to
+  `0700` and a managed regular file from `0666` to `0600`;
 - reject lexical path escapes and pre-existing symlinks at every managed component;
 - use `O_NOFOLLOW` for managed leaf opens where Node exposes it, reject non-regular files, and
   revalidate the configured path anchors and managed directories around pathname-based operations;
@@ -296,9 +303,16 @@ Requirements:
 Write the failing coverage in `src/fs/store.test.ts` and `src/fs/store-faults.test.ts` before
 changing `src/fs/store.ts`, `src/fs/paths.ts`, or `src/fs/validation.ts`. Run the journal contract
 kit plus corruption, permission, static traversal/symlink, stale-writer, concurrent-writer, and
-crash tests against temporary directories. In this task, a race test means two legitimate journal
-writers competing for the same immutable revision; an active same-authority path-replacement race
-is outside the v1 threat model.
+crash tests against temporary directories. POSIX-gated permission tests must prove the exact mode
+tightening above and use a focused filesystem-stat test double to prove foreign ownership is
+rejected without requiring elevated privileges.
+
+Add one deterministic fault-injection test that replaces a managed component after one successful
+anchor validation and proves that the following validation returns `JOURNAL_CORRUPT`. The test
+proves detection only; it must not assert containment or absence of an outside effect during the
+replacement window. In this task, a concurrent-writer race means two legitimate journal writers
+competing for the same immutable revision. An active same-authority path-replacement race remains
+outside the v1 threat model.
 
 ### Task 6: PR 7 distribution gate
 

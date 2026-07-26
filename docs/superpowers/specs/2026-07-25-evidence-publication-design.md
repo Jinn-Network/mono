@@ -385,12 +385,20 @@ must be controlled by the application operator and must not be concurrently muta
 process with the same or greater filesystem authority.
 
 Within that trust boundary, the binding must reject lexical path escapes, pre-existing symlinks at
-every managed component, non-regular managed files, malformed or corrupt revisions, unsafe
-permissions where the platform exposes POSIX ownership and modes, and stale or conflicting
-writers. It must use non-following leaf opens where Node exposes them and revalidate managed
+every managed component, non-regular managed files, malformed or corrupt revisions, and stale or
+conflicting writers. Where the platform exposes POSIX ownership, a configured root, managed
+directory, or managed file owned by another user is rejected. New managed directories and files
+use `0700` and `0600`; an existing current-user-owned managed component with a broader mode is
+tightened to the corresponding private mode before use. Ancestors above the configured root are an
+operator-controlled precondition rather than managed journal state, so the binding neither changes
+their modes nor claims to defend against their hostile mutation.
+
+The binding must use non-following leaf opens where Node exposes them and revalidate managed
 components around pathname-based operations so detectable replacement or corruption fails closed.
-The journal contract and filesystem tests cover these static and accidental conditions, concurrent
-journal writers, cancellation, and crash recovery.
+The journal contract and filesystem tests cover these static and accidental conditions,
+deterministically detected between-check replacement, concurrent journal writers, cancellation,
+and crash recovery. A detection test does not imply that pathname-based operations can contain the
+effect of a hostile replacement before the following validation.
 
 Node 22 does not expose descriptor-relative child operations such as `openat` and `linkat`.
 Therefore the portable v1 binding does not claim containment against an equally privileged local
