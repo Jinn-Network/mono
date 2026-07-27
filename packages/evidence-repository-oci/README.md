@@ -28,6 +28,28 @@ against the Evidence Repository reference.
 The normative profile, JSON Schema, and golden manifest vectors ship under
 `profiles/` and `fixtures/`.
 
+## ORAS adapter
+
+The working registry adapter requires ORAS `>=1.3.0 <2` and is tested with
+1.3.2:
+
+```ts
+import {
+  createOrasCliEvidenceRepository,
+} from "@jinn-network/evidence-repository-oci";
+
+const repository = await createOrasCliEvidenceRepository({
+  repository: "registry.example.com/jinn/evidence",
+  registryConfigPath: "/private/path/to/registry-config.json",
+});
+```
+
+The adapter invokes `oras blob push/fetch` and `oras manifest push/fetch`
+without a shell. It constructs and verifies manifest bytes in this package.
+Authentication remains entirely owned by ORAS through its registry config;
+passwords and tokens are intentionally not JavaScript options or command-line
+arguments.
+
 ## Development
 
 Use Node 22, Yarn 4.13.0, and ORAS 1.3.2 for registry integration:
@@ -38,4 +60,5 @@ yarn check:profile
 yarn typecheck
 yarn test
 yarn build
+yarn pack:smoke
 ```
