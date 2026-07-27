@@ -338,7 +338,7 @@ __metadata:
   resolution: "@jinn-network/core@workspace:."
   dependencies:
     "@huggingface/transformers": "npm:^4.2.0"
-    "@jinn-network/plugin": "npm:0.1.1"
+    "@jinn-network/plugin": "npm:0.1.2"
     "@lmoe/gliner-onnx": "npm:0.1.0"
     "@noble/hashes": "npm:^2.2.0"
     "@secretlint/core": "npm:^13.0.2"

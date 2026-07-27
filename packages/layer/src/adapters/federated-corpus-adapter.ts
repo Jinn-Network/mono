@@ -20,7 +20,9 @@ export interface FederatedCorpusAdapterDeps {
   timeoutMs?: number;
 }
 
-export const DEFAULT_FEDERATED_CHILD_TIMEOUT_MS = 5_000;
+// Cold public corpus reads can take longer than five seconds while still
+// completing inside Hermes' 15-second session-pickup deadline.
+export const DEFAULT_FEDERATED_CHILD_TIMEOUT_MS = 10_000;
 
 export function createFederatedCorpusAdapter(
   deps: FederatedCorpusAdapterDeps,
