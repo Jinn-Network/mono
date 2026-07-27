@@ -51,6 +51,7 @@ export function resolvePluginRoot(): string {
   requireAsset(pluginRoot, 'skills/learn/SKILL.md');
   requireAsset(pluginRoot, 'hooks/session-start', 'plugin assets may be stale or incomplete; rebuild the plugin');
   requireAsset(pluginRoot, 'hooks/hooks.json', 'plugin assets may be stale or incomplete; rebuild the plugin');
+  requireAsset(pluginRoot, 'hooks/post-tool-use', 'plugin assets may be stale or incomplete; rebuild the plugin');
   requireAsset(pluginRoot, '.claude-plugin/plugin.json', 'plugin manifest missing; learner attribution would be silently dropped — rebuild the plugin');
   return pluginRoot;
 }

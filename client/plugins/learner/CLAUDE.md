@@ -17,6 +17,7 @@ When a session starts, the harness adapter provides the task payload and paths. 
 
 **Hook:**
 - `hooks/session-start` — runs once at session start; ensures `implStateDir` is a git repo and sets `claude-code-learner` author identity.
+- `hooks/post-tool-use` — on Bash/Shell PostToolUseFailure (and defensive PostToolUse), appends non-empty failed-test working-tree diffs to `$WORKING_DIR/.execute/intermediate-failure-diffs.json` for harvest (§10 field 4).
 
 ## Conventions
 
