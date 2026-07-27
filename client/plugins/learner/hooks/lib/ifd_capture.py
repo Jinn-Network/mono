@@ -54,9 +54,12 @@ def exit_code_from_payload(payload: dict) -> Optional[int]:
     PostToolUse: only when tool_response carries an explicit numeric exit code.
     """
     event = payload.get("hook_event_name") or payload.get("hookEventName")
-    if payload.get("is_interrupt") is True:
+    if payload.get("is_interrupt") is True or payload.get("isInterrupt") is True:
         return None
-    resp_code = _exit_code_from_response(payload.get("tool_response"))
+    tool_response = payload.get("tool_response")
+    if tool_response is None:
+        tool_response = payload.get("toolResponse")
+    resp_code = _exit_code_from_response(tool_response)
     if resp_code is not None:
         return resp_code
     if event in ("PostToolUseFailure", "PostToolUseFailed"):
@@ -143,6 +146,11 @@ def handle_hook_payload(payload: dict, working_dir: Path) -> None:
     tool = payload.get("tool_name") or payload.get("toolName") or ""
     if tool not in SHELL_TOOLS:
         return
+    # Stage 1: lazy-pin session base on the first shell hook that sees repo/.git,
+    # including success / non-test Bash — not only the first failed test. Otherwise
+    # commits between explore and the first failure silently move the baseline.
+    repo_root = working_dir / "repo"
+    base = ensure_session_base(working_dir, repo_root)
     tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
     if not isinstance(tool_input, dict):
         return
@@ -152,8 +160,8 @@ def handle_hook_payload(payload: dict, working_dir: Path) -> None:
     code = exit_code_from_payload(payload)
     if code is None or code == 0:
         return
-    repo_root = working_dir / "repo"
-    base = ensure_session_base(working_dir, repo_root)
+    if base is None:
+        base = ensure_session_base(working_dir, repo_root)
     if base is None:
         return
     diff = accepted_diff(repo_root, base)

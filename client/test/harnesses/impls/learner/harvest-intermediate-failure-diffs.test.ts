@@ -129,4 +129,21 @@ describe('harvestOutput — intermediateFailureDiffs (#2230)', () => {
     expect(out.intermediateFailureDiffs).toEqual(['diff A']);
     expect(out.solutionPayload).toBeUndefined();
   });
+
+  it('filters non-string / empty entries and omits when nothing remains', async () => {
+    writeTypedPayload(workingDir, {
+      schemaVersion: 'swe-rebench-v2-solution.v1',
+      patch: 'diff --git a/foo b/foo\n@@ -1 +1 @@\n-old\n+new\n',
+    });
+    writeIfd(workingDir, ['keep-me', 42, null, '', { nope: true }]);
+
+    const out = await harvestOutput(workingDir, 'solve-only', {
+      id: 'task-1',
+      description: 'd',
+      solverType: 'swe-rebench-v2.v1',
+      role: 'restoration',
+    } as never);
+
+    expect(out.intermediateFailureDiffs).toEqual(['keep-me']);
+  });
 });

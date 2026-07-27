@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -20,30 +20,37 @@ const HOOK = join(PLUGIN_HOOKS, 'post-tool-use');
 
 function initRepo(repo: string): string {
   mkdirSync(repo, { recursive: true });
-  execFileSync('git', ['init', '--initial-branch=main'], { cwd: repo });
-  execFileSync('git', ['config', 'user.email', 't@test'], { cwd: repo });
-  execFileSync('git', ['config', 'user.name', 't'], { cwd: repo });
+  spawnSync('git', ['init', '--initial-branch=main'], { cwd: repo, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.email', 't@test'], { cwd: repo, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.name', 't'], { cwd: repo, encoding: 'utf8' });
   writeFileSync(join(repo, 'a.py'), 'x = 1\n');
-  execFileSync('git', ['add', 'a.py'], { cwd: repo });
-  execFileSync('git', ['commit', '-m', 'base'], { cwd: repo });
-  return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+  spawnSync('git', ['add', 'a.py'], { cwd: repo, encoding: 'utf8' });
+  spawnSync('git', ['commit', '-m', 'base'], { cwd: repo, encoding: 'utf8' });
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' });
+  return (head.stdout ?? '').trim();
 }
 
-function runHook(workingDir: string, stdinObj: unknown): { status: number; stderr: string } {
+function runHook(
+  workingDir: string,
+  stdinObj: unknown,
+): { status: number; stdout: string; stderr: string } {
   const stdin = JSON.stringify(stdinObj);
-  try {
-    execFileSync('python3', [HOOK], {
-      cwd: workingDir,
-      env: { ...process.env, WORKING_DIR: workingDir },
-      input: stdin,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return { status: 0, stderr: '' };
-  } catch (err: unknown) {
-    const e = err as { status?: number; stderr?: string };
-    return { status: e.status ?? 1, stderr: e.stderr ?? '' };
-  }
+  const r = spawnSync('python3', [HOOK], {
+    cwd: workingDir,
+    env: { ...process.env, WORKING_DIR: workingDir },
+    input: stdin,
+    encoding: 'utf8',
+  });
+  return {
+    status: r.status ?? 1,
+    stdout: r.stdout ?? '',
+    stderr: r.stderr ?? '',
+  };
+}
+
+function expectHookOk(r: { status: number; stdout: string }): void {
+  expect(r.status).toBe(0);
+  expect(r.stdout).toBe('');
 }
 
 function diffsPath(workingDir: string): string {
@@ -53,11 +60,12 @@ function diffsPath(workingDir: string): string {
 describe('learner PostToolUse(Failure) intermediate-failure-diffs hook (#2230)', () => {
   let workingDir: string;
   let repo: string;
+  let baseHead: string;
 
   beforeEach(() => {
     workingDir = mkdtempSync(join(tmpdir(), 'jinn-ifd-hook-'));
     repo = join(workingDir, 'repo');
-    initRepo(repo);
+    baseHead = initRepo(repo);
     // Dirty tree vs HEAD — the failed-attempt boundary.
     writeFileSync(join(repo, 'a.py'), 'x = 2\n');
   });
@@ -74,13 +82,13 @@ describe('learner PostToolUse(Failure) intermediate-failure-diffs hook (#2230)',
       error: 'Command exited with non-zero status code 1',
       is_interrupt: false,
     });
-    expect(r.status).toBe(0);
+    expectHookOk(r);
     expect(existsSync(diffsPath(workingDir))).toBe(true);
     const arr = JSON.parse(readFileSync(diffsPath(workingDir), 'utf8')) as string[];
     expect(arr).toHaveLength(1);
     expect(arr[0]).toContain('a.py');
-    expect(readFileSync(join(workingDir, '.execute', 'session-repo-base'), 'utf8').trim()).toMatch(
-      /^[0-9a-f]{40}$/,
+    expect(readFileSync(join(workingDir, '.execute', 'session-repo-base'), 'utf8').trim()).toBe(
+      baseHead,
     );
   });
 
@@ -92,13 +100,13 @@ describe('learner PostToolUse(Failure) intermediate-failure-diffs hook (#2230)',
       error: 'Command exited with non-zero status code 1',
       is_interrupt: false,
     };
-    expect(runHook(workingDir, payload).status).toBe(0);
-    expect(runHook(workingDir, payload).status).toBe(0);
+    expectHookOk(runHook(workingDir, payload));
+    expectHookOk(runHook(workingDir, payload));
     const arr = JSON.parse(readFileSync(diffsPath(workingDir), 'utf8')) as string[];
     expect(arr).toHaveLength(1);
   });
 
-  it('ignores non-test Bash failures (ls)', () => {
+  it('ignores non-test Bash failures (ls) but still pins session base', () => {
     const r = runHook(workingDir, {
       hook_event_name: 'PostToolUseFailure',
       tool_name: 'Bash',
@@ -106,8 +114,11 @@ describe('learner PostToolUse(Failure) intermediate-failure-diffs hook (#2230)',
       error: 'Command exited with non-zero status code 1',
       is_interrupt: false,
     });
-    expect(r.status).toBe(0);
+    expectHookOk(r);
     expect(existsSync(diffsPath(workingDir))).toBe(false);
+    expect(readFileSync(join(workingDir, '.execute', 'session-repo-base'), 'utf8').trim()).toBe(
+      baseHead,
+    );
   });
 
   it('ignores PostToolUse with exit 0 for vitest', () => {
@@ -117,7 +128,7 @@ describe('learner PostToolUse(Failure) intermediate-failure-diffs hook (#2230)',
       tool_input: { command: 'vitest run' },
       tool_response: { stdout: 'ok', stderr: '', exit_code: 0, interrupted: false, isImage: false },
     });
-    expect(r.status).toBe(0);
+    expectHookOk(r);
     expect(existsSync(diffsPath(workingDir))).toBe(false);
   });
 
@@ -128,9 +139,69 @@ describe('learner PostToolUse(Failure) intermediate-failure-diffs hook (#2230)',
       tool_input: { command: 'npm test' },
       tool_response: { stdout: '', stderr: 'fail', exit_code: 1, interrupted: false, isImage: false },
     });
-    expect(r.status).toBe(0);
+    expectHookOk(r);
     const arr = JSON.parse(readFileSync(diffsPath(workingDir), 'utf8')) as string[];
     expect(arr).toHaveLength(1);
+  });
+
+  it('captures camelCase toolResponse / toolName PostToolUse payloads', () => {
+    const r = runHook(workingDir, {
+      hookEventName: 'PostToolUse',
+      toolName: 'Bash',
+      toolInput: { command: 'pytest' },
+      toolResponse: { exitCode: 1 },
+    });
+    expectHookOk(r);
+    const arr = JSON.parse(readFileSync(diffsPath(workingDir), 'utf8')) as string[];
+    expect(arr).toHaveLength(1);
+  });
+
+  it('keeps the first-pinned session base after HEAD moves', () => {
+    // Explore Bash pins base before any failure.
+    expectHookOk(
+      runHook(workingDir, {
+        hook_event_name: 'PostToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'ls' },
+        tool_response: { exit_code: 0 },
+      }),
+    );
+    expect(readFileSync(join(workingDir, '.execute', 'session-repo-base'), 'utf8').trim()).toBe(
+      baseHead,
+    );
+
+    // Agent commits mid-session — base must not follow HEAD.
+    writeFileSync(join(repo, 'a.py'), 'x = 3\n');
+    spawnSync('git', ['add', 'a.py'], { cwd: repo, encoding: 'utf8' });
+    spawnSync('git', ['commit', '-m', 'mid'], { cwd: repo, encoding: 'utf8' });
+    writeFileSync(join(repo, 'a.py'), 'x = 4\n');
+
+    expectHookOk(
+      runHook(workingDir, {
+        hook_event_name: 'PostToolUseFailure',
+        tool_name: 'Bash',
+        tool_input: { command: 'pytest' },
+        error: 'Command exited with non-zero status code 1',
+      }),
+    );
+    expect(readFileSync(join(workingDir, '.execute', 'session-repo-base'), 'utf8').trim()).toBe(
+      baseHead,
+    );
+    const arr = JSON.parse(readFileSync(diffsPath(workingDir), 'utf8')) as string[];
+    expect(arr).toHaveLength(1);
+    expect(arr[0]).toContain('x = 4');
+  });
+
+  it('does not append when the working tree matches the session base', () => {
+    writeFileSync(join(repo, 'a.py'), 'x = 1\n'); // clean vs base HEAD
+    const r = runHook(workingDir, {
+      hook_event_name: 'PostToolUseFailure',
+      tool_name: 'Bash',
+      tool_input: { command: 'pytest' },
+      error: 'Command exited with non-zero status code 1',
+    });
+    expectHookOk(r);
+    expect(existsSync(diffsPath(workingDir))).toBe(false);
   });
 
   it('no-ops when repo/.git is missing (exit 0)', () => {
@@ -142,7 +213,7 @@ describe('learner PostToolUse(Failure) intermediate-failure-diffs hook (#2230)',
       tool_input: { command: 'pytest' },
       error: 'Command exited with non-zero status code 1',
     });
-    expect(r.status).toBe(0);
+    expectHookOk(r);
     expect(existsSync(diffsPath(workingDir))).toBe(false);
   });
 
@@ -154,7 +225,7 @@ describe('learner PostToolUse(Failure) intermediate-failure-diffs hook (#2230)',
       error: 'Interrupted',
       is_interrupt: true,
     });
-    expect(r.status).toBe(0);
+    expectHookOk(r);
     expect(existsSync(diffsPath(workingDir))).toBe(false);
   });
 });

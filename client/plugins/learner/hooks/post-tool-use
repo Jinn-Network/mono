@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -11,6 +12,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
 from ifd_capture import handle_hook_payload  # noqa: E402
+
+
+def os_environ_working_dir() -> Path | None:
+    value = (os.environ.get("WORKING_DIR") or os.environ.get("JINN_WORKING_DIR") or "").strip()
+    if not value:
+        return None
+    return Path(value)
 
 
 def main() -> int:
@@ -30,15 +38,6 @@ def main() -> int:
         print(f"post-tool-use: swallowed error: {exc}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
     return 0
-
-
-def os_environ_working_dir() -> Path | None:
-    import os
-
-    value = (os.environ.get("WORKING_DIR") or os.environ.get("JINN_WORKING_DIR") or "").strip()
-    if not value:
-        return None
-    return Path(value)
 
 
 if __name__ == "__main__":
