@@ -514,6 +514,27 @@ class SqliteLocalOperationsStore implements LocalOperationsStore {
       status: string;
       count: number;
     }>;
+    const foreign = database.prepare(`
+      SELECT
+        (SELECT count(*) FROM indexer_checkpoints
+          WHERE generation_id = ? AND source_id <> ?) +
+        (SELECT count(*) FROM processed_cursors
+          WHERE generation_id = ? AND source_id <> ?) +
+        (SELECT count(*) FROM indexing_outcomes
+          WHERE generation_id = ? AND source_id <> ?) AS count
+    `).get(
+      generationId,
+      sourceId,
+      generationId,
+      sourceId,
+      generationId,
+      sourceId,
+    ) as { count: number };
+    if (foreign.count !== 0) {
+      publicationCorrupt(
+        "The active generation contains indexing state for a foreign source.",
+      );
+    }
     const indexed = outcomes.find((row) => row.status === "indexed")?.count ?? 0;
     const failed = outcomes.find((row) => row.status === "failed")?.count ?? 0;
     const invalidCount = (value: number) =>

@@ -96,6 +96,7 @@ __metadata:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
     "@jinn-network/evidence-repository-fs": "npm:0.1.0"
+    "@jinn-network/execution-recorder": "npm:0.1.0"
     "@types/better-sqlite3": "npm:7.6.13"
     "@types/node": "npm:^22.0.0"
     better-sqlite3: "npm:13.0.1"
@@ -126,6 +127,20 @@ __metadata:
   resolution: "@jinn-network/evidence-repository@portal:../evidence-repository::locator=%40jinn-network%2Fevidence-local-runtime%40workspace%3A."
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/execution-recorder@portal:../execution-recorder::locator=%40jinn-network%2Fevidence-local-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/execution-recorder@portal:../execution-recorder::locator=%40jinn-network%2Fevidence-local-runtime%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
   peerDependencies:
     vitest: ^4.1.8
   peerDependenciesMeta:
