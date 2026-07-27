@@ -64,4 +64,9 @@ def test_installable_product_docs_describe_parked_stage2_not_deleted_stage1_surf
     assert "local" in description
 
     plugin_readme = text_by_path[APP_ROOT / "plugins" / "jinn" / "README.md"]
-    assert "[JINN.md](../../JINN.md)" in plugin_readme
+    assert (
+        "**No separate search. No slash commands. Just use Hermes normally.**"
+        in plugin_readme
+    )
+    assert "How should a Jinn evaluator handle Docker failures?" in plugin_readme
+    assert "JINN.md" not in plugin_readme
