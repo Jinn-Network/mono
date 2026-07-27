@@ -8,8 +8,67 @@ const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'evidence');
 const evidenceDirectories = [
   'protocol', 'repository', 'repository-oci', 'discovery', 'catalog-sqlite',
-  'execution-recorder', 'attestation-issuer', 'local-runtime',
+  'execution-recorder', 'attestation-issuer', 'derivation', 'local-runtime',
 ];
+
+const DERIVATION_FORBIDDEN_PACKAGES = [
+  '@huggingface/transformers',
+  '@jinn-network/attestation-issuer',
+  '@jinn-network/evidence-catalog-sqlite',
+  '@jinn-network/evidence-derivation-ml',
+  '@jinn-network/evidence-discovery',
+  '@jinn-network/evidence-local-runtime',
+  '@jinn-network/evidence-publication',
+  '@jinn-network/evidence-repository',
+  '@jinn-network/execution-recorder',
+  '@lmoe/gliner-onnx',
+  'better-sqlite3',
+  'node:dgram',
+  'node:dns',
+  'node:fs',
+  'node:http',
+  'node:http2',
+  'node:https',
+  'node:net',
+  'node:tls',
+  'viem',
+];
+
+const DERIVATION_ALLOWED_DEPENDENCIES = [
+  '@jinn-network/evidence-protocol',
+  '@noble/hashes',
+  '@secretlint/core',
+  '@secretlint/secretlint-rule-preset-recommend',
+  'canonicalize',
+  'zod',
+];
+
+const DERIVATION_ALLOWED_DEV_DEPENDENCIES = [
+  '@types/node',
+  'typescript',
+  'vitest',
+];
+
+const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
+const ambientNetworkIdentifier = new RegExp(
+  String.raw`(?<![\w$."'\x60])(?:${AMBIENT_NETWORK_APIS.join('|')})\b`,
+  'g',
+);
+const ambientNetworkGlobal = new RegExp(
+  String.raw`\b(?:globalThis|global)\s*(?:(?:\.|\?\.)\s*(?:${AMBIENT_NETWORK_APIS.join('|')})\b|(?:\?\.)?\s*\[\s*["'](?:${AMBIENT_NETWORK_APIS.join('|')})["']\s*\])`,
+  'g',
+);
+
+function ambientNetworkUsesInFiles(sourceFiles) {
+  return sourceFiles.flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    const identifiers = [...source.matchAll(ambientNetworkIdentifier)]
+      .map((match) => `${relative(root, file)} -> ${match[0]}`);
+    const globals = [...source.matchAll(ambientNetworkGlobal)]
+      .map((match) => `${relative(root, file)} -> ${match[0]}`);
+    return [...identifiers, ...globals];
+  }).sort();
+}
 
 function files(directory) {
   if (!existsSync(directory)) return [];
@@ -122,7 +181,52 @@ test('Discovery boundary checks catch bare, relative, and root-helper Journal es
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
-test('evidence source boundaries remain one-way after discovery consolidation', () => {
+test('Derivation boundary checks catch package, I/O, and local-path escapes', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-derivation-boundary-'));
+  try {
+    const source = join(fixture, 'src');
+    const forbidden = join(fixture, 'forbidden');
+    mkdirSync(source); mkdirSync(forbidden);
+    writeFileSync(join(source, 'source.ts'), [
+      'import "@jinn-network/evidence-repository";',
+      'export * from "@jinn-network/evidence-publication";',
+      'await import("@jinn-network/evidence-discovery");',
+      'require("@jinn-network/execution-recorder");',
+      'import "node:fs/promises";',
+      'import "node:http";',
+      'export * from "node:https";',
+      'await import("node:net");',
+      'require("node:dns/promises");',
+      'import "@huggingface/transformers";',
+      'import "../forbidden/local.js";',
+    ].join('\n'));
+    assert.equal(
+      forbiddenImports(source, DERIVATION_FORBIDDEN_PACKAGES, [forbidden]).length,
+      11,
+    );
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('Derivation boundary checks catch ambient network APIs without imports', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-derivation-network-boundary-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'source.ts'), AMBIENT_NETWORK_APIS.flatMap((api) => [
+      `${api};`,
+      `globalThis.${api};`,
+      `globalThis[${JSON.stringify(api)}];`,
+      `globalThis?.${api};`,
+      `globalThis?.[${JSON.stringify(api)}];`,
+    ]).join('\n'));
+    assert.equal(
+      ambientNetworkUsesInFiles(files(source)).length,
+      AMBIENT_NETWORK_APIS.length * 5,
+    );
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('evidence source boundaries remain one-way across the approved graph', () => {
   const discovery = join(packages, 'discovery', 'src');
   const catalog = join(discovery, 'catalog');
   const indexer = join(discovery, 'indexer');
@@ -161,6 +265,51 @@ test('evidence source boundaries remain one-way after discovery consolidation', 
 
   for (const producer of ['execution-recorder', 'attestation-issuer']) {
     assertBoundary(join(packages, producer, 'src'), [...concreteBindings, '@jinn-network/evidence-local-runtime'], [journal, repositoryFs, join(packages, 'repository-oci'), join(packages, 'catalog-sqlite'), join(packages, 'local-runtime')]);
+  }
+  const derivation = join(packages, 'derivation');
+  const derivationManifest = manifest('derivation');
+  const derivationForbiddenRoots = evidenceDirectories
+    .filter((directory) => !['derivation', 'protocol'].includes(directory))
+    .map((directory) => join(packages, directory));
+  assertBoundary(
+    join(derivation, 'src'),
+    DERIVATION_FORBIDDEN_PACKAGES,
+    derivationForbiddenRoots,
+  );
+  assert.deepEqual(
+    ambientNetworkUsesInFiles(files(join(derivation, 'src'))),
+    [],
+    'derivation may not use ambient network APIs',
+  );
+  assert.deepEqual(
+    Object.keys(derivationManifest.dependencies ?? {}).sort(),
+    DERIVATION_ALLOWED_DEPENDENCIES,
+    'derivation production dependencies must match the approved design inventory',
+  );
+  assert.deepEqual(
+    Object.keys(derivationManifest.devDependencies ?? {}).sort(),
+    DERIVATION_ALLOWED_DEV_DEPENDENCIES,
+    'derivation development dependencies must match the approved toolchain',
+  );
+  assert.deepEqual(
+    Object.keys(derivationManifest.optionalDependencies ?? {}),
+    [],
+    'derivation may not declare optional dependencies',
+  );
+  assert.deepEqual(
+    Object.keys(derivationManifest.peerDependencies ?? {}),
+    [],
+    'derivation may not declare peer dependencies',
+  );
+  for (const section of [
+    'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
+  ]) {
+    for (const dependency of DERIVATION_FORBIDDEN_PACKAGES) {
+      assert.ok(
+        !Object.hasOwn(derivationManifest[section] ?? {}, dependency),
+        `derivation may not declare ${dependency} in ${section}`,
+      );
+    }
   }
   for (const directory of evidenceDirectories) {
     if (directory === 'local-runtime' || directory === 'catalog-sqlite') continue;

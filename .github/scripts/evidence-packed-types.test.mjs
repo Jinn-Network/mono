@@ -18,6 +18,7 @@ const packages = [
   ['catalog-sqlite', '@jinn-network/evidence-catalog-sqlite'],
   ['execution-recorder', '@jinn-network/execution-recorder'],
   ['attestation-issuer', '@jinn-network/attestation-issuer'],
+  ['derivation', '@jinn-network/evidence-derivation'],
   ['local-runtime', '@jinn-network/evidence-local-runtime'],
 ];
 
@@ -36,6 +37,7 @@ const codeEntrypoints = [
   '@jinn-network/execution-recorder/testing',
   '@jinn-network/attestation-issuer',
   '@jinn-network/attestation-issuer/testing',
+  '@jinn-network/evidence-derivation',
   '@jinn-network/evidence-local-runtime',
 ];
 
@@ -52,12 +54,13 @@ function run(command, args, options = {}) {
     child.once('error', reject);
     child.once('exit', (code) => {
       const output = Buffer.concat(stdout).toString('utf8');
+      const errorOutput = Buffer.concat(stderr).toString('utf8');
       if (code === 0) {
         resolvePromise(output);
         return;
       }
       reject(new Error(
-        `${command} exited with ${code}: ${Buffer.concat(stderr).toString('utf8')}`,
+        `${command} exited with ${code}:\n${output}${errorOutput}`,
       ));
     });
   });
@@ -136,7 +139,7 @@ try {
   }
 
   console.log(
-    `Compiled a packed TypeScript consumer against ${codeEntrypoints.length} public code entrypoints across all eight evidence packages.`,
+    `Compiled a packed TypeScript consumer against ${codeEntrypoints.length} public code entrypoints across all nine evidence packages.`,
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
