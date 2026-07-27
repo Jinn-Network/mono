@@ -632,7 +632,9 @@ Execution**, not a second Execution. A conforming public crate:
   primary native trace of, or Runtime Specification used by the historical Execution;
 - links the public Root Dataset to the private record commitment with `prov:wasDerivedFrom`; and
 - records a scrub transformation activity, scrubber implementation, policy digest, timestamp,
-  per-class disposition counts, and source-to-derived artifact mappings.
+  per-class disposition counts, and source-to-derived artifact mappings; and
+- records the private source commitment but never embeds the derived metadata digest in the
+  derived metadata or one of its payloads, because that would create a circular digest.
 
 This lets a public record preserve exact commitments without publishing exact bytes. It does not
 make the private evidence independently reproducible by a consumer that lacks access. If
@@ -878,12 +880,14 @@ The public Root Dataset is a new evidence record but still mentions Execution
 | Field | Example value |
 | --- | --- |
 | Source record | `sha256:PRIVATE_METADATA_SHA256` |
-| Derived record | Computed public metadata SHA-256 |
 | Scrubber | `example-scrubber` version `3.1.0`, code digest included |
 | Policy | `public-execution-policy-v4`, digest included |
 | Derived artifacts | private native-trace digest → public trace digest |
 | Dispositions | `absolute-path:redact = 1`; `credential:redact = 1`; rejects = 0 |
 | Derivation | public trace and Root Dataset `prov:wasDerivedFrom` their private sources |
+
+The public metadata digest is computed by the carrier or store after serialization. It is not a
+field inside the scrub receipt.
 
 The public package is therefore independently conforming and portable. It is not a claim that the
 private native-trace bytes are public, nor a second run. The two Result Evaluations still apply

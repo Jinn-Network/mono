@@ -1,0 +1,32 @@
+diff --git a/src/slug.ts b/src/slug.ts
+--- a/src/slug.ts
++++ b/src/slug.ts
+@@ -1,3 +1,7 @@
+ export function normalizeSlug(input: string): string {
+-  return input.trim().toLowerCase().replace(/\s+/g, '-');
++  return input
++    .trim()
++    .toLowerCase()
++    .replace(/[^a-z0-9]+/g, '-')
++    .replace(/^-+|-+$/g, '');
+ }
+diff --git a/test/slug.test.ts b/test/slug.test.ts
+--- a/test/slug.test.ts
++++ b/test/slug.test.ts
+@@ -6,4 +6,16 @@ describe('normalizeSlug', () => {
+   it('normalizes simple spaces', () => {
+     expect(normalizeSlug('Hello World')).toBe('hello-world');
+   });
++
++  it('collapses repeated separators', () => {
++    expect(normalizeSlug('Hello___World...Again')).toBe('hello-world-again');
++  });
++
++  it('removes surrounding punctuation', () => {
++    expect(normalizeSlug('---Hello World---')).toBe('hello-world');
++  });
++
++  it('returns empty for punctuation-only input', () => {
++    expect(normalizeSlug('---___...')).toBe('');
++  });
+ });

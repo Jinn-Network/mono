@@ -21,10 +21,10 @@
     {
       "@id": "./",
       "@type": "Dataset",
-      "name": "Golden synthetic Execution Evidence v1 record",
-      "description": "A complete synthetic record demonstrating capture-time Task, inputs, Executor, Execution, Result, trace, observations, and provenance.",
-      "dateCreated": "2026-07-23T15:02:08Z",
-      "datePublished": "2026-07-23T15:02:08Z",
+      "name": "Golden synthetic public Execution Evidence v1 derivative",
+      "description": "A conforming public derivative retaining exact historical commitments while publishing a separate scrubbed trace.",
+      "dateCreated": "2026-07-23T16:10:00Z",
+      "datePublished": "2026-07-23T16:10:00Z",
       "license": {
         "@id": "https://creativecommons.org/publicdomain/zero/1.0/"
       },
@@ -32,7 +32,7 @@
         "@id": "https://jinn.network/profiles/execution-evidence/1.0"
       },
       "creator": {
-        "@id": "urn:uuid:44444444-4444-4444-8444-444444444444"
+        "@id": "urn:uuid:88888888-8888-4888-8888-888888888888"
       },
       "hasPart": [
         {
@@ -82,13 +82,28 @@
         },
         {
           "@id": "external/marketplace-reference.json"
+        },
+        {
+          "@id": "private/ro-crate-metadata.json"
+        },
+        {
+          "@id": "trace/trajectory.public.jsonl"
+        },
+        {
+          "@id": "scrub/public-execution-policy.json"
+        },
+        {
+          "@id": "scrub/scrub-receipt.json"
         }
       ],
       "mentions": {
         "@id": "urn:uuid:22222222-2222-4222-8222-222222222222"
       },
       "prov:wasGeneratedBy": {
-        "@id": "#capture"
+        "@id": "#public-scrub"
+      },
+      "prov:wasDerivedFrom": {
+        "@id": "private/ro-crate-metadata.json"
       }
     },
     {
@@ -435,6 +450,114 @@
       "agent": {
         "@id": "urn:uuid:44444444-4444-4444-8444-444444444444"
       }
+    },
+    {
+      "@id": "private/ro-crate-metadata.json",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "name": "Unavailable exact private Execution Evidence metadata commitment",
+      "encodingFormat": "application/ld+json",
+      "sha256": "dcaa588c17467cdf4939ff18d578537995c04bc700d0c0e6df3d64ddc02dd4cf"
+    },
+    {
+      "@id": "trace/trajectory.public.jsonl",
+      "@type": "File",
+      "name": "Structure-aware scrubbed trace projection",
+      "encodingFormat": "application/x-ndjson",
+      "sha256": "e261de0ff9ccfc2a2c074d26a1fe0683405c3829c7127b4d0eb3d235e9491e76",
+      "conformsTo": {
+        "@id": "https://jinn.network/formats/fixture-trajectory/1.0"
+      },
+      "about": {
+        "@id": "urn:uuid:22222222-2222-4222-8222-222222222222"
+      },
+      "prov:wasDerivedFrom": {
+        "@id": "trace/trajectory.jsonl"
+      },
+      "prov:wasGeneratedBy": {
+        "@id": "#public-scrub"
+      }
+    },
+    {
+      "@id": "scrub/public-execution-policy.json",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "name": "Structure-aware public execution policy",
+      "encodingFormat": "application/json",
+      "sha256": "40140317cf686ffff29d64eef1b2287eb4560ed09c44c7fa24d21f6eef0f71f7"
+    },
+    {
+      "@id": "scrub/scrub-receipt.json",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "name": "Public derivation scrub receipt",
+      "encodingFormat": "application/json",
+      "sha256": "80c0e8a19c380949f28cf59b30c13b65b39a0cdda1524cc3c45ba0019c34433a",
+      "prov:wasGeneratedBy": {
+        "@id": "#public-scrub"
+      }
+    },
+    {
+      "@id": "urn:uuid:88888888-8888-4888-8888-888888888888",
+      "@type": [
+        "SoftwareApplication",
+        "prov:Agent"
+      ],
+      "name": "Synthetic structure-aware scrubber",
+      "softwareVersion": "1.0.0"
+    },
+    {
+      "@id": "#disposition-absolute-path-redact",
+      "@type": "PropertyValue",
+      "name": "absolute-path:redact",
+      "propertyID": "https://jinn.network/terms/dispositions/absolute-path/redact",
+      "value": 1,
+      "unitCode": "count"
+    },
+    {
+      "@id": "#disposition-credential-redact",
+      "@type": "PropertyValue",
+      "name": "credential:redact",
+      "propertyID": "https://jinn.network/terms/dispositions/credential/redact",
+      "value": 1,
+      "unitCode": "count"
+    },
+    {
+      "@id": "#disposition-reject",
+      "@type": "PropertyValue",
+      "name": "reject",
+      "propertyID": "https://jinn.network/terms/dispositions/reject",
+      "value": 0,
+      "unitCode": "count"
+    },
+    {
+      "@id": "#public-scrub",
+      "@type": "prov:Activity",
+      "name": "Structure-aware public derivation",
+      "endTime": "2026-07-23T16:10:00Z",
+      "agent": {
+        "@id": "urn:uuid:88888888-8888-4888-8888-888888888888"
+      },
+      "instrument": {
+        "@id": "scrub/public-execution-policy.json"
+      },
+      "jinn:dispositionCount": [
+        {
+          "@id": "#disposition-absolute-path-redact"
+        },
+        {
+          "@id": "#disposition-credential-redact"
+        },
+        {
+          "@id": "#disposition-reject"
+        }
+      ]
     }
   ]
 }

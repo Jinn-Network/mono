@@ -203,6 +203,13 @@ describe("Execution Evidence validation", () => {
     const noCapture = clone();
     delete entity(noCapture, "./").creator;
     expect(codes(noCapture)).toContain("CAPTURE_PROVENANCE_MISSING");
+
+    const nonAgentCapture = clone();
+    entity(
+      nonAgentCapture,
+      "urn:uuid:44444444-4444-4444-8444-444444444444",
+    )["@type"] = "CreativeWork";
+    expect(codes(nonAgentCapture)).toContain("CAPTURE_PROVENANCE_MISSING");
   });
 
   it("requires every declared runtime component to be content-bound", () => {
@@ -252,6 +259,26 @@ describe("Execution Evidence validation", () => {
       },
     ];
     expect(codes(executionDocument)).toContain("EXECUTION_CARDINALITY");
+  });
+
+  it("suppresses duplicate diagnostics for one malformed relationship", () => {
+    const document = clone();
+    entity(
+      document,
+      "urn:uuid:22222222-2222-4222-8222-222222222222",
+    ).instrument = {
+      "@id": "runtime/runtime-specification.json",
+      nestedDefinition: true,
+    };
+
+    const diagnostics = validateExecutionEvidence(bytes(document)).diagnostics;
+    expect(
+      diagnostics.filter(
+        ({ code, entityId }) =>
+          code === "ROCRATE_REFERENCE_INVALID" &&
+          entityId === "urn:uuid:22222222-2222-4222-8222-222222222222",
+      ),
+    ).toHaveLength(1);
   });
 
   it("reports stable machine-detectable failures for the Autopilot candidate", () => {

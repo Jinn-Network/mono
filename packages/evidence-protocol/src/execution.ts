@@ -55,6 +55,14 @@ function hasType(entity: Entity | undefined, type: string): boolean {
   return types(entity).includes(type);
 }
 
+function isAgentEntity(entity: Entity | undefined): boolean {
+  return types(entity).some((type) =>
+    ["Person", "Organization", "prov:Agent", "prov:SoftwareAgent"].includes(
+      type,
+    ),
+  );
+}
+
 function values(value: unknown): readonly unknown[] {
   return value === undefined ? [] : Array.isArray(value) ? value : [value];
 }
@@ -99,13 +107,20 @@ function issue(
 function ordered(
   diagnostics: readonly ConformanceDiagnostic[],
 ): readonly ConformanceDiagnostic[] {
-  return [...diagnostics].sort(
+  const sorted = [...diagnostics].sort(
     (left, right) =>
       left.path.localeCompare(right.path) ||
       left.code.localeCompare(right.code) ||
       (left.entityId ?? "").localeCompare(right.entityId ?? "") ||
       left.message.localeCompare(right.message),
   );
+  const seen = new Set<string>();
+  return sorted.filter((diagnostic) => {
+    const key = `${diagnostic.code}\0${diagnostic.path}\0${diagnostic.entityId ?? ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function parseJson(
@@ -339,6 +354,66 @@ function validateDerivations(
         ),
       );
     }
+
+    if (entity["@id"] === "./" && activity) {
+      const source =
+        predecessors.length === 1
+          ? graph.byId.get(predecessors[0]!)
+          : undefined;
+      const policyIds = rawReferences(activity.instrument) ?? [];
+      const policy =
+        policyIds.length === 1 ? graph.byId.get(policyIds[0]!) : undefined;
+      const countIds =
+        rawReferences(activity["jinn:dispositionCount"]) ?? [];
+      const counts = resolved(graph, countIds);
+      const mappings = graph.entities.filter((candidate) => {
+        if (candidate === entity) return false;
+        const generatedBy =
+          rawReferences(candidate["prov:wasGeneratedBy"]) ?? [];
+        const derivedFrom =
+          rawReferences(candidate["prov:wasDerivedFrom"]) ?? [];
+        return (
+          generatedBy.includes(activity["@id"]) && derivedFrom.length > 0
+        );
+      });
+      const generatedEntities = graph.entities.filter((candidate) =>
+        (rawReferences(candidate["prov:wasGeneratedBy"]) ?? []).includes(
+          activity["@id"],
+        ),
+      );
+      const circularDigestDeclared = [activity, ...generatedEntities].some(
+        (candidate) =>
+          candidate.derivedMetadataDigest !== undefined ||
+          candidate["jinn:derivedMetadataDigest"] !== undefined,
+      );
+
+      if (
+        !source ||
+        !contentBound(source) ||
+        !policy ||
+        !contentBound(policy) ||
+        countIds.length === 0 ||
+        countIds.length !== counts.length ||
+        counts.some(
+          (count) =>
+            !hasType(count, "PropertyValue") ||
+            typeof count.name !== "string" ||
+            typeof count.value !== "number" ||
+            count.value < 0,
+        ) ||
+        mappings.length === 0 ||
+        circularDigestDeclared
+      ) {
+        diagnostics.push(
+          issue(
+            "DERIVATION_PROVENANCE_INVALID",
+            graphPath(graph, activity),
+            "Public derivation requires a private source commitment, content-bound policy, artifact mapping, disposition counts, and no circular derived metadata digest.",
+            activity["@id"],
+          ),
+        );
+      }
+    }
   }
 }
 
@@ -399,6 +474,7 @@ function validateRoot(
     creators.length !== 1 ||
     !creator ||
     !isAbsoluteIri(creator["@id"]) ||
+    !isAgentEntity(creator) ||
     typeof root.datePublished !== "string"
   ) {
     diagnostics.push(
@@ -578,11 +654,7 @@ function validateExecution(
     const agent = agents[0]!;
     if (
       !isAbsoluteIri(agent["@id"]) ||
-      !types(agent).some((type) =>
-        ["Person", "Organization", "prov:Agent", "prov:SoftwareAgent"].includes(
-          type,
-        ),
-      )
+      !isAgentEntity(agent)
     ) {
       diagnostics.push(
         issue(
@@ -851,16 +923,7 @@ export function validateExecutionEvidence(
     validateProfileEntity(graph, diagnostics);
     validateArtifacts(graph, diagnostics);
     validateDerivations(graph, diagnostics);
-    for (const entity of graph.entities.filter((candidate) =>
-      types(candidate).some((type) =>
-        [
-          "Person",
-          "Organization",
-          "prov:Agent",
-          "prov:SoftwareAgent",
-        ].includes(type),
-      ),
-    )) {
+    for (const entity of graph.entities.filter(isAgentEntity)) {
       if (!isAbsoluteIri(entity["@id"])) {
         diagnostics.push(
           issue(

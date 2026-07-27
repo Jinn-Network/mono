@@ -15,7 +15,7 @@
       "@id": "./",
       "@type": "Dataset",
       "name": "Golden Execution Evidence v1 fixture collection",
-      "description": "A synthetic collection containing one sealed Execution Evidence record and two later signed claims.",
+      "description": "A synthetic collection containing private and public Execution Evidence records and two later signed claims.",
       "dateCreated": "2026-07-23T16:05:01Z",
       "datePublished": "2026-07-23T16:05:01Z",
       "license": {
@@ -120,6 +120,24 @@
         },
         {
           "@id": "claims/execution-verification/execution-verification.dsse.json"
+        },
+        {
+          "@id": "public/ro-crate-metadata.json"
+        },
+        {
+          "@id": "public/task/task.md"
+        },
+        {
+          "@id": "public/results/slug-normalization.patch"
+        },
+        {
+          "@id": "public/trace/trajectory.public.jsonl"
+        },
+        {
+          "@id": "public/scrub/public-execution-policy.json"
+        },
+        {
+          "@id": "public/scrub/scrub-receipt.json"
         }
       ],
       "mentions": [
@@ -131,6 +149,9 @@
         },
         {
           "@id": "claims/execution-verification/execution-verification.dsse.json"
+        },
+        {
+          "@id": "public/ro-crate-metadata.json"
         }
       ]
     },
@@ -139,14 +160,14 @@
       "@type": "File",
       "name": "Fixture documentation",
       "encodingFormat": "text/markdown",
-      "sha256": "b1c4399789036e4b50a56c736a86cde8b7731d47f603f6716642d71bcd8fee14"
+      "sha256": "2ad090fd2779806e8048655e51e0786f51d62a348a53e0f81db55ea4db084e64"
     },
     {
       "@id": "conformance-report.json",
       "@type": "File",
       "name": "Fixture conformance coverage report",
       "encodingFormat": "application/json",
-      "sha256": "8b8f9f78631f3478628e3127157ea04e4f66ada0a1fc8108f959504bbb85a92c"
+      "sha256": "76b20129919e862034e48f78d4caa8494c929bd6ad4cca133e7e14eaa6ab221b"
     },
     {
       "@id": "execution/ro-crate-metadata.json",
@@ -156,7 +177,7 @@
       ],
       "name": "Sealed Execution Evidence metadata",
       "encodingFormat": "application/ld+json",
-      "sha256": "ef1cf13d2ecbb4ec9c2a5466dcd9d282899184e3b229ab55b67f06a1a303ad8d",
+      "sha256": "dcaa588c17467cdf4939ff18d578537995c04bc700d0c0e6df3d64ddc02dd4cf",
       "about": {
         "@id": "urn:uuid:22222222-2222-4222-8222-222222222222"
       }
@@ -307,7 +328,7 @@
       "@id": "claims/execution-verification/statement.json",
       "@type": "File",
       "encodingFormat": "application/vnd.in-toto+json",
-      "sha256": "41ffbcb2914d788f07f9a1584ec4c268264ed711cd133973ff1a01e45aaac6f3"
+      "sha256": "93bfd775f76fac78bbe41631a1cb0abbced763ed0ecb3df875d99ca641b9c702"
     },
     {
       "@id": "claims/execution-verification/verifier.mjs",
@@ -334,14 +355,14 @@
       "@id": "claims/execution-verification/public-key.pem",
       "@type": "File",
       "encodingFormat": "application/x-pem-file",
-      "sha256": "1c0841a6822a54eab027f3513e9b11f11bf47d6fa196760b2eee2105cfaf5073"
+      "sha256": "4d741dbfb4845615773251bcfe130b7ce3e63d9626a5979a51bf3b6631ab78eb"
     },
     {
       "@id": "claims/execution-verification/execution-verification.dsse.json",
       "@type": "File",
       "name": "Signed Execution Verification Evidence",
       "encodingFormat": "application/vnd.dsse.envelope.v1+json",
-      "sha256": "0658fbd0874111dbfe44b4a69017ab9604d2f749e22b7a43e7cd14cdbda6dae5"
+      "sha256": "d9843f1f4689d5f0d726f7b37815afb6c04a61ae5d7ccbb5c6269cb239854034"
     },
     {
       "@id": "urn:uuid:22222222-2222-4222-8222-222222222222",
@@ -358,6 +379,57 @@
       "@id": "https://creativecommons.org/publicdomain/zero/1.0/",
       "@type": "CreativeWork",
       "name": "CC0 1.0 Universal"
+    },
+    {
+      "@id": "public/ro-crate-metadata.json",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "name": "Conforming public Execution Evidence metadata",
+      "encodingFormat": "application/ld+json",
+      "sha256": "95fbf3c50d8a90f9437801e6559237f3bdf5eed2f613870462abfae1447c79a3"
+    },
+    {
+      "@id": "public/task/task.md",
+      "@type": "File",
+      "name": "Unchanged public Task",
+      "encodingFormat": "text/markdown",
+      "sha256": "1f42fd35cecf09d1bdf953fe4c7a1c8d25fd0bcf415a6b39aa7b61f1e982ef93"
+    },
+    {
+      "@id": "public/results/slug-normalization.patch",
+      "@type": "File",
+      "name": "Unchanged public Result",
+      "encodingFormat": "text/x-diff",
+      "sha256": "c43b406505b8c53ff9bf0a1c57442080d99a14b9f278739cb426313cf3238b07"
+    },
+    {
+      "@id": "public/trace/trajectory.public.jsonl",
+      "@type": "File",
+      "name": "Scrubbed public trace projection",
+      "encodingFormat": "application/x-ndjson",
+      "sha256": "e261de0ff9ccfc2a2c074d26a1fe0683405c3829c7127b4d0eb3d235e9491e76"
+    },
+    {
+      "@id": "public/scrub/public-execution-policy.json",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "name": "Public derivation policy",
+      "encodingFormat": "application/json",
+      "sha256": "40140317cf686ffff29d64eef1b2287eb4560ed09c44c7fa24d21f6eef0f71f7"
+    },
+    {
+      "@id": "public/scrub/scrub-receipt.json",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "name": "Public derivation receipt",
+      "encodingFormat": "application/json",
+      "sha256": "80c0e8a19c380949f28cf59b30c13b65b39a0cdda1524cc3c45ba0019c34433a"
     }
   ]
 }

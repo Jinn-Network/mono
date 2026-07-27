@@ -5,7 +5,7 @@
     "profile": "https://jinn.network/profiles/execution-evidence/1.0",
     "status": "structurally-complete-local-fixture",
     "record": "execution/ro-crate-metadata.json",
-    "sha256": "bb4cc647b25b6d40db6d5f3b0734db675f88a830209bd982ced7bb115484053e",
+    "sha256": "dcaa588c17467cdf4939ff18d578537995c04bc700d0c0e6df3d64ddc02dd4cf",
     "externalClaimLimitation": "The reserved profile URI must resolve to the published profile before external conformance claims are emitted."
   },
   "resultEvaluationEvidence": {
@@ -22,23 +22,10 @@
     "subject": "execution/ro-crate-metadata.json"
   },
   "publicationCheck": {
-    "status": "blocked-by-current-scrubber",
-    "rejected": true,
-    "findings": 11,
-    "redactions": 11,
-    "unresolvedFlags": 0,
-    "perClassCounts": {
-      "A2:redact": 9,
-      "B1:redact": 2
-    },
-    "expectedTechnicalShapes": [
-      "dsse-payload",
-      "dsse-signature",
-      "ed25519-public-key",
-      "model-identifier",
-      "package-manager-version"
-    ],
-    "meaning": "Signed or content-bound evidence must not be rewritten to satisfy a generic entropy detector; the publication path needs structure-aware allowlisting or classification."
+    "status": "conforming-structure-aware-derivative",
+    "rejected": false,
+    "sourceCommitment": "sha256:dcaa588c17467cdf4939ff18d578537995c04bc700d0c0e6df3d64ddc02dd4cf",
+    "derivedMetadataDigestRecordedInsideDerivative": false
   },
   "coverage": [
     "exact-task",
@@ -55,7 +42,8 @@
     "external-marketplace-references",
     "append-only-result-evaluation",
     "append-only-execution-verification",
-    "dsse-signatures"
+    "dsse-signatures",
+    "conforming-public-derivative"
   ],
   "claimsNotMade": [
     "historical-execution",
@@ -63,5 +51,14 @@
     "provider-attested-model-identity",
     "permission-to-publish-real-user-data",
     "marketplace-settlement-validity"
-  ]
+  ],
+  "publicDerivative": {
+    "status": "structurally-complete-local-fixture",
+    "record": "public/ro-crate-metadata.json",
+    "sha256": "95fbf3c50d8a90f9437801e6559237f3bdf5eed2f613870462abfae1447c79a3",
+    "sameExecutionId": "urn:uuid:22222222-2222-4222-8222-222222222222",
+    "unavailableExactArtifact": "public/trace/trajectory.jsonl",
+    "publishedDerivative": "public/trace/trajectory.public.jsonl",
+    "transferredPrivateVerification": false
+  }
 }
