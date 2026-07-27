@@ -20,7 +20,6 @@ const consumer = join(temporaryRoot, "consumer");
 const packages = [
   ["evidence-protocol", "@jinn-network/evidence-protocol"],
   ["evidence-repository", "@jinn-network/evidence-repository"],
-  ["evidence-repository-fs", "@jinn-network/evidence-repository-fs"],
   ["evidence-catalog", "@jinn-network/evidence-catalog"],
   ["evidence-indexer", "@jinn-network/evidence-indexer"],
   ["evidence-catalog-sqlite", "@jinn-network/evidence-catalog-sqlite"],

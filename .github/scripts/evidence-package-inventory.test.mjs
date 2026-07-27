@@ -15,7 +15,6 @@ const DEPENDENCY_SECTIONS = [
 const EVIDENCE_PACKAGES = [
   ['evidence-protocol', '@jinn-network/evidence-protocol'],
   ['evidence-repository', '@jinn-network/evidence-repository'],
-  ['evidence-repository-fs', '@jinn-network/evidence-repository-fs'],
   ['evidence-repository-oci', '@jinn-network/evidence-repository-oci'],
   ['evidence-catalog', '@jinn-network/evidence-catalog'],
   ['evidence-catalog-sqlite', '@jinn-network/evidence-catalog-sqlite'],
@@ -36,12 +35,6 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['evidence-repository', {
     dependencies: ['@jinn-network/evidence-protocol'],
     devDependencies: [],
-    optionalDependencies: [],
-    peerDependencies: [],
-  }],
-  ['evidence-repository-fs', {
-    dependencies: ['@jinn-network/evidence-repository'],
-    devDependencies: ['@jinn-network/evidence-protocol'],
     optionalDependencies: [],
     peerDependencies: [],
   }],
@@ -114,7 +107,6 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/evidence-indexer',
       '@jinn-network/evidence-protocol',
       '@jinn-network/evidence-repository',
-      '@jinn-network/evidence-repository-fs',
     ],
     devDependencies: ['@jinn-network/execution-recorder'],
     optionalDependencies: [],
@@ -140,8 +132,8 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;
 }
 
-test('the evidence package inventory is explicit and has eleven manifests', () => {
-  assert.equal(EVIDENCE_PACKAGES.length, 11);
+test('the evidence package inventory is explicit and has ten manifests', () => {
+  assert.equal(EVIDENCE_PACKAGES.length, 10);
   for (const [directory, expectedName] of EVIDENCE_PACKAGES) {
     assert.equal(readPackage(directory).name, expectedName);
   }

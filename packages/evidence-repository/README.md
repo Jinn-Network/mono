@@ -19,6 +19,39 @@ Consumers validate retrieved record bytes with the Evidence Protocol package.
 Repository implementations may use local files, OCI registries, or another
 transport without changing the consumer-facing contract.
 
+## Filesystem binding
+
+The native filesystem binding is deliberately opt-in through the `/fs` subpath;
+the package root remains contracts only.
+
+```ts
+import {
+  createFilesystemEvidenceRepository,
+} from "@jinn-network/evidence-repository/fs";
+
+const repository = await createFilesystemEvidenceRepository({
+  rootDir: "/private/path/to/evidence",
+});
+```
+
+It stores exact bytes in a rebuildable content-addressed layout:
+
+```text
+repository.json
+objects/sha256/<prefix>/<remaining-hex>
+records/<family>/sha256/<prefix>/<remaining-hex>.json
+```
+
+Objects contain the supplied bytes. A record marker registers an object digest
+under one record family without duplicating or interpreting it. Writes use
+flushed same-directory temporary files and atomic no-clobber publication;
+reads reject symlinks and non-regular managed paths and re-check SHA-256 before
+returning bytes. New roots and managed directories use mode `0700`; new files
+use `0600` on platforms with POSIX permissions.
+
+This binding adds no list, query, deletion, retention, encryption, validation,
+or policy API. Evidence Protocol conformance remains a consumer concern.
+
 ## Use
 
 ```ts

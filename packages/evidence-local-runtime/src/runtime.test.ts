@@ -20,7 +20,7 @@ import {
 } from "@jinn-network/evidence-repository";
 import {
   createFilesystemEvidenceRepository,
-} from "@jinn-network/evidence-repository-fs";
+} from "@jinn-network/evidence-repository/fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { openLocalOperationsStore } from "./operations-store.js";

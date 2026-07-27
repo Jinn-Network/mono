@@ -20,18 +20,22 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   EvidenceRepositoryError,
   assertRepositoryOperationActive,
+} from "../errors.js";
+import {
   createArtifactReference,
   createRecordReference,
   parseEvidenceArtifactReference,
   parseEvidenceRecordReference,
-  type EvidenceArtifactReference,
-  type EvidenceRecordFamily,
-  type EvidenceRecordReference,
-  type EvidenceRepository,
-  type RepositoryOperationOptions,
-  type RepositoryWriteReceipt,
-  type Sha256Digest,
-} from "@jinn-network/evidence-repository";
+} from "../references.js";
+import type {
+  EvidenceArtifactReference,
+  EvidenceRecordFamily,
+  EvidenceRecordReference,
+  EvidenceRepository,
+  RepositoryOperationOptions,
+  RepositoryWriteReceipt,
+  Sha256Digest,
+} from "../types.js";
 
 export const FILESYSTEM_REPOSITORY_FORMAT = {
   format: "jinn-evidence-repository",

@@ -160,7 +160,7 @@ console.log("Packed Indexer fixture, announcement round trip, and dependency bou
   for (const name of distFiles.filter((entry) => entry.endsWith(".js"))) {
     const source = await readFile(join(installedRoot, "dist", name), "utf8");
     for (const forbidden of [
-      "evidence-repository-fs",
+      "evidence-repository/fs",
       "evidence-repository-oci",
       "sqlite",
       "postgres",
