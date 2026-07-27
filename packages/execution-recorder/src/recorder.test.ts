@@ -10,6 +10,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import {
+  checkArtifactIntegrity,
+  validateExecutionEvidence,
+} from "@jinn-network/evidence-protocol";
+import {
+  EvidenceRepositoryError,
+  type EvidenceRepository,
+} from "@jinn-network/evidence-repository";
 import { InMemoryEvidenceRepository } from "@jinn-network/evidence-repository/testing";
 import { afterEach, describe, expect, test } from "vitest";
 
@@ -18,6 +26,7 @@ import { readStoredObject } from "./object-store.js";
 import { openWorkspaceState } from "./state.js";
 import type {
   FileArtifactCapture,
+  NativeTraceCapture,
   RuntimeObservationCapture,
   StartExecutionRecordingInput,
 } from "./types.js";
@@ -121,6 +130,20 @@ function startInput(
       origin,
     },
     ...overrides,
+  };
+}
+
+function nativeTrace(text = "native trace\n"): NativeTraceCapture {
+  return {
+    artifact: file(
+      "trace/native.jsonl",
+      text,
+      "application/x-ndjson",
+    ),
+    format: {
+      entityId: "https://example.test/formats/native-trace/v1",
+      name: "Fixture native trace",
+    },
   };
 }
 
@@ -483,5 +506,275 @@ describe("execution recorder lifecycle", () => {
       }),
     ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
     expect((await openWorkspaceState(workspaceDir)).head.revision).toBe(1);
+  });
+});
+
+describe("execution recorder finalization lifecycle", () => {
+  test("finalizes through the public handle and returns exact conforming repository bytes", async () => {
+    const workspaceDir = await workspace();
+    const repository = new InMemoryEvidenceRepository();
+    const recording = await createExecutionRecorder({
+      repository,
+    }).start(startInput(workspaceDir));
+
+    const outcome = await recording.finalize({
+      outcome: "completed",
+      endedAt: "2026-07-24T10:01:00Z",
+      results: [file("results/result.txt", "result\n")],
+      nativeTrace: nativeTrace(),
+    });
+
+    expect(outcome.finalized).toBe(true);
+    expect(recording.status).toBe("finalized");
+    expect(recording.receipt).toEqual(
+      outcome.finalized ? outcome.receipt : undefined,
+    );
+    if (!outcome.finalized) throw new Error("Expected finalization.");
+
+    const metadata = await repository.getRecord(outcome.receipt.record);
+    expect(metadata).not.toBeNull();
+    const report = validateExecutionEvidence(metadata!);
+    expect(report).toMatchObject({ conforms: true, diagnostics: [] });
+    if (report.value === undefined) {
+      throw new Error("Expected parsed Execution Evidence.");
+    }
+    const byDigest = new Map<string, Uint8Array>();
+    for (const reference of outcome.receipt.artifacts) {
+      const bytes = await repository.getArtifact(reference);
+      expect(bytes).not.toBeNull();
+      byDigest.set(reference.digest, bytes!);
+    }
+    const artifacts = new Map<string, Uint8Array>();
+    for (const entity of report.value["@graph"]) {
+      if (typeof entity.sha256 !== "string") continue;
+      const bytes = byDigest.get(`sha256:${entity.sha256}`);
+      if (bytes !== undefined) artifacts.set(entity["@id"], bytes);
+    }
+    expect(
+      checkArtifactIntegrity(report.value, artifacts).artifacts,
+    ).toSatisfy(
+      (entries: readonly { status: string }[]) =>
+        entries.every(({ status }) => status === "verified"),
+    );
+
+    const repeated = await recording.finalize({
+      outcome: "completed",
+      endedAt: "2026-07-24T10:01:00Z",
+      results: [file("results/result.txt", "result\n")],
+      nativeTrace: nativeTrace(),
+    });
+    expect(repeated).toEqual(outcome);
+  });
+
+  test("caller mutation of a finalize result cannot change the persisted receipt", async () => {
+    const workspaceDir = await workspace();
+    const repository = new InMemoryEvidenceRepository();
+    const recording = await createExecutionRecorder({
+      repository,
+    }).start(startInput(workspaceDir));
+    const input = {
+      outcome: "completed" as const,
+      endedAt: "2026-07-24T10:01:00Z",
+      results: [file("results/result.txt", "result\n")],
+      nativeTrace: nativeTrace(),
+    };
+    const outcome = await recording.finalize(input);
+    if (!outcome.finalized) throw new Error("Expected finalization.");
+    const expected = structuredClone(outcome.receipt);
+    const exposed = outcome.receipt as unknown as {
+      executionId: string;
+      record: { family: string; digest: string };
+      artifacts: Array<{ digest: string }>;
+      finalizedAt: string;
+    };
+
+    exposed.executionId =
+      "urn:uuid:00000000-0000-4000-8000-000000000000";
+    exposed.record.family = "result-evaluation";
+    exposed.record.digest = `sha256:${"0".repeat(64)}`;
+    exposed.artifacts[0]!.digest = `sha256:${"1".repeat(64)}`;
+    exposed.artifacts.splice(1);
+    exposed.finalizedAt = "2030-01-01T00:00:00.000Z";
+
+    const repeated = await recording.finalize(input);
+    expect(repeated).toEqual({
+      finalized: true,
+      receipt: expected,
+    });
+    expect(recording.receipt).toEqual(expected);
+  });
+
+  test("caller mutation of the receipt getter cannot change later views", async () => {
+    const workspaceDir = await workspace();
+    const recording = await createExecutionRecorder({
+      repository: new InMemoryEvidenceRepository(),
+    }).start(startInput(workspaceDir));
+    const outcome = await recording.finalize({
+      outcome: "completed",
+      endedAt: "2026-07-24T10:01:00Z",
+      results: [file("results/result.txt", "result\n")],
+      nativeTrace: nativeTrace(),
+    });
+    if (!outcome.finalized) throw new Error("Expected finalization.");
+    const expected = structuredClone(outcome.receipt);
+    const receiptView = recording.receipt;
+    if (receiptView === undefined) {
+      throw new Error("Expected the recording receipt.");
+    }
+    const exposed = receiptView as unknown as {
+      record: { digest: string };
+      artifacts: Array<{ digest: string }>;
+    };
+
+    exposed.record.digest = `sha256:${"0".repeat(64)}`;
+    exposed.artifacts.splice(0);
+
+    const later = recording.receipt;
+    expect(later).toEqual(expected);
+    expect(later).not.toBe(exposed);
+    expect(later?.record).not.toBe(exposed.record);
+    expect(later?.artifacts).not.toBe(exposed.artifacts);
+  });
+
+  test("durably snapshots incomplete finalization material for a later retry", async () => {
+    const workspaceDir = await workspace();
+    const sourceDir = await realpath(
+      await mkdtemp(join(tmpdir(), "jinn-recorder-result-")),
+    );
+    roots.push(sourceDir);
+    const resultPath = join(sourceDir, "result.txt");
+    await writeFile(resultPath, "captured result\n");
+    const repository = new InMemoryEvidenceRepository();
+    const recorder = createExecutionRecorder({ repository });
+    const recording = await recorder.start(startInput(workspaceDir));
+
+    const incomplete = await recording.finalize({
+      outcome: "completed",
+      endedAt: "2026-07-24T10:01:00Z",
+      results: [
+        {
+          kind: "file",
+          entityId: "results/result.txt",
+          source: {
+            path: resultPath,
+            mediaType: "text/plain",
+          },
+          origin,
+        },
+      ],
+    });
+    expect(incomplete).toMatchObject({
+      finalized: false,
+      diagnostics: [{ code: "NATIVE_TRACE_MISSING" }],
+    });
+    expect(recording.status).toBe("open");
+
+    await writeFile(resultPath, "mutated after capture\n");
+    const finalized = await recording.finalize({
+      outcome: "completed",
+      endedAt: "2026-07-24T10:01:00Z",
+      nativeTrace: nativeTrace(),
+    });
+    expect(finalized.finalized).toBe(true);
+    if (!finalized.finalized) throw new Error("Expected finalization.");
+    const artifactValues = await Promise.all(
+      finalized.receipt.artifacts.map((reference) =>
+        repository.getArtifact(reference),
+      ),
+    );
+    expect(
+      artifactValues.some(
+        (bytes) =>
+          bytes !== null &&
+          decoder.decode(bytes) === "captured result\n",
+      ),
+    ).toBe(true);
+  });
+
+  test("rejects contextual identity conflicts before finalization material becomes durable", async () => {
+    const workspaceDir = await workspace();
+    const repository = new InMemoryEvidenceRepository();
+    const recording = await createExecutionRecorder({
+      repository,
+    }).start(startInput(workspaceDir));
+
+    await expect(
+      recording.finalize({
+        outcome: "completed",
+        endedAt: "2026-07-24T10:01:00Z",
+        results: [
+          {
+            ...file("results/result.txt", "result\n"),
+            origin: {
+              kind: "producer-observed",
+              observer:
+                "https://spdx.org/licenses/Apache-2.0.html",
+            },
+          },
+        ],
+        nativeTrace: nativeTrace(),
+      }),
+    ).rejects.toMatchObject({ code: "RECORDING_CONFLICT" });
+    expect((await openWorkspaceState(workspaceDir)).head.revision).toBe(1);
+
+    await expect(
+      recording.finalize({
+        outcome: "completed",
+        endedAt: "2026-07-24T10:01:00Z",
+        results: [file("results/result.txt", "result\n")],
+        nativeTrace: {
+          ...nativeTrace(),
+          format: {
+            entityId: "https://executor.example/agent",
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: "RECORDING_CONFLICT" });
+    expect((await openWorkspaceState(workspaceDir)).head.revision).toBe(1);
+
+    expect(
+      await recording.finalize({
+        outcome: "completed",
+        endedAt: "2026-07-24T10:01:00Z",
+        results: [file("results/result.txt", "result\n")],
+        nativeTrace: nativeTrace(),
+      }),
+    ).toMatchObject({ finalized: true });
+  });
+
+  test("resume completes a journaled finalization after a repository interruption", async () => {
+    const workspaceDir = await workspace();
+    const backing = new InMemoryEvidenceRepository();
+    let interruptRecord = true;
+    const repository: EvidenceRepository = {
+      putArtifact: (...args) => backing.putArtifact(...args),
+      getArtifact: (...args) => backing.getArtifact(...args),
+      getRecord: (...args) => backing.getRecord(...args),
+      putRecord: async (...args) => {
+        if (interruptRecord) {
+          interruptRecord = false;
+          throw new EvidenceRepositoryError(
+            "DEPENDENCY_UNAVAILABLE",
+            "simulated interruption",
+          );
+        }
+        return backing.putRecord(...args);
+      },
+    };
+    const recorder = createExecutionRecorder({ repository });
+    const recording = await recorder.start(startInput(workspaceDir));
+
+    await expect(
+      recording.finalize({
+        outcome: "failed",
+        endedAt: "2026-07-24T10:01:00Z",
+        nativeTrace: nativeTrace(),
+      }),
+    ).rejects.toMatchObject({ code: "DEPENDENCY_UNAVAILABLE" });
+    expect(recording.status).toBe("finalizing");
+
+    const recovered = await recorder.resume({ workspaceDir });
+    expect(recovered.status).toBe("finalized");
+    expect(recovered.receipt).toBeDefined();
   });
 });

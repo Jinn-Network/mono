@@ -4,9 +4,11 @@ import type {
   EvidenceRecordReference,
   Sha256Digest,
 } from "@jinn-network/evidence-repository";
-import { validateExecutionEvidence } from "@jinn-network/evidence-protocol";
 
 import { assertRecorderOperationActive, ExecutionRecorderError } from "./errors.js";
+import { findContextualIdentityConflict } from "./contextual-identities.js";
+import { buildFinalizationCandidate } from "./finalization-candidate.js";
+import { finalizationIntentFingerprint } from "./finalization-intent.js";
 import {
   appendJournalEntry,
   initializeWorkspaceMarker,
@@ -42,6 +44,7 @@ export interface WorkspaceState {
   readonly status: ExecutionRecordingStatus;
   readonly recording?: PersistedStartRecording;
   readonly inputs: readonly PersistedArtifactCapture[];
+  readonly results: readonly PersistedArtifactCapture[];
   readonly runtimeObservations: readonly PersistedRuntimeObservationCapture[];
   readonly nativeTrace?: PersistedNativeTraceCapture;
   readonly finalization?: FinalizationPrepared;
@@ -105,6 +108,13 @@ function eventObjectReferences(
         : artifactObjectReferences(event.observation.component.descriptor);
     case "native-trace-attached":
       return artifactObjectReferences(event.trace.artifact);
+    case "finalization-material-captured":
+      return [
+        ...event.results.flatMap(artifactObjectReferences),
+        ...(event.nativeTrace === undefined
+          ? []
+          : artifactObjectReferences(event.nativeTrace.artifact)),
+      ];
     case "finalization-prepared":
       return [
         ...event.results.flatMap(artifactObjectReferences),
@@ -150,6 +160,17 @@ async function verifyEventObjects(
                   event.trace,
                 ),
               }
+            : event.type === "finalization-material-captured"
+              ? {
+                  expected: event.declarationFingerprint,
+                  actual: captureFingerprint(
+                    "finalization-material",
+                    {
+                      results: event.results,
+                      nativeTrace: event.nativeTrace,
+                    },
+                  ),
+                }
             : undefined;
   if (
     declaration !== undefined &&
@@ -159,6 +180,39 @@ async function verifyEventObjects(
       state,
       "Journal declaration fingerprint does not match its payload.",
     );
+  }
+  const projectedIdentityState =
+    event.type === "initialized"
+      ? {
+          ...state,
+          recording: event.recording,
+          inputs: event.recording.initialInputs,
+        }
+      : event.type === "input-captured"
+        ? { ...state, inputs: [...state.inputs, event.input] }
+        : event.type === "runtime-observation-captured"
+          ? {
+              ...state,
+              runtimeObservations: [
+                ...state.runtimeObservations,
+                event.observation,
+              ],
+            }
+          : event.type === "native-trace-attached"
+            ? { ...state, nativeTrace: event.trace }
+            : event.type === "finalization-material-captured"
+              ? {
+                  ...state,
+                  results: [...state.results, ...event.results],
+                  nativeTrace:
+                    event.nativeTrace ?? state.nativeTrace,
+                }
+              : state;
+  const identityIssue = findContextualIdentityConflict(
+    projectedIdentityState,
+  );
+  if (identityIssue !== undefined) {
+    throw corruptState(state, identityIssue.message);
   }
   const unique = new Map<Sha256Digest, StoredObjectReference>();
   for (const reference of eventObjectReferences(event)) {
@@ -172,6 +226,27 @@ async function verifyEventObjects(
     unique.set(reference.digest, reference);
   }
   if (event.type === "finalization-prepared") {
+    if (
+      finalizationIntentFingerprint(event) !==
+      event.intentFingerprint
+    ) {
+      throw corruptState(
+        state,
+        "Finalization intent fingerprint does not match its material.",
+      );
+    }
+    if (
+      captureFingerprint("finalization-results", event.results) !==
+      captureFingerprint("finalization-results", state.results) ||
+      state.nativeTrace === undefined ||
+      captureFingerprint("native-trace", event.nativeTrace) !==
+        captureFingerprint("native-trace", state.nativeTrace)
+    ) {
+      throw corruptState(
+        state,
+        "Finalization intent does not match the durably captured finalization material.",
+      );
+    }
     for (const reference of stateObjectReferences(state)) {
       const previous = unique.get(reference.digest);
       if (previous !== undefined && previous.size !== reference.size) {
@@ -208,38 +283,51 @@ async function verifyEventObjects(
         "Finalization metadata object was not captured.",
       );
     }
-    const report = validateExecutionEvidence(metadataBytes);
-    if (!report.conforms || report.value === undefined) {
+    let candidate;
+    try {
+      candidate = buildFinalizationCandidate({
+        recording: state.recording!,
+        additionalInputs: state.inputs.slice(
+          state.recording!.initialInputs.length,
+        ),
+        runtimeObservations: state.runtimeObservations,
+        outcome: event.outcome,
+        endedAt: event.endedAt,
+        finalizedAt: event.finalizedAt,
+        results: event.results,
+        nativeTrace: event.nativeTrace,
+      });
+    } catch (error) {
+      throw new ExecutionRecorderError(
+        "WORKSPACE_CORRUPT",
+        "Finalization intent cannot be reconstructed from captured state.",
+        { workspaceDir: state.paths.root },
+        { cause: error },
+      );
+    }
+    if (!candidate.validation.conforms) {
       throw corruptState(
         state,
         "Finalization metadata is not conforming Execution Evidence.",
       );
     }
-    const expectedDigests = [
-      ...new Set(
-        report.value["@graph"]
-          .filter(
-            (entity) => entity["@id"] !== "ro-crate-metadata.json",
-          )
-          .map((entity) =>
-            typeof entity.sha256 === "string"
-              ? (`sha256:${entity.sha256}` as Sha256Digest)
-              : null,
-          )
-          .filter(
-            (digest): digest is Sha256Digest => digest !== null,
-          ),
-      ),
-    ].sort();
     if (
-      expectedDigests.length !== event.artifactDigests.length ||
-      !expectedDigests.every(
+      candidate.intentFingerprint !== event.intentFingerprint ||
+      candidate.metadata.digest !== event.metadata.digest ||
+      candidate.metadata.size !== event.metadata.size ||
+      candidate.metadataBytes.byteLength !== metadataBytes.byteLength ||
+      !candidate.metadataBytes.every(
+        (byte, index) => byte === metadataBytes[index],
+      ) ||
+      candidate.artifactDigests.length !==
+        event.artifactDigests.length ||
+      !candidate.artifactDigests.every(
         (digest, index) => digest === event.artifactDigests[index],
       )
     ) {
       throw corruptState(
         state,
-        "Finalization artifact digests do not match persisted metadata.",
+        "Finalization intent does not match its reconstructed metadata.",
       );
     }
   }
@@ -252,6 +340,7 @@ function stateObjectReferences(
   return [
     ...recordingObjectReferences(state.recording),
     ...state.inputs.flatMap(artifactObjectReferences),
+    ...state.results.flatMap(artifactObjectReferences),
     ...state.runtimeObservations.flatMap((observation) =>
       eventObjectReferences({
         type: "runtime-observation-captured",
@@ -305,6 +394,37 @@ function reduceEvent(state: WorkspaceState, event: JournalEvent): WorkspaceState
       };
     case "native-trace-attached":
       return { ...state, nativeTrace: event.trace };
+    case "finalization-material-captured": {
+      if (state.status !== "open") {
+        throw corruptState(
+          state,
+          "Finalization material was captured after an intent was prepared.",
+        );
+      }
+      if (
+        event.nativeTrace !== undefined &&
+        state.nativeTrace !== undefined &&
+        captureFingerprint("native-trace", state.nativeTrace) !==
+          captureFingerprint("native-trace", event.nativeTrace)
+      ) {
+        throw corruptState(
+          state,
+          "Finalization material conflicts with the selected native trace.",
+        );
+      }
+      return {
+        ...state,
+        results: [...state.results, ...event.results].sort(
+          (left, right) =>
+            left.entityId < right.entityId
+              ? -1
+              : left.entityId > right.entityId
+                ? 1
+                : 0,
+        ),
+        nativeTrace: event.nativeTrace ?? state.nativeTrace,
+      };
+    }
     case "finalization-prepared":
       if (state.finalization !== undefined || state.status === "finalized") {
         throw corruptState(
@@ -423,6 +543,7 @@ function emptyState(
     executionId,
     status: "open",
     inputs: [],
+    results: [],
     runtimeObservations: [],
     repositoryArtifactDigests: [],
     head: { revision: 0, digest: null },

@@ -141,6 +141,12 @@ export type JournalEvent =
       readonly declarationFingerprint: Sha256Digest;
     }
   | {
+      readonly type: "finalization-material-captured";
+      readonly results: readonly PersistedArtifactCapture[];
+      readonly nativeTrace?: PersistedNativeTraceCapture;
+      readonly declarationFingerprint: Sha256Digest;
+    }
+  | {
       readonly type: "finalization-prepared";
       readonly intentFingerprint: Sha256Digest;
       readonly finalizedAt: string;

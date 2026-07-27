@@ -13,6 +13,8 @@ import { join } from "node:path";
 import type { Sha256Digest } from "@jinn-network/evidence-repository";
 import { afterEach, describe, expect, test } from "vitest";
 
+import { buildFinalizationCandidate } from "./finalization-candidate.js";
+import { finalizationIntentFingerprint } from "./finalization-intent.js";
 import type {
   JournalEvent,
   PersistedFileArtifactCapture,
@@ -34,11 +36,6 @@ const ORIGIN = {
   observer: "urn:uuid:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as const,
 };
 const temporaryDirectories: string[] = [];
-const protocolFixtureRoot = new URL(
-  "../../evidence-protocol/fixtures/golden-execution-evidence-v1/execution/",
-  import.meta.url,
-);
-
 afterEach(async () => {
   await Promise.all(
     temporaryDirectories.splice(0).map((path) =>
@@ -125,20 +122,6 @@ function initialized(
   };
 }
 
-function withInitializedRecording(
-  event: Extract<JournalEvent, { type: "initialized" }>,
-  recording: PersistedStartRecording,
-): Extract<JournalEvent, { type: "initialized" }> {
-  return {
-    ...event,
-    recording,
-    declarationFingerprint: captureFingerprint(
-      "initialized",
-      recording,
-    ),
-  };
-}
-
 async function finalizingState(
   workspaceDir: string,
 ): Promise<{
@@ -146,155 +129,114 @@ async function finalizingState(
   readonly metadata: StoredObjectReference;
   readonly artifactDigests: readonly Sha256Digest[];
 }> {
-  let state = await createWorkspaceState(workspaceDir, EXECUTION_ID);
-  const { artifacts, metadata, artifactDigests } =
-    await conformingMetadataFixture(state);
-  const start = initialized(artifacts[0]);
-  state = await appendWorkspaceEvent(
-    state,
-    withInitializedRecording(start, {
-      ...start.recording,
-      initialInputs: artifacts.map((artifact, index) =>
-        file(`inputs/fixture-${index}.bin`, artifact),
-      ),
-    }),
-    "2026-07-24T10:00:00Z",
-  );
-  state = await appendWorkspaceEvent(
-    state,
-    {
-      type: "finalization-prepared",
-      intentFingerprint: `sha256:${"4".repeat(64)}`,
-      finalizedAt: "2026-07-24T10:01:00Z",
-      outcome: "completed",
-      endedAt: "2026-07-24T10:00:59Z",
-      results: artifacts.slice(1).map((artifact, index) =>
-        file(`results/result-${index + 1}.bin`, artifact),
-      ),
-      nativeTrace: {
-        artifact: file("trace/trace.json", artifacts[0]),
-        format: { entityId: "https://example.com/trace-format" },
-      },
-      metadata,
-      artifactDigests,
-    },
+  const fixture = await initializedConformingMetadataState(workspaceDir);
+  const state = await appendWorkspaceEvent(
+    fixture.state,
+    fixture.event,
     "2026-07-24T10:01:00Z",
-  );
-  return {
-    state,
-    metadata,
-    artifactDigests,
-  };
-}
-
-async function conformingMetadataFixture(
-  state: WorkspaceState,
-  options: { readonly descriptorSha?: boolean } = {},
-): Promise<{
-  readonly artifacts: readonly StoredObjectReference[];
-  readonly metadata: StoredObjectReference;
-  readonly artifactDigests: readonly Sha256Digest[];
-  readonly extra: StoredObjectReference;
-}> {
-  const metadataBytes = await readFile(
-    new URL("ro-crate-metadata.json", protocolFixtureRoot),
-  );
-  const document = JSON.parse(new TextDecoder().decode(metadataBytes)) as {
-    "@graph": Array<{ "@id": string; sha256?: string }>;
-  };
-  const byDigest = new Map<Sha256Digest, StoredObjectReference>();
-  for (const entity of document["@graph"]) {
-    if (
-      entity["@id"] === "ro-crate-metadata.json" ||
-      typeof entity.sha256 !== "string"
-    ) {
-      continue;
-    }
-    const reference = await storeObject(
-      state.paths,
-      await readFile(new URL(entity["@id"], protocolFixtureRoot)),
-    );
-    expect(reference.digest).toBe(`sha256:${entity.sha256}`);
-    byDigest.set(reference.digest, reference);
-  }
-  const artifacts = [...byDigest.values()].sort((left, right) =>
-    left.digest.localeCompare(right.digest),
-  );
-  const extra = await storeObject(
-    state.paths,
-    new TextEncoder().encode("captured-but-not-in-metadata"),
-  );
-  if (options.descriptorSha) {
-    const descriptor = document["@graph"].find(
-      (entity) => entity["@id"] === "ro-crate-metadata.json",
-    );
-    if (descriptor === undefined) throw new Error("Missing metadata descriptor");
-    descriptor.sha256 = extra.digest.slice("sha256:".length);
-  }
-  return {
-    artifacts,
-    metadata: await storeObject(
-      state.paths,
-      options.descriptorSha
-        ? new TextEncoder().encode(JSON.stringify(document))
-        : metadataBytes,
-    ),
-    artifactDigests: artifacts.map(({ digest }) => digest),
-    extra,
-  };
-}
-
-async function initializedConformingMetadataState(
-  workspaceDir: string,
-  options: { readonly descriptorSha?: boolean } = {},
-): Promise<{
-  readonly state: WorkspaceState;
-  readonly metadata: StoredObjectReference;
-  readonly artifactDigests: readonly Sha256Digest[];
-  readonly extra: StoredObjectReference;
-  readonly trace: StoredObjectReference;
-}> {
-  let state = await createWorkspaceState(workspaceDir, EXECUTION_ID);
-  const fixture = await conformingMetadataFixture(state, options);
-  const start = initialized(fixture.artifacts[0]);
-  state = await appendWorkspaceEvent(
-    state,
-    withInitializedRecording(start, {
-      ...start.recording,
-      initialInputs: [...fixture.artifacts, fixture.extra].map(
-        (artifact, index) =>
-          file(`inputs/fixture-${index}.bin`, artifact),
-      ),
-    }),
-    "2026-07-24T10:00:00Z",
   );
   return {
     state,
     metadata: fixture.metadata,
     artifactDigests: fixture.artifactDigests,
-    extra: fixture.extra,
-    trace: fixture.artifacts[0],
+  };
+}
+
+async function initializedConformingMetadataState(
+  workspaceDir: string,
+): Promise<{
+  readonly state: WorkspaceState;
+  readonly metadata: StoredObjectReference;
+  readonly artifactDigests: readonly Sha256Digest[];
+  readonly extra: StoredObjectReference;
+  readonly event: Extract<JournalEvent, { type: "finalization-prepared" }>;
+}> {
+  let state = await createWorkspaceState(workspaceDir, EXECUTION_ID);
+  const source = await storeObject(
+    state.paths,
+    new TextEncoder().encode("fixture source"),
+  );
+  const start = initialized(source);
+  state = await appendWorkspaceEvent(
+    state,
+    start,
+    "2026-07-24T10:00:00Z",
+  );
+  const resultSource = await storeObject(
+    state.paths,
+    new TextEncoder().encode("fixture result"),
+  );
+  const traceSource = await storeObject(
+    state.paths,
+    new TextEncoder().encode("fixture trace"),
+  );
+  const results = [file("results/result.bin", resultSource)];
+  const nativeTrace = {
+    artifact: file("trace/trace.json", traceSource),
+    format: { entityId: "https://example.com/trace-format" },
+  } as const;
+  const material = { results, nativeTrace };
+  state = await appendWorkspaceEvent(
+    state,
+    {
+      type: "finalization-material-captured",
+      ...material,
+      declarationFingerprint: captureFingerprint(
+        "finalization-material",
+        material,
+      ),
+    },
+    "2026-07-24T10:00:59Z",
+  );
+  const candidate = buildFinalizationCandidate({
+    recording: state.recording!,
+    additionalInputs: [],
+    runtimeObservations: [],
+    outcome: "completed",
+    endedAt: "2026-07-24T10:00:59Z",
+    finalizedAt: "2026-07-24T10:01:00Z",
+    results,
+    nativeTrace,
+  });
+  expect(candidate.validation.conforms).toBe(true);
+  const metadata = await storeObject(
+    state.paths,
+    candidate.metadataBytes,
+  );
+  const event = {
+    type: "finalization-prepared",
+    intentFingerprint: candidate.intentFingerprint,
+    finalizedAt: "2026-07-24T10:01:00Z",
+    outcome: "completed",
+    endedAt: "2026-07-24T10:00:59Z",
+    results,
+    nativeTrace,
+    metadata,
+    artifactDigests: candidate.artifactDigests,
+  } as const;
+  const extra = await storeObject(
+    state.paths,
+    new TextEncoder().encode("captured-but-not-in-metadata"),
+  );
+  return {
+    state,
+    metadata,
+    artifactDigests: candidate.artifactDigests,
+    extra,
+    event,
   };
 }
 
 function finalizationEvent(
-  metadata: StoredObjectReference,
-  trace: StoredObjectReference,
-  artifactDigests: readonly Sha256Digest[],
+  event: Extract<JournalEvent, { type: "finalization-prepared" }>,
+  overrides: Partial<
+    Extract<JournalEvent, { type: "finalization-prepared" }>
+  > = {},
 ): Extract<JournalEvent, { type: "finalization-prepared" }> {
+  const changed = { ...event, ...overrides };
   return {
-    type: "finalization-prepared",
-    intentFingerprint: `sha256:${"4".repeat(64)}`,
-    finalizedAt: "2026-07-24T10:01:00Z",
-    outcome: "completed",
-    endedAt: "2026-07-24T10:00:59Z",
-    results: [],
-    nativeTrace: {
-      artifact: file("trace/trace.json", trace),
-      format: { entityId: "https://example.com/trace-format" },
-    },
-    metadata,
-    artifactDigests,
+    ...changed,
+    intentFingerprint: finalizationIntentFingerprint(changed),
   };
 }
 
@@ -349,6 +291,80 @@ describe("replayed workspace state", () => {
       ],
       head: { revision: 3 },
     });
+  });
+
+  test("replays durably captured finalization material while still open", async () => {
+    const workspaceDir = await temporaryWorkspace();
+    let state = await createWorkspaceState(workspaceDir, EXECUTION_ID);
+    const source = await storeObject(
+      state.paths,
+      new TextEncoder().encode("source"),
+    );
+    state = await appendWorkspaceEvent(
+      state,
+      initialized(source),
+      "2026-07-24T10:00:00Z",
+    );
+    const result = file("results/value.bin", source);
+    const material = {
+      results: [result],
+      nativeTrace: undefined,
+    };
+    state = await appendWorkspaceEvent(
+      state,
+      {
+        type: "finalization-material-captured",
+        ...material,
+        declarationFingerprint: captureFingerprint(
+          "finalization-material",
+          material,
+        ),
+      },
+      "2026-07-24T10:00:01Z",
+    );
+
+    const reopened = await openWorkspaceState(workspaceDir);
+    expect(reopened.status).toBe("open");
+    expect(reopened.results).toEqual([result]);
+    expect(reopened.nativeTrace).toBeUndefined();
+  });
+
+  test("rejects finalization material with a conflicting contextual identity before publication", async () => {
+    const workspaceDir = await temporaryWorkspace();
+    let state = await createWorkspaceState(workspaceDir, EXECUTION_ID);
+    const source = await storeObject(
+      state.paths,
+      new TextEncoder().encode("source"),
+    );
+    const start = initialized(source);
+    state = await appendWorkspaceEvent(
+      state,
+      start,
+      "2026-07-24T10:00:00Z",
+    );
+    const nativeTrace = {
+      artifact: file("trace/trace.json", source),
+      format: { entityId: start.recording.executor.entityId },
+    } as const;
+    const material = { results: [], nativeTrace };
+
+    await expect(
+      appendWorkspaceEvent(
+        state,
+        {
+          type: "finalization-material-captured",
+          ...material,
+          declarationFingerprint: captureFingerprint(
+            "finalization-material",
+            material,
+          ),
+        },
+        "2026-07-24T10:00:01Z",
+      ),
+    ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
+    expect((await openWorkspaceState(workspaceDir)).head).toEqual(
+      state.head,
+    );
   });
 
   test("rejects a replay whose journal references a corrupted object", async () => {
@@ -437,13 +453,15 @@ describe("replayed workspace state", () => {
 
   test("rejects finalization artifact digests that omit metadata-bound artifacts", async () => {
     const workspaceDir = await temporaryWorkspace();
-    const { state, metadata, artifactDigests, trace } =
+    const { state, artifactDigests, event } =
       await initializedConformingMetadataState(workspaceDir);
 
     await expect(
       appendWorkspaceEvent(
         state,
-        finalizationEvent(metadata, trace, artifactDigests.slice(1)),
+        finalizationEvent(event, {
+          artifactDigests: artifactDigests.slice(1),
+        }),
         "2026-07-24T10:01:00Z",
       ),
     ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
@@ -451,30 +469,27 @@ describe("replayed workspace state", () => {
 
   test("rejects captured artifact digests absent from the persisted metadata", async () => {
     const workspaceDir = await temporaryWorkspace();
-    const { state, metadata, artifactDigests, extra, trace } =
+    const { state, artifactDigests, extra, event } =
       await initializedConformingMetadataState(workspaceDir);
     const withExtra = [...artifactDigests, extra.digest].sort();
 
     await expect(
       appendWorkspaceEvent(
         state,
-        finalizationEvent(metadata, trace, withExtra),
+        finalizationEvent(event, { artifactDigests: withExtra }),
         "2026-07-24T10:01:00Z",
       ),
     ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
   });
 
-  test("excludes the metadata descriptor hash by entity identity", async () => {
+  test("accepts an exact reconstructed finalization intent", async () => {
     const workspaceDir = await temporaryWorkspace();
-    const { state, metadata, artifactDigests, trace } =
-      await initializedConformingMetadataState(workspaceDir, {
-        descriptorSha: true,
-      });
-
+    const { state, event } =
+      await initializedConformingMetadataState(workspaceDir);
     await expect(
       appendWorkspaceEvent(
         state,
-        finalizationEvent(metadata, trace, artifactDigests),
+        event,
         "2026-07-24T10:01:00Z",
       ),
     ).resolves.toMatchObject({ status: "finalizing" });
@@ -482,17 +497,27 @@ describe("replayed workspace state", () => {
 
   test("rejects a finalization object reference whose prior digest has a conflicting size", async () => {
     const workspaceDir = await temporaryWorkspace();
-    const { state, metadata, artifactDigests, trace } =
+    const { state, event } =
       await initializedConformingMetadataState(workspaceDir);
+    if (event.nativeTrace.artifact.kind !== "file") {
+      throw new Error("Fixture native trace must be a file.");
+    }
 
     await expect(
       appendWorkspaceEvent(
         state,
-        finalizationEvent(
-          metadata,
-          { ...trace, size: trace.size + 1 },
-          artifactDigests,
-        ),
+        finalizationEvent(event, {
+          nativeTrace: {
+            ...event.nativeTrace,
+            artifact: {
+              ...event.nativeTrace.artifact,
+              source: {
+                ...event.nativeTrace.artifact.source,
+                size: event.nativeTrace.artifact.source.size + 1,
+              },
+            },
+          },
+        }),
         "2026-07-24T10:01:00Z",
       ),
     ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
@@ -500,16 +525,15 @@ describe("replayed workspace state", () => {
 
   test("rejects a finalization end time before the recorded start time", async () => {
     const workspaceDir = await temporaryWorkspace();
-    const { state, metadata, artifactDigests, trace } =
+    const { state, event } =
       await initializedConformingMetadataState(workspaceDir);
 
     await expect(
       appendWorkspaceEvent(
         state,
-        {
-          ...finalizationEvent(metadata, trace, artifactDigests),
+        finalizationEvent(event, {
           endedAt: "2026-07-24T09:59:59Z",
-        },
+        }),
         "2026-07-24T10:01:00Z",
       ),
     ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
