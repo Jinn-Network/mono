@@ -104,6 +104,12 @@ describe('packed client workflow coverage', () => {
     const smoke = workflow('client/scripts/smoke-test-pack.mjs');
 
     expect(smoke).toContain("packageManager: 'yarn@4.13.0'");
+    expect(smoke).toContain(
+      "'@jinn-network/core': `file:${join(installedBundledWorkspaceRoot, 'core')}`",
+    );
+    expect(smoke).toContain(
+      "'@jinn-network/plugin': `file:${join(installedBundledWorkspaceRoot, 'plugin')}`",
+    );
     expect(smoke).toContain("'nodeLinker: node-modules\\n'");
     expect(smoke).toContain("['yarn', 'install', '--no-immutable']");
     expect(smoke).toContain('yarn consumer exact installed jinn --help');
@@ -130,6 +136,41 @@ describe('packed client workflow coverage', () => {
     expect(clientPublish).toContain(
       'external-consumer-acceptance.mjs --registry --sdk-spec "${SDK_SPEC}" --client-spec "${CLIENT_SPEC}"',
     );
+  });
+
+  it('publishes client canaries only with registry-resolvable bundled dependencies', () => {
+    const resolveBundled = workflowStep(
+      '.github/workflows/npm-publish.yml',
+      'Resolve bundled dependency publications',
+    );
+    const patchCanary = workflowStep(
+      '.github/workflows/npm-publish.yml',
+      'Patch package version for canary publish',
+    );
+
+    expect(resolveBundled).toContain('@jinn-network/core@${CORE_VERSION}');
+    expect(resolveBundled).toContain('@jinn-network/plugin@${PLUGIN_VERSION}');
+    expect(resolveBundled).toContain('-canary.${SHORT_SHA}');
+    expect(resolveBundled).toContain('npm view "${CORE_SPEC}" gitHead');
+    expect(resolveBundled).toContain('npm view "${PLUGIN_SPEC}" gitHead');
+    expect(resolveBundled).toContain('JINN_BUILD_COMMIT');
+    expect(patchCanary).toContain('steps.bundled.outputs.core_version');
+    expect(patchCanary).toContain('steps.bundled.outputs.plugin_version');
+    expect(patchCanary).toContain("const corePath = '../packages/core/package.json'");
+    expect(patchCanary).toContain("const pluginPath = '../packages/plugin/package.json'");
+    expect(patchCanary).toContain('core.version =');
+    expect(patchCanary).toContain('plugin.version =');
+  });
+
+  it('runs postpublication registry acceptance through Yarn 4', () => {
+    const acceptance = workflow('client/scripts/external-consumer-acceptance.mjs');
+
+    expect(acceptance).toContain("packageManager: 'yarn@4.13.0'");
+    expect(acceptance).toContain("'nodeLinker: node-modules\\n'");
+    expect(acceptance).toContain(
+      "'corepack', ['yarn', 'install', '--no-immutable']",
+    );
+    expect(acceptance).toContain('registry Yarn consumer installed jinn tasks --help');
   });
 
   it('restarts the exact-SHA publish chain when either trusted-publisher workflow changes', () => {

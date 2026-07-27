@@ -1,6 +1,6 @@
 {
   "name": "@jinn-network/jinn-layer",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Standalone Jinn plugin process layer: host contract, local evidence, corpus reads, distillation, and seed import.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
@@ -38,8 +38,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@jinn-network/core": "0.1.1",
-    "@jinn-network/plugin": "0.1.1",
+    "@jinn-network/core": "0.1.2",
+    "@jinn-network/plugin": "0.1.2",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "better-sqlite3": "^12.10.0",
     "canonicalize": "^3.0.0",
