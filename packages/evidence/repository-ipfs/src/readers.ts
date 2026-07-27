@@ -272,9 +272,18 @@ async function performFetch(
     const fetchResult = Promise.resolve(
       fetchCapability(input, init),
     );
-    void fetchResult.catch(() => {
-      // Keep a losing injected fetch observed after caller cancellation.
-    });
+    void fetchResult
+      .then(
+        (response) => {
+          if (signal?.aborted === true) cancelResponse(response);
+        },
+        () => {
+          // Keep a losing injected fetch rejection observed.
+        },
+      )
+      .catch(() => {
+        // Detached late-response cleanup cannot escape publicly.
+      });
     const result =
       abortResult === undefined
         ? await fetchResult

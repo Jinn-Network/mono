@@ -694,6 +694,100 @@ describe("bounded IPFS block readers", () => {
     }
   });
 
+  test("cancels responses that fulfill after caller abort without awaiting cleanup", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (error: unknown) => {
+      unhandled.push(error);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      for (const kind of ["Kubo", "gateway"] as const) {
+        for (const cancelMode of ["reject", "never"] as const) {
+          const controller = new AbortController();
+          let resolveFetch!: (response: Response) => void;
+          let resolveFetchStarted!: () => void;
+          let resolveCancelStarted!: () => void;
+          const fetchStarted = new Promise<void>((resolve) => {
+            resolveFetchStarted = resolve;
+          });
+          const cancelStarted = new Promise<void>((resolve) => {
+            resolveCancelStarted = resolve;
+          });
+          const ignoredFetch = new Promise<Response>((resolve) => {
+            resolveFetch = resolve;
+          });
+          const options = {
+            endpoint:
+              kind === "Kubo"
+                ? "http://127.0.0.1:5001"
+                : "https://gateway.example.test",
+            fetch: async () => {
+              resolveFetchStarted();
+              return ignoredFetch;
+            },
+          };
+          const reader =
+            kind === "Kubo"
+              ? createKuboBlockReader(options)
+              : createGatewayBlockReader(options);
+          const pending = reader.getBlock(EMPTY_RAW_CID, {
+            maxBytes: 64,
+            signal: controller.signal,
+          });
+          await fetchStarted;
+          controller.abort(createAuthorityBearingError("abort reason"));
+
+          await assert.rejects(
+            Promise.race([
+              pending,
+              rejectAfter(
+                100,
+                `${kind} ${cancelMode} primary abort hung`,
+              ),
+            ]),
+            hasCode("OPERATION_ABORTED"),
+            `${kind} ${cancelMode}`,
+          );
+
+          let cancelSawAbortedSignal = false;
+          resolveFetch(
+            new Response(
+              new ReadableStream<Uint8Array>({
+                cancel() {
+                  cancelSawAbortedSignal = controller.signal.aborted;
+                  resolveCancelStarted();
+                  return cancelMode === "reject"
+                    ? Promise.reject(
+                        createAuthorityBearingError(
+                          "late response cancellation",
+                        ),
+                      )
+                    : new Promise<void>(() => {});
+                },
+              }),
+            ),
+          );
+          await Promise.race([
+            cancelStarted,
+            rejectAfter(
+              100,
+              `${kind} ${cancelMode} late response was not canceled`,
+            ),
+          ]);
+          assert.equal(
+            cancelSawAbortedSignal,
+            true,
+            `${kind} ${cancelMode}`,
+          );
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          assert.deepEqual(unhandled, [], `${kind} ${cancelMode}`);
+        }
+      }
+    } finally {
+      process.removeListener("unhandledRejection", onUnhandled);
+    }
+  });
+
   test("distinguishes dependency AbortError from an actual caller abort", async () => {
     for (const kind of ["Kubo", "gateway"] as const) {
       const dependencyAbort = new Error("transport timeout");
