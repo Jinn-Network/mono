@@ -20,6 +20,12 @@ describe("publication entrypoint boundaries", () => {
     expect(createFilesystemPublicationJournalStore).toBeTypeOf("function");
   });
 
+  test("keeps internal placement continuation out of the root entrypoint", () => {
+    expect(
+      "continuePublicationPlacements" in publication,
+    ).toBe(false);
+  });
+
   test("exports contract kits only from the testing entrypoint", () => {
     expect(
       "describeAnnouncementSinkContract" in publication,
