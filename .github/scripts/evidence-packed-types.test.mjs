@@ -14,6 +14,7 @@ const packages = [
   ['protocol', '@jinn-network/evidence-protocol'],
   ['repository', '@jinn-network/evidence-repository'],
   ['repository-oci', '@jinn-network/evidence-repository-oci'],
+  ['repository-ipfs', '@jinn-network/evidence-repository-ipfs'],
   ['discovery', '@jinn-network/evidence-discovery'],
   ['catalog-sqlite', '@jinn-network/evidence-catalog-sqlite'],
   ['execution-recorder', '@jinn-network/execution-recorder'],
@@ -28,6 +29,8 @@ const codeEntrypoints = [
   '@jinn-network/evidence-repository/testing',
   '@jinn-network/evidence-repository/fs',
   '@jinn-network/evidence-repository-oci',
+  '@jinn-network/evidence-repository-ipfs',
+  '@jinn-network/evidence-repository-ipfs/cid',
   '@jinn-network/evidence-discovery',
   '@jinn-network/evidence-discovery/testing',
   '@jinn-network/evidence-discovery/indexer',
@@ -140,7 +143,7 @@ try {
   }
 
   console.log(
-    `Compiled a packed TypeScript consumer against ${codeEntrypoints.length} public code entrypoints across all nine evidence packages.`,
+    `Compiled a packed TypeScript consumer against ${codeEntrypoints.length} public code entrypoints across all ten evidence packages.`,
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });

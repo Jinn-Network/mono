@@ -7,8 +7,47 @@ import { test } from 'node:test';
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'evidence');
 const evidenceDirectories = [
-  'protocol', 'repository', 'repository-oci', 'discovery', 'catalog-sqlite',
-  'execution-recorder', 'attestation-issuer', 'derivation', 'local-runtime',
+  'protocol', 'repository', 'repository-oci', 'repository-ipfs', 'discovery',
+  'catalog-sqlite', 'execution-recorder', 'attestation-issuer', 'derivation',
+  'local-runtime',
+];
+
+const IPFS_FORBIDDEN_PACKAGES = [
+  '@jinn-network/attestation-issuer',
+  '@jinn-network/evidence-catalog-sqlite',
+  '@jinn-network/evidence-derivation',
+  '@jinn-network/evidence-discovery',
+  '@jinn-network/evidence-local-runtime',
+  '@jinn-network/evidence-protocol',
+  '@jinn-network/evidence-publication',
+  '@jinn-network/evidence-repository-oci',
+  '@jinn-network/execution-recorder',
+  'better-sqlite3',
+  'viem',
+];
+
+const IPFS_ALLOWED_DEPENDENCIES = [
+  '@jinn-network/evidence-repository',
+  'kubo-rpc-client',
+];
+
+const IPFS_ALLOWED_DEV_DEPENDENCIES = [
+  '@jinn-network/evidence-protocol',
+  '@types/node',
+  'typescript',
+  'vitest',
+];
+
+const IPFS_CID_FORBIDDEN_PACKAGES = [
+  'kubo-rpc-client',
+  'node:dgram',
+  'node:dns',
+  'node:fs',
+  'node:http',
+  'node:http2',
+  'node:https',
+  'node:net',
+  'node:tls',
 ];
 
 const DERIVATION_FORBIDDEN_PACKAGES = [
@@ -282,15 +321,62 @@ test('Derivation root and testing boundaries distinguish test-only dependencies'
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
+test('IPFS boundary checks catch foreign packages and /cid reader escapes', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-ipfs-boundary-'));
+  try {
+    const source = join(fixture, 'src');
+    const foreign = join(fixture, 'foreign');
+    const cid = join(source, 'cid.ts');
+    const readers = join(source, 'readers.ts');
+    const registration = join(source, 'registration.ts');
+    mkdirSync(source); mkdirSync(foreign);
+    writeFileSync(join(source, 'index.ts'), [
+      'import "@jinn-network/evidence-protocol";',
+      'import "@jinn-network/evidence-publication";',
+      'import "@jinn-network/evidence-repository-oci";',
+      'import "../foreign/application.js";',
+    ].join('\n'));
+    writeFileSync(cid, [
+      'import "kubo-rpc-client";',
+      'import "node:http";',
+      'export * from "./readers.js";',
+      'export * from "./registration.js";',
+      'fetch;',
+      'globalThis.fetch;',
+    ].join('\n'));
+    writeFileSync(readers, 'export const reader = true;\n');
+    writeFileSync(registration, 'export const registration = true;\n');
+    assert.equal(
+      forbiddenImports(
+        source,
+        IPFS_FORBIDDEN_PACKAGES,
+        [foreign],
+      ).length,
+      4,
+    );
+    assert.equal(
+      forbiddenImportsInFiles(
+        [cid],
+        IPFS_CID_FORBIDDEN_PACKAGES,
+        [readers, registration],
+      ).length,
+      4,
+    );
+    assert.equal(ambientNetworkUsesInFiles([cid]).length, 2);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
 test('evidence source boundaries remain one-way across the approved graph', () => {
   const discovery = join(packages, 'discovery', 'src');
   const catalog = join(discovery, 'catalog');
   const indexer = join(discovery, 'indexer');
   const journal = join(discovery, 'journal');
   const repositoryFs = join(packages, 'repository', 'src', 'fs');
+  const repositoryIpfs = join(packages, 'repository-ipfs');
   const concreteBindings = [
     '@jinn-network/evidence-discovery/journal', '@jinn-network/evidence-repository/fs',
-    '@jinn-network/evidence-repository-oci', '@jinn-network/evidence-catalog-sqlite',
+    '@jinn-network/evidence-repository-oci', '@jinn-network/evidence-repository-ipfs',
+    '@jinn-network/evidence-catalog-sqlite',
   ];
 
   assertBoundary(join(packages, 'protocol', 'src'), ['@jinn-network/']);
@@ -302,7 +388,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     ['.', './indexer', './journal', './testing']);
 
   assertBoundary(catalog, ['@jinn-network/evidence-discovery/indexer', '@jinn-network/evidence-discovery/journal'], [indexer, journal]);
-  assertBoundary(indexer, ['@jinn-network/evidence-discovery/journal', ...concreteBindings], [journal, repositoryFs, join(packages, 'repository-oci'), join(packages, 'catalog-sqlite')]);
+  assertBoundary(indexer, ['@jinn-network/evidence-discovery/journal', ...concreteBindings], [journal, repositoryFs, join(packages, 'repository-oci'), repositoryIpfs, join(packages, 'catalog-sqlite')]);
   assertBoundary(journal, ['@jinn-network/evidence-discovery/indexer'], [indexer]);
   const discoveryRootFiles = files(discovery)
     .filter((file) => ![catalog, indexer, journal].some((ownedRoot) => inside(file, ownedRoot)));
@@ -320,8 +406,64 @@ test('evidence source boundaries remain one-way across the approved graph', () =
   );
 
   for (const producer of ['execution-recorder', 'attestation-issuer']) {
-    assertBoundary(join(packages, producer, 'src'), [...concreteBindings, '@jinn-network/evidence-local-runtime'], [journal, repositoryFs, join(packages, 'repository-oci'), join(packages, 'catalog-sqlite'), join(packages, 'local-runtime')]);
+    assertBoundary(join(packages, producer, 'src'), [...concreteBindings, '@jinn-network/evidence-local-runtime'], [journal, repositoryFs, join(packages, 'repository-oci'), repositoryIpfs, join(packages, 'catalog-sqlite'), join(packages, 'local-runtime')]);
   }
+  const ipfsSource = join(repositoryIpfs, 'src');
+  const ipfsManifest = manifest('repository-ipfs');
+  const ipfsProductionFiles = files(ipfsSource)
+    .filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
+  const ipfsForbiddenRoots = evidenceDirectories
+    .filter((directory) => !['repository-ipfs', 'repository'].includes(directory))
+    .map((directory) => join(packages, directory));
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      ipfsProductionFiles,
+      IPFS_FORBIDDEN_PACKAGES,
+      ipfsForbiddenRoots,
+    ),
+    [],
+    'the IPFS binding may depend only on the Repository contract',
+  );
+  const ipfsCid = join(ipfsSource, 'cid.ts');
+  const ipfsReader = join(ipfsSource, 'readers.ts');
+  const ipfsRegistration = join(ipfsSource, 'registration.ts');
+  const ipfsRepository = join(ipfsSource, 'repository.ts');
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      [ipfsCid],
+      IPFS_CID_FORBIDDEN_PACKAGES,
+      [ipfsReader, ipfsRegistration, ipfsRepository],
+    ),
+    [],
+    'the IPFS /cid entrypoint must remain pure mapping',
+  );
+  assert.deepEqual(
+    ambientNetworkUsesInFiles([ipfsCid]),
+    [],
+    'the IPFS /cid entrypoint may not use ambient network APIs',
+  );
+  assert.deepEqual(Object.keys(ipfsManifest.exports).sort(), ['.', './cid', './profile/*']);
+  assert.deepEqual(ipfsManifest.exports['.'], {
+    import: './dist/index.js',
+    types: './dist/index.d.ts',
+  });
+  assert.deepEqual(ipfsManifest.exports['./cid'], {
+    import: './dist/cid.js',
+    types: './dist/cid.d.ts',
+  });
+  assert.equal(ipfsManifest.exports['./profile/*'], './profile/*');
+  assert.deepEqual(
+    Object.keys(ipfsManifest.dependencies ?? {}).sort(),
+    IPFS_ALLOWED_DEPENDENCIES,
+    'IPFS production dependencies must match the approved design inventory',
+  );
+  assert.deepEqual(
+    Object.keys(ipfsManifest.devDependencies ?? {}).sort(),
+    IPFS_ALLOWED_DEV_DEPENDENCIES,
+    'IPFS development dependencies must match the approved toolchain',
+  );
+  assert.deepEqual(Object.keys(ipfsManifest.optionalDependencies ?? {}), []);
+  assert.deepEqual(Object.keys(ipfsManifest.peerDependencies ?? {}), []);
   const derivation = join(packages, 'derivation');
   const derivationSource = join(derivation, 'src');
   const derivationTesting = join(derivationSource, 'testing.ts');
@@ -421,5 +563,24 @@ test('evidence source boundaries remain one-way across the approved graph', () =
   for (const directory of evidenceDirectories) {
     if (directory === 'local-runtime' || directory === 'repository') continue;
     assertBoundary(join(packages, directory, 'src'), ['@jinn-network/evidence-repository/fs'], [repositoryFs]);
+  }
+  for (const directory of evidenceDirectories) {
+    if (directory === 'repository-ipfs') continue;
+    for (const section of [
+      'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
+    ]) {
+      assert.ok(
+        !Object.hasOwn(
+          manifest(directory)[section] ?? {},
+          '@jinn-network/evidence-repository-ipfs',
+        ),
+        `${directory} may not depend on the concrete IPFS binding`,
+      );
+    }
+    assertBoundary(
+      join(packages, directory, 'src'),
+      ['@jinn-network/evidence-repository-ipfs'],
+      [repositoryIpfs],
+    );
   }
 });
