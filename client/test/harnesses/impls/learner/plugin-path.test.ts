@@ -49,6 +49,17 @@ describe('resolvePluginRoot', () => {
     );
   });
 
+  it('throws with an actionable message when hooks/post-tool-use-failure is missing', () => {
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path.endsWith('hooks/post-tool-use-failure')) return false;
+      return true;
+    });
+    expect(() => resolvePluginRoot()).toThrowError(
+      /missing hooks\/post-tool-use-failure — plugin assets may be stale or incomplete; rebuild the plugin/,
+    );
+  });
+
   it('throws with an actionable message when hooks/hooks.json is missing', () => {
     // Simulate a stale plugin tree: pluginRoot exists, skills/learn/SKILL.md exists,
     // hooks/session-start exists, but hooks/hooks.json is absent.

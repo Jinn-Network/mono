@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# PostToolUseFailure hook — capture intermediateFailureDiffs for failed test Bash (#2225).
+# Always exit 0 so hook noise never blocks the agent.
+set +e
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+
+HELPER=""
+for candidate in \
+  "$PLUGIN_ROOT/../../harnesses/impls/learner/intermediate-failure-diffs.js" \
+  "$PLUGIN_ROOT/../../dist/harnesses/impls/learner/intermediate-failure-diffs.js"
+do
+  if [[ -f "$candidate" ]]; then
+    HELPER="$candidate"
+    break
+  fi
+done
+
+if [[ -n "$HELPER" ]]; then
+  node "$HELPER" post-tool-use-failure
+  exit 0
+fi
+
+# Repo-dev fallback: source tree + tsx (not the production path).
+SRC="$PLUGIN_ROOT/../../src/harnesses/impls/learner/intermediate-failure-diffs.ts"
+if [[ -f "$SRC" ]] && command -v tsx >/dev/null 2>&1; then
+  tsx "$SRC" post-tool-use-failure
+  exit 0
+fi
+
+echo "post-tool-use-failure: helper not found (build client so dist/harnesses/... exists)" >&2
+exit 0
