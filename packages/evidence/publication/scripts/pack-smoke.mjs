@@ -119,6 +119,8 @@ import {
   type PublicationJournalStore,
   type PublishInput,
 } from "@jinn-network/evidence-publication";
+// @ts-expect-error Internal placement continuation is not a public export.
+import type { continuePublicationPlacements } from "@jinn-network/evidence-publication";
 import {
   describeAnnouncementSinkContract,
   InMemoryPublicationJournalStore,
@@ -141,6 +143,7 @@ void journal;
 void filesystem;
 void maximumRevisionBytes;
 void describeAnnouncementSinkContract;
+void (null as unknown as typeof continuePublicationPlacements);
 `,
   );
   await writeFile(
@@ -191,6 +194,7 @@ import {
 import { createRecordReference } from "@jinn-network/evidence-repository";
 
 assert.equal("createFilesystemPublicationJournalStore" in root, false);
+assert.equal("continuePublicationPlacements" in root, false);
 assert.equal(FILESYSTEM_PUBLICATION_JOURNAL_MAX_REVISION_BYTES, 8 * 1024 * 1024);
 const sink = new InMemoryAnnouncementSink({
   medium: "https://publication.test/medium",

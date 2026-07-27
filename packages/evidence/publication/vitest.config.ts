@@ -9,6 +9,9 @@ export default defineConfig({
       "@jinn-network/evidence-protocol": fileURLToPath(
         new URL("../protocol/src/hashing.ts", import.meta.url),
       ),
+      "@jinn-network/evidence-repository/testing": fileURLToPath(
+        new URL("../repository/src/testing.ts", import.meta.url),
+      ),
       "@jinn-network/evidence-repository": fileURLToPath(
         new URL("../repository/src/index.ts", import.meta.url),
       ),
