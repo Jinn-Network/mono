@@ -38,6 +38,7 @@ const codeEntrypoints = [
   '@jinn-network/attestation-issuer',
   '@jinn-network/attestation-issuer/testing',
   '@jinn-network/evidence-derivation',
+  '@jinn-network/evidence-derivation/testing',
   '@jinn-network/evidence-local-runtime',
 ];
 

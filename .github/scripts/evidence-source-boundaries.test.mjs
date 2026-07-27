@@ -49,6 +49,8 @@ const DERIVATION_ALLOWED_DEV_DEPENDENCIES = [
   'vitest',
 ];
 
+const DERIVATION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
 const ambientNetworkIdentifier = new RegExp(
   String.raw`(?<![\w$."'\x60])(?:${AMBIENT_NETWORK_APIS.join('|')})\b`,
@@ -94,12 +96,22 @@ function inside(child, parent) {
   return path === '' || (!path.startsWith('..') && !path.startsWith('/'));
 }
 
+function sourceModuleStem(path) {
+  return path.replace(/\.[cm]?[jt]sx?$/u, '');
+}
+
+function insideForbiddenRoot(path, forbiddenRoot) {
+  return existsSync(forbiddenRoot) && lstatSync(forbiddenRoot).isFile()
+    ? sourceModuleStem(path) === sourceModuleStem(forbiddenRoot)
+    : inside(path, forbiddenRoot);
+}
+
 function forbiddenImportsInFiles(sourceFiles, forbiddenPackages, forbiddenRoots = []) {
   return sourceFiles.flatMap((file) => specifiers(readFileSync(file, 'utf8')).flatMap((specifier) => {
     const packageMatch = forbiddenPackages.some((forbidden) => forbidden.endsWith('/')
       ? specifier.startsWith(forbidden) : specifier === forbidden || specifier.startsWith(`${forbidden}/`));
     const pathMatch = specifier.startsWith('.') && forbiddenRoots.some((forbiddenRoot) =>
-      inside(resolve(dirname(file), specifier), forbiddenRoot));
+      insideForbiddenRoot(resolve(dirname(file), specifier), forbiddenRoot));
     return packageMatch || pathMatch ? [`${relative(root, file)} -> ${specifier}`] : [];
   })).sort();
 }
@@ -226,6 +238,50 @@ test('Derivation boundary checks catch ambient network APIs without imports', ()
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
+test('Derivation root and testing boundaries distinguish test-only dependencies', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-derivation-testing-boundary-'));
+  try {
+    const source = join(fixture, 'src');
+    const testing = join(source, 'testing.ts');
+    const testingFixtures = join(source, 'fixtures.ts');
+    const testingInvocation = join(
+      source,
+      'detector-contract-invocation.ts',
+    );
+    mkdirSync(source);
+    writeFileSync(join(source, 'index.ts'), [
+      'import "vitest";',
+      'export * from "./testing.js";',
+      'export * from "./fixtures.js";',
+      'export * from "./detector-contract-invocation.js";',
+    ].join('\n'));
+    writeFileSync(testing, [
+      'import "@jinn-network/evidence-repository";',
+      'import "node:fs/promises";',
+    ].join('\n'));
+    writeFileSync(testingFixtures, 'export const syntheticFixture = true;\n');
+    writeFileSync(
+      testingInvocation,
+      'export const invokeContractDetector = true;\n',
+    );
+    assert.equal(
+      forbiddenImportsInFiles(
+        [join(source, 'index.ts')],
+        ['vitest'],
+        [testing, testingFixtures, testingInvocation],
+      ).length,
+      4,
+    );
+    assert.equal(
+      forbiddenImportsInFiles(
+        [testing],
+        DERIVATION_FORBIDDEN_PACKAGES,
+      ).length,
+      2,
+    );
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
 test('evidence source boundaries remain one-way across the approved graph', () => {
   const discovery = join(packages, 'discovery', 'src');
   const catalog = join(discovery, 'catalog');
@@ -267,20 +323,61 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     assertBoundary(join(packages, producer, 'src'), [...concreteBindings, '@jinn-network/evidence-local-runtime'], [journal, repositoryFs, join(packages, 'repository-oci'), join(packages, 'catalog-sqlite'), join(packages, 'local-runtime')]);
   }
   const derivation = join(packages, 'derivation');
+  const derivationSource = join(derivation, 'src');
+  const derivationTesting = join(derivationSource, 'testing.ts');
+  const derivationTestingFixtures = join(derivationSource, 'fixtures.ts');
+  const derivationTestingInvocation = join(
+    derivationSource,
+    'detector-contract-invocation.ts',
+  );
+  const derivationTestingFiles = [
+    derivationTesting,
+    derivationTestingFixtures,
+    derivationTestingInvocation,
+  ];
+  const derivationSourceFiles = files(derivationSource);
+  const derivationProductionFiles = derivationSourceFiles.filter((file) =>
+    !derivationTestingFiles.includes(file)
+      && !/\.test\.[cm]?[jt]sx?$/u.test(file));
   const derivationManifest = manifest('derivation');
   const derivationForbiddenRoots = evidenceDirectories
     .filter((directory) => !['derivation', 'protocol'].includes(directory))
     .map((directory) => join(packages, directory));
-  assertBoundary(
-    join(derivation, 'src'),
-    DERIVATION_FORBIDDEN_PACKAGES,
-    derivationForbiddenRoots,
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      derivationProductionFiles,
+      [...DERIVATION_FORBIDDEN_PACKAGES, 'vitest'],
+      [...derivationForbiddenRoots, ...derivationTestingFiles],
+    ),
+    [],
+    'the Derivation root region must not expose /testing or test-only dependencies',
   );
   assert.deepEqual(
-    ambientNetworkUsesInFiles(files(join(derivation, 'src'))),
+    forbiddenImportsInFiles(
+      derivationTestingFiles,
+      DERIVATION_FORBIDDEN_PACKAGES,
+      derivationForbiddenRoots,
+    ),
     [],
-    'derivation may not use ambient network APIs',
+    'the Derivation /testing region crosses an evidence architecture boundary',
   );
+  assert.deepEqual(
+    ambientNetworkUsesInFiles([
+      ...derivationProductionFiles,
+      ...derivationTestingFiles,
+    ]),
+    [],
+    'Derivation production and /testing entrypoints may not use ambient network APIs',
+  );
+  assert.deepEqual(Object.keys(derivationManifest.exports).sort(), ['.', './testing']);
+  assert.deepEqual(derivationManifest.exports['.'], {
+    import: './dist/index.js',
+    types: './dist/index.d.ts',
+  });
+  assert.deepEqual(derivationManifest.exports['./testing'], {
+    import: './dist/testing.js',
+    types: './dist/testing.d.ts',
+  });
   assert.deepEqual(
     Object.keys(derivationManifest.dependencies ?? {}).sort(),
     DERIVATION_ALLOWED_DEPENDENCIES,
@@ -297,10 +394,13 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     'derivation may not declare optional dependencies',
   );
   assert.deepEqual(
-    Object.keys(derivationManifest.peerDependencies ?? {}),
-    [],
-    'derivation may not declare peer dependencies',
+    Object.keys(derivationManifest.peerDependencies ?? {}).sort(),
+    DERIVATION_ALLOWED_PEER_DEPENDENCIES,
+    'derivation peer dependencies must remain test-only',
   );
+  assert.deepEqual(derivationManifest.peerDependenciesMeta, {
+    vitest: { optional: true },
+  });
   for (const section of [
     'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
   ]) {

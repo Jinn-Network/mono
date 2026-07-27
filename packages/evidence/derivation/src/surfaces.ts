@@ -199,6 +199,7 @@ function walkMetadata(
   source: ValidatedDerivationSource,
   surfaces: DerivationSurface[],
   protectedLocations: ProtectedLocation[],
+  extensionContext = false,
 ): boolean {
   if (Array.isArray(value)) {
     return value.every((child, index) =>
@@ -211,6 +212,7 @@ function walkMetadata(
         source,
         surfaces,
         protectedLocations,
+        extensionContext,
       ),
     );
   }
@@ -251,7 +253,7 @@ function walkMetadata(
     const child = descriptor.value;
     const childPointer = `${pointer}/${escapePointer(key)}`;
     const childSegmentKinds = [...segmentKinds, "object-property"] as const;
-    if (PROTECTED_KEYS.has(key)) {
+    if (!extensionContext && PROTECTED_KEYS.has(key)) {
       const protectedClass = protectedClassFor(key, child, source);
       protectedLocations.push({
         location: childPointer,
@@ -270,6 +272,7 @@ function walkMetadata(
             source,
             surfaces,
             protectedLocations,
+            extensionContext,
           )
         ) {
           continue;
@@ -327,7 +330,7 @@ function walkMetadata(
       });
       continue;
     }
-    if (PROTOCOL_SCALARS.has(key)) {
+    if (!extensionContext && PROTOCOL_SCALARS.has(key)) {
       if (
         typeof child === "string" ||
         typeof child === "number" ||
@@ -352,6 +355,7 @@ function walkMetadata(
           source,
           surfaces,
           protectedLocations,
+          extensionContext,
         )
       ) {
         continue;
@@ -374,6 +378,7 @@ function walkMetadata(
         source,
         surfaces,
         protectedLocations,
+        true,
       )
     ) {
       continue;

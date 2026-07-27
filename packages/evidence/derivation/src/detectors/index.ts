@@ -42,6 +42,78 @@ export interface BuiltinDetectorOptions {
   readonly privateConfiguration: BuiltinPrivateConfiguration;
 }
 
+interface BuiltinDetectorRuntimeState {
+  readonly retainedSurfaces: Map<DerivationSurface, number>;
+  rejectNextDetection: boolean;
+}
+
+const builtinDetectorRuntimeStates = new WeakMap<
+  DerivationDetector,
+  BuiltinDetectorRuntimeState
+>();
+
+function builtinDetectorRuntimeState(
+  detector: DerivationDetector,
+): BuiltinDetectorRuntimeState {
+  const state = builtinDetectorRuntimeStates.get(detector);
+  if (!state) {
+    throw new EvidenceDerivationError(
+      "INVALID_DERIVATION_INPUT",
+      "The built-in detector probe requires a built-in detector.",
+    );
+  }
+  return state;
+}
+
+function retainSurface(
+  state: BuiltinDetectorRuntimeState,
+  surface: DerivationSurface,
+): void {
+  state.retainedSurfaces.set(
+    surface,
+    (state.retainedSurfaces.get(surface) ?? 0) + 1,
+  );
+}
+
+function releaseSurface(
+  state: BuiltinDetectorRuntimeState,
+  surface: DerivationSurface,
+): void {
+  const references = state.retainedSurfaces.get(surface);
+  if (references === undefined || references <= 1) {
+    state.retainedSurfaces.delete(surface);
+    return;
+  }
+  state.retainedSurfaces.set(surface, references - 1);
+}
+
+function applyOperationalRejectionProbe(
+  state: BuiltinDetectorRuntimeState,
+): void {
+  if (!state.rejectNextDetection) return;
+  state.rejectNextDetection = false;
+  throw new Error("Built-in detector synthetic operational rejection.");
+}
+
+/** @internal Test-only observer for the built-in detector contract harness. */
+export function retainedBuiltinSurfaceCount(
+  detector: DerivationDetector,
+): number {
+  let references = 0;
+  for (const count of builtinDetectorRuntimeState(detector)
+    .retainedSurfaces.values()) {
+    references += count;
+  }
+  return references;
+}
+
+/** @internal Bounded non-abort rejection seam for detector contract tests. */
+export function rejectNextBuiltinDetection(
+  detector: DerivationDetector,
+): void {
+  builtinDetectorRuntimeState(detector).rejectNextDetection = true;
+}
+
 type Match = {
   readonly class: string;
   readonly start: number;
@@ -506,89 +578,118 @@ export function createBuiltinDerivationDetectors(
   );
   const knownValues = Object.freeze([...configuration.knownIdentities]);
   const privateAllowlist = Object.freeze([...configuration.privateAllowlist]);
+  const knownRuntimeState: BuiltinDetectorRuntimeState = {
+    retainedSurfaces: new Map(),
+    rejectNextDetection: false,
+  };
   const knownIdentity: DerivationDetector = Object.freeze({
     descriptor: knownDescriptor,
     async detect(
       surface: DerivationSurface,
       operationOptions?: DerivationOperationOptions,
     ) {
-      if (operationOptions?.signal?.aborted) {
-        throw new EvidenceDerivationError(
-          "OPERATION_ABORTED",
-          "Derivation was aborted.",
-        );
-      }
-      const results: DerivationFinding[] = [];
-      for (const value of knownValues) {
-        let offset = surface.text.indexOf(value);
-        while (offset >= 0) {
-          results.push(
-            finding(
-              surface,
-              {
-                class:
-                  DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration
-                    .knownIdentityFinding.class,
-                start: offset,
-                end: offset + value.length,
-                confidence:
-                  DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration
-                    .knownIdentityFinding.confidence,
-                evidence:
-                  DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration
-                    .knownIdentityFinding.evidence,
-              },
-              knownDescriptor,
-            ),
-          );
-          offset = surface.text.indexOf(
-            value,
-            offset +
-              (DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration
-                .knownIdentityMechanism.matchAdvance ===
-              "matched-length"
-                ? value.length
-                : 1),
+      retainSurface(knownRuntimeState, surface);
+      try {
+        if (operationOptions?.signal?.aborted) {
+          throw new EvidenceDerivationError(
+            "OPERATION_ABORTED",
+            "Derivation was aborted.",
           );
         }
+        applyOperationalRejectionProbe(knownRuntimeState);
+        await Promise.resolve();
+        if (operationOptions?.signal?.aborted) {
+          throw new EvidenceDerivationError(
+            "OPERATION_ABORTED",
+            "Derivation was aborted.",
+          );
+        }
+        const results: DerivationFinding[] = [];
+        for (const value of knownValues) {
+          let offset = surface.text.indexOf(value);
+          while (offset >= 0) {
+            results.push(
+              finding(
+                surface,
+                {
+                  class:
+                    DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration
+                      .knownIdentityFinding.class,
+                  start: offset,
+                  end: offset + value.length,
+                  confidence:
+                    DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration
+                      .knownIdentityFinding.confidence,
+                  evidence:
+                    DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration
+                      .knownIdentityFinding.evidence,
+                },
+                knownDescriptor,
+              ),
+            );
+            offset = surface.text.indexOf(
+              value,
+              offset +
+                (DETERMINISTIC_PUBLIC_RECIPE.privateConfiguration
+                  .knownIdentityMechanism.matchAdvance ===
+                "matched-length"
+                  ? value.length
+                  : 1),
+            );
+          }
+        }
+        return results;
+      } finally {
+        releaseSurface(knownRuntimeState, surface);
       }
-      return results;
     },
   });
+  builtinDetectorRuntimeStates.set(knownIdentity, knownRuntimeState);
   const patternsDescriptor = descriptor(
     "deterministic-patterns",
     DETERMINISTIC_PUBLIC_RECIPE,
     configurationDigest,
   );
+  const patternsRuntimeState: BuiltinDetectorRuntimeState = {
+    retainedSurfaces: new Map(),
+    rejectNextDetection: false,
+  };
   const patterns: DerivationDetector = Object.freeze({
     descriptor: patternsDescriptor,
     async detect(
       surface: DerivationSurface,
       operationOptions?: DerivationOperationOptions,
     ) {
-      if (operationOptions?.signal?.aborted) {
-        throw new EvidenceDerivationError(
-          "OPERATION_ABORTED",
-          "Derivation was aborted.",
-        );
-      }
-      const matches = await patternMatches(surface.text, surface);
-      if (operationOptions?.signal?.aborted) {
-        throw new EvidenceDerivationError(
-          "OPERATION_ABORTED",
-          "Derivation was aborted.",
-        );
-      }
-      return matches
-        .filter((match) => {
-          const matched = surface.text.slice(match.start, match.end);
-          return !privateAllowlist.some(
-            (allowed) => allowed.length > 0 && matched.includes(allowed),
+      retainSurface(patternsRuntimeState, surface);
+      try {
+        if (operationOptions?.signal?.aborted) {
+          throw new EvidenceDerivationError(
+            "OPERATION_ABORTED",
+            "Derivation was aborted.",
           );
-        })
-        .map((match) => finding(surface, match, patternsDescriptor));
+        }
+        applyOperationalRejectionProbe(patternsRuntimeState);
+        const matches = await patternMatches(surface.text, surface);
+        if (operationOptions?.signal?.aborted) {
+          throw new EvidenceDerivationError(
+            "OPERATION_ABORTED",
+            "Derivation was aborted.",
+          );
+        }
+        return matches
+          .filter((match) => {
+            const matched = surface.text.slice(match.start, match.end);
+            return !privateAllowlist.some(
+              (allowed) => allowed.length > 0 && matched.includes(allowed),
+            );
+          })
+          .map((match) => finding(surface, match, patternsDescriptor));
+      } finally {
+        releaseSurface(patternsRuntimeState, surface);
+      }
     },
   });
+  builtinDetectorRuntimeStates.set(patterns, patternsRuntimeState);
   return Object.freeze([knownIdentity, patterns]);
 }
 

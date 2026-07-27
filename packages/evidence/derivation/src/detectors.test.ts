@@ -6,6 +6,7 @@ import { canonicalJsonBytes, sha256Digest } from "./bytes.js";
 import {
   createBuiltinDerivationDetectors,
   normalizeDetectorFindings,
+  retainedBuiltinSurfaceCount,
 } from "./detectors/index.js";
 import {
   builtinDetectorImplementationDigest,
@@ -122,6 +123,72 @@ describe("built-in detectors", () => {
       builtinDetectorImplementationDigest("deterministic-patterns", mutated),
     ).not.toBe(detectors[1]!.descriptor.implementationDigest);
   });
+
+  test.each([
+    ["known identity", 0],
+    ["deterministic patterns", 1],
+  ] as const)(
+    "releases the %s surface after success and operational cancellation",
+    async (_name, detectorIndex) => {
+      const detector = createBuiltinDerivationDetectors({
+        privateConfiguration,
+      })[detectorIndex]!;
+      const retainedSurfaceCount = (): number =>
+        retainedBuiltinSurfaceCount(detector);
+
+      const successful = detector.detect(surface("Ada Example"));
+      expect(retainedSurfaceCount()).toBe(1);
+      await successful;
+      expect(retainedSurfaceCount()).toBe(0);
+
+      const alreadyAborted = new AbortController();
+      alreadyAborted.abort();
+      await expect(
+        detector.detect(surface("Ada Example"), {
+          signal: alreadyAborted.signal,
+        }),
+      ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
+      expect(retainedSurfaceCount()).toBe(0);
+
+      const inFlight = new AbortController();
+      const pending = detector.detect(surface("Ada Example"), {
+        signal: inFlight.signal,
+      });
+      expect(retainedSurfaceCount()).toBe(1);
+      inFlight.abort();
+      await expect(pending).rejects.toMatchObject({
+        code: "OPERATION_ABORTED",
+      });
+      expect(retainedSurfaceCount()).toBe(0);
+    },
+  );
+
+  test.each([
+    ["known identity", 0],
+    ["deterministic patterns", 1],
+  ] as const)(
+    "counts overlapping same-surface %s success and cancellation independently",
+    async (_name, detectorIndex) => {
+      const detector = createBuiltinDerivationDetectors({
+        privateConfiguration,
+      })[detectorIndex]!;
+      const sharedSurface = surface("Ada Example");
+      const controller = new AbortController();
+
+      const successful = detector.detect(sharedSurface);
+      const cancelled = detector.detect(sharedSurface, {
+        signal: controller.signal,
+      });
+      expect(retainedBuiltinSurfaceCount(detector)).toBe(2);
+
+      controller.abort();
+      await expect(cancelled).rejects.toMatchObject({
+        code: "OPERATION_ABORTED",
+      });
+      await successful;
+      expect(retainedBuiltinSurfaceCount(detector)).toBe(0);
+    },
+  );
 });
 
 describe("finding normalization", () => {

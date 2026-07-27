@@ -173,7 +173,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  derivation-core:
+  derivation:
+    name: Derivation
     needs: foundation
     runs-on: ubuntu-latest
     steps:
@@ -193,7 +194,7 @@ jobs:
       - name: Install packed-smoke dependency toolchain
         working-directory: packages/evidence/protocol
         run: yarn install --immutable
-      - name: Verify Derivation contracts and engine
+      - name: Verify complete Derivation package
         working-directory: packages/evidence/derivation
         run: |
           yarn install --immutable
@@ -318,7 +319,7 @@ jobs:
           retention-days: 1
 
   verify:
-    needs: [architecture, foundation, components, derivation-core, catalog-sqlite, local-runtime]
+    needs: [architecture, foundation, components, derivation, catalog-sqlite, local-runtime]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -327,7 +328,7 @@ jobs:
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
           FOUNDATION_RESULT: ${{ needs.foundation.result }}
           COMPONENTS_RESULT: ${{ needs.components.result }}
-          DERIVATION_CORE_RESULT: ${{ needs['derivation-core'].result }}
+          DERIVATION_RESULT: ${{ needs.derivation.result }}
           CATALOG_SQLITE_RESULT: ${{ needs['catalog-sqlite'].result }}
           LOCAL_RUNTIME_RESULT: ${{ needs['local-runtime'].result }}
         run: |
@@ -335,7 +336,7 @@ jobs:
             "$ARCHITECTURE_RESULT" \
             "$FOUNDATION_RESULT" \
             "$COMPONENTS_RESULT" \
-            "$DERIVATION_CORE_RESULT" \
+            "$DERIVATION_RESULT" \
             "$CATALOG_SQLITE_RESULT" \
             "$LOCAL_RUNTIME_RESULT"; do
             test "$result" = "success"

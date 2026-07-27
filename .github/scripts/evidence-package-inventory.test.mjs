@@ -104,3 +104,11 @@ test('evidence package Jinn dependencies and portal resolutions match the approv
     }
   }
 });
+
+test('the Derivation testing entrypoint declares Vitest as an exact optional peer', () => {
+  const derivation = readPackage('derivation');
+  assert.deepEqual(derivation.peerDependencies, { vitest: '^4.1.8' });
+  assert.deepEqual(derivation.peerDependenciesMeta, {
+    vitest: { optional: true },
+  });
+});
