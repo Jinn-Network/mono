@@ -22,6 +22,7 @@ import type {
   DerivationRecordReference,
   PublishableArtifact,
 } from "./types.js";
+import { compareCodeUnitStrings } from "./order.js";
 
 type Entity = ExecutionEvidenceDocument["@graph"][number];
 
@@ -218,7 +219,7 @@ export function buildPublicExecutionEvidence(
     if (right === descriptor) return 1;
     if (left === root) return -1;
     if (right === root) return 1;
-    return left["@id"].localeCompare(right["@id"]);
+    return compareCodeUnitStrings(left["@id"], right["@id"]);
   });
   const metadataBytes = prettyBytes(document);
   const validation = validateExecutionEvidence(metadataBytes);
@@ -263,7 +264,7 @@ export function buildPublicExecutionEvidence(
       kind: "receipt",
     },
   ];
-  artifacts.sort((left, right) => left.entityId.localeCompare(right.entityId));
+  artifacts.sort((left, right) => compareCodeUnitStrings(left.entityId, right.entityId));
   return Object.freeze({
     record: Object.freeze({
       reference,

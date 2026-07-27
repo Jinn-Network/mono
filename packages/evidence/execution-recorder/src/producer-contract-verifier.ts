@@ -15,6 +15,7 @@ import type {
   ExecutionProducerContractScenario,
 } from "./testing.js";
 import { isStrictRfc3339 } from "./validate-input.js";
+import { compareCodeUnitStrings } from "./order.js";
 
 type GraphEntity = ExecutionEvidenceDocument["@graph"][number];
 
@@ -70,7 +71,7 @@ function byteBearingEntities(
       (entity) =>
         typeof entity.sha256 === "string" && SHA256.test(entity.sha256),
     )
-    .sort((left, right) => left["@id"].localeCompare(right["@id"]));
+    .sort((left, right) => compareCodeUnitStrings(left["@id"], right["@id"]));
 }
 
 async function retrieveAllArtifacts(

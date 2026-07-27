@@ -16,6 +16,7 @@ import type {
   ResultEvaluationEvidence,
   ValidationReport,
 } from "./types.js";
+import { compareCodeUnitStrings } from "./order.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -47,10 +48,10 @@ function sortedDiagnostics(
 ): readonly ConformanceDiagnostic[] {
   return [...diagnostics].sort(
     (left, right) =>
-      left.path.localeCompare(right.path) ||
-      left.code.localeCompare(right.code) ||
-      (left.entityId ?? "").localeCompare(right.entityId ?? "") ||
-      left.message.localeCompare(right.message),
+      compareCodeUnitStrings(left.path, right.path) ||
+      compareCodeUnitStrings(left.code, right.code) ||
+      compareCodeUnitStrings((left.entityId ?? ""), right.entityId ?? "") ||
+      compareCodeUnitStrings(left.message, right.message),
   );
 }
 

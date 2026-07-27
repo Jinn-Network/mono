@@ -19,6 +19,7 @@ import type {
   PreparedExecutionVerification,
   PreparedResultEvaluation,
 } from "./types.js";
+import { compareCodeUnitStrings } from "./order.js";
 
 type Family = AnyPreparedAttestation["family"];
 
@@ -73,9 +74,9 @@ function diagnosticMessage(
 ): string {
   return [...diagnostics]
     .sort((a, b) =>
-      a.path.localeCompare(b.path) ||
-      a.code.localeCompare(b.code) ||
-      a.message.localeCompare(b.message))
+      compareCodeUnitStrings(a.path, b.path) ||
+      compareCodeUnitStrings(a.code, b.code) ||
+      compareCodeUnitStrings(a.message, b.message))
     .map(({ code, path, message }) => `${code} ${path || "/"}: ${message}`)
     .join("; ");
 }
