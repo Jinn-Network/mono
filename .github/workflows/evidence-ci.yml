@@ -141,6 +141,10 @@ jobs:
       - name: Test
         working-directory: packages/evidence/${{ matrix.component }}
         run: yarn test
+      - name: Test Kubo compatibility and Repository contract
+        if: matrix.component == 'repository-ipfs'
+        working-directory: packages/evidence/repository-ipfs
+        run: yarn test:kubo
       - name: Build
         working-directory: packages/evidence/${{ matrix.component }}
         run: yarn build
