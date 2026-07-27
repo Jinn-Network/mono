@@ -208,6 +208,64 @@ describe('bundled workspace packaging', () => {
     await expect(lstat(path.join(clientRoot, '.jinn-pack-bundled-workspaces'))).rejects.toThrow();
   });
 
+  it('materializes exact canary workspace versions selected before client publication', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'jinn-bundled-workspaces-canary-'));
+    dirs.push(root);
+    const clientRoot = path.join(root, 'client');
+    const coreRoot = path.join(root, 'packages', 'core');
+    const pluginRoot = path.join(root, 'packages', 'plugin');
+    const scopeRoot = path.join(clientRoot, 'node_modules', '@jinn-network');
+    const coreVersion = '0.1.2-canary.01234567';
+    const pluginVersion = '0.1.2-canary.01234567';
+
+    await mkdir(path.join(coreRoot, 'dist'), { recursive: true });
+    await mkdir(path.join(pluginRoot, 'dist'), { recursive: true });
+    await mkdir(scopeRoot, { recursive: true });
+    await writeFile(
+      path.join(clientRoot, 'package.json'),
+      JSON.stringify({
+        name: '@jinn-network/client',
+        version: '0.2.2-canary.sha.0123456789abcdef',
+        dependencies: {
+          '@jinn-network/core': coreVersion,
+          '@jinn-network/plugin': pluginVersion,
+        },
+        bundledDependencies: ['@jinn-network/core', '@jinn-network/plugin'],
+      }),
+    );
+    await writeFile(
+      path.join(coreRoot, 'package.json'),
+      JSON.stringify({
+        name: '@jinn-network/core',
+        version: coreVersion,
+        files: ['dist/'],
+      }),
+    );
+    await writeFile(
+      path.join(pluginRoot, 'package.json'),
+      JSON.stringify({
+        name: '@jinn-network/plugin',
+        version: pluginVersion,
+        files: ['dist/'],
+      }),
+    );
+    await writeFile(path.join(coreRoot, 'dist', 'index.js'), 'export const core = true;\n');
+    await writeFile(path.join(pluginRoot, 'dist', 'index.js'), 'export const plugin = true;\n');
+    await symlink(path.relative(scopeRoot, coreRoot), path.join(scopeRoot, 'core'));
+    await symlink(path.relative(scopeRoot, pluginRoot), path.join(scopeRoot, 'plugin'));
+
+    await materializeBundledWorkspaces({ clientRoot });
+
+    const packedCore = JSON.parse(
+      await readFile(path.join(scopeRoot, 'core', 'package.json'), 'utf8'),
+    );
+    const packedPlugin = JSON.parse(
+      await readFile(path.join(scopeRoot, 'plugin', 'package.json'), 'utf8'),
+    );
+    expect(packedCore.version).toBe(coreVersion);
+    expect(packedPlugin.version).toBe(pluginVersion);
+  });
+
   it('restores manifest bytes and earlier links when a later workspace fails to materialize', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'jinn-bundled-workspaces-recovery-'));
     dirs.push(root);

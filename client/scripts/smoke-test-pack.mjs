@@ -31,6 +31,11 @@ const clientRoot = join(__dirname, '..');
 const smokeDir = mkdtempSync(join(tmpdir(), 'jinn-pack-smoke-'));
 const smokeEnv = { ...process.env, HOME: smokeDir, NO_COLOR: '1' };
 const installedPackageRoot = join(smokeDir, 'node_modules', '@jinn-network', 'client');
+const installedBundledWorkspaceRoot = join(
+  installedPackageRoot,
+  'node_modules',
+  '@jinn-network',
+);
 const outputArgIndex = process.argv.indexOf('--output');
 const outputArg = outputArgIndex === -1 ? undefined : process.argv[outputArgIndex + 1];
 if (outputArgIndex !== -1 && (!outputArg || outputArg.startsWith('--'))) {
@@ -180,6 +185,13 @@ try {
       packageManager: 'yarn@4.13.0',
       dependencies: {
         '@jinn-network/client': `file:${tarball}`,
+      },
+      // Exercise Yarn's node-modules layout against the exact private
+      // workspaces in this candidate tarball. Their target npm versions may
+      // not exist yet while a coherent release is being prepared.
+      resolutions: {
+        '@jinn-network/core': `file:${join(installedBundledWorkspaceRoot, 'core')}`,
+        '@jinn-network/plugin': `file:${join(installedBundledWorkspaceRoot, 'plugin')}`,
       },
     }, null, 2)}\n`,
   );

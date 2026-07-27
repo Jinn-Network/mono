@@ -110,6 +110,25 @@ describe('FederatedCorpusAdapter', () => {
     await expect(search).resolves.toEqual(degraded('local corpus: local corpus timed out after 10ms', [publicHit]));
   });
 
+  it('allows a healthy cold public search to finish after five seconds by default', async () => {
+    vi.useFakeTimers();
+    const local = makePort(async () => ok([]));
+    const publicCorpus = makePort(() => new Promise((resolve) => {
+      setTimeout(() => resolve(ok([publicHit])), 7_000);
+    }));
+    const adapter = createFederatedCorpusAdapter({ local, public: publicCorpus });
+
+    let settled = false;
+    const search = adapter.search('query').finally(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    await expect(search).resolves.toEqual(ok([publicHit]));
+  });
+
   it('opens the timed-out child circuit for later search and get calls', async () => {
     vi.useFakeTimers();
     let rejectLocal!: (error: Error) => void;
