@@ -5,11 +5,10 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
-const packages = join(root, 'packages');
+const packages = join(root, 'packages', 'evidence');
 const evidenceDirectories = [
-  'evidence-protocol', 'evidence-repository', 'evidence-repository-oci',
-  'evidence-discovery', 'evidence-catalog-sqlite', 'execution-recorder',
-  'attestation-issuer', 'evidence-local-runtime',
+  'protocol', 'repository', 'repository-oci', 'discovery', 'catalog-sqlite',
+  'execution-recorder', 'attestation-issuer', 'local-runtime',
 ];
 
 function files(directory) {
@@ -36,14 +35,18 @@ function inside(child, parent) {
   return path === '' || (!path.startsWith('..') && !path.startsWith('/'));
 }
 
-function forbiddenImports(sourceRoot, forbiddenPackages, forbiddenRoots = []) {
-  return files(sourceRoot).flatMap((file) => specifiers(readFileSync(file, 'utf8')).flatMap((specifier) => {
+function forbiddenImportsInFiles(sourceFiles, forbiddenPackages, forbiddenRoots = []) {
+  return sourceFiles.flatMap((file) => specifiers(readFileSync(file, 'utf8')).flatMap((specifier) => {
     const packageMatch = forbiddenPackages.some((forbidden) => forbidden.endsWith('/')
       ? specifier.startsWith(forbidden) : specifier === forbidden || specifier.startsWith(`${forbidden}/`));
     const pathMatch = specifier.startsWith('.') && forbiddenRoots.some((forbiddenRoot) =>
       inside(resolve(dirname(file), specifier), forbiddenRoot));
     return packageMatch || pathMatch ? [`${relative(root, file)} -> ${specifier}`] : [];
   })).sort();
+}
+
+function forbiddenImports(sourceRoot, forbiddenPackages, forbiddenRoots = []) {
+  return forbiddenImportsInFiles(files(sourceRoot), forbiddenPackages, forbiddenRoots);
 }
 
 function assertBoundary(sourceRoot, forbiddenPackages, forbiddenRoots = []) {
@@ -90,12 +93,14 @@ test('the import scanner catches static, export, dynamic, require, and local-pat
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
-test('Discovery boundary checks catch bare and relative Journal escapes', () => {
+test('Discovery boundary checks catch bare, relative, and root-helper Journal escapes', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'jinn-discovery-boundary-'));
   try {
+    const source = join(fixture, 'src');
     const catalog = join(fixture, 'catalog');
+    const indexer = join(source, 'indexer');
     const journal = join(fixture, 'journal');
-    mkdirSync(catalog); mkdirSync(journal);
+    mkdirSync(source); mkdirSync(catalog); mkdirSync(indexer); mkdirSync(journal);
     writeFileSync(join(catalog, 'source.ts'), [
       'import "@jinn-network/evidence-discovery/journal";',
       'export * from "../journal/index.js";',
@@ -104,58 +109,68 @@ test('Discovery boundary checks catch bare and relative Journal escapes', () => 
       forbiddenImports(catalog, ['@jinn-network/evidence-discovery/journal'], [journal]).length,
       2,
     );
+    writeFileSync(join(source, 'index.ts'), 'export * from "./bridge.js";');
+    writeFileSync(join(source, 'bridge.ts'), 'export * from "../journal/index.js";');
+    assert.equal(
+      forbiddenImportsInFiles(
+        files(source).filter((file) => !inside(file, indexer)),
+        ['@jinn-network/evidence-discovery/journal'],
+        [journal],
+      ).length,
+      1,
+    );
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
 test('evidence source boundaries remain one-way after discovery consolidation', () => {
-  const discovery = join(packages, 'evidence-discovery', 'src');
+  const discovery = join(packages, 'discovery', 'src');
   const catalog = join(discovery, 'catalog');
   const indexer = join(discovery, 'indexer');
   const journal = join(discovery, 'journal');
-  const repositoryFs = join(packages, 'evidence-repository', 'src', 'fs');
+  const repositoryFs = join(packages, 'repository', 'src', 'fs');
   const concreteBindings = [
     '@jinn-network/evidence-discovery/journal', '@jinn-network/evidence-repository/fs',
     '@jinn-network/evidence-repository-oci', '@jinn-network/evidence-catalog-sqlite',
   ];
 
-  assertBoundary(join(packages, 'evidence-protocol', 'src'), ['@jinn-network/']);
-  assertPackageRootBoundary('evidence-repository', ['@jinn-network/evidence-repository/fs'], repositoryFs);
-  assert.deepEqual(manifest('evidence-repository').exports['./fs'], {
+  assertBoundary(join(packages, 'protocol', 'src'), ['@jinn-network/']);
+  assertPackageRootBoundary('repository', ['@jinn-network/evidence-repository/fs'], repositoryFs);
+  assert.deepEqual(manifest('repository').exports['./fs'], {
     import: './dist/fs/index.js', types: './dist/fs/index.d.ts',
   });
-  assert.deepEqual(Object.keys(manifest('evidence-discovery').exports).sort(),
+  assert.deepEqual(Object.keys(manifest('discovery').exports).sort(),
     ['.', './indexer', './journal', './testing']);
 
   assertBoundary(catalog, ['@jinn-network/evidence-discovery/indexer', '@jinn-network/evidence-discovery/journal'], [indexer, journal]);
-  assertBoundary(indexer, ['@jinn-network/evidence-discovery/journal', ...concreteBindings], [journal, repositoryFs, join(packages, 'evidence-repository-oci'), join(packages, 'evidence-catalog-sqlite')]);
+  assertBoundary(indexer, ['@jinn-network/evidence-discovery/journal', ...concreteBindings], [journal, repositoryFs, join(packages, 'repository-oci'), join(packages, 'catalog-sqlite')]);
   assertBoundary(journal, ['@jinn-network/evidence-discovery/indexer'], [indexer]);
-  for (const entrypoint of ['index.ts', 'testing.ts']) {
-    assert.deepEqual(
-      forbiddenImports(
-        join(discovery, entrypoint),
-        [
-          '@jinn-network/evidence-discovery/indexer',
-          '@jinn-network/evidence-discovery/journal',
-        ],
-        [indexer, journal],
-      ),
-      [],
-      `the Discovery ${entrypoint} entrypoint must not expose Indexer or Journal`,
-    );
-  }
+  const discoveryRootFiles = files(discovery)
+    .filter((file) => ![catalog, indexer, journal].some((ownedRoot) => inside(file, ownedRoot)));
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      discoveryRootFiles,
+      [
+        '@jinn-network/evidence-discovery/indexer',
+        '@jinn-network/evidence-discovery/journal',
+      ],
+      [indexer, journal],
+    ),
+    [],
+    'the Discovery root region must not expose Indexer or Journal',
+  );
 
   for (const producer of ['execution-recorder', 'attestation-issuer']) {
-    assertBoundary(join(packages, producer, 'src'), [...concreteBindings, '@jinn-network/evidence-local-runtime'], [journal, repositoryFs, join(packages, 'evidence-repository-oci'), join(packages, 'evidence-catalog-sqlite'), join(packages, 'evidence-local-runtime')]);
+    assertBoundary(join(packages, producer, 'src'), [...concreteBindings, '@jinn-network/evidence-local-runtime'], [journal, repositoryFs, join(packages, 'repository-oci'), join(packages, 'catalog-sqlite'), join(packages, 'local-runtime')]);
   }
   for (const directory of evidenceDirectories) {
-    if (directory === 'evidence-local-runtime' || directory === 'evidence-catalog-sqlite') continue;
+    if (directory === 'local-runtime' || directory === 'catalog-sqlite') continue;
     for (const section of ['dependencies', 'devDependencies']) {
       assert.ok(!Object.hasOwn(manifest(directory)[section] ?? {}, '@jinn-network/evidence-catalog-sqlite'), `${directory} may not depend on concrete Catalog storage`);
     }
-    assertBoundary(join(packages, directory, 'src'), ['@jinn-network/evidence-catalog-sqlite'], [join(packages, 'evidence-catalog-sqlite')]);
+    assertBoundary(join(packages, directory, 'src'), ['@jinn-network/evidence-catalog-sqlite'], [join(packages, 'catalog-sqlite')]);
   }
   for (const directory of evidenceDirectories) {
-    if (directory === 'evidence-local-runtime' || directory === 'evidence-repository') continue;
+    if (directory === 'local-runtime' || directory === 'repository') continue;
     assertBoundary(join(packages, directory, 'src'), ['@jinn-network/evidence-repository/fs'], [repositoryFs]);
   }
 });

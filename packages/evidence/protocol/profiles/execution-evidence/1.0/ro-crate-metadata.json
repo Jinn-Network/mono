@@ -1,0 +1,136 @@
+{
+  "@context": [
+    "https://w3id.org/ro/crate/1.3/context",
+    {
+      "sha256": "https://w3id.org/ro/terms/workflow-run#sha256"
+    }
+  ],
+  "@graph": [
+    {
+      "@id": "ro-crate-metadata.json",
+      "@type": "CreativeWork",
+      "about": {
+        "@id": "./"
+      },
+      "conformsTo": {
+        "@id": "https://w3id.org/ro/crate/1.3"
+      }
+    },
+    {
+      "@id": "./",
+      "@type": [
+        "Dataset",
+        "ProfileCrate"
+      ],
+      "name": "Jinn Execution Evidence Profile 1.0",
+      "description": "Normative profile, vocabulary, schemas, and reference implementation metadata.",
+      "version": "1.0.0",
+      "license": "https://spdx.org/licenses/MIT",
+      "mainEntity": {
+        "@id": "specification.md"
+      },
+      "hasPart": [
+        {
+          "@id": "specification.md"
+        },
+        {
+          "@id": "vocabulary.jsonld"
+        },
+        {
+          "@id": "schemas/dsse-envelope.schema.json"
+        },
+        {
+          "@id": "schemas/execution-evidence-document.schema.json"
+        },
+        {
+          "@id": "schemas/execution-verification-statement.schema.json"
+        },
+        {
+          "@id": "schemas/resource-descriptor.schema.json"
+        },
+        {
+          "@id": "schemas/result-evaluation-statement.schema.json"
+        }
+      ],
+      "about": {
+        "@id": "https://jinn.network/profiles/execution-evidence/1.0"
+      }
+    },
+    {
+      "@id": "https://jinn.network/profiles/execution-evidence/1.0",
+      "@type": [
+        "CreativeWork",
+        "Profile"
+      ],
+      "name": "Jinn Execution Evidence Profile 1.0",
+      "version": "1.0.0",
+      "isProfileOf": [
+        {
+          "@id": "https://w3id.org/ro/crate/1.3"
+        },
+        {
+          "@id": "https://in-toto.io/Statement/v1"
+        }
+      ],
+      "subjectOf": {
+        "@id": "https://www.npmjs.com/package/@jinn-network/evidence-protocol"
+      }
+    },
+    {
+      "@id": "https://www.npmjs.com/package/@jinn-network/evidence-protocol",
+      "@type": "SoftwareSourceCode",
+      "name": "@jinn-network/evidence-protocol",
+      "version": "0.1.0",
+      "codeRepository": "https://github.com/Jinn-Network/mono/tree/next/packages/evidence/protocol"
+    },
+    {
+      "@id": "specification.md",
+      "@type": "File",
+      "name": "specification.md",
+      "encodingFormat": "text/markdown",
+      "sha256": "1917764948761455490d2baa1e8fde98ee888813309207cc0f0798f971c1291e"
+    },
+    {
+      "@id": "vocabulary.jsonld",
+      "@type": "File",
+      "name": "vocabulary.jsonld",
+      "encodingFormat": "application/ld+json",
+      "sha256": "47e8f24f58997911dd9bde38705cd86eaca0c0d75c4e76bfebfb122f3fa53673"
+    },
+    {
+      "@id": "schemas/dsse-envelope.schema.json",
+      "@type": "File",
+      "name": "schemas/dsse-envelope.schema.json",
+      "encodingFormat": "application/schema+json",
+      "sha256": "a6f82709e8e836cce6130e96d3bc43e53a2e7f84d6e236fd93899dcf247b5901"
+    },
+    {
+      "@id": "schemas/execution-evidence-document.schema.json",
+      "@type": "File",
+      "name": "schemas/execution-evidence-document.schema.json",
+      "encodingFormat": "application/schema+json",
+      "sha256": "c0d732b40c3f87d03f9caa1b2571e19ebc34a3be1fc6e3c4c8830f99c0da4a11"
+    },
+    {
+      "@id": "schemas/execution-verification-statement.schema.json",
+      "@type": "File",
+      "name": "schemas/execution-verification-statement.schema.json",
+      "encodingFormat": "application/schema+json",
+      "sha256": "b6a75273d2ef8e90b10eb2a80e3746ab3ba2e980b3a2d0ced21edf1399371315"
+    },
+    {
+      "@id": "schemas/resource-descriptor.schema.json",
+      "@type": "File",
+      "name": "schemas/resource-descriptor.schema.json",
+      "encodingFormat": "application/schema+json",
+      "sha256": "0465626bdf205211b2a7bffa38027b5ba3b4e32f974098b8d17c41c1e6103c1a"
+    },
+    {
+      "@id": "schemas/result-evaluation-statement.schema.json",
+      "@type": "File",
+      "name": "schemas/result-evaluation-statement.schema.json",
+      "encodingFormat": "application/schema+json",
+      "sha256": "8c9dff1f77f54b35d97b31e3747986c8f599530c8357c3c9dce43d89cea63d65"
+    }
+  ]
+}

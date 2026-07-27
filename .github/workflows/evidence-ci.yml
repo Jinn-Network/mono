@@ -1,0 +1,325 @@
+name: Evidence CI
+
+on:
+  pull_request:
+  push:
+    branches: [next]
+    paths:
+      - "packages/evidence/**"
+      - ".github/scripts/evidence-*.test.mjs"
+      - ".github/workflows/evidence-ci.yml"
+      - "docs/superpowers/specs/2026-07-23-jinn-execution-evidence-protocol-design.md"
+      - "docs/superpowers/specs/2026-07-24-jinn-attestation-issuer-design.md"
+
+permissions:
+  contents: read
+
+env:
+  EVIDENCE_ROOT: packages/evidence
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify package inventory and dependency graph
+        run: node --test .github/scripts/evidence-package-inventory.test.mjs
+      - name: Verify source boundaries and canaries
+        run: node --test .github/scripts/evidence-source-boundaries.test.mjs
+
+  foundation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Verify Evidence Protocol
+        working-directory: packages/evidence/protocol
+        run: |
+          yarn install --immutable
+          yarn check:profile
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Evidence Protocol distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-protocol-dist
+          path: packages/evidence/protocol/dist
+          if-no-files-found: error
+          retention-days: 1
+      - name: Verify Evidence Repository
+        working-directory: packages/evidence/repository
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Evidence Repository distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-repository-dist
+          path: packages/evidence/repository/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  components:
+    name: component (${{ matrix.component }})
+    needs: foundation
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - repository-oci
+          - discovery
+          - execution-recorder
+          - attestation-issuer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Evidence Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-protocol-dist
+          path: packages/evidence/protocol/dist
+      - name: Restore Evidence Repository distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-repository-dist
+          path: packages/evidence/repository/dist
+      - name: Install packed-smoke dependency toolchains
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable)
+          (cd packages/evidence/repository && yarn install --immutable)
+      - name: Install ORAS 1.3.2
+        if: matrix.component == 'repository-oci'
+        uses: oras-project/setup-oras@v2
+        with:
+          version: 1.3.2
+      - name: Start Distribution registry
+        if: matrix.component == 'repository-oci'
+        run: |
+          for attempt in $(seq 1 3); do
+            if docker pull registry:3.0.0; then
+              break
+            fi
+            if [ "$attempt" = "3" ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 5))"
+          done
+          docker run --detach --name jinn-evidence-registry \
+            --publish 5000:5000 registry:3.0.0
+      - name: Install immutable dependencies
+        working-directory: packages/evidence/${{ matrix.component }}
+        run: yarn install --immutable
+      - name: Check profile and schema drift
+        if: matrix.component == 'repository-oci'
+        working-directory: packages/evidence/repository-oci
+        run: yarn check:profile
+      - name: Typecheck
+        working-directory: packages/evidence/${{ matrix.component }}
+        run: yarn typecheck
+      - name: Test
+        working-directory: packages/evidence/${{ matrix.component }}
+        run: yarn test
+      - name: Build
+        working-directory: packages/evidence/${{ matrix.component }}
+        run: yarn build
+      - name: Smoke-test packed distribution
+        working-directory: packages/evidence/${{ matrix.component }}
+        run: yarn pack:smoke
+      - name: Wait for Distribution registry
+        if: matrix.component == 'repository-oci'
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:5000/v2/ > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Distribution registry was not ready after ${attempt} attempts."
+          exit 1
+      - name: Test ORAS registry round trip
+        if: matrix.component == 'repository-oci'
+        working-directory: packages/evidence/repository-oci
+        env:
+          JINN_OCI_REGISTRY_TEST: "1"
+          JINN_OCI_TEST_REPOSITORY: localhost:5000/jinn/evidence
+          ORAS_PATH: oras
+        run: yarn test:registry
+      - name: Upload component distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-${{ matrix.component }}-dist
+          path: packages/evidence/${{ matrix.component }}/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  catalog-sqlite:
+    needs: [foundation, components]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Evidence Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-protocol-dist
+          path: packages/evidence/protocol/dist
+      - name: Restore Evidence Repository distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-repository-dist
+          path: packages/evidence/repository/dist
+      - name: Restore Evidence Discovery distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-discovery-dist
+          path: packages/evidence/discovery/dist
+      - name: Install packed-smoke dependency toolchains
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable)
+          (cd packages/evidence/repository && yarn install --immutable)
+          (cd packages/evidence/discovery && yarn install --immutable)
+      - name: Verify SQLite Evidence Catalog
+        working-directory: packages/evidence/catalog-sqlite
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload SQLite Evidence Catalog distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-catalog-sqlite-dist
+          path: packages/evidence/catalog-sqlite/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  local-runtime:
+    needs: [foundation, components, catalog-sqlite]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Evidence Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-protocol-dist
+          path: packages/evidence/protocol/dist
+      - name: Restore Evidence Repository distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-repository-dist
+          path: packages/evidence/repository/dist
+      - name: Restore Evidence Discovery distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-discovery-dist
+          path: packages/evidence/discovery/dist
+      - name: Restore Execution Recorder distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-execution-recorder-dist
+          path: packages/evidence/execution-recorder/dist
+      - name: Restore SQLite Evidence Catalog distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-catalog-sqlite-dist
+          path: packages/evidence/catalog-sqlite/dist
+      - name: Install packed-smoke dependency toolchains
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable)
+          (cd packages/evidence/repository && yarn install --immutable)
+          (cd packages/evidence/discovery && yarn install --immutable)
+          (cd packages/evidence/catalog-sqlite && yarn install --immutable)
+          (cd packages/evidence/execution-recorder && yarn install --immutable)
+      - name: Verify Local Evidence Runtime
+        working-directory: packages/evidence/local-runtime
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Local Evidence Runtime distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-local-runtime-dist
+          path: packages/evidence/local-runtime/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    needs: [architecture, foundation, components, catalog-sqlite, local-runtime]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Evidence CI stage to succeed
+        env:
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
+          FOUNDATION_RESULT: ${{ needs.foundation.result }}
+          COMPONENTS_RESULT: ${{ needs.components.result }}
+          CATALOG_SQLITE_RESULT: ${{ needs['catalog-sqlite'].result }}
+          LOCAL_RUNTIME_RESULT: ${{ needs['local-runtime'].result }}
+        run: |
+          for result in \
+            "$ARCHITECTURE_RESULT" \
+            "$FOUNDATION_RESULT" \
+            "$COMPONENTS_RESULT" \
+            "$CATALOG_SQLITE_RESULT" \
+            "$LOCAL_RUNTIME_RESULT"; do
+            test "$result" = "success"
+          done
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore all package distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: evidence-*-dist
+          path: .evidence-dist
+      - name: Place package distributions
+        run: |
+          for package in protocol repository repository-oci discovery catalog-sqlite execution-recorder attestation-issuer local-runtime; do
+            mkdir -p "packages/evidence/${package}/dist"
+            cp -R ".evidence-dist/evidence-${package}-dist/." "packages/evidence/${package}/dist/"
+          done
+      - name: Compile packed public entrypoint consumers
+        run: node .github/scripts/evidence-packed-types.test.mjs
