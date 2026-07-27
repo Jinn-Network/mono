@@ -47,6 +47,7 @@ __metadata:
   resolution: "@jinn-network/evidence-announcement-journal@workspace:."
   dependencies:
     "@jinn-network/evidence-catalog": "npm:0.1.0"
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
     "@types/node": "npm:^22.0.0"
     typescript: "npm:^5.9.3"
