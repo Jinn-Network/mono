@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { keccak256, toBytes } from 'viem';
 import type { ZodIssue } from 'zod/v3';
-import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput } from './persistence.js';
+import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput, serializeIntermediateFailureDiffsJson } from './persistence.js';
 import { TaskRunState, MissingEvidenceHashError } from './state.js';
 import type { Store } from '../../store/store.js';
 import {
@@ -1889,13 +1889,17 @@ export class TaskEngine {
           this.trajectoryCollectors.set(task.requestId, trajectory);
           // No codeDigest for skipped runs — leave map empty.
           // Fall through to persistence below via goto-equivalent pattern.
+          const nextSolutionOutputsJson = JSON.stringify(skippedOutput);
           this.persistence.transition(task.requestId, TaskRunState.POST_SNAPSHOT, {
             postSnapshotCapturedAt: Date.now(),
             postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0, payload: null },
             fillsPayload: [],
             gatingClaim: skippedOutput.gating,
             informationalClaim: skippedOutput.informational ?? null,
-            solutionOutputsJson: JSON.stringify(skippedOutput),
+            solutionOutputsJson: nextSolutionOutputsJson,
+            intermediateFailureDiffsJson: serializeIntermediateFailureDiffsJson(
+              skippedOutput.intermediateFailureDiffs,
+            ),
             implName: impl.name,
             runtimePluginsJson: JSON.stringify(attributedPlugins),
             consumedRefsJson,
@@ -1941,14 +1945,20 @@ export class TaskEngine {
       // the transition (RUNNING → POST_SNAPSHOT) but before pack() runs will
       // find the serialised output in the DB on restart. pack() will hydrate the
       // in-memory map from solutionOutputsJson if the map entry is absent (#6).
-      // Capture post-snapshot from impl output so data-driven advance fires
+      // Capture post-snapshot from impl output so data-driven advance fires.
+      // Persist harness-emitted intermediateFailureDiffs in the same transition
+      // (#1643 / spec §10 field 4).
+      const nextSolutionOutputsJson = JSON.stringify(output);
       this.persistence.transition(task.requestId, TaskRunState.POST_SNAPSHOT, {
         postSnapshotCapturedAt: Date.now(),
         postSnapshotPayload: output.postSnapshot ?? { capturedAt: Date.now(), hlTime: 0, payload: null },
         fillsPayload: output.fills ?? [],
         gatingClaim: output.gating,
         informationalClaim: output.informational ?? null,
-        solutionOutputsJson: JSON.stringify(output),
+        solutionOutputsJson: nextSolutionOutputsJson,
+        intermediateFailureDiffsJson: serializeIntermediateFailureDiffsJson(
+          output.intermediateFailureDiffs,
+        ),
         implName: impl.name,
         runtimePluginsJson: JSON.stringify(attributedPlugins),
         consumedRefsJson,
