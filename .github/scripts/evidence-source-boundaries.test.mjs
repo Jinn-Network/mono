@@ -11,9 +11,27 @@ const evidenceDirectories = [
   'catalog-sqlite', 'execution-recorder', 'attestation-issuer', 'derivation',
   'local-runtime',
 ];
+const IPFS_APPLICATION_AND_LEGACY_ROOTS = [
+  join(root, 'apps'),
+  join(root, 'client'),
+  ...[
+    'autopilot', 'core', 'indexer', 'indexer-enrichment', 'layer', 'plugin',
+    'sdk',
+  ].map((directory) => join(root, 'packages', directory)),
+];
+const IPFS_PRODUCTION_FORBIDDEN_ROOTS = [
+  ...evidenceDirectories
+    .filter((directory) => !['repository-ipfs', 'repository'].includes(directory))
+    .map((directory) => join(packages, directory)),
+  ...IPFS_APPLICATION_AND_LEGACY_ROOTS,
+];
 
 const IPFS_FORBIDDEN_PACKAGES = [
+  '@jinn-network/autopilot',
   '@jinn-network/attestation-issuer',
+  '@jinn-network/broadcast-bot',
+  '@jinn-network/client',
+  '@jinn-network/core',
   '@jinn-network/evidence-catalog-sqlite',
   '@jinn-network/evidence-derivation',
   '@jinn-network/evidence-discovery',
@@ -22,7 +40,14 @@ const IPFS_FORBIDDEN_PACKAGES = [
   '@jinn-network/evidence-publication',
   '@jinn-network/evidence-repository-oci',
   '@jinn-network/execution-recorder',
+  '@jinn-network/indexer',
+  '@jinn-network/indexer-enrichment',
+  '@jinn-network/jinn-layer',
+  '@jinn-network/marketplace',
+  '@jinn-network/plugin',
+  '@jinn-network/sdk',
   'better-sqlite3',
+  'hermes-agent',
   'viem',
 ];
 
@@ -366,6 +391,39 @@ test('IPFS boundary checks catch foreign packages and /cid reader escapes', () =
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
+test('IPFS production boundary configuration catches application and legacy escapes', () => {
+  const fixture = mkdtempSync(join(
+    packages,
+    'repository-ipfs',
+    '.jinn-ipfs-production-boundary-',
+  ));
+  try {
+    const source = join(fixture, 'source.ts');
+    const localSpecifier = (target) => {
+      const specifier = relative(fixture, target).replaceAll('\\', '/');
+      return specifier.startsWith('.') ? specifier : `./${specifier}`;
+    };
+    writeFileSync(source, [
+      'import "@jinn-network/core";',
+      'import "@jinn-network/jinn-layer";',
+      'import "@jinn-network/plugin";',
+      'import "@jinn-network/autopilot";',
+      `import ${JSON.stringify(localSpecifier(join(root, 'packages', 'core', 'src')))};`,
+      `import ${JSON.stringify(localSpecifier(join(root, 'packages', 'layer', 'src')))};`,
+      `import ${JSON.stringify(localSpecifier(join(root, 'client', 'src')))};`,
+      `import ${JSON.stringify(localSpecifier(join(root, 'apps', 'jinn-agent')))};`,
+    ].join('\n'));
+    assert.equal(
+      forbiddenImportsInFiles(
+        [source],
+        IPFS_FORBIDDEN_PACKAGES,
+        IPFS_PRODUCTION_FORBIDDEN_ROOTS,
+      ).length,
+      8,
+    );
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
 test('evidence source boundaries remain one-way across the approved graph', () => {
   const discovery = join(packages, 'discovery', 'src');
   const catalog = join(discovery, 'catalog');
@@ -412,14 +470,11 @@ test('evidence source boundaries remain one-way across the approved graph', () =
   const ipfsManifest = manifest('repository-ipfs');
   const ipfsProductionFiles = files(ipfsSource)
     .filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
-  const ipfsForbiddenRoots = evidenceDirectories
-    .filter((directory) => !['repository-ipfs', 'repository'].includes(directory))
-    .map((directory) => join(packages, directory));
   assert.deepEqual(
     forbiddenImportsInFiles(
       ipfsProductionFiles,
       IPFS_FORBIDDEN_PACKAGES,
-      ipfsForbiddenRoots,
+      IPFS_PRODUCTION_FORBIDDEN_ROOTS,
     ),
     [],
     'the IPFS binding may depend only on the Repository contract',
