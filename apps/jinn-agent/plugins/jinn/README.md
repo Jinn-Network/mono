@@ -26,7 +26,7 @@ You are ready when the doctor ends with `all checks passed`.
 If you use the Hermes gateway, restart it with `hermes gateway restart`. A new
 terminal chat loads Jinn without this step.
 
-## Try your first pickup
+## Talk to Hermes normally
 
 Start a fresh chat:
 
@@ -34,34 +34,41 @@ Start a fresh chat:
 hermes chat
 ```
 
-Then describe the task normally. Include the concrete problem and repository
-when they matter; there is no Jinn slash command to run.
+That is the whole workflow. Describe the task as you normally would; there is
+no Jinn slash command to run.
 
 Jinn checks retained local episodes and the public Jinn corpus when a new task
-starts or its stable task/repository context changes. When it finds evidence it
-can actually deliver, you will see:
+starts or its stable task/repository context changes. A new installation has no
+local episodes yet, but it can immediately use the public starter corpus for
+Jinn engineering work. Your local episodes extend what Jinn can help with over
+time.
+
+When Jinn finds relevant evidence it can actually deliver, interactive chat
+shows:
 
 ```text
-◇ corpus  provided 2 evidence packets  ·  searched: score-zero, jinn, evaluator, docker, eval
+◇ corpus  provided 2 evidence packets  ·  searched: zero-score, jinn, evaluator, docker, credential
 ```
 
-For example, a clean test with matching retained episodes began with a normal
-question:
+For example, this normal question retrieved public evidence in a clean test
+with zero local episodes:
 
 ```text
-You: In the Jinn evaluator, a Docker eval run that aborts partway is recorded
-as an ordinary score-zero failure. What is the root cause and specific fix?
+You: How should a Jinn evaluator handle Docker credential or daemon failures
+during evaluation so they do not become real zero-score verdicts?
 
-Hermes: The evaluator's Docker-abort handling is incorrectly gated on
-`noTestPassed`. Remove that requirement and classify known container-abort
-signals as `EvalCouldNotGradeError`, even after partial test progress.
+Hermes: Treat Docker setup and container-start failures as evaluator
+infrastructure failures, not candidate failures. Mark the run unscorable and
+emit no scored verdict; keep normal grading when tests actually run.
 ```
 
-Hermes received the evidence automatically and used its concrete diagnosis.
-Your result will depend on what relevant local or public evidence exists.
+Hermes received two attributed public evidence packets automatically and used
+their concrete diagnosis. No agent tool or second model call was needed.
 
-If no retrievable evidence matches the task, Jinn stays out of the way. At the
-end of the session, Hermes reports:
+Jinn only supplies evidence that passes automatic retrieval and relevance
+checks. An unrelated question receives no corpus context. If no retrievable
+evidence matches your task, Jinn stays out of the way and Hermes reports at the
+end of the session:
 
 ```text
 knowledge searched · nothing relevant found
