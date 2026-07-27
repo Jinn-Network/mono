@@ -5,6 +5,8 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { describe, test } from "vitest";
 
+import { EvidenceRepositoryError } from "@jinn-network/evidence-repository";
+
 import {
   MAX_STANDARD_IPFS_BLOCK_BYTES,
   createGatewayBlockReader,
@@ -147,6 +149,103 @@ describe("bounded IPFS block readers", () => {
     );
     assert.equal(hostileAccesses, 0);
     assert.equal(canceled, true);
+  });
+
+  test("classifies a fulfilled non-byte chunk as a frozen protocol failure", async () => {
+    const injected = createAuthorityBearingError("non-byte chunk");
+    let canceled = false;
+    let released = false;
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        hostileResponse({
+          body: {
+            getReader() {
+              return {
+                cancel() {
+                  canceled = true;
+                },
+                read() {
+                  return Promise.resolve({
+                    done: false as const,
+                    value: injected,
+                  });
+                },
+                releaseLock() {
+                  released = true;
+                },
+              };
+            },
+          },
+        }),
+    });
+
+    await assert.rejects(
+      reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      (error: unknown) => {
+        assert.ok(error instanceof EvidenceRepositoryError);
+        assert.equal(Object.isFrozen(error), true);
+        return assertSanitizedDependencyError(
+          error,
+          "IO_FAILURE",
+          "block-read",
+          "protocol-failure",
+        );
+      },
+    );
+    assert.equal(canceled, true);
+    assert.equal(released, true);
+  });
+
+  test("classifies a fulfilled detached byte chunk as a frozen protocol failure", async () => {
+    const detached = Uint8Array.of(0x61);
+    structuredClone(detached.buffer, { transfer: [detached.buffer] });
+    Object.defineProperty(detached, "authority", {
+      configurable: true,
+      value: AUTHORITY_MARKER_TEXT,
+    });
+    let canceled = false;
+    let released = false;
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        hostileResponse({
+          body: {
+            getReader() {
+              return {
+                cancel() {
+                  canceled = true;
+                },
+                read() {
+                  return Promise.resolve({
+                    done: false as const,
+                    value: detached,
+                  });
+                },
+                releaseLock() {
+                  released = true;
+                },
+              };
+            },
+          },
+        }),
+    });
+
+    await assert.rejects(
+      reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      (error: unknown) => {
+        assert.ok(error instanceof EvidenceRepositoryError);
+        assert.equal(Object.isFrozen(error), true);
+        return assertSanitizedDependencyError(
+          error,
+          "IO_FAILURE",
+          "block-read",
+          "protocol-failure",
+        );
+      },
+    );
+    assert.equal(canceled, true);
+    assert.equal(released, true);
   });
 
   test("cancels before retaining a chunk that crosses the inclusive limit", async () => {

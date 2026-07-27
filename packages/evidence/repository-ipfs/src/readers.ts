@@ -403,11 +403,16 @@ async function readBoundedResponse(
       if (item.done) break;
       const chunk = item.value;
       if (!isUint8Array(chunk)) {
-        throw new TypeError(
-          "The IPFS response stream returned a non-byte chunk.",
-        );
+        directStreamError = responseProtocolFailure();
+        throw directStreamError;
       }
-      const chunkByteLength = intrinsicUint8ArrayByteLength(chunk);
+      let chunkByteLength: number;
+      try {
+        chunkByteLength = intrinsicUint8ArrayByteLength(chunk);
+      } catch {
+        directStreamError = responseProtocolFailure();
+        throw directStreamError;
+      }
       if (chunkByteLength > maxBytes - offset) {
         directStreamError = responseLimitError(
           tooLargeCode,
@@ -416,7 +421,12 @@ async function readBoundedResponse(
         );
         throw directStreamError;
       }
-      setIntrinsicUint8Array(output, chunk, offset);
+      try {
+        setIntrinsicUint8Array(output, chunk, offset);
+      } catch {
+        directStreamError = responseProtocolFailure();
+        throw directStreamError;
+      }
       offset += chunkByteLength;
     }
   } catch (error) {
