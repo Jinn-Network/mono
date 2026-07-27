@@ -3,7 +3,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { runInNewContext } from "node:vm";
 import { describe, test } from "vitest";
+
+import { EvidenceRepositoryError } from "@jinn-network/evidence-repository";
 
 import {
   MAX_STANDARD_IPFS_BLOCK_BYTES,
@@ -65,6 +68,616 @@ describe("bounded IPFS block readers", () => {
     );
   });
 
+  test("adopts only exact native fetch Promises without consulting hostile surfaces", async () => {
+    for (const kind of ["Kubo", "gateway"] as const) {
+      let nativeThenAccesses = 0;
+      const nativeResult = Promise.resolve(
+        new Response(new Uint8Array()),
+      );
+      Object.defineProperty(nativeResult, "then", {
+        configurable: true,
+        get() {
+          nativeThenAccesses += 1;
+          throw createAuthorityBearingError(
+            `${kind} native fetch own then`,
+          );
+        },
+      });
+      const acceptedOptions = {
+        endpoint:
+          kind === "Kubo"
+            ? "http://127.0.0.1:5001"
+            : "https://gateway.example.test",
+        fetch: (() => nativeResult) as typeof globalThis.fetch,
+      };
+      const accepted =
+        kind === "Kubo"
+          ? createKuboBlockReader(acceptedOptions)
+          : createGatewayBlockReader(acceptedOptions);
+      assert.deepEqual(
+        await accepted.getBlock(EMPTY_RAW_CID, { maxBytes: 0 }),
+        new Uint8Array(),
+        kind,
+      );
+      assert.equal(nativeThenAccesses, 0, kind);
+
+      let thenableAccesses = 0;
+      const thenable = Object.defineProperty({}, "then", {
+        configurable: true,
+        get() {
+          thenableAccesses += 1;
+          throw createAuthorityBearingError(
+            `${kind} fetch thenable`,
+          );
+        },
+      });
+      let proxyAccesses = 0;
+      const promiseProxy = new Proxy(
+        Promise.resolve(new Response(new Uint8Array())),
+        {
+          get() {
+            proxyAccesses += 1;
+            throw createAuthorityBearingError(
+              `${kind} fetch Promise Proxy`,
+            );
+          },
+        },
+      );
+      let foreignThenAccesses = 0;
+      const foreignPromise = runInNewContext(
+        "Promise.resolve(null)",
+      ) as object;
+      Object.defineProperty(foreignPromise, "then", {
+        configurable: true,
+        get() {
+          foreignThenAccesses += 1;
+          throw createAuthorityBearingError(
+            `${kind} foreign fetch Promise`,
+          );
+        },
+      });
+      let subclassThenAccesses = 0;
+      class FetchPromiseSubclass<T> extends Promise<T> {}
+      Object.defineProperty(FetchPromiseSubclass.prototype, "then", {
+        configurable: true,
+        get() {
+          subclassThenAccesses += 1;
+          throw createAuthorityBearingError(
+            `${kind} fetch Promise subclass`,
+          );
+        },
+      });
+      const subclassPromise = new FetchPromiseSubclass<Response>(
+        (resolve) => resolve(new Response(new Uint8Array())),
+      );
+      let constructorAccesses = 0;
+      const mutableConstructorPromise = Promise.resolve(
+        new Response(new Uint8Array()),
+      );
+      Object.defineProperty(mutableConstructorPromise, "constructor", {
+        configurable: true,
+        get() {
+          constructorAccesses += 1;
+          throw createAuthorityBearingError(
+            `${kind} fetch Promise constructor`,
+          );
+        },
+      });
+      const malformed: ReadonlyArray<{
+        readonly label: string;
+        readonly value: unknown;
+      }> = [
+        {
+          label: `${kind} synchronous fetch result`,
+          value: new Response(new Uint8Array()),
+        },
+        { label: `${kind} fetch thenable`, value: thenable },
+        { label: `${kind} fetch Promise Proxy`, value: promiseProxy },
+        { label: `${kind} foreign fetch Promise`, value: foreignPromise },
+        {
+          label: `${kind} fetch Promise subclass`,
+          value: subclassPromise,
+        },
+        {
+          label: `${kind} fetch Promise constructor`,
+          value: mutableConstructorPromise,
+        },
+      ];
+      for (const item of malformed) {
+        const malformedOptions = {
+          endpoint:
+            kind === "Kubo"
+              ? "http://127.0.0.1:5001"
+              : "https://gateway.example.test",
+          fetch: (() => item.value) as typeof globalThis.fetch,
+        };
+        const reader =
+          kind === "Kubo"
+            ? createKuboBlockReader(malformedOptions)
+            : createGatewayBlockReader(malformedOptions);
+        await assert.rejects(
+          reader.getBlock(EMPTY_RAW_CID, { maxBytes: 0 }),
+          assertFrozenProtocolFailure,
+          item.label,
+        );
+      }
+      const synchronousThrowOptions = {
+        endpoint:
+          kind === "Kubo"
+            ? "http://127.0.0.1:5001"
+            : "https://gateway.example.test",
+        fetch: (() => {
+          throw createAuthorityBearingError(
+            `${kind} synchronous fetch throw`,
+          );
+        }) as typeof globalThis.fetch,
+      };
+      const synchronousThrowReader =
+        kind === "Kubo"
+          ? createKuboBlockReader(synchronousThrowOptions)
+          : createGatewayBlockReader(synchronousThrowOptions);
+      await assert.rejects(
+        synchronousThrowReader.getBlock(EMPTY_RAW_CID, {
+          maxBytes: 0,
+        }),
+        assertFrozenProtocolFailure,
+        `${kind} synchronous fetch throw`,
+      );
+      assert.equal(thenableAccesses, 0, kind);
+      assert.equal(proxyAccesses, 0, kind);
+      assert.equal(foreignThenAccesses, 0, kind);
+      assert.equal(subclassThenAccesses, 0, kind);
+      assert.equal(constructorAccesses, 0, kind);
+    }
+  });
+
+  test("keeps settled fetch and read values nested in inert records across async hops", async () => {
+    for (const withSignal of [false, true]) {
+      let thenCalls = 0;
+      let restorePrototypeThen = () => {};
+      const settledRead = Promise.resolve({ done: true as const });
+      const response = responseWithReader({
+        read() {
+          return settledRead;
+        },
+        releaseLock() {
+          restorePrototypeThen();
+        },
+      });
+      const settledFetch = Promise.resolve(response);
+      const reader = createGatewayBlockReader({
+        endpoint: "https://gateway.example.test",
+        fetch: (() => settledFetch) as typeof globalThis.fetch,
+      });
+      const previousThen = Object.getOwnPropertyDescriptor(
+        Object.prototype,
+        "then",
+      );
+      restorePrototypeThen = () => {
+        if (previousThen === undefined) {
+          delete (Object.prototype as { then?: unknown }).then;
+        } else {
+          Object.defineProperty(Object.prototype, "then", previousThen);
+        }
+      };
+      Object.defineProperty(Object.prototype, "then", {
+        configurable: true,
+        value(
+          _resolve: (value: unknown) => void,
+          reject: (error: unknown) => void,
+        ) {
+          thenCalls += 1;
+          reject("late Object.prototype.then adoption");
+        },
+      });
+      try {
+        assert.deepEqual(
+          await reader.getBlock(EMPTY_RAW_CID, {
+            maxBytes: 0,
+            ...(withSignal
+              ? { signal: new AbortController().signal }
+              : {}),
+          }),
+          new Uint8Array(),
+          `withSignal=${withSignal}`,
+        );
+        assert.equal(thenCalls, 0, `withSignal=${withSignal}`);
+      } finally {
+        restorePrototypeThen();
+      }
+    }
+  });
+
+  test("does not re-assimilate settled response objects with hostile then surfaces", async () => {
+    for (const kind of ["Kubo", "gateway"] as const) {
+      for (const placement of ["own", "prototype"] as const) {
+        let thenAccesses = 0;
+        const response = hostileResponse({
+          status: kind === "Kubo" ? 401 : 404,
+        });
+        const fetchResult = Promise.resolve(response);
+        const hostileThen = {
+          configurable: true,
+          get() {
+            thenAccesses += 1;
+            throw createAuthorityBearingError(
+              `${kind} response ${placement} then`,
+            );
+          },
+        };
+        if (placement === "own") {
+          Object.defineProperty(response, "then", hostileThen);
+        } else {
+          Object.setPrototypeOf(
+            response,
+            Object.defineProperty({}, "then", hostileThen),
+          );
+        }
+        const options = {
+          endpoint:
+            kind === "Kubo"
+              ? "http://127.0.0.1:5001"
+              : "https://gateway.example.test",
+          fetch: (() => fetchResult) as typeof globalThis.fetch,
+        };
+        const reader =
+          kind === "Kubo"
+            ? createKuboBlockReader(options)
+            : createGatewayBlockReader(options);
+        if (kind === "Kubo") {
+          await assert.rejects(
+            reader.getBlock(EMPTY_RAW_CID, { maxBytes: 0 }),
+            hasCode("ACCESS_DENIED"),
+            placement,
+          );
+        } else {
+          assert.equal(
+            await reader.getBlock(EMPTY_RAW_CID, { maxBytes: 0 }),
+            null,
+            placement,
+          );
+        }
+        assert.equal(thenAccesses, 0, `${kind} ${placement}`);
+      }
+    }
+  });
+
+  test("snapshots response cancellation without invoking overrideable cleanup surfaces", async () => {
+    let nativeBodyAccesses = 0;
+    let nativeCanceled = false;
+    const nativeResponse = new Response(
+      new ReadableStream<Uint8Array>({
+        cancel() {
+          nativeCanceled = true;
+        },
+      }),
+      { status: 404 },
+    );
+    Object.defineProperty(nativeResponse, "body", {
+      configurable: true,
+      get() {
+        nativeBodyAccesses += 1;
+        throw createAuthorityBearingError(
+          "native Response own body override",
+        );
+      },
+    });
+    const nativeReader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: (() =>
+        Promise.resolve(nativeResponse)) as typeof globalThis.fetch,
+    });
+    assert.equal(
+      await nativeReader.getBlock(EMPTY_RAW_CID, { maxBytes: 0 }),
+      null,
+    );
+    assert.equal(nativeBodyAccesses, 0);
+    assert.equal(nativeCanceled, true);
+
+    for (const kind of ["Kubo", "gateway"] as const) {
+      let responseBodyAccessorCalls = 0;
+      let bodyProxyAccesses = 0;
+      let cancelAccessorCalls = 0;
+      let cancelProxyCalls = 0;
+      let arbitraryThenAccesses = 0;
+      const cleanupBodies: ReadonlyArray<{
+        readonly body: unknown | PropertyDescriptor;
+        readonly label: string;
+      }> = [
+        {
+          label: "response body accessor",
+          body: {
+            configurable: true,
+            get() {
+              responseBodyAccessorCalls += 1;
+              throw createAuthorityBearingError(
+                "structural response body accessor",
+              );
+            },
+          },
+        },
+        {
+          label: "body Proxy",
+          body: new Proxy(
+            {},
+            {
+              get() {
+                bodyProxyAccesses += 1;
+                throw createAuthorityBearingError("response body Proxy");
+              },
+            },
+          ),
+        },
+        {
+          label: "cancel accessor",
+          body: Object.defineProperty({}, "cancel", {
+            configurable: true,
+            get() {
+              cancelAccessorCalls += 1;
+              throw createAuthorityBearingError(
+                "response body cancel accessor",
+              );
+            },
+          }),
+        },
+        {
+          label: "cancel method Proxy",
+          body: {
+            cancel: new Proxy(
+              () => undefined,
+              {
+                apply() {
+                  cancelProxyCalls += 1;
+                  throw createAuthorityBearingError(
+                    "response cancel method Proxy",
+                  );
+                },
+              },
+            ),
+          },
+        },
+        {
+          label: "arbitrary cancel result",
+          body: {
+            cancel() {
+              return Object.defineProperty({}, "then", {
+                configurable: true,
+                get() {
+                  arbitraryThenAccesses += 1;
+                  throw createAuthorityBearingError(
+                    "arbitrary cancel result",
+                  );
+                },
+              });
+            },
+          },
+        },
+      ];
+      for (const item of cleanupBodies) {
+        const response = hostileResponse({
+          body: item.body,
+          status: kind === "Kubo" ? 401 : 404,
+        });
+        const options = {
+          endpoint:
+            kind === "Kubo"
+              ? "http://127.0.0.1:5001"
+              : "https://gateway.example.test",
+          fetch: (() =>
+            Promise.resolve(response)) as typeof globalThis.fetch,
+        };
+        const reader =
+          kind === "Kubo"
+            ? createKuboBlockReader(options)
+            : createGatewayBlockReader(options);
+        if (kind === "Kubo") {
+          await assert.rejects(
+            reader.getBlock(EMPTY_RAW_CID, { maxBytes: 0 }),
+            hasCode("ACCESS_DENIED"),
+            item.label,
+          );
+        } else {
+          assert.equal(
+            await reader.getBlock(EMPTY_RAW_CID, { maxBytes: 0 }),
+            null,
+            item.label,
+          );
+        }
+      }
+      assert.equal(responseBodyAccessorCalls, 0, kind);
+      assert.equal(bodyProxyAccesses, 0, kind);
+      assert.equal(cancelAccessorCalls, 0, kind);
+      assert.equal(cancelProxyCalls, 0, kind);
+      assert.equal(arbitraryThenAccesses, 0, kind);
+    }
+  });
+
+  test("observes only exact native structural cancellation results without awaiting cleanup", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (error: unknown) => {
+      unhandled.push(error);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      for (const kind of ["Kubo", "gateway"] as const) {
+        let nativeThenAccesses = 0;
+        const nativeRejection = Promise.reject(
+          createAuthorityBearingError(
+            `${kind} structural cancel rejection`,
+          ),
+        );
+        Object.defineProperty(nativeRejection, "then", {
+          configurable: true,
+          get() {
+            nativeThenAccesses += 1;
+            throw createAuthorityBearingError(
+              `${kind} native cancel own then`,
+            );
+          },
+        });
+        let thenableAccesses = 0;
+        const thenable = Object.defineProperty({}, "then", {
+          configurable: true,
+          get() {
+            thenableAccesses += 1;
+            throw createAuthorityBearingError(
+              `${kind} arbitrary cancel thenable`,
+            );
+          },
+        });
+        let proxyAccesses = 0;
+        const promiseProxy = new Proxy(Promise.resolve(), {
+          get() {
+            proxyAccesses += 1;
+            throw createAuthorityBearingError(
+              `${kind} cancel Promise Proxy`,
+            );
+          },
+        });
+        let foreignThenAccesses = 0;
+        const foreignPromise = runInNewContext(
+          "Promise.resolve()",
+        ) as object;
+        Object.defineProperty(foreignPromise, "then", {
+          configurable: true,
+          get() {
+            foreignThenAccesses += 1;
+            throw createAuthorityBearingError(
+              `${kind} foreign cancel Promise`,
+            );
+          },
+        });
+        let subclassThenAccesses = 0;
+        class CancelPromiseSubclass<T> extends Promise<T> {}
+        Object.defineProperty(CancelPromiseSubclass.prototype, "then", {
+          configurable: true,
+          get() {
+            subclassThenAccesses += 1;
+            throw createAuthorityBearingError(
+              `${kind} cancel Promise subclass`,
+            );
+          },
+        });
+        const subclassPromise = new CancelPromiseSubclass<void>(
+          (resolve) => resolve(),
+        );
+        const cleanupResults: ReadonlyArray<{
+          readonly label: string;
+          readonly result: unknown;
+        }> = [
+          { label: "native rejection", result: nativeRejection },
+          {
+            label: "native never",
+            result: new Promise<void>(() => {}),
+          },
+          { label: "arbitrary thenable", result: thenable },
+          { label: "Promise Proxy", result: promiseProxy },
+          { label: "foreign Promise", result: foreignPromise },
+          { label: "Promise subclass", result: subclassPromise },
+        ];
+        for (const item of cleanupResults) {
+          const response = hostileResponse({
+            body: {
+              cancel() {
+                return item.result;
+              },
+            },
+            status: kind === "Kubo" ? 401 : 404,
+          });
+          const options = {
+            endpoint:
+              kind === "Kubo"
+                ? "http://127.0.0.1:5001"
+                : "https://gateway.example.test",
+            fetch: (() =>
+              Promise.resolve(response)) as typeof globalThis.fetch,
+          };
+          const reader =
+            kind === "Kubo"
+              ? createKuboBlockReader(options)
+              : createGatewayBlockReader(options);
+          if (kind === "Kubo") {
+            await assert.rejects(
+              Promise.race([
+                reader.getBlock(EMPTY_RAW_CID, { maxBytes: 0 }),
+                rejectAfter(100, `${kind} ${item.label} cleanup hung`),
+              ]),
+              hasCode("ACCESS_DENIED"),
+              item.label,
+            );
+          } else {
+            assert.equal(
+              await Promise.race([
+                reader.getBlock(EMPTY_RAW_CID, { maxBytes: 0 }),
+                rejectAfter(100, `${kind} ${item.label} cleanup hung`),
+              ]),
+              null,
+              item.label,
+            );
+          }
+        }
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(nativeThenAccesses, 0, kind);
+        assert.equal(thenableAccesses, 0, kind);
+        assert.equal(proxyAccesses, 0, kind);
+        assert.equal(foreignThenAccesses, 0, kind);
+        assert.equal(subclassThenAccesses, 0, kind);
+        assert.deepEqual(unhandled, [], kind);
+      }
+    } finally {
+      process.removeListener("unhandledRejection", onUnhandled);
+    }
+  });
+
+  test("rejects late-abort response Proxies without entering their traps", async () => {
+    for (const kind of ["Kubo", "gateway"] as const) {
+      const controller = new AbortController();
+      let responseProxyAccesses = 0;
+      let resolveFetch!: (response: Response) => void;
+      let markFetchStarted!: () => void;
+      const fetchStarted = new Promise<void>((resolve) => {
+        markFetchStarted = resolve;
+      });
+      const fetchResult = new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      });
+      const options = {
+        endpoint:
+          kind === "Kubo"
+            ? "http://127.0.0.1:5001"
+            : "https://gateway.example.test",
+        fetch: (() => {
+          markFetchStarted();
+          return fetchResult;
+        }) as typeof globalThis.fetch,
+      };
+      const reader =
+        kind === "Kubo"
+          ? createKuboBlockReader(options)
+          : createGatewayBlockReader(options);
+      const pending = reader.getBlock(EMPTY_RAW_CID, {
+        maxBytes: 0,
+        signal: controller.signal,
+      });
+      await fetchStarted;
+      controller.abort();
+      await assert.rejects(pending, hasCode("OPERATION_ABORTED"), kind);
+
+      const responseProxy = new Proxy(hostileResponse({}), {
+        get(target, key, receiver) {
+          if (key === "then") return undefined;
+          responseProxyAccesses += 1;
+          throw createAuthorityBearingError(
+            `${kind} late response Proxy`,
+          );
+        },
+      });
+      resolveFetch(responseProxy);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(responseProxyAccesses, 0, kind);
+    }
+  });
+
   test("accepts the inclusive delivered-byte limit without trusting Content-Length", async () => {
     const reader = createGatewayBlockReader({
       endpoint: "https://gateway.example.test",
@@ -77,6 +690,953 @@ describe("bounded IPFS block readers", () => {
     assert.deepEqual(
       await reader.getBlock(ABC_RAW_CID, { maxBytes: 3 }),
       new Uint8Array([0x61, 0x62, 0x63]),
+    );
+  });
+
+  test("counts branded stream chunks without consulting ordinary metadata or iterators", async () => {
+    const chunk = new Uint8Array([0x61, 0x62, 0x63]);
+    let hostileAccesses = 0;
+    for (const key of ["byteLength", "length"] as const) {
+      Object.defineProperty(chunk, key, {
+        configurable: true,
+        get() {
+          hostileAccesses += 1;
+          throw new Error(`ordinary ${key} access is forbidden`);
+        },
+      });
+    }
+    Object.defineProperty(chunk, Symbol.iterator, {
+      configurable: true,
+      get() {
+        hostileAccesses += 1;
+        throw new Error("ordinary iterator access is forbidden");
+      },
+    });
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () => new Response(streamBytes([chunk])),
+    });
+
+    assert.deepEqual(
+      await reader.getBlock(ABC_RAW_CID, { maxBytes: 3 }),
+      new Uint8Array([0x61, 0x62, 0x63]),
+    );
+    assert.equal(hostileAccesses, 0);
+  });
+
+  test("rejects an intrinsically oversized branded chunk before copying it", async () => {
+    const chunk = new Uint8Array([0x61, 0x62, 0x63, 0x64]);
+    let hostileAccesses = 0;
+    Object.defineProperty(chunk, "byteLength", {
+      configurable: true,
+      value: 0,
+    });
+    Object.defineProperty(chunk, Symbol.iterator, {
+      configurable: true,
+      get() {
+        hostileAccesses += 1;
+        throw new Error("ordinary iterator access is forbidden");
+      },
+    });
+    let canceled = false;
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(chunk);
+            },
+            cancel() {
+              canceled = true;
+            },
+          }),
+        ),
+    });
+
+    await assert.rejects(
+      reader.getBlock(ABC_RAW_CID, { maxBytes: 3 }),
+      hasCode("CONTENT_TOO_LARGE"),
+    );
+    assert.equal(hostileAccesses, 0);
+    assert.equal(canceled, true);
+  });
+
+  test("classifies a fulfilled non-byte chunk as a frozen protocol failure", async () => {
+    const injected = createAuthorityBearingError("non-byte chunk");
+    let canceled = false;
+    let released = false;
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        hostileResponse({
+          body: {
+            getReader() {
+              return {
+                cancel() {
+                  canceled = true;
+                },
+                read() {
+                  return Promise.resolve({
+                    done: false as const,
+                    value: injected,
+                  });
+                },
+                releaseLock() {
+                  released = true;
+                },
+              };
+            },
+          },
+        }),
+    });
+
+    await assert.rejects(
+      reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      (error: unknown) => {
+        assert.ok(error instanceof EvidenceRepositoryError);
+        assert.equal(Object.isFrozen(error), true);
+        return assertSanitizedDependencyError(
+          error,
+          "IO_FAILURE",
+          "block-read",
+          "protocol-failure",
+        );
+      },
+    );
+    assert.equal(canceled, true);
+    assert.equal(released, true);
+  });
+
+  test("classifies a fulfilled detached byte chunk as a frozen protocol failure", async () => {
+    const detached = Uint8Array.of(0x61);
+    structuredClone(detached.buffer, { transfer: [detached.buffer] });
+    Object.defineProperty(detached, "authority", {
+      configurable: true,
+      value: AUTHORITY_MARKER_TEXT,
+    });
+    let canceled = false;
+    let released = false;
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        hostileResponse({
+          body: {
+            getReader() {
+              return {
+                cancel() {
+                  canceled = true;
+                },
+                read() {
+                  return Promise.resolve({
+                    done: false as const,
+                    value: detached,
+                  });
+                },
+                releaseLock() {
+                  released = true;
+                },
+              };
+            },
+          },
+        }),
+    });
+
+    await assert.rejects(
+      reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      (error: unknown) => {
+        assert.ok(error instanceof EvidenceRepositoryError);
+        assert.equal(Object.isFrozen(error), true);
+        return assertSanitizedDependencyError(
+          error,
+          "IO_FAILURE",
+          "block-read",
+          "protocol-failure",
+        );
+      },
+    );
+    assert.equal(canceled, true);
+    assert.equal(released, true);
+  });
+
+  test("classifies malformed reader surfaces as frozen protocol failures without invoking traps", async () => {
+    let accessorReadAccesses = 0;
+    const accessorReader = Object.defineProperty({}, "read", {
+      configurable: true,
+      get() {
+        accessorReadAccesses += 1;
+        throw createAuthorityBearingError("reader read accessor");
+      },
+    });
+    let proxyReaderTraps = 0;
+    const proxyReader = new Proxy(
+      {
+        read() {
+          return Promise.resolve({ done: true as const });
+        },
+      },
+      {
+        get() {
+          proxyReaderTraps += 1;
+          throw createAuthorityBearingError("reader proxy get");
+        },
+        getOwnPropertyDescriptor() {
+          proxyReaderTraps += 1;
+          throw createAuthorityBearingError(
+            "reader proxy descriptor",
+          );
+        },
+        getPrototypeOf() {
+          proxyReaderTraps += 1;
+          throw createAuthorityBearingError(
+            "reader proxy prototype",
+          );
+        },
+      },
+    );
+    const malformedReaders: ReadonlyArray<{
+      readonly label: string;
+      readonly value: unknown;
+    }> = [
+      { label: "null", value: null },
+      { label: "undefined", value: undefined },
+      { label: "number", value: 1 },
+      { label: "string", value: "reader" },
+      { label: "function", value: () => undefined },
+      { label: "missing read", value: {} },
+      { label: "non-function read", value: { read: 1 } },
+      { label: "accessor read", value: accessorReader },
+      { label: "Proxy reader", value: proxyReader },
+      {
+        label: "synchronous read call failure",
+        value: {
+          read() {
+            throw createAuthorityBearingError(
+              "synchronous read call",
+            );
+          },
+        },
+      },
+    ];
+
+    for (const item of malformedReaders) {
+      const reader = createGatewayBlockReader({
+        endpoint: "https://gateway.example.test",
+        fetch: async () => responseWithReader(item.value),
+      });
+
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        (error: unknown) =>
+          assertFrozenProtocolFailure(error),
+        item.label,
+      );
+    }
+
+    assert.equal(accessorReadAccesses, 0);
+    assert.equal(proxyReaderTraps, 0);
+  });
+
+  test("snapshots own and inherited cleanup methods before read mutates their surfaces", async () => {
+    for (const placement of ["own", "inherited"] as const) {
+      let cancelCalls = 0;
+      let releaseCalls = 0;
+      let mutatedSurfaceTraps = 0;
+      let cancelThenTraps = 0;
+      let releaseThenTraps = 0;
+      const cleanup = {
+        cancel() {
+          cancelCalls += 1;
+          const result = Promise.resolve();
+          Object.defineProperty(result, "then", {
+            configurable: true,
+            get() {
+              cancelThenTraps += 1;
+              throw createAuthorityBearingError(
+                "cancel promise then",
+              );
+            },
+          });
+          return result;
+        },
+        releaseLock() {
+          releaseCalls += 1;
+          return Object.defineProperty({}, "then", {
+            configurable: true,
+            get() {
+              releaseThenTraps += 1;
+              throw createAuthorityBearingError(
+                "release thenable",
+              );
+            },
+          });
+        },
+      };
+      const source: Record<string, unknown> =
+        placement === "own"
+          ? { ...cleanup }
+          : Object.create(cleanup) as Record<string, unknown>;
+      Object.defineProperty(source, "read", {
+        configurable: true,
+        value() {
+          for (const key of ["cancel", "releaseLock"] as const) {
+            Object.defineProperty(source, key, {
+              configurable: true,
+              get() {
+                mutatedSurfaceTraps += 1;
+                throw createAuthorityBearingError(
+                  `mutated ${key} surface`,
+                );
+              },
+            });
+          }
+          return Promise.resolve({ done: false });
+        },
+      });
+      const reader = createGatewayBlockReader({
+        endpoint: "https://gateway.example.test",
+        fetch: async () => responseWithReader(source),
+      });
+
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        assertFrozenProtocolFailure,
+        placement,
+      );
+      assert.equal(cancelCalls, 1, placement);
+      assert.equal(releaseCalls, 1, placement);
+      assert.equal(mutatedSurfaceTraps, 0, placement);
+      assert.equal(cancelThenTraps, 0, placement);
+      assert.equal(releaseThenTraps, 0, placement);
+    }
+  });
+
+  test("rejects hostile optional cleanup method descriptors without invoking them", async () => {
+    let accessorCalls = 0;
+    let methodProxyCalls = 0;
+    const methodProxy = new Proxy(
+      () => undefined,
+      {
+        apply() {
+          methodProxyCalls += 1;
+          throw createAuthorityBearingError(
+            "cleanup method Proxy apply",
+          );
+        },
+      },
+    );
+    for (const name of [
+      "cancel",
+      "read",
+      "releaseLock",
+    ] as const) {
+      for (const surface of [
+        "accessor",
+        "non-function",
+        "Proxy",
+      ] as const) {
+        const source: Record<string, unknown> = {
+          read() {
+            return Promise.resolve({ done: true });
+          },
+        };
+        if (surface === "accessor") {
+          Object.defineProperty(source, name, {
+            configurable: true,
+            get() {
+              accessorCalls += 1;
+              throw createAuthorityBearingError(
+                `${name} accessor`,
+              );
+            },
+          });
+        } else {
+          source[name] = surface === "Proxy" ? methodProxy : 1;
+        }
+        const reader = createGatewayBlockReader({
+          endpoint: "https://gateway.example.test",
+          fetch: async () => responseWithReader(source),
+        });
+        await assert.rejects(
+          reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+          assertFrozenProtocolFailure,
+          `${name} ${surface}`,
+        );
+      }
+    }
+    assert.equal(accessorCalls, 0);
+    assert.equal(methodProxyCalls, 0);
+  });
+
+  test("rejects a Proxy anywhere in the traversed reader prototype chain", async () => {
+    for (let proxyDepth = 1; proxyDepth <= 31; proxyDepth += 1) {
+      let proxyTraps = 0;
+      const proxy = new Proxy(Object.create(null) as object, {
+        getOwnPropertyDescriptor() {
+          proxyTraps += 1;
+          throw createAuthorityBearingError(
+            "reader prototype descriptor",
+          );
+        },
+        getPrototypeOf() {
+          proxyTraps += 1;
+          throw createAuthorityBearingError(
+            "reader prototype traversal",
+          );
+        },
+      });
+      let prototype: object | null = proxy;
+      for (let depth = 1; depth < proxyDepth; depth += 1) {
+        prototype = Object.create(prototype) as object;
+      }
+      const source = Object.create(prototype) as {
+        read?: () => Promise<{ readonly done: true }>;
+      };
+      Object.defineProperty(source, "read", {
+        value() {
+          return Promise.resolve({ done: true as const });
+        },
+      });
+      const reader = createGatewayBlockReader({
+        endpoint: "https://gateway.example.test",
+        fetch: async () => responseWithReader(source),
+      });
+
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        assertFrozenProtocolFailure,
+        `Proxy at depth ${proxyDepth}`,
+      );
+      assert.equal(proxyTraps, 0);
+    }
+  });
+
+  test("bounds full reader prototype traversal at depth 31", async () => {
+    const accepted = createReaderAtPrototypeDepth(31);
+    const acceptedReader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () => responseWithReader(accepted),
+    });
+    assert.deepEqual(
+      await acceptedReader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      new Uint8Array(),
+    );
+
+    const rejected = createReaderAtPrototypeDepth(32);
+    const rejectedReader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () => responseWithReader(rejected),
+    });
+    await assert.rejects(
+      rejectedReader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      assertFrozenProtocolFailure,
+    );
+  });
+
+  test("classifies malformed fulfilled read results as frozen protocol failures without invoking traps", async () => {
+    let proxyResultTraps = 0;
+    let proxyThenAccesses = 0;
+    const proxyResult = new Proxy(
+      {
+        done: true,
+      },
+      {
+        get(target, key, receiver) {
+          if (key === "then") {
+            proxyThenAccesses += 1;
+            if (proxyThenAccesses > 1) {
+              proxyResultTraps += 1;
+              throw createAuthorityBearingError(
+                "result Proxy then replay",
+              );
+            }
+            return Reflect.get(target, key, receiver);
+          }
+          proxyResultTraps += 1;
+          throw createAuthorityBearingError("result proxy get");
+        },
+        getOwnPropertyDescriptor() {
+          proxyResultTraps += 1;
+          throw createAuthorityBearingError(
+            "result proxy descriptor",
+          );
+        },
+      },
+    );
+    let doneAccessorCalls = 0;
+    const accessorDoneResult = Object.defineProperty(
+      {},
+      "done",
+      {
+        configurable: true,
+        get() {
+          doneAccessorCalls += 1;
+          throw createAuthorityBearingError("result done accessor");
+        },
+      },
+    );
+    let valueAccessorCalls = 0;
+    const accessorValueResult = Object.defineProperties(
+      {},
+      {
+        done: {
+          configurable: true,
+          value: false,
+        },
+        value: {
+          configurable: true,
+          get() {
+            valueAccessorCalls += 1;
+            throw createAuthorityBearingError(
+              "result value accessor",
+            );
+          },
+        },
+      },
+    );
+    const malformedResults: ReadonlyArray<{
+      readonly label: string;
+      readonly value: unknown;
+    }> = [
+      { label: "null", value: null },
+      { label: "undefined", value: undefined },
+      { label: "number", value: 0 },
+      { label: "string", value: "result" },
+      { label: "boolean", value: true },
+      { label: "missing done", value: {} },
+      {
+        label: "inherited done",
+        value: Object.create({ done: true }) as object,
+      },
+      { label: "numeric done", value: { done: 0 } },
+      { label: "text done", value: { done: "false" } },
+      { label: "null done", value: { done: null } },
+      { label: "false without value", value: { done: false } },
+      {
+        label: "false with inherited value",
+        value: Object.assign(
+          Object.create({ value: new Uint8Array() }) as object,
+          { done: false },
+        ),
+      },
+      {
+        label: "false with non-byte value",
+        value: {
+          done: false,
+          value: createAuthorityBearingError(
+            "fulfilled non-byte result",
+          ),
+        },
+      },
+      { label: "Proxy result", value: proxyResult },
+      { label: "accessor done", value: accessorDoneResult },
+      { label: "accessor value", value: accessorValueResult },
+    ];
+
+    for (const item of malformedResults) {
+      const reader = createGatewayBlockReader({
+        endpoint: "https://gateway.example.test",
+        fetch: async () =>
+          responseWithReader({
+            read() {
+              return Promise.resolve(item.value);
+            },
+          }),
+      });
+
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        (error: unknown) =>
+          assertFrozenProtocolFailure(error),
+        item.label,
+      );
+    }
+
+    assert.equal(proxyResultTraps, 0);
+    assert.equal(proxyThenAccesses, 1);
+    assert.equal(doneAccessorCalls, 0);
+    assert.equal(valueAccessorCalls, 0);
+  });
+
+  test("accepts a done result without inspecting its hostile value", async () => {
+    let valueAccessorCalls = 0;
+    const done = Object.defineProperties(
+      {},
+      {
+        done: {
+          configurable: true,
+          value: true,
+        },
+        value: {
+          configurable: true,
+          get() {
+            valueAccessorCalls += 1;
+            throw createAuthorityBearingError(
+              "completed result value",
+            );
+          },
+        },
+      },
+    );
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        responseWithReader({
+          read() {
+            return Promise.resolve(done);
+          },
+        }),
+    });
+
+    assert.deepEqual(
+      await reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      new Uint8Array(),
+    );
+    assert.equal(valueAccessorCalls, 0);
+  });
+
+  test("keeps a genuine returned read promise rejection classified as unavailable", async () => {
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        responseWithReader({
+          read() {
+            return Promise.reject(
+              createAuthorityBearingError(
+                "returned read promise rejection",
+              ),
+            );
+          },
+        }),
+    });
+
+    await assert.rejects(
+      reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      (error: unknown) => {
+        assert.ok(error instanceof EvidenceRepositoryError);
+        assert.equal(Object.isFrozen(error), true);
+        return assertSanitizedDependencyError(
+          error,
+          "DEPENDENCY_UNAVAILABLE",
+          "block-read",
+          "unavailable",
+        );
+      },
+    );
+  });
+
+  test("adopts an exact native Promise without consulting its hostile own then", async () => {
+    let thenAccesses = 0;
+    const result = Promise.resolve({ done: true as const });
+    Object.defineProperty(result, "then", {
+      configurable: true,
+      get() {
+        thenAccesses += 1;
+        throw createAuthorityBearingError(
+          "native promise own then",
+        );
+      },
+    });
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        responseWithReader({
+          read() {
+            return result;
+          },
+        }),
+    });
+
+    assert.deepEqual(
+      await reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      new Uint8Array(),
+    );
+    assert.equal(thenAccesses, 0);
+  });
+
+  test("rejects sync results, thenables, Promise Proxies, foreign Promises, and subclasses without traps", async () => {
+    let thenableTraps = 0;
+    const thenable = Object.defineProperty({}, "then", {
+      configurable: true,
+      get() {
+        thenableTraps += 1;
+        throw createAuthorityBearingError("arbitrary thenable");
+      },
+    });
+    let promiseProxyTraps = 0;
+    const promiseProxy = new Proxy(
+      Promise.resolve({ done: true as const }),
+      {
+        get() {
+          promiseProxyTraps += 1;
+          throw createAuthorityBearingError("Promise Proxy");
+        },
+      },
+    );
+    let subclassThenTraps = 0;
+    class ThenSubclass<T> extends Promise<T> {}
+    Object.defineProperty(ThenSubclass.prototype, "then", {
+      configurable: true,
+      get() {
+        subclassThenTraps += 1;
+        throw createAuthorityBearingError(
+          "Promise subclass then",
+        );
+      },
+    });
+    const thenSubclass = new ThenSubclass<{
+      readonly done: true;
+    }>((resolve) => resolve({ done: true }));
+    let subclassSpeciesTraps = 0;
+    class SpeciesSubclass<T> extends Promise<T> {}
+    Object.defineProperty(SpeciesSubclass, Symbol.species, {
+      configurable: true,
+      get() {
+        subclassSpeciesTraps += 1;
+        throw createAuthorityBearingError(
+          "Promise subclass species",
+        );
+      },
+    });
+    const speciesSubclass = new SpeciesSubclass<{
+      readonly done: true;
+    }>((resolve) => resolve({ done: true }));
+    const foreignPromise = runInNewContext(
+      "Promise.resolve({ done: true })",
+    ) as object;
+    let foreignThenTraps = 0;
+    Object.defineProperty(foreignPromise, "then", {
+      configurable: true,
+      get() {
+        foreignThenTraps += 1;
+        throw createAuthorityBearingError(
+          "cross-realm Promise then",
+        );
+      },
+    });
+    const cases: ReadonlyArray<{
+      readonly label: string;
+      readonly value: unknown;
+    }> = [
+      { label: "sync result object", value: { done: true } },
+      { label: "arbitrary thenable", value: thenable },
+      { label: "Promise Proxy", value: promiseProxy },
+      { label: "cross-realm Promise", value: foreignPromise },
+      { label: "Promise subclass then", value: thenSubclass },
+      {
+        label: "Promise subclass species",
+        value: speciesSubclass,
+      },
+    ];
+
+    for (const item of cases) {
+      const reader = createGatewayBlockReader({
+        endpoint: "https://gateway.example.test",
+        fetch: async () =>
+          responseWithReader({
+            read() {
+              return item.value;
+            },
+          }),
+      });
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        assertFrozenProtocolFailure,
+        item.label,
+      );
+    }
+    assert.equal(thenableTraps, 0);
+    assert.equal(promiseProxyTraps, 0);
+    assert.equal(foreignThenTraps, 0);
+    assert.equal(subclassThenTraps, 0);
+    assert.equal(subclassSpeciesTraps, 0);
+  });
+
+  test("rejects an exact native Promise with a mutable constructor surface without invoking it", async () => {
+    let constructorAccesses = 0;
+    const result = Promise.resolve({ done: true as const });
+    Object.defineProperty(result, "constructor", {
+      configurable: true,
+      get() {
+        constructorAccesses += 1;
+        throw createAuthorityBearingError(
+          "Promise constructor accessor",
+        );
+      },
+    });
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        responseWithReader({
+          read() {
+            return result;
+          },
+        }),
+    });
+
+    await assert.rejects(
+      reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      assertFrozenProtocolFailure,
+    );
+    assert.equal(constructorAccesses, 0);
+  });
+
+  test("observes late native Promise rejection and removes abort listeners after cancellation", async () => {
+    const controller = new AbortController();
+    const tracked = trackAbortListeners(controller.signal);
+    let rejectRead!: (error: unknown) => void;
+    const pending = new Promise<never>((_resolve, reject) => {
+      rejectRead = reject;
+    });
+    let markReadStarted!: () => void;
+    const readStarted = new Promise<void>((resolve) => {
+      markReadStarted = resolve;
+    });
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        responseWithReader({
+          read() {
+            markReadStarted();
+            return pending;
+          },
+        }),
+    });
+    const operation = reader.getBlock(EMPTY_RAW_CID, {
+      maxBytes: 64,
+      signal: tracked.signal,
+    });
+    await readStarted;
+    controller.abort(
+      createAuthorityBearingError("late rejection abort"),
+    );
+
+    await assert.rejects(operation, hasCode("OPERATION_ABORTED"));
+    assert.equal(tracked.activeCount(), 0);
+    rejectRead(createAuthorityBearingError("late read rejection"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+
+  test("observes native cancel rejection without awaiting cancel or release results", async () => {
+    let rejectCancel!: (error: unknown) => void;
+    const cancelResult = new Promise<never>((_resolve, reject) => {
+      rejectCancel = reject;
+    });
+    let releaseThenAccesses = 0;
+    const source = {
+      cancel() {
+        return cancelResult;
+      },
+      read() {
+        return Promise.resolve({ done: false });
+      },
+      releaseLock() {
+        return Object.defineProperty({}, "then", {
+          configurable: true,
+          get() {
+            releaseThenAccesses += 1;
+            throw createAuthorityBearingError(
+              "release result then",
+            );
+          },
+        });
+      },
+    };
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () => responseWithReader(source),
+    });
+
+    await assert.rejects(
+      Promise.race([
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        rejectAfter(100, "reader cleanup was awaited"),
+      ]),
+      assertFrozenProtocolFailure,
+    );
+    rejectCancel(createAuthorityBearingError("cancel rejection"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(releaseThenAccesses, 0);
+  });
+
+  test("does not assimilate arbitrary cancel or release thenables and tolerates release throws", async () => {
+    for (const releaseMode of ["thenable", "throw"] as const) {
+      let cancelThenAccesses = 0;
+      let releaseThenAccesses = 0;
+      const source = {
+        cancel() {
+          return Object.defineProperty({}, "then", {
+            configurable: true,
+            get() {
+              cancelThenAccesses += 1;
+              throw createAuthorityBearingError(
+                "cancel arbitrary thenable",
+              );
+            },
+          });
+        },
+        read() {
+          return Promise.resolve({ done: false });
+        },
+        releaseLock() {
+          if (releaseMode === "throw") {
+            throw createAuthorityBearingError("release throw");
+          }
+          return Object.defineProperty({}, "then", {
+            configurable: true,
+            get() {
+              releaseThenAccesses += 1;
+              throw createAuthorityBearingError(
+                "release arbitrary thenable",
+              );
+            },
+          });
+        },
+      };
+      const reader = createGatewayBlockReader({
+        endpoint: "https://gateway.example.test",
+        fetch: async () => responseWithReader(source),
+      });
+
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        assertFrozenProtocolFailure,
+      );
+      assert.equal(cancelThenAccesses, 0, releaseMode);
+      assert.equal(releaseThenAccesses, 0, releaseMode);
+    }
+  });
+
+  test("keeps caller abort authoritative over synchronous reader failure", async () => {
+    const controller = new AbortController();
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        responseWithReader({
+          read() {
+            controller.abort(
+              createAuthorityBearingError("reader abort reason"),
+            );
+            throw createAuthorityBearingError(
+              "reader failure after abort",
+            );
+          },
+        }),
+    });
+
+    await assert.rejects(
+      reader.getBlock(EMPTY_RAW_CID, {
+        maxBytes: 64,
+        signal: controller.signal,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof EvidenceRepositoryError);
+        assert.equal(Object.isFrozen(error), true);
+        assert.equal(error.code, "OPERATION_ABORTED");
+        assert.equal(error.cause, undefined);
+        assertNoAuthorityMarkers(error);
+        return true;
+      },
     );
   });
 
@@ -1067,9 +2627,9 @@ describe("bounded IPFS block readers", () => {
         (error: unknown) =>
           assertSanitizedDependencyError(
             error,
-            "DEPENDENCY_UNAVAILABLE",
+            "IO_FAILURE",
             "block-read",
-            "unavailable",
+            "protocol-failure",
           ),
         field,
       );
@@ -1307,6 +2867,41 @@ function hostileResponse(
     }
   }
   return response as unknown as Response;
+}
+
+function responseWithReader(reader: unknown): Response {
+  return hostileResponse({
+    body: {
+      getReader() {
+        return reader;
+      },
+    },
+  });
+}
+
+function createReaderAtPrototypeDepth(depth: number): object {
+  let prototype: object | null = null;
+  for (let current = 0; current < depth; current += 1) {
+    prototype = Object.create(prototype) as object;
+  }
+  const source = Object.create(prototype) as object;
+  Object.defineProperty(source, "read", {
+    value() {
+      return Promise.resolve({ done: true as const });
+    },
+  });
+  return source;
+}
+
+function assertFrozenProtocolFailure(error: unknown): boolean {
+  assert.ok(error instanceof EvidenceRepositoryError);
+  assert.equal(Object.isFrozen(error), true);
+  return assertSanitizedDependencyError(
+    error,
+    "IO_FAILURE",
+    "block-read",
+    "protocol-failure",
+  );
 }
 
 function isPropertyDescriptor(

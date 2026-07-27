@@ -109,6 +109,76 @@ describe("IpfsEvidenceRepository reads", () => {
     first![0] = 0;
     assert.deepEqual(await repository.getArtifact(reference), bytes);
   });
+
+  test("snapshots injected reader bytes without consulting ordinary metadata or iterators", async () => {
+    const bytes = Uint8Array.of(1, 2, 3, 4);
+    const reference = createArtifactReference(bytes);
+    const blocks = new Map<string, Uint8Array>([
+      [digestToRawCid(reference.digest), bytes],
+      [
+        registrationCidForReference(reference),
+        buildArtifactRegistrationBytes(reference),
+      ],
+    ]);
+    let hostileAccesses = 0;
+    const reader: IpfsBlockReader = {
+      async getBlock(cid) {
+        const stored = blocks.get(cid);
+        if (stored === undefined) return null;
+        const returned = new Uint8Array(stored);
+        Object.defineProperty(returned, "byteLength", {
+          configurable: true,
+          get() {
+            hostileAccesses += 1;
+            throw new Error("ordinary byteLength access is forbidden");
+          },
+        });
+        Object.defineProperty(returned, Symbol.iterator, {
+          configurable: true,
+          get() {
+            hostileAccesses += 1;
+            throw new Error("ordinary iterator access is forbidden");
+          },
+        });
+        return returned;
+      },
+    };
+    const repository = new IpfsEvidenceRepository({
+      client: new FakeKubo().asClient(),
+      reader,
+    });
+
+    assert.deepEqual(await repository.getArtifact(reference), bytes);
+    assert.equal(hostileAccesses, 0);
+  });
+
+  test("maps detached injected reader bytes to the sanitized protocol-failure contract", async () => {
+    const reference = createArtifactReference(
+      encoder.encode("detached reader bytes"),
+    );
+    const detached = Uint8Array.of(1);
+    structuredClone(detached.buffer, { transfer: [detached.buffer] });
+    const reader: IpfsBlockReader = {
+      async getBlock() {
+        return detached;
+      },
+    };
+    const repository = new IpfsEvidenceRepository({
+      client: new FakeKubo().asClient(),
+      reader,
+    });
+
+    await assert.rejects(
+      repository.getArtifact(reference),
+      (error: unknown) =>
+        assertSanitizedDependencyError(
+          error,
+          "IO_FAILURE",
+          "block-read",
+          "protocol-failure",
+        ),
+    );
+  });
 });
 
 describe("IpfsEvidenceRepository writes", () => {
@@ -141,6 +211,19 @@ describe("IpfsEvidenceRepository writes", () => {
       MAX_STANDARD_IPFS_BLOCK_BYTES + 1,
     );
     const small = new Uint8Array([1]);
+    const detached = Uint8Array.of(1);
+    structuredClone(detached.buffer, { transfer: [detached.buffer] });
+    let proxyTrapCalls = 0;
+    const proxied = new Proxy(small, {
+      get() {
+        proxyTrapCalls += 1;
+        throw new Error("caller byte proxy getter must not run");
+      },
+      getPrototypeOf() {
+        proxyTrapCalls += 1;
+        throw new Error("caller byte proxy prototype trap must not run");
+      },
+    });
     const controller = new AbortController();
     controller.abort();
     const copySpy = vi.spyOn(Uint8Array, "from");
@@ -161,13 +244,89 @@ describe("IpfsEvidenceRepository writes", () => {
         hasCode("CONTENT_TOO_LARGE"),
       );
       await assert.rejects(
+        repository.putArtifact(detached),
+        hasCode("CONTENT_CORRUPT"),
+      );
+      await assert.rejects(
+        repository.putArtifact(proxied),
+        hasCode("CONTENT_CORRUPT"),
+      );
+      await assert.rejects(
         repository.putRecord("execution-evidence", oversized),
         hasCode("CONTENT_TOO_LARGE"),
       );
       assert.equal(copySpy.mock.calls.length, 0);
+      assert.equal(proxyTrapCalls, 0);
     } finally {
       copySpy.mockRestore();
     }
+    assert.deepEqual(reader.calls, []);
+    assert.deepEqual(kubo.events, []);
+  });
+
+  test("accepts the exact 2 MiB intrinsic caller bytes without consulting metadata or iterators", async () => {
+    const reader = new FakeIpfsBlockReader();
+    const kubo = new FakeKubo(reader);
+    const repository = new IpfsEvidenceRepository({
+      client: kubo.asClient(),
+      reader,
+    });
+    const bytes = new Uint8Array(MAX_STANDARD_IPFS_BLOCK_BYTES);
+    bytes[0] = 0x11;
+    bytes[bytes.length - 1] = 0x22;
+    const expected = new Uint8Array(bytes);
+    let hostileAccesses = 0;
+    Object.defineProperty(bytes, "byteLength", {
+      configurable: true,
+      get() {
+        hostileAccesses += 1;
+        throw new Error("ordinary byteLength access is forbidden");
+      },
+    });
+    Object.defineProperty(bytes, Symbol.iterator, {
+      configurable: true,
+      get() {
+        hostileAccesses += 1;
+        throw new Error("ordinary iterator access is forbidden");
+      },
+    });
+
+    const receipt = await repository.putArtifact(bytes);
+
+    assert.equal(receipt.size, MAX_STANDARD_IPFS_BLOCK_BYTES);
+    assert.deepEqual(kubo.putCalls[0]?.bytes, expected);
+    assert.equal(hostileAccesses, 0);
+  });
+
+  test("rejects intrinsic 2 MiB plus one before RPC without consulting a hostile iterator", async () => {
+    const reader = new FakeIpfsBlockReader();
+    const kubo = new FakeKubo(reader);
+    const repository = new IpfsEvidenceRepository({
+      client: kubo.asClient(),
+      reader,
+    });
+    const bytes = new Uint8Array(
+      MAX_STANDARD_IPFS_BLOCK_BYTES + 1,
+    );
+    let hostileAccesses = 0;
+    Object.defineProperty(bytes, "byteLength", {
+      configurable: true,
+      value: 0,
+    });
+    Object.defineProperty(bytes, Symbol.iterator, {
+      configurable: true,
+      get() {
+        hostileAccesses += 1;
+        throw new Error("ordinary iterator access is forbidden");
+      },
+    });
+
+    await assert.rejects(
+      repository.putArtifact(bytes),
+      hasCode("CONTENT_TOO_LARGE"),
+    );
+
+    assert.equal(hostileAccesses, 0);
     assert.deepEqual(reader.calls, []);
     assert.deepEqual(kubo.events, []);
   });
