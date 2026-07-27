@@ -63,7 +63,7 @@ const EvaluationPredicateSchema = z.looseObject({
   evaluationSpecification: ResourceDescriptorSchema.optional(),
   taskSubject: z.string().min(1),
   resultSubjects: z.array(z.string().min(1)).min(1),
-  verdict: z.string().min(1),
+  verdict: z.enum(["pass", "fail", "inconclusive"]),
   measurements: z.array(MeasurementSchema).optional(),
   evidence: z.array(ResourceDescriptorSchema).optional(),
   explanation: z.string().optional(),
@@ -74,7 +74,7 @@ const EvaluationPredicateSchema = z.looseObject({
 
 const VerificationCheckSchema = z.looseObject({
   name: z.string().min(1),
-  status: z.string().min(1),
+  status: z.enum(["pass", "fail", "unknown"]),
   explanation: z.string().optional(),
   evidence: z.array(ResourceDescriptorSchema).optional(),
   annotations: z.record(z.string(), z.unknown()).optional(),
@@ -86,7 +86,7 @@ const VerificationPredicateSchema = z.looseObject({
   verificationMethod: ResourceDescriptorSchema.optional(),
   verificationPolicy: ResourceDescriptorSchema.optional(),
   executionId: z.string().min(1),
-  verdict: z.string().min(1),
+  verdict: z.enum(["verified", "rejected", "inconclusive"]),
   checks: z.array(VerificationCheckSchema).optional(),
   explanation: z.string().optional(),
   limitations: z.array(z.string()).optional(),

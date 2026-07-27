@@ -1,3 +1,4 @@
+export * from "./claims.js";
 export * from "./hashing.js";
 export * from "./identifiers.js";
 export * from "./profile.js";
