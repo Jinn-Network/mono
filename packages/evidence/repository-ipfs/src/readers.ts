@@ -34,9 +34,11 @@ import {
 
 const MAX_KUBO_ERROR_BODY_BYTES = 64 * 1024;
 const RAW_BLOCK_ACCEPT = "application/vnd.ipld.raw";
-const FETCH_ABORTED = Symbol("FETCH_ABORTED");
 const MAX_READER_PROTOTYPE_DEPTH = 32;
 const intrinsicApply = Reflect.apply;
+const intrinsicCreate = Object.create;
+const intrinsicDefineProperty = Object.defineProperty;
+const intrinsicFreeze = Object.freeze;
 const intrinsicGetOwnPropertyDescriptor =
   Object.getOwnPropertyDescriptor;
 const intrinsicGetPrototypeOf = Object.getPrototypeOf;
@@ -59,6 +61,11 @@ const nativePromiseSpeciesDescriptor =
     NativePromise,
     Symbol.species,
   )!;
+const nativeResponseBodyGetter =
+  intrinsicGetOwnPropertyDescriptor(
+    Response.prototype,
+    "body",
+  )!.get as (this: Response) => ReadableStream<Uint8Array> | null;
 
 interface ResponseBodyReader {
   readonly cancel?: (...arguments_: readonly unknown[]) => unknown;
@@ -73,9 +80,59 @@ type ResponseReadResult =
   | { readonly done: true }
   | { readonly done: false; readonly value: unknown };
 
-type NativePromiseSettlement =
-  | { readonly status: "fulfilled"; readonly value: unknown }
-  | { readonly status: "rejected" };
+interface NativePromiseFulfilled<T> {
+  readonly status: "fulfilled";
+  readonly value: T;
+}
+
+interface NativePromiseRejected {
+  readonly status: "rejected";
+}
+
+interface FetchAborted {
+  readonly status: "aborted";
+}
+
+type NativePromiseSettlement<T> =
+  | NativePromiseFulfilled<T>
+  | NativePromiseRejected;
+
+const NATIVE_PROMISE_REJECTED =
+  createInertStatusRecord<NativePromiseRejected>("rejected");
+const FETCH_ABORTED =
+  createInertStatusRecord<FetchAborted>("aborted");
+
+function createInertStatusRecord<
+  T extends NativePromiseRejected | FetchAborted,
+>(status: T["status"]): T {
+  const record = intrinsicCreate(null) as T;
+  intrinsicDefineProperty(record, "status", {
+    configurable: false,
+    enumerable: true,
+    value: status,
+    writable: false,
+  });
+  return intrinsicFreeze(record);
+}
+
+function createInertFulfilledRecord<T>(
+  value: T,
+): NativePromiseFulfilled<T> {
+  const record = intrinsicCreate(null) as NativePromiseFulfilled<T>;
+  intrinsicDefineProperty(record, "status", {
+    configurable: false,
+    enumerable: true,
+    value: "fulfilled",
+    writable: false,
+  });
+  intrinsicDefineProperty(record, "value", {
+    configurable: false,
+    enumerable: true,
+    value,
+    writable: false,
+  });
+  return intrinsicFreeze(record);
+}
 
 export interface IpfsBlockReader {
   getBlock(
@@ -107,7 +164,7 @@ export function createKuboBlockReader(
       assertRepositoryOperationActive(operationOptions);
 
       const url = kuboBlockGetUrl(endpoint, canonicalCid);
-      const response = await performFetch(
+      const responseResult = await performFetch(
         fetchCapability,
         url,
         {
@@ -116,6 +173,7 @@ export function createKuboBlockReader(
         },
         operationOptions,
       );
+      const response = responseResult.value;
       if (operationOptions.signal?.aborted === true) {
         cancelResponse(response);
       }
@@ -184,7 +242,7 @@ export function createGatewayBlockReader(
       const maxBytes = parseMaxBytes(operationOptions.maxBytes);
       assertRepositoryOperationActive(operationOptions);
 
-      const response = await performFetch(
+      const responseResult = await performFetch(
         fetchCapability,
         gatewayBlockUrl(endpoint, canonicalCid),
         {
@@ -194,6 +252,7 @@ export function createGatewayBlockReader(
         },
         operationOptions,
       );
+      const response = responseResult.value;
       if (operationOptions.signal?.aborted === true) {
         cancelResponse(response);
       }
@@ -294,14 +353,14 @@ async function performFetch(
   input: URL,
   init: RequestInit,
   options: RepositoryOperationOptions,
-): Promise<Response> {
+): Promise<NativePromiseFulfilled<Response>> {
   assertRepositoryOperationActive(options);
   const signal = options.signal;
   let onAbort: (() => void) | undefined;
-  let abortResult: Promise<typeof FETCH_ABORTED> | undefined;
+  let abortResult: Promise<FetchAborted> | undefined;
   if (signal !== undefined) {
-    let resolveAbort!: (result: typeof FETCH_ABORTED) => void;
-    abortResult = new Promise((resolve) => {
+    let resolveAbort!: (result: FetchAborted) => void;
+    abortResult = new NativePromise((resolve) => {
       resolveAbort = resolve;
     });
     const abortListener = () => resolveAbort(FETCH_ABORTED);
@@ -311,52 +370,59 @@ async function performFetch(
   }
 
   try {
-    if (signal?.aborted === true) {
+    if (isSignalAborted(signal)) {
       throw ipfsRepositoryError(
         "OPERATION_ABORTED",
         "The IPFS block read was aborted.",
       );
     }
 
-    const fetchResult = Promise.resolve(
-      fetchCapability(input, init),
-    );
-    void fetchResult
-      .then(
+    let fetchResult: Promise<NativePromiseSettlement<Response>>;
+    try {
+      fetchResult = observeNativePromise<Response>(
+        intrinsicApply(fetchCapability, undefined, [input, init]),
         (response) => {
-          if (signal?.aborted === true) cancelResponse(response);
+          if (isSignalAborted(signal)) cancelResponse(response);
         },
-        () => {
-          // Keep a losing injected fetch rejection observed.
-        },
-      )
-      .catch(() => {
-        // Detached late-response cleanup cannot escape publicly.
-      });
+      );
+    } catch {
+      if (isSignalAborted(signal)) {
+        throw ipfsRepositoryError(
+          "OPERATION_ABORTED",
+          "The IPFS block read was aborted.",
+        );
+      }
+      throw responseProtocolFailure();
+    }
+
     const result =
       abortResult === undefined
         ? await fetchResult
-        : await Promise.race([fetchResult, abortResult]);
-    if (result === FETCH_ABORTED) {
+        : await raceNativePromises(fetchResult, abortResult);
+    if (isSignalAborted(signal)) {
+      if (result.status === "fulfilled") {
+        cancelResponse(result.value);
+      }
       throw ipfsRepositoryError(
         "OPERATION_ABORTED",
         "The IPFS block read was aborted.",
+      );
+    }
+    if (result.status === "aborted") {
+      throw ipfsRepositoryError(
+        "OPERATION_ABORTED",
+        "The IPFS block read was aborted.",
+      );
+    }
+    if (result.status === "rejected") {
+      throw ipfsDependencyError(
+        "DEPENDENCY_UNAVAILABLE",
+        "The configured IPFS block endpoint was unavailable.",
+        "block-read",
+        "unavailable",
       );
     }
     return result;
-  } catch (error) {
-    if (signal?.aborted === true) {
-      throw ipfsRepositoryError(
-        "OPERATION_ABORTED",
-        "The IPFS block read was aborted.",
-      );
-    }
-    throw ipfsDependencyError(
-      "DEPENDENCY_UNAVAILABLE",
-      "The configured IPFS block endpoint was unavailable.",
-      "block-read",
-      "unavailable",
-    );
   } finally {
     if (signal !== undefined && onAbort !== undefined) {
       try {
@@ -366,6 +432,10 @@ async function performFetch(
       }
     }
   }
+}
+
+function isSignalAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
 }
 
 async function readBoundedResponse(
@@ -565,14 +635,11 @@ function mapHttpFailure(
 async function readNextChunk(
   reader: ResponseBodyReader,
   options: RepositoryOperationOptions,
-): Promise<{
-  readonly status: "fulfilled";
-  readonly value: unknown;
-}> {
+): Promise<NativePromiseFulfilled<unknown>> {
   assertRepositoryOperationActive(options);
-  let pendingRead: Promise<NativePromiseSettlement>;
+  let pendingRead: Promise<NativePromiseSettlement<unknown>>;
   try {
-    pendingRead = observeReadPromise(
+    pendingRead = observeNativePromise(
       intrinsicApply(reader.read, reader.source, []),
     );
   } catch {
@@ -626,14 +693,14 @@ async function readNextChunk(
   }
 }
 
-function raceNativePromises<T>(
+function raceNativePromises<T, U>(
   first: Promise<T>,
-  second: Promise<never>,
-): Promise<T> {
+  second: Promise<U>,
+): Promise<T | U> {
   if (!nativePromiseInfrastructureIsIntact()) {
     throw responseProtocolFailure();
   }
-  return new NativePromise<T>((resolve, reject) => {
+  return new NativePromise<T | U>((resolve, reject) => {
     intrinsicApply(nativePromiseThen, first, [resolve, reject]);
     intrinsicApply(nativePromiseThen, second, [resolve, reject]);
   });
@@ -776,27 +843,35 @@ function parseResponseReadResult(value: unknown): ResponseReadResult {
   return { done: false, value: valueDescriptor.value };
 }
 
-function observeReadPromise(
+function observeNativePromise<T>(
   value: unknown,
-): Promise<NativePromiseSettlement> {
+  onFulfilled?: (value: T) => void,
+): Promise<NativePromiseSettlement<T>> {
   if (!isSafelyObservableNativePromise(value)) {
     throw new TypeError(
-      "Response body read() must return an exact native Promise.",
+      "An injected async capability must return an exact native Promise.",
     );
   }
 
-  let settle!: (value: NativePromiseSettlement) => void;
-  const settlement = new NativePromise<NativePromiseSettlement>(
+  let settle!: (value: NativePromiseSettlement<T>) => void;
+  const settlement = new NativePromise<NativePromiseSettlement<T>>(
     (resolve) => {
       settle = resolve;
     },
   );
   intrinsicApply(nativePromiseThen, value, [
     (result: unknown) => {
-      settle({ status: "fulfilled", value: result });
+      if (onFulfilled !== undefined) {
+        try {
+          onFulfilled(result as T);
+        } catch {
+          // Detached cleanup cannot displace source observation.
+        }
+      }
+      settle(createInertFulfilledRecord(result as T));
     },
     () => {
-      settle({ status: "rejected" });
+      settle(NATIVE_PROMISE_REJECTED);
     },
   ]);
   return settlement;
@@ -876,18 +951,98 @@ function descriptorsEqual(
   );
 }
 
-function cancelResponse(response: Response): void {
+function cancelResponse(response: unknown): void {
   try {
-    const body = response.body;
-    if (body === null) return;
-    const cancel = body.cancel;
-    if (typeof cancel !== "function") return;
-    void Promise.resolve(Reflect.apply(cancel, body, [])).catch(() => {
-      // The primary HTTP classification remains authoritative.
-    });
+    const body = snapshotResponseBody(response);
+    if (body === undefined || body === null) return;
+    const cancellation = snapshotBodyCancellation(body);
+    if (cancellation === undefined) return;
+    observeCleanupPromise(
+      intrinsicApply(cancellation.cancel, cancellation.source, []),
+    );
   } catch {
     // The primary HTTP classification remains authoritative.
   }
+}
+
+function snapshotResponseBody(response: unknown): unknown {
+  if (
+    typeof response !== "object" ||
+    response === null ||
+    isProxy(response)
+  ) {
+    return undefined;
+  }
+  try {
+    return intrinsicApply(nativeResponseBodyGetter, response, []);
+  } catch {
+    const descriptor = intrinsicGetOwnPropertyDescriptor(
+      response,
+      "body",
+    );
+    if (
+      descriptor === undefined ||
+      !("value" in descriptor)
+    ) {
+      return undefined;
+    }
+    return descriptor.value;
+  }
+}
+
+function snapshotBodyCancellation(
+  body: unknown,
+):
+  | {
+      readonly cancel: (
+        ...arguments_: readonly unknown[]
+      ) => unknown;
+      readonly source: object;
+    }
+  | undefined {
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    isProxy(body)
+  ) {
+    return undefined;
+  }
+
+  let cancel:
+    | ((...arguments_: readonly unknown[]) => unknown)
+    | undefined;
+  let cancelFound = false;
+  let owner: object | null = body;
+  for (
+    let depth = 0;
+    owner !== null && depth < MAX_READER_PROTOTYPE_DEPTH;
+    depth += 1
+  ) {
+    if (isProxy(owner)) return undefined;
+    if (!cancelFound) {
+      const descriptor = intrinsicGetOwnPropertyDescriptor(
+        owner,
+        "cancel",
+      );
+      if (descriptor !== undefined) {
+        cancelFound = true;
+        if (
+          !("value" in descriptor) ||
+          typeof descriptor.value !== "function" ||
+          isProxy(descriptor.value)
+        ) {
+          return undefined;
+        }
+        cancel = descriptor.value as (
+          ...arguments_: readonly unknown[]
+        ) => unknown;
+      }
+    }
+    owner = intrinsicGetPrototypeOf(owner) as object | null;
+  }
+
+  if (owner !== null || cancel === undefined) return undefined;
+  return { cancel, source: body };
 }
 
 function cancelReader(
