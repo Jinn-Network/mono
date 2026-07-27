@@ -627,6 +627,8 @@ export async function harvestOutput(workingDir: string, phaseRange?: string, tas
   const learnerArtifacts = collectLearnerArtifacts(workingDir);
   const artifacts = [...learnerArtifacts];
   const solverType = typeof task?.solverType === 'string' ? task.solverType : undefined;
+  const withFailureDiffs = <T extends Solution>(solution: T): T =>
+    attachIntermediateFailureDiffs(solution, workingDir);
 
   // Prediction.v1 path — reads .execute/prediction-v1-solution.json
   // directly (predates the submit_typed_payload MCP tool). To be migrated to
@@ -660,7 +662,7 @@ export async function harvestOutput(workingDir: string, phaseRange?: string, tas
       },
       access: { priceUsdc: '0' },
     });
-    return attachIntermediateFailureDiffs(
+    return withFailureDiffs(
       buildSolutionOutput({
         solverType: 'prediction.v1',
         venueName: 'claude-code-learner',
@@ -685,7 +687,6 @@ export async function harvestOutput(workingDir: string, phaseRange?: string, tas
         },
         artifacts,
       }) as Solution,
-      workingDir,
     );
   }
 
@@ -721,32 +722,26 @@ export async function harvestOutput(workingDir: string, phaseRange?: string, tas
       },
       access: { priceUsdc: '0' },
     });
-    return attachIntermediateFailureDiffs(
-      {
-        venueRef: { name: 'claude-code-learner' },
-        gating,
-        ...(Object.keys(informationalEntries).length > 0
-          ? { informational: informationalEntries }
-          : {}),
-        [role === 'verdict' ? 'verdictPayload' : 'solutionPayload']: typedPayload,
-        artifacts,
-      } as Solution,
-      workingDir,
-    );
-  }
-
-  // No typed payload submitted — fall through to the phase-artifact-only shape.
-  // Tasks without a typed payload schema (or where the model didn't call
-  // submit_typed_payload) still return the gating-only Solution.
-  return attachIntermediateFailureDiffs(
-    {
+    return withFailureDiffs({
       venueRef: { name: 'claude-code-learner' },
       gating,
       ...(Object.keys(informationalEntries).length > 0
         ? { informational: informationalEntries }
         : {}),
-      ...(artifacts.length > 0 ? { artifacts } : {}),
-    } as Solution,
-    workingDir,
-  );
+      [role === 'verdict' ? 'verdictPayload' : 'solutionPayload']: typedPayload,
+      artifacts,
+    } as Solution);
+  }
+
+  // No typed payload submitted — fall through to the phase-artifact-only shape.
+  // Tasks without a typed payload schema (or where the model didn't call
+  // submit_typed_payload) still return the gating-only Solution.
+  return withFailureDiffs({
+    venueRef: { name: 'claude-code-learner' },
+    gating,
+    ...(Object.keys(informationalEntries).length > 0
+      ? { informational: informationalEntries }
+      : {}),
+    ...(artifacts.length > 0 ? { artifacts } : {}),
+  } as Solution);
 }

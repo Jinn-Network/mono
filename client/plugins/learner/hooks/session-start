@@ -41,15 +41,21 @@ git config user.email "claude-code-learner@local"
 echo "session-start: implStateDir ready at $(pwd) (HEAD=$(git rev-parse HEAD))" >&2
 
 # Record session-start HEAD of the coding checkout for intermediateFailureDiffs
-# capture (#2225). Base is fixed for the session — do not re-read on failures.
+# capture (#2225). Base is fixed for the session — write once; SessionStart also
+# fires on clear|compact, so do not overwrite an existing base under a live store.
 WORKING="${WORKING_DIR:-${JINN_WORKING_DIR:-}}"
 if [[ -n "$WORKING" && -d "$WORKING/repo/.git" ]]; then
-  mkdir -p "$WORKING/.jinn"
-  if git -C "$WORKING/repo" rev-parse HEAD >"$WORKING/.jinn/session-repo-base-head" 2>/dev/null; then
-    echo "session-start: recorded repo base HEAD=$(tr -d '\n' <"$WORKING/.jinn/session-repo-base-head")" >&2
+  BASE_FILE="$WORKING/.jinn/session-repo-base-head"
+  if [[ -f "$BASE_FILE" ]]; then
+    echo "session-start: keeping existing repo base HEAD=$(tr -d '\n' <"$BASE_FILE")" >&2
   else
-    rm -f "$WORKING/.jinn/session-repo-base-head"
-    echo "session-start: repo present but rev-parse failed; skipping base HEAD" >&2
+    mkdir -p "$WORKING/.jinn"
+    if HEAD="$(git -C "$WORKING/repo" rev-parse HEAD 2>/dev/null)" && [[ -n "$HEAD" ]]; then
+      printf '%s\n' "$HEAD" >"$BASE_FILE"
+      echo "session-start: recorded repo base HEAD=$HEAD" >&2
+    else
+      echo "session-start: repo present but rev-parse failed; skipping base HEAD" >&2
+    fi
   fi
 fi
 

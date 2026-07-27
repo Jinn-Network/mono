@@ -11,7 +11,6 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const JINN_CAPTURE_DIR = '.jinn';
 export const SESSION_REPO_BASE_HEAD_FILE = '.jinn/session-repo-base-head';
 export const INTERMEDIATE_FAILURE_DIFFS_FILE = '.jinn/intermediate-failure-diffs.json';
 
@@ -35,7 +34,7 @@ function splitShellWords(command: string): string[] {
       escaped = false;
       continue;
     }
-    if (quote === "'" ) {
+    if (quote === "'") {
       if (ch === "'") {
         quote = null;
       } else {
@@ -123,10 +122,37 @@ function gitStdout(
 }
 
 /**
+ * Cheap dirty check before building a full binary patch (PostToolUseFailure hot path).
+ * `git diff --quiet` exits 1 when tracked changes exist.
+ */
+function hasWorkingTreeChanges(repoDir: string, baseHead: string): boolean {
+  try {
+    execFileSync('git', ['diff', '--quiet', baseHead, '--'], {
+      cwd: repoDir,
+      encoding: 'utf8',
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    const status = typeof (err as { status?: number }).status === 'number'
+      ? (err as { status: number }).status
+      : -1;
+    if (status === 1) return true;
+    throw err;
+  }
+  const untrackedRaw = gitStdout(
+    repoDir,
+    ['-c', 'core.quotepath=false', 'ls-files', '--others', '--exclude-standard', '-z'],
+  );
+  return untrackedRaw.split('\0').some((name) => name.length > 0);
+}
+
+/**
  * Port of session_bridge.accepted_diff — tracked + untracked patch vs base HEAD.
  * Never mutates the git index.
  */
 export function workingTreeDiff(repoDir: string, baseHead: string): string {
+  if (!hasWorkingTreeChanges(repoDir, baseHead)) return '';
   const tracked = gitStdout(
     repoDir,
     ['-c', 'core.quotepath=false', 'diff', '--binary', '--no-ext-diff', baseHead, '--'],
@@ -173,7 +199,8 @@ export function appendIntermediateFailureDiff(storePath: string, diff: string): 
   if (!diff) return;
   mkdirSync(dirname(storePath), { recursive: true });
   const existing = readStoreArray(storePath);
-  if (existing.includes(diff)) return;
+  const seen = new Set(existing);
+  if (seen.has(diff)) return;
   existing.push(diff);
   const tmp = `${storePath}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(existing)}\n`);
@@ -193,10 +220,7 @@ export function attachIntermediateFailureDiffs<T extends { intermediateFailureDi
   return { ...solution, intermediateFailureDiffs: diffs };
 }
 
-/**
- * PostToolUseFailure processing — implemented in Task 3.
- * Exported here so the hook CLI entry can live in this module.
- */
+/** PostToolUseFailure processing — hook CLI entry lives in this module. */
 export function processPostToolUseFailure(stdinJson: string, env: NodeJS.ProcessEnv = process.env): void {
   try {
     const workingDir = env.WORKING_DIR || env.JINN_WORKING_DIR;
@@ -229,23 +253,6 @@ async function main(): Promise<void> {
     const chunks: Buffer[] = [];
     for await (const c of process.stdin) chunks.push(c as Buffer);
     processPostToolUseFailure(Buffer.concat(chunks).toString('utf8'), process.env);
-    return;
-  }
-  if (cmd === 'record-base-head') {
-    const workingDir = process.env.WORKING_DIR || process.env.JINN_WORKING_DIR;
-    if (!workingDir) return;
-    const repoDir = join(workingDir, 'repo');
-    if (!existsSync(join(repoDir, '.git'))) return;
-    try {
-      const head = gitStdout(repoDir, ['rev-parse', 'HEAD']).trim();
-      if (!head) return;
-      mkdirSync(join(workingDir, JINN_CAPTURE_DIR), { recursive: true });
-      writeFileSync(join(workingDir, SESSION_REPO_BASE_HEAD_FILE), `${head}\n`);
-    } catch (err) {
-      console.error(
-        `[intermediate-failure-diffs] record-base-head: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
     return;
   }
   console.error(`unknown command: ${cmd ?? '(none)'}`);

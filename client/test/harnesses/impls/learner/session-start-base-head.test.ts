@@ -45,6 +45,27 @@ describe('session-start records repo base HEAD', () => {
     expect(recorded).toBe(head);
   });
 
+  it('keeps an existing base HEAD across clear/compact SessionStart re-runs', () => {
+    const repo = join(workingDir, 'repo');
+    const head = initRepo(repo);
+    mkdirSync(join(workingDir, '.jinn'), { recursive: true });
+    writeFileSync(join(workingDir, SESSION_REPO_BASE_HEAD_FILE), `${head}\n`);
+    writeFileSync(join(repo, 'a.txt'), '2\n');
+    execFileSync('git', ['add', 'a.txt'], { cwd: repo });
+    execFileSync('git', ['commit', '-m', 'later'], { cwd: repo });
+    const later = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+    expect(later).not.toBe(head);
+
+    const hook = join(resolvePluginRoot(), 'hooks', 'session-start');
+    chmodSync(hook, 0o755);
+    execFileSync('bash', [hook], {
+      env: { ...process.env, IMPL_STATE_DIR: implStateDir, WORKING_DIR: workingDir },
+      encoding: 'utf8',
+    });
+    const recorded = readFileSync(join(workingDir, SESSION_REPO_BASE_HEAD_FILE), 'utf8').trim();
+    expect(recorded).toBe(head);
+  });
+
   it('skips base-head write when repo is absent', () => {
     const hook = join(resolvePluginRoot(), 'hooks', 'session-start');
     execFileSync('bash', [hook], {
