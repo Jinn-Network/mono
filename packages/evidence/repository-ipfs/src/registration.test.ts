@@ -11,10 +11,17 @@ import type {
 import {
   IPFS_REGISTRATION_PROFILE,
   buildArtifactRegistrationBytes,
+  buildRegistrationBytes,
   buildRecordRegistrationBytes,
   parseRegistrationBytes,
   registrationCidForReference,
 } from "./registration.js";
+import { isIpfsRepositoryError } from "./errors.js";
+import {
+  AUTHORITY_MARKER_TEXT,
+  assertNoAuthorityMarkers,
+  createAuthorityBearingError,
+} from "../test/authority-markers.js";
 
 const DIGEST =
   "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
@@ -139,4 +146,199 @@ describe("IPFS repository registration profile", () => {
         error.code === "INVALID_REFERENCE",
     );
   });
+
+  test("maps hostile reference inspection to package-owned errors", () => {
+    const proxy = new Proxy(
+      {},
+      {
+        getOwnPropertyDescriptor() {
+          throw createAuthorityBearingError("reference descriptor");
+        },
+        getPrototypeOf() {
+          throw createAuthorityBearingError("reference prototype");
+        },
+        has() {
+          throw createAuthorityBearingError("reference membership");
+        },
+      },
+    );
+    const recordFamilyGetter = Object.defineProperties(
+      { digest: DIGEST },
+      {
+        family: authorityGetter("family"),
+      },
+    ) as unknown as EvidenceRecordReference;
+    const recordDigestGetter = Object.defineProperties(
+      { family: "execution-evidence" },
+      {
+        digest: authorityGetter("digest"),
+      },
+    ) as EvidenceRecordReference;
+    const artifactDigestGetter = Object.defineProperties(
+      {},
+      {
+        digest: authorityGetter("digest"),
+      },
+    ) as EvidenceArtifactReference;
+
+    const cases: ReadonlyArray<{
+      readonly label: string;
+      readonly run: () => unknown;
+    }> = [
+      {
+        label: "record builder proxy",
+        run: () =>
+          buildRecordRegistrationBytes(
+            proxy as EvidenceRecordReference,
+          ),
+      },
+      {
+        label: "artifact builder proxy",
+        run: () =>
+          buildArtifactRegistrationBytes(
+            proxy as EvidenceArtifactReference,
+          ),
+      },
+      {
+        label: "generic builder proxy",
+        run: () =>
+          buildRegistrationBytes(
+            proxy as EvidenceArtifactReference,
+          ),
+      },
+      {
+        label: "CID helper proxy",
+        run: () =>
+          registrationCidForReference(
+            proxy as EvidenceArtifactReference,
+          ),
+      },
+      {
+        label: "record builder family getter",
+        run: () => buildRecordRegistrationBytes(recordFamilyGetter),
+      },
+      {
+        label: "record builder digest getter",
+        run: () => buildRecordRegistrationBytes(recordDigestGetter),
+      },
+      {
+        label: "artifact builder digest getter",
+        run: () =>
+          buildArtifactRegistrationBytes(artifactDigestGetter),
+      },
+      {
+        label: "generic builder family getter",
+        run: () => buildRegistrationBytes(recordFamilyGetter),
+      },
+      {
+        label: "CID helper digest getter",
+        run: () =>
+          registrationCidForReference(artifactDigestGetter),
+      },
+    ];
+
+    for (const entry of cases) {
+      assert.throws(
+        entry.run,
+        (error: unknown) =>
+          assertStableInvalidReference(error, entry.label),
+        entry.label,
+      );
+    }
+  });
+
+  test("rejects inherited references without invoking inherited accessors", () => {
+    const inheritedRecord = Object.create({
+      digest: DIGEST,
+      family: "execution-evidence",
+    }) as EvidenceRecordReference;
+    const inheritedArtifact = Object.create({
+      digest: DIGEST,
+    }) as EvidenceArtifactReference;
+
+    for (const [label, run] of [
+      [
+        "record",
+        () => buildRecordRegistrationBytes(inheritedRecord),
+      ],
+      [
+        "artifact",
+        () => buildArtifactRegistrationBytes(inheritedArtifact),
+      ],
+      [
+        "generic",
+        () => buildRegistrationBytes(inheritedRecord),
+      ],
+      [
+        "CID",
+        () => registrationCidForReference(inheritedArtifact),
+      ],
+    ] as const) {
+      assert.throws(
+        run,
+        (error: unknown) => assertStableInvalidReference(error, label),
+        label,
+      );
+    }
+  });
+
+  test("snapshots required fields without traversing cyclic or hostile extras", () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const record = {
+      digest: DIGEST,
+      extra: cyclic,
+      family: "execution-evidence",
+    } as EvidenceRecordReference & { readonly extra: unknown };
+    Object.defineProperty(record, "hostile", authorityGetter("extra"));
+    const artifact = {
+      digest: DIGEST,
+      extra: cyclic,
+    } as EvidenceArtifactReference & { readonly extra: unknown };
+    Object.defineProperty(artifact, "hostile", authorityGetter("extra"));
+
+    assert.equal(
+      decoder.decode(buildRecordRegistrationBytes(record)),
+      vectors[0]!.line,
+    );
+    assert.equal(
+      decoder.decode(buildRegistrationBytes(record)),
+      vectors[0]!.line,
+    );
+    assert.equal(
+      registrationCidForReference(record),
+      vectors[0]!.cid,
+    );
+    assert.equal(
+      decoder.decode(buildArtifactRegistrationBytes(artifact)),
+      `{"digest":"${DIGEST}","kind":"artifact","profile":"jinn.evidence-repository.ipfs-registration","version":1}\n`,
+    );
+  });
 });
+
+function authorityGetter(label: string): PropertyDescriptor {
+  return {
+    configurable: true,
+    enumerable: true,
+    get() {
+      throw `${AUTHORITY_MARKER_TEXT}/${label}`;
+    },
+  };
+}
+
+function assertStableInvalidReference(
+  error: unknown,
+  label: string,
+): boolean {
+  assert.ok(error instanceof Error, label);
+  assert.equal(
+    (error as Error & { code?: unknown }).code,
+    "INVALID_REFERENCE",
+    label,
+  );
+  assert.equal(error.cause, undefined, label);
+  assert.equal(Object.isFrozen(error), true, label);
+  assert.equal(isIpfsRepositoryError(error), true, label);
+  assertNoAuthorityMarkers(error);
+  return true;
+}

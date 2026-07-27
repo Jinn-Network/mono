@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { isProxy } from "node:util/types";
+
 import {
   EvidenceRepositoryError,
   createArtifactReference,
@@ -10,6 +12,7 @@ import {
 } from "@jinn-network/evidence-repository";
 
 import { digestToRawCid } from "./cid.js";
+import { ipfsRepositoryError } from "./errors.js";
 
 export const IPFS_REGISTRATION_PROFILE =
   "jinn.evidence-repository.ipfs-registration";
@@ -35,7 +38,15 @@ export type IpfsRepositoryRegistration =
 export function buildRecordRegistrationBytes(
   untrustedReference: EvidenceRecordReference,
 ): Uint8Array {
-  const reference = parseEvidenceRecordReference(untrustedReference);
+  const reference = parseRecordRegistrationReference(
+    untrustedReference,
+  );
+  return encodeRecordRegistration(reference);
+}
+
+function encodeRecordRegistration(
+  reference: EvidenceRecordReference,
+): Uint8Array {
   return encoder.encode(
     `{"digest":"${reference.digest}","family":"${reference.family}",` +
       `"kind":"record","profile":"${IPFS_REGISTRATION_PROFILE}",` +
@@ -46,7 +57,15 @@ export function buildRecordRegistrationBytes(
 export function buildArtifactRegistrationBytes(
   untrustedReference: EvidenceArtifactReference,
 ): Uint8Array {
-  const reference = parseEvidenceArtifactReference(untrustedReference);
+  const reference = parseArtifactRegistrationReference(
+    untrustedReference,
+  );
+  return encodeArtifactRegistration(reference);
+}
+
+function encodeArtifactRegistration(
+  reference: EvidenceArtifactReference,
+): Uint8Array {
   return encoder.encode(
     `{"digest":"${reference.digest}","kind":"artifact",` +
       `"profile":"${IPFS_REGISTRATION_PROFILE}",` +
@@ -57,9 +76,10 @@ export function buildArtifactRegistrationBytes(
 export function buildRegistrationBytes(
   reference: EvidenceRecordReference | EvidenceArtifactReference,
 ): Uint8Array {
-  return isRecordReference(reference)
-    ? buildRecordRegistrationBytes(reference)
-    : buildArtifactRegistrationBytes(reference);
+  const snapshot = snapshotRegistrationReference(reference, "either");
+  return snapshot.kind === "record"
+    ? encodeRecordRegistration(parseRecordSnapshot(snapshot))
+    : encodeArtifactRegistration(parseArtifactSnapshot(snapshot));
 }
 
 export function registrationCidForReference(
@@ -106,13 +126,120 @@ export function parseRegistrationBytes(
   );
 }
 
-function isRecordReference(
-  reference: EvidenceRecordReference | EvidenceArtifactReference,
-): reference is EvidenceRecordReference {
-  return (
-    typeof reference === "object" &&
-    reference !== null &&
-    "family" in reference
+interface ReferenceSnapshot {
+  readonly digest: unknown;
+  readonly family?: unknown;
+  readonly kind: "artifact" | "record";
+}
+
+function parseRecordRegistrationReference(
+  reference: unknown,
+): EvidenceRecordReference {
+  return parseRecordSnapshot(
+    snapshotRegistrationReference(reference, "record"),
+  );
+}
+
+function parseArtifactRegistrationReference(
+  reference: unknown,
+): EvidenceArtifactReference {
+  return parseArtifactSnapshot(
+    snapshotRegistrationReference(reference, "artifact"),
+  );
+}
+
+function snapshotRegistrationReference(
+  reference: unknown,
+  expectedKind: "artifact" | "either" | "record",
+): ReferenceSnapshot {
+  try {
+    if (
+      reference === null ||
+      typeof reference !== "object" ||
+      isProxy(reference) ||
+      Array.isArray(reference)
+    ) {
+      throw invalidRegistrationReference();
+    }
+    const prototype = Object.getPrototypeOf(reference);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw invalidRegistrationReference();
+    }
+    const digest = ownDataProperty(reference, "digest");
+    if (expectedKind === "artifact") {
+      return { digest, kind: "artifact" };
+    }
+    const familyDescriptor =
+      Object.getOwnPropertyDescriptor(reference, "family");
+    if (expectedKind === "record") {
+      if (
+        familyDescriptor === undefined ||
+        !("value" in familyDescriptor)
+      ) {
+        throw invalidRegistrationReference();
+      }
+      return {
+        digest,
+        family: familyDescriptor.value,
+        kind: "record",
+      };
+    }
+    if (familyDescriptor === undefined) {
+      return { digest, kind: "artifact" };
+    }
+    if (!("value" in familyDescriptor)) {
+      throw invalidRegistrationReference();
+    }
+    return {
+      digest,
+      family: familyDescriptor.value,
+      kind: "record",
+    };
+  } catch {
+    throw invalidRegistrationReference();
+  }
+}
+
+function ownDataProperty(
+  reference: object,
+  key: string,
+): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(reference, key);
+  if (descriptor === undefined || !("value" in descriptor)) {
+    throw invalidRegistrationReference();
+  }
+  return descriptor.value;
+}
+
+function parseRecordSnapshot(
+  snapshot: ReferenceSnapshot,
+): EvidenceRecordReference {
+  try {
+    return parseEvidenceRecordReference({
+      digest: snapshot.digest,
+      family: snapshot.family,
+    });
+  } catch {
+    throw invalidRegistrationReference();
+  }
+}
+
+function parseArtifactSnapshot(
+  snapshot: ReferenceSnapshot,
+): EvidenceArtifactReference {
+  try {
+    return parseEvidenceArtifactReference({
+      digest: snapshot.digest,
+    });
+  } catch {
+    throw invalidRegistrationReference();
+  }
+}
+
+function invalidRegistrationReference(): EvidenceRepositoryError {
+  return ipfsRepositoryError(
+    "INVALID_REFERENCE",
+    "Expected an inert evidence repository reference.",
   );
 }
 

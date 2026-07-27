@@ -26,6 +26,7 @@ import {
 
 const MAX_KUBO_ERROR_BODY_BYTES = 64 * 1024;
 const RAW_BLOCK_ACCEPT = "application/vnd.ipld.raw";
+const FETCH_ABORTED = Symbol("FETCH_ABORTED");
 
 export interface IpfsBlockReader {
   getBlock(
@@ -246,10 +247,47 @@ async function performFetch(
   options: RepositoryOperationOptions,
 ): Promise<Response> {
   assertRepositoryOperationActive(options);
+  const signal = options.signal;
+  let onAbort: (() => void) | undefined;
+  let abortResult: Promise<typeof FETCH_ABORTED> | undefined;
+  if (signal !== undefined) {
+    let resolveAbort!: (result: typeof FETCH_ABORTED) => void;
+    abortResult = new Promise((resolve) => {
+      resolveAbort = resolve;
+    });
+    const abortListener = () => resolveAbort(FETCH_ABORTED);
+    onAbort = abortListener;
+    signal.addEventListener("abort", abortListener, { once: true });
+    if (signal.aborted) abortListener();
+  }
+
   try {
-    return await fetchCapability(input, init);
+    if (signal?.aborted === true) {
+      throw ipfsRepositoryError(
+        "OPERATION_ABORTED",
+        "The IPFS block read was aborted.",
+      );
+    }
+
+    const fetchResult = Promise.resolve(
+      fetchCapability(input, init),
+    );
+    void fetchResult.catch(() => {
+      // Keep a losing injected fetch observed after caller cancellation.
+    });
+    const result =
+      abortResult === undefined
+        ? await fetchResult
+        : await Promise.race([fetchResult, abortResult]);
+    if (result === FETCH_ABORTED) {
+      throw ipfsRepositoryError(
+        "OPERATION_ABORTED",
+        "The IPFS block read was aborted.",
+      );
+    }
+    return result;
   } catch (error) {
-    if (options.signal?.aborted === true) {
+    if (signal?.aborted === true) {
       throw ipfsRepositoryError(
         "OPERATION_ABORTED",
         "The IPFS block read was aborted.",
@@ -261,6 +299,14 @@ async function performFetch(
       "block-read",
       "unavailable",
     );
+  } finally {
+    if (signal !== undefined && onAbort !== undefined) {
+      try {
+        signal.removeEventListener("abort", onAbort);
+      } catch {
+        // Listener cleanup cannot displace the primary operation result.
+      }
+    }
   }
 }
 

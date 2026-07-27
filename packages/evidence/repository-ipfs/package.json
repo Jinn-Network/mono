@@ -54,6 +54,7 @@
   },
   "resolutions": {
     "@jinn-network/evidence-protocol": "portal:../protocol",
-    "@jinn-network/evidence-repository": "portal:../repository"
+    "@jinn-network/evidence-repository": "portal:../repository",
+    "vite": "6.4.3"
   }
 }

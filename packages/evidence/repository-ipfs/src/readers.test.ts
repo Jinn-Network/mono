@@ -212,6 +212,55 @@ describe("bounded IPFS block readers", () => {
     assert.equal(canceled, true);
   });
 
+  test("rejects an oversized first chunk before copying or pulling again", async () => {
+    let canceled = false;
+    let reads = 0;
+    const body = {
+      getReader() {
+        return {
+          cancel() {
+            canceled = true;
+          },
+          read() {
+            reads += 1;
+            if (reads > 1) {
+              throw new Error("the reader must not pull a second chunk");
+            }
+            return Promise.resolve({
+              done: false as const,
+              value: new Uint8Array(
+                MAX_STANDARD_IPFS_BLOCK_BYTES + 1,
+              ),
+            });
+          },
+          releaseLock() {},
+        };
+      },
+    } as unknown as ReadableStream<Uint8Array>;
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        ({
+          body,
+          headers: new Headers(),
+          ok: true,
+          status: 200,
+        }) as Response,
+    });
+
+    await assert.rejects(
+      Promise.race([
+        reader.getBlock(EMPTY_RAW_CID, {
+          maxBytes: MAX_STANDARD_IPFS_BLOCK_BYTES,
+        }),
+        rejectAfter(100, "oversized first chunk cancellation hung"),
+      ]),
+      hasCode("CONTENT_TOO_LARGE"),
+    );
+    assert.equal(canceled, true);
+    assert.equal(reads, 1);
+  });
+
   test("distinguishes authoritative absence from outages and corruption", async () => {
     const gatewayMissing = createGatewayBlockReader({
       endpoint: "https://gateway.example.test",
@@ -575,6 +624,73 @@ describe("bounded IPFS block readers", () => {
         kind,
       );
       assert.equal(canceled, true, kind);
+    }
+  });
+
+  test("promptly aborts ignored fetches and observes their later rejection", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (error: unknown) => {
+      unhandled.push(error);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      for (const kind of ["Kubo", "gateway"] as const) {
+        const controller = new AbortController();
+        const tracked = trackAbortListeners(controller.signal);
+        let rejectFetch!: (error: unknown) => void;
+        let resolveFetchStarted!: () => void;
+        const fetchStarted = new Promise<void>((resolve) => {
+          resolveFetchStarted = resolve;
+        });
+        const ignoredFetch = new Promise<Response>((_resolve, reject) => {
+          rejectFetch = reject;
+        });
+        const options = {
+          endpoint:
+            kind === "Kubo"
+              ? "http://127.0.0.1:5001"
+              : "https://gateway.example.test",
+          fetch: async () => {
+            resolveFetchStarted();
+            return ignoredFetch;
+          },
+        };
+        const reader =
+          kind === "Kubo"
+            ? createKuboBlockReader(options)
+            : createGatewayBlockReader(options);
+        const pending = reader.getBlock(EMPTY_RAW_CID, {
+          maxBytes: 64,
+          signal: tracked.signal,
+        });
+        await fetchStarted;
+        controller.abort(createAuthorityBearingError("abort reason"));
+
+        await assert.rejects(
+          Promise.race([
+            pending,
+            rejectAfter(100, `${kind} ignored fetch abort hung`),
+          ]),
+          (error: unknown) => {
+            assert.ok(error instanceof Error);
+            assert.equal(
+              (error as Error & { code?: unknown }).code,
+              "OPERATION_ABORTED",
+            );
+            assert.equal(error.cause, undefined);
+            assertNoAuthorityMarkers(error);
+            return true;
+          },
+          kind,
+        );
+        assert.equal(tracked.activeCount(), 0, kind);
+
+        rejectFetch(createAuthorityBearingError("late fetch rejection"));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.deepEqual(unhandled, [], kind);
+      }
+    } finally {
+      process.removeListener("unhandledRejection", onUnhandled);
     }
   });
 
@@ -1016,6 +1132,43 @@ function rejectAfter(delayMs: number, message: string): Promise<never> {
   return new Promise((_resolve, reject) => {
     setTimeout(() => reject(new Error(message)), delayMs);
   });
+}
+
+function trackAbortListeners(signal: AbortSignal): {
+  readonly activeCount: () => number;
+  readonly signal: AbortSignal;
+} {
+  const active = new Set<EventListenerOrEventListenerObject>();
+  const addEventListener = signal.addEventListener.bind(signal);
+  const removeEventListener = signal.removeEventListener.bind(signal);
+  Object.defineProperties(signal, {
+    addEventListener: {
+      configurable: true,
+      value(
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: AddEventListenerOptions | boolean,
+      ) {
+        if (type === "abort") active.add(listener);
+        addEventListener(type, listener, options);
+      },
+    },
+    removeEventListener: {
+      configurable: true,
+      value(
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: EventListenerOptions | boolean,
+      ) {
+        if (type === "abort") active.delete(listener);
+        removeEventListener(type, listener, options);
+      },
+    },
+  });
+  return {
+    activeCount: () => active.size,
+    signal,
+  };
 }
 
 function createHostilePrototypeTrap(label: string): Error {
