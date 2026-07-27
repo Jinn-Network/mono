@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { runInNewContext } from "node:vm";
 import { describe, test } from "vitest";
 
 import { EvidenceRepositoryError } from "@jinn-network/evidence-repository";
@@ -326,8 +327,205 @@ describe("bounded IPFS block readers", () => {
     assert.equal(proxyReaderTraps, 0);
   });
 
+  test("snapshots own and inherited cleanup methods before read mutates their surfaces", async () => {
+    for (const placement of ["own", "inherited"] as const) {
+      let cancelCalls = 0;
+      let releaseCalls = 0;
+      let mutatedSurfaceTraps = 0;
+      let cancelThenTraps = 0;
+      let releaseThenTraps = 0;
+      const cleanup = {
+        cancel() {
+          cancelCalls += 1;
+          const result = Promise.resolve();
+          Object.defineProperty(result, "then", {
+            configurable: true,
+            get() {
+              cancelThenTraps += 1;
+              throw createAuthorityBearingError(
+                "cancel promise then",
+              );
+            },
+          });
+          return result;
+        },
+        releaseLock() {
+          releaseCalls += 1;
+          return Object.defineProperty({}, "then", {
+            configurable: true,
+            get() {
+              releaseThenTraps += 1;
+              throw createAuthorityBearingError(
+                "release thenable",
+              );
+            },
+          });
+        },
+      };
+      const source: Record<string, unknown> =
+        placement === "own"
+          ? { ...cleanup }
+          : Object.create(cleanup) as Record<string, unknown>;
+      Object.defineProperty(source, "read", {
+        configurable: true,
+        value() {
+          for (const key of ["cancel", "releaseLock"] as const) {
+            Object.defineProperty(source, key, {
+              configurable: true,
+              get() {
+                mutatedSurfaceTraps += 1;
+                throw createAuthorityBearingError(
+                  `mutated ${key} surface`,
+                );
+              },
+            });
+          }
+          return Promise.resolve({ done: false });
+        },
+      });
+      const reader = createGatewayBlockReader({
+        endpoint: "https://gateway.example.test",
+        fetch: async () => responseWithReader(source),
+      });
+
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        assertFrozenProtocolFailure,
+        placement,
+      );
+      assert.equal(cancelCalls, 1, placement);
+      assert.equal(releaseCalls, 1, placement);
+      assert.equal(mutatedSurfaceTraps, 0, placement);
+      assert.equal(cancelThenTraps, 0, placement);
+      assert.equal(releaseThenTraps, 0, placement);
+    }
+  });
+
+  test("rejects hostile optional cleanup method descriptors without invoking them", async () => {
+    let accessorCalls = 0;
+    let methodProxyCalls = 0;
+    const methodProxy = new Proxy(
+      () => undefined,
+      {
+        apply() {
+          methodProxyCalls += 1;
+          throw createAuthorityBearingError(
+            "cleanup method Proxy apply",
+          );
+        },
+      },
+    );
+    for (const name of [
+      "cancel",
+      "read",
+      "releaseLock",
+    ] as const) {
+      for (const surface of [
+        "accessor",
+        "non-function",
+        "Proxy",
+      ] as const) {
+        const source: Record<string, unknown> = {
+          read() {
+            return Promise.resolve({ done: true });
+          },
+        };
+        if (surface === "accessor") {
+          Object.defineProperty(source, name, {
+            configurable: true,
+            get() {
+              accessorCalls += 1;
+              throw createAuthorityBearingError(
+                `${name} accessor`,
+              );
+            },
+          });
+        } else {
+          source[name] = surface === "Proxy" ? methodProxy : 1;
+        }
+        const reader = createGatewayBlockReader({
+          endpoint: "https://gateway.example.test",
+          fetch: async () => responseWithReader(source),
+        });
+        await assert.rejects(
+          reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+          assertFrozenProtocolFailure,
+          `${name} ${surface}`,
+        );
+      }
+    }
+    assert.equal(accessorCalls, 0);
+    assert.equal(methodProxyCalls, 0);
+  });
+
+  test("rejects a Proxy anywhere in the traversed reader prototype chain", async () => {
+    for (let proxyDepth = 1; proxyDepth <= 31; proxyDepth += 1) {
+      let proxyTraps = 0;
+      const proxy = new Proxy(Object.create(null) as object, {
+        getOwnPropertyDescriptor() {
+          proxyTraps += 1;
+          throw createAuthorityBearingError(
+            "reader prototype descriptor",
+          );
+        },
+        getPrototypeOf() {
+          proxyTraps += 1;
+          throw createAuthorityBearingError(
+            "reader prototype traversal",
+          );
+        },
+      });
+      let prototype: object | null = proxy;
+      for (let depth = 1; depth < proxyDepth; depth += 1) {
+        prototype = Object.create(prototype) as object;
+      }
+      const source = Object.create(prototype) as {
+        read?: () => Promise<{ readonly done: true }>;
+      };
+      Object.defineProperty(source, "read", {
+        value() {
+          return Promise.resolve({ done: true as const });
+        },
+      });
+      const reader = createGatewayBlockReader({
+        endpoint: "https://gateway.example.test",
+        fetch: async () => responseWithReader(source),
+      });
+
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        assertFrozenProtocolFailure,
+        `Proxy at depth ${proxyDepth}`,
+      );
+      assert.equal(proxyTraps, 0);
+    }
+  });
+
+  test("bounds full reader prototype traversal at depth 31", async () => {
+    const accepted = createReaderAtPrototypeDepth(31);
+    const acceptedReader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () => responseWithReader(accepted),
+    });
+    assert.deepEqual(
+      await acceptedReader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      new Uint8Array(),
+    );
+
+    const rejected = createReaderAtPrototypeDepth(32);
+    const rejectedReader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () => responseWithReader(rejected),
+    });
+    await assert.rejects(
+      rejectedReader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      assertFrozenProtocolFailure,
+    );
+  });
+
   test("classifies malformed fulfilled read results as frozen protocol failures without invoking traps", async () => {
     let proxyResultTraps = 0;
+    let proxyThenAccesses = 0;
     const proxyResult = new Proxy(
       {
         done: true,
@@ -335,6 +533,13 @@ describe("bounded IPFS block readers", () => {
       {
         get(target, key, receiver) {
           if (key === "then") {
+            proxyThenAccesses += 1;
+            if (proxyThenAccesses > 1) {
+              proxyResultTraps += 1;
+              throw createAuthorityBearingError(
+                "result Proxy then replay",
+              );
+            }
             return Reflect.get(target, key, receiver);
           }
           proxyResultTraps += 1;
@@ -438,6 +643,7 @@ describe("bounded IPFS block readers", () => {
     }
 
     assert.equal(proxyResultTraps, 0);
+    assert.equal(proxyThenAccesses, 1);
     assert.equal(doneAccessorCalls, 0);
     assert.equal(valueAccessorCalls, 0);
   });
@@ -507,6 +713,288 @@ describe("bounded IPFS block readers", () => {
         );
       },
     );
+  });
+
+  test("adopts an exact native Promise without consulting its hostile own then", async () => {
+    let thenAccesses = 0;
+    const result = Promise.resolve({ done: true as const });
+    Object.defineProperty(result, "then", {
+      configurable: true,
+      get() {
+        thenAccesses += 1;
+        throw createAuthorityBearingError(
+          "native promise own then",
+        );
+      },
+    });
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        responseWithReader({
+          read() {
+            return result;
+          },
+        }),
+    });
+
+    assert.deepEqual(
+      await reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      new Uint8Array(),
+    );
+    assert.equal(thenAccesses, 0);
+  });
+
+  test("rejects sync results, thenables, Promise Proxies, foreign Promises, and subclasses without traps", async () => {
+    let thenableTraps = 0;
+    const thenable = Object.defineProperty({}, "then", {
+      configurable: true,
+      get() {
+        thenableTraps += 1;
+        throw createAuthorityBearingError("arbitrary thenable");
+      },
+    });
+    let promiseProxyTraps = 0;
+    const promiseProxy = new Proxy(
+      Promise.resolve({ done: true as const }),
+      {
+        get() {
+          promiseProxyTraps += 1;
+          throw createAuthorityBearingError("Promise Proxy");
+        },
+      },
+    );
+    let subclassThenTraps = 0;
+    class ThenSubclass<T> extends Promise<T> {}
+    Object.defineProperty(ThenSubclass.prototype, "then", {
+      configurable: true,
+      get() {
+        subclassThenTraps += 1;
+        throw createAuthorityBearingError(
+          "Promise subclass then",
+        );
+      },
+    });
+    const thenSubclass = new ThenSubclass<{
+      readonly done: true;
+    }>((resolve) => resolve({ done: true }));
+    let subclassSpeciesTraps = 0;
+    class SpeciesSubclass<T> extends Promise<T> {}
+    Object.defineProperty(SpeciesSubclass, Symbol.species, {
+      configurable: true,
+      get() {
+        subclassSpeciesTraps += 1;
+        throw createAuthorityBearingError(
+          "Promise subclass species",
+        );
+      },
+    });
+    const speciesSubclass = new SpeciesSubclass<{
+      readonly done: true;
+    }>((resolve) => resolve({ done: true }));
+    const foreignPromise = runInNewContext(
+      "Promise.resolve({ done: true })",
+    ) as object;
+    let foreignThenTraps = 0;
+    Object.defineProperty(foreignPromise, "then", {
+      configurable: true,
+      get() {
+        foreignThenTraps += 1;
+        throw createAuthorityBearingError(
+          "cross-realm Promise then",
+        );
+      },
+    });
+    const cases: ReadonlyArray<{
+      readonly label: string;
+      readonly value: unknown;
+    }> = [
+      { label: "sync result object", value: { done: true } },
+      { label: "arbitrary thenable", value: thenable },
+      { label: "Promise Proxy", value: promiseProxy },
+      { label: "cross-realm Promise", value: foreignPromise },
+      { label: "Promise subclass then", value: thenSubclass },
+      {
+        label: "Promise subclass species",
+        value: speciesSubclass,
+      },
+    ];
+
+    for (const item of cases) {
+      const reader = createGatewayBlockReader({
+        endpoint: "https://gateway.example.test",
+        fetch: async () =>
+          responseWithReader({
+            read() {
+              return item.value;
+            },
+          }),
+      });
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        assertFrozenProtocolFailure,
+        item.label,
+      );
+    }
+    assert.equal(thenableTraps, 0);
+    assert.equal(promiseProxyTraps, 0);
+    assert.equal(foreignThenTraps, 0);
+    assert.equal(subclassThenTraps, 0);
+    assert.equal(subclassSpeciesTraps, 0);
+  });
+
+  test("rejects an exact native Promise with a mutable constructor surface without invoking it", async () => {
+    let constructorAccesses = 0;
+    const result = Promise.resolve({ done: true as const });
+    Object.defineProperty(result, "constructor", {
+      configurable: true,
+      get() {
+        constructorAccesses += 1;
+        throw createAuthorityBearingError(
+          "Promise constructor accessor",
+        );
+      },
+    });
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        responseWithReader({
+          read() {
+            return result;
+          },
+        }),
+    });
+
+    await assert.rejects(
+      reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      assertFrozenProtocolFailure,
+    );
+    assert.equal(constructorAccesses, 0);
+  });
+
+  test("observes late native Promise rejection and removes abort listeners after cancellation", async () => {
+    const controller = new AbortController();
+    const tracked = trackAbortListeners(controller.signal);
+    let rejectRead!: (error: unknown) => void;
+    const pending = new Promise<never>((_resolve, reject) => {
+      rejectRead = reject;
+    });
+    let markReadStarted!: () => void;
+    const readStarted = new Promise<void>((resolve) => {
+      markReadStarted = resolve;
+    });
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        responseWithReader({
+          read() {
+            markReadStarted();
+            return pending;
+          },
+        }),
+    });
+    const operation = reader.getBlock(EMPTY_RAW_CID, {
+      maxBytes: 64,
+      signal: tracked.signal,
+    });
+    await readStarted;
+    controller.abort(
+      createAuthorityBearingError("late rejection abort"),
+    );
+
+    await assert.rejects(operation, hasCode("OPERATION_ABORTED"));
+    assert.equal(tracked.activeCount(), 0);
+    rejectRead(createAuthorityBearingError("late read rejection"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+
+  test("observes native cancel rejection without awaiting cancel or release results", async () => {
+    let rejectCancel!: (error: unknown) => void;
+    const cancelResult = new Promise<never>((_resolve, reject) => {
+      rejectCancel = reject;
+    });
+    let releaseThenAccesses = 0;
+    const source = {
+      cancel() {
+        return cancelResult;
+      },
+      read() {
+        return Promise.resolve({ done: false });
+      },
+      releaseLock() {
+        return Object.defineProperty({}, "then", {
+          configurable: true,
+          get() {
+            releaseThenAccesses += 1;
+            throw createAuthorityBearingError(
+              "release result then",
+            );
+          },
+        });
+      },
+    };
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () => responseWithReader(source),
+    });
+
+    await assert.rejects(
+      Promise.race([
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        rejectAfter(100, "reader cleanup was awaited"),
+      ]),
+      assertFrozenProtocolFailure,
+    );
+    rejectCancel(createAuthorityBearingError("cancel rejection"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(releaseThenAccesses, 0);
+  });
+
+  test("does not assimilate arbitrary cancel or release thenables and tolerates release throws", async () => {
+    for (const releaseMode of ["thenable", "throw"] as const) {
+      let cancelThenAccesses = 0;
+      let releaseThenAccesses = 0;
+      const source = {
+        cancel() {
+          return Object.defineProperty({}, "then", {
+            configurable: true,
+            get() {
+              cancelThenAccesses += 1;
+              throw createAuthorityBearingError(
+                "cancel arbitrary thenable",
+              );
+            },
+          });
+        },
+        read() {
+          return Promise.resolve({ done: false });
+        },
+        releaseLock() {
+          if (releaseMode === "throw") {
+            throw createAuthorityBearingError("release throw");
+          }
+          return Object.defineProperty({}, "then", {
+            configurable: true,
+            get() {
+              releaseThenAccesses += 1;
+              throw createAuthorityBearingError(
+                "release arbitrary thenable",
+              );
+            },
+          });
+        },
+      };
+      const reader = createGatewayBlockReader({
+        endpoint: "https://gateway.example.test",
+        fetch: async () => responseWithReader(source),
+      });
+
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        assertFrozenProtocolFailure,
+      );
+      assert.equal(cancelThenAccesses, 0, releaseMode);
+      assert.equal(releaseThenAccesses, 0, releaseMode);
+    }
   });
 
   test("keeps caller abort authoritative over synchronous reader failure", async () => {
@@ -1779,6 +2267,20 @@ function responseWithReader(reader: unknown): Response {
       },
     },
   });
+}
+
+function createReaderAtPrototypeDepth(depth: number): object {
+  let prototype: object | null = null;
+  for (let current = 0; current < depth; current += 1) {
+    prototype = Object.create(prototype) as object;
+  }
+  const source = Object.create(prototype) as object;
+  Object.defineProperty(source, "read", {
+    value() {
+      return Promise.resolve({ done: true as const });
+    },
+  });
+  return source;
 }
 
 function assertFrozenProtocolFailure(error: unknown): boolean {
