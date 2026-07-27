@@ -9,7 +9,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 export const SESSION_REPO_BASE_HEAD_FILE = '.jinn/session-repo-base-head';
 export const INTERMEDIATE_FAILURE_DIFFS_FILE = '.jinn/intermediate-failure-diffs.json';
@@ -248,18 +247,15 @@ export function processPostToolUseFailure(stdinJson: string, env: NodeJS.Process
 }
 
 async function main(): Promise<void> {
-  const cmd = process.argv[2];
-  if (cmd === 'post-tool-use-failure') {
-    const chunks: Buffer[] = [];
-    for await (const c of process.stdin) chunks.push(c as Buffer);
-    processPostToolUseFailure(Buffer.concat(chunks).toString('utf8'), process.env);
-    return;
-  }
-  console.error(`unknown command: ${cmd ?? '(none)'}`);
-  process.exitCode = 1;
+  const chunks: Buffer[] = [];
+  for await (const c of process.stdin) chunks.push(c as Buffer);
+  processPostToolUseFailure(Buffer.concat(chunks).toString('utf8'), process.env);
 }
 
-const isDirect = Boolean(process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href);
-if (isDirect) {
+// Gate on the subcommand, not import.meta.url === pathToFileURL(argv[1]).
+// argv[1] is often a symlink (installs, temp layouts, macOS /var vs /private/var);
+// import.meta.url is realpath-canonicalized, so URL equality silently skips main()
+// and the bash hook still exits 0 — AC1 miss (#2233).
+if (process.argv[2] === 'post-tool-use-failure') {
   void main();
 }
