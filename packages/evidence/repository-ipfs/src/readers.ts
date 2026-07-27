@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash } from "node:crypto";
-import { isUint8Array } from "node:util/types";
+import { isProxy, isUint8Array } from "node:util/types";
 
 import {
   EvidenceRepositoryError,
@@ -31,6 +31,16 @@ import {
 const MAX_KUBO_ERROR_BODY_BYTES = 64 * 1024;
 const RAW_BLOCK_ACCEPT = "application/vnd.ipld.raw";
 const FETCH_ABORTED = Symbol("FETCH_ABORTED");
+const MAX_READER_PROTOTYPE_DEPTH = 32;
+
+interface ResponseBodyReader {
+  readonly read: (...arguments_: readonly unknown[]) => unknown;
+  readonly source: object;
+}
+
+type ResponseReadResult =
+  | { readonly done: true }
+  | { readonly done: false; readonly value: unknown };
 
 export interface IpfsBlockReader {
   getBlock(
@@ -334,7 +344,7 @@ async function readBoundedResponse(
     readonly operation: "block-read";
   },
 ): Promise<Uint8Array> {
-  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  let reader: ResponseBodyReader;
   let directSetupError: EvidenceRepositoryError | undefined;
   try {
     const headers = response.headers;
@@ -378,8 +388,9 @@ async function readBoundedResponse(
     if (typeof getReader !== "function") {
       throw new TypeError("Response body does not expose getReader().");
     }
-    reader = Reflect.apply(getReader, body, []) as
-      ReadableStreamDefaultReader<Uint8Array>;
+    reader = parseResponseBodyReader(
+      Reflect.apply(getReader, body, []),
+    );
   } catch (error) {
     cancelResponse(response);
     if (options.signal?.aborted === true) {
@@ -398,8 +409,15 @@ async function readBoundedResponse(
   try {
     while (true) {
       assertRepositoryOperationActive(options);
-      const item = await readNextChunk(reader, options);
+      const rawItem = await readNextChunk(reader, options);
       assertRepositoryOperationActive(options);
+      let item: ResponseReadResult;
+      try {
+        item = parseResponseReadResult(rawItem);
+      } catch {
+        directStreamError = responseProtocolFailure();
+        throw directStreamError;
+      }
       if (item.done) break;
       const chunk = item.value;
       if (!isUint8Array(chunk)) {
@@ -510,12 +528,21 @@ function mapHttpFailure(
 }
 
 async function readNextChunk(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
+  reader: ResponseBodyReader,
   options: RepositoryOperationOptions,
-): Promise<ReadableStreamReadResult<Uint8Array>> {
+): Promise<unknown> {
   assertRepositoryOperationActive(options);
+  let pendingRead: Promise<unknown>;
+  try {
+    pendingRead = Promise.resolve(
+      Reflect.apply(reader.read, reader.source, []),
+    );
+  } catch {
+    throw responseProtocolFailure();
+  }
+
   const signal = options.signal;
-  if (signal === undefined) return reader.read();
+  if (signal === undefined) return pendingRead;
 
   let rejectAbort!: (error: EvidenceRepositoryError) => void;
   const aborted = new Promise<never>((_resolve, reject) => {
@@ -532,10 +559,96 @@ async function readNextChunk(
   signal.addEventListener("abort", onAbort, { once: true });
   if (signal.aborted) onAbort();
   try {
-    return await Promise.race([reader.read(), aborted]);
+    return await Promise.race([pendingRead, aborted]);
   } finally {
     signal.removeEventListener("abort", onAbort);
   }
+}
+
+function parseResponseBodyReader(value: unknown): ResponseBodyReader {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    isProxy(value)
+  ) {
+    throw new TypeError(
+      "Response body getReader() returned an invalid reader.",
+    );
+  }
+
+  let owner: object | null = value;
+  for (
+    let depth = 0;
+    owner !== null && depth < MAX_READER_PROTOTYPE_DEPTH;
+    depth += 1
+  ) {
+    if (isProxy(owner)) {
+      throw new TypeError(
+        "Response body reader must not contain a Proxy surface.",
+      );
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(owner, "read");
+    if (descriptor !== undefined) {
+      if (
+        !("value" in descriptor) ||
+        typeof descriptor.value !== "function" ||
+        isProxy(descriptor.value)
+      ) {
+        throw new TypeError(
+          "Response body reader does not expose a stable read method.",
+        );
+      }
+      return {
+        read: descriptor.value as (
+          ...arguments_: readonly unknown[]
+        ) => unknown,
+        source: value,
+      };
+    }
+    owner = Object.getPrototypeOf(owner) as object | null;
+  }
+
+  throw new TypeError(
+    "Response body reader does not expose a bounded read method.",
+  );
+}
+
+function parseResponseReadResult(value: unknown): ResponseReadResult {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    isProxy(value)
+  ) {
+    throw new TypeError(
+      "Response body reader returned an invalid result.",
+    );
+  }
+
+  const doneDescriptor = Object.getOwnPropertyDescriptor(value, "done");
+  if (
+    doneDescriptor === undefined ||
+    !("value" in doneDescriptor) ||
+    typeof doneDescriptor.value !== "boolean"
+  ) {
+    throw new TypeError(
+      "Response body reader result must expose an own boolean done value.",
+    );
+  }
+  if (doneDescriptor.value) return { done: true };
+
+  const valueDescriptor = Object.getOwnPropertyDescriptor(
+    value,
+    "value",
+  );
+  if (
+    valueDescriptor === undefined ||
+    !("value" in valueDescriptor)
+  ) {
+    throw new TypeError(
+      "An incomplete response body reader result must expose an own data value.",
+    );
+  }
+  return { done: false, value: valueDescriptor.value };
 }
 
 function cancelResponse(response: Response): void {
@@ -553,12 +666,16 @@ function cancelResponse(response: Response): void {
 }
 
 function cancelReader(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
+  reader: ResponseBodyReader,
 ): void {
   try {
-    const cancel = reader.cancel;
+    const cancel = (
+      reader.source as { readonly cancel?: unknown }
+    ).cancel;
     if (typeof cancel !== "function") return;
-    void Promise.resolve(Reflect.apply(cancel, reader, [])).catch(() => {
+    void Promise.resolve(
+      Reflect.apply(cancel, reader.source, []),
+    ).catch(() => {
       // The primary limit, cancellation, or transport failure remains authoritative.
     });
   } catch {
@@ -567,12 +684,14 @@ function cancelReader(
 }
 
 function releaseReader(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
+  reader: ResponseBodyReader,
 ): void {
   try {
-    const releaseLock = reader.releaseLock;
+    const releaseLock = (
+      reader.source as { readonly releaseLock?: unknown }
+    ).releaseLock;
     if (typeof releaseLock !== "function") return;
-    Reflect.apply(releaseLock, reader, []);
+    Reflect.apply(releaseLock, reader.source, []);
   } catch {
     // An in-flight injected read must not displace the primary operation result.
   }

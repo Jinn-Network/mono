@@ -248,6 +248,300 @@ describe("bounded IPFS block readers", () => {
     assert.equal(released, true);
   });
 
+  test("classifies malformed reader surfaces as frozen protocol failures without invoking traps", async () => {
+    let accessorReadAccesses = 0;
+    const accessorReader = Object.defineProperty({}, "read", {
+      configurable: true,
+      get() {
+        accessorReadAccesses += 1;
+        throw createAuthorityBearingError("reader read accessor");
+      },
+    });
+    let proxyReaderTraps = 0;
+    const proxyReader = new Proxy(
+      {
+        read() {
+          return Promise.resolve({ done: true as const });
+        },
+      },
+      {
+        get() {
+          proxyReaderTraps += 1;
+          throw createAuthorityBearingError("reader proxy get");
+        },
+        getOwnPropertyDescriptor() {
+          proxyReaderTraps += 1;
+          throw createAuthorityBearingError(
+            "reader proxy descriptor",
+          );
+        },
+        getPrototypeOf() {
+          proxyReaderTraps += 1;
+          throw createAuthorityBearingError(
+            "reader proxy prototype",
+          );
+        },
+      },
+    );
+    const malformedReaders: ReadonlyArray<{
+      readonly label: string;
+      readonly value: unknown;
+    }> = [
+      { label: "null", value: null },
+      { label: "undefined", value: undefined },
+      { label: "number", value: 1 },
+      { label: "string", value: "reader" },
+      { label: "function", value: () => undefined },
+      { label: "missing read", value: {} },
+      { label: "non-function read", value: { read: 1 } },
+      { label: "accessor read", value: accessorReader },
+      { label: "Proxy reader", value: proxyReader },
+      {
+        label: "synchronous read call failure",
+        value: {
+          read() {
+            throw createAuthorityBearingError(
+              "synchronous read call",
+            );
+          },
+        },
+      },
+    ];
+
+    for (const item of malformedReaders) {
+      const reader = createGatewayBlockReader({
+        endpoint: "https://gateway.example.test",
+        fetch: async () => responseWithReader(item.value),
+      });
+
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        (error: unknown) =>
+          assertFrozenProtocolFailure(error),
+        item.label,
+      );
+    }
+
+    assert.equal(accessorReadAccesses, 0);
+    assert.equal(proxyReaderTraps, 0);
+  });
+
+  test("classifies malformed fulfilled read results as frozen protocol failures without invoking traps", async () => {
+    let proxyResultTraps = 0;
+    const proxyResult = new Proxy(
+      {
+        done: true,
+      },
+      {
+        get(target, key, receiver) {
+          if (key === "then") {
+            return Reflect.get(target, key, receiver);
+          }
+          proxyResultTraps += 1;
+          throw createAuthorityBearingError("result proxy get");
+        },
+        getOwnPropertyDescriptor() {
+          proxyResultTraps += 1;
+          throw createAuthorityBearingError(
+            "result proxy descriptor",
+          );
+        },
+      },
+    );
+    let doneAccessorCalls = 0;
+    const accessorDoneResult = Object.defineProperty(
+      {},
+      "done",
+      {
+        configurable: true,
+        get() {
+          doneAccessorCalls += 1;
+          throw createAuthorityBearingError("result done accessor");
+        },
+      },
+    );
+    let valueAccessorCalls = 0;
+    const accessorValueResult = Object.defineProperties(
+      {},
+      {
+        done: {
+          configurable: true,
+          value: false,
+        },
+        value: {
+          configurable: true,
+          get() {
+            valueAccessorCalls += 1;
+            throw createAuthorityBearingError(
+              "result value accessor",
+            );
+          },
+        },
+      },
+    );
+    const malformedResults: ReadonlyArray<{
+      readonly label: string;
+      readonly value: unknown;
+    }> = [
+      { label: "null", value: null },
+      { label: "undefined", value: undefined },
+      { label: "number", value: 0 },
+      { label: "string", value: "result" },
+      { label: "boolean", value: true },
+      { label: "missing done", value: {} },
+      {
+        label: "inherited done",
+        value: Object.create({ done: true }) as object,
+      },
+      { label: "numeric done", value: { done: 0 } },
+      { label: "text done", value: { done: "false" } },
+      { label: "null done", value: { done: null } },
+      { label: "false without value", value: { done: false } },
+      {
+        label: "false with inherited value",
+        value: Object.assign(
+          Object.create({ value: new Uint8Array() }) as object,
+          { done: false },
+        ),
+      },
+      {
+        label: "false with non-byte value",
+        value: {
+          done: false,
+          value: createAuthorityBearingError(
+            "fulfilled non-byte result",
+          ),
+        },
+      },
+      { label: "Proxy result", value: proxyResult },
+      { label: "accessor done", value: accessorDoneResult },
+      { label: "accessor value", value: accessorValueResult },
+    ];
+
+    for (const item of malformedResults) {
+      const reader = createGatewayBlockReader({
+        endpoint: "https://gateway.example.test",
+        fetch: async () =>
+          responseWithReader({
+            read() {
+              return Promise.resolve(item.value);
+            },
+          }),
+      });
+
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        (error: unknown) =>
+          assertFrozenProtocolFailure(error),
+        item.label,
+      );
+    }
+
+    assert.equal(proxyResultTraps, 0);
+    assert.equal(doneAccessorCalls, 0);
+    assert.equal(valueAccessorCalls, 0);
+  });
+
+  test("accepts a done result without inspecting its hostile value", async () => {
+    let valueAccessorCalls = 0;
+    const done = Object.defineProperties(
+      {},
+      {
+        done: {
+          configurable: true,
+          value: true,
+        },
+        value: {
+          configurable: true,
+          get() {
+            valueAccessorCalls += 1;
+            throw createAuthorityBearingError(
+              "completed result value",
+            );
+          },
+        },
+      },
+    );
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        responseWithReader({
+          read() {
+            return Promise.resolve(done);
+          },
+        }),
+    });
+
+    assert.deepEqual(
+      await reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      new Uint8Array(),
+    );
+    assert.equal(valueAccessorCalls, 0);
+  });
+
+  test("keeps a genuine returned read promise rejection classified as unavailable", async () => {
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        responseWithReader({
+          read() {
+            return Promise.reject(
+              createAuthorityBearingError(
+                "returned read promise rejection",
+              ),
+            );
+          },
+        }),
+    });
+
+    await assert.rejects(
+      reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      (error: unknown) => {
+        assert.ok(error instanceof EvidenceRepositoryError);
+        assert.equal(Object.isFrozen(error), true);
+        return assertSanitizedDependencyError(
+          error,
+          "DEPENDENCY_UNAVAILABLE",
+          "block-read",
+          "unavailable",
+        );
+      },
+    );
+  });
+
+  test("keeps caller abort authoritative over synchronous reader failure", async () => {
+    const controller = new AbortController();
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        responseWithReader({
+          read() {
+            controller.abort(
+              createAuthorityBearingError("reader abort reason"),
+            );
+            throw createAuthorityBearingError(
+              "reader failure after abort",
+            );
+          },
+        }),
+    });
+
+    await assert.rejects(
+      reader.getBlock(EMPTY_RAW_CID, {
+        maxBytes: 64,
+        signal: controller.signal,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof EvidenceRepositoryError);
+        assert.equal(Object.isFrozen(error), true);
+        assert.equal(error.code, "OPERATION_ABORTED");
+        assert.equal(error.cause, undefined);
+        assertNoAuthorityMarkers(error);
+        return true;
+      },
+    );
+  });
+
   test("cancels before retaining a chunk that crosses the inclusive limit", async () => {
     let canceled = false;
     const reader = createGatewayBlockReader({
@@ -1235,9 +1529,9 @@ describe("bounded IPFS block readers", () => {
         (error: unknown) =>
           assertSanitizedDependencyError(
             error,
-            "DEPENDENCY_UNAVAILABLE",
+            "IO_FAILURE",
             "block-read",
-            "unavailable",
+            "protocol-failure",
           ),
         field,
       );
@@ -1475,6 +1769,27 @@ function hostileResponse(
     }
   }
   return response as unknown as Response;
+}
+
+function responseWithReader(reader: unknown): Response {
+  return hostileResponse({
+    body: {
+      getReader() {
+        return reader;
+      },
+    },
+  });
+}
+
+function assertFrozenProtocolFailure(error: unknown): boolean {
+  assert.ok(error instanceof EvidenceRepositoryError);
+  assert.equal(Object.isFrozen(error), true);
+  return assertSanitizedDependencyError(
+    error,
+    "IO_FAILURE",
+    "block-read",
+    "protocol-failure",
+  );
 }
 
 function isPropertyDescriptor(
