@@ -1,4 +1,5 @@
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 
 export type SessionEchoLiveMode = 'borrow-mismatch' | 'borrow-aligned';
 
@@ -55,6 +56,75 @@ export function dockerPreflightError(probe: DockerInfoProbe): string | null {
   }
   if (result.status !== 0) return 'Docker daemon not reachable';
   return null;
+}
+
+export function isGradedSessionEchoLiveClassification(
+  classification: SessionEchoLiveClassification,
+): boolean {
+  return classification !== 'infra-blocked';
+}
+
+export function sessionEchoLiveProcessExitCode(
+  result: SessionEchoLiveClassifyResult,
+): number {
+  if (result.redFlag) return 1;
+  if (result.classification === 'infra-blocked') return 1;
+  return 0;
+}
+
+export interface SessionEchoLivePriorSummary {
+  classification: SessionEchoLiveClassification;
+}
+
+export interface SessionEchoLiveResultWritePlan {
+  resultPath: string;
+  preservedPriorGradedSoR: boolean;
+}
+
+export function readSessionEchoLivePriorSummary(
+  canonicalPath: string,
+): SessionEchoLivePriorSummary | null {
+  if (!existsSync(canonicalPath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(canonicalPath, 'utf8')) as {
+      classification?: unknown;
+    };
+    if (
+      parsed.classification === 'admitted'
+      || parsed.classification === 'rejected:empirical-dead'
+      || parsed.classification === 'rejected:other'
+      || parsed.classification === 'infra-blocked'
+    ) {
+      return { classification: parsed.classification };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function resolveSessionEchoLiveResultWrite(input: {
+  canonicalPath: string;
+  classified: SessionEchoLiveClassifyResult;
+  prior?: SessionEchoLivePriorSummary | null;
+  timestamp?: string;
+}): SessionEchoLiveResultWritePlan {
+  const preserve =
+    input.prior != null
+    && isGradedSessionEchoLiveClassification(input.prior.classification)
+    && input.classified.classification === 'infra-blocked';
+
+  if (!preserve) {
+    return { resultPath: input.canonicalPath, preservedPriorGradedSoR: false };
+  }
+
+  const dir = dirname(input.canonicalPath);
+  const base = basename(input.canonicalPath, '.json');
+  const timestamp = input.timestamp ?? new Date().toISOString().replace(/[:.]/g, '-');
+  return {
+    resultPath: join(dir, `${base}-${timestamp}.json`),
+    preservedPriorGradedSoR: true,
+  };
 }
 
 export function seedIsolatedValidatedPool(
