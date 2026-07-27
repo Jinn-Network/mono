@@ -1,0 +1,49 @@
+{
+  "execution-evidence": {
+    "reference": {
+      "family": "execution-evidence",
+      "digest": "sha256:4acf65d289f83a4749034b05ed7c5a8bf1119a820fc4d7cfa8ffd5945c3c1771"
+    },
+    "size": 26,
+    "artifactType": "application/vnd.jinn.execution-evidence.v1+json",
+    "lookupTag": "execution-evidence-sha256-4acf65d289f83a4749034b05ed7c5a8bf1119a820fc4d7cfa8ffd5945c3c1771",
+    "manifestDigest": "sha256:bbb57908370a7df3c6cbc91f4b4c386cc8946272e097a7654da860dfaec9c253",
+    "manifestPath": "fixtures/golden-oci-mapping/execution-evidence.manifest.json",
+    "contentPath": "fixtures/golden-oci-mapping/execution-evidence.content"
+  },
+  "result-evaluation": {
+    "reference": {
+      "family": "result-evaluation",
+      "digest": "sha256:13c3fbbd1c0cf26624ada78a75342e3d6b0f81fd2fa6982400e20293279405ae"
+    },
+    "size": 25,
+    "artifactType": "application/vnd.jinn.result-evaluation.v1+json",
+    "lookupTag": "result-evaluation-sha256-13c3fbbd1c0cf26624ada78a75342e3d6b0f81fd2fa6982400e20293279405ae",
+    "manifestDigest": "sha256:14038e8a508bb9310ba68bb44b25e59ff6a7ae3119d14c7dc8ba4afd5c8a7f71",
+    "manifestPath": "fixtures/golden-oci-mapping/result-evaluation.manifest.json",
+    "contentPath": "fixtures/golden-oci-mapping/result-evaluation.content"
+  },
+  "execution-verification": {
+    "reference": {
+      "family": "execution-verification",
+      "digest": "sha256:454b20b5ce25d0435e2b28fe7df079bf009e8b09e87ba0c5c2606aa31c23f3ca"
+    },
+    "size": 30,
+    "artifactType": "application/vnd.jinn.execution-verification.v1+json",
+    "lookupTag": "execution-verification-sha256-454b20b5ce25d0435e2b28fe7df079bf009e8b09e87ba0c5c2606aa31c23f3ca",
+    "manifestDigest": "sha256:b2d488ad93e79547703869d665f6f4c0f45ef7e46aedd16d8e942232b5cacfb0",
+    "manifestPath": "fixtures/golden-oci-mapping/execution-verification.manifest.json",
+    "contentPath": "fixtures/golden-oci-mapping/execution-verification.content"
+  },
+  "artifact": {
+    "reference": {
+      "digest": "sha256:1cb7e940d783319fd4635b0977cf4a710aaba45557552dfaa382ada779d677ea"
+    },
+    "size": 24,
+    "artifactType": "application/vnd.jinn.evidence-artifact.v1",
+    "lookupTag": "artifact-sha256-1cb7e940d783319fd4635b0977cf4a710aaba45557552dfaa382ada779d677ea",
+    "manifestDigest": "sha256:5645701029406e778e00b3f3e91c44b4171ec60a1e9547816165c315cc1f6284",
+    "manifestPath": "fixtures/golden-oci-mapping/artifact.manifest.json",
+    "contentPath": "fixtures/golden-oci-mapping/artifact.content"
+  }
+}
