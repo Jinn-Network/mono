@@ -1,0 +1,49 @@
+{
+  "name": "@jinn-network/attestation-issuer",
+  "version": "0.1.0",
+  "description": "Producer-neutral issuance of Jinn evaluation and verification attestations.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/attestation-issuer"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/evidence-protocol": "0.1.0",
+    "@jinn-network/evidence-repository": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/evidence-protocol": "portal:../evidence-protocol",
+    "@jinn-network/evidence-repository": "portal:../evidence-repository"
+  }
+}
