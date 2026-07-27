@@ -91,6 +91,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+const INTERMEDIATE_FAILURE_DIFFS_FILE = 'intermediate-failure-diffs.json';
+
+/** Best-effort read of hook-emitted §10 field 4. Omit when absent/empty/malformed. */
+export function readIntermediateFailureDiffs(workingDir: string): string[] | undefined {
+  const path = join(workingDir, '.execute', INTERMEDIATE_FAILURE_DIFFS_FILE);
+  if (!existsSync(path)) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (!Array.isArray(parsed)) return undefined;
+    const diffs = parsed.filter((x): x is string => typeof x === 'string' && x.length > 0);
+    return diffs.length > 0 ? diffs : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function withIntermediateFailureDiffs<T extends Solution>(
+  solution: T,
+  workingDir: string,
+): T {
+  const diffs = readIntermediateFailureDiffs(workingDir);
+  if (!diffs) return solution;
+  return { ...solution, intermediateFailureDiffs: diffs };
+}
+
 function safeReadJson(path: string): Record<string, unknown> | null {
   if (!existsSync(path)) return null;
   try {
@@ -659,30 +684,33 @@ export async function harvestOutput(workingDir: string, phaseRange?: string, tas
       },
       access: { priceUsdc: '0' },
     });
-    return buildSolutionOutput({
-      solverType: 'prediction.v1',
-      venueName: 'claude-code-learner',
-      payload,
-      gating: {
-        ...gating,
-        probabilityYes: payload.probabilityYes,
-        submittedAt: payload.submittedAt,
-        modelId: payload.modelId,
-      },
-      informational: {
-        ...predictionInformationalFromTask(task),
-        ...(learnerArtifacts.length > 0
-          ? {
-              learnerFeedbackArtifacts: learnerArtifacts.map((artifact) => ({
-                path: artifact.path,
-                artifactType: artifact.artifactType,
-                metadata: artifact.metadata,
-              })),
-            }
-          : {}),
-      },
-      artifacts,
-    }) as Solution;
+    return withIntermediateFailureDiffs(
+      buildSolutionOutput({
+        solverType: 'prediction.v1',
+        venueName: 'claude-code-learner',
+        payload,
+        gating: {
+          ...gating,
+          probabilityYes: payload.probabilityYes,
+          submittedAt: payload.submittedAt,
+          modelId: payload.modelId,
+        },
+        informational: {
+          ...predictionInformationalFromTask(task),
+          ...(learnerArtifacts.length > 0
+            ? {
+                learnerFeedbackArtifacts: learnerArtifacts.map((artifact) => ({
+                  path: artifact.path,
+                  artifactType: artifact.artifactType,
+                  metadata: artifact.metadata,
+                })),
+              }
+            : {}),
+        },
+        artifacts,
+      }) as Solution,
+      workingDir,
+    );
   }
 
   // Generic typed-payload path. The agent calls the MCP tool
@@ -717,26 +745,32 @@ export async function harvestOutput(workingDir: string, phaseRange?: string, tas
       },
       access: { priceUsdc: '0' },
     });
-    return {
-      venueRef: { name: 'claude-code-learner' },
-      gating,
-      ...(Object.keys(informationalEntries).length > 0
-        ? { informational: informationalEntries }
-        : {}),
-      [role === 'verdict' ? 'verdictPayload' : 'solutionPayload']: typedPayload,
-      artifacts,
-    } as Solution;
+    return withIntermediateFailureDiffs(
+      {
+        venueRef: { name: 'claude-code-learner' },
+        gating,
+        ...(Object.keys(informationalEntries).length > 0
+          ? { informational: informationalEntries }
+          : {}),
+        [role === 'verdict' ? 'verdictPayload' : 'solutionPayload']: typedPayload,
+        artifacts,
+      } as Solution,
+      workingDir,
+    );
   }
 
   // No typed payload submitted — fall through to the phase-artifact-only shape.
   // Tasks without a typed payload schema (or where the model didn't call
   // submit_typed_payload) still return the gating-only Solution.
-  return {
-    venueRef: { name: 'claude-code-learner' },
-    gating,
-    ...(Object.keys(informationalEntries).length > 0
-      ? { informational: informationalEntries }
-      : {}),
-    ...(artifacts.length > 0 ? { artifacts } : {}),
-  };
+  return withIntermediateFailureDiffs(
+    {
+      venueRef: { name: 'claude-code-learner' },
+      gating,
+      ...(Object.keys(informationalEntries).length > 0
+        ? { informational: informationalEntries }
+        : {}),
+      ...(artifacts.length > 0 ? { artifacts } : {}),
+    },
+    workingDir,
+  );
 }
