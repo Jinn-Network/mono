@@ -118,6 +118,27 @@ export function buildMineableRecord(ctx: {
   };
 }
 
+/**
+ * Safe read of harness-emitted failed diffs for §10 field 4 assemblers (#1643).
+ * Source column is written at RUNNING → POST_SNAPSHOT from
+ * Solution.intermediateFailureDiffs — not from solution overwrite archaeology.
+ * Returns [] for null, empty, malformed, or non-array JSON.
+ */
+export function intermediateFailureDiffsFromTaskRun(run: {
+  intermediateFailureDiffsJson: string | null;
+}): string[] {
+  if (run.intermediateFailureDiffsJson == null || run.intermediateFailureDiffsJson === '') {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(run.intermediateFailureDiffsJson) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+  } catch {
+    return [];
+  }
+}
+
 export class MineableTraceStore implements MineableTraceStorePort {
   private readonly store: ContributionStore;
   private readonly evidence: ReturnType<typeof createEvidenceAdapter>;
