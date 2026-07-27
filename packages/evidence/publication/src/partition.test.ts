@@ -104,6 +104,59 @@ describe("exact announcement partitioning", () => {
     ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
   });
 
+  test("keeps the original caller signal when prepare silently tries to replace it", async () => {
+    const controller = new AbortController();
+    const replacement = new AbortController();
+    const callerOptions = { signal: controller.signal };
+    const frameBytes = Uint8Array.of(1, 2, 3);
+    let receivedOptions: object | undefined;
+    let mutationResult: boolean | undefined;
+    const mutatingSink: AnnouncementSink = {
+      medium: "https://publication.test/mutation-medium",
+      profile: "https://publication.test/profiles/mutation/v1",
+      capabilities: {},
+      prepare: async (candidate, _context, options) => {
+        receivedOptions = options;
+        controller.abort();
+        mutationResult = Reflect.set(
+          options as object,
+          "signal",
+          replacement.signal,
+        );
+        return {
+          medium: "https://publication.test/mutation-medium",
+          profile: "https://publication.test/profiles/mutation/v1",
+          members: candidate.map(({ reference }) => ({
+            reference: { ...reference },
+          })),
+          frameBytes: Uint8Array.from(frameBytes),
+          frameDigest: hashExactBytes(frameBytes),
+          frameSize: frameBytes.byteLength,
+        };
+      },
+      place: async () => {
+        throw new Error("unexpected placement");
+      },
+      reconcile: async () => {
+        throw new Error("unexpected reconciliation");
+      },
+    };
+
+    await expect(
+      prepareAnnouncementPartitions(
+        members(1),
+        "urn:jinn:publication-destination:partition-options",
+        mutatingSink,
+        callerOptions,
+      ),
+    ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
+
+    expect(receivedOptions).not.toBe(callerOptions);
+    expect(Object.isFrozen(receivedOptions)).toBe(true);
+    expect(mutationResult).toBe(false);
+    expect(callerOptions.signal).toBe(controller.signal);
+  });
+
   test("isolates prepared-member and context validation from sink mutation", async () => {
     const originalMembers = members(1);
     const originalReference = { ...originalMembers[0]!.reference };

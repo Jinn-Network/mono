@@ -426,6 +426,57 @@ describe("publish", () => {
     });
   });
 
+  test("keeps the original publish signal when prepare throws while trying to replace it", async () => {
+    const repository = new RecordingRepository();
+    const journal = new InMemoryPublicationJournalStore();
+    const delegate = sink();
+    const controller = new AbortController();
+    const replacement = new AbortController();
+    const publishInput = { ...input(), signal: controller.signal };
+    let mutationThrew = false;
+    const mutatingSink: AnnouncementSink = {
+      medium: delegate.medium,
+      profile: delegate.profile,
+      capabilities: delegate.capabilities,
+      prepare: async (members, context, options) => {
+        const prepared = await delegate.prepare(members, context, options);
+        controller.abort();
+        try {
+          (
+            options as {
+              signal?: AbortSignal;
+            }
+          ).signal = replacement.signal;
+        } catch (error) {
+          mutationThrew = error instanceof TypeError;
+        }
+        return prepared;
+      },
+      place: delegate.place.bind(delegate),
+      reconcile: delegate.reconcile.bind(delegate),
+    };
+
+    await expect(
+      publish(publishInput, {
+        repository,
+        sink: mutatingSink,
+        journal,
+      }),
+    ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
+
+    expect(mutationThrew).toBe(true);
+    expect(publishInput.signal).toBe(controller.signal);
+    expect(delegate.placementEffectCount).toBe(0);
+
+    const receipt = await publish(input(), {
+      repository,
+      sink: mutatingSink,
+      journal,
+    });
+    expect(receipt.completed).toBe(true);
+    expect(delegate.placementEffectCount).toBe(1);
+  });
+
   test("returns the same stable receipt for an identical completed call", async () => {
     const repository = new RecordingRepository();
     const journal = new InMemoryPublicationJournalStore();

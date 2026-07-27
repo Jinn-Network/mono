@@ -22,7 +22,10 @@ import type {
   PublishInput,
   VersionedPublicationJournalEntry,
 } from "./types.js";
-import { readRepositoryCapabilities } from "./validation.js";
+import {
+  readRepositoryCapabilities,
+  snapshotPublicationOperationOptions,
+} from "./validation.js";
 
 function journalConflict(error: unknown): boolean {
   return (
@@ -326,8 +329,8 @@ export async function publish(
   input: PublishInput,
   dependencies: PublicationDependencies,
 ): Promise<PublicationReceipt> {
+  const options = snapshotPublicationOperationOptions(input);
   const normalized = normalizePublishInput(input);
-  const options: RepositoryOperationOptions = { signal: input.signal };
   assertPublicationOperationActive(options);
   const capabilities = readRepositoryCapabilities(
     dependencies.repository,

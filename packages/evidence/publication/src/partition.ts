@@ -13,6 +13,9 @@ import type {
   AnnouncementSink,
   PreparedPublicationPartition,
 } from "./types.js";
+import {
+  snapshotPublicationOperationOptions,
+} from "./validation.js";
 
 function declaredPositiveLimit(
   value: number | undefined,
@@ -86,7 +89,8 @@ export async function prepareAnnouncementPartitions(
   sink: AnnouncementSink,
   options?: RepositoryOperationOptions,
 ): Promise<readonly PreparedPublicationPartition[]> {
-  assertPublicationOperationActive(options);
+  const operationOptions = snapshotPublicationOperationOptions(options);
+  assertPublicationOperationActive(operationOptions);
   if (!Array.isArray(members) || members.length === 0) {
     throw new EvidencePublicationError(
       "INVALID_INPUT",
@@ -114,7 +118,7 @@ export async function prepareAnnouncementPartitions(
         destination,
         ordinal,
         sink,
-        options,
+        operationOptions,
       );
       if (
         !fitsDeclaredLimits(

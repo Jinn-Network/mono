@@ -32,6 +32,7 @@ import {
   assertAbsoluteIri,
   parsePublicationDigest,
   snapshotExactBytes,
+  snapshotPublicationOperationOptions,
 } from "./validation.js";
 
 function journalConflict(error: unknown): boolean {
@@ -554,6 +555,7 @@ export async function continuePublicationPlacements(
   dependencies: PublicationDependencies,
   options?: RepositoryOperationOptions,
 ): Promise<PublicationReceipt> {
+  const operationOptions = snapshotPublicationOperationOptions(options);
   let entry = initial;
 
   while (!entry.completed) {
@@ -566,7 +568,7 @@ export async function continuePublicationPlacements(
         entry,
         { ...entry, completed: true },
         dependencies,
-        options,
+        operationOptions,
       );
       continue;
     }
@@ -588,7 +590,7 @@ export async function continuePublicationPlacements(
           pending: intent,
         }),
         dependencies,
-        options,
+        operationOptions,
       );
       entry = checkpointed.entry;
       if (checkpointed.writtenByCaller) {
@@ -597,7 +599,7 @@ export async function continuePublicationPlacements(
           entry.preparedPartitions![partition.ordinal]!,
           idempotencyKey,
           dependencies,
-          options,
+          operationOptions,
         );
       }
       continue;
@@ -615,7 +617,7 @@ export async function continuePublicationPlacements(
       );
     }
 
-    assertPublicationOperationActive(options);
+    assertPublicationOperationActive(operationOptions);
     const expectedPrepared = snapshotPreparedAnnouncement(
       partition.prepared,
       partition.prepared.members,
@@ -643,9 +645,9 @@ export async function continuePublicationPlacements(
     const result = await dependencies.sink.reconcile(
       suppliedPrepared,
       suppliedPending,
-      options,
+      operationOptions,
     );
-    assertPublicationOperationActive(options);
+    assertPublicationOperationActive(operationOptions);
     const checked = snapshotReconcileResult(
       result,
       idempotencyKey,
@@ -658,7 +660,7 @@ export async function continuePublicationPlacements(
         partition,
         idempotencyKey,
         dependencies,
-        options,
+        operationOptions,
       );
       continue;
     }
@@ -684,7 +686,7 @@ export async function continuePublicationPlacements(
             pending: checked.pending,
           }),
           dependencies,
-          options,
+          operationOptions,
         );
         const checkpointedPlacement = entry.preparedPartitions?.find(
           ({ ordinal }) => ordinal === partition.ordinal,
@@ -706,7 +708,7 @@ export async function continuePublicationPlacements(
         placement: checked.placement,
       }),
       dependencies,
-      options,
+      operationOptions,
     );
   }
 
@@ -719,10 +721,19 @@ export async function reconcile(
   dependencies: PublicationDependencies,
   options?: RepositoryOperationOptions,
 ): Promise<PublicationReceipt> {
+  const operationOptions = snapshotPublicationOperationOptions(options);
   const bundleKey = parsePublicationDigest(
     untrustedBundleKey,
     "Publication bundle key",
   );
-  const entry = await loadEntry(bundleKey, dependencies, options);
-  return continuePublicationPlacements(entry, dependencies, options);
+  const entry = await loadEntry(
+    bundleKey,
+    dependencies,
+    operationOptions,
+  );
+  return continuePublicationPlacements(
+    entry,
+    dependencies,
+    operationOptions,
+  );
 }

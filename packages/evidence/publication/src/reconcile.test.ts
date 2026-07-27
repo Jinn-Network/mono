@@ -376,6 +376,129 @@ describe("publication placement recovery", () => {
     expect(delegate.reconcileCallCount).toBe(1);
   });
 
+  test("keeps the original reconcile signal when the sink silently tries to delete it", async () => {
+    const repository = new InMemoryEvidenceRepository();
+    const journal = new InMemoryPublicationJournalStore();
+    const delegate = sink();
+    let loseResponse = true;
+    const uncertain: AnnouncementSink = {
+      medium: delegate.medium,
+      profile: delegate.profile,
+      capabilities: delegate.capabilities,
+      prepare: delegate.prepare.bind(delegate),
+      place: async (prepared, idempotencyKey, options) => {
+        const result = await delegate.place(
+          prepared,
+          idempotencyKey,
+          options,
+        );
+        if (loseResponse) {
+          loseResponse = false;
+          throw new EvidencePublicationError(
+            "PLACEMENT_UNCERTAIN",
+            "fixture lost response",
+          );
+        }
+        return result;
+      },
+      reconcile: delegate.reconcile.bind(delegate),
+    };
+    const normalized = normalizePublishInput(input());
+
+    await expect(
+      publish(input(), { repository, journal, sink: uncertain }),
+    ).rejects.toMatchObject({ code: "PLACEMENT_UNCERTAIN" });
+    expect(delegate.placementEffectCount).toBe(1);
+
+    const controller = new AbortController();
+    const callerOptions = { signal: controller.signal };
+    let receivedOptions: object | undefined;
+    let deletionResult: boolean | undefined;
+    const mutatingReconcile: AnnouncementSink = {
+      ...uncertain,
+      reconcile: async (prepared, pending, options) => {
+        receivedOptions = options;
+        controller.abort();
+        deletionResult = Reflect.deleteProperty(
+          options as object,
+          "signal",
+        );
+        return delegate.reconcile(prepared, pending, options);
+      },
+    };
+
+    await expect(
+      reconcile(
+        normalized.bundleKey,
+        { repository, journal, sink: mutatingReconcile },
+        callerOptions,
+      ),
+    ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
+
+    expect(receivedOptions).not.toBe(callerOptions);
+    expect(Object.isFrozen(receivedOptions)).toBe(true);
+    expect(deletionResult).toBe(false);
+    expect(callerOptions.signal).toBe(controller.signal);
+    expect(delegate.placementEffectCount).toBe(1);
+
+    const receipt = await reconcile(normalized.bundleKey, {
+      repository,
+      journal,
+      sink: uncertain,
+    });
+    expect(receipt.completed).toBe(true);
+    expect(delegate.placementEffectCount).toBe(1);
+  });
+
+  test("preserves a pending intent when place aborts then tries to erase its signal", async () => {
+    const repository = new InMemoryEvidenceRepository();
+    const journal = new InMemoryPublicationJournalStore();
+    const delegate = sink();
+    const controller = new AbortController();
+    let deletionResult: boolean | undefined;
+    const mutatingPlace: AnnouncementSink = {
+      medium: delegate.medium,
+      profile: delegate.profile,
+      capabilities: delegate.capabilities,
+      prepare: delegate.prepare.bind(delegate),
+      place: async (prepared, idempotencyKey, options) => {
+        const result = await delegate.place(
+          prepared,
+          idempotencyKey,
+          options,
+        );
+        controller.abort();
+        deletionResult = Reflect.deleteProperty(
+          options as object,
+          "signal",
+        );
+        return result;
+      },
+      reconcile: delegate.reconcile.bind(delegate),
+    };
+
+    await expect(
+      publish(
+        { ...input(), signal: controller.signal },
+        { repository, journal, sink: mutatingPlace },
+      ),
+    ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
+
+    expect(deletionResult).toBe(false);
+    expect(delegate.placementEffectCount).toBe(1);
+    expect(
+      journal.entries()[0]?.preparedPartitions?.[0]?.placement.status,
+    ).toBe("pending");
+
+    const receipt = await publish(input(), {
+      repository,
+      journal,
+      sink: mutatingPlace,
+    });
+    expect(receipt.completed).toBe(true);
+    expect(delegate.placementEffectCount).toBe(1);
+  });
+
   test("keeps durable prepared state isolated from sink.place mutation", async () => {
     const repository = new InMemoryEvidenceRepository();
     const journal = new InMemoryPublicationJournalStore();
