@@ -23,3 +23,14 @@ export class EvidenceIndexerError extends Error {
     super(message, options);
   }
 }
+
+export function assertEvidenceIndexerOperationActive(options?: {
+  readonly signal?: AbortSignal;
+}): void {
+  if (options?.signal?.aborted) {
+    throw new EvidenceIndexerError(
+      "OPERATION_ABORTED",
+      "The Evidence Indexer operation was aborted.",
+    );
+  }
+}
