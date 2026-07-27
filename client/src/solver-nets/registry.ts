@@ -43,6 +43,15 @@ export interface JoinedSolverNetConfig {
 
 export interface LoadedSolverNet {
   name: string;
+  /**
+   * IPFS CID of the joined SolverNet's manifest — the key the operator
+   * joined under (`config.joinedSolverNets`). Distinct from `name` (the
+   * registry's collision-resistant lookup key, which defaults to this CID
+   * but can be overridden by a display name). Used to disambiguate two
+   * joined SolverNets sharing a `solverType` by the specific manifest a
+   * task pins via `task.solverNetManifestCid` (issue #2039).
+   */
+  manifestCid: string;
   enabled: boolean;
   solverType: string;
   /** Active operator roles (non-empty after load). */
@@ -212,15 +221,28 @@ export class SolverNetRegistry {
     }
   }
 
+  private matchesTaskRole(net: LoadedSolverNet, taskRole?: SolverNetTaskRole): boolean {
+    if (taskRole === undefined) return true;
+    return net.roles.some((r) => taskRoleForOperatorRole(r) === taskRole);
+  }
+
   forSolverType(solverType: string, taskRole?: SolverNetTaskRole): LoadedSolverNet | undefined {
     return [...this.nets.values()].find((net) =>
-      net.enabled &&
-      net.solverType === solverType &&
-      (taskRole === undefined ||
-        net.roles.some((r) => {
-          const tr = taskRoleForOperatorRole(r);
-          return tr !== undefined && tr === taskRole;
-        })),
+      net.enabled && net.solverType === solverType && this.matchesTaskRole(net, taskRole),
+    );
+  }
+
+  /**
+   * Resolve a joined SolverNet by its manifest CID rather than by
+   * `solverType` registration order. Preferred over `forSolverType` whenever
+   * the caller has a task's `solverNetManifestCid` in hand — two joined
+   * SolverNets can share a `solverType`, and only the manifest CID
+   * disambiguates which one a given task is actually pinned to (issue
+   * #2039 AC2).
+   */
+  forManifestCid(manifestCid: string, taskRole?: SolverNetTaskRole): LoadedSolverNet | undefined {
+    return [...this.nets.values()].find((net) =>
+      net.enabled && net.manifestCid === manifestCid && this.matchesTaskRole(net, taskRole),
     );
   }
 
@@ -331,6 +353,7 @@ export async function registerJoinedNet(
   }
   registry.register({
     name,
+    manifestCid: cid,
     enabled: net.enabled,
     solverType: net.solverType,
     roles: rolesFromConfig(net),

@@ -820,6 +820,7 @@ export class MechAdapter implements ExecutionAdapter {
       spec: state.spec ?? {},
       eligibility: state.eligibility ?? {},
       claimPolicy: state.claimPolicy ?? DEFAULT_MECH_CLAIM_POLICY,
+      ...(state.executionRequest ? { executionRequest: state.executionRequest } : {}),
       creator: {
         safeAddress: getAddress(this.config.safeAddress),
         agentEoa: account.address,
@@ -862,8 +863,12 @@ export class MechAdapter implements ExecutionAdapter {
     taskCid?: string;
     autopilotEvaluationContext?: Record<string, unknown>;
   }): Task {
+    // Strip the restoration execution-profile pin. It asserts against the
+    // solver harness/model/version; evaluation resolves a different Harness
+    // (issue #2165 / PR #2081). Leaving it would false-reject the evaluator.
+    const { executionRequest: _solverProfile, ...restorationTask } = params.task;
     return {
-      ...params.task,
+      ...restorationTask,
       id: `${params.task.id}:evaluation:${params.attemptIndex}`,
       role: 'evaluation',
       restorationRequestId: params.solutionRequestId,
