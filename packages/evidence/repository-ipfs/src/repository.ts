@@ -29,6 +29,10 @@ import {
   normalizeRawCid,
 } from "./cid.js";
 import {
+  copyIntrinsicUint8Array,
+  intrinsicUint8ArrayByteLength,
+} from "./byte-intrinsics.js";
+import {
   ipfsDependencyError,
   ipfsRepositoryError,
   isIpfsRepositoryError,
@@ -245,7 +249,7 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
           "protocol-failure",
         );
       }
-      return Uint8Array.from(bytes);
+      return copyReadBytes(bytes);
     } catch (error) {
       throw mapIpfsDependencyError(
         error,
@@ -684,13 +688,60 @@ function copyPutBytes(
     );
   }
   assertRepositoryOperationActive(options);
-  if (value.byteLength > MAX_STANDARD_IPFS_BLOCK_BYTES) {
+  let byteLength: number;
+  try {
+    byteLength = intrinsicUint8ArrayByteLength(value);
+  } catch {
+    throw ipfsRepositoryError(
+      "CONTENT_CORRUPT",
+      "Repository content must be an attached Uint8Array.",
+    );
+  }
+  if (byteLength > MAX_STANDARD_IPFS_BLOCK_BYTES) {
     throw ipfsRepositoryError(
       "CONTENT_TOO_LARGE",
       "IPFS repository objects must not exceed 2 MiB.",
     );
   }
-  return Uint8Array.from(value);
+  try {
+    return copyIntrinsicUint8Array(value, byteLength);
+  } catch {
+    throw ipfsRepositoryError(
+      "CONTENT_CORRUPT",
+      "Repository content must be an attached Uint8Array.",
+    );
+  }
+}
+
+function copyReadBytes(value: Uint8Array): Uint8Array {
+  let byteLength: number;
+  try {
+    byteLength = intrinsicUint8ArrayByteLength(value);
+  } catch {
+    throw readBytesProtocolFailure();
+  }
+  if (byteLength > MAX_STANDARD_IPFS_BLOCK_BYTES) {
+    throw ipfsDependencyError(
+      "CONTENT_TOO_LARGE",
+      "The configured IPFS read path exceeded its byte limit.",
+      "block-read",
+      "protocol-failure",
+    );
+  }
+  try {
+    return copyIntrinsicUint8Array(value, byteLength);
+  } catch {
+    throw readBytesProtocolFailure();
+  }
+}
+
+function readBytesProtocolFailure(): EvidenceRepositoryError {
+  return ipfsDependencyError(
+    "IO_FAILURE",
+    "The configured IPFS read path returned invalid bytes.",
+    "block-read",
+    "protocol-failure",
+  );
 }
 
 function isReadbackDeadlineExpired(error: unknown): boolean {

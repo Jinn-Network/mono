@@ -18,6 +18,10 @@ import {
   rawCidToDigest,
 } from "./cid.js";
 import {
+  intrinsicUint8ArrayByteLength,
+  setIntrinsicUint8Array,
+} from "./byte-intrinsics.js";
+import {
   ipfsDependencyError,
   ipfsRepositoryError,
   isIpfsRepositoryError,
@@ -403,7 +407,8 @@ async function readBoundedResponse(
           "The IPFS response stream returned a non-byte chunk.",
         );
       }
-      if (chunk.byteLength > maxBytes - offset) {
+      const chunkByteLength = intrinsicUint8ArrayByteLength(chunk);
+      if (chunkByteLength > maxBytes - offset) {
         directStreamError = responseLimitError(
           tooLargeCode,
           tooLargeMessage,
@@ -411,8 +416,8 @@ async function readBoundedResponse(
         );
         throw directStreamError;
       }
-      output.set(chunk, offset);
-      offset += chunk.byteLength;
+      setIntrinsicUint8Array(output, chunk, offset);
+      offset += chunkByteLength;
     }
   } catch (error) {
     cancelReader(reader);

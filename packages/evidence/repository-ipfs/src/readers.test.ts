@@ -80,6 +80,75 @@ describe("bounded IPFS block readers", () => {
     );
   });
 
+  test("counts branded stream chunks without consulting ordinary metadata or iterators", async () => {
+    const chunk = new Uint8Array([0x61, 0x62, 0x63]);
+    let hostileAccesses = 0;
+    for (const key of ["byteLength", "length"] as const) {
+      Object.defineProperty(chunk, key, {
+        configurable: true,
+        get() {
+          hostileAccesses += 1;
+          throw new Error(`ordinary ${key} access is forbidden`);
+        },
+      });
+    }
+    Object.defineProperty(chunk, Symbol.iterator, {
+      configurable: true,
+      get() {
+        hostileAccesses += 1;
+        throw new Error("ordinary iterator access is forbidden");
+      },
+    });
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () => new Response(streamBytes([chunk])),
+    });
+
+    assert.deepEqual(
+      await reader.getBlock(ABC_RAW_CID, { maxBytes: 3 }),
+      new Uint8Array([0x61, 0x62, 0x63]),
+    );
+    assert.equal(hostileAccesses, 0);
+  });
+
+  test("rejects an intrinsically oversized branded chunk before copying it", async () => {
+    const chunk = new Uint8Array([0x61, 0x62, 0x63, 0x64]);
+    let hostileAccesses = 0;
+    Object.defineProperty(chunk, "byteLength", {
+      configurable: true,
+      value: 0,
+    });
+    Object.defineProperty(chunk, Symbol.iterator, {
+      configurable: true,
+      get() {
+        hostileAccesses += 1;
+        throw new Error("ordinary iterator access is forbidden");
+      },
+    });
+    let canceled = false;
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(chunk);
+            },
+            cancel() {
+              canceled = true;
+            },
+          }),
+        ),
+    });
+
+    await assert.rejects(
+      reader.getBlock(ABC_RAW_CID, { maxBytes: 3 }),
+      hasCode("CONTENT_TOO_LARGE"),
+    );
+    assert.equal(hostileAccesses, 0);
+    assert.equal(canceled, true);
+  });
+
   test("cancels before retaining a chunk that crosses the inclusive limit", async () => {
     let canceled = false;
     const reader = createGatewayBlockReader({
