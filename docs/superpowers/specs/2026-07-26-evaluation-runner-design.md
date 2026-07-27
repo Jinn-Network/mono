@@ -1,11 +1,10 @@
 # Evaluation Runner Design
 
 - **Date:** 2026-07-26
-- **Status:** approved section by section; awaiting final document review
+- **Status:** approved; implementation planning completed on 2026-07-27
 - **Scope:** a host-neutral application capability that evaluates exact Task and Result
   artifacts through a registered evaluator and issues Result Evaluation Evidence
-- **Out of scope:** implementation sequencing, an implementation plan, concrete evaluator
-  implementations, and deployment
+- **Out of scope:** concrete evaluator implementations and deployment
 
 ## 1. Decision
 

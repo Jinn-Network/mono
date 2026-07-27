@@ -1,9 +1,9 @@
 # Evidence Contribution Design
 
-- **Status:** Approved section by section; written specification awaiting explicit review
+- **Status:** Approved; implementation planning completed on 2026-07-27
 - **Date:** 2026-07-26
 - **Scope:** Application-level Evidence disclosure orchestration
-- **Implementation status:** Design only. No implementation plan is authorized.
+- **Implementation status:** Design and implementation plan complete; implementation has not begun.
 
 ## 1. Decision
 
@@ -1077,7 +1077,7 @@ This design does not include:
 - plugin-specific UI;
 - blockchain anchoring except through a separately injected generic destination;
 - a mandatory daemon, queue, ledger, service, or public API; or
-- implementation planning or implementation.
+- implementation.
 
 ## 24. Deferred work
 

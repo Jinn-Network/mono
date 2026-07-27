@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Execute against Evidence stack commit `67b1d164bba7445737587a7abb0336532cc5bf58`. If that commit is no longer the intended stack head, stop and re-audit the package graph and contracts before editing.
+- Start from the reviewed Evidence integration head containing commit `67b1d164bba7445737587a7abb0336532cc5bf58` as an ancestor. If that commit is absent or the package graph has changed incompatibly, stop and re-audit the contracts before editing.
 - Create one package at `packages/evidence/retrieval` named `@jinn-network/evidence-retrieval`; publish only `.` and `./testing`.
 - Production dependencies are exactly `@jinn-network/evidence-protocol`, `@jinn-network/evidence-repository`, and `@jinn-network/evidence-discovery`.
 - The root package must not import a search engine, vector database, embedding runtime, concrete Catalog store, concrete Repository binding, plugin, marketplace, Autopilot, network client, filesystem API, or ambient network API.
@@ -40,10 +40,8 @@
 Use an isolated worktree created with `superpowers:using-git-worktrees`. Establish the reviewed base before Task 1:
 
 ```bash
-git fetch origin
 git cat-file -e 67b1d164bba7445737587a7abb0336532cc5bf58^{commit}
-git switch -c codex/evidence-retrieval 67b1d164bba7445737587a7abb0336532cc5bf58
-test "$(git rev-parse HEAD)" = "67b1d164bba7445737587a7abb0336532cc5bf58"
+git merge-base --is-ancestor 67b1d164bba7445737587a7abb0336532cc5bf58 HEAD
 git status --short
 ```
 
@@ -5516,7 +5514,7 @@ git commit -m "ci(evidence): verify retrieval package"
 Before claiming implementation complete, use `superpowers:verification-before-completion`, then `superpowers:requesting-code-review`.
 
 - [ ] Run the full command sequence from **Execution Baseline** in a fresh shell and retain its exit output.
-- [ ] Run `git diff 67b1d164bba7445737587a7abb0336532cc5bf58 --check`; expected: no whitespace errors.
+- [ ] Run `git diff --check`; expected: no whitespace errors.
 - [ ] Run `git status --short`; expected: only intentional Retrieval, architecture-script, workflow, design, and plan files are present.
 - [ ] Run:
 

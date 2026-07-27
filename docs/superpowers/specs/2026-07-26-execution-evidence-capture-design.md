@@ -1,9 +1,9 @@
 # Execution Evidence Capture Design
 
-**Status:** Draft for review
+**Status:** Approved; implementation planning completed on 2026-07-27
 **Capability:** Execution Evidence Capture
-**Delivery stop line:** Design only. Do not begin bridge implementation, host
-migration, or cutover.
+**Delivery stop line:** Design and implementation plan only. Bridge
+implementation, host migration, and cutover have not begun.
 
 ## 1. Purpose
 
