@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import { isProxy } from "node:util/types";
 
 import {
   EvidenceAnnouncementJournalError,
@@ -33,6 +34,9 @@ import {
 import {
   createFilesystemEvidenceRepository,
 } from "@jinn-network/evidence-repository/fs";
+import {
+  describeEvidenceRepositoryContract,
+} from "@jinn-network/evidence-repository/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -131,29 +135,27 @@ function hookFor(
   };
 }
 
-function wrapRepository<T extends EvidenceRepository>(
-  repository: T,
+function wrapRepository(
+  repository: EvidenceRepository,
   hook: (point: FaultPoint) => Promise<void>,
-): T {
-  return new Proxy(repository, {
-    get(target, property) {
-      if (property === "putRecord") {
-        return async (
-          family: Parameters<EvidenceRepository["putRecord"]>[0],
-          bytes: Parameters<EvidenceRepository["putRecord"]>[1],
-          options: Parameters<EvidenceRepository["putRecord"]>[2],
-        ) => {
-          const receipt = await target.putRecord(family, bytes, options);
-          await hook("after-repository-return");
-          return receipt;
-        };
-      }
-      const value = Reflect.get(target, property, target) as unknown;
-      return typeof value === "function"
-        ? (value as (...args: never[]) => unknown).bind(target)
-        : value;
+): EvidenceRepository {
+  return {
+    capabilities: repository.capabilities,
+    async putRecord(family, bytes, options) {
+      const receipt = await repository.putRecord(family, bytes, options);
+      await hook("after-repository-return");
+      return receipt;
     },
-  });
+    getRecord(reference, options) {
+      return repository.getRecord(reference, options);
+    },
+    putArtifact(bytes, options) {
+      return repository.putArtifact(bytes, options);
+    },
+    getArtifact(reference, options) {
+      return repository.getArtifact(reference, options);
+    },
+  };
 }
 
 function wrapOperations(
@@ -313,6 +315,17 @@ if (CHILD_POINT !== undefined) {
   const temporaryRoots: string[] = [];
   const openRuntimes: LocalEvidenceRuntime[] = [];
 
+  describeEvidenceRepositoryContract(async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "jinn-local-fault-repository-"));
+    const repository = await createFilesystemEvidenceRepository({ rootDir });
+    return {
+      repository: wrapRepository(repository, async () => undefined),
+      async cleanup() {
+        await rm(rootDir, { recursive: true, force: true });
+      },
+    };
+  });
+
   afterEach(async () => {
     await Promise.allSettled(
       openRuntimes.splice(0).map((runtime) => runtime.close()),
@@ -323,6 +336,25 @@ if (CHILD_POINT !== undefined) {
         force: true,
       })),
     );
+  });
+
+  it("exposes the fault wrapper as an ordinary Repository with a stable capability slot", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "jinn-local-capability-proxy-"));
+    temporaryRoots.push(rootDir);
+    const repository = await createFilesystemEvidenceRepository({ rootDir });
+    const wrapped = wrapRepository(repository, async () => undefined);
+
+    expect(isProxy(wrapped)).toBe(false);
+    const descriptor = Object.getOwnPropertyDescriptor(
+      wrapped,
+      "capabilities",
+    );
+    expect(descriptor).toBeDefined();
+    expect(Object.hasOwn(descriptor!, "value")).toBe(true);
+    expect(Object.hasOwn(descriptor!, "get")).toBe(false);
+    expect(descriptor!.value).toBe(repository.capabilities);
+    expect(wrapped.capabilities).toBe(repository.capabilities);
+    expect(wrapped.capabilities).toBe(repository.capabilities);
   });
 
   async function openTrackedRuntime(rootDir: string): Promise<LocalEvidenceRuntime> {

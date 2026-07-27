@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 
 import {
   EvidenceRepositoryError,
+  NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
   assertRepositoryOperationActive,
   createArtifactReference,
   createRecordReference,
@@ -153,6 +154,9 @@ function isSupportedOrasVersion(
 }
 
 export class OrasCliEvidenceRepository implements EvidenceRepository {
+  readonly capabilities =
+    NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES;
+
   readonly #repository: string;
   readonly #orasPath: string;
   readonly #registryFlags: readonly string[];

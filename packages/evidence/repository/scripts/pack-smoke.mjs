@@ -102,6 +102,7 @@ try {
       dependencies: {
         "@jinn-network/evidence-protocol": `file:${protocolArchive}`,
         "@jinn-network/evidence-repository": `file:${repositoryArchive}`,
+        typescript: "5.9.3",
         vitest: "4.1.8",
       },
     }),
@@ -118,6 +119,47 @@ try {
     "@jinn-network",
     "evidence-repository",
   );
+  const typeConsumer = join(consumer, "packed-types.ts");
+  const typeConfig = join(consumer, "tsconfig.json");
+  await writeFile(
+    typeConsumer,
+    `
+import {
+  type EvidenceRepository,
+  type EvidenceRepositoryErrorCode,
+} from "@jinn-network/evidence-repository";
+import {
+  createFilesystemEvidenceRepository,
+} from "@jinn-network/evidence-repository/fs";
+
+declare const repository: EvidenceRepository;
+const limit: number | undefined = repository.capabilities.maxObjectBytes;
+const code: EvidenceRepositoryErrorCode = "CONTENT_TOO_LARGE";
+const filesystemRepository: EvidenceRepository =
+  await createFilesystemEvidenceRepository({ rootDir: "/tmp/type-only" });
+void limit;
+void code;
+void filesystemRepository;
+`,
+  );
+  await writeFile(
+    typeConfig,
+    JSON.stringify({
+      compilerOptions: {
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        noEmit: true,
+        strict: true,
+        target: "ES2022",
+      },
+      include: ["packed-types.ts"],
+    }),
+  );
+  await run(
+    process.execPath,
+    [join(consumer, "node_modules", "typescript", "bin", "tsc"), "-p", typeConfig],
+    { cwd: consumer },
+  );
   const smokeScript = join(consumer, "smoke.mjs");
   await writeFile(
     smokeScript,
@@ -127,6 +169,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   EVIDENCE_RECORD_FAMILIES,
+  EVIDENCE_REPOSITORY_ERROR_CODES,
+  NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
   createArtifactReference,
   createRecordReference,
 } from "@jinn-network/evidence-repository";
@@ -145,6 +189,12 @@ if (typeof describeEvidenceRepositoryContract !== "function") {
 const rootDir = await mkdtemp(join(tmpdir(), "jinn-packed-repository-fs-"));
 try {
   const repository = await createFilesystemEvidenceRepository({ rootDir });
+  if (repository.capabilities !== NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES) {
+    throw new Error("filesystem capability object is not the shared no-limit object");
+  }
+  if (!EVIDENCE_REPOSITORY_ERROR_CODES.includes("CONTENT_TOO_LARGE")) {
+    throw new Error("CONTENT_TOO_LARGE error code missing");
+  }
   const receipt = await repository.putRecord("execution-evidence", bytes);
   const retrieved = await repository.getRecord(receipt.reference);
   if (!retrieved || !Buffer.from(retrieved).equals(Buffer.from(bytes))) {

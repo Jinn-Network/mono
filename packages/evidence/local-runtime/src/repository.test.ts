@@ -2,6 +2,7 @@
 import type { FilesystemEvidenceAnnouncementJournal } from "@jinn-network/evidence-discovery/journal";
 import {
   EvidenceRepositoryError,
+  NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
   createArtifactReference,
   createRecordReference,
   type EvidenceRecordReference,
@@ -25,6 +26,7 @@ function harness() {
   );
   const artifactReference = createArtifactReference(recordBytes);
   const underlying: EvidenceRepository = {
+    capabilities: NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
     putRecord: vi.fn(async (family, bytes) => ({
       reference: createRecordReference(family, bytes),
       size: bytes.byteLength,
@@ -72,6 +74,74 @@ function harness() {
 }
 
 describe("announcement-aware Repository delegation", () => {
+  it("rejects an oversized record before publication effects", async () => {
+    const value = harness();
+    const maxObjectBytes = 2;
+    const underlying: EvidenceRepository = {
+      ...value.underlying,
+      capabilities: Object.freeze({ maxObjectBytes }),
+    };
+    const beforePublication = vi.fn(async () => undefined);
+    const onPublicationStart = vi.fn();
+    const onPublicationEnd = vi.fn();
+    const onPublished = vi.fn();
+    const repository = createAnnouncementAwareRepository({
+      repository: underlying,
+      journal: value.journal,
+      operations: value.operations,
+      sourceId: value.sourceId,
+      repositoryId: value.repositoryId,
+      assertReadable() {},
+      assertWritable() {},
+      beforePublication,
+      onPublicationStart,
+      onPublicationEnd,
+      onPublished,
+    });
+
+    const error = await repository.putRecord(
+      "execution-evidence",
+      new Uint8Array(maxObjectBytes + 1),
+    ).catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(EvidenceRepositoryError);
+    expect(error).toMatchObject({
+      name: "EvidenceRepositoryError",
+      code: "CONTENT_TOO_LARGE",
+    });
+    expect(error).not.toHaveProperty("cause");
+    expect(underlying.putRecord).not.toHaveBeenCalled();
+    expect(value.operations.stagePublication).not.toHaveBeenCalled();
+    expect(value.operations.markPublicationStored).not.toHaveBeenCalled();
+    expect(value.operations.markPublicationAnnounced).not.toHaveBeenCalled();
+    expect(value.operations.completePublication).not.toHaveBeenCalled();
+    expect(value.journal.appendAvailable).not.toHaveBeenCalled();
+    expect(beforePublication).not.toHaveBeenCalled();
+    expect(onPublicationStart).not.toHaveBeenCalled();
+    expect(onPublicationEnd).not.toHaveBeenCalled();
+    expect(onPublished).not.toHaveBeenCalled();
+  });
+
+  it("preserves the underlying repository capability object", () => {
+    const value = harness();
+    const repository = createAnnouncementAwareRepository({
+      repository: value.underlying,
+      journal: value.journal,
+      operations: value.operations,
+      sourceId: value.sourceId,
+      repositoryId: value.repositoryId,
+      assertReadable() {},
+      assertWritable() {},
+      onPublished() {},
+    });
+
+    expect(value.underlying.capabilities).toBe(
+      NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
+    );
+    expect(repository.capabilities).toBe(value.underlying.capabilities);
+    expect(repository.capabilities).toBe(value.underlying.capabilities);
+  });
+
   it("delegates artifact methods exactly once without touching publication state", async () => {
     const value = harness();
     const readable = vi.fn();

@@ -92,6 +92,7 @@ describe("prepared repository commitment", () => {
     const backing = new InMemoryEvidenceRepository();
     const repository: EvidenceRepository = {
       ...backing,
+      capabilities: backing.capabilities,
       putRecord: async () => ({
         reference: { family: "result-evaluation", digest: value.recordDigest },
         size: 0,
@@ -119,6 +120,7 @@ describe("prepared repository commitment", () => {
     const injected = new EvidenceRepositoryError("IO_FAILURE", "injected");
     let first = true;
     const repository: EvidenceRepository = {
+      capabilities: backing.capabilities,
       putRecord: async (...args) => {
         if (first) {
           first = false;
@@ -223,6 +225,7 @@ describe("prepared repository commitment", () => {
     const value = await prepared();
     const repository = new InMemoryEvidenceRepository();
     const contract: EvidenceRepository = {
+      capabilities: repository.capabilities,
       putRecord: async () => ({
         reference: {
           family: (change.reference?.family ?? value.family) as never,
@@ -259,6 +262,7 @@ describe("prepared repository commitment", () => {
       trust: "must-not-leak",
     };
     const contract: EvidenceRepository = {
+      capabilities: repository.capabilities,
       putRecord: async () => ({
         reference,
         get size() {
@@ -304,6 +308,7 @@ describe("prepared repository commitment", () => {
       }),
     ]) {
       const contract: EvidenceRepository = {
+        capabilities: repository.capabilities,
         putRecord: async () => receipt as never,
         getRecord: repository.getRecord.bind(repository),
         putArtifact: repository.putArtifact.bind(repository),

@@ -93,6 +93,21 @@ function repositoryBoundaryError(
   return new EvidenceRepositoryError("IO_FAILURE", message, { cause: error });
 }
 
+function assertWithinDeclaredObjectLimit(
+  maxObjectBytes: number | undefined,
+  bytes: Uint8Array,
+): void {
+  if (
+    maxObjectBytes !== undefined &&
+    bytes.byteLength > maxObjectBytes
+  ) {
+    throw new EvidenceRepositoryError(
+      "CONTENT_TOO_LARGE",
+      `The ${bytes.byteLength}-byte object exceeds the repository's ${maxObjectBytes}-byte limit.`,
+    );
+  }
+}
+
 function assertReceipt(
   intent: PublicationIntent,
   receipt: Awaited<ReturnType<EvidenceRepository["putRecord"]>>,
@@ -263,13 +278,17 @@ export function createAnnouncementAwareRepository(
   options: CreateAnnouncementAwareRepositoryOptions,
 ): EvidenceRepository {
   const mutex = new KeyedMutex();
+  const capabilities = options.repository.capabilities;
+  const maxObjectBytes = capabilities.maxObjectBytes;
   return {
+    capabilities,
     async putRecord(family, callerBytes, operationOptions) {
       let publicationStarted = false;
       try {
         options.assertReadable();
         options.assertWritable();
         assertRepositoryOperationActive(operationOptions);
+        assertWithinDeclaredObjectLimit(maxObjectBytes, callerBytes);
         const recordBytes = Uint8Array.from(callerBytes);
         const reference = createRecordReference(family, recordBytes);
         const identity = publicationIdentity(

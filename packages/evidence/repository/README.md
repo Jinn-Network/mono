@@ -19,6 +19,21 @@ Consumers validate retrieved record bytes with the Evidence Protocol package.
 Repository implementations may use local files, OCI registries, or another
 transport without changing the consumer-facing contract.
 
+Every repository is a non-Proxy object that exposes `capabilities` through a
+stable own data slot. The slot may use the writable and configurable descriptor
+of an ordinary class field, but its value remains stable. The capability
+snapshot is non-Proxy, non-extensible, has `Object.prototype` or `null` as its
+prototype, and contains only non-writable, non-configurable own data fields.
+Accessors and inherited `maxObjectBytes` values are rejected without evaluation.
+
+The optional own `maxObjectBytes` field is a positive safe integer when a
+binding declares a finite per-object limit. A present `undefined` value is
+invalid. Only an absent field means that the binding declares no finite
+application-level limit; it does not guarantee infinite storage. Unknown own
+fields are semantically ignored but follow the same representation rules. The
+in-memory, filesystem, and OCI bindings use the shared frozen, null-prototype
+`NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES` object.
+
 ## Filesystem binding
 
 The native filesystem binding is deliberately opt-in through the `/fs` subpath;
@@ -73,7 +88,7 @@ async function readExecution(
 ```
 
 Missing content returns `null`. Malformed references, corruption, access
-failures, dependency failures, cancellation, and I/O failures throw
+failures, dependency failures, size-limit violations, cancellation, and I/O failures throw
 `EvidenceRepositoryError` with a stable error code.
 
 ## Implementation contract
@@ -85,11 +100,27 @@ import {
   describeEvidenceRepositoryContract,
 } from "@jinn-network/evidence-repository/testing";
 
+const DECLARED_MAX_OBJECT_BYTES = 2 * 1024 * 1024;
+
 describeEvidenceRepositoryContract(async () => ({
-  repository: await createRepository(),
+  repository: await createRepository({
+    maxObjectBytes: DECLARED_MAX_OBJECT_BYTES,
+  }),
+  createObjectAtDeclaredLimit: () =>
+    new Uint8Array(DECLARED_MAX_OBJECT_BYTES),
+  createObjectAboveDeclaredLimit: () =>
+    new Uint8Array(DECLARED_MAX_OBJECT_BYTES + 1),
   cleanup: async () => closeRepository(),
 }));
 ```
+
+Bounded bindings must provide both boundary factories. They return fixtures
+whose byte lengths are exactly the declared inclusive limit and that limit plus
+one. Requiring explicit fixtures prevents the generic kit from allocating an
+arbitrary capability value. Bindings without a declared finite limit omit both.
+The kit validates repository and capability representation before invoking
+repository behavior and revalidates the original capability slot after every
+behavior test.
 
 See [`specification.md`](./specification.md) for the complete v1 boundary.
 

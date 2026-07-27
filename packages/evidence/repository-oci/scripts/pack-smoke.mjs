@@ -55,6 +55,7 @@ try {
         "@jinn-network/evidence-protocol": `file:${protocolArchive}`,
         "@jinn-network/evidence-repository": `file:${contractArchive}`,
         "@jinn-network/evidence-repository-oci": `file:${ociArchive}`,
+        typescript: "5.9.3",
       },
     }),
   );
@@ -69,6 +70,47 @@ try {
     "node_modules",
     "@jinn-network",
     "evidence-repository-oci",
+  );
+  const typeConsumer = join(consumer, "packed-types.ts");
+  const typeConfig = join(consumer, "tsconfig.json");
+  await writeFile(
+    typeConsumer,
+    `
+import type {
+  EvidenceRepository,
+  EvidenceRepositoryErrorCode,
+} from "@jinn-network/evidence-repository";
+import {
+  createOrasCliEvidenceRepository,
+} from "@jinn-network/evidence-repository-oci";
+
+type OrasRepository = Awaited<ReturnType<typeof createOrasCliEvidenceRepository>>;
+declare const repository: OrasRepository;
+const contract: EvidenceRepository = repository;
+const limit: number | undefined = repository.capabilities.maxObjectBytes;
+const code: EvidenceRepositoryErrorCode = "CONTENT_TOO_LARGE";
+void contract;
+void limit;
+void code;
+`,
+  );
+  await writeFile(
+    typeConfig,
+    JSON.stringify({
+      compilerOptions: {
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        noEmit: true,
+        strict: true,
+        target: "ES2022",
+      },
+      include: ["packed-types.ts"],
+    }),
+  );
+  await run(
+    process.execPath,
+    [join(consumer, "node_modules", "typescript", "bin", "tsc"), "-p", typeConfig],
+    { cwd: consumer },
   );
   const smokeScript = join(consumer, "smoke.mjs");
   await writeFile(

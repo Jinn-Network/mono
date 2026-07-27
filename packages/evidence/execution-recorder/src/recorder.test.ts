@@ -747,6 +747,7 @@ describe("execution recorder finalization lifecycle", () => {
     const backing = new InMemoryEvidenceRepository();
     let interruptRecord = true;
     const repository: EvidenceRepository = {
+      capabilities: backing.capabilities,
       putArtifact: (...args) => backing.putArtifact(...args),
       getArtifact: (...args) => backing.getArtifact(...args),
       getRecord: (...args) => backing.getRecord(...args),

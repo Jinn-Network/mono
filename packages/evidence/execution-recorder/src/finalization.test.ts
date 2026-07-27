@@ -135,6 +135,7 @@ function nativeTrace(value = "fixture trace"): NativeTraceCapture {
 
 class FinalizationFaultRepository implements EvidenceRepository {
   readonly delegate = new InMemoryEvidenceRepository();
+  readonly capabilities = this.delegate.capabilities;
   readonly events: string[] = [];
 
   constructor(
@@ -203,6 +204,7 @@ class FinalizationFaultRepository implements EvidenceRepository {
 
 class ReceiptMutatingRepository implements EvidenceRepository {
   readonly delegate = new FinalizationFaultRepository();
+  readonly capabilities = this.delegate.capabilities;
 
   constructor(
     private readonly mutateArtifact?: (
@@ -251,6 +253,7 @@ class ReceiptMutatingRepository implements EvidenceRepository {
 
 class ByteMutatingRepository implements EvidenceRepository {
   readonly delegate = new FinalizationFaultRepository();
+  readonly capabilities = this.delegate.capabilities;
 
   constructor(
     private readonly target: "artifact" | "record",

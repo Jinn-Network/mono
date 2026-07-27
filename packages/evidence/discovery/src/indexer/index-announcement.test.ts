@@ -9,6 +9,7 @@ import {
 } from "../catalog/index.js";
 import {
   EvidenceRepositoryError,
+  NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
 } from "@jinn-network/evidence-repository";
 import { InMemoryEvidenceRepository } from "@jinn-network/evidence-repository/testing";
 import { describe, expect, test, vi } from "vitest";
@@ -222,6 +223,7 @@ describe("single announcement indexing", () => {
       "Fixture access denied.",
     );
     const repository = {
+      capabilities: NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
       getRecord: vi.fn(async () => {
         throw repositoryFailure;
       }),
@@ -302,6 +304,7 @@ describe("single announcement indexing", () => {
     ).reference;
     const getArtifact = vi.fn();
     const repository = {
+      capabilities: NO_DECLARED_LIMIT_EVIDENCE_REPOSITORY_CAPABILITIES,
       getRecord: vi.fn(async () => corruptBytes),
       getArtifact,
     } as never;
