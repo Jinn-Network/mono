@@ -4,6 +4,7 @@ export {
   ATTESTATION_ISSUER_ERROR_CODES,
   AttestationIssuerError,
 } from "./errors.js";
+export { commitPreparedAttestation } from "./commit.js";
 export {
   prepareExecutionVerification,
   prepareResultEvaluation,

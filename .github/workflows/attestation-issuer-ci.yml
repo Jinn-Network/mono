@@ -1,0 +1,63 @@
+name: Attestation Issuer CI
+
+on:
+  pull_request:
+    paths:
+      - "packages/evidence-protocol/**"
+      - "packages/evidence-repository/**"
+      - "packages/attestation-issuer/**"
+      - "docs/superpowers/specs/2026-07-24-jinn-attestation-issuer-design.md"
+      - ".github/workflows/attestation-issuer-ci.yml"
+  push:
+    branches: [next]
+    paths:
+      - "packages/evidence-protocol/**"
+      - "packages/evidence-repository/**"
+      - "packages/attestation-issuer/**"
+      - "docs/superpowers/specs/2026-07-24-jinn-attestation-issuer-design.md"
+      - ".github/workflows/attestation-issuer-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+
+      - name: Verify Evidence Protocol dependency
+        working-directory: packages/evidence-protocol
+        run: |
+          yarn install --immutable
+          yarn check:profile
+          yarn typecheck
+          yarn test
+          yarn build
+
+      - name: Verify Evidence Repository dependency
+        working-directory: packages/evidence-repository
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+
+      - name: Verify Attestation Issuer
+        working-directory: packages/attestation-issuer
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke

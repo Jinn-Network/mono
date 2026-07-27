@@ -19,10 +19,17 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
-    }
+    },
+    "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+    },
+    "./fixtures/*": "./fixtures/*"
   },
   "files": [
-    "dist/"
+    "dist/",
+    "fixtures/",
+    "README.md"
   ],
   "publishConfig": {
     "access": "public"
@@ -31,11 +38,20 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
   },
   "dependencies": {
     "@jinn-network/evidence-protocol": "0.1.0",
     "@jinn-network/evidence-repository": "0.1.0"
+  },
+  "peerDependencies": {
+    "vitest": "^4.1.8"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
