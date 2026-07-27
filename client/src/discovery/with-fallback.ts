@@ -329,5 +329,14 @@ export function withFallback(
         () => floor.getVerdictTallies(args),
       );
     },
+
+    getTaskLifecycleEvidence(args) {
+      // Completeness signal for generators (#2044): tolerant fall-through to the
+      // authoritative-only floor on indexer outage (like getTaskStatuses).
+      return dispatch(
+        () => primary.getTaskLifecycleEvidence(args),
+        () => floor.getTaskLifecycleEvidence(args),
+      );
+    },
   };
 }
