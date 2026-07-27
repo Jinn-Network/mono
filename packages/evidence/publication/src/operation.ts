@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { isProxy } from "node:util/types";
+import { isNativeError, isProxy } from "node:util/types";
 
 import {
   EvidenceRepositoryError,
@@ -41,7 +41,13 @@ function hasOrdinaryPrototype(
   value: unknown,
   expectedPrototype: object,
 ): boolean {
-  if (!isObjectLike(value) || isProxy(value)) return false;
+  if (
+    !isObjectLike(value) ||
+    isProxy(value) ||
+    !isNativeError(value)
+  ) {
+    return false;
+  }
   let current: object | null;
   try {
     current = Reflect.getPrototypeOf(value);

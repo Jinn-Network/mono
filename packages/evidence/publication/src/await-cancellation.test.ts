@@ -56,6 +56,7 @@ interface PendingPublication {
   readonly bundleKey: ReturnType<typeof normalizePublishInput>["bundleKey"];
 }
 
+class RepositoryErrorSubclass extends EvidenceRepositoryError {}
 class JournalConflictSubclass extends EvidencePublicationError {}
 
 function publicationInput(signal?: AbortSignal): PublishInput {
@@ -537,6 +538,33 @@ describe("trap-free rejected-value classification", () => {
     expect(caught).toBe(rejection);
   });
 
+  test("does not classify a repository-error subclass prototype during cancellation", async () => {
+    const controller = new AbortController();
+    const rejection = RepositoryErrorSubclass.prototype;
+    const scenario = await failureScenario(
+      "sink-prepare",
+      rejection,
+      controller,
+    );
+
+    const caught = await captureRejection(scenario.invoke());
+
+    expect(caught).not.toBe(rejection);
+    expect(
+      caught instanceof EvidencePublicationError &&
+      caught.code === "OPERATION_ABORTED",
+    ).toBe(true);
+  });
+
+  test("preserves an uncancelled repository-error subclass prototype rejection", async () => {
+    const rejection = RepositoryErrorSubclass.prototype;
+    const scenario = await failureScenario("sink-prepare", rejection);
+
+    const caught = await captureRejection(scenario.invoke());
+
+    expect(caught).toBe(rejection);
+  });
+
   test("maps a cancelled revoked Proxy rejection without observing it", async () => {
     const controller = new AbortController();
     const revocable = Proxy.revocable(
@@ -580,7 +608,6 @@ describe("trap-free rejected-value classification", () => {
   });
 
   test("preserves an ordinary repository-error subclass during cancellation", async () => {
-    class RepositoryErrorSubclass extends EvidenceRepositoryError {}
     const controller = new AbortController();
     const cause = new Error("repository subclass cause");
     const rejection = new RepositoryErrorSubclass(
@@ -632,6 +659,87 @@ describe("trap-free rejected-value classification", () => {
 
     expect(receipt.completed).toBe(true);
     expect(sink.placementEffectCount).toBe(1);
+  });
+
+  test.each([
+    [
+      "base",
+      EvidencePublicationError.prototype,
+    ],
+    [
+      "subclass",
+      JournalConflictSubclass.prototype,
+    ],
+  ])(
+    "does not classify a publication-error %s prototype as a journal conflict",
+    async (_kind, rejection) => {
+      Object.defineProperty(rejection, "code", {
+        configurable: true,
+        value: "JOURNAL_CONFLICT",
+      });
+      const repository = new InMemoryEvidenceRepository();
+      const journalDelegate = new InMemoryPublicationJournalStore();
+      const sink = publicationSink();
+      const journal: PublicationJournalStore = {
+        load: journalDelegate.load.bind(journalDelegate),
+        create: async (entry, options) => {
+          await journalDelegate.create(entry, options);
+          throw rejection;
+        },
+        compareAndSwap: journalDelegate.compareAndSwap.bind(journalDelegate),
+      };
+
+      try {
+        const caught = await captureRejection(
+          publish(
+            publicationInput(),
+            { repository, journal, sink },
+          ),
+        );
+
+        expect(caught).toBe(rejection);
+        expect(sink.placementEffectCount).toBe(0);
+      } finally {
+        Reflect.deleteProperty(rejection, "code");
+      }
+    },
+  );
+
+  test("does not invoke an accessor-backed journal conflict code", async () => {
+    let getterCalls = 0;
+    const rejection = new JournalConflictSubclass(
+      "JOURNAL_CONFLICT",
+      "accessor-backed conflict",
+    );
+    Object.defineProperty(rejection, "code", {
+      configurable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error("code accessor must not run");
+      },
+    });
+    const repository = new InMemoryEvidenceRepository();
+    const journalDelegate = new InMemoryPublicationJournalStore();
+    const sink = publicationSink();
+    const journal: PublicationJournalStore = {
+      load: journalDelegate.load.bind(journalDelegate),
+      create: async (entry, options) => {
+        await journalDelegate.create(entry, options);
+        throw rejection;
+      },
+      compareAndSwap: journalDelegate.compareAndSwap.bind(journalDelegate),
+    };
+
+    const caught = await captureRejection(
+      publish(
+        publicationInput(),
+        { repository, journal, sink },
+      ),
+    );
+
+    expect(getterCalls).toBe(0);
+    expect(caught).toBe(rejection);
+    expect(sink.placementEffectCount).toBe(0);
   });
 
   test("wraps a Proxy thrown during prepared-frame validation without observing it", async () => {
