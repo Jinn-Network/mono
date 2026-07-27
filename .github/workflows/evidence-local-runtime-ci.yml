@@ -5,10 +5,8 @@ on:
     paths:
       - "packages/evidence-protocol/**"
       - "packages/evidence-repository/**"
-      - "packages/evidence-catalog/**"
-      - "packages/evidence-indexer/**"
+      - "packages/evidence-discovery/**"
       - "packages/evidence-catalog-sqlite/**"
-      - "packages/evidence-announcement-journal/**"
       - "packages/execution-recorder/**"
       - "packages/evidence-local-runtime/**"
       - ".github/workflows/evidence-local-runtime-ci.yml"
@@ -17,10 +15,8 @@ on:
     paths:
       - "packages/evidence-protocol/**"
       - "packages/evidence-repository/**"
-      - "packages/evidence-catalog/**"
-      - "packages/evidence-indexer/**"
+      - "packages/evidence-discovery/**"
       - "packages/evidence-catalog-sqlite/**"
-      - "packages/evidence-announcement-journal/**"
       - "packages/execution-recorder/**"
       - "packages/evidence-local-runtime/**"
       - ".github/workflows/evidence-local-runtime-ci.yml"
@@ -63,17 +59,8 @@ jobs:
           yarn build
           yarn pack:smoke
 
-      - name: Verify Evidence Catalog
-        working-directory: packages/evidence-catalog
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn pack:smoke
-
-      - name: Verify Evidence Indexer
-        working-directory: packages/evidence-indexer
+      - name: Verify Evidence Discovery
+        working-directory: packages/evidence-discovery
         run: |
           yarn install --immutable
           yarn typecheck
@@ -83,15 +70,6 @@ jobs:
 
       - name: Verify SQLite Evidence Catalog
         working-directory: packages/evidence-catalog-sqlite
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn pack:smoke
-
-      - name: Verify local announcement journal
-        working-directory: packages/evidence-announcement-journal
         run: |
           yarn install --immutable
           yarn typecheck

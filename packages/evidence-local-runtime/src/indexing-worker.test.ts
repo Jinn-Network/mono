@@ -3,17 +3,17 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { openFilesystemEvidenceAnnouncementJournal } from "@jinn-network/evidence-announcement-journal";
+import { openFilesystemEvidenceAnnouncementJournal } from "@jinn-network/evidence-discovery/journal";
 import type {
   CatalogRecordProjection,
   EvidenceCatalogReader,
-} from "@jinn-network/evidence-catalog";
-import { EvidenceCatalogError } from "@jinn-network/evidence-catalog";
+} from "@jinn-network/evidence-discovery";
+import { EvidenceCatalogError } from "@jinn-network/evidence-discovery";
 import {
   EvidenceIndexerError,
   EvidenceIndexer,
   EvidenceIndexingResult,
-} from "@jinn-network/evidence-indexer";
+} from "@jinn-network/evidence-discovery/indexer";
 import { EvidenceRepositoryError } from "@jinn-network/evidence-repository";
 import { afterEach, describe, expect, it, vi } from "vitest";
 

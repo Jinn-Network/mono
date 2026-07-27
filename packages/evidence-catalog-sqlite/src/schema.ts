@@ -5,7 +5,7 @@ import {
   CATALOG_SCHEMA_VERSION,
   EvidenceCatalogError,
   type CatalogGeneration,
-} from "@jinn-network/evidence-catalog";
+} from "@jinn-network/evidence-discovery";
 
 import { catalogIoError } from "./errors.js";
 

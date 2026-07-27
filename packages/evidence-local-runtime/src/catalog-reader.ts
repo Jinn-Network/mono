@@ -2,7 +2,7 @@
 import {
   EvidenceCatalogError,
   type EvidenceCatalogReader,
-} from "@jinn-network/evidence-catalog";
+} from "@jinn-network/evidence-discovery";
 
 interface ReaderSlot {
   readonly reader: EvidenceCatalogReader;

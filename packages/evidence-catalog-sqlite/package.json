@@ -36,7 +36,7 @@
     "prepack": "yarn build"
   },
   "dependencies": {
-    "@jinn-network/evidence-catalog": "0.1.0",
+    "@jinn-network/evidence-discovery": "0.1.0",
     "@jinn-network/evidence-repository": "0.1.0",
     "better-sqlite3": "13.0.1"
   },
@@ -48,7 +48,7 @@
     "vitest": "^4.1.8"
   },
   "resolutions": {
-    "@jinn-network/evidence-catalog": "portal:../evidence-catalog",
+    "@jinn-network/evidence-discovery": "portal:../evidence-discovery",
     "@jinn-network/evidence-protocol": "portal:../evidence-protocol",
     "@jinn-network/evidence-repository": "portal:../evidence-repository"
   }

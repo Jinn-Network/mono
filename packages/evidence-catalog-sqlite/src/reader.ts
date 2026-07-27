@@ -15,7 +15,7 @@ import {
   type JsonValue,
   type ResultEvaluationProjection,
   type VerificationCatalogQuery,
-} from "@jinn-network/evidence-catalog";
+} from "@jinn-network/evidence-discovery";
 import type Database from "better-sqlite3";
 
 import {

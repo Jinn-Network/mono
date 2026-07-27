@@ -11,7 +11,7 @@ import {
   type RecordLocationObservation,
   type RecordLocationWithdrawal,
   type Sha256Digest,
-} from "@jinn-network/evidence-catalog";
+} from "@jinn-network/evidence-discovery";
 
 export interface ProjectionRows {
   readonly record: {

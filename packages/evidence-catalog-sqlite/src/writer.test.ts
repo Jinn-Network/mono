@@ -14,11 +14,11 @@ import {
   type EvidenceRecordReference,
   type RecordLocationObservation,
   type RecordLocationWithdrawal,
-} from "@jinn-network/evidence-catalog";
+} from "@jinn-network/evidence-discovery";
 import {
   createCatalogContractFixtures,
   describeEvidenceCatalogContract,
-} from "@jinn-network/evidence-catalog/testing";
+} from "@jinn-network/evidence-discovery/testing";
 import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 

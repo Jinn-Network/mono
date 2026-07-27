@@ -20,10 +20,10 @@ import {
   EvidenceAnnouncementJournalError,
   openFilesystemEvidenceAnnouncementJournal,
   type FilesystemEvidenceAnnouncementJournal,
-} from "@jinn-network/evidence-announcement-journal";
+} from "@jinn-network/evidence-discovery/journal";
 import {
   EvidenceCatalogError,
-} from "@jinn-network/evidence-catalog";
+} from "@jinn-network/evidence-discovery";
 import {
   createRecordReference,
   EvidenceRepositoryError,
@@ -38,7 +38,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   openFilesystemEvidenceAnnouncementJournalForTesting,
   type JournalAppendFaultPoint,
-} from "../../evidence-announcement-journal/dist/journal.js";
+} from "../../evidence-discovery/dist/journal/journal.js";
 import {
   publishCatalogPointer,
   type LocalCatalogPointerV1,

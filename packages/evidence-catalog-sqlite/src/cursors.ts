@@ -5,7 +5,7 @@ import {
   type EvaluationCatalogQuery,
   type ExecutionCatalogQuery,
   type VerificationCatalogQuery,
-} from "@jinn-network/evidence-catalog";
+} from "@jinn-network/evidence-discovery";
 
 import { canonicalJsonSnapshot, sha256Text } from "./projection-row.js";
 

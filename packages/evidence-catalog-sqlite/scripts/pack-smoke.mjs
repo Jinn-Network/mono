@@ -19,7 +19,7 @@ const temporaryRoot = await mkdtemp(
 const archives = {
   protocol: join(temporaryRoot, "evidence-protocol.tgz"),
   repository: join(temporaryRoot, "evidence-repository.tgz"),
-  catalog: join(temporaryRoot, "evidence-catalog.tgz"),
+  discovery: join(temporaryRoot, "evidence-discovery.tgz"),
   sqlite: join(temporaryRoot, "evidence-catalog-sqlite.tgz"),
 };
 const consumer = join(temporaryRoot, "consumer");
@@ -55,7 +55,7 @@ try {
   for (const [directory, archive] of [
     ["evidence-protocol", archives.protocol],
     ["evidence-repository", archives.repository],
-    ["evidence-catalog", archives.catalog],
+    ["evidence-discovery", archives.discovery],
     ["evidence-catalog-sqlite", archives.sqlite],
   ]) {
     await run("yarn", ["pack", "--out", archive], {
@@ -93,7 +93,7 @@ try {
       dependencies: {
         "@jinn-network/evidence-protocol": `file:${archives.protocol}`,
         "@jinn-network/evidence-repository": `file:${archives.repository}`,
-        "@jinn-network/evidence-catalog": `file:${archives.catalog}`,
+        "@jinn-network/evidence-discovery": `file:${archives.discovery}`,
         "@jinn-network/evidence-catalog-sqlite": `file:${archives.sqlite}`,
       },
     }),
@@ -172,7 +172,7 @@ try {
       .filter((name) => name.startsWith("@jinn-network/"))
       .sort(),
     [
-      "@jinn-network/evidence-catalog",
+      "@jinn-network/evidence-discovery",
       "@jinn-network/evidence-repository",
     ],
   );

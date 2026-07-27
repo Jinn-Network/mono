@@ -42,28 +42,19 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@jinn-network/evidence-announcement-journal@portal:../evidence-announcement-journal::locator=%40jinn-network%2Fevidence-local-runtime%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/evidence-announcement-journal@portal:../evidence-announcement-journal::locator=%40jinn-network%2Fevidence-local-runtime%40workspace%3A."
-  dependencies:
-    "@jinn-network/evidence-catalog": "npm:0.1.0"
-    "@jinn-network/evidence-repository": "npm:0.1.0"
-  languageName: node
-  linkType: soft
-
 "@jinn-network/evidence-catalog-sqlite@portal:../evidence-catalog-sqlite::locator=%40jinn-network%2Fevidence-local-runtime%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/evidence-catalog-sqlite@portal:../evidence-catalog-sqlite::locator=%40jinn-network%2Fevidence-local-runtime%40workspace%3A."
   dependencies:
-    "@jinn-network/evidence-catalog": "npm:0.1.0"
+    "@jinn-network/evidence-discovery": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
     better-sqlite3: "npm:13.0.1"
   languageName: node
   linkType: soft
 
-"@jinn-network/evidence-catalog@portal:../evidence-catalog::locator=%40jinn-network%2Fevidence-local-runtime%40workspace%3A.":
+"@jinn-network/evidence-discovery@portal:../evidence-discovery::locator=%40jinn-network%2Fevidence-local-runtime%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/evidence-catalog@portal:../evidence-catalog::locator=%40jinn-network%2Fevidence-local-runtime%40workspace%3A."
+  resolution: "@jinn-network/evidence-discovery@portal:../evidence-discovery::locator=%40jinn-network%2Fevidence-local-runtime%40workspace%3A."
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
@@ -75,24 +66,12 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/evidence-indexer@portal:../evidence-indexer::locator=%40jinn-network%2Fevidence-local-runtime%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/evidence-indexer@portal:../evidence-indexer::locator=%40jinn-network%2Fevidence-local-runtime%40workspace%3A."
-  dependencies:
-    "@jinn-network/evidence-catalog": "npm:0.1.0"
-    "@jinn-network/evidence-protocol": "npm:0.1.0"
-    "@jinn-network/evidence-repository": "npm:0.1.0"
-  languageName: node
-  linkType: soft
-
 "@jinn-network/evidence-local-runtime@workspace:.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/evidence-local-runtime@workspace:."
   dependencies:
-    "@jinn-network/evidence-announcement-journal": "npm:0.1.0"
-    "@jinn-network/evidence-catalog": "npm:0.1.0"
     "@jinn-network/evidence-catalog-sqlite": "npm:0.1.0"
-    "@jinn-network/evidence-indexer": "npm:0.1.0"
+    "@jinn-network/evidence-discovery": "npm:0.1.0"
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
     "@jinn-network/execution-recorder": "npm:0.1.0"
