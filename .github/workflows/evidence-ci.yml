@@ -86,6 +86,7 @@ jobs:
           - discovery
           - execution-recorder
           - attestation-issuer
+          - publication
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -361,7 +362,7 @@ jobs:
           path: .evidence-dist
       - name: Place package distributions
         run: |
-          for package in protocol repository repository-oci repository-ipfs discovery catalog-sqlite execution-recorder attestation-issuer derivation local-runtime; do
+          for package in protocol repository repository-oci repository-ipfs discovery catalog-sqlite execution-recorder attestation-issuer derivation publication local-runtime; do
             mkdir -p "packages/evidence/${package}/dist"
             cp -R ".evidence-dist/evidence-${package}-dist/." "packages/evidence/${package}/dist/"
           done

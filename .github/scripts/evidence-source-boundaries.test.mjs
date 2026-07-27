@@ -9,9 +9,9 @@ const packages = join(root, 'packages', 'evidence');
 const evidenceDirectories = [
   'protocol', 'repository', 'repository-oci', 'repository-ipfs', 'discovery',
   'catalog-sqlite', 'execution-recorder', 'attestation-issuer', 'derivation',
-  'local-runtime',
+  'publication', 'local-runtime',
 ];
-const IPFS_APPLICATION_AND_LEGACY_ROOTS = [
+const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
   join(root, 'client'),
   ...[
@@ -23,7 +23,7 @@ const IPFS_PRODUCTION_FORBIDDEN_ROOTS = [
   ...evidenceDirectories
     .filter((directory) => !['repository-ipfs', 'repository'].includes(directory))
     .map((directory) => join(packages, directory)),
-  ...IPFS_APPLICATION_AND_LEGACY_ROOTS,
+  ...APPLICATION_AND_LEGACY_ROOTS,
 ];
 
 const IPFS_FORBIDDEN_PACKAGES = [
@@ -114,6 +114,59 @@ const DERIVATION_ALLOWED_DEV_DEPENDENCIES = [
 ];
 
 const DERIVATION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+
+const PUBLICATION_FORBIDDEN_PACKAGES = [
+  '@jinn-network/autopilot',
+  '@jinn-network/attestation-issuer',
+  '@jinn-network/broadcast-bot',
+  '@jinn-network/client',
+  '@jinn-network/core',
+  '@jinn-network/evidence-catalog-sqlite',
+  '@jinn-network/evidence-derivation',
+  '@jinn-network/evidence-discovery',
+  '@jinn-network/evidence-local-runtime',
+  '@jinn-network/evidence-protocol',
+  '@jinn-network/evidence-publication/fs',
+  '@jinn-network/evidence-publication/testing',
+  '@jinn-network/evidence-repository/fs',
+  '@jinn-network/evidence-repository-ipfs',
+  '@jinn-network/evidence-repository-oci',
+  '@jinn-network/execution-recorder',
+  '@jinn-network/indexer',
+  '@jinn-network/indexer-enrichment',
+  '@jinn-network/jinn-layer',
+  '@jinn-network/marketplace',
+  '@jinn-network/plugin',
+  '@jinn-network/sdk',
+  'better-sqlite3',
+  'hermes-agent',
+  'node:child_process',
+  'node:dgram',
+  'node:dns',
+  'node:http',
+  'node:http2',
+  'node:https',
+  'node:net',
+  'node:tls',
+  'viem',
+];
+
+const PUBLICATION_ALLOWED_DEPENDENCIES = [
+  '@jinn-network/evidence-repository',
+];
+
+const PUBLICATION_ALLOWED_DEV_DEPENDENCIES = [
+  '@jinn-network/evidence-protocol',
+  '@types/node',
+  'typescript',
+  'vitest',
+];
+
+const PUBLICATION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const PUBLICATION_FORBIDDEN_MANIFEST_PACKAGES =
+  PUBLICATION_FORBIDDEN_PACKAGES.filter(
+    (dependency) => dependency !== '@jinn-network/evidence-protocol',
+  );
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
 const ambientNetworkIdentifier = new RegExp(
@@ -430,6 +483,86 @@ test('IPFS production boundary configuration catches application and legacy esca
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
+test('Publication boundary checks catch root, testing, filesystem, application, and legacy escapes', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-publication-boundary-'));
+  try {
+    const source = join(fixture, 'src');
+    const publicationFs = join(source, 'fs');
+    const publicationTesting = join(source, 'testing.ts');
+    const applications = join(fixture, 'applications');
+    const legacy = join(fixture, 'legacy');
+    mkdirSync(source);
+    mkdirSync(publicationFs);
+    mkdirSync(applications);
+    mkdirSync(legacy);
+    const rootSource = join(source, 'root.ts');
+    const testingSource = publicationTesting;
+    const fsSource = join(publicationFs, 'index.ts');
+    writeFileSync(rootSource, [
+      'import "@jinn-network/evidence-publication/fs";',
+      'export * from "./fs/index.js";',
+      'export * from "./testing.js";',
+      'import "@jinn-network/evidence-discovery";',
+      'import "@jinn-network/evidence-repository/fs";',
+      'import "@jinn-network/evidence-repository-oci";',
+      'import "@jinn-network/evidence-repository-ipfs";',
+      'import "@jinn-network/core";',
+      'import "../applications/index.js";',
+      'import "../legacy/index.js";',
+      'import "node:fs/promises";',
+      'import "node:https";',
+      'fetch;',
+    ].join('\n'));
+    writeFileSync(testingSource, [
+      'import "@jinn-network/evidence-publication/fs";',
+      'export * from "./fs/index.js";',
+      'import "@jinn-network/evidence-discovery";',
+      'import "@jinn-network/evidence-repository-ipfs";',
+      'import "@jinn-network/core";',
+      'import "../applications/index.js";',
+      'import "node:http";',
+      'WebSocket;',
+    ].join('\n'));
+    writeFileSync(fsSource, [
+      'export * from "../testing.js";',
+      'import "@jinn-network/evidence-discovery";',
+      'import "@jinn-network/evidence-repository-oci";',
+      'import "@jinn-network/core";',
+      'import "../../legacy/index.js";',
+      'import "node:net";',
+      'EventSource;',
+    ].join('\n'));
+
+    assert.equal(
+      forbiddenImportsInFiles(
+        [rootSource],
+        [...PUBLICATION_FORBIDDEN_PACKAGES, 'node:fs'],
+        [publicationFs, publicationTesting, applications, legacy],
+      ).length,
+      12,
+    );
+    assert.equal(ambientNetworkUsesInFiles([rootSource]).length, 1);
+    assert.equal(
+      forbiddenImportsInFiles(
+        [testingSource],
+        [...PUBLICATION_FORBIDDEN_PACKAGES, 'node:fs'],
+        [publicationFs, applications, legacy],
+      ).length,
+      7,
+    );
+    assert.equal(ambientNetworkUsesInFiles([testingSource]).length, 1);
+    assert.equal(
+      forbiddenImportsInFiles(
+        [fsSource],
+        PUBLICATION_FORBIDDEN_PACKAGES,
+        [publicationTesting, applications, legacy],
+      ).length,
+      6,
+    );
+    assert.equal(ambientNetworkUsesInFiles([fsSource]).length, 1);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
 test('evidence source boundaries remain one-way across the approved graph', () => {
   const discovery = join(packages, 'discovery', 'src');
   const catalog = join(discovery, 'catalog');
@@ -611,6 +744,121 @@ test('evidence source boundaries remain one-way across the approved graph', () =
       assert.ok(
         !Object.hasOwn(derivationManifest[section] ?? {}, dependency),
         `derivation may not declare ${dependency} in ${section}`,
+      );
+    }
+  }
+  const publication = join(packages, 'publication');
+  const publicationSource = join(publication, 'src');
+  const publicationFs = join(publicationSource, 'fs');
+  const publicationTesting = join(publicationSource, 'testing.ts');
+  const publicationSourceFiles = files(publicationSource);
+  const publicationRootFiles = publicationSourceFiles.filter((file) =>
+    !inside(file, publicationFs)
+      && file !== publicationTesting
+      && !/\.test\.[cm]?[jt]sx?$/u.test(file));
+  const publicationTestingFiles = [publicationTesting];
+  const publicationFsFiles = files(publicationFs)
+    .filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
+  const publicationForeignEvidenceRoots = evidenceDirectories
+    .filter((directory) => !['publication', 'repository'].includes(directory))
+    .map((directory) => join(packages, directory));
+  const publicationManifest = manifest('publication');
+
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      publicationRootFiles,
+      [...PUBLICATION_FORBIDDEN_PACKAGES, 'node:fs'],
+      [
+        publicationFs,
+        publicationTesting,
+        ...publicationForeignEvidenceRoots,
+        ...APPLICATION_AND_LEGACY_ROOTS,
+      ],
+    ),
+    [],
+    'the Publication root crosses an evidence architecture boundary',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      publicationTestingFiles,
+      [...PUBLICATION_FORBIDDEN_PACKAGES, 'node:fs'],
+      [
+        publicationFs,
+        ...publicationForeignEvidenceRoots,
+        ...APPLICATION_AND_LEGACY_ROOTS,
+      ],
+    ),
+    [],
+    'the Publication /testing entrypoint crosses an evidence architecture boundary',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      publicationFsFiles,
+      PUBLICATION_FORBIDDEN_PACKAGES,
+      [
+        publicationTesting,
+        ...publicationForeignEvidenceRoots,
+        ...APPLICATION_AND_LEGACY_ROOTS,
+      ],
+    ),
+    [],
+    'the Publication /fs entrypoint crosses an evidence architecture boundary',
+  );
+  assert.deepEqual(
+    ambientNetworkUsesInFiles([
+      ...publicationRootFiles,
+      ...publicationTestingFiles,
+      ...publicationFsFiles,
+    ]),
+    [],
+    'Publication entrypoints may not implement an ambient announcement medium',
+  );
+  assert.deepEqual(
+    Object.keys(publicationManifest.exports).sort(),
+    ['.', './fs', './testing'],
+  );
+  assert.deepEqual(publicationManifest.exports['.'], {
+    import: './dist/index.js',
+    types: './dist/index.d.ts',
+  });
+  assert.deepEqual(publicationManifest.exports['./testing'], {
+    import: './dist/testing.js',
+    types: './dist/testing.d.ts',
+  });
+  assert.deepEqual(publicationManifest.exports['./fs'], {
+    import: './dist/fs/index.js',
+    types: './dist/fs/index.d.ts',
+  });
+  assert.deepEqual(
+    Object.keys(publicationManifest.dependencies ?? {}).sort(),
+    PUBLICATION_ALLOWED_DEPENDENCIES,
+    'Publication production dependencies must match the approved design inventory',
+  );
+  assert.deepEqual(
+    Object.keys(publicationManifest.devDependencies ?? {}).sort(),
+    PUBLICATION_ALLOWED_DEV_DEPENDENCIES,
+    'Publication development dependencies must match the approved toolchain',
+  );
+  assert.deepEqual(
+    Object.keys(publicationManifest.optionalDependencies ?? {}),
+    [],
+    'Publication may not declare optional dependencies',
+  );
+  assert.deepEqual(
+    Object.keys(publicationManifest.peerDependencies ?? {}).sort(),
+    PUBLICATION_ALLOWED_PEER_DEPENDENCIES,
+    'Publication peer dependencies must remain test-only',
+  );
+  assert.deepEqual(publicationManifest.peerDependenciesMeta, {
+    vitest: { optional: true },
+  });
+  for (const section of [
+    'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
+  ]) {
+    for (const dependency of PUBLICATION_FORBIDDEN_MANIFEST_PACKAGES) {
+      assert.ok(
+        !Object.hasOwn(publicationManifest[section] ?? {}, dependency),
+        `Publication may not declare ${dependency} in ${section}`,
       );
     }
   }

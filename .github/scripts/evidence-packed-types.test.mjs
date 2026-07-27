@@ -20,6 +20,7 @@ const packages = [
   ['execution-recorder', '@jinn-network/execution-recorder'],
   ['attestation-issuer', '@jinn-network/attestation-issuer'],
   ['derivation', '@jinn-network/evidence-derivation'],
+  ['publication', '@jinn-network/evidence-publication'],
   ['local-runtime', '@jinn-network/evidence-local-runtime'],
 ];
 
@@ -42,6 +43,9 @@ const codeEntrypoints = [
   '@jinn-network/attestation-issuer/testing',
   '@jinn-network/evidence-derivation',
   '@jinn-network/evidence-derivation/testing',
+  '@jinn-network/evidence-publication',
+  '@jinn-network/evidence-publication/testing',
+  '@jinn-network/evidence-publication/fs',
   '@jinn-network/evidence-local-runtime',
 ];
 
@@ -143,7 +147,7 @@ try {
   }
 
   console.log(
-    `Compiled a packed TypeScript consumer against ${codeEntrypoints.length} public code entrypoints across all ten evidence packages.`,
+    `Compiled a packed TypeScript consumer against ${codeEntrypoints.length} public code entrypoints across all eleven evidence packages.`,
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });

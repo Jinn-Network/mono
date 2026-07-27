@@ -19,6 +19,7 @@ const EVIDENCE_PACKAGES = [
   ['execution-recorder', '@jinn-network/execution-recorder'],
   ['attestation-issuer', '@jinn-network/attestation-issuer'],
   ['derivation', '@jinn-network/evidence-derivation'],
+  ['publication', '@jinn-network/evidence-publication'],
   ['local-runtime', '@jinn-network/evidence-local-runtime'],
 ];
 
@@ -32,6 +33,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['execution-recorder', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['attestation-issuer', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['derivation', { dependencies: ['@jinn-network/evidence-protocol'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
+  ['publication', { dependencies: ['@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
   ['local-runtime', { dependencies: ['@jinn-network/evidence-catalog-sqlite', '@jinn-network/evidence-discovery', '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/execution-recorder'], optionalDependencies: [], peerDependencies: [] }],
 ]);
 
@@ -64,8 +66,8 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;
 }
 
-test('the evidence package inventory is explicit and has ten manifests', () => {
-  assert.equal(EVIDENCE_PACKAGES.length, 10);
+test('the evidence package inventory is explicit and has eleven manifests', () => {
+  assert.equal(EVIDENCE_PACKAGES.length, 11);
   for (const [directory, expectedName] of EVIDENCE_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);
