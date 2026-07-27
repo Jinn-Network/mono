@@ -14,6 +14,7 @@ import {
 import { cloneVersionedPublicationJournalEntry } from "./journal.js";
 import {
   createPublicationOperation,
+  isEvidencePublicationErrorCode,
   type PublicationOperation,
 } from "./operation.js";
 import type {
@@ -36,10 +37,7 @@ import {
 } from "./validation.js";
 
 function journalConflict(error: unknown): boolean {
-  return (
-    error instanceof EvidencePublicationError &&
-    error.code === "JOURNAL_CONFLICT"
-  );
+  return isEvidencePublicationErrorCode(error, "JOURNAL_CONFLICT");
 }
 
 function sinkViolation(message: string, cause?: unknown): never {

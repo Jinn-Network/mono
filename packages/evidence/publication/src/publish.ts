@@ -10,6 +10,7 @@ import { EvidencePublicationError } from "./errors.js";
 import { normalizePublishInput } from "./identities.js";
 import {
   createPublicationOperation,
+  isEvidencePublicationErrorCode,
   type PublicationOperation,
 } from "./operation.js";
 import {
@@ -29,10 +30,7 @@ import {
 } from "./validation.js";
 
 function journalConflict(error: unknown): boolean {
-  return (
-    error instanceof EvidencePublicationError &&
-    error.code === "JOURNAL_CONFLICT"
-  );
+  return isEvidencePublicationErrorCode(error, "JOURNAL_CONFLICT");
 }
 
 function sameRecord(

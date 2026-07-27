@@ -11,6 +11,7 @@ import {
 } from "@jinn-network/evidence-repository";
 
 import { EvidencePublicationError } from "./errors.js";
+import { isEvidencePublicationErrorCode } from "./operation.js";
 import type {
   AnnouncementMember,
   NormalizedPublishInput,
@@ -251,10 +252,7 @@ export function snapshotPreparedAnnouncement(
       expectedProfile,
     );
   } catch (cause) {
-    if (
-      cause instanceof EvidencePublicationError &&
-      cause.code === "SINK_PROTOCOL_VIOLATION"
-    ) {
+    if (isEvidencePublicationErrorCode(cause, "SINK_PROTOCOL_VIOLATION")) {
       throw cause;
     }
     throw new EvidencePublicationError(

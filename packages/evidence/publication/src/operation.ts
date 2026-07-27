@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isProxy } from "node:util/types";
+
 import {
   EvidenceRepositoryError,
   type RepositoryOperationOptions,
@@ -6,6 +8,7 @@ import {
 
 import {
   EvidencePublicationError,
+  type EvidencePublicationErrorCode,
 } from "./errors.js";
 
 export interface PublicationOperation {
@@ -23,6 +26,68 @@ const abortSignalAbortedGetter = Object.getOwnPropertyDescriptor(
 )?.get;
 const addEventListener = EventTarget.prototype.addEventListener;
 const removeEventListener = EventTarget.prototype.removeEventListener;
+const evidenceRepositoryErrorPrototype = EvidenceRepositoryError.prototype;
+const evidencePublicationErrorPrototype = EvidencePublicationError.prototype;
+const missingDataProperty = Symbol("missing data property");
+
+function isObjectLike(value: unknown): value is object {
+  return (
+    (typeof value === "object" && value !== null) ||
+    typeof value === "function"
+  );
+}
+
+function hasOrdinaryPrototype(
+  value: unknown,
+  expectedPrototype: object,
+): boolean {
+  if (!isObjectLike(value) || isProxy(value)) return false;
+  let current: object | null;
+  try {
+    current = Reflect.getPrototypeOf(value);
+  } catch {
+    return false;
+  }
+  while (current !== null) {
+    if (isProxy(current)) return false;
+    if (current === expectedPrototype) return true;
+    try {
+      current = Reflect.getPrototypeOf(current);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+function ownDataProperty(
+  value: unknown,
+  key: PropertyKey,
+): unknown | typeof missingDataProperty {
+  if (!isObjectLike(value) || isProxy(value)) return missingDataProperty;
+  try {
+    const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+    return descriptor !== undefined && "value" in descriptor
+      ? descriptor.value
+      : missingDataProperty;
+  } catch {
+    return missingDataProperty;
+  }
+}
+
+function isEvidenceRepositoryError(value: unknown): boolean {
+  return hasOrdinaryPrototype(value, evidenceRepositoryErrorPrototype);
+}
+
+export function isEvidencePublicationErrorCode(
+  value: unknown,
+  code: EvidencePublicationErrorCode,
+): boolean {
+  return (
+    hasOrdinaryPrototype(value, evidencePublicationErrorPrototype) &&
+    ownDataProperty(value, "code") === code
+  );
+}
 
 function intrinsicSignalAborted(signal: AbortSignal): boolean {
   if (abortSignalAbortedGetter === undefined) {
@@ -102,7 +167,7 @@ export function createPublicationOperation(
       try {
         result = await operation();
       } catch (error) {
-        if (error instanceof EvidenceRepositoryError) {
+        if (isEvidenceRepositoryError(error)) {
           throw error;
         }
         assertActive();

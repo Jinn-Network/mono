@@ -49,6 +49,15 @@ interface FailureScenario {
   readonly placementEffectCount: () => number;
 }
 
+interface PendingPublication {
+  readonly repository: InMemoryEvidenceRepository;
+  readonly journal: InMemoryPublicationJournalStore;
+  readonly sink: InMemoryAnnouncementSink;
+  readonly bundleKey: ReturnType<typeof normalizePublishInput>["bundleKey"];
+}
+
+class JournalConflictSubclass extends EvidencePublicationError {}
+
 function publicationInput(signal?: AbortSignal): PublishInput {
   const record = Uint8Array.of(10, 11);
   const artifact = Uint8Array.of(20, 21);
@@ -271,6 +280,51 @@ async function failureScenario(
   };
 }
 
+async function pendingPublication(): Promise<PendingPublication> {
+  const repository = new InMemoryEvidenceRepository();
+  const journal = new InMemoryPublicationJournalStore();
+  const sink = publicationSink();
+  let losePlacementResponse = true;
+  const uncertainSink: AnnouncementSink = {
+    medium: sink.medium,
+    profile: sink.profile,
+    capabilities: sink.capabilities,
+    prepare: sink.prepare.bind(sink),
+    place: async (prepared, idempotencyKey, options) => {
+      const result = await sink.place(
+        prepared,
+        idempotencyKey,
+        options,
+      );
+      if (losePlacementResponse) {
+        losePlacementResponse = false;
+        throw new EvidencePublicationError(
+          "PLACEMENT_UNCERTAIN",
+          "The fixture discarded the first placement response.",
+        );
+      }
+      return result;
+    },
+    reconcile: sink.reconcile.bind(sink),
+  };
+  const input = publicationInput();
+  const setupError = await captureRejection(
+    publish(input, { repository, journal, sink: uncertainSink }),
+  );
+  if (
+    !(setupError instanceof EvidencePublicationError) ||
+    setupError.code !== "PLACEMENT_UNCERTAIN"
+  ) {
+    throw setupError;
+  }
+  return {
+    repository,
+    journal,
+    sink,
+    bundleKey: normalizePublishInput(input).bundleKey,
+  };
+}
+
 describe("awaited publication cancellation precedence", () => {
   test.each(DEPENDENCY_STAGES)(
     "maps latched cancellation after rejected %s to publication cancellation",
@@ -381,6 +435,330 @@ describe("awaited publication cancellation precedence", () => {
     } finally {
       EventTarget.prototype.removeEventListener = originalRemove;
     }
+  });
+});
+
+describe("trap-free rejected-value classification", () => {
+  test("maps a cancelled Proxy rejection without invoking its prototype trap", async () => {
+    const controller = new AbortController();
+    const trapFailure = new Error("prototype trap must not run");
+    let trapCalls = 0;
+    const rejection = new Proxy(new Error("proxied rejection"), {
+      getPrototypeOf: () => {
+        trapCalls += 1;
+        throw trapFailure;
+      },
+    });
+    const scenario = await failureScenario(
+      "sink-prepare",
+      rejection,
+      controller,
+    );
+
+    const caught = await captureRejection(scenario.invoke());
+
+    expect(trapCalls).toBe(0);
+    expect(
+      caught instanceof EvidencePublicationError &&
+      caught.code === "OPERATION_ABORTED",
+    ).toBe(true);
+  });
+
+  test("preserves an uncancelled Proxy journal rejection without invoking its prototype trap", async () => {
+    const trapFailure = new Error("prototype trap must not run");
+    let trapCalls = 0;
+    const rejection = new Proxy(new Error("proxied journal rejection"), {
+      getPrototypeOf: () => {
+        trapCalls += 1;
+        throw trapFailure;
+      },
+    });
+    const scenario = await failureScenario("journal-create", rejection);
+
+    const caught = await captureRejection(scenario.invoke());
+
+    expect(trapCalls).toBe(0);
+    expect(Object.is(caught, rejection)).toBe(true);
+  });
+
+  test("stops before a Proxy in an ordinary error prototype chain", async () => {
+    const controller = new AbortController();
+    const trapFailure = new Error("prototype trap must not run");
+    let trapCalls = 0;
+    const proxiedPrototype = new Proxy(
+      Object.create(EvidenceRepositoryError.prototype) as object,
+      {
+        getPrototypeOf: () => {
+          trapCalls += 1;
+          throw trapFailure;
+        },
+      },
+    );
+    const rejection = new Error("ordinary error with proxied prototype");
+    Object.setPrototypeOf(rejection, proxiedPrototype);
+    const scenario = await failureScenario(
+      "sink-prepare",
+      rejection,
+      controller,
+    );
+
+    const caught = await captureRejection(scenario.invoke());
+
+    expect(trapCalls).toBe(0);
+    expect(
+      caught instanceof EvidencePublicationError &&
+      caught.code === "OPERATION_ABORTED",
+    ).toBe(true);
+  });
+
+  test("does not classify the repository error prototype as an instance during cancellation", async () => {
+    const controller = new AbortController();
+    const rejection = EvidenceRepositoryError.prototype;
+    const scenario = await failureScenario(
+      "sink-prepare",
+      rejection,
+      controller,
+    );
+
+    const caught = await captureRejection(scenario.invoke());
+
+    expect(
+      caught instanceof EvidencePublicationError &&
+      caught.code === "OPERATION_ABORTED",
+    ).toBe(true);
+  });
+
+  test("preserves the uncancelled repository error prototype rejection", async () => {
+    const rejection = EvidenceRepositoryError.prototype;
+    const scenario = await failureScenario("sink-prepare", rejection);
+
+    const caught = await captureRejection(scenario.invoke());
+
+    expect(caught).toBe(rejection);
+  });
+
+  test("maps a cancelled revoked Proxy rejection without observing it", async () => {
+    const controller = new AbortController();
+    const revocable = Proxy.revocable(
+      new Error("revoked rejection"),
+      {},
+    );
+    revocable.revoke();
+    const scenario = await failureScenario(
+      "sink-prepare",
+      revocable.proxy,
+      controller,
+    );
+
+    const caught = await captureRejection(scenario.invoke());
+
+    expect(
+      caught instanceof EvidencePublicationError &&
+      caught.code === "OPERATION_ABORTED",
+    ).toBe(true);
+  });
+
+  test("preserves an uncancelled revoked Proxy journal rejection", async () => {
+    const revocable = Proxy.revocable(
+      new Error("revoked journal rejection"),
+      {},
+    );
+    revocable.revoke();
+    const scenario = await failureScenario(
+      "journal-create",
+      revocable.proxy,
+    );
+
+    const observed = await scenario.invoke().then(
+      () => {
+        throw new Error("Expected the operation to reject.");
+      },
+      (reason: unknown) => ({ reason }),
+    );
+
+    expect(Object.is(observed.reason, revocable.proxy)).toBe(true);
+  });
+
+  test("preserves an ordinary repository-error subclass during cancellation", async () => {
+    class RepositoryErrorSubclass extends EvidenceRepositoryError {}
+    const controller = new AbortController();
+    const cause = new Error("repository subclass cause");
+    const rejection = new RepositoryErrorSubclass(
+      "DEPENDENCY_UNAVAILABLE",
+      "repository subclass rejection",
+      { cause },
+    );
+    const scenario = await failureScenario(
+      "sink-prepare",
+      rejection,
+      controller,
+    );
+
+    const caught = await captureRejection(scenario.invoke());
+
+    expect(caught).toBe(rejection);
+    expect(caught).toBeInstanceOf(RepositoryErrorSubclass);
+    expect((caught as RepositoryErrorSubclass).code).toBe(
+      "DEPENDENCY_UNAVAILABLE",
+    );
+    expect((caught as RepositoryErrorSubclass).cause).toBe(cause);
+  });
+
+  test("publish converges on an ordinary journal-conflict subclass", async () => {
+    const repository = new InMemoryEvidenceRepository();
+    const journalDelegate = new InMemoryPublicationJournalStore();
+    const sink = publicationSink();
+    let conflict = true;
+    const journal: PublicationJournalStore = {
+      load: journalDelegate.load.bind(journalDelegate),
+      create: async (entry, options) => {
+        const created = await journalDelegate.create(entry, options);
+        if (conflict) {
+          conflict = false;
+          throw new JournalConflictSubclass(
+            "JOURNAL_CONFLICT",
+            "fixture concurrent creation",
+          );
+        }
+        return created;
+      },
+      compareAndSwap: journalDelegate.compareAndSwap.bind(journalDelegate),
+    };
+
+    const receipt = await publish(
+      publicationInput(),
+      { repository, journal, sink },
+    );
+
+    expect(receipt.completed).toBe(true);
+    expect(sink.placementEffectCount).toBe(1);
+  });
+
+  test("wraps a Proxy thrown during prepared-frame validation without observing it", async () => {
+    let validationTrapCalls = 0;
+    let causeTrapCalls = 0;
+    const secondary = new Error("cause prototype trap must not run");
+    const cause = new Proxy(new Error("prepared validation rejection"), {
+      getPrototypeOf: () => {
+        causeTrapCalls += 1;
+        throw secondary;
+      },
+    });
+    const framePrototype = new Proxy({}, {
+      getPrototypeOf: () => {
+        validationTrapCalls += 1;
+        throw cause;
+      },
+    });
+    const frameBytes = Object.create(framePrototype) as unknown as Uint8Array;
+    const delegate = publicationSink();
+    const sink: AnnouncementSink = {
+      medium: delegate.medium,
+      profile: delegate.profile,
+      capabilities: delegate.capabilities,
+      prepare: async (members, context, options) => ({
+        ...(await delegate.prepare(members, context, options)),
+        frameBytes,
+      }),
+      place: delegate.place.bind(delegate),
+      reconcile: delegate.reconcile.bind(delegate),
+    };
+
+    const caught = await captureRejection(
+      prepareAnnouncementPartitions(
+        recordMembers(),
+        "urn:jinn:publication-destination:prepared-frame-proxy",
+        sink,
+      ),
+    );
+
+    expect(validationTrapCalls).toBe(1);
+    expect(causeTrapCalls).toBe(0);
+    expect(
+      caught instanceof EvidencePublicationError &&
+      caught.code === "SINK_PROTOCOL_VIOLATION"
+    ).toBe(true);
+    expect((caught as Error).cause).toBe(cause);
+  });
+
+  test("reconcile preserves an uncancelled Proxy CAS rejection without invoking its prototype trap", async () => {
+    const pending = await pendingPublication();
+    const trapFailure = new Error("prototype trap must not run");
+    let trapCalls = 0;
+    let reject = true;
+    const rejection = new Proxy(new Error("proxied CAS rejection"), {
+      getPrototypeOf: () => {
+        trapCalls += 1;
+        throw trapFailure;
+      },
+    });
+    const journal: PublicationJournalStore = {
+      load: pending.journal.load.bind(pending.journal),
+      create: pending.journal.create.bind(pending.journal),
+      compareAndSwap: async (expected, next, options) => {
+        const stored = await pending.journal.compareAndSwap(
+          expected,
+          next,
+          options,
+        );
+        if (reject) {
+          reject = false;
+          throw rejection;
+        }
+        return stored;
+      },
+    };
+
+    const caught = await captureRejection(
+      reconcile(pending.bundleKey, {
+        repository: pending.repository,
+        journal,
+        sink: pending.sink,
+      }),
+    );
+
+    expect(trapCalls).toBe(0);
+    expect(Object.is(caught, rejection)).toBe(true);
+    const receipt = await reconcile(pending.bundleKey, {
+      repository: pending.repository,
+      journal: pending.journal,
+      sink: pending.sink,
+    });
+    expect(receipt.completed).toBe(true);
+    expect(pending.sink.placementEffectCount).toBe(1);
+  });
+
+  test("reconcile converges on an ordinary journal-conflict subclass", async () => {
+    const pending = await pendingPublication();
+    let conflict = true;
+    const journal: PublicationJournalStore = {
+      load: pending.journal.load.bind(pending.journal),
+      create: pending.journal.create.bind(pending.journal),
+      compareAndSwap: async (expected, next, options) => {
+        const stored = await pending.journal.compareAndSwap(
+          expected,
+          next,
+          options,
+        );
+        if (conflict) {
+          conflict = false;
+          throw new JournalConflictSubclass(
+            "JOURNAL_CONFLICT",
+            "fixture concurrent checkpoint",
+          );
+        }
+        return stored;
+      },
+    };
+
+    const receipt = await reconcile(pending.bundleKey, {
+      repository: pending.repository,
+      journal,
+      sink: pending.sink,
+    });
+
+    expect(receipt.completed).toBe(true);
+    expect(pending.sink.placementEffectCount).toBe(1);
   });
 });
 
