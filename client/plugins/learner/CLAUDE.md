@@ -15,8 +15,9 @@ When a session starts, the harness adapter provides the task payload and paths. 
 - `explorer-prompt.md` — info gatherer (used by Orient and Debrief, parallel-dispatched)
 - `strategist-prompt.md`, `planner-prompt.md`, `step-worker-prompt.md`, `analyst-prompt.md`, `promoter-prompt.md`, `consolidator-prompt.md` — one per specialized role
 
-**Hook:**
-- `hooks/session-start` — runs once at session start; ensures `implStateDir` is a git repo and sets `claude-code-learner` author identity.
+**Hooks:**
+- `hooks/session-start` — runs once at session start; ensures `implStateDir` is a git repo, sets `claude-code-learner` author identity, and records `$WORKING_DIR/repo` HEAD into `.jinn/session-repo-base-head` when present.
+- `hooks/post-tool-use-failure` — on failed Bash test commands, appends non-empty working-tree diffs vs that base HEAD into `.jinn/intermediate-failure-diffs.json` for harvest (`Solution.intermediateFailureDiffs`). Codex/Hermes stay honest omit/`[]` until follow-ups wire the same store contract.
 
 ## Conventions
 

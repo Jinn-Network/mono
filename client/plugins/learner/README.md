@@ -6,7 +6,21 @@ A drop-in plugin for any agent harness that supports skills + subagent dispatch 
 
 - **1 orchestrator skill** — `skills/learn/SKILL.md`. Drives the seven-phase pipeline end-to-end inside one harness session.
 - **7 sibling subagent prompts** — `skills/learn/<role>-prompt.md` for `explorer`, `strategist`, `planner`, `step-worker`, `analyst`, `promoter`, `consolidator`. Each is the prompt body the orchestrator passes to a fresh-context subagent dispatch.
-- **1 hook** — `hooks/session-start` initializes `implStateDir` as a git repo and sets author identity.
+- **2 hooks** — `hooks/session-start` initializes `implStateDir` as a git repo, sets author identity, and records coding-checkout base HEAD; `hooks/post-tool-use-failure` captures intermediate failure diffs for failed test Bash commands.
+
+## intermediateFailureDiffs (§10 field 4)
+
+On Claude Code, `PostToolUseFailure` (Bash) appends non-empty working-tree
+diffs vs session-start `repo` HEAD into `.jinn/intermediate-failure-diffs.json`
+when the failed command is test-like (`pytest` / `yarn test` / …). Harvest
+attaches the list onto `Solution.intermediateFailureDiffs`.
+
+**Codex / Hermes (this Issue):** honest omit / empty field 4. Follow-ups:
+
+- `feat: emit intermediateFailureDiffs from Codex coding harness`
+- `feat: emit intermediateFailureDiffs from Hermes coding harness` (Hermes
+  `post_tool_call` plugin writing the same `.jinn/intermediate-failure-diffs.json`
+  contract so harvest lights up without LearnerHarness)
 
 ## Installing
 
