@@ -27,3 +27,12 @@ export type {
   PreparedCodexWorkspace,
   PrepareCodexWorkspaceInput,
 } from './adapters/codex-workspace.js';
+export {
+  isTestCommand,
+  workingTreeDiff,
+  appendIntermediateFailureDiff,
+  readIntermediateFailureDiffs,
+  attachIntermediateFailureDiffs,
+  INTERMEDIATE_FAILURE_DIFFS_FILE,
+  SESSION_REPO_BASE_HEAD_FILE,
+} from './intermediate-failure-diffs.js';
