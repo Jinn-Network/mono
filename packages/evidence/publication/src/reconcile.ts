@@ -6,15 +6,16 @@ import type {
   Sha256Digest,
 } from "@jinn-network/evidence-repository";
 
-import {
-  assertPublicationOperationActive,
-  EvidencePublicationError,
-} from "./errors.js";
+import { EvidencePublicationError } from "./errors.js";
 import {
   derivePlacementIdempotencyKey,
   snapshotPreparedAnnouncement,
 } from "./identities.js";
 import { cloneVersionedPublicationJournalEntry } from "./journal.js";
+import {
+  createPublicationOperation,
+  type PublicationOperation,
+} from "./operation.js";
 import type {
   OpaqueSinkState,
   PendingAnnouncement,
@@ -32,7 +33,6 @@ import {
   assertAbsoluteIri,
   parsePublicationDigest,
   snapshotExactBytes,
-  snapshotPublicationOperationOptions,
 } from "./validation.js";
 
 function journalConflict(error: unknown): boolean {
@@ -299,11 +299,14 @@ function snapshotReconcileResult(
 async function loadEntry(
   bundleKey: Sha256Digest,
   dependencies: PublicationDependencies,
-  options?: RepositoryOperationOptions,
+  operation: PublicationOperation,
 ): Promise<VersionedPublicationJournalEntry> {
-  assertPublicationOperationActive(options);
-  const entry = await dependencies.journal.load(bundleKey, options);
-  assertPublicationOperationActive(options);
+  operation.assertActive();
+  const entry = await dependencies.journal.load(
+    bundleKey,
+    operation.dependencyOptions,
+  );
+  operation.assertActive();
   if (entry === null) {
     throw new EvidencePublicationError(
       "JOURNAL_CORRUPT",
@@ -317,20 +320,20 @@ async function checkpoint(
   expected: VersionedPublicationJournalEntry,
   next: PublicationJournalEntry,
   dependencies: PublicationDependencies,
-  options?: RepositoryOperationOptions,
+  operation: PublicationOperation,
 ): Promise<VersionedPublicationJournalEntry> {
-  assertPublicationOperationActive(options);
+  operation.assertActive();
   try {
     const versioned = await dependencies.journal.compareAndSwap(
       expected,
       next,
-      options,
+      operation.dependencyOptions,
     );
-    assertPublicationOperationActive(options);
+    operation.assertActive();
     return versioned;
   } catch (error) {
     if (!journalConflict(error)) throw error;
-    return loadEntry(expected.bundleKey, dependencies, options);
+    return loadEntry(expected.bundleKey, dependencies, operation);
   }
 }
 
@@ -338,24 +341,28 @@ async function checkpointNewIntent(
   expected: VersionedPublicationJournalEntry,
   next: PublicationJournalEntry,
   dependencies: PublicationDependencies,
-  options?: RepositoryOperationOptions,
+  operation: PublicationOperation,
 ): Promise<{
   readonly entry: VersionedPublicationJournalEntry;
   readonly writtenByCaller: boolean;
 }> {
-  assertPublicationOperationActive(options);
+  operation.assertActive();
   try {
     const entry = await dependencies.journal.compareAndSwap(
       expected,
       next,
-      options,
+      operation.dependencyOptions,
     );
-    assertPublicationOperationActive(options);
+    operation.assertActive();
     return { entry, writtenByCaller: true };
   } catch (error) {
     if (!journalConflict(error)) throw error;
     return {
-      entry: await loadEntry(expected.bundleKey, dependencies, options),
+      entry: await loadEntry(
+        expected.bundleKey,
+        dependencies,
+        operation,
+      ),
       writtenByCaller: false,
     };
   }
@@ -484,9 +491,9 @@ async function placeAfterIntent(
   partition: PreparedPublicationPartition,
   idempotencyKey: Sha256Digest,
   dependencies: PublicationDependencies,
-  options?: RepositoryOperationOptions,
+  operation: PublicationOperation,
 ): Promise<VersionedPublicationJournalEntry> {
-  assertPublicationOperationActive(options);
+  operation.assertActive();
   const expectedPrepared = snapshotPreparedAnnouncement(
     partition.prepared,
     partition.prepared.members,
@@ -502,9 +509,9 @@ async function placeAfterIntent(
   const result = await dependencies.sink.place(
     suppliedPrepared,
     idempotencyKey,
-    options,
+    operation.dependencyOptions,
   );
-  assertPublicationOperationActive(options);
+  operation.assertActive();
   const checked = snapshotPlaceResult(
     result,
     idempotencyKey,
@@ -525,7 +532,7 @@ async function placeAfterIntent(
             pending: checked.pending,
           }),
           dependencies,
-          options,
+          operation,
         );
     if (
       checkpointed.preparedPartitions?.[partition.ordinal]?.placement
@@ -546,16 +553,15 @@ async function placeAfterIntent(
       placement: checked.placement,
     }),
     dependencies,
-    options,
+    operation,
   );
 }
 
 export async function continuePublicationPlacements(
   initial: VersionedPublicationJournalEntry,
   dependencies: PublicationDependencies,
-  options?: RepositoryOperationOptions,
+  operation: PublicationOperation,
 ): Promise<PublicationReceipt> {
-  const operationOptions = snapshotPublicationOperationOptions(options);
   let entry = initial;
 
   while (!entry.completed) {
@@ -568,7 +574,7 @@ export async function continuePublicationPlacements(
         entry,
         { ...entry, completed: true },
         dependencies,
-        operationOptions,
+        operation,
       );
       continue;
     }
@@ -590,7 +596,7 @@ export async function continuePublicationPlacements(
           pending: intent,
         }),
         dependencies,
-        operationOptions,
+        operation,
       );
       entry = checkpointed.entry;
       if (checkpointed.writtenByCaller) {
@@ -599,7 +605,7 @@ export async function continuePublicationPlacements(
           entry.preparedPartitions![partition.ordinal]!,
           idempotencyKey,
           dependencies,
-          operationOptions,
+          operation,
         );
       }
       continue;
@@ -617,7 +623,7 @@ export async function continuePublicationPlacements(
       );
     }
 
-    assertPublicationOperationActive(operationOptions);
+    operation.assertActive();
     const expectedPrepared = snapshotPreparedAnnouncement(
       partition.prepared,
       partition.prepared.members,
@@ -645,9 +651,9 @@ export async function continuePublicationPlacements(
     const result = await dependencies.sink.reconcile(
       suppliedPrepared,
       suppliedPending,
-      operationOptions,
+      operation.dependencyOptions,
     );
-    assertPublicationOperationActive(operationOptions);
+    operation.assertActive();
     const checked = snapshotReconcileResult(
       result,
       idempotencyKey,
@@ -660,7 +666,7 @@ export async function continuePublicationPlacements(
         partition,
         idempotencyKey,
         dependencies,
-        operationOptions,
+        operation,
       );
       continue;
     }
@@ -686,7 +692,7 @@ export async function continuePublicationPlacements(
             pending: checked.pending,
           }),
           dependencies,
-          operationOptions,
+          operation,
         );
         const checkpointedPlacement = entry.preparedPartitions?.find(
           ({ ordinal }) => ordinal === partition.ordinal,
@@ -708,7 +714,7 @@ export async function continuePublicationPlacements(
         placement: checked.placement,
       }),
       dependencies,
-      operationOptions,
+      operation,
     );
   }
 
@@ -721,19 +727,23 @@ export async function reconcile(
   dependencies: PublicationDependencies,
   options?: RepositoryOperationOptions,
 ): Promise<PublicationReceipt> {
-  const operationOptions = snapshotPublicationOperationOptions(options);
-  const bundleKey = parsePublicationDigest(
-    untrustedBundleKey,
-    "Publication bundle key",
-  );
-  const entry = await loadEntry(
-    bundleKey,
-    dependencies,
-    operationOptions,
-  );
-  return continuePublicationPlacements(
-    entry,
-    dependencies,
-    operationOptions,
-  );
+  const operation = createPublicationOperation(options);
+  try {
+    const bundleKey = parsePublicationDigest(
+      untrustedBundleKey,
+      "Publication bundle key",
+    );
+    const entry = await loadEntry(
+      bundleKey,
+      dependencies,
+      operation,
+    );
+    return await continuePublicationPlacements(
+      entry,
+      dependencies,
+      operation,
+    );
+  } finally {
+    operation.close();
+  }
 }

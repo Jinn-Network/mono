@@ -3,16 +3,18 @@ import {
   EvidenceRepositoryError,
   type EvidenceArtifactReference,
   type EvidenceRecordReference,
-  type RepositoryOperationOptions,
   type RepositoryWriteReceipt,
 } from "@jinn-network/evidence-repository";
 
-import {
-  assertPublicationOperationActive,
-  EvidencePublicationError,
-} from "./errors.js";
+import { EvidencePublicationError } from "./errors.js";
 import { normalizePublishInput } from "./identities.js";
-import { prepareAnnouncementPartitions } from "./partition.js";
+import {
+  createPublicationOperation,
+  type PublicationOperation,
+} from "./operation.js";
+import {
+  prepareAnnouncementPartitionsWithOperation,
+} from "./partition-internal.js";
 import { continuePublicationPlacements } from "./reconcile.js";
 import type {
   NormalizedPublishInput,
@@ -24,7 +26,6 @@ import type {
 } from "./types.js";
 import {
   readRepositoryCapabilities,
-  snapshotPublicationOperationOptions,
 } from "./validation.js";
 
 function journalConflict(error: unknown): boolean {
@@ -123,14 +124,14 @@ function preflightRemainingBytes(
 async function loadEntry(
   normalized: NormalizedPublishInput,
   dependencies: PublicationDependencies,
-  options: RepositoryOperationOptions,
+  operation: PublicationOperation,
 ): Promise<VersionedPublicationJournalEntry | null> {
-  assertPublicationOperationActive(options);
+  operation.assertActive();
   const entry = await dependencies.journal.load(
     normalized.bundleKey,
-    options,
+    operation.dependencyOptions,
   );
-  assertPublicationOperationActive(options);
+  operation.assertActive();
   return entry;
 }
 
@@ -138,7 +139,7 @@ async function createEntry(
   normalized: NormalizedPublishInput,
   maxObjectBytes: number | undefined,
   dependencies: PublicationDependencies,
-  options: RepositoryOperationOptions,
+  operation: PublicationOperation,
 ): Promise<VersionedPublicationJournalEntry> {
   const initial: PublicationJournalEntry = {
     schemaVersion: 1,
@@ -153,14 +154,21 @@ async function createEntry(
     storedRecords: [],
     completed: false,
   };
-  assertPublicationOperationActive(options);
+  operation.assertActive();
   try {
-    const created = await dependencies.journal.create(initial, options);
-    assertPublicationOperationActive(options);
+    const created = await dependencies.journal.create(
+      initial,
+      operation.dependencyOptions,
+    );
+    operation.assertActive();
     return created;
   } catch (error) {
     if (!journalConflict(error)) throw error;
-    const concurrent = await loadEntry(normalized, dependencies, options);
+    const concurrent = await loadEntry(
+      normalized,
+      dependencies,
+      operation,
+    );
     if (concurrent === null) throw error;
     validateExistingEntry(concurrent, normalized);
     return concurrent;
@@ -172,20 +180,24 @@ async function checkpoint(
   next: PublicationJournalEntry,
   normalized: NormalizedPublishInput,
   dependencies: PublicationDependencies,
-  options: RepositoryOperationOptions,
+  operation: PublicationOperation,
 ): Promise<VersionedPublicationJournalEntry> {
-  assertPublicationOperationActive(options);
+  operation.assertActive();
   try {
     const versioned = await dependencies.journal.compareAndSwap(
       expected,
       next,
-      options,
+      operation.dependencyOptions,
     );
-    assertPublicationOperationActive(options);
+    operation.assertActive();
     return versioned;
   } catch (error) {
     if (!journalConflict(error)) throw error;
-    const concurrent = await loadEntry(normalized, dependencies, options);
+    const concurrent = await loadEntry(
+      normalized,
+      dependencies,
+      operation,
+    );
     if (concurrent === null) {
       throw new EvidencePublicationError(
         "JOURNAL_CORRUPT",
@@ -228,19 +240,19 @@ async function storeObjects(
   initial: VersionedPublicationJournalEntry,
   normalized: NormalizedPublishInput,
   dependencies: PublicationDependencies,
-  options: RepositoryOperationOptions,
+  operation: PublicationOperation,
 ): Promise<VersionedPublicationJournalEntry> {
   let entry = initial;
 
   while (entry.storedArtifacts.length < normalized.artifacts.length) {
     const index = entry.storedArtifacts.length;
     const artifact = normalized.artifacts[index]!;
-    assertPublicationOperationActive(options);
+    operation.assertActive();
     const receipt = await dependencies.repository.putArtifact(
       artifact.bytes,
-      options,
+      operation.dependencyOptions,
     );
-    assertPublicationOperationActive(options);
+    operation.assertActive();
     assertArtifactReceipt(
       receipt,
       artifact.reference,
@@ -260,20 +272,20 @@ async function storeObjects(
       },
       normalized,
       dependencies,
-      options,
+      operation,
     );
   }
 
   while (entry.storedRecords.length < normalized.records.length) {
     const index = entry.storedRecords.length;
     const record = normalized.records[index]!;
-    assertPublicationOperationActive(options);
+    operation.assertActive();
     const receipt = await dependencies.repository.putRecord(
       record.reference.family,
       record.bytes,
-      options,
+      operation.dependencyOptions,
     );
-    assertPublicationOperationActive(options);
+    operation.assertActive();
     assertRecordReceipt(
       receipt,
       record.reference,
@@ -293,7 +305,7 @@ async function storeObjects(
       },
       normalized,
       dependencies,
-      options,
+      operation,
     );
   }
 
@@ -304,22 +316,22 @@ async function preparePlan(
   initial: VersionedPublicationJournalEntry,
   normalized: NormalizedPublishInput,
   dependencies: PublicationDependencies,
-  options: RepositoryOperationOptions,
+  operation: PublicationOperation,
 ): Promise<VersionedPublicationJournalEntry> {
   let entry = initial;
   while (entry.preparedPartitions === undefined) {
-    const partitions = await prepareAnnouncementPartitions(
+    const partitions = await prepareAnnouncementPartitionsWithOperation(
       entry.records.map((reference) => ({ reference })),
       entry.destination,
       dependencies.sink,
-      options,
+      operation,
     );
     entry = await checkpoint(
       entry,
       { ...entry, preparedPartitions: partitions },
       normalized,
       dependencies,
-      options,
+      operation,
     );
   }
   return entry;
@@ -329,47 +341,55 @@ export async function publish(
   input: PublishInput,
   dependencies: PublicationDependencies,
 ): Promise<PublicationReceipt> {
-  const options = snapshotPublicationOperationOptions(input);
-  const normalized = normalizePublishInput(input);
-  assertPublicationOperationActive(options);
-  const capabilities = readRepositoryCapabilities(
-    dependencies.repository,
-  );
-  let entry = await loadEntry(normalized, dependencies, options);
+  const operation = createPublicationOperation(input);
+  try {
+    const normalized = normalizePublishInput(input);
+    operation.assertActive();
+    const capabilities = readRepositoryCapabilities(
+      dependencies.repository,
+    );
+    let entry = await loadEntry(normalized, dependencies, operation);
 
-  if (entry === null) {
-    preflightRemainingBytes(
-      normalized,
-      capabilities.maxObjectBytes,
-    );
-    entry = await createEntry(
-      normalized,
-      capabilities.maxObjectBytes,
-      dependencies,
-      options,
-    );
-  } else {
+    if (entry === null) {
+      preflightRemainingBytes(
+        normalized,
+        capabilities.maxObjectBytes,
+      );
+      entry = await createEntry(
+        normalized,
+        capabilities.maxObjectBytes,
+        dependencies,
+        operation,
+      );
+    } else {
+      validateExistingEntry(entry, normalized);
+      preflightRemainingBytes(
+        normalized,
+        capabilities.maxObjectBytes,
+        entry.storedArtifacts.length,
+        entry.storedRecords.length,
+      );
+    }
+
     validateExistingEntry(entry, normalized);
-    preflightRemainingBytes(
+    entry = await storeObjects(
+      entry,
       normalized,
-      capabilities.maxObjectBytes,
-      entry.storedArtifacts.length,
-      entry.storedRecords.length,
+      dependencies,
+      operation,
     );
+    entry = await preparePlan(
+      entry,
+      normalized,
+      dependencies,
+      operation,
+    );
+    return await continuePublicationPlacements(
+      entry,
+      dependencies,
+      operation,
+    );
+  } finally {
+    operation.close();
   }
-
-  validateExistingEntry(entry, normalized);
-  entry = await storeObjects(
-    entry,
-    normalized,
-    dependencies,
-    options,
-  );
-  entry = await preparePlan(
-    entry,
-    normalized,
-    dependencies,
-    options,
-  );
-  return continuePublicationPlacements(entry, dependencies, options);
 }

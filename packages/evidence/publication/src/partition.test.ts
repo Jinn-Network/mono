@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { getEventListeners } from "node:events";
+
 import { createRecordReference } from "@jinn-network/evidence-repository";
 import { describe, expect, test } from "vitest";
 
@@ -11,6 +13,11 @@ import {
 } from "./testing.js";
 import type { AnnouncementSink } from "./types.js";
 
+const abortSignalAbortedGetter = Object.getOwnPropertyDescriptor(
+  AbortSignal.prototype,
+  "aborted",
+)?.get;
+
 function members(count: number) {
   return Array.from({ length: count }, (_unused, index) => ({
     reference: createRecordReference(
@@ -18,6 +25,35 @@ function members(count: number) {
       new Uint8Array([index + 1]),
     ),
   }));
+}
+
+function abortAndShadowSignal(
+  controller: AbortController,
+  signal: AbortSignal,
+): void {
+  controller.abort();
+  Object.defineProperties(signal, {
+    aborted: {
+      configurable: true,
+      value: false,
+    },
+    addEventListener: {
+      configurable: true,
+      value: () => {
+        throw new Error("shadowed addEventListener must not be used");
+      },
+    },
+    removeEventListener: {
+      configurable: true,
+      value: () => {
+        throw new Error("shadowed removeEventListener must not be used");
+      },
+    },
+  });
+  expect(
+    Reflect.apply(abortSignalAbortedGetter!, signal, []),
+  ).toBe(true);
+  expect(signal.aborted).toBe(false);
 }
 
 describe("exact announcement partitioning", () => {
@@ -90,7 +126,7 @@ describe("exact announcement partitioning", () => {
 
   test("honors cancellation around preparation", async () => {
     const controller = new AbortController();
-    controller.abort();
+    abortAndShadowSignal(controller, controller.signal);
     await expect(
       prepareAnnouncementPartitions(
         members(1),
@@ -155,6 +191,96 @@ describe("exact announcement partitioning", () => {
     expect(Object.isFrozen(receivedOptions)).toBe(true);
     expect(mutationResult).toBe(false);
     expect(callerOptions.signal).toBe(controller.signal);
+  });
+
+  test("latches cancellation when prepare shadows the native signal state", async () => {
+    const controller = new AbortController();
+    const frameBytes = Uint8Array.of(1, 2, 3);
+    const mutatingSink: AnnouncementSink = {
+      medium: "https://publication.test/mutation-medium",
+      profile: "https://publication.test/profiles/mutation/v1",
+      capabilities: {},
+      prepare: async (candidate, _context, options) => {
+        abortAndShadowSignal(controller, options!.signal!);
+        return {
+          medium: "https://publication.test/mutation-medium",
+          profile: "https://publication.test/profiles/mutation/v1",
+          members: candidate.map(({ reference }) => ({
+            reference: { ...reference },
+          })),
+          frameBytes: Uint8Array.from(frameBytes),
+          frameDigest: hashExactBytes(frameBytes),
+          frameSize: frameBytes.byteLength,
+        };
+      },
+      place: async () => {
+        throw new Error("unexpected placement");
+      },
+      reconcile: async () => {
+        throw new Error("unexpected reconciliation");
+      },
+    };
+
+    await expect(
+      prepareAnnouncementPartitions(
+        members(1),
+        "urn:jinn:publication-destination:partition-signal-shadow",
+        mutatingSink,
+        { signal: controller.signal },
+      ),
+    ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
+  });
+
+  test("removes the private abort listener after successful preparation", async () => {
+    const controller = new AbortController();
+    const sink = new InMemoryAnnouncementSink({
+      medium: "https://publication.test/medium",
+      profile: "https://publication.test/profiles/canonical-json/v1",
+    });
+
+    await prepareAnnouncementPartitions(
+      members(1),
+      "urn:jinn:publication-destination:partition-cleanup",
+      sink,
+      { signal: controller.signal },
+    );
+
+    expect(
+      getEventListeners(controller.signal, "abort"),
+    ).toHaveLength(0);
+  });
+
+  test("uses native event methods when the signal shadows listener methods", async () => {
+    const controller = new AbortController();
+    Object.defineProperties(controller.signal, {
+      addEventListener: {
+        configurable: true,
+        value: () => {
+          throw new Error("shadowed addEventListener must not be used");
+        },
+      },
+      removeEventListener: {
+        configurable: true,
+        value: () => {
+          throw new Error("shadowed removeEventListener must not be used");
+        },
+      },
+    });
+    const sink = new InMemoryAnnouncementSink({
+      medium: "https://publication.test/medium",
+      profile: "https://publication.test/profiles/canonical-json/v1",
+    });
+
+    await prepareAnnouncementPartitions(
+      members(1),
+      "urn:jinn:publication-destination:partition-shadowed-listeners",
+      sink,
+      { signal: controller.signal },
+    );
+
+    expect(
+      getEventListeners(controller.signal, "abort"),
+    ).toHaveLength(0);
   });
 
   test("isolates prepared-member and context validation from sink mutation", async () => {

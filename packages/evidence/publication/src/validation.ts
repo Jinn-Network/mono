@@ -5,17 +5,9 @@ import {
   parseSha256Digest,
   type EvidenceRepository,
   type EvidenceRepositoryCapabilities,
-  type RepositoryOperationOptions,
 } from "@jinn-network/evidence-repository";
 
 import { EvidencePublicationError } from "./errors.js";
-
-export function snapshotPublicationOperationOptions(
-  options?: RepositoryOperationOptions,
-): Readonly<RepositoryOperationOptions> {
-  const signal = options?.signal;
-  return Object.freeze({ signal });
-}
 
 export function exactBytesLength(value: unknown): number | undefined {
   if (isProxy(value) || !(value instanceof Uint8Array)) return undefined;

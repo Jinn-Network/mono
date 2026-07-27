@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { getEventListeners } from "node:events";
+
 import {
   createArtifactReference,
   createRecordReference,
@@ -24,8 +26,43 @@ import {
 import type {
   AnnouncementSink,
   PreparedAnnouncement,
+  PublicationJournalStore,
   PublishInput,
 } from "./types.js";
+
+const abortSignalAbortedGetter = Object.getOwnPropertyDescriptor(
+  AbortSignal.prototype,
+  "aborted",
+)?.get;
+
+function abortAndShadowSignal(
+  controller: AbortController,
+  signal: AbortSignal,
+): void {
+  controller.abort();
+  Object.defineProperties(signal, {
+    aborted: {
+      configurable: true,
+      value: false,
+    },
+    addEventListener: {
+      configurable: true,
+      value: () => {
+        throw new Error("shadowed addEventListener must not be used");
+      },
+    },
+    removeEventListener: {
+      configurable: true,
+      value: () => {
+        throw new Error("shadowed removeEventListener must not be used");
+      },
+    },
+  });
+  expect(
+    Reflect.apply(abortSignalAbortedGetter!, signal, []),
+  ).toBe(true);
+  expect(signal.aborted).toBe(false);
+}
 
 function immutableCapabilities(
   maxObjectBytes?: number,
@@ -275,18 +312,22 @@ describe("publish", () => {
 
   test("propagates a repository error as the same object", async () => {
     const repository = new RecordingRepository();
+    const controller = new AbortController();
     const expected = new EvidenceRepositoryError(
       "DEPENDENCY_UNAVAILABLE",
       "fixture unavailable",
       { cause: new Error("root cause") },
     );
-    repository.putArtifact = async () => {
+    repository.putArtifact = async (_bytes, options) => {
+      expect(
+        getEventListeners(options!.signal!, "abort"),
+      ).toHaveLength(1);
       throw expected;
     };
 
     let caught: unknown;
     try {
-      await publish(input(), {
+      await publish({ ...input(), signal: controller.signal }, {
         repository,
         sink: sink(),
         journal: new InMemoryPublicationJournalStore(),
@@ -296,6 +337,9 @@ describe("publish", () => {
     }
     expect(caught).toBe(expected);
     expect((caught as EvidenceRepositoryError).cause).toBe(expected.cause);
+    expect(
+      getEventListeners(controller.signal, "abort"),
+    ).toHaveLength(0);
   });
 
   test("rejects a mismatched repository receipt with a repository error", async () => {
@@ -476,6 +520,215 @@ describe("publish", () => {
     expect(receipt.completed).toBe(true);
     expect(delegate.placementEffectCount).toBe(1);
   });
+
+  test("latches cancellation when prepare shadows the native signal state", async () => {
+    const repository = new RecordingRepository();
+    const journal = new InMemoryPublicationJournalStore();
+    const delegate = sink();
+    const controller = new AbortController();
+    let mutate = true;
+    const mutatingSink: AnnouncementSink = {
+      medium: delegate.medium,
+      profile: delegate.profile,
+      capabilities: delegate.capabilities,
+      prepare: async (members, context, options) => {
+        const prepared = await delegate.prepare(members, context, options);
+        if (mutate) {
+          mutate = false;
+          abortAndShadowSignal(controller, options!.signal!);
+        }
+        return prepared;
+      },
+      place: delegate.place.bind(delegate),
+      reconcile: delegate.reconcile.bind(delegate),
+    };
+
+    await expect(
+      publish(
+        { ...input(), signal: controller.signal },
+        { repository, sink: mutatingSink, journal },
+      ),
+    ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
+
+    expect(delegate.placementEffectCount).toBe(0);
+    expect(journal.entries()[0]?.preparedPartitions).toBeUndefined();
+
+    const receipt = await publish(input(), {
+      repository,
+      sink: mutatingSink,
+      journal,
+    });
+    expect(receipt.completed).toBe(true);
+    expect(delegate.placementEffectCount).toBe(1);
+  });
+
+  test("reuses one private latch through preparation and placement, then removes it", async () => {
+    const repository = new RecordingRepository();
+    const journal = new InMemoryPublicationJournalStore();
+    const delegate = sink();
+    const controller = new AbortController();
+    const listenerCounts: number[] = [];
+    const observingSink: AnnouncementSink = {
+      medium: delegate.medium,
+      profile: delegate.profile,
+      capabilities: delegate.capabilities,
+      prepare: async (members, context, options) => {
+        listenerCounts.push(
+          getEventListeners(options!.signal!, "abort").length,
+        );
+        return delegate.prepare(members, context, options);
+      },
+      place: async (prepared, idempotencyKey, options) => {
+        listenerCounts.push(
+          getEventListeners(options!.signal!, "abort").length,
+        );
+        return delegate.place(prepared, idempotencyKey, options);
+      },
+      reconcile: delegate.reconcile.bind(delegate),
+    };
+
+    const receipt = await publish(
+      { ...input(), signal: controller.signal },
+      { repository, sink: observingSink, journal },
+    );
+
+    expect(receipt.completed).toBe(true);
+    expect(listenerCounts.length).toBeGreaterThan(1);
+    expect(listenerCounts.every((count) => count === 1)).toBe(true);
+    expect(
+      getEventListeners(controller.signal, "abort"),
+    ).toHaveLength(0);
+  });
+
+  test("rejects an already-aborted publish before any effect", async () => {
+    const repository = new RecordingRepository();
+    const journal = new InMemoryPublicationJournalStore();
+    const announcementSink = sink();
+    const controller = new AbortController();
+    abortAndShadowSignal(controller, controller.signal);
+
+    await expect(
+      publish(
+        { ...input(), signal: controller.signal },
+        { repository, sink: announcementSink, journal },
+      ),
+    ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
+
+    expect(repository.events).toEqual([]);
+    expect(journal.entryCount).toBe(0);
+    expect(announcementSink.prepareCallCount).toBe(0);
+    expect(announcementSink.placementEffectCount).toBe(0);
+  });
+
+  test.each(["load", "create", "compareAndSwap"] as const)(
+    "latches cancellation after the journal %s await",
+    async (stage) => {
+      const repository = new RecordingRepository();
+      const delegateJournal = new InMemoryPublicationJournalStore();
+      const announcementSink = sink();
+      const controller = new AbortController();
+      let mutate = true;
+      const maybeMutate = (options?: RepositoryOperationOptions): void => {
+        if (!mutate) return;
+        mutate = false;
+        abortAndShadowSignal(controller, options!.signal!);
+      };
+      const journal: PublicationJournalStore = {
+        load: async (bundleKey, options) => {
+          const result = await delegateJournal.load(bundleKey, options);
+          if (stage === "load") maybeMutate(options);
+          return result;
+        },
+        create: async (entry, options) => {
+          const result = await delegateJournal.create(entry, options);
+          if (stage === "create") maybeMutate(options);
+          return result;
+        },
+        compareAndSwap: async (expected, next, options) => {
+          const result = await delegateJournal.compareAndSwap(
+            expected,
+            next,
+            options,
+          );
+          if (stage === "compareAndSwap") maybeMutate(options);
+          return result;
+        },
+      };
+
+      await expect(
+        publish(
+          { ...input(), signal: controller.signal },
+          { repository, sink: announcementSink, journal },
+        ),
+      ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
+
+      expect(announcementSink.placementEffectCount).toBe(0);
+      expect(delegateJournal.entryCount).toBe(stage === "load" ? 0 : 1);
+      expect(
+        delegateJournal.entries()[0]?.storedArtifacts.length ?? 0,
+      ).toBe(stage === "compareAndSwap" ? 1 : 0);
+
+      const receipt = await publish(input(), {
+        repository,
+        sink: announcementSink,
+        journal: delegateJournal,
+      });
+      expect(receipt.completed).toBe(true);
+      expect(announcementSink.placementEffectCount).toBe(1);
+    },
+  );
+
+  test.each(["artifact", "record"] as const)(
+    "latches cancellation after the repository %s await",
+    async (stage) => {
+      const repository = new RecordingRepository();
+      const journal = new InMemoryPublicationJournalStore();
+      const announcementSink = sink();
+      const controller = new AbortController();
+      let mutate = true;
+      const maybeMutate = (options?: RepositoryOperationOptions): void => {
+        if (!mutate) return;
+        mutate = false;
+        abortAndShadowSignal(controller, options!.signal!);
+      };
+      if (stage === "artifact") {
+        const putArtifact = repository.putArtifact.bind(repository);
+        repository.putArtifact = async (bytes, options) => {
+          const receipt = await putArtifact(bytes, options);
+          maybeMutate(options);
+          return receipt;
+        };
+      } else {
+        const putRecord = repository.putRecord.bind(repository);
+        repository.putRecord = async (family, bytes, options) => {
+          const receipt = await putRecord(family, bytes, options);
+          maybeMutate(options);
+          return receipt;
+        };
+      }
+
+      await expect(
+        publish(
+          { ...input(), signal: controller.signal },
+          { repository, sink: announcementSink, journal },
+        ),
+      ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
+
+      expect(announcementSink.placementEffectCount).toBe(0);
+      expect(journal.entries()[0]?.storedRecords).toHaveLength(0);
+      expect(journal.entries()[0]?.storedArtifacts).toHaveLength(
+        stage === "record" ? 2 : 0,
+      );
+
+      const receipt = await publish(input(), {
+        repository,
+        sink: announcementSink,
+        journal,
+      });
+      expect(receipt.completed).toBe(true);
+      expect(announcementSink.placementEffectCount).toBe(1);
+    },
+  );
 
   test("returns the same stable receipt for an identical completed call", async () => {
     const repository = new RecordingRepository();

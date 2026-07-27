@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { getEventListeners } from "node:events";
+
 import {
   createRecordReference,
   type Sha256Digest,
@@ -31,6 +33,40 @@ import type {
   ReconcileResult,
   VersionedPublicationJournalEntry,
 } from "./types.js";
+
+const abortSignalAbortedGetter = Object.getOwnPropertyDescriptor(
+  AbortSignal.prototype,
+  "aborted",
+)?.get;
+
+function abortAndShadowSignal(
+  controller: AbortController,
+  signal: AbortSignal,
+): void {
+  controller.abort();
+  Object.defineProperties(signal, {
+    aborted: {
+      configurable: true,
+      value: false,
+    },
+    addEventListener: {
+      configurable: true,
+      value: () => {
+        throw new Error("shadowed addEventListener must not be used");
+      },
+    },
+    removeEventListener: {
+      configurable: true,
+      value: () => {
+        throw new Error("shadowed removeEventListener must not be used");
+      },
+    },
+  });
+  expect(
+    Reflect.apply(abortSignalAbortedGetter!, signal, []),
+  ).toBe(true);
+  expect(signal.aborted).toBe(false);
+}
 
 function input(): PublishInput {
   const bytes = new Uint8Array([1]);
@@ -497,6 +533,255 @@ describe("publication placement recovery", () => {
     });
     expect(receipt.completed).toBe(true);
     expect(delegate.placementEffectCount).toBe(1);
+  });
+
+  test("latches cancellation when place shadows the native signal after an effect", async () => {
+    const repository = new InMemoryEvidenceRepository();
+    const journal = new InMemoryPublicationJournalStore();
+    const delegate = sink();
+    const controller = new AbortController();
+    let mutate = true;
+    const mutatingPlace: AnnouncementSink = {
+      medium: delegate.medium,
+      profile: delegate.profile,
+      capabilities: delegate.capabilities,
+      prepare: async (members, context, options) => {
+        const listenersBeforePrepare = getEventListeners(
+          options!.signal!,
+          "abort",
+        ).length;
+        if (listenersBeforePrepare !== 1) {
+          throw new Error(
+            `listener count before prepare: ${listenersBeforePrepare}`,
+          );
+        }
+        const prepared = await delegate.prepare(
+          members,
+          context,
+          options,
+        );
+        const listenersAfterPrepare = getEventListeners(
+          options!.signal!,
+          "abort",
+        ).length;
+        if (listenersAfterPrepare !== 1) {
+          throw new Error(
+            `listener count after prepare: ${listenersAfterPrepare}`,
+          );
+        }
+        return prepared;
+      },
+      place: async (prepared, idempotencyKey, options) => {
+        const listenersBeforePlace = getEventListeners(
+          options!.signal!,
+          "abort",
+        ).length;
+        if (listenersBeforePlace !== 1) {
+          throw new Error(
+            `listener count before place: ${listenersBeforePlace}`,
+          );
+        }
+        const result = await delegate.place(
+          prepared,
+          idempotencyKey,
+          options,
+        );
+        if (mutate) {
+          mutate = false;
+          abortAndShadowSignal(controller, options!.signal!);
+        }
+        return result;
+      },
+      reconcile: delegate.reconcile.bind(delegate),
+    };
+
+    await expect(
+      publish(
+        { ...input(), signal: controller.signal },
+        { repository, journal, sink: mutatingPlace },
+      ),
+    ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
+
+    expect(delegate.placementEffectCount).toBe(1);
+    expect(
+      journal.entries()[0]?.preparedPartitions?.[0]?.placement.status,
+    ).toBe("pending");
+
+    const receipt = await publish(input(), {
+      repository,
+      journal,
+      sink: mutatingPlace,
+    });
+    expect(receipt.completed).toBe(true);
+    expect(delegate.placementEffectCount).toBe(1);
+    expect(delegate.reconcileCallCount).toBe(1);
+  });
+
+  test("latches cancellation when exported reconcile receives a shadowed signal", async () => {
+    const repository = new InMemoryEvidenceRepository();
+    const journal = new InMemoryPublicationJournalStore();
+    const delegate = sink();
+    let loseResponse = true;
+    const uncertain: AnnouncementSink = {
+      medium: delegate.medium,
+      profile: delegate.profile,
+      capabilities: delegate.capabilities,
+      prepare: delegate.prepare.bind(delegate),
+      place: async (prepared, idempotencyKey, options) => {
+        const result = await delegate.place(
+          prepared,
+          idempotencyKey,
+          options,
+        );
+        if (loseResponse) {
+          loseResponse = false;
+          throw new EvidencePublicationError(
+            "PLACEMENT_UNCERTAIN",
+            "fixture lost response",
+          );
+        }
+        return result;
+      },
+      reconcile: delegate.reconcile.bind(delegate),
+    };
+    const normalized = normalizePublishInput(input());
+
+    await expect(
+      publish(input(), { repository, journal, sink: uncertain }),
+    ).rejects.toMatchObject({ code: "PLACEMENT_UNCERTAIN" });
+    expect(delegate.placementEffectCount).toBe(1);
+
+    const controller = new AbortController();
+    let mutate = true;
+    const mutatingReconcile: AnnouncementSink = {
+      ...uncertain,
+      reconcile: async (prepared, pending, options) => {
+        expect(
+          getEventListeners(options!.signal!, "abort"),
+        ).toHaveLength(1);
+        const result = await delegate.reconcile(
+          prepared,
+          pending,
+          options,
+        );
+        if (mutate) {
+          mutate = false;
+          abortAndShadowSignal(controller, options!.signal!);
+        }
+        return result;
+      },
+    };
+
+    await expect(
+      reconcile(
+        normalized.bundleKey,
+        { repository, journal, sink: mutatingReconcile },
+        { signal: controller.signal },
+      ),
+    ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
+
+    expect(delegate.placementEffectCount).toBe(1);
+    expect(
+      journal.entries()[0]?.preparedPartitions?.[0]?.placement.status,
+    ).toBe("pending");
+
+    const receipt = await reconcile(normalized.bundleKey, {
+      repository,
+      journal,
+      sink: uncertain,
+    });
+    expect(receipt.completed).toBe(true);
+    expect(delegate.placementEffectCount).toBe(1);
+  });
+
+  test("uses one private latch for exported reconcile and removes it on success", async () => {
+    const repository = new InMemoryEvidenceRepository();
+    const journal = new InMemoryPublicationJournalStore();
+    const delegate = sink();
+    let loseResponse = true;
+    const uncertain: AnnouncementSink = {
+      medium: delegate.medium,
+      profile: delegate.profile,
+      capabilities: delegate.capabilities,
+      prepare: delegate.prepare.bind(delegate),
+      place: async (prepared, idempotencyKey, options) => {
+        const result = await delegate.place(
+          prepared,
+          idempotencyKey,
+          options,
+        );
+        if (loseResponse) {
+          loseResponse = false;
+          throw new EvidencePublicationError(
+            "PLACEMENT_UNCERTAIN",
+            "fixture lost response",
+          );
+        }
+        return result;
+      },
+      reconcile: delegate.reconcile.bind(delegate),
+    };
+    const normalized = normalizePublishInput(input());
+    await expect(
+      publish(input(), { repository, journal, sink: uncertain }),
+    ).rejects.toMatchObject({ code: "PLACEMENT_UNCERTAIN" });
+
+    const controller = new AbortController();
+    const observing: AnnouncementSink = {
+      ...uncertain,
+      reconcile: async (prepared, pending, options) => {
+        expect(
+          getEventListeners(options!.signal!, "abort"),
+        ).toHaveLength(1);
+        return delegate.reconcile(prepared, pending, options);
+      },
+    };
+
+    const receipt = await reconcile(
+      normalized.bundleKey,
+      { repository, journal, sink: observing },
+      { signal: controller.signal },
+    );
+
+    expect(receipt.completed).toBe(true);
+    expect(
+      getEventListeners(controller.signal, "abort"),
+    ).toHaveLength(0);
+  });
+
+  test("rejects an already-aborted exported reconcile before recovery effects", async () => {
+    const repository = new InMemoryEvidenceRepository();
+    const journal = new InMemoryPublicationJournalStore();
+    const delegate = sink();
+    let interrupt = true;
+    delegate.beforePlace = () => {
+      if (!interrupt) return;
+      interrupt = false;
+      throw new EvidencePublicationError(
+        "PLACEMENT_UNCERTAIN",
+        "fixture interruption",
+      );
+    };
+    const normalized = normalizePublishInput(input());
+    await expect(
+      publish(input(), { repository, journal, sink: delegate }),
+    ).rejects.toMatchObject({ code: "PLACEMENT_UNCERTAIN" });
+    const reconcileCalls = delegate.reconcileCallCount;
+    const controller = new AbortController();
+    abortAndShadowSignal(controller, controller.signal);
+
+    await expect(
+      reconcile(
+        normalized.bundleKey,
+        { repository, journal, sink: delegate },
+        { signal: controller.signal },
+      ),
+    ).rejects.toMatchObject({ code: "OPERATION_ABORTED" });
+
+    expect(delegate.reconcileCallCount).toBe(reconcileCalls);
+    expect(
+      journal.entries()[0]?.preparedPartitions?.[0]?.placement.status,
+    ).toBe("pending");
   });
 
   test("keeps durable prepared state isolated from sink.place mutation", async () => {
