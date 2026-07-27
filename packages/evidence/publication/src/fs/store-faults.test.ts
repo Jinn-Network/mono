@@ -515,9 +515,7 @@ test("reports cleanup uncertainty when an unpublished complete temp cannot be re
 
   fault.failTemporaryCleanup = false;
   fault.beforeLink = undefined;
-  await expect(store.load(journalEntry.bundleKey)).resolves.toMatchObject({
-    revision: 0,
-  });
+  await expect(store.load(journalEntry.bundleKey)).resolves.toBeNull();
 });
 
 test("preserves and repairs the temp/final pair after the first post-link sync fails", async () => {
@@ -602,7 +600,7 @@ test("replay durably syncs the final link before and after idempotent temp clean
   ]);
 });
 
-test("load can recover a complete pre-link temp while its legitimate writer remains live", async () => {
+test("load ignores a complete pre-link temp while its legitimate writer remains live", async () => {
   const root = await import("node:fs/promises").then(({ mkdtemp }) =>
     mkdtemp(join(tmpdir(), "jinn-publication-journal-fault-"))
   );
@@ -627,7 +625,7 @@ test("load can recover a complete pre-link temp while its legitimate writer rema
   releaseLink.resolve();
   const created = await creating;
 
-  expect(recovered).toEqual(created);
+  expect(recovered).toBeNull();
   await expect(store.load(created.bundleKey)).resolves.toEqual(created);
 });
 

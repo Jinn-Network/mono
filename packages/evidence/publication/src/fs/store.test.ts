@@ -393,13 +393,12 @@ describe("filesystem publication journal store", () => {
     });
   });
 
-  test("durably recovers a complete crash-before-link revision zero temp", async () => {
+  test("ignores an unpublished revision-zero temp instead of committing it during replay", async () => {
     const root = await temporaryRoot();
     const store = await createFilesystemPublicationJournalStore({
       rootDir: root,
     });
     const journalEntry = entry();
-    const expected = { ...journalEntry, revision: 0 } as const;
     const hex = journalEntry.bundleKey.slice(7);
     const revisionDir = join(
       root,
@@ -414,22 +413,21 @@ describe("filesystem publication journal store", () => {
         revisionDir,
         ".tmp-11111111-1111-4111-8111-111111111111.json",
       ),
-      encodeVersionedPublicationJournalEntry(expected),
+      encodeVersionedPublicationJournalEntry({
+        ...journalEntry,
+        revision: 0,
+      }),
       { mode: 0o600 },
     );
 
-    await expect(store.load(journalEntry.bundleKey)).resolves.toEqual(
-      expected,
-    );
+    await expect(store.load(journalEntry.bundleKey)).resolves.toBeNull();
     expect(await readdir(revisionDir)).toEqual([
-      "00000000000000000000.json",
+      ".tmp-11111111-1111-4111-8111-111111111111.json",
     ]);
-    await expect(store.load(journalEntry.bundleKey)).resolves.toEqual(
-      expected,
-    );
+    await expect(store.load(journalEntry.bundleKey)).resolves.toBeNull();
   });
 
-  test("durably recovers a complete crash-before-link later revision temp", async () => {
+  test("ignores an unpublished later-revision temp instead of advancing replay", async () => {
     const root = await temporaryRoot();
     const store = await createFilesystemPublicationJournalStore({
       rootDir: root,
@@ -460,12 +458,12 @@ describe("filesystem publication journal store", () => {
       { mode: 0o600 },
     );
 
-    await expect(store.load(created.bundleKey)).resolves.toEqual(expected);
-    expect(await readdir(revisionDir)).toEqual([
+    await expect(store.load(created.bundleKey)).resolves.toEqual(created);
+    expect((await readdir(revisionDir)).sort()).toEqual([
+      ".tmp-11111111-1111-4111-8111-111111111111.json",
       "00000000000000000000.json",
-      "00000000000000000001.json",
     ]);
-    await expect(store.load(created.bundleKey)).resolves.toEqual(expected);
+    await expect(store.load(created.bundleKey)).resolves.toEqual(created);
   });
 
   test("repairs one recognized temp/final hard-link pair during replay", async () => {
@@ -917,6 +915,25 @@ describe("filesystem publication journal store", () => {
     const frameBytes = new Uint8Array(
       FILESYSTEM_PUBLICATION_JOURNAL_MAX_REVISION_BYTES + 1,
     );
+    const frameDigest = hashExactBytes(frameBytes);
+    const frameSize = frameBytes.byteLength;
+    let metadataReads = 0;
+    for (const key of ["length", "byteLength"] as const) {
+      Object.defineProperty(frameBytes, key, {
+        configurable: true,
+        get: () => {
+          metadataReads += 1;
+          return 0;
+        },
+      });
+    }
+    Object.defineProperty(frameBytes, Symbol.iterator, {
+      configurable: true,
+      get: () => {
+        metadataReads += 1;
+        throw new RangeError("hostile iterator");
+      },
+    });
     const oversized: PublicationJournalEntry = {
       ...stored,
       preparedPartitions: [{
@@ -926,8 +943,8 @@ describe("filesystem publication journal store", () => {
           profile: "https://publication.test/profile/v1",
           members: [{ reference: stored.records[0]! }],
           frameBytes,
-          frameDigest: hashExactBytes(frameBytes),
-          frameSize: frameBytes.byteLength,
+          frameDigest,
+          frameSize,
         },
         placement: { status: "unplaced" },
       }],
@@ -940,6 +957,7 @@ describe("filesystem publication journal store", () => {
       expect(
         bufferFrom.mock.calls.some(([value]) => value === frameBytes),
       ).toBe(false);
+      expect(metadataReads).toBe(0);
     } finally {
       bufferFrom.mockRestore();
     }

@@ -9,17 +9,32 @@ import {
 
 import { EvidencePublicationError } from "./errors.js";
 
+const intrinsicApply = Reflect.apply;
+const typedArrayPrototype = Object.getPrototypeOf(
+  Uint8Array.prototype,
+) as object;
+
+function bindIntrinsicGetter<T>(
+  prototype: object,
+  key: PropertyKey,
+): (value: object) => T {
+  const getter = Object.getOwnPropertyDescriptor(prototype, key)?.get;
+  if (getter === undefined) {
+    throw new TypeError(`Missing intrinsic getter for ${String(key)}.`);
+  }
+  return (value) => intrinsicApply(getter, value, []) as T;
+}
+
+const getTypedArrayLength = bindIntrinsicGetter<number>(
+  typedArrayPrototype,
+  "length",
+);
+const setTypedArray = Uint8Array.prototype.set;
+
 export function exactBytesLength(value: unknown): number | undefined {
   if (isProxy(value) || !(value instanceof Uint8Array)) return undefined;
   try {
-    const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype);
-    const lengthGetter = Object.getOwnPropertyDescriptor(
-      typedArrayPrototype,
-      "length",
-    )?.get;
-    return lengthGetter === undefined
-      ? undefined
-      : Reflect.apply(lengthGetter, value, []) as number;
+    return getTypedArrayLength(value);
   } catch {
     return undefined;
   }
@@ -31,9 +46,7 @@ export function snapshotExactBytes(value: unknown): Uint8Array | undefined {
   const bytes = value as Uint8Array;
   try {
     const snapshot = new Uint8Array(length);
-    for (let index = 0; index < length; index += 1) {
-      snapshot[index] = bytes[index]!;
-    }
+    intrinsicApply(setTypedArray, snapshot, [bytes]);
     return snapshot;
   } catch {
     return undefined;

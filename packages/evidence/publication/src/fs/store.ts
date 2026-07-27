@@ -336,99 +336,6 @@ async function readRevision(
   return decoded!;
 }
 
-async function recoverRecognizedOrphanTemporary(
-  revisionDir: string,
-  temporaryName: string,
-  bundleKey: Sha256Digest,
-  previous: VersionedPublicationJournalEntry | undefined,
-  options?: RepositoryOperationOptions,
-): Promise<"recovered" | "rescan" | "stale"> {
-  const temporaryPath = join(revisionDir, temporaryName);
-  let stats: Awaited<ReturnType<typeof lstat>>;
-  try {
-    assertPublicationOperationActive(options);
-    stats = await lstat(temporaryPath);
-    assertPublicationOperationActive(options);
-  } catch (error) {
-    if (nodeErrorCode(error) === "ENOENT") return "rescan";
-    if (error instanceof EvidencePublicationError) throw error;
-    return mapFilesystemError(
-      error,
-      "Failed to inspect a recoverable publication revision temp.",
-    );
-  }
-  if (
-    stats.isSymbolicLink() ||
-    !stats.isFile() ||
-    stats.nlink !== 1
-  ) {
-    throw new EvidencePublicationError(
-      "JOURNAL_CORRUPT",
-      "A crash-before-link publication temp must be one regular link.",
-    );
-  }
-  const candidate = await readRevision(temporaryPath, options);
-  if (candidate.bundleKey !== bundleKey) {
-    throw new EvidencePublicationError(
-      "JOURNAL_CORRUPT",
-      "A recoverable publication temp does not match its directory key.",
-    );
-  }
-  const expectedRevision = previous === undefined
-    ? 0
-    : previous.revision + 1;
-  if (candidate.revision < expectedRevision) return "stale";
-  if (candidate.revision !== expectedRevision) {
-    throw new EvidencePublicationError(
-      "JOURNAL_CORRUPT",
-      "A recoverable publication temp skips a journal revision.",
-    );
-  }
-  const { revision: _revision, ...unversioned } = candidate;
-  if (previous === undefined) {
-    const initial = snapshotInitialPublicationJournalEntry(unversioned);
-    if (!sameEntry({ ...initial, revision: 0 }, candidate)) {
-      throw new EvidencePublicationError(
-        "JOURNAL_CORRUPT",
-        "A recoverable revision-zero temp is not an initial journal entry.",
-      );
-    }
-  } else {
-    validateJournalTransition(previous, unversioned);
-  }
-  const finalPath = join(revisionDir, revisionName(candidate.revision));
-  let linked = false;
-  try {
-    assertPublicationOperationActive(options);
-    await link(temporaryPath, finalPath);
-    linked = true;
-  } catch (error) {
-    const code = nodeErrorCode(error);
-    if (code !== "EEXIST" && code !== "ENOENT") {
-      if (error instanceof EvidencePublicationError) throw error;
-      return mapFilesystemError(
-        error,
-        "Failed to recover a publication revision temp.",
-      );
-    }
-  }
-  if (!linked) {
-    try {
-      const concurrent = await readRevision(finalPath, options);
-      if (!sameEntry(concurrent, candidate)) return "rescan";
-    } catch (error) {
-      if (nodeErrorCode(error) === "ENOENT") return "rescan";
-      throw error;
-    }
-  }
-  await finishLinkedTemporaryPublication(
-    revisionDir,
-    temporaryPath,
-    options,
-  );
-  return "recovered";
-}
-
 export class FilesystemPublicationJournalStore
   implements PublicationJournalStore {
   readonly #paths: FilesystemPublicationJournalPaths;
@@ -517,7 +424,6 @@ export class FilesystemPublicationJournalStore
         "Publication journal revisions must be contiguous and canonical.",
       );
     }
-    let orphanTemporaryName: string | undefined;
     const temporaryStats = new Map<
       string,
       Awaited<ReturnType<typeof lstat>>
@@ -582,7 +488,6 @@ export class FilesystemPublicationJournalStore
           }
           throw error;
         }
-        orphanTemporaryName = temporaryNames[0]!;
       } else {
         throw new EvidencePublicationError(
           "JOURNAL_CORRUPT",
@@ -590,7 +495,7 @@ export class FilesystemPublicationJournalStore
         );
       }
     }
-    if (finals.length === 0 && orphanTemporaryName === undefined) return null;
+    if (finals.length === 0) return null;
     let previous: VersionedPublicationJournalEntry | undefined;
     for (const [revision, name] of finals.entries()) {
       await assertFilesystemPublicationJournalInfrastructure(
@@ -621,16 +526,6 @@ export class FilesystemPublicationJournalStore
         validateJournalTransition(previous, unversioned);
       }
       previous = current;
-    }
-    if (orphanTemporaryName !== undefined) {
-      const recovery = await recoverRecognizedOrphanTemporary(
-        revisionDir,
-        orphanTemporaryName,
-        bundleKey,
-        previous,
-        options,
-      );
-      if (recovery !== "stale") return this.load(bundleKey, options);
     }
     if (previous === undefined) return null;
     return cloneVersionedPublicationJournalEntry(previous!);
