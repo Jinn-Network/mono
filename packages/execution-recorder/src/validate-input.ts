@@ -14,6 +14,7 @@ import type {
   NativeTraceCapture,
   OpaqueRuntimeComponentCapture,
   RuntimeObservationCapture,
+  ResumeExecutionRecordingInput,
   StartExecutionRecordingInput,
 } from "./types.js";
 
@@ -487,6 +488,14 @@ export function validateStartExecutionRecordingInput(
   }
 
   if (input.repositoryState !== undefined) {
+    if (
+      input.repositoryState.artifact?.kind !== "dataset" &&
+      input.repositoryState.artifact?.kind !== "collection"
+    ) {
+      invalidCaptureInput(
+        "repositoryState/artifact must be a dataset or collection artifact.",
+      );
+    }
     validateArtifact(
       input.repositoryState.artifact,
       "repositoryState/artifact",
@@ -551,6 +560,15 @@ export function validateStartExecutionRecordingInput(
       invalidCaptureInput(`runtime/components/${index}/kind is invalid.`);
     }
   });
+}
+
+export function validateResumeExecutionRecordingInput(
+  input: ResumeExecutionRecordingInput,
+): void {
+  if (!input || typeof input !== "object") {
+    invalidCaptureInput("resume input is required.");
+  }
+  nonEmptyString(input.workspaceDir, "workspaceDir");
 }
 
 export function validateFinalizeExecutionInput(

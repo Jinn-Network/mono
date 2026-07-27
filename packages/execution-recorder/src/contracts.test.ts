@@ -172,6 +172,24 @@ describe("execution recorder contracts", () => {
     );
   });
 
+  test("rejects a file artifact as repository state", () => {
+    const input = validStart();
+
+    expect(() =>
+      validateStartExecutionRecordingInput({
+        ...input,
+        repositoryState: {
+          artifact: file("repository/source.patch"),
+          identifiers: [],
+        } as never,
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        code: "INVALID_CAPTURE_INPUT",
+      }),
+    );
+  });
+
   test("rejects extension fields that collide with recorder-owned fields", () => {
     const input = validStart();
     expect(() =>
@@ -272,5 +290,6 @@ describe("execution recorder contracts", () => {
       "NATIVE_TRACE_MISSING",
       "COMPLETED_RESULT_MISSING",
     ]);
+    expect(publicApi.createExecutionRecorder).toBeTypeOf("function");
   });
 });
