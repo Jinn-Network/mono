@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Start from the reviewed Evidence integration head containing commit `67b1d164bba7445737587a7abb0336532cc5bf58` as an ancestor. If that commit is absent or the package graph has changed incompatibly, stop and re-audit the contracts before editing.
+- Start from the recorded Evidence integration head `f65880c4e244e32334f0fed98bf00ff9b307e87d` on `integration/evidence-v1`, or a descendant containing that exact commit. If that commit is absent or the package graph has changed incompatibly, stop and re-audit the contracts before editing.
 - Create one package at `packages/evidence/retrieval` named `@jinn-network/evidence-retrieval`; publish only `.` and `./testing`.
 - Production dependencies are exactly `@jinn-network/evidence-protocol`, `@jinn-network/evidence-repository`, and `@jinn-network/evidence-discovery`.
 - The root package must not import a search engine, vector database, embedding runtime, concrete Catalog store, concrete Repository binding, plugin, marketplace, Autopilot, network client, filesystem API, or ambient network API.
@@ -40,8 +40,8 @@
 Use an isolated worktree created with `superpowers:using-git-worktrees`. Establish the reviewed base before Task 1:
 
 ```bash
-git cat-file -e 67b1d164bba7445737587a7abb0336532cc5bf58^{commit}
-git merge-base --is-ancestor 67b1d164bba7445737587a7abb0336532cc5bf58 HEAD
+git cat-file -e f65880c4e244e32334f0fed98bf00ff9b307e87d^{commit}
+git merge-base --is-ancestor f65880c4e244e32334f0fed98bf00ff9b307e87d HEAD
 git status --short
 ```
 

@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Implement against evidence-stack commit `702042da46072c721e821e54cf5d9308737ea254` from PR #2203, or a descendant containing that exact commit. Do not implement from the older detached workspace commit.
+- Implement against the recorded Evidence integration head `f65880c4e244e32334f0fed98bf00ff9b307e87d` on `integration/evidence-v1`, or a descendant containing that exact commit. Do not implement from an older detached workspace commit or from a mid-stack substrate branch.
 - Start implementation in a fresh isolated worktree using `superpowers:using-git-worktrees`; do not modify an active evidence-stack worktree.
 - Treat [the approved design](../specs/2026-07-26-evaluation-runner-design.md) as authoritative. If implementation appears to require a protocol or substrate ownership change, stop and raise a separate design decision.
 - V1 issues Result Evaluation only. Do not add Execution Verification, a queue, a service transport, evaluator modes, evaluator infrastructure, publication policy, trust policy, or marketplace behavior.
@@ -32,7 +32,7 @@
 Before Task 1:
 
 ```bash
-git merge-base --is-ancestor 702042da46072c721e821e54cf5d9308737ea254 HEAD
+git merge-base --is-ancestor f65880c4e244e32334f0fed98bf00ff9b307e87d HEAD
 git status --short
 ```
 
@@ -2090,8 +2090,8 @@ Expected: the consumer compiles all public entrypoints across eleven evidence pa
 - [ ] Check diff quality and test leakage:
 
 ```bash
-git diff 702042da46072c721e821e54cf5d9308737ea254...HEAD --check
-git diff --stat 702042da46072c721e821e54cf5d9308737ea254...HEAD
+git diff f65880c4e244e32334f0fed98bf00ff9b307e87d...HEAD --check
+git diff --stat f65880c4e244e32334f0fed98bf00ff9b307e87d...HEAD
 git status --short
 ```
 

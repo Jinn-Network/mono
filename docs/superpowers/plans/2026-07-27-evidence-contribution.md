@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Execute in an isolated worktree created with `superpowers:using-git-worktrees`; never implement in an active substrate worktree.
-- Start from a dependency-complete Evidence base containing Derivation distribution commit `df87ae6ba62c` (or a descendant) and hardened Publication commit `44b67cdff3c6` (or a descendant).
+- Start from the recorded Evidence integration head `f65880c4e244e32334f0fed98bf00ff9b307e87d` on `integration/evidence-v1`, or a descendant containing that exact commit. It carries both the Derivation distribution work and the hardened Publication work. The commit `44b67cdff3c6` named in the pre-integration draft of this plan is not an ancestor of the integration head — it lived on an abandoned `codex/private-publication-quality-fix*` branch and its content re-landed under different SHAs; do not attempt to base on it.
 - The base must already expose `@jinn-network/evidence-protocol`, `@jinn-network/evidence-repository`, `@jinn-network/evidence-derivation`, and `@jinn-network/evidence-publication`; if not, stop and reconcile the substrate outside this plan.
 - Use exactly one primary `EvidenceRecordReference` per request. Related Evaluation and Verification records use independent requests.
 - Do not add a service, daemon, queue, ledger, wallet, blockchain, Discovery, plugin, marketplace, Autopilot, IPFS, OCI, or concrete Repository dependency.
@@ -38,6 +38,7 @@ Run every shell block with the repository root as its working directory. A `cd` 
 Before Task 1, run:
 
 ```bash
+git merge-base --is-ancestor f65880c4e244e32334f0fed98bf00ff9b307e87d HEAD
 test -f packages/evidence/protocol/package.json
 test -f packages/evidence/repository/package.json
 test -f packages/evidence/derivation/package.json

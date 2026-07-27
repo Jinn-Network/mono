@@ -1,8 +1,8 @@
 # Evidence Application Layer Index
 
 - **Date:** 2026-07-27
-- **Status:** Four priority application designs and implementation plans collected and reconciled;
-  implementation has not begun
+- **Status:** Four priority application designs and implementation plans collected and reconciled
+  against the recorded Evidence integration head; implementation has not begun
 - **Role:** A short dependency and ownership index for the authoritative application
   specifications. It does not replace them.
 
@@ -82,8 +82,22 @@ This prevents a cycle and permits all four implementation streams to share one s
 
 ## 5. Implementation ordering
 
-Implementation begins only after the complete Evidence substrate DAG is merged into the temporary
-Evidence integration branch and the exact integration head is recorded.
+The complete Evidence substrate DAG is merged. The recorded integration head is:
+
+```text
+branch: integration/evidence-v1
+head:   f65880c4e244e32334f0fed98bf00ff9b307e87d
+```
+
+It was produced by merging all 38 substrate pull requests, in topological order and with merge
+commits only, onto a branch cut from `next` at `918e683d44a237d61d6f84a082cb2be9dc6a6f76`. Its tree
+is byte-identical to the former stack tip across `packages/evidence/`, `.github/scripts/evidence-*`,
+and `.github/workflows/evidence-ci.yml`. Every application worktree starts from this head or a
+descendant containing it, and each plan's preflight asserts that with
+`git merge-base --is-ancestor`.
+
+Application work targets `integration/evidence-v1`, not `next`. Migration and product cutover land
+on the same branch, and a single merge-commit pull request promotes it to `next` at the end.
 
 From that common head:
 
@@ -100,7 +114,31 @@ current approved integration head containing its required commits.
 Plugin, marketplace, Autopilot, and other host migrations follow in separate designs and PRs after
 the reusable application capabilities are implemented and verified.
 
-## 6. Authoritative documents
+## 6. Shared CI guard ownership
+
+All four lanes add their package to the same four files:
+
+- `.github/scripts/evidence-package-inventory.test.mjs`
+- `.github/scripts/evidence-source-boundaries.test.mjs`
+- `.github/scripts/evidence-packed-types.test.mjs`
+- `.github/workflows/evidence-ci.yml`
+
+**Each lane registers its own package.** A single preparatory pull request registering all four
+slots ahead of the lanes is not possible: `evidence-package-inventory.test.mjs` asserts an exact
+package count, asserts that every listed package's `package.json` exists on disk, and reconciles
+the declared list against the packages actually present under `packages/evidence/`. A slot declared
+before its package exists fails from both directions.
+
+The edits are additive entries in sorted lists, so concurrent lanes conflict only when two land on
+adjacent lines. That is an ordinary textual conflict, not a serialization requirement, and it does
+not make the lanes dependent on one another.
+
+Package naming follows the substrate component a package extends, not a uniform `evidence-` prefix.
+`@jinn-network/execution-recorder` and `@jinn-network/attestation-issuer` already omit the prefix in
+the merged substrate, so `@jinn-network/execution-recorder-bridge` and
+`@jinn-network/evaluation-runner` are consistent with existing practice rather than exceptions to it.
+
+## 7. Authoritative documents
 
 ### Execution Evidence Capture
 
@@ -122,5 +160,6 @@ the reusable application capabilities are implemented and verified.
 - [Design](./2026-07-26-evaluation-runner-design.md)
 - [Implementation plan](../plans/2026-07-27-evaluation-runner.md)
 
-The specifications own semantics. The plans own the proposed implementation sequence and must be
-re-audited against the final integration head before execution.
+The specifications own semantics. The plans own the proposed implementation sequence. Their
+baselines have been re-audited against the integration head recorded in §5; the pre-integration
+mid-stack and abandoned-branch commit references they previously named are superseded.

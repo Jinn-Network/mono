@@ -47,11 +47,15 @@ newline-delimited JSON over standard input/output,
 
 ## Preflight
 
-Work from the isolated branch containing the approved design. Put Node 22 first
-on `PATH` and build the stacked prerequisites in dependency order:
+Work from an isolated worktree branched off the recorded Evidence integration
+head `f65880c4e244e32334f0fed98bf00ff9b307e87d` on `integration/evidence-v1`, or
+a descendant containing that exact commit. Put Node 22 first on `PATH` and build
+the stacked prerequisites in dependency order:
 
 ```bash
 export PATH="/opt/homebrew/opt/node@22/bin:$PATH"
+
+git merge-base --is-ancestor f65880c4e244e32334f0fed98bf00ff9b307e87d HEAD
 
 for package in protocol repository execution-recorder; do
   (
@@ -1125,7 +1129,7 @@ Run:
 
 ```bash
 git diff --name-only \
-  78bc2d1e064f40af2632788508e6c92fe6ff6192...HEAD
+  f65880c4e244e32334f0fed98bf00ff9b307e87d...HEAD
 ```
 
 The output may contain only:
