@@ -51,7 +51,10 @@ import { loadConfig } from '../src/config.js';
 import {
   classifySessionEchoLiveResult,
   dockerPreflightError,
+  readSessionEchoLivePriorSummary,
+  resolveSessionEchoLiveResultWrite,
   seedIsolatedValidatedPool,
+  sessionEchoLiveProcessExitCode,
   type SessionEchoLiveMode,
 } from '../src/solver-types/_swe-rebench-v2-session-echo-live-classify.js';
 
@@ -277,6 +280,13 @@ async function main(): Promise<void> {
     infraError,
   });
 
+  const prior = readSessionEchoLivePriorSummary(outPath);
+  const writePlan = resolveSessionEchoLiveResultWrite({
+    canonicalPath: outPath,
+    classified,
+    prior,
+  });
+
   const summary = {
     mode,
     repo: REPO,
@@ -294,16 +304,27 @@ async function main(): Promise<void> {
     infraError: infraError ?? null,
     elapsedSec,
     workDir,
-    resultPath: outPath,
+    resultPath: writePlan.resultPath,
+    preservedPriorGradedSoR: writePlan.preservedPriorGradedSoR,
   };
-  writeFileSync(outPath, `${JSON.stringify(summary, null, 2)}\n`);
+  writeFileSync(writePlan.resultPath, `${JSON.stringify(summary, null, 2)}\n`);
   console.log('[session-echo-live] RESULT', JSON.stringify(summary, null, 2));
-  console.log(`[session-echo-live] wrote ${outPath}`);
+  console.log(`[session-echo-live] wrote ${writePlan.resultPath}`);
+  if (writePlan.preservedPriorGradedSoR) {
+    console.error(
+      `[session-echo-live] preserved prior graded SoR at ${outPath}; infra-blocked attempt written to ${writePlan.resultPath}`,
+    );
+  }
   if (classified.redFlag) {
     console.error(`[session-echo-live] RED FLAG: ${classified.redFlag}`);
   }
 
   await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+
+  const exitCode = sessionEchoLiveProcessExitCode(classified);
+  if (exitCode !== 0) {
+    process.exit(exitCode);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
