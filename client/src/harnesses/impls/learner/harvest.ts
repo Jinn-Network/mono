@@ -746,7 +746,7 @@ export async function harvestOutput(workingDir: string, phaseRange?: string, tas
         ? { informational: informationalEntries }
         : {}),
       ...(artifacts.length > 0 ? { artifacts } : {}),
-    },
+    } as Solution,
     workingDir,
   );
 }
