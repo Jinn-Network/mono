@@ -1,0 +1,9 @@
+{
+  "reference": {
+    "family": "result-evaluation",
+    "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "contentCid": "f01551220e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "registrationText": "{\"digest\":\"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"family\":\"result-evaluation\",\"kind\":\"record\",\"profile\":\"jinn.evidence-repository.ipfs-registration\",\"version\":1}\n",
+  "registrationCid": "f015512206ffa29812bdbfa7df53d2cb55c908501a0f5d859021a3d78bb6835e2d90b7e64"
+}

@@ -13,6 +13,7 @@ const EVIDENCE_PACKAGES = [
   ['protocol', '@jinn-network/evidence-protocol'],
   ['repository', '@jinn-network/evidence-repository'],
   ['repository-oci', '@jinn-network/evidence-repository-oci'],
+  ['repository-ipfs', '@jinn-network/evidence-repository-ipfs'],
   ['discovery', '@jinn-network/evidence-discovery'],
   ['catalog-sqlite', '@jinn-network/evidence-catalog-sqlite'],
   ['execution-recorder', '@jinn-network/execution-recorder'],
@@ -25,6 +26,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['protocol', { dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['repository', { dependencies: ['@jinn-network/evidence-protocol'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['repository-oci', { dependencies: ['@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
+  ['repository-ipfs', { dependencies: ['@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
   ['discovery', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['catalog-sqlite', { dependencies: ['@jinn-network/evidence-discovery', '@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
   ['execution-recorder', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
@@ -62,8 +64,8 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;
 }
 
-test('the evidence package inventory is explicit and has nine manifests', () => {
-  assert.equal(EVIDENCE_PACKAGES.length, 9);
+test('the evidence package inventory is explicit and has ten manifests', () => {
+  assert.equal(EVIDENCE_PACKAGES.length, 10);
   for (const [directory, expectedName] of EVIDENCE_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);

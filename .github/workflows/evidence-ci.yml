@@ -82,6 +82,7 @@ jobs:
       matrix:
         component:
           - repository-oci
+          - repository-ipfs
           - discovery
           - execution-recorder
           - attestation-issuer
@@ -131,8 +132,8 @@ jobs:
         working-directory: packages/evidence/${{ matrix.component }}
         run: yarn install --immutable
       - name: Check profile and schema drift
-        if: matrix.component == 'repository-oci'
-        working-directory: packages/evidence/repository-oci
+        if: matrix.component == 'repository-oci' || matrix.component == 'repository-ipfs'
+        working-directory: packages/evidence/${{ matrix.component }}
         run: yarn check:profile
       - name: Typecheck
         working-directory: packages/evidence/${{ matrix.component }}
@@ -356,7 +357,7 @@ jobs:
           path: .evidence-dist
       - name: Place package distributions
         run: |
-          for package in protocol repository repository-oci discovery catalog-sqlite execution-recorder attestation-issuer derivation local-runtime; do
+          for package in protocol repository repository-oci repository-ipfs discovery catalog-sqlite execution-recorder attestation-issuer derivation local-runtime; do
             mkdir -p "packages/evidence/${package}/dist"
             cp -R ".evidence-dist/evidence-${package}-dist/." "packages/evidence/${package}/dist/"
           done

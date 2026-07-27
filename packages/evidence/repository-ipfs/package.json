@@ -1,0 +1,60 @@
+{
+  "name": "@jinn-network/evidence-repository-ipfs",
+  "version": "0.1.0",
+  "description": "Bounded raw-block IPFS binding for the Jinn Evidence Repository contract.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/evidence/repository-ipfs"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./cid": {
+      "import": "./dist/cid.js",
+      "types": "./dist/cid.d.ts"
+    },
+    "./profile/*": "./profile/*"
+  },
+  "files": [
+    "dist/",
+    "profile/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "check:profile": "yarn build && node scripts/check-profile.mjs",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/evidence-repository": "0.1.0",
+    "kubo-rpc-client": "7.1.0"
+  },
+  "devDependencies": {
+    "@jinn-network/evidence-protocol": "0.1.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/evidence-protocol": "portal:../protocol",
+    "@jinn-network/evidence-repository": "portal:../repository",
+    "vite": "6.4.3"
+  }
+}
