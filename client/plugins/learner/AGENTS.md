@@ -32,7 +32,7 @@ The harness adapter provides the task payload and paths at session start. The ha
 
 ## Components
 
-See `CLAUDE.md` for the same component listing — both loaders cover the same plugin contents; this file just notes the cross-harness tool mapping.
+See `CLAUDE.md` for the same component listing — both loaders cover the same plugin contents; this file just notes the cross-harness tool mapping. On Claude Code, `hooks/post-tool-use` captures failed-test Bash/Shell diffs into `$WORKING_DIR/.execute/intermediate-failure-diffs.json` for harvest (§10 field 4).
 
 ## Spec
 
