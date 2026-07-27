@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { describe, test } from "vitest";
 
@@ -8,7 +9,15 @@ import {
   MAX_STANDARD_IPFS_BLOCK_BYTES,
   createGatewayBlockReader,
   createKuboBlockReader,
+  digestToRawCid,
 } from "./index.js";
+import { ipfsDependencyError } from "./errors.js";
+import {
+  AUTHORITY_MARKER_TEXT,
+  assertNoAuthorityMarkers,
+  assertSanitizedDependencyError,
+  createAuthorityBearingError,
+} from "../test/authority-markers.js";
 
 const EMPTY_RAW_CID =
   "f01551220e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
@@ -162,6 +171,47 @@ describe("bounded IPFS block readers", () => {
     assert.equal(canceled, true);
   });
 
+  test("enforces the exact streamed 2 MiB boundary without Content-Length", async () => {
+    const exactBytes = new Uint8Array(MAX_STANDARD_IPFS_BLOCK_BYTES);
+    const exactCid = digestToRawCid(
+      `sha256:${createHash("sha256").update(exactBytes).digest("hex")}`,
+    );
+    const exact = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        new Response(streamBytes([exactBytes]), { status: 200 }),
+    });
+    const accepted = await exact.getBlock(exactCid, {
+      maxBytes: MAX_STANDARD_IPFS_BLOCK_BYTES,
+    });
+    assert.equal(accepted?.byteLength, MAX_STANDARD_IPFS_BLOCK_BYTES);
+
+    let canceled = false;
+    const oversized = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(exactBytes);
+              controller.enqueue(new Uint8Array([1]));
+            },
+            cancel() {
+              canceled = true;
+            },
+          }),
+          { status: 200 },
+        ),
+    });
+    await assert.rejects(
+      oversized.getBlock(exactCid, {
+        maxBytes: MAX_STANDARD_IPFS_BLOCK_BYTES,
+      }),
+      hasCode("CONTENT_TOO_LARGE"),
+    );
+    assert.equal(canceled, true);
+  });
+
   test("distinguishes authoritative absence from outages and corruption", async () => {
     const gatewayMissing = createGatewayBlockReader({
       endpoint: "https://gateway.example.test",
@@ -172,7 +222,7 @@ describe("bounded IPFS block readers", () => {
       null,
     );
 
-    for (const status of [429, 500, 503]) {
+    for (const status of [408, 429, 500, 503]) {
       const unavailable = createGatewayBlockReader({
         endpoint: "https://gateway.example.test",
         fetch: async () => new Response("unavailable", { status }),
@@ -305,6 +355,606 @@ describe("bounded IPFS block readers", () => {
     );
   });
 
+  test("gives post-fetch cancellation precedence over every HTTP status", async () => {
+    for (const kind of ["Kubo", "gateway"] as const) {
+      for (const status of [404, 500, 200]) {
+        const controller = new AbortController();
+        const options = {
+          endpoint:
+            kind === "Kubo"
+              ? "http://127.0.0.1:5001"
+              : "https://gateway.example.test",
+          fetch: async () => {
+            controller.abort();
+            return new Response(
+              status === 200 ? new Uint8Array() : "response",
+              { status },
+            );
+          },
+        };
+        const reader =
+          kind === "Kubo"
+            ? createKuboBlockReader(options)
+            : createGatewayBlockReader(options);
+
+        await assert.rejects(
+          reader.getBlock(EMPTY_RAW_CID, {
+            maxBytes: 64,
+            signal: controller.signal,
+          }),
+          hasCode("OPERATION_ABORTED"),
+          `${kind} ${status}`,
+        );
+      }
+    }
+  });
+
+  test("cancels post-fetch response bodies without displacing abort errors", async () => {
+    for (const kind of ["Kubo", "gateway"] as const) {
+      for (const cancelFails of [false, true]) {
+        const controller = new AbortController();
+        let canceled = false;
+        const options = {
+          endpoint:
+            kind === "Kubo"
+              ? "http://127.0.0.1:5001"
+              : "https://gateway.example.test",
+          fetch: async () => {
+            controller.abort();
+            return new Response(
+              new ReadableStream({
+                start(streamController) {
+                  streamController.enqueue(new Uint8Array([0]));
+                },
+                cancel() {
+                  canceled = true;
+                  if (cancelFails) {
+                    throw new Error("cancel failed");
+                  }
+                },
+              }),
+            );
+          },
+        };
+        const reader =
+          kind === "Kubo"
+            ? createKuboBlockReader(options)
+            : createGatewayBlockReader(options);
+
+        await assert.rejects(
+          reader.getBlock(EMPTY_RAW_CID, {
+            maxBytes: 64,
+            signal: controller.signal,
+          }),
+          hasCode("OPERATION_ABORTED"),
+          `${kind} cancelFails=${cancelFails}`,
+        );
+        assert.equal(canceled, true, `${kind} cancelFails=${cancelFails}`);
+      }
+    }
+  });
+
+  test("does not await never-settling post-fetch cancellation", async () => {
+    for (const kind of ["Kubo", "gateway"] as const) {
+      const controller = new AbortController();
+      let canceled = false;
+      const options = {
+        endpoint:
+          kind === "Kubo"
+            ? "http://127.0.0.1:5001"
+            : "https://gateway.example.test",
+        fetch: async () => {
+          controller.abort();
+          return new Response(
+            new ReadableStream({
+              start(streamController) {
+                streamController.enqueue(new Uint8Array([0]));
+              },
+              cancel() {
+                canceled = true;
+                return new Promise<void>(() => {});
+              },
+            }),
+          );
+        },
+      };
+      const reader =
+        kind === "Kubo"
+          ? createKuboBlockReader(options)
+          : createGatewayBlockReader(options);
+
+      await assert.rejects(
+        Promise.race([
+          reader.getBlock(EMPTY_RAW_CID, {
+            maxBytes: 64,
+            signal: controller.signal,
+          }),
+          rejectAfter(100, `${kind} post-fetch cancellation hung`),
+        ]),
+        hasCode("OPERATION_ABORTED"),
+        kind,
+      );
+      assert.equal(canceled, true, kind);
+    }
+  });
+
+  test("cancels mid-stream caller aborts without displacing abort errors", async () => {
+    for (const kind of ["Kubo", "gateway"] as const) {
+      for (const cancelFails of [false, true]) {
+        const controller = new AbortController();
+        let canceled = false;
+        let pulls = 0;
+        const options = {
+          endpoint:
+            kind === "Kubo"
+              ? "http://127.0.0.1:5001"
+              : "https://gateway.example.test",
+          fetch: async () =>
+            new Response(
+              new ReadableStream<Uint8Array>({
+                pull(streamController) {
+                  pulls += 1;
+                  if (pulls === 1) {
+                    streamController.enqueue(new Uint8Array([1]));
+                    return;
+                  }
+                  controller.abort();
+                },
+                cancel() {
+                  canceled = true;
+                  if (cancelFails) {
+                    throw new Error("cancel failed");
+                  }
+                },
+              }),
+            ),
+        };
+        const reader =
+          kind === "Kubo"
+            ? createKuboBlockReader(options)
+            : createGatewayBlockReader(options);
+
+        await assert.rejects(
+          reader.getBlock(EMPTY_RAW_CID, {
+            maxBytes: 64,
+            signal: controller.signal,
+          }),
+          hasCode("OPERATION_ABORTED"),
+          `${kind} cancelFails=${cancelFails}`,
+        );
+        assert.ok(pulls >= 2, kind);
+        assert.equal(canceled, true, `${kind} cancelFails=${cancelFails}`);
+      }
+    }
+  });
+
+  test("races never-settling reads and cancellation against caller abort", async () => {
+    for (const kind of ["Kubo", "gateway"] as const) {
+      const controller = new AbortController();
+      let canceled = false;
+      let resolvePullStarted!: () => void;
+      const pullStarted = new Promise<void>((resolve) => {
+        resolvePullStarted = resolve;
+      });
+      const options = {
+        endpoint:
+          kind === "Kubo"
+            ? "http://127.0.0.1:5001"
+            : "https://gateway.example.test",
+        fetch: async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              pull() {
+                resolvePullStarted();
+                return new Promise<void>(() => {});
+              },
+              cancel() {
+                canceled = true;
+                return new Promise<void>(() => {});
+              },
+            }),
+          ),
+      };
+      const reader =
+        kind === "Kubo"
+          ? createKuboBlockReader(options)
+          : createGatewayBlockReader(options);
+      const pending = reader.getBlock(EMPTY_RAW_CID, {
+        maxBytes: 64,
+        signal: controller.signal,
+      });
+      await pullStarted;
+      controller.abort();
+
+      await assert.rejects(
+        Promise.race([
+          pending,
+          rejectAfter(100, `${kind} pending read abort hung`),
+        ]),
+        hasCode("OPERATION_ABORTED"),
+        kind,
+      );
+      assert.equal(canceled, true, kind);
+    }
+  });
+
+  test("distinguishes dependency AbortError from an actual caller abort", async () => {
+    for (const kind of ["Kubo", "gateway"] as const) {
+      const dependencyAbort = new Error("transport timeout");
+      dependencyAbort.name = "AbortError";
+      const dependencyOptions = {
+        endpoint:
+          kind === "Kubo"
+            ? "http://127.0.0.1:5001"
+            : "https://gateway.example.test",
+        fetch: async () => {
+          throw dependencyAbort;
+        },
+      };
+      const dependencyReader =
+        kind === "Kubo"
+          ? createKuboBlockReader(dependencyOptions)
+          : createGatewayBlockReader(dependencyOptions);
+      await assert.rejects(
+        dependencyReader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        hasCode("DEPENDENCY_UNAVAILABLE"),
+        kind,
+      );
+
+      const controller = new AbortController();
+      const callerReader =
+        kind === "Kubo"
+          ? createKuboBlockReader({
+              ...dependencyOptions,
+              fetch: async () => {
+                controller.abort();
+                throw dependencyAbort;
+              },
+            })
+          : createGatewayBlockReader({
+              ...dependencyOptions,
+              fetch: async () => {
+                controller.abort();
+                throw dependencyAbort;
+              },
+            });
+      await assert.rejects(
+        callerReader.getBlock(EMPTY_RAW_CID, {
+          maxBytes: 64,
+          signal: controller.signal,
+        }),
+        hasCode("OPERATION_ABORTED"),
+        kind,
+      );
+    }
+  });
+
+  test("sanitizes injected fetch failures without exposing request authority", async () => {
+    for (const kind of ["Kubo", "gateway"] as const) {
+      const injected = createAuthorityBearingError();
+      const encodedMarker = encodeURIComponent(AUTHORITY_MARKER_TEXT);
+      const endpoint =
+        kind === "Kubo"
+          ? `http://127.0.0.1:5001/${encodedMarker}`
+          : `https://gateway.example.test/${encodedMarker}`;
+      const reader =
+        kind === "Kubo"
+          ? createKuboBlockReader({
+              endpoint,
+              fetch: async () => {
+                throw injected;
+              },
+            })
+          : createGatewayBlockReader({
+              endpoint,
+              fetch: async () => {
+                throw injected;
+              },
+            });
+
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        (error: unknown) =>
+          assertSanitizedDependencyError(
+            error,
+            "DEPENDENCY_UNAVAILABLE",
+            "block-read",
+            "unavailable",
+          ),
+        kind,
+      );
+    }
+  });
+
+  test("sanitizes injected response-stream failures", async () => {
+    const injected = createAuthorityBearingError("stream failed");
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.error(injected);
+            },
+          }),
+        ),
+    });
+
+    await assert.rejects(
+      reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+      (error: unknown) =>
+        assertSanitizedDependencyError(
+          error,
+          "DEPENDENCY_UNAVAILABLE",
+          "block-read",
+          "unavailable",
+      ),
+    );
+  });
+
+  test("reconstructs a stale package error rethrown by a response stream", async () => {
+    const staleError = ipfsDependencyError(
+      "DEPENDENCY_UNAVAILABLE",
+      "An earlier IPFS block write was unavailable.",
+      "block-write",
+      "unavailable",
+    );
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.error(staleError);
+            },
+          }),
+        ),
+    });
+    let reconstructedError: unknown;
+    try {
+      await reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 });
+    } catch (error) {
+      reconstructedError = error;
+    }
+
+    assert.notEqual(reconstructedError, staleError);
+    assertSanitizedDependencyError(
+      reconstructedError,
+      "DEPENDENCY_UNAVAILABLE",
+      "block-read",
+      "unavailable",
+    );
+  });
+
+  test("sanitizes hostile response metadata, body, and reader surfaces", async () => {
+    const cases: ReadonlyArray<{
+      readonly label: string;
+      readonly response: () => Response;
+    }> = [
+      {
+        label: "status",
+        response: () =>
+          hostileResponse({
+            status: hostileGetter("response status"),
+          }),
+      },
+      {
+        label: "ok",
+        response: () =>
+          hostileResponse({
+            ok: hostileGetter("response ok"),
+          }),
+      },
+      {
+        label: "headers",
+        response: () =>
+          hostileResponse({
+            headers: hostileGetter("response headers"),
+          }),
+      },
+      {
+        label: "headers.get",
+        response: () =>
+          hostileResponse({
+            headers: hostileObjectProperty(
+              "get",
+              "headers get",
+            ),
+          }),
+      },
+      {
+        label: "body",
+        response: () =>
+          hostileResponse({
+            body: hostileGetter("response body"),
+          }),
+      },
+      {
+        label: "body.getReader",
+        response: () =>
+          hostileResponse({
+            body: hostileObjectProperty(
+              "getReader",
+              "body getReader",
+            ),
+          }),
+      },
+      {
+        label: "body.getReader()",
+        response: () =>
+          hostileResponse({
+            body: {
+              getReader() {
+                throw createHostilePrototypeTrap("body reader call");
+              },
+            },
+          }),
+      },
+    ];
+
+    for (const item of cases) {
+      const reader = createGatewayBlockReader({
+        endpoint: "https://gateway.example.test",
+        fetch: async () => item.response(),
+      });
+
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        (error: unknown) => {
+          assert.equal(
+            (error as { readonly code?: unknown }).code,
+            "IO_FAILURE",
+            item.label,
+          );
+          return assertSanitizedDependencyError(
+            error,
+            "IO_FAILURE",
+            "block-read",
+            "protocol-failure",
+          );
+        },
+        item.label,
+      );
+    }
+  });
+
+  test("sanitizes hostile stream result and chunk inspection", async () => {
+    for (const field of ["done", "value"] as const) {
+      const result = new Proxy(
+        {
+          done: false,
+          value: new Uint8Array(),
+        },
+        {
+          get(target, key, receiver) {
+            if (key === field) {
+              throw createHostilePrototypeTrap(`stream ${field}`);
+            }
+            return Reflect.get(target, key, receiver);
+          },
+        },
+      );
+      const reader = createGatewayBlockReader({
+        endpoint: "https://gateway.example.test",
+        fetch: async () =>
+          hostileResponse({
+            body: {
+              getReader() {
+                return {
+                  async cancel() {},
+                  async read() {
+                    return result;
+                  },
+                  releaseLock() {},
+                };
+              },
+            },
+          }),
+      });
+
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, { maxBytes: 64 }),
+        (error: unknown) =>
+          assertSanitizedDependencyError(
+            error,
+            "DEPENDENCY_UNAVAILABLE",
+            "block-read",
+            "unavailable",
+          ),
+        field,
+      );
+    }
+  });
+
+  test("keeps cancellation authoritative when response cleanup is hostile", async () => {
+    for (const kind of ["Kubo", "gateway"] as const) {
+      const controller = new AbortController();
+      const options = {
+        endpoint:
+          kind === "Kubo"
+            ? "http://127.0.0.1:5001"
+            : "https://gateway.example.test",
+        fetch: async () => {
+          controller.abort(
+            createAuthorityBearingError("hostile abort reason"),
+          );
+          return hostileResponse({
+            body: hostileGetter("cancellation body"),
+          });
+        },
+      };
+      const reader =
+        kind === "Kubo"
+          ? createKuboBlockReader(options)
+          : createGatewayBlockReader(options);
+
+      await assert.rejects(
+        reader.getBlock(EMPTY_RAW_CID, {
+          maxBytes: 64,
+          signal: controller.signal,
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.equal(
+            (error as Error & { code?: unknown }).code,
+            "OPERATION_ABORTED",
+          );
+          assert.equal(error.cause, undefined);
+          assertNoAuthorityMarkers(error);
+          return true;
+        },
+        kind,
+      );
+    }
+  });
+
+  test("does not expose injected errors or abort reasons on caller cancellation", async () => {
+    const controller = new AbortController();
+    const injected = createAuthorityBearingError("canceled fetch");
+    const reader = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () => {
+        controller.abort(createAuthorityBearingError("abort reason"));
+        throw injected;
+      },
+    });
+
+    await assert.rejects(
+      reader.getBlock(EMPTY_RAW_CID, {
+        maxBytes: 64,
+        signal: controller.signal,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal(
+          (error as Error & { code?: unknown }).code,
+          "OPERATION_ABORTED",
+        );
+        assert.equal(error.cause, undefined);
+        assertNoAuthorityMarkers(error);
+        return true;
+      },
+    );
+  });
+
+  test("does not expose invalid endpoint text in validation errors", () => {
+    let error: unknown;
+    try {
+      createGatewayBlockReader({
+        endpoint: `not-a-url:${AUTHORITY_MARKER_TEXT}`,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    assert.ok(error instanceof Error);
+    assert.equal(
+      (error as Error & { code?: unknown }).code,
+      "INVALID_REFERENCE",
+    );
+    assert.equal(error.cause, undefined);
+    assertNoAuthorityMarkers(error);
+  });
+
   test("rejects unsafe endpoints and raw-profile-invalid CIDs before fetch", async () => {
     let calls = 0;
     const fetch = async (): Promise<Response> => {
@@ -340,12 +990,14 @@ describe("bounded IPFS block readers", () => {
 });
 
 function streamBytes(
-  chunks: readonly (readonly number[])[],
+  chunks: readonly (readonly number[] | Uint8Array)[],
 ): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
     start(controller) {
       for (const chunk of chunks) {
-        controller.enqueue(Uint8Array.from(chunk));
+        controller.enqueue(
+          chunk instanceof Uint8Array ? chunk : Uint8Array.from(chunk),
+        );
       }
       controller.close();
     },
@@ -358,4 +1010,70 @@ function hasCode(code: string): (error: unknown) => boolean {
     error !== null &&
     "code" in error &&
     error.code === code;
+}
+
+function rejectAfter(delayMs: number, message: string): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    setTimeout(() => reject(new Error(message)), delayMs);
+  });
+}
+
+function createHostilePrototypeTrap(label: string): Error {
+  return new Proxy(createAuthorityBearingError(label), {
+    getPrototypeOf() {
+      throw createAuthorityBearingError(`${label} prototype`);
+    },
+  });
+}
+
+function hostileGetter(label: string): PropertyDescriptor {
+  return {
+    configurable: true,
+    enumerable: true,
+    get() {
+      throw createHostilePrototypeTrap(label);
+    },
+  };
+}
+
+function hostileObjectProperty(
+  key: string,
+  label: string,
+): object {
+  return Object.defineProperty({}, key, hostileGetter(label));
+}
+
+function hostileResponse(
+  overrides: Readonly<Record<string, unknown | PropertyDescriptor>>,
+): Response {
+  const response: Record<string, unknown> = {
+    body: null,
+    headers: new Headers(),
+    ok: true,
+    status: 200,
+  };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (isPropertyDescriptor(value)) {
+      Object.defineProperty(response, key, value);
+    } else {
+      response[key] = value;
+    }
+  }
+  return response as unknown as Response;
+}
+
+function isPropertyDescriptor(
+  value: unknown,
+): value is PropertyDescriptor {
+  if (typeof value !== "object" || value === null) return false;
+  const getDescriptor = Object.getOwnPropertyDescriptor(value, "get");
+  const setDescriptor = Object.getOwnPropertyDescriptor(value, "set");
+  return (
+    (getDescriptor !== undefined &&
+      "value" in getDescriptor &&
+      typeof getDescriptor.value === "function") ||
+    (setDescriptor !== undefined &&
+      "value" in setDescriptor &&
+      typeof setDescriptor.value === "function")
+  );
 }

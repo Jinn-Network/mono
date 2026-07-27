@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash } from "node:crypto";
+import { isUint8Array } from "node:util/types";
 
 import {
   EvidenceRepositoryError,
@@ -16,6 +17,12 @@ import {
   normalizeRawCid,
   rawCidToDigest,
 } from "./cid.js";
+import {
+  ipfsDependencyError,
+  ipfsRepositoryError,
+  isIpfsRepositoryError,
+  mapIpfsDependencyError,
+} from "./errors.js";
 
 const MAX_KUBO_ERROR_BODY_BYTES = 64 * 1024;
 const RAW_BLOCK_ACCEPT = "application/vnd.ipld.raw";
@@ -59,21 +66,32 @@ export function createKuboBlockReader(
         },
         operationOptions,
       );
+      if (operationOptions.signal?.aborted === true) {
+        cancelResponse(response);
+      }
+      assertRepositoryOperationActive(operationOptions);
 
-      if (response.status === 401 || response.status === 403) {
-        await cancelResponse(response);
+      const status = readResponseStatus(response, operationOptions);
+      if (status === 401 || status === 403) {
+        cancelResponse(response);
         throw repositoryError(
           "ACCESS_DENIED",
-          `Kubo block read was denied with HTTP ${response.status}.`,
+          `Kubo block read was denied with HTTP ${status}.`,
+          "block-read",
+          "access-denied",
         );
       }
-      if (response.status === 500) {
+      if (status === 500) {
         const errorBytes = await readBoundedResponse(
           response,
           MAX_KUBO_ERROR_BODY_BYTES,
           operationOptions,
           "DEPENDENCY_UNAVAILABLE",
           "Kubo error response exceeded the pinned envelope limit.",
+          {
+            failureKind: "protocol-failure",
+            operation: "block-read",
+          },
         );
         if (isPinnedKuboNotFound(errorBytes, canonicalCid)) {
           return null;
@@ -81,11 +99,13 @@ export function createKuboBlockReader(
         throw repositoryError(
           "DEPENDENCY_UNAVAILABLE",
           "Kubo returned an unrecognized command error envelope.",
+          "block-read",
+          "protocol-failure",
         );
       }
-      if (!response.ok) {
-        await cancelResponse(response);
-        throw mapHttpFailure("Kubo", response.status);
+      if (!readResponseOk(response, operationOptions)) {
+        cancelResponse(response);
+        throw mapHttpFailure("Kubo", status);
       }
 
       return verifyBlock(
@@ -124,21 +144,28 @@ export function createGatewayBlockReader(
         },
         operationOptions,
       );
+      if (operationOptions.signal?.aborted === true) {
+        cancelResponse(response);
+      }
+      assertRepositoryOperationActive(operationOptions);
 
-      if (response.status === 404) {
-        await cancelResponse(response);
+      const status = readResponseStatus(response, operationOptions);
+      if (status === 404) {
+        cancelResponse(response);
         return null;
       }
-      if (response.status === 401 || response.status === 403) {
-        await cancelResponse(response);
+      if (status === 401 || status === 403) {
+        cancelResponse(response);
         throw repositoryError(
           "ACCESS_DENIED",
-          `Gateway block read was denied with HTTP ${response.status}.`,
+          `Gateway block read was denied with HTTP ${status}.`,
+          "block-read",
+          "access-denied",
         );
       }
-      if (!response.ok) {
-        await cancelResponse(response);
-        throw mapHttpFailure("Gateway", response.status);
+      if (!readResponseOk(response, operationOptions)) {
+        cancelResponse(response);
+        throw mapHttpFailure("Gateway", status);
       }
 
       return verifyBlock(
@@ -159,11 +186,10 @@ function parseEndpoint(value: string | URL, label: string): URL {
   let endpoint: URL;
   try {
     endpoint = new URL(value);
-  } catch (error) {
-    throw repositoryError(
+  } catch {
+    throw ipfsRepositoryError(
       "INVALID_REFERENCE",
       `${label} endpoint must be an absolute HTTP(S) URL.`,
-      error,
     );
   }
   if (
@@ -173,7 +199,7 @@ function parseEndpoint(value: string | URL, label: string): URL {
     endpoint.search !== "" ||
     endpoint.hash !== ""
   ) {
-    throw repositoryError(
+    throw ipfsRepositoryError(
       "INVALID_REFERENCE",
       `${label} endpoint must be an HTTP(S) URL without userinfo, query, or fragment.`,
     );
@@ -183,7 +209,7 @@ function parseEndpoint(value: string | URL, label: string): URL {
 
 function parseMaxBytes(value: number): number {
   if (!Number.isSafeInteger(value) || value < 0) {
-    throw repositoryError(
+    throw ipfsRepositoryError(
       "INVALID_REFERENCE",
       "maxBytes must be a non-negative safe integer.",
     );
@@ -223,20 +249,17 @@ async function performFetch(
   try {
     return await fetchCapability(input, init);
   } catch (error) {
-    if (
-      options.signal?.aborted === true ||
-      (error instanceof Error && error.name === "AbortError")
-    ) {
-      throw repositoryError(
+    if (options.signal?.aborted === true) {
+      throw ipfsRepositoryError(
         "OPERATION_ABORTED",
         "The IPFS block read was aborted.",
-        error,
       );
     }
-    throw repositoryError(
+    throw ipfsDependencyError(
       "DEPENDENCY_UNAVAILABLE",
       "The configured IPFS block endpoint was unavailable.",
-      error,
+      "block-read",
+      "unavailable",
     );
   }
 }
@@ -247,55 +270,121 @@ async function readBoundedResponse(
   options: RepositoryOperationOptions,
   tooLargeCode: EvidenceRepositoryErrorCode,
   tooLargeMessage: string,
+  dependencyFailure?: {
+    readonly failureKind: "protocol-failure" | "unavailable";
+    readonly operation: "block-read";
+  },
 ): Promise<Uint8Array> {
-  const declaredLength = response.headers.get("content-length");
-  if (declaredLength !== null && /^[0-9]+$/u.test(declaredLength)) {
-    const parsedLength = Number(declaredLength);
-    if (Number.isSafeInteger(parsedLength) && parsedLength > maxBytes) {
-      await cancelResponse(response);
-      throw repositoryError(tooLargeCode, tooLargeMessage);
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  let directSetupError: EvidenceRepositoryError | undefined;
+  try {
+    const headers = response.headers;
+    const getHeader = headers.get;
+    if (typeof getHeader !== "function") {
+      throw new TypeError("Response headers do not expose get().");
     }
+    const declaredLength = Reflect.apply(
+      getHeader,
+      headers,
+      ["content-length"],
+    ) as unknown;
+    if (
+      declaredLength !== null &&
+      typeof declaredLength !== "string"
+    ) {
+      throw new TypeError("Response Content-Length was not text.");
+    }
+    if (
+      declaredLength !== null &&
+      /^[0-9]+$/u.test(declaredLength)
+    ) {
+      const parsedLength = Number(declaredLength);
+      if (
+        Number.isSafeInteger(parsedLength) &&
+        parsedLength > maxBytes
+      ) {
+        cancelResponse(response);
+        directSetupError = responseLimitError(
+          tooLargeCode,
+          tooLargeMessage,
+          dependencyFailure,
+        );
+        throw directSetupError;
+      }
+    }
+
+    const body = response.body;
+    if (body === null) return new Uint8Array();
+    const getReader = body.getReader;
+    if (typeof getReader !== "function") {
+      throw new TypeError("Response body does not expose getReader().");
+    }
+    reader = Reflect.apply(getReader, body, []) as
+      ReadableStreamDefaultReader<Uint8Array>;
+  } catch (error) {
+    cancelResponse(response);
+    if (options.signal?.aborted === true) {
+      throw ipfsRepositoryError(
+        "OPERATION_ABORTED",
+        "The IPFS response stream was aborted.",
+      );
+    }
+    if (error === directSetupError) throw error;
+    throw responseProtocolFailure();
   }
 
-  if (response.body === null) return new Uint8Array();
-
   const output = new Uint8Array(maxBytes);
-  const reader = response.body.getReader();
   let offset = 0;
+  let directStreamError: EvidenceRepositoryError | undefined;
   try {
     while (true) {
       assertRepositoryOperationActive(options);
-      const item = await reader.read();
+      const item = await readNextChunk(reader, options);
       assertRepositoryOperationActive(options);
       if (item.done) break;
       const chunk = item.value;
+      if (!isUint8Array(chunk)) {
+        throw new TypeError(
+          "The IPFS response stream returned a non-byte chunk.",
+        );
+      }
       if (chunk.byteLength > maxBytes - offset) {
-        await cancelReader(reader);
-        throw repositoryError(tooLargeCode, tooLargeMessage);
+        directStreamError = responseLimitError(
+          tooLargeCode,
+          tooLargeMessage,
+          dependencyFailure,
+        );
+        throw directStreamError;
       }
       output.set(chunk, offset);
       offset += chunk.byteLength;
     }
   } catch (error) {
-    if (error instanceof EvidenceRepositoryError) throw error;
-    await cancelReader(reader);
-    if (
-      options.signal?.aborted === true ||
-      (error instanceof Error && error.name === "AbortError")
-    ) {
-      throw repositoryError(
+    cancelReader(reader);
+    if (options.signal?.aborted === true) {
+      throw ipfsRepositoryError(
         "OPERATION_ABORTED",
         "The IPFS response stream was aborted.",
-        error,
       );
     }
-    throw repositoryError(
+    if (error === directStreamError) throw error;
+    if (isIpfsRepositoryError(error)) {
+      throw mapIpfsDependencyError(
+        error,
+        "The IPFS response stream failed.",
+        "block-read",
+        options.signal,
+        true,
+      );
+    }
+    throw ipfsDependencyError(
       "DEPENDENCY_UNAVAILABLE",
       "The IPFS response stream failed.",
-      error,
+      "block-read",
+      "unavailable",
     );
   } finally {
-    reader.releaseLock();
+    releaseReader(reader);
   }
   return output.subarray(0, offset);
 }
@@ -306,7 +395,7 @@ function verifyBlock(bytes: Uint8Array, cid: string): Uint8Array {
     `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
   );
   if (actualDigest !== expectedDigest) {
-    throw repositoryError(
+    throw ipfsRepositoryError(
       "CONTENT_CORRUPT",
       "IPFS block bytes do not match the requested CID.",
     );
@@ -334,45 +423,183 @@ function mapHttpFailure(
   dependency: string,
   status: number,
 ): EvidenceRepositoryError {
-  if (status === 429 || status >= 500) {
-    return repositoryError(
+  if (status === 408 || status === 429 || status >= 500) {
+    return ipfsDependencyError(
       "DEPENDENCY_UNAVAILABLE",
       `${dependency} block read failed with HTTP ${status}.`,
+      "block-read",
+      "unavailable",
     );
   }
-  return repositoryError(
+  return ipfsDependencyError(
     "IO_FAILURE",
     `${dependency} block read failed with HTTP ${status}.`,
+    "block-read",
+    "protocol-failure",
   );
 }
 
-async function cancelResponse(response: Response): Promise<void> {
-  if (response.body === null) return;
+async function readNextChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  options: RepositoryOperationOptions,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  assertRepositoryOperationActive(options);
+  const signal = options.signal;
+  if (signal === undefined) return reader.read();
+
+  let rejectAbort!: (error: EvidenceRepositoryError) => void;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  const onAbort = () => {
+    rejectAbort(
+      ipfsRepositoryError(
+        "OPERATION_ABORTED",
+        "The IPFS response stream was aborted.",
+      ),
+    );
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
+  if (signal.aborted) onAbort();
   try {
-    await response.body.cancel();
+    return await Promise.race([reader.read(), aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
+function cancelResponse(response: Response): void {
+  try {
+    const body = response.body;
+    if (body === null) return;
+    const cancel = body.cancel;
+    if (typeof cancel !== "function") return;
+    void Promise.resolve(Reflect.apply(cancel, body, [])).catch(() => {
+      // The primary HTTP classification remains authoritative.
+    });
   } catch {
     // The primary HTTP classification remains authoritative.
   }
 }
 
-async function cancelReader(
+function cancelReader(
   reader: ReadableStreamDefaultReader<Uint8Array>,
-): Promise<void> {
+): void {
   try {
-    await reader.cancel();
+    const cancel = reader.cancel;
+    if (typeof cancel !== "function") return;
+    void Promise.resolve(Reflect.apply(cancel, reader, [])).catch(() => {
+      // The primary limit, cancellation, or transport failure remains authoritative.
+    });
   } catch {
     // The primary limit, cancellation, or transport failure remains authoritative.
   }
 }
 
+function releaseReader(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): void {
+  try {
+    const releaseLock = reader.releaseLock;
+    if (typeof releaseLock !== "function") return;
+    Reflect.apply(releaseLock, reader, []);
+  } catch {
+    // An in-flight injected read must not displace the primary operation result.
+  }
+}
+
+function readResponseStatus(
+  response: Response,
+  options: RepositoryOperationOptions,
+): number {
+  let status: unknown;
+  try {
+    status = response.status;
+  } catch {
+    throw responseSurfaceFailure(response, options);
+  }
+  if (
+    typeof status !== "number" ||
+    !Number.isInteger(status) ||
+    status < 0 ||
+    status > 599
+  ) {
+    throw responseSurfaceFailure(response, options);
+  }
+  return status;
+}
+
+function readResponseOk(
+  response: Response,
+  options: RepositoryOperationOptions,
+): boolean {
+  let ok: unknown;
+  try {
+    ok = response.ok;
+  } catch {
+    throw responseSurfaceFailure(response, options);
+  }
+  if (typeof ok !== "boolean") {
+    throw responseSurfaceFailure(response, options);
+  }
+  return ok;
+}
+
+function responseSurfaceFailure(
+  response: Response,
+  options: RepositoryOperationOptions,
+): EvidenceRepositoryError {
+  cancelResponse(response);
+  return options.signal?.aborted === true
+    ? ipfsRepositoryError(
+        "OPERATION_ABORTED",
+        "The IPFS block read was aborted.",
+      )
+    : responseProtocolFailure();
+}
+
+function responseProtocolFailure(): EvidenceRepositoryError {
+  return ipfsDependencyError(
+    "IO_FAILURE",
+    "The configured IPFS block endpoint returned an invalid response.",
+    "block-read",
+    "protocol-failure",
+  );
+}
+
 function repositoryError(
   code: EvidenceRepositoryErrorCode,
   message: string,
-  cause?: unknown,
+  operation: "block-read",
+  failureKind:
+    | "access-denied"
+    | "protocol-failure"
+    | "unavailable",
 ): EvidenceRepositoryError {
-  return new EvidenceRepositoryError(
+  return ipfsDependencyError(
     code,
     message,
-    cause === undefined ? undefined : { cause },
+    operation,
+    failureKind,
   );
+}
+
+function responseLimitError(
+  code: EvidenceRepositoryErrorCode,
+  message: string,
+  dependencyFailure:
+    | {
+        readonly failureKind: "protocol-failure" | "unavailable";
+        readonly operation: "block-read";
+      }
+    | undefined,
+): EvidenceRepositoryError {
+  return dependencyFailure === undefined
+    ? ipfsRepositoryError(code, message)
+    : ipfsDependencyError(
+        code,
+        message,
+        dependencyFailure.operation,
+        dependencyFailure.failureKind,
+      );
 }

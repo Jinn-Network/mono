@@ -76,8 +76,8 @@ export function parseRegistrationBytes(
   let text: string;
   try {
     text = fatalDecoder.decode(bytes);
-  } catch (error) {
-    throw corruptRegistration("Registration bytes are not valid UTF-8.", error);
+  } catch {
+    throw corruptRegistration("Registration bytes are not valid UTF-8.");
   }
 
   const recordMatch = RECORD_REGISTRATION_PATTERN.exec(text);
@@ -118,11 +118,9 @@ function isRecordReference(
 
 function corruptRegistration(
   message: string,
-  cause?: unknown,
 ): EvidenceRepositoryError {
   return new EvidenceRepositoryError(
     "CONTENT_CORRUPT",
     message,
-    cause === undefined ? undefined : { cause },
   );
 }
