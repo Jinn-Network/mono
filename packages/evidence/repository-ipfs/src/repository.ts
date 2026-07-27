@@ -227,10 +227,14 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
   ): Promise<Uint8Array | null> {
     try {
       assertRepositoryOperationActive(options);
-      const bytes = await this.#reader.getBlock(cid, {
-        ...options,
-        maxBytes: MAX_STANDARD_IPFS_BLOCK_BYTES,
-      });
+      const bytes = await awaitCallerAbortable(
+        () =>
+          this.#reader.getBlock(cid, {
+            ...options,
+            maxBytes: MAX_STANDARD_IPFS_BLOCK_BYTES,
+          }),
+        options,
+      );
       assertRepositoryOperationActive(options);
       if (bytes === null) return null;
       if (!isUint8Array(bytes)) {
@@ -335,14 +339,18 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
   ): Promise<void> {
     try {
       assertRepositoryOperationActive(options);
-      const returnedCid = await this.#client.block.put(bytes, {
-        allowBigBlock: false,
-        format: "raw",
-        mhtype: "sha2-256",
-        pin: true,
-        signal: options.signal,
-        version: 1,
-      });
+      const returnedCid = await awaitCallerAbortable(
+        () =>
+          this.#client.block.put(bytes, {
+            allowBigBlock: false,
+            format: "raw",
+            mhtype: "sha2-256",
+            pin: true,
+            signal: options.signal,
+            version: 1,
+          }),
+        options,
+      );
       assertRepositoryOperationActive(options);
 
       let returnedCanonical: string;
@@ -389,11 +397,12 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
   ): Promise<boolean> {
     try {
       assertRepositoryOperationActive(options);
-      for await (const pin of this.#client.pin.ls({
+      const pins = this.#client.pin.ls({
         paths: decodeRawCid(cid),
         signal: options.signal,
         type: "all",
-      })) {
+      });
+      for await (const pin of callerAbortableItems(pins, options)) {
         assertRepositoryOperationActive(options);
         const pinCid = dependencyDataProperty(pin, "cid");
         const pinType = dependencyDataProperty(pin, "type");
@@ -428,11 +437,15 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
   ): Promise<void> {
     try {
       assertRepositoryOperationActive(options);
-      const pin = await this.#client.pin.remote.add(decodeRawCid(cid), {
-        background: false,
-        service: this.#remotePinService,
-        signal: options.signal,
-      });
+      const pin = await awaitCallerAbortable(
+        () =>
+          this.#client.pin.remote.add(decodeRawCid(cid), {
+            background: false,
+            service: this.#remotePinService,
+            signal: options.signal,
+          }),
+        options,
+      );
       assertRepositoryOperationActive(options);
       const pinCid = dependencyDataProperty(pin, "cid");
       const pinStatus = dependencyDataProperty(pin, "status");
@@ -471,12 +484,13 @@ export class IpfsEvidenceRepository implements EvidenceRepository {
   ): Promise<boolean> {
     try {
       assertRepositoryOperationActive(options);
-      for await (const pin of this.#client.pin.remote.ls({
+      const pins = this.#client.pin.remote.ls({
         cid: [decodeRawCid(cid)],
         service: this.#remotePinService,
         signal: options.signal,
         status: ["pinned"],
-      })) {
+      });
+      for await (const pin of callerAbortableItems(pins, options)) {
         assertRepositoryOperationActive(options);
         const pinCid = dependencyDataProperty(pin, "cid");
         const pinStatus = dependencyDataProperty(pin, "status");
@@ -685,6 +699,93 @@ function isReadbackDeadlineExpired(error: unknown): boolean {
       typeof error === "function") &&
     readbackDeadlineErrors.has(error)
   );
+}
+
+async function awaitCallerAbortable<T>(
+  operation: () => T | PromiseLike<T>,
+  options: RepositoryOperationOptions,
+): Promise<T> {
+  assertRepositoryOperationActive(options);
+  const signal = options.signal;
+  if (signal === undefined) return Promise.resolve(operation());
+
+  let rejectAbort!: (error: EvidenceRepositoryError) => void;
+  const callerAbort = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  let abortRaised = false;
+  const onAbort = () => {
+    if (abortRaised) return;
+    abortRaised = true;
+    rejectAbort(
+      ipfsRepositoryError(
+        "OPERATION_ABORTED",
+        "The IPFS repository operation was aborted.",
+      ),
+    );
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
+  if (signal.aborted) onAbort();
+  let dependency: Promise<T>;
+  if (signal.aborted) {
+    dependency = new Promise<T>(() => {});
+  } else {
+    try {
+      dependency = Promise.resolve(operation());
+    } catch (error) {
+      dependency = Promise.reject(error);
+    }
+  }
+
+  try {
+    const result = await Promise.race([dependency, callerAbort]);
+    assertRepositoryOperationActive(options);
+    return result;
+  } catch (error) {
+    assertRepositoryOperationActive(options);
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
+async function* callerAbortableItems<T>(
+  values: AsyncIterable<T>,
+  options: RepositoryOperationOptions,
+): AsyncGenerator<T, void, undefined> {
+  const iterator = values[Symbol.asyncIterator]();
+  let exhausted = false;
+  try {
+    while (true) {
+      const step = await awaitCallerAbortable(
+        () => iterator.next(),
+        options,
+      );
+      if (step.done) {
+        exhausted = true;
+        return;
+      }
+      yield step.value;
+    }
+  } finally {
+    if (!exhausted) closeIteratorWithoutWaiting(iterator);
+  }
+}
+
+function closeIteratorWithoutWaiting<T>(
+  iterator: AsyncIterator<T>,
+): void {
+  try {
+    const close = iterator.return;
+    if (typeof close !== "function") return;
+    const result = Reflect.apply(close, iterator, []);
+    void Promise.resolve(result).then(
+      () => undefined,
+      () => undefined,
+    );
+  } catch {
+    // Hostile cleanup must not delay or replace the primary result.
+  }
 }
 
 function registrationsEqual(

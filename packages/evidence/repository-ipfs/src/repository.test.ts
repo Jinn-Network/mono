@@ -993,6 +993,169 @@ describe("IpfsEvidenceRepository writes", () => {
     }
   });
 
+  test("promptly aborts a non-cooperative injected reader and observes its late rejection", async () => {
+    const pendingRead = createDeferred<Uint8Array | null>();
+    const readStarted = createDeferred<void>();
+    const reader: IpfsBlockReader = {
+      getBlock() {
+        readStarted.resolve();
+        return pendingRead.promise;
+      },
+    };
+    const repository = new IpfsEvidenceRepository({
+      client: new FakeKubo().asClient(),
+      reader,
+    });
+    const controller = new AbortController();
+    const pending = repository.getArtifact(
+      createArtifactReference(encoder.encode("non-cooperative reader")),
+      { signal: controller.signal },
+    );
+    await readStarted.promise;
+
+    controller.abort();
+    await assert.rejects(
+      settleWithin(pending, 100),
+      hasCode("OPERATION_ABORTED"),
+    );
+
+    pendingRead.reject(new Error("late reader rejection"));
+    await flushLateSettlement();
+  });
+
+  test("promptly aborts a non-cooperative block put and observes its late rejection", async () => {
+    const reader = new FakeIpfsBlockReader();
+    const kubo = new FakeKubo(reader);
+    const client = kubo.asClient();
+    const pendingPut = createDeferred<never>();
+    const putStarted = createDeferred<void>();
+    Object.defineProperty(client.block, "put", {
+      configurable: true,
+      value() {
+        putStarted.resolve();
+        return pendingPut.promise;
+      },
+    });
+    const repository = new IpfsEvidenceRepository({ client, reader });
+    const controller = new AbortController();
+    const pending = repository.putArtifact(
+      encoder.encode("non-cooperative block put"),
+      { signal: controller.signal },
+    );
+    await putStarted.promise;
+
+    controller.abort();
+    await assert.rejects(
+      settleWithin(pending, 100),
+      hasCode("OPERATION_ABORTED"),
+    );
+
+    pendingPut.reject(new Error("late block-put rejection"));
+    await flushLateSettlement();
+    assert.deepEqual(kubo.events, []);
+  });
+
+  test("promptly aborts and closes a non-cooperative local pin iterator", async () => {
+    const reader = new FakeIpfsBlockReader();
+    const kubo = new FakeKubo(reader);
+    const client = kubo.asClient();
+    const pins = createNonCooperativeAsyncIterable<unknown>();
+    Object.defineProperty(client.pin, "ls", {
+      configurable: true,
+      value() {
+        return pins.iterable;
+      },
+    });
+    const repository = new IpfsEvidenceRepository({ client, reader });
+    const controller = new AbortController();
+    const pending = repository.putArtifact(
+      encoder.encode("non-cooperative local pin listing"),
+      { signal: controller.signal },
+    );
+    await pins.started;
+
+    controller.abort();
+    await assert.rejects(
+      settleWithin(pending, 100),
+      hasCode("OPERATION_ABORTED"),
+    );
+    assert.equal(pins.returnCalls(), 1);
+
+    pins.reject(new Error("late local-pin rejection"));
+    await flushLateSettlement();
+  });
+
+  test("promptly aborts non-cooperative remote pin add and listing boundaries", async () => {
+    {
+      const reader = new FakeIpfsBlockReader();
+      const kubo = new FakeKubo(reader);
+      const client = kubo.asClient();
+      const pendingAdd = createDeferred<never>();
+      const addStarted = createDeferred<void>();
+      Object.defineProperty(client.pin.remote, "add", {
+        configurable: true,
+        value() {
+          addStarted.resolve();
+          return pendingAdd.promise;
+        },
+      });
+      const repository = new IpfsEvidenceRepository({
+        client,
+        reader,
+        remotePinService: "operator-pins",
+      });
+      const controller = new AbortController();
+      const pending = repository.putArtifact(
+        encoder.encode("non-cooperative remote pin add"),
+        { signal: controller.signal },
+      );
+      await addStarted.promise;
+
+      controller.abort();
+      await assert.rejects(
+        settleWithin(pending, 100),
+        hasCode("OPERATION_ABORTED"),
+      );
+
+      pendingAdd.reject(new Error("late remote-pin-add rejection"));
+      await flushLateSettlement();
+    }
+
+    {
+      const reader = new FakeIpfsBlockReader();
+      const kubo = new FakeKubo(reader);
+      const client = kubo.asClient();
+      const pins = createNonCooperativeAsyncIterable<unknown>();
+      Object.defineProperty(client.pin.remote, "ls", {
+        configurable: true,
+        value() {
+          return pins.iterable;
+        },
+      });
+      const repository = new IpfsEvidenceRepository({
+        client,
+        reader,
+        remotePinService: "operator-pins",
+      });
+      const controller = new AbortController();
+      const pending = repository.putArtifact(
+        encoder.encode("non-cooperative remote pin listing"),
+        { signal: controller.signal },
+      );
+      await pins.started;
+
+      controller.abort();
+      await assert.rejects(
+        settleWithin(pending, 100),
+        hasCode("OPERATION_ABORTED"),
+      );
+      assert.equal(pins.returnCalls(), 1);
+
+      pins.reject(new Error("late remote-pin-list rejection"));
+      await flushLateSettlement();
+    }
+  });
+
   test("retries lagging readback and fails a zero-duration deadline closed", async () => {
     const bytes = encoder.encode("lagging gateway");
     const reference = createArtifactReference(bytes);
@@ -1269,6 +1432,75 @@ function rejectAfter(delayMs: number, message: string): Promise<never> {
   return new Promise((_resolve, reject) => {
     setTimeout(() => reject(new Error(message)), delayMs);
   });
+}
+
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  readonly reject: (error: unknown) => void;
+  readonly resolve: (value: T) => void;
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let reject!: (error: unknown) => void;
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    reject = rejectPromise;
+    resolve = resolvePromise;
+  });
+  return { promise, reject, resolve };
+}
+
+function createNonCooperativeAsyncIterable<T>(): {
+  readonly iterable: AsyncIterable<T>;
+  readonly reject: (error: unknown) => void;
+  readonly returnCalls: () => number;
+  readonly started: Promise<void>;
+} {
+  const step = createDeferred<IteratorResult<T>>();
+  const nextStarted = createDeferred<void>();
+  let closeCalls = 0;
+  const iterator: AsyncIterableIterator<T> = {
+    [Symbol.asyncIterator]() {
+      return this;
+    },
+    next() {
+      nextStarted.resolve();
+      return step.promise;
+    },
+    return() {
+      closeCalls += 1;
+      return Promise.resolve({ done: true, value: undefined });
+    },
+  };
+  return {
+    iterable: iterator,
+    reject: step.reject,
+    returnCalls: () => closeCalls,
+    started: nextStarted.promise,
+  };
+}
+
+async function settleWithin<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("operation did not settle after caller abort")),
+      timeoutMs,
+    );
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+async function flushLateSettlement(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 function hasCode(code: string): (error: unknown) => boolean {

@@ -90,6 +90,7 @@ export function createCommandSupervisor(spawnCapability = spawn) {
   let interruptedBy;
   let interruptForceKillTimer;
   let interruptForceKillChild;
+  const interruption = new AbortController();
 
   const execute = (command, args, options = {}, cleanup = false) => {
     if (interruptedBy !== undefined && !cleanup) {
@@ -189,6 +190,9 @@ export function createCommandSupervisor(spawnCapability = spawn) {
     interrupt(signal) {
       const repeated = interruptedBy !== undefined;
       interruptedBy ??= signal;
+      if (!interruption.signal.aborted) {
+        interruption.abort(new CommandInterrupted(interruptedBy));
+      }
       const child = activeCleanupChild ?? activeCommandChild;
       if (child === undefined) return;
       if (repeated) {
@@ -206,6 +210,7 @@ export function createCommandSupervisor(spawnCapability = spawn) {
       execute(command, args, { captureOutput: true }),
     run: (command, args, options) =>
       execute(command, args, options),
+    signal: interruption.signal,
   };
 }
 
@@ -250,6 +255,7 @@ function commandOutput(command, args, supervisor) {
 async function waitForEndpoint(name, supervisor) {
   let endpoint;
   for (let attempt = 0; attempt < 120; attempt += 1) {
+    throwIfSupervisorInterrupted(supervisor);
     if (endpoint === undefined) {
       try {
         const binding = await commandOutput(
@@ -266,18 +272,95 @@ async function waitForEndpoint(name, supervisor) {
     }
     if (endpoint !== undefined) {
       try {
-        const response = await fetch(`${endpoint}/api/v0/version`, {
-          method: "POST",
-          signal: AbortSignal.timeout(1_000),
-        });
+        const timeoutSignal = AbortSignal.timeout(1_000);
+        const signal =
+          supervisor.signal === undefined
+            ? timeoutSignal
+            : AbortSignal.any([timeoutSignal, supervisor.signal]);
+        const response = await awaitSupervisorInterruptable(
+          () =>
+            fetch(`${endpoint}/api/v0/version`, {
+              method: "POST",
+              signal,
+            }),
+          supervisor,
+        );
+        throwIfSupervisorInterrupted(supervisor);
         if (response.ok) return endpoint;
       } catch {
+        throwIfSupervisorInterrupted(supervisor);
         // Kubo has not opened the loopback-published API yet.
       }
     }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await waitForReadinessRetry(supervisor, 250);
   }
   throw new Error(`Kubo container ${name} did not become ready.`);
+}
+
+async function awaitSupervisorInterruptable(operation, supervisor) {
+  throwIfSupervisorInterrupted(supervisor);
+  const signal = supervisor.signal;
+  if (signal === undefined) return Promise.resolve(operation());
+
+  let rejectInterrupt;
+  const interrupted = new Promise((_resolve, reject) => {
+    rejectInterrupt = reject;
+  });
+  const onInterrupt = () => rejectInterrupt(signal.reason);
+  signal.addEventListener("abort", onInterrupt, { once: true });
+  if (signal.aborted) onInterrupt();
+  let pending;
+  if (signal.aborted) {
+    pending = new Promise(() => {});
+  } else {
+    try {
+      pending = Promise.resolve(operation());
+    } catch (error) {
+      pending = Promise.reject(error);
+    }
+  }
+  try {
+    return await Promise.race([pending, interrupted]);
+  } finally {
+    signal.removeEventListener("abort", onInterrupt);
+  }
+}
+
+async function waitForReadinessRetry(supervisor, delayMs) {
+  throwIfSupervisorInterrupted(supervisor);
+  const signal = supervisor.signal;
+  if (signal === undefined) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    return;
+  }
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onInterrupt);
+      result();
+    };
+    const onInterrupt = () =>
+      finish(() => reject(signal.reason));
+    const timer = setTimeout(
+      () => finish(resolve),
+      delayMs,
+    );
+    signal.addEventListener("abort", onInterrupt, { once: true });
+    if (signal.aborted) onInterrupt();
+  });
+  throwIfSupervisorInterrupted(supervisor);
+}
+
+function throwIfSupervisorInterrupted(supervisor) {
+  const signal = supervisor.signal;
+  if (signal?.aborted !== true) return;
+  if (signal.reason instanceof CommandInterrupted) {
+    throw signal.reason;
+  }
+  throw new CommandInterrupted("an external signal");
 }
 
 if (
