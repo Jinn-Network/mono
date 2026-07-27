@@ -5,6 +5,8 @@ import {
   isTypedArray,
 } from "node:util/types";
 
+import { snapshotExactBytes } from "./validation.js";
+
 const encoder = new TextEncoder();
 const fatalDecoder = new TextDecoder("utf-8", { fatal: true });
 const maximumScanDepth = 64;
@@ -65,7 +67,12 @@ function exactMarkerBytes(value: unknown): Uint8Array {
       "Authority markers must be non-proxy Uint8Array values.",
     );
   }
-  const snapshot = Uint8Array.from(value);
+  const snapshot = snapshotExactBytes(value);
+  if (snapshot === undefined) {
+    throw new TypeError(
+      "Authority markers must be non-proxy Uint8Array values.",
+    );
+  }
   if (snapshot.byteLength < 32) {
     throw new TypeError("Authority markers must contain at least 32 bytes.");
   }

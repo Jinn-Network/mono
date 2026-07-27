@@ -125,6 +125,162 @@ describe("publication journal codecs and transitions", () => {
     ).toBe(encodeVersionedPublicationJournalEntry(versioned).byteLength);
   });
 
+  test("snapshots prepared frame bytes without consulting caller metadata", () => {
+    const planned = plannedEntry();
+    for (const shadowedLength of [0, 1, 10]) {
+      const frameBytes = new Uint8Array([7, 8, 9]);
+      let metadataReads = 0;
+      Object.defineProperty(frameBytes, "length", {
+        configurable: true,
+        value: shadowedLength,
+      });
+      Object.defineProperty(frameBytes, "byteLength", {
+        configurable: true,
+        get: () => {
+          metadataReads += 1;
+          throw new RangeError("hostile byteLength");
+        },
+      });
+      Object.defineProperty(frameBytes, Symbol.iterator, {
+        configurable: true,
+        get: () => {
+          metadataReads += 1;
+          throw new RangeError("hostile iterator");
+        },
+      });
+      const versioned: VersionedPublicationJournalEntry = {
+        ...planned,
+        preparedPartitions: [{
+          ...planned.preparedPartitions![0]!,
+          prepared: {
+            ...planned.preparedPartitions![0]!.prepared,
+            frameBytes,
+          },
+        }],
+        revision: 2,
+      };
+
+      const decoded = decodeVersionedPublicationJournalEntry(
+        encodeVersionedPublicationJournalEntry(versioned),
+      );
+
+      expect(
+        decoded.preparedPartitions?.[0]?.prepared.frameBytes,
+        `shadowed length ${shadowedLength}`,
+      ).toEqual(new Uint8Array([7, 8, 9]));
+      expect(metadataReads).toBe(0);
+    }
+  });
+
+  test("snapshots opaque sink state without consulting caller metadata", () => {
+    const planned = plannedEntry();
+    for (const shadowedLength of [0, 1, 10]) {
+      const stateBytes = new Uint8Array([0, 255, 1]);
+      let metadataReads = 0;
+      Object.defineProperty(stateBytes, "length", {
+        configurable: true,
+        value: shadowedLength,
+      });
+      Object.defineProperty(stateBytes, "byteLength", {
+        configurable: true,
+        get: () => {
+          metadataReads += 1;
+          throw new RangeError("hostile byteLength");
+        },
+      });
+      Object.defineProperty(stateBytes, Symbol.iterator, {
+        configurable: true,
+        get: () => {
+          metadataReads += 1;
+          throw new RangeError("hostile iterator");
+        },
+      });
+      const versioned: VersionedPublicationJournalEntry = {
+        ...planned,
+        preparedPartitions: [{
+          ...planned.preparedPartitions![0]!,
+          placement: {
+            status: "pending",
+            pending: {
+              idempotencyKey:
+                "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+              frameDigest:
+                planned.preparedPartitions![0]!.prepared.frameDigest,
+              state: {
+                format: "https://publication.test/state/v1",
+                bytes: stateBytes,
+              },
+            },
+          },
+        }],
+        revision: 3,
+      };
+
+      const decoded = decodeVersionedPublicationJournalEntry(
+        encodeVersionedPublicationJournalEntry(versioned),
+      );
+
+      const placement = decoded.preparedPartitions?.[0]?.placement;
+      expect(placement?.status).toBe("pending");
+      if (placement?.status !== "pending") {
+        throw new Error("Expected pending placement.");
+      }
+      expect(
+        placement.pending.state?.bytes,
+        `shadowed length ${shadowedLength}`,
+      ).toEqual(new Uint8Array([0, 255, 1]));
+      expect(metadataReads).toBe(0);
+    }
+  });
+
+  test("maps detached and proxied journal byte fields to typed corruption errors", () => {
+    const planned = plannedEntry();
+    for (const target of ["frame", "state"] as const) {
+      const detached = new Uint8Array([7, 8, 9]);
+      structuredClone(detached.buffer, { transfer: [detached.buffer] });
+      const invalidValues: readonly Uint8Array[] = [
+        detached,
+        new Proxy(new Uint8Array([7, 8, 9]), {}),
+      ];
+      for (const bytes of invalidValues) {
+        const versioned: VersionedPublicationJournalEntry = {
+          ...planned,
+          preparedPartitions: [{
+            ...planned.preparedPartitions![0]!,
+            ...(target === "frame"
+              ? {
+                  prepared: {
+                    ...planned.preparedPartitions![0]!.prepared,
+                    frameBytes: bytes,
+                  },
+                }
+              : {
+                  placement: {
+                    status: "pending" as const,
+                    pending: {
+                      idempotencyKey:
+                        "sha256:3333333333333333333333333333333333333333333333333333333333333333" as const,
+                      frameDigest:
+                        planned.preparedPartitions![0]!.prepared.frameDigest,
+                      state: {
+                        format: "https://publication.test/state/v1",
+                        bytes,
+                      },
+                    },
+                  },
+                }),
+          }],
+          revision: 3,
+        };
+
+        expect(
+          () => encodeVersionedPublicationJournalEntry(versioned),
+          target,
+        ).toThrowError(expect.objectContaining({ code: "JOURNAL_CORRUPT" }));
+      }
+    }
+  });
+
   test("rejects unknown schema versions and malformed base64", () => {
     const encoded = JSON.parse(
       new TextDecoder().decode(

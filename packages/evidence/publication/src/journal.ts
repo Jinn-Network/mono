@@ -29,6 +29,7 @@ import {
   assertAbsoluteIri,
   exactBytesLength,
   parsePublicationDigest,
+  snapshotExactBytes,
 } from "./validation.js";
 
 const encoder = new TextEncoder();
@@ -164,8 +165,12 @@ function assertCanonicalReferences(
   }
 }
 
-function base64(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString("base64");
+function base64(bytes: Uint8Array, role: string): string {
+  const snapshot = snapshotExactBytes(bytes);
+  if (snapshot === undefined) {
+    return corrupt(`${role} must be exact non-proxy Uint8Array bytes.`);
+  }
+  return Buffer.from(snapshot).toString("base64");
 }
 
 class JournalSizeExceeded extends Error {}
@@ -519,7 +524,7 @@ function decodeOpaqueState(value: unknown, role: string): OpaqueSinkState {
 function encodeOpaqueState(state: OpaqueSinkState): Record<string, unknown> {
   return {
     format: state.format,
-    bytes: base64(state.bytes),
+    bytes: base64(state.bytes, "Opaque sink state bytes"),
   };
 }
 
@@ -724,7 +729,10 @@ function encodePartition(
       members: partition.prepared.members.map(({ reference }) => ({
         reference,
       })),
-      frameBytes: base64(partition.prepared.frameBytes),
+      frameBytes: base64(
+        partition.prepared.frameBytes,
+        "Prepared announcement frame bytes",
+      ),
       frameDigest: partition.prepared.frameDigest,
       frameSize: partition.prepared.frameSize,
     },

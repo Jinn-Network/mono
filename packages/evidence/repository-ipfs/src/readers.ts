@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash } from "node:crypto";
-import { isUint8Array } from "node:util/types";
+import {
+  isPromise,
+  isProxy,
+  isUint8Array,
+} from "node:util/types";
 
 import {
   EvidenceRepositoryError,
@@ -18,6 +22,10 @@ import {
   rawCidToDigest,
 } from "./cid.js";
 import {
+  intrinsicUint8ArrayByteLength,
+  setIntrinsicUint8Array,
+} from "./byte-intrinsics.js";
+import {
   ipfsDependencyError,
   ipfsRepositoryError,
   isIpfsRepositoryError,
@@ -26,7 +34,105 @@ import {
 
 const MAX_KUBO_ERROR_BODY_BYTES = 64 * 1024;
 const RAW_BLOCK_ACCEPT = "application/vnd.ipld.raw";
-const FETCH_ABORTED = Symbol("FETCH_ABORTED");
+const MAX_READER_PROTOTYPE_DEPTH = 32;
+const intrinsicApply = Reflect.apply;
+const intrinsicCreate = Object.create;
+const intrinsicDefineProperty = Object.defineProperty;
+const intrinsicFreeze = Object.freeze;
+const intrinsicGetOwnPropertyDescriptor =
+  Object.getOwnPropertyDescriptor;
+const intrinsicGetPrototypeOf = Object.getPrototypeOf;
+const NativePromise = Promise;
+const nativePromisePrototype = NativePromise.prototype;
+const nativePromiseThen = intrinsicGetOwnPropertyDescriptor(
+  nativePromisePrototype,
+  "then",
+)!.value as (
+  onFulfilled?: (value: unknown) => unknown,
+  onRejected?: (reason: unknown) => unknown,
+) => Promise<unknown>;
+const nativePromiseConstructorDescriptor =
+  intrinsicGetOwnPropertyDescriptor(
+    nativePromisePrototype,
+    "constructor",
+  )!;
+const nativePromiseSpeciesDescriptor =
+  intrinsicGetOwnPropertyDescriptor(
+    NativePromise,
+    Symbol.species,
+  )!;
+const nativeResponseBodyGetter =
+  intrinsicGetOwnPropertyDescriptor(
+    Response.prototype,
+    "body",
+  )!.get as (this: Response) => ReadableStream<Uint8Array> | null;
+
+interface ResponseBodyReader {
+  readonly cancel?: (...arguments_: readonly unknown[]) => unknown;
+  readonly read: (...arguments_: readonly unknown[]) => unknown;
+  readonly releaseLock?: (
+    ...arguments_: readonly unknown[]
+  ) => unknown;
+  readonly source: object;
+}
+
+type ResponseReadResult =
+  | { readonly done: true }
+  | { readonly done: false; readonly value: unknown };
+
+interface NativePromiseFulfilled<T> {
+  readonly status: "fulfilled";
+  readonly value: T;
+}
+
+interface NativePromiseRejected {
+  readonly status: "rejected";
+}
+
+interface FetchAborted {
+  readonly status: "aborted";
+}
+
+type NativePromiseSettlement<T> =
+  | NativePromiseFulfilled<T>
+  | NativePromiseRejected;
+
+const NATIVE_PROMISE_REJECTED =
+  createInertStatusRecord<NativePromiseRejected>("rejected");
+const FETCH_ABORTED =
+  createInertStatusRecord<FetchAborted>("aborted");
+
+function createInertStatusRecord<
+  T extends NativePromiseRejected | FetchAborted,
+>(status: T["status"]): T {
+  const record = intrinsicCreate(null) as T;
+  intrinsicDefineProperty(record, "status", {
+    configurable: false,
+    enumerable: true,
+    value: status,
+    writable: false,
+  });
+  return intrinsicFreeze(record);
+}
+
+function createInertFulfilledRecord<T>(
+  value: T,
+): NativePromiseFulfilled<T> {
+  const record = intrinsicCreate(null) as NativePromiseFulfilled<T>;
+  intrinsicDefineProperty(record, "status", {
+    configurable: false,
+    enumerable: true,
+    value: "fulfilled",
+    writable: false,
+  });
+  intrinsicDefineProperty(record, "value", {
+    configurable: false,
+    enumerable: true,
+    value,
+    writable: false,
+  });
+  return intrinsicFreeze(record);
+}
 
 export interface IpfsBlockReader {
   getBlock(
@@ -58,7 +164,7 @@ export function createKuboBlockReader(
       assertRepositoryOperationActive(operationOptions);
 
       const url = kuboBlockGetUrl(endpoint, canonicalCid);
-      const response = await performFetch(
+      const responseResult = await performFetch(
         fetchCapability,
         url,
         {
@@ -67,6 +173,7 @@ export function createKuboBlockReader(
         },
         operationOptions,
       );
+      const response = responseResult.value;
       if (operationOptions.signal?.aborted === true) {
         cancelResponse(response);
       }
@@ -135,7 +242,7 @@ export function createGatewayBlockReader(
       const maxBytes = parseMaxBytes(operationOptions.maxBytes);
       assertRepositoryOperationActive(operationOptions);
 
-      const response = await performFetch(
+      const responseResult = await performFetch(
         fetchCapability,
         gatewayBlockUrl(endpoint, canonicalCid),
         {
@@ -145,6 +252,7 @@ export function createGatewayBlockReader(
         },
         operationOptions,
       );
+      const response = responseResult.value;
       if (operationOptions.signal?.aborted === true) {
         cancelResponse(response);
       }
@@ -245,14 +353,14 @@ async function performFetch(
   input: URL,
   init: RequestInit,
   options: RepositoryOperationOptions,
-): Promise<Response> {
+): Promise<NativePromiseFulfilled<Response>> {
   assertRepositoryOperationActive(options);
   const signal = options.signal;
   let onAbort: (() => void) | undefined;
-  let abortResult: Promise<typeof FETCH_ABORTED> | undefined;
+  let abortResult: Promise<FetchAborted> | undefined;
   if (signal !== undefined) {
-    let resolveAbort!: (result: typeof FETCH_ABORTED) => void;
-    abortResult = new Promise((resolve) => {
+    let resolveAbort!: (result: FetchAborted) => void;
+    abortResult = new NativePromise((resolve) => {
       resolveAbort = resolve;
     });
     const abortListener = () => resolveAbort(FETCH_ABORTED);
@@ -262,52 +370,59 @@ async function performFetch(
   }
 
   try {
-    if (signal?.aborted === true) {
+    if (isSignalAborted(signal)) {
       throw ipfsRepositoryError(
         "OPERATION_ABORTED",
         "The IPFS block read was aborted.",
       );
     }
 
-    const fetchResult = Promise.resolve(
-      fetchCapability(input, init),
-    );
-    void fetchResult
-      .then(
+    let fetchResult: Promise<NativePromiseSettlement<Response>>;
+    try {
+      fetchResult = observeNativePromise<Response>(
+        intrinsicApply(fetchCapability, undefined, [input, init]),
         (response) => {
-          if (signal?.aborted === true) cancelResponse(response);
+          if (isSignalAborted(signal)) cancelResponse(response);
         },
-        () => {
-          // Keep a losing injected fetch rejection observed.
-        },
-      )
-      .catch(() => {
-        // Detached late-response cleanup cannot escape publicly.
-      });
+      );
+    } catch {
+      if (isSignalAborted(signal)) {
+        throw ipfsRepositoryError(
+          "OPERATION_ABORTED",
+          "The IPFS block read was aborted.",
+        );
+      }
+      throw responseProtocolFailure();
+    }
+
     const result =
       abortResult === undefined
         ? await fetchResult
-        : await Promise.race([fetchResult, abortResult]);
-    if (result === FETCH_ABORTED) {
+        : await raceNativePromises(fetchResult, abortResult);
+    if (isSignalAborted(signal)) {
+      if (result.status === "fulfilled") {
+        cancelResponse(result.value);
+      }
       throw ipfsRepositoryError(
         "OPERATION_ABORTED",
         "The IPFS block read was aborted.",
+      );
+    }
+    if (result.status === "aborted") {
+      throw ipfsRepositoryError(
+        "OPERATION_ABORTED",
+        "The IPFS block read was aborted.",
+      );
+    }
+    if (result.status === "rejected") {
+      throw ipfsDependencyError(
+        "DEPENDENCY_UNAVAILABLE",
+        "The configured IPFS block endpoint was unavailable.",
+        "block-read",
+        "unavailable",
       );
     }
     return result;
-  } catch (error) {
-    if (signal?.aborted === true) {
-      throw ipfsRepositoryError(
-        "OPERATION_ABORTED",
-        "The IPFS block read was aborted.",
-      );
-    }
-    throw ipfsDependencyError(
-      "DEPENDENCY_UNAVAILABLE",
-      "The configured IPFS block endpoint was unavailable.",
-      "block-read",
-      "unavailable",
-    );
   } finally {
     if (signal !== undefined && onAbort !== undefined) {
       try {
@@ -317,6 +432,10 @@ async function performFetch(
       }
     }
   }
+}
+
+function isSignalAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
 }
 
 async function readBoundedResponse(
@@ -330,7 +449,7 @@ async function readBoundedResponse(
     readonly operation: "block-read";
   },
 ): Promise<Uint8Array> {
-  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  let reader: ResponseBodyReader;
   let directSetupError: EvidenceRepositoryError | undefined;
   try {
     const headers = response.headers;
@@ -374,8 +493,9 @@ async function readBoundedResponse(
     if (typeof getReader !== "function") {
       throw new TypeError("Response body does not expose getReader().");
     }
-    reader = Reflect.apply(getReader, body, []) as
-      ReadableStreamDefaultReader<Uint8Array>;
+    reader = parseResponseBodyReader(
+      Reflect.apply(getReader, body, []),
+    );
   } catch (error) {
     cancelResponse(response);
     if (options.signal?.aborted === true) {
@@ -394,16 +514,29 @@ async function readBoundedResponse(
   try {
     while (true) {
       assertRepositoryOperationActive(options);
-      const item = await readNextChunk(reader, options);
+      const readSettlement = await readNextChunk(reader, options);
       assertRepositoryOperationActive(options);
+      let item: ResponseReadResult;
+      try {
+        item = parseResponseReadResult(readSettlement.value);
+      } catch {
+        directStreamError = responseProtocolFailure();
+        throw directStreamError;
+      }
       if (item.done) break;
       const chunk = item.value;
       if (!isUint8Array(chunk)) {
-        throw new TypeError(
-          "The IPFS response stream returned a non-byte chunk.",
-        );
+        directStreamError = responseProtocolFailure();
+        throw directStreamError;
       }
-      if (chunk.byteLength > maxBytes - offset) {
+      let chunkByteLength: number;
+      try {
+        chunkByteLength = intrinsicUint8ArrayByteLength(chunk);
+      } catch {
+        directStreamError = responseProtocolFailure();
+        throw directStreamError;
+      }
+      if (chunkByteLength > maxBytes - offset) {
         directStreamError = responseLimitError(
           tooLargeCode,
           tooLargeMessage,
@@ -411,8 +544,13 @@ async function readBoundedResponse(
         );
         throw directStreamError;
       }
-      output.set(chunk, offset);
-      offset += chunk.byteLength;
+      try {
+        setIntrinsicUint8Array(output, chunk, offset);
+      } catch {
+        directStreamError = responseProtocolFailure();
+        throw directStreamError;
+      }
+      offset += chunkByteLength;
     }
   } catch (error) {
     cancelReader(reader);
@@ -495,15 +633,35 @@ function mapHttpFailure(
 }
 
 async function readNextChunk(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
+  reader: ResponseBodyReader,
   options: RepositoryOperationOptions,
-): Promise<ReadableStreamReadResult<Uint8Array>> {
+): Promise<NativePromiseFulfilled<unknown>> {
   assertRepositoryOperationActive(options);
+  let pendingRead: Promise<NativePromiseSettlement<unknown>>;
+  try {
+    pendingRead = observeNativePromise(
+      intrinsicApply(reader.read, reader.source, []),
+    );
+  } catch {
+    throw responseProtocolFailure();
+  }
+
   const signal = options.signal;
-  if (signal === undefined) return reader.read();
+  if (signal === undefined) {
+    const settlement = await pendingRead;
+    if (settlement.status === "rejected") {
+      throw ipfsDependencyError(
+        "DEPENDENCY_UNAVAILABLE",
+        "The IPFS response stream failed.",
+        "block-read",
+        "unavailable",
+      );
+    }
+    return settlement;
+  }
 
   let rejectAbort!: (error: EvidenceRepositoryError) => void;
-  const aborted = new Promise<never>((_resolve, reject) => {
+  const aborted = new NativePromise<never>((_resolve, reject) => {
     rejectAbort = reject;
   });
   const onAbort = () => {
@@ -517,47 +675,395 @@ async function readNextChunk(
   signal.addEventListener("abort", onAbort, { once: true });
   if (signal.aborted) onAbort();
   try {
-    return await Promise.race([reader.read(), aborted]);
+    const settlement = await raceNativePromises(
+      pendingRead,
+      aborted,
+    );
+    if (settlement.status === "rejected") {
+      throw ipfsDependencyError(
+        "DEPENDENCY_UNAVAILABLE",
+        "The IPFS response stream failed.",
+        "block-read",
+        "unavailable",
+      );
+    }
+    return settlement;
   } finally {
     signal.removeEventListener("abort", onAbort);
   }
 }
 
-function cancelResponse(response: Response): void {
+function raceNativePromises<T, U>(
+  first: Promise<T>,
+  second: Promise<U>,
+): Promise<T | U> {
+  if (!nativePromiseInfrastructureIsIntact()) {
+    throw responseProtocolFailure();
+  }
+  return new NativePromise<T | U>((resolve, reject) => {
+    intrinsicApply(nativePromiseThen, first, [resolve, reject]);
+    intrinsicApply(nativePromiseThen, second, [resolve, reject]);
+  });
+}
+
+function parseResponseBodyReader(value: unknown): ResponseBodyReader {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    isProxy(value)
+  ) {
+    throw new TypeError(
+      "Response body getReader() returned an invalid reader.",
+    );
+  }
+
+  let cancel:
+    | ((...arguments_: readonly unknown[]) => unknown)
+    | undefined;
+  let cancelFound = false;
+  let read:
+    | ((...arguments_: readonly unknown[]) => unknown)
+    | undefined;
+  let readFound = false;
+  let releaseLock:
+    | ((...arguments_: readonly unknown[]) => unknown)
+    | undefined;
+  let releaseLockFound = false;
+  let owner: object | null = value;
+  for (
+    let depth = 0;
+    owner !== null && depth < MAX_READER_PROTOTYPE_DEPTH;
+    depth += 1
+  ) {
+    if (isProxy(owner)) {
+      throw new TypeError(
+        "Response body reader must not contain a Proxy surface.",
+      );
+    }
+    if (!cancelFound) {
+      const descriptor = intrinsicGetOwnPropertyDescriptor(
+        owner,
+        "cancel",
+      );
+      if (descriptor !== undefined) {
+        cancelFound = true;
+        cancel = parseReaderMethod(descriptor, "cancel");
+      }
+    }
+    if (!readFound) {
+      const descriptor = intrinsicGetOwnPropertyDescriptor(
+        owner,
+        "read",
+      );
+      if (descriptor !== undefined) {
+        readFound = true;
+        read = parseReaderMethod(descriptor, "read");
+      }
+    }
+    if (!releaseLockFound) {
+      const descriptor = intrinsicGetOwnPropertyDescriptor(
+        owner,
+        "releaseLock",
+      );
+      if (descriptor !== undefined) {
+        releaseLockFound = true;
+        releaseLock = parseReaderMethod(
+          descriptor,
+          "releaseLock",
+        );
+      }
+    }
+    owner = intrinsicGetPrototypeOf(owner) as object | null;
+  }
+
+  if (owner !== null || read === undefined) {
+    throw new TypeError(
+      "Response body reader does not expose a bounded read surface.",
+    );
+  }
+  return { cancel, read, releaseLock, source: value };
+}
+
+function parseReaderMethod(
+  descriptor: PropertyDescriptor,
+  name: "cancel" | "read" | "releaseLock",
+): (...arguments_: readonly unknown[]) => unknown {
+  if (
+    !("value" in descriptor) ||
+    typeof descriptor.value !== "function" ||
+    isProxy(descriptor.value)
+  ) {
+    throw new TypeError(
+      `Response body reader does not expose a stable ${name} method.`,
+    );
+  }
+  return descriptor.value as (
+    ...arguments_: readonly unknown[]
+  ) => unknown;
+}
+
+function parseResponseReadResult(value: unknown): ResponseReadResult {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    isProxy(value)
+  ) {
+    throw new TypeError(
+      "Response body reader returned an invalid result.",
+    );
+  }
+
+  const doneDescriptor = intrinsicGetOwnPropertyDescriptor(
+    value,
+    "done",
+  );
+  if (
+    doneDescriptor === undefined ||
+    !("value" in doneDescriptor) ||
+    typeof doneDescriptor.value !== "boolean"
+  ) {
+    throw new TypeError(
+      "Response body reader result must expose an own boolean done value.",
+    );
+  }
+  if (doneDescriptor.value) return { done: true };
+
+  const valueDescriptor = intrinsicGetOwnPropertyDescriptor(
+    value,
+    "value",
+  );
+  if (
+    valueDescriptor === undefined ||
+    !("value" in valueDescriptor)
+  ) {
+    throw new TypeError(
+      "An incomplete response body reader result must expose an own data value.",
+    );
+  }
+  return { done: false, value: valueDescriptor.value };
+}
+
+function observeNativePromise<T>(
+  value: unknown,
+  onFulfilled?: (value: T) => void,
+): Promise<NativePromiseSettlement<T>> {
+  if (!isSafelyObservableNativePromise(value)) {
+    throw new TypeError(
+      "An injected async capability must return an exact native Promise.",
+    );
+  }
+
+  let settle!: (value: NativePromiseSettlement<T>) => void;
+  const settlement = new NativePromise<NativePromiseSettlement<T>>(
+    (resolve) => {
+      settle = resolve;
+    },
+  );
+  intrinsicApply(nativePromiseThen, value, [
+    (result: unknown) => {
+      if (onFulfilled !== undefined) {
+        try {
+          onFulfilled(result as T);
+        } catch {
+          // Detached cleanup cannot displace source observation.
+        }
+      }
+      settle(createInertFulfilledRecord(result as T));
+    },
+    () => {
+      settle(NATIVE_PROMISE_REJECTED);
+    },
+  ]);
+  return settlement;
+}
+
+function observeCleanupPromise(value: unknown): void {
+  if (!isSafelyObservableNativePromise(value)) return;
   try {
-    const body = response.body;
-    if (body === null) return;
-    const cancel = body.cancel;
-    if (typeof cancel !== "function") return;
-    void Promise.resolve(Reflect.apply(cancel, body, [])).catch(() => {
-      // The primary HTTP classification remains authoritative.
-    });
+    intrinsicApply(nativePromiseThen, value, [
+      () => undefined,
+      () => undefined,
+    ]);
+  } catch {
+    // Cleanup observation cannot displace the primary operation result.
+  }
+}
+
+function isSafelyObservableNativePromise(
+  value: unknown,
+): value is Promise<unknown> {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    isProxy(value) ||
+    !isPromise(value)
+  ) {
+    return false;
+  }
+  try {
+    if (intrinsicGetPrototypeOf(value) !== nativePromisePrototype) {
+      return false;
+    }
+    if (
+      intrinsicGetOwnPropertyDescriptor(value, "constructor") !==
+      undefined
+    ) {
+      return false;
+    }
+    return nativePromiseInfrastructureIsIntact();
+  } catch {
+    return false;
+  }
+}
+
+function nativePromiseInfrastructureIsIntact(): boolean {
+  return (
+    descriptorsEqual(
+      intrinsicGetOwnPropertyDescriptor(
+        nativePromisePrototype,
+        "constructor",
+      ),
+      nativePromiseConstructorDescriptor,
+    ) &&
+    descriptorsEqual(
+      intrinsicGetOwnPropertyDescriptor(
+        NativePromise,
+        Symbol.species,
+      ),
+      nativePromiseSpeciesDescriptor,
+    )
+  );
+}
+
+function descriptorsEqual(
+  actual: PropertyDescriptor | undefined,
+  expected: PropertyDescriptor,
+): boolean {
+  if (actual === undefined) return false;
+  return (
+    actual.configurable === expected.configurable &&
+    actual.enumerable === expected.enumerable &&
+    ("value" in actual) === ("value" in expected) &&
+    ("value" in actual
+      ? actual.value === expected.value &&
+        actual.writable === expected.writable
+      : actual.get === expected.get && actual.set === expected.set)
+  );
+}
+
+function cancelResponse(response: unknown): void {
+  try {
+    const body = snapshotResponseBody(response);
+    if (body === undefined || body === null) return;
+    const cancellation = snapshotBodyCancellation(body);
+    if (cancellation === undefined) return;
+    observeCleanupPromise(
+      intrinsicApply(cancellation.cancel, cancellation.source, []),
+    );
   } catch {
     // The primary HTTP classification remains authoritative.
   }
 }
 
+function snapshotResponseBody(response: unknown): unknown {
+  if (
+    typeof response !== "object" ||
+    response === null ||
+    isProxy(response)
+  ) {
+    return undefined;
+  }
+  try {
+    return intrinsicApply(nativeResponseBodyGetter, response, []);
+  } catch {
+    const descriptor = intrinsicGetOwnPropertyDescriptor(
+      response,
+      "body",
+    );
+    if (
+      descriptor === undefined ||
+      !("value" in descriptor)
+    ) {
+      return undefined;
+    }
+    return descriptor.value;
+  }
+}
+
+function snapshotBodyCancellation(
+  body: unknown,
+):
+  | {
+      readonly cancel: (
+        ...arguments_: readonly unknown[]
+      ) => unknown;
+      readonly source: object;
+    }
+  | undefined {
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    isProxy(body)
+  ) {
+    return undefined;
+  }
+
+  let cancel:
+    | ((...arguments_: readonly unknown[]) => unknown)
+    | undefined;
+  let cancelFound = false;
+  let owner: object | null = body;
+  for (
+    let depth = 0;
+    owner !== null && depth < MAX_READER_PROTOTYPE_DEPTH;
+    depth += 1
+  ) {
+    if (isProxy(owner)) return undefined;
+    if (!cancelFound) {
+      const descriptor = intrinsicGetOwnPropertyDescriptor(
+        owner,
+        "cancel",
+      );
+      if (descriptor !== undefined) {
+        cancelFound = true;
+        if (
+          !("value" in descriptor) ||
+          typeof descriptor.value !== "function" ||
+          isProxy(descriptor.value)
+        ) {
+          return undefined;
+        }
+        cancel = descriptor.value as (
+          ...arguments_: readonly unknown[]
+        ) => unknown;
+      }
+    }
+    owner = intrinsicGetPrototypeOf(owner) as object | null;
+  }
+
+  if (owner !== null || cancel === undefined) return undefined;
+  return { cancel, source: body };
+}
+
 function cancelReader(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
+  reader: ResponseBodyReader,
 ): void {
   try {
-    const cancel = reader.cancel;
-    if (typeof cancel !== "function") return;
-    void Promise.resolve(Reflect.apply(cancel, reader, [])).catch(() => {
-      // The primary limit, cancellation, or transport failure remains authoritative.
-    });
+    if (reader.cancel === undefined) return;
+    observeCleanupPromise(
+      intrinsicApply(reader.cancel, reader.source, []),
+    );
   } catch {
     // The primary limit, cancellation, or transport failure remains authoritative.
   }
 }
 
 function releaseReader(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
+  reader: ResponseBodyReader,
 ): void {
   try {
-    const releaseLock = reader.releaseLock;
-    if (typeof releaseLock !== "function") return;
-    Reflect.apply(releaseLock, reader, []);
+    if (reader.releaseLock === undefined) return;
+    intrinsicApply(reader.releaseLock, reader.source, []);
   } catch {
     // An in-flight injected read must not displace the primary operation result.
   }

@@ -523,4 +523,67 @@ describe("authority-marker conformance scanner", () => {
       }, true);
     }
   });
+
+  test("snapshots exact marker bytes without consulting hostile iterator metadata", () => {
+    const marker = Uint8Array.from(printable);
+    const decoy = encoder.encode(
+      "decoy-printable-authority-marker-0000002",
+    );
+    let metadataReads = 0;
+    for (const key of ["length", "byteLength"] as const) {
+      Object.defineProperty(marker, key, {
+        configurable: true,
+        get: () => {
+          metadataReads += 1;
+          return 0;
+        },
+      });
+    }
+    Object.defineProperty(marker, Symbol.iterator, {
+      configurable: true,
+      get: () => {
+        metadataReads += 1;
+        return function* (): IterableIterator<number> {
+          yield* decoy;
+        };
+      },
+    });
+
+    const markers = validateAuthorityMarkers([marker, binary]);
+
+    const exact = Buffer.from(printable);
+    const representations: readonly unknown[] = [
+      Uint8Array.from(printable),
+      exact.toString("hex"),
+      exact.toString("base64"),
+      exact.toString("base64url"),
+    ];
+    for (const representation of representations) {
+      expect(() =>
+        assertNoAuthorityMarkerLeaks(markers, [
+          { nested: representation },
+        ])
+      ).toThrowError(/authority marker/u);
+    }
+    expect(metadataReads).toBe(0);
+  });
+
+  test("continues rejecting proxied, detached, and cross-realm marker bytes", () => {
+    const detached = Uint8Array.from(printable);
+    structuredClone(detached.buffer, { transfer: [detached.buffer] });
+    const foreign = runInNewContext(
+      "Uint8Array.from(bytes)",
+      { bytes: [...printable] },
+    ) as Uint8Array;
+
+    for (const invalid of [
+      new Proxy(Uint8Array.from(printable), {}),
+      detached,
+      foreign,
+    ]) {
+      expect(() =>
+        validateAuthorityMarkers([invalid, binary])
+      ).toThrowError(TypeError);
+    }
+  });
 });
