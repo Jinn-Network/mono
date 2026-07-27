@@ -1,0 +1,55 @@
+{
+  "name": "@jinn-network/evidence-catalog-sqlite",
+  "version": "0.1.0",
+  "description": "Secure SQLite binding for the Jinn Evidence Catalog contract.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/evidence-catalog-sqlite"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/evidence-catalog": "0.1.0",
+    "@jinn-network/evidence-repository": "0.1.0",
+    "better-sqlite3": "13.0.1"
+  },
+  "devDependencies": {
+    "@jinn-network/evidence-protocol": "0.1.0",
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/evidence-catalog": "portal:../evidence-catalog",
+    "@jinn-network/evidence-protocol": "portal:../evidence-protocol",
+    "@jinn-network/evidence-repository": "portal:../evidence-repository"
+  }
+}
