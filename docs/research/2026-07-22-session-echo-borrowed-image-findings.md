@@ -97,6 +97,33 @@ Not product-red for the red-flag sense (no admit under mismatch). Not
 `rejected:empirical-dead` either — so AC2’s review hypothesis is still
 unconfirmed.
 
+### (e) 2026-07-27 re-run attempt (#2172) — Docker daemon infra-block
+
+Host preflight for issue [#2172](https://github.com/Jinn-Network/mono/issues/2172)
+on `mac.homenet.telecomitalia.it`:
+
+| Check | Result |
+|---|---|
+| Free disk | **41.3 GB** — clears unmodified 20 GB `JINN_EVAL_DISK_FLOOR_GB` |
+| Docker CLI | 28.5.1 present; contexts `default` + `desktop-linux` (current) |
+| Docker Desktop | Was not running; `open -a Docker` then force quit+relaunch |
+| `docker info` | Client OK; **Server: Cannot connect** to `unix://~/.docker/run/docker.sock` for ~2 minutes of polling after relaunch. Earlier probes against a cold Desktop hung past 20s (same failure class as (d)). |
+| Result JSON | **Not overwritten** — SoR still the 2026-07-22 graded artifact |
+
+Classification: **infra-blocked** at Docker daemon preflight. No
+`yarn task-creator:session-echo-live` admission path ran. Hypothesis still
+unconfirmed; not a red-flag admit.
+
+Operator action required: repair or replace Docker Desktop on this host (or
+re-dispatch #2172 onto a host with a responsive daemon + Hub credentials),
+then re-run:
+
+```bash
+cd client
+yarn task-creator:session-echo-live
+cat ~/.jinn-client/swe-rebench-v2/session-echo-live-result.json
+```
+
 ---
 
 ## Hypothesis status
@@ -137,7 +164,11 @@ No red-flag admit was observed on the runs that reached classification JSON.
 
 Re-run on a clean host when aiming to confirm empirical-dead specifically
 (current SoR already graded past Docker pull and landed
-`gold-patch-not-resolved`). Prerequisites that have blocked attempts:
+`gold-patch-not-resolved`). Issue [#2172](https://github.com/Jinn-Network/mono/issues/2172)
+tracked that re-run; attempt **(e)** on this Autopilot host cleared the disk
+floor but was still **infra-blocked** on an unresponsive / non-starting Docker
+Desktop daemon (same class as **(d)**). Prerequisites that have blocked
+attempts:
 
 1. Docker Hub credentials / image pull for the borrowed source image, and
 2. a responsive Docker daemon, and
