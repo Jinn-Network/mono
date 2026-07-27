@@ -93,6 +93,103 @@ export interface VerdictTallyResult {
   fail: number;
 }
 
+/** Top-level evidence for one posted task (#2044). */
+export interface TaskLifecycleEvidence {
+  taskId: string;
+  /** Chain-derived facts only. Never populated from *EnvelopeMeta. */
+  authoritative: AuthoritativeTaskLifecycle;
+}
+
+export interface AuthoritativeTaskLifecycle {
+  task: AuthoritativeTaskRow;
+  /** Sorted by attemptIndex ascending. */
+  attempts: AuthoritativeAttemptRow[];
+}
+
+export interface AuthoritativeTaskRow {
+  taskId: string;
+  chainId: number;
+  manifestDigest: `0x${string}`;
+  taskCidDigest: `0x${string}`;
+  creator: `0x${string}`;
+  maxClaims: number;
+  requiredVerdicts: number;
+  createdAtBlock: number;
+  createdAtTx?: `0x${string}`;
+  finalized: boolean;
+  refunded: boolean;
+}
+
+export interface AuthoritativeAttemptRow {
+  taskId: string;
+  chainId: number;
+  attemptIndex: number;
+  /** MechMarketplace SOLVE requestId. */
+  requestId: `0x${string}`;
+  operator: `0x${string}`;
+  priorityMech: `0x${string}`;
+  deliveryRate: string;
+  createdAtBlock: number;
+  /** Sorted by verdictIndex ascending. */
+  verdicts: AuthoritativeVerdictRow[];
+  attemptEnvelopeCandidates: AttemptEnvelopeCandidate[];
+}
+
+export interface AuthoritativeVerdictRow {
+  taskId: string;
+  chainId: number;
+  attemptIndex: number;
+  verdictIndex: number;
+  /** MechMarketplace EVAL requestId (≠ attempt.requestId). */
+  requestId: `0x${string}`;
+  evaluator: `0x${string}`;
+  /** On-chain VerdictCode 0..4 only — not envelope actualPassed. */
+  verdictCode: number;
+  createdAtBlock: number;
+  verdictEnvelopeCandidates: VerdictEnvelopeCandidate[];
+}
+
+export interface AttemptEnvelopeCandidate {
+  requestId: `0x${string}`;
+  chainId: number;
+  manifestCid: string;
+  publisherAgentId: string;
+  manifestHash: `0x${string}`;
+  enrichedAtBlock: number;
+  solverType?: string;
+  implName?: string;
+  implVersion?: string;
+  codeDigest?: string;
+  mode?: string;
+  pluginsJson?: string;
+  model?: string;
+  evidenceTier?: string;
+  sourcePublished?: boolean;
+  enrichmentStatus?: string;
+}
+
+export interface VerdictEnvelopeCandidate {
+  requestId: `0x${string}`;
+  chainId: number;
+  manifestCid: string;
+  publisherAgentId: string;
+  manifestHash: `0x${string}`;
+  enrichedAtBlock: number;
+  solverType?: string;
+  evidenceTier?: string;
+  actualPassed?: boolean;
+  actualScore?: string;
+  evaluatorVerdict?: string;
+  solutionRequestId?: string;
+  instanceId?: string;
+  solverNetManifestCid?: string;
+  enrichmentStatus?: string;
+  projectedTaskId?: string;
+  projectedAttemptIndex?: number;
+  projectedVerdictIndex?: number;
+  projectedEvaluator?: `0x${string}`;
+}
+
 /**
  * Per-on-chain-task claim-budget snapshot for a launched SolverNet. Returned by
  * `getInstanceClaimCounts`, keyed by **on-chain taskId** (decimal string) — NOT
@@ -649,6 +746,26 @@ export interface DiscoveryAPI {
    * the richer poles later without permitting fabricated activity.
    */
   getVerdictTallies(args: { taskIds: string[] }): Promise<Map<string, VerdictTallyResult>>;
+
+  /**
+   * Returns authoritative task→attempt→verdict lifecycle evidence for the given
+   * on-chain taskIds (decimal strings), plus untrusted envelope-candidate bags
+   * nested under each attempt/verdict (#2044).
+   *
+   * Empty `taskIds` → empty Map, no I/O. Unknown taskIds are omitted.
+   * Tolerant under withFallback: indexer outage falls through to the on-chain
+   * floor (authoritative spine only; candidates empty). On-chain scans are
+   * hard-capped (50 × ~1999-block chunks); HTTP GraphQL legs are hard-capped
+   * at 50 pages × 1000 rows. If either cap would truncate a result set, the
+   * call returns an empty Map (absence > partial lie) rather than a partial spine.
+   *
+   * Separation rule: every field under `authoritative` is sourced exclusively
+   * from on-chain event projections. Every `*EnvelopeCandidates` entry is
+   * sourced exclusively from attempt/verdict envelope meta (HTTP only).
+   */
+  getTaskLifecycleEvidence(args: {
+    taskIds: string[];
+  }): Promise<Map<string, TaskLifecycleEvidence>>;
 }
 
 // ── Error ────────────────────────────────────────────────────────────────────

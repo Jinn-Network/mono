@@ -329,5 +329,16 @@ export function withFallback(
         () => floor.getVerdictTallies(args),
       );
     },
+
+    getTaskLifecycleEvidence(args) {
+      // Completeness signal for generators (#2044): XOR primary → floor on outage
+      // (like getTaskStatuses). Does not call mergeTaskLifecycleEvidence — hybrid
+      // indexer+floor enrich is not production yet (#2173). If added later, merge
+      // with floor as authoritativeSource and HTTP primary as candidateSource only.
+      return dispatch(
+        () => primary.getTaskLifecycleEvidence(args),
+        () => floor.getTaskLifecycleEvidence(args),
+      );
+    },
   };
 }
