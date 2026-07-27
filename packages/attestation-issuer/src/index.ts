@@ -4,6 +4,11 @@ export {
   ATTESTATION_ISSUER_ERROR_CODES,
   AttestationIssuerError,
 } from "./errors.js";
+export {
+  prepareExecutionVerification,
+  prepareResultEvaluation,
+} from "./prepare.js";
+export { parsePreparedAttestation } from "./prepared.js";
 export type {
   AnyPreparedAttestation,
   AttestationAgentReference,
