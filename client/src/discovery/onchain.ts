@@ -1377,9 +1377,18 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
 
   // ── getTaskLifecycleEvidence (#2044) ───────────────────────────────────────
   // Reconstruct the authoritative task→attempt→verdict spine from router logs.
-  // Candidates are always empty on the floor (no IPFS enrichment). Scans are
-  // hard-capped at MAX_OPERATOR_COUNT_TASK_PAGES chunks; if the range would
-  // exceed the cap the whole call returns empty (absence > partial lie).
+  // Candidates are always empty on the floor (no IPFS enrichment).
+  //
+  // Production floors (DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK) sit millions of
+  // blocks behind head — a naive floor→head pre-check always trips the chunk
+  // cap and would return empty for every caller. Instead:
+  //   1. Topic-filter TaskCreated by the known taskIds and scan newest-first
+  //      (early-exit when every requested id is found; hard-capped at
+  //      MAX_OPERATOR_COUNT_TASK_PAGES chunks).
+  //   2. Bound attempt/verdict/refund scans to the create-block window
+  //      [min(createdAtBlock), head], again topic-filtered.
+  // Tasks whose Create sits outside the newest-first budget are omitted
+  // (absence > partial lie), same as an unknown taskId.
   async function getTaskLifecycleEvidence(args: {
     taskIds: string[];
   }): Promise<Map<string, TaskLifecycleEvidence>> {
@@ -1393,6 +1402,16 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     const requested = new Set(args.taskIds.filter(Boolean));
     if (requested.size === 0) return new Map();
 
+    const taskIdFilters: bigint[] = [];
+    for (const id of requested) {
+      try {
+        taskIdFilters.push(BigInt(id));
+      } catch {
+        // Non-numeric taskId — skip; callers never invent these.
+      }
+    }
+    if (taskIdFilters.length === 0) return new Map();
+
     const client = getClient();
     let currentBlock: bigint;
     try {
@@ -1404,83 +1423,77 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
       );
     }
 
-    const fromBlock = resolveScanFromBlock(opts, currentBlock);
-    // Pre-check truncation: if the floor→head range needs more than the hard
-    // chunk cap, omit everything rather than return a partial spine.
-    {
-      const span = chunk + 1n;
-      const range = currentBlock >= fromBlock ? currentBlock - fromBlock + 1n : 0n;
-      const needed = range === 0n ? 0n : (range + span - 1n) / span;
-      if (needed > BigInt(MAX_OPERATOR_COUNT_TASK_PAGES)) {
-        return new Map();
-      }
-    }
+    const floorFromBlock = resolveScanFromBlock(opts, currentBlock);
 
     type DecodedTask = RawTaskRow;
     type DecodedAttempt = RawAttemptRow;
     type DecodedVerdict = RawVerdictRow;
 
-    let tasks: DecodedTask[];
+    // Newest-first TaskCreated lookup, topic-filtered + early-exit.
+    const foundTasks = new Map<string, DecodedTask>();
     try {
-      const lists = await scanLogsInChunks(
-        async (start, end) => {
-          const logs = await (client as PublicClient).getLogs({
-            address: routerAddress,
-            event: ROUTER_TASK_CREATED_EVENT,
-            fromBlock: start,
-            toBlock: end,
-          });
-          const decoded: DecodedTask[] = [];
-          for (const log of logs) {
-            try {
-              const event = decodeEventLog({
-                abi: JINN_ROUTER_ABI,
-                data: log.data,
-                topics: log.topics,
-              });
-              if (event.eventName !== 'TaskCreated') continue;
-              const evArgs = event.args as {
-                creator: Address;
-                taskId: bigint;
-                manifestDigest: Hex;
-                taskCidDigest: Hex;
-                maxClaims: number;
-              };
-              const taskId = String(evArgs.taskId);
-              if (!requested.has(taskId)) continue;
-              const createdAtBlock = log.blockNumber != null ? Number(log.blockNumber) : NaN;
-              if (!Number.isFinite(createdAtBlock)) continue;
-              const row: DecodedTask = {
-                taskId,
-                chainId: opts.chainId,
-                manifestDigest: evArgs.manifestDigest.toLowerCase() as `0x${string}`,
-                taskCidDigest: evArgs.taskCidDigest.toLowerCase() as `0x${string}`,
-                creator: evArgs.creator.toLowerCase() as `0x${string}`,
-                maxClaims: Number(evArgs.maxClaims),
-                // Tokenless JinnRouterV3 finalizes on the first delivered
-                // verdict; requiredVerdicts is not present in TaskCreated.
-                requiredVerdicts: 1,
-                createdAtBlock,
-                finalized: false,
-                refunded: false,
-              };
-              if (log.transactionHash) {
-                row.createdAtTx = log.transactionHash.toLowerCase() as `0x${string}`;
-              }
-              decoded.push(row);
-            } catch {
-              // Not a TaskCreated event — skip.
+      let chunksScanned = 0;
+      for (
+        let end = currentBlock;
+        end >= floorFromBlock && foundTasks.size < requested.size;
+      ) {
+        if (chunksScanned >= MAX_OPERATOR_COUNT_TASK_PAGES) break;
+        const start =
+          end > chunk && end - chunk + 1n > floorFromBlock
+            ? end - chunk + 1n
+            : floorFromBlock;
+        const logs = await (client as PublicClient).getLogs({
+          address: routerAddress,
+          event: ROUTER_TASK_CREATED_EVENT,
+          args: { taskId: taskIdFilters },
+          fromBlock: start,
+          toBlock: end,
+        });
+        for (const log of logs) {
+          try {
+            const event = decodeEventLog({
+              abi: JINN_ROUTER_ABI,
+              data: log.data,
+              topics: log.topics,
+            });
+            if (event.eventName !== 'TaskCreated') continue;
+            const evArgs = event.args as {
+              creator: Address;
+              taskId: bigint;
+              manifestDigest: Hex;
+              taskCidDigest: Hex;
+              maxClaims: number;
+            };
+            const taskId = String(evArgs.taskId);
+            if (!requested.has(taskId) || foundTasks.has(taskId)) continue;
+            const createdAtBlock = log.blockNumber != null ? Number(log.blockNumber) : NaN;
+            if (!Number.isFinite(createdAtBlock)) continue;
+            const row: DecodedTask = {
+              taskId,
+              chainId: opts.chainId,
+              manifestDigest: evArgs.manifestDigest.toLowerCase() as `0x${string}`,
+              taskCidDigest: evArgs.taskCidDigest.toLowerCase() as `0x${string}`,
+              creator: evArgs.creator.toLowerCase() as `0x${string}`,
+              maxClaims: Number(evArgs.maxClaims),
+              // Tokenless JinnRouterV3 finalizes on the first delivered
+              // verdict; requiredVerdicts is not present in TaskCreated.
+              requiredVerdicts: 1,
+              createdAtBlock,
+              finalized: false,
+              refunded: false,
+            };
+            if (log.transactionHash) {
+              row.createdAtTx = log.transactionHash.toLowerCase() as `0x${string}`;
             }
+            foundTasks.set(taskId, row);
+          } catch {
+            // Not a TaskCreated event — skip.
           }
-          return decoded;
-        },
-        fromBlock,
-        currentBlock,
-        chunk,
-        undefined,
-        MAX_OPERATOR_COUNT_TASK_PAGES,
-      );
-      tasks = lists;
+        }
+        chunksScanned += 1;
+        if (start === floorFromBlock) break;
+        end = start - 1n;
+      }
     } catch (err) {
       if (err instanceof DiscoveryUnavailableError) throw err;
       throw new DiscoveryUnavailableError(
@@ -1489,8 +1502,28 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
       );
     }
 
+    const tasks = [...foundTasks.values()];
     if (tasks.length === 0) return new Map();
     const knownTaskIds = new Set(tasks.map((t) => t.taskId));
+    const knownTaskIdFilters = tasks.map((t) => BigInt(t.taskId));
+
+    // Create-block window: subsequent legs only need history from the oldest
+    // Create we found. If even that window exceeds the chunk budget, omit
+    // rather than return a partial spine (absence > partial lie).
+    const windowFromBlock = BigInt(
+      Math.min(...tasks.map((t) => t.createdAtBlock)),
+    );
+    {
+      const span = chunk + 1n;
+      const range =
+        currentBlock >= windowFromBlock
+          ? currentBlock - windowFromBlock + 1n
+          : 0n;
+      const needed = range === 0n ? 0n : (range + span - 1n) / span;
+      if (needed > BigInt(MAX_OPERATOR_COUNT_TASK_PAGES)) {
+        return new Map();
+      }
+    }
 
     let attempts: DecodedAttempt[];
     try {
@@ -1499,6 +1532,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
           const logs = await (client as PublicClient).getLogs({
             address: routerAddress,
             event: ROUTER_TASK_ATTEMPT_CREATED_EVENT,
+            args: { taskId: knownTaskIdFilters },
             fromBlock: start,
             toBlock: end,
           });
@@ -1539,7 +1573,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
           }
           return decoded;
         },
-        fromBlock,
+        windowFromBlock,
         currentBlock,
         chunk,
         undefined,
@@ -1561,6 +1595,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
           const logs = await (client as PublicClient).getLogs({
             address: routerAddress,
             event: ROUTER_VERDICT_DELIVERY_CLAIMED_EVENT,
+            args: { taskId: knownTaskIdFilters },
             fromBlock: start,
             toBlock: end,
           });
@@ -1601,7 +1636,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
           }
           return decoded;
         },
-        fromBlock,
+        windowFromBlock,
         currentBlock,
         chunk,
         undefined,
@@ -1623,6 +1658,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
           const logs = await (client as PublicClient).getLogs({
             address: routerAddress,
             event: ROUTER_TASK_BUDGET_REFUNDED_EVENT,
+            args: { taskId: knownTaskIdFilters },
             fromBlock: start,
             toBlock: end,
           });
@@ -1643,7 +1679,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
           }
           return decoded;
         },
-        fromBlock,
+        windowFromBlock,
         currentBlock,
         chunk,
         undefined,

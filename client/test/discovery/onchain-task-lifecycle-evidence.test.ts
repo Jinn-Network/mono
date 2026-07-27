@@ -306,4 +306,49 @@ describe('OnchainDiscoveryAPI.getTaskLifecycleEvidence (#2044)', () => {
     const map = await api.getTaskLifecycleEvidence({ taskIds: ['7'] });
     expect([...map.keys()]).toEqual(['7']);
   });
+
+  it('returns spines under production-sized floor→head spans for recent known taskIds', async () => {
+    // Production floors (mainnet ~25M) vs current heads span millions of
+    // blocks — far past 50×~1999 chunks. A floor→head pre-check would always
+    // return empty. Topic-filtered newest-first create lookup + create-block
+    // window must still recover recent known taskIds.
+    const prodHead = 35_000_000n;
+    const prodFloor = 25_000_000n;
+    const createBlock = prodHead - 500n;
+    const solve0 = `0x${'b0'.repeat(32)}` as Hex;
+    const eval0 = `0x${'d0'.repeat(32)}` as Hex;
+    const logs = [
+      buildTaskCreatedLog(7n, createBlock),
+      buildAttemptLog(7n, 0, solve0, createBlock + 10n, {
+        operator: `0x${'b0'.repeat(20)}` as Hex,
+        priorityMech: `0x${'c0'.repeat(20)}` as Hex,
+        deliveryRate: 1n,
+      }),
+      buildVerdictLog(7n, 0, 0, eval0, createBlock + 20n, {
+        evaluator: `0x${'e0'.repeat(20)}` as Hex,
+        verdictCode: 1,
+      }),
+    ];
+    const client = {
+      getBlockNumber: vi.fn(async () => prodHead),
+      getLogs: vi.fn(async (args: { fromBlock: bigint; toBlock: bigint }) =>
+        logs.filter(
+          (l) =>
+            (l as { blockNumber: bigint }).blockNumber >= args.fromBlock &&
+            (l as { blockNumber: bigint }).blockNumber <= args.toBlock,
+        ),
+      ),
+    };
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      taskDiscoveryFromBlock: prodFloor,
+      publicClient: client as never,
+    });
+    const map = await api.getTaskLifecycleEvidence({ taskIds: ['7'] });
+    expect(map.has('7')).toBe(true);
+    expect(map.get('7')!.authoritative.attempts).toHaveLength(1);
+    expect(map.get('7')!.authoritative.attempts[0]!.verdicts).toHaveLength(1);
+    // Must not walk the full floor→head range (would be thousands of chunks).
+    expect(client.getLogs.mock.calls.length).toBeLessThan(20);
+  });
 });
