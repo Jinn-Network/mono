@@ -8,6 +8,7 @@ import { SOLVER_TYPE_PAYLOADS, validatePayload } from '../../../types/payloads/i
 import type { OutputArtifact } from '../../../types/portfolio.js';
 import type { Task } from '../../../types/task.js';
 import type { Solution } from '../../types.js';
+import { attachIntermediateFailureDiffs } from './intermediate-failure-diffs.js';
 import { stripTestPathHunks } from './restoration-patch.js';
 
 // Async execFile — see #778. Replaces execFileSync at the two harvest /
@@ -659,30 +660,33 @@ export async function harvestOutput(workingDir: string, phaseRange?: string, tas
       },
       access: { priceUsdc: '0' },
     });
-    return buildSolutionOutput({
-      solverType: 'prediction.v1',
-      venueName: 'claude-code-learner',
-      payload,
-      gating: {
-        ...gating,
-        probabilityYes: payload.probabilityYes,
-        submittedAt: payload.submittedAt,
-        modelId: payload.modelId,
-      },
-      informational: {
-        ...predictionInformationalFromTask(task),
-        ...(learnerArtifacts.length > 0
-          ? {
-              learnerFeedbackArtifacts: learnerArtifacts.map((artifact) => ({
-                path: artifact.path,
-                artifactType: artifact.artifactType,
-                metadata: artifact.metadata,
-              })),
-            }
-          : {}),
-      },
-      artifacts,
-    }) as Solution;
+    return attachIntermediateFailureDiffs(
+      buildSolutionOutput({
+        solverType: 'prediction.v1',
+        venueName: 'claude-code-learner',
+        payload,
+        gating: {
+          ...gating,
+          probabilityYes: payload.probabilityYes,
+          submittedAt: payload.submittedAt,
+          modelId: payload.modelId,
+        },
+        informational: {
+          ...predictionInformationalFromTask(task),
+          ...(learnerArtifacts.length > 0
+            ? {
+                learnerFeedbackArtifacts: learnerArtifacts.map((artifact) => ({
+                  path: artifact.path,
+                  artifactType: artifact.artifactType,
+                  metadata: artifact.metadata,
+                })),
+              }
+            : {}),
+        },
+        artifacts,
+      }) as Solution,
+      workingDir,
+    );
   }
 
   // Generic typed-payload path. The agent calls the MCP tool
@@ -717,26 +721,32 @@ export async function harvestOutput(workingDir: string, phaseRange?: string, tas
       },
       access: { priceUsdc: '0' },
     });
-    return {
-      venueRef: { name: 'claude-code-learner' },
-      gating,
-      ...(Object.keys(informationalEntries).length > 0
-        ? { informational: informationalEntries }
-        : {}),
-      [role === 'verdict' ? 'verdictPayload' : 'solutionPayload']: typedPayload,
-      artifacts,
-    } as Solution;
+    return attachIntermediateFailureDiffs(
+      {
+        venueRef: { name: 'claude-code-learner' },
+        gating,
+        ...(Object.keys(informationalEntries).length > 0
+          ? { informational: informationalEntries }
+          : {}),
+        [role === 'verdict' ? 'verdictPayload' : 'solutionPayload']: typedPayload,
+        artifacts,
+      } as Solution,
+      workingDir,
+    );
   }
 
   // No typed payload submitted — fall through to the phase-artifact-only shape.
   // Tasks without a typed payload schema (or where the model didn't call
   // submit_typed_payload) still return the gating-only Solution.
-  return {
-    venueRef: { name: 'claude-code-learner' },
-    gating,
-    ...(Object.keys(informationalEntries).length > 0
-      ? { informational: informationalEntries }
-      : {}),
-    ...(artifacts.length > 0 ? { artifacts } : {}),
-  };
+  return attachIntermediateFailureDiffs(
+    {
+      venueRef: { name: 'claude-code-learner' },
+      gating,
+      ...(Object.keys(informationalEntries).length > 0
+        ? { informational: informationalEntries }
+        : {}),
+      ...(artifacts.length > 0 ? { artifacts } : {}),
+    },
+    workingDir,
+  );
 }

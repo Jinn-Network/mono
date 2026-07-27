@@ -8,6 +8,10 @@ import {
   requiredReadJson,
 } from '../../../../src/harnesses/impls/learner/harvest.js';
 import {
+  appendIntermediateFailureDiff,
+  INTERMEDIATE_FAILURE_DIFFS_FILE,
+} from '../../../../src/harnesses/impls/learner/intermediate-failure-diffs.js';
+import {
   fakeLearnerFeedback,
   fakePredictionCorpusRetrieval,
   fakePredictionV1Solution,
@@ -506,6 +510,26 @@ describe('harvestOutput', () => {
         artifactType: 'learner_feedback',
       }),
     ]);
+  });
+
+  it('attaches intermediateFailureDiffs when the capture store is non-empty (AC1)', async () => {
+    writeFullPipeline(workingDir);
+    mkdirSync(join(workingDir, '.jinn'), { recursive: true });
+    appendIntermediateFailureDiff(
+      join(workingDir, INTERMEDIATE_FAILURE_DIFFS_FILE),
+      'diff --git a/fail.py b/fail.py\n+broken\n',
+    );
+
+    const solution = await harvestOutput(workingDir, 'full');
+    expect(solution.intermediateFailureDiffs).toEqual([
+      'diff --git a/fail.py b/fail.py\n+broken\n',
+    ]);
+  });
+
+  it('omits intermediateFailureDiffs when the capture store is absent (AC2)', async () => {
+    writeFullPipeline(workingDir);
+    const solution = await harvestOutput(workingDir, 'full');
+    expect(solution.intermediateFailureDiffs).toBeUndefined();
   });
 });
 
