@@ -10,6 +10,7 @@ import {
   createLocalEpisodeSeedSource,
   type SeedEpisode,
 } from '../src/seed-import/episode-fetch.js';
+import { runJinnLayerCli } from '../src/cli.js';
 
 const REPO = 'Jinn-Network/mono';
 const FIXTURES_DIR = fileURLToPath(
@@ -17,9 +18,6 @@ const FIXTURES_DIR = fileURLToPath(
 );
 const TEMPLATE_DIR = fileURLToPath(
   new URL('../fixtures/curated-mono-candidates', import.meta.url),
-);
-const RUNBOOK_PATH = fileURLToPath(
-  new URL('../../../docs/runbooks/stage2-mono-curated-seeds.md', import.meta.url),
 );
 
 function episode(index: number, overrides: Partial<SeedEpisode> = {}): SeedEpisode {
@@ -261,15 +259,31 @@ describe('auditCuratedSeedBatch', () => {
     await expect(createLocalEpisodeSeedSource(TEMPLATE_DIR).list()).resolves.toEqual([]);
   });
 
-  it('documents the standalone package publication boundary as parked', () => {
-    const runbook = readFileSync(RUNBOOK_PATH, 'utf8');
-    expect(runbook).toContain('## 6. Publication is intentionally parked');
-    expect(runbook).toContain(
-      'Its CLI rejects `derive-env` and live\n`seed execute`',
+  it('keeps standalone seed execution parked without client-owned publish dependencies', async () => {
+    let output = '';
+    const code = await runJinnLayerCli(
+      [
+        'seed',
+        'execute',
+        '/tmp/unread-approved-report.json',
+        '--episodes-dir',
+        FIXTURES_DIR,
+      ],
+      {
+        writer: {
+          write(value) {
+            output += value;
+            return true;
+          },
+        },
+      },
     );
-    expect(runbook).toContain('stop there in the parked\nstate');
-    expect(runbook).not.toContain('unset JINN_LAYER_PRIVATE_KEY');
-    expect(runbook.match(/set -o pipefail/g)).toHaveLength(2);
+
+    expect(code).toBe(2);
+    expect(output).toBe(
+      'error: seed execute requires an injected client publish adapter; ' +
+      'the standalone layer keeps outbound publication parked\n',
+    );
   });
 
   it('reports the checked-in Stage 1 fixtures as the real one-of-three starting point, not a completed B3 batch', async () => {

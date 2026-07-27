@@ -613,8 +613,9 @@ def finish_session(
         assert pickup is None, f"expected no pickup, got {pickup!r}"
 
     current = jinn._handle_jinn("session", session_id=session_id, task_id=task_id)
-    assert "capture active" in current.lower(), current
-    assert "contribution parked · nothing leaves this machine" in current, current
+    if expected_pickup:
+        assert "prior note" in current.lower(), current
+    assert "contribution parked" not in current.lower(), current
     assert "publication ON" not in current, current
 
     if mutate:
@@ -781,13 +782,12 @@ def main() -> None:
         # Boundary: no skill-install language in the injection, ever.
         assert "skills install" not in target_context.lower()
         assert "adopted automatically" not in target_context.lower()
-        # (5) Attribution visible in /jinn session mid-task — asserted on the
-        # mid-session text finish_session captured while the state was live
-        # (session end pops it; a re-query here would read empty state).
-        assert SOURCE_REF in target_mid_session, target_mid_session
-        assert "captured" in parked_summary.lower()
-        assert "contribution recorded" in parked_summary.lower(), parked_summary
-        assert SOURCE_REF in parked_summary, parked_summary
+        # (5) Mid-task /jinn session shows operator-facing pickup summary
+        # (refs live in injected context, asserted above — not repeated here).
+        assert "used 1 prior note" in target_mid_session.lower(), target_mid_session
+        assert "saved this session" in parked_summary.lower()
+        assert "contribution recorded" not in parked_summary.lower(), parked_summary
+        assert "used 1 prior note" in parked_summary.lower(), parked_summary
         assert list(EPISODES_DIR.glob("*.episode.json")), "canonical episode missing"
         assert not list(CAPTURES_DIR.glob("*.json")), "retired CapturedTask tee wrote a file"
         write_local_skill_provenance("stage1-target-task")
@@ -849,11 +849,11 @@ def main() -> None:
             mutate="SECRET_ACCEPTED_DIFF_ON = True",
         )
         assert no_result_context is None
-        assert "knowledge searched · nothing relevant found" in no_result_summary.lower()
+        assert "no relevant prior notes found" in no_result_summary.lower()
         # The honest no-result line comes from THIS session's live state (the
         # search happened, nothing cleared the floor) — not from the empty
         # render an ended/unknown session would also produce.
-        assert "knowledge searched · nothing relevant found" in no_result_mid_session.lower(), (
+        assert "no relevant prior notes found" in no_result_mid_session.lower(), (
             no_result_mid_session
         )
 
@@ -895,8 +895,7 @@ def main() -> None:
         assert unavailable_context is not None
         assert "source: local-episode:stage1-target-task-" in unavailable_context
         assert SOURCE_REF not in unavailable_context
-        assert "knowledge searched" in unavailable_summary.lower()
-        assert "provided 1" in unavailable_summary.lower()
+        assert "used 1 prior note" in unavailable_summary.lower()
 
         local_layer_bin = Path(jinn.jinn_layer.resolve_binary().argv[0])
         hidden_layer_bin = local_layer_bin.with_name(".jinn-layer-stage1-hidden")
@@ -915,8 +914,7 @@ def main() -> None:
                 expected_pickup=False,
             )
             assert missing_context is None
-            assert "captured locally" in missing_summary.lower()
-            assert "process bridge degraded" in missing_summary.lower()
+            assert "saved this session locally" in missing_summary.lower()
         finally:
             hidden_layer_bin.rename(local_layer_bin)
             os.environ.pop("JINN_LAYER_BIN", None)
@@ -945,8 +943,7 @@ def main() -> None:
             expected_pickup=False,
         )
         assert incompatible_context is None
-        assert "captured locally" in incompatible_summary.lower()
-        assert "process bridge degraded" in incompatible_summary.lower()
+        assert "saved this session locally" in incompatible_summary.lower()
         jinn._runner = None
 
         # ── Boundary: no shared/network-skill install-or-adopt state anywhere

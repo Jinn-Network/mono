@@ -247,6 +247,51 @@ function probeEnv(baseEnv) {
   };
 }
 
+function runRegistryYarnConsumerAcceptance(options, consumerRoot) {
+  const yarnConsumerRoot = join(consumerRoot, 'yarn-consumer');
+  mkdirSync(yarnConsumerRoot, { recursive: true });
+  writeFileSync(
+    join(yarnConsumerRoot, 'package.json'),
+    `${JSON.stringify({
+      private: true,
+      packageManager: 'yarn@4.13.0',
+      dependencies: {
+        '@jinn-network/sdk': options.sdkSpec,
+        '@jinn-network/client': options.clientSpec,
+      },
+    }, null, 2)}\n`,
+  );
+  writeFileSync(
+    join(yarnConsumerRoot, '.yarnrc.yml'),
+    'nodeLinker: node-modules\n',
+  );
+  writeFileSync(join(yarnConsumerRoot, 'yarn.lock'), '');
+  const yarnEnv = isolatedConsumerEnv(yarnConsumerRoot);
+  runOrThrow(
+    'corepack', ['yarn', 'install', '--no-immutable'],
+    'install exact registry packages with Yarn 4',
+    { cwd: yarnConsumerRoot, env: yarnEnv },
+  );
+  const yarnBin = process.platform === 'win32'
+    ? join(yarnConsumerRoot, 'node_modules', '.bin', 'jinn.cmd')
+    : join(yarnConsumerRoot, 'node_modules', '.bin', 'jinn');
+  const help = runOrThrow(
+    yarnBin,
+    ['tasks', '--help'],
+    'registry Yarn consumer installed jinn tasks --help',
+    {
+      cwd: yarnConsumerRoot,
+      env: probeEnv(yarnEnv),
+      timeout: 30_000,
+    },
+  ).stdout;
+  for (const command of ['submit', 'observe-autopilot-delivery']) {
+    if (!help.includes(command)) {
+      throw new Error(`registry Yarn consumer tasks --help is missing ${command}`);
+    }
+  }
+}
+
 export function runAcceptance(options) {
   const consumerRoot = mkdtempSync(join(tmpdir(), 'jinn-external-consumer-'));
   const env = isolatedConsumerEnv(consumerRoot);
@@ -330,6 +375,10 @@ export function runAcceptance(options) {
       ], { cwd: consumerRoot, env: machineEnv, timeout: 30_000 }),
       'malformed observation',
     );
+
+    if (options.mode === 'registry') {
+      runRegistryYarnConsumerAcceptance(options, consumerRoot);
+    }
 
     return {
       mode: options.mode,

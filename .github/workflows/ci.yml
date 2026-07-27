@@ -7,6 +7,9 @@ on:
       - 'packages/sdk/**'
       - 'packages/core/**'
       - 'packages/plugin/**'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/npm-publish.yml'
+      - '.github/scripts/npm-publish-workflow.test.mjs'
   push:
     branches: [main]
     paths:
@@ -14,6 +17,9 @@ on:
       - 'packages/sdk/**'
       - 'packages/core/**'
       - 'packages/plugin/**'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/npm-publish.yml'
+      - '.github/scripts/npm-publish-workflow.test.mjs'
   # Manual trigger for the soft-gate e2e jobs (task-creator-marketplace-e2e).
   # Deliberately NOT wired to `schedule:` — a cron trigger on this workflow
   # would run every other job nightly too; dispatch keeps the soft gate
@@ -61,6 +67,7 @@ jobs:
       # The test file documents this var as the offline-CI gate.
       # Unit tests must not inherit agent credentials. Remove them rather than
       # assigning empty values, which would override explicit test env files.
+      - run: node --test ../.github/scripts/npm-publish-workflow.test.mjs
       - run: env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY yarn test
         env:
           SKIP_HL_TESTS: '1'

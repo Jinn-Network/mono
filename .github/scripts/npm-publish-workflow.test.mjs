@@ -115,7 +115,7 @@ async function runHungMonitor(harness, train = 'canary') {
 test('publish checks out and verifies the exact build commit before packaging', () => {
   assert.match(
     publish,
-    /ref: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.release_sha \|\| github\.sha \}\}/,
+    /ref: \$\{\{ github\.event_name == 'workflow_run' && github\.event\.workflow_run\.head_sha \|\| github\.event_name == 'workflow_dispatch' && inputs\.release_sha \|\| github\.sha \}\}/,
   );
 
   const verifyAt = publish.indexOf('name: Verify exact publish commit');
@@ -129,6 +129,43 @@ test('publish checks out and verifies the exact build commit before packaging', 
   assert.match(verification, /git rev-parse HEAD/);
   assert.match(verification, /JINN_BUILD_COMMIT/);
   assert.match(verification, /exit 1/);
+});
+
+test('stable publishing is recoverable and waits for the registry before acceptance', () => {
+  const existingAt = publish.indexOf('name: Check immutable client package');
+  const recheckAt = publish.indexOf('name: Recheck immutable stable client package');
+  const stablePublishAt = publish.indexOf('name: Publish stable');
+  const waitAt = publish.indexOf('name: Wait for stable client tarball');
+  const stableAcceptanceAt = publish.indexOf('name: Registry consumer acceptance (stable)');
+
+  assert.ok(existingAt >= 0, 'an immutable-package recovery guard must exist');
+  assert.ok(recheckAt > existingAt, 'stable state must be rechecked after long-running gates');
+  assert.ok(stablePublishAt > recheckAt, 'the final registry recheck must precede stable publish');
+  assert.ok(waitAt > stablePublishAt, 'registry propagation wait must follow stable publish');
+  assert.ok(
+    stableAcceptanceAt > waitAt,
+    'stable registry acceptance must not run before the package tarball is available',
+  );
+
+  const existingStep = publish.slice(existingAt, publish.indexOf('- run: yarn typecheck'));
+  assert.match(existingStep, /PACKAGE_SPEC:/);
+  assert.match(existingStep, /npm view "\$\{PACKAGE_SPEC\}" gitHead/);
+  assert.match(existingStep, /JINN_BUILD_COMMIT/);
+  assert.match(existingStep, /published=true/);
+  assert.match(existingStep, /published=false/);
+
+  const recheckStep = publish.slice(recheckAt, stablePublishAt);
+  assert.match(recheckStep, /npm view "\$\{PACKAGE_SPEC\}" gitHead/);
+  assert.match(recheckStep, /JINN_BUILD_COMMIT/);
+  assert.match(recheckStep, /published=true/);
+  assert.match(recheckStep, /published=false/);
+
+  const stablePublishStep = publish.slice(stablePublishAt, waitAt);
+  assert.match(
+    stablePublishStep,
+    /steps\.stable_existing\.outputs\.published != 'true'/,
+    'a matching previously published immutable version must be skipped on recovery',
+  );
 });
 
 test('publish alerts are handled outside the publish job', () => {

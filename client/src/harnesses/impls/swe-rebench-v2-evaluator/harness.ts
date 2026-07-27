@@ -290,10 +290,94 @@ interface EnabledState {
 
 type ReadEnabledState = EnabledState | LegacyEnabledState;
 
+export type CurrentSweRebenchV2EvaluatorEnableContract =
+  | { ok: true; upstreamRepoDir: string }
+  | { ok: false; reason: string; nextStep: string };
+
+export interface CurrentSweRebenchV2EvaluatorEnableContractFacts {
+  state: unknown;
+  implStateDir: string;
+  currentPatchBundle: PatchBundleMetadata;
+  checkoutExists: boolean;
+}
+
 interface CachedPublishedPoolArtifact {
   evalSemanticsVersion: string;
   artifactHash: string;
   entries: ScorableVettedPoolArtifactEntries;
+}
+
+/**
+ * Docker-free validation of the durable evaluator enable contract.
+ *
+ * This is the single production predicate for callers that need the managed
+ * checkout but must not invoke the harness readiness probe. It binds the
+ * marker to the managed path, current pinned upstream metadata, current patch
+ * bundle digest, trusted parser binding, and checkout existence.
+ */
+export function validateCurrentSweRebenchV2EvaluatorEnableContract(
+  facts: CurrentSweRebenchV2EvaluatorEnableContractFacts,
+): CurrentSweRebenchV2EvaluatorEnableContract {
+  const managedUpstreamRepoDir = join(facts.implStateDir, 'upstream');
+  const state = isLegacyEnabledState(facts.state) || isEnabledState(facts.state)
+    ? facts.state
+    : null;
+  if (!state) {
+    return {
+      ok: false,
+      reason: 'swe-rebench-v2 evaluator not enabled',
+      nextStep: `Run \`${ENABLE_CLI}\` to install and validate the evaluator.`,
+    };
+  }
+  if (state.upstreamRepoDir !== managedUpstreamRepoDir) {
+    return {
+      ok: false,
+      reason: 'swe-rebench-v2 evaluator enable state requires durable bundle repair',
+      nextStep: `Run \`${ENABLE_CLI}\` to restore the managed evaluator checkout.`,
+    };
+  }
+  if (!facts.checkoutExists) {
+    return {
+      ok: false,
+      reason: `upstream repo missing at ${managedUpstreamRepoDir}`,
+      nextStep: `Run \`${ENABLE_CLI}\` to re-clone the upstream eval harness.`,
+    };
+  }
+  if (!isCurrentEnabledState(state, facts.currentPatchBundle, managedUpstreamRepoDir)) {
+    return {
+      ok: false,
+      reason: 'swe-rebench-v2 evaluator enable state requires durable bundle repair',
+      nextStep: `Run \`${ENABLE_CLI}\` to pin and self-test the upstream evaluator bundle.`,
+    };
+  }
+  return { ok: true, upstreamRepoDir: managedUpstreamRepoDir };
+}
+
+/**
+ * Read-only production adapter for the pure current-contract validator.
+ * Resolves the versioned patch asset and filesystem facts, but deliberately
+ * performs no Docker or network probe.
+ */
+export function inspectCurrentSweRebenchV2EvaluatorEnableContract(
+  implStateDir: string,
+): CurrentSweRebenchV2EvaluatorEnableContract {
+  const managedUpstreamRepoDir = join(implStateDir, 'upstream');
+  let currentPatchBundle: PatchBundleMetadata;
+  try {
+    currentPatchBundle = patchBundleMetadata(patchBundlePath());
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `cannot load durable evaluator patch bundle: ${err instanceof Error ? err.message : String(err)}`,
+      nextStep: `Reinstall @jinn-network/client, then run \`${ENABLE_CLI}\`.`,
+    };
+  }
+  return validateCurrentSweRebenchV2EvaluatorEnableContract({
+    state: readEnabledState(implStateDir),
+    implStateDir,
+    currentPatchBundle,
+    checkoutExists: existsSync(managedUpstreamRepoDir),
+  });
 }
 
 export interface SweRebenchV2EvaluatorHarnessOptions {
@@ -532,69 +616,19 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
         },
       };
     }
-    const state = readEnabledState(this.implStateDir);
-    const upstreamRepoDir = join(this.implStateDir, 'upstream');
-    if (!state) {
+    const enableContract =
+      inspectCurrentSweRebenchV2EvaluatorEnableContract(this.implStateDir);
+    if (!enableContract.ok) {
       return {
         ready: false,
-        reason: 'swe-rebench-v2 evaluator not enabled',
+        reason: enableContract.reason,
         nextStep: {
-          description:
-            `Run \`${ENABLE_CLI}\` to clone the upstream eval harness and validate Docker + Python.`,
+          description: enableContract.nextStep,
           cli: ENABLE_CLI,
         },
       };
     }
-    if (state.upstreamRepoDir !== upstreamRepoDir) {
-      return {
-        ready: false,
-        reason: 'swe-rebench-v2 evaluator enable state requires durable bundle repair',
-        nextStep: {
-          description:
-            `Re-run \`${ENABLE_CLI}\` to restore the managed upstream evaluator checkout.`,
-          cli: ENABLE_CLI,
-        },
-      };
-    }
-    if (!existsSync(upstreamRepoDir)) {
-      return {
-        ready: false,
-        reason: `upstream repo missing at ${upstreamRepoDir}`,
-        nextStep: {
-          description:
-            `Re-run \`${ENABLE_CLI}\` to re-clone the upstream eval harness.`,
-          cli: ENABLE_CLI,
-        },
-      };
-    }
-    // v1 markers are intentionally readable so callers can locate their old
-    // checkout, but they do not prove that the required patch bundle and
-    // parser are present. Re-enable repairs them before this evaluator may
-    // claim more work.
-    let bundle: PatchBundleMetadata;
-    try {
-      bundle = patchBundleMetadata(patchBundlePath());
-    } catch (err) {
-      return {
-        ready: false,
-        reason: `cannot load durable evaluator patch bundle: ${err instanceof Error ? err.message : String(err)}`,
-        nextStep: {
-          description: `Reinstall @jinn-network/client, then re-run \`${ENABLE_CLI}\`.`,
-          cli: ENABLE_CLI,
-        },
-      };
-    }
-    if (!isCurrentEnabledState(state, bundle, upstreamRepoDir)) {
-      return {
-        ready: false,
-        reason: 'swe-rebench-v2 evaluator enable state requires durable bundle repair',
-        nextStep: {
-          description:
-            `Re-run \`${ENABLE_CLI}\` to pin and self-test the upstream evaluator bundle.`,
-          cli: ENABLE_CLI,
-        },
-      };
-    }
+    const upstreamRepoDir = enableContract.upstreamRepoDir;
     // Live Docker probe (TTL-cached): the eval shells out to per-instance
     // `docker run` images. Docker is validated at `jinn harnesses enable` time,
     // but it can stop afterwards — re-check periodically so the daemon does

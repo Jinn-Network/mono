@@ -177,6 +177,29 @@ describe('LifecycleDiscoveryCacheStore', () => {
     await expect(store.load()).resolves.toEqual(incremental);
   });
 
+  it('persists a closed PR whose GitHub update time precedes its close time', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'jinn-lifecycle-cache-'));
+    const store = new LifecycleDiscoveryCacheStore({ stateDirectory: directory });
+    const cached: LifecycleDiscoveryState = {
+      ...state(),
+      recentlyClosedPullRequests: [{
+        number: 1951,
+        title: 'Closed without a matching update timestamp',
+        state: 'CLOSED',
+        updatedAt: '2026-07-23T23:24:45Z',
+        headOid: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        headRefName: 'feature/1951',
+        baseRefName: 'next',
+        isDraft: false,
+        closedAt: '2026-07-23T23:24:47Z',
+        mergedAt: null,
+      }],
+    };
+
+    await expect(store.save(cached)).resolves.toBeUndefined();
+    await expect(store.load()).resolves.toEqual(cached);
+  });
+
   it.each([
     ['no live REST request', { restRequests: 0 }],
     ['nonzero GraphQL cost without a GraphQL request', { graphqlCost: 1 }],

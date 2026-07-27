@@ -205,6 +205,10 @@ jobs:
             exit 1
           fi
           echo "PUBLISH_VERSION=${PUBLISH_VERSION}" >> "${GITHUB_ENV}"
+      - name: Stage publisher from protected next
+        shell: bash
+        run: |
+          git show origin/next:.github/scripts/publish-layer-stable.mjs > /tmp/publish-layer-stable.mjs
       - name: Check out validated release commit
         shell: bash
         run: |
@@ -224,25 +228,38 @@ jobs:
             --version "${PUBLISH_VERSION}"
       - run: npm install -g npm@11.16.0
       - run: corepack enable
-      - run: yarn --cwd packages/plugin install --immutable
-      - run: yarn --cwd packages/plugin typecheck
-      - run: yarn --cwd packages/plugin build
-      - run: yarn --cwd packages/plugin test
-      - run: yarn --cwd packages/core install --immutable
-      - run: yarn --cwd packages/core typecheck
-      - run: yarn --cwd packages/core build
-      - run: yarn --cwd packages/core test
-      - run: yarn --cwd packages/layer install --immutable
-      - run: yarn --cwd packages/layer typecheck
-      - run: yarn --cwd packages/layer build
-      - run: yarn --cwd packages/layer test
-      - run: yarn --cwd packages/layer pack:smoke
+      - run: yarn install --immutable
+        working-directory: packages/plugin
+      - run: yarn typecheck
+        working-directory: packages/plugin
+      - run: yarn build
+        working-directory: packages/plugin
+      - run: yarn test
+        working-directory: packages/plugin
+      - run: yarn install --immutable
+        working-directory: packages/core
+      - run: yarn typecheck
+        working-directory: packages/core
+      - run: yarn build
+        working-directory: packages/core
+      - run: yarn test
+        working-directory: packages/core
+      - run: yarn install --immutable
+        working-directory: packages/layer
+      - run: yarn typecheck
+        working-directory: packages/layer
+      - run: yarn build
+        working-directory: packages/layer
+      - run: yarn test
+        working-directory: packages/layer
+      - run: yarn pack:smoke
+        working-directory: packages/layer
       # npm OIDC trusted publishing does not authenticate npm dist-tag, so a
       # cross-package atomic latest promotion is unavailable without adding a
       # long-lived token. The protected manual environment bounds the
       # transient partial-release window; the publisher resumes by exact SRI.
       - name: Publish coherent stable package set
         run: >-
-          node .github/scripts/publish-layer-stable.mjs
+          node /tmp/publish-layer-stable.mjs
           --root .
           --version "${PUBLISH_VERSION}"

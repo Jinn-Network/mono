@@ -199,9 +199,53 @@ jobs:
             exit 1
           fi
 
-      - name: Check immutable client canary
+      - name: Resolve bundled dependency publications
+        id: bundled
+        shell: bash
+        env:
+          DIST_TAG: ${{ steps.meta.outputs.dist_tag }}
+        run: |
+          set -euo pipefail
+          CORE_VERSION="$(node -p "require('../packages/core/package.json').version")"
+          PLUGIN_VERSION="$(node -p "require('../packages/plugin/package.json').version")"
+          CORE_SPEC="@jinn-network/core@${CORE_VERSION}"
+          PLUGIN_SPEC="@jinn-network/plugin@${PLUGIN_VERSION}"
+          PUBLISHED_CORE="$(npm view "${CORE_SPEC}" version 2>/dev/null || true)"
+          PUBLISHED_PLUGIN="$(npm view "${PLUGIN_SPEC}" version 2>/dev/null || true)"
+
+          if [ "${PUBLISHED_CORE}" = "${CORE_VERSION}" ] && [ "${PUBLISHED_PLUGIN}" = "${PLUGIN_VERSION}" ]; then
+            echo "::notice::Using published stable bundled dependencies ${CORE_SPEC} and ${PLUGIN_SPEC}"
+          elif [ "${DIST_TAG}" = "latest" ]; then
+            echo "::error::Stable client publication requires ${CORE_SPEC} and ${PLUGIN_SPEC} to exist on npm"
+            exit 1
+          else
+            SHORT_SHA="${JINN_BUILD_COMMIT:0:8}"
+            CORE_SPEC="@jinn-network/core@${CORE_VERSION}-canary.${SHORT_SHA}"
+            PLUGIN_SPEC="@jinn-network/plugin@${PLUGIN_VERSION}-canary.${SHORT_SHA}"
+            CORE_HEAD=""
+            PLUGIN_HEAD=""
+            for _ in $(seq 1 120); do
+              CORE_HEAD="$(npm view "${CORE_SPEC}" gitHead 2>/dev/null || true)"
+              PLUGIN_HEAD="$(npm view "${PLUGIN_SPEC}" gitHead 2>/dev/null || true)"
+              if [ "${CORE_HEAD}" = "${JINN_BUILD_COMMIT}" ] && [ "${PLUGIN_HEAD}" = "${JINN_BUILD_COMMIT}" ]; then
+                break
+              fi
+              sleep 5
+            done
+            if [ "${CORE_HEAD}" != "${JINN_BUILD_COMMIT}" ] || [ "${PLUGIN_HEAD}" != "${JINN_BUILD_COMMIT}" ]; then
+              echo "::error::Bundled dependency canaries did not resolve to ${JINN_BUILD_COMMIT}: ${CORE_SPEC}=${CORE_HEAD:-<missing>}, ${PLUGIN_SPEC}=${PLUGIN_HEAD:-<missing>}"
+              exit 1
+            fi
+            echo "::notice::Using exact-SHA bundled dependency canaries ${CORE_SPEC} and ${PLUGIN_SPEC}"
+          fi
+
+          {
+            echo "core_version=${CORE_SPEC##*@}"
+            echo "plugin_version=${PLUGIN_SPEC##*@}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Check immutable client package
         id: existing
-        if: steps.meta.outputs.dist_tag == 'canary'
         shell: bash
         env:
           PACKAGE_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
@@ -233,7 +277,17 @@ jobs:
             const fs = require('fs');
             const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
             pkg.version = '${{ steps.meta.outputs.publish_version }}';
+            pkg.dependencies['@jinn-network/core'] = '${{ steps.bundled.outputs.core_version }}';
+            pkg.dependencies['@jinn-network/plugin'] = '${{ steps.bundled.outputs.plugin_version }}';
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            const corePath = '../packages/core/package.json';
+            const core = JSON.parse(fs.readFileSync(corePath, 'utf8'));
+            core.version = '${{ steps.bundled.outputs.core_version }}';
+            fs.writeFileSync(corePath, JSON.stringify(core, null, 2) + '\n');
+            const pluginPath = '../packages/plugin/package.json';
+            const plugin = JSON.parse(fs.readFileSync(pluginPath, 'utf8'));
+            plugin.version = '${{ steps.bundled.outputs.plugin_version }}';
+            fs.writeFileSync(pluginPath, JSON.stringify(plugin, null, 2) + '\n');
             const sdkPath = '../packages/sdk/package.json';
             const sdk = JSON.parse(fs.readFileSync(sdkPath, 'utf8'));
             sdk.version = '0.1.1-canary.sha.${JINN_BUILD_COMMIT}';
@@ -422,11 +476,68 @@ jobs:
                 (waivedNote ? ` (${waivedNote})` : ''),
             );
 
-      - name: Publish stable
+      - name: Recheck immutable stable client package
+        id: stable_existing
         if: steps.meta.outputs.dist_tag == 'latest'
+        shell: bash
+        env:
+          PACKAGE_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+        run: |
+          VIEW_ERROR="${RUNNER_TEMP}/client-stable-view.stderr"
+          if npm view "${PACKAGE_SPEC}" version >/dev/null 2>"${VIEW_ERROR}"; then
+            EXISTING_HEAD="$(npm view "${PACKAGE_SPEC}" gitHead)"
+            if [ "${EXISTING_HEAD}" != "${JINN_BUILD_COMMIT}" ]; then
+              echo "::error::${PACKAGE_SPEC} exists with gitHead ${EXISTING_HEAD}, expected ${JINN_BUILD_COMMIT}"
+              exit 1
+            fi
+            echo "published=true" >> "${GITHUB_OUTPUT}"
+            echo "::notice::${PACKAGE_SPEC} already exists at the expected immutable commit"
+          elif grep -Eq 'E404|404 Not Found' "${VIEW_ERROR}"; then
+            echo "published=false" >> "${GITHUB_OUTPUT}"
+          else
+            cat "${VIEW_ERROR}" >&2
+            echo "::error::Could not determine whether ${PACKAGE_SPEC} already exists"
+            exit 1
+          fi
+
+      - name: Publish stable
+        if: steps.meta.outputs.dist_tag == 'latest' && steps.stable_existing.outputs.published != 'true'
         run: |
           unset NODE_AUTH_TOKEN
           npm publish --access public
+
+      - name: Validate stable client gitHead
+        if: steps.meta.outputs.dist_tag == 'latest'
+        shell: bash
+        env:
+          PACKAGE_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+        run: |
+          for _ in $(seq 1 30); do
+            PUBLISHED_HEAD="$(npm view "${PACKAGE_SPEC}" gitHead 2>/dev/null || true)"
+            if [ "${PUBLISHED_HEAD}" = "${JINN_BUILD_COMMIT}" ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::${PACKAGE_SPEC} gitHead did not resolve to ${JINN_BUILD_COMMIT}"
+          exit 1
+
+      - name: Wait for stable client tarball
+        if: steps.meta.outputs.dist_tag == 'latest'
+        shell: bash
+        env:
+          CLIENT_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+        run: |
+          PROBE_DIR="${RUNNER_TEMP}/client-stable-probe"
+          mkdir -p "${PROBE_DIR}"
+          for _ in $(seq 1 30); do
+            if npm pack --silent --pack-destination "${PROBE_DIR}" "${CLIENT_SPEC}" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::${CLIENT_SPEC} tarball did not become available"
+          exit 1
 
       - name: Registry consumer acceptance (stable)
         if: steps.meta.outputs.dist_tag == 'latest'

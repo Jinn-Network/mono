@@ -1,6 +1,6 @@
 {
   "name": "@jinn-network/core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Domain core for Jinn — evidence/contribution stores, scrub, trajectory parsing, and corpus reads. Independent of client/src.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
@@ -43,7 +43,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
-    "@jinn-network/plugin": "0.1.1",
+    "@jinn-network/plugin": "0.1.2",
     "@lmoe/gliner-onnx": "0.1.0",
     "@noble/hashes": "^2.2.0",
     "@secretlint/core": "^13.0.2",

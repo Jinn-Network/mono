@@ -1,114 +1,133 @@
-# Stage 2 curated mono seed batch
+# Stage 2 mono starter corpus
 
-Operator runbook for issue
-[#1826](https://github.com/Jinn-Network/mono/issues/1826): prepare,
-review, publish, and verify the first `Jinn-Network/mono` batch that satisfies
-the shared `K=3` retrieval-visible corpus probe.
+Operator runbook for [#2010](https://github.com/Jinn-Network/mono/issues/2010)
+and [#2190](https://github.com/Jinn-Network/mono/issues/2190): privately
+prepare, approve, publish, and verify 15 new retrieval-visible
+`Jinn-Network/mono` episodes for a clean Hermes installation.
 
-The repository supplies a template, an offline mechanical auditor, and the
-read-only planning lane. It deliberately supplies no pre-approved batch.
-The operator owns record selection, authorship, privacy review, publication,
-the live testnet probe, and the attributed working-session judgment.
+This is an operator-only process. Raw transcripts and private draft episodes
+never enter the repository. The standalone layer remains unable to publish:
+wallet access and live publication dependencies are supplied only by the
+client-owned command after an explicit `--yes`.
 
-## What the offline audit proves
+## Safety boundary
 
-For every `*.episode.json` file in the selected directory, it checks:
+The offline audit checks every selected `*.episode.json` for:
 
 - exact `Jinn-Network/mono` targeting and the shared `mono` probe term;
 - the canonical `retrieval:visible.v1` mark;
-- a distinct episode ID and distinct full mono commit URL;
-- a full base commit, recorded-session origin, completed test/evaluator-backed
-  outcome, and failure/fix/command evidence;
+- distinct episode IDs and distinct full mono source-commit URLs;
+- full base commits, recorded-session origin, completed
+  test/evaluator-backed outcomes, and failure/fix/command evidence;
 - the deterministic seed scrub preflight; and
-- at least the same `K=3` records used by `corpus-content`.
+- at least the same `K=3` records required by the public corpus probe.
 
-A local pass does **not** mean the records are useful enough to curate, does
-not authorize publication, and does not claim a live probe ran. Every report
-states those boundaries explicitly.
+A passing audit does not make the episodes useful, approve their wording,
+authorize publication, or prove a live retrieval result. All 15 records need
+manual factual, usefulness, and privacy review before the first wave.
 
-## 1. Prerequisites
+Publication is immutable. If a publish or anchor outcome is ambiguous, stop.
+Do not retry until the printed envelope and transaction have been reconciled.
+Preserve the seed-import state because it carries idempotency and supersede
+lineage.
 
-- Run from the Stage 2 candidate that contains the accepted visibility,
-  supersede, seed-scrub, corpus-probe, and stock-Hermes work.
-- Use Node 22 and install/build the independent package chain plus the client:
+## 1. Prepare the environment
 
-  ```bash
-  corepack yarn --cwd packages/plugin install --immutable
-  corepack yarn --cwd packages/plugin build
-  corepack yarn --cwd packages/core install --immutable
-  corepack yarn --cwd packages/core build
-  corepack yarn --cwd packages/layer install --immutable
-  corepack yarn --cwd packages/layer build
-  corepack yarn --cwd client install --immutable
-  export JINN_LAYER_BIN="$PWD/packages/layer/dist/bin/jinn-layer.js"
-  ```
-
-- Confirm the operator's testnet identity and discovery configuration are the
-  intended ones before any publication. Do not use production credentials or
-  promote `main` as part of this runbook.
-- Read `docs/runbooks/stage1-evidence-seeding.md`, especially its privacy
-  residuals and ambiguous-publication recovery rules.
-
-## 2. Author a private candidate batch
-
-Copy the non-loadable template out of the repository fixture tree:
+Use Node 22 and build the independent packages plus the client:
 
 ```bash
-mkdir -p /tmp/jinn-stage2-mono-candidates
-cp packages/layer/fixtures/curated-mono-candidates/episode.template.json \
-  /tmp/jinn-stage2-mono-candidates/<stable-id>.episode.json
+corepack yarn --cwd packages/plugin install --immutable
+corepack yarn --cwd packages/plugin build
+corepack yarn --cwd packages/core install --immutable
+corepack yarn --cwd packages/core build
+corepack yarn --cwd packages/layer install --immutable
+corepack yarn --cwd packages/layer build
+corepack yarn --cwd client install --immutable
+export JINN_LAYER_BIN="$PWD/packages/layer/dist/bin/jinn-layer.js"
 ```
 
-Prepare three or more distinct records. The checked-in
-`source-dashboard-flake` Stage 1 episode is a candidate, not an automatic
-approval; the existing Stage 1 fixture set has only one mechanically eligible
-marked mono record.
+Confirm that the local bootstrapped identity is the intended Base Sepolia
+operator. Do not use production credentials. Read
+`docs/runbooks/stage1-evidence-seeding.md`, especially the privacy residuals
+and ambiguous-publication recovery rules.
 
-For each record, the operator must review facts the script cannot establish:
+Create a durable private workspace with owner-only permissions:
 
-- the task is genuinely repo-specific and useful to an early mono session;
-- commands and outputs came from a real recorded session or a faithful
-  re-performance of the linked merged fix;
-- synthesis and tags are authored, specific, and not boilerplate;
-- excerpts are minimal, accurate, repo-relative, and free of user, machine,
-  customer, credential, private URL, and other sensitive data;
-- the full PII/secret residual described by the Stage 1 runbook has been
-  inspected manually; and
-- the retrieval mark is an intentional curation decision, not a copied
-  default.
+```bash
+install -d -m 700 "$HOME/.jinn-client/local-corpus/launch-15"
+```
 
-## 3. Mechanical audit (read-only)
+Copy the non-loadable template there for each draft:
+
+```bash
+cp packages/layer/fixtures/curated-mono-candidates/episode.template.json \
+  "$HOME/.jinn-client/local-corpus/launch-15/<stable-id>.episode.json"
+```
+
+## 2. Author and re-perform all 15 records
+
+Prepare exactly these new records:
+
+| Wave | Record IDs |
+| --- | --- |
+| 1 — newcomer experience | `source-dashboard-flake`, `claim-gate-usd-estimated-metered`, `plugin-federated-local-public-pickup`, `plugin-stock-hermes-useful-retrieval`, `packed-cold-stock-runtime-smoke` |
+| 2 — daemon/operator reliability | `daemon-gate-eval-scan-on-evaluator-role`, `daemon-nonblocking-inflight-recovery`, `discovery-skip-expired-execution-window`, `transcript-watcher-recency-bound`, `pidfile-recycled-daemon` |
+| 3 — evaluation/CI | `cross-language-parity-test-fail-closed`, `eval-docker-abort-classify-unscorable`, `evaluator-cost-monotonic-clock-and-finite-guard`, `pilot-evaluator-parity-strip-testhunks-tmp`, `publish-canary-path-filter-bundled-workspace` |
+
+For each record:
+
+1. Inspect the private source material and linked merged commit.
+2. In isolated temporary worktrees, run the focused failing command at the
+   recorded base commit and the passing command at the source commit.
+3. Author a minimal repo-relative failure/fix/command trio and a concise,
+   reusable synthesis.
+4. Use a unique full
+   `https://github.com/Jinn-Network/mono/commit/<40-sha>` source URL.
+5. Set `origin: operator-recorded-session`, a completed
+   `tests-passed`/`evaluator-verified` outcome, and
+   `retrieval:visible.v1`.
+6. Include `mono` and specific subsystem vocabulary in the tags.
+7. Remove usernames, emails, credentials, private URLs, absolute home paths,
+   and unnecessary transcript content.
+
+Do not fabricate historical output. If a historical environment cannot be
+re-performed faithfully, withhold that record and curate a replacement before
+approval. Do not include skill-distillation material in this launch.
+
+## 3. Audit the complete private batch
 
 ```bash
 set -o pipefail
 corepack yarn --cwd client stage2:validate-curated-seeds --episodes-dir \
-  /tmp/jinn-stage2-mono-candidates --repo Jinn-Network/mono --json \
-  | tee /tmp/stage2-mono-curated-audit.json
+  "$HOME/.jinn-client/local-corpus/launch-15" \
+  --repo Jinn-Network/mono --json \
+  | tee /tmp/stage2-mono-launch-15-audit.json
 ```
 
-Require all of:
+Require:
 
 - `automatedStatus: "pass"`;
-- `eligibleRecordCount >= 3`;
+- `recordCount: 15` and `eligibleRecordCount: 15`;
 - every record has `automatedStatus: "pass"`;
 - `humanCurationRequired: true`;
 - `publishAuthorized: false`; and
 - `liveProbe.status: "not-run"`.
 
-The negative control must fail honestly at the current one-of-three state:
+The checked-in negative control must still exit `1`:
 
 ```bash
 corepack yarn --cwd client stage2:validate-curated-seeds --episodes-dir \
   "$PWD/packages/layer/fixtures/stage1-seeds" --json
 ```
 
-That command exits `1`; it is evidence that the tool does not turn the
-checked-in fixtures into a completed Stage 2 claim.
+After the mechanical pass, manually review every final file for accuracy,
+usefulness, minimality, and privacy. All 15 must receive human approval before
+Wave 1 is published.
 
-## 4. Back up local publication state
+## 4. Back up publication state
 
-The idempotency file is needed to attach `supersedes` to a prior publication.
-Preserve it; never replace it with an empty file before publishing.
+The state file is needed for idempotency and `supersedes` attribution. Never
+replace it with an empty file before publishing.
 
 ```bash
 seed_state="${JINN_LAYER_SEED_STATE_PATH:-$HOME/.jinn-client/harness-layer/seed-import-state.json}"
@@ -122,36 +141,82 @@ else
 fi
 ```
 
-Keep the backup until publication, probe verification, and issue evidence are
-complete. If no publication occurred, it may restore accidentally damaged
-local state. If any publication or anchor may have succeeded, **do not roll
-the state file backward**: reconcile the printed envelope/transaction first,
-or a retry can duplicate immutable records and break supersede lineage.
+Keep the backup until all three waves and the clean-Hermes verification are
+complete. If any publication may have succeeded, do not roll the state file
+backward.
 
-## 5. Plan, inspect, and explicitly approve
+## 5. Plan and approve three waves
 
-Planning performs no corpus or chain writes:
+Copy the already approved files into three private wave directories, five per
+directory. Do not edit their content while splitting the batch.
+
+For each wave, generate a fresh read-only layer report:
 
 ```bash
-"$JINN_LAYER_BIN" seed plan --episodes-dir \
-  /tmp/jinn-stage2-mono-candidates \
-  --out /tmp/stage2-mono-curated-plan.json
+"$JINN_LAYER_BIN" seed plan \
+  --episodes-dir "$HOME/.jinn-client/local-corpus/launch-15/wave-1" \
+  --out /tmp/stage2-mono-wave-1-plan.json
 ```
 
-Compare the plan digests and rows with the audited files. A human must read
-every final file and explicitly approve this exact plan. Any edit after that
-review requires a fresh audit and plan.
+Repeat with `wave-2` and `wave-3`. Confirm that each report has exactly five
+`import` rows and that its IDs and digests match the approved files. Record
+explicit human approval of each immutable report. Any subsequent edit requires
+a fresh full audit, wave plan, and approval.
 
-## 6. Publication is intentionally parked
+## 6. Preview, publish, and gate each wave
 
-The extracted layer deliberately does not import the client's wallet or
-chain-writing implementation. Its CLI rejects `derive-env` and live
-`seed execute` unless an authorized host injects the publication adapter.
-The audit and plan above are safe and read-only; stop there in the parked
-state. Live publication and its immutable-record recovery procedure remain
-an operator gate for the future outbound-lane design.
+The preview derives the real operator identity but performs no IPFS, RPC,
+chain, ledger, or seed-state writes:
 
-## 7. Run the shared live probe
+```bash
+corepack yarn --cwd client stage2:publish-curated-seeds \
+  --episodes-dir "$HOME/.jinn-client/local-corpus/launch-15/wave-1" \
+  --report /tmp/stage2-mono-wave-1-plan.json \
+  --json
+```
+
+Verify chain `84532`, Safe, agent address, agent ID, five record IDs, and all
+digests. The private key and password are never printed.
+
+Only after that exact preview is approved, execute:
+
+```bash
+corepack yarn --cwd client stage2:publish-curated-seeds \
+  --episodes-dir "$HOME/.jinn-client/local-corpus/launch-15/wave-1" \
+  --report /tmp/stage2-mono-wave-1-plan.json \
+  --json --yes
+```
+
+For scripted password input, add `--password-fd <n>`. Password resolution is:
+explicit file descriptor, `JINN_PASSWORD`, the operator password file, then a
+fail-closed error.
+
+Require five imports and zero errors. Re-run the same command once and require
+zero imports plus five unchanged skips. Then:
+
+1. Fetch and validate every returned CID, signed episode envelope, artifact,
+   attribution, and scrub result.
+2. Reconcile every anchor transaction.
+3. Run the public probe and stock Hermes doctor.
+4. Test a clean Hermes home with a normal question relevant to the wave.
+
+Proceed to the next wave only after the current wave is fully green. Stop on a
+failed row, unexpected identity, digest mismatch, state/ledger warning,
+partial result, or ambiguous transaction.
+
+The standalone command remains intentionally parked:
+
+```bash
+"$JINN_LAYER_BIN" seed execute /tmp/stage2-mono-wave-1-plan.json \
+  --episodes-dir "$HOME/.jinn-client/local-corpus/launch-15/wave-1"
+```
+
+It must reject execution because no authorized client publish adapter was
+injected.
+
+## 7. Verify the public cold-start experience
+
+After all three waves:
 
 ```bash
 set -o pipefail
@@ -159,52 +224,41 @@ set -o pipefail
   | tee /tmp/stage2-mono-corpus-probe.json
 ```
 
-Require both `corpus-reachable.ok` and `corpus-content.ok` to be `true`.
-The content detail must report at least three retrieval-visible matching
-records. Also run the stock Hermes doctor and require its `corpus-content`
-check to report the same green result; do not substitute an offline fixture
-test for either live observation.
+Require `corpus-reachable.ok` and `corpus-content.ok`, with at least 15 newly
+published retrieval-visible mono records fetchable from the public corpus.
 
-## 8. Record the attributed operator moment
+From a stock Hermes installation with an empty local episode directory and the
+released Jinn plugin enabled:
 
-From a clean `Jinn-Network/mono` worktree, start a normal stock-Hermes working
-session with the accepted Jinn plugin enabled. Give it a genuine task whose
-vocabulary matches one curated episode. Do not script an artificial injection.
+- ask a natural plugin/newcomer question;
+- ask a daemon/operator reliability question;
+- ask an evaluator/CI question; and
+- ask one unrelated negative-control question.
 
-Before allowing the episode to influence the work, capture the visible
-knowledge packet and verify:
+Verify that relevant questions automatically receive correctly attributed
+public evidence without a slash command, while the unrelated question does not
+receive irrelevant corpus context. Preserve scrubbed transcripts, timestamps,
+the plugin/layer versions, retrieved envelope refs, and the usefulness
+judgment.
 
-- the task-linked prior episode appeared without a manual corpus lookup;
-- the UI/message names the source record or envelope ref;
-- the failure/fix/command excerpts and authored synthesis match the published
-  episode; and
-- the information was relevant and useful, not merely lexically matched.
+Only after this live proof is green should the plugin README be refreshed with
+the verified cold-start journey.
 
-Complete the working session and preserve a scrubbed transcript excerpt,
-timestamp, commit/worktree identity, task prompt, retrieved envelope ref, and
-the operator's usefulness judgment. This live session cannot be replaced by
-the local validator or corpus search command.
+## 8. Evidence and recovery
 
-## 9. Evidence and rollback
+Record on #2010:
 
-Comment on #1826 with:
-
-- the exact candidate commit and tool version;
-- the offline audit JSON;
-- the approved plan digests;
-- published envelope refs and anchor transactions;
+- the candidate commit and tool versions;
+- the complete audit result and 15 approved digests;
+- each wave's import/skip result, CIDs, and anchor transactions;
+- fetched-envelope and scrub verification;
 - the live layer probe and stock-doctor results; and
-- the scrubbed attributed-session evidence and operator judgment.
+- scrubbed clean-Hermes retrieval evidence.
 
-Records are immutable. If a curated record is wrong or unsafe, stop using it
-immediately and prepare a corrected record with the same stable identity. To
-demote rather than replace it, remove the retrieval mark from the corrected
-episode, run the normal seed plan/execute lane (the curated-batch audit will
-intentionally fail an unmarked record), and publish it as the superseding
-record. Verify that read-time collapse no longer admits the old marked
-version. Never claim deletion, edit an already published envelope, or discard
-the state that links the superseding publication.
-
-Keep #1826 human-blocked until all three live acceptance facts are present:
-three published marked mono records, green shared probes, and one genuinely
-useful attributed mono working session.
+Records are immutable. Correct an unsafe or inaccurate record by publishing a
+reviewed superseding record with the same stable identity. To demote it,
+remove the retrieval mark from the corrected episode and use the normal
+approved seed plan/execution lane; the curated auditor will intentionally
+reject that unmarked correction. Verify that read-time supersede collapse no
+longer admits the old marked version. Never claim deletion or edit an already
+published envelope.

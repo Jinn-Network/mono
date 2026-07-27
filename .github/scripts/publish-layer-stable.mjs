@@ -28,6 +28,8 @@ const npmCommand = args.get('--npm') ?? 'npm';
 const tarballsDir = mkdtempSync(join(tmpdir(), 'jinn-layer-stable-'));
 const npmEnv = { ...process.env };
 delete npmEnv.NODE_AUTH_TOKEN;
+const retryAttempts = Number.parseInt(process.env.JINN_NPM_REGISTRY_RETRY_ATTEMPTS ?? '12', 10);
+const retryDelayMs = Number.parseInt(process.env.JINN_NPM_REGISTRY_RETRY_DELAY_MS ?? '5000', 10);
 
 function fail(message) {
   throw new Error(`layer stable publish failed: ${message}`);
@@ -104,42 +106,62 @@ function packPackage(pkg) {
   };
 }
 
-function registryIntegrity(spec) {
-  const result = runNpm(
-    ['view', spec, 'dist.integrity', '--json'],
-    root,
-    { allowNotFound: true },
-  );
-  if (result === null) return null;
-  try {
-    const integrity = JSON.parse(result.stdout);
-    if (typeof integrity !== 'string' || !integrity.startsWith('sha512-')) {
-      fail(`registry returned invalid dist.integrity for ${spec}`);
-    }
-    return integrity;
-  } catch (error) {
-    if (error?.message?.startsWith('layer stable publish failed:')) throw error;
-    fail(`registry returned invalid JSON for ${spec}: ${error?.message ?? String(error)}`);
-  }
+function sleepSync(ms) {
+  if (ms <= 0) return;
+  const seconds = Math.max(1, Math.ceil(ms / 1000));
+  spawnSync('sleep', [String(seconds)], { stdio: 'ignore' });
 }
 
-function registryLatest(name) {
-  const result = runNpm(
-    ['view', name, 'dist-tags.latest', '--json'],
-    root,
-    { allowNotFound: true },
-  );
-  if (result === null) return null;
-  try {
-    const latest = JSON.parse(result.stdout);
-    if (typeof latest !== 'string') {
-      fail(`registry returned invalid dist-tags.latest for ${name}`);
+function registryIntegrity(spec, { allowRetry = false } = {}) {
+  const attempts = allowRetry ? retryAttempts : 1;
+  const delayMs = allowRetry ? retryDelayMs : 0;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const result = runNpm(
+      ['view', spec, 'dist.integrity', '--json'],
+      root,
+      { allowNotFound: true },
+    );
+    if (result !== null) {
+      try {
+        const integrity = JSON.parse(result.stdout);
+        if (typeof integrity !== 'string' || !integrity.startsWith('sha512-')) {
+          fail(`registry returned invalid dist.integrity for ${spec}`);
+        }
+        return integrity;
+      } catch (error) {
+        if (error?.message?.startsWith('layer stable publish failed:')) throw error;
+        fail(`registry returned invalid JSON for ${spec}: ${error?.message ?? String(error)}`);
+      }
     }
-    return latest;
-  } catch (error) {
-    if (error?.message?.startsWith('layer stable publish failed:')) throw error;
-    fail(`registry returned invalid latest JSON for ${name}: ${error?.message ?? String(error)}`);
+    if (attempt < attempts - 1) sleepSync(delayMs);
   }
+  return null;
+}
+
+function registryLatest(name, { allowRetry = false } = {}) {
+  const attempts = allowRetry ? retryAttempts : 1;
+  const delayMs = allowRetry ? retryDelayMs : 0;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const result = runNpm(
+      ['view', name, 'dist-tags.latest', '--json'],
+      root,
+      { allowNotFound: true },
+    );
+    if (result !== null) {
+      try {
+        const latest = JSON.parse(result.stdout);
+        if (typeof latest !== 'string') {
+          fail(`registry returned invalid dist-tags.latest for ${name}`);
+        }
+        return latest;
+      } catch (error) {
+        if (error?.message?.startsWith('layer stable publish failed:')) throw error;
+        fail(`registry returned invalid latest JSON for ${name}: ${error?.message ?? String(error)}`);
+      }
+    }
+    if (attempt < attempts - 1) sleepSync(delayMs);
+  }
+  return null;
 }
 
 function requireMatchingIntegrity(artifact, actual, phase) {
@@ -193,12 +215,12 @@ try {
     );
     requireMatchingIntegrity(
       artifact,
-      registryIntegrity(artifact.spec),
+      registryIntegrity(artifact.spec, { allowRetry: true }),
       'post-publish',
     );
     requireMatchingLatest(
       artifact,
-      registryLatest(artifact.name),
+      registryLatest(artifact.name, { allowRetry: true }),
       'post-publish',
     );
   }

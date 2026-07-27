@@ -815,6 +815,115 @@ describe('GitHubRestDiscoveryReader issue and PR indexes', () => {
     })]);
   });
 
+  it('accepts a closed PR whose GitHub update time precedes its close time', async () => {
+    const reader = new GitHubRestDiscoveryReader(new ConditionalRestClient(mapRunner(new Map([
+      [CLOSED_PR_ENDPOINT, included([{
+        number: 1951,
+        title: 'Closed without a matching update timestamp',
+        state: 'closed',
+        draft: false,
+        updated_at: '2026-07-23T23:24:45Z',
+        closed_at: '2026-07-23T23:24:47Z',
+        merged_at: null,
+        head: { sha: 'b'.repeat(40), ref: 'feature/1951' },
+        base: { ref: 'next' },
+      }])],
+    ]))));
+
+    await expect(reader.readRecentlyClosedPullRequestIndex('2026-07-21T00:00:00.000Z'))
+      .resolves.toEqual([expect.objectContaining({
+        number: 1951,
+        updatedAt: '2026-07-23T23:24:45Z',
+        closedAt: '2026-07-23T23:24:47Z',
+      })]);
+  });
+
+  it('uses the later close time when deciding whether a closed PR is recent', async () => {
+    const reader = new GitHubRestDiscoveryReader(new ConditionalRestClient(mapRunner(new Map([
+      [CLOSED_PR_ENDPOINT, included([{
+        number: 1951,
+        title: 'Closed across the incremental cutoff',
+        state: 'closed',
+        draft: false,
+        updated_at: '2026-07-20T23:59:59Z',
+        closed_at: '2026-07-21T00:00:01Z',
+        merged_at: null,
+        head: { sha: 'b'.repeat(40), ref: 'feature/1951' },
+        base: { ref: 'next' },
+      }])],
+    ]))));
+
+    await expect(reader.readRecentlyClosedPullRequestIndex('2026-07-21T00:00:00.000Z'))
+      .resolves.toEqual([expect.objectContaining({ number: 1951 })]);
+  });
+
+  it('does not stop before a later page with a recent close time', async () => {
+    const linkedPage2 =
+      'repositories/1190804373/pulls?state=closed&sort=updated&direction=desc'
+      + '&per_page=100&page=2';
+    const requestedPage2 =
+      'repos/Jinn-Network/mono/pulls?state=closed&sort=updated&direction=desc'
+      + '&per_page=100&page=2';
+    const closedPr = (number: number, updatedAt: string, closedAt: string) => ({
+      number,
+      title: `PR ${number}`,
+      state: 'closed',
+      draft: false,
+      updated_at: updatedAt,
+      closed_at: closedAt,
+      merged_at: null,
+      head: { sha: `${number}`.padStart(40, '0'), ref: `feature/${number}` },
+      base: { ref: 'next' },
+    });
+    const calls: string[] = [];
+    const reader = new GitHubRestDiscoveryReader(new ConditionalRestClient(mapRunner(new Map([
+      [CLOSED_PR_ENDPOINT, included([
+        closedPr(100, '2026-07-20T09:00:00Z', '2026-07-20T09:00:01Z'),
+      ], { next: linkedPage2 })],
+      [requestedPage2, included([
+        closedPr(99, '2026-07-19T09:00:00Z', '2026-07-21T09:00:00Z'),
+      ])],
+    ]), calls)));
+
+    await expect(reader.readRecentlyClosedPullRequestIndex('2026-07-21T00:00:00.000Z'))
+      .resolves.toEqual([expect.objectContaining({ number: 99 })]);
+    expect(calls).toEqual([CLOSED_PR_ENDPOINT, requestedPage2]);
+  });
+
+  it('accepts GitHub closed-PR pages that are not globally update-descending', async () => {
+    const linkedPage2 =
+      'repositories/1190804373/pulls?state=closed&sort=updated&direction=desc'
+      + '&per_page=100&page=2';
+    const requestedPage2 =
+      'repos/Jinn-Network/mono/pulls?state=closed&sort=updated&direction=desc'
+      + '&per_page=100&page=2';
+    const closedPr = (number: number, updatedAt: string) => ({
+      number,
+      title: `PR ${number}`,
+      state: 'closed',
+      draft: false,
+      updated_at: updatedAt,
+      closed_at: updatedAt,
+      merged_at: null,
+      head: { sha: `${number}`.padStart(40, '0'), ref: `feature/${number}` },
+      base: { ref: 'next' },
+    });
+    const reader = new GitHubRestDiscoveryReader(new ConditionalRestClient(mapRunner(new Map([
+      [CLOSED_PR_ENDPOINT, included([
+        closedPr(1485, '2026-07-14T10:58:40Z'),
+      ], { next: linkedPage2 })],
+      [requestedPage2, included([
+        closedPr(1646, '2026-07-14T13:08:00Z'),
+      ])],
+    ]))));
+
+    await expect(reader.readRecentlyClosedPullRequestIndex('2026-07-14T00:00:00.000Z'))
+      .resolves.toEqual([
+        expect.objectContaining({ number: 1485 }),
+        expect.objectContaining({ number: 1646 }),
+      ]);
+  });
+
   it('follows the live numeric-repository closed-PR Link in strict page-only mode', async () => {
     const linkedPage2 =
       'repositories/1190804373/pulls?state=closed&sort=updated&direction=desc'
@@ -903,11 +1012,6 @@ describe('GitHubRestDiscoveryReader issue and PR indexes', () => {
     ['closed PR with null closed_at', {
       number: 100, title: 'PR 100', state: 'closed', draft: false,
       updated_at: '2026-07-22T10:00:00Z', closed_at: null, merged_at: null,
-      head: { sha: 'b'.repeat(40), ref: 'feature/100' }, base: { ref: 'next' },
-    }],
-    ['closed PR updated before close', {
-      number: 100, title: 'PR 100', state: 'closed', draft: false,
-      updated_at: '2026-07-22T08:00:00Z', closed_at: '2026-07-22T09:00:00Z', merged_at: null,
       head: { sha: 'b'.repeat(40), ref: 'feature/100' }, base: { ref: 'next' },
     }],
     ['closed PR merged after close', {

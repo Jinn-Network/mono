@@ -1,127 +1,152 @@
 # Jinn for Hermes
 
-Give Hermes relevant evidence from retained local episodes and the public Jinn
-corpus while you work.
+Jinn helps Hermes reuse problem-solving experience beyond the current conversation.
 
-> Requires [Hermes](https://github.com/NousResearch/hermes-agent), Node.js 22+,
-> and npm.
+Hermes already has memory for information and conversational context. Jinn adds a layer for completed work: what problem an agent faced, what it tried, what failed, what worked, and what proved the solution was successful.
+
+When that experience is relevant, Jinn automatically brings it into the conversation from the public Jinn corpus or your previous sessions.
+
+**No separate search. No slash commands. Just use Hermes normally.**
+
+## What Jinn adds
+
+With Jinn, Hermes can:
+
+- benefit from relevant work completed by other agents;
+- recover useful solutions from your previous sessions;
+- reuse earlier attempts, failures, fixes, and outcomes;
+- avoid solving the same problem from scratch;
+- receive this experience automatically when it matches the current task.
+
+If Jinn has nothing useful to add, it stays out of the way.
 
 ## Install Jinn
+
+You need [Hermes](https://github.com/NousResearch/hermes-agent), Node.js 22 or newer, and npm.
+
+Install the plugin:
 
 ```bash
 hermes plugins install Jinn-Network/jinn-plugin
 ```
 
-Answer `y` when Hermes asks to enable `jinn`. Jinn installs its required layer
-automatically.
+Answer `y` when Hermes asks whether to enable Jinn. The plugin installs everything else it needs automatically.
 
-Check the installation:
+Confirm that Jinn is ready:
 
 ```bash
 hermes jinn-doctor
 ```
 
-You are ready when the doctor ends with `all checks passed`.
+You are ready when the doctor ends with:
 
-If you use the Hermes gateway, restart it with `hermes gateway restart`. A new
-terminal chat loads Jinn without this step.
+```text
+all checks passed
+```
 
-## Try your first pickup
+If you use the Hermes gateway, restart it:
 
-Start a fresh chat:
+```bash
+hermes gateway restart
+```
+
+A new terminal chat loads Jinn without this step.
+
+## Use Jinn
+
+Start Hermes:
 
 ```bash
 hermes chat
 ```
 
-Then describe the task normally. Include the concrete problem and repository
-when they matter; there is no Jinn slash command to run.
-
-Jinn checks retained local episodes and the public Jinn corpus when a new task
-starts or its stable task/repository context changes. When it finds evidence it
-can actually deliver, you will see:
+Then ask your question normally:
 
 ```text
-◇ corpus  provided 2 evidence packets  ·  searched: score-zero, jinn, evaluator, docker, eval
+How should a Jinn evaluator handle Docker failures?
 ```
 
-For example, a clean test with matching retained episodes began with a normal
-question:
+Jinn checks whether relevant work already exists in the public Jinn corpus or your previous sessions.
+
+If it finds something useful, it gives that experience to Hermes before Hermes answers. For example, Hermes may explain that Docker failures which prevent an evaluation from running should be treated as infrastructure failures rather than genuine candidate failures.
+
+You may see:
 
 ```text
-You: In the Jinn evaluator, a Docker eval run that aborts partway is recorded
-as an ordinary score-zero failure. What is the root cause and specific fix?
-
-Hermes: The evaluator's Docker-abort handling is incorrectly gated on
-`noTestPassed`. Remove that requirement and classify known container-abort
-signals as `EvalCouldNotGradeError`, even after partial test progress.
+◇ corpus
 ```
 
-Hermes received the evidence automatically and used its concrete diagnosis.
-Your result will depend on what relevant local or public evidence exists.
+This means Jinn found relevant prior work. You do not need to search the corpus or invoke a separate tool.
 
-If no retrievable evidence matches the task, Jinn stays out of the way. At the
-end of the session, Hermes reports:
+If nothing relevant exists, Jinn stays out of the way and Hermes continues normally.
 
-```text
-knowledge searched · nothing relevant found
+## Jinn becomes more useful over time
+
+A new installation has no local Jinn history, but it can immediately draw on relevant work from the public corpus.
+
+The public corpus currently begins with curated Jinn engineering experience. As more useful work is contributed, the range of problems it can help with will grow.
+
+Jinn also retains a scrubbed record of your completed sessions locally. This allows useful work from today to help with a similar task later.
+
+## Privacy
+
+Your retained sessions stay on your machine.
+
+Installing Jinn does not publish your conversations, code, or task history to the Jinn network. Publication requires a separate, explicit process.
+
+## If something is not working
+
+Run:
+
+```bash
+hermes jinn-doctor
 ```
 
-That is a successful search, not an installation problem. If Jinn reports a
-corpus access failure instead, run `hermes jinn-doctor`. The doctor names the
-failed check and prints the next command to run; it does not change your
-machine.
+The doctor checks the installation and tells you how to resolve any problem it finds. It does not change your machine.
 
-## Local task capture
+Finding no relevant prior work is not an installation problem. It simply means Jinn had nothing useful to add to that task.
 
-Jinn keeps a scrubbed episode of each session locally so later tasks can reuse
-relevant evidence. Nothing is published to the Jinn network automatically.
-
-## Update
+## Update Jinn
 
 ```bash
 hermes plugins update jinn
 hermes jinn-doctor
 ```
 
-## Disable or remove
+## Disable or remove Jinn
 
 ```bash
 hermes plugins disable jinn
 hermes plugins remove jinn
 ```
 
-Removing the plugin leaves its local Jinn data intact.
+Removing the plugin leaves your local Jinn data intact.
 
 <details>
 <summary>Permanently remove local Jinn data</summary>
 
-Jinn state is stored in both `${HERMES_HOME:-$HOME/.hermes}/jinn/` and
-`$HOME/.jinn-client/`. To back it up before deleting it, end active Hermes
-sessions, disable the plugin, then run:
+Jinn stores local state in:
+
+```text
+${HERMES_HOME:-$HOME/.hermes}/jinn/
+$HOME/.jinn-client/
+```
+
+To back it up before deleting it, end active Hermes sessions, disable the plugin, and run:
 
 ```bash
 JINN_STATE_BACKUP="$HOME/jinn-state-backup-$(date +%Y%m%d-%H%M%S)"
 mkdir -p -- "$JINN_STATE_BACKUP"
+
 for path in "${HERMES_HOME:-$HOME/.hermes}/jinn" "$HOME/.jinn-client"; do
   [ ! -e "$path" ] || cp -a -- "$path" "$JINN_STATE_BACKUP/"
 done
-find "$JINN_STATE_BACKUP" -maxdepth 2 -print
 ```
 
-After confirming the backup, remove both state directories:
+After confirming the backup, permanently delete the local state:
 
 ```bash
 rm -rf -- "${HERMES_HOME:-$HOME/.hermes}/jinn" "$HOME/.jinn-client"
 ```
 
-This permanently deletes local Jinn data. To restore the backup, keep Jinn
-disabled and copy the directories back to their original paths before enabling
-it again.
-
 </details>
-
-## Maintainers
-
-For runtime versioning and upstream-merge discipline, see
-[JINN.md](../../JINN.md).

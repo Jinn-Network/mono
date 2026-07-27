@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import {
   SweRebenchV2EvaluatorHarness,
   applyUpstreamPatches,
+  inspectCurrentSweRebenchV2EvaluatorEnableContract,
 } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js';
 import { HttpHfFetcher } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 import type { Task } from '../../../../src/types/task.js';
@@ -369,6 +370,61 @@ describe('SweRebenchV2EvaluatorHarness — isReady', () => {
     const r = await h.isReady();
     expect(r.ready).toBe(false);
     expect(r.reason).toMatch(/upstream repo missing/);
+  });
+});
+
+describe('current evaluator enable contract — Docker-free validation', () => {
+  let implStateDir: string;
+  beforeEach(() => {
+    implStateDir = makeImplStateDir();
+  });
+  afterEach(() => {
+    rmSync(implStateDir, { recursive: true, force: true });
+  });
+
+  it('rejects a structurally valid v1 marker with the re-enable instruction', () => {
+    makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
+
+    const result = inspectCurrentSweRebenchV2EvaluatorEnableContract(implStateDir);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected current-contract rejection');
+    expect(result.reason).toMatch(/durable bundle repair/i);
+    expect(result.nextStep).toContain('jinn harnesses enable swe-rebench-v2-evaluator');
+  });
+
+  it.each([
+    ['pinned upstream commit', (marker: any) => {
+      marker.upstream.commit = '0'.repeat(40);
+    }],
+    ['patch bundle digest', (marker: any) => {
+      marker.patchBundle.sha256 = `sha256:${'f'.repeat(64)}`;
+    }],
+    ['trusted parser binding', (marker: any) => {
+      marker.trustedParsers[0].bundleSha256 = `sha256:${'e'.repeat(64)}`;
+    }],
+  ])('rejects stale v2 %s metadata', (_label, mutate) => {
+    const upstreamRepoDir = join(implStateDir, 'upstream');
+    makeDurableEnabledMarker(implStateDir, upstreamRepoDir);
+    const markerPath = join(implStateDir, 'state.json');
+    const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
+    mutate(marker);
+    writeFileSync(markerPath, JSON.stringify(marker));
+
+    const result = inspectCurrentSweRebenchV2EvaluatorEnableContract(implStateDir);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected stale-contract rejection');
+    expect(result.reason).toMatch(/durable bundle repair/i);
+  });
+
+  it('accepts the current v2 marker, managed checkout, bundle, and parser binding', () => {
+    const upstreamRepoDir = join(implStateDir, 'upstream');
+    makeDurableEnabledMarker(implStateDir, upstreamRepoDir);
+
+    const result = inspectCurrentSweRebenchV2EvaluatorEnableContract(implStateDir);
+
+    expect(result).toEqual({ ok: true, upstreamRepoDir });
   });
 });
 

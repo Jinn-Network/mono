@@ -209,6 +209,21 @@ function assertRuntimeDependenciesAreInstallable(clientManifest, workspaceManife
   }
 }
 
+function assertBundledWorkspaceDependencyVersion(clientManifest, workspaceManifest) {
+  const packageName = workspaceManifest.name;
+  const workspaceVersion = workspaceManifest.version;
+  if (typeof workspaceVersion !== 'string' || !workspaceVersion) {
+    throw new Error(`${packageName} bundled workspace must declare a version`);
+  }
+
+  const declaredVersion = clientManifest.dependencies?.[packageName];
+  if (declaredVersion !== workspaceVersion) {
+    throw new Error(
+      `${packageName} bundled workspace version ${workspaceVersion} must be declared as exact client dependency ${workspaceVersion}; found ${declaredVersion ?? 'missing'}`,
+    );
+  }
+}
+
 export async function restoreBundledWorkspaces({ clientRoot }) {
   const stateRoot = path.join(clientRoot, STATE_DIR);
   const statePath = path.join(stateRoot, STATE_FILE);
@@ -259,6 +274,32 @@ export async function materializeBundledWorkspaces({ clientRoot }) {
     throw new Error('client package.json must declare bundledDependencies');
   }
 
+  const workspaces = [];
+  for (const packageName of packageNames) {
+    const parts = packageDirectory(packageName);
+    const target = path.join(clientRoot, 'node_modules', ...parts);
+    const targetStat = await lstat(target);
+    if (!targetStat.isSymbolicLink()) {
+      throw new Error(`${packageName} must be a workspace link before packing`);
+    }
+    const workspaceRoot = await realpath(target);
+    const workspaceManifest = await readJson(path.join(workspaceRoot, 'package.json'));
+    if (workspaceManifest.name !== packageName) {
+      throw new Error(
+        `workspace link for ${packageName} resolves to ${workspaceManifest.name ?? 'an unnamed package'}`,
+      );
+    }
+    assertBundledWorkspaceDependencyVersion(clientManifest, workspaceManifest);
+    assertRuntimeDependenciesAreInstallable(clientManifest, workspaceManifest);
+    workspaces.push({
+      packageName,
+      parts,
+      target,
+      workspaceRoot,
+      workspaceManifest,
+    });
+  }
+
   const stateRoot = path.join(clientRoot, STATE_DIR);
   await mkdir(stateRoot, { recursive: true });
   await writeFile(path.join(stateRoot, MANIFEST_BACKUP_FILE), sourceManifestBytes);
@@ -273,22 +314,12 @@ export async function materializeBundledWorkspaces({ clientRoot }) {
       `${JSON.stringify(publishManifest(clientManifest), null, 2)}\n`,
     );
 
-    for (const packageName of packageNames) {
-      const parts = packageDirectory(packageName);
-      const target = path.join(clientRoot, 'node_modules', ...parts);
-      const targetStat = await lstat(target);
-      if (!targetStat.isSymbolicLink()) {
-        throw new Error(`${packageName} must be a workspace link before packing`);
-      }
-      const workspaceRoot = await realpath(target);
-      const workspaceManifest = await readJson(path.join(workspaceRoot, 'package.json'));
-      if (workspaceManifest.name !== packageName) {
-        throw new Error(
-          `workspace link for ${packageName} resolves to ${workspaceManifest.name ?? 'an unnamed package'}`,
-        );
-      }
-      assertRuntimeDependenciesAreInstallable(clientManifest, workspaceManifest);
-
+    for (const {
+      parts,
+      target,
+      workspaceRoot,
+      workspaceManifest,
+    } of workspaces) {
       const backup = path.join(stateRoot, 'links', ...parts);
       await mkdir(path.dirname(backup), { recursive: true });
       await rename(target, backup);

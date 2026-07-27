@@ -7,6 +7,7 @@ import type {
   EnvelopeProjectionQuery,
 } from '../corpus/types.js';
 import { TASK_RUNS_SCHEMA, TaskRunPersistence } from '../harnesses/engine/persistence.js';
+import { PHASE_RUNS_SCHEMA, PhaseRunStore } from './phase-runs.js';
 import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 import type { TxSubmissionKey, TxSubmissionLedgerEntry } from '../tx-retry.js';
 import { normalizeEnvelopeRole, type Role } from '../types/envelope.js';
@@ -599,6 +600,7 @@ export class Store {
     this.db.pragma('journal_mode = WAL');
     this.db.exec(SCHEMA);
     this.db.exec(TASK_RUNS_SCHEMA);
+    this.db.exec(PHASE_RUNS_SCHEMA);
     this.ensureArtifactsTaskColumns();
     this.ensureRewardClaimsTxIndex();
     this.ensureNetworkArtifactsPeerCatalogId();
@@ -618,6 +620,11 @@ export class Store {
    */
   taskRunReadModel(): TaskRunReadModel {
     return new TaskRunPersistence(this.db);
+  }
+
+  /** Opaque generator phase-run persistence (#2042). */
+  phaseRuns(): PhaseRunStore {
+    return new PhaseRunStore(this.db);
   }
 
   /** Older request-first DBs keyed artifacts by desired_state_id before Task-native IDs landed. */

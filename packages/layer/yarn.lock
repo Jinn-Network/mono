@@ -354,7 +354,7 @@ __metadata:
   resolution: "@jinn-network/core@portal:../core::locator=%40jinn-network%2Fjinn-layer%40workspace%3A."
   dependencies:
     "@huggingface/transformers": "npm:^4.2.0"
-    "@jinn-network/plugin": "npm:0.1.1"
+    "@jinn-network/plugin": "npm:0.1.2"
     "@lmoe/gliner-onnx": "npm:0.1.0"
     "@noble/hashes": "npm:^2.2.0"
     "@secretlint/core": "npm:^13.0.2"
@@ -374,8 +374,8 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/jinn-layer@workspace:."
   dependencies:
-    "@jinn-network/core": "npm:0.1.1"
-    "@jinn-network/plugin": "npm:0.1.1"
+    "@jinn-network/core": "npm:0.1.2"
+    "@jinn-network/plugin": "npm:0.1.2"
     "@modelcontextprotocol/sdk": "npm:^1.27.1"
     "@types/better-sqlite3": "npm:^7.6.0"
     "@types/node": "npm:^26.1.0"

@@ -458,11 +458,7 @@ function parsePullRequestIndexRow(
   } else {
     closedAt = isoTimestamp(pr.closed_at, `pull request ${index}.closed_at`);
     mergedAt = nullableTimestamp(pr.merged_at, `pull request ${index}.merged_at`);
-    const updatedMs = exactUtcTimestamp(updatedAt, `pull request ${index}.updated_at`).ms;
     const closedMs = exactUtcTimestamp(closedAt, `pull request ${index}.closed_at`).ms;
-    if (closedMs > updatedMs) {
-      throw new GitHubRestSchemaError(`pull request ${index} was updated before it closed`);
-    }
     if (
       mergedAt !== null
       && exactUtcTimestamp(mergedAt, `pull request ${index}.merged_at`).ms > closedMs
@@ -848,7 +844,6 @@ export class GitHubRestDiscoveryReader {
       `repos/${REPO}/pulls?state=closed&sort=updated&direction=desc`
       + `&per_page=${PAGE_SIZE}&page=1`;
     const paginator = new ConfinedPaginator(endpoint, 'page');
-    let previousUpdatedMs = Number.POSITIVE_INFINITY;
     for (let page = 1; endpoint !== null; page += 1) {
       if (page > this.maxPages) {
         throw new GitHubRestPaginationError(`exceeded ${this.maxPages} recently-closed PR pages`);
@@ -860,20 +855,18 @@ export class GitHubRestDiscoveryReader {
       const response = await this.rest.getJson(endpoint);
       const pageRows = rows(response.body, `recently-closed PR page ${page}`)
         .map((row, index) => parsePullRequestIndexRow(row, index, 'closed'));
-      let reachedCutoff = false;
       for (const pr of pageRows) {
         const updatedMs = exactUtcTimestamp(pr.updatedAt, `pull request ${pr.number}.updated_at`).ms;
-        if (updatedMs > previousUpdatedMs) {
-          throw new GitHubRestSchemaError('recently-closed pull requests are not updated-descending');
-        }
-        previousUpdatedMs = updatedMs;
-        if (updatedMs < sinceMs) {
-          reachedCutoff = true;
+        const closedMs = exactUtcTimestamp(
+          pr.closedAt,
+          `pull request ${pr.number}.closed_at`,
+        ).ms;
+        if (Math.max(updatedMs, closedMs) < sinceMs) {
           continue;
         }
         result.push(pr);
       }
-      endpoint = reachedCutoff ? null : paginator.next(response.nextEndpoint);
+      endpoint = paginator.next(response.nextEndpoint);
     }
     return result;
   }

@@ -1048,9 +1048,9 @@ __metadata:
     "@grpc/grpc-js": "npm:^1.14.3"
     "@hono/node-server": "npm:^2.0.5"
     "@huggingface/transformers": "npm:^4.2.0"
-    "@jinn-network/core": "npm:0.1.0"
+    "@jinn-network/core": "npm:0.1.2"
     "@jinn-network/jinn-layer": "portal:../packages/layer"
-    "@jinn-network/plugin": "npm:0.1.0"
+    "@jinn-network/plugin": "npm:0.1.2"
     "@jinn-network/sdk": "portal:../packages/sdk"
     "@lmoe/gliner-onnx": "npm:0.1.0"
     "@modelcontextprotocol/sdk": "npm:^1.27.1"
@@ -1116,7 +1116,7 @@ __metadata:
   resolution: "@jinn-network/core@portal:../packages/core::locator=%40jinn-network%2Fclient%40workspace%3A."
   dependencies:
     "@huggingface/transformers": "npm:^4.2.0"
-    "@jinn-network/plugin": "npm:0.1.1"
+    "@jinn-network/plugin": "npm:0.1.2"
     "@lmoe/gliner-onnx": "npm:0.1.0"
     "@noble/hashes": "npm:^2.2.0"
     "@secretlint/core": "npm:^13.0.2"
@@ -1136,8 +1136,8 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/jinn-layer@portal:../packages/layer::locator=%40jinn-network%2Fclient%40workspace%3A."
   dependencies:
-    "@jinn-network/core": "npm:0.1.1"
-    "@jinn-network/plugin": "npm:0.1.1"
+    "@jinn-network/core": "npm:0.1.2"
+    "@jinn-network/plugin": "npm:0.1.2"
     "@modelcontextprotocol/sdk": "npm:^1.27.1"
     better-sqlite3: "npm:^12.10.0"
     canonicalize: "npm:^3.0.0"
