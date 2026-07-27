@@ -221,6 +221,33 @@ The textual Jinn convention for an algorithm/digest pair is `sha256:<64 lowercas
 Inside an in-toto Resource Descriptor the standard `{ "digest": { "sha256": "<hex>" } }` shape is
 used.
 
+### 5.1 String ordering in canonical bytes
+
+Because record bytes are the identity, any producer decision that changes byte order changes the
+digest. Where a producer sorts strings — graph entities, artifact lists, diagnostics, object keys —
+it MUST order them by **UTF-16 code unit**, ascending, comparing units pairwise and treating the
+shorter string as smaller when one is a prefix of the other. This is the ordering JavaScript's
+`<` and `>` operators give on strings, and the ordering already used for object keys by the
+canonical JSON serializer.
+
+Producers MUST NOT order canonical bytes with locale-aware or collation-aware comparison. Unicode
+collation is parameterized by locale and by CLDR version, so two conforming producers would emit
+different bytes — and therefore different digests — for identical input. In JavaScript this
+specifically excludes `String.prototype.localeCompare` and `Intl.Collator`; the equivalent
+locale-aware comparison in any other language is excluded on the same grounds. The rule is
+enforced for this repository's implementation by
+[`.github/scripts/evidence-source-boundaries.test.mjs`](../../../.github/scripts/evidence-source-boundaries.test.mjs).
+
+Code-unit order is deliberately **not** code-point order. A supplementary-plane character is
+encoded as a surrogate pair whose leading unit lies in U+D800–U+DBFF, so it sorts before every
+character in U+E000–U+FFFF even though its code point is higher. An implementation working from
+UTF-8 bytes or code points must reproduce the UTF-16 code-unit ordering to obtain matching
+digests; sorting by UTF-8 byte order is equivalent to code-point order and will disagree on
+supplementary-plane characters.
+
+Ordering is a property of the bytes, not of any display. Consumers presenting evidence to people
+remain free to sort however suits their audience.
+
 ## 6. Execution Evidence Profile
 
 **Target profile URI:** `https://jinn.network/profiles/execution-evidence/1.0`

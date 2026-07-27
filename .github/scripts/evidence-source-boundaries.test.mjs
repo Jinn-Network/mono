@@ -178,6 +178,38 @@ const ambientNetworkGlobal = new RegExp(
   'g',
 );
 
+// Canonical Evidence bytes must not depend on the host locale or the bundled
+// ICU data. These APIs all consult one or both, so an ordering or formatting
+// decision made with them can change a record's SHA-256 digest between two
+// hosts running identical code. Use a code-unit comparator instead; see any
+// package's src/order.ts.
+const LOCALE_SENSITIVE_APIS = [
+  'localeCompare',
+  'toLocaleUpperCase',
+  'toLocaleLowerCase',
+  'toLocaleString',
+  'toLocaleDateString',
+  'toLocaleTimeString',
+];
+const localeSensitiveMember = new RegExp(
+  String.raw`(?:\.|\?\.)\s*(?:${LOCALE_SENSITIVE_APIS.join('|')})\s*\(`,
+  'g',
+);
+const localeSensitiveIntl = new RegExp(
+  String.raw`(?<![\w$."'\x60])Intl\s*(?:\.|\?\.)`,
+  'g',
+);
+
+function localeSensitiveUsesInFiles(sourceFiles) {
+  return sourceFiles.flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    return [
+      ...[...source.matchAll(localeSensitiveMember)],
+      ...[...source.matchAll(localeSensitiveIntl)],
+    ].map((match) => `${relative(root, file)} -> ${match[0].trim()}`);
+  }).sort();
+}
+
 function ambientNetworkUsesInFiles(sourceFiles) {
   return sourceFiles.flatMap((file) => {
     const source = readFileSync(file, 'utf8');
@@ -890,6 +922,49 @@ test('evidence source boundaries remain one-way across the approved graph', () =
       join(packages, directory, 'src'),
       ['@jinn-network/evidence-repository-ipfs'],
       [repositoryIpfs],
+    );
+  }
+});
+
+test('locale-sensitive API detection catches member calls, optional chaining, and Intl', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-evidence-locale-boundary-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'source.ts'), [
+      ...LOCALE_SENSITIVE_APIS.flatMap((api) => [
+        `left.${api}(right);`,
+        `left?.${api}(right);`,
+      ]),
+      'new Intl.Collator("en-US").compare(left, right);',
+      'Intl?.Collator;',
+    ].join('\n'));
+    assert.equal(
+      localeSensitiveUsesInFiles(files(source)).length,
+      LOCALE_SENSITIVE_APIS.length * 2 + 2,
+    );
+
+    writeFileSync(join(source, 'clean.ts'), [
+      'export function compareCodeUnitStrings(left, right) {',
+      '  return left < right ? -1 : left > right ? 1 : 0;',
+      '}',
+      '// localeCompare is banned; this comment must not trip the scanner.',
+    ].join('\n'));
+    assert.deepEqual(localeSensitiveUsesInFiles([join(source, 'clean.ts')]), []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('Evidence production source never orders or formats with the host locale', () => {
+  for (const directory of evidenceDirectories) {
+    const source = join(packages, directory, 'src');
+    if (!existsSync(source)) continue;
+    const production = files(source)
+      .filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
+    assert.deepEqual(
+      localeSensitiveUsesInFiles(production),
+      [],
+      `${directory} production source must not depend on the host locale or ICU data; `
+        + 'canonical Evidence bytes would differ between hosts. Use src/order.ts.',
     );
   }
 });

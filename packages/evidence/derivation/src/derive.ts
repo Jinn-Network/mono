@@ -35,6 +35,7 @@ import type {
   EvidenceDeriver,
   PublishableArtifact,
 } from "./types.js";
+import { compareCodeUnitStrings } from "./order.js";
 
 function descriptorKey(value: DerivationDetectorDescriptor): string {
   return JSON.stringify({
@@ -169,7 +170,7 @@ function unchangedArtifacts(
           kind: "retained" as const,
         };
       })
-      .sort((left, right) => left.entityId.localeCompare(right.entityId)),
+      .sort((left, right) => compareCodeUnitStrings(left.entityId, right.entityId)),
   );
 }
 

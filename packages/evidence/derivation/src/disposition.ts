@@ -9,6 +9,7 @@ import type {
   DerivationSurface,
   DispositionCount,
 } from "./types.js";
+import { compareCodeUnitStrings } from "./order.js";
 
 export type SurfaceDispositionResult =
   | {
@@ -86,8 +87,8 @@ function counts(
   return Object.freeze(
     [...grouped.values()].sort(
       (left, right) =>
-        left.class.localeCompare(right.class) ||
-        left.disposition.localeCompare(right.disposition),
+        compareCodeUnitStrings(left.class, right.class) ||
+        compareCodeUnitStrings(left.disposition, right.disposition),
     ),
   );
 }
@@ -152,8 +153,8 @@ export function applyDerivationDispositions(
       (left, right) =>
         CONFIDENCE[right.finding.confidence] -
           CONFIDENCE[left.finding.confidence] ||
-        left.finding.class.localeCompare(right.finding.class) ||
-        left.finding.detector.id.localeCompare(right.finding.detector.id),
+        compareCodeUnitStrings(left.finding.class, right.finding.class) ||
+        compareCodeUnitStrings(left.finding.detector.id, right.finding.detector.id),
     );
   const selected: typeof redactions = [];
   for (const candidate of redactions) {

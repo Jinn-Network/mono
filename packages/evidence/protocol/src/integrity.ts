@@ -4,6 +4,7 @@ import type {
   ArtifactIntegrityEntry,
   ArtifactIntegrityReport,
 } from "./types.js";
+import { compareCodeUnitStrings } from "./order.js";
 
 const SHA256 = /^[a-f0-9]{64}$/;
 
@@ -38,7 +39,7 @@ export function checkArtifactIntegrity(
         actualDigest,
       };
     })
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
+    .sort((left, right) => compareCodeUnitStrings(left.entityId, right.entityId));
 
   return {
     artifacts,

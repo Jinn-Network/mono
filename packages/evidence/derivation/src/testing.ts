@@ -31,6 +31,7 @@ import type {
   EvidenceDeriver,
   ProtectedValueClass,
 } from "./types.js";
+import { compareCodeUnitStrings } from "./order.js";
 
 export type EvidenceDeriverContractFactory = (
   detectors?: readonly DerivationDetector[],
@@ -659,7 +660,7 @@ export function describeEvidenceDeriverContract(
         })),
       ).toEqual(
         [...input.sourceArtifacts]
-          .sort((left, right) => left.entityId.localeCompare(right.entityId))
+          .sort((left, right) => compareCodeUnitStrings(left.entityId, right.entityId))
           .map(({ entityId, bytes }) => ({
             entityId,
             digest: sha256Digest(bytes),

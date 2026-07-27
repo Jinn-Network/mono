@@ -25,6 +25,7 @@ import type {
   DerivationSha256Digest,
   DispositionCount,
 } from "./types.js";
+import { compareCodeUnitStrings } from "./order.js";
 
 const implementationSchema = z.strictObject({
   schemaVersion: z.literal("jinn.evidence-derivation-implementation.v1"),
@@ -240,8 +241,8 @@ function sortedCounts(
   }
   return [...grouped.values()].sort(
     (left, right) =>
-      left.class.localeCompare(right.class) ||
-      left.disposition.localeCompare(right.disposition),
+      compareCodeUnitStrings(left.class, right.class) ||
+      compareCodeUnitStrings(left.disposition, right.disposition),
   );
 }
 
@@ -267,12 +268,12 @@ export function buildScrubReceipt(
             ]
           : [],
       )
-      .sort((left, right) => left.detectorId.localeCompare(right.detectorId)),
+      .sort((left, right) => compareCodeUnitStrings(left.detectorId, right.detectorId)),
     completedAt: input.completedAt,
     mappings: [...input.mappings].sort(
       (left, right) =>
-        left.sourceEntityId.localeCompare(right.sourceEntityId) ||
-        left.derivedEntityId.localeCompare(right.derivedEntityId),
+        compareCodeUnitStrings(left.sourceEntityId, right.sourceEntityId) ||
+        compareCodeUnitStrings(left.derivedEntityId, right.derivedEntityId),
     ),
     artifacts: { ...input.artifactCounts },
     dispositions: sortedCounts(input.dispositions),

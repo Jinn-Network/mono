@@ -30,6 +30,7 @@ import type {
   DerivationSurface,
   DerivationOperationOptions,
 } from "../types.js";
+import { compareCodeUnitStrings } from "../order.js";
 
 export interface BuiltinPrivateConfiguration {
   readonly schemaVersion: "jinn.private-detector-configuration.v1";
@@ -862,11 +863,11 @@ export function normalizeDetectorFindings(
   }
   normalized.sort(
     (left, right) =>
-      left.surfaceId.localeCompare(right.surfaceId) ||
+      compareCodeUnitStrings(left.surfaceId, right.surfaceId) ||
       left.start - right.start ||
       left.end - right.end ||
-      left.class.localeCompare(right.class) ||
-      descriptorKey(left.detector).localeCompare(descriptorKey(right.detector)),
+      compareCodeUnitStrings(left.class, right.class) ||
+      compareCodeUnitStrings(descriptorKey(left.detector), descriptorKey(right.detector)),
   );
   const unique = normalized.filter(
     (candidate, index) =>

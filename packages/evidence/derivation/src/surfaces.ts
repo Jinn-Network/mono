@@ -15,6 +15,7 @@ import type {
   ProtectedValueClass,
 } from "./types.js";
 import type { ValidatedDerivationSource } from "./source.js";
+import { compareCodeUnitStrings } from "./order.js";
 
 export interface ProtectedLocation {
   readonly location: string;
@@ -621,7 +622,7 @@ export function extractDerivationSurfaces(
   return {
     surfaces: Object.freeze(
       surfaces.sort((left, right) =>
-        left.surfaceId.localeCompare(right.surfaceId),
+        compareCodeUnitStrings(left.surfaceId, right.surfaceId),
       ),
     ),
     protectedLocations: Object.freeze(

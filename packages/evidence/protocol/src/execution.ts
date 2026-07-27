@@ -12,6 +12,7 @@ import type {
   ConformanceDiagnosticCode,
   ValidationReport,
 } from "./types.js";
+import { compareCodeUnitStrings } from "./order.js";
 
 type Entity = ExecutionEvidenceDocument["@graph"][number];
 type JsonObject = Record<string, unknown>;
@@ -109,10 +110,10 @@ function ordered(
 ): readonly ConformanceDiagnostic[] {
   const sorted = [...diagnostics].sort(
     (left, right) =>
-      left.path.localeCompare(right.path) ||
-      left.code.localeCompare(right.code) ||
-      (left.entityId ?? "").localeCompare(right.entityId ?? "") ||
-      left.message.localeCompare(right.message),
+      compareCodeUnitStrings(left.path, right.path) ||
+      compareCodeUnitStrings(left.code, right.code) ||
+      compareCodeUnitStrings((left.entityId ?? ""), right.entityId ?? "") ||
+      compareCodeUnitStrings(left.message, right.message),
   );
   const seen = new Set<string>();
   return sorted.filter((diagnostic) => {

@@ -16,6 +16,7 @@ import type {
   DispositionCount,
   PublishableArtifact,
 } from "./types.js";
+import { compareCodeUnitStrings } from "./order.js";
 
 export interface DerivedArtifact {
   readonly sourceEntityId: string;
@@ -75,8 +76,8 @@ function combineCounts(
   return Object.freeze(
     [...grouped.values()].sort(
       (left, right) =>
-        left.class.localeCompare(right.class) ||
-        left.disposition.localeCompare(right.disposition),
+        compareCodeUnitStrings(left.class, right.class) ||
+        compareCodeUnitStrings(left.disposition, right.disposition),
     ),
   );
 }
@@ -222,13 +223,13 @@ export function transformSourceArtifacts(
     if (role === "task") taskDerived = true;
     if (role === "result") resultDerived = true;
   }
-  retained.sort((left, right) => left.entityId.localeCompare(right.entityId));
+  retained.sort((left, right) => compareCodeUnitStrings(left.entityId, right.entityId));
   derived.sort(
     (left, right) =>
-      left.sourceEntityId.localeCompare(right.sourceEntityId) ||
-      left.digest.localeCompare(right.digest),
+      compareCodeUnitStrings(left.sourceEntityId, right.sourceEntityId) ||
+      compareCodeUnitStrings(left.digest, right.digest),
   );
-  withheld.sort((left, right) => left.entityId.localeCompare(right.entityId));
+  withheld.sort((left, right) => compareCodeUnitStrings(left.entityId, right.entityId));
   return {
     status: "transformed",
     retained: Object.freeze(retained),
