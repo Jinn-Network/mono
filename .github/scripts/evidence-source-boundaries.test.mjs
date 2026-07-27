@@ -152,6 +152,8 @@ function specifiers(source) {
     new RegExp(String.raw`\bimport${trivia}["']([^"']+)["']`, 'g'),
     new RegExp(String.raw`\bimport${trivia}\(${trivia}["']([^"']+)["']${trivia}\)`, 'g'),
     new RegExp(String.raw`\brequire${trivia}\(${trivia}["']([^"']+)["']${trivia}\)`, 'g'),
+    new RegExp(String.raw`\bimport${trivia}\(${trivia}\x60((?:(?!\$\{)[^\x60])*)\x60${trivia}\)`, 'g'),
+    new RegExp(String.raw`\brequire${trivia}\(${trivia}\x60((?:(?!\$\{)[^\x60])*)\x60${trivia}\)`, 'g'),
   ].flatMap((pattern) => [...source.matchAll(pattern)].map((match) => match[1]));
 }
 
@@ -221,10 +223,12 @@ test('the import scanner catches static, export, dynamic, require, and local-pat
       'export { value } from /* boundary */ "@jinn-network/forbidden/commented-export";',
       'await import(// boundary', '  "@jinn-network/forbidden/line-comment");',
       'export { value } from /* first */ /* second */ "@jinn-network/forbidden/multiple-comments";',
+      'await import(`@jinn-network/forbidden/template-dynamic`);',
+      'require(`@jinn-network/forbidden/template-require`);',
       'import "../forbidden/local.js";',
     ].join('\n'));
     const findings = forbiddenImports(source, ['@jinn-network/'], [forbidden]);
-    assert.equal(findings.length, 9);
+    assert.equal(findings.length, 11);
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
@@ -412,6 +416,8 @@ test('IPFS production boundary configuration catches application and legacy esca
       `import ${JSON.stringify(localSpecifier(join(root, 'packages', 'layer', 'src')))};`,
       `import ${JSON.stringify(localSpecifier(join(root, 'client', 'src')))};`,
       `import ${JSON.stringify(localSpecifier(join(root, 'apps', 'jinn-agent')))};`,
+      'await import(`@jinn-network/evidence-protocol`);',
+      `require(\`${localSpecifier(join(root, 'client', 'plugins'))}\`);`,
     ].join('\n'));
     assert.equal(
       forbiddenImportsInFiles(
@@ -419,7 +425,7 @@ test('IPFS production boundary configuration catches application and legacy esca
         IPFS_FORBIDDEN_PACKAGES,
         IPFS_PRODUCTION_FORBIDDEN_ROOTS,
       ).length,
-      8,
+      10,
     );
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
