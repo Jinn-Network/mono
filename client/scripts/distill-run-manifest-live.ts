@@ -36,15 +36,7 @@ type VerdictSource = {
   list(args?: { limit?: number }): Promise<AttemptRef[]>;
 };
 import { authenticateExecutionEnvelope } from '../src/conformance/execution-envelope-authenticator.js';
-import { resolveCliPassword } from '../src/cli/password.js';
 import { loadConfig } from '../src/config.js';
-import { decryptMnemonic, walletPrivateKeyAtIndex } from '../src/earning/wallet.js';
-import {
-  DEFAULT_EARNING_DIR,
-  FleetStateStore,
-  mnemonicKeystorePath,
-} from '../src/earning/store.js';
-import { isOperationalServiceStep } from '../src/earning/types.js';
 import { createPublisherSafeResolver } from '../src/erc8004/publisher-safe-resolver.js';
 import { parseRpcUrls } from '../src/rpc/transport.js';
 import {
@@ -61,14 +53,7 @@ import {
   DEFAULT_TESTNET_IDENTITY_REGISTRY,
   DEFAULT_TESTNET_RPC_URL,
 } from './layer-live-deps.js';
-
-interface OperatorIdentity {
-  privateKey: `0x${string}`;
-  safeAddress: `0x${string}`;
-  agentId: bigint;
-  agentAddress: string;
-  serviceIndex: number;
-}
+import { deriveOperatorIdentity } from './layer-operator-identity.js';
 
 interface VerdictRow {
   requestId: string;
@@ -298,45 +283,6 @@ function parseArgs(argv: string[]): { limit?: number; yes: boolean } {
     throw new Error(`--limit must be a positive integer (got ${JSON.stringify(rawLimit)})`);
   }
   return { limit, yes: argv.includes('--yes') };
-}
-
-async function deriveOperatorIdentity(argv: string[]): Promise<OperatorIdentity> {
-  const earningDir = process.env['JINN_EARNING_DIR'] ?? DEFAULT_EARNING_DIR;
-  const store = new FleetStateStore(earningDir);
-
-  if (!store.hasMnemonicKeystore()) {
-    throw new Error(
-      `no keystore at ${mnemonicKeystorePath(earningDir)} — run \`jinn run\` to bootstrap first`,
-    );
-  }
-
-  const pw = resolveCliPassword(argv, process.env);
-  if (!pw.ok) {
-    throw new Error(pw.message);
-  }
-
-  const state = await store.tryLoadExisting();
-  const svc = state?.services.find((s) => isOperationalServiceStep(s.step));
-  if (!svc?.safe_address || !svc.agent_id) {
-    throw new Error(
-      'no fully-bootstrapped agent identity found (Safe/agent not yet registered) — finish `jinn run` bootstrap',
-    );
-  }
-
-  let mnemonic: string;
-  try {
-    mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), pw.password);
-  } catch {
-    throw new Error('could not decrypt keystore (wrong password?)');
-  }
-
-  return {
-    privateKey: walletPrivateKeyAtIndex(mnemonic, svc.index),
-    safeAddress: svc.safe_address as `0x${string}`,
-    agentId: BigInt(svc.agent_id),
-    agentAddress: svc.agent_address,
-    serviceIndex: svc.index,
-  };
 }
 
 async function main(): Promise<void> {
