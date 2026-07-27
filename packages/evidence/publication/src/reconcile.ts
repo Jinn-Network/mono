@@ -301,12 +301,13 @@ async function loadEntry(
   dependencies: PublicationDependencies,
   operation: PublicationOperation,
 ): Promise<VersionedPublicationJournalEntry> {
-  operation.assertActive();
-  const entry = await dependencies.journal.load(
-    bundleKey,
-    operation.dependencyOptions,
+  const { value: entry } = await operation.waitFor(
+    () =>
+      dependencies.journal.load(
+        bundleKey,
+        operation.dependencyOptions,
+      ),
   );
-  operation.assertActive();
   if (entry === null) {
     throw new EvidencePublicationError(
       "JOURNAL_CORRUPT",
@@ -322,14 +323,15 @@ async function checkpoint(
   dependencies: PublicationDependencies,
   operation: PublicationOperation,
 ): Promise<VersionedPublicationJournalEntry> {
-  operation.assertActive();
   try {
-    const versioned = await dependencies.journal.compareAndSwap(
-      expected,
-      next,
-      operation.dependencyOptions,
+    const { value: versioned } = await operation.waitFor(
+      () =>
+        dependencies.journal.compareAndSwap(
+          expected,
+          next,
+          operation.dependencyOptions,
+        ),
     );
-    operation.assertActive();
     return versioned;
   } catch (error) {
     if (!journalConflict(error)) throw error;
@@ -346,14 +348,15 @@ async function checkpointNewIntent(
   readonly entry: VersionedPublicationJournalEntry;
   readonly writtenByCaller: boolean;
 }> {
-  operation.assertActive();
   try {
-    const entry = await dependencies.journal.compareAndSwap(
-      expected,
-      next,
-      operation.dependencyOptions,
+    const { value: entry } = await operation.waitFor(
+      () =>
+        dependencies.journal.compareAndSwap(
+          expected,
+          next,
+          operation.dependencyOptions,
+        ),
     );
-    operation.assertActive();
     return { entry, writtenByCaller: true };
   } catch (error) {
     if (!journalConflict(error)) throw error;
@@ -493,7 +496,6 @@ async function placeAfterIntent(
   dependencies: PublicationDependencies,
   operation: PublicationOperation,
 ): Promise<VersionedPublicationJournalEntry> {
-  operation.assertActive();
   const expectedPrepared = snapshotPreparedAnnouncement(
     partition.prepared,
     partition.prepared.members,
@@ -506,12 +508,14 @@ async function placeAfterIntent(
     dependencies.sink.medium,
     dependencies.sink.profile,
   );
-  const result = await dependencies.sink.place(
-    suppliedPrepared,
-    idempotencyKey,
-    operation.dependencyOptions,
+  const { value: result } = await operation.waitFor(
+    () =>
+      dependencies.sink.place(
+        suppliedPrepared,
+        idempotencyKey,
+        operation.dependencyOptions,
+      ),
   );
-  operation.assertActive();
   const checked = snapshotPlaceResult(
     result,
     idempotencyKey,
@@ -623,7 +627,6 @@ export async function continuePublicationPlacements(
       );
     }
 
-    operation.assertActive();
     const expectedPrepared = snapshotPreparedAnnouncement(
       partition.prepared,
       partition.prepared.members,
@@ -648,12 +651,14 @@ export async function continuePublicationPlacements(
       expectedPrepared.frameDigest,
       "Supplied pending placement",
     );
-    const result = await dependencies.sink.reconcile(
-      suppliedPrepared,
-      suppliedPending,
-      operation.dependencyOptions,
+    const { value: result } = await operation.waitFor(
+      () =>
+        dependencies.sink.reconcile(
+          suppliedPrepared,
+          suppliedPending,
+          operation.dependencyOptions,
+        ),
     );
-    operation.assertActive();
     const checked = snapshotReconcileResult(
       result,
       idempotencyKey,
@@ -738,11 +743,13 @@ export async function reconcile(
       dependencies,
       operation,
     );
-    return await continuePublicationPlacements(
+    const receipt = await continuePublicationPlacements(
       entry,
       dependencies,
       operation,
     );
+    operation.assertActive();
+    return receipt;
   } finally {
     operation.close();
   }

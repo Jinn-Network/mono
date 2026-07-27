@@ -126,12 +126,13 @@ async function loadEntry(
   dependencies: PublicationDependencies,
   operation: PublicationOperation,
 ): Promise<VersionedPublicationJournalEntry | null> {
-  operation.assertActive();
-  const entry = await dependencies.journal.load(
-    normalized.bundleKey,
-    operation.dependencyOptions,
+  const { value: entry } = await operation.waitFor(
+    () =>
+      dependencies.journal.load(
+        normalized.bundleKey,
+        operation.dependencyOptions,
+      ),
   );
-  operation.assertActive();
   return entry;
 }
 
@@ -154,13 +155,14 @@ async function createEntry(
     storedRecords: [],
     completed: false,
   };
-  operation.assertActive();
   try {
-    const created = await dependencies.journal.create(
-      initial,
-      operation.dependencyOptions,
+    const { value: created } = await operation.waitFor(
+      () =>
+        dependencies.journal.create(
+          initial,
+          operation.dependencyOptions,
+        ),
     );
-    operation.assertActive();
     return created;
   } catch (error) {
     if (!journalConflict(error)) throw error;
@@ -182,14 +184,15 @@ async function checkpoint(
   dependencies: PublicationDependencies,
   operation: PublicationOperation,
 ): Promise<VersionedPublicationJournalEntry> {
-  operation.assertActive();
   try {
-    const versioned = await dependencies.journal.compareAndSwap(
-      expected,
-      next,
-      operation.dependencyOptions,
+    const { value: versioned } = await operation.waitFor(
+      () =>
+        dependencies.journal.compareAndSwap(
+          expected,
+          next,
+          operation.dependencyOptions,
+        ),
     );
-    operation.assertActive();
     return versioned;
   } catch (error) {
     if (!journalConflict(error)) throw error;
@@ -247,12 +250,13 @@ async function storeObjects(
   while (entry.storedArtifacts.length < normalized.artifacts.length) {
     const index = entry.storedArtifacts.length;
     const artifact = normalized.artifacts[index]!;
-    operation.assertActive();
-    const receipt = await dependencies.repository.putArtifact(
-      artifact.bytes,
-      operation.dependencyOptions,
+    const { value: receipt } = await operation.waitFor(
+      () =>
+        dependencies.repository.putArtifact(
+          artifact.bytes,
+          operation.dependencyOptions,
+        ),
     );
-    operation.assertActive();
     assertArtifactReceipt(
       receipt,
       artifact.reference,
@@ -279,13 +283,14 @@ async function storeObjects(
   while (entry.storedRecords.length < normalized.records.length) {
     const index = entry.storedRecords.length;
     const record = normalized.records[index]!;
-    operation.assertActive();
-    const receipt = await dependencies.repository.putRecord(
-      record.reference.family,
-      record.bytes,
-      operation.dependencyOptions,
+    const { value: receipt } = await operation.waitFor(
+      () =>
+        dependencies.repository.putRecord(
+          record.reference.family,
+          record.bytes,
+          operation.dependencyOptions,
+        ),
     );
-    operation.assertActive();
     assertRecordReceipt(
       receipt,
       record.reference,
@@ -384,11 +389,13 @@ export async function publish(
       dependencies,
       operation,
     );
-    return await continuePublicationPlacements(
+    const receipt = await continuePublicationPlacements(
       entry,
       dependencies,
       operation,
     );
+    operation.assertActive();
+    return receipt;
   } finally {
     operation.close();
   }

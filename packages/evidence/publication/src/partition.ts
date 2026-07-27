@@ -21,12 +21,14 @@ export async function prepareAnnouncementPartitions(
 ): Promise<readonly PreparedPublicationPartition[]> {
   const operation = createPublicationOperation(options);
   try {
-    return await prepareAnnouncementPartitionsWithOperation(
+    const partitions = await prepareAnnouncementPartitionsWithOperation(
       members,
       destination,
       sink,
       operation,
     );
+    operation.assertActive();
+    return partitions;
   } finally {
     operation.close();
   }

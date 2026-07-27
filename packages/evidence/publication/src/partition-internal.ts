@@ -48,7 +48,6 @@ async function prepareCandidate(
   sink: AnnouncementSink,
   operation: PublicationOperation,
 ) {
-  operation.assertActive();
   const expectedMembers = members.map(({ reference }) => ({
     reference: { ...reference },
   }));
@@ -60,12 +59,14 @@ async function prepareCandidate(
     partitionOrdinal: ordinal,
   };
   const suppliedContext = { ...expectedContext };
-  const untrusted = await sink.prepare(
-    suppliedMembers,
-    suppliedContext,
-    operation.dependencyOptions,
+  const { value: untrusted } = await operation.waitFor(
+    () =>
+      sink.prepare(
+        suppliedMembers,
+        suppliedContext,
+        operation.dependencyOptions,
+      ),
   );
-  operation.assertActive();
   return snapshotPreparedAnnouncement(
     untrusted,
     expectedMembers,

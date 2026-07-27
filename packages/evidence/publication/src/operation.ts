@@ -1,11 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-import type {
-  RepositoryOperationOptions,
+import {
+  EvidenceRepositoryError,
+  type RepositoryOperationOptions,
 } from "@jinn-network/evidence-repository";
 
 import {
   EvidencePublicationError,
 } from "./errors.js";
+
+export interface PublicationOperation {
+  readonly dependencyOptions: Readonly<RepositoryOperationOptions>;
+  assertActive(): void;
+  waitFor<T>(
+    operation: () => Promise<T>,
+  ): Promise<{ readonly value: T }>;
+  close(): void;
+}
 
 const abortSignalAbortedGetter = Object.getOwnPropertyDescriptor(
   AbortSignal.prototype,
@@ -13,12 +23,6 @@ const abortSignalAbortedGetter = Object.getOwnPropertyDescriptor(
 )?.get;
 const addEventListener = EventTarget.prototype.addEventListener;
 const removeEventListener = EventTarget.prototype.removeEventListener;
-
-export interface PublicationOperation {
-  readonly dependencyOptions: Readonly<RepositoryOperationOptions>;
-  assertActive(): void;
-  close(): void;
-}
 
 function intrinsicSignalAborted(signal: AbortSignal): boolean {
   if (abortSignalAbortedGetter === undefined) {
@@ -56,6 +60,19 @@ export function createPublicationOperation(
       // Cleanup must never replace the operation's result or primary error.
     }
   };
+  const assertActive = (): void => {
+    if (closed) {
+      throw new TypeError(
+        "A closed publication operation cannot be continued.",
+      );
+    }
+    if (aborted) {
+      throw new EvidencePublicationError(
+        "OPERATION_ABORTED",
+        "The publication operation was aborted.",
+      );
+    }
+  };
 
   if (signal !== undefined && !aborted) {
     try {
@@ -76,18 +93,23 @@ export function createPublicationOperation(
 
   return Object.freeze({
     dependencyOptions,
-    assertActive(): void {
-      if (closed) {
-        throw new TypeError(
-          "A closed publication operation cannot be continued.",
-        );
+    assertActive,
+    async waitFor<T>(
+      operation: () => Promise<T>,
+    ): Promise<{ readonly value: T }> {
+      assertActive();
+      let result: T;
+      try {
+        result = await operation();
+      } catch (error) {
+        if (error instanceof EvidenceRepositoryError) {
+          throw error;
+        }
+        assertActive();
+        throw error;
       }
-      if (aborted) {
-        throw new EvidencePublicationError(
-          "OPERATION_ABORTED",
-          "The publication operation was aborted.",
-        );
-      }
+      assertActive();
+      return { value: result };
     },
     close(): void {
       if (closed) return;
