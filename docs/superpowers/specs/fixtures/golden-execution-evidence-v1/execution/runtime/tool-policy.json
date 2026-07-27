@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "jinn.fixture.tool-policy.v1",
+  "tools": [
+    {
+      "name": "read-file",
+      "mode": "read-only"
+    },
+    {
+      "name": "apply-patch",
+      "mode": "repository-write"
+    },
+    {
+      "name": "run-tests",
+      "mode": "process"
+    }
+  ],
+  "network": "denied",
+  "shell": "denied"
+}

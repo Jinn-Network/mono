@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "example.marketplace-reference.v1",
+  "marketplace": "https://marketplace.example.invalid/",
+  "taskOffer": "https://marketplace.example.invalid/tasks/slug-normalization-17",
+  "attempt": "https://marketplace.example.invalid/attempts/attempt-42",
+  "assignment": "https://marketplace.example.invalid/assignments/assignment-9",
+  "protocolReferences": {
+    "task": "task/task.md",
+    "execution": "urn:uuid:22222222-2222-4222-8222-222222222222",
+    "agent": "urn:uuid:33333333-3333-4333-8333-333333333333",
+    "result": "results/slug-normalization.patch"
+  },
+  "note": "These are external product records linked to protocol evidence; they are not protocol-owned lifecycle fields."
+}

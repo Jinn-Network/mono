@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "jinn.runtime-specification.v1",
+  "name": "Synthetic Autopilot coding runtime",
+  "version": "1.0.0",
+  "entrypoint": "runner.mjs#runAttempt",
+  "controlledComponents": [
+    "runner.mjs",
+    "workflow.json",
+    "system-prompt.md",
+    "tool-policy.json",
+    "runtime-lock.json"
+  ],
+  "externalComponents": [
+    "hosted-model.json"
+  ]
+}

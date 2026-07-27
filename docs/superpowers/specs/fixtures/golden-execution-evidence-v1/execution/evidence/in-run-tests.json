@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "jinn.fixture.test-report.v1",
+  "executionId": "urn:uuid:22222222-2222-4222-8222-222222222222",
+  "command": "vitest run test/slug.test.ts",
+  "startedAt": "2026-07-23T15:02:05Z",
+  "endedAt": "2026-07-23T15:02:07Z",
+  "testsPassed": 4,
+  "testsFailed": 0,
+  "exitCode": 0
+}

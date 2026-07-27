@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "jinn.fixture.runtime-lock.v1",
+  "operatingSystem": "linux",
+  "architecture": "x86_64",
+  "node": "22.22.2",
+  "packageManager": "yarn@4.13.0",
+  "locale": "C.UTF-8",
+  "timezone": "UTC"
+}

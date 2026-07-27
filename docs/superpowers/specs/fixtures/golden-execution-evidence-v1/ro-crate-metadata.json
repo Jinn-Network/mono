@@ -1,0 +1,363 @@
+{
+  "@context": "https://w3id.org/ro/crate/1.3/context",
+  "@graph": [
+    {
+      "@id": "ro-crate-metadata.json",
+      "@type": "CreativeWork",
+      "conformsTo": {
+        "@id": "https://w3id.org/ro/crate/1.3"
+      },
+      "about": {
+        "@id": "./"
+      }
+    },
+    {
+      "@id": "./",
+      "@type": "Dataset",
+      "name": "Golden Execution Evidence v1 fixture collection",
+      "description": "A synthetic collection containing one sealed Execution Evidence record and two later signed claims.",
+      "dateCreated": "2026-07-23T16:05:01Z",
+      "datePublished": "2026-07-23T16:05:01Z",
+      "license": {
+        "@id": "https://creativecommons.org/publicdomain/zero/1.0/"
+      },
+      "creator": {
+        "@id": "urn:uuid:99999999-9999-4999-8999-999999999999"
+      },
+      "hasPart": [
+        {
+          "@id": "README.md"
+        },
+        {
+          "@id": "conformance-report.json"
+        },
+        {
+          "@id": "execution/ro-crate-metadata.json"
+        },
+        {
+          "@id": "execution/task/task.md"
+        },
+        {
+          "@id": "execution/inputs/repository-tree.json"
+        },
+        {
+          "@id": "execution/inputs/repository/src/slug.ts"
+        },
+        {
+          "@id": "execution/inputs/repository/test/slug.test.ts"
+        },
+        {
+          "@id": "execution/inputs/knowledge.md"
+        },
+        {
+          "@id": "execution/runtime/runtime-specification.json"
+        },
+        {
+          "@id": "execution/runtime/runner.mjs"
+        },
+        {
+          "@id": "execution/runtime/workflow.json"
+        },
+        {
+          "@id": "execution/runtime/system-prompt.md"
+        },
+        {
+          "@id": "execution/runtime/tool-policy.json"
+        },
+        {
+          "@id": "execution/runtime/hosted-model.json"
+        },
+        {
+          "@id": "execution/runtime/runtime-lock.json"
+        },
+        {
+          "@id": "execution/results/slug-normalization.patch"
+        },
+        {
+          "@id": "execution/trace/trajectory.jsonl"
+        },
+        {
+          "@id": "execution/evidence/in-run-tests.json"
+        },
+        {
+          "@id": "execution/external/marketplace-reference.json"
+        },
+        {
+          "@id": "claims/result-evaluation/statement.json"
+        },
+        {
+          "@id": "claims/result-evaluation/evaluator.mjs"
+        },
+        {
+          "@id": "claims/result-evaluation/evaluator-implementation.json"
+        },
+        {
+          "@id": "claims/result-evaluation/evaluation-specification.md"
+        },
+        {
+          "@id": "claims/result-evaluation/evaluation-report.json"
+        },
+        {
+          "@id": "claims/result-evaluation/public-key.pem"
+        },
+        {
+          "@id": "claims/result-evaluation/result-evaluation.dsse.json"
+        },
+        {
+          "@id": "claims/execution-verification/statement.json"
+        },
+        {
+          "@id": "claims/execution-verification/verifier.mjs"
+        },
+        {
+          "@id": "claims/execution-verification/verifier-implementation.json"
+        },
+        {
+          "@id": "claims/execution-verification/verification-policy.md"
+        },
+        {
+          "@id": "claims/execution-verification/public-key.pem"
+        },
+        {
+          "@id": "claims/execution-verification/execution-verification.dsse.json"
+        }
+      ],
+      "mentions": [
+        {
+          "@id": "urn:uuid:22222222-2222-4222-8222-222222222222"
+        },
+        {
+          "@id": "claims/result-evaluation/result-evaluation.dsse.json"
+        },
+        {
+          "@id": "claims/execution-verification/execution-verification.dsse.json"
+        }
+      ]
+    },
+    {
+      "@id": "README.md",
+      "@type": "File",
+      "name": "Fixture documentation",
+      "encodingFormat": "text/markdown",
+      "sha256": "b1c4399789036e4b50a56c736a86cde8b7731d47f603f6716642d71bcd8fee14"
+    },
+    {
+      "@id": "conformance-report.json",
+      "@type": "File",
+      "name": "Fixture conformance coverage report",
+      "encodingFormat": "application/json",
+      "sha256": "8b8f9f78631f3478628e3127157ea04e4f66ada0a1fc8108f959504bbb85a92c"
+    },
+    {
+      "@id": "execution/ro-crate-metadata.json",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "name": "Sealed Execution Evidence metadata",
+      "encodingFormat": "application/ld+json",
+      "sha256": "ef1cf13d2ecbb4ec9c2a5466dcd9d282899184e3b229ab55b67f06a1a303ad8d",
+      "about": {
+        "@id": "urn:uuid:22222222-2222-4222-8222-222222222222"
+      }
+    },
+    {
+      "@id": "execution/task/task.md",
+      "@type": "File",
+      "encodingFormat": "text/markdown",
+      "sha256": "1f42fd35cecf09d1bdf953fe4c7a1c8d25fd0bcf415a6b39aa7b61f1e982ef93"
+    },
+    {
+      "@id": "execution/inputs/repository-tree.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "sha256": "0c6d3f024ae4e4a87bda04b2b06a55b99cba73f9eb5a70f38f1857e549379b1d"
+    },
+    {
+      "@id": "execution/inputs/repository/src/slug.ts",
+      "@type": "File",
+      "encodingFormat": "text/typescript",
+      "sha256": "a47e413df6cdc33ce9634783b047dc702b4a78177debe476ee2b0698eba7b5ff"
+    },
+    {
+      "@id": "execution/inputs/repository/test/slug.test.ts",
+      "@type": "File",
+      "encodingFormat": "text/typescript",
+      "sha256": "2ddfeb6b357adaa5a86a59c7d78ca1d26d721c52e47f12e7e5a689f61860fc92"
+    },
+    {
+      "@id": "execution/inputs/knowledge.md",
+      "@type": "File",
+      "encodingFormat": "text/markdown",
+      "sha256": "36a4911c74dbe04c7dfad94248e9eeae38d4237b27086cebb0f1459f0182a086"
+    },
+    {
+      "@id": "execution/runtime/runtime-specification.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "sha256": "b1563a6db13e9214ca716653fc9862fa7fffc4e03c6a3b7ffde11b6922ba981a"
+    },
+    {
+      "@id": "execution/runtime/runner.mjs",
+      "@type": "File",
+      "encodingFormat": "text/javascript",
+      "sha256": "4f24efa2d21d2e457487aef2f152b574c977f0750d4e8a5ca623d659cc60425a"
+    },
+    {
+      "@id": "execution/runtime/workflow.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "sha256": "e1e0d8e2424598ef24ebf5b3c6f0e4ff03f3b94d0eb6c68eab4edd00b338f74c"
+    },
+    {
+      "@id": "execution/runtime/system-prompt.md",
+      "@type": "File",
+      "encodingFormat": "text/markdown",
+      "sha256": "db220054da8a9524f82f6505a04320f66300f21fd169f74a991b8b8bac319451"
+    },
+    {
+      "@id": "execution/runtime/tool-policy.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "sha256": "11bf01bd97086d09e8c55d1c4d8954ad97922e97c4ee60b0b916143939bf80a1"
+    },
+    {
+      "@id": "execution/runtime/hosted-model.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "sha256": "dcaf7b063b278a45fe08b78873ce21dc9e337455e153fdbc43c2ceb8a125d848"
+    },
+    {
+      "@id": "execution/runtime/runtime-lock.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "sha256": "1717bb740edf41b607300c5358e148f4b42f12d8fcccca8903649385e0345018"
+    },
+    {
+      "@id": "execution/results/slug-normalization.patch",
+      "@type": "File",
+      "encodingFormat": "text/x-diff",
+      "sha256": "c43b406505b8c53ff9bf0a1c57442080d99a14b9f278739cb426313cf3238b07"
+    },
+    {
+      "@id": "execution/trace/trajectory.jsonl",
+      "@type": "File",
+      "encodingFormat": "application/x-ndjson",
+      "sha256": "c22dd2dae4a3dc00297f91dcfafdcf8e5fbe8541cc81e2fd5a002372f2204483"
+    },
+    {
+      "@id": "execution/evidence/in-run-tests.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "sha256": "3ceef13187cc78434fcfd57b74aefdd005bdb143f9a628dbe7dcf2b115627602"
+    },
+    {
+      "@id": "execution/external/marketplace-reference.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "sha256": "ace9082d640415c4c33a4c3b292bf3bb637b14959b7e5006ae417240f3797bbf"
+    },
+    {
+      "@id": "claims/result-evaluation/statement.json",
+      "@type": "File",
+      "encodingFormat": "application/vnd.in-toto+json",
+      "sha256": "8bc65dacb69dc8b37196663a4746f1faf552784025c03398a178014aee6e370f"
+    },
+    {
+      "@id": "claims/result-evaluation/evaluator.mjs",
+      "@type": [
+        "File",
+        "SoftwareSourceCode"
+      ],
+      "encodingFormat": "text/javascript",
+      "sha256": "3a8a0807de3a0b506774e15a5c20f28d5eceec01dd063700b43007c09736dfb1"
+    },
+    {
+      "@id": "claims/result-evaluation/evaluator-implementation.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "sha256": "b7c4d8b4fc4719780b91e6e69a1236beb2ef66773f5e35450adb346ea21bfc24"
+    },
+    {
+      "@id": "claims/result-evaluation/evaluation-specification.md",
+      "@type": "File",
+      "encodingFormat": "text/markdown",
+      "sha256": "e1dccd97de6886b2e1961d396c044631c4d2f3b412cb3f4c7d715e9101fd6fe4"
+    },
+    {
+      "@id": "claims/result-evaluation/evaluation-report.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "sha256": "a13d0046865150ec121194084a45e23fb7ee8b22a1ffb6cb251dbfd223293fb8"
+    },
+    {
+      "@id": "claims/result-evaluation/public-key.pem",
+      "@type": "File",
+      "encodingFormat": "application/x-pem-file",
+      "sha256": "09c68bff5ca0344f7503aa36f0ef4ed16ce24ae443382635eb02ba7261dd4b71"
+    },
+    {
+      "@id": "claims/result-evaluation/result-evaluation.dsse.json",
+      "@type": "File",
+      "name": "Signed Result Evaluation Evidence",
+      "encodingFormat": "application/vnd.dsse.envelope.v1+json",
+      "sha256": "e54e79f14d8776e5d93ed4db1aff285cefd921e101d5dce6229cb2f6cbb01bc9"
+    },
+    {
+      "@id": "claims/execution-verification/statement.json",
+      "@type": "File",
+      "encodingFormat": "application/vnd.in-toto+json",
+      "sha256": "41ffbcb2914d788f07f9a1584ec4c268264ed711cd133973ff1a01e45aaac6f3"
+    },
+    {
+      "@id": "claims/execution-verification/verifier.mjs",
+      "@type": [
+        "File",
+        "SoftwareSourceCode"
+      ],
+      "encodingFormat": "text/javascript",
+      "sha256": "1935c1001b4cfdccbc8a4701bc9ad47496ce540d516f386dab0499a8feef7a23"
+    },
+    {
+      "@id": "claims/execution-verification/verifier-implementation.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "sha256": "79243a25b4f0f2986facdcf27265d6dc3bd67b0402cbd244b4274fd3f17f7bfd"
+    },
+    {
+      "@id": "claims/execution-verification/verification-policy.md",
+      "@type": "File",
+      "encodingFormat": "text/markdown",
+      "sha256": "e4e3edda0138ad852221568c3996239438119098d7c41c70ebad287119647e48"
+    },
+    {
+      "@id": "claims/execution-verification/public-key.pem",
+      "@type": "File",
+      "encodingFormat": "application/x-pem-file",
+      "sha256": "1c0841a6822a54eab027f3513e9b11f11bf47d6fa196760b2eee2105cfaf5073"
+    },
+    {
+      "@id": "claims/execution-verification/execution-verification.dsse.json",
+      "@type": "File",
+      "name": "Signed Execution Verification Evidence",
+      "encodingFormat": "application/vnd.dsse.envelope.v1+json",
+      "sha256": "0658fbd0874111dbfe44b4a69017ab9604d2f749e22b7a43e7cd14cdbda6dae5"
+    },
+    {
+      "@id": "urn:uuid:22222222-2222-4222-8222-222222222222",
+      "@type": "Action",
+      "name": "Synthetic slug-normalization execution"
+    },
+    {
+      "@id": "urn:uuid:99999999-9999-4999-8999-999999999999",
+      "@type": "SoftwareApplication",
+      "name": "Synthetic fixture collection assembler",
+      "softwareVersion": "1.0.0"
+    },
+    {
+      "@id": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "@type": "CreativeWork",
+      "name": "CC0 1.0 Universal"
+    }
+  ]
+}

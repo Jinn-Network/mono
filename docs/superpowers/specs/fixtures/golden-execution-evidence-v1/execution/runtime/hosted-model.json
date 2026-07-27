@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "jinn.hosted-model-descriptor.v1",
+  "provider": "https://www.anthropic.com/",
+  "service": "https://api.anthropic.com/",
+  "modelIdentifier": "claude-synthetic-fixture-2026-07-01",
+  "deploymentIdentifier": "urn:uuid:77777777-7777-4777-8777-777777777777",
+  "parameters": {
+    "maxOutputTokens": 4096,
+    "temperature": 0
+  },
+  "providerRequestId": "fixture-request-0001",
+  "providerAttestationAvailable": false,
+  "implementationAvailability": "opaque-hosted-service"
+}
