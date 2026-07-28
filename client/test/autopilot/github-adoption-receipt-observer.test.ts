@@ -281,6 +281,7 @@ function persistedRun(
   ),
 ): PersistedTaskRun {
   const correlation = output.correlation;
+  const spec = taskSpec();
   const producerResult = structuredClone(output);
   if (role === 'solution') {
     delete (
@@ -295,13 +296,13 @@ function persistedRun(
     solverType: 'jinn-repo.v1',
     taskRole: role === 'solution' ? 'restoration' : 'evaluation',
     task: {
-      id: correlation.taskId,
+      id: spec.instance_id,
       description: 'Autopilot marketplace session',
       solverType: 'jinn-repo.v1',
       contractId: 'jinn-repo',
       contractVersion: 'v1',
       role: role === 'solution' ? 'restoration' : 'evaluation',
-      spec: taskSpec(),
+      spec,
     },
     adoptionReceiptLocation: {
       repository: 'Jinn-Network/mono',
@@ -732,6 +733,66 @@ describe('observeExactAutopilotAdoptionReceipt', () => {
 });
 
 describe('TaskEngine AdoptionReceiptObserver', () => {
+  it('keeps numeric protocol correlation separate from semantic runtime identity', async () => {
+    const port = githubPort({
+      pages: { first: { comments: [] } },
+    });
+    const observer = createAutopilotGitHubAdoptionReceiptObserver({
+      github: port,
+    });
+
+    await expect(observer.observe(persistedRun())).resolves.toMatchObject({
+      state: 'pending',
+      detail: expect.stringMatching(/no exact authorized adoption receipt/i),
+    });
+    expect(port.listPrIssueComments).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a semantic runtime ID that differs from strict spec.instance_id', async () => {
+    const port = githubPort();
+    const run = persistedRun();
+    const observer = createAutopilotGitHubAdoptionReceiptObserver({
+      github: port,
+    });
+
+    await expect(observer.observe({
+      ...run,
+      task: {
+        ...run.task!,
+        id: 'autopilot:123e4567-e89b-42d3-a456-426614174099',
+      },
+    })).resolves.toEqual({
+      state: 'contradictory',
+      detail: 'persisted runtime Task identity or role is contradictory',
+    });
+    expect(port.listPrIssueComments).not.toHaveBeenCalled();
+  });
+
+  it('rejects a spec.instance_id outside its Autopilot session namespace', async () => {
+    const port = githubPort();
+    const run = persistedRun();
+    const mismatchedId = 'autopilot:123e4567-e89b-42d3-a456-426614174099';
+    const observer = createAutopilotGitHubAdoptionReceiptObserver({
+      github: port,
+    });
+
+    await expect(observer.observe({
+      ...run,
+      task: {
+        ...run.task!,
+        id: mismatchedId,
+        spec: {
+          ...(run.task!.spec as Record<string, unknown>),
+          instance_id: mismatchedId,
+        },
+      },
+    })).resolves.toEqual({
+      state: 'contradictory',
+      detail: 'persisted runtime Task identity or role is contradictory',
+    });
+    expect(port.listPrIssueComments).not.toHaveBeenCalled();
+  });
+
   it('derives the exact role, correlation, location, and authors from a persisted run', async () => {
     const observer = createAutopilotGitHubAdoptionReceiptObserver({
       github: githubPort(),

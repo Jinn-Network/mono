@@ -677,7 +677,9 @@ function sameAuthorPolicy(
   return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
 }
 
-function persistedExpectation(run: PersistedTaskRun):
+export function derivePersistedAutopilotAdoptionExpectation(
+  run: PersistedTaskRun,
+):
   | {
       readonly role: ReceiptRole;
       readonly correlation: AutopilotCorrelation;
@@ -705,18 +707,19 @@ function persistedExpectation(run: PersistedTaskRun):
       runtimeTask?.contractId === 'jinn-repo'
       && runtimeTask.contractVersion === 'v1'
     );
-  if (
-    !isJinnRepo
-    || runtimeTask?.id !== run.taskId
-    || runtimeTask.role !== run.taskRole
-  ) {
-    return { error: 'persisted runtime Task identity or role is contradictory' };
-  }
-  const parsedTask = JinnRepoTaskSchema.safeParse(run.task?.spec);
+  const parsedTask = JinnRepoTaskSchema.safeParse(runtimeTask?.spec);
   if (!parsedTask.success || parsedTask.data.source !== 'autopilot-session') {
     return { error: 'persisted Task is not a strict Autopilot session' };
   }
   const task = parsedTask.data;
+  if (
+    !isJinnRepo
+    || runtimeTask?.id !== task.instance_id
+    || task.instance_id !== `autopilot:${task.session.v2AttemptId}`
+    || runtimeTask.role !== run.taskRole
+  ) {
+    return { error: 'persisted runtime Task identity or role is contradictory' };
+  }
   if (
     run.adoptionReceiptLocation.repository !== task.session.repository
     || run.adoptionReceiptLocation.prNumber !== task.session.prNumber
@@ -814,7 +817,7 @@ export function createAutopilotGitHubAdoptionReceiptObserver(input: {
 }): AdoptionReceiptObserver {
   return {
     async observe(run: PersistedTaskRun): Promise<AdoptionObservation> {
-      const expected = persistedExpectation(run);
+      const expected = derivePersistedAutopilotAdoptionExpectation(run);
       if ('error' in expected) return contradictory(expected.error);
       return observeExactAutopilotAdoptionReceipt({
         expectedRole: expected.role,
