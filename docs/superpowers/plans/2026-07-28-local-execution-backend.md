@@ -644,3 +644,10 @@ pinned by the marketplace-binding design's companion-amendment declaration; the
 marketplace-binding plan names it. If honoring it requires touching the already-implemented
 frozen `TaskExecutionBackend` surface, surface the conflict to the coordinator before
 Milestone C freezes — do not silently widen the frozen interface.
+
+**Addendum 2026-07-28-b continued (post-draft dispositions):** the engagement entry's exact
+surface is now pinned — `submit(taskBytes, submissionBytes, engagement?)` per the TEP plan's
+Addendum 2026-07-28-b (authorized widening; implemented in the TEP tree at the start of
+Phase 4, before Milestone C). Milestone C consumes the widened contract; two-party mode
+scopes the `attempts` honor-or-reject to the single caller-identified attempt (chain enforces
+`maxClaims`; marketplace plan F4).

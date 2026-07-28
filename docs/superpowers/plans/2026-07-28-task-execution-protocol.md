@@ -921,3 +921,21 @@ Explicitly **not** in this plan (owned by sibling/later plans or recorded follow
 - [ ] Every sealed-bytes deliverable ships `order.ts`, pinned-digest golden fixtures, a key-order-sensitive equivalence record, and is covered by the locale-ban guard (Tasks 1.2/1.8).
 - [ ] No placeholder steps; the one intentional `PLACEHOLDER` (attempt-URI namespace) is computed and frozen in Task 1.3 Step 5.
 - [ ] Type names are consistent across tasks (`DerivedAttemptState`, `AttemptDescriptor`, `TaskExecutionError`, `TaskExecutionBackend`, `BackendCapabilities`, `mergeRequirements`, `EffectiveRequirements`, `TEP_ATTEMPT_NAMESPACE`, `foldObservations`, `deriveAttemptUri`, `serializeCanonicalJson`, `documentDigest`).
+
+## Addendum 2026-07-28-b — two-party engagement entry on `submit` (authorized widening)
+
+The marketplace-binding design's companion amendment (operator addendum 2026-07-28;
+anticipated by TEP §9.2) is realized as an **optional third parameter** on the frozen
+backend contract: `submit(taskBytes, submissionBytes, engagement?: TwoPartyEngagement)` with
+`TwoPartyEngagement = { attemptUri, dispatchContext }` — the caller-supplied deterministic
+Attempt URI computed via the protocol exports `deriveAttemptUri` + `TEP_ATTEMPT_NAMESPACE`
+(program §7.2). Rationale (marketplace plan finding F1): a Submission-document field is
+impossible (the URI depends on `attemptIndex`, known only at claim time, after the requester
+seals the Submission); a separate `engage()` verb violates ruling §7.18. Coordinator
+disposition: authorized as a design-sanctioned amendment, implemented as a small work item at
+the START of Phase 4 (before backend-local Milestone C freezes): widen the interface +
+`SubmissionAck`/conformance coverage in `task-execution-backend` and the testing kit
+(supplied-URI adoption, format validation, absent-in-single-party semantics unchanged; the
+in-memory fake honors it). Two-party mode additionally scopes the `attempts` honor-or-reject
+to the single caller-identified attempt (the chain enforces `maxClaims`) — marketplace plan
+finding F4.
