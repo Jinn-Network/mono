@@ -21,6 +21,7 @@ export type {
   ReconciliationReport,
   SubmissionAck,
   SubmissionUri,
+  TwoPartyEngagement,
 } from "./types.js";
 
 export { TaskExecutionError } from "./errors.js";

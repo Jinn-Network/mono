@@ -924,6 +924,8 @@ Explicitly **not** in this plan (owned by sibling/later plans or recorded follow
 
 ## Addendum 2026-07-28-b — two-party engagement entry on `submit` (authorized widening)
 
+**Status:** implemented (2026-07-28, start of Phase 4, before backend-local Milestone C froze).
+
 The marketplace-binding design's companion amendment (operator addendum 2026-07-28;
 anticipated by TEP §9.2) is realized as an **optional third parameter** on the frozen
 backend contract: `submit(taskBytes, submissionBytes, engagement?: TwoPartyEngagement)` with
@@ -932,10 +934,17 @@ Attempt URI computed via the protocol exports `deriveAttemptUri` + `TEP_ATTEMPT_
 (program §7.2). Rationale (marketplace plan finding F1): a Submission-document field is
 impossible (the URI depends on `attemptIndex`, known only at claim time, after the requester
 seals the Submission); a separate `engage()` verb violates ruling §7.18. Coordinator
-disposition: authorized as a design-sanctioned amendment, implemented as a small work item at
-the START of Phase 4 (before backend-local Milestone C freezes): widen the interface +
-`SubmissionAck`/conformance coverage in `task-execution-backend` and the testing kit
-(supplied-URI adoption, format validation, absent-in-single-party semantics unchanged; the
-in-memory fake honors it). Two-party mode additionally scopes the `attempts` honor-or-reject
-to the single caller-identified attempt (the chain enforces `maxClaims`) — marketplace plan
-finding F4.
+disposition: authorized as a design-sanctioned amendment, implemented at the START of Phase 4
+(before backend-local Milestone C freezes): widened the interface + `SubmissionAck`/conformance
+coverage in `task-execution-backend` and the testing kit (`TwoPartyEngagement` type export in
+`task-execution-backend/src/types.ts`; the widened `submit` on `TaskExecutionBackend`;
+supplied-URI adoption, malformed-URI rejection as `invalid-document`, and absent-in-single-party
+semantics unchanged, all proven as Layer-2 contract cases in
+`task-execution-testing/src/backend-contract.ts` and honored by the in-memory fake in
+`task-execution-testing/src/fake-backend.ts`). Two-party mode additionally scopes the
+`attempts` honor-or-reject to the single caller-identified attempt (the chain enforces
+`maxClaims`) — marketplace plan finding F4 — implemented in the fake as the same engagement-gated
+skip. Verified: `task-execution-{protocol,backend,testing}` typecheck + test green (82/8/54
+tests respectively, 7 backend + 50 testing pre-existing tests unmodified), pack-smoke green for
+`backend`/`testing`, and the `packages/task-execution/` guard suite
+(inventory/boundaries/packed-types/locale-ban) green.

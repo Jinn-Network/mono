@@ -1,6 +1,7 @@
 import type {
   AttemptDescriptor,
   AttemptState,
+  DispatchContext,
   ProtocolObservation,
   ResourceDescriptor,
 } from "@jinn-network/task-execution-protocol";
@@ -10,6 +11,19 @@ import type { TaskExecutionError } from "./errors.js";
 export type SubmissionUri = `urn:uuid:${string}`;
 /** A minted Attempt URI (§9.2). */
 export type AttemptUri = `urn:uuid:${string}`;
+
+/**
+ * The two-party engagement entry (TEP Addendum 2026-07-28-b, program §7.2/§7.22 — an authorized
+ * widening of the frozen `submit` contract, marketplace-binding-design Finding F1). A two-party
+ * binding (e.g. the marketplace) computes `attemptUri` deterministically via the protocol's
+ * exported `deriveAttemptUri` + `TEP_ATTEMPT_NAMESPACE` and builds `dispatchContext` itself; the
+ * backend adopts both instead of minting its own random Attempt URI. Single-party callers omit
+ * this parameter entirely and observe unchanged single-party semantics.
+ */
+export interface TwoPartyEngagement {
+  attemptUri: AttemptUri;
+  dispatchContext: DispatchContext;
+}
 
 /**
  * The `submit` acknowledgement (§12.2 idempotency). On acceptance, carries the minted

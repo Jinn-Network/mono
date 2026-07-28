@@ -9,10 +9,12 @@ import type {
   SubmissionAck,
   SubmissionUri,
   TaskExecutionBackend,
+  TwoPartyEngagement,
 } from "@jinn-network/task-execution-backend";
 import { TaskExecutionError } from "@jinn-network/task-execution-backend";
 import type {
   AttemptDescriptor,
+  JsonValue,
   ProtocolObservation,
   ResourceDescriptor,
   SubmissionRecord,
@@ -20,6 +22,7 @@ import type {
 import {
   documentDigest,
   foldObservations,
+  isValidUrnUuid,
   sha256Hex,
   serializeCanonicalJson,
   validateDelivery,
@@ -153,7 +156,23 @@ export class InMemoryTaskExecutionBackend implements TestableBackend {
     };
   }
 
-  async submit(taskBytes: Uint8Array, submissionBytes: Uint8Array): Promise<SubmissionAck> {
+  async submit(
+    taskBytes: Uint8Array,
+    submissionBytes: Uint8Array,
+    engagement?: TwoPartyEngagement,
+  ): Promise<SubmissionAck> {
+    // TEP Addendum 2026-07-28-b (program §7.2/§7.22): a malformed caller-supplied attemptUri is
+    // rejected up front, before any other document validation — the engagement is a call-level
+    // argument, not Submission content, so its shape is checked independently of it.
+    if (engagement !== undefined && !isValidUrnUuid(engagement.attemptUri)) {
+      return {
+        accepted: false,
+        error: new TaskExecutionError("invalid-document", {
+          detail: `engagement.attemptUri "${engagement.attemptUri}" is not a well-formed urn:uuid`,
+        }),
+      };
+    }
+
     const taskDoc = decode(taskBytes);
     const taskValidation = validateTask(taskDoc);
     if (!taskValidation.conforms) {
@@ -262,33 +281,42 @@ export class InMemoryTaskExecutionBackend implements TestableBackend {
         }),
       };
     }
-    for (const key of ["maxTotal", "maxConcurrent"] as const) {
-      const requested = submission.attempts?.[key];
-      if (requested === undefined) continue;
-      const declared = this.attempts[key];
-      if (declared === undefined || requested < declared[0] || requested > declared[1]) {
-        return {
-          accepted: false,
-          error: new TaskExecutionError("unsupported-requirement", {
-            detail: `attempts.${key} value ${requested} is outside this backend's declared bounds `
-              + (declared !== undefined ? `[${declared[0]}, ${declared[1]}]` : "(not declared)"),
-            annotations: { key: `attempts.${key}` },
-          }),
-        };
+    // TEP Addendum 2026-07-28-b (program §7.22, marketplace-binding-design Finding F4): in
+    // two-party mode this call concerns exactly the single caller-identified attempt named by
+    // `engagement.attemptUri` — an external chain enforces `maxClaims` across the Submission's
+    // overall `attempts` declaration, not this backend — so the bounds honor-or-reject is scoped
+    // out entirely rather than checked against this backend's own (single-party) declared range.
+    if (engagement === undefined) {
+      for (const key of ["maxTotal", "maxConcurrent"] as const) {
+        const requested = submission.attempts?.[key];
+        if (requested === undefined) continue;
+        const declared = this.attempts[key];
+        if (declared === undefined || requested < declared[0] || requested > declared[1]) {
+          return {
+            accepted: false,
+            error: new TaskExecutionError("unsupported-requirement", {
+              detail: `attempts.${key} value ${requested} is outside this backend's declared bounds `
+                + (declared !== undefined ? `[${declared[0]}, ${declared[1]}]` : "(not declared)"),
+              annotations: { key: `attempts.${key}` },
+            }),
+          };
+        }
       }
     }
 
     const submissionUri = submission.submission as SubmissionUri;
-    const attempt: AttemptUri = `urn:uuid:${crypto.randomUUID()}`;
+    // TEP Addendum 2026-07-28-b: two-party mode adopts the caller-supplied Attempt URI and
+    // records its dispatch-context content verbatim, instead of minting a random urn:uuid and
+    // building the content locally; single-party mode (engagement absent) is unchanged.
+    const attempt: AttemptUri = engagement !== undefined
+      ? (engagement.attemptUri as AttemptUri)
+      : `urn:uuid:${crypto.randomUUID()}`;
     const effectiveDeadline = submission.deadline;
 
-    const dispatchContext = {
-      taskDigest,
-      submission: submissionUri,
-      nonce: submission.nonce,
-      attempt,
-    };
-    const dispatchContextBytes = serializeCanonicalJson(dispatchContext);
+    const dispatchContext = engagement !== undefined
+      ? engagement.dispatchContext
+      : { taskDigest, submission: submissionUri, nonce: submission.nonce, attempt };
+    const dispatchContextBytes = serializeCanonicalJson(dispatchContext as JsonValue);
     const dispatchContextDescriptor: ResourceDescriptor = {
       uri: `urn:jinn:fake-backend:dispatch-context:${attempt}`,
       digest: { sha256: sha256Hex(dispatchContextBytes) },

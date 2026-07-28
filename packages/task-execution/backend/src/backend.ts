@@ -11,6 +11,7 @@ import type {
   ReconciliationReport,
   SubmissionAck,
   SubmissionUri,
+  TwoPartyEngagement,
 } from "./types.js";
 
 /**
@@ -33,8 +34,17 @@ export interface TaskExecutionBackend {
    * exact bytes. Idempotent per §12.2: byte-identical resubmission under the same
    * (requester, backend, idempotencyKey) scope returns the existing acknowledgement; a
    * same-key/different-bytes resubmission is a typed `submission-conflict` rejection.
+   *
+   * The optional third `engagement` parameter is the two-party engagement entry (TEP Addendum
+   * 2026-07-28-b, program §7.2/§7.22 — an authorized widening of this otherwise-frozen §22
+   * contract): when present, the backend **adopts** `engagement.attemptUri` (rejecting a
+   * malformed URI as `invalid-document`) and records `engagement.dispatchContext` verbatim
+   * instead of minting its own random Attempt URI; two-party mode additionally scopes the
+   * `attempts` honor-or-reject to this single caller-identified attempt (an external chain, not
+   * this backend, enforces `maxClaims` — marketplace-binding-design Finding F4). When absent,
+   * `submit` mints as before — single-party semantics are unchanged.
    */
-  submit(taskBytes: Uint8Array, submissionBytes: Uint8Array): Promise<SubmissionAck>;
+  submit(taskBytes: Uint8Array, submissionBytes: Uint8Array, engagement?: TwoPartyEngagement): Promise<SubmissionAck>;
 
   /**
    * Returns the derived state plus the observation log position. It is honest: it distinguishes
