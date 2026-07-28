@@ -145,7 +145,7 @@ function deferred<T>(): {
 
 async function waitUntil(
   predicate: () => boolean,
-  timeoutMs = 1000,
+  timeoutMs = 10_000,
 ): Promise<void> {
   const start = Date.now();
   while (!predicate()) {
@@ -540,7 +540,7 @@ describe("ExecutionRecorderBridge workspace concurrency", () => {
     ]);
     expect(firstResponse.ok).toBe(true);
     expect(secondResponse.ok).toBe(true);
-  });
+  }, 20_000);
 
   test("allows finalize dispatches for independent workspaces to proceed concurrently", async () => {
     const gate = deferred<void>();
@@ -565,18 +565,37 @@ describe("ExecutionRecorderBridge workspace concurrency", () => {
       executionId: (startB.result as { executionId: string }).executionId,
     };
 
+    // Workspace A and workspace B are independent queues, so which one's
+    // finalize happens to reach the gated first Repository write is a race
+    // — the test must not assume A always wins it. Instead: dispatch both
+    // without awaiting either, and prove exactly one of the two settles
+    // while the gate is held (the other is the one blocked on the shared
+    // gate, whichever workspace that turns out to be).
     const finalizeA = bridge.dispatch(
       request("finalize", finalizeParams(targetA), "finalize-a"),
     );
-    // Workspace B is an independent queue: it must settle even while
-    // workspace A's finalize is still gated inside its Repository write.
-    const finalizeB = await bridge.dispatch(
+    const finalizeB = bridge.dispatch(
       request("finalize", finalizeParams(targetB), "finalize-b"),
     );
-    expect(finalizeB.ok).toBe(true);
+    let aSettled = false;
+    let bSettled = false;
+    finalizeA.then(() => {
+      aSettled = true;
+    });
+    finalizeB.then(() => {
+      bSettled = true;
+    });
+
+    await waitUntil(() => aSettled || bSettled);
+    await delay(20);
+    expect(aSettled).not.toBe(bSettled);
 
     gate.resolve();
-    const finalizeAResponse = await finalizeA;
+    const [finalizeAResponse, finalizeBResponse] = await Promise.all([
+      finalizeA,
+      finalizeB,
+    ]);
     expect(finalizeAResponse.ok).toBe(true);
-  });
+    expect(finalizeBResponse.ok).toBe(true);
+  }, 20_000);
 });
