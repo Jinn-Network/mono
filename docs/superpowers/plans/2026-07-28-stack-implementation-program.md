@@ -17,15 +17,14 @@
 | [2026-07-28-trust-layer.md](./2026-07-28-trust-layer.md) | `@jinn-network/trust-{core,resolve,testing}` + trust tree guards (trust design §18 steps 1–2) | TEP protocol (equivalence leg only, gated task) |
 | [2026-07-28-task-execution-profiles.md](./2026-07-28-task-execution-profiles.md) | `@jinn-network/task-execution-profiles` + the two sealed profile documents | TEP plan |
 | [2026-07-28-record-discovery.md](./2026-07-28-record-discovery.md) | `@jinn-network/record-discovery-{protocol,serve,client,testing}`, `facts/*` leaves, `sources/evidence-journal` wrapper + discovery tree guards | Trust plan; profiles plan (facts leaves for its kinds only) |
-| [2026-07-28-local-execution-backend.md](./2026-07-28-local-execution-backend.md) | `@jinn-network/task-execution-backend-local`, the testing package's `./backend-local` kit slice, `@jinn-network/task-execution-evaluation-harness`, the F7 evidence-profile minor addition, Autopilot adoption (backend §11.1 scope) | TEP plan; profiles plan |
+| [2026-07-28-local-execution-backend.md](./2026-07-28-local-execution-backend.md) | `@jinn-network/task-execution-backend-local`, the testing package's `./backend-local` kit slice, `@jinn-network/task-execution-evaluation-harness`, the F7 evidence-profile minor addition (first-adopter pass descoped 2026-07-28 — see §9) | TEP plan; profiles plan |
 | Amended: [2026-07-27-execution-recorder-bridge.md](./2026-07-27-execution-recorder-bridge.md), [2026-07-27-evidence-retrieval.md](./2026-07-27-evidence-retrieval.md), [2026-07-27-evidence-contribution.md](./2026-07-27-evidence-contribution.md) (dated addenda) | The three evidence applications | Evidence substrate only |
 | Superseded: [2026-07-27-evaluation-runner.md](./2026-07-27-evaluation-runner.md) | Not executed; evaluator-adapter core re-homed into the backend-local plan | — |
 
 ## 2. Streams, phases, critical path
 
 Three streams run in parallel from approval; the critical path is
-**TEP protocol → TEP kit → profiles → backend-local (§18 order) → evaluation harness →
-Autopilot adoption**.
+**TEP protocol → TEP kit → profiles → backend-local (§18 order) → evaluation harness**.
 
 - **Phase 2 — foundations (three parallel streams).**
   S1 TEP core: protocol (+ carried amendments) → backend contract → testing kit, the in-memory
@@ -43,8 +42,8 @@ Autopilot adoption**.
 - **Phase 4 — the backend.** backend-local per its design §18 steps 1–3 (kit slice +
   supervisor → workspace + launchers, claude-code first → assembly + TEP kit green), then the
   F7 evidence-profile minor addition, then the evaluation harness.
-- **Phase 5 — adoption and close.** Autopilot adoption (backend §11.1/§17 impact scope only),
-  the overall program review, the full-program verification pass, and the merge proposal.
+- **Phase 5 — close.** The overall program review, the full-program verification pass, and
+  the merge proposal. (First-adopter adoption descoped 2026-07-28 — see §9.)
 
 Each phase ends with: all tests/kits/guards green on the session branch, the completed
 components' per-design reviews done and findings resolved, and a phase report.
@@ -73,7 +72,7 @@ components' per-design reviews done and findings resolved, and a phase report.
   conformance, correctness, an adversarial pass over its frozen interfaces. Findings are fixed
   before dependents build on the component. Reviewed sets: TEP core; trust; profiles;
   discovery; backend-local + harness; the three applications (one review each against their
-  designs); Autopilot adoption.
+  designs).
 - **Overall program review (end):** one Opus high-effort review across the integrated whole —
   cross-component integration, dependency-rule conformance, everything per-design reviews
   cannot see.
@@ -240,7 +239,10 @@ Confirmed by the operator at the program gate (2026-07-28):
 Recorded, not planned, not implemented here: the marketplace binding (chain/mech translation,
 projector #1, the query-plane service, subscribe relay, daemon TaskEngine carve, trust §18
 steps 5–6, the open-fleet adoption-authorization object); the benchmarking application;
-migration-mechanics specs for daemon/Autopilot cutovers beyond what backend §11.1 explicitly
-covers; trust §18 steps 3–8 host rollouts (bootstrap identity establishment, policy documents
-replacing allowlists, DSSE convergence, full backend grant-resolution obligations,
+**the first-adopter pass** (operator decision 2026-07-28: this program builds the full
+foundation only; adoption/proving — backend design §18 step 4, §11.1 — is its own later
+pass, and Autopilot now lives in a separate repository, so that pass consumes these packages
+from npm rather than in-repo portals); all migration-mechanics specs for daemon/Autopilot
+cutovers; trust §18 steps 3–8 host rollouts (bootstrap identity establishment, policy
+documents replacing allowlists, DSSE convergence, full backend grant-resolution obligations,
 verifier-policy integration).
