@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "type": "string",
+      "format": "uri"
+    },
+    "profile": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "downloadLocation": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "content": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "instructions": {
+      "type": "string"
+    },
+    "payload": {},
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "uri": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "downloadLocation": {
+            "type": "string"
+          },
+          "annotations": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": {}
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "schema": {}
+        },
+        "required": [
+          "name",
+          "mediaType",
+          "required"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "requirements": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    },
+    "preferences": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    },
+    "evaluation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "downloadLocation": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "content": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "supersedes": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "downloadLocation": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "content": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "author": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocol",
+    "profile",
+    "instructions",
+    "outputs"
+  ],
+  "additionalProperties": {}
+}

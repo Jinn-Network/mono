@@ -1,0 +1,526 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "allOf": [
+    {
+      "type": "object",
+      "properties": {
+        "specversion": {
+          "type": "string",
+          "const": "1.0"
+        },
+        "id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "datacontenttype": {
+          "type": "string",
+          "const": "application/json"
+        },
+        "dataschema": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "string",
+          "pattern": "^\\d{16}$"
+        },
+        "taskdigest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "traceparent": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "specversion",
+        "id",
+        "source",
+        "subject",
+        "time",
+        "datacontenttype",
+        "sequence"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "network.jinn.task-execution.submission-accepted.v1"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "submission": {
+                  "type": "string",
+                  "pattern": "^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "task": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "submission",
+                "task"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "network.jinn.task-execution.submission-rejected.v1"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "category": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string",
+                  "maxLength": 4096
+                }
+              },
+              "required": [
+                "category"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "network.jinn.task-execution.submission-closed.v1"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "deadline",
+                    "requester-close",
+                    "capacity"
+                  ]
+                }
+              },
+              "required": [
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "network.jinn.task-execution.attempt-engaged.v1"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "attempt": {
+                  "type": "string",
+                  "pattern": "^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "task": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "submission": {
+                  "type": "string",
+                  "pattern": "^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "executor": {
+                  "type": "string"
+                },
+                "effectiveDeadline": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "dispatchContext": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "uri": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "mediaType": {
+                      "type": "string"
+                    },
+                    "downloadLocation": {
+                      "type": "string"
+                    },
+                    "annotations": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "content": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                "annotations": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "attempt",
+                "task",
+                "submission",
+                "effectiveDeadline",
+                "source",
+                "dispatchContext"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "network.jinn.task-execution.attempt-started.v1"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "startedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "executor": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "startedAt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "network.jinn.task-execution.progress.v1"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "fraction": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "network.jinn.task-execution.cancel-requested.v1"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "requestedBy": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reason",
+                "requestedBy"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "network.jinn.task-execution.cancel-acknowledged.v1"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "acknowledgedBy": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "acknowledgedBy"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "network.jinn.task-execution.execution-observed.v1"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "executionId": {
+                  "type": "string",
+                  "pattern": "^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "evidenceRecord": {
+                  "type": "object",
+                  "properties": {
+                    "family": {
+                      "type": "string",
+                      "enum": [
+                        "execution-evidence",
+                        "result-evaluation",
+                        "execution-verification"
+                      ]
+                    },
+                    "digest": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    }
+                  },
+                  "required": [
+                    "family",
+                    "digest"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "executionId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "network.jinn.task-execution.delivery-recorded.v1"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "locators": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "uri": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "mediaType": {
+                      "type": "string"
+                    },
+                    "downloadLocation": {
+                      "type": "string"
+                    },
+                    "annotations": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "content": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "digest"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "network.jinn.task-execution.attempt-terminal.v1"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "delivered",
+                    "failed",
+                    "rejected",
+                    "cancelled",
+                    "expired",
+                    "lost"
+                  ]
+                },
+                "blame": {
+                  "type": "string",
+                  "enum": [
+                    "task",
+                    "infrastructure"
+                  ]
+                },
+                "category": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string",
+                  "maxLength": 4096
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  ]
+}
