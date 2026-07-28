@@ -3,6 +3,7 @@ import {
   IssueRelayRoundV1Schema,
   IssueRelayVerdictV1Schema,
   JinnRepoLegacySolutionPayloadSchema,
+  JinnRepoTaskSchema,
   type IssueRelayRoundV1,
   type IssueRelayVerdictV1,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
@@ -61,6 +62,8 @@ export interface IssueRelayDeliveryObserverDeps {
   readonly mechMarketplaceAddress: Address;
   readonly routerAddress: Address;
   readonly fetchEnvelopeBytes: (cid: string) => Promise<Uint8Array>;
+  /** Fetch the exact immutable jinn-repo.v1 Task document by its Task CID. */
+  readonly fetchTaskBytes: (cid: string) => Promise<Uint8Array>;
   readonly resolvePublisherSafe: (chainId: number, publisherAgentId: string, publishedAtBlock: bigint) => Promise<string>;
 }
 
@@ -77,9 +80,10 @@ const contradiction = (reason: string, error: string): IssueRelayDeliveryObserva
 function validExpectation(expected: IssueRelayMarketplaceDeliveryExpectation): IssueRelayDeliveryObservation | null {
   if (expected.schemaVersion !== 'jinn-issue-relay-delivery-expectation.v1' || !Number.isSafeInteger(expected.chainId) || expected.chainId <= 0 || !Number.isSafeInteger(expected.creationBlockNumber) || expected.creationBlockNumber < 0 || expected.fromBlock !== BigInt(expected.creationBlockNumber) || expected.toBlock < expected.fromBlock || !/^(0|[1-9][0-9]*)$/.test(expected.taskId) || !expected.taskCid || (expected.role !== 'solution' && expected.role !== 'verdict')) return contradiction('invalid-expectation', 'invalid Relay delivery identity or chain bounds');
   if (!IssueRelayRoundV1Schema.safeParse(expected.round).success) return contradiction('invalid-expectation', 'Relay round is invalid');
+  try { cidToDigestHex(expected.taskCid); } catch (error) { return contradiction('invalid-expectation', `invalid Task CID: ${detail(error)}`); }
   if ((expected.attemptIndex === undefined) !== (expected.requestId === undefined)) return contradiction('invalid-expectation', 'attempt index and request ID must appear together');
   if (expected.attemptIndex !== undefined && (!Number.isSafeInteger(expected.attemptIndex) || expected.attemptIndex < 0 || !/^0x[0-9a-fA-F]{64}$/.test(expected.requestId!))) return contradiction('invalid-expectation', 'persisted attempt correlation is invalid');
-  if (expected.role === 'verdict' && (!expected.solutionOperatorSafe || !/^0x[0-9a-fA-F]{40}$/.test(expected.solutionOperatorSafe))) return contradiction('invalid-expectation', 'verdict observation requires an authoritative solution Safe');
+  if (expected.role === 'verdict' && (!expected.solutionOperatorSafe || !/^0x[0-9a-fA-F]{40}$/.test(expected.solutionOperatorSafe) || expected.attemptIndex === undefined || expected.deliveryEnvelopeCid === undefined)) return contradiction('invalid-expectation', 'verdict observation requires authoritative solution correlation and Safe');
   return null;
 }
 
@@ -97,6 +101,19 @@ function sameRound(expected: IssueRelayRoundV1, actual: IssueRelayVerdictV1['cor
   return expected.generation === actual.generation && expected.round === actual.round && expected.snapshotDigest === actual.snapshotDigest;
 }
 
+function exactRound(left: IssueRelayRoundV1, right: IssueRelayRoundV1): boolean {
+  return left.schemaVersion === right.schemaVersion
+    && left.generation === right.generation
+    && left.round === right.round
+    && left.snapshotDigest === right.snapshotDigest
+    && left.targetRepository === right.targetRepository
+    && left.workspaceRepository === right.workspaceRepository
+    && left.inputHead === right.inputHead
+    && left.purpose === right.purpose
+    && left.prNumber === right.prNumber
+    && JSON.stringify(left.findings) === JSON.stringify(right.findings);
+}
+
 export function createIssueRelayDeliveryObserver(deps: IssueRelayDeliveryObserverDeps): IssueRelayDeliveryObserver {
   return { async observe(expected) {
     const invalid = validExpectation(expected); if (invalid) return invalid;
@@ -105,14 +122,26 @@ export function createIssueRelayDeliveryObserver(deps: IssueRelayDeliveryObserve
     if (lookup.status !== 'ready') return lookup.status === 'pending' ? pending(lookup.reason) : contradiction(lookup.reason, 'exact discovery returned contradictory rows');
     if (lookup.role !== expected.role || lookup.task.taskId !== expected.taskId || lookup.attempt.taskId !== expected.taskId || !same(lookup.envelope.requestId, lookup.attempt.requestId) || !/^0x[0-9a-fA-F]{40}$/.test(lookup.attempt.operator) || !/^0x[0-9a-fA-F]{40}$/.test(lookup.solutionOperator)) return contradiction('discovery-mismatch', 'exact discovery rows do not form the expected Task/attempt/envelope join');
     if (expected.role === 'verdict' && (same(lookup.attempt.operator, lookup.solutionOperator) || !same(expected.solutionOperatorSafe!, lookup.solutionOperator))) return contradiction('evaluator-is-solver', 'verdict evaluator must differ from the authoritative solution Safe');
-    if (expected.attemptIndex !== undefined && (expected.attemptIndex !== lookup.attempt.attemptIndex || !same(expected.requestId!, lookup.attempt.requestId))) return contradiction('stale-attempt', 'persisted attempt differs from exact discovery');
-    if (expected.deliveryEnvelopeCid !== undefined && expected.deliveryEnvelopeCid !== lookup.envelope.manifestCid) return contradiction('stale-delivery', 'persisted delivery CID differs from exact discovery');
+    if (expected.role === 'solution' && expected.attemptIndex !== undefined && (expected.attemptIndex !== lookup.attempt.attemptIndex || !same(expected.requestId!, lookup.attempt.requestId))) return contradiction('stale-attempt', 'persisted attempt differs from exact discovery');
+    if (expected.role === 'solution' && expected.deliveryEnvelopeCid !== undefined && expected.deliveryEnvelopeCid !== lookup.envelope.manifestCid) return contradiction('stale-delivery', 'persisted delivery CID differs from exact discovery');
     let publisher: string;
     try { publisher = await deps.resolvePublisherSafe(expected.chainId, lookup.envelope.publisherAgentId, BigInt(lookup.envelope.enrichedAtBlock)); } catch (error) { return pending('publisher-identity-unavailable', detail(error)); }
     if (!same(publisher, lookup.attempt.operator)) return contradiction('publisher-mismatch', 'publisher historical Safe differs from the delivery operator');
-    let taskDigest: Hex; let created: DecodedTaskCreated[];
-    try { taskDigest = cidToDigestHex(expected.taskCid); created = await exactTask(deps.publicClient, deps.routerAddress, expected.taskId, expected.fromBlock, expected.toBlock); } catch (error) { return pending('rpc-unavailable', detail(error)); }
+    let taskDigest: Hex;
+    try { taskDigest = cidToDigestHex(expected.taskCid); } catch (error) { return contradiction('invalid-expectation', `invalid Task CID: ${detail(error)}`); }
+    let created: DecodedTaskCreated[];
+    try { created = await exactTask(deps.publicClient, deps.routerAddress, expected.taskId, expected.fromBlock, expected.toBlock); } catch (error) { return pending('rpc-unavailable', detail(error)); }
     if (created.length !== 1 || !same(taskDigest, created[0]!.taskCidDigest) || !same(lookup.task.taskCidDigest, created[0]!.taskCidDigest) || lookup.task.createdAtBlock !== created[0]!.blockNumber || !created[0]!.transactionHash || !same(lookup.task.createdAtTx, created[0]!.transactionHash)) return contradiction('task-mismatch', 'expected CID or indexed Task provenance differs from Router TaskCreated');
+    let taskDocument: unknown;
+    try {
+      const taskBytes = await deps.fetchTaskBytes(expected.taskCid);
+      taskDocument = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(taskBytes));
+    } catch (error) {
+      return pending('task-unavailable', detail(error));
+    }
+    const parsedTask = JinnRepoTaskSchema.safeParse(taskDocument);
+    if (!parsedTask.success || parsedTask.data.source !== 'live-issue' || parsedTask.data.relay === undefined) return contradiction('invalid-task', 'exact Task CID is not a Relay live-issue task');
+    if (!exactRound(expected.round, parsedTask.data.relay as IssueRelayRoundV1)) return contradiction('round-mismatch', 'exact Task Relay capsule differs from expected round');
     let envelopeDigest: Hex;
     try { envelopeDigest = cidToDigestHex(lookup.envelope.manifestCid); } catch (error) { return contradiction('invalid-envelope-cid', detail(error)); }
     let provenance: Awaited<ReturnType<typeof verifyRouterAttemptProvenance>>;
@@ -138,7 +167,7 @@ export function createIssueRelayDeliveryObserver(deps: IssueRelayDeliveryObserve
       const parsedPayload = IssueRelayVerdictV1Schema.safeParse(signed.payload);
       if (!parsedPayload.success) return contradiction('invalid-result', parsedPayload.error.message);
       const verdict = parsedPayload.data as IssueRelayVerdictV1;
-      if (!sameRound(expected.round, verdict.correlation) || verdict.correlation.taskId !== expected.taskId || verdict.correlation.attemptIndex !== lookup.attempt.attemptIndex || !same(verdict.correlation.requestId, lookup.attempt.requestId) || verdict.correlation.deliveryEnvelopeCid !== lookup.envelope.manifestCid) return contradiction('correlation-mismatch', 'verdict correlation differs from the complete Relay round and delivery tuple');
+      if (!sameRound(expected.round, verdict.correlation) || verdict.correlation.taskId !== expected.taskId || verdict.correlation.attemptIndex !== expected.attemptIndex || !same(verdict.correlation.requestId, expected.requestId!) || verdict.correlation.deliveryEnvelopeCid !== expected.deliveryEnvelopeCid) return contradiction('correlation-mismatch', 'verdict correlation differs from the authoritative solution correlation');
       payload = verdict;
     }
     return { status: 'verified', role: expected.role, task: { taskId: expected.taskId, taskCid: expected.taskCid }, attempt: { attemptIndex: lookup.attempt.attemptIndex, requestId: lookup.attempt.requestId, operator: lookup.attempt.operator }, delivery: { envelopeCid: lookup.envelope.manifestCid, transactionHash: delivery.transactionHash, blockNumber: Number(delivery.blockNumber) }, round: expected.round, payload };

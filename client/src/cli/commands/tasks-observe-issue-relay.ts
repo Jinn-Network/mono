@@ -40,7 +40,7 @@ export const IssueRelayDeliveryExpectationSchema = z.object({
   deliveryEnvelopeCid: z.string().min(1).optional(), solutionOperatorSafe: address.optional(),
 }).strict().superRefine((value, ctx) => {
   if ((value.attemptIndex === undefined) !== (value.requestId === undefined)) ctx.addIssue({ code: 'custom', path: ['attemptIndex'], message: 'attemptIndex and requestId must appear together' });
-  if (value.role === 'verdict' && value.solutionOperatorSafe === undefined) ctx.addIssue({ code: 'custom', path: ['solutionOperatorSafe'], message: 'verdict observation requires solutionOperatorSafe' });
+  if (value.role === 'verdict' && (value.solutionOperatorSafe === undefined || value.attemptIndex === undefined || value.deliveryEnvelopeCid === undefined)) ctx.addIssue({ code: 'custom', path: ['solutionOperatorSafe'], message: 'verdict observation requires authoritative solution correlation and Safe' });
 });
 
 const relayVerdict = z.unknown().refine(
@@ -103,7 +103,7 @@ export async function runObserveIssueRelayDelivery(ctx: CommandContext): Promise
     const chain = getChainConfig(network, { testnetL2DeploymentPath: config.testnetL2DeploymentPath, testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath, testnetMechDeploymentPath: config.testnetMechDeploymentPath, testnetStolasDeploymentPath: config.testnetStolasDeploymentPath });
     const router = chain.jinnRouter ?? getJinnRouterAddress(chain.chainId); if (!router) throw new Error(`No Jinn Router address is configured for chain ${chain.chainId}`);
     const publicClient = createJinnPublicClient(config.rpcUrls, network);
-    const observer = createIssueRelayDeliveryObserver({ discovery: createHttpDiscoveryAPI({ url: config.discovery.url }), publicClient, mechMarketplaceAddress: getAddress(chain.mechMarketplace), routerAddress: getAddress(router), fetchEnvelopeBytes: (cid) => fetchRawBytesFromIpfs(config.ipfsGatewayUrl, cid), resolvePublisherSafe: createPublisherSafeResolver({ rpcUrl: config.rpcUrls[0]!, fallbackRpcUrls: config.rpcUrls.slice(1), expectedChainId: chain.chainId, ...(config.identityRegistryAddress === undefined ? {} : { identityRegistry: config.identityRegistryAddress }) }) });
+    const observer = createIssueRelayDeliveryObserver({ discovery: createHttpDiscoveryAPI({ url: config.discovery.url }), publicClient, mechMarketplaceAddress: getAddress(chain.mechMarketplace), routerAddress: getAddress(router), fetchEnvelopeBytes: (cid) => fetchRawBytesFromIpfs(config.ipfsGatewayUrl, cid), fetchTaskBytes: (cid) => fetchRawBytesFromIpfs(config.ipfsGatewayUrl, cid), resolvePublisherSafe: createPublisherSafeResolver({ rpcUrl: config.rpcUrls[0]!, fallbackRpcUrls: config.rpcUrls.slice(1), expectedChainId: chain.chainId, ...(config.identityRegistryAddress === undefined ? {} : { identityRegistry: config.identityRegistryAddress }) }) });
     const toBlock = await publicClient.getBlockNumber();
     if (toBlock < BigInt(expected.creationBlockNumber)) throw new Error('Latest chain block predates the marketplace Task');
     emitIssueRelayObservationResult(ctx, await observer.observe({ ...expected, chainId: chain.chainId, fromBlock: BigInt(expected.creationBlockNumber), toBlock }));

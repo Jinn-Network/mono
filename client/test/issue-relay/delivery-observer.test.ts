@@ -24,6 +24,9 @@ const TASK_TX = `0x${'44'.repeat(32)}` as Hex;
 const REQUEST_ID = `0x${'11'.repeat(32)}` as Hex;
 const ENVELOPE_CID = `f01551220${'55'.repeat(32)}`;
 const ENVELOPE_DIGEST = `0x${'55'.repeat(32)}` as Hex;
+const VERDICT_REQUEST_ID = `0x${'66'.repeat(32)}` as Hex;
+const VERDICT_ENVELOPE_CID = `f01551220${'77'.repeat(32)}`;
+const VERDICT_ENVELOPE_DIGEST = `0x${'77'.repeat(32)}` as Hex;
 const DELIVERY_TX = `0x${'77'.repeat(32)}` as Hex;
 const OPERATOR = `0x${'22'.repeat(20)}` as Address;
 const EVALUATOR = `0x${'23'.repeat(20)}` as Address;
@@ -40,6 +43,15 @@ const round = {
   targetRepository: 'Jinn-Network/mono', workspaceRepository: 'Jinn-Network/mono',
   inputHead: '1'.repeat(40), purpose: 'initial' as const, findings: [],
 };
+
+function taskDocument(relay = round) {
+  return {
+    schemaVersion: 'jinn-repo.v1', source: 'live-issue',
+    instance_id: 'issue-relay-501', repo: 'Jinn-Network/mono',
+    base_commit: relay.inputHead, problem_statement: 'Implement the issue.',
+    language: 'typescript', issue_number: 501, relay,
+  };
+}
 
 async function envelope(role: 'solution' | 'verdict', payload: unknown, override: Record<string, unknown> = {}) {
   const unsigned = {
@@ -71,18 +83,27 @@ function deliveryLog(operator: Address, requestId = REQUEST_ID, digest = ENVELOP
   return { address: MECH, topics, data: encodeAbiParameters([{ name: 'requestId', type: 'bytes32' }, { name: 'deliveryRate', type: 'uint256' }, { name: 'data', type: 'bytes' }], [requestId, 1n, digest]), transactionHash: DELIVERY_TX, blockNumber: 120n };
 }
 
-async function fixture(options: { role?: 'solution' | 'verdict'; payload?: unknown; envelopeOverride?: Record<string, unknown>; publisher?: Address; solutionOperator?: Address; expectation?: Partial<IssueRelayMarketplaceDeliveryExpectation>; rawEnvelopeBytes?: Uint8Array; mutate?: (value: Record<string, unknown>) => void } = {}) {
+async function fixture(options: { role?: 'solution' | 'verdict'; payload?: unknown; envelopeOverride?: Record<string, unknown>; publisher?: Address; solutionOperator?: Address; expectation?: Partial<IssueRelayMarketplaceDeliveryExpectation>; rawEnvelopeBytes?: Uint8Array; rawTaskBytes?: Uint8Array; distinctVerdictTransport?: boolean; mutate?: (value: Record<string, unknown>) => void } = {}) {
   const role = options.role ?? 'solution';
+  const requestId = role === 'verdict' && options.distinctVerdictTransport
+    ? VERDICT_REQUEST_ID : REQUEST_ID;
+  const envelopeCid = role === 'verdict' && options.distinctVerdictTransport
+    ? VERDICT_ENVELOPE_CID : ENVELOPE_CID;
+  const envelopeDigest = role === 'verdict' && options.distinctVerdictTransport
+    ? VERDICT_ENVELOPE_DIGEST : ENVELOPE_DIGEST;
   const payload = options.payload ?? (role === 'solution'
     ? { schemaVersion: 'jinn-repo-solution.v1', patch: 'diff --git a/a.ts b/a.ts\n' }
     : { schemaVersion: 'jinn-issue-relay-verdict.v1', outcome: 'pass', correlation: { generation: round.generation, round: round.round, snapshotDigest: round.snapshotDigest, taskId: TASK_ID, attemptIndex: 0, requestId: REQUEST_ID, deliveryEnvelopeCid: ENVELOPE_CID }, evaluatedHead: round.inputHead, summary: 'looks good', findings: [] });
-  const signed = await envelope(role, payload, options.envelopeOverride);
+  const signed = await envelope(role, payload, {
+    task: { cid: TASK_CID, onchainCreationTx: TASK_TX, onchainCreationBlock: 100, requestId },
+    ...options.envelopeOverride,
+  });
   options.mutate?.(signed);
   const signature = signed.signature as { hash: Hex };
-  const ready: AutopilotDeliveryCandidateLookup = { status: 'ready', role, task: { taskId: TASK_ID, taskCidDigest: TASK_DIGEST, createdAtBlock: 100, createdAtTx: TASK_TX }, attempt: { taskId: TASK_ID, attemptIndex: 0, requestId: REQUEST_ID, operator: role === 'solution' ? OPERATOR : EVALUATOR, createdAtBlock: 110 }, solutionOperator: options.solutionOperator ?? OPERATOR, envelope: { requestId: REQUEST_ID, manifestCid: ENVELOPE_CID, publisherAgentId: '7', manifestHash: signature.hash, enrichedAtBlock: 121 } };
-  const getLogs = vi.fn(({ address, event }) => address === ROUTER && event?.name === 'TaskCreated' ? [taskLog()] : address === ROUTER ? [attemptLog(role, role === 'solution' ? OPERATOR : EVALUATOR)] : [deliveryLog(role === 'solution' ? OPERATOR : EVALUATOR)]);
-  const observer = createIssueRelayDeliveryObserver({ discovery: { getAutopilotDeliveryCandidates: vi.fn().mockResolvedValue(ready) } as unknown as DiscoveryAPI, publicClient: { getLogs, readContract: vi.fn().mockResolvedValue({ deliveryMech: MECH }) } as unknown as PublicClient, mechMarketplaceAddress: MARKETPLACE, routerAddress: ROUTER, fetchEnvelopeBytes: vi.fn().mockResolvedValue(options.rawEnvelopeBytes ?? new TextEncoder().encode(JSON.stringify(signed))), resolvePublisherSafe: vi.fn().mockResolvedValue(options.publisher ?? (role === 'solution' ? OPERATOR : EVALUATOR)) });
-  const expectation: IssueRelayMarketplaceDeliveryExpectation = { chainId: CHAIN_ID, fromBlock: 100n, toBlock: 150n, schemaVersion: 'jinn-issue-relay-delivery-expectation.v1', role, taskId: TASK_ID, taskCid: TASK_CID, creationBlockNumber: 100, round, ...(role === 'verdict' ? { solutionOperatorSafe: OPERATOR } : {}), ...options.expectation };
+  const ready: AutopilotDeliveryCandidateLookup = { status: 'ready', role, task: { taskId: TASK_ID, taskCidDigest: TASK_DIGEST, createdAtBlock: 100, createdAtTx: TASK_TX }, attempt: { taskId: TASK_ID, attemptIndex: 0, requestId, operator: role === 'solution' ? OPERATOR : EVALUATOR, createdAtBlock: 110 }, solutionOperator: options.solutionOperator ?? OPERATOR, envelope: { requestId, manifestCid: envelopeCid, publisherAgentId: '7', manifestHash: signature.hash, enrichedAtBlock: 121 } };
+  const getLogs = vi.fn(({ address, event }) => address === ROUTER && event?.name === 'TaskCreated' ? [taskLog()] : address === ROUTER ? [attemptLog(role, role === 'solution' ? OPERATOR : EVALUATOR, requestId)] : [deliveryLog(role === 'solution' ? OPERATOR : EVALUATOR, requestId, envelopeDigest)]);
+  const observer = createIssueRelayDeliveryObserver({ discovery: { getAutopilotDeliveryCandidates: vi.fn().mockResolvedValue(ready) } as unknown as DiscoveryAPI, publicClient: { getLogs, readContract: vi.fn().mockResolvedValue({ deliveryMech: MECH }) } as unknown as PublicClient, mechMarketplaceAddress: MARKETPLACE, routerAddress: ROUTER, fetchEnvelopeBytes: vi.fn().mockResolvedValue(options.rawEnvelopeBytes ?? new TextEncoder().encode(JSON.stringify(signed))), fetchTaskBytes: vi.fn().mockResolvedValue(options.rawTaskBytes ?? new TextEncoder().encode(JSON.stringify(taskDocument()))), resolvePublisherSafe: vi.fn().mockResolvedValue(options.publisher ?? (role === 'solution' ? OPERATOR : EVALUATOR)) });
+  const expectation: IssueRelayMarketplaceDeliveryExpectation = { chainId: CHAIN_ID, fromBlock: 100n, toBlock: 150n, schemaVersion: 'jinn-issue-relay-delivery-expectation.v1', role, taskId: TASK_ID, taskCid: TASK_CID, creationBlockNumber: 100, round, ...(role === 'verdict' ? { solutionOperatorSafe: OPERATOR, attemptIndex: 0, requestId: REQUEST_ID, deliveryEnvelopeCid: ENVELOPE_CID } : {}), ...options.expectation };
   return { observer, expectation };
 }
 
@@ -97,6 +118,15 @@ describe('Issue Relay delivery observer', () => {
     await expect(unknownSchema.observer.observe(unknownSchema.expectation)).resolves.toMatchObject({ status: 'contradiction', reason: 'invalid-expectation' });
     const malformedBytes = await fixture({ rawEnvelopeBytes: new Uint8Array([0xff]) });
     await expect(malformedBytes.observer.observe(malformedBytes.expectation)).resolves.toMatchObject({ status: 'contradiction', reason: 'invalid-envelope' });
+  });
+
+  it('binds a solution to the exact task Relay capsule and rejects malformed Task CIDs', async () => {
+    const wrongRound = await fixture({ rawTaskBytes: new TextEncoder().encode(JSON.stringify(taskDocument({ ...round, round: 1 }))) });
+    await expect(wrongRound.observer.observe(wrongRound.expectation)).resolves.toMatchObject({ status: 'contradiction', reason: 'round-mismatch' });
+    const wrongSnapshot = await fixture({ rawTaskBytes: new TextEncoder().encode(JSON.stringify(taskDocument({ ...round, snapshotDigest: `sha256:${'b'.repeat(64)}` }))) });
+    await expect(wrongSnapshot.observer.observe(wrongSnapshot.expectation)).resolves.toMatchObject({ status: 'contradiction', reason: 'round-mismatch' });
+    const malformedCid = await fixture({ expectation: { taskCid: 'not-a-cid' } });
+    await expect(malformedCid.observer.observe(malformedCid.expectation)).resolves.toMatchObject({ status: 'contradiction', reason: 'invalid-expectation' });
   });
 
   it.each([
@@ -131,6 +161,19 @@ describe('Issue Relay delivery observer', () => {
     const snapshotMismatch = await fixture({ role: 'verdict', payload: { schemaVersion: 'jinn-issue-relay-verdict.v1', outcome: 'pass', correlation: { generation: round.generation, round: round.round, snapshotDigest: `sha256:${'b'.repeat(64)}`, taskId: TASK_ID, attemptIndex: 0, requestId: REQUEST_ID, deliveryEnvelopeCid: ENVELOPE_CID }, evaluatedHead: round.inputHead, summary: 'looks good', findings: [] } });
     await expect(snapshotMismatch.observer.observe(snapshotMismatch.expectation)).resolves.toMatchObject({ status: 'contradiction', reason: 'correlation-mismatch' });
     const roundMismatch = await fixture({ role: 'verdict', expectation: { round: { ...round, round: 1 } } });
-    await expect(roundMismatch.observer.observe(roundMismatch.expectation)).resolves.toMatchObject({ status: 'contradiction', reason: 'correlation-mismatch' });
+    await expect(roundMismatch.observer.observe(roundMismatch.expectation)).resolves.toMatchObject({ status: 'contradiction', reason: 'round-mismatch' });
+  });
+
+  it('binds a verdict payload to the authoritative solution correlation, not evaluator transport IDs', async () => {
+    const value = await fixture({
+      role: 'verdict', distinctVerdictTransport: true,
+      expectation: { attemptIndex: 0, requestId: REQUEST_ID, deliveryEnvelopeCid: ENVELOPE_CID },
+    });
+    await expect(value.observer.observe(value.expectation)).resolves.toMatchObject({
+      status: 'verified',
+      attempt: { requestId: VERDICT_REQUEST_ID },
+      delivery: { envelopeCid: VERDICT_ENVELOPE_CID },
+      payload: { correlation: { requestId: REQUEST_ID, deliveryEnvelopeCid: ENVELOPE_CID } },
+    });
   });
 });
