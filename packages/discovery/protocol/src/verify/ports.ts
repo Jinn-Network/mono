@@ -55,9 +55,22 @@ export interface FreshnessPolicy {
   isFresh(refreshBy: string, now: Date): boolean;
 }
 
+/**
+ * The high-water mark a consumer persists per source (§5.2/§10.3 step 3):
+ * the chain-position cursor (§5.3 rule 4) PLUS the accepted head's
+ * `issuedAt`, needed to enforce issuedAt monotonicity against a
+ * subsequently re-signed head citing the same or an earlier position. Not
+ * the bare `SourceCursor` the chain-linkage rules use elsewhere (§16 item
+ * 4's frozen `(sequence, entry digest)` tuple stays exactly that) -- this
+ * is `HighWaterMarkStore`'s own persisted shape only.
+ */
+export interface HighWaterMark extends SourceCursor {
+  issuedAt: string;
+}
+
 export interface HighWaterMarkStore {
-  get(source: SourceIdentity): Promise<SourceCursor | undefined>;
-  put(source: SourceIdentity, cursor: SourceCursor): Promise<void>;
+  get(source: SourceIdentity): Promise<HighWaterMark | undefined>;
+  put(source: SourceIdentity, mark: HighWaterMark): Promise<void>;
 }
 
 /** Projection derivation-consistency (§6.2). */

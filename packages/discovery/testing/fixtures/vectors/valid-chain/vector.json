@@ -106,7 +106,8 @@
     "status": "ok",
     "advanced": {
       "sequence": "0000000000000002",
-      "entry": "sha256:aadf46ca7ca9123c2f18c29a132b021a36411afce6fb0a191f93a53d872ec53a"
+      "entry": "sha256:aadf46ca7ca9123c2f18c29a132b021a36411afce6fb0a191f93a53d872ec53a",
+      "issuedAt": "2026-07-28T12:00:00.000Z"
     }
   }
 }

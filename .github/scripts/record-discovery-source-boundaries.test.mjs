@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'discovery');
-const discoveryDirectories = ['protocol', 'testing', 'serve', 'client', 'facts/evidence', 'facts/trust'];   // grows per package task
+const discoveryDirectories = ['protocol', 'testing', 'serve', 'client', 'facts/evidence', 'facts/trust', 'facts/task-execution', 'sources/evidence-journal'];   // grows per package task
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'), join(root, 'client'),
   ...['autopilot', 'core', 'indexer', 'indexer-enrichment', 'layer', 'plugin', 'sdk']
@@ -68,6 +68,35 @@ const FACTS_TRUST_FORBIDDEN_PACKAGES = [
   '@jinn-network/record-discovery-facts-evidence', '@jinn-network/record-discovery-facts-task-execution',
   '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-profiles',
   '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository', '@jinn-network/evidence-discovery',
+];
+// facts/task-execution carries the one sanctioned edge between the
+// discovery tree and the Task Execution Protocol record-kind tree (design
+// §12; plan Task 24; program §6.5 single-leaf folding): protocol +
+// task-execution-protocol + task-execution-profiles are allowed (see the
+// inventory guard's dependency-graph comment for why both task-execution
+// packages are direct deps); no serve/client, no other facts/* leaf, no
+// trust, no evidence.
+const FACTS_TASK_EXECUTION_FORBIDDEN_PACKAGES = [
+  '@jinn-network/record-discovery-serve', '@jinn-network/record-discovery-client',
+  '@jinn-network/record-discovery-testing',
+  '@jinn-network/record-discovery-facts-evidence', '@jinn-network/record-discovery-facts-trust',
+  '@jinn-network/trust-core', '@jinn-network/trust-resolve', '@jinn-network/trust-testing',
+  '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository', '@jinn-network/evidence-discovery',
+];
+// sources/evidence-journal carries the rule-widened sanctioned edge between
+// the discovery tree and the Evidence Protocol record-kind tree at the
+// `sources/*` leaf layer (design §11; plan Task 25; program §6 confirmation
+// 4 / Finding F7: "leaf packages under packages/discovery/ (facts/*,
+// sources/*) are the only places a discovery edge and a record-kind edge
+// meet"): protocol + serve + evidence-discovery + evidence-repository are
+// allowed (plus record-discovery-testing, the M3 conformance kit devDep
+// every serve-adjacent package uses for `runSourceConformance`); no client,
+// no facts/* leaf, no TEP, no trust.
+const SOURCE_EVIDENCE_JOURNAL_FORBIDDEN_PACKAGES = [
+  '@jinn-network/record-discovery-client',
+  '@jinn-network/record-discovery-facts-evidence', '@jinn-network/record-discovery-facts-trust', '@jinn-network/record-discovery-facts-task-execution',
+  '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-profiles',
+  '@jinn-network/trust-core', '@jinn-network/trust-resolve', '@jinn-network/trust-testing',
 ];
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
@@ -252,6 +281,14 @@ test('record-discovery-facts-evidence production source stays within its archite
 
 test('record-discovery-facts-trust production source stays within its architecture boundary', () => {
   assertBoundary(join(packages, 'facts', 'trust', 'src'), FACTS_TRUST_FORBIDDEN_PACKAGES);
+});
+
+test('record-discovery-facts-task-execution production source stays within its architecture boundary', () => {
+  assertBoundary(join(packages, 'facts', 'task-execution', 'src'), FACTS_TASK_EXECUTION_FORBIDDEN_PACKAGES);
+});
+
+test('record-discovery-source-evidence-journal production source stays within its architecture boundary', () => {
+  assertBoundary(join(packages, 'sources', 'evidence-journal', 'src'), SOURCE_EVIDENCE_JOURNAL_FORBIDDEN_PACKAGES);
 });
 
 test('record discovery production source never uses ambient network APIs', () => {

@@ -1,5 +1,6 @@
 import { recordDigest } from "../hashing.js";
 import type { FactsProfileDocument } from "../facts-profile.js";
+import { parseAnnouncementEntry } from "../entry.js";
 import type { AnnouncedItem, SourceCursor } from "../item.js";
 import { factsConsistency } from "./facts-consistency.js";
 import type {
@@ -27,19 +28,6 @@ import type { ItemOutcome } from "./outcomes.js";
 // fail closed on anything but `consistent` facts / a required derivation
 // check). `verifyItem` always reports the true computed outcome; the caller
 // decides what to do with a non-`consistent`/non-`present` result.
-
-// §10.4 step 3 requires confirming the cited entry lies on the source's
-// verified chain via the injected `verifiedChain(cursor)` port, which takes
-// a full `SourceCursor` (§5.3 rule 4: `{sequence, entry digest}`).
-// `AnnouncedItem.provenance` (frozen §8/§16.9 shape) carries the entry's
-// digest but not its sequence, so this reference implementation cannot
-// construct a fully-populated cursor at this call site. It passes a
-// placeholder sequence -- `verifiedChain` implementations key on the entry
-// digest, which uniquely identifies a position in an append-only chain.
-// Recorded as a finding for whoever revisits `AnnouncedItem`'s shape or the
-// `verifiedChain` port signature: carrying the entry's sequence on
-// `provenance` (or accepting a bare digest here) would close this gap.
-const UNKNOWN_SEQUENCE_PLACEHOLDER = "0000000000000000";
 
 export async function verifyItem(opts: {
   item: AnnouncedItem;
@@ -72,8 +60,40 @@ export async function verifyItem(opts: {
     records: ports.records,
   });
 
-  // Step 3: cited provenance.
-  const cursor: SourceCursor = { sequence: UNKNOWN_SEQUENCE_PLACEHOLDER, entry: item.provenance.entry };
+  // Step 3: verify the cited provenance (§10.4 step 3, decision-grade
+  // MUST). "Provenance" claimed by a query/subscribe service is only that
+  // service's word until this step corroborates it against the cited
+  // entry's OWN content and the source's verified chain -- a malicious
+  // service citing a trusted source it never synced, or lying about which
+  // entry announced this item, is caught here and nowhere else.
+  let citedEntryBytes: Uint8Array;
+  try {
+    citedEntryBytes = await ports.entries.fetch(item.provenance.entry);
+  } catch {
+    return { status: "unauthorized-provenance" };
+  }
+  if (recordDigest(citedEntryBytes) !== item.provenance.entry) {
+    return { status: "unauthorized-provenance" };
+  }
+  let citedEntry;
+  try {
+    citedEntry = parseAnnouncementEntry(
+      JSON.parse(new TextDecoder().decode(citedEntryBytes)),
+    );
+  } catch {
+    return { status: "unauthorized-provenance" };
+  }
+  const announces = citedEntry.announcements.some(
+    (announcement) =>
+      announcement.action === "available" &&
+      announcement.announcementId === item.provenance.announcementId &&
+      announcement.record.kind === item.record.kind &&
+      announcement.record.digest === item.record.digest,
+  );
+  if (!announces) {
+    return { status: "unauthorized-provenance" };
+  }
+  const cursor: SourceCursor = { sequence: citedEntry.sequence, entry: item.provenance.entry };
   if (!(await ports.verifiedChain(cursor))) {
     return { status: "unauthorized-provenance" };
   }

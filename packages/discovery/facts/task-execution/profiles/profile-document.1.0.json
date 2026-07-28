@@ -1,0 +1,9 @@
+{
+  "protocol": "https://jinn.network/record-discovery/1.0",
+  "kind": "https://jinn.network/records/profile-document/1.0",
+  "profile": "https://jinn.network/records/profile-document/1.0/facts/1.0",
+  "fields": [
+    { "name": "profile", "class": "record", "cloudEvents": { "attribute": "profile", "scalar": "string" } },
+    { "name": "extendsDigest", "class": "record", "referenceBearing": true }
+  ]
+}

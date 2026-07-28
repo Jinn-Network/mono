@@ -15,7 +15,7 @@
           "agent": "did:key:zProjector",
           "name": "marketplace"
         },
-        "entry": "sha256:54f5e461df159e92564b3c2262bed1c813a5ec66cfd3bbebdc73f776e5bb5168",
+        "entry": "sha256:353aa5cf8bc13ae88142b612def5901a18235a3d8f16c96ec493a6a68e45c8a8",
         "announcementId": "ann-derivation-consistency-fabricated",
         "derivation": {
           "substrateRef": "sha256:dcb04877671c29db36c45cf3ea8876f66bab3427d8d096156d0b0c1c1d293c65"
@@ -25,6 +25,26 @@
     "recordBytes": {
       "note": "derivation-consistency-fabricated fixture record bytes",
       "kind": "delivery"
+    },
+    "citedEntry": {
+      "protocol": "https://jinn.network/record-discovery/1.0",
+      "source": {
+        "agent": "did:key:zProjector",
+        "name": "marketplace"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00Z",
+      "announcements": [
+        {
+          "announcementId": "ann-derivation-consistency-fabricated",
+          "action": "available",
+          "record": {
+            "kind": "https://jinn.network/records/delivery/1.0",
+            "digest": "sha256:3ef5460a63dd0fcd3a478bad6b1151b440c8b2912e504ff6d8db1f85e2d73278"
+          }
+        }
+      ]
     }
   },
   "expect": {

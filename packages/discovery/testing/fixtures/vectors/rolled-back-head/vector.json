@@ -21,7 +21,8 @@
         },
         "cursor": {
           "sequence": "0000000000000005",
-          "entry": "sha256:fd9c86032838eb5e65d0f4ad6eb3af2d114ed16f4b729043cab3e2b7483decc9"
+          "entry": "sha256:fd9c86032838eb5e65d0f4ad6eb3af2d114ed16f4b729043cab3e2b7483decc9",
+          "issuedAt": "2026-07-27T12:00:00.000Z"
         }
       }
     },

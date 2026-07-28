@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { GENESIS_SEQUENCE, RECORD_DISCOVERY_VERSION } from "./identifiers.js";
+import { isSourceName } from "./grammar.js";
 import type { PublishedLocation, RecordRef } from "./item.js";
 
 // Announcement Entry (§5.1) -- the append-only sealed unit. Field set and
@@ -89,6 +90,10 @@ const AnnouncementEntrySchema = z.looseObject({
  */
 export function parseAnnouncementEntry(json: unknown): AnnouncementEntry {
   const parsed = AnnouncementEntrySchema.parse(json);
+
+  if (!isSourceName(parsed.source.name)) {
+    throw new Error(`Entry source name is not source-name-shaped (§5.1 SOURCE_NAME_GRAMMAR): ${parsed.source.name}`);
+  }
 
   const seen = new Set<string>();
   for (const announcement of parsed.announcements) {

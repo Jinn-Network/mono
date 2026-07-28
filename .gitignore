@@ -55,6 +55,9 @@ packages/discovery/*/.yarn/install-state.gz
 packages/discovery/facts/*/dist/
 packages/discovery/facts/*/.yarn/cache/
 packages/discovery/facts/*/.yarn/install-state.gz
+packages/discovery/sources/*/dist/
+packages/discovery/sources/*/.yarn/cache/
+packages/discovery/sources/*/.yarn/install-state.gz
 examples/external-restorer-impls/*/node_modules/
 examples/external-restorer-impls/*/dist/
 examples/external-restorer-impls/*/.yarn/cache/
