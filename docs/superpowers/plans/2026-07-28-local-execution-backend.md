@@ -628,3 +628,19 @@ Resolves the "See Findings" pointers above. These are coordination decisions, no
 1. **Spec coverage** — every design § maps to a task: §5 (C1 lock+capacity), §6.1 (A4), §6.2–§6.6 (A5), §7 (B1/B2), §8 (A2 contract, B3/B4 launchers, B3 result), §9 (C1/C2), §10.1–§10.2 (C3), §10.3–§10.4 (D2–D4), §11.1 (E1), §11.2 (Out of scope), §14 frozen interfaces (cited per task), §15 packages (A1/A2 structure), §16 conformance (A3 + C4), §17 (E1/E2), §18 steps 1–4 (A/B/C/D/E), §18 step 5 (Out of scope), §19/§20 (Out of scope / program-gate notes). F7 evidence amendment → D1.
 2. **Placeholder scan** — no "TBD"/"add validation"/"similar to Task N": B4 repeats B3's assertion families in full per harness; each task carries concrete test code or a precise assertion list.
 3. **Type consistency** — each contract type is defined once in its OWNING package (A2) and imported by name thereafter (cross-package imports type-only): `LaunchPlan`/`LauncherContract`/`LauncherCapabilities` in `launchers`; `TaskView`/`WorkspacePaths`/`ProvisionerContract`/`WorkspaceKind` in `workspace`; `AttemptIdentity`/`SpawnRequest` in `supervisor`; `EvidenceBindingPorts` in the assembly (C3); `CompletedEvaluation`/`EvaluatorRegistration` in the evaluation harness (D2). `compareCodeUnitStrings`/`serializeCanonical` are copied PER package (A1), not shared. `mergeRequirements`/`EffectiveRequirements`/`ComparisonClass` are CONSUMED from `@jinn-network/task-execution-protocol` (program §7.3) and never redefined locally — `TaskView.effectiveRequirements` references the protocol type, and C1 runs the merge. The launcher→{workspace,supervisor} intra-tree edges are intentional (Findings (e)).
+
+## Addendum 2026-07-28-b — two-party engagement entry (companion amendment)
+
+The approved marketplace-binding design
+(`docs/superpowers/specs/2026-07-28-marketplace-binding-design.md`, companion-amendment
+declaration; anticipated by TEP §9.2) requires the backend's engagement surface to accept a
+**caller-supplied deterministic Attempt URI**: two-party bindings compute the URI third-party
+via the protocol package's exported `deriveAttemptUri` + `TEP_ATTEMPT_NAMESPACE` (program
+§7.2), and the backend adopts the supplied URI (validating format) instead of minting its
+own; single-party callers omit it and the backend mints a random UUID per §9.2 as today.
+Milestone C (assembly) MUST include this entry in the engagement surface from day one — not
+retrofit it. The exact entry point (submit-time option vs Submission-document field) is
+pinned by the marketplace-binding design's companion-amendment declaration; the
+marketplace-binding plan names it. If honoring it requires touching the already-implemented
+frozen `TaskExecutionBackend` surface, surface the conflict to the coordinator before
+Milestone C freezes — do not silently widen the frozen interface.

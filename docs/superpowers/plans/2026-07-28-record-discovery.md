@@ -929,3 +929,15 @@ Per the design (§17, §20, §21) and the coordinator brief:
 - **Spec coverage.** §5.1 Announcement Entry → Task 4; §5.2 Source Head → Task 4/Task 16; §5.3 chain rules → Task 12; §5.4 facts cards → Task 6/Task 13 + facts leaves + the `FactsRecompute` seam (Task 8); §5.5 signing posture → identifiers + Task 12/16; §6 source classes / derivation → Task 8/13/20; §7 serving plane → M5; §8 query interfaces → Task 8 (owned in `protocol`, program §7.12) + Task 21 (client implementation); §9 subscribe + §9.1 CloudEvents → Task 7 + Task 21; §10.1/§10.3/§10.4 → Tasks 8/12/13/20; §11 crosswalk/wrapper → Task 25; §12 record kinds + facts-profile contract + URI grammar → Tasks 3/6 + the three facts leaves M7/M8 (evidence, task-execution, trust); §16 frozen interfaces → the frozen field sets in Tasks 4/6/8/21; §18 conformance → M3. Deferred sections (§19 migration, §20 stages 3–6, §21, §22) are in Out-of-scope.
 - **Placeholder scan.** Frozen field sets, identifiers, grammars, guard constant blocks, and verification-step orderings are fully specified; procedure bodies that are long (chain walk, layout writer, wrapper reconcile) are specified by exact behavior + the kit vectors that gate them rather than transcribed line-by-line — deliberate, because the kit is the executable spec (CSI). No "TBD"/"handle edge cases"/"similar to" placeholders remain.
 - **Type consistency.** `AnnouncedItem`, `SourceHead`, `AnnouncementEntry`, `SourceCursor`, `FactsProfileDocument`, the port interfaces (including `FactsRecompute`), the §8 query interfaces (`DiscoveryQueryService`/`Page`/`QueryCapabilities`/`FactsFilter`/`PageRequest`), and the typed outcomes are each defined **once** — all in `protocol` (Tasks 4/6/8) — and imported/referenced by name thereafter; `client` (Task 21) imports and implements `DiscoveryQueryService` rather than redefining it.
+
+## Addendum 2026-07-28-b — benchmarking facts-profile fields (companion amendment)
+
+The approved benchmarking-application design
+(`docs/superpowers/specs/2026-07-28-benchmarking-application-design.md` §11, §17.5) declares an
+ADDITIVE amendment to the **Submission and Delivery facts profiles**: optional namespaced
+fields `benchrun` / `benchcell` / `bencharm`, declared as CloudEvents filter attributes. The
+`facts/task-execution` leaf (M8) MUST author the Submission and Delivery facts-profile
+documents with these optional fields and their attribute lifts **from day one** — absent on
+non-benchmarking records, opaque to the core, never reopened later. A fourth leaf
+`discovery/facts/benchmarking` is OUT of this plan (owned by the benchmarking-application
+plan).
