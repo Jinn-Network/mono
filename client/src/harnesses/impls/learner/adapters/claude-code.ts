@@ -1,9 +1,10 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { finished } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
+import { inspectLearnerTerminalEvidence } from '../lifecycle-artifacts.js';
 import type { HarnessAdapter, TaskSessionInputs } from '../types.js';
 
 export interface ClaudeCodeHarnessAdapterConfig {
@@ -140,6 +141,10 @@ function taskContextJson(inputs: TaskSessionInputs): string {
 function captureLogError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
+
+type ClaudeResult = {
+  subtype: unknown;
+};
 
 function workspaceGuidance(inputs: TaskSessionInputs): string[] {
   if (!inputs.taskWorkspaceDir) {
@@ -351,34 +356,69 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
         closeLogs().then(complete, onLogError);
       };
 
-      // #883: complete on claude's terminal `result` message, not solely on
-      // process exit. claude streams `{"type":"result","subtype":…}` when the
-      // session ends; it may then fail to exit (a leaked tool subprocess holds
-      // the event loop open). Settling on the result — and reaping the group —
-      // means the task never strands in RUNNING waiting for an exit that never
-      // comes. The `child.on('exit')` handler below still covers crashes that
-      // emit no result; the `settled` guard makes whichever fires first win.
+      // #883: once learner artifacts prove the session is terminal, reap the
+      // process group on claude's result instead of waiting for an exit that a
+      // leaked tool subprocess may prevent. Claude can also emit `result` at
+      // intermediate wakeup boundaries, so the stream marker alone is not
+      // terminal evidence.
       let stdoutBuf = '';
-      const onResult = (subtype: unknown): void => {
-        if (settled) return;
+      let latestResult: ClaudeResult | undefined;
+      const reapTerminalProcess = (): void => {
         reap('SIGTERM');
         const killTimer = setTimeout(() => reap('SIGKILL'), 2000);
         if (typeof killTimer.unref === 'function') killTimer.unref();
-        settleAfterLogs(() => {
-          if (subtype === undefined || subtype === 'success') {
-            resolve();
-          } else {
-            reject(new Error(`claude-code adapter: session ended with result subtype=${String(subtype)}`));
-          }
+      };
+      const settleSuccessfulOrFailedResult = (result: ClaudeResult): void => {
+        if (result.subtype === undefined || result.subtype === 'success') {
+          resolve();
+        } else {
+          reject(
+            new Error(
+              `claude-code adapter: session ended with result subtype=${String(result.subtype)}`,
+            ),
+          );
+        }
+      };
+      const learnerFailureError = (errorArtifact: string): Error => {
+        const artifact = relative(inputs.workingDir, errorArtifact) || errorArtifact;
+        return new Error(
+          `claude-code adapter: learner reported terminal failure artifact ${artifact}`,
+        );
+      };
+      const onResult = (result: ClaudeResult): boolean => {
+        if (settled) return true;
+        latestResult = result;
+        const evidence = inspectLearnerTerminalEvidence({
+          workingDir: inputs.workingDir,
+          mode: inputs.mode,
+          phaseRange: inputs.adapterEnv?.LEARNER_PHASE_RANGE,
         });
+        if (evidence.kind === 'incomplete') return false;
+
+        reapTerminalProcess();
+        if (evidence.kind === 'failure') {
+          settleAfterLogs(() => reject(learnerFailureError(evidence.errorArtifact)));
+        } else {
+          settleAfterLogs(() => settleSuccessfulOrFailedResult(result));
+        }
+        return true;
+      };
+
+      const incompleteExitError = (missingArtifacts: readonly string[]): Error => {
+        const missing = missingArtifacts
+          .slice(0, 3)
+          .map((path) => relative(inputs.workingDir, path) || path)
+          .join(', ');
+        return new Error(
+          `claude-code adapter: child exited before learner terminal evidence${missing ? `: ${missing}` : ''}`,
+        );
       };
 
       let stderr = '';
       child.stdout?.on('data', (d: Buffer) => {
         // Guard against ERR_STREAM_WRITE_AFTER_END: once the session settles,
         // closeLogs() ends these streams, but the reaped child (SIGTERM, not
-        // instant) can still emit bytes — e.g. after onResult() fires on a
-        // mid-session tool-result envelope. An unguarded write here throws
+        // instant) can still emit bytes. An unguarded write here throws
         // "write after end", which surfaces as an engine tick failure.
         if (!stdoutLog.writableEnded) stdoutLog.write(d);
         if (settled) return;
@@ -391,8 +431,7 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
           try {
             const obj = JSON.parse(line) as { type?: unknown; subtype?: unknown };
             if (obj && obj.type === 'result') {
-              onResult(obj.subtype);
-              return;
+              if (onResult({ subtype: obj.subtype })) return;
             }
           } catch { /* partial or non-JSON line; keep scanning */ }
         }
@@ -403,20 +442,31 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
       });
 
       child.on('exit', (code, signal) => {
+        const evidence = inspectLearnerTerminalEvidence({
+          workingDir: inputs.workingDir,
+          mode: inputs.mode,
+          phaseRange: inputs.adapterEnv?.LEARNER_PHASE_RANGE,
+        });
         settleAfterLogs(() => {
-          if (code === 0) {
-            resolve();
-          } else if (inputs.abort.aborted) {
+          if (inputs.abort.aborted) {
             // Window expired; resolve anyway so harvester can collect
             // partial outputs. The shim's caller (engine) handles the
             // abort signal separately.
             resolve();
-          } else {
+          } else if (code !== 0) {
             reject(
               new Error(
                 `claude-code adapter: child exited with code=${code} signal=${signal}: ${stderr.slice(0, 500)}`,
               ),
             );
+          } else if (evidence.kind === 'failure') {
+            reject(learnerFailureError(evidence.errorArtifact));
+          } else if (evidence.kind === 'incomplete') {
+            reject(incompleteExitError(evidence.missingArtifacts));
+          } else if (latestResult) {
+            settleSuccessfulOrFailedResult(latestResult);
+          } else {
+            resolve();
           }
         });
       });

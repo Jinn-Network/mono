@@ -21,7 +21,17 @@ import { SOLVER_TYPE_PAYLOADS, validatePayload } from '../../../types/payloads/i
 import type { OutputArtifact } from '../../../types/portfolio.js';
 import type { Task } from '../../../types/task.js';
 import type { Solution } from '../../types.js';
+import {
+  LEARNER_PHASE_ORDER,
+  learnerPhaseArtifactPath,
+  requiredLearnerPhases,
+  requiredReadJson,
+  resolveLearnerPhaseRange,
+  type LearnerPhase,
+} from './lifecycle-artifacts.js';
 import { stripTestPathHunks } from './restoration-patch.js';
+
+export { requiredReadJson } from './lifecycle-artifacts.js';
 
 // Async execFile — see #778. Replaces execFileSync at the two harvest /
 // restoration-patch git invocations that previously blocked the daemon's
@@ -34,30 +44,6 @@ import { stripTestPathHunks } from './restoration-patch.js';
 const execFileAsync = promisify(execFile);
 const GIT_DIFF_TIMEOUT_MS = 60_000;
 const GIT_DIFF_MAX_BUFFER = 50 * 1024 * 1024;
-
-const PHASE_ORDER = [
-  'orient',
-  'strategize',
-  'plan',
-  'execute',
-  'debrief',
-  'improve',
-  'memory-consolidation',
-] as const;
-
-type Phase = (typeof PHASE_ORDER)[number];
-
-const PHASE_PRIMARY_ARTIFACT: Record<Phase, string> = {
-  orient: 'summary.json',
-  strategize: 'strategy.json',
-  plan: 'plan.json',
-  execute: 'summary.json',
-  debrief: 'analysis.json',
-  improve: 'summary.json',
-  'memory-consolidation': 'consolidation_record.json',
-};
-
-type PhaseRange = 'full' | 'pre-execute' | 'post-execute' | 'solve-only';
 
 export interface AutopilotHarvestIdentity {
   readonly taskId?: string;
@@ -92,16 +78,6 @@ function assertAutopilotHarvestIdentity(
   }
   return true;
 }
-
-const REQUIRED_PHASES: Record<PhaseRange, Phase[]> = {
-  full: [...PHASE_ORDER],
-  'pre-execute': ['orient', 'strategize', 'plan'],
-  'post-execute': ['debrief', 'improve', 'memory-consolidation'],
-  // Frozen-mode solve: the learning phases (improve, memory-consolidation) are
-  // intentionally skipped, so NO phase artifact is required. The swe-rebench
-  // patch is still harvested via the typed-payload / repo-diff path.
-  'solve-only': [],
-};
 
 const OPTIONAL_LEARNER_ARTIFACTS = [
   {
@@ -538,36 +514,6 @@ function predictionInformationalFromTask(task?: Task): Record<string, unknown> {
   return informational;
 }
 
-/**
- * Like safeReadJson but throws on missing file or invalid JSON.
- * Used for required phase artifacts where a silent failure would allow an
- * empty-looking success to propagate through the engine.
- */
-export function requiredReadJson(path: string): Record<string, unknown> {
-  if (!existsSync(path)) {
-    throw new Error(`Required artifact missing: ${path}`);
-  }
-  let text: string;
-  try {
-    text = readFileSync(path, 'utf8');
-  } catch (err) {
-    throw new Error(
-      `Cannot read required artifact ${path}: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    if (!isRecord(parsed)) {
-      throw new Error('expected a JSON object');
-    }
-    return parsed;
-  } catch (err) {
-    throw new Error(
-      `Required artifact contains invalid JSON: ${path}: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-}
-
 function readOptionalLearnerArtifact(path: string): Record<string, unknown> | null {
   if (!existsSync(path)) return null;
   try {
@@ -588,7 +534,7 @@ function readOptionalLearnerArtifact(path: string): Record<string, unknown> | nu
 
 function detectCompletedPhases(workingDir: string): string[] {
   const completed: string[] = [];
-  for (const phase of PHASE_ORDER) {
+  for (const phase of LEARNER_PHASE_ORDER) {
     const dir = join(workingDir, `.${phase}`);
     if (!existsSync(dir)) continue;
     try {
@@ -601,12 +547,6 @@ function detectCompletedPhases(workingDir: string): string[] {
     }
   }
   return completed;
-}
-
-function resolvePhaseRange(override?: string): PhaseRange {
-  const raw = override ?? process.env.LEARNER_PHASE_RANGE ?? 'full';
-  if (raw === 'pre-execute' || raw === 'post-execute' || raw === 'solve-only') return raw;
-  return 'full';
 }
 
 function lengthOf(value: unknown): number | undefined {
@@ -700,8 +640,10 @@ export async function harvestOutput(
   task?: Task,
   identity?: AutopilotHarvestIdentity,
 ): Promise<Solution> {
-  const range = resolvePhaseRange(phaseRange);
-  const requiredPhases = new Set<Phase>(REQUIRED_PHASES[range]);
+  const range = resolveLearnerPhaseRange(
+    phaseRange ?? process.env.LEARNER_PHASE_RANGE,
+  );
+  const requiredPhases = new Set<LearnerPhase>(requiredLearnerPhases(range));
   const typedPayloadPath = join(workingDir, '.execute', 'solution-payload.json');
   // Declared Autopilot sessions must derive their result from the daemon's
   // worktree harvest. Validate their signed session and persisted runtime
@@ -740,9 +682,9 @@ export async function harvestOutput(
     );
   }
 
-  const validated = new Map<Phase, Record<string, unknown>>();
-  for (const phase of REQUIRED_PHASES[range]) {
-    const path = join(workingDir, `.${phase}`, PHASE_PRIMARY_ARTIFACT[phase]);
+  const validated = new Map<LearnerPhase, Record<string, unknown>>();
+  for (const phase of requiredLearnerPhases(range)) {
+    const path = learnerPhaseArtifactPath(workingDir, phase);
     if (!typedPayload) {
       validated.set(phase, requiredReadJson(path));
       continue;
@@ -756,11 +698,11 @@ export async function harvestOutput(
   // Read a phase's primary artifact for optional gating-field extraction.
   // Required phases: use the already-validated result (no second read).
   // Optional phases: safeReadJson + warn on null.
-  function readForGating(phase: Phase): Record<string, unknown> | null {
+  function readForGating(phase: LearnerPhase): Record<string, unknown> | null {
     if (requiredPhases.has(phase)) {
       return validated.get(phase) ?? null;
     }
-    const path = join(workingDir, `.${phase}`, PHASE_PRIMARY_ARTIFACT[phase]);
+    const path = learnerPhaseArtifactPath(workingDir, phase);
     const data = safeReadJson(path);
     if (data === null) {
       console.warn(

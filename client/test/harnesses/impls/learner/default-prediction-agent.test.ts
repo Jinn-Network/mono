@@ -1,5 +1,12 @@
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -18,6 +25,22 @@ function readJson(path: string): Record<string, unknown> {
 function toolList(manifest: Record<string, unknown>): string[] {
   const jinn = manifest['jinn'] as { capabilities?: { tools?: Record<string, string[]> } };
   return Object.values(jinn.capabilities?.tools ?? {}).flat();
+}
+
+function writeCompletedLearnerArtifacts(workingDir: string): void {
+  for (const [phase, fileName] of [
+    ['orient', 'summary.json'],
+    ['strategize', 'strategy.json'],
+    ['plan', 'plan.json'],
+    ['execute', 'summary.json'],
+    ['debrief', 'analysis.json'],
+    ['improve', 'summary.json'],
+    ['memory-consolidation', 'consolidation_record.json'],
+  ]) {
+    const dir = join(workingDir, `.${phase}`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, fileName), '{}');
+  }
 }
 
 describe('default prediction agent runtime plugins', () => {
@@ -111,6 +134,7 @@ describe('default prediction agent runtime plugins', () => {
 describe('ClaudeCodeHarnessAdapter Network Tools env', () => {
   it('spawns Claude Code with runtime plugin dirs and Jinn MCP env', async () => {
     const calls: Array<{ command: string; args: string[]; options: { env?: NodeJS.ProcessEnv; cwd?: string } }> = [];
+    let workingDir = '';
     const spawnFn = vi.fn((command: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string }) => {
       calls.push({ command, args, options });
       const child = new EventEmitter() as EventEmitter & {
@@ -121,11 +145,14 @@ describe('ClaudeCodeHarnessAdapter Network Tools env', () => {
       child.stderr = new EventEmitter();
       child.killed = false;
       child.kill = vi.fn();
-      setImmediate(() => child.emit('exit', 0, null));
+      setImmediate(() => {
+        writeCompletedLearnerArtifacts(workingDir);
+        child.emit('exit', 0, null);
+      });
       return child;
     });
 
-    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-claude-adapter-work-'));
+    workingDir = mkdtempSync(join(tmpdir(), 'jinn-claude-adapter-work-'));
     const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-claude-adapter-state-'));
     const pluginInstallDir = mkdtempSync(join(tmpdir(), 'jinn-claude-adapter-plugins-'));
     // The adapter lets an operator-set JINN_NETWORK_TOOLS_CLIENT_ROOT win over

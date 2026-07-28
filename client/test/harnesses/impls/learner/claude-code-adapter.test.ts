@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +25,12 @@ type FakeClaudeChild = EventEmitter & {
 };
 
 function fakeClaudeChild(
-  mode: 'result-then-hang' | 'result-then-exit' | 'crash-no-result' | 'result-then-late-output',
+  mode:
+    | 'manual'
+    | 'result-then-hang'
+    | 'result-then-exit'
+    | 'crash-no-result'
+    | 'result-then-late-output',
 ): FakeClaudeChild {
   const child = new EventEmitter() as FakeClaudeChild;
   child.stdout = new EventEmitter();
@@ -35,6 +40,7 @@ function fakeClaudeChild(
   child.killed = false;
   child.kill = vi.fn(() => { child.killed = true; return true; });
   setImmediate(() => {
+    if (mode === 'manual') return;
     if (mode === 'crash-no-result') {
       child.stderr.emit('data', Buffer.from('boom\n'));
       child.emit('exit', 1, null);
@@ -64,6 +70,52 @@ function fakeClaudeChild(
   return child;
 }
 
+const fullTrainArtifactPaths = [
+  ['orient', 'summary.json'],
+  ['strategize', 'strategy.json'],
+  ['plan', 'plan.json'],
+  ['execute', 'summary.json'],
+  ['debrief', 'analysis.json'],
+  ['improve', 'summary.json'],
+  ['memory-consolidation', 'consolidation_record.json'],
+] as const;
+
+function writeJsonArtifact(
+  workingDir: string,
+  phase: string,
+  fileName: string,
+  payload: Record<string, unknown> = {},
+): void {
+  const dir = join(workingDir, `.${phase}`);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, fileName), JSON.stringify(payload));
+}
+
+function writeFullTrainArtifacts(workingDir: string): void {
+  for (const [phase, fileName] of fullTrainArtifactPaths) {
+    writeJsonArtifact(workingDir, phase, fileName);
+  }
+}
+
+function writePhases(
+  workingDir: string,
+  phases: readonly (typeof fullTrainArtifactPaths)[number][],
+): void {
+  for (const [phase, fileName] of phases) {
+    writeJsonArtifact(workingDir, phase, fileName);
+  }
+}
+
+function writeTask1196PartialOrientArtifacts(workingDir: string): void {
+  writeJsonArtifact(workingDir, 'orient', 'goal-parse.json');
+  writeJsonArtifact(workingDir, 'orient', 'world-state.json');
+  writeJsonArtifact(workingDir, 'orient', 'own-history.json');
+}
+
+async function nextTurn(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
 function sweTask(): Task {
   return {
     id: 'swe-rebench-task-restoration',
@@ -87,7 +139,15 @@ function sweTask(): Task {
   } as unknown as Task;
 }
 
-function runInputs(workingDir: string, implStateDir: string, abort: AbortSignal) {
+function runInputs(
+  workingDir: string,
+  implStateDir: string,
+  abort: AbortSignal,
+  options: {
+    mode?: 'train' | 'frozen';
+    phaseRange?: 'full' | 'pre-execute' | 'post-execute' | 'solve-only';
+  } = {},
+) {
   return {
     taskId: 'swe-rebench-task-restoration',
     requestId: '0x' + '7'.repeat(64),
@@ -100,8 +160,11 @@ function runInputs(workingDir: string, implStateDir: string, abort: AbortSignal)
     windowStartTs: 1,
     windowEndTs: 2,
     msUntilEndTs: 3_600_000,
-    mode: 'train' as const,
+    mode: options.mode ?? 'train',
     abort,
+    ...(options.phaseRange
+      ? { adapterEnv: { LEARNER_PHASE_RANGE: options.phaseRange } }
+      : {}),
   };
 }
 
@@ -128,6 +191,7 @@ describe('ClaudeCodeHarnessAdapter — completion + subprocess reaping (#883)', 
     const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-claude-hang-state-'));
     try {
       const adapter = makeAdapter(spawnFn, killGroup);
+      writeFullTrainArtifacts(workingDir);
       // Pre-fix this never resolves (adapter waits on child 'exit', which never
       // fires) and the test times out. Post-fix it resolves on the result line.
       await adapter.runTask(runInputs(workingDir, implStateDir, new AbortController().signal), learnerPluginRoot);
@@ -158,6 +222,7 @@ describe('ClaudeCodeHarnessAdapter — completion + subprocess reaping (#883)', 
     const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-claude-ok-state-'));
     try {
       const adapter = makeAdapter(spawnFn);
+      writeFullTrainArtifacts(workingDir);
       await expect(
         adapter.runTask(runInputs(workingDir, implStateDir, new AbortController().signal), learnerPluginRoot),
       ).resolves.toBeUndefined();
@@ -188,6 +253,7 @@ describe('ClaudeCodeHarnessAdapter — completion + subprocess reaping (#883)', 
     process.on('uncaughtException', onUncaught);
     try {
       const adapter = makeAdapter(spawnFn);
+      writeFullTrainArtifacts(workingDir);
       await expect(
         adapter.runTask(runInputs(workingDir, implStateDir, new AbortController().signal), learnerPluginRoot),
       ).resolves.toBeUndefined();
@@ -196,6 +262,245 @@ describe('ClaudeCodeHarnessAdapter — completion + subprocess reaping (#883)', 
       expect(uncaught.map((e) => e.message)).not.toContain('write after end');
     } finally {
       process.off('uncaughtException', onUncaught);
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  }, 8000);
+
+  it('keeps Task 1196 running across an intermediate result until terminal learner artifacts exist', async () => {
+    let child: FakeClaudeChild | undefined;
+    const spawnFn = vi.fn(() => {
+      child = fakeClaudeChild('manual');
+      return child;
+    });
+    const killGroup = vi.fn();
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-claude-multiturn-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-claude-multiturn-state-'));
+    try {
+      const adapter = makeAdapter(spawnFn, killGroup);
+      const run = adapter.runTask(
+        runInputs(workingDir, implStateDir, new AbortController().signal),
+        learnerPluginRoot,
+      );
+      let outcome: 'pending' | 'resolved' | 'rejected' = 'pending';
+      void run.then(
+        () => { outcome = 'resolved'; },
+        () => { outcome = 'rejected'; },
+      );
+      await nextTurn();
+
+      writeTask1196PartialOrientArtifacts(workingDir);
+      child!.stdout.emit(
+        'data',
+        Buffer.from('{"type":"result","subtype":"success"}\n'),
+      );
+      await nextTurn();
+
+      expect(outcome).toBe('pending');
+      expect(child!.kill).not.toHaveBeenCalled();
+      expect(killGroup).not.toHaveBeenCalled();
+
+      writeFullTrainArtifacts(workingDir);
+      child!.stdout.emit(
+        'data',
+        Buffer.from('{"type":"result","subtype":"success"}\n'),
+      );
+
+      await expect(run).resolves.toBeUndefined();
+      expect(child!.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(killGroup).toHaveBeenCalledWith(child!.pid, 'SIGTERM');
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  }, 8000);
+
+  it('settles a cached result on clean exit after terminal artifacts appear', async () => {
+    let child: FakeClaudeChild | undefined;
+    const spawnFn = vi.fn(() => {
+      child = fakeClaudeChild('manual');
+      return child;
+    });
+    const killGroup = vi.fn();
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-claude-cached-result-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-claude-cached-result-state-'));
+    try {
+      const adapter = makeAdapter(spawnFn, killGroup);
+      const run = adapter.runTask(
+        runInputs(workingDir, implStateDir, new AbortController().signal),
+        learnerPluginRoot,
+      );
+      await nextTurn();
+
+      writeTask1196PartialOrientArtifacts(workingDir);
+      child!.stdout.emit(
+        'data',
+        Buffer.from('{"type":"result","subtype":"success"}\n'),
+      );
+      await nextTurn();
+      expect(child!.kill).not.toHaveBeenCalled();
+
+      writeFullTrainArtifacts(workingDir);
+      child!.emit('exit', 0, null);
+
+      await expect(run).resolves.toBeUndefined();
+      expect(killGroup).not.toHaveBeenCalled();
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  }, 8000);
+
+  it('rejects a clean exit when only an intermediate result and partial artifacts exist', async () => {
+    let child: FakeClaudeChild | undefined;
+    const spawnFn = vi.fn(() => {
+      child = fakeClaudeChild('manual');
+      return child;
+    });
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-claude-early-exit-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-claude-early-exit-state-'));
+    try {
+      const adapter = makeAdapter(spawnFn);
+      const run = adapter.runTask(
+        runInputs(workingDir, implStateDir, new AbortController().signal),
+        learnerPluginRoot,
+      );
+      await nextTurn();
+
+      writeTask1196PartialOrientArtifacts(workingDir);
+      child!.stdout.emit(
+        'data',
+        Buffer.from('{"type":"result","subtype":"success"}\n'),
+      );
+      child!.emit('exit', 0, null);
+
+      await expect(run).rejects.toThrow(/before learner terminal evidence/);
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  }, 8000);
+
+  it.each([
+    {
+      name: 'full/frozen',
+      options: { mode: 'frozen' as const, phaseRange: 'full' as const },
+      artifacts: fullTrainArtifactPaths.slice(0, 5),
+    },
+    {
+      name: 'pre-execute/train',
+      options: { mode: 'train' as const, phaseRange: 'pre-execute' as const },
+      artifacts: fullTrainArtifactPaths.slice(0, 3),
+    },
+    {
+      name: 'post-execute/frozen',
+      options: { mode: 'frozen' as const, phaseRange: 'post-execute' as const },
+      artifacts: [fullTrainArtifactPaths[4]],
+    },
+  ])('settles $name only from that mode and phase-range terminal contract', async ({
+    options,
+    artifacts,
+  }) => {
+    let child: FakeClaudeChild | undefined;
+    const spawnFn = vi.fn(() => {
+      child = fakeClaudeChild('manual');
+      return child;
+    });
+    const killGroup = vi.fn();
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-claude-phase-range-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-claude-phase-range-state-'));
+    try {
+      writePhases(workingDir, artifacts);
+      const adapter = makeAdapter(spawnFn, killGroup);
+      const run = adapter.runTask(
+        runInputs(
+          workingDir,
+          implStateDir,
+          new AbortController().signal,
+          options,
+        ),
+        learnerPluginRoot,
+      );
+      await nextTurn();
+      child!.stdout.emit(
+        'data',
+        Buffer.from('{"type":"result","subtype":"success"}\n'),
+      );
+
+      await expect(run).resolves.toBeUndefined();
+      expect(killGroup).toHaveBeenCalledWith(child!.pid, 'SIGTERM');
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  }, 8000);
+
+  it('rejects and reaps when a valid learner error artifact is terminal evidence', async () => {
+    let child: FakeClaudeChild | undefined;
+    const spawnFn = vi.fn(() => {
+      child = fakeClaudeChild('manual');
+      return child;
+    });
+    const killGroup = vi.fn();
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-claude-error-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-claude-error-state-'));
+    try {
+      writeJsonArtifact(workingDir, 'errors', 'plan.json', { phase: 'plan' });
+      const adapter = makeAdapter(spawnFn, killGroup);
+      const run = adapter.runTask(
+        runInputs(workingDir, implStateDir, new AbortController().signal),
+        learnerPluginRoot,
+      );
+      await nextTurn();
+      child!.stdout.emit(
+        'data',
+        Buffer.from('{"type":"result","subtype":"success"}\n'),
+      );
+
+      await expect(run).rejects.toThrow(/terminal failure artifact.*plan\.json/);
+      expect(killGroup).toHaveBeenCalledWith(child!.pid, 'SIGTERM');
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  }, 8000);
+
+  it('does not settle an intermediate result from a corrupt learner error artifact', async () => {
+    let child: FakeClaudeChild | undefined;
+    const spawnFn = vi.fn(() => {
+      child = fakeClaudeChild('manual');
+      return child;
+    });
+    const killGroup = vi.fn();
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-claude-corrupt-error-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-claude-corrupt-error-state-'));
+    try {
+      const errorsDir = join(workingDir, '.errors');
+      mkdirSync(errorsDir, { recursive: true });
+      writeFileSync(join(errorsDir, 'plan.json'), 'not-json{');
+      const adapter = makeAdapter(spawnFn, killGroup);
+      const run = adapter.runTask(
+        runInputs(workingDir, implStateDir, new AbortController().signal),
+        learnerPluginRoot,
+      );
+      let outcome: 'pending' | 'resolved' | 'rejected' = 'pending';
+      void run.then(
+        () => { outcome = 'resolved'; },
+        () => { outcome = 'rejected'; },
+      );
+      await nextTurn();
+      child!.stdout.emit(
+        'data',
+        Buffer.from('{"type":"result","subtype":"success"}\n'),
+      );
+      await nextTurn();
+
+      expect(outcome).toBe('pending');
+      expect(killGroup).not.toHaveBeenCalled();
+
+      child!.emit('exit', 0, null);
+      await expect(run).rejects.toThrow(/before learner terminal evidence/);
+    } finally {
       rmSync(workingDir, { recursive: true, force: true });
       rmSync(implStateDir, { recursive: true, force: true });
     }
