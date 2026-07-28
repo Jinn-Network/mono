@@ -54,7 +54,10 @@ import {
   ROUTER_VERDICT_DELIVERY_CLAIMED_EVENT,
 } from '../adapters/mech/contracts.js';
 import { manifestDigestForCid } from '../adapters/mech/digest.js';
-import { assembleTaskLifecycleEvidence } from './task-lifecycle-evidence.js';
+import {
+  applyTaskLifecycleTerminals,
+  assembleTaskLifecycleEvidence,
+} from './task-lifecycle-evidence.js';
 import type { RawAttemptRow, RawTaskRow, RawVerdictRow } from './task-lifecycle-evidence.js';
 import { resolveMostRecentWins, type SetMetadataEvent, type SetMetadataLifecyclePayload } from '../solvernets/most-recent-wins.js';
 import { isRateLimitedEthReadError, withTransientEthReadRetry } from '../chain-read-errors.js';
@@ -1658,21 +1661,12 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
       );
     }
 
-    const verdictCountsByAttempt = new Map<string, number>();
-    for (const verdict of verdicts) {
-      const key = `${verdict.taskId}|${verdict.attemptIndex}|${verdict.chainId}`;
-      verdictCountsByAttempt.set(key, (verdictCountsByAttempt.get(key) ?? 0) + 1);
-    }
-    for (const task of tasks) {
-      task.finalized = attempts.some((attempt) =>
-        attempt.taskId === task.taskId
-        && attempt.chainId === task.chainId
-        && (verdictCountsByAttempt.get(
-          `${attempt.taskId}|${attempt.attemptIndex}|${attempt.chainId}`,
-        ) ?? 0) >= task.requiredVerdicts,
-      );
-      task.refunded = refundedTaskIds.has(task.taskId);
-    }
+    applyTaskLifecycleTerminals({
+      tasks,
+      attempts,
+      verdicts,
+      refundedTaskIds,
+    });
 
     return assembleTaskLifecycleEvidence({
       tasks,
