@@ -400,3 +400,110 @@ also insufficient. The learner hook requires `learn` as the first action, and
 fresh planner/worker subagents receive the learner role prompts directly.
 Workspace correctness must therefore be explicit in the shared session and
 dispatch contracts.
+
+## 13. Live-canary finding: Claude multi-turn completion handshake
+
+Task `1196` verified the task-workspace boundary: all three Orient explorers
+used the authoritative repository checkout at the exact claim head. It then
+exposed an independent lifecycle race in the Claude Code adapter.
+
+Claude Code can emit a top-level stream-json `result` at an intermediate
+turn boundary. In the observed run, the learner had dispatched three
+background explorers and called `ScheduleWakeup`. The CLI emitted a successful
+`result` while those explorers were still live. The adapter treated every
+top-level `result` as session-terminal, immediately reaped the process group,
+and settled the run. The last explorer notification arrived afterward, but the
+coordinator was interrupted before it could aggregate
+`.orient/summary.json`. No repository mutation or Solution envelope was
+produced.
+
+The adapter cannot decide session completion from Claude's stream marker alone.
+It must combine that marker with the learner's existing artifact contract.
+
+### 13.1 Terminal evidence
+
+The phase order, primary artifact names, phase-range normalization, and
+required-phase selection become one reusable contract shared by harvesting and
+the adapter. The adapter derives its normal terminal evidence from:
+
+- `mode = train`, `phaseRange = full`: all seven primary learner artifacts;
+- `mode = frozen`, `phaseRange = full`: Orient through Debrief, with Improve
+  and Memory consolidation omitted;
+- `phaseRange = pre-execute`: Orient, Strategize, and Plan;
+- `phaseRange = post-execute`: Debrief plus the train-only Improve and Memory
+  consolidation phases; and
+- `phaseRange = solve-only`: no learner phase artifacts, matching the existing
+  specialist-harvest contract.
+
+Every required primary artifact must exist and contain valid JSON. This avoids
+declaring completion while a file is absent, empty, or only partially written.
+
+The learner's existing failure contract is also terminal evidence. Any valid
+JSON file under `workingDir/.errors/*.json` means the coordinator intentionally
+reported a terminal failure. The adapter must reject that run rather than
+waiting for normal phase artifacts.
+
+### 13.2 Result and exit state machine
+
+The adapter retains the latest parsed top-level Claude `result`.
+
+When a `result` arrives:
+
+1. cache it;
+2. inspect terminal evidence;
+3. if evidence is incomplete, continue parsing without reaping, closing logs,
+   or settling;
+4. if a valid learner error artifact exists, reap and reject; and
+5. if normal terminal evidence exists, preserve the issue `#883` behavior:
+   reap the process group with `SIGTERM`, arm the two-second `SIGKILL`
+   backstop, and settle from the result subtype.
+
+The parser must continue through the current stdout chunk after an intermediate
+result so a later top-level result in the same chunk is not lost.
+
+Child exit remains an independent boundary:
+
+- window abort retains its existing partial-output resolution behavior;
+- a non-zero, non-aborted exit retains the existing process failure;
+- an exit after a valid learner error artifact rejects that reported failure;
+- an exit after normal terminal artifacts uses the cached/latest result when
+  one exists, otherwise a clean zero exit resolves; and
+- a clean exit before terminal evidence remains a failed early exit and must
+  not be converted to success merely because an intermediate successful
+  `result` was cached.
+
+This preserves bounded shutdown without a timer heuristic. A correctly
+completed session with leaked tool subprocesses is reaped immediately at its
+terminal `result`, exactly as in `#883`. An incomplete session remains bounded
+by the existing task-window abort. No polling loop, arbitrary grace period, or
+new model-authored completion sentinel is introduced.
+
+### 13.3 Regression coverage
+
+Tests must prove:
+
+1. the Task `1196` shape—partial Orient artifacts followed by an intermediate
+   successful `result`—does not kill or settle the child;
+2. a later result after all full/train artifacts exist reaps and resolves;
+3. a completed child that never exits still follows the `#883` process-group
+   reap path;
+4. full/frozen and pre/post phase ranges use their existing required artifact
+   sets;
+5. a valid `.errors/*.json` artifact is terminal failure evidence, while an
+   invalid JSON error file is not; and
+6. clean child exit cannot promote a cached intermediate result to success
+   before terminal evidence exists.
+
+### 13.4 Rejected alternatives
+
+Tracking Claude background-task lifecycle from stream-json was rejected
+because it couples the client to Claude-specific, version-sensitive event
+shapes and does not cover other multi-turn wakeup mechanisms.
+
+Adding `.coordinator/completed.json` was rejected because it creates a new
+model-authored protocol whose omission can recreate the hang. The learner
+already has an authoritative terminal artifact contract.
+
+Using an inactivity timeout or polling grace period was rejected because it
+can kill legitimate long-running subagents and makes correctness depend on
+timing rather than durable state.
