@@ -11,3 +11,5 @@ export * from "./revocation.js";
 export * from "./authorization.js";
 export * from "./policy.js";
 export * from "./ceremony.js";
+export * from "./interfaces.js";
+export * from "./verify.js";
