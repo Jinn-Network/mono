@@ -331,3 +331,72 @@ requires a `jinn-autopilot-mutation-result.v1` payload with
 that file. It also snapshots the real Git index before harvest and proves its
 bytes and status are unchanged afterward. Existing tracked-diff,
 missing-identity, legacy, engine, and Hermes coverage must remain green.
+
+## 12. Live-canary finding: learner task-workspace boundary
+
+The next live Task (`1195`) exposed a separate path-routing defect. The runtime
+correctly provisioned the authoritative repository at
+`<workingDir>/repo`, and the trusted harvester correctly inspected that
+checkout. The learner's planner and step workers instead received only the
+episode `workingDir`. Their generic instructions said that every expected
+output was under `workingDir`, so a relative task path such as
+`client/docs/marketplace-canary-….md` was resolved against the episode root.
+The requested file was created outside the repository, the authoritative
+checkout stayed clean, and packaging had no mutation payload to deliver.
+
+The approved boundary introduces an optional absolute `taskWorkspaceDir` in
+the learner session contract:
+
+- for repository-shaped `jinn-repo.v1` restoration tasks,
+  `taskWorkspaceDir = join(workingDir, "repo")`;
+- repository inspection, mutation, and verification must use
+  `taskWorkspaceDir`;
+- learner telemetry remains rooted at the episode `workingDir`, including
+  `.coordinator`, `.orient`, `.strategize`, `.plan`, `.execute`, `.debrief`,
+  `.improve`, and `.memory-consolidation`;
+- `implStateDir` remains the separate persistent learning-state root; and
+- non-repository tasks leave `taskWorkspaceDir` absent and retain their current
+  behavior.
+
+The harness threads this value into both supported learner launch surfaces.
+Claude Code and Codex keep their process current working directory at the
+episode `workingDir`; changing process cwd would be unsafe because repository
+provisioning may occur in a runtime SessionStart hook and because the telemetry
+contract is intentionally episode-rooted. The initial prompt names both roots
+and their responsibilities. The learner uniform dispatch then passes the
+absolute `taskWorkspaceDir` to the coordinator's planner and every step worker.
+Planner output must use absolute task paths beneath that root, and step workers
+must reject or report task mutations routed elsewhere.
+
+This is a shared harness boundary, not SolverNet-specific solving guidance. The
+runtime task skill remains authoritative for repository semantics and payload
+shape, but correctness no longer depends on that skill being selected before
+the learner hook's mandatory `learn` invocation. It also no longer depends on a
+task description redundantly mentioning `workingDir/repo`.
+
+### 12.1 Regression coverage
+
+Tests must prove:
+
+1. `LearnerHarness` sets the exact absolute repository workspace for a
+   `jinn-repo.v1` restoration task and leaves it absent for a non-repository
+   task.
+2. Both Claude Code and Codex initial prompts expose the episode root and task
+   workspace as distinct values while retaining episode-root process cwd.
+3. The learner planner and step-worker contracts receive
+   `taskWorkspaceDir`, route the Task `1195`-shaped relative
+   `client/docs/…` mutation into `<workingDir>/repo/client/docs/…`, and keep
+   phase artifacts under `<workingDir>/.<phase>/`.
+4. Existing non-repository adapter and learner behavior remains unchanged.
+
+### 12.2 Rejected alternatives
+
+Changing the agent process cwd to `<workingDir>/repo` is insufficient and can
+run before the runtime hook materializes the checkout. It also blurs the
+episode telemetry boundary.
+
+Strengthening only the repository runtime skill or its SessionStart steer is
+also insufficient. The learner hook requires `learn` as the first action, and
+fresh planner/worker subagents receive the learner role prompts directly.
+Workspace correctness must therefore be explicit in the shared session and
+dispatch contracts.
