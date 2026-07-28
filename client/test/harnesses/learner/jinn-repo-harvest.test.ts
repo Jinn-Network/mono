@@ -9,9 +9,17 @@
  * materializer no-ops for non-jinn-repo / evaluation / empty-diff cases.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { harvestOutput } from '../../../src/harnesses/impls/learner/harvest.js';
@@ -100,11 +108,27 @@ describe('harvestOutput — jinn-repo materializer', () => {
     rmSync(workingDir, { recursive: true, force: true });
   });
 
-  it('materializes a typed Autopilot mutation result from the worktree diff', async () => {
+  it('materializes the complete Autopilot worktree without mutating the real index', async () => {
     const repoDir = makeRepo(workingDir);
     writeFileSync(join(repoDir, 'README.md'), 'before\n');
+    writeFileSync(join(repoDir, 'obsolete.md'), 'remove me\n');
+    writeFileSync(join(repoDir, '.gitignore'), '*.ignored\n');
     commitBase(repoDir);
     writeFileSync(join(repoDir, 'README.md'), 'after\n');
+    rmSync(join(repoDir, 'obsolete.md'));
+    writeFileSync(join(repoDir, 'scratch.ignored'), 'ignore me\n');
+    mkdirSync(join(repoDir, 'client', 'docs'), { recursive: true });
+    writeFileSync(
+      join(repoDir, 'client', 'docs', 'marketplace-canary.md'),
+      'JINN_MARKETPLACE_CANARY\n',
+    );
+
+    const realIndexPath = join(repoDir, '.git', 'index');
+    const realIndexBefore = readFileSync(realIndexPath);
+    const statusBefore = execFileSync('git', ['status', '--short'], {
+      cwd: repoDir,
+      encoding: 'utf8',
+    });
 
     const out = await harvestOutput(
       workingDir,
@@ -134,6 +158,55 @@ describe('harvestOutput — jinn-repo materializer', () => {
       (out.solutionPayload?.correlation as Record<string, unknown>)
         .deliveryEnvelopeCid,
     ).toBeUndefined();
+    const patch = (out.solutionPayload as Record<string, unknown>).patch as string;
+    expect(patch).toContain('README.md');
+    expect(patch).toContain('-before');
+    expect(patch).toContain('+after');
+    expect(patch).toContain('obsolete.md');
+    expect(patch).toContain('deleted file mode 100644');
+    expect(patch).toContain('client/docs/marketplace-canary.md');
+    expect(patch).toContain('new file mode 100644');
+    expect(patch).toContain('+JINN_MARKETPLACE_CANARY');
+    expect(patch).not.toContain('scratch.ignored');
+
+    expect(readFileSync(realIndexPath).equals(realIndexBefore)).toBe(true);
+    expect(execFileSync('git', ['status', '--short'], {
+      cwd: repoDir,
+      encoding: 'utf8',
+    })).toBe(statusBefore);
+    expect(
+      readdirSync(join(workingDir, '.execute'))
+        .filter((entry) => entry.startsWith('autopilot-harvest-index-')),
+    ).toEqual([]);
+  });
+
+  it('removes the isolated index when complete Autopilot diff derivation fails', async () => {
+    const repoDir = makeRepo(workingDir);
+    writeFileSync(join(repoDir, 'README.md'), 'before\n');
+    commitBase(repoDir);
+    writeFileSync(join(repoDir, 'new.md'), 'new\n');
+    writeFileSync(join(repoDir, '.git', 'HEAD'), 'ref: refs/heads/missing\n');
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await harvestOutput(
+        workingDir,
+        'solve-only',
+        autopilotTask(),
+        {
+          taskId: '1192',
+          attemptIndex: 0,
+          requestId: `0x${'4'.repeat(64)}`,
+        },
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+
+    expect(
+      readdirSync(join(workingDir, '.execute'))
+        .filter((entry) => entry.startsWith('autopilot-harvest-index-')),
+    ).toEqual([]);
   });
 
   it('fails closed when an Autopilot session lacks runtime attempt identity', async () => {

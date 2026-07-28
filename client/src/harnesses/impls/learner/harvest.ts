@@ -1,5 +1,14 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { buildSolutionOutput } from '@jinn-network/sdk/solvernets/prediction-v1';
@@ -24,6 +33,7 @@ import { stripTestPathHunks } from './restoration-patch.js';
 // not.
 const execFileAsync = promisify(execFile);
 const GIT_DIFF_TIMEOUT_MS = 60_000;
+const GIT_DIFF_MAX_BUFFER = 50 * 1024 * 1024;
 
 const PHASE_ORDER = [
   'orient',
@@ -311,6 +321,7 @@ async function maybeMaterializeJinnRepoPatchPayload(
   workingDir: string,
   task?: Task,
   identity?: AutopilotHarvestIdentity,
+  isAutopilotSession = false,
 ): Promise<Record<string, unknown> | null> {
   if (task?.solverType !== 'jinn-repo.v1' || task.role === 'evaluation') {
     return null;
@@ -322,13 +333,15 @@ async function maybeMaterializeJinnRepoPatchPayload(
 
   let rawPatch = '';
   try {
-    // Async + bounded timeout, matching the swe-rebench materializer above.
-    const { stdout } = await execFileAsync('git', ['-C', repoDir, 'diff', '--binary'], {
-      encoding: 'utf8',
-      maxBuffer: 50 * 1024 * 1024,
-      timeout: GIT_DIFF_TIMEOUT_MS,
-    });
-    rawPatch = stdout;
+    rawPatch = isAutopilotSession
+      ? await deriveCompleteAutopilotWorktreePatch(workingDir, repoDir)
+      : (
+          await execFileAsync('git', ['-C', repoDir, 'diff', '--binary'], {
+            encoding: 'utf8',
+            maxBuffer: GIT_DIFF_MAX_BUFFER,
+            timeout: GIT_DIFF_TIMEOUT_MS,
+          })
+        ).stdout;
   } catch (err) {
     console.warn(
       `[claude-code-learner] harvestOutput: unable to derive jinn-repo patch from git diff: ${err instanceof Error ? err.message : String(err)}`,
@@ -399,6 +412,41 @@ async function maybeMaterializeJinnRepoPatchPayload(
     JSON.stringify(payload, null, 2),
   );
   return payload;
+}
+
+async function deriveCompleteAutopilotWorktreePatch(
+  workingDir: string,
+  repoDir: string,
+): Promise<string> {
+  // Populate an isolated index from HEAD, then stage the complete worktree into
+  // it so edits, deletions, and non-ignored untracked files share one patch
+  // without touching the operator's real index.
+  const executeDir = join(workingDir, '.execute');
+  mkdirSync(executeDir, { recursive: true });
+  const temporaryIndexDir = mkdtempSync(join(executeDir, 'autopilot-harvest-index-'));
+  const gitEnv = {
+    ...process.env,
+    GIT_INDEX_FILE: join(temporaryIndexDir, 'index'),
+  };
+  const options = {
+    encoding: 'utf8' as const,
+    env: gitEnv,
+    maxBuffer: GIT_DIFF_MAX_BUFFER,
+    timeout: GIT_DIFF_TIMEOUT_MS,
+  };
+
+  try {
+    await execFileAsync('git', ['-C', repoDir, 'read-tree', 'HEAD'], options);
+    await execFileAsync('git', ['-C', repoDir, 'add', '-A', '--'], options);
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', repoDir, 'diff', '--cached', '--binary', 'HEAD', '--'],
+      options,
+    );
+    return stdout;
+  } finally {
+    rmSync(temporaryIndexDir, { recursive: true, force: true });
+  }
 }
 
 function payloadRole(task?: Task): Role {
@@ -666,7 +714,12 @@ export async function harvestOutput(
   // .execute/solution-payload.json path is preserved everywhere else.
   const rawTypedPayload =
     (await maybeMaterializeSweRebenchPatchPayload(workingDir, task)) ??
-    (await maybeMaterializeJinnRepoPatchPayload(workingDir, task, identity)) ??
+    (await maybeMaterializeJinnRepoPatchPayload(
+      workingDir,
+      task,
+      identity,
+      isAutopilotSession,
+    )) ??
     (isAutopilotSession ? null : readTypedPayloadJson(typedPayloadPath));
   const typedPayload = rawTypedPayload
     ? normalizeTypedPayload(rawTypedPayload, task, typedPayloadPath)
