@@ -298,39 +298,50 @@ const mcnemarFixture = {
 
 // --- fixture 4: clean-subset@1 (delegates to wilson) -----------------------------------------
 
-const cleanSubsetTimestamps = {
-  [taskDigest("wilson/t1")]: "2026-01-01T00:00:00Z",
-  [taskDigest("wilson/t2")]: "2026-01-15T00:00:00Z",
-  [taskDigest("wilson/t3")]: "2026-02-10T00:00:00Z",
-  [taskDigest("wilson/t4")]: "2026-04-01T00:00:00Z",
-  [taskDigest("wilson/t5")]: "2026-04-15T00:00:00Z",
-  [taskDigest("wilson/t6")]: "2026-05-01T00:00:00Z",
+// Contamination-filtering direction (design §9.2): "clean" means the item postdates a model's
+// knowledge cutoff -- guaranteed not seen during training -- so the predicate KEEPS items whose
+// provenance timestamp is >= cutoff, not before it.
+const cleanSubsetCells = [
+  cell("clean/t1", "armA", 1, { outcome: "judged", verdicts: ["v"], validVerdicts: ["v"] }), // pass, pre-cutoff
+  cell("clean/t2", "armA", 1, { outcome: "judged", verdicts: ["v"], validVerdicts: ["v"] }), // pass, pre-cutoff
+  cell("clean/t3", "armA", 1, { outcome: "judged", verdicts: ["v"], validVerdicts: ["v"] }), // pass, post-cutoff
+  cell("clean/t4", "armA", 1, { outcome: "judged", verdicts: ["v"], validVerdicts: ["v"] }), // fail, post-cutoff
+];
+const cleanSubsetVerdictOutcomes = {
+  [digest("clean/t1/armA/verdict/v")]: verdictOutcome("pass"),
+  [digest("clean/t2/armA/verdict/v")]: verdictOutcome("pass"),
+  [digest("clean/t3/armA/verdict/v")]: verdictOutcome("pass"),
+  [digest("clean/t4/armA/verdict/v")]: verdictOutcome("fail"),
 };
-// cutoff keeps t1,t2,t3 (all pass) out of armA's 4 scored cells; t4 (fail) and the
-// unjudged/conflicted cells fall away regardless.
-const cleanSubsetKept = wilsonInterval(3, 3);
+const cleanSubsetTimestamps = {
+  [taskDigest("clean/t1")]: "2026-01-01T00:00:00Z",
+  [taskDigest("clean/t2")]: "2026-02-01T00:00:00Z",
+  [taskDigest("clean/t3")]: "2026-04-01T00:00:00Z",
+  [taskDigest("clean/t4")]: "2026-05-01T00:00:00Z",
+};
+const cleanSubsetKept = wilsonInterval(1, 2); // t3 (pass) + t4 (fail), post-cutoff
 const cleanSubsetFixture = {
   methodId: "jinn.benchmarking.method/clean-subset",
   methodVersion: "1",
   parameters: {
-    cutoff: "2026-02-15T00:00:00Z",
+    cutoff: "2026-03-01T00:00:00Z",
     basis: "self-declared",
     delegate: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} },
   },
   verdictRule: "unanimous",
-  matrices: [matrix(wilsonCells)],
-  verdictOutcomes: wilsonVerdictOutcomes,
+  matrices: [matrix(cleanSubsetCells)],
+  verdictOutcomes: cleanSubsetVerdictOutcomes,
   taskTimestamps: cleanSubsetTimestamps,
   expectedResults: {
     basis: "self-declared",
-    cutoff: "2026-02-15T00:00:00Z",
-    kept: 3,
-    excludedByPredicate: 3,
+    cutoff: "2026-03-01T00:00:00Z",
+    kept: 2,
+    excludedByPredicate: 2,
     delegate: {
       verdictRule: "unanimous",
       arms: {
         armA: {
-          n: 3,
+          n: 2,
           passRate: fixed4(cleanSubsetKept.p),
           wilsonInterval: { low: fixed4(cleanSubsetKept.lo), high: fixed4(cleanSubsetKept.hi) },
         },

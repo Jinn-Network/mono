@@ -1,0 +1,139 @@
+import { describe, expect, test } from "vitest";
+import {
+  nonInferiorityIut,
+  nonInferiorityVerdict,
+  pairedCostVerdict,
+  pairedRateDiffLowerBound,
+} from "./noninferiority.js";
+
+/** Deterministic PRNG (mulberry32) so bootstrap tests are reproducible. */
+function mulberry32(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state |= 0;
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+describe("pairedRateDiffLowerBound", () => {
+  test("zero-variance input (all deltas identical): the bootstrap lower bound is EXACTLY the observed mean, for any seed", () => {
+    // Every resample mean is trivially the same constant, so sorting/quantile selection returns
+    // that constant regardless of the bias-correction z0/zAlpha adjustment -- a hand-verifiable
+    // property, not merely re-running the implementation.
+    const rates = [{ pA: 0.5, pB: 0.6 }, { pA: 0.4, pB: 0.5 }, { pA: 0.3, pB: 0.4 }];
+    for (const seed of [1, 2, 42]) {
+      const bound = pairedRateDiffLowerBound(rates, { rng: mulberry32(seed), resamples: 500 });
+      expect(bound).toBeCloseTo(0.1, 12);
+    }
+  });
+
+  test("rejects an empty sample", () => {
+    expect(() => pairedRateDiffLowerBound([], { rng: mulberry32(1) })).toThrow();
+  });
+
+  test("a lower bound never exceeds the observed mean delta", () => {
+    const rates = [{ pA: 0.2, pB: 0.5 }, { pA: 0.3, pB: 0.3 }, { pA: 0.4, pB: 0.6 }, { pA: 0.1, pB: 0.5 }];
+    const observedMean = rates.reduce((s, r) => s + (r.pB - r.pA), 0) / rates.length;
+    const bound = pairedRateDiffLowerBound(rates, { rng: mulberry32(7), resamples: 2000 });
+    expect(bound).toBeLessThanOrEqual(observedMean + 1e-9);
+  });
+});
+
+describe("nonInferiorityVerdict", () => {
+  const constantImprovingRates = Array.from({ length: 6 }, () => ({ pA: 0.5, pB: 0.6 }));
+
+  test("below minN, the quality leg is inconclusive rather than a weak pass/fail", () => {
+    const result = nonInferiorityVerdict([{ pA: 0.5, pB: 0.6 }], {
+      rng: mulberry32(1),
+      stockBaseRate: 0.5,
+      minN: 5,
+    });
+    expect(result.verdict).toBe("inconclusive");
+    expect(result.lowerBound).toBeNull();
+  });
+
+  test("a clear, constant improvement passes both the absolute and relative checks", () => {
+    const result = nonInferiorityVerdict(constantImprovingRates, {
+      rng: mulberry32(3),
+      stockBaseRate: 0.5,
+      resamples: 500,
+    });
+    expect(result.verdict).toBe("pass");
+    expect(result.lowerBound).toBeCloseTo(0.1, 10); // constant delta -> exact bootstrap bound
+  });
+
+  test("a regression beyond deltaAbs fails the absolute check", () => {
+    const regressingRates = Array.from({ length: 6 }, () => ({ pA: 0.6, pB: 0.5 })); // delta = -0.1
+    const result = nonInferiorityVerdict(regressingRates, {
+      rng: mulberry32(3),
+      stockBaseRate: 0.6,
+      deltaAbs: 0.05,
+      resamples: 500,
+    });
+    expect(result.verdict).toBe("fail");
+    expect(result.reasons.some((r) => r.includes("absolute NI failed"))).toBe(true);
+  });
+});
+
+describe("pairedCostVerdict", () => {
+  test("below minN, inconclusive", () => {
+    expect(pairedCostVerdict([-1, -2, -3])).toEqual({ verdict: "inconclusive", pValue: null, n: 3 });
+  });
+
+  test("all-negative diffs (candidate strictly cheaper): matches the independently computed Wilcoxon values", () => {
+    const result = pairedCostVerdict([-10, -9, -8, -7, -6, -5, -4, -3, -2, -1]);
+    expect(result.verdict).toBe("lower");
+    expect(result.pValue).toBeCloseTo(0.0029608242202975865, 12);
+    expect(result.n).toBe(10);
+  });
+
+  test("all-positive diffs (candidate strictly costlier): not-lower, matches the independently computed value", () => {
+    const result = pairedCostVerdict([10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
+    expect(result.verdict).toBe("not-lower");
+    expect(result.pValue).toBeCloseTo(0.9978414738731554, 10);
+  });
+
+  test("zero diffs are dropped before the minN check", () => {
+    expect(pairedCostVerdict([0, 0, 0, -1, -2]).n).toBe(2);
+  });
+});
+
+describe("nonInferiorityIut (intersection-union composition)", () => {
+  const pass = { verdict: "pass" as const, lowerBound: 0, deltaAbs: 0.05, relativeRegression: 0, reasons: [] };
+  const fail = { verdict: "fail" as const, lowerBound: -1, deltaAbs: 0.05, relativeRegression: 1, reasons: ["x"] };
+  const inconclusiveQuality = { verdict: "inconclusive" as const, lowerBound: null, deltaAbs: 0.05, relativeRegression: null, reasons: ["x"] };
+  const lower = { verdict: "lower" as const, pValue: 0.01, n: 10 };
+  const notLower = { verdict: "not-lower" as const, pValue: 0.9, n: 10 };
+  const inconclusiveCost = { verdict: "inconclusive" as const, pValue: null, n: 3 };
+
+  test("PASS: both legs pass", () => {
+    expect(nonInferiorityIut(pass, lower)).toBe("PASS");
+  });
+
+  test("FAIL: quality fails even if cost is inconclusive (a decisive FAIL dominates)", () => {
+    expect(nonInferiorityIut(fail, inconclusiveCost)).toBe("FAIL");
+  });
+
+  test("FAIL: cost fails even if quality passes", () => {
+    expect(nonInferiorityIut(pass, notLower)).toBe("FAIL");
+  });
+
+  test("FAIL: both legs fail", () => {
+    expect(nonInferiorityIut(fail, notLower)).toBe("FAIL");
+  });
+
+  test("INCONCLUSIVE: quality inconclusive, cost passes", () => {
+    expect(nonInferiorityIut(inconclusiveQuality, lower)).toBe("INCONCLUSIVE");
+  });
+
+  test("INCONCLUSIVE: cost inconclusive, quality passes", () => {
+    expect(nonInferiorityIut(pass, inconclusiveCost)).toBe("INCONCLUSIVE");
+  });
+
+  test("INCONCLUSIVE: both legs inconclusive", () => {
+    expect(nonInferiorityIut(inconclusiveQuality, inconclusiveCost)).toBe("INCONCLUSIVE");
+  });
+});
