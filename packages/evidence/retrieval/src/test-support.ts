@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 import {
+  createArtifactReference,
   createRecordReference,
   type EvidenceRecordReference,
   type EvidenceRepository,
@@ -12,11 +13,14 @@ import {
   type EvidenceLocationPolicy,
   type EvidenceRecordLocator,
   type RetrievalLocationObservation,
+  type ValidatedRecord,
 } from "./contracts.js";
 import {
   createOperationContext,
   resolveHardLimits,
 } from "./operation.js";
+import type { ResolvedValidatedRecord } from "./resolution.js";
+import { validateCanonicalRecord } from "./validation.js";
 
 const GOLDEN_FIXTURES = {
   "execution-evidence":
@@ -81,6 +85,7 @@ export function policyInObservedOrder(): EvidenceLocationPolicy {
 
 export function repositoryReturning(
   recordBytes: Uint8Array | null,
+  artifacts: Readonly<Record<string, Uint8Array>> = {},
 ): EvidenceRepository & {
   readonly getRecord: ReturnType<typeof vi.fn>;
   readonly getArtifact: ReturnType<typeof vi.fn>;
@@ -95,7 +100,10 @@ export function repositoryReturning(
     getRecord: vi.fn(async () =>
       recordBytes === null ? null : Uint8Array.from(recordBytes),
     ),
-    getArtifact: vi.fn(async () => null),
+    getArtifact: vi.fn(async (reference: { readonly digest: string }) => {
+      const bytes = artifacts[reference.digest];
+      return bytes === undefined ? null : Uint8Array.from(bytes);
+    }),
   };
 }
 
@@ -120,6 +128,72 @@ export function arbitraryReference() {
     "execution-evidence",
     new TextEncoder().encode("arbitrary"),
   );
+}
+
+export async function validatedFixture(
+  family: EvidenceRecordReference["family"],
+): Promise<ValidatedRecord> {
+  const bytes = await loadProtocolFixture(family);
+  const reference = createRecordReference(family, bytes);
+  const validation = validateCanonicalRecord(
+    reference,
+    bytes,
+    bytes.byteLength,
+  );
+  if (!validation.ok) {
+    throw new Error(`Golden ${family} fixture did not validate.`);
+  }
+  return validation.validatedRecord;
+}
+
+export async function loadProtocolArtifact(path: string): Promise<Uint8Array> {
+  const url = import.meta.resolve(
+    `@jinn-network/evidence-protocol/fixtures/golden-execution-evidence-v1/${path}`,
+  );
+  return new Uint8Array(await readFile(new URL(url)));
+}
+
+export async function artifactFixture() {
+  const canonicalBytes = await loadProtocolFixture("execution-evidence");
+  const reference = createRecordReference(
+    "execution-evidence",
+    canonicalBytes,
+  );
+  const validation = validateCanonicalRecord(
+    reference,
+    canonicalBytes,
+    canonicalBytes.byteLength,
+  );
+  if (!validation.ok) throw new Error("Golden execution fixture did not validate.");
+  const resultBytes = await loadProtocolArtifact(
+    "execution/results/slug-normalization.patch",
+  );
+  const resultReference = createArtifactReference(resultBytes);
+  const repository = repositoryReturning(canonicalBytes, {
+    [resultReference.digest]: resultBytes,
+  });
+  const observation = available("fixture", "memory");
+  const record: ResolvedValidatedRecord = {
+    reference,
+    canonicalBytes: validation.canonicalBytes,
+    validatedRecord: validation.validatedRecord,
+    availability: [observation],
+    selectedLocation: observation,
+    repository,
+    allowedLocationAttempts: [{
+      repositoryId: "memory",
+      observation,
+    }],
+    warnings: [],
+    failures: [],
+  };
+  return {
+    record,
+    resultBytes,
+    repositories: [repository],
+    resolver: resolverFrom({ memory: repository }),
+    context: operationContext(),
+  };
 }
 
 export async function createKnownReferenceFixture(options: {

@@ -15,15 +15,21 @@ describe("retrieveKnownReference", () => {
       result: {
         reference: fixture.reference,
         discoveryProvenance: [],
-        artifacts: [],
         completeness: "complete",
       },
     });
+    if (outcome.status === "validated") {
+      expect(outcome.result.artifacts.length).toBeGreaterThan(0);
+      expect(outcome.result.artifacts.every(
+        ({ status }) => status === "not-requested",
+      )).toBe(true);
+    }
     expect(fixture.locator.locate).toHaveBeenCalledOnce();
     expect(fixture.repository.getRecord).toHaveBeenCalledWith(
       fixture.reference,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+    expect(fixture.repository.getArtifact).not.toHaveBeenCalled();
   });
 
   test("returns a typed failure and never exposes invalid bytes", async () => {

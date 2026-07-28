@@ -9,6 +9,7 @@ import {
   type RetrieveEvidenceOutcome,
   type RetrievalOperationOptions,
 } from "./contracts.js";
+import { hydrateArtifacts } from "./artifacts.js";
 import { EvidenceRetrievalError } from "./errors.js";
 import { assertBoundedJson, createOperationContext } from "./operation.js";
 import { resolveValidatedRecord } from "./resolution.js";
@@ -63,6 +64,12 @@ export async function retrieveKnownReference(
       return { status: "failed", failure: outcome.failure };
     }
     const record = outcome.record;
+    const hydration = await hydrateArtifacts({
+      record,
+      request: input.artifacts,
+      repositoryResolver: dependencies.repositoryResolver,
+      context,
+    });
     return {
       status: "validated",
       result: {
@@ -72,9 +79,9 @@ export async function retrieveKnownReference(
         discoveryProvenance: [],
         availability: record.availability,
         selectedLocation: record.selectedLocation,
-        artifacts: [],
-        completeness: "complete",
-        warnings: record.warnings,
+        artifacts: hydration.results,
+        completeness: hydration.completeness,
+        warnings: [...record.warnings, ...hydration.warnings],
       },
     };
   } finally {
