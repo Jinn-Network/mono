@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'discovery');
-const discoveryDirectories = ['protocol', 'testing'];   // grows per package task
+const discoveryDirectories = ['protocol', 'testing', 'serve'];   // grows per package task
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'), join(root, 'client'),
   ...['autopilot', 'core', 'indexer', 'indexer-enrichment', 'layer', 'plugin', 'sdk']
@@ -24,6 +24,14 @@ const PROTOCOL_FORBIDDEN_PACKAGES = [
 // leaves, and (like protocol) no TEP/Evidence record packages.
 const TESTING_FORBIDDEN_PACKAGES = [
   '@jinn-network/record-discovery-serve', '@jinn-network/record-discovery-client',
+  '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository',
+  '@jinn-network/evidence-discovery', '@jinn-network/task-execution-protocol',
+  '@jinn-network/task-execution-profiles',
+];
+// serve depends on protocol (production) + testing (dev, conformance kit
+// only); no client, no facts/* leaves, no TEP/Evidence record packages.
+const SERVE_FORBIDDEN_PACKAGES = [
+  '@jinn-network/record-discovery-client',
   '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository',
   '@jinn-network/evidence-discovery', '@jinn-network/task-execution-protocol',
   '@jinn-network/task-execution-profiles',
@@ -195,6 +203,10 @@ test('record-discovery-protocol production source stays within its architecture 
 
 test('record-discovery-testing production source stays within its architecture boundary', () => {
   assertBoundary(join(packages, 'testing', 'src'), TESTING_FORBIDDEN_PACKAGES);
+});
+
+test('record-discovery-serve production source stays within its architecture boundary', () => {
+  assertBoundary(join(packages, 'serve', 'src'), SERVE_FORBIDDEN_PACKAGES);
 });
 
 test('record discovery production source never uses ambient network APIs', () => {

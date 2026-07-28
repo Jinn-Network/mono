@@ -92,8 +92,44 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  serve:
+    needs: [foundation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependency from source (trust-core, §7.8)
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+      - name: Restore Record Discovery Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: record-discovery-protocol-dist
+          path: packages/discovery/protocol/dist
+      - name: Verify Record Discovery Serve
+        working-directory: packages/discovery/serve
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Record Discovery Serve distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: record-discovery-serve-dist
+          path: packages/discovery/serve/dist
+          if-no-files-found: error
+          retention-days: 1
+
   verify:
-    needs: [architecture, foundation, testing]
+    needs: [architecture, foundation, testing, serve]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -102,11 +138,13 @@ jobs:
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
           FOUNDATION_RESULT: ${{ needs.foundation.result }}
           TESTING_RESULT: ${{ needs.testing.result }}
+          SERVE_RESULT: ${{ needs.serve.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
             "$FOUNDATION_RESULT" \
-            "$TESTING_RESULT"; do
+            "$TESTING_RESULT" \
+            "$SERVE_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4
@@ -124,7 +162,7 @@ jobs:
           path: .record-discovery-dist
       - name: Place package distributions
         run: |
-          for package in protocol testing; do
+          for package in protocol testing serve; do
             mkdir -p "packages/discovery/${package}/dist"
             cp -R ".record-discovery-dist/record-discovery-${package}-dist/." "packages/discovery/${package}/dist/"
           done

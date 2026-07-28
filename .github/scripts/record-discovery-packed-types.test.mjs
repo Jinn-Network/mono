@@ -13,11 +13,13 @@ const consumerRoot = join(temporaryRoot, 'consumer');
 const packages = [
   ['protocol', '@jinn-network/record-discovery-protocol'],
   ['testing', '@jinn-network/record-discovery-testing'],
+  ['serve', '@jinn-network/record-discovery-serve'],
 ];
 
 const codeEntrypoints = [
   '@jinn-network/record-discovery-protocol',
   '@jinn-network/record-discovery-testing',
+  '@jinn-network/record-discovery-serve',
 ];
 
 // Cross-tree Jinn dependencies each *then-present* discovery package
