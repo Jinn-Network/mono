@@ -53,6 +53,7 @@ import {
   getTimeoutBounds,
 } from '../../adapters/mech/contracts.js';
 import { runObserveAutopilotDelivery } from './tasks-observe-autopilot.js';
+import { runObserveIssueRelayDelivery } from './tasks-observe-issue-relay.js';
 
 function findNamedErrorCause(
   error: unknown,
@@ -949,6 +950,9 @@ async function run(ctx: CommandContext): Promise<void> {
   if (subverb === 'observe-autopilot-delivery') {
     return runObserveAutopilotDelivery({ ...ctx, argv: rest });
   }
+  if (subverb === 'observe-issue-relay-delivery') {
+    return runObserveIssueRelayDelivery({ ...ctx, argv: rest });
+  }
   if (subverb === 'list') {
     const config = loadConfig(getConfigPathFromArgs(rest));
     emitResult(
@@ -1001,7 +1005,7 @@ async function run(ctx: CommandContext): Promise<void> {
       exampleCli: 'jinn tasks submit --id my-task --description "..." --solver-net prediction',
       details: {
         field: 'subverb',
-        expected: 'submit|observe-autopilot-delivery|list|show',
+        expected: 'submit|observe-autopilot-delivery|observe-issue-relay-delivery|list|show',
       },
     },
     { writer: ctx.writer, exit: ctx.exit },
@@ -1015,12 +1019,16 @@ const command: CommandModule = {
   jinn tasks submit --id <id> --description <text> (--solver-net <name> | --solver-type <type>) [--spec-file <path>] [--dry-run] [--yes] [--human]
   jinn tasks submit --request-file <path> [--dry-run] --yes --json
   jinn tasks observe-autopilot-delivery --expectation-file <path> --json
+  jinn tasks observe-issue-relay-delivery --expectation-file <absolute-path> --json
   jinn tasks list
   jinn tasks show <id>
 
 Idempotent: re-posting the same (--id) from the same creator Safe returns the
 existing request id from the shared task-posting store without sending a new
 transaction.
+
+Issue Relay observation exits 0 when verified, 30 while pending, 50 on a
+contradiction, and 40 for an operational failure.
 
 Options:
   --max-claims <n>    Number of on-chain attempt slots for the task (default 1).

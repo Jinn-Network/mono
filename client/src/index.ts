@@ -29,6 +29,14 @@ export {
   type VerifiedAutopilotMarketplaceDelivery,
 } from './autopilot/marketplace-delivery-observer.js';
 export {
+  createIssueRelayDeliveryObserver,
+  type IssueRelayDeliveryExpectation,
+  type IssueRelayDeliveryObservation,
+  type IssueRelayDeliveryObserver,
+  type IssueRelayDeliveryObserverDeps,
+  type IssueRelayMarketplaceDeliveryExpectation,
+} from './issue-relay/delivery-observer.js';
+export {
   createAutopilotGitHubAdoptionReceiptObserver,
   observeExactAutopilotAdoptionReceipt,
   type AutopilotGitHubReadPort,
