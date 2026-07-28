@@ -182,10 +182,14 @@ function goldenTaskInput(): PersistedTaskRunInput {
 function goldenSolutionOutput(
   mutation: Record<string, unknown> = SDK_GOLDEN_MUTATION,
 ): Record<string, unknown> {
+  const producerResult = structuredClone(mutation);
+  delete (
+    producerResult['correlation'] as Record<string, unknown>
+  ).deliveryEnvelopeCid;
   return {
     venueRef: { name: 'jinn-repo' },
     gating: {},
-    solutionPayload: mutation,
+    solutionPayload: producerResult,
   };
 }
 
@@ -288,13 +292,17 @@ function persistedAutopilotOutput(
       },
     };
   }
+  const producerCorrelation = structuredClone(correlation);
+  delete (
+    producerCorrelation as Record<string, unknown>
+  ).deliveryEnvelopeCid;
   return {
     venueRef: { name: 'jinn-repo' },
     gating: {},
     solutionPayload: {
       schemaVersion: 'jinn-autopilot-mutation-result.v1',
       outcome: 'mutation-complete',
-      correlation,
+      correlation: producerCorrelation,
       patch: 'diff --git a/a b/a',
       summary: 'Implemented.',
       evidence: {
