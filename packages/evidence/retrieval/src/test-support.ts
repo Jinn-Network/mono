@@ -8,15 +8,20 @@ import {
 } from "@jinn-network/evidence-repository";
 import { vi } from "vitest";
 
+import { referenceKey } from "./candidates.js";
 import {
   DEFAULT_RETRIEVAL_HARD_LIMITS,
   type CandidateSource,
+  type CandidateSourceDiagnostics,
   type CandidateSourceOperationOptions,
+  type CandidateSourceReport,
+  type EvidenceCandidate,
   type EvidenceLocationPolicy,
   type EvidenceRecordLocator,
   type FederatedCandidateAllocation,
   type FederatedOrdering,
   type RetrievalLocationObservation,
+  type RetrievalTelemetry,
   type ValidatedRecord,
 } from "./contracts.js";
 import { createFederatedCandidateSource } from "./federation.js";
@@ -24,7 +29,9 @@ import {
   createOperationContext,
   resolveHardLimits,
 } from "./operation.js";
+import { queryEvidence } from "./query.js";
 import type { ResolvedValidatedRecord } from "./resolution.js";
+import { createEvidenceRetrieval } from "./retrieval.js";
 import { validateCanonicalRecord } from "./validation.js";
 
 const GOLDEN_FIXTURES = {
@@ -291,5 +298,186 @@ export async function createKnownReferenceFixture(options: {
       repositoryResolver,
       hardLimits: resolveHardLimits(),
     },
+  };
+}
+
+export async function createQueryReferenceSet() {
+  const executionBytes = await loadProtocolFixture("execution-evidence");
+  const evaluationBytes = await loadProtocolFixture("result-evaluation");
+  const nonconformingBytes = new TextEncoder().encode("{}");
+  return {
+    firstValidReference: createRecordReference(
+      "execution-evidence",
+      executionBytes,
+    ),
+    secondValidReference: createRecordReference(
+      "result-evaluation",
+      evaluationBytes,
+    ),
+    unavailableReference: createRecordReference(
+      "execution-evidence",
+      new TextEncoder().encode("unavailable"),
+    ),
+    nonconformingReference: createRecordReference(
+      "execution-evidence",
+      nonconformingBytes,
+    ),
+    bytesByReference: new Map([
+      [
+        referenceKey(createRecordReference(
+          "execution-evidence",
+          executionBytes,
+        )),
+        executionBytes,
+      ],
+      [
+        referenceKey(createRecordReference(
+          "result-evaluation",
+          evaluationBytes,
+        )),
+        evaluationBytes,
+      ],
+      [
+        referenceKey(createRecordReference(
+          "execution-evidence",
+          nonconformingBytes,
+        )),
+        nonconformingBytes,
+      ],
+    ]),
+  };
+}
+
+export interface QueryFixtureOptions<ProviderData = unknown> {
+  readonly pages: readonly (
+    readonly (
+      | EvidenceRecordReference
+      | EvidenceCandidate<ProviderData>
+    )[]
+  )[];
+  readonly sourceReports?: readonly CandidateSourceReport[];
+  readonly artifactByDigest?: Readonly<Record<string, Uint8Array>>;
+  readonly diagnostics?: CandidateSourceDiagnostics;
+}
+
+export async function queryFixture<ProviderData = unknown>(
+  options: QueryFixtureOptions<ProviderData>,
+) {
+  const references = await createQueryReferenceSet();
+  const repository = repositoryReturning(null, options.artifactByDigest);
+  repository.getRecord.mockImplementation(async (
+    reference: EvidenceRecordReference,
+  ) => {
+    const bytes = references.bytesByReference.get(referenceKey(reference));
+    return bytes === undefined ? null : Uint8Array.from(bytes);
+  });
+  const locator = {
+    locate: vi.fn(async (reference: EvidenceRecordReference) => {
+      return references.bytesByReference.has(referenceKey(reference))
+        ? [available("fixture", "memory")]
+        : [];
+    }),
+  };
+  const repositoryResolver = resolverFrom({ memory: repository });
+  const identity = { id: "paged-fixture", version: "1.0.0" };
+  const find = vi.fn(async (
+    _query: unknown,
+    operation: CandidateSourceOperationOptions,
+  ) => {
+    const pageIndex = operation.cursor === undefined
+      ? 0
+      : Number(operation.cursor.value);
+    const page = options.pages[pageIndex] ?? [];
+    const candidates = page
+      .slice(0, operation.maximumCandidates)
+      .map((value) =>
+        "reference" in value ? value : { reference: value },
+      );
+    const nextIndex = pageIndex + 1;
+    return {
+      source: identity,
+      candidates,
+      ...(nextIndex >= options.pages.length
+        ? {}
+        : {
+            nextCursor: {
+              source: identity,
+              value: nextIndex,
+            },
+          }),
+      ...(options.sourceReports === undefined
+        ? {}
+        : { sourceReports: options.sourceReports }),
+      ...(options.diagnostics === undefined
+        ? {}
+        : { diagnostics: options.diagnostics }),
+    };
+  });
+  const source = { identity, find } satisfies CandidateSource<
+    unknown,
+    ProviderData
+  >;
+  const dependencies = {
+    locator,
+    locationPolicy: policyInObservedOrder(),
+    repositoryResolver,
+    hardLimits: resolveHardLimits(),
+  };
+  return {
+    ...references,
+    source,
+    find,
+    repository,
+    locator,
+    repositoryResolver,
+    dependencies,
+  };
+}
+
+export async function runQuery<ProviderData>(
+  fixture: Awaited<ReturnType<typeof queryFixture<ProviderData>>>,
+  limits: { readonly resultLimit: number; readonly candidateBudget: number },
+) {
+  return queryEvidence(
+    fixture.dependencies,
+    {
+      candidateSource: fixture.source,
+      sourceQuery: { kind: "fixture" },
+      diagnostics: "detailed",
+      ...limits,
+    },
+  );
+}
+
+export interface FacadeFixtureOptions {
+  readonly providerData?: unknown;
+  readonly telemetry?: RetrievalTelemetry;
+}
+
+export async function facadeFixture(
+  options: FacadeFixtureOptions = {},
+) {
+  const references = await createQueryReferenceSet();
+  const fixture = await queryFixture({
+    pages: [[{
+      reference: references.firstValidReference,
+      ...(options.providerData === undefined
+        ? {}
+        : { providerData: options.providerData }),
+    }]],
+  });
+  const retrievalOptions = {
+    locator: fixture.locator,
+    locationPolicy: policyInObservedOrder(),
+    repositoryResolver: fixture.repositoryResolver,
+    ...(options.telemetry === undefined
+      ? {}
+      : { telemetry: options.telemetry }),
+  };
+  return {
+    ...fixture,
+    options: retrievalOptions,
+    retrieval: createEvidenceRetrieval(retrievalOptions),
+    reference: references.firstValidReference,
   };
 }

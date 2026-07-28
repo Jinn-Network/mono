@@ -8,3 +8,4 @@ export {
   decodeSavedEvidenceQuery,
   savedEvidenceQueryDigest,
 } from "./saved-query.js";
+export { createEvidenceRetrieval } from "./retrieval.js";
