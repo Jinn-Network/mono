@@ -23,6 +23,19 @@ function cloneJsonValue(value: unknown): JsonValue {
     }
     if (typeof candidate === "number") {
       if (!Number.isFinite(candidate)) invalidInput("JSON numbers must be finite.");
+      // Program ruling §7.14: every sealer rejects numbers that are not
+      // exactly representable I-JSON integers -- fractional quantities must
+      // be encoded as strings by the caller instead. This closes a
+      // cross-language non-determinism gap in the generic seal path (typed
+      // record schemas already constrain their numeric fields to
+      // `z.number().int()`, so this is a latent-surface fix, not a change
+      // to any current record shape).
+      if (!Number.isSafeInteger(candidate)) {
+        invalidInput(
+          "JSON numbers must be exact I-JSON safe integers -- fractional or non-safe-integer "
+            + "quantities must be encoded as strings (§7.14).",
+        );
+      }
       return candidate;
     }
     if (typeof candidate !== "object") {

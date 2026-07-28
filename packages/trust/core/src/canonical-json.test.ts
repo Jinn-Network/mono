@@ -34,4 +34,17 @@ describe("canonicalJsonBytes", () => {
   test("rejects non-finite numbers", () => {
     expect(() => canonicalJsonBytes({ value: Number.POSITIVE_INFINITY })).toThrow();
   });
+
+  test("rejects fractional numbers (§7.14: only exact I-JSON integers seal; fractional quantities are strings)", () => {
+    expect(() => canonicalJsonBytes({ weight: 1.5 })).toThrow();
+  });
+
+  test("rejects numbers outside the safe-integer range", () => {
+    expect(() => canonicalJsonBytes({ value: Number.MAX_SAFE_INTEGER + 1 })).toThrow();
+  });
+
+  test("accepts exact safe integers, including negative and zero", () => {
+    const bytes = canonicalJsonBytes({ a: 0, b: -1, c: Number.MAX_SAFE_INTEGER });
+    expect(decode(bytes)).toBe(`{"a":0,"b":-1,"c":${Number.MAX_SAFE_INTEGER}}`);
+  });
 });
