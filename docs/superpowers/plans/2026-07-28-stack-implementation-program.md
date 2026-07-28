@@ -334,7 +334,7 @@ cutovers; trust §18 steps 3–8 host rollouts (bootstrap identity establishment
 documents replacing allowlists, DSSE convergence, full backend grant-resolution obligations,
 verifier-policy integration).
 
-## 10. Program extension (2026-07-28) — PENDING OPERATOR APPROVAL
+## 10. Program extension (2026-07-28) — APPROVED by the operator (2026-07-28)
 
 Per the operator addendum (integration head `1200b5842`), two reviewed component plans extend
 the program: [2026-07-28-marketplace-binding.md](./2026-07-28-marketplace-binding.md) and
@@ -358,7 +358,8 @@ in the operator's dependency order — **no extension code before explicit appro
   EXTENDED whole, full-program verification, single merge proposal to
   `integration/evidence-v1`.
 
-Gate-confirmation items for the operator at approval: the `@jinn-network/marketplace-*` npm
-prefix; the benchmarking identifier set (record-kind URIs pre-aligned at fix time to the
-implemented discovery grammar `https://jinn.network/records/benchmark*/1.0`; the bare-token
-`protocol: "jinn.benchmarking/1.0"` field vs TEP's https-URL convention).
+Gate confirmations (operator, 2026-07-28): extension approved in full (all three waves);
+`@jinn-network/marketplace-*` npm prefix confirmed; benchmarking protocol identifier is the
+**https URL form** `https://jinn.network/protocols/benchmarking/1.0` (operator ruling — the
+design's bare token `jinn.benchmarking/1.0` is superseded on this point; recorded as a dated
+addendum on the benchmarking plan); record-kind URIs as pre-aligned.

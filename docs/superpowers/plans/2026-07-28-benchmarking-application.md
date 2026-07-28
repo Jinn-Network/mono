@@ -827,3 +827,11 @@ path. This plan's M1 (record schemas) and M4 (run orchestration/dispatch) MUST e
 exactly those keys or pin different ones — in which case the leaf's recompute gets the
 one-line correction, at that moment, as a coordinated pair of edits. Confirmed at the
 program-extension gate.
+
+## Addendum 2026-07-28-c — protocol identifier (operator ruling at the extension gate)
+
+The `protocol` field of all four benchmarking record kinds is the https URL form
+**`https://jinn.network/protocols/benchmarking/1.0`** — consistent with the TEP / profiles /
+discovery convention. The design's literal bare token `jinn.benchmarking/1.0` is superseded on
+this point (operator ruling, 2026-07-28, program §10 gate). All schemas, sealed goldens, and
+pinned digests use the URL form from day one.
