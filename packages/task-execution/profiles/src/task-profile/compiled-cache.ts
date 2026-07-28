@@ -1,3 +1,4 @@
+import { canonicalJsonBytes } from "../bytes.js";
 import { ProfilesError } from "../errors.js";
 import { compilePayloadValidator, type PayloadValidationResult, type RegExpEngine } from "./payload-schema.js";
 import { sealTaskProfile } from "./seal.js";
@@ -18,8 +19,10 @@ export class PayloadValidatorCache {
   get(digest: string, doc: TaskProfileDocument, opts?: { regExp?: RegExpEngine }): CompiledValidator {
     const cached = this.cache.get(digest);
     if (cached !== undefined) return cached;
-    const bytes = sealTaskProfile(doc).bytes;
-    const validator = compilePayloadValidator(doc.payloadSchema, bytes, opts);
+    // `assertSafeSchema`'s size bound (§6.4) is over the schema itself, not the enclosing
+    // document envelope — pass the schema's own canonical bytes, not the whole sealed document.
+    const schemaBytes = canonicalJsonBytes(doc.payloadSchema);
+    const validator = compilePayloadValidator(doc.payloadSchema, schemaBytes, opts);
     this.cache.set(digest, validator);
     return validator;
   }
