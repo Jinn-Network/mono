@@ -30,6 +30,7 @@ export {
 } from './autopilot/marketplace-delivery-observer.js';
 export {
   createIssueRelayDeliveryObserver,
+  parseIssueRelayTaskCid,
   type IssueRelayDeliveryExpectation,
   type IssueRelayDeliveryObservation,
   type IssueRelayDeliveryObserver,

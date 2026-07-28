@@ -10,6 +10,7 @@ import {
 
 import {
   createIssueRelayDeliveryObserver,
+  parseIssueRelayTaskCid,
   type IssueRelayDeliveryExpectation,
   type IssueRelayDeliveryObservation,
 } from '../../issue-relay/delivery-observer.js';
@@ -26,6 +27,9 @@ import { COMMON_FLAGS, type CommandContext } from '../command.js';
 const address = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
 const requestId = z.string().regex(/^0x[0-9a-fA-F]{64}$/);
 const taskId = z.string().regex(/^(0|[1-9][0-9]*)$/);
+const taskCid = z.string().min(1).refine((value) => {
+  try { parseIssueRelayTaskCid(value); return true; } catch { return false; }
+}, 'Task CID must be a canonical raw sha2-256 CIDv1');
 const round = z.unknown().transform((value, ctx) => {
   const parsed = IssueRelayRoundV1Schema.safeParse(value);
   if (!parsed.success) { ctx.addIssue({ code: 'custom', message: 'invalid Relay round' }); return z.NEVER; }
@@ -34,7 +38,7 @@ const round = z.unknown().transform((value, ctx) => {
 
 export const IssueRelayDeliveryExpectationSchema = z.object({
   schemaVersion: z.literal('jinn-issue-relay-delivery-expectation.v1'),
-  role: z.enum(['solution', 'verdict']), taskId, taskCid: z.string().min(1),
+  role: z.enum(['solution', 'verdict']), taskId, taskCid,
   creationBlockNumber: z.number().int().safe().nonnegative(), round,
   attemptIndex: z.number().int().safe().nonnegative().optional(), requestId: requestId.optional(),
   deliveryEnvelopeCid: z.string().min(1).optional(), solutionOperatorSafe: address.optional(),

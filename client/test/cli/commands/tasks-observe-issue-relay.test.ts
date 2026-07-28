@@ -43,7 +43,7 @@ describe('tasks observe-issue-relay-delivery machine command', () => {
     const config = join(dir, 'config.json');
     writeFileSync(expectation, JSON.stringify({
       schemaVersion: 'jinn-issue-relay-delivery-expectation.v1', role: 'solution',
-      taskId: '501', taskCid: 'bafy-task', creationBlockNumber: 100,
+      taskId: '501', taskCid: `f01551220${'3'.repeat(64)}`, creationBlockNumber: 100,
       round: {
         schemaVersion: 'jinn-issue-relay-round.v1', generation: 'relay:501', round: 0,
         snapshotDigest: `sha256:${'a'.repeat(64)}`,
@@ -57,6 +57,29 @@ describe('tasks observe-issue-relay-delivery machine command', () => {
     expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({ code: 'transient_error' });
     expect(made.exits).toEqual([40]);
     expect(() => parseIssueRelayDeliveryCommandResult({ schemaVersion: 1, generatedAt: '2026-07-28T00:00:00.000Z', verb: 'tasks observe-issue-relay-delivery', observation: { status: 'pending', reason: 'x' }, extra: true })).toThrow();
+  });
+
+  it('rejects malformed canonical Task CIDs before config or RPC initialization', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-observe-relay-invalid-cid-'));
+    const expectation = join(dir, 'expectation.json');
+    const config = join(dir, 'config.json');
+    writeFileSync(expectation, JSON.stringify({
+      schemaVersion: 'jinn-issue-relay-delivery-expectation.v1', role: 'solution',
+      taskId: '501', taskCid: `f01551220${'g'.repeat(64)}`, creationBlockNumber: 100,
+      round: {
+        schemaVersion: 'jinn-issue-relay-round.v1', generation: 'relay:501', round: 0,
+        snapshotDigest: `sha256:${'a'.repeat(64)}`,
+        targetRepository: 'Jinn-Network/mono', workspaceRepository: 'Jinn-Network/mono',
+        inputHead: '1'.repeat(40), purpose: 'initial', findings: [],
+      },
+    }));
+    writeFileSync(config, '{ malformed');
+    const made = makeCommandCtx({ argv: ['observe-issue-relay-delivery', '--expectation-file', expectation, '--config', config, '--json'] });
+    await tasksCommand.run(made.ctx);
+    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
+      code: 'invalid_invocation', message: expect.stringMatching(/Task CID/i),
+    });
+    expect(made.exits).toEqual([11]);
   });
 
   it('rejects verified envelopes whose role and payload schema disagree', () => {
