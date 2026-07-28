@@ -483,8 +483,13 @@ function rowToTaskRun(row: RawRow): PersistedTaskRun {
  * `store.db` here.
  */
 export class TaskRunPersistence {
-  constructor(private readonly db: Database.Database) {
-    runAdditiveMigrations(db);
+  constructor(
+    private readonly db: Database.Database,
+    options: { migrate?: boolean } = {},
+  ) {
+    if (options.migrate !== false) {
+      runAdditiveMigrations(db);
+    }
   }
 
   /**
@@ -1032,6 +1037,136 @@ export class TaskRunPersistence {
     if (result.changes === 0) {
       throw new ConcurrentTransitionError(requestId, existing.state, 'FAILED');
     }
+  }
+
+  /**
+   * Administrative recovery for one already-validated false adoption
+   * contradiction. This is deliberately not a state-machine transition:
+   * FAILED remains terminal during ordinary execution.
+   *
+   * Every recovery-critical value from the validated snapshot participates in
+   * the WHERE clause. A changed row returns false instead of partially
+   * applying stale authority. Delivery and execution evidence are never
+   * rewritten; only the adoption scheduler is made live again.
+   */
+  requeueFailedAdoptionObservation(
+    expected: PersistedTaskRun,
+    recoveredAt: number,
+  ): boolean {
+    if (expected.state !== 'FAILED') return false;
+    const json = (value: unknown): string | null =>
+      value === null ? null : JSON.stringify(value);
+    const result = this.db.prepare(`
+      UPDATE task_runs
+      SET state = 'AWAITING_ADOPTION',
+          state_updated_at = @recoveredAt,
+          failure_reason = NULL,
+          failure_at = NULL,
+          adoption_last_error = NULL,
+          adoption_next_observation_at = @recoveredAt
+      WHERE request_id = @requestId
+        AND state = 'FAILED'
+        AND state_updated_at = @stateUpdatedAt
+        AND failure_reason IS @failureReason
+        AND failure_at IS @failureAt
+        AND task_id IS @taskId
+        AND attempt_index IS @attemptIndex
+        AND task_cid = @taskCid
+        AND onchain_creation_tx = @onchainCreationTx
+        AND onchain_creation_block = @onchainCreationBlock
+        AND onchain_creation_timestamp IS @onchainCreationTimestamp
+        AND solver_type IS @solverType
+        AND solver_net_manifest_cid IS @solverNetManifestCid
+        AND task_role IS @taskRole
+        AND impl_name IS @implName
+        AND task_payload IS @taskPayload
+        AND working_dir IS @workingDir
+        AND impl_state_dir IS @implStateDir
+        AND window_start_ts = @windowStartTs
+        AND window_end_ts = @windowEndTs
+        AND run_started_at IS @runStartedAt
+        AND pre_snapshot_captured_at IS @preSnapshotCapturedAt
+        AND pre_snapshot_payload IS @preSnapshotPayload
+        AND post_snapshot_captured_at IS @postSnapshotCapturedAt
+        AND post_snapshot_payload IS @postSnapshotPayload
+        AND fills_payload IS @fillsPayload
+        AND gating_claim IS @gatingClaim
+        AND informational_claim IS @informationalClaim
+        AND artifact_cids IS @artifactCids
+        AND manifest_generated_at IS @manifestGeneratedAt
+        AND manifest_cid IS @manifestCid
+        AND delivery_tx_hash IS @deliveryTxHash
+        AND delivery_digest IS @deliveryDigest
+        AND delivery_discovery_anchor_tx_hash IS @deliveryAnchorTxHash
+        AND delivery_discovery_anchor_block_number IS @deliveryAnchorBlock
+        AND evidence_hash IS @evidenceHash
+        AND solution_outputs_json IS @solutionOutputsJson
+        AND intermediate_failure_diffs_json IS @intermediateFailureDiffsJson
+        AND runtime_plugins_json IS @runtimePluginsJson
+        AND consumed_refs_json IS @consumedRefsJson
+        AND executor_mode IS @executorMode
+        AND executor_code_digest IS @executorCodeDigest
+        AND adoption_receipt_location IS @adoptionReceiptLocation
+        AND adoption_receipt_authors IS @adoptionReceiptAuthors
+        AND adoption_wait_started_at IS @adoptionWaitStartedAt
+        AND adoption_observation_attempts = @adoptionObservationAttempts
+        AND adoption_next_observation_at IS @adoptionNextObservationAt
+        AND adoption_last_observation IS @adoptionLastObservation
+        AND adoption_accepted_receipt IS @adoptionAcceptedReceipt
+        AND adoption_last_error IS @adoptionLastError
+    `).run({
+      recoveredAt,
+      requestId: expected.requestId,
+      stateUpdatedAt: expected.stateUpdatedAt,
+      failureReason: expected.failureReason,
+      failureAt: expected.failureAt,
+      taskId: expected.taskId,
+      attemptIndex: expected.attemptIndex,
+      taskCid: expected.taskCid,
+      onchainCreationTx: expected.onchainCreationTx,
+      onchainCreationBlock: expected.onchainCreationBlock,
+      onchainCreationTimestamp: expected.onchainCreationTimestamp,
+      solverType: expected.solverType,
+      solverNetManifestCid: expected.solverNetManifestCid,
+      taskRole: expected.taskRole,
+      implName: expected.implName,
+      taskPayload: json(expected.task),
+      workingDir: expected.workingDir,
+      implStateDir: expected.implStateDir,
+      windowStartTs: expected.windowStartTs,
+      windowEndTs: expected.windowEndTs,
+      runStartedAt: expected.runStartedAt,
+      preSnapshotCapturedAt: expected.preSnapshotCapturedAt,
+      preSnapshotPayload: json(expected.preSnapshotPayload),
+      postSnapshotCapturedAt: expected.postSnapshotCapturedAt,
+      postSnapshotPayload: json(expected.postSnapshotPayload),
+      fillsPayload: json(expected.fillsPayload),
+      gatingClaim: json(expected.gatingClaim),
+      informationalClaim: json(expected.informationalClaim),
+      artifactCids: json(expected.artifactCids),
+      manifestGeneratedAt: expected.manifestGeneratedAt,
+      manifestCid: expected.manifestCid,
+      deliveryTxHash: expected.deliveryTxHash,
+      deliveryDigest: expected.deliveryDigest,
+      deliveryAnchorTxHash: expected.deliveryDiscoveryAnchorTxHash,
+      deliveryAnchorBlock: expected.deliveryDiscoveryAnchorBlockNumber,
+      evidenceHash: expected.evidenceHash,
+      solutionOutputsJson: expected.solutionOutputsJson,
+      intermediateFailureDiffsJson: expected.intermediateFailureDiffsJson,
+      runtimePluginsJson: expected.runtimePluginsJson,
+      consumedRefsJson: expected.consumedRefsJson,
+      executorMode: expected.executorMode,
+      executorCodeDigest: expected.executorCodeDigest,
+      adoptionReceiptLocation: json(expected.adoptionReceiptLocation),
+      adoptionReceiptAuthors: json(expected.adoptionReceiptAuthors),
+      adoptionWaitStartedAt: expected.adoptionWaitStartedAt,
+      adoptionObservationAttempts: expected.adoptionObservationAttempts,
+      adoptionNextObservationAt: expected.adoptionNextObservationAt,
+      adoptionLastObservation: json(expected.adoptionLastObservation),
+      adoptionAcceptedReceipt: json(expected.adoptionAcceptedReceipt),
+      adoptionLastError: expected.adoptionLastError,
+    });
+    return result.changes === 1;
   }
 
   /**

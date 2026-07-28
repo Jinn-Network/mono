@@ -37,6 +37,7 @@ import updateCommand from './commands/update.js';
 import mcpCommand from './commands/mcp.js';
 import migrateAgentIdCommand from './commands/migrate-agent-id.js';
 import backfillFailedDeliveriesCommand from './commands/backfill-failed-deliveries.js';
+import recoverFailedAdoptionCommand from './commands/recover-failed-adoption.js';
 import conformanceCommand from './commands/conformance.js';
 import createCommand from './commands/create.js';
 import uiCommand from './commands/ui.js';
@@ -76,6 +77,7 @@ const COMMANDS: CommandModule[] = [
   mcpCommand,
   migrateAgentIdCommand,
   backfillFailedDeliveriesCommand,
+  recoverFailedAdoptionCommand,
   conformanceCommand,
   createCommand,
   uiCommand,
