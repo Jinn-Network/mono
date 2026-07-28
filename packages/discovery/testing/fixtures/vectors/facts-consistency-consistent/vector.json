@@ -1,0 +1,42 @@
+{
+  "name": "facts-consistency-consistent",
+  "kind": "facts-consistency",
+  "description": "The announced facts card matches the value recomputed from the record's own bytes exactly -- the baseline `consistent` outcome.",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://jinn.network/records/submission/1.0",
+        "digest": "sha256:aa8209024da3f7df8e837c26c02f5a2e42c7029415d05ea56e0dcb791d06f742"
+      },
+      "facts": {
+        "taskDigest": "sha256:9b0cd2c1ab68127362238b4a60a136739d582f705c1a38fba4745f620756f30c"
+      },
+      "provenance": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "entry": "sha256:6e18ec763c0751ffab6eddca795cf9a03b16c59b30cc266b9281a23a55897359",
+        "announcementId": "ann-3"
+      }
+    },
+    "profile": {
+      "protocol": "https://jinn.network/record-discovery/1.0",
+      "kind": "https://jinn.network/records/submission/1.0",
+      "profile": "https://jinn.network/records/submission/facts-profile/1.0",
+      "fields": [
+        {
+          "name": "taskDigest",
+          "class": "record",
+          "referenceBearing": true
+        }
+      ]
+    },
+    "recordBytes": {
+      "taskDigest": "sha256:9b0cd2c1ab68127362238b4a60a136739d582f705c1a38fba4745f620756f30c"
+    }
+  },
+  "expect": {
+    "facts": "consistent"
+  }
+}

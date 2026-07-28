@@ -1,0 +1,296 @@
+name: Record Discovery CI
+
+on:
+  pull_request:
+  push:
+    branches: [next]
+    paths:
+      - "packages/discovery/**"
+      - ".github/scripts/record-discovery-*.test.mjs"
+      - ".github/workflows/record-discovery-ci.yml"
+      - "docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md"
+
+permissions:
+  contents: read
+
+env:
+  DISCOVERY_ROOT: packages/discovery
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify package inventory and dependency graph
+        run: node --test .github/scripts/record-discovery-package-inventory.test.mjs
+      - name: Verify source boundaries and canaries
+        run: node --test .github/scripts/record-discovery-source-boundaries.test.mjs
+
+  foundation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependency from source (trust-core, §7.8)
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+      - name: Verify Record Discovery Protocol
+        working-directory: packages/discovery/protocol
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Record Discovery Protocol distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: record-discovery-protocol-dist
+          path: packages/discovery/protocol/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  testing:
+    needs: [foundation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Record Discovery Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: record-discovery-protocol-dist
+          path: packages/discovery/protocol/dist
+      - name: Verify Record Discovery Testing kit
+        working-directory: packages/discovery/testing
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Record Discovery Testing distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: record-discovery-testing-dist
+          path: packages/discovery/testing/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  serve:
+    needs: [foundation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependency from source (trust-core, §7.8)
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+      - name: Restore Record Discovery Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: record-discovery-protocol-dist
+          path: packages/discovery/protocol/dist
+      - name: Verify Record Discovery Serve
+        working-directory: packages/discovery/serve
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Record Discovery Serve distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: record-discovery-serve-dist
+          path: packages/discovery/serve/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  client:
+    needs: [foundation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependency from source (trust-core, §7.8)
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+      - name: Restore Record Discovery Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: record-discovery-protocol-dist
+          path: packages/discovery/protocol/dist
+      - name: Verify Record Discovery Client
+        working-directory: packages/discovery/client
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Record Discovery Client distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: record-discovery-client-dist
+          path: packages/discovery/client/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  facts-evidence:
+    needs: [foundation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependencies from source (evidence-protocol, evidence-repository, evidence-discovery, §7.8)
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+      - name: Restore Record Discovery Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: record-discovery-protocol-dist
+          path: packages/discovery/protocol/dist
+      - name: Verify Record Discovery Facts (Evidence)
+        working-directory: packages/discovery/facts/evidence
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Record Discovery Facts (Evidence) distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: record-discovery-facts-evidence-dist
+          path: packages/discovery/facts/evidence/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  facts-trust:
+    needs: [foundation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependency from source (trust-core, §7.8)
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+      - name: Restore Record Discovery Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: record-discovery-protocol-dist
+          path: packages/discovery/protocol/dist
+      - name: Verify Record Discovery Facts (Trust)
+        working-directory: packages/discovery/facts/trust
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Record Discovery Facts (Trust) distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: record-discovery-facts-trust-dist
+          path: packages/discovery/facts/trust/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    needs: [architecture, foundation, testing, serve, client, facts-evidence, facts-trust]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Record Discovery CI stage to succeed
+        env:
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
+          FOUNDATION_RESULT: ${{ needs.foundation.result }}
+          TESTING_RESULT: ${{ needs.testing.result }}
+          SERVE_RESULT: ${{ needs.serve.result }}
+          CLIENT_RESULT: ${{ needs.client.result }}
+          FACTS_EVIDENCE_RESULT: ${{ needs.facts-evidence.result }}
+          FACTS_TRUST_RESULT: ${{ needs.facts-trust.result }}
+        run: |
+          for result in \
+            "$ARCHITECTURE_RESULT" \
+            "$FOUNDATION_RESULT" \
+            "$TESTING_RESULT" \
+            "$SERVE_RESULT" \
+            "$CLIENT_RESULT" \
+            "$FACTS_EVIDENCE_RESULT" \
+            "$FACTS_TRUST_RESULT"; do
+            test "$result" = "success"
+          done
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore all package distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: record-discovery-*-dist
+          path: .record-discovery-dist
+      - name: Place package distributions
+        run: |
+          declare -A target=(
+            [protocol]=protocol [testing]=testing [serve]=serve [client]=client
+            [facts-evidence]=facts/evidence [facts-trust]=facts/trust
+          )
+          for package in "${!target[@]}"; do
+            mkdir -p "packages/discovery/${target[$package]}/dist"
+            cp -R ".record-discovery-dist/record-discovery-${package}-dist/." "packages/discovery/${target[$package]}/dist/"
+          done
+      - name: Build cross-tree portal dependencies from source (§7.8)
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+      - name: Compile packed public entrypoint consumers
+        run: node .github/scripts/record-discovery-packed-types.test.mjs

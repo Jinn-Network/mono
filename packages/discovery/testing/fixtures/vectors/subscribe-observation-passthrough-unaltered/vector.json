@@ -1,0 +1,15 @@
+{
+  "name": "subscribe-observation-passthrough-unaltered",
+  "kind": "subscribe",
+  "description": "§9.1: observation streams (TEP lifecycle observations) are relayed as-is -- a relay adds nothing and MUST NOT alter them, unlike the announcement stream's CloudEvents lifting.",
+  "input": {
+    "observation": {
+      "kind": "tep-lifecycle-observation",
+      "taskDigest": "sha256:f4156c629684a2fa5c3468a20cc8d0ddec1632316374050abe6e1902d279ff44",
+      "sequence": "0000000000000007"
+    }
+  },
+  "expect": {
+    "relayAltersObservation": false
+  }
+}

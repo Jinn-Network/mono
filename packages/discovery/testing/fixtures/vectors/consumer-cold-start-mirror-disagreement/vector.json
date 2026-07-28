@@ -1,0 +1,34 @@
+{
+  "name": "consumer-cold-start-mirror-disagreement",
+  "kind": "consumer",
+  "description": "§5.2/§13.3: a fresh consumer with no high-water mark queries every reachable mirror and takes the highest valid `(sequence, issuedAt)` -- mirror-b wins on sequence, then issuedAt breaks the tie among mirror-b/mirror-c only if sequences were equal (they aren't here).",
+  "input": {
+    "mirrors": [
+      {
+        "mirrorId": "mirror-a",
+        "head": {
+          "sequence": "0000000000000003",
+          "issuedAt": "2026-07-28T10:00:00.000Z"
+        }
+      },
+      {
+        "mirrorId": "mirror-b",
+        "head": {
+          "sequence": "0000000000000005",
+          "issuedAt": "2026-07-28T11:00:00.000Z"
+        }
+      },
+      {
+        "mirrorId": "mirror-c",
+        "head": {
+          "sequence": "0000000000000005",
+          "issuedAt": "2026-07-28T09:00:00.000Z"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "chosenMirror": "mirror-b",
+    "rule": "highest-valid-(sequence,issuedAt)"
+  }
+}

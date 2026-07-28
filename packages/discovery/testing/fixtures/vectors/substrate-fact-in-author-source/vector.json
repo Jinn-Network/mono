@@ -1,0 +1,49 @@
+{
+  "name": "substrate-fact-in-author-source",
+  "kind": "facts-consistency",
+  "description": "`escrowTerms` is a substrate-classed field (projection-only, §5.4 rule 2), but this item comes from an *author* source, which may only assert record facts -- rejected.",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://jinn.network/records/submission/1.0",
+        "digest": "sha256:fe0328e46eb952f9bed5960f7ef531137d969b51372daab1b10786c04a2a1b22"
+      },
+      "facts": {
+        "taskDigest": "sha256:b576bb210b2a1313eed1948f4216cb6440c2f5e61cf084da49c5e8ad3bfa437f",
+        "escrowTerms": "net-30"
+      },
+      "provenance": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "entry": "sha256:b7c2e52d90733be990c46f507e7ea3151bba2e1fd656be8695502ce2c5de4cd3",
+        "announcementId": "ann-5"
+      }
+    },
+    "sourceClass": "author",
+    "profile": {
+      "protocol": "https://jinn.network/record-discovery/1.0",
+      "kind": "https://jinn.network/records/submission/1.0",
+      "profile": "https://jinn.network/records/submission/facts-profile/1.0",
+      "fields": [
+        {
+          "name": "taskDigest",
+          "class": "record",
+          "referenceBearing": true
+        },
+        {
+          "name": "escrowTerms",
+          "class": "substrate"
+        }
+      ]
+    },
+    "recordBytes": {
+      "taskDigest": "sha256:b576bb210b2a1313eed1948f4216cb6440c2f5e61cf084da49c5e8ad3bfa437f"
+    }
+  },
+  "expect": {
+    "facts": "inconsistent",
+    "reason": "substrate-fact-from-author-source"
+  }
+}

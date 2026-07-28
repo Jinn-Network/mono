@@ -1,0 +1,29 @@
+{
+  "name": "item-unauthorized-provenance",
+  "kind": "item",
+  "description": "A query service cites an entry the consumer never synced onto the source's verified chain -- §10.4 step 3, the case a malicious aggregator is caught by.",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://jinn.network/records/submission/1.0",
+        "digest": "sha256:e093496b46e7ba47267c3ccac0dce59a0fcfc4e034340c51a3f0733a8ed149c3"
+      },
+      "provenance": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "entry": "sha256:8a87a19ee667279aa3346ef2296f292f28abed68695d5cd48956a16662aea706",
+        "announcementId": "ann-7"
+      }
+    },
+    "fetchedBytes": {
+      "note": "item-unauthorized-provenance fixture record bytes",
+      "kind": "submission"
+    },
+    "citedEntryReachable": false
+  },
+  "expect": {
+    "status": "unauthorized-provenance"
+  }
+}

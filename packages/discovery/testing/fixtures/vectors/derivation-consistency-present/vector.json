@@ -1,0 +1,33 @@
+{
+  "name": "derivation-consistency-present",
+  "kind": "derivation-consistency",
+  "description": "The projection's derivation annotation matches the substrate event it claims to project -- confirmed present.",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://jinn.network/records/delivery/1.0",
+        "digest": "sha256:f226ccc53fea7efca138e37a55ef7efc31d91516a242f407e16000f5613bbde7"
+      },
+      "facts": {},
+      "locations": [],
+      "provenance": {
+        "source": {
+          "agent": "did:key:zProjector",
+          "name": "marketplace"
+        },
+        "entry": "sha256:32e64d9f43d0e3ca61a7fc36ab9f624903d611fff8b91c3e45a1d952b939af81",
+        "announcementId": "ann-derivation-consistency-present",
+        "derivation": {
+          "substrateRef": "sha256:dccf178446e74c8f94818405d5a015e7a83c39ae52b82bb9225440aca967dcd7"
+        }
+      }
+    },
+    "recordBytes": {
+      "note": "derivation-consistency-present fixture record bytes",
+      "kind": "delivery"
+    }
+  },
+  "expect": {
+    "derivation": "present"
+  }
+}

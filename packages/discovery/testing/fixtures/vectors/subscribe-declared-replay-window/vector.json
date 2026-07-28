@@ -1,0 +1,12 @@
+{
+  "name": "subscribe-declared-replay-window",
+  "kind": "subscribe",
+  "description": "§9.3: relays are non-archival by design -- the replay window is bounded and advertised, not open-ended.",
+  "input": {
+    "replayWindowSize": 500,
+    "advertised": true
+  },
+  "expect": {
+    "boundedAndAdvertised": true
+  }
+}

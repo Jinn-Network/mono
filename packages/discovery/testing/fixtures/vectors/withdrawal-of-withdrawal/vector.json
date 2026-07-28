@@ -1,0 +1,137 @@
+{
+  "name": "withdrawal-of-withdrawal",
+  "kind": "source-chain",
+  "description": "`ann-3` retracts `ann-2`, which is itself a withdrawal (of `ann-1`), not an `available` -- same-source retraction targets `available` only.",
+  "input": {
+    "seed": {
+      "now": "2026-07-28T12:00:00.000Z",
+      "keys": [
+        {
+          "agent": "did:key:zAgentSourceOne",
+          "keyid": "key-1",
+          "validFrom": "2026-01-01T00:00:00.000Z",
+          "validTo": null,
+          "scope": "jinn:discovery-announcements"
+        }
+      ],
+      "hwm": null
+    },
+    "firstAdoption": true,
+    "head": {
+      "protocol": "https://jinn.network/record-discovery/1.0",
+      "origin": "did:key:zAgentSourceOne/feed",
+      "sequence": "0000000000000003",
+      "entry": "sha256:d6df3208f180b6266f0786bbdc192fc2b2fd72afa910a85f2854a2efdadff7bf",
+      "issuedAt": "2026-07-28T12:00:00.000Z",
+      "refreshBy": "2026-07-29T12:00:00.000Z"
+    },
+    "headSignature": {
+      "payloadType": "application/vnd.jinn.record-discovery.head.v1+json",
+      "payload": "{\"entry\":\"sha256:d6df3208f180b6266f0786bbdc192fc2b2fd72afa910a85f2854a2efdadff7bf\",\"issuedAt\":\"2026-07-28T12:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"refreshBy\":\"2026-07-29T12:00:00.000Z\",\"sequence\":\"0000000000000003\"}",
+      "signatures": [
+        {
+          "keyid": "key-1",
+          "sig": "95c639dad927899c76cf94fb8d319198a716f1efca081bd9dd182799fb38228f:key-1"
+        }
+      ]
+    },
+    "entries": [
+      {
+        "entry": {
+          "protocol": "https://jinn.network/record-discovery/1.0",
+          "source": {
+            "agent": "did:key:zAgentSourceOne",
+            "name": "feed"
+          },
+          "sequence": "0000000000000001",
+          "previous": null,
+          "timestamp": "2026-07-28T12:00:00.000Z",
+          "announcements": [
+            {
+              "announcementId": "ann-1",
+              "action": "available",
+              "record": {
+                "kind": "https://jinn.network/records/submission/1.0",
+                "digest": "sha256:59908df50572502ceeabbcc669a28bcc5343d7564a581b9c9648479580f5b773"
+              }
+            }
+          ]
+        },
+        "signature": {
+          "payloadType": "application/vnd.jinn.record-discovery.entry.v1+json",
+          "payload": "{\"announcements\":[{\"action\":\"available\",\"announcementId\":\"ann-1\",\"record\":{\"digest\":\"sha256:59908df50572502ceeabbcc669a28bcc5343d7564a581b9c9648479580f5b773\",\"kind\":\"https://jinn.network/records/submission/1.0\"}}],\"previous\":null,\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"sequence\":\"0000000000000001\",\"source\":{\"agent\":\"did:key:zAgentSourceOne\",\"name\":\"feed\"},\"timestamp\":\"2026-07-28T12:00:00.000Z\"}",
+          "signatures": [
+            {
+              "keyid": "key-1",
+              "sig": "37a78af256d37608aa967f3406dc634da978f083fde5b733a1eefe63b15c0950:key-1"
+            }
+          ]
+        }
+      },
+      {
+        "entry": {
+          "protocol": "https://jinn.network/record-discovery/1.0",
+          "source": {
+            "agent": "did:key:zAgentSourceOne",
+            "name": "feed"
+          },
+          "sequence": "0000000000000002",
+          "previous": "sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642",
+          "timestamp": "2026-07-28T12:00:00.000Z",
+          "announcements": [
+            {
+              "announcementId": "ann-2",
+              "action": "withdrawn",
+              "retracts": "ann-1",
+              "reason": "delisted"
+            }
+          ]
+        },
+        "signature": {
+          "payloadType": "application/vnd.jinn.record-discovery.entry.v1+json",
+          "payload": "{\"announcements\":[{\"action\":\"withdrawn\",\"announcementId\":\"ann-2\",\"reason\":\"delisted\",\"retracts\":\"ann-1\"}],\"previous\":\"sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642\",\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"sequence\":\"0000000000000002\",\"source\":{\"agent\":\"did:key:zAgentSourceOne\",\"name\":\"feed\"},\"timestamp\":\"2026-07-28T12:00:00.000Z\"}",
+          "signatures": [
+            {
+              "keyid": "key-1",
+              "sig": "b464516a4ac9334114aa709c3cf74a9192c4114691f0f30b82d2957e497b963d:key-1"
+            }
+          ]
+        }
+      },
+      {
+        "entry": {
+          "protocol": "https://jinn.network/record-discovery/1.0",
+          "source": {
+            "agent": "did:key:zAgentSourceOne",
+            "name": "feed"
+          },
+          "sequence": "0000000000000003",
+          "previous": "sha256:ae759b5a65ae00588ba1e39de912d30ca520690367506a917b6a375e763c1e3f",
+          "timestamp": "2026-07-28T12:00:00.000Z",
+          "announcements": [
+            {
+              "announcementId": "ann-3",
+              "action": "withdrawn",
+              "retracts": "ann-2",
+              "reason": "delisted"
+            }
+          ]
+        },
+        "signature": {
+          "payloadType": "application/vnd.jinn.record-discovery.entry.v1+json",
+          "payload": "{\"announcements\":[{\"action\":\"withdrawn\",\"announcementId\":\"ann-3\",\"reason\":\"delisted\",\"retracts\":\"ann-2\"}],\"previous\":\"sha256:ae759b5a65ae00588ba1e39de912d30ca520690367506a917b6a375e763c1e3f\",\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"sequence\":\"0000000000000003\",\"source\":{\"agent\":\"did:key:zAgentSourceOne\",\"name\":\"feed\"},\"timestamp\":\"2026-07-28T12:00:00.000Z\"}",
+          "signatures": [
+            {
+              "keyid": "key-1",
+              "sig": "f9c2fb2ed46f8b00e66e835c56cd104931b7ac099ab69053cbe1a016b9005988:key-1"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "broken-chain",
+    "at": "withdrawal-of-withdrawal"
+  }
+}

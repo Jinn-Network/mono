@@ -1,0 +1,12 @@
+{
+  "protocol": "https://jinn.network/record-discovery/1.0",
+  "kind": "https://jinn.network/records/execution-verification/1.0",
+  "profile": "https://jinn.network/records/execution-verification/1.0/facts/1.0",
+  "fields": [
+    { "name": "verifierId", "class": "record" },
+    { "name": "verdict", "class": "record", "cloudEvents": { "attribute": "verdict", "scalar": "string" } },
+    { "name": "verifiedAt", "class": "record" },
+    { "name": "executionId", "class": "record", "cloudEvents": { "attribute": "executionid", "scalar": "string" } },
+    { "name": "subjectDigest", "class": "record", "referenceBearing": true }
+  ]
+}

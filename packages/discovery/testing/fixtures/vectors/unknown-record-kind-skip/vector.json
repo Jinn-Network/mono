@@ -1,0 +1,80 @@
+{
+  "name": "unknown-record-kind-skip",
+  "kind": "source-chain",
+  "description": "An announcement for a record kind the consumer has no facts profile for -- skipped (not facts-checked), never an error; the chain still verifies (§15).",
+  "input": {
+    "seed": {
+      "now": "2026-07-28T12:00:00.000Z",
+      "keys": [
+        {
+          "agent": "did:key:zAgentSourceOne",
+          "keyid": "key-1",
+          "validFrom": "2026-01-01T00:00:00.000Z",
+          "validTo": null,
+          "scope": "jinn:discovery-announcements"
+        }
+      ],
+      "hwm": null
+    },
+    "firstAdoption": true,
+    "head": {
+      "protocol": "https://jinn.network/record-discovery/1.0",
+      "origin": "did:key:zAgentSourceOne/feed",
+      "sequence": "0000000000000001",
+      "entry": "sha256:7f13245fdcdf16e32b7cd87b8e476005a66973ec87b25dd7097ae7e3947204fc",
+      "issuedAt": "2026-07-28T12:00:00.000Z",
+      "refreshBy": "2026-07-29T12:00:00.000Z"
+    },
+    "headSignature": {
+      "payloadType": "application/vnd.jinn.record-discovery.head.v1+json",
+      "payload": "{\"entry\":\"sha256:7f13245fdcdf16e32b7cd87b8e476005a66973ec87b25dd7097ae7e3947204fc\",\"issuedAt\":\"2026-07-28T12:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"refreshBy\":\"2026-07-29T12:00:00.000Z\",\"sequence\":\"0000000000000001\"}",
+      "signatures": [
+        {
+          "keyid": "key-1",
+          "sig": "2389538f2ef473e7b85f49bf8d16cba90846b95e5e4075eaaf70f32ffab653c0:key-1"
+        }
+      ]
+    },
+    "entries": [
+      {
+        "entry": {
+          "protocol": "https://jinn.network/record-discovery/1.0",
+          "source": {
+            "agent": "did:key:zAgentSourceOne",
+            "name": "feed"
+          },
+          "sequence": "0000000000000001",
+          "previous": null,
+          "timestamp": "2026-07-28T12:00:00.000Z",
+          "announcements": [
+            {
+              "announcementId": "ann-1",
+              "action": "available",
+              "record": {
+                "kind": "https://jinn.network/records/some-future-kind/1.0",
+                "digest": "sha256:bee1e6ff4e1b8024edaf6fd4c5477a15b53e2bd3eb1e0e0253a62883a7eddfb0"
+              }
+            }
+          ]
+        },
+        "signature": {
+          "payloadType": "application/vnd.jinn.record-discovery.entry.v1+json",
+          "payload": "{\"announcements\":[{\"action\":\"available\",\"announcementId\":\"ann-1\",\"record\":{\"digest\":\"sha256:bee1e6ff4e1b8024edaf6fd4c5477a15b53e2bd3eb1e0e0253a62883a7eddfb0\",\"kind\":\"https://jinn.network/records/some-future-kind/1.0\"}}],\"previous\":null,\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"sequence\":\"0000000000000001\",\"source\":{\"agent\":\"did:key:zAgentSourceOne\",\"name\":\"feed\"},\"timestamp\":\"2026-07-28T12:00:00.000Z\"}",
+          "signatures": [
+            {
+              "keyid": "key-1",
+              "sig": "ecac61e2026266b173a1e6b33e8bc6900390cab2bdeaa21131580ac3c0969997:key-1"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "ok",
+    "advanced": {
+      "sequence": "0000000000000001",
+      "entry": "sha256:7f13245fdcdf16e32b7cd87b8e476005a66973ec87b25dd7097ae7e3947204fc"
+    }
+  }
+}
