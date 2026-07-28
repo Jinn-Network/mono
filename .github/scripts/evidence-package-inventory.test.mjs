@@ -23,6 +23,7 @@ const EVIDENCE_PACKAGES = [
   ['local-runtime', '@jinn-network/evidence-local-runtime'],
   ['execution-recorder-bridge', '@jinn-network/execution-recorder-bridge'],
   ['retrieval', '@jinn-network/evidence-retrieval'],
+  ['contribution', '@jinn-network/evidence-contribution'],
 ];
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -42,6 +43,17 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     dependencies: [
       '@jinn-network/evidence-discovery',
       '@jinn-network/evidence-protocol',
+      '@jinn-network/evidence-repository',
+    ],
+    devDependencies: [],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
+  ['contribution', {
+    dependencies: [
+      '@jinn-network/evidence-derivation',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/evidence-publication',
       '@jinn-network/evidence-repository',
     ],
     devDependencies: [],
@@ -79,8 +91,8 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;
 }
 
-test('the evidence package inventory is explicit and has thirteen manifests', () => {
-  assert.equal(EVIDENCE_PACKAGES.length, 13);
+test('the evidence package inventory is explicit and has fourteen manifests', () => {
+  assert.equal(EVIDENCE_PACKAGES.length, 14);
   for (const [directory, expectedName] of EVIDENCE_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);

@@ -10,6 +10,7 @@ const evidenceDirectories = [
   'protocol', 'repository', 'repository-oci', 'repository-ipfs', 'discovery',
   'catalog-sqlite', 'execution-recorder', 'attestation-issuer', 'derivation',
   'publication', 'local-runtime', 'execution-recorder-bridge', 'retrieval',
+  'contribution',
 ];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
@@ -224,6 +225,61 @@ const RETRIEVAL_FORBIDDEN_PACKAGES = [
   '@jinn-network/sdk',
   'better-sqlite3',
   'kubo-rpc-client',
+  'node:dgram',
+  'node:dns',
+  'node:fs',
+  'node:http',
+  'node:http2',
+  'node:https',
+  'node:net',
+  'node:tls',
+  'viem',
+];
+
+// Contribution composes Protocol, Repository, Derivation, and Publication
+// through injected ports. It never touches a concrete Repository binding,
+// Discovery, the Local Evidence Runtime, application/legacy paths, or
+// ambient I/O -- see Task 1 addendum.
+const CONTRIBUTION_ALLOWED_DEPENDENCIES = [
+  '@jinn-network/evidence-derivation',
+  '@jinn-network/evidence-protocol',
+  '@jinn-network/evidence-publication',
+  '@jinn-network/evidence-repository',
+  'canonicalize',
+];
+const CONTRIBUTION_ALLOWED_DEV_DEPENDENCIES = [
+  '@types/node',
+  'typescript',
+  'vitest',
+];
+const CONTRIBUTION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const CONTRIBUTION_FORBIDDEN_PACKAGES = [
+  '@huggingface/transformers',
+  '@jinn-network/attestation-issuer',
+  '@jinn-network/autopilot',
+  '@jinn-network/broadcast-bot',
+  '@jinn-network/client',
+  '@jinn-network/core',
+  '@jinn-network/evidence-catalog-sqlite',
+  '@jinn-network/evidence-discovery',
+  '@jinn-network/evidence-local-runtime',
+  '@jinn-network/evidence-repository-oci',
+  '@jinn-network/evidence-repository-ipfs',
+  '@jinn-network/evidence-repository/fs',
+  '@jinn-network/evidence-retrieval',
+  '@jinn-network/execution-recorder',
+  '@jinn-network/execution-recorder-bridge',
+  '@jinn-network/indexer',
+  '@jinn-network/indexer-enrichment',
+  '@jinn-network/jinn-layer',
+  '@jinn-network/marketplace',
+  '@jinn-network/plugin',
+  '@jinn-network/sdk',
+  'better-sqlite3',
+  'hermes-agent',
+  'kubo-rpc-client',
+  'node:child_process',
+  'node:crypto',
   'node:dgram',
   'node:dns',
   'node:fs',
@@ -683,6 +739,28 @@ test('Retrieval boundary checks catch package, I/O, and ambient-network escapes'
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
+test('Contribution boundary checks catch package, I/O, and ambient-network escapes', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-contribution-boundary-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'source.ts'), [
+      'import "@jinn-network/plugin";',
+      'export * from "@jinn-network/evidence-discovery";',
+      'await import("@jinn-network/evidence-repository/fs");',
+      'require("@jinn-network/evidence-catalog-sqlite");',
+      'import "node:fs";',
+      'import "node:crypto";',
+      'fetch;',
+    ].join('\n'));
+    assert.equal(
+      forbiddenImports(source, CONTRIBUTION_FORBIDDEN_PACKAGES).length,
+      6,
+    );
+    assert.equal(ambientNetworkUsesInFiles(files(source)).length, 1);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
 test('evidence source boundaries remain one-way across the approved graph', () => {
   const discovery = join(packages, 'discovery', 'src');
   const catalog = join(discovery, 'catalog');
@@ -1109,6 +1187,141 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     ),
     [],
     'the Retrieval root entrypoint must not export testing.ts or files under src/testing',
+  );
+
+  const contribution = join(packages, 'contribution');
+  const contributionSource = join(contribution, 'src');
+  const contributionTestingEntry = join(contributionSource, 'testing.ts');
+  const contributionTestingFixtures = join(
+    contributionSource,
+    'testing-fixtures.ts',
+  );
+  const contributionTestRegex = /\.test\.[cm]?[jt]sx?$/u;
+  const contributionSourceFiles = files(contributionSource);
+  const contributionTestingFiles = contributionSourceFiles.filter((file) =>
+    file === contributionTestingEntry
+      || file === contributionTestingFixtures
+      || contributionTestRegex.test(file));
+  const contributionProductionFiles = contributionSourceFiles.filter((file) =>
+    !contributionTestingFiles.includes(file));
+  const contributionManifest = manifest('contribution');
+  const contributionForeignEvidenceRoots = evidenceDirectories
+    .filter((directory) =>
+      !['contribution', 'protocol', 'repository', 'derivation', 'publication']
+        .includes(directory))
+    .map((directory) => join(packages, directory));
+  const contributionForeignRoots = [
+    ...contributionForeignEvidenceRoots,
+    repositoryFs,
+    join(packages, 'repository-oci'),
+    repositoryIpfs,
+    join(packages, 'catalog-sqlite'),
+    indexer,
+    journal,
+  ];
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      contributionProductionFiles,
+      [...CONTRIBUTION_FORBIDDEN_PACKAGES, 'vitest'],
+      [...contributionForeignRoots, ...contributionTestingFiles],
+    ),
+    [],
+    'the Contribution root region must not expose /testing, test-only fixtures, or test-only dependencies',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      contributionTestingFiles,
+      CONTRIBUTION_FORBIDDEN_PACKAGES.filter((dependency) =>
+        dependency !== 'node:fs'),
+      contributionForeignRoots,
+    ),
+    [],
+    'the Contribution /testing region crosses an evidence architecture boundary',
+  );
+  assert.deepEqual(
+    contributionTestingFiles.flatMap((file) =>
+      specifiers(readFileSync(file, 'utf8'))
+        .filter((specifier) => specifier === 'node:fs')
+        .map((specifier) => `${relative(root, file)} -> ${specifier}`)),
+    [],
+    'the Contribution /testing region may only use node:fs/promises, never bare node:fs',
+  );
+  assert.deepEqual(
+    ambientNetworkUsesInFiles([
+      ...contributionProductionFiles,
+      ...contributionTestingFiles,
+    ]),
+    [],
+    'Contribution production and /testing entrypoints may not use ambient network APIs',
+  );
+  assert.deepEqual(Object.keys(contributionManifest.exports).sort(), ['.', './testing']);
+  assert.deepEqual(contributionManifest.exports['.'], {
+    import: './dist/index.js',
+    types: './dist/index.d.ts',
+  });
+  assert.deepEqual(contributionManifest.exports['./testing'], {
+    import: './dist/testing.js',
+    types: './dist/testing.d.ts',
+  });
+  assert.deepEqual(
+    Object.keys(contributionManifest.dependencies ?? {}).sort(),
+    CONTRIBUTION_ALLOWED_DEPENDENCIES,
+    'contribution production dependencies must match the approved design inventory',
+  );
+  assert.deepEqual(
+    Object.keys(contributionManifest.devDependencies ?? {}).sort(),
+    CONTRIBUTION_ALLOWED_DEV_DEPENDENCIES,
+    'contribution development dependencies must match the approved toolchain',
+  );
+  assert.deepEqual(
+    Object.keys(contributionManifest.optionalDependencies ?? {}),
+    [],
+    'contribution may not declare optional dependencies',
+  );
+  assert.deepEqual(
+    Object.keys(contributionManifest.peerDependencies ?? {}).sort(),
+    CONTRIBUTION_ALLOWED_PEER_DEPENDENCIES,
+    'contribution peer dependencies must remain test-only',
+  );
+  assert.deepEqual(contributionManifest.peerDependenciesMeta, {
+    vitest: { optional: true },
+  });
+  for (const section of [
+    'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
+  ]) {
+    for (const dependency of CONTRIBUTION_FORBIDDEN_PACKAGES) {
+      assert.ok(
+        !Object.hasOwn(contributionManifest[section] ?? {}, dependency),
+        `contribution may not declare ${dependency} in ${section}`,
+      );
+    }
+  }
+  for (const directory of ['protocol', 'repository', 'derivation', 'publication']) {
+    for (const section of [
+      'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
+    ]) {
+      assert.ok(
+        !Object.hasOwn(
+          manifest(directory)[section] ?? {},
+          '@jinn-network/evidence-contribution',
+        ),
+        `${directory} may not depend on Contribution`,
+      );
+    }
+    assertBoundary(
+      join(packages, directory, 'src'),
+      ['@jinn-network/evidence-contribution'],
+      [contribution],
+    );
+  }
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      [join(contributionSource, 'index.ts')],
+      [],
+      [contributionTestingEntry, contributionTestingFixtures],
+    ),
+    [],
+    'the Contribution root entrypoint must not export testing.ts or testing-fixtures.ts',
   );
 
   for (const directory of evidenceDirectories) {
