@@ -1,0 +1,10 @@
+{
+  "input": {
+    "rule": {
+      "inconclusiveWhen": { "threshold": { "measurement": "coverage", "op": "lt", "value": 0 } },
+      "class": "window-open"
+    },
+    "measurements": { "coverage": -1 }
+  },
+  "expect": { "verdict": "inconclusive", "inconclusiveClass": "window-open" }
+}

@@ -4,3 +4,4 @@ export * from "./errors.js";
 export * from "./identifiers.js";
 export * from "./evaluation-spec/schema.js";
 export * from "./evaluation-spec/seal.js";
+export * from "./evaluation-spec/verdict-rule.js";

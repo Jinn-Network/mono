@@ -1,0 +1,12 @@
+{
+  "input": {
+    "rule": {
+      "all": [
+        { "threshold": { "measurement": "passed", "op": "eq", "value": true } },
+        { "threshold": { "measurement": "score", "op": "gte", "value": 80 } }
+      ]
+    },
+    "measurements": { "passed": true, "score": 92 }
+  },
+  "expect": { "verdict": "pass" }
+}
