@@ -11,10 +11,21 @@ const DEPENDENCY_SECTIONS = [
 
 const TRUST_PACKAGES = [
   ['core', '@jinn-network/trust-core'],
+  ['testing', '@jinn-network/trust-testing'],
 ];
 
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['core', { dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
+  // trust-resolve does not exist yet (Task T11) -- its dependency edge is
+  // added there, not hardcoded ahead of time.
+  ['testing', { dependencies: ['@jinn-network/trust-core'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
+]);
+
+// Cross-tree Jinn dependencies this tree's packages are approved to portal
+// to, keyed by name -> path relative to the repo root. Extended per task as
+// new cross-tree edges land (only evidence-protocol so far, T10).
+const CROSS_TREE_PACKAGES = new Map([
+  ['@jinn-network/evidence-protocol', join('packages', 'evidence', 'protocol')],
 ]);
 
 function readPackage(directory) {
@@ -42,12 +53,16 @@ function jinnDependencyNames(manifest, section) {
 
 function expectedPortal(directory, dependencyName) {
   const target = TRUST_PACKAGES.find(([, name]) => name === dependencyName);
-  assert.ok(target, `${directory} declares unknown Jinn dependency ${dependencyName}`);
-  return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;
+  if (target) {
+    return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;
+  }
+  const crossTreePath = CROSS_TREE_PACKAGES.get(dependencyName);
+  assert.ok(crossTreePath, `${directory} declares unknown Jinn dependency ${dependencyName}`);
+  return `portal:${relative(join(packageRoot, directory), join(root, crossTreePath))}`;
 }
 
-test('the trust package inventory is explicit and has one manifest', () => {
-  assert.equal(TRUST_PACKAGES.length, 1);
+test('the trust package inventory is explicit and has two manifests', () => {
+  assert.equal(TRUST_PACKAGES.length, 2);
   for (const [directory, expectedName] of TRUST_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);

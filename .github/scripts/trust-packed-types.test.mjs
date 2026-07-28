@@ -6,16 +6,19 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const trustRoot = join(root, 'packages', 'trust');
+const evidenceProtocolRoot = join(root, 'packages', 'evidence', 'protocol');
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'jinn-trust-packed-types-'));
 const archivesRoot = join(temporaryRoot, 'archives');
 const consumerRoot = join(temporaryRoot, 'consumer');
 
 const packages = [
   ['core', '@jinn-network/trust-core'],
+  ['testing', '@jinn-network/trust-testing'],
 ];
 
 const codeEntrypoints = [
   '@jinn-network/trust-core',
+  '@jinn-network/trust-testing',
 ];
 
 function run(command, args, options = {}) {
@@ -58,12 +61,27 @@ try {
     archives.set(name, join(archivesRoot, packed[0].filename));
   }
 
+  // Cross-tree portal dependency (§7.8): trust-testing's devDependency on
+  // evidence-protocol resolves through a portal at development time; add
+  // its own packed archive here so the packed-consumer graph resolves
+  // end-to-end the same way trust-testing's own pack:smoke does.
+  const evidenceProtocolPacked = JSON.parse(await run(
+    'npm',
+    ['pack', '--ignore-scripts', '--json', '--pack-destination', archivesRoot],
+    { cwd: evidenceProtocolRoot },
+  ));
+  if (evidenceProtocolPacked.length !== 1 || typeof evidenceProtocolPacked[0]?.filename !== 'string') {
+    throw new Error('npm pack returned an unexpected result for @jinn-network/evidence-protocol');
+  }
+  const evidenceProtocolArchive = join(archivesRoot, evidenceProtocolPacked[0].filename);
+
   await mkdir(consumerRoot);
   await writeFile(join(consumerRoot, 'package.json'), JSON.stringify({
     private: true,
     type: 'module',
     dependencies: Object.fromEntries([
       ...packages.map(([, name]) => [name, `file:${archives.get(name)}`]),
+      ['@jinn-network/evidence-protocol', `file:${evidenceProtocolArchive}`],
       ['@types/node', '^22.0.0'],
       ['typescript', '^5.9.3'],
       ['vitest', '^4.1.8'],

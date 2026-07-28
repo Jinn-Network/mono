@@ -6,8 +6,8 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'trust');
-// Extended by every later trust package task (T10 adds 'testing', T11 adds 'resolve').
-const trustDirectories = ['core'];
+// Extended by every later trust package task (T11 adds 'resolve').
+const trustDirectories = ['core', 'testing'];
 
 // Program ruling §7.9: trust-core's boundary guard allowlists exactly these
 // three externals (@noble/hashes + zod, the evidence floor, plus @noble/curves
@@ -250,7 +250,7 @@ test('trust-core manifest dependencies match the approved externals allowlist', 
 
 test('trust production source never uses ambient network APIs', () => {
   for (const directory of trustDirectories) {
-    if (directory !== 'core') continue; // resolve (T11) is the RPC package; it is exempt.
+    if (directory === 'resolve') continue; // resolve (T11) is the RPC package; it is exempt.
     const source = join(packages, directory, 'src');
     if (!existsSync(source)) continue;
     const production = files(source).filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
