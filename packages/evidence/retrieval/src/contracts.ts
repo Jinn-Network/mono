@@ -430,3 +430,50 @@ export interface ProviderQueryCodec<Query> {
   encode(query: Query): JsonValue;
   decode(value: JsonValue): Query;
 }
+
+export interface FederatedCandidateContribution<ChildData> {
+  readonly source: CandidateSourceIdentity;
+  readonly ordinal: number;
+  readonly providerData?: ChildData;
+  readonly locationHints: readonly RetrievalLocationHint[];
+}
+
+export interface FederatedCandidateGroup<ChildData> {
+  readonly reference: EvidenceRecordReference;
+  readonly contributions:
+    readonly FederatedCandidateContribution<ChildData>[];
+}
+
+export interface FederatedOrderedCandidate<CombinedData> {
+  readonly reference: EvidenceRecordReference;
+  readonly combinedData?: CombinedData;
+}
+
+export type FederatedOrdering<Query, ChildData, CombinedData> = (
+  groups: readonly FederatedCandidateGroup<ChildData>[],
+  query: Query,
+) => readonly FederatedOrderedCandidate<CombinedData>[];
+
+export type FederatedCandidateAllocation<Query> = (
+  maximumCandidates: number,
+  sources: readonly CandidateSourceIdentity[],
+  query: Query,
+) => readonly number[];
+
+export interface FederatedProviderData<ChildData, CombinedData> {
+  readonly contributions:
+    readonly FederatedCandidateContribution<ChildData>[];
+  readonly combinedData?: CombinedData;
+}
+
+export interface CreateFederatedCandidateSourceOptions<
+  Query,
+  ChildData,
+  CombinedData,
+> {
+  readonly identity: CandidateSourceIdentity;
+  readonly sources: readonly CandidateSource<Query, ChildData>[];
+  readonly allocate: FederatedCandidateAllocation<Query>;
+  readonly order: FederatedOrdering<Query, ChildData, CombinedData>;
+  readonly maximumConcurrency?: number;
+}

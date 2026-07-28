@@ -10,11 +10,16 @@ import { vi } from "vitest";
 
 import {
   DEFAULT_RETRIEVAL_HARD_LIMITS,
+  type CandidateSource,
+  type CandidateSourceOperationOptions,
   type EvidenceLocationPolicy,
   type EvidenceRecordLocator,
+  type FederatedCandidateAllocation,
+  type FederatedOrdering,
   type RetrievalLocationObservation,
   type ValidatedRecord,
 } from "./contracts.js";
+import { createFederatedCandidateSource } from "./federation.js";
 import {
   createOperationContext,
   resolveHardLimits,
@@ -194,6 +199,72 @@ export async function artifactFixture() {
     resolver: resolverFrom({ memory: repository }),
     context: operationContext(),
   };
+}
+
+export function candidateOptions(
+  maximumCandidates: number,
+): CandidateSourceOperationOptions {
+  return {
+    signal: new AbortController().signal,
+    timeoutMs: 1_000,
+    maximumCandidates,
+  };
+}
+
+export function sourceFixture(
+  id: string,
+  references: readonly EvidenceRecordReference[],
+) {
+  const identity = { id, version: "1.0.0" };
+  const find = vi.fn(async (
+    _query: unknown,
+    operation: CandidateSourceOperationOptions,
+  ) => ({
+    source: identity,
+    candidates: references
+      .slice(0, operation.maximumCandidates)
+      .map((reference) => ({ reference })),
+  }));
+  return {
+    find,
+    source: { identity, find } satisfies CandidateSource<unknown>,
+  };
+}
+
+export function failingSourceFixture(id: string) {
+  const identity = { id, version: "1.0.0" };
+  const find = vi.fn(async (): Promise<never> => {
+    throw new Error("Synthetic source failure.");
+  });
+  return {
+    find,
+    source: { identity, find } satisfies CandidateSource<unknown>,
+  };
+}
+
+export const equalAllocation: FederatedCandidateAllocation<unknown> = (
+  maximum,
+  sources,
+) => sources.map((_source, index) =>
+  Math.floor(maximum / sources.length)
+  + (index < maximum % sources.length ? 1 : 0),
+);
+
+export const providerOrder: FederatedOrdering<
+  unknown,
+  unknown,
+  undefined
+> = (groups) => groups.map(({ reference }) => ({ reference }));
+
+export function federated(
+  ...sources: readonly CandidateSource<unknown>[]
+) {
+  return createFederatedCandidateSource({
+    identity: { id: "federated-fixture", version: "1.0.0" },
+    sources,
+    allocate: equalAllocation,
+    order: providerOrder,
+  });
 }
 
 export async function createKnownReferenceFixture(options: {
