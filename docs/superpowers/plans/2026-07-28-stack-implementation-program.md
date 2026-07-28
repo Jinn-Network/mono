@@ -95,7 +95,7 @@ Settled here (the working titles in the designs are superseded by this table):
 
 | Tree | Directory | npm names |
 | --- | --- | --- |
-| task-execution | `packages/task-execution/{protocol,backend,testing,profiles,backend-local,evaluation-harness}` | `@jinn-network/task-execution-*` |
+| task-execution | `packages/task-execution/{protocol,backend,testing,profiles,evaluation-harness}` + `backend-local/{supervisor,workspace,launchers,assembly}` (four packages, design §15) | `@jinn-network/task-execution-*`; backend-local components: `@jinn-network/task-execution-{supervisor,workspace,launchers}` + `@jinn-network/task-execution-backend-local` (the assembly — it *is* the local backend) |
 | trust | `packages/trust/{core,resolve,testing}` | `@jinn-network/trust-{core,resolve,testing}` |
 | discovery | `packages/discovery/{protocol,serve,client,testing}`, `facts/{evidence,task-execution,trust}`, `sources/evidence-journal` | `@jinn-network/record-discovery-*` |
 
@@ -103,8 +103,19 @@ Confirmed by the operator at the program gate (2026-07-28):
 
 1. `record-discovery-*` npm prefix — confirmed (disambiguates from the existing
    `@jinn-network/evidence-discovery`).
-2. `backend-local` as ONE package with four guard-enforced sub-regions
-   (supervisor/workspace/launchers/assembly) + subpath exports — confirmed.
+2. `backend-local` as ONE package with four guard-enforced sub-regions — confirmed at the
+   gate, then **REVERSED by the operator later on 2026-07-28** (marketplace-binding design
+   session input): the package split is MAINTAINED — four separately consumable packages per
+   backend design §15 (`supervisor`, `workspace`, `launchers`, `assembly`), the supervisor
+   deliberately the most dependency-free because it is the piece most worth reusing. The
+   §5 never-touches columns are enforced by package-level dependency edges in the tree's
+   inventory/boundaries guards (stronger than sub-region wiring). See ruling §7.18 for the
+   consumption rule that motivated the split. Internal DAG ratified (coordinator,
+   2026-07-28, backend plan Finding (e)): **[supervisor ∥ workspace] → launchers →
+   assembly** — the frozen launcher signature couples `launchers` to `TaskView`/
+   `WorkspacePaths` (homed in `workspace`, which may import profiles) and `AttemptIdentity`
+   (homed in `supervisor`, which may not); no fifth shared-`contracts` package (extraction
+   deferred until a consumer outside the tree needs those types).
 3. Evaluation harness at `packages/task-execution/evaluation-harness` — confirmed.
 4. Published-source wrapper at `packages/discovery/sources/evidence-journal`, with program
    rule 1's wording widened to "leaf packages under `packages/discovery/` (`facts/*`,
@@ -142,10 +153,12 @@ Confirmed by the operator at the program gate (2026-07-28):
 4. **Delivery sealing in the backend:** assembly consumes the protocol package's exported
    Delivery sealer for the sealed Delivery (a TEP document, same tree); backend-local
    re-implements canonical bytes only for backend-internal state.
-5. **Testing-package edges:** `@jinn-network/task-execution-testing`'s `./backend-local` slice
-   depends on `backend-local` (production dep of the slice); `backend-local` consumes the
-   testing package as devDependency only. No production cycle (evidence `local-runtime`
-   precedent).
+5. **Testing-package edges (restated for the four-package split):** the
+   `@jinn-network/task-execution-testing` `./backend-local` slice takes production deps on the
+   backend-local component packages it drives (`launchers` for the fake launcher's contract,
+   `supervisor`/`workspace` for the fixture families, `backend-local` [assembly] for the
+   backend-level suite); each component package consumes the testing package as devDependency
+   only. No production cycle (evidence `local-runtime` precedent).
 6. **Guard-suite ownership:** each tree's guard scripts + CI workflow are created by the plan
    that lands the tree's first package (TEP plan for task-execution; trust plan for trust;
    discovery plan for discovery) and extended by every later package registration. Counts are
@@ -208,6 +221,18 @@ Confirmed by the operator at the program gate (2026-07-28):
     static check plus a pattern-length bound, with the residual (a pattern passing the static
     check can still backtrack) documented; the marketplace deployment profile mandates
     injecting a linear-time engine (RE2). Keeps the reference package pure-JS and portable.
+18. **Backend consumption rule (operator, 2026-07-28, from the marketplace-binding design
+    stream):** the backend is a **library**; every product embeds its own instance with its
+    own state root — there is no shared "local execution backend application". Bindings and
+    hosts consume an embedded backend **only through the assembly's standard
+    `TaskExecutionBackend` interface** — the marketplace binding composes as a peer (venue
+    verbs: discover/claim/deliver/settle) and hands sealed bytes to `submit`, waits for the
+    Delivery, and never imports or reaches into `supervisor`/`workspace`/`launchers`
+    internals. The component packages exist to be consumed **individually when building
+    other backends/bindings** (the reuse case), never as a side door into a running
+    backend. Guards encode: nothing outside `packages/task-execution/backend-local/` imports
+    `supervisor`/`workspace`/`launchers` except `assembly`, the testing slice, and the
+    evaluation harness's launcher surface.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 
