@@ -18,6 +18,7 @@ const packages = [
   ['facts/evidence', '@jinn-network/record-discovery-facts-evidence'],
   ['facts/trust', '@jinn-network/record-discovery-facts-trust'],
   ['facts/task-execution', '@jinn-network/record-discovery-facts-task-execution'],
+  ['sources/evidence-journal', '@jinn-network/record-discovery-source-evidence-journal'],
 ];
 
 const codeEntrypoints = [
@@ -28,6 +29,7 @@ const codeEntrypoints = [
   '@jinn-network/record-discovery-facts-evidence',
   '@jinn-network/record-discovery-facts-trust',
   '@jinn-network/record-discovery-facts-task-execution',
+  '@jinn-network/record-discovery-source-evidence-journal',
 ];
 
 // Cross-tree Jinn dependencies each *then-present* discovery package
@@ -39,7 +41,9 @@ const codeEntrypoints = [
 // execution lands -- both, not profiles alone, because profiles' public
 // surface does not re-export Task/Submission/Delivery's schemas (see the
 // inventory guard's dependency-graph comment and facts/task-execution's
-// src/recompute.ts for the full rationale).
+// src/recompute.ts for the full rationale). sources/evidence-journal adds
+// no NEW cross-tree package here -- its evidence-protocol/evidence-
+// repository/evidence-discovery dependencies are already packed by M7.
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],

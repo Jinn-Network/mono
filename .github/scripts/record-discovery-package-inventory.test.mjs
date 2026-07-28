@@ -17,6 +17,7 @@ const DISCOVERY_PACKAGES = [
   ['facts/evidence', '@jinn-network/record-discovery-facts-evidence'],
   ['facts/trust', '@jinn-network/record-discovery-facts-trust'],
   ['facts/task-execution', '@jinn-network/record-discovery-facts-task-execution'],
+  ['sources/evidence-journal', '@jinn-network/record-discovery-source-evidence-journal'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/discovery; map name -> absolute dir.
@@ -85,6 +86,19 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   // package anywhere in the graph gets its own resolutions entry"
   // precedent recorded above for testing/serve/client/facts-evidence.
   ['facts/task-execution', { dependencies: ['@jinn-network/record-discovery-protocol', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol'], devDependencies: ['@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
+  // sources/evidence-journal's own source imports protocol + serve +
+  // evidence-discovery + evidence-repository (plan Task 25; program §6/F7
+  // widens the "one edge per discovery leaf meets a record-kind tree" rule
+  // to include `sources/*`, not just `facts/*`). It takes
+  // record-discovery-testing as a devDependency (M3's conformance kit,
+  // `runSourceConformance`, mirroring serve's own precedent) plus two
+  // shadow devDependencies + portal resolutions: evidence-protocol (a
+  // transitive dependency of both evidence-discovery and evidence-
+  // repository) and trust-core (record-discovery-protocol's own transitive
+  // dependency, also pulled in by record-discovery-serve) -- the same
+  // "every Jinn package anywhere in the graph gets its own resolutions
+  // entry" precedent recorded above for testing/serve/client/facts-*.
+  ['sources/evidence-journal', { dependencies: ['@jinn-network/evidence-discovery', '@jinn-network/evidence-repository', '@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve'], devDependencies: ['@jinn-network/evidence-protocol', '@jinn-network/record-discovery-testing', '@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
 ]);
 
 function readPackage(directory) {
@@ -118,7 +132,7 @@ function expectedPortal(directory, dependencyName) {
 }
 
 test('the record discovery package inventory is explicit and has one manifest per package', () => {
-  assert.equal(DISCOVERY_PACKAGES.length, 7);
+  assert.equal(DISCOVERY_PACKAGES.length, 8);
   for (const [directory, expectedName] of DISCOVERY_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);

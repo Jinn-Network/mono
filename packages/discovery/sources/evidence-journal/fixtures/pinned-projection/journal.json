@@ -1,0 +1,35 @@
+[
+  {
+    "version": 1,
+    "revision": 1,
+    "announcement": {
+      "kind": "available",
+      "sourceId": "evidence-source",
+      "announcementId": "a-1",
+      "reference": {
+        "family": "execution-evidence",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "repositoryId": "local-repository-one"
+    }
+  },
+  {
+    "version": 1,
+    "revision": 2,
+    "predecessorDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "announcement": {
+      "kind": "available",
+      "sourceId": "evidence-source",
+      "announcementId": "a-2",
+      "reference": {
+        "family": "result-evaluation",
+        "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "repositoryId": "local-repository-one",
+      "publishedLocation": {
+        "bindingProfile": "https://example.invalid/oci",
+        "locator": { "repository": "jinn/evidence", "digest": "sha256:fixture" }
+      }
+    }
+  }
+]
