@@ -42,9 +42,20 @@ authentication), #2047–#2054 closed as superseded by the benchmarking design, 
    Then extend the master program document: new phases appended in dependency order —
    benchmarking records + kit once TEP/profiles sealing lands; the marketplace binding once
    the TEP kit, trust, and discovery serve/client are green; benchmarking run orchestration
-   once the backend contract is green; the benchmarking marketplace mode last. **Present the
-   program extension at your next phase boundary for my approval; code for the new components
-   starts only on my explicit yes.**
+   once the backend contract is green; the benchmarking marketplace mode last.
+
+   **Sequencing ruling (mine, binding): Autopilot adoption is removed from this pass.** The
+   local-backend design's §18 step 5 — your Phase 5 adoption work — is deferred: Autopilot
+   remains the named first adopter, but its adoption is scheduled together with the future
+   migration/daemon-composition design session, not in this program. The new component phases
+   take its place in the program tail: after backend-local assembly + the evaluation harness
+   are green, run the marketplace-binding phase, then the benchmarking phases, then the
+   overall program review + merge proposal. Record the deferral in the master program
+   document (deferred-implementation note, not the pending-design ledger — adoption is
+   designed, just not executed this pass).
+
+   **Present the program extension at your next phase boundary for my approval; code for the
+   new components starts only on my explicit yes.**
 3. **Two companion amendments must reach in-flight phases before their surfaces freeze** —
    this is why this addendum arrives now. Record both as dated addenda on the affected plans
    immediately:
@@ -59,7 +70,8 @@ authentication), #2047–#2054 closed as superseded by the benchmarking design, 
 4. **Your frozen `deriveAttemptUri` ruling is confirmed load-bearing**: the marketplace
    binding derives the same deterministic Attempt URIs third-party (its §6.2). Its plan must
    consume the protocol package's exported constant — never re-derive the rule.
-5. **Still out of scope**: the daemon TaskEngine carve and operator-daemon composition (waits
+5. **Still out of scope**: Autopilot adoption (deferred out of this pass per the sequencing
+   ruling in item 2); the daemon TaskEngine carve and operator-daemon composition (waits
    on the pending migration-mechanics design session); all tier-4 products (marketplace
    benchmarking service, skill factory, leaderboards, plugin composition); any on-chain
    deployment (the contract-revision code and its kit are in scope for the marketplace plan;
