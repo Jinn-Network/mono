@@ -14,6 +14,15 @@ const JsonScalarSchema: z.ZodType<JsonScalar> = z.union([
 ]);
 
 /**
+ * Strict decimal grammar (Global Constraints/§7.14 fractional-as-strings doctrine, composite
+ * `weight` precedent in family-blocks.ts): optional leading `-`, one or more digits, an optional
+ * `.` followed by one or more digits. No exponents, no leading `+`, no locale separators.
+ */
+export const DECIMAL_STRING_PATTERN = /^-?\d+(\.\d+)?$/;
+
+const ORDERED_OPS: ReadonlySet<ComparisonOp> = new Set(["lt", "lte", "gt", "gte"]);
+
+/**
  * `verdictRule` is a declarative structure in a closed vocabulary over declared measurement
  * names — threshold comparisons, boolean combinators, explicit inconclusive-predicates. No
  * executable code, no external refs, reads nothing outside delivered measurements (§7.3).
@@ -27,15 +36,34 @@ export type VerdictRule =
   | { pass: true }
   | { fail: true };
 
+// A threshold's `value` MAY be a decimal string (the sealed-numbers I-JSON-integer rule in
+// bytes.ts forces every fractional quantity to be a string, never a JSON number). For an ordered
+// op (lt/lte/gt/gte) that string is meaningless unless it is a well-formed decimal — `compare()`
+// below parses it as an exact decimal for those ops, so a malformed one must be rejected here, at
+// parse time, rather than silently comparing as `false` forever.
+const ThresholdSchema = z
+  .object({
+    measurement: z.string(),
+    op: z.enum(COMPARISON_OPS),
+    value: JsonScalarSchema,
+  })
+  .superRefine((threshold, ctx) => {
+    if (
+      ORDERED_OPS.has(threshold.op) &&
+      typeof threshold.value === "string" &&
+      !DECIMAL_STRING_PATTERN.test(threshold.value)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["value"],
+        message: `Ordered comparison "${threshold.op}" requires a decimal-string value matching ${DECIMAL_STRING_PATTERN.source}; got ${JSON.stringify(threshold.value)}.`,
+      });
+    }
+  });
+
 export const VerdictRuleSchema: z.ZodType<VerdictRule> = z.lazy(() =>
   z.union([
-    z.object({
-      threshold: z.object({
-        measurement: z.string(),
-        op: z.enum(COMPARISON_OPS),
-        value: JsonScalarSchema,
-      }),
-    }),
+    z.object({ threshold: ThresholdSchema }),
     z.object({ all: z.array(VerdictRuleSchema) }),
     z.object({ any: z.array(VerdictRuleSchema) }),
     z.object({ not: VerdictRuleSchema }),
@@ -60,14 +88,67 @@ function lookupMeasurement(measurements: MeasurementMap, name: string): string |
   return measurements[name];
 }
 
+type DecimalParts = { negative: boolean; intDigits: string; fracDigits: string };
+
+/**
+ * Parses a `number` or a decimal-grammar `string` into its exact sign/integer/fraction digit
+ * parts. Never routes through `Number()`/`parseFloat` — that would reintroduce the float-coercion
+ * pitfall this function exists to avoid. Returns `undefined` for anything that isn't decimal
+ * (booleans, `null`, non-decimal strings, non-finite numbers), so callers can fall back to a
+ * non-numeric comparison.
+ */
+function toDecimalParts(operand: string | number | boolean | null): DecimalParts | undefined {
+  let text: string;
+  if (typeof operand === "number") {
+    if (!Number.isFinite(operand)) return undefined;
+    text = operand.toString();
+  } else if (typeof operand === "string") {
+    text = operand;
+  } else {
+    return undefined;
+  }
+  if (!DECIMAL_STRING_PATTERN.test(text)) return undefined;
+  const negative = text.startsWith("-");
+  const unsigned = negative ? text.slice(1) : text;
+  const [intDigits, fracDigits = ""] = unsigned.split(".");
+  return { negative, intDigits, fracDigits };
+}
+
+/**
+ * Exact decimal comparison of two operands (each a measurement value or a threshold value),
+ * via scaled-integer `BigInt` — no epsilon, no locale, no float coercion of the string operand.
+ * Returns `-1 | 0 | 1` when both operands are decimal-parseable, `undefined` otherwise (a
+ * measurement/threshold pairing that never was numeric — e.g. a boolean — is not a decimal
+ * comparison at all, and callers fall back accordingly).
+ */
+function compareDecimal(
+  actual: string | number | boolean,
+  value: JsonScalar,
+): -1 | 0 | 1 | undefined {
+  const left = toDecimalParts(actual);
+  const right = toDecimalParts(value);
+  if (left === undefined || right === undefined) return undefined;
+  const scale = Math.max(left.fracDigits.length, right.fracDigits.length);
+  const leftScaled = BigInt((left.negative ? "-" : "") + left.intDigits + left.fracDigits.padEnd(scale, "0"));
+  const rightScaled = BigInt((right.negative ? "-" : "") + right.intDigits + right.fracDigits.padEnd(scale, "0"));
+  if (leftScaled < rightScaled) return -1;
+  if (leftScaled > rightScaled) return 1;
+  return 0;
+}
+
 function compare(op: ComparisonOp, actual: string | number | boolean, value: JsonScalar): boolean {
+  // Decimal-aware for every op: eq/ne canonicalize scale before comparing (e.g. "0.50" equals
+  // "0.5") whenever both operands are numeric (a `number` or a decimal-grammar string); when
+  // either side isn't numeric (booleans, `null`, non-decimal strings), decimal comparison is
+  // inapplicable and eq/ne fall back to the prior strict `===`/`!==` scalar comparison.
+  const decimal = compareDecimal(actual, value);
   switch (op) {
-    case "eq": return actual === value;
-    case "ne": return actual !== value;
-    case "lt": return typeof actual === "number" && typeof value === "number" && actual < value;
-    case "lte": return typeof actual === "number" && typeof value === "number" && actual <= value;
-    case "gt": return typeof actual === "number" && typeof value === "number" && actual > value;
-    case "gte": return typeof actual === "number" && typeof value === "number" && actual >= value;
+    case "eq": return decimal !== undefined ? decimal === 0 : actual === value;
+    case "ne": return decimal !== undefined ? decimal !== 0 : actual !== value;
+    case "lt": return decimal !== undefined && decimal < 0;
+    case "lte": return decimal !== undefined && decimal <= 0;
+    case "gt": return decimal !== undefined && decimal > 0;
+    case "gte": return decimal !== undefined && decimal >= 0;
   }
 }
 

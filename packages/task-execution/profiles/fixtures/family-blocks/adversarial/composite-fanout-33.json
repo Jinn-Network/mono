@@ -1,0 +1,211 @@
+{
+  "input": {
+    "family": "composite",
+    "block": {
+      "subSpecs": [
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-00"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-01"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-02"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-03"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-04"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-05"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-06"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-07"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-08"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-09"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-10"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-11"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-12"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-13"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-14"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-15"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-16"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-17"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-18"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-19"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-20"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-21"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-22"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-23"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-24"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-25"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-26"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-27"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-28"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-29"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-30"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-31"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-32"
+          },
+          "weight": "1"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "ok": false,
+    "code": "invalid-document"
+  }
+}

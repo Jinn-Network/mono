@@ -20,7 +20,10 @@ function assertIJsonNumbers(value: unknown): void {
     if (!Number.isFinite(value) || !Number.isInteger(value)) {
       throw new ProfilesError(
         "invalid-document",
-        `Sealed numbers must be I-JSON integers; got ${value}. Encode fractional values as strings.`,
+        `Sealed numbers must be I-JSON integers; got ${value}. Encode fractional values as ` +
+          `decimal strings matching /^-?\\d+(\\.\\d+)?$/ (e.g. "0.5") — verdictRule ordered ` +
+          `threshold comparisons (lt/lte/gt/gte) parse a decimal-string operand as an exact ` +
+          `decimal, so this is safe end to end, not just at the seal boundary.`,
       );
     }
     return;
