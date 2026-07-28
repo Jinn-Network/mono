@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { EVALUATION_SPEC_FORMAT_URI } from "../identifiers.js";
-import { RESOURCE_DESCRIPTOR_SHAPE, resourceDescriptorHasLocator } from "../resource-descriptor.js";
+import { accessClassifiedResourceDescriptor } from "../resource-descriptor.js";
 import { VerdictRuleSchema } from "./verdict-rule.js";
 import { UnscorableSchema } from "./unscorable.js";
+import { FAMILY_BLOCK_SCHEMAS } from "./family-blocks.js";
 
 /** Grader families (4, frozen, §7.1). */
 export const GRADER_FAMILIES = [
@@ -27,14 +28,7 @@ export const MeasurementDeclarationSchema = z.looseObject({
 export type MeasurementDeclaration = z.infer<typeof MeasurementDeclarationSchema>;
 
 /** A grader MAY be private — the sealed spec carries only its digest/locator, never a secret. */
-const GraderDescriptorSchema = z
-  .looseObject({
-    ...RESOURCE_DESCRIPTOR_SHAPE,
-    accessClass: z.enum(["public", "private"]).optional(),
-  })
-  .refine(resourceDescriptorHasLocator, {
-    message: "grader descriptor requires at least one of uri/digest/content (§6.4)",
-  });
+const GraderDescriptorSchema = accessClassifiedResourceDescriptor();
 
 export const EvidenceConventionsSchema = z.looseObject({
   requiredRefs: z.array(z.string()),
@@ -42,19 +36,31 @@ export const EvidenceConventionsSchema = z.looseObject({
 export type EvidenceConventions = z.infer<typeof EvidenceConventionsSchema>;
 
 /**
- * Top-level EvaluationSpec shape (§7.1). `familyBlock` is a `z.unknown()` placeholder here;
- * Task 6 edits this schema in place to discriminate it on `family`.
+ * Top-level EvaluationSpec shape (§7.1). `familyBlock` is declared `z.unknown()` at the field
+ * level and cross-validated against the schema `family` selects (`FAMILY_BLOCK_SCHEMAS`) in the
+ * `superRefine` below — the family/familyBlock pair spans two sibling top-level fields, so a
+ * single-field `z.discriminatedUnion` cannot express the pairing.
  */
-export const EvaluationSpecSchema = z.looseObject({
-  protocol: z.literal(EVALUATION_SPEC_FORMAT_URI),
-  semanticsVersion: z.string(),
-  family: z.enum(GRADER_FAMILIES),
-  grader: z.union([GraderDescriptorSchema, z.array(GraderDescriptorSchema)]),
-  familyBlock: z.unknown(),
-  measurements: z.array(MeasurementDeclarationSchema),
-  verdictRule: VerdictRuleSchema,
-  unscorable: UnscorableSchema,
-  evidenceConventions: EvidenceConventionsSchema,
-});
+export const EvaluationSpecSchema = z
+  .looseObject({
+    protocol: z.literal(EVALUATION_SPEC_FORMAT_URI),
+    semanticsVersion: z.string(),
+    family: z.enum(GRADER_FAMILIES),
+    grader: z.union([GraderDescriptorSchema, z.array(GraderDescriptorSchema)]),
+    familyBlock: z.unknown(),
+    measurements: z.array(MeasurementDeclarationSchema),
+    verdictRule: VerdictRuleSchema,
+    unscorable: UnscorableSchema,
+    evidenceConventions: EvidenceConventionsSchema,
+  })
+  .superRefine((spec, ctx) => {
+    const blockSchema = FAMILY_BLOCK_SCHEMAS[spec.family];
+    const result = blockSchema.safeParse(spec.familyBlock);
+    if (!result.success) {
+      for (const issue of result.error.issues) {
+        ctx.addIssue({ code: "custom", path: ["familyBlock", ...issue.path], message: issue.message });
+      }
+    }
+  });
 
 export type EvaluationSpec = z.infer<typeof EvaluationSpecSchema>;

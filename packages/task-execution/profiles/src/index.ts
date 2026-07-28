@@ -8,3 +8,6 @@ export * from "./evaluation-spec/verdict-rule.js";
 export * from "./evaluation-spec/unscorable.js";
 export * from "./evaluation-spec/measurements.js";
 export * from "./evaluation-spec/verdict-consistency.js";
+export * from "./evaluation-spec/family-blocks.js";
+export * from "./evaluation-spec/parser-registry.js";
+export * from "./evaluation-spec/composite.js";

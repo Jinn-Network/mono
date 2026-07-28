@@ -1,0 +1,245 @@
+{
+  "input": {
+    "block": {
+      "subSpecs": [
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-00"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-01"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-02"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-03"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-04"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-05"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-06"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-07"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-08"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-09"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-10"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-11"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-12"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-13"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-14"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-15"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-16"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-17"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-18"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-19"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-20"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-21"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-22"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-23"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-24"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-25"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-26"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-27"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-28"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-29"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-30"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-31"
+          },
+          "weight": "1"
+        },
+        {
+          "spec": {
+            "uri": "https://example.org/specs/case-32"
+          },
+          "weight": "1"
+        }
+      ]
+    },
+    "subSpecDepths": {
+      "https://example.org/specs/case-00": 0,
+      "https://example.org/specs/case-01": 0,
+      "https://example.org/specs/case-02": 0,
+      "https://example.org/specs/case-03": 0,
+      "https://example.org/specs/case-04": 0,
+      "https://example.org/specs/case-05": 0,
+      "https://example.org/specs/case-06": 0,
+      "https://example.org/specs/case-07": 0,
+      "https://example.org/specs/case-08": 0,
+      "https://example.org/specs/case-09": 0,
+      "https://example.org/specs/case-10": 0,
+      "https://example.org/specs/case-11": 0,
+      "https://example.org/specs/case-12": 0,
+      "https://example.org/specs/case-13": 0,
+      "https://example.org/specs/case-14": 0,
+      "https://example.org/specs/case-15": 0,
+      "https://example.org/specs/case-16": 0,
+      "https://example.org/specs/case-17": 0,
+      "https://example.org/specs/case-18": 0,
+      "https://example.org/specs/case-19": 0,
+      "https://example.org/specs/case-20": 0,
+      "https://example.org/specs/case-21": 0,
+      "https://example.org/specs/case-22": 0,
+      "https://example.org/specs/case-23": 0,
+      "https://example.org/specs/case-24": 0,
+      "https://example.org/specs/case-25": 0,
+      "https://example.org/specs/case-26": 0,
+      "https://example.org/specs/case-27": 0,
+      "https://example.org/specs/case-28": 0,
+      "https://example.org/specs/case-29": 0,
+      "https://example.org/specs/case-30": 0,
+      "https://example.org/specs/case-31": 0,
+      "https://example.org/specs/case-32": 0
+    }
+  },
+  "expect": {
+    "ok": false,
+    "code": "invalid-document"
+  }
+}

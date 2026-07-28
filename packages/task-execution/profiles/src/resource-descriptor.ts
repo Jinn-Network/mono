@@ -33,3 +33,19 @@ export const ResourceDescriptorSchema = z
   });
 
 export type ResourceDescriptorLike = z.infer<typeof ResourceDescriptorSchema>;
+
+/** A ResourceDescriptor that MAY be private — the sealed document carries only its digest/locator
+ * plus an access classification, never a secret (grader, testMaterial; §7.1/§11). */
+export const ACCESS_CLASSES = ["public", "private"] as const;
+export type AccessClass = (typeof ACCESS_CLASSES)[number];
+
+export function accessClassifiedResourceDescriptor() {
+  return z
+    .looseObject({
+      ...RESOURCE_DESCRIPTOR_SHAPE,
+      accessClass: z.enum(ACCESS_CLASSES).optional(),
+    })
+    .refine(resourceDescriptorHasLocator, {
+      message: "ResourceDescriptor requires at least one of uri/digest/content (§6.4)",
+    });
+}
