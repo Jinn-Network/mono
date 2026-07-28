@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { serializeCanonicalJson } from "@jinn-network/task-execution-protocol";
 import { canonicalJsonBytes } from "./index.js";
 import { buildRepositoryWorkProfile } from "./documents/repository-work-1.0.js";
+import { buildEvaluationTaskProfile } from "./documents/evaluation-task-1.0.js";
 import { sealTaskProfile } from "./task-profile/seal.js";
 
 // Cross-tree parity (program §7.15/§7.1): profiles re-implements sealing locally, but its
@@ -32,6 +33,24 @@ describe("repository-work/1.0 sealed asset matches its builder (design §8)", ()
     const pinned = (
       await readFile(
         new URL("../profiles/task-profiles/repository-work/1.0/profile.sha256", import.meta.url),
+        "utf8",
+      )
+    ).trim();
+    expect(pinned).toBe(sealed.digest);
+  });
+});
+
+// Task 13: same check for the second sealed document.
+describe("evaluation-task/1.0 sealed asset matches its builder (design §9)", () => {
+  it("profile.json bytes equal sealTaskProfile(buildEvaluationTaskProfile()).bytes, and profile.sha256 pins the same digest", async () => {
+    const sealed = sealTaskProfile(buildEvaluationTaskProfile());
+    const onDiskBytes = await readFile(
+      new URL("../profiles/task-profiles/evaluation-task/1.0/profile.json", import.meta.url),
+    );
+    expect(new Uint8Array(onDiskBytes)).toEqual(sealed.bytes);
+    const pinned = (
+      await readFile(
+        new URL("../profiles/task-profiles/evaluation-task/1.0/profile.sha256", import.meta.url),
         "utf8",
       )
     ).trim();
