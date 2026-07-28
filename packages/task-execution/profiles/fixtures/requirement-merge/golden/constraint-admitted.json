@@ -1,0 +1,8 @@
+{
+  "input": {
+    "task": { "model": { "provider": "anthropic" } },
+    "submission": { "model": { "id": "claude-3-opus" } },
+    "keyClasses": { "model": "constraint" }
+  },
+  "expect": { "ok": true, "effective": { "model": { "id": "claude-3-opus" } } }
+}

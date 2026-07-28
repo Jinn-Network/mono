@@ -1,0 +1,8 @@
+{
+  "input": {
+    "task": { "loadout": { "uri": "https://example.test/a.tar" } },
+    "submission": { "loadout": { "uri": "https://example.test/b.tar" } },
+    "keyClasses": { "loadout": "addable" }
+  },
+  "expect": { "ok": false, "category": "invalid-document", "key": "loadout" }
+}

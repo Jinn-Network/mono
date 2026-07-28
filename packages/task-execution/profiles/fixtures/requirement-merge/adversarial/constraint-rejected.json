@@ -1,0 +1,8 @@
+{
+  "input": {
+    "task": { "model": { "provider": "anthropic" } },
+    "submission": { "model": { "id": "gpt-4o" } },
+    "keyClasses": { "model": "constraint" }
+  },
+  "expect": { "ok": false, "category": "invalid-document", "key": "model" }
+}
