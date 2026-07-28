@@ -1,0 +1,6 @@
+{
+  "key-binding": "sha256:8e4eb8f45d5b12c7403e6d99728b8484bd89a5e5412256164a02c02d99b8cf3a",
+  "revocation": "sha256:dd6fe2fd23cf831b84d68dc2a0c09bd7cbaa41c7e902ce76238b4d9143fefffd",
+  "policy": "sha256:2627a9fb9406d7e382348cbabe9a41fc8b0e90129c3aed9183bcafdddb575e5f",
+  "authorization": "sha256:734848ceef295922ee837351f8c22806238d04df1f6d7651a4be935995a736e1"
+}
