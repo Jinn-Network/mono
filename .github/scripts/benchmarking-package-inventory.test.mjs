@@ -11,17 +11,27 @@ const DEPENDENCY_SECTIONS = [
 
 const BENCHMARKING_PACKAGES = [
   ['records', '@jinn-network/benchmarking-records'],
+  ['testing', '@jinn-network/benchmarking-testing'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/benchmarking; map name -> absolute dir
 // (record-discovery-package-inventory.test.mjs precedent, program §7.8).
 const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
+  ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
 ]);
 
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['records', {
     dependencies: ['@jinn-network/task-execution-protocol'],
+    devDependencies: [], optionalDependencies: [], peerDependencies: [],
+  }],
+  ['testing', {
+    dependencies: [
+      '@jinn-network/benchmarking-records',
+      '@jinn-network/task-execution-profiles',
+      '@jinn-network/task-execution-protocol',
+    ],
     devDependencies: [], optionalDependencies: [], peerDependencies: [],
   }],
 ]);
@@ -57,7 +67,7 @@ function expectedPortal(directory, dependencyName) {
 }
 
 test('the benchmarking package inventory is explicit and has one manifest per package', () => {
-  assert.equal(BENCHMARKING_PACKAGES.length, 1);
+  assert.equal(BENCHMARKING_PACKAGES.length, 2);
   for (const [directory, expectedName] of BENCHMARKING_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);

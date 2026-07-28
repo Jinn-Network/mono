@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'benchmarking');
-const benchmarkingDirectories = ['records'];
+const benchmarkingDirectories = ['records', 'testing'];
 
 // The whole benchmarking tree is forbidden to import any evidence-tree package, the two
 // I/O-free evidence producer packages, any record-discovery package, and — critically — every
@@ -56,6 +56,15 @@ const TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_RECORDS = [
   '@jinn-network/task-execution-backend',
   '@jinn-network/task-execution-testing',
   '@jinn-network/task-execution-profiles',
+];
+
+// testing (the M2 kit) may additionally import task-execution-profiles (its miniature-run
+// fixtures are profiles-conditioned, plan M2 gate); it may still not import the backend
+// contract or the TEP testing kit itself from production `src/` (those would be devDependency
+// concerns only, and this package declares neither).
+const TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_TESTING = [
+  '@jinn-network/task-execution-backend',
+  '@jinn-network/task-execution-testing',
 ];
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
@@ -218,6 +227,12 @@ test('benchmarking source boundaries remain one-way across the approved graph', 
   assertBoundary(
     join(packages, 'records', 'src'),
     [...BENCHMARKING_FOREIGN_PACKAGES, ...TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_RECORDS],
+    FORBIDDEN_ROOTS,
+  );
+  // testing depends on records + task-execution-protocol + task-execution-profiles only.
+  assertBoundary(
+    join(packages, 'testing', 'src'),
+    [...BENCHMARKING_FOREIGN_PACKAGES, ...TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_TESTING],
     FORBIDDEN_ROOTS,
   );
 });

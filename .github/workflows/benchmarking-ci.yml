@@ -60,8 +60,41 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  testing:
+    needs: [records]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependencies from source (§7.8)
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+      - name: Verify Benchmarking Testing (conformance kit)
+        working-directory: packages/benchmarking/testing
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Benchmarking Testing distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarking-testing-dist
+          path: packages/benchmarking/testing/dist
+          if-no-files-found: error
+          retention-days: 1
+
   verify:
-    needs: [architecture, records]
+    needs: [architecture, records, testing]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -69,10 +102,12 @@ jobs:
         env:
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
           RECORDS_RESULT: ${{ needs.records.result }}
+          TESTING_RESULT: ${{ needs.testing.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
-            "$RECORDS_RESULT"; do
+            "$RECORDS_RESULT" \
+            "$TESTING_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4
@@ -92,8 +127,11 @@ jobs:
         run: |
           mkdir -p packages/benchmarking/records/dist
           cp -R .benchmarking-dist/benchmarking-records-dist/. packages/benchmarking/records/dist/
-      - name: Build cross-tree portal dependency from source (§7.8)
+          mkdir -p packages/benchmarking/testing/dist
+          cp -R .benchmarking-dist/benchmarking-testing-dist/. packages/benchmarking/testing/dist/
+      - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
       - name: Compile packed public entrypoint consumers
         run: node .github/scripts/benchmarking-packed-types.test.mjs
