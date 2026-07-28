@@ -11,6 +11,7 @@ const DEPENDENCY_SECTIONS = [
 
 const DISCOVERY_PACKAGES = [
   ['protocol', '@jinn-network/record-discovery-protocol'],
+  ['testing', '@jinn-network/record-discovery-testing'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/discovery; map name -> absolute dir.
@@ -23,6 +24,17 @@ const SIBLING_TREE_DIRS = new Map([
 
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['protocol', { dependencies: ['@jinn-network/trust-core'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
+  // testing's own source only ever imports record-discovery-protocol (plan
+  // Task 9: "no cross-tree deps"). trust-core is a *shadow* devDependency +
+  // portal resolution -- yarn's per-project resolution step for this
+  // standalone project resolves protocol's transitive `trust-core` npm
+  // dependency too (no local registry publishes @jinn-network/*), and
+  // that requires a matching top-level override here even though testing
+  // never imports it (trust-testing's package.json shows the same
+  // precedent: every Jinn package anywhere in the graph gets its own
+  // resolutions entry). Recorded as a plan/mechanics deviation, not a
+  // silent addition.
+  ['testing', { dependencies: ['@jinn-network/record-discovery-protocol'], devDependencies: ['@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
 ]);
 
 function readPackage(directory) {
@@ -55,8 +67,8 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), targetDir) || '.'}`;
 }
 
-test('the record discovery package inventory is explicit and has one manifest', () => {
-  assert.equal(DISCOVERY_PACKAGES.length, 1);
+test('the record discovery package inventory is explicit and has one manifest per package', () => {
+  assert.equal(DISCOVERY_PACKAGES.length, 2);
   for (const [directory, expectedName] of DISCOVERY_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);
