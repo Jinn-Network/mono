@@ -25,6 +25,23 @@ export interface RuntimePlugin {
 
 // ── HarnessContext ────────────────────────────────────────────────────────
 
+export interface HarnessSolverNetContext {
+  name: string;
+  solverType: string;
+  model?: string;
+  provider?: import('./provider-ref.js').ProviderRef;
+  /** Exact persisted manifest/profile facts, present on registry-backed runs. */
+  manifestCid?: string;
+  roles?: Array<'solving' | 'evaluating'>;
+  contract?: { id: string; version: string };
+  harness?: string;
+  semanticEvaluator?: {
+    runtime: 'codex';
+    model: 'gpt-5.4-mini';
+    auth: 'chatgpt-oauth-only';
+  };
+}
+
 export interface HarnessContext {
   task: Task;
   /** Canonical on-chain Task id for this attempt. */
@@ -33,7 +50,7 @@ export interface HarnessContext {
   attemptIndex?: number;
   /** On-chain / persisted request id for this run. May differ from task.id. */
   requestId?: string;
-  solverNet?: { name: string; solverType: string; model?: string; provider?: import('./provider-ref.js').ProviderRef };
+  solverNet?: HarnessSolverNetContext;
   runtimePlugins?: RuntimePlugin[];
   solverPluginRoots?: string[];
   /**

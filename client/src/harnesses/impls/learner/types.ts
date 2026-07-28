@@ -22,6 +22,12 @@ export interface TaskSessionInputs {
   /** Optional per-SolverNet model override. */
   model?: string;
   /**
+   * Task-scoped Codex credential policy. Exact approved profiles opt into
+   * ChatGPT OAuth-only execution; generic Codex sessions remain compatible
+   * with either OAuth or API-key credentials.
+   */
+  readonly codexAuthPolicy?: 'compatible' | 'chatgpt-oauth-only';
+  /**
    * Optional per-SolverNet provider route for {@link model} (issue #1243).
    * A named provider (string) or a custom OpenAI-compatible endpoint object.
    * The Hermes adapter prefers this over its daemon-global provider and over

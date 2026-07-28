@@ -25,6 +25,39 @@ import { harvestOutput } from './harvest.js';
 import { buildClaudeIsReady } from '../../../preflight/claude-auth.js';
 import { probeCodexDoctor } from '../../../api/codex-doctor-endpoint.js';
 
+const AUTOPILOT_CODEX_CANARY_MANIFEST_CID =
+  'bafkreihvpooczub6s7c3yuraotwe43xbu4dliowmnkymegct66ddgrlaoa';
+
+function taskUsesJinnRepoV1Contract(ctx: HarnessContext): boolean {
+  const { contractId, contractVersion, solverType } = ctx.task;
+  if (contractId !== undefined || contractVersion !== undefined) {
+    return contractId === 'jinn-repo' && contractVersion === 'v1';
+  }
+  return solverType === 'jinn-repo.v1';
+}
+
+function requiresExactCodexOAuthPolicy(ctx: HarnessContext): boolean {
+  const solverNet = ctx.solverNet;
+  const profile = solverNet?.semanticEvaluator;
+  return (
+    ctx.task.role === 'restoration'
+    && taskUsesJinnRepoV1Contract(ctx)
+    && ctx.task.solverNetManifestCid === AUTOPILOT_CODEX_CANARY_MANIFEST_CID
+    && solverNet?.manifestCid === AUTOPILOT_CODEX_CANARY_MANIFEST_CID
+    && solverNet.solverType === 'jinn-repo.v1'
+    && solverNet.contract?.id === 'jinn-repo'
+    && solverNet.contract?.version === 'v1'
+    && solverNet.roles?.includes('solving') === true
+    && solverNet.roles?.includes('evaluating') === true
+    && solverNet.harness === 'codex'
+    && solverNet.model === 'gpt-5.4-mini'
+    && solverNet.provider === undefined
+    && profile?.runtime === 'codex'
+    && profile?.model === 'gpt-5.4-mini'
+    && profile?.auth === 'chatgpt-oauth-only'
+  );
+}
+
 /**
  * `Harness` shell. Bridges the engine's dispatch contract
  * (`await impl.run(ctx)`) into the harness adapter + markdown plugin.
@@ -297,18 +330,28 @@ export class LearnerHarness implements Harness {
     const phaseRange = ctx.mode === 'frozen'
       ? 'solve-only'
       : process.env.LEARNER_PHASE_RANGE;
+    const solverType =
+      (
+        ctx.task.contractId !== undefined
+        && ctx.task.contractVersion !== undefined
+      )
+        ? `${ctx.task.contractId}.${ctx.task.contractVersion}`
+        : (ctx.task.solverType ?? ctx.solverNet?.solverType);
     const inputs: TaskSessionInputs = {
       taskId: ctx.task.id,
       requestId: ctx.requestId,
       taskCid: ctx.taskCid,
-      solverType: ctx.task.solverType,
+      solverType,
       model: ctx.solverNet?.model,
+      ...(requiresExactCodexOAuthPolicy(ctx)
+        ? { codexAuthPolicy: 'chatgpt-oauth-only' as const }
+        : {}),
       ...(ctx.solverNet?.provider !== undefined ? { provider: ctx.solverNet.provider } : {}),
       claudeModel: ctx.solverNet?.model,
       taskBody: ctx.task as TaskSessionInputs['taskBody'],
       implStateDir: ctx.implStateDir,
       workingDir: ctx.workingDir,
-      ...(ctx.task.solverType === 'jinn-repo.v1' && ctx.task.role === 'restoration'
+      ...(solverType === 'jinn-repo.v1' && ctx.task.role === 'restoration'
         ? { taskWorkspaceDir: join(ctx.workingDir, 'repo') }
         : {}),
       pluginRoots: [...(ctx.solverPluginRoots ?? [])],

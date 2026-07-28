@@ -783,3 +783,266 @@ describe('CodexCodeHarnessAdapter — completion + subprocess reaping (#895)', (
     }
   }, 8000);
 });
+
+function authPolicyJwt(expSeconds: number): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString(
+    'base64url',
+  );
+  const payload = Buffer.from(JSON.stringify({ sub: 'operator', exp: expSeconds })).toString(
+    'base64url',
+  );
+  return `${header}.${payload}.signature`;
+}
+
+describe('CodexCodeHarnessAdapter — task-scoped ChatGPT OAuth policy', () => {
+  it.each([
+    ['omitted', undefined],
+    ['compatible', 'compatible' as const],
+  ])('keeps the generic %s policy API-key compatible', async (_name, policy) => {
+    const previousKey = process.env['OPENAI_API_KEY'];
+    process.env['OPENAI_API_KEY'] = 'generic-api-key-secret';
+    const spawnFn = vi.fn((_command: string, _args: string[], _options: unknown) =>
+      fakeCodexChild()
+    );
+    const inspectOAuth = vi.fn(() => ({
+      ready: false as const,
+      reason: 'must not be consulted for generic sessions',
+    }));
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-compatible-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-compatible-state-'));
+    try {
+      const adapter = new CodexCodeHarnessAdapter({
+        codexPath: 'codex-test',
+        clientRoot: '/client/root',
+        _spawnFn: spawnFn as never,
+        _runSessionStartHook: false,
+        _inspectOAuth: inspectOAuth,
+      });
+      await adapter.runTask({
+        ...runInputs(workingDir, implStateDir, new AbortController().signal),
+        ...(policy === undefined ? {} : { codexAuthPolicy: policy }),
+      }, learnerPluginRoot);
+
+      expect(inspectOAuth).not.toHaveBeenCalled();
+      expect(spawnFn).toHaveBeenCalledOnce();
+      expect(spawnFn.mock.calls[0]![2]).toMatchObject({
+        env: expect.objectContaining({
+          OPENAI_API_KEY: 'generic-api-key-secret',
+        }),
+      });
+    } finally {
+      if (previousKey === undefined) delete process.env['OPENAI_API_KEY'];
+      else process.env['OPENAI_API_KEY'] = previousKey;
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      name: 'environment API key',
+      environmentKey: 'env-api-key-secret',
+      authFile: {
+        auth_mode: 'chatgpt',
+        OPENAI_API_KEY: null,
+        tokens: { refresh_token: 'refresh-secret' },
+      },
+    },
+    {
+      name: 'auth-file API key',
+      authFile: {
+        auth_mode: 'chatgpt',
+        OPENAI_API_KEY: 'file-api-key-secret',
+        tokens: { refresh_token: 'refresh-secret' },
+      },
+    },
+    {
+      name: 'wrong auth mode',
+      authFile: {
+        auth_mode: 'apiKey',
+        OPENAI_API_KEY: null,
+        tokens: { refresh_token: 'refresh-secret' },
+      },
+    },
+    {
+      name: 'expired bearer',
+      authFile: {
+        auth_mode: 'chatgpt',
+        OPENAI_API_KEY: null,
+        tokens: {
+          access_token: authPolicyJwt(Math.floor(Date.now() / 1000) - 3_600),
+        },
+      },
+    },
+    {
+      name: 'missing auth file',
+      authFile: undefined,
+    },
+  ])('rejects strict policy with $name before preparation or spawn', async ({
+    environmentKey,
+    authFile,
+  }) => {
+    const previousKey = process.env['OPENAI_API_KEY'];
+    const previousHome = process.env['CODEX_HOME'];
+    const codexHome = mkdtempSync(join(tmpdir(), 'jinn-codex-policy-home-'));
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-policy-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-policy-state-'));
+    const spawnFn = vi.fn();
+    const sessionStartHook = vi.fn(() => ({ status: 0, stdout: '', stderr: '' }));
+    try {
+      process.env['CODEX_HOME'] = codexHome;
+      if (environmentKey === undefined) delete process.env['OPENAI_API_KEY'];
+      else process.env['OPENAI_API_KEY'] = environmentKey;
+      if (authFile !== undefined) {
+        writeFileSync(
+          join(codexHome, 'auth.json'),
+          JSON.stringify(authFile),
+          { mode: 0o600 },
+        );
+      }
+      const adapter = new CodexCodeHarnessAdapter({
+        codexPath: 'codex-test',
+        clientRoot: '/client/root',
+        _spawnFn: spawnFn as never,
+        _spawnSyncFn: sessionStartHook as never,
+      });
+
+      await expect(adapter.runTask({
+        ...runInputs(workingDir, implStateDir, new AbortController().signal),
+        codexAuthPolicy: 'chatgpt-oauth-only',
+      }, learnerPluginRoot)).rejects.toThrow(/ChatGPT OAuth/i);
+
+      expect(sessionStartHook).not.toHaveBeenCalled();
+      expect(spawnFn).not.toHaveBeenCalled();
+      expect(existsSync(join(workingDir, '.agents'))).toBe(false);
+      expect(existsSync(join(workingDir, '.codex-code'))).toBe(false);
+    } finally {
+      if (previousKey === undefined) delete process.env['OPENAI_API_KEY'];
+      else process.env['OPENAI_API_KEY'] = previousKey;
+      if (previousHome === undefined) delete process.env['CODEX_HOME'];
+      else process.env['CODEX_HOME'] = previousHome;
+      rmSync(codexHome, { recursive: true, force: true });
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks spawn when OAuth state is removed during session preparation', async () => {
+    const previousKey = process.env['OPENAI_API_KEY'];
+    const previousHome = process.env['CODEX_HOME'];
+    const codexHome = mkdtempSync(join(tmpdir(), 'jinn-codex-rotation-home-'));
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-rotation-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-rotation-state-'));
+    const authFilePath = join(codexHome, 'auth.json');
+    const spawnFn = vi.fn();
+    const sessionStartHook = vi.fn(() => {
+      rmSync(authFilePath);
+      return { status: 0, stdout: '', stderr: '' };
+    });
+    try {
+      delete process.env['OPENAI_API_KEY'];
+      process.env['CODEX_HOME'] = codexHome;
+      writeFileSync(authFilePath, JSON.stringify({
+        auth_mode: 'chatgpt',
+        tokens: { refresh_token: 'fixture-refresh-token' },
+      }), { mode: 0o600 });
+      const adapter = new CodexCodeHarnessAdapter({
+        codexPath: 'codex-test',
+        clientRoot: '/client/root',
+        _spawnFn: spawnFn as never,
+        _spawnSyncFn: sessionStartHook as never,
+      });
+
+      await expect(adapter.runTask({
+        ...runInputs(workingDir, implStateDir, new AbortController().signal),
+        codexAuthPolicy: 'chatgpt-oauth-only',
+      }, learnerPluginRoot)).rejects.toThrow(/ChatGPT OAuth/i);
+
+      expect(sessionStartHook).toHaveBeenCalledOnce();
+      expect(spawnFn).not.toHaveBeenCalled();
+      expect(existsSync(join(workingDir, '.agents', 'skills'))).toBe(true);
+      expect(existsSync(join(workingDir, '.codex-code'))).toBe(false);
+    } finally {
+      if (previousKey === undefined) delete process.env['OPENAI_API_KEY'];
+      else process.env['OPENAI_API_KEY'] = previousKey;
+      if (previousHome === undefined) delete process.env['CODEX_HOME'];
+      else process.env['CODEX_HOME'] = previousHome;
+      rmSync(codexHome, { recursive: true, force: true });
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  });
+
+  it('re-checks strict OAuth before restoration spawn and omits OPENAI_API_KEY defensively', async () => {
+    const previousKey = process.env['OPENAI_API_KEY'];
+    process.env['OPENAI_API_KEY'] = 'must-not-reach-strict-child';
+    const order: string[] = [];
+    let inspectionIndex = 0;
+    const inspectOAuth = vi.fn(() => {
+      order.push('inspect-oauth');
+      return {
+        ready: true as const,
+        authFilePath: inspectionIndex++ === 0
+          ? '/initial/codex/auth.json'
+          : '/rotated/codex/auth.json',
+      };
+    });
+    const spawnFn = vi.fn((_command: string, _args: string[], _options: unknown) => {
+      order.push('spawn');
+      return fakeCodexChild();
+    });
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-strict-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-strict-state-'));
+    try {
+      const adapter = new CodexCodeHarnessAdapter({
+        codexPath: 'codex-test',
+        clientRoot: '/client/root',
+        _spawnFn: spawnFn as never,
+        _runSessionStartHook: false,
+        _inspectOAuth: inspectOAuth,
+      });
+
+      await adapter.runTask({
+        ...runInputs(workingDir, implStateDir, new AbortController().signal),
+        taskWorkspaceDir: join(workingDir, 'repo'),
+        model: 'gpt-5.4-mini',
+        codexAuthPolicy: 'chatgpt-oauth-only',
+        adapterEnv: {
+          OPENAI_API_KEY: 'must-not-reach-strict-child-from-adapter-env',
+          HOME: '/must-not-control-strict-auth-home',
+          CODEX_HOME: '/must-not-control-strict-codex-home',
+        },
+      }, learnerPluginRoot);
+
+      expect(inspectOAuth).toHaveBeenCalledTimes(2);
+      expect(order).toEqual(['inspect-oauth', 'inspect-oauth', 'spawn']);
+      const [, args, options] = spawnFn.mock.calls[0]!;
+      expect(args).toEqual(expect.arrayContaining([
+        '--sandbox',
+        'danger-full-access',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '-m',
+        'gpt-5.4-mini',
+      ]));
+      expect(args).toContain('-c');
+      expect(args.join('\n')).not.toContain('OPENAI_API_KEY');
+      expect(args.join('\n')).not.toContain('/must-not-control-strict-auth-home');
+      expect(args.join('\n')).not.toContain('/must-not-control-strict-codex-home');
+      expect(options).toMatchObject({
+        cwd: workingDir,
+        env: expect.objectContaining({
+          CODEX_HOME: '/rotated/codex',
+        }),
+      });
+      expect(options.env).not.toHaveProperty('OPENAI_API_KEY');
+      expect(options.env?.['CODEX_HOME']).not.toBe('/initial/codex');
+      expect(options.env?.['HOME']).not.toBe('/must-not-control-strict-auth-home');
+      expect(existsSync(join(workingDir, '.agents', 'skills'))).toBe(true);
+    } finally {
+      if (previousKey === undefined) delete process.env['OPENAI_API_KEY'];
+      else process.env['OPENAI_API_KEY'] = previousKey;
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  });
+});

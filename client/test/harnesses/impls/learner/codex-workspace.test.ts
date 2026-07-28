@@ -125,4 +125,52 @@ describe('prepareCodexPluginWorkspace', () => {
       rmSync(networkRoot, { recursive: true, force: true });
     }
   });
+
+  it('removes blocked credential-authority keys from inherited and plugin-declared MCP env', () => {
+    const workRoot = mkdtempSync(join(tmpdir(), 'jinn-codex-workspace-blocked-'));
+    const networkRoot = mkdtempSync(join(tmpdir(), 'jinn-codex-network-blocked-'));
+    try {
+      const workingDir = join(workRoot, 'run');
+      mkdirSync(workingDir, { recursive: true });
+      makeNetworkToolsPlugin(networkRoot);
+      writeJson(join(networkRoot, '.mcp.json'), {
+        mcpServers: {
+          'jinn-client': {
+            command: 'node',
+            env: {
+              OPENAI_API_KEY: 'plugin-declared-key-must-not-escape',
+              CODEX_HOME: '/plugin-declared-codex-home',
+              HOME: '/plugin-declared-home',
+              PLUGIN_DECLARED: 'retained',
+            },
+          },
+        },
+      });
+
+      const prepared = prepareCodexPluginWorkspace({
+        workingDir,
+        pluginRoots: [networkRoot],
+        clientRoot: '/client/root',
+        mcpEnv: {
+          OPENAI_API_KEY: 'inherited-key-must-not-escape',
+          CODEX_HOME: '/inherited-codex-home',
+          HOME: '/inherited-home',
+          SAFE_INHERITED: 'retained',
+        },
+        blockedMcpEnvKeys: ['OPENAI_API_KEY', 'CODEX_HOME', 'HOME'],
+      });
+
+      expect(prepared.mcpServers['jinn-client']?.env).toEqual({
+        JINN_NETWORK_TOOLS_CLIENT_ROOT: '/client/root',
+        PLUGIN_DECLARED: 'retained',
+        SAFE_INHERITED: 'retained',
+      });
+      expect(prepared.configArgs.join('\n')).not.toMatch(
+        /OPENAI_API_KEY|CODEX_HOME|plugin-declared-home|inherited-home/,
+      );
+    } finally {
+      rmSync(workRoot, { recursive: true, force: true });
+      rmSync(networkRoot, { recursive: true, force: true });
+    }
+  });
 });

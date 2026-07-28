@@ -31,6 +31,7 @@ export interface PrepareCodexWorkspaceInput {
   pluginRoots: string[];
   clientRoot: string;
   mcpEnv?: Record<string, string>;
+  blockedMcpEnvKeys?: readonly string[];
   copyPlugins?: boolean;
 }
 
@@ -172,6 +173,7 @@ function readMcpServers(
   pluginName: string,
   clientRoot: string,
   mcpEnv: Record<string, string>,
+  blockedMcpEnvKeys: ReadonlySet<string>,
 ): Record<string, CodexMcpServerConfig> {
   const rel = manifest?.mcpServers;
   if (!rel) return {};
@@ -196,15 +198,17 @@ function readMcpServers(
             .filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
         )
       : {};
+    const env: Record<string, string> = {
+      ...mcpEnv,
+      ...(pluginName === 'network-tools' ? { JINN_NETWORK_TOOLS_CLIENT_ROOT: clientRoot } : {}),
+      ...declaredEnv,
+    };
+    for (const key of blockedMcpEnvKeys) delete env[key];
     out[name] = {
       command: record['command'],
       ...(args ? { args } : {}),
       cwd,
-      env: {
-        ...mcpEnv,
-        ...(pluginName === 'network-tools' ? { JINN_NETWORK_TOOLS_CLIENT_ROOT: clientRoot } : {}),
-        ...declaredEnv,
-      },
+      env,
     };
   }
   return out;
@@ -221,6 +225,7 @@ export function prepareCodexPluginWorkspace(input: PrepareCodexWorkspaceInput): 
   const skillLinks: string[] = [];
   const mcpServers: Record<string, CodexMcpServerConfig> = {};
   const marketplacePlugins: CodexMarketplacePlugin[] = [];
+  const blockedMcpEnvKeys = new Set(input.blockedMcpEnvKeys ?? []);
 
   for (const root of pluginRoots) {
     const info = pluginInfo(root);
@@ -257,7 +262,14 @@ export function prepareCodexPluginWorkspace(input: PrepareCodexWorkspaceInput): 
 
     Object.assign(
       mcpServers,
-      readMcpServers(projectedRoot, info.manifest, safeName, input.clientRoot, input.mcpEnv ?? {}),
+      readMcpServers(
+        projectedRoot,
+        info.manifest,
+        safeName,
+        input.clientRoot,
+        input.mcpEnv ?? {},
+        blockedMcpEnvKeys,
+      ),
     );
   }
 

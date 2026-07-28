@@ -209,11 +209,11 @@ function parseAgentReview(
   let raw: unknown;
   try {
     raw = JSON.parse(output);
-  } catch (error) {
+  } catch {
     return humanResult(
       context,
       'semantic-output-invalid',
-      `Semantic agent did not return JSON: ${error instanceof Error ? error.message : String(error)}`,
+      'Semantic evaluator returned malformed review JSON.',
     );
   }
 
@@ -222,9 +222,7 @@ function parseAgentReview(
     return humanResult(
       context,
       'semantic-output-invalid',
-      `Semantic agent output failed the strict review-result schema: ${parsed.error.issues
-        .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
-        .join('; ')}`,
+      'Semantic evaluator returned review JSON that failed the strict result schema.',
     );
   }
   if (!autopilotCorrelationMatches(context.correlation, parsed.data.correlation)) {
@@ -333,7 +331,9 @@ export async function runAutopilotSemanticReview(args: {
       review = humanResult(
         args.context,
         'semantic-runner-failed',
-        error instanceof Error ? error.message : String(error),
+        cleanupSafe
+          ? 'Semantic evaluator failed before producing a valid review.'
+          : 'Semantic evaluator process could not be safely reaped.',
       );
     }
     return {

@@ -5,6 +5,7 @@ import { finished } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { prepareCodexPluginWorkspace } from './codex-workspace.js';
 import type { HarnessAdapter, TaskSessionInputs } from '../types.js';
+import { requireChatGptOAuth } from '../../../codex-auth.js';
 
 export interface CodexCodeHarnessAdapterConfig {
   codexPath?: string;
@@ -25,6 +26,8 @@ export interface CodexCodeHarnessAdapterConfig {
   _spawnFn?: typeof spawn;
   _spawnSyncFn?: typeof spawnSync;
   _runSessionStartHook?: boolean;
+  /** Override the authoritative task-scoped OAuth check for tests. */
+  _inspectOAuth?: typeof requireChatGptOAuth;
   /**
    * Override the process-group kill for testing (#895, mirrors #883). Called
    * as `(childPid, signal)` and expected to signal the child's whole process
@@ -56,6 +59,11 @@ const ENV_ALLOWLIST = [
   'CODEX_HOME',
   'JINN_CODEX_PATH',
 ];
+const STRICT_CREDENTIAL_ENV_KEYS = [
+  'OPENAI_API_KEY',
+  'CODEX_HOME',
+  'HOME',
+] as const;
 
 function defaultClientRoot(): string {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -78,12 +86,18 @@ function defaultCodexPath(): string {
   return 'codex';
 }
 
-function buildAgentEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
+function buildAgentEnv(
+  extra: Record<string, string>,
+  includeOpenAiApiKey = true,
+): NodeJS.ProcessEnv {
   const env: Record<string, string> = {};
   for (const key of ENV_ALLOWLIST) {
+    if (key === 'OPENAI_API_KEY' && !includeOpenAiApiKey) continue;
     if (process.env[key]) env[key] = process.env[key]!;
   }
-  return { ...env, ...extra };
+  const merged = { ...env, ...extra };
+  if (!includeOpenAiApiKey) delete merged['OPENAI_API_KEY'];
+  return merged;
 }
 
 function stringField(value: unknown): string {
@@ -196,6 +210,7 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
   private readonly spawnFn: typeof spawn;
   private readonly spawnSyncFn: typeof spawnSync;
   private readonly runSessionStartHook: boolean;
+  private readonly inspectOAuth: typeof requireChatGptOAuth;
   private readonly killProcessGroup: (childPid: number, signal: NodeJS.Signals) => void;
 
   constructor(config: CodexCodeHarnessAdapterConfig = {}) {
@@ -209,6 +224,7 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
     this.spawnFn = config._spawnFn ?? spawn;
     this.spawnSyncFn = config._spawnSyncFn ?? spawnSync;
     this.runSessionStartHook = config._runSessionStartHook ?? true;
+    this.inspectOAuth = config._inspectOAuth ?? requireChatGptOAuth;
     this.killProcessGroup =
       config._killProcessGroup ?? ((childPid, signal) => { process.kill(-childPid, signal); });
   }
@@ -223,6 +239,26 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
    * the positional-arg invocation used pre-0.133 is no longer supported.
    */
   async runTask(inputs: TaskSessionInputs, pluginRoot: string): Promise<void> {
+    const oauthOnly = inputs.codexAuthPolicy === 'chatgpt-oauth-only';
+    const requireCurrentOAuth = (): string => {
+      const inspection = this.inspectOAuth();
+      if (!inspection.ready) {
+        throw new Error(
+          `codex-code adapter: ChatGPT OAuth is required: ${inspection.reason}`,
+        );
+      }
+      return inspection.authFilePath;
+    };
+    const initialAuthFilePath = oauthOnly
+      ? requireCurrentOAuth()
+      : undefined;
+    const adapterEnv: Record<string, string> = {};
+    for (const [key, value] of Object.entries(inputs.adapterEnv ?? {})) {
+      if (typeof value === 'string') adapterEnv[key] = value;
+    }
+    if (oauthOnly) {
+      for (const key of STRICT_CREDENTIAL_ENV_KEYS) delete adapterEnv[key];
+    }
     const baseEnv = {
       IMPL_STATE_DIR: inputs.implStateDir,
       JINN_HARNESS_MODE: inputs.mode ?? 'train',
@@ -247,9 +283,12 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
       JINN_CORPUS_CHAIN_ID: this.corpusEnv?.chainId != null ? String(this.corpusEnv.chainId) : '',
       JINN_CORPUS_IDENTITY_REGISTRY_ADDRESS: this.corpusEnv?.identityRegistryAddress ?? '',
       JINN_CORPUS_FROM_BLOCK: this.corpusEnv?.fromBlock != null ? String(this.corpusEnv.fromBlock) : '',
-      ...(inputs.adapterEnv ?? {}),
+      ...adapterEnv,
     };
-    const env = buildAgentEnv(baseEnv);
+    const env = buildAgentEnv(baseEnv, !oauthOnly);
+    if (initialAuthFilePath !== undefined) {
+      env['CODEX_HOME'] = dirname(initialAuthFilePath);
+    }
 
     let sessionStartContext = '';
     if (this.runSessionStartHook) {
@@ -281,7 +320,13 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
       pluginRoots: [pluginRoot, ...(inputs.pluginRoots ?? [])],
       clientRoot: this.clientRoot,
       mcpEnv: baseEnv,
+      ...(oauthOnly
+        ? { blockedMcpEnvKeys: STRICT_CREDENTIAL_ENV_KEYS }
+        : {}),
     });
+    if (oauthOnly) {
+      env['CODEX_HOME'] = dirname(requireCurrentOAuth());
+    }
 
     const args: string[] = [
       'exec',

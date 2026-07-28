@@ -299,6 +299,7 @@ describe('runAutopilotSemanticReview', () => {
     expect(agentRunner.run).toHaveBeenCalledWith(expect.objectContaining({
       abort: expect.any(AbortSignal),
     }));
+    expect(agentRunner.run).toHaveBeenCalledOnce();
     expect(agentRunner.run.mock.calls[0]![0]).not.toHaveProperty('cwd');
     expect(agentRunner.run.mock.calls[0]![0]).not.toHaveProperty('model');
     const prompt = agentRunner.run.mock.calls[0]![0].prompt as string;
@@ -488,10 +489,63 @@ describe('runAutopilotSemanticReview', () => {
       outcome: 'human',
       reason: {
         code: 'semantic-runner-failed',
-        detail: 'semantic process did not close',
+        detail: 'Semantic evaluator process could not be safely reaped.',
       },
     });
     expect(cleanup).not.toHaveBeenCalled();
+  });
+
+  it('scrubs semantic runner errors before constructing the publishable Human result', async () => {
+    const sentinel = 'SENTINEL_SEMANTIC_AUTH_MATERIAL_MUST_NOT_ESCAPE';
+    const result = await runAutopilotSemanticReview({
+      context: context(),
+      mechanicalRunner: mechanical(),
+      agentRunner: {
+        run: vi.fn().mockRejectedValue(
+          new Error(`provider stderr contained ${sentinel}`),
+        ),
+      },
+      abort: new AbortController().signal,
+    });
+
+    expect(result.review).toMatchObject({
+      outcome: 'human',
+      reason: {
+        code: 'semantic-runner-failed',
+        detail: 'Semantic evaluator failed before producing a valid review.',
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain(sentinel);
+  });
+
+  it.each([
+    [
+      'malformed JSON',
+      'SENTINEL_MALFORMED_REVIEW_MUST_NOT_ESCAPE',
+    ],
+    [
+      'strict-schema failure',
+      {
+        schemaVersion: 'jinn-autopilot-review-result.v1',
+        outcome: 'approve',
+        correlation: correlation(),
+        body: 'Otherwise valid.',
+        SENTINEL_UNKNOWN_REVIEW_KEY_MUST_NOT_ESCAPE: true,
+      },
+    ],
+  ])('scrubs %s details from the publishable Human result', async (_name, output) => {
+    const result = await runAutopilotSemanticReview({
+      context: context(),
+      mechanicalRunner: mechanical(),
+      agentRunner: agent(output),
+      abort: new AbortController().signal,
+    });
+
+    expect(result.review).toMatchObject({
+      outcome: 'human',
+      reason: { code: 'semantic-output-invalid' },
+    });
+    expect(JSON.stringify(result)).not.toContain('SENTINEL_');
   });
 
   it.each([

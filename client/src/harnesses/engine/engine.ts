@@ -225,10 +225,18 @@ export interface ImplRegistry {
 
 type LoadedSolverNetView = {
   name: string;
+  manifestCid?: string;
   solverType: string;
+  roles?: Array<'solving' | 'evaluating'>;
+  contract?: { id: string; version: string };
   harness: string;
   model?: string;
   provider?: import('../provider-ref.js').ProviderRef;
+  semanticEvaluator?: {
+    runtime: 'codex';
+    model: 'gpt-5.4-mini';
+    auth: 'chatgpt-oauth-only';
+  };
   runtimePlugins: RuntimePlugin[];
 };
 
@@ -1839,10 +1847,28 @@ export class TaskEngine {
           ? {
               name: solverNet.name,
               solverType: solverNet.solverType,
+              harness: solverNet.harness,
+              ...(solverNet.manifestCid
+                ? { manifestCid: solverNet.manifestCid }
+                : {}),
+              ...(solverNet.roles
+                ? { roles: [...solverNet.roles] }
+                : {}),
+              ...(solverNet.contract
+                ? {
+                    contract: {
+                      id: solverNet.contract.id,
+                      version: solverNet.contract.version,
+                    },
+                  }
+                : {}),
               ...(solverNet.model ? { model: solverNet.model } : {}),
               // Provider route travels alongside model (issue #1243) so the
               // Hermes adapter can route first-class instead of inferring.
               ...(solverNet.provider !== undefined ? { provider: solverNet.provider } : {}),
+              ...(solverNet.semanticEvaluator
+                ? { semanticEvaluator: solverNet.semanticEvaluator }
+                : {}),
             }
           : undefined,
         runtimePlugins,
