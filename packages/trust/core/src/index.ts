@@ -8,3 +8,4 @@ export * from "./types.js";
 export * from "./spellings.js";
 export * from "./key-binding.js";
 export * from "./revocation.js";
+export * from "./authorization.js";
