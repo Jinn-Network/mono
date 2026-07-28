@@ -23,3 +23,27 @@ export type { MarketplaceAttemptTuple } from "./attempt-uri.js";
 
 // --- the two-party engagement entry (named surface; consumed by the pipeline at Milestone M6) ---
 export type { TwoPartyEngagement } from "./two-party-engagement.js";
+
+// --- re-homed mech venue verbs (§14 "declared impact"; M2.1) ---
+export {
+  computeRawCodecCid,
+  decodeRawCodecCidDigestHex,
+  uploadRawCodecCid,
+} from "./venue/ipfs.js";
+export type { IpfsPinPort } from "./venue/ipfs.js";
+export { createRegistryPinPort, normalizeIpfsRegistryAddUrl } from "./venue/ipfs-pinfile.js";
+export type { FetchLike, RegistryPinPortOptions } from "./venue/ipfs-pinfile.js";
+export { ZeroEvidenceHashError, keccakEvidenceHash, rejectZeroEvidenceHash } from "./venue/digest.js";
+export { VerdictCode, verdictCodeFromValue } from "./venue/verdict-code.js";
+export {
+  KNOWN_INNER_ERRORS,
+  SafeInnerRevertError,
+  decodeSafeInnerRevert,
+  formatDecodedRevert,
+  formatKnownRevertDetail,
+} from "./venue/safe-revert.js";
+export { SAFE_ABI, buildSafeSignature, executeSafeTransaction } from "./venue/safe.js";
+export type { SafeTransactionParams } from "./venue/safe.js";
+export { JINN_ROUTER_V3_ABI } from "./abis/jinn-router-v3.js";
+export { TASK_COORDINATOR_ABI } from "./abis/task-coordinator.js";
+export { MECH_ABI, MECH_MARKETPLACE_ABI } from "./abis/mech-marketplace.js";
