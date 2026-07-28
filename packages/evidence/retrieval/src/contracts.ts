@@ -404,6 +404,26 @@ export interface EvidenceRetrieval {
   ): Promise<QueryEvidenceOutcome<ProviderData>>;
 }
 
+export const DEFAULT_RETRIEVAL_HARD_LIMITS: RetrievalHardLimits =
+  Object.freeze({
+    timeoutMs: 30_000,
+    maxResultLimit: 50,
+    maxCandidateBudget: 500,
+    maxCandidatePageSize: 100,
+    maxProviderMetadataBytes: 64 * 1024,
+    maxCursorBytes: 16 * 1024,
+    maxLocationObservations: 64,
+    maxLocationAttempts: 8,
+    maxRecordBytes: 16 * 1024 * 1024,
+    maxTotalRecordBytes: 128 * 1024 * 1024,
+    maxArtifactCount: 32,
+    maxArtifactBytes: 64 * 1024 * 1024,
+    maxTotalArtifactBytes: 128 * 1024 * 1024,
+    maxRecordConcurrency: 8,
+    maxArtifactConcurrency: 4,
+    maxDiagnostics: 100,
+  });
+
 export interface ProviderQueryCodec<Query> {
   readonly kind: string;
   readonly schemaVersion: string;
