@@ -66,29 +66,70 @@ try {
     "task-execution-profiles",
   );
   const smokeScript = join(consumer, "smoke.mjs");
-  // Minimal root-import smoke for Task 1: proves the packed tarball installs and its root entry
-  // resolves against the packed protocol dependency. The sealed-document + /testing assertions
-  // land with Task 15 (out of scope here) — this script is rewritten there, not extended
-  // piecemeal.
+  // Full Task 15 smoke: root import, both sealed-document assets resolved by digest through
+  // import.meta.resolve, the ./testing subpath + its FIXTURE_FAMILIES manifest, the
+  // @jinn-network/ dependency boundary, and no .test. leakage into dist.
   await writeFile(
     smokeScript,
     `
+import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
-import { EVAL_SEMANTICS_VERSION, TASK_PROFILE_FORMAT_URI } from "@jinn-network/task-execution-profiles";
+import { fileURLToPath } from "node:url";
+import {
+  EVAL_SEMANTICS_VERSION,
+  TASK_PROFILE_FORMAT_URI,
+  sealDocument,
+} from "@jinn-network/task-execution-profiles";
 
+// Root import: identifiers + the sealing entry point.
 if (TASK_PROFILE_FORMAT_URI !== "https://jinn.network/profiles/task-profile/1.0") {
   throw new Error("root import failed");
 }
 if (EVAL_SEMANTICS_VERSION !== "4") throw new Error("semanticsVersion seed mismatch");
+if (typeof sealDocument !== "function") throw new Error("sealDocument did not resolve from root import");
+const probe = sealDocument({ smoke: "test" });
+if (!probe.digest.startsWith("sha256:")) throw new Error("sealDocument did not return a sha256 digest");
+
+// The two sealed-document assets, resolved by subpath export — each matches its own
+// profile.sha256 (program §7.1: profile.json is the exact raw sealed bytes on disk).
+for (const profile of ["repository-work", "evaluation-task"]) {
+  const jsonUrl = import.meta.resolve(
+    \`@jinn-network/task-execution-profiles/profiles/task-profiles/\${profile}/1.0/profile.json\`,
+  );
+  const shaUrl = import.meta.resolve(
+    \`@jinn-network/task-execution-profiles/profiles/task-profiles/\${profile}/1.0/profile.sha256\`,
+  );
+  const bytes = await readFile(fileURLToPath(jsonUrl));
+  const pinned = (await readFile(fileURLToPath(shaUrl), "utf8")).trim();
+  const actual = \`sha256:\${createHash("sha256").update(bytes).digest("hex")}\`;
+  if (actual !== pinned) {
+    throw new Error(\`\${profile}/1.0/profile.json does not match its profile.sha256: \${actual} !== \${pinned}\`);
+  }
+}
+
+// The ./testing subpath + its FIXTURE_FAMILIES manifest.
+const testingModule = await import("@jinn-network/task-execution-profiles/testing");
+if (!Array.isArray(testingModule.FIXTURE_FAMILIES) || testingModule.FIXTURE_FAMILIES.length === 0) {
+  throw new Error("FIXTURE_FAMILIES did not resolve from the ./testing subpath, or is empty");
+}
+if (typeof testingModule.loadFixtureFamily !== "function" || typeof testingModule.runStructuralCheck !== "function") {
+  throw new Error("./testing did not export the structural runner");
+}
+
+// Dependency boundary + packaging hygiene.
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
 if (jinnDependencies.join(",") !== "@jinn-network/task-execution-protocol") {
   throw new Error("unexpected Jinn dependency boundary: " + jinnDependencies.join(", "));
 }
-const distFiles = await readdir(${JSON.stringify(join(installedRoot, "dist"))});
+const distFiles = await readdir(${JSON.stringify(join(installedRoot, "dist"))}, { recursive: true });
 if (distFiles.some((name) => name.includes(".test."))) throw new Error("test output leaked into dist");
 await readFile(${JSON.stringify(join(installedRoot, "README.md"))});
-console.log("Installed package root import, dist packaging, and dependency boundary verified.");
+
+console.log(
+  "Installed package root import, both sealed-document assets, ./testing + FIXTURE_FAMILIES, "
+    + "dependency boundary, and dist packaging verified.",
+);
 `,
   );
   await run(process.execPath, [smokeScript], { cwd: consumer });

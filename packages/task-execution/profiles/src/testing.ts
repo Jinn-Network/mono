@@ -6,6 +6,50 @@
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { ProfilesError } from "./errors.js";
+import { checkAdmissionReceipt } from "./admission-receipt.js";
+import { checkMeasurementCoverage } from "./evaluation-spec/measurements.js";
+import { checkVerdictConsistency } from "./evaluation-spec/verdict-consistency.js";
+import { checkAllOfConstruction, resolveFamilyUri } from "./task-profile/sub-profile.js";
+import { deriveEvaluationTask } from "./documents/evaluation-task-1.0.js";
+
+// Re-exported conformance-kit surface (design §12, plan Task 15): the structural checks a
+// downstream consumer runs the fixture families of `FIXTURE_FAMILIES` against, all reachable
+// from the single `./testing` entrypoint.
+export {
+  checkAdmissionReceipt,
+  checkAllOfConstruction,
+  checkMeasurementCoverage,
+  checkVerdictConsistency,
+  deriveEvaluationTask,
+  resolveFamilyUri,
+};
+
+/**
+ * Every fixture family this package ships under `fixtures/*` (design §12), sorted by UTF-16 code
+ * unit. Downstream consumers (the marketplace binding, the Autopilot adapter) iterate this list to
+ * discover what `loadFixtureFamily` + `runStructuralCheck` cover without hardcoding directory
+ * names of their own.
+ */
+export const FIXTURE_FAMILIES: string[] = [
+  "admission-receipt",
+  "composite",
+  "equivalence",
+  "evaluation-spec",
+  "evaluation-task-derivation",
+  "family-blocks",
+  "measurements-coverage",
+  "migration",
+  "requirement-merge",
+  "resolution",
+  "result-evaluation",
+  "schema-hardening",
+  "sub-profile",
+  "swe-rebench-golden",
+  "task-profile",
+  "unscorable",
+  "verdict-consistency",
+  "verdict-rule",
+];
 
 export type FixtureKind = "golden" | "adversarial";
 

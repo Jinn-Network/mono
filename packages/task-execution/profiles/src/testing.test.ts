@@ -1,8 +1,20 @@
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadFixtureFamily, runStructuralCheck } from "./testing.js";
+import { compareCodeUnitStrings } from "./order.js";
+import {
+  FIXTURE_FAMILIES,
+  checkAdmissionReceipt,
+  checkAllOfConstruction,
+  checkMeasurementCoverage,
+  checkVerdictConsistency,
+  deriveEvaluationTask,
+  loadFixtureFamily,
+  resolveFamilyUri,
+  runStructuralCheck,
+} from "./testing.js";
 import { ProfilesError } from "./errors.js";
 
 describe("conformance-kit backbone", () => {
@@ -58,5 +70,24 @@ describe("conformance-kit backbone", () => {
     const adversarial = results.find((r) => r.case === "rejects");
     expect(golden?.kind).toBe("golden");
     expect(adversarial?.kind).toBe("adversarial");
+  });
+});
+
+describe("./testing re-export surface (design §12, plan Task 15)", () => {
+  it("FIXTURE_FAMILIES names exactly the directories under fixtures/, sorted by code unit", async () => {
+    const fixturesRoot = fileURLToPath(new URL("../fixtures", import.meta.url));
+    const entries = await readdir(fixturesRoot, { withFileTypes: true });
+    const directories = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+    expect([...FIXTURE_FAMILIES].sort(compareCodeUnitStrings)).toEqual(FIXTURE_FAMILIES);
+    expect([...directories].sort(compareCodeUnitStrings)).toEqual([...FIXTURE_FAMILIES].sort(compareCodeUnitStrings));
+  });
+
+  it("re-exports every structural check named in the plan's Task 15 interfaces block", () => {
+    expect(typeof checkAdmissionReceipt).toBe("function");
+    expect(typeof checkAllOfConstruction).toBe("function");
+    expect(typeof checkMeasurementCoverage).toBe("function");
+    expect(typeof checkVerdictConsistency).toBe("function");
+    expect(typeof deriveEvaluationTask).toBe("function");
+    expect(typeof resolveFamilyUri).toBe("function");
   });
 });
