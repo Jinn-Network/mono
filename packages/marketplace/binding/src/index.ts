@@ -47,3 +47,7 @@ export type { SafeTransactionParams } from "./venue/safe.js";
 export { JINN_ROUTER_V3_ABI } from "./abis/jinn-router-v3.js";
 export { TASK_COORDINATOR_ABI } from "./abis/task-coordinator.js";
 export { MECH_ABI, MECH_MARKETPLACE_ABI } from "./abis/mech-marketplace.js";
+
+// --- today-mode symmetric honor-or-reject (§6.1, frozen §11.12, ruling §7.20; M2.2) ---
+export { honorOrRejectToday } from "./honor-or-reject.js";
+export type { HonorOrRejectResult } from "./honor-or-reject.js";
