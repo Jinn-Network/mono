@@ -6,8 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'trust');
-// Extended by every later trust package task (T11 adds 'resolve').
-const trustDirectories = ['core', 'testing'];
+const trustDirectories = ['core', 'resolve', 'testing'];
 
 // Program ruling §7.9: trust-core's boundary guard allowlists exactly these
 // three externals (@noble/hashes + zod, the evidence floor, plus @noble/curves
@@ -18,6 +17,15 @@ const trustDirectories = ['core', 'testing'];
 const CORE_ALLOWED_EXTERNALS = ['@noble/curves', '@noble/hashes', 'zod'];
 const CORE_ALLOWED_DEPENDENCIES = ['@noble/curves', '@noble/hashes', 'zod'];
 const CORE_ALLOWED_DEV_DEPENDENCIES = ['@types/node', 'typescript', 'vitest'];
+
+// Task T11: trust-resolve's own allowlist -- its two approved dependencies,
+// same-tree `@jinn-network/trust-core` and `viem` (the RPC client). Every
+// other `@jinn-network/*` name -- including the sibling `testing` package,
+// which resolve must not import -- fails this allowlist without a separate
+// ban-list entry, the same allowlist-shaped scanning `core` uses.
+const RESOLVE_ALLOWED_EXTERNALS = ['@jinn-network/trust-core', 'viem'];
+const RESOLVE_ALLOWED_DEPENDENCIES = ['@jinn-network/trust-core', 'viem'];
+const RESOLVE_ALLOWED_DEV_DEPENDENCIES = ['@types/node', 'typescript', 'vitest'];
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
 const ambientNetworkIdentifier = new RegExp(
@@ -246,6 +254,33 @@ test('trust-core manifest dependencies match the approved externals allowlist', 
   );
   assert.deepEqual(Object.keys(coreManifest.optionalDependencies ?? {}), []);
   assert.deepEqual(Object.keys(coreManifest.peerDependencies ?? {}), []);
+});
+
+test('trust-resolve production source imports only the allowed externals', () => {
+  const source = join(packages, 'resolve', 'src');
+  const production = files(source).filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
+  assert.deepEqual(
+    disallowedExternalsInFiles(production, RESOLVE_ALLOWED_EXTERNALS),
+    [],
+    'trust-resolve production source may import only @jinn-network/trust-core and viem',
+  );
+});
+
+test('trust-resolve manifest dependencies match the approved externals allowlist', () => {
+  const resolveManifest = manifest('resolve');
+  assert.deepEqual(
+    Object.keys(resolveManifest.dependencies ?? {}).sort(),
+    [...RESOLVE_ALLOWED_DEPENDENCIES].sort(),
+    'trust-resolve dependencies must be exactly @jinn-network/trust-core and viem',
+  );
+  const devDependencies = Object.keys(resolveManifest.devDependencies ?? {}).sort();
+  assert.deepEqual(
+    devDependencies.filter((name) => !RESOLVE_ALLOWED_DEV_DEPENDENCIES.includes(name)),
+    [],
+    'trust-resolve devDependencies must stay within the toolchain allowlist',
+  );
+  assert.deepEqual(Object.keys(resolveManifest.optionalDependencies ?? {}), []);
+  assert.deepEqual(Object.keys(resolveManifest.peerDependencies ?? {}), []);
 });
 
 test('trust production source never uses ambient network APIs', () => {

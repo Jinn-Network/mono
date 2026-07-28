@@ -56,10 +56,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  testing:
-    name: Trust Testing
-    # Updated to `needs: [foundation, resolve]` in Task T14, once the
-    # resolve-dependent kit code (fakes.ts / conformance.ts) lands.
+  resolve:
+    name: Trust Resolve
     needs: [foundation]
     runs-on: ubuntu-latest
     steps:
@@ -78,6 +76,51 @@ jobs:
           path: packages/trust/core/dist
       - name: Install same-tree portal dependency toolchain (trust-core)
         working-directory: packages/trust/core
+        run: yarn install --immutable
+      - name: Verify Trust Resolve
+        working-directory: packages/trust/resolve
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Trust Resolve distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: trust-resolve-dist
+          path: packages/trust/resolve/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  testing:
+    name: Trust Testing
+    needs: [foundation, resolve]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Trust Core distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: trust-core-dist
+          path: packages/trust/core/dist
+      - name: Install same-tree portal dependency toolchain (trust-core)
+        working-directory: packages/trust/core
+        run: yarn install --immutable
+      - name: Restore Trust Resolve distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: trust-resolve-dist
+          path: packages/trust/resolve/dist
+      - name: Install same-tree portal dependency toolchain (trust-resolve)
+        working-directory: packages/trust/resolve
         run: yarn install --immutable
       - name: Build cross-tree portal dependency from source (evidence-protocol, §7.8)
         working-directory: packages/evidence/protocol
@@ -101,7 +144,7 @@ jobs:
           retention-days: 1
 
   verify:
-    needs: [architecture, foundation, testing]
+    needs: [architecture, foundation, resolve, testing]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -109,11 +152,13 @@ jobs:
         env:
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
           FOUNDATION_RESULT: ${{ needs.foundation.result }}
+          RESOLVE_RESULT: ${{ needs.resolve.result }}
           TESTING_RESULT: ${{ needs.testing.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
             "$FOUNDATION_RESULT" \
+            "$RESOLVE_RESULT" \
             "$TESTING_RESULT"; do
             test "$result" = "success"
           done
@@ -132,7 +177,7 @@ jobs:
           path: .trust-dist
       - name: Place package distributions
         run: |
-          for package in core testing; do
+          for package in core resolve testing; do
             mkdir -p "packages/trust/${package}/dist"
             cp -R ".trust-dist/trust-${package}-dist/." "packages/trust/${package}/dist/"
           done

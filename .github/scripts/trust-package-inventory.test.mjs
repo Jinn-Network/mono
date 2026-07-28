@@ -11,13 +11,15 @@ const DEPENDENCY_SECTIONS = [
 
 const TRUST_PACKAGES = [
   ['core', '@jinn-network/trust-core'],
+  ['resolve', '@jinn-network/trust-resolve'],
   ['testing', '@jinn-network/trust-testing'],
 ];
 
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['core', { dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
-  // trust-resolve does not exist yet (Task T11) -- its dependency edge is
-  // added there, not hardcoded ahead of time.
+  ['resolve', { dependencies: ['@jinn-network/trust-core'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
+  // trust-testing's dependency on trust-resolve is added in Task T14, once
+  // the resolver-dependent kit code (fakes.ts / conformance.ts) lands.
   ['testing', { dependencies: ['@jinn-network/trust-core'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
 ]);
 
@@ -61,8 +63,8 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), join(root, crossTreePath))}`;
 }
 
-test('the trust package inventory is explicit and has two manifests', () => {
-  assert.equal(TRUST_PACKAGES.length, 2);
+test('the trust package inventory is explicit and has three manifests', () => {
+  assert.equal(TRUST_PACKAGES.length, 3);
   for (const [directory, expectedName] of TRUST_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);
