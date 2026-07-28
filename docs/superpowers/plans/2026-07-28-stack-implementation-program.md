@@ -209,7 +209,13 @@ Confirmed by the operator at the program gate (2026-07-28):
     and digest-algorithm agreement only — `evidence-protocol` exports no canonical
     serializer, and attestation-issuer's indented layout is evidence-internal (adjusts trust
     design §17's evidence-leg expectation; recorded as a surfaced finding, not silently
-    patched).
+    patched). Mirror finding from T17 (2026-07-28): `task-execution-protocol` exports **no
+    DSSE/PAE primitive at all** — by design (§22's pure-function surface is sealing +
+    digest; envelope wrapping belongs to consumers, e.g. trust-core's `dssePreAuthEncoding`,
+    itself PAE-byte-proven against evidence-protocol in the T10 leg). The TEP leg therefore
+    asserts canonical-byte + digest-algorithm agreement, and a fixture documents the absent
+    PAE export so nobody later "fixes" it with a duplicate. Do not add a PAE helper to the
+    protocol package.
 16. **`foldObservations` signature:** the frozen name gains an optional second parameter
     `{ now?, effectiveDeadline? }` (field-level refinement per TEP §22): without it the fold
     is a pure log fold (no provisional `expired`); with it, provisional `expired` is derived
