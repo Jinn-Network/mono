@@ -43,6 +43,9 @@ packages/*/.yarn/install-state.gz
 packages/evidence/*/dist/
 packages/evidence/*/.yarn/cache/
 packages/evidence/*/.yarn/install-state.gz
+packages/trust/*/dist/
+packages/trust/*/.yarn/cache/
+packages/trust/*/.yarn/install-state.gz
 examples/external-restorer-impls/*/node_modules/
 examples/external-restorer-impls/*/dist/
 examples/external-restorer-impls/*/.yarn/cache/
