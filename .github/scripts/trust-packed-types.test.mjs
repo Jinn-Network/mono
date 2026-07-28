@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const trustRoot = join(root, 'packages', 'trust');
 const evidenceProtocolRoot = join(root, 'packages', 'evidence', 'protocol');
+const taskExecutionProtocolRoot = join(root, 'packages', 'task-execution', 'protocol');
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'jinn-trust-packed-types-'));
 const archivesRoot = join(temporaryRoot, 'archives');
 const consumerRoot = join(temporaryRoot, 'consumer');
@@ -63,10 +64,11 @@ try {
     archives.set(name, join(archivesRoot, packed[0].filename));
   }
 
-  // Cross-tree portal dependency (§7.8): trust-testing's devDependency on
-  // evidence-protocol resolves through a portal at development time; add
-  // its own packed archive here so the packed-consumer graph resolves
-  // end-to-end the same way trust-testing's own pack:smoke does.
+  // Cross-tree portal dependency (§7.8): trust-testing's devDependencies on
+  // evidence-protocol (T10) and task-execution-protocol (T17) resolve
+  // through portals at development time; add their own packed archives here
+  // so the packed-consumer graph resolves end-to-end the same way
+  // trust-testing's own pack:smoke does.
   const evidenceProtocolPacked = JSON.parse(await run(
     'npm',
     ['pack', '--ignore-scripts', '--json', '--pack-destination', archivesRoot],
@@ -77,6 +79,16 @@ try {
   }
   const evidenceProtocolArchive = join(archivesRoot, evidenceProtocolPacked[0].filename);
 
+  const taskExecutionProtocolPacked = JSON.parse(await run(
+    'npm',
+    ['pack', '--ignore-scripts', '--json', '--pack-destination', archivesRoot],
+    { cwd: taskExecutionProtocolRoot },
+  ));
+  if (taskExecutionProtocolPacked.length !== 1 || typeof taskExecutionProtocolPacked[0]?.filename !== 'string') {
+    throw new Error('npm pack returned an unexpected result for @jinn-network/task-execution-protocol');
+  }
+  const taskExecutionProtocolArchive = join(archivesRoot, taskExecutionProtocolPacked[0].filename);
+
   await mkdir(consumerRoot);
   await writeFile(join(consumerRoot, 'package.json'), JSON.stringify({
     private: true,
@@ -84,6 +96,7 @@ try {
     dependencies: Object.fromEntries([
       ...packages.map(([, name]) => [name, `file:${archives.get(name)}`]),
       ['@jinn-network/evidence-protocol', `file:${evidenceProtocolArchive}`],
+      ['@jinn-network/task-execution-protocol', `file:${taskExecutionProtocolArchive}`],
       ['@types/node', '^22.0.0'],
       ['typescript', '^5.9.3'],
       ['vitest', '^4.1.8'],

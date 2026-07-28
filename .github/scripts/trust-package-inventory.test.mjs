@@ -18,14 +18,16 @@ const TRUST_PACKAGES = [
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['core', { dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['resolve', { dependencies: ['@jinn-network/trust-core'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
-  ['testing', { dependencies: ['@jinn-network/trust-core', '@jinn-network/trust-resolve'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
+  ['testing', { dependencies: ['@jinn-network/trust-core', '@jinn-network/trust-resolve'], devDependencies: ['@jinn-network/evidence-protocol', '@jinn-network/task-execution-protocol'], optionalDependencies: [], peerDependencies: [] }],
 ]);
 
 // Cross-tree Jinn dependencies this tree's packages are approved to portal
 // to, keyed by name -> path relative to the repo root. Extended per task as
-// new cross-tree edges land (only evidence-protocol so far, T10).
+// new cross-tree edges land (evidence-protocol T10, task-execution-protocol
+// T17 -- both devDependency-only equivalence oracles).
 const CROSS_TREE_PACKAGES = new Map([
   ['@jinn-network/evidence-protocol', join('packages', 'evidence', 'protocol')],
+  ['@jinn-network/task-execution-protocol', join('packages', 'task-execution', 'protocol')],
 ]);
 
 function readPackage(directory) {
