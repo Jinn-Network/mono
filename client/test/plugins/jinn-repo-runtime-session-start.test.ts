@@ -1,0 +1,96 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+
+const sh = promisify(execFile);
+const HOOK = fileURLToPath(
+  new URL('../../plugins/jinn-repo-runtime/hooks/session-start', import.meta.url),
+);
+const BASE_COMMIT = 'a'.repeat(40);
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+async function runSessionStart(spec: Record<string, unknown>): Promise<string[]> {
+  const workingDir = await mkdtemp(join(tmpdir(), 'jinn-repo-runtime-session-start-'));
+  tempDirs.push(workingDir);
+  const binDir = join(workingDir, 'bin');
+  const gitLog = join(workingDir, 'git.log');
+  await mkdir(binDir);
+  await writeFile(join(workingDir, 'task.json'), JSON.stringify({ spec }));
+  await writeFile(
+    join(binDir, 'git'),
+    [
+      '#!/usr/bin/env bash',
+      'printf "%s\\n" "$*" >> "$GIT_LOG"',
+      'if [[ "$1" == "-C" && "$3" == "rev-parse" ]]; then',
+      '  printf "%s\\n" "$GIT_HEAD"',
+      'fi',
+    ].join('\n'),
+  );
+  await chmod(join(binDir, 'git'), 0o755);
+
+  const result = await sh('bash', [HOOK], {
+    cwd: workingDir,
+    env: {
+      ...process.env,
+      WORKING_DIR: workingDir,
+      GIT_LOG: gitLog,
+      GIT_HEAD: BASE_COMMIT,
+      PATH: `${binDir}:${process.env.PATH ?? ''}`,
+    },
+  });
+  expect(result.stdout).toBe('');
+
+  try {
+    return (await readFile(gitLog, 'utf8')).trim().split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function liveIssueSpec(workspaceRepository?: string): Record<string, unknown> {
+  return {
+    repo: 'Jinn-Network/mono',
+    base_commit: BASE_COMMIT,
+    ...(workspaceRepository === undefined
+      ? {}
+      : { relay: { workspaceRepository } }),
+  };
+}
+
+describe('jinn-repo-runtime session-start hook', () => {
+  it('fetches a legacy live issue from its outer repository at the outer base commit', async () => {
+    const gitArgs = await runSessionStart(liveIssueSpec());
+
+    expect(gitArgs).toContain('remote add origin https://github.com/Jinn-Network/mono.git');
+    expect(gitArgs).toContain(`fetch --depth 1 --quiet origin ${BASE_COMMIT}`);
+    expect(gitArgs).toContain('checkout --quiet FETCH_HEAD');
+  });
+
+  it('fetches an initial Relay round from its target workspace repository at the outer base commit', async () => {
+    const gitArgs = await runSessionStart(liveIssueSpec('upstream-org/upstream-repo'));
+
+    expect(gitArgs).toContain('remote add origin https://github.com/upstream-org/upstream-repo.git');
+    expect(gitArgs).toContain(`fetch --depth 1 --quiet origin ${BASE_COMMIT}`);
+  });
+
+  it('fetches a repair Relay round from its managed-fork workspace repository at the outer base commit', async () => {
+    const gitArgs = await runSessionStart(liveIssueSpec('managed-fork/relay-repair'));
+
+    expect(gitArgs).toContain('remote add origin https://github.com/managed-fork/relay-repair.git');
+    expect(gitArgs).toContain(`fetch --depth 1 --quiet origin ${BASE_COMMIT}`);
+  });
+
+  it('rejects a non-GitHub workspace value before spawning Git', async () => {
+    const gitArgs = await runSessionStart(liveIssueSpec('https://github.com/managed-fork/relay-repair'));
+
+    expect(gitArgs).toEqual([]);
+  });
+});

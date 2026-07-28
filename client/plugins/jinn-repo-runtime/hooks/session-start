@@ -10,7 +10,8 @@
 #
 # Inputs (env, set by the harness adapter):
 #   WORKING_DIR / JINN_WORKING_DIR — the episode working dir (holds task.json)
-# Reads `spec.repo` + `spec.base_commit` from `$WORKING_DIR/task.json`
+# Reads `spec.repo`, optional `spec.relay.workspaceRepository`, and
+# `spec.base_commit` from `$WORKING_DIR/task.json`
 # (written by the harness's provisionWorkingDir).
 #
 # Contract: idempotent (provisions only when `$WORKING_DIR/repo/.git` is absent —
@@ -26,7 +27,9 @@ log() { echo "jinn-repo-runtime session-start: $*" >&2; }
 
 [[ -f "$TASK_JSON" ]] || { log "no task.json at $WD — skip (not a harness episode)"; exit 0; }
 
-# Extract spec.repo + spec.base_commit. shlex.quote keeps the eval injection-safe.
+# Extract the workspace repository + base_commit. shlex.quote keeps the eval
+# injection-safe. Relay workspaceRepository is the exact checkout repository;
+# legacy live issues retain spec.repo.
 REPO=""
 BASE=""
 eval "$(python3 - "$TASK_JSON" <<'PY' 2>/dev/null || true
@@ -35,12 +38,24 @@ try:
     spec = (json.load(open(sys.argv[1])) or {}).get("spec") or {}
 except Exception:
     sys.exit(0)
-print("REPO=" + shlex.quote(spec.get("repo") or ""))
+relay = spec.get("relay") or {}
+repo = relay.get("workspaceRepository") if isinstance(relay, dict) else None
+print("REPO=" + shlex.quote(repo or spec.get("repo") or ""))
 print("BASE=" + shlex.quote(spec.get("base_commit") or ""))
 PY
 )"
 
 [[ -n "$REPO" && -n "$BASE" ]] || { log "task.json has no spec.repo/base_commit — skip (not a jinn-repo task)"; exit 0; }
+case "$REPO" in
+  *.[gG][iI][tT])
+    log "task.json has an unsafe workspace repository — skip (not a GitHub owner/name slug)"
+    exit 0
+    ;;
+esac
+[[ "$REPO" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]] || {
+  log "task.json has an unsafe workspace repository — skip (not a GitHub owner/name slug)"
+  exit 0
+}
 
 REPO_DIR="$WD/repo"
 if [[ -d "$REPO_DIR/.git" ]]; then

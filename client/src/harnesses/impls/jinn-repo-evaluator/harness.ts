@@ -230,8 +230,8 @@ export interface JinnRepoEvaluatorHarnessOptions {
   grade?: GradeFn;
   /**
    * Live-issue grade-fn override (test injection). Defaults to
-   * {@link runJinnRepoLiveEval} resolved against `JINN_MONO_REPO_URL` (or the
-   * public GitHub URL), mirroring {@link JinnRepoEvaluator}'s resolution order.
+   * {@link runJinnRepoLiveEval} resolved against the task's exact workspace
+   * repository.
    */
   gradeLive?: LiveGradeFn;
   /** Deterministic exact-head checks, injectable for hermetic tests. */
@@ -269,7 +269,6 @@ export class JinnRepoEvaluatorHarness implements Harness {
         runJinnRepoLiveEval({
           spec: args.spec,
           patch: args.solution.patch,
-          monoRepoUrl: process.env['JINN_MONO_REPO_URL'] ?? DEFAULT_MONO_REPO_URL,
         }));
     this.immutableMechanicalVerifier = opts.immutableMechanicalVerifier;
     this.mechanicalRunner =

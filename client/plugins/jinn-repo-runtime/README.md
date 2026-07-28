@@ -4,13 +4,14 @@ Provides a Solver-side domain reference skill for the `jinn-repo.v1` SolverNet.
 
 This plugin bundles one skill:
 - `jinn-repo-task` — task input shape, repo handling (checkout of
-  `Jinn-Network/mono` at `base_commit`), and the `jinn-repo-solution.v1`
+  `goal.spec.repo` at `base_commit`, or a Relay round's exact
+  `goal.spec.relay.workspaceRepository`), and the `jinn-repo-solution.v1`
   output schema.
 
 It also ships a `SessionStart` hook (`hooks/session-start`) that
 deterministically materialises the task repository at `$WORKING_DIR/repo` at
-`base_commit` before the solver agent runs, so a direct-solving model never has
-to improvise the checkout.
+`base_commit` before the solver agent runs. Relay rounds use their exact
+workspace repository; legacy live issues retain `goal.spec.repo`.
 
 The plugin is loaded automatically when an operator's daemon has the
 `jinn-repo.v1` SolverNet enabled, per the registry's

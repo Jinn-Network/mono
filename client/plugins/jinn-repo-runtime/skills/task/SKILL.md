@@ -32,15 +32,24 @@ repo from another `workingDir` or from `implStateDir`. All in-tree edits must
 live in `$workingDir/repo` — that's where the daemon's harvester reads a
 `git diff` from to assemble your solution.
 
+For a Relay round, follow this rule exactly:
+
+```text
+Clone goal.spec.relay.workspaceRepository when relay is present.
+Fetch and checkout goal.spec.base_commit exactly.
+Never push. Return only jinn-repo-solution.v1 patch bytes.
+```
+
 If `$workingDir/repo/.git` is missing, materialise the repo at
 `<goal.spec.base_commit>` by fetching that exact SHA — **do not** `git clone`
 and then `git checkout`. Run these commands verbatim (substituting the
-base_commit; the repo is always `Jinn-Network/mono`):
+base_commit and repository; use `goal.spec.relay.workspaceRepository` when
+Relay is present, otherwise `goal.spec.repo`):
 
 ```bash
 mkdir -p "$workingDir/repo" && cd "$workingDir/repo"
 git init
-git remote add origin https://github.com/Jinn-Network/mono.git
+git remote add origin https://github.com/<repository>.git
 git fetch --depth 1 origin <goal.spec.base_commit>
 git checkout FETCH_HEAD
 ```
