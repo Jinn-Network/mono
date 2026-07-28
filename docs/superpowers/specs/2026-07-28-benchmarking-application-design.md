@@ -2,13 +2,21 @@
 
 | | |
 |---|---|
-| **Version** | 0.2 |
+| **Version** | 0.3 |
 | **Date** | 2026-07-28 |
 | **Author** | Ritsu (design session, Claude Fable 5) |
 | **Shape** | `design` (design-only session; no implementation, no implementation plan, no contract changes — contract-adjacent effects appear as declared impact only) |
 | **Status** | proposed (architecture and adversarial reviews run 2026-07-28; five blocking findings across both, all resolved in this revision, plus sixteen non-blocking tightenings — see Appendix B) |
 | **Supersedes** | `docs/superpowers/specs/2026-07-22-solvernet-benchmarking-primitive-design.md` v0.2 (draft PR #2002) — see §17 |
 | **Depends on** | the 2026-07-27 protocol stack: TEP (`2026-07-27-task-execution-protocol-and-stack-design.md`), profiles (`2026-07-27-task-profiles-and-evaluation-specs-design.md`), trust (`2026-07-27-trust-and-identity-layer-design.md`), record discovery (`2026-07-27-record-discovery-protocol-design.md`), local execution backend (`2026-07-27-local-execution-backend-design.md`), marketplace binding (`2026-07-28-marketplace-binding-design.md`), evidence protocol (`2026-07-23-jinn-execution-evidence-protocol-design.md`) |
+
+Revision note (v0.2 → v0.3): the #2038 disposition is strengthened per the
+2026-07-28 session decision — #2040/#2041/#2043/#2045 are closed as
+**re-homed** (their capabilities are owned by the stack designs and
+implemented as stack-program work on the evidence-v1 lineage, not as issues
+against `next`'s current engine); only #2044/PR #2219 runs to completion.
+§17.2 and §18.3 updated accordingly. No record shape, check, or interface
+changed.
 
 Revision note (v0.1 → v0.2): resolves all review findings. Material changes:
 the facts-card extension for shared record kinds is now an explicitly
@@ -1057,11 +1065,28 @@ Documents and issues only; nothing changes in code or on GitHub this session.
      the closest existing implementation of tasks-carry-profiles; vocabulary
      reframe tracked by the stack's own migration follow-ups, not here),
      #2042 (generator phase ledger).
-   - *In-flight domain-neutral, carries forward untouched*: #2040 (task-owned
-     loadouts), #2041 (isolation + effective-execution attestation) — both
-     are this design's run-pinning enforcement legs; #2043 (post outcomes /
-     exact escrow); #2044 (lifecycle evidence through discovery, PR #2219);
-     #2045 (evidence authentication).
+   - *In-flight, runs to completion*: #2044 (lifecycle evidence through
+     discovery) via PR #2219 — the one nearly-done item; it improves the
+     live product now and its shape informs projector #1.
+   - *Closed as re-homed (2026-07-28)*: #2040, #2041, #2043, #2045. Their
+     capabilities are not dropped — they are owned by the stack designs at
+     component boundaries, and are implemented as stack-program work on the
+     evidence-v1 lineage rather than as issues against `next`'s current
+     engine (building them there would pay for each twice). The homes:
+     task-owned loadout materialization → the local backend's Workspace
+     Provisioner (its §7.2/§8.1: digest-verified, fail-closed; the profiles
+     `loadout` pinning key absorbs #2040's typed kinds); isolation → the
+     local backend's per-attempt directory contract (ephemeral
+     `harness-state/`, wiped `secrets/`, hermetic invocation) with
+     effective-execution attestation → the evidence Runtime Observation
+     (profiles §5.2 cites #2041 as this mechanism); post outcomes / exact
+     escrow → the marketplace binding's posting and reservation-escrow
+     sections plus the 2026-07-24 broadcast-intent design; evidence
+     authentication → trust §7.5 plus the marketplace binding's settlement
+     joins and discovery's per-item verification. (#2041's per-attempt
+     credential isolation also has security value for the live fleet; if
+     live-fleet hardening becomes urgent before the stack lands, reopen a
+     narrowly-scoped fix rather than the full old-engine build.)
    - *Merged, superseded by design*: #2046's SDK contracts (`BenchmarkRunV1`,
      `ConfigV1`, `CellV1`, `BenchMatrixV1`, `BenchPreregistrationV1` in
      `packages/sdk/src/benchmarking.ts`). The code stays until the §6–§9
@@ -1098,9 +1123,12 @@ Documents and issues only; nothing changes in code or on GitHub this session.
    marketplace mode needs the marketplace binding implementation. The
    companion facts-profile amendment lands with the profiles package's facts
    work.
-3. Enforcement legs #2040/#2041 gate honest `verification` fields on open
-   backends; before they land, marketplace cells report `unverifiable` axes
-   honestly (and Reports disclose it) rather than blocking.
+3. The run-pinning enforcement capabilities — task-owned loadout
+   materialization and isolation + effective-execution attestation (formerly
+   issues #2040/#2041, closed as re-homed into the stack program per §17.2)
+   — gate honest `verification` fields on open backends; before they land,
+   marketplace cells report `unverifiable` axes honestly (and Reports
+   disclose it) rather than blocking.
 4. The re-derived #2047–#2054 issue tree happens at implementation planning,
    not in this session.
 
@@ -1152,8 +1180,9 @@ Documents and issues only; nothing changes in code or on GitHub this session.
    the only always-DSSE-signed record here.
 7. **Inspect posture** — use, never compete: import / execute-with / export
    seams; no viewer, no authoring framework.
-8. **#2038 disposition** — carry forward the domain-neutral train; supersede
-   the SDK shapes; re-derive #2047–#2054 from this spec.
+8. **#2038 disposition** — (revised in v0.3) let #2044/PR #2219 finish;
+   close #2040/#2041/#2043/#2045 as re-homed into the stack designs;
+   supersede the SDK shapes; re-derive #2047–#2054 from this spec.
 
 ## Appendix B — Review disposition (2026-07-28)
 
