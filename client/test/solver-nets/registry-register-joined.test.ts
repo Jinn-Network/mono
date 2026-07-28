@@ -19,6 +19,23 @@ const joined: JoinedSolverNetConfig = {
   disabledDefaultPlugins: [],
 };
 
+const semanticJoined: JoinedSolverNetConfig = {
+  manifestCid: 'bafkreihvpooczub6s7c3yuraotwe43xbu4dliowmnkymegct66ddgrlaoa',
+  name: 'autopilot-dual-role',
+  contract: { id: 'jinn-repo', version: 'v1' },
+  roles: ['solver', 'evaluator'],
+  harness: 'claude-code',
+  model: 'anthropic/claude-opus-4.7',
+  provider: 'openrouter',
+  semanticEvaluator: {
+    runtime: 'codex',
+    model: 'gpt-5.4-mini',
+    auth: 'chatgpt-oauth-only',
+  },
+  plugins: [],
+  disabledDefaultPlugins: [],
+};
+
 describe('registerJoinedNet', () => {
   it('produces the same LoadedSolverNet as loadSolverNets for the same entry', async () => {
     const viaBoot = await loadSolverNets({ joinedSolverNets: { [CID]: joined } });
@@ -34,6 +51,33 @@ describe('registerJoinedNet', () => {
     const live = new SolverNetRegistry();
     await registerJoinedNet(live, CID, { ...joined, contract: undefined });
     expect(live.list()).toEqual([]);
+  });
+
+  it('retains semantic metadata without changing restoration routing', async () => {
+    const live = new SolverNetRegistry();
+    await registerJoinedNet(live, semanticJoined.manifestCid, semanticJoined);
+
+    expect(live.list()).toEqual([
+      expect.objectContaining({
+        manifestCid: semanticJoined.manifestCid,
+        roles: ['solving', 'evaluating'],
+        harness: 'claude-code',
+        model: 'anthropic/claude-opus-4.7',
+        provider: 'openrouter',
+        semanticEvaluator: {
+          runtime: 'codex',
+          model: 'gpt-5.4-mini',
+          auth: 'chatgpt-oauth-only',
+        },
+      }),
+    ]);
+  });
+
+  it('omits semantic metadata for a legacy joined entry', async () => {
+    const live = new SolverNetRegistry();
+    await registerJoinedNet(live, CID, joined);
+
+    expect(live.list()[0]).not.toHaveProperty('semanticEvaluator');
   });
 
   describe('diagnostic warnings on silent skip', () => {

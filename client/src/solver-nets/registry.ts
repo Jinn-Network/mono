@@ -6,6 +6,13 @@ import type { ProviderRef } from '../harnesses/provider-ref.js';
 import { getSolverNetContract, type SolverNetContract } from './contracts.js';
 
 export const JINN_NETWORK_TOOLS_PLUGIN = 'bundled:network-tools' as const;
+export const CODEX_SEMANTIC_MODEL = 'gpt-5.4-mini' as const;
+
+export interface CodexSemanticEvaluatorProfile {
+  readonly runtime: 'codex';
+  readonly model: typeof CODEX_SEMANTIC_MODEL;
+  readonly auth: 'chatgpt-oauth-only';
+}
 
 export type SolverNetOperatorRole = 'solving' | 'evaluating';
 export type SolverNetTaskRole = 'restoration' | 'evaluation';
@@ -37,6 +44,7 @@ export interface JoinedSolverNetConfig {
   model?: string;
   /** Provider route for the model (issue #1243). See {@link ProviderRef}. */
   provider?: ProviderRef;
+  semanticEvaluator?: CodexSemanticEvaluatorProfile;
   plugins?: SolverPluginEntry[];
   disabledDefaultPlugins?: string[];
 }
@@ -61,6 +69,7 @@ export interface LoadedSolverNet {
   model?: string;
   /** Provider route for the model (issue #1243). See {@link ProviderRef}. */
   provider?: ProviderRef;
+  semanticEvaluator?: CodexSemanticEvaluatorProfile;
   runtimePlugins: RuntimePlugin[];
   taskGenerator: { enabled: boolean };
 }
@@ -361,6 +370,9 @@ export async function registerJoinedNet(
     harness: canonicalHarnessName(net.harness),
     ...(net.model ? { model: net.model } : {}),
     ...(net.provider !== undefined ? { provider: net.provider } : {}),
+    ...(joined.semanticEvaluator !== undefined
+      ? { semanticEvaluator: joined.semanticEvaluator }
+      : {}),
     runtimePlugins,
     taskGenerator: net.taskGenerator,
   });

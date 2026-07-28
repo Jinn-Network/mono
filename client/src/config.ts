@@ -444,6 +444,14 @@ export const JinnConfigSchema = z.object({
             }),
           ])
           .optional(),
+        semanticEvaluator: z
+          .object({
+            runtime: z.literal('codex'),
+            model: z.literal('gpt-5.4-mini'),
+            auth: z.literal('chatgpt-oauth-only'),
+          })
+          .strict()
+          .optional(),
         plugins: z.array(z.string()).default([]),
         disabledDefaultPlugins: z.array(z.string()).default([]),
       }),

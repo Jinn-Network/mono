@@ -959,6 +959,91 @@ describe('loadConfig legacy solverNets migration via loader', () => {
   });
 });
 
+describe('joinedSolverNets semantic evaluator profile', () => {
+  const dirs: string[] = [];
+  const manifestCid =
+    'bafkreihvpooczub6s7c3yuraotwe43xbu4dliowmnkymegct66ddgrlaoa';
+
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  async function writeConfigFile(
+    semanticEvaluator?: Record<string, unknown>,
+  ): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-semantic-profile-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify({
+      network: 'testnet',
+      joinedSolverNets: {
+        [manifestCid]: {
+          manifestCid,
+          contract: { id: 'jinn-repo', version: 'v1' },
+          roles: ['solver', 'evaluator'],
+          harness: 'codex',
+          model: 'gpt-5.4-mini',
+          ...(semanticEvaluator === undefined ? {} : { semanticEvaluator }),
+        },
+      },
+    }, null, 2));
+    return configPath;
+  }
+
+  it('preserves the exact Codex semantic evaluator profile', async () => {
+    const configPath = await writeConfigFile({
+      runtime: 'codex',
+      model: 'gpt-5.4-mini',
+      auth: 'chatgpt-oauth-only',
+    });
+
+    expect(loadConfig(configPath).joinedSolverNets?.[manifestCid]).toEqual({
+      manifestCid,
+      contract: { id: 'jinn-repo', version: 'v1' },
+      roles: ['solver', 'evaluator'],
+      harness: 'codex',
+      model: 'gpt-5.4-mini',
+      semanticEvaluator: {
+        runtime: 'codex',
+        model: 'gpt-5.4-mini',
+        auth: 'chatgpt-oauth-only',
+      },
+      plugins: [],
+      disabledDefaultPlugins: [],
+    });
+  });
+
+  it.each([
+    ['another runtime', { runtime: 'claude', model: 'gpt-5.4-mini', auth: 'chatgpt-oauth-only' }],
+    ['another model', { runtime: 'codex', model: 'gpt-5.4', auth: 'chatgpt-oauth-only' }],
+    ['another auth mode', { runtime: 'codex', model: 'gpt-5.4-mini', auth: 'api-key' }],
+    ['an unknown property', {
+      runtime: 'codex',
+      model: 'gpt-5.4-mini',
+      auth: 'chatgpt-oauth-only',
+      fallback: true,
+    }],
+    ['an empty object', {}],
+  ])('rejects %s in the semantic evaluator profile', async (_label, profile) => {
+    const configPath = await writeConfigFile(profile);
+    expect(() => loadConfig(configPath)).toThrow();
+  });
+
+  it('leaves a legacy joined entry without a semantic profile unchanged', async () => {
+    const configPath = await writeConfigFile();
+
+    expect(loadConfig(configPath).joinedSolverNets?.[manifestCid]).toEqual({
+      manifestCid,
+      contract: { id: 'jinn-repo', version: 'v1' },
+      roles: ['solver', 'evaluator'],
+      harness: 'codex',
+      model: 'gpt-5.4-mini',
+      plugins: [],
+      disabledDefaultPlugins: [],
+    });
+  });
+});
+
 describe('joinedSolverNets provider backfill (issue #1243)', () => {
   const dirs: string[] = [];
 
