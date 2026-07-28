@@ -22,6 +22,7 @@ const EVIDENCE_PACKAGES = [
   ['publication', '@jinn-network/evidence-publication'],
   ['local-runtime', '@jinn-network/evidence-local-runtime'],
   ['execution-recorder-bridge', '@jinn-network/execution-recorder-bridge'],
+  ['retrieval', '@jinn-network/evidence-retrieval'],
 ];
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -37,6 +38,16 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['publication', { dependencies: ['@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
   ['local-runtime', { dependencies: ['@jinn-network/evidence-catalog-sqlite', '@jinn-network/evidence-discovery', '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/execution-recorder'], optionalDependencies: [], peerDependencies: [] }],
   ['execution-recorder-bridge', { dependencies: ['@jinn-network/evidence-repository', '@jinn-network/execution-recorder'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
+  ['retrieval', {
+    dependencies: [
+      '@jinn-network/evidence-discovery',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/evidence-repository',
+    ],
+    devDependencies: [],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
 ]);
 
 function readPackage(directory) {
@@ -68,8 +79,8 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;
 }
 
-test('the evidence package inventory is explicit and has twelve manifests', () => {
-  assert.equal(EVIDENCE_PACKAGES.length, 12);
+test('the evidence package inventory is explicit and has thirteen manifests', () => {
+  assert.equal(EVIDENCE_PACKAGES.length, 13);
   for (const [directory, expectedName] of EVIDENCE_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);
@@ -112,10 +123,12 @@ test('evidence package Jinn dependencies and portal resolutions match the approv
   }
 });
 
-test('the Derivation testing entrypoint declares Vitest as an exact optional peer', () => {
-  const derivation = readPackage('derivation');
-  assert.deepEqual(derivation.peerDependencies, { vitest: '^4.1.8' });
-  assert.deepEqual(derivation.peerDependenciesMeta, {
-    vitest: { optional: true },
-  });
+test('testing entrypoints declare Vitest as an exact optional peer', () => {
+  for (const directory of ['derivation', 'retrieval']) {
+    const manifest = readPackage(directory);
+    assert.deepEqual(manifest.peerDependencies, { vitest: '^4.1.8' });
+    assert.deepEqual(manifest.peerDependenciesMeta, {
+      vitest: { optional: true },
+    });
+  }
 });
