@@ -3,5 +3,6 @@
   "revocation": "sha256:dd6fe2fd23cf831b84d68dc2a0c09bd7cbaa41c7e902ce76238b4d9143fefffd",
   "policy": "sha256:2627a9fb9406d7e382348cbabe9a41fc8b0e90129c3aed9183bcafdddb575e5f",
   "authorization": "sha256:734848ceef295922ee837351f8c22806238d04df1f6d7651a4be935995a736e1",
-  "key-binding-golden": "sha256:ee26c1a8c59aed5cad29bf7e5cd455530de90c40a8e5bba8fa71ca9da1e8dba8"
+  "key-binding-golden": "sha256:ee26c1a8c59aed5cad29bf7e5cd455530de90c40a8e5bba8fa71ca9da1e8dba8",
+  "revocation-golden": "sha256:94eb9b97ca81117b3dbda0f56c4ae7526fbda01e02393157b186187d8dd938de"
 }

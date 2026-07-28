@@ -7,6 +7,7 @@ import { parseSignedRecordEnvelope, sealSignedRecord } from "./dsse.js";
 import { TrustCoreError, invalidInput } from "./errors.js";
 import { TRUST_KEY_BINDING_FORMAT, TRUST_KEY_BINDING_MEDIA_TYPE } from "./identifiers.js";
 import { AnchorReferenceSchema, Sha256DigestSchema } from "./types.js";
+import type { ValidationDiagnostic } from "./types.js";
 import { AgentIriSchema, DidKeySchema, RelationshipSchema, ScopeSchema, VoucherIdentitySchema } from "./spellings.js";
 
 // ---------------------------------------------------------------------------
@@ -72,12 +73,6 @@ export const KeyBindingSchema = z.looseObject({
   anchors: z.array(AnchorReferenceSchema),
 });
 export type KeyBinding = z.infer<typeof KeyBindingSchema>;
-
-export interface ValidationDiagnostic {
-  readonly code: string;
-  readonly path: string;
-  readonly message: string;
-}
 
 export interface KeyBindingValidationReport {
   readonly conforms: boolean;

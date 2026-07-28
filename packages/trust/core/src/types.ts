@@ -26,3 +26,11 @@ export const AnchorReferenceSchema = z.looseObject({
   digest: Sha256DigestSchema,
 });
 export type AnchorReference = z.infer<typeof AnchorReferenceSchema>;
+
+/** A single validator diagnostic, shared across every sealed record
+ * family's `validate*` report shape. */
+export interface ValidationDiagnostic {
+  readonly code: string;
+  readonly path: string;
+  readonly message: string;
+}
