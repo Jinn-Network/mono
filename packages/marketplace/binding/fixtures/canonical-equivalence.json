@@ -1,0 +1,19 @@
+{
+  "keySortSensitive": {
+    "record": {
+      "zebra": "z",
+      "apple": "a",
+      "Middle": "m",
+      "chainId": 84532
+    },
+    "sha256Hex": "2ef07daa24dbd1f8b9f64d4e2a541e5b6a1664416998a46717fba94191137970"
+  },
+  "integerLikeKeys": {
+    "record": {
+      "10": "ten",
+      "2": "two",
+      "1": "one"
+    },
+    "sha256Hex": "88f1d5d864d29ee7e34bed097931cc725766463ad2b97c08685f0c20dbc66b21"
+  }
+}
