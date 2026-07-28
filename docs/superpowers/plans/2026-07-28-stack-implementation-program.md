@@ -279,6 +279,12 @@ Confirmed by the operator at the program gate (2026-07-28):
   `https://jinn.network/task-profiles/repository-work/1.0`,
   `https://jinn.network/task-profiles/evaluation-task/1.0` (+ the profiles/evaluation-spec
   format URIs). Pre-release checklist; does not gate internal work.
+- Plugin / checkpoint artifact record kinds have NO defining-bytes schema anywhere in the
+  implemented task-execution tree (discovered at the facts leaf, 2026-07-28): the discovery
+  §12 table names them and `RECORD_KINDS.plugin/checkpoint` are pinned, but the leaf
+  registers them structurally with zero declared fields (honest, not fabricated). The
+  defining schemas arrive with future plugin/checkpoint work; the leaf then gains their
+  fields.
 - Stale-doc corrections: evidence architecture doc §3/§4 status table (11 packages, all
   implemented); 2026-07-23 protocol design's pre-consolidation paths; application-layer index
   residual "four capabilities" phrasing and the §7 "re-audited" claim (partially corrected by

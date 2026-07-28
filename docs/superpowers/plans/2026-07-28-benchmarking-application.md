@@ -816,3 +816,14 @@ Explicitly **not** in this plan (tier-4 products, deferred design work, or other
 - Re-derivable-tier grading requirement for replaced cells — a product-policy candidate (§12.3/§20).
 - Matrix-validation-as-a-task (a marketplace task that independently recomputes a matrix) — a trust product candidate, not v1 (§20).
 - Repo-wide applications-vs-products taxonomy docs pass (§2/§20) — a follow-up owned by the program docs lane, not this plan.
+
+## Addendum 2026-07-28-b — bench-field wire placement (cross-plan coordination)
+
+The implemented `facts/task-execution` leaf reads the Addendum-2026-07-28-b benchmarking
+fields from `submission.annotations.{run, cellKey, armId}` (grounded in TEP's
+correlation-annotation doc-comment) and, for the Delivery, from top-level loose extension
+fields `run`/`cellKey`/`armId` — a documented ASSUMPTION, since no spec pins the exact JSON
+path. This plan's M1 (record schemas) and M4 (run orchestration/dispatch) MUST either emit
+exactly those keys or pin different ones — in which case the leaf's recompute gets the
+one-line correction, at that moment, as a coordinated pair of edits. Confirmed at the
+program-extension gate.
