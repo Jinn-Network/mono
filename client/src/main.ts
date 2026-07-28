@@ -82,6 +82,7 @@ import { createJoinApplier } from './daemon/join-applier.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import {
   makeConfiguredSemanticEvaluatorRunnerResolver,
+  type ConfiguredSemanticEvaluatorRunnerResolverOptions,
 } from './harnesses/impls/jinn-repo-evaluator/semantic-runner-resolver.js';
 import {
   makeDockerImmutableMechanicalVerifier,
@@ -221,6 +222,30 @@ if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') 
 const embeddedAgentEnabled = isEmbeddedAgentEnabled();
 
 let activeClaudePath = config.claudePath ?? 'claude';
+export function normalizeConfiguredCodexPath(
+  codexPath: string | undefined,
+): string {
+  return codexPath?.trim() || 'codex';
+}
+
+export type ProductionSemanticEvaluatorRunnerResolverOptions = Omit<
+  ConfiguredSemanticEvaluatorRunnerResolverOptions,
+  'getCodexPath'
+> & {
+  readonly configuredCodexPath: string | undefined;
+};
+
+export function makeProductionSemanticEvaluatorRunnerResolver(
+  options: ProductionSemanticEvaluatorRunnerResolverOptions,
+): ReturnType<typeof makeConfiguredSemanticEvaluatorRunnerResolver> {
+  const { configuredCodexPath, ...resolverOptions } = options;
+  const codexPath = normalizeConfiguredCodexPath(configuredCodexPath);
+  return makeConfiguredSemanticEvaluatorRunnerResolver({
+    ...resolverOptions,
+    getCodexPath: () => codexPath,
+  });
+}
+
 const selectClaudePath = (claudePath: string): void => {
   activeClaudePath = claudePath;
   config.claudePath = claudePath;
@@ -1550,9 +1575,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     codexPath: config.codexPath,
     codexDoctorTimeoutMs: config.codexDoctorTimeoutMs,
     semanticEvaluatorRunnerResolver:
-      makeConfiguredSemanticEvaluatorRunnerResolver({
+      makeProductionSemanticEvaluatorRunnerResolver({
         getJoinedSolverNets: () => config.joinedSolverNets,
         getClaudePath: () => activeClaudePath,
+        configuredCodexPath: config.codexPath,
       }),
     immutableMechanicalVerifier: makeDockerImmutableMechanicalVerifier(),
   })) {
