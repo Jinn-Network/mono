@@ -1,0 +1,11 @@
+{
+  "input": {
+    "spec": {
+      "measurements": [
+        { "name": "passed", "type": "boolean", "required": true }
+      ]
+    },
+    "delivered": {}
+  },
+  "expect": { "ok": false, "missing": ["passed"] }
+}

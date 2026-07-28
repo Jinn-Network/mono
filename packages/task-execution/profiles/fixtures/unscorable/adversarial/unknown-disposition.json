@@ -1,0 +1,4 @@
+{
+  "input": { "name": "mystery-outcome", "disposition": "skip" },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

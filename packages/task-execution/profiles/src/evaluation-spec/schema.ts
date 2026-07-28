@@ -2,6 +2,7 @@ import { z } from "zod";
 import { EVALUATION_SPEC_FORMAT_URI } from "../identifiers.js";
 import { RESOURCE_DESCRIPTOR_SHAPE, resourceDescriptorHasLocator } from "../resource-descriptor.js";
 import { VerdictRuleSchema } from "./verdict-rule.js";
+import { UnscorableSchema } from "./unscorable.js";
 
 /** Grader families (4, frozen, §7.1). */
 export const GRADER_FAMILIES = [
@@ -41,9 +42,8 @@ export const EvidenceConventionsSchema = z.looseObject({
 export type EvidenceConventions = z.infer<typeof EvidenceConventionsSchema>;
 
 /**
- * Top-level EvaluationSpec shape (§7.1). `unscorable` and `familyBlock` are `z.unknown()`
- * placeholders here; later tasks edit this schema in place to replace each placeholder with its
- * typed shape (unscorable: Task 5; familyBlock, discriminated on `family`: Task 6).
+ * Top-level EvaluationSpec shape (§7.1). `familyBlock` is a `z.unknown()` placeholder here;
+ * Task 6 edits this schema in place to discriminate it on `family`.
  */
 export const EvaluationSpecSchema = z.looseObject({
   protocol: z.literal(EVALUATION_SPEC_FORMAT_URI),
@@ -53,7 +53,7 @@ export const EvaluationSpecSchema = z.looseObject({
   familyBlock: z.unknown(),
   measurements: z.array(MeasurementDeclarationSchema),
   verdictRule: VerdictRuleSchema,
-  unscorable: z.unknown(),
+  unscorable: UnscorableSchema,
   evidenceConventions: EvidenceConventionsSchema,
 });
 

@@ -5,3 +5,6 @@ export * from "./identifiers.js";
 export * from "./evaluation-spec/schema.js";
 export * from "./evaluation-spec/seal.js";
 export * from "./evaluation-spec/verdict-rule.js";
+export * from "./evaluation-spec/unscorable.js";
+export * from "./evaluation-spec/measurements.js";
+export * from "./evaluation-spec/verdict-consistency.js";
