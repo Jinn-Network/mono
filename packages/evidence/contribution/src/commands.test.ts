@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+
 import {
   createBuiltinDerivationDetectors,
   createEvidenceDeriver,
@@ -9,6 +12,15 @@ import { createArtifactReference } from "@jinn-network/evidence-repository";
 import type { EvidenceRepository, Sha256Digest } from "@jinn-network/evidence-repository";
 import { InMemoryEvidenceRepository } from "@jinn-network/evidence-repository/testing";
 import { describe, expect, test } from "vitest";
+
+const require = createRequire(import.meta.url);
+
+async function loadGoldenFixture(path: string): Promise<Uint8Array> {
+  const fixturePath = require.resolve(
+    `@jinn-network/evidence-protocol/fixtures/${path}`,
+  );
+  return new Uint8Array(await readFile(fixturePath));
+}
 
 import {
   createContributionRequest,
@@ -26,6 +38,7 @@ import { InMemoryContributionStore } from "./testing-fixtures.js";
 import type {
   CreateContributionRequestInput,
   VerifiedDeriveExecutionDecision,
+  VerifiedDisclosurePolicyDecision,
 } from "./types.js";
 
 function fixedClock(at: string): ContributionClock {
@@ -226,7 +239,7 @@ async function seededExecutionEvidenceFixture(): Promise<{
 function preparationDependencies(
   base: ContributionCommandBaseDependencies,
   repository: EvidenceRepository,
-  route: VerifiedDeriveExecutionDecision,
+  route: VerifiedDisclosurePolicyDecision,
   staging: EvidenceRepository = new InMemoryEvidenceRepository(),
 ): ContributionPreparationDependencies {
   const repositories: RepositoryResolver = {
@@ -279,5 +292,53 @@ describe("prepareContribution", () => {
     const deps = preparationDependencies(base, repository, route);
     await expect(prepareContribution("missing", deps))
       .rejects.toThrow(EvidenceContributionError);
+  });
+
+  test("dispatches a disclose-signed-unchanged route end to end", async () => {
+    const base = dependencies();
+    const repository = new InMemoryEvidenceRepository();
+    const bytes = await loadGoldenFixture(
+      "golden-execution-evidence-v1/claims/result-evaluation/result-evaluation.dsse.json",
+    );
+    const receipt = await repository.putRecord("result-evaluation", bytes);
+    const policyDecision = {
+      authorityId: "https://authority.example/policy",
+      decisionId: "signed-decision",
+      digest: `sha256:${"a".repeat(64)}` as Sha256Digest,
+    };
+    const route: VerifiedDisclosurePolicyDecision = {
+      kind: "disclose-signed-unchanged",
+      decision: policyDecision,
+      source: receipt.reference,
+      issuedAt: "2026-07-27T00:00:00Z",
+      allowedCompanionArtifacts: [],
+    };
+    const proposalInput = proposal({
+      idempotencyKey: "plugin:attempt-signed",
+      source: { repositoryBindingId: SOURCE_BINDING, record: receipt.reference },
+      policyDecision,
+    });
+    const created = await createContributionRequest(proposalInput, base);
+    const deps = preparationDependencies(base, repository, route);
+    const prepared = await prepareContribution(created.requestId, deps);
+    expect(prepared.status).toBe("awaiting-authorization");
+    expect(prepared.previewFingerprint).toBeDefined();
+  });
+
+  test("dispatches a withhold route to the withheld aggregate status", async () => {
+    const base = dependencies();
+    const { repository, proposalInput, route: deriveRoute } = await seededExecutionEvidenceFixture();
+    const withholdRoute: VerifiedDisclosurePolicyDecision = {
+      kind: "withhold",
+      decision: deriveRoute.decision,
+      source: deriveRoute.source,
+      issuedAt: deriveRoute.issuedAt,
+      reasons: [{ code: "POLICY_WITHHELD" }],
+    };
+    const created = await createContributionRequest(proposalInput, base);
+    const deps = preparationDependencies(base, repository, withholdRoute);
+    const prepared = await prepareContribution(created.requestId, deps);
+    expect(prepared.status).toBe("withheld");
+    expect(prepared.withheldReasons).toEqual([{ code: "POLICY_WITHHELD" }]);
   });
 });

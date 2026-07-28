@@ -4,6 +4,8 @@ import type { DisclosurePolicyAuthority, DerivationResolver, ReviewReferenceStor
   "./policy.js";
 import { resolveDisclosureRoute } from "./policy.js";
 import { prepareExecutionDisclosure } from "./prepare-execution.js";
+import { prepareReusableDisclosure } from "./prepare-reuse.js";
+import { prepareSignedDisclosure } from "./prepare-signed.js";
 import {
   createContributionProposalFingerprint,
   normalizeCreateContributionRequestInput,
@@ -346,9 +348,39 @@ export async function prepareContribution(
         options,
       );
       break;
-    default:
-      // Completed in Task 6 (prepare-signed.ts / prepare-reuse.ts / withhold).
-      throw new EvidenceContributionError("PORT_PROTOCOL_VIOLATION");
+    case "disclose-signed-unchanged":
+      result = await prepareSignedDisclosure(
+        {
+          requestId,
+          intentFingerprint: sealed.intentFingerprint,
+          source: loadedSource,
+          route,
+          sourceRepositoryBindingId: versioned.value.proposal.source.repositoryBindingId,
+          stagingRepositoryBindingId: versioned.value.proposal.stagingRepositoryBindingId,
+          destinations: versioned.value.proposal.destinations,
+        },
+        dependencies.repositories,
+        options,
+      );
+      break;
+    case "reuse-prepared":
+      result = await prepareReusableDisclosure(
+        {
+          requestId,
+          intentFingerprint: sealed.intentFingerprint,
+          source: loadedSource,
+          route,
+          sourceRepositoryBindingId: versioned.value.proposal.source.repositoryBindingId,
+          stagingRepositoryBindingId: versioned.value.proposal.stagingRepositoryBindingId,
+          destinations: versioned.value.proposal.destinations,
+        },
+        dependencies.repositories,
+        options,
+      );
+      break;
+    case "withhold":
+      result = { status: "withheld", reasons: route.reasons };
+      break;
   }
 
   const preparedState = buildPreparedRequestState(versioned.value, result, now);

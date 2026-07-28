@@ -5,6 +5,8 @@ export * from "./identities.js";
 export * from "./manifest.js";
 export * from "./policy.js";
 export * from "./prepare-execution.js";
+export * from "./prepare-reuse.js";
+export * from "./prepare-signed.js";
 export * from "./request.js";
 export * from "./source.js";
 export * from "./state.js";
