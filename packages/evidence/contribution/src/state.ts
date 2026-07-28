@@ -14,6 +14,7 @@ import type {
   ContributionSafeReasonCode,
   CreateContributionRequestInput,
   PreparedDisclosure,
+  SafePublishedLocation,
   StandingGrantSourceScope,
   VerifiedDisclosurePolicyDecision,
   VerifiedExactAuthorization,
@@ -91,10 +92,26 @@ export type ContributionDestinationAuthorizationFacet =
 
 export type ContributionDestinationPublicationFacet =
   | { readonly status: "not-started" }
-  | { readonly status: "publishing" }
-  | { readonly status: "published"; readonly publishedAt: string }
-  | { readonly status: "retryable-failure" }
-  | { readonly status: "terminal-failure" };
+  | {
+      readonly status: "publishing";
+      readonly bundleKey: Sha256Digest;
+      readonly payloadFingerprint: Sha256Digest;
+    }
+  | {
+      readonly status: "published";
+      readonly publishedAt: string;
+      readonly bundleKey: Sha256Digest;
+      readonly payloadFingerprint: Sha256Digest;
+      readonly locations: readonly SafePublishedLocation[];
+    }
+  | {
+      readonly status: "retryable-failure";
+      readonly reasonCode: ContributionSafeReasonCode;
+    }
+  | {
+      readonly status: "terminal-failure";
+      readonly reasonCode: ContributionSafeReasonCode;
+    };
 
 export interface ContributionDestinationDeactivationFacet {
   readonly requested: boolean;

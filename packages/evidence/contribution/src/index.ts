@@ -8,6 +8,7 @@ export * from "./policy.js";
 export * from "./prepare-execution.js";
 export * from "./prepare-reuse.js";
 export * from "./prepare-signed.js";
+export * from "./publication.js";
 export * from "./request.js";
 export * from "./source.js";
 export * from "./state.js";

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { AuthorizationAuthority } from "./authorization.js";
 import { EvidenceContributionError } from "./errors.js";
+import type { PublicationResolver } from "./publication.js";
 import type { DisclosurePolicyAuthority, DerivationResolver, ReviewReferenceStore } from
   "./policy.js";
 import { resolveDisclosureRoute } from "./policy.js";
@@ -81,7 +82,10 @@ function toDestinationOutcome(
     deactivated: destination.deactivation.requested,
     ...(destination.authorization.status === "denied"
       ? { reasonCode: destination.authorization.reasonCode }
-      : {}),
+      : destination.publication.status === "retryable-failure" ||
+          destination.publication.status === "terminal-failure"
+        ? { reasonCode: destination.publication.reasonCode }
+        : {}),
     ...(destination.publication.status === "published"
       ? { publishedAt: destination.publication.publishedAt }
       : {}),
@@ -209,6 +213,17 @@ export interface ContributionAuthorizationDependencies
 export interface ContributionGrantDependencies
   extends ContributionCommandBaseDependencies {
   readonly authorization: AuthorizationAuthority;
+}
+
+/**
+ * Dependency aggregate for per-destination Publication commands
+ * (`publishContributionDestination`, `resumeContribution`,
+ * `retryContributionDestination`).
+ */
+export interface ContributionPublicationDependencies
+  extends ContributionCommandBaseDependencies {
+  readonly repositories: RepositoryResolver;
+  readonly publications: PublicationResolver;
 }
 
 const PREPARATION_CLAIM_MINUTES = 5;

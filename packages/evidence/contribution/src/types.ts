@@ -198,7 +198,7 @@ export interface PreparedDisclosureRisk {
 
 export interface PreparedContributionDestination {
   readonly descriptor: ContributionDestination;
-  readonly bundleKey: string;
+  readonly bundleKey: Sha256Digest;
   readonly payloadFingerprint: Sha256Digest;
 }
 
@@ -410,6 +410,20 @@ export interface StandingGrantRevocationSubmission {
 
 export interface VerifiedStandingGrantRevocation
   extends Omit<StandingGrantRevocationSubmission, "proofBytes"> {}
+
+// ---------------------------------------------------------------------------
+// Safe Publication location projection (design §13)
+//
+// An optional, private, binding-owned receipt projection. `profile`
+// identifies the binding's own semantics; Contribution never interprets
+// `value` -- it is validated only as a bounded inert string and scanned by
+// the contract kit for authority-marker leakage.
+// ---------------------------------------------------------------------------
+
+export interface SafePublishedLocation {
+  readonly profile: string;
+  readonly value: string;
+}
 
 export interface StandingAuthorizationGrantReadModel {
   readonly schemaVersion: 1;

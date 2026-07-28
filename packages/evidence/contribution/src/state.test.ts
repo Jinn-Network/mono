@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { Sha256Digest } from "@jinn-network/evidence-repository";
 import { describe, expect, test } from "vitest";
 
 import { EvidenceContributionError } from "./errors.js";
@@ -12,6 +13,9 @@ import {
   type ContributionRequestState,
 } from "./state.js";
 import type { CreateContributionRequestInput } from "./types.js";
+
+const BUNDLE_KEY = `sha256:${"1".repeat(64)}` as Sha256Digest;
+const PAYLOAD_FINGERPRINT = `sha256:${"2".repeat(64)}` as Sha256Digest;
 
 function proposal(): CreateContributionRequestInput {
   return {
@@ -117,7 +121,7 @@ describe("deriveContributionAggregateStatus", () => {
       destinationState({
         destination: "https://a.example",
         authorization: { status: "authorized" },
-        publication: { status: "publishing" },
+        publication: { status: "publishing", bundleKey: BUNDLE_KEY, payloadFingerprint: PAYLOAD_FINGERPRINT },
       }),
       destinationState({ destination: "https://b.example" }),
     ]);
@@ -131,7 +135,13 @@ describe("deriveContributionAggregateStatus", () => {
       destinationState({
         destination: "https://a.example",
         authorization: { status: "authorized" },
-        publication: { status: "published", publishedAt: "2026-07-28T00:00:01Z" },
+        publication: {
+          status: "published",
+          publishedAt: "2026-07-28T00:00:01Z",
+          bundleKey: BUNDLE_KEY,
+          payloadFingerprint: PAYLOAD_FINGERPRINT,
+          locations: [],
+        },
       }),
       destinationState({
         destination: "https://b.example",
@@ -155,7 +165,13 @@ describe("deriveContributionAggregateStatus", () => {
       destinationState({
         destination: "https://a.example",
         authorization: { status: "authorized" },
-        publication: { status: "published", publishedAt: "2026-07-28T00:00:01Z" },
+        publication: {
+          status: "published",
+          publishedAt: "2026-07-28T00:00:01Z",
+          bundleKey: BUNDLE_KEY,
+          payloadFingerprint: PAYLOAD_FINGERPRINT,
+          locations: [],
+        },
       }),
       destinationState({
         destination: "https://b.example",
@@ -170,7 +186,7 @@ describe("deriveContributionAggregateStatus", () => {
       destinationState({
         destination: "https://a.example",
         authorization: { status: "authorized" },
-        publication: { status: "publishing" },
+        publication: { status: "publishing", bundleKey: BUNDLE_KEY, payloadFingerprint: PAYLOAD_FINGERPRINT },
         deactivation: { requested: true, requestedAt: "2026-07-28T00:00:01Z" },
       }),
     ]);
