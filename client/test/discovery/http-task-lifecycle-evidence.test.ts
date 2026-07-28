@@ -6,6 +6,19 @@ function isReadyProbe(url: string): boolean {
   return url.endsWith('/ready');
 }
 
+function lifecycleFetch(pages: Record<string, unknown>[]): typeof fetch {
+  let i = 0;
+  return vi.fn(async (url: string) => {
+    if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+    return new Response(JSON.stringify(pages[i++] ?? { data: {} }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }) as unknown as typeof fetch;
+}
+
+const emptyPage = { items: [] as unknown[], pageInfo: { hasNextPage: false, endCursor: null } };
+
 describe('HttpDiscoveryAPI.getTaskLifecycleEvidence (#2044)', () => {
   it('short-circuits an empty task list with no network I/O', async () => {
     const fetchImpl = vi.fn();
@@ -134,5 +147,106 @@ describe('HttpDiscoveryAPI.getTaskLifecycleEvidence (#2044)', () => {
       expect.stringContaining('HTTP page cap hit on tasks'),
     );
     warn.mockRestore();
+  });
+
+  it('ignores hostile finalized when attempt/verdict spine is empty; keeps row refunded (#2236)', async () => {
+    const pages = [
+      { data: { tasks: { items: [{
+        id: '7', chainId: 84532, manifestDigest: `0x${'11'.repeat(32)}`,
+        taskCidDigest: `0x${'22'.repeat(32)}`, creator: `0x${'aa'.repeat(20)}`,
+        maxClaims: 1, requiredVerdicts: 1, createdAtBlock: '10',
+        finalized: true, refunded: true,
+      }], pageInfo: { hasNextPage: false, endCursor: null } } } },
+      { data: { attempts: emptyPage } },
+      { data: { verdicts: emptyPage } },
+    ];
+    const api = createHttpDiscoveryAPI({
+      url: 'http://stub/graphql',
+      fetchImpl: lifecycleFetch(pages),
+    });
+    const map = await api.getTaskLifecycleEvidence({ taskIds: ['7'] });
+    const task = map.get('7')!.authoritative.task;
+    expect(task.finalized).toBe(false);
+    expect(task.refunded).toBe(true);
+    expect(map.get('7')!.authoritative.attempts).toEqual([]);
+  });
+
+  it('sets finalized true from co-fetched spine even when task row says false (#2236)', async () => {
+    const pages = [
+      { data: { tasks: { items: [{
+        id: '7', chainId: 84532, manifestDigest: `0x${'11'.repeat(32)}`,
+        taskCidDigest: `0x${'22'.repeat(32)}`, creator: `0x${'aa'.repeat(20)}`,
+        maxClaims: 1, requiredVerdicts: 1, createdAtBlock: '10',
+        finalized: false, refunded: false,
+      }], pageInfo: { hasNextPage: false, endCursor: null } } } },
+      { data: { attempts: { items: [{
+        taskId: '7', chainId: 84532, attemptIndex: 0, requestId: `0x${'b0'.repeat(32)}`,
+        operator: `0x${'b0'.repeat(20)}`, priorityMech: `0x${'c0'.repeat(20)}`,
+        deliveryRate: '1', createdAtBlock: '20',
+      }], pageInfo: { hasNextPage: false, endCursor: null } } } },
+      { data: { verdicts: { items: [{
+        taskId: '7', chainId: 84532, attemptIndex: 0, verdictIndex: 0,
+        requestId: `0x${'d0'.repeat(32)}`, evaluator: `0x${'e0'.repeat(20)}`,
+        verdictCode: 1, createdAtBlock: '30',
+      }], pageInfo: { hasNextPage: false, endCursor: null } } } },
+      { data: { attemptEnvelopeMetas: emptyPage } },
+      { data: { verdictEnvelopeMetas: emptyPage } },
+    ];
+    const api = createHttpDiscoveryAPI({
+      url: 'http://stub/graphql',
+      fetchImpl: lifecycleFetch(pages),
+    });
+    const map = await api.getTaskLifecycleEvidence({ taskIds: ['7'] });
+    expect(map.get('7')!.authoritative.task.finalized).toBe(true);
+    expect(map.get('7')!.authoritative.task.refunded).toBe(false);
+  });
+
+  it('keeps finalized false when verdict count is below requiredVerdicts even if row says true (#2236)', async () => {
+    const pages = [
+      { data: { tasks: { items: [{
+        id: '7', chainId: 84532, manifestDigest: `0x${'11'.repeat(32)}`,
+        taskCidDigest: `0x${'22'.repeat(32)}`, creator: `0x${'aa'.repeat(20)}`,
+        maxClaims: 1, requiredVerdicts: 2, createdAtBlock: '10',
+        finalized: true, refunded: false,
+      }], pageInfo: { hasNextPage: false, endCursor: null } } } },
+      { data: { attempts: { items: [{
+        taskId: '7', chainId: 84532, attemptIndex: 0, requestId: `0x${'b0'.repeat(32)}`,
+        operator: `0x${'b0'.repeat(20)}`, priorityMech: `0x${'c0'.repeat(20)}`,
+        deliveryRate: '1', createdAtBlock: '20',
+      }], pageInfo: { hasNextPage: false, endCursor: null } } } },
+      { data: { verdicts: { items: [{
+        taskId: '7', chainId: 84532, attemptIndex: 0, verdictIndex: 0,
+        requestId: `0x${'d0'.repeat(32)}`, evaluator: `0x${'e0'.repeat(20)}`,
+        verdictCode: 1, createdAtBlock: '30',
+      }], pageInfo: { hasNextPage: false, endCursor: null } } } },
+      { data: { attemptEnvelopeMetas: emptyPage } },
+      { data: { verdictEnvelopeMetas: emptyPage } },
+    ];
+    const api = createHttpDiscoveryAPI({
+      url: 'http://stub/graphql',
+      fetchImpl: lifecycleFetch(pages),
+    });
+    const map = await api.getTaskLifecycleEvidence({ taskIds: ['7'] });
+    expect(map.get('7')!.authoritative.task.finalized).toBe(false);
+  });
+
+  it('keeps refunded false when task row says false and spine is empty (#2236)', async () => {
+    const pages = [
+      { data: { tasks: { items: [{
+        id: '7', chainId: 84532, manifestDigest: `0x${'11'.repeat(32)}`,
+        taskCidDigest: `0x${'22'.repeat(32)}`, creator: `0x${'aa'.repeat(20)}`,
+        maxClaims: 1, requiredVerdicts: 1, createdAtBlock: '10',
+        finalized: false, refunded: false,
+      }], pageInfo: { hasNextPage: false, endCursor: null } } } },
+      { data: { attempts: emptyPage } },
+      { data: { verdicts: emptyPage } },
+    ];
+    const api = createHttpDiscoveryAPI({
+      url: 'http://stub/graphql',
+      fetchImpl: lifecycleFetch(pages),
+    });
+    const task = (await api.getTaskLifecycleEvidence({ taskIds: ['7'] })).get('7')!.authoritative.task;
+    expect(task.finalized).toBe(false);
+    expect(task.refunded).toBe(false);
   });
 });
