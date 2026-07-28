@@ -72,7 +72,12 @@ describe('claude-code-learner mode gate', () => {
       const adapter = new CapturingAdapter();
       const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/x' });
       await harness.run(makeMinimalCtx('frozen'));
-      expect(harvestSpy).toHaveBeenCalledWith('/tmp/work', 'solve-only', expect.anything());
+      expect(harvestSpy).toHaveBeenCalledWith(
+        '/tmp/work',
+        'solve-only',
+        expect.anything(),
+        { taskId: undefined, attemptIndex: undefined, requestId: undefined },
+      );
     } finally {
       harvestSpy.mockRestore();
     }
@@ -87,7 +92,12 @@ describe('claude-code-learner mode gate', () => {
       const adapter = new CapturingAdapter();
       const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/x' });
       await harness.run(makeMinimalCtx('train'));
-      expect(harvestSpy).toHaveBeenCalledWith('/tmp/work', undefined, expect.anything());
+      expect(harvestSpy).toHaveBeenCalledWith(
+        '/tmp/work',
+        undefined,
+        expect.anything(),
+        { taskId: undefined, attemptIndex: undefined, requestId: undefined },
+      );
     } finally {
       harvestSpy.mockRestore();
     }
