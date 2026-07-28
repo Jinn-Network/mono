@@ -13,6 +13,7 @@ import type {
   RetrievalDiagnostics,
   RetrievalHardLimits,
   RetrievalOperationOptions,
+  RetrievalTelemetry,
   RetrievalWarning,
   ValidatedEvidenceAcceptance,
   ValidatedEvidenceResult,
@@ -28,12 +29,14 @@ import {
 } from "./operation.js";
 import { resolveValidatedRecord } from "./resolution.js";
 import { createQuerySnapshotReceipt } from "./saved-query.js";
+import { createTelemetrySession, type TelemetrySession } from "./telemetry.js";
 
 export interface QueryDependencies {
   readonly locator: EvidenceRecordLocator;
   readonly locationPolicy: EvidenceLocationPolicy;
   readonly repositoryResolver: EvidenceRepositoryResolver;
   readonly hardLimits: RetrievalHardLimits;
+  readonly telemetry?: RetrievalTelemetry;
 }
 
 interface CandidateResolution<ProviderData> {
@@ -298,6 +301,7 @@ async function resolveCandidateGroup<Query, ProviderData>(
     readonly locationHints: Parameters<typeof resolveValidatedRecord>[0]["hints"];
   },
   context: OperationContext,
+  telemetry: TelemetrySession,
 ): Promise<CandidateResolution<ProviderData>> {
   const resolved = await resolveValidatedRecord({
     reference: group.reference,
@@ -308,11 +312,22 @@ async function resolveCandidateGroup<Query, ProviderData>(
     context,
   });
   if (!resolved.ok) {
+    await telemetry.emit({
+      stage: "record",
+      failureCode: resolved.failure.code,
+    });
     return {
       failures: [...resolved.failures],
       warnings: [],
     };
   }
+  await telemetry.emit({
+    stage: "record",
+    ...(resolved.record.selectedLocation.publishedLocation === undefined
+      ? {}
+      : { bindingProfile: resolved.record.selectedLocation.publishedLocation.bindingProfile }),
+    bytes: resolved.record.canonicalBytes.byteLength,
+  });
 
   if (input.acceptance) {
     let decision;
@@ -347,6 +362,16 @@ async function resolveCandidateGroup<Query, ProviderData>(
     request: input.artifacts,
     repositoryResolver: dependencies.repositoryResolver,
     context,
+  });
+  await telemetry.emit({
+    stage: "artifact",
+    bytes: hydration.results.reduce(
+      (sum, artifact) => sum + (artifact.bytes?.byteLength ?? 0),
+      0,
+    ),
+    ...(hydration.completeness === "artifact-incomplete"
+      ? { failureCode: "REQUIRED_ARTIFACT_UNAVAILABLE" as const }
+      : {}),
   });
   return {
     result: {
@@ -388,6 +413,12 @@ export async function queryEvidence<Query, ProviderData>(
     dependencies.hardLimits,
     operationOptions,
   );
+  const telemetry = createTelemetrySession(
+    dependencies.telemetry,
+    context,
+    "query",
+  );
+  await telemetry.emit({ stage: "started" });
   const accumulator = new CandidateAccumulator<ProviderData>(
     input.candidateSource.identity,
     dependencies.hardLimits,
@@ -421,6 +452,11 @@ export async function queryEvidence<Query, ProviderData>(
             : { checkpoint: input.checkpoint }),
         });
         accumulator.append(page, maximumCandidates);
+        await telemetry.emit({
+          stage: "source",
+          source: input.candidateSource.identity,
+          candidateCount: page.candidates.length,
+        });
       } catch (error) {
         const sourceFailure = classifySourceError(
           error,
@@ -434,6 +470,11 @@ export async function queryEvidence<Query, ProviderData>(
           candidatesReturned: 0,
           failure: sourceFailure,
         }]);
+        await telemetry.emit({
+          stage: "source",
+          source: input.candidateSource.identity,
+          failureCode: sourceFailure.code,
+        });
         break;
       }
 
@@ -491,6 +532,7 @@ export async function queryEvidence<Query, ProviderData>(
             input,
             group,
             context,
+            telemetry,
           ),
         );
         for (const resolved of resolvedBatch) {
@@ -549,6 +591,12 @@ export async function queryEvidence<Query, ProviderData>(
       providerIssues,
       dependencies.hardLimits.maxDiagnostics,
     );
+    await telemetry.emit({
+      stage: "completed",
+      candidateCount: accumulator.examined,
+      resultCount: results.length,
+      ...(status === "failed" && failures[0] ? { failureCode: failures[0].code } : {}),
+    });
     return {
       status,
       results,

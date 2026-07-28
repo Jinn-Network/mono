@@ -21,6 +21,7 @@ export function createEvidenceRetrieval(
     locationPolicy: options.locationPolicy,
     repositoryResolver: options.repositoryResolver,
     hardLimits: resolveHardLimits(options.hardLimits),
+    ...(options.telemetry === undefined ? {} : { telemetry: options.telemetry }),
   });
   const facade: EvidenceRetrieval = {
     retrieve: (input, operationOptions) =>
