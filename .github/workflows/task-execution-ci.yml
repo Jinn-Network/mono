@@ -172,8 +172,224 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  supervisor:
+    needs: [foundation, backend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Task Execution Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-protocol-dist
+          path: packages/task-execution/protocol/dist
+      - name: Restore Task Execution Backend distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-backend-dist
+          path: packages/task-execution/backend/dist
+      - name: Install packed-smoke dependency toolchains
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable)
+          (cd packages/task-execution/backend && yarn install --immutable)
+      - name: Verify Task Execution Supervisor
+        working-directory: packages/task-execution/backend-local/supervisor
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Execution Supervisor distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-execution-supervisor-dist
+          path: packages/task-execution/backend-local/supervisor/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  workspace:
+    needs: [foundation, profiles]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Task Execution Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-protocol-dist
+          path: packages/task-execution/protocol/dist
+      - name: Restore Task Execution Profiles distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-profiles-dist
+          path: packages/task-execution/profiles/dist
+      - name: Install packed-smoke dependency toolchains
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable)
+          (cd packages/task-execution/profiles && yarn install --immutable)
+      - name: Verify Task Execution Workspace
+        working-directory: packages/task-execution/backend-local/workspace
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Execution Workspace distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-execution-workspace-dist
+          path: packages/task-execution/backend-local/workspace/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  launchers:
+    needs: [foundation, backend, profiles, supervisor, workspace]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Task Execution Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-protocol-dist
+          path: packages/task-execution/protocol/dist
+      - name: Restore Task Execution Backend distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-backend-dist
+          path: packages/task-execution/backend/dist
+      - name: Restore Task Execution Profiles distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-profiles-dist
+          path: packages/task-execution/profiles/dist
+      - name: Restore Task Execution Supervisor distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-supervisor-dist
+          path: packages/task-execution/backend-local/supervisor/dist
+      - name: Restore Task Execution Workspace distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-workspace-dist
+          path: packages/task-execution/backend-local/workspace/dist
+      - name: Install packed-smoke dependency toolchains
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable)
+          (cd packages/task-execution/backend && yarn install --immutable)
+          (cd packages/task-execution/profiles && yarn install --immutable)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable)
+      - name: Verify Task Execution Launchers
+        working-directory: packages/task-execution/backend-local/launchers
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Execution Launchers distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-execution-launchers-dist
+          path: packages/task-execution/backend-local/launchers/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  backend-local:
+    needs: [foundation, backend, profiles, supervisor, workspace, launchers, testing]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Task Execution Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-protocol-dist
+          path: packages/task-execution/protocol/dist
+      - name: Restore Task Execution Backend distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-backend-dist
+          path: packages/task-execution/backend/dist
+      - name: Restore Task Execution Profiles distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-profiles-dist
+          path: packages/task-execution/profiles/dist
+      - name: Restore Task Execution Supervisor distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-supervisor-dist
+          path: packages/task-execution/backend-local/supervisor/dist
+      - name: Restore Task Execution Workspace distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-workspace-dist
+          path: packages/task-execution/backend-local/workspace/dist
+      - name: Restore Task Execution Launchers distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-launchers-dist
+          path: packages/task-execution/backend-local/launchers/dist
+      - name: Install packed-smoke dependency toolchains
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable)
+          (cd packages/task-execution/backend && yarn install --immutable)
+          (cd packages/task-execution/profiles && yarn install --immutable)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable)
+          (cd packages/task-execution/backend-local/launchers && yarn install --immutable)
+      - name: Build evidence contract packages from source (cross-tree CI convention, program §7.8)
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+      - name: Verify Task Execution Backend Local (assembly)
+        working-directory: packages/task-execution/backend-local/assembly
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Execution Backend Local distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-execution-backend-local-dist
+          path: packages/task-execution/backend-local/assembly/dist
+          if-no-files-found: error
+          retention-days: 1
+
   verify:
-    needs: [architecture, foundation, backend, testing, profiles]
+    needs: [architecture, foundation, backend, testing, profiles, supervisor, workspace, launchers, backend-local]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -184,13 +400,21 @@ jobs:
           BACKEND_RESULT: ${{ needs.backend.result }}
           TESTING_RESULT: ${{ needs.testing.result }}
           PROFILES_RESULT: ${{ needs.profiles.result }}
+          SUPERVISOR_RESULT: ${{ needs.supervisor.result }}
+          WORKSPACE_RESULT: ${{ needs.workspace.result }}
+          LAUNCHERS_RESULT: ${{ needs.launchers.result }}
+          BACKEND_LOCAL_RESULT: ${{ needs.backend-local.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
             "$FOUNDATION_RESULT" \
             "$BACKEND_RESULT" \
             "$TESTING_RESULT" \
-            "$PROFILES_RESULT"; do
+            "$PROFILES_RESULT" \
+            "$SUPERVISOR_RESULT" \
+            "$WORKSPACE_RESULT" \
+            "$LAUNCHERS_RESULT" \
+            "$BACKEND_LOCAL_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4
@@ -212,5 +436,17 @@ jobs:
             mkdir -p "packages/task-execution/${package}/dist"
             cp -R ".task-execution-dist/task-execution-${package}-dist/." "packages/task-execution/${package}/dist/"
           done
+          for package in supervisor workspace launchers; do
+            mkdir -p "packages/task-execution/backend-local/${package}/dist"
+            cp -R ".task-execution-dist/task-execution-${package}-dist/." "packages/task-execution/backend-local/${package}/dist/"
+          done
+          mkdir -p "packages/task-execution/backend-local/assembly/dist"
+          cp -R ".task-execution-dist/task-execution-backend-local-dist/." "packages/task-execution/backend-local/assembly/dist/"
+      - name: Build evidence contract packages from source (cross-tree CI convention, program §7.8)
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
       - name: Compile packed public entrypoint consumers
         run: node .github/scripts/task-execution-packed-types.test.mjs
