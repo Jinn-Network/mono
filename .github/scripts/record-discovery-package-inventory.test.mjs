@@ -13,6 +13,7 @@ const DISCOVERY_PACKAGES = [
   ['protocol', '@jinn-network/record-discovery-protocol'],
   ['testing', '@jinn-network/record-discovery-testing'],
   ['serve', '@jinn-network/record-discovery-serve'],
+  ['client', '@jinn-network/record-discovery-client'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/discovery; map name -> absolute dir.
@@ -45,6 +46,11 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   // per-package project that portals to protocol, even when serve's own
   // source never imports trust-core directly.
   ['serve', { dependencies: ['@jinn-network/record-discovery-protocol'], devDependencies: ['@jinn-network/record-discovery-testing', '@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
+  // client's own source imports protocol + trust-core (plan Task 18: the
+  // verification driver wires trust-core key-binding resolution). It
+  // declares no facts/* dependency -- the facts leaves are reached only
+  // through host-assembled runtime injection (Task 18 note, program §7.13).
+  ['client', { dependencies: ['@jinn-network/record-discovery-protocol', '@jinn-network/trust-core'], devDependencies: ['@jinn-network/record-discovery-testing'], optionalDependencies: [], peerDependencies: [] }],
 ]);
 
 function readPackage(directory) {
@@ -78,7 +84,7 @@ function expectedPortal(directory, dependencyName) {
 }
 
 test('the record discovery package inventory is explicit and has one manifest per package', () => {
-  assert.equal(DISCOVERY_PACKAGES.length, 3);
+  assert.equal(DISCOVERY_PACKAGES.length, 4);
   for (const [directory, expectedName] of DISCOVERY_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);

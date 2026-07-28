@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'discovery');
-const discoveryDirectories = ['protocol', 'testing', 'serve'];   // grows per package task
+const discoveryDirectories = ['protocol', 'testing', 'serve', 'client'];   // grows per package task
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'), join(root, 'client'),
   ...['autopilot', 'core', 'indexer', 'indexer-enrichment', 'layer', 'plugin', 'sdk']
@@ -32,6 +32,18 @@ const TESTING_FORBIDDEN_PACKAGES = [
 // only); no client, no facts/* leaves, no TEP/Evidence record packages.
 const SERVE_FORBIDDEN_PACKAGES = [
   '@jinn-network/record-discovery-client',
+  '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository',
+  '@jinn-network/evidence-discovery', '@jinn-network/task-execution-protocol',
+  '@jinn-network/task-execution-profiles',
+];
+// client depends on protocol (production) + trust-core (production, the
+// verification driver) + testing (dev, conformance kit only); no serve, no
+// facts/* leaves (host-assembled runtime injection only, Task 18 note), no
+// TEP/Evidence record packages.
+const CLIENT_FORBIDDEN_PACKAGES = [
+  '@jinn-network/record-discovery-serve',
+  '@jinn-network/record-discovery-facts-evidence', '@jinn-network/record-discovery-facts-trust',
+  '@jinn-network/record-discovery-facts-task-execution',
   '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository',
   '@jinn-network/evidence-discovery', '@jinn-network/task-execution-protocol',
   '@jinn-network/task-execution-profiles',
@@ -207,6 +219,10 @@ test('record-discovery-testing production source stays within its architecture b
 
 test('record-discovery-serve production source stays within its architecture boundary', () => {
   assertBoundary(join(packages, 'serve', 'src'), SERVE_FORBIDDEN_PACKAGES);
+});
+
+test('record-discovery-client production source stays within its architecture boundary', () => {
+  assertBoundary(join(packages, 'client', 'src'), CLIENT_FORBIDDEN_PACKAGES);
 });
 
 test('record discovery production source never uses ambient network APIs', () => {

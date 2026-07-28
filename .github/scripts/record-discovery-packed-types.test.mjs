@@ -14,12 +14,14 @@ const packages = [
   ['protocol', '@jinn-network/record-discovery-protocol'],
   ['testing', '@jinn-network/record-discovery-testing'],
   ['serve', '@jinn-network/record-discovery-serve'],
+  ['client', '@jinn-network/record-discovery-client'],
 ];
 
 const codeEntrypoints = [
   '@jinn-network/record-discovery-protocol',
   '@jinn-network/record-discovery-testing',
   '@jinn-network/record-discovery-serve',
+  '@jinn-network/record-discovery-client',
 ];
 
 // Cross-tree Jinn dependencies each *then-present* discovery package
