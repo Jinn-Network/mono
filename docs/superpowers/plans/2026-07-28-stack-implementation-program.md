@@ -267,9 +267,35 @@ Confirmed by the operator at the program gate (2026-07-28):
 
 ## 9. Out of scope — pending design sessions
 
-Recorded, not planned, not implemented here: the marketplace binding (chain/mech translation,
-projector #1, the query-plane service, subscribe relay, daemon TaskEngine carve, trust §18
-steps 5–6, the open-fleet adoption-authorization object); the benchmarking application;
+**Ledger update (2026-07-28, operator addendum at integration head `f5602b60b`/`1200b5842`):**
+the marketplace binding and the benchmarking application are now DESIGNED
+(`2026-07-28-marketplace-binding-design.md` — chain-venue TEP binding over the deployed
+TaskCoordinator + JinnRouterV3 + Mech substrate, two-generation seam, projector #1, plus a
+specified contract revision as declared impact; `2026-07-28-benchmarking-application-design.md`
+v0.3 — four tier-2 record kinds + one tier-3 application). Their component plans are being
+drafted under rule 5 discipline; the program extension (appended phases in dependency order:
+benchmarking records + kit after TEP/profiles sealing → marketplace binding after TEP kit +
+trust + discovery serve/client green → benchmarking run orchestration after the backend
+contract is green → benchmarking marketplace mode last) is presented at the next phase
+boundary; **code for the new components starts only on explicit operator approval.**
+Companion amendments recorded 2026-07-28 as dated addenda: benchmarking facts-profile fields
+(`benchrun`/`benchcell`/`bencharm`) on the record-discovery plan (M8 builds them in from day
+one); the two-party engagement entry (caller-supplied deterministic Attempt URI, ruling §7.2
+constants) on the local-execution-backend plan (Milestone C includes it from day one).
+Absorbed: the #2038 issue tree was swept 2026-07-28 — #2040/#2041/#2043/#2045 closed as
+re-homed (capabilities already in this program's work items), #2047–#2054 superseded by the
+benchmarking design, #2044/PR #2219 continues on `next`. Closed issues are not scope; the
+specs are.
+
+Remaining pending design session (recorded, not planned, not implemented): the
+migration-mechanics / operator-daemon-composition session — the daemon TaskEngine carve,
+the daemon consumption swap, and operator-daemon composition wait on it. The discovery
+query-plane service and subscribe relay remain out unless the marketplace-binding design
+explicitly pulls them in (the plan draft reports either way). Also still out: tier-4
+products (marketplace
+benchmarking service, skill factory, leaderboards, plugin composition); any on-chain
+deployment (the contract-revision code and its kit are marketplace-plan scope; deploys are a
+human-gated runbook item, never program work);
 **the first-adopter pass** (operator decision 2026-07-28: this program builds the full
 foundation only; adoption/proving — backend design §18 step 4, §11.1 — is its own later
 pass, and Autopilot now lives in a separate repository, so that pass consumes these packages
