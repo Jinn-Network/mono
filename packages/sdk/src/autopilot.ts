@@ -5,12 +5,14 @@ export {
   AutopilotCorrelationSchema,
   AutopilotEvaluationContextSchema,
   AutopilotMutationEvidenceSchema,
+  AutopilotMutationDeliveryResultSchema,
   AutopilotMutationResultSchema,
   AutopilotReviewCorrelationSchema,
   AutopilotReviewResultSchema,
   AutopilotSessionCapsuleSchema,
   AutopilotWorkflowSchema,
   autopilotCorrelationMatches,
+  bindAutopilotMutationDeliveryResult,
 } from './autopilot-session.js';
 export type {
   AcceptedSolutionAdoptionReceipt,
@@ -19,6 +21,7 @@ export type {
   AutopilotCorrelation,
   AutopilotEvaluationContext,
   AutopilotMutationEvidence,
+  AutopilotMutationDeliveryResult,
   AutopilotMutationResult,
   AutopilotReviewCorrelation,
   AutopilotReviewResult,

@@ -34,6 +34,7 @@ export {
   AutopilotAdoptionRejectionReasonSchema,
   AutopilotCorrelationSchema,
   AutopilotEvaluationContextSchema,
+  AutopilotMutationDeliveryResultSchema,
   AutopilotMutationResultSchema,
   AutopilotMutationEvidenceSchema,
   AutopilotReviewCorrelationSchema,
@@ -42,6 +43,7 @@ export {
   AutopilotWorkflowSchema,
   AcceptedSolutionAdoptionReceiptSchema,
   autopilotCorrelationMatches,
+  bindAutopilotMutationDeliveryResult,
 } from '../autopilot-session.js';
 export type {
   AcceptedSolutionAdoptionReceipt,
@@ -50,6 +52,7 @@ export type {
   AutopilotCorrelation,
   AutopilotEvaluationContext,
   AutopilotMutationEvidence,
+  AutopilotMutationDeliveryResult,
   AutopilotMutationResult,
   AutopilotReviewCorrelation,
   AutopilotReviewResult,

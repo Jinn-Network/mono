@@ -5,10 +5,12 @@ import {
   AutopilotAdoptionReceiptSchema,
   AutopilotCorrelationSchema,
   AutopilotEvaluationContextSchema,
+  AutopilotMutationDeliveryResultSchema,
   AutopilotMutationResultSchema,
   AutopilotReviewResultSchema,
   AutopilotSessionCapsuleSchema,
   autopilotCorrelationMatches,
+  bindAutopilotMutationDeliveryResult,
 } from '../src/autopilot-session.js';
 
 const fixtureDirectory = fileURLToPath(
@@ -17,6 +19,15 @@ const fixtureDirectory = fileURLToPath(
 
 function fixture(name: string): unknown {
   return JSON.parse(readFileSync(`${fixtureDirectory}${name}.json`, 'utf8')) as unknown;
+}
+
+function mutationDeliveryFixture(): Record<string, unknown> {
+  const value = structuredClone(
+    fixture('mutation-complete') as Record<string, unknown>,
+  );
+  const correlation = value.correlation as Record<string, unknown>;
+  delete correlation.deliveryEnvelopeCid;
+  return value;
 }
 
 function withoutKey(
@@ -135,6 +146,41 @@ describe('AutopilotSessionCapsuleSchema', () => {
 });
 
 describe('Autopilot result schemas', () => {
+  it('accepts a producer mutation result without an envelope CID', () => {
+    expect(
+      AutopilotMutationDeliveryResultSchema.parse(mutationDeliveryFixture()),
+    ).toEqual(mutationDeliveryFixture());
+  });
+
+  it('keeps producer and verified correlation boundaries distinct', () => {
+    const producer = mutationDeliveryFixture();
+    expect(() => AutopilotMutationResultSchema.parse(producer)).toThrow();
+    expect(() => AutopilotMutationDeliveryResultSchema.parse({
+      ...producer,
+      correlation: {
+        ...(producer.correlation as Record<string, unknown>),
+        deliveryEnvelopeCid: 'bafy-producer-authored',
+      },
+    })).toThrow();
+  });
+
+  it('binds the authenticated envelope CID into a strict mutation result', () => {
+    const bound = bindAutopilotMutationDeliveryResult(
+      mutationDeliveryFixture(),
+      'bafy-authenticated-envelope',
+    );
+    expect(bound.correlation.deliveryEnvelopeCid)
+      .toBe('bafy-authenticated-envelope');
+    expect(AutopilotMutationResultSchema.parse(bound)).toEqual(bound);
+  });
+
+  it('rejects an invalid authenticated envelope CID', () => {
+    expect(() => bindAutopilotMutationDeliveryResult(
+      mutationDeliveryFixture(),
+      '',
+    )).toThrow();
+  });
+
   for (const outcome of ['complete', 'human']) {
     it(`parses the mutation ${outcome} fixture`, () => {
       expect(AutopilotMutationResultSchema.parse(fixture(`mutation-${outcome}`)))

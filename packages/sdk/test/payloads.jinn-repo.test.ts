@@ -81,9 +81,13 @@ describe('jinn-repo-verdict.v2 (mechanical, live-issue — issue #1891)', () => 
 });
 
 describe('jinn-repo Autopilot session payloads', () => {
-  it('accepts mutation results through the additive Solution payload branch', () => {
+  it('accepts pre-envelope mutation results through the additive Solution branch', () => {
     for (const name of ['mutation-complete', 'mutation-human']) {
-      const value = autopilotFixture(name);
+      const value = structuredClone(
+        autopilotFixture(name) as Record<string, unknown>,
+      );
+      const correlation = value.correlation as Record<string, unknown>;
+      delete correlation.deliveryEnvelopeCid;
       expect(JinnRepoAutopilotSolutionPayloadSchema.parse(value)).toEqual(value);
       expect(JinnRepoSolutionPayloadSchema.parse(value)).toEqual(value);
     }

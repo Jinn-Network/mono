@@ -22,7 +22,7 @@
 
 import { z } from 'zod/v3';
 import {
-  AutopilotMutationResultSchema,
+  AutopilotMutationDeliveryResultSchema,
   AutopilotReviewResultSchema,
 } from '../autopilot-session.js';
 
@@ -31,7 +31,8 @@ export const JinnRepoLegacySolutionPayloadSchema = z.object({
   patch: z.string().min(1),
 });
 
-export const JinnRepoAutopilotSolutionPayloadSchema = AutopilotMutationResultSchema;
+export const JinnRepoAutopilotSolutionPayloadSchema =
+  AutopilotMutationDeliveryResultSchema;
 
 export const JinnRepoSolutionPayloadSchema = z.union([
   JinnRepoLegacySolutionPayloadSchema,

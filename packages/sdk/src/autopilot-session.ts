@@ -149,6 +149,15 @@ const autopilotCorrelationFields = {
   reviewRefOid: GitOidSchema.optional(),
 };
 
+const {
+  deliveryEnvelopeCid: _deliveryEnvelopeCid,
+  ...autopilotMutationDeliveryCorrelationFields
+} = autopilotCorrelationFields;
+
+const AutopilotMutationDeliveryCorrelationSchema = z.object(
+  autopilotMutationDeliveryCorrelationFields,
+).strict();
+
 export const AutopilotCorrelationSchema = z.object(
   autopilotCorrelationFields,
 ).strict();
@@ -210,6 +219,34 @@ export type AutopilotMutationEvidence = z.infer<
   typeof AutopilotMutationEvidenceSchema
 >;
 
+const AutopilotMutationDeliveryCompleteResultSchema = z.object({
+  schemaVersion: z.literal('jinn-autopilot-mutation-result.v1'),
+  outcome: z.literal('mutation-complete'),
+  correlation: AutopilotMutationDeliveryCorrelationSchema,
+  patch: PatchSchema,
+  summary: boundedSingleLine(MAX_MUTATION_SUMMARY_BYTES, 'Mutation summary'),
+  evidence: AutopilotMutationEvidenceSchema,
+}).strict();
+
+const AutopilotMutationDeliveryHumanResultSchema = z.object({
+  schemaVersion: z.literal('jinn-autopilot-mutation-result.v1'),
+  outcome: z.literal('human'),
+  correlation: AutopilotMutationDeliveryCorrelationSchema,
+  reason: AutopilotHumanReasonSchema,
+}).strict();
+
+export const AutopilotMutationDeliveryResultSchema = z.discriminatedUnion(
+  'outcome',
+  [
+    AutopilotMutationDeliveryCompleteResultSchema,
+    AutopilotMutationDeliveryHumanResultSchema,
+  ],
+);
+
+export type AutopilotMutationDeliveryResult = z.infer<
+  typeof AutopilotMutationDeliveryResultSchema
+>;
+
 const AutopilotMutationCompleteResultSchema = z.object({
   schemaVersion: z.literal('jinn-autopilot-mutation-result.v1'),
   outcome: z.literal('mutation-complete'),
@@ -232,6 +269,20 @@ export const AutopilotMutationResultSchema = z.discriminatedUnion('outcome', [
 ]);
 
 export type AutopilotMutationResult = z.infer<typeof AutopilotMutationResultSchema>;
+
+export function bindAutopilotMutationDeliveryResult(
+  value: unknown,
+  deliveryEnvelopeCid: string,
+): AutopilotMutationResult {
+  const delivery = AutopilotMutationDeliveryResultSchema.parse(value);
+  return AutopilotMutationResultSchema.parse({
+    ...delivery,
+    correlation: {
+      ...delivery.correlation,
+      deliveryEnvelopeCid,
+    },
+  });
+}
 
 const AutopilotReviewFollowUpSchema = z.object({
   type: z.enum(['feat', 'chore', 'fix', 'refactor']),
