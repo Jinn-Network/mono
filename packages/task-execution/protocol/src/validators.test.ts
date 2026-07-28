@@ -66,6 +66,20 @@ describe("validateTask", () => {
     expect(result.conforms).toBe(false);
     expect(result.errors.some((e) => e.path.includes("deadline"))).toBe(true);
   });
+
+  describe("ResourceDescriptor content-without-digest (§6.4)", () => {
+    test("rejects an inputs[] descriptor carrying inline content with no accompanying digest", () => {
+      const result = validateTask({ ...validTask, inputs: [{ content: "aGVsbG8=" }] });
+      expect(result.conforms).toBe(false);
+    });
+    test("accepts inline content accompanied by a digest", () => {
+      const result = validateTask({
+        ...validTask,
+        inputs: [{ content: "aGVsbG8=", digest: { sha256: "a".repeat(64) } }],
+      });
+      expect(result.conforms).toBe(true);
+    });
+  });
 });
 
 describe("validateSubmission", () => {
@@ -76,6 +90,23 @@ describe("validateSubmission", () => {
     const { nonce: _nonce, ...withoutNonce } = validSubmission;
     const result = validateSubmission(withoutNonce);
     expect(result.conforms).toBe(false);
+  });
+
+  describe("task ResourceDescriptor requires a sha256 digest entry (§8)", () => {
+    test("rejects a task reference carrying only a uri, no digest", () => {
+      const result = validateSubmission({
+        ...validSubmission,
+        task: { uri: "https://example.test/task.json" },
+      });
+      expect(result.conforms).toBe(false);
+    });
+    test("rejects a task reference whose digest map has no sha256 entry", () => {
+      const result = validateSubmission({
+        ...validSubmission,
+        task: { digest: { sha1: "a".repeat(40) } },
+      });
+      expect(result.conforms).toBe(false);
+    });
   });
 });
 

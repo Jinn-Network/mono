@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import canonicalize from "canonicalize";
 import { serializeCanonicalJson } from "./canonical.js";
-import { IJsonNumberError } from "./json.js";
+import { IJsonNumberError, UndefinedArrayElementError, type JsonValue } from "./json.js";
 
 const decode = (b: Uint8Array) => new TextDecoder().decode(b);
 
@@ -26,5 +26,23 @@ describe("serializeCanonicalJson", () => {
   test("matches the RFC 8785 reference for the integer-only subset", () => {
     const value = { z: [3, 2, 1], a: { d: 1, c: 2 } };
     expect(decode(serializeCanonicalJson(value))).toBe(canonicalize(value));
+  });
+
+  test("omits object members whose value is undefined (mirrors JSON.stringify member omission)", () => {
+    const withUndefined = { a: 1, b: undefined } as unknown as JsonValue;
+    const withoutMember = { a: 1 };
+    expect(decode(serializeCanonicalJson(withUndefined))).toBe(decode(serializeCanonicalJson(withoutMember)));
+    expect(decode(serializeCanonicalJson(withUndefined))).toBe('{"a":1}');
+  });
+
+  test("rejects an undefined array element with a typed invalid-document error instead of emitting a literal token", () => {
+    const withUndefinedElement = [1, undefined, 2] as unknown as JsonValue;
+    expect(() => serializeCanonicalJson(withUndefinedElement)).toThrow(UndefinedArrayElementError);
+    try {
+      serializeCanonicalJson(withUndefinedElement);
+      expect.unreachable();
+    } catch (error: unknown) {
+      expect((error as { category?: string }).category).toBe("invalid-document");
+    }
   });
 });

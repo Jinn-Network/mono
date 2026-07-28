@@ -187,6 +187,56 @@ describe("foldObservations", () => {
     expect(derived.cancelRequested).toBe(true);
   });
 
+  test("self-filters to the authoritative source pinned by attempt-engaged: a forged non-authoritative attempt-terminal does not alter derived state", () => {
+    sequenceCounter = 0;
+    const engagedEvt = engaged({ source: SOURCE }); // pins SOURCE as authoritative
+    const genuineTerminal = terminal("delivered", {}, { source: SOURCE });
+    // Forged: a different source injects a contradictory terminal after the genuine one.
+    const forgedTerminal = terminal("failed", {}, { source: "urn:jinn:attacker:forged-executor" });
+    const log = [engagedEvt, genuineTerminal, forgedTerminal];
+    const derived = foldObservations(log);
+    expect(derived.state).toBe("delivered");
+    expect(derived.terminal).toBe(true);
+    expect(derived.contradictory).toBe(false); // the forged terminal is filtered out, not folded
+  });
+
+  test("self-filters non-authoritative attempt-started: only the authoritative source's activity drives derived state", () => {
+    sequenceCounter = 0;
+    const engagedEvt = engaged({ source: SOURCE });
+    const forgedStarted = started({ source: "urn:jinn:attacker:forged-executor" });
+    const log = [engagedEvt, forgedStarted];
+    const derived = foldObservations(log);
+    expect(derived.state).toBe("pending"); // the forged "started" from another source never counts
+  });
+
+  test("multiple attempt-engaged from different sources: the first by sequence wins as authoritative", () => {
+    sequenceCounter = 0;
+    const ATTACKER = "urn:jinn:attacker:forged-executor";
+    const genuineEngaged = engaged({ source: SOURCE, sequence: "0000000000000001" });
+    // Forged: a later attempt-engaged from a different producer, naming itself as source in both
+    // the envelope and the payload's authoritative-source field.
+    const forgedEngaged = observation(
+      "network.jinn.task-execution.attempt-engaged.v1",
+      {
+        attempt: ATTEMPT,
+        task: `sha256:${"a".repeat(64)}`,
+        submission: "urn:uuid:11111111-1111-5111-8111-111111111111",
+        effectiveDeadline: "2026-08-01T01:00:00Z",
+        source: ATTACKER,
+        executor: ATTACKER,
+        dispatchContext: { uri: "https://example.test/dispatch-context.json" },
+      },
+      { source: ATTACKER, sequence: "0000000000000002" },
+    );
+    const genuineTerminal = terminal("delivered", {}, { source: SOURCE, sequence: "0000000000000003" });
+    const log = [genuineEngaged, forgedEngaged, genuineTerminal];
+    const derived = foldObservations(log);
+    expect(derived.state).toBe("delivered");
+    expect(derived.contradictory).toBe(false);
+    // The later, non-authoritative engaged never overwrote the authoritative executor.
+    expect(derived.executor).toBe(undefined);
+  });
+
   test("execution-observed accumulates executionIds; delivery-recorded accumulates deliveries", () => {
     sequenceCounter = 0;
     const executionObserved = observation(

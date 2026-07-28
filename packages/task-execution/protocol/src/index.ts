@@ -8,7 +8,7 @@ export const TASK_EXECUTION_PROTOCOL_URI =
 export { compareCodeUnitStrings } from "./order.js";
 export { documentDigest, sha256Hex } from "./hashing.js";
 export { serializeCanonicalJson } from "./canonical.js";
-export { IJsonNumberError, assertIJsonInteger } from "./json.js";
+export { IJsonNumberError, UndefinedArrayElementError, assertIJsonInteger } from "./json.js";
 export type { JsonValue } from "./json.js";
 
 // --- descriptors + structural evidence seam ---

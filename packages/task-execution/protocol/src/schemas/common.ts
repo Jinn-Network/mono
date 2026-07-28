@@ -38,6 +38,12 @@ export const ResourceDescriptorSchema = z
       || (descriptor.digest !== undefined && Object.keys(descriptor.digest).length > 0)
       || descriptor.content !== undefined,
     { message: "ResourceDescriptor requires at least one of uri/digest/content (§6.4)" },
+  )
+  .refine(
+    (descriptor) =>
+      descriptor.content === undefined
+      || (descriptor.digest !== undefined && Object.keys(descriptor.digest).length > 0),
+    { message: "inline content must always be accompanied by its digest (§6.4)" },
   );
 
 /** The structural Evidence Protocol seam (§6.4) — a reference by family + digest only. */

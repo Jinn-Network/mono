@@ -69,7 +69,7 @@
     {
       "id": "oversized-content",
       "description": "A ResourceDescriptor with inline `content` over 64 KiB, and an observation `message` over 4 KiB.",
-      "expectedDisposition": "rejected against the §10.2/§20 advisory ceilings"
+      "expectedDisposition": "the observation message IS rejected (schema-enforced MUST, §10.2); the inline content is NOT rejected -- its 64 KiB ceiling is a documented un-enforced SHOULD (§6.4/§20, Layer-3 boundary)"
     }
   ]
 }
