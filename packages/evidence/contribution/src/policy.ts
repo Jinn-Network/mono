@@ -11,6 +11,7 @@ import type {
 
 import { EvidenceContributionError } from "./errors.js";
 import type {
+  ContributionCallOptions,
   ContributionOperationOptions,
   ContributionRequestId,
   DisclosurePolicyDecisionReference,
@@ -20,7 +21,7 @@ import type {
   VerifiedSignedUnchangedDecision,
   VerifiedWithholdDecision,
 } from "./types.js";
-import { CONTRIBUTION_SAFE_REASON_CODES } from "./types.js";
+import { CONTRIBUTION_SAFE_REASON_CODES, toContributionCallOptions } from "./types.js";
 import type { DerivationFinding } from "@jinn-network/evidence-derivation";
 import {
   parseAbsoluteIri,
@@ -33,7 +34,7 @@ export interface DisclosurePolicyAuthority {
   verify(
     reference: DisclosurePolicyDecisionReference,
     source: EvidenceRecordReference,
-    options?: ContributionOperationOptions,
+    options?: ContributionCallOptions,
   ): Promise<VerifiedDisclosurePolicyDecision>;
 }
 
@@ -43,7 +44,7 @@ export interface DerivationResolver {
       readonly implementationDigest: Sha256Digest;
       readonly configurationDigest?: Sha256Digest;
     },
-    options?: ContributionOperationOptions,
+    options?: ContributionCallOptions,
   ): Promise<EvidenceDeriver>;
 }
 
@@ -53,7 +54,7 @@ export interface ReviewReferenceStore {
       readonly requestId: ContributionRequestId;
       readonly findings: readonly DerivationFinding[];
     },
-    options?: ContributionOperationOptions,
+    options?: ContributionCallOptions,
   ): Promise<{ readonly reviewReference: string }>;
 }
 
@@ -289,7 +290,7 @@ export async function resolveDisclosureRoute(
   now: string,
   options?: ContributionOperationOptions,
 ): Promise<VerifiedDisclosurePolicyDecision> {
-  const raw = await authority.verify(reference, source, options);
+  const raw = await authority.verify(reference, source, toContributionCallOptions(options));
   const snapshot = snapshotInertJsonValue(raw) as Record<string, unknown>;
   if (typeof snapshot !== "object" || snapshot === null) fail("POLICY_INVALID");
 

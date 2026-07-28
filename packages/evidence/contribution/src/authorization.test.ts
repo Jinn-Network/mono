@@ -185,7 +185,7 @@ function exactSubmission(
     authorityId: "https://authority.example/host",
     actorId: "user-1",
     previewFingerprint: `sha256:${"0".repeat(64)}` as Sha256Digest,
-    allowedDestinationConfigurationDigests: [],
+    allowedDestinationIds: [],
     decidedAt: "2026-07-28T00:00:00Z",
     proofDigest: hashExactBytes(proofBytes),
     proofBytes,
@@ -203,7 +203,7 @@ function grantingAuthority(
       authorityId: submission.authorityId,
       actorId: submission.actorId,
       previewFingerprint: submission.previewFingerprint,
-      allowedDestinationConfigurationDigests: submission.allowedDestinationConfigurationDigests,
+      allowedDestinationIds: submission.allowedDestinationIds,
       decidedAt: submission.decidedAt,
       ...(submission.expiresAt !== undefined ? { expiresAt: submission.expiresAt } : {}),
       proofDigest: submission.proofDigest,
@@ -267,7 +267,7 @@ describe("authorizeContribution", () => {
       prepared.requestId,
       exactSubmission({
         previewFingerprint: prepared.previewFingerprint!,
-        allowedDestinationConfigurationDigests: [target.configurationDigest],
+        allowedDestinationIds: [target.destination],
       }),
       authDeps,
     );
@@ -288,7 +288,7 @@ describe("authorizeContribution", () => {
           authorityId: submission.authorityId,
           actorId: submission.actorId,
           previewFingerprint: submission.previewFingerprint,
-          allowedDestinationConfigurationDigests: [target.configurationDigest],
+          allowedDestinationIds: [target.destination],
           decidedAt: submission.decidedAt,
           proofDigest: submission.proofDigest,
           exactPreviewPresented: false,
@@ -302,7 +302,7 @@ describe("authorizeContribution", () => {
         mode: "organization-exact",
         previewFingerprint: prepared.previewFingerprint!,
         exactPreviewPresented: false,
-        allowedDestinationConfigurationDigests: [target.configurationDigest],
+        allowedDestinationIds: [target.destination],
       }),
       authDeps,
     );
@@ -336,12 +336,12 @@ describe("authorizeContribution", () => {
           authorityId: submission.authorityId,
           actorId: submission.actorId,
           previewFingerprint: submission.previewFingerprint,
-          allowedDestinationConfigurationDigests: [authorized.configurationDigest],
+          allowedDestinationIds: [authorized.destination],
           decidedAt: submission.decidedAt,
           proofDigest: submission.proofDigest,
           exactPreviewPresented: true,
           deniedDestinations: [
-            { configurationDigest: denied.configurationDigest, reasonCode: "DESTINATION_DENIED" },
+            { destination: denied.destination, reasonCode: "DESTINATION_DENIED" },
           ],
         }),
       }),
@@ -363,6 +363,40 @@ describe("authorizeContribution", () => {
     );
   });
 
+  test("two destinations sharing a configurationDigest are independently authorized by destination ID", async () => {
+    const shared = `sha256:${"9".repeat(64)}` as Sha256Digest;
+    const approve = destination({ destination: "https://a.example", configurationDigest: shared });
+    const leaveAwaiting = destination({ destination: "https://b.example", configurationDigest: shared });
+    const { deps, prepared } = await preparedRequest([approve, leaveAwaiting]);
+    const authDeps: ContributionAuthorizationDependencies = {
+      ...deps,
+      authorization: grantingAuthority({
+        verifyExact: async (submission) => ({
+          mode: submission.mode,
+          authorityId: submission.authorityId,
+          actorId: submission.actorId,
+          previewFingerprint: submission.previewFingerprint,
+          allowedDestinationIds: [approve.destination],
+          decidedAt: submission.decidedAt,
+          proofDigest: submission.proofDigest,
+          exactPreviewPresented: true,
+          deniedDestinations: [],
+        }),
+      }),
+    };
+    const result = await authorizeContribution(
+      prepared.requestId,
+      exactSubmission({ previewFingerprint: prepared.previewFingerprint! }),
+      authDeps,
+    );
+    expect(result.destinations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ destination: approve.destination, status: "authorized" }),
+        expect.objectContaining({ destination: leaveAwaiting.destination, status: "awaiting-authorization" }),
+      ]),
+    );
+  });
+
   test("an already-expired decision is rejected", async () => {
     const { deps, prepared } = await preparedRequest();
     const target = destination();
@@ -374,7 +408,7 @@ describe("authorizeContribution", () => {
           authorityId: submission.authorityId,
           actorId: submission.actorId,
           previewFingerprint: submission.previewFingerprint,
-          allowedDestinationConfigurationDigests: [target.configurationDigest],
+          allowedDestinationIds: [target.destination],
           decidedAt: submission.decidedAt,
           expiresAt: "2026-07-27T23:59:59Z",
           proofDigest: submission.proofDigest,
@@ -406,7 +440,7 @@ describe("authorizeContribution", () => {
       prepared.requestId,
       exactSubmission({
         previewFingerprint: prepared.previewFingerprint!,
-        allowedDestinationConfigurationDigests: [target.configurationDigest],
+        allowedDestinationIds: [target.destination],
       }),
       authDeps,
     );

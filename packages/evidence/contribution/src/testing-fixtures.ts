@@ -355,36 +355,35 @@ export class RetainingReviewReferenceStore implements ReviewReferenceStore {
 
 /**
  * A permissive `AuthorizationAuthority` double: exact submissions are
- * granted for every destination configuration digest the caller listed
- * (unless the digest is in a caller-configured denial set), standing
- * grants and revocations are verified as submitted, and host-scope
- * evaluation always matches. Sufficient for contract scenarios that
- * exercise Contribution's own re-derivation logic rather than authority
- * business rules.
+ * granted for every destination ID the caller listed (unless the ID is in
+ * a caller-configured denial set), standing grants and revocations are
+ * verified as submitted, and host-scope evaluation always matches.
+ * Sufficient for contract scenarios that exercise Contribution's own
+ * re-derivation logic rather than authority business rules.
  */
 export class GrantingAuthorizationAuthority implements AuthorizationAuthority {
-  readonly deniedConfigurationDigests = new Set<Sha256Digest>();
+  readonly deniedDestinationIds = new Set<string>();
   hostScopeMatches = true;
 
   async verifyExact(
     submission: Parameters<AuthorizationAuthority["verifyExact"]>[0],
   ) {
-    const denied = submission.allowedDestinationConfigurationDigests.filter((digest) =>
-      this.deniedConfigurationDigests.has(digest));
-    const allowed = submission.allowedDestinationConfigurationDigests.filter((digest) =>
-      !this.deniedConfigurationDigests.has(digest));
+    const denied = submission.allowedDestinationIds.filter((id) =>
+      this.deniedDestinationIds.has(id));
+    const allowed = submission.allowedDestinationIds.filter((id) =>
+      !this.deniedDestinationIds.has(id));
     return {
       mode: submission.mode,
       authorityId: submission.authorityId,
       actorId: submission.actorId,
       previewFingerprint: submission.previewFingerprint,
-      allowedDestinationConfigurationDigests: allowed,
+      allowedDestinationIds: allowed,
       decidedAt: submission.decidedAt,
       ...(submission.expiresAt !== undefined ? { expiresAt: submission.expiresAt } : {}),
       proofDigest: submission.proofDigest,
       exactPreviewPresented: submission.exactPreviewPresented,
-      deniedDestinations: denied.map((configurationDigest) => ({
-        configurationDigest,
+      deniedDestinations: denied.map((destination) => ({
+        destination,
         reasonCode: "DESTINATION_DENIED" as const,
       })),
     };

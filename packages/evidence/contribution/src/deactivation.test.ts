@@ -123,7 +123,9 @@ function proposal(
   };
 }
 
-async function preparedRequest(): Promise<{
+async function preparedRequest(
+  destinations: readonly ContributionDestination[] = [destination()],
+): Promise<{
   readonly deps: ContributionCommandBaseDependencies;
   readonly prepared: ContributionReadModel;
   readonly stagingRepository: EvidenceRepository;
@@ -151,6 +153,7 @@ async function preparedRequest(): Promise<{
     proposal({
       source: { repositoryBindingId: SOURCE_BINDING, record: receipt.reference },
       policyDecision,
+      destinations,
     }),
     deps,
   );
@@ -174,6 +177,7 @@ async function preparedRequest(): Promise<{
 async function authorize(
   deps: ContributionCommandBaseDependencies,
   prepared: ContributionReadModel,
+  destinations: readonly ContributionDestination[] = [destination()],
 ): Promise<void> {
   const authority: AuthorizationAuthority = {
     verifyExact: async (submission) => ({
@@ -181,7 +185,7 @@ async function authorize(
       authorityId: submission.authorityId,
       actorId: submission.actorId,
       previewFingerprint: submission.previewFingerprint,
-      allowedDestinationConfigurationDigests: submission.allowedDestinationConfigurationDigests,
+      allowedDestinationIds: submission.allowedDestinationIds,
       decidedAt: submission.decidedAt,
       proofDigest: submission.proofDigest,
       exactPreviewPresented: submission.exactPreviewPresented,
@@ -199,7 +203,7 @@ async function authorize(
       authorityId: "https://authority.example/host",
       actorId: "user-1",
       previewFingerprint: prepared.previewFingerprint!,
-      allowedDestinationConfigurationDigests: [destination().configurationDigest],
+      allowedDestinationIds: destinations.map((d) => d.destination),
       decidedAt: "2026-07-28T00:00:00Z",
       proofDigest: hashExactBytes(proofBytes),
       proofBytes,
@@ -337,6 +341,65 @@ describe("deactivateContributionDestination", () => {
     });
   });
 
+  test("reconciles an interrupted publishing destination without a stale expectedRequestRevision spuriously conflicting", async () => {
+    const { deps, prepared, stagingRepository } = await preparedRequest();
+    await authorize(deps, prepared);
+
+    const sink = new InMemoryAnnouncementSink({
+      medium: "https://media.example/ipfs",
+      profile: "https://profiles.example/evidence/v1",
+    });
+    const journal = new InMemoryPublicationJournalStore();
+    const workingRepository = new InMemoryEvidenceRepository();
+    let interrupt = true;
+    const interruptingRepository: EvidenceRepository = {
+      ...workingRepository,
+      putRecord: async (...args: Parameters<EvidenceRepository["putRecord"]>) => {
+        if (interrupt) throw new Error("synthetic interruption");
+        return workingRepository.putRecord(...args);
+      },
+    } as EvidenceRepository;
+    const resolver: PublicationResolver = {
+      resolve: async (descriptor) => ({
+        descriptor,
+        dependencies: { repository: interruptingRepository, sink, journal },
+      }),
+    };
+    const pubDeps: ContributionCloseoutDependencies = {
+      ...deps,
+      repositories: { resolve: async () => stagingRepository },
+      publications: resolver,
+    };
+    const { publishContributionDestination } = await import("./publication.js");
+    // Checkpoints to `publishing`, then an unclassified failure interrupts
+    // before a terminal state is recorded -- the destination is left
+    // `publishing` in the store.
+    await expect(
+      publishContributionDestination(prepared.requestId, destination().destination, pubDeps),
+    ).rejects.toThrow();
+    const midway = await deps.store.loadRequest(prepared.requestId);
+    expect(midway?.value.destinations[0]?.publication.status).toBe("publishing");
+
+    interrupt = false;
+    // `deactivateContributionDestination` checkpoints its own
+    // deactivation-requested transition first (advancing the store
+    // revision), then reconciles the interrupted `publishing` destination
+    // through a nested `publishContributionDestination` call. A caller's
+    // `expectedRequestRevision`, read before this call, must not be
+    // forwarded into that nested call -- it would compare against a
+    // revision this call itself already advanced and fail spuriously.
+    const deactivated = await deactivateContributionDestination(
+      prepared.requestId,
+      destination().destination,
+      pubDeps,
+      { expectedRequestRevision: midway!.revision },
+    );
+    expect(deactivated.destinations[0]).toMatchObject({
+      status: "published",
+      deactivated: true,
+    });
+  });
+
   test("unsupported withdrawal records unsupported without claiming deletion", async () => {
     const { deps, prepared, stagingRepository } = await preparedRequest();
     await authorize(deps, prepared);
@@ -373,6 +436,34 @@ describe("deactivateContribution", () => {
       publications: resolver,
     };
     const result = await deactivateContribution(prepared.requestId, closeoutDeps);
+    expect(result.destinations.every((entry) => entry.deactivated)).toBe(true);
+  });
+
+  test("with expectedRequestRevision deactivates every destination, not just the first", async () => {
+    const a = destination({
+      destination: "https://a.example",
+      configurationDigest: `sha256:${"1".repeat(64)}` as Sha256Digest,
+    });
+    const b = destination({
+      destination: "https://b.example",
+      configurationDigest: `sha256:${"2".repeat(64)}` as Sha256Digest,
+    });
+    const { deps, prepared, stagingRepository } = await preparedRequest([a, b]);
+    await authorize(deps, prepared, [a, b]);
+    const { resolver } = publicationResolverFor(stagingRepository);
+    const closeoutDeps: ContributionCloseoutDependencies = {
+      ...deps,
+      repositories: { resolve: async () => stagingRepository },
+      publications: resolver,
+    };
+    const current = await deps.store.loadRequest(prepared.requestId);
+    // Deactivating the first destination checkpoints a state change and
+    // advances the store revision; that must not cause the second
+    // destination's deactivation to spuriously see a stale expectation and
+    // throw STORE_CONFLICT.
+    const result = await deactivateContribution(prepared.requestId, closeoutDeps, {
+      expectedRequestRevision: current!.revision,
+    });
     expect(result.destinations.every((entry) => entry.deactivated)).toBe(true);
   });
 });

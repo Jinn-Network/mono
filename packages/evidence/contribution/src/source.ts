@@ -11,14 +11,16 @@ import type {
 
 import { EvidenceContributionError } from "./errors.js";
 import type {
+  ContributionCallOptions,
   ContributionOperationOptions,
   EvidenceSourceSelection,
 } from "./types.js";
+import { toContributionCallOptions } from "./types.js";
 
 export interface RepositoryResolver {
   resolve(
     bindingId: string,
-    options?: ContributionOperationOptions,
+    options?: ContributionCallOptions,
   ): Promise<EvidenceRepository>;
 }
 
@@ -55,7 +57,7 @@ export async function loadAndValidateEvidenceSource(
 ): Promise<LoadedEvidenceSource> {
   const repository = await repositories.resolve(
     selection.repositoryBindingId,
-    options,
+    toContributionCallOptions(options),
   );
   const bytes = await repository.getRecord(selection.record, options);
   if (bytes === null) {

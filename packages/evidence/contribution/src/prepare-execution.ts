@@ -25,6 +25,7 @@ import type {
   PreparedUnavailableArtifact,
   VerifiedDeriveExecutionDecision,
 } from "./types.js";
+import { toContributionCallOptions } from "./types.js";
 
 async function loadExactArtifact(
   repository: EvidenceRepository,
@@ -108,11 +109,11 @@ export async function prepareExecutionDisclosure(
   }
   const sourceRepository = await dependencies.repositories.resolve(
     input.sourceRepositoryBindingId,
-    options,
+    toContributionCallOptions(options),
   );
   const stagingRepository = await dependencies.repositories.resolve(
     input.stagingRepositoryBindingId,
-    options,
+    toContributionCallOptions(options),
   );
 
   const policyBytes = await loadExactArtifact(
@@ -160,7 +161,7 @@ export async function prepareExecutionDisclosure(
         ? { configurationDigest: input.route.configurationDigest }
         : {}),
     },
-    options,
+    toContributionCallOptions(options),
   );
 
   const outcome = await deriver.derive(
@@ -184,7 +185,7 @@ export async function prepareExecutionDisclosure(
     const findings: readonly DerivationFinding[] = outcome.findings;
     const { reviewReference } = await dependencies.reviews.retain(
       { requestId: input.requestId, findings },
-      options,
+      toContributionCallOptions(options),
     );
     return { status: "review-required", reviewReference };
   }

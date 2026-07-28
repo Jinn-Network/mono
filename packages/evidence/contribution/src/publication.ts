@@ -25,6 +25,7 @@ import {
   type ContributionRequestState,
 } from "./state.js";
 import type {
+  ContributionCallOptions,
   ContributionDestination,
   ContributionOperationOptions,
   ContributionReadModel,
@@ -32,6 +33,7 @@ import type {
   ContributionSafeReasonCode,
   SafePublishedLocation,
 } from "./types.js";
+import { toContributionCallOptions } from "./types.js";
 import { snapshotInertJsonValue } from "./validation.js";
 
 function fail(code: EvidenceContributionErrorCode): never {
@@ -68,7 +70,7 @@ export interface AvailabilityWithdrawal {
       readonly destination: ContributionDestination;
       readonly publicationReceipt: PublicationReceipt;
     },
-    options?: ContributionOperationOptions,
+    options?: ContributionCallOptions,
   ): Promise<AvailabilityWithdrawalResult>;
 }
 
@@ -84,7 +86,7 @@ export interface ResolvedPublicationDestination {
 export interface PublicationResolver {
   resolve(
     destination: ContributionDestination,
-    options?: ContributionOperationOptions,
+    options?: ContributionCallOptions,
   ): Promise<ResolvedPublicationDestination>;
 }
 
@@ -118,7 +120,7 @@ export async function loadAuthorizedPublishInput(
 
   const staging = await repositories.resolve(
     state.proposal.stagingRepositoryBindingId,
-    options,
+    toContributionCallOptions(options),
   );
   const recordBytes = await staging.getRecord(manifest.preparedRecord, options);
   if (recordBytes === null) fail("SOURCE_NOT_FOUND");
@@ -311,7 +313,10 @@ export async function publishContributionDestination(
 
   await assertDestinationCurrentlyAuthorized(versioned.value, destination, dependencies, options);
 
-  const resolved = await dependencies.publications.resolve(prepared.descriptor, options);
+  const resolved = await dependencies.publications.resolve(
+    prepared.descriptor,
+    toContributionCallOptions(options),
+  );
   if (
     resolved.descriptor.destination !== prepared.descriptor.destination ||
     resolved.descriptor.configurationDigest !== prepared.descriptor.configurationDigest
@@ -440,6 +445,12 @@ export async function resumeContribution(
 ): Promise<ContributionReadModel> {
   const initial = await dependencies.store.loadRequest(requestId, options);
   if (initial === null) fail("INVALID_INPUT");
+  if (
+    options?.expectedRequestRevision !== undefined &&
+    options.expectedRequestRevision !== initial.revision
+  ) {
+    fail("STORE_CONFLICT");
+  }
   if (initial.value.preparation.status !== "preview-ready") {
     return toContributionReadModel(initial);
   }
@@ -457,9 +468,15 @@ export async function resumeContribution(
     .slice()
     .sort(compareCodeUnitStrings);
 
+  // Only `signal` crosses into each per-destination call -- the caller's
+  // `expectedRequestRevision` is gated exactly once, above, against the
+  // revision read before this loop started. Forwarding it into every
+  // iteration would re-check it against a revision this same loop has
+  // already advanced, failing every destination after the first.
+  const nestedOptions = toContributionCallOptions(options);
   let latest = toContributionReadModel(initial);
   for (const destination of eligible) {
-    latest = await publishContributionDestination(requestId, destination, dependencies, options);
+    latest = await publishContributionDestination(requestId, destination, dependencies, nestedOptions);
   }
   return latest;
 }

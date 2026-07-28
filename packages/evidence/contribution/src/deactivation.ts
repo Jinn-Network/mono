@@ -19,6 +19,7 @@ import type {
   ContributionRequestId,
   ContributionSafeReasonCode,
 } from "./types.js";
+import { toContributionCallOptions } from "./types.js";
 
 // The optional availability-withdrawal capability
 // (`AvailabilityWithdrawal` / `AvailabilityWithdrawalResult`) is owned by
@@ -100,6 +101,12 @@ export async function deactivateContributionDestination(
 ): Promise<ContributionReadModel> {
   let versioned = await dependencies.store.loadRequest(requestId, options);
   if (versioned === null) fail("INVALID_INPUT");
+  if (
+    options?.expectedRequestRevision !== undefined &&
+    options.expectedRequestRevision !== versioned.revision
+  ) {
+    fail("STORE_CONFLICT");
+  }
   if (versioned.value.preparation.status !== "preview-ready") fail("INVALID_INPUT");
   const manifest = versioned.value.preparation.disclosure.manifest;
   const existing = versioned.value.destinations.find(
@@ -130,10 +137,19 @@ export async function deactivateContributionDestination(
 
   // Reconcile an already-started Publication through the very same
   // operation before attempting withdrawal -- an interrupted `publishing`
-  // destination may already have an external effect.
+  // destination may already have an external effect. Only `signal` crosses
+  // into this nested call: the checkpoint above may have already advanced
+  // the store revision past whatever `expectedRequestRevision` the caller
+  // supplied (already gated once, above), so forwarding it here would
+  // spuriously fail the reconciliation.
   if (versioned.value.destinations.find((c) => c.destination === destination)?.publication.status
       === "publishing") {
-    await publishContributionDestination(requestId, destination, dependencies, options);
+    await publishContributionDestination(
+      requestId,
+      destination,
+      dependencies,
+      toContributionCallOptions(options),
+    );
     const reloaded = await dependencies.store.loadRequest(requestId, options);
     if (reloaded !== null) versioned = reloaded;
   }
@@ -152,7 +168,10 @@ export async function deactivateContributionDestination(
     return toContributionReadModel(versioned);
   }
 
-  const resolved = await dependencies.publications.resolve(prepared.descriptor, options);
+  const resolved = await dependencies.publications.resolve(
+    prepared.descriptor,
+    toContributionCallOptions(options),
+  );
   const now = dependencies.clock.now();
   if (resolved.withdrawal === undefined) {
     const unsupportedState: ContributionRequestState = appendCurrentContributionReceipt({
@@ -185,7 +204,7 @@ export async function deactivateContributionDestination(
   };
   const result = await resolved.withdrawal.deactivate(
     { destination: prepared.descriptor, publicationReceipt },
-    options,
+    toContributionCallOptions(options),
   );
   const finalState: ContributionRequestState = appendCurrentContributionReceipt({
     ...versioned.value,
@@ -210,13 +229,23 @@ export async function deactivateContribution(
 ): Promise<ContributionReadModel> {
   const initial = await dependencies.store.loadRequest(requestId, options);
   if (initial === null) fail("INVALID_INPUT");
+  if (
+    options?.expectedRequestRevision !== undefined &&
+    options.expectedRequestRevision !== initial.revision
+  ) {
+    fail("STORE_CONFLICT");
+  }
   if (initial.value.preparation.status !== "preview-ready") fail("INVALID_INPUT");
   let latest = toContributionReadModel(initial);
   const destinations = [...initial.value.destinations]
     .map((d) => d.destination)
     .sort(compareCodeUnitStrings);
+  // Only `signal` crosses into each per-destination call -- the caller's
+  // `expectedRequestRevision` is gated exactly once, above; see
+  // `resumeContribution` in publication.ts for the identical reasoning.
+  const nestedOptions = toContributionCallOptions(options);
   for (const destination of destinations) {
-    latest = await deactivateContributionDestination(requestId, destination, dependencies, options);
+    latest = await deactivateContributionDestination(requestId, destination, dependencies, nestedOptions);
   }
   return latest;
 }

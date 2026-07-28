@@ -92,6 +92,30 @@ export interface ContributionOperationOptions {
   readonly expectedGrantRevision?: number;
 }
 
+/**
+ * Signal-only projection of `ContributionOperationOptions`. Every injected
+ * port (`RepositoryResolver`, `DisclosurePolicyAuthority`,
+ * `DerivationResolver`, `AuthorizationAuthority`, `PublicationResolver`,
+ * `ReviewReferenceStore`, `AvailabilityWithdrawal`) and every nested
+ * Contribution command call receives only this narrowed shape --
+ * `expectedRequestRevision`/`expectedGrantRevision` are gated exactly once,
+ * at the invoked command's own first store transition, and never forwarded
+ * past it (Global Constraints: "Strip expected-revision fields before
+ * calling Repository, Derivation, Publication, authority, review, or
+ * withdrawal ports; only the `signal` crosses those boundaries.").
+ */
+export interface ContributionCallOptions {
+  readonly signal?: AbortSignal;
+}
+
+/** Project `options` down to the signal-only shape every port and nested command call receives. */
+export function toContributionCallOptions(
+  options?: ContributionOperationOptions,
+): ContributionCallOptions | undefined {
+  if (options === undefined) return undefined;
+  return options.signal !== undefined ? { signal: options.signal } : {};
+}
+
 // ---------------------------------------------------------------------------
 // Safe reason vocabulary
 // ---------------------------------------------------------------------------
@@ -379,7 +403,14 @@ export interface ExactAuthorizationSubmission {
   readonly authorityId: string;
   readonly actorId: string;
   readonly previewFingerprint: Sha256Digest;
-  readonly allowedDestinationConfigurationDigests: readonly Sha256Digest[];
+  /**
+   * Destination IDs (the manifest's `ContributionDestination.destination`
+   * IRIs), not configuration digests (design §9.3: "allowed destination
+   * IDs"). Two distinct destinations may share a `configurationDigest`;
+   * keying by destination ID lets each be independently authorized or
+   * denied (design §11.3).
+   */
+  readonly allowedDestinationIds: readonly string[];
   readonly decidedAt: string;
   readonly expiresAt?: string;
   readonly proofDigest: Sha256Digest;
@@ -390,7 +421,7 @@ export interface ExactAuthorizationSubmission {
 export interface VerifiedExactAuthorization
   extends Omit<ExactAuthorizationSubmission, "proofBytes"> {
   readonly deniedDestinations: readonly {
-    readonly configurationDigest: Sha256Digest;
+    readonly destination: string;
     readonly reasonCode: ContributionSafeReasonCode;
   }[];
 }

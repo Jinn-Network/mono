@@ -17,6 +17,7 @@ import type {
   PreviewReadyPreparation,
   VerifiedSignedUnchangedDecision,
 } from "./types.js";
+import { toContributionCallOptions } from "./types.js";
 
 function assertArtifactReceiptMatches(
   receipt: RepositoryWriteReceipt<EvidenceArtifactReference>,
@@ -77,11 +78,11 @@ export async function prepareSignedDisclosure(
   }
   const sourceRepository = await repositories.resolve(
     input.sourceRepositoryBindingId,
-    options,
+    toContributionCallOptions(options),
   );
   const stagingRepository = await repositories.resolve(
     input.stagingRepositoryBindingId,
-    options,
+    toContributionCallOptions(options),
   );
 
   const recordReceipt = await stagingRepository.putRecord(

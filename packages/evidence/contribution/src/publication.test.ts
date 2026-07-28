@@ -176,7 +176,7 @@ async function authorizedRequest(
       authorityId: submission.authorityId,
       actorId: submission.actorId,
       previewFingerprint: submission.previewFingerprint,
-      allowedDestinationConfigurationDigests: submission.allowedDestinationConfigurationDigests,
+      allowedDestinationIds: submission.allowedDestinationIds,
       decidedAt: submission.decidedAt,
       proofDigest: submission.proofDigest,
       exactPreviewPresented: submission.exactPreviewPresented,
@@ -194,7 +194,7 @@ async function authorizedRequest(
       authorityId: "https://authority.example/host",
       actorId: "user-1",
       previewFingerprint: prepared.previewFingerprint!,
-      allowedDestinationConfigurationDigests: destinations.map((d) => d.configurationDigest),
+      allowedDestinationIds: destinations.map((d) => d.destination),
       decidedAt: "2026-07-28T00:00:00Z",
       proofDigest: hashExactBytes(proofBytes),
       proofBytes,
@@ -425,6 +425,40 @@ describe("publishContributionDestination", () => {
     const result = await resumeContribution(authorized.requestId, pubDeps);
     expect(result.status).toBe("completed");
     expect(result.destinations.every((entry) => entry.status === "published")).toBe(true);
+  });
+
+  test("resumeContribution with expectedRequestRevision publishes every destination, not just the first", async () => {
+    const a = destination({
+      destination: "https://a.example",
+      configurationDigest: `sha256:${"1".repeat(64)}` as Sha256Digest,
+    });
+    const b = destination({
+      destination: "https://b.example",
+      configurationDigest: `sha256:${"2".repeat(64)}` as Sha256Digest,
+    });
+    const { deps, authorized, stagingRepository } = await authorizedRequest([a, b]);
+    const backend = freshPublicationBackend();
+    const pubDeps: ContributionPublicationDependencies = {
+      ...deps,
+      repositories: {
+        resolve: async (bindingId) => {
+          if (bindingId === STAGING_BINDING) return stagingRepository;
+          throw new Error(`unknown binding ${bindingId}`);
+        },
+      },
+      publications: resolverFor(backend),
+    };
+    // The caller's `expectedRequestRevision` reflects the revision it read
+    // before deciding to resume. Publishing the first of several
+    // destinations advances the store revision; that must not cause the
+    // remaining destinations' per-destination publish to spuriously see a
+    // stale expectation and throw STORE_CONFLICT.
+    const result = await resumeContribution(authorized.requestId, pubDeps, {
+      expectedRequestRevision: authorized.revision,
+    });
+    expect(result.status).toBe("completed");
+    expect(result.destinations.every((entry) => entry.status === "published")).toBe(true);
+    expect(backend.sink.placementEffectCount).toBe(2);
   });
 
   test("no Publication effect occurs without current authorization", async () => {

@@ -70,7 +70,7 @@ await authorizeContribution(
     authorityId: "https://host.example/authority",
     actorId: "user-1",
     previewFingerprint: prepared.previewFingerprint!,
-    allowedDestinationConfigurationDigests: [/* chosen destinations */],
+    allowedDestinationIds: [/* chosen destination IDs */],
     decidedAt: new Date().toISOString(),
     proofDigest,
     proofBytes,

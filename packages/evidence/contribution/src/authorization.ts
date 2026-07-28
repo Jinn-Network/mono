@@ -20,6 +20,8 @@ import {
 import type { VersionedStandingGrant } from "./store.js";
 import {
   CONTRIBUTION_SAFE_REASON_CODES,
+  toContributionCallOptions,
+  type ContributionCallOptions,
   type ContributionGrantId,
   type ContributionOperationOptions,
   type ContributionReadModel,
@@ -48,21 +50,21 @@ export interface AuthorizationAuthority {
   verifyExact(
     submission: ExactAuthorizationSubmission,
     manifest: PreparedDisclosureManifest,
-    options?: ContributionOperationOptions,
+    options?: ContributionCallOptions,
   ): Promise<VerifiedExactAuthorization>;
   verifyStandingGrant(
     submission: StandingGrantSubmission,
-    options?: ContributionOperationOptions,
+    options?: ContributionCallOptions,
   ): Promise<VerifiedStandingGrant>;
   verifyStandingGrantRevocation(
     submission: StandingGrantRevocationSubmission,
     grant: StandingAuthorizationGrantState,
-    options?: ContributionOperationOptions,
+    options?: ContributionCallOptions,
   ): Promise<VerifiedStandingGrantRevocation>;
   evaluateHostScope(
     grant: StandingAuthorizationGrantState,
     context: Readonly<Record<string, string>>,
-    options?: ContributionOperationOptions,
+    options?: ContributionCallOptions,
   ): Promise<{ readonly matches: boolean; readonly decisionDigest: Sha256Digest }>;
 }
 
@@ -101,6 +103,11 @@ function parseDigestArray(value: unknown, field: string): readonly Sha256Digest[
   return value.map((entry) => parseContributionDigest(entry, field));
 }
 
+function parseAbsoluteIriArray(value: unknown, field: string): readonly string[] {
+  if (!Array.isArray(value)) fail("POLICY_INVALID");
+  return value.map((entry) => parseAbsoluteIri(entry, field));
+}
+
 function parseVerifiedExactAuthorization(
   raw: unknown,
   submission: ExactAuthorizationSubmission,
@@ -118,9 +125,9 @@ function parseVerifiedExactAuthorization(
   if (previewFingerprint !== submission.previewFingerprint) {
     fail("AUTHORIZATION_STALE");
   }
-  const allowedDestinationConfigurationDigests = parseDigestArray(
-    snapshot.allowedDestinationConfigurationDigests,
-    "allowedDestinationConfigurationDigests",
+  const allowedDestinationIds = parseAbsoluteIriArray(
+    snapshot.allowedDestinationIds,
+    "allowedDestinationIds",
   );
   const decidedAt = parseContributionTimestamp(snapshot.decidedAt, "decidedAt");
   const expiresAt = snapshot.expiresAt === undefined
@@ -132,9 +139,9 @@ function parseVerifiedExactAuthorization(
     if (typeof entry !== "object" || entry === null) fail("POLICY_INVALID");
     const candidate = entry as Record<string, unknown>;
     return {
-      configurationDigest: parseContributionDigest(
-        candidate.configurationDigest,
-        "deniedDestinations[].configurationDigest",
+      destination: parseAbsoluteIri(
+        candidate.destination,
+        "deniedDestinations[].destination",
       ),
       reasonCode: parseSafeReasonCode(candidate.reasonCode),
     };
@@ -157,7 +164,7 @@ function parseVerifiedExactAuthorization(
       return snapshot.actorId;
     })(),
     previewFingerprint,
-    allowedDestinationConfigurationDigests,
+    allowedDestinationIds,
     decidedAt,
     ...(expiresAt !== undefined ? { expiresAt } : {}),
     proofDigest: parseContributionDigest(snapshot.proofDigest, "proofDigest"),
@@ -204,7 +211,7 @@ export async function authorizeContribution(
   const raw = await dependencies.authorization.verifyExact(
     forAuthority,
     manifest,
-    options,
+    toContributionCallOptions(options),
   );
   const verified = parseVerifiedExactAuthorization(raw, submission);
 
@@ -214,9 +221,14 @@ export async function authorizeContribution(
   }
 
   const decisionId = dependencies.identifiers.nextDecisionId();
-  const allowedDigests = new Set(verified.allowedDestinationConfigurationDigests);
-  const deniedByDigest = new Map(
-    verified.deniedDestinations.map((entry) => [entry.configurationDigest, entry.reasonCode]),
+  // Selection is keyed by destination ID, not `configurationDigest` (design
+  // §9.3: "allowed destination IDs"; §11.3: approval of one destination
+  // never implies approval of another). Two distinct destinations may share
+  // a `configurationDigest`; keying by digest would authorize or deny both
+  // together even when the decision named only one.
+  const allowedIds = new Set(verified.allowedDestinationIds);
+  const deniedByDestination = new Map(
+    verified.deniedDestinations.map((entry) => [entry.destination, entry.reasonCode]),
   );
 
   const events: {
@@ -229,9 +241,8 @@ export async function authorizeContribution(
 
   let nextDestinations = versioned.value.destinations;
   for (const prepared of manifest.destinations) {
-    const configDigest = prepared.descriptor.configurationDigest;
     const destination = prepared.descriptor.destination;
-    if (allowedDigests.has(configDigest)) {
+    if (allowedIds.has(destination)) {
       nextDestinations = updateContributionDestinationState(
         nextDestinations,
         destination,
@@ -241,8 +252,8 @@ export async function authorizeContribution(
         }),
       );
       events.push({ schemaVersion: 1, kind: "authorized", at: now, destination });
-    } else if (deniedByDigest.has(configDigest)) {
-      const reasonCode = deniedByDigest.get(configDigest)!;
+    } else if (deniedByDestination.has(destination)) {
+      const reasonCode = deniedByDestination.get(destination)!;
       nextDestinations = updateContributionDestinationState(
         nextDestinations,
         destination,
@@ -469,7 +480,10 @@ export async function createStandingAuthorizationGrant(
     ...submission,
     proofBytes: Uint8Array.from(submission.proofBytes),
   };
-  const raw = await dependencies.authorization.verifyStandingGrant(forAuthority, options);
+  const raw = await dependencies.authorization.verifyStandingGrant(
+    forAuthority,
+    toContributionCallOptions(options),
+  );
   const verified = parseVerifiedStandingGrant(raw, submission);
 
   const now = dependencies.clock.now();
@@ -530,7 +544,7 @@ export async function revokeStandingAuthorizationGrant(
   const raw = await dependencies.authorization.verifyStandingGrantRevocation(
     forAuthority,
     versioned.value,
-    options,
+    toContributionCallOptions(options),
   );
   const verified = parseVerifiedStandingGrantRevocation(raw, submission);
 
@@ -598,7 +612,7 @@ export async function applyStandingAuthorization(
     const evaluation = await dependencies.authorization.evaluateHostScope(
       grant,
       versioned.value.proposal.hostContext ?? {},
-      options,
+      toContributionCallOptions(options),
     );
     if (!evaluation.matches) fail("AUTHORIZATION_DENIED");
   }

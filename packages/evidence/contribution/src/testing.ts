@@ -215,7 +215,7 @@ function grantingExactSubmission(
     authorityId: "https://authority.example/host",
     actorId: "user-1",
     previewFingerprint: `sha256:${"0".repeat(64)}` as Sha256Digest,
-    allowedDestinationConfigurationDigests: [],
+    allowedDestinationIds: [],
     decidedAt: "2026-07-28T00:00:00Z",
     proofDigest,
     proofBytes,
@@ -277,7 +277,7 @@ async function authorizePrepared(
     prepared.requestId,
     grantingExactSubmission({
       previewFingerprint: prepared.previewFingerprint!,
-      allowedDestinationConfigurationDigests: destinations.map((d) => d.configurationDigest),
+      allowedDestinationIds: destinations.map((d) => d.destination),
     }),
     IGNORED,
   );
@@ -477,7 +477,7 @@ export function describeEvidenceContributionContract(
           mode: "organization-exact",
           exactPreviewPresented: false,
           previewFingerprint: prepared.previewFingerprint!,
-          allowedDestinationConfigurationDigests: [destination().configurationDigest],
+          allowedDestinationIds: [destination().destination],
         }),
         IGNORED,
       );

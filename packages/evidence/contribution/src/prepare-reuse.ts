@@ -21,6 +21,7 @@ import type {
   PreviewReadyPreparation,
   VerifiedReuseDecision,
 } from "./types.js";
+import { toContributionCallOptions } from "./types.js";
 
 function assertArtifactReceiptMatches(
   receipt: RepositoryWriteReceipt<EvidenceArtifactReference>,
@@ -103,11 +104,11 @@ export async function prepareReusableDisclosure(
 ): Promise<PreviewReadyPreparation> {
   const sourceRepository = await repositories.resolve(
     input.sourceRepositoryBindingId,
-    options,
+    toContributionCallOptions(options),
   );
   const stagingRepository = await repositories.resolve(
     input.stagingRepositoryBindingId,
-    options,
+    toContributionCallOptions(options),
   );
 
   const priorManifestBytes = await loadExactArtifact(
