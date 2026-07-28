@@ -1,0 +1,6 @@
+{
+  "input": {
+    "patternLength": 1025
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

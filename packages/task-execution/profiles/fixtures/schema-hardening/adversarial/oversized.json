@@ -1,0 +1,7 @@
+{
+  "input": {
+    "schema": { "type": "object" },
+    "byteLengthOverride": 300000
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}
