@@ -1,4 +1,4 @@
-// @jinn-network/marketplace-binding -- public surface (M0+M1.1 slice).
+// @jinn-network/marketplace-binding -- public surface (M0+M1 slice).
 //
 // `order.ts`/`canonical-json.ts` are deliberately NOT exported here: they seal the binding's own
 // backend-internal canonical bytes only (broadcast-intent WAL record, correspondence-assertion
@@ -20,3 +20,6 @@ export {
   normalizeAttemptTuple,
 } from "./attempt-uri.js";
 export type { MarketplaceAttemptTuple } from "./attempt-uri.js";
+
+// --- the two-party engagement entry (named surface; consumed by the pipeline at Milestone M6) ---
+export type { TwoPartyEngagement } from "./two-party-engagement.js";
