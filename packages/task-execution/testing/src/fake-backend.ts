@@ -65,6 +65,13 @@ const DEFAULT_RUN_PINNING: RunPinningKeySupport[] = [
   { key: "harness", inventory: ["fake-harness-v1"], posture: "enforced" },
 ];
 
+// Mirrors backend-local v1: a single Attempt per Submission, in both the "how many total" and
+// "how many concurrently" senses (§9.2).
+const DEFAULT_ATTEMPT_BOUNDS: BackendCapabilities["attempts"] = {
+  maxTotal: [1, 1],
+  maxConcurrent: [1, 1],
+};
+
 export interface InMemoryBackendOptions {
   /** The authoritative observation-producer source URI for this backend instance (§10.1). */
   source?: string;
@@ -74,8 +81,20 @@ export interface InMemoryBackendOptions {
   runPinning?: RunPinningKeySupport[];
 }
 
+// The idempotency scope key MUST be delimited (§12.2): `requester` and `idempotencyKey`
+// are caller-controlled strings of arbitrary length, so naive concatenation lets two
+// distinct pairs collide at a shared boundary (e.g. requester "ab" + key "c" === requester
+// "a" + key "bc"), producing a false submission-conflict or a false idempotent hit across
+// requesters -- exactly the cross-requester capture §12.2 forbids. U+001F (the ASCII unit
+// separator) is the frozen delimiter this tree already uses for the same reason in
+// `deriveAttemptUri` (protocol/src/identifiers.ts): a control character absent from both
+// fields, so the two parts can never concatenate ambiguously. It was already present here
+// as a literal, invisible byte; naming it explicitly avoids anyone (reviewer or editor)
+// misreading this as an undelimited concatenation.
+const SCOPE_DELIMITER = "\u001f";
+
 function scopeKey(requester: string, idempotencyKey: string): string {
-  return `${requester}${idempotencyKey}`;
+  return `${requester}${SCOPE_DELIMITER}${idempotencyKey}`;
 }
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
@@ -98,6 +117,7 @@ export class InMemoryTaskExecutionBackend implements TestableBackend {
   private readonly source: string;
   private readonly executor: string;
   private readonly runPinning: RunPinningKeySupport[];
+  private readonly attempts: BackendCapabilities["attempts"] = DEFAULT_ATTEMPT_BOUNDS;
 
   private readonly submissionsByScope = new Map<string, StoredSubmission>();
   private readonly submissionsByUri = new Map<SubmissionUri, StoredSubmission>();
@@ -128,7 +148,7 @@ export class InMemoryTaskExecutionBackend implements TestableBackend {
       evidenceCapture: "none",
       deadlineEnforcement: false,
       isolation: ["none"],
-      attempts: {},
+      attempts: this.attempts,
       runPinning: { keys: this.runPinning },
     };
   }
@@ -160,6 +180,20 @@ export class InMemoryTaskExecutionBackend implements TestableBackend {
     // Consumer-side rule: the exact received bytes are the digest, never a re-canonicalization.
     const taskDigest = documentDigest(taskBytes);
     const submissionDigest = documentDigest(submissionBytes);
+
+    // §8: the Submission's `task` reference commits to "the sealed Task digest plus locator
+    // hints" — the schema requires a sha256 entry (protocol/src/schemas/submission.ts), so a
+    // mismatch here means the caller paired this Submission with the wrong Task bytes.
+    const boundTaskDigestHex = submission.task.digest?.sha256;
+    if (boundTaskDigestHex !== sha256Hex(taskBytes)) {
+      return {
+        accepted: false,
+        error: new TaskExecutionError("invalid-reference", {
+          detail: `Submission's task digest (sha256:${boundTaskDigestHex ?? "none"}) does not `
+            + `match the provided Task bytes' digest (${taskDigest})`,
+        }),
+      };
+    }
 
     const scope = scopeKey(submission.requester, submission.idempotencyKey);
     const existing = this.submissionsByScope.get(scope);
@@ -198,6 +232,47 @@ export class InMemoryTaskExecutionBackend implements TestableBackend {
           error: new TaskExecutionError("unsupported-requirement", {
             detail: `run-pinning key "${key}" requested a value outside this backend's declared inventory`,
             annotations: { key },
+          }),
+        };
+      }
+    }
+
+    // §8: `attempts`, `evaluationRequirements`, and `capabilityGrants` follow the same
+    // honor-or-reject rule as Task requirements — a backend that cannot honor a supplied value
+    // (including one with no deployment profile that interprets `evaluationRequirements`, or one
+    // that does not resolve `capabilityGrants`) MUST reject at submit, naming the field. This
+    // fake declares no evaluation profile and does not interpret capability grants, so both are
+    // an unconditional reject when supplied; `attempts` is honored only within the declared
+    // per-key [min, max] bounds.
+    if (submission.evaluationRequirements !== undefined) {
+      return {
+        accepted: false,
+        error: new TaskExecutionError("unsupported-requirement", {
+          detail: "this backend declares no evaluation profile and cannot honor evaluationRequirements (§8)",
+          annotations: { key: "evaluationRequirements" },
+        }),
+      };
+    }
+    if (submission.capabilityGrants !== undefined) {
+      return {
+        accepted: false,
+        error: new TaskExecutionError("unsupported-requirement", {
+          detail: "this backend does not resolve capabilityGrants (§8)",
+          annotations: { key: "capabilityGrants" },
+        }),
+      };
+    }
+    for (const key of ["maxTotal", "maxConcurrent"] as const) {
+      const requested = submission.attempts?.[key];
+      if (requested === undefined) continue;
+      const declared = this.attempts[key];
+      if (declared === undefined || requested < declared[0] || requested > declared[1]) {
+        return {
+          accepted: false,
+          error: new TaskExecutionError("unsupported-requirement", {
+            detail: `attempts.${key} value ${requested} is outside this backend's declared bounds `
+              + (declared !== undefined ? `[${declared[0]}, ${declared[1]}]` : "(not declared)"),
+            annotations: { key: `attempts.${key}` },
           }),
         };
       }

@@ -59,6 +59,13 @@ describe("InMemoryTaskExecutionBackend: happy path", () => {
     expect(pendingSnapshot.descriptor.task).toBe(taskDigest);
     expect(pendingSnapshot.descriptor.submission).toBe("urn:uuid:11111111-1111-5111-8111-111111111111");
     const attempt = pendingSnapshot.descriptor.attempt;
+    // `foldObservations` self-filters to the authoritative source pinned by `attempt-engaged`
+    // (§10.1/§10.4): a driven observation must carry that same envelope `source` to count.
+    const engaged = pendingSnapshot.observations.find(
+      (observation) => observation.type === "network.jinn.task-execution.attempt-engaged.v1",
+    );
+    if (engaged === undefined) throw new Error("expected an attempt-engaged observation on submit");
+    const authoritativeSource = engaged.source;
 
     const delivery = deliveryBytesFor(taskDigest, attempt);
     await backend.recordDelivery(attempt, delivery);
@@ -66,7 +73,7 @@ describe("InMemoryTaskExecutionBackend: happy path", () => {
       {
         specversion: "1.0",
         id: "evt-terminal",
-        source: pendingSnapshot.descriptor.attempt, // arbitrary but stable per-attempt source for driven facts
+        source: authoritativeSource,
         subject: attempt,
         time: "2026-07-28T00:05:30Z",
         datacontenttype: "application/json",

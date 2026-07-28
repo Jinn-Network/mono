@@ -47,11 +47,20 @@ function deliveryBytesFor(taskDigest: string, attempt: string): Uint8Array {
   });
 }
 
-function terminalObservation(attempt: string, state: "delivered" | "failed", blame?: "task" | "infrastructure") {
+// `foldObservations` self-filters to the authoritative source pinned by `attempt-engaged`
+// (§10.1/§10.4): a driven observation must carry that same envelope `source` to count toward
+// derived state, so every fixture below takes the attempt's real authoritative `source` as a
+// parameter rather than inventing its own producer identity.
+function terminalObservation(
+  attempt: string,
+  source: string,
+  state: "delivered" | "failed",
+  blame?: "task" | "infrastructure",
+) {
   return {
     specversion: "1.0" as const,
     id: unique("evt"),
-    source: `urn:jinn:conformance-kit:${attempt}`,
+    source,
     subject: attempt,
     time: new Date().toISOString(),
     datacontenttype: "application/json" as const,
@@ -61,11 +70,11 @@ function terminalObservation(attempt: string, state: "delivered" | "failed", bla
   };
 }
 
-function startedObservation(attempt: string) {
+function startedObservation(attempt: string, source: string) {
   return {
     specversion: "1.0" as const,
     id: unique("evt"),
-    source: `urn:jinn:conformance-kit:${attempt}`,
+    source,
     subject: attempt,
     time: new Date().toISOString(),
     datacontenttype: "application/json" as const,
@@ -78,14 +87,18 @@ function startedObservation(attempt: string) {
 async function submitAccepted(
   backend: TestableBackend,
   overrides: Record<string, unknown> = {},
-): Promise<{ attempt: `urn:uuid:${string}`; taskDigest: `sha256:${string}` }> {
+): Promise<{ attempt: `urn:uuid:${string}`; taskDigest: `sha256:${string}`; source: string }> {
   const task = taskBytes();
   const taskDigest = documentDigest(task);
   const submission = submissionBytes(taskDigest, overrides);
   const ack = await backend.submit(task, submission);
   if (!ack.accepted) throw new Error(`expected acceptance, got ${JSON.stringify(ack.error)}`);
   const snapshot = await backend.observe(ack.submission);
-  return { attempt: snapshot.descriptor.attempt, taskDigest };
+  const engaged = snapshot.observations.find(
+    (observation) => observation.type === "network.jinn.task-execution.attempt-engaged.v1",
+  );
+  if (engaged === undefined) throw new Error("expected an attempt-engaged observation on submit");
+  return { attempt: snapshot.descriptor.attempt, taskDigest, source: engaged.source };
 }
 
 export type DescribeTaskExecutionBackendContract = typeof describeTaskExecutionBackendContract;
@@ -128,18 +141,18 @@ export function describeTaskExecutionBackendContract(makeBackend: () => Testable
 
     test("observe is honest: distinguishes pending, running, and a failed terminal (never infers success from liveness)", async () => {
       const backend = makeBackend();
-      const { attempt } = await submitAccepted(backend);
+      const { attempt, source } = await submitAccepted(backend);
 
       const pending = await backend.observe(attempt);
       expect(pending.descriptor.derived.state).toBe("pending");
       expect(pending.descriptor.derived.terminal).toBe(false);
 
-      await backend.drive(attempt, [startedObservation(attempt)]);
+      await backend.drive(attempt, [startedObservation(attempt, source)]);
       const running = await backend.observe(attempt);
       expect(running.descriptor.derived.state).toBe("running");
       expect(running.descriptor.derived.terminal).toBe(false);
 
-      await backend.drive(attempt, [terminalObservation(attempt, "failed", "task")]);
+      await backend.drive(attempt, [terminalObservation(attempt, source, "failed", "task")]);
       const failed = await backend.observe(attempt);
       expect(failed.descriptor.derived.state).toBe("failed");
       expect(failed.descriptor.derived.terminal).toBe(true);
@@ -170,13 +183,13 @@ export function describeTaskExecutionBackendContract(makeBackend: () => Testable
       const backend = makeBackend();
       if (backend.cancel === undefined) return; // optional capability (§14)
       const cancel = backend.cancel.bind(backend);
-      const { attempt } = await submitAccepted(backend);
+      const { attempt, source } = await submitAccepted(backend);
 
       const beforeTerminal = await cancel(attempt, "no longer needed");
       expect(beforeTerminal.requested).toBe(true);
       expect(beforeTerminal.terminalState).toBeUndefined();
 
-      await backend.drive(attempt, [terminalObservation(attempt, "delivered")]);
+      await backend.drive(attempt, [terminalObservation(attempt, source, "delivered")]);
 
       const afterTerminalFirst = await cancel(attempt, "race: caller A");
       const afterTerminalSecond = await cancel(attempt, "race: caller B");
@@ -228,19 +241,19 @@ export function describeTaskExecutionBackendContract(makeBackend: () => Testable
 
       // By contrast, a *failed* Attempt terminal is a successful, honest observe() — a work
       // outcome, never an operational error (§13).
-      const { attempt } = await submitAccepted(backend);
-      await backend.drive(attempt, [terminalObservation(attempt, "failed", "task")]);
+      const { attempt, source } = await submitAccepted(backend);
+      await backend.drive(attempt, [terminalObservation(attempt, source, "failed", "task")]);
       const snapshot = await backend.observe(attempt);
       expect(snapshot.descriptor.derived.state).toBe("failed");
     });
 
     test("result retrieval on terminal Attempts: deliveries + fetchDelivery return exact bytes; result-unavailable is loud otherwise", async () => {
       const backend = makeBackend();
-      const { attempt, taskDigest } = await submitAccepted(backend);
+      const { attempt, taskDigest, source } = await submitAccepted(backend);
       const delivery = deliveryBytesFor(taskDigest, attempt);
 
       await backend.recordDelivery(attempt, delivery);
-      await backend.drive(attempt, [terminalObservation(attempt, "delivered")]);
+      await backend.drive(attempt, [terminalObservation(attempt, source, "delivered")]);
 
       const refs = await backend.deliveries(attempt);
       expect(refs).toHaveLength(1);
@@ -250,6 +263,109 @@ export function describeTaskExecutionBackendContract(makeBackend: () => Testable
       await expect(
         backend.fetchDelivery({ attempt, digest: `sha256:${"c".repeat(64)}` }),
       ).rejects.toMatchObject({ category: "result-unavailable" });
+    });
+
+    test("idempotency scope is delimited: concatenation-colliding (requester, idempotencyKey) pairs never conflict or capture each other (§12.2)", async () => {
+      const backend = makeBackend();
+      const task = taskBytes();
+      const taskDigest = documentDigest(task);
+      // Chosen so naive concatenation ("requester" + "idempotencyKey") collides: "ab" + "c" ===
+      // "a" + "bc" === "abc". A scope key with no delimiter between the two fields would treat
+      // these as the same scope — exactly the cross-requester capture §12.2 forbids.
+      const first = submissionBytes(taskDigest, { requester: "ab", idempotencyKey: "c" });
+      const second = submissionBytes(taskDigest, { requester: "a", idempotencyKey: "bc" });
+
+      const firstAck = await backend.submit(task, first);
+      const secondAck = await backend.submit(task, second);
+      expect(firstAck.accepted).toBe(true);
+      expect(secondAck.accepted).toBe(true);
+      if (!firstAck.accepted || !secondAck.accepted) throw new Error("unreachable");
+      expect(firstAck.submission).not.toBe(secondAck.submission);
+
+      const firstSnapshot = await backend.observe(firstAck.submission);
+      const secondSnapshot = await backend.observe(secondAck.submission);
+      expect(firstSnapshot.descriptor.attempt).not.toBe(secondSnapshot.descriptor.attempt);
+    });
+
+    test("the same idempotencyKey under two different requesters yields two distinct accepted Submissions (no conflict, no capture, §12.2)", async () => {
+      const backend = makeBackend();
+      const task = taskBytes();
+      const taskDigest = documentDigest(task);
+      const sharedKey = unique("shared-key");
+      const requesterA = `urn:uuid:${crypto.randomUUID()}`;
+      const requesterB = `urn:uuid:${crypto.randomUUID()}`;
+
+      const firstAck = await backend.submit(
+        task,
+        submissionBytes(taskDigest, { requester: requesterA, idempotencyKey: sharedKey }),
+      );
+      const secondAck = await backend.submit(
+        task,
+        submissionBytes(taskDigest, { requester: requesterB, idempotencyKey: sharedKey }),
+      );
+      expect(firstAck.accepted).toBe(true);
+      expect(secondAck.accepted).toBe(true);
+      if (!firstAck.accepted || !secondAck.accepted) throw new Error("unreachable");
+      expect(firstAck.submission).not.toBe(secondAck.submission);
+    });
+
+    test("submit rejects when the Submission's task digest does not match the provided Task bytes (invalid-reference, §8)", async () => {
+      const backend = makeBackend();
+      const task = taskBytes();
+      const wrongDigest = `sha256:${"0".repeat(64)}`;
+      const submission = submissionBytes(wrongDigest);
+
+      const ack = await backend.submit(task, submission);
+      expect(ack.accepted).toBe(false);
+      if (ack.accepted) throw new Error("unreachable");
+      expect(ack.error).toBeInstanceOf(TaskExecutionError);
+      expect(ack.error.category).toBe("invalid-reference");
+      expect(ack.error.retryable).toBe(false);
+    });
+
+    test("submit rejects supplied evaluationRequirements this backend does not declare/interpret (unsupported-requirement, §8)", async () => {
+      const backend = makeBackend();
+      const task = taskBytes();
+      const taskDigest = documentDigest(task);
+      const submission = submissionBytes(taskDigest, { evaluationRequirements: { minConfidenceBps: 900 } });
+
+      const ack = await backend.submit(task, submission);
+      expect(ack.accepted).toBe(false);
+      if (ack.accepted) throw new Error("unreachable");
+      expect(ack.error).toBeInstanceOf(TaskExecutionError);
+      expect(ack.error.category).toBe("unsupported-requirement");
+    });
+
+    test("submit rejects supplied capabilityGrants this backend does not declare/interpret (unsupported-requirement, §8)", async () => {
+      const backend = makeBackend();
+      const task = taskBytes();
+      const taskDigest = documentDigest(task);
+      const submission = submissionBytes(taskDigest, { capabilityGrants: { "x-conformance-kit/grant": true } });
+
+      const ack = await backend.submit(task, submission);
+      expect(ack.accepted).toBe(false);
+      if (ack.accepted) throw new Error("unreachable");
+      expect(ack.error).toBeInstanceOf(TaskExecutionError);
+      expect(ack.error.category).toBe("unsupported-requirement");
+    });
+
+    test("submit rejects a requested attempts bound outside this backend's declared range (unsupported-requirement, §8)", async () => {
+      const backend = makeBackend();
+      const capabilities = await backend.capabilities();
+      const declaredMaxTotal = capabilities.attempts.maxTotal;
+      if (declaredMaxTotal === undefined) {
+        throw new Error("fixture expects this backend to declare attempts.maxTotal bounds");
+      }
+      const task = taskBytes();
+      const taskDigest = documentDigest(task);
+      const outOfRange = declaredMaxTotal[1] + 1;
+      const submission = submissionBytes(taskDigest, { attempts: { maxTotal: outOfRange } });
+
+      const ack = await backend.submit(task, submission);
+      expect(ack.accepted).toBe(false);
+      if (ack.accepted) throw new Error("unreachable");
+      expect(ack.error).toBeInstanceOf(TaskExecutionError);
+      expect(ack.error.category).toBe("unsupported-requirement");
     });
 
     test("concurrent Attempts on one Task, under separate Submissions, are legal within declared bounds (§9.2)", async () => {

@@ -378,20 +378,38 @@ export function describeProtocolConformance(): void {
       expect(override).toEqual({ key: "x-jinn-example.test/protocolOverride", coreField: "protocol" });
     });
 
-    test("oversized-content: inline content over 64 KiB and an observation message over 4 KiB are rejected against the advisory ceilings (§10.2/§20)", async () => {
+    test("oversized-content: the observation message ceiling IS enforced (§10.2); the 64 KiB inline-content ceiling is a documented un-enforced SHOULD (§6.4/§20, Layer-3 boundary)", async () => {
+      const observation = await readAdversarialJson("oversized-content", "oversized-observation.json") as {
+        data: { message?: string };
+      };
+      expect(observation.data.message!.length).toBeGreaterThan(MAX_FREE_TEXT_BYTES);
+      // The `progress.v1` payload schema enforces the 4 KiB free-text ceiling directly — a
+      // genuine, schema-checked MUST.
+      expect(validateObservation(observation).conforms).toBe(false);
+
       const descriptor = await readAdversarialJson("oversized-content", "resource-descriptor.json") as {
         content?: string;
       };
       expect(descriptor.content).toBeDefined();
       const decodedLength = Buffer.from(descriptor.content!, "base64").length;
       expect(decodedLength).toBeGreaterThan(MAX_INLINE_CONTENT_BYTES);
-
-      const observation = await readAdversarialJson("oversized-content", "oversized-observation.json") as {
-        data: { message?: string };
+      // By contrast, §6.4/§20's 64 KiB inline-content ceiling is a SHOULD, not a MUST: the
+      // ResourceDescriptor schema imposes no content-size bound, and this kit does not invent
+      // one it isn't mandated to enforce. The oversized descriptor is structurally
+      // indistinguishable from a compliant one — exactly the honest-boundary pattern the
+      // dispatch-context-grafting and leaked-task-resubmission adversarial fixtures above already
+      // document, rather than faking a catch.
+      const taskCarryingTheDescriptor = {
+        protocol: "https://jinn.network/profiles/task-execution/1.0",
+        profile: {
+          uri: "https://jinn.network/task-profiles/repository-work/1.0",
+          digest: { sha256: "3917f0428b2626fd2cc93675172731cc000b69d7d783f9adaf5159be56fd10a6" },
+        },
+        instructions: "oversized-content boundary fixture.",
+        outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
+        inputs: [descriptor],
       };
-      expect(observation.data.message!.length).toBeGreaterThan(MAX_FREE_TEXT_BYTES);
-      // The `progress.v1` payload schema enforces the 4 KiB free-text ceiling directly.
-      expect(validateObservation(observation).conforms).toBe(false);
+      expect(validateTask(taskCarryingTheDescriptor).conforms).toBe(true);
     });
   });
 }
