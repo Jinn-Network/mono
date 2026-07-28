@@ -762,6 +762,10 @@ export interface DiscoveryAPI {
    * Separation rule: every field under `authoritative` is sourced exclusively
    * from on-chain event projections. Every `*EnvelopeCandidates` entry is
    * sourced exclusively from attempt/verdict envelope meta (HTTP only).
+   *
+   * `authoritative.task.refunded` is backing-specific: on-chain from
+   * `TaskBudgetRefunded` logs; HTTP from the indexer task-row boolean only
+   * (no refund-event GraphQL entity to cross-check).
    */
   getTaskLifecycleEvidence(args: {
     taskIds: string[];
