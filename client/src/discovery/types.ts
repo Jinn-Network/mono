@@ -64,16 +64,12 @@ export type TaskOnchainStatus = 'open' | 'finalized' | 'expired' | 'unknown';
  * by on-chain taskId (decimal string). On the HTTP path `finalized` is derived
  * from co-fetched attempt/verdict spine rows (parity with
  * `getTaskLifecycleEvidence` / #2236); `refunded` comes from the task-row
- * boolean only. `claimWindowEnd` is unix seconds and MAY be null/undefined in
+ * boolean only. When HTTP pagination hits the shared page cap on attempts or
+ * verdicts, spine rows may be incomplete and `finalized` can under-report —
+ * see `getTaskStatuses` for the DISPLAY truncation contract vs lifecycle's
+ * empty-Map rule. `claimWindowEnd` is unix seconds and MAY be null/undefined in
  * the live indexer today (its call-trace decode is pending), so a missing/invalid
  * window degrades to 'unknown' rather than guessing 'open'.
- *
- * HTTP page-cap asymmetry (#2245): unlike `getTaskLifecycleEvidence`, this path
- * does not blank the Map when attempts or verdicts hit
- * `MAX_OPERATOR_COUNT_TASK_PAGES` with pages remaining. A truncated spine can
- * under-report `finalized: true` for affected tasks. That conservative false is
- * intentional for the DISPLAY chip — safer than trusting the indexer task-row
- * `finalized` flag or dropping every other task's chip.
  */
 export interface TaskStatusSnapshot {
   taskId: string;
@@ -719,10 +715,11 @@ export interface DiscoveryAPI {
   /**
    * Returns the on-chain finalization snapshot for every task posted on the
    * SolverNet identified by `manifestCid`, keyed by on-chain taskId (decimal
-   * string). Joined via `manifestDigest === keccak256(manifestCid)`. On HTTP,
-   * `finalized` is derived from co-fetched attempt/verdict spine rows (parity
-   * with `getTaskLifecycleEvidence` / #2236); `refunded` and `claimWindowEnd`
-   * come from the indexer task row only.
+   * string). Tasks are joined via `manifestDigest === keccak256(manifestCid)`.
+   * On the HTTP path `finalized` is derived from co-fetched attempt/verdict
+   * spine rows via `applyTaskLifecycleTerminals` (parity with
+   * `getTaskLifecycleEvidence` / #2236); `refunded` comes from the task-row
+   * boolean only. `claimWindowEnd` is display-only from the task row.
    *
    * This is a DISPLAY/advisory signal (the Launcher "Recent posted Tasks"
    * status chip), NOT a correctness gate, so it is *tolerant*: like
@@ -736,14 +733,16 @@ export interface DiscoveryAPI {
    * today (call-trace decode pending), so callers must treat a missing/invalid
    * window as `'unknown'` rather than guessing `'open'`.
    *
-   * Page-cap tradeoff (#2245): HTTP legs share the same
-   * `MAX_OPERATOR_COUNT_TASK_PAGES` cap as `getTaskLifecycleEvidence`, but this
-   * method does *not* apply that call's absence-over-partial-lie rule — if
-   * attempts or verdicts truncate, it returns the partial Map and may
-   * under-report `finalized: true` for tasks whose spine rows were not fetched.
-   * Under-reporting is safer here than blanking every chip or trusting the
-   * indexer task-row `finalized` boolean. Authoritative callers must use
-   * `getTaskLifecycleEvidence`, which returns empty on truncation.
+   * HTTP GraphQL legs share the same hard page cap as `getTaskLifecycleEvidence`
+   * (50 pages × 1000 rows per leg). Unlike lifecycle evidence, when attempts
+   * or verdicts pagination would exceed the cap this method silently stops
+   * paging and returns whatever task rows were already fetched with a partial
+   * spine — so `finalized` may under-report on very large SolverNets. That is
+   * acceptable for this DISPLAY chip: callers map absence to `'unknown'` and
+   * must never guess `'open'`; a false non-finalized is safer than inventing
+   * lifecycle authority from a truncated spine. Callers that need the stricter
+   * truncate policy (`absence > partial lie`) use `getTaskLifecycleEvidence`,
+   * which returns an empty Map when any leg would truncate.
    */
   getTaskStatuses(args: { manifestCid: string }): Promise<Map<string, TaskStatusSnapshot>>;
 
