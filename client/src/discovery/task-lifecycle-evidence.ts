@@ -27,6 +27,36 @@ function reqKey(requestId: string, chainId: number): string {
   return `${requestId.toLowerCase()}|${chainId}`;
 }
 
+/**
+ * Derive authoritative finalized/refunded onto each RawTaskRow in place.
+ * finalized = some attempt for the task has verdictCount >= requiredVerdicts
+ *   (count key: taskId|attemptIndex|chainId).
+ * refunded = membership in refundedTaskIds (caller supplies the set —
+ *   onchain from TaskBudgetRefunded logs; HTTP from task-row refunded bits).
+ */
+export function applyTaskLifecycleTerminals(input: {
+  tasks: RawTaskRow[];
+  attempts: ReadonlyArray<Pick<RawAttemptRow, 'taskId' | 'attemptIndex' | 'chainId'>>;
+  verdicts: ReadonlyArray<Pick<RawVerdictRow, 'taskId' | 'attemptIndex' | 'chainId'>>;
+  refundedTaskIds: ReadonlySet<string>;
+}): void {
+  const verdictCountsByAttempt = new Map<string, number>();
+  for (const verdict of input.verdicts) {
+    const key = attemptKey(verdict.taskId, verdict.attemptIndex, verdict.chainId);
+    verdictCountsByAttempt.set(key, (verdictCountsByAttempt.get(key) ?? 0) + 1);
+  }
+  for (const task of input.tasks) {
+    task.finalized = input.attempts.some((attempt) =>
+      attempt.taskId === task.taskId
+      && attempt.chainId === task.chainId
+      && (verdictCountsByAttempt.get(
+        attemptKey(attempt.taskId, attempt.attemptIndex, attempt.chainId),
+      ) ?? 0) >= task.requiredVerdicts,
+    );
+    task.refunded = input.refundedTaskIds.has(task.taskId);
+  }
+}
+
 export function assembleTaskLifecycleEvidence(input: {
   tasks: RawTaskRow[];
   attempts: RawAttemptRow[];
