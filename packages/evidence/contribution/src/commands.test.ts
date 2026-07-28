@@ -1,16 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
+import {
+  createBuiltinDerivationDetectors,
+  createEvidenceDeriver,
+} from "@jinn-network/evidence-derivation";
+import { createSyntheticDerivationInput } from "@jinn-network/evidence-derivation/testing";
+import type { EvidenceDeriver } from "@jinn-network/evidence-derivation";
+import { createArtifactReference } from "@jinn-network/evidence-repository";
+import type { EvidenceRepository, Sha256Digest } from "@jinn-network/evidence-repository";
+import { InMemoryEvidenceRepository } from "@jinn-network/evidence-repository/testing";
 import { describe, expect, test } from "vitest";
 
 import {
   createContributionRequest,
   inspectContribution,
+  prepareContribution,
   type ContributionClock,
   type ContributionCommandBaseDependencies,
   type ContributionIdentifierSource,
+  type ContributionPreparationDependencies,
 } from "./commands.js";
 import { EvidenceContributionError } from "./errors.js";
+import type { DisclosurePolicyAuthority } from "./policy.js";
+import type { RepositoryResolver } from "./source.js";
 import { InMemoryContributionStore } from "./testing-fixtures.js";
-import type { CreateContributionRequestInput } from "./types.js";
+import type {
+  CreateContributionRequestInput,
+  VerifiedDeriveExecutionDecision,
+} from "./types.js";
 
 function fixedClock(at: string): ContributionClock {
   return { now: () => at };
@@ -132,6 +148,136 @@ describe("inspectContribution", () => {
   test("rejects an unknown request id", async () => {
     const deps = dependencies();
     await expect(inspectContribution("missing", deps))
+      .rejects.toThrow(EvidenceContributionError);
+  });
+});
+
+const SOURCE_BINDING = "private-local";
+const STAGING_BINDING = "private-staging";
+
+const privateConfiguration = {
+  schemaVersion: "jinn.private-detector-configuration.v1" as const,
+  nonce: "private-test-nonce-0123456789abcdef",
+  knownIdentities: ["Ada Example"],
+  privateAllowlist: ["operator.internal.example"],
+};
+
+function silentDeriver(): EvidenceDeriver {
+  const detectors = createBuiltinDerivationDetectors({ privateConfiguration })
+    .map((detector) => ({
+      descriptor: detector.descriptor,
+      async detect() {
+        return [];
+      },
+    }));
+  return createEvidenceDeriver({ detectors });
+}
+
+async function seededExecutionEvidenceFixture(): Promise<{
+  readonly repository: EvidenceRepository;
+  readonly proposalInput: CreateContributionRequestInput;
+  readonly route: VerifiedDeriveExecutionDecision;
+}> {
+  const repository = new InMemoryEvidenceRepository();
+  const input = createSyntheticDerivationInput();
+  await repository.putRecord("execution-evidence", input.sourceRecord.bytes);
+  await repository.putArtifact(input.policyBytes);
+  await repository.putArtifact(input.scrubber.implementationDescriptorBytes);
+  for (const artifact of input.sourceArtifacts) {
+    await repository.putArtifact(artifact.bytes);
+  }
+  const policyDecision = {
+    authorityId: "https://authority.example/policy",
+    decisionId: "decision-1",
+    digest: `sha256:${"a".repeat(64)}` as Sha256Digest,
+  };
+  const route: VerifiedDeriveExecutionDecision = {
+    kind: "derive-execution",
+    decision: policyDecision,
+    source: input.sourceRecord.reference,
+    issuedAt: "2026-07-27T00:00:00Z",
+    policyInput: createArtifactReference(input.policyBytes),
+    implementationDescriptor: createArtifactReference(
+      input.scrubber.implementationDescriptorBytes,
+    ),
+    sourceArtifacts: input.sourceArtifacts.map((artifact) => ({
+      entityId: artifact.entityId,
+      reference: createArtifactReference(artifact.bytes),
+    })),
+    policyDigest: createArtifactReference(input.policyBytes).digest,
+    implementationDigest: createArtifactReference(
+      input.scrubber.implementationDescriptorBytes,
+    ).digest,
+    scrubberAgentId: input.scrubber.agentId,
+    completedAt: input.completedAt,
+    risk: {
+      irreversibility: "immutable-or-replicable",
+      sourceCommitmentCorrelation: "none-declared",
+    },
+  };
+  const proposalInput = proposal({
+    idempotencyKey: "plugin:attempt-execution",
+    source: { repositoryBindingId: SOURCE_BINDING, record: input.sourceRecord.reference },
+    policyDecision,
+  });
+  return { repository, proposalInput, route };
+}
+
+function preparationDependencies(
+  base: ContributionCommandBaseDependencies,
+  repository: EvidenceRepository,
+  route: VerifiedDeriveExecutionDecision,
+  staging: EvidenceRepository = new InMemoryEvidenceRepository(),
+): ContributionPreparationDependencies {
+  const repositories: RepositoryResolver = {
+    resolve: async (bindingId) => {
+      if (bindingId === SOURCE_BINDING) return repository;
+      if (bindingId === STAGING_BINDING) return staging;
+      throw new Error(`unknown binding ${bindingId}`);
+    },
+  };
+  const policies: DisclosurePolicyAuthority = { verify: async () => route };
+  return {
+    ...base,
+    repositories,
+    policies,
+    derivations: { resolve: async () => silentDeriver() },
+    reviews: {
+      retain: async () => {
+        throw new Error("unexpected review retain call");
+      },
+    },
+  };
+}
+
+describe("prepareContribution", () => {
+  test("prepares a derive-execution route to preview-ready", async () => {
+    const base = dependencies();
+    const { repository, proposalInput, route } = await seededExecutionEvidenceFixture();
+    const created = await createContributionRequest(proposalInput, base);
+    const deps = preparationDependencies(base, repository, route);
+    const prepared = await prepareContribution(created.requestId, deps);
+    expect(prepared.status).toBe("awaiting-authorization");
+    expect(prepared.previewFingerprint).toBeDefined();
+    expect(prepared.destinations).toHaveLength(1);
+    expect(prepared.destinations[0]).toMatchObject({ status: "awaiting-authorization" });
+  });
+
+  test("is idempotent for a request already resolved", async () => {
+    const base = dependencies();
+    const { repository, proposalInput, route } = await seededExecutionEvidenceFixture();
+    const created = await createContributionRequest(proposalInput, base);
+    const deps = preparationDependencies(base, repository, route);
+    const first = await prepareContribution(created.requestId, deps);
+    const second = await prepareContribution(created.requestId, deps);
+    expect(second).toEqual(first);
+  });
+
+  test("rejects preparing an unknown request", async () => {
+    const base = dependencies();
+    const { repository, route } = await seededExecutionEvidenceFixture();
+    const deps = preparationDependencies(base, repository, route);
+    await expect(prepareContribution("missing", deps))
       .rejects.toThrow(EvidenceContributionError);
   });
 });

@@ -95,6 +95,7 @@ describe("resolveDisclosureRoute", () => {
       sourceArtifacts: [],
       policyDigest: digest("3"),
       implementationDigest: digest("4"),
+      scrubberAgentId: "urn:uuid:scrubber-agent",
       completedAt: "2026-07-27T00:00:01Z",
       risk: { irreversibility: "immutable-or-replicable", sourceCommitmentCorrelation: "none-declared" },
     });
@@ -114,6 +115,7 @@ describe("resolveDisclosureRoute", () => {
       sourceArtifacts: [],
       policyDigest: digest("3"),
       implementationDigest: digest("4"),
+      scrubberAgentId: "urn:uuid:scrubber-agent",
       completedAt: "2026-07-27T00:00:01Z",
       risk: { irreversibility: "immutable-or-replicable", sourceCommitmentCorrelation: "none-declared" },
     });

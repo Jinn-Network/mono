@@ -141,6 +141,9 @@ export interface VerifiedDeriveExecutionDecision
   readonly policyDigest: Sha256Digest;
   readonly implementationDigest: Sha256Digest;
   readonly configurationDigest?: Sha256Digest;
+  /** Identity of the Derivation scrubbing agent, required by
+   * `EvidenceDeriver.derive`'s `scrubber.agentId`. */
+  readonly scrubberAgentId: string;
   readonly completedAt: string;
   readonly risk: PreparedDisclosureRisk;
 }

@@ -144,9 +144,16 @@ function parseDeriveExecutionDecision(
   ) {
     fail("POLICY_INVALID");
   }
+  if (
+    typeof candidate.scrubberAgentId !== "string" ||
+    candidate.scrubberAgentId.length === 0
+  ) {
+    fail("POLICY_INVALID");
+  }
   return {
     ...base,
     kind: "derive-execution",
+    scrubberAgentId: candidate.scrubberAgentId,
     policyInput: (() => {
       try {
         return parseEvidenceArtifactReference(candidate.policyInput);
