@@ -239,6 +239,29 @@ Confirmed by the operator at the program gate (2026-07-28):
     backend. Guards encode: nothing outside `packages/task-execution/backend-local/` imports
     `supervisor`/`workspace`/`launchers` except `assembly`, the testing slice, and the
     evaluation harness's launcher surface.
+19. **Deployment-profile conformance placement (extension review, 2026-07-28):** the TEP core
+    kit (`describeTaskExecutionBackendContract`) stays profile-agnostic and unchanged — TEP
+    §24 places binding-integration checks at Layer 3, outside the shipped kit. The §16.2
+    marketplace-profile checks (signed docs, mandatory executionIds+evidenceRecords,
+    executor-signed Deliveries, dispatch-binding, evaluationSpecification digest equality)
+    are authored natively in `marketplace-testing`; any backend put under the core kit
+    implements its `TestableBackend` seam explicitly.
+20. **closeAt honor-or-reject symmetry (extension review adjudication):** a binding that
+    cannot genuinely enforce `closeAt` rejects it with `unsupported-requirement` (TEP §8
+    forbids weak/partial honoring). Today-mode marketplace therefore rejects; revised-mode
+    (on-chain claim window) honors. No "declared-approximate" capability class in v1. Both
+    bindings behave identically to backend-local C1.
+21. **Derivation-annotation extensibility:** the discovery derivation annotation is
+    unknown-field-tolerant (the design's unknown-fields-skip discipline);
+    `blockHash`/`finalityTier`/`contractGeneration` are ratified as registered standard
+    additions via a dated addendum on the record-discovery plan. Marketplace M4 hard-gates
+    on verifying the implemented annotation schema actually tolerates them (checked at the
+    Phase 3 merge).
+22. **Local cell-dispatch Attempt identity (benchmarking):** local single-party dispatch uses
+    the 2-arg `submit` — the backend mints the Attempt URI; the run orchestrator reads the
+    minted URI back into the Matrix `attempt` field; resumption idempotency rides the stable
+    Submission digest + idempotency key. `deriveAttemptUri` is a two-party concern and enters
+    benchmarking only in its marketplace mode via the binding.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

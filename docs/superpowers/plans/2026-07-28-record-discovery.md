@@ -941,3 +941,13 @@ documents with these optional fields and their attribute lifts **from day one** 
 non-benchmarking records, opaque to the core, never reopened later. A fourth leaf
 `discovery/facts/benchmarking` is OUT of this plan (owned by the benchmarking-application
 plan).
+
+## Addendum 2026-07-28-c — derivation-annotation extensibility (ruling §7.21)
+
+The derivation annotation ({chainId, contract, event, blockNumber, txHash, logIndex}, design
+§6.2/§6.3) is **unknown-field-tolerant** per the design's unknown-fields-skip discipline, and
+`blockHash` / `finalityTier` / `contractGeneration` are ratified as registered standard
+additions (consumed by marketplace projector #1). The implemented annotation schema MUST
+tolerate (not strip, not reject) these fields; derivation-consistency verifies only the
+declared base fields plus any additions the verifying profile registers. Verified against
+the implemented schema at the Phase 3 merge; marketplace M4 hard-gates on it.
