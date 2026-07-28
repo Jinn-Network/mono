@@ -16,7 +16,9 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  JINN_REPO_LIVE_ISSUE_RELAY_MAX_SPEC_BYTES,
   JinnRepoAutopilotSessionTaskSchema,
+  JinnRepoLiveIssueTaskSchema,
   JinnRepoTaskSchema,
   isAutopilotSessionTask,
   isMergedPrTask,
@@ -82,23 +84,42 @@ describe('JinnRepoTaskSchema (SDK) — live-issue branch (prospective)', () => {
     problem_statement: 'Live issue #1889: jinn-repo live-variant schema.',
     issue_number: 1889,
   };
+  const relay = {
+    schemaVersion: 'jinn-issue-relay-round.v1' as const,
+    generation: 'R_kgDOExample:42:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    round: 0,
+    snapshotDigest: `sha256:${'a'.repeat(64)}`,
+    targetRepository: 'Jinn-Network/mono',
+    workspaceRepository: 'Jinn-Network/mono',
+    inputHead: validLiveIssue.base_commit,
+    purpose: 'initial' as const,
+    findings: [],
+  };
+
+  function relayTaskAtCanonicalBytes(targetBytes: number) {
+    const fixed = {
+      ...validLiveIssue,
+      problem_statement: '',
+      relay,
+    };
+    const fixedBytes = new TextEncoder().encode(
+      `${JSON.stringify(fixed, null, 2)}\n`,
+    ).byteLength;
+    const task = {
+      ...fixed,
+      problem_statement: 'x'.repeat(targetBytes - fixedBytes),
+    };
+    expect(new TextEncoder().encode(
+      `${JSON.stringify(task, null, 2)}\n`,
+    ).byteLength).toBe(targetBytes);
+    return task;
+  }
 
   it('accepts a well-formed live-issue task', () => {
     expect(JinnRepoTaskSchema.parse(validLiveIssue)).toEqual(validLiveIssue);
   });
 
   it('accepts a Relay capsule only when its duplicated outer bindings agree', () => {
-    const relay = {
-      schemaVersion: 'jinn-issue-relay-round.v1',
-      generation: 'R_kgDOExample:42:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      round: 0,
-      snapshotDigest: `sha256:${'a'.repeat(64)}`,
-      targetRepository: 'Jinn-Network/mono',
-      workspaceRepository: 'Jinn-Network/mono',
-      inputHead: validLiveIssue.base_commit,
-      purpose: 'initial',
-      findings: [],
-    };
     expect(JinnRepoTaskSchema.parse({ ...validLiveIssue, relay }).relay)
       .toEqual(relay);
     expect(JinnRepoTaskSchema.safeParse({
@@ -110,6 +131,26 @@ describe('JinnRepoTaskSchema (SDK) — live-issue branch (prospective)', () => {
       ...validLiveIssue,
       relay: { ...relay, targetRepository: 'other/repo' },
     }).success).toBe(false);
+  });
+
+  it('bounds only Relay live-issue specs at 2 MiB of canonical UTF-8 bytes', () => {
+    const exact = relayTaskAtCanonicalBytes(
+      JINN_REPO_LIVE_ISSUE_RELAY_MAX_SPEC_BYTES,
+    );
+    const oversized = relayTaskAtCanonicalBytes(
+      JINN_REPO_LIVE_ISSUE_RELAY_MAX_SPEC_BYTES + 1,
+    );
+
+    expect(JinnRepoTaskSchema.safeParse(exact).success).toBe(true);
+    expect(JinnRepoLiveIssueTaskSchema.safeParse(exact).success).toBe(true);
+    expect(JinnRepoTaskSchema.safeParse(oversized).success).toBe(false);
+    expect(JinnRepoLiveIssueTaskSchema.safeParse(oversized).success).toBe(false);
+    expect(JinnRepoTaskSchema.safeParse({
+      ...oversized,
+      problem_statement:
+        'x'.repeat(JINN_REPO_LIVE_ISSUE_RELAY_MAX_SPEC_BYTES + 1),
+      relay: undefined,
+    }).success).toBe(true);
   });
 
   it('rejects a live-issue task missing issue_number', () => {

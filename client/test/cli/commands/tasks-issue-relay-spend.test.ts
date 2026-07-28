@@ -52,7 +52,9 @@ afterEach(() => {
   gatherIntrospectionRaw.mockClear();
 });
 
-function relayFixture(): {
+function relayFixture(options: {
+  readonly canonicalSpecBytes?: number;
+} = {}): {
   readonly configPath: string;
   readonly specPath: string;
   readonly argv: string[];
@@ -70,7 +72,18 @@ function relayFixture(): {
       },
     },
   }));
-  writeFileSync(specPath, JSON.stringify({
+  const relay = {
+    schemaVersion: 'jinn-issue-relay-round.v1',
+    generation: 'R_kgDOExample:42:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    round: 0,
+    snapshotDigest: `sha256:${'a'.repeat(64)}`,
+    targetRepository: 'Jinn-Network/mono',
+    workspaceRepository: 'Jinn-Network/mono',
+    inputHead: 'a'.repeat(40),
+    purpose: 'initial',
+    findings: [],
+  };
+  const spec = {
     schemaVersion: 'jinn-repo.v1',
     source: 'live-issue',
     instance_id: 'relay:test:0',
@@ -79,7 +92,21 @@ function relayFixture(): {
     language: 'typescript',
     problem_statement: 'Fix the frozen issue.',
     issue_number: 42,
-  }));
+    relay,
+  };
+  if (options.canonicalSpecBytes !== undefined) {
+    const empty = { ...spec, problem_statement: '' };
+    const fixedBytes = Buffer.byteLength(`${JSON.stringify(empty, null, 2)}\n`);
+    spec.problem_statement =
+      'x'.repeat(options.canonicalSpecBytes - fixedBytes);
+    if (
+      Buffer.byteLength(`${JSON.stringify(spec, null, 2)}\n`)
+      !== options.canonicalSpecBytes
+    ) {
+      throw new Error('Failed to synthesize an exact-size Relay spec fixture');
+    }
+  }
+  writeFileSync(specPath, `${JSON.stringify(spec, null, 2)}\n`);
   return {
     configPath,
     specPath,
@@ -101,8 +128,33 @@ function relayFixture(): {
 }
 
 describe('Issue Relay loose-flag spend contract', () => {
-  it('dry-run reports the exact Safe, selected manifest, and computed escrow spend', async () => {
-    const fixture = relayFixture();
+  it('rejects a Relay spec over 2 MiB before signer or funding resolution', async () => {
+    const fixture = relayFixture({
+      canonicalSpecBytes: 2 * 1024 * 1024 + 1,
+    });
+    const made = makeCommandCtx({
+      argv: [
+        ...fixture.argv.slice(0, -2),
+        '--dry-run',
+        '--yes',
+        '--json',
+      ],
+    });
+
+    await tasksCommand.run(made.ctx);
+
+    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
+      code: 'invalid_invocation',
+      message: expect.stringMatching(/spec.*2 MiB|spec.*byte limit/i),
+    });
+    expect(createCliReadOnlySignerContext).not.toHaveBeenCalled();
+    expect(getMechDeliveryRate).not.toHaveBeenCalled();
+  });
+
+  it('dry-run accepts an exact 2 MiB Relay spec and reports the funding plan', async () => {
+    const fixture = relayFixture({
+      canonicalSpecBytes: 2 * 1024 * 1024,
+    });
     const made = makeCommandCtx({
       argv: [
         ...fixture.argv.slice(0, -2),
