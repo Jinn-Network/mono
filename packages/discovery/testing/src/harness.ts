@@ -86,4 +86,14 @@ export function isItemInput(input: unknown): input is ItemVectorInput {
 
 export interface DerivationConsistencyVectorInput {
   item: AnnouncedItem;
+  /**
+   * The item's own record bytes, seeded into `RecordFetcher` so `verifyItem`
+   * step 1 (`fetch` + re-hash, §10.4) can succeed ahead of the derivation
+   * check under test -- present whenever the vector's `item.record.digest`
+   * is digest-consistent with these bytes (finding, M4: the derivation-
+   * consistency vectors originally carried a digest with no seeded preimage
+   * anywhere in the harness, which made step 1 throw before step 4 was ever
+   * reached; the fixtures were corrected to carry matching bytes).
+   */
+  recordBytes?: unknown;
 }

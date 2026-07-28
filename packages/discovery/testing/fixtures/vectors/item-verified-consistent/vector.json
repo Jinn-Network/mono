@@ -6,7 +6,7 @@
     "item": {
       "record": {
         "kind": "https://jinn.network/records/submission/1.0",
-        "digest": "sha256:6175d467a3e7874677df35fabcbdd087c27320c659ac2027bf4f37c486c5ccf8"
+        "digest": "sha256:a8be3fed9027048c3568b8906457de3e28aa1b38cffe3693644390aaf7934d20"
       },
       "facts": {
         "taskDigest": "sha256:af3b96582b4ed142bf381fc161ac143718d61f263c38f4206a9c8c81d11e01d7"
@@ -19,6 +19,10 @@
         "entry": "sha256:92d11bcc469c24d37a908c037f5b3caa0f95cb6716e8ae4d357741a7a0d7edb8",
         "announcementId": "ann-8"
       }
+    },
+    "fetchedBytes": {
+      "note": "item-verified-consistent fixture record bytes",
+      "kind": "submission"
     },
     "decisionGrade": false
   },

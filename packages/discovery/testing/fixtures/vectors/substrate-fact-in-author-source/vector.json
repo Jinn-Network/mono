@@ -6,7 +6,7 @@
     "item": {
       "record": {
         "kind": "https://jinn.network/records/submission/1.0",
-        "digest": "sha256:5a581dca7fedad9cc0d09eb0e5fc775cef04d6cc3b1e6b6e7d3cd13cdf3805d6"
+        "digest": "sha256:fe0328e46eb952f9bed5960f7ef531137d969b51372daab1b10786c04a2a1b22"
       },
       "facts": {
         "taskDigest": "sha256:b576bb210b2a1313eed1948f4216cb6440c2f5e61cf084da49c5e8ad3bfa437f",

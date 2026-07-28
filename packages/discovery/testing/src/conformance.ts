@@ -158,7 +158,11 @@ function buildItemCallOpts(vector: Vector): Parameters<typeof verifyItem>[0] {
   if (vector.kind === "derivation-consistency") {
     const input = vector.input as DerivationConsistencyVectorInput;
     const outcome = (vector.expect as { derivation: "present" | "fabricated" | "reorged-away" }).derivation;
-    const ports = makeInMemoryPorts({ substrateOutcome: outcome });
+    const digest = input.item.record.digest;
+    const ports = makeInMemoryPorts({
+      substrateOutcome: outcome,
+      records: input.recordBytes !== undefined ? { [digest]: input.recordBytes } : {},
+    });
     return {
       item: input.item,
       decisionGrade: true,

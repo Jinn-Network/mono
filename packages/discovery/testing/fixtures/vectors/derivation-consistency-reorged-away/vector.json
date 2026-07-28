@@ -6,7 +6,7 @@
     "item": {
       "record": {
         "kind": "https://jinn.network/records/delivery/1.0",
-        "digest": "sha256:4a00258ddd1cc4ad3f07ee93bbd3afe06a1ffad9a402ee51339a2aca72fcc872"
+        "digest": "sha256:4f8e1f9116f5563145e6097a86a9bdddb3be613db0cffac51f2db5f5c0b89678"
       },
       "facts": {},
       "locations": [],
@@ -21,6 +21,10 @@
           "substrateRef": "sha256:86bc2c619e558c8a5fa9dbd374bd438114583fe11316daba65262b097f8d36d6"
         }
       }
+    },
+    "recordBytes": {
+      "note": "derivation-consistency-reorged-away fixture record bytes",
+      "kind": "delivery"
     }
   },
   "expect": {
