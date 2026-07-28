@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ServeUnderTest } from "@jinn-network/record-discovery-testing";
 import { loadVectorsByKind, runSourceConformance } from "@jinn-network/record-discovery-testing";
-import type { AnnouncementEntry } from "@jinn-network/record-discovery-protocol";
 import { parseAnnouncementEntry } from "@jinn-network/record-discovery-protocol";
 
 import type { BlobStore } from "./ports.js";
+import type { DsseEnvelope } from "./head.js";
 import { maintainsFreshness, refreshByWithinBound } from "./head.js";
+import type { SignedEntry } from "./archive.js";
 import { writeArchivePages } from "./archive.js";
 
 // Wires `discovery/serve`'s own implementation into the M3 kit's
@@ -52,13 +53,16 @@ describe("source-conformance-correction-by-append-reorged, exercised against ser
       (v) => v.name === "source-conformance-correction-by-append-reorged",
     );
     expect(vector).toBeDefined();
-    const input = vector!.input as { entries: Array<{ entry: unknown }> };
-    const entries: AnnouncementEntry[] = input.entries.map((e) => parseAnnouncementEntry(e.entry));
-    expect(entries.length).toBeGreaterThanOrEqual(2);
-    expect(entries[1]!.announcements.some((a) => a.action === "withdrawn" && a.reason === "reorged")).toBe(true);
+    const input = vector!.input as { entries: Array<{ entry: unknown; signature?: DsseEnvelope }> };
+    const signedEntries: SignedEntry[] = input.entries.map((e) => ({
+      entry: parseAnnouncementEntry(e.entry),
+      ...(e.signature === undefined ? {} : { signature: e.signature }),
+    }));
+    expect(signedEntries.length).toBeGreaterThanOrEqual(2);
+    expect(signedEntries[1]!.entry.announcements.some((a) => a.action === "withdrawn" && a.reason === "reorged")).toBe(true);
 
     const store: BlobStore = { async put() {} };
-    const { pages } = await writeArchivePages(store, "feed", entries);
+    const { pages } = await writeArchivePages(store, "feed", signedEntries);
     expect(pages.length).toBeGreaterThanOrEqual(1);
   });
 });
