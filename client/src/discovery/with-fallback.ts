@@ -331,19 +331,34 @@ export function withFallback(
       );
     },
 
-    getTaskLifecycleEvidence(args) {
+    async getTaskLifecycleEvidence(args) {
       // Completeness signal for generators (#2044): tolerant fall-through to the
       // authoritative-only floor on indexer outage (like getTaskStatuses).
       // When the primary responds, floor spine wins and primary supplies only
       // envelope candidates (#2044 AC3, #2235).
-      return dispatch(
-        async () => {
-          const candidateSource = await primary.getTaskLifecycleEvidence(args);
-          const authoritativeSource = await floor.getTaskLifecycleEvidence(args);
-          return mergeTaskLifecycleEvidence(authoritativeSource, candidateSource);
-        },
-        () => floor.getTaskLifecycleEvidence(args),
-      );
+      //
+      // Floor must NOT live inside dispatch's primaryFn: a floor RPC failure is
+      // DiscoveryUnavailableError (network-shaped) and would poison shared
+      // primary health, skipping the healthy indexer for every other method
+      // (#2240). Only the primary call drives recordPrimarySuccess/Failure;
+      // floor fetch + merge happen after primary success is recorded.
+      let candidateSource;
+      if (isPrimaryHealthy()) {
+        try {
+          candidateSource = await primary.getTaskLifecycleEvidence(args);
+          recordPrimarySuccess();
+        } catch (err) {
+          if (isNetworkError(err)) {
+            recordPrimaryFailure();
+            return floor.getTaskLifecycleEvidence(args);
+          }
+          throw err;
+        }
+      } else {
+        return floor.getTaskLifecycleEvidence(args);
+      }
+      const authoritativeSource = await floor.getTaskLifecycleEvidence(args);
+      return mergeTaskLifecycleEvidence(authoritativeSource, candidateSource);
     },
   };
 }

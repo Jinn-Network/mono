@@ -653,6 +653,39 @@ describe('withFallback — all four methods', () => {
     expect(result).toBe(floorResult);
     expect(floor.getTaskLifecycleEvidence).toHaveBeenCalledOnce();
   });
+
+  it('floor DiscoveryUnavailableError after primary success does not mark primary unhealthy (#2240)', async () => {
+    // Dual-fetch must not nest floor inside dispatch's primaryFn: a floor RPC
+    // 429/timeout would otherwise count as a primary failure and skip the
+    // healthy indexer for every dispatch-backed method.
+    const primaryEvidence = new Map();
+    const primary = {
+      getTaskLifecycleEvidence: vi.fn(async () => primaryEvidence),
+      findClaimableTasks: vi.fn(async () => [TASK_CANDIDATE]),
+    } as unknown as DiscoveryAPI;
+    const floor = {
+      getTaskLifecycleEvidence: vi.fn(async () => {
+        throw new DiscoveryUnavailableError('floor RPC 429');
+      }),
+      findClaimableTasks: vi.fn(async () => []),
+    } as unknown as DiscoveryAPI;
+    const api = makeWrapper(primary, floor, { unhealthyThreshold: 1, retryAfterMs: 60_000 });
+
+    await expect(
+      api.getTaskLifecycleEvidence({ taskIds: ['7'] }),
+    ).rejects.toBeInstanceOf(DiscoveryUnavailableError);
+    expect(primary.getTaskLifecycleEvidence).toHaveBeenCalledOnce();
+    expect(floor.getTaskLifecycleEvidence).toHaveBeenCalledOnce();
+
+    // Primary must still be healthy: a subsequent dispatch-backed call must
+    // hit the indexer, not skip straight to the floor.
+    await api.findClaimableTasks({
+      solverNetManifestCids: [],
+      operatorAddress: OPERATOR_ADDRESS,
+    });
+    expect(primary.findClaimableTasks).toHaveBeenCalledOnce();
+    expect(floor.findClaimableTasks).not.toHaveBeenCalled();
+  });
 });
 
 describe('DiscoveryUnavailableError', () => {
