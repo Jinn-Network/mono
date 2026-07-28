@@ -1,1 +1,1 @@
-export {};
+export * from "./facts-profile.js";
