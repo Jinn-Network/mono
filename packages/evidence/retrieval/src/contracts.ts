@@ -477,3 +477,12 @@ export interface CreateFederatedCandidateSourceOptions<
   readonly order: FederatedOrdering<Query, ChildData, CombinedData>;
   readonly maximumConcurrency?: number;
 }
+
+export interface CreateSavedEvidenceQueryInput<Query> {
+  readonly candidateSourceSet: CandidateSourceIdentity;
+  readonly sourceQuery: Query;
+  readonly codec: ProviderQueryCodec<Query>;
+  readonly resultLimit: number;
+  readonly candidateBudget: number;
+  readonly acceptancePolicy?: SavedEvidenceQuery["acceptancePolicy"];
+}
