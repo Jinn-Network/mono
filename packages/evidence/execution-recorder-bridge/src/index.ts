@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+export * from "./bridge.js";
 export * from "./errors.js";
 export * from "./protocol.js";
 export * from "./wire.js";
