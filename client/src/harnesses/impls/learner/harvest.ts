@@ -69,6 +69,20 @@ function hasAutopilotRuntimeAttemptIdentity(
   );
 }
 
+function assertAutopilotHarvestIdentity(
+  task?: Task,
+  identity?: AutopilotHarvestIdentity,
+): boolean {
+  if (task?.spec?.['source'] !== 'autopilot-session') return false;
+  const parsedTask = JinnRepoAutopilotSessionTaskSchema.safeParse(task.spec);
+  if (!parsedTask.success || !hasAutopilotRuntimeAttemptIdentity(identity)) {
+    throw new Error(
+      '[claude-code-learner] harvestOutput: Autopilot runtime attempt identity or source Task is invalid.',
+    );
+  }
+  return true;
+}
+
 const REQUIRED_PHASES: Record<PhaseRange, Phase[]> = {
   full: [...PHASE_ORDER],
   'pre-execute': ['orient', 'strategize', 'plan'],
@@ -641,6 +655,11 @@ export async function harvestOutput(
   const range = resolvePhaseRange(phaseRange);
   const requiredPhases = new Set<Phase>(REQUIRED_PHASES[range]);
   const typedPayloadPath = join(workingDir, '.execute', 'solution-payload.json');
+  // Declared Autopilot sessions must derive their result from the daemon's
+  // worktree harvest. Validate their signed session and persisted runtime
+  // identity before any early return or typed-file fallback can authorize an
+  // agent-authored correlation.
+  const isAutopilotSession = assertAutopilotHarvestIdentity(task, identity);
   // For swe-rebench-v2 restoration the `git diff` over the task checkout is the
   // authoritative patch (always well-formed; agent-authored diffs are not).
   // maybeMaterialize* returns null for any other case, so the agent-authored
@@ -648,7 +667,7 @@ export async function harvestOutput(
   const rawTypedPayload =
     (await maybeMaterializeSweRebenchPatchPayload(workingDir, task)) ??
     (await maybeMaterializeJinnRepoPatchPayload(workingDir, task, identity)) ??
-    readTypedPayloadJson(typedPayloadPath);
+    (isAutopilotSession ? null : readTypedPayloadJson(typedPayloadPath));
   const typedPayload = rawTypedPayload
     ? normalizeTypedPayload(rawTypedPayload, task, typedPayloadPath)
     : null;

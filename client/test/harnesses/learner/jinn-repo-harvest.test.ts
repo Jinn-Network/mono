@@ -147,6 +147,33 @@ describe('harvestOutput — jinn-repo materializer', () => {
     ).rejects.toThrow(/Autopilot runtime attempt identity/);
   });
 
+  it('fails closed before falling back to an agent-authored payload without runtime identity', async () => {
+    mkdirSync(join(workingDir, '.execute'), { recursive: true });
+    writeFileSync(
+      join(workingDir, '.execute', 'solution-payload.json'),
+      JSON.stringify({
+        schemaVersion: 'jinn-autopilot-mutation-result.v1',
+        outcome: 'mutation-complete',
+        correlation: {
+          taskId: 'invented-task-id',
+          attemptIndex: 0,
+          requestId: `0x${'4'.repeat(64)}`,
+          v2AttemptId: SESSION.v2AttemptId,
+          claimOid: SESSION.claimOid,
+          prNumber: SESSION.prNumber,
+          expectedHead: SESSION.expectedHead,
+        },
+        patch: 'diff --git a/README.md b/README.md\n',
+        summary: 'Agent-authored payload.',
+        evidence: { commands: [], tests: [] },
+      }),
+    );
+
+    await expect(
+      harvestOutput(workingDir, undefined, autopilotTask()),
+    ).rejects.toThrow(/Autopilot runtime attempt identity/);
+  });
+
   it('(a) materializes a jinn-repo-solution.v1 payload from a source-file working-tree change', async () => {
     const repoDir = makeRepo(workingDir);
     mkdirSync(join(repoDir, 'src'), { recursive: true });
