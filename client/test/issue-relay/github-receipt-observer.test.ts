@@ -98,6 +98,42 @@ const anchor: IssueRelayEvaluationAnchorV1 = {
   anchoredAt: '2026-07-28T12:12:00.000Z',
 };
 
+function markerRound(
+  adoption: Readonly<Record<string, unknown>> = {
+    disposition: 'accepted',
+    resultingHead: head,
+    receiptDigest: anchor.adoptionReceiptDigest,
+  },
+) {
+  return {
+    round: 0,
+    purpose: 'initial',
+    workspaceRepository: round.workspaceRepository,
+    inputHead: round.inputHead,
+    task: {
+      taskKey: `issue-relay:${round.generation}:round:0`,
+      taskId: correlation.taskId,
+      taskCid: 'bafy-task',
+      fundedAt: '2026-07-28T12:05:00.000Z',
+    },
+    solution: {
+      envelopeCid: correlation.deliveryEnvelopeCid,
+      operatorSafe: solutionSafe,
+      observedAt: '2026-07-28T12:08:00.000Z',
+    },
+    adoption,
+    ...(adoption['disposition'] === 'accepted'
+      ? {
+          checks: {
+            head,
+            status: 'passed',
+            digest: checksDigest,
+          },
+        }
+      : {}),
+  };
+}
+
 function generationMarker(overrides: Record<string, unknown> = {}): string {
   const marker = {
     schemaVersion: 'jinn-issue-relay-generation.v1',
@@ -135,33 +171,7 @@ function generationMarker(overrides: Record<string, unknown> = {}): string {
     },
     phase: 'evaluating',
     deadlineAt: '2026-07-29T12:02:00.000Z',
-    rounds: [{
-      round: 0,
-      purpose: 'initial',
-      workspaceRepository: round.workspaceRepository,
-      inputHead: round.inputHead,
-      task: {
-        taskKey: `issue-relay:${round.generation}:round:0`,
-        taskId: correlation.taskId,
-        taskCid: 'bafy-task',
-        fundedAt: '2026-07-28T12:05:00.000Z',
-      },
-      solution: {
-        envelopeCid: correlation.deliveryEnvelopeCid,
-        operatorSafe: solutionSafe,
-        observedAt: '2026-07-28T12:08:00.000Z',
-      },
-      adoption: {
-        disposition: 'accepted',
-        resultingHead: head,
-        receiptDigest: anchor.adoptionReceiptDigest,
-      },
-      checks: {
-        head,
-        status: 'passed',
-        digest: checksDigest,
-      },
-    }],
+    rounds: [markerRound()],
     pr: {
       number: prNumber,
       branch: receipt.headRef,
@@ -353,6 +363,186 @@ describe('observeExactIssueRelayEvaluationReceipts', () => {
     await expect(observe(github)).resolves.toMatchObject({
       state: 'contradictory',
       detail: expect.stringMatching(/accepted.*rejected/i),
+    });
+  });
+
+  it('observes a rejected receipt only when the marker has the same rejected disposition and digest', async () => {
+    const rejected: Extract<
+      IssueRelayAdoptionReceiptV1,
+      { disposition: 'rejected' }
+    > = {
+      schemaVersion: 'jinn-issue-relay-adoption.v1',
+      disposition: 'rejected',
+      correlation,
+      reason: 'unsafe-patch',
+      detail: 'Rejected by host policy.',
+      recordedAt: '2026-07-28T12:10:00.000Z',
+    };
+    const github = port({
+      issuePages: {
+        first: {
+          comments: [comment(1, generationMarker({
+            rounds: [markerRound({
+              disposition: 'rejected',
+              receiptDigest: digest(rejected),
+            })],
+          }))],
+        },
+      },
+      prPages: {
+        first: {
+          comments: [
+            comment(2, formatIssueRelayAdoptionReceiptComment(rejected)),
+          ],
+        },
+      },
+    });
+
+    await expect(observe(github)).resolves.toMatchObject({
+      state: 'rejected',
+      receipt: rejected,
+      detail: expect.stringMatching(/rejected/i),
+    });
+  });
+
+  it('rejects an accepted receipt when the marker declares rejected adoption with accepted-only fields', async () => {
+    const github = port({
+      issuePages: {
+        first: {
+          comments: [comment(1, generationMarker({
+            rounds: [markerRound({
+              disposition: 'rejected',
+              resultingHead: head,
+              receiptDigest: digest(receipt),
+            })],
+          }))],
+        },
+      },
+    });
+
+    await expect(observe(github)).resolves.toMatchObject({
+      state: 'contradictory',
+      detail: expect.stringMatching(/adoption.*disposition|adoption.*shape/i),
+    });
+  });
+
+  it('rejects a rejected receipt when the marker declares accepted adoption', async () => {
+    const rejected: Extract<
+      IssueRelayAdoptionReceiptV1,
+      { disposition: 'rejected' }
+    > = {
+      schemaVersion: 'jinn-issue-relay-adoption.v1',
+      disposition: 'rejected',
+      correlation,
+      reason: 'unsafe-patch',
+      detail: 'Rejected by host policy.',
+      recordedAt: '2026-07-28T12:10:00.000Z',
+    };
+    const github = port({
+      prPages: {
+        first: {
+          comments: [
+            comment(2, formatIssueRelayAdoptionReceiptComment(rejected)),
+          ],
+        },
+      },
+    });
+
+    await expect(observe(github)).resolves.toMatchObject({
+      state: 'contradictory',
+      detail: expect.stringMatching(/adoption.*disposition/i),
+    });
+  });
+
+  it('rejects a rejected receipt when the marker digest names a different receipt', async () => {
+    const rejected: Extract<
+      IssueRelayAdoptionReceiptV1,
+      { disposition: 'rejected' }
+    > = {
+      schemaVersion: 'jinn-issue-relay-adoption.v1',
+      disposition: 'rejected',
+      correlation,
+      reason: 'unsafe-patch',
+      detail: 'Rejected by host policy.',
+      recordedAt: '2026-07-28T12:10:00.000Z',
+    };
+    const github = port({
+      issuePages: {
+        first: {
+          comments: [comment(1, generationMarker({
+            rounds: [markerRound({
+              disposition: 'rejected',
+              receiptDigest: digest(receipt),
+            })],
+          }))],
+        },
+      },
+      prPages: {
+        first: {
+          comments: [
+            comment(2, formatIssueRelayAdoptionReceiptComment(rejected)),
+          ],
+        },
+      },
+    });
+
+    await expect(observe(github)).resolves.toMatchObject({
+      state: 'contradictory',
+      detail: expect.stringMatching(/receipt.*digest/i),
+    });
+  });
+
+  it('rejects an accepted receipt when marker and anchor agree on the wrong receipt digest', async () => {
+    const wrongReceiptDigest = `sha256:${'d'.repeat(64)}` as const;
+    const wrongAnchor: IssueRelayEvaluationAnchorV1 = {
+      ...anchor,
+      adoptionReceiptDigest: wrongReceiptDigest,
+    };
+    const github = port({
+      issuePages: {
+        first: {
+          comments: [comment(1, generationMarker({
+            rounds: [markerRound({
+              disposition: 'accepted',
+              resultingHead: head,
+              receiptDigest: wrongReceiptDigest,
+            })],
+          }))],
+        },
+      },
+      prPages: {
+        first: {
+          comments: [
+            comment(2, formatIssueRelayAdoptionReceiptComment(receipt)),
+            comment(3, formatIssueRelayEvaluationAnchorComment(wrongAnchor)),
+          ],
+        },
+      },
+    });
+
+    await expect(observe(github)).resolves.toMatchObject({
+      state: 'contradictory',
+      detail: expect.stringMatching(/receipt.*digest/i),
+    });
+  });
+
+  it('rejects accepted marker adoption without the accepted resulting head', async () => {
+    const github = port({
+      issuePages: {
+        first: {
+          comments: [comment(1, generationMarker({
+            rounds: [markerRound({
+              disposition: 'accepted',
+              receiptDigest: digest(receipt),
+            })],
+          }))],
+        },
+      },
+    });
+
+    await expect(observe(github)).resolves.toMatchObject({
+      state: 'contradictory',
+      detail: expect.stringMatching(/adoption.*shape/i),
     });
   });
 

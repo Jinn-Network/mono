@@ -203,24 +203,29 @@ function statusContextStatus(value: unknown): RestCheckStatus {
   throw new Error('Malformed GitHub commit status state');
 }
 
+function canonicalJson(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value as Record<string, unknown>).sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(
+        (value as Record<string, unknown>)[key],
+      )}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function canonicalDigest(value: unknown): `sha256:${string}` {
+  return `sha256:${createHash('sha256').update(canonicalJson(value)).digest('hex')}`;
+}
+
 function checkDigest(input: {
   readonly head: string;
   readonly required: IssueRelayCheckSummary['required'];
   readonly optional: IssueRelayCheckSummary['optional'];
 }): `sha256:${string}` {
-  const canonical = (value: unknown): string => {
-    if (typeof value === 'string') return JSON.stringify(value);
-    if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-    if (value !== null && typeof value === 'object') {
-      return `{${Object.keys(value as Record<string, unknown>).sort()
-        .map((key) => `${JSON.stringify(key)}:${canonical(
-          (value as Record<string, unknown>)[key],
-        )}`)
-        .join(',')}}`;
-    }
-    return JSON.stringify(value);
-  };
-  return `sha256:${createHash('sha256').update(canonical(input)).digest('hex')}`;
+  return canonicalDigest(input);
 }
 
 /**
@@ -691,6 +696,18 @@ function markerContradiction(input: {
     return 'Relay issue generation marker task key is contradictory';
   }
   if (
+    (
+      markerRound.adoption?.disposition === 'accepted'
+      && markerRound.adoption.resultingHead === undefined
+    )
+    || (
+      markerRound.adoption?.disposition === 'rejected'
+      && markerRound.adoption.resultingHead !== undefined
+    )
+  ) {
+    return 'Relay issue generation marker adoption shape is contradictory';
+  }
+  if (
     input.round.purpose === 'repair'
     && input.round.prNumber !== input.marker.pr?.number
   ) {
@@ -792,6 +809,16 @@ export async function observeExactIssueRelayEvaluationReceipts(input: {
   const parsedReceipt = IssueRelayAdoptionReceiptV1Schema.safeParse(receipts[0]);
   if (!parsedReceipt.success) return contradictory('Relay adoption receipt is malformed');
   const receipt = parsedReceipt.data as IssueRelayAdoptionReceiptV1;
+  const markerAdoption = marker.rounds[input.round.round]!.adoption;
+  if (
+    markerAdoption === undefined
+    || markerAdoption.disposition !== receipt.disposition
+  ) {
+    return contradictory('Relay marker adoption disposition is contradictory');
+  }
+  if (markerAdoption.receiptDigest !== canonicalDigest(receipt)) {
+    return contradictory('Relay marker adoption receipt digest is contradictory');
+  }
   if (receipt.disposition === 'rejected') {
     return {
       state: 'rejected',

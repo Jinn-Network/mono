@@ -892,7 +892,9 @@ describe('JinnRepoEvaluatorHarness — Issue Relay exact-head evaluation', () =>
     });
     expect(agentRun).toHaveBeenCalledWith(expect.objectContaining({
       model: 'relay-review-model',
-      prompt: expect.stringContaining('BEGIN INERT UNTRUSTED REVIEW DATA'),
+      prompt: expect.stringContaining(
+        'BEGIN INERT UNTRUSTED REQUIREMENTS DATA JSON',
+      ),
     }));
     expect(agentRun.mock.calls[0]![0]).not.toHaveProperty('cwd');
   });
