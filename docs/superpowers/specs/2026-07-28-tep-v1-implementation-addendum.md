@@ -174,7 +174,79 @@ Recorded per the coordinator brief and the program's follow-ups registry
   — sibling/later plans that consume the packages shipped here and register themselves into the
   guard files this plan created (program §7.6: guard-suite ownership).
 
-## 4. Pointer
+## 4. Design-review rulings (2026-07-28, second pass)
+
+A design review of the shipped `@jinn-network/task-execution-{protocol,testing}` packages
+(`stack/s1-tep` design-review, 7 findings) produced coordinator rulings on four open points. All
+four are implemented in this milestone's follow-up commits; recorded here per the review's
+instruction to append them to this addendum.
+
+### 4.1 Idempotency scope delimiter (reused, not newly introduced)
+
+`testing/src/fake-backend.ts`'s `scopeKey(requester, idempotencyKey)` already delimited the two
+caller-controlled fields with U+001F (the ASCII unit separator) in the original commit — the same
+frozen delimiter `deriveAttemptUri` uses (§2 above, `protocol/src/identifiers.ts`) and for the
+same reason: `requester`/`idempotencyKey` are arbitrary-length strings, so undelimited
+concatenation lets two distinct `(requester, idempotencyKey)` pairs collide at a shared boundary
+(e.g. requester `"ab"` + key `"c"` === requester `"a"` + key `"bc"`), producing a false
+`submission-conflict` or a false idempotent hit across requesters — the cross-requester capture
+§12.2 forbids. The delimiter byte was present but literally invisible in source (an unescaped
+control character), which is almost certainly why the review's automated read of the file
+concluded it was absent. The follow-up commit does not change scoping behavior; it names the
+existing byte as `const SCOPE_DELIMITER = "\u001f"` so the delimiter is legible to both reviewers
+and editors, and adds the Layer-2 contract coverage that was genuinely missing: same
+`idempotencyKey` under two different requesters yields two distinct accepted Submissions (no
+conflict, no capture), plus a concatenation-collision regression case
+(`testing/src/backend-contract.ts`).
+
+### 4.2 `attempts` bounds semantics (honor-or-reject, §8/§15)
+
+The reference backend now declares `attempts: { maxTotal: [1, 1], maxConcurrent: [1, 1] }`
+(`DEFAULT_ATTEMPT_BOUNDS`, `testing/src/fake-backend.ts`) — mirroring backend-local v1's
+single-Attempt-per-Submission posture — and `submit` honors a supplied `attempts.maxTotal` /
+`attempts.maxConcurrent` only when the requested value falls within the declared `[min, max]`
+range, rejecting an out-of-range or undeclared-key request with `unsupported-requirement` naming
+the field (`attempts.maxTotal` / `attempts.maxConcurrent`). `evaluationRequirements` and
+`capabilityGrants` are rejected unconditionally when supplied, since this fake declares no
+evaluation profile and does not resolve capability grants — the same honor-or-reject discipline
+§8 already applies to Task-level `requirements` extends to these three Submission-level dispatch
+parameters. Layer-2 contract cases cover all three rejection paths plus the in-range acceptance
+already exercised by the concurrent-Attempts fixture.
+
+### 4.3 Task-digest binding: `invalid-reference`, not silently ignored (§8)
+
+`submit` now rejects when `documentDigest(taskBytes)` does not equal the Submission's `task`
+descriptor digest, with `category: "invalid-reference"` (`retryable: false`, the §13 default for
+that category) — closing the gap where a Submission naming Task A's digest could be paired with
+Task B's bytes and silently executed as Task B. The Submission schema
+(`protocol/src/schemas/submission.ts`) now requires the `task` `ResourceDescriptor` to carry a
+sha256 digest entry (`TaskReferenceSchema`, a `.refine()` over the general
+`ResourceDescriptorSchema`): §8's text already mandated "the sealed Task digest plus locator
+hints", so a `task` reference satisfiable by `uri` alone was the bug, not a deliberate looseness.
+Layer-2 contract test: `testing/src/backend-contract.ts`, digest-mismatch case.
+
+### 4.4 `foldObservations` self-filters to the authoritative source (§10.1/§10.4)
+
+`foldObservations` (`protocol/src/fold.ts`) now pins the authoritative observation-producer
+source from the first `attempt-engaged` observation in sequence order (its `data.source` field,
+§10.1) and excludes every subsequent observation whose envelope `source` does not match — so a
+non-authoritative or forged observation (e.g. a corroborating observer's own `attempt-terminal`,
+or an attacker-supplied one) can never alter derived state or raise a false `contradictory`. If
+multiple `attempt-engaged` observations from different sources appear, the first by sequence wins
+as the engagement; every other `attempt-engaged`, including a later one from a different source,
+is itself non-authoritative and filtered the same way. This is documented on the function
+(`fold.ts`) as the SELF-FILTER precondition, and pinned by three new adversarial fixtures in
+`fold.test.ts`: a forged non-authoritative `attempt-terminal`, a forged non-authoritative
+`attempt-started`, and a forged non-authoritative `attempt-engaged` racing the genuine one.
+
+This ruling had a downstream consequence worth recording: the Layer-2 backend-contract fixtures
+and `fake-backend.test.ts`'s happy path previously drove test observations from an arbitrary,
+non-authoritative `source` (a per-attempt placeholder, or a fixed `"urn:jinn:conformance-kit:…"`
+string) — behavior the pre-fix fold accepted regardless of source. Both were updated to derive
+and reuse the attempt's actual authoritative source (read off the `attempt-engaged` observation
+`submitAccepted`/`submit` returns) rather than weakening any assertion.
+
+## 5. Pointer
 
 Full design text: `docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md`.
 Carried-amendment source: `docs/superpowers/specs/2026-07-27-task-profiles-and-evaluation-specs-design.md`
