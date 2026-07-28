@@ -90,3 +90,12 @@ of the working-tree diff is authoritative and takes precedence over a stale
 hand-written `<workingDir>/.execute/solution-payload.json`. Do **not** include
 daemon-derived fields (e.g. trajectory CIDs) — the daemon attaches trajectory
 provenance to the envelope automatically.
+
+## Autopilot session Tasks
+
+For `goal.spec.source: autopilot-session`, the daemon instead materialises a
+`jinn-autopilot-mutation-result.v1` payload from the uncommitted working-tree
+diff. Leave the patch uncommitted and do not invent Task, request, or attempt
+identity: the daemon supplies those persisted runtime values. The
+`deliveryEnvelopeCid` is derived only after signed-envelope assembly and must
+not be authored by the agent.

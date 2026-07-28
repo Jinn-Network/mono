@@ -39,6 +39,56 @@ function jinnRepoTask(role: 'restoration' | 'evaluation' = 'restoration') {
   } as never;
 }
 
+const SESSION = {
+  schemaVersion: 'jinn-autopilot-session.v1',
+  workflow: 'implement',
+  repository: 'Jinn-Network/mono',
+  language: 'typescript',
+  verificationProfile: 'jinn-mono.v1',
+  issueNumber: 2253,
+  prNumber: 2255,
+  targetBase: 'next',
+  branch: 'autopilot/2253',
+  claimOid: '1'.repeat(40),
+  expectedHead: '2'.repeat(40),
+  v2AttemptId: '11111111-1111-4111-8111-111111111111',
+  runnerId: 'marketplace-canary',
+  taskSnapshot: {
+    title: 'Canary',
+    body: 'Clarify the command.',
+    prBody: 'Closes #2253',
+    baseSha: '3'.repeat(40),
+    targetBaseOid: '3'.repeat(40),
+  },
+  workflowContract: {
+    skill: 'implement-issue',
+    version: 'v2',
+    resultSchema: 'jinn-autopilot-mutation-result.v1',
+  },
+  deadline: '2026-07-28T12:00:00.000Z',
+  receiptAuthors: ['ritsukai'],
+} as const;
+
+function autopilotTask() {
+  return {
+    id: `autopilot:${SESSION.v2AttemptId}`,
+    description: 'Canary',
+    solverType: 'jinn-repo.v1',
+    role: 'restoration',
+    spec: {
+      schemaVersion: 'jinn-repo.v1',
+      source: 'autopilot-session',
+      instance_id: `autopilot:${SESSION.v2AttemptId}`,
+      repo: 'Jinn-Network/mono',
+      base_commit: SESSION.expectedHead,
+      problem_statement: 'Clarify the command.',
+      language: 'typescript',
+      verificationProfile: 'jinn-mono.v1',
+      session: SESSION,
+    },
+  } as never;
+}
+
 describe('harvestOutput — jinn-repo materializer', () => {
   let workingDir: string;
 
@@ -48,6 +98,53 @@ describe('harvestOutput — jinn-repo materializer', () => {
 
   afterEach(() => {
     rmSync(workingDir, { recursive: true, force: true });
+  });
+
+  it('materializes a typed Autopilot mutation result from the worktree diff', async () => {
+    const repoDir = makeRepo(workingDir);
+    writeFileSync(join(repoDir, 'README.md'), 'before\n');
+    commitBase(repoDir);
+    writeFileSync(join(repoDir, 'README.md'), 'after\n');
+
+    const out = await harvestOutput(
+      workingDir,
+      undefined,
+      autopilotTask(),
+      {
+        taskId: '1192',
+        attemptIndex: 0,
+        requestId: `0x${'4'.repeat(64)}`,
+      },
+    );
+
+    expect(out.solutionPayload).toMatchObject({
+      schemaVersion: 'jinn-autopilot-mutation-result.v1',
+      outcome: 'mutation-complete',
+      correlation: {
+        taskId: '1192',
+        attemptIndex: 0,
+        requestId: `0x${'4'.repeat(64)}`,
+        v2AttemptId: SESSION.v2AttemptId,
+        claimOid: SESSION.claimOid,
+        prNumber: SESSION.prNumber,
+        expectedHead: SESSION.expectedHead,
+      },
+    });
+    expect(
+      (out.solutionPayload?.correlation as Record<string, unknown>)
+        .deliveryEnvelopeCid,
+    ).toBeUndefined();
+  });
+
+  it('fails closed when an Autopilot session lacks runtime attempt identity', async () => {
+    const repoDir = makeRepo(workingDir);
+    writeFileSync(join(repoDir, 'README.md'), 'before\n');
+    commitBase(repoDir);
+    writeFileSync(join(repoDir, 'README.md'), 'after\n');
+
+    await expect(
+      harvestOutput(workingDir, undefined, autopilotTask()),
+    ).rejects.toThrow(/Autopilot runtime attempt identity/);
   });
 
   it('(a) materializes a jinn-repo-solution.v1 payload from a source-file working-tree change', async () => {

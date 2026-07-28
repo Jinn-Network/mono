@@ -3,6 +3,10 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { buildSolutionOutput } from '@jinn-network/sdk/solvernets/prediction-v1';
+import {
+  AutopilotMutationDeliveryResultSchema,
+  JinnRepoAutopilotSessionTaskSchema,
+} from '@jinn-network/sdk/solvernets/jinn-repo';
 import type { Role } from '../../../types/envelope.js';
 import { SOLVER_TYPE_PAYLOADS, validatePayload } from '../../../types/payloads/index.js';
 import type { OutputArtifact } from '../../../types/portfolio.js';
@@ -44,6 +48,26 @@ const PHASE_PRIMARY_ARTIFACT: Record<Phase, string> = {
 };
 
 type PhaseRange = 'full' | 'pre-execute' | 'post-execute' | 'solve-only';
+
+export interface AutopilotHarvestIdentity {
+  readonly taskId?: string;
+  readonly attemptIndex?: number;
+  readonly requestId?: string;
+}
+
+function hasAutopilotRuntimeAttemptIdentity(
+  identity?: AutopilotHarvestIdentity,
+): identity is Required<AutopilotHarvestIdentity> {
+  return (
+    typeof identity?.taskId === 'string'
+    && identity.taskId.trim().length > 0
+    && typeof identity.attemptIndex === 'number'
+    && Number.isInteger(identity.attemptIndex)
+    && identity.attemptIndex >= 0
+    && typeof identity.requestId === 'string'
+    && /^0x[0-9a-fA-F]{64}$/.test(identity.requestId)
+  );
+}
 
 const REQUIRED_PHASES: Record<PhaseRange, Phase[]> = {
   full: [...PHASE_ORDER],
@@ -272,6 +296,7 @@ async function maybeMaterializeSweRebenchPatchPayload(
 async function maybeMaterializeJinnRepoPatchPayload(
   workingDir: string,
   task?: Task,
+  identity?: AutopilotHarvestIdentity,
 ): Promise<Record<string, unknown> | null> {
   if (task?.solverType !== 'jinn-repo.v1' || task.role === 'evaluation') {
     return null;
@@ -309,6 +334,44 @@ async function maybeMaterializeJinnRepoPatchPayload(
       '[claude-code-learner] harvestOutput: jinn-repo git diff contained only test-file changes; no source patch to submit.',
     );
     return null;
+  }
+
+  if (task.spec?.['source'] === 'autopilot-session') {
+    const parsedTask = JinnRepoAutopilotSessionTaskSchema.safeParse(task.spec);
+    if (!parsedTask.success || !hasAutopilotRuntimeAttemptIdentity(identity)) {
+      throw new Error(
+        '[claude-code-learner] harvestOutput: Autopilot runtime attempt identity or source Task is invalid.',
+      );
+    }
+
+    const session = parsedTask.data.session;
+    const payload = AutopilotMutationDeliveryResultSchema.parse({
+      schemaVersion: 'jinn-autopilot-mutation-result.v1',
+      outcome: 'mutation-complete',
+      correlation: {
+        taskId: identity.taskId,
+        attemptIndex: identity.attemptIndex,
+        requestId: identity.requestId,
+        v2AttemptId: session.v2AttemptId,
+        claimOid: session.claimOid,
+        prNumber: session.prNumber,
+        expectedHead: session.expectedHead,
+      },
+      patch,
+      summary: `Completed ${session.workflow} workflow for PR #${session.prNumber}.`,
+      evidence: {
+        commands: [],
+        tests: [],
+        notes: ['Patch harvested from the completed repository worktree.'],
+      },
+    });
+    const executeDir = join(workingDir, '.execute');
+    mkdirSync(executeDir, { recursive: true });
+    writeFileSync(
+      join(executeDir, 'solution-payload.json'),
+      JSON.stringify(payload, null, 2),
+    );
+    return payload;
   }
 
   const payload = {
@@ -569,7 +632,12 @@ function collectLearnerArtifacts(workingDir: string): OutputArtifact[] {
  * Required phase artifacts: hard-fail (throw) if missing or corrupt JSON.
  * Optional phase artifacts (outside the required range): safeReadJson + warn on null.
  */
-export async function harvestOutput(workingDir: string, phaseRange?: string, task?: Task): Promise<Solution> {
+export async function harvestOutput(
+  workingDir: string,
+  phaseRange?: string,
+  task?: Task,
+  identity?: AutopilotHarvestIdentity,
+): Promise<Solution> {
   const range = resolvePhaseRange(phaseRange);
   const requiredPhases = new Set<Phase>(REQUIRED_PHASES[range]);
   const typedPayloadPath = join(workingDir, '.execute', 'solution-payload.json');
@@ -579,7 +647,7 @@ export async function harvestOutput(workingDir: string, phaseRange?: string, tas
   // .execute/solution-payload.json path is preserved everywhere else.
   const rawTypedPayload =
     (await maybeMaterializeSweRebenchPatchPayload(workingDir, task)) ??
-    (await maybeMaterializeJinnRepoPatchPayload(workingDir, task)) ??
+    (await maybeMaterializeJinnRepoPatchPayload(workingDir, task, identity)) ??
     readTypedPayloadJson(typedPayloadPath);
   const typedPayload = rawTypedPayload
     ? normalizeTypedPayload(rawTypedPayload, task, typedPayloadPath)

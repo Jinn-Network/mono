@@ -27,6 +27,10 @@ export interface RuntimePlugin {
 
 export interface HarnessContext {
   task: Task;
+  /** Canonical on-chain Task id for this attempt. */
+  taskId?: string;
+  /** Canonical zero-based marketplace attempt index. */
+  attemptIndex?: number;
   /** On-chain / persisted request id for this run. May differ from task.id. */
   requestId?: string;
   solverNet?: { name: string; solverType: string; model?: string; provider?: import('./provider-ref.js').ProviderRef };

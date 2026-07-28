@@ -1831,6 +1831,8 @@ export class TaskEngine {
           role,
           window: { startTs: task.windowStartTs, endTs: task.windowEndTs },
         }) as import('../../types/task.js').Task,
+        taskId: task.taskId ?? undefined,
+        attemptIndex: task.attemptIndex ?? undefined,
         requestId: task.requestId,
         taskCid: task.taskCid,
         solverNet: solverNet

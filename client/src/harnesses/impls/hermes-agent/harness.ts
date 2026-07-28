@@ -295,7 +295,11 @@ export class HermesHarness implements Harness {
       mode: ctx.mode,
     });
 
-    const solution = await harvestOutput(ctx.workingDir, undefined, ctx.task);
+    const solution = await harvestOutput(ctx.workingDir, undefined, ctx.task, {
+      taskId: ctx.taskId,
+      attemptIndex: ctx.attemptIndex,
+      requestId: ctx.requestId,
+    });
     return { ...solution, venueRef: { ...solution.venueRef, name: this.name } };
   }
 }

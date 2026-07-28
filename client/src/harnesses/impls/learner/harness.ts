@@ -317,7 +317,11 @@ export class LearnerHarness implements Harness {
     // mode (undefined → 'full') is unchanged, so the daemon's normal restoration
     // runs are unaffected.
     const phaseRange = ctx.mode === 'frozen' ? 'solve-only' : undefined;
-    const solution = await harvestOutput(ctx.workingDir, phaseRange, ctx.task);
+    const solution = await harvestOutput(ctx.workingDir, phaseRange, ctx.task, {
+      taskId: ctx.taskId,
+      attemptIndex: ctx.attemptIndex,
+      requestId: ctx.requestId,
+    });
     return {
       ...solution,
       venueRef: { ...solution.venueRef, name: this.name },

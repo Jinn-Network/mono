@@ -166,6 +166,8 @@ describe('jinn-mono-egi: full Task round-trip', () => {
 
     await engine.observe({
       requestId: 'egi-1',
+      taskId: '7',
+      attemptIndex: 2,
       taskCid: 'cid-egi-1',
       onchainCreationTx: '0xdef',
       onchainCreationBlock: 2,
@@ -182,6 +184,11 @@ describe('jinn-mono-egi: full Task round-trip', () => {
 
     expect(received.ctx).not.toBeNull();
     expect(received.ctx!.task).toEqual(ds);
+    expect(received.ctx).toMatchObject({
+      taskId: '7',
+      attemptIndex: 2,
+      requestId: 'egi-1',
+    });
   });
 
   it('falls back to stub when task_payload is NULL (legacy row)', async () => {
