@@ -38,6 +38,24 @@ export {
   type IssueRelayMarketplaceDeliveryExpectation,
 } from './issue-relay/delivery-observer.js';
 export {
+  createIssueRelayGitHubRestReadPort,
+  observeExactIssueRelayEvaluationReceipts,
+  type IssueRelayCheckSummary,
+  type IssueRelayEvaluationReceiptObservation,
+  type IssueRelayGenerationMarker,
+  type IssueRelayGitHubComment,
+  type IssueRelayGitHubCommentPage,
+  type IssueRelayGitHubReadPort,
+  type IssueRelayGitHubRestReadOptions,
+  type IssueRelayPullRequestFacts,
+} from './issue-relay/github-receipt-observer.js';
+export {
+  createIssueRelayEvaluationContextResolver,
+  type IssueRelayEvaluationContextObservation,
+  type IssueRelayEvaluationContextResolver,
+  type IssueRelayEvaluationContextResolverInput,
+} from './issue-relay/evaluation-context-resolver.js';
+export {
   createAutopilotGitHubAdoptionReceiptObserver,
   observeExactAutopilotAdoptionReceipt,
   type AutopilotGitHubReadPort,

@@ -360,10 +360,24 @@ export const IssueRelayEvaluationContextV1Schema = z.object({
   }
   const roundBindings: Array<[unknown, unknown, Array<string | number>, string]> = [
     [reviewTarget.targetRepository, round.targetRepository, ['reviewTarget', 'targetRepository'], 'target repository'],
-    [reviewTarget.workspaceRepository, round.workspaceRepository, ['reviewTarget', 'workspaceRepository'], 'workspace repository'],
-    [reviewTarget.prNumber, round.prNumber, ['reviewTarget', 'prNumber'], 'PR number'],
     [adoptionReceipt.inputHead, round.inputHead, ['adoptionReceipt', 'inputHead'], 'input head'],
   ];
+  if (round.purpose === 'repair') {
+    roundBindings.push(
+      [
+        reviewTarget.workspaceRepository,
+        round.workspaceRepository,
+        ['reviewTarget', 'workspaceRepository'],
+        'workspace repository',
+      ],
+      [
+        reviewTarget.prNumber,
+        round.prNumber,
+        ['reviewTarget', 'prNumber'],
+        'PR number',
+      ],
+    );
+  }
   for (const [actual, expected, path, label] of roundBindings) {
     if (actual !== expected) reject(path, `Evaluation ${label} must match round`);
   }

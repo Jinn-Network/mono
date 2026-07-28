@@ -206,6 +206,26 @@ describe('Issue Relay evidence contracts', () => {
     }).success).toBe(false);
   });
 
+  it('allows an initial upstream solver workspace but binds repair work to the PR workspace', () => {
+    const { prNumber: _prNumber, ...roundWithoutPr } = repairRound;
+    expect(IssueRelayEvaluationContextV1Schema.safeParse({
+      ...context,
+      round: {
+        ...roundWithoutPr,
+        purpose: 'initial',
+        findings: [],
+        workspaceRepository: 'Jinn-Network/mono-upstream',
+      },
+    }).success).toBe(true);
+    expect(IssueRelayEvaluationContextV1Schema.safeParse({
+      ...context,
+      round: {
+        ...repairRound,
+        workspaceRepository: 'Jinn-Network/another-fork',
+      },
+    }).success).toBe(false);
+  });
+
   it('requires outcome-specific verdict findings', () => {
     const pass = {
       schemaVersion: 'jinn-issue-relay-verdict.v1' as const,
