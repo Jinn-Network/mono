@@ -2015,6 +2015,10 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   // Leg 1 pages tasks for manifestDigest; legs 2–3 co-fetch attempts/verdicts so
   // finalized matches getTaskLifecycleEvidence (#2236 / #2241). refunded uses the
   // task-row boolean only; claimWindowEnd is display-only from the task row.
+  //
+  // Page-cap: unlike getTaskLifecycleEvidence, truncated attempt/verdict legs do
+  // not blank the Map — partial spine may under-report finalized (DISPLAY
+  // tradeoff; see TaskStatusSnapshot / DiscoveryAPI.getTaskStatuses, #2245).
   async function getTaskStatuses(args: {
     manifestCid: string;
   }): Promise<Map<string, TaskStatusSnapshot>> {

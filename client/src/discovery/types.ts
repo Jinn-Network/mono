@@ -67,6 +67,13 @@ export type TaskOnchainStatus = 'open' | 'finalized' | 'expired' | 'unknown';
  * boolean only. `claimWindowEnd` is unix seconds and MAY be null/undefined in
  * the live indexer today (its call-trace decode is pending), so a missing/invalid
  * window degrades to 'unknown' rather than guessing 'open'.
+ *
+ * HTTP page-cap asymmetry (#2245): unlike `getTaskLifecycleEvidence`, this path
+ * does not blank the Map when attempts or verdicts hit
+ * `MAX_OPERATOR_COUNT_TASK_PAGES` with pages remaining. A truncated spine can
+ * under-report `finalized: true` for affected tasks. That conservative false is
+ * intentional for the DISPLAY chip — safer than trusting the indexer task-row
+ * `finalized` flag or dropping every other task's chip.
  */
 export interface TaskStatusSnapshot {
   taskId: string;
@@ -712,8 +719,10 @@ export interface DiscoveryAPI {
   /**
    * Returns the on-chain finalization snapshot for every task posted on the
    * SolverNet identified by `manifestCid`, keyed by on-chain taskId (decimal
-   * string). Backed by the indexer `task` table (`finalized`, `refunded`,
-   * `claimWindowEnd`), joined via `manifestDigest === keccak256(manifestCid)`.
+   * string). Joined via `manifestDigest === keccak256(manifestCid)`. On HTTP,
+   * `finalized` is derived from co-fetched attempt/verdict spine rows (parity
+   * with `getTaskLifecycleEvidence` / #2236); `refunded` and `claimWindowEnd`
+   * come from the indexer task row only.
    *
    * This is a DISPLAY/advisory signal (the Launcher "Recent posted Tasks"
    * status chip), NOT a correctness gate, so it is *tolerant*: like
@@ -726,6 +735,15 @@ export interface DiscoveryAPI {
    * `claimWindowEnd` (unix seconds) may be null/undefined in the live indexer
    * today (call-trace decode pending), so callers must treat a missing/invalid
    * window as `'unknown'` rather than guessing `'open'`.
+   *
+   * Page-cap tradeoff (#2245): HTTP legs share the same
+   * `MAX_OPERATOR_COUNT_TASK_PAGES` cap as `getTaskLifecycleEvidence`, but this
+   * method does *not* apply that call's absence-over-partial-lie rule — if
+   * attempts or verdicts truncate, it returns the partial Map and may
+   * under-report `finalized: true` for tasks whose spine rows were not fetched.
+   * Under-reporting is safer here than blanking every chip or trusting the
+   * indexer task-row `finalized` boolean. Authoritative callers must use
+   * `getTaskLifecycleEvidence`, which returns empty on truncation.
    */
   getTaskStatuses(args: { manifestCid: string }): Promise<Map<string, TaskStatusSnapshot>>;
 
