@@ -53,6 +53,7 @@
   },
   "devDependencies": {
     "@jinn-network/evidence-protocol": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"
@@ -60,6 +61,7 @@
   "resolutions": {
     "@jinn-network/trust-core": "portal:../core",
     "@jinn-network/trust-resolve": "portal:../resolve",
-    "@jinn-network/evidence-protocol": "portal:../../evidence/protocol"
+    "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol"
   }
 }

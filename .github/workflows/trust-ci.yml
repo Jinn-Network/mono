@@ -127,6 +127,11 @@ jobs:
         run: |
           corepack yarn install --immutable
           corepack yarn build
+      - name: Build cross-tree portal dependency from source (task-execution-protocol, §7.8, Task T17)
+        working-directory: packages/task-execution/protocol
+        run: |
+          corepack yarn install --immutable
+          corepack yarn build
       - name: Verify complete Trust Testing package
         working-directory: packages/trust/testing
         run: |
@@ -184,5 +189,8 @@ jobs:
       - name: Build cross-tree portal dependency from source (evidence-protocol, §7.8)
         run: |
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+      - name: Build cross-tree portal dependency from source (task-execution-protocol, §7.8, Task T17)
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
       - name: Compile packed public entrypoint consumers
         run: node .github/scripts/trust-packed-types.test.mjs

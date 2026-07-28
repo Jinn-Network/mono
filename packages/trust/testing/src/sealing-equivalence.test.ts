@@ -6,14 +6,24 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import * as evidenceProtocol from "@jinn-network/evidence-protocol";
+import * as taskExecutionProtocol from "@jinn-network/task-execution-protocol";
+import type { JsonValue } from "@jinn-network/task-execution-protocol";
 import * as trustCore from "@jinn-network/trust-core";
 
-import { assertSealingEquivalence } from "./sealing-equivalence.js";
-import type { SealingEquivalenceCase } from "./sealing-equivalence.js";
+import { assertCanonicalByteEquivalence, assertSealingEquivalence } from "./sealing-equivalence.js";
+import type { CanonicalByteEquivalenceCase, SealingEquivalenceCase } from "./sealing-equivalence.js";
 
 function loadFixture(name: string): unknown {
   const path = fileURLToPath(new URL(`../fixtures/equivalence-v1/${name}`, import.meta.url));
   return JSON.parse(readFileSync(path, "utf8"));
+}
+
+// task-execution-protocol's canonical serializer is typed over its own
+// `JsonValue` union rather than `unknown`; fixture values are always
+// JSON.parse output (structurally JsonValue-compatible), so this narrow
+// cast at the test boundary is safe.
+function tepCanonicalJsonBytes(value: unknown): Uint8Array {
+  return taskExecutionProtocol.serializeCanonicalJson(value as JsonValue);
 }
 
 describe("sealing algorithm-equivalence vs evidence-protocol (§16, program ruling §7.15)", () => {
@@ -67,5 +77,86 @@ describe("sealing algorithm-equivalence vs evidence-protocol (§16, program ruli
     // '"10"' sorts after '"2"' by UTF-16 code unit ('1' < '2'), the
     // opposite of numeric order -- proving explicit sorted-key iteration.
     expect(text.indexOf('"10"')).toBeLessThan(text.indexOf('"2"'));
+  });
+});
+
+describe("canonical-byte equivalence vs task-execution-protocol (Task T17; program ruling §7.1/§7.15)", () => {
+  test("trust-core's canonicalJsonBytes and task-execution-protocol's serializeCanonicalJson produce byte-identical output over the shared fixture set", () => {
+    const extraCases = loadFixture("task-execution-canonical-cases.json") as ReadonlyArray<{
+      readonly name: string;
+      readonly value: unknown;
+    }>;
+    // The key-order-sensitive record (nested unsorted keys AND integer-like
+    // keys "10"/"2") is carried forward from the T10 fixture set for this
+    // leg, per the plan's explicit direction -- it is the object-key-order-
+    // sensitive AND integer-like-key record this leg requires.
+    const keyOrderSensitiveInput = loadFixture("key-order-sensitive.json");
+    const cases: CanonicalByteEquivalenceCase[] = [
+      ...extraCases,
+      { name: "key-order-sensitive", value: keyOrderSensitiveInput },
+    ];
+
+    // §7.1 (program ruling): both trust-core and task-execution-protocol
+    // emit raw RFC 8785 JCS -- no indent, no trailing newline. This is the
+    // genuine cross-impl canonical-byte equivalence leg the T10 evidence
+    // leg could not assert (evidence-protocol exports no canonical
+    // serializer, §7.15). This fixture VERIFIES the fixed convention; it
+    // does not negotiate one. Any divergence is a bug against §7.1 in one
+    // implementation -- surface it, never retune either serializer to make
+    // this pass.
+    assertCanonicalByteEquivalence(
+      { canonicalJsonBytes: trustCore.canonicalJsonBytes },
+      { canonicalJsonBytes: tepCanonicalJsonBytes },
+      cases,
+    );
+  });
+
+  test("trust-core's recordDigest and task-execution-protocol's documentDigest agree on the same already-serialized bytes (digest algorithm identity)", () => {
+    const raw = loadFixture("shared-payload-bytes.json") as ReadonlyArray<{
+      readonly name: string;
+      readonly payloadUtf8: string;
+    }>;
+    for (const entry of raw) {
+      const bytes = new TextEncoder().encode(entry.payloadUtf8);
+      expect(taskExecutionProtocol.documentDigest(bytes)).toBe(trustCore.recordDigest(bytes));
+    }
+  });
+
+  // Ground-truth finding (mirrors §7.15's evidence-protocol finding, this
+  // time in the other direction): task-execution-protocol implements no
+  // DSSE envelope handling at all -- it exports sealing (canonical bytes +
+  // digest) but never a pre-authentication-encoding primitive. A signed TEP
+  // document is DSSE-wrapped by a *consumer* (e.g. trust-core's own
+  // dssePreAuthEncoding, already proven byte-identical to evidence-
+  // protocol's in the T10 leg above), not by task-execution-protocol
+  // itself. The plan text's "plus PAE + recordDigest agreement" for T17
+  // therefore only has a recordDigest half against this package; the PAE
+  // half is asserted (and was already asserted) against evidence-protocol
+  // in T10. This is a surfaced finding, not a silently patched fixture.
+  test("task-execution-protocol exports no DSSE pre-authentication-encoding primitive (documents why the T17 PAE leg is not assertable here)", () => {
+    expect((taskExecutionProtocol as Record<string, unknown>)["dssePreAuthEncoding"]).toBeUndefined();
+  });
+
+  test("the cross-impl canonical-byte oracle digest for the key-order-sensitive record is pinned", () => {
+    const keyOrderSensitiveInput = loadFixture("key-order-sensitive.json");
+    const trustCoreBytes = trustCore.canonicalJsonBytes(keyOrderSensitiveInput);
+    const tepBytes = tepCanonicalJsonBytes(keyOrderSensitiveInput);
+    const trustCoreDigest = trustCore.recordDigest(trustCoreBytes);
+    const tepDigest = taskExecutionProtocol.documentDigest(tepBytes);
+
+    // Since the bytes are asserted byte-identical above, both digests must
+    // already agree -- restated here as its own assertion for a sharper
+    // failure signal if only the digest (not the canonical bytes) drifts.
+    expect(tepDigest).toBe(trustCoreDigest);
+
+    const expectedDigests = loadFixture("task-execution-oracle-digests.json") as Record<string, string>;
+    const expected = expectedDigests["key-order-sensitive"];
+    if (expected === undefined) {
+      throw new Error(
+        `No pinned oracle digest for "key-order-sensitive" yet -- actual digest: ${trustCoreDigest}\n`
+          + "Paste this into fixtures/equivalence-v1/task-execution-oracle-digests.json and re-run.",
+      );
+    }
+    expect(trustCoreDigest).toBe(expected);
   });
 });
