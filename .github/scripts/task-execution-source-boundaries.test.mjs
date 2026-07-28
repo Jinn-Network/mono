@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'task-execution');
-const taskExecutionDirectories = ['protocol', 'backend'];
+const taskExecutionDirectories = ['protocol', 'backend', 'testing'];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
   join(root, 'client'),
@@ -175,9 +175,9 @@ test('the import scanner catches static, export, dynamic, require, and local-pat
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
-// task-execution sibling packages `backend` (this graph) must never import, beyond its one
-// approved dependency (protocol) — new siblings are added here as they register (Task 3.1 adds
-// `testing`; `backend-local`, a sibling package not in this tree yet, is out of scope here).
+// task-execution sibling packages must never import beyond their approved dependencies — new
+// siblings are added here as they register (`backend-local`, a sibling package not in this tree
+// yet, is out of scope here).
 const TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_BACKEND = [
   '@jinn-network/task-execution-testing',
 ];
@@ -192,6 +192,10 @@ test('task-execution source boundaries remain one-way across the approved graph'
     join(packages, 'backend', 'src'),
     [...TASK_EXECUTION_FOREIGN_PACKAGES, ...TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_BACKEND],
   );
+
+  // testing depends on protocol + backend only: both import freely, every foreign package and
+  // every other task-execution sibling (none yet besides protocol/backend) are forbidden.
+  assertBoundary(join(packages, 'testing', 'src'), TASK_EXECUTION_FOREIGN_PACKAGES);
 });
 
 test('locale-sensitive API detection catches member calls, optional chaining, and Intl', () => {

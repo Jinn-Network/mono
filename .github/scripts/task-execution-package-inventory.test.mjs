@@ -12,12 +12,17 @@ const DEPENDENCY_SECTIONS = [
 const TASK_EXECUTION_PACKAGES = [
   ['protocol', '@jinn-network/task-execution-protocol'],
   ['backend', '@jinn-network/task-execution-backend'],
+  ['testing', '@jinn-network/task-execution-testing'],
 ];
 
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['protocol', { dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['backend', {
     dependencies: ['@jinn-network/task-execution-protocol'],
+    devDependencies: [], optionalDependencies: [], peerDependencies: [],
+  }],
+  ['testing', {
+    dependencies: ['@jinn-network/task-execution-backend', '@jinn-network/task-execution-protocol'],
     devDependencies: [], optionalDependencies: [], peerDependencies: [],
   }],
 ]);
@@ -52,7 +57,7 @@ function expectedPortal(directory, dependencyName) {
 }
 
 test('the task-execution package inventory is explicit and has one manifest', () => {
-  assert.equal(TASK_EXECUTION_PACKAGES.length, 2);
+  assert.equal(TASK_EXECUTION_PACKAGES.length, 3);
   for (const [directory, expectedName] of TASK_EXECUTION_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);
@@ -90,4 +95,12 @@ test('task-execution package Jinn dependencies and portal resolutions match the 
         `${directory} must resolve ${dependencyName} through its matching portal`);
     }
   }
+});
+
+test('the testing kit declares Vitest as an exact optional peer', () => {
+  const testing = readPackage('testing');
+  assert.deepEqual(testing.peerDependencies, { vitest: '^4.1.8' });
+  assert.deepEqual(testing.peerDependenciesMeta, {
+    vitest: { optional: true },
+  });
 });
