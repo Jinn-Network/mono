@@ -306,6 +306,46 @@ describe('OnchainDiscoveryAPI.getTaskLifecycleEvidence (#2044)', () => {
     expect(ev.authoritative.attempts).toEqual([]);
   });
 
+  it('sets finalized true and refunded false when verdicts exist without a refund (#2234)', async () => {
+    const solve0 = `0x${'b0'.repeat(32)}` as Hex;
+    const eval0 = `0x${'d0'.repeat(32)}` as Hex;
+    const logs = [
+      buildTaskCreatedLog(55n, HEAD - 100n),
+      buildAttemptLog(55n, 0, solve0, HEAD - 90n),
+      buildVerdictLog(55n, 0, 0, eval0, HEAD - 80n),
+    ];
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      taskDiscoveryFromBlock: 0,
+      publicClient: buildMockClient(logs) as never,
+    });
+    const map = await api.getTaskLifecycleEvidence({ taskIds: ['55'] });
+    const ev = map.get('55')!;
+    expect(ev.authoritative.task.finalized).toBe(true);
+    expect(ev.authoritative.task.refunded).toBe(false);
+    expect(ev.authoritative.attempts).toHaveLength(1);
+    expect(ev.authoritative.attempts[0]!.verdicts).toHaveLength(1);
+  });
+
+  it('keeps finalized and refunded false for attempts with zero verdicts (#2234)', async () => {
+    const solve0 = `0x${'b0'.repeat(32)}` as Hex;
+    const logs = [
+      buildTaskCreatedLog(56n, HEAD - 100n),
+      buildAttemptLog(56n, 0, solve0, HEAD - 90n),
+    ];
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      taskDiscoveryFromBlock: 0,
+      publicClient: buildMockClient(logs) as never,
+    });
+    const map = await api.getTaskLifecycleEvidence({ taskIds: ['56'] });
+    const ev = map.get('56')!;
+    expect(ev.authoritative.task.finalized).toBe(false);
+    expect(ev.authoritative.task.refunded).toBe(false);
+    expect(ev.authoritative.attempts).toHaveLength(1);
+    expect(ev.authoritative.attempts[0]!.verdicts).toEqual([]);
+  });
+
   it('filters unrelated taskIds out of the spine', async () => {
     const logs = [
       buildTaskCreatedLog(7n, HEAD - 100n),
