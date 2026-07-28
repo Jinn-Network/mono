@@ -9,3 +9,4 @@ export * from "./spellings.js";
 export * from "./key-binding.js";
 export * from "./revocation.js";
 export * from "./authorization.js";
+export * from "./policy.js";
