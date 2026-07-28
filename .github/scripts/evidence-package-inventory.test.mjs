@@ -21,6 +21,7 @@ const EVIDENCE_PACKAGES = [
   ['derivation', '@jinn-network/evidence-derivation'],
   ['publication', '@jinn-network/evidence-publication'],
   ['local-runtime', '@jinn-network/evidence-local-runtime'],
+  ['execution-recorder-bridge', '@jinn-network/execution-recorder-bridge'],
 ];
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -35,6 +36,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['derivation', { dependencies: ['@jinn-network/evidence-protocol'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['publication', { dependencies: ['@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
   ['local-runtime', { dependencies: ['@jinn-network/evidence-catalog-sqlite', '@jinn-network/evidence-discovery', '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/execution-recorder'], optionalDependencies: [], peerDependencies: [] }],
+  ['execution-recorder-bridge', { dependencies: ['@jinn-network/evidence-repository', '@jinn-network/execution-recorder'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
 ]);
 
 function readPackage(directory) {
@@ -66,8 +68,8 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;
 }
 
-test('the evidence package inventory is explicit and has eleven manifests', () => {
-  assert.equal(EVIDENCE_PACKAGES.length, 11);
+test('the evidence package inventory is explicit and has twelve manifests', () => {
+  assert.equal(EVIDENCE_PACKAGES.length, 12);
   for (const [directory, expectedName] of EVIDENCE_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);
@@ -83,6 +85,7 @@ test('the evidence package inventory is explicit and has eleven manifests', () =
       return /^@jinn-network\/evidence-/.test(name)
         || name === '@jinn-network/execution-recorder'
         || name === '@jinn-network/attestation-issuer'
+        || name === '@jinn-network/execution-recorder-bridge'
         ? [[relative(packageRoot, dirname(packageJson)), name]]
         : [];
     }).sort(([left], [right]) => left.localeCompare(right));
