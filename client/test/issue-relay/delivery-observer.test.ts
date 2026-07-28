@@ -53,6 +53,18 @@ function taskDocument(relay = round) {
   };
 }
 
+function taskEnvelope(relay = round) {
+  return {
+    schemaVersion: 'task.v1', id: 'issue-relay-task-501',
+    solverType: 'jinn-repo.v1', solverNetManifestCid: 'jinn-repo.v1',
+    contractId: 'jinn-repo', contractVersion: 'v1', role: 'restoration',
+    description: 'Implement the issue.', window: { startTs: 1, endTs: 2 },
+    spec: taskDocument(relay), eligibility: {}, claimPolicy: { maxClaims: 1 },
+    creator: { safeAddress: OPERATOR, agentEoa: AGENT_EOA }, createdAt: 1,
+    signature: { algo: 'secp256k1', signer: AGENT_EOA, hash: `0x${'1'.repeat(64)}`, sig: `0x${'2'.repeat(130)}` },
+  };
+}
+
 async function envelope(role: 'solution' | 'verdict', payload: unknown, override: Record<string, unknown> = {}) {
   const unsigned = {
     schemaVersion: 'jinn.execution.v1', solverType: 'jinn-repo.v1', role,
@@ -102,9 +114,9 @@ async function fixture(options: { role?: 'solution' | 'verdict'; payload?: unkno
   const signature = signed.signature as { hash: Hex };
   const ready: AutopilotDeliveryCandidateLookup = { status: 'ready', role, task: { taskId: TASK_ID, taskCidDigest: TASK_DIGEST, createdAtBlock: 100, createdAtTx: TASK_TX }, attempt: { taskId: TASK_ID, attemptIndex: 0, requestId, operator: role === 'solution' ? OPERATOR : EVALUATOR, createdAtBlock: 110 }, solutionOperator: options.solutionOperator ?? OPERATOR, envelope: { requestId, manifestCid: envelopeCid, publisherAgentId: '7', manifestHash: signature.hash, enrichedAtBlock: 121 } };
   const getLogs = vi.fn(({ address, event }) => address === ROUTER && event?.name === 'TaskCreated' ? [taskLog()] : address === ROUTER ? [attemptLog(role, role === 'solution' ? OPERATOR : EVALUATOR, requestId)] : [deliveryLog(role === 'solution' ? OPERATOR : EVALUATOR, requestId, envelopeDigest)]);
-  const observer = createIssueRelayDeliveryObserver({ discovery: { getAutopilotDeliveryCandidates: vi.fn().mockResolvedValue(ready) } as unknown as DiscoveryAPI, publicClient: { getLogs, readContract: vi.fn().mockResolvedValue({ deliveryMech: MECH }) } as unknown as PublicClient, mechMarketplaceAddress: MARKETPLACE, routerAddress: ROUTER, fetchEnvelopeBytes: vi.fn().mockResolvedValue(options.rawEnvelopeBytes ?? new TextEncoder().encode(JSON.stringify(signed))), fetchTaskBytes: vi.fn().mockResolvedValue(options.rawTaskBytes ?? new TextEncoder().encode(JSON.stringify(taskDocument()))), resolvePublisherSafe: vi.fn().mockResolvedValue(options.publisher ?? (role === 'solution' ? OPERATOR : EVALUATOR)) });
+  const observer = createIssueRelayDeliveryObserver({ discovery: { getAutopilotDeliveryCandidates: vi.fn().mockResolvedValue(ready) } as unknown as DiscoveryAPI, publicClient: { getLogs, readContract: vi.fn().mockResolvedValue({ deliveryMech: MECH }) } as unknown as PublicClient, mechMarketplaceAddress: MARKETPLACE, routerAddress: ROUTER, fetchEnvelopeBytes: vi.fn().mockResolvedValue(options.rawEnvelopeBytes ?? new TextEncoder().encode(JSON.stringify(signed))), fetchTaskBytes: vi.fn().mockResolvedValue(options.rawTaskBytes ?? new TextEncoder().encode(JSON.stringify(taskEnvelope()))), resolvePublisherSafe: vi.fn().mockResolvedValue(options.publisher ?? (role === 'solution' ? OPERATOR : EVALUATOR)) });
   const expectation: IssueRelayMarketplaceDeliveryExpectation = { chainId: CHAIN_ID, fromBlock: 100n, toBlock: 150n, schemaVersion: 'jinn-issue-relay-delivery-expectation.v1', role, taskId: TASK_ID, taskCid: TASK_CID, creationBlockNumber: 100, round, ...(role === 'verdict' ? { solutionOperatorSafe: OPERATOR, attemptIndex: 0, requestId: REQUEST_ID, deliveryEnvelopeCid: ENVELOPE_CID } : {}), ...options.expectation };
-  return { observer, expectation };
+  return { observer, expectation, getLogs };
 }
 
 describe('Issue Relay delivery observer', () => {
@@ -121,12 +133,13 @@ describe('Issue Relay delivery observer', () => {
   });
 
   it('binds a solution to the exact task Relay capsule and rejects malformed Task CIDs', async () => {
-    const wrongRound = await fixture({ rawTaskBytes: new TextEncoder().encode(JSON.stringify(taskDocument({ ...round, round: 1 }))) });
+    const wrongRound = await fixture({ rawTaskBytes: new TextEncoder().encode(JSON.stringify(taskEnvelope({ ...round, round: 1 }))) });
     await expect(wrongRound.observer.observe(wrongRound.expectation)).resolves.toMatchObject({ status: 'contradiction', reason: 'round-mismatch' });
-    const wrongSnapshot = await fixture({ rawTaskBytes: new TextEncoder().encode(JSON.stringify(taskDocument({ ...round, snapshotDigest: `sha256:${'b'.repeat(64)}` }))) });
+    const wrongSnapshot = await fixture({ rawTaskBytes: new TextEncoder().encode(JSON.stringify(taskEnvelope({ ...round, snapshotDigest: `sha256:${'b'.repeat(64)}` }))) });
     await expect(wrongSnapshot.observer.observe(wrongSnapshot.expectation)).resolves.toMatchObject({ status: 'contradiction', reason: 'round-mismatch' });
-    const malformedCid = await fixture({ expectation: { taskCid: 'not-a-cid' } });
+    const malformedCid = await fixture({ expectation: { taskCid: `f01551220${'g'.repeat(64)}` } });
     await expect(malformedCid.observer.observe(malformedCid.expectation)).resolves.toMatchObject({ status: 'contradiction', reason: 'invalid-expectation' });
+    expect(malformedCid.getLogs).not.toHaveBeenCalled();
   });
 
   it.each([
