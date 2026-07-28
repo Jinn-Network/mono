@@ -7,9 +7,9 @@ import {
   TRUST_KEY_BINDING_FORMAT,
   TRUST_POLICY_FORMAT,
   TRUST_REVOCATION_FORMAT,
+  ceremonyEvidenceDigest,
   deriveStrength,
   didPkh,
-  recordDigest,
   sealAuthorization,
   sealKeyBinding,
   sealRevocation,
@@ -180,7 +180,11 @@ export async function buildKeyBindingFixture(options: BuildKeyBindingFixtureOpti
       throw new Error("buildKeyBindingFixture: eoa ceremonyType requires eoaCeremony options.");
     }
     ceremonyEvidence = buildEoaCeremonyEvidence(options.agent, options.workingKeyDidKey, options.eoaCeremony);
-    ceremonyDigest = recordDigest(new TextEncoder().encode(JSON.stringify(ceremonyEvidence.message)));
+    // §7.1's digest-referenced ceremony evidence: the binding's
+    // `ceremony.digest` must commit to the SAME evidence blob `verify.ts`'s
+    // ceremony leg is handed (major finding) -- computed the same way
+    // `ceremonyEvidenceDigest` computes it in core, over the full evidence.
+    ceremonyDigest = ceremonyEvidenceDigest(ceremonyEvidence);
   } else {
     ceremonyDigest = testSha256Digest(`${options.ceremonyType}-ceremony-${options.agent}-${options.workingKeyDidKey}`);
   }

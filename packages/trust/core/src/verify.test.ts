@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import { canonicalJsonBytes } from "./canonical-json.js";
+import { ceremonyEvidenceDigest } from "./ceremony.js";
 import type { EoaCeremonyEvidence } from "./ceremony.js";
 import { parseDsseEnvelope, sealDsseEnvelope } from "./dsse.js";
 import {
@@ -174,7 +175,7 @@ describe("verifyEnvelopeBinding", () => {
         didKey: eoaFixture.didKey,
       },
       voucher: { kind: "account", did: didPkh(eoaFixture.voucherChainId, eoaFixture.message.address), contractAccount: false },
-      ceremony: { type: "eoa", digest: `sha256:${"a".repeat(64)}` },
+      ceremony: { type: "eoa", digest: ceremonyEvidenceDigest(eoaCeremonyEvidence()) },
       scope: ["deliveries", "verdicts"],
     });
     const resolver = new FakeBindingResolver().register({
@@ -190,6 +191,38 @@ describe("verifyEnvelopeBinding", () => {
     );
     expect(outcome.ok).toBe(true);
     expect(outcome.resolvedBinding?.binding.agent).toBe(eoaFixture.agentIri);
+  });
+
+  test("(major finding) a resolved binding whose committed ceremony.digest does not match the supplied ceremony evidence's digest fails ceremony verification, even though the evidence is genuine and content-matching", async () => {
+    const binding = keyBinding({
+      agent: eoaFixture.agentIri,
+      key: {
+        publicKey: "0x04",
+        keyid: eoaFixture.didKey,
+        algorithm: "secp256k1",
+        didKey: eoaFixture.didKey,
+      },
+      voucher: { kind: "account", did: didPkh(eoaFixture.voucherChainId, eoaFixture.message.address), contractAccount: false },
+      // A digest that does NOT correspond to `eoaCeremonyEvidence()` -- the
+      // record commits to a DIFFERENT piece of ceremony evidence than what
+      // the resolver is about to supply.
+      ceremony: { type: "eoa", digest: `sha256:${"f".repeat(64)}` },
+      scope: ["deliveries", "verdicts"],
+    });
+    const resolver = new FakeBindingResolver().register({
+      key: eoaFixture.didKey,
+      agent: eoaFixture.agentIri,
+      resolved: resolvedBinding({ binding, ceremonyEvidence: eoaCeremonyEvidence() }),
+    });
+    const envelopeBytes = sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, eoaFixture.didKey);
+
+    const outcome = await verifyEnvelopeBinding(
+      { envelopeBytes, key: eoaFixture.didKey, agent: eoaFixture.agentIri, family: "deliveries", atTime: "2026-03-01T00:00:00Z" },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(outcome.reason).toBe("ceremony-verification-failed");
+    expect(outcome.detail).toMatch(/ceremony evidence digest/);
   });
 
   test("step 1 rejects an envelope with no valid signature from the claimed key", async () => {

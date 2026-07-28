@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { verifyEoaCeremony } from "./ceremony.js";
+import { ceremonyEvidenceDigest, verifyEoaCeremony } from "./ceremony.js";
 import { canonicalJsonBytes } from "./canonical-json.js";
 import { dssePreAuthEncoding, sealDsseEnvelope } from "./dsse.js";
 import { TRUST_KEY_BINDING_MEDIA_TYPE } from "./identifiers.js";
@@ -124,6 +124,21 @@ async function verifyCeremonyLeg(
   if (ceremonyType === "eoa") {
     if (resolved.ceremonyEvidence === undefined) {
       return { verified: false, reason: "resolved binding is missing its EOA ceremony evidence." };
+    }
+    // §7.1's digest-referenced ceremony evidence: the record's own
+    // `ceremony.digest` commits to a specific evidence blob. Without this
+    // check the resolver-supplied `ceremonyEvidence` is never tied to that
+    // commitment -- any evidence that independently recovers and content-
+    // matches would verify, regardless of what the signed record actually
+    // committed to (major finding: the digest is otherwise decorative).
+    const committedDigest = resolved.binding.ceremony.digest;
+    const suppliedDigest = ceremonyEvidenceDigest(resolved.ceremonyEvidence);
+    if (suppliedDigest !== committedDigest) {
+      return {
+        verified: false,
+        reason: `ceremony evidence digest "${suppliedDigest}" does not match the binding's `
+          + `committed ceremony.digest "${committedDigest}".`,
+      };
     }
     const result = verifyEoaCeremony(resolved.ceremonyEvidence, resolved.binding);
     return { verified: result.verified, ...(result.reason === undefined ? {} : { reason: result.reason }) };

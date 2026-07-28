@@ -326,6 +326,37 @@ describe("§16 adversarial battery", () => {
     expect(outcome.detail).toMatch(/missing its EOA ceremony evidence/);
   });
 
+  test("ceremony-evidence digest commitment: evidence whose digest does not equal the binding's committed ceremony.digest MUST FAIL (major finding)", async () => {
+    const agent = testAgentIri("adversarial-digest-mismatch");
+    const key = testDidKey("adversarial-digest-mismatch-key");
+    const signer = createEoaTestSigner("adversarial-digest-mismatch");
+    const fixture = await buildResolvedBindingFixture({
+      agent,
+      workingKeyDidKey: key,
+      ceremonyType: "eoa",
+      voucher: accountVoucher(84532, signer.address),
+      eoaCeremony: { signer, chainId: 84532 },
+    });
+    // The record's committed digest no longer names the evidence the
+    // resolver is about to supply -- an evidence supplier pairing
+    // mismatched (evidence, digest) must not verify (§7.1: the digest is a
+    // commitment, not decoration).
+    fakes.registerBinding({
+      key,
+      agent,
+      resolved: {
+        ...fixture.resolved,
+        binding: { ...fixture.binding, ceremony: { type: "eoa", digest: `sha256:${"9".repeat(64)}` } },
+      },
+      validFrom: fixture.binding.validFrom,
+    });
+
+    const outcome = await verify({ envelopeBytes: fixture.envelopeBytes, key, agent, atTime: "2026-06-01T00:00:00.000Z" });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.reason).toBe("ceremony-verification-failed");
+    expect(outcome.detail).toMatch(/ceremony evidence digest/);
+  });
+
   test("scope violations: a binding's scope must cover the envelope's record family", async () => {
     const agent = testAgentIri("adversarial-scope");
     const key = testDidKey("adversarial-scope-key");
