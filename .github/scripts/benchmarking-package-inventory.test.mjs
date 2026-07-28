@@ -12,6 +12,7 @@ const DEPENDENCY_SECTIONS = [
 const BENCHMARKING_PACKAGES = [
   ['records', '@jinn-network/benchmarking-records'],
   ['testing', '@jinn-network/benchmarking-testing'],
+  ['aggregate', '@jinn-network/benchmarking-aggregate'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/benchmarking; map name -> absolute dir
@@ -19,6 +20,7 @@ const BENCHMARKING_PACKAGES = [
 const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
+  ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
 ]);
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -33,6 +35,18 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/task-execution-protocol',
     ],
     devDependencies: [], optionalDependencies: [], peerDependencies: [],
+  }],
+  ['aggregate', {
+    dependencies: ['@jinn-network/benchmarking-records', '@jinn-network/trust-core'],
+    // task-execution-protocol/profiles are transitively required to resolve
+    // benchmarking-testing's own portal deps under a standalone (non-workspace) yarn project —
+    // aggregate/src never imports either directly (source-boundaries guard enforces this).
+    devDependencies: [
+      '@jinn-network/benchmarking-testing',
+      '@jinn-network/task-execution-profiles',
+      '@jinn-network/task-execution-protocol',
+    ],
+    optionalDependencies: [], peerDependencies: [],
   }],
 ]);
 
@@ -67,7 +81,7 @@ function expectedPortal(directory, dependencyName) {
 }
 
 test('the benchmarking package inventory is explicit and has one manifest per package', () => {
-  assert.equal(BENCHMARKING_PACKAGES.length, 2);
+  assert.equal(BENCHMARKING_PACKAGES.length, 3);
   for (const [directory, expectedName] of BENCHMARKING_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);

@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'benchmarking');
-const benchmarkingDirectories = ['records', 'testing'];
+const benchmarkingDirectories = ['records', 'testing', 'aggregate'];
 
 // The whole benchmarking tree is forbidden to import any evidence-tree package, the two
 // I/O-free evidence producer packages, any record-discovery package, and — critically — every
@@ -65,6 +65,17 @@ const TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_RECORDS = [
 const TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_TESTING = [
   '@jinn-network/task-execution-backend',
   '@jinn-network/task-execution-testing',
+];
+
+// aggregate (M3) imports records + trust-core only (plan M3 Task 3.1 Interfaces): no
+// task-execution-* import at all, even though task-execution-protocol/profiles are transitive
+// devDependencies (needed only to resolve benchmarking-testing's own portal deps under a
+// standalone yarn project, never imported from aggregate/src).
+const TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_AGGREGATE = [
+  '@jinn-network/task-execution-backend',
+  '@jinn-network/task-execution-testing',
+  '@jinn-network/task-execution-profiles',
+  '@jinn-network/task-execution-protocol',
 ];
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
@@ -233,6 +244,12 @@ test('benchmarking source boundaries remain one-way across the approved graph', 
   assertBoundary(
     join(packages, 'testing', 'src'),
     [...BENCHMARKING_FOREIGN_PACKAGES, ...TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_TESTING],
+    FORBIDDEN_ROOTS,
+  );
+  // aggregate depends on records + trust-core only; never run, never any task-execution-*.
+  assertBoundary(
+    join(packages, 'aggregate', 'src'),
+    [...BENCHMARKING_FOREIGN_PACKAGES, ...TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_AGGREGATE],
     FORBIDDEN_ROOTS,
   );
 });

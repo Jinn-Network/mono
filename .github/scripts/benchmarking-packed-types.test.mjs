@@ -13,19 +13,23 @@ const consumerRoot = join(temporaryRoot, 'consumer');
 const packages = [
   ['records', '@jinn-network/benchmarking-records'],
   ['testing', '@jinn-network/benchmarking-testing'],
+  ['aggregate', '@jinn-network/benchmarking-aggregate'],
 ];
 
 const codeEntrypoints = [
   '@jinn-network/benchmarking-records',
   '@jinn-network/benchmarking-testing',
+  '@jinn-network/benchmarking-aggregate',
 ];
 
 // Cross-tree Jinn dependency each *then-present* benchmarking package references, packed as a
 // file: dep so NodeNext resolves it (program §7.8; record-discovery-packed-types.test.mjs
-// precedent). M1 seeds task-execution-protocol; M2 (testing) adds task-execution-profiles.
+// precedent). M1 seeds task-execution-protocol; M2 (testing) adds task-execution-profiles; M3
+// (aggregate) adds trust-core.
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
+  ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
 ];
 
 function run(command, args, options = {}) {

@@ -93,8 +93,43 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  aggregate:
+    needs: [records, testing]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependencies from source (§7.8)
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/testing && yarn install --immutable && yarn build)
+      - name: Verify Benchmarking Aggregate
+        working-directory: packages/benchmarking/aggregate
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Benchmarking Aggregate distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarking-aggregate-dist
+          path: packages/benchmarking/aggregate/dist
+          if-no-files-found: error
+          retention-days: 1
+
   verify:
-    needs: [architecture, records, testing]
+    needs: [architecture, records, testing, aggregate]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -103,11 +138,13 @@ jobs:
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
           RECORDS_RESULT: ${{ needs.records.result }}
           TESTING_RESULT: ${{ needs.testing.result }}
+          AGGREGATE_RESULT: ${{ needs.aggregate.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
             "$RECORDS_RESULT" \
-            "$TESTING_RESULT"; do
+            "$TESTING_RESULT" \
+            "$AGGREGATE_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4
@@ -129,9 +166,12 @@ jobs:
           cp -R .benchmarking-dist/benchmarking-records-dist/. packages/benchmarking/records/dist/
           mkdir -p packages/benchmarking/testing/dist
           cp -R .benchmarking-dist/benchmarking-testing-dist/. packages/benchmarking/testing/dist/
+          mkdir -p packages/benchmarking/aggregate/dist
+          cp -R .benchmarking-dist/benchmarking-aggregate-dist/. packages/benchmarking/aggregate/dist/
       - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
       - name: Compile packed public entrypoint consumers
         run: node .github/scripts/benchmarking-packed-types.test.mjs
