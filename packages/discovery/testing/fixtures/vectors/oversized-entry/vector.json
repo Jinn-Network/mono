@@ -17,6 +17,24 @@
       "hwm": null
     },
     "firstAdoption": true,
+    "head": {
+      "protocol": "https://jinn.network/record-discovery/1.0",
+      "origin": "did:key:zAgentSourceOne/feed",
+      "sequence": "0000000000000002",
+      "entry": "sha256:679958c6ec1cba6910c4ddc19cce142c75c3a803d0da132363abb3ee2152c797",
+      "issuedAt": "2026-07-28T12:00:00.000Z",
+      "refreshBy": "2026-07-29T12:00:00.000Z"
+    },
+    "headSignature": {
+      "payloadType": "application/vnd.jinn.record-discovery.head.v1+json",
+      "payload": "{\"entry\":\"sha256:679958c6ec1cba6910c4ddc19cce142c75c3a803d0da132363abb3ee2152c797\",\"issuedAt\":\"2026-07-28T12:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"refreshBy\":\"2026-07-29T12:00:00.000Z\",\"sequence\":\"0000000000000002\"}",
+      "signatures": [
+        {
+          "keyid": "key-1",
+          "sig": "c2a38e998d1f537676f7ef1ff73a191c9c03c36bc6906a8f5b29a2f1ca6bf03c:key-1"
+        }
+      ]
+    },
     "entries": [
       {
         "entry": {
