@@ -18,3 +18,4 @@ export * from "./task-profile/payload-schema.js";
 export * from "./task-profile/compiled-cache.js";
 export * from "./task-profile/resolve.js";
 export * from "./task-profile/sub-profile.js";
+export * from "./documents/repository-work-1.0.js";
