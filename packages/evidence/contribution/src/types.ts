@@ -341,3 +341,88 @@ export interface ContributionReceipt {
   readonly destinations: readonly ContributionDestinationOutcome[];
   readonly generatedAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// Authorization submissions and verified results (design §9.3)
+//
+// `proofBytes` is transient authority input: core verifies
+// `hashExactBytes(proofBytes) === proofDigest`, forwards a snapshot to the
+// `AuthorizationAuthority` port, then discards it. No verified result,
+// state, event, receipt, read model, or error retains it.
+// ---------------------------------------------------------------------------
+
+export interface ExactAuthorizationSubmission {
+  readonly mode: "interactive-exact" | "organization-exact";
+  readonly authorityId: string;
+  readonly actorId: string;
+  readonly previewFingerprint: Sha256Digest;
+  readonly allowedDestinationConfigurationDigests: readonly Sha256Digest[];
+  readonly decidedAt: string;
+  readonly expiresAt?: string;
+  readonly proofDigest: Sha256Digest;
+  readonly proofBytes: Uint8Array;
+  readonly exactPreviewPresented: boolean;
+}
+
+export interface VerifiedExactAuthorization
+  extends Omit<ExactAuthorizationSubmission, "proofBytes"> {
+  readonly deniedDestinations: readonly {
+    readonly configurationDigest: Sha256Digest;
+    readonly reasonCode: ContributionSafeReasonCode;
+  }[];
+}
+
+export type StandingGrantSourceScope =
+  | { readonly kind: "exact-source"; readonly source: EvidenceRecordReference }
+  | { readonly kind: "host-scope"; readonly scopeDigest: Sha256Digest };
+
+export interface StandingGrantSubmission {
+  readonly authorityId: string;
+  readonly actorId: string;
+  readonly sourceScope: StandingGrantSourceScope;
+  readonly allowedFamilies: readonly EvidenceRecordReference["family"][];
+  readonly policyAuthorityIds: readonly string[];
+  readonly policyProfiles: readonly string[];
+  readonly policyDigests: readonly Sha256Digest[];
+  readonly implementationDigests: readonly Sha256Digest[];
+  readonly derivationConfigurationDigests: readonly Sha256Digest[];
+  readonly destinationConfigurationDigests: readonly Sha256Digest[];
+  readonly limits: ContributionResourceLimits;
+  readonly issuedAt: string;
+  readonly expiresAt?: string;
+  readonly proofDigest: Sha256Digest;
+  readonly proofBytes: Uint8Array;
+}
+
+export interface VerifiedStandingGrant
+  extends Omit<StandingGrantSubmission, "proofBytes"> {}
+
+export interface StandingGrantRevocationSubmission {
+  readonly authorityId: string;
+  readonly actorId: string;
+  readonly grantId: ContributionGrantId;
+  readonly expectedGrantVersion: number;
+  readonly revokedAt: string;
+  readonly reasonCode: ContributionSafeReasonCode;
+  readonly proofDigest: Sha256Digest;
+  readonly proofBytes: Uint8Array;
+}
+
+export interface VerifiedStandingGrantRevocation
+  extends Omit<StandingGrantRevocationSubmission, "proofBytes"> {}
+
+export interface StandingAuthorizationGrantReadModel {
+  readonly schemaVersion: 1;
+  readonly grantId: ContributionGrantId;
+  readonly revision: number;
+  readonly authorityId: string;
+  readonly sourceScope: StandingGrantSourceScope;
+  readonly allowedFamilies: readonly EvidenceRecordReference["family"][];
+  readonly destinationConfigurationDigests: readonly Sha256Digest[];
+  readonly limits?: ContributionResourceLimits;
+  readonly issuedAt: string;
+  readonly expiresAt?: string;
+  readonly revoked: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}

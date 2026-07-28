@@ -14,8 +14,12 @@ import type {
   ContributionSafeReasonCode,
   CreateContributionRequestInput,
   PreparedDisclosure,
+  StandingGrantSourceScope,
   VerifiedDisclosurePolicyDecision,
+  VerifiedExactAuthorization,
 } from "./types.js";
+
+export type { StandingGrantSourceScope } from "./types.js";
 
 // Schema-version constants for these durable shapes are owned by
 // `types.ts` (`CONTRIBUTION_REQUEST_STATE_SCHEMA_VERSION`,
@@ -120,6 +124,21 @@ export function createDefaultContributionDestinationStates(
     .map((prepared) => defaultDestinationState(prepared.descriptor.destination));
 }
 
+/**
+ * Replace one destination's state by destination IRI, leaving every other
+ * destination and field untouched. Unknown destinations are a no-op --
+ * callers that must distinguish "unknown destination" fail closed
+ * themselves before calling this.
+ */
+export function updateContributionDestinationState(
+  destinations: readonly ContributionDestinationState[],
+  destination: string,
+  updater: (current: ContributionDestinationState) => ContributionDestinationState,
+): readonly ContributionDestinationState[] {
+  return destinations.map((current) =>
+    current.destination === destination ? updater(current) : current);
+}
+
 // ---------------------------------------------------------------------------
 // Contribution request state
 // ---------------------------------------------------------------------------
@@ -136,6 +155,17 @@ export interface ContributionRequestState {
   };
   readonly preparation: ContributionPreparationFacet;
   readonly destinations: readonly ContributionDestinationState[];
+  /**
+   * Append-only history of verified exact-authorization decisions bound to
+   * this request, keyed by `decisionId`. A destination's authorization
+   * facet stores only the `decisionId`; the full verified decision (mode,
+   * authority/actor, preview fingerprint, expiry) lives here so the read
+   * model and receipt can project it without re-deriving trust.
+   */
+  readonly authorizationDecisions: readonly {
+    readonly decisionId: ContributionDecisionId;
+    readonly decision: VerifiedExactAuthorization;
+  }[];
   readonly auditEvents: readonly ContributionAuditEvent[];
   readonly receipts: readonly {
     readonly receipt: ContributionReceipt;
@@ -162,6 +192,7 @@ export function createProposedContributionRequestState(input: {
     proposalFingerprint: input.proposalFingerprint,
     preparation: { status: "proposed" },
     destinations: [],
+    authorizationDecisions: [],
     auditEvents: [
       {
         schemaVersion: 1,
@@ -178,10 +209,6 @@ export function createProposedContributionRequestState(input: {
 // ---------------------------------------------------------------------------
 // Standing authorization grant state
 // ---------------------------------------------------------------------------
-
-export type StandingGrantSourceScope =
-  | { readonly kind: "exact-source"; readonly source: EvidenceRecordReference }
-  | { readonly kind: "host-scope"; readonly scopeDigest: Sha256Digest };
 
 export interface StandingAuthorizationGrantState {
   readonly schemaVersion: 1;

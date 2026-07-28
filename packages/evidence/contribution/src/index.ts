@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+export * from "./authorization.js";
 export * from "./commands.js";
 export * from "./errors.js";
 export * from "./identities.js";

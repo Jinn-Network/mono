@@ -111,6 +111,13 @@ export function assertSafeContributionRequestTransition(
     fail("STORE_CORRUPT");
   }
   if (
+    next.authorizationDecisions.length < previous.authorizationDecisions.length ||
+    previous.authorizationDecisions.some((entry, index) =>
+      !deepEqual(entry, next.authorizationDecisions[index]))
+  ) {
+    fail("STORE_CORRUPT");
+  }
+  if (
     next.receipts.length < previous.receipts.length ||
     previous.receipts.some((entry, index) =>
       !deepEqual(entry, next.receipts[index]))

@@ -23,9 +23,14 @@ async function loadGoldenFixture(path: string): Promise<Uint8Array> {
 }
 
 import {
+  authorizeContribution,
+  type AuthorizationAuthority,
+} from "./authorization.js";
+import {
   createContributionRequest,
   inspectContribution,
   prepareContribution,
+  type ContributionAuthorizationDependencies,
   type ContributionClock,
   type ContributionCommandBaseDependencies,
   type ContributionIdentifierSource,
@@ -323,6 +328,59 @@ describe("prepareContribution", () => {
     const prepared = await prepareContribution(created.requestId, deps);
     expect(prepared.status).toBe("awaiting-authorization");
     expect(prepared.previewFingerprint).toBeDefined();
+  });
+
+  test("an authorized derive-execution destination reaches publishing end to end", async () => {
+    const base = dependencies();
+    const { repository, proposalInput, route } = await seededExecutionEvidenceFixture();
+    const created = await createContributionRequest(proposalInput, base);
+    const deps = preparationDependencies(base, repository, route);
+    const prepared = await prepareContribution(created.requestId, deps);
+    const targetDestination = proposalInput.destinations[0]!;
+    const proofBytes = new Uint8Array([1, 2, 3]);
+    const authority: AuthorizationAuthority = {
+      verifyExact: async (submission) => ({
+        mode: submission.mode,
+        authorityId: submission.authorityId,
+        actorId: submission.actorId,
+        previewFingerprint: submission.previewFingerprint,
+        allowedDestinationConfigurationDigests: submission.allowedDestinationConfigurationDigests,
+        decidedAt: submission.decidedAt,
+        proofDigest: submission.proofDigest,
+        exactPreviewPresented: submission.exactPreviewPresented,
+        deniedDestinations: [],
+      }),
+      verifyStandingGrant: async () => {
+        throw new Error("unexpected standing grant call");
+      },
+      verifyStandingGrantRevocation: async () => {
+        throw new Error("unexpected revocation call");
+      },
+      evaluateHostScope: async () => {
+        throw new Error("unexpected host-scope call");
+      },
+    };
+    const authDeps: ContributionAuthorizationDependencies = { ...base, authorization: authority };
+    const { hashExactBytes } = await import("@jinn-network/evidence-publication");
+    const authorized = await authorizeContribution(
+      prepared.requestId,
+      {
+        mode: "interactive-exact",
+        authorityId: "https://authority.example/host",
+        actorId: "user-1",
+        previewFingerprint: prepared.previewFingerprint!,
+        allowedDestinationConfigurationDigests: [targetDestination.configurationDigest],
+        decidedAt: "2026-07-28T00:00:00Z",
+        proofDigest: hashExactBytes(proofBytes),
+        proofBytes,
+        exactPreviewPresented: true,
+      },
+      authDeps,
+    );
+    expect(authorized.status).toBe("publishing");
+    expect(authorized.destinations).toEqual([
+      expect.objectContaining({ destination: targetDestination.destination, status: "authorized" }),
+    ]);
   });
 
   test("dispatches a withhold route to the withheld aggregate status", async () => {

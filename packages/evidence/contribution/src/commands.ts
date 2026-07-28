@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { AuthorizationAuthority } from "./authorization.js";
 import { EvidenceContributionError } from "./errors.js";
 import type { DisclosurePolicyAuthority, DerivationResolver, ReviewReferenceStore } from
   "./policy.js";
@@ -188,6 +189,26 @@ export interface ContributionPreparationDependencies
   readonly policies: DisclosurePolicyAuthority;
   readonly derivations: DerivationResolver;
   readonly reviews: ReviewReferenceStore;
+}
+
+/**
+ * Dependency aggregate for exact-authorization commands
+ * (`authorizeContribution`). The exact intersection of ports that command
+ * uses -- never a generic service locator.
+ */
+export interface ContributionAuthorizationDependencies
+  extends ContributionCommandBaseDependencies {
+  readonly authorization: AuthorizationAuthority;
+}
+
+/**
+ * Dependency aggregate for standing-grant commands
+ * (`createStandingAuthorizationGrant`, `revokeStandingAuthorizationGrant`,
+ * `applyStandingAuthorization`).
+ */
+export interface ContributionGrantDependencies
+  extends ContributionCommandBaseDependencies {
+  readonly authorization: AuthorizationAuthority;
 }
 
 const PREPARATION_CLAIM_MINUTES = 5;
