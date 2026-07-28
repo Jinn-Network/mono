@@ -6,3 +6,4 @@ export * from "./identifiers.js";
 export * from "./errors.js";
 export * from "./types.js";
 export * from "./spellings.js";
+export * from "./key-binding.js";

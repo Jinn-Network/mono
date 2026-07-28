@@ -10,4 +10,5 @@ export const TRUST_POLICY_MEDIA_TYPE = "application/vnd.jinn.trust.policy.v1+jso
 export const TRUST_REVOCATION_MEDIA_TYPE = "application/vnd.jinn.trust.revocation.v1+json" as const;
 export const TRUST_KEY_BINDING_FORMAT = "https://jinn.network/trust/key-binding/v1" as const;
 export const TRUST_POLICY_FORMAT = "https://jinn.network/trust/policy/v1" as const;
+export const TRUST_REVOCATION_FORMAT = "https://jinn.network/trust/revocation/v1" as const;
 export const AUTHORIZATION_PREDICATE_TYPE = "https://jinn.network/trust/authorization/v1" as const;

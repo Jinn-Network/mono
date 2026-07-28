@@ -3,6 +3,8 @@
 import { canonicalJsonBytes } from "./canonical-json.js";
 import { invalidInput } from "./errors.js";
 import { DSSE_PAYLOAD_TYPE } from "./identifiers.js";
+import { recordDigest } from "./hashing.js";
+import type { Sha256Digest } from "./types.js";
 
 function ascii(value: string): Uint8Array {
   return Uint8Array.from(value, (character) => character.charCodeAt(0));
@@ -97,21 +99,32 @@ export interface DsseProducedSignature {
 export interface SealDsseEnvelopeInput {
   readonly payloadBytes: Uint8Array;
   readonly signatures: readonly [DsseProducedSignature, ...DsseProducedSignature[]];
+  /**
+   * The DSSE envelope's `payloadType`. Per TEP §21.2 ("a signed record is a
+   * DSSE envelope whose `payloadType` is the record's media type"), most
+   * trust-core record families seal under their own vendor media type
+   * (`TRUST_KEY_BINDING_MEDIA_TYPE`, `TRUST_REVOCATION_MEDIA_TYPE`,
+   * `TRUST_POLICY_MEDIA_TYPE`) -- only authorization statements (genuine
+   * in-toto Statements) use the generic `DSSE_PAYLOAD_TYPE`. Defaults to
+   * `DSSE_PAYLOAD_TYPE` for that authorization-statement case and for
+   * backward compatibility with callers that seal bare in-toto Statements.
+   */
+  readonly payloadType?: string;
 }
 
 /**
  * Seals a DSSE envelope over already-serialized payload bytes: canonicalizes
  * `{ payloadType, payload: base64(payloadBytes), signatures }` via
  * `canonicalJsonBytes`. Callers sign
- * `dssePreAuthEncoding(DSSE_PAYLOAD_TYPE, payloadBytes)` to produce each
- * signature before calling this.
+ * `dssePreAuthEncoding(payloadType, payloadBytes)` (payloadType defaulting to
+ * `DSSE_PAYLOAD_TYPE`) to produce each signature before calling this.
  */
 export function sealDsseEnvelope(input: SealDsseEnvelopeInput): Uint8Array {
   if (input.signatures.length === 0) {
     invalidInput("A DSSE envelope requires at least one signature.");
   }
   const envelope: DsseEnvelope = {
-    payloadType: DSSE_PAYLOAD_TYPE,
+    payloadType: input.payloadType ?? DSSE_PAYLOAD_TYPE,
     payload: encodeBase64(input.payloadBytes),
     signatures: input.signatures.map((signature) => ({
       ...(signature.keyid === undefined ? {} : { keyid: signature.keyid }),
@@ -174,5 +187,99 @@ export function parseDsseEnvelope(bytes: Uint8Array): ParsedDsseEnvelope {
     payloadType: envelope["payloadType"] as string,
     payloadBytes,
     signatures,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Signed-record helpers -- the "sealing spine" every record family (T4-T7)
+// consumes to seal and structurally parse its own DSSE-wrapped sealed
+// document. Injected-signer port, modeled on
+// packages/evidence/attestation-issuer/src/types.ts's DsseSigner.
+// ---------------------------------------------------------------------------
+
+export interface DsseSigningRequest {
+  readonly payloadType: string;
+  readonly payloadBytes: Uint8Array;
+  readonly preAuthEncoding: Uint8Array;
+  readonly signal?: AbortSignal;
+}
+
+/** Injected working-key signer port. I/O-free callers (tests, fakes) supply
+ * a pure function; a real host wires this to actual key material. */
+export type DsseSigner = (
+  request: DsseSigningRequest,
+) => Promise<readonly [DsseProducedSignature, ...DsseProducedSignature[]]>;
+
+export interface SealSignedRecordInput {
+  /** The already-canonicalizable record content (canonicalized via
+   * `canonicalJsonBytes` before signing/sealing). */
+  readonly record: unknown;
+  readonly payloadType: string;
+  readonly signer: DsseSigner;
+  readonly signal?: AbortSignal;
+}
+
+export interface SealedRecord {
+  readonly envelopeBytes: Uint8Array;
+  readonly payloadBytes: Uint8Array;
+  readonly recordDigest: Sha256Digest;
+}
+
+/**
+ * Canonicalizes `input.record`, signs its DSSE pre-authentication encoding
+ * via the injected `signer`, and seals the DSSE envelope under
+ * `input.payloadType`. `recordDigest` is the digest of the sealed envelope
+ * bytes (the record's identity), matching the evidence-protocol precedent
+ * (`recordDigest(envelopeBytes)`, not the bare payload).
+ */
+export async function sealSignedRecord(input: SealSignedRecordInput): Promise<SealedRecord> {
+  const payloadBytes = canonicalJsonBytes(input.record);
+  const preAuthEncoding = dssePreAuthEncoding(input.payloadType, payloadBytes);
+  const signatures = await input.signer({
+    payloadType: input.payloadType,
+    payloadBytes,
+    preAuthEncoding,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  const envelopeBytes = sealDsseEnvelope({
+    payloadBytes,
+    signatures,
+    payloadType: input.payloadType,
+  });
+  return {
+    envelopeBytes,
+    payloadBytes,
+    recordDigest: recordDigest(envelopeBytes),
+  };
+}
+
+export interface ParsedSignedRecordEnvelope {
+  readonly payloadBytes: Uint8Array;
+  readonly signatures: readonly DsseEnvelopeSignature[];
+  readonly recordDigest: Sha256Digest;
+}
+
+/**
+ * Parses a sealed DSSE envelope and asserts its `payloadType` matches
+ * `expectedPayloadType` -- the structural half of validating a sealed
+ * record family (schema conformance of the decoded payload is the caller's
+ * job; no cryptographic signature verification happens here, per rung
+ * separation -- §7.5 step 1 offline-verifies the signature, a concern of
+ * `verify.ts`, not the record-level validator).
+ */
+export function parseSignedRecordEnvelope(
+  envelopeBytes: Uint8Array,
+  expectedPayloadType: string,
+): ParsedSignedRecordEnvelope {
+  const parsed = parseDsseEnvelope(envelopeBytes);
+  if (parsed.payloadType !== expectedPayloadType) {
+    invalidInput(
+      `DSSE envelope payloadType "${parsed.payloadType}" does not match expected "${expectedPayloadType}".`,
+    );
+  }
+  return {
+    payloadBytes: parsed.payloadBytes,
+    signatures: parsed.signatures,
+    recordDigest: recordDigest(envelopeBytes),
   };
 }
