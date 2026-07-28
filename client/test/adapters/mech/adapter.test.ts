@@ -528,6 +528,39 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('checks exact funding facts after rate resolution and before createTask', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { submitTask } = await import('../../../src/adapters/mech/contracts.js');
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const assertFunding = vi.fn(() => {
+      throw new Error('dry-run spend changed');
+    });
+
+    await expect(adapter.postTask({
+      id: 'prediction-task-1',
+      description: 'Will the test market resolve YES?',
+      solverType: 'prediction.v1',
+      contractId: 'prediction',
+      contractVersion: 'v1',
+      solverNetManifestCid: 'bafyfixturecid',
+      claimPolicy: {
+        mode: 'parallel',
+        maxClaims: 25,
+        maxClaimsPerOperator: 1,
+        claimLeaseTtlSeconds: 600,
+      },
+    }, { assertFunding })).rejects.toThrow('dry-run spend changed');
+
+    expect(assertFunding).toHaveBeenCalledWith({
+      creatorSafe: TEST_CONFIG.safeAddress,
+      solverNetManifestCid: 'bafyfixturecid',
+      proposedSpendWei: 50_000_000n,
+    });
+    expect(submitTask).not.toHaveBeenCalled();
+    await adapter.stop();
+  });
+
   it('postTask refuses to sign and post a Task without solverNetManifestCid', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { submitTask } = await import('../../../src/adapters/mech/contracts.js');

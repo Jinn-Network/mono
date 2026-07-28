@@ -73,6 +73,7 @@ import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
 import { emitStructured } from '../../events/emitter.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
+import { marketplaceTaskBudgetWei } from '../../tasks/submit-preflight.js';
 import {
   SOLUTION_ENVELOPE_CID_CONTEXT_KEY,
   SOLUTION_TASK_CID_CONTEXT_KEY,
@@ -698,6 +699,15 @@ export class MechAdapter implements ExecutionAdapter {
     }
     const manifestDigest = keccak256(toBytes(signedTask.solverNetManifestCid));
     const policy = this.contractPolicyForTask(restorationState);
+    await options?.assertFunding?.({
+      creatorSafe: this.config.safeAddress,
+      solverNetManifestCid: signedTask.solverNetManifestCid,
+      proposedSpendWei: marketplaceTaskBudgetWei({
+        solutionMaxDeliveryRateWei: deliveryRate,
+        verdictMaxDeliveryRateWei: deliveryRate,
+        maxClaims: policy.maxClaims,
+      }),
+    });
 
     const taskSubmission = await submitTask(
       this.publicClient,
