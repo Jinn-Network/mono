@@ -14,12 +14,15 @@ const packages = [
   ['protocol', '@jinn-network/task-execution-protocol'],
   ['backend', '@jinn-network/task-execution-backend'],
   ['testing', '@jinn-network/task-execution-testing'],
+  ['profiles', '@jinn-network/task-execution-profiles'],
 ];
 
 const codeEntrypoints = [
   '@jinn-network/task-execution-protocol',
   '@jinn-network/task-execution-backend',
   '@jinn-network/task-execution-testing',
+  '@jinn-network/task-execution-profiles',
+  '@jinn-network/task-execution-profiles/testing',
 ];
 
 function run(command, args, options = {}) {
