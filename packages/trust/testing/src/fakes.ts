@@ -52,9 +52,10 @@ export interface FakeTrustResolvers {
   readonly dsseVerifier: DsseChainVerifier;
   registerBinding(entry: RegisteredBinding): void;
   registerAnchor(digest: Sha256Digest, observation: AnchorObservation): void;
-  /** Defaults every witness lookup to `{ verified: true }` until a
-   * verifier IRI is registered with an explicit result (adversarial
-   * fixtures register `{ verified: false, reason }`). */
+  /** Fails closed by default (`{ verified: false }`) until a verifier IRI
+   * is registered with an explicit result -- a witness the test never
+   * vouches for should never silently pass, matching §16's "unsigned/
+   * fabricated witness" adversarial case. */
   registerWitnessResult(verifier: string, result: WitnessResult): void;
   reset(): void;
 }
@@ -92,7 +93,8 @@ export function createFakeResolvers(): FakeTrustResolvers {
     },
     witnessVerifier: {
       async verify1271Witness(witness) {
-        return witnessResults.get(witness.verifier) ?? { verified: true };
+        return witnessResults.get(witness.verifier)
+          ?? { verified: false, reason: `no witness result registered for verifier "${witness.verifier}".` };
       },
     },
     dsseVerifier: fakeDsseVerifier,

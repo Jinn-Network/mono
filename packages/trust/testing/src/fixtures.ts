@@ -93,6 +93,21 @@ function fixtureSigner(keyid: string): DsseSigner {
   return async () => [{ signature: Uint8Array.of(1), keyid }];
 }
 
+/** A multi-signer fixture (needed only for §9 dual-threshold policy-chain
+ * scenarios, where one envelope must carry signatures from more than one
+ * declared keyid at once -- `DsseSigner` returns a non-empty array of
+ * signatures per call, so a single injected signer can produce all of
+ * them). */
+function multiFixtureSigner(keyids: readonly string[]): DsseSigner {
+  return async () => {
+    const [first, ...rest] = keyids;
+    return [
+      { signature: Uint8Array.of(1), keyid: first! },
+      ...rest.map((keyid) => ({ signature: Uint8Array.of(1), keyid })),
+    ];
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Key-binding fixtures (§7.1/§7.2).
 // ---------------------------------------------------------------------------
@@ -351,7 +366,16 @@ export interface BuildPolicyFixtureOptions {
   readonly version?: number;
   readonly predecessor?: Sha256Digest;
   readonly purposes: Record<string, PolicyPurposeEntry>;
+  /** The version's own declared signer set (§9: working keys listed in
+   * THIS version). Defaults to a single-key, threshold-1 set naming
+   * `signerKeyid`. */
+  readonly signerSet?: { readonly keys: readonly string[]; readonly threshold: number };
   readonly signerKeyid: string;
+  /** Every keyid whose signature the sealed envelope should actually
+   * carry -- defaults to `[signerKeyid]`. §9's dual-threshold chaining
+   * needs a child version's envelope to carry signatures from BOTH the
+   * old and new signer sets at once. */
+  readonly envelopeSignerKeyids?: readonly string[];
   readonly refreshBy?: string;
 }
 
@@ -367,9 +391,12 @@ export async function buildPolicyFixture(options: BuildPolicyFixtureOptions): Pr
     version: options.version ?? 1,
     ...(options.predecessor === undefined ? {} : { predecessor: options.predecessor }),
     purposes: options.purposes,
-    signerSet: { keys: [options.signerKeyid], threshold: 1 },
+    signerSet: options.signerSet === undefined
+      ? { keys: [options.signerKeyid], threshold: 1 }
+      : { keys: [...options.signerSet.keys], threshold: options.signerSet.threshold },
     refreshBy: options.refreshBy ?? "2027-01-01T00:00:00.000Z",
   };
-  const sealed = await sealTrustPolicy(policy, fixtureSigner(options.signerKeyid));
+  const envelopeSigners = options.envelopeSignerKeyids ?? [options.signerKeyid];
+  const sealed = await sealTrustPolicy(policy, multiFixtureSigner(envelopeSigners));
   return { policy, envelopeBytes: sealed.envelopeBytes, digest: sealed.recordDigest };
 }
