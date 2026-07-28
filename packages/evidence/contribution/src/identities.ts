@@ -40,7 +40,22 @@ export function createContributionReceiptFingerprint(
     schemaVersion: receipt.schemaVersion,
     requestId: receipt.requestId,
     status: receipt.status,
+    source: receipt.source,
+    policyDecision: receipt.policyDecision,
     previewFingerprint: receipt.previewFingerprint ?? null,
+    preparedRecord: receipt.preparedRecord ?? null,
+    artifacts: receipt.artifacts === undefined
+      ? null
+      : [...receipt.artifacts]
+        .map((artifact) => ({ digest: artifact.digest }))
+        .sort((left, right) => compareCodeUnitStrings(left.digest, right.digest)),
+    reviewReference: receipt.reviewReference ?? null,
+    withheldReasons: receipt.withheldReasons === undefined
+      ? null
+      : [...receipt.withheldReasons]
+        .map((reason) => reason.code)
+        .sort(compareCodeUnitStrings),
+    declinedReasonCode: receipt.declinedReasonCode ?? null,
     destinations: [...receipt.destinations]
       .map((outcome) => ({
         destination: outcome.destination,
@@ -48,9 +63,17 @@ export function createContributionReceiptFingerprint(
         deactivated: outcome.deactivated,
         reasonCode: outcome.reasonCode ?? null,
         publishedAt: outcome.publishedAt ?? null,
+        bundleKey: outcome.bundleKey ?? null,
+        payloadFingerprint: outcome.payloadFingerprint ?? null,
+        locations: outcome.locations === undefined
+          ? null
+          : [...outcome.locations]
+            .map((location) => ({ profile: location.profile, value: location.value }))
+            .sort((left, right) => compareCodeUnitStrings(left.profile, right.profile)),
       }))
       .sort((left, right) =>
         compareCodeUnitStrings(left.destination, right.destination)),
+    stagingRetention: receipt.stagingRetention,
     generatedAt: receipt.generatedAt,
   });
 }

@@ -398,5 +398,10 @@ describe("prepareContribution", () => {
     const prepared = await prepareContribution(created.requestId, deps);
     expect(prepared.status).toBe("withheld");
     expect(prepared.withheldReasons).toEqual([{ code: "POLICY_WITHHELD" }]);
+
+    const { readContributionReceipt } = await import("./receipt.js");
+    const receipt = await readContributionReceipt(created.requestId, base);
+    expect(receipt.status).toBe("withheld");
+    expect(receipt.withheldReasons).toEqual([{ code: "POLICY_WITHHELD" }]);
   });
 });

@@ -41,8 +41,15 @@ describe("createContributionReceiptFingerprint", () => {
       schemaVersion: 1,
       requestId: "request-1",
       status: "publishing",
+      source: { family: "execution-evidence", digest: `sha256:${"b".repeat(64)}` },
+      policyDecision: {
+        authorityId: "https://authority.example/policy",
+        decisionId: "decision-1",
+        digest: `sha256:${"c".repeat(64)}`,
+      },
       previewFingerprint: `sha256:${"a".repeat(64)}`,
       destinations,
+      stagingRetention: "required-for-recovery",
       generatedAt: "2026-07-28T00:00:00Z",
     };
   }

@@ -13,23 +13,21 @@ import {
   normalizeCreateContributionRequestInput,
   sealContributionIntent,
 } from "./request.js";
+import { createContributionReadModel } from "./read-model.js";
+import { appendCurrentContributionReceipt } from "./receipt.js";
 import { loadAndValidateEvidenceSource } from "./source.js";
 import type { RepositoryResolver } from "./source.js";
 import {
   acquireContributionWorkClaim,
   createDefaultContributionDestinationStates,
   createProposedContributionRequestState,
-  deriveContributionAggregateStatus,
   releaseContributionWorkClaim,
   type ContributionAuditEvent,
-  type ContributionDestinationState,
   type ContributionRequestState,
 } from "./state.js";
 import type { ContributionStore, VersionedContributionRequest } from "./store.js";
 import type {
   ContributionDecisionId,
-  ContributionDestinationOutcome,
-  ContributionDestinationOutcomeStatus,
   ContributionGrantId,
   ContributionOperationOptions,
   ContributionReadModel,
@@ -55,80 +53,15 @@ export interface ContributionCommandBaseDependencies {
   readonly identifiers: ContributionIdentifierSource;
 }
 
-function publicDestinationOutcomeStatus(
-  destination: ContributionDestinationState,
-): ContributionDestinationOutcomeStatus {
-  if (destination.publication.status === "published") return "published";
-  if (destination.publication.status === "retryable-failure") return "retryable-failure";
-  if (destination.publication.status === "terminal-failure") return "terminal-failure";
-  if (destination.publication.status === "publishing") return "publishing";
-  if (
-    destination.authorization.status === "denied" ||
-    destination.authorization.status === "expired" ||
-    destination.authorization.status === "revoked"
-  ) {
-    return "denied";
-  }
-  if (destination.authorization.status === "authorized") return "authorized";
-  return "awaiting-authorization";
-}
-
-function toDestinationOutcome(
-  destination: ContributionDestinationState,
-): ContributionDestinationOutcome {
-  return {
-    destination: destination.destination,
-    status: publicDestinationOutcomeStatus(destination),
-    deactivated: destination.deactivation.requested,
-    ...(destination.authorization.status === "denied"
-      ? { reasonCode: destination.authorization.reasonCode }
-      : destination.publication.status === "retryable-failure" ||
-          destination.publication.status === "terminal-failure"
-        ? { reasonCode: destination.publication.reasonCode }
-        : {}),
-    ...(destination.publication.status === "published"
-      ? { publishedAt: destination.publication.publishedAt }
-      : {}),
-  };
-}
-
 /**
- * Project durable request state into the safe, immutable read model. This
- * is a minimal projection sufficient for the commands implemented through
- * Task 6; Task 9 owns the full `read-model.ts` projection (receipts,
- * warnings, and richer facet detail) and is expected to supersede this
- * helper.
+ * Project durable request state (with its store revision) into the safe,
+ * immutable read model. Owned by `read-model.ts`; re-exported under this
+ * established name since every command module already imports it as
+ * `toContributionReadModel`.
  */
-export function toContributionReadModel(
+export const toContributionReadModel: (
   versioned: VersionedContributionRequest,
-): ContributionReadModel {
-  const state = versioned.value;
-  const preparation = state.preparation;
-  return {
-    schemaVersion: 1,
-    requestId: state.requestId,
-    revision: versioned.revision,
-    status: deriveContributionAggregateStatus(state),
-    source: state.proposal.source.record,
-    policyDecision: state.proposal.policyDecision,
-    ...(preparation.status === "preview-ready"
-      ? {
-        previewFingerprint: preparation.disclosure.previewFingerprint,
-        manifestBytes: preparation.disclosure.manifestBytes,
-      }
-      : {}),
-    ...(preparation.status === "review-required"
-      ? { reviewReference: preparation.reviewReference }
-      : {}),
-    ...(preparation.status === "withheld"
-      ? { withheldReasons: preparation.reasons }
-      : {}),
-    destinations: state.destinations.map(toDestinationOutcome),
-    warnings: [],
-    createdAt: state.createdAt,
-    updatedAt: state.updatedAt,
-  };
-}
+) => ContributionReadModel = createContributionReadModel;
 
 /**
  * Create a new Contribution request from a caller-supplied proposal.
@@ -225,6 +158,17 @@ export interface ContributionPublicationDependencies
   readonly repositories: RepositoryResolver;
   readonly publications: PublicationResolver;
 }
+
+/**
+ * Dependency aggregate for closeout commands (`declineContribution`,
+ * `deactivateContributionDestination`, `deactivateContribution`). Closeout
+ * uses the same resolved binding and already-checkpointed Publication
+ * identity for in-flight reconciliation, so it is the exact
+ * `ContributionPublicationDependencies` set -- never an independent
+ * withdrawal resolver that could target a different destination.
+ */
+export interface ContributionCloseoutDependencies
+  extends ContributionPublicationDependencies {}
 
 const PREPARATION_CLAIM_MINUTES = 5;
 
@@ -419,7 +363,9 @@ export async function prepareContribution(
       break;
   }
 
-  const preparedState = buildPreparedRequestState(versioned.value, result, now);
+  const preparedState = appendCurrentContributionReceipt(
+    buildPreparedRequestState(versioned.value, result, now),
+  );
   try {
     versioned = await dependencies.store.compareAndSwapRequest(
       versioned,

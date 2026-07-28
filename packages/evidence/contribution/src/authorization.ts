@@ -11,6 +11,7 @@ import {
   EvidenceContributionError,
   type EvidenceContributionErrorCode,
 } from "./errors.js";
+import { appendCurrentContributionReceipt } from "./receipt.js";
 import {
   updateContributionDestinationState,
   type ContributionRequestState,
@@ -260,7 +261,7 @@ export async function authorizeContribution(
     }
   }
 
-  const nextState: ContributionRequestState = {
+  const nextState: ContributionRequestState = appendCurrentContributionReceipt({
     ...versioned.value,
     destinations: nextDestinations,
     authorizationDecisions: [
@@ -269,7 +270,7 @@ export async function authorizeContribution(
     ],
     auditEvents: [...versioned.value.auditEvents, ...events],
     updatedAt: now,
-  };
+  });
   versioned = await dependencies.store.compareAndSwapRequest(versioned, nextState, options);
   return toContributionReadModel(versioned);
 }
@@ -642,12 +643,12 @@ export async function applyStandingAuthorization(
   }
   if (!matchedAny) fail("AUTHORIZATION_DENIED");
 
-  const nextState: ContributionRequestState = {
+  const nextState: ContributionRequestState = appendCurrentContributionReceipt({
     ...versioned.value,
     destinations: nextDestinations,
     auditEvents: [...versioned.value.auditEvents, ...events],
     updatedAt: now,
-  };
+  });
   versioned = await dependencies.store.compareAndSwapRequest(versioned, nextState, options);
   return toContributionReadModel(versioned);
 }

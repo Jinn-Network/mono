@@ -310,6 +310,9 @@ export interface ContributionDestinationOutcome {
   readonly deactivated: boolean;
   readonly reasonCode?: ContributionSafeReasonCode;
   readonly publishedAt?: string;
+  readonly bundleKey?: Sha256Digest;
+  readonly payloadFingerprint?: Sha256Digest;
+  readonly locations?: readonly SafePublishedLocation[];
 }
 
 // ---------------------------------------------------------------------------
@@ -327,18 +330,38 @@ export interface ContributionReadModel {
   readonly manifestBytes?: Uint8Array;
   readonly reviewReference?: string;
   readonly withheldReasons?: readonly { readonly code: ContributionSafeReasonCode }[];
+  readonly declinedReasonCode?: ContributionSafeReasonCode;
   readonly destinations: readonly ContributionDestinationOutcome[];
   readonly warnings: readonly string[];
   readonly createdAt: string;
   readonly updatedAt: string;
 }
 
+/**
+ * Private operational audit projection (design §9.5). Never implies
+ * evaluation, verification, identity trust, public admission, search
+ * visibility, reputation, marketplace acceptance, reward, corpus
+ * membership, or deletion of any bytes.
+ */
 export interface ContributionReceipt {
   readonly schemaVersion: 1;
   readonly requestId: ContributionRequestId;
   readonly status: ContributionAggregateStatus;
+  readonly source: EvidenceRecordReference;
+  readonly policyDecision: DisclosurePolicyDecisionReference;
   readonly previewFingerprint?: Sha256Digest;
+  readonly preparedRecord?: EvidenceRecordReference;
+  readonly artifacts?: readonly EvidenceArtifactReference[];
+  readonly reviewReference?: string;
+  readonly withheldReasons?: readonly { readonly code: ContributionSafeReasonCode }[];
+  readonly declinedReasonCode?: ContributionSafeReasonCode;
   readonly destinations: readonly ContributionDestinationOutcome[];
+  /**
+   * Retention eligibility only -- Contribution reports live record and
+   * artifact references but never deletes them (design §17.2). The host
+   * owns retention enforcement and garbage collection.
+   */
+  readonly stagingRetention: "required-for-recovery" | "eligible-for-host-cleanup";
   readonly generatedAt: string;
 }
 

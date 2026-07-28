@@ -70,7 +70,11 @@ export type ContributionPreparationFacet =
       readonly status: "preview-ready";
       readonly disclosure: PreparedDisclosure;
     }
-  | { readonly status: "declined"; readonly declinedAt: string };
+  | {
+      readonly status: "declined";
+      readonly declinedAt: string;
+      readonly reasonCode: ContributionSafeReasonCode;
+    };
 
 export type ContributionPreparationStatus =
   ContributionPreparationFacet["status"];
@@ -113,9 +117,15 @@ export type ContributionDestinationPublicationFacet =
       readonly reasonCode: ContributionSafeReasonCode;
     };
 
+export type ContributionDestinationDeactivationOutcome =
+  | { readonly status: "withdrawn"; readonly externalId: string }
+  | { readonly status: "unsupported"; readonly reasonCode: ContributionSafeReasonCode }
+  | { readonly status: "retryable-failure"; readonly reasonCode: ContributionSafeReasonCode };
+
 export interface ContributionDestinationDeactivationFacet {
   readonly requested: boolean;
   readonly requestedAt?: string;
+  readonly outcome?: ContributionDestinationDeactivationOutcome;
 }
 
 export interface ContributionDestinationState {

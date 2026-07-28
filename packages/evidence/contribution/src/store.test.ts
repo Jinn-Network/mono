@@ -80,7 +80,11 @@ describe("InMemoryContributionStore", () => {
     await expect(
       store.compareAndSwapRequest(created, {
         ...created.value,
-        preparation: { status: "declined", declinedAt: "2026-07-28T00:00:02Z" },
+        preparation: {
+          status: "declined",
+          declinedAt: "2026-07-28T00:00:02Z",
+          reasonCode: "OPERATOR_ATTENTION_REQUIRED",
+        },
         updatedAt: "2026-07-28T00:00:02Z",
       }),
     ).rejects.toThrow(EvidenceContributionError);

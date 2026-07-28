@@ -16,8 +16,9 @@ import {
   type ContributionCommandBaseDependencies,
   type ContributionPublicationDependencies,
 } from "./commands.js";
-import { compareCodeUnitStrings } from "./identities.js";
 import { EvidenceContributionError, type EvidenceContributionErrorCode } from "./errors.js";
+import { compareCodeUnitStrings } from "./identities.js";
+import { appendCurrentContributionReceipt } from "./receipt.js";
 import type { RepositoryResolver } from "./source.js";
 import {
   updateContributionDestinationState,
@@ -359,7 +360,7 @@ export async function publishContributionDestination(
     const classified = classifyPublicationFailure(cause);
     if (classified === undefined) throw cause;
     const now = dependencies.clock.now();
-    const failedState: ContributionRequestState = {
+    const failedState: ContributionRequestState = appendCurrentContributionReceipt({
       ...versioned.value,
       destinations: updateContributionDestinationState(
         versioned.value.destinations,
@@ -380,7 +381,7 @@ export async function publishContributionDestination(
         },
       ],
       updatedAt: now,
-    };
+    });
     versioned = await dependencies.store.compareAndSwapRequest(versioned, failedState, options);
     return toContributionReadModel(versioned);
   }
@@ -395,7 +396,7 @@ export async function publishContributionDestination(
 
   const locations = safeLocations(resolved, receipt);
   const publishedAt = dependencies.clock.now();
-  const publishedState: ContributionRequestState = {
+  const publishedState: ContributionRequestState = appendCurrentContributionReceipt({
     ...versioned.value,
     destinations: updateContributionDestinationState(
       versioned.value.destinations,
@@ -416,7 +417,7 @@ export async function publishContributionDestination(
       { schemaVersion: 1, kind: "published" as const, at: publishedAt, destination },
     ],
     updatedAt: publishedAt,
-  };
+  });
   versioned = await dependencies.store.compareAndSwapRequest(versioned, publishedState, options);
   return toContributionReadModel(versioned);
 }
