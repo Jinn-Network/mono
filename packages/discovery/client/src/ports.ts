@@ -16,6 +16,8 @@ export type { HighWaterMarkStore, ResolvedKey } from "@jinn-network/record-disco
 export interface TransportResponse {
   status: number;
   contentType?: string;
+  /** The server-declared size in bytes (e.g. a Content-Length header), when known ahead of reading the full body -- lets hostile-locator guards (§7/§14) reject before transferring an oversized payload. */
+  declaredLength?: number;
   bytes: Uint8Array;
 }
 
