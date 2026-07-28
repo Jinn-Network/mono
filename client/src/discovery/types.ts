@@ -712,8 +712,11 @@ export interface DiscoveryAPI {
   /**
    * Returns the on-chain finalization snapshot for every task posted on the
    * SolverNet identified by `manifestCid`, keyed by on-chain taskId (decimal
-   * string). Backed by the indexer `task` table (`finalized`, `refunded`,
-   * `claimWindowEnd`), joined via `manifestDigest === keccak256(manifestCid)`.
+   * string). Tasks are joined via `manifestDigest === keccak256(manifestCid)`.
+   * On the HTTP path `finalized` is derived from co-fetched attempt/verdict
+   * spine rows via `applyTaskLifecycleTerminals` (parity with
+   * `getTaskLifecycleEvidence` / #2236); `refunded` comes from the task-row
+   * boolean only. `claimWindowEnd` is display-only from the task row.
    *
    * This is a DISPLAY/advisory signal (the Launcher "Recent posted Tasks"
    * status chip), NOT a correctness gate, so it is *tolerant*: like
