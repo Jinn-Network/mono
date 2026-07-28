@@ -12,10 +12,12 @@ const consumerRoot = join(temporaryRoot, 'consumer');
 
 const packages = [
   ['protocol', '@jinn-network/task-execution-protocol'],
+  ['backend', '@jinn-network/task-execution-backend'],
 ];
 
 const codeEntrypoints = [
   '@jinn-network/task-execution-protocol',
+  '@jinn-network/task-execution-backend',
 ];
 
 function run(command, args, options = {}) {

@@ -11,10 +11,15 @@ const DEPENDENCY_SECTIONS = [
 
 const TASK_EXECUTION_PACKAGES = [
   ['protocol', '@jinn-network/task-execution-protocol'],
+  ['backend', '@jinn-network/task-execution-backend'],
 ];
 
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['protocol', { dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
+  ['backend', {
+    dependencies: ['@jinn-network/task-execution-protocol'],
+    devDependencies: [], optionalDependencies: [], peerDependencies: [],
+  }],
 ]);
 
 function readPackage(directory) {
@@ -47,7 +52,7 @@ function expectedPortal(directory, dependencyName) {
 }
 
 test('the task-execution package inventory is explicit and has one manifest', () => {
-  assert.equal(TASK_EXECUTION_PACKAGES.length, 1);
+  assert.equal(TASK_EXECUTION_PACKAGES.length, 2);
   for (const [directory, expectedName] of TASK_EXECUTION_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);
