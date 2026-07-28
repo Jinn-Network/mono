@@ -1,0 +1,43 @@
+{
+  "name": "unknown-facts-field-skip",
+  "kind": "facts-consistency",
+  "description": "The facts card carries an extra field (`aFieldFromANewerProfileVersion`) the consumer's profile does not name -- skipped, never an error; the named fields still check out consistent (§15).",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://jinn.network/records/submission/1.0",
+        "digest": "sha256:8aeb0a2f9730c1d779c6cfcf550a42113a23ca8aab5e2e5826468756d2c4248c"
+      },
+      "facts": {
+        "taskDigest": "sha256:a0dc99e1111fb9bbcd21a4aed59d17fe4e6d651b37a7a637ac17f4d7f231b422",
+        "aFieldFromANewerProfileVersion": "unrecognized"
+      },
+      "provenance": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "entry": "sha256:75fd4a268b09c13ab16af6af68987296498cea8f18054d63d7d26a00714f8d33",
+        "announcementId": "ann-4"
+      }
+    },
+    "profile": {
+      "protocol": "https://jinn.network/record-discovery/1.0",
+      "kind": "https://jinn.network/records/submission/1.0",
+      "profile": "https://jinn.network/records/submission/facts-profile/1.0",
+      "fields": [
+        {
+          "name": "taskDigest",
+          "class": "record",
+          "referenceBearing": true
+        }
+      ]
+    },
+    "recordBytes": {
+      "taskDigest": "sha256:a0dc99e1111fb9bbcd21a4aed59d17fe4e6d651b37a7a637ac17f4d7f231b422"
+    }
+  },
+  "expect": {
+    "facts": "consistent"
+  }
+}

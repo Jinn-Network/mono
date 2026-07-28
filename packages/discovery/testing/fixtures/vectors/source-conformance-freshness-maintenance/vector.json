@@ -1,0 +1,33 @@
+{
+  "name": "source-conformance-freshness-maintenance",
+  "kind": "source-chain",
+  "description": "A source re-signs its head periodically even with nothing new announced -- each successive head's `issuedAt` strictly increases and `refreshBy` stays ahead of it (§7.3).",
+  "input": {
+    "refreshes": [
+      {
+        "payloadType": "application/vnd.jinn.record-discovery.head.v1+json",
+        "payload": "{\"entry\":\"sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642\",\"issuedAt\":\"2026-07-28T00:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"refreshBy\":\"2026-07-28T06:00:00.000Z\",\"sequence\":\"0000000000000001\"}",
+        "signatures": [
+          {
+            "keyid": "key-1",
+            "sig": "fb116143dee8645a13606a97d99e482ab32857289140b4006c692b98481ccd4d:key-1"
+          }
+        ]
+      },
+      {
+        "payloadType": "application/vnd.jinn.record-discovery.head.v1+json",
+        "payload": "{\"entry\":\"sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642\",\"issuedAt\":\"2026-07-28T06:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"refreshBy\":\"2026-07-28T12:00:00.000Z\",\"sequence\":\"0000000000000001\"}",
+        "signatures": [
+          {
+            "keyid": "key-1",
+            "sig": "49c4ce79ad7b8d3b130c74e582199c48b31f04bbf1ad10a3064dbacb5683a83d:key-1"
+          }
+        ]
+      }
+    ]
+  },
+  "expect": {
+    "issuedAtStrictlyIncreasing": true,
+    "refreshByAlwaysAhead": true
+  }
+}

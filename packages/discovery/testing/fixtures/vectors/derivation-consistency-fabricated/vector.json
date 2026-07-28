@@ -1,0 +1,29 @@
+{
+  "name": "derivation-consistency-fabricated",
+  "kind": "derivation-consistency",
+  "description": "The projection's derivation annotation cites a substrate event that never happened -- the substrate, not the projector, is truth (§6.2, §14).",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://jinn.network/records/delivery/1.0",
+        "digest": "sha256:05693908caec3bb636a4f8c0fe9da073b2a8d1fabaae0292924d740d3c3a9cc9"
+      },
+      "facts": {},
+      "locations": [],
+      "provenance": {
+        "source": {
+          "agent": "did:key:zProjector",
+          "name": "marketplace"
+        },
+        "entry": "sha256:54f5e461df159e92564b3c2262bed1c813a5ec66cfd3bbebdc73f776e5bb5168",
+        "announcementId": "ann-derivation-consistency-fabricated",
+        "derivation": {
+          "substrateRef": "sha256:dcb04877671c29db36c45cf3ea8876f66bab3427d8d096156d0b0c1c1d293c65"
+        }
+      }
+    }
+  },
+  "expect": {
+    "derivation": "fabricated"
+  }
+}

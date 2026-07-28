@@ -1,0 +1,18 @@
+{
+  "name": "consumer-head-vs-delivered-divergence",
+  "kind": "consumer",
+  "description": "§9.5: the periodic independent head-vs-delivered comparison finds the relay is 4 entries behind its own advertised head -- downgrade the relay (withholding, not necessarily malicious, but not trusted as complete).",
+  "input": {
+    "relayDeliveredUpTo": {
+      "sequence": "0000000000000005",
+      "entry": "sha256:91693571d8faad590abcff692c9266861a66581c7fe712db7fe2b22575e21323"
+    },
+    "independentlyObservedHead": {
+      "sequence": "0000000000000009",
+      "entry": "sha256:223bfeb54171339182490ae97107cb0240c86f6da45d5a5d4308f1e67d0eaadd"
+    }
+  },
+  "expect": {
+    "downgradeRelay": true
+  }
+}

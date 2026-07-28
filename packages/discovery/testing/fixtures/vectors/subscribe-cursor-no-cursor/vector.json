@@ -1,0 +1,9 @@
+{
+  "name": "subscribe-cursor-no-cursor",
+  "kind": "subscribe",
+  "description": "§9.3: no cursor supplied -- live tail from now.",
+  "input": {},
+  "expect": {
+    "behavior": "live-tail-from-now"
+  }
+}

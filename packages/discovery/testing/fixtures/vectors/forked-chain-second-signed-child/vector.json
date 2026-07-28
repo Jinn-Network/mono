@@ -1,0 +1,90 @@
+{
+  "name": "forked-chain-second-signed-child",
+  "kind": "source-chain",
+  "description": "Two distinct, independently signed entries both name the genesis entry as `previous` at the same sequence -- equivocation with no benign reading (§5.3).",
+  "input": {
+    "seed": {
+      "now": "2026-07-28T12:00:00.000Z",
+      "keys": [
+        {
+          "agent": "did:key:zAgentSourceOne",
+          "keyid": "key-1",
+          "validFrom": "2026-01-01T00:00:00.000Z",
+          "validTo": null,
+          "scope": "jinn:discovery-announcements"
+        }
+      ],
+      "hwm": null
+    },
+    "firstAdoption": true,
+    "genesis": {
+      "protocol": "https://jinn.network/record-discovery/1.0",
+      "source": {
+        "agent": "did:key:zAgentSourceOne",
+        "name": "feed"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00.000Z",
+      "announcements": [
+        {
+          "announcementId": "ann-1",
+          "action": "available",
+          "record": {
+            "kind": "https://jinn.network/records/submission/1.0",
+            "digest": "sha256:59908df50572502ceeabbcc669a28bcc5343d7564a581b9c9648479580f5b773"
+          }
+        }
+      ]
+    },
+    "childA": {
+      "entry": {
+        "protocol": "https://jinn.network/record-discovery/1.0",
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "sequence": "0000000000000002",
+        "previous": "sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642",
+        "timestamp": "2026-07-28T12:00:00.000Z",
+        "announcements": [
+          {
+            "announcementId": "ann-2a",
+            "action": "available",
+            "record": {
+              "kind": "https://jinn.network/records/submission/1.0",
+              "digest": "sha256:a716ed2715d14dc3b76e4225fa45f71dec4fe1796df1c9b06f80343c2993fabc"
+            }
+          }
+        ]
+      },
+      "digest": "sha256:4540bc0e3a35a52bbaf25338b6d686b221f5b118ca4ff50f90b7a3b7d84355f4"
+    },
+    "childB": {
+      "entry": {
+        "protocol": "https://jinn.network/record-discovery/1.0",
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "sequence": "0000000000000002",
+        "previous": "sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642",
+        "timestamp": "2026-07-28T12:00:00.000Z",
+        "announcements": [
+          {
+            "announcementId": "ann-2b",
+            "action": "available",
+            "record": {
+              "kind": "https://jinn.network/records/submission/1.0",
+              "digest": "sha256:634bb6da7f51514123c272e7dd45247dd3385f0bd5b469a39c1c93c7bd86124f"
+            }
+          }
+        ]
+      },
+      "digest": "sha256:7d39faea33541086accbc3e0d1d34e4780f7784e7a19efd8b441c5cef8a4666d"
+    }
+  },
+  "expect": {
+    "status": "forked"
+  }
+}

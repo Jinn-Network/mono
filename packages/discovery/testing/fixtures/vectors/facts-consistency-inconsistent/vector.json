@@ -1,0 +1,42 @@
+{
+  "name": "facts-consistency-inconsistent",
+  "kind": "facts-consistency",
+  "description": "The announced `taskDigest` fact does not match the value recomputed from the record's own bytes -- a signed false statement by the source (§5.4, §10.4 step 2).",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://jinn.network/records/submission/1.0",
+        "digest": "sha256:0f39ce3d274ea10c22b7fbb605018142f5b6d69bcba358bb2798e69d6aa4ee46"
+      },
+      "facts": {
+        "taskDigest": "sha256:5feac0e544fa5277a1592c0dddca28acba997dc59259c91f2bc3020eb09da17d"
+      },
+      "provenance": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "entry": "sha256:5e2d5d1e58e94d7607e0745cd3e612c4a358fc93f37fc5ab1fed8d04bbf7ce77",
+        "announcementId": "ann-1"
+      }
+    },
+    "profile": {
+      "protocol": "https://jinn.network/record-discovery/1.0",
+      "kind": "https://jinn.network/records/submission/1.0",
+      "profile": "https://jinn.network/records/submission/facts-profile/1.0",
+      "fields": [
+        {
+          "name": "taskDigest",
+          "class": "record",
+          "referenceBearing": true
+        }
+      ]
+    },
+    "recordBytes": {
+      "taskDigest": "sha256:43a3a8f016024cd64de56a1ce8efeff6a4230e91826b2408bae0e94f18ef958b"
+    }
+  },
+  "expect": {
+    "facts": "inconsistent"
+  }
+}
