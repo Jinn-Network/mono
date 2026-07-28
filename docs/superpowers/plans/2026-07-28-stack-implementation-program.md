@@ -327,3 +327,32 @@ from npm rather than in-repo portals); all migration-mechanics specs for daemon/
 cutovers; trust §18 steps 3–8 host rollouts (bootstrap identity establishment, policy
 documents replacing allowlists, DSSE convergence, full backend grant-resolution obligations,
 verifier-policy integration).
+
+## 10. Program extension (2026-07-28) — PENDING OPERATOR APPROVAL
+
+Per the operator addendum (integration head `1200b5842`), two reviewed component plans extend
+the program: [2026-07-28-marketplace-binding.md](./2026-07-28-marketplace-binding.md) and
+[2026-07-28-benchmarking-application.md](./2026-07-28-benchmarking-application.md) (both
+fix-then-approve reviewed; all findings applied under rulings §7.19–§7.22). Appended phases,
+in the operator's dependency order — **no extension code before explicit approval**:
+
+- **Phase 5 — extension wave 1** (gates: TEP protocol + profiles + trust + discovery
+  serve/client green — i.e. the Phase 3 boundary): benchmarking records + aggregate + kit
+  (its plan M1–M3) ∥ marketplace binding M0–M5 (scaffold/seam, Attempt-URI agreement,
+  posting + requester-facing backend + native §16.2 conformance, claim/deliver/settle,
+  projector #1, evaluation legs).
+- **Phase 6 — extension wave 2** (gates: Phase 4 backend-local assembly + the TEP engagement
+  widening green): marketplace pipeline (M6, embedding the local backend per §7.18);
+  benchmarking run orchestration (M4–M5, local mode per §7.22); the contract-revision code +
+  Hardhat kit (M7; Hardhat-3 prerequisite checked; **deploys are human-gated runbook items,
+  never program work**); benchmarking facts leaf (M6) into the discovery tree.
+- **Phase 7 — extension wave 3**: benchmarking marketplace mode (its M7, sole
+  marketplace-importing package) over the binding.
+- **Phase 8 — close** (renumbers the original Phase 5): overall program review across the
+  EXTENDED whole, full-program verification, single merge proposal to
+  `integration/evidence-v1`.
+
+Gate-confirmation items for the operator at approval: the `@jinn-network/marketplace-*` npm
+prefix; the benchmarking identifier set (record-kind URIs pre-aligned at fix time to the
+implemented discovery grammar `https://jinn.network/records/benchmark*/1.0`; the bare-token
+`protocol: "jinn.benchmarking/1.0"` field vs TEP's https-URL convention).
