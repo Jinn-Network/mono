@@ -1,0 +1,18 @@
+{
+  "name": "submission-segment-survival",
+  "description": "The submission-scoped log segment (design §6.2) holds submission-accepted/-rejected/-closed events — facts that exist BEFORE or WITHOUT any Attempt. A rejected Submission must stay durable and distinguishable from a never-seen one after restart, so `observe`/`watch` have a defined substrate even when no Attempt was ever engaged.",
+  "submissionEvents": [
+    {
+      "submission": "urn:uuid:00000000-0000-0000-0000-0000000000f9",
+      "seq": 1,
+      "type": "submission-rejected",
+      "time": "2026-07-28T00:00:00.000Z",
+      "details": { "category": "unsupported-requirement", "detail": "attempts: {maxTotal:2} outside the 1..1 the local backend supports" }
+    }
+  ],
+  "expected": {
+    "beforeRestart": { "classification": "rejected", "distinguishableFromNeverSeen": true },
+    "afterRestart": { "classification": "rejected", "distinguishableFromNeverSeen": true },
+    "note": "a Submission URI with no submission-scoped segment entry at all is 'never seen' (unknown); one with a submission-rejected entry is durably 'rejected' — these two must never be confused after a restart rebuilds only from durable records"
+  }
+}

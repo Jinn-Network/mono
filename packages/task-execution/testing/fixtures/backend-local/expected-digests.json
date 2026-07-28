@@ -1,0 +1,27 @@
+{
+  "description": "Pinned-digest golden fixtures (Global Constraints, program §7.14, design §16). Digests are sha256 over the canonical-JSON serialization (code-unit sorted keys, I-JSON integers only) produced by testing/src/backend-local/canonical.ts's `serializeCanonicalFixture`. Each entry includes at least one object-key-sort-sensitive record.",
+  "entries": [
+    {
+      "name": "journal-to-observation-projection",
+      "source": "journals/valid.json",
+      "recordKind": "projected-observation-array",
+      "canonicalizationNote": "each event projects to {id, subject, type} with id = `${source}/${attemptId}/${seq}`; the array is emitted in journal seq order (already sorted — the object-key-sort-sensitivity is inside each element, not the array order)",
+      "expectedDigest": "sha256:f55e28993e0f2ed5ee8821f453346888f8b29a523ff83ef65724b98133e59bc7"
+    },
+    {
+      "name": "launch-plan-out-of-source-order-keys",
+      "recordKind": "LaunchPlan",
+      "canonicalizationNote": "the source record below is written with argv/blameExitCodes/cwd/env/interruptionBehavior/resultContract/validExitCodes intentionally out of alphabetical order (resultContract, argv, validExitCodes, cwd, interruptionBehavior, env, blameExitCodes) — this is the object-key-sort-sensitive record Global Constraints requires; the canonical serializer must still emit code-unit-sorted keys regardless of source order",
+      "sourceRecord": {
+        "resultContract": { "outputSchemaFlag": "--json-schema", "envelopeFormat": "fixture-envelope-v1" },
+        "argv": ["fixture-harness", "--task", "input/task.json"],
+        "validExitCodes": [0],
+        "cwd": "/attempts/fixture/work",
+        "interruptionBehavior": "repeatable",
+        "env": { "STUB_API_KEY": "secrets/api-key", "JINN_ATTEMPT_ID": "urn:uuid:00000000-0000-0000-0000-000000000201" },
+        "blameExitCodes": [{ "match": { "exitCode": 1 }, "blame": "task", "reasonCode": "generic-failure" }]
+      },
+      "expectedDigest": "sha256:e83eb60fd2f1c7e610e614b93c082ede8e2f4e49e5935d1bcd9a59eb1aa63fb6"
+    }
+  ]
+}

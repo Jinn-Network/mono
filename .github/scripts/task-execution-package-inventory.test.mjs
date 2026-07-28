@@ -37,9 +37,29 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     dependencies: ['@jinn-network/task-execution-protocol'],
     devDependencies: [], optionalDependencies: [], peerDependencies: [],
   }],
+  // testing's `./backend-local` slice (backend plan Task A3, program §7.5/Finding (a)) takes
+  // PRODUCTION deps on the four backend-local components (its fake launcher implements the
+  // launchers contract, its fixture families drive supervisor/workspace, its backend-level
+  // suite drives the assembly) — the arrows point one way at production scope: each component
+  // consumes testing back only as a devDependency (see below), so there is no production cycle
+  // (the evidence-tree `local-runtime → execution-recorder` devDep precedent). The
+  // devDependencies below are transitive-only gap-fills: packages testing never imports
+  // directly, but that a production dependency of a production dependency needs resolved
+  // locally instead of from the (unpublished) registry — profiles (workspace/launchers/
+  // assembly's own dependency) and the evidence contract chain (assembly's own dependency;
+  // evidence-repository/-discovery/execution-recorder each depend on evidence-protocol).
   ['testing', {
-    dependencies: ['@jinn-network/task-execution-backend', '@jinn-network/task-execution-protocol'],
-    devDependencies: [], optionalDependencies: [], peerDependencies: [],
+    dependencies: [
+      '@jinn-network/task-execution-backend', '@jinn-network/task-execution-backend-local',
+      '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-protocol',
+      '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
+    ],
+    devDependencies: [
+      '@jinn-network/evidence-discovery', '@jinn-network/evidence-protocol',
+      '@jinn-network/evidence-repository', '@jinn-network/execution-recorder',
+      '@jinn-network/task-execution-profiles',
+    ],
+    optionalDependencies: [], peerDependencies: [],
   }],
   ['profiles', {
     dependencies: ['@jinn-network/task-execution-protocol'],

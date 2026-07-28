@@ -1,0 +1,35 @@
+{
+  "description": "Evidence join scenarios (design §10.1-§10.2, frozen interface §14 item 11). Data-only in Milestone A (Task A3) — consumed by the real evidence recorder join in Milestone C (Task C3).",
+  "scenarios": [
+    {
+      "name": "capture-always-failure-is-failed-infrastructure",
+      "description": "Under evidenceCapture: 'always', a recorder capture failure is failed[infrastructure] — the finalize receipt MUST precede delivered.",
+      "given": { "evidenceCapture": "always", "captureOutcome": "recorder-finalize-threw" },
+      "expected": { "terminalState": "failed", "blame": "infrastructure" }
+    },
+    {
+      "name": "receipt-fields-present-in-delivery",
+      "description": "The finalize receipt {family, digest} + Execution ID enter the Delivery's evidenceRecords/executionIds.",
+      "given": { "finalizeReceipt": { "family": "execution-evidence", "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" }, "executionId": "urn:uuid:00000000-0000-0000-0000-0000000000ee" },
+      "expected": { "delivery": { "evidenceRecords": [{ "family": "execution-evidence", "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" }], "executionIds": ["urn:uuid:00000000-0000-0000-0000-0000000000ee"] } }
+    },
+    {
+      "name": "dispatch-context-artifact-in-captured-inputs",
+      "description": "The dispatch-context artifact written into input/ is registered in the recorder's captured input set, closing the anti-retro-claiming loop.",
+      "given": { "inputDirArtifacts": ["input/task.json", "input/dispatch-context.json"] },
+      "expected": { "recorderCapturedInputsIncludes": "input/dispatch-context.json" }
+    },
+    {
+      "name": "seal-once-checkpoint-crash-reuse",
+      "description": "The Delivery is assembled once from the attempt record, checkpointed atomically, and reused verbatim on any recovery — never re-assembled.",
+      "given": { "checkpointWrittenDigest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "scriptedCrashAfterCheckpoint": true },
+      "expected": { "recoveredDeliveryDigest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "reassembled": false, "reread": true }
+    },
+    {
+      "name": "torn-checkpoint-re-read-variant",
+      "description": "A torn checkpoint (crash mid-write) is re-read, not re-assembled from a partial file — the atomic-publish discipline (temp+fsync+rename+dir-fsync) means a torn write never lands as the checkpoint at all.",
+      "given": { "checkpointWriteTornAt": "mid-rename" },
+      "expected": { "checkpointFilePresent": false, "recoveryReAssemblesFromAttemptRecordExactlyOnce": true }
+    }
+  ]
+}

@@ -36,6 +36,7 @@ const codeEntrypoints = [
   '@jinn-network/task-execution-protocol',
   '@jinn-network/task-execution-backend',
   '@jinn-network/task-execution-testing',
+  '@jinn-network/task-execution-testing/backend-local',
   '@jinn-network/task-execution-profiles',
   '@jinn-network/task-execution-profiles/testing',
   '@jinn-network/task-execution-supervisor',
