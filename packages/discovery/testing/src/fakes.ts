@@ -11,6 +11,7 @@ import type {
   FactsProfileDocument,
   FactsRecompute,
   FreshnessPolicy,
+  HighWaterMark,
   HighWaterMarkStore,
   KeyResolver,
   RecordFactRecompute,
@@ -19,7 +20,6 @@ import type {
   ReferencedBytes,
   ResolvedKey,
   SignatureVerifier,
-  SourceCursor,
   SourceIdentity,
   SubstrateChecker,
 } from "@jinn-network/record-discovery-protocol";
@@ -45,15 +45,13 @@ export interface SeedKey {
 export interface Seed {
   now: string; // ISO instant the fake Clock reports
   keys: SeedKey[]; // key-binding history for KeyResolver
-  hwm: { source: SourceIdentity; cursor: SourceCursor } | null;
+  hwm: { source: SourceIdentity; cursor: HighWaterMark } | null;
   /** digest -> the record's own JSON value (sealed on demand for RecordFetcher/facts recompute). */
   records: Record<string, unknown>;
   /** digest -> the entry's own JSON value (sealed on demand for EntryFetcher). */
   entries: Record<string, unknown>;
   /** Referenced-record digests that are NOT fetchable -- drives `indeterminate` facts. */
   withheldDigests: string[];
-  /** Entry digests the fake reports as reachable on the source's verified chain (§10.4 step 3). */
-  verifiedChainDigests: string[];
   /** The single facts profile active for the item(s) under test. */
   factsProfile: FactsProfileDocument | undefined;
   /** Whether the announcing source is an author source (rejects substrate facts, §5.4 rule 2). */
@@ -68,7 +66,6 @@ export const DEFAULT_SEED: Seed = {
   records: {},
   entries: {},
   withheldDigests: [],
-  verifiedChainDigests: [],
   factsProfile: undefined,
   sourceClass: "projection",
   substrateOutcome: undefined,
@@ -151,7 +148,7 @@ function makeFreshnessPolicy(): FreshnessPolicy {
 }
 
 function makeHighWaterMarkStore(seed: Seed): HighWaterMarkStore {
-  const store = new Map<string, SourceCursor>();
+  const store = new Map<string, HighWaterMark>();
   // Fixture JSON that omits `seed.hwm` entirely (rather than spelling out
   // `"hwm": null`) parses to `undefined`, not `null` -- treat both as "no
   // high-water mark" so a missing key never crashes the fake.
@@ -159,11 +156,11 @@ function makeHighWaterMarkStore(seed: Seed): HighWaterMarkStore {
     store.set(`${seed.hwm.source.agent}/${seed.hwm.source.name}`, seed.hwm.cursor);
   }
   return {
-    async get(source: SourceIdentity): Promise<SourceCursor | undefined> {
+    async get(source: SourceIdentity): Promise<HighWaterMark | undefined> {
       return store.get(`${source.agent}/${source.name}`);
     },
-    async put(source: SourceIdentity, cursor: SourceCursor): Promise<void> {
-      store.set(`${source.agent}/${source.name}`, cursor);
+    async put(source: SourceIdentity, mark: HighWaterMark): Promise<void> {
+      store.set(`${source.agent}/${source.name}`, mark);
     },
   };
 }

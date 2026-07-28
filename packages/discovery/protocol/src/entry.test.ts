@@ -88,4 +88,15 @@ describe("parseAnnouncementEntry", () => {
   it("rejects an entry with an empty announcements array", () => {
     expect(() => parseAnnouncementEntry(genesisEntry({ announcements: [] }))).toThrow();
   });
+
+  it("rejects an entry whose source name is not source-name-shaped (§5.1 pinned grammar, MINOR fix)", () => {
+    expect(() =>
+      parseAnnouncementEntry(genesisEntry({ source: { agent: "urn:uuid:1234", name: "Not_Valid!" } })),
+    ).toThrow();
+  });
+
+  it("accepts an entry whose source name is source-name-shaped", () => {
+    const entry = parseAnnouncementEntry(genesisEntry({ source: { agent: "urn:uuid:1234", name: "a-valid-name-42" } }));
+    expect(entry.source.name).toBe("a-valid-name-42");
+  });
 });

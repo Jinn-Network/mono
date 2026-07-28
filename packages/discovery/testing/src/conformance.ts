@@ -5,9 +5,9 @@ import {
 } from "@jinn-network/record-discovery-protocol";
 import type {
   DiscoveryQueryService,
+  HighWaterMark,
   ItemOutcome,
   SourceChainOutcome,
-  SourceCursor,
   verifyItem,
   verifySourceChain,
 } from "@jinn-network/record-discovery-protocol";
@@ -38,10 +38,17 @@ import { loadVectorsByKind, type Vector } from "./vectors.js";
 // ---------------------------------------------------------------------------
 
 function assertSourceChainOutcome(outcome: SourceChainOutcome, vector: Vector): void {
-  const expected = vector.expect as { status: string; advanced?: SourceCursor };
-  expect(outcome.status, `${vector.name}: ${vector.description}`).toBe(expected.status);
+  const expected = vector.expect as { status: string; at?: string; advanced?: HighWaterMark };
+  const label = `${vector.name}: ${vector.description}`;
+  expect(outcome.status, label).toBe(expected.status);
+  // MINOR-3 (review kit precision): a coarse status match alone lets a
+  // broken-chain outcome pass for the WRONG reason -- assert the precise
+  // `at` detail every broken-chain vector's fixture carries.
+  if (outcome.status === "broken-chain" && expected.at !== undefined) {
+    expect(outcome.at, label).toBe(expected.at);
+  }
   if (outcome.status === "ok" && expected.advanced !== undefined) {
-    expect(outcome.advanced).toEqual(expected.advanced);
+    expect(outcome.advanced, label).toEqual(expected.advanced);
   }
 }
 
@@ -136,10 +143,10 @@ function buildItemCallOpts(vector: Vector): Parameters<typeof verifyItem>[0] {
     const digest = input.item.record.digest;
     const ports = makeInMemoryPorts({
       records: { [digest]: input.recordBytes },
+      entries: input.citedEntry !== undefined ? { [input.item.provenance.entry]: input.citedEntry } : {},
       withheldDigests: input.withheldReferencedDigests ?? [],
       factsProfile: input.profile as never,
       sourceClass: input.sourceClass ?? "projection",
-      verifiedChainDigests: [input.item.provenance.entry],
     });
     return {
       item: input.item,
@@ -151,6 +158,11 @@ function buildItemCallOpts(vector: Vector): Parameters<typeof verifyItem>[0] {
         keys: ports.keys,
         sigs: ports.sigs,
         factsRecompute: ports.factsRecompute,
+        // §10.4 step 3 (BLOCKER fix) now genuinely fetches+parses the cited
+        // entry and checks announcement membership before ever consulting
+        // `verifiedChain` -- this fixed `true` covers ONLY the final
+        // chain-membership sub-check; a fixture without a matching
+        // `citedEntry` still fails step 3 on its own.
         verifiedChain: async () => true,
       },
     };
@@ -162,6 +174,7 @@ function buildItemCallOpts(vector: Vector): Parameters<typeof verifyItem>[0] {
     const ports = makeInMemoryPorts({
       substrateOutcome: outcome,
       records: input.recordBytes !== undefined ? { [digest]: input.recordBytes } : {},
+      entries: input.citedEntry !== undefined ? { [input.item.provenance.entry]: input.citedEntry } : {},
     });
     return {
       item: input.item,
@@ -180,7 +193,8 @@ function buildItemCallOpts(vector: Vector): Parameters<typeof verifyItem>[0] {
   const input = vector.input as ItemVectorInput;
   const digest = input.item.record.digest;
   const seedRecords: Record<string, unknown> = input.fetchedBytes !== undefined ? { [digest]: input.fetchedBytes } : {};
-  const ports = makeInMemoryPorts({ records: seedRecords });
+  const seedEntries: Record<string, unknown> = input.citedEntry !== undefined ? { [input.item.provenance.entry]: input.citedEntry } : {};
+  const ports = makeInMemoryPorts({ records: seedRecords, entries: seedEntries });
   return {
     item: input.item,
     decisionGrade: input.decisionGrade ?? false,
@@ -190,7 +204,7 @@ function buildItemCallOpts(vector: Vector): Parameters<typeof verifyItem>[0] {
       keys: ports.keys,
       sigs: ports.sigs,
       factsRecompute: ports.factsRecompute,
-      verifiedChain: async () => input.citedEntryReachable ?? true,
+      verifiedChain: async () => input.chainVerified ?? true,
     },
   };
 }

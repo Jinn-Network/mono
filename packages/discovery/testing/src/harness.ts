@@ -64,6 +64,8 @@ export interface FactsConsistencyVectorInput {
   sourceClass?: "author" | "projection";
   withheldReferencedDigests?: `sha256:${string}`[];
   decisionGrade?: boolean;
+  /** Raw AnnouncementEntry JSON seeded into the fake EntryFetcher for `item.provenance.entry`, required to clear §10.4 step 3 ahead of the facts-consistency check under test (BLOCKER fix: step 3 now runs for real). */
+  citedEntry?: unknown;
 }
 
 export function isFactsConsistencyInput(input: unknown): input is FactsConsistencyVectorInput {
@@ -74,8 +76,11 @@ export function isFactsConsistencyInput(input: unknown): input is FactsConsisten
 
 export interface ItemVectorInput {
   item: AnnouncedItem;
-  fetchedBytes?: string;
-  citedEntryReachable?: boolean;
+  fetchedBytes?: unknown;
+  /** Raw AnnouncementEntry JSON seeded into the fake EntryFetcher for `item.provenance.entry` (§10.4 step 3, BLOCKER fix) -- absent for vectors that never reach step 3 (e.g. content-corruption). */
+  citedEntry?: unknown;
+  /** Fed to the `verifiedChain` port once the cited entry's own content has corroborated the claimed announcementId/record -- defaults to `true`. */
+  chainVerified?: boolean;
   decisionGrade?: boolean;
 }
 
@@ -96,4 +101,6 @@ export interface DerivationConsistencyVectorInput {
    * reached; the fixtures were corrected to carry matching bytes).
    */
   recordBytes?: unknown;
+  /** Raw AnnouncementEntry JSON seeded into the fake EntryFetcher for `item.provenance.entry`, required to clear §10.4 step 3 ahead of the derivation-consistency check under test (BLOCKER fix: step 3 now runs for real). */
+  citedEntry?: unknown;
 }

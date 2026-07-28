@@ -137,6 +137,15 @@ export function walkLinkage(params: {
     if (node.entry.announcements.length > CEILINGS.itemsPerEntry) {
       return { ok: false, failure: { kind: "entry-ceiling" } };
     }
+    // §5.1: per-item facts card <= CEILINGS.factsCardBytes, hard under the
+    // published-source profile this procedure always verifies against.
+    for (const announcement of node.entry.announcements) {
+      if (announcement.action !== "available") continue;
+      const cardBytes = sealJson(announcement.facts ?? {}).bytes.length;
+      if (cardBytes > CEILINGS.factsCardBytes) {
+        return { ok: false, failure: { kind: "entry-ceiling" } };
+      }
+    }
     walked.push(node);
 
     if (stopAtDigest !== undefined && node.digest === stopAtDigest) {

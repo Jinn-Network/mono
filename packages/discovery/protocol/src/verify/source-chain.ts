@@ -4,7 +4,7 @@ import type { SourceHead } from "../head.js";
 import { splitOrigin } from "../grammar.js";
 import { dssePreAuthEncoding } from "../dsse.js";
 import { checkGlobalChainRules, digestEntries, walkLinkage, type DigestedEntry } from "./chain-rules.js";
-import type { FreshnessPolicy, HighWaterMarkStore, KeyResolver, ResolvedKey, SignatureVerifier } from "./ports.js";
+import type { FreshnessPolicy, HighWaterMark, HighWaterMarkStore, KeyResolver, ResolvedKey, SignatureVerifier } from "./ports.js";
 import type { SourceChainOutcome } from "./outcomes.js";
 
 // Named verification: `source-chain-verification` (design §10.3). The
@@ -98,6 +98,17 @@ export async function verifySourceChain(opts: {
   if (!firstAdoption && highWaterMark === undefined) {
     return { status: "broken-chain", at: "missing-high-water-mark" };
   }
+  // §5.2: `issuedAt` MUST strictly increase on every re-signing. A prior
+  // accepted head's `issuedAt` (persisted on the high-water mark) is the
+  // consumer's own record to be monotonic against -- a presented head that
+  // does not strictly increase on it is a regression (clock rollback or a
+  // maliciously backdated re-sign), never accepted.
+  if (
+    highWaterMark !== undefined &&
+    !(new Date(head.issuedAt).getTime() > new Date(highWaterMark.issuedAt).getTime())
+  ) {
+    return { status: "broken-chain", at: "issued-at-monotonicity" };
+  }
 
   // Materialize the fed entries once; both the global structural checks and
   // the linkage walk need random-access-by-digest.
@@ -135,6 +146,12 @@ export async function verifySourceChain(opts: {
   // orphans history, §10.1); a missing entry signature is broken-chain, a
   // signature by a key never bound to the agent is unauthorized-signer.
   for (const node of walk.walked) {
+    // §16 item 2: each entry's source tuple must equal the head it is
+    // walked under -- an entry from another of this agent's sources (or a
+    // foreign one) must never be accepted as this source's history.
+    if (node.entry.source.agent !== source.agent || node.entry.source.name !== source.name) {
+      return { status: "broken-chain", at: "source-mismatch" };
+    }
     const signature = signatureByDigest.get(node.digest)!;
     if (signature.signatures.length === 0) {
       return { status: "broken-chain", at: "missing-entry-signature" };
@@ -160,8 +177,10 @@ export async function verifySourceChain(opts: {
     }
   }
 
-  // Step 7: advance the high-water mark.
-  const advanced = { sequence: head.sequence, entry: head.entry } as const;
+  // Step 7: advance the high-water mark. Persists `issuedAt` alongside the
+  // chain-position cursor -- the record the NEXT verification's issuedAt
+  // monotonicity check (above) is monotonic against.
+  const advanced: HighWaterMark = { sequence: head.sequence, entry: head.entry, issuedAt: head.issuedAt };
   await hwm.put(source, advanced);
   return { status: "ok", head, advanced };
 }

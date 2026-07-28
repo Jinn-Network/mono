@@ -1,12 +1,16 @@
 import { readFile } from "node:fs/promises";
 
 import {
+  GENESIS_SEQUENCE,
+  RECORD_DISCOVERY_VERSION,
   RECORD_KINDS,
   recordDigest,
+  sealJson,
   verifyItem,
 } from "@jinn-network/record-discovery-protocol";
 import type {
   AnnouncedItem,
+  AnnouncementEntry,
   EntryFetcher,
   KeyResolver,
   RecordFetcher,
@@ -22,14 +26,40 @@ import { TASK_EXECUTION_FACTS_RECOMPUTE } from "./recompute.js";
 // verify-item.test.ts): the leaf's profiles + recompute fns, wired through
 // protocol's real `verifyItem`/`facts-consistency` procedure over genuine
 // sealed task-execution records -- not a hand-simulated comparison. Ports
-// this procedure never calls for an author-source item (entries/keys/sigs)
-// are stubbed to fail loudly if that assumption ever changes.
+// this procedure never calls for an author-source item (keys/sigs) are
+// stubbed to fail loudly if that assumption ever changes. `entries` is now
+// genuinely exercised by §10.4 step 3 (BLOCKER fix) -- `entryFetcherFor`
+// below seeds a real AnnouncementEntry that actually announces the item
+// under test.
 
-const unusedEntryFetcher: EntryFetcher = {
-  async "fetch"(): Promise<Uint8Array> {
-    throw new Error("entries port must not be called for this item verification");
-  },
-};
+/** Builds a genuine AnnouncementEntry announcing `(announcementId, record)`, and an EntryFetcher serving it at its real digest -- the digest to set as `item.provenance.entry`. */
+function entryFetcherFor(params: {
+  source: { agent: string; name: string };
+  announcementId: string;
+  record: { kind: string; digest: `sha256:${string}` };
+}): { entryFetcher: EntryFetcher; entryDigest: `sha256:${string}` } {
+  const entry: AnnouncementEntry = {
+    protocol: RECORD_DISCOVERY_VERSION,
+    source: params.source,
+    sequence: GENESIS_SEQUENCE,
+    previous: null,
+    timestamp: "2026-07-28T12:00:00Z",
+    announcements: [
+      { announcementId: params.announcementId, action: "available", record: params.record },
+    ],
+  };
+  const { bytes, digest } = sealJson(entry);
+  return {
+    entryDigest: digest,
+    entryFetcher: {
+      async "fetch"(requested) {
+        if (requested !== digest) throw new Error(`no entry seeded for ${requested}`);
+        return bytes;
+      },
+    },
+  };
+}
+
 const unusedKeyResolver: KeyResolver = {
   async resolve() {
     throw new Error("keys port must not be called for this item verification");
@@ -68,14 +98,16 @@ describe("facts/task-execution wired into protocol's verifyItem", () => {
     );
 
     const recordFetcher: RecordFetcher = { async "fetch"() { return bytes; } };
+    const source = { agent: "urn:uuid:11111111-1111-1111-1111-111111111111", name: "requester" };
+    const { entryFetcher, entryDigest } = entryFetcherFor({
+      source,
+      announcementId: "a1",
+      record: { kind: RECORD_KINDS.task, digest },
+    });
     const item: AnnouncedItem = {
       record: { kind: RECORD_KINDS.task, digest },
       facts: announcedFacts,
-      provenance: {
-        source: { agent: "urn:uuid:11111111-1111-1111-1111-111111111111", name: "requester" },
-        entry: digest,
-        announcementId: "a1",
-      },
+      provenance: { source, entry: entryDigest, announcementId: "a1" },
     };
 
     const outcome = await verifyItem({
@@ -84,7 +116,7 @@ describe("facts/task-execution wired into protocol's verifyItem", () => {
       decisionGrade: true,
       ports: {
         records: recordFetcher,
-        entries: unusedEntryFetcher,
+        entries: entryFetcher,
         keys: unusedKeyResolver,
         sigs: unusedSignatureVerifier,
         factsRecompute: TASK_EXECUTION_FACTS_RECOMPUTE,
@@ -99,14 +131,16 @@ describe("facts/task-execution wired into protocol's verifyItem", () => {
     const bytes = await loadGoldenTaskBytes();
     const digest = recordDigest(bytes);
     const recordFetcher: RecordFetcher = { async "fetch"() { return bytes; } };
+    const source = { agent: "urn:uuid:11111111-1111-1111-1111-111111111111", name: "requester" };
+    const { entryFetcher, entryDigest } = entryFetcherFor({
+      source,
+      announcementId: "a1",
+      record: { kind: RECORD_KINDS.task, digest },
+    });
     const item: AnnouncedItem = {
       record: { kind: RECORD_KINDS.task, digest },
       facts: { profileUri: "https://not-the-real-profile.example/1.0" },
-      provenance: {
-        source: { agent: "urn:uuid:11111111-1111-1111-1111-111111111111", name: "requester" },
-        entry: digest,
-        announcementId: "a1",
-      },
+      provenance: { source, entry: entryDigest, announcementId: "a1" },
     };
 
     const outcome = await verifyItem({
@@ -115,7 +149,7 @@ describe("facts/task-execution wired into protocol's verifyItem", () => {
       decisionGrade: true,
       ports: {
         records: recordFetcher,
-        entries: unusedEntryFetcher,
+        entries: entryFetcher,
         keys: unusedKeyResolver,
         sigs: unusedSignatureVerifier,
         factsRecompute: TASK_EXECUTION_FACTS_RECOMPUTE,
@@ -151,6 +185,12 @@ describe("facts/task-execution wired into protocol's verifyItem", () => {
         throw new Error(`unexpected fetch: ${requested}`);
       },
     };
+    const submissionSource = { agent: "urn:uuid:eeeeeeee-eeee-5eee-8eee-eeeeeeeeeeee", name: "requester" };
+    const { entryFetcher: submissionEntryFetcher, entryDigest: submissionEntryDigest } = entryFetcherFor({
+      source: submissionSource,
+      announcementId: "a1",
+      record: { kind: RECORD_KINDS.submission, digest },
+    });
     const item: AnnouncedItem = {
       record: { kind: RECORD_KINDS.submission, digest },
       facts: {
@@ -160,11 +200,7 @@ describe("facts/task-execution wired into protocol's verifyItem", () => {
         benchcell: "sha256:2222222222222222222222222222222222222222222222222222222222222222/arm-a/1",
         bencharm: "arm-a",
       },
-      provenance: {
-        source: { agent: "urn:uuid:eeeeeeee-eeee-5eee-8eee-eeeeeeeeeeee", name: "requester" },
-        entry: digest,
-        announcementId: "a1",
-      },
+      provenance: { source: submissionSource, entry: submissionEntryDigest, announcementId: "a1" },
     };
 
     const outcome = await verifyItem({
@@ -173,7 +209,7 @@ describe("facts/task-execution wired into protocol's verifyItem", () => {
       decisionGrade: true,
       ports: {
         records: recordFetcher,
-        entries: unusedEntryFetcher,
+        entries: submissionEntryFetcher,
         keys: unusedKeyResolver,
         sigs: unusedSignatureVerifier,
         factsRecompute: TASK_EXECUTION_FACTS_RECOMPUTE,
@@ -195,13 +231,19 @@ describe("facts/task-execution wired into protocol's verifyItem", () => {
     });
     const digest = recordDigest(deliveryBytes);
     const recordFetcher: RecordFetcher = { async "fetch"() { return deliveryBytes; } };
+    const deliverySource = { agent: "urn:uuid:22222222-2222-2222-2222-222222222222", name: "operator" };
+    const { entryFetcher: deliveryEntryFetcher, entryDigest: deliveryEntryDigest } = entryFetcherFor({
+      source: deliverySource,
+      announcementId: "a1",
+      record: { kind: RECORD_KINDS.delivery, digest },
+    });
     const item: AnnouncedItem = {
       record: { kind: RECORD_KINDS.delivery, digest },
       // No benchrun/benchcell/bencharm announced -- an ordinary, non-benchmarking Delivery.
       facts: { outcome: "fulfilled" },
       provenance: {
-        source: { agent: "urn:uuid:22222222-2222-2222-2222-222222222222", name: "operator" },
-        entry: digest,
+        source: deliverySource,
+        entry: deliveryEntryDigest,
         announcementId: "a1",
       },
     };
@@ -212,7 +254,7 @@ describe("facts/task-execution wired into protocol's verifyItem", () => {
       decisionGrade: true,
       ports: {
         records: recordFetcher,
-        entries: unusedEntryFetcher,
+        entries: deliveryEntryFetcher,
         keys: unusedKeyResolver,
         sigs: unusedSignatureVerifier,
         factsRecompute: TASK_EXECUTION_FACTS_RECOMPUTE,

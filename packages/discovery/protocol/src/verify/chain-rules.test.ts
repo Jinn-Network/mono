@@ -162,4 +162,42 @@ describe("walkLinkage", () => {
     const result = walkLinkage({ byDigest, headEntryDigest: digested[0]!.digest, stopAtDigest: `sha256:${"f".repeat(64)}` });
     expect(result).toEqual({ ok: false, failure: { kind: "linkage" } });
   });
+
+  it("fails with entry-ceiling when an announcement's facts card seals to more than CEILINGS.factsCardBytes (§5.1, MINOR fix)", () => {
+    const genesis = entry({
+      sequence: GENESIS_SEQUENCE,
+      previous: null,
+      announcements: [
+        {
+          announcementId: "ann-oversized-facts",
+          action: "available",
+          record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"a".repeat(64)}` },
+          facts: { blob: "x".repeat(4200) }, // seals to > 4 KiB
+        },
+      ],
+    });
+    const digested = digestEntries([genesis]);
+    const byDigest = new Map(digested.map((d) => [d.digest, d] as const));
+    const result = walkLinkage({ byDigest, headEntryDigest: digested[0]!.digest, stopAtDigest: undefined });
+    expect(result).toEqual({ ok: false, failure: { kind: "entry-ceiling" } });
+  });
+
+  it("accepts an announcement whose facts card seals within CEILINGS.factsCardBytes", () => {
+    const genesis = entry({
+      sequence: GENESIS_SEQUENCE,
+      previous: null,
+      announcements: [
+        {
+          announcementId: "ann-small-facts",
+          action: "available",
+          record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"a".repeat(64)}` },
+          facts: { blob: "x".repeat(10) },
+        },
+      ],
+    });
+    const digested = digestEntries([genesis]);
+    const byDigest = new Map(digested.map((d) => [d.digest, d] as const));
+    const result = walkLinkage({ byDigest, headEntryDigest: digested[0]!.digest, stopAtDigest: undefined });
+    expect(result.ok).toBe(true);
+  });
 });

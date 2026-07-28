@@ -1,12 +1,12 @@
 import type { AnnouncementEntry } from "../entry.js";
 import type { SourceHead } from "../head.js";
-import type { SourceCursor } from "../item.js";
+import type { HighWaterMark } from "./ports.js";
 
 // Typed outcomes for the two named verification procedures (design §16
 // item 11): failures are typed, not boolean.
 
 export type SourceChainOutcome =
-  | { status: "ok"; head: SourceHead; advanced: SourceCursor }
+  | { status: "ok"; head: SourceHead; advanced: HighWaterMark }
   | { status: "stale" } // refreshBy expired
   | { status: "forked"; evidence: { a: SourceHead | AnnouncementEntry; b: SourceHead | AnnouncementEntry } } // equivocation -- evidence-bearing
   | { status: "broken-chain"; at: string } // linkage, contiguity, ceiling, or duplicate-announcementId failure -- sequence or entry digest

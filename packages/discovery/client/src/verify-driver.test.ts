@@ -121,7 +121,7 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
   it("verifyForDecision rejects an item citing an entry that was never verified onto the source's chain (unauthorized-provenance)", async () => {
     const vector = loadVectorsByKind("item").find((v) => v.name === "item-unauthorized-provenance");
     expect(vector).toBeDefined();
-    const input = vector!.input as { item: AnnouncedItem; fetchedBytes: unknown };
+    const input = vector!.input as { item: AnnouncedItem; fetchedBytes: unknown; citedEntry: unknown };
 
     const trust = createTrustAdapter({
       bindingResolver: makeFakeBindingResolver([]),
@@ -134,7 +134,17 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
       factsProfiles: { get: () => undefined },
       factsRecompute: { get: () => undefined },
       records: { "fetch": async () => sealJson(input.fetchedBytes).bytes },
-      entries: { "fetch": async () => new Uint8Array() },
+      // The cited entry is REAL and genuinely announces this item (§10.4
+      // step 3's membership check passes) -- it is simply never run through
+      // `verifySource`, so the driver's own verified-chain set never
+      // records it. The rejection below is for the chain-membership
+      // reason the vector is named for, not a fetch/digest mismatch.
+      entries: {
+        "fetch": async (digest) => {
+          if (digest !== input.item.provenance.entry) throw new Error(`unexpected entry fetch: ${digest}`);
+          return sealJson(input.citedEntry).bytes;
+        },
+      },
       now: () => new Date("2026-07-28T12:00:00.000Z"),
     });
     // No verifySource call for this item's source -- its cited entry is

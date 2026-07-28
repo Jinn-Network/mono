@@ -4,6 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { recordDigest } from "../hashing.js";
+import { sealJson } from "../sealing.js";
+import { RECORD_DISCOVERY_VERSION, GENESIS_SEQUENCE } from "../identifiers.js";
+import type { AnnouncementEntry } from "../entry.js";
 import type { AnnouncedItem } from "../item.js";
 import { verifyItem } from "./item.js";
 import type {
@@ -45,11 +48,6 @@ function loadAnnotation(): Record<string, unknown> {
   return JSON.parse(readFileSync(fileURLToPath(fixtureUrl), "utf8")) as Record<string, unknown>;
 }
 
-const unusedEntryFetcher: EntryFetcher = {
-  async "fetch"(): Promise<Uint8Array> {
-    throw new Error("entries port must not be called for this item verification");
-  },
-};
 const unusedKeyResolver: KeyResolver = {
   async resolve() {
     throw new Error("keys port must not be called for this item verification");
@@ -84,12 +82,39 @@ describe("derivation annotation extensibility (ruling §7.21, Addendum 2026-07-2
     const bytes = new TextEncoder().encode(JSON.stringify({ hello: "world" }));
     const digest = recordDigest(bytes);
     const recordFetcher: RecordFetcher = { async "fetch"() { return bytes; } };
+    const recordKind = "https://jinn.network/records/delivery/1.0";
+
+    // §10.4 step 3 (BLOCKER fix) fetches and parses the cited entry before
+    // any derivation-consistency check runs -- seed a real entry (its OWN
+    // digest, distinct from the record's digest) whose announcements[]
+    // genuinely announces this item.
+    const citedEntry: AnnouncementEntry = {
+      protocol: RECORD_DISCOVERY_VERSION,
+      source: { agent: "did:key:zProjector", name: "marketplace" },
+      sequence: GENESIS_SEQUENCE,
+      previous: null,
+      timestamp: "2026-07-28T12:00:00Z",
+      announcements: [
+        {
+          announcementId: "a1",
+          action: "available",
+          record: { kind: recordKind, digest },
+        },
+      ],
+    };
+    const { bytes: citedEntryBytes, digest: entryDigest } = sealJson(citedEntry);
+    const entryFetcher: EntryFetcher = {
+      async "fetch"(requested) {
+        if (requested !== entryDigest) throw new Error(`no entry seeded for ${requested}`);
+        return citedEntryBytes;
+      },
+    };
 
     const item: AnnouncedItem = {
-      record: { kind: "https://jinn.network/records/delivery/1.0", digest },
+      record: { kind: recordKind, digest },
       provenance: {
         source: { agent: "did:key:zProjector", name: "marketplace" },
-        entry: digest,
+        entry: entryDigest,
         announcementId: "a1",
         derivation,
       },
@@ -108,7 +133,7 @@ describe("derivation annotation extensibility (ruling §7.21, Addendum 2026-07-2
       decisionGrade: true,
       ports: {
         records: recordFetcher,
-        entries: unusedEntryFetcher,
+        entries: entryFetcher,
         keys: unusedKeyResolver,
         sigs: unusedSignatureVerifier,
         factsRecompute: noFactsRecompute,

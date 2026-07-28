@@ -11,7 +11,7 @@ import type { FactsProfileDocument } from "@jinn-network/record-discovery-protoc
 // backed by a file or a database) satisfies that same shape; the in-memory
 // variant this package builds for cold/warm sync (Task 19) is one such
 // implementation.
-export type { HighWaterMarkStore, ResolvedKey } from "@jinn-network/record-discovery-protocol";
+export type { HighWaterMark, HighWaterMarkStore, ResolvedKey } from "@jinn-network/record-discovery-protocol";
 
 export interface TransportResponse {
   status: number;

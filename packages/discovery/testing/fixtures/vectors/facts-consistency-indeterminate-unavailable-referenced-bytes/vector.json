@@ -17,7 +17,7 @@
           "agent": "did:key:zAgentSourceOne",
           "name": "feed"
         },
-        "entry": "sha256:edda7b47233f9790fcc6d116d0a0c0eac38a5d6e44b7cf0c002c6d30bfa61e74",
+        "entry": "sha256:eca1eee408ec70a38a24b772b4836a8fcbd03efe9319aa16674e83fcf0c6a633",
         "announcementId": "ann-2"
       }
     },
@@ -44,7 +44,27 @@
     "withheldReferencedDigests": [
       "sha256:bf65fe8d29c8b3945c76a22c27775b3b6b2f38168e7f7a4d262314943160bc28"
     ],
-    "decisionGrade": true
+    "decisionGrade": true,
+    "citedEntry": {
+      "protocol": "https://jinn.network/record-discovery/1.0",
+      "source": {
+        "agent": "did:key:zAgentSourceOne",
+        "name": "feed"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00Z",
+      "announcements": [
+        {
+          "announcementId": "ann-2",
+          "action": "available",
+          "record": {
+            "kind": "https://jinn.network/records/submission/1.0",
+            "digest": "sha256:3bb0ec9c0252184d0ba51109f1f8d4fb0dab6cd0f36cecfa2fb7dde90b939a27"
+          }
+        }
+      ]
+    }
   },
   "expect": {
     "facts": "indeterminate",

@@ -74,7 +74,8 @@
     "status": "ok",
     "advanced": {
       "sequence": "0000000000000001",
-      "entry": "sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642"
+      "entry": "sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642",
+      "issuedAt": "2026-07-28T12:00:00.000Z"
     }
   }
 }
