@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'task-execution');
-const taskExecutionDirectories = ['protocol', 'backend', 'testing'];
+const taskExecutionDirectories = ['protocol', 'backend', 'testing', 'profiles'];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
   join(root, 'client'),
@@ -182,6 +182,30 @@ const TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_BACKEND = [
   '@jinn-network/task-execution-testing',
 ];
 
+// profiles depends on protocol only (program §7.3/§7.15; plan Global Constraints): every other
+// task-execution sibling is forbidden, same as the foreign-package boundary.
+const TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_PROFILES = [
+  '@jinn-network/task-execution-backend',
+  '@jinn-network/task-execution-testing',
+];
+
+// profiles' approved production/dev dependency inventory (plan Task 1 Step 3; sorted, code
+// unit). New dependencies require a plan/design amendment, not an ad hoc guard edit.
+const PROFILES_ALLOWED_DEPENDENCIES = [
+  '@jinn-network/task-execution-protocol',
+  '@noble/hashes',
+  'ajv',
+  'canonicalize',
+  'safe-regex',
+  'zod',
+];
+const PROFILES_ALLOWED_DEV_DEPENDENCIES = [
+  '@types/node',
+  '@types/safe-regex',
+  'typescript',
+  'vitest',
+];
+
 test('task-execution source boundaries remain one-way across the approved graph', () => {
   assertBoundary(join(packages, 'protocol', 'src'), ['@jinn-network/']);
   assertBoundary(join(packages, 'protocol', 'src'), TASK_EXECUTION_FOREIGN_PACKAGES);
@@ -196,6 +220,27 @@ test('task-execution source boundaries remain one-way across the approved graph'
   // testing depends on protocol + backend only: both import freely, every foreign package and
   // every other task-execution sibling (none yet besides protocol/backend) are forbidden.
   assertBoundary(join(packages, 'testing', 'src'), TASK_EXECUTION_FOREIGN_PACKAGES);
+
+  // profiles depends on protocol only: every foreign package and every other task-execution
+  // sibling (backend, testing) are forbidden.
+  assertBoundary(
+    join(packages, 'profiles', 'src'),
+    [...TASK_EXECUTION_FOREIGN_PACKAGES, ...TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_PROFILES],
+  );
+});
+
+test('profiles production and development dependency inventories match the approved design', () => {
+  const manifest = JSON.parse(readFileSync(join(packages, 'profiles', 'package.json'), 'utf8'));
+  assert.deepEqual(
+    Object.keys(manifest.dependencies ?? {}).sort(),
+    PROFILES_ALLOWED_DEPENDENCIES,
+    'profiles production dependencies must match the approved design inventory',
+  );
+  assert.deepEqual(
+    Object.keys(manifest.devDependencies ?? {}).sort(),
+    PROFILES_ALLOWED_DEV_DEPENDENCIES,
+    'profiles development dependencies must match the approved toolchain',
+  );
 });
 
 test('locale-sensitive API detection catches member calls, optional chaining, and Intl', () => {

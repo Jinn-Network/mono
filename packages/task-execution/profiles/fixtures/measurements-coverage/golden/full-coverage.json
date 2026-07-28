@@ -1,0 +1,12 @@
+{
+  "input": {
+    "spec": {
+      "measurements": [
+        { "name": "passed", "type": "boolean", "required": true },
+        { "name": "duration_seconds", "type": "number", "required": false }
+      ]
+    },
+    "delivered": { "passed": true }
+  },
+  "expect": { "ok": true }
+}

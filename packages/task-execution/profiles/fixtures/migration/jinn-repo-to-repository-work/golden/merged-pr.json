@@ -1,0 +1,25 @@
+{
+  "input": {
+    "instance_id": "jinn-repo-000123",
+    "repo": "Jinn-Network/mono",
+    "base_commit": "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    "problem_statement": "Fix the slug normalization bug in the discovery indexer.",
+    "language": "typescript",
+    "source": "merged-pr"
+  },
+  "expect": {
+    "instructions": "Fix the slug normalization bug in the discovery indexer.",
+    "payload": {
+      "instance_id": "jinn-repo-000123",
+      "language": "typescript",
+      "provenance": { "kind": "mined" }
+    },
+    "inputs": [
+      {
+        "name": "repository-state",
+        "uri": "https://github.com/Jinn-Network/mono",
+        "annotations": { "ref": "abcdefabcdefabcdefabcdefabcdefabcdefabcd" }
+      }
+    ]
+  }
+}

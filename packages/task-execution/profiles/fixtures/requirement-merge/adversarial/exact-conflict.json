@@ -1,0 +1,8 @@
+{
+  "input": {
+    "task": { "isolationPolicy": "sandboxed" },
+    "submission": { "isolationPolicy": "unrestricted" },
+    "keyClasses": { "isolationPolicy": "exact" }
+  },
+  "expect": { "ok": false, "category": "invalid-document", "key": "isolationPolicy" }
+}

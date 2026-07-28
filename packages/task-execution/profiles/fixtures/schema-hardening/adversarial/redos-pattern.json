@@ -1,0 +1,6 @@
+{
+  "input": {
+    "schema": { "type": "string", "pattern": "(a+)+$" }
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

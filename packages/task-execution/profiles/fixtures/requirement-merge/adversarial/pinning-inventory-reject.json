@@ -1,0 +1,13 @@
+{
+  "_label": "backend-capability-path DATA — NOT executed through mergeRequirements (program §7.3). `unsupported-requirement` is produced by a backend's capability check over its declared runPinning inventory, never by the pure merge. This kit asserts only that the fixture is well-formed; requirement-merge.test.ts excludes it from the mergeRequirements execution loop by name.",
+  "input": {
+    "submissionRequirementKey": "customHarnessFlag",
+    "declaredKeyClass": "addable",
+    "backendDeclaredCapabilityKeys": ["harness", "model", "loadout", "isolationPolicy"]
+  },
+  "expect": {
+    "ok": false,
+    "category": "unsupported-requirement",
+    "key": "customHarnessFlag"
+  }
+}

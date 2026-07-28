@@ -1,0 +1,4 @@
+{
+  "input": { "name": "sandbox-provisioning-timeout", "disposition": "retryable-infrastructure" },
+  "expect": { "name": "sandbox-provisioning-timeout", "disposition": "retryable-infrastructure" }
+}
