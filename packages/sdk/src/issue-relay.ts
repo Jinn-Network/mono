@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod/v3';
 import { GitHubRepositorySlugSchema } from './autopilot-session.js';
 
@@ -270,6 +271,25 @@ function correlationsMatch(
     && left.deliveryEnvelopeCid === right.deliveryEnvelopeCid;
 }
 
+/** RFC 8785-compatible serialization for the JSON values used by Relay receipts. */
+function canonicalJson(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const keys = Object.keys(value as Record<string, unknown>).sort();
+    return `{${keys
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function hashAcceptedAdoptionReceipt(
+  receipt: z.infer<typeof AcceptedIssueRelayAdoptionReceiptV1Schema>,
+): `sha256:${string}` {
+  return `sha256:${createHash('sha256').update(canonicalJson(receipt)).digest('hex')}`;
+}
+
 export const IssueRelayEvaluationContextV1Schema = z.object({
   schemaVersion: z.literal('jinn-issue-relay-evaluation-context.v1'),
   goal: z.object({
@@ -314,6 +334,7 @@ export const IssueRelayEvaluationContextV1Schema = z.object({
     ctx.addIssue({ code: z.ZodIssueCode.custom, path, message });
   };
   const { round, correlation, reviewTarget, adoptionReceipt, evaluationAnchor } = value;
+  const expectedAdoptionReceiptDigest = hashAcceptedAdoptionReceipt(adoptionReceipt);
 
   if (value.goal.snapshotDigest !== round.snapshotDigest) {
     reject(['goal', 'snapshotDigest'], 'Goal snapshotDigest must match round');
@@ -349,6 +370,7 @@ export const IssueRelayEvaluationContextV1Schema = z.object({
   const receiptBindings: Array<[unknown, unknown, Array<string | number>, string]> = [
     [adoptionReceipt.targetRepository, reviewTarget.targetRepository, ['adoptionReceipt', 'targetRepository'], 'target repository'],
     [adoptionReceipt.workspaceRepository, reviewTarget.workspaceRepository, ['adoptionReceipt', 'workspaceRepository'], 'workspace repository'],
+    [adoptionReceipt.issueNumber, reviewTarget.issueNumber, ['adoptionReceipt', 'issueNumber'], 'issue number'],
     [adoptionReceipt.prNumber, reviewTarget.prNumber, ['adoptionReceipt', 'prNumber'], 'PR number'],
     [adoptionReceipt.headRef, reviewTarget.headRef, ['adoptionReceipt', 'headRef'], 'head ref'],
     [adoptionReceipt.resultingHead, reviewTarget.evaluatedHead, ['adoptionReceipt', 'resultingHead'], 'evaluated head'],
@@ -364,6 +386,7 @@ export const IssueRelayEvaluationContextV1Schema = z.object({
     [evaluationAnchor.baseOid, reviewTarget.baseOid, ['evaluationAnchor', 'baseOid'], 'base OID'],
     [evaluationAnchor.headRef, reviewTarget.headRef, ['evaluationAnchor', 'headRef'], 'head ref'],
     [evaluationAnchor.evaluatedHead, reviewTarget.evaluatedHead, ['evaluationAnchor', 'evaluatedHead'], 'evaluated head'],
+    [evaluationAnchor.adoptionReceiptDigest, expectedAdoptionReceiptDigest, ['evaluationAnchor', 'adoptionReceiptDigest'], 'adoption receipt digest'],
     [evaluationAnchor.checksDigest, value.checks.digest, ['evaluationAnchor', 'checksDigest'], 'checks digest'],
   ];
   for (const [actual, expected, path, label] of anchorBindings) {

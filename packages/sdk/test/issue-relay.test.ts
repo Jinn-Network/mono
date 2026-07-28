@@ -122,7 +122,7 @@ const anchor = {
   baseOid: oid,
   headRef: 'relay/1889',
   evaluatedHead: '2'.repeat(40),
-  adoptionReceiptDigest: `sha256:${'c'.repeat(64)}`,
+  adoptionReceiptDigest: 'sha256:3dafed6b323a92e7d5aa1c011490270f24f853da52da2fd18aba43cfbdc398c3',
   checksDigest: `sha256:${'d'.repeat(64)}`,
   anchoredAt: '2026-07-28T12:01:00.000Z',
 };
@@ -188,6 +188,20 @@ describe('Issue Relay evidence contracts', () => {
       evaluationAnchor: {
         ...anchor,
         correlation: { ...correlation, requestId: 'other-request' },
+      },
+    }).success).toBe(false);
+  });
+
+  it('binds the accepted receipt issue number and canonical digest exactly', () => {
+    expect(IssueRelayEvaluationContextV1Schema.safeParse({
+      ...context,
+      adoptionReceipt: { ...acceptedReceipt, issueNumber: 1890 },
+    }).success).toBe(false);
+    expect(IssueRelayEvaluationContextV1Schema.safeParse({
+      ...context,
+      evaluationAnchor: {
+        ...anchor,
+        adoptionReceiptDigest: `sha256:${'c'.repeat(64)}`,
       },
     }).success).toBe(false);
   });
