@@ -70,3 +70,20 @@ export type {
 // --- today-mode posting + digest-join (§6.1; M2.3) ---
 export { MARKETPLACE_MANIFEST_DIGEST_SENTINEL, encodeCreateTaskCalldata, postTask } from "./posting.js";
 export type { PostingPorts, PostingTerms, SafeBroadcastPort } from "./posting.js";
+
+// --- capabilities() with the attested run-pinning posture (§7, profiles §5.2; M2.4) ---
+export { MARKETPLACE_CORE_KEY_CLASSES, marketplaceCapabilities } from "./capabilities.js";
+
+// --- the requester-facing TaskExecutionBackend (§13, Finding F2; M2.4) ---
+export { makeMarketplaceBackend } from "./backend.js";
+export type { MarketplaceTestableBackend } from "./backend.js";
+export type {
+  MarketplaceBackendPorts,
+  MarketplaceObservePort,
+  RecordSubmissionInput,
+  SubmissionScopeRecord,
+} from "./backend-ports.js";
+
+// --- the reference in-memory MarketplaceObservePort (stub self-claim, design §5.3; M2.4) ---
+export { createInMemoryMarketplaceObserveStore } from "./observe-store.js";
+export type { InMemoryMarketplaceObserveStore } from "./observe-store.js";

@@ -1,0 +1,203 @@
+// SPDX-License-Identifier: MIT
+
+// The requester-facing `TaskExecutionBackend` (design §13 read together with Finding F2: the
+// design's §13 "the TEP kit runs against this binding" implies a requester-facing backend
+// subject; this module makes it explicit). `submit` posts (today-mode, via posting.ts);
+// `observe`/`deliveries`/`fetchDelivery` project through the injected `MarketplaceObservePort`
+// (the real projector, Milestone M4, is not yet built -- see backend-ports.ts); `cancel` is
+// honestly unimplemented at this milestone (wires to lifecycle.ts, Milestone M3.4).
+//
+// This module implements the `TestableBackend` SEAM structurally (ruling §7.19: "any backend put
+// under the core kit implements its `TestableBackend` seam explicitly") WITHOUT importing the
+// type from `@jinn-network/task-execution-testing` -- that package is forbidden to `binding` by
+// the source-boundaries guard (testing-only concerns live in the `marketplace-testing` tree,
+// M2.5). `MarketplaceTestableBackend` below is a local, hand-rolled type matching that seam's
+// exact shape; TypeScript's structural typing lets `marketplace-testing` pass this backend to
+// `describeTaskExecutionBackendContract` without a cast.
+import { TaskExecutionError, type BackendCapabilities, type CancelAck, type DeliveryRef, type ObservationCursor, type ObservationSnapshot, type PreflightReport, type PreflightRequest, type ReconciliationReport, type SubmissionAck, type SubmissionUri, type TaskExecutionBackend } from "@jinn-network/task-execution-backend";
+import { documentDigest, mergeRequirements, validateSubmission, validateTask, type ProtocolObservation, type SubmissionRecord, type TaskSpecification } from "@jinn-network/task-execution-protocol";
+import type { MarketplaceChainConfig } from "./addresses.js";
+import { BroadcastUncertainError } from "./broadcast-intent.js";
+import { MARKETPLACE_CORE_KEY_CLASSES, marketplaceCapabilities } from "./capabilities.js";
+import { honorOrRejectToday } from "./honor-or-reject.js";
+import { postTask } from "./posting.js";
+import type { MarketplaceBackendPorts } from "./backend-ports.js";
+
+type AttemptUri = `urn:uuid:${string}`;
+
+/** The `TestableBackend` seam, implemented structurally -- see the module doc for why this is not imported. */
+export interface MarketplaceTestableBackend extends TaskExecutionBackend {
+  drive(attempt: AttemptUri, observations: readonly ProtocolObservation[]): Promise<void>;
+  recordDelivery(attempt: AttemptUri, deliveryBytes: Uint8Array): Promise<void>;
+  simulateReconciliation(ref: SubmissionUri | AttemptUri, outcome: ReconciliationReport): void;
+}
+
+function decodeJson(bytes: Uint8Array): unknown {
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/**
+ * The requester-facing marketplace `TaskExecutionBackend` (design §7, §13). `config` selects the
+ * chain-generation-specific addresses (M0.3); `ports` supplies the posting mechanics (M2.3) and
+ * the observation surface (M2.4, standing in for the not-yet-built projector).
+ */
+export function makeMarketplaceBackend(
+  config: MarketplaceChainConfig,
+  ports: MarketplaceBackendPorts,
+): MarketplaceTestableBackend {
+  async function capabilities(): Promise<BackendCapabilities> {
+    return marketplaceCapabilities();
+  }
+
+  async function submit(taskBytes: Uint8Array, submissionBytes: Uint8Array): Promise<SubmissionAck> {
+    let taskParsed: unknown;
+    let submissionParsed: unknown;
+    try {
+      taskParsed = decodeJson(taskBytes);
+    } catch (err) {
+      return { accepted: false, error: new TaskExecutionError("invalid-document", { detail: `Task bytes are not valid JSON: ${String(err)}` }) };
+    }
+    try {
+      submissionParsed = decodeJson(submissionBytes);
+    } catch (err) {
+      return { accepted: false, error: new TaskExecutionError("invalid-document", { detail: `Submission bytes are not valid JSON: ${String(err)}` }) };
+    }
+
+    const taskValidation = validateTask(taskParsed);
+    if (!taskValidation.conforms) {
+      return {
+        accepted: false,
+        error: new TaskExecutionError("invalid-document", {
+          detail: taskValidation.errors.map((e) => `${e.path}: ${e.message}`).join("; "),
+        }),
+      };
+    }
+    const submissionValidation = validateSubmission(submissionParsed);
+    if (!submissionValidation.conforms) {
+      return {
+        accepted: false,
+        error: new TaskExecutionError("invalid-document", {
+          detail: submissionValidation.errors.map((e) => `${e.path}: ${e.message}`).join("; "),
+        }),
+      };
+    }
+
+    const task = taskParsed as TaskSpecification;
+    const submission = submissionParsed as SubmissionRecord;
+
+    // TEP §12.2 idempotent resubmission: same (requester, idempotencyKey) scope. Byte-identical
+    // resubmission returns the existing ack; a same-key/different-bytes resubmission is a typed
+    // `submission-conflict`. This is a DIFFERENT concern from postTask's broadcast-crash WAL
+    // (broadcast-intent.ts) -- that guards the chain broadcast itself, this guards the
+    // application-level submit contract.
+    const existingScope = await ports.observe.lookupSubmissionByScope(submission.requester, submission.idempotencyKey);
+    if (existingScope !== undefined) {
+      if (bytesEqual(existingScope.submissionBytes, submissionBytes)) {
+        return { accepted: true, submission: existingScope.submissionUri, digest: existingScope.digest };
+      }
+      return {
+        accepted: false,
+        error: new TaskExecutionError("submission-conflict", {
+          detail: `idempotencyKey "${submission.idempotencyKey}" already used with different Submission bytes in this scope`,
+        }),
+      };
+    }
+
+    const merged = mergeRequirements(task.requirements, submission.requirements, MARKETPLACE_CORE_KEY_CLASSES);
+    if (!merged.ok) {
+      return {
+        accepted: false,
+        error: new TaskExecutionError("invalid-document", {
+          detail: `requirement "${merged.key}" does not satisfy its comparison class between Task and Submission`,
+          annotations: { key: merged.key },
+        }),
+      };
+    }
+
+    const backendCapabilities = await marketplaceCapabilities();
+    const honorResult = honorOrRejectToday(submission, merged.effective, backendCapabilities);
+    if (!honorResult.ok) {
+      return {
+        accepted: false,
+        error: new TaskExecutionError(honorResult.category, {
+          detail: `today-mode cannot honor requirement "${honorResult.key}" (TEP §8 forbids silent degradation; ruling §7.20)`,
+          annotations: { key: honorResult.key },
+        }),
+      };
+    }
+
+    let outcome;
+    try {
+      outcome = await postTask(taskBytes, submissionBytes, ports.terms, config, ports.creatorSafe, ports.posting);
+    } catch (err) {
+      if (err instanceof TaskExecutionError) return { accepted: false, error: err };
+      if (err instanceof BroadcastUncertainError) {
+        return {
+          accepted: false,
+          error: new TaskExecutionError("backend-unavailable", { detail: err.message, retryable: true }),
+        };
+      }
+      throw err;
+    }
+
+    const taskDigest = documentDigest(taskBytes);
+    const submissionDigest = documentDigest(submissionBytes);
+    await ports.observe.recordSubmission({
+      taskDigest,
+      submissionDigest,
+      submissionBytes,
+      submission,
+      outcome,
+    });
+
+    return { accepted: true, submission: submission.submission as SubmissionUri, digest: submissionDigest };
+  }
+
+  async function observe(ref: SubmissionUri | AttemptUri): Promise<ObservationSnapshot> {
+    return ports.observe.observe(ref);
+  }
+
+  async function recover(ref: SubmissionUri | AttemptUri): Promise<ReconciliationReport> {
+    return ports.observe.recover(ref);
+  }
+
+  async function deliveries(attempt: AttemptUri): Promise<DeliveryRef[]> {
+    return ports.observe.deliveries(attempt);
+  }
+
+  async function fetchDelivery(ref: DeliveryRef): Promise<Uint8Array> {
+    return ports.observe.fetchDelivery(ref);
+  }
+
+  async function drive(attempt: AttemptUri, observations: readonly ProtocolObservation[]): Promise<void> {
+    return ports.observe.drive(attempt, observations);
+  }
+
+  async function recordDelivery(attempt: AttemptUri, deliveryBytes: Uint8Array): Promise<void> {
+    return ports.observe.recordDelivery(attempt, deliveryBytes);
+  }
+
+  function simulateReconciliation(ref: SubmissionUri | AttemptUri, outcome: ReconciliationReport): void {
+    ports.observe.simulateReconciliation(ref, outcome);
+  }
+
+  return {
+    capabilities,
+    submit,
+    observe,
+    recover,
+    deliveries,
+    fetchDelivery,
+    drive,
+    recordDelivery,
+    simulateReconciliation,
+  };
+}
+
+export type { PreflightReport, PreflightRequest, CancelAck };

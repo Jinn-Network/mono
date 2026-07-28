@@ -49,7 +49,7 @@ export interface PostingIntentStore {
 export function createInMemoryPostingIntentStore(): PostingIntentStore {
   const byKey = new Map<string, PostingIntentRecord>();
   const keyOf = (key: PostingIntentKey): string =>
-    `${key.creatorSafe.toLowerCase()}${key.taskCidDigest}${key.submissionDigest}`;
+    `${key.creatorSafe.toLowerCase()}|${key.taskCidDigest}|${key.submissionDigest}`;
 
   return {
     async persist(intent) {
