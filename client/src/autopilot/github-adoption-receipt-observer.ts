@@ -1,8 +1,8 @@
 import {
   AutopilotCorrelationSchema,
-  AutopilotMutationResultSchema,
   AutopilotReviewResultSchema,
   JinnRepoTaskSchema,
+  bindAutopilotMutationDeliveryResult,
   parseAutopilotAdoptionReceiptComment,
   type AutopilotAdoptionReceipt,
   type AutopilotAdoptionRejectionReason,
@@ -690,7 +690,6 @@ function persistedExpectation(run: PersistedTaskRun):
   if (
     run.taskId === null
     || run.attemptIndex === null
-    || run.manifestCid === null
     || run.adoptionReceiptLocation === null
     || run.adoptionReceiptAuthors === null
     || run.solutionOutputsJson === null
@@ -742,13 +741,29 @@ function persistedExpectation(run: PersistedTaskRun):
     solutionPayload?: unknown;
     verdictPayload?: unknown;
   };
-  const parsedResult = role === 'solution'
-    ? AutopilotMutationResultSchema.safeParse(payload.solutionPayload)
-    : AutopilotReviewResultSchema.safeParse(payload.verdictPayload);
-  if (!parsedResult.success) {
-    return { error: `persisted ${role} output failed its strict SDK schema` };
+  let parsedResult: AutopilotMutationResult | AutopilotReviewResult;
+  if (role === 'solution') {
+    if (!run.manifestCid) {
+      return { error: 'persisted solution envelope CID is unavailable' };
+    }
+    try {
+      parsedResult = bindAutopilotMutationDeliveryResult(
+        payload.solutionPayload,
+        run.manifestCid,
+      );
+    } catch {
+      return { error: 'persisted solution output failed its strict SDK schema' };
+    }
+  } else {
+    const parsedReview = AutopilotReviewResultSchema.safeParse(
+      payload.verdictPayload,
+    );
+    if (!parsedReview.success) {
+      return { error: 'persisted verdict output failed its strict SDK schema' };
+    }
+    parsedResult = parsedReview.data;
   }
-  const correlation = parsedResult.data.correlation;
+  const correlation = parsedResult.correlation;
   if (
     correlation.taskId !== run.taskId
     || correlation.attemptIndex !== run.attemptIndex
@@ -768,12 +783,12 @@ function persistedExpectation(run: PersistedTaskRun):
         correlation,
         operation: operationForMutation(
           task.session,
-          parsedResult.data as AutopilotMutationResult,
+          parsedResult as AutopilotMutationResult,
         ),
         acceptedAllowed:
-          (parsedResult.data as AutopilotMutationResult).outcome
+          (parsedResult as AutopilotMutationResult).outcome
             === 'mutation-complete',
-        ...((parsedResult.data as AutopilotMutationResult).outcome === 'human'
+        ...((parsedResult as AutopilotMutationResult).outcome === 'human'
           ? { rejectedReason: 'policy-human' as const }
           : {}),
         authors: task.session.receiptAuthors,
@@ -782,7 +797,7 @@ function persistedExpectation(run: PersistedTaskRun):
         role,
         correlation,
         operation: operationForReview(
-          parsedResult.data as AutopilotReviewResult,
+          parsedResult as AutopilotReviewResult,
         ),
         acceptedAllowed: true,
         authors: task.session.receiptAuthors,

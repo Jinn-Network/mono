@@ -281,6 +281,12 @@ function persistedRun(
   ),
 ): PersistedTaskRun {
   const correlation = output.correlation;
+  const producerResult = structuredClone(output);
+  if (role === 'solution') {
+    delete (
+      producerResult.correlation as Record<string, unknown>
+    ).deliveryEnvelopeCid;
+  }
   return {
     requestId: correlation.requestId,
     taskId: correlation.taskId,
@@ -304,7 +310,7 @@ function persistedRun(
     adoptionReceiptAuthors: [...session.receiptAuthors],
     solutionOutputsJson: JSON.stringify(
       role === 'solution'
-        ? { solutionPayload: output }
+        ? { solutionPayload: producerResult }
         : { verdictPayload: output },
     ),
   } as PersistedTaskRun;

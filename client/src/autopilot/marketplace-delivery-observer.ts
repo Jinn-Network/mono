@@ -1,10 +1,10 @@
 import type { Address, Hex, Log, PublicClient } from 'viem';
 import {
   AutopilotCorrelationSchema,
-  AutopilotMutationResultSchema,
   AutopilotReviewResultSchema,
   AutopilotSessionCapsuleSchema,
   autopilotCorrelationMatches,
+  bindAutopilotMutationDeliveryResult,
   type AutopilotCorrelation,
   type AutopilotMutationResult,
   type AutopilotReviewResult,
@@ -580,16 +580,27 @@ export function createAutopilotMarketplaceDeliveryObserver(
         );
       }
 
-      const resultParse = expected.role === 'solution'
-        ? AutopilotMutationResultSchema.safeParse(envelope.payload)
-        : AutopilotReviewResultSchema.safeParse(envelope.payload);
-      if (!resultParse.success) {
-        return contradiction(
-          'invalid-result',
-          resultParse.error.issues
-            .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
-            .join('; '),
-        );
+      let result: AutopilotMutationResult | AutopilotReviewResult;
+      if (expected.role === 'solution') {
+        try {
+          result = bindAutopilotMutationDeliveryResult(
+            envelope.payload,
+            lookup.envelope.manifestCid,
+          );
+        } catch (error) {
+          return contradiction('invalid-result', errorDetail(error));
+        }
+      } else {
+        const parsed = AutopilotReviewResultSchema.safeParse(envelope.payload);
+        if (!parsed.success) {
+          return contradiction(
+            'invalid-result',
+            parsed.error.issues
+              .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+              .join('; '),
+          );
+        }
+        result = parsed.data;
       }
 
       const expectedCorrelation = expectedCorrelationFor(expected, lookup);
@@ -599,7 +610,7 @@ export function createAutopilotMarketplaceDeliveryObserver(
           'expected complete result correlation is invalid',
         );
       }
-      if (!autopilotCorrelationMatches(expectedCorrelation, resultParse.data.correlation)) {
+      if (!autopilotCorrelationMatches(expectedCorrelation, result.correlation)) {
         return contradiction(
           'correlation-mismatch',
           'result correlation differs from the complete expected marketplace/session tuple',
@@ -630,8 +641,8 @@ export function createAutopilotMarketplaceDeliveryObserver(
           blockNumber: delivery.blockNumber,
         },
         envelope,
-        result: resultParse.data,
-        correlation: resultParse.data.correlation,
+        result,
+        correlation: result.correlation,
       };
     },
   };

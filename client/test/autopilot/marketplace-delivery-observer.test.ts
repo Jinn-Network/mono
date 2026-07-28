@@ -313,8 +313,12 @@ interface HarnessOptions {
 
 async function harness(options: HarnessOptions = {}) {
   const role = options.role ?? 'solution';
+  const producerResult = structuredClone(mutationResult());
+  delete (
+    producerResult.correlation as Record<string, unknown>
+  ).deliveryEnvelopeCid;
   const payload = options.payload ?? (
-    role === 'solution' ? mutationResult() : reviewResult()
+    role === 'solution' ? producerResult : reviewResult()
   );
   const envelope = await signedEnvelope(role, payload, options.envelopeOverride);
   options.mutateEnvelope?.(envelope);
@@ -441,6 +445,9 @@ describe('Autopilot marketplace delivery observer', () => {
       result: {
         schemaVersion: 'jinn-autopilot-mutation-result.v1',
         outcome: 'mutation-complete',
+        correlation: {
+          deliveryEnvelopeCid: ENVELOPE_CID,
+        },
       },
     });
     expect(fixture.discovery.getAutopilotDeliveryCandidates).toHaveBeenCalledWith({
@@ -809,7 +816,6 @@ describe('Autopilot marketplace delivery observer', () => {
     ['taskId', { taskId: '999' }],
     ['attemptIndex', { attemptIndex: 2 }],
     ['requestId', { requestId: `0x${'88'.repeat(32)}` }],
-    ['deliveryEnvelopeCid', { deliveryEnvelopeCid: `f01551220${'88'.repeat(32)}` }],
     ['v2AttemptId', { v2AttemptId: '123e4567-e89b-42d3-a456-426614174099' }],
     ['claimOid', { claimOid: '8'.repeat(40) }],
     ['prNumber', { prNumber: 999 }],
@@ -817,10 +823,14 @@ describe('Autopilot marketplace delivery observer', () => {
   ] as const)(
     'rejects a result with mismatched correlation.%s',
     async (_field, override) => {
+      const producerResult = structuredClone(mutationResult({
+        correlation: correlation(override as Partial<AutopilotCorrelation>),
+      }));
+      delete (
+        producerResult.correlation as Record<string, unknown>
+      ).deliveryEnvelopeCid;
       const fixture = await harness({
-        payload: mutationResult({
-          correlation: correlation(override as Partial<AutopilotCorrelation>),
-        }),
+        payload: producerResult,
       });
       await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
         status: 'contradiction',

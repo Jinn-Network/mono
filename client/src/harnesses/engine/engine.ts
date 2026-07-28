@@ -101,10 +101,10 @@ import { harnessStateDirName, harnessNameMatches } from '../names.js';
 import { recordTaskCost } from '../../spend/record.js';
 import {
   AutopilotAdoptionReceiptSchema,
-  JinnRepoAutopilotSolutionPayloadSchema,
   JinnRepoAutopilotVerdictPayloadSchema,
   JinnRepoTaskSchema,
   autopilotCorrelationMatches,
+  bindAutopilotMutationDeliveryResult,
   type AutopilotAdoptionReceipt,
   type AutopilotCorrelation,
   type JinnRepoAutopilotSessionTask,
@@ -3201,9 +3201,17 @@ export class TaskEngine {
         solutionPayload?: unknown;
         verdictPayload?: unknown;
       };
-      const parsed = role === 'solution'
-        ? JinnRepoAutopilotSolutionPayloadSchema.safeParse(output.solutionPayload)
-        : JinnRepoAutopilotVerdictPayloadSchema.safeParse(output.verdictPayload);
+      if (role === 'solution') {
+        if (!task.manifestCid) return null;
+        const result = bindAutopilotMutationDeliveryResult(
+          output.solutionPayload,
+          task.manifestCid,
+        );
+        return result.correlation;
+      }
+      const parsed = JinnRepoAutopilotVerdictPayloadSchema.safeParse(
+        output.verdictPayload,
+      );
       return parsed.success ? parsed.data.correlation : null;
     } catch {
       return null;

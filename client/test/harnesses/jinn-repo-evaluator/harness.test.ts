@@ -224,6 +224,10 @@ function autopilotHarnessFixtures() {
       tests: ['yarn test'],
     },
   };
+  const producerResult = structuredClone(mutation);
+  delete (
+    producerResult.correlation as Record<string, unknown>
+  ).deliveryEnvelopeCid;
   const context = {
     schemaVersion: 'jinn-autopilot-evaluation-context.v1',
     operators: { solutionSafe, evaluatorSafe },
@@ -267,7 +271,7 @@ function autopilotHarnessFixtures() {
       safeAddress: solutionSafe,
       agentEoa: `0x${'3'.repeat(40)}`,
     },
-    payload: mutation,
+    payload: producerResult,
   });
   const task: Task = {
     id: 'autopilot:501:0:evaluation:0',
@@ -284,7 +288,7 @@ function autopilotHarnessFixtures() {
       autopilotEvaluation: context,
     },
   };
-  return { task, context, mutation };
+  return { task, context, mutation, producerResult };
 }
 
 describe('JinnRepoEvaluatorHarness — supports', () => {

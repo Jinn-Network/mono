@@ -269,6 +269,10 @@ function autopilotEvaluationFixtures() {
       tests: ['yarn test'],
     },
   };
+  const producerResult = structuredClone(mutation);
+  delete (
+    producerResult.correlation as Record<string, unknown>
+  ).deliveryEnvelopeCid;
   const context = {
     schemaVersion: 'jinn-autopilot-evaluation-context.v1' as const,
     operators: {
@@ -310,7 +314,7 @@ function autopilotEvaluationFixtures() {
       },
     },
   };
-  return { taskSpec, mutation, context };
+  return { taskSpec, mutation, producerResult, context };
 }
 
 describe('MechAdapter TaskCoordinator flow', () => {
@@ -1552,7 +1556,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       data: {
         solverType: 'jinn-repo.v1',
         role: 'solution',
-        payload: fixtures.mutation,
+        payload: fixtures.producerResult,
       },
     } as never);
 
@@ -1608,7 +1612,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       data: {
         solverType: 'jinn-repo.v1',
         role: 'solution',
-        payload: fixtures.mutation,
+        payload: fixtures.producerResult,
       },
     } as never);
 

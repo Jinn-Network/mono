@@ -25,8 +25,9 @@ import { join } from 'node:path';
 import {
   AutopilotEvaluationContextSchema,
   JinnRepoAutopilotSessionTaskSchema,
-  JinnRepoAutopilotSolutionPayloadSchema,
   JinnRepoLegacySolutionPayloadSchema,
+  bindAutopilotMutationDeliveryResult,
+  type AutopilotMutationResult,
   type JinnRepoVerdictPayload,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 import {
@@ -172,15 +173,6 @@ function parseAutopilotEvaluationTask(task: Task):
       reason: `expected jinn-repo.v1/solution envelope, got ${envelope.solverType}/${envelope.role}`,
     };
   }
-  const parsedSolution = JinnRepoAutopilotSolutionPayloadSchema.safeParse(
-    envelope.payload,
-  );
-  if (!parsedSolution.success) {
-    return {
-      ok: false,
-      reason: `malformed Autopilot mutation result: ${summarizeZodError(parsedSolution.error)}`,
-    };
-  }
   const solutionEnvelopeCid = resolveSolutionEnvelopeCid(task);
   if (!solutionEnvelopeCid) {
     return {
@@ -188,9 +180,21 @@ function parseAutopilotEvaluationTask(task: Task):
       reason: 'context.solutionEnvelopeCid required for Autopilot evaluation',
     };
   }
+  let parsedSolution: AutopilotMutationResult;
+  try {
+    parsedSolution = bindAutopilotMutationDeliveryResult(
+      envelope.payload,
+      solutionEnvelopeCid,
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `malformed Autopilot mutation result: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
   const admission = admitAutopilotEvaluationOpportunity({
     task: parsedTask.data,
-    solution: parsedSolution.data,
+    solution: parsedSolution,
     taskId: parsedContext.data.correlation.taskId,
     attemptIndex: task.attemptNumber ?? -1,
     requestId: task.restorationRequestId ?? '',

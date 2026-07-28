@@ -81,7 +81,8 @@ import {
 } from '../../harnesses/impls/evaluation-context.js';
 import {
   JinnRepoAutopilotSessionTaskSchema,
-  JinnRepoAutopilotSolutionPayloadSchema,
+  bindAutopilotMutationDeliveryResult,
+  type AutopilotMutationResult,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 import {
   admitAutopilotEvaluationOpportunity,
@@ -1297,10 +1298,13 @@ export class MechAdapter implements ExecutionAdapter {
         );
         return undefined;
       }
-      const parsedSolution = JinnRepoAutopilotSolutionPayloadSchema.safeParse(
-        parsedEnvelope.data.payload,
-      );
-      if (!parsedSolution.success) {
+      let parsedSolution: AutopilotMutationResult;
+      try {
+        parsedSolution = bindAutopilotMutationDeliveryResult(
+          parsedEnvelope.data.payload,
+          solutionEnvelopeCid,
+        );
+      } catch {
         console.log(
           `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: invalid mutation result`,
         );
@@ -1310,7 +1314,7 @@ export class MechAdapter implements ExecutionAdapter {
       const observation =
         await this.config.autopilotEvaluationContextResolver?.resolve({
           task: parsedTask.data,
-          solution: parsedSolution.data,
+          solution: parsedSolution,
           taskId: solution.taskId,
           attemptIndex: solution.attemptIndex,
           requestId: solution.requestId,
@@ -1320,7 +1324,7 @@ export class MechAdapter implements ExecutionAdapter {
         });
       const admission = admitAutopilotEvaluationOpportunity({
         task: parsedTask.data,
-        solution: parsedSolution.data,
+        solution: parsedSolution,
         taskId: solution.taskId,
         attemptIndex: solution.attemptIndex,
         requestId: solution.requestId,
