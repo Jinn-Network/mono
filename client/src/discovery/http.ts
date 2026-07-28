@@ -35,7 +35,10 @@ import type {
   AutopilotDeliveryRole,
 } from './types.js';
 import { DiscoveryUnavailableError, TASK_POST_WINDOW_BLOCKS, bucketTaskPostCounts } from './types.js';
-import { assembleTaskLifecycleEvidence } from './task-lifecycle-evidence.js';
+import {
+  applyTaskLifecycleTerminals,
+  assembleTaskLifecycleEvidence,
+} from './task-lifecycle-evidence.js';
 import type { RawAttemptRow, RawTaskRow, RawVerdictRow } from './task-lifecycle-evidence.js';
 import { manifestDigestForCid } from '../adapters/mech/digest.js';
 import {
@@ -2123,6 +2126,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     };
 
     const tasks: RawTaskRow[] = [];
+    const refundedTaskIds = new Set<string>();
     let taskCursor: string | null = null;
     for (let page = 0; page < MAX_OPERATOR_COUNT_TASK_PAGES; page++) {
       const data = await postGql<{
@@ -2136,6 +2140,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         const createdAtBlock = Number(row.createdAtBlock);
         if (!Number.isFinite(createdAtBlock)) continue;
         if (!isHex(row.manifestDigest) || !isHex(row.taskCidDigest) || !isHex(row.creator)) continue;
+        if (row.refunded === true) refundedTaskIds.add(row.id);
         const task: RawTaskRow = {
           taskId: row.id,
           chainId: row.chainId,
@@ -2145,8 +2150,9 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
           maxClaims: row.maxClaims,
           requiredVerdicts: row.requiredVerdicts > 0 ? row.requiredVerdicts : 1,
           createdAtBlock,
-          finalized: row.finalized === true,
-          refunded: row.refunded === true,
+          // Provisional — applyTaskLifecycleTerminals overwrites both before assemble.
+          finalized: false,
+          refunded: false,
         };
         if (isHex(row.createdAtTx ?? undefined)) {
           task.createdAtTx = row.createdAtTx!.toLowerCase() as `0x${string}`;
@@ -2235,6 +2241,15 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         verdictCursor = advance.cursor;
       }
     }
+
+    // finalized from co-fetched attempts/verdicts (floor parity); refunded from
+    // task-row boolean only — no refund-event GraphQL entity to cross-check (#2236).
+    applyTaskLifecycleTerminals({
+      tasks,
+      attempts,
+      verdicts,
+      refundedTaskIds,
+    });
 
     const solveRequestIds = Array.from(new Set(attempts.map((a) => a.requestId)));
     const evalRequestIds = Array.from(new Set(verdicts.map((v) => v.requestId)));
