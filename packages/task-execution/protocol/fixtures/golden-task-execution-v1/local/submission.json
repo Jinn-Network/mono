@@ -1,0 +1,1 @@
+{"deadline":"2026-07-29T00:00:00Z","idempotencyKey":"golden-local-1","nonce":"golden-local-nonce-1","protocol":"https://jinn.network/profiles/task-execution/1.0","requester":"urn:uuid:cccccccc-cccc-5ccc-8ccc-cccccccccccc","submission":"urn:uuid:bbbbbbbb-bbbb-5bbb-8bbb-bbbbbbbbbbbb","task":{"digest":{"sha256":"2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0"}}}

@@ -1,0 +1,75 @@
+{
+  "taskDigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+  "fixtures": [
+    {
+      "id": "malformed-document",
+      "description": "A Task document missing the required `outputs` field.",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "digest-mismatch",
+      "description": "A document whose exact bytes do not match its claimed digest (claimed-digest.json != sha256 of document.json).",
+      "expectedDisposition": "content-corruption"
+    },
+    {
+      "id": "illegal-terminal-transition",
+      "description": "An attempt-started observation sequenced after the authoritative attempt-terminal — terminal states are absorbing (§10.4 rule 1).",
+      "expectedDisposition": "derived state remains the terminal state; the late observation has no effect"
+    },
+    {
+      "id": "replayed-and-out-of-order",
+      "description": "A duplicated (source,id) observation plus array order that contradicts sequence order.",
+      "expectedDisposition": "dedupes on (source,id); resolves order by sequence, not array position"
+    },
+    {
+      "id": "sequence-boundary",
+      "description": "Two `sequence` values straddling a decimal-width rollover (9 -> 10), pinning that the fixed 16-digit zero-padded encoding orders lexicographically the same as numerically.",
+      "expectedDisposition": "\"0000000000000009\" < \"0000000000000010\" lexicographically, matching numeric order"
+    },
+    {
+      "id": "contradictory-terminals",
+      "description": "Two attempt-terminal observations (delivered, then failed) — not the sanctioned lost-correction case.",
+      "expectedDisposition": "derived state = the first terminal in sequence order (delivered), contradictory: true"
+    },
+    {
+      "id": "expired-then-late-terminal",
+      "description": "log-without-terminal.json folded with fold-options.json derives provisional `expired`; log-with-terminal.json (the same Attempt, extended with a genuine attempt-terminal{delivered}) derives `delivered` with no `contradictory` flag.",
+      "expectedDisposition": "provisional expired is superseded by a genuine terminal, never itself a log entry"
+    },
+    {
+      "id": "lost-then-corrected",
+      "description": "attempt-terminal{lost}, later corrected by attempt-terminal{delivered} once the partition heals (§10.4 rule 6).",
+      "expectedDisposition": "derived state = delivered, contradictory: false"
+    },
+    {
+      "id": "forged-cross-attempt-supersedes",
+      "description": "delivery-b-forged-supersedes.json names delivery-a.json's digest in `supersedes`, but the two Deliveries belong to different Attempts.",
+      "expectedDisposition": "invalid-document (checkable whenever both records are held, §11.3 rule 1)"
+    },
+    {
+      "id": "idempotency-scopes",
+      "description": "submission-a and submission-b share (requester, idempotencyKey) but differ in bytes; submission-c reuses the literal key string under a different requester.",
+      "expectedDisposition": "a/b: submission-conflict (same scope, different bytes); a/c: distinct scopes, no conflict (§12.2)"
+    },
+    {
+      "id": "dispatch-context-grafting",
+      "description": "A structurally valid DispatchContext document that was never genuinely conveyed at dispatch.",
+      "expectedDisposition": "NOT caught by structure alone; the Layer-3 dispatch-binding check is the intended catch (§24)"
+    },
+    {
+      "id": "leaked-task-resubmission",
+      "description": "A confidential-input Task resubmitted by an unauthorized requester, with no capabilityGrants.",
+      "expectedDisposition": "structural fact only (no grants present); resolution-failure enforcement is Layer 3 (§24)"
+    },
+    {
+      "id": "extension-override",
+      "description": "A namespaced extension field claiming a different `protocol` than the document's core field.",
+      "expectedDisposition": "invalid-document where a validator can detect the contradiction (§21.3)"
+    },
+    {
+      "id": "oversized-content",
+      "description": "A ResourceDescriptor with inline `content` over 64 KiB, and an observation `message` over 4 KiB.",
+      "expectedDisposition": "the observation message IS rejected (schema-enforced MUST, §10.2); the inline content is NOT rejected -- its 64 KiB ceiling is a documented un-enforced SHOULD (§6.4/§20, Layer-3 boundary)"
+    }
+  ]
+}

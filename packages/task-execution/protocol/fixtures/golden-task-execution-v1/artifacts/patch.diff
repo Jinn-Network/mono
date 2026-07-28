@@ -1,0 +1,6 @@
+diff --git a/src/slug.ts b/src/slug.ts
+--- a/src/slug.ts
++++ b/src/slug.ts
+@@ -1 +1 @@
+-export const slug = (s: string) => s;
++export const slug = (s: string) => s.trim().toLowerCase();

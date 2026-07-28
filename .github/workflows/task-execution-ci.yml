@@ -1,0 +1,177 @@
+name: Task Execution CI
+
+on:
+  pull_request:
+  push:
+    branches: [next]
+    paths:
+      - "packages/task-execution/**"
+      - ".github/scripts/task-execution-*.test.mjs"
+      - ".github/workflows/task-execution-ci.yml"
+      - "docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md"
+
+permissions:
+  contents: read
+
+env:
+  TASK_EXECUTION_ROOT: packages/task-execution
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify package inventory and dependency graph
+        run: node --test .github/scripts/task-execution-package-inventory.test.mjs
+      - name: Verify source boundaries and canaries
+        run: node --test .github/scripts/task-execution-source-boundaries.test.mjs
+
+  foundation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Verify Task Execution Protocol
+        working-directory: packages/task-execution/protocol
+        run: |
+          yarn install --immutable
+          yarn check:schemas
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Execution Protocol distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-execution-protocol-dist
+          path: packages/task-execution/protocol/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  backend:
+    needs: foundation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Task Execution Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-protocol-dist
+          path: packages/task-execution/protocol/dist
+      - name: Install packed-smoke dependency toolchain
+        working-directory: packages/task-execution/protocol
+        run: yarn install --immutable
+      - name: Verify Task Execution Backend
+        working-directory: packages/task-execution/backend
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Execution Backend distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-execution-backend-dist
+          path: packages/task-execution/backend/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  testing:
+    needs: [foundation, backend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Task Execution Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-protocol-dist
+          path: packages/task-execution/protocol/dist
+      - name: Restore Task Execution Backend distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-backend-dist
+          path: packages/task-execution/backend/dist
+      - name: Install packed-smoke dependency toolchains
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable)
+          (cd packages/task-execution/backend && yarn install --immutable)
+      - name: Verify Task Execution Testing kit
+        working-directory: packages/task-execution/testing
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Execution Testing distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-execution-testing-dist
+          path: packages/task-execution/testing/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    needs: [architecture, foundation, backend, testing]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Task Execution CI stage to succeed
+        env:
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
+          FOUNDATION_RESULT: ${{ needs.foundation.result }}
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          TESTING_RESULT: ${{ needs.testing.result }}
+        run: |
+          for result in \
+            "$ARCHITECTURE_RESULT" \
+            "$FOUNDATION_RESULT" \
+            "$BACKEND_RESULT" \
+            "$TESTING_RESULT"; do
+            test "$result" = "success"
+          done
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore all package distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: task-execution-*-dist
+          path: .task-execution-dist
+      - name: Place package distributions
+        run: |
+          for package in protocol backend testing; do
+            mkdir -p "packages/task-execution/${package}/dist"
+            cp -R ".task-execution-dist/task-execution-${package}-dist/." "packages/task-execution/${package}/dist/"
+          done
+      - name: Compile packed public entrypoint consumers
+        run: node .github/scripts/task-execution-packed-types.test.mjs

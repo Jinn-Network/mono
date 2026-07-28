@@ -1,0 +1,23 @@
+{
+  "taskDigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+  "scenarios": {
+    "local": {
+      "submission": "urn:uuid:bbbbbbbb-bbbb-5bbb-8bbb-bbbbbbbbbbbb",
+      "submissionDigest": "sha256:9c5c466d60c4486428e3606860f2f0c3d1050b28f8e937573e6025b2f93dbd25",
+      "attempt": "urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa",
+      "deliveryDigest": "sha256:7c75a5b04dca693d29c56bcf7213cea45338f32f8e0f2c2745775cb7e3c7cfdc"
+    },
+    "marketplace": {
+      "submission": "urn:uuid:dddddddd-dddd-5ddd-8ddd-dddddddddddd",
+      "submissionDigest": "sha256:3d802052a7c655f660280b7b391034a932b3ac546c28ffd3ccb293736d552430",
+      "attempt": "urn:uuid:39d04895-f99d-57b8-bba6-e266626f6fae",
+      "deliveryDigest": "sha256:d533fb15574e5e9d44a3cf267e42e49d6ccc18ad245ff68d77e2cc4ed4f8b4c2",
+      "correlationTuple": {
+        "chainId": 8453,
+        "coordinatorAddress": "0xfFa7118A3D820cd4E820010837D65FAfF463181B",
+        "taskId": "golden-task-1",
+        "attemptIndex": 0
+      }
+    }
+  }
+}
