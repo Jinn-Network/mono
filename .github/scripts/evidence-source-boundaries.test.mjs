@@ -9,7 +9,7 @@ const packages = join(root, 'packages', 'evidence');
 const evidenceDirectories = [
   'protocol', 'repository', 'repository-oci', 'repository-ipfs', 'discovery',
   'catalog-sqlite', 'execution-recorder', 'attestation-issuer', 'derivation',
-  'publication', 'local-runtime',
+  'publication', 'local-runtime', 'execution-recorder-bridge',
 ];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
@@ -167,6 +167,35 @@ const PUBLICATION_FORBIDDEN_MANIFEST_PACKAGES =
   PUBLICATION_FORBIDDEN_PACKAGES.filter(
     (dependency) => dependency !== '@jinn-network/evidence-protocol',
   );
+
+// The bridge has production dependencies only on Repository and Recorder;
+// `@jinn-network/evidence-repository/fs` is a concrete binding permitted
+// solely from the filesystem CLI composition root (`src/cli.ts`), and
+// `@jinn-network/evidence-protocol` is a development-only portal dependency
+// that must never reach bridge production source (see the Task 1 addendum).
+const BRIDGE_FOREIGN_PACKAGES = [
+  '@jinn-network/attestation-issuer',
+  '@jinn-network/autopilot',
+  '@jinn-network/broadcast-bot',
+  '@jinn-network/client',
+  '@jinn-network/core',
+  '@jinn-network/evidence-catalog-sqlite',
+  '@jinn-network/evidence-derivation',
+  '@jinn-network/evidence-discovery',
+  '@jinn-network/evidence-local-runtime',
+  '@jinn-network/evidence-publication',
+  '@jinn-network/evidence-repository-ipfs',
+  '@jinn-network/evidence-repository-oci',
+  '@jinn-network/indexer',
+  '@jinn-network/indexer-enrichment',
+  '@jinn-network/jinn-layer',
+  '@jinn-network/marketplace',
+  '@jinn-network/plugin',
+  '@jinn-network/sdk',
+  'better-sqlite3',
+  'hermes-agent',
+  'viem',
+];
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
 const ambientNetworkIdentifier = new RegExp(
@@ -902,9 +931,45 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     assertBoundary(join(packages, directory, 'src'), ['@jinn-network/evidence-catalog-sqlite'], [join(packages, 'catalog-sqlite')]);
   }
   for (const directory of evidenceDirectories) {
-    if (directory === 'local-runtime' || directory === 'repository') continue;
+    if (
+      directory === 'local-runtime' ||
+      directory === 'repository' ||
+      directory === 'execution-recorder-bridge'
+    ) continue;
     assertBoundary(join(packages, directory, 'src'), ['@jinn-network/evidence-repository/fs'], [repositoryFs]);
   }
+  const bridge = join(packages, 'execution-recorder-bridge');
+  const bridgeSource = join(bridge, 'src');
+  const bridgeCli = join(bridgeSource, 'cli.ts');
+  const bridgeTestRegex = /\.test\.[cm]?[jt]sx?$/u;
+  const bridgeSourceFiles = files(bridgeSource);
+  const bridgeProductionFiles = bridgeSourceFiles.filter(
+    (file) => !bridgeTestRegex.test(file),
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      bridgeSourceFiles.filter((file) => file !== bridgeCli),
+      ['@jinn-network/evidence-repository/fs'],
+    ),
+    [],
+    'only execution-recorder-bridge/src/cli.ts may depend on the concrete filesystem Repository',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(bridgeProductionFiles, [
+      '@jinn-network/evidence-protocol',
+    ]),
+    [],
+    'execution-recorder-bridge production source may not depend on the development-only Protocol portal',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      bridgeSourceFiles,
+      BRIDGE_FOREIGN_PACKAGES,
+      [join(packages, 'local-runtime'), ...APPLICATION_AND_LEGACY_ROOTS],
+    ),
+    [],
+    'execution-recorder-bridge may not depend on the Local Evidence Runtime, host, plugin, Autopilot, or marketplace paths',
+  );
   for (const directory of evidenceDirectories) {
     if (directory === 'repository-ipfs') continue;
     for (const section of [

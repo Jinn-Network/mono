@@ -22,6 +22,7 @@ const packages = [
   ['derivation', '@jinn-network/evidence-derivation'],
   ['publication', '@jinn-network/evidence-publication'],
   ['local-runtime', '@jinn-network/evidence-local-runtime'],
+  ['execution-recorder-bridge', '@jinn-network/execution-recorder-bridge'],
 ];
 
 const codeEntrypoints = [
@@ -47,6 +48,7 @@ const codeEntrypoints = [
   '@jinn-network/evidence-publication/testing',
   '@jinn-network/evidence-publication/fs',
   '@jinn-network/evidence-local-runtime',
+  '@jinn-network/execution-recorder-bridge',
 ];
 
 function run(command, args, options = {}) {
@@ -147,7 +149,7 @@ try {
   }
 
   console.log(
-    `Compiled a packed TypeScript consumer against ${codeEntrypoints.length} public code entrypoints across all eleven evidence packages.`,
+    `Compiled a packed TypeScript consumer against ${codeEntrypoints.length} public code entrypoints across all ${packages.length} evidence packages.`,
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
