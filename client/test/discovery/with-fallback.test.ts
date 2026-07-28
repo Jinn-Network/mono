@@ -536,18 +536,106 @@ describe('withFallback — all four methods', () => {
     expect(floor.getVerdictTallies).toHaveBeenCalledOnce();
   });
 
-  it('getTaskLifecycleEvidence delegates to the primary on success (#2044)', async () => {
-    const primaryResult = new Map();
+  it('getTaskLifecycleEvidence merges floor spine with primary candidates on success (#2044, #2235)', async () => {
+    const hex32 = (n: string) => `0x${n.repeat(32)}` as `0x${string}`;
+    const addr = (n: string) => `0x${n.repeat(20)}` as `0x${string}`;
+    const floorResult = new Map([
+      [
+        '7',
+        {
+          taskId: '7',
+          authoritative: {
+            task: {
+              taskId: '7',
+              chainId: 84532,
+              manifestDigest: hex32('11'),
+              taskCidDigest: hex32('22'),
+              creator: addr('aa'),
+              maxClaims: 1,
+              requiredVerdicts: 1,
+              createdAtBlock: 10,
+              finalized: false,
+              refunded: false,
+            },
+            attempts: [
+              {
+                taskId: '7',
+                chainId: 84532,
+                attemptIndex: 0,
+                requestId: hex32('b0'),
+                operator: addr('b0'),
+                priorityMech: addr('c0'),
+                deliveryRate: '1',
+                createdAtBlock: 20,
+                verdicts: [],
+                attemptEnvelopeCandidates: [],
+              },
+            ],
+          },
+        },
+      ],
+    ]);
+    const primaryResult = new Map([
+      [
+        '7',
+        {
+          taskId: '7',
+          authoritative: {
+            task: {
+              taskId: '7',
+              chainId: 84532,
+              manifestDigest: hex32('ff'),
+              taskCidDigest: hex32('ee'),
+              creator: addr('ff'),
+              maxClaims: 99,
+              requiredVerdicts: 9,
+              createdAtBlock: 999,
+              finalized: true,
+              refunded: true,
+            },
+            attempts: [
+              {
+                taskId: '7',
+                chainId: 84532,
+                attemptIndex: 0,
+                requestId: hex32('b0'),
+                operator: addr('ff'),
+                priorityMech: addr('ff'),
+                deliveryRate: '999',
+                createdAtBlock: 999,
+                verdicts: [],
+                attemptEnvelopeCandidates: [
+                  {
+                    requestId: hex32('b0'),
+                    chainId: 84532,
+                    manifestCid: 'bafyA',
+                    publisherAgentId: '1',
+                    manifestHash: hex32('99'),
+                    enrichedAtBlock: 25,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    ]);
     const primary = {
       getTaskLifecycleEvidence: vi.fn(async () => primaryResult),
     } as unknown as DiscoveryAPI;
     const floor = {
-      getTaskLifecycleEvidence: vi.fn(async () => new Map()),
+      getTaskLifecycleEvidence: vi.fn(async () => floorResult),
     } as unknown as DiscoveryAPI;
     const api = makeWrapper(primary, floor);
     const result = await api.getTaskLifecycleEvidence({ taskIds: ['7'] });
-    expect(result).toBe(primaryResult);
-    expect(floor.getTaskLifecycleEvidence).not.toHaveBeenCalled();
+    expect(primary.getTaskLifecycleEvidence).toHaveBeenCalledOnce();
+    expect(floor.getTaskLifecycleEvidence).toHaveBeenCalledOnce();
+    const task = result.get('7')!.authoritative.task;
+    expect(task.manifestDigest).toBe(hex32('11'));
+    expect(task.finalized).toBe(false);
+    expect(result.get('7')!.authoritative.attempts[0]!.operator).toBe(addr('b0'));
+    expect(result.get('7')!.authoritative.attempts[0]!.attemptEnvelopeCandidates)
+      .toHaveLength(1);
   });
 
   it('getTaskLifecycleEvidence routes to floor on DiscoveryUnavailableError — tolerant (#2044)', async () => {

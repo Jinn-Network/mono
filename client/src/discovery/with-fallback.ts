@@ -22,6 +22,7 @@
  * Spec: spec/2026-05-11-discovery-api-and-shared-indexer.md §9.3.
  */
 
+import { mergeTaskLifecycleEvidence } from './task-lifecycle-evidence.js';
 import type { DiscoveryAPI } from './types.js';
 import { DiscoveryUnavailableError } from './types.js';
 
@@ -333,8 +334,14 @@ export function withFallback(
     getTaskLifecycleEvidence(args) {
       // Completeness signal for generators (#2044): tolerant fall-through to the
       // authoritative-only floor on indexer outage (like getTaskStatuses).
+      // When the primary responds, floor spine wins and primary supplies only
+      // envelope candidates (#2044 AC3, #2235).
       return dispatch(
-        () => primary.getTaskLifecycleEvidence(args),
+        async () => {
+          const candidateSource = await primary.getTaskLifecycleEvidence(args);
+          const authoritativeSource = await floor.getTaskLifecycleEvidence(args);
+          return mergeTaskLifecycleEvidence(authoritativeSource, candidateSource);
+        },
         () => floor.getTaskLifecycleEvidence(args),
       );
     },
