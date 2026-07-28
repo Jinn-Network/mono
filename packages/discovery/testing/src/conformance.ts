@@ -230,9 +230,21 @@ export function runSourceConformance(serve: ServeUnderTest): void {
     for (const vector of loadVectorsByKind("source-chain").filter((v) => v.name.startsWith("source-conformance-"))) {
       it(vector.name, () => {
         const input = vector.input as Record<string, unknown>;
-        if ("profile" in input) {
-          const expectSigned = (vector.expect as { signed: boolean }).signed;
-          expect(serve.isPublished("feed")).toBe(expectSigned);
+        const expect_ = vector.expect as Record<string, unknown>;
+        // Keyed by `vector.name`, not a hardcoded source name: the
+        // published-profile and unpublished-profile vectors both declare
+        // the same origin ("feed") but opposite `signed` outcomes, so one
+        // `ServeUnderTest` instance can only answer both correctly if
+        // queried under distinct keys (implementer finding, M5, plan Task
+        // 16 -- this loop's own iteration variable already disambiguates,
+        // a literal was standing in its place). Guarding on `"signed" in
+        // expect_` also excludes correction-by-append-reorged, whose
+        // `expect` never declared a `signed` field -- `(undefined as
+        // boolean)` compared with `.toBe(...)` against a real boolean
+        // return value could never pass.
+        if ("profile" in input && "signed" in expect_) {
+          const expectSigned = expect_["signed"] as boolean;
+          expect(serve.isPublished(vector.name)).toBe(expectSigned);
         }
         if ("refreshes" in input) {
           expect(serve.maintainsFreshness(input["refreshes"] as Array<{ payload: string }>)).toBe(true);
