@@ -38,10 +38,14 @@ try:
     spec = (json.load(open(sys.argv[1])) or {}).get("spec") or {}
 except Exception:
     sys.exit(0)
-relay = spec.get("relay") or {}
-repo = relay.get("workspaceRepository") if isinstance(relay, dict) else None
-print("REPO=" + shlex.quote(repo or spec.get("repo") or ""))
-print("BASE=" + shlex.quote(spec.get("base_commit") or ""))
+if "relay" in spec:
+    relay = spec["relay"]
+    repo = relay.get("workspaceRepository") if isinstance(relay, dict) else None
+else:
+    repo = spec.get("repo")
+print("REPO=" + shlex.quote(repo if isinstance(repo, str) else ""))
+base = spec.get("base_commit")
+print("BASE=" + shlex.quote(base if isinstance(base, str) else ""))
 PY
 )"
 

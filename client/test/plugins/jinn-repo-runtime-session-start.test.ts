@@ -11,6 +11,7 @@ const HOOK = fileURLToPath(
   new URL('../../plugins/jinn-repo-runtime/hooks/session-start', import.meta.url),
 );
 const BASE_COMMIT = 'a'.repeat(40);
+const RELAY_INPUT_HEAD = 'b'.repeat(40);
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -61,7 +62,7 @@ function liveIssueSpec(workspaceRepository?: string): Record<string, unknown> {
     base_commit: BASE_COMMIT,
     ...(workspaceRepository === undefined
       ? {}
-      : { relay: { workspaceRepository } }),
+      : { relay: { workspaceRepository, inputHead: RELAY_INPUT_HEAD } }),
   };
 }
 
@@ -79,6 +80,7 @@ describe('jinn-repo-runtime session-start hook', () => {
 
     expect(gitArgs).toContain('remote add origin https://github.com/upstream-org/upstream-repo.git');
     expect(gitArgs).toContain(`fetch --depth 1 --quiet origin ${BASE_COMMIT}`);
+    expect(gitArgs).not.toContain(`fetch --depth 1 --quiet origin ${RELAY_INPUT_HEAD}`);
   });
 
   it('fetches a repair Relay round from its managed-fork workspace repository at the outer base commit', async () => {
@@ -86,10 +88,25 @@ describe('jinn-repo-runtime session-start hook', () => {
 
     expect(gitArgs).toContain('remote add origin https://github.com/managed-fork/relay-repair.git');
     expect(gitArgs).toContain(`fetch --depth 1 --quiet origin ${BASE_COMMIT}`);
+    expect(gitArgs).not.toContain(`fetch --depth 1 --quiet origin ${RELAY_INPUT_HEAD}`);
   });
 
   it('rejects a non-GitHub workspace value before spawning Git', async () => {
     const gitArgs = await runSessionStart(liveIssueSpec('https://github.com/managed-fork/relay-repair'));
+
+    expect(gitArgs).toEqual([]);
+  });
+
+  it.each([
+    ['an empty Relay object', {}],
+    ['an empty Relay workspace repository', { workspaceRepository: '' }],
+    ['a non-object Relay value', 'not-an-object'],
+  ])('rejects %s before spawning Git', async (_caseName, relay) => {
+    const gitArgs = await runSessionStart({
+      repo: 'Jinn-Network/mono',
+      base_commit: BASE_COMMIT,
+      relay,
+    });
 
     expect(gitArgs).toEqual([]);
   });
