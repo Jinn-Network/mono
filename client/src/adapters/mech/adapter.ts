@@ -866,9 +866,21 @@ export class MechAdapter implements ExecutionAdapter {
     // Strip the restoration execution-profile pin. It asserts against the
     // solver harness/model/version; evaluation resolves a different Harness
     // (issue #2165 / PR #2081). Leaving it would false-reject the evaluator.
-    const { executionRequest: _solverProfile, ...restorationTask } = params.task;
+    // Also strip nested signedTask.executionRequest so parseTask cannot
+    // rehydrate the solver pin (issue #2169).
+    const {
+      executionRequest: _solverProfile,
+      signedTask: restorationSignedTask,
+      ...restorationTask
+    } = params.task;
+    let signedTask = restorationSignedTask;
+    if (signedTask?.executionRequest !== undefined) {
+      const { executionRequest: _nestedProfile, ...signedWithoutProfile } = signedTask;
+      signedTask = signedWithoutProfile;
+    }
     return {
       ...restorationTask,
+      ...(signedTask !== undefined ? { signedTask } : {}),
       id: `${params.task.id}:evaluation:${params.attemptIndex}`,
       role: 'evaluation',
       restorationRequestId: params.solutionRequestId,
