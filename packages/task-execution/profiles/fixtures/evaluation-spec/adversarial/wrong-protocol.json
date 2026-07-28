@@ -1,0 +1,13 @@
+{
+  "protocol": "https://jinn.network/profiles/evaluation-spec/9.9",
+  "semanticsVersion": "4",
+  "family": "deterministic-process",
+  "grader": { "uri": "https://example.org/graders/deterministic-process-runner" },
+  "familyBlock": {},
+  "measurements": [
+    { "name": "passed", "type": "boolean", "required": true }
+  ],
+  "verdictRule": { "threshold": { "measurement": "passed", "op": "eq", "value": true } },
+  "unscorable": [],
+  "evidenceConventions": { "requiredRefs": [] }
+}
