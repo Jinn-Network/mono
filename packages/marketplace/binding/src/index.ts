@@ -51,3 +51,22 @@ export { MECH_ABI, MECH_MARKETPLACE_ABI } from "./abis/mech-marketplace.js";
 // --- today-mode symmetric honor-or-reject (§6.1, frozen §11.12, ruling §7.20; M2.2) ---
 export { honorOrRejectToday } from "./honor-or-reject.js";
 export type { HonorOrRejectResult } from "./honor-or-reject.js";
+
+// --- broadcast-intent WAL (honors the pinned 2026-07-24 crash-safety design; M2.3) ---
+export {
+  BroadcastUncertainError,
+  createInMemoryPostingIntentStore,
+  recoverPostingIntents,
+} from "./broadcast-intent.js";
+export type {
+  PostingIntent,
+  PostingIntentKey,
+  PostingIntentRecord,
+  PostingIntentStore,
+  PostingOutcome,
+  ScanForOnChainMatch,
+} from "./broadcast-intent.js";
+
+// --- today-mode posting + digest-join (§6.1; M2.3) ---
+export { MARKETPLACE_MANIFEST_DIGEST_SENTINEL, encodeCreateTaskCalldata, postTask } from "./posting.js";
+export type { PostingPorts, PostingTerms, SafeBroadcastPort } from "./posting.js";
