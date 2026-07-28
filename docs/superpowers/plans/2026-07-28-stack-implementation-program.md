@@ -243,8 +243,9 @@ Confirmed by the operator at the program gate (2026-07-28):
 ## 8. Follow-ups registry (recorded once; none block v1)
 
 - IANA registration for the `vnd.jinn.task-execution.*`, `vnd.jinn.trust.*`,
-  `vnd.jinn.record-discovery.*` vendor trees (TEP §28; trust §20; discovery §22). Vendor-tree
-  names used as-is until then.
+  `vnd.jinn.record-discovery.*`, and `vnd.jinn.benchmarking.*` vendor trees (TEP §28; trust
+  §20; discovery §22; benchmarking design — postdates the original list). Vendor-tree names
+  used as-is until then.
 - Scheme-IRI (`identifier` propertyID) registration for did:pkh / did:key / CAIP-19 / GitHub
   spellings + the TEP scheme IRIs — one shared follow-up across TEP §28 / profiles §17 /
   trust §20.
