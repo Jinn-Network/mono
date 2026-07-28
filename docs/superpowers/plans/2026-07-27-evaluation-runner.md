@@ -1,5 +1,17 @@
 # Evaluation Runner Implementation Plan
 
+> **SUPERSEDED 2026-07-28 — `@jinn-network/evaluation-runner` will not be built.**
+> The host-orchestration half of the underlying design is superseded by
+> [`docs/superpowers/specs/2026-07-27-local-execution-backend-design.md`](../specs/2026-07-27-local-execution-backend-design.md)
+> (§10.4, §17). The surviving evaluator-adapter core (design §10 / §11) plus the
+> Attestation Issuer composition (design §17) is implemented as the **evaluation harness**
+> work item in
+> [`docs/superpowers/plans/2026-07-28-local-execution-backend.md`](./2026-07-28-local-execution-backend.md).
+> This plan is retained unmodified below for the record.
+>
+> **Status:** Superseded — this plan does not execute. (It carried no explicit Status
+> field before this note; this block is its status of record.)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a production-shaped, method-neutral `@jinn-network/evaluation-runner` library that turns one exact evaluation request into at most one checkpointed, signed, and repository-committed Result Evaluation without owning scheduling, evaluator infrastructure, trust, or publication.
