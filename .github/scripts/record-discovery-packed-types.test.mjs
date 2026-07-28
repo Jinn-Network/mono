@@ -15,6 +15,8 @@ const packages = [
   ['testing', '@jinn-network/record-discovery-testing'],
   ['serve', '@jinn-network/record-discovery-serve'],
   ['client', '@jinn-network/record-discovery-client'],
+  ['facts/evidence', '@jinn-network/record-discovery-facts-evidence'],
+  ['facts/trust', '@jinn-network/record-discovery-facts-trust'],
 ];
 
 const codeEntrypoints = [
@@ -22,15 +24,21 @@ const codeEntrypoints = [
   '@jinn-network/record-discovery-testing',
   '@jinn-network/record-discovery-serve',
   '@jinn-network/record-discovery-client',
+  '@jinn-network/record-discovery-facts-evidence',
+  '@jinn-network/record-discovery-facts-trust',
 ];
 
 // Cross-tree Jinn dependencies each *then-present* discovery package
 // references, packed as file: deps so NodeNext resolves them (program §7.8).
-// M1 seeds trust-core only; later milestones add evidence-discovery,
-// evidence-repository (M7) and task-execution-profiles (M8) here as their
-// consuming facts/* or sources/* leaves land.
+// M1 seeds trust-core only; M7 adds evidence-protocol, evidence-repository,
+// and evidence-discovery (facts/evidence's dependency, including the
+// "/indexer" subpath its exported recompute fns use); M8 adds
+// task-execution-profiles as facts/task-execution lands.
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
+  ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
+  ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
 ];
 
 function run(command, args, options = {}) {
