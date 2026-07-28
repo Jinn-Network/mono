@@ -1,0 +1,266 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "type": "string",
+      "const": "https://jinn.network/protocols/benchmarking/1.0"
+    },
+    "benchmark": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "downloadLocation": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "content": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "owner": {
+      "type": "string"
+    },
+    "arms": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "armId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "pinning": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "execution": {
+            "type": "object",
+            "properties": {
+              "allowlist": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "allowlist"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "armId",
+          "pinning"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "replicates": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "completenessFloor": {
+          "type": "string",
+          "pattern": "^\\d+(\\.\\d+)?$"
+        },
+        "cellWindow": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "replacement": {
+          "type": "object",
+          "properties": {
+            "allowed": {
+              "type": "boolean"
+            },
+            "maxPerCell": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "allowed"
+          ],
+          "additionalProperties": false
+        },
+        "independence": {
+          "type": "string",
+          "enum": [
+            "gating",
+            "disclosed"
+          ]
+        },
+        "evaluation": {
+          "type": "object",
+          "properties": {
+            "minVerdicts": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "distinctEvaluator": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "submissionBaseline": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "participantExclusions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "completenessFloor",
+        "cellWindow",
+        "replacement",
+        "independence",
+        "evaluation",
+        "submissionBaseline"
+      ],
+      "additionalProperties": false
+    },
+    "analysisPlan": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "parameters": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "method",
+          "version",
+          "parameters"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "budget": {
+      "type": "object",
+      "properties": {
+        "perCell": {
+          "type": "object",
+          "properties": {
+            "solve": {
+              "type": "string",
+              "pattern": "^\\d+(\\.\\d+)?$"
+            },
+            "evaluate": {
+              "type": "string",
+              "pattern": "^\\d+(\\.\\d+)?$"
+            }
+          },
+          "required": [
+            "solve",
+            "evaluate"
+          ],
+          "additionalProperties": false
+        },
+        "hardCap": {
+          "type": "string",
+          "pattern": "^\\d+(\\.\\d+)?$"
+        },
+        "unit": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "perCell",
+        "hardCap",
+        "unit"
+      ],
+      "additionalProperties": false
+    },
+    "venue": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "self-run",
+            "open-competition"
+          ]
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "closeAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    }
+  },
+  "required": [
+    "protocol",
+    "benchmark",
+    "owner",
+    "arms",
+    "replicates",
+    "policy",
+    "closeAt"
+  ],
+  "additionalProperties": {}
+}

@@ -1,0 +1,23 @@
+{
+  "committed": 5,
+  "scenarios": {
+    "revealed-full": {
+      "revealed": 5,
+      "committed": 5,
+      "ok": true
+    },
+    "revealed-partial": {
+      "revealed": 2,
+      "committed": 5,
+      "ok": true
+    },
+    "tampered-item": {
+      "revealed": 0,
+      "committed": 5,
+      "ok": false,
+      "mismatched": [
+        "50a6a9787f196bf3654d99f8ae1c9adb5891269259f4158860530300a252f462"
+      ]
+    }
+  }
+}
