@@ -1,4 +1,5 @@
 import {
+  DISCOVERY_SIGNING_SCOPE,
   dssePreAuthEncoding,
   recordDigest,
   referenceBearingFields,
@@ -111,15 +112,23 @@ function withinValidity(key: SeedKey, at: Date): boolean {
   return t >= from && t < to;
 }
 
+// The KeyResolver contract (protocol's verify/ports.ts) documents `resolve`
+// as returning "the scoped keys valid for `agent` at `at`, under
+// DISCOVERY_SIGNING_SCOPE" -- i.e. the resolver itself is scoped to
+// discovery's signing purpose, not merely to `agent`. Filtering on
+// `key.scope === DISCOVERY_SIGNING_SCOPE` here (a seeded field the fake
+// previously stored but never consulted) is what makes the
+// `wrong-signing-scope` vector -- a key bound under a foreign scope -- fail
+// resolution the way §10.3 step 1 requires (finding, M4).
 function makeKeyResolver(seed: Seed): KeyResolver {
   return {
     async resolve(agent: string, at: Date): Promise<ResolvedKey[]> {
       return seed.keys
-        .filter((key) => key.agent === agent && withinValidity(key, at))
+        .filter((key) => key.agent === agent && key.scope === DISCOVERY_SIGNING_SCOPE && withinValidity(key, at))
         .map((key) => ({ keyid: key.keyid, publicKey: `fake-public-key:${key.keyid}`, algorithm: "fake" }));
     },
     async everBound(agent: string, keyid: string): Promise<boolean> {
-      return seed.keys.some((key) => key.agent === agent && key.keyid === keyid);
+      return seed.keys.some((key) => key.agent === agent && key.keyid === keyid && key.scope === DISCOVERY_SIGNING_SCOPE);
     },
   };
 }
