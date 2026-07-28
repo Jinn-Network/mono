@@ -71,7 +71,7 @@ function deliveryLog(operator: Address, requestId = REQUEST_ID, digest = ENVELOP
   return { address: MECH, topics, data: encodeAbiParameters([{ name: 'requestId', type: 'bytes32' }, { name: 'deliveryRate', type: 'uint256' }, { name: 'data', type: 'bytes' }], [requestId, 1n, digest]), transactionHash: DELIVERY_TX, blockNumber: 120n };
 }
 
-async function fixture(options: { role?: 'solution' | 'verdict'; payload?: unknown; envelopeOverride?: Record<string, unknown>; publisher?: Address; solutionOperator?: Address; expectation?: Partial<IssueRelayMarketplaceDeliveryExpectation>; mutate?: (value: Record<string, unknown>) => void } = {}) {
+async function fixture(options: { role?: 'solution' | 'verdict'; payload?: unknown; envelopeOverride?: Record<string, unknown>; publisher?: Address; solutionOperator?: Address; expectation?: Partial<IssueRelayMarketplaceDeliveryExpectation>; rawEnvelopeBytes?: Uint8Array; mutate?: (value: Record<string, unknown>) => void } = {}) {
   const role = options.role ?? 'solution';
   const payload = options.payload ?? (role === 'solution'
     ? { schemaVersion: 'jinn-repo-solution.v1', patch: 'diff --git a/a.ts b/a.ts\n' }
@@ -81,7 +81,7 @@ async function fixture(options: { role?: 'solution' | 'verdict'; payload?: unkno
   const signature = signed.signature as { hash: Hex };
   const ready: AutopilotDeliveryCandidateLookup = { status: 'ready', role, task: { taskId: TASK_ID, taskCidDigest: TASK_DIGEST, createdAtBlock: 100, createdAtTx: TASK_TX }, attempt: { taskId: TASK_ID, attemptIndex: 0, requestId: REQUEST_ID, operator: role === 'solution' ? OPERATOR : EVALUATOR, createdAtBlock: 110 }, solutionOperator: options.solutionOperator ?? OPERATOR, envelope: { requestId: REQUEST_ID, manifestCid: ENVELOPE_CID, publisherAgentId: '7', manifestHash: signature.hash, enrichedAtBlock: 121 } };
   const getLogs = vi.fn(({ address, event }) => address === ROUTER && event?.name === 'TaskCreated' ? [taskLog()] : address === ROUTER ? [attemptLog(role, role === 'solution' ? OPERATOR : EVALUATOR)] : [deliveryLog(role === 'solution' ? OPERATOR : EVALUATOR)]);
-  const observer = createIssueRelayDeliveryObserver({ discovery: { getAutopilotDeliveryCandidates: vi.fn().mockResolvedValue(ready) } as unknown as DiscoveryAPI, publicClient: { getLogs, readContract: vi.fn().mockResolvedValue({ deliveryMech: MECH }) } as unknown as PublicClient, mechMarketplaceAddress: MARKETPLACE, routerAddress: ROUTER, fetchEnvelopeBytes: vi.fn().mockResolvedValue(new TextEncoder().encode(JSON.stringify(signed))), resolvePublisherSafe: vi.fn().mockResolvedValue(options.publisher ?? (role === 'solution' ? OPERATOR : EVALUATOR)) });
+  const observer = createIssueRelayDeliveryObserver({ discovery: { getAutopilotDeliveryCandidates: vi.fn().mockResolvedValue(ready) } as unknown as DiscoveryAPI, publicClient: { getLogs, readContract: vi.fn().mockResolvedValue({ deliveryMech: MECH }) } as unknown as PublicClient, mechMarketplaceAddress: MARKETPLACE, routerAddress: ROUTER, fetchEnvelopeBytes: vi.fn().mockResolvedValue(options.rawEnvelopeBytes ?? new TextEncoder().encode(JSON.stringify(signed))), resolvePublisherSafe: vi.fn().mockResolvedValue(options.publisher ?? (role === 'solution' ? OPERATOR : EVALUATOR)) });
   const expectation: IssueRelayMarketplaceDeliveryExpectation = { chainId: CHAIN_ID, fromBlock: 100n, toBlock: 150n, schemaVersion: 'jinn-issue-relay-delivery-expectation.v1', role, taskId: TASK_ID, taskCid: TASK_CID, creationBlockNumber: 100, round, ...(role === 'verdict' ? { solutionOperatorSafe: OPERATOR } : {}), ...options.expectation };
   return { observer, expectation };
 }
@@ -90,6 +90,13 @@ describe('Issue Relay delivery observer', () => {
   it('verifies a signed solution bound to the exact task and chain facts', async () => {
     const value = await fixture();
     await expect(value.observer.observe(value.expectation)).resolves.toMatchObject({ status: 'verified', role: 'solution', task: { taskId: TASK_ID, taskCid: TASK_CID }, attempt: { requestId: REQUEST_ID, operator: OPERATOR }, delivery: { envelopeCid: ENVELOPE_CID, transactionHash: DELIVERY_TX, blockNumber: 120 }, round, payload: { schemaVersion: 'jinn-repo-solution.v1' } });
+  });
+
+  it('rejects an unknown expectation schema version and malformed fetched bytes', async () => {
+    const unknownSchema = await fixture({ expectation: { schemaVersion: 'other.v1' as never } });
+    await expect(unknownSchema.observer.observe(unknownSchema.expectation)).resolves.toMatchObject({ status: 'contradiction', reason: 'invalid-expectation' });
+    const malformedBytes = await fixture({ rawEnvelopeBytes: new Uint8Array([0xff]) });
+    await expect(malformedBytes.observer.observe(malformedBytes.expectation)).resolves.toMatchObject({ status: 'contradiction', reason: 'invalid-envelope' });
   });
 
   it.each([

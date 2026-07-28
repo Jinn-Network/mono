@@ -47,17 +47,29 @@ const relayVerdict = z.unknown().refine(
   (value) => IssueRelayVerdictV1Schema.safeParse(value).success,
   'invalid Issue Relay verdict payload',
 );
-const relayPayload = z.union([
-  z.object({
-    schemaVersion: z.literal('jinn-repo-solution.v1'),
-    patch: z.string().min(1),
-  }).strict(),
-  relayVerdict,
-]);
-const observation = z.discriminatedUnion('status', [
+const verifiedCommon = {
+  status: z.literal('verified'),
+  task: z.object({ taskId, taskCid: z.string().min(1) }).strict(),
+  attempt: z.object({ attemptIndex: z.number().int().safe().nonnegative(), requestId, operator: address }).strict(),
+  delivery: z.object({ envelopeCid: z.string().min(1), transactionHash: requestId, blockNumber: z.number().int().safe().nonnegative() }).strict(),
+  round,
+};
+const observation = z.union([
   z.object({ status: z.literal('pending'), reason: z.string().min(1), detail: z.string().min(1).optional() }).strict(),
   z.object({ status: z.literal('contradiction'), reason: z.string().min(1), detail: z.string().min(1) }).strict(),
-  z.object({ status: z.literal('verified'), role: z.enum(['solution', 'verdict']), task: z.object({ taskId, taskCid: z.string().min(1) }).strict(), attempt: z.object({ attemptIndex: z.number().int().safe().nonnegative(), requestId, operator: address }).strict(), delivery: z.object({ envelopeCid: z.string().min(1), transactionHash: requestId, blockNumber: z.number().int().safe().nonnegative() }).strict(), round, payload: relayPayload }).strict(),
+  z.object({
+    ...verifiedCommon,
+    role: z.literal('solution'),
+    payload: z.object({
+      schemaVersion: z.literal('jinn-repo-solution.v1'),
+      patch: z.string().min(1),
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...verifiedCommon,
+    role: z.literal('verdict'),
+    payload: relayVerdict,
+  }).strict(),
 ]);
 const resultSchema = z.object({ schemaVersion: z.literal(1), generatedAt: z.string().datetime({ offset: true }), verb: z.literal('tasks observe-issue-relay-delivery'), observation }).strict();
 export type IssueRelayDeliveryCommandResult = z.infer<typeof resultSchema>;

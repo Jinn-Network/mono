@@ -58,4 +58,16 @@ describe('tasks observe-issue-relay-delivery machine command', () => {
     expect(made.exits).toEqual([40]);
     expect(() => parseIssueRelayDeliveryCommandResult({ schemaVersion: 1, generatedAt: '2026-07-28T00:00:00.000Z', verb: 'tasks observe-issue-relay-delivery', observation: { status: 'pending', reason: 'x' }, extra: true })).toThrow();
   });
+
+  it('rejects verified envelopes whose role and payload schema disagree', () => {
+    const verified = {
+      status: 'verified', role: 'verdict', task: { taskId: '501', taskCid: 'bafy-task' },
+      attempt: { attemptIndex: 0, requestId: `0x${'1'.repeat(64)}`, operator: `0x${'2'.repeat(40)}` },
+      delivery: { envelopeCid: 'bafy-envelope', transactionHash: `0x${'3'.repeat(64)}`, blockNumber: 120 },
+      round: { schemaVersion: 'jinn-issue-relay-round.v1', generation: 'relay:501', round: 0, snapshotDigest: `sha256:${'a'.repeat(64)}`, targetRepository: 'Jinn-Network/mono', workspaceRepository: 'Jinn-Network/mono', inputHead: '1'.repeat(40), purpose: 'initial', findings: [] },
+      payload: { schemaVersion: 'jinn-repo-solution.v1', patch: 'diff --git a/a b/a\n' },
+    };
+    expect(() => parseIssueRelayDeliveryCommandResult({ schemaVersion: 1, generatedAt: '2026-07-28T00:00:00.000Z', verb: 'tasks observe-issue-relay-delivery', observation: verified })).toThrow();
+    expect(() => parseIssueRelayDeliveryCommandResult({ schemaVersion: 1, generatedAt: '2026-07-28T00:00:00.000Z', verb: 'tasks observe-issue-relay-delivery', observation: { ...verified, role: 'solution', payload: { schemaVersion: 'jinn-issue-relay-verdict.v1' } } })).toThrow();
+  });
 });
