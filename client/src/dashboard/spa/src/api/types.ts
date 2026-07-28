@@ -1029,12 +1029,18 @@ export interface HarnessAuthStatusResponse {
 // (#675).
 
 export type CodexAuthStatus = 'ok' | 'expired' | 'not_configured';
+export type CodexCredentialMode =
+  | 'chatgpt-oauth'
+  | 'api-key'
+  | 'not-configured'
+  | 'invalid';
 export type CodexVersionStatus = 'ok' | 'unknown' | 'untested';
 
 export interface CodexDoctorResponse {
   installed: boolean;
   authenticated: boolean;
   authStatus: CodexAuthStatus;
+  credentialMode: CodexCredentialMode;
   cliVersion: string | null;
   versionStatus: CodexVersionStatus;
   exitCode: number | null;

@@ -32,11 +32,12 @@ class NoOpAdapter implements HarnessAdapter {
 }
 
 describe('LearnerHarness.isReady — Codex variant (#348)', () => {
-  it('returns ready=true when probeCodexDoctor reports installed, exit 0, authenticated', async () => {
+  it('returns ready=true for a live ChatGPT OAuth session', async () => {
     vi.mocked(probeCodexDoctor).mockResolvedValue({
       installed: true,
       authenticated: true,
       authStatus: 'ok',
+      credentialMode: 'chatgpt-oauth',
       exitCode: 0,
       stdout: 'codex 1.2.3',
       stderr: '',
@@ -49,11 +50,29 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
     expect(probeCodexDoctor).toHaveBeenCalled();
   });
 
+  it('returns ready=true for generic Codex API-key mode', async () => {
+    vi.mocked(probeCodexDoctor).mockResolvedValue({
+      installed: true,
+      authenticated: true,
+      authStatus: 'ok',
+      credentialMode: 'api-key',
+      exitCode: 0,
+      stdout: 'codex 1.2.3',
+      stderr: '',
+      cliVersion: '1.2.3',
+      versionStatus: 'untested',
+    });
+    const harness = new LearnerHarness({ name: CODEX_HARNESS, adapter: new NoOpAdapter() });
+    const result = await harness.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
+    expect(result.ready).toBe(true);
+  });
+
   it('returns ready=false with install nextStep when codex binary missing', async () => {
     vi.mocked(probeCodexDoctor).mockResolvedValue({
       installed: false,
       authenticated: false,
       authStatus: 'not_configured',
+      credentialMode: 'not-configured',
       exitCode: null,
       stdout: '',
       stderr: '',
@@ -73,6 +92,7 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
       installed: true,
       authenticated: false,
       authStatus: 'not_configured',
+      credentialMode: 'not-configured',
       exitCode: 0,
       stdout: 'codex 1.2.3',
       stderr: '',
@@ -94,6 +114,7 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
       installed: true,
       authenticated: false,
       authStatus: 'expired',
+      credentialMode: 'invalid',
       exitCode: 0,
       stdout: 'codex 1.2.3',
       stderr: '',

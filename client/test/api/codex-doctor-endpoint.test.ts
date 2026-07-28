@@ -117,12 +117,14 @@ const { addCodexDoctorRoutes, probeCodexDoctor } = await import(
 );
 
 type CodexAuthStatus = 'ok' | 'expired' | 'not_configured';
+type CodexCredentialMode = 'chatgpt-oauth' | 'api-key' | 'not-configured' | 'invalid';
 type CodexVersionStatus = 'ok' | 'unknown' | 'untested';
 
 interface CodexDoctorBody {
   installed: boolean;
   authenticated: boolean;
   authStatus: CodexAuthStatus;
+  credentialMode: CodexCredentialMode;
   cliVersion: string | null;
   versionStatus: CodexVersionStatus;
   exitCode: number | null;
@@ -203,6 +205,7 @@ describe('GET /api/codex/doctor — install detection', () => {
     expect(body.installed).toBe(false);
     expect(body.authenticated).toBe(false);
     expect(body.authStatus).toBe('not_configured');
+    expect(body.credentialMode).toBe('not-configured');
     expect(body.exitCode).toBeNull();
     expect(body.stdout).toBe('');
     expect(body.stderr).toBe('');
@@ -236,6 +239,7 @@ describe('GET /api/codex/doctor — install detection', () => {
     // Non-zero exit means auth is not meaningful even if credentials exist.
     expect(body.authenticated).toBe(false);
     expect(body.authStatus).toBe('not_configured');
+    expect(body.credentialMode).toBe('not-configured');
     expect(body.stdout).toBe('');
     expect(body.stderr).toBe(diagnosticMsg);
   });
@@ -324,6 +328,7 @@ describe('probeCodexDoctor — auth detection (presence)', () => {
     expect(result.installed).toBe(true);
     expect(result.authenticated).toBe(true);
     expect(result.authStatus).toBe('ok');
+    expect(result.credentialMode).toBe('api-key');
     // env-based auth short-circuits the filesystem probe.
     expect(readFileSyncMock).not.toHaveBeenCalled();
   });
@@ -335,6 +340,7 @@ describe('probeCodexDoctor — auth detection (presence)', () => {
     expect(result.installed).toBe(true);
     expect(result.authenticated).toBe(false);
     expect(result.authStatus).toBe('not_configured');
+    expect(result.credentialMode).toBe('not-configured');
   });
 
   it('treats an empty/whitespace OPENAI_API_KEY as absent', async () => {
@@ -355,6 +361,7 @@ describe('probeCodexDoctor — auth detection (presence)', () => {
 
     const result = await probeCodexDoctor({ env: {} });
     expect(result.authStatus).toBe('ok');
+    expect(result.credentialMode).toBe('chatgpt-oauth');
   });
 
   it('reads $CODEX_HOME/auth.json when CODEX_HOME is set', async () => {
@@ -387,6 +394,7 @@ describe('probeCodexDoctor — auth detection (presence)', () => {
       readAuthFile: () => JSON.stringify({ auth_mode: 'apikey', OPENAI_API_KEY: 'sk-file-123' }),
     });
     expect(result.authStatus).toBe('ok');
+    expect(result.credentialMode).toBe('api-key');
     // Override skips the real filesystem probe.
     expect(readFileSyncMock).not.toHaveBeenCalled();
   });
@@ -436,6 +444,7 @@ describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
     });
     expect(result.authenticated).toBe(true);
     expect(result.authStatus).toBe('ok');
+    expect(result.credentialMode).toBe('chatgpt-oauth');
   });
 
   // #464 regression: a healthy `codex login` whose short-lived id_token AND
@@ -505,6 +514,7 @@ describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
     });
     expect(result.authenticated).toBe(false);
     expect(result.authStatus).toBe('expired');
+    expect(result.credentialMode).toBe('invalid');
   });
 
   it('authStatus:expired for a malformed (unparseable) auth.json — never crashes', async () => {
@@ -589,7 +599,7 @@ describe('probeCodexDoctor — auth liveness (#366, #464)', () => {
 });
 
 // #675 — codex CLI version surfacing. The harness was developed against the
-// 0.50.0–0.133.0 window; an out-of-range CLI may break in ways the daemon
+// 0.50.0–0.136.0 window; an out-of-range CLI may break in ways the daemon
 // cannot recover from. The doctor parses `codex --version` stdout, classifies
 // it against the tested range, and emits a single console.warn on out-of-range.
 describe('probeCodexDoctor — CLI version surfacing (#675)', () => {
@@ -616,6 +626,13 @@ describe('probeCodexDoctor — CLI version surfacing (#675)', () => {
     expect(result.versionStatus).toBe('ok');
   });
 
+  it('reports versionStatus=ok at the exact minimum tested version', async () => {
+    execVersion('codex-cli 0.50.0\n');
+    const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+    expect(result.versionStatus).toBe('ok');
+    expect(result.cliVersion).toBe('0.50.0');
+  });
+
   it('reports versionStatus=untested for a version below MIN_TESTED', async () => {
     execVersion('codex-cli 0.10.0\n');
     const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
@@ -634,18 +651,25 @@ describe('probeCodexDoctor — CLI version surfacing (#675)', () => {
   // 'ok' — codex patch bumps almost never break the CLI contract, and warning
   // on every patch would produce alarm fatigue. Bump MAX on minor/major
   // upgrades only.
-  it('reports versionStatus=ok for a patch release within the tested minor (0.133.5)', async () => {
-    execVersion('codex-cli 0.133.5\n');
+  it('reports versionStatus=ok for a patch release within the tested minor (0.136.5)', async () => {
+    execVersion('codex-cli 0.136.5\n');
     const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
     expect(result.versionStatus).toBe('ok');
-    expect(result.cliVersion).toBe('0.133.5');
+    expect(result.cliVersion).toBe('0.136.5');
   });
 
-  it('reports versionStatus=untested for a minor bump above MAX_TESTED (0.134.0)', async () => {
-    execVersion('codex-cli 0.134.0\n');
+  it('reports versionStatus=untested for a minor bump above MAX_TESTED (0.137.0)', async () => {
+    execVersion('codex-cli 0.137.0\n');
     const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
     expect(result.versionStatus).toBe('untested');
-    expect(result.cliVersion).toBe('0.134.0');
+    expect(result.cliVersion).toBe('0.137.0');
+  });
+
+  it('reports versionStatus=untested for a major bump above MAX_TESTED (1.0.0)', async () => {
+    execVersion('codex-cli 1.0.0\n');
+    const result = await probeCodexDoctor({ env: { OPENAI_API_KEY: 'sk-x' } });
+    expect(result.versionStatus).toBe('untested');
+    expect(result.cliVersion).toBe('1.0.0');
   });
 
   it('readiness is not affected by versionStatus (an untested version still authenticates)', async () => {
