@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type {
   AbsoluteIri,
   CaptureOrigin,
@@ -14,9 +18,33 @@ import type {
   ResourceRuntimeObservationCapture,
 } from "@jinn-network/execution-recorder";
 
+/**
+ * Reads this package's own `version` field out of its package.json, which
+ * sits one directory above this module both in source (src/protocol.ts)
+ * and in the compiled, packed distribution (dist/protocol.js). Failing
+ * loudly here (rather than falling back to a placeholder) is deliberate:
+ * a bridge shipped without a readable version is a packaging bug that
+ * `hello` must never paper over.
+ */
+function readOwnPackageVersion(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const raw = readFileSync(join(here, "..", "package.json"), "utf8");
+  const pkg = JSON.parse(raw) as { readonly version?: string };
+  if (typeof pkg.version !== "string" || pkg.version.length === 0) {
+    throw new Error(
+      "execution-recorder-bridge package.json is missing a version field.",
+    );
+  }
+  return pkg.version;
+}
+
 export const RECORDER_BRIDGE_PROTOCOL =
   "jinn.execution-recorder.bridge/v1" as const;
-export const RECORDER_BRIDGE_VERSION = "0.1.0" as const;
+export const RECORDER_BRIDGE_VERSION: string = readOwnPackageVersion();
+// Declares the Recorder release this bridge build was verified against.
+// protocol.test.ts asserts this stays equal to the installed
+// @jinn-network/execution-recorder version, so `hello` cannot drift from
+// the Recorder it actually fronts.
 export const COMPATIBLE_RECORDER_VERSION = "0.1.0" as const;
 
 export const RECORDER_BRIDGE_METHODS = [

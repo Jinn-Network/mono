@@ -278,10 +278,11 @@ async function findFederatedPage<Query, ChildData, CombinedData>(
     readonly value: JsonValue;
   }[] = [];
   let everyLeafCheckpointReplayable = true;
-  let anySuccessfulLeafHasCheckpoint = false;
+  let everyLeafSucceeded = true;
 
   for (const leaf of leaves) {
     if (!leaf.ok) {
+      everyLeafSucceeded = false;
       sourceReports.push({
         source: leaf.child.identity,
         status: "failed",
@@ -349,7 +350,6 @@ async function findFederatedPage<Query, ChildData, CombinedData>(
       });
     }
     if (page.checkpoint !== undefined) {
-      anySuccessfulLeafHasCheckpoint = true;
       checkpointChildren.push({
         sourceId: child.identity.id,
         sourceVersion: child.identity.version,
@@ -420,7 +420,9 @@ async function findFederatedPage<Query, ChildData, CombinedData>(
           identityVersion: options.identity.version,
           children: checkpointChildren,
         },
-        replayable: anySuccessfulLeafHasCheckpoint && everyLeafCheckpointReplayable,
+        replayable: everyLeafSucceeded
+          && checkpointChildren.length === options.sources.length
+          && everyLeafCheckpointReplayable,
       };
 
   return {

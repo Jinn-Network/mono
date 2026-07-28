@@ -1,5 +1,5 @@
 import { createRecordReference } from "@jinn-network/evidence-repository";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { createFederatedCandidateSource } from "./federation.js";
 import {
@@ -284,6 +284,65 @@ describe("createFederatedCandidateSource", () => {
       candidateOptions(4),
     );
     expect(page.checkpoint?.replayable).toBe(false);
+  });
+
+  test("a composite checkpoint is non-replayable when a configured leaf fails, and a replay attempt never runs that leaf as if it had been captured", async () => {
+    const replayableLeaf = {
+      identity: { id: "replayable", version: "1.0.0" },
+      find: vi.fn(async (
+        _query: unknown,
+        options: { readonly maximumCandidates: number },
+      ) => ({
+        source: { id: "replayable", version: "1.0.0" },
+        candidates: [{ reference: firstReference }].slice(
+          0,
+          options.maximumCandidates,
+        ),
+        checkpoint: {
+          source: { id: "replayable", version: "1.0.0" },
+          value: { generation: 1 },
+          replayable: true,
+        },
+      })),
+    };
+    const failingLeaf = {
+      identity: { id: "failing", version: "1.0.0" },
+      find: vi.fn(async (
+        _query: unknown,
+        _options: { readonly checkpoint?: unknown },
+      ): Promise<never> => {
+        throw new Error("Synthetic source failure.");
+      }),
+    };
+    const source = createFederatedCandidateSource({
+      identity: { id: "checkpoint-partial-failure", version: "1.0.0" },
+      sources: [replayableLeaf as never, failingLeaf as never],
+      allocate: equalAllocation,
+      order: providerOrder,
+    });
+    const page = await source.find(
+      { terms: ["checkpoint"] },
+      candidateOptions(4),
+    );
+    // Even though the surviving leaf produced a replayable checkpoint, the
+    // failed leaf contributed nothing to replay against, so the composite
+    // must not claim replayability.
+    expect(page.checkpoint?.replayable).toBe(false);
+
+    // A caller that (incorrectly) tries to replay this non-replayable
+    // checkpoint anyway must never have the previously-failed leaf silently
+    // treated as though its state had been captured: it receives no
+    // checkpoint constraint at all and therefore runs against current
+    // state, not a frozen historical one.
+    await source.find(
+      { terms: ["checkpoint"] },
+      { ...candidateOptions(4), checkpoint: page.checkpoint },
+    );
+    expect(failingLeaf.find).toHaveBeenCalledTimes(2);
+    const replayCallOptions = failingLeaf.find.mock.calls[1]?.[1] as
+      | { readonly checkpoint?: unknown }
+      | undefined;
+    expect(replayCallOptions?.checkpoint).toBeUndefined();
   });
 
   test("all child failures produce an empty page with failed source reports, not a successful leaf report", async () => {

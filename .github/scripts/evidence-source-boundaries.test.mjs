@@ -1356,6 +1356,17 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     'only execution-recorder-bridge/src/cli.ts may depend on the concrete filesystem Repository',
   );
   assert.deepEqual(
+    forbiddenImportsInFiles(
+      [join(bridgeSource, 'index.ts')],
+      [],
+      [bridgeCli],
+    ),
+    [],
+    'the execution-recorder-bridge root entrypoint must not export cli.ts, which would '
+      + 'transitively load the concrete filesystem Repository binding into every consumer '
+      + 'of the injection-based bridge core',
+  );
+  assert.deepEqual(
     forbiddenImportsInFiles(bridgeProductionFiles, [
       '@jinn-network/evidence-protocol',
     ]),
