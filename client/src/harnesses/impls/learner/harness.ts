@@ -291,6 +291,12 @@ export class LearnerHarness implements Harness {
 
   async run(ctx: HarnessContext): Promise<Solution> {
     const window = ctx.task.window ?? { startTs: 0, endTs: 0 };
+    // Resolve the phase range once for both runtime completion evidence and
+    // harvesting. Frozen direct solves intentionally require no generic
+    // learner artifacts; train-mode wrappers may select a pre/post subset.
+    const phaseRange = ctx.mode === 'frozen'
+      ? 'solve-only'
+      : process.env.LEARNER_PHASE_RANGE;
     const inputs: TaskSessionInputs = {
       taskId: ctx.task.id,
       requestId: ctx.requestId,
@@ -311,15 +317,13 @@ export class LearnerHarness implements Harness {
       msUntilEndTs: ctx.msUntilEndTs(),
       abort: ctx.abort,
       mode: ctx.mode,
+      ...(phaseRange
+        ? { adapterEnv: { LEARNER_PHASE_RANGE: phaseRange } }
+        : {}),
     };
 
     await this.adapter.runTask(inputs, this.pluginRoot);
 
-    // Frozen mode skips the learning phases (improve, memory-consolidation), so
-    // harvest must not require their artifacts — solve-only requires none. Train
-    // mode (undefined → 'full') is unchanged, so the daemon's normal restoration
-    // runs are unaffected.
-    const phaseRange = ctx.mode === 'frozen' ? 'solve-only' : undefined;
     const solution = await harvestOutput(ctx.workingDir, phaseRange, ctx.task, {
       taskId: ctx.taskId,
       attemptIndex: ctx.attemptIndex,

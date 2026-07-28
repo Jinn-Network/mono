@@ -397,6 +397,11 @@ describe('ClaudeCodeHarnessAdapter — completion + subprocess reaping (#883)', 
       options: { mode: 'frozen' as const, phaseRange: 'post-execute' as const },
       artifacts: [fullTrainArtifactPaths[4]],
     },
+    {
+      name: 'solve-only/frozen',
+      options: { mode: 'frozen' as const, phaseRange: 'solve-only' as const },
+      artifacts: fullTrainArtifactPaths.slice(0, 0),
+    },
   ])('settles $name only from that mode and phase-range terminal contract', async ({
     options,
     artifacts,
@@ -500,6 +505,36 @@ describe('ClaudeCodeHarnessAdapter — completion + subprocess reaping (#883)', 
 
       child!.emit('exit', 0, null);
       await expect(run).rejects.toThrow(/before learner terminal evidence/);
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  }, 8000);
+
+  it('preserves window-abort resolution with incomplete terminal artifacts', async () => {
+    let child: FakeClaudeChild | undefined;
+    const spawnFn = vi.fn(() => {
+      child = fakeClaudeChild('manual');
+      return child;
+    });
+    const killGroup = vi.fn();
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-claude-abort-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-claude-abort-state-'));
+    const controller = new AbortController();
+    try {
+      const adapter = makeAdapter(spawnFn, killGroup);
+      const run = adapter.runTask(
+        runInputs(workingDir, implStateDir, controller.signal),
+        learnerPluginRoot,
+      );
+      await nextTurn();
+
+      writeTask1196PartialOrientArtifacts(workingDir);
+      controller.abort();
+      child!.emit('exit', null, 'SIGTERM');
+
+      await expect(run).resolves.toBeUndefined();
+      expect(killGroup).toHaveBeenCalledWith(child!.pid, 'SIGTERM');
     } finally {
       rmSync(workingDir, { recursive: true, force: true });
       rmSync(implStateDir, { recursive: true, force: true });

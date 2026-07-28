@@ -72,6 +72,9 @@ describe('claude-code-learner mode gate', () => {
       const adapter = new CapturingAdapter();
       const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/x' });
       await harness.run(makeMinimalCtx('frozen'));
+      expect(adapter.lastInputs?.adapterEnv).toEqual({
+        LEARNER_PHASE_RANGE: 'solve-only',
+      });
       expect(harvestSpy).toHaveBeenCalledWith(
         '/tmp/work',
         'solve-only',
@@ -92,6 +95,7 @@ describe('claude-code-learner mode gate', () => {
       const adapter = new CapturingAdapter();
       const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/x' });
       await harness.run(makeMinimalCtx('train'));
+      expect(adapter.lastInputs?.adapterEnv).toBeUndefined();
       expect(harvestSpy).toHaveBeenCalledWith(
         '/tmp/work',
         undefined,
@@ -102,4 +106,35 @@ describe('claude-code-learner mode gate', () => {
       harvestSpy.mockRestore();
     }
   });
+
+  it.each(['pre-execute', 'post-execute'] as const)(
+    'passes configured train phase range %s to both adapter and harvest',
+    async (phaseRange) => {
+      const priorPhaseRange = process.env.LEARNER_PHASE_RANGE;
+      process.env.LEARNER_PHASE_RANGE = phaseRange;
+      const harvestSpy = vi.spyOn(harvestModule, 'harvestOutput').mockResolvedValue({
+        venueRef: { name: 'claude-code-learner' },
+        gating: {},
+      } as Awaited<ReturnType<typeof harvestModule.harvestOutput>>);
+      try {
+        const adapter = new CapturingAdapter();
+        const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/x' });
+        await harness.run(makeMinimalCtx('train'));
+
+        expect(adapter.lastInputs?.adapterEnv).toEqual({
+          LEARNER_PHASE_RANGE: phaseRange,
+        });
+        expect(harvestSpy).toHaveBeenCalledWith(
+          '/tmp/work',
+          phaseRange,
+          expect.anything(),
+          { taskId: undefined, attemptIndex: undefined, requestId: undefined },
+        );
+      } finally {
+        if (priorPhaseRange === undefined) delete process.env.LEARNER_PHASE_RANGE;
+        else process.env.LEARNER_PHASE_RANGE = priorPhaseRange;
+        harvestSpy.mockRestore();
+      }
+    },
+  );
 });
