@@ -125,16 +125,34 @@ describe('signTaskV1', () => {
         agentEoa: account.address,
       },
       createdAt: 1700000000000,
-      executionRequest: { harness: 'codex', model: 'gpt-5-codex' },
+      executionRequest: {
+        harness: 'codex',
+        model: 'gpt-5-codex',
+        version: '1.2.3',
+        loadoutRef: 'arm-a',
+        isolation: 'dedicated',
+      },
     };
 
     const signedOriginal = await signTaskV1(baseTask, pk);
     const signedChangedHarness = await signTaskV1(
-      { ...baseTask, executionRequest: { harness: 'claude-code', model: 'gpt-5-codex' } },
+      { ...baseTask, executionRequest: { ...baseTask.executionRequest!, harness: 'claude-code' } },
       pk,
     );
     const signedChangedModel = await signTaskV1(
-      { ...baseTask, executionRequest: { harness: 'codex', model: 'gpt-5.1' } },
+      { ...baseTask, executionRequest: { ...baseTask.executionRequest!, model: 'gpt-5.1' } },
+      pk,
+    );
+    const signedChangedVersion = await signTaskV1(
+      { ...baseTask, executionRequest: { ...baseTask.executionRequest!, version: '2.0.0' } },
+      pk,
+    );
+    const signedChangedLoadoutRef = await signTaskV1(
+      { ...baseTask, executionRequest: { ...baseTask.executionRequest!, loadoutRef: 'arm-b' } },
+      pk,
+    );
+    const signedChangedIsolation = await signTaskV1(
+      { ...baseTask, executionRequest: { ...baseTask.executionRequest!, isolation: 'shared' } },
       pk,
     );
     const signedNoExecutionRequest = await signTaskV1(
@@ -151,6 +169,9 @@ describe('signTaskV1', () => {
     // the same way any other field tampering is.
     expect(signedChangedHarness.signature.hash).not.toBe(signedOriginal.signature.hash);
     expect(signedChangedModel.signature.hash).not.toBe(signedOriginal.signature.hash);
+    expect(signedChangedVersion.signature.hash).not.toBe(signedOriginal.signature.hash);
+    expect(signedChangedLoadoutRef.signature.hash).not.toBe(signedOriginal.signature.hash);
+    expect(signedChangedIsolation.signature.hash).not.toBe(signedOriginal.signature.hash);
     expect(signedNoExecutionRequest.signature.hash).not.toBe(signedOriginal.signature.hash);
   });
 });
