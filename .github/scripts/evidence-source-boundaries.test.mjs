@@ -9,7 +9,7 @@ const packages = join(root, 'packages', 'evidence');
 const evidenceDirectories = [
   'protocol', 'repository', 'repository-oci', 'repository-ipfs', 'discovery',
   'catalog-sqlite', 'execution-recorder', 'attestation-issuer', 'derivation',
-  'publication', 'local-runtime', 'execution-recorder-bridge',
+  'publication', 'local-runtime', 'execution-recorder-bridge', 'retrieval',
 ];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
@@ -194,6 +194,44 @@ const BRIDGE_FOREIGN_PACKAGES = [
   '@jinn-network/sdk',
   'better-sqlite3',
   'hermes-agent',
+  'viem',
+];
+
+const RETRIEVAL_ALLOWED_DEPENDENCIES = [
+  '@jinn-network/evidence-discovery',
+  '@jinn-network/evidence-protocol',
+  '@jinn-network/evidence-repository',
+];
+const RETRIEVAL_ALLOWED_DEV_DEPENDENCIES = [
+  '@types/node',
+  'typescript',
+  'vitest',
+];
+const RETRIEVAL_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const RETRIEVAL_FORBIDDEN_PACKAGES = [
+  '@huggingface/transformers',
+  '@jinn-network/autopilot',
+  '@jinn-network/evidence-catalog-sqlite',
+  '@jinn-network/evidence-discovery/indexer',
+  '@jinn-network/evidence-discovery/journal',
+  '@jinn-network/evidence-local-runtime',
+  '@jinn-network/evidence-repository-oci',
+  '@jinn-network/evidence-repository-ipfs',
+  '@jinn-network/evidence-repository/fs',
+  '@jinn-network/jinn-layer',
+  '@jinn-network/marketplace',
+  '@jinn-network/plugin',
+  '@jinn-network/sdk',
+  'better-sqlite3',
+  'kubo-rpc-client',
+  'node:dgram',
+  'node:dns',
+  'node:fs',
+  'node:http',
+  'node:http2',
+  'node:https',
+  'node:net',
+  'node:tls',
   'viem',
 ];
 
@@ -624,6 +662,27 @@ test('Publication boundary checks catch root, testing, filesystem, application, 
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
+test('Retrieval boundary checks catch package, I/O, and ambient-network escapes', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-retrieval-boundary-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'source.ts'), [
+      'import "@jinn-network/plugin";',
+      'export * from "@jinn-network/evidence-catalog-sqlite";',
+      'await import("@jinn-network/evidence-repository/fs");',
+      'require("@jinn-network/evidence-discovery/journal");',
+      'import "node:fs";',
+      'fetch;',
+    ].join('\n'));
+    assert.equal(
+      forbiddenImports(source, RETRIEVAL_FORBIDDEN_PACKAGES).length,
+      5,
+    );
+    assert.equal(ambientNetworkUsesInFiles(files(source)).length, 1);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
 test('evidence source boundaries remain one-way across the approved graph', () => {
   const discovery = join(packages, 'discovery', 'src');
   const catalog = join(discovery, 'catalog');
@@ -923,6 +982,135 @@ test('evidence source boundaries remain one-way across the approved graph', () =
       );
     }
   }
+  const retrieval = join(packages, 'retrieval');
+  const retrievalSource = join(retrieval, 'src');
+  const retrievalTestingDir = join(retrievalSource, 'testing');
+  const retrievalTestingEntry = join(retrievalSource, 'testing.ts');
+  const retrievalTestSupport = join(retrievalSource, 'test-support.ts');
+  const retrievalTestRegex = /\.test\.[cm]?[jt]sx?$/u;
+  const retrievalSourceFiles = files(retrievalSource);
+  const retrievalTestingFiles = retrievalSourceFiles.filter((file) =>
+    file === retrievalTestingEntry
+      || file === retrievalTestSupport
+      || inside(file, retrievalTestingDir)
+      || retrievalTestRegex.test(file));
+  const retrievalProductionFiles = retrievalSourceFiles.filter((file) =>
+    !retrievalTestingFiles.includes(file));
+  const retrievalManifest = manifest('retrieval');
+  const retrievalForeignEvidenceRoots = evidenceDirectories
+    .filter((directory) =>
+      !['retrieval', 'protocol', 'repository', 'discovery'].includes(directory))
+    .map((directory) => join(packages, directory));
+  const retrievalForeignRoots = [
+    ...retrievalForeignEvidenceRoots,
+    repositoryFs,
+    join(packages, 'repository-oci'),
+    repositoryIpfs,
+    join(packages, 'catalog-sqlite'),
+    indexer,
+    journal,
+  ];
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      retrievalProductionFiles,
+      [...RETRIEVAL_FORBIDDEN_PACKAGES, 'vitest'],
+      [...retrievalForeignRoots, ...retrievalTestingFiles],
+    ),
+    [],
+    'the Retrieval root region must not expose /testing, test-support, or test-only dependencies',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      retrievalTestingFiles,
+      RETRIEVAL_FORBIDDEN_PACKAGES.filter((dependency) => dependency !== 'node:fs'),
+      retrievalForeignRoots,
+    ),
+    [],
+    'the Retrieval /testing region crosses an evidence architecture boundary',
+  );
+  assert.deepEqual(
+    retrievalTestingFiles.flatMap((file) =>
+      specifiers(readFileSync(file, 'utf8'))
+        .filter((specifier) => specifier === 'node:fs')
+        .map((specifier) => `${relative(root, file)} -> ${specifier}`)),
+    [],
+    'the Retrieval /testing region may only use node:fs/promises, never bare node:fs',
+  );
+  assert.deepEqual(
+    ambientNetworkUsesInFiles([
+      ...retrievalProductionFiles,
+      ...retrievalTestingFiles,
+    ]),
+    [],
+    'Retrieval production and /testing entrypoints may not use ambient network APIs',
+  );
+  assert.deepEqual(Object.keys(retrievalManifest.exports).sort(), ['.', './testing']);
+  assert.deepEqual(retrievalManifest.exports['.'], {
+    import: './dist/index.js',
+    types: './dist/index.d.ts',
+  });
+  assert.deepEqual(retrievalManifest.exports['./testing'], {
+    import: './dist/testing.js',
+    types: './dist/testing.d.ts',
+  });
+  assert.deepEqual(
+    Object.keys(retrievalManifest.dependencies ?? {}).sort(),
+    RETRIEVAL_ALLOWED_DEPENDENCIES,
+    'retrieval production dependencies must match the approved design inventory',
+  );
+  assert.deepEqual(
+    Object.keys(retrievalManifest.devDependencies ?? {}).sort(),
+    RETRIEVAL_ALLOWED_DEV_DEPENDENCIES,
+    'retrieval development dependencies must match the approved toolchain',
+  );
+  assert.deepEqual(
+    Object.keys(retrievalManifest.optionalDependencies ?? {}),
+    [],
+    'retrieval may not declare optional dependencies',
+  );
+  assert.deepEqual(
+    Object.keys(retrievalManifest.peerDependencies ?? {}).sort(),
+    RETRIEVAL_ALLOWED_PEER_DEPENDENCIES,
+    'retrieval peer dependencies must remain test-only',
+  );
+  assert.deepEqual(retrievalManifest.peerDependenciesMeta, {
+    vitest: { optional: true },
+  });
+  for (const section of [
+    'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
+  ]) {
+    for (const dependency of RETRIEVAL_FORBIDDEN_PACKAGES) {
+      assert.ok(
+        !Object.hasOwn(retrievalManifest[section] ?? {}, dependency),
+        `retrieval may not declare ${dependency} in ${section}`,
+      );
+    }
+  }
+  for (const directory of ['protocol', 'repository', 'discovery']) {
+    for (const section of [
+      'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
+    ]) {
+      assert.ok(
+        !Object.hasOwn(manifest(directory)[section] ?? {}, '@jinn-network/evidence-retrieval'),
+        `${directory} may not depend on Retrieval`,
+      );
+    }
+    assertBoundary(
+      join(packages, directory, 'src'),
+      ['@jinn-network/evidence-retrieval'],
+      [retrieval],
+    );
+  }
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      [join(retrievalSource, 'index.ts')],
+      [],
+      [retrievalTestingDir, retrievalTestingEntry],
+    ),
+    [],
+    'the Retrieval root entrypoint must not export testing.ts or files under src/testing',
+  );
+
   for (const directory of evidenceDirectories) {
     if (directory === 'local-runtime' || directory === 'catalog-sqlite') continue;
     for (const section of ['dependencies', 'devDependencies']) {

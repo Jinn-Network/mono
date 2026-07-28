@@ -10,6 +10,8 @@ on:
       - ".github/workflows/evidence-ci.yml"
       - "docs/superpowers/specs/2026-07-23-jinn-execution-evidence-protocol-design.md"
       - "docs/superpowers/specs/2026-07-24-jinn-attestation-issuer-design.md"
+      - "docs/superpowers/specs/2026-07-26-evidence-retrieval-design.md"
+      - "docs/superpowers/plans/2026-07-27-evidence-retrieval.md"
 
 permissions:
   contents: read
@@ -264,6 +266,55 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  retrieval:
+    name: Evidence Retrieval
+    needs: [foundation, components]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Evidence Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-protocol-dist
+          path: packages/evidence/protocol/dist
+      - name: Restore Evidence Repository distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-repository-dist
+          path: packages/evidence/repository/dist
+      - name: Restore Evidence Discovery distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-discovery-dist
+          path: packages/evidence/discovery/dist
+      - name: Install packed-smoke dependency toolchains
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable)
+          (cd packages/evidence/repository && yarn install --immutable)
+          (cd packages/evidence/discovery && yarn install --immutable)
+      - name: Verify Evidence Retrieval
+        working-directory: packages/evidence/retrieval
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Evidence Retrieval distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-retrieval-dist
+          path: packages/evidence/retrieval/dist
+          if-no-files-found: error
+          retention-days: 1
+
   catalog-sqlite:
     needs: [foundation, components]
     runs-on: ubuntu-latest
@@ -373,7 +424,7 @@ jobs:
           retention-days: 1
 
   verify:
-    needs: [architecture, foundation, components, derivation, execution-recorder-bridge, catalog-sqlite, local-runtime]
+    needs: [architecture, foundation, components, derivation, execution-recorder-bridge, retrieval, catalog-sqlite, local-runtime]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -384,6 +435,7 @@ jobs:
           COMPONENTS_RESULT: ${{ needs.components.result }}
           DERIVATION_RESULT: ${{ needs.derivation.result }}
           EXECUTION_RECORDER_BRIDGE_RESULT: ${{ needs['execution-recorder-bridge'].result }}
+          RETRIEVAL_RESULT: ${{ needs.retrieval.result }}
           CATALOG_SQLITE_RESULT: ${{ needs['catalog-sqlite'].result }}
           LOCAL_RUNTIME_RESULT: ${{ needs['local-runtime'].result }}
         run: |
@@ -393,6 +445,7 @@ jobs:
             "$COMPONENTS_RESULT" \
             "$DERIVATION_RESULT" \
             "$EXECUTION_RECORDER_BRIDGE_RESULT" \
+            "$RETRIEVAL_RESULT" \
             "$CATALOG_SQLITE_RESULT" \
             "$LOCAL_RUNTIME_RESULT"; do
             test "$result" = "success"
@@ -412,7 +465,7 @@ jobs:
           path: .evidence-dist
       - name: Place package distributions
         run: |
-          for package in protocol repository repository-oci repository-ipfs discovery catalog-sqlite execution-recorder attestation-issuer derivation publication local-runtime execution-recorder-bridge; do
+          for package in protocol repository repository-oci repository-ipfs discovery catalog-sqlite execution-recorder attestation-issuer derivation publication local-runtime execution-recorder-bridge retrieval; do
             mkdir -p "packages/evidence/${package}/dist"
             cp -R ".evidence-dist/evidence-${package}-dist/." "packages/evidence/${package}/dist/"
           done
