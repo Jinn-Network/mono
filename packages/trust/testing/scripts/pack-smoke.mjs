@@ -14,9 +14,11 @@ import { fileURLToPath } from "node:url";
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const trustPackagesRoot = join(packageRoot, "..");
 const coreRoot = join(trustPackagesRoot, "core");
+const resolveRoot = join(trustPackagesRoot, "resolve");
 const evidenceProtocolRoot = join(trustPackagesRoot, "..", "evidence", "protocol");
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-trust-testing-"));
 const coreArchive = join(temporaryRoot, "trust-core.tgz");
+const resolveArchive = join(temporaryRoot, "trust-resolve.tgz");
 const evidenceProtocolArchive = join(temporaryRoot, "evidence-protocol.tgz");
 const testingArchive = join(temporaryRoot, "trust-testing.tgz");
 const consumer = join(temporaryRoot, "consumer");
@@ -78,6 +80,7 @@ try {
   // evidence-protocol's dist/ -- the CI job does the same (trust-ci.yml).
   for (const [root, archive] of [
     [coreRoot, coreArchive],
+    [resolveRoot, resolveArchive],
     [evidenceProtocolRoot, evidenceProtocolArchive],
     [packageRoot, testingArchive],
   ]) {
@@ -94,8 +97,13 @@ try {
     type: "module",
     dependencies: {
       "@jinn-network/trust-core": `file:${coreArchive}`,
+      "@jinn-network/trust-resolve": `file:${resolveArchive}`,
       "@jinn-network/evidence-protocol": `file:${evidenceProtocolArchive}`,
       "@jinn-network/trust-testing": `file:${testingArchive}`,
+      // trust-testing's index re-exports its conformance battery, which
+      // imports vitest at module scope (an optional peer dependency) --
+      // installed here so the packed consumer resolves it.
+      vitest: "4.1.8",
     },
   }));
   await run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], {

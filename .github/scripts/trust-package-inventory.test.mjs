@@ -18,9 +18,7 @@ const TRUST_PACKAGES = [
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['core', { dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['resolve', { dependencies: ['@jinn-network/trust-core'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
-  // trust-testing's dependency on trust-resolve is added in Task T14, once
-  // the resolver-dependent kit code (fakes.ts / conformance.ts) lands.
-  ['testing', { dependencies: ['@jinn-network/trust-core'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
+  ['testing', { dependencies: ['@jinn-network/trust-core', '@jinn-network/trust-resolve'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
 ]);
 
 // Cross-tree Jinn dependencies this tree's packages are approved to portal
