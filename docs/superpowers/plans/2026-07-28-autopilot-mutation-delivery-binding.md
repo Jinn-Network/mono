@@ -1044,3 +1044,119 @@ Record:
 - adoption receipt marker, author, disposition, and operation;
 - daemon Solution-claim transaction or exact claimability evidence;
 - confirmation that only one top-level Task exists.
+
+### Task 6: Harvest complete Autopilot worktree mutations
+
+**Files:**
+- Modify:
+  `client/src/harnesses/impls/learner/harvest.ts`
+- Test:
+  `client/test/harnesses/learner/jinn-repo-harvest.test.ts`
+
+**Interfaces:**
+- Consumes: a successfully parsed declared `autopilot-session`, its persisted
+  runtime Task/attempt/request identity, and `$workingDir/repo`.
+- Produces: one daemon-derived
+  `jinn-autopilot-mutation-result.v1` payload whose binary patch contains
+  tracked edits, tracked deletions, and untracked additions without changing
+  the repository's real index.
+
+- [ ] **Step 1: Write the failing complete-worktree regression**
+
+Extend the Autopilot materializer test fixture to commit two tracked files,
+then modify one, delete one, and create an untracked Markdown file. Snapshot
+the real `.git/index` bytes immediately before `harvestOutput`.
+
+Assert the returned payload has `outcome: mutation-complete`; its single patch
+contains the tracked edit, deletion, and new file; the real index bytes are
+unchanged; and no temporary harvest-index directory remains under
+`workingDir/.execute`.
+
+- [ ] **Step 2: Run the focused test and verify RED**
+
+Run:
+
+```bash
+PATH=/Users/adrianobradley/.nvm/versions/node/v22.22.2/bin:$PATH \
+  yarn vitest run \
+  client/test/harnesses/learner/jinn-repo-harvest.test.ts
+```
+
+Expected: the new assertion fails because plain `git diff --binary` omits the
+untracked Markdown file.
+
+- [ ] **Step 3: Implement isolated-index complete patch derivation**
+
+In `harvest.ts`, add one internal helper used only after
+`assertAutopilotHarvestIdentity` identifies a declared Autopilot session:
+
+1. create `workingDir/.execute` and a uniquely named temporary directory
+   beneath it;
+2. set a separate absolute `GIT_INDEX_FILE` inside that directory;
+3. run `git -C <repo> read-tree HEAD`;
+4. run `git -C <repo> add -A --`;
+5. run
+   `git -C <repo> diff --cached --binary HEAD --`;
+6. return stdout and remove the temporary directory.
+
+Pass the isolated environment only to those Git commands. Keep the ordinary
+and legacy jinn-repo materializer on its existing tracked
+`git diff --binary` path.
+
+- [ ] **Step 4: Run the focused test and verify GREEN**
+
+Run the Step 2 command. Expected: all tests in the focused file pass.
+
+- [ ] **Step 5: Write the failing error-cleanup regression**
+
+Create an Autopilot repository whose `HEAD` cannot be read after the base
+commit, invoke harvest, and assert no temporary harvest-index directory
+remains. Verify the test fails when cleanup occurs only on the success path.
+
+- [ ] **Step 6: Guarantee cleanup in `finally` and verify GREEN**
+
+Move exact temporary-directory removal into `finally`, retaining the existing
+warning/fail-closed behavior for Git command failure. Run the focused test
+again and require all cases to pass.
+
+- [ ] **Step 7: Verify the affected client surface**
+
+Run:
+
+```bash
+PATH=/Users/adrianobradley/.nvm/versions/node/v22.22.2/bin:$PATH \
+  yarn vitest run \
+  client/test/harnesses/learner/jinn-repo-harvest.test.ts \
+  client/test/harnesses/impls/learner/harvest.test.ts \
+  client/test/harnesses/impls/learner/mode-gate.test.ts \
+  client/test/harnesses/engine/bug-fixes.test.ts \
+  client/test/harnesses/engine/adoption-delivery.test.ts \
+  client/test/harnesses/impls/jinn-repo-evaluator/harness.test.ts \
+  client/test/harnesses/impls/hermes-agent/harness.test.ts
+```
+
+Then run client typecheck, the full client test suite, `git diff --check`, and
+the client build with Node `v22.22.2`.
+
+- [ ] **Step 8: Review and commit**
+
+Review the exact diff for:
+
+- Autopilot-only routing;
+- real index/worktree immutability;
+- ignored-path behavior;
+- binary patch retention;
+- bounded command timeouts and buffers;
+- `finally` cleanup;
+- no relaxation of payload correlation or downstream mutation policy.
+
+Commit only the design/plan update, implementation, and regression tests.
+
+- [ ] **Step 9: Retry with a fresh disposable issue**
+
+Gracefully stop the owned sole daemon, start the rebuilt client exactly once,
+and verify health plus canonical solver/evaluator membership. Create a new
+Low-effort non-CODEOWNER Markdown issue; never reuse issue `2256` or Task
+`1193`. Run exactly one active implementation Task for the new issue and use
+recovery-only cycles after submission. Apply the Task 5 observation,
+adoption, receipt, and same-Task evaluator stop conditions unchanged.

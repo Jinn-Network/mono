@@ -292,3 +292,42 @@ cryptographic fixed point. This is not a viable protocol.
 - Automated tests cover the producer/consumer boundary and fail-closed cases.
 - One fresh marketplace canary reaches accepted Solution adoption receipt and
   exact-head evaluator readiness without a second evaluator Task.
+
+## 11. Live-canary finding: complete worktree patch derivation
+
+The first fresh canary after the binding change created one new Markdown file.
+That file remained untracked, as expected for solver worktree output. The
+Autopilot harvester correctly refused to trust the agent-authored typed payload
+for runtime correlation, but its authoritative `git diff --binary` omitted the
+untracked file. With no authoritative typed payload, learner phase telemetry
+became mandatory and an independent agent deviation
+(`.improve/promoter_summary.json` instead of `.improve/summary.json`) failed
+packaging before any Solution envelope existed.
+
+Declared `autopilot-session` tasks therefore need a complete worktree patch,
+not only a tracked-file diff. Their harvester will:
+
+1. create a temporary index outside the repository's real index;
+2. initialize it from `HEAD` with `git read-tree HEAD`;
+3. add the complete worktree with `git add -A --` under the temporary
+   `GIT_INDEX_FILE`;
+4. derive one `git diff --cached --binary HEAD --` patch from that index;
+5. remove the temporary index in `finally`, on success or failure.
+
+This preserves the current trust boundary: correlation still comes from the
+daemon's persisted Task/attempt identity and the patch still comes from the
+daemon-observed checkout. It captures tracked edits, deletions, and untracked
+additions, respects Git ignore rules, and never mutates the real index or
+worktree. Existing prohibited-test-path stripping and downstream mutation
+policy validation remain unchanged.
+
+The complete-worktree path is scoped only to a successfully parsed declared
+`autopilot-session`. Ordinary and legacy `jinn-repo.v1` tasks retain their
+existing tracked `git diff --binary` behavior.
+
+The regression test creates an untracked file in an Autopilot checkout and
+requires a `jinn-autopilot-mutation-result.v1` payload with
+`outcome: mutation-complete`, exact runtime correlation, and a patch containing
+that file. It also snapshots the real Git index before harvest and proves its
+bytes and status are unchanged afterward. Existing tracked-diff,
+missing-identity, legacy, engine, and Hermes coverage must remain green.
