@@ -564,10 +564,11 @@ query ClaimCountTasks($manifestDigest: String!, $limit: Int!, $after: String) {
 `;
 
 /**
- * Per-task on-chain finalization snapshot (#579). Pages every task id +
- * finalized/refunded/claimWindowEnd for a SolverNet's manifestDigest, capped at
- * MAX_OPERATOR_COUNT_TASK_PAGES like CLAIM_COUNT_TASKS_QUERY. Backs the Launcher
- * "Recent posted Tasks" status chip — a DISPLAY signal, not a correctness gate.
+ * Per-task on-chain finalization snapshot (#579). Pages every task row for a
+ * SolverNet's manifestDigest, then co-fetches attempts/verdicts to derive
+ * finalized (spine parity with getTaskLifecycleEvidence / #2236). refunded
+ * comes from the task-row boolean only; claimWindowEnd is advisory display.
+ * Capped at MAX_OPERATOR_COUNT_TASK_PAGES like CLAIM_COUNT_TASKS_QUERY.
  */
 const TASK_STATUSES_QUERY = `
 query TaskStatuses($manifestDigest: String!, $limit: Int!, $after: String) {
@@ -580,7 +581,13 @@ query TaskStatuses($manifestDigest: String!, $limit: Int!, $after: String) {
   ) {
     items {
       id
-      finalized
+      chainId
+      manifestDigest
+      taskCidDigest
+      creator
+      maxClaims
+      requiredVerdicts
+      createdAtBlock
       refunded
       claimWindowEnd
     }
@@ -758,9 +765,47 @@ interface TaskStatusesPage {
   tasks: {
     items: Array<{
       id: string;
-      finalized: boolean | string | number | null;
-      refunded: boolean | string | number | null;
+      chainId: number;
+      manifestDigest: string;
+      taskCidDigest: string;
+      creator: string;
+      maxClaims: number;
+      requiredVerdicts: number;
+      createdAtBlock: string | number;
+      refunded: boolean;
       claimWindowEnd?: string | number | null;
+    }>;
+    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+
+interface StatusSpineAttemptsPage {
+  attempts: {
+    items: Array<{
+      taskId: string;
+      chainId: number;
+      attemptIndex: number;
+      requestId: string;
+      operator: string;
+      priorityMech: string;
+      deliveryRate: string | number;
+      createdAtBlock: string | number;
+    }>;
+    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+
+interface StatusSpineVerdictsPage {
+  verdicts: {
+    items: Array<{
+      taskId: string;
+      chainId: number;
+      attemptIndex: number;
+      verdictIndex: number;
+      requestId: string;
+      evaluator: string;
+      verdictCode: number;
+      createdAtBlock: string | number;
     }>;
     pageInfo?: { hasNextPage: boolean; endCursor: string | null };
   };
@@ -1967,8 +2012,9 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
 
   // ── getTaskStatuses (#579) ─────────────────────────────────────────────────
   // Per-task finalized/refunded/claimWindowEnd for a SolverNet, keyed by taskId.
-  // Single leg, mirroring getInstanceClaimCounts leg 1: page tasks for the
-  // manifestDigest, capped at MAX_OPERATOR_COUNT_TASK_PAGES.
+  // Leg 1 pages tasks for manifestDigest; legs 2–3 co-fetch attempts/verdicts so
+  // finalized matches getTaskLifecycleEvidence (#2236 / #2241). refunded uses the
+  // task-row boolean only; claimWindowEnd is display-only from the task row.
   async function getTaskStatuses(args: {
     manifestCid: string;
   }): Promise<Map<string, TaskStatusSnapshot>> {
@@ -1976,7 +2022,9 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
 
     const manifestDigest = manifestDigestForCid(args.manifestCid).toLowerCase();
 
-    const out = new Map<string, TaskStatusSnapshot>();
+    const tasks: RawTaskRow[] = [];
+    const refundedTaskIds = new Set<string>();
+    const claimWindowEndByTaskId = new Map<string, number | undefined>();
     let taskCursor: string | null = null;
     for (let page = 0; page < MAX_OPERATOR_COUNT_TASK_PAGES; page++) {
       const data: TaskStatusesPage = await postGql<TaskStatusesPage>(
@@ -1986,20 +2034,125 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         { manifestDigest, limit: ATTEMPTS_PAGE_LIMIT, after: taskCursor },
       );
       for (const row of data.tasks?.items ?? []) {
-        const finalized = parseOptionalBoolean(row.finalized);
-        const refunded = parseOptionalBoolean(row.refunded);
-        if (finalized === undefined || refunded === undefined) continue;
-        const claimWindowEnd = parseOptionalNumber(row.claimWindowEnd);
-        out.set(row.id, {
+        const createdAtBlock = Number(row.createdAtBlock);
+        if (!Number.isFinite(createdAtBlock)) continue;
+        if (!isHex(row.manifestDigest) || !isHex(row.taskCidDigest) || !isHex(row.creator)) continue;
+        if (row.refunded === true) refundedTaskIds.add(row.id);
+        claimWindowEndByTaskId.set(row.id, parseOptionalNumber(row.claimWindowEnd));
+        tasks.push({
           taskId: row.id,
-          finalized,
-          refunded,
-          claimWindowEnd,
+          chainId: row.chainId,
+          manifestDigest: row.manifestDigest.toLowerCase() as `0x${string}`,
+          taskCidDigest: row.taskCidDigest.toLowerCase() as `0x${string}`,
+          creator: row.creator.toLowerCase() as `0x${string}`,
+          maxClaims: row.maxClaims,
+          requiredVerdicts: row.requiredVerdicts > 0 ? row.requiredVerdicts : 1,
+          createdAtBlock,
+          finalized: false,
+          refunded: false,
         });
       }
       const pageInfo = data.tasks?.pageInfo;
       if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
       taskCursor = pageInfo.endCursor;
+    }
+
+    if (tasks.length === 0) return new Map();
+
+    const taskIdsByChain = new Map<number, string[]>();
+    for (const t of tasks) {
+      const list = taskIdsByChain.get(t.chainId) ?? [];
+      list.push(t.taskId);
+      taskIdsByChain.set(t.chainId, list);
+    }
+
+    const attempts: RawAttemptRow[] = [];
+    for (const [chainId, taskIds] of taskIdsByChain) {
+      let attemptCursor: string | null = null;
+      for (let page = 0; page < MAX_OPERATOR_COUNT_TASK_PAGES; page++) {
+        const data: StatusSpineAttemptsPage = await postGql<StatusSpineAttemptsPage>(
+          gqlUrl,
+          fetchImpl,
+          LIFECYCLE_ATTEMPTS_QUERY,
+          {
+            taskIds,
+            chainId,
+            limit: ATTEMPTS_PAGE_LIMIT,
+            after: attemptCursor,
+          },
+        );
+        for (const row of data.attempts?.items ?? []) {
+          const createdAtBlock = Number(row.createdAtBlock);
+          if (!Number.isFinite(createdAtBlock)) continue;
+          if (!isHex(row.requestId) || !isHex(row.operator) || !isHex(row.priorityMech)) continue;
+          attempts.push({
+            taskId: row.taskId,
+            chainId: row.chainId,
+            attemptIndex: row.attemptIndex,
+            requestId: row.requestId.toLowerCase() as `0x${string}`,
+            operator: row.operator.toLowerCase() as `0x${string}`,
+            priorityMech: row.priorityMech.toLowerCase() as `0x${string}`,
+            deliveryRate: String(row.deliveryRate),
+            createdAtBlock,
+          });
+        }
+        const pageInfo = data.attempts?.pageInfo;
+        if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
+        attemptCursor = pageInfo.endCursor;
+      }
+    }
+
+    const verdicts: RawVerdictRow[] = [];
+    for (const [chainId, taskIds] of taskIdsByChain) {
+      let verdictCursor: string | null = null;
+      for (let page = 0; page < MAX_OPERATOR_COUNT_TASK_PAGES; page++) {
+        const data: StatusSpineVerdictsPage = await postGql<StatusSpineVerdictsPage>(
+          gqlUrl,
+          fetchImpl,
+          LIFECYCLE_VERDICTS_QUERY,
+          {
+            taskIds,
+            chainId,
+            limit: ATTEMPTS_PAGE_LIMIT,
+            after: verdictCursor,
+          },
+        );
+        for (const row of data.verdicts?.items ?? []) {
+          const createdAtBlock = Number(row.createdAtBlock);
+          if (!Number.isFinite(createdAtBlock)) continue;
+          if (!isHex(row.requestId) || !isHex(row.evaluator)) continue;
+          verdicts.push({
+            taskId: row.taskId,
+            chainId: row.chainId,
+            attemptIndex: row.attemptIndex,
+            verdictIndex: row.verdictIndex,
+            requestId: row.requestId.toLowerCase() as `0x${string}`,
+            evaluator: row.evaluator.toLowerCase() as `0x${string}`,
+            verdictCode: row.verdictCode,
+            createdAtBlock,
+          });
+        }
+        const pageInfo = data.verdicts?.pageInfo;
+        if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
+        verdictCursor = pageInfo.endCursor;
+      }
+    }
+
+    applyTaskLifecycleTerminals({
+      tasks,
+      attempts,
+      verdicts,
+      refundedTaskIds,
+    });
+
+    const out = new Map<string, TaskStatusSnapshot>();
+    for (const task of tasks) {
+      out.set(task.taskId, {
+        taskId: task.taskId,
+        finalized: task.finalized,
+        refunded: task.refunded,
+        claimWindowEnd: claimWindowEndByTaskId.get(task.taskId),
+      });
     }
     return out;
   }
