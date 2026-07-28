@@ -25,6 +25,10 @@ import {
   AutopilotMutationResultSchema,
   AutopilotReviewResultSchema,
 } from '../autopilot-session.js';
+import {
+  IssueRelayAdoptionReceiptV1Schema,
+  IssueRelayVerdictV1Schema,
+} from '../issue-relay.js';
 
 export const JinnRepoLegacySolutionPayloadSchema = z.object({
   schemaVersion: z.literal('jinn-repo-solution.v1'),
@@ -33,9 +37,13 @@ export const JinnRepoLegacySolutionPayloadSchema = z.object({
 
 export const JinnRepoAutopilotSolutionPayloadSchema = AutopilotMutationResultSchema;
 
+export const JinnRepoIssueRelayAdoptionPayloadSchema =
+  IssueRelayAdoptionReceiptV1Schema;
+
 export const JinnRepoSolutionPayloadSchema = z.union([
   JinnRepoLegacySolutionPayloadSchema,
   JinnRepoAutopilotSolutionPayloadSchema,
+  JinnRepoIssueRelayAdoptionPayloadSchema,
 ]);
 
 export type JinnRepoSolutionPayload = z.infer<typeof JinnRepoSolutionPayloadSchema>;
@@ -71,8 +79,11 @@ export const JinnRepoVerdictPayloadSchema = z.union([
   JinnRepoVerdictV1PayloadSchema,
   JinnRepoVerdictV2PayloadSchema,
   AutopilotReviewResultSchema,
+  IssueRelayVerdictV1Schema,
 ]);
 
 export const JinnRepoAutopilotVerdictPayloadSchema = AutopilotReviewResultSchema;
+
+export const JinnRepoIssueRelayVerdictPayloadSchema = IssueRelayVerdictV1Schema;
 
 export type JinnRepoVerdictPayload = z.infer<typeof JinnRepoVerdictPayloadSchema>;

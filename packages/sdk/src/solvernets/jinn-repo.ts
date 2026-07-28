@@ -18,10 +18,12 @@ export type {
 export {
   JinnRepoLegacySolutionPayloadSchema,
   JinnRepoAutopilotSolutionPayloadSchema,
+  JinnRepoIssueRelayAdoptionPayloadSchema,
   JinnRepoSolutionPayloadSchema,
   JinnRepoVerdictPayloadSchema,
   JinnRepoVerdictV2PayloadSchema,
   JinnRepoAutopilotVerdictPayloadSchema,
+  JinnRepoIssueRelayVerdictPayloadSchema,
 } from '../payloads/jinn-repo.js';
 export type {
   JinnRepoSolutionPayload,
@@ -89,3 +91,33 @@ export type {
 export type {
   ParsedAutopilotAdoptionReceiptComment,
 } from '../autopilot-adoption-comment.js';
+
+export {
+  GitOidSchema,
+  IssueRelayAdoptionReceiptV1Schema,
+  IssueRelayCorrelationV1Schema,
+  IssueRelayEvaluationAnchorV1Schema,
+  IssueRelayEvaluationContextV1Schema,
+  IssueRelayFindingV1Schema,
+  IssueRelayPurposeSchema,
+  IssueRelayRoundV1Schema,
+  IssueRelayVerdictV1Schema,
+  Sha256DigestSchema,
+} from '../issue-relay.js';
+export type {
+  IssueRelayAdoptionReceiptV1,
+  IssueRelayCorrelationV1,
+  IssueRelayEvaluationAnchorV1,
+  IssueRelayEvaluationContextV1,
+  IssueRelayFindingV1,
+  IssueRelayPurpose,
+  IssueRelayRoundV1,
+  IssueRelayVerdictV1,
+} from '../issue-relay.js';
+
+export {
+  formatIssueRelayAdoptionReceiptComment,
+  formatIssueRelayEvaluationAnchorComment,
+  parseIssueRelayAdoptionReceiptComment,
+  parseIssueRelayEvaluationAnchorComment,
+} from '../issue-relay-comment.js';

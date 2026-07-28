@@ -27,6 +27,7 @@ import {
   AutopilotSessionCapsuleSchema,
   GitHubRepositorySlugSchema,
 } from './autopilot-session.js';
+import { IssueRelayRoundV1Schema } from './issue-relay.js';
 
 export const JINN_REPO_SCHEMA_VERSION = 'jinn-repo.v1' as const;
 
@@ -64,6 +65,7 @@ export const JinnRepoMergedPrTaskSchema = z.object({
   issue_number: z.never().optional(),
   effort: z.never().optional(),
   session: z.never().optional(),
+  relay: z.never().optional(),
 });
 
 export const JinnRepoLiveIssueTaskSchema = z.object({
@@ -78,6 +80,7 @@ export const JinnRepoLiveIssueTaskSchema = z.object({
   test_files: z.never().optional(),
   test_cmd: z.never().optional(),
   session: z.never().optional(),
+  relay: IssueRelayRoundV1Schema.optional(),
 });
 
 const autopilotSessionTaskFields = {
@@ -93,6 +96,7 @@ const autopilotSessionTaskFields = {
   test_cmd: z.never().optional(),
   issue_number: z.never().optional(),
   effort: z.never().optional(),
+  relay: z.never().optional(),
 };
 
 const JinnRepoAutopilotSessionTaskObjectSchema = z.object(
@@ -143,6 +147,22 @@ export const JinnRepoTaskSchema = z.preprocess((val) => {
   JinnRepoLiveIssueTaskSchema,
   JinnRepoAutopilotSessionTaskObjectSchema,
 ])).superRefine((task, ctx) => {
+  if (task.source === 'live-issue' && task.relay !== undefined) {
+    if (task.base_commit !== task.relay.inputHead) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['base_commit'],
+        message: 'base_commit must match relay.inputHead',
+      });
+    }
+    if (task.repo !== task.relay.targetRepository) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['repo'],
+        message: 'repo must match relay.targetRepository',
+      });
+    }
+  }
   if (task.source !== 'autopilot-session') return;
   requireAutopilotSessionBindings(task, ctx);
 });

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "jinn-issue-relay-adoption.v1",
+  "disposition": "accepted",
+  "correlation": {
+    "generation": "R_kgDOExample:42:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "round": 1,
+    "snapshotDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "taskId": "task-42",
+    "attemptIndex": 0,
+    "requestId": "request-42",
+    "deliveryEnvelopeCid": "bafyrelay42"
+  },
+  "targetRepository": "Jinn-Network/mono",
+  "workspaceRepository": "Jinn-Network/mono",
+  "issueNumber": 1889,
+  "prNumber": 42,
+  "headRef": "relay/1889",
+  "inputHead": "1111111111111111111111111111111111111111",
+  "resultingHead": "2222222222222222222222222222222222222222",
+  "patchDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "solutionSafe": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "adoptedAt": "2026-07-28T12:00:00.000Z"
+}

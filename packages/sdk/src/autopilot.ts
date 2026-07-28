@@ -27,6 +27,36 @@ export type {
 } from './autopilot-session.js';
 
 export {
+  GitOidSchema,
+  IssueRelayAdoptionReceiptV1Schema,
+  IssueRelayCorrelationV1Schema,
+  IssueRelayEvaluationAnchorV1Schema,
+  IssueRelayEvaluationContextV1Schema,
+  IssueRelayFindingV1Schema,
+  IssueRelayPurposeSchema,
+  IssueRelayRoundV1Schema,
+  IssueRelayVerdictV1Schema,
+  Sha256DigestSchema,
+} from './issue-relay.js';
+export type {
+  IssueRelayAdoptionReceiptV1,
+  IssueRelayCorrelationV1,
+  IssueRelayEvaluationAnchorV1,
+  IssueRelayEvaluationContextV1,
+  IssueRelayFindingV1,
+  IssueRelayPurpose,
+  IssueRelayRoundV1,
+  IssueRelayVerdictV1,
+} from './issue-relay.js';
+
+export {
+  formatIssueRelayAdoptionReceiptComment,
+  formatIssueRelayEvaluationAnchorComment,
+  parseIssueRelayAdoptionReceiptComment,
+  parseIssueRelayEvaluationAnchorComment,
+} from './issue-relay-comment.js';
+
+export {
   formatAutopilotAdoptionReceiptComment,
   parseAutopilotAdoptionReceiptComment,
 } from './autopilot-adoption-comment.js';
