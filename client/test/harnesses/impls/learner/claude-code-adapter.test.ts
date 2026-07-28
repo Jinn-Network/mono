@@ -95,6 +95,7 @@ function runInputs(workingDir: string, implStateDir: string, abort: AbortSignal)
     taskBody: sweTask() as never,
     implStateDir,
     workingDir,
+    taskWorkspaceDir: join(workingDir, 'repo'),
     pluginRoots: [],
     windowStartTs: 1,
     windowEndTs: 2,
@@ -141,7 +142,18 @@ describe('ClaudeCodeHarnessAdapter — completion + subprocess reaping (#883)', 
   }, 8000);
 
   it('resolves on the normal path (result then clean exit)', async () => {
-    const spawnFn = vi.fn(() => fakeClaudeChild('result-then-exit'));
+    const calls: Array<{
+      args: string[];
+      options: { cwd?: string };
+    }> = [];
+    const spawnFn = vi.fn((
+      _command: string,
+      args: string[],
+      options: { cwd?: string },
+    ) => {
+      calls.push({ args, options });
+      return fakeClaudeChild('result-then-exit');
+    });
     const workingDir = mkdtempSync(join(tmpdir(), 'jinn-claude-ok-work-'));
     const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-claude-ok-state-'));
     try {
@@ -149,6 +161,13 @@ describe('ClaudeCodeHarnessAdapter — completion + subprocess reaping (#883)', 
       await expect(
         adapter.runTask(runInputs(workingDir, implStateDir, new AbortController().signal), learnerPluginRoot),
       ).resolves.toBeUndefined();
+      const call = calls[0]!;
+      const prompt = call.args[call.args.indexOf('-p') + 1]!;
+      expect(prompt).toContain(`- workingDir = ${workingDir}`);
+      expect(prompt).toContain(`- taskWorkspaceDir = ${join(workingDir, 'repo')}`);
+      expect(prompt).toContain('Task inspection, mutation, and verification must happen only in `taskWorkspaceDir`.');
+      expect(prompt).toContain('Learner telemetry and harness artifacts must remain under `workingDir`.');
+      expect(call.options.cwd).toBe(workingDir);
     } finally {
       rmSync(workingDir, { recursive: true, force: true });
       rmSync(implStateDir, { recursive: true, force: true });

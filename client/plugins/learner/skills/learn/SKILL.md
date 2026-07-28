@@ -12,12 +12,20 @@ You are running one goal end-to-end through a seven-phase learning loop. This si
 
 - `goal` — `{ id, description, kind?, deadline?, spec? }`. Free-form payload describing what to achieve. The plugin reads `description` to know the task and may organize prior runs by `kind` if present. The plugin does not interpret `kind` semantically; it is an opaque string used for organizing artifacts.
 - `workingDir` — ephemeral path; the harness harvests it for delivery when this skill returns.
+- `taskWorkspaceDir` — optional absolute path for the Task's authoritative mutable workspace. When present, repository inspection, mutation, and verification happen only here. This is distinct from `workingDir`.
 - `implStateDir` — the agent's persistent self-state. Git-backed by the SessionStart hook. Mutations here persist across runs and constitute "learning."
 - `msUntilDeadline` — function returning remaining time.
 - `mode` — `train` or `frozen`. Default to `train` if absent. In `frozen` mode, the learning loop must not mutate `implStateDir`.
 - An abort signal that fires at the goal's deadline (if any).
 
 The session-start hook (`hooks/session-start`) has already initialized `implStateDir` as a git repo with the `claude-code-learner` author identity.
+
+When `taskWorkspaceDir` is present, bind it once and pass that exact absolute
+path to every dispatched subagent. Task files belong under
+`taskWorkspaceDir`; learner telemetry remains under `workingDir`, including
+`.coordinator`, `.orient`, `.strategize`, `.plan`, `.execute`, `.debrief`,
+`.improve`, and `.memory-consolidation`. Never resolve a relative repository
+path against the episode root.
 
 ## 1. Boot
 
@@ -46,7 +54,9 @@ Write `workingDir/.coordinator/boot.json` (downstream phases — particularly St
 }
 ```
 
-The harness hands you `goal`, `workingDir`, and `implStateDir` as session inputs (not POSIX env vars). Bind them to the variables this section uses, then write the file:
+The harness hands you `goal`, `workingDir`, optional `taskWorkspaceDir`, and
+`implStateDir` as session inputs (not POSIX env vars). Bind them to the
+variables this section uses, then write the file:
 
 ```bash
 # Bind session inputs into shell variables (substitute your harness's
@@ -98,6 +108,7 @@ Every section that dispatches a subagent uses the same shape. Spawn a fresh-cont
 ```
 goal             = <copy of goal>
 workingDir       = <path>
+taskWorkspaceDir = <absolute path or null>
 implStateDir     = <path, read-only unless this role mutates it>
 outputPath       = workingDir/.<phase>/<artifact>.json
 msUntilDeadline  = <current value>
@@ -114,6 +125,7 @@ Use the dispatch, wait, and release primitives exposed by the current harness. T
 - Wait until every required artifact for the current phase exists; if a multi-wait returns only some completed subagents, keep waiting on the remaining handles.
 - Release/close completed subagents once their outputs have been verified and their summaries have been captured, especially before spawning a later phase.
 - Pass absolute filesystem paths in subagent inputs. Subagents must use those absolute paths for reads and writes rather than assuming they inherited the coordinator's current working directory.
+- When `taskWorkspaceDir` is non-null, pass it unchanged to every subagent. Task inspection, mutations, outputs, and success verification use that root; learner phase artifacts use `workingDir`.
 
 For sections that dispatch multiple subagents in parallel (Orient, optional Debrief probes), spawn one subagent per topic with its own `topic` and `outputPath`. If your harness supports it, run them concurrently; otherwise dispatch sequentially. Subagents do not spawn further subagents — they are one level deep.
 
@@ -204,6 +216,7 @@ priorPlanTemplatesPath   = implStateDir/plans/<goal.kind>/ (or null)
 replanContextPath        = workingDir/.plan/replan-context.json (or null on first plan)
 priorPlanArchives        = [workingDir/.plan/plan-v1.json, ...] (or empty on first plan)
 workingDir               = <path>
+taskWorkspaceDir         = <absolute path or null>
 implStateDir             = <path, read-only>
 outputPath               = workingDir/.plan/plan.json
 msUntilDeadline          = <current value>
@@ -235,6 +248,7 @@ prompt body      = ${PLUGIN_ROOT}/skills/learn/step-worker-prompt.md
 stepSpec         = <the entire step object from plan.json>
 goal             = <copy of goal>
 workingDir       = <path>
+taskWorkspaceDir = <absolute path or null>
 implStateDir     = <path, read-only>
 msUntilDeadline  = <current value>
 ```
@@ -242,7 +256,7 @@ msUntilDeadline  = <current value>
 For parallel-batch steps (steps sharing a `concurrency: parallel-batch-X` label), dispatch the whole batch concurrently if your harness supports it; wait for all to return before advancing.
 
 After a worker returns:
-- The worker's self-reported `status` and `blockers` are evidence; the authoritative verdict is your re-check of the step's `successSignal` against actual outputs on disk.
+- The worker's self-reported `status` and `blockers` are evidence; the authoritative verdict is your re-check of the step's `successSignal` against actual outputs on disk. When `taskWorkspaceDir` is non-null, re-check every Task mutation and repository condition there, never at the episode root.
 - Check `successSignal` — did the step succeed?
 - If yes: append to `workingDir/.execute/log.jsonl` (carrying the worker's `status` and `blockers` into the log entry) and advance.
 - If no: see "When stuck" below.

@@ -302,6 +302,9 @@ export class LearnerHarness implements Harness {
       taskBody: ctx.task as TaskSessionInputs['taskBody'],
       implStateDir: ctx.implStateDir,
       workingDir: ctx.workingDir,
+      ...(ctx.task.solverType === 'jinn-repo.v1' && ctx.task.role === 'restoration'
+        ? { taskWorkspaceDir: join(ctx.workingDir, 'repo') }
+        : {}),
       pluginRoots: [...(ctx.solverPluginRoots ?? [])],
       windowStartTs: window.startTs,
       windowEndTs: window.endTs,

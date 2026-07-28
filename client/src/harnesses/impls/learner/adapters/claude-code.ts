@@ -141,6 +141,18 @@ function captureLogError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
+function workspaceGuidance(inputs: TaskSessionInputs): string[] {
+  if (!inputs.taskWorkspaceDir) {
+    return ['Keep all task work inside `workingDir`.'];
+  }
+  return [
+    '`workingDir` is the episode root, not the task repository.',
+    'Task inspection, mutation, and verification must happen only in `taskWorkspaceDir`.',
+    'Learner telemetry and harness artifacts must remain under `workingDir`.',
+    'Do not create task repository files directly under `workingDir` outside `taskWorkspaceDir`.',
+  ];
+}
+
 /**
  * Construct the initial task prompt. Harness/plugin-specific operating details
  * live in the projected runtime instructions, not in this daemon handoff.
@@ -150,13 +162,16 @@ function buildInitialPrompt(inputs: TaskSessionInputs): string {
     'You are executing a Jinn task.',
     'Complete the task described by the task payload below.',
     'Use the available skills, plugins, tools, and runtime context exposed by this harness.',
-    'Keep all task work inside `workingDir`.',
+    ...workspaceGuidance(inputs),
     'When the task requires a typed SolverNet payload, call submit_typed_payload. Do not write .execute/solution-payload.json directly unless submit_typed_payload is unavailable; if fallback is required, the file must match the exact SolverNet schema.',
     '',
     'Session inputs:',
     `- goal.id = ${inputs.taskId}`,
     inputs.taskCid ? `- goal.cid = ${inputs.taskCid}` : '',
     `- workingDir = ${inputs.workingDir}`,
+    inputs.taskWorkspaceDir
+      ? `- taskWorkspaceDir = ${inputs.taskWorkspaceDir}`
+      : '',
     `- implStateDir = ${inputs.implStateDir}`,
     `- goal.deadline = ${inputs.windowEndTs} (ms since epoch)`,
     `- msUntilDeadline = ${inputs.msUntilEndTs}`,

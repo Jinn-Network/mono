@@ -34,6 +34,12 @@ export interface TaskSessionInputs {
   implStateDir: string;
   /** Ephemeral workingDir for this attempt */
   workingDir: string;
+  /**
+   * Optional absolute workspace containing the Task's authoritative mutable
+   * files. Repository-shaped tasks use this to keep source mutations separate
+   * from learner telemetry, which remains rooted at {@link workingDir}.
+   */
+  taskWorkspaceDir?: string;
   /** Additional SolverPlugin package roots to pass through host plugin loading. */
   pluginRoots?: string[];
   /** Window timestamps (ms since epoch) */

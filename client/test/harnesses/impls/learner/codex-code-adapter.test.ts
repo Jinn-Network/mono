@@ -249,6 +249,7 @@ describe('CodexCodeHarnessAdapter', () => {
         taskBody: sweTask() as never,
         implStateDir,
         workingDir,
+        taskWorkspaceDir: join(workingDir, 'repo'),
         pluginRoots: [sweRuntimePluginRoot, networkToolsPluginRoot],
         windowStartTs: 1,
         windowEndTs: 2,
@@ -301,6 +302,7 @@ describe('CodexCodeHarnessAdapter', () => {
         taskBody: sweTask() as never,
         implStateDir,
         workingDir,
+        taskWorkspaceDir: join(workingDir, 'repo'),
         pluginRoots: [sweRuntimePluginRoot, networkToolsPluginRoot],
         windowStartTs: 1,
         windowEndTs: 2,
@@ -364,6 +366,10 @@ describe('CodexCodeHarnessAdapter', () => {
       // can read goal.spec.repo / goal.spec.base_commit at runtime.
       expect(promptArg).toContain('goal (full body)');
       expect(promptArg).toContain('swe-rebench-v2.v1');
+      expect(promptArg).toContain(`- workingDir = ${workingDir}`);
+      expect(promptArg).toContain(`- taskWorkspaceDir = ${join(workingDir, 'repo')}`);
+      expect(promptArg).toContain('Task inspection, mutation, and verification must happen only in `taskWorkspaceDir`.');
+      expect(promptArg).toContain('Learner telemetry and harness artifacts must remain under `workingDir`.');
 
       expect(calls[0]!.options.cwd).toBe(workingDir);
       expect(calls[0]!.options.env).toMatchObject({

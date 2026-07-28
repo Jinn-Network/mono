@@ -181,6 +181,7 @@ describe('ClaudeCodeHarnessAdapter Network Tools env', () => {
       expect(promptArg).toContain('Use the available skills, plugins, tools, and runtime context exposed by this harness');
       expect(promptArg).not.toContain('claude-code-learner:learn');
       expect(promptArg).toContain('- mode = train');
+      expect(promptArg).not.toContain('taskWorkspaceDir');
       expect(calls[0]!.args).toEqual(expect.arrayContaining([
         '--plugin-dir',
         '/plugins/learner',

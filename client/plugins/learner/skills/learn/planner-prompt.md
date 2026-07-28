@@ -16,6 +16,8 @@ Turn the strategy into concrete steps Execute can follow.
 - `replanContextPath` — read if non-null; contains `{ failedStepId, blockers, partialOutputs[] }` from the prior Execute attempt
 - `priorPlanArchives` — array of paths to prior plan versions (`plan-v<N>.json`); read them to understand what was already tried before producing the new plan
 - `workingDir`, `implStateDir` (read-only)
+- `taskWorkspaceDir` — optional absolute path for the Task's authoritative
+  mutable workspace
 - `outputPath` — write plan.json here
 - `msUntilDeadline`
 
@@ -29,13 +31,28 @@ Each step must be specific enough that a `step-worker` subagent can carry it out
 - Brief description (one sentence)
 - Inputs the worker reads (paths or structured payloads)
 - Tools / MCPs the worker needs
-- Expected outputs (paths under `workingDir/`)
+- Expected outputs. Put learner phase artifacts under `workingDir`; when
+  `taskWorkspaceDir` is present, put each Task mutation or repository output at
+  an absolute path under `taskWorkspaceDir`
 - Success signal — how the orchestrator knows this step succeeded
 - Abort/recovery condition
 
 For `hold-and-revise` or `continuous-observation` postures, include `wait`-kind steps where appropriate:
 
 **On replan:** if `replanContextPath` was provided, the new plan must explicitly avoid the failure mode named in `failedStepId` + `blockers` — either skip that step's approach, route around it, or change the inputs that triggered it. Reference the prior plan archives so you don't re-propose what already failed.
+
+## Workspace routing
+
+When `taskWorkspaceDir` is non-null, make every repository path in a work step
+absolute before writing the plan. For example, a Task 1195-shaped target
+`client/docs/<file>.md` becomes
+`<taskWorkspaceDir>/client/docs/<file>.md`. Repository inspection, mutation,
+and verification must use that root. Do not place the same relative path
+directly under `workingDir`.
+
+Keep learner phase artifacts under `workingDir` (for example,
+`<workingDir>/.execute/summary.json`). If `taskWorkspaceDir` is null, retain the
+existing single-root behavior.
 
 ```json
 { "id": "step-3", "kind": "wait", "durationMs": 7200000, "untilTs": null, "condition": null }
