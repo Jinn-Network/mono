@@ -5,8 +5,10 @@ import {
   AUTHORIZATION_PREDICATE_TYPE,
   IN_TOTO_STATEMENT_TYPE,
   authenticateRequester,
+  ceremonyEvidenceDigest,
   checkAttenuation,
   matchCeremonyContent,
+  serializeCeremonyMessage,
   settlementJoinCheck,
   verifyEnvelopeBinding,
   verifyPolicyChain,
@@ -89,6 +91,62 @@ describe("§16 adversarial battery", () => {
     expect(outcome.reason).toBe("ceremony-verification-failed");
   });
 
+  test("forged binding: a genuine signature by voucher V over a DIFFERENT message, paired with a fabricated message (+ matching committed digest) claiming an attacker's (key, agent), fails (blocker finding)", async () => {
+    const signer = createEoaTestSigner("adversarial-eoa-forge");
+    const genuineAgent = testAgentIri("adversarial-eoa-forge-genuine");
+    const attackerAgent = testAgentIri("adversarial-eoa-forge-attacker");
+    const key = testDidKey("adversarial-eoa-forge-key");
+
+    const genuine = await buildResolvedBindingFixture({
+      agent: genuineAgent,
+      workingKeyDidKey: key,
+      ceremonyType: "eoa",
+      voucher: accountVoucher(84532, signer.address),
+      eoaCeremony: { signer, chainId: 84532 },
+    });
+    const attacker = await buildResolvedBindingFixture({
+      agent: attackerAgent,
+      workingKeyDidKey: key,
+      ceremonyType: "eoa",
+      voucher: accountVoucher(84532, signer.address),
+      eoaCeremony: { signer, chainId: 84532 },
+    });
+
+    // The attacker keeps V's genuine messageBytes + signature -- signed
+    // over the ORIGINAL message naming `genuineAgent` -- but fabricates
+    // `message` to claim resources for their own (key, agent), and
+    // republishes a binding whose committed `ceremony.digest` matches this
+    // forged evidence blob exactly (the attacker controls both, so the
+    // digest-commitment check alone cannot catch this). Only the §7.2
+    // content-match byte-equality check (blocker finding) can: the
+    // fabricated `message` does not re-serialize to the genuine
+    // `messageBytes` it is paired with.
+    const forgedEvidence = {
+      ...genuine.ceremonyEvidence!,
+      message: { ...genuine.ceremonyEvidence!.message, resources: [attackerAgent, key] },
+    };
+    const forgedDigest = ceremonyEvidenceDigest(forgedEvidence);
+    fakes.registerBinding({
+      key,
+      agent: attackerAgent,
+      resolved: {
+        ...attacker.resolved,
+        binding: { ...attacker.resolved.binding, ceremony: { type: "eoa", digest: forgedDigest } },
+        ceremonyEvidence: forgedEvidence,
+      },
+      validFrom: attacker.binding.validFrom,
+    });
+
+    const outcome = await verify({
+      envelopeBytes: attacker.envelopeBytes,
+      key,
+      agent: attackerAgent,
+      atTime: "2026-06-01T00:00:00.000Z",
+    });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.reason).toBe("ceremony-verification-failed");
+  });
+
   test("lifted-ceremony content mismatch (ReCap authorization ceremony)", async () => {
     const signer = createEoaTestSigner("adversarial-recap-lift");
     const message: SiweCeremonyMessage = {
@@ -101,7 +159,13 @@ describe("§16 adversarial battery", () => {
       issuedAt: "2026-01-01T00:00:00.000Z",
       resources: ["deliveries:submit"],
     };
-    const messageBytes = new TextEncoder().encode(JSON.stringify(message));
+    // `messageBytes` must be the genuine canonical EIP-4361 re-serialization
+    // of `message` -- `matchCeremonyContent` now asserts byte-equality
+    // between the two before trusting `message.resources` (blocker
+    // finding), so this test's mismatch must come from the intended
+    // capability-content check below, not an incidental serialization
+    // mismatch.
+    const messageBytes = serializeCeremonyMessage("recap", message);
     const ceremony: ReCapCeremonyEvidence = { type: "recap", message, messageBytes, signature: signer.sign(messageBytes) };
 
     const liftedStatement: AuthorizationStatement = {

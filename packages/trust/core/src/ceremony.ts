@@ -3,11 +3,14 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 
+import { canonicalJsonBytes } from "./canonical-json.js";
 import { compareCodeUnitStrings } from "./order.js";
 import { invalidInput } from "./errors.js";
+import { recordDigest } from "./hashing.js";
 import { toChecksumAddress } from "./spellings.js";
 import type { AuthorizationStatement } from "./authorization.js";
 import type { KeyBinding } from "./key-binding.js";
+import type { Sha256Digest } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // EIP-191 `personal_sign` recovery (design §7.2: EOA ceremonies are
@@ -43,6 +46,14 @@ const EIP191_SIGNATURE_LENGTH = 65;
 
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) return false;
+  }
+  return true;
 }
 
 /**
@@ -139,6 +150,80 @@ export interface CeremonyContentMatchResult {
   readonly mismatch?: string;
 }
 
+// ---------------------------------------------------------------------------
+// §7.2's profiled EIP-4361 (SIWE) message text -- the canonical
+// re-serialization the mandatory content match binds to (below). Without
+// this, `matchCeremonyContent` would trust the attacker-controllable
+// structured `message` object independent of what was actually
+// EIP-191-signed (`messageBytes`): a genuine signature over ANY message,
+// paired with a fabricated `message` claiming a binding for an arbitrary
+// (key, agent) or capability set, would content-match successfully. The
+// statement line is fixed per ceremony type (the "profile"); it is not a
+// producer-supplied field, so it cannot itself be forged independent of
+// `resources`/`domain`/`uri`/etc, all of which ARE bound by this
+// byte-equality check.
+// ---------------------------------------------------------------------------
+
+const EOA_CEREMONY_STATEMENT = "Bind this working key to the named Agent IRI.";
+const RECAP_CEREMONY_STATEMENT = "Authorize the listed capabilities.";
+
+function ceremonyStatement(type: "eoa" | "recap"): string {
+  return type === "eoa" ? EOA_CEREMONY_STATEMENT : RECAP_CEREMONY_STATEMENT;
+}
+
+/**
+ * Canonically re-serializes a structured ceremony `message` to its EIP-4361
+ * message text -- the exact bytes a genuine ceremony EIP-191-signs. This is
+ * a pure function of `(type, message)`: two callers presented with the same
+ * structured fields always produce identical bytes, which is what makes
+ * byte-equality against `messageBytes` a meaningful binding check rather
+ * than a check with wiggle room.
+ */
+export function serializeCeremonyMessage(
+  type: "eoa" | "recap",
+  message: SiweCeremonyMessage,
+): Uint8Array {
+  const lines = [
+    `${message.domain} wants you to sign in with your Ethereum account:`,
+    message.address,
+    "",
+    ceremonyStatement(type),
+    "",
+    `URI: ${message.uri}`,
+    `Version: ${message.version}`,
+    `Chain ID: ${message.chainId}`,
+    `Nonce: ${message.nonce}`,
+    `Issued At: ${message.issuedAt}`,
+  ];
+  if (message.expirationTime !== undefined) {
+    lines.push(`Expiration Time: ${message.expirationTime}`);
+  }
+  lines.push("Resources:");
+  for (const resource of message.resources) {
+    lines.push(`- ${resource}`);
+  }
+  return new TextEncoder().encode(lines.join("\n"));
+}
+
+/**
+ * §7.1's digest-referenced ceremony evidence: the sha256 digest a
+ * key-binding record's `ceremony.digest` commits to. Computed over the
+ * full evidence -- `type`, the structured `message`, and the hex-encoded
+ * `messageBytes`/`signature` -- so the record's commitment pins exactly
+ * which evidence blob a verifier must be shown, not merely its message
+ * content.
+ */
+export function ceremonyEvidenceDigest(
+  ceremony: EoaCeremonyEvidence | ReCapCeremonyEvidence,
+): Sha256Digest {
+  return recordDigest(canonicalJsonBytes({
+    type: ceremony.type,
+    message: ceremony.message,
+    messageBytes: bytesToHex(ceremony.messageBytes),
+    signature: bytesToHex(ceremony.signature),
+  }));
+}
+
 /**
  * §7.2's mandatory field-for-field ceremony<->record content match: the
  * SIWE `resources` Agent IRI must equal `record.agent`, and the
@@ -147,6 +232,16 @@ export interface CeremonyContentMatchResult {
  * mismatch means the ceremony binds nothing -- this is what stops a
  * victim's genuine ceremony from being lifted into a binding (or
  * authorization) for a different key, Agent, or capability set.
+ *
+ * Before any `message.*` field is trusted, the structured `message` is
+ * canonically re-serialized and checked for BYTE-EQUALITY against the
+ * actually-signed `messageBytes` (§7.2 mandatory content match -- this is
+ * what ties the content match to the signature, not just to whatever the
+ * evidence supplier claims `message` says). Without this, `message` is an
+ * independent, attacker-controllable field: a genuine EIP-191 signature by
+ * voucher V over ANY message could be paired with a fabricated `message`
+ * naming an arbitrary (key, agent) or capability set and would otherwise
+ * content-match successfully.
  */
 export function matchCeremonyContent(
   ceremony: EoaCeremonyEvidence,
@@ -160,6 +255,16 @@ export function matchCeremonyContent(
   ceremony: EoaCeremonyEvidence | ReCapCeremonyEvidence,
   record: KeyBinding | AuthorizationStatement,
 ): CeremonyContentMatchResult {
+  const reserialized = serializeCeremonyMessage(ceremony.type, ceremony.message);
+  if (!bytesEqual(reserialized, ceremony.messageBytes)) {
+    return {
+      matches: false,
+      mismatch: "ceremony message does not re-serialize to the signed messageBytes -- the "
+        + "structured message and the EIP-191-signed bytes disagree, so no message.* field "
+        + "can be trusted (§7.2 mandatory content match).",
+    };
+  }
+
   if (ceremony.type === "recap") {
     const statement = record as AuthorizationStatement;
     const transcribed = [...ceremony.message.resources].sort(compareCodeUnitStrings);

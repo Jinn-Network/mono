@@ -14,6 +14,7 @@ import {
   sealKeyBinding,
   sealRevocation,
   sealTrustPolicy,
+  serializeCeremonyMessage,
 } from "@jinn-network/trust-core";
 import type {
   AuthorizationStatement,
@@ -131,14 +132,15 @@ function buildEoaCeremonyEvidence(
     nonce: "fixture-nonce",
     issuedAt: "2026-01-01T00:00:00.000Z",
     // §7.2's mandatory content-match payload for an EOA key-binding
-    // ceremony: [Agent IRI, did:key URI]. The kit encodes the message as
-    // canonical JSON rather than literal EIP-4361 text -- `verify.ts`'s
-    // EOA leg only content-matches these structured fields and
-    // EIP-191-recovers whatever bytes were signed; it never parses SIWE
-    // text. Flagged as a documented fixture simplification.
+    // ceremony: [Agent IRI, did:key URI].
     resources: [agentIri, workingKeyDidKey],
   };
-  const messageBytes = new TextEncoder().encode(JSON.stringify(message));
+  // `messageBytes` is the REAL canonical EIP-4361 re-serialization of
+  // `message` -- `matchCeremonyContent` (core) now asserts byte-equality
+  // between the two before trusting any `message.*` field (blocker
+  // finding), so a genuine fixture ceremony must actually sign the bytes
+  // its structured `message` re-serializes to, not a JSON stand-in.
+  const messageBytes = serializeCeremonyMessage("eoa", message);
   const signature = options.signer.sign(messageBytes);
   return { type: "eoa", message, messageBytes, signature };
 }

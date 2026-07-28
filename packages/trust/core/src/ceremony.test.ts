@@ -164,6 +164,73 @@ describe("matchCeremonyContent (§7.2 mandatory content match)", () => {
     );
     expect(result.matches).toBe(false);
   });
+
+  // -------------------------------------------------------------------------
+  // §7.2 mandatory content match MUST bind to the signed bytes, not just to
+  // whatever `message` claims (blocker finding): a structured `message`
+  // that disagrees with `messageBytes` must never reach the field-for-field
+  // comparison below, and a genuine signature over one message must never
+  // content-match a fabricated `message` describing a different one.
+  // -------------------------------------------------------------------------
+
+  test("(a) EOA: a structured message that disagrees with the signed messageBytes fails before any message.* field is trusted", () => {
+    const genuine = eoaCeremony();
+    const tampered: EoaCeremonyEvidence = {
+      ...genuine,
+      message: { ...genuine.message, nonce: "tampered-nonce-not-in-messageBytes" },
+    };
+    const result = matchCeremonyContent(tampered, keyBindingFor(eoaFixture.agentIri));
+    expect(result.matches).toBe(false);
+    expect(result.mismatch).toMatch(/messageBytes/);
+  });
+
+  test("(b) EOA: a genuine signature by voucher V over a DIFFERENT message, paired with a fabricated message claiming a binding for an attacker's (key, agent), fails (forged-binding attempt)", () => {
+    const genuine = eoaCeremony();
+    // The attacker keeps V's genuine messageBytes + signature (signed over
+    // the ORIGINAL message naming eoaFixture.agentIri) but swaps in a
+    // fabricated `message` whose resources claim a binding for a different
+    // Agent IRI -- the record they actually want to forge.
+    const forged: EoaCeremonyEvidence = {
+      type: "eoa",
+      message: { ...genuine.message, resources: [eoaFixture.otherAgentIri, eoaFixture.didKey] },
+      messageBytes: genuine.messageBytes,
+      signature: genuine.signature,
+    };
+    const contentResult = matchCeremonyContent(forged, keyBindingFor(eoaFixture.otherAgentIri));
+    expect(contentResult.matches).toBe(false);
+
+    const verifyResult = verifyEoaCeremony(forged, keyBindingFor(eoaFixture.otherAgentIri));
+    expect(verifyResult.verified).toBe(false);
+  });
+
+  test("(a) ReCap: a structured message that disagrees with the signed messageBytes fails before any message.* field is trusted", () => {
+    const genuine = recapCeremony();
+    const tampered: ReCapCeremonyEvidence = {
+      ...genuine,
+      message: { ...genuine.message, nonce: "tampered-nonce-not-in-messageBytes" },
+    };
+    const result = matchCeremonyContent(tampered, authorizationStatementFor(recapFixture.capabilities));
+    expect(result.matches).toBe(false);
+    expect(result.mismatch).toMatch(/messageBytes/);
+  });
+
+  test("(b) ReCap: a genuine signature over a DIFFERENT message, paired with a fabricated message claiming wider capabilities, fails (forged-authorization attempt)", () => {
+    const genuine = recapCeremony();
+    const forged: ReCapCeremonyEvidence = {
+      type: "recap",
+      message: { ...genuine.message, resources: recapFixture.mismatchedCapabilities },
+      messageBytes: genuine.messageBytes,
+      signature: genuine.signature,
+    };
+    const contentResult = matchCeremonyContent(
+      forged,
+      authorizationStatementFor(recapFixture.mismatchedCapabilities),
+    );
+    expect(contentResult.matches).toBe(false);
+
+    const verifyResult = verifyReCapCeremony(forged, authorizationStatementFor(recapFixture.mismatchedCapabilities));
+    expect(verifyResult.verified).toBe(false);
+  });
 });
 
 describe("verifyEoaCeremony (§7.5 step 3 offline EOA leg)", () => {
