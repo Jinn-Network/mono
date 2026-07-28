@@ -100,18 +100,16 @@ Settled here (the working titles in the designs are superseded by this table):
 | trust | `packages/trust/{core,resolve,testing}` | `@jinn-network/trust-{core,resolve,testing}` |
 | discovery | `packages/discovery/{protocol,serve,client,testing}`, `facts/{evidence,task-execution,trust}`, `sources/evidence-journal` | `@jinn-network/record-discovery-*` |
 
-Flagged for confirmation at the program gate (drafts proceed on these calls):
+Confirmed by the operator at the program gate (2026-07-28):
 
-1. `record-discovery-*` npm prefix (vs plain `discovery-*`) — chosen to disambiguate from the
-   existing `@jinn-network/evidence-discovery`.
+1. `record-discovery-*` npm prefix — confirmed (disambiguates from the existing
+   `@jinn-network/evidence-discovery`).
 2. `backend-local` as ONE package with four guard-enforced sub-regions
-   (supervisor/workspace/launchers/assembly) + subpath exports, per the evidence-discovery
-   consolidation precedent — vs four packages read literally from backend design §15.
-3. Evaluation harness at `packages/task-execution/evaluation-harness` (design assigns no home).
+   (supervisor/workspace/launchers/assembly) + subpath exports — confirmed.
+3. Evaluation harness at `packages/task-execution/evaluation-harness` — confirmed.
 4. Published-source wrapper at `packages/discovery/sources/evidence-journal`, with program
    rule 1's wording widened to "leaf packages under `packages/discovery/` (`facts/*`,
-   `sources/*`) are the only places a discovery edge and a record-kind edge meet". The
-   evidence-tree alternative is rejected: evidence packages never import discovery.
+   `sources/*`) are the only places a discovery edge and a record-kind edge meet" — confirmed.
 5. Facts-leaf granularity — **adjudicated by review**: three leaves. `facts/profiles` folds
    into `facts/task-execution` (one leaf per record-kind tree, discovery design §17; both
    bound the same `task-execution-profiles` tree). The single leaf covers Task, Submission,
