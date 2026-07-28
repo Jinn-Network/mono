@@ -61,10 +61,12 @@ export type TaskOnchainStatus = 'open' | 'finalized' | 'expired' | 'unknown';
 
 /**
  * Per-task on-chain finalization snapshot, returned by `getTaskStatuses` keyed
- * by on-chain taskId (decimal string). `claimWindowEnd` is unix seconds and MAY
- * be null/undefined in the live indexer today (its call-trace decode is
- * pending), so a missing/invalid window degrades to 'unknown' rather than
- * guessing 'open'.
+ * by on-chain taskId (decimal string). On the HTTP path `finalized` is derived
+ * from co-fetched attempt/verdict spine rows (parity with
+ * `getTaskLifecycleEvidence` / #2236); `refunded` comes from the task-row
+ * boolean only. `claimWindowEnd` is unix seconds and MAY be null/undefined in
+ * the live indexer today (its call-trace decode is pending), so a missing/invalid
+ * window degrades to 'unknown' rather than guessing 'open'.
  */
 export interface TaskStatusSnapshot {
   taskId: string;
