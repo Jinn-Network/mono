@@ -30,6 +30,8 @@ export interface MethodComputeInput {
 export interface Method {
   readonly id: string;
   readonly version: string;
+  /** Only methods that pair shared Task digests may compare matrices from Benchmark versions. */
+  readonly versionRobust: boolean;
   compute(input: MethodComputeInput): unknown;
 }
 

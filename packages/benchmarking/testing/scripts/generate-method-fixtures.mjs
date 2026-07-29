@@ -293,6 +293,7 @@ const mcnemarFixture = {
     concordantFail: 1,
     excluded: { count: 0, cellKeys: [] },
     pValue: fixed4(mcnemarP),
+    clustering: { basis: "none", clusters: 4 },
   },
 };
 

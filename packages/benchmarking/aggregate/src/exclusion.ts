@@ -5,6 +5,7 @@ export interface CellRef {
   readonly taskDigest: string;
   readonly armId: string;
   readonly replicate: number;
+  readonly validVerdicts: readonly string[];
 }
 
 export interface ExcludedReport {
@@ -23,7 +24,13 @@ export function selectScorableCells(matrix: MatrixRecord): { scored: CellRef[]; 
   const scored: CellRef[] = [];
   const excludedKeys: string[] = [];
   for (const cell of matrix.cells) {
-    const ref: CellRef = { cellKey: cell.cellKey, taskDigest: cell.taskDigest, armId: cell.armId, replicate: cell.replicate };
+    const ref: CellRef = {
+      cellKey: cell.cellKey,
+      taskDigest: cell.taskDigest,
+      armId: cell.armId,
+      replicate: cell.replicate,
+      validVerdicts: cell.validVerdicts ?? [],
+    };
     if (cell.outcome === "judged") scored.push(ref);
     else excludedKeys.push(cell.cellKey);
   }

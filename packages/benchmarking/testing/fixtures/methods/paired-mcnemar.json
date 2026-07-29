@@ -384,6 +384,10 @@
       "count": 0,
       "cellKeys": []
     },
-    "pValue": "0.6250"
+    "pValue": "0.6250",
+    "clustering": {
+      "basis": "none",
+      "clusters": 4
+    }
   }
 }
