@@ -92,3 +92,20 @@ it("substitutes a declared secret reference with its absolute attempt-local path
   expect(readFileSync(seen, "utf8")).toBe(realpathSync(join(secretsDir, "credential")));
   expect(readFileSync(join(secretsDir, "credential"))).toEqual(bytes);
 });
+
+it("round-trips an escaped binary-safe nonce through fingerprint and outcome while child env receives only its encoded identity", async () => {
+  const root = mkdtempSync(join(tmpdir(), "jinn-shim-nonce-"));
+  dirs.push(root);
+  const metaDir = join(root, "meta"); const secretsDir = join(root, "secrets"); const seen = join(root, "nonce-env");
+  mkdirSync(metaDir, { recursive: true }); mkdirSync(secretsDir, { recursive: true });
+  const nonce = "nul-\u0000-quote-\"-slash-\\-control-\u0001-supplementary-😀";
+  spawnShim(
+    { attemptId: "attempt-nonce-binary", nonce, metaDir, secretsDir },
+    { argv: [process.execPath, "-e", `require('node:fs').writeFileSync(${JSON.stringify(seen)},process.env.JINN_ATTEMPT_NONCE)`], env: {}, cwd: root },
+  );
+  const outcome = await waitForJson(join(metaDir, "outcome.json"));
+  const fingerprint = await waitForJson(join(metaDir, "shim.json"));
+  expect(outcome["nonce"]).toBe(nonce);
+  expect(fingerprint["nonce"]).toBe(nonce);
+  expect(readFileSync(seen, "utf8")).toMatch(/^b64url-v1:[A-Za-z0-9_-]+$/u);
+});

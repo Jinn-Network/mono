@@ -44,6 +44,13 @@ function events(): JournalEvent[] {
 }
 
 describe("projectObservations", () => {
+  test("projects the exact sorted bounded-cleanup residual vector on the terminal observation", () => {
+    const result = projectObservations([
+      { attemptId: attempt, seq: 1, type: "attempt-engaged", time: "2026-07-28T00:00:00.000Z", details: { attempt, taskDigest: `sha256:${"a".repeat(64)}`, submission: "urn:uuid:00000000-0000-4000-8000-0000000000f8", source } },
+      { attemptId: attempt, seq: 2, type: "attempt-terminal", time: "2026-07-28T00:00:01.000Z", details: { state: "failed", blame: "infrastructure", category: "backend-unavailable", residualPids: [17, 42, 99], source }, failsAttempt: false },
+    ]);
+    expect(result.at(-1)?.data).toEqual({ state: "failed", blame: "infrastructure", category: "backend-unavailable", residualPids: [17, 42, 99] });
+  });
   test("rebuilds emit identical deterministic (source,id) pairs", () => {
     const first = projectObservations(events());
     const rebuilt = projectObservations(structuredClone(events()));

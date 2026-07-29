@@ -30,6 +30,8 @@ import { dirname, join } from "node:path";
 // platforms where this residual applies.
 
 interface ShimSpawnRequest {
+  /** Exact JSON transport; process environment carries only the encoded identity. */
+  readonly nonce: string;
   readonly argv: readonly string[];
   readonly env: Readonly<Record<string, string>>;
   readonly cwd: string;
@@ -145,12 +147,13 @@ async function main(): Promise<void> {
   }
 
   const attemptId = process.env["JINN_ATTEMPT_ID"] ?? "";
-  const nonce = process.env["JINN_ATTEMPT_NONCE"] ?? "";
+  const nonceIdentity = process.env["JINN_ATTEMPT_NONCE"] ?? "";
   const metaDir = process.env["JINN_ATTEMPT_META_DIR"] ?? "";
   const secretsDir = process.env["JINN_ATTEMPT_SECRETS_DIR"];
   const heartbeatMs = Number(process.env["JINN_ATTEMPT_HEARTBEAT_MS"] ?? "15000");
 
   const spec = JSON.parse(readFileSync(specPath!, "utf8")) as ShimSpawnRequest;
+  const nonce = spec.nonce;
 
   // Step 2 (design §6.1): ignore SIGTERM/SIGINT/SIGHUP at the shim's OWN level — the shim is a
   // process-group member and must survive signals aimed loosely at its surroundings, because it
@@ -177,7 +180,7 @@ async function main(): Promise<void> {
   const resolvedEnv = {
     ...resolveSecretReferences(spec.env, secretsDir),
     JINN_ATTEMPT_ID: attemptId,
-    JINN_ATTEMPT_NONCE: nonce,
+    JINN_ATTEMPT_NONCE: nonceIdentity,
   };
   const stdout = openLogFd(spec.stdoutPath);
   const stderr = openLogFd(spec.stderrPath);

@@ -192,6 +192,9 @@ export function projectObservations(
             ...(event.details["detail"] === undefined
               ? {}
               : { detail: event.details["detail"] }),
+            ...(Array.isArray(event.details["residualPids"])
+              ? { residualPids: event.details["residualPids"] }
+              : {}),
           },
         } as ProtocolObservation);
         break;

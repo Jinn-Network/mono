@@ -21,7 +21,7 @@
 #define MAX_SPEC_ITEMS 512
 
 typedef struct {
-  char *attempt, *nonce, *meta, *secrets, *cwd, *stdout_path, *stderr_path;
+  char *attempt, *nonce, *nonce_identity, *meta, *secrets, *cwd, *stdout_path, *stderr_path;
   char **argv, **env;
   size_t argc, envc;
   uint32_t heartbeat_ms;
@@ -56,11 +56,11 @@ static int parse_spec(const char *path, spawn_spec *spec) {
   for (size_t offset = 0; offset < (size_t)statbuf.st_size;) { ssize_t read_count = read(fd, bytes + offset, (size_t)statbuf.st_size - offset); if (read_count <= 0) { free(bytes); close(fd); return -1; } offset += (size_t)read_count; }
   close(fd); const unsigned char *cursor = bytes, *end = bytes + statbuf.st_size;
   if (memcmp(cursor, "JNSP1", 5) != 0) { free(bytes); return -1; } cursor += 5;
-  spec->attempt = read_string(&cursor, end); spec->nonce = read_string(&cursor, end);
+  spec->attempt = read_string(&cursor, end); spec->nonce = read_string(&cursor, end); spec->nonce_identity = read_string(&cursor, end);
   spec->meta = read_string(&cursor, end); spec->secrets = read_string(&cursor, end);
   spec->cwd = read_string(&cursor, end); spec->stdout_path = read_string(&cursor, end); spec->stderr_path = read_string(&cursor, end);
   spec->heartbeat_ms = read_u32(&cursor, end); uint32_t argc = read_u32(&cursor, end);
-  if (!spec->attempt || !spec->nonce || !spec->meta || !spec->secrets || !spec->cwd || argc == 0 || argc > MAX_SPEC_ITEMS) { free(bytes); return -1; }
+  if (!spec->attempt || !spec->nonce || !spec->nonce_identity || !spec->meta || !spec->secrets || !spec->cwd || argc == 0 || argc > MAX_SPEC_ITEMS) { free(bytes); return -1; }
   spec->argv = calloc((size_t)argc + 1, sizeof(char *)); spec->argc = argc;
   for (uint32_t index = 0; index < argc; index++) if ((spec->argv[index] = read_string(&cursor, end)) == NULL) { free(bytes); return -1; }
   uint32_t envc = read_u32(&cursor, end); if (envc > MAX_SPEC_ITEMS) { free(bytes); return -1; }
@@ -72,7 +72,7 @@ static int parse_spec(const char *path, spawn_spec *spec) {
 static void free_spec(spawn_spec *spec) {
   for (size_t i = 0; i < spec->argc; i++) free(spec->argv[i]);
   for (size_t i = 0; i < spec->envc; i++) free(spec->env[i]);
-  free(spec->argv); free(spec->env); free(spec->attempt); free(spec->nonce); free(spec->meta); free(spec->secrets); free(spec->cwd); free(spec->stdout_path); free(spec->stderr_path);
+  free(spec->argv); free(spec->env); free(spec->attempt); free(spec->nonce); free(spec->nonce_identity); free(spec->meta); free(spec->secrets); free(spec->cwd); free(spec->stdout_path); free(spec->stderr_path);
 }
 
 /* A forward is an env reference to an owned file, never a request to copy secret bytes into env. */
@@ -203,16 +203,15 @@ static int read_cancellation(const spawn_spec *spec, uint32_t *grace, uint32_t *
   char path[4096]; snprintf(path, sizeof(path), "%s/cancellation-command.json", spec->meta); int fd = open(path, O_RDONLY); struct stat statbuf; if (fd < 0 || fstat(fd, &statbuf) != 0 || statbuf.st_size <= 0 || statbuf.st_size > MAX_SPEC_BYTES) { if (fd >= 0) close(fd); return 0; }
   char *json = calloc((size_t)statbuf.st_size + 1, 1); if (json == NULL) { close(fd); return 0; } size_t offset = 0; while (offset < (size_t)statbuf.st_size) { ssize_t count = read(fd, json + offset, (size_t)statbuf.st_size - offset); if (count <= 0) { free(json); close(fd); return 0; } offset += (size_t)count; } close(fd);
   long grace_value = json_number(json, "graceMs"), ceiling_value = json_number(json, "killPollCeilingMs");
-  char *nonce = json_string_value(json, "nonce"); int valid = nonce != NULL && strcmp(nonce, spec->nonce) == 0 && grace_value >= 0 && ceiling_value >= 0 && grace_value <= INT32_MAX && ceiling_value <= INT32_MAX; free(nonce); free(json);
+  char *nonce = json_string_value(json, "nonce"), *nonce_token = nonce == NULL ? NULL : json_quote(nonce); int valid = nonce_token != NULL && strcmp(nonce_token, spec->nonce) == 0 && grace_value >= 0 && ceiling_value >= 0 && grace_value <= INT32_MAX && ceiling_value <= INT32_MAX; free(nonce_token); free(nonce); free(json);
   if (!valid) return 0; *grace = (uint32_t)grace_value; *ceiling = (uint32_t)ceiling_value; return 1;
 }
 
 static void write_pid_result(const spawn_spec *spec, const char *name, const pid_list *pids) {
-  char path[4096], *nonce = json_quote(spec->nonce); if (nonce == NULL) fatal("cannot encode cancellation result");
-  size_t capacity = strlen(nonce) + pids->count * 32 + 40, offset = 0; char *json = malloc(capacity); if (json == NULL) fatal("cannot encode cancellation result");
-  offset = (size_t)snprintf(json, capacity, "{\"nonce\":%s,\"residualPids\":[", nonce);
+  char path[4096]; size_t capacity = strlen(spec->nonce) + pids->count * 32 + 40, offset = 0; char *json = malloc(capacity); if (json == NULL) fatal("cannot encode cancellation result");
+  offset = (size_t)snprintf(json, capacity, "{\"nonce\":%s,\"residualPids\":[", spec->nonce);
   for (size_t index = 0; index < pids->count; index++) offset += (size_t)snprintf(json + offset, capacity - offset, "%s%ld", index == 0 ? "" : ",", (long)pids->items[index]);
-  snprintf(json + offset, capacity - offset, "]}"); snprintf(path, sizeof(path), "%s/%s", spec->meta, name); atomic_write(path, json); free(nonce); free(json);
+  snprintf(json + offset, capacity - offset, "]}"); snprintf(path, sizeof(path), "%s/%s", spec->meta, name); atomic_write(path, json); free(json);
 }
 
 static void write_heartbeat(const spawn_spec *spec) { char path[4096], json[256]; struct timespec mono; clock_gettime(CLOCK_MONOTONIC, &mono); snprintf(path, sizeof(path), "%s/heartbeat", spec->meta); snprintf(json, sizeof(json), "{\"monotonicMs\":\"%lld\",\"wallClock\":\"%lld\"}", (long long)mono.tv_sec * 1000 + mono.tv_nsec / 1000000, (long long)time(NULL)); atomic_write(path, json); }
@@ -236,9 +235,9 @@ int main(int argc, char **argv) {
   if (prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0) fatal("PR_SET_CHILD_SUBREAPER unavailable");
   struct sigaction action = {0}; action.sa_handler = on_control_signal; sigaction(SIGUSR1, &action, NULL); sigaction(SIGTERM, &action, NULL); sigaction(SIGINT, &action, NULL); sigaction(SIGHUP, &action, NULL);
   char started_at[32]; format_rfc3339(started_at); int release_pipe[2]; if (pipe(release_pipe) != 0) fatal("custody release pipe failed"); pid_t leader = fork(); if (leader < 0) fatal("fork failed");
-  if (leader == 0) { close(release_pipe[1]); setpgid(0, 0); char release; if (read(release_pipe[0], &release, 1) != 1) _exit(127); close(release_pipe[0]); if (chdir(spec.cwd) != 0) _exit(127); int stdout_fd = spec.stdout_path[0] ? open(spec.stdout_path, O_WRONLY | O_CREAT | O_APPEND, 0600) : open("/dev/null", O_WRONLY); int stderr_fd = spec.stderr_path[0] ? open(spec.stderr_path, O_WRONLY | O_CREAT | O_APPEND, 0600) : open("/dev/null", O_WRONLY); dup2(stdout_fd, STDOUT_FILENO); dup2(stderr_fd, STDERR_FILENO); size_t attempt_len = strlen(spec.attempt), nonce_len = strlen(spec.nonce); char *identity = malloc(17 + attempt_len), *nonce = malloc(20 + nonce_len); if (identity == NULL || nonce == NULL) _exit(127); snprintf(identity, 17 + attempt_len, "JINN_ATTEMPT_ID=%s", spec.attempt); snprintf(nonce, 20 + nonce_len, "JINN_ATTEMPT_NONCE=%s", spec.nonce); spec.env[spec.envc++] = identity; spec.env[spec.envc++] = nonce; execve(spec.argv[0], spec.argv, spec.env); _exit(127); }
+  if (leader == 0) { close(release_pipe[1]); setpgid(0, 0); char release; if (read(release_pipe[0], &release, 1) != 1) _exit(127); close(release_pipe[0]); if (chdir(spec.cwd) != 0) _exit(127); int stdout_fd = spec.stdout_path[0] ? open(spec.stdout_path, O_WRONLY | O_CREAT | O_APPEND, 0600) : open("/dev/null", O_WRONLY); int stderr_fd = spec.stderr_path[0] ? open(spec.stderr_path, O_WRONLY | O_CREAT | O_APPEND, 0600) : open("/dev/null", O_WRONLY); dup2(stdout_fd, STDOUT_FILENO); dup2(stderr_fd, STDERR_FILENO); size_t attempt_len = strlen(spec.attempt), nonce_len = strlen(spec.nonce_identity); char *identity = malloc(17 + attempt_len), *nonce = malloc(20 + nonce_len); if (identity == NULL || nonce == NULL) _exit(127); snprintf(identity, 17 + attempt_len, "JINN_ATTEMPT_ID=%s", spec.attempt); snprintf(nonce, 20 + nonce_len, "JINN_ATTEMPT_NONCE=%s", spec.nonce_identity); spec.env[spec.envc++] = identity; spec.env[spec.envc++] = nonce; execve(spec.argv[0], spec.argv, spec.env); _exit(127); }
   close(release_pipe[0]); setpgid(leader, leader); char cgroup_state[16], cgroup_path[4096]; bind_cgroup(leader, &spec, cgroup_state, cgroup_path); if (write(release_pipe[1], "R", 1) != 1) fatal("custody release failed"); close(release_pipe[1]);
-  char path[4096], *quoted_nonce = json_quote(spec.nonce); if (quoted_nonce == NULL) fatal("cannot encode fingerprint"); size_t fingerprint_size = strlen(quoted_nonce) + 144; char *fingerprint = malloc(fingerprint_size); if (fingerprint == NULL) fatal("cannot encode fingerprint"); snprintf(fingerprint, fingerprint_size, "{\"pid\":%ld,\"startTime\":%ld,\"nonce\":%s,\"harnessPid\":%ld,\"ready\":true}", (long)getpid(), process_start_time(getpid()), quoted_nonce, (long)leader); snprintf(path, sizeof(path), "%s/shim.json", spec.meta); atomic_write(path, fingerprint); free(fingerprint); free(quoted_nonce);
+  char path[4096]; size_t fingerprint_size = strlen(spec.nonce) + 144; char *fingerprint = malloc(fingerprint_size); if (fingerprint == NULL) fatal("cannot encode fingerprint"); snprintf(fingerprint, fingerprint_size, "{\"pid\":%ld,\"startTime\":%ld,\"nonce\":%s,\"harnessPid\":%ld,\"ready\":true}", (long)getpid(), process_start_time(getpid()), spec.nonce, (long)leader); snprintf(path, sizeof(path), "%s/shim.json", spec.meta); atomic_write(path, fingerprint); free(fingerprint);
   int cancellation_requested = 0, deadline_expired = 0, status = 0, adopted_reaped = 0; uint64_t cancellation_deadline = 0; pid_list nonleaders = {0};
   for (;;) { siginfo_t info = {0}; if (waitid(P_PID, leader, &info, WEXITED | WNOWAIT | WNOHANG) == 0 && info.si_pid != 0) break;
     if (cancellation_wakeup) { cancellation_wakeup = 0; uint32_t grace, ceiling; if (!cancellation_requested && read_cancellation(&spec, &grace, &ceiling)) { cancellation_requested = 1; uint64_t now = monotonic_ms(); cancellation_deadline = now + ceiling; if (scan_custody(leader, getpid(), 1, &nonleaders) != 0) fatal("cannot scan custody domain"); signal_group(leader, SIGTERM); signal_members(&nonleaders, SIGTERM); uint64_t term_until = now + grace; while (monotonic_ms() < term_until && monotonic_ms() < cancellation_deadline) sleep_ms(1); if (!skip_kill_for_test()) { if (scan_custody(leader, getpid(), 1, &nonleaders) != 0) fatal("cannot scan custody domain"); signal_group(leader, SIGKILL); signal_members(&nonleaders, SIGKILL); } } }
@@ -255,7 +254,7 @@ int main(int argc, char **argv) {
   char finished_at[32], exit_json[32], signal_json[128], custody[8192]; format_rfc3339(finished_at);
   if (empty_before_leader_reap && WIFEXITED(status)) snprintf(exit_json, sizeof(exit_json), "%d", WEXITSTATUS(status)); else snprintf(exit_json, sizeof(exit_json), "null");
   if (empty_before_leader_reap && WIFSIGNALED(status)) snprintf(signal_json, sizeof(signal_json), "\"%s\"", signal_name(WTERMSIG(status))); else snprintf(signal_json, sizeof(signal_json), "null");
-  char *quoted_attempt = json_quote(spec.attempt); quoted_nonce = json_quote(spec.nonce); if (quoted_attempt == NULL || quoted_nonce == NULL) fatal("cannot encode outcome"); size_t outcome_size = strlen(quoted_attempt) + strlen(quoted_nonce) + strlen(exit_json) + strlen(signal_json) + 160; char *outcome = malloc(outcome_size); if (outcome == NULL) fatal("cannot encode outcome"); snprintf(outcome, outcome_size, "{\"attemptId\":%s,\"nonce\":%s,\"exitCode\":%s,\"termSignal\":%s,\"startedAt\":\"%s\",\"finishedAt\":\"%s\"}", quoted_attempt, quoted_nonce, exit_json, signal_json, started_at, finished_at); snprintf(path, sizeof(path), "%s/outcome.json", spec.meta); atomic_write(path, outcome); free(outcome); free(quoted_attempt); free(quoted_nonce);
+  char *quoted_attempt = json_quote(spec.attempt); if (quoted_attempt == NULL) fatal("cannot encode outcome"); size_t outcome_size = strlen(quoted_attempt) + strlen(spec.nonce) + strlen(exit_json) + strlen(signal_json) + 160; char *outcome = malloc(outcome_size); if (outcome == NULL) fatal("cannot encode outcome"); snprintf(outcome, outcome_size, "{\"attemptId\":%s,\"nonce\":%s,\"exitCode\":%s,\"termSignal\":%s,\"startedAt\":\"%s\",\"finishedAt\":\"%s\"}", quoted_attempt, spec.nonce, exit_json, signal_json, started_at, finished_at); snprintf(path, sizeof(path), "%s/outcome.json", spec.meta); atomic_write(path, outcome); free(outcome); free(quoted_attempt);
   snprintf(custody, sizeof(custody), "{\"subreaper\":true,\"cgroup\":\"%s\",\"leaderReapedAfterGroupEmpty\":%s,\"adoptedChildrenReaped\":%d,\"groupEmpty\":%s}", cgroup_state, empty_before_leader_reap ? "true" : "false", adopted_reaped, empty_before_leader_reap ? "true" : "false"); snprintf(path, sizeof(path), "%s/custody.json", spec.meta); atomic_write(path, custody);
   if (empty_before_leader_reap && cgroup_path[0]) rmdir(cgroup_path);
   pids_clear(&nonleaders); free_spec(&spec); return empty_before_leader_reap ? 0 : 1;

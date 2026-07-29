@@ -45,6 +45,22 @@ function cancellationResultPath(metaDir: string): string {
   return join(metaDir, "cancellation-result.json");
 }
 
+const NONCE_IDENTITY_PREFIX = "b64url-v1:";
+
+/** Binary-safe process identity for any I-JSON scalar string; never put nonce text in argv/env. */
+export function encodeNonceIdentity(nonce: string): string {
+  return `${NONCE_IDENTITY_PREFIX}${Buffer.from(nonce, "utf8").toString("base64url")}`;
+}
+
+export function decodeNonceIdentity(identity: string): string | null {
+  if (!identity.startsWith(NONCE_IDENTITY_PREFIX) || !/^[A-Za-z0-9_-]*$/u.test(identity.slice(NONCE_IDENTITY_PREFIX.length))) return null;
+  try {
+    const bytes = Buffer.from(identity.slice(NONCE_IDENTITY_PREFIX.length), "base64url");
+    const nonce = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return encodeNonceIdentity(nonce) === identity ? nonce : null;
+  } catch { return null; }
+}
+
 function nativeShimPath(): string {
   const configured = process.env["JINN_NATIVE_CUSTODY_BINARY"];
   if (configured !== undefined) return configured;
@@ -267,10 +283,11 @@ export function resolveShimScriptEntry(): string {
 /** Writes the harness `SpawnRequest` the shim script reads at startup (`env` may carry `secrets/<name>` REFERENCES, resolved by the shim at exec — never resolved here). */
 export function writeSpawnRequestSpec(
   metaDir: string,
+  nonce: string,
   spawn: SpawnRequest & { readonly stdoutPath?: string; readonly stderrPath?: string },
 ): string {
   const path = join(metaDir, "spawn-request.json");
-  atomicWriteFileSync(path, JSON.stringify(spawn));
+  atomicWriteFileSync(path, JSON.stringify({ ...spawn, nonce }));
   return path;
 }
 
@@ -286,7 +303,7 @@ function writeNativeSpawnSpec(
   request: BuildShimSpawnRequest,
   harness: SpawnRequest & { readonly stdoutPath?: string; readonly stderrPath?: string },
 ): string {
-  const strings = [request.attemptId, request.nonce, request.metaDir, request.secretsDir, harness.cwd, harness.stdoutPath ?? "", harness.stderrPath ?? ""];
+  const strings = [request.attemptId, JSON.stringify(request.nonce), encodeNonceIdentity(request.nonce), request.metaDir, request.secretsDir, harness.cwd, harness.stdoutPath ?? "", harness.stderrPath ?? ""];
   const parts: Buffer[] = [Buffer.from("JNSP1", "ascii"), ...strings.map(nativeString)];
   const count = (value: number): void => { const bytes = Buffer.allocUnsafe(4); bytes.writeUInt32LE(value, 0); parts.push(bytes); };
   count(request.heartbeatMs ?? 15_000);
@@ -295,7 +312,7 @@ function writeNativeSpawnSpec(
   const envEntries = [
     ...Object.entries(harness.env).map(([key, value]) => `${key}=${value}`),
     `JINN_ATTEMPT_ID=${request.attemptId}`,
-    `JINN_ATTEMPT_NONCE=${request.nonce}`,
+    `JINN_ATTEMPT_NONCE=${encodeNonceIdentity(request.nonce)}`,
   ];
   count(envEntries.length);
   for (const entry of envEntries) parts.push(nativeString(entry));
@@ -330,7 +347,7 @@ export function buildShimSpawn(request: BuildShimSpawnRequest): {
     env: {
       ...(process.env as Record<string, string>),
       JINN_ATTEMPT_ID: request.attemptId,
-      JINN_ATTEMPT_NONCE: request.nonce,
+      JINN_ATTEMPT_NONCE: encodeNonceIdentity(request.nonce),
       JINN_ATTEMPT_META_DIR: request.metaDir,
       JINN_ATTEMPT_SECRETS_DIR: request.secretsDir,
       ...(request.heartbeatMs === undefined ? {} : { JINN_ATTEMPT_HEARTBEAT_MS: String(request.heartbeatMs) }),
@@ -353,7 +370,7 @@ export function spawnShim(request: BuildShimSpawnRequest, harness: SpawnRequest 
       env: {
         ...(process.env as Record<string, string>),
         JINN_ATTEMPT_ID: request.attemptId,
-        JINN_ATTEMPT_NONCE: request.nonce,
+        JINN_ATTEMPT_NONCE: encodeNonceIdentity(request.nonce),
       },
       detached: true,
       stdio: ["ignore", "ignore", "ignore"],
@@ -361,7 +378,7 @@ export function spawnShim(request: BuildShimSpawnRequest, harness: SpawnRequest 
     child.unref();
     return child;
   }
-  writeSpawnRequestSpec(request.metaDir, harness);
+  writeSpawnRequestSpec(request.metaDir, request.nonce, harness);
   const built = buildShimSpawn(request);
   const child = spawn(built.command, built.args as string[], {
     env: built.env as NodeJS.ProcessEnv,

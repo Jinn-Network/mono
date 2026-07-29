@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { atomicWriteFileSync } from "./fs-atomic.js";
 import {
   buildShimSpawn, fingerprintAlive, listProcessGroupPids, readOutcome, readProcessStartTime, readShimFingerprint,
-  resolveShimScriptEntry, writeOutcomeFile, writeShimFingerprint,
+  decodeNonceIdentity, encodeNonceIdentity, resolveShimScriptEntry, writeOutcomeFile, writeShimFingerprint,
 } from "./shim.js";
 
 const tempDirs: string[] = [];
@@ -137,6 +137,14 @@ describe("resolveShimScriptEntry", () => {
 });
 
 describe("buildShimSpawn", () => {
+  it("uses one reversible versioned base64url identity for every legal nonce scalar string", () => {
+    for (const nonce of ["\u0000", "quote-\"-slash-\\-control-\u0001", "supplementary-😀", "x".repeat(32_768)]) {
+      const encoded = encodeNonceIdentity(nonce);
+      expect(encoded).toMatch(/^b64url-v1:[A-Za-z0-9_-]*$/u);
+      expect(decodeNonceIdentity(encoded)).toBe(nonce);
+    }
+  });
+
   it("tags JINN_ATTEMPT_ID/NONCE/META_DIR/SECRETS_DIR on the shim's OWN env — present from fork", () => {
     const built = buildShimSpawn({
       attemptId: "urn:uuid:00000000-0000-0000-0000-000000000201",
@@ -146,7 +154,7 @@ describe("buildShimSpawn", () => {
     });
     expect(built.command).toBe(process.execPath);
     expect(built.env["JINN_ATTEMPT_ID"]).toBe("urn:uuid:00000000-0000-0000-0000-000000000201");
-    expect(built.env["JINN_ATTEMPT_NONCE"]).toBe("n1");
+    expect(built.env["JINN_ATTEMPT_NONCE"]).toBe(encodeNonceIdentity("n1"));
     expect(built.env["JINN_ATTEMPT_META_DIR"]).toBe("/attempts/x/meta");
     expect(built.env["JINN_ATTEMPT_SECRETS_DIR"]).toBe("/attempts/x/secrets");
     expect(built.args[1]).toBe(join("/attempts/x/meta", "spawn-request.json"));
