@@ -46,6 +46,10 @@ describe("passAtK (Chen 2021 unbiased estimator)", () => {
     expect(() => passAtK(3, -1, 1)).toThrow();
     expect(() => passAtK(3, 1, 0)).toThrow();
   });
+
+  test("rejects k greater than observed n instead of reporting false certainty", () => {
+    expect(() => passAtK(1, 0, 2)).toThrow(/k<=n/);
+  });
 });
 
 describe("avgAtOne", () => {

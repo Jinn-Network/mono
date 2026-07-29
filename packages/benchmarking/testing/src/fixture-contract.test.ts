@@ -156,4 +156,30 @@ describe("method fixture/spec completeness", () => {
       expectedCompute: "reject",
     });
   });
+
+  test("pins subject isolation and pass@k incompatible-domain method vectors", async () => {
+    const isolated = await fixtureJson("methods/subject-isolation.json");
+    const passAtKIncompatible = await fixtureJson("methods/pass-at-k-incompatible.json");
+
+    expect(isolated.matrices).toHaveLength(2);
+    expect(isolated.matrices[0].cells[0]).toMatchObject({
+      cellKey: isolated.matrices[1].cells[0].cellKey,
+      taskDigest: isolated.matrices[1].cells[0].taskDigest,
+      armId: isolated.matrices[1].cells[0].armId,
+    });
+    expect(isolated.expectedResults.perSubject.map(
+      (subject: { results: { arms: { armA: { passRate: string } } } }) =>
+        subject.results.arms.armA.passRate,
+    )).toEqual(["1.0000", "0.0000"]);
+
+    expect(passAtKIncompatible.parameters.k).toBe(2);
+    expect(passAtKIncompatible.expectedResults.incompatible).toMatchObject({
+      count: 1,
+      tasks: [{
+        n: 1,
+        k: 2,
+        reason: "k-exceeds-observed-replicates",
+      }],
+    });
+  });
 });

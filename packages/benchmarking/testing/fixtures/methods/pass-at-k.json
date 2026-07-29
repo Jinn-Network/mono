@@ -326,6 +326,10 @@
         ]
       }
     },
+    "incompatible": {
+      "count": 0,
+      "tasks": []
+    },
     "conflicted": {
       "count": 0,
       "cellKeys": []

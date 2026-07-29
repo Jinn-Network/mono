@@ -10,8 +10,8 @@
  * for even moderate `n`).
  */
 export function passAtK(n: number, c: number, k: number): number {
-  if (n < 0 || c < 0 || c > n || !Number.isInteger(n) || !Number.isInteger(c) || !Number.isInteger(k) || k < 1) {
-    throw new Error(`passAtK: invalid arguments n=${n} c=${c} k=${k} (require 0<=c<=n, k>=1 integers)`);
+  if (n < 0 || c < 0 || c > n || !Number.isInteger(n) || !Number.isInteger(c) || !Number.isInteger(k) || k < 1 || k > n) {
+    throw new Error(`passAtK: invalid arguments n=${n} c=${c} k=${k} (require 0<=c<=n, 1<=k<=n integers)`);
   }
   if (n - c < k) return 1;
   let product = 1;

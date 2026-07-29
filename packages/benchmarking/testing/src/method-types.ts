@@ -20,7 +20,7 @@ export interface VerifiedAnchoredBenchmarkAnnouncement {
  * pre-registration facts are parsed from those exact bytes — never supplied as derived callbacks.
  */
 export interface MethodComputeInput {
-  readonly matrices: readonly MatrixRecord[];
+  readonly subjects: readonly MethodSubject[];
   readonly parameters: Readonly<Record<string, unknown>>;
   readonly verdictRule: VerdictRuleName;
   readonly resolveVerdictBytes: (verdictDigest: string) => Uint8Array | undefined;
@@ -32,6 +32,22 @@ export interface MethodComputeInput {
   /** `clean-subset@1`'s delegate call (§9.2: "restrict... then delegate to another method") is
    * the only method that needs this — every other method ignores it. */
   readonly registry?: MethodRegistry;
+}
+
+export interface MethodSubject {
+  /** Exact lowercase sha256 digest of the corresponding canonical Matrix bytes. */
+  readonly subjectSha256: string;
+  readonly matrix: MatrixRecord;
+}
+
+export interface SubjectMethodResult {
+  readonly subjectSha256: string;
+  readonly results: unknown;
+}
+
+export interface MethodResults {
+  /** Same length/order and exact identities as MethodComputeInput.subjects. */
+  readonly perSubject: readonly SubjectMethodResult[];
 }
 
 export type MethodReferenceSet = "v1-reference" | "registered-non-reference";
@@ -67,7 +83,7 @@ export interface Method {
   readonly computeAvailability: ComputeAvailability;
   readonly versionRobust: boolean;
   validateParameters(parameters: Readonly<Record<string, unknown>>): ParameterValidationResult;
-  readonly compute?: (input: MethodComputeInput) => unknown;
+  readonly compute?: (input: MethodComputeInput) => MethodResults;
 }
 
 /** The kit's injected shape (design §16): `aggregate` implements this over its seven methods. */

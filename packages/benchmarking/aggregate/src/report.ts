@@ -128,12 +128,15 @@ export interface ProducedReport {
 
 function computeInputFor(
   ports: MethodPorts,
-  matrices: readonly MatrixRecord[],
+  exactSubjects: readonly ExactMatrixSubject[],
   parameters: Readonly<Record<string, unknown>>,
   verdictRule: VerdictRuleName,
 ): MethodComputeInput {
   return {
-    matrices,
+    subjects: exactSubjects.map((subject) => ({
+      subjectSha256: stripSha256Prefix(subject.digest),
+      matrix: subject.record,
+    })),
     parameters,
     verdictRule,
     resolveVerdictBytes: ports.resolveVerdictBytes,
@@ -171,18 +174,32 @@ function derivePreregistered(
     && exactJsonEqual(entry.parameters, method.parameters)));
 }
 
-function resultPairingTaskDigests(results: unknown): string[] | undefined {
+function perSubjectPairingTaskDigests(
+  results: unknown,
+  subjectSha256s: readonly string[],
+): string[][] | undefined {
   if (typeof results !== "object" || results === null) return undefined;
-  const pairing = (results as Record<string, unknown>)["pairing"];
-  if (typeof pairing !== "object" || pairing === null) return undefined;
-  const taskDigests = (pairing as Record<string, unknown>)["taskDigests"];
-  if (
-    !Array.isArray(taskDigests)
-    || taskDigests.some((digest) => typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest))
-  ) {
-    return undefined;
+  const perSubject = (results as Record<string, unknown>)["perSubject"];
+  if (!Array.isArray(perSubject) || perSubject.length !== subjectSha256s.length) return undefined;
+  const pairings: string[][] = [];
+  for (const [index, entry] of perSubject.entries()) {
+    if (typeof entry !== "object" || entry === null) return undefined;
+    const subject = entry as Record<string, unknown>;
+    if (subject["subjectSha256"] !== subjectSha256s[index]) return undefined;
+    const subjectResults = subject["results"];
+    if (typeof subjectResults !== "object" || subjectResults === null) return undefined;
+    const pairing = (subjectResults as Record<string, unknown>)["pairing"];
+    if (typeof pairing !== "object" || pairing === null) return undefined;
+    const taskDigests = (pairing as Record<string, unknown>)["taskDigests"];
+    if (
+      !Array.isArray(taskDigests)
+      || taskDigests.some((digest) => typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest))
+    ) {
+      return undefined;
+    }
+    pairings.push(taskDigests as string[]);
   }
-  return taskDigests as string[];
+  return pairings;
 }
 
 function checkResolvedComparability(
@@ -199,10 +216,12 @@ function checkResolvedComparability(
       detail: `subjects resolve to distinct Benchmark digests: ${benchmarkDigests.sort().join(", ")}`,
     };
   }
-  const pairing = resultPairingTaskDigests(results);
-  if (pairing === undefined) {
+  const subjectSha256s = matrices.map((matrix) => sealMatrix(matrix).digest.slice("sha256:".length));
+  const pairings = perSubjectPairingTaskDigests(results, subjectSha256s);
+  if (pairings === undefined) {
     return { ok: false, detail: "version-robust result does not disclose exact paired Task digests" };
   }
+  const pairing = pairings[0] ?? [];
   if (pairing.length === 0) {
     return {
       ok: false,
@@ -215,6 +234,15 @@ function checkResolvedComparability(
     || pairing.some((digest, index) => digest !== sortedPairing[index])
   ) {
     return { ok: false, detail: "version-robust pairing must be unique and code-unit sorted" };
+  }
+  if (pairings.some((candidate) =>
+    candidate.length !== pairing.length
+    || candidate.some((digest, index) => digest !== pairing[index])
+  )) {
+    return {
+      ok: false,
+      detail: "version-robust cross-Benchmark results must disclose one identical Task-digest pairing per subject",
+    };
   }
   const perSubjectTasks = matrices.map(
     (matrix) => new Set(matrix.cells.map((cell) => cell.taskDigest)),
@@ -265,7 +293,7 @@ export async function produceReport(
   const exactSubjects = input.subjects.map(parseExactMatrix);
   const matrices = exactSubjects.map((subject) => subject.record);
   const runs = resolvedRuns(matrices, input);
-  const results = method.compute!(computeInputFor(input, matrices, parameters, input.verdictRule));
+  const results = method.compute!(computeInputFor(input, exactSubjects, parameters, input.verdictRule));
   const comparability = checkResolvedComparability(matrices, runs, method, results);
   if (!comparability.ok) {
     throw new Error(`produceReport: benchmark-comparability: ${comparability.detail}`);
@@ -464,7 +492,7 @@ export async function verifyReport(
   try {
     runs = resolvedRuns(matrices, ports);
     recomputed = method.compute!(
-      computeInputFor(ports, matrices, record.method.parameters, verdictRuleParam as VerdictRuleName),
+      computeInputFor(ports, exactSubjects, record.method.parameters, verdictRuleParam as VerdictRuleName),
     );
   } catch (cause) {
     return { ok: false, check: "report-recompute", detail: String(cause) };

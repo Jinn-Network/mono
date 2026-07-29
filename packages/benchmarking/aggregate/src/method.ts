@@ -16,7 +16,7 @@ export type VerdictRuleName = "sole" | "unanimous" | "any-pass" | "majority";
  * program §7.6), defined locally for the same boundary reason as `VerdictOutcome` above.
  */
 export interface MethodComputeInput {
-  readonly matrices: readonly MatrixRecord[];
+  readonly subjects: readonly MethodSubject[];
   readonly parameters: Readonly<Record<string, unknown>>;
   readonly verdictRule: VerdictRuleName;
   readonly resolveVerdictBytes: (verdictDigest: string) => Uint8Array | undefined;
@@ -26,6 +26,22 @@ export interface MethodComputeInput {
     benchmarkDigest: string,
   ) => VerifiedAnchoredBenchmarkAnnouncement | undefined;
   readonly registry?: MethodRegistry;
+}
+
+export interface MethodSubject {
+  /** Exact lowercase sha256 digest of the corresponding canonical Matrix bytes. */
+  readonly subjectSha256: string;
+  readonly matrix: MatrixRecord;
+}
+
+export interface SubjectMethodResult {
+  readonly subjectSha256: string;
+  readonly results: unknown;
+}
+
+export interface MethodResults {
+  /** Same length/order and exact identities as MethodComputeInput.subjects. */
+  readonly perSubject: readonly SubjectMethodResult[];
 }
 
 export interface VerifiedAnchoredBenchmarkAnnouncement {
@@ -57,7 +73,7 @@ export interface Method {
   validateParameters(parameters: Readonly<Record<string, unknown>>):
     | { readonly ok: true }
     | { readonly ok: false; readonly issues: readonly string[] };
-  readonly compute?: (input: MethodComputeInput) => unknown;
+  readonly compute?: (input: MethodComputeInput) => MethodResults;
 }
 
 /** The method-URI + version registry (design §9.2, §14.7). */

@@ -22,7 +22,9 @@ import {
 import { describe, expect, test } from "vitest";
 import type {
   MethodComputeInput,
+  MethodResults,
   MethodRegistry,
+  MethodSubject,
   VerifiedAnchoredBenchmarkAnnouncement,
   VerdictRuleName,
 } from "./method-types.js";
@@ -138,8 +140,129 @@ function verdictEnvelopeBytes(labelDigest: string, outcome: VerdictOutcome): Uin
   return canonicalJsonBytes(buildVerdictEnvelope(statement, [{ keyid: "did:key:zFixture", sig: "AA==" }]));
 }
 
+interface MutableFixtureCell {
+  cellKey: string;
+  taskDigest: string;
+  armId: string;
+  replicate: number;
+  dispatches: number;
+  accounted?: number;
+  submission?: string;
+  delivery?: string;
+  verdicts: string[];
+  validVerdicts: string[];
+  outcome: "judged" | "unjudged" | "unscorable" | "expired" | "invalidated" | "excluded";
+  verification: {
+    harness: "match" | "mismatch" | "unverifiable";
+    model: "match" | "mismatch" | "unverifiable";
+    loadout: "match" | "mismatch" | "unverifiable";
+    isolation: "match" | "mismatch" | "unverifiable";
+    checksFailed: string[];
+  };
+}
+
+interface MutableFixtureMatrix {
+  run: { digest: { sha256: string } };
+  cells: MutableFixtureCell[];
+  exclusions: Array<{ cellKey: string; reason: string }>;
+  attrition: {
+    perArm: Record<string, {
+      expected: number;
+      judged: number;
+      unjudged: number;
+      unscorable: number;
+      expired: number;
+      invalidated: number;
+      excluded: number;
+      replacements: number;
+    }>;
+    asymmetryFlags: string[];
+  };
+  completeness: {
+    expected: number;
+    judged: number;
+    floor: string;
+    runOutcome: "complete" | "partial" | "cancelled";
+  };
+}
+
+function fixtureDigest(label: string): string {
+  return documentDigest(new TextEncoder().encode(label));
+}
+
+/** Materialize the readable method fixtures as internally valid Matrix records before sealing. */
+function normalizeFixtureMatrix(matrix: MutableFixtureMatrix, matrixIndex: number): void {
+  for (const [cellIndex, cell] of matrix.cells.entries()) {
+    if (cell.dispatches > 0) {
+      cell.accounted ??= cell.dispatches;
+      cell.submission ??= fixtureDigest(`fixture-submission/${matrixIndex}/${cellIndex}/${cell.cellKey}`);
+    }
+    if (
+      ["judged", "unjudged", "unscorable", "invalidated"].includes(cell.outcome)
+      && cell.delivery === undefined
+    ) {
+      cell.delivery = fixtureDigest(`fixture-delivery/${matrixIndex}/${cellIndex}/${cell.cellKey}`);
+    }
+    cell.verdicts.sort();
+    cell.validVerdicts.sort();
+    cell.verification.checksFailed.sort();
+  }
+  matrix.cells.sort((left, right) => left.cellKey < right.cellKey ? -1 : left.cellKey > right.cellKey ? 1 : 0);
+
+  const reasonByCell = new Map(matrix.exclusions.map((entry) => [entry.cellKey, entry.reason]));
+  matrix.exclusions = matrix.cells
+    .filter((cell) => cell.outcome === "excluded")
+    .map((cell) => ({
+      cellKey: cell.cellKey,
+      reason: reasonByCell.get(cell.cellKey) ?? "fixture-participant-exclusion",
+    }));
+
+  const perArm: MutableFixtureMatrix["attrition"]["perArm"] = {};
+  for (const cell of matrix.cells) {
+    const counts = perArm[cell.armId] ?? {
+      expected: 0,
+      judged: 0,
+      unjudged: 0,
+      unscorable: 0,
+      expired: 0,
+      invalidated: 0,
+      excluded: 0,
+      replacements: 0,
+    };
+    counts.expected += 1;
+    counts[cell.outcome] += 1;
+    counts.replacements += Math.max(0, cell.dispatches - 1);
+    perArm[cell.armId] = counts;
+  }
+  matrix.attrition.perArm = perArm;
+  const vectors = Object.values(perArm).map((counts) =>
+    [
+      counts.unjudged,
+      counts.unscorable,
+      counts.expired,
+      counts.invalidated,
+      counts.excluded,
+      counts.replacements,
+    ].join("/")
+  );
+  if (Object.keys(perArm).length < 2 || new Set(vectors).size <= 1) {
+    matrix.attrition.asymmetryFlags = [];
+  } else {
+    matrix.attrition.asymmetryFlags.sort();
+  }
+
+  matrix.completeness.expected = matrix.cells.length;
+  matrix.completeness.judged = matrix.cells.filter((cell) => cell.outcome === "judged").length;
+  if (matrix.completeness.runOutcome !== "cancelled") {
+    const denominator = matrix.cells.filter((cell) => cell.outcome !== "excluded").length;
+    const ratio = denominator === 0 ? 1 : matrix.completeness.judged / denominator;
+    matrix.completeness.runOutcome = ratio >= Number(matrix.completeness.floor) ? "complete" : "partial";
+  }
+}
+
 interface PreparedMethodFixture {
   readonly matrices: MatrixRecord[];
+  readonly subjects: MethodSubject[];
   readonly expectedResults: unknown;
   readonly ports: Pick<
     MethodComputeInput,
@@ -151,6 +274,18 @@ interface PreparedMethodFixture {
   readonly verdictBytes: Map<string, Uint8Array>;
   readonly runBytes: Map<string, Uint8Array>;
   readonly taskBytes: Map<string, Uint8Array>;
+}
+
+function subjectEntries(matrices: readonly MatrixRecord[]): MethodSubject[] {
+  return matrices.map((matrix) => ({
+    subjectSha256: sealMatrix(matrix).digest.slice("sha256:".length),
+    matrix,
+  }));
+}
+
+function onlySubjectResults(results: MethodResults): unknown {
+  expect(results.perSubject).toHaveLength(1);
+  return results.perSubject[0]!.results;
 }
 
 /**
@@ -166,17 +301,7 @@ function prepareFixture(fixture: MethodFixture): PreparedMethodFixture {
   const announcements = new Map<string, VerifiedAnchoredBenchmarkAnnouncement>();
   const replacements = new Map<string, string>();
 
-  const rawMatrices = structuredClone(fixture.matrices) as Array<{
-    run: { digest: { sha256: string } };
-    cells: Array<{
-      cellKey: string;
-      taskDigest: string;
-      armId: string;
-      replicate: number;
-      verdicts: string[];
-      validVerdicts: string[];
-    }>;
-  }>;
+  const rawMatrices = structuredClone(fixture.matrices) as MutableFixtureMatrix[];
 
   const oldTaskDigests = [...new Set(rawMatrices.flatMap((matrix) => matrix.cells.map((cell) => cell.taskDigest)))];
   for (const oldTaskDigest of oldTaskDigests) {
@@ -214,6 +339,7 @@ function prepareFixture(fixture: MethodFixture): PreparedMethodFixture {
       cell.verdicts = cell.verdicts.map((digest) => verdictReplacements.get(digest) ?? digest).sort();
       cell.validVerdicts = cell.validVerdicts.map((digest) => verdictReplacements.get(digest) ?? digest).sort();
     }
+    normalizeFixtureMatrix(matrix, matrixIndex);
 
     const armIds = [...new Set(matrix.cells.map((cell) => cell.armId))].sort();
     const benchmarkDigest = `sha256:${String(matrixIndex + 1).padStart(64, "b")}`;
@@ -272,9 +398,26 @@ function prepareFixture(fixture: MethodFixture): PreparedMethodFixture {
   });
 
   for (const [before, after] of verdictReplacements) replacements.set(before, after);
+  const matrices = parseMatrices(rawMatrices);
+  const subjects = subjectEntries(matrices);
+  subjects.forEach((subject, index) => replacements.set(`$subject:${index}`, subject.subjectSha256));
+  const mappedExpected = sortIdentifierArraysDeep(mapStringsDeep(fixture.expectedResults, replacements));
+  const expectedResults = (
+    typeof mappedExpected === "object"
+    && mappedExpected !== null
+    && Object.hasOwn(mappedExpected, "perSubject")
+  )
+    ? mappedExpected
+    : {
+        perSubject: [{
+          subjectSha256: subjects[0]!.subjectSha256,
+          results: mappedExpected,
+        }],
+      };
   return {
-    matrices: parseMatrices(rawMatrices),
-    expectedResults: sortIdentifierArraysDeep(mapStringsDeep(fixture.expectedResults, replacements)),
+    matrices,
+    subjects,
+    expectedResults,
     ports: {
       resolveVerdictBytes: (digest) => verdictBytes.get(digest),
       resolveRunBytes: (digest) => runBytes.get(digest),
@@ -310,7 +453,7 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
         const completeParameters = { ...fixture.parameters, verdictRule: fixture.verdictRule };
         expect(method!.validateParameters(completeParameters), `${name} parameters`).toEqual({ ok: true });
         const results = method!.compute!({
-          matrices: prepared.matrices,
+          subjects: prepared.subjects,
           parameters: completeParameters,
           verdictRule: fixture.verdictRule,
           registry,
@@ -361,13 +504,13 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
         const method = registry.get(entry.methodId, "1");
         expect(method?.computeAvailability, entry.methodId).toBe("available");
         const results = method!.compute!({
-          matrices: [matrix],
+          subjects: subjectEntries([matrix]),
           parameters: { ...entry.parameters, verdictRule: "unanimous" },
           verdictRule: "unanimous",
           registry,
           ...prepared.ports,
-        }) as { conflicted?: unknown };
-        expect(results.conflicted, entry.methodId).toEqual(
+        });
+        expect((onlySubjectResults(results) as { conflicted?: unknown }).conflicted, entry.methodId).toEqual(
           mapStringsDeep(fixture.expectedConflicted, new Map(
             [...prepared.taskBytes.keys()].map((digest, index) => [
               [...new Set((fixture.matrix as { cells: Array<{ taskDigest: string }> }).cells.map((cell) => cell.taskDigest))][index]!,
@@ -399,7 +542,7 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
       });
       const method = registry.get("jinn.benchmarking.method/paired-mcnemar", "1")!;
       expect(() => method.compute!({
-        matrices: prepared.matrices,
+        subjects: prepared.subjects,
         parameters: { ...fixture.parameters, verdictRule: "unanimous" },
         verdictRule: "unanimous",
         registry,
@@ -415,15 +558,19 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
       const prepared = prepareFixture({ ...fixture, runReplicates: 1 });
       const method = registry.get(fixture.methodId, fixture.methodVersion)!;
       const results = method.compute!({
-        matrices: prepared.matrices,
+        subjects: prepared.subjects,
         parameters: { ...fixture.parameters, verdictRule: fixture.verdictRule },
         verdictRule: fixture.verdictRule,
         registry,
         ...prepared.ports,
-      }) as { clustering: { basis: string }; pairing: { taskDigests: string[] } };
+      });
       expect(results).toEqual(prepared.expectedResults);
-      expect(results.clustering.basis).toBe("task-provenance-source");
-      expect(results.pairing.taskDigests).toHaveLength(6);
+      const subjectResults = onlySubjectResults(results) as {
+        clustering: { basis: string };
+        pairing: { taskDigests: string[] };
+      };
+      expect(subjectResults.clustering.basis).toBe("task-provenance-source");
+      expect(subjectResults.pairing.taskDigests).toHaveLength(6);
     });
 
     test("referenced valid verdicts fail closed when unavailable or digest-mismatched", async () => {
@@ -433,7 +580,7 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
       const referencedDigest = prepared.matrices[0]!.cells.find((cell) => cell.validVerdicts.length > 0)!
         .validVerdicts[0]!;
       const base = {
-        matrices: prepared.matrices,
+        subjects: prepared.subjects,
         parameters: { verdictRule: fixture.verdictRule },
         verdictRule: fixture.verdictRule,
         registry,
@@ -478,17 +625,18 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
         },
       };
       const result = method.compute!({
-        matrices: prepared.matrices,
+        subjects: prepared.subjects,
         parameters,
         verdictRule: "unanimous",
         registry,
         ...prepared.ports,
-      }) as { basis: string; keptTaskDigests: string[] };
-      expect(result.basis).toBe("announcement-anchored");
-      expect(result.keptTaskDigests).toHaveLength(4);
+      });
+      const subjectResult = onlySubjectResults(result) as { basis: string; keptTaskDigests: string[] };
+      expect(subjectResult.basis).toBe("announcement-anchored");
+      expect(subjectResult.keptTaskDigests).toHaveLength(4);
 
       expect(() => method.compute!({
-        matrices: prepared.matrices,
+        subjects: prepared.subjects,
         parameters,
         verdictRule: "unanimous",
         registry,

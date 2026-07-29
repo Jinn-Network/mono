@@ -7,7 +7,10 @@ export { BENCHMARKING_METHOD_REGISTRY, createMethodRegistry } from "./registry.j
 export type {
   Method,
   MethodComputeInput,
+  MethodResults,
   MethodRegistry,
+  MethodSubject,
+  SubjectMethodResult,
   VerifiedAnchoredBenchmarkAnnouncement,
   VerdictOutcome,
   VerdictRuleName,

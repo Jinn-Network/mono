@@ -1,4 +1,10 @@
-import { BENCHMARKING_METHOD_IDS, BENCHMARKING_METHOD_VERSION, compareCodeUnitStrings } from "@jinn-network/benchmarking-records";
+import {
+  BENCHMARKING_METHOD_IDS,
+  BENCHMARKING_METHOD_VERSION,
+  compareCodeUnitStrings,
+  sealMatrix,
+  type MatrixRecord,
+} from "@jinn-network/benchmarking-records";
 import { filterByCutoff } from "./clean-subset.js";
 import { selectScorableCells, type CellRef } from "./exclusion.js";
 import type { Method, MethodComputeInput, MethodRegistry } from "./method.js";
@@ -17,6 +23,13 @@ import { wilsonInterval } from "./stats/wilson.js";
 import { reduceValidVerdicts, type VerdictReduction } from "./verdict-rule.js";
 
 type MethodMetadata = Omit<Method, "id" | "version" | "versionRobust" | "compute">;
+type SingleSubjectComputeInput = Omit<MethodComputeInput, "subjects"> & {
+  readonly subjectSha256: string;
+  readonly matrices: readonly [MatrixRecord];
+};
+type SingleSubjectMethod = Omit<Method, "compute"> & {
+  readonly compute?: (input: SingleSubjectComputeInput) => unknown;
+};
 
 function validateParameters(
   schema: Method["parameterSchema"],
@@ -204,10 +217,10 @@ function requireIntegerParam(parameters: Readonly<Record<string, unknown>>, key:
   return value;
 }
 
-/** Every scored cell across all subject matrices, reduced to a decisive value (or dropped as
+/** Every scored cell in one exact subject Matrix, reduced to a decisive value (or dropped as
  * `conflicted`). Shared by every per-cell scoring method (§9.3 exclusion discipline, §9.2
- * verdictRule reduction). */
-function reduceScoredCells(input: MethodComputeInput): { decisive: (CellRef & { value: "pass" | "fail" })[]; conflictedCellKeys: string[] } {
+ * verdictRule reduction). Public methods apply this independently to each ordered subject. */
+function reduceScoredCells(input: SingleSubjectComputeInput): { decisive: (CellRef & { value: "pass" | "fail" })[]; conflictedCellKeys: string[] } {
   const decisive: (CellRef & { value: "pass" | "fail" })[] = [];
   const conflictedCellKeys: string[] = [];
   for (const matrix of input.matrices) {
@@ -226,7 +239,7 @@ function reduceScoredCells(input: MethodComputeInput): { decisive: (CellRef & { 
 
 // --- wilson@1 (design §9.2) ------------------------------------------------------------------
 
-const wilsonMethod: Method = {
+const wilsonMethod: SingleSubjectMethod = {
   ...METHOD_METADATA.wilson,
   id: BENCHMARKING_METHOD_IDS.wilson,
   version: BENCHMARKING_METHOD_VERSION,
@@ -256,18 +269,19 @@ const wilsonMethod: Method = {
 
 // --- avg-at-k@1 / pass-at-k@1 (design §9.2) --------------------------------------------------
 
-function perArmTaskReplicateCounts(input: MethodComputeInput): {
-  perArmTask: Map<string, Map<string, { n: number; c: number }>>;
+function perArmTaskReplicateCounts(input: SingleSubjectComputeInput): {
+  perArmTask: Map<string, Map<string, { n: number; c: number; cellKeys: string[] }>>;
   taskDigests: string[];
   conflictedCellKeys: string[];
 } {
   const { decisive, conflictedCellKeys } = reduceScoredCells(input);
-  const perArmTask = new Map<string, Map<string, { n: number; c: number }>>();
+  const perArmTask = new Map<string, Map<string, { n: number; c: number; cellKeys: string[] }>>();
   for (const cell of decisive) {
-    const perTask = perArmTask.get(cell.armId) ?? new Map<string, { n: number; c: number }>();
-    const bucket = perTask.get(cell.taskDigest) ?? { n: 0, c: 0 };
+    const perTask = perArmTask.get(cell.armId) ?? new Map<string, { n: number; c: number; cellKeys: string[] }>();
+    const bucket = perTask.get(cell.taskDigest) ?? { n: 0, c: 0, cellKeys: [] };
     bucket.n += 1;
     if (cell.value === "pass") bucket.c += 1;
+    bucket.cellKeys.push(cell.cellKey);
     perTask.set(cell.taskDigest, bucket);
     perArmTask.set(cell.armId, perTask);
   }
@@ -277,7 +291,7 @@ function perArmTaskReplicateCounts(input: MethodComputeInput): {
   return { perArmTask, taskDigests, conflictedCellKeys };
 }
 
-const avgAtKMethod: Method = {
+const avgAtKMethod: SingleSubjectMethod = {
   ...METHOD_METADATA.avgAtK,
   id: BENCHMARKING_METHOD_IDS.avgAtK,
   version: BENCHMARKING_METHOD_VERSION,
@@ -309,7 +323,7 @@ const avgAtKMethod: Method = {
   },
 };
 
-const passAtKMethod: Method = {
+const passAtKMethod: SingleSubjectMethod = {
   ...METHOD_METADATA.passAtK,
   id: BENCHMARKING_METHOD_IDS.passAtK,
   version: BENCHMARKING_METHOD_VERSION,
@@ -318,19 +332,40 @@ const passAtKMethod: Method = {
     const k = requireIntegerParam(input.parameters, "k");
     const { perArmTask, taskDigests, conflictedCellKeys } = perArmTaskReplicateCounts(input);
     const arms: Record<string, unknown> = {};
+    const incompatibleTasks: {
+      armId: string;
+      taskDigest: string;
+      n: number;
+      k: number;
+      reason: "k-exceeds-observed-replicates";
+      cellKeys: string[];
+    }[] = [];
     for (const armId of [...perArmTask.keys()].sort(compareCodeUnitStrings)) {
       const perTask = perArmTask.get(armId)!;
       const perTaskResults: Record<string, unknown> = {};
       let sum = 0;
+      let compatibleTaskCount = 0;
       for (const taskDigest of [...perTask.keys()].sort(compareCodeUnitStrings)) {
-        const { n, c } = perTask.get(taskDigest)!;
+        const { n, c, cellKeys } = perTask.get(taskDigest)!;
+        if (k > n) {
+          incompatibleTasks.push({
+            armId,
+            taskDigest,
+            n,
+            k,
+            reason: "k-exceeds-observed-replicates",
+            cellKeys: [...cellKeys].sort(compareCodeUnitStrings),
+          });
+          continue;
+        }
         const value = passAtK(n, c, k);
         sum += value;
+        compatibleTaskCount += 1;
         perTaskResults[taskDigest] = { n, c, passAtK: fixed4(value) };
       }
       arms[armId] = {
         perTask: perTaskResults,
-        mean: fixed4(perTask.size > 0 ? sum / perTask.size : 0),
+        mean: fixed4(compatibleTaskCount > 0 ? sum / compatibleTaskCount : 0),
         missingTaskDigests: taskDigests.filter((digest) => !perTask.has(digest)),
       };
     }
@@ -338,6 +373,7 @@ const passAtKMethod: Method = {
       verdictRule: input.verdictRule,
       k,
       arms,
+      incompatible: { count: incompatibleTasks.length, tasks: incompatibleTasks },
       conflicted: { count: conflictedCellKeys.length, cellKeys: conflictedCellKeys },
     };
   },
@@ -345,7 +381,7 @@ const passAtKMethod: Method = {
 
 // --- paired-mcnemar@1 (design §9.2) ------------------------------------------------------------
 
-const pairedMcnemarMethod: Method = {
+const pairedMcnemarMethod: SingleSubjectMethod = {
   ...METHOD_METADATA.pairedMcnemar,
   id: BENCHMARKING_METHOD_IDS.pairedMcnemar,
   version: BENCHMARKING_METHOD_VERSION,
@@ -469,7 +505,52 @@ const pairedMcnemarMethod: Method = {
 
 // --- clean-subset@1 (design §9.2) --------------------------------------------------------------
 
-const cleanSubsetMethod: Method = {
+function restrictMatrixToTasks(matrix: MatrixRecord, keptTaskDigests: ReadonlySet<string>): MatrixRecord {
+  const cells = matrix.cells.filter((cell) => keptTaskDigests.has(cell.taskDigest));
+  const keptCellKeys = new Set(cells.map((cell) => cell.cellKey));
+  const exclusions = matrix.exclusions.filter((entry) => keptCellKeys.has(entry.cellKey));
+  const perArm: MatrixRecord["attrition"]["perArm"] = {};
+  for (const cell of cells) {
+    const counts = perArm[cell.armId] ?? {
+      expected: 0,
+      judged: 0,
+      unjudged: 0,
+      unscorable: 0,
+      expired: 0,
+      invalidated: 0,
+      excluded: 0,
+      replacements: 0,
+    };
+    counts.expected += 1;
+    counts[cell.outcome] += 1;
+    counts.replacements += Math.max(0, cell.dispatches - 1);
+    perArm[cell.armId] = counts;
+  }
+  const judged = cells.filter((cell) => cell.outcome === "judged").length;
+  const denominator = cells.length - exclusions.length;
+  const floorPassed = (denominator === 0 ? 1 : judged / denominator) >= Number(matrix.completeness.floor);
+  return {
+    ...matrix,
+    cells,
+    exclusions,
+    attrition: {
+      perArm,
+      // Predicate restriction can remove one side of a declared flag. The delegate receives the
+      // exact restricted population, so no original whole-Matrix asymmetry claim is carried over.
+      asymmetryFlags: [],
+    },
+    completeness: {
+      ...matrix.completeness,
+      expected: cells.length,
+      judged,
+      ...(matrix.completeness.runOutcome === "cancelled"
+        ? {}
+        : { runOutcome: floorPassed ? "complete" as const : "partial" as const }),
+    },
+  };
+}
+
+const cleanSubsetMethod: SingleSubjectMethod = {
   ...METHOD_METADATA.cleanSubset,
   id: BENCHMARKING_METHOD_IDS.cleanSubset,
   version: BENCHMARKING_METHOD_VERSION,
@@ -531,16 +612,27 @@ const cleanSubsetMethod: Method = {
     const keptSet = new Set(kept);
     const excludedSet = new Set(excludedByPredicate);
 
-    const filteredMatrices = input.matrices.map((matrix) => ({
-      ...matrix,
-      cells: matrix.cells.filter((cell) => keptSet.has(cell.taskDigest)),
-    }));
-
-    const delegateResults = delegateMethod.compute({
-      ...input,
-      matrices: filteredMatrices as typeof input.matrices,
+    const filteredMatrix = restrictMatrixToTasks(input.matrices[0], keptSet);
+    const filteredSubjectSha256 = sealMatrix(filteredMatrix).digest.slice("sha256:".length);
+    const delegateEnvelope = delegateMethod.compute({
+      subjects: [{ subjectSha256: filteredSubjectSha256, matrix: filteredMatrix }],
       parameters: delegateParameters,
+      verdictRule: input.verdictRule,
+      resolveVerdictBytes: input.resolveVerdictBytes,
+      resolveRunBytes: input.resolveRunBytes,
+      resolveTaskBytes: input.resolveTaskBytes,
+      registry: input.registry,
+      ...(input.resolveAnchoredBenchmarkAnnouncement === undefined
+        ? {}
+        : { resolveAnchoredBenchmarkAnnouncement: input.resolveAnchoredBenchmarkAnnouncement }),
     });
+    if (
+      delegateEnvelope.perSubject.length !== 1
+      || delegateEnvelope.perSubject[0]?.subjectSha256 !== filteredSubjectSha256
+    ) {
+      throw new Error("clean-subset@1: delegate did not preserve the restricted subject identity");
+    }
+    const delegateResults = delegateEnvelope.perSubject[0].results;
     const excludedCellKeys = input.matrices
       .flatMap((matrix) => matrix.cells)
       .filter((cell) => excludedSet.has(cell.taskDigest))
@@ -570,7 +662,7 @@ const cleanSubsetMethod: Method = {
 // discovery only: v1 has no frozen pairwise-judgment input record, so its declarative metadata
 // truthfully marks compute unavailable.
 
-const nonInferiorityIutMethod: Method = {
+const nonInferiorityIutMethod: SingleSubjectMethod = {
   ...METHOD_METADATA.noninferiorityIut,
   id: BENCHMARKING_METHOD_IDS.noninferiorityIut,
   version: BENCHMARKING_METHOD_VERSION,
@@ -717,7 +809,7 @@ const nonInferiorityIutMethod: Method = {
   },
 };
 
-const bradleyTerryMethod: Method = {
+const bradleyTerryMethod: SingleSubjectMethod = {
   ...METHOD_METADATA.bradleyTerry,
   id: BENCHMARKING_METHOD_IDS.bradleyTerry,
   version: BENCHMARKING_METHOD_VERSION,
@@ -726,7 +818,7 @@ const bradleyTerryMethod: Method = {
 
 // --- the registry -------------------------------------------------------------------------------
 
-const METHODS: readonly Method[] = [
+const SINGLE_SUBJECT_METHODS: readonly SingleSubjectMethod[] = [
   wilsonMethod,
   avgAtKMethod,
   passAtKMethod,
@@ -735,6 +827,49 @@ const METHODS: readonly Method[] = [
   cleanSubsetMethod,
   bradleyTerryMethod,
 ];
+
+function subjectScopedMethod(method: SingleSubjectMethod): Method {
+  if (method.compute === undefined) {
+    const { compute: _compute, ...declarativeMethod } = method;
+    return declarativeMethod;
+  }
+  const compute = method.compute;
+  return {
+    ...method,
+    compute(input) {
+      const seen = new Set<string>();
+      for (const subject of input.subjects) {
+        if (!/^[a-f0-9]{64}$/.test(subject.subjectSha256)) {
+          throw new Error(`method subjectSha256 is not an exact lowercase sha256: ${subject.subjectSha256}`);
+        }
+        const exactSha256 = sealMatrix(subject.matrix).digest.slice("sha256:".length);
+        if (subject.subjectSha256 !== exactSha256) {
+          throw new Error(
+            `method subjectSha256 ${subject.subjectSha256} does not match canonical Matrix digest ${exactSha256}`,
+          );
+        }
+        if (seen.has(subject.subjectSha256)) {
+          throw new Error(`method subject identity is duplicated: ${subject.subjectSha256}`);
+        }
+        seen.add(subject.subjectSha256);
+      }
+      return {
+        perSubject: input.subjects.map((subject) => {
+          return {
+            subjectSha256: subject.subjectSha256,
+            results: compute({
+              ...input,
+              subjectSha256: subject.subjectSha256,
+              matrices: [subject.matrix],
+            }),
+          };
+        }),
+      };
+    },
+  };
+}
+
+const METHODS: readonly Method[] = SINGLE_SUBJECT_METHODS.map(subjectScopedMethod);
 
 /** The §9.2 method registry: URI + version identification over the seven registered methods
  * (six in the v1 reference set; `bradley-terry@1` registered but not part of it, §9.2). */

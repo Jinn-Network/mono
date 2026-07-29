@@ -119,6 +119,8 @@ function makeFixture(options: { preregistered?: boolean; subjectCount?: number }
         replicate: 1,
         dispatches: 1,
         accounted: 1,
+        submission: `sha256:${"3".repeat(64)}`,
+        delivery: `sha256:${"4".repeat(64)}`,
         verdicts: [verdictDigest],
         validVerdicts: [verdictDigest],
         outcome: "judged",
@@ -139,7 +141,7 @@ function makeFixture(options: { preregistered?: boolean; subjectCount?: number }
             replacements: 0,
           },
         },
-        asymmetryFlags: index === 0 ? [] : ["fixture-flag"],
+        asymmetryFlags: [],
       },
       completeness: { expected: 1, judged: 1, floor: "1", runOutcome: "complete" },
       assembly: { procedure: "jinn.benchmarking.assembly", version: "1.0" },
@@ -182,15 +184,20 @@ function crossVersionPairedFixture(sharedTask: boolean): Fixture {
     });
     const taskDigest = recordDigest(taskBytes);
     taskMap.set(taskDigest, taskBytes);
-    const armId = index === 0 ? "armA" : "armB";
-    const verdict = verdictBytes(index === 0 ? "fail" : "pass", `cross-${index}`);
-    const verdictDigest = recordDigest(verdict);
-    verdictMap.set(verdictDigest, verdict);
+    const baselineVerdict = verdictBytes("fail", `cross-${index}-baseline`);
+    const candidateVerdict = verdictBytes("pass", `cross-${index}-candidate`);
+    const baselineVerdictDigest = recordDigest(baselineVerdict);
+    const candidateVerdictDigest = recordDigest(candidateVerdict);
+    verdictMap.set(baselineVerdictDigest, baselineVerdict);
+    verdictMap.set(candidateVerdictDigest, candidateVerdict);
     const run = sealRun({
       protocol: "https://jinn.network/protocols/benchmarking/1.0",
       benchmark: { digest: { sha256: (index === 0 ? "b" : "c").repeat(64) } },
       owner: "urn:uuid:22222222-2222-5222-8222-222222222222",
-      arms: [{ armId, pinning: {} }],
+      arms: [
+        { armId: "armA", pinning: { "fixture/arm": "armA" } },
+        { armId: "armB", pinning: { "fixture/arm": "armB" } },
+      ],
       replicates: 1,
       policy: {
         completenessFloor: "1",
@@ -213,23 +220,52 @@ function crossVersionPairedFixture(sharedTask: boolean): Fixture {
       protocol: "https://jinn.network/protocols/benchmarking/1.0",
       run: { digest: { sha256: run.digest.slice("sha256:".length) } },
       closeBoundary: { at: "2026-08-04T00:00:00Z" },
-      cells: [{
-        cellKey: `${taskHex}/${armId}/1`,
-        taskDigest: taskHex,
-        armId,
-        replicate: 1,
-        dispatches: 1,
-        accounted: 1,
-        verdicts: [verdictDigest],
-        validVerdicts: [verdictDigest],
-        outcome: "judged",
-        verification: MATCH_ALL,
-        integrityTier: "re-derivable",
-      }],
+      cells: [
+        {
+          cellKey: `${taskHex}/armA/1`,
+          taskDigest: taskHex,
+          armId: "armA",
+          replicate: 1,
+          dispatches: 1,
+          accounted: 1,
+          submission: `sha256:${"5".repeat(64)}`,
+          delivery: `sha256:${"6".repeat(64)}`,
+          verdicts: [baselineVerdictDigest],
+          validVerdicts: [baselineVerdictDigest],
+          outcome: "judged",
+          verification: MATCH_ALL,
+          integrityTier: "re-derivable",
+        },
+        {
+          cellKey: `${taskHex}/armB/1`,
+          taskDigest: taskHex,
+          armId: "armB",
+          replicate: 1,
+          dispatches: 1,
+          accounted: 1,
+          submission: `sha256:${"7".repeat(64)}`,
+          delivery: `sha256:${"8".repeat(64)}`,
+          verdicts: [candidateVerdictDigest],
+          validVerdicts: [candidateVerdictDigest],
+          outcome: "judged",
+          verification: MATCH_ALL,
+          integrityTier: "re-derivable",
+        },
+      ],
       exclusions: [],
       attrition: {
         perArm: {
-          [armId]: {
+          armA: {
+            expected: 1,
+            judged: 1,
+            unjudged: 0,
+            unscorable: 0,
+            expired: 0,
+            invalidated: 0,
+            excluded: 0,
+            replacements: 0,
+          },
+          armB: {
             expected: 1,
             judged: 1,
             unjudged: 0,
@@ -242,7 +278,7 @@ function crossVersionPairedFixture(sharedTask: boolean): Fixture {
         },
         asymmetryFlags: [],
       },
-      completeness: { expected: 1, judged: 1, floor: "1", runOutcome: "complete" },
+      completeness: { expected: 2, judged: 2, floor: "1", runOutcome: "complete" },
       assembly: { procedure: "jinn.benchmarking.assembly", version: "1.0" },
     });
     subjectBytes.push(matrix.bytes);
@@ -364,7 +400,7 @@ describe("deriveDisclosures", () => {
     expect(disclosures.perSubject.map((entry) => entry.subjectSha256)).toEqual(
       fixture.subjectBytes.map((bytes) => recordDigest(bytes).slice("sha256:".length)),
     );
-    expect(disclosures.perSubject[1]!.attrition.asymmetryFlags).toEqual(["fixture-flag"]);
+    expect(disclosures.perSubject[1]!.attrition.asymmetryFlags).toEqual([]);
     expect(disclosures.perSubject[0]!.integrityTiers).not.toEqual(
       disclosures.perSubject[1]!.integrityTiers,
     );
@@ -491,8 +527,13 @@ describe("byte-first produceReport / verifyReport", () => {
       },
       signer,
     );
-    expect((produced.record.results as { pairing: { taskDigests: string[] } }).pairing.taskDigests)
-      .toHaveLength(1);
+    const perSubject = (produced.record.results as {
+      perSubject: Array<{ subjectSha256: string; results: { pairing: { taskDigests: string[] } } }>;
+    }).perSubject;
+    expect(perSubject).toHaveLength(2);
+    expect(perSubject[0]!.results.pairing.taskDigests).toHaveLength(1);
+    expect(perSubject[1]!.results.pairing.taskDigests)
+      .toEqual(perSubject[0]!.results.pairing.taskDigests);
     const result = await verifyReport(
       {
         envelopeBytes: produced.envelope,
@@ -519,7 +560,7 @@ describe("byte-first produceReport / verifyReport", () => {
         author: AUTHOR,
       },
       signer,
-    )).rejects.toThrow(/no exact shared Task-digest pairing/);
+    )).rejects.toThrow(/identical Task-digest pairing/);
   });
 
   test("verification instant is explicit context and invalid input fails before trust resolution", async () => {

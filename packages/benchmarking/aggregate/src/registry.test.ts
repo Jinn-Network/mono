@@ -1,11 +1,25 @@
 import { describe, expect, test } from "vitest";
+import { parseMatrix, sealMatrix } from "@jinn-network/benchmarking-records";
 import { BENCHMARKING_METHOD_REGISTRY } from "./index.js";
 import { createMethodRegistry } from "./registry.js";
 import type { MethodComputeInput } from "./method.js";
 
 function baseInput(overrides: Partial<MethodComputeInput> = {}): MethodComputeInput {
+  const sealed = sealMatrix({
+    protocol: "https://jinn.network/protocols/benchmarking/1.0",
+    run: { digest: { sha256: "a".repeat(64) } },
+    closeBoundary: { at: "2026-08-04T00:00:00Z" },
+    cells: [],
+    exclusions: [],
+    attrition: { perArm: {}, asymmetryFlags: [] },
+    completeness: { expected: 0, judged: 0, floor: "1", runOutcome: "complete" },
+    assembly: { procedure: "jinn.benchmarking.assembly", version: "1.0" },
+  });
   return {
-    matrices: [],
+    subjects: [{
+      subjectSha256: sealed.digest.slice("sha256:".length),
+      matrix: parseMatrix(sealed.bytes),
+    }],
     parameters: {},
     verdictRule: "unanimous",
     resolveVerdictBytes: () => undefined,
@@ -55,6 +69,26 @@ describe("bradley-terry@1", () => {
       computeAvailability: "unavailable",
     });
     expect(method.compute).toBeUndefined();
+  });
+});
+
+describe("subject-scoped method inputs", () => {
+  test("bind each declared subject identity to its canonical Matrix digest", () => {
+    const method = createMethodRegistry().get("jinn.benchmarking.method/wilson", "1")!;
+    const input = baseInput({ parameters: { verdictRule: "unanimous" } });
+    expect(() => method.compute!({
+      ...input,
+      subjects: [{ ...input.subjects[0]!, subjectSha256: "f".repeat(64) }],
+    })).toThrow(/does not match canonical Matrix digest/);
+  });
+
+  test("reject duplicate subject identities before computing any result", () => {
+    const method = createMethodRegistry().get("jinn.benchmarking.method/wilson", "1")!;
+    const input = baseInput({ parameters: { verdictRule: "unanimous" } });
+    expect(() => method.compute!({
+      ...input,
+      subjects: [input.subjects[0]!, input.subjects[0]!],
+    })).toThrow(/subject identity is duplicated/);
   });
 });
 

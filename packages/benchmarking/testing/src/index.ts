@@ -17,11 +17,14 @@ export type {
   DeclarativeParameterSchema,
   Method,
   MethodComputeInput,
+  MethodResults,
   MethodReferenceSet,
   MethodRegistry,
+  MethodSubject,
   ParameterValidationResult,
   VerifiedAnchoredBenchmarkAnnouncement,
   VerdictRuleName,
+  SubjectMethodResult,
 } from "./method-types.js";
 
 export { describeOrderingConformance } from "./ordering-conformance.js";
