@@ -48,6 +48,36 @@ describe("BenchmarkRecordSchema / parseBenchmark / sealBenchmark", () => {
     }
   });
 
+  test.each([
+    "01.0.0",
+    "1.01.0",
+    "1.0.01",
+    "1.0.0-01",
+    "1.0.0-alpha.01",
+    "1.0.0-",
+    "1.0.0+",
+    "1.0.0-alpha..1",
+    "1.0.0+build..1",
+    "1.0.0-\u03b1",
+  ])("rejects invalid SemVer 2.0.0 boundary %s", (version) => {
+    const value = loadFixture("minimal.json") as Record<string, unknown>;
+    expect(() => sealBenchmark({ ...value, version })).toThrow(InvalidDocumentError);
+  });
+
+  test.each([
+    "0.0.0",
+    "1.0.0-0",
+    "1.0.0-alpha.1",
+    "1.0.0-alpha-01",
+    "1.0.0+001",
+    "1.0.0-rc.1+build.001",
+    "1.0.0-x.7.z.92",
+    "999999999999999999999999.0.0",
+  ])("accepts valid SemVer 2.0.0 boundary %s", (version) => {
+    const value = loadFixture("minimal.json") as Record<string, unknown>;
+    expect(() => sealBenchmark({ ...value, version })).not.toThrow();
+  });
+
   test("an item's task ResourceDescriptor without a sha256 digest is rejected", () => {
     const value = loadFixture("invalid-item-uri-only.json");
     expect(() => sealBenchmark(value)).toThrow();

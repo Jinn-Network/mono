@@ -4,9 +4,10 @@ import { topLevelRecordSchema } from "../extensions.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
 import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
 
-// A SemVer 2.0.0 version string (§6.1/§6.2).
+// The complete SemVer 2.0.0 grammar (§6.1/§6.2): core numeric identifiers and numeric
+// prerelease identifiers forbid leading zeroes; build identifiers deliberately do not.
 const SemVer = z.string().regex(
-  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+  /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/,
   "must be a SemVer 2.0.0 version string",
 );
 
