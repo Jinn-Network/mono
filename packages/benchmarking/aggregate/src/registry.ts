@@ -881,7 +881,7 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
         verdict: cost.verdict,
         pValue: cost.pValue === null ? null : fixed4(cost.pValue),
         n: cost.n,
-        ...(cost.scale === undefined || cost.scale === 0n ? {} : { replay: {
+        ...(cost.scale === undefined || (cost.scale === 0n && (cost.divisors === undefined || !cost.divisors.some((divisor) => divisor > 1n))) ? {} : { replay: {
           scale: cost.scale.toString(),
           ...(cost.divisors === undefined ? {} : { divisors: cost.divisors.map((divisor) => divisor.toString()) }),
           differences: cost.differences!.map((difference) => difference.toString()),

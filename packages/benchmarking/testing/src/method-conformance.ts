@@ -844,6 +844,79 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
       });
     });
 
+    test("noninferiority cost emits scale-zero rational replay for integer-spelled denominator-three means", async () => {
+      const fixture = structuredClone(await loadFixture("noninferiority-pass.json")) as Omit<MethodFixture, "matrices" | "runReplicates"> & {
+        matrices: MutableFixtureMatrix[];
+        runReplicates?: number;
+      };
+      const matrix = fixture.matrices[0] as MutableFixtureMatrix;
+      const original = [...matrix.cells];
+      for (const cell of original) {
+        if (cell.armId === "armA") {
+          cell.cost = { value: "1", unit: "USD", source: "reported" };
+          for (const replicate of [2, 3]) {
+            matrix.cells.push({ ...structuredClone(cell), replicate, cellKey: `${cell.taskDigest}/armA/${replicate}`, cost: { value: "1", unit: "USD", source: "reported" } });
+          }
+        } else {
+          cell.cost = { value: "0", unit: "USD", source: "reported" };
+          matrix.cells.push({ ...structuredClone(cell), replicate: 2, cellKey: `${cell.taskDigest}/armB/2`, cost: { value: "0", unit: "USD", source: "reported" } });
+          matrix.cells.push({ ...structuredClone(cell), replicate: 3, cellKey: `${cell.taskDigest}/armB/3`, cost: { value: "1", unit: "USD", source: "reported" } });
+        }
+      }
+      fixture.runReplicates = 3;
+      const prepared = prepareFixture(fixture);
+      const method = registry.get(fixture.methodId, fixture.methodVersion)!;
+      const result = onlySubjectResults(method.compute!({
+        subjects: prepared.subjects,
+        parameters: { ...fixture.parameters, verdictRule: fixture.verdictRule },
+        verdictRule: fixture.verdictRule,
+        registry,
+        ...prepared.ports,
+      })) as {
+        verdictRule: string;
+        baseline: string;
+        candidate: string;
+        verdict: string;
+        pairing: { taskDigests: string[] };
+        quality: unknown;
+        cost: { verdict: string; pValue: string | null; n: number; replay: { scale: string; divisors: string[]; differences: string[] }; excluded: { count: number; cellKeys: string[] } };
+        excluded: { count: number; cellKeys: string[] };
+        conflicted: unknown;
+        bootstrap: unknown;
+      };
+      const taskDigests = [...prepared.taskBytes.keys()]
+        .map((digest) => digest.slice("sha256:".length))
+        .sort();
+      const sourceByTaskDigest = new Map([...prepared.taskBytes.entries()].map(([digest, bytes]) => [
+        digest.slice("sha256:".length),
+        `fixture-source/${(JSON.parse(new TextDecoder().decode(bytes)) as { instructions: string }).instructions.slice("Fixture task ".length)}`,
+      ]));
+      const expectedClusters = taskDigests.map((digest) => ({
+        key: ["source", sourceByTaskDigest.get(digest)!],
+        members: [digest],
+      })).sort((left, right) => left.key[1] < right.key[1] ? -1 : left.key[1] > right.key[1] ? 1 : 0);
+      expect(result).toEqual({
+        verdictRule: "unanimous",
+        baseline: "armA",
+        candidate: "armB",
+        verdict: "PASS",
+        pairing: { taskDigests },
+        quality: { verdict: "pass", lowerBound: "0.0000", relativeRegression: "0.0000", reasons: [] },
+        cost: {
+          verdict: "lower", pValue: "0.0030", n: 10,
+          replay: { scale: "0", divisors: Array.from({ length: 10 }, () => "3"), differences: Array.from({ length: 10 }, () => "-2") },
+          excluded: { count: 0, cellKeys: [] },
+        },
+        excluded: { count: 0, cellKeys: [] },
+        conflicted: { count: 0, cellKeys: [] },
+        bootstrap: {
+          procedure: "xorshift32-v1", seed: 123456789, resamples: 1000,
+          basis: "task-provenance-source-family", count: 10, unit: "source-cluster", draws: 10_000,
+          clusters: expectedClusters,
+        },
+      });
+    });
+
     test("plaintext source and opaque source commitment remain tagged, non-colliding cluster identities", async () => {
       const fixture = structuredClone(await loadFixture("noninferiority-pass.json")) as Omit<MethodFixture, "matrices"> & { matrices: Array<{ cells: Array<{ taskDigest: string }> }>; taskProvenance?: Record<string, { source?: string; sourceCommitment?: string }> };
       const [first, second] = [...new Set(fixture.matrices[0]!.cells.map((cell) => cell.taskDigest))];
