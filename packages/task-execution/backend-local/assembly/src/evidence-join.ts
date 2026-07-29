@@ -76,6 +76,7 @@ export interface EvidenceCaptureSession {
 export interface EvidenceJoin {
   readonly ports: EvidenceBindingPorts;
   start(input: StartEvidenceCaptureInput): Promise<EvidenceCaptureSession>;
+  resume(paths: WorkspacePaths): Promise<EvidenceCaptureSession>;
   awaitIndexed(reference: EvidenceRecordReference): Promise<EvidenceIndexingOutcome>;
 }
 
@@ -271,6 +272,12 @@ export function createEvidenceJoin(options: EvidenceJoinOptions): EvidenceJoin {
         },
       });
       return new EvidenceCaptureSessionImpl(recording, input.paths);
+    },
+    async resume(paths) {
+      const recording = await recorder.resume({
+        workspaceDir: join(realpathSync(paths.meta), "evidence-recording"),
+      });
+      return new EvidenceCaptureSessionImpl(recording, paths);
     },
     awaitIndexed(reference) {
       return options.ports.awaitIndexed(reference);

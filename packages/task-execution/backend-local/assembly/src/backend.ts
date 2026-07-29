@@ -668,6 +668,24 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         ? {}
         : { annotations: submission.annotations }),
     };
+    const view: TaskView = {
+      task,
+      effectiveRequirements: merged.effective,
+      profile: resolvedProfile,
+    };
+    const selectedProvisioner = this.config.provisioner({
+      sealedTaskBytes: taskBytes.slice(),
+      dispatchContextBytes,
+      task,
+      submission,
+      attempt: identity,
+    });
+    if (!validProvisionerId(selectedProvisioner.id)) {
+      this.capacity.release(attempt);
+      return this.reject(submissionUri, "backend-unavailable", {
+        detail: "provisioner selector returned an empty or non-canonical id",
+      });
+    }
     mkdirSync(this.paths(attempt).meta, { recursive: true, mode: 0o700 });
     this.journal(attempt).append({
       attemptId: attempt,
@@ -708,22 +726,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       details: { taskDigest, digest, attempt },
     });
 
-    const view: TaskView = {
-      task,
-      effectiveRequirements: merged.effective,
-      profile: resolvedProfile,
-    };
-    const selectedProvisioner = this.config.provisioner({
-      sealedTaskBytes: taskBytes.slice(),
-      dispatchContextBytes,
-      task,
-      submission,
-      attempt: identity,
-    });
     const provisioner = selectedProvisioner.contract;
-    if (!validProvisionerId(selectedProvisioner.id)) {
-      throw new Error("provisioner selector returned an empty or non-canonical id");
-    }
     atomicWrite(join(this.paths(attempt).meta, "dispatch-context.sealed"), dispatchContextBytes);
     const grants = submission.capabilityGrants === undefined
       ? []
@@ -1367,8 +1370,13 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       if (stored === undefined || typeof intent?.details["provisioner"] !== "string") {
         throw new TaskExecutionError("backend-unavailable", { detail: "recovery lacks persisted provisioner identity" });
       }
-      const task = decode(stored.taskBytes) as TaskSpecification;
-      const submission = decode(stored.submissionBytes) as SubmissionRecord;
+      const checked = this.decodeAndSealCheck(stored.taskBytes, stored.submissionBytes);
+      if (!checked.ok || documentDigest(stored.taskBytes) !== stored.taskDigest
+        || checked.submission.submission !== stored.parsed.submission) {
+        throw new TaskExecutionError("invalid-document", { detail: "persisted Task or Submission failed exact recovery validation" });
+      }
+      const task = checked.task;
+      const submission = checked.submission;
       const profile = this.profile(task);
       const merged = mergeRequirements(task.requirements, submission.requirements, {
         ...CORE_REQUIREMENT_CLASSES,

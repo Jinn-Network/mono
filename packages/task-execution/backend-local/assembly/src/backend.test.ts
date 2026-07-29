@@ -183,7 +183,10 @@ describe("local TaskExecutionBackend submission path (C1)", () => {
   test("rejects hostile provisioner identities before setup", async () => {
     const backend = fixture(await stateRoot("provisioner-id"), { provisionerId: "\u0000" });
     const task = taskBytes();
-    await expect(backend.submit(task, submissionBytes(task))).rejects.toThrow("non-canonical id");
+    const ack = await backend.submit(task, submissionBytes(task));
+    expect(ack.accepted).toBe(false);
+    if (ack.accepted) throw new Error("unreachable");
+    expect(ack.error.category).toBe("backend-unavailable");
   });
 
   test("starts a real shim without an in-process execution callback", async () => {
