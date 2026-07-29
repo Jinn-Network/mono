@@ -1062,3 +1062,28 @@ lifecycle outcomes with zero forbidden effects. The full M0–M5 package, consum
 packed-type, workflow, and contract checks run again, followed by another fresh whole-design
 review. M6 remains blocked until that review is green and the Phase 4 backend-local assembly
 gate has passed.
+
+## Addendum 2026-07-29-o — terminal Task state, exact ABI, and non-vacuous native admission
+
+The fourth fresh whole-component review at marketplace stream head
+`b1b9ffa40dbfae61d498a4f7297e355a8c092678` is **RED**. Program rulings
+§7.105–§7.110 bind the M0–M5 repair:
+
+1. revised Task digest admission happens before any capacity, terms, or publication anchor is
+   installed; a corrupt creation leaves only a non-reopenable tombstone;
+2. requester `TaskClosed` state is monotonic and no later release, expiry, top-up, or claim may
+   reopen or reannounce it;
+3. on-chain verdict code `Invalid` maps exactly to TEP `rejected[protocol-violation]`;
+4. the exported today-mode TaskCoordinator ABI is an exact slice of the compiled/deployed
+   artifact, including complete tuple fields, event arguments, and indexing, with artifact and
+   fork parity gates;
+5. the reusable native §16.2 signed-Task family invokes only the single exported admission
+   boundary and asserts complete success and hostile results; and
+6. lifecycle conformance uses exact full transitions, refusal provenance, processed identities,
+   accepted-event sets, announcements, and state—never partial matchers.
+
+The repair remains M0–M5 only and is test-first. It runs the complete binding/projector/testing
+package gates, the live ephemeral/fork suite, TEP/evidence/trust/discovery consumers, marketplace
+guard trio, packed consumer, contract compile/targeted tests, workflow lint, raw-control scan, and
+a new independent whole-design review. M6 remains blocked on that GREEN verdict and the Phase 4
+backend-local assembly gate.

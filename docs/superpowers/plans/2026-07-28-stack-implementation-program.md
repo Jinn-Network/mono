@@ -903,6 +903,154 @@ Confirmed by the operator at the program gate (2026-07-28):
     zero-denominator Matrix may never be `complete`. Records, aggregate helpers, minimal
     fixtures, Report disclosures, and exported schema examples use this conservative outcome and
     never substitute a synthetic ratio of one.
+85. **Linux custody is the complete descendant domain, never only the original process
+    group:** the native shim establishes its authoritative custody boundary before releasing the
+    child to `exec`. Where a delegated cgroup is available, setup and membership precede that
+    release and cgroup membership/kill is authoritative. The required subreaper fallback tracks,
+    enumerates, kills, and reaps every descendant or adopted child independently of its current
+    session or process group; PGID operations are only an acceleration. Terminalization waits for
+    verified emptiness or the bounded-ceiling residual result. Native vectors include a
+    new-session child and a double-fork/adopted child.
+86. **The cancellation ceiling is one end-to-end monotonic deadline:** the bound starts when
+    the matching cancel/deadline request is detected and covers TERM, grace, KILL, leader wait,
+    descendant/cgroup cleanup, and reaping. No blocking wait may extend it. At expiry the shim
+    atomically writes and fsyncs a valid result containing the exact sorted residual PID vector,
+    including any leader, adopted descendant, or remaining cgroup member, and the backend
+    terminalizes instead of hanging. Tests exercise a leader that remains present at the ceiling.
+87. **A secret forward resolves to a verified path, never to secret bytes:** a LaunchPlan env
+    value such as `secrets/<target>` is a declared reference. After backend-owned materialization,
+    both platform shims validate that declaration and substitute the verified absolute
+    Attempt-local path. They never read, trim, decode, or place the file's contents in the
+    environment. File-reading harnesses consume the declared path separately. Cross-platform
+    tests preserve binary bytes and significant trailing whitespace in the `0600` file.
+88. **Native shim JSON preserves every protocol-legal string exactly:** no fixed buffer or
+    quote-substring parser may truncate, misparse, or interpolate Submission nonces, Attempt URIs,
+    or other admitted values. The helper uses a strict bounded JSON codec, or an equivalently
+    exact token representation, and emits valid UTF-8 JSON (canonical where the owning state
+    contract requires it). Escaped quotes, backslashes, control escapes, Unicode, and
+    boundary-length legal nonces round-trip exactly; malformed or over-bound shim documents fail
+    before exec. This does not silently narrow the protocol nonce schema.
+89. **A shim fingerprint is an explicit control-ready boundary:** the cancellation handler is
+    installed, pending cancellation can be queued, and the child/control target exists before
+    the one ready fingerprint is atomically published. Assembly accepts only that ready phase,
+    not the mere presence of any fingerprint. An immediate post-publication cancellation has an
+    exact outcome vector.
+90. **Inline ResourceDescriptor content is strict canonical base64:** workspace provisioning
+    validates the standard-base64 grammar and canonical round-trip, decodes to bytes, verifies the
+    descriptor digest over those decoded bytes, and writes those bytes unchanged. Malformed or
+    noncanonical base64 is a pre-execution content error. Binary and invalid-encoding vectors pin
+    the behavior.
+91. **Local `runPinning: "enforced"` means the selected executable and every requested pin are
+    actually verified:** a deployment supplies an exact executable identity (normally an
+    absolute path) and a launcher-specific readiness/version/digest probe. Required
+    harness/model/loadout pins are checked before intent and spawn; an unconfigured or mismatched
+    pin rejects rather than riding only as an informational env value. The provisioner
+    digest-verifies the loadout and launcher/workspace share one canonical contained loadout-path
+    function. Only explicitly permitted pin/path env keys survive execution filtering.
+    Capabilities advertise the enforced posture only when this path is configured and both
+    preflight and submit perform the same readiness check.
+92. **Launcher routing is profile-safe and independent of registry order:** the four generic
+    agent launchers support repository-work only; the evaluation launcher supports
+    evaluation-task only. Assembly resolves and validates the Task profile before launcher
+    selection, validates an explicit harness against that profile, and always routes evaluation
+    work through the dedicated evaluation harness. Capabilities and preflight expose those exact
+    per-launcher facts.
+93. **One Attempt URI has one durable engagement binding:** before capacity acquisition,
+    assembly binds the URI to the exact Task digest, Submission URI/bytes, nonce, and dispatch
+    context digest. A byte-exact idempotent duplicate returns the existing acknowledgement before
+    capacity accounting; any different binding is `invalid-reference` and may not share a root,
+    journal, or worker. The binding rebuilds on restart, and `CapacityGate` treats an already-live
+    non-idempotent identity as a conflict rather than a successful acquisition.
+94. **Pre-exec cancellation is phase-aware and cannot fall through to spawn:** each accepted
+    Attempt has a durable phase and cooperative abort signal. Provisioning, input/secret
+    materialization, and every intervening await are followed by a cancellation checkpoint, with
+    a final check immediately before spawn intent and real spawn. A cancel during setup aborts
+    cleanup and appends the exact `rejected` / `neverExecuted: true` terminal without invoking the
+    shim. Replay and restart preserve that decision.
+95. **Rejected Submission segments have their own durable projection:** startup rebuilds an
+    index from every Submission segment independently of Attempt journals. `observe`/`watch` of
+    the rejected Submission identity returns a stable submission-rejected observation and cursor,
+    distinct from never-seen, across restart; it does not fabricate an Attempt.
+96. **Advertising `watch: true` requires a real resumable durable tail:** from the supplied
+    cursor, `watch()` yields each later committed observation once in append order, waits for new
+    durable events, and ends only at the watched terminal/rejection, backend shutdown, or consumer
+    cancellation. Iterator return removes its waiter. Restart and resume vectors prove cursor
+    stability. A backend with only a finite snapshot must advertise `watch: false`; the local
+    design target implements the tail.
+97. **`fetchArtifact` serves only backend-issued harvested authority:** a durable index binds
+    each exact descriptor to its Attempt and verified `out/` or `logs/` root. Retrieval accepts
+    only an indexed descriptor previously issued through harvest/Delivery, canonicalizes beneath
+    that root, opens no-follow, and rechecks the recorded digest before returning bytes.
+    Unindexed, mutated, external, symlinked, or mismatched locators fail with a typed refusal.
+98. **AttemptRecord is a complete pure fold of durable events:** journal events carry and the
+    fold consumes the LaunchPlan/executor identity, spawn interruption behavior, execution exit
+    code and signal, decoded result envelope and matched blame rule, recovery advice, recovery
+    facts, harvested manifest/omissions/violations, and terminal details. Harvest is represented
+    durably rather than supplied through an optional ephemeral argument. Exact full-record tests
+    cover success, task failure, infrastructure failure, cancellation, deadline, and recovery.
+99. **Evidence capture joins the complete verified input and correct output namespaces:** its
+    immutable initial-input set contains the exact Task, dispatch context, every digest-verified
+    provisioned input, loadout, and evaluation material. Result capture resolves `out/...` under
+    the output root and `logs/...` under the log root, using contained no-follow reads and digest
+    verification. Tests cover subject inputs, loadout, output, stdout/stderr, and transcript.
+100. **Bounded cleanup results are consumed before generic harvest gating:** assembly reads and
+    verifies the shim cancellation/deadline result before a group-empty wait can replace it with a
+    generic harvest error. A ceiling expiry produces the typed terminal and exact sorted residual
+    vector in AttemptRecord and observation; an empty result proceeds through ordinary harvest.
+101. **The supervisor conformance kit executes exact fixture semantics:** every golden journal,
+    reconciliation, shim, cancellation, and deadline row uses a distinct scripted process reality
+    and asserts the complete expected action, classification, terminal, and annotations. No
+    `toBeDefined`, existence-only, or shared always-empty adapter can satisfy a behavior vector.
+    A negative control proves a deliberately empty/wrong implementation fails.
+102. **The writer lock outlives every accepted worker and durable appender:** the canonical
+    shutdown path first rejects new work, cooperatively drains workers, completes/fsyncs durable
+    transitions and cleanup, and only then releases the root lock. If a legacy synchronous
+    `close()` surface remains, it may not release while work is live. A second instance is refused
+    until shutdown has completed.
+103. **Artifact and attempt byte ceilings are enforced at their declared scopes:** the
+    advertised `maxArtifactBytes` is checked incrementally per collected output/log artifact
+    before whole-file allocation, while the local design's separate per-Attempt cumulative quota
+    covers execution data across `out/` and `logs/`. Streaming no-follow reads compute digests and
+    bounds together. Exact-boundary and one-byte-over vectors produce the typed integrity or
+    infrastructure outcome, and capabilities advertise only configured enforced limits.
+104. **Evaluation launcher facts come from the selected validated registration:** planning
+    resolves the exact deployment registration for the Task and derives its signer-forward target
+    and interruption/recovery behavior from that same object. Launcher options cannot override
+    those fields independently. Registration-set preflight rejects ambiguity or invalid
+    signer/recovery configuration before Attempt work, and runtime uses the same selected
+    registration for verification, adapter execution, and signing.
+105. **A digest-rejected revised Task can never become admissible state:** Task material is
+    resolved and its exact protocol digest is checked before the projector installs capacity,
+    terms, Submission anchor, or any reopenable Task state. A mismatch records only the processed
+    log identity plus a permanent non-admissible rejection tombstone; later claim, release,
+    expiry, top-up, replay, or split-batch processing cannot create availability from it. The
+    hostile reject→claim→release sequence yields no accepted Attempt, retained publication
+    anchor, or announcement.
+106. **Requester close is monotonic terminal Task state:** after `TaskClosed`, the projector
+    retains immutable requester-closed status and withdraws availability. Later release, expiry,
+    top-up, claim, replay, or batch boundary cannot reopen or reannounce the Submission. Exact
+    close→release and close→expiry split-batch vectors prove prior-state-plus-log behavior and no
+    downstream publication.
+107. **On-chain evaluation code `Invalid` maps to TEP rejection:** verdict code `3` produces
+    terminal `{ state: "rejected", category: "protocol-violation" }`, never operational
+    `failed`. The projector asserts complete exact outputs for every defined code `0` through `4`
+    and an out-of-range code, preserving the rest of ruling §7.61's frozen mapping.
+108. **Today-mode public ABIs are exact compiled/deployed contract slices:** every exported
+    function tuple and event entry preserves the compiled artifact's field order, types, names,
+    and indexing. In particular, `getAttempt` includes the leading Task/Attempt identity fields
+    and `TaskCreated` includes its exact signature and `maxClaims`. An artifact-parity gate fails
+    drift, and the pinned ephemeral/live-fork vector decodes the known deployment through the
+    exported ABI to the exact operator/request/Task facts.
+109. **Native signed-Task conformance has one admission boundary:** one shared vector table
+    invokes only exported `checkSignedTaskAdmission` for every positive and hostile case. Success
+    asserts the complete exact envelope bytes, canonical Task bytes, and returned Task document;
+    each hostile vector asserts its exact typed refusal. Direct DSSE parsing or detached binding
+    comparisons outside that boundary cannot satisfy the reusable §16.2 suite.
+110. **Marketplace lifecycle conformance asserts complete transitions:** every replay,
+    rejection, claim/release/expiry/top-up/close, and refusal vector uses exact equality for the
+    full emitted observations, refusals (including kind and derivation), accepted-event set,
+    processed log identities, announcements, and returned persistent state. No partial matcher or
+    erased processed-log field may make the §7.75 contract vacuous.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

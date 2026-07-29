@@ -728,3 +728,36 @@ returns the minimal validated view the harness needs. The harness calls it befor
 evaluation derivation or adapter execution. Profiles does not select settlement context and the
 harness does not gain a direct protocol dependency or duplicate serializer. Host materialization
 being digest-verified remains necessary but is not a substitute for this semantic admission.
+
+## Addendum 2026-07-29-f — whole-component design-review repair boundary
+
+The fresh whole-component review at backend stream head
+`e258422e66f10e383f7f9bf44ee3c6c5308c84ef` is **RED**. Program rulings §7.85–§7.104
+adjudicate all twenty findings and are binding on the repair:
+
+1. Linux custody covers cgroup members and every descendant/adopted child across session/PGID
+   changes, established before exec; one end-to-end monotonic cancellation deadline terminalizes
+   with an exact sorted residual vector.
+2. Both shims forward verified absolute secret-file paths, preserve secret bytes, parse and emit
+   every legal JSON string exactly, and publish a fingerprint only after cancellation control is
+   ready.
+3. Inline descriptor content is strict canonical base64 decoded to binary bytes. Enforced run
+   pinning verifies the actual executable, model, and digest-pinned loadout, and launcher routing
+   is exact by Task profile.
+4. Attempt identities have one durable exact engagement binding; setup cancellation cannot spawn;
+   rejected Submission projection and true resumable watch survive restart.
+5. Artifact retrieval is limited to indexed, re-verified harvested authority; AttemptRecord is a
+   complete journal-only fold; evidence capture includes every verified input and resolves output
+   versus log namespaces correctly.
+6. The bounded shim cleanup result precedes harvest gating and reaches observations; the
+   supervisor kit asserts complete distinct fixture outcomes and contains a failing negative
+   control.
+7. Shutdown retains the writer lock until workers and appenders drain. Per-artifact and
+   per-Attempt cumulative byte limits are streamed and enforced at their declared scopes.
+8. Evaluation launcher signer and recovery facts derive from the exact selected validated
+   registration and cannot drift through independent options.
+
+The repair remains within Milestones A–D. It must be test-first, retain the real native Linux
+integration gate (with explicit platform skips elsewhere), and pass every package gate,
+task-execution/evidence guard trio, workflow lint, packed consumer, raw-control scan, and a fresh
+independent whole-component design review before the stream may merge.
