@@ -130,7 +130,15 @@ function resolveAuthoritativeTerminal(
 ): { terminal: JournalEvent | undefined; contradictory: boolean } {
   const accepted = events.filter((event) => event.type === "attempt-terminal" && event.rejectedAtAppend !== true);
   const rejected = events.some((event) => event.type === "attempt-terminal" && event.rejectedAtAppend === true);
-  return { terminal: accepted[0], contradictory: rejected };
+  const first = accepted[0];
+  const terminal = first?.details["state"] === "lost" && accepted[1] !== undefined
+    ? accepted[1]
+    : first;
+  const allowedAcceptedCount = first?.details["state"] === "lost" ? 2 : 1;
+  return {
+    terminal,
+    contradictory: rejected || accepted.length > allowedAcceptedCount,
+  };
 }
 
 function derivePhase(events: readonly JournalEvent[]): AttemptRecord["phase"] {

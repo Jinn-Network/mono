@@ -44,9 +44,9 @@ function parseIntactLines<T>(raw: string, path: string): { events: T[]; tornTail
   return { events, tornTail };
 }
 
-/** The prior accepted (non-rejected) terminal for an attemptId within an event list, if any. */
-function acceptedTerminalFor(events: readonly JournalEvent[], attemptId: string): JournalEvent | undefined {
-  return events.find(
+/** Accepted (non-rejected) terminals for an attemptId within an event list, in durable order. */
+function acceptedTerminalsFor(events: readonly JournalEvent[], attemptId: string): JournalEvent[] {
+  return events.filter(
     (event) => event.attemptId === attemptId && event.type === "attempt-terminal" && event.rejectedAtAppend !== true,
   );
 }
@@ -129,18 +129,19 @@ export function openAttemptJournal(
     };
 
     if (intent.type === "attempt-terminal") {
-      const priorAccepted = acceptedTerminalFor(events, intent.attemptId);
-      if (priorAccepted !== undefined) {
-        const priorState = (priorAccepted.details as { state?: string }).state;
-        if (priorState !== "lost") {
+      const priorAccepted = acceptedTerminalsFor(events, intent.attemptId);
+      if (priorAccepted.length > 0) {
+        const correctionAvailable = priorAccepted.length === 1
+          && priorAccepted[0]!.details["state"] === "lost";
+        if (!correctionAvailable) {
           // Contradictory: still durably recorded (never silently dropped) but flagged, and the
           // first-by-seq terminal remains authoritative (TEP §10.4 rule 4).
           record = { ...record, rejectedAtAppend: true };
           appendFsyncedLineSync(path, JSON.stringify(record));
           throw new JournalTerminalRejectedError(intent.attemptId);
         }
-        // else: the ONE sanctioned terminal-to-terminal transition (TEP §10.4 rule 6) — accept
-        // the corrective terminal with no flag.
+        // Else: consume the ONE sanctioned terminal-to-terminal transition (TEP §10.4 rule 6).
+        // Any later terminal sees two accepted terminals and is rejected above.
       }
     }
 

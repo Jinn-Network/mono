@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { atomicWriteFileSync } from "./fs-atomic.js";
 import {
-  buildShimSpawn, fingerprintAlive, readOutcome, readProcessStartTime, readShimFingerprint,
+  buildShimSpawn, fingerprintAlive, listProcessGroupPids, readOutcome, readProcessStartTime, readShimFingerprint,
   resolveShimScriptEntry, writeOutcomeFile, writeShimFingerprint,
 } from "./shim.js";
 
@@ -103,6 +104,27 @@ describe("readProcessStartTime", () => {
     const first = readProcessStartTime(process.pid);
     const second = readProcessStartTime(process.pid);
     expect(first).toBe(second);
+  });
+});
+
+describe("process-group scanning", () => {
+  it("finds a real process-group member from the process table", async () => {
+    const child = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => process.exit(0), 30000)"],
+      { detached: true, stdio: "ignore" },
+    );
+    if (child.pid === undefined) throw new Error("fixture child has no PID");
+    try {
+      expect(listProcessGroupPids(child.pid)).toContain(child.pid);
+    } finally {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // ESRCH is an allowed fixture-exit race.
+      }
+      await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    }
   });
 });
 

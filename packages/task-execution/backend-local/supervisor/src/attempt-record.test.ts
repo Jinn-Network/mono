@@ -65,6 +65,33 @@ describe("foldAttemptRecord", () => {
     expect(record.terminalState).toBe("delivered");
   });
 
+  it("lets the one accepted terminal after lost supersede lost without a contradictory flag", () => {
+    const events: JournalEvent[] = [
+      event({ attemptId: "a1", seq: 1, type: "spawned", details: { nonce: "n1", pid: 1, startTime: 1 } }),
+      event({ attemptId: "a1", seq: 2, type: "attempt-terminal", details: { state: "lost", blame: "infrastructure" } }),
+      event({ attemptId: "a1", seq: 3, type: "attempt-terminal", details: { state: "delivered", exitCode: 0 } }),
+    ];
+
+    const record = foldAttemptRecord(events);
+
+    expect(record.terminalState).toBe("delivered");
+    expect(record.outcome?.exitCode).toBe(0);
+    expect(record.contradictory).toBe(false);
+  });
+
+  it("keeps the one lost correction authoritative and flags any later accepted terminal", () => {
+    const events: JournalEvent[] = [
+      event({ attemptId: "a1", seq: 1, type: "attempt-terminal", details: { state: "lost", blame: "infrastructure" } }),
+      event({ attemptId: "a1", seq: 2, type: "attempt-terminal", details: { state: "delivered", exitCode: 0 } }),
+      event({ attemptId: "a1", seq: 3, type: "attempt-terminal", details: { state: "failed", blame: "task" } }),
+    ];
+
+    const record = foldAttemptRecord(events);
+
+    expect(record.terminalState).toBe("delivered");
+    expect(record.contradictory).toBe(true);
+  });
+
   it("folds harvest results into the outputs manifest, omissions, and integrity violations", () => {
     const record = foldAttemptRecord(
       [event({ attemptId: "a1", seq: 1, type: "attempt-engaged" })],

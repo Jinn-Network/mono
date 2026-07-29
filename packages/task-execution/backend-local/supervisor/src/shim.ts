@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { atomicWriteFileSync, readAtomicFileSync } from "./fs-atomic.js";
@@ -121,6 +121,49 @@ export function readProcessStartTime(pid: number): number | undefined {
   } catch {
     return undefined; // pid not found, or the platform probe is unavailable — unverifiable
   }
+}
+
+function linuxProcessGroupId(pid: number): number | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const afterComm = stat.slice(stat.lastIndexOf(")") + 2).trim();
+    const fields = afterComm.split(/\s+/);
+    // Fields after `(comm)` begin at stat field 3 (`state`); pgrp is field 5.
+    const value = Number(fields[2]);
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Returns every process-table member whose process-group id is `pgid`. Recovery and terminal
+ * cleanup use this instead of treating the group leader's bare PID as proof that the whole
+ * subtree is empty.
+ */
+export function listProcessGroupPids(pgid: number): number[] {
+  if (!Number.isSafeInteger(pgid) || pgid <= 0) return [];
+  const members: number[] = [];
+  if (process.platform === "linux") {
+    for (const entry of readdirSync("/proc", { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^[0-9]+$/u.test(entry.name)) continue;
+      const pid = Number(entry.name);
+      if (linuxProcessGroupId(pid) === pgid) members.push(pid);
+    }
+  } else {
+    try {
+      const rows = execFileSync("ps", ["-axo", "pid=,pgid="], { encoding: "utf8" });
+      for (const row of rows.split("\n")) {
+        const [pidText, groupText] = row.trim().split(/\s+/);
+        const pid = Number(pidText);
+        const group = Number(groupText);
+        if (Number.isSafeInteger(pid) && pid > 0 && group === pgid) members.push(pid);
+      }
+    } catch {
+      return [];
+    }
+  }
+  return members.sort((left, right) => left - right);
 }
 
 /** Probes whether the shim recorded at `metaDir` is genuinely alive right now (fingerprint verified against the live process table, not a bare PID check). */

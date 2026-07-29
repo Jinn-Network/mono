@@ -93,7 +93,14 @@ describe("openAttemptJournal", () => {
       attemptId: "a1", type: "attempt-terminal", details: { state: "delivered", nonce: "n1" }, failsAttempt: false,
     });
     expect(corrected.rejectedAtAppend).toBeUndefined();
-    expect(journal.read()).toHaveLength(3);
+
+    expect(() => journal.append({
+      attemptId: "a1", type: "attempt-terminal", details: { state: "failed", blame: "infrastructure", nonce: "n1" }, failsAttempt: true,
+    })).toThrow(JournalTerminalRejectedError);
+
+    const events = journal.read();
+    expect(events).toHaveLength(4);
+    expect(events[3]!.rejectedAtAppend).toBe(true);
   });
 
   it("refuses a spawn record whose nonce is already live under another attempt (injected isNonceLive)", () => {

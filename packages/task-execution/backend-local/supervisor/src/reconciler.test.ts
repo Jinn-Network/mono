@@ -37,4 +37,24 @@ describe("reconcileAttempt", () => {
     });
     expect(result).toMatchObject({ classification: "stale-foreign", action: "ignore-outcome-file" });
   });
+
+  it("never treats a nonce-mismatched outcome as a correction of lost", () => {
+    const result = reconcileAttempt(foldAttemptRecord([
+      event("spawned", 1),
+      {
+        ...event("attempt-terminal", 2),
+        details: { state: "lost", blame: "infrastructure" },
+      },
+    ]), {
+      processAlive: false,
+      shimAlive: false,
+      outcomePresent: true,
+      nonceMatches: false,
+    });
+
+    expect(result).toEqual({
+      classification: "stale-foreign",
+      action: "ignore-outcome-file",
+    });
+  });
 });

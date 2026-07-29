@@ -75,6 +75,7 @@ import type {
 } from "@jinn-network/task-execution-supervisor";
 import {
   foldAttemptRecord,
+  listProcessGroupPids,
   openAttemptJournal,
   openSubmissionSegment,
   probeShimAlive,
@@ -86,6 +87,7 @@ import {
 } from "@jinn-network/task-execution-supervisor";
 import type {
   CapabilityGrant,
+  HarvestResult,
   ProvisionerContract,
   TaskView,
   WorkspacePaths,
@@ -166,6 +168,188 @@ function validProvisionerId(value: string): boolean {
   return true;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasOnlyKeys(
+  value: Readonly<Record<string, unknown>>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): boolean {
+  const keys = Object.keys(value);
+  return required.every((key) => Object.hasOwn(value, key))
+    && keys.every((key) => required.includes(key) || optional.includes(key));
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && !/[\u0000-\u001f\u007f]/u.test(value);
+}
+
+function validSecretForwardTarget(value: string): boolean {
+  return value !== "." && value !== ".." && !value.includes("/") && !value.includes("\\")
+    && nonEmptyString(value);
+}
+
+function parseLaunchPlan(value: unknown): LaunchPlan {
+  if (!isRecord(value) || !hasOnlyKeys(
+    value,
+    ["argv", "env", "cwd", "validExitCodes", "resultContract", "interruptionBehavior"],
+    ["blameExitCodes", "secretForwards"],
+  )) {
+    throw new TaskExecutionError("invalid-document", {
+      detail: "journaled LaunchPlan has missing or unknown fields",
+    });
+  }
+  const argv = value.argv;
+  const env = value.env;
+  const validExitCodes = value.validExitCodes;
+  const resultContract = value.resultContract;
+  if (
+    !Array.isArray(argv)
+    || argv.length === 0
+    || !nonEmptyString(argv[0])
+    || !argv.every((entry) => typeof entry === "string" && !entry.includes("\u0000"))
+    || !isRecord(env)
+    || !Object.entries(env).every(
+      ([key, entry]) => nonEmptyString(key) && !key.includes("=")
+        && typeof entry === "string" && !entry.includes("\u0000"),
+    )
+    || !nonEmptyString(value.cwd)
+    || !Array.isArray(validExitCodes)
+    || validExitCodes.length === 0
+    || new Set(validExitCodes).size !== validExitCodes.length
+    || !validExitCodes.every(
+      (entry) => Number.isSafeInteger(entry) && Number(entry) >= 0 && Number(entry) <= 255,
+    )
+    || !["repeatable", "recoverable", "nonrepeatable"].includes(
+      String(value.interruptionBehavior),
+    )
+  ) {
+    throw new TaskExecutionError("invalid-document", {
+      detail: "journaled LaunchPlan invocation fields are structurally invalid",
+    });
+  }
+  if (!isRecord(resultContract) || !hasOnlyKeys(
+    resultContract,
+    ["envelopeFormat"],
+    ["outputSchemaFlag", "structuredOutputArtifact", "correlationFields"],
+  ) || !nonEmptyString(resultContract.envelopeFormat)) {
+    throw new TaskExecutionError("invalid-document", {
+      detail: "journaled LaunchPlan result contract is structurally invalid",
+    });
+  }
+  for (const field of ["outputSchemaFlag", "structuredOutputArtifact"] as const) {
+    const entry = resultContract[field];
+    if (entry !== undefined && !nonEmptyString(entry)) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: `journaled LaunchPlan resultContract.${field} is invalid`,
+      });
+    }
+  }
+  const correlationFields = resultContract.correlationFields;
+  if (correlationFields !== undefined && (
+    !Array.isArray(correlationFields)
+    || new Set(correlationFields).size !== correlationFields.length
+    || !correlationFields.every((entry) =>
+      ["harnessVersion", "capabilities", "sessionId"].includes(String(entry)))
+  )) {
+    throw new TaskExecutionError("invalid-document", {
+      detail: "journaled LaunchPlan correlation fields are structurally invalid",
+    });
+  }
+  const blameExitCodes = value.blameExitCodes;
+  if (blameExitCodes !== undefined && (
+    !Array.isArray(blameExitCodes)
+    || !blameExitCodes.every((candidate) => {
+      if (!isRecord(candidate) || !hasOnlyKeys(
+        candidate,
+        ["match", "blame", "reasonCode"],
+      ) || !isRecord(candidate.match) || !hasOnlyKeys(
+        candidate.match,
+        [],
+        ["exitCode", "signal"],
+      )) return false;
+      const { exitCode, signal } = candidate.match;
+      const hasMatch = exitCode !== undefined || signal !== undefined;
+      return hasMatch
+        && (exitCode === undefined
+          || (Number.isSafeInteger(exitCode) && Number(exitCode) >= 0 && Number(exitCode) <= 255))
+        && (signal === undefined || nonEmptyString(signal))
+        && (candidate.blame === "task" || candidate.blame === "infrastructure")
+        && nonEmptyString(candidate.reasonCode);
+    })
+  )) {
+    throw new TaskExecutionError("invalid-document", {
+      detail: "journaled LaunchPlan blame rules are structurally invalid",
+    });
+  }
+  const secretForwards = value.secretForwards;
+  if (secretForwards !== undefined) {
+    if (!Array.isArray(secretForwards) || !secretForwards.every((candidate) =>
+      isRecord(candidate)
+      && hasOnlyKeys(candidate, ["grantKey", "target"])
+      && nonEmptyString(candidate.grantKey)
+      && nonEmptyString(candidate.target)
+      && validSecretForwardTarget(candidate.target))
+    ) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: "journaled LaunchPlan secret forwards are structurally invalid",
+      });
+    }
+    const grantKeys = secretForwards.map((candidate) => candidate.grantKey);
+    const targets = secretForwards.map((candidate) => candidate.target);
+    if (new Set(grantKeys).size !== grantKeys.length || new Set(targets).size !== targets.length) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: "journaled LaunchPlan secret forwards are not unique",
+      });
+    }
+  }
+  return value as unknown as LaunchPlan;
+}
+
+function parseHarvestResult(event: JournalEvent): HarvestResult {
+  const manifest = event.details["manifest"];
+  const omissions = event.details["omissions"];
+  const integrityViolations = event.details["integrityViolations"];
+  const digest = /^sha256:[0-9a-f]{64}$/u;
+  if (
+    !Array.isArray(manifest)
+    || !Array.isArray(omissions)
+    || !Array.isArray(integrityViolations)
+    || !manifest.every((candidate) =>
+      isRecord(candidate)
+      && hasOnlyKeys(candidate, ["path", "sizeBytes", "sha256"], ["mediaType"])
+      && nonEmptyString(candidate.path)
+      && Number.isSafeInteger(candidate.sizeBytes)
+      && Number(candidate.sizeBytes) >= 0
+      && typeof candidate.sha256 === "string"
+      && digest.test(candidate.sha256)
+      && (candidate.mediaType === undefined || nonEmptyString(candidate.mediaType)))
+    || !omissions.every(nonEmptyString)
+    || !integrityViolations.every((candidate) =>
+      isRecord(candidate)
+      && hasOnlyKeys(candidate, ["path", "reason"])
+      && nonEmptyString(candidate.path)
+      && nonEmptyString(candidate.reason))
+  ) {
+    throw new TaskExecutionError("invalid-document", {
+      detail: "journaled harvest result is structurally invalid",
+    });
+  }
+  const paths = manifest.map((candidate) => candidate.path);
+  if (new Set(paths).size !== paths.length || new Set(omissions).size !== omissions.length) {
+    throw new TaskExecutionError("invalid-document", {
+      detail: "journaled harvest result contains duplicate paths",
+    });
+  }
+  return {
+    manifest: manifest as unknown as HarvestResult["manifest"],
+    omissions,
+    integrityViolations: integrityViolations as unknown as HarvestResult["integrityViolations"],
+  };
+}
+
 function requestedInventoryValue(value: unknown): string | undefined {
   if (typeof value === "string") return value;
   if (typeof value !== "object" || value === null) return undefined;
@@ -224,6 +408,16 @@ export interface SelectedProvisioner {
 export interface LocalBackendFaults {
   /** Test-only crash injection after the Delivery checkpoint is durable but before its event. */
   readonly afterDeliveryCheckpoint?: () => void;
+  /** Test-only restart boundary injection; production compositions leave this absent. */
+  readonly onCompletionPhase?: (
+    phase:
+      | "before-outcome-wait"
+      | "after-outcome"
+      | "before-harvest"
+      | "after-harvest"
+      | "after-evidence"
+      | "before-delivery-checkpoint",
+  ) => void | Promise<void>;
 }
 
 export interface LocalTaskExecutionBackendConfig {
@@ -241,8 +435,6 @@ export interface LocalTaskExecutionBackendConfig {
   readonly recorderAvailability?: RecorderAvailability;
   readonly trustKeys?: TrustKeyConfig;
   readonly evidence?: EvidenceBindingPorts;
-  /** @deprecated Test compatibility only; production execution always uses the real shim. */
-  readonly execute?: (input: unknown) => Promise<unknown>;
   readonly capabilityGrants?: (
     grants: Readonly<Record<string, unknown>>,
   ) => readonly CapabilityGrant[];
@@ -300,6 +492,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   private readonly attempts = new Map<AttemptUri, AttemptMeta>();
   private readonly reconciliationOverrides = new Map<string, ReconciliationReport>();
   private readonly workers = new Set<Promise<void>>();
+  private readonly workerAttempts = new Map<AttemptUri, number>();
   private closed = false;
 
   constructor(private readonly config: LocalTaskExecutionBackendConfig) {
@@ -319,6 +512,20 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       });
     }
     if (!this.writer.acquired) throw this.writer.error;
+  }
+
+  private trackWorker(attempt: AttemptUri, worker: Promise<void>): void {
+    this.workers.add(worker);
+    this.workerAttempts.set(attempt, (this.workerAttempts.get(attempt) ?? 0) + 1);
+    void worker.finally(() => {
+      this.workers.delete(worker);
+      const remaining = (this.workerAttempts.get(attempt) ?? 1) - 1;
+      if (remaining <= 0) {
+        this.workerAttempts.delete(attempt);
+      } else {
+        this.workerAttempts.set(attempt, remaining);
+      }
+    });
   }
 
   private submissionDirectory(identity: string): string {
@@ -781,9 +988,9 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         cwd: plan.cwd,
       };
       const planBytes = serializeCanonicalJson({
-        argv: [...spawn.argv],
-        env: { ...spawn.env },
-        cwd: spawn.cwd,
+        argv: [...plan.argv],
+        env: { ...plan.env },
+        cwd: plan.cwd,
         validExitCodes: [...plan.validExitCodes],
         ...(plan.blameExitCodes === undefined ? {} : { blameExitCodes: plan.blameExitCodes }),
         resultContract: plan.resultContract,
@@ -845,8 +1052,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
           });
         }
       });
-      this.workers.add(worker);
-      void worker.finally(() => this.workers.delete(worker));
+      this.trackWorker(attempt, worker);
     } catch (error) {
       // Terminal planning/materialization failures must never retain a secret forward.
       rmSync(this.paths(attempt).secrets, { recursive: true, force: true });
@@ -977,144 +1183,84 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       },
     });
 
+    await this.config.faults?.onCompletionPhase?.("before-outcome-wait");
     const execution = await this.waitForOutcome(input.paths.meta, input.attempt.nonce);
-    this.journal(attempt).append({
-      attemptId: attempt,
-      type: "exec-finished",
-      time: this.now(),
-      details: {
-        exitCode: execution.exitCode ?? null,
-        termSignal: execution.signal ?? null,
-        source: this.config.source,
-      },
-    });
+    await this.config.faults?.onCompletionPhase?.("after-outcome");
+    await this.completeAttempt({ ...input, execution, capture, capturePosture });
+  }
 
-    this.journal(attempt).append({
-      attemptId: attempt,
-      type: "harvest-started",
-      time: this.now(),
-      details: { source: this.config.source },
-    });
-    let harvest;
+  /** Shared post-outcome path. Recovery supplies the exact persisted plan and a resumed recorder. */
+  private async completeAttempt(input: {
+    readonly attempt: AttemptIdentity;
+    readonly taskBytes: Uint8Array;
+    readonly task: TaskSpecification;
+    readonly paths: WorkspacePaths;
+    readonly provisioner: ProvisionerContract;
+    readonly plan: LaunchPlan;
+    readonly execution: { readonly exitCode?: number; readonly signal?: string };
+    readonly capture?: EvidenceCaptureSession;
+    readonly capturePosture: RecorderAvailability;
+  }): Promise<void> {
+    const attempt = input.attempt.attemptUri;
+    const initialRecord = foldAttemptRecord(this.journal(attempt).read());
+    if (initialRecord.terminal && initialRecord.terminalState !== "lost") return;
+    const append = (type: JournalEvent["type"], details: Readonly<Record<string, unknown>>) => {
+      if (this.journal(attempt).read().some((event) => event.type === type)) return;
+      this.journal(attempt).append({ attemptId: attempt, type, time: this.now(), details: { ...details, source: this.config.source } });
+    };
+    append("exec-finished", { exitCode: input.execution.exitCode ?? null, termSignal: input.execution.signal ?? null });
+    append("harvest-started", {});
+    await this.config.faults?.onCompletionPhase?.("before-harvest");
+    let harvest: HarvestResult;
+    const harvested = this.journal(attempt).read().find((event) => event.type === "harvested");
     try {
-      harvest = await input.provisioner.harvest(input.paths, input.task.outputs);
+      await this.waitForHarnessGroupEmpty(input.paths);
+      harvest = harvested === undefined
+        ? await input.provisioner.harvest(input.paths, input.task.outputs)
+        : this.journaledHarvest(harvested);
     } catch (error) {
-      this.appendTerminal(attempt, {
-        state: "failed",
-        blame: "infrastructure",
-        category: "backend-unavailable",
-        detail:
-          error instanceof Error ? `harvest failed: ${error.message}` : "harvest failed",
-      });
+      if (error instanceof TaskExecutionError && error.category === "invalid-document") {
+        throw error;
+      }
+      this.appendTerminal(attempt, { state: "failed", blame: "infrastructure", category: "backend-unavailable", detail: error instanceof Error ? `harvest failed: ${error.message}` : "harvest failed" });
       return;
     }
-    this.journal(attempt).append({
-      attemptId: attempt,
-      type: "harvested",
-      time: this.now(),
-      details: {
-        manifest: harvest.manifest,
-        omissions: harvest.omissions,
-        integrityViolations: harvest.integrityViolations,
-        source: this.config.source,
-      },
-    });
-
+    if (harvested === undefined) append("harvested", { manifest: harvest.manifest, omissions: harvest.omissions, integrityViolations: harvest.integrityViolations });
+    await this.config.faults?.onCompletionPhase?.("after-harvest");
     const envelope = this.readResultEnvelope(input.paths, input.plan, harvest);
-    const interpreted = interpretResult(
-      input.plan,
-      {
-        ...(execution.exitCode === undefined ? {} : { exitCode: execution.exitCode }),
-        ...(execution.signal === undefined ? {} : { signal: execution.signal }),
-      },
-      envelope,
-    );
-
-    let receipt;
-    if (capture !== undefined) {
+    const interpreted = interpretResult(input.plan, input.execution, envelope);
+    const observedEvidence = this.journal(attempt).read()
+      .find((event) => event.type === "execution-observed");
+    let receipt = observedEvidence === undefined
+      ? undefined
+      : this.journaledEvidenceLink(observedEvidence);
+    if (input.capture !== undefined && observedEvidence === undefined) {
       try {
-        await capture.captureRuntimeObservation({
-          kind: "resource",
-          entityId: "runtime/process-exit",
-          name: "Harness process exit",
-          value: execution.exitCode ?? execution.signal ?? "unknown",
-          propertyId: "https://jinn.network/properties/process-exit",
-          origin: {
-            kind: "producer-observed",
-            observer: this.config.source as `${string}:${string}`,
-          },
-        });
-        receipt = await capture.finalize({
-          harvest,
-          outcome: interpreted.state === "delivered" ? "completed" : "failed",
-          endedAt: this.now(),
-        });
+        await input.capture.captureRuntimeObservation({ kind: "resource", entityId: "runtime/process-exit", name: "Harness process exit", value: input.execution.exitCode ?? input.execution.signal ?? "unknown", propertyId: "https://jinn.network/properties/process-exit", origin: { kind: "producer-observed", observer: this.config.source as `${string}:${string}` } });
+        receipt = await input.capture.finalize({ harvest, outcome: interpreted.state === "delivered" ? "completed" : "failed", endedAt: this.now() });
       } catch (error) {
-        if (capturePosture === "always") {
-          this.appendTerminal(attempt, {
-            state: "failed",
-            blame: "infrastructure",
-            category: "dependency-unavailable",
-            detail:
-              error instanceof Error
-                ? `evidence capture finalization failed: ${error.message}`
-                : "evidence capture finalization failed",
-          });
+        if (input.capturePosture === "always") {
+          this.appendTerminal(attempt, { state: "failed", blame: "infrastructure", category: "dependency-unavailable", detail: error instanceof Error ? `evidence capture finalization failed: ${error.message}` : "evidence capture finalization failed" });
           return;
         }
+        append("progress", { degradation: "evidence-capture-finalization-failed" });
       }
     }
-
-    if (receipt !== undefined) {
-      this.journal(attempt).append({
-        attemptId: attempt,
-        type: "execution-observed",
-        time: this.now(),
-        details: {
-          executionId: receipt.executionId,
-          evidenceRecord: receipt.record,
-          source: this.config.source,
-        },
-      });
-    }
-
+    if (receipt !== undefined) append("execution-observed", { executionId: receipt.executionId, evidenceRecord: receipt.record });
+    await this.config.faults?.onCompletionPhase?.("after-evidence");
     if (interpreted.state === "failed") {
-      this.appendTerminal(attempt, {
-        state: "failed",
-        blame: interpreted.blame ?? "task",
-        category: "protocol-violation",
-        detail: interpreted.reasonCode ?? "executor reported failure",
-      });
+      this.appendTerminal(attempt, { state: "failed", blame: interpreted.blame ?? "task", category: "protocol-violation", detail: interpreted.reasonCode ?? "executor reported failure" });
       return;
     }
-
-    const deliveryBytes = sealDelivery({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
-      attempt,
-      task: documentDigest(input.taskBytes),
-      outputs: harvest.manifest.map((artifact) => ({
-        name: artifact.path,
-        ...(artifact.mediaType === undefined ? {} : { mediaType: artifact.mediaType }),
-        digest: {
-          sha256: String(artifact.sha256).replace(/^sha256:/u, ""),
-        },
-      })),
-      outcome: interpreted.outcome ?? "fulfilled",
-      ...(receipt === undefined
-        ? {}
-        : {
-            evidenceRecords: [receipt.record],
-            executionIds: [receipt.executionId],
-          }),
-      createdAt: this.now(),
-    });
+    if (existsSync(this.deliveryCheckpointPath(attempt))) {
+      this.recordCheckpointEvent(attempt);
+      this.appendTerminal(attempt, { state: "delivered", ...(interpreted.reasonCode === undefined ? {} : { detail: interpreted.reasonCode }) });
+      return;
+    }
+    await this.config.faults?.onCompletionPhase?.("before-delivery-checkpoint");
+    const deliveryBytes = sealDelivery({ protocol: "https://jinn.network/profiles/task-execution/1.0", attempt, task: documentDigest(input.taskBytes), outputs: harvest.manifest.map((artifact) => ({ name: artifact.path, ...(artifact.mediaType === undefined ? {} : { mediaType: artifact.mediaType }), digest: { sha256: String(artifact.sha256).replace(/^sha256:/u, "") } })), outcome: interpreted.outcome ?? "fulfilled", ...(receipt === undefined ? {} : { evidenceRecords: [receipt.record], executionIds: [receipt.executionId] }), createdAt: this.now() });
     await this.recordDelivery(attempt, deliveryBytes);
-    this.appendTerminal(attempt, {
-      state: "delivered",
-      ...(interpreted.reasonCode === undefined
-        ? {}
-        : { detail: interpreted.reasonCode }),
-    });
+    this.appendTerminal(attempt, { state: "delivered", ...(interpreted.reasonCode === undefined ? {} : { detail: interpreted.reasonCode }) });
   }
 
   private async waitForShimFingerprint(meta: string): Promise<NonNullable<ReturnType<typeof readShimFingerprint>>> {
@@ -1171,6 +1317,165 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       }
       if (!probeShimAlive(meta).alive) throw new Error("shim exited without a nonce-matching outcome");
       await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
+  private recordCheckpointEvent(attempt: AttemptUri): void {
+    const bytes = new Uint8Array(readFileSync(this.deliveryCheckpointPath(attempt)));
+    const digest = documentDigest(bytes);
+    if (!this.journal(attempt).read().some((event) => event.type === "delivery-recorded" && event.details["digest"] === digest)) {
+      this.journal(attempt).append({ attemptId: attempt, type: "delivery-recorded", time: this.now(), details: { digest, source: this.config.source } });
+    }
+  }
+
+  private journaledPlan(event: JournalEvent): LaunchPlan {
+    const raw = event.details["launchPlan"];
+    if (!isRecord(raw)) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: "spawn intent has no structural LaunchPlan",
+      });
+    }
+    const bytes = serializeCanonicalJson(raw as JsonValue);
+    if (event.details["launchPlanDigest"] !== documentDigest(bytes)) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: "journaled LaunchPlan digest does not bind its exact bytes",
+      });
+    }
+    return parseLaunchPlan(raw);
+  }
+
+  private journaledHarvest(event: JournalEvent): HarvestResult {
+    return parseHarvestResult(event);
+  }
+
+  private journaledEvidenceLink(event: JournalEvent): {
+    readonly executionId: `urn:uuid:${string}`;
+    readonly record: { readonly family: string; readonly digest: `sha256:${string}` };
+  } {
+    const executionId = event.details["executionId"];
+    const record = event.details["evidenceRecord"];
+    if (
+      typeof executionId !== "string"
+      || !/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(executionId)
+      || !isRecord(record)
+      || !hasOnlyKeys(record, ["family", "digest"])
+      || !nonEmptyString(record.family)
+      || typeof record.digest !== "string"
+      || !/^sha256:[0-9a-f]{64}$/u.test(record.digest)
+    ) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: "journaled execution-observed evidence link is structurally invalid",
+      });
+    }
+    return {
+      executionId: executionId as `urn:uuid:${string}`,
+      record: {
+        family: record.family,
+        digest: record.digest as `sha256:${string}`,
+      },
+    };
+  }
+
+  private async waitForHarnessGroupEmpty(paths: WorkspacePaths): Promise<void> {
+    const fingerprint = readShimFingerprint(paths.meta);
+    if (fingerprint?.harnessPid === undefined) return;
+    for (let tries = 0; tries < 200; tries += 1) {
+      if (listProcessGroupPids(fingerprint.harnessPid).length === 0) return;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    throw new TaskExecutionError("backend-unavailable", { detail: "harness group is not empty; refusing harvest" });
+  }
+
+  private harnessGroupPids(paths: WorkspacePaths): readonly number[] {
+    const fingerprint = readShimFingerprint(paths.meta);
+    if (fingerprint?.harnessPid === undefined) return [];
+    return listProcessGroupPids(fingerprint.harnessPid);
+  }
+
+  private async killHarnessGroup(paths: WorkspacePaths): Promise<readonly number[]> {
+    const fingerprint = readShimFingerprint(paths.meta);
+    if (fingerprint?.harnessPid === undefined) return [];
+    const pids = [...listProcessGroupPids(fingerprint.harnessPid)];
+    if (pids.length === 0) return [];
+    try {
+      process.kill(-fingerprint.harnessPid, "SIGTERM");
+    } catch {
+      // Exited races are verified by the process-group scan below.
+    }
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (listProcessGroupPids(fingerprint.harnessPid).length === 0) return pids;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    try {
+      process.kill(-fingerprint.harnessPid, "SIGKILL");
+    } catch {
+      // Exited races are verified by the process-group scan below.
+    }
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if (listProcessGroupPids(fingerprint.harnessPid).length === 0) return pids;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    throw new TaskExecutionError("backend-unavailable", {
+      detail: `recovery kill ladder left live process-group members: ${listProcessGroupPids(fingerprint.harnessPid).join(",")}`,
+    });
+  }
+
+  private async resumeEvidenceCapture(
+    attempt: AttemptUri,
+    paths: WorkspacePaths,
+    posture: RecorderAvailability,
+  ): Promise<EvidenceCaptureSession | undefined> {
+    if (posture === "none") return undefined;
+    if (this.config.evidence === undefined) {
+      if (posture === "always") {
+        this.appendTerminal(attempt, {
+          state: "failed",
+          blame: "infrastructure",
+          category: "dependency-unavailable",
+          detail: "evidence capture is required but no EvidenceBindingPorts were injected",
+        });
+      } else {
+        this.journal(attempt).append({
+          attemptId: attempt,
+          type: "progress",
+          time: this.now(),
+          details: {
+            degradation: "evidence-capture-unavailable",
+            source: this.config.source,
+          },
+        });
+      }
+      return undefined;
+    }
+    try {
+      return await createEvidenceJoin({
+        ports: this.config.evidence,
+        source: this.config.source as `${string}:${string}`,
+        executor: this.config.executor as `${string}:${string}`,
+        now: () => this.now(),
+      }).resume(paths);
+    } catch (error) {
+      if (posture === "always") {
+        this.appendTerminal(attempt, {
+          state: "failed",
+          blame: "infrastructure",
+          category: "dependency-unavailable",
+          detail: error instanceof Error
+            ? `evidence capture resume failed: ${error.message}`
+            : "evidence capture resume failed",
+        });
+      } else {
+        this.journal(attempt).append({
+          attemptId: attempt,
+          type: "progress",
+          time: this.now(),
+          details: {
+            degradation: "evidence-capture-resume-failed",
+            source: this.config.source,
+          },
+        });
+      }
+      return undefined;
     }
   }
 
@@ -1366,6 +1671,172 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     return { requested: true };
   }
 
+  private reconstructRecoveryContext(
+    attempt: AttemptUri,
+    events: readonly JournalEvent[],
+  ): {
+    readonly taskBytes: Uint8Array;
+    readonly task: TaskSpecification;
+    readonly provisioner: ProvisionerContract;
+    readonly plan: LaunchPlan;
+    readonly identity: AttemptIdentity;
+  } {
+    const record = foldAttemptRecord(events);
+    const metadata = this.attempts.get(attempt);
+    const intent = events.find((event) => event.type === "spawn-intended");
+    const engaged = events.find((event) => event.type === "attempt-engaged");
+    if (
+      metadata === undefined
+      || intent === undefined
+      || engaged === undefined
+      || typeof intent.details["provisioner"] !== "string"
+    ) {
+      throw new TaskExecutionError("backend-unavailable", {
+        detail: "recovery lacks durable attempt, engagement, or provisioner identity",
+      });
+    }
+    const stored = this.submissionsByUri.get(metadata.submission);
+    if (stored === undefined || stored.attempt !== attempt) {
+      throw new TaskExecutionError("backend-unavailable", {
+        detail: "recovery lacks the exact persisted Task and Submission bytes",
+      });
+    }
+    const checked = this.decodeAndSealCheck(stored.taskBytes, stored.submissionBytes);
+    if (!checked.ok) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: `persisted Task or Submission failed exact recovery validation: ${checked.detail}`,
+      });
+    }
+    const taskDigest = documentDigest(stored.taskBytes);
+    const submissionDigest = documentDigest(stored.submissionBytes);
+    if (
+      taskDigest !== stored.taskDigest
+      || taskDigest !== metadata.task
+      || record.taskDigest !== taskDigest
+      || engaged.details["taskDigest"] !== taskDigest
+      || submissionDigest !== stored.digest
+      || checked.submission.submission !== metadata.submission
+      || stored.parsed.submission !== metadata.submission
+      || record.submissionUri !== metadata.submission
+      || engaged.details["submission"] !== metadata.submission
+      || record.attemptUri !== attempt
+      || engaged.details["attempt"] !== attempt
+      || record.nonce !== checked.submission.nonce
+    ) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: "persisted recovery identities do not bind the exact Task, Submission, and Attempt",
+      });
+    }
+    const dispatchPath = join(this.paths(attempt).meta, "dispatch-context.sealed");
+    let dispatchContextBytes: Uint8Array;
+    let dispatchDocument: unknown;
+    try {
+      dispatchContextBytes = new Uint8Array(readFileSync(dispatchPath));
+      dispatchDocument = decode(dispatchContextBytes);
+    } catch (error) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: error instanceof Error
+          ? `persisted dispatch context is unreadable: ${error.message}`
+          : "persisted dispatch context is unreadable",
+      });
+    }
+    const dispatchValidation = validateDispatchContext(dispatchDocument);
+    if (
+      !dispatchValidation.conforms
+      || !bytesEqual(
+        serializeCanonicalJson(dispatchDocument as JsonValue),
+        dispatchContextBytes,
+      )
+    ) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: "persisted dispatch context is not exact canonical conforming bytes",
+      });
+    }
+    const dispatch = dispatchDocument as DispatchContext;
+    if (
+      dispatch.taskDigest !== taskDigest
+      || dispatch.submission !== metadata.submission
+      || dispatch.nonce !== checked.submission.nonce
+      || dispatch.attempt !== attempt
+    ) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: "persisted dispatch context does not bind this Task, Submission, nonce, and Attempt",
+      });
+    }
+    const dispatchDescriptor = engaged.details["dispatchContext"];
+    if (
+      !isRecord(dispatchDescriptor)
+      || !isRecord(dispatchDescriptor.digest)
+      || dispatchDescriptor.uri !== `urn:jinn:backend-local:dispatch-context:${attempt.slice("urn:uuid:".length)}`
+      || dispatchDescriptor.digest["sha256"] !== sha256Hex(dispatchContextBytes)
+    ) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: "attempt engagement does not bind the persisted dispatch-context bytes",
+      });
+    }
+    const profile = this.profile(checked.task);
+    const merged = mergeRequirements(
+      checked.task.requirements,
+      checked.submission.requirements,
+      {
+        ...CORE_REQUIREMENT_CLASSES,
+        ...Object.fromEntries(
+          profile.requirementKeys.map(({ key, comparisonClass }) => [key, comparisonClass]),
+        ),
+      },
+    );
+    if (!merged.ok) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: `persisted requirements no longer merge at ${merged.key}`,
+      });
+    }
+    const identity: AttemptIdentity = {
+      attemptUri: attempt,
+      nonce: checked.submission.nonce,
+      attemptNumber: record.attemptNumber ?? 1,
+    };
+    const selected = this.config.provisioner({
+      sealedTaskBytes: stored.taskBytes.slice(),
+      dispatchContextBytes: dispatchContextBytes.slice(),
+      task: checked.task,
+      submission: checked.submission,
+      attempt: identity,
+    });
+    if (
+      !validProvisionerId(selected.id)
+      || selected.id !== intent.details["provisioner"]
+    ) {
+      const existing = this.journal(attempt).read().some((event) =>
+        event.type === "reconciliation"
+        && event.details["classification"] === "contradictory"
+        && event.details["reason"] === "provisioner-identity-mismatch");
+      if (!existing) {
+        this.journal(attempt).append({
+          attemptId: attempt,
+          type: "reconciliation",
+          time: this.now(),
+          details: {
+            classification: "contradictory",
+            reason: "provisioner-identity-mismatch",
+            expected: intent.details["provisioner"],
+            actual: selected.id,
+            source: this.config.source,
+          },
+        });
+      }
+      throw new TaskExecutionError("backend-unavailable", {
+        detail: "recovery provisioner identity differs from spawn intent",
+      });
+    }
+    return {
+      taskBytes: stored.taskBytes.slice(),
+      task: checked.task,
+      provisioner: selected.contract,
+      plan: this.journaledPlan(intent),
+      identity,
+    };
+  }
+
   async recover(ref: SubmissionUri | AttemptUri): Promise<ReconciliationReport> {
     this.assertWriter();
     const override = this.reconciliationOverrides.get(ref);
@@ -1380,15 +1851,65 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     const record = foldAttemptRecord(events);
     const paths = this.paths(attempt);
     const checkpoint = this.deliveryCheckpointPath(attempt);
-    const fingerprint = readShimFingerprint(paths.meta);
+    // An active in-process worker owns observation and completion for every nonterminal phase.
+    // Recovery remains restart-capable because ownership is deliberately process-local.
+    if ((this.workerAttempts.get(attempt) ?? 0) > 0 && !record.terminal) {
+      return { classification: "matching" };
+    }
     const shim = probeShimAlive(paths.meta);
-    const outcome = readOutcome(paths.meta, record.nonce);
-    const reconciliation = reconcileAttempt(record, {
-      processAlive: shim.alive,
+    const rawOutcome = readOutcome(paths.meta);
+    const outcome = rawOutcome !== null && rawOutcome.nonce === record.nonce ? rawOutcome : null;
+    const groupPids = this.harnessGroupPids(paths);
+    let reconciliation = reconcileAttempt(record, {
+      processAlive: shim.alive || groupPids.length > 0,
       shimAlive: shim.alive,
-      outcomePresent: outcome !== null,
-      nonceMatches: outcome !== null,
+      outcomePresent: rawOutcome !== null,
+      nonceMatches: rawOutcome === null ? undefined : outcome !== null,
+      deliveryCheckpointPresent: existsSync(checkpoint),
+      shimFingerprintVerifiedSurvivorsAlive: record.terminal && groupPids.length > 0,
+      pids: groupPids,
     });
+    let staleOutcome = false;
+    if (reconciliation.classification === "stale-foreign") {
+      staleOutcome = true;
+      reconciliation = reconcileAttempt(record, {
+        processAlive: shim.alive || groupPids.length > 0,
+        shimAlive: shim.alive,
+        outcomePresent: false,
+        deliveryCheckpointPresent: existsSync(checkpoint),
+        shimFingerprintVerifiedSurvivorsAlive: record.terminal && groupPids.length > 0,
+        pids: groupPids,
+      });
+      this.journal(attempt).append({
+        attemptId: attempt,
+        type: "reconciliation",
+        time: this.now(),
+        details: {
+          classification: "stale-foreign",
+          action: "ignored-nonce-mismatched-outcome",
+          source: this.config.source,
+        },
+      });
+    }
+    if (reconciliation.classification === "orphaned" || reconciliation.classification === "contradictory") {
+      const killedPids = await this.killHarnessGroup(paths);
+      this.journal(attempt).append({
+        attemptId: attempt,
+        type: "reconciliation",
+        time: this.now(),
+        details: {
+          classification: reconciliation.classification,
+          killedPids,
+          source: this.config.source,
+        },
+      });
+      if (reconciliation.classification === "orphaned") {
+        this.appendTerminal(attempt, { state: "lost", blame: "infrastructure", category: "backend-unavailable", detail: "dead shim left live harness group", killedPids });
+      }
+      return reconciliation.classification === "contradictory"
+        ? { classification: "contradictory", detail: "terminal state contradicted live survivors or durable terminals" }
+        : { classification: "matching", detail: "orphaned" };
+    }
     if (!existsSync(checkpoint) && (reconciliation.classification === "absent-never-executed" || reconciliation.classification === "absent")) {
       this.appendTerminal(attempt, {
         state: reconciliation.terminalState,
@@ -1399,60 +1920,55 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
           : "spawn intent has no recoverable shim or outcome",
         ...(reconciliation.classification === "absent-never-executed" ? { neverExecuted: true } : {}),
       });
-    }
-    // Recovery must prove the durable selection can still be reconstructed before any harvest.
-    if (record.phase !== "terminal" && record.phase !== "engaged") {
-      const stored = this.submissionsByUri.get(this.attempts.get(attempt)?.submission ?? "" as SubmissionUri);
-      const intent = events.find((event) => event.type === "spawn-intended");
-      if (stored === undefined || typeof intent?.details["provisioner"] !== "string") {
-        throw new TaskExecutionError("backend-unavailable", { detail: "recovery lacks persisted provisioner identity" });
-      }
-      const checked = this.decodeAndSealCheck(stored.taskBytes, stored.submissionBytes);
-      if (!checked.ok || documentDigest(stored.taskBytes) !== stored.taskDigest
-        || checked.submission.submission !== stored.parsed.submission) {
-        throw new TaskExecutionError("invalid-document", { detail: "persisted Task or Submission failed exact recovery validation" });
-      }
-      const task = checked.task;
-      const submission = checked.submission;
-      const profile = this.profile(task);
-      const merged = mergeRequirements(task.requirements, submission.requirements, {
-        ...CORE_REQUIREMENT_CLASSES,
-        ...Object.fromEntries(profile.requirementKeys.map(({ key, comparisonClass }) => [key, comparisonClass])),
-      });
-      if (!merged.ok) throw new TaskExecutionError("invalid-document", { detail: `persisted requirements no longer merge at ${merged.key}` });
-      const selected = this.config.provisioner({
-        sealedTaskBytes: stored.taskBytes.slice(),
-        dispatchContextBytes: new Uint8Array(readFileSync(join(paths.meta, "dispatch-context.sealed"))),
-        task,
-        submission,
-        attempt: { attemptUri: attempt, nonce: submission.nonce, attemptNumber: 1 },
-      });
-      if (selected.id !== intent.details["provisioner"]) {
-        throw new TaskExecutionError("backend-unavailable", { detail: "recovery provisioner identity differs from spawn intent" });
-      }
+      return {
+        classification: "absent",
+        detail: staleOutcome ? "stale-foreign" : reconciliation.classification,
+      };
     }
     if (existsSync(checkpoint)) {
-      const bytes = new Uint8Array(readFileSync(checkpoint));
-      const digest = documentDigest(bytes);
-      const alreadyRecorded = this.journal(attempt).read().some(
-        (event) =>
-          event.type === "delivery-recorded"
-          && event.details["digest"] === digest,
-      );
-      if (!alreadyRecorded) {
-        this.journal(attempt).append({
-          attemptId: attempt,
-          type: "delivery-recorded",
-          time: this.now(),
-          details: { digest, source: this.config.source },
-        });
+      const checkpointBytes = new Uint8Array(readFileSync(checkpoint));
+      await this.recordDelivery(attempt, checkpointBytes);
+      const current = foldAttemptRecord(this.journal(attempt).read());
+      if (!current.terminal || current.terminalState === "lost") {
+        this.appendTerminal(attempt, { state: "delivered" });
       }
+      return { classification: "matching" };
+    }
+    if (reconciliation.classification === "matching" && record.terminal) {
+      return { classification: "matching" };
+    }
+
+    // Every completion-capable row reconstructs from the exact durable contracts. The launcher
+    // is deliberately absent from this path: recovery parses the fsynced LaunchPlan.
+    const recovered = this.reconstructRecoveryContext(attempt, events);
+    const completionClassifications = new Set([
+      "matching-late",
+      "harvesting-resume",
+      "recording-resume",
+      "corrected",
+    ]);
+    if (completionClassifications.has(reconciliation.classification)) {
+      const finished = this.journal(attempt).read().find((event) => event.type === "exec-finished");
+      const execution = outcome === null
+        ? { ...(typeof finished?.details["exitCode"] === "number" ? { exitCode: finished.details["exitCode"] } : {}), ...(typeof finished?.details["termSignal"] === "string" ? { signal: finished.details["termSignal"] } : {}) }
+        : { ...(outcome.exitCode === null ? {} : { exitCode: outcome.exitCode }), ...(outcome.termSignal === null ? {} : { signal: outcome.termSignal }) };
+      const posture = this.config.recorderAvailability ?? "none";
+      const capture = await this.resumeEvidenceCapture(attempt, paths, posture);
+      await this.completeAttempt({ attempt: recovered.identity, taskBytes: recovered.taskBytes, task: recovered.task, paths, provisioner: recovered.provisioner, plan: recovered.plan, execution, capture, capturePosture: posture });
+    } else if (reconciliation.classification === "matching") {
+      // The real shim remains the custodian; recovery only resumes observation and completion.
+      const posture = this.config.recorderAvailability ?? "none";
+      const worker = this.waitForOutcome(paths.meta, recovered.identity.nonce)
+        .then(async (execution) => this.completeAttempt({ attempt: recovered.identity, taskBytes: recovered.taskBytes, task: recovered.task, paths, provisioner: recovered.provisioner, plan: recovered.plan, execution, capture: await this.resumeEvidenceCapture(attempt, paths, posture), capturePosture: posture }))
+        .catch((error: unknown) => {
+          if (!foldAttemptRecord(this.journal(attempt).read()).terminal) {
+            this.appendTerminal(attempt, { state: "lost", blame: "infrastructure", category: "backend-unavailable", detail: error instanceof Error ? error.message : "resumed shim supervision failed" });
+          }
+        });
+      this.trackWorker(attempt, worker);
     }
     return {
-      classification: existsSync(checkpoint) ? "matching" : reconciliation.classification === "absent" || reconciliation.classification === "absent-never-executed"
-        ? "absent"
-        : reconciliation.classification === "contradictory" ? "contradictory" : "matching",
-      ...(existsSync(checkpoint) || reconciliation.classification === "matching" ? {} : { detail: reconciliation.classification }),
+      classification: "matching",
     };
   }
 

@@ -516,6 +516,30 @@ describe("seal-once Delivery checkpoint (C1)", () => {
     const refs = await backend.deliveries(attempt);
     expect(await backend.fetchDelivery(refs[0]!)).toEqual(delivery);
   });
+
+  test("recovery replays a durable Delivery checkpoint exactly once", async () => {
+    const root = await stateRoot("checkpoint-idempotent-replay");
+    const backend = fixture(root);
+    const task = taskBytes();
+    const attempt = await acceptedAttempt(backend, task, submissionBytes(task));
+    const delivery = sealDelivery({
+      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      attempt,
+      task: documentDigest(task),
+      outputs: [],
+      outcome: "fulfilled",
+      createdAt: "2026-07-28T00:05:00Z",
+    });
+    await backend.recordDelivery(attempt, delivery);
+
+    await backend.recover(attempt);
+    await backend.recover(attempt);
+    const journal = (await Promise.all(
+      (await allFiles(root)).filter((path) => path.endsWith("journal.jsonl")).map((path) => readFile(path, "utf8")),
+    )).join("\n");
+    expect((journal.match(/\"type\":\"delivery-recorded\"/g) ?? [])).toHaveLength(1);
+    expect(await backend.fetchDelivery((await backend.deliveries(attempt))[0]!)).toEqual(delivery);
+  });
 });
 
 test("a malformed Task is a typed invalid-document SubmissionAck", async () => {

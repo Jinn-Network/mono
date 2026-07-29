@@ -27,6 +27,9 @@ export interface ReconciliationResult {
 /** Pure recovery classifier. It reports actions for the caller to perform; it never respawns. */
 export function reconcileAttempt(record: AttemptRecord, reality: AttemptReality): ReconciliationResult {
   if (record.terminal) {
+    if (record.terminalState === "lost" && reality.outcomePresent && reality.nonceMatches === false) {
+      return { classification: "stale-foreign", action: "ignore-outcome-file" };
+    }
     if (record.terminalState === "lost" && reality.outcomePresent) return { classification: "corrected", action: "accept-corrective-terminal" };
     if (record.contradictory || reality.shimFingerprintVerifiedSurvivorsAlive) return { classification: "contradictory", action: "terminal-record-wins-kill-survivors", killedPids: reality.pids ?? [] };
     return { classification: "matching", action: "terminal-record-wins" };

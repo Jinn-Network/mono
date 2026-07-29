@@ -52,7 +52,7 @@ function submissionBytes(
 
 export interface LocalBackendConformanceSubject
   extends TestableBackend,
-    Pick<LocalTaskExecutionBackend, "close" | "deliveryCheckpointPath"> {}
+    Pick<LocalTaskExecutionBackend, "close" | "deliveryCheckpointPath" | "drain"> {}
 
 export interface LocalBackendContractFactory {
   (): LocalBackendConformanceSubject;
@@ -157,6 +157,7 @@ export function describeLocalBackendContract(
       const submission = submissionBytes(task);
       const ack = await scenario.backend.submit(task, submission);
       if (!ack.accepted) throw new Error(`expected accepted: ${ack.error.category}`);
+      await scenario.backend.drain();
 
       const snapshot = await scenario.backend.observe(ack.submission);
       expect(snapshot.descriptor.derived.state).toBe("delivered");
@@ -180,6 +181,7 @@ export function describeLocalBackendContract(
       const task = taskBytes();
       const ack = await backend.submit(task, submissionBytes(task));
       if (!ack.accepted) throw new Error(`expected accepted: ${ack.error.category}`);
+      await backend.drain();
       const snapshot = await backend.observe(ack.submission);
       expect(snapshot.descriptor.derived).toMatchObject({
         state: "failed",

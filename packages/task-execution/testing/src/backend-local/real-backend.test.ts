@@ -14,6 +14,10 @@ import {
   type LocalTaskExecutionBackend,
   type LocalTaskExecutionBackendConfig,
 } from "@jinn-network/task-execution-backend-local";
+import type {
+  LauncherCapabilities,
+  LauncherContract,
+} from "@jinn-network/task-execution-launchers";
 import {
   buildRepositoryWorkProfile,
   type ProfileStore,
@@ -25,8 +29,6 @@ import {
   type LocalBackendContractFactory,
   type LocalBackendConformanceSubject,
 } from "./backend-contract.js";
-import { makeFakeLauncher } from "./fake-launcher.js";
-
 const roots: string[] = [];
 const instances: LocalTaskExecutionBackend[] = [];
 const profile = buildRepositoryWorkProfile();
@@ -38,13 +40,13 @@ function root(): string {
   return value;
 }
 
-afterAll(() => {
+afterAll(async () => {
+  await Promise.all(instances.map((instance) => instance.drain()));
   for (const instance of instances) instance.close();
   for (const value of roots) rmSync(value, { recursive: true, force: true });
 });
 
-const launcher = makeFakeLauncher({
-  capabilities: {
+const launcherCapabilities: LauncherCapabilities = {
     taskProfiles: [profile.profile],
     inputMediaTypes: ["application/json"],
     outputMediaTypes: ["text/x-diff"],
@@ -52,14 +54,36 @@ const launcher = makeFakeLauncher({
     resume: false,
     interruptionBehaviorDefault: "repeatable",
     runPinning: { keys: [] },
-  },
-  plan: {
-    validExitCodes: [0],
-    resultContract: { envelopeFormat: "fake" },
-    interruptionBehavior: "repeatable",
-  },
-  onRun: () => ({ exitCode: 0 }),
-});
+};
+
+/**
+ * The real-backend suite must cross the actual supervisor/shim boundary. This launcher remains
+ * a pure contract implementation: its plan is closed data and it never calls the fake
+ * launcher's `onRun` simulation hook. A short delay keeps generic drive-based scenarios pending
+ * until their synthetic observations are appended; evidence scenarios select immediate exit.
+ */
+function makeNodeProcessLauncher(delayMs: number): LauncherContract {
+  return {
+    id: "real-node-fixture",
+    capabilities: () => launcherCapabilities,
+    plan(_view, paths) {
+      return {
+        argv: [
+          process.execPath,
+          "-e",
+          `setTimeout(() => process.exit(0), ${delayMs})`,
+        ],
+        env: {},
+        cwd: paths.work,
+        validExitCodes: [0],
+        resultContract: { envelopeFormat: "fixture" },
+        interruptionBehavior: "repeatable",
+      };
+    },
+  };
+}
+
+const launcher = makeNodeProcessLauncher(500);
 
 const provisioner: ProvisionerContract = {
   workspaceKind: () => "dir",
@@ -133,6 +157,7 @@ const factory = Object.assign(
       let calls = 0;
       return {
         backend: create(root(), {
+          launchers: [makeNodeProcessLauncher(0)],
           recorderAvailability: "always",
           evidence: {
             repository,
@@ -142,7 +167,6 @@ const factory = Object.assign(
               return { status: "not-announced", reference };
             },
           },
-          execute: async () => ({ exitCode: 0 }),
         }),
         indexingCalls: () => calls,
       };

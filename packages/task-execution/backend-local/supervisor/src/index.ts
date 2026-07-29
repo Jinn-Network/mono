@@ -10,6 +10,7 @@ export { reconcileAttempt } from "./reconciler.js";
 export { runCancellationLadder } from "./cancellation.js";
 export { armDeadline, heartbeatIsStale } from "./deadline.js";
 export {
+  listProcessGroupPids,
   probeShimAlive,
   readOutcome,
   readProcessStartTime,
