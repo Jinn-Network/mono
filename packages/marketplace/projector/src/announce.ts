@@ -24,6 +24,7 @@ import {
   type SourceIdentity,
   type WithdrawnAnnouncement,
 } from "@jinn-network/record-discovery-protocol";
+import { documentDigest } from "@jinn-network/task-execution-protocol";
 import {
   maintainHead,
   writeArchivePages,
@@ -108,11 +109,20 @@ export interface VerdictObservationRefusal {
   readonly failures: VerdictObservationFailure[];
 }
 
+/** A chain-anchor admission failure. It intentionally remains outside Protocol Observation data. */
+export interface AnnouncementMaterialRefusal {
+  readonly kind: "announcement-material-refused";
+  readonly role: AnnouncementRecordRole;
+  readonly expectedDigest: `sha256:${string}`;
+  readonly actualDigest: `sha256:${string}`;
+  readonly derivation: DerivationAnnotation;
+}
+
 export interface AnnouncementProjectionResult {
   readonly announcements: ProjectedAnnouncement[];
   readonly entries: SignedEntry[];
   readonly pages: string[];
-  readonly refusals: VerdictObservationRefusal[];
+  readonly refusals: Array<VerdictObservationRefusal | AnnouncementMaterialRefusal>;
   readonly head?: SourceHead;
   readonly headEnvelope?: DsseEnvelope;
 }
@@ -270,6 +280,68 @@ async function availableAnnouncement(
   return availableAnnouncementFromMaterial(event, role, material, ports);
 }
 
+function digestFromBytes32(value: string): `sha256:${string}` {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(value)) {
+    throw new TypeError(`expected bytes32 sha256 anchor, got ${value}`);
+  }
+  return `sha256:${value.slice(2).toLowerCase()}`;
+}
+
+function expectedMaterialDigest(
+  event: ObservationMarketplaceEvent,
+  role: AnnouncementRecordRole,
+  observationById: ReadonlyMap<string, { readonly data: Record<string, unknown> }>,
+): `sha256:${string}` | undefined {
+  if (role === "submission" && event.event === "TaskCreated") {
+    return event.derivation.contractGeneration === "revised" && "submissionDigest" in event.facts
+      ? digestFromBytes32(event.facts.submissionDigest)
+      : undefined;
+  }
+  if (role === "delivery" && event.event === "SolutionDeliveryClaimed") {
+    const recorded = observationById.get(
+      observationId(event, "network.jinn.task-execution.delivery-recorded.v1"),
+    );
+    const digest = recorded?.data["digest"];
+    return typeof digest === "string" && /^sha256:[0-9a-f]{64}$/.test(digest)
+      ? digest as `sha256:${string}`
+      : undefined;
+  }
+  if (
+    role === "evaluation-delivery"
+    && event.event === "VerdictDeliveryClaimed"
+    && event.derivation.contractGeneration === "revised"
+    && "evaluationDeliveryDigest" in event.facts
+  ) {
+    return digestFromBytes32(event.facts.evaluationDeliveryDigest);
+  }
+  return undefined;
+}
+
+async function anchorCheckedMaterial(
+  event: ObservationMarketplaceEvent,
+  role: AnnouncementRecordRole,
+  ports: AnnouncementProjectionPorts,
+  observationById: ReadonlyMap<string, { readonly data: Record<string, unknown> }>,
+  refusals: Array<VerdictObservationRefusal | AnnouncementMaterialRefusal>,
+): Promise<AnnouncementRecordMaterial | undefined> {
+  const material = await ports.resolveRecord(event, role);
+  const expectedDigest = expectedMaterialDigest(event, role, observationById);
+  if (expectedDigest !== undefined) {
+    const actualDigest = documentDigest(material.bytes);
+    if (actualDigest !== expectedDigest) {
+      refusals.push({
+        kind: "announcement-material-refused",
+        role,
+        expectedDigest,
+        actualDigest,
+        derivation: event.derivation,
+      });
+      return undefined;
+    }
+  }
+  return material;
+}
+
 function verdictRefusal(
   event: Extract<ObservationMarketplaceEvent, { event: "VerdictDeliveryClaimed" }>,
   failures: VerdictObservationFailure[],
@@ -366,9 +438,15 @@ export async function projectAnnouncements(
   const observationIds = new Set(
     transition.observations.map((observation) => observation.id),
   );
+  const observationById = new Map(
+    transition.observations.map((observation) => [
+      observation.id,
+      { data: observation.data },
+    ] as const),
+  );
   const announcements: ProjectedAnnouncement[] = [];
   const entries: SignedEntry[] = [];
-  const refusals: VerdictObservationRefusal[] = [];
+  const refusals: Array<VerdictObservationRefusal | AnnouncementMaterialRefusal> = [];
   const known = new Map<string, string>();
   let next = initialSequence;
   let previous = initialPrevious;
@@ -382,7 +460,12 @@ export async function projectAnnouncements(
             observationId(event, "network.jinn.task-execution.submission-accepted.v1"),
           )
         ) {
-          projected.push(await availableAnnouncement(event, "submission", ports));
+          const material = await anchorCheckedMaterial(
+            event, "submission", ports, observationById, refusals,
+          );
+          if (material !== undefined) {
+            projected.push(await availableAnnouncementFromMaterial(event, "submission", material, ports));
+          }
         }
         break;
       }
@@ -411,7 +494,12 @@ export async function projectAnnouncements(
             observationId(event, "network.jinn.task-execution.delivery-recorded.v1"),
           )
         ) {
-          projected.push(await availableAnnouncement(event, "delivery", ports));
+          const material = await anchorCheckedMaterial(
+            event, "delivery", ports, observationById, refusals,
+          );
+          if (material !== undefined) {
+            projected.push(await availableAnnouncementFromMaterial(event, "delivery", material, ports));
+          }
         }
         break;
       }
@@ -422,7 +510,16 @@ export async function projectAnnouncements(
             observationId(event, "network.jinn.task-execution.attempt-terminal.v1"),
           )
         ) {
-          const material = await ports.resolveRecord(event, "evaluation-delivery");
+          const material = await anchorCheckedMaterial(
+            event,
+            "evaluation-delivery",
+            ports,
+            observationById,
+            refusals,
+          );
+          if (material === undefined) {
+            break;
+          }
           if (typeof ports.verifyVerdictObservation !== "function") {
             refusals.push(verdictRefusal(event, [{
               check: "verdict-observation-verifier",
@@ -481,18 +578,14 @@ export async function projectAnnouncements(
             break;
           }
 
-          projected.push(await availableAnnouncementFromMaterial(
-            event,
-            "evaluation-delivery",
-            material,
-            ports,
-            {
-              "https://jinn.network/facts/marketplace-verdict-correspondence/1.0": {
-                onChainVerdictCode: event.facts.verdictCode,
-                statementVerdict: verified.statementVerdict,
-              },
+          // The material was anchor-admitted before the verifier ran. Rebuild only the facts
+          // card with the verified correspondence; writing/signing remains after this gate.
+          projected.push(await availableAnnouncementFromMaterial(event, "evaluation-delivery", material, ports, {
+            "https://jinn.network/facts/marketplace-verdict-correspondence/1.0": {
+              onChainVerdictCode: event.facts.verdictCode,
+              statementVerdict: verified.statementVerdict,
             },
-          ));
+          }));
           const withdrawal = await withdrawnAnnouncement(
             event,
             "submission",
@@ -519,7 +612,15 @@ export async function projectAnnouncements(
       }
 
       case "AttemptsAdded":
-        projected.push(await availableAnnouncement(event, "submission", ports));
+        if (transition.availabilityOpenedLogIds.includes([
+          event.derivation.chainId,
+          event.derivation.contract.toLowerCase(),
+          event.derivation.blockHash.toLowerCase(),
+          event.derivation.txHash.toLowerCase(),
+          event.derivation.logIndex,
+        ].join(":"))) {
+          projected.push(await availableAnnouncement(event, "submission", ports));
+        }
         break;
 
       // Claims are graph edges, not availability counters. Mech Deliver is only a join fact;
@@ -528,6 +629,15 @@ export async function projectAnnouncements(
       case "Deliver":
       case "AttemptExpired":
       case "AttemptReleased":
+        if (transition.availabilityOpenedLogIds.includes([
+          event.derivation.chainId,
+          event.derivation.contract.toLowerCase(),
+          event.derivation.blockHash.toLowerCase(),
+          event.derivation.txHash.toLowerCase(),
+          event.derivation.logIndex,
+        ].join(":"))) {
+          projected.push(await availableAnnouncement(event, "submission", ports));
+        }
         break;
     }
 

@@ -15,7 +15,7 @@
       "args": {
         "creator": "0x3333333333333333333333333333333333333333",
         "taskCidDigest": "0x7777777777777777777777777777777777777777777777777777777777777777",
-        "submissionDigest": "0x9999999999999999999999999999999999999999999999999999999999999999",
+        "submissionDigest": "0xf74de6f7baa7f7ef40ea6dcec644ff9b7d9c1de6eefc392e3508806308c5f111",
         "taskId": "42",
         "maxTotal": "1",
         "maxConcurrent": "1",
@@ -114,7 +114,7 @@
       "args": {
         "operator": "0x2222222222222222222222222222222222222222",
         "requestId": "0x4444444444444444444444444444444444444444444444444444444444444444",
-        "deliveryDigest": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "deliveryDigest": "0x56acaf3001da18073284585e4ec2e58e588ad8ffe32cc419aa84157170b3c760",
         "taskId": "42",
         "attemptIndex": "3"
       },
@@ -171,7 +171,7 @@
       "args": {
         "evaluator": "0x5555555555555555555555555555555555555555",
         "requestId": "0x6666666666666666666666666666666666666666666666666666666666666666",
-        "evaluationDeliveryDigest": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "evaluationDeliveryDigest": "0x5d0dc288642f8cc6c0383084f0508582bde514bd63a3bd7b8488ea06c452db05",
         "taskId": "42",
         "attemptIndex": "3",
         "verdictIndex": "1",
@@ -194,7 +194,7 @@
   "expect": {
     "observationCount": 6,
     "announcementCount": 6,
-    "observationSha256": "sha256:68a3974ce1219bf98840340f3ca5c1ec24167ba63ec473065895497a49544746",
+    "observationSha256": "sha256:d641f66b65eba0a422ecd6066e18281d84a40ffc81b98758954428531071db0a",
     "announcementSha256": "sha256:e8b391b109d4345b297a573f68776e5e124dae07b3aef44620cf58509d99dc7c",
     "requiredObservationTypes": [
       "network.jinn.task-execution.submission-accepted.v1",

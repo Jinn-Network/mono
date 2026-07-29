@@ -6,6 +6,7 @@ import {
   sealJson,
   type FactsRecompute,
 } from "@jinn-network/record-discovery-protocol";
+import { documentDigest } from "@jinn-network/task-execution-protocol";
 import type { BlobStore, DsseSigner } from "@jinn-network/record-discovery-serve";
 import type { Address, Hex } from "viem";
 import { describe, expect, test } from "vitest";
@@ -34,6 +35,7 @@ const TASK_DIGEST = `sha256:${"7".repeat(64)}` as const;
 const SUBMISSION = "urn:uuid:11111111-1111-4111-8111-111111111111" as const;
 const SUBMISSION_BYTES = new TextEncoder().encode('{"record":"submission"}');
 const DELIVERY_BYTES = new TextEncoder().encode('{"record":"delivery"}');
+const DELIVERY_DIGEST = documentDigest(DELIVERY_BYTES);
 const EVALUATION_BYTES = new TextEncoder().encode('{"record":"evaluation-delivery"}');
 const CONTEXT: ObservationProjectionContext = {
   taskCoordinator: COORDINATOR,
@@ -117,14 +119,14 @@ function deliveryEvents(
         mechServiceMultisig: OPERATOR,
         requestId: REQUEST_ID,
         deliveryRate: 10n,
-        data: `0x${"a".repeat(64)}`,
+        data: `0x${DELIVERY_DIGEST.slice("sha256:".length)}`,
       },
       derivation: derivation("Deliver", 2),
     }, {
       deliveryCorrespondence: {
-        sha256Digest: `sha256:${"a".repeat(64)}`,
+        sha256Digest: DELIVERY_DIGEST,
         keccakEvidenceHash: `0x${"b".repeat(64)}`,
-        onChainSha256CidDigest: `sha256:${"a".repeat(64)}`,
+        onChainSha256CidDigest: DELIVERY_DIGEST,
         onChainKeccak,
       },
     }),
@@ -350,6 +352,79 @@ describe("projectAnnouncements", () => {
       ),
     ).toEqual([]);
   });
+
+  test("refuses swapped revised Submission material before facts, storage, signing, or archive writes", async () => {
+    const { ports, writes, signed, recomputed } = makePorts();
+    const revisedTask = projectable({
+      event: "TaskCreated",
+      facts: {
+        creator: CREATOR,
+        taskCidDigest: `0x${"7".repeat(64)}`,
+        submissionDigest: `0x${"d".repeat(64)}`,
+        taskId: 42n, maxTotal: 1, maxConcurrent: 1,
+        submissionDeadline: 1_800_000_000n, closeAt: 0n, responseTimeout: 3600n,
+        minVerdicts: 1, requireDistinctEvaluator: true,
+        solutionMaxDeliveryRate: 10n, verdictMaxDeliveryRate: 20n,
+        solutionBudget: 100n, verdictBudget: 20n,
+      },
+      derivation: derivation("TaskCreated", 30, "revised"),
+    });
+    const result = await projectAnnouncements(transition([revisedTask]), ports);
+
+    expect(result.announcements).toEqual([]);
+    expect(result.refusals).toEqual([{
+      kind: "announcement-material-refused",
+      role: "submission",
+      expectedDigest: `sha256:${"d".repeat(64)}`,
+      actualDigest: documentDigest(SUBMISSION_BYTES),
+      derivation: revisedTask.derivation,
+    }]);
+    expect(recomputed).toEqual([]);
+    expect(writes).toEqual([]);
+    expect(signed).toEqual([]);
+  });
+
+  test.each(["solution", "evaluation"] as const)(
+    "refuses swapped revised %s Delivery material before downstream effects",
+    async (leg) => {
+      const { ports, writes, signed, recomputed, verified } = makePorts();
+      const event = leg === "solution"
+        ? projectable({
+            event: "SolutionDeliveryClaimed",
+            facts: { operator: OPERATOR, requestId: REQUEST_ID, deliveryDigest: `0x${"d".repeat(64)}`, taskId: 42n, attemptIndex: 3 },
+            derivation: derivation("SolutionDeliveryClaimed", 31, "revised"),
+          })
+        : projectable({
+            event: "VerdictDeliveryClaimed",
+            facts: { evaluator: OPERATOR, requestId: REQUEST_ID, evaluationDeliveryDigest: `0x${"e".repeat(64)}`, taskId: 42n, attemptIndex: 3, verdictIndex: 1, verdictCode: 1 },
+            derivation: derivation("VerdictDeliveryClaimed", 32, "revised"),
+          });
+      const type = leg === "solution"
+        ? "network.jinn.task-execution.delivery-recorded.v1"
+        : "network.jinn.task-execution.attempt-terminal.v1";
+      const synthetic = {
+        ...transition([]),
+        events: [event],
+        observations: [{
+          id: `${event.derivation.txHash}:${event.derivation.logIndex}:${type}`,
+          data: leg === "solution" ? { digest: `sha256:${"d".repeat(64)}` } : { state: "delivered" },
+        }],
+      } as unknown as ReturnType<typeof transition>;
+      const result = await projectAnnouncements(synthetic, ports);
+
+      const expectedDigest = `sha256:${leg === "solution" ? "d".repeat(64) : "e".repeat(64)}`;
+      expect(result.refusals).toMatchObject([{
+        kind: "announcement-material-refused",
+        role: leg === "solution" ? "delivery" : "evaluation-delivery",
+        expectedDigest,
+        derivation: event.derivation,
+      }]);
+      expect(recomputed).toEqual([]);
+      expect(writes).toEqual([]);
+      expect(signed).toEqual([]);
+      expect(verified).toEqual([]);
+    },
+  );
 
   test("claim emits no announcement, while exhaustion withdrawal followed by AttemptsAdded appends a fresh availability", async () => {
     const { ports } = makePorts();
@@ -624,13 +699,10 @@ describe("projectAnnouncements", () => {
       },
     });
 
-    expect(appended).toEqual([{
-      previous: previousHead,
-      sequences: ["0000000000000002"],
-    }]);
-    expect(projected.pages).toEqual(["0000000000000002"]);
-    expect(projected.entries[0]!.entry.previous).toBe(previousEntryDigest);
-    expect(projected.head?.sequence).toBe("0000000000000002");
+    expect(appended).toEqual([]);
+    expect(projected.pages).toEqual([]);
+    expect(projected.entries).toEqual([]);
+    expect(projected.head).toEqual(previousHead);
   });
 
   test("consumes the exact shared transition result instead of re-projecting its events", async () => {

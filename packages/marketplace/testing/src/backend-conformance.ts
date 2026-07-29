@@ -20,6 +20,8 @@ import { validateExecutionEvidence } from "@jinn-network/evidence-protocol";
 import {
   TRUST_KEY_BINDING_FORMAT,
   authenticateRequester,
+  dssePreAuthEncoding,
+  parseDsseEnvelope,
   sealDsseEnvelope,
   verifyEnvelopeBinding,
   type BindingResolver,
@@ -42,6 +44,7 @@ import { describeTaskExecutionBackendContract, type TestableBackend } from "@jin
 import { describe, expect, test } from "vitest";
 
 const SUBMISSION_MEDIA_TYPE = "application/vnd.jinn.task-execution.submission.v1+json";
+const TASK_MEDIA_TYPE = "application/vnd.jinn.task-execution.task.v1+json";
 const DELIVERY_MEDIA_TYPE = "application/vnd.jinn.task-execution.delivery.v1+json";
 const MARKETPLACE_FAMILY = "jinn:marketplace";
 
@@ -51,20 +54,25 @@ const MARKETPLACE_FAMILY = "jinn:marketplace";
 // comment).
 // ---------------------------------------------------------------------------
 
-/** Trusts each DSSE envelope's declared `keyid` without cryptographic verification -- signature
- * *validity* is `trust-core`'s own concern, already covered by its ceremony/DSSE test suites;
- * this isolates the marketplace profile checks' own composition logic under test. */
+/**
+ * Deterministic signature seam for the native profile vector. It binds every accepted key to
+ * the exact received DSSE PAE (payload type + canonical Task/Submission/Delivery bytes); a
+ * key id alone is never an authority result.
+ */
 export function buildTrustingDsseVerifier(): DsseChainVerifier {
   return (envelopeBytes) => {
-    // Minimal DSSE-envelope JSON parse: the sealed payload is base64 in `payload`, signatures in
-    // `signatures[].keyid`. Avoids importing `parseDsseEnvelope` only to re-derive the same list.
-    const parsed = JSON.parse(new TextDecoder().decode(envelopeBytes)) as {
-      signatures: { keyid?: string }[];
-    };
+    const parsed = parseDsseEnvelope(envelopeBytes);
+    const pae = dssePreAuthEncoding(parsed.payloadType, parsed.payloadBytes);
     return {
       validSignerKeyids: parsed.signatures
-        .map((s) => s.keyid)
-        .filter((keyid): keyid is string => keyid !== undefined),
+        .flatMap((signature) => {
+          if (signature.keyid === undefined) return [];
+          const expected = new TextEncoder().encode(
+            `${signature.keyid}:${sha256Hex(pae)}`,
+          );
+          const expectedBase64 = btoa(String.fromCharCode(...expected));
+          return signature.sig === expectedBase64 ? [signature.keyid] : [];
+        }),
     };
   };
 }
@@ -159,7 +167,10 @@ export function buildDefaultTrustFixture(): MarketplaceProfileTrustFixture {
 }
 
 function signedEnvelope(payloadBytes: Uint8Array, payloadType: string, keyid: string): Uint8Array {
-  return sealDsseEnvelope({ payloadBytes, payloadType, signatures: [{ signature: new Uint8Array([1, 2, 3]), keyid }] });
+  const signature = new TextEncoder().encode(
+    `${keyid}:${sha256Hex(dssePreAuthEncoding(payloadType, payloadBytes))}`,
+  );
+  return sealDsseEnvelope({ payloadBytes, payloadType, signatures: [{ signature, keyid }] });
 }
 
 // ---------------------------------------------------------------------------
@@ -583,6 +594,66 @@ export function describeMarketplaceBackendConformance(
 
   // Layer 2: native §16.2 marketplace-profile conformance.
   describe("native §16.2 marketplace-profile conformance", () => {
+    test("a signed Task recovers its exact canonical payload and requester authority", async () => {
+      const task = sealTask({
+        protocol: "https://jinn.network/profiles/task-execution/1.0",
+        profile: PROFILE_DESCRIPTOR,
+        instructions: "§16.2 signed-Task exact-payload fixture.",
+        outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
+      });
+      const envelope = signedEnvelope(task, TASK_MEDIA_TYPE, trustFixture.requesterKey);
+      const recovered = parseDsseEnvelope(envelope);
+
+      expect(recovered.payloadType).toBe(TASK_MEDIA_TYPE);
+      expect(exactBytes(recovered.payloadBytes, task)).toBe(true);
+      expect(exactBytes(recovered.payloadBytes, sealTask(TaskSpecificationSchema.parse(
+        parseExactJson(recovered.payloadBytes, "Task"),
+      )))).toBe(true);
+      await expect(verifyEnvelopeBinding({
+        envelopeBytes: envelope,
+        key: trustFixture.requesterKey,
+        agent: trustFixture.requesterAgent,
+        family: "authorizations",
+        atTime: "2026-01-01T00:00:00Z",
+      }, {
+        bindingResolver: trustFixture.bindingResolver,
+        witnessVerifier: { verify1271Witness: async () => ({ verified: true }) },
+        dsseVerifier: trustFixture.dsseVerifier,
+      })).resolves.toMatchObject({ ok: true });
+    });
+
+    test("signed Task rejects substituted/noncanonical payloads and an unauthorized claimed signer", async () => {
+      const task = sealTask({
+        protocol: "https://jinn.network/profiles/task-execution/1.0",
+        profile: PROFILE_DESCRIPTOR,
+        instructions: "§16.2 signed-Task hostile payload fixture.",
+        outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
+      });
+      const substituted = signedEnvelope(
+        new TextEncoder().encode(`${new TextDecoder().decode(task)} `),
+        TASK_MEDIA_TYPE,
+        trustFixture.requesterKey,
+      );
+      const recovered = parseDsseEnvelope(substituted);
+      expect(exactBytes(recovered.payloadBytes, task)).toBe(false);
+      expect(exactBytes(recovered.payloadBytes, sealTask(TaskSpecificationSchema.parse(
+        parseExactJson(recovered.payloadBytes, "substituted Task"),
+      )))).toBe(false);
+
+      const unauthorized = signedEnvelope(task, TASK_MEDIA_TYPE, trustFixture.executorKey);
+      await expect(verifyEnvelopeBinding({
+        envelopeBytes: unauthorized,
+        key: trustFixture.executorKey,
+        agent: trustFixture.executorAgent,
+        family: "authorizations",
+        atTime: "2026-01-01T00:00:00Z",
+      }, {
+        bindingResolver: trustFixture.bindingResolver,
+        witnessVerifier: { verify1271Witness: async () => ({ verified: true }) },
+        dsseVerifier: trustFixture.dsseVerifier,
+      })).resolves.toMatchObject({ ok: false, reason: "scope-violation" });
+    });
+
     test("a signed Submission verifies via authenticateRequester (DSSE over exact sealed bytes, §7.5b)", async () => {
       const task = sealTask({
         protocol: "https://jinn.network/profiles/task-execution/1.0",

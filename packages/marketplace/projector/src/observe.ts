@@ -65,8 +65,17 @@ export interface MarketplaceProjectionState {
   processedCorrectionIds: string[];
   /** Last emitted sequence by authoritative `(source, subject)` observation stream. */
   sequenceBySourceSubject: Record<string, string>;
-  /** Task-capacity facts required to detect exhaustion across host callback boundaries. */
-  tasks: Record<string, { maxTotal: number; engaged: number }>;
+  /**
+   * Capacity, identity, and visibility are deliberately distinct: a released revised Attempt
+   * ceases to occupy capacity but its index can never be reused for a different Attempt URI.
+   */
+  tasks: Record<string, {
+    maxTotal: number;
+    liveAttemptIndices: Record<string, true>;
+    seenAttemptIndices: Record<string, true>;
+    highestAttemptIndex: number;
+    availability: "open" | "closed";
+  }>;
   /** External Mech delivery facts waiting for their router claim. */
   pendingMechDeliveries: Record<string, PendingMechDelivery>;
 }
@@ -78,6 +87,18 @@ export interface MarketplaceProjectionTransition {
   readonly events: ObservationMarketplaceEvent[];
   /** Exact observation result consumed by the announcement projector. */
   readonly observations: MarketplaceProtocolObservation[];
+  /** Revised-chain facts that changed a Submission from closed to open in this batch. */
+  readonly availabilityOpenedLogIds: readonly string[];
+  /** Typed fail-closed capacity/identity refusals; no observation is emitted for these facts. */
+  readonly refusals: readonly MarketplaceProjectionRefusal[];
+}
+
+export interface MarketplaceProjectionRefusal {
+  readonly kind: "marketplace-projection-refused";
+  readonly reason: "unknown-task" | "attempt-identity-regressing" | "attempt-not-live" | "capacity-contradiction";
+  readonly derivation: MarketplaceEvent["derivation"];
+  readonly taskId: bigint;
+  readonly attemptIndex?: number;
 }
 
 export function createMarketplaceProjectionState(): MarketplaceProjectionState {
@@ -180,6 +201,23 @@ function sequenceStreamKey(source: string, subject: string): string {
   return `${source.length}:${source}${subject}`;
 }
 
+const NON_PROTOCOL_CATEGORIES = new Set([
+  "verdict-fail",
+  "verdict-invalid",
+  "verdict-unresolved",
+  "verdict-code-invalid",
+  "digest-divergence",
+  "delivery-join-missing",
+]);
+
+/** Internal refusal labels must never escape as frozen TEP §13 observation categories. */
+function assertProtocolCategory(data: Record<string, unknown>): void {
+  const category = data["category"];
+  if (typeof category === "string" && NON_PROTOCOL_CATEGORIES.has(category)) {
+    throw new Error(`internal marketplace refusal "${category}" cannot be a Protocol Observation category`);
+  }
+}
+
 export function nextMarketplaceObservationSequence(
   state: MarketplaceProjectionState,
   source: string,
@@ -201,18 +239,19 @@ export function nextMarketplaceObservationSequence(
 function verdictTerminal(verdictCode: number): {
   readonly state: "delivered" | "rejected" | "failed";
   readonly category?: string;
+  readonly detail?: string;
 } {
   switch (verdictCode) {
     case 1:
       return { state: "delivered" };
     case 2:
-      return { state: "rejected", category: "verdict-fail" };
+      return { state: "rejected", detail: "verdict-fail" };
     case 3:
-      return { state: "failed", category: "verdict-invalid" };
+      return { state: "failed", category: "protocol-violation" };
     case 4:
-      return { state: "failed", category: "verdict-unresolved" };
+      return { state: "failed", category: "result-unavailable" };
     default:
-      return { state: "rejected", category: "verdict-code-invalid" };
+      return { state: "rejected", category: "protocol-violation" };
   }
 }
 
@@ -227,6 +266,8 @@ export function reduceMarketplaceProjection(
   const state = cloneMarketplaceProjectionState(previousState);
   const observations: MarketplaceProtocolObservation[] = [];
   const acceptedEvents: ObservationMarketplaceEvent[] = [];
+  const availabilityOpenedLogIds: string[] = [];
+  const refusals: MarketplaceProjectionRefusal[] = [];
   const processed = new Set(state.processedLogIds);
 
   function emit(
@@ -235,6 +276,7 @@ export function reduceMarketplaceProjection(
     subject: string,
     data: Record<string, unknown>,
   ): void {
+    assertProtocolCategory(data);
     const source = sourceFor(event);
     const observation = {
       specversion: "1.0",
@@ -252,6 +294,25 @@ export function reduceMarketplaceProjection(
     observations.push(observation);
   }
 
+  function refuse(
+    event: ObservationMarketplaceEvent,
+    reason: MarketplaceProjectionRefusal["reason"],
+    taskId: bigint,
+    attemptIndex?: number,
+  ): void {
+    refusals.push({
+      kind: "marketplace-projection-refused",
+      reason,
+      derivation: event.derivation,
+      taskId,
+      ...(attemptIndex === undefined ? {} : { attemptIndex }),
+    });
+  }
+
+  function updateAvailability(task: MarketplaceProjectionState["tasks"][string]): "open" | "closed" {
+    return Object.keys(task.liveAttemptIndices).length >= task.maxTotal ? "closed" : "open";
+  }
+
   for (const event of events) {
     const identity = logIdentity(event);
     if (processed.has(identity)) continue;
@@ -266,7 +327,13 @@ export function reduceMarketplaceProjection(
         const maxTotal = "maxClaims" in event.facts
           ? event.facts.maxClaims
           : event.facts.maxTotal;
-        state.tasks[key] = { maxTotal, engaged: 0 };
+        state.tasks[key] = {
+          maxTotal,
+          liveAttemptIndices: {},
+          seenAttemptIndices: {},
+          highestAttemptIndex: -1,
+          availability: maxTotal === 0 ? "closed" : "open",
+        };
 
         if (anchoredTaskDigest !== event.projection.taskDigest) {
           emit(
@@ -274,7 +341,7 @@ export function reduceMarketplaceProjection(
             "network.jinn.task-execution.submission-rejected.v1",
             event.projection.submission,
             {
-              category: "digest-divergence",
+              category: "content-corruption",
               detail: "TaskCreated task digest does not match resolved signed Submission task digest",
             },
           );
@@ -293,6 +360,29 @@ export function reduceMarketplaceProjection(
       }
 
       case "TaskAttemptCreated": {
+        const key = taskKey(event, event.facts.taskId);
+        const taskCapacity = state.tasks[key];
+        if (event.derivation.contractGeneration === "revised") {
+          if (taskCapacity === undefined) {
+            refuse(event, "unknown-task", event.facts.taskId, event.facts.attemptIndex);
+            break;
+          }
+          if (
+            taskCapacity.seenAttemptIndices[String(event.facts.attemptIndex)] !== undefined
+            || event.facts.attemptIndex <= taskCapacity.highestAttemptIndex
+          ) {
+            refuse(event, "attempt-identity-regressing", event.facts.taskId, event.facts.attemptIndex);
+            break;
+          }
+          taskCapacity.seenAttemptIndices[String(event.facts.attemptIndex)] = true;
+          taskCapacity.liveAttemptIndices[String(event.facts.attemptIndex)] = true;
+          taskCapacity.highestAttemptIndex = event.facts.attemptIndex;
+        } else if (taskCapacity !== undefined) {
+          // Today has no release/expiry; every chain claim remains a monotonic occupancy fact.
+          taskCapacity.seenAttemptIndices[String(event.facts.attemptIndex)] = true;
+          taskCapacity.liveAttemptIndices[String(event.facts.attemptIndex)] = true;
+          taskCapacity.highestAttemptIndex = Math.max(taskCapacity.highestAttemptIndex, event.facts.attemptIndex);
+        }
         const attempt = attemptFor(event, event.facts.taskId, event.facts.attemptIndex);
         const effectiveDeadline = "attemptDeadline" in event.facts
           ? unixSecondsToRfc3339(event.facts.attemptDeadline)
@@ -316,11 +406,10 @@ export function reduceMarketplaceProjection(
           },
         );
 
-        const key = taskKey(event, event.facts.taskId);
-        const taskCapacity = state.tasks[key];
         if (taskCapacity !== undefined) {
-          taskCapacity.engaged += 1;
-          if (taskCapacity.engaged >= taskCapacity.maxTotal) {
+          const wasOpen = taskCapacity.availability === "open";
+          taskCapacity.availability = updateAvailability(taskCapacity);
+          if (wasOpen && taskCapacity.availability === "closed") {
             emit(
               event,
               "network.jinn.task-execution.submission-closed.v1",
@@ -358,7 +447,7 @@ export function reduceMarketplaceProjection(
             attempt,
             {
               state: "rejected",
-              category: "delivery-join-missing",
+              category: "invalid-reference",
               detail: "no external Mech Deliver fact for router requestId",
             },
           );
@@ -394,7 +483,7 @@ export function reduceMarketplaceProjection(
             attempt,
             {
               state: "rejected",
-              category: "digest-divergence",
+              category: "content-corruption",
               detail: "today-mode sha256↔keccak correspondence failed",
             },
           );
@@ -427,6 +516,20 @@ export function reduceMarketplaceProjection(
       }
 
       case "AttemptExpired": {
+        const key = taskKey(event, event.facts.taskId);
+        const taskCapacity = state.tasks[key];
+        if (taskCapacity === undefined) {
+          refuse(event, "unknown-task", event.facts.taskId, event.facts.attemptIndex);
+          break;
+        }
+        if (taskCapacity.liveAttemptIndices[String(event.facts.attemptIndex)] === undefined) {
+          refuse(event, "attempt-not-live", event.facts.taskId, event.facts.attemptIndex);
+          break;
+        }
+        const wasClosed = taskCapacity.availability === "closed";
+        delete taskCapacity.liveAttemptIndices[String(event.facts.attemptIndex)];
+        taskCapacity.availability = updateAvailability(taskCapacity);
+        if (wasClosed && taskCapacity.availability === "open") availabilityOpenedLogIds.push(identity);
         emit(
           event,
           "network.jinn.task-execution.attempt-terminal.v1",
@@ -437,6 +540,20 @@ export function reduceMarketplaceProjection(
       }
 
       case "AttemptReleased": {
+        const key = taskKey(event, event.facts.taskId);
+        const taskCapacity = state.tasks[key];
+        if (taskCapacity === undefined) {
+          refuse(event, "unknown-task", event.facts.taskId, event.facts.attemptIndex);
+          break;
+        }
+        if (taskCapacity.liveAttemptIndices[String(event.facts.attemptIndex)] === undefined) {
+          refuse(event, "attempt-not-live", event.facts.taskId, event.facts.attemptIndex);
+          break;
+        }
+        const wasClosed = taskCapacity.availability === "closed";
+        delete taskCapacity.liveAttemptIndices[String(event.facts.attemptIndex)];
+        taskCapacity.availability = updateAvailability(taskCapacity);
+        if (wasClosed && taskCapacity.availability === "open") availabilityOpenedLogIds.push(identity);
         emit(
           event,
           "network.jinn.task-execution.attempt-terminal.v1",
@@ -459,10 +576,21 @@ export function reduceMarketplaceProjection(
       case "AttemptsAdded": {
         const key = taskKey(event, event.facts.taskId);
         const existing = state.tasks[key];
-        state.tasks[key] = {
-          maxTotal: event.facts.newMaxTotal,
-          engaged: existing?.engaged ?? 0,
-        };
+        if (existing === undefined) {
+          refuse(event, "unknown-task", event.facts.taskId);
+          break;
+        }
+        if (
+          event.facts.newMaxTotal <= existing.maxTotal
+          || event.facts.newMaxTotal - existing.maxTotal !== event.facts.added
+        ) {
+          refuse(event, "capacity-contradiction", event.facts.taskId);
+          break;
+        }
+        const wasClosed = existing.availability === "closed";
+        existing.maxTotal = event.facts.newMaxTotal;
+        existing.availability = updateAvailability(existing);
+        if (wasClosed && existing.availability === "open") availabilityOpenedLogIds.push(identity);
         break;
       }
 
@@ -473,7 +601,13 @@ export function reduceMarketplaceProjection(
     }
   }
 
-  return { state, events: acceptedEvents, observations };
+  return {
+    state,
+    events: acceptedEvents,
+    observations,
+    availabilityOpenedLogIds,
+    refusals,
+  };
 }
 
 /**

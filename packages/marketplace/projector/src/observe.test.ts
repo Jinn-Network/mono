@@ -174,7 +174,14 @@ describe("projectObservations", () => {
         },
       } as MarketplaceEvent);
 
-      const observation = projectObservations([routedClaim])[0]!;
+      const state = createMarketplaceProjectionState();
+      if (generation === "revised") {
+        state.tasks["84532:0x1111111111111111111111111111111111111111:42"] = {
+          maxTotal: 2, liveAttemptIndices: {}, seenAttemptIndices: {},
+          highestAttemptIndex: -1, availability: "open",
+        };
+      }
+      const observation = projectObservations([routedClaim], state)[0]!;
       expect(observation.subject).toBe(ATTEMPT);
       expect(observation.subject).not.toBe(deriveMarketplaceAttemptUri({
         chainId: 84532,
@@ -239,7 +246,7 @@ describe("projectObservations", () => {
       ...base("network.jinn.task-execution.attempt-terminal.v1", ATTEMPT, 2n, 3, "SolutionDeliveryClaimed"),
       data: {
         state: "rejected",
-        category: "digest-divergence",
+        category: "content-corruption",
         detail: "today-mode sha256↔keccak correspondence failed",
       },
     });
@@ -289,8 +296,13 @@ describe("projectObservations", () => {
       deliveryCorrespondence: undefined,
     });
 
+    const state = createMarketplaceProjectionState();
+    state.tasks["84532:0x1111111111111111111111111111111111111111:42"] = {
+      maxTotal: 2, liveAttemptIndices: {}, seenAttemptIndices: {},
+      highestAttemptIndex: -1, availability: "open",
+    };
     expect(
-      projectObservations([revisedClaim, operationalMechJoin, revisedSolution]).at(-1),
+      projectObservations([revisedClaim, operationalMechJoin, revisedSolution], state).at(-1),
     ).toEqual({
       ...base("network.jinn.task-execution.delivery-recorded.v1", ATTEMPT, 2n, 3, "SolutionDeliveryClaimed", "revised"),
       data: { digest: `sha256:${"d".repeat(64)}` },
@@ -317,11 +329,6 @@ describe("projectObservations", () => {
         derivation: derivation("AttemptExpired", 5, "revised"),
       }),
       projectable({
-        event: "AttemptReleased",
-        facts: { taskId: 42n, attemptIndex: 3, operator: OPERATOR },
-        derivation: derivation("AttemptReleased", 6, "revised"),
-      }),
-      projectable({
         event: "TaskBudgetRefunded",
         facts: {
           taskId: 42n,
@@ -338,10 +345,15 @@ describe("projectObservations", () => {
       }),
     ];
 
-    expect(projectObservations(events).map(({ type, data }) => ({ type, data }))).toEqual([
+    const state = createMarketplaceProjectionState();
+    state.tasks["84532:0x1111111111111111111111111111111111111111:42"] = {
+      maxTotal: 2, liveAttemptIndices: { "3": true }, seenAttemptIndices: { "3": true },
+      highestAttemptIndex: 3, availability: "open",
+    };
+    expect(projectObservations(events, state).map(({ type, data }) => ({ type, data }))).toEqual([
       {
         type: "network.jinn.task-execution.attempt-terminal.v1",
-        data: { state: "rejected", category: "verdict-fail" },
+        data: { state: "rejected", detail: "verdict-fail" },
       },
       {
         type: "network.jinn.task-execution.submission-closed.v1",
@@ -350,10 +362,6 @@ describe("projectObservations", () => {
       {
         type: "network.jinn.task-execution.attempt-terminal.v1",
         data: { state: "expired" },
-      },
-      {
-        type: "network.jinn.task-execution.attempt-terminal.v1",
-        data: { state: "cancelled" },
       },
       {
         type: "network.jinn.task-execution.submission-closed.v1",
@@ -532,9 +540,57 @@ describe("projectObservations", () => {
     ]);
     expect(four.state.tasks).toEqual({
       "84532:0x1111111111111111111111111111111111111111:42": {
-        engaged: 2,
         maxTotal: 2,
+        liveAttemptIndices: { "3": true, "4": true },
+        seenAttemptIndices: { "3": true, "4": true },
+        highestAttemptIndex: 4,
+        availability: "closed",
       },
     });
+  });
+
+  test("revised max-one release and expiry free only the exact live identity for a distinct reclaim", () => {
+    const revisedTask = projectable({
+      event: "TaskCreated",
+      facts: {
+        creator: CREATOR, taskCidDigest: `0x${"7".repeat(64)}`,
+        submissionDigest: `0x${"9".repeat(64)}`, taskId: 42n, maxTotal: 1,
+        maxConcurrent: 1, submissionDeadline: 1_800_000_000n, closeAt: 0n,
+        responseTimeout: 3600n, minVerdicts: 1, requireDistinctEvaluator: true,
+        solutionMaxDeliveryRate: 10n, verdictMaxDeliveryRate: 20n,
+        solutionBudget: 100n, verdictBudget: 20n,
+      },
+      derivation: derivation("TaskCreated", 20, "revised"),
+    });
+    const revisedClaim = (attemptIndex: number, logIndex: number) => projectable({
+      event: "TaskAttemptCreated",
+      facts: { operator: OPERATOR, priorityMech: OPERATOR, requestId: `0x${String(attemptIndex).repeat(64)}` as Hex, taskId: 42n, attemptIndex, attemptDeadline: 1_800_000_000n, deliveryRate: 10n },
+      derivation: derivation("TaskAttemptCreated", logIndex, "revised"),
+    });
+    const release = projectable({
+      event: "AttemptReleased",
+      facts: { taskId: 42n, attemptIndex: 3, operator: OPERATOR },
+      derivation: derivation("AttemptReleased", 22, "revised"),
+    });
+    const expiry = projectable({
+      event: "AttemptExpired",
+      facts: { taskId: 42n, attemptIndex: 4, operator: OPERATOR },
+      derivation: derivation("AttemptExpired", 24, "revised"),
+    });
+
+    const one = reduceMarketplaceProjection([revisedTask, revisedClaim(3, 21)], createMarketplaceProjectionState());
+    const two = reduceMarketplaceProjection([release], one.state);
+    const three = reduceMarketplaceProjection([revisedClaim(4, 23)], two.state);
+    const four = reduceMarketplaceProjection([expiry], three.state);
+    const five = reduceMarketplaceProjection([revisedClaim(5, 25)], four.state);
+
+    expect(two.state.tasks["84532:0x1111111111111111111111111111111111111111:42"]).toMatchObject({
+      liveAttemptIndices: {}, highestAttemptIndex: 3, availability: "open",
+    });
+    expect(five.state.tasks["84532:0x1111111111111111111111111111111111111111:42"]).toMatchObject({
+      liveAttemptIndices: { "5": true }, highestAttemptIndex: 5, availability: "closed",
+    });
+    expect([...one.observations, ...three.observations, ...five.observations]
+      .filter(({ type }) => type === "network.jinn.task-execution.submission-closed.v1")).toHaveLength(3);
   });
 });
