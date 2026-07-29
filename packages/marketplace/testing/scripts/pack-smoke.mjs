@@ -13,6 +13,7 @@ const dependencyChain = [
   ["@jinn-network/task-execution-testing", join(packageRoot, "..", "..", "task-execution", "testing")],
   ["@jinn-network/trust-core", join(packageRoot, "..", "..", "trust", "core")],
   ["@jinn-network/trust-resolve", join(packageRoot, "..", "..", "trust", "resolve")],
+  ["@jinn-network/trust-testing", join(packageRoot, "..", "..", "trust", "testing")],
   ["@jinn-network/record-discovery-protocol", join(packageRoot, "..", "..", "discovery", "protocol")],
   ["@jinn-network/record-discovery-serve", join(packageRoot, "..", "..", "discovery", "serve")],
   ["@jinn-network/record-discovery-testing", join(packageRoot, "..", "..", "discovery", "testing")],
@@ -58,6 +59,8 @@ function assertArchiveShape(entries) {
     "package/README.md",
     "package/dist/index.d.ts",
     "package/dist/index.js",
+    "package/dist/named-check-fixtures.d.ts",
+    "package/dist/named-check-fixtures.js",
     "package/dist/projector-conformance.d.ts",
     "package/dist/projector-conformance.js",
     "package/fixtures/projector/golden-events/revised-cross-batch-flow.json",
@@ -110,7 +113,7 @@ try {
 
   await writeFile(
     join(consumer, "packed-types.ts"),
-    `import "@jinn-network/marketplace-testing";\nimport "@jinn-network/marketplace-testing/backend-conformance";\nimport "@jinn-network/marketplace-testing/projector-conformance";\n`,
+    `import "@jinn-network/marketplace-testing";\nimport "@jinn-network/marketplace-testing/backend-conformance";\nimport "@jinn-network/marketplace-testing/named-check-fixtures";\nimport "@jinn-network/marketplace-testing/projector-conformance";\n`,
   );
   await writeFile(
     join(consumer, "tsconfig.json"),
@@ -138,6 +141,7 @@ try {
 import { readFile, readdir } from "node:fs/promises";
 import "@jinn-network/marketplace-testing";
 import "@jinn-network/marketplace-testing/backend-conformance";
+import "@jinn-network/marketplace-testing/named-check-fixtures";
 import "@jinn-network/marketplace-testing/projector-conformance";
 
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
@@ -148,6 +152,7 @@ const expected = ${JSON.stringify(
         "@jinn-network/marketplace-projector",
         "@jinn-network/record-discovery-testing",
         "@jinn-network/task-execution-testing",
+        "@jinn-network/trust-testing",
       ].sort(),
     )};
 if (jinnDependencies.join(",") !== expected.join(",")) {

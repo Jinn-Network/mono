@@ -2,7 +2,9 @@
 
 Conformance testing kit for the Jinn marketplace binding tree. Consumes
 `@jinn-network/marketplace-{binding,projector}`, `@jinn-network/task-execution-testing`, and
-`@jinn-network/record-discovery-testing` as production dependencies — the marketplace-tree
+`@jinn-network/record-discovery-testing` as production dependencies. Its evaluation-leg suite
+also consumes `@jinn-network/trust-testing` so its decision-grade vectors resolve genuine sealed
+KeyBinding fixtures rather than hand-shaped resolver objects — the marketplace-tree
 placement described in the plan's Finding F6 (a literal slice inside
 `@jinn-network/task-execution-testing`, the backend-local precedent, would invert dependencies:
 a foundation-tree testing package would end up depending on the application-tree
@@ -28,10 +30,13 @@ The package currently runs:
   ordered split batches, replay idempotency, cross-batch joins/capacity/top-up, monotonic
   sequences, Submission-only retraction, Attempt `lost` → genuine-terminal correction, and
   fail-closed canonical selection for malformed or ungrounded corrections;
+- the reusable `describeNamedChecks` evaluation-leg suite: exact pair-derived bytes, strict
+  verdict-code mapping, requester self-claim-on-solve, evaluator distinctness, and settlement
+  trust joins against parsed, sealed `@jinn-network/trust-testing` bindings;
 - the today-generation anvil-fork escrow-lifecycle fixtures and the Attempt-URI two-party
   agreement checks (requester/operator/third-party independent computation).
 
-The evaluation-leg and revised-contract suites remain later milestones in the same plan.
+The revised-contract suite remains a later milestone in the same plan.
 
 Consumed by component packages as a **devDependency only, never a production dependency** — but
 note this kit does not itself appear in `binding`/`projector`/`pipeline`'s `package.json`

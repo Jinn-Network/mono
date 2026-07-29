@@ -65,15 +65,13 @@ const PIPELINE_FORBIDDEN_PACKAGES = [
 // modules"): the native §16.2 profile conformance (M2.5) composes the trust verification
 // procedures `authenticateRequester`/`verifyEnvelopeBinding` directly
 // (`@jinn-network/trust-core`, implemented by `@jinn-network/trust-resolve`) -- both were already
-// declared as `testing`'s devDependencies at M0.1 in anticipation of this. `trust-testing` stays
-// forbidden (no fixture package exists to reuse yet; M2.5 builds its own trust test doubles
-// inline, mirroring `packages/trust/core/src/verify.test.ts`'s own pattern).
+// declared as `testing`'s devDependencies at M0.1 in anticipation of this. M5.3 additionally
+// consumes `trust-testing` for real sealed KeyBinding fixtures in the named-check suite.
 const TESTING_FORBIDDEN_PACKAGES = [
   '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
   '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-backend-local',
   '@jinn-network/marketplace-pipeline',
   '@jinn-network/record-discovery-client',
-  '@jinn-network/trust-testing',
 ];
 
 // The one backend-local package every marketplace package but binding/projector/testing must
@@ -277,7 +275,9 @@ test('marketplace exports stay root-only except for the native testing conforman
     ['pipeline', '@jinn-network/marketplace-pipeline', ['.']],
     // The native §16.2 suite is intentionally a public testing subpath; it does not turn the
     // profile checks into a parameter of the unmodified TEP core kit (ruling §7.19).
-    ['testing', '@jinn-network/marketplace-testing', ['.', './backend-conformance', './projector-conformance']],
+    ['testing', '@jinn-network/marketplace-testing', [
+      '.', './backend-conformance', './named-check-fixtures', './projector-conformance',
+    ]],
   ]) {
     const manifest = JSON.parse(readFileSync(join(packages, directory, 'package.json'), 'utf8'));
     assert.deepEqual(Object.keys(manifest.exports ?? {}), entries,

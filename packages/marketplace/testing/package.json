@@ -24,6 +24,10 @@
       "import": "./dist/backend-conformance.js",
       "types": "./dist/backend-conformance.d.ts"
     },
+    "./named-check-fixtures": {
+      "import": "./dist/named-check-fixtures.js",
+      "types": "./dist/named-check-fixtures.d.ts"
+    },
     "./projector-conformance": {
       "import": "./dist/projector-conformance.js",
       "types": "./dist/projector-conformance.d.ts"
@@ -49,6 +53,7 @@
     "@jinn-network/marketplace-projector": "0.1.0",
     "@jinn-network/record-discovery-testing": "0.1.0",
     "@jinn-network/task-execution-testing": "0.1.0",
+    "@jinn-network/trust-testing": "0.1.0",
     "viem": "^2.0.0"
   },
   "peerDependencies": {
@@ -82,6 +87,7 @@
     "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
     "@jinn-network/task-execution-testing": "portal:../../task-execution/testing",
     "@jinn-network/trust-core": "portal:../../trust/core",
-    "@jinn-network/trust-resolve": "portal:../../trust/resolve"
+    "@jinn-network/trust-resolve": "portal:../../trust/resolve",
+    "@jinn-network/trust-testing": "portal:../../trust/testing"
   }
 }

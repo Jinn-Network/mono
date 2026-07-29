@@ -23,6 +23,7 @@ const codeEntrypoints = [
   '@jinn-network/marketplace-pipeline',
   '@jinn-network/marketplace-testing',
   '@jinn-network/marketplace-testing/backend-conformance',
+  '@jinn-network/marketplace-testing/named-check-fixtures',
   '@jinn-network/marketplace-testing/projector-conformance',
 ];
 
@@ -30,8 +31,8 @@ const codeEntrypoints = [
 // file: deps so NodeNext resolves them (program §7.8). M0-M1: binding's five direct deps
 // (task-execution-{protocol,backend,profiles}, trust-{core,resolve}); projector adds
 // record-discovery-{protocol,serve} + their own trust-core/record-discovery-testing shadow
-// deps; testing adds task-execution-testing + record-discovery-testing. pipeline and testing's
-// shadow closures are already covered by the same set (no new cross-tree package names).
+// deps; testing adds task-execution-testing + record-discovery-testing, then trust-testing for
+// M5.3's real sealed binding fixtures. Pipeline and testing's shadow closures are covered below.
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
@@ -39,6 +40,7 @@ const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-testing', join(root, 'packages', 'task-execution', 'testing')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
   ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
+  ['@jinn-network/trust-testing', join(root, 'packages', 'trust', 'testing')],
   ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
   ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
   ['@jinn-network/record-discovery-testing', join(root, 'packages', 'discovery', 'testing')],

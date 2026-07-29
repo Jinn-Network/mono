@@ -25,6 +25,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/task-execution-testing', join(root, 'packages', 'task-execution', 'testing')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
   ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
+  ['@jinn-network/trust-testing', join(root, 'packages', 'trust', 'testing')],
   ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
   ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
   ['@jinn-network/record-discovery-testing', join(root, 'packages', 'discovery', 'testing')],
@@ -104,10 +105,11 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/marketplace-projector',
       '@jinn-network/record-discovery-testing',
       '@jinn-network/task-execution-testing',
+      '@jinn-network/trust-testing',
     ],
-    // Shadow devDependencies: the full transitive closure reachable via the four declared
+    // Shadow devDependencies: the full transitive closure reachable via the five declared
     // dependencies above (marketplace-binding, marketplace-projector, record-discovery-testing,
-    // task-execution-testing).
+    // task-execution-testing, trust-testing).
     devDependencies: [
       '@jinn-network/record-discovery-protocol',
       '@jinn-network/record-discovery-serve',

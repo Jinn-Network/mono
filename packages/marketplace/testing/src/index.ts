@@ -1,6 +1,17 @@
 export { describeEscrowLifecycle } from "./escrow-lifecycle.js";
 export type { ForkEscrowContext } from "./escrow-lifecycle.js";
 export {
+  buildNamedCheckFixture,
+  describeNamedChecks,
+  withNamedCheckStatement,
+} from "./named-check-fixtures.js";
+export type {
+  BuildNamedCheckFixtureOptions,
+  NamedCheckFixture,
+  NamedCheckSubject,
+  NamedCheckTrustFixture,
+} from "./named-check-fixtures.js";
+export {
   describeMarketplaceProjectorConformance,
   loadMarketplaceProjectorFixtures,
   loadMarketplaceProjectorReorgFixtures,
