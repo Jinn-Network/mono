@@ -6,6 +6,12 @@ export {
   INTERRUPTION_BEHAVIORS,
   RUN_PINNING_ENFORCEMENT_POSTURES,
 } from "./contract.js";
+export { claudeCodeLauncher } from "./claude-code.js";
+export { codexLauncher } from "./codex.js";
+export { hermesLauncher } from "./hermes.js";
+export { cursorLauncher } from "./cursor.js";
+export { interpretResult } from "./result.js";
+export type { InterpretedResult } from "./result.js";
 export type {
   BlameRule,
   InterruptionBehavior,
