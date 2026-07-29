@@ -857,3 +857,48 @@ The Mech request fields remain operational joins for the chosen V4 realization, 
 router's sha256 `deliveryDigest` / `evaluationDeliveryDigest` alone determine protocol identity;
 revised mode never restores V3's sha256↔keccak correspondence. M4 fixtures are the ABI contract
 for M7.1–M7.3, whose compiled contract ABIs and both-generation tests must match them exactly.
+
+## Addendum 2026-07-29-g — reorg correction scope (program ruling §7.30)
+
+The design §8 table's “corrective terminal per TEP fold rules” is Attempt-scoped. When a reorg
+invalidates a previously projected claim, delivery, verdict, expiry, or other Attempt-scoped
+chain fact, the projector appends an authoritative
+`network.jinn.task-execution.attempt-terminal.v1` observation with
+`data: { state: "lost" }` on the same Attempt URI and projector source. It does not rewrite the
+prior observation. If the canonical chain later makes the true outcome determinate, the later
+authoritative terminal supersedes `lost` without contradiction under TEP §10.4 rule 6.
+
+A reorged `TaskCreated` has no Attempt subject. M4 must not turn it into
+`submission-rejected`: rejection is an admission result and its `category` is restricted to the
+frozen TEP §13 vocabulary, which contains no `substrate-reorg`. It must not turn it into
+`submission-closed`, whose frozen reasons are deadline, requester close, and capacity. The signed
+append-only discovery retraction (`reason: "reorged"`) is therefore the correction for
+pre-Attempt Submission availability; canonical query state excludes the orphaned derivation,
+while the raw accepted observation remains an immutable historical projection.
+
+M4.5 adds two precise conformance legs: (1) Task-post reorg → signed discovery retraction and no
+synthetic TEP rejection/close; (2) Attempt-scoped reorg → append-only `lost` observation on the
+same Attempt/source, with prior bytes unchanged and a later real terminal accepted as the TEP
+fold's sanctioned correction.
+
+## Addendum 2026-07-29-h — incremental projector state (program ruling §7.31)
+
+The §8 “one projection machine, two deterministic outputs” is a stateful reducer across ordered
+event batches, not a stateless function whose joins reset on every host callback. M4 exposes
+explicit caller-owned observation projection state, which the host persists transactionally or
+rebuilds deterministically from the canonical ordered event log. At minimum it retains processed
+log identities, per-source/subject observation sequence, Task capacity, and external Mech
+`Deliver` facts waiting for their router claims.
+
+The production batch composition performs one state transition and derives both outputs from it.
+`projectAnnouncements` consumes that exact transition's observation result; it must not invoke a
+fresh call-local observation projection. Replaying the same chain-log identity is idempotent and
+emits no duplicate observation or announcement. A complete-log replay and any ordered split of
+the same log produce byte-identical concatenated outputs. Delivery joins, capacity exhaustion and
+top-up, and sequence monotonicity survive batch boundaries.
+
+Internal join/capacity/dedupe caches are derived state and may be rewound or rebuilt on reorg.
+Previously signed protocol observations and discovery entries are never rewritten; they receive
+only the append-only corrections fixed by §7.30 and discovery's retraction discipline. M4.5 adds
+non-vacuous vectors for split-batch equivalence, duplicate replay, cross-batch
+`Deliver`→claim, cross-batch Task capacity/top-up, and monotonic sequences.

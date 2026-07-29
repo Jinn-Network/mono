@@ -324,6 +324,32 @@ Confirmed by the operator at the program gate (2026-07-28):
     against this V4 ABI plus the external Mech ABI and §7.28 lifecycle events—never by
     composing the V3 router ABI. M7 must implement the exact event contract and prove compiled
     ABI equality against the M4 fixtures.
+30. **Marketplace reorg correction is Attempt-scoped in TEP:** the marketplace design §8
+    projector-table phrase “corrective terminal per TEP fold rules” applies only where the
+    reorg invalidates a previously projected **Attempt-scoped** chain fact. The projector appends
+    an authoritative `attempt-terminal.v1 { state: "lost" }` on that same Attempt URI and source;
+    a later authoritative terminal may supersede it under TEP §10.4 rule 6. It never fabricates
+    `submission-rejected` or `submission-closed` for a reorged `TaskCreated`: TEP's frozen
+    submission vocabulary has no reorg correction, `substrate-reorg` is not a §13 error category,
+    and inventing either would corrupt their defined meanings. For pre-Attempt submission
+    availability, the append-only signed discovery retraction (`reason: "reorged"`) is the
+    correction; canonical query state excludes the orphaned derivation while the raw
+    `submission-accepted` observation remains historical. M4 conformance must prove both halves:
+    a Task-post reorg retracts discovery availability without a synthetic TEP rejection/close,
+    and an Attempt-scoped reorg appends `lost` without rewriting prior observations.
+31. **Marketplace projection is an incremental stateful reducer:** M4's
+    `projectObservations(events)` is not licensed to keep Mech-delivery joins, Task capacity,
+    deduplication, or observation sequence solely in call-local maps. The production composition
+    consumes an explicit caller-owned projection state (persisted by the host or deterministically
+    rebuilt from the canonical ordered log) and produces observations and announcements from the
+    same state transition. The same event identity applied twice emits nothing twice; a full-log
+    replay equals any ordered split-batch projection; Mech `Deliver`→router-claim joins and
+    Task-capacity transitions must span batches; observation sequences do not reset at a batch
+    boundary. `projectAnnouncements` must consume the exact observation result of that shared
+    transition, never call a fresh stateless observation projection. Reorg handling may rebuild
+    derived join/capacity/dedupe state from canonical logs, but signed observations and
+    announcements are corrected only by append. M4.5 must carry split-batch, replay-idempotency,
+    cross-batch join/capacity, and monotonic-sequence vectors.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 
