@@ -57,3 +57,18 @@ export function defineEvaluatorRegistration(
   }
   return Object.freeze(registration);
 }
+
+/** Validates the host-owned set once, before a Task can select a registration. */
+export function validateEvaluatorRegistrationSet(
+  registrations: readonly EvaluatorRegistration[],
+): readonly EvaluatorRegistration[] {
+  const ids = new Set<string>();
+  for (const registration of registrations) {
+    defineEvaluatorRegistration(registration);
+    if (ids.has(registration.registrationId)) {
+      throw new TypeError("EvaluatorRegistration registrationId values must be unique");
+    }
+    ids.add(registration.registrationId);
+  }
+  return Object.freeze([...registrations]);
+}

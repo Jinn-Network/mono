@@ -17,6 +17,10 @@ import {
   EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE,
   type EvaluationHarnessDeployment,
 } from "./runtime.js";
+import {
+  type EvaluatorRegistration,
+  validateEvaluatorRegistrationSet,
+} from "./registration.js";
 
 export const EVALUATION_LAUNCHER_ID = "evaluation-harness";
 const DEFAULT_SIGNER_SECRET_FORWARD = {
@@ -47,10 +51,10 @@ export interface EvaluationLauncherOptions {
   readonly entrypoint?: string;
   /** Test/embedding override; production defaults to the current absolute Node executable. */
   readonly nodeExecutable?: string;
-  /** Must agree with the host-selected evaluator registration's recovery contract. */
-  readonly interruptionBehavior?: InterruptionBehavior;
-  /** Host-selected signer grant and Attempt-local target; never a secret path or value. */
-  readonly signerSecretForward?: { readonly grantKey: string; readonly target: string };
+  /** Host-owned validated registrations; no Task or launcher option may invent one. */
+  readonly registrations?: readonly EvaluatorRegistration[];
+  /** Resolves one configured registration from the already-resolved Task view. */
+  readonly selectRegistration?: (view: TaskView) => EvaluatorRegistration;
   readonly probe?: () => Promise<ProbeResult>;
 }
 
@@ -90,8 +94,7 @@ function launchPlan(
   deploymentModule: string,
   entrypoint: string,
   nodeExecutable: string,
-  interruptionBehavior: InterruptionBehavior,
-  signerSecretForward: { readonly grantKey: string; readonly target: string },
+  registration: EvaluatorRegistration,
   view: TaskView,
   paths: WorkspacePaths,
   _attempt: AttemptIdentity,
@@ -105,6 +108,7 @@ function launchPlan(
     argv: [nodeExecutable, entrypoint],
     env: {
       JINN_ATTEMPT_EVALUATION_DEPLOYMENT_MODULE: deploymentModule,
+      JINN_ATTEMPT_EVALUATOR_REGISTRATION: registration.registrationId,
       JINN_ATTEMPT_ROOT: paths.root,
       JINN_ATTEMPT_INPUT: paths.input,
       JINN_ATTEMPT_WORK: paths.work,
@@ -138,8 +142,11 @@ function launchPlan(
       envelopeFormat: "jinn-result-evaluation-dsse-v1",
       structuredOutputArtifact: "out/verdict",
     },
-    interruptionBehavior,
-    secretForwards: [signerSecretForward],
+    interruptionBehavior: registration.interruptionBehavior,
+    secretForwards: [{
+      grantKey: registration.signer.handle.replace(/\.pem$/u, ""),
+      target: registration.signer.handle,
+    }],
   };
 }
 
@@ -160,26 +167,37 @@ export function makeEvaluationLauncher(
     options.nodeExecutable ?? process.execPath,
     "nodeExecutable",
   );
-  const interruptionBehavior = options.interruptionBehavior ?? "repeatable";
-  const signerSecretForward = options.signerSecretForward ?? DEFAULT_SIGNER_SECRET_FORWARD;
-  nonEmpty(signerSecretForward.grantKey, "signerSecretForward.grantKey");
-  nonEmpty(signerSecretForward.target, "signerSecretForward.target");
+  const registrations = validateEvaluatorRegistrationSet(options.registrations ?? []);
+  const selectedRegistration = (view: TaskView): EvaluatorRegistration => {
+    if (options.selectRegistration === undefined) {
+      throw new TypeError("evaluation launcher requires a registration selector");
+    }
+    const registration = options.selectRegistration(view);
+    if (!registrations.some((candidate) => candidate.registrationId === registration.registrationId)) {
+      throw new TypeError("evaluation launcher selected an unconfigured registration");
+    }
+    return registration;
+  };
 
   return Object.freeze({
     id: EVALUATION_LAUNCHER_ID,
-    capabilities: () => launcherCapabilities(interruptionBehavior, signerSecretForward),
+    capabilities: () => launcherCapabilities("repeatable", DEFAULT_SIGNER_SECRET_FORWARD),
     ...(options.probe === undefined ? {} : { probe: options.probe }),
     plan(
       view: TaskView,
       paths: WorkspacePaths,
       attempt: AttemptIdentity,
     ) {
+      const registration = selectedRegistration(view);
+      const signerSecretForward = {
+        grantKey: registration.signer.handle.replace(/\.pem$/u, ""),
+        target: registration.signer.handle,
+      };
       return launchPlan(
         deploymentModule,
         entrypoint,
         nodeExecutable,
-        interruptionBehavior,
-        signerSecretForward,
+        registration,
         view,
         paths,
         attempt,

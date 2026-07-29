@@ -3,6 +3,7 @@
 import { describe, expect, test } from "vitest";
 import {
   defineEvaluatorRegistration,
+  validateEvaluatorRegistrationSet,
   type EvaluatorRegistration,
   type InterruptionBehavior,
 } from "./registration.js";
@@ -73,5 +74,10 @@ describe("EvaluatorRegistration", () => {
       "did:key:z6MkhzYwRj8TvZEp41ApnVVDN5a5hBCk8tQYp4w7vGkVn5F8",
     );
     expect(value.signer.handle).toBe("evaluator-agent-key");
+  });
+
+  test("rejects duplicate deployment registrations before any Attempt can select one", () => {
+    const value = registration("repeatable");
+    expect(() => validateEvaluatorRegistrationSet([value, value])).toThrow("unique");
   });
 });

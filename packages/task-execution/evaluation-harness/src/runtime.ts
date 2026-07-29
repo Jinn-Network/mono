@@ -413,8 +413,11 @@ function enforceParserAllowlist(
 function selectRegistration(
   deployment: EvaluationHarnessDeployment,
   specification: EvaluationSpec,
+  selectedId?: string,
 ): EvaluatorRegistration {
   const compatible = deployment.registrations.filter((registration) =>
+    (selectedId === undefined || registration.registrationId === selectedId)
+    &&
     registration.specificationCompatibility(specification)
   );
   if (compatible.length !== 1) {
@@ -680,6 +683,12 @@ export async function runEvaluationHarness(
 ): Promise<number> {
   try {
     const deployment = configuredDeployment ?? await deploymentFromEnvironment();
+    const selectedRegistrationId = configuredDeployment === undefined
+      ? process.env["JINN_ATTEMPT_EVALUATOR_REGISTRATION"]
+      : undefined;
+    if (configuredDeployment === undefined && (selectedRegistrationId === undefined || selectedRegistrationId.length === 0)) {
+      throw new EvaluationHarnessInputError("spawned evaluation harness has no selected registration");
+    }
     const bindings = await readEvaluationTask(paths);
     const [task, delivery, ...results] = await Promise.all([
       readExactMaterial(paths.input, bindings.subjectTask),
@@ -741,7 +750,7 @@ export async function runEvaluationHarness(
     assertClosedVerdictRule(rawSpecification["verdictRule"]);
     const specification = parseEvaluationSpec(specificationBytes);
     enforceParserAllowlist(specification, deployment.parserAllowlist);
-    const registration = selectRegistration(deployment, specification);
+    const registration = selectRegistration(deployment, specification, selectedRegistrationId);
     const context = await optionalContext(paths.input);
     const attempt = await attemptIdentity(paths.input);
     const completed = validateCompletedEvaluation(

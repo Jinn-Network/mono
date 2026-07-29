@@ -1012,6 +1012,14 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     try {
       selectedLauncher = this.selectLauncher(view);
       const deployment = this.config.launcherDeployments?.[selectedLauncher.id];
+      const requiredDirectPins = ["harness", "model", "loadout"]
+        .filter((key) => merged.effective[key] !== undefined);
+      if (deployment === undefined && requiredDirectPins.length > 0) {
+        this.capacity.release(attempt);
+        return this.reject(submissionUri, "unsupported-requirement", {
+          detail: `selected launcher has no configured direct verification for ${requiredDirectPins.join(", ")}`,
+        });
+      }
       if (deployment !== undefined) {
         const pinning = await verifyRunPinning(
           deployment,

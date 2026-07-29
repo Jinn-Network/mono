@@ -347,6 +347,37 @@ describe("local TaskExecutionBackend submission path (C1)", () => {
     expect(setup).not.toHaveBeenCalled();
   });
 
+  test.each([
+    ["model", { id: "fixture-model" }],
+    ["harness", { id: "fixture", version: "1.2.3", digest: "a".repeat(64) }],
+    ["loadout", { kind: "jinn.skill.v1", name: "skill", digest: { sha256: "b".repeat(64) } }],
+  ])("rejects an unconfigured required %s pin before intent or spawn", async (key, value) => {
+    const setup = vi.fn(async () => undefined);
+    const launcher: LauncherContract = {
+      id: "fixture",
+      capabilities: () => ({
+        taskProfiles: [profile.profile], inputMediaTypes: [], outputMediaTypes: [], structuredOutput: false,
+        resume: false, interruptionBehaviorDefault: "repeatable", secretForwards: [],
+        runPinning: { keys: ["harness", "model", "loadout"].map((pinningKey) => ({
+          key: pinningKey, inventory: [pinningKey === "harness" ? "fixture" : pinningKey === "model" ? "fixture-model" : "jinn.skill.v1"], posture: "enforced" as const,
+        })) },
+      }),
+      plan() { throw new Error("must not plan"); },
+    };
+    const root = await stateRoot(`unconfigured-${key}`);
+    const backend = makeLocalTaskExecutionBackend({
+      stateRoot: root, source: "urn:test", executor: "urn:test", profileStore, launchers: [launcher],
+      provisioner: () => ({ id: "fixture", contract: { workspaceKind: () => "dir", setup, executionEnv: (entry) => ({ ...entry.env }), async harvest() { return { manifest: [], omissions: [], integrityViolations: [] }; } } }),
+      provisionerCapabilities: { taskProfiles: [profile.profile], workspaceKinds: ["dir"], inputMediaTypes: [], outputMediaTypes: [], isolation: [] },
+    });
+    backends.push(backend);
+    const task = taskBytes();
+    const ack = await backend.submit(task, submissionBytes(task, { requirements: { [key]: value } }));
+    expect(ack).toMatchObject({ accepted: false, error: { category: "unsupported-requirement" } });
+    expect(setup).not.toHaveBeenCalled();
+    expect(await allFiles(root)).not.toContainEqual(expect.stringContaining("journal.jsonl"));
+  });
+
   test("preflight scopes resolver-ready launchers and does not probe unavailable secret launchers", async () => {
     const secretProbe = vi.fn(async () => ({ ready: true }));
     const plainProbe = vi.fn(async () => ({ ready: true }));

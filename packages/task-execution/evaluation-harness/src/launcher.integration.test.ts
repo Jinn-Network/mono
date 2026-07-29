@@ -331,8 +331,8 @@ export const evaluationHarnessDeployment = {
   const launcher = makeEvaluationLauncher({
     deploymentModule: pathToFileURL(deploymentModule).href,
     entrypoint: compiledHarnessEntrypoint,
-    interruptionBehavior: registration.interruptionBehavior,
-    signerSecretForward,
+    registrations: [registration],
+    selectRegistration: () => registration,
   });
   const repository = new InMemoryEvidenceRepository();
   const backend = makeLocalTaskExecutionBackend({
@@ -449,6 +449,8 @@ describe("evaluationLauncher", () => {
       deploymentModule: "file:///host/evaluation-deployment.mjs",
       entrypoint: "/opt/jinn/evaluation-harness/bin.js",
       nodeExecutable: "/opt/jinn/node",
+      registrations: [evaluatorRegistration()],
+      selectRegistration: () => evaluatorRegistration(),
     });
     const docs = documents();
     const view: TaskView = {
@@ -490,6 +492,8 @@ describe("evaluationLauncher", () => {
     expect(first.env).toEqual({
       JINN_ATTEMPT_EVALUATION_DEPLOYMENT_MODULE:
         "file:///host/evaluation-deployment.mjs",
+      JINN_ATTEMPT_EVALUATOR_REGISTRATION:
+        "launcher-integration-evaluator",
       JINN_ATTEMPT_ROOT: paths.root,
       JINN_ATTEMPT_INPUT: paths.input,
       JINN_ATTEMPT_WORK: paths.work,
