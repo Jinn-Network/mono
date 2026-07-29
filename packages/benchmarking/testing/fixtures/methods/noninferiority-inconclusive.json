@@ -287,7 +287,40 @@
     "bootstrap": {
       "procedure": "xorshift32-v1",
       "seed": 123456789,
-      "resamples": 1000
+      "resamples": 1000,
+      "basis": "task-provenance-source-family",
+      "count": 3,
+      "unit": "source-cluster",
+      "draws": 3000,
+      "clusters": [
+        {
+          "key": [
+            "source",
+            "fixture-source/10dd4eda9d0be5e0ed7e6a220833621b62b960a4e610525d25a57bffe5c6b764"
+          ],
+          "members": [
+            "10dd4eda9d0be5e0ed7e6a220833621b62b960a4e610525d25a57bffe5c6b764"
+          ]
+        },
+        {
+          "key": [
+            "source",
+            "fixture-source/f5604bea0237d6ebf2e80d1a3efa65a94f0c38afc4932b3c895ac288447a5202"
+          ],
+          "members": [
+            "f5604bea0237d6ebf2e80d1a3efa65a94f0c38afc4932b3c895ac288447a5202"
+          ]
+        },
+        {
+          "key": [
+            "source",
+            "fixture-source/f9c504b3e7171f15f7a994f5e1b68dd66f811a339838e83bc60d1314c11c8ca9"
+          ],
+          "members": [
+            "f9c504b3e7171f15f7a994f5e1b68dd66f811a339838e83bc60d1314c11c8ca9"
+          ]
+        }
+      ]
     }
   }
 }

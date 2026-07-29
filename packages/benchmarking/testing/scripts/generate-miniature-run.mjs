@@ -338,12 +338,12 @@ const methodSpecs = [
   },
   {
     id: "jinn.benchmarking.method/noninferiority-iut",
-    requiredInputs: ["matrix.cells", "matrix.cost", "referenced-verdicts"],
-    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate", "seed", "resamples"], properties: { verdictRule: { enum: ["sole", "unanimous", "any-pass", "majority"] }, baseline: { type: "string" }, candidate: { type: "string" }, seed: { type: "integer", minimum: 1 }, resamples: { type: "integer", minimum: 100 } }, additionalProperties: false },
+    requiredInputs: ["matrix.cells", "matrix.cost", "referenced-verdicts", "exact-task-bytes", "task-provenance-source-family"],
+    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate", "seed", "resamples"], properties: { verdictRule: { enum: ["sole", "unanimous", "any-pass", "majority"] }, baseline: { type: "string" }, candidate: { type: "string" }, seed: { type: "integer", minimum: 1 }, resamples: { type: "integer", minimum: 1 } }, additionalProperties: false },
     outputShape: "BCa quality lower bound AND one-sided paired-cost Wilcoxon + exclusions + conflicted cells",
     exclusionRule: "paired both-arm judged cells; cost only both-solve pairs; report remainder",
     clusteringRule: "task-provenance-source",
-    resamplingProcedure: "xorshift32-v1; sample paired tasks with replacement; one uint32 draw per position; index=floor(uint32/2^32*n); BCa uses jackknife acceleration",
+    resamplingProcedure: "xorshift32-v1; sample whole source clusters with replacement; one uint32 draw per cluster position; cluster jackknife acceleration",
   },
   {
     id: "jinn.benchmarking.method/clean-subset",

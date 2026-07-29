@@ -260,6 +260,16 @@ describe("checkBenchmarkTransition", () => {
     expect(checkBenchmarkTransition(successor(predecessor, [DIGEST_A], "1.0.0"), predecessor.bytes))
       .toEqual({ ok: true, bump: "patch" });
   });
+
+  test("compares unbounded SemVer numeric core and prerelease identifiers without Number precision loss", () => {
+    const predecessor = sealBenchmark(benchmarkWith([DIGEST_A], { version: "900719925474099312345.0.0-999999999999999999999999" }));
+    expect(checkBenchmarkTransition(
+      successor(predecessor, [DIGEST_A], "900719925474099312345.0.0-1000000000000000000000000"), predecessor.bytes,
+    )).toEqual({ ok: true, bump: "patch" });
+    expect(checkBenchmarkTransition(
+      successor(predecessor, [DIGEST_A], "900719925474099312344.999999999999999999999999.999999999999999999999999"), predecessor.bytes,
+    )).toMatchObject({ ok: false, reason: "version-not-increasing" });
+  });
 });
 
 describe("checkComparability", () => {

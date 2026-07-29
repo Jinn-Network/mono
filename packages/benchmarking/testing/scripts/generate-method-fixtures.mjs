@@ -77,6 +77,25 @@ function fixed4(x) {
   return x.toFixed(4);
 }
 
+/** Independent §7.47 disclosure oracle for the deterministic fixture source families. */
+function sourceClusters(taskDigests, resamples) {
+  const clusters = taskDigests.map((taskDigest) => ({
+    key: ["source", `fixture-source/${taskDigest}`],
+    members: [taskDigest],
+  })).sort((left, right) => {
+    const leftKey = JSON.stringify(left.key);
+    const rightKey = JSON.stringify(right.key);
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+  });
+  return {
+    basis: "task-provenance-source-family",
+    count: clusters.length,
+    unit: "source-cluster",
+    draws: clusters.length * resamples,
+    clusters,
+  };
+}
+
 // --- Matrix-record builders (structurally valid per @jinn-network/benchmarking-records' schema,
 //     but built here from scratch -- not routed through `sealMatrix`, since fixture *content*,
 //     not sealed *bytes*, is what these method fixtures pin) --------------------------------
@@ -502,7 +521,10 @@ function noninferiorityFixture(name, baselineOutcomes, candidateOutcomes) {
       },
       excluded: { count: 0, cellKeys: [] },
       conflicted: { count: 0, cellKeys: [] },
-      bootstrap: { procedure: "xorshift32-v1", seed: 123456789, resamples: 1000 },
+      bootstrap: {
+        procedure: "xorshift32-v1", seed: 123456789, resamples: 1000,
+        ...sourceClusters(taskDigests, 1000),
+      },
     },
   };
 }

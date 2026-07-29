@@ -9,8 +9,10 @@ import {
 } from "@jinn-network/benchmarking-records";
 import {
   buildVerdictEnvelope,
+  buildRepositoryWorkProfile,
   canonicalJsonBytes,
   recordDigest,
+  sealTaskProfile,
   type ResultEvaluationStatement,
   type VerdictOutcome,
 } from "@jinn-network/task-execution-profiles";
@@ -37,6 +39,7 @@ interface MethodFixture {
   readonly verdictOutcomes: Record<string, VerdictOutcome>;
   readonly taskTimestamps?: Record<string, string>;
   readonly clusterKeys?: Record<string, string>;
+  readonly taskProvenance?: Record<string, { readonly source?: string; readonly sourceCommitment?: string }>;
   readonly runReplicates?: number;
   readonly expectedResults: unknown;
 }
@@ -89,6 +92,10 @@ function parseMatrices(raw: readonly unknown[]): MatrixRecord[] {
 
 function mapStringsDeep(value: unknown, replacements: ReadonlyMap<string, string>): unknown {
   if (typeof value === "string") {
+    // Provenance source-family claims are opaque values, not record references. In particular,
+    // the deterministic `fixture-source/<symbolic-task>` token must remain byte-for-byte the
+    // declared cluster key while task descriptor/cell references are rewritten below.
+    if (value.startsWith("fixture-source/")) return value;
     let mapped = value;
     for (const [before, after] of replacements) mapped = mapped.replaceAll(before, after);
     return mapped;
@@ -307,16 +314,20 @@ function prepareFixture(fixture: MethodFixture): PreparedMethodFixture {
   const replacements = new Map<string, string>();
 
   const rawMatrices = structuredClone(fixture.matrices) as MutableFixtureMatrix[];
+  const repositoryWorkProfile = buildRepositoryWorkProfile();
+  const repositoryWorkProfileDigest = sealTaskProfile(repositoryWorkProfile).digest.slice("sha256:".length);
 
   const oldTaskDigests = [...new Set(rawMatrices.flatMap((matrix) => matrix.cells.map((cell) => cell.taskDigest)))];
   for (const oldTaskDigest of oldTaskDigests) {
     const task = sealTask({
       protocol: TASK_EXECUTION_PROTOCOL_URI,
-      profile: { digest: { sha256: "f".repeat(64) } },
+      profile: { digest: { sha256: repositoryWorkProfileDigest } },
       instructions: `Fixture task ${oldTaskDigest}`,
       payload: {
+        language: "TypeScript",
         provenance: {
-          source: fixture.clusterKeys?.[oldTaskDigest] ?? `fixture-source/${oldTaskDigest}`,
+          ...(fixture.taskProvenance?.[oldTaskDigest]
+            ?? { source: fixture.clusterKeys?.[oldTaskDigest] ?? `fixture-source/${oldTaskDigest}` }),
           timestamp: fixture.taskTimestamps?.[oldTaskDigest] ?? "2026-07-29T00:00:00Z",
         },
       },
@@ -471,6 +482,55 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
   describe("benchmarking method-registry conformance (design §9.2/§16)", () => {
     test("fixture set is non-empty", async () => {
       expect((await computeFixtureNames()).length).toBeGreaterThan(0);
+    });
+
+    test("method fixtures materialize real published repository-work profile Tasks", async () => {
+      const prepared = prepareFixture(await loadFixture("noninferiority-pass.json"));
+      const profileDigest = sealTaskProfile(buildRepositoryWorkProfile()).digest.slice("sha256:".length);
+      for (const bytes of prepared.taskBytes.values()) {
+        const task = JSON.parse(new TextDecoder().decode(bytes)) as { profile?: { digest?: { sha256?: string } }; payload?: { provenance?: unknown } };
+        expect(task.profile?.digest?.sha256).toBe(profileDigest);
+        expect(task.payload?.provenance).toMatchObject({ timestamp: "2026-07-29T00:00:00Z" });
+      }
+    });
+
+    test("noninferiority resolves provenance and changes its uncertainty under whole-source grouping", async () => {
+      const original = await loadFixture("noninferiority-pass.json");
+      const varied = structuredClone(original) as Omit<MethodFixture, "matrices" | "verdictOutcomes"> & { matrices: Array<{ cells: Array<{ armId: string; taskDigest: string; validVerdicts: string[] }> }>; verdictOutcomes: Record<string, VerdictOutcome> };
+      const taskDigests = [...new Set(varied.matrices.flatMap((matrix) => matrix.cells.map((cell) => cell.taskDigest)))];
+      for (const [index, cell] of varied.matrices[0]!.cells.entries()) {
+        if (cell.armId === "armB" && index % 4 === 1) {
+          for (const digest of cell.validVerdicts) varied.verdictOutcomes[digest] = { verdict: "fail" };
+        }
+      }
+      const independentlyGrouped = structuredClone(varied) as Omit<typeof varied, "clusterKeys"> & { clusterKeys?: Record<string, string> };
+      independentlyGrouped.clusterKeys = Object.fromEntries(taskDigests.map((digest, index) => [digest, index < 5 ? "family-a" : "family-b"]));
+      const method = registry.get(varied.methodId, varied.methodVersion)!;
+      const compute = (fixture: MethodFixture) => method.compute!({
+        ...(() => {
+          const prepared = prepareFixture(fixture);
+          return { subjects: subjectEntries(prepared.matrices), parameters: fixture.parameters,
+            verdictRule: fixture.verdictRule, registry, ...prepared.ports };
+        })(),
+      }).perSubject[0]!.results as { bootstrap: { lowerBound?: string; count: number; unit: string } };
+      const iidLike = compute(varied);
+      const grouped = compute(independentlyGrouped);
+      expect(iidLike.bootstrap).toMatchObject({ unit: "source-cluster", count: 10 });
+      expect(grouped.bootstrap).toMatchObject({ unit: "source-cluster", count: 2 });
+      expect(grouped.bootstrap).not.toEqual(iidLike.bootstrap);
+    });
+
+    test("plaintext source and opaque source commitment remain tagged, non-colliding cluster identities", async () => {
+      const fixture = structuredClone(await loadFixture("noninferiority-pass.json")) as Omit<MethodFixture, "matrices"> & { matrices: Array<{ cells: Array<{ taskDigest: string }> }>; taskProvenance?: Record<string, { source?: string; sourceCommitment?: string }> };
+      const [first, second] = [...new Set(fixture.matrices[0]!.cells.map((cell) => cell.taskDigest))];
+      const token = `sha256:${"a".repeat(64)}`;
+      fixture.taskProvenance = { [first!]: { source: token }, [second!]: { sourceCommitment: token } };
+      const prepared = prepareFixture(fixture);
+      const method = registry.get(fixture.methodId, fixture.methodVersion)!;
+      const result = method.compute!({ subjects: prepared.subjects, parameters: fixture.parameters, verdictRule: fixture.verdictRule, registry, ...prepared.ports })
+        .perSubject[0]!.results as { bootstrap: { clusters: Array<{ key: [string, string] }> } };
+      expect(result.bootstrap.clusters.map((cluster) => cluster.key)).toContainEqual(["source", token]);
+      expect(result.bootstrap.clusters.map((cluster) => cluster.key)).toContainEqual(["sourceCommitment", token]);
     });
 
     test("each fixture's method reproduces the pinned expectedResults", async () => {

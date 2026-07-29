@@ -31,6 +31,22 @@ type SingleSubjectMethod = Omit<Method, "compute"> & {
   readonly compute?: (input: SingleSubjectComputeInput) => unknown;
 };
 
+function sourceClusterManifest(rates: readonly {
+  readonly taskDigest: string;
+  readonly cluster: readonly ["source" | "sourceCommitment", string];
+}[]): readonly { readonly key: readonly ["source" | "sourceCommitment", string]; readonly members: readonly string[] }[] {
+  const groups = new Map<string, { key: ["source" | "sourceCommitment", string]; members: string[] }>();
+  for (const rate of rates) {
+    const id = JSON.stringify(rate.cluster);
+    const group = groups.get(id) ?? { key: [rate.cluster[0], rate.cluster[1]], members: [] };
+    group.members.push(rate.taskDigest);
+    groups.set(id, group);
+  }
+  return [...groups.values()]
+    .map((group) => ({ ...group, members: group.members.sort(compareCodeUnitStrings) }))
+    .sort((left, right) => compareCodeUnitStrings(JSON.stringify(left.key), JSON.stringify(right.key)));
+}
+
 function validateParameters(
   schema: Method["parameterSchema"],
   parameters: Readonly<Record<string, unknown>>,
@@ -787,6 +803,7 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
         };
       });
     const clusterCount = new Set(clusteredRates.map((rate) => JSON.stringify(rate.cluster))).size;
+    const clusterManifest = sourceClusterManifest(clusteredRates);
     const clusterBootstrap = clusteredRates.length > 0 && clusterCount >= 2
       ? clusteredPairedRateDiffBca(clusteredRates, { seed, resamples })
       : undefined;
@@ -822,10 +839,14 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
         cellKeys: conflictedCellKeys.sort(compareCodeUnitStrings),
       },
       bootstrap: clusterBootstrap === undefined
-        ? { procedure: "xorshift32-v1", seed, resamples, unit: "source-cluster", draws: 0, clusters: [] }
+        ? {
+            procedure: "xorshift32-v1", seed, resamples, basis: "task-provenance-source-family",
+            count: clusterManifest.length, unit: "source-cluster", draws: 0, clusters: clusterManifest,
+          }
         : {
-            procedure: "xorshift32-v1", seed, resamples, unit: clusterBootstrap.unit,
-            draws: clusterBootstrap.draws, clusters: clusterBootstrap.clusters,
+            procedure: "xorshift32-v1", seed, resamples, basis: "task-provenance-source-family",
+            count: clusterManifest.length, unit: clusterBootstrap.unit,
+            draws: clusterBootstrap.draws, clusters: clusterManifest,
           },
     };
   },

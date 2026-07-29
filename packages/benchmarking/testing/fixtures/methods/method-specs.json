@@ -158,7 +158,6 @@
           "type": "integer"
         },
         "seed": {
-          "maximum": 4294967295,
           "minimum": 1,
           "type": "integer"
         },
@@ -184,9 +183,11 @@
     "requiredInputs": [
       "matrix.cells",
       "matrix.cost",
-      "referenced-verdicts"
+      "referenced-verdicts",
+      "exact-task-bytes",
+      "task-provenance-source-family"
     ],
-    "resamplingProcedure": "xorshift32-v1; sample paired tasks with replacement; one uint32 draw per position; index=floor(uint32/2^32*n); BCa uses jackknife acceleration",
+    "resamplingProcedure": "xorshift32-v1; sample whole source clusters with replacement; one uint32 draw per cluster position; cluster jackknife acceleration",
     "version": "1"
   },
   {

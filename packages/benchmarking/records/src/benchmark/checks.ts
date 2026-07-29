@@ -131,9 +131,9 @@ export function checkBenchmarkPredecessor(
 }
 
 interface SemVer {
-  readonly major: number;
-  readonly minor: number;
-  readonly patch: number;
+  readonly major: string;
+  readonly minor: string;
+  readonly patch: string;
   readonly prerelease: readonly string[];
 }
 
@@ -142,9 +142,9 @@ function parseSemVer(value: string): SemVer | undefined {
   const match = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[0-9]*[A-Za-z-][0-9A-Za-z-]*|[1-9][0-9]*)(?:\.(?:0|[0-9]*[A-Za-z-][0-9A-Za-z-]*|[1-9][0-9]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(value);
   if (match === null) return undefined;
   return {
-    major: Number(match[1]),
-    minor: Number(match[2]),
-    patch: Number(match[3]),
+    major: match[1]!,
+    minor: match[2]!,
+    patch: match[3]!,
     prerelease: match[4] === undefined ? [] : match[4].split("."),
   };
 }
@@ -160,7 +160,7 @@ function comparePrerelease(left: readonly string[], right: readonly string[]): n
     if (a === b) continue;
     const aNumeric = /^[0-9]+$/.test(a);
     const bNumeric = /^[0-9]+$/.test(b);
-    if (aNumeric && bNumeric) return Number(a) < Number(b) ? -1 : 1;
+    if (aNumeric && bNumeric) return compareDecimal(a, b);
     if (aNumeric) return -1;
     if (bNumeric) return 1;
     return compareCodeUnitStrings(a, b);
@@ -168,9 +168,15 @@ function comparePrerelease(left: readonly string[], right: readonly string[]): n
   return 0;
 }
 
+/** SemVer numeric identifiers are unbounded; compare decimal strings without Number loss. */
+function compareDecimal(left: string, right: string): number {
+  if (left.length !== right.length) return left.length < right.length ? -1 : 1;
+  return compareCodeUnitStrings(left, right);
+}
+
 function compareSemVer(left: SemVer, right: SemVer): number {
   for (const key of ["major", "minor", "patch"] as const) {
-    if (left[key] !== right[key]) return left[key] < right[key] ? -1 : 1;
+    if (left[key] !== right[key]) return compareDecimal(left[key], right[key]);
   }
   return comparePrerelease(left.prerelease, right.prerelease);
 }
@@ -200,11 +206,11 @@ export function checkBenchmarkTransition(
   if (from === undefined || to === undefined) return { ok: false, reason: "invalid-version" };
   if (compareSemVer(to, from) <= 0) return { ok: false, reason: "version-not-increasing" };
   const bump = classifyVersionBump(previous, next);
-  const core = bump === "major" ? to.major > from.major
-    : bump === "minor" ? to.major === from.major && to.minor > from.minor
+  const core = bump === "major" ? compareDecimal(to.major, from.major) > 0
+    : bump === "minor" ? to.major === from.major && compareDecimal(to.minor, from.minor) > 0
       : to.major === from.major && to.minor === from.minor && to.patch === from.patch
         ? true
-        : to.major === from.major && to.minor === from.minor && to.patch > from.patch;
+        : to.major === from.major && to.minor === from.minor && compareDecimal(to.patch, from.patch) > 0;
   return core ? { ok: true, bump } : { ok: false, reason: "wrong-bump" };
 }
 
