@@ -85,6 +85,9 @@ jobs:
           (cd packages/discovery/protocol && yarn install --immutable && yarn build)
           (cd packages/discovery/serve && yarn install --immutable && yarn build)
           (cd packages/discovery/testing && yarn install --immutable && yarn build)
+      - name: Generate local Anvil fixture artifacts from tracked contracts source (M3.5)
+        run: |
+          (cd contracts && yarn install --immutable && yarn compile)
       - name: Restore Marketplace Binding distribution
         uses: actions/download-artifact@v4
         with:
