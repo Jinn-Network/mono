@@ -1108,6 +1108,37 @@ Confirmed by the operator at the program gate (2026-07-28):
     top-ups are refused, and replay or a batch boundary cannot erase the terminal cause. Exact
     split-batch verdict→release, refund→expiry, and refund→top-up vectors assert persistent
     state, full observations/refusals, and no new `available` announcement.
+118. **The non-inferiority cost leg forms exactly one paired difference per Task:** for each
+    paired Task, compute each arm's exact arithmetic mean over that arm's passing repeats, then
+    subtract the baseline-arm mean from the candidate-arm mean. A failed or absent repeat does
+    not remove a different passing repeat from the other arm; only a Task lacking at least one
+    passing repeat in either arm is excluded. After all Task-level differences exist, normalize
+    them once to the global maximum decimal scale under §7.112 and run the paired-task Wilcoxon
+    rule. An exact `R = 2` asymmetric-repeat vector must distinguish this rule from
+    replicate-coordinate matching and assert the complete verdict, p-value, `n`, scale,
+    differences, and exclusions.
+119. **Every grammar-valid Arm ID is an opaque, prototype-safe data key:** the frozen
+    `[A-Za-z0-9_-]{1,64}` grammar includes names such as `__proto__`, `constructor`, and
+    `prototype`. Record parsing, Matrix `attrition.perArm`, aggregate result construction,
+    enumeration, comparison, sealing, and public output must preserve each as an own data
+    property without prototype mutation, key loss, or inherited lookup. Implementations use
+    null-prototype maps, `Map`, or an equivalently safe representation at every Arm-indexed
+    boundary; exact hostile vectors traverse Run→Matrix→all applicable M1–M3 aggregate methods
+    and sealed output.
+120. **The exported Matrix schema uses the exact frozen Arm-ID grammar and parity canaries:**
+    `attrition.perArm` property names accept exactly `[A-Za-z0-9_-]{1,64}`, matching runtime.
+    The bidirectional §7.113 runner exercises Matrix keys beginning with a digit, underscore,
+    and hyphen, plus the prototype-sensitive legal names from §7.119, and rejects dot-bearing,
+    overlong, empty, and otherwise invalid names in both runtime and Draft 2020-12 validation.
+    A Run-only arm mutation cannot satisfy Matrix schema parity.
+121. **The benchmarking ambient-network guard scans executable template interpolations and
+    computed browser members:** template raw text remains inert, but every `${...}` expression
+    is scanned as code, including nested templates; literal computed access such as
+    `window["fetch"]`, `self['WebSocket']`, and `globalThis[\`XMLHttpRequest\`]` is equivalent
+    to dot access and must be detected. Positive canaries cover each executable form and
+    combinations inside interpolation; negative canaries cover the same spellings in comments,
+    ordinary strings, and template raw segments. Dynamic computed names need not be resolved in
+    v1, but stripping an executable interpolation or literal member is nonconforming.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

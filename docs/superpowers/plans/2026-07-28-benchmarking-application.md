@@ -1074,3 +1074,29 @@ The repair is test-first and remains M1–M3 only. It runs the complete records/
 trust/profile consumer, schema drift/parity, package, guard, packed-type, workflow, raw-control,
 and clean-worktree gates. M4–M7 remain blocked until a new independent whole-design review accepts
 the exact repaired head.
+
+## Addendum 2026-07-29-n — Task-level cost pairs, opaque Arm keys, and complete executable guards
+
+The eleventh fresh M1–M3 whole-design review at
+`4314470738d7b2aa1ed6abe26f4920dd16e40214` is **RED**. Program rulings
+§7.118–§7.121 bind the next repair:
+
+1. `noninferiority-iut@1` forms one cost difference per Task from each arm's exact mean over its
+   passing repeats, then applies the already-frozen global-scale normalization and paired-task
+   Wilcoxon rule; it never pairs or discards costs by replicate coordinate;
+2. every grammar-valid Arm ID, including `__proto__`, `constructor`, and `prototype`, survives
+   record parsing, Matrix sealing, aggregate maps, enumeration, and public output as an opaque own
+   data key without prototype effects;
+3. the generated Matrix schema uses the exact `[A-Za-z0-9_-]{1,64}` Arm grammar, and the
+   bidirectional parity runner exercises Matrix property names rather than relying on a Run-only
+   mutation; and
+4. the ambient-network guard scans executable template interpolation and literal computed browser
+   members while continuing to ignore comments, ordinary strings, and inert template raw text.
+
+The cost conformance fixture uses exact public records with `R = 2`, asymmetric passing repeats,
+and enough Tasks to pin the complete Wilcoxon result. Hostile Arm-key fixtures traverse
+Run→Matrix→every applicable M1–M3 aggregate method and sealed output. Guard canaries cover nested
+interpolation and quote/backtick computed members. The repair is test-first and runs the complete
+records/aggregate/testing, trust/profile consumer, schema drift/parity, package, guard,
+packed-type, workflow, raw-control, and clean-worktree gates. M4–M7 remain blocked until a new
+independent whole-design review accepts the exact repaired head.
