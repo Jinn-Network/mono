@@ -90,7 +90,29 @@ export type { InMemoryMarketplaceObserveStore } from "./observe-store.js";
 
 export { claimAttempt, dispatchContextDescriptor } from "./claim.js";
 export type { ClaimAttemptResult, ClaimPorts, PreClaimResult } from "./claim.js";
-export { convergeDelivery, checkDeliveryCorrespondence } from "./delivery.js";
-export type { ConvergedDelivery, DeliveryCorrespondence } from "./delivery.js";
+export {
+  DeliveryAdmissionError,
+  convergeDelivery,
+  checkDeliveryCorrespondence,
+} from "./delivery.js";
+export type {
+  ConvergedDelivery,
+  DeliveryAdmissionFailureKind,
+  DeliveryCorrespondence,
+} from "./delivery.js";
 export { settleDelivery, mapRaceLoss } from "./settlement.js";
+export type {
+  DeliveryChainFacts,
+  DispatchBindingCheck,
+  EvaluationSpecificationCheck,
+  ExecutorBindingCheck,
+  RevisedDeliveryFacts,
+  SettlementAttempt,
+  SettlementGateFailure,
+  SettlementGradeVerification,
+  SettlementGradeVerificationInput,
+  SettlementPorts,
+  SettlementResult,
+  TodayDeliveryFacts,
+} from "./settlement.js";
 export { closeSubmission, releaseAttempt, signalCancel } from "./lifecycle.js";

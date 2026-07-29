@@ -21,8 +21,63 @@ export class IJsonNumberError extends Error {
   }
 }
 
+/** Thrown when a string is not an I-JSON Unicode scalar sequence (program §7.24). */
+export class IJsonUnicodeError extends Error {
+  constructor(
+    readonly location: string,
+    readonly codeUnitIndex: number,
+  ) {
+    super(`unpaired UTF-16 surrogate at ${location}, code-unit index ${codeUnitIndex}`);
+    this.name = "IJsonUnicodeError";
+  }
+}
+
 function assertIJsonInteger(value: number): void {
   if (!Number.isSafeInteger(value)) throw new IJsonNumberError(value);
+}
+
+function assertUnicodeScalarString(value: string, location: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const nextCodeUnit = value.charCodeAt(index + 1);
+      if (
+        index + 1 >= value.length
+        || nextCodeUnit < 0xdc00
+        || nextCodeUnit > 0xdfff
+      ) {
+        throw new IJsonUnicodeError(location, index);
+      }
+      index += 1;
+      continue;
+    }
+    if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      throw new IJsonUnicodeError(location, index);
+    }
+  }
+}
+
+/**
+ * Recursively enforces I-JSON's Unicode-scalar requirement in both member names and values.
+ * Exported for exact Delivery admission; it does not serialize or normalize its input.
+ */
+export function assertIJsonUnicode(value: unknown, location = "<root>"): void {
+  if (typeof value === "string") {
+    assertUnicodeScalarString(value, location);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((element, index) => {
+      assertIJsonUnicode(element, `${location}[${index}]`);
+    });
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, member] of Object.entries(value)) {
+      assertUnicodeScalarString(key, `object key at ${location}`);
+      assertIJsonUnicode(member, `${location}.${key}`);
+    }
+  }
 }
 
 /**
@@ -47,5 +102,6 @@ function serialize(value: JsonValue): string {
 
 /** Serializes a `JsonValue` to its canonical (JCS-style, sorted-key) string form. */
 export function serializeCanonical(value: JsonValue): string {
+  assertIJsonUnicode(value);
   return serialize(value);
 }

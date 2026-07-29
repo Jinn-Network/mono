@@ -26,6 +26,33 @@ describe("serializeCanonical", () => {
     expect(serializeCanonical({ a: [1, "x", true, null] })).toBe('{"a":[1,"x",true,null]}');
   });
 
+  test.each([
+    {
+      label: "string value",
+      value: { nested: ["valid", String.fromCharCode(0xd800)] },
+    },
+    {
+      label: "object key",
+      value: { [String.fromCharCode(0xdc00)]: "value" },
+    },
+  ])("rejects a lone UTF-16 surrogate in a $label", ({ value }) => {
+    expect(() => serializeCanonical(value)).toThrowError(
+      expect.objectContaining({
+        name: "IJsonUnicodeError",
+        message: expect.stringContaining("unpaired UTF-16 surrogate"),
+      }),
+    );
+  });
+
+  test("accepts valid supplementary scalar pairs in keys and values", () => {
+    const supplementaryScalar = String.fromCodePoint(0x1f600);
+    expect(
+      serializeCanonical({
+        [supplementaryScalar]: { value: supplementaryScalar },
+      }),
+    ).toBe(`{"${supplementaryScalar}":{"value":"${supplementaryScalar}"}}`);
+  });
+
   test("never relies on JSON.stringify's own key ordering", () => {
     // JSON.stringify would already produce this for a literal-order object, but the point is
     // that our own explicit sort drives emission, not JS object insertion order -- proven by the
