@@ -597,7 +597,7 @@ describe("byte-first produceReport / verifyReport", () => {
   test("new exact-byte boundaries reject lone surrogates and accept supplementary scalar pairs", async () => {
     const fixture = makeFixture();
     const parsed = parseMatrix(fixture.subjectBytes[0]!);
-    expect(() => sealMatrix({ ...parsed, "fixture/note": "valid \u{1f680}" })).not.toThrow();
-    expect(() => sealMatrix({ ...parsed, "fixture/note": "\ud800" })).toThrow();
+    expect(() => sealMatrix({ ...parsed, "example.fixture.note": "valid \u{1f680}" })).not.toThrow();
+    expect(() => sealMatrix({ ...parsed, "example.fixture.note": "\ud800" })).toThrow();
   });
 });

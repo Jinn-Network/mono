@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AgentIriSchema, DigestBearingResourceDescriptorSchema, LowercaseSha256HexSchema } from "../descriptors.js";
+import { topLevelRecordSchema } from "../extensions.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
 import { AttritionSchema, CompletenessSchema } from "../matrix/schema.js";
 import { isJsonValue } from "../json.js";
@@ -46,8 +47,7 @@ const DisclosuresSchema = z.object({
   perSubject: z.array(PerSubjectDisclosureSchema),
 });
 
-export const ReportRecordSchema = z
-  .object({
+export const ReportRecordSchema = topLevelRecordSchema({
     protocol: z.literal(BENCHMARKING_PROTOCOL),
     subjects: z.array(DigestBearingResourceDescriptorSchema).min(1),
     method: MethodRefSchema,
@@ -61,7 +61,6 @@ export const ReportRecordSchema = z
     limitations: z.array(z.string()).optional(),
     author: AgentIriSchema,
   })
-  .loose() // open to namespaced extensions (TEP §21.3)
   .superRefine((report, ctx) => {
     if (report.disclosures === undefined) {
       ctx.addIssue({

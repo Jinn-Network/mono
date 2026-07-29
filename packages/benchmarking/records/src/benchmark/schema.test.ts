@@ -97,7 +97,7 @@ describe("BenchmarkRecordSchema / parseBenchmark / sealBenchmark", () => {
   test("accepts a supplementary-plane scalar in received record strings and keys", () => {
     const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
     value.description = "astral-\u{1F9EA}";
-    value["emoji-\u{1F680}"] = "ok";
+    value["https://example.test/extensions/\u{1F680}"] = "ok";
     expect(parseBenchmark(sealBenchmark(value).bytes)).toMatchObject(value);
   });
 });

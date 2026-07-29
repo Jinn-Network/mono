@@ -151,13 +151,13 @@ describe("MatrixRecordSchema / parseMatrix / sealMatrix", () => {
       expect.unreachable();
     } catch (error) {
       const issues = (error as InvalidDocumentError).errors;
-      expect(issues.some((issue) => /no aggregate of any kind/.test(issue.message))).toBe(true);
+      expect(issues.some((issue) => /reverse-DNS or absolute URI/.test(issue.message))).toBe(true);
     }
   });
 
-  test("a legitimately namespaced extension key is accepted", () => {
+  test("a reverse-DNS extension key is accepted", () => {
     const value = loadFixture("valid.json") as Record<string, unknown>;
-    const withExtension = { ...value, "jinn.benchmarking.internal/note": "informational" };
+    const withExtension = { ...value, "network.jinn.benchmarking.internal": "informational" };
     expect(() => MatrixRecordSchema.parse(withExtension)).not.toThrow();
   });
 

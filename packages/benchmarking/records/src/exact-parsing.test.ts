@@ -4,6 +4,7 @@ import { parseBenchmark, sealBenchmark } from "./benchmark/schema.js";
 import { parseMatrix, sealMatrix } from "./matrix/schema.js";
 import { parseReport, sealReport } from "./report/schema.js";
 import { parseRun, sealRun } from "./run/schema.js";
+import { InvalidDocumentError } from "./sealing.js";
 
 interface ExactFamily {
   readonly name: string;
@@ -26,7 +27,7 @@ function fixtureDocument(relativePath: string): Record<string, unknown> {
 function withExtension(family: ExactFamily, value: unknown): Uint8Array {
   return family.seal({
     ...fixtureDocument(family.fixture),
-    "test.example/note": value,
+    "test.example.note": value,
   }).bytes;
 }
 
@@ -42,6 +43,25 @@ function replaceNeedleByte(bytes: Uint8Array, needle: string): Uint8Array {
 }
 
 describe.each(families)("$name exact public parser", (family) => {
+  test("rejects a bare unknown top-level field", () => {
+    expect(() => family.seal({
+      ...fixtureDocument(family.fixture),
+      bareUnknown: true,
+    })).toThrow(InvalidDocumentError);
+  });
+
+  test.each([
+    ["reverse-DNS", "org.example.benchmarking.note"],
+    ["absolute-URI", "https://example.test/extensions/benchmarking-note"],
+  ])("preserves a %s top-level extension", (_kind, key) => {
+    const extension = { scalar: "rocket-\u{1f680}" };
+    const parsed = family.parse(family.seal({
+      ...fixtureDocument(family.fixture),
+      [key]: extension,
+    }).bytes) as Record<string, unknown>;
+    expect(parsed[key]).toEqual(extension);
+  });
+
   test("accepts exact canonical bytes containing a supplementary Unicode scalar", () => {
     expect(() => family.parse(withExtension(family, "rocket-\u{1f680}"))).not.toThrow();
   });
@@ -61,5 +81,14 @@ describe.each(families)("$name exact public parser", (family) => {
 
   test("uses fatal UTF-8 decoding", () => {
     expect(() => family.parse(replaceNeedleByte(withExtension(family, "ok"), "ok"))).toThrow();
+  });
+});
+
+describe("Report reserved-looking unknown fields", () => {
+  test.each(["createdAt", "timestamp"])("rejects bare unknown top-level field %s", (key) => {
+    expect(() => sealReport({
+      ...fixtureDocument("../fixtures/report/minimal.json"),
+      [key]: "2026-07-29T00:00:00Z",
+    })).toThrow(InvalidDocumentError);
   });
 });

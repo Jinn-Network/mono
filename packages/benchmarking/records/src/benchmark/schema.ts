@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AgentIriSchema, DigestBearingResourceDescriptorSchema } from "../descriptors.js";
+import { topLevelRecordSchema } from "../extensions.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
 import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
 
@@ -22,20 +23,18 @@ const RevealSchema = z.object({
   notBefore: z.string().datetime({ offset: true }).optional(),
 });
 
-export const BenchmarkRecordSchema = z
-  .object({
-    protocol: z.literal(BENCHMARKING_PROTOCOL),
-    name: z.string(),
-    description: z.string(),
-    author: AgentIriSchema.optional(),
-    version: SemVer,
-    supersedes: DigestBearingResourceDescriptorSchema.optional(),
-    items: z.array(BenchmarkItemSchema),
-    reveal: RevealSchema,
-    license: z.string().optional(),
-    citation: z.string().optional(),
-  })
-  .loose(); // open to namespaced extensions (TEP §21.3)
+export const BenchmarkRecordSchema = topLevelRecordSchema({
+  protocol: z.literal(BENCHMARKING_PROTOCOL),
+  name: z.string(),
+  description: z.string(),
+  author: AgentIriSchema.optional(),
+  version: SemVer,
+  supersedes: DigestBearingResourceDescriptorSchema.optional(),
+  items: z.array(BenchmarkItemSchema),
+  reveal: RevealSchema,
+  license: z.string().optional(),
+  citation: z.string().optional(),
+});
 
 export type BenchmarkRecord = z.infer<typeof BenchmarkRecordSchema>;
 export type BenchmarkItem = BenchmarkRecord["items"][number];

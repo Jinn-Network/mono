@@ -2,6 +2,7 @@ import { z } from "zod";
 import { RequirementsMap } from "@jinn-network/task-execution-protocol";
 import { serializeCanonicalJson } from "../canonical.js";
 import { AgentIriSchema, DigestBearingResourceDescriptorSchema } from "../descriptors.js";
+import { topLevelRecordSchema } from "../extensions.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
 import type { JsonValue } from "../json.js";
 import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
@@ -63,8 +64,7 @@ function pinningBytes(pinning: Record<string, unknown> | undefined): string {
   return new TextDecoder().decode(serializeCanonicalJson((pinning ?? {}) as JsonValue));
 }
 
-export const RunRecordSchema = z
-  .object({
+export const RunRecordSchema = topLevelRecordSchema({
     protocol: z.literal(BENCHMARKING_PROTOCOL),
     benchmark: DigestBearingResourceDescriptorSchema,
     owner: AgentIriSchema,
@@ -76,7 +76,6 @@ export const RunRecordSchema = z
     venue: VenueSchema.optional(),
     closeAt: Rfc3339,
   })
-  .loose() // open to namespaced extensions (TEP §21.3)
   .superRefine((run, ctx) => {
     const floor = Number(run.policy.completenessFloor);
     if (!(floor > 0 && floor <= 1)) {

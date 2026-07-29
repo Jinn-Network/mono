@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Sha256Digest } from "@jinn-network/task-execution-protocol";
 import { AgentIriSchema, DigestBearingResourceDescriptorSchema } from "../descriptors.js";
+import { topLevelRecordSchema } from "../extensions.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
 import { compareCodeUnitStrings } from "../order.js";
 import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
@@ -117,23 +118,6 @@ const AssemblySchema = z.object({
   version: z.string(),
 });
 
-// The Matrix's only namespaced-extension escape hatch (tenet 3: no aggregate of any kind at
-// this record kind). Any top-level key beyond the enumerated set MUST look like a namespaced
-// extension (TEP §21.3 style: `<namespace>/<rest>`), never a bare English word — a bare extra
-// key ("winner", "bestArm") is exactly the shape an aggregate smuggled in as an "extension"
-// would take, and this schema rejects it outright.
-const KNOWN_MATRIX_FIELDS = new Set([
-  "protocol",
-  "run",
-  "closeBoundary",
-  "cells",
-  "exclusions",
-  "attrition",
-  "completeness",
-  "assembly",
-]);
-const NAMESPACED_EXTENSION_KEY = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*\/[A-Za-z]/;
-
 function isSortedUnique(values: readonly string[]): boolean {
   return values.every((value, index) =>
     index === 0 || compareCodeUnitStrings(values[index - 1]!, value) < 0
@@ -173,8 +157,7 @@ const OUTCOME_COUNT_FIELDS = [
   "excluded",
 ] as const;
 
-export const MatrixRecordSchema = z
-  .object({
+export const MatrixRecordSchema = topLevelRecordSchema({
     protocol: z.literal(BENCHMARKING_PROTOCOL),
     run: DigestBearingResourceDescriptorSchema,
     closeBoundary: CloseBoundarySchema,
@@ -184,21 +167,7 @@ export const MatrixRecordSchema = z
     completeness: CompletenessSchema,
     assembly: AssemblySchema,
   })
-  .loose() // open to namespaced extensions (TEP §21.3) — but see the tenet-3 refine below
   .superRefine((matrix, ctx) => {
-    // Tenet 3: no aggregate of any kind. Any top-level key beyond the enumerated set must be a
-    // namespaced extension.
-    for (const key of Object.keys(matrix)) {
-      if (KNOWN_MATRIX_FIELDS.has(key)) continue;
-      if (!NAMESPACED_EXTENSION_KEY.test(key)) {
-        ctx.addIssue({
-          code: "custom",
-          message: `unnamespaced top-level field "${key}" is forbidden — the Matrix carries no aggregate of any kind (tenet 3); extensions must be namespaced (TEP §21.3)`,
-          path: [key],
-        });
-      }
-    }
-
     // "cells[] has exactly one entry per expected cell" (§8.1) — the self-contained structural
     // proxy this record alone can check is that the declared `completeness.expected` count
     // matches how many cell entries are actually present; the true expected-cell-set match
