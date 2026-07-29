@@ -307,7 +307,6 @@ const PROFILES_ALLOWED_DEPENDENCIES = [
   '@jinn-network/task-execution-protocol',
   '@noble/hashes',
   'ajv',
-  'canonicalize',
   'safe-regex',
   'zod',
 ];
