@@ -45,8 +45,9 @@ export function runPinningConstraint(facts: {
 }
 
 /**
- * Returns false when the facts card pins a harness/model/loadout/isolation that the wiring
- * entry cannot honor. Effort floor is carried through for downstream verification only.
+ * Returns false when the facts card pins a harness/model/loadout that the wiring entry cannot
+ * honor. Isolation is authority-bearing only through sealed requirements plus backend
+ * capability/preflight enforcement; the wiring label is descriptive.
  */
 export function wiringHonorsPinning(
   facts: {

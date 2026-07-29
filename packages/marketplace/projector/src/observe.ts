@@ -2,7 +2,10 @@
 
 import {
   checkDeliveryCorrespondence,
+  decodeRevisedRequestData,
   deriveMarketplaceAttemptUri,
+  REVISED_LEG_SOLUTION,
+  REVISED_LEG_VERDICT,
 } from "@jinn-network/marketplace-binding";
 import {
   formatSequence,
@@ -51,8 +54,16 @@ export type MarketplaceProtocolObservation = ProtocolObservation & {
   };
 };
 
+interface ReceiptPosition {
+  readonly blockHash: Hex;
+  readonly txHash: Hex;
+  readonly logIndex: number;
+}
+
 interface PendingMechDelivery {
   readonly data: Hex;
+  readonly requestData?: Hex;
+  readonly receipt?: ReceiptPosition;
   readonly deliveryCorrespondence?: NonNullable<
     ObservationProjectionContext["deliveryCorrespondence"]
   >;
@@ -123,6 +134,10 @@ export interface MarketplaceProjectionState {
    * Distinct from task-attempt `seenAttemptIndices`; tracks monotonic single-use verdict slots.
    */
   evaluationIdentities: Record<string, EvaluationParentIdentity>;
+  /** Claim-time identity keyed by the protocol Attempt URI. */
+  attemptEngagements: Record<string, AttemptEngagement>;
+  /** Evaluation claim identity keyed by parent identity plus verdict index. */
+  evaluationEngagements: Record<string, EvaluationEngagement>;
 }
 
 interface EvaluationParentIdentity {
@@ -133,8 +148,46 @@ interface EvaluationParentIdentity {
 interface RequestIdBinding {
   readonly taskId: bigint;
   readonly attemptIndex: number;
-  readonly role: "task-attempt" | "evaluation-attempt";
+  readonly role:
+    | "task-attempt"
+    | "evaluation-attempt"
+    | "solution-preparation"
+    | "verdict-preparation";
+  readonly kind?: "solution" | "verdict";
   readonly verdictIndex?: number;
+  readonly party?: `0x${string}`;
+  readonly priorityMech?: `0x${string}`;
+  readonly deliveryRate?: bigint;
+  readonly deliveryDigest?: Hex;
+  readonly verdictCode?: number;
+  readonly nonce?: bigint;
+  readonly   preparation?: ReceiptPosition;
+  status?: "claimed" | "prepared" | "delivered" | "forfeited";
+  /** Prevents duplicate attempt-terminal emissions across coordinator/reservation forfeit. */
+  forfeitTerminalEmitted?: true;
+}
+
+interface AttemptEngagement {
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+  readonly operator: `0x${string}`;
+  readonly priorityMech: `0x${string}`;
+  readonly deliveryRate: bigint;
+  readonly generation: "today" | "revised";
+  status: "live" | "prepared" | "submitted" | "released" | "expired" | "forfeited";
+  preparedRequestId?: Hex;
+}
+
+interface EvaluationEngagement {
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+  readonly verdictIndex: number;
+  readonly evaluator: `0x${string}`;
+  readonly priorityMech: `0x${string}`;
+  readonly deliveryRate: bigint;
+  readonly generation: "today" | "revised";
+  status: "live" | "prepared" | "delivered" | "released" | "expired" | "forfeited";
+  preparedRequestId?: Hex;
 }
 
 export interface MarketplaceProjectionTransition {
@@ -159,7 +212,15 @@ export interface MarketplaceProjectionRefusal {
     | "attempt-identity-regressing"
     | "request-id-reused"
     | "attempt-not-live"
-    | "capacity-contradiction";
+    | "capacity-contradiction"
+    | "attempt-already-prepared"
+    | "preparation-mismatch"
+    | "deliver-request-data-invalid"
+    | "deliver-request-data-mismatch"
+    | "receipt-continuity-mismatch"
+    | "reservation-not-prepared"
+    | "reservation-not-delivered"
+    | "engagement-forfeited";
   readonly derivation: MarketplaceEvent["derivation"];
   readonly taskId: bigint;
   readonly attemptIndex?: number;
@@ -174,6 +235,8 @@ export function createMarketplaceProjectionState(): MarketplaceProjectionState {
     pendingMechDeliveries: {},
     requestIdBindings: {},
     evaluationIdentities: {},
+    attemptEngagements: {},
+    evaluationEngagements: {},
   };
 }
 
@@ -218,6 +281,12 @@ export function cloneMarketplaceProjectionState(
         key,
         {
           data: value.data.slice() as Hex,
+          ...(value.requestData === undefined
+            ? {}
+            : { requestData: value.requestData.slice() as Hex }),
+          ...(value.receipt === undefined
+            ? {}
+            : { receipt: { ...value.receipt } }),
           ...(value.deliveryCorrespondence === undefined
             ? {}
             : {
@@ -228,7 +297,17 @@ export function cloneMarketplaceProjectionState(
         },
       ]),
     ),
-    requestIdBindings: { ...state.requestIdBindings },
+    requestIdBindings: Object.fromEntries(
+      Object.entries(state.requestIdBindings).map(([key, value]) => [
+        key,
+        {
+          ...value,
+          ...(value.preparation === undefined
+            ? {}
+            : { preparation: { ...value.preparation } }),
+        },
+      ]),
+    ),
     evaluationIdentities: Object.fromEntries(
       Object.entries(state.evaluationIdentities).map(([key, value]) => [
         key,
@@ -236,6 +315,18 @@ export function cloneMarketplaceProjectionState(
           seenVerdictIndices: { ...value.seenVerdictIndices },
           highestVerdictIndex: value.highestVerdictIndex,
         },
+      ]),
+    ),
+    attemptEngagements: Object.fromEntries(
+      Object.entries(state.attemptEngagements ?? {}).map(([key, value]) => [
+        key,
+        { ...value },
+      ]),
+    ),
+    evaluationEngagements: Object.fromEntries(
+      Object.entries(state.evaluationEngagements ?? {}).map(([key, value]) => [
+        key,
+        { ...value },
       ]),
     ),
   };
@@ -323,6 +414,38 @@ function logIdentity(event: ObservationMarketplaceEvent): string {
   ].join(":");
 }
 
+const CANONICAL_HASH = /^0x[0-9a-f]{64}$/;
+
+function receiptPosition(
+  derivation: MarketplaceEvent["derivation"],
+): ReceiptPosition | undefined {
+  if (
+    !CANONICAL_HASH.test(derivation.blockHash)
+    || !CANONICAL_HASH.test(derivation.txHash)
+    || !Number.isSafeInteger(derivation.logIndex)
+    || derivation.logIndex < 0
+  ) {
+    return undefined;
+  }
+  return {
+    blockHash: derivation.blockHash,
+    txHash: derivation.txHash,
+    logIndex: derivation.logIndex,
+  };
+}
+
+function followsInSameReceipt(
+  earlier: ReceiptPosition | undefined,
+  laterDerivation: MarketplaceEvent["derivation"],
+): boolean {
+  const later = receiptPosition(laterDerivation);
+  return earlier !== undefined
+    && later !== undefined
+    && earlier.blockHash === later.blockHash
+    && earlier.txHash === later.txHash
+    && earlier.logIndex < later.logIndex;
+}
+
 function requestIdBindingKey(chainId: number, requestId: Hex): string {
   return `${chainId}:${requestId.toLowerCase()}`;
 }
@@ -345,6 +468,68 @@ function evaluationParentKey(
   attemptIndex: number,
 ): string {
   return `${event.derivation.chainId}:${event.projection.taskCoordinator.toLowerCase()}:${taskId}:${attemptIndex}`;
+}
+
+function evaluationEngagementKey(
+  event: ObservationMarketplaceEvent,
+  taskId: bigint,
+  attemptIndex: number,
+  verdictIndex: number,
+): string {
+  return `${evaluationParentKey(event, taskId, attemptIndex)}:${verdictIndex}`;
+}
+
+function sameAddress(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
+type ContractGeneration = "today" | "revised";
+
+function taskContractGeneration(
+  task: MarketplaceTaskProjection | undefined,
+): ContractGeneration | undefined {
+  if (task === undefined || task.admission === "rejected") return undefined;
+  const generation = task.submissionTerms?.contractGeneration;
+  return generation === "revised" || generation === "today"
+    ? generation
+    : undefined;
+}
+
+function bindingContractGeneration(binding: RequestIdBinding): ContractGeneration {
+  return binding.role === "task-attempt" || binding.role === "evaluation-attempt"
+    ? "today"
+    : "revised";
+}
+
+function isDeliverableAttemptEngagement(
+  engagement: AttemptEngagement | undefined,
+): engagement is AttemptEngagement {
+  return engagement !== undefined
+    && (engagement.status === "live" || engagement.status === "prepared");
+}
+
+function isDeliverableEvaluationEngagement(
+  engagement: EvaluationEngagement | undefined,
+): engagement is EvaluationEngagement {
+  return engagement !== undefined
+    && (engagement.status === "live" || engagement.status === "prepared");
+}
+
+function forfeitPreparedOrDeliveredBindings(
+  state: MarketplaceProjectionState,
+  chainId: number,
+  predicate: (binding: RequestIdBinding) => boolean,
+): boolean {
+  let hadDeliveredBinding = false;
+  for (const [key, binding] of Object.entries(state.requestIdBindings)) {
+    if (!key.startsWith(`${chainId}:`) || !predicate(binding)) continue;
+    if (binding.status === "delivered") hadDeliveredBinding = true;
+    if (binding.status === "prepared" || binding.status === "delivered") {
+      binding.status = "forfeited";
+      delete state.pendingMechDeliveries[key];
+    }
+  }
+  return hadDeliveredBinding;
 }
 
 function evaluationVerdictIdentityRefused(
@@ -590,19 +775,38 @@ export function reduceMarketplaceProjection(
           refuse(event, "attempt-identity-regressing", event.facts.taskId, event.facts.attemptIndex);
           break;
         }
-        if (!registerRequestIdBinding(state, event.derivation.chainId, event.facts.requestId, {
-          taskId: event.facts.taskId,
-          attemptIndex: event.facts.attemptIndex,
-          role: "task-attempt",
-        })) {
-          refuse(event, "request-id-reused", event.facts.taskId, event.facts.attemptIndex);
-          break;
+        if (
+          event.derivation.contractGeneration === "today"
+          && "requestId" in event.facts
+        ) {
+          if (!registerRequestIdBinding(
+            state,
+            event.derivation.chainId,
+            event.facts.requestId,
+            {
+              taskId: event.facts.taskId,
+              attemptIndex: event.facts.attemptIndex,
+              role: "task-attempt",
+            },
+          )) {
+            refuse(event, "request-id-reused", event.facts.taskId, event.facts.attemptIndex);
+            break;
+          }
         }
         // Today has no release/expiry; every chain claim remains a monotonic occupancy fact.
         taskCapacity.seenAttemptIndices[String(event.facts.attemptIndex)] = true;
         taskCapacity.liveAttemptIndices[String(event.facts.attemptIndex)] = true;
         taskCapacity.highestAttemptIndex = event.facts.attemptIndex;
         const attempt = attemptFor(event, event.facts.taskId, event.facts.attemptIndex);
+        state.attemptEngagements[attempt] = {
+          taskId: event.facts.taskId,
+          attemptIndex: event.facts.attemptIndex,
+          operator: event.facts.operator,
+          priorityMech: event.facts.priorityMech,
+          deliveryRate: event.facts.deliveryRate,
+          generation: event.derivation.contractGeneration,
+          status: "live",
+        };
         const effectiveDeadline = "attemptDeadline" in event.facts
           ? unixSecondsToRfc3339(event.facts.attemptDeadline)
           : event.projection.effectiveDeadline;
@@ -619,8 +823,17 @@ export function reduceMarketplaceProjection(
             source: sourceFor(event),
             dispatchContext: event.projection.dispatchContext,
             annotations: {
-              requestId: event.facts.requestId,
               contractGeneration: event.derivation.contractGeneration,
+              ...(event.derivation.contractGeneration === "today"
+                && "requestId" in event.facts
+                ? { requestId: event.facts.requestId }
+                : {
+                    engagement: {
+                      taskId: event.facts.taskId.toString(),
+                      attemptIndex: event.facts.attemptIndex,
+                      kind: "solution",
+                    },
+                  }),
             },
           },
         );
@@ -640,10 +853,287 @@ export function reduceMarketplaceProjection(
         break;
       }
 
+      case "SolutionDeliveryPrepared": {
+        const attempt = attemptFor(
+          event,
+          event.facts.taskId,
+          event.facts.attemptIndex,
+        );
+        const engagement = state.attemptEngagements[attempt];
+        if (
+          engagement === undefined
+          || engagement.generation !== "revised"
+          || !sameAddress(engagement.operator, event.facts.operator)
+        ) {
+          refuse(
+            event,
+            "attempt-not-live",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (engagement.preparedRequestId !== undefined) {
+          refuse(
+            event,
+            "attempt-already-prepared",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (engagement.status !== "live") {
+          refuse(
+            event,
+            "attempt-not-live",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        const preparation = receiptPosition(event.derivation);
+        if (preparation === undefined) {
+          refuse(
+            event,
+            "receipt-continuity-mismatch",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (!registerRequestIdBinding(
+          state,
+          event.derivation.chainId,
+          event.facts.expectedRequestId,
+          {
+            taskId: event.facts.taskId,
+            attemptIndex: event.facts.attemptIndex,
+            role: "solution-preparation",
+            kind: "solution",
+            party: event.facts.operator,
+            priorityMech: engagement.priorityMech,
+            deliveryRate: engagement.deliveryRate,
+            deliveryDigest: event.facts.deliveryDigest,
+            verdictCode: 0,
+            nonce: event.facts.nonce,
+            preparation,
+            status: "prepared",
+          },
+        )) {
+          refuse(
+            event,
+            "request-id-reused",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        engagement.preparedRequestId = event.facts.expectedRequestId;
+        engagement.status = "prepared";
+        break;
+      }
+
+      case "VerdictDeliveryPrepared": {
+        const key = evaluationEngagementKey(
+          event,
+          event.facts.taskId,
+          event.facts.attemptIndex,
+          event.facts.verdictIndex,
+        );
+        const engagement = state.evaluationEngagements[key];
+        if (
+          engagement === undefined
+          || engagement.generation !== "revised"
+          || !sameAddress(engagement.evaluator, event.facts.evaluator)
+        ) {
+          refuse(
+            event,
+            "attempt-not-live",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (engagement.preparedRequestId !== undefined) {
+          refuse(
+            event,
+            "attempt-already-prepared",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (engagement.status !== "live") {
+          refuse(
+            event,
+            "attempt-not-live",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        const preparation = receiptPosition(event.derivation);
+        if (preparation === undefined) {
+          refuse(
+            event,
+            "receipt-continuity-mismatch",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (!registerRequestIdBinding(
+          state,
+          event.derivation.chainId,
+          event.facts.expectedRequestId,
+          {
+            taskId: event.facts.taskId,
+            attemptIndex: event.facts.attemptIndex,
+            verdictIndex: event.facts.verdictIndex,
+            role: "verdict-preparation",
+            kind: "verdict",
+            party: event.facts.evaluator,
+            priorityMech: engagement.priorityMech,
+            deliveryRate: engagement.deliveryRate,
+            deliveryDigest: event.facts.deliveryDigest,
+            verdictCode: event.facts.verdictCode,
+            nonce: event.facts.nonce,
+            preparation,
+            status: "prepared",
+          },
+        )) {
+          refuse(
+            event,
+            "request-id-reused",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        engagement.preparedRequestId = event.facts.expectedRequestId;
+        engagement.status = "prepared";
+        break;
+      }
+
       case "Deliver": {
-        state.pendingMechDeliveries[
-          pendingDeliveryKey(event, event.facts.requestId)
-        ] = {
+        const pendingKey = pendingDeliveryKey(event, event.facts.requestId);
+        const bindingKey = requestIdBindingKey(
+          event.derivation.chainId,
+          event.facts.requestId,
+        );
+        const existingBinding = state.requestIdBindings[bindingKey];
+        if (existingBinding?.status === "forfeited") {
+          refuse(
+            event,
+            "engagement-forfeited",
+            existingBinding.taskId,
+            existingBinding.attemptIndex,
+          );
+          break;
+        }
+        if ("requestData" in event.facts) {
+          let decoded;
+          try {
+            decoded = decodeRevisedRequestData(event.facts.requestData);
+          } catch {
+            refuse(event, "deliver-request-data-invalid", 0n);
+            break;
+          }
+          const binding = state.requestIdBindings[bindingKey];
+          const deliveryReceipt = receiptPosition(event.derivation);
+          const kind = decoded.legKind === REVISED_LEG_SOLUTION
+            ? "solution"
+            : decoded.legKind === REVISED_LEG_VERDICT
+              ? "verdict"
+              : undefined;
+          if (
+            binding === undefined
+            || binding.status !== "prepared"
+            || binding.kind !== kind
+            || binding.taskId !== decoded.taskId
+            || binding.attemptIndex !== decoded.attemptIndex
+            || (binding.verdictIndex ?? 0) !== decoded.verdictIndex
+            || binding.deliveryDigest !== decoded.deliveryDigest
+            || (binding.verdictCode ?? 0) !== decoded.verdictCode
+            || binding.priorityMech === undefined
+            || !sameAddress(binding.priorityMech, event.facts.mech)
+            || binding.party === undefined
+            || !sameAddress(binding.party, event.facts.mechServiceMultisig)
+            || binding.deliveryRate !== event.facts.deliveryRate
+          ) {
+            refuse(
+              event,
+              "deliver-request-data-mismatch",
+              decoded.taskId,
+              decoded.attemptIndex,
+            );
+            break;
+          }
+          const attempt = attemptFor(event, decoded.taskId, decoded.attemptIndex);
+          const engagement = kind === "solution"
+            ? state.attemptEngagements[attempt]
+            : undefined;
+          const evaluation = kind === "verdict"
+            ? state.evaluationEngagements[evaluationEngagementKey(
+              event,
+              decoded.taskId,
+              decoded.attemptIndex,
+              decoded.verdictIndex,
+            )]
+            : undefined;
+          if (
+            (kind === "solution" && !isDeliverableAttemptEngagement(engagement))
+            || (kind === "verdict" && !isDeliverableEvaluationEngagement(evaluation))
+          ) {
+            refuse(
+              event,
+              engagement?.status === "forfeited" || evaluation?.status === "forfeited"
+                ? "engagement-forfeited"
+                : "attempt-not-live",
+              decoded.taskId,
+              decoded.attemptIndex,
+            );
+            break;
+          }
+          if (
+            deliveryReceipt === undefined
+            || !followsInSameReceipt(binding.preparation, event.derivation)
+          ) {
+            refuse(
+              event,
+              "receipt-continuity-mismatch",
+              decoded.taskId,
+              decoded.attemptIndex,
+            );
+            break;
+          }
+          binding.status = "delivered";
+          state.pendingMechDeliveries[pendingKey] = {
+            data: event.facts.deliveryData,
+            requestData: event.facts.requestData,
+            receipt: deliveryReceipt,
+            ...(event.projection.deliveryCorrespondence === undefined
+              ? {}
+              : {
+                  deliveryCorrespondence:
+                    event.projection.deliveryCorrespondence,
+                }),
+          };
+          break;
+        }
+        if (
+          existingBinding !== undefined
+          && bindingContractGeneration(existingBinding) === "revised"
+        ) {
+          refuse(
+            event,
+            "deliver-request-data-invalid",
+            existingBinding.taskId,
+            existingBinding.attemptIndex,
+          );
+          break;
+        }
+        state.pendingMechDeliveries[pendingKey] = {
           data: event.facts.data,
           ...(event.projection.deliveryCorrespondence === undefined
             ? {}
@@ -662,8 +1152,94 @@ export function reduceMarketplaceProjection(
           break;
         }
         const attempt = attemptFor(event, event.facts.taskId, event.facts.attemptIndex);
+        const engagement = state.attemptEngagements[attempt];
+        const authoritativeGeneration = taskContractGeneration(task)
+          ?? engagement?.generation;
+        if (
+          authoritativeGeneration === "revised"
+          && !("deliveryDigest" in event.facts)
+        ) {
+          refuse(
+            event,
+            "reservation-not-delivered",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (engagement?.status === "forfeited") {
+          refuse(
+            event,
+            "engagement-forfeited",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (
+          authoritativeGeneration === "revised"
+          && !admissibleTask(task)
+        ) {
+          refuse(
+            event,
+            "unknown-task",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
         const pendingKey = pendingDeliveryKey(event, event.facts.requestId);
         const mechDelivery = state.pendingMechDeliveries[pendingKey];
+        const binding = state.requestIdBindings[
+          requestIdBindingKey(event.derivation.chainId, event.facts.requestId)
+        ];
+        if (binding?.status === "forfeited") {
+          refuse(
+            event,
+            "engagement-forfeited",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (
+          "deliveryDigest" in event.facts
+          && (
+            mechDelivery === undefined
+            || mechDelivery.requestData === undefined
+            || binding === undefined
+            || binding.role !== "solution-preparation"
+            || binding.status !== "delivered"
+            || binding.taskId !== event.facts.taskId
+            || binding.attemptIndex !== event.facts.attemptIndex
+            || binding.deliveryDigest !== event.facts.deliveryDigest
+            || binding.party === undefined
+            || !sameAddress(binding.party, event.facts.operator)
+          )
+        ) {
+          refuse(
+            event,
+            "reservation-not-delivered",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (
+          "deliveryDigest" in event.facts
+          && (
+            !followsInSameReceipt(binding?.preparation, event.derivation)
+            || !followsInSameReceipt(mechDelivery?.receipt, event.derivation)
+          )
+        ) {
+          refuse(
+            event,
+            "receipt-continuity-mismatch",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
         if (mechDelivery === undefined) {
           emit(
             event,
@@ -680,6 +1256,13 @@ export function reduceMarketplaceProjection(
         delete state.pendingMechDeliveries[pendingKey];
 
         if ("deliveryDigest" in event.facts) {
+          if (binding !== undefined) binding.status = "claimed";
+          if (admissibleTask(task)) {
+            delete task.liveAttemptIndices[String(event.facts.attemptIndex)];
+            task.availability = updateAvailability(task);
+          }
+          const engagement = state.attemptEngagements[attempt];
+          if (engagement !== undefined) engagement.status = "submitted";
           emit(
             event,
             "network.jinn.task-execution.delivery-recorded.v1",
@@ -728,6 +1311,90 @@ export function reduceMarketplaceProjection(
           refuse(event, "task-not-admissible", event.facts.taskId, event.facts.attemptIndex);
           break;
         }
+        const evaluation = state.evaluationEngagements[
+          evaluationEngagementKey(
+            event,
+            event.facts.taskId,
+            event.facts.attemptIndex,
+            event.facts.verdictIndex,
+          )
+        ];
+        const authoritativeGeneration = taskContractGeneration(task)
+          ?? evaluation?.generation;
+        if (
+          authoritativeGeneration === "revised"
+          && !("evaluationDeliveryDigest" in event.facts)
+        ) {
+          refuse(
+            event,
+            "reservation-not-delivered",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (evaluation?.status === "forfeited") {
+          refuse(
+            event,
+            "engagement-forfeited",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (authoritativeGeneration === "revised") {
+          const pendingKey = pendingDeliveryKey(event, event.facts.requestId);
+          const mechDelivery = state.pendingMechDeliveries[pendingKey];
+          const binding = state.requestIdBindings[
+            requestIdBindingKey(event.derivation.chainId, event.facts.requestId)
+          ];
+          if (binding?.status === "forfeited") {
+            refuse(
+              event,
+              "engagement-forfeited",
+              event.facts.taskId,
+              event.facts.attemptIndex,
+            );
+            break;
+          }
+          if (
+            !("evaluationDeliveryDigest" in event.facts)
+            || mechDelivery?.requestData === undefined
+            || binding === undefined
+            || binding.role !== "verdict-preparation"
+            || binding.status !== "delivered"
+            || binding.taskId !== event.facts.taskId
+            || binding.attemptIndex !== event.facts.attemptIndex
+            || binding.verdictIndex !== event.facts.verdictIndex
+            || binding.deliveryDigest !== event.facts.evaluationDeliveryDigest
+            || binding.verdictCode !== event.facts.verdictCode
+            || binding.party === undefined
+            || !sameAddress(binding.party, event.facts.evaluator)
+          ) {
+            refuse(
+              event,
+              "reservation-not-delivered",
+              event.facts.taskId,
+              event.facts.attemptIndex,
+            );
+            break;
+          }
+          if (
+            !followsInSameReceipt(binding.preparation, event.derivation)
+            || !followsInSameReceipt(mechDelivery.receipt, event.derivation)
+          ) {
+            refuse(
+              event,
+              "receipt-continuity-mismatch",
+              event.facts.taskId,
+              event.facts.attemptIndex,
+            );
+            break;
+          }
+          delete state.pendingMechDeliveries[pendingKey];
+          binding.status = "claimed";
+          if (evaluation !== undefined) evaluation.status = "delivered";
+        }
         if (admissibleTask(task)) {
           task.terminalCause ??= "finalized";
           task.availability = "closed";
@@ -765,6 +1432,10 @@ export function reduceMarketplaceProjection(
         }
         const wasClosed = taskCapacity.availability === "closed";
         delete taskCapacity.liveAttemptIndices[String(event.facts.attemptIndex)];
+        const expiredAttempt = state.attemptEngagements[
+          attemptFor(event, event.facts.taskId, event.facts.attemptIndex)
+        ];
+        if (expiredAttempt !== undefined) expiredAttempt.status = "expired";
         taskCapacity.availability = updateAvailability(taskCapacity);
         if (wasClosed && taskCapacity.availability === "open" && taskCapacity.terminalCause === undefined && taskCapacity.requesterClosed !== true) availabilityOpenedLogIds.push(identity);
         emit(
@@ -793,6 +1464,10 @@ export function reduceMarketplaceProjection(
         }
         const wasClosed = taskCapacity.availability === "closed";
         delete taskCapacity.liveAttemptIndices[String(event.facts.attemptIndex)];
+        const releasedAttempt = state.attemptEngagements[
+          attemptFor(event, event.facts.taskId, event.facts.attemptIndex)
+        ];
+        if (releasedAttempt !== undefined) releasedAttempt.status = "released";
         taskCapacity.availability = updateAvailability(taskCapacity);
         if (wasClosed && taskCapacity.availability === "open" && taskCapacity.terminalCause === undefined && taskCapacity.requesterClosed !== true) availabilityOpenedLogIds.push(identity);
         emit(
@@ -801,6 +1476,258 @@ export function reduceMarketplaceProjection(
           attemptFor(event, event.facts.taskId, event.facts.attemptIndex),
           { state: "cancelled" },
         );
+        break;
+      }
+
+      case "AttemptForfeited": {
+        const task = state.tasks[taskKey(event, event.facts.taskId)];
+        if (!admissibleTask(task)) {
+          refuse(
+            event,
+            task?.admission === "rejected"
+              ? "task-not-admissible"
+              : "unknown-task",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        const attempt = attemptFor(
+          event,
+          event.facts.taskId,
+          event.facts.attemptIndex,
+        );
+        const engagement = state.attemptEngagements[attempt];
+        if (
+          engagement === undefined
+          || (
+            engagement.status !== "live"
+            && engagement.status !== "prepared"
+          )
+          || !sameAddress(engagement.operator, event.facts.operator)
+        ) {
+          refuse(
+            event,
+            "attempt-not-live",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        const hadDeliveredBinding = forfeitPreparedOrDeliveredBindings(
+          state,
+          event.derivation.chainId,
+          (binding) =>
+            binding.taskId === event.facts.taskId
+            && binding.attemptIndex === event.facts.attemptIndex
+            && binding.kind === "solution",
+        );
+        delete task.liveAttemptIndices[String(event.facts.attemptIndex)];
+        task.availability = updateAvailability(task);
+        engagement.status = "forfeited";
+        if (!hadDeliveredBinding) {
+          for (const binding of Object.values(state.requestIdBindings)) {
+            if (
+              binding.taskId === event.facts.taskId
+              && binding.attemptIndex === event.facts.attemptIndex
+              && binding.kind === "solution"
+            ) {
+              binding.forfeitTerminalEmitted = true;
+            }
+          }
+          emit(
+            event,
+            "network.jinn.task-execution.attempt-terminal.v1",
+            attempt,
+            {
+              state: "failed",
+              category: "result-unavailable",
+              detail: "delivery reservation forfeited",
+            },
+          );
+        }
+        break;
+      }
+
+      case "VerdictForfeited": {
+        const engagement = state.evaluationEngagements[
+          evaluationEngagementKey(
+            event,
+            event.facts.taskId,
+            event.facts.attemptIndex,
+            event.facts.verdictIndex,
+          )
+        ];
+        if (
+          engagement === undefined
+          || (
+            engagement.status !== "live"
+            && engagement.status !== "prepared"
+          )
+          || !sameAddress(engagement.evaluator, event.facts.evaluator)
+        ) {
+          refuse(
+            event,
+            "attempt-not-live",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        forfeitPreparedOrDeliveredBindings(
+          state,
+          event.derivation.chainId,
+          (binding) =>
+            binding.taskId === event.facts.taskId
+            && binding.attemptIndex === event.facts.attemptIndex
+            && binding.verdictIndex === event.facts.verdictIndex
+            && binding.kind === "verdict",
+        );
+        engagement.status = "forfeited";
+        break;
+      }
+
+      case "ReservationForfeited": {
+        const bindingKey = requestIdBindingKey(
+          event.derivation.chainId,
+          event.facts.requestId,
+        );
+        const binding = state.requestIdBindings[bindingKey];
+        const expectedKind = event.facts.legKind === REVISED_LEG_SOLUTION
+          ? "solution"
+          : event.facts.legKind === REVISED_LEG_VERDICT
+            ? "verdict"
+            : undefined;
+        if (
+          binding === undefined
+          || binding.kind !== expectedKind
+          || binding.taskId !== event.facts.taskId
+          || binding.attemptIndex !== event.facts.attemptIndex
+          || (binding.verdictIndex ?? 0) !== event.facts.verdictIndex
+          || binding.deliveryRate !== event.facts.rate
+        ) {
+          refuse(
+            event,
+            "reservation-not-delivered",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (binding.status === "forfeited") {
+          if (binding.forfeitTerminalEmitted === true) {
+            break;
+          }
+          if (expectedKind !== "solution") {
+            const evaluation = state.evaluationEngagements[
+              evaluationEngagementKey(
+                event,
+                event.facts.taskId,
+                event.facts.attemptIndex,
+                event.facts.verdictIndex,
+              )
+            ];
+            if (evaluation !== undefined) evaluation.status = "forfeited";
+            binding.forfeitTerminalEmitted = true;
+            break;
+          }
+          const task = state.tasks[taskKey(event, event.facts.taskId)];
+          if (!admissibleTask(task)) {
+            refuse(
+              event,
+              task?.admission === "rejected"
+                ? "task-not-admissible"
+                : "unknown-task",
+              event.facts.taskId,
+              event.facts.attemptIndex,
+            );
+            break;
+          }
+          const attempt = attemptFor(
+            event,
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          delete task.liveAttemptIndices[String(event.facts.attemptIndex)];
+          task.availability = updateAvailability(task);
+          const engagement = state.attemptEngagements[attempt];
+          if (engagement !== undefined) engagement.status = "forfeited";
+          binding.forfeitTerminalEmitted = true;
+          emit(
+            event,
+            "network.jinn.task-execution.attempt-terminal.v1",
+            attempt,
+            {
+              state: "failed",
+              category: "result-unavailable",
+              detail: "delivery reservation forfeited",
+            },
+          );
+          break;
+        }
+        if (
+          binding.status !== "delivered"
+          || state.pendingMechDeliveries[
+            pendingDeliveryKey(event, event.facts.requestId)
+          ] === undefined
+        ) {
+          refuse(
+            event,
+            "reservation-not-delivered",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        binding.status = "forfeited";
+        delete state.pendingMechDeliveries[
+          pendingDeliveryKey(event, event.facts.requestId)
+        ];
+        if (expectedKind === "solution") {
+          const task = state.tasks[taskKey(event, event.facts.taskId)];
+          if (!admissibleTask(task)) {
+            refuse(
+              event,
+              task?.admission === "rejected"
+                ? "task-not-admissible"
+                : "unknown-task",
+              event.facts.taskId,
+              event.facts.attemptIndex,
+            );
+            break;
+          }
+          const attempt = attemptFor(
+            event,
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          delete task.liveAttemptIndices[String(event.facts.attemptIndex)];
+          task.availability = updateAvailability(task);
+          const engagement = state.attemptEngagements[attempt];
+          if (engagement !== undefined) engagement.status = "forfeited";
+          binding.forfeitTerminalEmitted = true;
+          emit(
+            event,
+            "network.jinn.task-execution.attempt-terminal.v1",
+            attempt,
+            {
+              state: "failed",
+              category: "result-unavailable",
+              detail: "delivery reservation forfeited",
+            },
+          );
+        } else {
+          const evaluation = state.evaluationEngagements[
+            evaluationEngagementKey(
+              event,
+              event.facts.taskId,
+              event.facts.attemptIndex,
+              event.facts.verdictIndex,
+            )
+          ];
+          if (evaluation !== undefined) evaluation.status = "forfeited";
+          binding.forfeitTerminalEmitted = true;
+        }
         break;
       }
 
@@ -890,7 +1817,13 @@ export function reduceMarketplaceProjection(
           refuse(event, "task-closed", event.facts.taskId, event.facts.attemptIndex);
           break;
         }
-        if (task.liveAttemptIndices[String(event.facts.attemptIndex)] === undefined) {
+        const parentAttempt = state.attemptEngagements[
+          attemptFor(event, event.facts.taskId, event.facts.attemptIndex)
+        ];
+        const parentIsEligible = event.derivation.contractGeneration === "revised"
+          ? parentAttempt?.status === "submitted"
+          : task.liveAttemptIndices[String(event.facts.attemptIndex)] !== undefined;
+        if (!parentIsEligible) {
           refuse(event, "attempt-not-live", event.facts.taskId, event.facts.attemptIndex);
           break;
         }
@@ -907,20 +1840,45 @@ export function reduceMarketplaceProjection(
           refuse(event, "attempt-identity-regressing", event.facts.taskId, event.facts.attemptIndex);
           break;
         }
-        if (!registerRequestIdBinding(state, event.derivation.chainId, event.facts.requestId, {
-          taskId: event.facts.taskId,
-          attemptIndex: event.facts.attemptIndex,
-          role: "evaluation-attempt",
-          verdictIndex: event.facts.verdictIndex,
-        })) {
-          refuse(event, "request-id-reused", event.facts.taskId, event.facts.attemptIndex);
-          break;
+        if (
+          event.derivation.contractGeneration === "today"
+          && "requestId" in event.facts
+        ) {
+          if (!registerRequestIdBinding(
+            state,
+            event.derivation.chainId,
+            event.facts.requestId,
+            {
+              taskId: event.facts.taskId,
+              attemptIndex: event.facts.attemptIndex,
+              role: "evaluation-attempt",
+              verdictIndex: event.facts.verdictIndex,
+            },
+          )) {
+            refuse(event, "request-id-reused", event.facts.taskId, event.facts.attemptIndex);
+            break;
+          }
         }
         registerEvaluationVerdictIdentity(
           state,
           evaluationParent,
           event.facts.verdictIndex,
         );
+        state.evaluationEngagements[evaluationEngagementKey(
+          event,
+          event.facts.taskId,
+          event.facts.attemptIndex,
+          event.facts.verdictIndex,
+        )] = {
+          taskId: event.facts.taskId,
+          attemptIndex: event.facts.attemptIndex,
+          verdictIndex: event.facts.verdictIndex,
+          evaluator: event.facts.evaluator,
+          priorityMech: event.facts.priorityMech,
+          deliveryRate: event.facts.deliveryRate,
+          generation: event.derivation.contractGeneration,
+          status: "live",
+        };
         break;
       }
     }

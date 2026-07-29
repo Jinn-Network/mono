@@ -2,7 +2,6 @@ export { describeEscrowLifecycle } from "./escrow-lifecycle.js";
 export type { ForkEscrowContext } from "./escrow-lifecycle.js";
 export {
   REVISED_CLAIM_EVENT_NAMES,
-  REVISED_CONTRACT_ADAPTER_DELTA,
   REVISED_DOMAIN_HASH,
   REVISED_LEG_SOLUTION,
   REVISED_LEG_VERDICT,

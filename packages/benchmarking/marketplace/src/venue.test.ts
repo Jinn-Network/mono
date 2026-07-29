@@ -14,15 +14,16 @@ import {
 } from "@jinn-network/benchmarking-records";
 import {
   BASE_SEPOLIA_TODAY,
-  MECH_ABI,
   createInMemoryPostingIntentStore,
   createInMemoryMarketplaceObserveStore,
   deriveMarketplaceAttemptUri,
+  encodeRevisedRequestData,
   makeMarketplaceBackend,
   type MarketplaceTestableBackend,
 } from "@jinn-network/marketplace-binding";
 import {
   REVISED_PROJECTOR_EVENTS_ABI,
+  REVISED_MECH_DELIVER_ABI,
   createMarketplaceProjectionState,
   decodeMarketplaceLogs,
   marketplaceEventOriginAuthority,
@@ -198,7 +199,7 @@ function buildSealedSubmission(runDigest: `sha256:${string}`, dispatch = 1) {
 }
 
 function abiEvent(name: string): AbiEvent {
-  const event = [...REVISED_PROJECTOR_EVENTS_ABI, ...MECH_ABI].find((item) => item.name === name);
+  const event = [...REVISED_PROJECTOR_EVENTS_ABI, ...REVISED_MECH_DELIVER_ABI].find((item) => item.name === name);
   if (event === undefined) throw new Error(`unknown event ${name}`);
   return event as AbiEvent;
 }
@@ -380,7 +381,6 @@ describe("runOnMarketplace", () => {
         args: {
           operator: "0x3333333333333333333333333333333333333333",
           priorityMech: MECH,
-          requestId,
           taskId: "1",
           attemptIndex: "0",
           attemptDeadline: "4102444800",
@@ -388,26 +388,50 @@ describe("runOnMarketplace", () => {
         },
       }),
       rawLog({
-        event: "Deliver",
+        event: "SolutionDeliveryPrepared",
         blockNumber: 102,
         blockHash: "0x8888888888888888888888888888888888888888888888888888888888888888",
         txHash: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         logIndex: 0,
         finalityTier: "finalized",
         args: {
+          operator: "0x3333333333333333333333333333333333333333",
+          expectedRequestId: requestId,
+          taskId: "1",
+          attemptIndex: "0",
+          nonce: "1",
+          deliveryDigest: digestToBytes32(deliveryDigest),
+        },
+      }),
+      rawLog({
+        event: "Deliver",
+        blockNumber: 102,
+        blockHash: "0x8888888888888888888888888888888888888888888888888888888888888888",
+        txHash: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        logIndex: 1,
+        finalityTier: "finalized",
+        args: {
           mech: MECH,
-          mechServiceMultisig: MECH,
+          mechServiceMultisig: "0x3333333333333333333333333333333333333333",
           requestId,
           deliveryRate: "10",
-          data: `0x${Buffer.from(deliveryBytes).toString("hex")}`,
+          requestData: encodeRevisedRequestData({
+            legKind: 1,
+            taskId: 1n,
+            attemptIndex: 0,
+            verdictIndex: 0,
+            deliveryDigest: digestToBytes32(deliveryDigest),
+            verdictCode: 0,
+          }),
+          deliveryData: `0x${Buffer.from(deliveryBytes).toString("hex")}`,
         },
       }),
       rawLog({
         event: "SolutionDeliveryClaimed",
-        blockNumber: 103,
-        blockHash: "0x9999999999999999999999999999999999999999999999999999999999999999",
-        txHash: "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-        logIndex: 0,
+        blockNumber: 102,
+        blockHash: "0x8888888888888888888888888888888888888888888888888888888888888888",
+        txHash: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        logIndex: 2,
         finalityTier: "finalized",
         args: {
           operator: "0x3333333333333333333333333333333333333333",
@@ -422,7 +446,8 @@ describe("runOnMarketplace", () => {
       "2026-08-03T09:00:00Z",
       "2026-08-03T09:00:01Z",
       "2026-08-03T09:00:02Z",
-      "2026-08-03T09:00:03Z",
+      "2026-08-03T09:00:02Z",
+      "2026-08-03T09:00:02Z",
     ];
     const enriched = decodePipelineLogs(
       logs,
@@ -430,7 +455,7 @@ describe("runOnMarketplace", () => {
         ...projectionContext,
         timestamp,
         taskCoordinator: COORDINATOR,
-        ...(index >= 2
+        ...(index >= 3
           ? {
             deliveryCorrespondence: {
               sha256Digest: deliveryDigest,

@@ -45,8 +45,24 @@ export {
 export { SAFE_ABI, buildSafeSignature, executeSafeTransaction } from "./venue/safe.js";
 export type { SafeTransactionParams } from "./venue/safe.js";
 export { JINN_ROUTER_V3_ABI } from "./abis/jinn-router-v3.js";
+export { JINN_ROUTER_V4_ABI } from "./abis/revised-contracts.js";
 export { TASK_COORDINATOR_ABI } from "./abis/task-coordinator.js";
 export { MECH_ABI, MECH_MARKETPLACE_ABI } from "./abis/mech-marketplace.js";
+export {
+  REVISED_DOMAIN_HASH,
+  REVISED_LEG_SOLUTION,
+  REVISED_LEG_VERDICT,
+  REVISED_REQUEST_DATA_DOMAIN,
+  REVISED_REQUEST_DATA_VERSION,
+  REVISED_SOLUTION_VERDICT_CODE_SENTINEL,
+  REVISED_SOLUTION_VERDICT_SENTINEL,
+  assertRevisedRequestDataShape,
+  decodeRevisedRequestData,
+  encodeRevisedRequestData,
+  encodeRevisedSolutionRequestData,
+  encodeRevisedVerdictRequestData,
+} from "./revised-request-data.js";
+export type { RevisedRequestData } from "./revised-request-data.js";
 
 // --- today-mode symmetric honor-or-reject (§6.1, frozen §11.12, ruling §7.20; M2.2) ---
 export { honorOrRejectToday } from "./honor-or-reject.js";
@@ -121,7 +137,12 @@ export type {
   SettlementResult,
   TodayRouterDeliveryFacts,
 } from "./settlement.js";
-export { closeSubmission, releaseAttempt, signalCancel } from "./lifecycle.js";
+export {
+  closeSubmission,
+  forfeitDeliveredReservation,
+  releaseAttempt,
+  signalCancel,
+} from "./lifecycle.js";
 
 // --- evaluation leg: pair-derived Task + requester-side Submission sealing (§6.4, §7.39–§7.40) ---
 export {

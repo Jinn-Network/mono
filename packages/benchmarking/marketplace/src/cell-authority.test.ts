@@ -4,7 +4,12 @@ import {
   cellIdempotencyKey,
   submissionExtensionBlock,
 } from "@jinn-network/benchmarking-records";
-import { deriveMarketplaceAttemptUri, BASE_SEPOLIA_TODAY, MECH_ABI } from "@jinn-network/marketplace-binding";
+import {
+  BASE_SEPOLIA_TODAY,
+  deriveMarketplaceAttemptUri,
+  encodeRevisedRequestData,
+  MECH_ABI,
+} from "@jinn-network/marketplace-binding";
 import {
   decodeMarketplaceLogs,
   marketplaceEventOriginAuthority,
@@ -13,6 +18,7 @@ import {
 } from "@jinn-network/marketplace-projector";
 import {
   documentDigest,
+  sealDelivery,
   sealSubmission,
 } from "@jinn-network/task-execution-protocol";
 import {
@@ -169,7 +175,7 @@ function attemptEvent(input: {
     facts: {
       taskId: 42n,
       attemptIndex: input.attemptIndex,
-      requestId: input.requestId,
+      ...(input.generation === "today" ? { requestId: input.requestId } : {}),
       deliveryRate: 10n,
       operator: input.operator ?? OPERATOR,
       priorityMech: "0x4444444444444444444444444444444444444444" as Address,
@@ -178,7 +184,11 @@ function attemptEvent(input: {
   } as ObservationMarketplaceEvent;
 }
 
-function deliveryEvent(attemptIndex: number, requestId: Hex): ObservationMarketplaceEvent {
+function deliveryEvent(
+  attemptIndex: number,
+  requestId: Hex,
+  deliveryDigest: Hex = `0x${"d".repeat(64)}`,
+): ObservationMarketplaceEvent {
   return {
     event: "SolutionDeliveryClaimed",
     derivation: {
@@ -188,7 +198,7 @@ function deliveryEvent(attemptIndex: number, requestId: Hex): ObservationMarketp
       blockNumber: 101 + attemptIndex,
       blockHash: `0x${String(attemptIndex + 7).padStart(64, "7")}` as Hex,
       txHash: `0x${String(attemptIndex + 20).padStart(64, "b")}` as Hex,
-      logIndex: 0,
+      logIndex: 2,
       finalityTier: "finalized",
       contractGeneration: "revised",
     },
@@ -207,7 +217,7 @@ function deliveryEvent(attemptIndex: number, requestId: Hex): ObservationMarketp
       taskId: 42n,
       attemptIndex,
       requestId,
-      deliveryDigest: `0x${"d".repeat(64)}` as Hex,
+      deliveryDigest,
       operator: OPERATOR,
     },
   } as ObservationMarketplaceEvent;
@@ -223,7 +233,63 @@ function projectionWithAttempts(
     blockNumber: 105,
     blockHash: "0x1515151515151515151515151515151515151515151515151515151515151515",
   };
-  const all = [...baseEvents, ...attempts, ...settlements];
+  const completed = settlements.flatMap((settlement) => {
+    if (
+      settlement.event !== "SolutionDeliveryClaimed"
+      || !("deliveryDigest" in settlement.facts)
+    ) {
+      return [settlement];
+    }
+    const attempt = attempts.find((candidate) =>
+      candidate.event === "TaskAttemptCreated"
+      && candidate.facts.attemptIndex === settlement.facts.attemptIndex
+    );
+    if (attempt?.event !== "TaskAttemptCreated") return [settlement];
+    const prepared: ObservationMarketplaceEvent = {
+      event: "SolutionDeliveryPrepared",
+      derivation: {
+        ...settlement.derivation,
+        event: "SolutionDeliveryPrepared",
+        logIndex: 0,
+      },
+      projection: settlement.projection,
+      facts: {
+        operator: settlement.facts.operator,
+        expectedRequestId: settlement.facts.requestId,
+        taskId: settlement.facts.taskId,
+        attemptIndex: settlement.facts.attemptIndex,
+        nonce: 1n,
+        deliveryDigest: settlement.facts.deliveryDigest,
+      },
+    };
+    const delivered: ObservationMarketplaceEvent = {
+      event: "Deliver",
+      derivation: {
+        ...settlement.derivation,
+        contract: attempt.facts.priorityMech,
+        event: "Deliver",
+        logIndex: 1,
+      },
+      projection: settlement.projection,
+      facts: {
+        mech: attempt.facts.priorityMech,
+        mechServiceMultisig: settlement.facts.operator,
+        requestId: settlement.facts.requestId,
+        deliveryRate: attempt.facts.deliveryRate,
+        requestData: encodeRevisedRequestData({
+          legKind: 1,
+          taskId: settlement.facts.taskId,
+          attemptIndex: settlement.facts.attemptIndex,
+          verdictIndex: 0,
+          deliveryDigest: settlement.facts.deliveryDigest,
+          verdictCode: 0,
+        }),
+        deliveryData: settlement.facts.deliveryDigest,
+      },
+    };
+    return [prepared, delivered, settlement];
+  });
+  const all = [...baseEvents, ...attempts, ...completed];
   return deriveAuthorityProjection(all, closeAnchor);
 }
 
@@ -290,25 +356,87 @@ describe("selectAccountedAttempt", () => {
 });
 
 describe("authorizeCellFromProjection attempt selection", () => {
+  test("refused duplicate creation cannot shadow authoritative cell fields", async () => {
+    const sealed = buildSealedSubmission();
+    const base = enrichedEvents(`0x${sealed.digest.slice("sha256:".length)}`);
+    const valid = attemptEvent({
+      attemptIndex: 0,
+      requestId: `0x${"9".repeat(64)}` as Hex,
+      blockNumber: 99,
+    });
+    const refusedDuplicate = {
+      ...valid,
+      derivation: {
+        ...valid.derivation,
+        blockNumber: 100,
+        blockHash: `0x${"a".repeat(64)}` as Hex,
+        txHash: `0x${"b".repeat(64)}` as Hex,
+        logIndex: 8,
+      },
+      facts: {
+        ...valid.facts,
+        deliveryRate: 999n,
+        operator: "0x9999999999999999999999999999999999999999" as Address,
+      },
+    } as ObservationMarketplaceEvent;
+    const projection = projectionWithAttempts(base, [valid, refusedDuplicate]);
+
+    const cell = await authorizeCellFromProjection({
+      runDigest: RUN_DIGEST,
+      candidate: {
+        cellKey: CELL_KEY,
+        armId: "armA",
+        replicate: 1,
+        taskDigest: TASK_DIGEST,
+        dispatches: 1,
+      },
+      projection,
+      material: { sealedSubmissionBytes: () => sealed.bytes },
+    });
+
+    expect(cell?.attempt).toBe(deriveMarketplaceAttemptUri({
+      chainId: 84532,
+      coordinator: COORDINATOR,
+      taskId: 42n,
+      attemptIndex: 0,
+    }));
+    expect(cell?.submissionDigest).toBe(sealed.digest);
+  });
+
   test("selects later delivered attempt over earlier undelivered attempt", async () => {
     const sealed = buildSealedSubmission();
     const base = enrichedEvents(`0x${sealed.digest.slice("sha256:".length)}`);
     const request0 = `0x${"a".repeat(64)}` as Hex;
     const request1 = `0x${"b".repeat(64)}` as Hex;
-    const projection = projectionWithAttempts(
-      base,
-      [
-        attemptEvent({ attemptIndex: 0, requestId: request0, blockNumber: 99 }),
-        attemptEvent({ attemptIndex: 1, requestId: request1, blockNumber: 100 }),
-      ],
-      [deliveryEvent(1, request1)],
-    );
     const attempt1 = deriveMarketplaceAttemptUri({
       chainId: 84532,
       coordinator: COORDINATOR,
       taskId: 42n,
       attemptIndex: 1,
     });
+    const deliveryBytes = sealDelivery({
+      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      attempt: attempt1,
+      task: `sha256:${TASK_DIGEST}`,
+      outputs: [],
+      outcome: "fulfilled",
+      executionIds: ["urn:uuid:44444444-4444-4444-8444-444444444444"],
+      evidenceRecords: [],
+      createdAt: "2026-08-01T00:00:01Z",
+    });
+    const deliveryDigest = documentDigest(deliveryBytes);
+    const projection = projectionWithAttempts(
+      base,
+      [
+        attemptEvent({ attemptIndex: 0, requestId: request0, blockNumber: 99 }),
+        attemptEvent({ attemptIndex: 1, requestId: request1, blockNumber: 100 }),
+      ],
+      [deliveryEvent(
+        1,
+        request1,
+        `0x${deliveryDigest.slice("sha256:".length)}` as Hex,
+      )],
+    );
     const candidate: ProjectorCellJoinCandidate = {
       cellKey: CELL_KEY,
       armId: "armA",
@@ -321,7 +449,10 @@ describe("authorizeCellFromProjection attempt selection", () => {
       runDigest: RUN_DIGEST,
       candidate,
       projection,
-      material: { sealedSubmissionBytes: () => sealed.bytes },
+      material: {
+        sealedSubmissionBytes: () => sealed.bytes,
+        sealedDeliveryBytes: () => deliveryBytes,
+      },
     });
     expect(cell?.attempt).toBe(attempt1);
   });

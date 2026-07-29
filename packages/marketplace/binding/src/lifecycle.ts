@@ -17,6 +17,33 @@ export async function releaseAttempt(taskId: bigint, attemptIndex: number, confi
   if (ports.releaseAttempt === undefined) throw new Error("revised releaseAttempt port is required");
   await ports.releaseAttempt({ taskId, attemptIndex });
 }
+
+export async function forfeitDeliveredReservation(
+  input: {
+    readonly taskId: bigint;
+    readonly attemptIndex: number;
+    readonly verdictIndex: number;
+    readonly legKind: 1 | 2;
+  },
+  config: MarketplaceChainConfig,
+  ports: {
+    readonly forfeitDeliveredReservation?: (input: {
+      readonly taskId: bigint;
+      readonly attemptIndex: number;
+      readonly verdictIndex: number;
+      readonly legKind: 1 | 2;
+    }) => Promise<void>;
+  },
+): Promise<void | { ok: false; kind: "unsupported" }> {
+  if (config.generation === "today") {
+    return { ok: false, kind: "unsupported" };
+  }
+  if (ports.forfeitDeliveredReservation === undefined) {
+    throw new Error("revised forfeitDeliveredReservation port is required");
+  }
+  await ports.forfeitDeliveredReservation(input);
+}
+
 /** Cancellation is a durable, idempotent requester signal; it never revokes a live attempt. */
 export async function signalCancel(
   attempt: `urn:uuid:${string}`,

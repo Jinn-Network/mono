@@ -5,27 +5,27 @@
  * {@link RevisedContractConformancePort} (see contracts Hardhat adapter).
  */
 
-import { keccak256, toBytes, encodeAbiParameters, parseAbiParameters, decodeAbiParameters } from "viem";
-
-export const REVISED_REQUEST_DATA_DOMAIN = "jinn.marketplace.revised" as const;
-export const REVISED_REQUEST_DATA_VERSION = 2 as const;
-export const REVISED_LEG_SOLUTION = 1 as const;
-export const REVISED_LEG_VERDICT = 2 as const;
-export const REVISED_SOLUTION_VERDICT_SENTINEL = 0 as const;
-export const REVISED_SOLUTION_VERDICT_CODE_SENTINEL = 0 as const;
-
-export const REVISED_DOMAIN_HASH = keccak256(toBytes(REVISED_REQUEST_DATA_DOMAIN));
-
-export type RevisedRequestData = {
-  readonly domain: `0x${string}`;
-  readonly version: number;
-  readonly legKind: typeof REVISED_LEG_SOLUTION | typeof REVISED_LEG_VERDICT;
-  readonly taskId: bigint;
-  readonly attemptIndex: number;
-  readonly verdictIndex: number;
-  readonly deliveryDigest: `0x${string}`;
-  readonly verdictCode: number;
-};
+import {
+  REVISED_LEG_SOLUTION,
+  REVISED_LEG_VERDICT,
+  assertRevisedRequestDataShape,
+  type RevisedRequestData,
+} from "@jinn-network/marketplace-binding";
+import { keccak256, toBytes } from "viem";
+export {
+  REVISED_DOMAIN_HASH,
+  REVISED_LEG_SOLUTION,
+  REVISED_LEG_VERDICT,
+  REVISED_REQUEST_DATA_DOMAIN,
+  REVISED_REQUEST_DATA_VERSION,
+  REVISED_SOLUTION_VERDICT_CODE_SENTINEL,
+  REVISED_SOLUTION_VERDICT_SENTINEL,
+  assertRevisedRequestDataShape,
+  decodeRevisedRequestData,
+  encodeRevisedSolutionRequestData,
+  encodeRevisedVerdictRequestData,
+} from "@jinn-network/marketplace-binding";
+export type { RevisedRequestData } from "@jinn-network/marketplace-binding";
 
 /** Exact V4 claim events after Addendum 2026-07-29-r (no Mech requestId at claim). */
 export const REVISED_CLAIM_EVENT_NAMES = [
@@ -37,117 +37,6 @@ export const REVISED_CLAIM_EVENT_NAMES = [
   "VerdictDeliveryClaimed",
   "ReservationForfeited",
 ] as const;
-
-/**
- * Adapter delta note: projector `REVISED_COMMON_PROJECTOR_EVENTS_ABI` still lists
- * `requestId` as the third indexed topic on claim events (Addendum f). Contract core
- * emits `taskId` as the third indexed topic instead. Follow-on must update projector
- * event ABIs, claim-identity engagement (no requestId until Deliver), and
- * requestData decoding via abi.decode of this blob (v2 includes verdictCode).
- */
-export const REVISED_CONTRACT_ADAPTER_DELTA = {
-  claimEventsDropRequestId: true,
-  claimThirdIndexedTopic: "taskId",
-  requestDataEncoding:
-    "abi.encode(domain,version,legKind,taskId,attemptIndex,verdictIndex,deliveryDigest,verdictCode)",
-  requestDataVersion: REVISED_REQUEST_DATA_VERSION,
-  settlementIsAtomicSafeBatch: true,
-  settlementLegs: ["prepare", "deliverMarketplaceWithSignatures", "routerClaim"] as const,
-  feeToken: "OLAS",
-  paymentTypeName: "FixedPriceToken",
-  accounting: "escrowed = remaining + reserved + spentOut",
-} as const;
-
-const REQUEST_DATA_ABI = parseAbiParameters(
-  "bytes32 domain, uint8 version, uint8 legKind, uint256 taskId, uint32 attemptIndex, uint32 verdictIndex, bytes32 deliveryDigest, uint8 verdictCode",
-);
-
-export function encodeRevisedSolutionRequestData(input: {
-  taskId: bigint;
-  attemptIndex: number;
-  deliveryDigest: `0x${string}`;
-}): `0x${string}` {
-  if (input.deliveryDigest === ("0x" + "0".repeat(64)) as `0x${string}`) {
-    throw new Error("revised requestData deliveryDigest must be nonzero");
-  }
-  return encodeAbiParameters(REQUEST_DATA_ABI, [
-    REVISED_DOMAIN_HASH,
-    REVISED_REQUEST_DATA_VERSION,
-    REVISED_LEG_SOLUTION,
-    input.taskId,
-    input.attemptIndex,
-    REVISED_SOLUTION_VERDICT_SENTINEL,
-    input.deliveryDigest,
-    REVISED_SOLUTION_VERDICT_CODE_SENTINEL,
-  ]);
-}
-
-export function encodeRevisedVerdictRequestData(input: {
-  taskId: bigint;
-  attemptIndex: number;
-  verdictIndex: number;
-  deliveryDigest: `0x${string}`;
-  verdictCode: number;
-}): `0x${string}` {
-  if (input.deliveryDigest === ("0x" + "0".repeat(64)) as `0x${string}`) {
-    throw new Error("revised requestData deliveryDigest must be nonzero");
-  }
-  if (input.verdictCode < 1 || input.verdictCode > 4) {
-    throw new Error(`revised verdictCode invalid: ${input.verdictCode}`);
-  }
-  return encodeAbiParameters(REQUEST_DATA_ABI, [
-    REVISED_DOMAIN_HASH,
-    REVISED_REQUEST_DATA_VERSION,
-    REVISED_LEG_VERDICT,
-    input.taskId,
-    input.attemptIndex,
-    input.verdictIndex,
-    input.deliveryDigest,
-    input.verdictCode,
-  ]);
-}
-
-export function decodeRevisedRequestData(data: `0x${string}`): RevisedRequestData {
-  const [domain, version, legKind, taskId, attemptIndex, verdictIndex, deliveryDigest, verdictCode] =
-    decodeAbiParameters(REQUEST_DATA_ABI, data);
-  const decoded: RevisedRequestData = {
-    domain: domain as `0x${string}`,
-    version: Number(version),
-    legKind: Number(legKind) as RevisedRequestData["legKind"],
-    taskId,
-    attemptIndex: Number(attemptIndex),
-    verdictIndex: Number(verdictIndex),
-    deliveryDigest: deliveryDigest as `0x${string}`,
-    verdictCode: Number(verdictCode),
-  };
-  assertRevisedRequestDataShape(decoded);
-  return decoded;
-}
-
-export function assertRevisedRequestDataShape(decoded: RevisedRequestData): void {
-  if (decoded.domain !== REVISED_DOMAIN_HASH) {
-    throw new Error(`revised requestData domain mismatch: ${decoded.domain}`);
-  }
-  if (decoded.version !== REVISED_REQUEST_DATA_VERSION) {
-    throw new Error(`revised requestData version mismatch: ${decoded.version}`);
-  }
-  if (decoded.legKind !== REVISED_LEG_SOLUTION && decoded.legKind !== REVISED_LEG_VERDICT) {
-    throw new Error(`revised requestData legKind invalid: ${decoded.legKind}`);
-  }
-  if (decoded.legKind === REVISED_LEG_SOLUTION) {
-    if (decoded.verdictIndex !== REVISED_SOLUTION_VERDICT_SENTINEL) {
-      throw new Error("solution requestData must use verdictIndex sentinel 0");
-    }
-    if (decoded.verdictCode !== REVISED_SOLUTION_VERDICT_CODE_SENTINEL) {
-      throw new Error("solution requestData must use verdictCode sentinel 0");
-    }
-  } else if (decoded.verdictCode < 1 || decoded.verdictCode > 4) {
-    throw new Error(`revised verdictCode invalid: ${decoded.verdictCode}`);
-  }
-  if (decoded.deliveryDigest === ("0x" + "0".repeat(64)) as `0x${string}`) {
-    throw new Error("revised requestData deliveryDigest must be nonzero");
-  }
-}
 
 /** Port implemented by a Hardhat (or other) deployment adapter. */
 export interface RevisedContractConformancePort {

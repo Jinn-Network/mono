@@ -55,12 +55,36 @@ export function validateRequirementsAgainstRunPinning(
   return undefined;
 }
 
+function pinnedIsolationUnsupported(
+  facts: Pick<SubmissionFacts, "requirements" | "runPinning">,
+  capabilities: BackendCapabilities,
+): boolean {
+  const pinned = facts.runPinning?.isolationPolicy;
+  if (pinned === undefined) return false;
+
+  const requested = requestedInventoryValue(facts.requirements["isolationPolicy"]);
+  if (requested !== pinned || pinned === "*" || pinned === "unrestricted") return true;
+
+  const support = capabilities.runPinning.keys.find(({ key }) =>
+    key === "isolationPolicy"
+  );
+  if (
+    support === undefined
+    || support.posture !== "enforced"
+    || !support.inventory.includes(pinned)
+    || !capabilities.isolation.includes(pinned)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Fail-closed backend capability + preflight gate (design §7). Runs after operator policy
  * gates and before any venue claim.
  */
 export async function verifyPreclaim(
-  facts: Pick<SubmissionFacts, "profileUri" | "requirements">,
+  facts: Pick<SubmissionFacts, "profileUri" | "requirements" | "runPinning">,
   backend: TaskExecutionBackend,
   capabilities: BackendCapabilities,
 ): Promise<PreclaimResult> {
@@ -74,6 +98,13 @@ export async function verifyPreclaim(
   );
   if (unsupportedKey !== undefined) {
     return { ok: false, reason: "unsupported-requirement", detail: unsupportedKey };
+  }
+  if (pinnedIsolationUnsupported(facts, capabilities)) {
+    return {
+      ok: false,
+      reason: "unsupported-requirement",
+      detail: "isolationPolicy",
+    };
   }
 
   if (!capabilities.preflight || backend.preflight === undefined) {

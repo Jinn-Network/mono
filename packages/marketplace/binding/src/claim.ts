@@ -14,13 +14,36 @@ export interface ClaimPorts {
   readonly priorityMech: Address;
   readonly capabilityMatch: () => Promise<PreClaimResult>;
   readonly preflight?: () => Promise<PreClaimResult>;
-  readonly claimTask: (input: { taskId: bigint; priorityMech: Address }) => Promise<{ attemptIndex: number; requestId: Hex; txHash: Hex }>;
+  readonly claimTask: (input: {
+    taskId: bigint;
+    priorityMech: Address;
+  }) => Promise<{
+    attemptIndex: number;
+    requestId?: Hex;
+    txHash: Hex;
+  }>;
 }
+
+interface ClaimSuccessBase {
+  readonly ok: true;
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+  readonly attemptUri: AttemptUri;
+  readonly txHash: Hex;
+  readonly dispatchContext: DispatchContext;
+}
+
 export type ClaimAttemptResult =
   | { ok: false; kind: "pre-claim-rejected"; reason: string }
-  | { ok: true; attemptIndex: number; attemptUri: AttemptUri; requestId: Hex; txHash: Hex; dispatchContext: DispatchContext };
+  | (ClaimSuccessBase & {
+      readonly generation: "today";
+      readonly requestId: Hex;
+    })
+  | (ClaimSuccessBase & {
+      readonly generation: "revised";
+    });
 
-/** Today-mode spends the Mech request at claim; revised-mode reservation-not-spend is M7 work. */
+/** Today claims bind requestId; revised claims bind only monotonic task-attempt identity. */
 export async function claimAttempt(taskId: bigint, config: MarketplaceChainConfig, ports: ClaimPorts): Promise<ClaimAttemptResult> {
   const capability = await ports.capabilityMatch();
   if (!capability.ok) return { ok: false, kind: "pre-claim-rejected", reason: capability.reason };
@@ -28,10 +51,52 @@ export async function claimAttempt(taskId: bigint, config: MarketplaceChainConfi
   if (!preflight.ok) return { ok: false, kind: "pre-claim-rejected", reason: preflight.reason };
   const receipt = await ports.claimTask({ taskId, priorityMech: ports.priorityMech });
   const attemptUri = deriveMarketplaceAttemptUri({ chainId: config.chainId, coordinator: config.taskCoordinator, taskId, attemptIndex: receipt.attemptIndex });
-  return { ok: true, ...receipt, attemptUri, dispatchContext: { taskDigest: ports.taskDigest, submission: ports.submission, nonce: ports.nonce, attempt: attemptUri } };
+  const base = {
+    ok: true as const,
+    taskId,
+    attemptIndex: receipt.attemptIndex,
+    attemptUri,
+    txHash: receipt.txHash,
+    dispatchContext: {
+      taskDigest: ports.taskDigest,
+      submission: ports.submission,
+      nonce: ports.nonce,
+      attempt: attemptUri,
+    },
+  };
+  if (config.generation === "revised") {
+    if (receipt.requestId !== undefined) {
+      throw new Error("revised claimTask must not return a requestId");
+    }
+    return { ...base, generation: "revised" };
+  }
+  if (receipt.requestId === undefined) {
+    throw new Error("today claimTask must return a requestId");
+  }
+  return { ...base, generation: "today", requestId: receipt.requestId };
 }
 
 /** Correlation annotation carried by the later `attempt-engaged` projection. */
-export function dispatchContextDescriptor(attemptUri: AttemptUri, requestId: Hex, txHash: Hex): { attempt: AttemptUri; requestId: Hex; txHash: Hex } {
-  return { attempt: attemptUri, requestId, txHash };
+export function dispatchContextDescriptor(
+  claim: Extract<ClaimAttemptResult, { ok: true }>,
+): {
+  readonly attempt: AttemptUri;
+  readonly engagement: {
+    readonly taskId: bigint;
+    readonly attemptIndex: number;
+    readonly kind: "solution";
+  };
+  readonly txHash: Hex;
+  readonly requestId?: Hex;
+} {
+  return {
+    attempt: claim.attemptUri,
+    engagement: {
+      taskId: claim.taskId,
+      attemptIndex: claim.attemptIndex,
+      kind: "solution",
+    },
+    txHash: claim.txHash,
+    ...(claim.generation === "today" ? { requestId: claim.requestId } : {}),
+  };
 }

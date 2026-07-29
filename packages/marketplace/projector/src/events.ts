@@ -50,8 +50,7 @@ export const REVISED_COMMON_PROJECTOR_EVENTS_ABI = [
     inputs: [
       { name: "operator", type: "address", indexed: true },
       { name: "priorityMech", type: "address", indexed: true },
-      { name: "requestId", type: "bytes32", indexed: true },
-      { name: "taskId", type: "uint256", indexed: false },
+      { name: "taskId", type: "uint256", indexed: true },
       { name: "attemptIndex", type: "uint32", indexed: false },
       { name: "attemptDeadline", type: "uint64", indexed: false },
       { name: "deliveryRate", type: "uint256", indexed: false },
@@ -63,12 +62,37 @@ export const REVISED_COMMON_PROJECTOR_EVENTS_ABI = [
     inputs: [
       { name: "evaluator", type: "address", indexed: true },
       { name: "priorityMech", type: "address", indexed: true },
-      { name: "requestId", type: "bytes32", indexed: true },
-      { name: "taskId", type: "uint256", indexed: false },
+      { name: "taskId", type: "uint256", indexed: true },
       { name: "attemptIndex", type: "uint32", indexed: false },
       { name: "verdictIndex", type: "uint32", indexed: false },
       { name: "attemptDeadline", type: "uint64", indexed: false },
       { name: "deliveryRate", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "SolutionDeliveryPrepared",
+    inputs: [
+      { name: "operator", type: "address", indexed: true },
+      { name: "expectedRequestId", type: "bytes32", indexed: true },
+      { name: "taskId", type: "uint256", indexed: true },
+      { name: "attemptIndex", type: "uint32", indexed: false },
+      { name: "nonce", type: "uint256", indexed: false },
+      { name: "deliveryDigest", type: "bytes32", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "VerdictDeliveryPrepared",
+    inputs: [
+      { name: "evaluator", type: "address", indexed: true },
+      { name: "expectedRequestId", type: "bytes32", indexed: true },
+      { name: "taskId", type: "uint256", indexed: true },
+      { name: "attemptIndex", type: "uint32", indexed: false },
+      { name: "verdictIndex", type: "uint32", indexed: false },
+      { name: "nonce", type: "uint256", indexed: false },
+      { name: "deliveryDigest", type: "bytes32", indexed: false },
+      { name: "verdictCode", type: "uint8", indexed: false },
     ],
   },
   {
@@ -115,6 +139,18 @@ export const REVISED_COMMON_PROJECTOR_EVENTS_ABI = [
       { name: "newMaxTotal", type: "uint32", indexed: false },
     ],
   },
+  {
+    type: "event",
+    name: "ReservationForfeited",
+    inputs: [
+      { name: "taskId", type: "uint256", indexed: true },
+      { name: "attemptIndex", type: "uint32", indexed: true },
+      { name: "verdictIndex", type: "uint32", indexed: true },
+      { name: "requestId", type: "bytes32", indexed: false },
+      { name: "rate", type: "uint256", indexed: false },
+      { name: "legKind", type: "uint8", indexed: false },
+    ],
+  },
 ] as const;
 
 /** Exact V4 lifecycle events frozen by Addendum 2026-07-29-e / ruling §7.28. */
@@ -147,10 +183,51 @@ export const REVISED_LIFECYCLE_PROJECTOR_EVENTS_ABI = [
   },
 ] as const;
 
-export const REVISED_PROJECTOR_EVENTS_ABI = [
+export const REVISED_ROUTER_PROJECTOR_EVENTS_ABI = [
   ...REVISED_COMMON_PROJECTOR_EVENTS_ABI,
   ...REVISED_LIFECYCLE_PROJECTOR_EVENTS_ABI,
 ] as const;
+
+export const REVISED_COORDINATOR_PROJECTOR_EVENTS_ABI = [
+  {
+    type: "event",
+    name: "AttemptForfeited",
+    inputs: [
+      { name: "taskId", type: "uint256", indexed: true },
+      { name: "attemptIndex", type: "uint32", indexed: true },
+      { name: "operator", type: "address", indexed: true },
+    ],
+  },
+  {
+    type: "event",
+    name: "VerdictForfeited",
+    inputs: [
+      { name: "taskId", type: "uint256", indexed: true },
+      { name: "attemptIndex", type: "uint32", indexed: true },
+      { name: "verdictIndex", type: "uint32", indexed: true },
+      { name: "evaluator", type: "address", indexed: false },
+    ],
+  },
+] as const;
+
+export const REVISED_PROJECTOR_EVENTS_ABI = [
+  ...REVISED_ROUTER_PROJECTOR_EVENTS_ABI,
+  ...REVISED_COORDINATOR_PROJECTOR_EVENTS_ABI,
+] as const;
+
+/** Exact signed-delivery event emitted by MechMarketplace in revised mode. */
+export const REVISED_MECH_DELIVER_ABI = [{
+  type: "event",
+  name: "Deliver",
+  inputs: [
+    { name: "mech", type: "address", indexed: true },
+    { name: "mechServiceMultisig", type: "address", indexed: true },
+    { name: "requestId", type: "bytes32", indexed: false },
+    { name: "deliveryRate", type: "uint256", indexed: false },
+    { name: "requestData", type: "bytes", indexed: false },
+    { name: "deliveryData", type: "bytes", indexed: false },
+  ],
+}] as const;
 
 const V3_ROUTER_EVENTS_ABI = JINN_ROUTER_V3_ABI.filter(
   (entry) => entry.type === "event",
@@ -159,9 +236,15 @@ const TODAY_ROUTER_EVENT_TOPICS = new Set(
   V3_ROUTER_EVENTS_ABI.map((event) => toEventSelector(event)),
 );
 const TODAY_PROJECTOR_EVENTS_ABI = [...V3_ROUTER_EVENTS_ABI, ...MECH_ABI] as const;
-const REVISED_DECODE_EVENTS_ABI = [...REVISED_PROJECTOR_EVENTS_ABI, ...MECH_ABI] as const;
+const REVISED_DECODE_EVENTS_ABI = [
+  ...REVISED_PROJECTOR_EVENTS_ABI,
+  ...REVISED_MECH_DELIVER_ABI,
+] as const;
 const REVISED_ROUTER_EVENT_TOPICS = new Set(
-  REVISED_PROJECTOR_EVENTS_ABI.map((event) => toEventSelector(event)),
+  REVISED_ROUTER_PROJECTOR_EVENTS_ABI.map((event) => toEventSelector(event)),
+);
+const REVISED_COORDINATOR_EVENT_TOPICS = new Set(
+  REVISED_COORDINATOR_PROJECTOR_EVENTS_ABI.map((event) => toEventSelector(event)),
 );
 
 const TODAY_EVENT_TOPICS = new Set(
@@ -170,7 +253,12 @@ const TODAY_EVENT_TOPICS = new Set(
 const REVISED_EVENT_TOPICS = new Set(
   REVISED_DECODE_EVENTS_ABI.map((event) => toEventSelector(event)),
 );
-const MECH_EVENT_TOPICS = new Set(MECH_ABI.map((event) => toEventSelector(event)));
+const TODAY_MECH_EVENT_TOPICS = new Set(
+  MECH_ABI.map((event) => toEventSelector(event)),
+);
+const REVISED_MECH_EVENT_TOPICS = new Set(
+  REVISED_MECH_DELIVER_ABI.map((event) => toEventSelector(event)),
+);
 
 /**
  * Explicit decode authority: configuration supplies exact chain/router/coordinator identities;
@@ -199,7 +287,10 @@ function authorizedOrigin(
 ): boolean {
   if (log.chainId !== authority.config.chainId || log.topics.length === 0) return false;
   const topic = log.topics[0]!;
-  if (MECH_EVENT_TOPICS.has(topic)) {
+  const mechTopics = authority.config.generation === "today"
+    ? TODAY_MECH_EVENT_TOPICS
+    : REVISED_MECH_EVENT_TOPICS;
+  if (mechTopics.has(topic)) {
     return authority.isAuthorizedMechOrigin(log.address);
   }
   const routerTopics = authority.config.generation === "today"
@@ -207,6 +298,12 @@ function authorizedOrigin(
     : REVISED_ROUTER_EVENT_TOPICS;
   if (routerTopics.has(topic)) {
     return sameEvmAddress(log.address, authority.config.jinnRouter);
+  }
+  if (
+    authority.config.generation === "revised"
+    && REVISED_COORDINATOR_EVENT_TOPICS.has(topic)
+  ) {
+    return sameEvmAddress(log.address, authority.config.taskCoordinator);
   }
   return false;
 }
@@ -262,7 +359,6 @@ type V3TaskAttemptCreated = Event<"TaskAttemptCreated", {
 type V4TaskAttemptCreated = Event<"TaskAttemptCreated", {
   readonly operator: Address;
   readonly priorityMech: Address;
-  readonly requestId: Hex;
   readonly taskId: bigint;
   readonly attemptIndex: number;
   readonly attemptDeadline: bigint;
@@ -282,7 +378,6 @@ type V3EvaluationAttemptCreated = Event<"EvaluationAttemptCreated", {
 type V4EvaluationAttemptCreated = Event<"EvaluationAttemptCreated", {
   readonly evaluator: Address;
   readonly priorityMech: Address;
-  readonly requestId: Hex;
   readonly taskId: bigint;
   readonly attemptIndex: number;
   readonly verdictIndex: number;
@@ -338,6 +433,32 @@ export type MarketplaceEvent =
       readonly deliveryRate: bigint;
       readonly data: Hex;
     }>
+  | Event<"Deliver", {
+      readonly mech: Address;
+      readonly mechServiceMultisig: Address;
+      readonly requestId: Hex;
+      readonly deliveryRate: bigint;
+      readonly requestData: Hex;
+      readonly deliveryData: Hex;
+    }>
+  | Event<"SolutionDeliveryPrepared", {
+      readonly operator: Address;
+      readonly expectedRequestId: Hex;
+      readonly taskId: bigint;
+      readonly attemptIndex: number;
+      readonly nonce: bigint;
+      readonly deliveryDigest: Hex;
+    }>
+  | Event<"VerdictDeliveryPrepared", {
+      readonly evaluator: Address;
+      readonly expectedRequestId: Hex;
+      readonly taskId: bigint;
+      readonly attemptIndex: number;
+      readonly verdictIndex: number;
+      readonly nonce: bigint;
+      readonly deliveryDigest: Hex;
+      readonly verdictCode: number;
+    }>
   | V3SolutionDeliveryClaimed
   | V4SolutionDeliveryClaimed
   | V3VerdictDeliveryClaimed
@@ -367,6 +488,25 @@ export type MarketplaceEvent =
   | Event<"TaskClosed", {
       readonly taskId: bigint;
       readonly creator: Address;
+    }>
+  | Event<"ReservationForfeited", {
+      readonly taskId: bigint;
+      readonly attemptIndex: number;
+      readonly verdictIndex: number;
+      readonly requestId: Hex;
+      readonly rate: bigint;
+      readonly legKind: number;
+    }>
+  | Event<"AttemptForfeited", {
+      readonly taskId: bigint;
+      readonly attemptIndex: number;
+      readonly operator: Address;
+    }>
+  | Event<"VerdictForfeited", {
+      readonly taskId: bigint;
+      readonly attemptIndex: number;
+      readonly verdictIndex: number;
+      readonly evaluator: Address;
     }>;
 
 function argsRecord(value: unknown): Record<string, unknown> {
@@ -417,7 +557,23 @@ function commonEvent(
 ): MarketplaceEvent | undefined {
   switch (eventName) {
     case "Deliver":
-      return {
+      return "requestData" in args
+        ? {
+            event: eventName,
+            facts: {
+              mech: stringArg<Address>(args, "mech"),
+              mechServiceMultisig: stringArg<Address>(
+                args,
+                "mechServiceMultisig",
+              ),
+              requestId: stringArg<Hex>(args, "requestId"),
+              deliveryRate: bigintArg(args, "deliveryRate"),
+              requestData: stringArg<Hex>(args, "requestData"),
+              deliveryData: stringArg<Hex>(args, "deliveryData"),
+            },
+            derivation,
+          }
+        : {
         event: eventName,
         facts: {
           mech: stringArg<Address>(args, "mech"),
@@ -554,7 +710,6 @@ function revisedEvent(
         facts: {
           operator: stringArg<Address>(args, "operator"),
           priorityMech: stringArg<Address>(args, "priorityMech"),
-          requestId: stringArg<Hex>(args, "requestId"),
           taskId: bigintArg(args, "taskId"),
           attemptIndex: numberArg(args, "attemptIndex"),
           attemptDeadline: bigintArg(args, "attemptDeadline"),
@@ -568,12 +723,39 @@ function revisedEvent(
         facts: {
           evaluator: stringArg<Address>(args, "evaluator"),
           priorityMech: stringArg<Address>(args, "priorityMech"),
-          requestId: stringArg<Hex>(args, "requestId"),
           taskId: bigintArg(args, "taskId"),
           attemptIndex: numberArg(args, "attemptIndex"),
           verdictIndex: numberArg(args, "verdictIndex"),
           attemptDeadline: bigintArg(args, "attemptDeadline"),
           deliveryRate: bigintArg(args, "deliveryRate"),
+        },
+        derivation,
+      };
+    case "SolutionDeliveryPrepared":
+      return {
+        event: eventName,
+        facts: {
+          operator: stringArg<Address>(args, "operator"),
+          expectedRequestId: stringArg<Hex>(args, "expectedRequestId"),
+          taskId: bigintArg(args, "taskId"),
+          attemptIndex: numberArg(args, "attemptIndex"),
+          nonce: bigintArg(args, "nonce"),
+          deliveryDigest: stringArg<Hex>(args, "deliveryDigest"),
+        },
+        derivation,
+      };
+    case "VerdictDeliveryPrepared":
+      return {
+        event: eventName,
+        facts: {
+          evaluator: stringArg<Address>(args, "evaluator"),
+          expectedRequestId: stringArg<Hex>(args, "expectedRequestId"),
+          taskId: bigintArg(args, "taskId"),
+          attemptIndex: numberArg(args, "attemptIndex"),
+          verdictIndex: numberArg(args, "verdictIndex"),
+          nonce: bigintArg(args, "nonce"),
+          deliveryDigest: stringArg<Hex>(args, "deliveryDigest"),
+          verdictCode: numberArg(args, "verdictCode"),
         },
         derivation,
       };
@@ -616,6 +798,7 @@ function revisedEvent(
       };
     case "AttemptExpired":
     case "AttemptReleased":
+    case "AttemptForfeited":
       return {
         event: eventName,
         facts: {
@@ -625,12 +808,36 @@ function revisedEvent(
         },
         derivation,
       };
+    case "VerdictForfeited":
+      return {
+        event: eventName,
+        facts: {
+          taskId: bigintArg(args, "taskId"),
+          attemptIndex: numberArg(args, "attemptIndex"),
+          verdictIndex: numberArg(args, "verdictIndex"),
+          evaluator: stringArg<Address>(args, "evaluator"),
+        },
+        derivation,
+      };
     case "TaskClosed":
       return {
         event: eventName,
         facts: {
           taskId: bigintArg(args, "taskId"),
           creator: stringArg<Address>(args, "creator"),
+        },
+        derivation,
+      };
+    case "ReservationForfeited":
+      return {
+        event: eventName,
+        facts: {
+          taskId: bigintArg(args, "taskId"),
+          attemptIndex: numberArg(args, "attemptIndex"),
+          verdictIndex: numberArg(args, "verdictIndex"),
+          requestId: stringArg<Hex>(args, "requestId"),
+          rate: bigintArg(args, "rate"),
+          legKind: numberArg(args, "legKind"),
         },
         derivation,
       };

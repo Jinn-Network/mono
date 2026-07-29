@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { keccak256, toBytes } from "viem";
 import {
-  REVISED_CONTRACT_ADAPTER_DELTA,
   REVISED_DOMAIN_HASH,
   REVISED_LEG_SOLUTION,
   REVISED_LEG_VERDICT,
@@ -16,19 +15,6 @@ import {
 } from "./revised-contract-conformance.js";
 
 describe("revised-contract-conformance surface", () => {
-  test("documents the frozen adapter delta for binding/projector follow-on", () => {
-    expect(REVISED_CONTRACT_ADAPTER_DELTA.claimEventsDropRequestId).toBe(true);
-    expect(REVISED_CONTRACT_ADAPTER_DELTA.claimThirdIndexedTopic).toBe("taskId");
-    expect(REVISED_CONTRACT_ADAPTER_DELTA.feeToken).toBe("OLAS");
-    expect(REVISED_CONTRACT_ADAPTER_DELTA.requestDataVersion).toBe(2);
-    expect(REVISED_CONTRACT_ADAPTER_DELTA.requestDataEncoding).toMatch(/verdictCode/);
-    expect(REVISED_CONTRACT_ADAPTER_DELTA.settlementLegs).toEqual([
-      "prepare",
-      "deliverMarketplaceWithSignatures",
-      "routerClaim",
-    ]);
-  });
-
   test("encodes and decodes v2 requestData with verdictCode binding", () => {
     const digest = keccak256(toBytes("d"));
     const solution = encodeRevisedSolutionRequestData({

@@ -13,13 +13,14 @@ import {
   type SourceHead,
 } from "@jinn-network/record-discovery-protocol";
 import type { BlobStore } from "@jinn-network/record-discovery-serve";
-import { BASE_SEPOLIA_TODAY, MECH_ABI } from "@jinn-network/marketplace-binding";
+import { BASE_SEPOLIA_TODAY } from "@jinn-network/marketplace-binding";
 import {
   foldObservations,
   type ProtocolObservation,
 } from "@jinn-network/task-execution-protocol";
 import {
   REVISED_PROJECTOR_EVENTS_ABI,
+  REVISED_MECH_DELIVER_ABI,
   appendSignedReorgCorrection,
   createMarketplaceProjectionState,
   decodeMarketplaceLogs,
@@ -84,7 +85,7 @@ function asFixtureLogs(fixture: {
 }
 
 function abiEvent(name: string): AbiEvent {
-  const event = [...REVISED_PROJECTOR_EVENTS_ABI, ...MECH_ABI].find((item) =>
+  const event = [...REVISED_PROJECTOR_EVENTS_ABI, ...REVISED_MECH_DELIVER_ABI].find((item) =>
     item.name === name
   );
   if (event === undefined) throw new Error(`unknown fixture event: ${name}`);
@@ -691,20 +692,41 @@ const subject: MarketplaceProjectorConformanceSubject = {
     ) {
       throw new Error(`fixture ${fixture.name} projected no lost correction`);
     }
-    const laterEvent: ObservationMarketplaceEvent = {
-      ...verdict,
+    const preparation = events.find((event) =>
+      event.event === "VerdictDeliveryPrepared"
+      && event.facts.expectedRequestId === verdict.facts.requestId
+    );
+    const delivery = events.find((event) =>
+      event.event === "Deliver"
+      && event.facts.requestId === verdict.facts.requestId
+    );
+    if (preparation === undefined || delivery === undefined) {
+      throw new Error(`fixture ${fixture.name} projected no atomic verdict receipt`);
+    }
+    const atomicReceipt = [preparation, delivery, verdict];
+    const laterReceipt = atomicReceipt.map((event, logIndex): ObservationMarketplaceEvent => ({
+      ...event,
       derivation: {
-        ...verdict.derivation,
+        ...event.derivation,
         blockNumber: verdict.derivation.blockNumber + 1,
         blockHash: `0x${"8".repeat(64)}`,
         txHash: `0x${"9".repeat(64)}`,
+        logIndex,
       },
       projection: {
-        ...verdict.projection,
+        ...event.projection,
         timestamp: "2026-07-29T12:10:00Z",
       },
-    };
-    const later = reduceMarketplaceProjection([laterEvent], corrected.state);
+    }));
+    const canonicalBeforeVerdict = reduceMarketplaceProjection(
+      events.filter((event) => !atomicReceipt.includes(event)),
+      createMarketplaceProjectionState(),
+    ).state;
+    const later = reduceMarketplaceProjection(laterReceipt, {
+      ...canonicalBeforeVerdict,
+      processedCorrectionIds: corrected.state.processedCorrectionIds,
+      sequenceBySourceSubject: corrected.state.sequenceBySourceSubject,
+    });
     const laterTerminal = later.observations.find((observation) =>
       observation.type === "network.jinn.task-execution.attempt-terminal.v1"
     );

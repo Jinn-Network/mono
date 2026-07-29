@@ -12,6 +12,7 @@ import {
 import { describe, expect, test } from "vitest";
 import {
   REVISED_COMMON_PROJECTOR_EVENTS_ABI,
+  REVISED_MECH_DELIVER_ABI,
   REVISED_PROJECTOR_EVENTS_ABI,
   decodeMarketplaceLogs as decodeWithAuthority,
   marketplaceEventOriginAuthority,
@@ -251,33 +252,31 @@ describe("decodeMarketplaceLogs", () => {
       topics: exactTopics(encodeEventTopics({
         abi: REVISED_COMMON_PROJECTOR_EVENTS_ABI,
         eventName: "TaskAttemptCreated",
-        args: { operator: OPERATOR, priorityMech: PRIORITY_MECH, requestId: REQUEST_ID },
+        args: { operator: OPERATOR, priorityMech: PRIORITY_MECH, taskId: 42n },
       })),
       data: encodeAbiParameters(
         [
-          { name: "taskId", type: "uint256" },
           { name: "attemptIndex", type: "uint32" },
           { name: "attemptDeadline", type: "uint64" },
           { name: "deliveryRate", type: "uint256" },
         ],
-        [42n, 3, 1_800_000_000n, 100n],
+        [3, 1_800_000_000n, 100n],
       ),
     });
     const evaluationAttempt = log({
       topics: exactTopics(encodeEventTopics({
         abi: REVISED_COMMON_PROJECTOR_EVENTS_ABI,
         eventName: "EvaluationAttemptCreated",
-        args: { evaluator, priorityMech: PRIORITY_MECH, requestId: REQUEST_ID },
+        args: { evaluator, priorityMech: PRIORITY_MECH, taskId: 42n },
       })),
       data: encodeAbiParameters(
         [
-          { name: "taskId", type: "uint256" },
           { name: "attemptIndex", type: "uint32" },
           { name: "verdictIndex", type: "uint32" },
           { name: "attemptDeadline", type: "uint64" },
           { name: "deliveryRate", type: "uint256" },
         ],
-        [42n, 3, 4, 1_800_000_100n, 200n],
+        [3, 4, 1_800_000_100n, 200n],
       ),
     });
     const solutionClaimed = log({
@@ -326,7 +325,6 @@ describe("decodeMarketplaceLogs", () => {
         facts: {
           operator: OPERATOR,
           priorityMech: PRIORITY_MECH,
-          requestId: REQUEST_ID,
           taskId: 42n,
           attemptIndex: 3,
           attemptDeadline: 1_800_000_000n,
@@ -338,7 +336,6 @@ describe("decodeMarketplaceLogs", () => {
         facts: {
           evaluator,
           priorityMech: PRIORITY_MECH,
-          requestId: REQUEST_ID,
           taskId: 42n,
           attemptIndex: 3,
           verdictIndex: 4,
@@ -594,8 +591,21 @@ describe("decodeMarketplaceLogs", () => {
         contractGeneration: "today",
       }),
     });
+    const revisedTopics = encodeEventTopics({
+      abi: REVISED_MECH_DELIVER_ABI,
+      eventName: "Deliver",
+      args: { mech: MECH, mechServiceMultisig: OPERATOR },
+    });
+    const revisedData = encodeAbiParameters(
+      REVISED_MECH_DELIVER_ABI[0].inputs.filter((input) => !input.indexed),
+      [REQUEST_ID, 99n, "0x1234", "0xabcd"],
+    );
     expect(decodeMarketplaceLogs([
-      log({ address: MECH, topics: exactTopics(topics), data }),
+      log({
+        address: MECH,
+        topics: exactTopics(revisedTopics),
+        data: revisedData,
+      }),
     ], "revised")[0]).toEqual({
       event: "Deliver",
       facts: {
@@ -603,7 +613,8 @@ describe("decodeMarketplaceLogs", () => {
         mechServiceMultisig: OPERATOR,
         requestId: REQUEST_ID,
         deliveryRate: 99n,
-        data: "0x1234",
+        requestData: "0x1234",
+        deliveryData: "0xabcd",
       },
       derivation: expect.objectContaining({
         contract: MECH,
@@ -864,16 +875,15 @@ describe("decodeMarketplaceLogs", () => {
         const topics = encodeEventTopics({
           abi: REVISED_COMMON_PROJECTOR_EVENTS_ABI,
           eventName: "TaskAttemptCreated",
-          args: { operator: OPERATOR, priorityMech: PRIORITY_MECH, requestId: REQUEST_ID },
+          args: { operator: OPERATOR, priorityMech: PRIORITY_MECH, taskId: 42n },
         });
         const data = encodeAbiParameters(
           [
-            { name: "taskId", type: "uint256" },
             { name: "attemptIndex", type: "uint32" },
             { name: "attemptDeadline", type: "uint64" },
             { name: "deliveryRate", type: "uint256" },
           ],
-          [42n, 3, 1_800_000_000n, 10n],
+          [3, 1_800_000_000n, 10n],
         );
         return log({ topics: exactTopics(topics), data });
       },
@@ -886,17 +896,16 @@ describe("decodeMarketplaceLogs", () => {
         const topics = encodeEventTopics({
           abi: REVISED_COMMON_PROJECTOR_EVENTS_ABI,
           eventName: "EvaluationAttemptCreated",
-          args: { evaluator: OPERATOR, priorityMech: PRIORITY_MECH, requestId: REQUEST_ID },
+          args: { evaluator: OPERATOR, priorityMech: PRIORITY_MECH, taskId: 42n },
         });
         const data = encodeAbiParameters(
           [
-            { name: "taskId", type: "uint256" },
             { name: "attemptIndex", type: "uint32" },
             { name: "verdictIndex", type: "uint32" },
             { name: "attemptDeadline", type: "uint64" },
             { name: "deliveryRate", type: "uint256" },
           ],
-          [42n, 3, 1, 1_800_000_000n, 10n],
+          [3, 1, 1_800_000_000n, 10n],
         );
         return log({ topics: exactTopics(topics), data });
       },
@@ -1030,17 +1039,18 @@ describe("decodeMarketplaceLogs", () => {
       eventName: "Deliver",
       build: () => {
         const topics = encodeEventTopics({
-          abi: MECH_ABI,
+          abi: REVISED_MECH_DELIVER_ABI,
           eventName: "Deliver",
           args: { mech: MECH, mechServiceMultisig: OPERATOR },
         });
         const data = encodeAbiParameters(
+          REVISED_MECH_DELIVER_ABI[0].inputs.filter((input) => !input.indexed),
           [
-            { name: "requestId", type: "bytes32" },
-            { name: "deliveryRate", type: "uint256" },
-            { name: "data", type: "bytes" },
+            REQUEST_ID,
+            10n,
+            `0x${"a".repeat(64)}`,
+            `0x${"b".repeat(64)}`,
           ],
-          [REQUEST_ID, 10n, `0x${"a".repeat(64)}`],
         );
         return log({ address: MECH, topics: exactTopics(topics), data });
       },

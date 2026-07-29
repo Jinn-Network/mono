@@ -18,7 +18,11 @@ import {
 } from "@jinn-network/task-execution-protocol";
 import { createInMemoryBackend } from "@jinn-network/task-execution-testing";
 import { describe, expect, test, vi } from "vitest";
-import { BASE_SEPOLIA_TODAY, keccakEvidenceHash } from "@jinn-network/marketplace-binding";
+import {
+  BASE_SEPOLIA_TODAY,
+  deriveMarketplaceAttemptUri,
+  keccakEvidenceHash,
+} from "@jinn-network/marketplace-binding";
 import { takeEveryRunnable } from "./claim-predicate.js";
 import { runPipeline, type PipelinePorts } from "./pipeline.js";
 import type { SubmissionFacts } from "./types.js";
@@ -118,6 +122,36 @@ function createPreflightBackend(options?: {
   };
 }
 
+function createIsolationBackend(input: {
+  inventory?: readonly string[];
+  posture?: "enforced" | "attested";
+  isolation?: string[];
+  preflight?: TaskExecutionBackend["preflight"];
+} = {}): TaskExecutionBackend {
+  const isolationSupport = input.inventory === undefined
+    ? []
+    : [{
+        key: "isolationPolicy",
+        inventory: input.inventory,
+        posture: input.posture ?? "enforced",
+      } satisfies RunPinningKeySupport];
+  return createPreflightBackend({
+    runPinning: [...DEFAULT_RUN_PINNING, ...isolationSupport],
+    capabilities: {
+      isolation: input.isolation ?? [...(input.inventory ?? [])],
+    },
+    ...(input.preflight === undefined ? {} : { preflight: input.preflight }),
+  });
+}
+
+function claimTaskSpy() {
+  return vi.fn(async () => ({
+    attemptIndex: 3,
+    requestId: REQUEST_ID,
+    txHash: CLAIM_TX,
+  }));
+}
+
 function settlementPortsForDelivery(deliveryBytes: Uint8Array): PipelinePorts["settlement"] {
   const sha256Digest = `sha256:${sha256Hex(deliveryBytes)}` as const;
   const keccak = keccakEvidenceHash(deliveryBytes);
@@ -138,6 +172,10 @@ function settlementPortsForDelivery(deliveryBytes: Uint8Array): PipelinePorts["s
       keccakEvidenceHash: keccak,
     }),
     claimSolutionDelivery: async () => ({ status: "settled" }),
+    settleRevisedSolutionDelivery: async () => ({
+      status: "settled",
+      requestId: REQUEST_ID,
+    }),
   };
 }
 
@@ -178,6 +216,7 @@ const WIRING = [{
   model: "claude-haiku",
   plugins: ["git"],
   credentialRef: "cred-1",
+  isolationPolicy: "workspace-snapshot",
 }];
 
 const PIPELINE_CONFIG = {
@@ -227,6 +266,156 @@ describe("runPipeline", () => {
     );
     expect(result).toEqual({ kind: "not-claimed", reason: "pinning-mismatch" });
     expect(claimTask).not.toHaveBeenCalled();
+  });
+
+  test("wiring isolation label cannot substitute for enforced backend support", async () => {
+    const claimTask = claimTaskSpy();
+    const result = await runPipeline(
+      {
+        facts: baseFacts({
+          requirements: { isolationPolicy: "workspace-snapshot" },
+          runPinning: { isolationPolicy: "workspace-snapshot" },
+        }),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      PIPELINE_CONFIG,
+      createIsolationBackend({
+        inventory: ["workspace-snapshot"],
+        posture: "attested",
+        isolation: ["workspace-snapshot"],
+      }),
+      makePorts({ claim: { ...makePorts().claim, claimTask } }),
+    );
+
+    expect(result).toEqual({ kind: "not-claimed", reason: "unsupported-requirement" });
+    expect(claimTask).not.toHaveBeenCalled();
+  });
+
+  test("does not claim when isolation capability support is absent", async () => {
+    const claimTask = claimTaskSpy();
+    const result = await runPipeline(
+      {
+        facts: baseFacts({
+          requirements: { isolationPolicy: "workspace-snapshot" },
+          runPinning: { isolationPolicy: "workspace-snapshot" },
+        }),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      PIPELINE_CONFIG,
+      createIsolationBackend({ isolation: ["workspace-snapshot"] }),
+      makePorts({ claim: { ...makePorts().claim, claimTask } }),
+    );
+
+    expect(result).toEqual({ kind: "not-claimed", reason: "unsupported-requirement" });
+    expect(claimTask).not.toHaveBeenCalled();
+  });
+
+  test("does not claim through unrestricted isolation inventory", async () => {
+    const claimTask = claimTaskSpy();
+    const result = await runPipeline(
+      {
+        facts: baseFacts({
+          requirements: { isolationPolicy: "workspace-snapshot" },
+          runPinning: { isolationPolicy: "workspace-snapshot" },
+        }),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      PIPELINE_CONFIG,
+      createIsolationBackend({
+        inventory: ["*"],
+        posture: "enforced",
+        isolation: ["unrestricted"],
+      }),
+      makePorts({ claim: { ...makePorts().claim, claimTask } }),
+    );
+
+    expect(result).toEqual({ kind: "not-claimed", reason: "unsupported-requirement" });
+    expect(claimTask).not.toHaveBeenCalled();
+  });
+
+  test("does not claim when sealed and discovery isolation policies mismatch", async () => {
+    const claimTask = claimTaskSpy();
+    const result = await runPipeline(
+      {
+        facts: baseFacts({
+          requirements: { isolationPolicy: "ephemeral-container" },
+          runPinning: { isolationPolicy: "workspace-snapshot" },
+        }),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      PIPELINE_CONFIG,
+      createIsolationBackend({
+        inventory: ["workspace-snapshot", "ephemeral-container"],
+        posture: "enforced",
+        isolation: ["workspace-snapshot", "ephemeral-container"],
+      }),
+      makePorts({ claim: { ...makePorts().claim, claimTask } }),
+    );
+
+    expect(result).toEqual({ kind: "not-claimed", reason: "unsupported-requirement" });
+    expect(claimTask).not.toHaveBeenCalled();
+  });
+
+  test("does not claim when discovery isolation is absent from sealed requirements", async () => {
+    const claimTask = claimTaskSpy();
+    const result = await runPipeline(
+      {
+        facts: baseFacts({
+          requirements: {},
+          runPinning: { isolationPolicy: "workspace-snapshot" },
+        }),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      PIPELINE_CONFIG,
+      createIsolationBackend({
+        inventory: ["workspace-snapshot"],
+        posture: "enforced",
+        isolation: ["workspace-snapshot"],
+      }),
+      makePorts({ claim: { ...makePorts().claim, claimTask } }),
+    );
+
+    expect(result).toEqual({ kind: "not-claimed", reason: "unsupported-requirement" });
+    expect(claimTask).not.toHaveBeenCalled();
+  });
+
+  test("claims only when sealed isolation has enforced capability and ready preflight", async () => {
+    const claimTask = vi.fn(async () => ({
+      attemptIndex: 3,
+      requestId: REQUEST_ID,
+      txHash: CLAIM_TX,
+    }));
+    const preflight = vi.fn(async (): Promise<PreflightReport> => ({ ready: true }));
+    const result = await runPipeline(
+      {
+        facts: baseFacts({
+          requirements: { isolationPolicy: "workspace-snapshot" },
+          runPinning: { isolationPolicy: "workspace-snapshot" },
+        }),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      PIPELINE_CONFIG,
+      createIsolationBackend({
+        inventory: ["workspace-snapshot"],
+        posture: "enforced",
+        isolation: ["workspace-snapshot"],
+        preflight,
+      }),
+      makePorts({ claim: { ...makePorts().claim, claimTask } }),
+    );
+
+    expect(result.kind).toBe("delivered");
+    expect(preflight).toHaveBeenCalledWith({
+      taskProfile: PROFILE_URI,
+      requirements: { isolationPolicy: "workspace-snapshot" },
+    });
+    expect(claimTask).toHaveBeenCalledOnce();
   });
 
   test("does not claim on profile-mismatch preclaim gate", async () => {
@@ -393,6 +582,120 @@ describe("runPipeline", () => {
       }),
     );
     expect(result).toEqual({ kind: "race-lost", state: "rejected" });
+  });
+
+  test("assembles revised settlement from task-attempt identity and joins requestId only after prepare", async () => {
+    const revisedConfig = {
+      ...PIPELINE_CONFIG,
+      chain: { ...BASE_SEPOLIA_TODAY, generation: "revised" as const },
+    };
+    const attemptUri = deriveMarketplaceAttemptUri({
+      chainId: revisedConfig.chain.chainId,
+      coordinator: revisedConfig.chain.taskCoordinator,
+      taskId: 7n,
+      attemptIndex: 3,
+    });
+    const deliveryBytes = goldenDelivery(attemptUri);
+    const deliveryDigest = `sha256:${sha256Hex(deliveryBytes)}` as const;
+    const settleRevisedSolutionDelivery = vi.fn(async () => ({
+      status: "settled" as const,
+      requestId: REQUEST_ID,
+    }));
+    const result = await runPipeline(
+      {
+        facts: baseFacts(),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      revisedConfig,
+      createPreflightBackend(),
+      makePorts({
+        claim: {
+          ...makePorts().claim,
+          claimTask: async () => ({
+            attemptIndex: 3,
+            txHash: CLAIM_TX,
+          }),
+        },
+        deliveryWait: {
+          waitForDelivery: async () => ({ ok: true, deliveryBytes }),
+        },
+        settlement: {
+          ...settlementPortsForDelivery(deliveryBytes),
+          settleRevisedSolutionDelivery,
+          readRouterDeliveryFacts: async () => ({
+            generation: "revised",
+            requestId: REQUEST_ID,
+            taskId: 7n,
+            attemptIndex: 3,
+            sha256Digest: deliveryDigest,
+          }),
+        },
+      }),
+    );
+
+    expect(result).toEqual({ kind: "delivered", state: "delivered" });
+    expect(settleRevisedSolutionDelivery).toHaveBeenCalledWith({
+      taskId: 7n,
+      attemptIndex: 3,
+      deliveryDigest: `0x${deliveryDigest.slice("sha256:".length)}`,
+      deliveryBytes,
+    });
+  });
+
+  test("forfeits a revised delivered reservation instead of releasing or inventing settlement", async () => {
+    const revisedConfig = {
+      ...PIPELINE_CONFIG,
+      chain: { ...BASE_SEPOLIA_TODAY, generation: "revised" as const },
+    };
+    const attemptUri = deriveMarketplaceAttemptUri({
+      chainId: revisedConfig.chain.chainId,
+      coordinator: revisedConfig.chain.taskCoordinator,
+      taskId: 7n,
+      attemptIndex: 3,
+    });
+    const deliveryBytes = goldenDelivery(attemptUri);
+    const forfeitDeliveredReservation = vi.fn(async () => {});
+    const releaseAttempt = vi.fn(async () => {});
+    const result = await runPipeline(
+      {
+        facts: baseFacts(),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      revisedConfig,
+      createPreflightBackend(),
+      makePorts({
+        claim: {
+          ...makePorts().claim,
+          claimTask: async () => ({ attemptIndex: 3, txHash: CLAIM_TX }),
+        },
+        deliveryWait: {
+          waitForDelivery: async () => ({ ok: true, deliveryBytes }),
+        },
+        settlement: {
+          ...settlementPortsForDelivery(deliveryBytes),
+          settleRevisedSolutionDelivery: async () => ({
+            status: "delivered-unsettled",
+            requestId: REQUEST_ID,
+          }),
+        },
+        release: { releaseAttempt, forfeitDeliveredReservation },
+      }),
+    );
+
+    expect(result).toEqual({
+      kind: "settlement-forfeited",
+      state: "delivered",
+      forfeited: true,
+    });
+    expect(forfeitDeliveredReservation).toHaveBeenCalledWith({
+      taskId: 7n,
+      attemptIndex: 3,
+      verdictIndex: 0,
+      legKind: 1,
+    });
+    expect(releaseAttempt).not.toHaveBeenCalled();
   });
 });
 

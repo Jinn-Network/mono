@@ -65,6 +65,12 @@ export interface ReleaseAttemptPort {
     readonly taskId: bigint;
     readonly attemptIndex: number;
   }): Promise<void | { readonly ok: false; readonly kind: "unsupported" }>;
+  forfeitDeliveredReservation?(input: {
+    readonly taskId: bigint;
+    readonly attemptIndex: number;
+    readonly verdictIndex: number;
+    readonly legKind: 1 | 2;
+  }): Promise<void>;
 }
 
 export interface PipelinePorts {
@@ -103,6 +109,11 @@ export type PipelineRunOutcome =
   | { readonly kind: "submit-rejected"; readonly detail: string; readonly released: boolean }
   | { readonly kind: "delivery-wait-failed"; readonly waitKind: "timeout" | "cancelled" | "backend-terminal"; readonly state?: AttemptState; readonly released: boolean }
   | { readonly kind: "settlement-failed"; readonly result: SettlementResult; readonly released: boolean }
+  | {
+      readonly kind: "settlement-forfeited";
+      readonly state: "delivered";
+      readonly forfeited: true;
+    }
   | { readonly kind: "race-lost"; readonly state: AttemptState }
   | { readonly kind: "delivered"; readonly state: AttemptState };
 
@@ -202,17 +213,56 @@ export async function runPipeline(
 
   await convergeDelivery(deliveryWait.deliveryBytes, ports.ipfs);
 
+  const settlementAttempt = claim.generation === "today"
+    ? {
+        requestId: claim.requestId,
+        expectedDispatchContextDigest:
+          dispatchContextDigest(claim.dispatchContext),
+      }
+    : {
+        taskId: claim.taskId,
+        attemptIndex: claim.attemptIndex,
+        expectedDispatchContextDigest:
+          dispatchContextDigest(claim.dispatchContext),
+      };
   const settlement = await settleDelivery(
-    {
-      requestId: claim.requestId,
-      expectedDispatchContextDigest: dispatchContextDigest(claim.dispatchContext),
-    },
+    settlementAttempt,
     deliveryWait.deliveryBytes,
     config.chain,
     ports.settlement,
   );
   if (!settlement.settled) {
+    if (
+      claim.generation === "revised"
+      && settlement.state === "delivered"
+      && !("kind" in settlement)
+    ) {
+      if (ports.release.forfeitDeliveredReservation === undefined) {
+        throw new Error(
+          "revised delivered reservation requires forfeitDeliveredReservation port",
+        );
+      }
+      await ports.release.forfeitDeliveredReservation({
+        taskId: claim.taskId,
+        attemptIndex: claim.attemptIndex,
+        verdictIndex: 0,
+        legKind: 1,
+      });
+      return {
+        kind: "settlement-forfeited",
+        state: "delivered",
+        forfeited: true,
+      };
+    }
     if (!("kind" in settlement)) {
+      if (claim.generation === "revised") {
+        const released = await promptRelease(
+          ports,
+          input.facts.taskId,
+          claim.attemptIndex,
+        );
+        return { kind: "settlement-failed", result: settlement, released };
+      }
       return { kind: "race-lost", state: settlement.state };
     }
     const released = await promptRelease(ports, input.facts.taskId, claim.attemptIndex);

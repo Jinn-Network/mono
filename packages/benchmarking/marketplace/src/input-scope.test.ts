@@ -286,7 +286,6 @@ function projectionWithAttemptLineage(
     facts: {
       taskId: 42n,
       attemptIndex: 0,
-      requestId: REQUEST_ID,
       deliveryRate: 10n,
       operator: "0x3333333333333333333333333333333333333333" as Address,
       priorityMech: "0x4444444444444444444444444444444444444444" as Address,

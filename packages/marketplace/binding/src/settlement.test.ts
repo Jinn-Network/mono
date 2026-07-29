@@ -62,6 +62,12 @@ const ATTEMPT: SettlementAttempt = {
   expectedDispatchContextDigest: DISPATCH_DIGEST,
   taskEvaluationDigest: EVALUATION_DIGEST,
 };
+const REVISED_ATTEMPT: SettlementAttempt = {
+  taskId: 7n,
+  attemptIndex: 3,
+  expectedDispatchContextDigest: DISPATCH_DIGEST,
+  taskEvaluationDigest: EVALUATION_DIGEST,
+};
 
 const VERIFIED: SettlementGradeVerification = {
   executorBinding: { status: "verified" },
@@ -89,6 +95,8 @@ function revisedFacts(overrides: Partial<{
   return {
     generation: "revised" as const,
     requestId: overrides.requestId ?? REQUEST_ID,
+    taskId: 7n,
+    attemptIndex: 3,
     sha256Digest: overrides.sha256Digest ?? DELIVERY_SHA256,
   };
 }
@@ -134,6 +142,12 @@ function makePorts(input: {
     claimSolutionDelivery: vi.fn(async () => ({
       status: input.chainStatus ?? "settled",
     })),
+    settleRevisedSolutionDelivery: vi.fn(async () => {
+      const status = input.chainStatus ?? "settled";
+      return status === "rejected"
+        ? { status }
+        : { status, requestId: REQUEST_ID };
+    }),
   };
 }
 
@@ -188,16 +202,55 @@ describe("settleDelivery settlement-grade gate", () => {
   });
 
   test("revised mode requires only its sha256 anchor and sends that digest through the generation seam", async () => {
+    const effects: string[] = [];
     const ports = makePorts({ facts: revisedFacts() });
+    const mutablePorts = ports as {
+      -readonly [Key in keyof SettlementPorts]: SettlementPorts[Key]
+    };
+    mutablePorts.verifySettlementGrade = vi.fn(async () => {
+      effects.push("verify");
+      return VERIFIED;
+    });
+    mutablePorts.pin = vi.fn(async () => {
+      effects.push("pin");
+    });
+    mutablePorts.settleRevisedSolutionDelivery = vi.fn(async () => {
+      effects.push("prepare-deliver-claim");
+      return {
+        status: "settled" as const,
+        requestId: REQUEST_ID,
+      };
+    });
+    mutablePorts.readMechDeliveryFacts = vi.fn(async () => {
+      effects.push("mech-read");
+      return {
+        requestId: REQUEST_ID,
+        sha256CidDigest: DELIVERY_SHA256,
+      };
+    });
+    mutablePorts.readRouterDeliveryFacts = vi.fn(async () => {
+      effects.push("router-read");
+      return revisedFacts();
+    });
 
     await expect(
-      settleDelivery(ATTEMPT, SEALED_DELIVERY, REVISED_CONFIG, ports),
+      settleDelivery(REVISED_ATTEMPT, SEALED_DELIVERY, REVISED_CONFIG, ports),
     ).resolves.toEqual({ settled: true, state: "delivered" });
 
-    expect(ports.claimSolutionDelivery).toHaveBeenCalledWith({
-      requestId: REQUEST_ID,
-      solutionDigest: `0x${DELIVERY_SHA256.slice("sha256:".length)}`,
+    expect(ports.settleRevisedSolutionDelivery).toHaveBeenCalledWith({
+      taskId: 7n,
+      attemptIndex: 3,
+      deliveryDigest: `0x${DELIVERY_SHA256.slice("sha256:".length)}`,
+      deliveryBytes: SEALED_DELIVERY,
     });
+    expect(ports.claimSolutionDelivery).not.toHaveBeenCalled();
+    expect(effects).toEqual([
+      "verify",
+      "pin",
+      "prepare-deliver-claim",
+      "mech-read",
+      "router-read",
+    ]);
   });
 
   test("rejects schema-valid noncanonical Delivery JSON before verifier, chain reads, pin, or claim", async () => {
@@ -486,7 +539,7 @@ describe("settleDelivery settlement-grade gate", () => {
       mechFacts: { requestId: REQUEST_ID, sha256CidDigest: DELIVERY_SHA256 },
     });
     await expect(
-      settleDelivery(ATTEMPT, SEALED_DELIVERY, REVISED_CONFIG, ports),
+      settleDelivery(REVISED_ATTEMPT, SEALED_DELIVERY, REVISED_CONFIG, ports),
     ).resolves.toEqual({
       settled: false,
       state: "rejected",
@@ -496,7 +549,7 @@ describe("settleDelivery settlement-grade gate", () => {
       onChain: { sha256Digest: onChainDigest },
     });
     expect(ports.pinned).toEqual([SEALED_DELIVERY]);
-    expect(ports.claimSolutionDelivery).toHaveBeenCalledOnce();
+    expect(ports.settleRevisedSolutionDelivery).toHaveBeenCalledOnce();
   });
 
   test("rejects chain facts from a different contract generation", async () => {

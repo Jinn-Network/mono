@@ -14,8 +14,7 @@ import {
 import { ZeroEvidenceHashError } from "./venue/digest.js";
 import type { IpfsPinPort } from "./venue/ipfs.js";
 
-export interface SettlementAttempt {
-  readonly requestId: Hex;
+interface SettlementAttemptBase {
   readonly expectedDispatchContextDigest: `sha256:${string}`;
   /**
    * When present, the injected verifier must prove equality with the resolved Execution
@@ -24,6 +23,18 @@ export interface SettlementAttempt {
    */
   readonly taskEvaluationDigest?: `sha256:${string}`;
 }
+
+export type SettlementAttempt =
+  | (SettlementAttemptBase & {
+      readonly requestId: Hex;
+      readonly taskId?: never;
+      readonly attemptIndex?: never;
+    })
+  | (SettlementAttemptBase & {
+      readonly taskId: bigint;
+      readonly attemptIndex: number;
+      readonly requestId?: never;
+    });
 
 type VerifiedCheck = { readonly status: "verified" };
 
@@ -87,6 +98,8 @@ export interface TodayRouterDeliveryFacts {
 export interface RevisedRouterDeliveryFacts {
   readonly generation: "revised";
   readonly requestId: Hex;
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
   /** Revised contracts anchor only the exact Delivery's sha256 digest. */
   readonly sha256Digest: `sha256:${string}`;
 }
@@ -117,6 +130,25 @@ export interface SettlementPorts {
       | "rejected"
       | "delivered-unsettled";
   }>;
+  /**
+   * Executes the V4 prepare -> signed Marketplace Deliver -> router claim sequence as one
+   * revert-on-failure Safe batch. requestId first emerges from this operation.
+   */
+  readonly settleRevisedSolutionDelivery?: (input: {
+    readonly taskId: bigint;
+    readonly attemptIndex: number;
+    readonly deliveryDigest: Hex;
+    readonly deliveryBytes: Uint8Array;
+  }) => Promise<
+    | { readonly status: "rejected" }
+    | {
+        readonly status:
+          | "settled"
+          | "already-settled"
+          | "delivered-unsettled";
+        readonly requestId: Hex;
+      }
+  >;
 }
 
 export type SettlementGateFailure =
@@ -145,6 +177,13 @@ export type SettlementGateFailure =
       readonly kind: "request-id-mismatch";
       readonly expectedRequestId: Hex;
       readonly actualRequestId: Hex;
+    }
+  | {
+      readonly settled: false;
+      readonly state: "rejected";
+      readonly kind: "engagement-identity-mismatch";
+      readonly expected: { readonly taskId: bigint; readonly attemptIndex: number };
+      readonly actual: { readonly taskId: bigint; readonly attemptIndex: number };
     }
   | {
       readonly settled: false;
@@ -237,7 +276,7 @@ function verificationFailure(
 }
 
 function mechFactsFailure(
-  attempt: SettlementAttempt,
+  expectedRequestId: Hex,
   config: MarketplaceChainConfig,
   delivery: {
     readonly sha256Digest: `sha256:${string}`;
@@ -245,12 +284,12 @@ function mechFactsFailure(
   },
   facts: MechDeliveryFacts,
 ): SettlementGateFailure | undefined {
-  if (facts.requestId !== attempt.requestId) {
+  if (facts.requestId !== expectedRequestId) {
     return {
       settled: false,
       state: "rejected",
       kind: "request-id-mismatch",
-      expectedRequestId: attempt.requestId,
+      expectedRequestId,
       actualRequestId: facts.requestId,
     };
   }
@@ -286,6 +325,7 @@ function mechFactsFailure(
 
 function routerFactsFailure(
   attempt: SettlementAttempt,
+  expectedRequestId: Hex,
   config: MarketplaceChainConfig,
   delivery: {
     readonly sha256Digest: `sha256:${string}`;
@@ -303,13 +343,36 @@ function routerFactsFailure(
       actualGeneration: facts.generation,
     };
   }
-  if (facts.requestId !== attempt.requestId) {
+  if (facts.requestId !== expectedRequestId) {
     return {
       settled: false,
       state: "rejected",
       kind: "request-id-mismatch",
-      expectedRequestId: attempt.requestId,
+      expectedRequestId,
       actualRequestId: facts.requestId,
+    };
+  }
+  if (
+    facts.generation === "revised"
+    && (
+      attempt.taskId === undefined
+      || attempt.attemptIndex === undefined
+      || facts.taskId !== attempt.taskId
+      || facts.attemptIndex !== attempt.attemptIndex
+    )
+  ) {
+    return {
+      settled: false,
+      state: "rejected",
+      kind: "engagement-identity-mismatch",
+      expected: {
+        taskId: attempt.taskId ?? -1n,
+        attemptIndex: attempt.attemptIndex ?? -1,
+      },
+      actual: {
+        taskId: facts.taskId,
+        attemptIndex: facts.attemptIndex,
+      },
     };
   }
   if (facts.generation === "today") {
@@ -397,32 +460,93 @@ export async function settleDelivery(
   const rejectedVerification = verificationFailure(attempt, verification);
   if (rejectedVerification !== undefined) return rejectedVerification;
 
-  const mechFacts = await ports.readMechDeliveryFacts({
-    requestId: attempt.requestId,
-    config,
-  });
-  const rejectedMechFacts = mechFactsFailure(attempt, config, delivery, mechFacts);
-  if (rejectedMechFacts !== undefined) return rejectedMechFacts;
-
-  await ports.pin(sealedDeliveryBytes);
-  const solutionDigest = config.generation === "today"
-    ? delivery.keccakEvidenceHash
-    : `0x${delivery.sha256Digest.slice("sha256:".length)}` as Hex;
-  const result = await ports.claimSolutionDelivery({
-    requestId: attempt.requestId,
-    solutionDigest,
-  });
-  if (result.status === "settled" || result.status === "already-settled") {
-    const routerFacts = await ports.readRouterDeliveryFacts({
+  if (config.generation === "today") {
+    if (attempt.requestId === undefined) {
+      throw new Error("today settlement requires claim-time requestId identity");
+    }
+    const mechFacts = await ports.readMechDeliveryFacts({
       requestId: attempt.requestId,
       config,
     });
-    const rejectedRouterFacts = routerFactsFailure(attempt, config, delivery, mechFacts, routerFacts);
-    if (rejectedRouterFacts !== undefined) return rejectedRouterFacts;
-    return { settled: true, state: "delivered" };
+    const rejectedMechFacts = mechFactsFailure(
+      attempt.requestId,
+      config,
+      delivery,
+      mechFacts,
+    );
+    if (rejectedMechFacts !== undefined) return rejectedMechFacts;
+
+    await ports.pin(sealedDeliveryBytes);
+    const result = await ports.claimSolutionDelivery({
+      requestId: attempt.requestId,
+      solutionDigest: delivery.keccakEvidenceHash,
+    });
+    if (result.status === "settled" || result.status === "already-settled") {
+      const routerFacts = await ports.readRouterDeliveryFacts({
+        requestId: attempt.requestId,
+        config,
+      });
+      const rejectedRouterFacts = routerFactsFailure(
+        attempt,
+        attempt.requestId,
+        config,
+        delivery,
+        mechFacts,
+        routerFacts,
+      );
+      if (rejectedRouterFacts !== undefined) return rejectedRouterFacts;
+      return { settled: true, state: "delivered" };
+    }
+    return {
+      settled: false,
+      state: mapRaceLoss(result.status),
+    };
   }
-  return {
-    settled: false,
-    state: mapRaceLoss(result.status),
-  };
+
+  if (attempt.taskId === undefined || attempt.attemptIndex === undefined) {
+    throw new Error("revised settlement requires taskId and attemptIndex identity");
+  }
+  if (ports.settleRevisedSolutionDelivery === undefined) {
+    throw new Error("revised settlement requires settleRevisedSolutionDelivery port");
+  }
+  await ports.pin(sealedDeliveryBytes);
+  const result = await ports.settleRevisedSolutionDelivery({
+    taskId: attempt.taskId,
+    attemptIndex: attempt.attemptIndex,
+    deliveryDigest:
+      `0x${delivery.sha256Digest.slice("sha256:".length)}` as Hex,
+    deliveryBytes: sealedDeliveryBytes,
+  });
+  if (result.status === "rejected") {
+    return { settled: false, state: "rejected" };
+  }
+  if (result.status === "delivered-unsettled") {
+    return { settled: false, state: "delivered" };
+  }
+
+  const mechFacts = await ports.readMechDeliveryFacts({
+    requestId: result.requestId,
+    config,
+  });
+  const rejectedMechFacts = mechFactsFailure(
+    result.requestId,
+    config,
+    delivery,
+    mechFacts,
+  );
+  if (rejectedMechFacts !== undefined) return rejectedMechFacts;
+  const routerFacts = await ports.readRouterDeliveryFacts({
+    requestId: result.requestId,
+    config,
+  });
+  const rejectedRouterFacts = routerFactsFailure(
+    attempt,
+    result.requestId,
+    config,
+    delivery,
+    mechFacts,
+    routerFacts,
+  );
+  if (rejectedRouterFacts !== undefined) return rejectedRouterFacts;
+  return { settled: true, state: "delivered" };
 }
