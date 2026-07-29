@@ -28,7 +28,13 @@ import type {
   TwoPartyEngagement,
 } from "@jinn-network/task-execution-backend";
 import { TaskExecutionError } from "@jinn-network/task-execution-backend";
-import type { LauncherContract, ProbeResult } from "@jinn-network/task-execution-launchers";
+import type {
+  LaunchPlan,
+  LauncherContract,
+  ProbeResult,
+  ResultEnvelope,
+} from "@jinn-network/task-execution-launchers";
+import { interpretResult } from "@jinn-network/task-execution-launchers";
 import {
   ProfilesError,
   resolveProfile,
@@ -73,7 +79,6 @@ import type {
   CapabilityGrant,
   ProvisionerContract,
   TaskView,
-  WorkspaceKind,
   WorkspacePaths,
 } from "@jinn-network/task-execution-workspace";
 import { ProvisioningRejectedError } from "@jinn-network/task-execution-workspace";
@@ -89,6 +94,11 @@ import {
   type TrustKeyConfig,
 } from "./capabilities.js";
 import { projectObservations } from "./observation.js";
+import {
+  createEvidenceJoin,
+  type EvidenceBindingPorts,
+  type EvidenceCaptureSession,
+} from "./evidence-join.js";
 
 // Core requirement comparison classes (profiles §5.1 / program §7.3). Profile-added entries
 // are overlaid after resolution, so the resolved document is authoritative for its own keys.
@@ -186,6 +196,19 @@ export interface LocalBackendFaults {
   readonly afterDeliveryCheckpoint?: () => void;
 }
 
+export interface LocalExecutionInput {
+  readonly attempt: AttemptIdentity;
+  readonly paths: WorkspacePaths;
+  readonly plan: LaunchPlan;
+  readonly spawn: SpawnRequest;
+}
+
+export interface LocalExecutionOutcome {
+  readonly exitCode?: number;
+  readonly signal?: string;
+  readonly envelope?: ResultEnvelope;
+}
+
 export interface LocalTaskExecutionBackendConfig {
   readonly stateRoot: string;
   readonly source: string;
@@ -200,6 +223,13 @@ export interface LocalTaskExecutionBackendConfig {
   readonly maxConcurrentAttempts?: number;
   readonly recorderAvailability?: RecorderAvailability;
   readonly trustKeys?: TrustKeyConfig;
+  readonly evidence?: EvidenceBindingPorts;
+  /**
+   * Injected custody runner. Production hosts normally adapt this to the supervisor shim; the
+   * conformance host injects a deterministic in-process driver. When absent, the accepted
+   * Attempt remains pending after durable spawn-intent for the kit's explicit drive seam.
+   */
+  readonly execute?: (input: LocalExecutionInput) => Promise<LocalExecutionOutcome>;
   readonly capabilityGrants?: (
     grants: Readonly<Record<string, unknown>>,
   ) => readonly CapabilityGrant[];
@@ -746,6 +776,19 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
           source: this.config.source,
         },
       });
+      if (this.config.execute !== undefined) {
+        await this.runAcceptedAttempt({
+          attempt: identity,
+          taskBytes,
+          task,
+          dispatchContextBytes,
+          paths: this.paths(attempt),
+          provisioner,
+          plan,
+          planBytes,
+          spawn,
+        });
+      }
     } catch (error) {
       this.journal(attempt).append({
         attemptId: attempt,
@@ -764,6 +807,257 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     }
 
     return { accepted: true, submission: submissionUri, digest };
+  }
+
+  private appendTerminal(
+    attempt: AttemptUri,
+    details: Readonly<Record<string, unknown>>,
+  ): void {
+    this.journal(attempt).append({
+      attemptId: attempt,
+      type: "attempt-terminal",
+      time: this.now(),
+      details: { ...details, source: this.config.source },
+      ...(details["state"] === "failed" || details["state"] === "lost"
+        ? { failsAttempt: true }
+        : {}),
+    });
+    this.capacity.release(attempt);
+  }
+
+  private async runAcceptedAttempt(input: {
+    readonly attempt: AttemptIdentity;
+    readonly taskBytes: Uint8Array;
+    readonly task: TaskSpecification;
+    readonly dispatchContextBytes: Uint8Array;
+    readonly paths: WorkspacePaths;
+    readonly provisioner: ProvisionerContract;
+    readonly plan: LaunchPlan;
+    readonly planBytes: Uint8Array;
+    readonly spawn: SpawnRequest;
+  }): Promise<void> {
+    const attempt = input.attempt.attemptUri;
+    const capturePosture = this.config.recorderAvailability ?? "none";
+    let capture: EvidenceCaptureSession | undefined;
+    if (capturePosture !== "none") {
+      if (this.config.evidence === undefined) {
+        if (capturePosture === "always") {
+          this.appendTerminal(attempt, {
+            state: "failed",
+            blame: "infrastructure",
+            category: "dependency-unavailable",
+            detail: "evidence capture is required but no EvidenceBindingPorts were injected",
+          });
+          return;
+        }
+      } else {
+        try {
+          capture = await createEvidenceJoin({
+            ports: this.config.evidence,
+            source: this.config.source as `${string}:${string}`,
+            executor: this.config.executor as `${string}:${string}`,
+            now: () => this.now(),
+          }).start({
+            paths: input.paths,
+            attempt,
+            taskDigest: documentDigest(input.taskBytes),
+            taskBytes: input.taskBytes,
+            dispatchContextBytes: input.dispatchContextBytes,
+            launchPlanBytes: input.planBytes,
+            startedAt: this.now(),
+          });
+        } catch (error) {
+          if (capturePosture === "always") {
+            this.appendTerminal(attempt, {
+              state: "failed",
+              blame: "infrastructure",
+              category: "dependency-unavailable",
+              detail:
+                error instanceof Error
+                  ? `evidence capture start failed: ${error.message}`
+                  : "evidence capture start failed",
+            });
+            return;
+          }
+        }
+      }
+    }
+
+    this.journal(attempt).append({
+      attemptId: attempt,
+      type: "spawned",
+      time: this.now(),
+      details: {
+        nonce: input.attempt.nonce,
+        pid: process.pid,
+        startTime: Date.now(),
+        source: this.config.source,
+      },
+    });
+    this.journal(attempt).append({
+      attemptId: attempt,
+      type: "attempt-started",
+      time: this.now(),
+      details: {
+        startedAt: this.now(),
+        executor: this.config.executor,
+        source: this.config.source,
+      },
+    });
+
+    let execution: LocalExecutionOutcome;
+    try {
+      execution = await this.config.execute!({
+        attempt: input.attempt,
+        paths: input.paths,
+        plan: input.plan,
+        spawn: input.spawn,
+      });
+    } catch (error) {
+      execution = {
+        signal: "EXECUTION_DRIVER_ERROR",
+        envelope: {
+          status: "error",
+          code: error instanceof Error ? error.message : "execution driver failed",
+        },
+      };
+    }
+    this.journal(attempt).append({
+      attemptId: attempt,
+      type: "exec-finished",
+      time: this.now(),
+      details: {
+        exitCode: execution.exitCode ?? null,
+        termSignal: execution.signal ?? null,
+        source: this.config.source,
+      },
+    });
+
+    this.journal(attempt).append({
+      attemptId: attempt,
+      type: "harvest-started",
+      time: this.now(),
+      details: { source: this.config.source },
+    });
+    let harvest;
+    try {
+      harvest = await input.provisioner.harvest(input.paths, input.task.outputs);
+    } catch (error) {
+      this.appendTerminal(attempt, {
+        state: "failed",
+        blame: "infrastructure",
+        category: "backend-unavailable",
+        detail:
+          error instanceof Error ? `harvest failed: ${error.message}` : "harvest failed",
+      });
+      return;
+    }
+    this.journal(attempt).append({
+      attemptId: attempt,
+      type: "harvested",
+      time: this.now(),
+      details: {
+        manifest: harvest.manifest,
+        omissions: harvest.omissions,
+        integrityViolations: harvest.integrityViolations,
+        source: this.config.source,
+      },
+    });
+
+    const interpreted = interpretResult(
+      input.plan,
+      {
+        ...(execution.exitCode === undefined ? {} : { exitCode: execution.exitCode }),
+        ...(execution.signal === undefined ? {} : { signal: execution.signal }),
+      },
+      execution.envelope,
+    );
+
+    let receipt;
+    if (capture !== undefined) {
+      try {
+        await capture.captureRuntimeObservation({
+          kind: "resource",
+          entityId: "runtime/process-exit",
+          name: "Harness process exit",
+          value: execution.exitCode ?? execution.signal ?? "unknown",
+          propertyId: "https://jinn.network/properties/process-exit",
+          origin: {
+            kind: "producer-observed",
+            observer: this.config.source as `${string}:${string}`,
+          },
+        });
+        receipt = await capture.finalize({
+          harvest,
+          outcome: interpreted.state === "delivered" ? "completed" : "failed",
+          endedAt: this.now(),
+        });
+      } catch (error) {
+        if (capturePosture === "always") {
+          this.appendTerminal(attempt, {
+            state: "failed",
+            blame: "infrastructure",
+            category: "dependency-unavailable",
+            detail:
+              error instanceof Error
+                ? `evidence capture finalization failed: ${error.message}`
+                : "evidence capture finalization failed",
+          });
+          return;
+        }
+      }
+    }
+
+    if (receipt !== undefined) {
+      this.journal(attempt).append({
+        attemptId: attempt,
+        type: "execution-observed",
+        time: this.now(),
+        details: {
+          executionId: receipt.executionId,
+          evidenceRecord: receipt.record,
+          source: this.config.source,
+        },
+      });
+    }
+
+    if (interpreted.state === "failed") {
+      this.appendTerminal(attempt, {
+        state: "failed",
+        blame: interpreted.blame ?? "task",
+        category: "protocol-violation",
+        detail: interpreted.reasonCode ?? "executor reported failure",
+      });
+      return;
+    }
+
+    const deliveryBytes = sealDelivery({
+      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      attempt,
+      task: documentDigest(input.taskBytes),
+      outputs: harvest.manifest.map((artifact) => ({
+        name: artifact.path,
+        ...(artifact.mediaType === undefined ? {} : { mediaType: artifact.mediaType }),
+        digest: {
+          sha256: String(artifact.sha256).replace(/^sha256:/u, ""),
+        },
+      })),
+      outcome: interpreted.outcome ?? "fulfilled",
+      ...(receipt === undefined
+        ? {}
+        : {
+            evidenceRecords: [receipt.record],
+            executionIds: [receipt.executionId],
+          }),
+      createdAt: this.now(),
+    });
+    await this.recordDelivery(attempt, deliveryBytes);
+    this.appendTerminal(attempt, {
+      state: "delivered",
+      ...(interpreted.reasonCode === undefined
+        ? {}
+        : { detail: interpreted.reasonCode }),
+    });
   }
 
   private selectLauncher(view: TaskView): LauncherContract {

@@ -26,13 +26,35 @@ See the design: `docs/superpowers/specs/2026-07-27-local-execution-backend-desig
 (frozen interfaces), §15 (packages), §16 (conformance — the reference implementation is the TEP
 conformance kit's first real consumer).
 
-## Status
+## Evidence host wiring
 
-Scaffold stage (backend plan Milestone A, Task A1): package registered, dependency edges and CI
-job in place. `src/` fills in Milestone C (backend verbs, capacity gate, single-writer lock,
-observation projection, assembled capabilities, the evidence join), turning the
-`@jinn-network/task-execution-testing` `./backend-local` slice's `describeLocalBackendContract`
-(and the TEP core conformance kit run against this binding) green.
+The host owns the concrete evidence runtime and narrows it to the assembly's contract-only port:
+
+```ts
+import { openLocalEvidenceRuntime } from "@jinn-network/evidence-local-runtime";
+import {
+  makeLocalTaskExecutionBackend,
+  type EvidenceBindingPorts,
+} from "@jinn-network/task-execution-backend-local";
+
+const runtime = await openLocalEvidenceRuntime({ rootDir: evidenceRoot });
+const evidence: EvidenceBindingPorts = {
+  repository: runtime.repository,
+  catalog: runtime.catalog,
+  awaitIndexed: (reference) => runtime.awaitIndexed(reference),
+};
+
+const backend = makeLocalTaskExecutionBackend({
+  // stateRoot, launchers, provisioner, profileStore, executor, …
+  evidence,
+  recorderAvailability: "always",
+});
+```
+
+Only the host imports `@jinn-network/evidence-local-runtime`. This package imports the
+repository/catalog contracts and the execution-recorder producer; delivery waits for the
+recorder's finalization receipt, while catalog indexing remains an explicit later operation and
+never gates `delivered`.
 
 ## Never touches
 

@@ -5,6 +5,8 @@ export {
 } from "./backend.js";
 export type {
   LocalBackendFaults,
+  LocalExecutionInput,
+  LocalExecutionOutcome,
   LocalProvisionerInput,
   LocalTaskExecutionBackendConfig,
   ProvisionerCapabilities,
@@ -18,3 +20,13 @@ export type {
 } from "./capabilities.js";
 export { projectObservations } from "./observation.js";
 export type { ProjectableJournalEvent } from "./observation.js";
+export { createEvidenceJoin } from "./evidence-join.js";
+export type {
+  EvidenceBindingPorts,
+  EvidenceCaptureSession,
+  EvidenceIndexingOutcome,
+  EvidenceJoin,
+  EvidenceJoinOptions,
+  FinalizeEvidenceCaptureInput,
+  StartEvidenceCaptureInput,
+} from "./evidence-join.js";
