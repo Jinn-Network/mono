@@ -150,6 +150,7 @@ function documents(): Documents {
       },
     },
   });
+  const subjectResult = encoder.encode("diff --git a/control b/control\n");
   const subjectDelivery = sealDelivery({
     protocol: "https://jinn.network/profiles/task-execution/1.0",
     attempt: "urn:uuid:11111111-1111-4111-8111-111111111111",
@@ -157,12 +158,11 @@ function documents(): Documents {
     outputs: [{
       name: "result.patch",
       mediaType: "text/x-diff",
-      digest: { sha256: "5".repeat(64) },
+      digest: { sha256: sha256(subjectResult).slice("sha256:".length) },
     }],
     outcome: "fulfilled",
     createdAt: "2026-07-29T12:00:00.000Z",
   });
-  const subjectResult = encoder.encode("diff --git a/control b/control\n");
   const evaluationTask = deriveEvaluationTask({
     subjectTask: {
       name: "subject-task.json",
@@ -267,6 +267,20 @@ async function backendFixture(
         (docs.specification.familyBlock as DeterministicProcessBlock).parser,
       ),
     ]),
+    maxClaimEvidenceBytes: 1024,
+    evidenceWriter: {
+      async putClaimEvidence({ name, bytes, mediaType }: {
+        readonly name: string;
+        readonly bytes: Uint8Array;
+        readonly mediaType?: string;
+      }) {
+        return {
+          name,
+          digest: { sha256: sha256(bytes).slice("sha256:".length) },
+          ...(mediaType === undefined ? {} : { mediaType }),
+        };
+      },
+    },
   };
   const launcher = makeEvaluationLauncher({
     deploymentModule: "file:///host/evaluation-deployment.mjs",

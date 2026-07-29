@@ -28,6 +28,12 @@ export const evaluationHarnessDeployment: EvaluationHarnessDeployment =
   Object.freeze({
     registrations: Object.freeze([]),
     parserAllowlist: new Set<string>(),
+    maxClaimEvidenceBytes: 1,
+    evidenceWriter: {
+      async putClaimEvidence() {
+        throw new TypeError("evaluation deployment must configure an evidence repository writer");
+      },
+    },
   });
 
 export interface EvaluationLauncherOptions {

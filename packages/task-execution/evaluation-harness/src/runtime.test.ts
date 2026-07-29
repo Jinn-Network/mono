@@ -267,6 +267,16 @@ function deployment(
           ]
         : [],
     ),
+    maxClaimEvidenceBytes: 1024,
+    evidenceWriter: {
+      async putClaimEvidence({ name, bytes, mediaType }) {
+        return {
+          name,
+          digest: { sha256: digestHex(bytes) },
+          ...(mediaType === undefined ? {} : { mediaType }),
+        };
+      },
+    },
   };
 }
 
@@ -378,6 +388,77 @@ describe("runEvaluationHarness", () => {
     expect(await allFileText(fixture.paths.logs)).not.toContain(
       fixture.privateKeyText,
     );
+  });
+
+  test("stores content claim evidence through the injected writer before issuing", async () => {
+    const fixture = await makeFixture();
+    const claimBytes = encoder.encode('{"passed":true}');
+    const writer = vi.fn(async ({ name, bytes, mediaType }: {
+      readonly name: string;
+      readonly bytes: Uint8Array;
+      readonly mediaType?: string;
+    }) => ({
+      name,
+      digest: { sha256: digestHex(bytes) },
+      ...(mediaType === undefined ? {} : { mediaType }),
+    }));
+    const evaluate = vi.fn<EvaluatorRegistration["adapter"]["evaluate"]>(
+      async () => ({
+        detailedOutcome: {},
+        verdict: "pass",
+        evaluatedAt: "2026-07-29T12:00:00.000Z",
+        measurements: [
+          { name: "passed", value: true },
+          { name: "tests", value: 1 },
+        ],
+        claimEvidence: [{
+          kind: "content",
+          name: "evaluation-report.json",
+          bytes: claimBytes,
+          mediaType: "application/json",
+        }],
+      }),
+    );
+    const configured = {
+      ...deployment(fixture.spec, registration(evaluate)),
+      maxClaimEvidenceBytes: 1024,
+      evidenceWriter: { putClaimEvidence: writer },
+    } as unknown as EvaluationHarnessDeployment;
+
+    expect(configured.evidenceWriter.putClaimEvidence).toBe(writer);
+    const exitCode = await runEvaluationHarness(fixture.paths, configured);
+
+    expect(evaluate).toHaveBeenCalledOnce();
+    expect(writer).toHaveBeenCalledWith({
+      name: "evaluation-report.json",
+      bytes: claimBytes,
+      mediaType: "application/json",
+    }, { signal: undefined });
+    expect(exitCode).toBe(0);
+  });
+
+  test("rejects over-limit content evidence before writer I/O", async () => {
+    const fixture = await makeFixture();
+    const writer = vi.fn();
+    const evaluate = vi.fn<EvaluatorRegistration["adapter"]["evaluate"]>(
+      async () => ({
+        detailedOutcome: {}, verdict: "pass", evaluatedAt: "2026-07-29T12:00:00.000Z",
+        measurements: [{ name: "passed", value: true }, { name: "tests", value: 1 }],
+        claimEvidence: [{
+          kind: "content", name: "evaluation-report.json", bytes: encoder.encode("too-large"),
+        }],
+      }),
+    );
+    const configured = {
+      ...deployment(fixture.spec, registration(evaluate)),
+      maxClaimEvidenceBytes: 1,
+      evidenceWriter: { putClaimEvidence: writer },
+    } as unknown as EvaluationHarnessDeployment;
+
+    expect(await runEvaluationHarness(fixture.paths, configured))
+      .toBe(EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE);
+    expect(writer).not.toHaveBeenCalled();
+    await expect(readFile(join(fixture.paths.out, "verdict"))).rejects.toThrow();
   });
 
   test("refuses a parser identity outside the deployment allowlist without invoking it", async () => {

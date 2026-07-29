@@ -14,7 +14,7 @@ import {
   type AttestationResourceReference,
   type EvaluationMeasurement as IssuerMeasurement,
 } from "@jinn-network/attestation-issuer";
-import type { ResourceDescriptorSchema } from "@jinn-network/evidence-protocol";
+import { ResourceDescriptorSchema } from "@jinn-network/evidence-protocol";
 import {
   checkMeasurementCoverage,
   checkVerdictConsistency,
@@ -62,11 +62,24 @@ type ParsedResourceDescriptor = ReturnType<
   (typeof ResourceDescriptorSchema)["parse"]
 >;
 
+export interface EvidenceRepositoryWriter {
+  putClaimEvidence(
+    input: {
+      readonly name: string;
+      readonly bytes: Uint8Array;
+      readonly mediaType?: string;
+    },
+    options: { readonly signal?: AbortSignal },
+  ): Promise<ResourceDescriptor>;
+}
+
 export interface EvaluationHarnessDeployment {
   /** Host-authored registrations. No registration is selected from Task/spec bytes. */
   readonly registrations: readonly EvaluatorRegistration[];
   /** Exact parser identity keys produced by `parserAllowlistKey`. */
   readonly parserAllowlist: ReadonlySet<string>;
+  readonly evidenceWriter: EvidenceRepositoryWriter;
+  readonly maxClaimEvidenceBytes: number;
 }
 
 class EvaluationHarnessInputError extends Error {
@@ -570,20 +583,36 @@ function measurementMap(
   return { values, measurements };
 }
 
-function evidenceReference(
+async function evidenceReference(
   evidence: ClaimEvidence,
-): AttestationResourceReference {
+  deployment: EvaluationHarnessDeployment,
+): Promise<AttestationResourceReference> {
   if (evidence.kind === "content") {
     if (evidence.name.length === 0) {
       operational("CompletedEvaluation evidence name must be non-empty");
     }
-    return {
-      name: evidence.name,
-      digest: sha256(evidence.bytes),
-      ...(evidence.mediaType === undefined
-        ? {}
-        : { mediaType: evidence.mediaType }),
-    };
+    if (evidence.bytes.byteLength > deployment.maxClaimEvidenceBytes) {
+      operational("CompletedEvaluation evidence exceeds the deployment content bound");
+    }
+    let descriptor: ResourceDescriptor;
+    try {
+      descriptor = await deployment.evidenceWriter.putClaimEvidence({
+        name: evidence.name,
+        bytes: evidence.bytes,
+        ...(evidence.mediaType === undefined ? {} : { mediaType: evidence.mediaType }),
+      }, { signal: undefined });
+    } catch (cause) {
+      operational("claim evidence storage failed", cause);
+    }
+    const parsed = ResourceDescriptorSchema.safeParse(descriptor!);
+    if (!parsed.success || parsed.data.content !== undefined) {
+      operational("claim evidence writer returned an invalid descriptor");
+    }
+    const reference = resourceReference(parsed.data, "claim evidence writer result");
+    if (reference.name !== evidence.name || reference.mediaType !== evidence.mediaType) {
+      operational("claim evidence writer returned a contradictory descriptor");
+    }
+    return reference;
   }
   return resourceReference(evidence.descriptor, "claim evidence");
 }
@@ -612,13 +641,14 @@ function resourceReference(
   };
 }
 
-function validateCompletedDetails(
+async function validateCompletedDetails(
   completed: CompletedEvaluation,
   specification: EvaluationSpec,
-): {
+  deployment: EvaluationHarnessDeployment,
+): Promise<{
   readonly measurements: readonly IssuerMeasurement[];
   readonly evidence: readonly AttestationResourceReference[];
-} {
+}> {
   if (
     completed.explanation !== undefined &&
     completed.explanation.length === 0
@@ -633,7 +663,9 @@ function validateCompletedDetails(
     operational("CompletedEvaluation limitations must be non-empty strings");
   }
   const { measurements } = measurementMap(completed, specification);
-  const evidence = (completed.claimEvidence ?? []).map(evidenceReference);
+  const evidence = await Promise.all(
+    (completed.claimEvidence ?? []).map((claim) => evidenceReference(claim, deployment)),
+  );
   const evidenceNames = new Set(evidence.map(({ name }) => name));
   const missingEvidence = specification.evidenceConventions.requiredRefs
     .filter((name) => !evidenceNames.has(name));
@@ -675,12 +707,19 @@ function validDeployment(value: unknown): value is EvaluationHarnessDeployment {
   const deployment = value as {
     readonly registrations?: unknown;
     readonly parserAllowlist?: unknown;
+    readonly evidenceWriter?: unknown;
+    readonly maxClaimEvidenceBytes?: unknown;
   };
   return (
     Array.isArray(deployment.registrations) &&
     typeof deployment.parserAllowlist === "object" &&
     deployment.parserAllowlist !== null &&
-    typeof (deployment.parserAllowlist as ReadonlySet<string>).has === "function"
+    typeof (deployment.parserAllowlist as ReadonlySet<string>).has === "function" &&
+    typeof (deployment.evidenceWriter as EvidenceRepositoryWriter | undefined)
+      ?.putClaimEvidence === "function" &&
+    typeof deployment.maxClaimEvidenceBytes === "number" &&
+    Number.isSafeInteger(deployment.maxClaimEvidenceBytes) &&
+    deployment.maxClaimEvidenceBytes > 0
   );
 }
 
@@ -768,7 +807,7 @@ export async function runEvaluationHarness(
         ),
       ),
     );
-    const normalized = validateCompletedDetails(completed, specification);
+    const normalized = await validateCompletedDetails(completed, specification, deployment);
     const prepared = await prepareResultEvaluation({
       task: resourceReference(task.descriptor, "Task subject"),
       results: results.map(({ descriptor }) =>
