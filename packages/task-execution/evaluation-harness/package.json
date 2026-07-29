@@ -15,6 +15,9 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "jinn-evaluation-harness": "./dist/bin.js"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",

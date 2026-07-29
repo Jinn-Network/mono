@@ -80,8 +80,13 @@ try {
     .filter(Boolean);
   for (const required of [
     "package/README.md",
+    "package/dist/bin.js",
     "package/dist/index.d.ts",
     "package/dist/index.js",
+    "package/dist/runtime.d.ts",
+    "package/dist/runtime.js",
+    "package/dist/sign.d.ts",
+    "package/dist/sign.js",
   ]) {
     if (!entries.includes(required)) {
       throw new Error(`evaluation-harness archive is missing ${required}`);
@@ -117,19 +122,32 @@ try {
     `
 import type {
   CompletedEvaluation,
+  EvaluationHarnessDeployment,
   EvaluatorAdapter,
   EvaluatorRegistration,
   EvaluationOperationalError,
+} from "@jinn-network/task-execution-evaluation-harness";
+import {
+  makeSecretsSigner,
+  pathsFromEnv,
+  runEvaluationHarness,
 } from "@jinn-network/task-execution-evaluation-harness";
 
 declare const completed: CompletedEvaluation;
 declare const adapter: EvaluatorAdapter;
 declare const registration: EvaluatorRegistration;
 declare const failure: EvaluationOperationalError;
+declare const deployment: EvaluationHarnessDeployment;
+declare const paths: Parameters<typeof runEvaluationHarness>[0];
 void completed;
 void adapter;
 void registration;
 void failure;
+void deployment;
+void paths;
+void makeSecretsSigner;
+void pathsFromEnv;
+void runEvaluationHarness;
 `,
   );
   await writeFile(
@@ -169,6 +187,12 @@ import { readFile, readdir } from "node:fs/promises";
 const harness = await import("@jinn-network/task-execution-evaluation-harness");
 if (typeof harness.validateCompletedEvaluation !== "function") {
   throw new Error("root runtime exports are incomplete");
+}
+if (
+  typeof harness.runEvaluationHarness !== "function" ||
+  typeof harness.makeSecretsSigner !== "function"
+) {
+  throw new Error("harness runtime exports are incomplete");
 }
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const actual = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();

@@ -149,6 +149,8 @@ __metadata:
     "@types/node": "npm:^22.0.0"
     typescript: "npm:^5.9.3"
     vitest: "npm:^4.1.8"
+  bin:
+    jinn-evaluation-harness: ./dist/bin.js
   languageName: unknown
   linkType: soft
 
