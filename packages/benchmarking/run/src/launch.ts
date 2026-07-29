@@ -1,0 +1,594 @@
+import { createHash } from "node:crypto";
+import {
+  cellIdempotencyKey,
+  documentDigest,
+  expectedCellSet,
+  submissionExtensionBlock,
+  type BenchmarkRecord,
+  type RunRecord,
+} from "@jinn-network/benchmarking-records";
+import type {
+  ObservationSnapshot,
+  TaskExecutionBackend,
+} from "@jinn-network/task-execution-backend";
+import { sealSubmission } from "@jinn-network/task-execution-protocol";
+import { assertCellCorrespondence, CellCorrespondenceError } from "./checks.js";
+
+export type CellStatusKind =
+  | "dispatch"
+  | "claimed"
+  | "delivered"
+  | "judged"
+  | "cancelled"
+  | "error";
+
+/** §7.4 replaceable terminal reasons — typed, never parsed from prose. */
+export type ReplaceableReason = "expired" | "unscorable" | "exclusion-hit";
+
+export interface CellStatusEvent {
+  cellKey: string;
+  armId: string;
+  replicate: number;
+  dispatch: number;
+  kind: CellStatusKind;
+  attempt?: string;
+  submission?: `urn:uuid:${string}`;
+  submissionDigest?: `sha256:${string}`;
+  detail?: string;
+  /** True when this terminal is replaceable under §7.4. */
+  replaceable?: boolean;
+  /** Typed replaceable reason when `replaceable` is true. */
+  replaceableReason?: ReplaceableReason;
+  /** Cancellation marker for assembly (`completeness.runOutcome: "cancelled"`). */
+  cancelledRun?: boolean;
+}
+
+/** Injected clock — launch never owns timer policy beyond reading `now()`. */
+export type Clock = {
+  now(): Date;
+};
+
+/**
+ * Injected wait/poll port for backends that do not advertise `watch`.
+ * The host owns sleep/backoff; this package only awaits the port.
+ */
+export type AttemptWaitPort = {
+  waitUntilTerminal(input: {
+    backend: TaskExecutionBackend;
+    attempt: string;
+    signal?: AbortSignal;
+    closeAt: string;
+  }): Promise<ObservationSnapshot>;
+};
+
+/** Crash-safe resume: exact previously accepted Submission bytes for a dispatch. */
+export type AcceptedSubmissionPort = {
+  acceptedSubmissionBytes(
+    runDigest: string,
+    cellKey: string,
+    dispatch: number,
+  ): Uint8Array | undefined | Promise<Uint8Array | undefined>;
+};
+
+/** Host-visible typed terminal facts beyond Attempt derived state (§7.4). */
+export type HostTerminalFacts = {
+  exclusionHit?: boolean;
+  unscorable?: boolean;
+};
+
+/** Classify a terminal observation into status + §7.4 replaceability. */
+export type TerminalClassifier = (input: {
+  snapshot: ObservationSnapshot;
+  cellKey: string;
+  armId: string;
+  hostFacts?: HostTerminalFacts;
+}) => {
+  kind: CellStatusKind;
+  replaceable: boolean;
+  replaceableReason?: ReplaceableReason;
+  detail?: string;
+  judged?: boolean;
+};
+
+export interface LaunchOptions {
+  runDigest: `sha256:${string}`;
+  taskBytesFor(taskDigestHex: string): Uint8Array | Promise<Uint8Array>;
+  signal?: AbortSignal;
+  /**
+   * Explicit owner early-close (distinct from natural `closeAt`). When true, assembly receives
+   * `cancelledRun` after in-flight drain.
+   */
+  earlyClose?: boolean;
+  /** Injected clock for deadline = min(nowMs + cellWindowMs, closeAt). */
+  clock?: Clock;
+  /** @deprecated prefer `clock`; retained for older tests as epoch-ms factory. */
+  now?: () => number;
+  mintSubmissionUri?: (idempotencyKey: string) => `urn:uuid:${string}`;
+  requirementsOverride?: Record<string, unknown>;
+  /** Fallback when `capabilities().watch` is false / `backend.watch` absent. */
+  waitForTerminal?: AttemptWaitPort;
+  /** Exact accepted Submission bytes for resume (no package journal). */
+  acceptedSubmissions?: AcceptedSubmissionPort;
+  /** Optional §7.4 classifier (defaults to `defaultClassifyTerminal`). */
+  classifyTerminal?: TerminalClassifier;
+  /** Optional host-visible exclusion/unscorable facts per Attempt. */
+  hostTerminalFacts?(input: {
+    cellKey: string;
+    armId: string;
+    attempt: string;
+    snapshot: ObservationSnapshot;
+  }): HostTerminalFacts | undefined | Promise<HostTerminalFacts | undefined>;
+}
+
+function mergePinningMaps(
+  pinning: Record<string, unknown>,
+  baseline: Record<string, unknown>,
+): Record<string, unknown> {
+  return { ...baseline, ...pinning };
+}
+
+function deterministicSubmissionUri(idempotencyKey: string): `urn:uuid:${string}` {
+  const hex = createHash("sha256").update(idempotencyKey, "utf8").digest("hex");
+  const uuid = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+  return `urn:uuid:${uuid}`;
+}
+
+function resolveNow(opts: LaunchOptions): Date {
+  if (opts.clock !== undefined) return opts.clock.now();
+  if (opts.now !== undefined) return new Date(opts.now());
+  return new Date();
+}
+
+/**
+ * Deadline = min(nowMs + cellWindowMs, closeAt), calendar-strict RFC3339 Z.
+ * Canonical `Run.policy.cellWindow` is a duration in milliseconds.
+ */
+export function computeCellDeadline(
+  now: Date,
+  cellWindowMs: number,
+  closeAt: string,
+): string {
+  const windowEndMs = now.getTime() + cellWindowMs;
+  const closeMs = Date.parse(closeAt);
+  const deadlineMs = Number.isFinite(closeMs) ? Math.min(windowEndMs, closeMs) : windowEndMs;
+  return new Date(deadlineMs).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+/**
+ * §7.4 default: only expired, unscorable, and exclusion-hit are replaceable.
+ * judged / unjudged / invalidated / delivered / cancelled / submit-rejection are not.
+ */
+export function defaultClassifyTerminal(input: {
+  snapshot: ObservationSnapshot;
+  hostFacts?: HostTerminalFacts;
+}): ReturnType<TerminalClassifier> {
+  if (input.hostFacts?.exclusionHit === true) {
+    return {
+      kind: "error",
+      replaceable: true,
+      replaceableReason: "exclusion-hit",
+      detail: "exclusion-hit",
+    };
+  }
+  if (input.hostFacts?.unscorable === true) {
+    return {
+      kind: "error",
+      replaceable: true,
+      replaceableReason: "unscorable",
+      detail: "unscorable",
+    };
+  }
+  const state = input.snapshot.descriptor.derived.state;
+  if (state === "expired") {
+    return {
+      kind: "error",
+      replaceable: true,
+      replaceableReason: "expired",
+      detail: "expired",
+    };
+  }
+  if (state === "delivered") {
+    return { kind: "delivered", replaceable: false };
+  }
+  if (state === "cancelled") {
+    return { kind: "cancelled", replaceable: false, detail: "cancelled" };
+  }
+  if (state === "failed" || state === "rejected" || state === "lost") {
+    return { kind: "error", replaceable: false, detail: state };
+  }
+  return { kind: "error", replaceable: false, detail: state };
+}
+
+async function waitForAttemptTerminal(
+  backend: TaskExecutionBackend,
+  attempt: string,
+  opts: LaunchOptions,
+  closeAt: string,
+): Promise<ObservationSnapshot> {
+  const capabilities = await backend.capabilities();
+  if (capabilities.watch && backend.watch !== undefined) {
+    let latest = await backend.observe(attempt as never);
+    if (latest.descriptor.derived.terminal) return latest;
+    for await (const _observation of backend.watch(attempt as never, latest.cursor)) {
+      void _observation;
+      if (opts.signal?.aborted || opts.earlyClose === true) break;
+      latest = await backend.observe(attempt as never);
+      if (latest.descriptor.derived.terminal) return latest;
+      if (Date.parse(closeAt) <= resolveNow(opts).getTime()) {
+        return latest;
+      }
+    }
+    return latest;
+  }
+  if (opts.waitForTerminal === undefined) {
+    throw new Error(
+      "launchAndWatch: backend does not advertise watch; inject waitForTerminal (no owned timer policy)",
+    );
+  }
+  return opts.waitForTerminal.waitUntilTerminal({
+    backend,
+    attempt,
+    signal: opts.signal,
+    closeAt,
+  });
+}
+
+type Coord = { cellKey: string; taskDigest: string; armId: string; replicate: number };
+
+async function sealNewSubmission(input: {
+  run: RunRecord;
+  runDigest: `sha256:${string}`;
+  coord: Coord;
+  dispatch: number;
+  opts: LaunchOptions;
+  requirements: Record<string, unknown>;
+}): Promise<{ bytes: Uint8Array; digest: `sha256:${string}`; uri: `urn:uuid:${string}` }> {
+  const { run, runDigest, coord, dispatch, opts, requirements } = input;
+  const idempotencyKey = cellIdempotencyKey(runDigest, coord.cellKey, dispatch);
+  const submissionUri =
+    opts.mintSubmissionUri?.(idempotencyKey) ?? deterministicSubmissionUri(idempotencyKey);
+  const deadline = computeCellDeadline(
+    resolveNow(opts),
+    run.policy.cellWindow,
+    run.closeAt,
+  );
+  const submissionDocument = {
+    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    submission: submissionUri,
+    task: { digest: { sha256: coord.taskDigest } },
+    requester: run.owner,
+    nonce: `${coord.cellKey}:${dispatch}`,
+    idempotencyKey,
+    deadline,
+    requirements,
+    annotations: submissionExtensionBlock(runDigest, coord.cellKey, coord.armId),
+  };
+  const bytes = sealSubmission(submissionDocument);
+  return { bytes, digest: documentDigest(bytes), uri: submissionUri };
+}
+
+async function dispatchAndWatchCell(input: {
+  run: RunRecord;
+  runDigest: `sha256:${string}`;
+  backend: TaskExecutionBackend;
+  coord: Coord;
+  dispatch: number;
+  opts: LaunchOptions;
+  inFlight: Set<string>;
+}): Promise<CellStatusEvent[]> {
+  const { run, runDigest, backend, coord, dispatch, opts, inFlight } = input;
+  const arm = run.arms.find((candidate) => candidate.armId === coord.armId);
+  if (arm === undefined) throw new Error(`unknown armId ${coord.armId}`);
+
+  const expectedRequirements = mergePinningMaps(
+    arm.pinning as Record<string, unknown>,
+    run.policy.submissionBaseline as Record<string, unknown>,
+  );
+  const actualRequirements = opts.requirementsOverride ?? expectedRequirements;
+  assertCellCorrespondence(expectedRequirements, actualRequirements);
+
+  const taskBytes = await opts.taskBytesFor(coord.taskDigest);
+  const taskDigest = documentDigest(taskBytes);
+  if (taskDigest !== `sha256:${coord.taskDigest}`) {
+    throw new Error(
+      `task bytes for ${coord.taskDigest} digest to ${taskDigest}, expected sha256:${coord.taskDigest}`,
+    );
+  }
+
+  const prior = await opts.acceptedSubmissions?.acceptedSubmissionBytes(
+    runDigest,
+    coord.cellKey,
+    dispatch,
+  );
+  const sealed = prior !== undefined
+    ? {
+      bytes: prior,
+      digest: documentDigest(prior),
+      uri: (JSON.parse(new TextDecoder().decode(prior)) as { submission: `urn:uuid:${string}` }).submission,
+    }
+    : await sealNewSubmission({
+      run,
+      runDigest,
+      coord,
+      dispatch,
+      opts,
+      requirements: actualRequirements,
+    });
+
+  const ack = await backend.submit(taskBytes, sealed.bytes);
+  if (!ack.accepted) {
+    // Submit rejection is NOT a §7.4 replacement trigger.
+    return [{
+      cellKey: coord.cellKey,
+      armId: coord.armId,
+      replicate: coord.replicate,
+      dispatch,
+      kind: "error",
+      detail: ack.error.detail ?? ack.error.category,
+      replaceable: false,
+    }];
+  }
+
+  const snapshot = await backend.observe(ack.submission);
+  const attempt = snapshot.descriptor.attempt;
+  if (typeof attempt !== "string" || attempt.length === 0) {
+    throw new Error("observe(ack.submission) did not materialize descriptor.attempt");
+  }
+  inFlight.add(attempt);
+
+  const events: CellStatusEvent[] = [{
+    cellKey: coord.cellKey,
+    armId: coord.armId,
+    replicate: coord.replicate,
+    dispatch,
+    kind: "dispatch",
+    attempt,
+    submission: ack.submission,
+    submissionDigest: ack.digest,
+  }];
+
+  if (!snapshot.descriptor.derived.terminal) {
+    events.push({
+      cellKey: coord.cellKey,
+      armId: coord.armId,
+      replicate: coord.replicate,
+      dispatch,
+      kind: "claimed",
+      attempt,
+      submission: ack.submission,
+      submissionDigest: ack.digest,
+    });
+  }
+
+  const terminalSnap = snapshot.descriptor.derived.terminal
+    ? snapshot
+    : await waitForAttemptTerminal(backend, attempt, opts, run.closeAt);
+
+  const hostFacts = await opts.hostTerminalFacts?.({
+    cellKey: coord.cellKey,
+    armId: coord.armId,
+    attempt,
+    snapshot: terminalSnap,
+  });
+
+  const classified = (opts.classifyTerminal ?? defaultClassifyTerminal)({
+    snapshot: terminalSnap,
+    cellKey: coord.cellKey,
+    armId: coord.armId,
+    ...(hostFacts === undefined ? {} : { hostFacts }),
+  });
+
+  events.push({
+    cellKey: coord.cellKey,
+    armId: coord.armId,
+    replicate: coord.replicate,
+    dispatch,
+    kind: classified.kind,
+    attempt,
+    submission: ack.submission,
+    submissionDigest: ack.digest,
+    ...(classified.detail === undefined ? {} : { detail: classified.detail }),
+    replaceable: classified.replaceable,
+    ...(classified.replaceableReason === undefined
+      ? {}
+      : { replaceableReason: classified.replaceableReason }),
+  });
+
+  if (classified.judged === true && classified.kind !== "judged") {
+    events.push({
+      cellKey: coord.cellKey,
+      armId: coord.armId,
+      replicate: coord.replicate,
+      dispatch,
+      kind: "judged",
+      attempt,
+      submission: ack.submission,
+      submissionDigest: ack.digest,
+      replaceable: false,
+    });
+  }
+
+  inFlight.delete(attempt);
+  return events;
+}
+
+function maxDispatches(run: RunRecord): number {
+  if (!run.policy.replacement.allowed) return 1;
+  return (run.policy.replacement.maxPerCell ?? 1) + 1;
+}
+
+function pastClose(run: RunRecord, opts: LaunchOptions): boolean {
+  return Date.parse(run.closeAt) <= resolveNow(opts).getTime();
+}
+
+function ownerCancelled(opts: LaunchOptions): boolean {
+  return opts.signal?.aborted === true || opts.earlyClose === true;
+}
+
+/**
+ * Dispatch each expected cell via 2-arg `submit`, watch to a terminal boundary, and apply §7.4
+ * replacement only for expired / unscorable / exclusion-hit terminals.
+ *
+ * Natural `closeAt` stops further dispatch/replacement without marking the run cancelled.
+ * Only signal abort or explicit `earlyClose` sets `cancelledRun` for assembly.
+ */
+export async function* launchAndWatch(
+  bench: BenchmarkRecord,
+  run: RunRecord,
+  backend: TaskExecutionBackend,
+  opts: LaunchOptions,
+): AsyncGenerator<CellStatusEvent> {
+  const cells = expectedCellSet(bench, run);
+  const maxPerCell = maxDispatches(run);
+  const inFlight = new Set<string>();
+  let runCancelled = false;
+
+  const drainInFlight = async function* (): AsyncGenerator<CellStatusEvent> {
+    if (backend.cancel !== undefined) {
+      for (const attempt of [...inFlight]) {
+        try {
+          await backend.cancel(attempt as never, "run-cancelled");
+        } catch {
+          // best-effort cancel; still drain via watch/wait
+        }
+      }
+    }
+    for (const attempt of [...inFlight]) {
+      try {
+        const snap = await waitForAttemptTerminal(backend, attempt, opts, run.closeAt);
+        yield {
+          cellKey: "drain",
+          armId: "",
+          replicate: 0,
+          dispatch: 0,
+          kind: snap.descriptor.derived.state === "cancelled" ? "cancelled" : "error",
+          attempt,
+          detail: `drain:${snap.descriptor.derived.state}`,
+          cancelledRun: true,
+        };
+      } catch {
+        yield {
+          cellKey: "drain",
+          armId: "",
+          replicate: 0,
+          dispatch: 0,
+          kind: "cancelled",
+          attempt,
+          detail: "drain-to-boundary",
+          cancelledRun: true,
+        };
+      }
+      inFlight.delete(attempt);
+    }
+  };
+
+  for (const coord of cells) {
+    if (ownerCancelled(opts)) {
+      runCancelled = true;
+      break;
+    }
+    if (pastClose(run, opts)) {
+      // Natural close: stop dispatch; do not cancel.
+      break;
+    }
+
+    let dispatch = 1;
+    let lastReplaceable = false;
+    do {
+      if (ownerCancelled(opts)) {
+        runCancelled = true;
+        break;
+      }
+      if (pastClose(run, opts)) break;
+
+      const events = await dispatchAndWatchCell({
+        run,
+        runDigest: opts.runDigest,
+        backend,
+        coord,
+        dispatch,
+        opts,
+        inFlight,
+      });
+      for (const event of events) yield event;
+      const terminal = events[events.length - 1]!;
+      lastReplaceable = terminal.replaceable === true;
+      if (!lastReplaceable) break;
+      if (!run.policy.replacement.allowed) break;
+      if (dispatch >= maxPerCell) break;
+      if (pastClose(run, opts)) break;
+      if (ownerCancelled(opts)) {
+        runCancelled = true;
+        break;
+      }
+      dispatch += 1;
+    } while (lastReplaceable);
+
+    if (runCancelled) break;
+  }
+
+  if (runCancelled) {
+    for await (const event of drainInFlight()) yield event;
+    yield {
+      cellKey: "*",
+      armId: "*",
+      replicate: 0,
+      dispatch: 0,
+      kind: "cancelled",
+      detail: opts.signal?.aborted ? "signal-aborted" : "early-close",
+      cancelledRun: true,
+    };
+  }
+}
+
+/**
+ * Re-enter outstanding cells using backend durability + exact accepted Submission bytes when
+ * the host supplies them. No package-local run journal.
+ */
+export async function* resumeRun(
+  bench: BenchmarkRecord,
+  run: RunRecord,
+  backend: TaskExecutionBackend,
+  opts: LaunchOptions & {
+    outstanding: readonly {
+      cellKey: string;
+      armId: string;
+      replicate: number;
+      taskDigest: string;
+      dispatch: number;
+    }[];
+  },
+): AsyncGenerator<CellStatusEvent> {
+  void bench;
+  const inFlight = new Set<string>();
+  for (const cell of opts.outstanding) {
+    if (ownerCancelled(opts)) {
+      yield {
+        cellKey: cell.cellKey,
+        armId: cell.armId,
+        replicate: cell.replicate,
+        dispatch: cell.dispatch,
+        kind: "cancelled",
+        detail: "drain-to-boundary",
+        cancelledRun: true,
+      };
+      continue;
+    }
+    if (pastClose(run, opts)) {
+      // Natural close on resume: do not re-dispatch; leave accounting to assembly.
+      continue;
+    }
+    const events = await dispatchAndWatchCell({
+      run,
+      runDigest: opts.runDigest,
+      backend,
+      coord: cell,
+      dispatch: cell.dispatch,
+      opts,
+      inFlight,
+    });
+    for (const event of events) yield event;
+  }
+}
+
+export { CellCorrespondenceError };

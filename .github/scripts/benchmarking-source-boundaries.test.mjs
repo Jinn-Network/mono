@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'benchmarking');
-const benchmarkingDirectories = ['records', 'testing', 'aggregate'];
+const benchmarkingDirectories = ['records', 'testing', 'aggregate', 'run', 'interop'];
 
 // The whole benchmarking tree is forbidden to import any evidence-tree package, the two
 // I/O-free evidence producer packages, any record-discovery package, and — critically — every
@@ -76,6 +76,30 @@ const TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_AGGREGATE = [
   '@jinn-network/task-execution-testing',
   '@jinn-network/task-execution-profiles',
   '@jinn-network/task-execution-protocol',
+];
+
+// run (M4) may import the backend contract + protocol + profiles, but never a concrete
+// backend-local / evidence / marketplace / aggregate package (plan Task 4.1; tenet 3/4).
+const RUN_FORBIDDEN_EXTRA = [
+  '@jinn-network/benchmarking-aggregate',
+  '@jinn-network/task-execution-testing',
+  '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-workspace',
+  '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-supervisor',
+];
+
+// interop (M5) imports records + profiles + protocol; never run / aggregate / backend /
+// marketplace / evidence (plan Task 5.1 Interfaces; dependency direction records ← interop).
+const INTEROP_FORBIDDEN_EXTRA = [
+  '@jinn-network/benchmarking-run',
+  '@jinn-network/benchmarking-aggregate',
+  '@jinn-network/task-execution-backend',
+  '@jinn-network/task-execution-testing',
+  '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-workspace',
+  '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-supervisor',
 ];
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
@@ -338,6 +362,19 @@ test('benchmarking source boundaries remain one-way across the approved graph', 
   assertBoundary(
     join(packages, 'aggregate', 'src'),
     [...BENCHMARKING_FOREIGN_PACKAGES, ...TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_AGGREGATE],
+    FORBIDDEN_ROOTS,
+  );
+  // run depends on records + backend contract + protocol + profiles; never aggregate /
+  // concrete backends / marketplace / evidence.
+  assertBoundary(
+    join(packages, 'run', 'src'),
+    [...BENCHMARKING_FOREIGN_PACKAGES, ...RUN_FORBIDDEN_EXTRA],
+    FORBIDDEN_ROOTS,
+  );
+  // interop depends on records + profiles + protocol; never run / aggregate / backends.
+  assertBoundary(
+    join(packages, 'interop', 'src'),
+    [...BENCHMARKING_FOREIGN_PACKAGES, ...INTEROP_FORBIDDEN_EXTRA],
     FORBIDDEN_ROOTS,
   );
 });

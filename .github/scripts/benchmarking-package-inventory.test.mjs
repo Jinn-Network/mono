@@ -13,6 +13,8 @@ const BENCHMARKING_PACKAGES = [
   ['records', '@jinn-network/benchmarking-records'],
   ['testing', '@jinn-network/benchmarking-testing'],
   ['aggregate', '@jinn-network/benchmarking-aggregate'],
+  ['run', '@jinn-network/benchmarking-run'],
+  ['interop', '@jinn-network/benchmarking-interop'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/benchmarking; map name -> absolute dir
@@ -20,6 +22,16 @@ const BENCHMARKING_PACKAGES = [
 const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
+  ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
+  ['@jinn-network/task-execution-testing', join(root, 'packages', 'task-execution', 'testing')],
+  ['@jinn-network/task-execution-backend-local', join(root, 'packages', 'task-execution', 'backend-local', 'assembly')],
+  ['@jinn-network/task-execution-launchers', join(root, 'packages', 'task-execution', 'backend-local', 'launchers')],
+  ['@jinn-network/task-execution-supervisor', join(root, 'packages', 'task-execution', 'backend-local', 'supervisor')],
+  ['@jinn-network/task-execution-workspace', join(root, 'packages', 'task-execution', 'backend-local', 'workspace')],
+  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
+  ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
+  ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
+  ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
 ]);
 
@@ -40,6 +52,39 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['aggregate', {
     dependencies: ['@jinn-network/benchmarking-records', '@jinn-network/trust-core'],
     devDependencies: ['@jinn-network/task-execution-protocol'],
+    optionalDependencies: [], peerDependencies: [],
+  }],
+  ['run', {
+    dependencies: [
+      '@jinn-network/benchmarking-records',
+      '@jinn-network/task-execution-backend',
+      '@jinn-network/task-execution-profiles',
+      '@jinn-network/task-execution-protocol',
+    ],
+    // task-execution-testing pulls backend-local + evidence contracts for yarn install;
+    // production `src/` must still never import them (source-boundaries guard).
+    devDependencies: [
+      '@jinn-network/benchmarking-testing',
+      '@jinn-network/evidence-discovery',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/evidence-repository',
+      '@jinn-network/execution-recorder',
+      '@jinn-network/task-execution-backend-local',
+      '@jinn-network/task-execution-launchers',
+      '@jinn-network/task-execution-supervisor',
+      '@jinn-network/task-execution-testing',
+      '@jinn-network/task-execution-workspace',
+    ],
+    optionalDependencies: [], peerDependencies: [],
+  }],
+  ['interop', {
+    dependencies: [
+      '@jinn-network/benchmarking-records',
+      '@jinn-network/task-execution-profiles',
+      '@jinn-network/task-execution-protocol',
+    ],
+    // testing kit is used only for describeExportConformance in the package test suite.
+    devDependencies: ['@jinn-network/benchmarking-testing'],
     optionalDependencies: [], peerDependencies: [],
   }],
 ]);

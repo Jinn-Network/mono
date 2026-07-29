@@ -10,6 +10,11 @@ import {
   sealRun,
   serializeCanonicalJson,
 } from "@jinn-network/benchmarking-records";
+import {
+  EVAL_SEMANTICS_VERSION,
+  EVALUATION_SPEC_FORMAT_URI,
+  sealEvaluationSpec,
+} from "@jinn-network/task-execution-profiles";
 import { sealDelivery, sealSubmission, sealTask } from "@jinn-network/task-execution-protocol";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -38,7 +43,42 @@ async function writeJson(relative, value) {
   await writeBytes(relative, serializeCanonicalJson(value));
 }
 
-const evaluationDigest = "e".repeat(64);
+/** Honest EvaluationSpec body — sealed digest is pinned into every miniature Task. */
+const evaluationSpecDocument = {
+  protocol: EVALUATION_SPEC_FORMAT_URI,
+  semanticsVersion: EVAL_SEMANTICS_VERSION,
+  family: "deterministic-process",
+  grader: {
+    name: "jinn.parser.miniature",
+    digest: { sha256: "1".repeat(64) },
+    accessClass: "public",
+  },
+  familyBlock: {
+    image: {
+      uri: "https://example.org/images/miniature-runner",
+      digest: { sha256: "2".repeat(64) },
+    },
+    platform: "linux/amd64",
+    workspace: {},
+    testMaterial: [{
+      uri: "https://example.org/tests/miniature.py",
+      accessClass: "public",
+    }],
+    parser: {
+      id: "jinn.parser.miniature",
+      version: "1.0.0",
+      digest: `sha256:${"1".repeat(64)}`,
+    },
+    transitions: { failToPass: [], passToPass: [] },
+    timeout: 600,
+  },
+  measurements: [{ name: "passed", type: "boolean", required: true }],
+  verdictRule: { threshold: { measurement: "passed", op: "eq", value: true } },
+  unscorable: [],
+  evidenceConventions: { requiredRefs: [] },
+};
+const sealedEvaluationSpec = sealEvaluationSpec(evaluationSpecDocument);
+const evaluationDigest = sealedEvaluationSpec.digest.slice("sha256:".length);
 const profileDigest = "f".repeat(64);
 const tasks = ["alpha", "beta", "gamma"].map((name) => {
   const bytes = sealTask({
@@ -152,14 +192,27 @@ const cells = coordinates.map((coordinate, index) => {
 
   const verdictCount = index === 2 ? 2 : outcome === "judged" ? 1 : 0;
   const cellVerdicts = [];
+  let firstEvaluator;
   for (let verdictIndex = 0; verdictIndex < verdictCount; verdictIndex += 1) {
+    const verdictLabel = (index + verdictIndex) % 3 === 0 ? "fail" : "pass";
+    const evaluator =
+      `urn:uuid:${String(500 + index + verdictIndex).padStart(8, "0")}-0000-5000-8000-000000000000`;
+    if (firstEvaluator === undefined) firstEvaluator = evaluator;
+    // Consistency material: measurements must recompute to the delivered verdict.
+    const measurements = { passed: verdictLabel === "pass" };
     const verdict = {
       cellKey,
-      verdict: (index + verdictIndex) % 3 === 0 ? "fail" : "pass",
-      evaluator: `urn:uuid:${String(500 + index + verdictIndex).padStart(8, "0")}-0000-5000-8000-000000000000`,
+      verdict: verdictLabel,
+      evaluator,
       evaluationSpecification: `sha256:${evaluationDigest}`,
+      measurements,
     };
-    const digest = digestOf(verdict);
+    const digest = digestOf({
+      cellKey: verdict.cellKey,
+      verdict: verdict.verdict,
+      evaluator: verdict.evaluator,
+      evaluationSpecification: verdict.evaluationSpecification,
+    });
     verdicts.push({ digest, ...verdict });
     cellVerdicts.push(digest);
   }
@@ -171,6 +224,11 @@ const cells = coordinates.map((coordinate, index) => {
   });
 
   const verificationStatus = outcome === "invalidated" ? "mismatch" : "match";
+  const solver = hasDelivery
+    ? `urn:uuid:${String(300 + index).padStart(8, "0")}-0000-5000-8000-000000000000`
+    : undefined;
+  const evaluator = firstEvaluator
+    ?? (hasDelivery ? "unresolved" : undefined);
   return {
     cellKey,
     taskDigest: coordinate.task.digest,
@@ -193,10 +251,11 @@ const cells = coordinates.map((coordinate, index) => {
     integrityTier: index % 4 === 0 ? "attested-only" : "re-derivable",
     ...(hasDelivery ? {
       attempt: `urn:uuid:${String(index + 101).padStart(8, "0")}-0000-5000-8000-000000000000`,
-      solver: `urn:uuid:${String(300 + index).padStart(8, "0")}-0000-5000-8000-000000000000`,
+      solver,
       cost: { value: coordinate.armId === "armA" ? "1.25" : "0.75", unit: "USD", source: "reported" },
       latencyMs: 1000 + index,
     } : {}),
+    ...(evaluator === undefined ? {} : { evaluator }),
   };
 });
 cells.sort((left, right) => left.cellKey < right.cellKey ? -1 : left.cellKey > right.cellKey ? 1 : 0);
@@ -244,16 +303,52 @@ await writeJson("miniature-run/submissions.json", submissions);
 await writeJson("miniature-run/deliveries.json", deliveries);
 await writeJson("miniature-run/verdicts.json", verdicts);
 await writeJson("miniature-run/evidence.json", evidence);
+const portOutputs = Object.fromEntries(cells.map((cell, sortedIndex) => {
+  void sortedIndex;
+  const originalIndex = coordinates.findIndex((coordinate) =>
+    `${coordinate.task.digest}/${coordinate.armId}/${coordinate.replicate}` === cell.cellKey
+  );
+  return [cell.cellKey, {
+    ...(cell.solver === undefined ? {} : { solver: cell.solver }),
+    ...(cell.evaluator === undefined || cell.evaluator === "unresolved"
+      ? {}
+      : { evaluator: cell.evaluator }),
+    verification: {
+      harness: cell.verification.harness,
+      model: cell.verification.model,
+      loadout: cell.verification.loadout,
+      isolation: cell.verification.isolation,
+    },
+    integrityTier: cell.integrityTier,
+    ...(cell.cost === undefined ? {} : { cost: cell.cost }),
+    ...(cell.latencyMs === undefined ? {} : { latencyMs: cell.latencyMs }),
+    ...(outcomePlan[originalIndex] === "unscorable"
+      ? { evaluationTerminal: "could-not-grade" }
+      : {}),
+  }];
+}));
+
+await writeJson("miniature-run/evaluation-spec.json", evaluationSpecDocument);
+await writeBytes("miniature-run/evaluation-spec.sealed.json", sealedEvaluationSpec.bytes);
 await writeJson("miniature-run/injected-scope.json", {
   submissions,
   deliveries,
   verdicts,
   evidence,
+  exclusions: [
+    {
+      cellKey: cells.find((cell) => cell.outcome === "excluded").cellKey,
+      reason: "participant-exclusion",
+    },
+  ],
   replacementLineage: [{
     cellKey: cells.find((cell) => cell.dispatches > 1).cellKey,
     dispatches: 2,
     reason: "expired",
   }],
+  portOutputs,
+  evaluationSpec: evaluationSpecDocument,
+  evaluationSpecDigest: sealedEvaluationSpec.digest,
 });
 await writeBytes("miniature-run/expected-matrix.json", matrixSealed.bytes);
 await writeBytes("miniature-run/expected-matrix.sha256", text.encode(matrixSealed.digest));
@@ -284,6 +379,11 @@ await writeJson("exports/eval-log.json", {
     epoch: cell.replicate,
     target: cell.armId,
     outcome: cell.outcome,
+    evidence: {
+      // Distinctive injected EvidenceResolver refs (non-vacuous port use).
+      transcriptRef: `transcript:miniature:${cell.cellKey}`,
+      evidenceRef: `evidence:miniature:${cell.cellKey}`,
+    },
   })),
 });
 await writeJson("exports/croissant.json", {
@@ -293,7 +393,7 @@ await writeJson("exports/croissant.json", {
   version: benchmark.version,
   distribution: tasks.map((task) => ({
     "@type": "cr:FileObject",
-    name: `${task.name}.task.json`,
+    name: `${task.digest}.task.json`,
     sha256: task.digest,
   })),
 });
@@ -303,164 +403,7 @@ await writeJson("exports/static-bundle.json", {
   files: ["benchmark.json", "run.json", "matrix.json", "verdicts.json", "evidence.json"],
 });
 
-const methodSpecs = [
-  {
-    id: "jinn.benchmarking.method/wilson",
-    requiredInputs: ["matrix.cells", "referenced-verdicts"],
-    parameterSchema: { type: "object", required: ["verdictRule"], properties: { verdictRule: { enum: ["sole", "unanimous", "any-pass", "majority"] } }, additionalProperties: false },
-    outputShape: "per-arm pass rate + Wilson interval + conflicted cells",
-    exclusionRule: "judged-only; conflicted dropped-with-report",
-    clusteringRule: "none",
-  },
-  {
-    id: "jinn.benchmarking.method/avg-at-k",
-    requiredInputs: ["matrix.cells", "referenced-verdicts"],
-    parameterSchema: { type: "object", required: ["verdictRule"], properties: { verdictRule: { enum: ["sole", "unanimous", "any-pass", "majority"] } }, additionalProperties: false },
-    outputShape: "per-arm per-task repetition rate + arm mean + conflicted cells",
-    exclusionRule: "judged-only; preserve arm identity",
-    clusteringRule: "none",
-  },
-  {
-    id: "jinn.benchmarking.method/pass-at-k",
-    requiredInputs: ["matrix.cells", "referenced-verdicts"],
-    parameterSchema: { type: "object", required: ["verdictRule", "k"], properties: { verdictRule: { enum: ["sole", "unanimous", "any-pass", "majority"] }, k: { type: "integer", minimum: 1 } }, additionalProperties: false },
-    outputShape: "per-arm per-task unbiased pass@k + arm mean + conflicted cells",
-    exclusionRule: "judged-only; preserve arm identity",
-    clusteringRule: "none",
-  },
-  {
-    id: "jinn.benchmarking.method/paired-mcnemar",
-    requiredInputs: ["matrix.cells", "referenced-verdicts", "task-provenance-source"],
-    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate"], properties: { verdictRule: { enum: ["sole", "unanimous", "any-pass", "majority"] }, baseline: { type: "string" }, candidate: { type: "string" } }, additionalProperties: false },
-    outputShape: "paired exact McNemar + provenance-cluster correction + excluded cells",
-    exclusionRule: "pair shared task digests judged in both arms; report full remainder",
-    clusteringRule: "task-provenance-source",
-  },
-  {
-    id: "jinn.benchmarking.method/noninferiority-iut",
-    requiredInputs: ["matrix.cells", "matrix.cost", "referenced-verdicts", "exact-task-bytes", "task-provenance-source-family"],
-    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate", "seed", "resamples"], properties: { verdictRule: { enum: ["sole", "unanimous", "any-pass", "majority"] }, baseline: { type: "string" }, candidate: { type: "string" }, seed: { type: "integer", minimum: 1 }, resamples: { type: "integer", minimum: 1 } }, additionalProperties: false },
-    outputShape: "BCa quality lower bound AND one-sided paired-cost Wilcoxon + exclusions + conflicted cells",
-    exclusionRule: "paired both-arm judged cells; cost only both-solve pairs; report remainder",
-    clusteringRule: "task-provenance-source",
-    resamplingProcedure: "xorshift32-v1; sample whole source clusters with replacement; one uint32 draw per cluster position; cluster jackknife acceleration",
-  },
-  {
-    id: "jinn.benchmarking.method/clean-subset",
-    requiredInputs: ["matrix.cells", "referenced-verdicts", "exact-task-bytes-or-anchored-benchmark-announcement"],
-    parameterSchema: { type: "object", required: ["verdictRule", "basis", "cutoff", "delegate"], properties: { verdictRule: { enum: ["sole", "unanimous", "any-pass", "majority"] }, basis: { enum: ["self-declared", "announcement-anchored"] }, cutoff: { type: "string", format: "date-time" }, delegate: { type: "object" } }, additionalProperties: false },
-    outputShape: "named contamination subset + delegated results + conflicted cells",
-    exclusionRule: "predicate exclusions reported before delegate exclusions",
-    clusteringRule: "delegate-defined",
-  },
-].map((spec) => ({
-  ...spec,
-  version: "1",
-  referenceSet: "v1-reference",
-  deterministic: true,
-  computeAvailability: "available",
-}));
-methodSpecs.push({
-  id: "jinn.benchmarking.method/bradley-terry",
-  version: "1",
-  requiredInputs: ["pairwise-judgment-records (not frozen in v1)"],
-  parameterSchema: { type: "object", required: [], properties: {}, additionalProperties: false },
-  outputShape: "unavailable until genuine pairwise judgment input is frozen",
-  exclusionRule: "unavailable",
-  clusteringRule: "unavailable",
-  referenceSet: "registered-non-reference",
-  deterministic: true,
-  computeAvailability: "unavailable",
-});
-await writeJson("methods/method-specs.json", methodSpecs);
-await writeJson("methods/conformance-cases.json", {
-  conflicts: methodSpecs.filter((spec) => spec.referenceSet === "v1-reference").map((spec) => spec.id),
-  pairedExclusions: true,
-  pinnedClustering: "task-provenance-source",
-  comparability: {
-    marginalCrossVersion: "reject",
-    pairedSharedTaskDigests: "permit-only-when-declared-and-observed",
-  },
-});
-const conflictMatrix = structuredClone(matrix);
-const conflictDigest = digestOf({
-  cellKey: multiVerdictCell.cellKey,
-  verdict: "fail",
-  evaluator: "urn:uuid:90000000-0000-5000-8000-000000000009",
-});
-const conflictCell = conflictMatrix.cells.find((cell) => cell.cellKey === multiVerdictCell.cellKey);
-if (conflictCell === undefined) throw new Error("conflict fixture cell missing from Matrix");
-conflictCell.verdicts = [...new Set([...conflictCell.verdicts, conflictDigest])].sort();
-conflictCell.validVerdicts = [...conflictCell.verdicts];
-const conflictOutcomes = {
-  ...Object.fromEntries(verdicts.map((verdict) => [verdict.digest, { verdict: verdict.verdict }])),
-  [conflictDigest]: { verdict: "fail" },
-};
-await writeJson("methods/conflict-cases.json", {
-  matrix: conflictMatrix,
-  verdictOutcomes: conflictOutcomes,
-  taskTimestamps: Object.fromEntries(tasks.map((task) => [task.digest, "2026-01-01T00:00:00Z"])),
-  expectedConflicted: { count: 1, cellKeys: [multiVerdictCell.cellKey] },
-  cases: [
-    { methodId: "jinn.benchmarking.method/wilson", parameters: {} },
-    { methodId: "jinn.benchmarking.method/avg-at-k", parameters: {} },
-    { methodId: "jinn.benchmarking.method/pass-at-k", parameters: { k: 1 } },
-    { methodId: "jinn.benchmarking.method/paired-mcnemar", parameters: { baseline: "armA", candidate: "armB" } },
-    { methodId: "jinn.benchmarking.method/noninferiority-iut", parameters: { baseline: "armA", candidate: "armB", seed: 123456789, resamples: 1000 } },
-    {
-      methodId: "jinn.benchmarking.method/clean-subset",
-      parameters: {
-        cutoff: "2026-03-01T00:00:00Z",
-        basis: "self-declared",
-        delegate: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} },
-      },
-    },
-  ],
-});
-await writeJson("methods/paired-contract.json", {
-  matrix,
-  verdictOutcomes: Object.fromEntries(verdicts.map((verdict) => [verdict.digest, { verdict: verdict.verdict }])),
-  clusterKeys: Object.fromEntries(tasks.map((task, index) => [task.digest, `source-${index % 2}`])),
-  parameters: { baseline: "armA", candidate: "armB" },
-  expected: {
-    clusteringBasis: "task-provenance-source",
-    excludedCount: cells.filter((cell) => cell.outcome !== "judged").length,
-    excludedCellKeys: cells.filter((cell) => cell.outcome !== "judged").map((cell) => cell.cellKey).sort(),
-  },
-});
-await writeJson("methods/noninferiority-iut.json", {
-  kind: "compute",
-  methodId: "jinn.benchmarking.method/noninferiority-iut",
-  methodVersion: "1",
-  parameters: {
-    verdictRule: "unanimous",
-    baseline: "armA",
-    candidate: "armB",
-    seed: 123456789,
-    resamples: 1000,
-  },
-  verdictRule: "unanimous",
-  matrices: [matrix],
-  verdictOutcomes: Object.fromEntries(verdicts.map((verdict) => [verdict.digest, { verdict: verdict.verdict }])),
-  expectedResults: {
-    verdict: "inconclusive",
-    quality: { verdict: "inconclusive", lowerBound: null, relativeRegression: null, reasons: ["insufficient paired judged tasks"] },
-    cost: { verdict: "inconclusive", pValue: null, n: 4 },
-    excluded: {
-      count: cells.filter((cell) => cell.outcome !== "judged").length,
-      cellKeys: cells.filter((cell) => cell.outcome !== "judged").map((cell) => cell.cellKey).sort(),
-    },
-    conflicted: { count: 1, cellKeys: [multiVerdictCell.cellKey] },
-    bootstrap: { procedure: "xorshift32-v1", seed: 123456789, resamples: 1000 },
-  },
-});
-await writeJson("methods/bradley-terry.json", {
-  kind: "registration",
-  methodId: "jinn.benchmarking.method/bradley-terry",
-  methodVersion: "1",
-  referenceSet: "registered-non-reference",
-  computeAvailability: "unavailable",
-  expectedCompute: "reject",
-});
+// Method fixtures are owned by `generate-method-fixtures.mjs` — do not overwrite them here.
 
-console.log(`Generated miniature-run, ordering, export, and method-contract fixtures under ${fixturesRoot}.`);
+console.log(`Generated miniature-run, ordering, and export fixtures under ${fixturesRoot}.`);
+console.log(`Multi-verdict cell (methods fixtures are separate): ${multiVerdictCell.cellKey}`);

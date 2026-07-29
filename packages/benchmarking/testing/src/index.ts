@@ -32,8 +32,22 @@ export type {
 export { describeOrderingConformance } from "./ordering-conformance.js";
 export type { OrderingLegs } from "./ordering-conformance.js";
 
-export { describeAssemblyConformance } from "./assembly-types.js";
-export type { AssembleMatrixFn } from "./assembly-types.js";
+export { describeAssemblyConformance, buildMiniatureAssemblyPorts } from "./assembly-types.js";
+export type {
+  AssembleMatrixFn,
+  AssemblyPorts,
+  AssemblyProcedure,
+  AdmissionEvidencePort,
+  CloseBoundaryResolver,
+  CostSource,
+  InScopeCell,
+  InScopeVerdict,
+  InputScope,
+  IntegrityTier,
+  PinningAxisStatus,
+  PinningObservationPort,
+  TrustResolver,
+} from "./assembly-types.js";
 
-export { describeExportConformance } from "./export-types.js";
-export type { Exporters } from "./export-types.js";
+export { describeExportConformance, buildMiniatureExportInputs } from "./export-types.js";
+export type { EvidenceResolver, Exporters } from "./export-types.js";
