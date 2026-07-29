@@ -112,7 +112,7 @@ jobs:
           (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
           (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
-      - name: Verify Benchmarking Testing (conformance kit)
+      - name: Verify Benchmarking Testing (mandatory M1-M3 conformance)
         working-directory: packages/benchmarking/testing
         run: |
           yarn install --immutable

@@ -641,7 +641,7 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
       }));
     });
 
-    test("clean-subset keeps self-declared Task bytes and verified anchored announcements as distinct acquisition paths", async () => {
+    test("clean-subset keeps self-declared Task bytes and proof-verified anchored announcements as distinct acquisition paths", async () => {
       const fixture = await loadFixture("clean-subset.json");
       const prepared = prepareFixture(fixture);
       const method = registry.get(fixture.methodId, fixture.methodVersion)!;
