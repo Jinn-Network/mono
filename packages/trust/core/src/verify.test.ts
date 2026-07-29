@@ -620,17 +620,23 @@ describe("settlementJoinCheck (§7.5a)", () => {
 describe("authenticateRequester (§7.5b)", () => {
   const REQUESTER_KEY = "did:key:z6MkfREQUESTER11111111111111111111111111111";
 
-  test("(f) a valid Submission whose key resolves to the claimed requester IRI with scope:authorizations authenticates", async () => {
-    const binding = keyBinding({
-      agent: AGENT,
-      key: { publicKey: "0x00", keyid: REQUESTER_KEY, algorithm: "ed25519", didKey: REQUESTER_KEY },
-      voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
-      scope: ["authorizations"],
+  function requesterBinding(revocations: readonly ResolvedRevocation[] = []): ResolvedBinding {
+    return resolvedBinding({
+      binding: keyBinding({
+        agent: AGENT,
+        key: { publicKey: "0x00", keyid: REQUESTER_KEY, algorithm: "ed25519", didKey: REQUESTER_KEY },
+        voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+        scope: ["authorizations"],
+      }),
+      revocations,
     });
+  }
+
+  test("(f) a valid Submission whose key resolves to the claimed requester IRI with scope:authorizations authenticates", async () => {
     const resolver = new FakeBindingResolver().register({
       key: REQUESTER_KEY,
       agent: AGENT,
-      resolved: resolvedBinding({ binding }),
+      resolved: requesterBinding(),
     });
     const envelopeBytes = sealedEnvelope({ submission: true }, TRUST_KEY_BINDING_MEDIA_TYPE, REQUESTER_KEY);
 
@@ -639,6 +645,90 @@ describe("authenticateRequester (§7.5b)", () => {
       { bindingResolver: resolver, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome.ok).toBe(true);
+  });
+
+  test("rejects a requester binding revoked before the Submission sealing time", async () => {
+    const resolver = new FakeBindingResolver().register({
+      key: REQUESTER_KEY,
+      agent: AGENT,
+      resolved: requesterBinding([
+        revocationEntry(VOUCHER_DID, "2026-02-01T00:00:00Z"),
+      ]),
+    });
+    const envelopeBytes = sealedEnvelope(
+      { submission: true },
+      TRUST_KEY_BINDING_MEDIA_TYPE,
+      REQUESTER_KEY,
+    );
+
+    const outcome = await authenticateRequester(
+      {
+        envelopeBytes,
+        key: REQUESTER_KEY,
+        requesterAgent: AGENT,
+        sealingTime: "2026-03-01T00:00:00Z",
+      },
+      { bindingResolver: resolver, dsseVerifier: trustingDsseVerifier },
+    );
+
+    expect(outcome).toEqual({
+      ok: false,
+      reason: `revoked effective "2026-02-01T00:00:00Z" by "${VOUCHER_DID}".`,
+    });
+  });
+
+  test("accepts a requester binding revoked after the Submission sealing time", async () => {
+    const resolver = new FakeBindingResolver().register({
+      key: REQUESTER_KEY,
+      agent: AGENT,
+      resolved: requesterBinding([
+        revocationEntry(VOUCHER_DID, "2026-04-01T00:00:00Z"),
+      ]),
+    });
+    const envelopeBytes = sealedEnvelope(
+      { submission: true },
+      TRUST_KEY_BINDING_MEDIA_TYPE,
+      REQUESTER_KEY,
+    );
+
+    const outcome = await authenticateRequester(
+      {
+        envelopeBytes,
+        key: REQUESTER_KEY,
+        requesterAgent: AGENT,
+        sealingTime: "2026-03-01T00:00:00Z",
+      },
+      { bindingResolver: resolver, dsseVerifier: trustingDsseVerifier },
+    );
+
+    expect(outcome).toEqual({ ok: true });
+  });
+
+  test("ignores a requester revocation issued by an unauthorized revoker", async () => {
+    const resolver = new FakeBindingResolver().register({
+      key: REQUESTER_KEY,
+      agent: AGENT,
+      resolved: requesterBinding([
+        revocationEntry(OTHER_VOUCHER_DID, "2026-02-01T00:00:00Z"),
+      ]),
+    });
+    const envelopeBytes = sealedEnvelope(
+      { submission: true },
+      TRUST_KEY_BINDING_MEDIA_TYPE,
+      REQUESTER_KEY,
+    );
+
+    const outcome = await authenticateRequester(
+      {
+        envelopeBytes,
+        key: REQUESTER_KEY,
+        requesterAgent: AGENT,
+        sealingTime: "2026-03-01T00:00:00Z",
+      },
+      { bindingResolver: resolver, dsseVerifier: trustingDsseVerifier },
+    );
+
+    expect(outcome).toEqual({ ok: true });
   });
 
   test("(f) a Submission whose key resolves to a different requester IRI fails", async () => {
