@@ -116,3 +116,15 @@ export type {
   TodayDeliveryFacts,
 } from "./settlement.js";
 export { closeSubmission, releaseAttempt, signalCancel } from "./lifecycle.js";
+
+// --- evaluation leg: pair-derived Task + requester-side Submission sealing (§6.4, §7.39–§7.40) ---
+export {
+  ADMISSION_RECEIPT_ANNOTATION_URI,
+  deriveAndSealEvaluationSubmission,
+} from "./evaluation-derive.js";
+export type {
+  DeriveAndSealEvaluationSubmissionInput,
+  DerivedEvaluationSubmission,
+  EvaluationSubmissionFields,
+  SealedDocumentTriple,
+} from "./evaluation-derive.js";

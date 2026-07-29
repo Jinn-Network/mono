@@ -2,7 +2,10 @@ import { TASK_EXECUTION_PROTOCOL_URI } from "@jinn-network/task-execution-protoc
 import { compareCodeUnitStrings } from "../order.js";
 import { sealDocument } from "../bytes.js";
 import { EVALUATION_TASK_PROFILE_URI, TASK_PROFILE_FORMAT_URI, VERDICT_DSSE_PAYLOAD_TYPE } from "../identifiers.js";
-import type { ResourceDescriptorLike } from "../resource-descriptor.js";
+import {
+  ResourceDescriptorSchema,
+  type ResourceDescriptorLike,
+} from "../resource-descriptor.js";
 import { sealTaskProfile } from "../task-profile/seal.js";
 import type { TaskProfileDocument } from "../task-profile/schema.js";
 
@@ -92,6 +95,12 @@ export interface DeriveEvaluationTaskInput {
   subjectDelivery: EvaluationTaskSubjectRef;
   subjectResults: EvaluationTaskSubjectRef[];
   evaluationSpecDigest: `sha256:${string}`;
+  /**
+   * The subject requester's signed admission receipt descriptor, when the
+   * deployment requires one. Program §7.39 fixes its position after every
+   * name-sorted subject artifact without changing the receipt-free template.
+   */
+  admissionReceipt?: ResourceDescriptorLike;
 }
 
 function stripSha256Prefix(digest: string): string {
@@ -115,6 +124,13 @@ export function deriveEvaluationTask(
   const subjectResults = [...input.subjectResults].sort((a, b) =>
     compareCodeUnitStrings(a.name, b.name),
   );
+  let admissionReceipt: ResourceDescriptorLike | undefined;
+  if (input.admissionReceipt !== undefined) {
+    admissionReceipt = ResourceDescriptorSchema.parse(input.admissionReceipt);
+    if (admissionReceipt.name !== "admission-receipt") {
+      throw new Error('evaluation Task admission receipt descriptor must be named "admission-receipt" (§7.39)');
+    }
+  }
 
   const document = {
     protocol: TASK_EXECUTION_PROTOCOL_URI,
@@ -133,6 +149,7 @@ export function deriveEvaluationTask(
       toFetchableDescriptor(input.subjectTask),
       toFetchableDescriptor(input.subjectDelivery),
       ...subjectResults.map(toFetchableDescriptor),
+      ...(admissionReceipt === undefined ? [] : [admissionReceipt]),
     ],
     outputs: [{ name: "verdict", mediaType: VERDICT_DSSE_PAYLOAD_TYPE, required: true }],
   };

@@ -52,6 +52,37 @@ describe("deriveEvaluationTask — full-document template, slot-fixed pair (desi
     expect(deriveEvaluationTask(reordered).digest).toBe(deriveEvaluationTask(input).digest);
   });
 
+  it("appends an optional admission receipt after the sorted subject artifacts (§7.39)", async () => {
+    const golden = JSON.parse(await fixture("golden/derive-TD.json"));
+    const input = golden.input as DeriveEvaluationTaskInput;
+    const admissionReceipt = {
+      name: "admission-receipt",
+      digest: { sha256: "a".repeat(64) },
+      uri: "ipfs://bafy-admission-receipt",
+      mediaType: "application/vnd.in-toto+json",
+    };
+
+    const derived = deriveEvaluationTask({ ...input, admissionReceipt });
+    const document = derived.document as { inputs: unknown[] };
+    expect(document.inputs).toEqual([
+      { name: input.subjectTask.name, digest: { sha256: input.subjectTask.digest.slice("sha256:".length) } },
+      { name: input.subjectDelivery.name, digest: { sha256: input.subjectDelivery.digest.slice("sha256:".length) } },
+      ...[...input.subjectResults]
+        .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
+        .map((subject) => ({
+          name: subject.name,
+          digest: { sha256: subject.digest.slice("sha256:".length) },
+        })),
+      admissionReceipt,
+    ]);
+  });
+
+  it("retains the existing byte-pinned derivation when no admission receipt is supplied (§7.39)", async () => {
+    const golden = JSON.parse(await fixture("golden/derive-TD.json"));
+    const input = golden.input as DeriveEvaluationTaskInput;
+    expect(deriveEvaluationTask(input).digest).toBe(golden.expect.digest);
+  });
+
   it("passes every digest-sensitivity adversarial fixture (a substituted subject changes the digest)", async () => {
     const names = ["superseded-delivery", "competitor-delivery", "wrong-spec-digest"];
     for (const name of names) {
