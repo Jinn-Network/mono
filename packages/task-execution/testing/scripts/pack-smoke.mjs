@@ -153,6 +153,8 @@ import type {
   AttemptSupervisorUnderTest,
   FakeLaunchOutcome,
   FakeLaunchScript,
+  LocalBackendConformanceSubject,
+  LocalBackendContractFactory,
 } from "@jinn-network/task-execution-testing/backend-local";
 import {
   describeAttemptSupervisorContract,
@@ -167,6 +169,8 @@ declare const describeContract: DescribeTaskExecutionBackendContract;
 declare const script: FakeLaunchScript;
 declare const outcome: FakeLaunchOutcome;
 declare const supervisorUnderTest: AttemptSupervisorUnderTest;
+declare const localSubject: LocalBackendConformanceSubject;
+declare const localFactory: LocalBackendContractFactory;
 void backend;
 void describeContract;
 void createInMemoryBackend;
@@ -175,6 +179,8 @@ void describeTaskExecutionBackendContract;
 void script;
 void outcome;
 void supervisorUnderTest;
+void localSubject;
+void localFactory;
 void makeFakeLauncher;
 void describeAttemptSupervisorContract;
 void describeLauncherContract;

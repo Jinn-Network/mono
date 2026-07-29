@@ -27,6 +27,10 @@ export type {
   WorkspaceScenarioOptions,
 } from "./workspace-contract.js";
 export { describeLocalBackendContract } from "./backend-contract.js";
+export type {
+  LocalBackendConformanceSubject,
+  LocalBackendContractFactory,
+} from "./backend-contract.js";
 
 // --- fixture loaders + types ---
 export {

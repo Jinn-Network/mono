@@ -115,15 +115,29 @@ try {
 
   const installedRoot = join(consumer, "node_modules", "@jinn-network", "task-execution-backend-local");
 
-  // Compile-time check: the assembly's `src/` is a Milestone-C stub through Milestone A (this
-  // package's dependency edges + CI job register now per plan Task A1; `makeLocalTaskExecutionBackend`
-  // lands in C1) — a namespace import is the honest check available at this stage.
+  // Compile-time check: every Milestone-C root symbol resolves for a NodeNext-strict consumer.
   await writeFile(
     join(consumer, "packed-types.ts"),
     `
-import type * as BackendLocal from "@jinn-network/task-execution-backend-local";
+import type {
+  EvidenceBindingPorts,
+  LocalTaskExecutionBackendConfig,
+} from "@jinn-network/task-execution-backend-local";
+import {
+  assembleCapabilities,
+  createEvidenceJoin,
+  makeLocalTaskExecutionBackend,
+  projectObservations,
+} from "@jinn-network/task-execution-backend-local";
 
-type _AssertModuleResolves = typeof BackendLocal;
+declare const config: LocalTaskExecutionBackendConfig;
+declare const evidence: EvidenceBindingPorts;
+const backend = makeLocalTaskExecutionBackend(config);
+void backend;
+void evidence;
+void assembleCapabilities;
+void createEvidenceJoin;
+void projectObservations;
 `,
   );
   await writeFile(
@@ -153,7 +167,15 @@ type _AssertModuleResolves = typeof BackendLocal;
     smokeScript,
     `
 import { readFile, readdir } from "node:fs/promises";
-await import("@jinn-network/task-execution-backend-local");
+const backendLocal = await import("@jinn-network/task-execution-backend-local");
+for (const name of [
+  "assembleCapabilities",
+  "createEvidenceJoin",
+  "makeLocalTaskExecutionBackend",
+  "projectObservations",
+]) {
+  if (typeof backendLocal[name] !== "function") throw new Error("missing root export " + name);
+}
 
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
