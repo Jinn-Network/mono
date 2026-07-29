@@ -1108,10 +1108,11 @@ Coordinator inspection of the eleventh-review repair at
 twelfth review was dispatched. Program rulings §7.126–§7.127 bind the follow-up:
 
 1. legal decimal repeat costs whose exact arithmetic mean is non-terminating in base ten remain
-   exact reduced rationals; Wilcoxon normalization uses one common positive divisor plus the
-   already-frozen global decimal scale, and replay discloses that divisor rather than throwing or
-   rounding; the asymmetric `R = 2` conformance vector uses the exact `1.0`, `9.0`, and `6.0`
-   spellings and asserts `scale`, integer differences, exclusions, p-value, `n`, and verdict; and
+   exact reduced rationals; Wilcoxon ranking uses exact cross-products under the already-frozen
+   global decimal scale, and replay discloses parallel reduced divisors rather than forming a
+   potentially unbounded common LCM, throwing, or rounding; the asymmetric `R = 2` conformance
+   vector uses the exact `1.0`, `9.0`, and `6.0` spellings and asserts `scale`, integer
+   differences, exclusions, p-value, `n`, and verdict; and
 2. computed browser-member recognition has no fixed character look-behind and includes optional
    computed access across arbitrary whitespace/comments, including inside nested template
    interpolation, while the corresponding inert spellings remain negative.

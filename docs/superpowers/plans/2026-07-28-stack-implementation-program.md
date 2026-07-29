@@ -1178,13 +1178,14 @@ Confirmed by the operator at the program gate (2026-07-28):
     mean whose reduced denominator contains factors other than two or five is not an
     incompatibility and is never rounded or rejected. Each Task difference is held as a reduced
     rational. For deterministic Wilcoxon replay, align decimal inputs to one global base-10 scale
-    `S`, then normalize the reduced Task differences to one positive common denominator `D`; rank
-    and tie the resulting signed `BigInt` numerators. Replay reports `scale: S`,
-    `differences: [...]`, and `divisor: D` when `D > 1`, meaning
-    `difference = numerator / (D × 10^S)`. Exact finite-decimal behavior stays byte-compatible
-    with §7.112. Vectors cover a denominator-three mean and the §7.118 `1.0/9.0` versus `6.0`
-    asymmetric-repeat case, asserting the complete replay as well as verdict, p-value, `n`, and
-    exclusions.
+    `S`, retain each reduced signed `BigInt` numerator and positive divisor, and compare absolute
+    values by exact cross-products for ranking and ties. Do not form an unbounded LCM across the
+    sample. Replay reports `scale: S`, `differences: [...]`, and a parallel `divisors: [...]` when
+    any divisor exceeds one, meaning
+    `difference[i] = numerator[i] / (divisor[i] × 10^S)`. Exact finite-decimal behavior omits
+    `divisors` and stays byte-compatible with §7.112. Vectors cover a denominator-three mean and
+    the §7.118 `1.0/9.0` versus `6.0` asymmetric-repeat case, asserting the complete replay as
+    well as verdict, p-value, `n`, and exclusions.
 127. **Computed-member network detection has no arbitrary look-behind or optional-chain gap:**
     literal members remain recognizable across any legal whitespace or comment span and under
     optional computed access such as `window?.["fetch"]`; a fixed preceding-character window is
