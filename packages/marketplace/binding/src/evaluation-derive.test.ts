@@ -121,6 +121,27 @@ describe("deriveAndSealEvaluationSubmission (§6.4, program §7.39–§7.40)", (
       .toThrow(/named "admission-receipt"/);
   });
 
+  test("requires the receipt-bearing subject Submission to bind the supplied settlement Task", () => {
+    const mismatched: SubmissionRecord = {
+      ...subjectSubmission,
+      task: {
+        name: "another-task.json",
+        digest: { sha256: "f".repeat(64) },
+      },
+    };
+    expect(() => deriveAndSealEvaluationSubmission(input({ subjectSubmission: mismatched })))
+      .toThrow(/subject Submission task digest/);
+  });
+
+  test("requester-side sealing preserves the subject Submission requester IRI", () => {
+    expect(() => deriveAndSealEvaluationSubmission(input({
+      submissionFields: {
+        ...input().submissionFields,
+        requester: "https://jinn.network/agents/not-the-subject-requester",
+      },
+    }))).toThrow(/requester must equal/);
+  });
+
   test("requires requester sealing for private or grant-bearing evaluation dispatch", () => {
     expect(() => deriveAndSealEvaluationSubmission(input({ sealerRole: "evaluator" })))
       .toThrow(/requester/);

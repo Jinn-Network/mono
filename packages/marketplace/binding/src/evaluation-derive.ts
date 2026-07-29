@@ -69,7 +69,7 @@ function assertClosedSubmissionFields(fields: EvaluationSubmissionFields): void 
   }
 }
 
-function receiptFromSubjectSubmission(subjectSubmission: SubmissionRecord) {
+function parseSubjectSubmission(subjectSubmission: SubmissionRecord) {
   const parsed = SubmissionRecordSchema.parse(subjectSubmission);
   const candidate = parsed.annotations?.[ADMISSION_RECEIPT_ANNOTATION_URI];
   if (candidate === undefined) {
@@ -81,7 +81,7 @@ function receiptFromSubjectSubmission(subjectSubmission: SubmissionRecord) {
   if (receipt.name !== "admission-receipt") {
     throw new Error('subject Submission receipt descriptor must be named "admission-receipt" (§7.39)');
   }
-  return receipt;
+  return { parsed, receipt };
 }
 
 function assertSealerRule(input: DeriveAndSealEvaluationSubmissionInput): void {
@@ -107,7 +107,22 @@ export function deriveAndSealEvaluationSubmission(
   assertClosedSubmissionFields(input.submissionFields);
   assertSealerRule(input);
 
-  const admissionReceipt = receiptFromSubjectSubmission(input.subjectSubmission);
+  const { parsed: subjectSubmission, receipt: admissionReceipt } =
+    parseSubjectSubmission(input.subjectSubmission);
+  const expectedTaskDigest = input.subjectTask.digest.slice("sha256:".length);
+  if (subjectSubmission.task.digest?.sha256 !== expectedTaskDigest) {
+    throw new Error(
+      "subject Submission task digest must equal the supplied settlement Task digest (§7.40)",
+    );
+  }
+  if (
+    input.sealerRole === "requester"
+    && input.submissionFields.requester !== subjectSubmission.requester
+  ) {
+    throw new Error(
+      "requester-side evaluation Submission requester must equal the subject Submission requester (§7.40)",
+    );
+  }
   const task = deriveEvaluationTask({
     subjectTask: input.subjectTask,
     subjectDelivery: input.subjectDelivery,
