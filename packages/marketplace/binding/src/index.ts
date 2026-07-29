@@ -122,6 +122,21 @@ export {
   ADMISSION_RECEIPT_ANNOTATION_URI,
   deriveAndSealEvaluationSubmission,
 } from "./evaluation-derive.js";
+
+// --- decision-grade verdict observation gate (§6.4, §7.5a/§7.5b, §7.41–§7.45) ---
+export {
+  ADMISSION_RECEIPT_TRUST_SCOPE,
+  decisionGradeVerdictCode,
+  gateVerdictObservation,
+} from "./named-checks.js";
+export type {
+  ExactEvaluationArtifact,
+  SettlementAuthorizedEvaluationContext,
+  VerdictObservationFailure,
+  VerdictObservationGate,
+  VerdictObservationGateInput,
+  VerdictObservationGatePorts,
+} from "./named-checks.js";
 export type {
   DeriveAndSealEvaluationSubmissionInput,
   DerivedEvaluationSubmission,

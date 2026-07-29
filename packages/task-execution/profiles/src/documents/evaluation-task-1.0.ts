@@ -121,9 +121,17 @@ function toFetchableDescriptor(ref: EvaluationTaskSubjectRef): ResourceDescripto
 export function deriveEvaluationTask(
   input: DeriveEvaluationTaskInput,
 ): { document: unknown; bytes: Uint8Array; digest: `sha256:${string}` } {
-  const subjectResults = [...input.subjectResults].sort((a, b) =>
-    compareCodeUnitStrings(a.name, b.name),
-  );
+  const subjectTask = {
+    name: input.subjectTask.name,
+    digest: input.subjectTask.digest,
+  };
+  const subjectDelivery = {
+    name: input.subjectDelivery.name,
+    digest: input.subjectDelivery.digest,
+  };
+  const subjectResults = input.subjectResults
+    .map((result) => ({ name: result.name, digest: result.digest }))
+    .sort((a, b) => compareCodeUnitStrings(a.name, b.name));
   let admissionReceipt: ResourceDescriptorLike | undefined;
   if (input.admissionReceipt !== undefined) {
     admissionReceipt = ResourceDescriptorSchema.parse(input.admissionReceipt);
@@ -140,14 +148,14 @@ export function deriveEvaluationTask(
     },
     instructions: EVALUATION_TASK_INSTRUCTIONS,
     payload: {
-      subjectTask: input.subjectTask,
-      subjectDelivery: input.subjectDelivery,
+      subjectTask,
+      subjectDelivery,
       subjectResults,
       evaluationSpec: input.evaluationSpecDigest,
     },
     inputs: [
-      toFetchableDescriptor(input.subjectTask),
-      toFetchableDescriptor(input.subjectDelivery),
+      toFetchableDescriptor(subjectTask),
+      toFetchableDescriptor(subjectDelivery),
       ...subjectResults.map(toFetchableDescriptor),
       ...(admissionReceipt === undefined ? [] : [admissionReceipt]),
     ],

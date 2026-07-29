@@ -83,6 +83,24 @@ describe("deriveEvaluationTask — full-document template, slot-fixed pair (desi
     expect(deriveEvaluationTask(input).digest).toBe(golden.expect.digest);
   });
 
+  it("copies only name + digest from subject refs so transport-only fields cannot enter sealed bytes", async () => {
+    const golden = JSON.parse(await fixture("golden/derive-TD.json"));
+    const input = golden.input as DeriveEvaluationTaskInput;
+    const withTransportFields = {
+      ...input,
+      subjectTask: { ...input.subjectTask, bytes: new Uint8Array([1]) },
+      subjectDelivery: { ...input.subjectDelivery, bytes: new Uint8Array([2]) },
+      subjectResults: input.subjectResults.map((result) => ({
+        ...result,
+        bytes: new Uint8Array([3]),
+      })),
+    };
+    const clean = deriveEvaluationTask(input);
+    const transported = deriveEvaluationTask(withTransportFields);
+    expect(transported.digest).toBe(clean.digest);
+    expect(transported.document).toEqual(clean.document);
+  });
+
   it("passes every digest-sensitivity adversarial fixture (a substituted subject changes the digest)", async () => {
     const names = ["superseded-delivery", "competitor-delivery", "wrong-spec-digest"];
     for (const name of names) {
