@@ -284,6 +284,23 @@ Confirmed by the operator at the program gate (2026-07-28):
     standalone CI build graph cyclic and can pass locally only because of stale `dist`
     artifacts. Concrete-subject adapters and kit invocations live in the testing package or a
     later consumer.
+26. **Benchmarking bootstrap replay procedure:** `noninferiority-iut@1` uses the registry-pinned
+    procedure identifier `xorshift32-v1`: a nonzero unsigned 32-bit sealed seed; the xorshift32
+    transitions `x ^= x << 13`, `x ^= x >>> 17`, `x ^= x << 5`, truncating to uint32 after
+    each transition; one next-uint32 draw per sampled position; and
+    `floor((draw / 2^32) * n)` as the with-replacement index into the UTF-16-code-unit-ordered
+    paired-task vector. The sealed method parameters carry `seed` and `resamples`; zero or an
+    out-of-range/non-integer seed fails validation. BCa jackknife acceleration is computed
+    deterministically and consumes no PRNG draws. The procedure is statistical replay
+    machinery, not a cryptographic primitive.
+27. **`paired-mcnemar@1` replicate boundary:** exact McNemar v1 is the seed library's
+    single-replicate (`Run.replicates === 1`) binary matched-task method. A subject Run with
+    more than one replicate is a typed incompatible input for this method; the implementation
+    never invents majority, any-pass, or overwrite-based replicate reduction. Multi-replicate
+    analyses use `avg-at-k@1`, `pass-at-k@1`, or `noninferiority-iut@1` (which derives paired
+    per-task rates/costs under its own declared contract). The kit carries both an exact
+    single-replicate McNemar fixture and a multi-replicate fail-closed fixture; every excluded
+    cell key remains reported deterministically.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

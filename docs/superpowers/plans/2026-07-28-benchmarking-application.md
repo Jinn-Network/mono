@@ -873,6 +873,21 @@ rules are binding on the repair and supersede any singular/collapsed reading of 
    plus real injected drivers. Future implementation drivers may compile without invocation,
    but their byte-exact oracles and mandatory cases are not deferred to M4/M5.
 
+## Addendum 2026-07-29-e — deterministic bootstrap and McNemar replicate boundary
+
+The repaired M2 kit exposed two method details that the design named but did not spell down to
+replay bytes. Program rulings §7.26–§7.27 are binding:
+
+1. `noninferiority-iut@1` declares `xorshift32-v1` exactly as program §7.26 specifies. Its
+   sealed parameters contain a nonzero uint32 `seed` and positive integer `resamples`; the
+   paired-task vector is code-unit ordered; sampling consumes exactly one uint32 draw per
+   position. Actual BCa jackknife acceleration is deterministic and consumes no PRNG draw.
+2. `paired-mcnemar@1` is valid only for resolved subjects whose `Run.replicates === 1`.
+   Multiple replicates fail closed as an incompatible method input. V1 does not silently reduce
+   replicates by majority, any-pass, last-write, or another unsealed choice; the registered
+   multi-replicate methods own those analyses. M2 fixture-pins one exact R=1 computation, one
+   R>1 refusal, provenance clustering, and the complete excluded-cell remainder.
+
 The review's remaining findings are direct design/plan violations, not new choices: enforce
 digest-bearing record references; validate Task/evaluation judgeability and ordered Benchmark
 versioning; require open-competition independence gating; fail closed on missing verdicts and
