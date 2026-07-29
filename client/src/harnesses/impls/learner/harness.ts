@@ -24,6 +24,8 @@ import { findSolverPluginManifest } from '../../../plugins/manifest.js';
 import { harvestOutput } from './harvest.js';
 import { buildClaudeIsReady } from '../../../preflight/claude-auth.js';
 import { probeCodexDoctor } from '../../../api/codex-doctor-endpoint.js';
+import { JinnRepoTaskSchema } from '@jinn-network/sdk/solvernets/jinn-repo';
+import { prepareRepositoryWorkspace } from './repository-workspace.js';
 
 const AUTOPILOT_CODEX_CANARY_MANIFEST_CID =
   'bafkreihvpooczub6s7c3yuraotwe43xbu4dliowmnkymegct66ddgrlaoa';
@@ -337,6 +339,19 @@ export class LearnerHarness implements Harness {
       )
         ? `${ctx.task.contractId}.${ctx.task.contractVersion}`
         : (ctx.task.solverType ?? ctx.solverNet?.solverType);
+    const taskWorkspaceDir =
+      solverType === 'jinn-repo.v1' && ctx.task.role === 'restoration'
+        ? join(ctx.workingDir, 'repo')
+        : undefined;
+    if (taskWorkspaceDir !== undefined) {
+      const repositoryTask = JinnRepoTaskSchema.safeParse(ctx.task.spec);
+      if (repositoryTask.success) {
+        await prepareRepositoryWorkspace(taskWorkspaceDir, {
+          repository: repositoryTask.data.repo,
+          baseCommit: repositoryTask.data.base_commit,
+        });
+      }
+    }
     const inputs: TaskSessionInputs = {
       taskId: ctx.task.id,
       requestId: ctx.requestId,
@@ -351,9 +366,7 @@ export class LearnerHarness implements Harness {
       taskBody: ctx.task as TaskSessionInputs['taskBody'],
       implStateDir: ctx.implStateDir,
       workingDir: ctx.workingDir,
-      ...(solverType === 'jinn-repo.v1' && ctx.task.role === 'restoration'
-        ? { taskWorkspaceDir: join(ctx.workingDir, 'repo') }
-        : {}),
+      ...(taskWorkspaceDir !== undefined ? { taskWorkspaceDir } : {}),
       pluginRoots: [...(ctx.solverPluginRoots ?? [])],
       windowStartTs: window.startTs,
       windowEndTs: window.endTs,
