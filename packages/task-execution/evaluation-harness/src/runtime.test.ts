@@ -25,6 +25,7 @@ import {
 } from "@jinn-network/task-execution-profiles";
 import type { WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { documentDigest, sealDelivery, sealTask } from "@jinn-network/task-execution-protocol";
 import {
   EVALUATION_HARNESS_EXIT_INVALID_INPUT,
   EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE,
@@ -135,7 +136,7 @@ async function makeFixture(options: {
         bytes: options.specificationBytes,
         digest: digestString(options.specificationBytes),
       };
-  const subjectTaskBytes = encoder.encode(JSON.stringify({
+  const subjectTaskBytes = sealTask({
     protocol: "https://jinn.network/profiles/task-execution/1.0",
     profile: {
       uri: "https://jinn.network/task-profiles/repository-work/1.0",
@@ -155,9 +156,20 @@ async function makeFixture(options: {
         ).slice("sha256:".length),
       },
     },
-  }));
-  const deliveryBytes = encoder.encode('{"outcome":"fulfilled"}');
+  });
   const resultBytes = encoder.encode("diff --git a/a b/a\n");
+  const deliveryBytes = sealDelivery({
+    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    attempt: "urn:uuid:33333333-3333-4333-8333-333333333333",
+    task: documentDigest(subjectTaskBytes),
+    outputs: [{
+      name: "result.patch",
+      mediaType: "text/x-diff",
+      digest: { sha256: digestHex(resultBytes) },
+    }],
+    outcome: "fulfilled",
+    createdAt: "2026-07-29T12:00:00.000Z",
+  });
   const evaluationTask = deriveEvaluationTask({
     subjectTask: {
       name: "subject-task.json",
@@ -437,6 +449,48 @@ describe("runEvaluationHarness", () => {
     const fixture = await makeFixture({
       subjectEvaluationDigest: `sha256:${"f".repeat(64)}`,
     });
+    const evaluate = vi.fn<EvaluatorRegistration["adapter"]["evaluate"]>();
+
+    const exitCode = await runEvaluationHarness(
+      fixture.paths,
+      deployment(fixture.spec, registration(evaluate)),
+    );
+
+    expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_INVALID_INPUT);
+    expect(evaluate).not.toHaveBeenCalled();
+    await expect(readFile(join(fixture.paths.out, "verdict"))).rejects.toThrow();
+  });
+
+  test("refuses a canonical Delivery bound to a different subject Task", async () => {
+    const fixture = await makeFixture();
+    const foreignTask = sealTask({
+      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      profile: { digest: { sha256: "a".repeat(64) } },
+      instructions: "foreign task",
+      outputs: [],
+    });
+    const foreignDelivery = sealDelivery({
+      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      attempt: "urn:uuid:44444444-4444-4444-8444-444444444444",
+      task: documentDigest(foreignTask),
+      outputs: [{
+        name: "result.patch",
+        mediaType: "text/x-diff",
+        digest: { sha256: digestHex(await readFile(join(fixture.paths.input, "result.patch"))) },
+      }],
+      outcome: "fulfilled",
+      createdAt: "2026-07-29T12:00:00.000Z",
+    });
+    await writeFile(join(fixture.paths.input, "subject-delivery.json"), foreignDelivery);
+    const subjectTask = await readFile(join(fixture.paths.input, "subject-task.json"));
+    const result = await readFile(join(fixture.paths.input, "result.patch"));
+    const evaluationTask = deriveEvaluationTask({
+      subjectTask: { name: "subject-task.json", digest: digestString(subjectTask) },
+      subjectDelivery: { name: "subject-delivery.json", digest: digestString(foreignDelivery) },
+      subjectResults: [{ name: "result.patch", digest: digestString(result) }],
+      evaluationSpecDigest: fixture.specDigest,
+    });
+    await writeFile(join(fixture.paths.input, "task.sealed"), evaluationTask.bytes);
     const evaluate = vi.fn<EvaluatorRegistration["adapter"]["evaluate"]>();
 
     const exitCode = await runEvaluationHarness(

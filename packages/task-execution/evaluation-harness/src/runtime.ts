@@ -18,6 +18,7 @@ import type { ResourceDescriptorSchema } from "@jinn-network/evidence-protocol";
 import {
   checkMeasurementCoverage,
   checkVerdictConsistency,
+  deriveEvaluationTask,
   EVALUATION_TASK_PROFILE_URI,
   parseEvaluationSpec,
   parserAllowlistKey,
@@ -26,6 +27,15 @@ import {
   type EvaluationSpec,
   type MeasurementMap,
 } from "@jinn-network/task-execution-profiles";
+import {
+  documentDigest,
+  sealDelivery,
+  sealTask,
+  validateDelivery,
+  validateTask,
+  type DeliveryRecord,
+  type TaskSpecification,
+} from "@jinn-network/task-execution-protocol";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import type { WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import {
@@ -111,6 +121,11 @@ function digestObject(
 
 function sha256(bytes: Uint8Array): `sha256:${string}` {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
 }
 
 function parseJson(bytes: Uint8Array, label: string): unknown {
@@ -318,6 +333,63 @@ function validateCrosswalk(
           ),
         }),
   };
+}
+
+function validateSubjectBindings(input: {
+  readonly evaluationTaskBytes: Uint8Array;
+  readonly bindings: EvaluationTaskBindings;
+  readonly task: ExactEvaluationMaterial;
+  readonly delivery: ExactEvaluationMaterial;
+  readonly results: readonly ExactEvaluationMaterial[];
+}): void {
+  const taskDocument = parseJson(input.task.bytes, "subject Task");
+  const taskValidation = validateTask(taskDocument);
+  if (!taskValidation.conforms || !bytesEqual(sealTask(taskDocument), input.task.bytes)) {
+    throw new EvaluationHarnessInputError("subject Task is not exact canonical Task bytes");
+  }
+  const deliveryDocument = parseJson(input.delivery.bytes, "subject Delivery");
+  const deliveryValidation = validateDelivery(deliveryDocument);
+  if (
+    !deliveryValidation.conforms
+    || !bytesEqual(sealDelivery(deliveryDocument), input.delivery.bytes)
+  ) {
+    throw new EvaluationHarnessInputError("subject Delivery is not exact canonical Delivery bytes");
+  }
+  const task = taskDocument as TaskSpecification;
+  const delivery = deliveryDocument as DeliveryRecord;
+  if (delivery.task !== documentDigest(input.task.bytes)) {
+    throw new EvaluationHarnessInputError("subject Delivery is bound to a different Task");
+  }
+  if (delivery.outputs.length !== input.results.length) {
+    throw new EvaluationHarnessInputError("subject Delivery output cardinality does not match supplied Results");
+  }
+  const taskOutputs = new Map(task.outputs.map((output) => [output.name, output]));
+  const deliveryOutputs = new Map(delivery.outputs.map((output) => [output.name, output]));
+  if (deliveryOutputs.size !== delivery.outputs.length) {
+    throw new EvaluationHarnessInputError("subject Delivery output names must be unique");
+  }
+  for (const result of input.results) {
+    const output = deliveryOutputs.get(result.descriptor.name);
+    const taskOutput = taskOutputs.get(result.descriptor.name);
+    if (
+      output === undefined
+      || taskOutput === undefined
+      || output.mediaType !== taskOutput.mediaType
+      || output.digest?.sha256 === undefined
+      || `sha256:${output.digest.sha256}` !== sha256(result.bytes)
+    ) {
+      throw new EvaluationHarnessInputError("supplied Results do not exactly match subject Delivery outputs");
+    }
+  }
+  const rederived = deriveEvaluationTask({
+    subjectTask: input.bindings.subjectTask,
+    subjectDelivery: input.bindings.subjectDelivery,
+    subjectResults: [...input.bindings.subjectResults],
+    evaluationSpecDigest: input.bindings.evaluationSpec,
+  });
+  if (!bytesEqual(rederived.bytes, input.evaluationTaskBytes)) {
+    throw new EvaluationHarnessInputError("evaluation Task does not equal the profiles derivation");
+  }
 }
 
 function exactKeys(
@@ -644,7 +716,7 @@ export async function runEvaluationHarness(
   try {
     const deployment = configuredDeployment ?? await deploymentFromEnvironment();
     const bindings = await readEvaluationTask(paths);
-    const [task, _delivery, ...results] = await Promise.all([
+    const [task, delivery, ...results] = await Promise.all([
       readExactMaterial(paths.input, bindings.subjectTask),
       readExactMaterial(paths.input, bindings.subjectDelivery),
       ...bindings.subjectResults.map((reference) =>
@@ -660,6 +732,14 @@ export async function runEvaluationHarness(
         "evaluation Task crosswalk digest does not match evaluation-spec.json",
       );
     }
+    const evaluationTaskBytes = await readFile(join(paths.input, "task.sealed"));
+    validateSubjectBindings({
+      evaluationTaskBytes,
+      bindings,
+      task,
+      delivery,
+      results,
+    });
     const evaluationSpecification = validateCrosswalk(
       task,
       specificationDigest,
