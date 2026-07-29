@@ -1036,3 +1036,29 @@ lifecycle facts, every category mapping, and the missing signed-Task family. The
 package, architecture, packed-type, and workflow gates run again, followed by another fresh
 whole-design review. M6 remains blocked until that review is green and the Phase 4 backend-local
 assembly gate has passed.
+
+## Addendum 2026-07-29-n — immutable projector state, retained anchors, and executable conformance
+
+The third fresh whole-component review rejected the otherwise-green M0–M5 head on four
+non-vacuous defects. Program rulings §7.72–§7.75 freeze their repair:
+
+1. projection is a persistent-value reducer: every nested mutable map is cloned before change,
+   no transition mutates caller-owned prior state, and the returned state shares no mutable
+   object with its input;
+2. revised Task state retains its exact creation Submission digest and derivation/log anchor,
+   and every later release, expiry, or top-up reopening revalidates the resolved bytes against
+   that retained digest before any publication, signing, archive, or head effect;
+3. native signed-Task conformance uses one exported admission function that performs exact
+   media, fatal decode/schema/I-JSON, canonical re-seal equality, real PAE-bound signature, and
+   requester-authority verification for both positive and hostile vectors; and
+4. every lifecycle refusal and exact-log replay path is exercised through full-output
+   conformance vectors, with refused facts excluded from the accepted-event collection and
+   allowed no downstream effect.
+
+The repair is test-first and proves input-state byte identity for claim, release, expiry,
+top-up, refusal, and replay; substituted Submission bytes on every reopening path; canonical
+and noncanonical or unauthorized signed Tasks through the same boundary; and exact typed
+lifecycle outcomes with zero forbidden effects. The full M0–M5 package, consumer, guard,
+packed-type, workflow, and contract checks run again, followed by another fresh whole-design
+review. M6 remains blocked until that review is green and the Phase 4 backend-local assembly
+gate has passed.

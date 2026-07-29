@@ -794,6 +794,43 @@ Confirmed by the operator at the program gate (2026-07-28):
     no invented incompatibility for a Task with no decisive observation. Conflicted and other
     exclusions retain their existing disclosures. A two-arm fixture with one fully
     expired/excluded arm pins the complete result for all three methods.
+72. **Marketplace projection state is a persistent value owned by its caller:** every reducer
+    transition clones every nested mutable structure it may change, including live Attempt
+    occupancy, seen Attempt identities, and pending correspondence state. No accepted, refused,
+    replayed, or reorg event may mutate the supplied prior state, and the returned state shares
+    no mutable object with it. Byte snapshots before and after claim, release, expiry, top-up,
+    refusal, and replay transitions prove both nonmutation and isolation.
+73. **A revised Task's creation anchor survives every availability epoch:** the accepted
+    revised-mode `TaskCreated` transition retains the exact creation `submissionDigest` and the
+    creation derivation/log identity in Task state. Before any release-, expiry-, or
+    `AttemptsAdded`-driven reopening can emit facts, write a record, sign, archive, or advance a
+    head, the projector resolves the Submission once and requires
+    `documentDigest(resolvedBytes)` to equal that retained digest. A mismatch returns typed
+    `announcement-material-refused` detail naming role `submission`, expected and actual digest,
+    the current reopening derivation, and the original anchor derivation, with zero downstream
+    effects. Today mode never fabricates an unavailable anchor or a reopening path. A later
+    signed availability announcement may have a new announcement id and entry sequence, but it
+    retains the same record digest and facts identity.
+74. **Signed Task admission is one executable native conformance boundary:** the marketplace
+    testing package exports one reusable check that accepts exact DSSE-envelope bytes, the
+    expected claimed requester/creator/key/time context, and the real resolver/policy
+    dependencies. It parses the envelope, requires the exact Task media type, performs fatal
+    UTF-8, JSON, schema, and I-JSON validation, re-seals the Task and requires byte equality, and
+    then verifies the signature's actual PAE-bound bytes and requester authority with
+    `verifyEnvelopeBinding`. It returns a closed typed result whose successful form includes the
+    exact recovered Task bytes and document. Canonical success, trailing-whitespace or
+    reordered payload, substituted payload, wrong media type, and unauthorized signer all run
+    through this same function; comparing byte arrays outside the admission boundary or using a
+    verifier double that ignores the received envelope is vacuous and nonconforming.
+75. **Marketplace lifecycle refusals are executable conformance, not dormant branches:** the
+    native kit pins exact-log replay as idempotent and pins distinct-log duplicate, reused or
+    regressing Attempt identity, unknown-task claim/release/expiry, non-live release/expiry, and
+    contradictory top-up to their exact typed refusal results. A refused event is not appended
+    to the transition's accepted-event collection and causes no observation, announcement,
+    record, signing, archive, or head effect; only the processed-log identity needed to make the
+    same log replay idempotent may change. Capacity, Attempt identity, sequence, and other
+    protocol state remain byte-identical. Each vector asserts the complete transition output,
+    not merely the refusal name.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 
