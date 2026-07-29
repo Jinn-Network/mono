@@ -39,9 +39,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/record-discovery-testing', join(root, 'packages', 'discovery', 'testing')],
 ]);
 
-// Approved graph, M0+M1 (plan Milestones M0-M1; scaffold + Attempt-URI agreement only -- no
-// binding/projector/pipeline source beyond the seam + sealing utils + attempt-uri + the
-// type-only two-party-engagement declaration land yet).
+// Approved graph through M6 (plan Milestones M0-M6).
 //
 // binding and projector/pipeline deliberately do NOT devDep marketplace-testing (a documented
 // deviation from the plan's M0.1 Step 1 literal preview): declaring it creates a two-way portal
@@ -52,11 +50,10 @@ const SIBLING_TREE_DIRS = new Map([
 // do not devDep their sibling testing/kit packages either -- only the testing/kit package
 // depends on the components it exercises (see binding/testing READMEs for the full rationale).
 //
-// pipeline additionally omits @jinn-network/task-execution-backend-local (the plan's literal
-// M0.1 preview) because that package does not exist yet in this worktree
-// (packages/task-execution/backend-local -- Phase 4, not started). The edge lands at Milestone
-// M6 (Phase 6) once the assembly package registers (program §7.6 guard-suite ownership: "...
-// extended by every later package registration").
+// pipeline composes binding venue verbs with an embedded backend peer (ruling §7.18). It
+// declares backend-local for the assembly dependency edge and the packed-type closure; shadow
+// devDependencies mirror backend-local's transitive portal closure (empirically required for
+// standalone yarn install). task-execution-testing is dev-only for unit tests.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['binding', {
     dependencies: [
@@ -96,11 +93,19 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     dependencies: [
       '@jinn-network/marketplace-binding',
       '@jinn-network/task-execution-backend',
+      '@jinn-network/task-execution-backend-local',
       '@jinn-network/task-execution-protocol',
     ],
-    // Shadow devDependencies pulled in transitively via marketplace-binding's own dependencies.
     devDependencies: [
+      '@jinn-network/evidence-discovery',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/evidence-repository',
+      '@jinn-network/execution-recorder',
+      '@jinn-network/task-execution-launchers',
       '@jinn-network/task-execution-profiles',
+      '@jinn-network/task-execution-supervisor',
+      '@jinn-network/task-execution-testing',
+      '@jinn-network/task-execution-workspace',
       '@jinn-network/trust-core',
       '@jinn-network/trust-resolve',
     ],

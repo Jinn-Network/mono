@@ -49,6 +49,56 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@jinn-network/evidence-discovery@portal:../../evidence/discovery::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-discovery@portal:../../evidence/discovery::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/evidence-protocol@portal:../../evidence/protocol::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-protocol@portal:../../evidence/protocol::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A."
+  dependencies:
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/evidence-repository@portal:../../evidence/repository::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-repository@portal:../../evidence/repository::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/execution-recorder@portal:../../evidence/execution-recorder::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/execution-recorder@portal:../../evidence/execution-recorder::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
 "@jinn-network/marketplace-binding@portal:../binding::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/marketplace-binding@portal:../binding::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A."
@@ -68,10 +118,19 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/marketplace-pipeline@workspace:."
   dependencies:
+    "@jinn-network/evidence-discovery": "npm:0.1.0"
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+    "@jinn-network/execution-recorder": "npm:0.1.0"
     "@jinn-network/marketplace-binding": "npm:0.1.0"
     "@jinn-network/task-execution-backend": "npm:0.1.0"
+    "@jinn-network/task-execution-backend-local": "npm:0.1.0"
+    "@jinn-network/task-execution-launchers": "npm:0.1.0"
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
+    "@jinn-network/task-execution-supervisor": "npm:0.1.0"
+    "@jinn-network/task-execution-testing": "npm:0.1.0"
+    "@jinn-network/task-execution-workspace": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
     "@jinn-network/trust-resolve": "npm:0.1.0"
     "@types/node": "npm:^22.0.0"
@@ -80,11 +139,38 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@jinn-network/task-execution-backend-local@portal:../../task-execution/backend-local/assembly::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/task-execution-backend-local@portal:../../task-execution/backend-local/assembly::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-discovery": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+    "@jinn-network/execution-recorder": "npm:0.1.0"
+    "@jinn-network/task-execution-backend": "npm:0.1.0"
+    "@jinn-network/task-execution-launchers": "npm:0.1.0"
+    "@jinn-network/task-execution-profiles": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+    "@jinn-network/task-execution-supervisor": "npm:0.1.0"
+    "@jinn-network/task-execution-workspace": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
 "@jinn-network/task-execution-backend@portal:../../task-execution/backend::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/task-execution-backend@portal:../../task-execution/backend::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A."
   dependencies:
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/task-execution-launchers@portal:../../task-execution/backend-local/launchers::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/task-execution-launchers@portal:../../task-execution/backend-local/launchers::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A."
+  dependencies:
+    "@jinn-network/task-execution-profiles": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+    "@jinn-network/task-execution-supervisor": "npm:0.1.0"
+    "@jinn-network/task-execution-workspace": "npm:0.1.0"
   languageName: node
   linkType: soft
 
@@ -107,6 +193,42 @@ __metadata:
   dependencies:
     "@noble/hashes": "npm:^2.2.0"
     zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/task-execution-supervisor@portal:../../task-execution/backend-local/supervisor::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/task-execution-supervisor@portal:../../task-execution/backend-local/supervisor::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A."
+  dependencies:
+    "@jinn-network/task-execution-backend": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/task-execution-testing@portal:../../task-execution/testing::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/task-execution-testing@portal:../../task-execution/testing::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A."
+  dependencies:
+    "@jinn-network/task-execution-backend": "npm:0.1.0"
+    "@jinn-network/task-execution-backend-local": "npm:0.1.0"
+    "@jinn-network/task-execution-launchers": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+    "@jinn-network/task-execution-supervisor": "npm:0.1.0"
+    "@jinn-network/task-execution-workspace": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/task-execution-workspace@portal:../../task-execution/backend-local/workspace::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/task-execution-workspace@portal:../../task-execution/backend-local/workspace::locator=%40jinn-network%2Fmarketplace-pipeline%40workspace%3A."
+  dependencies:
+    "@jinn-network/task-execution-profiles": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
   languageName: node
   linkType: soft
 

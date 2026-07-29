@@ -253,7 +253,14 @@ test('marketplace-projector production source stays within its architecture boun
 });
 
 test('marketplace-pipeline production source stays within its architecture boundary', () => {
-  assertBoundary(join(packages, 'pipeline', 'src'), PIPELINE_FORBIDDEN_PACKAGES, APPLICATION_AND_LEGACY_ROOTS);
+  const productionFiles = files(join(packages, 'pipeline', 'src')).filter(
+    (file) => !/\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(file),
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(productionFiles, PIPELINE_FORBIDDEN_PACKAGES, APPLICATION_AND_LEGACY_ROOTS),
+    [],
+    'packages/marketplace/pipeline/src crosses a marketplace architecture boundary',
+  );
 });
 
 test('marketplace-testing production source stays within its architecture boundary', () => {
@@ -267,7 +274,10 @@ test('no marketplace package imports the backend-local component internals (ruli
   }
   // pipeline itself may never reach into supervisor/workspace/launchers either -- only the
   // assembly (-backend-local), already covered by PIPELINE_FORBIDDEN_PACKAGES above.
-  assertBoundary(join(packages, 'pipeline', 'src'), BACKEND_LOCAL_INTERNALS);
+  const pipelineProductionFiles = files(join(packages, 'pipeline', 'src')).filter(
+    (file) => !/\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(file),
+  );
+  assert.deepEqual(forbiddenImportsInFiles(pipelineProductionFiles, BACKEND_LOCAL_INTERNALS), []);
 });
 
 test('marketplace exports stay root-only except for the native testing conformance subpaths', () => {

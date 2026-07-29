@@ -6,10 +6,22 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Cross-tree + sibling portal dependencies (§7.8), packed in dependency order (leaves first).
+// Runtime closure: pipeline's four direct deps (binding, backend, backend-local, protocol) plus
+// backend-local assembly's evidence contract slice and binding's trust-{core,resolve} — mirrors
+// marketplace-packed-types / marketplace-testing pack-smoke, trimmed to this package's runtime
+// boundary (no record-discovery, task-execution-testing, or trust-testing).
 const dependencyChain = [
+  ["@jinn-network/evidence-protocol", join(packageRoot, "..", "..", "evidence", "protocol")],
+  ["@jinn-network/evidence-repository", join(packageRoot, "..", "..", "evidence", "repository")],
+  ["@jinn-network/evidence-discovery", join(packageRoot, "..", "..", "evidence", "discovery")],
+  ["@jinn-network/execution-recorder", join(packageRoot, "..", "..", "evidence", "execution-recorder")],
   ["@jinn-network/task-execution-protocol", join(packageRoot, "..", "..", "task-execution", "protocol")],
   ["@jinn-network/task-execution-backend", join(packageRoot, "..", "..", "task-execution", "backend")],
   ["@jinn-network/task-execution-profiles", join(packageRoot, "..", "..", "task-execution", "profiles")],
+  ["@jinn-network/task-execution-supervisor", join(packageRoot, "..", "..", "task-execution", "backend-local", "supervisor")],
+  ["@jinn-network/task-execution-workspace", join(packageRoot, "..", "..", "task-execution", "backend-local", "workspace")],
+  ["@jinn-network/task-execution-launchers", join(packageRoot, "..", "..", "task-execution", "backend-local", "launchers")],
+  ["@jinn-network/task-execution-backend-local", join(packageRoot, "..", "..", "task-execution", "backend-local", "assembly")],
   ["@jinn-network/trust-core", join(packageRoot, "..", "..", "trust", "core")],
   ["@jinn-network/trust-resolve", join(packageRoot, "..", "..", "trust", "resolve")],
   ["@jinn-network/marketplace-binding", join(packageRoot, "..", "binding")],
@@ -127,7 +139,12 @@ import "@jinn-network/marketplace-pipeline";
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
 const expected = ${JSON.stringify(
-      ["@jinn-network/marketplace-binding", "@jinn-network/task-execution-backend", "@jinn-network/task-execution-protocol"].sort(),
+      [
+        "@jinn-network/marketplace-binding",
+        "@jinn-network/task-execution-backend",
+        "@jinn-network/task-execution-backend-local",
+        "@jinn-network/task-execution-protocol",
+      ].sort(),
     )};
 if (jinnDependencies.join(",") !== expected.join(",")) {
   throw new Error("unexpected Jinn dependency boundary: " + jinnDependencies.join(", "));

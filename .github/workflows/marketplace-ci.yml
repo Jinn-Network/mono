@@ -130,9 +130,17 @@ jobs:
           corepack prepare yarn@4.13.0 --activate
       - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
+          (cd packages/task-execution/testing && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/trust/resolve && yarn install --immutable && yarn build)
       - name: Restore Marketplace Binding distribution
