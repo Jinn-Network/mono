@@ -46,8 +46,16 @@
     "vitest": "^4.1.8"
   },
   "resolutions": {
+    "@jinn-network/evidence-discovery": "portal:../../../evidence/discovery",
+    "@jinn-network/evidence-protocol": "portal:../../../evidence/protocol",
+    "@jinn-network/evidence-repository": "portal:../../../evidence/repository",
+    "@jinn-network/execution-recorder": "portal:../../../evidence/execution-recorder",
     "@jinn-network/task-execution-backend": "portal:../../backend",
+    "@jinn-network/task-execution-backend-local": "portal:../assembly",
+    "@jinn-network/task-execution-launchers": "portal:../launchers",
+    "@jinn-network/task-execution-profiles": "portal:../../profiles",
     "@jinn-network/task-execution-protocol": "portal:../../protocol",
-    "@jinn-network/task-execution-testing": "portal:../../testing"
+    "@jinn-network/task-execution-testing": "portal:../../testing",
+    "@jinn-network/task-execution-workspace": "portal:../workspace"
   }
 }

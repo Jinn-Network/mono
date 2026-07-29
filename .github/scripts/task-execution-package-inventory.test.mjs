@@ -31,6 +31,20 @@ const EXTERNAL_JINN_PACKAGES = [
   ['packages/evidence/execution-recorder', '@jinn-network/execution-recorder'],
 ];
 
+// A component's dev-only portal to the backend-local testing kit must also resolve the kit's
+// production component closure locally. These are RESOLUTION overrides only: they do not add
+// manifest dependency edges or create a production cycle. With node-modules Yarn cannot safely
+// materialize that cyclic portal graph; the component projects use PnP for this dev-only kit
+// edge, while the testing package itself remains independently installable.
+const BACKEND_LOCAL_TESTING_PORTAL_CLOSURE = [
+  '@jinn-network/evidence-discovery', '@jinn-network/evidence-protocol',
+  '@jinn-network/evidence-repository', '@jinn-network/execution-recorder',
+  '@jinn-network/task-execution-backend', '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-profiles',
+  '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-supervisor',
+  '@jinn-network/task-execution-testing', '@jinn-network/task-execution-workspace',
+];
+
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['protocol', { dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['backend', {
@@ -171,9 +185,13 @@ test('task-execution package Jinn dependencies and portal resolutions match the 
     }
     const declared = DEPENDENCY_SECTIONS.flatMap((section) => jinnDependencyNames(manifest, section)).sort();
     const resolutions = manifest.resolutions ?? {};
+    const ownName = manifest.name;
+    const expectedResolved = directory.startsWith('backend-local/')
+      ? [...new Set([...declared, ...BACKEND_LOCAL_TESTING_PORTAL_CLOSURE.filter((name) => name !== ownName)])].sort()
+      : declared;
     const resolved = Object.keys(resolutions).filter((name) => name.startsWith('@jinn-network/')).sort();
-    assert.deepEqual(resolved, declared, `${directory} has unmatched Jinn resolutions`);
-    for (const dependencyName of declared) {
+    assert.deepEqual(resolved, expectedResolved, `${directory} has unmatched Jinn resolutions`);
+    for (const dependencyName of expectedResolved) {
       assert.equal(resolutions[dependencyName], expectedPortal(directory, dependencyName),
         `${directory} must resolve ${dependencyName} through its matching portal`);
     }

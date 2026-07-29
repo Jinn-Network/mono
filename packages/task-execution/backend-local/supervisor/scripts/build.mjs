@@ -5,12 +5,11 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const dist = join(packageRoot, "dist");
-const tsc = join(packageRoot, "node_modules", "typescript", "bin", "tsc");
 
 await rm(dist, { recursive: true, force: true });
 
 await new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, [tsc, "-p", "tsconfig.build.json"], {
+  const child = spawn("yarn", ["tsc", "-p", "tsconfig.build.json"], {
     cwd: packageRoot,
     stdio: "inherit",
   });
