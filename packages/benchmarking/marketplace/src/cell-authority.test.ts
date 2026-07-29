@@ -4,7 +4,12 @@ import {
   cellIdempotencyKey,
   submissionExtensionBlock,
 } from "@jinn-network/benchmarking-records";
-import { deriveMarketplaceAttemptUri, BASE_SEPOLIA_TODAY, MECH_ABI } from "@jinn-network/marketplace-binding";
+import {
+  BASE_SEPOLIA_TODAY,
+  deriveMarketplaceAttemptUri,
+  encodeRevisedRequestData,
+  MECH_ABI,
+} from "@jinn-network/marketplace-binding";
 import {
   decodeMarketplaceLogs,
   marketplaceEventOriginAuthority,
@@ -169,7 +174,7 @@ function attemptEvent(input: {
     facts: {
       taskId: 42n,
       attemptIndex: input.attemptIndex,
-      requestId: input.requestId,
+      ...(input.generation === "today" ? { requestId: input.requestId } : {}),
       deliveryRate: 10n,
       operator: input.operator ?? OPERATOR,
       priorityMech: "0x4444444444444444444444444444444444444444" as Address,
@@ -223,7 +228,64 @@ function projectionWithAttempts(
     blockNumber: 105,
     blockHash: "0x1515151515151515151515151515151515151515151515151515151515151515",
   };
-  const all = [...baseEvents, ...attempts, ...settlements];
+  const completed = settlements.flatMap((settlement) => {
+    if (
+      settlement.event !== "SolutionDeliveryClaimed"
+      || !("deliveryDigest" in settlement.facts)
+    ) {
+      return [settlement];
+    }
+    const attempt = attempts.find((candidate) =>
+      candidate.event === "TaskAttemptCreated"
+      && candidate.facts.attemptIndex === settlement.facts.attemptIndex
+    );
+    if (attempt?.event !== "TaskAttemptCreated") return [settlement];
+    const prepared: ObservationMarketplaceEvent = {
+      event: "SolutionDeliveryPrepared",
+      derivation: {
+        ...settlement.derivation,
+        event: "SolutionDeliveryPrepared",
+        blockNumber: settlement.derivation.blockNumber - 1,
+        logIndex: 0,
+      },
+      projection: settlement.projection,
+      facts: {
+        operator: settlement.facts.operator,
+        expectedRequestId: settlement.facts.requestId,
+        taskId: settlement.facts.taskId,
+        attemptIndex: settlement.facts.attemptIndex,
+        nonce: 1n,
+        deliveryDigest: settlement.facts.deliveryDigest,
+      },
+    };
+    const delivered: ObservationMarketplaceEvent = {
+      event: "Deliver",
+      derivation: {
+        ...settlement.derivation,
+        contract: attempt.facts.priorityMech,
+        event: "Deliver",
+        logIndex: 1,
+      },
+      projection: settlement.projection,
+      facts: {
+        mech: attempt.facts.priorityMech,
+        mechServiceMultisig: settlement.facts.operator,
+        requestId: settlement.facts.requestId,
+        deliveryRate: attempt.facts.deliveryRate,
+        requestData: encodeRevisedRequestData({
+          legKind: 1,
+          taskId: settlement.facts.taskId,
+          attemptIndex: settlement.facts.attemptIndex,
+          verdictIndex: 0,
+          deliveryDigest: settlement.facts.deliveryDigest,
+          verdictCode: 0,
+        }),
+        deliveryData: settlement.facts.deliveryDigest,
+      },
+    };
+    return [prepared, delivered, settlement];
+  });
+  const all = [...baseEvents, ...attempts, ...completed];
   return deriveAuthorityProjection(all, closeAnchor);
 }
 

@@ -18,7 +18,11 @@ import {
 } from "@jinn-network/task-execution-protocol";
 import { createInMemoryBackend } from "@jinn-network/task-execution-testing";
 import { describe, expect, test, vi } from "vitest";
-import { BASE_SEPOLIA_TODAY, keccakEvidenceHash } from "@jinn-network/marketplace-binding";
+import {
+  BASE_SEPOLIA_TODAY,
+  deriveMarketplaceAttemptUri,
+  keccakEvidenceHash,
+} from "@jinn-network/marketplace-binding";
 import { takeEveryRunnable } from "./claim-predicate.js";
 import { runPipeline, type PipelinePorts } from "./pipeline.js";
 import type { SubmissionFacts } from "./types.js";
@@ -138,6 +142,10 @@ function settlementPortsForDelivery(deliveryBytes: Uint8Array): PipelinePorts["s
       keccakEvidenceHash: keccak,
     }),
     claimSolutionDelivery: async () => ({ status: "settled" }),
+    settleRevisedSolutionDelivery: async () => ({
+      status: "settled",
+      requestId: REQUEST_ID,
+    }),
   };
 }
 
@@ -178,6 +186,7 @@ const WIRING = [{
   model: "claude-haiku",
   plugins: ["git"],
   credentialRef: "cred-1",
+  isolationPolicy: "workspace-snapshot",
 }];
 
 const PIPELINE_CONFIG = {
@@ -393,6 +402,120 @@ describe("runPipeline", () => {
       }),
     );
     expect(result).toEqual({ kind: "race-lost", state: "rejected" });
+  });
+
+  test("assembles revised settlement from task-attempt identity and joins requestId only after prepare", async () => {
+    const revisedConfig = {
+      ...PIPELINE_CONFIG,
+      chain: { ...BASE_SEPOLIA_TODAY, generation: "revised" as const },
+    };
+    const attemptUri = deriveMarketplaceAttemptUri({
+      chainId: revisedConfig.chain.chainId,
+      coordinator: revisedConfig.chain.taskCoordinator,
+      taskId: 7n,
+      attemptIndex: 3,
+    });
+    const deliveryBytes = goldenDelivery(attemptUri);
+    const deliveryDigest = `sha256:${sha256Hex(deliveryBytes)}` as const;
+    const settleRevisedSolutionDelivery = vi.fn(async () => ({
+      status: "settled" as const,
+      requestId: REQUEST_ID,
+    }));
+    const result = await runPipeline(
+      {
+        facts: baseFacts(),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      revisedConfig,
+      createPreflightBackend(),
+      makePorts({
+        claim: {
+          ...makePorts().claim,
+          claimTask: async () => ({
+            attemptIndex: 3,
+            txHash: CLAIM_TX,
+          }),
+        },
+        deliveryWait: {
+          waitForDelivery: async () => ({ ok: true, deliveryBytes }),
+        },
+        settlement: {
+          ...settlementPortsForDelivery(deliveryBytes),
+          settleRevisedSolutionDelivery,
+          readRouterDeliveryFacts: async () => ({
+            generation: "revised",
+            requestId: REQUEST_ID,
+            taskId: 7n,
+            attemptIndex: 3,
+            sha256Digest: deliveryDigest,
+          }),
+        },
+      }),
+    );
+
+    expect(result).toEqual({ kind: "delivered", state: "delivered" });
+    expect(settleRevisedSolutionDelivery).toHaveBeenCalledWith({
+      taskId: 7n,
+      attemptIndex: 3,
+      deliveryDigest: `0x${deliveryDigest.slice("sha256:".length)}`,
+      deliveryBytes,
+    });
+  });
+
+  test("forfeits a revised delivered reservation instead of releasing or inventing settlement", async () => {
+    const revisedConfig = {
+      ...PIPELINE_CONFIG,
+      chain: { ...BASE_SEPOLIA_TODAY, generation: "revised" as const },
+    };
+    const attemptUri = deriveMarketplaceAttemptUri({
+      chainId: revisedConfig.chain.chainId,
+      coordinator: revisedConfig.chain.taskCoordinator,
+      taskId: 7n,
+      attemptIndex: 3,
+    });
+    const deliveryBytes = goldenDelivery(attemptUri);
+    const forfeitDeliveredReservation = vi.fn(async () => {});
+    const releaseAttempt = vi.fn(async () => {});
+    const result = await runPipeline(
+      {
+        facts: baseFacts(),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      revisedConfig,
+      createPreflightBackend(),
+      makePorts({
+        claim: {
+          ...makePorts().claim,
+          claimTask: async () => ({ attemptIndex: 3, txHash: CLAIM_TX }),
+        },
+        deliveryWait: {
+          waitForDelivery: async () => ({ ok: true, deliveryBytes }),
+        },
+        settlement: {
+          ...settlementPortsForDelivery(deliveryBytes),
+          settleRevisedSolutionDelivery: async () => ({
+            status: "delivered-unsettled",
+            requestId: REQUEST_ID,
+          }),
+        },
+        release: { releaseAttempt, forfeitDeliveredReservation },
+      }),
+    );
+
+    expect(result).toEqual({
+      kind: "settlement-forfeited",
+      state: "delivered",
+      forfeited: true,
+    });
+    expect(forfeitDeliveredReservation).toHaveBeenCalledWith({
+      taskId: 7n,
+      attemptIndex: 3,
+      verdictIndex: 0,
+      legKind: 1,
+    });
+    expect(releaseAttempt).not.toHaveBeenCalled();
   });
 });
 

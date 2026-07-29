@@ -687,6 +687,10 @@ export async function projectAnnouncements(
           `${taskKey(event, event.facts.taskId)}:${role}`,
           announcement.announcementId,
         );
+      } else if (announcement.action === "withdrawn") {
+        for (const [key, announcementId] of known) {
+          if (announcementId === announcement.retracts) known.delete(key);
+        }
       }
     }
 

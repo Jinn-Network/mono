@@ -252,7 +252,26 @@ export async function authorizeCellFromProjection(input: {
     if (anchoredDigest !== undefined && anchoredDigest !== submission.digest) continue;
 
     const creation = attemptCreations.get(engaged.attemptUrn);
-    if (creation === undefined || creation.requestId !== engaged.requestId) continue;
+    if (creation === undefined) continue;
+    if (
+      acceptedGeneration === "today"
+      && (
+        creation.requestId === undefined
+        || engaged.requestId === undefined
+        || creation.requestId !== engaged.requestId
+      )
+    ) {
+      continue;
+    }
+    if (
+      acceptedGeneration === "revised"
+      && (
+        creation.requestId !== undefined
+        || engaged.requestId !== undefined
+      )
+    ) {
+      continue;
+    }
     if (!addressEqual(creation.operator, engaged.executor)) continue;
     if (creation.generation !== acceptedGeneration) continue;
     if (engaged.generation !== acceptedGeneration) continue;

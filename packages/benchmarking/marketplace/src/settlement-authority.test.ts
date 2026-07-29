@@ -53,7 +53,10 @@ function projection(overrides: Partial<AuthorityProjection> = {}): AuthorityProj
           uri: "urn:jinn:marketplace:dispatch-context:42:0",
           digest: { sha256: "8888888888888888888888888888888888888888888888888888888888888888" },
         },
-        annotations: { requestId: REQUEST_ID },
+        annotations: {
+          contractGeneration: "revised",
+          engagement: { taskId: "42", attemptIndex: 0, kind: "solution" },
+        },
       },
       derivation: {
         chainId: 84532,
@@ -115,11 +118,42 @@ function projection(overrides: Partial<AuthorityProjection> = {}): AuthorityProj
       facts: {
         taskId: 42n,
         attemptIndex: 0,
-        requestId: REQUEST_ID,
         deliveryRate: 10n,
         operator: "0x3333333333333333333333333333333333333333",
         priorityMech: "0x4444444444444444444444444444444444444444",
         attemptDeadline: 1785369600n,
+      },
+    }, {
+      event: "SolutionDeliveryPrepared",
+      derivation: {
+        chainId: 84532,
+        contract: "0x1111111111111111111111111111111111111111",
+        event: "SolutionDeliveryPrepared",
+        blockNumber: 101,
+        blockHash: "0x7777777777777777777777777777777777777777777777777777777777777777",
+        txHash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        logIndex: 0,
+        finalityTier: "finalized",
+        contractGeneration: "revised",
+      },
+      projection: {
+        taskCoordinator: COORDINATOR,
+        timestamp: "2026-07-29T12:00:01Z",
+        submission: "urn:uuid:11111111-1111-4111-8111-111111111111",
+        taskDigest: `sha256:${TASK_DIGEST}`,
+        effectiveDeadline: "2026-07-30T12:00:00Z",
+        dispatchContext: {
+          uri: "urn:jinn:marketplace:dispatch-context:42:0",
+          digest: { sha256: "8888888888888888888888888888888888888888888888888888888888888888" },
+        },
+      },
+      facts: {
+        operator: "0x3333333333333333333333333333333333333333",
+        expectedRequestId: REQUEST_ID,
+        taskId: 42n,
+        attemptIndex: 0,
+        nonce: 1n,
+        deliveryDigest: `0x${"d".repeat(64)}`,
       },
     }, {
       event: "SolutionDeliveryClaimed",

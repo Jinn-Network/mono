@@ -64,5 +64,11 @@ export function wiringHonorsPinning(
   if (pin.harness !== undefined && pin.harness !== wiring.harness) return false;
   if (pin.model !== undefined && pin.model !== wiring.model) return false;
   if (pin.loadout !== undefined && !wiring.plugins.includes(pin.loadout)) return false;
+  if (
+    pin.isolationPolicy !== undefined
+    && pin.isolationPolicy !== wiring.isolationPolicy
+  ) {
+    return false;
+  }
   return true;
 }

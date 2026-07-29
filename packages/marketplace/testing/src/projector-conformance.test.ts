@@ -13,13 +13,14 @@ import {
   type SourceHead,
 } from "@jinn-network/record-discovery-protocol";
 import type { BlobStore } from "@jinn-network/record-discovery-serve";
-import { BASE_SEPOLIA_TODAY, MECH_ABI } from "@jinn-network/marketplace-binding";
+import { BASE_SEPOLIA_TODAY } from "@jinn-network/marketplace-binding";
 import {
   foldObservations,
   type ProtocolObservation,
 } from "@jinn-network/task-execution-protocol";
 import {
   REVISED_PROJECTOR_EVENTS_ABI,
+  REVISED_MECH_DELIVER_ABI,
   appendSignedReorgCorrection,
   createMarketplaceProjectionState,
   decodeMarketplaceLogs,
@@ -84,7 +85,7 @@ function asFixtureLogs(fixture: {
 }
 
 function abiEvent(name: string): AbiEvent {
-  const event = [...REVISED_PROJECTOR_EVENTS_ABI, ...MECH_ABI].find((item) =>
+  const event = [...REVISED_PROJECTOR_EVENTS_ABI, ...REVISED_MECH_DELIVER_ABI].find((item) =>
     item.name === name
   );
   if (event === undefined) throw new Error(`unknown fixture event: ${name}`);
@@ -704,7 +705,15 @@ const subject: MarketplaceProjectorConformanceSubject = {
         timestamp: "2026-07-29T12:10:00Z",
       },
     };
-    const later = reduceMarketplaceProjection([laterEvent], corrected.state);
+    const canonicalBeforeVerdict = reduceMarketplaceProjection(
+      events.filter((event) => event !== verdict),
+      createMarketplaceProjectionState(),
+    ).state;
+    const later = reduceMarketplaceProjection([laterEvent], {
+      ...canonicalBeforeVerdict,
+      processedCorrectionIds: corrected.state.processedCorrectionIds,
+      sequenceBySourceSubject: corrected.state.sequenceBySourceSubject,
+    });
     const laterTerminal = later.observations.find((observation) =>
       observation.type === "network.jinn.task-execution.attempt-terminal.v1"
     );

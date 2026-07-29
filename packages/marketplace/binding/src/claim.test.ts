@@ -4,6 +4,10 @@ import { claimAttempt, dispatchContextDescriptor } from "./claim.js";
 
 const TASK_DIGEST = `sha256:${"a".repeat(64)}` as const;
 const REQUEST_ID = `0x${"b".repeat(64)}` as const;
+const REVISED_CONFIG = {
+  ...BASE_SEPOLIA_TODAY,
+  generation: "revised" as const,
+};
 
 describe("claimAttempt", () => {
   test("rejects a failed preflight before claimTask spends funds", async () => {
@@ -25,8 +29,62 @@ describe("claimAttempt", () => {
     if (result.ok) {
       expect(result.attemptUri).toMatch(/^urn:uuid:/);
       expect(result.dispatchContext.attempt).toBe(result.attemptUri);
-      expect(dispatchContextDescriptor(result.attemptUri, result.requestId, result.txHash)).toMatchObject({ requestId: REQUEST_ID });
+      expect(dispatchContextDescriptor(result)).toMatchObject({
+        engagement: { taskId: 7n, attemptIndex: 3, kind: "solution" },
+        requestId: REQUEST_ID,
+      });
     }
     expect(claimTask).toHaveBeenCalledWith({ taskId: 7n, priorityMech: BASE_SEPOLIA_TODAY.mechMarketplace });
+  });
+
+  test("uses task and attempt identity in revised mode without inventing a request ID", async () => {
+    const claimTask = vi.fn(async () => ({
+      attemptIndex: 4,
+      txHash: `0x${"d".repeat(64)}` as const,
+    }));
+    const result = await claimAttempt(9n, REVISED_CONFIG, {
+      taskDigest: TASK_DIGEST,
+      submission: "urn:uuid:submission",
+      nonce: "n-2",
+      priorityMech: REVISED_CONFIG.mechMarketplace,
+      capabilityMatch: async () => ({ ok: true }),
+      preflight: async () => ({ ok: true }),
+      claimTask,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      generation: "revised",
+      taskId: 9n,
+      attemptIndex: 4,
+    });
+    expect(result).not.toHaveProperty("requestId");
+    if (result.ok) {
+      expect(dispatchContextDescriptor(result)).toEqual({
+        attempt: result.attemptUri,
+        engagement: {
+          taskId: 9n,
+          attemptIndex: 4,
+          kind: "solution",
+        },
+        txHash: `0x${"d".repeat(64)}`,
+      });
+    }
+  });
+
+  test("fails closed if a revised claim adapter leaks the removed V3 request identity", async () => {
+    await expect(claimAttempt(9n, REVISED_CONFIG, {
+      taskDigest: TASK_DIGEST,
+      submission: "urn:uuid:submission",
+      nonce: "n-3",
+      priorityMech: REVISED_CONFIG.mechMarketplace,
+      capabilityMatch: async () => ({ ok: true }),
+      preflight: async () => ({ ok: true }),
+      claimTask: async () => ({
+        attemptIndex: 4,
+        requestId: REQUEST_ID,
+        txHash: `0x${"e".repeat(64)}`,
+      }),
+    })).rejects.toThrow("revised claimTask must not return a requestId");
   });
 });

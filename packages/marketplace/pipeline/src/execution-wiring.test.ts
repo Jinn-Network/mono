@@ -14,6 +14,7 @@ const WIRING: ExecutionWiringEntry = {
   model: "claude-haiku",
   plugins: ["git", "tests"],
   credentialRef: "cred-1",
+  isolationPolicy: "workspace-snapshot",
 };
 
 describe("execution wiring", () => {
@@ -39,5 +40,19 @@ describe("execution wiring", () => {
     expect(wiringHonorsPinning({ runPinning: { model: "gpt-4" } }, WIRING)).toBe(false);
     expect(wiringHonorsPinning({ runPinning: { loadout: "tests" } }, WIRING)).toBe(true);
     expect(wiringHonorsPinning({ runPinning: { loadout: "lint" } }, WIRING)).toBe(false);
+  });
+
+  test("fails closed when isolation is the only hostile pin mismatch", () => {
+    expect(wiringHonorsPinning({
+      runPinning: {
+        harness: WIRING.harness,
+        model: WIRING.model,
+        loadout: "tests",
+        isolationPolicy: "ephemeral-container",
+      },
+    }, WIRING)).toBe(false);
+    expect(wiringHonorsPinning({
+      runPinning: { isolationPolicy: "workspace-snapshot" },
+    }, WIRING)).toBe(true);
   });
 });

@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import {
   deriveAuthorityProjection,
   indexAttemptCreations,
+  indexDeliveryPreparations,
   indexSolutionSettlements,
   isEventAuthorityEligible,
 } from "./authority-projection.js";
@@ -36,7 +37,6 @@ function projectionShell(): ObservationMarketplaceEvent["projection"] {
 
 function attemptCreated(input: {
   attemptIndex: number;
-  requestId: Hex;
   deliveryRate: bigint;
   blockNumber: number;
   blockHash: Hex;
@@ -60,11 +60,42 @@ function attemptCreated(input: {
     facts: {
       taskId: 42n,
       attemptIndex: input.attemptIndex,
-      requestId: input.requestId,
       deliveryRate: input.deliveryRate,
       operator: "0x3333333333333333333333333333333333333333" as Address,
       priorityMech: "0x4444444444444444444444444444444444444444" as Address,
       attemptDeadline: 1785369600n,
+    },
+  } as ObservationMarketplaceEvent;
+}
+
+function solutionPrepared(input: {
+  attemptIndex: number;
+  requestId: Hex;
+  blockNumber: number;
+  blockHash: Hex;
+  finalityTier?: "finalized" | "safe";
+}): ObservationMarketplaceEvent {
+  return {
+    event: "SolutionDeliveryPrepared",
+    derivation: {
+      chainId: 84532,
+      contract: COORDINATOR,
+      event: "SolutionDeliveryPrepared",
+      blockNumber: input.blockNumber,
+      blockHash: input.blockHash,
+      txHash: `0x${String(input.attemptIndex + 5).padStart(64, "c")}` as Hex,
+      logIndex: 0,
+      finalityTier: input.finalityTier ?? "finalized",
+      contractGeneration: "revised",
+    },
+    projection: projectionShell(),
+    facts: {
+      taskId: 42n,
+      attemptIndex: input.attemptIndex,
+      operator: "0x3333333333333333333333333333333333333333" as Address,
+      expectedRequestId: input.requestId,
+      nonce: 7n,
+      deliveryDigest: `0x${"d".repeat(64)}` as Hex,
     },
   } as ObservationMarketplaceEvent;
 }
@@ -104,14 +135,12 @@ describe("deriveAuthorityProjection ordering", () => {
   test("orphan TaskAttemptCreated never enters creation index", () => {
     const eligible = attemptCreated({
       attemptIndex: 0,
-      requestId: REQUEST_ELIGIBLE,
       deliveryRate: 10n,
       blockNumber: 100,
       blockHash: "0x6666666666666666666666666666666666666666666666666666666666666666",
     });
     const orphan = attemptCreated({
       attemptIndex: 1,
-      requestId: REQUEST_ORPHAN,
       deliveryRate: 999n,
       blockNumber: 101,
       blockHash: ORPHAN_HASH,
@@ -131,45 +160,67 @@ describe("deriveAuthorityProjection ordering", () => {
   test("orphan settlement never enters settlement index", () => {
     const attempt = attemptCreated({
       attemptIndex: 0,
-      requestId: REQUEST_ELIGIBLE,
       deliveryRate: 10n,
       blockNumber: 100,
       blockHash: "0x6666666666666666666666666666666666666666666666666666666666666666",
     });
-    const eligibleSettlement = solutionClaimed({
+    const eligiblePreparation = solutionPrepared({
       attemptIndex: 0,
       requestId: REQUEST_ELIGIBLE,
       blockNumber: 101,
       blockHash: "0x7777777777777777777777777777777777777777777777777777777777777777",
     });
+    const eligibleSettlement = solutionClaimed({
+      attemptIndex: 0,
+      requestId: REQUEST_ELIGIBLE,
+      blockNumber: 102,
+      blockHash: "0x8888888888888888888888888888888888888888888888888888888888888888",
+    });
+    const orphanPreparation = solutionPrepared({
+      attemptIndex: 0,
+      requestId: REQUEST_ORPHAN,
+      blockNumber: 103,
+      blockHash: ORPHAN_HASH,
+    });
     const orphanSettlement = solutionClaimed({
       attemptIndex: 0,
       requestId: REQUEST_ORPHAN,
-      blockNumber: 102,
+      blockNumber: 103,
       blockHash: ORPHAN_HASH,
     });
     const projection = deriveAuthorityProjection(
-      [attempt, eligibleSettlement, orphanSettlement],
+      [
+        attempt,
+        eligiblePreparation,
+        eligibleSettlement,
+        orphanPreparation,
+        orphanSettlement,
+      ],
       ANCHOR,
       new Set([ORPHAN_HASH]),
     );
     const settlements = indexSolutionSettlements(projection.events);
-    expect(settlements.has(REQUEST_ELIGIBLE)).toBe(true);
-    expect(settlements.has(REQUEST_ORPHAN)).toBe(false);
-    expect(projection.events).toHaveLength(2);
+    const attemptUrn = deriveMarketplaceAttemptUri({
+      chainId: 84532,
+      coordinator: COORDINATOR,
+      taskId: 42n,
+      attemptIndex: 0,
+    });
+    expect(settlements.get(attemptUrn)?.requestId).toBe(REQUEST_ELIGIBLE);
+    expect(indexDeliveryPreparations(projection.events).get(attemptUrn)?.requestId)
+      .toBe(REQUEST_ELIGIBLE);
+    expect(projection.events).toHaveLength(3);
   });
 
   test("safe and late events do not mutate authority indexes", () => {
     const eligible = attemptCreated({
       attemptIndex: 0,
-      requestId: REQUEST_ELIGIBLE,
       deliveryRate: 10n,
       blockNumber: 100,
       blockHash: "0x6666666666666666666666666666666666666666666666666666666666666666",
     });
     const safe = attemptCreated({
       attemptIndex: 1,
-      requestId: REQUEST_ORPHAN,
       deliveryRate: 888n,
       blockNumber: 100,
       blockHash: "0x6666666666666666666666666666666666666666666666666666666666666666",
@@ -177,7 +228,6 @@ describe("deriveAuthorityProjection ordering", () => {
     });
     const late = attemptCreated({
       attemptIndex: 2,
-      requestId: `0x${"6".repeat(64)}` as Hex,
       deliveryRate: 777n,
       blockNumber: 200,
       blockHash: "0x8888888888888888888888888888888888888888888888888888888888888888",

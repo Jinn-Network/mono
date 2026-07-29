@@ -154,7 +154,7 @@ export function deriveAuthorityProjection(
 
 export interface AttemptCreationAuthority {
   readonly attemptUrn: `urn:uuid:${string}`;
-  readonly requestId: `0x${string}`;
+  readonly requestId?: `0x${string}`;
   readonly deliveryRate: bigint;
   readonly operator: `0x${string}`;
   readonly taskId: bigint;
@@ -168,8 +168,17 @@ export interface AttemptObservationAuthority {
   readonly taskDigest: `sha256:${string}`;
   readonly executor: `0x${string}`;
   readonly observationId: string;
-  readonly requestId: `0x${string}`;
+  readonly requestId?: `0x${string}`;
   readonly generation: "today" | "revised";
+}
+
+export interface DeliveryPreparationAuthority {
+  readonly attemptUrn: `urn:uuid:${string}`;
+  readonly requestId: `0x${string}`;
+  readonly deliveryDigest: `sha256:${string}`;
+  readonly kind: "solution" | "verdict";
+  readonly verdictIndex?: number;
+  readonly generation: "revised";
 }
 
 export interface DeliveryObservationAuthority {
@@ -228,7 +237,9 @@ export function indexAttemptCreations(
     const attemptUrn = attemptForEvent(event, event.facts.taskId, event.facts.attemptIndex);
     index.set(attemptUrn, {
       attemptUrn,
-      requestId: event.facts.requestId,
+      ...("requestId" in event.facts
+        ? { requestId: event.facts.requestId }
+        : {}),
       deliveryRate: event.facts.deliveryRate,
       operator: event.facts.operator,
       taskId: event.facts.taskId,
@@ -258,7 +269,6 @@ export function indexAttemptObservations(
       || typeof task !== "string"
       || typeof executor !== "string"
       || !isRecord(annotations)
-      || typeof annotations.requestId !== "string"
     ) {
       continue;
     }
@@ -268,11 +278,47 @@ export function indexAttemptObservations(
       taskDigest: task as `sha256:${string}`,
       executor: executor as `0x${string}`,
       observationId: observation.id,
-      requestId: annotations.requestId as `0x${string}`,
+      ...(typeof annotations.requestId === "string"
+        ? { requestId: annotations.requestId as `0x${string}` }
+        : {}),
       generation: observation.derivation.contractGeneration,
     });
   }
   return index;
+}
+
+export function indexDeliveryPreparations(
+  events: readonly ObservationMarketplaceEvent[],
+): Map<string, DeliveryPreparationAuthority> {
+  const byAttempt = new Map<string, DeliveryPreparationAuthority>();
+  for (const event of events) {
+    if (
+      event.event !== "SolutionDeliveryPrepared"
+      && event.event !== "VerdictDeliveryPrepared"
+    ) {
+      continue;
+    }
+    const attemptUrn = attemptForEvent(
+      event,
+      event.facts.taskId,
+      event.facts.attemptIndex,
+    );
+    const preparation: DeliveryPreparationAuthority = {
+      attemptUrn,
+      requestId: event.facts.expectedRequestId,
+      deliveryDigest: digestFromBytes32(event.facts.deliveryDigest),
+      kind: event.event === "SolutionDeliveryPrepared" ? "solution" : "verdict",
+      ...(event.event === "VerdictDeliveryPrepared"
+        ? { verdictIndex: event.facts.verdictIndex }
+        : {}),
+      generation: "revised",
+    };
+    const key = preparation.kind === "solution"
+      ? attemptUrn
+      : `${attemptUrn}:verdict:${preparation.verdictIndex}`;
+    byAttempt.set(key, preparation);
+  }
+  return byAttempt;
 }
 
 export function indexDeliveryObservations(
@@ -295,11 +341,11 @@ export function indexDeliveryObservations(
 export function indexSolutionSettlements(
   events: readonly ObservationMarketplaceEvent[],
 ): Map<string, SolutionSettlementAuthority> {
-  const byRequest = new Map<string, SolutionSettlementAuthority>();
+  const byAttempt = new Map<string, SolutionSettlementAuthority>();
   for (const event of events) {
     if (event.event !== "SolutionDeliveryClaimed") continue;
     const attemptUrn = attemptForEvent(event, event.facts.taskId, event.facts.attemptIndex);
-    byRequest.set(event.facts.requestId, {
+    byAttempt.set(attemptUrn, {
       attemptUrn,
       requestId: event.facts.requestId,
       ...("deliveryDigest" in event.facts
@@ -308,7 +354,7 @@ export function indexSolutionSettlements(
       generation: event.derivation.contractGeneration,
     });
   }
-  return byRequest;
+  return byAttempt;
 }
 
 export function indexVerdictSettlements(
