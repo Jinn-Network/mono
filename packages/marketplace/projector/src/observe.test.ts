@@ -52,7 +52,7 @@ function derivation(
     chainId: 84532,
     contract: COORDINATOR,
     event,
-    blockNumber: 100n,
+    blockNumber: 100,
     blockHash: BLOCK_HASH,
     txHash: TX_HASH,
     logIndex,

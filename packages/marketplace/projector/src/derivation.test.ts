@@ -21,12 +21,30 @@ describe("createDerivationAnnotation", () => {
       chainId: 84532,
       contract: "0x1111111111111111111111111111111111111111",
       event: "TaskAttemptCreated",
-      blockNumber: 12_345_678n,
+      blockNumber: 12_345_678,
       blockHash: `0x${"2".repeat(64)}`,
       txHash: `0x${"3".repeat(64)}`,
       logIndex: 7,
       finalityTier: "safe",
       contractGeneration: "today",
     });
+  });
+
+  test("rejects a block number that cannot be represented as an exact I-JSON integer", () => {
+    expect(() =>
+      createDerivationAnnotation(
+        {
+          chainId: 84532,
+          address: "0x1111111111111111111111111111111111111111",
+          blockNumber: BigInt(Number.MAX_SAFE_INTEGER) + 1n,
+          blockHash: `0x${"2".repeat(64)}`,
+          transactionHash: `0x${"3".repeat(64)}`,
+          logIndex: 7,
+          finalityTier: "safe",
+        },
+        "TaskAttemptCreated",
+        "today",
+      )
+    ).toThrow(/I-JSON safe integer/);
   });
 });

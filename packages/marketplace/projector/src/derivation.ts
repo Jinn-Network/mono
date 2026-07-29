@@ -13,7 +13,7 @@ export interface DerivationAnnotation {
   readonly chainId: number;
   readonly contract: Address;
   readonly event: string;
-  readonly blockNumber: bigint;
+  readonly blockNumber: number;
   readonly blockHash: Hex;
   readonly txHash: Hex;
   readonly logIndex: number;
@@ -36,11 +36,19 @@ export function createDerivationAnnotation(
   event: string,
   contractGeneration: ContractGeneration,
 ): DerivationAnnotation {
+  if (
+    log.blockNumber < 0n
+    || log.blockNumber > BigInt(Number.MAX_SAFE_INTEGER)
+  ) {
+    throw new RangeError(
+      `blockNumber must be an exact I-JSON safe integer: ${log.blockNumber}`,
+    );
+  }
   return {
     chainId: log.chainId,
     contract: log.address,
     event,
-    blockNumber: log.blockNumber,
+    blockNumber: Number(log.blockNumber),
     blockHash: log.blockHash,
     txHash: log.transactionHash,
     logIndex: log.logIndex,

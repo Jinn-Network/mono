@@ -508,7 +508,7 @@ describe("decodeMarketplaceLogs", () => {
           chainId: 84532,
           contract: ROUTER,
           event: "TaskAttemptCreated",
-          blockNumber: 99n,
+          blockNumber: 99,
           blockHash: BLOCK_HASH,
           txHash: TX_HASH,
           logIndex: 2,
