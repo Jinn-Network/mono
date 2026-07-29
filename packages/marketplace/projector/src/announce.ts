@@ -67,6 +67,16 @@ export interface AnnouncementProjectionPorts {
   readonly previousHead?: SourceHead;
   readonly previousEntryDigest?: `sha256:${string}` | null;
   readonly initialSequence?: bigint;
+  /**
+   * Required for incremental publication. `serve.writeArchivePages` is a genesis/full-history
+   * writer whose page numbering starts at one, so invoking it over only a later batch would
+   * overwrite immutable archive paths. The host must inject its append-aware archive writer.
+   */
+  readonly appendArchiveEntries?: (input: {
+    readonly source: SourceIdentity;
+    readonly previousHead: SourceHead;
+    readonly entries: readonly SignedEntry[];
+  }) => Promise<{ readonly pages: string[] }>;
   /** Host lookup for a prior availability when this batch did not itself announce it. */
   readonly resolvePriorAnnouncementId?: (
     event: ObservationMarketplaceEvent,
@@ -280,6 +290,33 @@ export async function projectAnnouncements(
   if (initialSequence > 1n && initialPrevious === null) {
     throw new Error("non-genesis announcement sequence requires previousEntryDigest");
   }
+  if (ports.previousHead !== undefined) {
+    if (ports.appendArchiveEntries === undefined) {
+      throw new Error(
+        "incremental announcement publication requires an append-aware archive writer",
+      );
+    }
+    const expectedOrigin = formatOrigin(
+      ports.source.agent,
+      ports.source.name,
+    );
+    if (ports.previousHead.origin !== expectedOrigin) {
+      throw new Error(
+        `previousHead origin "${ports.previousHead.origin}" does not match projector source "${expectedOrigin}"`,
+      );
+    }
+    const expectedSequence = BigInt(ports.previousHead.sequence) + 1n;
+    if (initialSequence !== expectedSequence) {
+      throw new Error(
+        `incremental sequence ${initialSequence} must follow previousHead sequence ${ports.previousHead.sequence}`,
+      );
+    }
+    if (initialPrevious !== ports.previousHead.entry) {
+      throw new Error(
+        "previousEntryDigest must equal previousHead.entry for incremental publication",
+      );
+    }
+  }
 
   const observationIds = new Set(
     projectObservations(events).map((observation) => observation.id),
@@ -422,7 +459,13 @@ export async function projectAnnouncements(
     };
   }
 
-  const { pages } = await writeArchivePages(ports.store, ports.source.name, entries);
+  const { pages } = ports.previousHead === undefined
+    ? await writeArchivePages(ports.store, ports.source.name, entries)
+    : await ports.appendArchiveEntries!({
+        source: ports.source,
+        previousHead: ports.previousHead,
+        entries,
+      });
   const tip = entries.at(-1)!.entry;
   const tipDigest = sealJson(tip).digest;
   const base: SourceHead = ports.previousHead === undefined

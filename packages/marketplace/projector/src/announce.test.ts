@@ -368,4 +368,50 @@ describe("projectAnnouncements", () => {
       }),
     ).rejects.toThrow(/DISCOVERY_SIGNING_SCOPE/);
   });
+
+  test("requires an append-aware archive writer for incremental publication instead of overwriting genesis pages", async () => {
+    const genesisPorts = makePorts();
+    const genesis = await projectAnnouncements([task()], genesisPorts.ports);
+    const previousHead = genesis.head!;
+    const previousEntryDigest = sealJson(genesis.entries.at(-1)!.entry).digest;
+    const topUp = projectable({
+      event: "AttemptsAdded",
+      facts: { taskId: 42n, creator: CREATOR, added: 1, newMaxTotal: 3 },
+      derivation: derivation("AttemptsAdded", 6, "revised"),
+    });
+
+    const missingWriter = makePorts();
+    await expect(
+      projectAnnouncements([topUp], {
+        ...missingWriter.ports,
+        previousHead,
+        previousEntryDigest,
+        initialSequence: 2n,
+      }),
+    ).rejects.toThrow(/append-aware archive writer/);
+
+    const appended: Array<{ previous: typeof previousHead; sequences: string[] }> = [];
+    const incremental = makePorts();
+    const projected = await projectAnnouncements([topUp], {
+      ...incremental.ports,
+      previousHead,
+      previousEntryDigest,
+      initialSequence: 2n,
+      async appendArchiveEntries(input) {
+        appended.push({
+          previous: input.previousHead,
+          sequences: input.entries.map(({ entry }) => entry.sequence),
+        });
+        return { pages: ["0000000000000002"] };
+      },
+    });
+
+    expect(appended).toEqual([{
+      previous: previousHead,
+      sequences: ["0000000000000002"],
+    }]);
+    expect(projected.pages).toEqual(["0000000000000002"]);
+    expect(projected.entries[0]!.entry.previous).toBe(previousEntryDigest);
+    expect(projected.head?.sequence).toBe("0000000000000002");
+  });
 });
