@@ -2,6 +2,30 @@ export type JsonValue =
   | null | boolean | number | string
   | JsonValue[] | { [key: string]: JsonValue };
 
+/** True only for an acyclic value that can be represented losslessly as sealed I-JSON. */
+export function isJsonValue(value: unknown, ancestors: ReadonlySet<object> = new Set()): value is JsonValue {
+  if (value === null || typeof value === "boolean" || typeof value === "string") return true;
+  if (typeof value === "number") return Number.isSafeInteger(value);
+  if (typeof value !== "object") return false;
+  if (ancestors.has(value)) return false;
+
+  const nextAncestors = new Set(ancestors);
+  nextAncestors.add(value);
+  if (Array.isArray(value)) {
+    return value.every((element, index) => index in value && isJsonValue(element, nextAncestors));
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  if (Object.getOwnPropertySymbols(value).length > 0) return false;
+  const propertyNames = Object.getOwnPropertyNames(value);
+  if (propertyNames.length !== Object.keys(value).length) return false;
+  return propertyNames.every((key) =>
+    Object.prototype.propertyIsEnumerable.call(value, key)
+    && isJsonValue((value as Record<string, unknown>)[key], nextAncestors)
+  );
+}
+
 export class IJsonNumberError extends Error {
   constructor(readonly value: number) {
     super(`number is not an exact I-JSON integer: ${value}`);

@@ -2,8 +2,12 @@ import { z } from "zod";
 import { AgentIriSchema, DigestBearingResourceDescriptorSchema, LowercaseSha256HexSchema } from "../descriptors.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
 import { AttritionSchema, CompletenessSchema } from "../matrix/schema.js";
-import { assertIJsonStrings } from "../json.js";
-import { InvalidDocumentError, sealWithSchema, type SealedRecord } from "../sealing.js";
+import { isJsonValue } from "../json.js";
+import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
+
+const JsonValueSchema = z.unknown().refine(isJsonValue, {
+  message: "must be a losslessly representable JSON value",
+});
 
 const MethodRefSchema = z.object({
   id: z.string(),
@@ -48,7 +52,7 @@ export const ReportRecordSchema = z
     subjects: z.array(DigestBearingResourceDescriptorSchema).min(1),
     method: MethodRefSchema,
     preregistered: z.boolean().optional(),
-    results: z.unknown(),
+    results: JsonValueSchema,
     // Required (§9.1: a report that hides attrition is malformed) — see the superRefine below,
     // which is what actually gates this: keeping the raw shape optional lets a document that
     // omits `disclosures` entirely reach a named, message-bearing refine issue instead of a
@@ -102,20 +106,7 @@ export type ReportRecord = z.infer<typeof ReportRecordSchema>;
 
 /** Parse and validate raw sealed bytes into a `ReportRecord`; throws `InvalidDocumentError`. */
 export function parseReport(bytes: Uint8Array): ReportRecord {
-  let json: unknown;
-  try {
-    json = JSON.parse(new TextDecoder().decode(bytes));
-  } catch {
-    throw new InvalidDocumentError([{ path: "", message: "not valid JSON" }]);
-  }
-  assertIJsonStrings(json);
-  const parsed = ReportRecordSchema.safeParse(json);
-  if (!parsed.success) {
-    throw new InvalidDocumentError(
-      parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })),
-    );
-  }
-  return parsed.data;
+  return parseExactWithSchema(ReportRecordSchema, bytes);
 }
 
 /**

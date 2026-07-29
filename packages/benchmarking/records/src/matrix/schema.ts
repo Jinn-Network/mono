@@ -2,9 +2,8 @@ import { z } from "zod";
 import { Sha256Digest } from "@jinn-network/task-execution-protocol";
 import { DigestBearingResourceDescriptorSchema } from "../descriptors.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
-import { assertIJsonStrings } from "../json.js";
 import { compareCodeUnitStrings } from "../order.js";
-import { InvalidDocumentError, sealWithSchema, type SealedRecord } from "../sealing.js";
+import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
 import { cellKey as computeCellKey } from "../run/cells.js";
 
 const Rfc3339 = z.string().datetime({ offset: true });
@@ -223,20 +222,7 @@ export type MatrixCell = MatrixRecord["cells"][number];
 
 /** Parse and validate raw sealed bytes into a `MatrixRecord`; throws `InvalidDocumentError`. */
 export function parseMatrix(bytes: Uint8Array): MatrixRecord {
-  let json: unknown;
-  try {
-    json = JSON.parse(new TextDecoder().decode(bytes));
-  } catch {
-    throw new InvalidDocumentError([{ path: "", message: "not valid JSON" }]);
-  }
-  assertIJsonStrings(json);
-  const parsed = MatrixRecordSchema.safeParse(json);
-  if (!parsed.success) {
-    throw new InvalidDocumentError(
-      parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })),
-    );
-  }
-  return parsed.data;
+  return parseExactWithSchema(MatrixRecordSchema, bytes);
 }
 
 /** Validate → seal a Matrix record document (§8.1). */

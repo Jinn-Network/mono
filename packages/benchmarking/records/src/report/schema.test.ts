@@ -128,4 +128,16 @@ describe("ReportRecordSchema / parseReport / sealReport", () => {
     const value = loadFixture("minimal.json") as Record<string, unknown>;
     expect(() => sealReport({ ...value, author: "not an iri" })).toThrow(InvalidDocumentError);
   });
+
+  test.each([
+    ["missing required value", undefined],
+    ["nested undefined", { value: undefined }],
+    ["function", () => "not JSON"],
+    ["symbol", Symbol("not-json")],
+    ["bigint", BigInt(1)],
+  ])("rejects non-JSON results: %s", (_label, results) => {
+    const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
+    value.results = results;
+    expect(() => sealReport(value)).toThrow();
+  });
 });

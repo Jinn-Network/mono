@@ -2,9 +2,9 @@ import { compareCodeUnitStrings } from "../order.js";
 import { TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
 import { serializeCanonicalJson } from "../canonical.js";
 import { LowercaseSha256HexSchema } from "../descriptors.js";
-import { sha256Hex } from "../hashing.js";
+import { documentDigest, sha256Hex } from "../hashing.js";
 import type { JsonValue } from "../json.js";
-import { itemTaskDigest, type BenchmarkRecord } from "./schema.js";
+import { itemTaskDigest, parseBenchmark, type BenchmarkRecord } from "./schema.js";
 
 /** Named check `benchmark-item-distinctness` (§6.1): item Task digests must be distinct. */
 export function checkItemDistinctness(
@@ -87,6 +87,33 @@ export function checkJudgeability(
 }
 
 export type VersionBump = "patch" | "minor" | "major";
+
+export type BenchmarkPredecessorCheck =
+  | { ok: true }
+  | { ok: false; reason: "missing-supersedes" }
+  | { ok: false; reason: "invalid-predecessor" }
+  | { ok: false; reason: "digest-mismatch"; expected: `sha256:${string}`; actual: `sha256:${string}` };
+
+/** Bind a successor's `supersedes` descriptor to exact canonical predecessor Benchmark bytes. */
+export function checkBenchmarkPredecessor(
+  next: BenchmarkRecord,
+  predecessorBytes: Uint8Array,
+): BenchmarkPredecessorCheck {
+  const sha256 = next.supersedes?.digest.sha256;
+  if (sha256 === undefined) return { ok: false, reason: "missing-supersedes" };
+
+  try {
+    parseBenchmark(predecessorBytes);
+  } catch {
+    return { ok: false, reason: "invalid-predecessor" };
+  }
+
+  const expected = `sha256:${sha256}` as const;
+  const actual = documentDigest(predecessorBytes);
+  return actual === expected
+    ? { ok: true }
+    : { ok: false, reason: "digest-mismatch", expected, actual };
+}
 
 /**
  * §6.2 versioning classifier: patch only when the ordered item list is byte-identical; minor

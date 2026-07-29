@@ -1,9 +1,7 @@
 import { z } from "zod";
-import { ResourceDescriptorSchema } from "@jinn-network/task-execution-protocol";
 import { AgentIriSchema, DigestBearingResourceDescriptorSchema } from "../descriptors.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
-import { assertIJsonStrings } from "../json.js";
-import { InvalidDocumentError, sealWithSchema, type SealedRecord } from "../sealing.js";
+import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
 
 // A SemVer 2.0.0 version string (§6.1/§6.2).
 const SemVer = z.string().regex(
@@ -31,7 +29,7 @@ export const BenchmarkRecordSchema = z
     description: z.string(),
     author: AgentIriSchema.optional(),
     version: SemVer,
-    supersedes: ResourceDescriptorSchema.optional(),
+    supersedes: DigestBearingResourceDescriptorSchema.optional(),
     items: z.array(BenchmarkItemSchema),
     reveal: RevealSchema,
     license: z.string().optional(),
@@ -53,20 +51,7 @@ export function itemTaskDigest(item: BenchmarkItem): string {
 
 /** Parse and validate raw sealed bytes into a `BenchmarkRecord`; throws `InvalidDocumentError`. */
 export function parseBenchmark(bytes: Uint8Array): BenchmarkRecord {
-  let json: unknown;
-  try {
-    json = JSON.parse(new TextDecoder().decode(bytes));
-  } catch {
-    throw new InvalidDocumentError([{ path: "", message: "not valid JSON" }]);
-  }
-  assertIJsonStrings(json);
-  const parsed = BenchmarkRecordSchema.safeParse(json);
-  if (!parsed.success) {
-    throw new InvalidDocumentError(
-      parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })),
-    );
-  }
-  return parsed.data;
+  return parseExactWithSchema(BenchmarkRecordSchema, bytes);
 }
 
 /** Validate → seal a Benchmark record document (§6.1). */

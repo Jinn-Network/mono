@@ -48,12 +48,18 @@ export type { DigestBearingResourceDescriptor } from "./descriptors.js";
 export { BenchmarkRecordSchema, itemTaskDigest, parseBenchmark, sealBenchmark } from "./benchmark/schema.js";
 export type { BenchmarkItem, BenchmarkRecord } from "./benchmark/schema.js";
 export {
+  checkBenchmarkPredecessor,
   checkComparability,
   checkItemDistinctness,
   checkJudgeability,
   classifyVersionBump,
 } from "./benchmark/checks.js";
-export type { JudgeabilityInvalidItem, TaskBytesResolver, VersionBump } from "./benchmark/checks.js";
+export type {
+  BenchmarkPredecessorCheck,
+  JudgeabilityInvalidItem,
+  TaskBytesResolver,
+  VersionBump,
+} from "./benchmark/checks.js";
 export { checkRevealConsistency } from "./benchmark/reveal.js";
 export type { RevealCoverage } from "./benchmark/reveal.js";
 

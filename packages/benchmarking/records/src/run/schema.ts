@@ -3,8 +3,8 @@ import { RequirementsMap } from "@jinn-network/task-execution-protocol";
 import { serializeCanonicalJson } from "../canonical.js";
 import { AgentIriSchema, DigestBearingResourceDescriptorSchema } from "../descriptors.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
-import { assertIJsonStrings, type JsonValue } from "../json.js";
-import { InvalidDocumentError, sealWithSchema, type SealedRecord } from "../sealing.js";
+import type { JsonValue } from "../json.js";
+import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
 
 const Rfc3339 = z.string().datetime({ offset: true });
 
@@ -133,20 +133,7 @@ export type RunArm = RunRecord["arms"][number];
 
 /** Parse and validate raw sealed bytes into a `RunRecord`; throws `InvalidDocumentError`. */
 export function parseRun(bytes: Uint8Array): RunRecord {
-  let json: unknown;
-  try {
-    json = JSON.parse(new TextDecoder().decode(bytes));
-  } catch {
-    throw new InvalidDocumentError([{ path: "", message: "not valid JSON" }]);
-  }
-  assertIJsonStrings(json);
-  const parsed = RunRecordSchema.safeParse(json);
-  if (!parsed.success) {
-    throw new InvalidDocumentError(
-      parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })),
-    );
-  }
-  return parsed.data;
+  return parseExactWithSchema(RunRecordSchema, bytes);
 }
 
 /** Validate → seal a Run record document (§7.1). */

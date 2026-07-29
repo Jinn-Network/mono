@@ -2,8 +2,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { sealTask } from "@jinn-network/task-execution-protocol";
 import { documentDigest } from "../hashing.js";
-import { BenchmarkRecordSchema } from "./schema.js";
+import { BenchmarkRecordSchema, sealBenchmark } from "./schema.js";
 import {
+  checkBenchmarkPredecessor,
   checkComparability,
   checkItemDistinctness,
   checkJudgeability,
@@ -172,6 +173,40 @@ describe("classifyVersionBump", () => {
       }],
     });
     expect(classifyVersionBump(prev, next)).toBe("major");
+  });
+});
+
+describe("checkBenchmarkPredecessor", () => {
+  test("binds supersedes to the exact canonical predecessor Benchmark bytes", () => {
+    const predecessor = sealBenchmark(benchmarkWith([DIGEST_A], { version: "1.0.0" }));
+    const next = benchmarkWith([DIGEST_A, DIGEST_B], {
+      version: "1.1.0",
+      supersedes: { digest: { sha256: predecessor.digest.slice("sha256:".length) } },
+    });
+    expect(checkBenchmarkPredecessor(next, predecessor.bytes)).toEqual({ ok: true });
+  });
+
+  test("fails when supersedes names a different predecessor digest", () => {
+    const predecessor = sealBenchmark(benchmarkWith([DIGEST_A], { version: "1.0.0" }));
+    const next = benchmarkWith([DIGEST_A, DIGEST_B], {
+      version: "1.1.0",
+      supersedes: { digest: { sha256: DIGEST_C } },
+    });
+    expect(checkBenchmarkPredecessor(next, predecessor.bytes)).toEqual({
+      ok: false,
+      reason: "digest-mismatch",
+      expected: `sha256:${DIGEST_C}`,
+      actual: predecessor.digest,
+    });
+  });
+
+  test("fails closed when a successor omits its predecessor identity", () => {
+    const predecessor = sealBenchmark(benchmarkWith([DIGEST_A], { version: "1.0.0" }));
+    const next = benchmarkWith([DIGEST_A, DIGEST_B], { version: "1.1.0" });
+    expect(checkBenchmarkPredecessor(next, predecessor.bytes)).toEqual({
+      ok: false,
+      reason: "missing-supersedes",
+    });
   });
 });
 

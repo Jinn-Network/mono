@@ -75,6 +75,16 @@ describe("BenchmarkRecordSchema / parseBenchmark / sealBenchmark", () => {
   });
 
   test.each([
+    { uri: "https://example.test/benchmark-v1.json" },
+    { digest: { sha256: "A".repeat(64) } },
+    { digest: { sha256: "short" } },
+    { digest: {} },
+  ])("rejects supersedes without one canonical lowercase sha256 digest", (supersedes) => {
+    const value = loadFixture("minimal.json") as Record<string, unknown>;
+    expect(() => sealBenchmark({ ...value, supersedes })).toThrow(InvalidDocumentError);
+  });
+
+  test.each([
     ["string value", (value: Record<string, unknown>) => { value.description = "\uD800"; }],
     ["extension key", (value: Record<string, unknown>) => { value["bad\uDC00"] = "value"; }],
   ])("rejects an unpaired surrogate in received record %s", (_label, mutate) => {
@@ -88,6 +98,6 @@ describe("BenchmarkRecordSchema / parseBenchmark / sealBenchmark", () => {
     const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
     value.description = "astral-\u{1F9EA}";
     value["emoji-\u{1F680}"] = "ok";
-    expect(parseBenchmark(new TextEncoder().encode(JSON.stringify(value)))).toMatchObject(value);
+    expect(parseBenchmark(sealBenchmark(value).bytes)).toMatchObject(value);
   });
 });
