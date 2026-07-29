@@ -1,6 +1,5 @@
-import { join } from "node:path";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
-import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
+import { canonicalLoadoutPath, type TaskView, type WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import type { LauncherCapabilities, ProbeResult } from "./contract.js";
 
 export interface LauncherOptions {
@@ -50,22 +49,7 @@ export function effort(view: TaskView): string | undefined {
 export function loadoutPath(view: TaskView, paths: WorkspacePaths): string | undefined {
   const value = requirementRecord(view).loadout;
   if (value === undefined) return undefined;
-  if (typeof value !== "object" || value === null) throw new Error("loadout pin must be an object");
-  const loadout = value as { name?: unknown; digest?: { sha256?: unknown }; kind?: unknown };
-  if (
-    loadout.kind !== "jinn.skill.v1"
-    || typeof loadout.digest?.sha256 !== "string"
-    || !/^[0-9a-f]{64}$/u.test(loadout.digest.sha256)
-  ) throw new Error("unsupported or unpinned loadout");
-  if (
-    typeof loadout.name !== "string"
-    || loadout.name.length === 0
-    || loadout.name === "."
-    || loadout.name === ".."
-    || loadout.name.includes("/")
-    || loadout.name.includes("\\")
-  ) throw new Error("loadout name must be one contained input path");
-  return join(paths.input, loadout.name);
+  return canonicalLoadoutPath(paths.input, value);
 }
 
 export function schema(view: TaskView): unknown {

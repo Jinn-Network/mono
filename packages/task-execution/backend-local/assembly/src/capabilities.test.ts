@@ -63,13 +63,32 @@ describe("assembleCapabilities", () => {
     expect(capabilities.runPinning.keys).toContainEqual({
       key: "harness",
       inventory: ["alpha", "beta"],
-      posture: "enforced",
+      posture: "attested",
     });
     expect(capabilities.runPinning.keys).toContainEqual({
       key: "model",
       inventory: ["model-a"],
-      posture: "enforced",
+      posture: "attested",
     });
+  });
+
+  test("advertises enforced only when every launcher contributing a pin key has a configured deployment", () => {
+    const input = {
+      launchers: [
+        launcher("configured", ["profile:one"], [{ key: "harness", inventory: ["configured"] }]),
+        launcher("unconfigured", ["profile:one"], [{ key: "harness", inventory: ["unconfigured"] }]),
+      ],
+      provisioner: {
+        taskProfiles: ["profile:one"], workspaceKinds: ["dir" as const], inputMediaTypes: [], outputMediaTypes: [], isolation: ["process"],
+      },
+      recorderAvailability: "none" as const,
+      trustKeys: {},
+    };
+
+    expect(assembleCapabilities({ ...input, enforcedLauncherIds: new Set(["configured"]) }))
+      .toMatchObject({ runPinning: { keys: [{ key: "harness", inventory: ["configured", "unconfigured"], posture: "attested" }] } });
+    expect(assembleCapabilities({ ...input, enforcedLauncherIds: new Set(["configured", "unconfigured"]) }))
+      .toMatchObject({ runPinning: { keys: [{ key: "harness", inventory: ["configured", "unconfigured"], posture: "enforced" }] } });
   });
 
   test.each(["none", "available", "always"] as const)(
@@ -153,11 +172,11 @@ describe("assembleCapabilities", () => {
 
     expect(assembleCapabilities({ ...input, secretForwardResolverConfigured: false })).toMatchObject({
       taskProfiles: ["profile:shared"],
-      runPinning: { keys: [{ key: "harness", inventory: ["plain"], posture: "enforced" }] },
+      runPinning: { keys: [{ key: "harness", inventory: ["plain"], posture: "attested" }] },
     });
     expect(assembleCapabilities({ ...input, secretForwardResolverConfigured: true })).toMatchObject({
       taskProfiles: ["profile:secret", "profile:shared"],
-      runPinning: { keys: [{ key: "harness", inventory: ["plain", "secret"], posture: "enforced" }] },
+      runPinning: { keys: [{ key: "harness", inventory: ["plain", "secret"], posture: "attested" }] },
     });
   });
 });

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
-import { materializeInput } from "./materialize.js";
+import { materializeInput, materializeLoadout } from "./materialize.js";
 import { harvest } from "./harvest.js";
 import type { LaunchEnv, ProvisionerContract, WorkspacePaths } from "./contract.js";
 import type { TaskView } from "./task-view.js";
@@ -95,7 +95,7 @@ export function makeDirProvisioner(options: DirProvisionerOptions): ProvisionerC
         await writeFile(join(paths.input, "dispatch-context.json"), options.dispatchContextBytes, { mode: 0o400 });
         for (const input of view.task.inputs ?? []) await materializeInput(input, paths.input, options.fetchInput ?? (async () => { throw new Error("input fetcher unavailable"); }));
         const loadout = ((view.effectiveRequirements ?? {}) as Record<string, unknown>).loadout;
-        if (loadout !== undefined) await materializeInput(loadout as ResourceDescriptor, paths.input, options.fetchInput ?? (async () => { throw new Error("loadout fetcher unavailable"); }));
+        if (loadout !== undefined) await materializeLoadout(loadout, paths.input, options.fetchInput ?? (async () => { throw new Error("loadout fetcher unavailable"); }));
         await sealInputAndSnapshot(paths);
         if (options.quotaBytes !== undefined) {
           if (!options.runtime?.startQuotaEnforcement) throw new Error("quota requires startQuotaEnforcement runtime port");

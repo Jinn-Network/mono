@@ -786,7 +786,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     const probes: ProbeResult[] = await Promise.all(viable.map(async (launcher): Promise<ProbeResult> => {
       const deployment = this.config.launcherDeployments?.[launcher.id];
       if (deployment !== undefined) {
-        const pinning = await verifyRunPinning(deployment, request.requirements ?? {}, "");
+        const pinning = await verifyRunPinning(deployment, request.requirements ?? {});
         if (!pinning.ready) return pinning;
       }
       return launcher.probe?.() ?? { ready: true };
@@ -1025,7 +1025,6 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         const pinning = await verifyRunPinning(
           deployment,
           merged.effective as Record<string, unknown>,
-          this.paths(attempt).input,
         );
         if (!pinning.ready) {
           this.capacity.release(attempt);

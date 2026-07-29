@@ -128,6 +128,7 @@ function fixture(
             posture: "enforced",
           },
           { key: "harness", inventory: ["fixture"], posture: "enforced" },
+          { key: "loadout", inventory: ["jinn.skill.v1"], posture: "enforced" },
         ],
       },
     }),
@@ -291,10 +292,16 @@ describe("result-envelope admission", () => {
 
 describe("local TaskExecutionBackend submission path (C1)", () => {
   test("uses the exact same deployment probe for enforced capability, preflight, and submit", async () => {
+    const loadout = {
+      kind: "jinn.skill.v1" as const,
+      name: "review-skill",
+      digest: { sha256: "b".repeat(64) },
+    };
     const probe = vi.fn(async () => ({
       ready: true,
       executable: { path: "/opt/jinn/fixture", digest: "a".repeat(64) },
       models: ["fixture-model"],
+      loadouts: [{ kind: "jinn.skill.v1" as const, name: "review-skill", digest: "b".repeat(64) }],
     }));
     const backend = fixture(await stateRoot("deployment-pinning"), {
       launcherDeployments: {
@@ -307,8 +314,8 @@ describe("local TaskExecutionBackend submission path (C1)", () => {
     expect((await backend.capabilities()).runPinning.keys).toContainEqual({
       key: "harness", inventory: ["fixture"], posture: "enforced",
     });
-    await expect(backend.preflight({ taskProfile: profile.profile })).resolves.toEqual({ ready: true });
-    const task = taskBytes();
+    await expect(backend.preflight({ taskProfile: profile.profile, requirements: { loadout } })).resolves.toEqual({ ready: true });
+    const task = taskBytes({ requirements: { loadout } });
     await expect(backend.submit(task, submissionBytes(task))).resolves.toMatchObject({ accepted: true });
     expect(probe).toHaveBeenCalledTimes(2);
   });
@@ -374,6 +381,47 @@ describe("local TaskExecutionBackend submission path (C1)", () => {
     const task = taskBytes();
     const ack = await backend.submit(task, submissionBytes(task, { requirements: { [key]: value } }));
     expect(ack).toMatchObject({ accepted: false, error: { category: "unsupported-requirement" } });
+    expect(setup).not.toHaveBeenCalled();
+    expect(await allFiles(root)).not.toContainEqual(expect.stringContaining("journal.jsonl"));
+  });
+
+  test("rejects an escaping loadout before setup, intent, or spawn", async () => {
+    const setup = vi.fn(async () => undefined);
+    const launcher: LauncherContract = {
+      id: "fixture",
+      capabilities: () => ({
+        taskProfiles: [profile.profile], inputMediaTypes: [], outputMediaTypes: [], structuredOutput: false,
+        resume: false, interruptionBehaviorDefault: "repeatable", secretForwards: [],
+        runPinning: { keys: [{ key: "loadout", inventory: ["jinn.skill.v1"], posture: "enforced" }] },
+      }),
+      plan() { throw new Error("must not plan an invalid loadout"); },
+    };
+    const root = await stateRoot("invalid-loadout");
+    const backend = makeLocalTaskExecutionBackend({
+      stateRoot: root, source: "urn:test", executor: "urn:test", profileStore, launchers: [launcher],
+      provisioner: () => ({ id: "fixture", contract: {
+        workspaceKind: () => "dir", setup, executionEnv: (entry) => ({ ...entry.env }),
+        async harvest() { return { manifest: [], omissions: [], integrityViolations: [] }; },
+      } }),
+      provisionerCapabilities: { taskProfiles: [profile.profile], workspaceKinds: ["dir"], inputMediaTypes: [], outputMediaTypes: [], isolation: [] },
+      launcherDeployments: {
+        fixture: {
+          executable: { path: "/opt/jinn/fixture", digest: "a".repeat(64) },
+          async probe() {
+            return {
+              ready: true,
+              executable: { path: "/opt/jinn/fixture", digest: "a".repeat(64) },
+              loadouts: [{ kind: "jinn.skill.v1" as const, name: "review-skill", digest: "b".repeat(64) }],
+            };
+          },
+        },
+      },
+    });
+    backends.push(backend);
+    const task = taskBytes();
+    await expect(backend.submit(task, submissionBytes(task, {
+      requirements: { loadout: { kind: "jinn.skill.v1", name: "../escape", digest: { sha256: "b".repeat(64) } } },
+    }))).resolves.toMatchObject({ accepted: false, error: { category: "unsupported-requirement" } });
     expect(setup).not.toHaveBeenCalled();
     expect(await allFiles(root)).not.toContainEqual(expect.stringContaining("journal.jsonl"));
   });

@@ -59,8 +59,7 @@ export function assembleCapabilities(
     for (const support of launcher.capabilities().runPinning.keys) {
       const entry = inventoryByKey.get(support.key) ?? { inventory: [], enforced: true };
       entry.inventory.push(...support.inventory);
-      entry.enforced &&= input.enforcedLauncherIds === undefined
-        || input.enforcedLauncherIds.has(launcher.id);
+      entry.enforced &&= input.enforcedLauncherIds?.has(launcher.id) === true;
       inventoryByKey.set(support.key, entry);
     }
   }

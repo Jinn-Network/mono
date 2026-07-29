@@ -61,6 +61,79 @@ describe("directory provisioner", () => {
     expect(createHash("sha256").update(bytes).digest("hex")).toHaveLength(64);
   });
 
+  it("writes a verified loadout at its canonical launcher path", async () => {
+    const target = await paths();
+    const bytes = Buffer.from("verified loadout bytes");
+    const loadoutView = {
+      ...view,
+      effectiveRequirements: {
+        loadout: {
+          kind: "jinn.skill.v1",
+          name: "review-skill",
+          digest: { sha256: createHash("sha256").update(bytes).digest("hex") },
+        },
+      },
+    } as unknown as TaskView;
+    await makeDirProvisioner({
+      sealedTaskBytes: Buffer.from("sealed"),
+      dispatchContextBytes: Buffer.from("{}"),
+      runtime,
+      fetchInput: async () => bytes,
+    }).setup(loadoutView, target, []);
+    await expect(readFile(join(target.input, "review-skill"))).resolves.toEqual(bytes);
+  });
+
+  it.each([
+    ["../secrets/key", "key"],
+    ["/etc/passwd", "passwd"],
+    ["nested/loadout", "loadout"],
+    ["", "input"],
+  ])(
+    "rejects invalid loadout name %j instead of rewriting it into the input directory",
+    async (name, rewritten) => {
+      const target = await paths();
+      const bytes = Buffer.from("verified loadout bytes");
+      const loadoutView = {
+        ...view,
+        effectiveRequirements: {
+          loadout: {
+            kind: "jinn.skill.v1",
+            name,
+            digest: { sha256: createHash("sha256").update(bytes).digest("hex") },
+          },
+        },
+      } as unknown as TaskView;
+      await expect(makeDirProvisioner({
+        sealedTaskBytes: Buffer.from("sealed"),
+        dispatchContextBytes: Buffer.from("{}"),
+        runtime,
+        fetchInput: async () => bytes,
+      }).setup(loadoutView, target, [])).rejects.toBeInstanceOf(ProvisioningRejectedError);
+      await expect(readFile(join(target.input, rewritten))).rejects.toThrow();
+    },
+  );
+
+  it("rejects a loadout whose fetched bytes do not match its required digest", async () => {
+    const target = await paths();
+    const loadoutView = {
+      ...view,
+      effectiveRequirements: {
+        loadout: {
+          kind: "jinn.skill.v1",
+          name: "review-skill",
+          digest: { sha256: "0".repeat(64) },
+        },
+      },
+    } as unknown as TaskView;
+    await expect(makeDirProvisioner({
+      sealedTaskBytes: Buffer.from("sealed"),
+      dispatchContextBytes: Buffer.from("{}"),
+      runtime,
+      fetchInput: async () => Buffer.from("wrong bytes"),
+    }).setup(loadoutView, target, [])).rejects.toBeInstanceOf(ProvisioningRejectedError);
+    await expect(readFile(join(target.input, "review-skill"))).rejects.toThrow();
+  });
+
   it("gates harvest and reports input mutation from its setup snapshot", async () => {
     const target = await paths();
     let empty = false;

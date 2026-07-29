@@ -1,3 +1,5 @@
+import { canonicalLoadoutPin } from "@jinn-network/task-execution-workspace";
+
 export interface VerifiedExecutable {
   readonly path: string;
   readonly digest: string;
@@ -9,7 +11,11 @@ export interface LauncherReadiness {
   readonly executable: VerifiedExecutable;
   readonly harnessVersions?: readonly string[];
   readonly models?: readonly string[];
-  readonly loadouts?: readonly { readonly path: string; readonly digest: string }[];
+  readonly loadouts?: readonly {
+    readonly kind: "jinn.skill.v1";
+    readonly name: string;
+    readonly digest: string;
+  }[];
 }
 
 export interface LocalLauncherDeployment {
@@ -26,19 +32,10 @@ function isDigest(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{64}$/u.test(value);
 }
 
-function containedLoadoutPath(input: string, name: unknown): string | undefined {
-  if (
-    typeof name !== "string" || name.length === 0 || name === "." || name === ".."
-    || name.includes("/") || name.includes("\\")
-  ) return undefined;
-  return `${input}/${name}`;
-}
-
 /** The deployment probe is the sole dynamic admission boundary for enforced local pins. */
 export async function verifyRunPinning(
   deployment: LocalLauncherDeployment,
   requirements: Readonly<Record<string, unknown>>,
-  inputPath: string,
 ): Promise<RunPinningCheck> {
   const readiness = await deployment.probe();
   if (!readiness.ready) return { ready: false, detail: readiness.detail ?? "launcher readiness probe failed" };
@@ -63,13 +60,15 @@ export async function verifyRunPinning(
   }
   const loadout = requirements.loadout;
   if (loadout !== undefined) {
-    const record = typeof loadout === "object" && loadout !== null ? loadout as {
-      kind?: unknown; name?: unknown; digest?: { sha256?: unknown };
-    } : undefined;
-    const path = containedLoadoutPath(inputPath, record?.name);
-    if (record?.kind !== "jinn.skill.v1" || path === undefined) return { ready: false, detail: "loadout path is not contained" };
-    if (!isDigest(record.digest?.sha256)) return { ready: false, detail: "loadout digest is invalid" };
-    if (!readiness.loadouts?.some((entry) => entry.path === path && entry.digest === record.digest?.sha256)) {
+    let pin;
+    try {
+      pin = canonicalLoadoutPin(loadout);
+    } catch {
+      return { ready: false, detail: "loadout path is not contained" };
+    }
+    if (!isDigest(pin.digest)) return { ready: false, detail: "loadout digest is invalid" };
+    if (!readiness.loadouts?.some((entry) =>
+      entry.kind === pin.kind && entry.name === pin.name && entry.digest === pin.digest)) {
       return { ready: false, detail: "loadout digest mismatch" };
     }
   }
