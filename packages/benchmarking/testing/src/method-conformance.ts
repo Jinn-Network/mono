@@ -186,6 +186,7 @@ interface MutableFixtureCell {
   validVerdicts: string[];
   outcome: "judged" | "unjudged" | "unscorable" | "expired" | "invalidated" | "excluded";
   integrityTier?: "re-derivable" | "attested-only";
+  cost?: { value: string; unit: string; source: "reported" | "settled" };
   verification: {
     harness: "match" | "mismatch" | "unverifiable";
     model: "match" | "mismatch" | "unverifiable";
@@ -697,6 +698,76 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
       expect(iidLike.bootstrap).toMatchObject({ unit: "source-cluster", count: 10 });
       expect(grouped.bootstrap).toMatchObject({ unit: "source-cluster", count: 2 });
       expect(grouped.bootstrap).not.toEqual(iidLike.bootstrap);
+    });
+
+    test("noninferiority cost forms one exact Task mean difference despite asymmetric R=2 passing repeats", async () => {
+      const fixture = structuredClone(await loadFixture("noninferiority-pass.json")) as Omit<MethodFixture, "matrices" | "runReplicates"> & {
+        matrices: MutableFixtureMatrix[];
+        runReplicates?: number;
+      };
+      const matrix = fixture.matrices[0] as MutableFixtureMatrix;
+      const original = [...matrix.cells];
+      for (const cell of original) {
+        if (cell.armId === "armA") {
+          cell.cost = { value: "1", unit: "USD", source: "reported" };
+          matrix.cells.push({ ...structuredClone(cell), replicate: 2, cellKey: `${cell.taskDigest}/armA/2`, cost: { value: "9", unit: "USD", source: "reported" } });
+        } else {
+          cell.cost = { value: "6", unit: "USD", source: "reported" };
+          matrix.cells.push({
+            ...structuredClone(cell), replicate: 2, cellKey: `${cell.taskDigest}/armB/2`,
+            verdicts: [], validVerdicts: [], outcome: "expired",
+          });
+        }
+      }
+      fixture.runReplicates = 2;
+      const prepared = prepareFixture(fixture);
+      const method = registry.get(fixture.methodId, fixture.methodVersion)!;
+      const result = onlySubjectResults(method.compute!({
+        subjects: prepared.subjects,
+        parameters: { ...fixture.parameters, verdictRule: fixture.verdictRule },
+        verdictRule: fixture.verdictRule,
+        registry,
+        ...prepared.ports,
+      })) as {
+        verdict: string;
+        pairing: { taskDigests: string[] };
+        quality: unknown;
+        cost: { verdict: string; pValue: string | null; n: number; excluded: { count: number; cellKeys: string[] } };
+        excluded: { count: number; cellKeys: string[] };
+        conflicted: unknown;
+        bootstrap: unknown;
+      };
+      const taskDigests = [...prepared.taskBytes.keys()]
+        .map((digest) => digest.slice("sha256:".length))
+        .sort();
+      const sourceByTaskDigest = new Map([...prepared.taskBytes.entries()].map(([digest, bytes]) => [
+        digest.slice("sha256:".length),
+        `fixture-source/${(JSON.parse(new TextDecoder().decode(bytes)) as { instructions: string }).instructions.slice("Fixture task ".length)}`,
+      ]));
+      const asymmetricCandidateCells = taskDigests.map((digest) => `${digest}/armB/2`).sort();
+      const expectedClusters = taskDigests.map((digest) => ({
+        key: ["source", sourceByTaskDigest.get(digest)!],
+        members: [digest],
+      })).sort((left, right) => left.key[1] < right.key[1] ? -1 : left.key[1] > right.key[1] ? 1 : 0);
+      expect(result).toEqual({
+        verdictRule: "unanimous",
+        baseline: "armA",
+        candidate: "armB",
+        verdict: "FAIL",
+        pairing: { taskDigests },
+        quality: { verdict: "pass", lowerBound: "0.0000", relativeRegression: "0.0000", reasons: [] },
+        cost: {
+          verdict: "not-lower", pValue: "0.9978", n: 10,
+          excluded: { count: 10, cellKeys: asymmetricCandidateCells },
+        },
+        excluded: { count: 10, cellKeys: asymmetricCandidateCells },
+        conflicted: { count: 0, cellKeys: [] },
+        bootstrap: {
+          procedure: "xorshift32-v1", seed: 123456789, resamples: 1000,
+          basis: "task-provenance-source-family", count: 10, unit: "source-cluster", draws: 10_000,
+          clusters: expectedClusters,
+        },
+      });
     });
 
     test("plaintext source and opaque source commitment remain tagged, non-colliding cluster identities", async () => {

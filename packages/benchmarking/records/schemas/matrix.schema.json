@@ -324,11 +324,8 @@
         "perArm": {
           "type": "object",
           "propertyNames": {
-            "anyOf": [
-              {
-                "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
-              }
-            ]
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
           },
           "additionalProperties": {
             "type": "object",

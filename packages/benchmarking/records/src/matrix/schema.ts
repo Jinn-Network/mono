@@ -91,18 +91,43 @@ const ExclusionSchema = z.object({
 });
 
 const ArmAttritionSchema = z.object({
-  expected: z.number().int().nonnegative(),
-  judged: z.number().int().nonnegative(),
-  unjudged: z.number().int().nonnegative(),
-  unscorable: z.number().int().nonnegative(),
-  expired: z.number().int().nonnegative(),
-  invalidated: z.number().int().nonnegative(),
-  excluded: z.number().int().nonnegative(),
-  replacements: z.number().int().nonnegative(),
+  expected: NonnegativeSafeIntegerSchema,
+  judged: NonnegativeSafeIntegerSchema,
+  unjudged: NonnegativeSafeIntegerSchema,
+  unscorable: NonnegativeSafeIntegerSchema,
+  expired: NonnegativeSafeIntegerSchema,
+  invalidated: NonnegativeSafeIntegerSchema,
+  excluded: NonnegativeSafeIntegerSchema,
+  replacements: NonnegativeSafeIntegerSchema,
+});
+
+type ArmCounts = z.infer<typeof ArmAttritionSchema>;
+
+/** Arm IDs are opaque wire keys, including __proto__/constructor/prototype. Do not let a normal
+ * object assignment turn a legal record key into prototype behavior at this boundary. */
+const ArmAttritionMapSchema = z.custom<Record<string, ArmCounts>>((value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value),
+).superRefine((value, ctx) => {
+  for (const [key, counts] of Object.entries(value)) {
+    const armId = ArmIdSchema.safeParse(key);
+    const parsedCounts = ArmAttritionSchema.safeParse(counts);
+    if (!armId.success) {
+      for (const issue of armId.error.issues) ctx.addIssue({ ...issue, path: [key, ...issue.path] });
+    }
+    if (!parsedCounts.success) {
+      for (const issue of parsedCounts.error.issues) ctx.addIssue({ ...issue, path: [key, ...issue.path] });
+    }
+  }
+}).overwrite((perArm) => {
+  const safe = Object.create(null) as Record<string, ArmCounts>;
+  for (const [key, counts] of Object.entries(perArm)) {
+    Object.defineProperty(safe, key, { enumerable: true, configurable: true, writable: true, value: counts });
+  }
+  return safe;
 });
 
 export const AttritionSchema = z.object({
-  perArm: z.record(ArmIdSchema, ArmAttritionSchema),
+  perArm: ArmAttritionMapSchema,
   asymmetryFlags: z.array(
     z.string().min(1).refine((value) => value.trim().length > 0, "flag must not be blank"),
   ),
@@ -134,8 +159,6 @@ function hasPinningMismatch(verification: z.infer<typeof VerificationSchema>): b
     verification.isolation,
   ].includes("mismatch");
 }
-
-type ArmCounts = z.infer<typeof ArmAttritionSchema>;
 
 function emptyArmCounts(): ArmCounts {
   return {

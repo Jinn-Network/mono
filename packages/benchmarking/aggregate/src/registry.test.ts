@@ -29,6 +29,30 @@ function baseInput(overrides: Partial<MethodComputeInput> = {}): MethodComputeIn
   };
 }
 
+function hostileArmSubject(): MethodComputeInput["subjects"][number] {
+  const taskDigest = "b".repeat(64);
+  const armIds = ["__proto__", "constructor", "prototype"];
+  const sealed = sealMatrix({
+    protocol: "https://jinn.network/protocols/benchmarking/1.0",
+    run: { digest: { sha256: "a".repeat(64) } },
+    closeBoundary: { at: "2026-08-04T00:00:00Z" },
+    cells: armIds.map((armId) => ({
+      cellKey: `${taskDigest}/${armId}/1`, taskDigest, armId, replicate: 1,
+      dispatches: 0, verdicts: [], validVerdicts: [], outcome: "expired" as const,
+      verification: { harness: "match" as const, model: "match" as const, loadout: "match" as const, isolation: "match" as const, checksFailed: [] },
+      integrityTier: "attested-only" as const,
+    })).sort((left, right) => left.cellKey < right.cellKey ? -1 : left.cellKey > right.cellKey ? 1 : 0),
+    exclusions: [],
+    attrition: { perArm: Object.fromEntries(armIds.map((armId) => [armId, {
+      expected: 1, judged: 0, unjudged: 0, unscorable: 0, expired: 1,
+      invalidated: 0, excluded: 0, replacements: 0,
+    }])), asymmetryFlags: [] },
+    completeness: { expected: 3, judged: 0, floor: "1", runOutcome: "partial" as const },
+    assembly: { procedure: "jinn.benchmarking.assembly", version: "1.0" },
+  });
+  return { subjectSha256: sealed.digest.slice("sha256:".length), matrix: parseMatrix(sealed.bytes) };
+}
+
 describe("createMethodRegistry", () => {
   test("exports the default registry through the package barrel", () => {
     expect(BENCHMARKING_METHOD_REGISTRY.get("jinn.benchmarking.method/wilson", "1")).toBeDefined();
@@ -90,6 +114,26 @@ describe("subject-scoped method inputs", () => {
       ...input,
       subjects: [input.subjects[0]!, input.subjects[0]!],
     })).toThrow(/subject identity is duplicated/);
+  });
+});
+
+describe("opaque Arm IDs", () => {
+  test("preserves hostile legal Arm IDs as null-prototype own keys in every Arm-indexed aggregate output", () => {
+    const registry = createMethodRegistry();
+    const subject = hostileArmSubject();
+    const input = baseInput({ subjects: [subject] });
+    for (const [methodId, parameters] of [
+      ["jinn.benchmarking.method/wilson", { verdictRule: "unanimous" }],
+      ["jinn.benchmarking.method/avg-at-k", { verdictRule: "unanimous" }],
+      ["jinn.benchmarking.method/pass-at-k", { verdictRule: "unanimous", k: 1 }],
+    ] as const) {
+      const result = registry.get(methodId, "1")!.compute!({ ...input, parameters }).perSubject[0]!.results as { arms: Record<string, unknown> };
+      expect(Object.getPrototypeOf(result.arms)).toBeNull();
+      expect(Object.keys(result.arms)).toEqual(["__proto__", "constructor", "prototype"]);
+      for (const armId of ["__proto__", "constructor", "prototype"]) {
+        expect(Object.hasOwn(result.arms, armId)).toBe(true);
+      }
+    }
   });
 });
 

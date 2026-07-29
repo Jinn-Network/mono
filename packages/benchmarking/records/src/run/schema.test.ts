@@ -109,6 +109,16 @@ describe("RunRecordSchema / parseRun / sealRun", () => {
     expect(() => sealRun(value)).toThrow(InvalidDocumentError);
   });
 
+  test("preserves every legal prototype-sensitive Arm ID as an own Run arm value", () => {
+    const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
+    value.arms = ["__proto__", "constructor", "prototype"].map((armId) => ({
+      armId,
+      pinning: { "fixture/arm": armId },
+    }));
+    const parsed = parseRun(sealRun(value).bytes);
+    expect(parsed.arms.map((arm) => arm.armId)).toEqual(["__proto__", "constructor", "prototype"]);
+  });
+
   test.each([
     (loadFixture("invalid-benchmark-uri-only.json") as { benchmark: unknown }).benchmark,
     { digest: { sha256: "A".repeat(64) } },

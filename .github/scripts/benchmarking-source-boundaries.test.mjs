@@ -84,28 +84,91 @@ const ambientNetworkIdentifier = new RegExp(
   'g',
 );
 const ambientNetworkGlobal = new RegExp(
-  String.raw`\b(?:globalThis|global|window|self)\s*(?:\.|\?\.)\s*(?:${AMBIENT_NETWORK_APIS.join('|')})\b`,
+  String.raw`\b(?:globalThis|global|window|self)\s*(?:(?:\.|\?\.)\s*(?:${AMBIENT_NETWORK_APIS.join('|')})\b|\[\s*(?:${AMBIENT_NETWORK_APIS.map((api) => `(?:"${api}"|'${api}'|\x60${api}\x60)`).join('|')})\s*\])`,
   'g',
 );
 
-/** Replace comments and inert string literals with whitespace without changing code layout.
- * This is deliberately small: the guard needs lexical, not semantic, understanding, and a
- * template literal is inert unless its interpolation is explicitly evaluated elsewhere. */
+/** Replace comments and inert literals with whitespace without changing code layout. Template
+ * raw text is inert, while every `${...}` expression is recursively retained as executable code.
+ * Literal computed browser members are retained only in their member-name position. */
 function executableSource(source) {
   let result = '';
-  let state = 'code';
-  for (let index = 0; index < source.length; index += 1) {
-    const char = source[index];
-    const next = source[index + 1];
-    if (state === 'code' && char === '/' && next === '/') { state = 'line-comment'; result += '  '; index += 1; continue; }
-    if (state === 'code' && char === '/' && next === '*') { state = 'block-comment'; result += '  '; index += 1; continue; }
-    if (state === 'code' && (char === '"' || char === "'" || char === '`')) { state = char; result += ' '; continue; }
-    if (state === 'line-comment' && (char === '\n' || char === '\r')) { state = 'code'; result += char; continue; }
-    if (state === 'block-comment' && char === '*' && next === '/') { state = 'code'; result += '  '; index += 1; continue; }
-    if ((state === '"' || state === "'" || state === '`') && char === '\\') { result += '  '; index += 1; continue; }
-    if ((state === '"' || state === "'" || state === '`') && char === state) { state = 'code'; result += ' '; continue; }
-    result += state === 'code' ? char : (char === '\n' || char === '\r' ? char : ' ');
-  }
+  const appendInert = (char) => { result += char === '\n' || char === '\r' ? char : ' '; };
+  const literalMemberContext = (index) => /\b(?:globalThis|global|window|self)\s*\[\s*$/u.test(source.slice(Math.max(0, index - 80), index));
+  const scanQuoted = (index, quote, retain) => {
+    for (let cursor = index; cursor < source.length; cursor += 1) {
+      const char = source[cursor];
+      if (char === '\\') {
+        if (retain) result += source.slice(cursor, cursor + 2);
+        else { appendInert(char); appendInert(source[cursor + 1] ?? ''); }
+        cursor += 1;
+        continue;
+      }
+      if (retain) result += char;
+      else appendInert(char);
+      if (char === quote && cursor !== index) return cursor + 1;
+    }
+    return source.length;
+  };
+  const scanTemplate = (index, retainRaw) => {
+    let cursor = index;
+    while (cursor < source.length) {
+      const char = source[cursor];
+      const next = source[cursor + 1];
+      if (char === '\\') {
+        if (retainRaw) result += source.slice(cursor, cursor + 2);
+        else { appendInert(char); appendInert(next ?? ''); }
+        cursor += 2;
+      } else if (char === '`') {
+        if (retainRaw) result += char;
+        else appendInert(char);
+        return cursor + 1;
+      } else if (char === '$' && next === '{') {
+        result += '${';
+        cursor = scanCode(cursor + 2, '}');
+        result += '}';
+        cursor += 1;
+      } else {
+        if (retainRaw) result += char;
+        else appendInert(char);
+        cursor += 1;
+      }
+    }
+    return cursor;
+  };
+  const scanCode = (index, terminator = undefined) => {
+    let cursor = index;
+    while (cursor < source.length) {
+      const char = source[cursor];
+      const next = source[cursor + 1];
+      if (terminator === '}' && char === '}') return cursor;
+      if (char === '/' && next === '/') {
+        appendInert(char); appendInert(next); cursor += 2;
+        while (cursor < source.length && source[cursor] !== '\n' && source[cursor] !== '\r') { appendInert(source[cursor]); cursor += 1; }
+      } else if (char === '/' && next === '*') {
+        appendInert(char); appendInert(next); cursor += 2;
+        while (cursor < source.length && !(source[cursor] === '*' && source[cursor + 1] === '/')) { appendInert(source[cursor]); cursor += 1; }
+        if (cursor < source.length) { appendInert(source[cursor]); appendInert(source[cursor + 1]); cursor += 2; }
+      } else if (char === '"' || char === "'") {
+        const retain = literalMemberContext(cursor);
+        cursor = scanQuoted(cursor, char, retain);
+      } else if (char === '`') {
+        const retain = literalMemberContext(cursor);
+        if (retain) result += char;
+        else appendInert(char);
+        cursor = scanTemplate(cursor + 1, retain);
+      } else if (char === '{') {
+        result += char;
+        cursor = scanCode(cursor + 1, '}');
+        if (cursor < source.length) { result += '}'; cursor += 1; }
+      } else {
+        result += char;
+        cursor += 1;
+      }
+    }
+    return cursor;
+  };
+  scanCode(0);
   return result;
 }
 
@@ -304,7 +367,7 @@ test('locale-sensitive API detection catches member calls, optional chaining, an
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
-test('ambient-network detection catches executable bare and browser-alias API escapes while ignoring comments and inert strings', () => {
+test('ambient-network detection scans executable template interpolation and literal computed browser members', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'jinn-benchmarking-network-boundary-'));
   try {
     const source = join(fixture, 'src');
@@ -317,11 +380,33 @@ test('ambient-network detection catches executable bare and browser-alias API es
       'globalThis.fetch("https://example.test");',
       'window?.fetch("https://example.test");',
       'self.fetch("https://example.test");',
+      'window["fetch"]("https://example.test");',
+      "self['WebSocket']('wss://example.test');",
+      'new globalThis[`XMLHttpRequest`]();',
+      'const interpolation = `${fetch("https://example.test")}`;',
+      'const nested = `${`${self["WebSocket"]("wss://example.test")}`}`;',
+      'const mixed = `${window["fetch"]("https://example.test")}`;',
       '// XMLHttpRequest is forbidden, but this comment is inert.',
       '/* window.fetch and self.WebSocket are inert comments. */',
       'const prose = "fetch globalThis.fetch window.XMLHttpRequest self.WebSocket";',
+      'const raw = `fetch window["fetch"] self[\'WebSocket\'] globalThis[\\`XMLHttpRequest\\`]`;',
     ].join('\n'));
-    assert.equal(ambientNetworkUsesInFiles(files(source)).length, 7);
+    const findings = ambientNetworkUsesInFiles(files(source)).map((finding) => finding.slice(finding.indexOf('src/source.ts')));
+    assert.deepEqual(findings, [
+      'src/source.ts -> EventSource',
+      'src/source.ts -> WebSocket',
+      'src/source.ts -> XMLHttpRequest',
+      'src/source.ts -> fetch',
+      'src/source.ts -> fetch',
+      'src/source.ts -> globalThis.fetch',
+      'src/source.ts -> globalThis[`XMLHttpRequest`]',
+      'src/source.ts -> self.fetch',
+      'src/source.ts -> self["WebSocket"]',
+      "src/source.ts -> self['WebSocket']",
+      'src/source.ts -> window?.fetch',
+      'src/source.ts -> window["fetch"]',
+      'src/source.ts -> window["fetch"]',
+    ].sort());
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 

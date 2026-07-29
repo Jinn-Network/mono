@@ -47,12 +47,33 @@ function postProcess(filename, schema) {
     schema.properties.policy.properties.completenessFloor.$comment = "Runtime check: exact BigInt completeness comparison.";
     schema.properties.closeAt.format = "date-time";
   }
+  const replaceArmMaps = (node) => {
+    if (node === null || typeof node !== "object") return;
+    if (node.properties?.perArm !== undefined) {
+      node.properties.perArm = {
+        type: "object",
+        propertyNames: { type: "string", pattern: "^[A-Za-z0-9_-]{1,64}$" },
+        additionalProperties: {
+          type: "object",
+          properties: {
+            expected: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER }, judged: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+            unjudged: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER }, unscorable: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+            expired: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER }, invalidated: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+            excluded: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER }, replacements: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+          },
+          required: ["expected", "judged", "unjudged", "unscorable", "expired", "invalidated", "excluded", "replacements"],
+          additionalProperties: false,
+        },
+      };
+    }
+    Object.values(node).forEach(replaceArmMaps);
+  };
   if (filename === "matrix.schema.json") {
     schema.properties.completeness.properties.floor.pattern = UNIT_DECIMAL;
     schema.properties.completeness.properties.floor.$comment = "Runtime check: exact BigInt completeness comparison and outcome derivation.";
-    schema.properties.attrition.properties.perArm.propertyNames = { anyOf: [{ pattern: "^[A-Za-z][A-Za-z0-9._-]{0,63}$" }] };
     schema.properties.closeBoundary.properties.at.format = "date-time";
   }
+  replaceArmMaps(schema);
   if (filename === "benchmark.schema.json" && schema.properties.reveal?.properties?.notBefore !== undefined) {
     schema.properties.reveal.properties.notBefore.format = "date-time";
   }
@@ -73,7 +94,10 @@ const FAMILIES = [
 
 const assets = new Map();
 for (const [filename, schema] of FAMILIES) {
-  assets.set(filename, jsonBytes(postProcess(filename, z.toJSONSchema(schema, { target: "draft-2020-12" }))));
+  const options = filename === "matrix.schema.json" || filename === "report.schema.json"
+    ? { target: "draft-2020-12", unrepresentable: "any" }
+    : { target: "draft-2020-12" };
+  assets.set(filename, jsonBytes(postProcess(filename, z.toJSONSchema(schema, options))));
 }
 
 const drift = [];

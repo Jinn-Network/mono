@@ -55,10 +55,37 @@ assert(runCheck(run), "arbitrarily tiny positive floor must pass schema parity")
 run.policy.completenessFloor = "1.0000000000000000001";
 assert(!runCheck(run), "above-one floor must fail schema parity");
 
-const matrix = await readJson(join(fixtures, "matrix", "minimal.json"));
+const matrix = await readJson(join(fixtures, "matrix", "valid.json"));
 const matrixCheck = await validate("matrix");
 matrix.aggregates = {};
 assert(!matrixCheck(matrix), "unnamespaced Matrix aggregate must fail schema parity");
+delete matrix.aggregates;
+
+for (const armId of ["1arm", "_arm", "-arm", "__proto__", "constructor", "prototype"]) {
+  matrix.cells[0].armId = armId;
+  matrix.cells[0].cellKey = `${matrix.cells[0].taskDigest}/${armId}/1`;
+  matrix.attrition.perArm = { [armId]: {
+    expected: 1, judged: 1, unjudged: 0, unscorable: 0, expired: 0,
+    invalidated: 0, excluded: 0, replacements: 0,
+  } };
+  const runtime = MatrixRecordSchema.safeParse(matrix);
+  const runtimeOk = runtime.success;
+  const schemaOk = matrixCheck(matrix);
+  assert(runtimeOk && schemaOk, `matrix/perArm/${armId}: runtime=${runtimeOk} Draft-2020-12=${schemaOk}: ${JSON.stringify(runtime.error?.issues ?? matrixCheck.errors)}`);
+}
+for (const armId of ["", "dot.arm", "a".repeat(65), "space arm", "slash/arm"]) {
+  matrix.cells[0].armId = armId;
+  matrix.cells[0].cellKey = `${matrix.cells[0].taskDigest}/${armId}/1`;
+  matrix.attrition.perArm = { [armId]: {
+    expected: 0, judged: 0, unjudged: 0, unscorable: 0, expired: 0,
+    invalidated: 0, excluded: 0, replacements: 0,
+  } };
+  const runtime = MatrixRecordSchema.safeParse(matrix);
+  const runtimeOk = runtime.success;
+  const schemaOk = matrixCheck(matrix);
+  assert(!runtimeOk && !schemaOk, `matrix/perArm/${JSON.stringify(armId)}: runtime and Draft 2020-12 must reject an invalid Arm ID`);
+}
+matrix.attrition.perArm = {};
 
 const extension = await readJson(join(fixtures, "benchmark", "minimal.json"));
 extension["urn:jinn:benchmarking:extension"] = { opaque: true };

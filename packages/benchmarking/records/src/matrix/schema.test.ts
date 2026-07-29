@@ -98,6 +98,24 @@ function rederiveConvenienceViews(matrix: MutableMatrix): void {
   matrix.completeness.runOutcome = completeness >= Number(matrix.completeness.floor) ? "complete" : "partial";
 }
 
+function matrixWithHostileArmIds(): MutableMatrix & Record<string, unknown> {
+  const value = validMatrix();
+  const exemplar = value.cells[0]!;
+  value.cells = ["__proto__", "constructor", "prototype"].map((armId) => ({
+    ...structuredClone(exemplar),
+    armId,
+    cellKey: `${exemplar.taskDigest}/${armId}/1`,
+  })).sort((left, right) => left.cellKey < right.cellKey ? -1 : left.cellKey > right.cellKey ? 1 : 0);
+  value.exclusions = [];
+  value.attrition.perArm = Object.fromEntries(value.cells.map((cell) => [cell.armId, {
+    expected: 1, judged: 1, unjudged: 0, unscorable: 0, expired: 0,
+    invalidated: 0, excluded: 0, replacements: 0,
+  }]));
+  value.attrition.asymmetryFlags = [];
+  value.completeness = { expected: 3, judged: 3, floor: "0.8", runOutcome: "complete" };
+  return value;
+}
+
 test("Matrix rejects an impossible civil closeBoundary.at date", () => {
   const matrix = validMatrix();
   (matrix.closeBoundary as Record<string, unknown>).at = "2026-02-30T00:00:00Z";
@@ -172,6 +190,16 @@ describe("MatrixRecordSchema / parseMatrix / sealMatrix", () => {
     const value = loadFixture("valid.json") as Record<string, unknown>;
     const withExtension = { ...value, "network.jinn.benchmarking.internal": "informational" };
     expect(() => MatrixRecordSchema.parse(withExtension)).not.toThrow();
+  });
+
+  test("preserves hostile legal attrition keys as own data properties through Matrix sealing", () => {
+    const parsed = parseMatrix(sealMatrix(matrixWithHostileArmIds()).bytes);
+    expect(Object.getPrototypeOf(parsed.attrition.perArm)).toBeNull();
+    expect(Object.keys(parsed.attrition.perArm)).toEqual(["__proto__", "constructor", "prototype"]);
+    for (const armId of ["__proto__", "constructor", "prototype"]) {
+      expect(Object.hasOwn(parsed.attrition.perArm, armId)).toBe(true);
+      expect(parsed.attrition.perArm[armId]!.judged).toBe(1);
+    }
   });
 
   test("rejects a duplicate cellKey across two cell entries", () => {

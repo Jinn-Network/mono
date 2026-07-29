@@ -54,6 +54,30 @@ function sourceClusterManifest(rates: readonly {
     });
 }
 
+/** Exact arithmetic mean of finite decimal values. A non-terminating decimal mean has no
+ * admissible fixed-scale replay representation, so the method fails closed rather than rounding
+ * before the comparison-wide Wilcoxon normalization. */
+function meanExactDecimal(values: readonly { readonly coefficient: bigint; readonly scale: bigint }[]): ExactCostDifference {
+  if (values.length === 0) throw new Error("exact decimal mean requires at least one value");
+  const scale = values.reduce((maximum, value) => value.scale > maximum ? value.scale : maximum, 0n);
+  let numerator = values.reduce((sum, value) => sum + scaleDecimal(value, scale), 0n);
+  let denominator = BigInt(values.length);
+  const gcd = (left: bigint, right: bigint): bigint => {
+    let a = left < 0n ? -left : left;
+    let b = right;
+    while (b !== 0n) [a, b] = [b, a % b];
+    return a;
+  };
+  const divisor = gcd(numerator, denominator);
+  numerator /= divisor;
+  denominator /= divisor;
+  let meanScale = scale;
+  while (denominator % 2n === 0n) { numerator *= 5n; denominator /= 2n; meanScale += 1n; }
+  while (denominator % 5n === 0n) { numerator *= 2n; denominator /= 5n; meanScale += 1n; }
+  if (denominator !== 1n) throw new Error("Task cost mean is not a finite decimal");
+  return { coefficient: numerator, scale: meanScale };
+}
+
 function validateParameters(
   schema: Method["parameterSchema"],
   parameters: Readonly<Record<string, unknown>>,
@@ -281,7 +305,7 @@ const wilsonMethod: SingleSubjectMethod = {
       if (cell.value === "pass") bucket.passed += 1;
       perArm.set(cell.armId, bucket);
     }
-    const arms: Record<string, unknown> = {};
+    const arms: Record<string, unknown> = Object.create(null);
     for (const armId of armIds) {
       const { passed, scorable } = perArm.get(armId)!;
       const { p, lo, hi } = wilsonInterval(passed, scorable);
@@ -329,10 +353,10 @@ const avgAtKMethod: SingleSubjectMethod = {
   versionRobust: false,
   compute(input) {
     const { perArmTask, armIds, taskDigests, conflictedCellKeys } = perArmTaskReplicateCounts(input);
-    const arms: Record<string, unknown> = {};
+    const arms: Record<string, unknown> = Object.create(null);
     for (const armId of armIds) {
       const perTask = perArmTask.get(armId)!;
-      const perTaskResults: Record<string, unknown> = {};
+      const perTaskResults: Record<string, unknown> = Object.create(null);
       let sum = 0;
       for (const taskDigest of [...perTask.keys()].sort(compareCodeUnitStrings)) {
         const { n, c } = perTask.get(taskDigest)!;
@@ -362,7 +386,7 @@ const passAtKMethod: SingleSubjectMethod = {
   compute(input) {
     const k = requireIntegerParam(input.parameters, "k");
     const { perArmTask, armIds, taskDigests, conflictedCellKeys } = perArmTaskReplicateCounts(input);
-    const arms: Record<string, unknown> = {};
+    const arms: Record<string, unknown> = Object.create(null);
     const incompatibleTasks: {
       armId: string;
       taskDigest: string;
@@ -373,7 +397,7 @@ const passAtKMethod: SingleSubjectMethod = {
     }[] = [];
     for (const armId of armIds) {
       const perTask = perArmTask.get(armId)!;
-      const perTaskResults: Record<string, unknown> = {};
+      const perTaskResults: Record<string, unknown> = Object.create(null);
       let sum = 0;
       let compatibleTaskCount = 0;
       for (const taskDigest of [...perTask.keys()].sort(compareCodeUnitStrings)) {
@@ -541,7 +565,7 @@ function restrictMatrixToTasks(matrix: MatrixRecord, keptTaskDigests: ReadonlySe
   const cells = matrix.cells.filter((cell) => keptTaskDigests.has(cell.taskDigest));
   const keptCellKeys = new Set(cells.map((cell) => cell.cellKey));
   const exclusions = matrix.exclusions.filter((entry) => keptCellKeys.has(entry.cellKey));
-  const perArm: MatrixRecord["attrition"]["perArm"] = {};
+  const perArm: MatrixRecord["attrition"]["perArm"] = Object.create(null);
   for (const cell of cells) {
     const counts = perArm[cell.armId] ?? {
       expected: 0,
@@ -778,44 +802,41 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
     const costDiffs: ExactCostDifference[] = [];
     const costIncludedCellKeys = new Set<string>();
     let costUnit: string | undefined;
-    for (const cells of byTask.values()) {
-      const coordinates = new Map<number, RelevantCell[]>();
-      for (const cell of cells) {
-        const bucket = coordinates.get(cell.replicate) ?? [];
-        bucket.push(cell);
-        coordinates.set(cell.replicate, bucket);
+    for (const taskDigest of [...byTask.keys()].sort(compareCodeUnitStrings)) {
+      const cells = byTask.get(taskDigest)!;
+      const baselineCells = cells.filter((cell) => cell.armId === baseline && cell.value === "pass" && cell.cost !== undefined);
+      const candidateCells = cells.filter((cell) => cell.armId === candidate && cell.value === "pass" && cell.cost !== undefined);
+      // Cost is one paired observation per Task. Passing repeats are averaged independently;
+      // neither coordinate matching nor an absent/failed peer may discard another arm's repeat.
+      if (baselineCells.length === 0 || candidateCells.length === 0) continue;
+      const taskCells = [...baselineCells, ...candidateCells];
+      const units = new Set(taskCells.map((cell) => cell.cost!.unit));
+      if (units.size !== 1) {
+        throw new MethodInputError("method-incompatible-cost-unit", taskCells[0]!.cellKey, "Task passing repeats use different cost units");
       }
-      for (const bucket of coordinates.values()) {
-        const baselineCells = bucket.filter((cell) => cell.armId === baseline);
-        const candidateCells = bucket.filter((cell) => cell.armId === candidate);
-        if (baselineCells.length !== 1 || candidateCells.length !== 1) continue;
-        const a = baselineCells[0]!;
-        const b = candidateCells[0]!;
-        if (a.value !== "pass" || b.value !== "pass" || a.cost === undefined || b.cost === undefined) {
-          continue;
-        }
-        if (a.cost.unit !== b.cost.unit) {
-          throw new MethodInputError("method-incompatible-cost-unit", a.cellKey, "both-solve pair uses different cost units");
-        }
-        if (costUnit !== undefined && costUnit !== a.cost.unit) {
-          throw new MethodInputError("method-incompatible-cost-unit", a.cellKey, "included both-solve pairs must share one cost unit");
-        }
-        const aCost = parseExactDecimal(a.cost.value);
-        const bCost = parseExactDecimal(b.cost.value);
-        if (aCost === undefined || bCost === undefined) {
-          throw new MethodInputError("method-incompatible-cost-unit", a.cellKey, "cost value is not an exact decimal");
-        }
-        costUnit = a.cost.unit;
-        // Do not normalize within a pair. Equivalent decimal spellings must share the one
-        // comparison-wide scale selected by pairedCostVerdict before ranks/ties are computed.
-        const scale = aCost.scale > bCost.scale ? aCost.scale : bCost.scale;
-        costDiffs.push({
-          coefficient: scaleDecimal(bCost, scale) - scaleDecimal(aCost, scale),
-          scale,
-        });
-        costIncludedCellKeys.add(a.cellKey);
-        costIncludedCellKeys.add(b.cellKey);
+      const unit = taskCells[0]!.cost!.unit;
+      if (costUnit !== undefined && costUnit !== unit) {
+        throw new MethodInputError("method-incompatible-cost-unit", taskCells[0]!.cellKey, "included Task cost differences must share one cost unit");
       }
+      const baselineMean = meanExactDecimal(baselineCells.map((cell) => {
+        const parsed = parseExactDecimal(cell.cost!.value);
+        if (parsed === undefined) throw new MethodInputError("method-incompatible-cost-unit", cell.cellKey, "cost value is not an exact decimal");
+        return parsed;
+      }));
+      const candidateMean = meanExactDecimal(candidateCells.map((cell) => {
+        const parsed = parseExactDecimal(cell.cost!.value);
+        if (parsed === undefined) throw new MethodInputError("method-incompatible-cost-unit", cell.cellKey, "cost value is not an exact decimal");
+        return parsed;
+      }));
+      costUnit = unit;
+      // Do not normalize Task differences here. pairedCostVerdict selects one global scale only
+      // after every Task mean difference has been collected (§7.112/§7.118).
+      const scale = baselineMean.scale > candidateMean.scale ? baselineMean.scale : candidateMean.scale;
+      costDiffs.push({
+        coefficient: scaleDecimal(candidateMean, scale) - scaleDecimal(baselineMean, scale),
+        scale,
+      });
+      for (const cell of taskCells) costIncludedCellKeys.add(cell.cellKey);
     }
     const costExcludedCellKeys = relevant
       .filter((cell) => !costIncludedCellKeys.has(cell.cellKey))
