@@ -975,3 +975,35 @@ record write, and returns a typed `verdict-observation-refused` entry with the d
 failures. Success adds the exact signed fact
 `https://jinn.network/facts/marketplace-verdict-correspondence/1.0`:
 `{ onChainVerdictCode, statementVerdict }`. Existing non-verdict projection is unchanged.
+
+## Addendum 2026-07-29-l — independent M0–M5 review repairs
+
+The fresh whole-component M0–M5 review rejected the frozen head. Two blockers and three direct
+majors require no new design choice:
+
+- requester `submit` performs fatal decode, protocol validation, protocol re-seal, and byte
+  equality for both Task and Submission before idempotency, WAL, IPFS, or wallet effects;
+- projector Attempt subjects always use the configured TaskCoordinator in the frozen tuple,
+  never the router/log emitter (which remains derivation provenance);
+- the completed backend accepts `evaluationRequirements.minVerdicts === 1`, wires the M5
+  private-spec grant-bearing Submission path, and wires/advertises M3 cancellation;
+- native §16.2 conformance hashes canonical resolved Evidence bytes against the Delivery
+  reference before inspecting dispatch/evaluation fields; and
+- the fork-backed suite uses an explicit realistic timeout rather than the generic five-second
+  unit-test ceiling.
+
+Program rulings §7.52–§7.55 freeze the four generalized seams exposed by the same review:
+
+1. Posting intent ownership is an atomic owner-token claim, with an immediate pre-wallet fence;
+   concurrent contenders cannot both broadcast and crashes remain recovery-scan cases.
+2. Decision-grade evaluator distinctness resolves the settlement-authorized solver and evaluator
+   declarations to Agent IRIs at their authority-bearing times. Address inequality is only a
+   preliminary filter; two Safes bound to one Agent fail closed.
+3. The requester backend reflects its completed M0–M5 behavior. It transports exact grant
+   references without redeeming them and implements terminal-aware/idempotent protocol
+   cancellation through injected lifecycle ports.
+4. Dispatch binding and evaluation-spec equality are claims about the exact canonical Execution
+   Evidence record selected and digest-bound by the Delivery, never a detached parsed object.
+
+The M0–M5 review is repeated from a fresh reader after all eight findings are repaired. M6 remains
+blocked both on that verdict and on the Phase 4 backend-local assembly gate.

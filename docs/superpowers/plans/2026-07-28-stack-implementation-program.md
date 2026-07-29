@@ -593,6 +593,52 @@ Confirmed by the operator at the program gate (2026-07-28):
     they cannot reject task-level iid sampling or an individual-Task jackknife. The runtime
     algorithm remains §7.47; this ruling strengthens the executable conformance contract rather
     than changing the statistic.
+52. **Marketplace posting ownership is atomic before wallet authority is exercised:** a
+    `lookup` followed by an unconditional intent `persist` is not an at-most-once protocol.
+    `PostingIntentStore` exposes a linearizable claim operation over the exact
+    `(creatorSafe, taskCidDigest, submissionDigest)` key. Its result is exactly one of:
+    caller-owned pending intent with an unguessable owner token, an already-pending intent owned
+    elsewhere, or the prior resolved outcome. Only the owner may resolve the intent. Concurrent
+    contenders never both reach the wallet port; losers return the resolved outcome or a typed
+    broadcast-uncertain result without uploading/broadcasting again. After slow preparation, the
+    owner performs a final token/freshness fence immediately before invoking the wallet write,
+    with no intervening await or external effect. A crash after the durable claim remains the
+    existing recovery-scan case and is never repaired by blind rebroadcast. The in-memory
+    reference store and every durable host adapter must implement the same atomic contract, with
+    a barrier-driven simultaneous-contender conformance vector.
+53. **Marketplace evaluator distinctness compares resolved Agent identities:** address
+    inequality remains the cheap on-chain preliminary filter, never the decision-grade security
+    boundary. The verdict gate receives settlement-authorized solver identity context:
+    `{ address, claimedAgent, declarationKey, effectiveTime }`, alongside the evaluator's
+    existing verdict-key/settlement-declaration context. It resolves both declaration legs with
+    the trust `BindingResolver` at their authority-bearing times, fails closed if either is
+    unavailable/invalid, and requires the resolved solver Agent IRI to differ from the evaluator
+    Agent IRI returned by the successful §7.5a settlement join. Two distinct addresses or Safes
+    bound to one Agent therefore fail `evaluator-distinctness`; invented/unbound claimed IRIs
+    fail resolution. Exact named-check fixtures cover same-address, two-address/same-Agent,
+    distinct-bound-Agent, and unresolved-leg cases.
+54. **The completed marketplace requester backend exposes its M0–M5 behavior, not the earlier
+    M2 snapshot:** today-mode accepts the supported one-verdict evaluation rail and rejects only
+    unsupported evaluation requirements such as `minVerdicts > 1`. A requester-sealed private
+    evaluation Submission may carry `capabilityGrants`; the chain binding transports those exact
+    sealed references for the evaluator and never redeems or drops them, so absence of a local
+    grant resolver is not a rejection reason. An end-to-end `deriveAndSealEvaluationSubmission`
+    → requester `submit` vector proves that path. The standard backend also wires its completed
+    lifecycle: `capabilities().cancel` is true exactly when the injected lifecycle port exists,
+    and `cancel` is terminal-aware/idempotent, maps Submission close through `closeSubmission`,
+    maps Attempt cancellation to the requester signal (and generation-appropriate release when
+    authorized), and never authors or revokes a work outcome. Unimplemented optional verbs
+    remain advertised false.
+55. **Marketplace §16.2 evidence checks start from a Delivery-bound exact record:** native
+    conformance receives the exact canonical Delivery bytes, selects its named Execution
+    Evidence reference, resolves exact record bytes, hashes those bytes, and requires equality
+    with the selected reference before parsing any fields. The resolved record must itself pass
+    its family's canonical/schema validation. Only that digest-bound record may prove the
+    per-Attempt dispatch-context captured input and the Evidence
+    `evaluationSpecification`/Task descriptor equality. A caller-supplied parsed object detached
+    from the Delivery reference has no authority. Mandatory swapped-record, digest-mismatch,
+    noncanonical-record, missing-reference, wrong-dispatch, and wrong-evaluation-spec vectors
+    assert the full named-check outcomes.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 
