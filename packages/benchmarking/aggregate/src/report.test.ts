@@ -42,6 +42,20 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((byte, index) => byte === right[index]);
 }
 
+function fixtureSignature(preAuthEncoding: Uint8Array): Uint8Array {
+  const digestBytes = new TextEncoder().encode(recordDigest(preAuthEncoding));
+  const signature = new Uint8Array(digestBytes.length + 1);
+  signature[0] = 0xfb;
+  signature.set(digestBytes, 1);
+  return signature;
+}
+
+function decodeBase64(value: string): Uint8Array {
+  const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+  return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
+}
+
 function verdictBytes(verdict: "pass" | "fail", label: string): Uint8Array {
   const subjectDigest = recordDigest(new TextEncoder().encode(label)).slice("sha256:".length);
   const payload = canonicalJsonBytes({
@@ -294,12 +308,21 @@ function crossVersionPairedFixture(sharedTask: boolean): Fixture {
   };
 }
 
-const signer: DsseSigner = async () => [
-  { keyid: REPORT_KEY, signature: Uint8Array.of(7, 8, 9) },
+const signer: DsseSigner = async ({ preAuthEncoding }) => [
+  { keyid: REPORT_KEY, signature: fixtureSignature(preAuthEncoding) },
 ];
 
 function resolvedBinding(scope: readonly string[], revoked: boolean): ResolvedBinding {
-  const revocationEnvelope = Uint8Array.of(9, 9, 9);
+  const revocationPayloadType = "application/vnd.jinn.trust.revocation.v1+json";
+  const revocationPayload = canonicalJsonBytes({ fixture: "revocation" });
+  const revocationEnvelope = sealDsseEnvelope({
+    payloadType: revocationPayloadType,
+    payloadBytes: revocationPayload,
+    signatures: [{
+      keyid: REPORT_KEY,
+      signature: fixtureSignature(dssePreAuthEncoding(revocationPayloadType, revocationPayload)),
+    }],
+  });
   return {
     binding: {
       protocol: "https://jinn.network/trust/key-binding/v1",
@@ -340,7 +363,6 @@ function resolvedBinding(scope: readonly string[], revoked: boolean): ResolvedBi
 
 function verificationPorts(
   methodPorts: MethodPorts,
-  expectedEnvelope: Uint8Array,
   options: {
     author?: string;
     scope?: readonly string[];
@@ -353,13 +375,24 @@ function verificationPorts(
     options.revoked ?? false,
   );
   const trust: VerifyEnvelopeBindingDeps = {
-    dsseVerifier: (bytes) => ({
-      validSignerKeyids: options.badSignature
-        ? []
-        : bytesEqual(bytes, expectedEnvelope) || bytesEqual(bytes, Uint8Array.of(9, 9, 9))
-          ? [REPORT_KEY]
-          : [],
-    }),
+    dsseVerifier: (bytes) => {
+      if (options.badSignature) return { validSignerKeyids: [] };
+      try {
+        const parsed = parseDsseEnvelope(bytes);
+        const expected = fixtureSignature(
+          dssePreAuthEncoding(parsed.payloadType, parsed.payloadBytes),
+        );
+        return {
+          validSignerKeyids: parsed.signatures
+            .filter((signature) =>
+              signature.keyid !== undefined
+              && bytesEqual(decodeBase64(signature.sig), expected))
+            .map((signature) => signature.keyid as string),
+        };
+      } catch {
+        return { validSignerKeyids: [] };
+      }
+    },
     bindingResolver: {
       async resolveBinding(query) {
         if (query.agent !== (options.author ?? AUTHOR) || query.key !== REPORT_KEY) return null;
@@ -401,7 +434,7 @@ test("verifyReport rejects an impossible civil effective-time context before tru
       subjects: fixture.subjectBytes,
       effectiveTime: "2026-02-30T00:00:00Z",
     },
-    verificationPorts(fixture.ports, produced.envelope),
+    verificationPorts(fixture.ports),
   );
   expect(result).toEqual({
     ok: false,
@@ -436,9 +469,93 @@ describe("byte-first produceReport / verifyReport", () => {
         subjects: fixture.subjectBytes,
         effectiveTime: EFFECTIVE_TIME,
       },
-      verificationPorts(fixture.ports, produced.envelope),
+      verificationPorts(fixture.ports),
     );
     expect(result).toMatchObject({ ok: true });
+  });
+
+  test.each([
+    ["pretty", (envelope: Record<string, unknown>) =>
+      `${JSON.stringify(envelope, null, 2)}\n`,
+    "invalid DSSE envelope: TrustCoreError: DSSE envelope bytes are not the exact producer encoding."],
+    ["reordered", (envelope: Record<string, unknown>) => JSON.stringify({
+      signatures: envelope["signatures"],
+      payloadType: envelope["payloadType"],
+      payload: envelope["payload"],
+    }),
+    "invalid DSSE envelope: TrustCoreError: DSSE envelope bytes are not the exact producer encoding."],
+    ["trailing", (_envelope: Record<string, unknown>, exact: string) => `${exact} `,
+    "invalid DSSE envelope: TrustCoreError: DSSE envelope bytes are not the exact producer encoding."],
+    ["duplicate", (envelope: Record<string, unknown>) =>
+      `{"payload":${JSON.stringify(envelope["payload"])},"payload":${JSON.stringify(envelope["payload"])},"payloadType":${JSON.stringify(envelope["payloadType"])},"signatures":${JSON.stringify(envelope["signatures"])}}`,
+    "invalid DSSE envelope: TrustCoreError: DSSE envelope bytes are not the exact producer encoding."],
+    ["extra", (envelope: Record<string, unknown>) => JSON.stringify({ ...envelope, extra: true }),
+    "invalid DSSE envelope: TrustCoreError: DSSE envelope must contain exactly payload, payloadType, and signatures."],
+    ["non-producer-base64", (envelope: Record<string, unknown>) => {
+      const signatures = envelope["signatures"] as Array<Record<string, unknown>>;
+      const signature = signatures[0]!;
+      const sig = signature["sig"] as string;
+      expect(sig).toContain("+");
+      return JSON.stringify({
+        ...envelope,
+        signatures: [{ ...signature, sig: sig.replace("+", "-") }],
+      });
+    }, "invalid DSSE envelope: TrustCoreError: DSSE envelope bytes are not the exact producer encoding."],
+  ] as const)(
+    "rejects a byte-distinct %s Report envelope before semantic trust verification",
+    async (_name, mutate, detail) => {
+      const fixture = makeFixture();
+      const produced = await produce(fixture);
+      const exact = new TextDecoder().decode(produced.envelope);
+      const envelope = JSON.parse(exact) as Record<string, unknown>;
+      const variant = new TextEncoder().encode(mutate(envelope, exact));
+      let trustCalls = 0;
+      const ports = verificationPorts(fixture.ports);
+      const result = await verifyReport(
+        {
+          envelopeBytes: variant,
+          subjects: fixture.subjectBytes,
+          effectiveTime: EFFECTIVE_TIME,
+        },
+        {
+          ...ports,
+          trust: {
+            ...ports.trust,
+            dsseVerifier: (bytes) => {
+              trustCalls += 1;
+              return ports.trust.dsseVerifier(bytes);
+            },
+          },
+        },
+      );
+      expect(result).toEqual({
+        ok: false,
+        check: "report-envelope",
+        detail,
+      });
+      expect(trustCalls).toBe(0);
+    },
+  );
+
+  test("exact envelope admission precedes verification-time context validation", async () => {
+    const fixture = makeFixture();
+    const produced = await produce(fixture);
+    const pretty = new TextEncoder().encode(
+      `${JSON.stringify(JSON.parse(new TextDecoder().decode(produced.envelope)), null, 2)}\n`,
+    );
+    const result = await verifyReport(
+      {
+        envelopeBytes: pretty,
+        subjects: fixture.subjectBytes,
+        effectiveTime: "not-a-time",
+      },
+      verificationPorts(fixture.ports),
+    );
+    expect(result).toEqual({
+      ok: false,
+      check: "report-envelope",
+      detail: "invalid DSSE envelope: TrustCoreError: DSSE envelope bytes are not the exact producer encoding.",
+    });
   });
 
   test.each([
@@ -455,7 +572,7 @@ describe("byte-first produceReport / verifyReport", () => {
         subjects: fixture.subjectBytes,
         effectiveTime: EFFECTIVE_TIME,
       },
-      verificationPorts(fixture.ports, produced.envelope, options),
+      verificationPorts(fixture.ports, options),
     );
     expect(result).toMatchObject({ ok: false, check });
   });
@@ -476,7 +593,7 @@ describe("byte-first produceReport / verifyReport", () => {
     expect(parsed.payloadBytes).not.toEqual(substitutedPayload);
     const result = await verifyReport(
       { envelopeBytes: substituted, subjects: fixture.subjectBytes, effectiveTime: EFFECTIVE_TIME },
-      verificationPorts(fixture.ports, produced.envelope),
+      verificationPorts(fixture.ports),
     );
     expect(result).toMatchObject({ ok: false, check: "report-authenticity" });
   });
@@ -489,7 +606,7 @@ describe("byte-first produceReport / verifyReport", () => {
     );
     const result = await verifyReport(
       { envelopeBytes: produced.envelope, subjects: [noncanonical], effectiveTime: EFFECTIVE_TIME },
-      verificationPorts(fixture.ports, produced.envelope),
+      verificationPorts(fixture.ports),
     );
     expect(result).toMatchObject({ ok: false, check: "report-recompute" });
   });
@@ -503,7 +620,7 @@ describe("byte-first produceReport / verifyReport", () => {
         subjects: [...fixture.subjectBytes].reverse(),
         effectiveTime: EFFECTIVE_TIME,
       },
-      verificationPorts(fixture.ports, produced.envelope),
+      verificationPorts(fixture.ports),
     );
     expect(result).toMatchObject({ ok: false, check: "report-recompute" });
   });
@@ -558,7 +675,7 @@ describe("byte-first produceReport / verifyReport", () => {
         subjects: fixture.subjectBytes,
         effectiveTime: EFFECTIVE_TIME,
       },
-      verificationPorts(fixture.ports, produced.envelope),
+      verificationPorts(fixture.ports),
     );
     expect(result).toMatchObject({ ok: true });
   });
@@ -586,7 +703,7 @@ describe("byte-first produceReport / verifyReport", () => {
     const produced = await produce(fixture);
     const result = await verifyReport(
       { envelopeBytes: produced.envelope, subjects: fixture.subjectBytes, effectiveTime: "not-time" },
-      verificationPorts(fixture.ports, produced.envelope),
+      verificationPorts(fixture.ports),
     );
     expect(result).toMatchObject({ ok: false, check: "report-authenticity" });
   });

@@ -319,6 +319,53 @@ describe("authenticated anchored announcement evidence", () => {
     }
   });
 
+  test("rejects an anchor that precedes the signed entry by a sub-millisecond fraction", () => {
+    const payloadBytes = entryBytes({
+      timestamp: "2026-07-29T00:00:00.0002Z",
+    });
+    const envelopeBytes = signedEntry(payloadBytes);
+    const entryDigest = recordDigest(payloadBytes);
+    expect(() => resolveAnchoredAnnouncementTime(
+      benchmarkDigest,
+      envelopeBytes,
+      () => ({
+        ok: true,
+        source,
+        verifiedEntryDigests: [entryDigest],
+        headDigest: entryDigest,
+        anchor: {
+          digest: entryDigest,
+          anchorTime: "2026-07-29T00:00:00.0001Z",
+        },
+      }),
+    )).toThrow(expect.objectContaining({
+      code: "anchored-announcement-unverified",
+      digest: benchmarkDigest,
+    }));
+  });
+
+  test("accepts an anchor at the same instant expressed under a different offset", () => {
+    const payloadBytes = entryBytes({
+      timestamp: "2026-07-29T00:00:00.1234Z",
+    });
+    const envelopeBytes = signedEntry(payloadBytes);
+    const entryDigest = recordDigest(payloadBytes);
+    expect(resolveAnchoredAnnouncementTime(
+      benchmarkDigest,
+      envelopeBytes,
+      () => ({
+        ok: true,
+        source,
+        verifiedEntryDigests: [entryDigest],
+        headDigest: entryDigest,
+        anchor: {
+          digest: entryDigest,
+          anchorTime: "2026-07-29T02:30:00.123400+02:30",
+        },
+      }),
+    )).toBe("2026-07-29T02:30:00.123400+02:30");
+  });
+
   test("rejects an impossible civil signed entry timestamp before invoking verification", () => {
     const envelopeBytes = signedEntry(entryBytes({
       timestamp: "2026-02-30T00:00:00Z",

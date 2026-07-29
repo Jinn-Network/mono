@@ -21,6 +21,30 @@ describe("filterByCutoff (design §9.2 clean-subset@1)", () => {
     expect(result.kept).toEqual(["t2"]);
   });
 
+  test("excludes a Task that precedes the cutoff by a sub-millisecond fraction", () => {
+    const result = filterByCutoff(
+      ["fractionally-before"],
+      "2026-07-29T00:00:00.0002Z",
+      () => "2026-07-29T00:00:00.0001Z",
+    );
+    expect(result).toEqual({
+      kept: [],
+      excludedByPredicate: ["fractionally-before"],
+    });
+  });
+
+  test("keeps a Task at an equal instant expressed under a different offset", () => {
+    const result = filterByCutoff(
+      ["same-instant"],
+      "2026-07-29T00:00:00.1234Z",
+      () => "2026-07-29T02:30:00.123400+02:30",
+    );
+    expect(result).toEqual({
+      kept: ["same-instant"],
+      excludedByPredicate: [],
+    });
+  });
+
   test("an item with no resolvable timestamp is conservatively excluded, never assumed clean", () => {
     const result = filterByCutoff(["missing"], "2026-01-01T00:00:00Z", () => undefined);
     expect(result.kept).toEqual([]);

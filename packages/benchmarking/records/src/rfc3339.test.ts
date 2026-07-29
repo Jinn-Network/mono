@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { isCalendarStrictRfc3339 } from "./rfc3339.js";
+import {
+  compareCalendarStrictRfc3339Instants,
+  isCalendarStrictRfc3339,
+} from "./rfc3339.js";
 
 describe("isCalendarStrictRfc3339", () => {
   test.each([
@@ -30,5 +33,47 @@ describe("isCalendarStrictRfc3339", () => {
   test("rejects non-string values", () => {
     expect(isCalendarStrictRfc3339(undefined)).toBe(false);
     expect(isCalendarStrictRfc3339(1)).toBe(false);
+  });
+});
+
+describe("compareCalendarStrictRfc3339Instants", () => {
+  test("preserves arbitrary fractional precision instead of truncating to milliseconds", () => {
+    expect(compareCalendarStrictRfc3339Instants(
+      "2026-07-29T00:00:00.0001Z",
+      "2026-07-29T00:00:00.0002Z",
+    )).toBe(-1);
+    expect(compareCalendarStrictRfc3339Instants(
+      "2026-07-29T00:00:00.1Z",
+      "2026-07-29T00:00:00.10Z",
+    )).toBe(0);
+  });
+
+  test("compares equal instants written with distinct numeric offsets as equal", () => {
+    expect(compareCalendarStrictRfc3339Instants(
+      "2026-07-29T02:30:00.123400+02:30",
+      "2026-07-29T00:00:00.1234Z",
+    )).toBe(0);
+  });
+
+  test("orders a calendar-valid leap second before the following civil second", () => {
+    expect(compareCalendarStrictRfc3339Instants(
+      "2016-12-31T23:59:60.999999Z",
+      "2017-01-01T00:00:00Z",
+    )).toBe(-1);
+    expect(compareCalendarStrictRfc3339Instants(
+      "2017-01-01T00:59:60.25+01:00",
+      "2016-12-31T23:59:60.250Z",
+    )).toBe(0);
+  });
+
+  test("refuses malformed and impossible civil inputs instead of normalizing them", () => {
+    expect(compareCalendarStrictRfc3339Instants(
+      "2026-02-30T00:00:00Z",
+      "2026-03-02T00:00:00Z",
+    )).toBeUndefined();
+    expect(compareCalendarStrictRfc3339Instants(
+      "2026-03-02T00:00:00Z",
+      "not-a-time",
+    )).toBeUndefined();
   });
 });

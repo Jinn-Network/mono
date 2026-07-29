@@ -14,7 +14,7 @@ import {
 import {
   canonicalJsonBytes,
   dssePreAuthEncoding,
-  parseDsseEnvelope,
+  parseExactDsseEnvelope,
   recordDigest,
   sealDsseEnvelope,
   verifyEnvelopeBinding,
@@ -366,18 +366,18 @@ export async function verifyReport(
   input: VerifyReportInput,
   ports: VerifyReportPorts,
 ): Promise<VerifyReportResult> {
+  let envelope: ReturnType<typeof parseExactDsseEnvelope>;
+  try {
+    envelope = parseExactDsseEnvelope(input.envelopeBytes);
+  } catch (cause) {
+    return { ok: false, check: "report-envelope", detail: `invalid DSSE envelope: ${String(cause)}` };
+  }
   if (!isCalendarStrictRfc3339(input.effectiveTime)) {
     return {
       ok: false,
       check: "report-authenticity",
       detail: "effectiveTime context must be an explicit RFC 3339 verification instant",
     };
-  }
-  let envelope: ReturnType<typeof parseDsseEnvelope>;
-  try {
-    envelope = parseDsseEnvelope(input.envelopeBytes);
-  } catch (cause) {
-    return { ok: false, check: "report-envelope", detail: `invalid DSSE envelope: ${String(cause)}` };
   }
   if (envelope.payloadType !== REPORT_MEDIA_TYPE) {
     return {

@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { submissionExtensionBlock } from "@jinn-network/benchmarking-records";
+import {
+  compareCalendarStrictRfc3339Instants,
+  submissionExtensionBlock,
+} from "@jinn-network/benchmarking-records";
 import { describe, expect, test } from "vitest";
 
 /**
@@ -20,6 +23,16 @@ export interface OrderingLegs {
   readonly localAppendOrder?: {
     readonly runAppendedBeforeCells: boolean;
   };
+}
+
+export function isAnchoredOrderValid(
+  anchored: NonNullable<OrderingLegs["anchored"]>,
+): boolean {
+  const order = compareCalendarStrictRfc3339Instants(
+    anchored.runAnnouncedAt,
+    anchored.earliestCellPostAt,
+  );
+  return order !== undefined && order <= 0;
 }
 
 /**
@@ -63,8 +76,7 @@ export function describeOrderingConformance(legs: OrderingLegs = {}): void {
       });
       test.runIf(legs.anchored !== undefined)("the announcement precedes the earliest cell post", () => {
         expect(legs.anchored!.violatesOrder).toBe(false);
-        expect(new Date(legs.anchored!.runAnnouncedAt).getTime())
-          .toBeLessThanOrEqual(new Date(legs.anchored!.earliestCellPostAt).getTime());
+        expect(isAnchoredOrderValid(legs.anchored!)).toBe(true);
       });
 
       test.skipIf(legs.anchored !== undefined)(

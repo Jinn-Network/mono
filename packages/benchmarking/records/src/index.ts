@@ -36,7 +36,7 @@ export {
 } from "./json.js";
 export type { JsonValue } from "./json.js";
 export {
-  calendarStrictRfc3339EpochMilliseconds,
+  compareCalendarStrictRfc3339Instants,
   isCalendarStrictRfc3339,
 } from "./rfc3339.js";
 export { InvalidDocumentError, sealRecord, sealWithSchema } from "./sealing.js";

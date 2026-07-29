@@ -1,6 +1,7 @@
 import {
-  calendarStrictRfc3339EpochMilliseconds,
+  compareCalendarStrictRfc3339Instants,
   compareCodeUnitStrings,
+  isCalendarStrictRfc3339,
 } from "@jinn-network/benchmarking-records";
 
 export type CleanSubsetBasis = "self-declared" | "announcement-anchored";
@@ -25,17 +26,18 @@ export function filterByCutoff(
   cutoff: string,
   resolveTimestamp: (taskDigest: string) => string | undefined,
 ): CleanSubsetFilterResult {
-  const cutoffMs = calendarStrictRfc3339EpochMilliseconds(cutoff);
-  if (cutoffMs === undefined) throw new Error(`filterByCutoff: cutoff is not a valid RFC 3339 timestamp: ${cutoff}`);
+  if (!isCalendarStrictRfc3339(cutoff)) {
+    throw new Error(`filterByCutoff: cutoff is not a valid RFC 3339 timestamp: ${cutoff}`);
+  }
 
   const kept: string[] = [];
   const excludedByPredicate: string[] = [];
   for (const taskDigest of taskDigests) {
     const timestamp = resolveTimestamp(taskDigest);
-    const timestampMs = timestamp === undefined
+    const ordering = timestamp === undefined
       ? undefined
-      : calendarStrictRfc3339EpochMilliseconds(timestamp);
-    if (timestampMs !== undefined && timestampMs >= cutoffMs) kept.push(taskDigest);
+      : compareCalendarStrictRfc3339Instants(timestamp, cutoff);
+    if (ordering !== undefined && ordering >= 0) kept.push(taskDigest);
     else excludedByPredicate.push(taskDigest);
   }
   kept.sort(compareCodeUnitStrings);

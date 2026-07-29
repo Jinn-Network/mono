@@ -1,5 +1,5 @@
 import {
-  calendarStrictRfc3339EpochMilliseconds,
+  compareCalendarStrictRfc3339Instants,
   isCalendarStrictRfc3339,
   parseRun,
   sealRun,
@@ -428,13 +428,14 @@ export function resolveAnchoredAnnouncementTime(
     && new Set(chain).size === chain.length
     && chain.includes(entryDigest)
     && chain[chain.length - 1] === verification.headDigest;
-  const anchorTimeMs = calendarStrictRfc3339EpochMilliseconds(verification.anchor.anchorTime);
-  const entryTimeMs = calendarStrictRfc3339EpochMilliseconds(entry["timestamp"] as string);
+  const anchorOrder = compareCalendarStrictRfc3339Instants(
+    verification.anchor.anchorTime,
+    entry["timestamp"] as string,
+  );
   const anchorIsExact = exactDigest(verification.headDigest)
     && verification.anchor.digest === verification.headDigest
-    && anchorTimeMs !== undefined
-    && entryTimeMs !== undefined
-    && anchorTimeMs >= entryTimeMs;
+    && anchorOrder !== undefined
+    && anchorOrder >= 0;
   if (!sourceMatches || !chainIsExact || !anchorIsExact) {
     throw new MethodInputError(
       "anchored-announcement-unverified",
