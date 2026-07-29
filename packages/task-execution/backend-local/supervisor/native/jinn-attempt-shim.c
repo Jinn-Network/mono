@@ -115,6 +115,13 @@ static int reap_exited_nonleaders(const pid_list *members) {
 static void signal_group(pid_t pgid, int signal_number) { if (kill(-pgid, signal_number) != 0 && errno != ESRCH) { } }
 static void sleep_ms(uint32_t milliseconds) { struct timespec delay = { .tv_sec = milliseconds / 1000, .tv_nsec = (long)(milliseconds % 1000) * 1000000L }; nanosleep(&delay, NULL); }
 
+/* The residual vector is compiled only into the test helper, never the shipped custodian. */
+#ifdef JINN_NATIVE_CUSTODY_TESTING
+static int skip_kill_for_test(void) { return getenv("JINN_NATIVE_CUSTODY_TEST_SKIP_KILL") != NULL; }
+#else
+static int skip_kill_for_test(void) { return 0; }
+#endif
+
 static void format_rfc3339(char output[32]) { time_t now = time(NULL); struct tm utc; gmtime_r(&now, &utc); strftime(output, 32, "%Y-%m-%dT%H:%M:%SZ", &utc); }
 static const char *signal_name(int value) { switch (value) { case SIGTERM: return "SIGTERM"; case SIGKILL: return "SIGKILL"; case SIGINT: return "SIGINT"; case SIGHUP: return "SIGHUP"; default: return strsignal(value); } }
 
@@ -160,12 +167,12 @@ int main(int argc, char **argv) {
   char fingerprint[4096], path[4096]; snprintf(fingerprint, sizeof(fingerprint), "{\"pid\":%ld,\"startTime\":%ld,\"nonce\":\"%s\",\"harnessPid\":%ld}", (long)getpid(), process_start_time(getpid()), spec.nonce, (long)leader); snprintf(path, sizeof(path), "%s/shim.json", spec.meta); atomic_write(path, fingerprint);
   int cancellation_requested = 0, status = 0, adopted_reaped = 0; pid_list nonleaders = {0};
   for (;;) { siginfo_t info = {0}; if (waitid(P_PID, leader, &info, WEXITED | WNOWAIT | WNOHANG) == 0 && info.si_pid != 0) break;
-    if (cancellation_wakeup) { cancellation_wakeup = 0; uint32_t grace, ceiling; if (!cancellation_requested && read_cancellation(&spec, &grace, &ceiling)) { cancellation_requested = 1; signal_group(leader, SIGTERM); sleep_ms(grace); if (getenv("JINN_NATIVE_CUSTODY_TEST_SKIP_KILL") == NULL) signal_group(leader, SIGKILL); (void)ceiling; } }
+    if (cancellation_wakeup) { cancellation_wakeup = 0; uint32_t grace, ceiling; if (!cancellation_requested && read_cancellation(&spec, &grace, &ceiling)) { cancellation_requested = 1; signal_group(leader, SIGTERM); sleep_ms(grace); if (!skip_kill_for_test()) signal_group(leader, SIGKILL); (void)ceiling; } }
     write_heartbeat(&spec); sleep_ms(spec.heartbeat_ms > 0 && spec.heartbeat_ms < 50 ? spec.heartbeat_ms : 5);
   }
-  if (!cancellation_requested || getenv("JINN_NATIVE_CUSTODY_TEST_SKIP_KILL") == NULL) signal_group(leader, SIGKILL);
+  if (!cancellation_requested || !skip_kill_for_test()) signal_group(leader, SIGKILL);
   uint32_t ceiling = 30000, requested_grace = 0; (void)read_cancellation(&spec, &requested_grace, &ceiling); uint32_t elapsed = 0;
-  while (scan_group(leader, 0, &nonleaders) == 0 && nonleaders.count > 0 && elapsed < ceiling) { adopted_reaped += reap_exited_nonleaders(&nonleaders); if (getenv("JINN_NATIVE_CUSTODY_TEST_SKIP_KILL") == NULL) signal_group(leader, SIGKILL); sleep_ms(10); elapsed += 10; }
+  while (scan_group(leader, 0, &nonleaders) == 0 && nonleaders.count > 0 && elapsed < ceiling) { adopted_reaped += reap_exited_nonleaders(&nonleaders); if (!skip_kill_for_test()) signal_group(leader, SIGKILL); sleep_ms(10); elapsed += 10; }
   if (scan_group(leader, 0, &nonleaders) != 0) fatal("cannot scan harness process group");
   int empty_before_leader_reap = nonleaders.count == 0;
   if (cancellation_requested) write_pid_result(&spec, "cancellation-result.json", &nonleaders);

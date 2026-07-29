@@ -47,7 +47,7 @@ function nativeShimPath(): string {
   const configured = process.env["JINN_NATIVE_CUSTODY_BINARY"];
   if (configured !== undefined) return configured;
   const here = dirname(fileURLToPath(import.meta.url));
-  return join(here, "..", "dist", "native", "jinn-attempt-shim");
+  return join(here, "..", "dist", "native", process.env["VITEST"] === undefined ? "jinn-attempt-shim" : "jinn-attempt-shim-test");
 }
 
 /** Linux custody is mandatory: a missing/failed native probe is never silently downgraded. */

@@ -32,7 +32,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "yarn build && vitest run",
+    "test": "JINN_NATIVE_CUSTODY_BUILD_TESTING=1 yarn build && vitest run",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
   },
