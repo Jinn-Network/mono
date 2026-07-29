@@ -52,7 +52,10 @@ function submissionBytes(
 
 export interface LocalBackendConformanceSubject
   extends TestableBackend,
-    Pick<LocalTaskExecutionBackend, "close" | "deliveryCheckpointPath" | "drain"> {}
+    Pick<LocalTaskExecutionBackend, "close" | "deliveryCheckpointPath" | "drain"> {
+  /** Local backend extension: drain workers/inflight before releasing the writer lock. */
+  shutdown(): Promise<void>;
+}
 
 export interface LocalBackendContractFactory {
   (): LocalBackendConformanceSubject;
@@ -142,7 +145,7 @@ export function describeLocalBackendContract(
       await expect(scenario.backend.recordDelivery(attempt, delivery)).rejects.toThrow(
         "scripted crash after checkpoint",
       );
-      scenario.backend.close();
+      await (scenario.backend as LocalBackendConformanceSubject).shutdown();
       const recovered = scenario.restart();
       expect(await recovered.recover(attempt)).toEqual({ classification: "matching" });
       const refs = await recovered.deliveries(attempt);

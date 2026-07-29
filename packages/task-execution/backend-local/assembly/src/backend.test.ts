@@ -47,7 +47,7 @@ async function stateRoot(name: string): Promise<string> {
 afterEach(async () => {
   await Promise.all(backends.splice(0).map(async (backend) => {
     await backend.drain();
-    backend.close();
+    await backend.shutdown();
   }));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -740,7 +740,7 @@ describe("seal-once Delivery checkpoint (C1)", () => {
     });
 
     await expect(backend.recordDelivery(attempt, delivery)).rejects.toThrow("scripted crash");
-    backend.close();
+    await backend.shutdown();
     crash = false;
     backend = fixture(root);
     expect(await backend.recover(attempt)).toEqual({ classification: "matching" });
@@ -766,7 +766,7 @@ describe("seal-once Delivery checkpoint (C1)", () => {
     await backend.recordDelivery(attempt, delivery);
     const checkpoint = backend.deliveryCheckpointPath(attempt);
     await writeFile(`${checkpoint}.tmp-torn`, delivery.subarray(0, 13));
-    backend.close();
+    await backend.shutdown();
 
     backend = fixture(root);
     const refs = await backend.deliveries(attempt);

@@ -41,8 +41,11 @@ function root(): string {
 }
 
 afterAll(async () => {
-  await Promise.all(instances.map((instance) => instance.drain()));
-  for (const instance of instances) instance.close();
+  await Promise.all(instances.map(async (instance) => {
+    const backend = instance as LocalBackendConformanceSubject;
+    await backend.drain();
+    await backend.shutdown();
+  }));
   for (const value of roots) rmSync(value, { recursive: true, force: true });
 });
 
@@ -130,7 +133,7 @@ function create(
     ...overrides,
   });
   instances.push(instance);
-  return instance;
+  return instance as LocalBackendConformanceSubject;
 }
 
 const factory = Object.assign(

@@ -119,6 +119,7 @@ import {
 } from "./evidence-join.js";
 import { materializeSecretForwards, type SecretForwardResolver } from "./secret-forwards.js";
 import { type LocalLauncherDeployment, verifyRunPinning } from "./pinning.js";
+import { ObservationWatchRegistry } from "./watch-registry.js";
 
 // Core requirement comparison classes (profiles §5.1 / program §7.3). Profile-added entries
 // are overlaid after resolution, so the resolved document is authoritative for its own keys.
@@ -571,7 +572,12 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   private readonly reconciliationOverrides = new Map<string, ReconciliationReport>();
   private readonly workers = new Set<Promise<void>>();
   private readonly workerAttempts = new Map<AttemptUri, number>();
+  private readonly inflight = new Set<Promise<unknown>>();
+  private readonly watchRegistry = new ObservationWatchRegistry();
   private closed = false;
+  private shutdownStarted = false;
+  private shutdownComplete = false;
+  private shutdownPromise?: Promise<void>;
 
   constructor(private readonly config: LocalTaskExecutionBackendConfig) {
     this.writer = acquireStateRootWriter(config.stateRoot);
@@ -584,12 +590,58 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   }
 
   private assertWriter(): void {
-    if (this.closed) {
+    if (this.closed || this.shutdownStarted) {
       throw new TaskExecutionError("backend-unavailable", {
-        detail: "local backend instance is closed",
+        detail: this.shutdownStarted
+          ? "local backend instance is shutting down"
+          : "local backend instance is closed",
       });
     }
     if (!this.writer.acquired) throw this.writer.error;
+  }
+
+  private trackInflight<T>(promise: Promise<T>): Promise<T> {
+    this.inflight.add(promise);
+    return promise.finally(() => {
+      this.inflight.delete(promise);
+    });
+  }
+
+  private notifyObservationTail(attempt: AttemptUri): void {
+    const observations = this.observations(attempt);
+    const latest = observations.at(-1)?.sequence ?? "0000000000000000";
+    this.watchRegistry.notify(attempt, latest);
+  }
+
+  private async invokeCompletionPhase(
+    phase:
+      | "before-outcome-wait"
+      | "after-outcome"
+      | "before-harvest"
+      | "after-harvest"
+      | "after-evidence"
+      | "before-delivery-checkpoint",
+  ): Promise<void> {
+    if (this.shutdownStarted) return;
+    const hook = this.config.faults?.onCompletionPhase;
+    if (hook === undefined) return;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    try {
+      await Promise.race([
+        hook(phase),
+        new Promise<void>((resolve) => {
+          timer = setInterval(() => {
+            if (this.shutdownStarted) resolve();
+          }, 5);
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearInterval(timer);
+    }
+  }
+
+  private workerMayContinue(): boolean {
+    return !this.shutdownStarted;
   }
 
   private trackWorker(attempt: AttemptUri, worker: Promise<void>): void {
@@ -630,7 +682,32 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   }
 
   private journal(attempt: AttemptUri) {
-    return openAttemptJournal(this.paths(attempt).meta);
+    const base = openAttemptJournal(this.paths(attempt).meta);
+    const notify = (): void => {
+      this.notifyObservationTail(attempt);
+    };
+    return {
+      append: (intent: Parameters<typeof base.append>[0]) => {
+        const event = base.append(intent);
+        notify();
+        return event;
+      },
+      fsyncedAppend: (intent: Parameters<typeof base.fsyncedAppend>[0]) => {
+        const event = base.fsyncedAppend(intent);
+        notify();
+        return event;
+      },
+      appendAndEmit: (
+        intent: Parameters<typeof base.appendAndEmit>[0],
+        emit: Parameters<typeof base.appendAndEmit>[1],
+      ) => {
+        const event = base.appendAndEmit(intent, emit);
+        notify();
+        return event;
+      },
+      read: base.read.bind(base),
+      durableSeq: base.durableSeq.bind(base),
+    };
   }
 
   private reject(
@@ -798,6 +875,14 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   }
 
   async submit(
+    taskBytes: Uint8Array,
+    submissionBytes: Uint8Array,
+    engagement?: TwoPartyEngagement,
+  ): Promise<SubmissionAck> {
+    return this.trackInflight(this.submitAccepted(taskBytes, submissionBytes, engagement));
+  }
+
+  private async submitAccepted(
     taskBytes: Uint8Array,
     submissionBytes: Uint8Array,
     engagement?: TwoPartyEngagement,
@@ -1193,6 +1278,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         planBytes,
         spawn,
       }).catch((error: unknown) => {
+        if (this.shutdownStarted) return;
         const record = foldAttemptRecord(this.journal(attempt).read());
         if (!record.terminal) {
           this.appendTerminal(attempt, {
@@ -1355,9 +1441,12 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     this.armExpiry(attempt);
     this.relayPendingCancellation(attempt);
 
-    await this.config.faults?.onCompletionPhase?.("before-outcome-wait");
+    await this.invokeCompletionPhase("before-outcome-wait");
+    if (!this.workerMayContinue()) return;
     const execution = await this.waitForOutcome(attempt, input.paths.meta, input.attempt.nonce);
-    await this.config.faults?.onCompletionPhase?.("after-outcome");
+    if (!this.workerMayContinue()) return;
+    await this.invokeCompletionPhase("after-outcome");
+    if (!this.workerMayContinue()) return;
     await this.completeAttempt({ ...input, execution, capture, capturePosture });
   }
 
@@ -1373,6 +1462,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     readonly capture?: EvidenceCaptureSession;
     readonly capturePosture: RecorderAvailability;
   }): Promise<void> {
+    if (!this.workerMayContinue()) return;
     const attempt = input.attempt.attemptUri;
     const initialRecord = foldAttemptRecord(this.journal(attempt).read());
     if (initialRecord.terminal && initialRecord.terminalState !== "lost") return;
@@ -1382,7 +1472,8 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     };
     append("exec-finished", { exitCode: input.execution.exitCode ?? null, termSignal: input.execution.signal ?? null });
     append("harvest-started", {});
-    await this.config.faults?.onCompletionPhase?.("before-harvest");
+    await this.invokeCompletionPhase("before-harvest");
+    if (!this.workerMayContinue()) return;
     // The shim's bounded cleanup result is authoritative: waiting for generic group emptiness
     // first would turn a deliberate ceiling terminal into an unrelated harvest failure.
     const cancellationResult = readShimCancellationResult(input.paths.meta, input.attempt.nonce);
@@ -1411,7 +1502,8 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       return;
     }
     if (harvested === undefined) append("harvested", { manifest: harvest.manifest, omissions: harvest.omissions, integrityViolations: harvest.integrityViolations });
-    await this.config.faults?.onCompletionPhase?.("after-harvest");
+    await this.invokeCompletionPhase("after-harvest");
+    if (!this.workerMayContinue()) return;
     const envelope = this.readResultEnvelope(input.paths, input.plan, harvest);
     const interpreted = interpretResult(input.plan, input.execution, envelope);
     const observedEvidence = this.journal(attempt).read()
@@ -1432,7 +1524,8 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       }
     }
     if (receipt !== undefined) append("execution-observed", { executionId: receipt.executionId, evidenceRecord: receipt.record });
-    await this.config.faults?.onCompletionPhase?.("after-evidence");
+    await this.invokeCompletionPhase("after-evidence");
+    if (!this.workerMayContinue()) return;
     // Cancellation is an intent, never an outcome channel.  The shim remains the sole outcome
     // recorder: only a signal outcome after that intent becomes `cancelled`; a natural exit
     // continues through normal interpretation and therefore wins a race with cancellation.
@@ -1458,7 +1551,8 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       this.appendTerminal(attempt, { state: "delivered", ...(interpreted.reasonCode === undefined ? {} : { detail: interpreted.reasonCode }) });
       return;
     }
-    await this.config.faults?.onCompletionPhase?.("before-delivery-checkpoint");
+    await this.invokeCompletionPhase("before-delivery-checkpoint");
+    if (!this.workerMayContinue()) return;
     const deliveryBytes = sealDelivery({ protocol: "https://jinn.network/profiles/task-execution/1.0", attempt, task: documentDigest(input.taskBytes), outputs: harvest.manifest.map((artifact) => ({ name: artifact.path, ...(artifact.mediaType === undefined ? {} : { mediaType: artifact.mediaType }), digest: { sha256: String(artifact.sha256).replace(/^sha256:/u, "") } })), outcome: interpreted.outcome ?? "fulfilled", ...(receipt === undefined ? {} : { evidenceRecords: [receipt.record], executionIds: [receipt.executionId] }), createdAt: this.now() });
     await this.recordDelivery(attempt, deliveryBytes);
     this.appendTerminal(attempt, { state: "delivered", ...(interpreted.reasonCode === undefined ? {} : { detail: interpreted.reasonCode }) });
@@ -1829,9 +1923,30 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     ref: SubmissionUri | AttemptUri,
     cursor?: ObservationCursor,
   ): AsyncIterable<ProtocolObservation> {
-    const snapshot = await this.observe(ref);
-    for (const observation of snapshot.observations) {
-      if (cursor === undefined || observation.sequence > cursor.sequence) yield observation;
+    this.assertWriter();
+    const attempt = this.resolveAttempt(ref);
+    let lastSequence = cursor?.sequence ?? "0000000000000000";
+    const abort = new AbortController();
+    try {
+      while (true) {
+        const snapshot = await this.observe(ref);
+        for (const observation of snapshot.observations) {
+          if (observation.sequence > lastSequence) {
+            yield observation;
+            lastSequence = observation.sequence;
+          }
+        }
+        if (snapshot.descriptor.derived.terminal || this.shutdownStarted) return;
+        if (this.observations(attempt).some((observation) => observation.sequence > lastSequence)) {
+          continue;
+        }
+        await this.watchRegistry.wait(attempt, lastSequence, abort.signal);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === "watch cancelled") return;
+      throw error;
+    } finally {
+      abort.abort();
     }
   }
 
@@ -2134,6 +2249,10 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   }
 
   async recover(ref: SubmissionUri | AttemptUri): Promise<ReconciliationReport> {
+    return this.trackInflight(this.recoverRef(ref));
+  }
+
+  private async recoverRef(ref: SubmissionUri | AttemptUri): Promise<ReconciliationReport> {
     this.assertWriter();
     const override = this.reconciliationOverrides.get(ref);
     if (override !== undefined) return override;
@@ -2260,6 +2379,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       const worker = this.waitForOutcome(attempt, paths.meta, recovered.identity.nonce)
         .then(async (execution) => this.completeAttempt({ attempt: recovered.identity, taskBytes: recovered.taskBytes, task: recovered.task, paths, provisioner: recovered.provisioner, plan: recovered.plan, execution, capture: await this.resumeEvidenceCapture(attempt, paths, posture), capturePosture: posture }))
         .catch((error: unknown) => {
+          if (this.shutdownStarted) return;
           if (!foldAttemptRecord(this.journal(attempt).read()).terminal) {
             this.appendTerminal(attempt, { state: "lost", blame: "infrastructure", category: "backend-unavailable", detail: error instanceof Error ? error.message : "resumed shim supervision failed" });
           }
@@ -2375,6 +2495,13 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     attempt: AttemptUri,
     deliveryBytes: Uint8Array,
   ): Promise<void> {
+    return this.trackInflight(this.recordDeliveryBytes(attempt, deliveryBytes));
+  }
+
+  private async recordDeliveryBytes(
+    attempt: AttemptUri,
+    deliveryBytes: Uint8Array,
+  ): Promise<void> {
     const metadata = this.attempts.get(attempt);
     if (metadata === undefined) {
       throw new TaskExecutionError("attempt-not-found", {
@@ -2457,14 +2584,38 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   }
 
   close(): void {
-    if (this.closed) return;
+    void this.shutdown();
+  }
+
+  /** Drains accepted workers and in-flight state-root mutations, then releases the writer lock. */
+  async shutdown(): Promise<void> {
+    if (this.shutdownComplete) return;
+    if (this.shutdownPromise === undefined) {
+      this.shutdownPromise = this.runShutdown();
+    }
+    return this.shutdownPromise;
+  }
+
+  private async runShutdown(): Promise<void> {
+    this.shutdownStarted = true;
     this.closed = true;
+    this.watchRegistry.closeAll();
+    await this.drain();
+    while (this.inflight.size > 0) {
+      await Promise.all([...this.inflight]);
+    }
     if (this.writer.acquired) this.writer.release();
+    this.shutdownComplete = true;
   }
 
   /** Waits for work already accepted by this embedded backend to stop mutating its state root. */
   async drain(): Promise<void> {
-    while (this.workers.size > 0) await Promise.all([...this.workers]);
+    while (this.workers.size > 0) {
+      await Promise.all([...this.workers]);
+    }
+    while (this.inflight.size > 0) {
+      await Promise.all([...this.inflight]);
+    }
   }
 }
 

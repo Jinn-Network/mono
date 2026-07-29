@@ -164,4 +164,31 @@ describe("directory provisioner", () => {
       OPENROUTER_API_KEY: "secrets/key",
     });
   });
+
+  it("forwards declared OpenAI secret references but rejects raw API key values", () => {
+    expect(executionEnv({
+      cwd: "/attempt/work",
+      env: {
+        OPENAI_API_KEY: "secrets/openai-key",
+        OPENROUTER_API_KEY: "secrets/router-key",
+      },
+    })).toEqual({
+      OPENAI_API_KEY: "secrets/openai-key",
+      OPENROUTER_API_KEY: "secrets/router-key",
+    });
+    expect(executionEnv({
+      cwd: "/attempt/work",
+      env: {
+        OPENAI_API_KEY: "sk-live-raw-key",
+        OPENROUTER_API_KEY: "or-live-raw-key",
+      },
+    })).toEqual({});
+    expect(executionEnv({
+      cwd: "/attempt/work",
+      env: {
+        OPENAI_API_KEY: "secrets/",
+        OPENROUTER_API_KEY: "../secrets/key",
+      },
+    })).toEqual({});
+  });
 });

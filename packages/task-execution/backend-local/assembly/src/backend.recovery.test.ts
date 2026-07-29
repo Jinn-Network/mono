@@ -90,8 +90,7 @@ function barrier(): Barrier {
 
 afterEach(async () => {
   for (const release of releaseBarriers.splice(0)) release();
-  await Promise.allSettled(backends.map((backend) => backend.drain()));
-  for (const backend of backends.splice(0)) backend.close();
+  await Promise.allSettled(backends.map((backend) => backend.shutdown()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -270,6 +269,14 @@ async function submit(
   };
 }
 
+async function handoffWriter(
+  backend: LocalTaskExecutionBackend,
+  release?: () => void,
+): Promise<void> {
+  if (release !== undefined) release();
+  await backend.shutdown();
+}
+
 async function waitFor(
   predicate: () => boolean | Promise<boolean>,
   message: string,
@@ -279,6 +286,30 @@ async function waitFor(
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(message);
+}
+
+async function expectRestartBlocked(
+  root: string,
+  attempt: `urn:uuid:${string}`,
+  options: BackendFixtureOptions = {},
+): Promise<void> {
+  const blocked = fixture(root, options);
+  await expect(blocked.recover(attempt)).rejects.toMatchObject({
+    category: "backend-unavailable",
+  });
+}
+
+async function restartWhilePaused(
+  root: string,
+  backend: LocalTaskExecutionBackend,
+  pause: Barrier,
+  attempt: `urn:uuid:${string}`,
+  options: BackendFixtureOptions = {},
+): Promise<LocalTaskExecutionBackend> {
+  void backend.shutdown();
+  await expectRestartBlocked(root, attempt, options);
+  await handoffWriter(backend, () => pause.release());
+  return fixture(root, options);
 }
 
 async function journalEvents(root: string, attempt: string): Promise<JournalEvent[]> {
@@ -327,9 +358,7 @@ describe("restart reconstruction and §6.4 actions", () => {
     const marker = JSON.parse(
       await readFile(join(paths(root, accepted.attempt).meta, "evidence-recording", "workspace.json"), "utf8"),
     ) as { executionId: string };
-    first.close();
-
-    const recovered = fixture(root, {
+    const recovered = await restartWhilePaused(root, first, pause, accepted.attempt, {
       processDelayMs: 250,
       selectionInputs,
       planCalls,
@@ -371,11 +400,16 @@ describe("restart reconstruction and §6.4 actions", () => {
     });
     const { attempt } = await submit(first);
     await pause.entered;
-    first.close();
+    void first.shutdown();
+    await expectRestartBlocked(root, attempt, {
+      recorderAvailability: "always",
+      evidenceRepository: repository,
+    });
     await rm(join(paths(root, attempt).meta, "evidence-recording"), {
       recursive: true,
       force: true,
     });
+    await handoffWriter(first, () => pause.release());
 
     const recovered = fixture(root, {
       recorderAvailability: "always",
@@ -400,9 +434,7 @@ describe("restart reconstruction and §6.4 actions", () => {
     });
     const { attempt } = await submit(first);
     await pause.entered;
-    first.close();
-
-    const recovered = fixture(root, { harvestCalls });
+    const recovered = await restartWhilePaused(root, first, pause, attempt, { harvestCalls });
     expect(await recovered.recover(attempt)).toEqual({ classification: "matching" });
     expect(await terminalState(recovered, attempt)).toBe("delivered");
     expect(harvestCalls.value).toBe(1);
@@ -422,9 +454,7 @@ describe("restart reconstruction and §6.4 actions", () => {
     expect((await journalEvents(root, attempt)).some(
       ({ type }) => type === "harvest-started",
     )).toBe(true);
-    first.close();
-
-    const recovered = fixture(root, { harvestCalls });
+    const recovered = await restartWhilePaused(root, first, pause, attempt, { harvestCalls });
     expect((await recovered.recover(attempt)).classification).toBe("matching");
     expect(await terminalState(recovered, attempt)).toBe("delivered");
     expect(harvestCalls.value).toBe(1);
@@ -441,9 +471,7 @@ describe("restart reconstruction and §6.4 actions", () => {
     });
     const { attempt } = await submit(first);
     await pause.entered;
-    first.close();
-
-    const recovered = fixture(root, { harvestCalls });
+    const recovered = await restartWhilePaused(root, first, pause, attempt, { harvestCalls });
     expect((await recovered.recover(attempt)).classification).toBe("matching");
     expect(await terminalState(recovered, attempt)).toBe("delivered");
     expect(harvestCalls.value).toBe(1);
@@ -471,7 +499,7 @@ describe("restart reconstruction and §6.4 actions", () => {
       ...outcome,
       nonce: `${outcome.nonce}-foreign`,
     }));
-    first.close();
+    const recovered = await restartWhilePaused(root, first, pause, attempt);
     const fingerprint = readShimFingerprint(workspace.meta);
     await waitFor(
       () => !probeShimAlive(workspace.meta).alive
@@ -480,7 +508,6 @@ describe("restart reconstruction and §6.4 actions", () => {
       "completed harness did not relinquish its process group",
     );
 
-    const recovered = fixture(root);
     expect(await recovered.recover(attempt)).toEqual({
       classification: "absent",
       detail: "stale-foreign",
@@ -509,12 +536,12 @@ describe("restart reconstruction and §6.4 actions", () => {
     const { attempt, submission } = await submit(first);
     await replaceJournal(root, attempt, (events) =>
       events.filter(({ type }) => type !== "attempt-terminal"));
-    first.close();
+    await handoffWriter(first);
 
     const absent = fixture(root);
     expect((await absent.recover(attempt)).classification).toBe("absent");
     expect(await terminalState(absent, attempt)).toBe("lost");
-    absent.close();
+    await handoffWriter(absent);
     const parsed = JSON.parse(new TextDecoder().decode(submission)) as { nonce: string };
     await writeFile(join(paths(root, attempt).meta, "outcome.json"), JSON.stringify({
       attemptId: attempt,
@@ -548,9 +575,7 @@ describe("restart reconstruction and §6.4 actions", () => {
     if (fingerprint?.harnessPid === undefined) throw new Error("fixture shim did not publish harness PID");
     process.kill(fingerprint.pid, "SIGKILL");
     await waitFor(() => !probeShimAlive(workspace.meta).alive, "shim did not die");
-    first.close();
-
-    const recovered = fixture(root);
+    const recovered = await restartWhilePaused(root, first, pause, attempt);
     expect((await recovered.recover(attempt)).detail).toBe("orphaned");
     expect(await terminalState(recovered, attempt)).toBe("lost");
     const reconciliation = (await journalEvents(root, attempt))
@@ -577,9 +602,7 @@ describe("restart reconstruction and §6.4 actions", () => {
       type: "attempt-terminal",
       details: { state: "failed", blame: "task", source: "urn:jinn:backend-local:recovery-test" },
     });
-    first.close();
-
-    const recovered = fixture(root);
+    const recovered = await restartWhilePaused(root, first, pause, attempt);
     expect((await recovered.recover(attempt)).classification).toBe("contradictory");
     expect((await recovered.observe(attempt)).descriptor.derived.state).toBe("failed");
     const reconciliation = (await journalEvents(root, attempt))
@@ -608,9 +631,7 @@ describe("restart reconstruction and §6.4 actions", () => {
       type: "attempt-terminal",
       details: { state: "delivered", source: "urn:jinn:backend-local:recovery-test" },
     })).toThrow("contradictory terminal");
-    first.close();
-
-    const recovered = fixture(root);
+    const recovered = await restartWhilePaused(root, first, pause, attempt);
     expect((await recovered.recover(attempt)).classification).toBe("contradictory");
     expect((await recovered.observe(attempt)).descriptor.derived.state).toBe("failed");
     expect((await journalEvents(root, attempt)).some(
@@ -630,8 +651,7 @@ describe("restart reconstruction and §6.4 actions", () => {
     await pause.entered;
     await replaceJournal(engagedRoot, engagedAttempt, (events) =>
       events.filter(({ type }) => type === "attempt-engaged"));
-    engaged.close();
-    const engagedRecovered = fixture(engagedRoot);
+    const engagedRecovered = await restartWhilePaused(engagedRoot, engaged, pause, engagedAttempt);
     expect((await engagedRecovered.recover(engagedAttempt)).classification).toBe("absent");
     const engagedTerminal = (await journalEvents(engagedRoot, engagedAttempt))
       .find(({ type }) => type === "attempt-terminal");
@@ -656,7 +676,7 @@ describe("restart reconstruction and §6.4 actions", () => {
     const intendedAttempt = (await submit(intended)).attempt;
     await replaceJournal(intendedRoot, intendedAttempt, (events) =>
       events.filter(({ type }) => type !== "attempt-terminal"));
-    intended.close();
+    await handoffWriter(intended);
     const intendedRecovered = fixture(intendedRoot);
     expect((await intendedRecovered.recover(intendedAttempt)).classification).toBe("absent");
     expect(await terminalState(intendedRecovered, intendedAttempt)).toBe("lost");
@@ -673,8 +693,7 @@ describe("restart reconstruction and §6.4 actions", () => {
     });
     const { attempt } = await submit(first);
     await pause.entered;
-    first.close();
-
+    await handoffWriter(first, () => pause.release());
     const recovered = fixture(root, { planCalls, selectorId: "provisioner-b" });
     await expect(recovered.recover(attempt)).rejects.toMatchObject({
       category: "backend-unavailable",
@@ -696,14 +715,14 @@ describe("restart reconstruction and §6.4 actions", () => {
     await pause.entered;
     const workspace = paths(root, attempt);
     const originalDispatchBytes = await readFile(join(workspace.meta, "dispatch-context.sealed"));
-    first.close();
+    await handoffWriter(first, () => pause.release());
 
     await writeFile(join(workspace.meta, "dispatch-context.sealed"), '{"attempt":"tampered"}');
     const dispatchRecovery = fixture(root);
     await expect(dispatchRecovery.recover(attempt)).rejects.toMatchObject({
       category: "invalid-document",
     });
-    dispatchRecovery.close();
+    await dispatchRecovery.shutdown();
 
     const events = await journalEvents(root, attempt);
     const intentIndex = events.findIndex(({ type }) => type === "spawn-intended");
@@ -737,7 +756,7 @@ describe("restart reconstruction and §6.4 actions", () => {
     });
     const { attempt } = await submit(first);
     await pause.entered;
-    first.close();
+    await handoffWriter(first, () => pause.release());
     await replaceJournal(root, attempt, (events) => events.map((event) =>
       event.type === "harvested"
         ? { ...event, details: { ...event.details, manifest: [{ path: "patch", sizeBytes: -1, sha256: "wrong" }] } }
@@ -808,15 +827,17 @@ describe("restart reconstruction and §6.4 actions", () => {
 
   test("a reset monotonic identity on recovery fails closed through the shim deadline path", async () => {
     const root = await stateRoot("relative-deadline-reset");
-    const first = fixture(root, { processDelayMs: 30_000 });
+    const pause = barrier();
+    const first = fixture(root, {
+      processDelayMs: 250,
+      completionBarrier: { phase: "before-outcome-wait", barrier: pause },
+    });
     const { attempt } = await submit(first, undefined, 30_000);
-    await waitFor(() => readShimFingerprint(paths(root, attempt).meta) !== null, "shim did not start");
+    await pause.entered;
     const metadataPath = join(paths(root, attempt).meta, "attempt.json");
     const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
     await writeFile(metadataPath, JSON.stringify({ ...metadata, monotonicClockIdentity: "reset-boot" }));
-    first.close();
-
-    const recovered = fixture(root, { processDelayMs: 30_000 });
+    const recovered = await restartWhilePaused(root, first, pause, attempt, { processDelayMs: 250 });
     expect(await recovered.recover(attempt)).toEqual({ classification: "matching" });
     expect(await terminalState(recovered, attempt)).toBe("expired");
     const events = await journalEvents(root, attempt);

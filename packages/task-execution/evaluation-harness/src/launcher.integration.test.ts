@@ -87,7 +87,9 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
-  for (const backend of backends.splice(0)) backend.close();
+  await Promise.all(backends.splice(0).map((backend) =>
+    (backend as LocalTaskExecutionBackend & { shutdown(): Promise<void> }).shutdown(),
+  ));
   await Promise.all(
     roots.splice(0).map((root) =>
       rm(root, { recursive: true, force: true })
@@ -745,7 +747,7 @@ describe("evaluationLauncher", () => {
       first.backend.deliveryCheckpointPath(attempt),
     );
 
-    first.backend.close();
+    await (first.backend as LocalTaskExecutionBackend & { shutdown(): Promise<void> }).shutdown();
     backends.splice(backends.indexOf(first.backend), 1);
     crash = false;
     const recovered = await backendFixture(root, docs, privateKeyText, {

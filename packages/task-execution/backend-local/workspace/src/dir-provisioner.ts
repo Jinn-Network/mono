@@ -53,6 +53,10 @@ async function sealInputAndSnapshot(paths: WorkspacePaths): Promise<void> {
   await chmod(paths.input, 0o500);
 }
 
+function isDeclaredSecretReference(value: string): boolean {
+  return /^secrets\/[A-Za-z0-9._-]+$/.test(value);
+}
+
 export function executionEnv(launch: LaunchEnv): Record<string, string> {
   const result: Record<string, string> = {};
   const allowed = new Set([
@@ -77,6 +81,10 @@ export function executionEnv(launch: LaunchEnv): Record<string, string> {
     "OPENROUTER_API_KEY",
   ]);
   for (const [key, value] of Object.entries(launch.env)) {
+    if (
+      (key === "OPENAI_API_KEY" || key === "OPENROUTER_API_KEY")
+      && !isDeclaredSecretReference(value)
+    ) continue;
     if (allowed.has(key)) result[key] = value;
   }
   return result;
