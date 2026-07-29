@@ -118,6 +118,16 @@ export interface MarketplaceProjectionState {
    * events register here; any distinct-log reuse or contradictory rebinding is refused.
    */
   requestIdBindings: Record<string, RequestIdBinding>;
+  /**
+   * Evaluation verdict-slot identity keyed by `(chain, coordinator, taskId, parentAttemptIndex)`.
+   * Distinct from task-attempt `seenAttemptIndices`; tracks monotonic single-use verdict slots.
+   */
+  evaluationIdentities: Record<string, EvaluationParentIdentity>;
+}
+
+interface EvaluationParentIdentity {
+  seenVerdictIndices: Record<string, true>;
+  highestVerdictIndex: number;
 }
 
 interface RequestIdBinding {
@@ -163,6 +173,7 @@ export function createMarketplaceProjectionState(): MarketplaceProjectionState {
     tasks: {},
     pendingMechDeliveries: {},
     requestIdBindings: {},
+    evaluationIdentities: {},
   };
 }
 
@@ -218,6 +229,15 @@ export function cloneMarketplaceProjectionState(
       ]),
     ),
     requestIdBindings: { ...state.requestIdBindings },
+    evaluationIdentities: Object.fromEntries(
+      Object.entries(state.evaluationIdentities).map(([key, value]) => [
+        key,
+        {
+          seenVerdictIndices: { ...value.seenVerdictIndices },
+          highestVerdictIndex: value.highestVerdictIndex,
+        },
+      ]),
+    ),
   };
 }
 
@@ -317,6 +337,40 @@ function registerRequestIdBinding(
   if (state.requestIdBindings[key] !== undefined) return false;
   state.requestIdBindings[key] = binding;
   return true;
+}
+
+function evaluationParentKey(
+  event: ObservationMarketplaceEvent,
+  taskId: bigint,
+  attemptIndex: number,
+): string {
+  return `${event.derivation.chainId}:${event.projection.taskCoordinator.toLowerCase()}:${taskId}:${attemptIndex}`;
+}
+
+function evaluationVerdictIdentityRefused(
+  state: MarketplaceProjectionState,
+  parentKey: string,
+  verdictIndex: number,
+): boolean {
+  const parent = state.evaluationIdentities[parentKey];
+  return (
+    parent?.seenVerdictIndices[String(verdictIndex)] !== undefined
+    || verdictIndex <= (parent?.highestVerdictIndex ?? -1)
+  );
+}
+
+function registerEvaluationVerdictIdentity(
+  state: MarketplaceProjectionState,
+  parentKey: string,
+  verdictIndex: number,
+): void {
+  let parent = state.evaluationIdentities[parentKey];
+  if (parent === undefined) {
+    parent = { seenVerdictIndices: {}, highestVerdictIndex: -1 };
+    state.evaluationIdentities[parentKey] = parent;
+  }
+  parent.seenVerdictIndices[String(verdictIndex)] = true;
+  parent.highestVerdictIndex = verdictIndex;
 }
 
 function sequenceStreamKey(source: string, subject: string): string {
@@ -822,13 +876,35 @@ export function reduceMarketplaceProjection(
       // Evaluation execution is projected by the M5 requester-sealed evaluation leg. This
       // on-chain event alone does not carry the distinct evaluation Task/Submission identities.
       case "EvaluationAttemptCreated": {
-        const task = state.tasks[taskKey(event, event.facts.taskId)];
+        const key = taskKey(event, event.facts.taskId);
+        const task = state.tasks[key];
         if (task?.admission === "rejected") {
           refuse(event, "task-not-admissible", event.facts.taskId, event.facts.attemptIndex);
           break;
         }
         if (!admissibleTask(task)) {
           refuse(event, "unknown-task", event.facts.taskId, event.facts.attemptIndex);
+          break;
+        }
+        if (task.terminalCause !== undefined || task.requesterClosed === true) {
+          refuse(event, "task-closed", event.facts.taskId, event.facts.attemptIndex);
+          break;
+        }
+        if (task.liveAttemptIndices[String(event.facts.attemptIndex)] === undefined) {
+          refuse(event, "attempt-not-live", event.facts.taskId, event.facts.attemptIndex);
+          break;
+        }
+        const evaluationParent = evaluationParentKey(
+          event,
+          event.facts.taskId,
+          event.facts.attemptIndex,
+        );
+        if (evaluationVerdictIdentityRefused(
+          state,
+          evaluationParent,
+          event.facts.verdictIndex,
+        )) {
+          refuse(event, "attempt-identity-regressing", event.facts.taskId, event.facts.attemptIndex);
           break;
         }
         if (!registerRequestIdBinding(state, event.derivation.chainId, event.facts.requestId, {
@@ -838,7 +914,13 @@ export function reduceMarketplaceProjection(
           verdictIndex: event.facts.verdictIndex,
         })) {
           refuse(event, "request-id-reused", event.facts.taskId, event.facts.attemptIndex);
+          break;
         }
+        registerEvaluationVerdictIdentity(
+          state,
+          evaluationParent,
+          event.facts.verdictIndex,
+        );
         break;
       }
     }

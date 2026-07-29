@@ -194,6 +194,11 @@ export function loadMarketplaceProjectorReorgFixtures(): MarketplaceProjectorReo
   return loadDirectory<MarketplaceProjectorReorgFixture>("reorg-scenarios");
 }
 
+export {
+  describeMarketplaceProjectorIdentityConformance,
+  type MarketplaceProjectorIdentityConformanceOptions,
+} from "./projector-identity-conformance.js";
+
 function sha256(bytes: Uint8Array): `sha256:${string}` {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 }

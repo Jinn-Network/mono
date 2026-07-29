@@ -42,6 +42,7 @@ import {
 import {
   describeMarketplaceProjectorConformance,
   loadMarketplaceProjectorFixtures,
+  describeMarketplaceProjectorIdentityConformance,
   type DerivationOutcome,
   type MarketplaceProjectorConformanceSubject,
   type MarketplaceProjectorFixture,
@@ -883,3 +884,4 @@ const subject: MarketplaceProjectorConformanceSubject = {
 };
 
 describeMarketplaceProjectorConformance(subject);
+describeMarketplaceProjectorIdentityConformance({ ports });
