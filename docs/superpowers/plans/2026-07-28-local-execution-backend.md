@@ -651,3 +651,32 @@ Addendum 2026-07-28-b (authorized widening; implemented in the TEP tree at the s
 Phase 4, before Milestone C). Milestone C consumes the widened contract; two-party mode
 scopes the `attempts` honor-or-reject to the single caller-identified attempt (chain enforces
 `maxClaims`; marketplace plan F4).
+
+## Addendum 2026-07-29-c — independent design-review fix rulings
+
+Program rulings §7.33–§7.36 resolve the backend/harness review's implementation seams:
+
+1. Opaque capability-grant handles are redeemed by a host-injected `SecretForwardResolver`
+   after durable `spawn-intended` and immediately before the real shim spawn. The resolver writes
+   only the launcher-declared `0600` no-follow/exclusive target under `secrets/`; no raw value
+   enters plan, journal, `meta/`, logs, or arguments. Missing resolver fails before spawn, and
+   terminal cleanup wipes material even if harvest fails.
+2. The harness validates exact Task/Delivery/Result/spec bytes, Delivery and output bindings,
+   allowed outcome/supersession, and byte equality with the profiles full-document evaluation
+   derivation. The dispatching binding owns selection of the settlement-authorized pair; the
+   backend owns internal pair consistency and imports no settlement policy.
+3. Adapter-produced claim-evidence content is stored through an injected evidence-repository
+   writer before Attestation Issuer signing; only its returned descriptor enters the Statement.
+   Missing/failed storage is an operational no-verdict path.
+4. The shim's behavioral custody contract takes precedence over “self-contained Node script.”
+   A small platform helper beneath the same public API is permitted. Linux subreaper,
+   process-table fingerprint, zombie-pinned group-empty ordering, and delegated cgroup use where
+   available are implemented and fail closed when mandatory custody is unavailable; macOS keeps
+   the design's named process-group residual.
+
+The accepted review findings also require, without further semantic amendment: assembly
+execution/cancel/recover/deadline must use the real supervisor rather than a host `execute`
+shortcut; the root lock must use atomic owner publication plus PID/start-marker/token stale
+reclamation; terminal cleanup runs in `finally`; and all four backend-local canonical serializers
+recursively reject lone surrogates. The conformance kit replaces coarse `toBeDefined()` checks
+with exact supervisor outcomes and runs a real no-shortcut assembly/evaluation Attempt.

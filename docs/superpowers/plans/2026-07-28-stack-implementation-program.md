@@ -363,6 +363,40 @@ Confirmed by the operator at the program gate (2026-07-28):
     remain contradictory and must never be presented as canonical chain state. M4.5 must prove
     the raw-history, canonical-filtered, and later-correction cases. This does not add a generic
     chain rule to TEP.
+33. **Local secret forwards materialize just-in-time before shim spawn:** the backend-local
+    plan's opaque `secrets/*.handle` descriptor is not itself usable secret material. A
+    host-injected `SecretForwardResolver` redeems declared handles only after durable
+    `spawn-intended` and immediately before `spawnShim`, writing the launcher-declared target
+    inside the Attempt's `secrets/` directory with no-follow/exclusive `0600` semantics. Raw
+    values never enter journal, `meta/`, plan, logs, or process arguments; terminal cleanup wipes
+    them even when harvest fails. A grant with no resolver fails before spawn rather than
+    creating an unusable handle. This post-intent/pre-spawn boundary is the v1 realization of
+    design §6.1's “at exec” requirement; the shim forwards the resulting path and the harness
+    reads it only when needed.
+34. **Evaluation pair-fixing is split at the backend boundary:** the evaluation harness must
+    parse exact Task, Delivery, Result, and EvaluationSpec bytes; verify Delivery→Task,
+    Delivery-output→Result, outcome/supersession rules, and byte equality with the profiles
+    full-document `deriveEvaluationTask(T,D,results,spec)` template before calling an adapter.
+    This proves internal pair consistency. Selecting which internally valid `(T,D)` is the
+    settlement-authorized pair remains the dispatching venue/binding's responsibility (the
+    marketplace named-check/dispatch-context layer); backend-local does not import settlement
+    policy or invent a second expected-pair authority.
+35. **New evaluation claim evidence is stored before signing:** `claimEvidence.kind="content"`
+    remains in the surviving Runner adapter contract, so the harness may not replace it with a
+    locally computed descriptor. The evaluation deployment injects an evidence-repository writer
+    contract; the runtime applies bounds, stores exact bytes first, and gives the Attestation
+    Issuer only the repository-returned descriptor. Content with no writer or a failed store is
+    an operational no-verdict failure. Existing descriptor evidence is digest-validated and
+    passes through without re-storage.
+36. **Linux custody may use a native helper beneath the Node shim contract:** design §6.1's
+    behavioral contract—subreaper custody, cgroup binding where delegated, zombie-pinned group
+    kill ordering, straggler reap, and real process-table fingerprinting—takes precedence over
+    the phrase “self-contained Node script.” The supervisor package may ship a small auditable
+    platform helper beneath the same public shim API. On Linux, subreaper and group-empty custody
+    are mandatory; delegated cgroup binding is used when the host provides it and its absence is
+    the already named residual. macOS retains the design's process-group residual. If required
+    custody support is unavailable, preflight/capabilities fail closed rather than advertising
+    cancellation or active deadlines that the assembly cannot enforce.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 
