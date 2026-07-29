@@ -17,3 +17,23 @@ export const ABANDONED_ACTION_STATUS =
 
 export const DISPOSITION_COUNT =
   "https://jinn.network/terms/dispositionCount" as const;
+
+// PropertyValue scheme IRIs. These stable spellings are unregistered pending the shared
+// Evidence/TEP/profiles/trust scheme-IRI registration follow-up.
+export const DID_PKH_IDENTIFIER_SCHEME_IRI =
+  "https://jinn.network/schemes/did-pkh" as const;
+
+export const DID_KEY_IDENTIFIER_SCHEME_IRI =
+  "https://jinn.network/schemes/did-key" as const;
+
+export const CAIP19_IDENTIFIER_SCHEME_IRI =
+  "https://jinn.network/schemes/caip-19" as const;
+
+export const GITHUB_IDENTIFIER_SCHEME_IRI =
+  "https://jinn.network/schemes/github" as const;
+
+export const PROFILE_URI_SCHEME_IRI =
+  "https://jinn.network/schemes/task-profile-uri" as const;
+
+export const TASK_DIGEST_SCHEME_IRI =
+  "https://jinn.network/schemes/task-digest" as const;

@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CAIP19_IDENTIFIER_SCHEME_IRI,
+  DID_KEY_IDENTIFIER_SCHEME_IRI,
+  DID_PKH_IDENTIFIER_SCHEME_IRI,
   DSSE_PAYLOAD_TYPE,
   CONFORMANCE_DIAGNOSTIC_CODES,
   EXECUTION_EVIDENCE_PROFILE_URI,
   EXECUTION_VERIFICATION_PREDICATE_TYPE,
   ExecutionEvidenceDocumentSchema,
+  GITHUB_IDENTIFIER_SCHEME_IRI,
   IN_TOTO_STATEMENT_TYPE,
+  PROFILE_URI_SCHEME_IRI,
   RESULT_EVALUATION_PREDICATE_TYPE,
+  TASK_DIGEST_SCHEME_IRI,
   recordDigest,
   sha256Hex,
 } from "./index.js";
@@ -25,6 +31,27 @@ describe("public contracts", () => {
     );
     expect(IN_TOTO_STATEMENT_TYPE).toBe("https://in-toto.io/Statement/v1");
     expect(DSSE_PAYLOAD_TYPE).toBe("application/vnd.in-toto+json");
+  });
+
+  it("exports stable PropertyValue scheme IRIs", () => {
+    expect(DID_PKH_IDENTIFIER_SCHEME_IRI).toBe(
+      "https://jinn.network/schemes/did-pkh",
+    );
+    expect(DID_KEY_IDENTIFIER_SCHEME_IRI).toBe(
+      "https://jinn.network/schemes/did-key",
+    );
+    expect(CAIP19_IDENTIFIER_SCHEME_IRI).toBe(
+      "https://jinn.network/schemes/caip-19",
+    );
+    expect(GITHUB_IDENTIFIER_SCHEME_IRI).toBe(
+      "https://jinn.network/schemes/github",
+    );
+    expect(PROFILE_URI_SCHEME_IRI).toBe(
+      "https://jinn.network/schemes/task-profile-uri",
+    );
+    expect(TASK_DIGEST_SCHEME_IRI).toBe(
+      "https://jinn.network/schemes/task-digest",
+    );
   });
 
   it("hashes the exact bytes with SHA-256", () => {
