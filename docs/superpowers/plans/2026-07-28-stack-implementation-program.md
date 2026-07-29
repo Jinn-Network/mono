@@ -1193,6 +1193,76 @@ Confirmed by the operator at the program gate (2026-07-28):
     comments/newlines, optional computed members, and the same forms inside nested template
     interpolation. The corresponding spellings in inert strings, comments, and template raw text
     remain negative.
+128. **Benchmarking facts preserve the M6 field set, including own-record identity digests:**
+    Benchmark exposes `benchmarkDigest`, optional `author`, and `version`; Run exposes
+    `runDigest`, `owner`, and reference-bearing `benchmarkDigest`; Matrix exposes
+    `matrixDigest`, reference-bearing `runDigest`, and `runOutcome`; Report exposes
+    reference-bearing `matrixDigests`, `methodId`, `methodVersion`, `author`, and
+    `preregistered`. Own-record digests are recomputed with discovery protocol
+    `recordDigest` over the exact received bytes even though the announcement also carries that
+    identity. Frozen CloudEvents attributes are Benchmark `author` / `benchversion`, Run
+    `owner` / `benchmark`, Matrix `run` / `runoutcome`, and Report `methodid` / `author`;
+    `matrixDigests` and the remaining fields are not CloudEvents-liftable.
+129. **Record facts admit ordered scalar arrays for genuinely plural record fields:** discovery
+    protocol adds `RecordFactScalar = string | number | boolean` and defines
+    `RecordFactValue = RecordFactScalar | readonly RecordFactScalar[] | undefined`. This is an
+    additive wire capability, not permission to collapse plural references into a joined string
+    or to emit one partial announcement per subject. Facts-consistency compares arrays by length
+    and element value in record order; scalar behavior remains unchanged. Report
+    `matrixDigests` is the first use, preserves `subjects[]` order, is reference-bearing, and is
+    never lifted into a CloudEvents scalar attribute. A conforming `referrers()` service inverts
+    every digest element independently.
+130. **Benchmarking reference-bearing facts fail closed through the referenced-bytes port:** Run
+    `benchmarkDigest`, Matrix `runDigest`, and every Report `matrixDigests` element are emitted
+    by recompute only after `ReferencedBytes.fetch` returns bytes that re-hash to the embedded
+    digest and parse as the expected Benchmark, Run, or Matrix kind respectively. Missing,
+    corrupt, or wrong-kind referenced bytes make that field `undefined` and therefore
+    facts-consistency `indeterminate`; native fields still recompute independently. The
+    `facts/benchmarking` leaf consumes `record-discovery-testing` as a dev-only conformance-kit
+    dependency and configures its exported driver locally; no benchmarking-specific adapter or
+    dependency is added inside the generic kit.
+131. **Revised marketplace delivery fees are OLAS and move only in an atomic valid-delivery
+    transaction:** the native BalanceTracker debits at `request()` and has no undelivered-request
+    reclaim, so it cannot satisfy `no valid delivery ⇒ net no spend`. Revised mode therefore
+    holds launcher OLAS in the router and uses the unchanged Mech Marketplace
+    `deliverMarketplaceWithSignatures` path with the canonical OLAS
+    `BalanceTrackerFixedPriceToken`; its `transferFrom(router, tracker, rate)` occurs only inside
+    the transaction that registers and delivers the request. Today mode remains native ETH.
+    This is the explicit economic-interface ruling required by DR-2026-06-30: OLAS is the revised
+    launcher fee unit as well as stake/reward unit.
+132. **Claim-time exclusivity is decoupled from Mech request identity:** revised
+    `TaskAttemptCreated` / `EvaluationAttemptCreated` reserve OLAS and emit the monotonic
+    task/attempt identity, operator/evaluator, priority Mech, deadline, and rate, but no Mech
+    `requestId`. The real request ID is created only by the later signed Deliver. The router
+    implements EIP-1271 as a read-only capability check: the signature preimage binds generation,
+    solution-versus-verdict kind, task/attempt/verdict indices, Mech, request data, rate,
+    FixedPriceToken payment type, and the Marketplace's current router nonce; cross-kind,
+    cross-attempt, cross-Mech, stale-nonce, wrong-rate, expired, released, and already-settled
+    authorizations fail closed.
+133. **Revised Mech delivery and router settlement are one Safe batch:** the operator/evaluator
+    Safe first calls its OLAS FixedPriceToken Mech's signed-delivery entry and then the router's
+    solution/verdict claim with the expected request-ID preimage. The second call verifies exact
+    Marketplace request info, requester = router, authorized delivery Mech/operator, live
+    reservation, digest, and replay state, then clears the reservation and records the protocol
+    delivery. MultiSend failure reverts both calls, so no paid-but-unsettled interval exists.
+    Revised settlement therefore proves ordered Mech-Deliver then router-claim logs from the same
+    receipt; §7.123's pre-existing Mech-fact rule remains today-mode only. The projector engages
+    from the claim without a request ID, decodes the frozen task/attempt correlation from Mech
+    `Deliver.requestData`, and joins the actual `requestId` to the later router log.
+134. **The revised contract is a clean fresh generation with narrow lifecycle policy:** deploy a
+    new proxy/implementation pair; never upgrade V3 in place. Policy requires
+    `maxTotal ≥ 1`, `1 ≤ maxConcurrent ≤ maxTotal`, positive solution/verdict rates, a future
+    submission deadline, and `minVerdicts ≥ 1`; solution escrow is `solutionRate × maxTotal` and
+    verdict escrow is `verdictRate × maxTotal × minVerdicts`, including proportional top-ups.
+    Evaluator-address distinctness is mandatory; the trust-layer Agent-IRI check remains
+    load-bearing. A nonzero release minimum-hold is fixed at deployment, while the per-operator
+    simultaneous-claim cap uses `0 = off`. V4 has only `None | Open | Closed`; terminal cause is
+    emitted separately, so `Cancelled` is not a second ambiguous terminal state. Creator close
+    stops new claims and refunds only genuinely unreserved or expired/released reservations;
+    already-authorized delivery survives close through the atomic batch. Base-mainnet OLAS token
+    tracker/factory addresses are production targets; Base Sepolia has no canonical inventory,
+    so M7 uses local/mainnet-fork conformance and MUST NOT invent or deploy a Jinn-owned testnet
+    payment rail without a separate authorization.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

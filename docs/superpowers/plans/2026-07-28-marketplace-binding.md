@@ -1137,3 +1137,45 @@ reused identities. It reruns the complete four-package gate, stub and Anvil-back
 contracts, consumers, guard trio, packed types, workflow lint, raw-control scan, and a fresh
 whole-design review. M6 remains blocked on that GREEN verdict and the Phase 4 backend-local
 assembly gate.
+
+## Addendum 2026-07-29-r — atomic OLAS delivery for the revised contract
+
+The M7 pre-implementation architecture review found that the design's native-fee realization is
+impossible on the unchanged Mech contracts: native `request()` debits the BalanceTracker at claim,
+and an undelivered/expired request has no requester reclaim path. A separate fund-then-deliver
+transaction has the same funded-but-undelivered hole. Program rulings §7.131–§7.134 therefore
+replace that open choice for revised mode:
+
+1. Today mode stays native ETH. Revised mode escrows **OLAS** in the router and uses the canonical
+   OLAS `BalanceTrackerFixedPriceToken` + FixedPriceToken Mech. No Mech request is posted or funded
+   at claim.
+2. Revised claim events contain the monotonic task/attempt identity, operator/evaluator, priority
+   Mech, deadline, and reserved rate, but **no Mech `requestId`**. The actual request ID first
+   exists in the delivery transaction.
+3. The router implements EIP-1271 as a view-only capability check over a closed signature
+   preimage binding generation, leg kind, task/attempt/verdict indices, Mech, request data, rate,
+   payment type, and the Marketplace's current router nonce. Only a live, unexpired, unreleased,
+   unsettled reservation returns the magic value.
+4. Delivery and settlement are one revert-on-failure Safe MultiSend: first the operator's
+   FixedPriceToken Mech calls `deliverMarketplaceWithSignatures`, which atomically creates the
+   request, emits `Deliver`, and pulls OLAS from the router; then the Safe calls the router's
+   solution/verdict claim with the expected request-ID preimage. The second call verifies exact
+   Marketplace request info, router requester identity, delivery Mech/operator, reservation,
+   digest, and replay state before recording and clearing the reservation. If either call fails,
+   both revert.
+5. Revised projector identity starts at claim without a request ID. It decodes the frozen
+   task/attempt correlation from `Deliver.requestData`, binds the real request ID there, and joins
+   the later router claim from the same ordered receipt. Marketplace ruling §7.123's
+   already-existing Mech-delivery precondition remains today-mode only; revised mode proves
+   Mech-Deliver-before-router-claim ordering inside one receipt.
+6. Revised `createTask` and `addAttempts` transfer OLAS into router escrow. Solution budget is
+   `solutionRate × maxTotal`; verdict budget is
+   `verdictRate × maxTotal × minVerdicts`. Close/release/expiry refund only reservations that
+   never entered the atomic delivery batch.
+
+The M7 contract is a fresh proxy/implementation generation, never an in-place V3 upgrade. Its
+policy bounds, status vocabulary, release minimum-hold, evaluator distinctness, and deployment
+scope are exactly program §7.134. Base mainnet's canonical OLAS token tracker/factory is the
+production target. Because the canonical inventory contains no Base-Sepolia OLAS FixedPriceToken
+rail, M7 proves the path with local mocks and a Base-mainnet fork; it does not silently deploy a
+Jinn-owned substitute on testnet.
