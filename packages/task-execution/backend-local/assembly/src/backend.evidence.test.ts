@@ -86,7 +86,7 @@ function backend(
     }),
     plan(_view, paths) {
       return {
-        argv: ["fixture"],
+        argv: [process.execPath, "-e", "process.exit(0)"],
         env: {},
         cwd: paths.work,
         validExitCodes: [0],
@@ -130,10 +130,16 @@ function backend(
         return { status: "not-announced", reference };
       },
     },
-    async execute() {
-      return { exitCode: 0 };
-    },
   });
+}
+
+async function terminalSnapshot(instance: LocalTaskExecutionBackend, submission: `urn:uuid:${string}`) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const snapshot = await instance.observe(submission);
+    if (snapshot.descriptor.derived.terminal) return snapshot;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("attempt did not become terminal");
 }
 
 describe("backend evidence capture posture (C3)", () => {
@@ -148,7 +154,7 @@ describe("backend evidence capture posture (C3)", () => {
     expect(ack.accepted).toBe(true);
     if (!ack.accepted) throw new Error("unreachable");
 
-    const snapshot = await instance.observe(ack.submission);
+    const snapshot = await terminalSnapshot(instance, ack.submission);
     expect(snapshot.descriptor.derived).toMatchObject({
       state: "delivered",
       terminal: true,
@@ -189,7 +195,7 @@ describe("backend evidence capture posture (C3)", () => {
     expect(ack.accepted).toBe(true);
     if (!ack.accepted) throw new Error("unreachable");
 
-    const snapshot = await instance.observe(ack.submission);
+    const snapshot = await terminalSnapshot(instance, ack.submission);
     expect(snapshot.descriptor.derived).toMatchObject({
       state: "failed",
       terminal: true,

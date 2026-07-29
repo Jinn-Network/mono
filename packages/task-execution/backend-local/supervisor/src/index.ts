@@ -9,7 +9,14 @@ export { foldAttemptRecord } from "./attempt-record.js";
 export { reconcileAttempt } from "./reconciler.js";
 export { runCancellationLadder } from "./cancellation.js";
 export { armDeadline, heartbeatIsStale } from "./deadline.js";
-export { readProcessStartTime } from "./shim.js";
+export {
+  probeShimAlive,
+  readOutcome,
+  readProcessStartTime,
+  readShimFingerprint,
+  spawnShim,
+} from "./shim.js";
+export type { OutcomeFile, ShimFingerprint } from "./shim.js";
 export type { JournalEvent, JournalEventIntent, SubmissionEvent, SubmissionEventIntent } from "./journal-types.js";
 export type { AttemptRecord, AttemptHarvestInput, AttemptOutputArtifact } from "./attempt-record.js";
 export type { AttemptReality, ReconciliationResult, ReconciliationClassification } from "./reconciler.js";

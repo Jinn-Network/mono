@@ -75,6 +75,11 @@ import {
   foldAttemptRecord,
   openAttemptJournal,
   openSubmissionSegment,
+  probeShimAlive,
+  readOutcome,
+  readShimFingerprint,
+  runCancellationLadder,
+  spawnShim,
 } from "@jinn-network/task-execution-supervisor";
 import type {
   CapabilityGrant,
@@ -198,19 +203,6 @@ export interface LocalBackendFaults {
   readonly afterDeliveryCheckpoint?: () => void;
 }
 
-export interface LocalExecutionInput {
-  readonly attempt: AttemptIdentity;
-  readonly paths: WorkspacePaths;
-  readonly plan: LaunchPlan;
-  readonly spawn: SpawnRequest;
-}
-
-export interface LocalExecutionOutcome {
-  readonly exitCode?: number;
-  readonly signal?: string;
-  readonly envelope?: ResultEnvelope;
-}
-
 export interface LocalTaskExecutionBackendConfig {
   readonly stateRoot: string;
   readonly source: string;
@@ -226,12 +218,8 @@ export interface LocalTaskExecutionBackendConfig {
   readonly recorderAvailability?: RecorderAvailability;
   readonly trustKeys?: TrustKeyConfig;
   readonly evidence?: EvidenceBindingPorts;
-  /**
-   * Injected custody runner. Production hosts normally adapt this to the supervisor shim; the
-   * conformance host injects a deterministic in-process driver. When absent, the accepted
-   * Attempt remains pending after durable spawn-intent for the kit's explicit drive seam.
-   */
-  readonly execute?: (input: LocalExecutionInput) => Promise<LocalExecutionOutcome>;
+  /** @deprecated Test compatibility only; production execution always uses the real shim. */
+  readonly execute?: (input: unknown) => Promise<unknown>;
   readonly capabilityGrants?: (
     grants: Readonly<Record<string, unknown>>,
   ) => readonly CapabilityGrant[];
@@ -802,19 +790,27 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
           resolver: this.config.secretForwardResolver,
         });
       }
-      if (this.config.execute !== undefined) {
-        await this.runAcceptedAttempt({
-          attempt: identity,
-          taskBytes,
-          task,
-          dispatchContextBytes,
-          paths: this.paths(attempt),
-          provisioner,
-          plan,
-          planBytes,
-          spawn,
-        });
-      }
+      void this.runAcceptedAttempt({
+        attempt: identity,
+        taskBytes,
+        task,
+        dispatchContextBytes,
+        paths: this.paths(attempt),
+        provisioner,
+        plan,
+        planBytes,
+        spawn,
+      }).catch((error: unknown) => {
+        const record = foldAttemptRecord(this.journal(attempt).read());
+        if (!record.terminal) {
+          this.appendTerminal(attempt, {
+            state: "failed",
+            blame: "infrastructure",
+            category: "backend-unavailable",
+            detail: error instanceof Error ? error.message : "shim supervision failed",
+          });
+        }
+      });
     } catch (error) {
       // Terminal planning/materialization failures must never retain a secret forward.
       rmSync(this.paths(attempt).secrets, { recursive: true, force: true });
@@ -852,6 +848,10 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         : {}),
     });
     this.capacity.release(attempt);
+    // Secret material is never retention data. Terminal cleanup is idempotent and happens even
+    // when the caller reached this path through a post-execution failure.
+    rmSync(this.paths(attempt).secrets, { recursive: true, force: true });
+    rmSync(this.paths(attempt).tmp, { recursive: true, force: true });
   }
 
   private async runAcceptedAttempt(input: {
@@ -912,14 +912,21 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       }
     }
 
+    spawnShim({
+      attemptId: attempt,
+      nonce: input.attempt.nonce,
+      metaDir: input.paths.meta,
+      secretsDir: input.paths.secrets,
+    }, input.spawn);
+    const fingerprint = await this.waitForShimFingerprint(input.paths.meta);
     this.journal(attempt).append({
       attemptId: attempt,
       type: "spawned",
       time: this.now(),
       details: {
         nonce: input.attempt.nonce,
-        pid: process.pid,
-        startTime: Date.now(),
+        pid: fingerprint.pid,
+        startTime: fingerprint.startTime,
         source: this.config.source,
       },
     });
@@ -934,23 +941,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       },
     });
 
-    let execution: LocalExecutionOutcome;
-    try {
-      execution = await this.config.execute!({
-        attempt: input.attempt,
-        paths: input.paths,
-        plan: input.plan,
-        spawn: input.spawn,
-      });
-    } catch (error) {
-      execution = {
-        signal: "EXECUTION_DRIVER_ERROR",
-        envelope: {
-          status: "error",
-          code: error instanceof Error ? error.message : "execution driver failed",
-        },
-      };
-    }
+    const execution = await this.waitForOutcome(input.paths.meta, input.attempt.nonce);
     this.journal(attempt).append({
       attemptId: attempt,
       type: "exec-finished",
@@ -999,7 +990,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         ...(execution.exitCode === undefined ? {} : { exitCode: execution.exitCode }),
         ...(execution.signal === undefined ? {} : { signal: execution.signal }),
       },
-      execution.envelope,
+      undefined,
     );
 
     let receipt;
@@ -1087,6 +1078,29 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         ? {}
         : { detail: interpreted.reasonCode }),
     });
+  }
+
+  private async waitForShimFingerprint(meta: string): Promise<NonNullable<ReturnType<typeof readShimFingerprint>>> {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const fingerprint = readShimFingerprint(meta);
+      if (fingerprint !== null) return fingerprint;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("shim did not publish a fingerprint");
+  }
+
+  private async waitForOutcome(meta: string, nonce: string): Promise<{ readonly exitCode?: number; readonly signal?: string }> {
+    for (;;) {
+      const outcome = readOutcome(meta, nonce);
+      if (outcome !== null) {
+        return {
+          ...(outcome.exitCode === null ? {} : { exitCode: outcome.exitCode }),
+          ...(outcome.termSignal === null ? {} : { signal: outcome.termSignal }),
+        };
+      }
+      if (!probeShimAlive(meta).alive) throw new Error("shim exited without a nonce-matching outcome");
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
   }
 
   private selectLauncher(view: TaskView): LauncherContract {
@@ -1262,6 +1276,22 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         source: this.config.source,
       },
     });
+    const paths = this.paths(attempt);
+    const fingerprint = readShimFingerprint(paths.meta);
+    if (fingerprint?.harnessPid !== undefined) {
+      const harnessPid = fingerprint.harnessPid;
+      void runCancellationLadder({}, {
+        signalTerm: () => { try { process.kill(-harnessPid, "SIGTERM"); } catch { /* exited races are resolved from outcome */ } },
+        signalKill: () => { try { process.kill(-harnessPid, "SIGKILL"); } catch { /* exited races are resolved from outcome */ } },
+        isSubtreeEmpty: () => {
+          try { process.kill(-harnessPid, 0); return false; } catch { return true; }
+        },
+        readOutcome: () => readOutcome(paths.meta, fingerprint.nonce),
+        harvest: () => undefined,
+        listPids: () => [harnessPid],
+        sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+      }).catch(() => undefined);
+    }
     return { requested: true };
   }
 

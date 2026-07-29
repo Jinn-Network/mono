@@ -5,8 +5,6 @@ export {
 } from "./backend.js";
 export type {
   LocalBackendFaults,
-  LocalExecutionInput,
-  LocalExecutionOutcome,
   LocalProvisionerInput,
   LocalTaskExecutionBackendConfig,
   ProvisionerCapabilities,

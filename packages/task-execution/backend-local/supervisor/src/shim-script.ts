@@ -16,7 +16,7 @@
 // the form `secrets/<name>`, resolved against `JINN_ATTEMPT_SECRETS_DIR` here, at exec, and never
 // written back to `metaDir` (§6.1 step 4).
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync,
 } from "node:fs";
@@ -77,6 +77,20 @@ function openLogFd(path: string | undefined): number | "ignore" {
   return openSync(path, "a");
 }
 
+/** Uses the same native process-table marker as recovery; never mix wall time with kernel ticks. */
+function ownProcessStartTime(): number {
+  if (process.platform === "linux") {
+    const stat = readFileSync(`/proc/${process.pid}/stat`, "utf8");
+    const afterComm = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
+    const value = Number(afterComm[19]);
+    if (Number.isFinite(value)) return value;
+  }
+  const output = execFileSync("ps", ["-o", "lstart=", "-p", String(process.pid)], { encoding: "utf8" }).trim();
+  const value = new Date(output).getTime();
+  if (Number.isFinite(value)) return value;
+  throw new Error("cannot determine shim process start marker");
+}
+
 async function main(): Promise<void> {
   const specPath = process.argv[2];
   if (!specPath) {
@@ -104,10 +118,9 @@ async function main(): Promise<void> {
     });
   }
 
-  // Step 3: write the fingerprint atomically, BEFORE spawning the harness. `startTime` is this
-  // process's own observed start marker (Date.now() at shim boot) — paired with `pid`, this is
-  // the fingerprint every liveness conclusion passes through (a bare PID is never trusted).
-  const startTime = Date.now();
+  // Step 3: write the fingerprint atomically, BEFORE spawning the harness. Its marker comes
+  // from the same native process-table representation recovery probes.
+  const startTime = ownProcessStartTime();
   const shimJsonPath = join(metaDir, "shim.json");
   atomicWriteFileSync(shimJsonPath, JSON.stringify({ pid: process.pid, startTime, nonce }));
 

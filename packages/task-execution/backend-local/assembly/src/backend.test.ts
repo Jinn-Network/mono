@@ -82,6 +82,7 @@ function fixture(
     afterDeliveryCheckpoint?: () => void;
     maxConcurrentAttempts?: number;
     provisioningRejectReason?: string;
+    argv?: readonly string[];
   } = {},
 ): LocalTaskExecutionBackend {
   const provisioner: ProvisionerContract = {
@@ -119,7 +120,7 @@ function fixture(
     plan(view, paths) {
       options.capturedViews?.push(view);
       return {
-        argv: ["fixture"],
+        argv: options.argv ?? ["fixture"],
         env: {},
         cwd: paths.work,
         validExitCodes: [0],
@@ -171,6 +172,25 @@ async function allFiles(root: string): Promise<string[]> {
 }
 
 describe("local TaskExecutionBackend submission path (C1)", () => {
+  test("starts a real shim without an in-process execution callback", async () => {
+    const root = await stateRoot("real-shim");
+    const backend = fixture(root, {
+      argv: [process.execPath, "-e", "setTimeout(() => process.exit(0), 200)"],
+    });
+    const task = taskBytes();
+    const attempt = await acceptedAttempt(backend, task, submissionBytes(task));
+    const shim = join(root, "attempts", attempt.slice("urn:uuid:".length), "meta", "shim.json");
+    for (let index = 0; index < 40; index += 1) {
+      try {
+        expect(JSON.parse(await readFile(shim, "utf8"))).toMatchObject({ nonce: expect.any(String) });
+        return;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
+    throw new Error("real shim fingerprint was never published");
+  });
+
   test("preserves byte-exact idempotency and rejects a same-scope byte conflict", async () => {
     const backend = fixture(await stateRoot("idempotency"));
     const task = taskBytes();
