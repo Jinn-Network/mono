@@ -110,6 +110,22 @@ describe("workspace paths", () => {
     });
   });
 
+  test("allows a stable unmanaged macOS /var ancestor", async ({ skip }) => {
+    if (process.platform !== "darwin") skip();
+    const varStats = await lstat("/var");
+    if (!varStats.isSymbolicLink()) skip();
+    const aliasBase = await mkdtemp("/var/tmp/jinn-recorder-alias-");
+    temporaryDirectories.push(aliasBase);
+    const paths = workspacePaths(join(aliasBase, "recording"));
+
+    await prepareWorkspaceDirectories(paths);
+
+    for (const path of [paths.root, paths.objects, paths.journal]) {
+      expect((await lstat(path)).isDirectory()).toBe(true);
+      expect((await lstat(path)).isSymbolicLink()).toBe(false);
+    }
+  });
+
   test("flushes each containing directory after creating managed directories", async () => {
     const parent = await temporaryDirectory("jinn-recorder-path-sync-");
     const probe = await open(parent, "r");

@@ -5,9 +5,10 @@ import {
   lstat,
   mkdir,
   open,
+  realpath,
   type FileHandle,
 } from "node:fs/promises";
-import { parse, relative, resolve, sep } from "node:path";
+import { dirname, parse, relative, resolve, sep } from "node:path";
 
 import { EvidenceAnnouncementJournalError } from "./errors.js";
 
@@ -52,6 +53,11 @@ function assertContained(rootDir: string, candidate: string): void {
   }
 }
 
+function isFilesystemRootChild(path: string): boolean {
+  const absolute = resolve(path);
+  return dirname(absolute) === parse(absolute).root;
+}
+
 async function rejectExistingSymlinkComponents(path: string): Promise<void> {
   const parsed = parse(path);
   const components = path.slice(parsed.root.length).split(sep).filter(Boolean);
@@ -69,6 +75,80 @@ async function rejectExistingSymlinkComponents(path: string): Promise<void> {
       mapIoError(error, "Failed to inspect a journal path.");
     }
   }
+}
+
+async function rejectNonPlatformAncestorSymlinks(path: string): Promise<void> {
+  const parsed = parse(path);
+  const components = path.slice(parsed.root.length).split(sep).filter(Boolean);
+  let current = parsed.root;
+  for (const component of components) {
+    current = resolve(current, component);
+    try {
+      const stats = await lstat(current);
+      if (stats.isSymbolicLink() && !isFilesystemRootChild(current)) {
+        throw journalError("A journal-managed path contains a symbolic link.");
+      }
+    } catch (error) {
+      if (isMissing(error)) return;
+      if (error instanceof EvidenceAnnouncementJournalError) throw error;
+      mapIoError(error, "Failed to inspect a journal path.");
+    }
+  }
+}
+
+async function canonicalizeConfiguredRoot(path: string): Promise<string> {
+  const lexicalRoot = resolve(path);
+  let unmanagedAncestor = dirname(lexicalRoot);
+  for (;;) {
+    try {
+      await lstat(unmanagedAncestor);
+      break;
+    } catch (error) {
+      if (!isMissing(error)) {
+        if (error instanceof EvidenceAnnouncementJournalError) throw error;
+        return mapIoError(
+          error,
+          "Failed to inspect the announcement journal ancestor.",
+        );
+      }
+      const parent = dirname(unmanagedAncestor);
+      if (parent === unmanagedAncestor) {
+        return mapIoError(
+          error,
+          "No existing announcement journal ancestor could be resolved.",
+        );
+      }
+      unmanagedAncestor = parent;
+    }
+  }
+  await rejectNonPlatformAncestorSymlinks(unmanagedAncestor);
+  let physicalAncestor: string;
+  try {
+    physicalAncestor = await realpath(unmanagedAncestor);
+    const stats = await lstat(physicalAncestor);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw journalError(
+        "The announcement journal ancestor does not resolve to a directory.",
+      );
+    }
+  } catch (error) {
+    if (error instanceof EvidenceAnnouncementJournalError) throw error;
+    return mapIoError(
+      error,
+      "Failed to resolve the announcement journal ancestor.",
+    );
+  }
+  const suffix = relative(unmanagedAncestor, lexicalRoot);
+  if (
+    suffix === ".." ||
+    suffix.startsWith(`..${sep}`) ||
+    parse(suffix).root.length > 0
+  ) {
+    throw journalError(
+      "The announcement journal root escapes its resolved ancestor.",
+    );
+  }
+  return resolve(physicalAncestor, suffix);
 }
 
 function assertOwned(stats: Awaited<ReturnType<typeof lstat>>, role: string): void {
@@ -114,7 +194,7 @@ export async function prepareJournalPaths(rootDirInput: string): Promise<Journal
   if (typeof rootDirInput !== "string" || rootDirInput.trim().length === 0) {
     throw journalError("The journal root must be a non-empty path.");
   }
-  const rootDir = resolve(rootDirInput);
+  const rootDir = await canonicalizeConfiguredRoot(rootDirInput);
   if (rootDir === parse(rootDir).root) {
     throw journalError("The filesystem root cannot be used as a journal root.");
   }

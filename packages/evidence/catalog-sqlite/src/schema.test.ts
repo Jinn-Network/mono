@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { chmod, link, lstat, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -43,7 +43,7 @@ describe("SQLite Evidence Catalog schema", () => {
 
     expect(SQLITE_EVIDENCE_CATALOG_SCHEMA_VERSION).toBe(1);
     expect(catalog.generation).toEqual(generation);
-    expect(catalog.databasePath).toBe(databasePath);
+    expect(catalog.databasePath).toBe(await realpath(databasePath));
     expect(await catalog.integrityCheck()).toEqual({ valid: true, messages: [] });
     await catalog.close();
 
@@ -102,6 +102,31 @@ describe("SQLite Evidence Catalog schema", () => {
     await expect(
       openSqliteEvidenceCatalog({ databasePath }),
     ).rejects.toMatchObject({ code: "IO_FAILURE" });
+  });
+
+  test("canonicalizes a stable unmanaged macOS /var ancestor", async ({
+    skip,
+  }) => {
+    if (process.platform !== "darwin") skip();
+    const varStats = await lstat("/var");
+    if (!varStats.isSymbolicLink()) skip();
+    const aliasBase = await mkdtemp("/var/tmp/jinn-catalog-alias-");
+    roots.push(aliasBase);
+    const databasePath = join(aliasBase, "private", "catalog.sqlite");
+
+    const catalog = await createSqliteEvidenceCatalog({
+      databasePath,
+      generation,
+    });
+    await catalog.close();
+
+    expect(await realpath(dirname(databasePath))).not.toBe(dirname(databasePath));
+    const reopened = await openSqliteEvidenceCatalog({ databasePath });
+    await expect(reopened.integrityCheck()).resolves.toEqual({
+      valid: true,
+      messages: [],
+    });
+    await reopened.close();
   });
 
   test.runIf(process.platform !== "win32")(

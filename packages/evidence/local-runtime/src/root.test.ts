@@ -4,13 +4,14 @@ import {
   chmod,
   link,
   lstat,
+  mkdtemp,
   readFile,
+  realpath,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
-import { mkdtemp } from "node:fs/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
@@ -92,6 +93,23 @@ describe("runtime root", () => {
     await expect(access(join(target, "runtime"))).rejects.toMatchObject({
       code: "ENOENT",
     });
+  });
+
+  it("canonicalizes a stable unmanaged macOS /var ancestor", async ({
+    skip,
+  }) => {
+    if (process.platform !== "darwin") skip();
+    const varStats = await lstat("/var");
+    if (!varStats.isSymbolicLink()) skip();
+    const aliasBase = await mkdtemp("/var/tmp/jinn-local-runtime-alias-");
+    roots.push(aliasBase);
+    const requestedRoot = join(aliasBase, "runtime");
+
+    const paths = await prepareRuntimePaths(requestedRoot);
+    expect(await realpath(requestedRoot)).not.toBe(requestedRoot);
+    expect(paths.rootDir).toBe(await realpath(requestedRoot));
+    const marker = await openRuntimeMarker(paths);
+    expect(marker.repositoryId).toMatch(/^local:/u);
   });
 
   it("creates a valid nonexisting leaf root with private ownership and modes", async () => {
