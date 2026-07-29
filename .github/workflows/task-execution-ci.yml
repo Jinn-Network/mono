@@ -418,8 +418,68 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  evaluation-harness:
+    needs: [foundation, backend, profiles, supervisor, workspace, launchers, backend-local]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore all Task Execution distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: task-execution-*-dist
+          path: .task-execution-dist
+      - name: Place Task Execution distributions
+        run: |
+          for package in protocol backend profiles; do
+            mkdir -p "packages/task-execution/${package}/dist"
+            cp -R ".task-execution-dist/task-execution-${package}-dist/." "packages/task-execution/${package}/dist/"
+          done
+          for package in supervisor workspace launchers; do
+            mkdir -p "packages/task-execution/backend-local/${package}/dist"
+            cp -R ".task-execution-dist/task-execution-${package}-dist/." "packages/task-execution/backend-local/${package}/dist/"
+          done
+          mkdir -p packages/task-execution/backend-local/assembly/dist
+          cp -R ".task-execution-dist/task-execution-backend-local-dist/." packages/task-execution/backend-local/assembly/dist/
+      - name: Install packed-smoke dependency toolchains
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable)
+          (cd packages/task-execution/backend && yarn install --immutable)
+          (cd packages/task-execution/profiles && yarn install --immutable)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable)
+          (cd packages/task-execution/backend-local/launchers && yarn install --immutable)
+      - name: Build evidence contract packages from source
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+          (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
+      - name: Verify Task Execution Evaluation Harness
+        working-directory: packages/task-execution/evaluation-harness
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Execution Evaluation Harness distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-execution-evaluation-harness-dist
+          path: packages/task-execution/evaluation-harness/dist
+          if-no-files-found: error
+          retention-days: 1
+
   verify:
-    needs: [architecture, foundation, backend, testing, profiles, supervisor, workspace, launchers, backend-local]
+    needs: [architecture, foundation, backend, testing, profiles, supervisor, workspace, launchers, backend-local, evaluation-harness]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -434,6 +494,7 @@ jobs:
           WORKSPACE_RESULT: ${{ needs.workspace.result }}
           LAUNCHERS_RESULT: ${{ needs.launchers.result }}
           BACKEND_LOCAL_RESULT: ${{ needs.backend-local.result }}
+          EVALUATION_HARNESS_RESULT: ${{ needs.evaluation-harness.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
@@ -444,7 +505,8 @@ jobs:
             "$SUPERVISOR_RESULT" \
             "$WORKSPACE_RESULT" \
             "$LAUNCHERS_RESULT" \
-            "$BACKEND_LOCAL_RESULT"; do
+            "$BACKEND_LOCAL_RESULT" \
+            "$EVALUATION_HARNESS_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4

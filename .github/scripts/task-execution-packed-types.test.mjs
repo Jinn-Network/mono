@@ -20,6 +20,7 @@ const packages = [
   [join(taskExecutionRoot, 'backend-local', 'workspace'), '@jinn-network/task-execution-workspace'],
   [join(taskExecutionRoot, 'backend-local', 'launchers'), '@jinn-network/task-execution-launchers'],
   [join(taskExecutionRoot, 'backend-local', 'assembly'), '@jinn-network/task-execution-backend-local'],
+  [join(taskExecutionRoot, 'evaluation-harness'), '@jinn-network/task-execution-evaluation-harness'],
 ];
 
 // The assembly's production dependencies reach outside the task-execution tree into the
@@ -30,6 +31,7 @@ const externalPackages = [
   [join(evidenceRoot, 'repository'), '@jinn-network/evidence-repository'],
   [join(evidenceRoot, 'discovery'), '@jinn-network/evidence-discovery'],
   [join(evidenceRoot, 'execution-recorder'), '@jinn-network/execution-recorder'],
+  [join(evidenceRoot, 'attestation-issuer'), '@jinn-network/attestation-issuer'],
 ];
 
 const codeEntrypoints = [
@@ -43,6 +45,7 @@ const codeEntrypoints = [
   '@jinn-network/task-execution-workspace',
   '@jinn-network/task-execution-launchers',
   '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-evaluation-harness',
 ];
 
 function run(command, args, options = {}) {

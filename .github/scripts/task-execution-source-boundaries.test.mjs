@@ -9,6 +9,7 @@ const packages = join(root, 'packages', 'task-execution');
 const taskExecutionDirectories = [
   'protocol', 'backend', 'testing', 'profiles',
   'backend-local/supervisor', 'backend-local/workspace', 'backend-local/launchers', 'backend-local/assembly',
+  'evaluation-harness',
 ];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
@@ -187,6 +188,7 @@ const TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_BACKEND = [
   '@jinn-network/task-execution-workspace',
   '@jinn-network/task-execution-launchers',
   '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-evaluation-harness',
 ];
 
 // profiles depends on protocol only (program §7.3/§7.15; plan Global Constraints): every other
@@ -198,6 +200,7 @@ const TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_PROFILES = [
   '@jinn-network/task-execution-workspace',
   '@jinn-network/task-execution-launchers',
   '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-evaluation-harness',
 ];
 
 // backend-local component import allowlists (backend plan Task A2 Step 4): a package-level
@@ -214,6 +217,7 @@ const SUPERVISOR_FORBIDDEN = [
   '@jinn-network/task-execution-workspace',
   '@jinn-network/task-execution-launchers',
   '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-evaluation-harness',
 ];
 
 // workspace: protocol + profiles only — never supervisor/launchers/assembly, never evidence.
@@ -225,6 +229,7 @@ const WORKSPACE_FORBIDDEN = [
   '@jinn-network/task-execution-supervisor',
   '@jinn-network/task-execution-launchers',
   '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-evaluation-harness',
 ];
 
 // launchers: protocol + profiles + supervisor + workspace — never assembly, never evidence, and
@@ -233,6 +238,7 @@ const LAUNCHERS_FORBIDDEN = [
   ...TASK_EXECUTION_FOREIGN_PACKAGES,
   '@jinn-network/task-execution-testing',
   '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-evaluation-harness',
   'node:child_process',
 ];
 
@@ -248,7 +254,29 @@ const ASSEMBLY_ALLOWED_EVIDENCE = [
 const ASSEMBLY_FORBIDDEN = [
   ...TASK_EXECUTION_FOREIGN_PACKAGES.filter((name) => !ASSEMBLY_ALLOWED_EVIDENCE.includes(name)),
   '@jinn-network/task-execution-testing',
+  '@jinn-network/task-execution-evaluation-harness',
 ];
+
+const EVALUATION_HARNESS_ALLOWED_EVIDENCE = [
+  '@jinn-network/evidence-protocol',
+  '@jinn-network/attestation-issuer',
+];
+const EVALUATION_HARNESS_PRODUCTION_FORBIDDEN = [
+  ...TASK_EXECUTION_FOREIGN_PACKAGES
+    .filter((name) => !EVALUATION_HARNESS_ALLOWED_EVIDENCE.includes(name)),
+  '@jinn-network/task-execution-backend',
+  '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-protocol',
+  '@jinn-network/task-execution-testing',
+];
+const EVALUATION_HARNESS_TEST_ALLOWED_EVIDENCE = [
+  ...EVALUATION_HARNESS_ALLOWED_EVIDENCE,
+  '@jinn-network/evidence-repository',
+  '@jinn-network/evidence-discovery',
+  '@jinn-network/execution-recorder',
+];
+const EVALUATION_HARNESS_TEST_FORBIDDEN = TASK_EXECUTION_FOREIGN_PACKAGES
+  .filter((name) => !EVALUATION_HARNESS_TEST_ALLOWED_EVIDENCE.includes(name));
 
 // The downstream backend-local conformance test is the sanctioned real-assembly consumer
 // (backend plan C4, program §7.25). It injects the evidence repository/catalog test
@@ -332,6 +360,28 @@ test('task-execution source boundaries remain one-way across the approved graph'
   assertBoundary(join(packages, 'backend-local', 'workspace', 'src'), WORKSPACE_FORBIDDEN);
   assertBoundary(join(packages, 'backend-local', 'launchers', 'src'), LAUNCHERS_FORBIDDEN);
   assertBoundary(join(packages, 'backend-local', 'assembly', 'src'), ASSEMBLY_FORBIDDEN);
+
+  // The harness consumes the launcher/workspace/supervisor contract surface and only the
+  // Evidence Protocol + Attestation Issuer production contracts. Assembly and fake evidence
+  // bindings are downstream integration-test dependencies, never production imports.
+  const harnessSrc = join(packages, 'evaluation-harness', 'src');
+  const harnessTests = files(harnessSrc)
+    .filter((file) => /\.test\.[cm]?[jt]sx?$/u.test(file));
+  const harnessProduction = files(harnessSrc)
+    .filter((file) => !harnessTests.includes(file));
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      harnessProduction,
+      EVALUATION_HARNESS_PRODUCTION_FORBIDDEN,
+    ),
+    [],
+    'evaluation-harness production source crosses its approved contract boundary',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(harnessTests, EVALUATION_HARNESS_TEST_FORBIDDEN),
+    [],
+    'evaluation-harness tests may import only approved injected evidence bindings',
+  );
 });
 
 test('cross-tree consumption: only assembly, the testing kit slice, and the evaluation harness may import backend-local components (program §7.18)', () => {
