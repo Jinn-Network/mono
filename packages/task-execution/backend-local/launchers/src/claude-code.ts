@@ -30,6 +30,7 @@ export function makeClaudeCodeLauncher(options: LauncherOptions = {}): LauncherC
         blameExitCodes: [{ match: { signal: "SIGKILL" }, blame: "infrastructure", reasonCode: "killed" }],
         resultContract: { envelopeFormat: "claude-code-stream-json", outputSchemaFlag: "--json-schema", structuredOutputArtifact: "out/structured-output.json", correlationFields: ["harnessVersion", "capabilities", "sessionId"] },
         interruptionBehavior: "recoverable",
+        secretForwards: [],
       };
     },
   };

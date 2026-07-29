@@ -61,6 +61,7 @@ const FIXED_PLAN: LaunchPlan = {
   blameExitCodes: [{ match: { exitCode: 1 }, blame: "task", reasonCode: "generic-failure" }],
   resultContract: { envelopeFormat: "stub-envelope-v1" },
   interruptionBehavior: "repeatable",
+  secretForwards: [{ grantKey: "api-key", target: "api-key" }],
 };
 
 const stubLauncher: LauncherContract = {
@@ -72,6 +73,7 @@ const stubLauncher: LauncherContract = {
     structuredOutput: false,
     resume: false,
     interruptionBehaviorDefault: "repeatable",
+    secretForwards: [{ grantKey: "api-key", target: "api-key" }],
     runPinning: { keys: [] },
   }),
   // A launcher never spawns, retries, or holds state (§8.4) — `plan` is a pure function of its

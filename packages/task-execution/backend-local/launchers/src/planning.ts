@@ -74,6 +74,7 @@ export function baseEnv(paths: WorkspacePaths, attempt: AttemptIdentity): Record
 export function capabilities(
   keys: readonly { key: string; inventory: readonly string[] }[],
   resume: boolean,
+  secretForwards: readonly { readonly grantKey: string; readonly target: string }[] = [],
 ): LauncherCapabilities {
   return {
     taskProfiles: ["https://jinn.network/task-profiles/repository-work/1.0", "https://jinn.network/task-profiles/evaluation-task/1.0"],
@@ -82,6 +83,7 @@ export function capabilities(
     structuredOutput: true,
     resume,
     interruptionBehaviorDefault: resume ? "recoverable" : "repeatable",
+    secretForwards,
     runPinning: { keys: keys.map((entry) => ({ ...entry, posture: "enforced" })) },
   };
 }

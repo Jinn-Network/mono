@@ -19,6 +19,10 @@ import {
 } from "./runtime.js";
 
 export const EVALUATION_LAUNCHER_ID = "evaluation-harness";
+const DEFAULT_SIGNER_SECRET_FORWARD = {
+  grantKey: "evaluator-agent-key",
+  target: "evaluator-agent-key.pem",
+} as const;
 
 /**
  * The default launcher module is deliberately adapter-empty. Concrete evaluator registrations
@@ -45,6 +49,8 @@ export interface EvaluationLauncherOptions {
   readonly nodeExecutable?: string;
   /** Must agree with the host-selected evaluator registration's recovery contract. */
   readonly interruptionBehavior?: InterruptionBehavior;
+  /** Host-selected signer grant and Attempt-local target; never a secret path or value. */
+  readonly signerSecretForward?: { readonly grantKey: string; readonly target: string };
   readonly probe?: () => Promise<ProbeResult>;
 }
 
@@ -55,6 +61,7 @@ function nonEmpty(value: string, label: string): string {
 
 function launcherCapabilities(
   interruptionBehavior: InterruptionBehavior,
+  signerSecretForward: { readonly grantKey: string; readonly target: string },
 ): LauncherCapabilities {
   return {
     taskProfiles: [EVALUATION_TASK_PROFILE_URI],
@@ -68,6 +75,7 @@ function launcherCapabilities(
     structuredOutput: false,
     resume: interruptionBehavior === "recoverable",
     interruptionBehaviorDefault: interruptionBehavior,
+    secretForwards: [signerSecretForward],
     runPinning: {
       keys: [{
         key: "harness",
@@ -83,6 +91,7 @@ function launchPlan(
   entrypoint: string,
   nodeExecutable: string,
   interruptionBehavior: InterruptionBehavior,
+  signerSecretForward: { readonly grantKey: string; readonly target: string },
   view: TaskView,
   paths: WorkspacePaths,
   _attempt: AttemptIdentity,
@@ -130,6 +139,7 @@ function launchPlan(
       structuredOutputArtifact: "out/verdict",
     },
     interruptionBehavior,
+    secretForwards: [signerSecretForward],
   };
 }
 
@@ -151,10 +161,13 @@ export function makeEvaluationLauncher(
     "nodeExecutable",
   );
   const interruptionBehavior = options.interruptionBehavior ?? "repeatable";
+  const signerSecretForward = options.signerSecretForward ?? DEFAULT_SIGNER_SECRET_FORWARD;
+  nonEmpty(signerSecretForward.grantKey, "signerSecretForward.grantKey");
+  nonEmpty(signerSecretForward.target, "signerSecretForward.target");
 
   return Object.freeze({
     id: EVALUATION_LAUNCHER_ID,
-    capabilities: () => launcherCapabilities(interruptionBehavior),
+    capabilities: () => launcherCapabilities(interruptionBehavior, signerSecretForward),
     ...(options.probe === undefined ? {} : { probe: options.probe }),
     plan(
       view: TaskView,
@@ -166,6 +179,7 @@ export function makeEvaluationLauncher(
         entrypoint,
         nodeExecutable,
         interruptionBehavior,
+        signerSecretForward,
         view,
         paths,
         attempt,

@@ -19,7 +19,7 @@ test("materializes a resolver-owned secret into an exclusive 0600 declared targe
     attempt: { attemptUri: "urn:uuid:11111111-1111-4111-8111-111111111111", nonce: "n", attemptNumber: 1 },
     secrets: join(root, "secrets"),
     forwards: [{ grantKey: "evaluator-key", target: "evaluator.pem" }],
-    grants: new Map([["evaluator-key", { reference: "opaque" }]]),
+    grants: [{ key: "evaluator-key", descriptor: { reference: "opaque" } }],
     resolver: { resolve },
   });
 
@@ -38,7 +38,7 @@ test("rejects a hostile declared target before calling the resolver", async () =
     attempt: { attemptUri: "urn:uuid:11111111-1111-4111-8111-111111111111", nonce: "n", attemptNumber: 1 },
     secrets: join(root, "secrets"),
     forwards: [{ grantKey: "evaluator-key", target: "../escape" }],
-    grants: new Map([["evaluator-key", { reference: "opaque" }]]),
+    grants: [{ key: "evaluator-key", descriptor: { reference: "opaque" } }],
     resolver: { resolve },
   })).rejects.toThrow("portable basename");
   expect(resolve).not.toHaveBeenCalled();
@@ -51,7 +51,7 @@ test("rejects duplicate or missing grants before resolver I/O", async () => {
   const input = {
     attempt: { attemptUri: "urn:uuid:11111111-1111-4111-8111-111111111111", nonce: "n", attemptNumber: 1 },
     secrets: join(root, "secrets"),
-    grants: new Map([["one", { reference: "opaque" }]]),
+    grants: [{ key: "one", descriptor: { reference: "opaque" } }],
     resolver: { resolve },
   } as const;
 
@@ -61,6 +61,14 @@ test("rejects duplicate or missing grants before resolver I/O", async () => {
   await expect(materializeSecretForwards({ ...input, forwards: [
     { grantKey: "missing", target: "missing" },
   ] })).rejects.toThrow("missing grant");
+  await expect(materializeSecretForwards({
+    ...input,
+    grants: [
+      { key: "one", descriptor: { reference: "first" } },
+      { key: "one", descriptor: { reference: "second" } },
+    ],
+    forwards: [{ grantKey: "one", target: "one" }],
+  })).rejects.toThrow("unique keys");
   expect(resolve).not.toHaveBeenCalled();
 });
 
@@ -76,7 +84,7 @@ test("refuses existing and symlink targets and zeroes resolver-owned buffers", a
   const input = {
     attempt: { attemptUri: "urn:uuid:11111111-1111-4111-8111-111111111111", nonce: "n", attemptNumber: 1 },
     secrets,
-    grants: new Map([["one", { reference: "opaque" }]]),
+    grants: [{ key: "one", descriptor: { reference: "opaque" } }],
     resolver: { resolve },
   } as const;
 

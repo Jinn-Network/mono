@@ -107,7 +107,7 @@ export function describeWorkspaceContract(subject: WorkspaceContractSubject): vo
       void executionCalled;
     });
 
-    test("grant handles are collision-safe references and never leak descriptors to meta/logs", async () => {
+    test("grant descriptors remain backend-owned until secret-forward materialization", async () => {
       const target = await paths();
       const secret = "resolved-secret-material";
       const { provisioner } = await subject.make({
@@ -119,10 +119,7 @@ export function describeWorkspaceContract(subject: WorkspaceContractSubject): vo
         { key: "a_b", descriptor: { token: secret } },
       ];
       await provisioner.setup(view(), target, grants);
-      const handles = await readdir(target.secrets);
-      expect(handles).toHaveLength(2);
-      expect(new Set(handles).size).toBe(2);
-      for (const handle of handles) expect(await readFile(join(target.secrets, handle), "utf8")).not.toContain(secret);
+      expect(await readdir(target.secrets)).toEqual([]);
       const backendText = (await Promise.all([target.meta, target.logs].map(async (dir) =>
         Promise.all((await readdir(dir)).map((name) => readFile(join(dir, name), "utf8")))))).flat().join("\n");
       expect(backendText).not.toContain(secret);

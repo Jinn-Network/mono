@@ -31,6 +31,7 @@ export function makeCursorLauncher(options: LauncherOptions = {}): LauncherContr
         blameExitCodes: [{ match: { signal: "SIGKILL" }, blame: "infrastructure", reasonCode: "killed" }],
         resultContract: { envelopeFormat: "cursor-agent-json", outputSchemaFlag: "--output-schema", structuredOutputArtifact: "out/structured-output.json", correlationFields: ["harnessVersion", "capabilities", "sessionId"] },
         interruptionBehavior: "repeatable",
+        secretForwards: [],
       };
     },
   };

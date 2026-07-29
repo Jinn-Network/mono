@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -23,6 +23,13 @@ describe("directory provisioner", () => {
       expect((await stat(directory)).isDirectory()).toBe(true);
     }
     expect((await stat(target.secrets)).mode & 0o777).toBe(0o700);
+  });
+
+  it("does not materialize opaque grant handles before backend-owned secret forwarding", async () => {
+    const target = await paths();
+    await makeDirProvisioner({ sealedTaskBytes: Buffer.from('{"task":true}'), dispatchContextBytes: Buffer.from("{}"), runtime })
+      .setup(view, target, [{ key: "evaluator-agent-key", descriptor: { reference: "opaque" } }]);
+    expect(await readdir(target.secrets)).toEqual([]);
   });
 
   it("writes sealed Task bytes verbatim and rejects fetched digest corruption", async () => {

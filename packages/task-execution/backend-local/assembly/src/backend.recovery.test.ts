@@ -160,6 +160,7 @@ interface BackendFixtureOptions {
   readonly recorderAvailability?: "none" | "available" | "always";
   readonly heartbeatIntervalMs?: number;
   readonly evidenceRepository?: InMemoryEvidenceRepository;
+  readonly secretForwards?: readonly { readonly grantKey: string; readonly target: string }[];
 }
 
 function fixture(root: string, options: BackendFixtureOptions = {}): LocalTaskExecutionBackend {
@@ -173,6 +174,7 @@ function fixture(root: string, options: BackendFixtureOptions = {}): LocalTaskEx
       structuredOutput: false,
       resume: false,
       interruptionBehaviorDefault: "repeatable",
+      secretForwards: options.secretForwards ?? [],
       runPinning: { keys: [] },
     }),
     plan(view, workspace) {
@@ -483,6 +485,7 @@ describe("restart reconstruction and §6.4 actions", () => {
   test("a prior lost terminal accepts a recovered matching outcome as the only corrective terminal", async () => {
     const root = await stateRoot("lost-correction");
     const first = fixture(root, {
+      secretForwards: [{ grantKey: "key", target: "key" }],
       plan(_view, workspace) {
         return {
           argv: [process.execPath, "-e", "process.exit(0)"],
@@ -622,6 +625,7 @@ describe("restart reconstruction and §6.4 actions", () => {
 
     const intendedRoot = await stateRoot("intended");
     const intended = fixture(intendedRoot, {
+      secretForwards: [{ grantKey: "key", target: "key" }],
       plan(_view, workspace) {
         return {
           argv: [process.execPath, "-e", "process.exit(0)"],

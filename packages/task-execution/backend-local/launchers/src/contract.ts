@@ -82,6 +82,8 @@ export interface LauncherCapabilities {
   readonly structuredOutput: boolean;
   readonly resume: boolean;
   readonly interruptionBehaviorDefault: InterruptionBehavior;
+  /** Exact non-secret forwards this launcher may require for every planned invocation. */
+  readonly secretForwards: readonly { readonly grantKey: string; readonly target: string }[];
   readonly runPinning: { readonly keys: readonly LauncherRunPinningKeySupport[] };
 }
 

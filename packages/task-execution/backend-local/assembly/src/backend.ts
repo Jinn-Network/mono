@@ -218,6 +218,47 @@ function validSecretForwardTarget(value: string): boolean {
     && nonEmptyString(value);
 }
 
+function declaredSecretForwards(plan: LaunchPlan): readonly { readonly grantKey: string; readonly target: string }[] {
+  return plan.secretForwards ?? [];
+}
+
+function validateSecretForwardPlan(
+  launcher: LauncherContract,
+  plan: LaunchPlan,
+): readonly { readonly grantKey: string; readonly target: string }[] {
+  const declared = launcher.capabilities().secretForwards;
+  const planned = declaredSecretForwards(plan);
+  if (
+    declared.length !== planned.length
+    || declared.some((forward, index) =>
+      forward.grantKey !== planned[index]?.grantKey || forward.target !== planned[index]?.target)
+  ) {
+    throw new Error("LaunchPlan secret forwards must exactly match the launcher capability declaration");
+  }
+  const targets = new Set<string>();
+  const grantKeys = new Set<string>();
+  for (const forward of declared) {
+    if (
+      !nonEmptyString(forward.grantKey)
+      || !validSecretForwardTarget(forward.target)
+      || targets.has(forward.target)
+      || grantKeys.has(forward.grantKey)
+    ) {
+      throw new Error("launcher secret forward declarations are invalid");
+    }
+    targets.add(forward.target);
+    grantKeys.add(forward.grantKey);
+  }
+  for (const value of Object.values(plan.env)) {
+    if (!value.startsWith("secrets/")) continue;
+    const target = value.slice("secrets/".length);
+    if (declared.filter((forward) => forward.target === target).length !== 1) {
+      throw new Error("launch environment secret reference has no declared secret forward");
+    }
+  }
+  return planned;
+}
+
 function parseLaunchPlan(value: unknown): LaunchPlan {
   if (!isRecord(value) || !hasOnlyKeys(
     value,
@@ -690,6 +731,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       provisioner: this.config.provisionerCapabilities,
       recorderAvailability: this.config.recorderAvailability ?? "none",
       trustKeys: this.config.trustKeys ?? {},
+      secretForwardResolverConfigured: this.config.secretForwardResolver !== undefined,
       custody: nativeCustodySupport(),
     });
   }
@@ -698,20 +740,40 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     return this.capabilitiesValue();
   }
 
-  async preflight(_request: PreflightRequest): Promise<PreflightReport> {
+  private preflightLaunchers(request: PreflightRequest): readonly LauncherContract[] {
+    const harness = requestedInventoryValue(request.requirements?.["harness"]);
+    return this.config.launchers.filter((launcher) =>
+      (request.taskProfile === undefined
+        || launcher.capabilities().taskProfiles.includes(request.taskProfile))
+      && (harness === undefined || launcher.id === harness));
+  }
+
+  private preflightUnavailable(detail: string): PreflightReport {
+    return {
+      ready: false,
+      detail,
+      error: new TaskExecutionError("backend-unavailable", { detail }),
+    };
+  }
+
+  async preflight(request: PreflightRequest): Promise<PreflightReport> {
     this.assertWriter();
     const custody = nativeCustodySupport();
     if (!custody.ready) {
-      return {
-        ready: false,
-        detail: custody.detail ?? "attempt custody support is unavailable",
-        error: new TaskExecutionError("backend-unavailable", {
-          detail: custody.detail ?? "attempt custody support is unavailable",
-        }),
-      };
+      return this.preflightUnavailable(custody.detail ?? "attempt custody support is unavailable");
+    }
+    const candidates = this.preflightLaunchers(request);
+    if (candidates.length === 0) {
+      return this.preflightUnavailable("no configured launcher matches the requested task profile and harness");
+    }
+    const viable = candidates.filter((launcher) =>
+      this.config.secretForwardResolver !== undefined
+        || launcher.capabilities().secretForwards.length === 0);
+    if (viable.length === 0) {
+      return this.preflightUnavailable("selected launcher requires secret forwards but no SecretForwardResolver is configured");
     }
     const probes: ProbeResult[] = await Promise.all(
-      this.config.launchers.map(
+      viable.map(
         async (launcher): Promise<ProbeResult> =>
           launcher.probe?.() ?? { ready: true },
       ),
@@ -719,13 +781,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     const failed = probes.find((probe) => !probe.ready);
     return failed === undefined
       ? { ready: true }
-      : {
-          ready: false,
-          detail: failed.detail ?? "a configured launcher is not ready",
-          error: new TaskExecutionError("backend-unavailable", {
-            detail: failed.detail ?? "launcher probe failed",
-          }),
-        };
+      : this.preflightUnavailable(failed.detail ?? "launcher probe failed");
   }
 
   async submit(
@@ -1067,15 +1123,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
           source: this.config.source,
         },
       });
-      const secretForwards = plan.secretForwards ?? [];
-      const forwardTargets = new Set(secretForwards.map(({ target }) => target));
-      for (const value of Object.values(spawn.env)) {
-        if (!value.startsWith("secrets/")) continue;
-        const target = value.slice("secrets/".length);
-        if (!forwardTargets.has(target)) {
-          throw new Error("launch environment secret reference has no declared secret forward");
-        }
-      }
+      const secretForwards = validateSecretForwardPlan(launcher, plan);
       if (secretForwards.length > 0) {
         if (this.config.secretForwardResolver === undefined) {
           throw new Error("launcher requires secret forwards but no SecretForwardResolver is configured");
@@ -1084,7 +1132,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
           attempt: identity,
           secrets: this.paths(attempt).secrets,
           forwards: secretForwards,
-          grants: new Map(grants.map((grant) => [grant.key, grant.descriptor])),
+          grants,
           resolver: this.config.secretForwardResolver,
         });
       }
@@ -1122,6 +1170,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
           state: "failed",
           blame: "infrastructure",
           category: "backend-unavailable",
+          neverExecuted: true,
           detail: error instanceof Error ? error.message : "launcher planning failed",
           source: this.config.source,
         },

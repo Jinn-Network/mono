@@ -6,6 +6,7 @@ function launcher(
   id: string,
   taskProfiles: string[],
   keys: Array<{ key: string; inventory: string[] }> = [],
+  secretForwards: Array<{ grantKey: string; target: string }> = [],
 ): LauncherContract {
   return {
     id,
@@ -16,6 +17,7 @@ function launcher(
       structuredOutput: false,
       resume: false,
       interruptionBehaviorDefault: "repeatable",
+      secretForwards,
       runPinning: {
         keys: keys.map((entry) => ({ ...entry, posture: "enforced" as const })),
       },
@@ -129,5 +131,33 @@ describe("assembleCapabilities", () => {
     });
     expect(capabilities.cancel).toBe(false);
     expect(capabilities.deadlineEnforcement).toBe(false);
+  });
+
+  test("excludes secret-requiring launchers without hiding a non-secret peer", () => {
+    const input = {
+      launchers: [
+        launcher("secret", ["profile:shared", "profile:secret"], [
+          { key: "harness", inventory: ["secret"] },
+        ], [{ grantKey: "key", target: "key" }]),
+        launcher("plain", ["profile:shared"], [
+          { key: "harness", inventory: ["plain"] },
+        ]),
+      ],
+      provisioner: {
+        taskProfiles: ["profile:shared", "profile:secret"],
+        workspaceKinds: ["dir" as const], inputMediaTypes: [], outputMediaTypes: [], isolation: ["process"],
+      },
+      recorderAvailability: "none" as const,
+      trustKeys: {},
+    };
+
+    expect(assembleCapabilities({ ...input, secretForwardResolverConfigured: false })).toMatchObject({
+      taskProfiles: ["profile:shared"],
+      runPinning: { keys: [{ key: "harness", inventory: ["plain"], posture: "enforced" }] },
+    });
+    expect(assembleCapabilities({ ...input, secretForwardResolverConfigured: true })).toMatchObject({
+      taskProfiles: ["profile:secret", "profile:shared"],
+      runPinning: { keys: [{ key: "harness", inventory: ["plain", "secret"], posture: "enforced" }] },
+    });
   });
 });

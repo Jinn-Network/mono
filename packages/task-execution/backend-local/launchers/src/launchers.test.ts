@@ -18,6 +18,19 @@ describe("v1 launchers", () => {
     });
   }
 
+  it("declares every plan's secret forwards statically", () => {
+    expect(hermesLauncher.capabilities().secretForwards).toEqual([
+      { grantKey: "openrouter-api-key", target: "openrouter-api-key" },
+    ]);
+    expect(hermesLauncher.plan(view, paths, attempt).secretForwards).toEqual(
+      hermesLauncher.capabilities().secretForwards,
+    );
+    for (const launcher of [claudeCodeLauncher, codexLauncher, cursorLauncher]) {
+      expect(launcher.capabilities().secretForwards).toEqual([]);
+      expect(launcher.plan(view, paths, attempt).secretForwards).toEqual([]);
+    }
+  });
+
   it("uses the exit record over a lying success envelope and preserves resumable limits", () => {
     const plan = claudeCodeLauncher.plan(view, paths, attempt);
     expect(interpretResult(plan, { exitCode: 1 }, { subtype: "success" }).state).toBe("failed");

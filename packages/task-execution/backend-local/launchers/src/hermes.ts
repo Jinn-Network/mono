@@ -5,6 +5,7 @@ import {
 } from "./planning.js";
 
 const ITERATIONS: Record<string, string> = { low: "16", medium: "32", high: "64", xhigh: "96", max: "128" };
+const SECRET_FORWARDS = [{ grantKey: "openrouter-api-key", target: "openrouter-api-key" }] as const;
 export function makeHermesLauncher(options: LauncherOptions = {}): LauncherContract {
   return {
     id: "hermes",
@@ -14,7 +15,7 @@ export function makeHermesLauncher(options: LauncherOptions = {}): LauncherContr
       { key: "isolationPolicy", inventory: ["unrestricted"] },
       { key: "loadout", inventory: ["jinn.skill.v1"] },
       { key: "model", inventory: ["pinned-id"] },
-    ], true),
+    ], true, SECRET_FORWARDS),
     probe: probeFrom(options, "hermes"),
     plan(view, paths, attempt) {
       const harness = requireHarness(view, "hermes"); isolation(view);
@@ -30,6 +31,7 @@ export function makeHermesLauncher(options: LauncherOptions = {}): LauncherContr
         blameExitCodes: [{ match: { signal: "SIGKILL" }, blame: "infrastructure", reasonCode: "killed" }],
         resultContract: { envelopeFormat: "hermes-json", outputSchemaFlag: "--json-schema", structuredOutputArtifact: "out/structured-output.json", correlationFields: ["harnessVersion", "capabilities", "sessionId"] },
         interruptionBehavior: "recoverable",
+        secretForwards: SECRET_FORWARDS,
       };
     },
   };

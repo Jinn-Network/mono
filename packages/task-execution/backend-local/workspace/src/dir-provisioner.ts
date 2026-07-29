@@ -2,10 +2,9 @@ import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
-import { resolveGrantsToSecrets } from "./grants.js";
 import { materializeInput } from "./materialize.js";
 import { harvest } from "./harvest.js";
-import type { CapabilityGrant, LaunchEnv, ProvisionerContract, WorkspacePaths } from "./contract.js";
+import type { LaunchEnv, ProvisionerContract, WorkspacePaths } from "./contract.js";
 import type { TaskView } from "./task-view.js";
 
 export interface DirProvisionerOptions {
@@ -67,7 +66,7 @@ function executionEnv(launch: LaunchEnv): Record<string, string> {
 export function makeDirProvisioner(options: DirProvisionerOptions): ProvisionerContract {
   return {
     workspaceKind: () => "dir",
-    async setup(view: TaskView, paths: WorkspacePaths, grants: readonly CapabilityGrant[]): Promise<void> {
+    async setup(view: TaskView, paths: WorkspacePaths): Promise<void> {
       try {
         await mkdir(paths.root, { recursive: true });
         for (const path of [paths.input, paths.work, paths.out, paths.logs, paths.harnessState, paths.tmp, paths.meta]) await mkdir(path, { recursive: true });
@@ -79,7 +78,6 @@ export function makeDirProvisioner(options: DirProvisionerOptions): ProvisionerC
         for (const input of view.task.inputs ?? []) await materializeInput(input, paths.input, options.fetchInput ?? (async () => { throw new Error("input fetcher unavailable"); }));
         const loadout = ((view.effectiveRequirements ?? {}) as Record<string, unknown>).loadout;
         if (loadout !== undefined) await materializeInput(loadout as ResourceDescriptor, paths.input, options.fetchInput ?? (async () => { throw new Error("loadout fetcher unavailable"); }));
-        await resolveGrantsToSecrets(grants, paths.secrets);
         await sealInputAndSnapshot(paths);
         if (options.quotaBytes !== undefined) {
           if (!options.runtime?.startQuotaEnforcement) throw new Error("quota requires startQuotaEnforcement runtime port");

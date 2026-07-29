@@ -53,6 +53,7 @@ const launcherCapabilities: LauncherCapabilities = {
     structuredOutput: false,
     resume: false,
     interruptionBehaviorDefault: "repeatable",
+    secretForwards: [],
     runPinning: { keys: [] },
 };
 
@@ -78,6 +79,7 @@ function makeNodeProcessLauncher(delayMs: number): LauncherContract {
         validExitCodes: [0],
         resultContract: { envelopeFormat: "fixture" },
         interruptionBehavior: "repeatable",
+        secretForwards: [],
       };
     },
   };

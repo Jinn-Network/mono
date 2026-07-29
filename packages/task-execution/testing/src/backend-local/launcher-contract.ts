@@ -120,6 +120,19 @@ export function assertSecretEnvAreReferences(launcher: LauncherContract): void {
   }
 }
 
+/** Static forwards are the closed declaration a plan may use; file-reading launchers need no env reference. */
+export function assertSecretForwardsMatchCapabilities(launcher: LauncherContract): void {
+  const { view, paths, attempt } = makeSampleLauncherInputs();
+  const declared = launcher.capabilities().secretForwards;
+  const planned = launcher.plan(view, paths, attempt).secretForwards ?? [];
+  expect(planned).toEqual(declared);
+  for (const value of Object.values(launcher.plan(view, paths, attempt).env)) {
+    if (!value.startsWith("secrets/")) continue;
+    const target = value.slice("secrets/".length);
+    expect(declared.filter((forward) => forward.target === target)).toHaveLength(1);
+  }
+}
+
 /**
  * The launcher-contract conformance suite (design §16). Runs the full determinism/hermeticity/
  * statelessness/secret-discipline assertion set against any `LauncherContract` — proven now
@@ -135,5 +148,6 @@ export function describeLauncherContract(launcher: LauncherContract): void {
     test("plan is hermetic (ambient env never leaks in)", () => assertPlanHermetic(launcher));
     test("plan is stateless across differing inputs", () => assertPlanStateless(launcher));
     test("secret-shaped env values are references, not resolved values", () => assertSecretEnvAreReferences(launcher));
+    test("secret forwards exactly match static capabilities", () => assertSecretForwardsMatchCapabilities(launcher));
   });
 }

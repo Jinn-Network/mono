@@ -30,6 +30,7 @@ export function makeCodexLauncher(options: LauncherOptions = {}): LauncherContra
         blameExitCodes: [{ match: { signal: "SIGKILL" }, blame: "infrastructure", reasonCode: "killed" }],
         resultContract: { envelopeFormat: "codex-exec-json", outputSchemaFlag: "--output-schema", structuredOutputArtifact: "out/structured-output.json", correlationFields: ["harnessVersion", "capabilities", "sessionId"] },
         interruptionBehavior: "recoverable",
+        secretForwards: [],
       };
     },
   };

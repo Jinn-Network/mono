@@ -16,6 +16,7 @@ export {
   assertPlanHermetic,
   assertPlanStateless,
   assertSecretEnvAreReferences,
+  assertSecretForwardsMatchCapabilities,
   describeLauncherContract,
   makeSampleLauncherInputs,
 } from "./launcher-contract.js";

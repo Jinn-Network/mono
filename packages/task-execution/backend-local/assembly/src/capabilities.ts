@@ -26,6 +26,8 @@ export interface AssembleCapabilitiesInput {
   readonly provisioner: CapabilityProvisionerConfig;
   readonly recorderAvailability: RecorderAvailability;
   readonly trustKeys: TrustKeyConfig;
+  /** Secret-forward launchers are not statically usable until the host injects a resolver. */
+  readonly secretForwardResolverConfigured?: boolean;
   /** Linux custody support is dynamic; absent retains the non-Linux residual path. */
   readonly custody?: { readonly ready: boolean };
 }
@@ -38,8 +40,11 @@ function sortedUnique(values: Iterable<string>): string[] {
 export function assembleCapabilities(
   input: AssembleCapabilitiesInput,
 ): BackendCapabilities {
+  const viableLaunchers = input.launchers.filter((launcher) =>
+    input.secretForwardResolverConfigured === true
+      || launcher.capabilities().secretForwards.length === 0);
   const launcherProfiles = new Set(
-    input.launchers.flatMap((launcher) => [
+    viableLaunchers.flatMap((launcher) => [
       ...launcher.capabilities().taskProfiles,
     ]),
   );
@@ -48,7 +53,7 @@ export function assembleCapabilities(
   );
 
   const inventoryByKey = new Map<string, string[]>();
-  for (const launcher of input.launchers) {
+  for (const launcher of viableLaunchers) {
     for (const support of launcher.capabilities().runPinning.keys) {
       const inventory = inventoryByKey.get(support.key) ?? [];
       inventory.push(...support.inventory);

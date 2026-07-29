@@ -22,7 +22,6 @@ export { ProvisioningRejectedError } from "./dir-provisioner.js";
 export type { DirProvisionerOptions } from "./dir-provisioner.js";
 export type { WorkspaceRuntimePorts } from "./dir-provisioner.js";
 export { makeWorktreeProvisioner, selectProvisioner } from "./worktree-provisioner.js";
-export { resolveGrantsToSecrets } from "./grants.js";
 export { ContentCorruptionError, materializeInput } from "./materialize.js";
 export { harvest } from "./harvest.js";
 export { enforceWorkspaceQuota, WorkspaceQuotaExceededError } from "./quota.js";

@@ -37,18 +37,23 @@ export async function materializeSecretForwards(input: {
   readonly attempt: AttemptIdentity;
   readonly secrets: string;
   readonly forwards: readonly SecretForwardDeclaration[];
-  readonly grants: ReadonlyMap<string, unknown>;
+  readonly grants: readonly { readonly key: string; readonly descriptor: unknown }[];
   readonly resolver: SecretForwardResolver;
   readonly signal?: AbortSignal;
 }): Promise<void> {
   const targets = new Set<string>();
   const grantKeys = new Set<string>();
+  const grants = new Map<string, unknown>();
+  for (const grant of input.grants) {
+    if (grants.has(grant.key)) throw new Error("capability grants must have unique keys");
+    grants.set(grant.key, grant.descriptor);
+  }
   for (const forward of input.forwards) {
     if (!validTarget(forward.target)) throw new Error("secret forward target must be a portable basename");
     if (targets.has(forward.target) || grantKeys.has(forward.grantKey)) {
       throw new Error("secret forward declarations must have unique targets and grant keys");
     }
-    if (!input.grants.has(forward.grantKey)) throw new Error("secret forward declares a missing grant");
+    if (!grants.has(forward.grantKey)) throw new Error("secret forward declares a missing grant");
     targets.add(forward.target);
     grantKeys.add(forward.grantKey);
   }
@@ -64,7 +69,7 @@ export async function materializeSecretForwards(input: {
       resolved = await input.resolver.resolve({
         attempt: input.attempt,
         grantKey: forward.grantKey,
-        descriptor: input.grants.get(forward.grantKey),
+        descriptor: grants.get(forward.grantKey),
       }, { signal: input.signal });
       snapshot = Uint8Array.from(resolved);
       const file = await open(

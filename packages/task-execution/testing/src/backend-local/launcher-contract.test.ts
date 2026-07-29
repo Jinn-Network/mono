@@ -23,6 +23,7 @@ const fakeLauncher = makeFakeLauncher({
     structuredOutput: false,
     resume: false,
     interruptionBehaviorDefault: "repeatable",
+    secretForwards: [{ grantKey: "fake-secret", target: "fake-handle" }],
     runPinning: { keys: [] },
   },
   onRun: () => ({ exitCode: 0, envelope: { subtype: "success" } }),

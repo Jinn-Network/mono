@@ -52,9 +52,9 @@ export interface LaunchEnv {
 
 /**
  * The minimal local `capabilityGrant` resolution (design §7.2, backend plan Finding (d)): a
- * declared grant resolves to an opaque reference-forward handle under `secrets/`, never a
- * resolved value. Full trust §8.3 backend grant-resolution obligations are out of scope for this
- * program (policy documents, DSSE convergence, verifier-policy integration).
+ * declared grant is an opaque descriptor retained only in the backend's admission path. The
+ * backend-owned secret-forward resolver redeems it after durable spawn intent; workspace setup
+ * never writes grant handles or values under `secrets/`.
  */
 export interface CapabilityGrant {
   /** The grant's declared key (matches a `secrets/` reference the launcher's `LaunchPlan.env` forwards). */
@@ -98,7 +98,7 @@ export interface HarvestResult {
 export interface ProvisionerContract {
   /** Selects the workspace kind for a Task view — plain dir by default, worktree for repository/session profiles (§7.2). */
   workspaceKind(view: TaskView): WorkspaceKind;
-  /** The setup phase (§7.2): resolves inputs by digest with re-hash-on-fetch, materializes the workspace kind, writes `secrets/`. Runs with the provisioner's authority (network + credentials). */
+  /** The setup phase (§7.2): resolves inputs by digest with re-hash-on-fetch and materializes the workspace kind. It may inspect declared grants for policy, but never writes handles or values to `secrets/`. */
   setup(view: TaskView, paths: WorkspacePaths, grants: readonly CapabilityGrant[]): Promise<void>;
   /** The execution-phase environment (§7.2 boundary): only the launcher's allowlisted env crosses from setup into the harness. */
   executionEnv(launch: LaunchEnv): Record<string, string>;

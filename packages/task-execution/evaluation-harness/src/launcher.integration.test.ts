@@ -263,6 +263,7 @@ function evaluatorRegistration(): EvaluatorRegistration {
 interface BackendFixture {
   readonly backend: LocalTaskExecutionBackend;
   readonly pathsByAttempt: Map<string, WorkspacePaths>;
+  readonly resolvedSigner: Uint8Array;
 }
 
 async function backendFixture(
@@ -275,6 +276,12 @@ async function backendFixture(
 ): Promise<BackendFixture> {
   const pathsByAttempt = new Map<string, WorkspacePaths>();
   const registration = evaluatorRegistration();
+  const signerSecretForward = {
+    grantKey: "evaluator-agent-key",
+    target: "evaluator-agent-key.pem",
+  } as const;
+  expect(registration.signer.handle).toBe(signerSecretForward.target);
+  const resolvedSigner = encoder.encode(privateKeyText);
   const deploymentModule = join(root, "evaluation-deployment.mjs");
   await writeFile(
     deploymentModule,
@@ -325,6 +332,7 @@ export const evaluationHarnessDeployment = {
     deploymentModule: pathToFileURL(deploymentModule).href,
     entrypoint: compiledHarnessEntrypoint,
     interruptionBehavior: registration.interruptionBehavior,
+    signerSecretForward,
   });
   const repository = new InMemoryEvidenceRepository();
   const backend = makeLocalTaskExecutionBackend({
@@ -339,7 +347,7 @@ export const evaluationHarnessDeployment = {
         async setup(_view, paths, grants) {
           pathsByAttempt.set(input.attempt.attemptUri, paths);
           await Promise.all(
-            Object.values(paths).map((path) =>
+            Object.values(paths).filter((path) => path !== paths.secrets).map((path) =>
               mkdir(path, { recursive: true })
             ),
           );
@@ -369,12 +377,6 @@ export const evaluationHarnessDeployment = {
             writeFile(
               join(paths.input, "evaluation-context.json"),
               '{"source":"launcher-integration"}',
-            ),
-            // Test host resolution: the Submission carried only the opaque reference above.
-            writeFile(
-              join(paths.secrets, registration.signer.handle),
-              privateKeyText,
-              { mode: 0o600 },
             ),
           ]);
         },
@@ -406,6 +408,13 @@ export const evaluationHarnessDeployment = {
         descriptor,
       } satisfies CapabilityGrant));
     },
+    secretForwardResolver: {
+      async resolve({ grantKey, descriptor }) {
+        expect(grantKey).toBe(signerSecretForward.grantKey);
+        expect(descriptor).toEqual({ reference: "test:evaluator-agent-key" });
+        return resolvedSigner;
+      },
+    },
     recorderAvailability: "always",
     evidence: {
       repository,
@@ -420,7 +429,7 @@ export const evaluationHarnessDeployment = {
     now: () => "2026-07-29T12:02:00.000Z",
   });
   backends.push(backend);
-  return { backend, pathsByAttempt };
+  return { backend, pathsByAttempt, resolvedSigner };
 }
 
 async function textFiles(root: string): Promise<string> {
@@ -491,15 +500,17 @@ describe("evaluationLauncher", () => {
       JINN_ATTEMPT_META: paths.meta,
       TMPDIR: paths.tmp,
     });
+    expect(first.secretForwards).toEqual([
+      { grantKey: "evaluator-agent-key", target: "evaluator-agent-key.pem" },
+    ]);
+    expect(launcher.capabilities().secretForwards).toEqual(first.secretForwards);
     expect(Object.keys(first.env)).toEqual(
       expect.arrayContaining([
         "JINN_ATTEMPT_EVALUATION_DEPLOYMENT_MODULE",
         "JINN_ATTEMPT_SECRETS",
       ]),
     );
-    expect(JSON.stringify(first)).not.toMatch(
-      /PRIVATE KEY|evaluator-agent-key\.pem/u,
-    );
+    expect(JSON.stringify(first)).not.toMatch(/PRIVATE KEY/u);
     expect(first.blameExitCodes).toEqual([
       {
         match: { exitCode: 65 },
@@ -586,6 +597,7 @@ describe("evaluationLauncher", () => {
     expect(delivery.executionIds).toHaveLength(1);
     await expect(readFile(join(paths!.secrets, "evaluator-agent-key.pem")))
       .rejects.toThrow();
+    expect(fixture.resolvedSigner).toEqual(new Uint8Array(fixture.resolvedSigner.length));
     expect(await textFiles(root)).not.toContain(privateKeyText);
   });
 

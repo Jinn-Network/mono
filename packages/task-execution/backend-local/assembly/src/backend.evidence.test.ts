@@ -82,6 +82,7 @@ function backend(
       structuredOutput: false,
       resume: false,
       interruptionBehaviorDefault: "repeatable",
+      secretForwards: [],
       runPinning: { keys: [] },
     }),
     plan(_view, paths) {

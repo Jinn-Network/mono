@@ -21,10 +21,11 @@ import type {
   WorkspacePaths,
 } from "@jinn-network/task-execution-workspace";
 import { ProvisioningRejectedError } from "@jinn-network/task-execution-workspace";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   makeLocalTaskExecutionBackend,
   type LocalTaskExecutionBackend,
+  type LocalTaskExecutionBackendConfig,
 } from "./backend.js";
 
 const roots: string[] = [];
@@ -91,6 +92,9 @@ function fixture(
     provisioningRejectReason?: string;
     argv?: readonly string[];
     provisionerId?: string;
+    launcher?: LauncherContract;
+    secretForwardResolver?: LocalTaskExecutionBackendConfig["secretForwardResolver"];
+    capabilityGrants?: LocalTaskExecutionBackendConfig["capabilityGrants"];
   } = {},
 ): LocalTaskExecutionBackend {
   const provisioner: ProvisionerContract = {
@@ -105,7 +109,7 @@ function fixture(
       return { manifest: [], omissions: [], integrityViolations: [] };
     },
   };
-  const launcher: LauncherContract = {
+  const defaultLauncher: LauncherContract = {
     id: "fixture",
     capabilities: () => ({
       taskProfiles: [profile.profile],
@@ -114,6 +118,7 @@ function fixture(
       structuredOutput: false,
       resume: false,
       interruptionBehaviorDefault: "repeatable",
+      secretForwards: [],
       runPinning: {
         keys: [
           {
@@ -134,9 +139,11 @@ function fixture(
         validExitCodes: [0],
         resultContract: { envelopeFormat: "fixture" },
         interruptionBehavior: "repeatable",
+        secretForwards: [],
       };
     },
   };
+  const launcher = options.launcher ?? defaultLauncher;
   const backend = makeLocalTaskExecutionBackend({
     stateRoot: root,
     source: "urn:jinn:backend-local:assembly-test",
@@ -152,6 +159,12 @@ function fixture(
       isolation: ["process"],
     },
     maxConcurrentAttempts: options.maxConcurrentAttempts ?? 8,
+    ...(options.secretForwardResolver === undefined
+      ? {}
+      : { secretForwardResolver: options.secretForwardResolver }),
+    ...(options.capabilityGrants === undefined
+      ? {}
+      : { capabilityGrants: options.capabilityGrants }),
     faults: { afterDeliveryCheckpoint: options.afterDeliveryCheckpoint },
   });
   backends.push(backend);
@@ -273,6 +286,96 @@ describe("result-envelope admission", () => {
 });
 
 describe("local TaskExecutionBackend submission path (C1)", () => {
+  test("preflight scopes resolver-ready launchers and does not probe unavailable secret launchers", async () => {
+    const secretProbe = vi.fn(async () => ({ ready: true }));
+    const plainProbe = vi.fn(async () => ({ ready: true }));
+    const secretLauncher: LauncherContract = {
+      id: "secret",
+      capabilities: () => ({
+        taskProfiles: [profile.profile], inputMediaTypes: [], outputMediaTypes: [], structuredOutput: false,
+        resume: false, interruptionBehaviorDefault: "repeatable",
+        secretForwards: [{ grantKey: "key", target: "key" }],
+        runPinning: { keys: [{ key: "harness", inventory: ["secret"], posture: "enforced" }] },
+      }),
+      probe: secretProbe,
+      plan() { throw new Error("not used"); },
+    };
+    const plainLauncher: LauncherContract = {
+      id: "plain",
+      capabilities: () => ({
+        taskProfiles: [profile.profile], inputMediaTypes: [], outputMediaTypes: [], structuredOutput: false,
+        resume: false, interruptionBehaviorDefault: "repeatable", secretForwards: [],
+        runPinning: { keys: [{ key: "harness", inventory: ["plain"], posture: "enforced" }] },
+      }),
+      probe: plainProbe,
+      plan() { throw new Error("not used"); },
+    };
+    const root = await stateRoot("preflight-secret-forward");
+    const backend = makeLocalTaskExecutionBackend({
+      stateRoot: root,
+      source: "urn:jinn:backend-local:assembly-test",
+      executor: "urn:jinn:agent:assembly-test",
+      profileStore,
+      launchers: [secretLauncher, plainLauncher],
+      provisioner: () => { throw new Error("not used"); },
+      provisionerCapabilities: {
+        taskProfiles: [profile.profile], workspaceKinds: ["dir"], inputMediaTypes: [], outputMediaTypes: [], isolation: ["process"],
+      },
+    });
+    backends.push(backend);
+
+    expect((await backend.capabilities()).taskProfiles).toEqual([profile.profile]);
+    expect((await backend.capabilities()).runPinning.keys).toContainEqual({
+      key: "harness", inventory: ["plain"], posture: "enforced",
+    });
+    await expect(backend.preflight({ requirements: { harness: { id: "secret" } } }))
+      .resolves.toMatchObject({ ready: false, error: { category: "backend-unavailable" } });
+    expect(secretProbe).not.toHaveBeenCalled();
+    await expect(backend.preflight({ taskProfile: profile.profile }))
+      .resolves.toEqual({ ready: true });
+    expect(plainProbe).toHaveBeenCalledOnce();
+    expect(secretProbe).not.toHaveBeenCalled();
+  });
+
+  test("rejects a plan whose forwards differ from its static declaration before spawn", async () => {
+    const resolve = vi.fn(async () => new TextEncoder().encode("secret-value"));
+    const launcher: LauncherContract = {
+      id: "fixture",
+      capabilities: () => ({
+        taskProfiles: [profile.profile], inputMediaTypes: [], outputMediaTypes: [], structuredOutput: false,
+        resume: false, interruptionBehaviorDefault: "repeatable", secretForwards: [],
+        runPinning: { keys: [{ key: "harness", inventory: ["fixture"], posture: "enforced" }] },
+      }),
+      plan(_view, paths) {
+        return {
+          argv: [process.execPath, "-e", "process.exit(0)"], env: { SECRET: "secrets/key" }, cwd: paths.work,
+          validExitCodes: [0], resultContract: { envelopeFormat: "fixture" }, interruptionBehavior: "repeatable",
+          secretForwards: [{ grantKey: "key", target: "key" }],
+        };
+      },
+    };
+    const root = await stateRoot("static-secret-forward");
+    const backend = fixture(root, {
+      launcher,
+      capabilityGrants: (grants) => Object.entries(grants).map(([key, descriptor]) => ({ key, descriptor })),
+      secretForwardResolver: { resolve },
+    });
+    const task = taskBytes();
+    const ack = await backend.submit(task, submissionBytes(task, {
+      capabilityGrants: { key: { reference: "opaque" } },
+      requirements: { harness: { id: "fixture" } },
+    }));
+    expect(ack.accepted).toBe(true);
+    if (!ack.accepted) throw new Error("unreachable");
+    await backend.drain();
+    expect(resolve).not.toHaveBeenCalled();
+    const events = (await Promise.all((await allFiles(root))
+      .filter((path) => path.endsWith("journal.jsonl"))
+      .map((path) => readFile(path, "utf8")))).join("\n");
+    expect(events).not.toContain('"type":"spawned"');
+    expect(events).toContain('"neverExecuted":true');
+  });
+
   test.runIf(process.platform === "linux")("fails preflight closed and withdraws custody claims when the Linux probe fails", async () => {
     const root = await stateRoot("custody-probe-failure");
     const prior = process.env["JINN_NATIVE_CUSTODY_BINARY"];

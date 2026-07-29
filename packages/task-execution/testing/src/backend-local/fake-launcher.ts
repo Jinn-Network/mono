@@ -54,6 +54,7 @@ const DEFAULT_CAPABILITIES: LauncherCapabilities = {
   structuredOutput: false,
   resume: false,
   interruptionBehaviorDefault: "repeatable",
+  secretForwards: [{ grantKey: "fake-secret", target: "fake-handle" }],
   runPinning: { keys: [] },
 };
 
@@ -66,9 +67,10 @@ const DEFAULT_CAPABILITIES: LauncherCapabilities = {
  * (statelessness) — the properties `describeLauncherContract` proves generically.
  */
 export function makeFakeLauncher(script: FakeLaunchScript): LauncherContract {
+  const capabilityDeclaration = script.capabilities ?? DEFAULT_CAPABILITIES;
   return {
     id: "fake",
-    capabilities: () => script.capabilities ?? DEFAULT_CAPABILITIES,
+    capabilities: () => capabilityDeclaration,
     plan(view: TaskView, paths: WorkspacePaths, attempt: AttemptIdentity): LaunchPlan {
       return {
         argv: [...(script.plan.argvPrefix ?? ["fake-launcher"]), view.task.instructions],
@@ -80,13 +82,16 @@ export function makeFakeLauncher(script: FakeLaunchScript): LauncherContract {
           JINN_ATTEMPT_ID: attempt.attemptUri,
           JINN_ATTEMPT_NONCE: attempt.nonce,
           JINN_FAKE_OUT_DIR: paths.out,
-          JINN_FAKE_SECRET_REF: "secrets/fake-handle",
+          ...(capabilityDeclaration.secretForwards[0] === undefined
+            ? {}
+            : { JINN_FAKE_SECRET_REF: `secrets/${capabilityDeclaration.secretForwards[0].target}` }),
         },
         cwd: paths.work,
         validExitCodes: script.plan.validExitCodes,
         blameExitCodes: script.plan.blameExitCodes,
         resultContract: script.plan.resultContract,
         interruptionBehavior: script.plan.interruptionBehavior,
+        secretForwards: capabilityDeclaration.secretForwards,
       };
     },
   };
