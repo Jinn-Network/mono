@@ -99,6 +99,7 @@ import {
   type EvidenceBindingPorts,
   type EvidenceCaptureSession,
 } from "./evidence-join.js";
+import { materializeSecretForwards, type SecretForwardResolver } from "./secret-forwards.js";
 
 // Core requirement comparison classes (profiles §5.1 / program §7.3). Profile-added entries
 // are overlaid after resolution, so the resolved document is authoritative for its own keys.
@@ -233,6 +234,7 @@ export interface LocalTaskExecutionBackendConfig {
   readonly capabilityGrants?: (
     grants: Readonly<Record<string, unknown>>,
   ) => readonly CapabilityGrant[];
+  readonly secretForwardResolver?: SecretForwardResolver;
   readonly now?: () => string;
   readonly faults?: LocalBackendFaults;
 }
@@ -707,13 +709,14 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       submission,
       attempt: identity,
     });
+    const grants = submission.capabilityGrants === undefined
+      ? []
+      : [...(this.config.capabilityGrants?.(submission.capabilityGrants) ?? [])];
     try {
       await provisioner.setup(
         view,
         this.paths(attempt),
-        submission.capabilityGrants === undefined
-          ? []
-          : [...(this.config.capabilityGrants?.(submission.capabilityGrants) ?? [])],
+        grants,
       );
     } catch (error) {
       if (error instanceof ProvisioningRejectedError) {
@@ -763,6 +766,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         validExitCodes: [...plan.validExitCodes],
         resultContract: plan.resultContract,
         interruptionBehavior: plan.interruptionBehavior,
+        ...(plan.secretForwards === undefined ? {} : { secretForwards: plan.secretForwards }),
       } as unknown as JsonValue);
       this.journal(attempt).fsyncedAppend({
         attemptId: attempt,
@@ -776,6 +780,27 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
           source: this.config.source,
         },
       });
+      const secretForwards = plan.secretForwards ?? [];
+      const forwardTargets = new Set(secretForwards.map(({ target }) => target));
+      for (const value of Object.values(spawn.env)) {
+        if (!value.startsWith("secrets/")) continue;
+        const target = value.slice("secrets/".length);
+        if (!forwardTargets.has(target)) {
+          throw new Error("launch environment secret reference has no declared secret forward");
+        }
+      }
+      if (secretForwards.length > 0) {
+        if (this.config.secretForwardResolver === undefined) {
+          throw new Error("launcher requires secret forwards but no SecretForwardResolver is configured");
+        }
+        await materializeSecretForwards({
+          attempt: identity,
+          secrets: this.paths(attempt).secrets,
+          forwards: secretForwards,
+          grants: new Map(grants.map((grant) => [grant.key, grant.descriptor])),
+          resolver: this.config.secretForwardResolver,
+        });
+      }
       if (this.config.execute !== undefined) {
         await this.runAcceptedAttempt({
           attempt: identity,

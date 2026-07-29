@@ -57,6 +57,7 @@ export interface LaunchPlan {
   readonly blameExitCodes?: readonly BlameRule[];
   readonly resultContract: ResultContract;
   readonly interruptionBehavior: InterruptionBehavior;
+  readonly secretForwards?: readonly { readonly grantKey: string; readonly target: string }[];
 }
 
 /** A backend's declared enforcement posture for a supported run-pinning key (profiles §5.2) — independently re-implemented here (this package does not depend on `@jinn-network/task-execution-backend`, so it never imports `BackendCapabilities`'s copy). */
