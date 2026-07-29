@@ -1,8 +1,9 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TaskExecutionError } from "@jinn-network/task-execution-backend";
 import type { LauncherContract } from "@jinn-network/task-execution-launchers";
+import type { LaunchPlan } from "@jinn-network/task-execution-launchers";
 import {
   buildRepositoryWorkProfile,
   sealTaskProfile,
@@ -17,6 +18,7 @@ import {
 import type {
   ProvisionerContract,
   TaskView,
+  WorkspacePaths,
 } from "@jinn-network/task-execution-workspace";
 import { ProvisioningRejectedError } from "@jinn-network/task-execution-workspace";
 import { afterEach, describe, expect, test } from "vitest";
@@ -178,6 +180,97 @@ async function allFiles(root: string): Promise<string[]> {
   await walk(root);
   return result;
 }
+
+function readResultEnvelopeForTest(backend: LocalTaskExecutionBackend): (
+  paths: WorkspacePaths,
+  plan: LaunchPlan,
+  harvest: {
+    readonly manifest: readonly { readonly path: string }[];
+    readonly integrityViolations: readonly { readonly path: string }[];
+  },
+) => unknown {
+  return (backend as unknown as {
+    readResultEnvelope: (
+      paths: WorkspacePaths,
+      plan: LaunchPlan,
+      harvest: {
+        readonly manifest: readonly { readonly path: string }[];
+        readonly integrityViolations: readonly { readonly path: string }[];
+      },
+    ) => unknown;
+  }).readResultEnvelope.bind(backend);
+}
+
+function envelopePlan(): LaunchPlan {
+  return {
+    argv: ["fixture"],
+    env: {},
+    cwd: "/tmp",
+    validExitCodes: [0],
+    resultContract: {
+      envelopeFormat: "fixture",
+      structuredOutputArtifact: "out/result.json",
+    },
+    interruptionBehavior: "repeatable",
+  };
+}
+
+function envelopePaths(root: string): WorkspacePaths {
+  return {
+    root,
+    work: join(root, "work"),
+    input: join(root, "in"),
+    out: join(root, "out"),
+    tmp: join(root, "tmp"),
+    logs: join(root, "logs"),
+    harnessState: join(root, "harness"),
+    secrets: join(root, "secrets"),
+    meta: join(root, "meta"),
+  };
+}
+
+describe("result-envelope admission", () => {
+  test("rejects a symlinked envelope even if its manifest name is claimed", async () => {
+    const root = await stateRoot("envelope-symlink");
+    const paths = envelopePaths(root);
+    await mkdir(paths.out, { recursive: true });
+    const outside = join(root, "outside.json");
+    await writeFile(outside, '{"ok":true}');
+    await symlink(outside, join(paths.out, "result.json"));
+    const backend = fixture(root);
+
+    expect(() => readResultEnvelopeForTest(backend)(paths, envelopePlan(), {
+      manifest: [{ path: "result.json" }],
+      integrityViolations: [],
+    })).toThrow("escaped out/");
+  });
+
+  test("rejects invalid UTF-8 in an admitted envelope", async () => {
+    const root = await stateRoot("envelope-utf8");
+    const paths = envelopePaths(root);
+    await mkdir(paths.out, { recursive: true });
+    await writeFile(join(paths.out, "result.json"), Buffer.from([0xff]));
+    const backend = fixture(root);
+
+    expect(() => readResultEnvelopeForTest(backend)(paths, envelopePlan(), {
+      manifest: [{ path: "result.json" }],
+      integrityViolations: [],
+    })).toThrow(TypeError);
+  });
+
+  test("rejects an envelope present on disk but absent from the verified manifest", async () => {
+    const root = await stateRoot("envelope-manifest");
+    const paths = envelopePaths(root);
+    await mkdir(paths.out, { recursive: true });
+    await writeFile(join(paths.out, "result.json"), '{"ok":true}');
+    const backend = fixture(root);
+
+    expect(() => readResultEnvelopeForTest(backend)(paths, envelopePlan(), {
+      manifest: [],
+      integrityViolations: [],
+    })).toThrow("not admitted by verified harvest");
+  });
+});
 
 describe("local TaskExecutionBackend submission path (C1)", () => {
   test("rejects hostile provisioner identities before setup", async () => {
