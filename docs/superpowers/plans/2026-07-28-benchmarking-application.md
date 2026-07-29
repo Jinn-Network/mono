@@ -956,3 +956,23 @@ The fifth independent M1–M3 review found two direct conformance defects. Progr
 
 These repairs do not reopen the statistic or the published profile. They make the already-frozen
 validation and resampling rules executable under the standard package commands.
+
+## Addendum 2026-07-29-i — exact authority-time ordering and Report envelope bytes
+
+The sixth independent M1–M3 review reproduced two semantic defects even though all package and
+guard commands were green. Program rulings §7.57–§7.58 are binding on the next repair:
+
+1. The shared calendar-strict RFC 3339 boundary gains one exact-instant comparator. It applies
+   offsets and preserves every fractional digit; epoch-millisecond projection is forbidden for
+   authority ordering. Clean-subset cutoff and announcement-anchor comparisons must distinguish
+   `.0001Z` from `.0002Z`, while equal instants written under different offsets compare equal.
+   Validation and comparison retain the original sealed strings.
+2. `verifyReport` starts with trust-core's authoritative exact DSSE-envelope parser/round-trip.
+   The received closed-shape envelope must byte-equal the output of the existing canonical
+   producer reconstructed from its decoded payload and ordered signatures. Pretty/reordered,
+   trailing, duplicate-member, extra-member, and non-producer-base64 variants fail
+   `report-envelope` before trust verification. Tests use signature semantics over DSSE PAE so a
+   raw-envelope-equality double cannot make the vectors pass vacuously.
+
+M4 remains blocked until this repair passes the records, aggregate, testing, trust-core, guard,
+pack, and workflow-definition gates and a fresh independent reader returns GREEN.

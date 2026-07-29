@@ -659,6 +659,28 @@ Confirmed by the operator at the program gate (2026-07-28):
     owns the adapter-never-called integration vectors. The direct protocol import and manifest
     dev-only mismatch are removed; the original source-boundary rule remains unchanged.
 
+57. **Benchmarking authority-time ordering preserves arbitrary RFC 3339 precision:** validation
+    and comparison are separate operations. After §7.50's shared calendar-strict validation,
+    every benchmarking cutoff, provenance, anchor, and effective-time ordering uses one shared
+    exact-instant comparator. It applies the declared numeric offset and compares the complete
+    fractional second at arbitrary precision; it never projects through epoch milliseconds,
+    `Date.parse`, or another lossy host representation. Decimal tails compare by numeric value
+    (`.1 == .10`) while the original authority-bearing string remains unchanged. Equal instants
+    expressed under different offsets compare equal. Leap-second validation and ordering remain
+    calendar-strict. Mandatory vectors distinguish `.0001Z` from `.0002Z` in both clean-subset
+    cutoff and announcement-anchor paths, and pin an equal-instant offset pair.
+58. **Benchmarking Report admission requires the one exact trust DSSE encoding:** structural
+    `parseDsseEnvelope` success is insufficient. Trust-core owns an authoritative exact DSSE
+    envelope parser/round-trip which validates the closed envelope and signature-member shapes,
+    fatal UTF-8 JSON, strict base64, and the existing non-empty-signature rule, reconstructs the
+    envelope with `sealDsseEnvelope` from the decoded payload and signatures in their received
+    order, and requires byte equality with the received bytes. Benchmarking `verifyReport`
+    invokes that exact parser before trust resolution or method replay. Pretty-printed or
+    reordered JSON, trailing data, duplicate or extra members, non-producer base64 spellings, and
+    any other byte-distinct representation fail `report-envelope` even when the unchanged
+    payload/signature would pass PAE verification. The conformance verifier proves this with a
+    PAE/signature-semantic test double, never raw-envelope identity.
+
 ## 8. Follow-ups registry (recorded once; none block v1)
 
 - IANA registration for the `vnd.jinn.task-execution.*`, `vnd.jinn.trust.*`,
