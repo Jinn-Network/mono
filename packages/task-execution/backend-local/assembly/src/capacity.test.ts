@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -53,5 +53,20 @@ describe("one live writer per state root", () => {
 
     expect(writer.acquired).toBe(true);
     if (writer.acquired) writer.release();
+  });
+
+  test("publishes the owner native process-start marker with its PID", async () => {
+    const stateRoot = await root();
+    const writer = acquireStateRootWriter(stateRoot);
+    expect(writer.acquired).toBe(true);
+    if (!writer.acquired) throw new Error("unreachable");
+
+    const owner = JSON.parse(
+      await readFile(join(stateRoot, "meta", "backend.lock"), "utf8"),
+    ) as { pid: number; startTime: number; token: string };
+    expect(owner.pid).toBe(process.pid);
+    expect(Number.isFinite(owner.startTime)).toBe(true);
+    expect(owner.token).toMatch(/^[0-9a-f-]{36}$/u);
+    writer.release();
   });
 });

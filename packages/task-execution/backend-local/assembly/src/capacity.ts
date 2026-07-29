@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { TaskExecutionError } from "@jinn-network/task-execution-backend";
+import { readProcessStartTime } from "@jinn-network/task-execution-supervisor";
 
 export type CapacityAcquireResult =
   | { readonly acquired: true }
@@ -67,6 +68,7 @@ export type StateRootWriter =
 
 interface LockRecord {
   readonly pid: number;
+  readonly startTime: number;
   readonly token: string;
 }
 
@@ -84,21 +86,21 @@ function locked(detail: string): StateRootWriter {
   };
 }
 
-function processIsLive(pid: number): boolean {
-  if (!Number.isSafeInteger(pid) || pid < 1) return true;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ESRCH";
-  }
+function processIsLive(owner: LockRecord): boolean {
+  if (!Number.isSafeInteger(owner.pid) || owner.pid < 1) return false;
+  const current = readProcessStartTime(owner.pid);
+  return current !== undefined && current === owner.startTime;
 }
 
 function readLock(path: string): LockRecord | undefined {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<LockRecord>;
-    if (typeof parsed.pid !== "number" || typeof parsed.token !== "string") return undefined;
-    return { pid: parsed.pid, token: parsed.token };
+    if (
+      typeof parsed.pid !== "number"
+      || typeof parsed.startTime !== "number"
+      || typeof parsed.token !== "string"
+    ) return undefined;
+    return { pid: parsed.pid, startTime: parsed.startTime, token: parsed.token };
   } catch {
     return undefined;
   }
@@ -167,7 +169,7 @@ export function acquireStateRootWriter(stateRoot: string): StateRootWriter {
 
   if (existsSync(lockPath)) {
     const record = readLock(lockPath);
-    if (record !== undefined && processIsLive(record.pid)) {
+    if (record !== undefined && processIsLive(record)) {
       return locked("state root locked by a live instance");
     }
     if (!reclaimStaleLock(lockPath)) {
@@ -175,8 +177,12 @@ export function acquireStateRootWriter(stateRoot: string): StateRootWriter {
     }
   }
 
+  const startTime = readProcessStartTime(process.pid);
+  if (startTime === undefined) {
+    return locked("state root owner process start marker is unavailable");
+  }
   const token = crypto.randomUUID();
-  const record = { pid: process.pid, token } satisfies LockRecord;
+  const record = { pid: process.pid, startTime, token } satisfies LockRecord;
   if (!publishLock(lockPath, record)) {
     return locked(
       "state root locked by a live instance",
