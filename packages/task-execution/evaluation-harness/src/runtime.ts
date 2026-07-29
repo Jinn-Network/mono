@@ -23,19 +23,12 @@ import {
   parseEvaluationSpec,
   parserAllowlistKey,
   ProfilesError,
+  verifyEvaluationSubject,
   type DeterministicProcessBlock,
   type EvaluationSpec,
   type MeasurementMap,
+  type VerifiedEvaluationSpecification,
 } from "@jinn-network/task-execution-profiles";
-import {
-  documentDigest,
-  sealDelivery,
-  sealTask,
-  validateDelivery,
-  validateTask,
-  type DeliveryRecord,
-  type TaskSpecification,
-} from "@jinn-network/task-execution-protocol";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import type { WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import {
@@ -303,97 +296,30 @@ async function attemptIdentity(inputDir: string): Promise<AttemptIdentity> {
 }
 
 function validateCrosswalk(
-  task: ExactEvaluationMaterial,
+  evaluationSpecification: VerifiedEvaluationSpecification,
   specificationDigest: `sha256:${string}`,
 ): AttestationResourceReference {
-  const taskDocument = object(
-    parseJson(task.bytes, "subject Task"),
-    "subject Task",
-  );
-  const evaluation = object(
-    taskDocument["evaluation"],
-    "subject Task evaluation descriptor",
-  );
-  const declared = digestObject(
-    evaluation["digest"],
-    "subject Task evaluation descriptor digest",
-  );
-  if (`sha256:${declared.sha256}` !== specificationDigest) {
+  if (evaluationSpecification.digest !== specificationDigest) {
     throw new EvaluationHarnessInputError(
       "subject Task evaluation descriptor does not match the exact EvaluationSpec",
     );
   }
   return {
-    name: string(
-      evaluation["name"] ?? "evaluation-spec.json",
-      "subject Task evaluation descriptor name",
-    ),
+    name: evaluationSpecification.name,
     digest: specificationDigest,
-    ...(evaluation["uri"] === undefined
+    ...(evaluationSpecification.uri === undefined
       ? {}
-      : {
-          uri: string(
-            evaluation["uri"],
-            "subject Task evaluation descriptor uri",
-          ),
-        }),
-    ...(evaluation["mediaType"] === undefined
+      : { uri: evaluationSpecification.uri }),
+    ...(evaluationSpecification.mediaType === undefined
       ? {}
-      : {
-          mediaType: string(
-            evaluation["mediaType"],
-            "subject Task evaluation descriptor mediaType",
-          ),
-        }),
+      : { mediaType: evaluationSpecification.mediaType }),
   };
 }
 
-function validateSubjectBindings(input: {
+function validateEvaluationTaskDerivation(input: {
   readonly evaluationTaskBytes: Uint8Array;
   readonly bindings: EvaluationTaskBindings;
-  readonly task: ExactEvaluationMaterial;
-  readonly delivery: ExactEvaluationMaterial;
-  readonly results: readonly ExactEvaluationMaterial[];
 }): void {
-  const taskDocument = parseJson(input.task.bytes, "subject Task");
-  const taskValidation = validateTask(taskDocument);
-  if (!taskValidation.conforms || !bytesEqual(sealTask(taskDocument), input.task.bytes)) {
-    throw new EvaluationHarnessInputError("subject Task is not exact canonical Task bytes");
-  }
-  const deliveryDocument = parseJson(input.delivery.bytes, "subject Delivery");
-  const deliveryValidation = validateDelivery(deliveryDocument);
-  if (
-    !deliveryValidation.conforms
-    || !bytesEqual(sealDelivery(deliveryDocument), input.delivery.bytes)
-  ) {
-    throw new EvaluationHarnessInputError("subject Delivery is not exact canonical Delivery bytes");
-  }
-  const task = taskDocument as TaskSpecification;
-  const delivery = deliveryDocument as DeliveryRecord;
-  if (delivery.task !== documentDigest(input.task.bytes)) {
-    throw new EvaluationHarnessInputError("subject Delivery is bound to a different Task");
-  }
-  if (delivery.outputs.length !== input.results.length) {
-    throw new EvaluationHarnessInputError("subject Delivery output cardinality does not match supplied Results");
-  }
-  const taskOutputs = new Map(task.outputs.map((output) => [output.name, output]));
-  const deliveryOutputs = new Map(delivery.outputs.map((output) => [output.name, output]));
-  if (deliveryOutputs.size !== delivery.outputs.length) {
-    throw new EvaluationHarnessInputError("subject Delivery output names must be unique");
-  }
-  for (const result of input.results) {
-    const output = deliveryOutputs.get(result.descriptor.name);
-    const taskOutput = taskOutputs.get(result.descriptor.name);
-    if (
-      output === undefined
-      || taskOutput === undefined
-      || output.mediaType !== taskOutput.mediaType
-      || output.digest?.sha256 === undefined
-      || `sha256:${output.digest.sha256}` !== sha256(result.bytes)
-    ) {
-      throw new EvaluationHarnessInputError("supplied Results do not exactly match subject Delivery outputs");
-    }
-  }
   const rederived = deriveEvaluationTask({
     subjectTask: input.bindings.subjectTask,
     subjectDelivery: input.bindings.subjectDelivery,
@@ -772,15 +698,40 @@ export async function runEvaluationHarness(
       );
     }
     const evaluationTaskBytes = await readFile(join(paths.input, "task.sealed"));
-    validateSubjectBindings({
+    const verifiedSubject = verifyEvaluationSubject({
+      taskBytes: task.bytes,
+      deliveryBytes: delivery.bytes,
+      results: results.map((result) => ({
+        name: result.descriptor.name,
+        bytes: result.bytes,
+      })),
+    });
+    validateEvaluationTaskDerivation({
       evaluationTaskBytes,
       bindings,
-      task,
-      delivery,
-      results,
     });
+    const exactTask: ExactEvaluationMaterial = {
+      descriptor: {
+        name: bindings.subjectTask.name,
+        digest: {
+          sha256: verifiedSubject.task.digest.slice("sha256:".length),
+        },
+      },
+      bytes: verifiedSubject.task.bytes,
+    };
+    const exactResults: readonly ExactEvaluationMaterial[] =
+      verifiedSubject.results.map((result) => ({
+        descriptor: {
+          name: result.name,
+          digest: {
+            sha256: result.digest.slice("sha256:".length),
+          },
+          mediaType: result.mediaType,
+        },
+        bytes: result.bytes,
+      }));
     const evaluationSpecification = validateCrosswalk(
-      task,
+      verifiedSubject.evaluationSpecification,
       specificationDigest,
     );
     const rawSpecification = object(
@@ -797,8 +748,8 @@ export async function runEvaluationHarness(
       registration.outcomeValidator(
         validateCompletedEvaluation(
           await registration.adapter.evaluate(
-            task,
-            results,
+            exactTask,
+            exactResults,
             specification,
             context,
             attempt,
@@ -809,8 +760,8 @@ export async function runEvaluationHarness(
     );
     const normalized = await validateCompletedDetails(completed, specification, deployment);
     const prepared = await prepareResultEvaluation({
-      task: resourceReference(task.descriptor, "Task subject"),
-      results: results.map(({ descriptor }) =>
+      task: resourceReference(exactTask.descriptor, "Task subject"),
+      results: exactResults.map(({ descriptor }) =>
         resourceReference(descriptor, "Result subject")
       ) as [
         AttestationResourceReference,

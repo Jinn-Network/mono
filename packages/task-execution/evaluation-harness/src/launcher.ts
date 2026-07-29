@@ -127,7 +127,7 @@ function launchPlan(
     ],
     resultContract: {
       envelopeFormat: "jinn-result-evaluation-dsse-v1",
-      structuredOutputArtifact: "verdict",
+      structuredOutputArtifact: "out/verdict",
     },
     interruptionBehavior,
   };

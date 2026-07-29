@@ -111,6 +111,11 @@ async function makeFixture(options: {
   readonly specification?: EvaluationSpec;
   readonly specificationBytes?: Uint8Array;
   readonly subjectEvaluationDigest?: `sha256:${string}`;
+  readonly subjectOutputs?: readonly {
+    readonly name: string;
+    readonly mediaType: string;
+    readonly required: boolean;
+  }[];
 } = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), "jinn-evaluation-runtime-"));
   temporaryRoots.push(root);
@@ -143,7 +148,7 @@ async function makeFixture(options: {
       digest: { sha256: "4".repeat(64) },
     },
     instructions: "Return the requested patch.",
-    outputs: [{
+    outputs: options.subjectOutputs ?? [{
       name: "result.patch",
       mediaType: "text/x-diff",
       required: true,
@@ -573,6 +578,42 @@ describe("runEvaluationHarness", () => {
     });
     await writeFile(join(fixture.paths.input, "task.sealed"), evaluationTask.bytes);
     const evaluate = vi.fn<EvaluatorRegistration["adapter"]["evaluate"]>();
+
+    const exitCode = await runEvaluationHarness(
+      fixture.paths,
+      deployment(fixture.spec, registration(evaluate)),
+    );
+
+    expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_INVALID_INPUT);
+    expect(evaluate).not.toHaveBeenCalled();
+    await expect(readFile(join(fixture.paths.out, "verdict"))).rejects.toThrow();
+  });
+
+  test("never invokes the adapter when the exact subject Task repeats an output name", async () => {
+    const fixture = await makeFixture({
+      subjectOutputs: [
+        { name: "result.patch", mediaType: "text/x-diff", required: true },
+        { name: "result.patch", mediaType: "text/x-diff", required: false },
+      ],
+    });
+    const evaluate = vi.fn<EvaluatorRegistration["adapter"]["evaluate"]>(
+      async () => ({
+        detailedOutcome: {},
+        verdict: "pass",
+        evaluatedAt: "2026-07-29T12:00:00.000Z",
+        measurements: [
+          { name: "passed", value: true },
+          { name: "tests", value: 1 },
+        ],
+        claimEvidence: [{
+          kind: "descriptor",
+          descriptor: {
+            name: "evaluation-report.json",
+            digest: { sha256: "6".repeat(64) },
+          },
+        }],
+      }),
+    );
 
     const exitCode = await runEvaluationHarness(
       fixture.paths,

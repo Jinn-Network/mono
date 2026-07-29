@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash, generateKeyPairSync } from "node:crypto";
+import { execFile } from "node:child_process";
 import {
   mkdir,
   mkdtemp,
@@ -11,6 +12,8 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { InMemoryEvidenceCatalog } from "@jinn-network/evidence-discovery";
 import { validateResultEvaluation } from "@jinn-network/evidence-protocol";
 import { InMemoryEvidenceRepository } from "@jinn-network/evidence-repository/testing";
@@ -43,12 +46,11 @@ import {
   type WorkspacePaths,
 } from "@jinn-network/task-execution-workspace";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeAll, describe, expect, test } from "vitest";
 import {
   evaluationLauncher,
   makeEvaluationLauncher,
 } from "./launcher.js";
-import { runEvaluationHarness } from "./runtime.js";
 import {
   defineEvaluatorRegistration,
   type EvaluatorRegistration,
@@ -58,6 +60,10 @@ const roots: string[] = [];
 const backends: LocalTaskExecutionBackend[] = [];
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+const execFileAsync = promisify(execFile);
+const compiledHarnessEntrypoint = fileURLToPath(
+  new URL("../dist/bin.js", import.meta.url),
+);
 const evaluationProfile = buildEvaluationTaskProfile();
 const sealedEvaluationProfile = sealTaskProfile(evaluationProfile);
 const profileStore: ProfileStore = {
@@ -67,6 +73,18 @@ const profileStore: ProfileStore = {
       : undefined;
   },
 };
+
+beforeAll(async () => {
+  // The public launcher spawns the packaged JavaScript entrypoint. Compile that entrypoint before
+  // this integration suite because package CI intentionally runs tests before its final build.
+  await execFileAsync(process.execPath, [
+    fileURLToPath(
+      new URL("../node_modules/typescript/bin/tsc", import.meta.url),
+    ),
+    "-p",
+    fileURLToPath(new URL("../tsconfig.build.json", import.meta.url)),
+  ]);
+});
 
 afterEach(async () => {
   for (const backend of backends.splice(0)) backend.close();
@@ -245,7 +263,6 @@ function evaluatorRegistration(): EvaluatorRegistration {
 interface BackendFixture {
   readonly backend: LocalTaskExecutionBackend;
   readonly pathsByAttempt: Map<string, WorkspacePaths>;
-  readonly plans: unknown[];
 }
 
 async function backendFixture(
@@ -254,36 +271,59 @@ async function backendFixture(
   privateKeyText: string,
   options: {
     readonly crashAfterDeliveryCheckpoint?: () => void;
-    readonly execute?: boolean;
   } = {},
 ): Promise<BackendFixture> {
   const pathsByAttempt = new Map<string, WorkspacePaths>();
-  const plans: unknown[] = [];
   const registration = evaluatorRegistration();
-  const deployment = {
-    registrations: [registration],
-    parserAllowlist: new Set([
-      parserAllowlistKey(
-        (docs.specification.familyBlock as DeterministicProcessBlock).parser,
-      ),
-    ]),
-    maxClaimEvidenceBytes: 1024,
-    evidenceWriter: {
-      async putClaimEvidence({ name, bytes, mediaType }: {
-        readonly name: string;
-        readonly bytes: Uint8Array;
-        readonly mediaType?: string;
-      }) {
+  const deploymentModule = join(root, "evaluation-deployment.mjs");
+  await writeFile(
+    deploymentModule,
+    `
+export const evaluationHarnessDeployment = {
+  registrations: [{
+    registrationId: "launcher-integration-evaluator",
+    adapter: {
+      async evaluate() {
         return {
-          name,
-          digest: { sha256: sha256(bytes).slice("sha256:".length) },
-          ...(mediaType === undefined ? {} : { mediaType }),
+          detailedOutcome: { integration: true },
+          verdict: "pass",
+          evaluatedAt: "2026-07-29T12:01:00.000Z",
+          measurements: [{ name: "passed", value: true }],
         };
       },
     },
-  };
+    evaluationMethod: {
+      name: "evaluation-harness-launcher-integration",
+      digest: { sha256: "${"6".repeat(64)}" },
+      uri: "https://jinn.network/software/evaluation-harness/integration-v1",
+    },
+    specificationCompatibility(value) {
+      return value.family === "deterministic-process";
+    },
+    evaluatorIdentity: {
+      id: "did:key:z6MkhzYwRj8TvZEp41ApnVVDN5a5hBCk8tQYp4w7vGkVn5F8",
+    },
+    signer: { handle: "evaluator-agent-key.pem" },
+    outcomeValidator(value) { return value; },
+    interruptionBehavior: "repeatable",
+  }],
+  parserAllowlist: new Set([
+    ${JSON.stringify(parserAllowlistKey(
+      (docs.specification.familyBlock as DeterministicProcessBlock).parser,
+    ))},
+  ]),
+  maxClaimEvidenceBytes: 1024,
+  evidenceWriter: {
+    async putClaimEvidence() {
+      throw new TypeError("launcher integration produces no new claim evidence");
+    },
+  },
+};
+`,
+  );
   const launcher = makeEvaluationLauncher({
-    deploymentModule: "file:///host/evaluation-deployment.mjs",
+    deploymentModule: pathToFileURL(deploymentModule).href,
+    entrypoint: compiledHarnessEntrypoint,
     interruptionBehavior: registration.interruptionBehavior,
   });
   const repository = new InMemoryEvidenceRepository();
@@ -348,7 +388,10 @@ async function backendFixture(
           return result;
         },
       };
-      return provisioner;
+      return {
+        id: "evaluation-test-dir-v1",
+        contract: provisioner,
+      };
     },
     provisionerCapabilities: {
       taskProfiles: [evaluationProfile.profile],
@@ -374,21 +417,10 @@ async function backendFixture(
     faults: {
       afterDeliveryCheckpoint: options.crashAfterDeliveryCheckpoint,
     },
-    ...(options.execute === false
-      ? {}
-      : {
-          async execute({ paths, plan }) {
-            plans.push(plan);
-            expect(JSON.stringify(plan)).not.toContain(privateKeyText);
-            return {
-              exitCode: await runEvaluationHarness(paths, deployment),
-            };
-          },
-        }),
     now: () => "2026-07-29T12:02:00.000Z",
   });
   backends.push(backend);
-  return { backend, pathsByAttempt, plans };
+  return { backend, pathsByAttempt };
 }
 
 async function textFiles(root: string): Promise<string> {
@@ -442,7 +474,7 @@ describe("evaluationLauncher", () => {
       validExitCodes: [0],
       resultContract: {
         envelopeFormat: "jinn-result-evaluation-dsse-v1",
-        structuredOutputArtifact: "verdict",
+        structuredOutputArtifact: "out/verdict",
       },
       interruptionBehavior: "repeatable",
     });
@@ -509,8 +541,12 @@ describe("evaluationLauncher", () => {
     );
     expect(ack.accepted).toBe(true);
     if (!ack.accepted) throw new Error("unreachable");
+    await fixture.backend.drain();
     const snapshot = await fixture.backend.observe(ack.submission);
-    expect(snapshot.descriptor.derived).toMatchObject({
+    expect(
+      snapshot.descriptor.derived,
+      JSON.stringify(snapshot.observations),
+    ).toMatchObject({
       state: "delivered",
       terminal: true,
     });
@@ -519,8 +555,6 @@ describe("evaluationLauncher", () => {
         !observation.type.includes("evaluation.attempt")
       ),
     ).toBe(true);
-    expect(fixture.plans).toHaveLength(1);
-
     const paths = fixture.pathsByAttempt.get(snapshot.descriptor.attempt);
     expect(paths).toBeDefined();
     const verdictBytes = await readFile(join(paths!.out, "verdict"));
@@ -577,6 +611,7 @@ describe("evaluationLauncher", () => {
     );
     expect(ack.accepted).toBe(true);
     if (!ack.accepted) throw new Error("unreachable");
+    await first.backend.drain();
     const initial = await first.backend.observe(ack.submission);
     const attempt = initial.descriptor.attempt;
     const paths = first.pathsByAttempt.get(attempt);
@@ -594,7 +629,6 @@ describe("evaluationLauncher", () => {
       crashAfterDeliveryCheckpoint() {
         if (crash) throw new Error("unreachable");
       },
-      execute: false,
     });
     expect(await recovered.backend.recover(attempt)).toEqual({
       classification: "matching",
