@@ -202,6 +202,27 @@ function ports(host = createAnnouncementHostState()): AnnouncementProjectionPort
     clock: { now: () => new Date("2026-07-29T12:00:01Z") },
     factsRecompute,
     referencedBytes: { async fetch() { return undefined; } },
+    async verifyVerdictObservation(event) {
+      const statementVerdict = event.facts.verdictCode === 1
+        ? "pass"
+        : event.facts.verdictCode === 2
+        ? "fail"
+        : event.facts.verdictCode === 4
+        ? "inconclusive"
+        : undefined;
+      return {
+        gate: {
+          decisionGrade: statementVerdict !== undefined,
+          failures: statementVerdict === undefined
+            ? [{
+                check: "verdict-correspondence",
+                detail: `fixture has no Statement verdict for code ${event.facts.verdictCode}`,
+              }]
+            : [],
+        },
+        ...(statementVerdict === undefined ? {} : { statementVerdict }),
+      };
+    },
     ...(host.previousHead === undefined
       ? {}
       : {

@@ -195,7 +195,7 @@
     "observationCount": 6,
     "announcementCount": 6,
     "observationSha256": "sha256:68a3974ce1219bf98840340f3ca5c1ec24167ba63ec473065895497a49544746",
-    "announcementSha256": "sha256:da82878caf0576e5f5b9f0bf0751085099b56679b5c324394c20f0d1a1ee54f7",
+    "announcementSha256": "sha256:e8b391b109d4345b297a573f68776e5e124dae07b3aef44620cf58509d99dc7c",
     "requiredObservationTypes": [
       "network.jinn.task-execution.submission-accepted.v1",
       "network.jinn.task-execution.attempt-engaged.v1",

@@ -164,6 +164,19 @@ function makePorts() {
   const writes: Array<{ path: string; bytes: Uint8Array; contentType: string }> = [];
   const signed: Uint8Array[] = [];
   const recomputed: Uint8Array[] = [];
+  const resolved: Array<{
+    role: "submission" | "delivery" | "evaluation-delivery";
+    material: {
+      kind: string;
+      bytes: Uint8Array;
+      mediaType?: string;
+      locations?: Array<{ profile: string; locator: string }>;
+    };
+  }> = [];
+  const verified: Array<{
+    event: Extract<ObservationMarketplaceEvent, { event: "VerdictDeliveryClaimed" }>;
+    material: (typeof resolved)[number]["material"];
+  }> = [];
   const store: BlobStore = {
     async put(path, bytes, contentType) {
       writes.push({ path, bytes: bytes.slice(), contentType });
@@ -211,7 +224,7 @@ function makePorts() {
     referencedBytes: { async fetch() { return undefined; } },
     async resolveRecord(_event, role) {
       if (role === "submission") {
-        return {
+        const material = {
           kind: RECORD_KINDS.submission,
           bytes: SUBMISSION_BYTES,
           mediaType: "application/vnd.jinn.task-execution.submission.v1+json",
@@ -220,8 +233,10 @@ function makePorts() {
             locator: "ipfs://submission",
           }],
         };
+        resolved.push({ role, material });
+        return material;
       }
-      return {
+      const material = {
         kind: RECORD_KINDS.delivery,
         bytes: role === "evaluation-delivery" ? EVALUATION_BYTES : DELIVERY_BYTES,
         mediaType: "application/vnd.jinn.task-execution.delivery.v1+json",
@@ -230,9 +245,25 @@ function makePorts() {
           locator: role === "evaluation-delivery" ? "ipfs://evaluation" : "ipfs://delivery",
         }],
       };
+      resolved.push({ role, material });
+      return material;
+    },
+    async verifyVerdictObservation(event, material) {
+      verified.push({ event, material });
+      const statementVerdict = event.facts.verdictCode === 1
+        ? "pass"
+        : event.facts.verdictCode === 2
+        ? "fail"
+        : event.facts.verdictCode === 4
+        ? "inconclusive"
+        : undefined;
+      return {
+        gate: { decisionGrade: true, failures: [] },
+        ...(statementVerdict === undefined ? {} : { statementVerdict }),
+      };
     },
   };
-  return { ports, writes, signed, recomputed };
+  return { ports, writes, signed, recomputed, resolved, verified };
 }
 
 describe("projectAnnouncements", () => {
@@ -344,8 +375,8 @@ describe("projectAnnouncements", () => {
     );
   });
 
-  test("verdict publishes an evaluation Delivery then withdraws Submission availability", async () => {
-    const { ports } = makePorts();
+  test("verdict verifies exact resolved material once, signs correspondence fact, then withdraws Submission", async () => {
+    const { ports, resolved, verified } = makePorts();
     const verdict = projectable({
       event: "VerdictDeliveryClaimed",
       facts: {
@@ -373,7 +404,164 @@ describe("projectAnnouncements", () => {
     ]);
     expect(result.announcements[1]).toMatchObject({
       locations: [{ locator: "ipfs://evaluation" }],
+      facts: {
+        "https://jinn.network/facts/marketplace-verdict-correspondence/1.0": {
+          onChainVerdictCode: 1,
+          statementVerdict: "pass",
+        },
+      },
     });
+    const evaluationResolution = resolved.filter(({ role }) =>
+      role === "evaluation-delivery"
+    );
+    expect(evaluationResolution).toHaveLength(1);
+    expect(verified).toHaveLength(1);
+    expect(verified[0]!.material).toBe(evaluationResolution[0]!.material);
+    expect(result.refusals).toEqual([]);
+  });
+
+  test("false named-check gate suppresses verdict publication and withdrawal without record writes", async () => {
+    const { ports, writes, resolved } = makePorts();
+    const failures = [
+      { check: "settlement-join", detail: "rotated evaluator key does not join settlement" },
+      { check: "verdict-consistency", detail: "measurement contradicts verdict" },
+    ];
+    const verdict = projectable({
+      event: "VerdictDeliveryClaimed",
+      facts: {
+        evaluator: OPERATOR,
+        requestId: REQUEST_ID,
+        taskId: 42n,
+        attemptIndex: 3,
+        verdictIndex: 1,
+        verdictCode: 1,
+      },
+      derivation: derivation("VerdictDeliveryClaimed", 5),
+    });
+    const result = await projectAnnouncements(transition([verdict]), {
+      ...ports,
+      async resolvePriorAnnouncementId() {
+        return "ann-prior-submission";
+      },
+      async verifyVerdictObservation() {
+        return {
+          gate: { decisionGrade: false, failures },
+          statementVerdict: "pass",
+        };
+      },
+    });
+
+    expect(result.announcements).toEqual([]);
+    expect(result.entries).toEqual([]);
+    expect(result.refusals).toEqual([{
+      kind: "verdict-observation-refused",
+      derivation: verdict.derivation,
+      onChainVerdictCode: 1,
+      statementVerdict: "pass",
+      failures,
+    }]);
+    expect(resolved.filter(({ role }) => role === "evaluation-delivery")).toHaveLength(1);
+    expect(writes).toEqual([]);
+  });
+
+  test.each([
+    {
+      name: "missing Statement verdict",
+      statementVerdict: undefined,
+      expectedDetail: "verified Result Evaluation Statement verdict is missing",
+    },
+    {
+      name: "unmappable Statement verdict",
+      statementVerdict: "invalid",
+      expectedDetail: 'missing or non-conforming Result Evaluation verdict "invalid"',
+    },
+    {
+      name: "on-chain code mismatch",
+      statementVerdict: "fail",
+      expectedDetail: 'Statement verdict "fail" requires code 2; on-chain claim carries 1',
+    },
+  ])("refuses $name without publishing or withdrawing", async ({
+    statementVerdict,
+    expectedDetail,
+  }) => {
+    const { ports, writes } = makePorts();
+    const verdict = projectable({
+      event: "VerdictDeliveryClaimed",
+      facts: {
+        evaluator: OPERATOR,
+        requestId: REQUEST_ID,
+        taskId: 42n,
+        attemptIndex: 3,
+        verdictIndex: 1,
+        verdictCode: 1,
+      },
+      derivation: derivation("VerdictDeliveryClaimed", 5),
+    });
+    const result = await projectAnnouncements(transition([verdict]), {
+      ...ports,
+      async resolvePriorAnnouncementId() {
+        return "ann-prior-submission";
+      },
+      async verifyVerdictObservation() {
+        return {
+          gate: { decisionGrade: true, failures: [] },
+          ...(statementVerdict === undefined
+            ? {}
+            : {
+                statementVerdict:
+                  statementVerdict as "pass" | "fail" | "inconclusive",
+              }),
+        };
+      },
+    });
+
+    expect(result.announcements).toEqual([]);
+    expect(result.entries).toEqual([]);
+    expect(result.refusals).toEqual([
+      expect.objectContaining({
+        kind: "verdict-observation-refused",
+        derivation: verdict.derivation,
+        onChainVerdictCode: 1,
+        ...(statementVerdict === undefined ? {} : { statementVerdict }),
+        failures: [{
+          check: "verdict-correspondence",
+          detail: expect.stringContaining(expectedDetail),
+        }],
+      }),
+    ]);
+    expect(writes).toEqual([]);
+  });
+
+  test("missing verifier port fails closed with a typed refusal and no record write", async () => {
+    const { ports, writes } = makePorts();
+    const verdict = projectable({
+      event: "VerdictDeliveryClaimed",
+      facts: {
+        evaluator: OPERATOR,
+        requestId: REQUEST_ID,
+        taskId: 42n,
+        attemptIndex: 3,
+        verdictIndex: 1,
+        verdictCode: 1,
+      },
+      derivation: derivation("VerdictDeliveryClaimed", 5),
+    });
+    const result = await projectAnnouncements(transition([verdict]), {
+      ...ports,
+      verifyVerdictObservation: undefined as never,
+    });
+
+    expect(result.announcements).toEqual([]);
+    expect(result.refusals).toEqual([{
+      kind: "verdict-observation-refused",
+      derivation: verdict.derivation,
+      onChainVerdictCode: 1,
+      failures: [{
+        check: "verdict-observation-verifier",
+        detail: "verifyVerdictObservation port is required for VerdictDeliveryClaimed",
+      }],
+    }]);
+    expect(writes).toEqual([]);
   });
 
   test("fails closed if the injected signer is not scoped to the discovery constant", async () => {

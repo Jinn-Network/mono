@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 
 import {
+  decisionGradeVerdictCode,
+  type VerdictObservationFailure,
+  type VerdictObservationGate,
+} from "@jinn-network/marketplace-binding";
+import {
   DISCOVERY_SIGNING_SCOPE,
   MEDIA_ENTRY,
   RECORD_DISCOVERY_VERSION,
@@ -63,6 +68,13 @@ export interface AnnouncementProjectionPorts {
     event: ObservationMarketplaceEvent,
     role: AnnouncementRecordRole,
   ) => Promise<AnnouncementRecordMaterial>;
+  readonly verifyVerdictObservation: (
+    event: Extract<ObservationMarketplaceEvent, { event: "VerdictDeliveryClaimed" }>,
+    material: AnnouncementRecordMaterial,
+  ) => Promise<{
+    readonly gate: VerdictObservationGate;
+    readonly statementVerdict?: "pass" | "fail" | "inconclusive";
+  }>;
   /** Existing chain position for an incremental append; omitted only at genesis. */
   readonly previousHead?: SourceHead;
   readonly previousEntryDigest?: `sha256:${string}` | null;
@@ -88,10 +100,19 @@ export type ProjectedAnnouncement =
   | (AvailableAnnouncement & { readonly derivation: DerivationAnnotation })
   | (WithdrawnAnnouncement & { readonly derivation: DerivationAnnotation });
 
+export interface VerdictObservationRefusal {
+  readonly kind: "verdict-observation-refused";
+  readonly derivation: DerivationAnnotation;
+  readonly onChainVerdictCode: number;
+  readonly statementVerdict?: "pass" | "fail" | "inconclusive";
+  readonly failures: VerdictObservationFailure[];
+}
+
 export interface AnnouncementProjectionResult {
   readonly announcements: ProjectedAnnouncement[];
   readonly entries: SignedEntry[];
   readonly pages: string[];
+  readonly refusals: VerdictObservationRefusal[];
   readonly head?: SourceHead;
   readonly headEnvelope?: DsseEnvelope;
 }
@@ -150,9 +171,9 @@ function announcementId(
 }
 
 function sortedDefinedFacts(
-  facts: Record<string, string | number | boolean | undefined>,
-): Record<string, string | number | boolean> {
-  const result: Record<string, string | number | boolean> = {};
+  facts: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
   for (const key of Object.keys(facts).sort()) {
     const value = facts[key];
     if (value !== undefined) result[key] = value;
@@ -193,12 +214,13 @@ function submissionTerms(
   };
 }
 
-async function availableAnnouncement(
+async function availableAnnouncementFromMaterial(
   event: ObservationMarketplaceEvent,
   role: AnnouncementRecordRole,
+  material: AnnouncementRecordMaterial,
   ports: AnnouncementProjectionPorts,
+  additionalFacts: Record<string, unknown> = {},
 ): Promise<ProjectedAnnouncement> {
-  const material = await ports.resolveRecord(event, role);
   const expectedKind = role === "submission"
     ? RECORD_KINDS.submission
     : RECORD_KINDS.delivery;
@@ -220,10 +242,10 @@ async function availableAnnouncement(
     material.bytes,
     material.mediaType,
   );
-  const facts = role === "submission"
+  const facts = sortedDefinedFacts(role === "submission"
     && (event.event === "TaskCreated" || event.event === "AttemptsAdded")
-    ? { ...recordFacts, terms: submissionTerms(event) }
-    : recordFacts;
+    ? { ...recordFacts, ...additionalFacts, terms: submissionTerms(event) }
+    : { ...recordFacts, ...additionalFacts });
 
   return {
     announcementId: announcementId(event, role, "available"),
@@ -236,6 +258,29 @@ async function availableAnnouncement(
     ...(material.locations === undefined ? {} : { locations: material.locations }),
     facts,
     derivation: event.derivation,
+  };
+}
+
+async function availableAnnouncement(
+  event: ObservationMarketplaceEvent,
+  role: AnnouncementRecordRole,
+  ports: AnnouncementProjectionPorts,
+): Promise<ProjectedAnnouncement> {
+  const material = await ports.resolveRecord(event, role);
+  return availableAnnouncementFromMaterial(event, role, material, ports);
+}
+
+function verdictRefusal(
+  event: Extract<ObservationMarketplaceEvent, { event: "VerdictDeliveryClaimed" }>,
+  failures: VerdictObservationFailure[],
+  statementVerdict?: "pass" | "fail" | "inconclusive",
+): VerdictObservationRefusal {
+  return {
+    kind: "verdict-observation-refused",
+    derivation: event.derivation,
+    onChainVerdictCode: event.facts.verdictCode,
+    ...(statementVerdict === undefined ? {} : { statementVerdict }),
+    failures,
   };
 }
 
@@ -323,6 +368,7 @@ export async function projectAnnouncements(
   );
   const announcements: ProjectedAnnouncement[] = [];
   const entries: SignedEntry[] = [];
+  const refusals: VerdictObservationRefusal[] = [];
   const known = new Map<string, string>();
   let next = initialSequence;
   let previous = initialPrevious;
@@ -376,9 +422,77 @@ export async function projectAnnouncements(
             observationId(event, "network.jinn.task-execution.attempt-terminal.v1"),
           )
         ) {
-          projected.push(
-            await availableAnnouncement(event, "evaluation-delivery", ports),
-          );
+          const material = await ports.resolveRecord(event, "evaluation-delivery");
+          if (typeof ports.verifyVerdictObservation !== "function") {
+            refusals.push(verdictRefusal(event, [{
+              check: "verdict-observation-verifier",
+              detail: "verifyVerdictObservation port is required for VerdictDeliveryClaimed",
+            }]));
+            break;
+          }
+
+          let verified: Awaited<
+            ReturnType<AnnouncementProjectionPorts["verifyVerdictObservation"]>
+          >;
+          try {
+            verified = await ports.verifyVerdictObservation(event, material);
+          } catch (cause) {
+            refusals.push(verdictRefusal(event, [{
+              check: "verdict-observation-verifier",
+              detail: `verifyVerdictObservation failed: ${String(cause)}`,
+            }]));
+            break;
+          }
+          if (!verified.gate.decisionGrade) {
+            refusals.push(
+              verdictRefusal(
+                event,
+                verified.gate.failures,
+                verified.statementVerdict,
+              ),
+            );
+            break;
+          }
+          if (verified.statementVerdict === undefined) {
+            refusals.push(verdictRefusal(event, [{
+              check: "verdict-correspondence",
+              detail: "verified Result Evaluation Statement verdict is missing",
+            }]));
+            break;
+          }
+
+          let expectedCode: number;
+          try {
+            expectedCode = decisionGradeVerdictCode(verified.statementVerdict);
+          } catch (cause) {
+            refusals.push(verdictRefusal(event, [{
+              check: "verdict-correspondence",
+              detail: String(cause),
+            }], verified.statementVerdict));
+            break;
+          }
+          if (expectedCode !== event.facts.verdictCode) {
+            refusals.push(verdictRefusal(event, [{
+              check: "verdict-correspondence",
+              detail:
+                `Statement verdict "${verified.statementVerdict}" requires code ${expectedCode}; `
+                + `on-chain claim carries ${event.facts.verdictCode}`,
+            }], verified.statementVerdict));
+            break;
+          }
+
+          projected.push(await availableAnnouncementFromMaterial(
+            event,
+            "evaluation-delivery",
+            material,
+            ports,
+            {
+              "https://jinn.network/facts/marketplace-verdict-correspondence/1.0": {
+                onChainVerdictCode: event.facts.verdictCode,
+                statementVerdict: verified.statementVerdict,
+              },
+            },
+          ));
           const withdrawal = await withdrawnAnnouncement(
             event,
             "submission",
@@ -455,6 +569,7 @@ export async function projectAnnouncements(
       announcements,
       entries,
       pages: [],
+      refusals,
       ...(ports.previousHead === undefined ? {} : { head: ports.previousHead }),
     };
   }
@@ -493,6 +608,7 @@ export async function projectAnnouncements(
     announcements,
     entries,
     pages,
+    refusals,
     head: maintained.head,
     ...(maintained.envelope === undefined
       ? {}
