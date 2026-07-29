@@ -20,3 +20,52 @@ describe("cross-package sealing equivalence", () => {
     expect(canonicalJsonBytes(shuffled)).toEqual(canonicalJsonBytes(value));
   });
 });
+
+describe("fail-closed I-JSON sealing", () => {
+  it("rejects sparse and nested sparse arrays", () => {
+    expect(() => sealDocument(Array(2))).toThrow();
+    expect(() => sealDocument({ nested: [Array(1)] })).toThrow();
+  });
+
+  it("rejects unsafe integers", () => {
+    expect(() => sealDocument({ value: Number.MAX_SAFE_INTEGER + 1 })).toThrow();
+  });
+
+  it("rejects undefined at root and in objects or arrays", () => {
+    for (const value of [undefined, { value: undefined }, [undefined]]) {
+      expect(() => sealDocument(value)).toThrow();
+    }
+  });
+
+  it("rejects unsupported function, symbol, and bigint values", () => {
+    for (const value of [
+      () => undefined,
+      Symbol("unsupported"),
+      1n,
+      { value: () => undefined },
+      { value: Symbol("unsupported") },
+    ]) {
+      expect(() => sealDocument(value)).toThrow();
+    }
+  });
+
+  it("rejects unpaired UTF-16 surrogates in string values and object keys", () => {
+    for (const value of [
+      { value: "\ud800" },
+      { value: "\udc00" },
+      { ["\ud800"]: "value" },
+      { ["\udc00"]: "value" },
+    ]) {
+      expect(() => sealDocument(value)).toThrow();
+    }
+  });
+
+  it("accepts valid supplementary-plane Unicode", () => {
+    expect(new TextDecoder().decode(sealDocument({ emoji: "😀" }).bytes)).toBe(
+      '{"emoji":"😀"}',
+    );
+    expect(new TextDecoder().decode(sealDocument({ ["😀"]: "ok" }).bytes)).toBe(
+      '{"😀":"ok"}',
+    );
+  });
+});

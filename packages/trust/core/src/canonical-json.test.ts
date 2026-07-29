@@ -47,4 +47,43 @@ describe("canonicalJsonBytes", () => {
     const bytes = canonicalJsonBytes({ a: 0, b: -1, c: Number.MAX_SAFE_INTEGER });
     expect(decode(bytes)).toBe(`{"a":0,"b":-1,"c":${Number.MAX_SAFE_INTEGER}}`);
   });
+
+  test("rejects sparse and nested sparse arrays", () => {
+    expect(() => canonicalJsonBytes(Array(2))).toThrow();
+    expect(() => canonicalJsonBytes({ nested: [Array(1)] })).toThrow();
+  });
+
+  test("rejects undefined at root and in objects or arrays", () => {
+    for (const value of [undefined, { value: undefined }, [undefined]]) {
+      expect(() => canonicalJsonBytes(value)).toThrow();
+    }
+  });
+
+  test("rejects unsupported function, symbol, and bigint values", () => {
+    for (const value of [
+      () => undefined,
+      Symbol("unsupported"),
+      1n,
+      { value: () => undefined },
+      { value: Symbol("unsupported") },
+    ]) {
+      expect(() => canonicalJsonBytes(value)).toThrow();
+    }
+  });
+
+  test("rejects unpaired UTF-16 surrogates in string values and object keys", () => {
+    for (const value of [
+      { value: "\ud800" },
+      { value: "\udc00" },
+      { ["\ud800"]: "value" },
+      { ["\udc00"]: "value" },
+    ]) {
+      expect(() => canonicalJsonBytes(value)).toThrow();
+    }
+  });
+
+  test("accepts valid supplementary-plane Unicode", () => {
+    expect(decode(canonicalJsonBytes({ emoji: "😀" }))).toBe('{"emoji":"😀"}');
+    expect(decode(canonicalJsonBytes({ ["😀"]: "ok" }))).toBe('{"😀":"ok"}');
+  });
 });

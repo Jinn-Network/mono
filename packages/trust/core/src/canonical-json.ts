@@ -4,6 +4,21 @@ import { TrustCoreError, invalidInput } from "./errors.js";
 import { compareCodeUnitStrings } from "./order.js";
 import type { JsonValue } from "./types.js";
 
+function assertUnicodeScalarString(value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!Number.isInteger(next) || next < 0xdc00 || next > 0xdfff) {
+        invalidInput("JSON strings must not contain unpaired UTF-16 surrogates.");
+      }
+      index += 1;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      invalidInput("JSON strings must not contain unpaired UTF-16 surrogates.");
+    }
+  }
+}
+
 // Prototype-safety pass, ported from
 // packages/evidence/attestation-issuer/src/deterministic-json.ts's
 // `cloneJsonValue` (verbatim structure; adapted to trust-core's own error
@@ -14,11 +29,11 @@ function cloneJsonValue(value: unknown): JsonValue {
   const active = new WeakSet<object>();
 
   const visit = (candidate: unknown): JsonValue => {
-    if (
-      candidate === null ||
-      typeof candidate === "string" ||
-      typeof candidate === "boolean"
-    ) {
+    if (candidate === null || typeof candidate === "boolean") {
+      return candidate;
+    }
+    if (typeof candidate === "string") {
+      assertUnicodeScalarString(candidate);
       return candidate;
     }
     if (typeof candidate === "number") {
@@ -102,6 +117,7 @@ function cloneJsonValue(value: unknown): JsonValue {
         if (typeof key !== "string") {
           invalidInput("JSON objects must not contain symbol properties.");
         }
+        assertUnicodeScalarString(key);
         const descriptor = descriptors[key];
         if (
           descriptor === undefined ||
