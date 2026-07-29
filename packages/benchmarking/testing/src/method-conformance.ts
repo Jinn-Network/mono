@@ -25,7 +25,6 @@ import type {
   MethodResults,
   MethodRegistry,
   MethodSubject,
-  VerifiedAnchoredBenchmarkAnnouncement,
   VerdictRuleName,
 } from "./method-types.js";
 
@@ -270,6 +269,7 @@ interface PreparedMethodFixture {
     | "resolveRunBytes"
     | "resolveTaskBytes"
     | "resolveAnchoredBenchmarkAnnouncement"
+    | "verifyAnchoredBenchmarkAnnouncement"
   >;
   readonly verdictBytes: Map<string, Uint8Array>;
   readonly runBytes: Map<string, Uint8Array>;
@@ -298,7 +298,12 @@ function prepareFixture(fixture: MethodFixture): PreparedMethodFixture {
   const taskBytes = new Map<string, Uint8Array>();
   const verdictBytes = new Map<string, Uint8Array>();
   const runBytes = new Map<string, Uint8Array>();
-  const announcements = new Map<string, VerifiedAnchoredBenchmarkAnnouncement>();
+  const announcements = new Map<string, {
+    envelopeBytes: Uint8Array;
+    entryBytes: Uint8Array;
+    entryDigest: string;
+    source: { agent: string; name: string };
+  }>();
   const replacements = new Map<string, string>();
 
   const rawMatrices = structuredClone(fixture.matrices) as MutableFixtureMatrix[];
@@ -392,8 +397,11 @@ function prepareFixture(fixture: MethodFixture): PreparedMethodFixture {
     announcements.set(benchmarkDigest, {
       envelopeBytes,
       entryBytes,
-      anchoredAt: "2026-07-29T00:00:00Z",
-      verification: "verified",
+      entryDigest: recordDigest(entryBytes),
+      source: {
+        agent: "urn:uuid:88888888-8888-5888-8888-888888888888",
+        name: "fixture",
+      },
     });
   });
 
@@ -422,7 +430,30 @@ function prepareFixture(fixture: MethodFixture): PreparedMethodFixture {
       resolveVerdictBytes: (digest) => verdictBytes.get(digest),
       resolveRunBytes: (digest) => runBytes.get(digest),
       resolveTaskBytes: (digest) => taskBytes.get(digest),
-      resolveAnchoredBenchmarkAnnouncement: (digest) => announcements.get(digest),
+      resolveAnchoredBenchmarkAnnouncement: (digest) => announcements.get(digest)?.envelopeBytes,
+      verifyAnchoredBenchmarkAnnouncement: (request) => {
+        const expected = announcements.get(request.benchmarkDigest);
+        if (
+          expected === undefined
+          || request.entryDigest !== expected.entryDigest
+          || request.source.agent !== expected.source.agent
+          || request.source.name !== expected.source.name
+          || recordDigest(request.envelopeBytes) !== recordDigest(expected.envelopeBytes)
+          || recordDigest(request.entryBytes) !== recordDigest(expected.entryBytes)
+        ) {
+          return { ok: false, reason: "fixture Discovery proof mismatch" };
+        }
+        return {
+          ok: true,
+          source: expected.source,
+          verifiedEntryDigests: [expected.entryDigest],
+          headDigest: expected.entryDigest,
+          anchor: {
+            digest: expected.entryDigest,
+            anchorTime: "2026-07-29T00:00:00Z",
+          },
+        };
+      },
     },
     verdictBytes,
     runBytes,

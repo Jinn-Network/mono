@@ -2,15 +2,30 @@ import type { MatrixRecord } from "@jinn-network/benchmarking-records";
 /** The contract-wide multi-verdict reduction name (design §9.2) — never a report-time free string. */
 export type VerdictRuleName = "sole" | "unanimous" | "any-pass" | "majority";
 
-export interface VerifiedAnchoredBenchmarkAnnouncement {
-  /** Exact signed discovery Announcement Entry envelope bytes. */
+export interface AnchoredBenchmarkAnnouncementVerificationInput {
+  readonly benchmarkDigest: string;
   readonly envelopeBytes: Uint8Array;
-  /** Exact canonical Announcement Entry payload bytes authenticated by `envelopeBytes`. */
   readonly entryBytes: Uint8Array;
-  /** Verifier-authenticated anchor time, never an author-supplied timestamp callback. */
-  readonly anchoredAt: string;
-  readonly verification: "verified";
+  readonly entryDigest: string;
+  readonly source: { readonly agent: string; readonly name: string };
+  readonly sequence: string;
+  readonly previous: string | null;
+  readonly entryTimestamp: string;
 }
+
+export type AnchoredBenchmarkAnnouncementVerification =
+  | {
+      readonly ok: true;
+      readonly source: { readonly agent: string; readonly name: string };
+      readonly verifiedEntryDigests: readonly string[];
+      readonly headDigest: string;
+      readonly anchor: { readonly digest: string; readonly anchorTime: string };
+    }
+  | { readonly ok: false; readonly reason: string };
+
+export type AnchoredBenchmarkAnnouncementVerifier = (
+  input: AnchoredBenchmarkAnnouncementVerificationInput,
+) => AnchoredBenchmarkAnnouncementVerification;
 
 /**
  * The injected shape every §9.2 method's `compute()` receives. Pure — no I/O, no marketplace or
@@ -26,9 +41,8 @@ export interface MethodComputeInput {
   readonly resolveVerdictBytes: (verdictDigest: string) => Uint8Array | undefined;
   readonly resolveRunBytes: (runDigest: string) => Uint8Array | undefined;
   readonly resolveTaskBytes: (taskDigest: string) => Uint8Array | undefined;
-  readonly resolveAnchoredBenchmarkAnnouncement?: (
-    benchmarkDigest: string,
-  ) => VerifiedAnchoredBenchmarkAnnouncement | undefined;
+  readonly resolveAnchoredBenchmarkAnnouncement?: (benchmarkDigest: string) => Uint8Array | undefined;
+  readonly verifyAnchoredBenchmarkAnnouncement?: AnchoredBenchmarkAnnouncementVerifier;
   /** `clean-subset@1`'s delegate call (§9.2: "restrict... then delegate to another method") is
    * the only method that needs this — every other method ignores it. */
   readonly registry?: MethodRegistry;

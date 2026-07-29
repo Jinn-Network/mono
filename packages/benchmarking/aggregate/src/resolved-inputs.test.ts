@@ -121,59 +121,160 @@ describe("exact Task provenance bytes", () => {
 
 describe("authenticated anchored announcement evidence", () => {
   const benchmarkDigest = `sha256:${"d".repeat(64)}`;
-  const entryBytes = canonicalJsonBytes({
-    protocol: "https://jinn.network/record-discovery/1.0",
-    announcements: [{
-      action: "available",
-      record: {
-        kind: "https://jinn.network/records/benchmark/1.0",
-        digest: benchmarkDigest,
-      },
-    }],
-  });
+  const source = {
+    agent: "urn:uuid:88888888-8888-5888-8888-888888888888",
+    name: "fixture",
+  };
 
-  test("accepts exact signed Discovery Entry bytes naming the requested Benchmark", () => {
-    const envelopeBytes = sealDsseEnvelope({
-      payloadBytes: entryBytes,
-      payloadType: "application/vnd.jinn.discovery.entry.v1+json",
-      signatures: [{ keyid: "did:key:zFixture", signature: Uint8Array.of(1) }],
+  function entryBytes(overrides: Record<string, unknown> = {}): Uint8Array {
+    return canonicalJsonBytes({
+      protocol: "https://jinn.network/record-discovery/1.0",
+      source,
+      sequence: "0000000000000001",
+      previous: null,
+      timestamp: "2026-07-28T23:59:59Z",
+      announcements: [{
+        announcementId: "fixture-benchmark",
+        action: "available",
+        record: {
+          kind: "https://jinn.network/records/benchmark/1.0",
+          digest: benchmarkDigest,
+        },
+      }],
+      ...overrides,
     });
-    expect(resolveAnchoredAnnouncementTime(benchmarkDigest, {
+  }
+
+  function signedEntry(
+    payloadBytes: Uint8Array,
+    signature: Uint8Array = Uint8Array.of(1),
+    payloadType = "application/vnd.jinn.discovery.entry.v1+json",
+  ): Uint8Array {
+    return sealDsseEnvelope({
+      payloadBytes,
+      payloadType,
+      signatures: [{ keyid: "did:key:zFixture", signature }],
+    });
+  }
+
+  test("derives time from proof-bearing verification of exact signature, source, chain, and anchor", () => {
+    const payloadBytes = entryBytes();
+    const envelopeBytes = signedEntry(payloadBytes);
+    const entryDigest = recordDigest(payloadBytes);
+    expect(resolveAnchoredAnnouncementTime(
+      benchmarkDigest,
       envelopeBytes,
-      entryBytes,
-      anchoredAt: "2026-07-29T00:00:00Z",
-      verification: "verified",
-    })).toBe("2026-07-29T00:00:00Z");
+      (request) => {
+        expect(request).toMatchObject({
+          benchmarkDigest,
+          entryDigest,
+          source,
+          sequence: "0000000000000001",
+          previous: null,
+          entryTimestamp: "2026-07-28T23:59:59Z",
+        });
+        expect(request.envelopeBytes).toEqual(envelopeBytes);
+        expect(request.entryBytes).toEqual(payloadBytes);
+        return {
+          ok: true,
+          source,
+          verifiedEntryDigests: [entryDigest],
+          headDigest: entryDigest,
+          anchor: {
+            digest: entryDigest,
+            anchorTime: "2026-07-29T00:00:00Z",
+          },
+        };
+      },
+    )).toBe("2026-07-29T00:00:00Z");
   });
 
-  test("fails closed when a resolver returns an unverified marker", () => {
-    const proof = {
-      envelopeBytes: new Uint8Array(),
-      entryBytes: new Uint8Array(),
-      anchoredAt: "2026-07-29T00:00:00Z",
-      verification: "unverified",
-    } as unknown as Parameters<typeof resolveAnchoredAnnouncementTime>[1];
+  test.each([
+    ["signature", signedEntry(entryBytes(), Uint8Array.of(9))],
+    ["source binding", signedEntry(entryBytes({
+      source: { ...source, agent: "urn:uuid:99999999-9999-5999-8999-999999999999" },
+    }))],
+    ["chain link", signedEntry(entryBytes({
+      sequence: "0000000000000002",
+      previous: `sha256:${"0".repeat(64)}`,
+    }))],
+  ])("fails closed when injected verification rejects a forged %s", (_name, envelopeBytes) => {
+    expect(() => resolveAnchoredAnnouncementTime(
+      benchmarkDigest,
+      envelopeBytes,
+      () => ({ ok: false, reason: "discovery verification rejected forged evidence" }),
+    )).toThrow(expect.objectContaining({
+      code: "anchored-announcement-unverified",
+      digest: benchmarkDigest,
+    }));
+  });
 
-    expect(() => resolveAnchoredAnnouncementTime(benchmarkDigest, proof)).toThrow(
-      expect.objectContaining({
+  test("rejects a forged digest announcement before trusting the verification port", () => {
+    const envelopeBytes = signedEntry(entryBytes({
+      announcements: [{
+        announcementId: "fixture-benchmark",
+        action: "available",
+        record: {
+          kind: "https://jinn.network/records/benchmark/1.0",
+          digest: `sha256:${"e".repeat(64)}`,
+        },
+      }],
+    }));
+    expect(() => resolveAnchoredAnnouncementTime(
+      benchmarkDigest,
+      envelopeBytes,
+      () => { throw new Error("must not verify a payload that does not name the Benchmark"); },
+    )).toThrow(expect.objectContaining({
+      code: "anchored-announcement-malformed",
+      digest: benchmarkDigest,
+    }));
+  });
+
+  test("rejects invalid or mismatched verifier-derived chain/anchor facts and times", () => {
+    const payloadBytes = entryBytes();
+    const envelopeBytes = signedEntry(payloadBytes);
+    const entryDigest = recordDigest(payloadBytes);
+    for (const proof of [
+      {
+        ok: true as const,
+        source,
+        verifiedEntryDigests: [entryDigest],
+        headDigest: entryDigest,
+        anchor: { digest: entryDigest, anchorTime: "forged-time" },
+      },
+      {
+        ok: true as const,
+        source,
+        verifiedEntryDigests: [`sha256:${"a".repeat(64)}`],
+        headDigest: `sha256:${"a".repeat(64)}`,
+        anchor: { digest: `sha256:${"a".repeat(64)}`, anchorTime: "2026-07-29T00:00:00Z" },
+      },
+      {
+        ok: true as const,
+        source: { ...source, name: "other" },
+        verifiedEntryDigests: [entryDigest],
+        headDigest: entryDigest,
+        anchor: { digest: entryDigest, anchorTime: "2026-07-29T00:00:00Z" },
+      },
+    ]) {
+      expect(() => resolveAnchoredAnnouncementTime(
+        benchmarkDigest,
+        envelopeBytes,
+        () => proof,
+      )).toThrow(expect.objectContaining({
         code: "anchored-announcement-unverified",
         digest: benchmarkDigest,
-      }),
-    );
+      }));
+    }
   });
 
   test("rejects a signed payload under the wrong DSSE media type", () => {
-    const envelopeBytes = sealDsseEnvelope({
-      payloadBytes: entryBytes,
-      payloadType: "application/json",
-      signatures: [{ keyid: "did:key:zFixture", signature: Uint8Array.of(1) }],
-    });
-    expect(() => resolveAnchoredAnnouncementTime(benchmarkDigest, {
+    const envelopeBytes = signedEntry(entryBytes(), Uint8Array.of(1), "application/json");
+    expect(() => resolveAnchoredAnnouncementTime(
+      benchmarkDigest,
       envelopeBytes,
-      entryBytes,
-      anchoredAt: "2026-07-29T00:00:00Z",
-      verification: "verified",
-    })).toThrow(expect.objectContaining({
+      () => ({ ok: false, reason: "not reached" }),
+    )).toThrow(expect.objectContaining({
       code: "anchored-announcement-malformed",
       digest: benchmarkDigest,
     }));

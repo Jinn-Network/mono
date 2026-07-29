@@ -22,10 +22,10 @@ import {
   type VerifyEnvelopeBindingDeps,
 } from "@jinn-network/trust-core";
 import type {
+  AnchoredBenchmarkAnnouncementVerifier,
   Method,
   MethodComputeInput,
   MethodRegistry,
-  VerifiedAnchoredBenchmarkAnnouncement,
   VerdictRuleName,
 } from "./method.js";
 import { matrixRunDigest, resolveRun } from "./resolved-inputs.js";
@@ -98,9 +98,8 @@ export interface MethodPorts {
   readonly resolveVerdictBytes: (verdictDigest: string) => Uint8Array | undefined;
   readonly resolveRunBytes: (runDigest: string) => Uint8Array | undefined;
   readonly resolveTaskBytes: (taskDigest: string) => Uint8Array | undefined;
-  readonly resolveAnchoredBenchmarkAnnouncement?: (
-    benchmarkDigest: string,
-  ) => VerifiedAnchoredBenchmarkAnnouncement | undefined;
+  readonly resolveAnchoredBenchmarkAnnouncement?: (benchmarkDigest: string) => Uint8Array | undefined;
+  readonly verifyAnchoredBenchmarkAnnouncement?: AnchoredBenchmarkAnnouncementVerifier;
   readonly registry: MethodRegistry;
 }
 
@@ -146,6 +145,9 @@ function computeInputFor(
     ...(ports.resolveAnchoredBenchmarkAnnouncement === undefined
       ? {}
       : { resolveAnchoredBenchmarkAnnouncement: ports.resolveAnchoredBenchmarkAnnouncement }),
+    ...(ports.verifyAnchoredBenchmarkAnnouncement === undefined
+      ? {}
+      : { verifyAnchoredBenchmarkAnnouncement: ports.verifyAnchoredBenchmarkAnnouncement }),
   };
 }
 

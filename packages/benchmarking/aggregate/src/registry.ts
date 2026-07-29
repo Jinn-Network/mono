@@ -595,6 +595,7 @@ const cleanSubsetMethod: SingleSubjectMethod = {
         const timestamp = resolveAnchoredAnnouncementTime(
           benchmarkDigest,
           input.resolveAnchoredBenchmarkAnnouncement?.(benchmarkDigest),
+          input.verifyAnchoredBenchmarkAnnouncement,
         );
         for (const taskDigest of new Set(matrix.cells.map((cell) => cell.taskDigest))) {
           const existing = timestamps.get(taskDigest);
@@ -625,6 +626,9 @@ const cleanSubsetMethod: SingleSubjectMethod = {
       ...(input.resolveAnchoredBenchmarkAnnouncement === undefined
         ? {}
         : { resolveAnchoredBenchmarkAnnouncement: input.resolveAnchoredBenchmarkAnnouncement }),
+      ...(input.verifyAnchoredBenchmarkAnnouncement === undefined
+        ? {}
+        : { verifyAnchoredBenchmarkAnnouncement: input.verifyAnchoredBenchmarkAnnouncement }),
     });
     if (
       delegateEnvelope.perSubject.length !== 1

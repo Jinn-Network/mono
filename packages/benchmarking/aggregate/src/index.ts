@@ -5,13 +5,15 @@
 // --- the method registry + local types (design §9.2, §14.7) ---
 export { BENCHMARKING_METHOD_REGISTRY, createMethodRegistry } from "./registry.js";
 export type {
+  AnchoredBenchmarkAnnouncementVerification,
+  AnchoredBenchmarkAnnouncementVerificationInput,
+  AnchoredBenchmarkAnnouncementVerifier,
   Method,
   MethodComputeInput,
   MethodResults,
   MethodRegistry,
   MethodSubject,
   SubjectMethodResult,
-  VerifiedAnchoredBenchmarkAnnouncement,
   VerdictOutcome,
   VerdictRuleName,
 } from "./method.js";

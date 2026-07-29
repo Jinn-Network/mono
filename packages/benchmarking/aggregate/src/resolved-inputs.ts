@@ -10,8 +10,8 @@ import {
   recordDigest,
 } from "@jinn-network/trust-core";
 import type {
+  AnchoredBenchmarkAnnouncementVerifier,
   MethodComputeInput,
-  VerifiedAnchoredBenchmarkAnnouncement,
   VerdictOutcome,
 } from "./method.js";
 
@@ -306,32 +306,33 @@ export function resolveTaskProvenance(
 
 export function resolveAnchoredAnnouncementTime(
   benchmarkDigest: string,
-  proof: VerifiedAnchoredBenchmarkAnnouncement | undefined,
+  envelopeBytes: Uint8Array | undefined,
+  verify: AnchoredBenchmarkAnnouncementVerifier | undefined,
 ): string {
-  if (proof === undefined) {
+  if (envelopeBytes === undefined) {
     throw new MethodInputError(
       "anchored-announcement-unavailable",
       benchmarkDigest,
-      "resolver returned no authenticated announcement evidence",
+      "resolver returned no exact signed Discovery Entry envelope bytes",
     );
   }
-  if (proof.verification !== "verified" || !isRfc3339(proof.anchoredAt)) {
+  if (verify === undefined) {
     throw new MethodInputError(
       "anchored-announcement-unverified",
       benchmarkDigest,
-      "anchoring evidence/time was not verifier-authenticated",
+      "no proof-bearing Discovery signature/source/chain/anchor verifier was supplied",
     );
   }
+  let entryBytes: Uint8Array;
+  let entry: Record<string, unknown>;
   try {
-    const envelope = parseDsseEnvelope(proof.envelopeBytes);
+    const envelope = parseDsseEnvelope(envelopeBytes);
     if (envelope.payloadType !== DISCOVERY_ENTRY_PAYLOAD_TYPE) {
       throw new Error(`payloadType must be ${DISCOVERY_ENTRY_PAYLOAD_TYPE}`);
     }
-    if (!bytesEqual(envelope.payloadBytes, proof.entryBytes)) {
-      throw new Error("signed envelope payload does not equal the supplied exact entry bytes");
-    }
-    const entry = parseCanonicalJson(
-      proof.entryBytes,
+    entryBytes = envelope.payloadBytes;
+    entry = parseCanonicalJson(
+      entryBytes,
       "anchored-announcement-malformed",
       benchmarkDigest,
     );
@@ -349,6 +350,32 @@ export function resolveAnchoredAnnouncementTime(
     if (!namesBenchmark) {
       throw new Error("signed entry does not announce the requested Benchmark digest");
     }
+    const source = entry["source"];
+    if (
+      !isObject(source)
+      || typeof source["agent"] !== "string"
+      || source["agent"].length === 0
+      || typeof source["name"] !== "string"
+      || source["name"].length === 0
+    ) {
+      throw new Error("entry source must carry non-empty agent and name");
+    }
+    if (typeof entry["sequence"] !== "string" || !/^[0-9]{16}$/.test(entry["sequence"])) {
+      throw new Error("entry sequence must be an exact 16-digit decimal string");
+    }
+    const previous = entry["previous"];
+    if (previous !== null && (typeof previous !== "string" || !/^sha256:[a-f0-9]{64}$/.test(previous))) {
+      throw new Error("entry previous must be null or an exact lowercase sha256 digest");
+    }
+    if (
+      (entry["sequence"] === "0000000000000001" && previous !== null)
+      || (entry["sequence"] !== "0000000000000001" && previous === null)
+    ) {
+      throw new Error("entry genesis sequence/previous linkage is inconsistent");
+    }
+    if (!isRfc3339(entry["timestamp"])) {
+      throw new Error("entry timestamp must be RFC 3339");
+    }
   } catch (cause) {
     if (cause instanceof MethodInputError) throw cause;
     throw new MethodInputError(
@@ -357,5 +384,55 @@ export function resolveAnchoredAnnouncementTime(
       String(cause),
     );
   }
-  return proof.anchoredAt;
+
+  const entryDigest = recordDigest(entryBytes);
+  const source = entry["source"] as { agent: string; name: string };
+  let verification: ReturnType<AnchoredBenchmarkAnnouncementVerifier>;
+  try {
+    verification = verify({
+      benchmarkDigest,
+      envelopeBytes,
+      entryBytes,
+      entryDigest,
+      source,
+      sequence: entry["sequence"] as string,
+      previous: entry["previous"] as string | null,
+      entryTimestamp: entry["timestamp"] as string,
+    });
+  } catch (cause) {
+    throw new MethodInputError(
+      "anchored-announcement-unverified",
+      benchmarkDigest,
+      `Discovery verification port failed: ${String(cause)}`,
+    );
+  }
+  if (!verification.ok) {
+    throw new MethodInputError(
+      "anchored-announcement-unverified",
+      benchmarkDigest,
+      verification.reason,
+    );
+  }
+
+  const exactDigest = (value: string): boolean => /^sha256:[a-f0-9]{64}$/.test(value);
+  const chain = verification.verifiedEntryDigests;
+  const sourceMatches = verification.source.agent === source.agent
+    && verification.source.name === source.name;
+  const chainIsExact = chain.length > 0
+    && chain.every(exactDigest)
+    && new Set(chain).size === chain.length
+    && chain.includes(entryDigest)
+    && chain[chain.length - 1] === verification.headDigest;
+  const anchorIsExact = exactDigest(verification.headDigest)
+    && verification.anchor.digest === verification.headDigest
+    && isRfc3339(verification.anchor.anchorTime)
+    && Date.parse(verification.anchor.anchorTime) >= Date.parse(entry["timestamp"] as string);
+  if (!sourceMatches || !chainIsExact || !anchorIsExact) {
+    throw new MethodInputError(
+      "anchored-announcement-unverified",
+      benchmarkDigest,
+      "verification proof does not bind the exact source, entry chain, head anchor, and derived time",
+    );
+  }
+  return verification.anchor.anchorTime;
 }

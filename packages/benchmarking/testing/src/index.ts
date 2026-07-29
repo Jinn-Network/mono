@@ -13,6 +13,9 @@ export {
 
 export { describeMethodRegistryConformance } from "./method-conformance.js";
 export type {
+  AnchoredBenchmarkAnnouncementVerification,
+  AnchoredBenchmarkAnnouncementVerificationInput,
+  AnchoredBenchmarkAnnouncementVerifier,
   ComputeAvailability,
   DeclarativeParameterSchema,
   Method,
@@ -22,7 +25,6 @@ export type {
   MethodRegistry,
   MethodSubject,
   ParameterValidationResult,
-  VerifiedAnchoredBenchmarkAnnouncement,
   VerdictRuleName,
   SubjectMethodResult,
 } from "./method-types.js";

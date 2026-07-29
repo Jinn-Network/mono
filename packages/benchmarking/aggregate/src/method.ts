@@ -22,9 +22,8 @@ export interface MethodComputeInput {
   readonly resolveVerdictBytes: (verdictDigest: string) => Uint8Array | undefined;
   readonly resolveRunBytes: (runDigest: string) => Uint8Array | undefined;
   readonly resolveTaskBytes: (taskDigest: string) => Uint8Array | undefined;
-  readonly resolveAnchoredBenchmarkAnnouncement?: (
-    benchmarkDigest: string,
-  ) => VerifiedAnchoredBenchmarkAnnouncement | undefined;
+  readonly resolveAnchoredBenchmarkAnnouncement?: (benchmarkDigest: string) => Uint8Array | undefined;
+  readonly verifyAnchoredBenchmarkAnnouncement?: AnchoredBenchmarkAnnouncementVerifier;
   readonly registry?: MethodRegistry;
 }
 
@@ -44,12 +43,32 @@ export interface MethodResults {
   readonly perSubject: readonly SubjectMethodResult[];
 }
 
-export interface VerifiedAnchoredBenchmarkAnnouncement {
+export interface AnchoredBenchmarkAnnouncementVerificationInput {
+  readonly benchmarkDigest: string;
   readonly envelopeBytes: Uint8Array;
   readonly entryBytes: Uint8Array;
-  readonly anchoredAt: string;
-  readonly verification: "verified";
+  readonly entryDigest: string;
+  readonly source: { readonly agent: string; readonly name: string };
+  readonly sequence: string;
+  readonly previous: string | null;
+  readonly entryTimestamp: string;
 }
+
+export type AnchoredBenchmarkAnnouncementVerification =
+  | {
+      readonly ok: true;
+      readonly source: { readonly agent: string; readonly name: string };
+      /** Genesis-to-head entry digests authenticated as one append-only source chain. */
+      readonly verifiedEntryDigests: readonly string[];
+      readonly headDigest: string;
+      /** Authenticated append-only anchor observation for that exact head. */
+      readonly anchor: { readonly digest: string; readonly anchorTime: string };
+    }
+  | { readonly ok: false; readonly reason: string };
+
+export type AnchoredBenchmarkAnnouncementVerifier = (
+  input: AnchoredBenchmarkAnnouncementVerificationInput,
+) => AnchoredBenchmarkAnnouncementVerification;
 
 /** A registered §9.2 method: identified by URI + version, computing `results` from a matrix. */
 export interface Method {
