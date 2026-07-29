@@ -67,6 +67,8 @@ const PIPELINE_FORBIDDEN_PACKAGES = [
 // (`@jinn-network/trust-core`, implemented by `@jinn-network/trust-resolve`) -- both were already
 // declared as `testing`'s devDependencies at M0.1 in anticipation of this. M5.3 additionally
 // consumes `trust-testing` for real sealed KeyBinding fixtures in the named-check suite.
+// Program ruling §7.55 additionally requires `evidence-protocol`'s family validator before the
+// kit inspects any Delivery-bound Execution Evidence fields.
 const TESTING_FORBIDDEN_PACKAGES = [
   '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
   '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-backend-local',

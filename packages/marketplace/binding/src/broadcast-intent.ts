@@ -29,39 +29,113 @@ export interface PostingOutcome {
   readonly txHash: `0x${string}`;
 }
 
+declare const postingOwnerTokenBrand: unique symbol;
+/** Unguessable durable authority returned only to the caller that atomically created an intent. */
+export type PostingOwnerToken = string & {
+  readonly [postingOwnerTokenBrand]: "PostingOwnerToken";
+};
+
 export interface PostingIntentRecord extends PostingIntent {
   readonly resolved?: PostingOutcome;
 }
 
+interface OwnedPostingIntentRecord extends PostingIntentRecord {
+  readonly ownerToken: PostingOwnerToken;
+}
+
+export type PostingIntentClaim =
+  | {
+      readonly kind: "owner";
+      readonly intent: PostingIntent;
+      readonly ownerToken: PostingOwnerToken;
+    }
+  | {
+      readonly kind: "pending-other";
+      readonly intent: PostingIntent;
+    }
+  | {
+      readonly kind: "resolved";
+      readonly outcome: PostingOutcome;
+    };
+
 /**
- * The injected persistence port. `postTask` (posting.ts) calls `persist` before broadcasting and
- * `resolve` after a successful broadcast; `recoverPostingIntents` reads `scanPending` to find
- * intents that crashed between the two.
+ * Linearizable persistence port (program §7.52). `claim` atomically creates ownership or reports
+ * an existing pending/resolved record. Only the unguessable token owner may fence or resolve.
+ * Durable adapters persist the token beside the intent so crash recovery can resume the same
+ * ownership; they never implement `claim` as a racy lookup followed by an unconditional write.
  */
 export interface PostingIntentStore {
-  persist(intent: PostingIntent): Promise<void>;
-  resolve(key: PostingIntentKey, outcome: PostingOutcome): Promise<void>;
+  claim(intent: PostingIntent): Promise<PostingIntentClaim>;
+  fence(key: PostingIntentKey, ownerToken: PostingOwnerToken): Promise<boolean>;
+  resolve(
+    key: PostingIntentKey,
+    ownerToken: PostingOwnerToken,
+    outcome: PostingOutcome,
+  ): Promise<void>;
   lookup(key: PostingIntentKey): Promise<PostingIntentRecord | undefined>;
-  scanPending(): Promise<readonly PostingIntent[]>;
+  scanPending(): Promise<readonly OwnedPostingIntentRecord[]>;
 }
 
 /** An in-memory `PostingIntentStore` -- the reference implementation for tests and small hosts. */
 export function createInMemoryPostingIntentStore(): PostingIntentStore {
-  const byKey = new Map<string, PostingIntentRecord>();
+  const byKey = new Map<string, OwnedPostingIntentRecord>();
   const keyOf = (key: PostingIntentKey): string =>
     `${key.creatorSafe.toLowerCase()}|${key.taskCidDigest}|${key.submissionDigest}`;
 
   return {
-    async persist(intent) {
-      byKey.set(keyOf(intent), { ...intent });
+    async claim(intent) {
+      const key = keyOf(intent);
+      const existing = byKey.get(key);
+      if (existing?.resolved !== undefined) {
+        return { kind: "resolved", outcome: existing.resolved };
+      }
+      if (existing !== undefined) {
+        return {
+          kind: "pending-other",
+          intent: {
+            creatorSafe: existing.creatorSafe,
+            taskCidDigest: existing.taskCidDigest,
+            submissionDigest: existing.submissionDigest,
+            idempotencyKey: existing.idempotencyKey,
+            createdAt: existing.createdAt,
+          },
+        };
+      }
+      const ownerToken =
+        `posting-owner:${crypto.randomUUID()}` as PostingOwnerToken;
+      byKey.set(key, { ...intent, ownerToken });
+      return { kind: "owner", intent, ownerToken };
     },
-    async resolve(key, outcome) {
+    async fence(key, ownerToken) {
       const existing = byKey.get(keyOf(key));
-      if (existing === undefined) throw new Error("cannot resolve an intent that was never persisted");
+      return existing !== undefined
+        && existing.resolved === undefined
+        && existing.ownerToken === ownerToken;
+    },
+    async resolve(key, ownerToken, outcome) {
+      const existing = byKey.get(keyOf(key));
+      if (existing === undefined) {
+        throw new Error("cannot resolve an intent that was never claimed");
+      }
+      if (existing.ownerToken !== ownerToken) {
+        throw new Error("only the posting intent owner token may resolve");
+      }
+      if (existing.resolved !== undefined) {
+        if (
+          existing.resolved.taskId !== outcome.taskId
+          || existing.resolved.txHash !== outcome.txHash
+        ) {
+          throw new Error("posting intent is already resolved to a different outcome");
+        }
+        return;
+      }
       byKey.set(keyOf(key), { ...existing, resolved: outcome });
     },
     async lookup(key) {
-      return byKey.get(keyOf(key));
+      const existing = byKey.get(keyOf(key));
+      if (existing === undefined) return undefined;
+      const { ownerToken: _ownerToken, ...view } = existing;
+      return view;
     },
     async scanPending() {
       return [...byKey.values()].filter((record) => record.resolved === undefined);
@@ -96,11 +170,12 @@ export async function recoverPostingIntents(
 ): Promise<readonly PostingIntent[]> {
   const pending = await store.scanPending();
   const stillUncertain: PostingIntent[] = [];
-  for (const intent of pending) {
+  for (const ownedIntent of pending) {
+    const { ownerToken, ...intent } = ownedIntent;
     // eslint-disable-next-line no-await-in-loop -- recovery scans are small and sequential by design.
     const match = await scan(intent);
     if (match !== null) {
-      await store.resolve(intent, match);
+      await store.resolve(intent, ownerToken, match);
     } else {
       stillUncertain.push(intent);
     }

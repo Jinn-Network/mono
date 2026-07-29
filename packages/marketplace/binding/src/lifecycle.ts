@@ -17,5 +17,20 @@ export async function releaseAttempt(taskId: bigint, attemptIndex: number, confi
   if (ports.releaseAttempt === undefined) throw new Error("revised releaseAttempt port is required");
   await ports.releaseAttempt({ taskId, attemptIndex });
 }
-/** Cancellation is a requester signal; it never revokes a live attempt on chain. */
-export async function signalCancel(taskId: bigint, attemptIndex: number, ports: { signal: (input: { taskId: bigint; attemptIndex: number }) => Promise<void> }): Promise<void> { await ports.signal({ taskId, attemptIndex }); }
+/** Cancellation is a durable, idempotent requester signal; it never revokes a live attempt. */
+export async function signalCancel(
+  attempt: `urn:uuid:${string}`,
+  taskId: bigint,
+  attemptIndex: number,
+  reason: string,
+  ports: {
+    requestCancel(input: {
+      readonly attempt: `urn:uuid:${string}`;
+      readonly taskId: bigint;
+      readonly attemptIndex: number;
+      readonly reason: string;
+    }): Promise<"requested" | "already-requested">;
+  },
+): Promise<"requested" | "already-requested"> {
+  return ports.requestCancel({ attempt, taskId, attemptIndex, reason });
+}

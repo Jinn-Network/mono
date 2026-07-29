@@ -39,9 +39,11 @@ import { describe, expect, test } from "vitest";
 const ADMISSION_KEY = testDidKey("marketplace-admission-key");
 const VERDICT_KEY = testDidKey("marketplace-verdict-key");
 const SETTLEMENT_KEY = testDidKey("marketplace-settlement-key");
+const SOLVER_KEY = testDidKey("marketplace-solver-key");
 const REQUESTER_KEY = testDidKey("marketplace-requester-key");
 const ADMISSION_AGENT = testAgentIri("marketplace-admission");
 const EVALUATOR_AGENT = testAgentIri("marketplace-evaluator");
+const SOLVER_AGENT = testAgentIri("marketplace-solver");
 const REQUESTER_AGENT = testAgentIri("marketplace-requester");
 const OTHER_AGENT = testAgentIri("marketplace-other");
 const REQUESTER_SAFE = "0x1111111111111111111111111111111111111111";
@@ -89,6 +91,7 @@ export interface NamedCheckTrustFixture {
   readonly requester: ResolvedBinding;
   readonly verdict: ResolvedBinding;
   readonly settlement: ResolvedBinding;
+  readonly solver: ResolvedBinding;
 }
 
 export interface NamedCheckFixture {
@@ -298,6 +301,11 @@ export async function buildNamedCheckFixture(
       agent: settlementAgent,
       scope: ["verdicts"],
     }),
+    solver: await registerBinding(fakes, {
+      key: SOLVER_KEY,
+      agent: SOLVER_AGENT,
+      scope: ["deliveries"],
+    }),
   };
 
   const input: VerdictObservationGateInput = {
@@ -320,7 +328,12 @@ export async function buildNamedCheckFixture(
       settlementDeclarationKey: SETTLEMENT_KEY,
       claimBlockTime: CLAIM_BLOCK_TIME,
       onChainVerdictCode: VerdictCode.Pass,
-      solverAddress: REQUESTER_SAFE,
+      solver: {
+        address: REQUESTER_SAFE,
+        claimedAgent: SOLVER_AGENT,
+        declarationKey: SOLVER_KEY,
+        effectiveTime: "2026-07-29T09:50:00Z",
+      },
       evaluatorAddress: EVALUATOR_SAFE,
     },
     requesterAuthentication: {
@@ -434,7 +447,10 @@ export function describeNamedChecks(subject: NamedCheckSubject): void {
         ...fixture.input,
         verdict: {
           ...fixture.input.verdict,
-          solverAddress: REQUESTER_SAFE,
+          solver: {
+            ...fixture.input.verdict.solver,
+            address: REQUESTER_SAFE,
+          },
           evaluatorAddress: EVALUATOR_SAFE,
         },
       };
@@ -450,7 +466,7 @@ export function describeNamedChecks(subject: NamedCheckSubject): void {
         ...fixture.input,
         verdict: {
           ...fixture.input.verdict,
-          evaluatorAddress: fixture.input.verdict.solverAddress.toUpperCase(),
+          evaluatorAddress: fixture.input.verdict.solver.address.toUpperCase(),
         },
       };
       await expect(subject(input, fixture.ports)).resolves.toEqual({

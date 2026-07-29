@@ -90,7 +90,8 @@ export function encodeCreateTaskCalldata(input: {
  * two-rail escrow `value == (solutionRate + verdictRate) × maxClaims`), and resolves the intent
  * on success. Idempotent replay: a call whose exact `(creatorSafe, taskCidDigest,
  * submissionDigest)` key already resolved returns the prior outcome without re-broadcasting; one
- * still pending (unresolved) throws `BroadcastUncertainError` rather than risking a double-post.
+ * still pending under another owner throws `BroadcastUncertainError` rather than risking a
+ * double-post. The atomic owner-token claim and final pre-wallet fence are program §7.52.
  */
 export async function postTask(
   taskBytes: Uint8Array,
@@ -116,17 +117,16 @@ export async function postTask(
   const submissionDigest = documentDigest(submissionBytes);
   const key = { creatorSafe, taskCidDigest: taskDigest, submissionDigest };
 
-  const existing = await ports.intents.lookup(key);
-  if (existing !== undefined) {
-    if (existing.resolved !== undefined) return existing.resolved; // idempotent replay, no re-broadcast
-    throw new BroadcastUncertainError(existing);
-  }
-
-  await ports.intents.persist({
+  const intent = {
     ...key,
     idempotencyKey: submission.idempotencyKey,
     createdAt: new Date().toISOString(),
-  });
+  };
+  const claim = await ports.intents.claim(intent);
+  if (claim.kind === "resolved") return claim.outcome;
+  if (claim.kind === "pending-other") {
+    throw new BroadcastUncertainError(claim.intent);
+  }
 
   await uploadRawCodecCid(taskBytes, ports.ipfs);
   // Today-mode divergence: the Submission is uploaded for off-chain reference by the signed
@@ -144,13 +144,20 @@ export async function postTask(
     responseTimeoutSeconds: terms.responseTimeoutSeconds,
   });
 
-  const outcome = await ports.safe.broadcastCreateTask({
+  // Final owner/freshness fence immediately precedes the wallet invocation. There is no await,
+  // upload, persistence call, or other external effect between a successful fence and invoking
+  // `broadcastCreateTask` (program §7.52).
+  if (!await ports.intents.fence(key, claim.ownerToken)) {
+    throw new BroadcastUncertainError(claim.intent);
+  }
+  const broadcast = ports.safe.broadcastCreateTask({
     safeAddress: creatorSafe,
     to: config.jinnRouter,
     value: escrowValue,
     data,
   });
+  const outcome = await broadcast;
 
-  await ports.intents.resolve(key, outcome);
+  await ports.intents.resolve(key, claim.ownerToken, outcome);
   return outcome;
 }

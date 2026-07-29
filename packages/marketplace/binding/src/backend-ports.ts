@@ -51,12 +51,37 @@ export interface MarketplaceObservePort {
   fetchDelivery(ref: DeliveryRef): Promise<Uint8Array>;
 }
 
+/** Standard cancellation/close wiring supplied by the chain-generation host (program §7.54). */
+export interface MarketplaceLifecyclePorts {
+  resolveAttempt(
+    attempt: AttemptUri,
+  ): Promise<{ readonly taskId: bigint; readonly attemptIndex: number }>;
+  /**
+   * Atomically persists the requester signal by Attempt. Durable adapters return
+   * `already-requested` after restart/replay without emitting a second signal.
+   */
+  requestCancel(input: {
+    readonly attempt: AttemptUri;
+    readonly taskId: bigint;
+    readonly attemptIndex: number;
+    readonly reason: string;
+  }): Promise<"requested" | "already-requested">;
+  withdrawAnnouncement(input: { readonly taskId: bigint }): Promise<void>;
+  refundUnusedTaskBudget?(input: { readonly taskId: bigint }): Promise<void>;
+  closeTask?(input: { readonly taskId: bigint }): Promise<void>;
+  releaseAttempt?(input: {
+    readonly taskId: bigint;
+    readonly attemptIndex: number;
+  }): Promise<void>;
+}
+
 /** Every port `makeMarketplaceBackend` needs. */
 export interface MarketplaceBackendPorts {
   readonly creatorSafe: Address;
   readonly terms: PostingTerms;
   readonly posting: PostingPorts;
   readonly observe: MarketplaceObservePort;
+  lifecycle?: MarketplaceLifecyclePorts;
 }
 
 export type { ObservationCursor };

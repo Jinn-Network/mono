@@ -18,8 +18,8 @@ export type HonorOrRejectResult =
  * check in `backend.ts`/`capabilities.ts`, but none of these three checks reads it; see the
  * comment at the end of this function):
  *
- * 1. `evaluationRequirements.minVerdicts > 1` -- today's contract finalizes on the FIRST
- *    verdict of any code (§6.4); it cannot wait for a second.
+ * 1. Any evaluation requirement other than `minVerdicts: 1` -- today's contract implements
+ *    exactly first-verdict finalization and cannot honor an unknown or stronger requirement.
  * 2. `attempts.maxConcurrent > attempts.maxTotal` -- today's chain enforces only `maxClaims`
  *    (mapped from `maxTotal`); there is no separate on-chain concurrency parameter, so a
  *    Submission asking for more simultaneous attempts than total attempts is unhonorable
@@ -43,9 +43,19 @@ export function honorOrRejectToday(
     return { ok: false, category: "unsupported-requirement", key: "closeAt" };
   }
 
-  const minVerdicts = submission.evaluationRequirements?.["minVerdicts"];
-  if (typeof minVerdicts === "number" && minVerdicts > 1) {
-    return { ok: false, category: "unsupported-requirement", key: "evaluationRequirements.minVerdicts" };
+  for (const [key, value] of Object.entries(
+    submission.evaluationRequirements ?? {},
+  )) {
+    if (
+      key !== "minVerdicts"
+      || value !== 1
+    ) {
+      return {
+        ok: false,
+        category: "unsupported-requirement",
+        key: `evaluationRequirements.${key}`,
+      };
+    }
   }
 
   const { maxTotal, maxConcurrent } = submission.attempts ?? {};

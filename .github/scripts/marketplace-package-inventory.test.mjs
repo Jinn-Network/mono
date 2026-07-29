@@ -19,6 +19,7 @@ const MARKETPLACE_PACKAGES = [
 // Cross-tree Jinn dependencies live outside packages/marketplace; map name -> absolute dir
 // (record-discovery-package-inventory.test.mjs precedent).
 const SIBLING_TREE_DIRS = new Map([
+  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
@@ -101,6 +102,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   }],
   ['testing', {
     dependencies: [
+      '@jinn-network/evidence-protocol',
       '@jinn-network/marketplace-binding',
       '@jinn-network/marketplace-projector',
       '@jinn-network/record-discovery-testing',

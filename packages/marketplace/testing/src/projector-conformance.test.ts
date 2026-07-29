@@ -144,7 +144,10 @@ function enrichedEvents(
   }
   return decoded.map((event, index) => ({
     ...event,
-    projection: logs[index]!.projection,
+    projection: {
+      ...logs[index]!.projection,
+      taskCoordinator: logs[0]!.address,
+    },
   })) as ObservationMarketplaceEvent[];
 }
 

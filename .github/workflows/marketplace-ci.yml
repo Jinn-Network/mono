@@ -169,6 +169,7 @@ jobs:
           corepack prepare yarn@4.13.0 --activate
       - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
@@ -225,6 +226,7 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
       - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
@@ -297,6 +299,7 @@ jobs:
           done
       - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)

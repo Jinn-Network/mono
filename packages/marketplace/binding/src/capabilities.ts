@@ -45,15 +45,17 @@ const ATTESTED_RUN_PINNING_KEYS: RunPinningKeySupport[] = ["harness", "model", "
  * `capabilities()` (design §7): declares the today-mode bounds (`maxConcurrent == maxTotal`;
  * first-verdict finalization is enforced by `honorOrRejectToday`, not restated here as a
  * boolean -- no such field exists on `BackendCapabilities`) and the `attested` run-pinning
- * posture. `cancel`/`preflight`/`watch`/`fetchArtifact` are honestly `false` at M2 scope: those
- * optional verbs wire to the claim/lifecycle legs built at Milestone M3, not yet present.
+ * posture. `cancel` is advertised exactly when the completed requester backend receives its
+ * lifecycle ports (program §7.54); unrelated optional verbs remain false.
  */
-export async function marketplaceCapabilities(): Promise<BackendCapabilities> {
+export async function marketplaceCapabilities(
+  options: { readonly cancel?: boolean } = {},
+): Promise<BackendCapabilities> {
   return {
     taskProfiles: [],
     inputMediaTypes: [],
     outputMediaTypes: [],
-    cancel: false,
+    cancel: options.cancel === true,
     watch: false,
     preflight: false,
     fetchArtifact: false,

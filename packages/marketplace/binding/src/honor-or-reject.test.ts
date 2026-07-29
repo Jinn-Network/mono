@@ -57,6 +57,20 @@ describe("honorOrRejectToday", () => {
     expect(result).toEqual({ ok: true });
   });
 
+  test("unknown evaluation requirements are rejected instead of silently ignored", () => {
+    expect(honorOrRejectToday(
+      baseSubmission({
+        evaluationRequirements: { minConfidenceBps: 900 },
+      }),
+      {},
+      TODAY_MODE_CAPABILITIES,
+    )).toEqual({
+      ok: false,
+      category: "unsupported-requirement",
+      key: "evaluationRequirements.minConfidenceBps",
+    });
+  });
+
   test("today's chain enforces only maxClaims (=maxTotal): maxConcurrent > maxTotal rejects", () => {
     const result = honorOrRejectToday(
       baseSubmission({ attempts: { maxTotal: 2, maxConcurrent: 3 } }),

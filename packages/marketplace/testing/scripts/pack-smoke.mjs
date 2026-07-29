@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Cross-tree + sibling portal dependencies (§7.8), packed in dependency order (leaves first).
 const dependencyChain = [
+  ["@jinn-network/evidence-protocol", join(packageRoot, "..", "..", "evidence", "protocol")],
   ["@jinn-network/task-execution-protocol", join(packageRoot, "..", "..", "task-execution", "protocol")],
   ["@jinn-network/task-execution-backend", join(packageRoot, "..", "..", "task-execution", "backend")],
   ["@jinn-network/task-execution-profiles", join(packageRoot, "..", "..", "task-execution", "profiles")],
@@ -148,6 +149,7 @@ const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoo
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
 const expected = ${JSON.stringify(
       [
+        "@jinn-network/evidence-protocol",
         "@jinn-network/marketplace-binding",
         "@jinn-network/marketplace-projector",
         "@jinn-network/record-discovery-testing",

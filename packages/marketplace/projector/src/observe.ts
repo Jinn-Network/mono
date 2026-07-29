@@ -13,6 +13,8 @@ import type { Hex } from "viem";
 import type { MarketplaceEvent } from "./events.js";
 
 export interface ObservationProjectionContext {
+  /** Authoritative TaskCoordinator used by the protocol-owned Attempt URI derivation. */
+  readonly taskCoordinator: `0x${string}`;
   /** Deterministic block timestamp in RFC 3339 form; never projector wall-clock time. */
   readonly timestamp: string;
   /** Signed Submission identity resolved by the projector host for this on-chain task. */
@@ -131,7 +133,7 @@ function attemptFor(
 ): `urn:uuid:${string}` {
   return deriveMarketplaceAttemptUri({
     chainId: event.derivation.chainId,
-    coordinator: event.derivation.contract,
+    coordinator: event.projection.taskCoordinator,
     taskId,
     attemptIndex,
   });
@@ -153,7 +155,7 @@ function digestFromBytes32(value: Hex): `sha256:${string}` {
 }
 
 function taskKey(event: ObservationMarketplaceEvent, taskId: bigint): string {
-  return `${event.derivation.chainId}:${event.derivation.contract.toLowerCase()}:${taskId}`;
+  return `${event.derivation.chainId}:${event.projection.taskCoordinator.toLowerCase()}:${taskId}`;
 }
 
 function pendingDeliveryKey(

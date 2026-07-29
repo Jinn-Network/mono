@@ -49,6 +49,7 @@
     "prepack": "yarn build"
   },
   "dependencies": {
+    "@jinn-network/evidence-protocol": "0.1.0",
     "@jinn-network/marketplace-binding": "0.1.0",
     "@jinn-network/marketplace-projector": "0.1.0",
     "@jinn-network/record-discovery-testing": "0.1.0",
@@ -77,6 +78,7 @@
     "vitest": "^4.1.8"
   },
   "resolutions": {
+    "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
     "@jinn-network/marketplace-binding": "portal:../binding",
     "@jinn-network/marketplace-projector": "portal:../projector",
     "@jinn-network/record-discovery-protocol": "portal:../../discovery/protocol",

@@ -32,8 +32,10 @@ const codeEntrypoints = [
 // (task-execution-{protocol,backend,profiles}, trust-{core,resolve}); projector adds
 // record-discovery-{protocol,serve} + their own trust-core/record-discovery-testing shadow
 // deps; testing adds task-execution-testing + record-discovery-testing, then trust-testing for
-// M5.3's real sealed binding fixtures. Pipeline and testing's shadow closures are covered below.
+// M5.3's real sealed binding fixtures and evidence-protocol for §7.55 exact family validation.
+// Pipeline and testing's shadow closures are covered below.
 const CROSS_TREE_PACKAGES = [
+  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],

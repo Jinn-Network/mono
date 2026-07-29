@@ -137,6 +137,7 @@ async function startAnvilFork(): Promise<boolean> {
       }).catch(() => {});
     }, 500);
   });
+  if (!ready) stopAnvilFork();
   return ready;
 }
 
@@ -151,7 +152,11 @@ const TASK_CREATED_EVENT = parseAbi([
 
 function makeForkBackedBackend(): TestableBackend {
   const account = privateKeyToAccount(DEV_PRIVATE_KEY);
-  const transport = http(ANVIL_URL);
+  const transport = http(ANVIL_URL, {
+    retryCount: 2,
+    retryDelay: 250,
+    timeout: 30_000,
+  });
   const publicClient = createPublicClient({ transport });
   const walletClient = createWalletClient({ account, transport });
 
@@ -179,7 +184,11 @@ function makeForkBackedBackend(): TestableBackend {
             // nonce while holding the fork-wide queue so a new client cannot reuse a stale one.
             nonce: await publicClient.getTransactionCount({ address: account.address, blockTag: "pending" }),
           });
-          const receipt = await publicClient.waitForTransactionReceipt({ hash });
+          const receipt = await publicClient.waitForTransactionReceipt({
+            hash,
+            pollingInterval: 250,
+            timeout: 60_000,
+          });
           if (receipt.status !== "success") throw new Error(`createTask reverted (tx=${hash})`);
           const created = receipt.logs
             .map((log) => {
@@ -200,10 +209,14 @@ function makeForkBackedBackend(): TestableBackend {
   return makeMarketplaceBackend(BASE_SEPOLIA_TODAY, ports);
 }
 
-describe.runIf(await startAnvilFork())("marketplace backend conformance -- Anvil fork of Base Sepolia (§13)", () => {
-  afterAll(() => {
-    stopAnvilFork();
-  });
+describe.runIf(await startAnvilFork())(
+  "marketplace backend conformance -- Anvil fork of Base Sepolia (§13)",
+  { timeout: 60_000 },
+  () => {
+    afterAll(() => {
+      stopAnvilFork();
+    });
 
-  describeMarketplaceBackendConformance(makeForkBackedBackend);
-});
+    describeMarketplaceBackendConformance(makeForkBackedBackend);
+  },
+);

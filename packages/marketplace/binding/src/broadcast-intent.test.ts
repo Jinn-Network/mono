@@ -4,6 +4,7 @@ import {
   createInMemoryPostingIntentStore,
   recoverPostingIntents,
   type PostingIntent,
+  type PostingOwnerToken,
 } from "./broadcast-intent.js";
 
 function intent(overrides: Partial<PostingIntent> = {}): PostingIntent {
@@ -18,9 +19,10 @@ function intent(overrides: Partial<PostingIntent> = {}): PostingIntent {
 }
 
 describe("PostingIntentStore (in-memory reference)", () => {
-  test("persist then scanPending: exactly one recoverable intent, keyed on (creatorSafe, taskCidDigest, submissionDigest)", async () => {
+  test("claim then scanPending: exactly one recoverable owned intent, keyed on (creatorSafe, taskCidDigest, submissionDigest)", async () => {
     const store = createInMemoryPostingIntentStore();
-    await store.persist(intent());
+    const claimed = await store.claim(intent());
+    expect(claimed.kind).toBe("owner");
     const pending = await store.scanPending();
     expect(pending).toHaveLength(1);
     expect(pending[0]).toMatchObject({
@@ -32,24 +34,64 @@ describe("PostingIntentStore (in-memory reference)", () => {
 
   test("resolve clears an intent from scanPending (a completed post clears it)", async () => {
     const store = createInMemoryPostingIntentStore();
-    await store.persist(intent());
-    await store.resolve(intent(), { taskId: 1n, txHash: `0x${"c".repeat(64)}` });
+    const claimed = await store.claim(intent());
+    if (claimed.kind !== "owner") throw new Error("unreachable");
+    await store.resolve(intent(), claimed.ownerToken, { taskId: 1n, txHash: `0x${"c".repeat(64)}` });
     expect(await store.scanPending()).toHaveLength(0);
     expect((await store.lookup(intent()))?.resolved).toEqual({ taskId: 1n, txHash: `0x${"c".repeat(64)}` });
   });
 
-  test("resolve without a matching persisted intent throws (never fabricates a resolution)", async () => {
+  test("resolve without a matching claimed intent throws (never fabricates a resolution)", async () => {
     const store = createInMemoryPostingIntentStore();
-    await expect(store.resolve(intent(), { taskId: 1n, txHash: `0x${"c".repeat(64)}` })).rejects.toThrow(
-      /never persisted/,
+    await expect(store.resolve(
+      intent(),
+      "invented-token" as PostingOwnerToken,
+      { taskId: 1n, txHash: `0x${"c".repeat(64)}` },
+    )).rejects.toThrow(
+      /never claimed/,
     );
+  });
+
+  test("a simultaneous contender never receives the owner token and cannot fence or resolve", async () => {
+    const store = createInMemoryPostingIntentStore();
+    const [first, second] = await Promise.all([
+      store.claim(intent()),
+      store.claim(intent()),
+    ]);
+    const owner = [first, second].find((claim) => claim.kind === "owner");
+    const contender = [first, second].find((claim) => claim.kind === "pending-other");
+    expect(owner?.kind).toBe("owner");
+    expect(contender).toEqual({ kind: "pending-other", intent: intent() });
+    if (owner?.kind !== "owner") throw new Error("unreachable");
+
+    expect(await store.fence(intent(), owner.ownerToken)).toBe(true);
+    expect(
+      await store.fence(intent(), "invented-token" as PostingOwnerToken),
+    ).toBe(false);
+    await expect(store.resolve(
+      intent(),
+      "invented-token" as PostingOwnerToken,
+      { taskId: 1n, txHash: `0x${"c".repeat(64)}` },
+    )).rejects.toThrow(/owner token/);
+  });
+
+  test("a claim after resolution returns the prior outcome, never fresh ownership", async () => {
+    const store = createInMemoryPostingIntentStore();
+    const claimed = await store.claim(intent());
+    if (claimed.kind !== "owner") throw new Error("unreachable");
+    const outcome = { taskId: 1n, txHash: `0x${"c".repeat(64)}` } as const;
+    await store.resolve(intent(), claimed.ownerToken, outcome);
+    await expect(store.claim(intent())).resolves.toEqual({
+      kind: "resolved",
+      outcome,
+    });
   });
 });
 
 describe("recoverPostingIntents", () => {
   test("a matched intent is adopted idempotently (resolved, dropped from the returned uncertain list)", async () => {
     const store = createInMemoryPostingIntentStore();
-    await store.persist(intent());
+    await store.claim(intent());
     const outcome = { taskId: 7n, txHash: `0x${"d".repeat(64)}` } as const;
 
     const uncertain = await recoverPostingIntents(store, async () => outcome);
@@ -61,11 +103,17 @@ describe("recoverPostingIntents", () => {
 
   test("no on-chain match leaves the intent uncertain -- never silently retried", async () => {
     const store = createInMemoryPostingIntentStore();
-    await store.persist(intent());
+    await store.claim(intent());
+    let scanned: PostingIntent | undefined;
 
-    const uncertain = await recoverPostingIntents(store, async () => null);
+    const uncertain = await recoverPostingIntents(store, async (candidate) => {
+      scanned = candidate;
+      return null;
+    });
 
     expect(uncertain).toHaveLength(1);
+    expect(Object.hasOwn(scanned!, "ownerToken")).toBe(false);
+    expect(Object.hasOwn(uncertain[0]!, "ownerToken")).toBe(false);
     expect(await store.scanPending()).toHaveLength(1); // still pending, not silently cleared
   });
 });

@@ -16,6 +16,7 @@ import {
 } from "./observe.js";
 
 const COORDINATOR = "0x1111111111111111111111111111111111111111" satisfies Address;
+const ROUTER = "0x9999999999999999999999999999999999999999" satisfies Address;
 const OPERATOR = "0x2222222222222222222222222222222222222222" satisfies Address;
 const CREATOR = "0x3333333333333333333333333333333333333333" satisfies Address;
 const REQUEST_ID = `0x${"4".repeat(64)}` satisfies Hex;
@@ -38,6 +39,7 @@ const ATTEMPT = deriveMarketplaceAttemptUri({
 });
 
 const CONTEXT: ObservationProjectionContext = {
+  taskCoordinator: COORDINATOR,
   timestamp: TIME,
   submission: SUBMISSION,
   taskDigest: TASK_DIGEST,
@@ -143,6 +145,46 @@ const solutionClaimed = projectable({
 });
 
 describe("projectObservations", () => {
+  test.each(["today", "revised"] as const)(
+    "derives %s Attempt subjects from the configured TaskCoordinator, never the emitting router",
+    (generation) => {
+      const routedClaim = projectable({
+        event: "TaskAttemptCreated",
+        facts: generation === "today"
+          ? {
+              taskId: 42n,
+              attemptIndex: 3,
+              operator: OPERATOR,
+              requestId: REQUEST_ID,
+              priorityMech: OPERATOR,
+              deliveryRate: 10n,
+            }
+          : {
+              taskId: 42n,
+              attemptIndex: 3,
+              operator: OPERATOR,
+              requestId: REQUEST_ID,
+              priorityMech: OPERATOR,
+              deliveryRate: 10n,
+              attemptDeadline: 1_800_000_000n,
+            },
+        derivation: {
+          ...derivation("TaskAttemptCreated", 1, generation),
+          contract: ROUTER,
+        },
+      } as MarketplaceEvent);
+
+      const observation = projectObservations([routedClaim])[0]!;
+      expect(observation.subject).toBe(ATTEMPT);
+      expect(observation.subject).not.toBe(deriveMarketplaceAttemptUri({
+        chainId: 84532,
+        coordinator: ROUTER,
+        taskId: 42n,
+        attemptIndex: 3,
+      }));
+    },
+  );
+
   test("projects posting and claim into exact TEP observations using the protocol-owned Attempt URI", () => {
     const task = projectable({
       event: "TaskCreated",

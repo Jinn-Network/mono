@@ -23,8 +23,19 @@ describe("lifecycle exits", () => {
   });
 
   test("cancel is only a signal and never emits an on-chain revocation", async () => {
-    const signal = vi.fn(async () => undefined);
-    await signalCancel(4n, 2, { signal });
-    expect(signal).toHaveBeenCalledWith({ taskId: 4n, attemptIndex: 2 });
+    const requestCancel = vi.fn(async () => "requested" as const);
+    await expect(signalCancel(
+      "urn:uuid:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      4n,
+      2,
+      "requester cancelled",
+      { requestCancel },
+    )).resolves.toBe("requested");
+    expect(requestCancel).toHaveBeenCalledWith({
+      attempt: "urn:uuid:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      taskId: 4n,
+      attemptIndex: 2,
+      reason: "requester cancelled",
+    });
   });
 });

@@ -60,9 +60,11 @@ export {
 } from "./broadcast-intent.js";
 export type {
   PostingIntent,
+  PostingIntentClaim,
   PostingIntentKey,
   PostingIntentRecord,
   PostingIntentStore,
+  PostingOwnerToken,
   PostingOutcome,
   ScanForOnChainMatch,
 } from "./broadcast-intent.js";
@@ -79,6 +81,7 @@ export { makeMarketplaceBackend } from "./backend.js";
 export type { MarketplaceTestableBackend } from "./backend.js";
 export type {
   MarketplaceBackendPorts,
+  MarketplaceLifecyclePorts,
   MarketplaceObservePort,
   RecordSubmissionInput,
   SubmissionScopeRecord,

@@ -173,8 +173,8 @@ describe("postTask", () => {
     const ports = makePorts(async () => {
       throw new Error("never reached");
     });
-    // Manually persist a pending intent for the same key, simulating a crashed prior attempt.
-    await ports.intents.persist({
+    // Manually claim a pending intent for the same key, simulating a crashed prior owner.
+    await ports.intents.claim({
       creatorSafe: CREATOR_SAFE,
       taskCidDigest: `sha256:${sha256Hex(task)}`,
       submissionDigest: documentDigest(submission),
@@ -185,6 +185,56 @@ describe("postTask", () => {
     await expect(postTask(task, submission, TERMS, BASE_SEPOLIA_TODAY, CREATOR_SAFE, ports)).rejects.toBeInstanceOf(
       BroadcastUncertainError,
     );
+  });
+
+  test("barrier-driven simultaneous contenders permit exactly one owner and one wallet broadcast", async () => {
+    const task = goldenTask();
+    const submission = goldenSubmission(task);
+    let releaseBroadcast!: () => void;
+    const broadcastBarrier = new Promise<void>((resolve) => {
+      releaseBroadcast = resolve;
+    });
+    const broadcast = vi.fn(async () => {
+      await broadcastBarrier;
+      return { taskId: 5n, txHash: hash("e") };
+    });
+    const ports = makePorts(broadcast);
+
+    const owner = postTask(
+      task,
+      submission,
+      TERMS,
+      BASE_SEPOLIA_TODAY,
+      CREATOR_SAFE,
+      ports,
+    );
+    await vi.waitFor(() => {
+      expect(broadcast).toHaveBeenCalledTimes(1);
+    });
+    const contender = postTask(
+      task,
+      submission,
+      TERMS,
+      BASE_SEPOLIA_TODAY,
+      CREATOR_SAFE,
+      ports,
+    );
+
+    await expect(contender).rejects.toBeInstanceOf(BroadcastUncertainError);
+    expect(broadcast).toHaveBeenCalledTimes(1);
+    releaseBroadcast();
+    await expect(owner).resolves.toEqual({ taskId: 5n, txHash: hash("e") });
+    expect(broadcast).toHaveBeenCalledTimes(1);
+
+    await expect(postTask(
+      task,
+      submission,
+      TERMS,
+      BASE_SEPOLIA_TODAY,
+      CREATOR_SAFE,
+      ports,
+    )).resolves.toEqual({ taskId: 5n, txHash: hash("e") });
+    expect(broadcast).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -37,9 +37,11 @@ import { VerdictCode } from "./venue/verdict-code.js";
 const ADMISSION_KEY = "did:key:z6MkAdmissionReceipt1111111111111111111111";
 const VERDICT_KEY = "did:key:z6MkVerdictSigner111111111111111111111111";
 const SETTLEMENT_KEY = "did:key:z6MkSettlementSafe11111111111111111111111";
+const SOLVER_KEY = "did:key:z6MkSolverSafe111111111111111111111111111";
 const REQUESTER_KEY = "did:key:z6MkRequesterSigner1111111111111111111111";
 const ADMISSION_AGENT = "https://jinn.network/agents/admission-fixture";
 const EVALUATOR_AGENT = "https://jinn.network/agents/evaluator-fixture";
+const SOLVER_AGENT = "https://jinn.network/agents/solver-fixture";
 const REQUESTER_AGENT = "https://jinn.network/agents/requester-fixture";
 const SOLVER_ADDRESS = "0x1111111111111111111111111111111111111111";
 const EVALUATOR_ADDRESS = "0x2222222222222222222222222222222222222222";
@@ -111,11 +113,13 @@ function resolvedBinding(
 
 function makePorts(
   omittedKey?: string,
+  solverAgent: string = SOLVER_AGENT,
 ): VerdictObservationGatePorts {
   const entries = [
     { key: ADMISSION_KEY, agent: ADMISSION_AGENT, binding: resolvedBinding(ADMISSION_KEY, ADMISSION_AGENT, [ADMISSION_RECEIPT_TRUST_SCOPE]) },
     { key: VERDICT_KEY, agent: EVALUATOR_AGENT, binding: resolvedBinding(VERDICT_KEY, EVALUATOR_AGENT, ["verdicts"]) },
     { key: SETTLEMENT_KEY, agent: EVALUATOR_AGENT, binding: resolvedBinding(SETTLEMENT_KEY, EVALUATOR_AGENT, ["verdicts"]) },
+    { key: SOLVER_KEY, agent: solverAgent, binding: resolvedBinding(SOLVER_KEY, solverAgent, ["deliveries"]) },
     { key: REQUESTER_KEY, agent: REQUESTER_AGENT, binding: resolvedBinding(REQUESTER_KEY, REQUESTER_AGENT, ["authorizations"]) },
   ].filter((entry) => entry.key !== omittedKey);
   const bindingResolver: BindingResolver = {
@@ -298,7 +302,12 @@ function makeFixture(): {
         settlementDeclarationKey: SETTLEMENT_KEY,
         claimBlockTime: CLAIM_BLOCK_TIME,
         onChainVerdictCode: VerdictCode.Pass,
-        solverAddress: SOLVER_ADDRESS,
+        solver: {
+          address: SOLVER_ADDRESS,
+          claimedAgent: SOLVER_AGENT,
+          declarationKey: SOLVER_KEY,
+          effectiveTime: "2026-07-29T09:50:00Z",
+        },
         evaluatorAddress: EVALUATOR_ADDRESS,
       },
       requesterAuthentication: {
@@ -420,6 +429,53 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     });
   });
 
+  test("rejects distinct addresses that resolve to the same Agent IRI", async () => {
+    const fixture = makeFixture();
+    const input = {
+      ...fixture.input,
+      verdict: {
+        ...fixture.input.verdict,
+        solver: {
+          ...fixture.input.verdict.solver,
+          claimedAgent: EVALUATOR_AGENT,
+        },
+      },
+    };
+    expect(await gateVerdictObservation(
+      input,
+      makePorts(undefined, EVALUATOR_AGENT),
+    )).toEqual({
+      decisionGrade: false,
+      failures: [{ check: "evaluator-distinctness", detail: expect.any(String) }],
+    });
+  });
+
+  test("accepts distinct addresses bound to distinct Agent IRIs", async () => {
+    const fixture = makeFixture();
+    await expect(gateVerdictObservation(fixture.input, makePorts())).resolves.toEqual({
+      decisionGrade: true,
+      failures: [],
+    });
+  });
+
+  test("fails closed for an invented, unbound solver Agent IRI", async () => {
+    const fixture = makeFixture();
+    const input = {
+      ...fixture.input,
+      verdict: {
+        ...fixture.input.verdict,
+        solver: {
+          ...fixture.input.verdict.solver,
+          claimedAgent: "https://jinn.network/agents/invented-solver",
+        },
+      },
+    };
+    expect(await gateVerdictObservation(input, makePorts())).toEqual({
+      decisionGrade: false,
+      failures: [{ check: "evaluator-distinctness", detail: expect.any(String) }],
+    });
+  });
+
   test("fails closed when the settlement declaration does not join to the evaluator", async () => {
     const fixture = makeFixture();
     expect(await gateVerdictObservation(fixture.input, makePorts(SETTLEMENT_KEY))).toEqual({
@@ -474,6 +530,44 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     });
   });
 
+  test("refuses a verdict future-dated by a sub-millisecond fraction", async () => {
+    const fixture = makeFixture();
+    const future = withStatement(fixture, (statement) => {
+      (statement.predicate as Record<string, unknown>).evaluatedAt =
+        "2026-07-29T10:00:00.0002Z";
+    });
+    const input = {
+      ...future,
+      verdict: {
+        ...future.verdict,
+        claimBlockTime: "2026-07-29T10:00:00.0001Z",
+      },
+    };
+    expect(await gateVerdictObservation(input, makePorts())).toEqual({
+      decisionGrade: false,
+      failures: [{ check: "verdict-effective-time", detail: expect.any(String) }],
+    });
+  });
+
+  test("accepts equal instants written with different offsets and fractional precision", async () => {
+    const fixture = makeFixture();
+    const equal = withStatement(fixture, (statement) => {
+      (statement.predicate as Record<string, unknown>).evaluatedAt =
+        "2026-07-29T10:00:00.1Z";
+    });
+    const input = {
+      ...equal,
+      verdict: {
+        ...equal.verdict,
+        claimBlockTime: "2026-07-29T11:00:00.1000+01:00",
+      },
+    };
+    await expect(gateVerdictObservation(input, makePorts())).resolves.toEqual({
+      decisionGrade: true,
+      failures: [],
+    });
+  });
+
   test("refuses a Statement with no verdict rather than defaulting to Invalid", async () => {
     const fixture = makeFixture();
     const input = withStatement(fixture, (statement) => {
@@ -522,6 +616,11 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
       name: "requester authentication",
       throwingKey: REQUESTER_KEY,
       expectedCheck: "requester-authentication",
+    },
+    {
+      name: "solver declaration resolution",
+      throwingKey: SOLVER_KEY,
+      expectedCheck: "evaluator-distinctness",
     },
     {
       name: "verdict envelope binding",

@@ -49,6 +49,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@jinn-network/evidence-protocol@portal:../../evidence/protocol::locator=%40jinn-network%2Fmarketplace-testing%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-protocol@portal:../../evidence/protocol::locator=%40jinn-network%2Fmarketplace-testing%40workspace%3A."
+  dependencies:
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
 "@jinn-network/marketplace-binding@portal:../binding::locator=%40jinn-network%2Fmarketplace-testing%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/marketplace-binding@portal:../binding::locator=%40jinn-network%2Fmarketplace-testing%40workspace%3A."
@@ -81,6 +90,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/marketplace-testing@workspace:."
   dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/marketplace-binding": "npm:0.1.0"
     "@jinn-network/marketplace-projector": "npm:0.1.0"
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"

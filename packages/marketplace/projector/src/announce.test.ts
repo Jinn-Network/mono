@@ -36,6 +36,7 @@ const SUBMISSION_BYTES = new TextEncoder().encode('{"record":"submission"}');
 const DELIVERY_BYTES = new TextEncoder().encode('{"record":"delivery"}');
 const EVALUATION_BYTES = new TextEncoder().encode('{"record":"evaluation-delivery"}');
 const CONTEXT: ObservationProjectionContext = {
+  taskCoordinator: COORDINATOR,
   timestamp: "2026-07-29T12:00:00Z",
   submission: SUBMISSION,
   taskDigest: TASK_DIGEST,

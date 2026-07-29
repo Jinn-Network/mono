@@ -15,11 +15,27 @@
 // exact shape; TypeScript's structural typing lets `marketplace-testing` pass this backend to
 // `describeTaskExecutionBackendContract` without a cast.
 import { TaskExecutionError, type BackendCapabilities, type CancelAck, type DeliveryRef, type ObservationCursor, type ObservationSnapshot, type PreflightReport, type PreflightRequest, type ReconciliationReport, type SubmissionAck, type SubmissionUri, type TaskExecutionBackend } from "@jinn-network/task-execution-backend";
-import { documentDigest, mergeRequirements, validateSubmission, validateTask, type ProtocolObservation, type SubmissionRecord, type TaskSpecification } from "@jinn-network/task-execution-protocol";
+import {
+  documentDigest,
+  mergeRequirements,
+  sealSubmission,
+  sealTask,
+  validateSubmission,
+  validateTask,
+  type ProtocolObservation,
+  type SubmissionRecord,
+  type TaskSpecification,
+  type ValidationResult,
+} from "@jinn-network/task-execution-protocol";
 import type { MarketplaceChainConfig } from "./addresses.js";
 import { BroadcastUncertainError } from "./broadcast-intent.js";
+import { assertIJsonUnicode } from "./canonical-json.js";
 import { MARKETPLACE_CORE_KEY_CLASSES, marketplaceCapabilities } from "./capabilities.js";
 import { honorOrRejectToday } from "./honor-or-reject.js";
+import {
+  closeSubmission as closeMarketplaceSubmission,
+  signalCancel,
+} from "./lifecycle.js";
 import { postTask } from "./posting.js";
 import type { MarketplaceBackendPorts } from "./backend-ports.js";
 
@@ -30,10 +46,12 @@ export interface MarketplaceTestableBackend extends TaskExecutionBackend {
   drive(attempt: AttemptUri, observations: readonly ProtocolObservation[]): Promise<void>;
   recordDelivery(attempt: AttemptUri, deliveryBytes: Uint8Array): Promise<void>;
   simulateReconciliation(ref: SubmissionUri | AttemptUri, outcome: ReconciliationReport): void;
+  /** Marketplace requester close, distinct from standard Attempt cancellation (program §7.54). */
+  closeSubmission?(taskId: bigint): Promise<void>;
 }
 
 function decodeJson(bytes: Uint8Array): unknown {
-  return JSON.parse(new TextDecoder().decode(bytes));
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
 }
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
@@ -48,6 +66,69 @@ function requestedPinningId(value: unknown): string | undefined {
   return typeof id === "string" ? id : undefined;
 }
 
+type CanonicalAdmission<T> =
+  | { readonly ok: true; readonly document: T }
+  | { readonly ok: false; readonly error: TaskExecutionError };
+
+/**
+ * Fatal decode → schema validation → I-JSON scalar check → protocol re-seal → byte equality.
+ * This runs before idempotency scope lookup, WAL ownership, upload, or wallet effects.
+ */
+function admitCanonicalDocument<T>(
+  bytes: Uint8Array,
+  label: "Task" | "Submission",
+  validate: (document: unknown) => ValidationResult,
+  seal: (document: unknown) => Uint8Array,
+): CanonicalAdmission<T> {
+  let document: unknown;
+  try {
+    document = decodeJson(bytes);
+  } catch (cause) {
+    return {
+      ok: false,
+      error: new TaskExecutionError("invalid-document", {
+        detail: `${label} bytes are not valid fatal UTF-8 JSON: ${String(cause)}`,
+      }),
+    };
+  }
+
+  const validation = validate(document);
+  if (!validation.conforms) {
+    return {
+      ok: false,
+      error: new TaskExecutionError("invalid-document", {
+        detail: validation.errors
+          .map((issue) => `${issue.path}: ${issue.message}`)
+          .join("; "),
+      }),
+    };
+  }
+
+  let canonical: Uint8Array;
+  try {
+    assertIJsonUnicode(document);
+    canonical = seal(document);
+  } catch (cause) {
+    return {
+      ok: false,
+      error: new TaskExecutionError("invalid-document", {
+        detail: `${label} violates canonical I-JSON sealing: ${String(cause)}`,
+      }),
+    };
+  }
+  if (!bytesEqual(bytes, canonical)) {
+    return {
+      ok: false,
+      error: new TaskExecutionError("invalid-document", {
+        detail:
+          `${label} bytes are not the exact protocol canonical seal `
+          + "(pretty/reordered/duplicate-key encodings are not accepted)",
+      }),
+    };
+  }
+  return { ok: true, document: document as T };
+}
+
 /**
  * The requester-facing marketplace `TaskExecutionBackend` (design §7, §13). `config` selects the
  * chain-generation-specific addresses (M0.3); `ports` supplies the posting mechanics (M2.3) and
@@ -58,44 +139,31 @@ export function makeMarketplaceBackend(
   ports: MarketplaceBackendPorts,
 ): MarketplaceTestableBackend {
   async function capabilities(): Promise<BackendCapabilities> {
-    return marketplaceCapabilities();
+    return marketplaceCapabilities({ cancel: ports.lifecycle !== undefined });
   }
 
   async function submit(taskBytes: Uint8Array, submissionBytes: Uint8Array): Promise<SubmissionAck> {
-    let taskParsed: unknown;
-    let submissionParsed: unknown;
-    try {
-      taskParsed = decodeJson(taskBytes);
-    } catch (err) {
-      return { accepted: false, error: new TaskExecutionError("invalid-document", { detail: `Task bytes are not valid JSON: ${String(err)}` }) };
+    const taskAdmission = admitCanonicalDocument<TaskSpecification>(
+      taskBytes,
+      "Task",
+      validateTask,
+      sealTask,
+    );
+    if (!taskAdmission.ok) {
+      return { accepted: false, error: taskAdmission.error };
     }
-    try {
-      submissionParsed = decodeJson(submissionBytes);
-    } catch (err) {
-      return { accepted: false, error: new TaskExecutionError("invalid-document", { detail: `Submission bytes are not valid JSON: ${String(err)}` }) };
-    }
-
-    const taskValidation = validateTask(taskParsed);
-    if (!taskValidation.conforms) {
-      return {
-        accepted: false,
-        error: new TaskExecutionError("invalid-document", {
-          detail: taskValidation.errors.map((e) => `${e.path}: ${e.message}`).join("; "),
-        }),
-      };
-    }
-    const submissionValidation = validateSubmission(submissionParsed);
-    if (!submissionValidation.conforms) {
-      return {
-        accepted: false,
-        error: new TaskExecutionError("invalid-document", {
-          detail: submissionValidation.errors.map((e) => `${e.path}: ${e.message}`).join("; "),
-        }),
-      };
+    const submissionAdmission = admitCanonicalDocument<SubmissionRecord>(
+      submissionBytes,
+      "Submission",
+      validateSubmission,
+      sealSubmission,
+    );
+    if (!submissionAdmission.ok) {
+      return { accepted: false, error: submissionAdmission.error };
     }
 
-    const task = taskParsed as TaskSpecification;
-    const submission = submissionParsed as SubmissionRecord;
+    const task = taskAdmission.document;
+    const submission = submissionAdmission.document;
 
     // A sealed Submission commits to the exact Task bytes it was paired with. This is a bad
     // reference, rather than a malformed document: both documents have already passed schema
@@ -155,26 +223,25 @@ export function makeMarketplaceBackend(
       }
     }
 
-    // M2.4 declares neither an evaluation profile nor a capability-grant resolver. The
-    // marketplace must reject supplied values instead of silently dropping them (§8).
-    if (submission.evaluationRequirements !== undefined) {
-      return {
-        accepted: false,
-        error: new TaskExecutionError("unsupported-requirement", {
-          detail: "this backend declares no evaluation profile and cannot honor evaluationRequirements (§8)",
-          annotations: { key: "evaluationRequirements" },
-        }),
-      };
+    // The requester binding transports capability-grant references byte-exactly and never
+    // redeems them. Today mode supports exactly the first-verdict (`minVerdicts === 1`) rail;
+    // `honorOrRejectToday` below rejects unknown or stronger requirements (program §7.54).
+    for (const [key, grant] of Object.entries(submission.capabilityGrants ?? {})) {
+      const uri =
+        grant !== null && typeof grant === "object"
+          ? (grant as { readonly uri?: unknown }).uri
+          : undefined;
+      if (typeof uri !== "string" || uri.length === 0) {
+        return {
+          accepted: false,
+          error: new TaskExecutionError("unsupported-requirement", {
+            detail: `capability grant "${key}" is not a transportable capability reference`,
+            annotations: { key: `capabilityGrants.${key}` },
+          }),
+        };
+      }
     }
-    if (submission.capabilityGrants !== undefined) {
-      return {
-        accepted: false,
-        error: new TaskExecutionError("unsupported-requirement", {
-          detail: "this backend does not resolve capabilityGrants (§8)",
-          annotations: { key: "capabilityGrants" },
-        }),
-      };
-    }
+
     for (const key of ["maxTotal", "maxConcurrent"] as const) {
       const requested = submission.attempts?.[key];
       const declared = backendCapabilities.attempts[key];
@@ -264,6 +331,40 @@ export function makeMarketplaceBackend(
     ports.observe.simulateReconciliation(ref, outcome);
   }
 
+  async function cancel(
+    attempt: AttemptUri,
+    reason: string,
+  ): Promise<CancelAck> {
+    const lifecycle = ports.lifecycle;
+    if (lifecycle === undefined) {
+      throw new TaskExecutionError("backend-unavailable", {
+        detail: "marketplace lifecycle ports are not configured",
+      });
+    }
+    const snapshot = await ports.observe.observe(attempt);
+    if (snapshot.descriptor.derived.terminal) {
+      return {
+        requested: false,
+        terminalState: snapshot.descriptor.derived.state,
+      };
+    }
+    const target = await lifecycle.resolveAttempt(attempt);
+    await signalCancel(attempt, target.taskId, target.attemptIndex, reason, {
+      requestCancel: lifecycle.requestCancel,
+    });
+    return { requested: true };
+  }
+
+  async function closeSubmission(taskId: bigint): Promise<void> {
+    const lifecycle = ports.lifecycle;
+    if (lifecycle === undefined) {
+      throw new TaskExecutionError("backend-unavailable", {
+        detail: "marketplace lifecycle ports are not configured",
+      });
+    }
+    await closeMarketplaceSubmission(taskId, config, lifecycle);
+  }
+
   return {
     capabilities,
     submit,
@@ -274,6 +375,12 @@ export function makeMarketplaceBackend(
     drive,
     recordDelivery,
     simulateReconciliation,
+    ...(ports.lifecycle === undefined
+      ? {}
+      : {
+          cancel,
+          closeSubmission,
+        }),
   };
 }
 

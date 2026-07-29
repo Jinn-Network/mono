@@ -74,7 +74,12 @@ export interface VerdictObservationGateInput {
     readonly settlementDeclarationKey: string;
     readonly claimBlockTime: string;
     readonly onChainVerdictCode: VerdictCodeValue;
-    readonly solverAddress: string;
+    readonly solver: {
+      readonly address: string;
+      readonly claimedAgent: string;
+      readonly declarationKey: string;
+      readonly effectiveTime: string;
+    };
     readonly evaluatorAddress: string;
   };
   readonly requesterAuthentication: {
@@ -120,6 +125,74 @@ type ParsedVerdict =
 function byteEqual(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length
     && left.every((byte, index) => byte === right[index]);
+}
+
+function floorDivide(value: bigint, divisor: bigint): bigint {
+  const quotient = value / divisor;
+  return value % divisor < 0n ? quotient - 1n : quotient;
+}
+
+/** Proleptic-Gregorian day number; the epoch is irrelevant because only differences compare. */
+function civilDay(yearInput: bigint, month: bigint, day: bigint): bigint {
+  const year = yearInput - (month <= 2n ? 1n : 0n);
+  const era = floorDivide(year, 400n);
+  const yearOfEra = year - era * 400n;
+  const shiftedMonth = month + (month > 2n ? -3n : 9n);
+  const dayOfYear = (153n * shiftedMonth + 2n) / 5n + day - 1n;
+  const dayOfEra =
+    yearOfEra * 365n
+    + yearOfEra / 4n
+    - yearOfEra / 100n
+    + dayOfYear;
+  return era * 146097n + dayOfEra;
+}
+
+function exactRfc3339Instant(value: string): {
+  readonly wholeSecond: bigint;
+  readonly fraction: string;
+} {
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/.exec(
+      value,
+    );
+  if (match === null) {
+    throw new Error(`invalid RFC 3339 instant "${value}"`);
+  }
+  const [, year, month, day, hour, minute, second, fraction = "", zone] =
+    match;
+  const localSecond =
+    civilDay(BigInt(year!), BigInt(month!), BigInt(day!)) * 86_400n
+    + BigInt(hour!) * 3_600n
+    + BigInt(minute!) * 60n
+    + BigInt(second!);
+  const offsetSecond = zone === "Z"
+    ? 0n
+    : (
+        BigInt(zone!.slice(1, 3)) * 3_600n
+        + BigInt(zone!.slice(4, 6)) * 60n
+      ) * (zone!.startsWith("+") ? 1n : -1n);
+  return {
+    wholeSecond: localSecond - offsetSecond,
+    fraction,
+  };
+}
+
+function compareRfc3339Instants(left: string, right: string): number {
+  const leftInstant = exactRfc3339Instant(left);
+  const rightInstant = exactRfc3339Instant(right);
+  if (leftInstant.wholeSecond < rightInstant.wholeSecond) return -1;
+  if (leftInstant.wholeSecond > rightInstant.wholeSecond) return 1;
+  const width = Math.max(
+    leftInstant.fraction.length,
+    rightInstant.fraction.length,
+  );
+  for (let index = 0; index < width; index += 1) {
+    const leftDigit = leftInstant.fraction[index] ?? "0";
+    const rightDigit = rightInstant.fraction[index] ?? "0";
+    if (leftDigit < rightDigit) return -1;
+    if (leftDigit > rightDigit) return 1;
+  }
+  return 0;
 }
 
 function parseJson(bytes: Uint8Array, label: string): unknown {
@@ -547,14 +620,43 @@ export async function gateVerdictObservation(
       }
     }
 
-    if (
+    let distinctnessFailure =
       input.verdict.evaluatorAddress.toLowerCase()
-      === input.verdict.solverAddress.toLowerCase()
-    ) {
-      failures.push({
-        check: "evaluator-distinctness",
-        detail: "on-chain evaluator address equals the subject solver address",
-      });
+        === input.verdict.solver.address.toLowerCase()
+        ? "on-chain evaluator address equals the subject solver address"
+        : undefined;
+    let resolvedSolverAgent: string | undefined;
+    if (!Rfc3339.safeParse(input.verdict.solver.effectiveTime).success) {
+      distinctnessFailure =
+        `solver declaration effective time "${input.verdict.solver.effectiveTime}" is not RFC 3339`;
+    } else {
+      try {
+        const solverBinding = await ports.bindingResolver.resolveBinding(
+          {
+            key: input.verdict.solver.declarationKey,
+            agent: input.verdict.solver.claimedAgent,
+          },
+          input.verdict.solver.effectiveTime,
+        );
+        if (solverBinding === null) {
+          distinctnessFailure =
+            "solver declaration does not resolve to the claimed solver Agent IRI";
+        } else if (
+          solverBinding.binding.relationship !== "controls"
+          && solverBinding.binding.relationship !== "signs-for"
+        ) {
+          distinctnessFailure =
+            `solver declaration relationship "${solverBinding.binding.relationship}" is not authority-bearing`;
+        } else if (solverBinding.binding.agent !== input.verdict.solver.claimedAgent) {
+          distinctnessFailure =
+            "solver declaration resolved to a different Agent IRI";
+        } else {
+          resolvedSolverAgent = solverBinding.binding.agent;
+        }
+      } catch (cause) {
+        distinctnessFailure =
+          `solver declaration resolution dependency failed: ${String(cause)}`;
+      }
     }
 
     const evaluatedAt = statement.predicate.evaluatedAt;
@@ -563,7 +665,7 @@ export async function gateVerdictObservation(
     if (
       !validEvaluatedAt
       || !validClaimTime
-      || Date.parse(evaluatedAt) > Date.parse(input.verdict.claimBlockTime)
+      || compareRfc3339Instants(evaluatedAt, input.verdict.claimBlockTime) > 0
     ) {
       failures.push({
         check: "verdict-effective-time",
@@ -629,8 +731,22 @@ export async function gateVerdictObservation(
             check: "settlement-join",
             detail: join.reason ?? "settlement join failed",
           });
+        } else if (
+          join?.agent !== undefined
+          && resolvedSolverAgent !== undefined
+          && join.agent === resolvedSolverAgent
+        ) {
+          distinctnessFailure =
+            `solver and evaluator declarations both resolve to Agent IRI "${join.agent}"`;
         }
       }
+    }
+
+    if (distinctnessFailure !== undefined) {
+      failures.push({
+        check: "evaluator-distinctness",
+        detail: distinctnessFailure,
+      });
     }
   }
 
