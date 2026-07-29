@@ -250,6 +250,17 @@ const ASSEMBLY_FORBIDDEN = [
   '@jinn-network/task-execution-testing',
 ];
 
+// The downstream backend-local conformance test is the sanctioned real-assembly consumer
+// (backend plan C4, program §7.25). It injects the evidence repository/catalog test
+// implementations through the assembly-owned ports; no production testing-kit module may
+// import them, and every other evidence/runtime package remains forbidden even in this test.
+const TESTING_BACKEND_LOCAL_TEST_ALLOWED_EVIDENCE = [
+  '@jinn-network/evidence-repository',
+  '@jinn-network/evidence-discovery',
+];
+const TESTING_BACKEND_LOCAL_TEST_FORBIDDEN = TASK_EXECUTION_FOREIGN_PACKAGES
+  .filter((name) => !TESTING_BACKEND_LOCAL_TEST_ALLOWED_EVIDENCE.includes(name));
+
 // Cross-tree consumption rule (program §7.18): nothing OUTSIDE `packages/task-execution/backend-local/`
 // imports `@jinn-network/task-execution-{supervisor,workspace,launchers}` except the assembly,
 // the testing `./backend-local` slice, and the evaluation harness's launcher surface. `protocol`
@@ -290,9 +301,23 @@ test('task-execution source boundaries remain one-way across the approved graph'
     [...TASK_EXECUTION_FOREIGN_PACKAGES, ...TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_BACKEND],
   );
 
-  // testing depends on protocol + backend only: both import freely, every foreign package and
-  // every other task-execution sibling (none yet besides protocol/backend) are forbidden.
-  assertBoundary(join(packages, 'testing', 'src'), TASK_EXECUTION_FOREIGN_PACKAGES);
+  // Production testing-kit modules remain evidence-independent. The downstream C4
+  // conformance test alone may construct the injected in-memory repository/catalog.
+  const testingSrc = join(packages, 'testing', 'src');
+  const testingBackendLocalTests = files(join(testingSrc, 'backend-local'))
+    .filter((file) => /\.test\.[cm]?[jt]sx?$/.test(file));
+  const testingWithoutBackendLocalTests = files(testingSrc)
+    .filter((file) => !testingBackendLocalTests.includes(file));
+  assert.deepEqual(
+    forbiddenImportsInFiles(testingWithoutBackendLocalTests, TASK_EXECUTION_FOREIGN_PACKAGES),
+    [],
+    'testing production source and non-backend-local tests must remain evidence-independent',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(testingBackendLocalTests, TESTING_BACKEND_LOCAL_TEST_FORBIDDEN),
+    [],
+    'backend-local conformance tests may import only injected repository/catalog test bindings',
+  );
 
   // profiles depends on protocol only: every foreign package and every other task-execution
   // sibling (backend, testing) are forbidden.
