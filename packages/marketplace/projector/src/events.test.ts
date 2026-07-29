@@ -11,6 +11,7 @@ import {
 } from "viem";
 import { describe, expect, test } from "vitest";
 import {
+  REVISED_COMMON_PROJECTOR_EVENTS_ABI,
   REVISED_PROJECTOR_EVENTS_ABI,
   decodeMarketplaceLogs,
   type MarketplaceRawLog,
@@ -24,6 +25,39 @@ const CREATOR = "0x5555555555555555555555555555555555555555" satisfies Address;
 const REQUEST_ID = `0x${"6".repeat(64)}` satisfies Hex;
 const TX_HASH = `0x${"7".repeat(64)}` satisfies Hex;
 const BLOCK_HASH = `0x${"8".repeat(64)}` satisfies Hex;
+
+const V4_TASK_CREATED_ABI = [{
+  type: "event",
+  name: "TaskCreated",
+  inputs: [
+    { name: "creator", type: "address", indexed: true },
+    { name: "taskCidDigest", type: "bytes32", indexed: true },
+    { name: "submissionDigest", type: "bytes32", indexed: true },
+    { name: "taskId", type: "uint256", indexed: false },
+    { name: "maxTotal", type: "uint32", indexed: false },
+    { name: "maxConcurrent", type: "uint32", indexed: false },
+    { name: "submissionDeadline", type: "uint64", indexed: false },
+    { name: "closeAt", type: "uint64", indexed: false },
+    { name: "responseTimeout", type: "uint64", indexed: false },
+    { name: "minVerdicts", type: "uint32", indexed: false },
+    { name: "requireDistinctEvaluator", type: "bool", indexed: false },
+    { name: "solutionMaxDeliveryRate", type: "uint256", indexed: false },
+    { name: "verdictMaxDeliveryRate", type: "uint256", indexed: false },
+    { name: "solutionBudget", type: "uint256", indexed: false },
+    { name: "verdictBudget", type: "uint256", indexed: false },
+  ],
+}] as const;
+
+const V4_ATTEMPTS_ADDED_ABI = [{
+  type: "event",
+  name: "AttemptsAdded",
+  inputs: [
+    { name: "taskId", type: "uint256", indexed: true },
+    { name: "creator", type: "address", indexed: true },
+    { name: "added", type: "uint32", indexed: false },
+    { name: "newMaxTotal", type: "uint32", indexed: false },
+  ],
+}] as const;
 
 function log(input: {
   readonly address?: Address;
@@ -53,6 +87,250 @@ function exactTopics(
 }
 
 describe("decodeMarketplaceLogs", () => {
+  test("isolates changed V3 and V4 router topics by contract generation", () => {
+    const v3Topics = encodeEventTopics({
+      abi: JINN_ROUTER_V3_ABI,
+      eventName: "TaskCreated",
+      args: {
+        creator: CREATOR,
+        taskId: 42n,
+        manifestDigest: `0x${"9".repeat(64)}`,
+      },
+    });
+    const v3Data = encodeAbiParameters(
+      [
+        { name: "taskCidDigest", type: "bytes32" },
+        { name: "maxClaims", type: "uint32" },
+        { name: "solutionBudget", type: "uint256" },
+        { name: "verdictBudget", type: "uint256" },
+      ],
+      [`0x${"a".repeat(64)}`, 2, 100n, 20n],
+    );
+
+    const v4Topics = encodeEventTopics({
+      abi: V4_TASK_CREATED_ABI,
+      eventName: "TaskCreated",
+      args: {
+        creator: CREATOR,
+        taskCidDigest: `0x${"a".repeat(64)}`,
+        submissionDigest: `0x${"b".repeat(64)}`,
+      },
+    });
+    const v4Data = encodeAbiParameters(
+      V4_TASK_CREATED_ABI[0].inputs.filter((input) => !input.indexed),
+      [
+        42n,
+        2,
+        1,
+        1_800_000_000n,
+        1_800_000_100n,
+        3600n,
+        2,
+        true,
+        10n,
+        20n,
+        100n,
+        200n,
+      ],
+    );
+
+    expect(
+      decodeMarketplaceLogs([
+        log({ topics: exactTopics(v3Topics), data: v3Data }),
+      ], "revised"),
+    ).toEqual([]);
+    expect(
+      decodeMarketplaceLogs([
+        log({ topics: exactTopics(v4Topics), data: v4Data }),
+      ], "today"),
+    ).toEqual([]);
+    expect(
+      decodeMarketplaceLogs([
+        log({ topics: exactTopics(v4Topics), data: v4Data }),
+      ], "revised").map(({ event, facts }) => ({ event, facts })),
+    ).toEqual([
+      {
+        event: "TaskCreated",
+        facts: {
+          creator: CREATOR,
+          taskCidDigest: `0x${"a".repeat(64)}`,
+          submissionDigest: `0x${"b".repeat(64)}`,
+          taskId: 42n,
+          maxTotal: 2,
+          maxConcurrent: 1,
+          submissionDeadline: 1_800_000_000n,
+          closeAt: 1_800_000_100n,
+          responseTimeout: 3600n,
+          minVerdicts: 2,
+          requireDistinctEvaluator: true,
+          solutionMaxDeliveryRate: 10n,
+          verdictMaxDeliveryRate: 20n,
+          solutionBudget: 100n,
+          verdictBudget: 200n,
+        },
+      },
+    ]);
+  });
+
+  test("decodes AttemptsAdded only in revised mode as a distinct capacity fact", () => {
+    const topics = encodeEventTopics({
+      abi: V4_ATTEMPTS_ADDED_ABI,
+      eventName: "AttemptsAdded",
+      args: { taskId: 42n, creator: CREATOR },
+    });
+    const data = encodeAbiParameters(
+      V4_ATTEMPTS_ADDED_ABI[0].inputs.filter((input) => !input.indexed),
+      [2, 5],
+    );
+    const capacityLog = log({ topics: exactTopics(topics), data });
+
+    expect(decodeMarketplaceLogs([capacityLog], "today")).toEqual([]);
+    expect(decodeMarketplaceLogs([capacityLog], "revised")).toEqual([
+      {
+        event: "AttemptsAdded",
+        facts: {
+          taskId: 42n,
+          creator: CREATOR,
+          added: 2,
+          newMaxTotal: 5,
+        },
+        derivation: expect.objectContaining({
+          event: "AttemptsAdded",
+          contractGeneration: "revised",
+        }),
+      },
+    ]);
+  });
+
+  test("decodes the remaining exact V4 common facts and rejects their topics in today mode", () => {
+    const evaluator = getAddress("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+    const deliveryDigest = `0x${"c".repeat(64)}` satisfies Hex;
+    const evaluationDeliveryDigest = `0x${"d".repeat(64)}` satisfies Hex;
+
+    const taskAttempt = log({
+      topics: exactTopics(encodeEventTopics({
+        abi: REVISED_COMMON_PROJECTOR_EVENTS_ABI,
+        eventName: "TaskAttemptCreated",
+        args: { operator: OPERATOR, priorityMech: PRIORITY_MECH, requestId: REQUEST_ID },
+      })),
+      data: encodeAbiParameters(
+        [
+          { name: "taskId", type: "uint256" },
+          { name: "attemptIndex", type: "uint32" },
+          { name: "attemptDeadline", type: "uint64" },
+          { name: "deliveryRate", type: "uint256" },
+        ],
+        [42n, 3, 1_800_000_000n, 100n],
+      ),
+    });
+    const evaluationAttempt = log({
+      topics: exactTopics(encodeEventTopics({
+        abi: REVISED_COMMON_PROJECTOR_EVENTS_ABI,
+        eventName: "EvaluationAttemptCreated",
+        args: { evaluator, priorityMech: PRIORITY_MECH, requestId: REQUEST_ID },
+      })),
+      data: encodeAbiParameters(
+        [
+          { name: "taskId", type: "uint256" },
+          { name: "attemptIndex", type: "uint32" },
+          { name: "verdictIndex", type: "uint32" },
+          { name: "attemptDeadline", type: "uint64" },
+          { name: "deliveryRate", type: "uint256" },
+        ],
+        [42n, 3, 4, 1_800_000_100n, 200n],
+      ),
+    });
+    const solutionClaimed = log({
+      topics: exactTopics(encodeEventTopics({
+        abi: REVISED_COMMON_PROJECTOR_EVENTS_ABI,
+        eventName: "SolutionDeliveryClaimed",
+        args: { operator: OPERATOR, requestId: REQUEST_ID, deliveryDigest },
+      })),
+      data: encodeAbiParameters(
+        [
+          { name: "taskId", type: "uint256" },
+          { name: "attemptIndex", type: "uint32" },
+        ],
+        [42n, 3],
+      ),
+    });
+    const verdictClaimed = log({
+      topics: exactTopics(encodeEventTopics({
+        abi: REVISED_COMMON_PROJECTOR_EVENTS_ABI,
+        eventName: "VerdictDeliveryClaimed",
+        args: { evaluator, requestId: REQUEST_ID, evaluationDeliveryDigest },
+      })),
+      data: encodeAbiParameters(
+        [
+          { name: "taskId", type: "uint256" },
+          { name: "attemptIndex", type: "uint32" },
+          { name: "verdictIndex", type: "uint32" },
+          { name: "verdictCode", type: "uint8" },
+        ],
+        [42n, 3, 4, 2],
+      ),
+    });
+    const changedV4Logs = [
+      taskAttempt,
+      evaluationAttempt,
+      solutionClaimed,
+      verdictClaimed,
+    ];
+
+    expect(decodeMarketplaceLogs(changedV4Logs, "today")).toEqual([]);
+    expect(
+      decodeMarketplaceLogs(changedV4Logs, "revised").map(({ event, facts }) => ({ event, facts })),
+    ).toEqual([
+      {
+        event: "TaskAttemptCreated",
+        facts: {
+          operator: OPERATOR,
+          priorityMech: PRIORITY_MECH,
+          requestId: REQUEST_ID,
+          taskId: 42n,
+          attemptIndex: 3,
+          attemptDeadline: 1_800_000_000n,
+          deliveryRate: 100n,
+        },
+      },
+      {
+        event: "EvaluationAttemptCreated",
+        facts: {
+          evaluator,
+          priorityMech: PRIORITY_MECH,
+          requestId: REQUEST_ID,
+          taskId: 42n,
+          attemptIndex: 3,
+          verdictIndex: 4,
+          attemptDeadline: 1_800_000_100n,
+          deliveryRate: 200n,
+        },
+      },
+      {
+        event: "SolutionDeliveryClaimed",
+        facts: {
+          operator: OPERATOR,
+          requestId: REQUEST_ID,
+          deliveryDigest,
+          taskId: 42n,
+          attemptIndex: 3,
+        },
+      },
+      {
+        event: "VerdictDeliveryClaimed",
+        facts: {
+          evaluator,
+          requestId: REQUEST_ID,
+          evaluationDeliveryDigest,
+          taskId: 42n,
+          attemptIndex: 3,
+          verdictIndex: 4,
+          verdictCode: 2,
+        },
+      },
+    ]);
+  });
+
   test("decodes every remaining today-mode router event into its exact fact", () => {
     const taskCidDigest = `0x${"9".repeat(64)}` satisfies Hex;
     const manifestDigest = `0x${"a".repeat(64)}` satisfies Hex;
@@ -274,6 +552,23 @@ describe("decodeMarketplaceLogs", () => {
         contract: MECH,
         event: "Deliver",
         contractGeneration: "today",
+      }),
+    });
+    expect(decodeMarketplaceLogs([
+      log({ address: MECH, topics: exactTopics(topics), data }),
+    ], "revised")[0]).toEqual({
+      event: "Deliver",
+      facts: {
+        mech: MECH,
+        mechServiceMultisig: OPERATOR,
+        requestId: REQUEST_ID,
+        deliveryRate: 99n,
+        data: "0x1234",
+      },
+      derivation: expect.objectContaining({
+        contract: MECH,
+        event: "Deliver",
+        contractGeneration: "revised",
       }),
     });
   });

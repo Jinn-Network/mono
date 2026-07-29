@@ -18,11 +18,106 @@ import {
 } from "./derivation.js";
 
 /**
- * These event signatures are the M7 ABI contract frozen by program ruling §7.28 and marketplace
- * Addendum 2026-07-29-e. They are deliberately projector-local until M7 introduces the V4
- * contracts and their complete ABIs. Today mode never decodes them.
+ * Exact V4 router event contract frozen by marketplace Addendum 2026-07-29-f / program
+ * ruling §7.29. M7's compiled contract ABI must match these fixtures byte-for-byte.
  */
-export const REVISED_PROJECTOR_EVENTS_ABI = [
+export const REVISED_COMMON_PROJECTOR_EVENTS_ABI = [
+  {
+    type: "event",
+    name: "TaskCreated",
+    inputs: [
+      { name: "creator", type: "address", indexed: true },
+      { name: "taskCidDigest", type: "bytes32", indexed: true },
+      { name: "submissionDigest", type: "bytes32", indexed: true },
+      { name: "taskId", type: "uint256", indexed: false },
+      { name: "maxTotal", type: "uint32", indexed: false },
+      { name: "maxConcurrent", type: "uint32", indexed: false },
+      { name: "submissionDeadline", type: "uint64", indexed: false },
+      { name: "closeAt", type: "uint64", indexed: false },
+      { name: "responseTimeout", type: "uint64", indexed: false },
+      { name: "minVerdicts", type: "uint32", indexed: false },
+      { name: "requireDistinctEvaluator", type: "bool", indexed: false },
+      { name: "solutionMaxDeliveryRate", type: "uint256", indexed: false },
+      { name: "verdictMaxDeliveryRate", type: "uint256", indexed: false },
+      { name: "solutionBudget", type: "uint256", indexed: false },
+      { name: "verdictBudget", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "TaskAttemptCreated",
+    inputs: [
+      { name: "operator", type: "address", indexed: true },
+      { name: "priorityMech", type: "address", indexed: true },
+      { name: "requestId", type: "bytes32", indexed: true },
+      { name: "taskId", type: "uint256", indexed: false },
+      { name: "attemptIndex", type: "uint32", indexed: false },
+      { name: "attemptDeadline", type: "uint64", indexed: false },
+      { name: "deliveryRate", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "EvaluationAttemptCreated",
+    inputs: [
+      { name: "evaluator", type: "address", indexed: true },
+      { name: "priorityMech", type: "address", indexed: true },
+      { name: "requestId", type: "bytes32", indexed: true },
+      { name: "taskId", type: "uint256", indexed: false },
+      { name: "attemptIndex", type: "uint32", indexed: false },
+      { name: "verdictIndex", type: "uint32", indexed: false },
+      { name: "attemptDeadline", type: "uint64", indexed: false },
+      { name: "deliveryRate", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "SolutionDeliveryClaimed",
+    inputs: [
+      { name: "operator", type: "address", indexed: true },
+      { name: "requestId", type: "bytes32", indexed: true },
+      { name: "deliveryDigest", type: "bytes32", indexed: true },
+      { name: "taskId", type: "uint256", indexed: false },
+      { name: "attemptIndex", type: "uint32", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "VerdictDeliveryClaimed",
+    inputs: [
+      { name: "evaluator", type: "address", indexed: true },
+      { name: "requestId", type: "bytes32", indexed: true },
+      { name: "evaluationDeliveryDigest", type: "bytes32", indexed: true },
+      { name: "taskId", type: "uint256", indexed: false },
+      { name: "attemptIndex", type: "uint32", indexed: false },
+      { name: "verdictIndex", type: "uint32", indexed: false },
+      { name: "verdictCode", type: "uint8", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "TaskBudgetRefunded",
+    inputs: [
+      { name: "taskId", type: "uint256", indexed: true },
+      { name: "creator", type: "address", indexed: true },
+      { name: "solutionAmount", type: "uint256", indexed: false },
+      { name: "verdictAmount", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "AttemptsAdded",
+    inputs: [
+      { name: "taskId", type: "uint256", indexed: true },
+      { name: "creator", type: "address", indexed: true },
+      { name: "added", type: "uint32", indexed: false },
+      { name: "newMaxTotal", type: "uint32", indexed: false },
+    ],
+  },
+] as const;
+
+/** Exact V4 lifecycle events frozen by Addendum 2026-07-29-e / ruling §7.28. */
+export const REVISED_LIFECYCLE_PROJECTOR_EVENTS_ABI = [
   {
     type: "event",
     name: "AttemptExpired",
@@ -51,16 +146,22 @@ export const REVISED_PROJECTOR_EVENTS_ABI = [
   },
 ] as const;
 
-const TODAY_PROJECTOR_EVENTS_ABI = [
-  ...JINN_ROUTER_V3_ABI.filter((entry) => entry.type === "event"),
-  ...MECH_ABI,
+export const REVISED_PROJECTOR_EVENTS_ABI = [
+  ...REVISED_COMMON_PROJECTOR_EVENTS_ABI,
+  ...REVISED_LIFECYCLE_PROJECTOR_EVENTS_ABI,
 ] as const;
+
+const V3_ROUTER_EVENTS_ABI = JINN_ROUTER_V3_ABI.filter(
+  (entry) => entry.type === "event",
+);
+const TODAY_PROJECTOR_EVENTS_ABI = [...V3_ROUTER_EVENTS_ABI, ...MECH_ABI] as const;
+const REVISED_DECODE_EVENTS_ABI = [...REVISED_PROJECTOR_EVENTS_ABI, ...MECH_ABI] as const;
 
 const TODAY_EVENT_TOPICS = new Set(
   TODAY_PROJECTOR_EVENTS_ABI.map((event) => toEventSelector(event)),
 );
 const REVISED_EVENT_TOPICS = new Set(
-  REVISED_PROJECTOR_EVENTS_ABI.map((event) => toEventSelector(event)),
+  REVISED_DECODE_EVENTS_ABI.map((event) => toEventSelector(event)),
 );
 
 export interface MarketplaceRawLog extends DerivationLog {
@@ -74,33 +175,115 @@ type Event<Name extends string, Facts> = {
   readonly derivation: DerivationAnnotation;
 };
 
+type V3TaskCreated = Event<"TaskCreated", {
+  readonly creator: Address;
+  readonly taskId: bigint;
+  readonly manifestDigest: Hex;
+  readonly taskCidDigest: Hex;
+  readonly maxClaims: number;
+  readonly solutionBudget: bigint;
+  readonly verdictBudget: bigint;
+}>;
+
+type V4TaskCreated = Event<"TaskCreated", {
+  readonly creator: Address;
+  readonly taskCidDigest: Hex;
+  readonly submissionDigest: Hex;
+  readonly taskId: bigint;
+  readonly maxTotal: number;
+  readonly maxConcurrent: number;
+  readonly submissionDeadline: bigint;
+  readonly closeAt: bigint;
+  readonly responseTimeout: bigint;
+  readonly minVerdicts: number;
+  readonly requireDistinctEvaluator: boolean;
+  readonly solutionMaxDeliveryRate: bigint;
+  readonly verdictMaxDeliveryRate: bigint;
+  readonly solutionBudget: bigint;
+  readonly verdictBudget: bigint;
+}>;
+
+type V3TaskAttemptCreated = Event<"TaskAttemptCreated", {
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+  readonly operator: Address;
+  readonly requestId: Hex;
+  readonly priorityMech: Address;
+  readonly deliveryRate: bigint;
+}>;
+
+type V4TaskAttemptCreated = Event<"TaskAttemptCreated", {
+  readonly operator: Address;
+  readonly priorityMech: Address;
+  readonly requestId: Hex;
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+  readonly attemptDeadline: bigint;
+  readonly deliveryRate: bigint;
+}>;
+
+type V3EvaluationAttemptCreated = Event<"EvaluationAttemptCreated", {
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+  readonly verdictIndex: number;
+  readonly requestId: Hex;
+  readonly evaluator: Address;
+  readonly priorityMech: Address;
+  readonly deliveryRate: bigint;
+}>;
+
+type V4EvaluationAttemptCreated = Event<"EvaluationAttemptCreated", {
+  readonly evaluator: Address;
+  readonly priorityMech: Address;
+  readonly requestId: Hex;
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+  readonly verdictIndex: number;
+  readonly attemptDeadline: bigint;
+  readonly deliveryRate: bigint;
+}>;
+
+type V3SolutionDeliveryClaimed = Event<"SolutionDeliveryClaimed", {
+  readonly operator: Address;
+  readonly requestId: Hex;
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+}>;
+
+type V4SolutionDeliveryClaimed = Event<"SolutionDeliveryClaimed", {
+  readonly operator: Address;
+  readonly requestId: Hex;
+  readonly deliveryDigest: Hex;
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+}>;
+
+type V3VerdictDeliveryClaimed = Event<"VerdictDeliveryClaimed", {
+  readonly evaluator: Address;
+  readonly requestId: Hex;
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+  readonly verdictIndex: number;
+  readonly verdictCode: number;
+}>;
+
+type V4VerdictDeliveryClaimed = Event<"VerdictDeliveryClaimed", {
+  readonly evaluator: Address;
+  readonly requestId: Hex;
+  readonly evaluationDeliveryDigest: Hex;
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+  readonly verdictIndex: number;
+  readonly verdictCode: number;
+}>;
+
 export type MarketplaceEvent =
-  | Event<"TaskCreated", {
-      readonly creator: Address;
-      readonly taskId: bigint;
-      readonly manifestDigest: Hex;
-      readonly taskCidDigest: Hex;
-      readonly maxClaims: number;
-      readonly solutionBudget: bigint;
-      readonly verdictBudget: bigint;
-    }>
-  | Event<"TaskAttemptCreated", {
-      readonly taskId: bigint;
-      readonly attemptIndex: number;
-      readonly operator: Address;
-      readonly requestId: Hex;
-      readonly priorityMech: Address;
-      readonly deliveryRate: bigint;
-    }>
-  | Event<"EvaluationAttemptCreated", {
-      readonly taskId: bigint;
-      readonly attemptIndex: number;
-      readonly verdictIndex: number;
-      readonly requestId: Hex;
-      readonly evaluator: Address;
-      readonly priorityMech: Address;
-      readonly deliveryRate: bigint;
-    }>
+  | V3TaskCreated
+  | V4TaskCreated
+  | V3TaskAttemptCreated
+  | V4TaskAttemptCreated
+  | V3EvaluationAttemptCreated
+  | V4EvaluationAttemptCreated
   | Event<"Deliver", {
       readonly mech: Address;
       readonly mechServiceMultisig: Address;
@@ -108,25 +291,21 @@ export type MarketplaceEvent =
       readonly deliveryRate: bigint;
       readonly data: Hex;
     }>
-  | Event<"SolutionDeliveryClaimed", {
-      readonly operator: Address;
-      readonly requestId: Hex;
-      readonly taskId: bigint;
-      readonly attemptIndex: number;
-    }>
-  | Event<"VerdictDeliveryClaimed", {
-      readonly evaluator: Address;
-      readonly requestId: Hex;
-      readonly taskId: bigint;
-      readonly attemptIndex: number;
-      readonly verdictIndex: number;
-      readonly verdictCode: number;
-    }>
+  | V3SolutionDeliveryClaimed
+  | V4SolutionDeliveryClaimed
+  | V3VerdictDeliveryClaimed
+  | V4VerdictDeliveryClaimed
   | Event<"TaskBudgetRefunded", {
       readonly taskId: bigint;
       readonly creator: Address;
       readonly solutionAmount: bigint;
       readonly verdictAmount: bigint;
+    }>
+  | Event<"AttemptsAdded", {
+      readonly taskId: bigint;
+      readonly creator: Address;
+      readonly added: number;
+      readonly newMaxTotal: number;
     }>
   | Event<"AttemptExpired", {
       readonly taskId: bigint;
@@ -169,6 +348,12 @@ function numberArg(args: Record<string, unknown>, name: string): number {
   throw new TypeError(`${name} is not a safe integer`);
 }
 
+function booleanArg(args: Record<string, unknown>, name: string): boolean {
+  const value = args[name];
+  if (typeof value !== "boolean") throw new TypeError(`${name} is not a boolean`);
+  return value;
+}
+
 function stringArg<T extends string>(
   args: Record<string, unknown>,
   name: string,
@@ -178,12 +363,45 @@ function stringArg<T extends string>(
   return value as T;
 }
 
-function eventFromDecoded(
+function commonEvent(
   eventName: string,
-  decodedArgs: unknown,
+  args: Record<string, unknown>,
   derivation: DerivationAnnotation,
 ): MarketplaceEvent | undefined {
-  const args = argsRecord(decodedArgs);
+  switch (eventName) {
+    case "Deliver":
+      return {
+        event: eventName,
+        facts: {
+          mech: stringArg<Address>(args, "mech"),
+          mechServiceMultisig: stringArg<Address>(args, "mechServiceMultisig"),
+          requestId: stringArg<Hex>(args, "requestId"),
+          deliveryRate: bigintArg(args, "deliveryRate"),
+          data: stringArg<Hex>(args, "data"),
+        },
+        derivation,
+      };
+    case "TaskBudgetRefunded":
+      return {
+        event: eventName,
+        facts: {
+          taskId: bigintArg(args, "taskId"),
+          creator: stringArg<Address>(args, "creator"),
+          solutionAmount: bigintArg(args, "solutionAmount"),
+          verdictAmount: bigintArg(args, "verdictAmount"),
+        },
+        derivation,
+      };
+    default:
+      return undefined;
+  }
+}
+
+function todayEvent(
+  eventName: string,
+  args: Record<string, unknown>,
+  derivation: DerivationAnnotation,
+): MarketplaceEvent | undefined {
   switch (eventName) {
     case "TaskCreated":
       return {
@@ -226,18 +444,6 @@ function eventFromDecoded(
         },
         derivation,
       };
-    case "Deliver":
-      return {
-        event: eventName,
-        facts: {
-          mech: stringArg<Address>(args, "mech"),
-          mechServiceMultisig: stringArg<Address>(args, "mechServiceMultisig"),
-          requestId: stringArg<Hex>(args, "requestId"),
-          deliveryRate: bigintArg(args, "deliveryRate"),
-          data: stringArg<Hex>(args, "data"),
-        },
-        derivation,
-      };
     case "SolutionDeliveryClaimed":
       return {
         event: eventName,
@@ -262,14 +468,102 @@ function eventFromDecoded(
         },
         derivation,
       };
-    case "TaskBudgetRefunded":
+    default:
+      return commonEvent(eventName, args, derivation);
+  }
+}
+
+function revisedEvent(
+  eventName: string,
+  args: Record<string, unknown>,
+  derivation: DerivationAnnotation,
+): MarketplaceEvent | undefined {
+  switch (eventName) {
+    case "TaskCreated":
+      return {
+        event: eventName,
+        facts: {
+          creator: stringArg<Address>(args, "creator"),
+          taskCidDigest: stringArg<Hex>(args, "taskCidDigest"),
+          submissionDigest: stringArg<Hex>(args, "submissionDigest"),
+          taskId: bigintArg(args, "taskId"),
+          maxTotal: numberArg(args, "maxTotal"),
+          maxConcurrent: numberArg(args, "maxConcurrent"),
+          submissionDeadline: bigintArg(args, "submissionDeadline"),
+          closeAt: bigintArg(args, "closeAt"),
+          responseTimeout: bigintArg(args, "responseTimeout"),
+          minVerdicts: numberArg(args, "minVerdicts"),
+          requireDistinctEvaluator: booleanArg(args, "requireDistinctEvaluator"),
+          solutionMaxDeliveryRate: bigintArg(args, "solutionMaxDeliveryRate"),
+          verdictMaxDeliveryRate: bigintArg(args, "verdictMaxDeliveryRate"),
+          solutionBudget: bigintArg(args, "solutionBudget"),
+          verdictBudget: bigintArg(args, "verdictBudget"),
+        },
+        derivation,
+      };
+    case "TaskAttemptCreated":
+      return {
+        event: eventName,
+        facts: {
+          operator: stringArg<Address>(args, "operator"),
+          priorityMech: stringArg<Address>(args, "priorityMech"),
+          requestId: stringArg<Hex>(args, "requestId"),
+          taskId: bigintArg(args, "taskId"),
+          attemptIndex: numberArg(args, "attemptIndex"),
+          attemptDeadline: bigintArg(args, "attemptDeadline"),
+          deliveryRate: bigintArg(args, "deliveryRate"),
+        },
+        derivation,
+      };
+    case "EvaluationAttemptCreated":
+      return {
+        event: eventName,
+        facts: {
+          evaluator: stringArg<Address>(args, "evaluator"),
+          priorityMech: stringArg<Address>(args, "priorityMech"),
+          requestId: stringArg<Hex>(args, "requestId"),
+          taskId: bigintArg(args, "taskId"),
+          attemptIndex: numberArg(args, "attemptIndex"),
+          verdictIndex: numberArg(args, "verdictIndex"),
+          attemptDeadline: bigintArg(args, "attemptDeadline"),
+          deliveryRate: bigintArg(args, "deliveryRate"),
+        },
+        derivation,
+      };
+    case "SolutionDeliveryClaimed":
+      return {
+        event: eventName,
+        facts: {
+          operator: stringArg<Address>(args, "operator"),
+          requestId: stringArg<Hex>(args, "requestId"),
+          deliveryDigest: stringArg<Hex>(args, "deliveryDigest"),
+          taskId: bigintArg(args, "taskId"),
+          attemptIndex: numberArg(args, "attemptIndex"),
+        },
+        derivation,
+      };
+    case "VerdictDeliveryClaimed":
+      return {
+        event: eventName,
+        facts: {
+          evaluator: stringArg<Address>(args, "evaluator"),
+          requestId: stringArg<Hex>(args, "requestId"),
+          evaluationDeliveryDigest: stringArg<Hex>(args, "evaluationDeliveryDigest"),
+          taskId: bigintArg(args, "taskId"),
+          attemptIndex: numberArg(args, "attemptIndex"),
+          verdictIndex: numberArg(args, "verdictIndex"),
+          verdictCode: numberArg(args, "verdictCode"),
+        },
+        derivation,
+      };
+    case "AttemptsAdded":
       return {
         event: eventName,
         facts: {
           taskId: bigintArg(args, "taskId"),
           creator: stringArg<Address>(args, "creator"),
-          solutionAmount: bigintArg(args, "solutionAmount"),
-          verdictAmount: bigintArg(args, "verdictAmount"),
+          added: numberArg(args, "added"),
+          newMaxTotal: numberArg(args, "newMaxTotal"),
         },
         derivation,
       };
@@ -294,14 +588,14 @@ function eventFromDecoded(
         derivation,
       };
     default:
-      return undefined;
+      return commonEvent(eventName, args, derivation);
   }
 }
 
 /**
- * Decodes only the event set available in the selected contract generation. Unknown logs are
- * ignored; malformed logs matching a known topic are rejected by viem rather than converted to
- * invented facts.
+ * Decodes only the router event contract available in the selected generation. The unchanged
+ * external Mech Deliver event is decoded in both generations as an operational join, but V3
+ * router topics are never composed into revised mode and V4 topics never enter today mode.
  */
 export function decodeMarketplaceLogs(
   logs: readonly MarketplaceRawLog[],
@@ -309,7 +603,8 @@ export function decodeMarketplaceLogs(
 ): MarketplaceEvent[] {
   const abi = generation === "today"
     ? TODAY_PROJECTOR_EVENTS_ABI
-    : [...TODAY_PROJECTOR_EVENTS_ABI, ...REVISED_PROJECTOR_EVENTS_ABI] as const;
+    : REVISED_DECODE_EVENTS_ABI;
+  const knownTopics = generation === "today" ? TODAY_EVENT_TOPICS : REVISED_EVENT_TOPICS;
   const events: MarketplaceEvent[] = [];
 
   for (const log of logs) {
@@ -322,16 +617,14 @@ export function decodeMarketplaceLogs(
         strict: true,
       });
       const derivation = createDerivationAnnotation(log, decoded.eventName, generation);
-      const event = eventFromDecoded(decoded.eventName, decoded.args, derivation);
+      const args = argsRecord(decoded.args);
+      const event = generation === "today"
+        ? todayEvent(decoded.eventName, args, derivation)
+        : revisedEvent(decoded.eventName, args, derivation);
       if (event !== undefined) events.push(event);
     } catch (cause) {
       const claimedTopic = log.topics[0];
-      const known = claimedTopic !== undefined
-        && (
-          TODAY_EVENT_TOPICS.has(claimedTopic)
-          || (generation === "revised" && REVISED_EVENT_TOPICS.has(claimedTopic))
-        );
-      if (known) throw cause;
+      if (claimedTopic !== undefined && knownTopics.has(claimedTopic)) throw cause;
       // The projector consumes logs from several addresses. A topic outside the selected
       // generation's exact ABI set is unrelated input and contributes no event fact.
     }
