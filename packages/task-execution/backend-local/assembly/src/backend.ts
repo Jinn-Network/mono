@@ -573,11 +573,14 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   private readonly workers = new Set<Promise<void>>();
   private readonly workerAttempts = new Map<AttemptUri, number>();
   private readonly inflight = new Set<Promise<unknown>>();
+  private readonly attemptTimers = new Map<AttemptUri, Set<NodeJS.Timeout>>();
   private readonly watchRegistry = new ObservationWatchRegistry();
   private closed = false;
+  private closeInvoked = false;
   private shutdownStarted = false;
   private shutdownComplete = false;
   private shutdownPromise?: Promise<void>;
+  private readonly shutdownDrainFailures: Error[] = [];
 
   constructor(private readonly config: LocalTaskExecutionBackendConfig) {
     this.writer = acquireStateRootWriter(config.stateRoot);
@@ -600,11 +603,37 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     if (!this.writer.acquired) throw this.writer.error;
   }
 
+  private recordShutdownDrainFailure(error: unknown): void {
+    this.shutdownDrainFailures.push(error instanceof Error ? error : new Error(String(error)));
+  }
+
   private trackInflight<T>(promise: Promise<T>): Promise<T> {
     this.inflight.add(promise);
     return promise.finally(() => {
       this.inflight.delete(promise);
     });
+  }
+
+  private trackAttemptTimer(attempt: AttemptUri, timer: NodeJS.Timeout): void {
+    let timers = this.attemptTimers.get(attempt);
+    if (timers === undefined) {
+      timers = new Set();
+      this.attemptTimers.set(attempt, timers);
+    }
+    timers.add(timer);
+  }
+
+  private clearAttemptTimers(attempt: AttemptUri): void {
+    const timers = this.attemptTimers.get(attempt);
+    if (timers === undefined) return;
+    for (const timer of timers) clearTimeout(timer);
+    this.attemptTimers.delete(attempt);
+  }
+
+  private clearAllAttemptTimers(): void {
+    for (const attempt of [...this.attemptTimers.keys()]) {
+      this.clearAttemptTimers(attempt);
+    }
   }
 
   private notifyObservationTail(attempt: AttemptUri): void {
@@ -622,21 +651,16 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       | "after-evidence"
       | "before-delivery-checkpoint",
   ): Promise<void> {
-    if (this.shutdownStarted) return;
     const hook = this.config.faults?.onCompletionPhase;
     if (hook === undefined) return;
-    let timer: ReturnType<typeof setInterval> | undefined;
     try {
-      await Promise.race([
-        hook(phase),
-        new Promise<void>((resolve) => {
-          timer = setInterval(() => {
-            if (this.shutdownStarted) resolve();
-          }, 5);
-        }),
-      ]);
-    } finally {
-      if (timer !== undefined) clearInterval(timer);
+      await hook(phase);
+    } catch (error) {
+      if (this.closeInvoked) {
+        this.recordShutdownDrainFailure(error);
+        return;
+      }
+      throw error;
     }
   }
 
@@ -1278,6 +1302,10 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         planBytes,
         spawn,
       }).catch((error: unknown) => {
+        if (this.closeInvoked) {
+          this.recordShutdownDrainFailure(error);
+          return;
+        }
         if (this.shutdownStarted) return;
         const record = foldAttemptRecord(this.journal(attempt).read());
         if (!record.terminal) {
@@ -1318,6 +1346,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     attempt: AttemptUri,
     details: Readonly<Record<string, unknown>>,
   ): void {
+    this.clearAttemptTimers(attempt);
     this.journal(attempt).append({
       attemptId: attempt,
       type: "attempt-terminal",
@@ -1951,7 +1980,9 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   }
 
   async cancel(attempt: AttemptUri, reason: string): Promise<CancelAck> {
+    this.assertWriter();
     const snapshot = await this.observe(attempt);
+    this.assertWriter();
     if (snapshot.descriptor.derived.terminal) {
       return {
         requested: false,
@@ -1967,6 +1998,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
 
   /** Requests the shim-owned termination ladder. It intentionally records intent, not outcome. */
   private requestStop(attempt: AttemptUri, reason: string, deadline: boolean): void {
+    if (this.shutdownStarted || !this.writer.acquired) return;
     if (foldAttemptRecord(this.journal(attempt).read()).terminal) return;
     if (this.journal(attempt).read().some((event) => event.type === "cancel-requested")) return;
     this.journal(attempt).append({
@@ -1999,20 +2031,26 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
 
   /** Deadline timing starts at `attempt-started`; preparation is deliberately excluded. */
   private armExpiry(attempt: AttemptUri, recovering = false): void {
+    this.clearAttemptTimers(attempt);
     const metadata = this.attempts.get(attempt);
     if (metadata === undefined) return;
     const dueAt = Date.parse(metadata.effectiveDeadline);
     const maximumTimerDelayMs = 2_147_483_647;
     if (Number.isFinite(dueAt)) {
       const schedule = (): void => {
+        if (this.shutdownStarted || !this.writer.acquired) return;
         const remainingMs = Math.max(0, dueAt - Date.now());
         const timer = setTimeout(
           remainingMs > maximumTimerDelayMs
             ? schedule
-            : () => this.requestStop(attempt, "execution deadline expired", true),
+            : () => {
+                if (this.shutdownStarted || !this.writer.acquired) return;
+                this.requestStop(attempt, "execution deadline expired", true);
+              },
           Math.min(remainingMs, maximumTimerDelayMs),
         );
         timer.unref();
+        this.trackAttemptTimer(attempt, timer);
       };
       schedule();
     }
@@ -2047,15 +2085,20 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       return;
     }
     const scheduleRelative = (): void => {
+      if (this.shutdownStarted || !this.writer.acquired) return;
       const nowElapsedMs = Number((monotonicNowNs() - BigInt(startedNs)) / 1_000_000n);
       const remainingMs = Math.max(0, metadata.maxAttemptDurationMs! - nowElapsedMs);
       const timer = setTimeout(
         remainingMs > maximumTimerDelayMs
           ? scheduleRelative
-          : () => this.requestStop(attempt, "execution deadline expired", true),
+          : () => {
+              if (this.shutdownStarted || !this.writer.acquired) return;
+              this.requestStop(attempt, "execution deadline expired", true);
+            },
         Math.min(remainingMs, maximumTimerDelayMs),
       );
       timer.unref();
+      this.trackAttemptTimer(attempt, timer);
     };
     // `elapsedMs` establishes that the stored monotonic reading is usable before a timer is armed.
     void elapsedMs;
@@ -2063,6 +2106,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   }
 
   private recordHeartbeatStaleness(attempt: AttemptUri, meta: string): void {
+    if (this.shutdownStarted || !this.writer.acquired) return;
     if (this.journal(attempt).read().some((event) => event.type === "progress" && event.details["degradation"] === "heartbeat-stale")) return;
     const heartbeat = readHeartbeat(meta);
     if (heartbeat === null) return;
@@ -2379,6 +2423,10 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       const worker = this.waitForOutcome(attempt, paths.meta, recovered.identity.nonce)
         .then(async (execution) => this.completeAttempt({ attempt: recovered.identity, taskBytes: recovered.taskBytes, task: recovered.task, paths, provisioner: recovered.provisioner, plan: recovered.plan, execution, capture: await this.resumeEvidenceCapture(attempt, paths, posture), capturePosture: posture }))
         .catch((error: unknown) => {
+          if (this.closeInvoked) {
+            this.recordShutdownDrainFailure(error);
+            return;
+          }
           if (this.shutdownStarted) return;
           if (!foldAttemptRecord(this.journal(attempt).read()).terminal) {
             this.appendTerminal(attempt, { state: "lost", blame: "infrastructure", category: "backend-unavailable", detail: error instanceof Error ? error.message : "resumed shim supervision failed" });
@@ -2444,6 +2492,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     attempt: AttemptUri,
     observations: readonly ProtocolObservation[],
   ): Promise<void> {
+    this.assertWriter();
     if (!this.attempts.has(attempt)) {
       throw new TaskExecutionError("attempt-not-found", {
         detail: `no Attempt "${attempt}"`,
@@ -2502,6 +2551,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     attempt: AttemptUri,
     deliveryBytes: Uint8Array,
   ): Promise<void> {
+    this.assertWriter();
     const metadata = this.attempts.get(attempt);
     if (metadata === undefined) {
       throw new TaskExecutionError("attempt-not-found", {
@@ -2576,6 +2626,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     ref: SubmissionUri | AttemptUri,
     outcome: ReconciliationReport,
   ): void {
+    this.assertWriter();
     this.reconciliationOverrides.set(ref, outcome);
   }
 
@@ -2584,38 +2635,54 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   }
 
   close(): void {
-    void this.shutdown();
+    this.closeInvoked = true;
+    void this.shutdown().catch(() => {
+      // Sync close must not leave an unhandled rejection; await shutdown() surfaces it.
+    });
   }
 
   /** Drains accepted workers and in-flight state-root mutations, then releases the writer lock. */
   async shutdown(): Promise<void> {
     if (this.shutdownComplete) return;
     if (this.shutdownPromise === undefined) {
+      this.shutdownStarted = true;
+      this.closed = true;
+      this.watchRegistry.closeAll();
+      this.clearAllAttemptTimers();
       this.shutdownPromise = this.runShutdown();
     }
     return this.shutdownPromise;
   }
 
   private async runShutdown(): Promise<void> {
-    this.shutdownStarted = true;
-    this.closed = true;
-    this.watchRegistry.closeAll();
-    await this.drain();
-    while (this.inflight.size > 0) {
-      await Promise.all([...this.inflight]);
-    }
+    const drainFailures = await this.drainFixedPoint();
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    const failures = [...this.shutdownDrainFailures, ...drainFailures];
     if (this.writer.acquired) this.writer.release();
     this.shutdownComplete = true;
+    if (failures.length > 0 && this.closeInvoked) {
+      throw failures[0];
+    }
   }
 
   /** Waits for work already accepted by this embedded backend to stop mutating its state root. */
   async drain(): Promise<void> {
-    while (this.workers.size > 0) {
-      await Promise.all([...this.workers]);
+    await this.drainFixedPoint();
+  }
+
+  private async drainFixedPoint(): Promise<Error[]> {
+    const failures: Error[] = [];
+    while (this.workers.size > 0 || this.inflight.size > 0) {
+      const pending = [...this.workers, ...this.inflight];
+      if (pending.length === 0) break;
+      const results = await Promise.allSettled(pending);
+      for (const result of results) {
+        if (result.status === "rejected") {
+          failures.push(result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+        }
+      }
     }
-    while (this.inflight.size > 0) {
-      await Promise.all([...this.inflight]);
-    }
+    return failures;
   }
 }
 

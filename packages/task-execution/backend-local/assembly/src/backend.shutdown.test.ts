@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,9 +8,11 @@ import {
 } from "@jinn-network/task-execution-profiles";
 import {
   documentDigest,
+  sealDelivery,
   sealSubmission,
   sealTask,
 } from "@jinn-network/task-execution-protocol";
+import { TaskExecutionError } from "@jinn-network/task-execution-backend";
 import type { LauncherContract, LaunchPlan } from "@jinn-network/task-execution-launchers";
 import type { ProvisionerContract, TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import { afterEach, describe, expect, test } from "vitest";
@@ -19,6 +21,30 @@ import {
   type LocalTaskExecutionBackend,
   type LocalTaskExecutionBackendConfig,
 } from "./backend.js";
+
+interface JournalEvent {
+  readonly type: string;
+  readonly details: Record<string, unknown>;
+}
+
+async function journalEvents(root: string, attempt: string): Promise<JournalEvent[]> {
+  const file = join(root, "attempts", attempt.slice("urn:uuid:".length), "meta", "journal.jsonl");
+  return (await readFile(file, "utf8"))
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as JournalEvent);
+}
+
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  message: string,
+): Promise<void> {
+  for (let index = 0; index < 300; index += 1) {
+    if (await predicate()) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(message);
+}
 
 const roots: string[] = [];
 const backends: LocalTaskExecutionBackend[] = [];
@@ -121,7 +147,7 @@ function fixture(root: string, overrides: Partial<LocalTaskExecutionBackendConfi
 }
 
 let sequence = 0;
-function documents(): { readonly task: Uint8Array; readonly submission: Uint8Array } {
+function documents(deadline = "2099-01-01T00:00:00Z"): { readonly task: Uint8Array; readonly submission: Uint8Array } {
   sequence += 1;
   const task = sealTask({
     protocol: "https://jinn.network/profiles/task-execution/1.0",
@@ -141,9 +167,20 @@ function documents(): { readonly task: Uint8Array; readonly submission: Uint8Arr
       requester: "urn:uuid:62000000-0000-4000-8000-000000000001",
       idempotencyKey: `shutdown-${sequence}`,
       nonce: `shutdown-nonce-${sequence}`,
-      deadline: "2099-01-01T00:00:00Z",
+      deadline,
     }),
   };
+}
+
+function deliveryBytes(attempt: string, taskDigest: string): Uint8Array {
+  return sealDelivery({
+    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    attempt,
+    task: taskDigest,
+    outputs: [],
+    outcome: "fulfilled",
+    createdAt: "2026-07-28T00:05:00Z",
+  });
 }
 
 describe("writer-lock-safe shutdown (§7.102)", () => {
@@ -242,6 +279,273 @@ describe("writer-lock-safe shutdown (§7.102)", () => {
     await first.shutdown();
     const reopened = fixture(root);
     expect((await reopened.submit(task, submission)).accepted).toBe(true);
+  });
+
+  test("fixed-point drain retains the lock while in-flight submit spawns a worker after shutdown starts", async () => {
+    const root = await stateRoot("inflight-spawns-worker");
+    const setupPause = barrier();
+    const workerPause = barrier();
+    let enterSetup!: () => void;
+    let releaseSetup!: () => void;
+    const setupEntered = new Promise<void>((resolve) => {
+      enterSetup = resolve;
+    });
+    const setupBlocked = new Promise<void>((resolve) => {
+      releaseSetup = resolve;
+    });
+    const provisioner: ProvisionerContract = {
+      workspaceKind: () => "dir",
+      async setup(_view, workspace) {
+        enterSetup();
+        await setupBlocked;
+        await Promise.all(Object.values(workspace).map((path) => mkdir(path, { recursive: true })));
+      },
+      executionEnv: ({ env }) => ({ ...env }),
+      async harvest() {
+        return { manifest: [], omissions: [], integrityViolations: [] };
+      },
+    };
+    const first = makeLocalTaskExecutionBackend({
+      ...baseConfig(root, {
+        faults: {
+          async onCompletionPhase(phase) {
+            if (phase === "before-outcome-wait") await workerPause.wait();
+          },
+        },
+      }),
+      launchers: [{
+        id: "shutdown-fixture",
+        capabilities: () => ({
+          taskProfiles: [profile.profile],
+          inputMediaTypes: ["application/json"],
+          outputMediaTypes: ["text/x-diff"],
+          structuredOutput: false,
+          resume: false,
+          interruptionBehaviorDefault: "repeatable",
+          secretForwards: [],
+          runPinning: { keys: [] },
+        }),
+        plan(_view: TaskView, workspace: WorkspacePaths) {
+          return {
+            argv: [process.execPath, "-e", "setTimeout(() => process.exit(0), 250)"],
+            env: {},
+            cwd: workspace.work,
+            validExitCodes: [0],
+            resultContract: { envelopeFormat: "shutdown-fixture" },
+            interruptionBehavior: "repeatable",
+          };
+        },
+      }],
+      provisioner: () => ({ id: "slow-setup", contract: provisioner }),
+    });
+    backends.push(first);
+    const { task, submission } = documents();
+    const submitPromise = first.submit(task, submission);
+    await setupEntered;
+    const shuttingDown = first.shutdown();
+    const blocked = fixture(root);
+    await expect(blocked.submit(task, submissionBytes(task))).resolves.toMatchObject({
+      accepted: false,
+      error: { category: "backend-unavailable" },
+    });
+    releaseSetup();
+    const ack = await submitPromise;
+    if (!ack.accepted) throw ack.error;
+    const attempt = (await first.observe(ack.submission)).descriptor.attempt;
+    await workerPause.entered;
+    await expect(blocked.recover(attempt)).rejects.toMatchObject({
+      category: "backend-unavailable",
+    });
+    const journalAtBarrier = await journalEvents(root, attempt);
+    workerPause.release();
+    await shuttingDown;
+    await expect(journalEvents(root, attempt)).resolves.toEqual(journalAtBarrier);
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+    await expect(journalEvents(root, attempt)).resolves.toEqual(journalAtBarrier);
+    const reopened = makeLocalTaskExecutionBackend({
+      ...baseConfig(root),
+      launchers: [{
+        id: "shutdown-fixture",
+        capabilities: () => ({
+          taskProfiles: [profile.profile],
+          inputMediaTypes: ["application/json"],
+          outputMediaTypes: ["text/x-diff"],
+          structuredOutput: false,
+          resume: false,
+          interruptionBehaviorDefault: "repeatable",
+          secretForwards: [],
+          runPinning: { keys: [] },
+        }),
+        plan(_view: TaskView, workspace: WorkspacePaths) {
+          return {
+            argv: [process.execPath, "-e", "setTimeout(() => process.exit(0), 250)"],
+            env: {},
+            cwd: workspace.work,
+            validExitCodes: [0],
+            resultContract: { envelopeFormat: "shutdown-fixture" },
+            interruptionBehavior: "repeatable",
+          };
+        },
+      }],
+      provisioner: () => ({ id: "slow-setup", contract: provisioner }),
+    });
+    backends.push(reopened);
+    expect(await reopened.recover(attempt)).toEqual({ classification: "matching" });
+    await reopened.shutdown();
+  });
+
+  test("fixed-point drain releases the lock after allSettled even when a worker rejects", async () => {
+    const root = await stateRoot("allsettled-rejection");
+    const pause = barrier();
+    const first = fixture(root, {
+      faults: {
+        async onCompletionPhase(phase) {
+          if (phase === "before-outcome-wait") {
+            await pause.wait();
+            throw new Error("worker rejected during shutdown drain");
+          }
+        },
+      },
+    });
+    const { task, submission } = documents();
+    const ack = await first.submit(task, submission);
+    if (!ack.accepted) throw ack.error;
+    const attempt = (await first.observe(ack.submission)).descriptor.attempt;
+    await pause.entered;
+    const shuttingDown = first.shutdown();
+    pause.release();
+    await expect(shuttingDown).resolves.toBeUndefined();
+    const reopened = fixture(root);
+    expect(await reopened.recover(attempt)).toEqual({ classification: "matching" });
+  });
+
+  test("cleared deadline timers never mutate the journal after shutdown and lock handoff", async () => {
+    const root = await stateRoot("deadline-timer-ownership");
+    const workerPause = barrier();
+    const nearDeadline = new Date(Date.now() + 2_000).toISOString();
+    const first = fixture(root, {
+      faults: {
+        async onCompletionPhase(phase) {
+          if (phase === "before-outcome-wait") await workerPause.wait();
+        },
+      },
+      launchers: [{
+        id: "shutdown-fixture",
+        capabilities: () => ({
+          taskProfiles: [profile.profile],
+          inputMediaTypes: ["application/json"],
+          outputMediaTypes: ["text/x-diff"],
+          structuredOutput: false,
+          resume: false,
+          interruptionBehaviorDefault: "repeatable",
+          secretForwards: [],
+          runPinning: { keys: [] },
+        }),
+        plan(_view: TaskView, workspace: WorkspacePaths) {
+          return {
+            argv: [process.execPath, "-e", "setTimeout(() => process.exit(0), 30000)"],
+            env: {},
+            cwd: workspace.work,
+            validExitCodes: [0],
+            resultContract: { envelopeFormat: "shutdown-fixture" },
+            interruptionBehavior: "repeatable",
+          };
+        },
+      }],
+    });
+    const { task, submission } = documents(nearDeadline);
+    const ack = await first.submit(task, submission);
+    if (!ack.accepted) throw ack.error;
+    const attempt = (await first.observe(ack.submission)).descriptor.attempt;
+    await workerPause.entered;
+    const shuttingDown = first.shutdown();
+    workerPause.release();
+    await shuttingDown;
+    const journalAtHandoff = await journalEvents(root, attempt);
+    fixture(root);
+    await new Promise<void>((resolve) => setTimeout(resolve, 3_500));
+    expect(await journalEvents(root, attempt)).toEqual(journalAtHandoff);
+  });
+
+  test("public mutators reject once shutdown begins without changing durable state", async () => {
+    const root = await stateRoot("post-shutdown-mutators");
+    const pause = barrier();
+    const first = fixture(root, {
+      faults: {
+        async onCompletionPhase(phase) {
+          if (phase === "before-outcome-wait") await pause.wait();
+        },
+      },
+      launchers: [{
+        id: "shutdown-fixture",
+        capabilities: () => ({
+          taskProfiles: [profile.profile],
+          inputMediaTypes: ["application/json"],
+          outputMediaTypes: ["text/x-diff"],
+          structuredOutput: false,
+          resume: false,
+          interruptionBehaviorDefault: "repeatable",
+          secretForwards: [],
+          runPinning: { keys: [] },
+        }),
+        plan(_view: TaskView, workspace: WorkspacePaths) {
+          return {
+            argv: [process.execPath, "-e", "setTimeout(() => process.exit(0), 250)"],
+            env: {},
+            cwd: workspace.work,
+            validExitCodes: [0],
+            resultContract: { envelopeFormat: "shutdown-fixture" },
+            interruptionBehavior: "repeatable",
+          };
+        },
+      }],
+    });
+    const { task, submission } = documents();
+    const ack = await first.submit(task, submission);
+    if (!ack.accepted) throw ack.error;
+    const attempt = (await first.observe(ack.submission)).descriptor.attempt;
+    const taskDigest = (await first.observe(ack.submission)).descriptor.task;
+    await pause.entered;
+    const before = await journalEvents(root, attempt);
+    void first.shutdown();
+    await expect(first.cancel(attempt, "late")).rejects.toMatchObject({
+      category: "backend-unavailable",
+    });
+    await expect(first.recover(attempt)).rejects.toMatchObject({
+      category: "backend-unavailable",
+    });
+    await expect(first.drive(attempt, [])).rejects.toMatchObject({
+      category: "backend-unavailable",
+    });
+    await expect(first.recordDelivery(attempt, deliveryBytes(attempt, taskDigest))).rejects.toMatchObject({
+      category: "backend-unavailable",
+    });
+    expect(() => first.simulateReconciliation(attempt, { classification: "matching" })).toThrow(TaskExecutionError);
+    expect(await journalEvents(root, attempt)).toEqual(before);
+    pause.release();
+    await first.shutdown();
+  });
+
+  test("sync close consumes shutdown drain rejections without unhandled rejections", async () => {
+    const root = await stateRoot("close-consumes-rejection");
+    const pause = barrier();
+    const first = fixture(root, {
+      faults: {
+        async onCompletionPhase(phase) {
+          if (phase === "before-outcome-wait") {
+            await pause.wait();
+            throw new Error("close drain rejection");
+          }
+        },
+      },
+    });
+    const { task, submission } = documents();
+    const ack = await first.submit(task, submission);
+    if (!ack.accepted) throw ack.error;
+    await pause.entered;
+    first.close();
+    pause.release();
+    await expect(first.shutdown()).rejects.toThrow("close drain rejection");
   });
 });
 
