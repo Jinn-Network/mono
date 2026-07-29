@@ -83,6 +83,8 @@ try {
     "package/dist/bin.js",
     "package/dist/index.d.ts",
     "package/dist/index.js",
+    "package/dist/launcher.d.ts",
+    "package/dist/launcher.js",
     "package/dist/runtime.d.ts",
     "package/dist/runtime.js",
     "package/dist/sign.d.ts",
@@ -128,23 +130,36 @@ import type {
   EvaluationOperationalError,
 } from "@jinn-network/task-execution-evaluation-harness";
 import {
+  evaluationLauncher,
+  makeEvaluationLauncher,
   makeSecretsSigner,
   pathsFromEnv,
   runEvaluationHarness,
 } from "@jinn-network/task-execution-evaluation-harness";
+import type {
+  EvaluationLauncherOptions,
+} from "@jinn-network/task-execution-evaluation-harness/launcher";
+import {
+  EVALUATION_LAUNCHER_ID,
+} from "@jinn-network/task-execution-evaluation-harness/launcher";
 
 declare const completed: CompletedEvaluation;
 declare const adapter: EvaluatorAdapter;
 declare const registration: EvaluatorRegistration;
 declare const failure: EvaluationOperationalError;
 declare const deployment: EvaluationHarnessDeployment;
+declare const launcherOptions: EvaluationLauncherOptions;
 declare const paths: Parameters<typeof runEvaluationHarness>[0];
 void completed;
 void adapter;
 void registration;
 void failure;
 void deployment;
+void launcherOptions;
 void paths;
+void evaluationLauncher;
+void makeEvaluationLauncher;
+void EVALUATION_LAUNCHER_ID;
 void makeSecretsSigner;
 void pathsFromEnv;
 void runEvaluationHarness;
@@ -185,6 +200,7 @@ void runEvaluationHarness;
     `
 import { readFile, readdir } from "node:fs/promises";
 const harness = await import("@jinn-network/task-execution-evaluation-harness");
+const launcher = await import("@jinn-network/task-execution-evaluation-harness/launcher");
 if (typeof harness.validateCompletedEvaluation !== "function") {
   throw new Error("root runtime exports are incomplete");
 }
@@ -193,6 +209,13 @@ if (
   typeof harness.makeSecretsSigner !== "function"
 ) {
   throw new Error("harness runtime exports are incomplete");
+}
+if (
+  harness.evaluationLauncher?.id !== "evaluation-harness" ||
+  launcher.EVALUATION_LAUNCHER_ID !== "evaluation-harness" ||
+  typeof launcher.makeEvaluationLauncher !== "function"
+) {
+  throw new Error("evaluation launcher exports are incomplete");
 }
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const actual = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();

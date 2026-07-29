@@ -19,6 +19,6 @@ host-compatible registration. Deterministic parser identities must be present in
 allowlist; verdict rules are accepted only in the closed declarative vocabulary.
 
 The spawned CLI loads registrations and the parser allowlist only from the host-selected
-`JINN_EVALUATION_DEPLOYMENT_MODULE`. A registration carries a signer filename, not key bytes;
-`makeSecretsSigner` opens that file beneath `secrets/` only when Attestation Issuer requests a
-signature. The prepared DSSE bytes are published unchanged as `out/verdict`.
+`JINN_ATTEMPT_EVALUATION_DEPLOYMENT_MODULE`. A registration carries a signer filename, not key
+bytes; `makeSecretsSigner` opens that file beneath `secrets/` only when Attestation Issuer
+requests a signature. The prepared DSSE bytes are published unchanged as `out/verdict`.

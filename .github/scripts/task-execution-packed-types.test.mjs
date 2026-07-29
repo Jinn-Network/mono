@@ -46,6 +46,7 @@ const codeEntrypoints = [
   '@jinn-network/task-execution-launchers',
   '@jinn-network/task-execution-backend-local',
   '@jinn-network/task-execution-evaluation-harness',
+  '@jinn-network/task-execution-evaluation-harness/launcher',
 ];
 
 function run(command, args, options = {}) {

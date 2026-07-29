@@ -613,10 +613,11 @@ function validDeployment(value: unknown): value is EvaluationHarnessDeployment {
 }
 
 async function deploymentFromEnvironment(): Promise<EvaluationHarnessDeployment> {
-  const specifier = process.env["JINN_EVALUATION_DEPLOYMENT_MODULE"];
+  const specifier =
+    process.env["JINN_ATTEMPT_EVALUATION_DEPLOYMENT_MODULE"];
   if (specifier === undefined || specifier.length === 0) {
     throw new TypeError(
-      "JINN_EVALUATION_DEPLOYMENT_MODULE is required by the spawned harness",
+      "JINN_ATTEMPT_EVALUATION_DEPLOYMENT_MODULE is required by the spawned harness",
     );
   }
   const module = await import(specifier) as {
