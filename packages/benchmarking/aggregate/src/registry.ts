@@ -44,7 +44,10 @@ function sourceClusterManifest(rates: readonly {
   }
   return [...groups.values()]
     .map((group) => ({ ...group, members: group.members.sort(compareCodeUnitStrings) }))
-    .sort((left, right) => compareCodeUnitStrings(JSON.stringify(left.key), JSON.stringify(right.key)));
+    .sort((left, right) => {
+      const byTag = compareCodeUnitStrings(left.key[0], right.key[0]);
+      return byTag === 0 ? compareCodeUnitStrings(left.key[1], right.key[1]) : byTag;
+    });
 }
 
 function validateParameters(

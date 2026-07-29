@@ -524,13 +524,26 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
       const fixture = structuredClone(await loadFixture("noninferiority-pass.json")) as Omit<MethodFixture, "matrices"> & { matrices: Array<{ cells: Array<{ taskDigest: string }> }>; taskProvenance?: Record<string, { source?: string; sourceCommitment?: string }> };
       const [first, second] = [...new Set(fixture.matrices[0]!.cells.map((cell) => cell.taskDigest))];
       const token = `sha256:${"a".repeat(64)}`;
-      fixture.taskProvenance = { [first!]: { source: token }, [second!]: { sourceCommitment: token } };
+      fixture.taskProvenance = {
+        [first!]: { source: "\u0001" },
+        [second!]: { source: '"' },
+      };
       const prepared = prepareFixture(fixture);
       const method = registry.get(fixture.methodId, fixture.methodVersion)!;
       const result = method.compute!({ subjects: prepared.subjects, parameters: fixture.parameters, verdictRule: fixture.verdictRule, registry, ...prepared.ports })
         .perSubject[0]!.results as { bootstrap: { clusters: Array<{ key: [string, string] }> } };
-      expect(result.bootstrap.clusters.map((cluster) => cluster.key)).toContainEqual(["source", token]);
-      expect(result.bootstrap.clusters.map((cluster) => cluster.key)).toContainEqual(["sourceCommitment", token]);
+      const keys = result.bootstrap.clusters.map((cluster) => cluster.key);
+      expect(keys).toContainEqual(["source", "\u0001"]);
+      expect(keys).toContainEqual(["source", '"']);
+      expect(keys.indexOf(keys.find((key) => key[1] === "\u0001")!)).toBeLessThan(
+        keys.indexOf(keys.find((key) => key[1] === '"')!),
+      );
+      // A same-spelling commitment remains a different tagged cluster identity.
+      fixture.taskProvenance[second!] = { sourceCommitment: token };
+      const committed = prepareFixture(fixture);
+      const committedResult = method.compute!({ subjects: committed.subjects, parameters: fixture.parameters, verdictRule: fixture.verdictRule, registry, ...committed.ports })
+        .perSubject[0]!.results as { bootstrap: { clusters: Array<{ key: [string, string] }> } };
+      expect(committedResult.bootstrap.clusters.map((cluster) => cluster.key)).toContainEqual(["sourceCommitment", token]);
     });
 
     test("each fixture's method reproduces the pinned expectedResults", async () => {
