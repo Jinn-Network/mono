@@ -936,3 +936,23 @@ draw count are disclosed. The cost leg stays the separately frozen paired-task W
 
 This supersedes Addendum e's task-position sampling only for this quality bootstrap; the same
 nonzero uint32 seed and xorshift transition rules remain binding.
+
+## Addendum 2026-07-29-h — strict civil time and non-vacuous cluster conformance
+
+The fifth independent M1–M3 review found two direct conformance defects. Program rulings
+§7.50–§7.51 are binding on the final repair:
+
+1. All benchmarking consumers share one calendar-strict RFC 3339 validator. A host
+   `Date.parse` success is not validation because some runtimes normalize impossible dates.
+   Judgeability, resolved provenance, registry parameters, clean-subset anchoring, and Report
+   effective-time verification reject impossible civil dates such as February 30 without
+   normalizing the sealed string. The generic repository-work profile and digest do not change.
+2. The mandatory `noninferiority-iut@1` gate pins an independently calculated,
+   nonconstant/nonzero-acceleration whole-source-cluster BCa oracle with unequal non-singleton
+   clusters and asserts its complete quality result. A second exact vector changes only tagged
+   source grouping while holding observations, seed, resamples, and method parameters fixed; its
+   numeric lower bound must differ exactly. Metadata-only and singleton-cluster fixtures do not
+   satisfy M2 conformance because they cannot distinguish §7.47 from iid task resampling.
+
+These repairs do not reopen the statistic or the published profile. They make the already-frozen
+validation and resampling rules executable under the standard package commands.

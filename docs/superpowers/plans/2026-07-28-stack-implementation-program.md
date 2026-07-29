@@ -570,6 +570,29 @@ Confirmed by the operator at the program gate (2026-07-28):
     causes zero record writes and no withdrawal. This realizes marketplace design §6.4's
     off-chain decision-grade gate without moving trust resolution or Statement parsing into the
     chain decoder.
+50. **RFC 3339 consumers validate the civil timestamp, not only its parseability:** every
+    benchmarking boundary that accepts an authority-bearing timestamp uses one shared
+    calendar-strict validator. A matching lexical shape plus a finite `Date.parse` result is
+    insufficient because host runtimes may normalize impossible dates (for example,
+    `2026-02-30T00:00:00Z`) instead of rejecting them. Validation must independently prove the
+    represented year/month/day against the proleptic-Gregorian calendar and prove the time and
+    offset components are within the RFC 3339 grammar before any ordering or effective-time
+    comparison. The original string remains the sealed value; validation never normalizes or
+    rewrites it. Benchmark judgeability, resolved provenance, method parameters, clean-subset
+    anchors, and Report verification consume this same predicate and carry an impossible-date
+    negative vector. The generic repository-work profile and its digest remain unchanged.
+51. **Mandatory statistical conformance distinguishes cluster BCa from iid resampling:** the
+    benchmarking M1–M3 standard gate includes an independently calculated,
+    nonconstant/nonzero-acceleration `noninferiority-iut@1` oracle whose source clusters are
+    non-singleton and unequal. It pins the exact full quality result, not only bootstrap
+    disclosure metadata. A paired discriminator holds the Task observations, seed, draw count,
+    and method parameters fixed while changing only their tagged source-cluster grouping, and
+    asserts the exact resulting lower bound in both cases. The aggregate unit oracle also pins
+    whole-cluster jackknife acceleration and the selected adjusted quantile/index. Singleton-only
+    fixtures, zero/one extremes, or assertions limited to `basis`/`unit`/draw count are vacuous:
+    they cannot reject task-level iid sampling or an individual-Task jackknife. The runtime
+    algorithm remains §7.47; this ruling strengthens the executable conformance contract rather
+    than changing the statistic.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 
