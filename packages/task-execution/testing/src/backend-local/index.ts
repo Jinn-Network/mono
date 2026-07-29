@@ -22,6 +22,10 @@ export {
 export { describeAttemptSupervisorContract } from "./supervisor-contract.js";
 export type { AttemptSupervisorUnderTest } from "./supervisor-contract.js";
 export { describeWorkspaceContract } from "./workspace-contract.js";
+export type {
+  WorkspaceContractSubject,
+  WorkspaceScenarioOptions,
+} from "./workspace-contract.js";
 export { describeLocalBackendContract } from "./backend-contract.js";
 
 // --- fixture loaders + types ---

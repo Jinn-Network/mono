@@ -29,4 +29,27 @@ describe("harvest", () => {
     expect((await harvest(paths, [])).manifest.map((entry) => entry.path)).toEqual(["Z", "a"]);
     expect(await harvest(paths, [])).toEqual(await harvest(paths, []));
   });
+
+  it("recursively collects nested outputs and backend-owned logs as first-class artifacts", async () => {
+    const paths = await workspace();
+    await mkdir(join(paths.out, "nested"));
+    await writeFile(join(paths.out, "nested", "answer.txt"), "answer");
+    await writeFile(join(paths.logs, "stdout.log"), "out");
+    await writeFile(join(paths.logs, "stderr.log"), "err");
+    await writeFile(join(paths.logs, "transcript.ndjson"), "{}\n");
+    expect((await harvest(paths, [])).manifest.map((entry) => entry.path)).toEqual([
+      "logs/stderr.log", "logs/stdout.log", "logs/transcript.ndjson", "nested/answer.txt",
+    ]);
+  });
+
+  it("rejects a nested escaping symlink without dereferencing it", async () => {
+    const paths = await workspace();
+    await mkdir(join(paths.out, "nested"));
+    await writeFile(join(paths.secrets, "token"), "must-not-leak");
+    await symlink(join(paths.secrets, "token"), join(paths.out, "nested", "token"));
+    const result = await harvest(paths, [{ name: "nested/missing", mediaType: "text/plain", required: true }]);
+    expect(result.integrityViolations).toContainEqual({ path: "nested/token", reason: "symlink-escape" });
+    expect(result.omissions).toEqual(["nested/missing"]);
+    expect(result.manifest).toEqual([]);
+  });
 });

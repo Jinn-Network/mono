@@ -34,6 +34,10 @@ export interface ResultContract {
   readonly envelopeFormat: string;
   /** The structured-output flag this launcher passes through when the task profile declares an output schema (design §8.2), e.g. `"--json-schema"`. */
   readonly outputSchemaFlag?: string;
+  /** First-class structured object artifact emitted alongside the terminal envelope. */
+  readonly structuredOutputArtifact?: string;
+  /** Harness fields copied into attempt correlation annotations. */
+  readonly correlationFields?: readonly ("harnessVersion" | "capabilities" | "sessionId")[];
 }
 
 /**

@@ -17,12 +17,10 @@ Executor Launcher), §14 items 8-9 (frozen interfaces), §15 (packages).
 
 ## Status
 
-Scaffold stage (backend plan Milestone A, Tasks A1-A2): sealing utilities
-(`compareCodeUnitStrings`, `serializeCanonical`) and the `LaunchPlan`/`LauncherContract`/
-`LauncherCapabilities`/`BlameRule`/`ResultContract` contract types. The four v1 launchers
-(Milestone B) land next, turning the `@jinn-network/task-execution-testing` `./backend-local`
-slice's `describeLauncherContract` green over each of them (it already runs green over the
-kit's deterministic fake launcher).
+Milestone B: four harness-specific pure planners implement hermetic invocation, run-pinning,
+structured output, correlation declarations, static capabilities, injected dynamic probes,
+and exit/signal-authoritative result interpretation. Concrete conformance invocations live
+downstream in `@jinn-network/task-execution-testing` per program ruling §7.25.
 
 ## Never touches
 

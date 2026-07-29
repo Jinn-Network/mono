@@ -16,12 +16,11 @@ Workspace Provisioner), §14 items 7-8 (frozen interfaces), §15 (packages).
 
 ## Status
 
-Scaffold stage (backend plan Milestone A, Tasks A1-A2): sealing utilities
-(`compareCodeUnitStrings`, `serializeCanonical`) and the `TaskView`/`WorkspacePaths`/
-`ProvisionerContract`/`WorkspaceKind` contract types. The plain-dir and git-worktree
-provisioners, input materialization, harvest, and grant resolution (Milestone B) land next,
-turning the `@jinn-network/task-execution-testing` `./backend-local` slice's
-`describeWorkspaceContract` green.
+Milestone B: the plain-directory and exact detached-OID worktree provisioners, typed
+never-executed setup rejection, digest-verified/read-only inputs, opaque grant handles,
+runtime-injected quota/meta-reserve/process-group custody, deterministic recursive harvest,
+and terminal retention are implemented. Concrete conformance adapters live downstream in
+`@jinn-network/task-execution-testing` per program ruling §7.25.
 
 ## Never touches
 

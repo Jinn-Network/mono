@@ -68,15 +68,24 @@ export function assertPlanDeterministic(launcher: LauncherContract): void {
 export function assertPlanHermetic(launcher: LauncherContract): void {
   const { view, paths, attempt } = makeSampleLauncherInputs();
   const before = launcher.plan(view, paths, attempt);
-  const probeKey = "JINN_TESTING_HERMETICITY_PROBE";
-  const priorValue = process.env[probeKey];
-  process.env[probeKey] = "a-value-that-must-never-leak-into-the-plan";
+  const probes = {
+    JINN_TESTING_HERMETICITY_PROBE: "ambient",
+    OPENAI_API_KEY: "resolved-openai-secret",
+    ANTHROPIC_API_KEY: "resolved-anthropic-secret",
+    AWS_SECRET_ACCESS_KEY: "resolved-aws-secret",
+    GITHUB_TOKEN: "resolved-github-secret",
+  };
+  const prior = Object.fromEntries(Object.keys(probes).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, probes);
   try {
     const after = launcher.plan(view, paths, attempt);
     expect(after).toEqual(before);
+    expect(JSON.stringify(after)).not.toMatch(/resolved-(?:openai|anthropic|aws|github)-secret/u);
   } finally {
-    if (priorValue === undefined) delete process.env[probeKey];
-    else process.env[probeKey] = priorValue;
+    for (const [key, value] of Object.entries(prior)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 }
 
