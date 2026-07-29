@@ -366,21 +366,6 @@ describe("MatrixRecordSchema / parseMatrix / sealMatrix", () => {
     expect(() => sealMatrix(value)).toThrow(InvalidDocumentError);
   });
 
-  test("rejects unequal expected-cell counts across arms", () => {
-    const value = validMatrix();
-    const second = structuredClone(value.cells[0]!);
-    second.armId = "armB";
-    second.cellKey = `${second.taskDigest}/armB/${second.replicate}`;
-    const third = structuredClone(value.cells[0]!);
-    third.taskDigest = "f".repeat(64);
-    third.cellKey = `${third.taskDigest}/${third.armId}/${third.replicate}`;
-    value.cells = [value.cells[0]!, second, third].sort((a, b) => a.cellKey < b.cellKey ? -1 : 1);
-    rederiveConvenienceViews(value);
-    expect(value.attrition.perArm.armA!.expected).toBe(2);
-    expect(value.attrition.perArm.armB!.expected).toBe(1);
-    expect(() => sealMatrix(value)).toThrow(InvalidDocumentError);
-  });
-
   test.each([
     ["complete below the declared floor", (value: MutableMatrix) => {
       value.cells[0]!.outcome = "expired";

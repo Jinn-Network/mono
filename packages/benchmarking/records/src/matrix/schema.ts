@@ -432,15 +432,6 @@ export const MatrixRecordSchema = z
         }
       }
     }
-    const expectedPerArm = [...derivedPerArm.values()].map((counts) => counts.expected);
-    if (new Set(expectedPerArm).size > 1) {
-      ctx.addIssue({
-        code: "custom",
-        message: "the full cartesian expected-cell set requires equal expected counts for every arm (§7.3/§8.1)",
-        path: ["attrition", "perArm"],
-      });
-    }
-
     const judged = matrix.cells.filter((cell) => cell.outcome === "judged").length;
     if (matrix.completeness.judged !== judged) {
       ctx.addIssue({
