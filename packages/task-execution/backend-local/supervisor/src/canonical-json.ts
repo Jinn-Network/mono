@@ -30,6 +30,24 @@ export class UndefinedArrayElementError extends Error {
   }
 }
 
+export class UnpairedSurrogateError extends Error {
+  constructor() {
+    super("serializeCanonical: strings and object keys must contain only Unicode scalar values");
+    this.name = "UnpairedSurrogateError";
+  }
+}
+
+function assertUnicodeScalars(value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const following = value.charCodeAt(index + 1);
+      if (!(following >= 0xdc00 && following <= 0xdfff)) throw new UnpairedSurrogateError();
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) throw new UnpairedSurrogateError();
+  }
+}
+
 function serialize(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "boolean") return value ? "true" : "false";
@@ -37,7 +55,10 @@ function serialize(value: unknown): string {
     if (!Number.isInteger(value) || !Number.isSafeInteger(value)) throw new NonIntegerNumberError(value);
     return String(value);
   }
-  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "string") {
+    assertUnicodeScalars(value);
+    return JSON.stringify(value);
+  }
   if (Array.isArray(value)) {
     return `[${value
       .map((element) => {
@@ -51,6 +72,7 @@ function serialize(value: unknown): string {
     const keys = Object.keys(record)
       .filter((key) => record[key] !== undefined)
       .sort(compareCodeUnitStrings);
+    keys.forEach(assertUnicodeScalars);
     return `{${keys.map((key) => `${JSON.stringify(key)}:${serialize(record[key])}`).join(",")}}`;
   }
   throw new TypeError(`serializeCanonical: unsupported value type "${typeof value}"`);

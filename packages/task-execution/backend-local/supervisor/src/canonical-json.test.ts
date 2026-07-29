@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { NonIntegerNumberError, UndefinedArrayElementError, serializeCanonical } from "./canonical-json.js";
+import { NonIntegerNumberError, UndefinedArrayElementError, serializeCanonical, UnpairedSurrogateError } from "./canonical-json.js";
 
 describe("serializeCanonical", () => {
   it("sorts object keys by code unit regardless of insertion order", () => {
@@ -27,6 +27,12 @@ describe("serializeCanonical", () => {
 
   it("rejects an undefined array element", () => {
     expect(() => serializeCanonical([1, undefined, 2])).toThrow(UndefinedArrayElementError);
+  });
+
+  it("rejects lone UTF-16 surrogates in recursive keys and values while accepting pairs", () => {
+    expect(() => serializeCanonical({ nested: [String.fromCharCode(0xd800)] })).toThrow(UnpairedSurrogateError);
+    expect(() => serializeCanonical({ nested: { [String.fromCharCode(0xdc00)]: "ok" } })).toThrow(UnpairedSurrogateError);
+    expect(serializeCanonical({ "😀": ["😀"] })).toBe('{"😀":["😀"]}');
   });
 
   it("serializes nested arrays and objects deterministically", () => {
