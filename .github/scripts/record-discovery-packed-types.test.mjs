@@ -18,6 +18,7 @@ const packages = [
   ['facts/evidence', '@jinn-network/record-discovery-facts-evidence'],
   ['facts/trust', '@jinn-network/record-discovery-facts-trust'],
   ['facts/task-execution', '@jinn-network/record-discovery-facts-task-execution'],
+  ['facts/benchmarking', '@jinn-network/record-discovery-facts-benchmarking'],
   ['sources/evidence-journal', '@jinn-network/record-discovery-source-evidence-journal'],
 ];
 
@@ -29,6 +30,7 @@ const codeEntrypoints = [
   '@jinn-network/record-discovery-facts-evidence',
   '@jinn-network/record-discovery-facts-trust',
   '@jinn-network/record-discovery-facts-task-execution',
+  '@jinn-network/record-discovery-facts-benchmarking',
   '@jinn-network/record-discovery-source-evidence-journal',
 ];
 
@@ -51,6 +53,7 @@ const CROSS_TREE_PACKAGES = [
   ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
+  ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
 ];
 
 function run(command, args, options = {}) {

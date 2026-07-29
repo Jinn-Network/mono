@@ -17,6 +17,7 @@ const DISCOVERY_PACKAGES = [
   ['facts/evidence', '@jinn-network/record-discovery-facts-evidence'],
   ['facts/trust', '@jinn-network/record-discovery-facts-trust'],
   ['facts/task-execution', '@jinn-network/record-discovery-facts-task-execution'],
+  ['facts/benchmarking', '@jinn-network/record-discovery-facts-benchmarking'],
   ['sources/evidence-journal', '@jinn-network/record-discovery-source-evidence-journal'],
 ];
 
@@ -28,6 +29,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
   ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
   ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
+  ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
 ]);
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -86,6 +88,14 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   // package anywhere in the graph gets its own resolutions entry"
   // precedent recorded above for testing/serve/client/facts-evidence.
   ['facts/task-execution', { dependencies: ['@jinn-network/record-discovery-protocol', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol'], devDependencies: ['@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
+  // facts/benchmarking's own source imports protocol + benchmarking-records
+  // (plan M6 / program §7.128–§7.130): the sanctioned leaf edge into the
+  // benchmarking record-kind tree. It takes record-discovery-testing as a
+  // devDependency (facts-consistency conformance driver, configured locally)
+  // plus the same shadow trust-core portal resolution every protocol-consuming
+  // leaf needs for yarn's per-project resolution of protocol's transitive
+  // trust-core dependency.
+  ['facts/benchmarking', { dependencies: ['@jinn-network/benchmarking-records', '@jinn-network/record-discovery-protocol'], devDependencies: ['@jinn-network/record-discovery-testing', '@jinn-network/task-execution-protocol', '@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
   // sources/evidence-journal's own source imports protocol + serve +
   // evidence-discovery + evidence-repository (plan Task 25; program §6/F7
   // widens the "one edge per discovery leaf meets a record-kind tree" rule
@@ -132,7 +142,7 @@ function expectedPortal(directory, dependencyName) {
 }
 
 test('the record discovery package inventory is explicit and has one manifest per package', () => {
-  assert.equal(DISCOVERY_PACKAGES.length, 8);
+  assert.equal(DISCOVERY_PACKAGES.length, JINN_DEPENDENCY_GRAPH.size);
   for (const [directory, expectedName] of DISCOVERY_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);
