@@ -29,8 +29,10 @@ import {
   type ResolvedBinding,
 } from "@jinn-network/trust-core";
 import {
+  buildRevocationFixture,
   buildResolvedBindingFixture,
   createFakeResolvers,
+  resolvedRevocation,
   testAgentIri,
   testDidKey,
 } from "@jinn-network/trust-testing";
@@ -41,6 +43,12 @@ const VERDICT_KEY = testDidKey("marketplace-verdict-key");
 const SETTLEMENT_KEY = testDidKey("marketplace-settlement-key");
 const SOLVER_KEY = testDidKey("marketplace-solver-key");
 const REQUESTER_KEY = testDidKey("marketplace-requester-key");
+const REQUESTER_REVOCATION_KEY = testDidKey(
+  "marketplace-requester-revocation-key",
+);
+const UNAUTHORIZED_REVOCATION_KEY = testDidKey(
+  "marketplace-unauthorized-revocation-key",
+);
 const ADMISSION_AGENT = testAgentIri("marketplace-admission");
 const EVALUATOR_AGENT = testAgentIri("marketplace-evaluator");
 const SOLVER_AGENT = testAgentIri("marketplace-solver");
@@ -104,6 +112,10 @@ export interface NamedCheckFixture {
 export interface BuildNamedCheckFixtureOptions {
   /** Registers the settlement leg under another Agent IRI to model a failed trust join. */
   readonly settlementAgent?: string;
+  readonly requesterRevocation?: {
+    readonly effectiveTime: string;
+    readonly authorized: boolean;
+  };
 }
 
 function signedEnvelope(payloadBytes: Uint8Array, keyid: string): Uint8Array {
@@ -280,17 +292,50 @@ export async function buildNamedCheckFixture(
 
   const fakes = createFakeResolvers();
   const settlementAgent = options.settlementAgent ?? EVALUATOR_AGENT;
+  let requester = await registerBinding(fakes, {
+    key: REQUESTER_KEY,
+    agent: REQUESTER_AGENT,
+    scope: ["authorizations"],
+  });
+  if (options.requesterRevocation !== undefined) {
+    const revokedBy = options.requesterRevocation.authorized
+      ? REQUESTER_REVOCATION_KEY
+      : UNAUTHORIZED_REVOCATION_KEY;
+    if (options.requesterRevocation.authorized) {
+      await registerBinding(fakes, {
+        key: revokedBy,
+        agent: REQUESTER_AGENT,
+        scope: ["bindings"],
+      });
+    }
+    const revocation = await buildRevocationFixture({
+      target: requester.bindingDigest,
+      revokedBy,
+      effectiveFrom: options.requesterRevocation.effectiveTime,
+    });
+    requester = {
+      ...requester,
+      revocations: [
+        resolvedRevocation(
+          revocation,
+          options.requesterRevocation.effectiveTime,
+        ),
+      ],
+    };
+    fakes.registerBinding({
+      key: REQUESTER_KEY,
+      agent: REQUESTER_AGENT,
+      resolved: requester,
+      validFrom: requester.binding.validFrom,
+    });
+  }
   const trust = {
     admission: await registerBinding(fakes, {
       key: ADMISSION_KEY,
       agent: ADMISSION_AGENT,
       scope: [ADMISSION_RECEIPT_TRUST_SCOPE],
     }),
-    requester: await registerBinding(fakes, {
-      key: REQUESTER_KEY,
-      agent: REQUESTER_AGENT,
-      scope: ["authorizations"],
-    }),
+    requester,
     verdict: await registerBinding(fakes, {
       key: VERDICT_KEY,
       agent: EVALUATOR_AGENT,
@@ -489,6 +534,68 @@ export function describeNamedChecks(subject: NamedCheckSubject): void {
           check: "settlement-join",
           detail: expect.any(String),
         }],
+      });
+    });
+
+    test("refuses a requester binding revoked before Submission sealing", async () => {
+      const fixture = await buildNamedCheckFixture({
+        requesterRevocation: {
+          effectiveTime: "2026-07-29T07:00:00Z",
+          authorized: true,
+        },
+      });
+      await expect(subject(fixture.input, fixture.ports)).resolves.toEqual({
+        decisionGrade: false,
+        failures: [{
+          check: "requester-authentication",
+          detail: expect.stringContaining("revoked effective"),
+        }],
+      });
+    });
+
+    test("refuses a requester binding revoked exactly at Submission sealing", async () => {
+      const sealingTime = "2026-07-29T08:00:00Z";
+      const fixture = await buildNamedCheckFixture({
+        requesterRevocation: {
+          effectiveTime: sealingTime,
+          authorized: true,
+        },
+      });
+      expect(fixture.input.requesterAuthentication.sealingTime).toBe(
+        sealingTime,
+      );
+      await expect(subject(fixture.input, fixture.ports)).resolves.toEqual({
+        decisionGrade: false,
+        failures: [{
+          check: "requester-authentication",
+          detail: expect.stringContaining(`revoked effective "${sealingTime}"`),
+        }],
+      });
+    });
+
+    test("accepts a requester binding revoked after Submission sealing", async () => {
+      const fixture = await buildNamedCheckFixture({
+        requesterRevocation: {
+          effectiveTime: "2026-07-29T09:00:00Z",
+          authorized: true,
+        },
+      });
+      await expect(subject(fixture.input, fixture.ports)).resolves.toEqual({
+        decisionGrade: true,
+        failures: [],
+      });
+    });
+
+    test("ignores a requester revocation from an unauthorized key", async () => {
+      const fixture = await buildNamedCheckFixture({
+        requesterRevocation: {
+          effectiveTime: "2026-07-29T07:00:00Z",
+          authorized: false,
+        },
+      });
+      await expect(subject(fixture.input, fixture.ports)).resolves.toEqual({
+        decisionGrade: true,
+        failures: [],
       });
     });
   });

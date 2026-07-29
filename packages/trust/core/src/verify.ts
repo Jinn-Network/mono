@@ -541,6 +541,18 @@ export async function authenticateRequester(
     };
   }
 
+  const revocationResult = await checkRevocation(
+    resolved,
+    input.sealingTime,
+    deps,
+  );
+  if (!revocationResult.ok) {
+    return {
+      ok: false,
+      reason: revocationResult.detail ?? "requester binding is revoked.",
+    };
+  }
+
   if (deps.policy !== undefined) {
     const policyResult = checkPolicy(resolved, deps.policy);
     if (!policyResult.ok) {

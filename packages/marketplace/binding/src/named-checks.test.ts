@@ -16,11 +16,14 @@ import {
 } from "@jinn-network/task-execution-protocol";
 import {
   TRUST_KEY_BINDING_FORMAT,
+  TRUST_REVOCATION_FORMAT,
+  TRUST_REVOCATION_MEDIA_TYPE,
   parseDsseEnvelope,
   sealDsseEnvelope,
   type BindingResolver,
   type DsseChainVerifier,
   type ResolvedBinding,
+  type ResolvedRevocation,
   type WitnessVerifier,
 } from "@jinn-network/trust-core";
 import { describe, expect, test } from "vitest";
@@ -45,6 +48,10 @@ const SOLVER_AGENT = "https://jinn.network/agents/solver-fixture";
 const REQUESTER_AGENT = "https://jinn.network/agents/requester-fixture";
 const SOLVER_ADDRESS = "0x1111111111111111111111111111111111111111";
 const EVALUATOR_ADDRESS = "0x2222222222222222222222222222222222222222";
+const REQUESTER_VOUCHER =
+  "did:pkh:eip155:1:0x0000000000000000000000000000000000000000";
+const UNAUTHORIZED_REVOKER =
+  "did:pkh:eip155:1:0x3333333333333333333333333333333333333333";
 const EVALUATED_AT = "2026-07-29T10:00:00Z";
 const CLAIM_BLOCK_TIME = "2026-07-29T10:00:05Z";
 
@@ -85,20 +92,21 @@ function resolvedBinding(
   agent: string,
   scope: string[],
   relationship: "controls" | "signs-for" = "controls",
+  revocations: readonly ResolvedRevocation[] = [],
 ): ResolvedBinding {
   return {
     envelopeBytes: new TextEncoder().encode("fixture-binding"),
     bindingDigest: `sha256:${"8".repeat(64)}`,
     effectiveStart: "2026-01-01T00:00:00Z",
     isGenesis: true,
-    revocations: [],
+    revocations,
     binding: {
       protocol: TRUST_KEY_BINDING_FORMAT,
       agent,
       key: { publicKey: key, keyid: key, algorithm: "ed25519", didKey: key },
       voucher: {
         kind: "account",
-        did: "did:pkh:eip155:1:0x0000000000000000000000000000000000000000",
+        did: REQUESTER_VOUCHER,
         contractAccount: false,
       },
       relationship,
@@ -111,16 +119,52 @@ function resolvedBinding(
   };
 }
 
+function revocationEntry(
+  revokedBy: string,
+  effectiveTime: string,
+): ResolvedRevocation {
+  const revocation = {
+    protocol: TRUST_REVOCATION_FORMAT,
+    target: `sha256:${"8".repeat(64)}` as const,
+    revokedBy,
+    effectiveFrom: effectiveTime,
+    anchors: [],
+  };
+  return {
+    revocation,
+    envelopeBytes: sealDsseEnvelope({
+      payloadBytes: canonicalJsonBytes(revocation),
+      payloadType: TRUST_REVOCATION_MEDIA_TYPE,
+      signatures: [{
+        signature: new Uint8Array([1, 2, 3]),
+        keyid: revokedBy,
+      }],
+    }),
+    effectiveTime,
+  };
+}
+
 function makePorts(
   omittedKey?: string,
   solverAgent: string = SOLVER_AGENT,
+  requesterRevocations: readonly ResolvedRevocation[] = [],
 ): VerdictObservationGatePorts {
   const entries = [
     { key: ADMISSION_KEY, agent: ADMISSION_AGENT, binding: resolvedBinding(ADMISSION_KEY, ADMISSION_AGENT, [ADMISSION_RECEIPT_TRUST_SCOPE]) },
     { key: VERDICT_KEY, agent: EVALUATOR_AGENT, binding: resolvedBinding(VERDICT_KEY, EVALUATOR_AGENT, ["verdicts"]) },
     { key: SETTLEMENT_KEY, agent: EVALUATOR_AGENT, binding: resolvedBinding(SETTLEMENT_KEY, EVALUATOR_AGENT, ["verdicts"]) },
     { key: SOLVER_KEY, agent: solverAgent, binding: resolvedBinding(SOLVER_KEY, solverAgent, ["deliveries"]) },
-    { key: REQUESTER_KEY, agent: REQUESTER_AGENT, binding: resolvedBinding(REQUESTER_KEY, REQUESTER_AGENT, ["authorizations"]) },
+    {
+      key: REQUESTER_KEY,
+      agent: REQUESTER_AGENT,
+      binding: resolvedBinding(
+        REQUESTER_KEY,
+        REQUESTER_AGENT,
+        ["authorizations"],
+        "controls",
+        requesterRevocations,
+      ),
+    },
   ].filter((entry) => entry.key !== omittedKey);
   const bindingResolver: BindingResolver = {
     async resolveBinding(query, atTime) {
@@ -497,6 +541,69 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     expect(await gateVerdictObservation(fixture.input, makePorts(REQUESTER_KEY))).toEqual({
       decisionGrade: false,
       failures: [{ check: "requester-authentication", detail: expect.any(String) }],
+    });
+  });
+
+  test("rejects a requester binding revoked before the Submission sealing time", async () => {
+    const fixture = makeFixture();
+    const ports = makePorts(
+      undefined,
+      SOLVER_AGENT,
+      [revocationEntry(REQUESTER_VOUCHER, "2026-07-29T07:00:00Z")],
+    );
+
+    expect(await gateVerdictObservation(fixture.input, ports)).toEqual({
+      decisionGrade: false,
+      failures: [{
+        check: "requester-authentication",
+        detail: expect.stringContaining("revoked effective"),
+      }],
+    });
+  });
+
+  test("rejects a requester binding revoked exactly at the Submission sealing time", async () => {
+    const fixture = makeFixture();
+    const sealingTime = fixture.input.requesterAuthentication.sealingTime;
+    const ports = makePorts(
+      undefined,
+      SOLVER_AGENT,
+      [revocationEntry(REQUESTER_VOUCHER, sealingTime)],
+    );
+
+    expect(await gateVerdictObservation(fixture.input, ports)).toEqual({
+      decisionGrade: false,
+      failures: [{
+        check: "requester-authentication",
+        detail: expect.stringContaining(`revoked effective "${sealingTime}"`),
+      }],
+    });
+  });
+
+  test("accepts a requester binding revoked after the Submission sealing time", async () => {
+    const fixture = makeFixture();
+    const ports = makePorts(
+      undefined,
+      SOLVER_AGENT,
+      [revocationEntry(REQUESTER_VOUCHER, "2026-07-29T09:00:00Z")],
+    );
+
+    await expect(gateVerdictObservation(fixture.input, ports)).resolves.toEqual({
+      decisionGrade: true,
+      failures: [],
+    });
+  });
+
+  test("ignores a requester revocation issued by an unauthorized revoker", async () => {
+    const fixture = makeFixture();
+    const ports = makePorts(
+      undefined,
+      SOLVER_AGENT,
+      [revocationEntry(UNAUTHORIZED_REVOKER, "2026-07-29T07:00:00Z")],
+    );
+
+    await expect(gateVerdictObservation(fixture.input, ports)).resolves.toEqual({
+      decisionGrade: true,
+      failures: [],
     });
   });
 
