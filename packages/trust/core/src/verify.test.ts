@@ -17,6 +17,7 @@ import {
 } from "./identifiers.js";
 import type { BindingResolver, ResolvedBinding, ResolvedRevocation, WitnessVerifier } from "./interfaces.js";
 import type { KeyBinding } from "./key-binding.js";
+import { sealKeyBinding, validateKeyBinding } from "./key-binding.js";
 import type { DsseChainVerifier } from "./policy.js";
 import { didPkh } from "./spellings.js";
 import {
@@ -165,6 +166,66 @@ const KEY_2 = "did:key:z6MkfKEY22222222222222222222222222222222222";
 const CONSENT_KEY = "did:key:z6MkfCONSENT11111111111111111111111111111";
 
 describe("verifyEnvelopeBinding", () => {
+  test("a real sealed KeyBinding can carry and verify the admission-receipt scope (§7.42/§7.45)", async () => {
+    const admissionScope =
+      "https://jinn.network/trust-scopes/admission-receipts/1.0";
+    const key = "did:key:z6MkAdmissionScopeFixture1111111111111111111";
+    const agent = "https://jinn.network/agents/admission-scope-fixture";
+    const binding = keyBinding({
+      agent,
+      key: {
+        publicKey: "fixture-public-key",
+        keyid: key,
+        algorithm: "ed25519",
+        didKey: key,
+      },
+      voucher: {
+        kind: "account",
+        did: didPkh(8453, "0x4444444444444444444444444444444444444444"),
+        contractAccount: false,
+      },
+      scope: [admissionScope],
+    });
+    const sealedBinding = await sealKeyBinding(
+      binding,
+      async () => [{ signature: new Uint8Array([1, 2, 3]), keyid: key }],
+    );
+    const report = validateKeyBinding(sealedBinding.envelopeBytes);
+    expect(report).toMatchObject({ conforms: true });
+    expect(report.value?.scope).toEqual([admissionScope]);
+
+    const resolver = new FakeBindingResolver().register({
+      key,
+      agent,
+      resolved: resolvedBinding({
+        binding: report.value!,
+        envelopeBytes: sealedBinding.envelopeBytes,
+        bindingDigest: sealedBinding.recordDigest,
+      }),
+    });
+    const receiptEnvelope = sealedEnvelope(
+      { admission: "accepted" },
+      "application/vnd.in-toto+json",
+      key,
+    );
+    const outcome = await verifyEnvelopeBinding(
+      {
+        envelopeBytes: receiptEnvelope,
+        key,
+        agent,
+        family: admissionScope,
+        atTime: "2026-03-01T00:00:00Z",
+      },
+      {
+        bindingResolver: resolver,
+        witnessVerifier: fakeWitnessVerifier,
+        dsseVerifier: trustingDsseVerifier,
+        policy: { accepted: [agent], requiredStrength: "strong" },
+      },
+    );
+    expect(outcome).toMatchObject({ ok: true });
+  });
+
   test("(a) a valid envelope with a genuine EOA ceremony, resolved genesis binding, matching scope, and no revocation verifies", async () => {
     const binding = keyBinding({
       agent: eoaFixture.agentIri,
