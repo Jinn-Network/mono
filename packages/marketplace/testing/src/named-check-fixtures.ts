@@ -553,6 +553,26 @@ export function describeNamedChecks(subject: NamedCheckSubject): void {
       });
     });
 
+    test("refuses a requester binding revoked exactly at Submission sealing", async () => {
+      const sealingTime = "2026-07-29T08:00:00Z";
+      const fixture = await buildNamedCheckFixture({
+        requesterRevocation: {
+          effectiveTime: sealingTime,
+          authorized: true,
+        },
+      });
+      expect(fixture.input.requesterAuthentication.sealingTime).toBe(
+        sealingTime,
+      );
+      await expect(subject(fixture.input, fixture.ports)).resolves.toEqual({
+        decisionGrade: false,
+        failures: [{
+          check: "requester-authentication",
+          detail: expect.stringContaining(`revoked effective "${sealingTime}"`),
+        }],
+      });
+    });
+
     test("accepts a requester binding revoked after Submission sealing", async () => {
       const fixture = await buildNamedCheckFixture({
         requesterRevocation: {

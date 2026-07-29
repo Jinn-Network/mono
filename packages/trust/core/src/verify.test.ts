@@ -677,6 +677,37 @@ describe("authenticateRequester (§7.5b)", () => {
     });
   });
 
+  test("rejects a requester binding revoked exactly at the Submission sealing time", async () => {
+    const sealingTime = "2026-03-01T00:00:00Z";
+    const resolver = new FakeBindingResolver().register({
+      key: REQUESTER_KEY,
+      agent: AGENT,
+      resolved: requesterBinding([
+        revocationEntry(VOUCHER_DID, sealingTime),
+      ]),
+    });
+    const envelopeBytes = sealedEnvelope(
+      { submission: true },
+      TRUST_KEY_BINDING_MEDIA_TYPE,
+      REQUESTER_KEY,
+    );
+
+    const outcome = await authenticateRequester(
+      {
+        envelopeBytes,
+        key: REQUESTER_KEY,
+        requesterAgent: AGENT,
+        sealingTime,
+      },
+      { bindingResolver: resolver, dsseVerifier: trustingDsseVerifier },
+    );
+
+    expect(outcome).toEqual({
+      ok: false,
+      reason: `revoked effective "${sealingTime}" by "${VOUCHER_DID}".`,
+    });
+  });
+
   test("accepts a requester binding revoked after the Submission sealing time", async () => {
     const resolver = new FakeBindingResolver().register({
       key: REQUESTER_KEY,

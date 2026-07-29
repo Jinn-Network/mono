@@ -561,6 +561,24 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     });
   });
 
+  test("rejects a requester binding revoked exactly at the Submission sealing time", async () => {
+    const fixture = makeFixture();
+    const sealingTime = fixture.input.requesterAuthentication.sealingTime;
+    const ports = makePorts(
+      undefined,
+      SOLVER_AGENT,
+      [revocationEntry(REQUESTER_VOUCHER, sealingTime)],
+    );
+
+    expect(await gateVerdictObservation(fixture.input, ports)).toEqual({
+      decisionGrade: false,
+      failures: [{
+        check: "requester-authentication",
+        detail: expect.stringContaining(`revoked effective "${sealingTime}"`),
+      }],
+    });
+  });
+
   test("accepts a requester binding revoked after the Submission sealing time", async () => {
     const fixture = makeFixture();
     const ports = makePorts(
