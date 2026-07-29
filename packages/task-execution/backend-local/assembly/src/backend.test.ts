@@ -88,6 +88,7 @@ function fixture(
     maxConcurrentAttempts?: number;
     provisioningRejectReason?: string;
     argv?: readonly string[];
+    provisionerId?: string;
   } = {},
 ): LocalTaskExecutionBackend {
   const provisioner: ProvisionerContract = {
@@ -140,7 +141,7 @@ function fixture(
     executor: "urn:jinn:agent:assembly-test",
     profileStore,
     launchers: [launcher],
-    provisioner: () => ({ id: "fixture", contract: provisioner }),
+    provisioner: () => ({ id: options.provisionerId ?? "fixture", contract: provisioner }),
     provisionerCapabilities: {
       taskProfiles: [profile.profile],
       workspaceKinds: ["dir"],
@@ -179,6 +180,12 @@ async function allFiles(root: string): Promise<string[]> {
 }
 
 describe("local TaskExecutionBackend submission path (C1)", () => {
+  test("rejects hostile provisioner identities before setup", async () => {
+    const backend = fixture(await stateRoot("provisioner-id"), { provisionerId: "\u0000" });
+    const task = taskBytes();
+    await expect(backend.submit(task, submissionBytes(task))).rejects.toThrow("non-canonical id");
+  });
+
   test("starts a real shim without an in-process execution callback", async () => {
     const root = await stateRoot("real-shim");
     const backend = fixture(root, {

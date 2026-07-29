@@ -78,6 +78,7 @@ import {
   probeShimAlive,
   readOutcome,
   readShimFingerprint,
+  reconcileAttempt,
   runCancellationLadder,
   spawnShim,
 } from "@jinn-network/task-execution-supervisor";
@@ -147,6 +148,20 @@ function detail(errors: readonly { readonly path: string; readonly message: stri
 
 function directoryKey(value: string): string {
   return sha256Hex(new TextEncoder().encode(value));
+}
+
+function validProvisionerId(value: string): boolean {
+  if (value.length === 0) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) return false;
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next < 0xdc00 || next > 0xdfff) return false;
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) return false;
+  }
+  return true;
 }
 
 function requestedInventoryValue(value: unknown): string | undefined {
@@ -706,6 +721,9 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       attempt: identity,
     });
     const provisioner = selectedProvisioner.contract;
+    if (!validProvisionerId(selectedProvisioner.id)) {
+      throw new Error("provisioner selector returned an empty or non-canonical id");
+    }
     atomicWrite(join(this.paths(attempt).meta, "dispatch-context.sealed"), dispatchContextBytes);
     const grants = submission.capabilityGrants === undefined
       ? []
@@ -1318,7 +1336,56 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     } catch {
       return { classification: "absent", detail: `no durable record for ref "${ref}"` };
     }
+    const events = this.journal(attempt).read();
+    const record = foldAttemptRecord(events);
+    const paths = this.paths(attempt);
     const checkpoint = this.deliveryCheckpointPath(attempt);
+    const fingerprint = readShimFingerprint(paths.meta);
+    const shim = probeShimAlive(paths.meta);
+    const outcome = readOutcome(paths.meta, record.nonce);
+    const reconciliation = reconcileAttempt(record, {
+      processAlive: shim.alive,
+      shimAlive: shim.alive,
+      outcomePresent: outcome !== null,
+      nonceMatches: outcome !== null,
+    });
+    if (!existsSync(checkpoint) && (reconciliation.classification === "absent-never-executed" || reconciliation.classification === "absent")) {
+      this.appendTerminal(attempt, {
+        state: reconciliation.terminalState,
+        ...(reconciliation.blame === undefined ? {} : { blame: reconciliation.blame }),
+        category: "backend-unavailable",
+        detail: reconciliation.classification === "absent-never-executed"
+          ? "attempt was never spawned"
+          : "spawn intent has no recoverable shim or outcome",
+        ...(reconciliation.classification === "absent-never-executed" ? { neverExecuted: true } : {}),
+      });
+    }
+    // Recovery must prove the durable selection can still be reconstructed before any harvest.
+    if (record.phase !== "terminal" && record.phase !== "engaged") {
+      const stored = this.submissionsByUri.get(this.attempts.get(attempt)?.submission ?? "" as SubmissionUri);
+      const intent = events.find((event) => event.type === "spawn-intended");
+      if (stored === undefined || typeof intent?.details["provisioner"] !== "string") {
+        throw new TaskExecutionError("backend-unavailable", { detail: "recovery lacks persisted provisioner identity" });
+      }
+      const task = decode(stored.taskBytes) as TaskSpecification;
+      const submission = decode(stored.submissionBytes) as SubmissionRecord;
+      const profile = this.profile(task);
+      const merged = mergeRequirements(task.requirements, submission.requirements, {
+        ...CORE_REQUIREMENT_CLASSES,
+        ...Object.fromEntries(profile.requirementKeys.map(({ key, comparisonClass }) => [key, comparisonClass])),
+      });
+      if (!merged.ok) throw new TaskExecutionError("invalid-document", { detail: `persisted requirements no longer merge at ${merged.key}` });
+      const selected = this.config.provisioner({
+        sealedTaskBytes: stored.taskBytes.slice(),
+        dispatchContextBytes: new Uint8Array(readFileSync(join(paths.meta, "dispatch-context.sealed"))),
+        task,
+        submission,
+        attempt: { attemptUri: attempt, nonce: submission.nonce, attemptNumber: 1 },
+      });
+      if (selected.id !== intent.details["provisioner"]) {
+        throw new TaskExecutionError("backend-unavailable", { detail: "recovery provisioner identity differs from spawn intent" });
+      }
+    }
     if (existsSync(checkpoint)) {
       const bytes = new Uint8Array(readFileSync(checkpoint));
       const digest = documentDigest(bytes);
@@ -1336,7 +1403,12 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         });
       }
     }
-    return { classification: "matching" };
+    return {
+      classification: existsSync(checkpoint) ? "matching" : reconciliation.classification === "absent" || reconciliation.classification === "absent-never-executed"
+        ? "absent"
+        : reconciliation.classification === "contradictory" ? "contradictory" : "matching",
+      ...(existsSync(checkpoint) || reconciliation.classification === "matching" ? {} : { detail: reconciliation.classification }),
+    };
   }
 
   async deliveries(attempt: AttemptUri): Promise<DeliveryRef[]> {
