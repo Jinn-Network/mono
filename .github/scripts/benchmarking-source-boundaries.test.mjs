@@ -84,7 +84,7 @@ const ambientNetworkIdentifier = new RegExp(
   'g',
 );
 const ambientNetworkGlobal = new RegExp(
-  String.raw`\b(?:globalThis|global|window|self)\s*(?:(?:\.|\?\.)\s*(?:${AMBIENT_NETWORK_APIS.join('|')})\b|\[\s*(?:${AMBIENT_NETWORK_APIS.map((api) => `(?:"${api}"|'${api}'|\x60${api}\x60)`).join('|')})\s*\])`,
+  String.raw`\b(?:globalThis|global|window|self)\s*(?:(?:\.|\?\.)\s*(?:${AMBIENT_NETWORK_APIS.join('|')})\b|(?:\?\.)?\s*\[\s*(?:${AMBIENT_NETWORK_APIS.map((api) => `(?:"${api}"|'${api}'|\x60${api}\x60)`).join('|')})\s*\])`,
   'g',
 );
 
@@ -94,7 +94,10 @@ const ambientNetworkGlobal = new RegExp(
 function executableSource(source) {
   let result = '';
   const appendInert = (char) => { result += char === '\n' || char === '\r' ? char : ' '; };
-  const literalMemberContext = (index) => /\b(?:globalThis|global|window|self)\s*\[\s*$/u.test(source.slice(Math.max(0, index - 80), index));
+  // `result` has already replaced every preceding comment with layout-preserving whitespace and
+  // every inert literal with whitespace. This gives the member check arbitrary trivia support
+  // without a fixed raw-source look-behind or a regex over unbounded, unparsed source text.
+  const literalMemberContext = () => /\b(?:globalThis|global|window|self)\s*(?:\?\.\s*)?\[\s*$/u.test(result);
   const scanQuoted = (index, quote, retain) => {
     for (let cursor = index; cursor < source.length; cursor += 1) {
       const char = source[cursor];
@@ -150,10 +153,10 @@ function executableSource(source) {
         while (cursor < source.length && !(source[cursor] === '*' && source[cursor + 1] === '/')) { appendInert(source[cursor]); cursor += 1; }
         if (cursor < source.length) { appendInert(source[cursor]); appendInert(source[cursor + 1]); cursor += 2; }
       } else if (char === '"' || char === "'") {
-        const retain = literalMemberContext(cursor);
+        const retain = literalMemberContext();
         cursor = scanQuoted(cursor, char, retain);
       } else if (char === '`') {
-        const retain = literalMemberContext(cursor);
+        const retain = literalMemberContext();
         if (retain) result += char;
         else appendInert(char);
         cursor = scanTemplate(cursor + 1, retain);
@@ -209,7 +212,7 @@ function ambientNetworkUsesInFiles(sourceFiles) {
     const identifiers = [...source.matchAll(ambientNetworkIdentifier)]
       .map((match) => `${relative(root, file)} -> ${match[0]}`);
     const globals = [...source.matchAll(ambientNetworkGlobal)]
-      .map((match) => `${relative(root, file)} -> ${match[0]}`);
+      .map((match) => `${relative(root, file)} -> ${match[0].replace(/\s+/g, ' ').trim()}`);
     return [...identifiers, ...globals];
   }).sort();
 }
@@ -386,10 +389,15 @@ test('ambient-network detection scans executable template interpolation and lite
       'const interpolation = `${fetch("https://example.test")}`;',
       'const nested = `${`${self["WebSocket"]("wss://example.test")}`}`;',
       'const mixed = `${window["fetch"]("https://example.test")}`;',
+      `window${" ".repeat(81)}["fetch"]("https://example.test");`,
+      'globalThis /* member */ ?. /* computed */ ["EventSource"]("https://example.test");',
+      'const nestedComputed = `${`${self /* member */ ?. [\'WebSocket\']("wss://example.test")}`}`;',
       '// XMLHttpRequest is forbidden, but this comment is inert.',
       '/* window.fetch and self.WebSocket are inert comments. */',
       'const prose = "fetch globalThis.fetch window.XMLHttpRequest self.WebSocket";',
       'const raw = `fetch window["fetch"] self[\'WebSocket\'] globalThis[\\`XMLHttpRequest\\`]`;',
+      `const longRaw = \`window${" ".repeat(81)}["fetch"]\`;`,
+      'const inert = "globalThis /* member */ ?. [\'EventSource\']";',
     ].join('\n'));
     const findings = ambientNetworkUsesInFiles(files(source)).map((finding) => finding.slice(finding.indexOf('src/source.ts')));
     assert.deepEqual(findings, [
@@ -406,6 +414,9 @@ test('ambient-network detection scans executable template interpolation and lite
       'src/source.ts -> window?.fetch',
       'src/source.ts -> window["fetch"]',
       'src/source.ts -> window["fetch"]',
+      'src/source.ts -> window ["fetch"]',
+      'src/source.ts -> globalThis ?. ["EventSource"]',
+      "src/source.ts -> self ?. ['WebSocket']",
     ].sort());
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });

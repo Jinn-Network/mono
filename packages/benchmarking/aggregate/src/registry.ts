@@ -54,28 +54,36 @@ function sourceClusterManifest(rates: readonly {
     });
 }
 
-/** Exact arithmetic mean of finite decimal values. A non-terminating decimal mean has no
- * admissible fixed-scale replay representation, so the method fails closed rather than rounding
- * before the comparison-wide Wilcoxon normalization. */
+/** Exact reduced rational at a fixed base-ten scale: coefficient / (divisor × 10^scale). */
 function meanExactDecimal(values: readonly { readonly coefficient: bigint; readonly scale: bigint }[]): ExactCostDifference {
   if (values.length === 0) throw new Error("exact decimal mean requires at least one value");
   const scale = values.reduce((maximum, value) => value.scale > maximum ? value.scale : maximum, 0n);
   let numerator = values.reduce((sum, value) => sum + scaleDecimal(value, scale), 0n);
   let denominator = BigInt(values.length);
-  const gcd = (left: bigint, right: bigint): bigint => {
-    let a = left < 0n ? -left : left;
-    let b = right;
-    while (b !== 0n) [a, b] = [b, a % b];
-    return a;
-  };
-  const divisor = gcd(numerator, denominator);
-  numerator /= divisor;
-  denominator /= divisor;
-  let meanScale = scale;
-  while (denominator % 2n === 0n) { numerator *= 5n; denominator /= 2n; meanScale += 1n; }
-  while (denominator % 5n === 0n) { numerator *= 2n; denominator /= 5n; meanScale += 1n; }
-  if (denominator !== 1n) throw new Error("Task cost mean is not a finite decimal");
-  return { coefficient: numerator, scale: meanScale };
+  const gcd = greatestCommonDivisor(numerator, denominator);
+  numerator /= gcd;
+  denominator /= gcd;
+  return { coefficient: numerator, scale, ...(denominator === 1n ? {} : { divisor: denominator }) };
+}
+
+function greatestCommonDivisor(left: bigint, right: bigint): bigint {
+  let a = left < 0n ? -left : left;
+  let b = right < 0n ? -right : right;
+  while (b !== 0n) [a, b] = [b, a % b];
+  return a;
+}
+
+function subtractExactCostMeans(candidate: ExactCostDifference, baseline: ExactCostDifference): ExactCostDifference {
+  const scale = candidate.scale > baseline.scale ? candidate.scale : baseline.scale;
+  const candidateDivisor = candidate.divisor ?? 1n;
+  const baselineDivisor = baseline.divisor ?? 1n;
+  let coefficient = candidate.coefficient * (10n ** (scale - candidate.scale)) * baselineDivisor
+    - baseline.coefficient * (10n ** (scale - baseline.scale)) * candidateDivisor;
+  let divisor = candidateDivisor * baselineDivisor;
+  const gcd = greatestCommonDivisor(coefficient, divisor);
+  coefficient /= gcd;
+  divisor /= gcd;
+  return { coefficient, scale, ...(divisor === 1n ? {} : { divisor }) };
 }
 
 function validateParameters(
@@ -829,13 +837,9 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
         return parsed;
       }));
       costUnit = unit;
-      // Do not normalize Task differences here. pairedCostVerdict selects one global scale only
-      // after every Task mean difference has been collected (§7.112/§7.118).
-      const scale = baselineMean.scale > candidateMean.scale ? baselineMean.scale : candidateMean.scale;
-      costDiffs.push({
-        coefficient: scaleDecimal(candidateMean, scale) - scaleDecimal(baselineMean, scale),
-        scale,
-      });
+      // Do not normalize Task differences here. pairedCostVerdict selects one global scale and
+      // rational divisor only after every exact Task difference has been collected (§7.126).
+      costDiffs.push(subtractExactCostMeans(candidateMean, baselineMean));
       for (const cell of taskCells) costIncludedCellKeys.add(cell.cellKey);
     }
     const costExcludedCellKeys = relevant
@@ -879,6 +883,7 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
         n: cost.n,
         ...(cost.scale === undefined || cost.scale === 0n ? {} : { replay: {
           scale: cost.scale.toString(),
+          ...(cost.divisors === undefined ? {} : { divisors: cost.divisors.map((divisor) => divisor.toString()) }),
           differences: cost.differences!.map((difference) => difference.toString()),
         } }),
         excluded: { count: costExcludedCellKeys.length, cellKeys: costExcludedCellKeys },

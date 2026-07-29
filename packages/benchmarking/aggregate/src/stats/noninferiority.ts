@@ -263,6 +263,8 @@ export interface CostVerdictResult {
   readonly n: number;
   /** Present when callers supplied exact decimal coefficient/scale differences. */
   readonly scale?: bigint;
+  /** Parallel to differences when any exact Task difference has a non-unit divisor. */
+  readonly divisors?: readonly bigint[];
   /** Included nonzero differences rescaled to `scale`, in pair order. */
   readonly differences?: readonly bigint[];
 }
@@ -271,6 +273,8 @@ export interface CostVerdictResult {
 export interface ExactCostDifference {
   readonly coefficient: bigint;
   readonly scale: bigint;
+  /** Positive denominator of coefficient / (divisor × 10^scale). */
+  readonly divisor?: bigint;
 }
 
 /** One-sided Wilcoxon signed-rank test that the median paired cost difference is < 0 (candidate
@@ -283,8 +287,8 @@ export function pairedCostVerdict(
   const alpha = opts.alpha ?? 0.05;
   const exact = costDiffs.length > 0 && typeof costDiffs[0] === "object";
   const replay = exact ? normalizeCostDifferences(costDiffs as readonly ExactCostDifference[]) : undefined;
-  const normalized: readonly (number | bigint)[] = replay?.differences
-    ?? costDiffs as readonly (number | bigint)[];
+  if (replay !== undefined) return pairedExactCostVerdict(replay, opts);
+  const normalized: readonly (number | bigint)[] = costDiffs as readonly (number | bigint)[];
   const zero = typeof normalized[0] === "bigint" ? 0n : 0;
   const nonzero = normalized.filter((difference) => difference !== zero);
   if (nonzero.length < minN) {
@@ -292,7 +296,6 @@ export function pairedCostVerdict(
       verdict: "inconclusive",
       pValue: null,
       n: nonzero.length,
-      ...(replay === undefined ? {} : { scale: replay.scale, differences: nonzero as bigint[] }),
     };
   }
 
@@ -310,23 +313,91 @@ export function pairedCostVerdict(
     verdict: pValue < alpha ? "lower" : "not-lower",
     pValue,
     n,
-    ...(replay === undefined ? {} : { scale: replay.scale, differences: nonzero as bigint[] }),
   };
 }
 
 function normalizeCostDifferences(differences: readonly ExactCostDifference[]): {
   readonly scale: bigint;
   readonly differences: readonly bigint[];
+  readonly divisors: readonly bigint[];
 } {
   const scale = differences.reduce((maximum, difference) => {
     if (difference.scale < 0n) throw new Error("cost difference scale must be nonnegative");
     return difference.scale > maximum ? difference.scale : maximum;
   }, 0n);
+  const normalized = differences.map((difference) => {
+    let coefficient = difference.coefficient * (10n ** (scale - difference.scale));
+    let divisor = difference.divisor ?? 1n;
+    if (divisor <= 0n) throw new Error("cost difference divisor must be positive");
+    const common = gcd(coefficient, divisor);
+    coefficient /= common;
+    divisor /= common;
+    return { coefficient, divisor };
+  });
   return {
     scale,
-    differences: differences.map((difference) =>
-      difference.coefficient * (10n ** (scale - difference.scale))),
+    differences: normalized.map((difference) => difference.coefficient),
+    divisors: normalized.map((difference) => difference.divisor),
   };
+}
+
+function gcd(left: bigint, right: bigint): bigint {
+  let a = left < 0n ? -left : left;
+  let b = right < 0n ? -right : right;
+  while (b !== 0n) [a, b] = [b, a % b];
+  return a;
+}
+
+function pairedExactCostVerdict(
+  replay: { readonly scale: bigint; readonly differences: readonly bigint[]; readonly divisors: readonly bigint[] },
+  opts: { minN?: number; alpha?: number },
+): CostVerdictResult {
+  const minN = opts.minN ?? 10;
+  const alpha = opts.alpha ?? 0.05;
+  const nonzero = replay.differences
+    .map((difference, index) => ({ difference, divisor: replay.divisors[index]! }))
+    .filter(({ difference }) => difference !== 0n);
+  const publicReplay = {
+    scale: replay.scale,
+    differences: nonzero.map(({ difference }) => difference),
+    ...(replay.divisors.some((divisor) => divisor > 1n) ? { divisors: nonzero.map(({ divisor }) => divisor) } : {}),
+  };
+  if (nonzero.length < minN) {
+    return { verdict: "inconclusive", pValue: null, n: nonzero.length, ...publicReplay };
+  }
+  const ranks = rankExactAbs(nonzero);
+  let wPlus = 0;
+  nonzero.forEach(({ difference }, index) => {
+    if (difference >= 0n) wPlus += ranks[index]!;
+  });
+  const n = nonzero.length;
+  const meanW = (n * (n + 1)) / 4;
+  const sdW = Math.sqrt((n * (n + 1) * (2 * n + 1)) / 24);
+  const pValue = normCdf((wPlus - meanW + 0.5) / sdW);
+  return { verdict: pValue < alpha ? "lower" : "not-lower", pValue, n, ...publicReplay };
+}
+
+function rankExactAbs(values: readonly { readonly difference: bigint; readonly divisor: bigint }[]): number[] {
+  const abs = (value: bigint) => value < 0n ? -value : value;
+  const indices = values.map((value, index) => ({ ...value, index })).sort((left, right) => {
+    const leftCross = abs(left.difference) * right.divisor;
+    const rightCross = abs(right.difference) * left.divisor;
+    return leftCross < rightCross ? -1 : leftCross > rightCross ? 1 : 0;
+  });
+  const ranks = new Array<number>(values.length);
+  let start = 0;
+  while (start < indices.length) {
+    let end = start;
+    while (
+      end + 1 < indices.length
+      && abs(indices[end]!.difference) * indices[end + 1]!.divisor
+        === abs(indices[end + 1]!.difference) * indices[end]!.divisor
+    ) end += 1;
+    const rank = (start + end + 2) / 2;
+    for (let index = start; index <= end; index += 1) ranks[indices[index]!.index] = rank;
+    start = end + 1;
+  }
+  return ranks;
 }
 
 function rankAbs(absVals: readonly (number | bigint)[]): number[] {
