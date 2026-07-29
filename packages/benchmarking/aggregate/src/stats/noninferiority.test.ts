@@ -3,6 +3,7 @@ import {
   nonInferiorityIut,
   nonInferiorityVerdict,
   pairedCostVerdict,
+  pairedRateDiffBca,
   pairedRateDiffLowerBound,
   xorshift32,
 } from "./noninferiority.js";
@@ -45,6 +46,46 @@ describe("pairedRateDiffLowerBound", () => {
     const observedMean = rates.reduce((s, r) => s + (r.pB - r.pA), 0) / rates.length;
     const bound = pairedRateDiffLowerBound(rates, { seed: 7, resamples: 2000 });
     expect(bound).toBeLessThanOrEqual(observedMean + 1e-9);
+  });
+
+  test("pins a nonconstant nonzero-acceleration BCa oracle, draw count, and ordered task vector", () => {
+    // Independent Python NormalDist oracle over the exact xorshift32-v1 draws and the
+    // IEEE-754 deltas produced by these rate pairs.
+    // Deltas in code-unit task order: [-.4, -.1, 0, .05, .1, .6].
+    const orderedRates = [
+      { pA: 0.6, pB: 0.2 },
+      { pA: 0.5, pB: 0.4 },
+      { pA: 0.5, pB: 0.5 },
+      { pA: 0.4, pB: 0.45 },
+      { pA: 0.3, pB: 0.4 },
+      { pA: 0.2, pB: 0.8 },
+    ];
+    const result = pairedRateDiffBca(orderedRates, {
+      seed: 1,
+      resamples: 1_000,
+    });
+    expect(result.draws).toBe(6_000);
+    expect(result.observed).toBeCloseTo(0.04166666666666669, 15);
+    expect(result.acceleration).toBeCloseTo(0.036577981383804824, 14);
+    expect(result.biasCorrection).toBeCloseTo(0.025068908258711053, 7);
+    expect(result.adjustedQuantile).toBeCloseTo(0.06627599770137671, 7);
+    expect(result.adjustedIndex).toBe(66);
+    expect(result.lowerBound).toBeCloseTo(-0.14166666666666664, 15);
+
+    // A percentile-only implementation and a BCa implementation that forces acceleration=0
+    // both select -0.158333... for this exact stream. This vector must discriminate both.
+    const percentileOrZeroAcceleration = -0.15833333333333333;
+    expect(result.lowerBound).not.toBeCloseTo(percentileOrZeroAcceleration, 15);
+
+    // One draw is consumed per sampled position against the ordered task vector. Reversing that
+    // vector while keeping the exact stream changes the finite replay result.
+    const reversed = pairedRateDiffBca([...orderedRates].reverse(), {
+      seed: 1,
+      resamples: 1_000,
+    });
+    expect(reversed.draws).toBe(6_000);
+    expect(reversed.lowerBound).toBeCloseTo(-0.125, 15);
+    expect(reversed.lowerBound).not.toBe(result.lowerBound);
   });
 });
 

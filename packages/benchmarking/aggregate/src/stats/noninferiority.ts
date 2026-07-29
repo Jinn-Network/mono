@@ -19,6 +19,17 @@ export interface RateCiOptions {
   resamples?: number;
 }
 
+export interface PairedRateDiffBcaResult {
+  readonly observed: number;
+  readonly lowerBound: number;
+  readonly acceleration: number;
+  readonly biasCorrection: number;
+  readonly adjustedQuantile: number;
+  readonly adjustedIndex: number;
+  /** Exactly one xorshift32-v1 draw per task position in every resample. */
+  readonly draws: number;
+}
+
 /** Exact program §7.26 xorshift32-v1 stream. One call performs each transition with explicit
  * uint32 truncation and returns one unsigned 32-bit draw. */
 export function xorshift32(seed: number): () => number {
@@ -34,27 +45,35 @@ export function xorshift32(seed: number): () => number {
   };
 }
 
-/** One-sided BCa lower confidence bound for mean(delta_i), delta_i = pB - pA. Bootstrap
+/** One-sided BCa replay details for mean(delta_i), delta_i = pB - pA. Bootstrap
  * sampling uses exactly one xorshift32-v1 uint32 draw per sampled position. The jackknife
  * acceleration pass is deterministic and consumes no PRNG draws. */
-export function pairedRateDiffLowerBound(rates: readonly TaskRates[], opts: RateCiOptions): number {
+export function pairedRateDiffBca(
+  rates: readonly TaskRates[],
+  opts: RateCiOptions,
+): PairedRateDiffBcaResult {
   const alpha = opts.alpha ?? 0.05;
   const resamples = opts.resamples ?? 10_000;
+  if (!(alpha > 0 && alpha < 1)) {
+    throw new Error("pairedRateDiffBca: alpha must be in (0,1)");
+  }
   if (!Number.isInteger(resamples) || resamples <= 0) {
-    throw new Error("pairedRateDiffLowerBound: resamples must be a positive integer");
+    throw new Error("pairedRateDiffBca: resamples must be a positive integer");
   }
   const n = rates.length;
-  if (n === 0) throw new Error("pairedRateDiffLowerBound: empty sample");
+  if (n === 0) throw new Error("pairedRateDiffBca: empty sample");
   const deltas = rates.map((r) => r.pB - r.pA);
   const mean = (xs: readonly number[]): number => xs.reduce((s, x) => s + x, 0) / xs.length;
   const observed = mean(deltas);
   const nextU32 = xorshift32(opts.seed);
 
   const means: number[] = [];
+  let draws = 0;
   for (let b = 0; b < resamples; b += 1) {
     let s = 0;
     for (let i = 0; i < n; i += 1) {
       const index = Math.floor((nextU32() / 4_294_967_296) * n);
+      draws += 1;
       s += deltas[index]!;
     }
     means.push(s / n);
@@ -92,7 +111,20 @@ export function pairedRateDiffLowerBound(rates: readonly TaskRates[], opts: Rate
     : z0 + zCombined / denominator;
   const adj = normCdf(adjustedZ);
   const idx = Math.min(resamples - 1, Math.max(0, Math.floor(adj * resamples)));
-  return means[idx]!;
+  return {
+    observed,
+    lowerBound: means[idx]!,
+    acceleration,
+    biasCorrection: z0,
+    adjustedQuantile: adj,
+    adjustedIndex: idx,
+    draws,
+  };
+}
+
+/** One-sided BCa lower confidence bound. */
+export function pairedRateDiffLowerBound(rates: readonly TaskRates[], opts: RateCiOptions): number {
+  return pairedRateDiffBca(rates, opts).lowerBound;
 }
 
 export interface NonInferiorityOptions extends RateCiOptions {

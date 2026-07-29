@@ -2,23 +2,36 @@ import { clusterBy } from "./clustering.js";
 
 /**
  * Exact two-sided McNemar p-value for discordant counts `b` (improvements) and `c`
- * (regressions). Ported verbatim from `packages/core/src/paired.ts`'s `mcnemarExact` (adoption,
- * not invention — design §9.2). Under H0 each discordant pair is an independent fair coin, so
+ * (regressions). Adopted from `packages/core/src/paired.ts`'s `mcnemarExact`, with the same
+ * exact-binomial definition and a log-scaled tail recurrence to avoid seed-term underflow.
+ * Under H0 each discordant pair is an independent fair coin, so
  * the count of one direction is Binomial(n=b+c, 0.5); the two-sided p is
- * `2 * P(X <= min(b,c))`, capped at 1. Computed iteratively (term ratio) so it is exact and
- * overflow-free for any slate size.
+ * `2 * P(X <= min(b,c))`, capped at 1.
  */
 export function mcnemarExact(b: number, c: number): number {
+  if (!Number.isSafeInteger(b) || !Number.isSafeInteger(c) || b < 0 || c < 0) {
+    throw new Error("mcnemarExact: discordant counts must be nonnegative integers");
+  }
   const n = b + c;
   if (n === 0) return 1;
   const k = Math.min(b, c);
-  let term = Math.pow(0.5, n);
-  let cdf = term;
+  // For the central lower tail, symmetry makes the capped two-sided value exactly one.
+  if (k === Math.floor(n / 2)) return 1;
+
+  // Anchor the recurrence at its largest lower-tail term, C(n,k)/2^n. The old recurrence
+  // started at 2^-n, which can underflow to zero even when the full lower tail is representable.
+  let logTermAtK = -n * Math.LN2;
   for (let i = 1; i <= k; i += 1) {
-    term = (term * (n - i + 1)) / i;
-    cdf += term;
+    logTermAtK += Math.log(n - k + i) - Math.log(i);
   }
-  return Math.min(1, 2 * cdf);
+  let relativeTerm = 1;
+  let relativeCdf = 1;
+  for (let i = k; i >= 1; i -= 1) {
+    relativeTerm *= i / (n - i + 1);
+    relativeCdf += relativeTerm;
+  }
+  const logTwoSided = Math.LN2 + logTermAtK + Math.log(relativeCdf);
+  return logTwoSided >= 0 ? 1 : Math.exp(logTwoSided);
 }
 
 export interface DiscordantPair {

@@ -17,6 +17,27 @@ describe("mcnemarExact (ported from packages/core/src/paired.ts)", () => {
   test("is symmetric in b and c", () => {
     expect(mcnemarExact(5, 2)).toBeCloseTo(mcnemarExact(2, 5), 12);
   });
+
+  test("large balanced discordance remains exactly p=1 instead of underflowing", () => {
+    expect(mcnemarExact(600, 600)).toBe(1);
+  });
+
+  test("large extreme-but-representable tail is stable when the p=0.5 seed term underflows", () => {
+    // Independent high-precision oracle:
+    // 2 * sum(i=0..10, C(1075,i)) / 2^1075
+    expect(mcnemarExact(1065, 10)).toBeCloseTo(
+      2.7162020597214054e-300,
+      312,
+    );
+  });
+
+  test.each([
+    [-1, 0],
+    [0, -1],
+    [1.5, 1],
+  ])("rejects invalid discordant counts b=%s,c=%s", (b, c) => {
+    expect(() => mcnemarExact(b, c)).toThrow(/nonnegative integers/);
+  });
 });
 
 describe("clusteredVariance", () => {
