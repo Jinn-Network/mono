@@ -50,7 +50,7 @@ describe("today-generation escrow lifecycle fixture (§13)", () => {
     const url = `http://127.0.0.1:${port}`;
     const anvil = spawn("anvil", ["--fork-url", process.env.JINN_MARKETPLACE_FORK_RPC_URL ?? "https://base-sepolia.publicnode.com", "--port", String(port), "--silent"]);
     const ready = await new Promise<boolean>((resolve) => { const timer = setTimeout(() => resolve(false), 12_000); const poll = setInterval(async () => { try { await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' }); clearInterval(poll); clearTimeout(timer); resolve(true); } catch {} }, 150); });
-    if (!ready) { anvil.kill(); return; }
+    if (!ready) { anvil.kill(); throw new Error("Anvil/Base-Sepolia fork prerequisite unavailable; fixture did not run"); }
     try {
       const account = privateKeyToAccount(DEV_KEY);
       const publicClient = createPublicClient({ transport: http(url) });
@@ -73,7 +73,7 @@ describe("today-generation escrow lifecycle fixture (§13)", () => {
         deliver: async () => { await write(mech, mechA.abi, "deliverToMarketplace", [[requestId], ["0x736f6c7574696f6e"]]); },
         settle: async () => { await write(router, routerA.abi, "claimSolutionDelivery", [requestId, `0x${"3".repeat(64)}`]); await expect(write(router, routerA.abi, "claimSolutionDelivery", [requestId, `0x${"3".repeat(64)}`])).rejects.toThrow(); return { raceLost: false }; },
         verdict: async () => { await write(router, routerA.abi, "claimEvaluation", [taskId, 0, mech, `0x${"4".repeat(64)}`]); const result = await publicClient.readContract({ address: coordinator, abi: coordinatorA.abi, functionName: "getVerdict", args: [taskId, 0, 0] }) as { requestId: Hex }; verdictRequestId = result.requestId; await write(mech, mechA.abi, "deliverToMarketplace", [[verdictRequestId], ["0x76657264696374"]]); await write(router, routerA.abi, "claimVerdictDelivery", [verdictRequestId, `0x${"5".repeat(64)}`, 1]); },
-        refund: async () => { await write(router, routerA.abi, "refundUnusedTaskBudget", [taskId]); return { refunded: 1n }; },
+        refund: async () => { const before = await publicClient.readContract({ address: router, abi: routerA.abi, functionName: "taskPayments", args: [taskId] }) as readonly unknown[]; await write(router, routerA.abi, "refundUnusedTaskBudget", [taskId]); const after = await publicClient.readContract({ address: router, abi: routerA.abi, functionName: "taskPayments", args: [taskId] }) as readonly unknown[]; expect(after[6]).toBe(0n); expect(after[7]).toBe(0n); expect(after[8]).toBe(true); expect(after[9]).toBe(true); return { refunded: (before[6] as bigint) + (before[7] as bigint) }; },
       };
       await describeEscrowLifecycle({ ...BASE_SEPOLIA_TODAY, generation: "today", jinnRouter: router, taskCoordinator: coordinator, mechMarketplace: marketplace, activityChecker: activity }, ctx, "today");
     } finally { anvil.kill(); }
