@@ -2,6 +2,8 @@
 
 import {
   DISCOVERY_SIGNING_SCOPE,
+  formatOrigin,
+  RECORD_DISCOVERY_VERSION,
   RECORD_KINDS,
   recordDigest,
   sealJson,
@@ -182,6 +184,23 @@ function createAnnouncementHostState(): AnnouncementHostState {
     nextArchivePage: 1n,
     priorAnnouncements: new Map(),
   };
+}
+
+function incrementalPorts(): AnnouncementProjectionPorts {
+  const host = createAnnouncementHostState();
+  const agent = "did:key:zMarketplaceProjectorFixture";
+  const name = "marketplace";
+  host.previousHead = {
+    protocol: RECORD_DISCOVERY_VERSION,
+    origin: formatOrigin(agent, name),
+    sequence: "0000000000000005",
+    entry: `sha256:${"1".repeat(64)}`,
+    issuedAt: "2026-07-29T12:00:00Z",
+    refreshBy: "2026-07-30T12:00:00Z",
+  };
+  host.previousEntryDigest = host.previousHead.entry;
+  host.nextSequence = 6n;
+  return ports(host);
 }
 
 function ports(host = createAnnouncementHostState()): AnnouncementProjectionPorts {
@@ -884,4 +903,4 @@ const subject: MarketplaceProjectorConformanceSubject = {
 };
 
 describeMarketplaceProjectorConformance(subject);
-describeMarketplaceProjectorIdentityConformance({ ports });
+describeMarketplaceProjectorIdentityConformance({ ports, incrementalPorts });

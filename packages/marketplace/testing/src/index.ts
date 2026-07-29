@@ -13,6 +13,7 @@ export type {
 } from "./named-check-fixtures.js";
 export {
   describeMarketplaceProjectorConformance,
+  describeMarketplaceProjectorIdentityConformance,
   loadMarketplaceProjectorFixtures,
   loadMarketplaceProjectorReorgFixtures,
 } from "./projector-conformance.js";
@@ -27,6 +28,7 @@ export type {
   MarketplaceProjectorConformanceRun,
   MarketplaceProjectorConformanceSubject,
   MarketplaceProjectorFixture,
+  MarketplaceProjectorIdentityConformanceOptions,
   MarketplaceProjectorReorgFixture,
   MarketplaceProjectorReorgRun,
   MarketplaceProjectorReplayRun,

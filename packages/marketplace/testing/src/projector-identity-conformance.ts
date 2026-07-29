@@ -33,6 +33,12 @@ const PROJECTION: ObservationProjectionContext = {
   },
 };
 
+function stringifyState(state: unknown): string {
+  return JSON.stringify(state, (_key, value) =>
+    typeof value === "bigint" ? value.toString() : value,
+  );
+}
+
 function derivation(
   event: string,
   logIndex: number,
@@ -65,6 +71,62 @@ function appendProcessedLogId(
   ].join(":")];
 }
 
+interface PortCallCounts {
+  sign: number;
+  storePut: number;
+  appendArchiveEntries: number;
+  resolveRecord: number;
+  resolvePriorAnnouncementId: number;
+}
+
+function instrumentPorts(base: AnnouncementProjectionPorts): {
+  readonly ports: AnnouncementProjectionPorts;
+  readonly calls: PortCallCounts;
+} {
+  const calls: PortCallCounts = {
+    sign: 0,
+    storePut: 0,
+    appendArchiveEntries: 0,
+    resolveRecord: 0,
+    resolvePriorAnnouncementId: 0,
+  };
+  return {
+    calls,
+    ports: {
+      ...base,
+      signer: {
+        scope: base.signer.scope,
+        async sign(input) {
+          calls.sign += 1;
+          return base.signer.sign(input);
+        },
+      },
+      store: {
+        async put(key, bytes, contentType) {
+          calls.storePut += 1;
+          return base.store.put(key, bytes, contentType);
+        },
+      },
+      ...(base.appendArchiveEntries === undefined ? {} : {
+        appendArchiveEntries: async (input) => {
+          calls.appendArchiveEntries += 1;
+          return base.appendArchiveEntries!(input);
+        },
+      }),
+      resolveRecord: async (event, role) => {
+        calls.resolveRecord += 1;
+        return base.resolveRecord(event, role);
+      },
+      ...(base.resolvePriorAnnouncementId === undefined ? {} : {
+        resolvePriorAnnouncementId: async (event, role) => {
+          calls.resolvePriorAnnouncementId += 1;
+          return base.resolvePriorAnnouncementId!(event, role);
+        },
+      }),
+    },
+  };
+}
+
 function expectRefusalTransition(
   before: ReturnType<typeof createMarketplaceProjectionState>,
   result: MarketplaceProjectionTransition,
@@ -85,7 +147,40 @@ function expectRefusalTransition(
   })]);
 }
 
-function taskCreated(generation: "today" | "revised"): ObservationMarketplaceEvent {
+async function expectRefusalThroughAnnounceBoundary(
+  options: MarketplaceProjectorIdentityConformanceOptions,
+  before: ReturnType<typeof createMarketplaceProjectionState>,
+  result: MarketplaceProjectionTransition,
+  event: ObservationMarketplaceEvent,
+  reason: string,
+): Promise<void> {
+  expectRefusalTransition(before, result, event, reason);
+
+  const base = options.incrementalPorts();
+  const previousHead = base.previousHead;
+  const { ports, calls } = instrumentPorts(base);
+  const announced = await projectAnnouncements(result, ports);
+
+  expect(announced.announcements).toEqual([]);
+  expect(announced.entries).toEqual([]);
+  expect(announced.pages).toEqual([]);
+  expect(announced.refusals).toEqual([]);
+  if (previousHead !== undefined) {
+    expect(announced.head).toBe(previousHead);
+  } else {
+    expect(announced.head).toBeUndefined();
+  }
+  expect(calls.sign).toBe(0);
+  expect(calls.storePut).toBe(0);
+  expect(calls.appendArchiveEntries).toBe(0);
+  expect(calls.resolveRecord).toBe(0);
+  expect(calls.resolvePriorAnnouncementId).toBe(0);
+}
+
+function taskCreated(
+  generation: "today" | "revised",
+  options: { readonly twoLiveParents?: boolean } = {},
+): ObservationMarketplaceEvent {
   if (generation === "today") {
     return {
       event: "TaskCreated",
@@ -110,7 +205,7 @@ function taskCreated(generation: "today" | "revised"): ObservationMarketplaceEve
       submissionDigest: `0x${"d".repeat(64)}`,
       taskId: 42n,
       maxTotal: 2,
-      maxConcurrent: 1,
+      maxConcurrent: options.twoLiveParents === true ? 2 : 1,
       submissionDeadline: 1_800_000_000n,
       closeAt: 0n,
       responseTimeout: 3600n,
@@ -129,13 +224,15 @@ function taskCreated(generation: "today" | "revised"): ObservationMarketplaceEve
 function taskClaim(
   generation: "today" | "revised",
   logIndex: number,
-  requestId: Hex = REQUEST_ID,
+  options: { readonly requestId?: Hex; readonly attemptIndex?: number } = {},
 ): ObservationMarketplaceEvent {
+  const requestId = options.requestId ?? REQUEST_ID;
+  const attemptIndex = options.attemptIndex ?? 3;
   if (generation === "today") {
     return {
       event: "TaskAttemptCreated",
       facts: {
-        taskId: 42n, attemptIndex: 3, operator: OPERATOR, requestId,
+        taskId: 42n, attemptIndex, operator: OPERATOR, requestId,
         priorityMech: OPERATOR, deliveryRate: 10n,
       },
       derivation: derivation("TaskAttemptCreated", logIndex, generation),
@@ -146,7 +243,7 @@ function taskClaim(
     event: "TaskAttemptCreated",
     facts: {
       operator: OPERATOR, priorityMech: OPERATOR, requestId,
-      taskId: 42n, attemptIndex: 3, attemptDeadline: 1_800_000_000n, deliveryRate: 10n,
+      taskId: 42n, attemptIndex, attemptDeadline: 1_800_000_000n, deliveryRate: 10n,
     },
     derivation: derivation("TaskAttemptCreated", logIndex, generation),
     projection: PROJECTION,
@@ -156,15 +253,20 @@ function taskClaim(
 function evaluationClaim(
   generation: "today" | "revised",
   logIndex: number,
-  options: { readonly requestId?: Hex; readonly verdictIndex?: number } = {},
+  options: {
+    readonly requestId?: Hex;
+    readonly verdictIndex?: number;
+    readonly attemptIndex?: number;
+  } = {},
 ): ObservationMarketplaceEvent {
   const requestId = options.requestId ?? (`0x${"e".repeat(64)}` as Hex);
   const verdictIndex = options.verdictIndex ?? 0;
+  const attemptIndex = options.attemptIndex ?? 3;
   if (generation === "today") {
     return {
       event: "EvaluationAttemptCreated",
       facts: {
-        taskId: 42n, attemptIndex: 3, verdictIndex, requestId,
+        taskId: 42n, attemptIndex, verdictIndex, requestId,
         evaluator: OPERATOR, priorityMech: OPERATOR, deliveryRate: 10n,
       },
       derivation: derivation("EvaluationAttemptCreated", logIndex, generation),
@@ -175,7 +277,7 @@ function evaluationClaim(
     event: "EvaluationAttemptCreated",
     facts: {
       evaluator: OPERATOR, priorityMech: OPERATOR, requestId,
-      taskId: 42n, attemptIndex: 3, verdictIndex,
+      taskId: 42n, attemptIndex, verdictIndex,
       attemptDeadline: 1_800_000_000n, deliveryRate: 10n,
     },
     derivation: derivation("EvaluationAttemptCreated", logIndex, generation),
@@ -183,8 +285,13 @@ function evaluationClaim(
   };
 }
 
+function evaluationParentKey(taskId: bigint, attemptIndex: number): string {
+  return `84532:${COORDINATOR.toLowerCase()}:${taskId}:${attemptIndex}`;
+}
+
 export interface MarketplaceProjectorIdentityConformanceOptions {
   readonly ports: () => AnnouncementProjectionPorts;
+  readonly incrementalPorts: () => AnnouncementProjectionPorts;
 }
 
 /**
@@ -197,7 +304,7 @@ export function describeMarketplaceProjectorIdentityConformance(
   describe("marketplace projector identity conformance (§7.110, §7.125)", () => {
     for (const generation of ["today", "revised"] as const) {
       describe(`${generation} generation`, () => {
-        test("TaskAttemptCreated unknown-task refusal preserves complete boundary", () => {
+        test("TaskAttemptCreated unknown-task refusal preserves complete boundary", async () => {
           const created = reduceMarketplaceProjection(
             [taskCreated(generation)],
             createMarketplaceProjectionState(),
@@ -208,10 +315,12 @@ export function describeMarketplaceProjectorIdentityConformance(
             derivation: { ...derivation("TaskAttemptCreated", 1, generation), txHash: `0x${"a".repeat(64)}` },
           } as ObservationMarketplaceEvent;
           const refused = reduceMarketplaceProjection([unknown], created.state);
-          expectRefusalTransition(created.state, refused, unknown, "unknown-task");
+          await expectRefusalThroughAnnounceBoundary(
+            options, created.state, refused, unknown, "unknown-task",
+          );
         });
 
-        test("TaskAttemptCreated duplicate/regressing identity refusal", () => {
+        test("TaskAttemptCreated duplicate/regressing identity refusal", async () => {
           const created = reduceMarketplaceProjection(
             [taskCreated(generation), taskClaim(generation, 1)],
             createMarketplaceProjectionState(),
@@ -220,7 +329,8 @@ export function describeMarketplaceProjectorIdentityConformance(
             ...taskClaim(generation, 1),
             derivation: { ...taskClaim(generation, 1).derivation, txHash: `0x${"b".repeat(64)}`, logIndex: 2 },
           } as ObservationMarketplaceEvent;
-          expectRefusalTransition(
+          await expectRefusalThroughAnnounceBoundary(
+            options,
             created.state,
             reduceMarketplaceProjection([duplicate], created.state),
             duplicate,
@@ -231,7 +341,8 @@ export function describeMarketplaceProjectorIdentityConformance(
             facts: { ...taskClaim(generation, 1).facts, attemptIndex: 2 },
             derivation: { ...taskClaim(generation, 1).derivation, txHash: `0x${"c".repeat(64)}`, logIndex: 3 },
           } as ObservationMarketplaceEvent;
-          expectRefusalTransition(
+          await expectRefusalThroughAnnounceBoundary(
+            options,
             created.state,
             reduceMarketplaceProjection([regressing], created.state),
             regressing,
@@ -239,7 +350,7 @@ export function describeMarketplaceProjectorIdentityConformance(
           );
         });
 
-        test("TaskAttemptCreated request-id-reused refusal", () => {
+        test("TaskAttemptCreated request-id-reused refusal", async () => {
           const created = reduceMarketplaceProjection(
             [taskCreated(generation), taskClaim(generation, 1)],
             createMarketplaceProjectionState(),
@@ -249,7 +360,8 @@ export function describeMarketplaceProjectorIdentityConformance(
             facts: { ...taskClaim(generation, 1).facts, attemptIndex: 4 },
             derivation: { ...taskClaim(generation, 1).derivation, txHash: `0x${"d".repeat(64)}`, logIndex: 4 },
           } as ObservationMarketplaceEvent;
-          expectRefusalTransition(
+          await expectRefusalThroughAnnounceBoundary(
+            options,
             created.state,
             reduceMarketplaceProjection([reused], created.state),
             reused,
@@ -258,7 +370,7 @@ export function describeMarketplaceProjectorIdentityConformance(
         });
 
         if (generation === "revised") {
-          test("TaskAttemptCreated attempt-not-live on release/expiry without parent claim", () => {
+          test("TaskAttemptCreated attempt-not-live on release/expiry without parent claim", async () => {
             const created = reduceMarketplaceProjection(
               [taskCreated(generation)],
               createMarketplaceProjectionState(),
@@ -270,7 +382,8 @@ export function describeMarketplaceProjectorIdentityConformance(
                 derivation: derivation(lifecycleEvent, 1, generation),
                 projection: PROJECTION,
               } as ObservationMarketplaceEvent;
-              expectRefusalTransition(
+              await expectRefusalThroughAnnounceBoundary(
+                options,
                 created.state,
                 reduceMarketplaceProjection([lifecycle], created.state),
                 lifecycle,
@@ -280,13 +393,14 @@ export function describeMarketplaceProjectorIdentityConformance(
           });
         }
 
-        test("EvaluationAttemptCreated refuses before parent TaskAttemptCreated", () => {
+        test("EvaluationAttemptCreated refuses before parent TaskAttemptCreated", async () => {
           const created = reduceMarketplaceProjection(
             [taskCreated(generation)],
             createMarketplaceProjectionState(),
           );
           const evalClaim = evaluationClaim(generation, 2);
-          expectRefusalTransition(
+          await expectRefusalThroughAnnounceBoundary(
+            options,
             created.state,
             reduceMarketplaceProjection([evalClaim], created.state),
             evalClaim,
@@ -295,7 +409,7 @@ export function describeMarketplaceProjectorIdentityConformance(
         });
 
         if (generation === "revised") {
-          test("EvaluationAttemptCreated refuses after parent release/expiry", () => {
+          test("EvaluationAttemptCreated refuses after parent release/expiry", async () => {
             const afterLifecycle = reduceMarketplaceProjection(
               [
                 taskCreated(generation),
@@ -312,7 +426,8 @@ export function describeMarketplaceProjectorIdentityConformance(
             const evalClaim = evaluationClaim(generation, 3, {
               requestId: `0x${"f1".repeat(32)}` as Hex,
             });
-            expectRefusalTransition(
+            await expectRefusalThroughAnnounceBoundary(
+              options,
               afterLifecycle.state,
               reduceMarketplaceProjection([evalClaim], afterLifecycle.state),
               evalClaim,
@@ -321,7 +436,7 @@ export function describeMarketplaceProjectorIdentityConformance(
           });
         }
 
-        test("EvaluationAttemptCreated refuses on closed task with fresh request ID", () => {
+        test("EvaluationAttemptCreated refuses on closed task with fresh request ID", async () => {
           const terminal = generation === "today"
             ? ({
                 event: "VerdictDeliveryClaimed",
@@ -345,7 +460,8 @@ export function describeMarketplaceProjectorIdentityConformance(
           const evalClaim = evaluationClaim(generation, 3, {
             requestId: `0x${"f2".repeat(32)}` as Hex,
           });
-          expectRefusalTransition(
+          await expectRefusalThroughAnnounceBoundary(
+            options,
             closed.state,
             reduceMarketplaceProjection([evalClaim], closed.state),
             evalClaim,
@@ -353,7 +469,7 @@ export function describeMarketplaceProjectorIdentityConformance(
           );
         });
 
-        test("EvaluationAttemptCreated duplicate/regressing verdict slots and request-id reuse", () => {
+        test("EvaluationAttemptCreated duplicate/regressing verdict slots and request-id reuse", async () => {
           const admitted = reduceMarketplaceProjection(
             [
               taskCreated(generation),
@@ -371,7 +487,8 @@ export function describeMarketplaceProjectorIdentityConformance(
               verdictIndex: 2,
             }),
           } as ObservationMarketplaceEvent;
-          expectRefusalTransition(
+          await expectRefusalThroughAnnounceBoundary(
+            options,
             admitted.state,
             reduceMarketplaceProjection([duplicateVerdict], admitted.state),
             duplicateVerdict,
@@ -383,7 +500,8 @@ export function describeMarketplaceProjectorIdentityConformance(
               verdictIndex: 1,
             }),
           } as ObservationMarketplaceEvent;
-          expectRefusalTransition(
+          await expectRefusalThroughAnnounceBoundary(
+            options,
             admitted.state,
             reduceMarketplaceProjection([regressingVerdict], admitted.state),
             regressingVerdict,
@@ -393,7 +511,8 @@ export function describeMarketplaceProjectorIdentityConformance(
             requestId: `0x${"a2".repeat(32)}` as Hex,
             verdictIndex: 3,
           });
-          expectRefusalTransition(
+          await expectRefusalThroughAnnounceBoundary(
+            options,
             admitted.state,
             reduceMarketplaceProjection([crossFamilyReuse], admitted.state),
             crossFamilyReuse,
@@ -417,7 +536,8 @@ export function describeMarketplaceProjectorIdentityConformance(
               verdictIndex: 0,
             }),
           } as ObservationMarketplaceEvent;
-          expectRefusalTransition(
+          await expectRefusalThroughAnnounceBoundary(
+            options,
             admitted.state,
             reduceMarketplaceProjection([duplicate], admitted.state),
             duplicate,
@@ -431,6 +551,120 @@ export function describeMarketplaceProjectorIdentityConformance(
             availabilityOpenedLogIds: [],
             refusals: [],
           });
+        });
+
+        test("EvaluationAttemptCreated parent-attempt identity isolation", async () => {
+          const task = taskCreated(generation, { twoLiveParents: true });
+          const parent3 = taskClaim(generation, 1, {
+            attemptIndex: 3,
+            requestId: `0x${"p3".repeat(32)}` as Hex,
+          });
+          const parent4 = taskClaim(generation, 2, {
+            attemptIndex: 4,
+            requestId: `0x${"p4".repeat(32)}` as Hex,
+          });
+          const afterParents = reduceMarketplaceProjection(
+            [task, parent3, parent4],
+            createMarketplaceProjectionState(),
+          );
+          const eval3 = evaluationClaim(generation, 3, {
+            attemptIndex: 3,
+            requestId: `0x${"e3".repeat(32)}` as Hex,
+            verdictIndex: 0,
+          });
+          const eval4 = evaluationClaim(generation, 4, {
+            attemptIndex: 4,
+            requestId: `0x${"e4".repeat(32)}` as Hex,
+            verdictIndex: 0,
+          });
+          const afterEval3 = reduceMarketplaceProjection([eval3], afterParents.state);
+          expect(afterEval3.refusals).toEqual([]);
+          expect(afterEval3.observations).toEqual([]);
+          expect(afterEval3.events).toEqual([eval3]);
+          const afterBoth = reduceMarketplaceProjection([eval4], afterEval3.state);
+          expect(afterBoth.refusals).toEqual([]);
+          expect(afterBoth.observations).toEqual([]);
+          expect(afterBoth.events).toEqual([eval4]);
+
+          const key3 = evaluationParentKey(42n, 3);
+          const key4 = evaluationParentKey(42n, 4);
+          expect(key3).toMatch(/:42:3$/);
+          expect(key4).toMatch(/:42:4$/);
+          expect(afterBoth.state.evaluationIdentities[key3]).toEqual({
+            seenVerdictIndices: { "0": true },
+            highestVerdictIndex: 0,
+          });
+          expect(afterBoth.state.evaluationIdentities[key4]).toEqual({
+            seenVerdictIndices: { "0": true },
+            highestVerdictIndex: 0,
+          });
+          expect(afterBoth.state.evaluationIdentities[key3]!.seenVerdictIndices)
+            .not.toBe(afterBoth.state.evaluationIdentities[key4]!.seenVerdictIndices);
+
+          const duplicate3 = {
+            ...evaluationClaim(generation, 5, {
+              attemptIndex: 3,
+              requestId: `0x${"d3".repeat(32)}` as Hex,
+              verdictIndex: 0,
+            }),
+            derivation: {
+              ...evaluationClaim(generation, 5, {
+                attemptIndex: 3,
+                requestId: `0x${"d3".repeat(32)}` as Hex,
+                verdictIndex: 0,
+              }).derivation,
+              txHash: `0x${"x3".repeat(32)}` as Hex,
+            },
+          } as ObservationMarketplaceEvent;
+          const refused = reduceMarketplaceProjection([duplicate3], afterBoth.state);
+          await expectRefusalThroughAnnounceBoundary(
+            options, afterBoth.state, refused, duplicate3, "attempt-identity-regressing",
+          );
+          expect(refused.state.evaluationIdentities[key3]).toEqual(
+            afterBoth.state.evaluationIdentities[key3],
+          );
+          expect(refused.state.evaluationIdentities[key4]).toEqual(
+            afterBoth.state.evaluationIdentities[key4],
+          );
+        });
+
+        test("EvaluationAttemptCreated accepted path preserves caller state (§7.72)", async () => {
+          const afterParent = reduceMarketplaceProjection(
+            [taskCreated(generation), taskClaim(generation, 1)],
+            createMarketplaceProjectionState(),
+          );
+          const callerState = afterParent.state;
+          const snapshotBefore = stringifyState(callerState);
+
+          const eval0 = evaluationClaim(generation, 2, {
+            requestId: `0x${"v0".repeat(32)}` as Hex,
+            verdictIndex: 0,
+          });
+          const result0 = reduceMarketplaceProjection([eval0], callerState);
+          expect(stringifyState(callerState)).toBe(snapshotBefore);
+
+          const parentKey = evaluationParentKey(42n, 3);
+          expect(result0.state.evaluationIdentities).not.toBe(callerState.evaluationIdentities);
+          const parentIdentity0 = result0.state.evaluationIdentities[parentKey]!;
+          const seen0 = parentIdentity0.seenVerdictIndices;
+
+          const eval1 = evaluationClaim(generation, 3, {
+            requestId: `0x${"v1".repeat(32)}` as Hex,
+            verdictIndex: 1,
+          });
+          const result1 = reduceMarketplaceProjection([eval1], result0.state);
+          expect(seen0).toEqual({ "0": true });
+          expect(result1.state.evaluationIdentities).not.toBe(result0.state.evaluationIdentities);
+          expect(result1.state.evaluationIdentities[parentKey]).not.toBe(parentIdentity0);
+          expect(result1.state.evaluationIdentities[parentKey]!.seenVerdictIndices).not.toBe(seen0);
+          expect(result1.state.evaluationIdentities[parentKey]!.seenVerdictIndices).toEqual({
+            "0": true,
+            "1": true,
+          });
+
+          const announced = await projectAnnouncements(result1, options.ports());
+          expect(announced.announcements).toEqual([]);
+          expect(announced.entries).toEqual([]);
         });
 
         test("EvaluationAttemptCreated accepted path emits no observations through announce boundary", async () => {
@@ -448,6 +682,9 @@ export function describeMarketplaceProjectorIdentityConformance(
           expect(transition.events).toEqual([evalClaim]);
           const announced = await projectAnnouncements(transition, options.ports());
           expect(announced.announcements).toEqual([]);
+          expect(announced.entries).toEqual([]);
+          expect(announced.pages).toEqual([]);
+          expect(announced.refusals).toEqual([]);
         });
       });
     }
