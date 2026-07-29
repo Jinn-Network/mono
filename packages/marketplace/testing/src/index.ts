@@ -7,10 +7,12 @@ export {
 } from "./projector-conformance.js";
 export type {
   DerivationOutcome,
+  MarketplaceAttemptReorgRun,
   MarketplaceProjectorConformanceRun,
   MarketplaceProjectorConformanceSubject,
   MarketplaceProjectorFixture,
   MarketplaceProjectorReorgFixture,
   MarketplaceProjectorReorgRun,
+  MarketplaceProjectorReplayRun,
   ProjectedDerivation,
 } from "./projector-conformance.js";

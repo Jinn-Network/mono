@@ -8,7 +8,9 @@ import { describe, expect, test } from "vitest";
 import type { DerivationAnnotation } from "./derivation.js";
 import type { MarketplaceEvent } from "./events.js";
 import {
+  createMarketplaceProjectionState,
   projectObservations,
+  reduceMarketplaceProjection,
   type ObservationMarketplaceEvent,
   type ObservationProjectionContext,
 } from "./observe.js";
@@ -76,6 +78,8 @@ function base(
   subject: string,
   sequence: bigint,
   logIndex: number,
+  event: string,
+  generation: "today" | "revised" = "today",
 ) {
   return {
     specversion: "1.0",
@@ -86,6 +90,7 @@ function base(
     datacontenttype: "application/json",
     sequence: sequence.toString().padStart(16, "0"),
     taskdigest: TASK_DIGEST,
+    derivation: derivation(event, logIndex, generation),
     type,
   };
 }
@@ -155,11 +160,11 @@ describe("projectObservations", () => {
 
     expect(projectObservations([task, claim])).toEqual([
       {
-        ...base("network.jinn.task-execution.submission-accepted.v1", SUBMISSION, 1n, 0),
+        ...base("network.jinn.task-execution.submission-accepted.v1", SUBMISSION, 1n, 0, "TaskCreated"),
         data: { submission: SUBMISSION, task: TASK_DIGEST },
       },
       {
-        ...base("network.jinn.task-execution.attempt-engaged.v1", ATTEMPT, 2n, 1),
+        ...base("network.jinn.task-execution.attempt-engaged.v1", ATTEMPT, 1n, 1, "TaskAttemptCreated"),
         data: {
           attempt: ATTEMPT,
           task: TASK_DIGEST,
@@ -179,7 +184,7 @@ describe("projectObservations", () => {
 
   test("emits delivery-recorded only when the joined today sha256↔keccak correspondence is exact", () => {
     expect(projectObservations([claim, deliver(), solutionClaimed]).at(-1)).toEqual({
-      ...base("network.jinn.task-execution.delivery-recorded.v1", ATTEMPT, 2n, 3),
+      ...base("network.jinn.task-execution.delivery-recorded.v1", ATTEMPT, 2n, 3, "SolutionDeliveryClaimed"),
       data: { digest: `sha256:${"a".repeat(64)}` },
     });
 
@@ -189,7 +194,7 @@ describe("projectObservations", () => {
       solutionClaimed,
     ]);
     expect(mismatch.at(-1)).toEqual({
-      ...base("network.jinn.task-execution.attempt-terminal.v1", ATTEMPT, 2n, 3),
+      ...base("network.jinn.task-execution.attempt-terminal.v1", ATTEMPT, 2n, 3, "SolutionDeliveryClaimed"),
       data: {
         state: "rejected",
         category: "digest-divergence",
@@ -245,7 +250,7 @@ describe("projectObservations", () => {
     expect(
       projectObservations([revisedClaim, operationalMechJoin, revisedSolution]).at(-1),
     ).toEqual({
-      ...base("network.jinn.task-execution.delivery-recorded.v1", ATTEMPT, 2n, 3),
+      ...base("network.jinn.task-execution.delivery-recorded.v1", ATTEMPT, 2n, 3, "SolutionDeliveryClaimed", "revised"),
       data: { digest: `sha256:${"d".repeat(64)}` },
     });
   });
@@ -373,5 +378,121 @@ describe("projectObservations", () => {
     expect(observations.map((item) => ProtocolObservationSchema.safeParse(item).success)).toEqual(
       observations.map(() => true),
     );
+  });
+
+  test("caller-owned reducer state makes duplicate log replay emit nothing", () => {
+    const initial = createMarketplaceProjectionState();
+    const first = reduceMarketplaceProjection([claim], initial);
+    const replay = reduceMarketplaceProjection([claim], first.state);
+
+    expect(first.events).toEqual([claim]);
+    expect(first.observations).toHaveLength(1);
+    expect(replay.events).toEqual([]);
+    expect(replay.observations).toEqual([]);
+    expect(replay.state).toEqual(first.state);
+    expect(initial).toEqual(createMarketplaceProjectionState());
+  });
+
+  test("full replay equals ordered split batches and carries a Deliver join across the boundary", () => {
+    const events = [claim, deliver(), solutionClaimed];
+    const full = reduceMarketplaceProjection(
+      events,
+      createMarketplaceProjectionState(),
+    );
+
+    const one = reduceMarketplaceProjection(
+      [claim],
+      createMarketplaceProjectionState(),
+    );
+    const two = reduceMarketplaceProjection([deliver()], one.state);
+    const three = reduceMarketplaceProjection([solutionClaimed], two.state);
+
+    expect([
+      ...one.observations,
+      ...two.observations,
+      ...three.observations,
+    ]).toEqual(full.observations);
+    expect(three.state).toEqual(full.state);
+    expect(three.observations).toEqual([
+      {
+        ...base("network.jinn.task-execution.delivery-recorded.v1", ATTEMPT, 2n, 3, "SolutionDeliveryClaimed"),
+        data: { digest: `sha256:${"a".repeat(64)}` },
+      },
+    ]);
+  });
+
+  test("capacity exhaustion and top-up survive ordered batch boundaries with monotonic subject sequences", () => {
+    const task = projectable({
+      event: "TaskCreated",
+      facts: {
+        creator: CREATOR,
+        taskCidDigest: `0x${"7".repeat(64)}`,
+        submissionDigest: `0x${"9".repeat(64)}`,
+        taskId: 42n,
+        maxTotal: 1,
+        maxConcurrent: 1,
+        submissionDeadline: 1_800_000_000n,
+        closeAt: 0n,
+        responseTimeout: 3600n,
+        minVerdicts: 1,
+        requireDistinctEvaluator: true,
+        solutionMaxDeliveryRate: 10n,
+        verdictMaxDeliveryRate: 20n,
+        solutionBudget: 100n,
+        verdictBudget: 20n,
+      },
+      derivation: derivation("TaskCreated", 10, "revised"),
+    });
+    const firstClaim = projectable({
+      event: "TaskAttemptCreated",
+      facts: {
+        operator: OPERATOR,
+        priorityMech: OPERATOR,
+        requestId: REQUEST_ID,
+        taskId: 42n,
+        attemptIndex: 3,
+        attemptDeadline: 1_800_000_000n,
+        deliveryRate: 10n,
+      },
+      derivation: derivation("TaskAttemptCreated", 11, "revised"),
+    });
+    const topUp = projectable({
+      event: "AttemptsAdded",
+      facts: { taskId: 42n, creator: CREATOR, added: 1, newMaxTotal: 2 },
+      derivation: derivation("AttemptsAdded", 12, "revised"),
+    });
+    const secondClaim = projectable({
+      event: "TaskAttemptCreated",
+      facts: {
+        operator: OPERATOR,
+        priorityMech: OPERATOR,
+        requestId: `0x${"c".repeat(64)}`,
+        taskId: 42n,
+        attemptIndex: 4,
+        attemptDeadline: 1_800_000_100n,
+        deliveryRate: 10n,
+      },
+      derivation: derivation("TaskAttemptCreated", 13, "revised"),
+    });
+
+    const one = reduceMarketplaceProjection([task], createMarketplaceProjectionState());
+    const two = reduceMarketplaceProjection([firstClaim], one.state);
+    const three = reduceMarketplaceProjection([topUp], two.state);
+    const four = reduceMarketplaceProjection([secondClaim], three.state);
+    const submissionClosures = [...two.observations, ...four.observations]
+      .filter(({ type }) =>
+        type === "network.jinn.task-execution.submission-closed.v1"
+      );
+
+    expect(submissionClosures.map(({ sequence, data }) => ({ sequence, data }))).toEqual([
+      { sequence: "0000000000000002", data: { reason: "capacity" } },
+      { sequence: "0000000000000003", data: { reason: "capacity" } },
+    ]);
+    expect(four.state.tasks).toEqual({
+      "84532:0x1111111111111111111111111111111111111111:42": {
+        engaged: 2,
+        maxTotal: 2,
+      },
+    });
   });
 });

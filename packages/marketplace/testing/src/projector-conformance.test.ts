@@ -8,14 +8,24 @@ import {
   verifyItem,
   type AnnouncedItem,
   type FactsRecompute,
+  type SourceHead,
 } from "@jinn-network/record-discovery-protocol";
 import type { BlobStore } from "@jinn-network/record-discovery-serve";
+import { MECH_ABI } from "@jinn-network/marketplace-binding";
+import {
+  foldObservations,
+  type ProtocolObservation,
+} from "@jinn-network/task-execution-protocol";
 import {
   REVISED_PROJECTOR_EVENTS_ABI,
   appendSignedReorgCorrection,
+  createMarketplaceProjectionState,
   decodeMarketplaceLogs,
+  foldCanonicalMarketplaceObservations,
   projectAnnouncements,
-  projectObservations,
+  projectReorgObservation,
+  reduceMarketplaceProjection,
+  selectCanonicalMarketplaceObservations,
   type AnnouncementProjectionPorts,
   type MarketplaceRawLog,
   type ObservationMarketplaceEvent,
@@ -52,6 +62,8 @@ interface FixtureLog {
 
 const encoder = new TextEncoder();
 const SUBMISSION_BYTES = encoder.encode('{"record":"submission"}');
+const DELIVERY_BYTES = encoder.encode('{"record":"delivery"}');
+const EVALUATION_BYTES = encoder.encode('{"record":"evaluation-delivery"}');
 
 function asFixtureLogs(fixture: {
   readonly logs: readonly unknown[];
@@ -60,7 +72,7 @@ function asFixtureLogs(fixture: {
 }
 
 function abiEvent(name: string): AbiEvent {
-  const event = REVISED_PROJECTOR_EVENTS_ABI.find((item) =>
+  const event = [...REVISED_PROJECTOR_EVENTS_ABI, ...MECH_ABI].find((item) =>
     item.name === name
   );
   if (event === undefined) throw new Error(`unknown fixture event: ${name}`);
@@ -136,7 +148,23 @@ function enrichedEvents(
   })) as ObservationMarketplaceEvent[];
 }
 
-function ports(): AnnouncementProjectionPorts {
+interface AnnouncementHostState {
+  previousHead?: SourceHead;
+  previousEntryDigest?: `sha256:${string}`;
+  nextSequence: bigint;
+  nextArchivePage: bigint;
+  priorAnnouncements: Map<"submission" | "delivery", string>;
+}
+
+function createAnnouncementHostState(): AnnouncementHostState {
+  return {
+    nextSequence: 1n,
+    nextArchivePage: 1n,
+    priorAnnouncements: new Map(),
+  };
+}
+
+function ports(host = createAnnouncementHostState()): AnnouncementProjectionPorts {
   const store: BlobStore = { async put() {} };
   const signer: ScopedDiscoverySigner = {
     scope: DISCOVERY_SIGNING_SCOPE,
@@ -146,13 +174,22 @@ function ports(): AnnouncementProjectionPorts {
   };
   const factsRecompute: FactsRecompute = {
     get(kind) {
-      if (kind !== RECORD_KINDS.submission) return undefined;
-      return async () => ({
-        taskDigest: `sha256:${"7".repeat(64)}`,
-        taskProfileUri: "https://jinn.network/task-profiles/repository-work/1.0",
-        requesterIri: "did:key:zRequesterFixture",
-        deadline: "2026-07-30T12:00:00Z",
-      });
+      if (kind === RECORD_KINDS.submission) {
+        return async () => ({
+          taskDigest: `sha256:${"7".repeat(64)}`,
+          taskProfileUri: "https://jinn.network/task-profiles/repository-work/1.0",
+          requesterIri: "did:key:zRequesterFixture",
+          deadline: "2026-07-30T12:00:00Z",
+        });
+      }
+      if (kind === RECORD_KINDS.delivery) {
+        return async () => ({
+          taskDigest: `sha256:${"7".repeat(64)}`,
+          attemptUri: "urn:uuid:2868f518-bc8c-5703-992d-51afdfb53e4b",
+          outcome: "fulfilled",
+        });
+      }
+      return undefined;
     },
   };
   return {
@@ -165,43 +202,161 @@ function ports(): AnnouncementProjectionPorts {
     clock: { now: () => new Date("2026-07-29T12:00:01Z") },
     factsRecompute,
     referencedBytes: { async fetch() { return undefined; } },
+    ...(host.previousHead === undefined
+      ? {}
+      : {
+          previousHead: host.previousHead,
+          previousEntryDigest: host.previousEntryDigest!,
+          initialSequence: host.nextSequence,
+          async appendArchiveEntries() {
+            const page = host.nextArchivePage.toString().padStart(16, "0");
+            host.nextArchivePage += 1n;
+            return { pages: [page] };
+          },
+        }),
+    async resolvePriorAnnouncementId(_event, role) {
+      return host.priorAnnouncements.get(role);
+    },
     async resolveRecord(_event, role) {
-      if (role !== "submission") {
-        throw new Error(`fixture has no ${role} record`);
+      if (role === "submission") {
+        return {
+          kind: RECORD_KINDS.submission,
+          bytes: SUBMISSION_BYTES,
+          mediaType: "application/vnd.jinn.task-execution.submission.v1+json",
+        };
       }
       return {
-        kind: RECORD_KINDS.submission,
-        bytes: SUBMISSION_BYTES,
-        mediaType: "application/vnd.jinn.task-execution.submission.v1+json",
+        kind: RECORD_KINDS.delivery,
+        bytes: role === "evaluation-delivery"
+          ? EVALUATION_BYTES
+          : DELIVERY_BYTES,
+        mediaType: "application/vnd.jinn.task-execution.delivery.v1+json",
       };
     },
   };
 }
 
-async function projectFixture(
+function updateAnnouncementHost(
+  host: AnnouncementHostState,
+  projected: Awaited<ReturnType<typeof projectAnnouncements>>,
+): void {
+  for (const announcement of projected.announcements) {
+    if (announcement.action === "available") {
+      const role = announcement.record.kind === RECORD_KINDS.submission
+        ? "submission"
+        : "delivery";
+      host.priorAnnouncements.set(role, announcement.announcementId);
+      continue;
+    }
+    for (const [role, id] of host.priorAnnouncements) {
+      if (id === announcement.retracts) host.priorAnnouncements.delete(role);
+    }
+  }
+  const last = projected.entries.at(-1)?.entry;
+  if (projected.head !== undefined && last !== undefined) {
+    host.previousHead = projected.head;
+    host.previousEntryDigest = sealJson(last).digest;
+    host.nextSequence = BigInt(last.sequence) + 1n;
+  }
+}
+
+function batchEvents(
+  events: readonly ObservationMarketplaceEvent[],
+  batchSizes?: readonly number[],
+): ObservationMarketplaceEvent[][] {
+  if (batchSizes === undefined) return [[...events]];
+  if (
+    batchSizes.some((size) => !Number.isSafeInteger(size) || size <= 0)
+    || batchSizes.reduce((sum, size) => sum + size, 0) !== events.length
+  ) {
+    throw new Error("batchSizes must be positive safe integers covering every fixture log");
+  }
+  const batches: ObservationMarketplaceEvent[][] = [];
+  let offset = 0;
+  for (const size of batchSizes) {
+    batches.push(events.slice(offset, offset + size));
+    offset += size;
+  }
+  return batches;
+}
+
+function refuses(operation: () => unknown): boolean {
+  try {
+    operation();
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+async function projectFixtureInternal(
   fixture: MarketplaceProjectorFixture | MarketplaceProjectorReorgFixture,
+  options: { readonly batchSizes?: readonly number[] } = {},
 ) {
   const events = enrichedEvents(fixture);
-  const observations = projectObservations(events);
-  const projected = await projectAnnouncements(events, ports());
-  return { events, observations, projected };
+  let state = createMarketplaceProjectionState();
+  const host = createAnnouncementHostState();
+  const observations: unknown[] = [];
+  const announcements: unknown[] = [];
+  const derivations: ProjectedDerivation[] = [];
+  const projectedBatches: Array<Awaited<ReturnType<typeof projectAnnouncements>>> = [];
+
+  for (const batch of batchEvents(events, options.batchSizes)) {
+    const transition = reduceMarketplaceProjection(batch, state);
+    const projected = await projectAnnouncements(transition, ports(host));
+    observations.push(...transition.observations);
+    announcements.push(...projected.announcements);
+    derivations.push(...transition.events.map((event) => event.derivation));
+    projectedBatches.push(projected);
+    state = transition.state;
+    updateAnnouncementHost(host, projected);
+  }
+
+  const publicRun = {
+    observations,
+    announcements,
+    derivations,
+    observationBytes: encoder.encode(JSON.stringify(observations)),
+    announcementBytes: encoder.encode(JSON.stringify(announcements)),
+    stateBytes: encoder.encode(JSON.stringify(state)),
+  };
+  return {
+    events,
+    state,
+    host,
+    projectedBatches,
+    publicRun,
+  };
 }
 
 const subject: MarketplaceProjectorConformanceSubject = {
-  async project(fixture) {
-    const { events, observations, projected } = await projectFixture(fixture);
-    const announcements = projected.announcements;
+  async project(fixture, options) {
+    return (await projectFixtureInternal(fixture, options)).publicRun;
+  },
+
+  async replay(fixture) {
+    const first = await projectFixtureInternal(fixture);
+    const replayTransition = reduceMarketplaceProjection(
+      first.events,
+      first.state,
+    );
+    const replayAnnouncements = await projectAnnouncements(
+      replayTransition,
+      ports(first.host),
+    );
     return {
-      observations,
-      announcements,
-      derivations: events.map((event) => event.derivation),
-      observationBytes: encoder.encode(JSON.stringify(observations)),
-      announcementBytes: encoder.encode(JSON.stringify(announcements)),
+      first: first.publicRun,
+      replayObservations: replayTransition.observations,
+      replayAnnouncements: replayAnnouncements.announcements,
+      stateBytesAfterReplay: encoder.encode(
+        JSON.stringify(replayTransition.state),
+      ),
     };
   },
 
   async projectReorg(fixture) {
-    const { projected } = await projectFixture(fixture);
+    const run = await projectFixtureInternal(fixture);
+    const projected = run.projectedBatches[0]!;
     const prior = projected.announcements.find((announcement) =>
       announcement.action === "available"
     );
@@ -219,6 +374,23 @@ const subject: MarketplaceProjectorConformanceSubject = {
     });
     const after = sealJson(priorEntry);
     const correction = sealJson(signed.entry);
+    const accepted = run.publicRun.observations.find((observation) =>
+      typeof observation === "object"
+      && observation !== null
+      && "type" in observation
+      && observation.type
+        === "network.jinn.task-execution.submission-accepted.v1"
+    ) as ProtocolObservation | undefined;
+    if (accepted === undefined) {
+      throw new Error(`fixture ${fixture.name} projected no Submission acceptance`);
+    }
+    const tepCorrection = projectReorgObservation({
+      priorObservation: accepted,
+      derivation: run.events[0]!.derivation,
+      reorgedBlockHash: fixture.reorg.blockHash,
+      timestamp: fixture.reorg.timestamp,
+      state: run.state,
+    });
     return {
       priorEntry,
       priorEntryBytesBefore: before.bytes,
@@ -228,6 +400,170 @@ const subject: MarketplaceProjectorConformanceSubject = {
       correctionEntryBytes: correction.bytes,
       expectedPreviousDigest: before.digest,
       signatureCount: signed.signature?.signatures.length ?? 0,
+      tepCorrections: tepCorrection.observation === undefined
+        ? []
+        : [tepCorrection.observation],
+    };
+  },
+
+  async projectAttemptReorg(fixture) {
+    const events = enrichedEvents(fixture);
+    const verdict = events.find((event) =>
+      event.event === "VerdictDeliveryClaimed"
+    );
+    if (verdict === undefined) {
+      throw new Error(`fixture ${fixture.name} needs a claim and later verdict`);
+    }
+    const beforeReorg = reduceMarketplaceProjection(
+      events,
+      createMarketplaceProjectionState(),
+    );
+    const engaged = beforeReorg.observations.find((observation) =>
+      observation.type === "network.jinn.task-execution.attempt-engaged.v1"
+    );
+    const prior = beforeReorg.observations.find((observation) =>
+      observation.type === "network.jinn.task-execution.attempt-terminal.v1"
+      && observation.derivation.event === "VerdictDeliveryClaimed"
+    );
+    if (engaged === undefined || prior === undefined) {
+      throw new Error(`fixture ${fixture.name} projected no engaged/terminal Attempt`);
+    }
+    const priorBytesBefore = encoder.encode(JSON.stringify(prior));
+    const corrected = projectReorgObservation({
+      priorObservation: prior,
+      derivation: prior.derivation,
+      reorgedBlockHash: prior.derivation.blockHash,
+      timestamp: "2026-07-29T12:06:00Z",
+      state: beforeReorg.state,
+    });
+    if (
+      corrected.observation === undefined
+      || corrected.observation.type
+        !== "network.jinn.task-execution.attempt-terminal.v1"
+    ) {
+      throw new Error(`fixture ${fixture.name} projected no lost correction`);
+    }
+    const laterEvent: ObservationMarketplaceEvent = {
+      ...verdict,
+      derivation: {
+        ...verdict.derivation,
+        blockNumber: verdict.derivation.blockNumber + 1,
+        blockHash: `0x${"8".repeat(64)}`,
+        txHash: `0x${"9".repeat(64)}`,
+      },
+      projection: {
+        ...verdict.projection,
+        timestamp: "2026-07-29T12:10:00Z",
+      },
+    };
+    const later = reduceMarketplaceProjection([laterEvent], corrected.state);
+    const laterTerminal = later.observations.find((observation) =>
+      observation.type === "network.jinn.task-execution.attempt-terminal.v1"
+    );
+    if (
+      laterTerminal === undefined
+      || laterTerminal.type
+        !== "network.jinn.task-execution.attempt-terminal.v1"
+    ) {
+      throw new Error(`fixture ${fixture.name} projected no later terminal`);
+    }
+    const raw = [engaged, prior, corrected.observation];
+    const rawBytes = raw.map((observation) => JSON.stringify(observation));
+    const orphaned = new Set([prior.derivation.blockHash]);
+    const canonical = selectCanonicalMarketplaceObservations(raw, orphaned);
+    let missingProvenanceRefused = false;
+    const missing = { ...engaged } as ProtocolObservation;
+    delete (missing as { derivation?: unknown }).derivation;
+    try {
+      selectCanonicalMarketplaceObservations([missing], new Set());
+    } catch {
+      missingProvenanceRefused = true;
+    }
+    const duplicateTarget = structuredClone(prior);
+    const wrongSource = {
+      ...corrected.observation,
+      source: `${corrected.observation.source}:wrong`,
+    } as ProtocolObservation;
+    const wrongSubject = {
+      ...corrected.observation,
+      subject: `${corrected.observation.subject}:wrong`,
+    } as ProtocolObservation;
+    const wrongTargetBlock = {
+      ...prior,
+      derivation: {
+        ...prior.derivation,
+        blockHash: `0x${"a".repeat(64)}`,
+      },
+    } as ProtocolObservation;
+    const invalidCorrectionsRefused = {
+      absentTarget: refuses(() =>
+        selectCanonicalMarketplaceObservations(
+          [corrected.observation!],
+          orphaned,
+        )
+      ),
+      duplicateTarget: refuses(() =>
+        selectCanonicalMarketplaceObservations(
+          [engaged, prior, duplicateTarget, corrected.observation!],
+          orphaned,
+        )
+      ),
+      nonOrphanedHash: refuses(() =>
+        selectCanonicalMarketplaceObservations(raw, new Set())
+      ),
+      wrongSource: refuses(() =>
+        selectCanonicalMarketplaceObservations(
+          [engaged, prior, wrongSource],
+          orphaned,
+        )
+      ),
+      wrongSubject: refuses(() =>
+        selectCanonicalMarketplaceObservations(
+          [engaged, prior, wrongSubject],
+          orphaned,
+        )
+      ),
+      wrongTargetBlock: refuses(() =>
+        selectCanonicalMarketplaceObservations(
+          [engaged, wrongTargetBlock, corrected.observation!],
+          orphaned,
+        )
+      ),
+      mismatchedDerivation: refuses(() =>
+        projectReorgObservation({
+          priorObservation: prior,
+          derivation: {
+            ...prior.derivation,
+            event: "TaskAttemptCreated",
+          },
+          reorgedBlockHash: prior.derivation.blockHash,
+          timestamp: "2026-07-29T12:06:00Z",
+          state: beforeReorg.state,
+        })
+      ),
+    };
+    return {
+      priorObservation: prior,
+      priorBytesBefore,
+      priorBytesAfter: encoder.encode(JSON.stringify(prior)),
+      lostObservation: corrected.observation,
+      laterTerminal,
+      rawFolded: foldObservations(raw),
+      canonicalLostFolded: foldCanonicalMarketplaceObservations(
+        raw,
+        orphaned,
+      ),
+      folded: foldCanonicalMarketplaceObservations(
+        [...raw, laterTerminal],
+        orphaned,
+      ),
+      canonicalPreservedRaw:
+        canonical[0] === engaged
+        && canonical[1] === corrected.observation
+        && raw.map((observation) => JSON.stringify(observation))
+          .every((bytes, index) => bytes === rawBytes[index]),
+      missingProvenanceRefused,
+      invalidCorrectionsRefused,
     };
   },
 
@@ -236,18 +572,22 @@ const subject: MarketplaceProjectorConformanceSubject = {
     derivation: ProjectedDerivation,
     substrateOutcome: DerivationOutcome,
   ) {
-    const { projected } = await projectFixture(fixture);
-    const available = projected.announcements.find((announcement) =>
+    const run = await projectFixtureInternal(fixture);
+    const projected = run.projectedBatches[0]!;
+    const exactAvailable = projected.announcements.find((announcement) =>
       announcement.action === "available"
       && announcement.derivation.txHash === derivation.txHash
       && announcement.derivation.logIndex === derivation.logIndex
     );
-    if (available === undefined || available.action !== "available") {
+    if (
+      exactAvailable === undefined
+      || exactAvailable.action !== "available"
+    ) {
       throw new Error(`fixture ${fixture.name} projected no matching availability`);
     }
     const signedEntry = projected.entries.find(({ entry }) =>
       entry.announcements.some((announcement) =>
-        announcement.announcementId === available.announcementId
+        announcement.announcementId === exactAvailable.announcementId
       )
     );
     if (signedEntry === undefined) {
@@ -255,14 +595,14 @@ const subject: MarketplaceProjectorConformanceSubject = {
     }
     const sealedEntry = sealJson(signedEntry.entry);
     const item: AnnouncedItem = {
-      record: available.record,
-      facts: available.facts,
-      locations: available.locations,
+      record: exactAvailable.record,
+      facts: exactAvailable.facts,
+      locations: exactAvailable.locations,
       provenance: {
         source: signedEntry.entry.source,
         entry: sealedEntry.digest,
-        announcementId: available.announcementId,
-        derivation: available.derivation,
+        announcementId: exactAvailable.announcementId,
+        derivation: exactAvailable.derivation,
       },
     };
     const outcome = await verifyItem({

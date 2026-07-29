@@ -32,8 +32,8 @@ import {
 import type { DerivationAnnotation } from "./derivation.js";
 import type { MarketplaceEvent } from "./events.js";
 import {
-  projectObservations,
   type ObservationMarketplaceEvent,
+  type MarketplaceProjectionTransition,
 } from "./observe.js";
 
 export interface ScopedDiscoverySigner extends DsseSigner {
@@ -277,7 +277,7 @@ async function withdrawnAnnouncement(
  * the injected registry; callers cannot supply a precomputed record-facts card.
  */
 export async function projectAnnouncements(
-  events: readonly ObservationMarketplaceEvent[],
+  transition: MarketplaceProjectionTransition,
   ports: AnnouncementProjectionPorts,
 ): Promise<AnnouncementProjectionResult> {
   if (ports.signer.scope !== DISCOVERY_SIGNING_SCOPE) {
@@ -319,7 +319,7 @@ export async function projectAnnouncements(
   }
 
   const observationIds = new Set(
-    projectObservations(events).map((observation) => observation.id),
+    transition.observations.map((observation) => observation.id),
   );
   const announcements: ProjectedAnnouncement[] = [];
   const entries: SignedEntry[] = [];
@@ -327,7 +327,7 @@ export async function projectAnnouncements(
   let next = initialSequence;
   let previous = initialPrevious;
 
-  for (const event of events) {
+  for (const event of transition.events) {
     const projected: ProjectedAnnouncement[] = [];
     switch (event.event) {
       case "TaskCreated": {

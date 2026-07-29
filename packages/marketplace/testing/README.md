@@ -24,7 +24,10 @@ The package currently runs:
 - the natively-authored projector-determinism + reorg suite, reusing
   `@jinn-network/record-discovery-testing`'s `reorged` + `derivation-consistency` conformance
   vectors as building blocks (neither kit exports a profile-parameterized or
-  projector-determinism describe-function to re-expose, per Finding F6);
+  projector-determinism describe-function to re-expose, per Finding F6); its vectors cover
+  ordered split batches, replay idempotency, cross-batch joins/capacity/top-up, monotonic
+  sequences, Submission-only retraction, Attempt `lost` → genuine-terminal correction, and
+  fail-closed canonical selection for malformed or ungrounded corrections;
 - the today-generation anvil-fork escrow-lifecycle fixtures and the Attempt-URI two-party
   agreement checks (requester/operator/third-party independent computation).
 

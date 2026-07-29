@@ -16,6 +16,9 @@ export interface MarketplaceProjectorFixture {
     readonly announcementCount: number;
     readonly observationSha256: `sha256:${string}`;
     readonly announcementSha256: `sha256:${string}`;
+    readonly requiredObservationTypes?: readonly string[];
+    readonly announcementActions?: readonly string[];
+    readonly attemptReorg?: boolean;
   };
 }
 
@@ -53,6 +56,15 @@ export interface MarketplaceProjectorConformanceRun {
   readonly observationBytes: Uint8Array;
   /** Exact serialized output bytes exposed by the implementation under test. */
   readonly announcementBytes: Uint8Array;
+  /** Exact serialized final caller-owned reducer state. */
+  readonly stateBytes: Uint8Array;
+}
+
+export interface MarketplaceProjectorReplayRun {
+  readonly first: MarketplaceProjectorConformanceRun;
+  readonly replayObservations: readonly unknown[];
+  readonly replayAnnouncements: readonly unknown[];
+  readonly stateBytesAfterReplay: Uint8Array;
 }
 
 export interface MarketplaceProjectorReorgRun {
@@ -72,6 +84,60 @@ export interface MarketplaceProjectorReorgRun {
   readonly correctionEntryBytes: Uint8Array;
   readonly expectedPreviousDigest: string;
   readonly signatureCount: number;
+  /** Task-post reorg has no TEP correction under ruling §7.30. */
+  readonly tepCorrections: readonly unknown[];
+}
+
+export interface MarketplaceAttemptReorgRun {
+  readonly priorObservation: {
+    readonly source: string;
+    readonly subject: string;
+    readonly sequence: string;
+  };
+  readonly priorBytesBefore: Uint8Array;
+  readonly priorBytesAfter: Uint8Array;
+  readonly lostObservation: {
+    readonly source: string;
+    readonly subject: string;
+    readonly sequence: string;
+    readonly data: { readonly state: string };
+    readonly correction?: {
+      readonly retractsObservationId: string;
+      readonly orphanedBlockHash: string;
+    };
+  };
+  readonly laterTerminal: {
+    readonly source: string;
+    readonly subject: string;
+    readonly sequence: string;
+    readonly data: { readonly state: string };
+  };
+  readonly folded: {
+    readonly state: string;
+    readonly terminal: boolean;
+    readonly contradictory: boolean;
+  };
+  readonly rawFolded: {
+    readonly state: string;
+    readonly terminal: boolean;
+    readonly contradictory: boolean;
+  };
+  readonly canonicalLostFolded: {
+    readonly state: string;
+    readonly terminal: boolean;
+    readonly contradictory: boolean;
+  };
+  readonly canonicalPreservedRaw: boolean;
+  readonly missingProvenanceRefused: boolean;
+  readonly invalidCorrectionsRefused: {
+    readonly absentTarget: boolean;
+    readonly duplicateTarget: boolean;
+    readonly nonOrphanedHash: boolean;
+    readonly wrongSource: boolean;
+    readonly wrongSubject: boolean;
+    readonly wrongTargetBlock: boolean;
+    readonly mismatchedDerivation: boolean;
+  };
 }
 
 /**
@@ -81,10 +147,17 @@ export interface MarketplaceProjectorReorgRun {
 export interface MarketplaceProjectorConformanceSubject {
   project(
     fixture: MarketplaceProjectorFixture,
+    options?: { readonly batchSizes?: readonly number[] },
   ): Promise<MarketplaceProjectorConformanceRun>;
+  replay(
+    fixture: MarketplaceProjectorFixture,
+  ): Promise<MarketplaceProjectorReplayRun>;
   projectReorg(
     fixture: MarketplaceProjectorReorgFixture,
   ): Promise<MarketplaceProjectorReorgRun>;
+  projectAttemptReorg(
+    fixture: MarketplaceProjectorFixture,
+  ): Promise<MarketplaceAttemptReorgRun>;
   /**
    * Runs the projected annotation through the consumer's discovery item-verification path under
    * the requested substrate outcome. Reference implementations should delegate to
@@ -149,12 +222,110 @@ export function describeMarketplaceProjectorConformance(
         );
         expect(first.observationBytes).toEqual(second.observationBytes);
         expect(first.announcementBytes).toEqual(second.announcementBytes);
+        expect(first.stateBytes).toEqual(second.stateBytes);
         expect(sha256(first.observationBytes)).toBe(
           fixture.expect.observationSha256,
         );
         expect(sha256(first.announcementBytes)).toBe(
           fixture.expect.announcementSha256,
         );
+        if (fixture.expect.requiredObservationTypes !== undefined) {
+          const actual = new Set(
+            (first.observations as Array<{ type?: string }>)
+              .map((observation) => observation.type),
+          );
+          for (const required of fixture.expect.requiredObservationTypes) {
+            expect(actual.has(required), `${fixture.name}: ${required}`).toBe(true);
+          }
+        }
+        if (fixture.expect.announcementActions !== undefined) {
+          expect(
+            (first.announcements as Array<{ action?: string }>)
+              .map((announcement) => announcement.action),
+          ).toEqual(fixture.expect.announcementActions);
+        }
+        const lastSequence = new Map<string, bigint>();
+        for (
+          const observation of first.observations as Array<{
+            source: string;
+            subject: string;
+            sequence: string;
+          }>
+        ) {
+          const key = `${observation.source.length}:${observation.source}${observation.subject}`;
+          const sequence = BigInt(observation.sequence);
+          const previous = lastSequence.get(key);
+          if (previous !== undefined) {
+            expect(
+              sequence,
+              `${fixture.name}: monotonic sequence for ${observation.subject}`,
+            ).toBeGreaterThan(previous);
+          }
+          lastSequence.set(key, sequence);
+        }
+
+        const split = await projector.project(fixture, {
+          batchSizes: fixture.logs.map(() => 1),
+        });
+        expect(split.observationBytes).toEqual(first.observationBytes);
+        expect(split.announcementBytes).toEqual(first.announcementBytes);
+        expect(split.stateBytes).toEqual(first.stateBytes);
+
+        const replay = await projector.replay(fixture);
+        expect(replay.first.observationBytes).toEqual(first.observationBytes);
+        expect(replay.first.announcementBytes).toEqual(first.announcementBytes);
+        expect(replay.replayObservations).toEqual([]);
+        expect(replay.replayAnnouncements).toEqual([]);
+        expect(replay.stateBytesAfterReplay).toEqual(first.stateBytes);
+
+        if (fixture.expect.attemptReorg === true) {
+          const reorg = await projector.projectAttemptReorg(fixture);
+          expect(reorg.priorBytesAfter).toEqual(reorg.priorBytesBefore);
+          expect(reorg.lostObservation).toMatchObject({
+            source: reorg.priorObservation.source,
+            subject: reorg.priorObservation.subject,
+            data: { state: "lost" },
+            correction: {
+              retractsObservationId: expect.any(String),
+              orphanedBlockHash: expect.stringMatching(/^0x[0-9a-f]{64}$/u),
+            },
+          });
+          expect(BigInt(reorg.lostObservation.sequence)).toBeGreaterThan(
+            BigInt(reorg.priorObservation.sequence),
+          );
+          expect(reorg.laterTerminal).toMatchObject({
+            source: reorg.priorObservation.source,
+            subject: reorg.priorObservation.subject,
+            data: { state: "delivered" },
+          });
+          expect(BigInt(reorg.laterTerminal.sequence)).toBeGreaterThan(
+            BigInt(reorg.lostObservation.sequence),
+          );
+          expect(reorg.rawFolded).toMatchObject({
+            contradictory: true,
+          });
+          expect(reorg.canonicalLostFolded).toMatchObject({
+            state: "lost",
+            terminal: true,
+            contradictory: false,
+          });
+          expect(reorg.folded).toMatchObject({
+            state: "delivered",
+            terminal: true,
+            contradictory: false,
+          });
+          expect(reorg.canonicalPreservedRaw).toBe(true);
+          expect(reorg.missingProvenanceRefused).toBe(true);
+          expect(reorg.invalidCorrectionsRefused).toEqual({
+            absentTarget: true,
+            duplicateTarget: true,
+            nonOrphanedHash: true,
+            wrongSource: true,
+            wrongSubject: true,
+            wrongTargetBlock: true,
+            mismatchedDerivation: true,
+          });
+        }
       });
 
       test(`${fixture.name}: discovery derivation-consistency vectors target exact annotations`, async () => {
@@ -209,6 +380,7 @@ export function describeMarketplaceProjectorConformance(
           }),
         ]);
         expect(run.signatureCount).toBeGreaterThan(0);
+        expect(run.tepCorrections).toEqual([]);
         expect(sha256(run.correctionEntryBytes)).toBe(
           fixture.expect.correctionSha256,
         );

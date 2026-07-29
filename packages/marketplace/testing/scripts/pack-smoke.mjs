@@ -60,6 +60,7 @@ function assertArchiveShape(entries) {
     "package/dist/index.js",
     "package/dist/projector-conformance.d.ts",
     "package/dist/projector-conformance.js",
+    "package/fixtures/projector/golden-events/revised-cross-batch-flow.json",
     "package/fixtures/projector/golden-events/revised-task-created.json",
     "package/fixtures/projector/reorg-scenarios/revised-task-created-reorg.json",
   ]) {

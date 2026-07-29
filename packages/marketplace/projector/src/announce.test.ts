@@ -17,8 +17,13 @@ import {
   type ScopedDiscoverySigner,
 } from "./announce.js";
 import type {
+  MarketplaceProjectionState,
   ObservationMarketplaceEvent,
   ObservationProjectionContext,
+} from "./observe.js";
+import {
+  createMarketplaceProjectionState,
+  reduceMarketplaceProjection,
 } from "./observe.js";
 
 const COORDINATOR = "0x1111111111111111111111111111111111111111" satisfies Address;
@@ -148,6 +153,13 @@ function close(): ObservationMarketplaceEvent {
   });
 }
 
+function transition(
+  events: readonly ObservationMarketplaceEvent[],
+  state: MarketplaceProjectionState = createMarketplaceProjectionState(),
+) {
+  return reduceMarketplaceProjection(events, state);
+}
+
 function makePorts() {
   const writes: Array<{ path: string; bytes: Uint8Array; contentType: string }> = [];
   const signed: Uint8Array[] = [];
@@ -227,7 +239,7 @@ describe("projectAnnouncements", () => {
   test("publishes exact available/withdrawn actions, recomputing record facts from bytes and skipping claims", async () => {
     const { ports, writes, signed, recomputed } = makePorts();
     const events = [task(), claim(), ...deliveryEvents(), close()];
-    const result = await projectAnnouncements(events, ports);
+    const result = await projectAnnouncements(transition(events), ports);
 
     expect(result.announcements.map(({ action }) => action)).toEqual([
       "available",
@@ -291,11 +303,14 @@ describe("projectAnnouncements", () => {
 
   test("refuses to publish a Delivery announcement when the mandatory today digest join diverges", async () => {
     const { ports } = makePorts();
-    const result = await projectAnnouncements([
-      task(),
-      claim(),
-      ...deliveryEvents(`0x${"c".repeat(64)}`),
-    ], ports);
+    const result = await projectAnnouncements(
+      transition([
+        task(),
+        claim(),
+        ...deliveryEvents(`0x${"c".repeat(64)}`),
+      ]),
+      ports,
+    );
     expect(
       result.announcements.filter((announcement) =>
         announcement.action === "available"
@@ -311,7 +326,10 @@ describe("projectAnnouncements", () => {
       facts: { taskId: 42n, creator: CREATOR, added: 1, newMaxTotal: 2 },
       derivation: derivation("AttemptsAdded", 2, "revised"),
     });
-    const result = await projectAnnouncements([task(1), claim(), topUp], ports);
+    const result = await projectAnnouncements(
+      transition([task(1), claim(), topUp]),
+      ports,
+    );
 
     expect(result.announcements.map((announcement) => ({
       action: announcement.action,
@@ -340,7 +358,10 @@ describe("projectAnnouncements", () => {
       },
       derivation: derivation("VerdictDeliveryClaimed", 5),
     });
-    const result = await projectAnnouncements([task(), verdict], ports);
+    const result = await projectAnnouncements(
+      transition([task(), verdict]),
+      ports,
+    );
     expect(result.announcements.map((announcement) =>
       announcement.action === "available"
         ? [announcement.action, announcement.record.kind]
@@ -362,7 +383,7 @@ describe("projectAnnouncements", () => {
       scope: "jinn:wrong",
     };
     await expect(
-      projectAnnouncements([task()], {
+      projectAnnouncements(transition([task()]), {
         ...ports,
         signer: wrongSigner as ScopedDiscoverySigner,
       }),
@@ -371,7 +392,11 @@ describe("projectAnnouncements", () => {
 
   test("requires an append-aware archive writer for incremental publication instead of overwriting genesis pages", async () => {
     const genesisPorts = makePorts();
-    const genesis = await projectAnnouncements([task()], genesisPorts.ports);
+    const genesisTransition = transition([task()]);
+    const genesis = await projectAnnouncements(
+      genesisTransition,
+      genesisPorts.ports,
+    );
     const previousHead = genesis.head!;
     const previousEntryDigest = sealJson(genesis.entries.at(-1)!.entry).digest;
     const topUp = projectable({
@@ -381,8 +406,12 @@ describe("projectAnnouncements", () => {
     });
 
     const missingWriter = makePorts();
+    const incrementalTransition = transition(
+      [topUp],
+      genesisTransition.state,
+    );
     await expect(
-      projectAnnouncements([topUp], {
+      projectAnnouncements(incrementalTransition, {
         ...missingWriter.ports,
         previousHead,
         previousEntryDigest,
@@ -392,7 +421,7 @@ describe("projectAnnouncements", () => {
 
     const appended: Array<{ previous: typeof previousHead; sequences: string[] }> = [];
     const incremental = makePorts();
-    const projected = await projectAnnouncements([topUp], {
+    const projected = await projectAnnouncements(incrementalTransition, {
       ...incremental.ports,
       previousHead,
       previousEntryDigest,
@@ -413,5 +442,18 @@ describe("projectAnnouncements", () => {
     expect(projected.pages).toEqual(["0000000000000002"]);
     expect(projected.entries[0]!.entry.previous).toBe(previousEntryDigest);
     expect(projected.head?.sequence).toBe("0000000000000002");
+  });
+
+  test("consumes the exact shared transition result instead of re-projecting its events", async () => {
+    const { ports } = makePorts();
+    const projected = transition([task()]);
+    const result = await projectAnnouncements(
+      { ...projected, observations: [] },
+      ports,
+    );
+
+    expect(projected.observations).toHaveLength(1);
+    expect(result.announcements).toEqual([]);
+    expect(result.entries).toEqual([]);
   });
 });

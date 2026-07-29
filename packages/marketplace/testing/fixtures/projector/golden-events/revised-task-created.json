@@ -46,7 +46,7 @@
   "expect": {
     "observationCount": 1,
     "announcementCount": 1,
-    "observationSha256": "sha256:f99bd0ba192b8b0adbf3cc8d3f39c96872bc967d8fc4a76de968ea24d8428572",
+    "observationSha256": "sha256:caba9046e32e06caf73f960141ae0bc5e535c17999e1840a04de90be42bbedb8",
     "announcementSha256": "sha256:42f8ae3e85e6b66300b8f7a9e5c1c8012f683c4698a79412b2bf1f5e6217037c"
   }
 }

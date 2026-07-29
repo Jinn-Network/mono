@@ -6,6 +6,11 @@ import {
   type AnnouncementEntry,
 } from "@jinn-network/record-discovery-protocol";
 import type { SignedEntry } from "@jinn-network/record-discovery-serve";
+import {
+  foldObservations,
+  type DerivedAttemptState,
+  type ProtocolObservation,
+} from "@jinn-network/task-execution-protocol";
 import type { Hex } from "viem";
 import {
   signAnnouncementEntry,
@@ -13,6 +18,12 @@ import {
   type ScopedDiscoverySigner,
 } from "./announce.js";
 import type { DerivationAnnotation, FinalityTier } from "./derivation.js";
+import {
+  cloneMarketplaceProjectionState,
+  nextMarketplaceObservationSequence,
+  type MarketplaceProtocolObservation,
+  type MarketplaceProjectionState,
+} from "./observe.js";
 
 export interface FinalityPolicyOptions {
   /** Default `safe`; `finalized` is the explicit stricter published profile. */
@@ -92,4 +103,230 @@ export async function appendSignedReorgCorrection(
     entry,
     signature: await signAnnouncementEntry(entry, input.signer),
   };
+}
+
+const ATTEMPT_SCOPED_TYPES = new Set<ProtocolObservation["type"]>([
+  "network.jinn.task-execution.attempt-engaged.v1",
+  "network.jinn.task-execution.attempt-started.v1",
+  "network.jinn.task-execution.progress.v1",
+  "network.jinn.task-execution.cancel-requested.v1",
+  "network.jinn.task-execution.cancel-acknowledged.v1",
+  "network.jinn.task-execution.execution-observed.v1",
+  "network.jinn.task-execution.delivery-recorded.v1",
+  "network.jinn.task-execution.attempt-terminal.v1",
+]);
+
+export interface ProjectReorgObservationInput {
+  readonly priorObservation: ProtocolObservation;
+  readonly derivation: DerivationAnnotation;
+  readonly reorgedBlockHash: Hex;
+  readonly timestamp: string;
+  readonly state: MarketplaceProjectionState;
+}
+
+export interface ReorgObservationTransition {
+  readonly state: MarketplaceProjectionState;
+  readonly observation?: MarketplaceProtocolObservation;
+}
+
+/**
+ * Applies ruling §7.30. Attempt facts receive an append-only `lost` terminal on the same
+ * authoritative stream. Submission facts receive no invented TEP admission/closure outcome;
+ * their signed discovery retraction and canonical query exclusion are the correction.
+ */
+export function projectReorgObservation(
+  input: ProjectReorgObservationInput,
+): ReorgObservationTransition {
+  const priorDerivation = exactDerivation(
+    (input.priorObservation as MarketplaceProtocolObservation).derivation,
+  );
+  const suppliedDerivation = exactDerivation(input.derivation);
+  if (!sameDerivation(priorDerivation, suppliedDerivation)) {
+    throw new Error(
+      "reorg derivation does not exactly match prior observation derivation",
+    );
+  }
+  if (input.derivation.blockHash !== input.reorgedBlockHash) {
+    throw new Error(
+      `reorged block ${input.reorgedBlockHash} does not match prior derivation block ${input.derivation.blockHash}`,
+    );
+  }
+  if (!ATTEMPT_SCOPED_TYPES.has(input.priorObservation.type)) {
+    return { state: cloneMarketplaceProjectionState(input.state) };
+  }
+
+  const correctionId =
+    `reorg:${input.priorObservation.id}:${input.reorgedBlockHash}`;
+  if (input.state.processedCorrectionIds.includes(correctionId)) {
+    return { state: cloneMarketplaceProjectionState(input.state) };
+  }
+
+  const state = cloneMarketplaceProjectionState(input.state);
+  state.processedCorrectionIds.push(correctionId);
+  const sequence = nextMarketplaceObservationSequence(
+    state,
+    input.priorObservation.source,
+    input.priorObservation.subject,
+    input.priorObservation.sequence,
+  );
+  const observation: MarketplaceProtocolObservation = {
+    specversion: "1.0",
+    id: correctionId,
+    source: input.priorObservation.source,
+    subject: input.priorObservation.subject,
+    time: input.timestamp,
+    datacontenttype: "application/json",
+    sequence,
+    ...(input.priorObservation.taskdigest === undefined
+      ? {}
+      : { taskdigest: input.priorObservation.taskdigest }),
+    derivation: input.derivation,
+    correction: {
+      retractsObservationId: input.priorObservation.id,
+      orphanedBlockHash: input.reorgedBlockHash,
+    },
+    type: "network.jinn.task-execution.attempt-terminal.v1",
+    data: { state: "lost" },
+  };
+  return { state, observation };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function exactDerivation(value: unknown): DerivationAnnotation {
+  if (!isRecord(value)) {
+    throw new Error("marketplace observation is missing exact derivation provenance");
+  }
+  if (
+    !Number.isSafeInteger(value["chainId"])
+    || (value["chainId"] as number) < 0
+    || typeof value["contract"] !== "string"
+    || !/^0x[0-9a-fA-F]{40}$/u.test(value["contract"])
+    || typeof value["event"] !== "string"
+    || value["event"].length === 0
+    || !Number.isSafeInteger(value["blockNumber"])
+    || (value["blockNumber"] as number) < 0
+    || typeof value["blockHash"] !== "string"
+    || !/^0x[0-9a-fA-F]{64}$/u.test(value["blockHash"])
+    || typeof value["txHash"] !== "string"
+    || !/^0x[0-9a-fA-F]{64}$/u.test(value["txHash"])
+    || !Number.isSafeInteger(value["logIndex"])
+    || (value["logIndex"] as number) < 0
+    || (value["finalityTier"] !== "safe"
+      && value["finalityTier"] !== "finalized")
+    || (value["contractGeneration"] !== "today"
+      && value["contractGeneration"] !== "revised")
+  ) {
+    throw new Error("marketplace observation is missing exact derivation provenance");
+  }
+  return value as unknown as DerivationAnnotation;
+}
+
+function sameDerivation(
+  left: DerivationAnnotation,
+  right: DerivationAnnotation,
+): boolean {
+  return left.chainId === right.chainId
+    && left.contract === right.contract
+    && left.event === right.event
+    && left.blockNumber === right.blockNumber
+    && left.blockHash === right.blockHash
+    && left.txHash === right.txHash
+    && left.logIndex === right.logIndex
+    && left.finalityTier === right.finalityTier
+    && left.contractGeneration === right.contractGeneration;
+}
+
+/**
+ * Selects the current canonical marketplace view while returning the original observation
+ * objects unchanged. Ordinary orphaned facts are excluded; explicit lost corrections remain.
+ */
+export function selectCanonicalMarketplaceObservations(
+  raw: readonly ProtocolObservation[],
+  orphanedBlockHashes: ReadonlySet<string>,
+): MarketplaceProtocolObservation[] {
+  const orphaned = new Set(
+    [...orphanedBlockHashes].map((hash) => hash.toLowerCase()),
+  );
+  const indexed = raw.map((observation) => {
+    const candidate = observation as MarketplaceProtocolObservation;
+    return {
+      candidate,
+      derivation: exactDerivation(candidate.derivation),
+    };
+  });
+  const ordinaryById = new Map<
+    string,
+    Array<(typeof indexed)[number]>
+  >();
+  for (const item of indexed) {
+    if (item.candidate.correction === undefined) {
+      const matches = ordinaryById.get(item.candidate.id) ?? [];
+      matches.push(item);
+      ordinaryById.set(item.candidate.id, matches);
+    }
+  }
+
+  const selected: MarketplaceProtocolObservation[] = [];
+  for (const { candidate, derivation } of indexed) {
+    if (candidate.correction !== undefined) {
+      const correction = candidate.correction;
+      if (
+        !isRecord(correction)
+        || typeof correction.retractsObservationId !== "string"
+        || correction.retractsObservationId.length === 0
+        || typeof correction.orphanedBlockHash !== "string"
+        || !/^0x[0-9a-fA-F]{64}$/u.test(correction.orphanedBlockHash)
+        || correction.orphanedBlockHash !== derivation.blockHash
+        || candidate.type
+          !== "network.jinn.task-execution.attempt-terminal.v1"
+        || candidate.data.state !== "lost"
+      ) {
+        throw new Error("marketplace reorg correction metadata is invalid");
+      }
+      if (!orphaned.has(correction.orphanedBlockHash.toLowerCase())) {
+        throw new Error(
+          "marketplace reorg correction is outside the orphaned-hash substrate",
+        );
+      }
+      const targets = ordinaryById.get(correction.retractsObservationId) ?? [];
+      if (targets.length !== 1) {
+        throw new Error(
+          "marketplace reorg correction must resolve exactly one ordinary target",
+        );
+      }
+      const target = targets[0]!;
+      if (
+        target.candidate.source !== candidate.source
+        || target.candidate.subject !== candidate.subject
+      ) {
+        throw new Error(
+          "marketplace reorg correction source and subject must match its target",
+        );
+      }
+      if (target.derivation.blockHash !== correction.orphanedBlockHash) {
+        throw new Error(
+          "marketplace reorg correction target derivation block does not match",
+        );
+      }
+      selected.push(candidate);
+      continue;
+    }
+    if (!orphaned.has(derivation.blockHash.toLowerCase())) {
+      selected.push(candidate);
+    }
+  }
+  return selected;
+}
+
+/** Applies the unchanged generic TEP fold only after marketplace canonical selection. */
+export function foldCanonicalMarketplaceObservations(
+  raw: readonly ProtocolObservation[],
+  orphanedBlockHashes: ReadonlySet<string>,
+): DerivedAttemptState {
+  return foldObservations(
+    selectCanonicalMarketplaceObservations(raw, orphanedBlockHashes),
+  );
 }

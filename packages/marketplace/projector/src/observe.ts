@@ -40,9 +40,84 @@ export type ObservationMarketplaceEvent = MarketplaceEvent & {
   readonly projection: ObservationProjectionContext;
 };
 
-type DeliverEvent = Extract<MarketplaceEvent, { event: "Deliver" }> & {
-  readonly projection: ObservationProjectionContext;
+/** Marketplace CloudEvent extension required by rulings §7.21/§7.32. */
+export type MarketplaceProtocolObservation = ProtocolObservation & {
+  readonly derivation: MarketplaceEvent["derivation"];
+  readonly correction?: {
+    readonly retractsObservationId: string;
+    readonly orphanedBlockHash: Hex;
+  };
 };
+
+interface PendingMechDelivery {
+  readonly data: Hex;
+  readonly deliveryCorrespondence?: NonNullable<
+    ObservationProjectionContext["deliveryCorrespondence"]
+  >;
+}
+
+export interface MarketplaceProjectionState {
+  /** Canonical chain-log identities already reduced, in first-seen order. */
+  processedLogIds: string[];
+  /** Idempotency keys for append-only reorg corrections already emitted. */
+  processedCorrectionIds: string[];
+  /** Last emitted sequence by authoritative `(source, subject)` observation stream. */
+  sequenceBySourceSubject: Record<string, string>;
+  /** Task-capacity facts required to detect exhaustion across host callback boundaries. */
+  tasks: Record<string, { maxTotal: number; engaged: number }>;
+  /** External Mech delivery facts waiting for their router claim. */
+  pendingMechDeliveries: Record<string, PendingMechDelivery>;
+}
+
+export interface MarketplaceProjectionTransition {
+  /** Next caller-owned state. The input state is never mutated. */
+  readonly state: MarketplaceProjectionState;
+  /** Only first-seen events accepted by this transition; replayed log identities are absent. */
+  readonly events: ObservationMarketplaceEvent[];
+  /** Exact observation result consumed by the announcement projector. */
+  readonly observations: MarketplaceProtocolObservation[];
+}
+
+export function createMarketplaceProjectionState(): MarketplaceProjectionState {
+  return {
+    processedLogIds: [],
+    processedCorrectionIds: [],
+    sequenceBySourceSubject: {},
+    tasks: {},
+    pendingMechDeliveries: {},
+  };
+}
+
+export function cloneMarketplaceProjectionState(
+  state: MarketplaceProjectionState,
+): MarketplaceProjectionState {
+  return {
+    processedLogIds: [...state.processedLogIds],
+    processedCorrectionIds: [...state.processedCorrectionIds],
+    sequenceBySourceSubject: { ...state.sequenceBySourceSubject },
+    tasks: Object.fromEntries(
+      Object.entries(state.tasks).map(([key, value]) => [
+        key,
+        { ...value },
+      ]),
+    ),
+    pendingMechDeliveries: Object.fromEntries(
+      Object.entries(state.pendingMechDeliveries).map(([key, value]) => [
+        key,
+        {
+          data: value.data,
+          ...(value.deliveryCorrespondence === undefined
+            ? {}
+            : {
+                deliveryCorrespondence: {
+                  ...value.deliveryCorrespondence,
+                },
+              }),
+        },
+      ]),
+    ),
+  };
+}
 
 function sourceFor(event: ObservationMarketplaceEvent): string {
   return event.projection.source
@@ -81,6 +156,46 @@ function taskKey(event: ObservationMarketplaceEvent, taskId: bigint): string {
   return `${event.derivation.chainId}:${event.derivation.contract.toLowerCase()}:${taskId}`;
 }
 
+function pendingDeliveryKey(
+  event: ObservationMarketplaceEvent,
+  requestId: Hex,
+): string {
+  return `${event.derivation.chainId}:${requestId.toLowerCase()}`;
+}
+
+function logIdentity(event: ObservationMarketplaceEvent): string {
+  const derivation = event.derivation;
+  return [
+    derivation.chainId,
+    derivation.contract.toLowerCase(),
+    derivation.blockHash.toLowerCase(),
+    derivation.txHash.toLowerCase(),
+    derivation.logIndex,
+  ].join(":");
+}
+
+function sequenceStreamKey(source: string, subject: string): string {
+  return `${source.length}:${source}${subject}`;
+}
+
+export function nextMarketplaceObservationSequence(
+  state: MarketplaceProjectionState,
+  source: string,
+  subject: string,
+  floor?: string,
+): string {
+  const key = sequenceStreamKey(source, subject);
+  const recorded = state.sequenceBySourceSubject[key];
+  const previous = floor !== undefined
+    && (recorded === undefined || recorded < floor)
+    ? floor
+    : recorded;
+  const next = previous === undefined ? 1n : BigInt(previous) + 1n;
+  const sequence = formatSequence(next);
+  state.sequenceBySourceSubject[key] = sequence;
+  return sequence;
+}
+
 function verdictTerminal(verdictCode: number): {
   readonly state: "delivered" | "rejected" | "failed";
   readonly category?: string;
@@ -103,12 +218,14 @@ function verdictTerminal(verdictCode: number): {
  * The observation and announcement projectors consume the same ordered, context-enriched event
  * facts. Context is host-resolved signed-record/block data, kept separate from exact EVM facts.
  */
-export function projectObservations(
+export function reduceMarketplaceProjection(
   events: readonly ObservationMarketplaceEvent[],
-): ProtocolObservation[] {
-  const observations: ProtocolObservation[] = [];
-  const mechDeliveries = new Map<Hex, DeliverEvent>();
-  const capacity = new Map<string, { maxTotal: number; engaged: number }>();
+  previousState: MarketplaceProjectionState,
+): MarketplaceProjectionTransition {
+  const state = cloneMarketplaceProjectionState(previousState);
+  const observations: MarketplaceProtocolObservation[] = [];
+  const acceptedEvents: ObservationMarketplaceEvent[] = [];
+  const processed = new Set(state.processedLogIds);
 
   function emit(
     event: ObservationMarketplaceEvent,
@@ -116,22 +233,30 @@ export function projectObservations(
     subject: string,
     data: Record<string, unknown>,
   ): void {
+    const source = sourceFor(event);
     const observation = {
       specversion: "1.0",
       id: `${event.derivation.txHash}:${event.derivation.logIndex}:${type}`,
-      source: sourceFor(event),
+      source,
       subject,
       time: event.projection.timestamp,
       datacontenttype: "application/json",
-      sequence: formatSequence(BigInt(observations.length + 1)),
+      sequence: nextMarketplaceObservationSequence(state, source, subject),
       taskdigest: event.projection.taskDigest,
+      derivation: event.derivation,
       type,
       data,
-    } as ProtocolObservation;
+    } as MarketplaceProtocolObservation;
     observations.push(observation);
   }
 
   for (const event of events) {
+    const identity = logIdentity(event);
+    if (processed.has(identity)) continue;
+    processed.add(identity);
+    state.processedLogIds.push(identity);
+    acceptedEvents.push(event);
+
     switch (event.event) {
       case "TaskCreated": {
         const anchoredTaskDigest = digestFromBytes32(event.facts.taskCidDigest);
@@ -139,7 +264,7 @@ export function projectObservations(
         const maxTotal = "maxClaims" in event.facts
           ? event.facts.maxClaims
           : event.facts.maxTotal;
-        capacity.set(key, { maxTotal, engaged: 0 });
+        state.tasks[key] = { maxTotal, engaged: 0 };
 
         if (anchoredTaskDigest !== event.projection.taskDigest) {
           emit(
@@ -190,7 +315,7 @@ export function projectObservations(
         );
 
         const key = taskKey(event, event.facts.taskId);
-        const taskCapacity = capacity.get(key);
+        const taskCapacity = state.tasks[key];
         if (taskCapacity !== undefined) {
           taskCapacity.engaged += 1;
           if (taskCapacity.engaged >= taskCapacity.maxTotal) {
@@ -205,13 +330,25 @@ export function projectObservations(
         break;
       }
 
-      case "Deliver":
-        mechDeliveries.set(event.facts.requestId, event as DeliverEvent);
+      case "Deliver": {
+        state.pendingMechDeliveries[
+          pendingDeliveryKey(event, event.facts.requestId)
+        ] = {
+          data: event.facts.data,
+          ...(event.projection.deliveryCorrespondence === undefined
+            ? {}
+            : {
+                deliveryCorrespondence:
+                  event.projection.deliveryCorrespondence,
+              }),
+        };
         break;
+      }
 
       case "SolutionDeliveryClaimed": {
         const attempt = attemptFor(event, event.facts.taskId, event.facts.attemptIndex);
-        const mechDelivery = mechDeliveries.get(event.facts.requestId);
+        const pendingKey = pendingDeliveryKey(event, event.facts.requestId);
+        const mechDelivery = state.pendingMechDeliveries[pendingKey];
         if (mechDelivery === undefined) {
           emit(
             event,
@@ -225,6 +362,7 @@ export function projectObservations(
           );
           break;
         }
+        delete state.pendingMechDeliveries[pendingKey];
 
         if ("deliveryDigest" in event.facts) {
           emit(
@@ -236,9 +374,9 @@ export function projectObservations(
           break;
         }
 
-        const correspondence = mechDelivery.projection.deliveryCorrespondence;
-        const mechDigest = mechDelivery.facts.data.length === 66
-          ? digestFromBytes32(mechDelivery.facts.data)
+        const correspondence = mechDelivery.deliveryCorrespondence;
+        const mechDigest = mechDelivery.data.length === 66
+          ? digestFromBytes32(mechDelivery.data)
           : undefined;
         const checked = correspondence === undefined
           ? undefined
@@ -318,11 +456,11 @@ export function projectObservations(
 
       case "AttemptsAdded": {
         const key = taskKey(event, event.facts.taskId);
-        const existing = capacity.get(key);
-        capacity.set(key, {
+        const existing = state.tasks[key];
+        state.tasks[key] = {
           maxTotal: event.facts.newMaxTotal,
           engaged: existing?.engaged ?? 0,
-        });
+        };
         break;
       }
 
@@ -333,5 +471,17 @@ export function projectObservations(
     }
   }
 
-  return observations;
+  return { state, events: acceptedEvents, observations };
+}
+
+/**
+ * Stateless convenience for one complete ordered log. Incremental hosts must retain the
+ * transition state from `reduceMarketplaceProjection`; this wrapper intentionally does not hide
+ * state behind module globals.
+ */
+export function projectObservations(
+  events: readonly ObservationMarketplaceEvent[],
+  state: MarketplaceProjectionState = createMarketplaceProjectionState(),
+): MarketplaceProtocolObservation[] {
+  return reduceMarketplaceProjection(events, state).observations;
 }
