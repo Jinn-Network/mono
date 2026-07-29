@@ -7,6 +7,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   symlink,
@@ -397,6 +398,40 @@ describe("filesystem announcement journal", () => {
       })).status).toBe(expectedExisting ? "existing" : "created");
       await recovered.close();
     }
+  });
+
+  test("canonicalizes a stable unmanaged macOS /var ancestor", async ({
+    skip,
+  }) => {
+    if (process.platform !== "darwin") skip();
+    const varStats = await lstat("/var");
+    if (!varStats.isSymbolicLink()) skip();
+    const aliasBase = await mkdtemp("/var/tmp/jinn-announcement-alias-");
+    temporaryRoots.push(aliasBase);
+    const root = join(aliasBase, "journal");
+
+    const journal = await openFilesystemEvidenceAnnouncementJournal({
+      rootDir: root,
+      sourceId: SOURCE,
+    });
+    await journal.appendAvailable({
+      announcementId: "event-1",
+      reference: references[0]!,
+      repositoryId: REPOSITORY,
+    });
+    await journal.close();
+
+    expect(await realpath(root)).not.toBe(root);
+    const reopened = await openFilesystemEvidenceAnnouncementJournal({
+      rootDir: root,
+      sourceId: SOURCE,
+    });
+    const batches: unknown[] = [];
+    for await (const batch of reopened.read({})) {
+      batches.push(batch);
+    }
+    expect(batches).toHaveLength(1);
+    await reopened.close();
   });
 
   test("rejects managed symlinks and corrects private modes", async () => {

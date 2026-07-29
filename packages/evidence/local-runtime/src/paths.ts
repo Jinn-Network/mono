@@ -5,12 +5,14 @@ import {
   lstat,
   mkdir,
   open,
+  realpath,
 } from "node:fs/promises";
 import {
   dirname,
   isAbsolute,
   join,
   parse,
+  relative,
   resolve,
   sep,
 } from "node:path";
@@ -41,6 +43,17 @@ function unsafe(message: string, cause?: unknown): LocalEvidenceRuntimeError {
   );
 }
 
+function isFilesystemRootChild(path: string): boolean {
+  const absolute = resolve(path);
+  return dirname(absolute) === parse(absolute).root;
+}
+
+function nodeErrorCode(error: unknown): string | undefined {
+  return error !== null && typeof error === "object" && "code" in error
+    ? String((error as { readonly code?: unknown }).code)
+    : undefined;
+}
+
 async function rejectSymlinkComponents(path: string): Promise<void> {
   const absolute = resolve(path);
   const root = parse(absolute).root;
@@ -51,9 +64,12 @@ async function rejectSymlinkComponents(path: string): Promise<void> {
     try {
       const stat = await lstat(current);
       if (stat.isSymbolicLink()) {
-        throw unsafe(`Runtime path must not contain symlinks: ${current}`);
-      }
-      if (index < components.length - 1 && !stat.isDirectory()) {
+        // Stable platform aliases such as macOS /var -> /private/var are
+        // direct children of the filesystem root and are not attacker-controlled.
+        if (!isFilesystemRootChild(current)) {
+          throw unsafe(`Runtime path must not contain symlinks: ${current}`);
+        }
+      } else if (index < components.length - 1 && !stat.isDirectory()) {
         throw unsafe(`Runtime path parent must be a directory: ${current}`);
       }
     } catch (error) {
@@ -61,6 +77,78 @@ async function rejectSymlinkComponents(path: string): Promise<void> {
       throw error;
     }
   }
+}
+
+async function rejectNonPlatformAncestorSymlinks(path: string): Promise<void> {
+  const absolute = resolve(path);
+  const root = parse(absolute).root;
+  let current = root;
+  const components = absolute.slice(root.length).split(sep).filter(Boolean);
+  for (const component of components) {
+    current = join(current, component);
+    try {
+      const stat = await lstat(current);
+      if (stat.isSymbolicLink() && !isFilesystemRootChild(current)) {
+        throw unsafe(`Runtime path must not contain symlinks: ${current}`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+  }
+}
+
+async function canonicalizeConfiguredRoot(path: string): Promise<string> {
+  const lexicalRoot = resolve(path);
+  let unmanagedAncestor = dirname(lexicalRoot);
+  for (;;) {
+    try {
+      await lstat(unmanagedAncestor);
+      break;
+    } catch (error) {
+      if (nodeErrorCode(error) !== "ENOENT") {
+        if (error instanceof LocalEvidenceRuntimeError) throw error;
+        throw localRuntimeIoError(
+          error,
+          "Failed to inspect the runtime ancestor.",
+        );
+      }
+      const parent = dirname(unmanagedAncestor);
+      if (parent === unmanagedAncestor) {
+        throw localRuntimeIoError(
+          error,
+          "No existing runtime ancestor could be resolved.",
+        );
+      }
+      unmanagedAncestor = parent;
+    }
+  }
+  await rejectNonPlatformAncestorSymlinks(unmanagedAncestor);
+  let physicalAncestor: string;
+  try {
+    physicalAncestor = await realpath(unmanagedAncestor);
+    const stats = await lstat(physicalAncestor);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw unsafe(
+        `Runtime ancestor must resolve to a directory: ${physicalAncestor}`,
+      );
+    }
+  } catch (error) {
+    if (error instanceof LocalEvidenceRuntimeError) throw error;
+    throw localRuntimeIoError(
+      error,
+      "Failed to resolve the runtime ancestor.",
+    );
+  }
+  const suffix = relative(unmanagedAncestor, lexicalRoot);
+  if (
+    suffix === ".." ||
+    suffix.startsWith(`..${sep}`) ||
+    parse(suffix).root.length > 0
+  ) {
+    throw unsafe("The runtime root escapes its resolved ancestor.");
+  }
+  return resolve(physicalAncestor, suffix);
 }
 
 async function secureDirectory(path: string): Promise<void> {
@@ -113,7 +201,7 @@ export async function prepareRuntimePaths(
   ) {
     throw unsafe("rootDir must be a non-empty filesystem path.");
   }
-  const rootDir = resolve(untrustedRootDir);
+  const rootDir = await canonicalizeConfiguredRoot(untrustedRootDir);
   if (!isAbsolute(rootDir)) throw unsafe("rootDir must resolve absolutely.");
   if (rootDir === parse(rootDir).root) {
     throw unsafe("The filesystem root cannot be used as a runtime root.");
