@@ -311,6 +311,19 @@ Confirmed by the operator at the program gate (2026-07-28):
     separate `TaskBudgetRefunded` event rather than being folded into `TaskClosed`. M4 decodes
     these shapes only behind `generation: revised`; today mode never fabricates them. M7's
     compiled ABIs and lifecycle tests must prove exact agreement with the projector fixture.
+29. **Revised marketplace common-event ABI:** revised projection never reuses V3 router event
+    shapes. M4 freezes a separate V4 ABI for Task creation, solve/evaluation engagement,
+    sha256 Delivery/Verdict claims, budget refund, and capacity top-up; marketplace plan
+    Addendum 2026-07-29-f carries the exact Solidity signatures. Unix timestamps are absolute
+    seconds in `uint64`; `closeAt == 0` means absent; every claim emits its concrete absolute
+    attempt deadline. Release cooldown and the optional per-operator simultaneous-claim cap
+    are contract-global configuration, not per-task fields. `AttemptsAdded` is a distinct
+    capacity fact and re-opens discovery availability after exhaustion. The external Mech
+    `Deliver` event remains an operational join in revised mode, but only the V4 router's
+    sha256 anchor determines protocol Delivery/Verdict identity. Revised logs are decoded only
+    against this V4 ABI plus the external Mech ABI and §7.28 lifecycle events—never by
+    composing the V3 router ABI. M7 must implement the exact event contract and prove compiled
+    ABI equality against the M4 fixtures.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

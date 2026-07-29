@@ -762,3 +762,98 @@ task-id-only event is not event-complete. Refund value remains the separate
 `TaskBudgetRefunded` economic fact under the one-event-per-fact rule. M4 decodes these events
 only behind `generation: revised` and its fixtures are the ABI contract M7.1/M7.2/M7.3 must
 implement and prove exactly. Today mode never invents these events.
+
+## Addendum 2026-07-29-f — revised common-event ABI (program ruling §7.29)
+
+M4.1 must not compose V3 router events into `generation: revised`: the revision changes the
+Submission, deadline, Delivery, Verdict, and policy facts those events carry. Revised projection
+uses the unchanged external Mech `Deliver` event only as an operational join plus the following
+V4 router event contract:
+
+```solidity
+event TaskCreated(
+    address indexed creator,
+    bytes32 indexed taskCidDigest,
+    bytes32 indexed submissionDigest,
+    uint256 taskId,
+    uint32 maxTotal,
+    uint32 maxConcurrent,
+    uint64 submissionDeadline,
+    uint64 closeAt,
+    uint64 responseTimeout,
+    uint32 minVerdicts,
+    bool requireDistinctEvaluator,
+    uint256 solutionMaxDeliveryRate,
+    uint256 verdictMaxDeliveryRate,
+    uint256 solutionBudget,
+    uint256 verdictBudget
+);
+
+event TaskAttemptCreated(
+    address indexed operator,
+    address indexed priorityMech,
+    bytes32 indexed requestId,
+    uint256 taskId,
+    uint32 attemptIndex,
+    uint64 attemptDeadline,
+    uint256 deliveryRate
+);
+
+event EvaluationAttemptCreated(
+    address indexed evaluator,
+    address indexed priorityMech,
+    bytes32 indexed requestId,
+    uint256 taskId,
+    uint32 attemptIndex,
+    uint32 verdictIndex,
+    uint64 attemptDeadline,
+    uint256 deliveryRate
+);
+
+event SolutionDeliveryClaimed(
+    address indexed operator,
+    bytes32 indexed requestId,
+    bytes32 indexed deliveryDigest,
+    uint256 taskId,
+    uint32 attemptIndex
+);
+
+event VerdictDeliveryClaimed(
+    address indexed evaluator,
+    bytes32 indexed requestId,
+    bytes32 indexed evaluationDeliveryDigest,
+    uint256 taskId,
+    uint32 attemptIndex,
+    uint32 verdictIndex,
+    uint8 verdictCode
+);
+
+event TaskBudgetRefunded(
+    uint256 indexed taskId,
+    address indexed creator,
+    uint256 solutionAmount,
+    uint256 verdictAmount
+);
+
+event AttemptsAdded(
+    uint256 indexed taskId,
+    address indexed creator,
+    uint32 added,
+    uint32 newMaxTotal
+);
+```
+
+The §7.28 `AttemptExpired`, `AttemptReleased`, and `TaskClosed` events complete this V4 set.
+Topic placement spends the three non-anonymous indexed slots on the required digest/party facts;
+`taskId` remains present in event data where those slots are exhausted. Timestamps are absolute
+Unix seconds in `uint64`; zero is the absent-`closeAt` sentinel; each claim carries its concrete
+absolute deadline. Release cooldown and the optional per-operator simultaneous-claim cap are
+contract-global configuration. `AttemptsAdded` is the distinct capacity/top-up fact; after an
+exhaustion withdrawal it permits a new append-only `available` announcement. Reservation release
+is already represented by the attributable expiry/release event plus the task's emitted rate;
+refund remains the separate economic event.
+
+The Mech request fields remain operational joins for the chosen V4 realization, but the V4
+router's sha256 `deliveryDigest` / `evaluationDeliveryDigest` alone determine protocol identity;
+revised mode never restores V3's sha256↔keccak correspondence. M4 fixtures are the ABI contract
+for M7.1–M7.3, whose compiled contract ABIs and both-generation tests must match them exactly.
