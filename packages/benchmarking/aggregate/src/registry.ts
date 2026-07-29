@@ -16,7 +16,7 @@ import {
   resolveTaskProvenance,
   resolveVerdictOutcome,
 } from "./resolved-inputs.js";
-import { nonInferiorityIut, nonInferiorityVerdict, pairedCostVerdict, type NonInferiorityOptions } from "./stats/noninferiority.js";
+import { clusteredPairedRateDiffBca, nonInferiorityIut, nonInferiorityVerdict, pairedCostVerdict, type NonInferiorityOptions } from "./stats/noninferiority.js";
 import { pairedMcnemar } from "./stats/paired-mcnemar.js";
 import { avgAtOne, passAtK } from "./stats/pass-at-k.js";
 import { wilsonInterval } from "./stats/wilson.js";
@@ -167,14 +167,14 @@ const METHOD_METADATA = {
     computeAvailability: "available",
   }),
   noninferiorityIut: metadata({
-    requiredInputs: ["matrix.cells", "matrix.cost", "referenced-verdicts"],
+    requiredInputs: ["matrix.cells", "matrix.cost", "referenced-verdicts", "exact-task-bytes", "task-provenance-source-family"],
     parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate", "seed", "resamples"], properties: { verdictRule: VERDICT_RULE_PROPERTY, baseline: { type: "string" }, candidate: { type: "string" }, seed: { type: "integer", minimum: 1, maximum: 4_294_967_295 }, resamples: { type: "integer", minimum: 1 } }, additionalProperties: false },
     outputShape: "BCa quality lower bound AND one-sided paired-cost Wilcoxon + exclusions + conflicted cells",
     exclusionRule: "paired both-arm judged cells; cost only both-solve pairs; report remainder",
     clusteringRule: "task-provenance-source",
     referenceSet: "v1-reference",
     deterministic: true,
-    resamplingProcedure: "xorshift32-v1; sample paired tasks with replacement; one uint32 draw per position; index=floor(uint32/2^32*n); BCa uses jackknife acceleration",
+    resamplingProcedure: "xorshift32-v1; sample whole source clusters with replacement; one uint32 draw per cluster position; cluster jackknife acceleration",
     computeAvailability: "available",
   }),
   cleanSubset: metadata({
@@ -469,7 +469,8 @@ const pairedMcnemarMethod: SingleSubjectMethod = {
           baseline: baselineCells[0]!.value!,
           candidate: candidateCells[0]!.value!,
         });
-        clusterKeys.set(taskDigest, resolveTaskProvenance(taskDigest, input).source);
+        const provenance = resolveTaskProvenance(taskDigest, input);
+        clusterKeys.set(taskDigest, JSON.stringify([provenance.cluster.tag, provenance.cluster.value]));
       } else {
         excludedCellKeys.push(...cells.map((cell) => cell.cellKey));
       }
@@ -777,10 +778,22 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
       .map((cell) => cell.cellKey)
       .sort(compareCodeUnitStrings);
 
-    const options: NonInferiorityOptions = { seed, resamples };
-    const quality = rates.length > 0
+    const clusteredRates = rates.map((rate, index) => {
+        const provenance = resolveTaskProvenance(pairedTaskDigests[index]!, input);
+        return {
+          ...rate,
+          taskDigest: pairedTaskDigests[index]!,
+          cluster: [provenance.cluster.tag, provenance.cluster.value] as const,
+        };
+      });
+    const clusterCount = new Set(clusteredRates.map((rate) => JSON.stringify(rate.cluster))).size;
+    const clusterBootstrap = clusteredRates.length > 0 && clusterCount >= 2
+      ? clusteredPairedRateDiffBca(clusteredRates, { seed, resamples })
+      : undefined;
+    const options: NonInferiorityOptions = { seed, resamples, ...(clusterBootstrap === undefined ? {} : { lowerBound: clusterBootstrap.lowerBound }) };
+    const quality = clusteredRates.length > 0 && clusterCount >= 2
       ? nonInferiorityVerdict(rates, options)
-      : { verdict: "inconclusive" as const, lowerBound: null, deltaAbs: 0.05, relativeRegression: null, reasons: ["no paired tasks"] };
+      : { verdict: "inconclusive" as const, lowerBound: null, deltaAbs: 0.05, relativeRegression: null, reasons: [clusteredRates.length === 0 ? "no paired tasks" : `fewer than two source clusters (got ${clusterCount})`] };
     const cost = pairedCostVerdict(costDiffs);
     return {
       verdictRule: input.verdictRule,
@@ -808,7 +821,12 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
         count: conflictedCellKeys.length,
         cellKeys: conflictedCellKeys.sort(compareCodeUnitStrings),
       },
-      bootstrap: { procedure: "xorshift32-v1", seed, resamples },
+      bootstrap: clusterBootstrap === undefined
+        ? { procedure: "xorshift32-v1", seed, resamples, unit: "source-cluster", draws: 0, clusters: [] }
+        : {
+            procedure: "xorshift32-v1", seed, resamples, unit: clusterBootstrap.unit,
+            draws: clusterBootstrap.draws, clusters: clusterBootstrap.clusters,
+          },
     };
   },
 };

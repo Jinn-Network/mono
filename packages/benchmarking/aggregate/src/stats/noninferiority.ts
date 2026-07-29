@@ -30,6 +30,19 @@ export interface PairedRateDiffBcaResult {
   readonly draws: number;
 }
 
+export interface ClusteredTaskRate extends TaskRates {
+  readonly taskDigest: string;
+  readonly cluster: readonly ["source" | "sourceCommitment", string];
+}
+
+export interface ClusteredPairedRateDiffBcaResult extends PairedRateDiffBcaResult {
+  readonly unit: "source-cluster";
+  readonly clusters: readonly {
+    readonly key: readonly ["source" | "sourceCommitment", string];
+    readonly members: readonly string[];
+  }[];
+}
+
 /** Exact program §7.26 xorshift32-v1 stream. One call performs each transition with explicit
  * uint32 truncation and returns one unsigned 32-bit draw. */
 export function xorshift32(seed: number): () => number {
@@ -122,6 +135,67 @@ export function pairedRateDiffBca(
   };
 }
 
+/** §7.47 deterministic whole-source-cluster BCa bootstrap. Cluster/member ordering is explicit
+ * UTF-16 code-unit ordering; every draw selects a whole cluster and never draws within it. */
+export function clusteredPairedRateDiffBca(
+  rates: readonly ClusteredTaskRate[],
+  opts: RateCiOptions,
+): ClusteredPairedRateDiffBcaResult {
+  const alpha = opts.alpha ?? 0.05;
+  const resamples = opts.resamples ?? 10_000;
+  if (!(alpha > 0 && alpha < 1)) throw new Error("clusteredPairedRateDiffBca: alpha must be in (0,1)");
+  if (!Number.isInteger(resamples) || resamples <= 0) throw new Error("clusteredPairedRateDiffBca: resamples must be a positive integer");
+  const compare = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
+  const ordered = [...rates].sort((left, right) => compare(left.taskDigest, right.taskDigest));
+  const groups = new Map<string, { key: ["source" | "sourceCommitment", string]; members: ClusteredTaskRate[] }>();
+  for (const rate of ordered) {
+    const key = JSON.stringify(rate.cluster);
+    const group = groups.get(key);
+    if (group !== undefined) group.members.push(rate);
+    else groups.set(key, { key: [rate.cluster[0], rate.cluster[1]], members: [rate] });
+  }
+  const clusters = [...groups.values()].sort((left, right) => {
+    const tag = compare(left.key[0], right.key[0]);
+    return tag === 0 ? compare(left.key[1], right.key[1]) : tag;
+  });
+  if (clusters.length < 2) throw new Error("clusteredPairedRateDiffBca: at least two source clusters are required");
+  const delta = (rate: TaskRates): number => rate.pB - rate.pA;
+  const mean = (members: readonly ClusteredTaskRate[]): number => members.reduce((sum, rate) => sum + delta(rate), 0) / members.length;
+  const observed = mean(ordered);
+  const next = xorshift32(opts.seed);
+  const means: number[] = [];
+  let draws = 0;
+  for (let replicate = 0; replicate < resamples; replicate += 1) {
+    const sample: ClusteredTaskRate[] = [];
+    for (let position = 0; position < clusters.length; position += 1) {
+      const index = Math.floor((next() / 4_294_967_296) * clusters.length);
+      draws += 1;
+      sample.push(...clusters[index]!.members);
+    }
+    means.push(mean(sample));
+  }
+  means.sort((left, right) => left - right);
+  const below = means.filter((value) => value < observed).length;
+  const biasCorrection = invNorm(Math.min(Math.max(below / resamples, 1e-6), 1 - 1e-6));
+  const jackknife = clusters.map((_cluster, omitted) => mean(clusters.filter((_, index) => index !== omitted).flatMap((cluster) => cluster.members)));
+  const jackknifeMean = jackknife.reduce((sum, value) => sum + value, 0) / jackknife.length;
+  const numerator = jackknife.reduce((sum, value) => sum + Math.pow(jackknifeMean - value, 3), 0);
+  const sumSquares = jackknife.reduce((sum, value) => sum + Math.pow(jackknifeMean - value, 2), 0);
+  const acceleration = sumSquares === 0 ? 0 : numerator / (6 * Math.pow(sumSquares, 1.5));
+  const zCombined = biasCorrection + invNorm(alpha);
+  const denominator = 1 - acceleration * zCombined;
+  const adjustedZ = denominator === 0
+    ? (zCombined < 0 ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY)
+    : biasCorrection + zCombined / denominator;
+  const adjustedQuantile = normCdf(adjustedZ);
+  const adjustedIndex = Math.min(resamples - 1, Math.max(0, Math.floor(adjustedQuantile * resamples)));
+  return {
+    observed, lowerBound: means[adjustedIndex]!, acceleration, biasCorrection, adjustedQuantile,
+    adjustedIndex, draws, unit: "source-cluster",
+    clusters: clusters.map((cluster) => ({ key: cluster.key, members: cluster.members.map((member) => member.taskDigest) })),
+  };
+}
+
 /** One-sided BCa lower confidence bound. */
 export function pairedRateDiffLowerBound(rates: readonly TaskRates[], opts: RateCiOptions): number {
   return pairedRateDiffBca(rates, opts).lowerBound;
@@ -134,6 +208,8 @@ export interface NonInferiorityOptions extends RateCiOptions {
   /** Below this many paired tasks, the quality leg is inconclusive rather than a weak PASS/FAIL
    * (design §9.3 spirit: a method never manufactures confidence from too little data). */
   minN?: number;
+  /** A method-specific deterministic bootstrap lower bound (source-cluster bootstrap in §7.47). */
+  lowerBound?: number;
 }
 
 export type QualityVerdict = "pass" | "fail" | "inconclusive";
@@ -159,7 +235,7 @@ export function nonInferiorityVerdict(rates: readonly TaskRates[], opts: NonInfe
   }
   const deltaAbs = opts.deltaAbs ?? 0.05;
   const relativeCap = opts.relativeCap ?? 0.15;
-  const lowerBound = pairedRateDiffLowerBound(rates, opts);
+  const lowerBound = opts.lowerBound ?? pairedRateDiffLowerBound(rates, opts);
   const meanA = rates.reduce((s, r) => s + r.pA, 0) / rates.length;
   const meanB = rates.reduce((s, r) => s + r.pB, 0) / rates.length;
   const absRegression = Math.max(0, meanA - meanB);

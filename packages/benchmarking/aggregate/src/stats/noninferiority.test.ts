@@ -6,6 +6,7 @@ import {
   pairedRateDiffBca,
   pairedRateDiffLowerBound,
   xorshift32,
+  clusteredPairedRateDiffBca,
 } from "./noninferiority.js";
 
 describe("xorshift32-v1", () => {
@@ -86,6 +87,25 @@ describe("pairedRateDiffLowerBound", () => {
     expect(reversed.draws).toBe(6_000);
     expect(reversed.lowerBound).toBeCloseTo(-0.125, 15);
     expect(reversed.lowerBound).not.toBe(result.lowerBound);
+  });
+});
+
+describe("clusteredPairedRateDiffBca", () => {
+  test("samples whole source clusters, reports C draws per resample, and refuses a single cluster", () => {
+    const clustered = [
+      { taskDigest: "a", cluster: ["source", "family-a"] as const, pA: 0.8, pB: 0.2 },
+      { taskDigest: "b", cluster: ["source", "family-a"] as const, pA: 0.8, pB: 0.2 },
+      { taskDigest: "c", cluster: ["sourceCommitment", "sha256:" + "c".repeat(64)] as const, pA: 0.2, pB: 0.8 },
+    ];
+    const result = clusteredPairedRateDiffBca(clustered, { seed: 1, resamples: 10 });
+    expect(result.draws).toBe(20);
+    expect(result.unit).toBe("source-cluster");
+    expect(result.clusters).toEqual([
+      { key: ["source", "family-a"], members: ["a", "b"] },
+      { key: ["sourceCommitment", "sha256:" + "c".repeat(64)], members: ["c"] },
+    ]);
+    expect(() => clusteredPairedRateDiffBca(clustered.slice(0, 2), { seed: 1, resamples: 10 }))
+      .toThrow(/at least two source clusters/);
   });
 });
 

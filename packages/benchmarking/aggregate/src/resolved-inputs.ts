@@ -264,8 +264,9 @@ export function matrixRunDigest(matrix: MatrixRecord): string {
 }
 
 export interface ResolvedTaskProvenance {
-  readonly source: string;
   readonly timestamp: string;
+  /** Deliberately tagged: plaintext `source` and opaque `sourceCommitment` never collide. */
+  readonly cluster: { readonly tag: "source" | "sourceCommitment"; readonly value: string };
 }
 
 export function resolveTaskProvenance(
@@ -286,11 +287,14 @@ export function resolveTaskProvenance(
     throw new MethodInputError("task-record-malformed", digest, "payload.provenance is required");
   }
   const source = provenance["source"];
-  if (typeof source !== "string" || source.length === 0) {
+  const sourceCommitment = provenance["sourceCommitment"];
+  const hasSource = typeof source === "string" && source.length > 0;
+  const hasCommitment = typeof sourceCommitment === "string" && /^sha256:[a-f0-9]{64}$/.test(sourceCommitment);
+  if (hasSource === hasCommitment) {
     throw new MethodInputError(
       "task-provenance-source-missing",
       digest,
-      "payload.provenance.source is required",
+      "payload.provenance must carry exactly one non-empty source or lowercase sha256 sourceCommitment",
     );
   }
   const timestamp = provenance["timestamp"];
@@ -301,7 +305,12 @@ export function resolveTaskProvenance(
       "payload.provenance.timestamp must be RFC 3339",
     );
   }
-  return { source, timestamp };
+  return {
+    timestamp,
+    cluster: hasSource
+      ? { tag: "source", value: source as string }
+      : { tag: "sourceCommitment", value: sourceCommitment as string },
+  };
 }
 
 export function resolveAnchoredAnnouncementTime(

@@ -103,8 +103,8 @@ describe("exact Task provenance bytes", () => {
     expect(resolveTaskProvenance(digest.slice("sha256:".length), {
       resolveTaskBytes: () => bytes,
     })).toEqual({
-      source: "repository/\u{1f680}",
       timestamp: "2026-07-29T00:00:00Z",
+      cluster: { tag: "source", value: "repository/\u{1f680}" },
     });
   });
 
@@ -116,6 +116,19 @@ describe("exact Task provenance bytes", () => {
     expect(() => resolveTaskProvenance(digest.slice("sha256:".length), {
       resolveTaskBytes: () => bytes,
     })).toThrow(MethodInputError);
+  });
+
+  test("uses a tagged plaintext-or-commitment source-family key and rejects ambiguous provenance", () => {
+    const commitment = `sha256:${"c".repeat(64)}`;
+    const committed = canonicalJsonBytes({ payload: { provenance: { timestamp: "2026-07-29T00:00:00Z", sourceCommitment: commitment } } });
+    const digest = recordDigest(committed);
+    expect(resolveTaskProvenance(digest.slice("sha256:".length), { resolveTaskBytes: () => committed }))
+      .toEqual({ timestamp: "2026-07-29T00:00:00Z", cluster: { tag: "sourceCommitment", value: commitment } });
+
+    const ambiguous = canonicalJsonBytes({ payload: { provenance: { timestamp: "2026-07-29T00:00:00Z", source: "sha256:source", sourceCommitment: commitment } } });
+    const ambiguousDigest = recordDigest(ambiguous);
+    expect(() => resolveTaskProvenance(ambiguousDigest.slice("sha256:".length), { resolveTaskBytes: () => ambiguous }))
+      .toThrow(expect.objectContaining({ code: "task-provenance-source-missing" }));
   });
 });
 
