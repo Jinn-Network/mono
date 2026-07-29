@@ -8,6 +8,7 @@ import {
 import {
   sealTask,
   sha256Hex,
+  type TaskSpecification,
 } from "@jinn-network/task-execution-protocol";
 import { expect, test } from "vitest";
 
@@ -27,9 +28,9 @@ function envelope(
   return sealDsseEnvelope({ payloadBytes, payloadType, signatures: [{ signature, keyid }] });
 }
 
-test("one admission boundary handles canonical and hostile signed Task envelopes", async () => {
+test("shared signed-Task vectors exercise only the exported admission boundary", async () => {
   const fixture = conformance.buildDefaultTrustFixture();
-  const task = sealTask({
+  const task: TaskSpecification = {
     protocol: "https://jinn.network/profiles/task-execution/1.0",
     profile: {
       uri: "https://jinn.network/task-profiles/repository-work/1.0",
@@ -37,7 +38,8 @@ test("one admission boundary handles canonical and hostile signed Task envelopes
     },
     instructions: "admission boundary fixture",
     outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
-  });
+  };
+  const canonicalTaskBytes = sealTask(task);
   const dependencies = {
     bindingResolver: fixture.bindingResolver,
     witnessVerifier: { verify1271Witness: async () => ({ verified: true }) },
@@ -52,25 +54,81 @@ test("one admission boundary handles canonical and hostile signed Task envelopes
       dependencies,
     });
 
-  await expect(admit(envelope(task, "application/vnd.jinn.task-execution.task.v1+json", fixture.requesterKey)))
-    .resolves.toMatchObject({ ok: true, taskBytes: task });
-  await expect(admit(envelope(new TextEncoder().encode(`${new TextDecoder().decode(task)} `), "application/vnd.jinn.task-execution.task.v1+json", fixture.requesterKey)))
-    .resolves.toMatchObject({ ok: false, reason: "task-canonical" });
-  const document = JSON.parse(new TextDecoder().decode(task)) as Record<string, unknown>;
-  const reordered = new TextEncoder().encode(JSON.stringify({
-    outputs: document["outputs"], instructions: document["instructions"],
-    profile: document["profile"], protocol: document["protocol"],
+  const noncanonicalTaskBytes = new TextEncoder().encode(
+    `${new TextDecoder().decode(canonicalTaskBytes)} `,
+  );
+  const reorderedTaskBytes = new TextEncoder().encode(JSON.stringify({
+    outputs: task.outputs,
+    instructions: task.instructions,
+    profile: task.profile,
+    protocol: task.protocol,
   }));
-  await expect(admit(envelope(reordered, "application/vnd.jinn.task-execution.task.v1+json", fixture.requesterKey)))
-    .resolves.toMatchObject({ ok: false, reason: "task-canonical" });
-  const substituted = sealTask({
-    ...document,
-    instructions: "substituted after signing",
-  } as Parameters<typeof sealTask>[0]);
-  await expect(admit(envelope(substituted, "application/vnd.jinn.task-execution.task.v1+json", fixture.requesterKey, task)))
-    .resolves.toMatchObject({ ok: false, reason: "requester-binding" });
-  await expect(admit(envelope(task, "application/json", fixture.requesterKey)))
-    .resolves.toMatchObject({ ok: false, reason: "media-type" });
-  await expect(admit(envelope(task, "application/vnd.jinn.task-execution.task.v1+json", fixture.executorKey), fixture.executorKey, fixture.executorAgent))
-    .resolves.toMatchObject({ ok: false, reason: "requester-binding" });
+  const substitutedTaskBytes = sealTask({ ...task, instructions: "substituted after signing" });
+  const canonicalEnvelope = envelope(
+    canonicalTaskBytes,
+    "application/vnd.jinn.task-execution.task.v1+json",
+    fixture.requesterKey,
+  );
+
+  const vectors: ReadonlyArray<{
+    readonly name: string;
+    readonly envelopeBytes: Uint8Array;
+    readonly key?: string;
+    readonly agent?: string;
+    readonly expected: conformance.SignedTaskAdmissionResult;
+  }> = [
+    {
+      name: "canonical requester Task",
+      envelopeBytes: canonicalEnvelope,
+      expected: {
+        ok: true as const,
+        envelopeBytes: canonicalEnvelope,
+        taskBytes: canonicalTaskBytes,
+        task,
+      },
+    },
+    {
+      name: "trailing-byte noncanonical Task",
+      envelopeBytes: envelope(noncanonicalTaskBytes, "application/vnd.jinn.task-execution.task.v1+json", fixture.requesterKey),
+      expected: { ok: false as const, reason: "task-canonical" as const, detail: "DSSE payload differs from the canonical sealed Task bytes" },
+    },
+    {
+      name: "reordered noncanonical Task",
+      envelopeBytes: envelope(reorderedTaskBytes, "application/vnd.jinn.task-execution.task.v1+json", fixture.requesterKey),
+      expected: { ok: false as const, reason: "task-canonical" as const, detail: "DSSE payload differs from the canonical sealed Task bytes" },
+    },
+    {
+      name: "PAE signature for substituted Task",
+      envelopeBytes: envelope(substitutedTaskBytes, "application/vnd.jinn.task-execution.task.v1+json", fixture.requesterKey, canonicalTaskBytes),
+      expected: {
+        ok: false as const,
+        reason: "requester-binding" as const,
+        detail: "no valid signature by claimed key \"did:key:z6MkRequesterFixtureKey\" on the envelope.",
+      },
+    },
+    {
+      name: "wrong DSSE media type",
+      envelopeBytes: envelope(canonicalTaskBytes, "application/json", fixture.requesterKey),
+      expected: {
+        ok: false as const,
+        reason: "media-type" as const,
+        detail: "expected application/vnd.jinn.task-execution.task.v1+json, got application/json",
+      },
+    },
+    {
+      name: "signer without requester authority",
+      envelopeBytes: envelope(canonicalTaskBytes, "application/vnd.jinn.task-execution.task.v1+json", fixture.executorKey),
+      key: fixture.executorKey,
+      agent: fixture.executorAgent,
+      expected: {
+        ok: false as const,
+        reason: "requester-binding" as const,
+        detail: "binding scope [jinn:marketplace] does not cover family \"authorizations\".",
+      },
+    },
+  ];
+
+  for (const vector of vectors) {
+    expect(await admit(vector.envelopeBytes, vector.key, vector.agent), vector.name).toEqual(vector.expected);
+  }
 });

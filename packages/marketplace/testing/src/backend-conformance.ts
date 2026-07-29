@@ -193,6 +193,8 @@ export interface SignedTaskAdmissionInput {
 export type SignedTaskAdmissionResult =
   | {
       readonly ok: true;
+      /** Exact received DSSE bytes; callers never reconstruct an equivalent envelope. */
+      readonly envelopeBytes: Uint8Array;
       readonly taskBytes: Uint8Array;
       readonly task: TaskSpecification;
     }
@@ -278,7 +280,12 @@ export async function checkSignedTaskAdmission(
       detail: binding.detail ?? binding.reason ?? "requester authority was not accepted",
     };
   }
-  return { ok: true, taskBytes: parsed.payloadBytes.slice(), task };
+  return {
+    ok: true,
+    envelopeBytes: input.envelopeBytes.slice(),
+    taskBytes: parsed.payloadBytes.slice(),
+    task,
+  };
 }
 
 /** The §16.2 marketplace profile requires `executionIds` and `evidenceRecords` on every Delivery. */
@@ -696,7 +703,7 @@ export function describeMarketplaceBackendConformance(
 
   // Layer 2: native §16.2 marketplace-profile conformance.
   describe("native §16.2 marketplace-profile conformance", () => {
-    test("a signed Task recovers its exact canonical payload and requester authority", async () => {
+    test("signed-Task admission uses the exported boundary for complete canonical success", async () => {
       const task = sealTask({
         protocol: "https://jinn.network/profiles/task-execution/1.0",
         profile: PROFILE_DESCRIPTOR,
@@ -704,56 +711,64 @@ export function describeMarketplaceBackendConformance(
         outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
       });
       const envelope = signedEnvelope(task, TASK_MEDIA_TYPE, trustFixture.requesterKey);
-      const recovered = parseDsseEnvelope(envelope);
-
-      expect(recovered.payloadType).toBe(TASK_MEDIA_TYPE);
-      expect(exactBytes(recovered.payloadBytes, task)).toBe(true);
-      expect(exactBytes(recovered.payloadBytes, sealTask(TaskSpecificationSchema.parse(
-        parseExactJson(recovered.payloadBytes, "Task"),
-      )))).toBe(true);
-      await expect(verifyEnvelopeBinding({
+      expect(await checkSignedTaskAdmission({
         envelopeBytes: envelope,
-        key: trustFixture.requesterKey,
-        agent: trustFixture.requesterAgent,
-        family: "authorizations",
+        requesterKey: trustFixture.requesterKey,
+        requesterAgent: trustFixture.requesterAgent,
         atTime: "2026-01-01T00:00:00Z",
-      }, {
+        dependencies: {
         bindingResolver: trustFixture.bindingResolver,
         witnessVerifier: { verify1271Witness: async () => ({ verified: true }) },
         dsseVerifier: trustFixture.dsseVerifier,
-      })).resolves.toMatchObject({ ok: true });
+        },
+      })).toEqual({
+        ok: true,
+        envelopeBytes: envelope,
+        taskBytes: task,
+        task: TaskSpecificationSchema.parse(parseExactJson(task, "Task")),
+      });
     });
 
-    test("signed Task rejects substituted/noncanonical payloads and an unauthorized claimed signer", async () => {
+    test("signed-Task hostile vectors use the exported boundary and exact typed refusals", async () => {
       const task = sealTask({
         protocol: "https://jinn.network/profiles/task-execution/1.0",
         profile: PROFILE_DESCRIPTOR,
         instructions: "§16.2 signed-Task hostile payload fixture.",
         outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
       });
-      const substituted = signedEnvelope(
+      const noncanonical = signedEnvelope(
         new TextEncoder().encode(`${new TextDecoder().decode(task)} `),
         TASK_MEDIA_TYPE,
         trustFixture.requesterKey,
       );
-      const recovered = parseDsseEnvelope(substituted);
-      expect(exactBytes(recovered.payloadBytes, task)).toBe(false);
-      expect(exactBytes(recovered.payloadBytes, sealTask(TaskSpecificationSchema.parse(
-        parseExactJson(recovered.payloadBytes, "substituted Task"),
-      )))).toBe(false);
-
       const unauthorized = signedEnvelope(task, TASK_MEDIA_TYPE, trustFixture.executorKey);
-      await expect(verifyEnvelopeBinding({
-        envelopeBytes: unauthorized,
-        key: trustFixture.executorKey,
-        agent: trustFixture.executorAgent,
-        family: "authorizations",
-        atTime: "2026-01-01T00:00:00Z",
-      }, {
+      const dependencies = {
         bindingResolver: trustFixture.bindingResolver,
         witnessVerifier: { verify1271Witness: async () => ({ verified: true }) },
         dsseVerifier: trustFixture.dsseVerifier,
-      })).resolves.toMatchObject({ ok: false, reason: "scope-violation" });
+      };
+      expect(await checkSignedTaskAdmission({
+        envelopeBytes: noncanonical,
+        requesterKey: trustFixture.requesterKey,
+        requesterAgent: trustFixture.requesterAgent,
+        atTime: "2026-01-01T00:00:00Z",
+        dependencies,
+      })).toEqual({
+        ok: false,
+        reason: "task-canonical",
+        detail: "DSSE payload differs from the canonical sealed Task bytes",
+      });
+      expect(await checkSignedTaskAdmission({
+        envelopeBytes: unauthorized,
+        requesterKey: trustFixture.executorKey,
+        requesterAgent: trustFixture.executorAgent,
+        atTime: "2026-01-01T00:00:00Z",
+        dependencies,
+      })).toEqual({
+        ok: false,
+        reason: "requester-binding",
+        detail: "binding scope [jinn:marketplace] does not cover family \"authorizations\".",
+      });
     });
 
     test("a signed Submission verifies via authenticateRequester (DSSE over exact sealed bytes, §7.5b)", async () => {

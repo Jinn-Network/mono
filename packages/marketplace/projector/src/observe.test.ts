@@ -442,6 +442,253 @@ describe("projectObservations", () => {
     ]);
   });
 
+  test.each([
+    [0, { state: "rejected", category: "protocol-violation" }],
+    [1, { state: "delivered" }],
+    [2, { state: "rejected", detail: "verdict-fail" }],
+    [3, { state: "rejected", category: "protocol-violation" }],
+    [4, { state: "failed", category: "result-unavailable" }],
+    [5, { state: "rejected", category: "protocol-violation" }],
+  ] as const)("maps verdict code %i to its complete frozen terminal output", (verdictCode, expected) => {
+    const verdict = projectable({
+      event: "VerdictDeliveryClaimed",
+      facts: {
+        evaluator: OPERATOR,
+        requestId: REQUEST_ID,
+        taskId: 42n,
+        attemptIndex: 3,
+        verdictIndex: 1,
+        verdictCode,
+      },
+      derivation: derivation("VerdictDeliveryClaimed", 40 + verdictCode, "revised"),
+    });
+    const output = projectObservations([verdict]);
+    expect(output).toEqual([
+      {
+        ...base(
+          "network.jinn.task-execution.attempt-terminal.v1",
+          ATTEMPT,
+          1n,
+          40 + verdictCode,
+          "VerdictDeliveryClaimed",
+          "revised",
+        ),
+        data: expected,
+      },
+      {
+        ...base(
+          "network.jinn.task-execution.submission-closed.v1",
+          SUBMISSION,
+          1n,
+          40 + verdictCode,
+          "VerdictDeliveryClaimed",
+          "revised",
+        ),
+        data: { reason: "capacity" },
+      },
+    ]);
+  });
+
+  test("digest-rejected revised creation is a non-reopenable tombstone across claim then release", () => {
+    const rejectedCreation = projectable({
+      event: "TaskCreated",
+      facts: {
+        creator: CREATOR, taskCidDigest: `0x${"0".repeat(64)}`,
+        submissionDigest: `0x${"d".repeat(64)}`, taskId: 42n, maxTotal: 1,
+        maxConcurrent: 1, submissionDeadline: 1_800_000_000n, closeAt: 0n,
+        responseTimeout: 3600n, minVerdicts: 1, requireDistinctEvaluator: true,
+        solutionMaxDeliveryRate: 10n, verdictMaxDeliveryRate: 20n,
+        solutionBudget: 100n, verdictBudget: 20n,
+      },
+      derivation: derivation("TaskCreated", 90, "revised"),
+    });
+    const revisedClaim = projectable({
+      event: "TaskAttemptCreated",
+      facts: {
+        taskId: 42n, attemptIndex: 3, operator: OPERATOR, requestId: REQUEST_ID,
+        priorityMech: OPERATOR, attemptDeadline: 1_800_000_000n, deliveryRate: 10n,
+      },
+      derivation: derivation("TaskAttemptCreated", 91, "revised"),
+    });
+    const release = projectable({
+      event: "AttemptReleased",
+      facts: { taskId: 42n, attemptIndex: 3, operator: OPERATOR },
+      derivation: derivation("AttemptReleased", 92, "revised"),
+    });
+
+    const created = reduceMarketplaceProjection([rejectedCreation], createMarketplaceProjectionState());
+    expect(created).toEqual({
+      state: {
+        processedLogIds: [`84532:${COORDINATOR}:${BLOCK_HASH}:${TX_HASH}:90`],
+        processedCorrectionIds: [],
+        sequenceBySourceSubject: {
+          [`${SOURCE.length}:${SOURCE}${SUBMISSION}`]: "0000000000000001",
+        },
+        tasks: {
+          "84532:0x1111111111111111111111111111111111111111:42": {
+            admission: "rejected",
+            rejection: {
+              category: "content-corruption",
+              derivation: derivation("TaskCreated", 90, "revised"),
+            },
+          },
+        },
+        pendingMechDeliveries: {},
+      },
+      events: [rejectedCreation],
+      observations: [{
+        ...base("network.jinn.task-execution.submission-rejected.v1", SUBMISSION, 1n, 90, "TaskCreated", "revised"),
+        data: {
+          category: "content-corruption",
+          detail: "TaskCreated task digest does not match resolved signed Submission task digest",
+        },
+      }],
+      availabilityOpenedLogIds: [],
+      refusals: [],
+    });
+
+    const claimed = reduceMarketplaceProjection([revisedClaim], created.state);
+    const released = reduceMarketplaceProjection([release], claimed.state);
+    expect(claimed).toEqual({
+      state: {
+        ...created.state,
+        processedLogIds: [...created.state.processedLogIds, `84532:${COORDINATOR}:${BLOCK_HASH}:${TX_HASH}:91`],
+      },
+      events: [], observations: [], availabilityOpenedLogIds: [],
+      refusals: [{
+        kind: "marketplace-projection-refused",
+        reason: "task-not-admissible",
+        derivation: derivation("TaskAttemptCreated", 91, "revised"),
+        taskId: 42n,
+        attemptIndex: 3,
+      }],
+    });
+    expect(released).toEqual({
+      state: {
+        ...claimed.state,
+        processedLogIds: [...claimed.state.processedLogIds, `84532:${COORDINATOR}:${BLOCK_HASH}:${TX_HASH}:92`],
+      },
+      events: [], observations: [], availabilityOpenedLogIds: [],
+      refusals: [{
+        kind: "marketplace-projection-refused",
+        reason: "task-not-admissible",
+        derivation: derivation("AttemptReleased", 92, "revised"),
+        taskId: 42n,
+        attemptIndex: 3,
+      }],
+    });
+  });
+
+  test.each(["AttemptReleased", "AttemptExpired"] as const)(
+    "TaskClosed remains terminal across a later %s batch", (lifecycleEvent) => {
+      const revisedTask = projectable({
+        event: "TaskCreated",
+        facts: {
+          creator: CREATOR, taskCidDigest: `0x${"7".repeat(64)}`,
+          submissionDigest: `0x${"d".repeat(64)}`, taskId: 42n, maxTotal: 1,
+          maxConcurrent: 1, submissionDeadline: 1_800_000_000n, closeAt: 0n,
+          responseTimeout: 3600n, minVerdicts: 1, requireDistinctEvaluator: true,
+          solutionMaxDeliveryRate: 10n, verdictMaxDeliveryRate: 20n,
+          solutionBudget: 100n, verdictBudget: 20n,
+        },
+        derivation: derivation("TaskCreated", 100, "revised"),
+      });
+      const revisedClaim = projectable({
+        event: "TaskAttemptCreated",
+        facts: {
+          taskId: 42n, attemptIndex: 3, operator: OPERATOR, requestId: REQUEST_ID,
+          priorityMech: OPERATOR, attemptDeadline: 1_800_000_000n, deliveryRate: 10n,
+        },
+        derivation: derivation("TaskAttemptCreated", 101, "revised"),
+      });
+      const close = projectable({
+        event: "TaskClosed",
+        facts: { taskId: 42n, creator: CREATOR },
+        derivation: derivation("TaskClosed", 102, "revised"),
+      });
+      const lifecycle = projectable({
+        event: lifecycleEvent,
+        facts: { taskId: 42n, attemptIndex: 3, operator: OPERATOR },
+        derivation: derivation(lifecycleEvent, 103, "revised"),
+      });
+      const initial = reduceMarketplaceProjection([revisedTask, revisedClaim], createMarketplaceProjectionState());
+      const closed = reduceMarketplaceProjection([close], initial.state);
+      const after = reduceMarketplaceProjection([lifecycle], closed.state);
+      const key = "84532:0x1111111111111111111111111111111111111111:42";
+      const attemptSequenceKey = `${SOURCE.length}:${SOURCE}${ATTEMPT}`;
+      expect(after).toEqual({
+        state: {
+          ...closed.state,
+          processedLogIds: [...closed.state.processedLogIds, `84532:${COORDINATOR}:${BLOCK_HASH}:${TX_HASH}:103`],
+          sequenceBySourceSubject: {
+            ...closed.state.sequenceBySourceSubject,
+            [attemptSequenceKey]: "0000000000000002",
+          },
+          tasks: {
+            [key]: {
+              ...closed.state.tasks[key],
+              liveAttemptIndices: {},
+              availability: "closed",
+              requesterClosed: true,
+            },
+          },
+        },
+        events: [lifecycle],
+        observations: [{
+          ...base(
+            "network.jinn.task-execution.attempt-terminal.v1",
+            ATTEMPT,
+            2n,
+            103,
+            lifecycleEvent,
+            "revised",
+          ),
+          data: lifecycleEvent === "AttemptReleased" ? { state: "cancelled" } : { state: "expired" },
+        }],
+        availabilityOpenedLogIds: [],
+        refusals: [],
+      });
+      const blockedClaim = {
+        ...revisedClaim,
+        facts: { ...revisedClaim.facts, attemptIndex: 4 },
+        derivation: derivation("TaskAttemptCreated", 104, "revised"),
+      } as ObservationMarketplaceEvent;
+      const reannounceAttempt = reduceMarketplaceProjection([blockedClaim], after.state);
+      expect(reannounceAttempt).toEqual({
+        state: {
+          ...after.state,
+          processedLogIds: [...after.state.processedLogIds, `84532:${COORDINATOR}:${BLOCK_HASH}:${TX_HASH}:104`],
+        },
+        events: [], observations: [], availabilityOpenedLogIds: [],
+        refusals: [{
+          kind: "marketplace-projection-refused",
+          reason: "task-closed",
+          derivation: derivation("TaskAttemptCreated", 104, "revised"),
+          taskId: 42n,
+          attemptIndex: 4,
+        }],
+      });
+      const topUp = projectable({
+        event: "AttemptsAdded",
+        facts: { taskId: 42n, creator: CREATOR, added: 1, newMaxTotal: 2 },
+        derivation: derivation("AttemptsAdded", 105, "revised"),
+      });
+      expect(reduceMarketplaceProjection([topUp], after.state)).toEqual({
+        state: {
+          ...after.state,
+          processedLogIds: [...after.state.processedLogIds, `84532:${COORDINATOR}:${BLOCK_HASH}:${TX_HASH}:105`],
+        },
+        events: [], observations: [], availabilityOpenedLogIds: [],
+        refusals: [{
+          kind: "marketplace-projection-refused",
+          reason: "task-closed",
+          derivation: derivation("AttemptsAdded", 105, "revised"),
+          taskId: 42n,
+        }],
+      });
+    },
+  );
+
   test("emits capacity closure at exhaustion and treats AttemptsAdded as a capacity fact, not a fake acceptance", () => {
     const task = projectable({
       event: "TaskCreated",
