@@ -87,3 +87,10 @@ export type {
 // --- the reference in-memory MarketplaceObservePort (stub self-claim, design §5.3; M2.4) ---
 export { createInMemoryMarketplaceObserveStore } from "./observe-store.js";
 export type { InMemoryMarketplaceObserveStore } from "./observe-store.js";
+
+export { claimAttempt, dispatchContextDescriptor } from "./claim.js";
+export type { ClaimAttemptResult, ClaimPorts, PreClaimResult } from "./claim.js";
+export { convergeDelivery, checkDeliveryCorrespondence } from "./delivery.js";
+export type { ConvergedDelivery, DeliveryCorrespondence } from "./delivery.js";
+export { settleDelivery, mapRaceLoss } from "./settlement.js";
+export { closeSubmission, releaseAttempt, signalCancel } from "./lifecycle.js";
