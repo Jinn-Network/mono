@@ -1018,13 +1018,14 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       },
     });
 
+    const envelope = this.readResultEnvelope(input.paths, input.plan);
     const interpreted = interpretResult(
       input.plan,
       {
         ...(execution.exitCode === undefined ? {} : { exitCode: execution.exitCode }),
         ...(execution.signal === undefined ? {} : { signal: execution.signal }),
       },
-      undefined,
+      envelope,
     );
 
     let receipt;
@@ -1121,6 +1122,21 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
     throw new Error("shim did not publish a fingerprint");
+  }
+
+  private readResultEnvelope(paths: WorkspacePaths, plan: LaunchPlan): ResultEnvelope | undefined {
+    const artifact = plan.resultContract.structuredOutputArtifact;
+    if (artifact === undefined) return undefined;
+    if (!artifact.startsWith("out/") || artifact.includes("..") || artifact.includes("\\")) {
+      throw new Error("launcher result envelope artifact must be a contained out/ path");
+    }
+    const path = join(paths.root, artifact);
+    if (!existsSync(path)) return undefined;
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new Error("launcher result envelope must be a JSON object");
+    }
+    return parsed as ResultEnvelope;
   }
 
   private async waitForOutcome(meta: string, nonce: string): Promise<{ readonly exitCode?: number; readonly signal?: string }> {
