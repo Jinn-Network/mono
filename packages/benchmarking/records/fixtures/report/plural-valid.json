@@ -107,7 +107,7 @@
           "expected": 4,
           "judged": 3,
           "floor": "0.75",
-          "runOutcome": "partial"
+          "runOutcome": "complete"
         },
         "attrition": {
           "perArm": {

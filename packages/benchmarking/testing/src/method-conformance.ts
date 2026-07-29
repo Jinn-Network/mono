@@ -917,6 +917,82 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
       });
     });
 
+    test("noninferiority-iut refuses a single source cluster at the public method path", async () => {
+      const fixture = structuredClone(await loadFixture("noninferiority-pass.json")) as Omit<MethodFixture, "matrices" | "taskProvenance"> & {
+        matrices: MutableFixtureMatrix[];
+        taskProvenance?: Record<string, { source?: string }>;
+      };
+      const sharedSource = "fixture-source/shared-cluster";
+      const taskDigests = [...new Set(fixture.matrices[0]!.cells.map((cell) => cell.taskDigest))];
+      fixture.taskProvenance = Object.fromEntries(taskDigests.map((taskDigest) => [taskDigest, { source: sharedSource }]));
+      const prepared = prepareFixture(fixture);
+      const method = registry.get(fixture.methodId, fixture.methodVersion)!;
+      const result = onlySubjectResults(method.compute!({
+        subjects: prepared.subjects,
+        parameters: { ...fixture.parameters, verdictRule: fixture.verdictRule },
+        verdictRule: fixture.verdictRule,
+        registry,
+        ...prepared.ports,
+      })) as {
+        verdictRule: string;
+        baseline: string;
+        candidate: string;
+        verdict: string;
+        pairing: { taskDigests: string[] };
+        quality: { verdict: string; lowerBound: string | null; relativeRegression: string | null; reasons: string[] };
+        cost: { verdict: string; pValue: string | null; n: number; excluded: { count: number; cellKeys: string[] } };
+        excluded: { count: number; cellKeys: string[] };
+        conflicted: { count: number; cellKeys: string[] };
+        bootstrap: {
+          procedure: string;
+          seed: number;
+          resamples: number;
+          basis: string;
+          count: number;
+          unit: string;
+          draws: number;
+          clusters: Array<{ key: [string, string]; members: string[] }>;
+        };
+      };
+      const pairedTaskDigests = [...prepared.taskBytes.keys()]
+        .map((digest) => digest.slice("sha256:".length))
+        .sort();
+      expect(result).toEqual({
+        verdictRule: "unanimous",
+        baseline: "armA",
+        candidate: "armB",
+        verdict: "INCONCLUSIVE",
+        pairing: { taskDigests: pairedTaskDigests },
+        quality: {
+          verdict: "inconclusive",
+          lowerBound: null,
+          relativeRegression: null,
+          reasons: ["fewer than two source clusters (got 1)"],
+        },
+        cost: {
+          verdict: "lower",
+          pValue: "0.0030",
+          n: 10,
+          excluded: { count: 0, cellKeys: [] },
+        },
+        excluded: { count: 0, cellKeys: [] },
+        conflicted: { count: 0, cellKeys: [] },
+        bootstrap: {
+          procedure: "xorshift32-v1",
+          seed: 123456789,
+          resamples: 1000,
+          basis: "task-provenance-source-family",
+          count: 1,
+          unit: "source-cluster",
+          draws: 0,
+          clusters: [{
+            key: ["source", sharedSource],
+            members: pairedTaskDigests,
+          }],
+        },
+      });
+    });
+
     test("plaintext source and opaque source commitment remain tagged, non-colliding cluster identities", async () => {
       const fixture = structuredClone(await loadFixture("noninferiority-pass.json")) as Omit<MethodFixture, "matrices"> & { matrices: Array<{ cells: Array<{ taskDigest: string }> }>; taskProvenance?: Record<string, { source?: string; sourceCommitment?: string }> };
       const [first, second] = [...new Set(fixture.matrices[0]!.cells.map((cell) => cell.taskDigest))];

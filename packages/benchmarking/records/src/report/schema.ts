@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AgentIriSchema, DigestBearingResourceDescriptorSchema, LowercaseSha256HexSchema } from "../descriptors.js";
 import { topLevelRecordSchema } from "../extensions.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
+import { sumAttritionExcluded, validateCompletenessOutcome } from "../completeness.js";
 import { AttritionSchema, CompletenessSchema } from "../matrix/schema.js";
 import { isJsonValue } from "../json.js";
 import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
@@ -85,6 +86,15 @@ export const ReportRecordSchema = topLevelRecordSchema({
           message: "per-subject disclosure digest/order does not match subjects",
           path: ["disclosures", "perSubject", index, "subjectSha256"],
         });
+      }
+      if (disclosure !== undefined) {
+        validateCompletenessOutcome(
+          disclosure.completeness,
+          disclosure.completeness.judged,
+          sumAttritionExcluded(disclosure.attrition),
+          ctx,
+          ["disclosures", "perSubject", index, "completeness"],
+        );
       }
     });
   });

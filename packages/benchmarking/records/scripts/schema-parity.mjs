@@ -100,4 +100,22 @@ const leadingDigitArm = await readJson(join(fixtures, "run", "minimal.json"));
 leadingDigitArm.arms[0].armId = "1arm";
 assert(RunRecordSchema.safeParse(leadingDigitArm).success && runCheck(leadingDigitArm), "run/leading-digit-arm: runtime and Draft 2020-12 must accept armId 1arm");
 
+const reportHostile = await readJson(join(fixtures, "report", "minimal.json"));
+const reportCheck = await validate("report");
+reportHostile.disclosures.perSubject[0].completeness = { expected: 0, judged: 0, floor: "1", runOutcome: "complete" };
+assert(!ReportRecordSchema.safeParse(reportHostile).success, "report/zero-expected-complete: runtime must reject complete at zero eligible denominator");
+assert(reportCheck(reportHostile), "report/zero-expected-complete: Draft 2020-12 accepts shape (semantic gate is runtime-only)");
+reportHostile.disclosures.perSubject[0].completeness.runOutcome = "partial";
+assert(ReportRecordSchema.safeParse(reportHostile).success && reportCheck(reportHostile), "report/zero-expected-partial: runtime and Draft 2020-12 must accept partial at zero eligible denominator");
+
+const reportAllExcluded = await readJson(join(fixtures, "report", "valid.json"));
+reportAllExcluded.disclosures.perSubject[0].attrition.perArm.armA = {
+  expected: 1, judged: 0, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 1, replacements: 0,
+};
+reportAllExcluded.disclosures.perSubject[0].completeness = { expected: 1, judged: 0, floor: "1", runOutcome: "complete" };
+assert(!ReportRecordSchema.safeParse(reportAllExcluded).success, "report/all-excluded-complete: runtime must reject complete when every cell is excluded");
+assert(reportCheck(reportAllExcluded), "report/all-excluded-complete: Draft 2020-12 accepts shape (semantic gate is runtime-only)");
+reportAllExcluded.disclosures.perSubject[0].completeness.runOutcome = "partial";
+assert(ReportRecordSchema.safeParse(reportAllExcluded).success && reportCheck(reportAllExcluded), "report/all-excluded-partial: runtime and Draft 2020-12 must accept partial when every cell is excluded");
+
 console.log("Draft 2020-12 schema parity: bidirectional corpus + extension/descriptor/arm/time/floor/aggregate vectors passed.");

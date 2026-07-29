@@ -455,6 +455,160 @@ describe("deriveDisclosures", () => {
       disclosures.perSubject[1]!.integrityTiers,
     );
   });
+
+  function independenceFixture(options: {
+    outcome: "judged" | "expired";
+    independence: "disclosed" | "gating";
+    checksFailed: readonly string[];
+  }): Fixture {
+    const registry = createMethodRegistry();
+    const verdictMap = new Map<string, Uint8Array>();
+    const verdictOne = verdictBytes("pass", "independence");
+    verdictMap.set(recordDigest(verdictOne), verdictOne);
+    const run = sealRun({
+      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      benchmark: { digest: { sha256: "b".repeat(64) } },
+      owner: "urn:uuid:22222222-2222-5222-8222-222222222222",
+      arms: [{ armId: "armA", pinning: {} }],
+      replicates: 1,
+      policy: {
+        completenessFloor: "1",
+        cellWindow: 60_000,
+        replacement: { allowed: false },
+        independence: options.independence,
+        evaluation: {},
+        submissionBaseline: {},
+      },
+      closeAt: "2026-08-04T00:00:00Z",
+    });
+    const runMap = new Map<string, Uint8Array>([[run.digest, run.bytes]]);
+    const taskDigest = "c".repeat(64);
+    const verdictDigest = recordDigest(verdictOne);
+    const judgedCell = {
+      cellKey: `${taskDigest}/armA/1`,
+      taskDigest,
+      armId: "armA",
+      replicate: 1,
+      dispatches: 1,
+      accounted: 1,
+      submission: `sha256:${"3".repeat(64)}`,
+      delivery: `sha256:${"4".repeat(64)}`,
+      verdicts: [verdictDigest],
+      validVerdicts: [verdictDigest],
+      outcome: "judged" as const,
+      verification: {
+        harness: "match",
+        model: "match",
+        loadout: "match",
+        isolation: "match",
+        checksFailed: [...options.checksFailed].sort(),
+      },
+      integrityTier: "re-derivable" as const,
+    };
+    const expiredCell = {
+      cellKey: `${taskDigest}/armA/1`,
+      taskDigest,
+      armId: "armA",
+      replicate: 1,
+      dispatches: 0,
+      verdicts: [] as string[],
+      validVerdicts: [] as string[],
+      outcome: "expired" as const,
+      verification: {
+        harness: "match",
+        model: "match",
+        loadout: "match",
+        isolation: "match",
+        checksFailed: [...options.checksFailed].sort(),
+      },
+      integrityTier: "re-derivable" as const,
+    };
+    const cell = options.outcome === "judged" ? judgedCell : expiredCell;
+    const matrix = sealMatrix({
+      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      run: { digest: { sha256: run.digest.slice("sha256:".length) } },
+      closeBoundary: { at: "2026-08-04T00:00:00Z" },
+      cells: [cell],
+      exclusions: [],
+      attrition: {
+        perArm: {
+          armA: {
+            expected: 1,
+            judged: options.outcome === "judged" ? 1 : 0,
+            unjudged: 0,
+            unscorable: 0,
+            expired: options.outcome === "expired" ? 1 : 0,
+            invalidated: 0,
+            excluded: 0,
+            replacements: 0,
+          },
+        },
+        asymmetryFlags: [],
+      },
+      completeness: {
+        expected: 1,
+        judged: options.outcome === "judged" ? 1 : 0,
+        floor: "1",
+        runOutcome: options.outcome === "judged" ? "complete" : "partial",
+      },
+      assembly: { procedure: "jinn.benchmarking.assembly", version: "1.0" },
+    });
+    return {
+      subjectBytes: [matrix.bytes],
+      ports: {
+        registry,
+        resolveVerdictBytes: (digest) => verdictMap.get(digest),
+        resolveRunBytes: (digest) => runMap.get(digest),
+        resolveTaskBytes: () => undefined,
+      },
+    };
+  }
+
+  test.each([
+    ["judged disclosed independence violation", { outcome: "judged" as const, independence: "disclosed" as const, expected: 1 }],
+    ["expired disclosed independence violation", { outcome: "expired" as const, independence: "disclosed" as const, expected: 0 }],
+    ["judged gating independence violation", { outcome: "judged" as const, independence: "gating" as const, expected: 0 }],
+    ["expired gating independence violation", { outcome: "expired" as const, independence: "gating" as const, expected: 0 }],
+  ])("counts evaluator-independence disclosures only for judged cells under disclosed policy (%s)", (_label, { outcome, independence, expected }) => {
+    const fixture = independenceFixture({
+      outcome,
+      independence,
+      checksFailed: ["evaluator-independence"],
+    });
+    const disclosures = deriveDisclosures(fixture.subjectBytes, fixture.ports.resolveRunBytes);
+    expect(disclosures.perSubject[0]).toMatchObject({
+      subjectSha256: recordDigest(fixture.subjectBytes[0]!).slice("sha256:".length),
+      integrityTiers: { "re-derivable": 1, "attested-only": 0 },
+      pinning: {
+        harness: { match: 1, mismatch: 0, unverifiable: 0 },
+        model: { match: 1, mismatch: 0, unverifiable: 0 },
+        loadout: { match: 1, mismatch: 0, unverifiable: 0 },
+        isolation: { match: 1, mismatch: 0, unverifiable: 0 },
+      },
+      independence: expected,
+      completeness: {
+        expected: 1,
+        judged: outcome === "judged" ? 1 : 0,
+        floor: "1",
+        runOutcome: outcome === "judged" ? "complete" : "partial",
+      },
+      attrition: {
+        perArm: {
+          armA: {
+            expected: 1,
+            judged: outcome === "judged" ? 1 : 0,
+            unjudged: 0,
+            unscorable: 0,
+            expired: outcome === "expired" ? 1 : 0,
+            invalidated: 0,
+            excluded: 0,
+            replacements: 0,
+          },
+        },
+        asymmetryFlags: [],
+      },
+    });
+  });
 });
 
 describe("byte-first produceReport / verifyReport", () => {

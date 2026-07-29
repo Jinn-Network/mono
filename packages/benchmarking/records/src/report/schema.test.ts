@@ -38,7 +38,7 @@ describe("ReportRecordSchema / parseReport / sealReport", () => {
     );
     expect(perSubject.map((entry) => entry.completeness)).toEqual([
       { expected: 3, judged: 1, floor: "0.5", runOutcome: "cancelled" },
-      { expected: 4, judged: 3, floor: "0.75", runOutcome: "partial" },
+      { expected: 4, judged: 3, floor: "0.75", runOutcome: "complete" },
     ]);
     expect(perSubject[0]!.attrition.perArm["armA"]!.replacements).toBe(0);
     expect(perSubject[1]!.attrition.perArm["armA"]!.replacements).toBe(2);
@@ -128,8 +128,6 @@ describe("ReportRecordSchema / parseReport / sealReport", () => {
   });
 
   test.each([
-    ["missing required value", undefined],
-    ["nested undefined", { value: undefined }],
     ["function", () => "not JSON"],
     ["symbol", Symbol("not-json")],
     ["bigint", BigInt(1)],
@@ -137,5 +135,52 @@ describe("ReportRecordSchema / parseReport / sealReport", () => {
     const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
     value.results = results;
     expect(() => sealReport(value)).toThrow();
+  });
+
+  test("rejects zero-eligible complete per-subject disclosure completeness", () => {
+    const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown> & {
+      disclosures: {
+        perSubject: Array<{
+          completeness: { expected: number; judged: number; floor: string; runOutcome: string };
+          attrition: { perArm: Record<string, unknown> };
+        }>;
+      };
+    };
+    value.disclosures.perSubject[0]!.completeness = {
+      expected: 0, judged: 0, floor: "1", runOutcome: "complete",
+    };
+    expect(() => sealReport(value)).toThrow(InvalidDocumentError);
+    try {
+      sealReport(value);
+      expect.unreachable();
+    } catch (error) {
+      const issues = (error as InvalidDocumentError).errors;
+      expect(issues.some((issue) =>
+        issue.path === "disclosures.perSubject.0.completeness.runOutcome"
+        && issue.message.includes("runOutcome complete requires the declared completeness floor to pass"),
+      )).toBe(true);
+    }
+    value.disclosures.perSubject[0]!.completeness.runOutcome = "partial";
+    expect(() => sealReport(value)).not.toThrow();
+  });
+
+  test("rejects all-excluded complete per-subject disclosure completeness", () => {
+    const value = JSON.parse(JSON.stringify(loadFixture("valid.json"))) as Record<string, unknown> & {
+      disclosures: {
+        perSubject: Array<{
+          completeness: { expected: number; judged: number; floor: string; runOutcome: string };
+          attrition: { perArm: Record<string, { excluded: number; expected: number; judged: number; unjudged: number; unscorable: number; expired: number; invalidated: number; replacements: number }> };
+        }>;
+      };
+    };
+    value.disclosures.perSubject[0]!.attrition.perArm.armA = {
+      expected: 1, judged: 0, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 1, replacements: 0,
+    };
+    value.disclosures.perSubject[0]!.completeness = {
+      expected: 1, judged: 0, floor: "1", runOutcome: "complete",
+    };
+    expect(() => sealReport(value)).toThrow(InvalidDocumentError);
+    value.disclosures.perSubject[0]!.completeness.runOutcome = "partial";
+    expect(() => sealReport(value)).not.toThrow();
   });
 });

@@ -13,7 +13,7 @@ import {
   TaskDigestHexSchema,
   cellKey as computeCellKey,
 } from "../run/cells.js";
-import { exactDecimalInUnitInterval, meetsExactDecimalFloor } from "../decimal.js";
+import { validateCompletenessOutcome } from "../completeness.js";
 
 const Rfc3339 = z.string().refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp");
 
@@ -434,30 +434,13 @@ export const MatrixRecordSchema = topLevelRecordSchema({
         path: ["completeness", "judged"],
       });
     }
-    if (!exactDecimalInUnitInterval(matrix.completeness.floor)) {
-      ctx.addIssue({
-        code: "custom",
-        message: "completeness.floor must be in (0,1] (§8.1)",
-        path: ["completeness", "floor"],
-      });
-    } else {
-      const denominator = matrix.cells.length - excludedKeys.length;
-      const floorPassed = meetsExactDecimalFloor(judged, denominator, matrix.completeness.floor);
-      if (matrix.completeness.runOutcome === "complete" && !floorPassed) {
-        ctx.addIssue({
-          code: "custom",
-          message: "runOutcome complete requires the declared completeness floor to pass (§8.1)",
-          path: ["completeness", "runOutcome"],
-        });
-      }
-      if (matrix.completeness.runOutcome === "partial" && floorPassed) {
-        ctx.addIssue({
-          code: "custom",
-          message: "runOutcome partial requires the declared completeness floor to be missed (§8.1)",
-          path: ["completeness", "runOutcome"],
-        });
-      }
-    }
+    validateCompletenessOutcome(
+      matrix.completeness,
+      judged,
+      excludedKeys.length,
+      ctx,
+      ["completeness"],
+    );
 
     if (!isSortedUnique(matrix.attrition.asymmetryFlags)) {
       ctx.addIssue({
