@@ -1,0 +1,32 @@
+import { mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { harvest } from "./harvest.js";
+import type { WorkspacePaths } from "./contract.js";
+
+async function workspace(): Promise<WorkspacePaths> {
+  const root = await mkdtemp(join(tmpdir(), "jinn-harvest-"));
+  const result = Object.fromEntries(["input", "work", "out", "logs", "harnessState", "secrets", "tmp", "meta"].map((name) => [name, join(root, name)]).concat([["root", root]])) as WorkspacePaths;
+  await Promise.all([result.out, result.input, result.work, result.logs, result.harnessState, result.secrets, result.tmp, result.meta].map((path) => mkdir(path, { recursive: true })));
+  return result;
+}
+
+describe("harvest", () => {
+  it("records omissions and never dereferences a symlink escaping out", async () => {
+    const paths = await workspace();
+    await symlink(join(paths.secrets, "token"), join(paths.out, "creds"));
+    const result = await harvest(paths, [{ name: "missing", mediaType: "text/plain", required: true }]);
+    expect(result.omissions).toEqual(["missing"]);
+    expect(result.integrityViolations).toEqual([{ path: "creds", reason: "symlink-escape" }]);
+    expect(result.manifest).toEqual([]);
+  });
+
+  it("is deterministic and sorts artifact paths by code unit", async () => {
+    const paths = await workspace();
+    await writeFile(join(paths.out, "a"), "a"); await writeFile(join(paths.out, "Z"), "z");
+    expect((await harvest(paths, [])).manifest.map((entry) => entry.path)).toEqual(["Z", "a"]);
+    expect(await harvest(paths, [])).toEqual(await harvest(paths, []));
+  });
+});

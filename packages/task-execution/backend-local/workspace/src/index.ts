@@ -17,3 +17,8 @@ export type {
   WorkspaceKind,
   WorkspacePaths,
 } from "./contract.js";
+export { makeDirProvisioner } from "./dir-provisioner.js";
+export { makeWorktreeProvisioner, selectProvisioner } from "./worktree-provisioner.js";
+export { resolveGrantsToSecrets } from "./grants.js";
+export { ContentCorruptionError, materializeInput } from "./materialize.js";
+export { harvest } from "./harvest.js";

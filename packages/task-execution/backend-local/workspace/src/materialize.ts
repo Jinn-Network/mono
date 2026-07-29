@@ -1,0 +1,21 @@
+import { createHash } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
+import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
+
+export class ContentCorruptionError extends Error {
+  readonly code = "content-corruption";
+  constructor() { super("fetched input digest does not match its declared sha256"); }
+}
+
+export async function materializeInput(
+  descriptor: ResourceDescriptor,
+  inputDir: string,
+  fetchInput: (descriptor: ResourceDescriptor) => Promise<Uint8Array>,
+): Promise<void> {
+  const bytes = descriptor.content === undefined ? await fetchInput(descriptor) : Buffer.from(descriptor.content);
+  const expected = descriptor.digest?.sha256;
+  if (expected !== undefined && createHash("sha256").update(bytes).digest("hex") !== expected) throw new ContentCorruptionError();
+  await mkdir(inputDir, { recursive: true });
+  await writeFile(join(inputDir, basename(descriptor.name ?? descriptor.uri ?? "input")), bytes, { mode: 0o400 });
+}
