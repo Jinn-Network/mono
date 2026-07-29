@@ -1,0 +1,1318 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
+import type {
+  AttemptUri,
+  BackendCapabilities,
+  CancelAck,
+  DeliveryRef,
+  ObservationCursor,
+  ObservationSnapshot,
+  PreflightReport,
+  PreflightRequest,
+  ReconciliationReport,
+  SubmissionAck,
+  SubmissionUri,
+  TaskExecutionBackend,
+  TwoPartyEngagement,
+} from "@jinn-network/task-execution-backend";
+import { TaskExecutionError } from "@jinn-network/task-execution-backend";
+import type { LauncherContract, ProbeResult } from "@jinn-network/task-execution-launchers";
+import {
+  ProfilesError,
+  resolveProfile,
+  type ProfileStore,
+  type TaskProfileDocument,
+} from "@jinn-network/task-execution-profiles";
+import type {
+  AttemptDescriptor,
+  ComparisonClass,
+  DispatchContext,
+  JsonValue,
+  ProtocolObservation,
+  SubmissionRecord,
+  TaskSpecification,
+} from "@jinn-network/task-execution-protocol";
+import {
+  documentDigest,
+  foldObservations,
+  formatSequence,
+  isValidUrnUuid,
+  mergeRequirements,
+  sealDelivery,
+  sealSubmission,
+  sealTask,
+  serializeCanonicalJson,
+  sha256Hex,
+  validateDelivery,
+  validateDispatchContext,
+  validateSubmission,
+  validateTask,
+} from "@jinn-network/task-execution-protocol";
+import type {
+  AttemptIdentity,
+  JournalEvent,
+  SpawnRequest,
+} from "@jinn-network/task-execution-supervisor";
+import {
+  foldAttemptRecord,
+  openAttemptJournal,
+  openSubmissionSegment,
+} from "@jinn-network/task-execution-supervisor";
+import type {
+  CapabilityGrant,
+  ProvisionerContract,
+  TaskView,
+  WorkspaceKind,
+  WorkspacePaths,
+} from "@jinn-network/task-execution-workspace";
+import { ProvisioningRejectedError } from "@jinn-network/task-execution-workspace";
+import {
+  acquireStateRootWriter,
+  CapacityGate,
+  type StateRootWriter,
+} from "./capacity.js";
+
+// Core requirement comparison classes (profiles §5.1 / program §7.3). Profile-added entries
+// are overlaid after resolution, so the resolved document is authoritative for its own keys.
+const CORE_REQUIREMENT_CLASSES: Readonly<Record<string, ComparisonClass>> = {
+  maxAttemptDurationMs: "ceiling",
+  maxTokens: "ceiling",
+  maxCost: "ceiling",
+  isolation: "exact",
+  networkPolicy: "exact",
+  evidenceCapture: "exact",
+  harness: "exact",
+  model: "constraint",
+  loadout: "exact",
+  isolationPolicy: "exact",
+};
+
+const SCOPE_DELIMITER = "\u001f";
+const textDecoder = new TextDecoder("utf-8", { fatal: true });
+
+function scopeKey(requester: string, key: string): string {
+  return `${requester}${SCOPE_DELIMITER}${key}`;
+}
+
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+function decode(bytes: Uint8Array): unknown {
+  return JSON.parse(textDecoder.decode(bytes));
+}
+
+function detail(errors: readonly { readonly path: string; readonly message: string }[]): string {
+  return errors.map((error) => `${error.path}: ${error.message}`).join("; ");
+}
+
+function directoryKey(value: string): string {
+  return sha256Hex(new TextEncoder().encode(value));
+}
+
+function requestedInventoryValue(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as { readonly id?: unknown; readonly kind?: unknown };
+  if (typeof record.id === "string") return record.id;
+  if (typeof record.kind === "string") return record.kind;
+  return undefined;
+}
+
+function atomicWrite(path: string, bytes: Uint8Array): void {
+  const directory = path.slice(0, path.lastIndexOf("/"));
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const temporary = `${path}.tmp-${process.pid}-${crypto.randomUUID()}`;
+  const fd = openSync(temporary, "wx", 0o600);
+  try {
+    writeFileSync(fd, bytes);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  renameSync(temporary, path);
+  const directoryFd = openSync(directory, "r");
+  try {
+    fsyncSync(directoryFd);
+  } finally {
+    closeSync(directoryFd);
+  }
+}
+
+function errorCategory(error: unknown): TaskExecutionError {
+  if (error instanceof TaskExecutionError) return error;
+  if (error instanceof ProfilesError) {
+    return new TaskExecutionError(error.code, { detail: error.message });
+  }
+  return new TaskExecutionError("backend-unavailable", {
+    detail: error instanceof Error ? error.message : "local backend operation failed",
+  });
+}
+
+export interface ProvisionerCapabilities {
+  readonly taskProfiles: readonly string[];
+  readonly workspaceKinds: readonly WorkspaceKind[];
+  readonly inputMediaTypes: readonly string[];
+  readonly outputMediaTypes: readonly string[];
+  readonly maxArtifactBytes?: number;
+  readonly isolation: readonly string[];
+}
+
+export interface LocalProvisionerInput {
+  readonly sealedTaskBytes: Uint8Array;
+  readonly dispatchContextBytes: Uint8Array;
+  readonly task: TaskSpecification;
+  readonly submission: SubmissionRecord;
+  readonly attempt: AttemptIdentity;
+}
+
+export interface LocalBackendFaults {
+  /** Test-only crash injection after the Delivery checkpoint is durable but before its event. */
+  readonly afterDeliveryCheckpoint?: () => void;
+}
+
+export interface LocalTaskExecutionBackendConfig {
+  readonly stateRoot: string;
+  readonly source: string;
+  readonly executor: string;
+  readonly profileStore: ProfileStore;
+  readonly resolveTaskProfile?: (
+    descriptor: TaskSpecification["profile"],
+  ) => TaskProfileDocument;
+  readonly launchers: readonly LauncherContract[];
+  readonly provisioner: (input: LocalProvisionerInput) => ProvisionerContract;
+  readonly provisionerCapabilities: ProvisionerCapabilities;
+  readonly maxConcurrentAttempts?: number;
+  readonly capabilityGrants?: (
+    grants: Readonly<Record<string, unknown>>,
+  ) => readonly CapabilityGrant[];
+  readonly now?: () => string;
+  readonly faults?: LocalBackendFaults;
+}
+
+interface StoredSubmission {
+  readonly taskBytes: Uint8Array;
+  readonly submissionBytes: Uint8Array;
+  readonly digest: `sha256:${string}`;
+  readonly parsed: SubmissionRecord;
+  readonly taskDigest: `sha256:${string}`;
+  readonly attempt: AttemptUri;
+}
+
+interface AttemptMeta {
+  readonly attempt: AttemptUri;
+  readonly task: `sha256:${string}`;
+  readonly submission: SubmissionUri;
+  readonly effectiveDeadline: string;
+  readonly annotations?: Readonly<Record<string, unknown>>;
+}
+
+interface PersistedSubmission {
+  readonly digest: `sha256:${string}`;
+  readonly taskDigest: `sha256:${string}`;
+  readonly attempt: AttemptUri;
+  readonly submission: SubmissionUri;
+  readonly requester: string;
+  readonly idempotencyKey: string;
+}
+
+interface PersistedAttempt extends AttemptMeta {}
+
+function asAttemptUri(value: string): AttemptUri {
+  return value as AttemptUri;
+}
+
+function asSubmissionUri(value: string): SubmissionUri {
+  return value as SubmissionUri;
+}
+
+/**
+ * The reference local backend. The three conformance-driving methods (`drive`,
+ * `recordDelivery`, `simulateReconciliation`) are explicit implementation seams used by the
+ * unchanged Layer-2 kit; applications consume this value only as `TaskExecutionBackend`.
+ */
+export class LocalTaskExecutionBackend implements TaskExecutionBackend {
+  private readonly writer: StateRootWriter;
+  private readonly capacity: CapacityGate;
+  private readonly submissionsByScope = new Map<string, StoredSubmission>();
+  private readonly submissionsByUri = new Map<SubmissionUri, StoredSubmission>();
+  private readonly attempts = new Map<AttemptUri, AttemptMeta>();
+  private readonly reconciliationOverrides = new Map<string, ReconciliationReport>();
+  private closed = false;
+
+  constructor(private readonly config: LocalTaskExecutionBackendConfig) {
+    this.writer = acquireStateRootWriter(config.stateRoot);
+    this.capacity = new CapacityGate(config.maxConcurrentAttempts ?? 4);
+    this.rebuildIndexes();
+  }
+
+  private now(): string {
+    return this.config.now?.() ?? new Date().toISOString();
+  }
+
+  private assertWriter(): void {
+    if (this.closed) {
+      throw new TaskExecutionError("backend-unavailable", {
+        detail: "local backend instance is closed",
+      });
+    }
+    if (!this.writer.acquired) throw this.writer.error;
+  }
+
+  private submissionDirectory(identity: string): string {
+    return join(this.config.stateRoot, "submissions", directoryKey(identity));
+  }
+
+  private attemptRoot(attempt: AttemptUri): string {
+    return join(this.config.stateRoot, "attempts", attempt.slice("urn:uuid:".length));
+  }
+
+  private paths(attempt: AttemptUri): WorkspacePaths {
+    const root = this.attemptRoot(attempt);
+    return {
+      root,
+      input: join(root, "input"),
+      work: join(root, "work"),
+      out: join(root, "out"),
+      logs: join(root, "logs"),
+      harnessState: join(root, "harness-state"),
+      secrets: join(root, "secrets"),
+      tmp: join(root, "tmp"),
+      meta: join(root, "meta"),
+    };
+  }
+
+  private journal(attempt: AttemptUri) {
+    return openAttemptJournal(this.paths(attempt).meta);
+  }
+
+  private reject(
+    identity: string,
+    category: TaskExecutionError["category"],
+    options: {
+      readonly detail?: string;
+      readonly annotations?: Readonly<Record<string, unknown>>;
+    } = {},
+  ): SubmissionAck {
+    const error = new TaskExecutionError(category, {
+      detail: options.detail,
+      annotations: options.annotations === undefined
+        ? undefined
+        : { ...options.annotations },
+    });
+    openSubmissionSegment(this.submissionDirectory(identity)).append({
+      submission: identity,
+      type: "submission-rejected",
+      time: this.now(),
+      details: {
+        category,
+        ...(options.detail === undefined ? {} : { detail: options.detail }),
+        ...(options.annotations === undefined ? {} : { annotations: options.annotations }),
+      },
+    });
+    return { accepted: false, error };
+  }
+
+  private decodeAndSealCheck(
+    taskBytes: Uint8Array,
+    submissionBytes: Uint8Array,
+  ):
+    | {
+        readonly ok: true;
+        readonly task: TaskSpecification;
+        readonly submission: SubmissionRecord;
+      }
+    | { readonly ok: false; readonly identity: string; readonly detail: string } {
+    let submissionIdentity = `invalid:${documentDigest(submissionBytes)}`;
+    try {
+      const taskDocument = decode(taskBytes);
+      const taskValidation = validateTask(taskDocument);
+      if (!taskValidation.conforms) {
+        return { ok: false, identity: submissionIdentity, detail: detail(taskValidation.errors) };
+      }
+      if (!bytesEqual(sealTask(taskDocument), taskBytes)) {
+        return {
+          ok: false,
+          identity: submissionIdentity,
+          detail: "Task bytes are valid JSON but are not the exact canonical sealed bytes",
+        };
+      }
+
+      const submissionDocument = decode(submissionBytes);
+      if (
+        typeof submissionDocument === "object"
+        && submissionDocument !== null
+        && typeof (submissionDocument as { submission?: unknown }).submission === "string"
+      ) {
+        submissionIdentity = String(
+          (submissionDocument as { submission: unknown }).submission,
+        );
+      }
+      const submissionValidation = validateSubmission(submissionDocument);
+      if (!submissionValidation.conforms) {
+        return {
+          ok: false,
+          identity: submissionIdentity,
+          detail: detail(submissionValidation.errors),
+        };
+      }
+      if (!bytesEqual(sealSubmission(submissionDocument), submissionBytes)) {
+        return {
+          ok: false,
+          identity: submissionIdentity,
+          detail: "Submission bytes are valid JSON but are not the exact canonical sealed bytes",
+        };
+      }
+      return {
+        ok: true,
+        task: taskDocument as TaskSpecification,
+        submission: submissionDocument as SubmissionRecord,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        identity: submissionIdentity,
+        detail: error instanceof Error ? error.message : "document decoding failed",
+      };
+    }
+  }
+
+  private profile(task: TaskSpecification): TaskProfileDocument {
+    return this.config.resolveTaskProfile?.(task.profile)
+      ?? resolveProfile(task.profile, this.config.profileStore);
+  }
+
+  private capabilitiesValue(): BackendCapabilities {
+    const taskProfiles = [...new Set(
+      this.config.launchers.flatMap((launcher) => [...launcher.capabilities().taskProfiles]),
+    )].filter((profile) => this.config.provisionerCapabilities.taskProfiles.includes(profile));
+    const runPinning = new Map<string, Set<string>>();
+    for (const launcher of this.config.launchers) {
+      for (const support of launcher.capabilities().runPinning.keys) {
+        const inventory = runPinning.get(support.key) ?? new Set<string>();
+        for (const item of support.inventory) inventory.add(item);
+        runPinning.set(support.key, inventory);
+      }
+    }
+    return {
+      taskProfiles,
+      inputMediaTypes: [...this.config.provisionerCapabilities.inputMediaTypes],
+      outputMediaTypes: [...this.config.provisionerCapabilities.outputMediaTypes],
+      ...(this.config.provisionerCapabilities.maxArtifactBytes === undefined
+        ? {}
+        : { maxArtifactBytes: this.config.provisionerCapabilities.maxArtifactBytes }),
+      cancel: true,
+      watch: true,
+      preflight: true,
+      fetchArtifact: true,
+      confidentialInputs: true,
+      signedObservations: false,
+      signedDeliveries: false,
+      evidenceCapture: "none",
+      deadlineEnforcement: true,
+      isolation: [...this.config.provisionerCapabilities.isolation],
+      attempts: { maxTotal: [1, 1], maxConcurrent: [1, 1] },
+      runPinning: {
+        keys: [...runPinning].map(([key, inventory]) => ({
+          key,
+          inventory: [...inventory],
+          posture: "enforced" as const,
+        })),
+      },
+    };
+  }
+
+  async capabilities(): Promise<BackendCapabilities> {
+    return this.capabilitiesValue();
+  }
+
+  async preflight(_request: PreflightRequest): Promise<PreflightReport> {
+    this.assertWriter();
+    const probes: ProbeResult[] = await Promise.all(
+      this.config.launchers.map(
+        async (launcher): Promise<ProbeResult> =>
+          launcher.probe?.() ?? { ready: true },
+      ),
+    );
+    const failed = probes.find((probe) => !probe.ready);
+    return failed === undefined
+      ? { ready: true }
+      : {
+          ready: false,
+          detail: failed.detail ?? "a configured launcher is not ready",
+          error: new TaskExecutionError("backend-unavailable", {
+            detail: failed.detail ?? "launcher probe failed",
+          }),
+        };
+  }
+
+  async submit(
+    taskBytes: Uint8Array,
+    submissionBytes: Uint8Array,
+    engagement?: TwoPartyEngagement,
+  ): Promise<SubmissionAck> {
+    try {
+      this.assertWriter();
+    } catch (error) {
+      return { accepted: false, error: errorCategory(error) };
+    }
+    const checked = this.decodeAndSealCheck(taskBytes, submissionBytes);
+    if (!checked.ok) {
+      return this.reject(checked.identity, "invalid-document", { detail: checked.detail });
+    }
+    const { task, submission } = checked;
+    const submissionUri = asSubmissionUri(submission.submission);
+
+    if (engagement !== undefined) {
+      if (!isValidUrnUuid(engagement.attemptUri)) {
+        return this.reject(submissionUri, "invalid-document", {
+          detail: `engagement.attemptUri "${engagement.attemptUri}" is not a well-formed urn:uuid`,
+        });
+      }
+      const dispatchValidation = validateDispatchContext(engagement.dispatchContext);
+      if (!dispatchValidation.conforms) {
+        return this.reject(submissionUri, "invalid-document", {
+          detail: detail(dispatchValidation.errors),
+        });
+      }
+    }
+
+    const taskDigest = documentDigest(taskBytes);
+    const boundTaskDigest = submission.task.digest?.sha256;
+    if (boundTaskDigest !== taskDigest.slice("sha256:".length)) {
+      return this.reject(submissionUri, "invalid-reference", {
+        detail: `Submission task digest sha256:${boundTaskDigest ?? "none"} does not match ${taskDigest}`,
+      });
+    }
+
+    const scope = scopeKey(submission.requester, submission.idempotencyKey);
+    const existing = this.submissionsByScope.get(scope);
+    if (existing !== undefined) {
+      if (
+        bytesEqual(existing.taskBytes, taskBytes)
+        && bytesEqual(existing.submissionBytes, submissionBytes)
+      ) {
+        return {
+          accepted: true,
+          submission: asSubmissionUri(existing.parsed.submission),
+          digest: existing.digest,
+        };
+      }
+      return this.reject(submissionUri, "submission-conflict", {
+        detail: `idempotencyKey "${submission.idempotencyKey}" already has different exact bytes in this requester/backend scope`,
+      });
+    }
+
+    let resolvedProfile: TaskProfileDocument;
+    try {
+      resolvedProfile = this.profile(task);
+    } catch (error) {
+      const mapped = errorCategory(error);
+      return this.reject(submissionUri, mapped.category, { detail: mapped.detail });
+    }
+
+    const keyClasses: Record<string, ComparisonClass> = {
+      ...CORE_REQUIREMENT_CLASSES,
+      ...Object.fromEntries(
+        resolvedProfile.requirementKeys.map(({ key, comparisonClass }) => [
+          key,
+          comparisonClass,
+        ]),
+      ),
+    };
+    const merged = mergeRequirements(
+      task.requirements,
+      submission.requirements,
+      keyClasses,
+    );
+    if (!merged.ok) {
+      return this.reject(submissionUri, merged.category, {
+        detail: `requirement "${merged.key}" violates its ${keyClasses[merged.key] ?? "conservative"} comparison class`,
+        annotations: { key: merged.key },
+      });
+    }
+
+    const capabilities = this.capabilitiesValue();
+    const supportByKey = new Map(
+      capabilities.runPinning.keys.map((support) => [support.key, support]),
+    );
+    for (const [key, value] of Object.entries(merged.effective)) {
+      const support = supportByKey.get(key);
+      if (support === undefined) {
+        return this.reject(submissionUri, "unsupported-requirement", {
+          detail: `requirement "${key}" is not declared by this backend`,
+          annotations: { key },
+        });
+      }
+      const requested = requestedInventoryValue(value);
+      if (
+        support.inventory.length > 0
+        && !support.inventory.includes("*")
+        && (requested === undefined || !support.inventory.includes(requested))
+      ) {
+        return this.reject(submissionUri, "unsupported-requirement", {
+          detail: `requirement "${key}" requests a value outside this backend's inventory`,
+          annotations: { key },
+        });
+      }
+    }
+
+    if (submission.evaluationRequirements !== undefined) {
+      return this.reject(submissionUri, "unsupported-requirement", {
+        detail: "no configured deployment profile interprets evaluationRequirements",
+        annotations: { key: "evaluationRequirements" },
+      });
+    }
+    if (submission.profileParameters !== undefined) {
+      return this.reject(submissionUri, "unsupported-requirement", {
+        detail: "the resolved profile does not declare profileParameters",
+        annotations: { key: "profileParameters" },
+      });
+    }
+    if (submission.closeAt !== undefined) {
+      return this.reject(submissionUri, "unsupported-requirement", {
+        detail: "this embedded local backend cannot enforce closeAt",
+        annotations: { key: "closeAt" },
+      });
+    }
+    if (submission.capabilityGrants !== undefined && this.config.capabilityGrants === undefined) {
+      return this.reject(submissionUri, "unsupported-requirement", {
+        detail: "no capability-grant resolver is configured",
+        annotations: { key: "capabilityGrants" },
+      });
+    }
+    if (engagement === undefined) {
+      for (const key of ["maxTotal", "maxConcurrent"] as const) {
+        const requested = submission.attempts?.[key];
+        if (requested !== undefined && requested !== 1) {
+          return this.reject(submissionUri, "unsupported-requirement", {
+            detail: `attempts.${key}=${requested} is outside the local backend's [1, 1] range`,
+            annotations: { key: `attempts.${key}` },
+          });
+        }
+      }
+    }
+
+    const attempt = engagement?.attemptUri ?? asAttemptUri(`urn:uuid:${crypto.randomUUID()}`);
+    const capacity = this.capacity.tryAcquire(attempt);
+    if (!capacity.acquired) {
+      return this.reject(submissionUri, capacity.error.category, {
+        detail: capacity.error.detail,
+        annotations: capacity.error.annotations,
+      });
+    }
+
+    const dispatchContext: DispatchContext = engagement?.dispatchContext ?? {
+      taskDigest,
+      submission: submissionUri,
+      nonce: submission.nonce,
+      attempt,
+    };
+    if (
+      dispatchContext.taskDigest !== taskDigest
+      || dispatchContext.submission !== submissionUri
+      || dispatchContext.nonce !== submission.nonce
+      || dispatchContext.attempt !== attempt
+    ) {
+      this.capacity.release(attempt);
+      return this.reject(submissionUri, "invalid-reference", {
+        detail: "the supplied dispatch context does not bind the submitted Task, Submission, nonce, and Attempt",
+      });
+    }
+    const dispatchContextBytes = serializeCanonicalJson(dispatchContext as JsonValue);
+    const dispatchContextDescriptor = {
+      uri: `urn:jinn:backend-local:dispatch-context:${attempt.slice("urn:uuid:".length)}`,
+      digest: { sha256: sha256Hex(dispatchContextBytes) },
+    };
+
+    const identity: AttemptIdentity = {
+      attemptUri: attempt,
+      nonce: submission.nonce,
+      attemptNumber: 1,
+    };
+    const meta: AttemptMeta = {
+      attempt,
+      task: taskDigest,
+      submission: submissionUri,
+      effectiveDeadline: submission.deadline,
+      ...(submission.annotations === undefined
+        ? {}
+        : { annotations: submission.annotations }),
+    };
+    mkdirSync(this.paths(attempt).meta, { recursive: true, mode: 0o700 });
+    this.journal(attempt).append({
+      attemptId: attempt,
+      type: "attempt-engaged",
+      time: this.now(),
+      details: {
+        attempt,
+        taskDigest,
+        submission: submissionUri,
+        executor: this.config.executor,
+        effectiveDeadline: submission.deadline,
+        source: this.config.source,
+        dispatchContext: dispatchContextDescriptor,
+        attemptNumber: 1,
+        ...(submission.annotations === undefined
+          ? {}
+          : { annotations: submission.annotations }),
+      },
+    });
+
+    const digest = documentDigest(submissionBytes);
+    const stored: StoredSubmission = {
+      taskBytes: taskBytes.slice(),
+      submissionBytes: submissionBytes.slice(),
+      digest,
+      parsed: submission,
+      taskDigest,
+      attempt,
+    };
+    this.attempts.set(attempt, meta);
+    this.submissionsByScope.set(scope, stored);
+    this.submissionsByUri.set(submissionUri, stored);
+    this.persistAccepted(stored, meta);
+    openSubmissionSegment(this.submissionDirectory(submissionUri)).append({
+      submission: submissionUri,
+      type: "submission-accepted",
+      time: this.now(),
+      details: { taskDigest, digest, attempt },
+    });
+
+    const view: TaskView = {
+      task,
+      effectiveRequirements: merged.effective,
+      profile: resolvedProfile,
+    };
+    const provisioner = this.config.provisioner({
+      sealedTaskBytes: taskBytes.slice(),
+      dispatchContextBytes,
+      task,
+      submission,
+      attempt: identity,
+    });
+    try {
+      await provisioner.setup(
+        view,
+        this.paths(attempt),
+        submission.capabilityGrants === undefined
+          ? []
+          : [...(this.config.capabilityGrants?.(submission.capabilityGrants) ?? [])],
+      );
+    } catch (error) {
+      if (error instanceof ProvisioningRejectedError) {
+        this.journal(attempt).append({
+          attemptId: attempt,
+          type: "attempt-terminal",
+          time: this.now(),
+          details: {
+            state: "rejected",
+            category: "invalid-reference",
+            detail: error.reason,
+            neverExecuted: true,
+            source: this.config.source,
+          },
+        });
+      } else {
+        this.journal(attempt).append({
+          attemptId: attempt,
+          type: "attempt-terminal",
+          time: this.now(),
+          details: {
+            state: "failed",
+            blame: "infrastructure",
+            category: "backend-unavailable",
+            detail: error instanceof Error ? error.message : "provisioning failed",
+            source: this.config.source,
+          },
+          failsAttempt: true,
+        });
+      }
+      this.capacity.release(attempt);
+      return { accepted: true, submission: submissionUri, digest };
+    }
+
+    try {
+      const launcher = this.selectLauncher(view);
+      const plan = launcher.plan(view, this.paths(attempt), identity);
+      const spawn: SpawnRequest = {
+        argv: plan.argv,
+        env: provisioner.executionEnv({ env: plan.env, cwd: plan.cwd }),
+        cwd: plan.cwd,
+      };
+      const planBytes = serializeCanonicalJson({
+        argv: [...spawn.argv],
+        env: { ...spawn.env },
+        cwd: spawn.cwd,
+        validExitCodes: [...plan.validExitCodes],
+        resultContract: plan.resultContract,
+        interruptionBehavior: plan.interruptionBehavior,
+      } as unknown as JsonValue);
+      this.journal(attempt).fsyncedAppend({
+        attemptId: attempt,
+        type: "spawn-intended",
+        time: this.now(),
+        details: {
+          nonce: submission.nonce,
+          launcher: launcher.id,
+          launchPlanDigest: documentDigest(planBytes),
+          launchPlan: JSON.parse(textDecoder.decode(planBytes)),
+          source: this.config.source,
+        },
+      });
+    } catch (error) {
+      this.journal(attempt).append({
+        attemptId: attempt,
+        type: "attempt-terminal",
+        time: this.now(),
+        details: {
+          state: "failed",
+          blame: "infrastructure",
+          category: "backend-unavailable",
+          detail: error instanceof Error ? error.message : "launcher planning failed",
+          source: this.config.source,
+        },
+        failsAttempt: true,
+      });
+      this.capacity.release(attempt);
+    }
+
+    return { accepted: true, submission: submissionUri, digest };
+  }
+
+  private selectLauncher(view: TaskView): LauncherContract {
+    const harness = requestedInventoryValue(
+      (view.effectiveRequirements as Record<string, unknown>).harness,
+    );
+    const launcher = harness === undefined
+      ? this.config.launchers.find((candidate) =>
+          candidate.capabilities().taskProfiles.includes(view.profile.profile))
+      : this.config.launchers.find((candidate) => candidate.id === harness);
+    if (launcher === undefined) {
+      throw new TaskExecutionError("unsupported-requirement", {
+        detail: harness === undefined
+          ? `no launcher supports profile "${view.profile.profile}"`
+          : `no registered launcher has id "${harness}"`,
+      });
+    }
+    return launcher;
+  }
+
+  private persistAccepted(stored: StoredSubmission, attempt: AttemptMeta): void {
+    const submissionDirectory = this.submissionDirectory(stored.parsed.submission);
+    atomicWrite(join(submissionDirectory, "task.sealed"), stored.taskBytes);
+    atomicWrite(join(submissionDirectory, "submission.sealed"), stored.submissionBytes);
+    atomicWrite(
+      join(submissionDirectory, "metadata.json"),
+      serializeCanonicalJson({
+        digest: stored.digest,
+        taskDigest: stored.taskDigest,
+        attempt: stored.attempt,
+        submission: asSubmissionUri(stored.parsed.submission),
+        requester: stored.parsed.requester,
+        idempotencyKey: stored.parsed.idempotencyKey,
+      } satisfies PersistedSubmission as unknown as JsonValue),
+    );
+    atomicWrite(
+      join(this.paths(stored.attempt).meta, "attempt.json"),
+      serializeCanonicalJson(attempt as unknown as JsonValue),
+    );
+  }
+
+  private rebuildIndexes(): void {
+    const submissionsRoot = join(this.config.stateRoot, "submissions");
+    if (existsSync(submissionsRoot)) {
+      for (const entry of readdirSync(submissionsRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const directory = join(submissionsRoot, entry.name);
+        const metadataPath = join(directory, "metadata.json");
+        const taskPath = join(directory, "task.sealed");
+        const submissionPath = join(directory, "submission.sealed");
+        if (
+          !existsSync(metadataPath)
+          || !existsSync(taskPath)
+          || !existsSync(submissionPath)
+        ) {
+          continue;
+        }
+        try {
+          const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as PersistedSubmission;
+          const submissionBytes = new Uint8Array(readFileSync(submissionPath));
+          const parsed = decode(submissionBytes) as SubmissionRecord;
+          const stored: StoredSubmission = {
+            taskBytes: new Uint8Array(readFileSync(taskPath)),
+            submissionBytes,
+            digest: metadata.digest,
+            parsed,
+            taskDigest: metadata.taskDigest,
+            attempt: metadata.attempt,
+          };
+          this.submissionsByScope.set(
+            scopeKey(metadata.requester, metadata.idempotencyKey),
+            stored,
+          );
+          this.submissionsByUri.set(metadata.submission, stored);
+        } catch {
+          // A corrupt durable entry is surfaced by recover for its reference; one malformed
+          // directory must not make unrelated accepted submissions disappear at startup.
+        }
+      }
+    }
+
+    const live: AttemptUri[] = [];
+    const attemptsRoot = join(this.config.stateRoot, "attempts");
+    if (existsSync(attemptsRoot)) {
+      for (const entry of readdirSync(attemptsRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const attempt = asAttemptUri(`urn:uuid:${entry.name}`);
+        const metadataPath = join(attemptsRoot, entry.name, "meta", "attempt.json");
+        if (!existsSync(metadataPath)) continue;
+        try {
+          const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as PersistedAttempt;
+          this.attempts.set(attempt, metadata);
+          if (!foldAttemptRecord(this.journal(attempt).read()).terminal) live.push(attempt);
+        } catch {
+          // recover(ref) is the fail-loud reconciliation surface for corrupt attempts.
+        }
+      }
+    }
+    this.capacity.restore(live);
+  }
+
+  private resolveAttempt(ref: SubmissionUri | AttemptUri): AttemptUri {
+    if (this.attempts.has(ref as AttemptUri)) return ref as AttemptUri;
+    const stored = this.submissionsByUri.get(ref as SubmissionUri);
+    if (stored !== undefined) return stored.attempt;
+    throw new TaskExecutionError("attempt-not-found", {
+      detail: `no Attempt or Submission for ref "${ref}"`,
+    });
+  }
+
+  private observations(attempt: AttemptUri): ProtocolObservation[] {
+    const events = this.journal(attempt).read();
+    const engaged = events.find((event) => event.type === "attempt-engaged");
+    const authoritativeSource =
+      typeof engaged?.details["source"] === "string"
+        ? engaged.details["source"]
+        : this.config.source;
+    const taskDigest =
+      typeof engaged?.details["taskDigest"] === "string"
+        ? engaged.details["taskDigest"] as `sha256:${string}`
+        : undefined;
+    return events.flatMap((event) => {
+      const base = {
+        specversion: "1.0" as const,
+        id: `${authoritativeSource}/${event.attemptId}/${event.seq}`,
+        source: authoritativeSource,
+        subject: event.attemptId,
+        time: event.time,
+        datacontenttype: "application/json" as const,
+        sequence: formatSequence(BigInt(event.seq)),
+        ...(taskDigest === undefined ? {} : { taskdigest: taskDigest }),
+      };
+      switch (event.type) {
+        case "attempt-engaged":
+          return [{
+            ...base,
+            type: "network.jinn.task-execution.attempt-engaged.v1" as const,
+            data: {
+              attempt: event.details["attempt"],
+              task: event.details["taskDigest"],
+              submission: event.details["submission"],
+              executor: event.details["executor"],
+              effectiveDeadline: event.details["effectiveDeadline"],
+              source: authoritativeSource,
+              dispatchContext: event.details["dispatchContext"],
+              ...(event.details["annotations"] === undefined
+                ? {}
+                : { annotations: event.details["annotations"] }),
+            },
+          } as ProtocolObservation];
+        case "attempt-started":
+        case "spawned":
+          return [{
+            ...base,
+            type: "network.jinn.task-execution.attempt-started.v1" as const,
+            data: {
+              startedAt:
+                typeof event.details["startedAt"] === "string"
+                  ? event.details["startedAt"]
+                  : event.time,
+              ...(typeof event.details["executor"] === "string"
+                ? { executor: event.details["executor"] }
+                : {}),
+            },
+          } as ProtocolObservation];
+        case "cancel-requested":
+          return [{
+            ...base,
+            type: "network.jinn.task-execution.cancel-requested.v1" as const,
+            data: {
+              reason: String(event.details["reason"] ?? "cancel requested"),
+              requestedBy: String(event.details["requestedBy"] ?? "backend caller"),
+            },
+          } as ProtocolObservation];
+        case "cancel-acknowledged":
+          return [{
+            ...base,
+            type: "network.jinn.task-execution.cancel-acknowledged.v1" as const,
+            data: {
+              acknowledgedBy: String(
+                event.details["acknowledgedBy"] ?? this.config.source,
+              ),
+            },
+          } as ProtocolObservation];
+        case "delivery-recorded":
+          return [{
+            ...base,
+            type: "network.jinn.task-execution.delivery-recorded.v1" as const,
+            data: {
+              digest: event.details["digest"],
+              ...(event.details["locators"] === undefined
+                ? {}
+                : { locators: event.details["locators"] }),
+            },
+          } as ProtocolObservation];
+        case "attempt-terminal":
+          return [{
+            ...base,
+            type: "network.jinn.task-execution.attempt-terminal.v1" as const,
+            data: {
+              state: event.details["state"],
+              ...(event.details["blame"] === undefined
+                ? {}
+                : { blame: event.details["blame"] }),
+              ...(event.details["category"] === undefined
+                ? {}
+                : { category: event.details["category"] }),
+              ...(event.details["detail"] === undefined
+                ? {}
+                : { detail: event.details["detail"] }),
+            },
+          } as ProtocolObservation];
+        case "progress":
+        case "spawn-intended":
+        case "exec-finished":
+        case "harvest-started":
+        case "harvested":
+        case "delivery-checkpointed":
+        case "reconciliation":
+          return [{
+            ...base,
+            type: "network.jinn.task-execution.progress.v1" as const,
+            data: {
+              message: event.displayMessage ?? event.type,
+              ...(typeof event.details["fraction"] === "number"
+                ? { fraction: event.details["fraction"] }
+                : {}),
+            },
+          } as ProtocolObservation];
+        default:
+          return [];
+      }
+    });
+  }
+
+  async observe(ref: SubmissionUri | AttemptUri): Promise<ObservationSnapshot> {
+    const attempt = this.resolveAttempt(ref);
+    const metadata = this.attempts.get(attempt);
+    if (metadata === undefined) {
+      throw new TaskExecutionError("attempt-not-found", {
+        detail: `no Attempt for ref "${ref}"`,
+      });
+    }
+    const observations = this.observations(attempt);
+    const derived = foldObservations(observations, {
+      now: this.now(),
+      effectiveDeadline: metadata.effectiveDeadline,
+    });
+    const descriptor: AttemptDescriptor = {
+      attempt,
+      task: metadata.task,
+      submission: metadata.submission,
+      ...(metadata.annotations === undefined
+        ? {}
+        : { annotations: metadata.annotations }),
+      derived,
+    };
+    return {
+      descriptor,
+      cursor: {
+        sequence: observations.at(-1)?.sequence ?? "0000000000000000",
+      },
+      observations,
+    };
+  }
+
+  async *watch(
+    ref: SubmissionUri | AttemptUri,
+    cursor?: ObservationCursor,
+  ): AsyncIterable<ProtocolObservation> {
+    const snapshot = await this.observe(ref);
+    for (const observation of snapshot.observations) {
+      if (cursor === undefined || observation.sequence > cursor.sequence) yield observation;
+    }
+  }
+
+  async cancel(attempt: AttemptUri, reason: string): Promise<CancelAck> {
+    const snapshot = await this.observe(attempt);
+    if (snapshot.descriptor.derived.terminal) {
+      return {
+        requested: false,
+        terminalState: snapshot.descriptor.derived.state,
+      };
+    }
+    this.journal(attempt).append({
+      attemptId: attempt,
+      type: "cancel-requested",
+      time: this.now(),
+      details: {
+        reason,
+        requestedBy: "TaskExecutionBackend.cancel",
+        source: this.config.source,
+      },
+    });
+    return { requested: true };
+  }
+
+  async recover(ref: SubmissionUri | AttemptUri): Promise<ReconciliationReport> {
+    this.assertWriter();
+    const override = this.reconciliationOverrides.get(ref);
+    if (override !== undefined) return override;
+    let attempt: AttemptUri;
+    try {
+      attempt = this.resolveAttempt(ref);
+    } catch {
+      return { classification: "absent", detail: `no durable record for ref "${ref}"` };
+    }
+    const checkpoint = this.deliveryCheckpointPath(attempt);
+    if (existsSync(checkpoint)) {
+      const bytes = new Uint8Array(readFileSync(checkpoint));
+      const digest = documentDigest(bytes);
+      const alreadyRecorded = this.journal(attempt).read().some(
+        (event) =>
+          event.type === "delivery-recorded"
+          && event.details["digest"] === digest,
+      );
+      if (!alreadyRecorded) {
+        this.journal(attempt).append({
+          attemptId: attempt,
+          type: "delivery-recorded",
+          time: this.now(),
+          details: { digest, source: this.config.source },
+        });
+      }
+    }
+    return { classification: "matching" };
+  }
+
+  async deliveries(attempt: AttemptUri): Promise<DeliveryRef[]> {
+    if (!this.attempts.has(attempt)) {
+      throw new TaskExecutionError("attempt-not-found", {
+        detail: `no Attempt "${attempt}"`,
+      });
+    }
+    const checkpoint = this.deliveryCheckpointPath(attempt);
+    if (!existsSync(checkpoint)) return [];
+    const bytes = new Uint8Array(readFileSync(checkpoint));
+    return [{ attempt, digest: documentDigest(bytes) }];
+  }
+
+  async fetchDelivery(ref: DeliveryRef): Promise<Uint8Array> {
+    const checkpoint = this.deliveryCheckpointPath(ref.attempt);
+    if (!existsSync(checkpoint)) {
+      throw new TaskExecutionError("result-unavailable", {
+        detail: `no Delivery recorded for Attempt "${ref.attempt}"`,
+      });
+    }
+    const bytes = new Uint8Array(readFileSync(checkpoint));
+    if (documentDigest(bytes) !== ref.digest) {
+      throw new TaskExecutionError("result-unavailable", {
+        detail: `Delivery "${ref.digest}" is not recorded for Attempt "${ref.attempt}"`,
+      });
+    }
+    return bytes;
+  }
+
+  async fetchArtifact(descriptor: {
+    readonly uri?: string;
+    readonly digest?: Readonly<Record<string, string>>;
+  }): Promise<Uint8Array> {
+    if (descriptor.uri?.startsWith("file:") !== true) {
+      throw new TaskExecutionError("result-unavailable", {
+        detail: "this local artifact descriptor has no file locator",
+      });
+    }
+    const bytes = new Uint8Array(readFileSync(new URL(descriptor.uri)));
+    const expected = descriptor.digest?.sha256;
+    if (expected !== undefined && sha256Hex(bytes) !== expected) {
+      throw new TaskExecutionError("content-corruption", {
+        detail: "local artifact bytes do not match the descriptor digest",
+      });
+    }
+    return bytes;
+  }
+
+  // --- explicit conformance seam ---
+
+  async drive(
+    attempt: AttemptUri,
+    observations: readonly ProtocolObservation[],
+  ): Promise<void> {
+    if (!this.attempts.has(attempt)) {
+      throw new TaskExecutionError("attempt-not-found", {
+        detail: `no Attempt "${attempt}"`,
+      });
+    }
+    for (const observation of observations) {
+      let type: JournalEvent["type"];
+      let details: Record<string, unknown> = {
+        ...observation.data,
+        source: this.config.source,
+      };
+      switch (observation.type) {
+        case "network.jinn.task-execution.attempt-started.v1":
+          type = "attempt-started";
+          break;
+        case "network.jinn.task-execution.progress.v1":
+          type = "progress";
+          break;
+        case "network.jinn.task-execution.cancel-requested.v1":
+          type = "cancel-requested";
+          break;
+        case "network.jinn.task-execution.cancel-acknowledged.v1":
+          type = "cancel-acknowledged";
+          break;
+        case "network.jinn.task-execution.attempt-terminal.v1":
+          type = "attempt-terminal";
+          break;
+        default:
+          continue;
+      }
+      this.journal(attempt).append({
+        attemptId: attempt,
+        type,
+        time: observation.time,
+        details,
+        ...(type === "attempt-terminal"
+          && (details["state"] === "failed" || details["state"] === "lost")
+          ? { failsAttempt: true }
+          : {}),
+      });
+      if (type === "attempt-terminal") this.capacity.release(attempt);
+    }
+  }
+
+  async recordDelivery(
+    attempt: AttemptUri,
+    deliveryBytes: Uint8Array,
+  ): Promise<void> {
+    const metadata = this.attempts.get(attempt);
+    if (metadata === undefined) {
+      throw new TaskExecutionError("attempt-not-found", {
+        detail: `no Attempt "${attempt}"`,
+      });
+    }
+    let document: unknown;
+    try {
+      document = decode(deliveryBytes);
+    } catch (error) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: error instanceof Error ? error.message : "Delivery decoding failed",
+      });
+    }
+    const validation = validateDelivery(document);
+    if (!validation.conforms) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: detail(validation.errors),
+      });
+    }
+    if (!bytesEqual(sealDelivery(document), deliveryBytes)) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: "Delivery bytes are not the exact canonical sealed bytes",
+      });
+    }
+    const delivery = document as { readonly attempt: string; readonly task: string };
+    if (delivery.attempt !== attempt || delivery.task !== metadata.task) {
+      throw new TaskExecutionError("invalid-reference", {
+        detail: "Delivery does not bind this Attempt and Task",
+      });
+    }
+
+    const checkpoint = this.deliveryCheckpointPath(attempt);
+    if (existsSync(checkpoint)) {
+      const existing = new Uint8Array(readFileSync(checkpoint));
+      if (!bytesEqual(existing, deliveryBytes)) {
+        throw new TaskExecutionError("protocol-violation", {
+          detail: "seal-once checkpoint already contains different Delivery bytes",
+        });
+      }
+    } else {
+      atomicWrite(checkpoint, deliveryBytes);
+      this.journal(attempt).append({
+        attemptId: attempt,
+        type: "delivery-checkpointed",
+        time: this.now(),
+        details: {
+          digest: documentDigest(deliveryBytes),
+          source: this.config.source,
+        },
+      });
+      this.config.faults?.afterDeliveryCheckpoint?.();
+    }
+
+    const digest = documentDigest(deliveryBytes);
+    const recorded = this.journal(attempt).read().some(
+      (event) =>
+        event.type === "delivery-recorded"
+        && event.details["digest"] === digest,
+    );
+    if (!recorded) {
+      this.journal(attempt).append({
+        attemptId: attempt,
+        type: "delivery-recorded",
+        time: this.now(),
+        details: { digest, source: this.config.source },
+      });
+    }
+  }
+
+  simulateReconciliation(
+    ref: SubmissionUri | AttemptUri,
+    outcome: ReconciliationReport,
+  ): void {
+    this.reconciliationOverrides.set(ref, outcome);
+  }
+
+  deliveryCheckpointPath(attempt: AttemptUri): string {
+    return join(this.paths(attempt).meta, "delivery.sealed");
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.writer.acquired) this.writer.release();
+  }
+}
+
+export function makeLocalTaskExecutionBackend(
+  config: LocalTaskExecutionBackendConfig,
+): LocalTaskExecutionBackend {
+  return new LocalTaskExecutionBackend(config);
+}
