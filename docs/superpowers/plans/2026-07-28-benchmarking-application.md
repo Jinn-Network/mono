@@ -1100,3 +1100,23 @@ interpolation and quote/backtick computed members. The repair is test-first and 
 records/aggregate/testing, trust/profile consumer, schema drift/parity, package, guard,
 packed-type, workflow, raw-control, and clean-worktree gates. M4–M7 remain blocked until a new
 independent whole-design review accepts the exact repaired head.
+
+## Addendum 2026-07-29-o — rational Task means and unbounded computed-member scanning
+
+Coordinator inspection of the eleventh-review repair at
+`e0923e5737bf61e12cc9d1a2796237606d3ad561` rejected two incomplete boundaries before a
+twelfth review was dispatched. Program rulings §7.126–§7.127 bind the follow-up:
+
+1. legal decimal repeat costs whose exact arithmetic mean is non-terminating in base ten remain
+   exact reduced rationals; Wilcoxon normalization uses one common positive divisor plus the
+   already-frozen global decimal scale, and replay discloses that divisor rather than throwing or
+   rounding; the asymmetric `R = 2` conformance vector uses the exact `1.0`, `9.0`, and `6.0`
+   spellings and asserts `scale`, integer differences, exclusions, p-value, `n`, and verdict; and
+2. computed browser-member recognition has no fixed character look-behind and includes optional
+   computed access across arbitrary whitespace/comments, including inside nested template
+   interpolation, while the corresponding inert spellings remain negative.
+
+The follow-up is test-first and M1–M3 only. It reruns the complete records/aggregate/testing,
+trust/profile consumer, schema drift/parity, package, guard, packed-type, workflow, raw-control,
+and clean-worktree gates. M4–M7 remain blocked until a fresh independent whole-design review
+accepts the exact repaired head.

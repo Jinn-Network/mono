@@ -1110,3 +1110,30 @@ binding/projector/testing/pipeline package gates, live ephemeral/fork suite, evi
 discovery consumers, marketplace guard trio and packed consumer, contract compile/targeted
 tests, workflow lint, raw-control scan, and a new independent whole-design review. M6 remains
 blocked on that GREEN verdict and the Phase 4 backend-local assembly gate.
+
+## Addendum 2026-07-29-q — atomic Submission scope, causal settlement, and authorized events
+
+The sixth fresh M0–M5 whole-design review at marketplace stream head
+`63096a14d07fff29cc186d1001a2021c7fc5ed61` is **RED** despite every package, contract,
+guard, and workflow gate being green. Program rulings §7.122–§7.125 bind the repair:
+
+1. requester-scope idempotency uses one durable atomic ownership claim before upload, posting
+   intent, or wallet effects; simultaneous conflicting Submissions produce exactly one owner,
+   one broadcast, and one `submission-conflict`;
+2. settlement performs exact byte/verification/Mech checks before claim, submits the binding-
+   computed digest, and verifies the router fact only after that transaction created it (or reads
+   the existing fact for `already-settled`);
+3. log decoding takes an explicit chain/generation origin policy and refuses ABI-shaped events
+   from any unauthorized router, coordinator, or dynamically authorized Mech address before
+   projection; and
+4. today mode applies the same known-Task, monotonic Attempt/request identity, duplicate, and
+   replay checks as revised mode, with complete native conformance vectors and no invented
+   release/reopen lifecycle.
+
+The repair remains M0–M5 only and is test-first. Public hostile vectors use barrier-driven
+concurrent backend calls, a stateful settlement port where router state appears only after claim,
+arbitrary-address logs for every event family, and exact today-mode unknown/duplicate/regressing/
+reused identities. It reruns the complete four-package gate, stub and Anvil-backed native kit,
+contracts, consumers, guard trio, packed types, workflow lint, raw-control scan, and a fresh
+whole-design review. M6 remains blocked on that GREEN verdict and the Phase 4 backend-local
+assembly gate.

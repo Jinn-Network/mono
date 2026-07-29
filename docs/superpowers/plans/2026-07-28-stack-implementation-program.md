@@ -1139,6 +1139,59 @@ Confirmed by the operator at the program gate (2026-07-28):
     combinations inside interpolation; negative canaries cover the same spellings in comments,
     ordinary strings, and template raw segments. Dynamic computed names need not be resolved in
     v1, but stripping an executable interpolation or literal member is nonconforming.
+122. **Marketplace Submission idempotency is linearized before every external effect:** one
+    durable atomic scope claim owns `(requester, idempotencyKey)` and binds it to the exact
+    Submission digest and bytes before upload, pin, intent creation, or wallet broadcast. A
+    different binding returns `submission-conflict`; a byte-exact completed binding returns the
+    existing acknowledgement; and a byte-exact pending contender never becomes a second owner or
+    broadcasts. Only the unguessable claim owner may resolve the scope to its chain outcome, and
+    crash recovery retains that ownership while coordinating with the existing posting-intent
+    WAL. A barrier-driven public-backend vector starts two conflicting submits simultaneously and
+    asserts one owner, one broadcast, one accepted result, one exact conflict, and durable replay.
+123. **Marketplace delivery settlement separates pre-claim proof from transaction-created
+    facts:** exact Delivery admission, settlement-grade verification, byte pinning, and any
+    already-existing Mech delivery fact run before `claimSolutionDelivery`; the binding computes
+    the claim digest from the admitted bytes and submits it. The router delivery fact created by
+    that transaction is read from its authoritative receipt or an exact post-transaction query
+    and only then joined to the Mech fact and recomputed bytes. `already-settled` reads and checks
+    the existing authoritative fact; race-loss outcomes retain their frozen mapping. Tests use a
+    stateful port in which the router fact does not exist before claim and becomes available only
+    because the claim ran—preloading the postcondition is vacuous.
+124. **Marketplace projector decoding is origin-authorized before ABI interpretation:** decoding
+    receives an explicit generation-specific origin policy tied to the exact chain configuration.
+    Each router/coordinator event is accepted only from its configured contract and each Mech
+    event only from an address authorized by the injected dynamic Mech-origin rule for that
+    deployment. Chain ID and address comparison are exact EVM identity checks; an ABI-compatible
+    topic/data pair from any other address is ignored or returned as a typed origin refusal before
+    it can enter reducer state, observations, announcements, records, signing, or archive effects.
+    Positive and arbitrary-address hostile vectors cover every event family in both generations.
+125. **Today-mode Attempt identity is as fail-closed as revised mode:** `TaskAttemptCreated` and
+    `EvaluationAttemptCreated` require a known admissible Task and the exact live parent identity,
+    and reject distinct-log duplicates, reused or regressing indices, reused request IDs, and
+    contradictory bindings without mutation or downstream effects. Exact-log replay remains the
+    one idempotent exception. Today mode still has no invented release/reopen lifecycle; the
+    shared validation protects its existing occupancy semantics. The native §16.2 kit carries
+    complete today- and revised-mode vectors for every identity refusal and asserts full state,
+    processed identities, accepted events, observations, refusals, announcements, and zero
+    forbidden effects.
+126. **Per-Task cost means remain exact for every legal decimal repeat count:** an arithmetic
+    mean whose reduced denominator contains factors other than two or five is not an
+    incompatibility and is never rounded or rejected. Each Task difference is held as a reduced
+    rational. For deterministic Wilcoxon replay, align decimal inputs to one global base-10 scale
+    `S`, then normalize the reduced Task differences to one positive common denominator `D`; rank
+    and tie the resulting signed `BigInt` numerators. Replay reports `scale: S`,
+    `differences: [...]`, and `divisor: D` when `D > 1`, meaning
+    `difference = numerator / (D × 10^S)`. Exact finite-decimal behavior stays byte-compatible
+    with §7.112. Vectors cover a denominator-three mean and the §7.118 `1.0/9.0` versus `6.0`
+    asymmetric-repeat case, asserting the complete replay as well as verdict, p-value, `n`, and
+    exclusions.
+127. **Computed-member network detection has no arbitrary look-behind or optional-chain gap:**
+    literal members remain recognizable across any legal whitespace or comment span and under
+    optional computed access such as `window?.["fetch"]`; a fixed preceding-character window is
+    not syntax-aware. Positive canaries include more than eighty characters of whitespace,
+    comments/newlines, optional computed members, and the same forms inside nested template
+    interpolation. The corresponding spellings in inert strings, comments, and template raw text
+    remain negative.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 
