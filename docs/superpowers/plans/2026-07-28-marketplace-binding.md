@@ -902,3 +902,29 @@ Previously signed protocol observations and discovery entries are never rewritte
 only the append-only corrections fixed by §7.30 and discovery's retraction discipline. M4.5 adds
 non-vacuous vectors for split-batch equivalence, duplicate replay, cross-batch
 `Deliver`→claim, cross-batch Task capacity/top-up, and monotonic sequences.
+
+## Addendum 2026-07-29-i — terminal reorg canonical view (program ruling §7.32)
+
+An appended `lost` observation is directly accepted by TEP §10.4 only when no earlier
+authoritative terminal survives the input fold. If a previously projected Verdict/finalization
+terminal is later orphaned, immutable raw history contains terminal→`lost`; the generic fold
+correctly marks that unfiltered history contradictory and must not be changed for one chain
+binding.
+
+Every marketplace-produced Protocol Observation therefore carries the exact §7.21 derivation
+annotation of its chain fact. A reorg correction also carries deterministic correction metadata
+naming the retracted observation id and orphaned block hash. The marketplace projector exports a
+current-canonical selector that:
+
+1. preserves the complete raw observation history byte-for-byte;
+2. excludes ordinary observations whose annotated block hash the chain substrate proves
+   orphaned;
+3. retains the explicit reorg correction observation; and
+4. passes that selected sequence to the unchanged TEP `foldObservations`.
+
+For a reorged prior terminal, the canonical selection therefore folds to `lost`; if a later
+canonical terminal appears it supersedes `lost` under TEP rule 6. The unfiltered historical fold
+remains contradictory and is evidence of the branch change, not the chain-current state.
+M4.5 pins all three outcomes (raw contradiction, canonical `lost`, later genuine correction) and
+proves that observations lacking exact derivation provenance cannot enter the marketplace
+canonical selector. No generic chain-awareness or new terminal transition is added to TEP.

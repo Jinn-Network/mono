@@ -350,6 +350,19 @@ Confirmed by the operator at the program gate (2026-07-28):
     derived join/capacity/dedupe state from canonical logs, but signed observations and
     announcements are corrected only by append. M4.5 must carry split-batch, replay-idempotency,
     cross-batch join/capacity, and monotonic-sequence vectors.
+32. **Marketplace terminal reorgs require canonical filtering before TEP fold:** §7.30's
+    appended `lost` is directly fold-correct when no earlier authoritative terminal survives.
+    It cannot by itself replace an already projected `delivered` / `rejected` / `failed`
+    terminal: generic TEP §10.4 correctly treats terminal→`lost` as contradictory. Therefore every
+    marketplace-produced Protocol Observation carries its exact §7.21 derivation annotation, and
+    a reorg correction additionally names the retracted observation id and orphaned block hash.
+    The marketplace current-state selector keeps the immutable raw history, removes ordinary
+    observations whose derivation is proven orphaned, retains the explicit correction, and only
+    then calls the unchanged generic TEP fold. Thus a reorged terminal yields canonical `lost`,
+    and a later canonical terminal supersedes it under rule 6; an unfiltered historical fold may
+    remain contradictory and must never be presented as canonical chain state. M4.5 must prove
+    the raw-history, canonical-filtered, and later-correction cases. This does not add a generic
+    chain rule to TEP.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 
