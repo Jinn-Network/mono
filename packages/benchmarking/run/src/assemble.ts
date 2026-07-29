@@ -77,6 +77,29 @@ async function classifyVerdict(input: {
 }
 
 /**
+ * Run-policy participant exclusion (program §7.4). Never trusts join-supplied exclusion flags.
+ */
+export function deriveParticipantExclusion(input: {
+  run: RunRecord;
+  arm: RunRecord["arms"][number];
+  solver: string | "unresolved" | undefined;
+}): { hit: boolean; reason: string } {
+  const { run, arm, solver } = input;
+  if (solver === undefined || solver === "unresolved") {
+    return { hit: false, reason: "" };
+  }
+  const exclusions = run.policy.participantExclusions ?? [];
+  if (exclusions.includes(solver)) {
+    return { hit: true, reason: "policy.participantExclusions" };
+  }
+  const allowlist = arm.execution?.allowlist;
+  if (allowlist !== undefined && allowlist.length > 0 && !allowlist.includes(solver)) {
+    return { hit: true, reason: "arm.execution.allowlist" };
+  }
+  return { hit: false, reason: "" };
+}
+
+/**
  * Outcome derivation (§8.2). Precedence is exclusive: exclusion-hit → pinning mismatch →
  * ≥1 valid verdict → unscorable → delivery-without-valid-verdict → expired (incl. never-dispatched).
  */
@@ -84,9 +107,10 @@ export function deriveOutcome(input: {
   cell: InScopeCell;
   pinningFailed: boolean;
   validVerdicts: string[];
+  exclusionHit?: boolean;
 }): Outcome {
-  const { cell, pinningFailed, validVerdicts } = input;
-  if (cell.exclusionHit) return "excluded";
+  const { cell, pinningFailed, validVerdicts, exclusionHit = false } = input;
+  if (exclusionHit) return "excluded";
   if (pinningFailed) return "invalidated";
   if (validVerdicts.length > 0) return "judged";
   if (cell.evaluationTerminal === "could-not-grade") return "unscorable";
@@ -153,18 +177,15 @@ export async function assembleMatrix(
       { cellKey: cell.cellKey, arm },
     );
     const pinningCheck = checkPinningObservation(pinning);
-    const integrityTier = cell.integrityTier
-      ?? await ports.admission.tierFor(
-        cell.taskDigest,
-        (cell.evaluationSpecDigest ?? `sha256:${"e".repeat(64)}`).replace(/^sha256:/, ""),
-      );
-    const hasDelivery = cell.deliveryDigest !== undefined;
-    const solver = cell.dispatches > 0 && hasDelivery
+    const integrityTier = await ports.admission.tierFor(cell);
+    const solverAtClose = cell.dispatches > 0
       ? await ports.trust.resolveAgent(
         { cellKey: cell.cellKey, role: "solver" },
         effectiveTime,
       )
       : undefined;
+    const exclusion = deriveParticipantExclusion({ run, arm, solver: solverAtClose });
+    const solver = solverAtClose === "unresolved" ? undefined : solverAtClose;
 
     const checksFailed = new Set<string>();
     if (!pinningCheck.ok) checksFailed.add(pinningCheck.check);
@@ -208,6 +229,7 @@ export async function assembleMatrix(
       cell,
       pinningFailed: !pinningCheck.ok,
       validVerdicts,
+      exclusionHit: exclusion.hit,
     });
     const cost = await ports.cost.costFor(cell);
     const latencyMs = await ports.cost.latencyFor(cell);
@@ -244,7 +266,7 @@ export async function assembleMatrix(
     if (outcome === "excluded") {
       exclusions.push({
         cellKey: cell.cellKey,
-        reason: cell.exclusionReason ?? "participant-exclusion",
+        reason: exclusion.reason || "participant-exclusion",
       });
     }
   }

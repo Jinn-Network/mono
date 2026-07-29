@@ -23,4 +23,4 @@ yarn pack:smoke
 ```
 
 See `docs/superpowers/plans/2026-07-28-benchmarking-application.md` (M6) for the implementation
-plan.
+plan. Shipped-surface record: `docs/superpowers/specs/2026-07-28-benchmarking-implementation-addendum.md`.

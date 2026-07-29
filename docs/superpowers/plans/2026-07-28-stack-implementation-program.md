@@ -1263,6 +1263,52 @@ Confirmed by the operator at the program gate (2026-07-28):
     tracker/factory addresses are production targets; Base Sepolia has no canonical inventory,
     so M7 uses local/mainnet-fork conformance and MUST NOT invent or deploy a Jinn-owned testnet
     payment rail without a separate authorization.
+135. **Requester-side M7 does not widen `launchAndWatch` or invent engagement at post time:**
+    M7 requester composition submits exact Task/Submission bytes through the standard 2-arg
+    `TaskExecutionBackend` contract only; it does not widen `launchAndWatch` and does not
+    invent or pass a two-party engagement at open-competition post time. Deterministic Attempt
+    identity is created by the later operator claim path (marketplace pipeline's
+    `buildEngagement`, per binding design) and enters the Matrix only from authoritative
+    observe/projector facts. Pipeline continues to own operator-side `buildEngagement`;
+    benchmarking never passes engagement.
+136. **`runOnMarketplace` enforces marketplace profile at composition time:** `runOnMarketplace`
+    enforces — at composition time, not schema-wide — `venue.kind === 'open-competition'`,
+    `policy.independence === 'gating'`, and a present valid `budget`. Local mode remains legal
+    without budget.
+137. **Matrix `closeBoundary.at` is the sealed Run `closeAt`; anchor is separately derived:**
+    `closeBoundary.at` remains the exact sealed `Run.closeAt`. Its anchor is separately the
+    first canonical `finalized` block at or after that instant; no finalized anchor means fail
+    closed. Never substitute block timestamp into `at`.
+138. **Marketplace InputScope authority is projector-root-export only:** InputScope authority
+    comes from root-exported canonical projector observations/state/selectors after origin
+    authorization, reducer admission, reorg correction, and finality annotation; only finalized
+    facts through the anchor are eligible. Host resolvers may supply referenced sealed bytes but
+    may not bypass projector authority with arbitrary raw-log-shaped facts. No deep imports.
+139. **Settled cost is the successful delivery settlement joined to the accounted attempt:**
+    `settled` cost means the exact successful delivery settlement joined to the accounted
+    attempt. `value` is the settled delivery rate, never task budget/reservation envelope;
+    `unit` is the exact sealed `Run.budget.unit`, and the adapter validates the settlement
+    generation/payment asset against it (today native ETH, revised OLAS per §7.131). If no
+    settlement exists, the deterministic evidence-reported source may be used and labeled
+    `reported`; never relabel it settled.
+140. **`@jinn-network/marketplace-pipeline` is out of M7 production and test dependencies:**
+    M7 proves requester backend composition and projector-derived scope; pipeline remains the
+    separate operator claim/engagement composition path.
+141. **M7 trust resolution stays injected; pinning axes honestly unverifiable:** trust
+    resolution/signing remain injected through benchmarking-run ports; M7 adds no trust
+    implementation. Pinning axes are all honestly `unverifiable` until #2040/#2041; absent
+    admission receipt means `attested-only`.
+142. **M7 supports today and revised projector generations with honest deadline semantics:**
+    M7 supports today and revised projector generations. Today does not gain fictitious
+    on-chain deadline enforcement; both modes exclude records after the finalized close anchor.
+    Today settlement is native ETH; revised settlement is OLAS per §7.131.
+143. **M7 performs no ambient RPC/network access and imports no viem:** finalized block/canonical
+    projector inputs are host-injected public ports. Binding/projector are consumed only via
+    package-root exports.
+144. **M8 ships informational addendum only after six packages/facts leaf green:** M8 must ship
+    the informational implementation addendum and README pointers after all six packages/facts
+    leaf are green; no tier-4 service, deploy, daemon migration, or binding/projector redesign
+    enters scope.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

@@ -9,7 +9,7 @@ import {
 } from "@jinn-network/benchmarking-records";
 import type { EvaluationSpec } from "@jinn-network/task-execution-profiles";
 import { describe, expect, test } from "vitest";
-import { assembleMatrix, deriveOutcome } from "./assemble.js";
+import { assembleMatrix, deriveOutcome, deriveParticipantExclusion } from "./assemble.js";
 import type { AssemblyPorts, InScopeCell } from "./ports.js";
 
 const TASK_DIGEST = "d42df69433efba6b5fc689bd07c7c4923e02c9a9dda45455ae58f14c09d77e91";
@@ -324,9 +324,10 @@ describe("six-outcome derivation + precedence", () => {
 
   test("precedence: exclusion beats pinning mismatch and valid verdicts", () => {
     expect(deriveOutcome({
-      cell: cellBase({ exclusionHit: true, evaluationTerminal: "could-not-grade" }),
+      cell: cellBase({ evaluationTerminal: "could-not-grade" }),
       pinningFailed: true,
       validVerdicts: [VERDICT_DIGEST],
+      exclusionHit: true,
     })).toBe("excluded");
   });
 
@@ -414,5 +415,67 @@ describe("verdict-spec-match + fail-closed consistency", () => {
     const result = await assembleMatrix(bench, run, portsFor(cell));
     expect(result.record.cells[0]!.outcome).toBe("judged");
     expect(result.record.cells[0]!.evaluator).toBe("agent://evaluator");
+  });
+});
+
+describe("participant exclusion policy (program §7.4)", () => {
+  test("deriveParticipantExclusion hits policy.participantExclusions", () => {
+    const bench = singleItemBench();
+    const run = parseRun(sealRun({
+      protocol: BENCHMARKING_PROTOCOL,
+      benchmark: { digest: { sha256: sealBenchmark(bench).digest.slice("sha256:".length) } },
+      owner: "urn:uuid:20000000-0000-5000-8000-000000000002",
+      arms: [{
+        armId: "armA",
+        pinning: { model: { id: "model-a" }, harness: { id: "kit", version: "1" } },
+      }],
+      replicates: 1,
+      policy: {
+        completenessFloor: "1",
+        cellWindow: 3_600_000,
+        replacement: { allowed: false },
+        independence: "gating",
+        evaluation: { minVerdicts: 1, distinctEvaluator: true },
+        submissionBaseline: { isolationPolicy: "fixture" },
+        participantExclusions: ["agent://blocked"],
+      },
+      venue: { kind: "self-run", note: "exclusion probe" },
+      closeAt: "2026-08-04T00:00:00Z",
+    }).bytes);
+    expect(deriveParticipantExclusion({
+      run,
+      arm: run.arms[0]!,
+      solver: "agent://blocked",
+    })).toEqual({ hit: true, reason: "policy.participantExclusions" });
+  });
+
+  test("host join exclusionHit cannot force excluded outcome", async () => {
+    const bench = singleItemBench();
+    const run = singleArmRun(bench, "gating");
+    const cell = cellBase({
+      exclusionHit: true,
+      exclusionReason: "host-invented",
+      verdicts: [consistentVerdict()],
+    });
+    const result = await assembleMatrix(bench, run, portsFor(cell));
+    expect(result.record.cells[0]!.outcome).toBe("judged");
+    expect(result.record.exclusions).toEqual([]);
+  });
+
+  test("integrityTier laundering via join is ignored", async () => {
+    const bench = singleItemBench();
+    const run = singleArmRun(bench, "gating");
+    const cell = cellBase({
+      integrityTier: "re-derivable",
+      verdicts: [consistentVerdict()],
+    });
+    const ports = portsFor(cell);
+    ports.admission = {
+      async tierFor() {
+        return "attested-only";
+      },
+    };
+    const result = await assembleMatrix(bench, run, ports);
+    expect(result.record.cells[0]!.integrityTier).toBe("attested-only");
   });
 });

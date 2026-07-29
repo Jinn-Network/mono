@@ -16,6 +16,7 @@ const packages = [
   ['aggregate', '@jinn-network/benchmarking-aggregate'],
   ['run', '@jinn-network/benchmarking-run'],
   ['interop', '@jinn-network/benchmarking-interop'],
+  ['marketplace', '@jinn-network/benchmarking-marketplace'],
 ];
 
 const codeEntrypoints = [
@@ -24,18 +25,25 @@ const codeEntrypoints = [
   '@jinn-network/benchmarking-aggregate',
   '@jinn-network/benchmarking-run',
   '@jinn-network/benchmarking-interop',
+  '@jinn-network/benchmarking-marketplace',
 ];
 
 // Cross-tree Jinn dependency each *then-present* benchmarking package references, packed as a
 // file: dep so NodeNext resolves it (program §7.8; record-discovery-packed-types.test.mjs
 // precedent). M1 seeds task-execution-protocol; M2 (testing) adds task-execution-profiles; M3
 // (aggregate) adds trust-core; M4 (run) adds task-execution-backend; M5 (interop) reuses
-// protocol + profiles.
+// protocol + profiles; M7 (marketplace) adds marketplace-binding/projector plus
+// discovery + trust-resolve transitives for binding/projector graphs.
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+  ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
+  ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
+  ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
+  ['@jinn-network/marketplace-binding', join(root, 'packages', 'marketplace', 'binding')],
+  ['@jinn-network/marketplace-projector', join(root, 'packages', 'marketplace', 'projector')],
 ];
 
 function run(command, args, options = {}) {

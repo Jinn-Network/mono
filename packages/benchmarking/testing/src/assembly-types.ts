@@ -75,7 +75,9 @@ export interface PinningObservationPort {
 }
 
 export interface AdmissionEvidencePort {
-  tierFor(taskDigest: string, evaluationSpecDigest: string): Promise<IntegrityTier>;
+  tierFor(
+    cell: Pick<InScopeCell, "cellKey" | "taskDigest" | "evaluationSpecDigest">,
+  ): Promise<IntegrityTier>;
 }
 
 export interface CostSource {
@@ -231,9 +233,6 @@ export async function buildMiniatureAssemblyPorts(): Promise<{
               ...(verdict.measurements === undefined ? {} : { measurements: verdict.measurements }),
               ...(scope.evaluationSpec === undefined ? {} : { evaluationSpec: scope.evaluationSpec }),
             })),
-            ...(exclusionByCell.has(cellKey)
-              ? { exclusionHit: true as const, exclusionReason: exclusionByCell.get(cellKey) }
-              : {}),
             ...(evaluationByTask.get(taskDigest!) === undefined
               ? {}
               : { evaluationSpecDigest: evaluationByTask.get(taskDigest!) }),
@@ -286,11 +285,8 @@ export async function buildMiniatureAssemblyPorts(): Promise<{
       },
     },
     admission: {
-      async tierFor(taskDigest) {
-        for (const [cellKey, output] of Object.entries(scope.portOutputs)) {
-          if (cellKey.startsWith(`${taskDigest}/`)) return output.integrityTier;
-        }
-        return "attested-only";
+      async tierFor(cell) {
+        return scope.portOutputs[cell.cellKey]?.integrityTier ?? "attested-only";
       },
     },
     cost: {

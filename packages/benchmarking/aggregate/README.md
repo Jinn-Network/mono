@@ -27,3 +27,5 @@ Report author under the benchmarking-report trust scope, binds every referenced 
 its digest, recomputes results and disclosures, and checks resolved Run comparability and universal
 preregistration. The Report has no sealed timestamp, so `effectiveTime` is verifier context only;
 it is never inferred from a Report field or callback.
+
+Shipped-surface record: `docs/superpowers/specs/2026-07-28-benchmarking-implementation-addendum.md`.

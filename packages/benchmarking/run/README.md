@@ -10,3 +10,5 @@ backend mints the Attempt URI; the run reads it back exclusively from
 Submission digest + `cellIdempotencyKey`) — this package keeps no run journal.
 
 Aggregation lives in `@jinn-network/benchmarking-aggregate`. This package never imports it.
+
+Shipped-surface record: `docs/superpowers/specs/2026-07-28-benchmarking-implementation-addendum.md`.

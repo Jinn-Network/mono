@@ -80,7 +80,7 @@ describe("injected assembly ports (design §8.3)", () => {
       "2026-08-04T00:00:00Z",
     );
     expect((await ports.pinning.observe({}, {})).harness).toBe("match");
-    expect(await ports.admission.tierFor("a".repeat(64), "e".repeat(64))).toBe("attested-only");
+    expect(await ports.admission.tierFor(cell)).toBe("attested-only");
     expect(await ports.cost.costFor(cell)).toEqual({ value: "1.00", unit: "USD", source: "reported" });
     expect(await ports.cost.latencyFor(cell)).toBe(42);
   });

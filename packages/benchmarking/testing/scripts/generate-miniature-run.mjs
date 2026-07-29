@@ -118,6 +118,7 @@ const runSealed = sealRun({
     independence: "gating",
     evaluation: { minVerdicts: 1, distinctEvaluator: true },
     submissionBaseline: { isolationPolicy: "fixture" },
+    participantExclusions: ["urn:uuid:00000306-0000-5000-8000-000000000000"],
   },
   analysisPlan: [
     { method: "jinn.benchmarking.method/wilson", version: "1", parameters: { verdictRule: "unanimous" } },
@@ -174,7 +175,7 @@ const cells = coordinates.map((coordinate, index) => {
   }
 
   const outcome = outcomePlan[index];
-  const hasDelivery = !["expired", "excluded"].includes(outcome);
+  const hasDelivery = !["expired"].includes(outcome);
   let deliveryDigest;
   if (hasDelivery) {
     const delivery = {
@@ -278,7 +279,7 @@ const matrixSealed = sealMatrix({
   closeBoundary: { at: "2026-08-04T00:00:00Z" },
   cells,
   exclusions: [
-    { cellKey: cells.find((cell) => cell.outcome === "excluded").cellKey, reason: "participant-exclusion" },
+    { cellKey: cells.find((cell) => cell.outcome === "excluded").cellKey, reason: "policy.participantExclusions" },
   ],
   attrition: { perArm, asymmetryFlags: ["nonjudged-arm-imbalance"] },
   completeness: {
@@ -338,7 +339,7 @@ await writeJson("miniature-run/injected-scope.json", {
   exclusions: [
     {
       cellKey: cells.find((cell) => cell.outcome === "excluded").cellKey,
-      reason: "participant-exclusion",
+      reason: "policy.participantExclusions",
     },
   ],
   replacementLineage: [{

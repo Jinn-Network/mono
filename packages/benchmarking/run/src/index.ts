@@ -61,7 +61,7 @@ export {
 export { summarizeCellStatus } from "./status.js";
 export type { CellStatusSummary } from "./status.js";
 
-export { assembleMatrix, deriveOutcome } from "./assemble.js";
+export { assembleMatrix, deriveOutcome, deriveParticipantExclusion } from "./assemble.js";
 export type { AssembledMatrix } from "./assemble.js";
 
 export { verifyMatrix } from "./verify.js";

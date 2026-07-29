@@ -15,6 +15,7 @@ const BENCHMARKING_PACKAGES = [
   ['aggregate', '@jinn-network/benchmarking-aggregate'],
   ['run', '@jinn-network/benchmarking-run'],
   ['interop', '@jinn-network/benchmarking-interop'],
+  ['marketplace', '@jinn-network/benchmarking-marketplace'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/benchmarking; map name -> absolute dir
@@ -33,6 +34,12 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
   ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+  ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
+  ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
+  ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
+  ['@jinn-network/marketplace-binding', join(root, 'packages', 'marketplace', 'binding')],
+  ['@jinn-network/marketplace-projector', join(root, 'packages', 'marketplace', 'projector')],
+  ['@jinn-network/marketplace-testing', join(root, 'packages', 'marketplace', 'testing')],
 ]);
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -85,6 +92,27 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     // testing kit is used only for describeExportConformance in the package test suite.
     devDependencies: ['@jinn-network/benchmarking-testing'],
+    optionalDependencies: [], peerDependencies: [],
+  }],
+  ['marketplace', {
+    dependencies: [
+      '@jinn-network/benchmarking-records',
+      '@jinn-network/benchmarking-run',
+      '@jinn-network/marketplace-binding',
+      '@jinn-network/marketplace-projector',
+      '@jinn-network/task-execution-protocol',
+    ],
+    devDependencies: [
+      '@jinn-network/benchmarking-testing',
+      '@jinn-network/task-execution-profiles',
+    ],
+    portalResolutions: [
+      '@jinn-network/record-discovery-protocol',
+      '@jinn-network/record-discovery-serve',
+      '@jinn-network/task-execution-backend',
+      '@jinn-network/trust-core',
+      '@jinn-network/trust-resolve',
+    ],
     optionalDependencies: [], peerDependencies: [],
   }],
 ]);
@@ -155,10 +183,12 @@ test('benchmarking package Jinn dependencies and portal resolutions match the ap
         `${directory} has unapproved Jinn ${section}`);
     }
     const declared = DEPENDENCY_SECTIONS.flatMap((section) => jinnDependencyNames(manifest, section)).sort();
+    const portalResolutions = [...(approved.portalResolutions ?? [])].sort();
     const resolutions = manifest.resolutions ?? {};
     const resolved = Object.keys(resolutions).filter((name) => name.startsWith('@jinn-network/')).sort();
-    assert.deepEqual(resolved, declared, `${directory} has unmatched Jinn resolutions`);
-    for (const dependencyName of declared) {
+    assert.deepEqual(resolved, [...declared, ...portalResolutions].sort(),
+      `${directory} has unmatched Jinn resolutions`);
+    for (const dependencyName of [...declared, ...portalResolutions]) {
       assert.equal(resolutions[dependencyName], expectedPortal(directory, dependencyName),
         `${directory} must resolve ${dependencyName} through its matching portal`);
     }

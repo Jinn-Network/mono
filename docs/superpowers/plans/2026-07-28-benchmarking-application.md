@@ -8,7 +8,7 @@
 **Implements:** `docs/superpowers/specs/2026-07-28-benchmarking-application-design.md` (v0.3), following its §18 internal sequence and §15 package shape exactly.
 **Program:** `docs/superpowers/plans/2026-07-28-stack-implementation-program.md` — §6 naming, the §7 seventeen-plus binding rulings, and the §9 ledger (benchmarking added as a designed component; program extension appends the benchmarking phases in dependency order).
 **Dependencies on sibling 2026-07-28 plans (consumed as real, not re-planned):**
-- `2026-07-28-task-execution-protocol.md` — **PRESENT/green on this branch.** Exports consumed: `serializeCanonicalJson`, `documentDigest`, `compareCodeUnitStrings`, `sha256Hex`, `assertIJsonInteger`, `IJsonNumberError`, `ResourceDescriptor`, `EvidenceRecordReference`, `sealTask`/`sealSubmission`/`sealDelivery`, `mergeRequirements`, `EffectiveRequirements`, `ComparisonClass`, the Task/Submission/Delivery/observation schemas + validators, `foldObservations`, `AttemptDescriptor`, the run-pinning vocabulary (`harness`/`model`/`loadout`/`isolationPolicy`) in `common.ts`. **Attempt identity (program §7.22):** local single-party cell dispatch (M4 `run`) commits to the on-branch **2-arg `submit(taskBytes, submissionBytes)`** — the backend **mints** the Attempt URI, and the run reads it back from the `SubmissionAck`/`observe` surface (the materialized `AttemptDescriptor`, program §7.16) into the Matrix `attempt` field; resumption idempotency rides the stable Submission digest + `cellIdempotencyKey`, never a re-derived Attempt. The deterministic-Attempt-URI derivation exports (`deriveAttemptUri`, `TEP_ATTEMPT_NAMESPACE`, `isValidUrnUuid`) are a **two-party** concern owned by the marketplace binding (program §7.2 — the binding consumes the exported constant; it never re-derives its own) and enter benchmarking **only** in M7 marketplace mode, via the binding + `engagement` param — not imported by local `run`.
+- `2026-07-28-task-execution-protocol.md` — **PRESENT/green on this branch.** Exports consumed: `serializeCanonicalJson`, `documentDigest`, `compareCodeUnitStrings`, `sha256Hex`, `assertIJsonInteger`, `IJsonNumberError`, `ResourceDescriptor`, `EvidenceRecordReference`, `sealTask`/`sealSubmission`/`sealDelivery`, `mergeRequirements`, `EffectiveRequirements`, `ComparisonClass`, the Task/Submission/Delivery/observation schemas + validators, `foldObservations`, `AttemptDescriptor`, the run-pinning vocabulary (`harness`/`model`/`loadout`/`isolationPolicy`) in `common.ts`. **Attempt identity (program §7.22):** local single-party cell dispatch (M4 `run`) commits to the on-branch **2-arg `submit(taskBytes, submissionBytes)`** — the backend **mints** the Attempt URI, and the run reads it back from the `SubmissionAck`/`observe` surface (the materialized `AttemptDescriptor`, program §7.16) into the Matrix `attempt` field; resumption idempotency rides the stable Submission digest + `cellIdempotencyKey`, never a re-derived Attempt. The deterministic-Attempt-URI derivation exports (`deriveAttemptUri`, `TEP_ATTEMPT_NAMESPACE`, `isValidUrnUuid`) are a **two-party** concern owned by the marketplace binding and operator pipeline (program §7.2 — the binding consumes the exported constant; it never re-derives its own). In M7 marketplace mode they enter the Matrix only from authoritative observe/projector facts after the operator claim path — benchmarking submits sealed bytes through the standard 2-arg backend contract and never passes `engagement` (program §7.135); not imported by local `run`.
 - `2026-07-28-task-execution-profiles.md` — **ABSENT on this branch (Phase 3, in flight).** Exports consumed (kit + run + interop + aggregate, NOT records): `EvaluationSpec`/`sealEvaluationSpec`/`parseEvaluationSpec`, `checkVerdictConsistency`, `evaluateVerdictRule`, `requiredMeasurementNames`, the `repository-work/1.0` builder `buildRepositoryWorkProfile`, `buildEvaluationTaskProfile`, the `provenance` block shape (`kind`, blindable `sourceCommitment`), the §7.7 spec-digest equality rule (named here `verdict-spec-match`).
 - `2026-07-28-record-discovery.md` — **ABSENT on this branch (Phase 3, in flight).** Exports consumed by the facts leaf only: `record-discovery-protocol`'s `FactsProfileDocument`/`FactsProfileField`/`parseFactsProfile`, `sealJson`, `assertRecordKindUri`, the `FactsRecompute`/`RecordFactRecompute`/`ReferencedBytes` port shapes; `record-discovery-testing`'s facts-consistency conformance driver. The `benchrun`/`benchcell`/`bencharm` **Submission/Delivery** facts fields are **already recorded as Addendum 2026-07-28-b on the record-discovery plan and built by its M8 `facts/task-execution` leaf** — this plan REFERENCES them and does NOT re-plan them (§17.5). This plan owns only the `facts/benchmarking` leaf + the CloudEvents filter attributes on the four **benchmarking** record kinds.
 - `2026-07-28-marketplace-binding.md` — **NOT YET DRAFTED** (only the design `2026-07-28-marketplace-binding-design.md` exists). The marketplace-mode milestone (M7, LAST) gates on that plan and on the marketplace binding + projector packages existing; it composes against the design's §11 frozen interfaces (the `TaskExecutionBackend` peer, venue verbs discover/claim/deliver/settle, projector derivation annotations, the anchored close boundary). See Findings F2.
@@ -87,7 +87,7 @@ Expected: prints `OK`. These are Phase-2 packages, merged and green on this bran
 - [ ] **Record the deferred cross-tree gates (asserted at their milestones, not here):**
   - `@jinn-network/task-execution-profiles` — required by M2 (kit fixtures), M4 (run: `verdict-spec-match`/`verdict-consistency`), M5 (interop: `repository-work/1.0`). Absent on this branch; each milestone asserts it before starting.
   - `packages/discovery/{protocol,testing}` — required by M6 (facts leaf). Absent; M6 asserts it.
-  - the marketplace-binding plan + `packages/marketplace/{binding,projector,pipeline}` — required by M7. Not yet drafted / absent; M7 asserts it (Finding F2).
+  - the marketplace-binding plan + `packages/marketplace/{binding,projector}` — required by M7 (program §7.140: `@jinn-network/marketplace-pipeline` is out of M7 production and test dependencies; pipeline remains the separate operator claim/engagement composition path). Not yet drafted / absent; M7 asserts it (Finding F2).
 
 - [ ] **Confirm the sealing ground-truth file exists to copy.** Run `ls packages/task-execution/protocol/src/order.ts` — expected to exist (the `order.ts` you copy verbatim into `records`).
 
@@ -533,7 +533,7 @@ Backend contract is present on this branch (run orchestration gates on the TEP b
 - Create: `packages/benchmarking/run/src/launch.ts` (+ `.test.ts`), `src/status.ts` (+ `.test.ts`)
 
 **Interfaces:**
-- Consumes: `TaskExecutionBackend` (2-arg `submit`/`observe`/`deliveries`/`recover`/`cancel`), `sealSubmission`, `submissionExtensionBlock`, `cellIdempotencyKey`, `AttemptDescriptor`, `expectedCellSet`. **Attempt identity (program §7.22):** local single-party cell dispatch commits to the on-branch **2-arg `submit(taskBytes, submissionBytes)`** — the backend **mints** the Attempt URI, which the run reads back from the `SubmissionAck`/`observe` surface (the materialized `AttemptDescriptor`, program §7.16) into the Matrix `attempt` field. Resumption idempotency rides the stable Submission digest + `cellIdempotencyKey`, never a re-derived Attempt. **No `deriveAttemptUri` in local mode** — deterministic caller-supplied Attempt URIs are a two-party concern that enters benchmarking only in M7 marketplace mode, via the binding + `engagement` param.
+- Consumes: `TaskExecutionBackend` (2-arg `submit`/`observe`/`deliveries`/`recover`/`cancel`), `sealSubmission`, `submissionExtensionBlock`, `cellIdempotencyKey`, `AttemptDescriptor`, `expectedCellSet`. **Attempt identity (program §7.22):** local single-party cell dispatch commits to the on-branch **2-arg `submit(taskBytes, submissionBytes)`** — the backend **mints** the Attempt URI, which the run reads back from the `SubmissionAck`/`observe` surface (the materialized `AttemptDescriptor`, program §7.16) into the Matrix `attempt` field. Resumption idempotency rides the stable Submission digest + `cellIdempotencyKey`, never a re-derived Attempt. **No `deriveAttemptUri` in local mode** — deterministic Attempt URIs are a two-party concern that enter the Matrix in M7 marketplace mode only from authoritative observe/projector facts after the operator claim path; benchmarking never passes `engagement` (program §7.135).
 - Produces:
   - `launchAndWatch(bench, run, backend, opts): AsyncIterable<CellStatusEvent>` (§10.1 op 4) — dispatches each expected cell as an ordinary TEP Submission of the item's Task via the backend's **2-arg `submit`** (the backend mints the cell's Attempt URI, captured from the `SubmissionAck`/`observe` surface for the later Matrix `attempt` field — never re-derived), with the full requirements map equal to `arm.pinning ∪ policy.submissionBaseline` (the `cell-correspondence` invariant, byte-level map equality after JCS), `deadline` from `cellWindow` clipped to `closeAt`, the `jinn.benchmarking/cell` extension block, and the `cellIdempotencyKey` — so crash-safe resumption never re-posts a cell and a replacement is a visibly new `dispatch`. Emits live per-cell status (`dispatch`/`claimed`/`delivered`/`judged`); infra failures shown as infra (`unscorable` ≠ fail). `cancel` drains to a boundary and still assembles a matrix (`runOutcome: cancelled`).
   - `resumeRun(...)` — re-derives outstanding cells from the backend's `recover`/`observe` (idempotency keys make resumption re-enter the same cells).
@@ -682,7 +682,7 @@ If absent, **stop** — the facts leaf needs the discovery facts-profile contrac
 
 ## M7 — `benchmarking/marketplace` (the marketplace venue — LAST, gated on the marketplace-binding plan)
 
-Delivers `@jinn-network/benchmarking-marketplace` (design §13, §7.2 leg (b), §18.3). This is the **only** benchmarking package that imports a marketplace package. It injects marketplace-backed implementations of the M4 `run` ports (anchored close boundary, projector-derived input scope, `settled` cost source) and composes the marketplace binding's `TaskExecutionBackend` peer into `launchAndWatch` (per program §7.18: the binding is consumed only through the standard `TaskExecutionBackend` interface — hand sealed bytes to `submit`, wait for the Delivery; never reach into binding internals). It comes last because it gates on the marketplace-binding **plan** and its packages, which are not yet drafted/landed (Finding F2).
+Delivers `@jinn-network/benchmarking-marketplace` (design §13, §7.2 leg (b), §18.3). This is the **only** benchmarking package that imports a marketplace package. It injects marketplace-backed implementations of the M4 `run` ports (anchored close boundary, projector-derived input scope, `settled` cost source) and composes the marketplace binding's `TaskExecutionBackend` peer with `benchmarking-run`'s unmodified `launchAndWatch` (per program §7.18: hand sealed bytes to the standard 2-arg `submit`, wait for the Delivery; never reach into binding internals; never pass `engagement`, program §7.135). It comes last because it gates on the marketplace-binding **plan** and its packages, which are not yet drafted/landed (Finding F2). M7 imports binding + projector only (program §7.140); no `marketplace-pipeline`, no `viem`, no ambient RPC (program §7.143).
 
 **Gate assertion (M7 start):**
 
@@ -705,10 +705,10 @@ If absent, **stop** — M7 is blocked on the marketplace-binding plan and its im
 **Interfaces:**
 - `package.json` deps: `@jinn-network/benchmarking-run` (portal `../run`), `@jinn-network/benchmarking-records` (portal `../records`), the marketplace binding + projector packages (portals; exact names per the marketplace plan), `@jinn-network/task-execution-backend` (contract). Boundaries: this package's `BENCHMARKING_MARKETPLACE_ALLOWED` list adds the marketplace binding + projector (the sanctioned carve-out); everything else in the tree still forbids marketplace imports.
 - Produces the marketplace-backed port implementations for `run` (design §13 normative rows):
-  - `marketplaceCloseBoundary(...)`: `CloseBoundaryResolver` resolving `closeAt` → the first `finalized` block at/after it (anchor **required** on anchored backends, §8.1) — this is the missing leg (b) of `preregistration-precedes-dispatch` (anchored ordering: Run announcement observed at/before the earliest cell post; §7.2 leg (b)).
-  - `projectorInputScope(...)`: `InputScope` deriving in-scope records from the projector's chain events at `finalized` up to the close anchor, with the marketplace binding's projector derivation annotations (§8.3).
-  - `settledCostSource(...)`: `CostSource` sourcing `cost` from escrow settlement events where available, else `reported` (§8.3/§13).
-  - The `attested` pinning posture: `PinningObservationPort` that reports `unverifiable` axes honestly until #2040/#2041 land (design §18.3), so a marketplace Report cannot silently score unverified configurations.
+  - `marketplaceCloseBoundary(...)`: `CloseBoundaryResolver` resolving `closeAt` → the first `finalized` block at/after it (anchor **required** on anchored backends, design §8.1; program §7.137: `at` is the exact sealed `Run.closeAt`, anchor is separately derived; no finalized anchor means fail closed; never substitute block timestamp into `at`) — this is the missing leg (b) of `preregistration-precedes-dispatch` (anchored ordering: Run announcement observed at/before the earliest cell post; design §7.2 leg (b)).
+  - `projectorInputScope(...)`: `InputScope` deriving in-scope records from root-exported canonical projector observations/state/selectors after origin authorization, reducer admission, reorg correction, and finality annotation; only finalized facts through the anchor are eligible (design §8.3; program §7.138). Host resolvers may supply referenced sealed bytes but may not bypass projector authority with arbitrary raw-log-shaped facts. No deep imports.
+  - `settledCostSource(...)`: `CostSource` sourcing `cost` from the exact successful delivery settlement joined to the accounted attempt where available, else `reported` (design §8.3/§13; program §7.139: `value` is the settled delivery rate, never task budget/reservation envelope; `unit` is the exact sealed `Run.budget.unit`; validate generation/payment asset — today native ETH, revised OLAS per program §7.131; never relabel `reported` as `settled`).
+  - The `attested` pinning posture: `PinningObservationPort` that reports `unverifiable` axes honestly until #2040/#2041 land (design §18.3; program §7.141); absent admission receipt means `attested-only`.
 
 - [ ] **Step 1: Register `marketplace` in the guards + CI** (count → 6; the boundary carve-out for the marketplace packages; CI builds run + records + the marketplace packages first). Scaffold.
 - [ ] **Step 2: Write failing tests** for the three ports (close-boundary anchor resolution against a fork/fixture; projector-derived input scope over a projector fixture; settled-cost sourcing). Run — expect FAIL.
@@ -718,13 +718,13 @@ If absent, **stop** — M7 is blocked on the marketplace-binding plan and its im
 ### Task 7.2: Marketplace venue composition + the anchored ordering leg (b) + kit conformance
 
 **Files:**
-- Create: `packages/benchmarking/marketplace/src/venue.ts` (+ `.test.ts`) — composes the binding's `TaskExecutionBackend` peer into `launchAndWatch` + `assembleMatrix`
+- Create: `packages/benchmarking/marketplace/src/venue.ts` (+ `.test.ts`) — composes the binding's `TaskExecutionBackend` peer with `benchmarking-run`'s unmodified `launchAndWatch` + `assembleMatrix`
 - Create: `packages/benchmarking/marketplace/src/ordering-leg-b.test.ts` — runs the kit's `describeOrderingConformance` anchored leg (b)
 - Create: `packages/benchmarking/marketplace/src/index.ts` (final barrel) + `README.md`
 
 **Interfaces:**
 - Produces:
-  - `runOnMarketplace(bench, run, binding: TaskExecutionBackend, projector, opts)` — composes `benchmarking-run`'s `launchAndWatch` (dispatching cell Submissions to the binding's `submit`, waiting for Deliveries) + `assembleMatrix` (with the marketplace-backed ports), venue `open-competition`, `independence: gating` required (§7.1), `budget` required, close boundary anchored. The binding is consumed **only** through the `TaskExecutionBackend` interface (program §7.18). **This is the sole benchmarking mode where a deterministic third-party Attempt URI is in play** (program §7.22): it enters via the binding's `submit` `engagement` param — the binding derives it with the TEP `deriveAttemptUri` export (program §7.2; the binding never re-derives its own), and benchmarking hands sealed bytes + the engagement entry across the standard interface without deriving or re-deriving any Attempt URI itself.
+  - `runOnMarketplace(bench, run, binding: TaskExecutionBackend, projector, opts)` — composes `benchmarking-run`'s unmodified `launchAndWatch` (dispatching cell Submissions through the binding's standard 2-arg `submit`, waiting for Deliveries) + `assembleMatrix` (with the marketplace-backed ports). Enforces at composition time (program §7.136): `venue.kind === 'open-competition'`, `policy.independence === 'gating'`, and a present valid `budget`; local mode remains legal without budget. Close boundary anchored per program §7.137. The binding is consumed **only** through the `TaskExecutionBackend` interface (program §7.18). **This is the sole benchmarking mode where a deterministic third-party Attempt URI is in play** (program §7.22): it is created by the later operator claim path and enters the Matrix only from authoritative observe/projector facts — benchmarking submits exact Task/Submission bytes through the 2-arg contract and never passes `engagement` (program §7.135).
   - The anchored ordering leg (b) of `preregistration-precedes-dispatch` (§7.2 leg (b)) — asserted via the kit's `describeOrderingConformance` anchored positive + anchored-violation transcript.
 
 - [ ] **Step 1: Write the failing `venue.test.ts` + `ordering-leg-b.test.ts`** driving the composition against the marketplace binding's kit/fixtures (the TEP kit runs against the binding per marketplace design §13). Run — expect FAIL.
@@ -734,6 +734,8 @@ If absent, **stop** — M7 is blocked on the marketplace-binding plan and its im
 ---
 
 ## M8 — Tree verification + declared-impact addendum
+
+Per program §7.144: M8 ships the informational implementation addendum and README pointers **after** all six packages/facts leaf are green. No tier-4 service, deploy, daemon migration, or binding/projector redesign enters scope.
 
 ### Task 8.1: Packed-types tree gate + full CI dry run
 
@@ -1121,3 +1123,58 @@ The follow-up is test-first and M1–M3 only. It reruns the complete records/agg
 trust/profile consumer, schema drift/parity, package, guard, packed-type, workflow, raw-control,
 and clean-worktree gates. M4–M7 remain blocked until a fresh independent whole-design review
 accepts the exact repaired head.
+
+## Addendum 2026-07-29-p — M7 interface rulings (coordinator freeze)
+
+Coordinator inspection at `421607f64` freezes the M7 marketplace-venue interface before
+implementation. Program rulings §7.135–§7.144 are binding; this addendum restates them against
+the benchmarking plan and design surfaces they govern. Any earlier plan prose — including
+historical addenda — that implied benchmarking itself passes `engagement` or widens
+`launchAndWatch` is superseded on this point.
+
+1. **Requester composition stays on the 2-arg backend contract.** M7 does not widen
+   `launchAndWatch` and does not invent or pass a two-party engagement at open-competition post
+   time. It submits exact Task/Submission bytes through the standard 2-arg `TaskExecutionBackend`
+   contract. Deterministic Attempt identity is created by the later operator claim path
+   (`marketplace-pipeline`'s `buildEngagement`) and enters the Matrix only from authoritative
+   observe/projector facts. Pipeline continues to own operator-side `buildEngagement`.
+2. **`runOnMarketplace` enforces marketplace profile at composition time.** At composition time
+   (not schema-wide): `venue.kind === 'open-competition'`, `policy.independence === 'gating'`,
+   and a present valid `budget`. Local mode remains legal without budget (design §13).
+3. **Close boundary splits `at` from anchor.** Matrix `closeBoundary.at` remains the exact sealed
+   `Run.closeAt` (design §8.1). Its anchor is separately the first canonical `finalized` block
+   at or after that instant; no finalized anchor means fail closed. Never substitute block
+   timestamp into `at`.
+4. **InputScope authority is projector-root-export only.** Authority comes from root-exported
+   canonical projector observations/state/selectors after origin authorization, reducer
+   admission, reorg correction, and finality annotation; only finalized facts through the anchor
+   are eligible (design §8.3). Host resolvers may supply referenced sealed bytes but may not
+   bypass projector authority with arbitrary raw-log-shaped facts. No deep imports.
+5. **Settled cost is settlement-joined, never budget-envelope.** `settled` means the exact
+   successful delivery settlement joined to the accounted attempt. `value` is the settled
+   delivery rate, never task budget/reservation envelope; `unit` is the exact sealed
+   `Run.budget.unit`, and the adapter validates the settlement generation/payment asset against
+   it (today native ETH, revised OLAS per program §7.131). If no settlement exists, the
+   deterministic evidence-reported source may be used and labeled `reported`; never relabel it
+   `settled` (design §8.3/§13).
+6. **`marketplace-pipeline` is out of M7 dependencies.** `@jinn-network/marketplace-pipeline`
+   is out of M7 production and test dependencies. M7 proves requester backend composition and
+   projector-derived scope; pipeline remains the separate operator claim/engagement composition
+   path.
+7. **Trust stays injected; pinning honestly unverifiable.** Trust resolution/signing remain
+   injected through benchmarking-run ports; M7 adds no trust implementation. Pinning axes are
+   all honestly `unverifiable` until #2040/#2041; absent admission receipt means
+   `attested-only` (design §18.3).
+8. **Today and revised projector generations, honest deadline semantics.** M7 supports both
+   projector generations. Today does not gain fictitious on-chain deadline enforcement; both
+   modes exclude records after the finalized close anchor. Today settlement is native ETH;
+   revised settlement is OLAS per program §7.131.
+9. **No ambient RPC/viem; host-injected ports only.** M7 performs no ambient RPC/network access
+   and imports no `viem`. Finalized block/canonical projector inputs are host-injected public
+   ports. Binding/projector are consumed only via package-root exports.
+10. **M8 scope is informational addendum only.** M8 must ship the informational implementation
+    addendum and README pointers after all six packages/facts leaf are green; no tier-4 service,
+    deploy, daemon migration, or binding/projector redesign enters scope.
+
+M7 implementation is unblocked on these rulings only after a fresh independent whole-design
+review accepts the exact head carrying them.

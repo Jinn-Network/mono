@@ -60,7 +60,7 @@ export interface InScopeCell {
   evaluationSpec?: EvaluationSpec;
   /** Terminal could-not-grade signal for unscorable derivation (§8.2). */
   evaluationTerminal?: "could-not-grade";
-  /** When the input scope already carries an integrity tier, assembly prefers it. */
+  /** Ignored by assembly — integrity tier is sourced only from `AdmissionEvidencePort`. */
   integrityTier?: IntegrityTier;
 }
 
@@ -119,7 +119,9 @@ export interface PinningObservationPort {
 
 /** Admission receipt → integrity tier; conservative `attested-only` when absent (§8.4). */
 export interface AdmissionEvidencePort {
-  tierFor(taskDigest: string, evaluationSpecDigest: string): Promise<IntegrityTier>;
+  tierFor(
+    cell: Pick<InScopeCell, "cellKey" | "taskDigest" | "evaluationSpecDigest">,
+  ): Promise<IntegrityTier>;
 }
 
 /** Optional cost/latency sourcing pinned by assembly procedure version (§8.3). */

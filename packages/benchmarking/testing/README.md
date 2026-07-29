@@ -43,3 +43,5 @@ fixtures, oracles, and drivers are not deferred.
 
 See `docs/superpowers/specs/2026-07-28-benchmarking-application-design.md` §16 and
 `docs/superpowers/plans/2026-07-28-benchmarking-application.md` M2.
+
+Shipped-surface record: `docs/superpowers/specs/2026-07-28-benchmarking-implementation-addendum.md`.

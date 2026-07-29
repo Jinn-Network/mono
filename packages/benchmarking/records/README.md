@@ -46,5 +46,4 @@ marketplace package. See `.github/scripts/benchmarking-source-boundaries.test.mj
 - Plan: `docs/superpowers/plans/2026-07-28-benchmarking-application.md` (M1), including
   Addendum 2026-07-28-b (the `submission.annotations.{run,cellKey,armId}` wire shape) and
   Addendum 2026-07-28-c (the `protocol` field is the https URL form).
-- Declared-impact addendum (implementation record): filed at M8, once the full benchmarking
-  application tree lands.
+- Declared-impact addendum: `docs/superpowers/specs/2026-07-28-benchmarking-implementation-addendum.md`.
