@@ -1019,3 +1019,36 @@ The repair adds the exact overflow and materialization-bound vectors plus one se
 fully-attrited fixture exercised by all three methods. Records, aggregate, testing, trust,
 profiles, schema/profile pins, package gates, guards, packs, and workflows run again. M4 remains
 blocked until another fresh whole-design review returns GREEN.
+
+## Addendum 2026-07-29-l — exact provenance, decimals, schemas, and bounded verification
+
+The ninth fresh M1–M3 whole-design review rejected an otherwise-green head. Program rulings
+§7.76–§7.84 freeze the repair:
+
+1. one records-owned exact canonical Task/provenance resolver drives judgeability and every
+   aggregate clustering/cutoff consumer; a malformed present claim and a canonical non-Task fail
+   closed;
+2. completeness floors and comparisons use exact scaled-integer arithmetic, while the
+   noninferiority cost leg ranks exact decimal differences under one common unit;
+3. every arm's pinning keys are disjoint from the Run submission baseline;
+4. Report independence disclosure resolves the exact Run and counts only judged cells under its
+   disclosed policy;
+5. generated Draft 2020-12 schemas enforce the representable runtime wire rules and carry an
+   executable fixture-parity gate;
+6. `noninferiority-iut@1` exports and enforces the v1 maximum of 100,000 resamples before work;
+7. the paired-exclusion vector reaches and asserts its complete `R = 1` remainder rather than
+   passing through the separate replicate incompatibility; and
+8. a zero eligible-cell denominator is partial unless the Run is explicitly cancelled, never
+   synthetically complete.
+
+The repair is test-first. Hostile vectors include valid source plus malformed commitment,
+canonical non-Task bytes, decimal underflow/above-one and values above `2^53`, mixed cost units,
+baseline/pinning collision, expired and gating independence cells, invalid civil time,
+leap-second schema acceptance, unnamespaced aggregate, maximum-plus-one resamples, and the exact
+pairing remainder. The full records, aggregate, testing, trust/profile consumer, schema/profile
+pin, guard, packed-type, and workflow gates run again.
+
+The same review's two non-blocking hygiene notes are included in this repair: the ambient-network
+scanner receives a self-test and is applied to benchmarking production source, and the aggregate
+README points to the real testing-package conformance entrypoint. M4–M7 remain blocked until
+another fresh whole-design review accepts M1–M3.

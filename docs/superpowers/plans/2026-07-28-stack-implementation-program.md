@@ -831,6 +831,78 @@ Confirmed by the operator at the program gate (2026-07-28):
     same log replay idempotent may change. Capacity, Attempt identity, sequence, and other
     protocol state remain byte-identical. Each vector asserts the complete transition output,
     not merely the refusal name.
+76. **Benchmark Task provenance is admitted only from one exact canonical Task boundary:** the
+    records package owns and exports the resolver used by both `benchmark-judgeability` and the
+    aggregate package. It verifies the expected digest, fatal UTF-8 and JSON, the exact
+    `TaskSpecificationSchema`, canonical re-seal byte equality, the required evaluation
+    descriptor digest, and calendar-strict provenance time before returning a tagged source
+    family. Exactly one of the two provenance claim keys may be present as an own property:
+    non-empty `source` or lowercase `sha256:<64 hex>` `sourceCommitment`. A present malformed
+    second claim is not treated as absent; zero claims, two claims, an invalid present claim, a
+    canonical non-Task object, and any unavailable, mismatched, or noncanonical Task all fail
+    closed with the existing typed boundary outcome. Report methods never reimplement or weaken
+    this admission.
+77. **Benchmark completeness uses exact decimal arithmetic end to end:** the records package
+    parses decimal strings into package-local coefficient-and-scale values using `BigInt`, never
+    `Number`, and preserves the sealed spelling. Run and Matrix floors are in the exact interval
+    `(0, 1]`; an arbitrarily small positive decimal remains positive, while any value
+    mathematically above one is rejected even if IEEE-754 would round it to one. Matrix and
+    aggregate completeness compare `judged / (expected - excluded) >= floor` by integer
+    cross-products, and `clean-subset@1` consumes the same exact helper. Boundary vectors include
+    a positive value below binary-number range and a value immediately above one.
+78. **The noninferiority cost leg ranks exact same-unit decimal differences:** every included
+    both-solve pair is converted to a scaled `BigInt` difference without binary floating-point
+    conversion; absolute-difference ordering and ties for the one-sided paired Wilcoxon use
+    exact values. All included pairs must share one cost unit across the complete comparison.
+    A within-pair unit mismatch or a second included unit returns a typed method incompatibility,
+    never an exclusion that silently enters a mixed-unit rank test. Vectors above `2^53`, with
+    long fractional scales, prove the exact verdict, and a mixed-unit vector proves the closed
+    outcome.
+79. **Run-level Submission baseline keys and arm pinning keys are disjoint:** for every arm, the
+    key intersection of `policy.submissionBaseline` and `arm.pinning` must be empty. Any
+    intersection is a Run schema error at the exact arm/key path, regardless of whether the two
+    values happen to be byte-equal. The full cell requirements remain the unambiguous union of
+    those disjoint maps, and runtime plus exported-schema parity fixtures pin a conflicting
+    `model` key.
+80. **Report independence disclosure is derived under the exact Run policy:** disclosure
+    production and verification resolve each Matrix's digest-bound canonical Run before
+    counting. `independence` counts only cells whose outcome is `judged`, whose exact Run declares
+    `policy.independence: "disclosed"`, and whose failed named checks include
+    `evaluator-independence`. Non-judged cells never count; a gating Run cannot manufacture the
+    disclosed-policy count. Missing, mismatched, malformed, or noncanonical Run bytes fail
+    disclosure production and verification closed. Expired and gating-policy hostile vectors
+    assert the complete disclosures.
+81. **Checked-in Benchmark JSON Schemas are enforceable wire contracts, not loose Zod
+    projections:** schema generation post-processes refinements that Draft 2020-12 can represent
+    and its drift gate validates the generated schemas against the repository's valid/invalid
+    wire fixtures. In particular, all four record schemas permit only known or namespaced
+    top-level properties; Run and Matrix express the exact `(0,1]` floor grammar; calendar-time
+    fields reject invalid civil dates while retaining the valid leap-second contract; and
+    unnamespaced Matrix aggregates are rejected. Runtime-only cross-field checks that Draft
+    2020-12 cannot express carry an explicit `$comment` naming the required runtime check rather
+    than being implied by an unconstrained schema. The parity gate proves leap-second acceptance,
+    invalid-date rejection, above-one floor rejection, tiny-positive floor acceptance, and the
+    unnamespaced aggregate refusal with a Draft 2020-12 validator configured for asserted
+    formats.
+82. **`noninferiority-iut@1` has a versioned v1 resampling ceiling:** the aggregate package
+    exports `MAX_NONINFERIORITY_RESAMPLES_V1 = 100_000`. The method parameter schema declares
+    that maximum, every direct bootstrap helper rejects a non-integer, non-positive, or
+    above-maximum value before allocation or iteration, and Report production/verification
+    returns its typed parameter incompatibility before compute. The default remains 10,000 and
+    xorshift/cluster draw semantics below the ceiling are unchanged. Maximum and maximum-plus-one
+    vectors pin the resource contract.
+83. **The paired-exclusion conformance case reaches the behavior it claims to test:** the
+    `R = 1` pairing fixture contains judged pairs plus missing, conflicted, and one-sided cells,
+    and asserts the exact full excluded remainder, cell-key ordering, and tagged clustering
+    basis. The `R > 1` incompatibility remains a separate vector. No early incompatibility may
+    satisfy the exclusion test, and every declared expected result in the fixture must be
+    consumed by an assertion.
+84. **A zero eligible-cell denominator never proves completeness:** when
+    `expected - excluded == 0`, the completeness floor is not met and a non-cancelled Matrix must
+    declare `runOutcome: "partial"`. An explicitly owner-cancelled run remains `cancelled`; a
+    zero-denominator Matrix may never be `complete`. Records, aggregate helpers, minimal
+    fixtures, Report disclosures, and exported schema examples use this conservative outcome and
+    never substitute a synthetic ratio of one.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 
