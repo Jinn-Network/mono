@@ -145,6 +145,74 @@ const solutionClaimed = projectable({
 });
 
 describe("projectObservations", () => {
+  test("keeps every nested caller state value isolated across accepted and refused lifecycle facts", () => {
+    const initial = createMarketplaceProjectionState();
+    const created = projectable({
+      event: "TaskCreated",
+      facts: {
+        creator: CREATOR,
+        taskCidDigest: `0x${"7".repeat(64)}`,
+        submissionDigest: `0x${"d".repeat(64)}`,
+        taskId: 42n,
+        maxTotal: 1,
+        maxConcurrent: 1,
+        submissionDeadline: 1_800_000_000n,
+        closeAt: 0n,
+        responseTimeout: 3600n,
+        minVerdicts: 1,
+        requireDistinctEvaluator: true,
+        solutionMaxDeliveryRate: 10n,
+        verdictMaxDeliveryRate: 20n,
+        solutionBudget: 100n,
+        verdictBudget: 20n,
+      },
+      derivation: derivation("TaskCreated", 80, "revised"),
+    });
+    const createdTransition = reduceMarketplaceProjection([created], initial);
+    const claim = projectable({
+      event: "TaskAttemptCreated",
+      facts: {
+        taskId: 42n, attemptIndex: 1, operator: OPERATOR,
+        requestId: REQUEST_ID, priorityMech: OPERATOR, attemptDeadline: 1_800_000_001n,
+        deliveryRate: 10n,
+      },
+      derivation: derivation("TaskAttemptCreated", 81, "revised"),
+    });
+    const beforeClaim = structuredClone(createdTransition.state);
+    const claimed = reduceMarketplaceProjection([claim], createdTransition.state);
+    expect(createdTransition.state).toEqual(beforeClaim);
+    expect(claimed.state.tasks).not.toBe(createdTransition.state.tasks);
+    expect(claimed.state.tasks[Object.keys(claimed.state.tasks)[0]!]?.liveAttemptIndices)
+      .not.toBe(createdTransition.state.tasks[Object.keys(createdTransition.state.tasks)[0]!]?.liveAttemptIndices);
+
+    const release = projectable({
+      event: "AttemptReleased",
+      facts: { taskId: 42n, attemptIndex: 1, operator: OPERATOR },
+      derivation: derivation("AttemptReleased", 82, "revised"),
+    });
+    const beforeRelease = structuredClone(claimed.state);
+    const released = reduceMarketplaceProjection([release], claimed.state);
+    expect(claimed.state).toEqual(beforeRelease);
+
+    const expiry = projectable({
+      event: "AttemptExpired",
+      facts: { taskId: 42n, attemptIndex: 1, operator: OPERATOR },
+      derivation: derivation("AttemptExpired", 83, "revised"),
+    });
+    const beforeRefusal = structuredClone(released.state);
+    const refused = reduceMarketplaceProjection([expiry], released.state);
+    expect(released.state).toEqual(beforeRefusal);
+    expect(refused.events).toEqual([]);
+    expect(refused.observations).toEqual([]);
+    expect(refused.refusals.map(({ reason }) => reason)).toEqual(["attempt-not-live"]);
+    expect({ ...refused.state, processedLogIds: [] }).toEqual({ ...released.state, processedLogIds: [] });
+
+    const replay = reduceMarketplaceProjection([expiry], refused.state);
+    expect(replay.events).toEqual([]);
+    expect(replay.observations).toEqual([]);
+    expect(replay.refusals).toEqual([]);
+    expect(replay.state).toEqual(refused.state);
+  });
   test.each(["today", "revised"] as const)(
     "derives %s Attempt subjects from the configured TaskCoordinator, never the emitting router",
     (generation) => {
@@ -538,13 +606,17 @@ describe("projectObservations", () => {
       { sequence: "0000000000000002", data: { reason: "capacity" } },
       { sequence: "0000000000000003", data: { reason: "capacity" } },
     ]);
-    expect(four.state.tasks).toEqual({
+    expect(four.state.tasks).toMatchObject({
       "84532:0x1111111111111111111111111111111111111111:42": {
         maxTotal: 2,
         liveAttemptIndices: { "3": true, "4": true },
         seenAttemptIndices: { "3": true, "4": true },
         highestAttemptIndex: 4,
         availability: "closed",
+        submissionAnchor: {
+          digest: `sha256:${"9".repeat(64)}`,
+          derivation: derivation("TaskCreated", 10, "revised"),
+        },
       },
     });
   });

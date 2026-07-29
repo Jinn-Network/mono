@@ -40,12 +40,14 @@ import {
 } from "viem";
 import {
   describeMarketplaceProjectorConformance,
+  loadMarketplaceProjectorFixtures,
   type DerivationOutcome,
   type MarketplaceProjectorConformanceSubject,
   type MarketplaceProjectorFixture,
   type MarketplaceProjectorReorgFixture,
   type ProjectedDerivation,
 } from "./projector-conformance.js";
+import { expect, test } from "vitest";
 
 interface FixtureLog {
   readonly event: string;
@@ -312,6 +314,114 @@ function refuses(operation: () => unknown): boolean {
     return true;
   }
 }
+
+test("lifecycle replay and refusals preserve the complete accepted-output boundary", () => {
+  const fixture = loadMarketplaceProjectorFixtures().find(({ name }) => name === "revised-cross-batch-flow");
+  if (fixture === undefined) throw new Error("revised lifecycle fixture is missing");
+  const [created, claim] = enrichedEvents(fixture);
+  if (
+    created === undefined || created.event !== "TaskCreated"
+    || claim === undefined || claim.event !== "TaskAttemptCreated"
+  ) {
+    throw new Error("revised lifecycle fixture lacks TaskCreated and TaskAttemptCreated");
+  }
+  const createdState = reduceMarketplaceProjection([created], createMarketplaceProjectionState());
+  const claimed = reduceMarketplaceProjection([claim], createdState.state);
+  const stateWithoutProcessed = (state: typeof claimed.state) => ({ ...state, processedLogIds: [] });
+  const replay = reduceMarketplaceProjection([claim], claimed.state);
+  expect(replay).toMatchObject({ events: [], observations: [], availabilityOpenedLogIds: [], refusals: [] });
+  expect(replay.state).toEqual(claimed.state);
+
+  const distinctLog = {
+    ...claim,
+    derivation: { ...claim.derivation, txHash: `0x${"c".repeat(64)}`, logIndex: 1 },
+  } as ObservationMarketplaceEvent;
+  const regressing = reduceMarketplaceProjection([distinctLog], claimed.state);
+  expect(regressing).toMatchObject({
+    events: [], observations: [], availabilityOpenedLogIds: [],
+    refusals: [{ reason: "attempt-identity-regressing", taskId: claim.facts.taskId, attemptIndex: claim.facts.attemptIndex }],
+  });
+  expect(stateWithoutProcessed(regressing.state)).toEqual(stateWithoutProcessed(claimed.state));
+
+  const reusedIndex = {
+    ...claim,
+    facts: { ...claim.facts, attemptIndex: claim.facts.attemptIndex - 1 },
+    derivation: { ...claim.derivation, txHash: `0x${"b".repeat(64)}`, logIndex: 5 },
+  } as ObservationMarketplaceEvent;
+  const reused = reduceMarketplaceProjection([reusedIndex], claimed.state);
+  expect(reused).toMatchObject({
+    events: [], observations: [], availabilityOpenedLogIds: [],
+    refusals: [{ reason: "attempt-identity-regressing", attemptIndex: claim.facts.attemptIndex - 1 }],
+  });
+  expect(stateWithoutProcessed(reused.state)).toEqual(stateWithoutProcessed(claimed.state));
+
+  const unknown = {
+    ...claim,
+    facts: { ...claim.facts, taskId: 999n, attemptIndex: claim.facts.attemptIndex + 1 },
+    derivation: { ...claim.derivation, txHash: `0x${"d".repeat(64)}`, logIndex: 2 },
+  } as ObservationMarketplaceEvent;
+  const unknownResult = reduceMarketplaceProjection([unknown], createdState.state);
+  expect(unknownResult).toMatchObject({
+    events: [], observations: [], availabilityOpenedLogIds: [],
+    refusals: [{ reason: "unknown-task", taskId: 999n, attemptIndex: claim.facts.attemptIndex + 1 }],
+  });
+  expect(stateWithoutProcessed(unknownResult.state)).toEqual(stateWithoutProcessed(createdState.state));
+
+  const release = {
+    event: "AttemptReleased" as const,
+    facts: { taskId: claim.facts.taskId, attemptIndex: claim.facts.attemptIndex, operator: claim.facts.operator },
+    derivation: { ...claim.derivation, event: "AttemptReleased", txHash: `0x${"e".repeat(64)}`, logIndex: 3 },
+    projection: claim.projection,
+  } as ObservationMarketplaceEvent;
+  const nonLive = reduceMarketplaceProjection([release], createdState.state);
+  expect(nonLive).toMatchObject({
+    events: [], observations: [], availabilityOpenedLogIds: [],
+    refusals: [{ reason: "attempt-not-live", taskId: claim.facts.taskId, attemptIndex: claim.facts.attemptIndex }],
+  });
+  expect(stateWithoutProcessed(nonLive.state)).toEqual(stateWithoutProcessed(createdState.state));
+
+  const expiry = {
+    ...release,
+    event: "AttemptExpired" as const,
+    derivation: { ...release.derivation, event: "AttemptExpired", txHash: `0x${"a".repeat(64)}`, logIndex: 6 },
+  } as ObservationMarketplaceEvent;
+  const nonLiveExpiry = reduceMarketplaceProjection([expiry], createdState.state);
+  expect(nonLiveExpiry).toMatchObject({
+    events: [], observations: [], availabilityOpenedLogIds: [],
+    refusals: [{ reason: "attempt-not-live", taskId: claim.facts.taskId, attemptIndex: claim.facts.attemptIndex }],
+  });
+  expect(stateWithoutProcessed(nonLiveExpiry.state)).toEqual(stateWithoutProcessed(createdState.state));
+
+  for (const lifecycle of [release, expiry]) {
+    const unknownLifecycle = {
+      ...lifecycle,
+      facts: { ...lifecycle.facts, taskId: 999n },
+      derivation: {
+        ...lifecycle.derivation,
+        txHash: `0x${(lifecycle.event === "AttemptReleased" ? "9" : "8").repeat(64)}`,
+      },
+    } as ObservationMarketplaceEvent;
+    const unknownLifecycleResult = reduceMarketplaceProjection([unknownLifecycle], createdState.state);
+    expect(unknownLifecycleResult).toMatchObject({
+      events: [], observations: [], availabilityOpenedLogIds: [],
+      refusals: [{ reason: "unknown-task", taskId: 999n, attemptIndex: claim.facts.attemptIndex }],
+    });
+    expect(stateWithoutProcessed(unknownLifecycleResult.state)).toEqual(stateWithoutProcessed(createdState.state));
+  }
+
+  const topUp = {
+    event: "AttemptsAdded" as const,
+    facts: { taskId: claim.facts.taskId, creator: created.facts.creator, added: 1, newMaxTotal: 1 },
+    derivation: { ...claim.derivation, event: "AttemptsAdded", txHash: `0x${"f".repeat(64)}`, logIndex: 4 },
+    projection: claim.projection,
+  } as ObservationMarketplaceEvent;
+  const contradictory = reduceMarketplaceProjection([topUp], createdState.state);
+  expect(contradictory).toMatchObject({
+    events: [], observations: [], availabilityOpenedLogIds: [],
+    refusals: [{ reason: "capacity-contradiction", taskId: claim.facts.taskId }],
+  });
+  expect(stateWithoutProcessed(contradictory.state)).toEqual(stateWithoutProcessed(createdState.state));
+});
 
 async function projectFixtureInternal(
   fixture: MarketplaceProjectorFixture | MarketplaceProjectorReorgFixture,

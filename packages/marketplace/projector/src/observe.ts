@@ -75,6 +75,13 @@ export interface MarketplaceProjectionState {
     seenAttemptIndices: Record<string, true>;
     highestAttemptIndex: number;
     availability: "open" | "closed";
+    /** Revised creation anchor used to admit every later availability re-opening. */
+    submissionAnchor?: {
+      readonly digest: `sha256:${string}`;
+      readonly derivation: MarketplaceEvent["derivation"];
+    };
+    /** Immutable creation facts reused by later availability announcements. */
+    submissionTerms?: Record<string, string>;
   }>;
   /** External Mech delivery facts waiting for their router claim. */
   pendingMechDeliveries: Record<string, PendingMechDelivery>;
@@ -121,14 +128,29 @@ export function cloneMarketplaceProjectionState(
     tasks: Object.fromEntries(
       Object.entries(state.tasks).map(([key, value]) => [
         key,
-        { ...value },
+        {
+          ...value,
+          liveAttemptIndices: { ...value.liveAttemptIndices },
+          seenAttemptIndices: { ...value.seenAttemptIndices },
+          ...(value.submissionTerms === undefined
+            ? {}
+            : { submissionTerms: { ...value.submissionTerms } }),
+          ...(value.submissionAnchor === undefined
+            ? {}
+            : {
+                submissionAnchor: {
+                  digest: value.submissionAnchor.digest,
+                  derivation: { ...value.submissionAnchor.derivation },
+                },
+              }),
+        },
       ]),
     ),
     pendingMechDeliveries: Object.fromEntries(
       Object.entries(state.pendingMechDeliveries).map(([key, value]) => [
         key,
         {
-          data: value.data,
+          data: value.data.slice() as Hex,
           ...(value.deliveryCorrespondence === undefined
             ? {}
             : {
@@ -173,6 +195,33 @@ function digestFromBytes32(value: Hex): `sha256:${string}` {
     throw new TypeError(`expected bytes32 sha256 anchor, got ${value}`);
   }
   return `sha256:${value.slice(2).toLowerCase()}`;
+}
+
+function creationSubmissionTerms(
+  event: Extract<ObservationMarketplaceEvent, { event: "TaskCreated" }>,
+): Record<string, string> {
+  if ("maxClaims" in event.facts) {
+    return {
+      contractGeneration: "today",
+      maxTotal: String(event.facts.maxClaims),
+      solutionBudgetWei: event.facts.solutionBudget.toString(),
+      verdictBudgetWei: event.facts.verdictBudget.toString(),
+    };
+  }
+  return {
+    contractGeneration: "revised",
+    maxTotal: String(event.facts.maxTotal),
+    maxConcurrent: String(event.facts.maxConcurrent),
+    submissionDeadline: event.facts.submissionDeadline.toString(),
+    ...(event.facts.closeAt === 0n ? {} : { closeAt: event.facts.closeAt.toString() }),
+    responseTimeout: event.facts.responseTimeout.toString(),
+    minVerdicts: String(event.facts.minVerdicts),
+    requireDistinctEvaluator: String(event.facts.requireDistinctEvaluator),
+    solutionMaxDeliveryRateWei: event.facts.solutionMaxDeliveryRate.toString(),
+    verdictMaxDeliveryRateWei: event.facts.verdictMaxDeliveryRate.toString(),
+    solutionBudgetWei: event.facts.solutionBudget.toString(),
+    verdictBudgetWei: event.facts.verdictBudget.toString(),
+  };
 }
 
 function taskKey(event: ObservationMarketplaceEvent, taskId: bigint): string {
@@ -269,6 +318,7 @@ export function reduceMarketplaceProjection(
   const availabilityOpenedLogIds: string[] = [];
   const refusals: MarketplaceProjectionRefusal[] = [];
   const processed = new Set(state.processedLogIds);
+  let eventRefused = false;
 
   function emit(
     event: ObservationMarketplaceEvent,
@@ -300,6 +350,7 @@ export function reduceMarketplaceProjection(
     taskId: bigint,
     attemptIndex?: number,
   ): void {
+    eventRefused = true;
     refusals.push({
       kind: "marketplace-projection-refused",
       reason,
@@ -318,7 +369,7 @@ export function reduceMarketplaceProjection(
     if (processed.has(identity)) continue;
     processed.add(identity);
     state.processedLogIds.push(identity);
-    acceptedEvents.push(event);
+    eventRefused = false;
 
     switch (event.event) {
       case "TaskCreated": {
@@ -333,6 +384,15 @@ export function reduceMarketplaceProjection(
           seenAttemptIndices: {},
           highestAttemptIndex: -1,
           availability: maxTotal === 0 ? "closed" : "open",
+          submissionTerms: creationSubmissionTerms(event),
+          ...(event.derivation.contractGeneration === "revised" && "submissionDigest" in event.facts
+            ? {
+                submissionAnchor: {
+                  digest: digestFromBytes32(event.facts.submissionDigest),
+                  derivation: { ...event.derivation },
+                },
+              }
+            : {}),
         };
 
         if (anchoredTaskDigest !== event.projection.taskDigest) {
@@ -599,6 +659,7 @@ export function reduceMarketplaceProjection(
       case "EvaluationAttemptCreated":
         break;
     }
+    if (!eventRefused) acceptedEvents.push(event);
   }
 
   return {

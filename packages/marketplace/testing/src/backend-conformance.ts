@@ -27,6 +27,7 @@ import {
   type BindingResolver,
   type DsseChainVerifier,
   type ResolvedBinding,
+  type VerifyEnvelopeBindingDeps,
 } from "@jinn-network/trust-core";
 import {
   DeliveryRecordSchema,
@@ -38,6 +39,7 @@ import {
   sha256Hex,
   type DeliveryRecord,
   type EvidenceRecordReference,
+  type TaskSpecification,
 } from "@jinn-network/task-execution-protocol";
 import { sealEvaluationSpec, type EvaluationSpec } from "@jinn-network/task-execution-profiles";
 import { describeTaskExecutionBackendContract, type TestableBackend } from "@jinn-network/task-execution-testing";
@@ -178,6 +180,106 @@ function signedEnvelope(payloadBytes: Uint8Array, payloadType: string, keyid: st
 // ---------------------------------------------------------------------------
 
 export type MandatoryEvidenceResult = { ok: true } | { ok: false; reason: string };
+
+/** Exact signed-Task admission boundary required by marketplace profile §16.2. */
+export interface SignedTaskAdmissionInput {
+  readonly envelopeBytes: Uint8Array;
+  readonly requesterAgent: string;
+  readonly requesterKey: string;
+  readonly atTime: string;
+  readonly dependencies: VerifyEnvelopeBindingDeps;
+}
+
+export type SignedTaskAdmissionResult =
+  | {
+      readonly ok: true;
+      readonly taskBytes: Uint8Array;
+      readonly task: TaskSpecification;
+    }
+  | {
+      readonly ok: false;
+      readonly reason:
+        | "envelope"
+        | "media-type"
+        | "task-json"
+        | "task-schema"
+        | "task-canonical"
+        | "requester-binding";
+      readonly detail: string;
+    };
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.length === right.length
+    && left.every((byte, index) => byte === right[index]);
+}
+
+/**
+ * Admits only a DSSE envelope that carries the exact canonical Task bytes and whose received
+ * PAE-bound envelope verifies under the expected requester authority. `parseDsseEnvelope` is
+ * deliberately the trust-core parser available to this branch; Task exactness is established by
+ * canonical re-sealing, not by inventing a second envelope parser dependency.
+ */
+export async function checkSignedTaskAdmission(
+  input: SignedTaskAdmissionInput,
+): Promise<SignedTaskAdmissionResult> {
+  let parsed: ReturnType<typeof parseDsseEnvelope>;
+  try {
+    parsed = parseDsseEnvelope(input.envelopeBytes);
+  } catch (cause) {
+    return { ok: false, reason: "envelope", detail: String(cause) };
+  }
+  if (parsed.payloadType !== TASK_MEDIA_TYPE) {
+    return {
+      ok: false,
+      reason: "media-type",
+      detail: `expected ${TASK_MEDIA_TYPE}, got ${parsed.payloadType}`,
+    };
+  }
+
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(parsed.payloadBytes));
+  } catch (cause) {
+    return { ok: false, reason: "task-json", detail: String(cause) };
+  }
+
+  let task: TaskSpecification;
+  try {
+    task = TaskSpecificationSchema.parse(parsedJson);
+  } catch (cause) {
+    return { ok: false, reason: "task-schema", detail: String(cause) };
+  }
+
+  let canonical: Uint8Array;
+  try {
+    canonical = sealTask(task);
+  } catch (cause) {
+    return { ok: false, reason: "task-schema", detail: String(cause) };
+  }
+  if (!sameBytes(parsed.payloadBytes, canonical)) {
+    return {
+      ok: false,
+      reason: "task-canonical",
+      detail: "DSSE payload differs from the canonical sealed Task bytes",
+    };
+  }
+
+  const binding = await verifyEnvelopeBinding({
+    envelopeBytes: input.envelopeBytes,
+    key: input.requesterKey,
+    agent: input.requesterAgent,
+    family: "authorizations",
+    atTime: input.atTime,
+  }, input.dependencies);
+  if (!binding.ok) {
+    return {
+      ok: false,
+      reason: "requester-binding",
+      detail: binding.detail ?? binding.reason ?? "requester authority was not accepted",
+    };
+  }
+  return { ok: true, taskBytes: parsed.payloadBytes.slice(), task };
+}
 
 /** The §16.2 marketplace profile requires `executionIds` and `evidenceRecords` on every Delivery. */
 export function checkMandatoryEvidence(delivery: DeliveryRecord): MandatoryEvidenceResult {

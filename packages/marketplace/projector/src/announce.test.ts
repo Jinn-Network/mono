@@ -451,6 +451,119 @@ describe("projectAnnouncements", () => {
     );
   });
 
+  test("a retained revised anchor reopens with the original record digest and facts identity", async () => {
+    const anchoredDigest = documentDigest(SUBMISSION_BYTES);
+    const revisedTask = projectable({
+      event: "TaskCreated",
+      facts: {
+        creator: CREATOR, taskCidDigest: `0x${"7".repeat(64)}`,
+        submissionDigest: `0x${anchoredDigest.slice("sha256:".length)}`,
+        taskId: 42n, maxTotal: 1, maxConcurrent: 1,
+        submissionDeadline: 1_800_000_000n, closeAt: 0n, responseTimeout: 3600n,
+        minVerdicts: 1, requireDistinctEvaluator: true,
+        solutionMaxDeliveryRate: 10n, verdictMaxDeliveryRate: 20n,
+        solutionBudget: 100n, verdictBudget: 20n,
+      },
+      derivation: derivation("TaskCreated", 60, "revised"),
+    });
+    const revisedClaim = projectable({
+      event: "TaskAttemptCreated",
+      facts: {
+        taskId: 42n, attemptIndex: 1, operator: OPERATOR, requestId: REQUEST_ID,
+        priorityMech: OPERATOR, attemptDeadline: 1_800_000_001n, deliveryRate: 10n,
+      },
+      derivation: derivation("TaskAttemptCreated", 61, "revised"),
+    });
+    const topUp = projectable({
+      event: "AttemptsAdded",
+      facts: { taskId: 42n, creator: CREATOR, added: 1, newMaxTotal: 2 },
+      derivation: derivation("AttemptsAdded", 62, "revised"),
+    });
+    const creation = reduceMarketplaceProjection([revisedTask, revisedClaim], createMarketplaceProjectionState());
+    const reopening = reduceMarketplaceProjection([topUp], creation.state);
+    const initial = await projectAnnouncements(creation, makePorts().ports);
+    const reopened = await projectAnnouncements(reopening, makePorts().ports);
+    const initialAvailable = initial.announcements.find((announcement) => announcement.action === "available");
+    const reopenedAvailable = reopened.announcements.find((announcement) => announcement.action === "available");
+
+    expect(reopenedAvailable?.announcementId).not.toBe(initialAvailable?.announcementId);
+    expect(reopenedAvailable?.action === "available" && initialAvailable?.action === "available"
+      ? reopenedAvailable.record.digest
+      : undefined).toBe(initialAvailable?.action === "available" ? initialAvailable.record.digest : undefined);
+    expect(reopenedAvailable?.action === "available" && initialAvailable?.action === "available"
+      ? reopenedAvailable.facts
+      : undefined).toEqual(initialAvailable?.action === "available" ? initialAvailable.facts : undefined);
+  });
+
+  test.each([
+    ["release", "AttemptReleased"],
+    ["expiry", "AttemptExpired"],
+    ["top-up", "AttemptsAdded"],
+  ] as const)("refuses swapped retained Submission material on revised %s reopening before downstream effects", async (_name, eventName) => {
+    const { ports, writes, signed, recomputed, resolved } = makePorts();
+    const anchoredDigest = documentDigest(SUBMISSION_BYTES);
+    const revisedTask = projectable({
+      event: "TaskCreated",
+      facts: {
+        creator: CREATOR, taskCidDigest: `0x${"7".repeat(64)}`,
+        submissionDigest: `0x${anchoredDigest.slice("sha256:".length)}`,
+        taskId: 42n, maxTotal: 1, maxConcurrent: 1,
+        submissionDeadline: 1_800_000_000n, closeAt: 0n, responseTimeout: 3600n,
+        minVerdicts: 1, requireDistinctEvaluator: true,
+        solutionMaxDeliveryRate: 10n, verdictMaxDeliveryRate: 20n,
+        solutionBudget: 100n, verdictBudget: 20n,
+      },
+      derivation: derivation("TaskCreated", 70, "revised"),
+    });
+    const revisedClaim = projectable({
+      event: "TaskAttemptCreated",
+      facts: {
+        taskId: 42n, attemptIndex: 1, operator: OPERATOR, requestId: REQUEST_ID,
+        priorityMech: OPERATOR, attemptDeadline: 1_800_000_001n, deliveryRate: 10n,
+      },
+      derivation: derivation("TaskAttemptCreated", 71, "revised"),
+    });
+    const opening = eventName === "AttemptsAdded"
+      ? projectable({
+          event: "AttemptsAdded",
+          facts: { taskId: 42n, creator: CREATOR, added: 1, newMaxTotal: 2 },
+          derivation: derivation("AttemptsAdded", 72, "revised"),
+        })
+      : projectable({
+          event: eventName,
+          facts: { taskId: 42n, attemptIndex: 1, operator: OPERATOR },
+          derivation: derivation(eventName, 72, "revised"),
+        } as MarketplaceEvent);
+    const before = reduceMarketplaceProjection([revisedTask, revisedClaim], createMarketplaceProjectionState());
+    const reopening = reduceMarketplaceProjection([opening], before.state);
+    const result = await projectAnnouncements(reopening, {
+      ...ports,
+      async resolveRecord(event, role) {
+        if (role === "submission" && event === opening) {
+          return {
+            kind: RECORD_KINDS.submission,
+            bytes: new TextEncoder().encode('{"swapped":true}'),
+          };
+        }
+        return ports.resolveRecord(event, role);
+      },
+    });
+
+    expect(result.announcements).toEqual([]);
+    expect(result.refusals).toEqual([{
+      kind: "announcement-material-refused",
+      role: "submission",
+      expectedDigest: anchoredDigest,
+      actualDigest: documentDigest(new TextEncoder().encode('{"swapped":true}')),
+      derivation: opening.derivation,
+      originalAnchorDerivation: revisedTask.derivation,
+    }]);
+    expect(resolved.filter(({ role }) => role === "submission")).toHaveLength(0);
+    expect(recomputed).toEqual([]);
+    expect(writes).toEqual([]);
+    expect(signed).toEqual([]);
+  });
+
   test("verdict verifies exact resolved material once, signs correspondence fact, then withdraws Submission", async () => {
     const { ports, resolved, verified } = makePorts();
     const verdict = projectable({

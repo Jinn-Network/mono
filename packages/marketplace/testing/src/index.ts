@@ -16,6 +16,11 @@ export {
   loadMarketplaceProjectorFixtures,
   loadMarketplaceProjectorReorgFixtures,
 } from "./projector-conformance.js";
+export { checkSignedTaskAdmission } from "./backend-conformance.js";
+export type {
+  SignedTaskAdmissionInput,
+  SignedTaskAdmissionResult,
+} from "./backend-conformance.js";
 export type {
   DerivationOutcome,
   MarketplaceAttemptReorgRun,

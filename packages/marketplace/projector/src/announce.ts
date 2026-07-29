@@ -116,6 +116,8 @@ export interface AnnouncementMaterialRefusal {
   readonly expectedDigest: `sha256:${string}`;
   readonly actualDigest: `sha256:${string}`;
   readonly derivation: DerivationAnnotation;
+  /** Present when a later availability epoch fails the immutable creation anchor. */
+  readonly originalAnchorDerivation?: DerivationAnnotation;
 }
 
 export interface AnnouncementProjectionResult {
@@ -155,7 +157,7 @@ export async function signAnnouncementEntry(
 }
 
 function taskKey(event: ObservationMarketplaceEvent, taskId: bigint): string {
-  return `${event.derivation.chainId}:${event.derivation.contract.toLowerCase()}:${taskId}`;
+  return `${event.derivation.chainId}:${event.projection.taskCoordinator.toLowerCase()}:${taskId}`;
 }
 
 function observationId(
@@ -253,7 +255,7 @@ async function availableAnnouncementFromMaterial(
     material.mediaType,
   );
   const facts = sortedDefinedFacts(role === "submission"
-    && (event.event === "TaskCreated" || event.event === "AttemptsAdded")
+    && event.event === "TaskCreated"
     ? { ...recordFacts, ...additionalFacts, terms: submissionTerms(event) }
     : { ...recordFacts, ...additionalFacts });
 
@@ -269,15 +271,6 @@ async function availableAnnouncementFromMaterial(
     facts,
     derivation: event.derivation,
   };
-}
-
-async function availableAnnouncement(
-  event: ObservationMarketplaceEvent,
-  role: AnnouncementRecordRole,
-  ports: AnnouncementProjectionPorts,
-): Promise<ProjectedAnnouncement> {
-  const material = await ports.resolveRecord(event, role);
-  return availableAnnouncementFromMaterial(event, role, material, ports);
 }
 
 function digestFromBytes32(value: string): `sha256:${string}` {
@@ -317,15 +310,37 @@ function expectedMaterialDigest(
   return undefined;
 }
 
+function retainedReopeningAnchor(
+  event: ObservationMarketplaceEvent,
+  transition: MarketplaceProjectionTransition,
+): {
+  readonly digest: `sha256:${string}`;
+  readonly derivation: DerivationAnnotation;
+  readonly terms: Record<string, string>;
+} | undefined {
+  if (
+    event.derivation.contractGeneration !== "revised"
+    || (event.event !== "AttemptsAdded" && event.event !== "AttemptExpired" && event.event !== "AttemptReleased")
+    || !("taskId" in event.facts)
+  ) {
+    return undefined;
+  }
+  const task = transition.state.tasks[taskKey(event, event.facts.taskId)];
+  if (task?.submissionAnchor === undefined) return undefined;
+  return { ...task.submissionAnchor, terms: task.submissionTerms ?? {} };
+}
+
 async function anchorCheckedMaterial(
   event: ObservationMarketplaceEvent,
   role: AnnouncementRecordRole,
   ports: AnnouncementProjectionPorts,
   observationById: ReadonlyMap<string, { readonly data: Record<string, unknown> }>,
   refusals: Array<VerdictObservationRefusal | AnnouncementMaterialRefusal>,
+  transition: MarketplaceProjectionTransition,
 ): Promise<AnnouncementRecordMaterial | undefined> {
   const material = await ports.resolveRecord(event, role);
-  const expectedDigest = expectedMaterialDigest(event, role, observationById);
+  const anchor = role === "submission" ? retainedReopeningAnchor(event, transition) : undefined;
+  const expectedDigest = expectedMaterialDigest(event, role, observationById) ?? anchor?.digest;
   if (expectedDigest !== undefined) {
     const actualDigest = documentDigest(material.bytes);
     if (actualDigest !== expectedDigest) {
@@ -335,6 +350,7 @@ async function anchorCheckedMaterial(
         expectedDigest,
         actualDigest,
         derivation: event.derivation,
+        ...(anchor === undefined ? {} : { originalAnchorDerivation: anchor.derivation }),
       });
       return undefined;
     }
@@ -461,10 +477,12 @@ export async function projectAnnouncements(
           )
         ) {
           const material = await anchorCheckedMaterial(
-            event, "submission", ports, observationById, refusals,
+            event, "submission", ports, observationById, refusals, transition,
           );
           if (material !== undefined) {
-            projected.push(await availableAnnouncementFromMaterial(event, "submission", material, ports));
+            projected.push(await availableAnnouncementFromMaterial(event, "submission", material, ports, {
+              terms: retainedReopeningAnchor(event, transition)?.terms,
+            }));
           }
         }
         break;
@@ -495,7 +513,7 @@ export async function projectAnnouncements(
           )
         ) {
           const material = await anchorCheckedMaterial(
-            event, "delivery", ports, observationById, refusals,
+            event, "delivery", ports, observationById, refusals, transition,
           );
           if (material !== undefined) {
             projected.push(await availableAnnouncementFromMaterial(event, "delivery", material, ports));
@@ -516,6 +534,7 @@ export async function projectAnnouncements(
             ports,
             observationById,
             refusals,
+            transition,
           );
           if (material === undefined) {
             break;
@@ -619,7 +638,14 @@ export async function projectAnnouncements(
           event.derivation.txHash.toLowerCase(),
           event.derivation.logIndex,
         ].join(":"))) {
-          projected.push(await availableAnnouncement(event, "submission", ports));
+          const material = await anchorCheckedMaterial(
+            event, "submission", ports, observationById, refusals, transition,
+          );
+          if (material !== undefined) {
+            projected.push(await availableAnnouncementFromMaterial(event, "submission", material, ports, {
+              terms: retainedReopeningAnchor(event, transition)?.terms,
+            }));
+          }
         }
         break;
 
@@ -636,7 +662,14 @@ export async function projectAnnouncements(
           event.derivation.txHash.toLowerCase(),
           event.derivation.logIndex,
         ].join(":"))) {
-          projected.push(await availableAnnouncement(event, "submission", ports));
+          const material = await anchorCheckedMaterial(
+            event, "submission", ports, observationById, refusals, transition,
+          );
+          if (material !== undefined) {
+            projected.push(await availableAnnouncementFromMaterial(event, "submission", material, ports, {
+              terms: retainedReopeningAnchor(event, transition)?.terms,
+            }));
+          }
         }
         break;
     }
