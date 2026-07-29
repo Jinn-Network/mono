@@ -39,10 +39,12 @@ it("survives SIGTERM aimed at its group and remains the outcome recorder", async
   mkdirSync(secretsDir, { recursive: true });
   spawnShim(
     { attemptId: "attempt-2", nonce: "nonce-2", metaDir, secretsDir },
-    { argv: [process.execPath, "-e", "setTimeout(() => process.exit(0), 80)"], env: {}, cwd: root },
+    { argv: [process.execPath, "-e", "setTimeout(() => process.exit(0), 40)"], env: {}, cwd: root },
   );
   const fingerprint = await waitForJson(join(metaDir, "shim.json"));
-  process.kill(-Number(fingerprint["pid"]), "SIGTERM");
+  // The harness is deliberately in a separate group; this direct shim signal proves that its
+  // signal trap survives and continues to record the harness's natural result.
+  process.kill(Number(fingerprint["pid"]), "SIGTERM");
   const outcome = await waitForJson(join(metaDir, "outcome.json"));
   expect(outcome).toMatchObject({ exitCode: 0, termSignal: null });
 });

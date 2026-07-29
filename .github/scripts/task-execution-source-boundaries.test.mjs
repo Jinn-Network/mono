@@ -303,7 +303,24 @@ test('task-execution source boundaries remain one-way across the approved graph'
 
   // backend-local (design §15, program §6 decision 2 revised): the package-level one-way
   // dependency graph enforcing the §5 never-touches columns (plan Task A2 Step 4).
-  assertBoundary(join(packages, 'backend-local', 'supervisor', 'src'), SUPERVISOR_FORBIDDEN);
+  // The supervisor's real conformance adapter is a dev-only test consumer of the kit (plan A5).
+  // Production supervisor modules remain free of testing, preserving the one-way runtime graph.
+  const supervisorSrc = join(packages, 'backend-local', 'supervisor', 'src');
+  const supervisorProduction = files(supervisorSrc).filter((file) => !file.endsWith('.test.ts'));
+  assert.deepEqual(
+    forbiddenImportsInFiles(supervisorProduction, SUPERVISOR_FORBIDDEN),
+    [],
+    'supervisor production source crosses a task-execution architecture boundary',
+  );
+  const supervisorKitImports = forbiddenImportsInFiles(
+    files(supervisorSrc).filter((file) => file.endsWith('.test.ts')),
+    ['@jinn-network/task-execution-testing'],
+  );
+  assert.deepEqual(
+    supervisorKitImports,
+    ['packages/task-execution/backend-local/supervisor/src/reconciler.conformance.test.ts -> @jinn-network/task-execution-testing/backend-local'],
+    'only the supervisor conformance test may consume the testing kit',
+  );
   assertBoundary(join(packages, 'backend-local', 'workspace', 'src'), WORKSPACE_FORBIDDEN);
   assertBoundary(join(packages, 'backend-local', 'launchers', 'src'), LAUNCHERS_FORBIDDEN);
   assertBoundary(join(packages, 'backend-local', 'assembly', 'src'), ASSEMBLY_FORBIDDEN);
