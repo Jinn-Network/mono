@@ -7,6 +7,8 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  linkSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -102,6 +104,49 @@ function readLock(path: string): LockRecord | undefined {
   }
 }
 
+function publishLock(lockPath: string, record: LockRecord): boolean {
+  const ownerPath = `${lockPath}.owner-${record.token}`;
+  let ownerFd: number | undefined;
+  try {
+    ownerFd = openSync(ownerPath, "wx", 0o600);
+    writeFileSync(ownerFd, JSON.stringify(record));
+    fsyncSync(ownerFd);
+    closeSync(ownerFd);
+    ownerFd = undefined;
+    // The canonical lock appears only after its complete owner record is durable.
+    linkSync(ownerPath, lockPath);
+    return true;
+  } catch {
+    if (ownerFd !== undefined) closeSync(ownerFd);
+    return false;
+  } finally {
+    try {
+      unlinkSync(ownerPath);
+    } catch {
+      // The canonical hard link, when present, owns the published record.
+    }
+  }
+}
+
+function reclaimStaleLock(lockPath: string): boolean {
+  const quarantinePath = `${lockPath}.stale-${crypto.randomUUID()}`;
+  try {
+    // Rename is atomic: only one contender gets ownership of this stale generation.
+    renameSync(lockPath, quarantinePath);
+  } catch {
+    return false;
+  }
+  try {
+    return true;
+  } finally {
+    try {
+      unlinkSync(quarantinePath);
+    } catch {
+      // A leftover quarantine name is harmless and contains no live canonical owner.
+    }
+  }
+}
+
 /**
  * Acquires the one-writer state-root lifetime lock.
  *
@@ -122,32 +167,22 @@ export function acquireStateRootWriter(stateRoot: string): StateRootWriter {
 
   if (existsSync(lockPath)) {
     const record = readLock(lockPath);
-    if (record === undefined || processIsLive(record.pid)) {
+    if (record !== undefined && processIsLive(record.pid)) {
       return locked("state root locked by a live instance");
     }
-    try {
-      unlinkSync(lockPath);
-    } catch {
+    if (!reclaimStaleLock(lockPath)) {
       return locked("state root lock could not be reclaimed");
     }
   }
 
   const token = crypto.randomUUID();
-  let fd: number | undefined;
-  try {
-    fd = openSync(lockPath, "wx", 0o600);
-    writeFileSync(fd, JSON.stringify({ pid: process.pid, token } satisfies LockRecord));
-    fsyncSync(fd);
-  } catch (error) {
-    if (fd !== undefined) closeSync(fd);
+  const record = { pid: process.pid, token } satisfies LockRecord;
+  if (!publishLock(lockPath, record)) {
     return locked(
-      (error as NodeJS.ErrnoException).code === "EEXIST"
-        ? "state root locked by a live instance"
-        : "state root lock could not be acquired",
+      "state root locked by a live instance",
     );
   }
   liveRoots.set(root, token);
-  const heldFd = fd;
 
   let released = false;
   return {
@@ -156,7 +191,6 @@ export function acquireStateRootWriter(stateRoot: string): StateRootWriter {
     release() {
       if (released) return;
       released = true;
-      closeSync(heldFd);
       if (liveRoots.get(root) === token) liveRoots.delete(root);
       const record = readLock(lockPath);
       if (record?.token === token) {

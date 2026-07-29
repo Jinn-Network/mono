@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -42,5 +42,16 @@ describe("one live writer per state root", () => {
     const replacement = acquireStateRootWriter(stateRoot);
     expect(replacement.acquired).toBe(true);
     if (replacement.acquired) replacement.release();
+  });
+
+  test("reclaims a malformed legacy lock left before owner publication", async () => {
+    const stateRoot = await root();
+    await mkdir(join(stateRoot, "meta"), { recursive: true });
+    await writeFile(join(stateRoot, "meta", "backend.lock"), "{");
+
+    const writer = acquireStateRootWriter(stateRoot);
+
+    expect(writer.acquired).toBe(true);
+    if (writer.acquired) writer.release();
   });
 });
