@@ -625,10 +625,12 @@ Confirmed by the operator at the program gate (2026-07-28):
     grant resolver is not a rejection reason. An end-to-end `deriveAndSealEvaluationSubmission`
     → requester `submit` vector proves that path. The standard backend also wires its completed
     lifecycle: `capabilities().cancel` is true exactly when the injected lifecycle port exists,
-    and `cancel` is terminal-aware/idempotent, maps Submission close through `closeSubmission`,
-    maps Attempt cancellation to the requester signal (and generation-appropriate release when
-    authorized), and never authors or revokes a work outcome. Unimplemented optional verbs
-    remain advertised false.
+    and the standard Attempt-only `cancel` is terminal-aware/idempotent, maps to the requester
+    signal (and generation-appropriate release when authorized), and never authors or revokes a
+    work outcome. Submission close remains the existing explicit `closeSubmission(taskId)`
+    binding extension and routes through the generation seam; it is not smuggled into TEP's
+    Attempt-only `cancel` signature. Unimplemented optional standard verbs remain advertised
+    false.
 55. **Marketplace §16.2 evidence checks start from a Delivery-bound exact record:** native
     conformance receives the exact canonical Delivery bytes, selects its named Execution
     Evidence reference, resolves exact record bytes, hashes those bytes, and requires equality

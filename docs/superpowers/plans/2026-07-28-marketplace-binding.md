@@ -1001,7 +1001,8 @@ Program rulings §7.52–§7.55 freeze the four generalized seams exposed by the
    preliminary filter; two Safes bound to one Agent fail closed.
 3. The requester backend reflects its completed M0–M5 behavior. It transports exact grant
    references without redeeming them and implements terminal-aware/idempotent protocol
-   cancellation through injected lifecycle ports.
+   Attempt cancellation through injected lifecycle ports. Submission close stays the explicit
+   `closeSubmission(taskId)` binding extension; it does not widen TEP's `cancel` signature.
 4. Dispatch binding and evaluation-spec equality are claims about the exact canonical Execution
    Evidence record selected and digest-bound by the Delivery, never a detached parsed object.
 
