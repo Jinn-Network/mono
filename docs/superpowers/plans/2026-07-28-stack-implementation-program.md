@@ -1063,6 +1063,33 @@ Confirmed by the operator at the program gate (2026-07-28):
     long legal nonce have cross-platform exact-round-trip vectors. This encoding clarification
     supersedes design §6.1's implication that every nonce can ride literally in `execve`
     environment strings; it does not change the Submission schema.
+112. **Exact cost differences share one comparison-wide decimal scale before ranking:** each
+    included same-unit pair retains its signed coefficient and scale until all pairs are known.
+    The cost leg chooses the maximum scale across that complete comparison, rescales every
+    coefficient to it, and only then computes absolute ranks and ties. Equivalent decimal
+    spellings therefore cannot change a Wilcoxon result. An end-to-end vector with eight `-0.9`
+    differences and two `+0.10` differences pins the common-scale `lower` result and its exact
+    replay details; long fractional scales remain exact.
+113. **Benchmark schema parity is bidirectional, complete for representable rules, and a CI
+    gate:** the generated Draft 2020-12 schemas and runtime accept/reject the same valid/invalid
+    fixture corpus wherever JSON Schema can express the rule. Report `disclosures` is required;
+    namespaced top-level extensions accept every runtime-valid absolute URI including `urn:`;
+    digest-bearing Task descriptors retain the runtime-valid optional `name` hint; and the exact
+    Arm ID grammar permits a valid leading digit. The parity runner exercises each direction,
+    reports the record kind and fixture on drift, and `benchmarking-ci.yml` runs
+    `check:schema-parity` in the records gate. Runtime-only cross-field checks remain explicit
+    `$comment`s rather than silent schema claims.
+114. **The paired-exclusion conformance fixture contains a real `R = 1` remainder:** one
+    dedicated input includes judged pairs plus missing, conflicted, and one-sided cells, then
+    consumes and asserts the fixture's complete ordered exclusions and tagged clustering basis.
+    The `R > 1` incompatibility is a different fixture and test. Neither test may reuse the
+    other's early outcome or leave a declared expected field unasserted.
+115. **The benchmarking ambient-network guard is syntax-aware enough to distinguish code from
+    comments and covers browser aliases:** executable `fetch` through bare, `globalThis`,
+    `window`, or `self` access, plus `XMLHttpRequest`, `WebSocket`, and the guard's other banned
+    ambient forms, is detected in production source. Comments and inert string literals do not
+    count as executable findings. Positive canaries cover each access form and negative canaries
+    cover comments/strings, so a comment cannot satisfy the scanner self-test.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

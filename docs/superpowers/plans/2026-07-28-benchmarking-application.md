@@ -1052,3 +1052,25 @@ The same review's two non-blocking hygiene notes are included in this repair: th
 scanner receives a self-test and is applied to benchmarking production source, and the aggregate
 README points to the real testing-package conformance entrypoint. M4–M7 remain blocked until
 another fresh whole-design review accepts M1–M3.
+
+## Addendum 2026-07-29-m — global cost scale, bidirectional schemas, and executable guards
+
+The tenth fresh M1–M3 whole-design review at
+`f96baa5b003325f5a12242178d74d3663951b228` is **RED**. Program rulings
+§7.112–§7.115 bind the next repair:
+
+1. exact same-unit cost differences retain coefficient and scale until the whole comparison is
+   known, then normalize once to the global maximum scale before Wilcoxon ranks or ties;
+2. exported Draft schemas and runtime share a bidirectional valid/invalid corpus, including
+   required Report disclosures, `urn:` extensions, optional descriptor names, and leading-digit
+   Arm IDs, and `check:schema-parity` runs in the records CI gate;
+3. the paired-exclusion test uses an actual `R = 1` fixture with judged, missing, conflicted, and
+   one-sided cells and consumes its exact ordered remainder/clustering expectation, while `R > 1`
+   stays separate; and
+4. the ambient-network guard detects executable browser aliases without treating comments or
+   inert strings as findings, with positive and negative canaries.
+
+The repair is test-first and remains M1–M3 only. It runs the complete records/aggregate/testing,
+trust/profile consumer, schema drift/parity, package, guard, packed-type, workflow, raw-control,
+and clean-worktree gates. M4–M7 remain blocked until a new independent whole-design review accepts
+the exact repaired head.
