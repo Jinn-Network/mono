@@ -680,6 +680,49 @@ Confirmed by the operator at the program gate (2026-07-28):
     any other byte-distinct representation fail `report-envelope` even when the unchanged
     payload/signature would pass PAE verification. The conformance verifier proves this with a
     PAE/signature-semantic test double, never raw-envelope identity.
+59. **Marketplace revised-mode announcements bind the exact resolved material to the chain
+    anchor before any effect:** for revised `TaskCreated`,
+    `documentDigest(material.bytes)` must equal the event's `submissionDigest`; for revised
+    `SolutionDeliveryClaimed` and `VerdictDeliveryClaimed`, it must equal `deliveryDigest` and
+    `evaluationDeliveryDigest`, respectively. The projector performs this comparison before
+    facts recomputation, verdict verification, record publication, archive/head writes, or
+    announcement signing. A mismatch produces a typed refusal carrying the material role,
+    expected digest, actual digest, and exact chain derivation, with zero downstream writes.
+    Today-mode solution material still must satisfy its existing Mech-request correspondence
+    join and must byte-hash to the delivery-recorded protocol digest selected by that join;
+    no Submission digest anchor is invented for the deployed today-mode `TaskCreated` event.
+60. **Marketplace capacity projection separates live occupancy from monotonic Attempt
+    identity and append-only availability:** state records `maxTotal`, the exact set/map of live
+    Attempt indices, the monotonic highest/seen Attempt identity, and whether availability is
+    currently open or closed as distinct facts. A revised claim adds its exact live index and
+    can emit capacity close/withdrawal only on an open→closed transition. The matching
+    `AttemptReleased` or `AttemptExpired` removes that exact live index; when this changes
+    closed→open, the projector appends a fresh signed `available` Submission announcement. It
+    does not rewrite an earlier announcement, reopen or rewrite the immutable TEP
+    `submission-closed` observation, or reuse an Attempt identity. `AttemptsAdded` likewise
+    reannounces only on closed→open. Duplicate lifecycle facts are idempotent; unknown,
+    contradictory, or identity-regressing facts fail closed with a typed refusal. Today-mode
+    retains the deployed contracts' monotonic claim-count behavior and fabricates no
+    release/reopen fact the chain cannot supply.
+61. **Marketplace verdict and projection failures use only the frozen TEP §13 category
+    vocabulary:** chain/material digest divergence maps to `content-corruption`; a missing
+    Delivery, request-id, or required reference join maps to `invalid-reference`; an invalid or
+    unmappable verdict code maps to `protocol-violation`; Result Evaluation `Invalid` is rejected
+    with `protocol-violation`; `Unresolved` fails with `result-unavailable`; normal `Fail`
+    rejects with no error category (a detail may say `verdict-fail`); and `Pass` delivers with no
+    error category. Projector/binding implementation may retain richer internal refusal kinds,
+    but no Protocol Observation serializes `verdict-fail`, `verdict-invalid`,
+    `verdict-unresolved`, `verdict-code-invalid`, `digest-divergence`, or
+    `delivery-join-missing` as a TEP category.
+62. **Marketplace native §16.2 conformance includes a non-vacuous signed-Task family:** the
+    kit seals canonical Task bytes, wraps those exact bytes in DSSE, and verifies the signature
+    and claimed creator/requester authority with the real trust verification primitive and
+    resolver seam used by the marketplace profile. The positive vector asserts the exact Task
+    payload recovered from the envelope and the successful authority result. Hostile vectors
+    cover payload substitution/noncanonical Task bytes and a signer lacking authority for the
+    claimed Agent; a test double that merely reports a valid key without binding the received
+    PAE/envelope bytes is not conforming. This family is additional to, not a substitute for,
+    the existing signed-Submission and executor-signed-Delivery vectors.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

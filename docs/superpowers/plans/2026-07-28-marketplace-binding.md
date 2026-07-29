@@ -30,7 +30,7 @@ _Every task's requirements implicitly include this section. Values copied verbat
 - **Attempt URIs are consumed, never re-derived (must #2; program §7.2; design §6.2/§11.6).** The deterministic Attempt URI is computed **only** by calling the protocol package's exported `deriveAttemptUri(MARKETPLACE_BINDING_NAME, tuple)` over `TEP_ATTEMPT_NAMESPACE`. The marketplace tree imports the export; it MUST NOT reimplement UUIDv5. A cross-package fixture asserts byte-identity against the protocol package's own pinned value (Milestone M1).
 - **Canonical sealed bytes, consumed not re-invented (program §7.1/§7.4/§7.14).** TEP Task/Submission/Delivery sealed bytes come from `@jinn-network/task-execution-protocol`; announcement sealed bytes come from `@jinn-network/record-discovery-serve`/`-protocol`. The marketplace tree re-implements a per-package `order.ts` (`compareCodeUnitStrings`, UTF-16 code-unit) + JCS serializer **only** for its own backend-internal canonical bytes (broadcast-intent WAL record; correspondence-assertion payload), with a pinned-digest equivalence fixture including one object-key-sort-sensitive record and one integer-like-key record (`{"10":…,"2":…}`). A fixture documents that the tree produces **no** new sealed TEP/discovery family, so nobody later adds a duplicate serializer (mirrors program §7.15's absent-export discipline).
 - **Locale ban.** `localeCompare`, `toLocale*`, and `Intl` are banned in all production source under `packages/marketplace/` (source-boundaries guard). `.test.ts` and `.mjs` guard scripts are exempt.
-- **No raw control bytes in source.** The Attempt-URI name delimiter and any control characters are written as escapes (`""`), never literal bytes (program directive; §7.14 discipline).
+- **No raw control bytes in source.** The Attempt-URI name delimiter and any control characters are written as escapes (`"\u001f"`), never literal bytes (program directive; §7.14 discipline).
 - **Honor-or-reject is symmetric at the binding (§6.1, frozen §11.12; TEP §8 forbids silent degradation).** In today-mode, `capabilities()` declares the today-mode bounds (`maxConcurrent == maxTotal`, first-verdict finalization); a Submission with `minVerdicts > 1` OR `maxConcurrent > maxTotal` OR a `closeAt` requirement (today-mode has no on-chain claim window and therefore cannot enforce a close deadline) is rejected with `unsupported-requirement`, never silently client-honored and never weakly/partially "approximated" (ruling §7.20 adjudication: TEP §8 forbids weak/partial honoring; a chain-direct claim can still land after `closeAt` regardless of a withdrawn announcement, so the former approximation path is dropped — today-mode behaves identically to backend-local C1). Revised-mode adds the on-chain concurrency parameter, multi-verdict finalization, and **honors `closeAt` via the on-chain claim window**.
 - **Marketplace deployment-profile requirements (TEP §16.2, must #8).** Signed Tasks and signed Submissions (DSSE over exact sealed bytes); executor-signed Deliveries; `executionIds` and `evidenceRecords` REQUIRED on Deliveries; the `dispatch-binding` check (the referenced Execution Evidence crate's captured inputs include the per-Attempt dispatch-context artifact §9.3); evaluation per the sealed spec with the Evidence `evaluationSpecification` digest equal to the Task's sealed `evaluation` descriptor digest. These §16.2 profile checks are **authored natively in `@jinn-network/marketplace-testing`** (M2.5) — consuming the profiles signed-doc / evidence / dispatch-binding assertions + the trust verification procedures — **not** by profile-parameterizing `describeTaskExecutionBackendContract` (ruling §7.19): the TEP core kit stays profile-agnostic and un-parameterized (TEP §24 places binding-integration checks at Layer 3, outside the shipped core kit); any backend put under the core kit implements its `TestableBackend` seam explicitly.
 - **Consumption rule (ruling §7.18, must #5).** The pipeline composes the embedded local backend **as a peer, only through the assembly's standard `TaskExecutionBackend` interface** (`@jinn-network/task-execution-backend-local`) — venue verbs discover/claim/deliver/settle on one side, sealed bytes handed to the two-party engagement entry on the other. It NEVER imports or reaches into `supervisor`/`workspace`/`launchers`.
@@ -1011,3 +1011,28 @@ Program rulings §7.52–§7.55 freeze the four generalized seams exposed by the
 
 The M0–M5 review is repeated from a fresh reader after all eight findings are repaired. M6 remains
 blocked both on that verdict and on the Phase 4 backend-local assembly gate.
+
+## Addendum 2026-07-29-m — final projector identity, occupancy, and conformance
+
+A second fresh whole-component review reproduced four remaining M0–M5 defects despite all
+package and guard gates being green. Program rulings §7.59–§7.62 freeze their repair:
+
+1. revised Task, solution Delivery, and evaluation Delivery announcements compare the exact
+   resolved material digest to the corresponding on-chain protocol digest before any facts,
+   verifier, publication, archive, or signing effect; today mode retains only the anchors its
+   deployed events actually provide;
+2. projector state separates live occupancy, monotonic Attempt identity, and availability
+   transitions, so revised release/expiry and top-up can append a fresh availability
+   announcement without rewriting TEP history or reusing an Attempt index;
+3. emitted Protocol Observation categories are mapped onto the frozen TEP §13 vocabulary
+   exactly as §7.61 specifies, with richer marketplace refusal names remaining internal; and
+4. the native §16.2 kit adds an exact-payload, real-authority signed-Task positive vector and
+   hostile payload/signing-authority negatives alongside the existing Submission and Delivery
+   families.
+
+The repair is test-first and includes direct regressions for swapped resolver bytes before any
+write, max-one claim→release/expiry→distinct reclaim across split batches, duplicate/unknown
+lifecycle facts, every category mapping, and the missing signed-Task family. The complete M0–M5
+package, architecture, packed-type, and workflow gates run again, followed by another fresh
+whole-design review. M6 remains blocked until that review is green and the Phase 4 backend-local
+assembly gate has passed.
