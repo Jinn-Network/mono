@@ -641,6 +641,20 @@ Confirmed by the operator at the program gate (2026-07-28):
     from the Delivery reference has no authority. Mandatory swapped-record, digest-mismatch,
     noncanonical-record, missing-reference, wrong-dispatch, and wrong-evaluation-spec vectors
     assert the full named-check outcomes.
+56. **Evaluation-harness exact subject admission preserves its profiles-only protocol seam:**
+    the harness production package continues to have no direct
+    `@jinn-network/task-execution-protocol` edge, as frozen by the backend package graph and
+    source-boundary guard. `task-execution-profiles` instead exports one evaluation-specific
+    exact-subject verifier. Given exact Task bytes, Delivery bytes, and Result materials, it uses
+    the protocol package's authoritative fatal decode/schema/sealers to require canonical byte
+    equality, Task↔Delivery digest binding, unique output names, declared-output/media-type
+    agreement, and exact Result digest/cardinality agreement, then returns only the
+    evaluation-facing validated subject view. It does not select the settlement-authorized pair
+    and imports no marketplace policy. The harness invokes this verifier before derivation,
+    adapter execution, or signing; it never duplicates a TEP sealer or trusts “preverified” host
+    claims without its own check. Profiles owns focused hostile-byte/pair tests and the harness
+    owns the adapter-never-called integration vectors. The direct protocol import and manifest
+    dev-only mismatch are removed; the original source-boundary rule remains unchanged.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

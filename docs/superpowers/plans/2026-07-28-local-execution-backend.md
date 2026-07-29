@@ -712,3 +712,19 @@ public `resume` operation, retaining its Execution ID. Required capture fails te
 missing/corrupt state; best-effort capture records degradation. Late outcome ingestion,
 idempotent harvest, evidence finalization, Delivery checkpointing, and terminalization share one
 completion routine. A present Delivery checkpoint is only re-recorded byte-for-byte.
+
+## Addendum 2026-07-29-e — evaluation exact-subject verification boundary
+
+The full backend-local gate exposed a production import that crossed the already-frozen
+evaluation-harness package graph: the harness directly imported Task/Delivery validators and
+sealers from `task-execution-protocol`, although its production manifest and source-boundary
+guard permit protocol semantics only through `task-execution-profiles`.
+
+Program ruling §7.56 resolves the implementation seam without weakening the guard. Profiles
+exports one evaluation-specific exact-subject verifier backed by the protocol package's
+authoritative validators/sealers. It checks fatal canonical Task/Delivery bytes, their digest
+join, output uniqueness/declarations/media types, and exact Result cardinality/digests, then
+returns the minimal validated view the harness needs. The harness calls it before full-document
+evaluation derivation or adapter execution. Profiles does not select settlement context and the
+harness does not gain a direct protocol dependency or duplicate serializer. Host materialization
+being digest-verified remains necessary but is not a substitute for this semantic admission.
