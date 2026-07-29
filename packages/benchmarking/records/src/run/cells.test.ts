@@ -24,13 +24,19 @@ describe("cellKey / parseCellKey", () => {
     expect(cellKey(DIGEST, "armA", 10)).toBe(`${DIGEST}/armA/10`);
   });
 
-  test("lowercases the task digest", () => {
-    expect(cellKey(DIGEST.toUpperCase(), "armA", 1)).toBe(`${DIGEST}/armA/1`);
-  });
-
-  test("rejects a non-positive or non-integer replicate", () => {
-    expect(() => cellKey(DIGEST, "armA", 0)).toThrow();
-    expect(() => cellKey(DIGEST, "armA", 1.5)).toThrow();
+  test.each([
+    ["uppercase digest", DIGEST.toUpperCase(), "armA", 1],
+    ["non-hex digest", `${"a".repeat(63)}g`, "armA", 1],
+    ["short digest", "a".repeat(63), "armA", 1],
+    ["empty arm", DIGEST, "", 1],
+    ["arm with slash", DIGEST, "arm/A", 1],
+    ["arm with space", DIGEST, "arm A", 1],
+    ["arm over 64 characters", DIGEST, "a".repeat(65), 1],
+    ["zero replicate", DIGEST, "armA", 0],
+    ["fractional replicate", DIGEST, "armA", 1.5],
+    ["unsafe replicate", DIGEST, "armA", Number.MAX_SAFE_INTEGER + 1],
+  ])("cellKey rejects %s without normalization", (_label, digest, armId, replicate) => {
+    expect(() => cellKey(digest, armId, replicate)).toThrow();
   });
 
   test("parseCellKey inverts cellKey", () => {
@@ -43,6 +49,27 @@ describe("cellKey / parseCellKey", () => {
     // and armId="a" rep="b/1" (illegal). The armId grammar (enforced at the Run schema level)
     // excludes '/' entirely, so parseCellKey's 3-part split is always unambiguous.
     expect(() => parseCellKey(`${DIGEST}/a/b/1`)).toThrow();
+  });
+
+  test.each([
+    ["uppercase digest", `${DIGEST.toUpperCase()}/armA/1`],
+    ["non-hex digest", `${"a".repeat(63)}g/armA/1`],
+    ["short digest", `${"a".repeat(63)}/armA/1`],
+    ["empty arm", `${DIGEST}//1`],
+    ["arm with space", `${DIGEST}/arm A/1`],
+    ["arm over 64 characters", `${DIGEST}/${"a".repeat(65)}/1`],
+    ["zero replicate", `${DIGEST}/armA/0`],
+    ["padded replicate", `${DIGEST}/armA/01`],
+    ["negative replicate", `${DIGEST}/armA/-1`],
+    ["fractional replicate", `${DIGEST}/armA/1.5`],
+    ["unsafe replicate", `${DIGEST}/armA/${Number.MAX_SAFE_INTEGER + 1}`],
+  ])("parseCellKey rejects %s", (_label, key) => {
+    expect(() => parseCellKey(key)).toThrow();
+  });
+
+  test("accepts the largest safe minimal-decimal replicate exactly", () => {
+    const key = cellKey(DIGEST, "armA", Number.MAX_SAFE_INTEGER);
+    expect(parseCellKey(key).replicate).toBe(Number.MAX_SAFE_INTEGER);
   });
 });
 
@@ -103,6 +130,11 @@ describe("submissionExtensionBlock", () => {
     expect(block).toEqual({ run: "sha256:runrundigest", cellKey: key, armId: "armA" });
     expect(Object.keys(block).sort()).toEqual(["armId", "cellKey", "run"]);
   });
+
+  test("rejects a malformed cellKey or an armId that contradicts the key", () => {
+    expect(() => submissionExtensionBlock("sha256:r", `${DIGEST}/arm A/1`, "arm A")).toThrow();
+    expect(() => submissionExtensionBlock("sha256:r", `${DIGEST}/armA/1`, "armB")).toThrow();
+  });
 });
 
 describe("cellIdempotencyKey", () => {
@@ -121,5 +153,11 @@ describe("cellIdempotencyKey", () => {
   test("rejects a non-positive dispatch index", () => {
     const key = cellKey(DIGEST, "armA", 1);
     expect(() => cellIdempotencyKey("sha256:r", key, 0)).toThrow();
+  });
+
+  test("rejects an unsafe dispatch index or malformed cellKey", () => {
+    const key = cellKey(DIGEST, "armA", 1);
+    expect(() => cellIdempotencyKey("sha256:r", key, Number.MAX_SAFE_INTEGER + 1)).toThrow();
+    expect(() => cellIdempotencyKey("sha256:r", `${DIGEST.toUpperCase()}/armA/1`, 1)).toThrow();
   });
 });

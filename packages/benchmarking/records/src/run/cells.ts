@@ -1,4 +1,6 @@
+import { z } from "zod";
 import { itemTaskDigest, type BenchmarkRecord } from "../benchmark/schema.js";
+import { LowercaseSha256HexSchema } from "../descriptors.js";
 import { compareCodeUnitStrings } from "../order.js";
 import type { RunRecord } from "./schema.js";
 
@@ -9,7 +11,30 @@ export interface CellCoord {
   replicate: number;
 }
 
+export const TaskDigestHexSchema = LowercaseSha256HexSchema;
+
+export const ArmIdSchema = z.string().regex(
+  /^[A-Za-z0-9_-]{1,64}$/,
+  "armId must match [A-Za-z0-9_-]{1,64} (§7.1)",
+);
+
+export const ReplicateSchema = z.number().int().positive().max(
+  Number.MAX_SAFE_INTEGER,
+  "replicate must be a safe integer",
+);
+
 const REPLICATE_RE = /^[1-9][0-9]*$/;
+
+export const CellKeySchema = z.string().superRefine((key, ctx) => {
+  try {
+    parseCellKey(key);
+  } catch (error) {
+    ctx.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : "malformed cellKey",
+    });
+  }
+});
 
 /**
  * `cellKey` grammar (§7.3, frozen interface #2): `"<taskDigest>/<armId>/<replicate>"` —
@@ -17,10 +42,10 @@ const REPLICATE_RE = /^[1-9][0-9]*$/;
  * excludes `/`), `replicate` 1-based minimal decimal (no padding).
  */
 export function cellKey(taskDigestHex: string, armId: string, replicate: number): string {
-  if (!Number.isInteger(replicate) || replicate < 1) {
-    throw new Error("replicate must be a 1-based positive integer (§7.3)");
-  }
-  return `${taskDigestHex.toLowerCase()}/${armId}/${replicate}`;
+  const taskDigest = TaskDigestHexSchema.parse(taskDigestHex);
+  const exactArmId = ArmIdSchema.parse(armId);
+  const exactReplicate = ReplicateSchema.parse(replicate);
+  return `${taskDigest}/${exactArmId}/${exactReplicate}`;
 }
 
 /** Inverse of `cellKey`: recovers the coordinate from a well-formed key. */
@@ -28,10 +53,20 @@ export function parseCellKey(key: string): CellCoord {
   const parts = key.split("/");
   if (parts.length !== 3) throw new Error(`malformed cellKey (expected 3 "/"-delimited parts): ${key}`);
   const [taskDigest, armId, replicateText] = parts;
+  if (!TaskDigestHexSchema.safeParse(taskDigest).success) {
+    throw new Error(`malformed cellKey task digest (must be 64 lowercase hex digits): ${key}`);
+  }
+  if (!ArmIdSchema.safeParse(armId).success) {
+    throw new Error(`malformed cellKey armId (must match [A-Za-z0-9_-]{1,64}): ${key}`);
+  }
   if (!REPLICATE_RE.test(replicateText)) {
     throw new Error(`malformed cellKey replicate (must be 1-based minimal decimal): ${key}`);
   }
-  return { cellKey: key, taskDigest, armId, replicate: Number(replicateText) };
+  const replicate = Number(replicateText);
+  if (!ReplicateSchema.safeParse(replicate).success) {
+    throw new Error(`malformed cellKey replicate (must be a positive safe integer): ${key}`);
+  }
+  return { cellKey: key, taskDigest, armId, replicate };
 }
 
 /**
@@ -77,7 +112,12 @@ export function submissionExtensionBlock(
   cell: string,
   armId: string,
 ): CellDispatchAnnotations {
-  return { run: runDigest, cellKey: cell, armId };
+  const coordinate = parseCellKey(cell);
+  const exactArmId = ArmIdSchema.parse(armId);
+  if (coordinate.armId !== exactArmId) {
+    throw new Error("annotation armId must exactly match the cellKey armId (§7.3)");
+  }
+  return { run: runDigest, cellKey: coordinate.cellKey, armId: exactArmId };
 }
 
 // Frozen name-construction delimiter (mirrors TEP identifiers.ts's `deriveAttemptUri` precedent):
@@ -93,8 +133,9 @@ const IDEMPOTENCY_KEY_UNIT_SEPARATOR = "\u001f";
  * stack's 1-based `replicate` convention.
  */
 export function cellIdempotencyKey(runDigest: string, cell: string, dispatch: number): string {
-  if (!Number.isInteger(dispatch) || dispatch < 1) {
+  const exactCell = parseCellKey(cell).cellKey;
+  if (!Number.isSafeInteger(dispatch) || dispatch < 1) {
     throw new Error("dispatch must be a 1-based positive integer (§7.3)");
   }
-  return [runDigest, cell, String(dispatch)].join(IDEMPOTENCY_KEY_UNIT_SEPARATOR);
+  return [runDigest, exactCell, String(dispatch)].join(IDEMPOTENCY_KEY_UNIT_SEPARATOR);
 }

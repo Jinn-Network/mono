@@ -5,6 +5,7 @@ import { AgentIriSchema, DigestBearingResourceDescriptorSchema } from "../descri
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
 import type { JsonValue } from "../json.js";
 import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
+import { ArmIdSchema, ReplicateSchema } from "./cells.js";
 
 const Rfc3339 = z.string().datetime({ offset: true });
 
@@ -14,11 +15,6 @@ const Rfc3339 = z.string().datetime({ offset: true });
  * amount, is a string).
  */
 const DecimalString = z.string().regex(/^\d+(\.\d+)?$/, "must be a decimal string");
-
-const ArmIdSchema = z.string().regex(
-  /^[A-Za-z0-9_-]{1,64}$/,
-  "armId must match [A-Za-z0-9_-]{1,64} (§7.1) — the charset excludes '/', the cellKey separator",
-);
 
 const ArmSchema = z.object({
   armId: ArmIdSchema,
@@ -73,7 +69,7 @@ export const RunRecordSchema = z
     benchmark: DigestBearingResourceDescriptorSchema,
     owner: AgentIriSchema,
     arms: z.array(ArmSchema).min(1),
-    replicates: z.number().int().positive(),
+    replicates: ReplicateSchema,
     policy: RunPolicySchema,
     analysisPlan: z.array(AnalysisPlanEntrySchema).optional(),
     budget: BudgetSchema.optional(),

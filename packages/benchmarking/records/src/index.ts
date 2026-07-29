@@ -67,6 +67,10 @@ export type { RevealCoverage } from "./benchmark/reveal.js";
 export { RunRecordSchema, parseRun, sealRun } from "./run/schema.js";
 export type { RunArm, RunRecord } from "./run/schema.js";
 export {
+  ArmIdSchema,
+  CellKeySchema,
+  ReplicateSchema,
+  TaskDigestHexSchema,
   cellIdempotencyKey,
   cellKey,
   expectedCellCount,

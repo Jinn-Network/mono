@@ -118,7 +118,8 @@
             "pattern": "^[0-9a-f]{64}$"
           },
           "armId": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
           },
           "replicate": {
             "type": "integer",
@@ -132,7 +133,7 @@
           },
           "accounted": {
             "type": "integer",
-            "minimum": 0,
+            "exclusiveMinimum": 0,
             "maximum": 9007199254740991
           },
           "submission": {
@@ -209,7 +210,8 @@
               "checksFailed": {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1
                 }
               }
             },
@@ -306,7 +308,8 @@
             "type": "string"
           },
           "reason": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [
@@ -322,7 +325,8 @@
         "perArm": {
           "type": "object",
           "propertyNames": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
           },
           "additionalProperties": {
             "type": "object",
@@ -384,7 +388,8 @@
         "asymmetryFlags": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         }
       },

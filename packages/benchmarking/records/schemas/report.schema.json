@@ -294,7 +294,8 @@
                   "perArm": {
                     "type": "object",
                     "propertyNames": {
-                      "type": "string"
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{1,64}$"
                     },
                     "additionalProperties": {
                       "type": "object",
@@ -356,7 +357,8 @@
                   "asymmetryFlags": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1
                     }
                   }
                 },
