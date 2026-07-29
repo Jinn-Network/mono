@@ -29,7 +29,7 @@ _Every task's requirements implicitly include this section. Values copied verbat
 - **Canonical sealed bytes, stack-wide (program §7.1).** Every sealed benchmarking record (Benchmark, Run, Matrix, Report) is the raw RFC 8785 JCS serialization under I-JSON — no indentation, no trailing newline. Seal once; verifiers hash the exact received bytes; the sealer rejects any number not an exact I-JSON integer (fractional quantities are strings). No consumer re-canonicalizes.
 - **UTF-16 code-unit ordering everywhere sealed bytes are produced (program §7.1/§7.14).** Copy `order.ts` (`compareCodeUnitStrings`) into `records`; use it for every object-key sort reaching canonical bytes; build canonical output by **explicit sorted-key iteration**, never `JSON.stringify` over a rebuilt object (integer-like keys diverge). `localeCompare`/`toLocale*`/`Intl` banned in all production source under `packages/benchmarking/` and the `facts/benchmarking` leaf (locale-ban guard; `.test.ts`/`.mjs` exempt).
 - **Cross-package/tree equivalence fixtures (program §7.1/§7.14).** Every sealed-bytes package ships pinned-digest golden fixtures, at least one object-key-order-sensitive record (two source key orderings → identical digest), and an integer-like-key fixture (`{"10":…,"2":…}` → code-unit order). `records` additionally carries a cross-tree equivalence leg asserting byte equality against `task-execution-protocol`'s `serializeCanonicalJson` for a shared logical input; the `facts/benchmarking` leaf seals via `record-discovery-protocol`'s `sealJson` (equivalence already proven in the discovery tree).
-- **No raw control bytes in source.** The `cellKey` unit-separator and any control chars are written as escapes (`""`), never literal control bytes.
+- **No raw control bytes in source.** The `cellKey` unit-separator and any control chars are written as escapes (`"\u001f"`), never literal control bytes.
 - **Kits precede implementations (program §7.6, design §15).** `benchmarking/testing` (M2) is authored before `aggregate`/`run`/`interop`; its exported `describe…Conformance()` drivers and golden fixtures are the executable spec each implementation greens.
 - **Per-package order.ts + raw-JCS sealing + equivalence fixtures wherever sealed bytes are produced** (program §7.1/§7.14). Applies to `records` (four record kinds). `aggregate` produces sealed Report bytes only by calling `records`' exported `sealReport` (no second serializer, program §7.4 Delivery-sealing precedent); its DSSE wrapping uses trust-core.
 - **Tier discipline (design §2, §7.7, program §7.7/§7.18):** nothing in `records`/`aggregate`/`run`/`interop`/`facts` names a tier-4 product. `run` consumes the backend, profiles, and evidence **through injected ports / contract types only** — never a concrete backend, never a concrete evidence binding, never a marketplace import. The only place a marketplace import appears is the M7 `marketplace` package.
@@ -976,3 +976,27 @@ guard commands were green. Program rulings §7.57–§7.58 are binding on the ne
 
 M4 remains blocked until this repair passes the records, aggregate, testing, trust-core, guard,
 pack, and workflow-definition gates and a fresh independent reader returns GREEN.
+
+## Addendum 2026-07-29-j — trust time, reveal state, and final M1–M3 repairs
+
+The seventh fresh M1–M3 review returned RED on seven reproduced defects while every existing
+package and guard command remained green. Program rulings §7.63–§7.69 freeze the repair:
+
+1. trust-core replaces lexical binding-window and revocation ordering with its own
+   calendar-strict, arbitrary-precision exact-instant comparator, including offset-equivalent and
+   lexically misleading revocation vectors;
+2. the trust DSSE producer rejects empty signatures and proves producer→exact-parser round-trip;
+3. record schemas use the shared civil RFC 3339 predicate directly so valid leap seconds are not
+   rejected by a narrower host/Zod prefilter;
+4. missing immediate-reveal Task material fails closed, and scheduled/after-run `unevaluated`
+   requires explicit trusted evidence that reveal has not occurred;
+5. `noninferiority-iut@1` declares its designed shared-Task version robustness and proves one
+   genuine cross-Benchmark pairing;
+6. both cell-dispatch helpers validate the exact lowercase sha256 Run identity before deriving
+   annotations or idempotency keys; and
+7. the benchmarking inventory removes its hardcoded count and derives cardinality from the live
+   declaration as required by the program guard rule.
+
+The repair is test-first and runs the complete records, aggregate, testing, trust-core, profiles,
+inventory, boundary, packed-type, pack, and workflow-definition gates. M4 remains blocked until a
+new independent whole-design review of the exact repaired head returns GREEN.

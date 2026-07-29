@@ -723,6 +723,56 @@ Confirmed by the operator at the program gate (2026-07-28):
     claimed Agent; a test double that merely reports a valid key without binding the received
     PAE/envelope bytes is not conforming. This family is additional to, not a substitute for,
     the existing signed-Submission and executor-signed-Delivery vectors.
+63. **Trust authority-time ordering is calendar-strict and exact:** trust-core owns a
+    standalone RFC 3339 validator/comparator suitable for its foundation package. It applies the
+    numeric offset, preserves arbitrary fractional precision, handles valid leap seconds, and
+    never orders authority times by lexical string comparison, `Date.parse`, or epoch
+    milliseconds. `verifyEnvelopeBinding` uses it for binding `effectiveStart`, `expiresAt`, and
+    anchored revocation `effectiveTime` comparisons; malformed authority times fail closed
+    before ceremony/policy success can authorize the envelope. Offset-equivalent instants compare
+    equal, and hostile vectors prove that an earlier revocation written with a lexically later
+    offset spelling rejects. Trust and benchmarking keep independent package-local
+    implementations and prove shared exact vectors, preserving the frozen dependency direction.
+64. **The trust DSSE producer cannot emit an envelope its exact parser rejects:**
+    `sealDsseEnvelope` rejects every zero-length produced signature before serialization, in
+    addition to its existing key-id and signature encoding checks. Producer→exact-parser
+    round-trip is mandatory for every accepted signature sequence and preserves received
+    signature order. The Report verifier carries one producer-created positive round-trip and
+    one empty-signature producer refusal; callers cannot use the lower-level producer to bypass
+    §7.58's non-empty-signature admission.
+65. **Benchmark record timestamp schemas use the shared civil-time authority directly:**
+    Benchmark reveal `notBefore`, Run `closeAt`, Matrix close-boundary time, and every equivalent
+    M1–M3 record field are validated by the calendar-strict RFC 3339 predicate itself. They are
+    not first filtered through a host/Zod datetime validator whose narrower grammar rejects a
+    valid leap second. Mandatory schema vectors accept `2016-12-31T23:59:60Z`, reject an invalid
+    leap second/date/offset, and retain the original sealed spelling.
+66. **Benchmark judgeability distinguishes unavailable material from proven pre-reveal
+    material:** an `immediate` Benchmark whose Task bytes cannot be resolved fails closed and
+    identifies every unavailable digest. `scheduled` may return
+    `committed-not-revealed` only when an explicit trusted comparison time is strictly before its
+    valid `notBefore`; `after-run` may do so only with explicit trusted evidence that the
+    applicable Run is not closed. At or after reveal, missing bytes fail closed. An absent
+    resolver or absent/invalid reveal context never proves pre-reveal state and therefore never
+    yields `unevaluated`. Resolved bytes continue through digest, canonical Task, evaluation
+    descriptor, and provenance checks unchanged.
+67. **`noninferiority-iut@1` is version-robust exactly through its shared-Task pairing:**
+    its registry metadata declares `versionRobust: true`. Cross-Benchmark comparison is legal
+    only over the exact shared Task digests the method actually pairs, and the result discloses
+    those pairings and all exclusions under the existing §7.47 method contract. A conformance
+    vector with two distinct Benchmark digests and identical shared eligible Task pairings must
+    pass; a comparison with no valid shared pairing remains inconclusive/fails under the method,
+    never by bypassing comparability.
+68. **Benchmark cell-dispatch helpers admit only exact Run identities:** before constructing
+    `submission.annotations.run` or a cell idempotency key, both helpers validate `runDigest` as
+    lowercase `sha256:<64 hex>`. Malformed, shortened, uppercase, or bare digests throw before
+    returning any derived value. The emitted annotation retains the exact validated digest; the
+    idempotency delimiter and cell/dispatch rules are otherwise unchanged.
+69. **Package-tree inventory cardinality is derived from the live inventory declaration:**
+    no benchmarking guard asserts a hand-maintained literal package count. The declared graph,
+    discovered manifests, and registered package rows remain exact-equality checked, so adding or
+    removing a row changes the effective count without a second numeric edit. This is the
+    benchmarking application of §7.6 and must be covered by a guard self-test, not merely a
+    source comment.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 
