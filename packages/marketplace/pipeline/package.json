@@ -1,0 +1,59 @@
+{
+  "name": "@jinn-network/marketplace-pipeline",
+  "version": "0.1.0",
+  "description": "The daemon's marketplace application: claim predicate, execution wiring, and the composition of the marketplace binding venue verbs with an embedded local backend (library, not a live cutover).",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/marketplace/pipeline"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/marketplace-binding": "0.1.0",
+    "@jinn-network/task-execution-backend": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0"
+  },
+  "devDependencies": {
+    "@jinn-network/task-execution-profiles": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0",
+    "@jinn-network/trust-resolve": "0.1.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/marketplace-binding": "portal:../binding",
+    "@jinn-network/task-execution-backend": "portal:../../task-execution/backend",
+    "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
+    "@jinn-network/trust-core": "portal:../../trust/core",
+    "@jinn-network/trust-resolve": "portal:../../trust/resolve"
+  }
+}

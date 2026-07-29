@@ -190,16 +190,47 @@ export const SCOPE_VOCABULARY = [
 ] as const;
 export type ScopeVocabularyMember = (typeof SCOPE_VOCABULARY)[number];
 
-const NAMESPACED_SCOPE_PATTERN = /^[a-z][a-z0-9-]*:[A-Za-z0-9-]+$/;
+const EXTENSION_FORBIDDEN_CHARACTER_PATTERN = /[\u0000-\u0020\u007f]/;
+const ABSOLUTE_URI_SCHEME_PATTERN = /^([A-Za-z][A-Za-z0-9+.-]*):(.*)$/;
+const REVERSE_DNS_LABEL_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+
+function isReverseDnsName(value: string): boolean {
+  if (EXTENSION_FORBIDDEN_CHARACTER_PATTERN.test(value) || value.length > 253) {
+    return false;
+  }
+  const labels = value.split(".");
+  return labels.length >= 2
+    && labels.every((label) => REVERSE_DNS_LABEL_PATTERN.test(label));
+}
+
+function isAbsoluteUriName(value: string): boolean {
+  if (EXTENSION_FORBIDDEN_CHARACTER_PATTERN.test(value)) return false;
+  const match = ABSOLUTE_URI_SCHEME_PATTERN.exec(value);
+  if (match === null || match[2]!.length === 0) return false;
+  try {
+    const parsed = new URL(value);
+    const scheme = match[1]!.toLowerCase();
+    if (scheme === "http" || scheme === "https") {
+      return match[2]!.startsWith("//") && parsed.hostname.length > 0;
+    }
+    if (match[2]!.startsWith("//")) {
+      return parsed.host.length > 0;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function describeScopeVocabulary(): string {
-  return `one of ${sortedVocabulary(SCOPE_VOCABULARY).join(", ")}, or a namespaced extension (namespace:custom)`;
+  return `one of ${sortedVocabulary(SCOPE_VOCABULARY).join(", ")}, or a TEP §21.3 reverse-DNS/absolute-URI extension`;
 }
 
 export const ScopeSchema = z.string().refine(
   (value) => (SCOPE_VOCABULARY as readonly string[]).includes(value)
-    || NAMESPACED_SCOPE_PATTERN.test(value),
-  { message: `scope must be ${describeScopeVocabulary()}.` },
+    || isReverseDnsName(value)
+    || isAbsoluteUriName(value),
+  { message: `scope must be ${describeScopeVocabulary()} (§7.45).` },
 );
 export type Scope = z.infer<typeof ScopeSchema>;
 

@@ -90,8 +90,33 @@ describe("ScopeSchema", () => {
     expect(ScopeSchema.safeParse("jinn:discovery-announcements").success).toBe(true);
   });
 
+  test("accepts TEP §21.3 reverse-DNS and absolute-URI extension names (§7.45)", () => {
+    expect(ScopeSchema.safeParse("network.jinn.discovery.announcements").success).toBe(true);
+    expect(
+      ScopeSchema.safeParse(
+        "https://jinn.network/trust-scopes/admission-receipts/1.0",
+      ).success,
+    ).toBe(true);
+    expect(ScopeSchema.safeParse("urn:jinn:trust-scope:receipts").success).toBe(true);
+  });
+
   test("rejects a malformed namespaced extension", () => {
     expect(ScopeSchema.safeParse("Jinn:Bad Namespace").success).toBe(false);
     expect(ScopeSchema.safeParse("no-colon").success).toBe(false);
+  });
+
+  test.each([
+    "relative/scope",
+    "https:/missing-authority",
+    "https://",
+    "https://jinn.network/has whitespace",
+    "https://jinn.network/control\u0007",
+    "network..jinn.scope",
+    "-network.jinn.scope",
+    "network.-jinn.scope",
+    "network.jinn-.scope",
+    "network.jinn.scope-",
+  ])("rejects malformed extension scope %j (§7.45)", (scope) => {
+    expect(ScopeSchema.safeParse(scope).success).toBe(false);
   });
 });

@@ -64,6 +64,9 @@ packages/discovery/sources/*/.yarn/install-state.gz
 packages/benchmarking/*/dist/
 packages/benchmarking/*/.yarn/cache/
 packages/benchmarking/*/.yarn/install-state.gz
+packages/marketplace/*/dist/
+packages/marketplace/*/.yarn/cache/
+packages/marketplace/*/.yarn/install-state.gz
 examples/external-restorer-impls/*/node_modules/
 examples/external-restorer-impls/*/dist/
 examples/external-restorer-impls/*/.yarn/cache/
