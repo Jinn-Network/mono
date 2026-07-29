@@ -1,6 +1,6 @@
 import type { z } from "zod";
 import { serializeCanonicalJson } from "./canonical.js";
-import type { JsonValue } from "./json.js";
+import { cloneIJsonValue, type JsonValue } from "./json.js";
 import { DeliveryRecordSchema } from "./schemas/delivery.js";
 import { SubmissionRecordSchema } from "./schemas/submission.js";
 import { TaskSpecificationSchema } from "./schemas/task.js";
@@ -21,7 +21,9 @@ export class InvalidDocumentError extends Error {
 }
 
 function seal(schema: z.ZodTypeAny, document: unknown): Uint8Array {
-  const parsed = schema.safeParse(document);
+  // Validate the caller's exact input before schema parsing can omit an explicit `undefined`
+  // or otherwise normalize an unsupported runtime value.
+  const parsed = schema.safeParse(cloneIJsonValue(document));
   if (!parsed.success) {
     const errors = parsed.error.issues.map((issue) => ({
       path: issue.path.join("."),

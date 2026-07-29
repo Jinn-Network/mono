@@ -49,7 +49,6 @@
     "@jinn-network/task-execution-protocol": "0.1.0",
     "@noble/hashes": "2.2.0",
     "ajv": "8.17.1",
-    "canonicalize": "3.0.0",
     "safe-regex": "2.1.1",
     "zod": "4.4.3"
   },

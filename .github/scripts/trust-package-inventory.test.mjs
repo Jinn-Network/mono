@@ -18,15 +18,17 @@ const TRUST_PACKAGES = [
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['core', { dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['resolve', { dependencies: ['@jinn-network/trust-core'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
-  ['testing', { dependencies: ['@jinn-network/trust-core', '@jinn-network/trust-resolve'], devDependencies: ['@jinn-network/evidence-protocol', '@jinn-network/task-execution-protocol'], optionalDependencies: [], peerDependencies: [] }],
+  ['testing', { dependencies: ['@jinn-network/trust-core', '@jinn-network/trust-resolve'], devDependencies: ['@jinn-network/evidence-protocol', '@jinn-network/record-discovery-protocol', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol'], optionalDependencies: [], peerDependencies: [] }],
 ]);
 
 // Cross-tree Jinn dependencies this tree's packages are approved to portal
 // to, keyed by name -> path relative to the repo root. Extended per task as
-// new cross-tree edges land (evidence-protocol T10, task-execution-protocol
-// T17 -- both devDependency-only equivalence oracles).
+// new cross-tree edges land. Every edge here is devDependency-only and
+// belongs to the stack-wide sealing conformance test.
 const CROSS_TREE_PACKAGES = new Map([
   ['@jinn-network/evidence-protocol', join('packages', 'evidence', 'protocol')],
+  ['@jinn-network/record-discovery-protocol', join('packages', 'discovery', 'protocol')],
+  ['@jinn-network/task-execution-profiles', join('packages', 'task-execution', 'profiles')],
   ['@jinn-network/task-execution-protocol', join('packages', 'task-execution', 'protocol')],
 ]);
 

@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import * as evidenceProtocol from "@jinn-network/evidence-protocol";
+import * as discoveryProtocol from "@jinn-network/record-discovery-protocol";
+import * as taskExecutionProfiles from "@jinn-network/task-execution-profiles";
 import * as taskExecutionProtocol from "@jinn-network/task-execution-protocol";
 import type { JsonValue } from "@jinn-network/task-execution-protocol";
 import * as trustCore from "@jinn-network/trust-core";
@@ -25,6 +27,16 @@ function loadFixture(name: string): unknown {
 function tepCanonicalJsonBytes(value: unknown): Uint8Array {
   return taskExecutionProtocol.serializeCanonicalJson(value as JsonValue);
 }
+
+const rawJcsImplementations = [
+  { name: "trust", canonicalJsonBytes: trustCore.canonicalJsonBytes },
+  { name: "task-execution protocol", canonicalJsonBytes: tepCanonicalJsonBytes },
+  { name: "task-execution profiles", canonicalJsonBytes: taskExecutionProfiles.canonicalJsonBytes },
+  {
+    name: "record discovery",
+    canonicalJsonBytes: (value: unknown) => discoveryProtocol.sealJson(value).bytes,
+  },
+] as const;
 
 describe("sealing algorithm-equivalence vs evidence-protocol (§16, program ruling §7.15)", () => {
   test("trust-core and evidence-protocol agree on DSSE PAE and recordDigest for the same already-serialized bytes", () => {
@@ -158,5 +170,140 @@ describe("canonical-byte equivalence vs task-execution-protocol (Task T17; progr
       );
     }
     expect(trustCoreDigest).toBe(expected);
+  });
+});
+
+describe("stack-wide raw-JCS conformance (program rulings §7.1/§7.14/§7.24)", () => {
+  test("all public canonical-byte APIs emit identical bytes for valid fixtures", () => {
+    const cases: CanonicalByteEquivalenceCase[] = [
+      {
+        name: "nested-key-order-and-integer-like-keys",
+        value: { zeta: { "2": 2, "10": 1 }, alpha: [true, null, 0] },
+      },
+      {
+        name: "valid-supplementary-plane-unicode",
+        value: { ["😀"]: "supplementary 😀", text: "𠜎" },
+      },
+    ];
+
+    for (const implementation of rawJcsImplementations.slice(1)) {
+      assertCanonicalByteEquivalence(
+        rawJcsImplementations[0],
+        implementation,
+        cases,
+      );
+    }
+
+    expect(
+      new TextDecoder().decode(
+        rawJcsImplementations[0].canonicalJsonBytes(cases[0]!.value),
+      ),
+    ).toBe('{"alpha":[true,null,0],"zeta":{"10":1,"2":2}}');
+    expect(
+      new TextDecoder().decode(
+        rawJcsImplementations[0].canonicalJsonBytes(cases[1]!.value),
+      ),
+    ).toBe('{"text":"𠜎","😀":"supplementary 😀"}');
+  });
+
+  test("all public canonical-byte APIs ignore inherited Array.prototype.toJSON", () => {
+    const original = Object.getOwnPropertyDescriptor(Array.prototype, "toJSON");
+    try {
+      Object.defineProperty(Array.prototype, "toJSON", {
+        configurable: true,
+        enumerable: false,
+        value: () => "hijacked",
+        writable: true,
+      });
+
+      for (const implementation of rawJcsImplementations) {
+        expect(
+          new TextDecoder().decode(
+            implementation.canonicalJsonBytes([1, { nested: [2] }]),
+          ),
+          implementation.name,
+        ).toBe('[1,{"nested":[2]}]');
+      }
+    } finally {
+      if (original === undefined) {
+        delete (Array.prototype as { toJSON?: unknown }).toJSON;
+      } else {
+        Object.defineProperty(Array.prototype, "toJSON", original);
+      }
+    }
+  });
+
+  test("all public canonical-byte APIs ignore inherited Object.prototype.toJSON", () => {
+    const original = Object.getOwnPropertyDescriptor(Object.prototype, "toJSON");
+    try {
+      Object.defineProperty(Object.prototype, "toJSON", {
+        configurable: true,
+        enumerable: false,
+        value: () => "hijacked",
+        writable: true,
+      });
+
+      for (const implementation of rawJcsImplementations) {
+        expect(
+          new TextDecoder().decode(
+            implementation.canonicalJsonBytes({ alpha: [1], nested: { beta: 2 } }),
+          ),
+          implementation.name,
+        ).toBe('{"alpha":[1],"nested":{"beta":2}}');
+      }
+    } finally {
+      if (original === undefined) {
+        delete (Object.prototype as { toJSON?: unknown }).toJSON;
+      } else {
+        Object.defineProperty(Object.prototype, "toJSON", original);
+      }
+    }
+  });
+
+  test("all public canonical-byte APIs reject the same hostile fixtures", () => {
+    const symbolKeyed = { [Symbol("unsupported-key")]: "value" };
+    const inherited = Object.assign(Object.create({ inherited: true }), { own: true });
+    const accessor = Object.defineProperty({}, "value", {
+      enumerable: true,
+      get: () => 1,
+    });
+    const nonEnumerable = Object.defineProperty({}, "value", {
+      enumerable: false,
+      value: 1,
+    });
+    const cyclic: Record<string, unknown> = {};
+    cyclic["self"] = cyclic;
+
+    const hostileCases: ReadonlyArray<CanonicalByteEquivalenceCase> = [
+      { name: "sparse-array", value: Array(2) },
+      { name: "nested-sparse-array", value: { nested: [Array(1)] } },
+      { name: "unsafe-integer", value: { value: Number.MAX_SAFE_INTEGER + 1 } },
+      { name: "undefined-root", value: undefined },
+      { name: "undefined-object-member", value: { value: undefined } },
+      { name: "undefined-array-element", value: [undefined] },
+      { name: "unpaired-high-surrogate-value", value: { value: "\ud800" } },
+      { name: "unpaired-low-surrogate-value", value: { value: "\udc00" } },
+      { name: "unpaired-high-surrogate-key", value: { ["\ud800"]: "value" } },
+      { name: "unpaired-low-surrogate-key", value: { ["\udc00"]: "value" } },
+      { name: "function-root", value: () => undefined },
+      { name: "function-member", value: { value: () => undefined } },
+      { name: "symbol-root", value: Symbol("unsupported") },
+      { name: "symbol-member", value: { value: Symbol("unsupported") } },
+      { name: "symbol-key", value: symbolKeyed },
+      { name: "bigint-root", value: 1n },
+      { name: "inherited-object-prototype", value: inherited },
+      { name: "accessor-property", value: accessor },
+      { name: "non-enumerable-property", value: nonEnumerable },
+      { name: "cyclic-value", value: cyclic },
+    ];
+
+    for (const hostileCase of hostileCases) {
+      for (const implementation of rawJcsImplementations) {
+        expect(
+          () => implementation.canonicalJsonBytes(hostileCase.value),
+          `${implementation.name} accepted ${hostileCase.name}`,
+        ).toThrow();
+      }
+    }
   });
 });

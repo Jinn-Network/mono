@@ -22,27 +22,63 @@ describe("serializeCanonicalJson", () => {
   });
   test("rejects non-I-JSON-integer numbers at sealing", () => {
     expect(() => serializeCanonicalJson({ q: 1.5 })).toThrow(IJsonNumberError);
+    expect(() => serializeCanonicalJson({ q: Number.MAX_SAFE_INTEGER + 1 })).toThrow(
+      IJsonNumberError,
+    );
   });
   test("matches the RFC 8785 reference for the integer-only subset", () => {
     const value = { z: [3, 2, 1], a: { d: 1, c: 2 } };
     expect(decode(serializeCanonicalJson(value))).toBe(canonicalize(value));
   });
 
-  test("omits object members whose value is undefined (mirrors JSON.stringify member omission)", () => {
-    const withUndefined = { a: 1, b: undefined } as unknown as JsonValue;
-    const withoutMember = { a: 1 };
-    expect(decode(serializeCanonicalJson(withUndefined))).toBe(decode(serializeCanonicalJson(withoutMember)));
-    expect(decode(serializeCanonicalJson(withUndefined))).toBe('{"a":1}');
+  test("rejects sparse and nested sparse arrays before emission", () => {
+    const sparse = Array(2) as unknown as JsonValue;
+    const nestedSparse = { nested: [Array(1)] } as unknown as JsonValue;
+    expect(() => serializeCanonicalJson(sparse)).toThrow();
+    expect(() => serializeCanonicalJson(nestedSparse)).toThrow();
   });
 
-  test("rejects an undefined array element with a typed invalid-document error instead of emitting a literal token", () => {
-    const withUndefinedElement = [1, undefined, 2] as unknown as JsonValue;
-    expect(() => serializeCanonicalJson(withUndefinedElement)).toThrow(UndefinedArrayElementError);
-    try {
-      serializeCanonicalJson(withUndefinedElement);
-      expect.unreachable();
-    } catch (error: unknown) {
-      expect((error as { category?: string }).category).toBe("invalid-document");
+  test("rejects undefined at root and in objects or arrays", () => {
+    const cases = [
+      undefined,
+      { value: undefined },
+      [undefined],
+    ] as unknown as JsonValue[];
+    for (const value of cases) {
+      expect(() => serializeCanonicalJson(value)).toThrow();
     }
+    expect(
+      () => serializeCanonicalJson([undefined] as unknown as JsonValue),
+    ).toThrow(UndefinedArrayElementError);
+  });
+
+  test("rejects unsupported function, symbol, and bigint values", () => {
+    const cases = [
+      () => undefined,
+      Symbol("unsupported"),
+      1n,
+      { value: () => undefined },
+      { value: Symbol("unsupported") },
+    ] as unknown as JsonValue[];
+    for (const value of cases) {
+      expect(() => serializeCanonicalJson(value)).toThrow();
+    }
+  });
+
+  test("rejects unpaired UTF-16 surrogates in string values and object keys", () => {
+    const cases = [
+      { value: "\ud800" },
+      { value: "\udc00" },
+      { ["\ud800"]: "value" },
+      { ["\udc00"]: "value" },
+    ] as JsonValue[];
+    for (const value of cases) {
+      expect(() => serializeCanonicalJson(value)).toThrow();
+    }
+  });
+
+  test("accepts valid supplementary-plane Unicode", () => {
+    expect(decode(serializeCanonicalJson({ emoji: "😀" }))).toBe('{"emoji":"😀"}');
+    expect(decode(serializeCanonicalJson({ ["😀"]: "ok" }))).toBe('{"😀":"ok"}');
   });
 });

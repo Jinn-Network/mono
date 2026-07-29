@@ -81,13 +81,7 @@ describe("seal-once idempotence", () => {
 });
 
 describe("sealing an explicit-undefined optional field", () => {
-  test("sealSubmission({...doc, optionalField: undefined}) byte-equals sealSubmission(doc)", () => {
-    // The idiomatic `{...record, closeAt: undefined}` construction pattern must not crash, and
-    // must seal identically to simply omitting the field — two semantically identical documents
-    // must produce byte-identical output (§6.1/§22).
-    const withExplicitUndefined = sealSubmission({ ...validSubmission, closeAt: undefined });
-    const withOmittedField = sealSubmission(validSubmission);
-    expect(documentDigest(withExplicitUndefined)).toBe(documentDigest(withOmittedField));
-    expect(withExplicitUndefined).toEqual(withOmittedField);
+  test("sealSubmission rejects an explicit undefined optional field instead of omitting it", () => {
+    expect(() => sealSubmission({ ...validSubmission, closeAt: undefined })).toThrow();
   });
 });
