@@ -26,6 +26,7 @@ import {
 } from "./backend.js";
 
 const roots: string[] = [];
+const backends: LocalTaskExecutionBackend[] = [];
 const profile = buildRepositoryWorkProfile();
 const sealedProfile = sealTaskProfile(profile);
 const profileStore: ProfileStore = {
@@ -41,6 +42,10 @@ async function stateRoot(name: string): Promise<string> {
 }
 
 afterEach(async () => {
+  await Promise.all(backends.splice(0).map(async (backend) => {
+    await backend.drain();
+    backend.close();
+  }));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -129,7 +134,7 @@ function fixture(
       };
     },
   };
-  return makeLocalTaskExecutionBackend({
+  const backend = makeLocalTaskExecutionBackend({
     stateRoot: root,
     source: "urn:jinn:backend-local:assembly-test",
     executor: "urn:jinn:agent:assembly-test",
@@ -146,6 +151,8 @@ function fixture(
     maxConcurrentAttempts: options.maxConcurrentAttempts ?? 8,
     faults: { afterDeliveryCheckpoint: options.afterDeliveryCheckpoint },
   });
+  backends.push(backend);
+  return backend;
 }
 
 async function acceptedAttempt(

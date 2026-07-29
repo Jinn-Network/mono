@@ -276,6 +276,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   private readonly submissionsByUri = new Map<SubmissionUri, StoredSubmission>();
   private readonly attempts = new Map<AttemptUri, AttemptMeta>();
   private readonly reconciliationOverrides = new Map<string, ReconciliationReport>();
+  private readonly workers = new Set<Promise<void>>();
   private closed = false;
 
   constructor(private readonly config: LocalTaskExecutionBackendConfig) {
@@ -790,7 +791,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
           resolver: this.config.secretForwardResolver,
         });
       }
-      void this.runAcceptedAttempt({
+      const worker = this.runAcceptedAttempt({
         attempt: identity,
         taskBytes,
         task,
@@ -811,6 +812,8 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
           });
         }
       });
+      this.workers.add(worker);
+      void worker.finally(() => this.workers.delete(worker));
     } catch (error) {
       // Terminal planning/materialization failures must never retain a secret forward.
       rmSync(this.paths(attempt).secrets, { recursive: true, force: true });
@@ -1515,6 +1518,11 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     if (this.closed) return;
     this.closed = true;
     if (this.writer.acquired) this.writer.release();
+  }
+
+  /** Waits for work already accepted by this embedded backend to stop mutating its state root. */
+  async drain(): Promise<void> {
+    while (this.workers.size > 0) await Promise.all([...this.workers]);
   }
 }
 
