@@ -1003,6 +1003,9 @@ Program rulings §7.52–§7.55 freeze the four generalized seams exposed by the
    references without redeeming them and implements terminal-aware/idempotent protocol
    Attempt cancellation through injected lifecycle ports. Submission close stays the explicit
    `closeSubmission(taskId)` binding extension; it does not widen TEP's `cancel` signature.
+   Cancel idempotency lives durably in the lifecycle port and requester cancel only signals:
+   operator-authorized `releaseAttempt` is a separate venue action, never a requester-chain
+   revocation.
 4. Dispatch binding and evaluation-spec equality are claims about the exact canonical Execution
    Evidence record selected and digest-bound by the Delivery, never a detached parsed object.
 

@@ -626,8 +626,11 @@ Confirmed by the operator at the program gate (2026-07-28):
     → requester `submit` vector proves that path. The standard backend also wires its completed
     lifecycle: `capabilities().cancel` is true exactly when the injected lifecycle port exists,
     and the standard Attempt-only `cancel` is terminal-aware/idempotent, maps to the requester
-    signal (and generation-appropriate release when authorized), and never authors or revokes a
-    work outcome. Submission close remains the existing explicit `closeSubmission(taskId)`
+    signal, and never authors or revokes a work outcome. Idempotency is durable in the injected
+    lifecycle operation and keyed by Attempt; a backend restart cannot signal twice. The
+    operator-facing `releaseAttempt` remains a separate authorized venue action taken by a
+    compliant operator after observing the request, never a chain effect of the requester
+    `cancel` call. Submission close remains the existing explicit `closeSubmission(taskId)`
     binding extension and routes through the generation seam; it is not smuggled into TEP's
     Attempt-only `cancel` signature. Unimplemented optional standard verbs remain advertised
     false.
