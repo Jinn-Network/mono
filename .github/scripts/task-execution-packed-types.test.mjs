@@ -6,23 +6,47 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const taskExecutionRoot = join(root, 'packages', 'task-execution');
+const evidenceRoot = join(root, 'packages', 'evidence');
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'jinn-task-execution-packed-types-'));
 const archivesRoot = join(temporaryRoot, 'archives');
 const consumerRoot = join(temporaryRoot, 'consumer');
 
 const packages = [
-  ['protocol', '@jinn-network/task-execution-protocol'],
-  ['backend', '@jinn-network/task-execution-backend'],
-  ['testing', '@jinn-network/task-execution-testing'],
-  ['profiles', '@jinn-network/task-execution-profiles'],
+  [join(taskExecutionRoot, 'protocol'), '@jinn-network/task-execution-protocol'],
+  [join(taskExecutionRoot, 'backend'), '@jinn-network/task-execution-backend'],
+  [join(taskExecutionRoot, 'testing'), '@jinn-network/task-execution-testing'],
+  [join(taskExecutionRoot, 'profiles'), '@jinn-network/task-execution-profiles'],
+  [join(taskExecutionRoot, 'backend-local', 'supervisor'), '@jinn-network/task-execution-supervisor'],
+  [join(taskExecutionRoot, 'backend-local', 'workspace'), '@jinn-network/task-execution-workspace'],
+  [join(taskExecutionRoot, 'backend-local', 'launchers'), '@jinn-network/task-execution-launchers'],
+  [join(taskExecutionRoot, 'backend-local', 'assembly'), '@jinn-network/task-execution-backend-local'],
+  [join(taskExecutionRoot, 'evaluation-harness'), '@jinn-network/task-execution-evaluation-harness'],
+];
+
+// The assembly's production dependencies reach outside the task-execution tree into the
+// evidence CONTRACT packages (program §7.7) — packed here too so the synthetic consumer's flat
+// install can satisfy them from local tarballs, never the (unpublished) registry.
+const externalPackages = [
+  [join(evidenceRoot, 'protocol'), '@jinn-network/evidence-protocol'],
+  [join(evidenceRoot, 'repository'), '@jinn-network/evidence-repository'],
+  [join(evidenceRoot, 'discovery'), '@jinn-network/evidence-discovery'],
+  [join(evidenceRoot, 'execution-recorder'), '@jinn-network/execution-recorder'],
+  [join(evidenceRoot, 'attestation-issuer'), '@jinn-network/attestation-issuer'],
 ];
 
 const codeEntrypoints = [
   '@jinn-network/task-execution-protocol',
   '@jinn-network/task-execution-backend',
   '@jinn-network/task-execution-testing',
+  '@jinn-network/task-execution-testing/backend-local',
   '@jinn-network/task-execution-profiles',
   '@jinn-network/task-execution-profiles/testing',
+  '@jinn-network/task-execution-supervisor',
+  '@jinn-network/task-execution-workspace',
+  '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-evaluation-harness',
+  '@jinn-network/task-execution-evaluation-harness/launcher',
 ];
 
 function run(command, args, options = {}) {
@@ -50,14 +74,16 @@ function run(command, args, options = {}) {
   });
 }
 
+const allPackages = [...packages, ...externalPackages];
+
 try {
   await mkdir(archivesRoot);
   const archives = new Map();
-  for (const [directory, name] of packages) {
+  for (const [packageDir, name] of allPackages) {
     const packed = JSON.parse(await run(
       'npm',
       ['pack', '--ignore-scripts', '--json', '--pack-destination', archivesRoot],
-      { cwd: join(taskExecutionRoot, directory) },
+      { cwd: packageDir },
     ));
     if (packed.length !== 1 || typeof packed[0]?.filename !== 'string') {
       throw new Error(`npm pack returned an unexpected result for ${name}`);
@@ -70,7 +96,7 @@ try {
     private: true,
     type: 'module',
     dependencies: Object.fromEntries([
-      ...packages.map(([, name]) => [name, `file:${archives.get(name)}`]),
+      ...allPackages.map(([, name]) => [name, `file:${archives.get(name)}`]),
       ['@types/node', '^22.0.0'],
       ['typescript', '^5.9.3'],
       ['vitest', '^4.1.8'],
@@ -111,13 +137,13 @@ try {
   );
   await run(typescript, ['--project', 'tsconfig.json'], { cwd: consumerRoot });
 
-  for (const [directory, name] of packages) {
+  for (const [packageDir, name] of allPackages) {
     const installed = JSON.parse(await readFile(
       join(consumerRoot, 'node_modules', ...name.split('/'), 'package.json'),
       'utf8',
     ));
     if (installed.name !== name) {
-      throw new Error(`${directory} installed as ${installed.name ?? 'an unnamed package'}`);
+      throw new Error(`${packageDir} installed as ${installed.name ?? 'an unnamed package'}`);
     }
   }
 

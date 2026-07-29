@@ -79,7 +79,13 @@ import {
   EVAL_SEMANTICS_VERSION,
   TASK_PROFILE_FORMAT_URI,
   sealDocument,
+  verifyEvaluationSubject,
 } from "@jinn-network/task-execution-profiles";
+import {
+  documentDigest,
+  sealDelivery,
+  sealTask,
+} from "@jinn-network/task-execution-protocol";
 
 // Root import: identifiers + the sealing entry point.
 if (TASK_PROFILE_FORMAT_URI !== "https://jinn.network/profiles/task-profile/1.0") {
@@ -89,6 +95,42 @@ if (EVAL_SEMANTICS_VERSION !== "4") throw new Error("semanticsVersion seed misma
 if (typeof sealDocument !== "function") throw new Error("sealDocument did not resolve from root import");
 const probe = sealDocument({ smoke: "test" });
 if (!probe.digest.startsWith("sha256:")) throw new Error("sealDocument did not return a sha256 digest");
+const resultBytes = new TextEncoder().encode("packed exact Result");
+const taskBytes = sealTask({
+  protocol: "https://jinn.network/profiles/task-execution/1.0",
+  profile: { digest: { sha256: "1".repeat(64) } },
+  instructions: "packed exact-subject smoke",
+  outputs: [{ name: "result", mediaType: "text/plain", required: true }],
+  evaluation: {
+    name: "evaluation-spec.json",
+    digest: { sha256: "2".repeat(64) },
+  },
+});
+const deliveryBytes = sealDelivery({
+  protocol: "https://jinn.network/profiles/task-execution/1.0",
+  attempt: "urn:uuid:33333333-3333-4333-8333-333333333333",
+  task: documentDigest(taskBytes),
+  outputs: [{
+    name: "result",
+    mediaType: "text/plain",
+    digest: {
+      sha256: documentDigest(resultBytes).slice("sha256:".length),
+    },
+  }],
+  outcome: "fulfilled",
+  createdAt: "2026-07-29T12:00:00.000Z",
+});
+const verified = verifyEvaluationSubject({
+  taskBytes,
+  deliveryBytes,
+  results: [{ name: "result", bytes: resultBytes }],
+});
+if (
+  verified.task.digest !== documentDigest(taskBytes)
+  || verified.results[0]?.digest !== documentDigest(resultBytes)
+) {
+  throw new Error("packed evaluation exact-subject verifier returned the wrong view");
+}
 
 // The two sealed-document assets, resolved by subpath export — each matches its own
 // profile.sha256 (program §7.1: profile.json is the exact raw sealed bytes on disk).

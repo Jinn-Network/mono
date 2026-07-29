@@ -1,4 +1,5 @@
 import { TaskExecutionError } from "@jinn-network/task-execution-backend";
+import type { TwoPartyEngagement } from "@jinn-network/task-execution-backend";
 import { documentDigest, sealDelivery, sealSubmission, sealTask } from "@jinn-network/task-execution-protocol";
 import { describe, expect, test } from "vitest";
 import type { TestableBackend } from "./fake-backend.js";
@@ -99,6 +100,20 @@ async function submitAccepted(
   );
   if (engaged === undefined) throw new Error("expected an attempt-engaged observation on submit");
   return { attempt: snapshot.descriptor.attempt, taskDigest, source: engaged.source };
+}
+
+// TEP Addendum 2026-07-28-b (two-party engagement, program §7.2/§7.22): builds a well-formed
+// engagement whose dispatch-context content agrees with the Submission it accompanies.
+function engagementFor(
+  taskDigest: `sha256:${string}`,
+  submission: `urn:uuid:${string}`,
+  nonce: string,
+  attemptUri: `urn:uuid:${string}`,
+): TwoPartyEngagement {
+  return {
+    attemptUri,
+    dispatchContext: { taskDigest, submission, nonce, attempt: attemptUri },
+  };
 }
 
 export type DescribeTaskExecutionBackendContract = typeof describeTaskExecutionBackendContract;
@@ -383,6 +398,76 @@ export function describeTaskExecutionBackendContract(makeBackend: () => Testable
       expect(first.descriptor.attempt).not.toBe(second.descriptor.attempt);
       expect(first.descriptor.derived.terminal).toBe(false);
       expect(second.descriptor.derived.terminal).toBe(false);
+    });
+
+    test("two-party engagement: submit adopts the caller-supplied attemptUri instead of minting one (TEP Addendum 2026-07-28-b)", async () => {
+      const backend = makeBackend();
+      const task = taskBytes();
+      const taskDigest = documentDigest(task);
+      const submissionUri: `urn:uuid:${string}` = `urn:uuid:${crypto.randomUUID()}`;
+      const nonce = unique("engaged-nonce");
+      const submission = submissionBytes(taskDigest, { submission: submissionUri, nonce });
+      const attemptUri: `urn:uuid:${string}` = `urn:uuid:${crypto.randomUUID()}`;
+
+      const ack = await backend.submit(task, submission, engagementFor(taskDigest, submissionUri, nonce, attemptUri));
+      expect(ack.accepted).toBe(true);
+      if (!ack.accepted) throw new Error("unreachable");
+
+      const snapshot = await backend.observe(ack.submission);
+      expect(snapshot.descriptor.attempt).toBe(attemptUri);
+    });
+
+    test("two-party engagement: a malformed attemptUri is rejected as invalid-document, never adopted (TEP Addendum 2026-07-28-b)", async () => {
+      const backend = makeBackend();
+      const task = taskBytes();
+      const taskDigest = documentDigest(task);
+      const submissionUri: `urn:uuid:${string}` = `urn:uuid:${crypto.randomUUID()}`;
+      const nonce = unique("malformed-nonce");
+      const submission = submissionBytes(taskDigest, { submission: submissionUri, nonce });
+      const malformedAttemptUri: `urn:uuid:${string}` = "urn:uuid:not-a-real-uuid";
+
+      const ack = await backend.submit(
+        task,
+        submission,
+        engagementFor(taskDigest, submissionUri, nonce, malformedAttemptUri),
+      );
+      expect(ack.accepted).toBe(false);
+      if (ack.accepted) throw new Error("unreachable");
+      expect(ack.error).toBeInstanceOf(TaskExecutionError);
+      expect(ack.error.category).toBe("invalid-document");
+    });
+
+    test("two-party engagement absent: submit mints a random Attempt URI, single-party semantics unchanged (TEP Addendum 2026-07-28-b)", async () => {
+      const backend = makeBackend();
+      const { attempt } = await submitAccepted(backend);
+      expect(attempt).toMatch(/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    });
+
+    test("two-party engagement scopes the attempts honor-or-reject to the single caller-identified attempt (marketplace-binding-design Finding F4)", async () => {
+      const backend = makeBackend();
+      const capabilities = await backend.capabilities();
+      const declaredMaxTotal = capabilities.attempts.maxTotal;
+      if (declaredMaxTotal === undefined) {
+        throw new Error("fixture expects this backend to declare attempts.maxTotal bounds");
+      }
+      // Out of the backend's own declared range — rejected in single-party mode (see the
+      // "outside this backend's declared range" test above), but a chain enforces `maxClaims`
+      // in two-party mode, not this backend, so it must be honored here.
+      const outOfRange = declaredMaxTotal[1] + 1;
+
+      const task = taskBytes();
+      const taskDigest = documentDigest(task);
+      const submissionUri: `urn:uuid:${string}` = `urn:uuid:${crypto.randomUUID()}`;
+      const nonce = unique("scoped-nonce");
+      const submission = submissionBytes(taskDigest, {
+        submission: submissionUri,
+        nonce,
+        attempts: { maxTotal: outOfRange },
+      });
+      const attemptUri: `urn:uuid:${string}` = `urn:uuid:${crypto.randomUUID()}`;
+
+      const ack = await backend.submit(task, submission, engagementFor(taskDigest, submissionUri, nonce, attemptUri));
+      expect(ack.accepted).toBe(true);
     });
   });
 }

@@ -46,6 +46,9 @@ packages/evidence/*/.yarn/install-state.gz
 packages/task-execution/*/dist/
 packages/task-execution/*/.yarn/cache/
 packages/task-execution/*/.yarn/install-state.gz
+packages/task-execution/backend-local/*/dist/
+packages/task-execution/backend-local/*/.yarn/cache/
+packages/task-execution/backend-local/*/.yarn/install-state.gz
 packages/trust/*/dist/
 packages/trust/*/.yarn/cache/
 packages/trust/*/.yarn/install-state.gz

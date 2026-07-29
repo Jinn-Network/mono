@@ -31,6 +31,9 @@ See the design: `docs/superpowers/specs/2026-07-27-task-execution-protocol-and-s
   outcomes, cancel races including cancel-after-terminal, unsupported-requirement rejection
   naming the field, failure-category mapping (operational error vs. Attempt outcome), result
   retrieval on terminal Attempts, and concurrent Attempts within declared bounds.
+- **`describeLocalBackendContract(makeBackend)`** from the `./backend-local` subpath — registers
+  that unchanged Layer-2 suite against the real local assembly, then adds the one-live-writer,
+  `attempts` 1..1, seal-once recovery, and evidence-finalization/indexing posture checks.
 
 ## Using the kit from a binding
 

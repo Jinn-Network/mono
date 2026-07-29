@@ -14,6 +14,23 @@ const TASK_EXECUTION_PACKAGES = [
   ['backend', '@jinn-network/task-execution-backend'],
   ['testing', '@jinn-network/task-execution-testing'],
   ['profiles', '@jinn-network/task-execution-profiles'],
+  ['backend-local/supervisor', '@jinn-network/task-execution-supervisor'],
+  ['backend-local/workspace', '@jinn-network/task-execution-workspace'],
+  ['backend-local/launchers', '@jinn-network/task-execution-launchers'],
+  ['backend-local/assembly', '@jinn-network/task-execution-backend-local'],
+  ['evaluation-harness', '@jinn-network/task-execution-evaluation-harness'],
+];
+
+// Packages OUTSIDE the task-execution tree that a task-execution package may legitimately
+// portal-resolve (backend plan program §7.7: the assembly consumes the evidence CONTRACT
+// packages + the I/O-free execution-recorder producer only — never evidence-local-runtime or
+// any record-discovery-* package). [directory relative to the repo root, expected name].
+const EXTERNAL_JINN_PACKAGES = [
+  ['packages/evidence/protocol', '@jinn-network/evidence-protocol'],
+  ['packages/evidence/repository', '@jinn-network/evidence-repository'],
+  ['packages/evidence/discovery', '@jinn-network/evidence-discovery'],
+  ['packages/evidence/execution-recorder', '@jinn-network/execution-recorder'],
+  ['packages/evidence/attestation-issuer', '@jinn-network/attestation-issuer'],
 ];
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -22,13 +39,81 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     dependencies: ['@jinn-network/task-execution-protocol'],
     devDependencies: [], optionalDependencies: [], peerDependencies: [],
   }],
+  // testing's `./backend-local` slice (backend plan Task A3, program §7.5/Finding (a)) takes
+  // PRODUCTION deps on the four backend-local components (its fake launcher implements the
+  // launchers contract, its fixture families drive supervisor/workspace, its backend-level
+  // suite drives the assembly) — the arrows point one way at production scope: each component
+  // consumes testing back only as a devDependency (see below), so there is no production cycle
+  // (the evidence-tree `local-runtime → execution-recorder` devDep precedent). The
+  // devDependencies below are transitive-only gap-fills: packages testing never imports
+  // directly, but that a production dependency of a production dependency needs resolved
+  // locally instead of from the (unpublished) registry — profiles (workspace/launchers/
+  // assembly's own dependency) and the evidence contract chain (assembly's own dependency;
+  // evidence-repository/-discovery/execution-recorder each depend on evidence-protocol).
   ['testing', {
-    dependencies: ['@jinn-network/task-execution-backend', '@jinn-network/task-execution-protocol'],
-    devDependencies: [], optionalDependencies: [], peerDependencies: [],
+    dependencies: [
+      '@jinn-network/task-execution-backend', '@jinn-network/task-execution-backend-local',
+      '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-protocol',
+      '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
+    ],
+    devDependencies: [
+      '@jinn-network/evidence-discovery', '@jinn-network/evidence-protocol',
+      '@jinn-network/evidence-repository', '@jinn-network/execution-recorder',
+      '@jinn-network/task-execution-profiles',
+    ],
+    optionalDependencies: [], peerDependencies: [],
   }],
   ['profiles', {
     dependencies: ['@jinn-network/task-execution-protocol'],
     devDependencies: [], optionalDependencies: [], peerDependencies: [],
+  }],
+  // backend-local (design §15, program §6 decision 2 revised): the internal DAG is
+  // [supervisor ∥ workspace] → launchers → assembly (plan Finding (e)). Each component also
+  // takes `@jinn-network/task-execution-testing` as a devDependency ONLY (program §7.5) to run
+  // the `./backend-local` kit slice locally; where that slice's own production dependencies
+  // (task-execution-backend, evidence-protocol) are not already satisfied by the component's
+  // own `dependencies`, they are added as devDependencies too so the standalone project's local
+  // install resolves them from a portal instead of the (unpublished) registry.
+  ['backend-local/supervisor', {
+    dependencies: ['@jinn-network/task-execution-backend', '@jinn-network/task-execution-protocol'],
+    devDependencies: [],
+    optionalDependencies: [], peerDependencies: [],
+  }],
+  ['backend-local/workspace', {
+    dependencies: ['@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol'],
+    devDependencies: ['@jinn-network/task-execution-backend'],
+    optionalDependencies: [], peerDependencies: [],
+  }],
+  ['backend-local/launchers', {
+    dependencies: [
+      '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol',
+      '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
+    ],
+    devDependencies: ['@jinn-network/task-execution-backend'],
+    optionalDependencies: [], peerDependencies: [],
+  }],
+  ['backend-local/assembly', {
+    dependencies: [
+      '@jinn-network/evidence-discovery', '@jinn-network/evidence-repository', '@jinn-network/execution-recorder',
+      '@jinn-network/task-execution-backend', '@jinn-network/task-execution-launchers',
+      '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol',
+      '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
+    ],
+    devDependencies: ['@jinn-network/evidence-protocol'],
+    optionalDependencies: [], peerDependencies: [],
+  }],
+  ['evaluation-harness', {
+    dependencies: [
+      '@jinn-network/attestation-issuer', '@jinn-network/evidence-protocol',
+      '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-profiles',
+      '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
+    ],
+    devDependencies: [
+      '@jinn-network/evidence-discovery', '@jinn-network/evidence-repository',
+      '@jinn-network/execution-recorder', '@jinn-network/task-execution-backend',
+      '@jinn-network/task-execution-backend-local', '@jinn-network/task-execution-protocol',
+    ],
+    optionalDependencies: [], peerDependencies: [],
   }],
 ]);
 
@@ -56,13 +141,21 @@ function jinnDependencyNames(manifest, section) {
 }
 
 function expectedPortal(directory, dependencyName) {
-  const target = TASK_EXECUTION_PACKAGES.find(([, name]) => name === dependencyName);
-  assert.ok(target, `${directory} declares unknown Jinn dependency ${dependencyName}`);
-  return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;
+  const internal = TASK_EXECUTION_PACKAGES.find(([, name]) => name === dependencyName);
+  if (internal) {
+    return `portal:${relative(join(packageRoot, directory), join(packageRoot, internal[0])) || '.'}`;
+  }
+  const external = EXTERNAL_JINN_PACKAGES.find(([, name]) => name === dependencyName);
+  assert.ok(external, `${directory} declares unknown Jinn dependency ${dependencyName}`);
+  return `portal:${relative(join(packageRoot, directory), join(root, external[0]))}`;
 }
 
 test('the task-execution package inventory is explicit and has one manifest', () => {
-  assert.equal(TASK_EXECUTION_PACKAGES.length, 4);
+  // Read live (Global Constraints: package counts are computed against the guard's current
+  // total, never a hardcoded guessed number) — TASK_EXECUTION_PACKAGES.length IS that live
+  // total; this assertion documents the count this revision expects (4 pre-existing + the four
+  // backend-local components, backend plan Task A1).
+  assert.equal(TASK_EXECUTION_PACKAGES.length, 9);
   for (const [directory, expectedName] of TASK_EXECUTION_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);

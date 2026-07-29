@@ -1,0 +1,78 @@
+{
+  "name": "@jinn-network/task-execution-evaluation-harness",
+  "version": "0.1.0",
+  "description": "Evaluator adapter contracts and the evaluation-task launcher for the Jinn Task Execution Protocol local backend.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/task-execution/evaluation-harness"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "jinn-evaluation-harness": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./launcher": {
+      "import": "./dist/launcher.js",
+      "types": "./dist/launcher.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/attestation-issuer": "0.1.0",
+    "@jinn-network/evidence-protocol": "0.1.0",
+    "@jinn-network/task-execution-launchers": "0.1.0",
+    "@jinn-network/task-execution-profiles": "0.1.0",
+    "@jinn-network/task-execution-supervisor": "0.1.0",
+    "@jinn-network/task-execution-workspace": "0.1.0"
+  },
+  "devDependencies": {
+    "@jinn-network/evidence-discovery": "0.1.0",
+    "@jinn-network/evidence-repository": "0.1.0",
+    "@jinn-network/execution-recorder": "0.1.0",
+    "@jinn-network/task-execution-backend": "0.1.0",
+    "@jinn-network/task-execution-backend-local": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/attestation-issuer": "portal:../../evidence/attestation-issuer",
+    "@jinn-network/evidence-discovery": "portal:../../evidence/discovery",
+    "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
+    "@jinn-network/evidence-repository": "portal:../../evidence/repository",
+    "@jinn-network/execution-recorder": "portal:../../evidence/execution-recorder",
+    "@jinn-network/task-execution-backend": "portal:../backend",
+    "@jinn-network/task-execution-backend-local": "portal:../backend-local/assembly",
+    "@jinn-network/task-execution-launchers": "portal:../backend-local/launchers",
+    "@jinn-network/task-execution-profiles": "portal:../profiles",
+    "@jinn-network/task-execution-protocol": "portal:../protocol",
+    "@jinn-network/task-execution-supervisor": "portal:../backend-local/supervisor",
+    "@jinn-network/task-execution-workspace": "portal:../backend-local/workspace"
+  }
+}

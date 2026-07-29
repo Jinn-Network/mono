@@ -33,6 +33,23 @@ Every Agent MUST use a stable absolute IRI. A wallet, key, account, organization
 be linked with standard identity relationships, but consumers MUST NOT infer control or trust
 from an identifier alone.
 
+Task and Execution entities MAY carry `identifier` values. A typed identifier record MUST be a
+`PropertyValue` whose `propertyID` is an absolute IRI naming the identifier scheme and whose
+`value` uses that scheme's native representation. The stable Jinn scheme-IRI spellings are:
+
+- `https://jinn.network/schemes/did-pkh` for `did:pkh` identifiers;
+- `https://jinn.network/schemes/did-key` for `did:key` identifiers;
+- `https://jinn.network/schemes/caip-19` for CAIP-19 identifiers;
+- `https://jinn.network/schemes/github` for GitHub identifiers;
+- `https://jinn.network/schemes/task-digest` for a Task's lowercase
+  `sha256:<64 lowercase hexadecimal digits>` digest; and
+- `https://jinn.network/schemes/task-profile-uri` for the absolute task-profile URI committed by
+  the Task.
+
+These identifiers corroborate cross-record identity. They do not replace the exact Task artifact,
+the primary Execution IRI, or a protocol-side Task-to-Execution edge, and they convey no
+authorization or trust.
+
 Every available byte-bearing artifact MUST carry a lowercase SHA-256 digest of its exact bytes.
 Unavailable private bytes MAY be represented by their prior name and SHA-256 commitment. An
 unavailable hosted or opaque component MUST be described by a content-bound observation
