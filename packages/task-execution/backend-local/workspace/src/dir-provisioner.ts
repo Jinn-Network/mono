@@ -53,12 +53,30 @@ async function sealInputAndSnapshot(paths: WorkspacePaths): Promise<void> {
   await chmod(paths.input, 0o500);
 }
 
-function executionEnv(launch: LaunchEnv): Record<string, string> {
+export function executionEnv(launch: LaunchEnv): Record<string, string> {
   const result: Record<string, string> = {};
+  const allowed = new Set([
+    "JINN_ATTEMPT_ID",
+    "JINN_ATTEMPT_ROOT",
+    "JINN_ATTEMPT_INPUT",
+    "JINN_ATTEMPT_WORK",
+    "JINN_ATTEMPT_OUT",
+    "JINN_ATTEMPT_LOGS",
+    "JINN_ATTEMPT_HARNESS_STATE",
+    "JINN_ATTEMPT_SECRETS",
+    "JINN_ATTEMPT_META",
+    "JINN_ATTEMPT_EVALUATION_DEPLOYMENT_MODULE",
+    "JINN_HARNESS_PIN_VERSION",
+    "JINN_HARNESS_PIN_DIGEST",
+    "JINN_LOADOUT_DIR",
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "HERMES_HOME",
+    "TMPDIR",
+    "OPENROUTER_API_KEY",
+  ]);
   for (const [key, value] of Object.entries(launch.env)) {
-    const pathKey = /^(?:JINN_ATTEMPT_|CLAUDE_CONFIG_DIR$|CODEX_HOME$|HERMES_HOME$|TMPDIR$)/u.test(key);
-    const secretForward = /(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/iu.test(key) && value.startsWith("secrets/");
-    if (pathKey || secretForward) result[key] = value;
+    if (allowed.has(key)) result[key] = value;
   }
   return result;
 }

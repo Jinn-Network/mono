@@ -15,6 +15,12 @@ export { makeHermesLauncher } from "./hermes.js";
 export { cursorLauncher } from "./cursor.js";
 export { makeCursorLauncher } from "./cursor.js";
 export { interpretResult } from "./result.js";
+export {
+  EVALUATION_LAUNCHER_ID,
+  EVALUATION_TASK_PROFILE,
+  REPOSITORY_WORK_PROFILE,
+  selectProfileSafeLauncher,
+} from "./routing.js";
 export type { InterpretedResult, ResultEnvelope } from "./result.js";
 export type {
   BlameRule,

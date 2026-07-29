@@ -39,6 +39,7 @@ import type {
   ResultEnvelope,
 } from "@jinn-network/task-execution-launchers";
 import { interpretResult } from "@jinn-network/task-execution-launchers";
+import { selectProfileSafeLauncher } from "@jinn-network/task-execution-launchers";
 import {
   ProfilesError,
   resolveProfile,
@@ -117,6 +118,7 @@ import {
   type EvidenceCaptureSession,
 } from "./evidence-join.js";
 import { materializeSecretForwards, type SecretForwardResolver } from "./secret-forwards.js";
+import { type LocalLauncherDeployment, verifyRunPinning } from "./pinning.js";
 
 // Core requirement comparison classes (profiles §5.1 / program §7.3). Profile-added entries
 // are overlaid after resolution, so the resolved document is authoritative for its own keys.
@@ -497,6 +499,8 @@ export interface LocalTaskExecutionBackendConfig {
     descriptor: TaskSpecification["profile"],
   ) => TaskProfileDocument;
   readonly launchers: readonly LauncherContract[];
+  /** Deployment-owned executable identities and launcher-specific pin/readiness probes. */
+  readonly launcherDeployments?: Readonly<Record<string, LocalLauncherDeployment>>;
   readonly provisioner: (input: LocalProvisionerInput) => SelectedProvisioner;
   readonly provisionerCapabilities: ProvisionerCapabilities;
   readonly maxConcurrentAttempts?: number;
@@ -733,6 +737,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       trustKeys: this.config.trustKeys ?? {},
       secretForwardResolverConfigured: this.config.secretForwardResolver !== undefined,
       custody: nativeCustodySupport(),
+      enforcedLauncherIds: new Set(Object.keys(this.config.launcherDeployments ?? {})),
     });
   }
 
@@ -742,10 +747,16 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
 
   private preflightLaunchers(request: PreflightRequest): readonly LauncherContract[] {
     const harness = requestedInventoryValue(request.requirements?.["harness"]);
-    return this.config.launchers.filter((launcher) =>
-      (request.taskProfile === undefined
-        || launcher.capabilities().taskProfiles.includes(request.taskProfile))
-      && (harness === undefined || launcher.id === harness));
+    if (request.taskProfile === undefined) {
+      return harness === undefined
+        ? this.config.launchers
+        : this.config.launchers.filter((launcher) => launcher.id === harness);
+    }
+    try {
+      return [selectProfileSafeLauncher(this.config.launchers, request.taskProfile, harness)];
+    } catch {
+      return [];
+    }
   }
 
   private preflightUnavailable(detail: string): PreflightReport {
@@ -772,12 +783,14 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     if (viable.length === 0) {
       return this.preflightUnavailable("selected launcher requires secret forwards but no SecretForwardResolver is configured");
     }
-    const probes: ProbeResult[] = await Promise.all(
-      viable.map(
-        async (launcher): Promise<ProbeResult> =>
-          launcher.probe?.() ?? { ready: true },
-      ),
-    );
+    const probes: ProbeResult[] = await Promise.all(viable.map(async (launcher): Promise<ProbeResult> => {
+      const deployment = this.config.launcherDeployments?.[launcher.id];
+      if (deployment !== undefined) {
+        const pinning = await verifyRunPinning(deployment, request.requirements ?? {}, "");
+        if (!pinning.ready) return pinning;
+      }
+      return launcher.probe?.() ?? { ready: true };
+    }));
     const failed = probes.find((probe) => !probe.ready);
     return failed === undefined
       ? { ready: true }
@@ -995,6 +1008,30 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       effectiveRequirements: merged.effective,
       profile: resolvedProfile,
     };
+    let selectedLauncher: LauncherContract;
+    try {
+      selectedLauncher = this.selectLauncher(view);
+      const deployment = this.config.launcherDeployments?.[selectedLauncher.id];
+      if (deployment !== undefined) {
+        const pinning = await verifyRunPinning(
+          deployment,
+          merged.effective as Record<string, unknown>,
+          this.paths(attempt).input,
+        );
+        if (!pinning.ready) {
+          this.capacity.release(attempt);
+          return this.reject(submissionUri, "unsupported-requirement", {
+            detail: pinning.detail ?? "selected launcher is not ready for the requested pins",
+          });
+        }
+      }
+    } catch (error) {
+      this.capacity.release(attempt);
+      const mapped = errorCategory(error);
+      return this.reject(submissionUri, mapped.category === "backend-unavailable"
+        ? "unsupported-requirement"
+        : mapped.category, { detail: mapped.detail });
+    }
     const selectedProvisioner = this.config.provisioner({
       sealedTaskBytes: taskBytes.slice(),
       dispatchContextBytes,
@@ -1093,7 +1130,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     }
 
     try {
-      const launcher = this.selectLauncher(view);
+      const launcher = selectedLauncher;
       const plan = launcher.plan(view, this.paths(attempt), identity);
       const spawn: SpawnRequest = {
         argv: plan.argv,
@@ -1639,18 +1676,13 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     const harness = requestedInventoryValue(
       (view.effectiveRequirements as Record<string, unknown>).harness,
     );
-    const launcher = harness === undefined
-      ? this.config.launchers.find((candidate) =>
-          candidate.capabilities().taskProfiles.includes(view.profile.profile))
-      : this.config.launchers.find((candidate) => candidate.id === harness);
-    if (launcher === undefined) {
+    try {
+      return selectProfileSafeLauncher(this.config.launchers, view.profile.profile, harness);
+    } catch (error) {
       throw new TaskExecutionError("unsupported-requirement", {
-        detail: harness === undefined
-          ? `no launcher supports profile "${view.profile.profile}"`
-          : `no registered launcher has id "${harness}"`,
+        detail: error instanceof Error ? error.message : "no launcher supports the resolved profile",
       });
     }
-    return launcher;
   }
 
   private persistAccepted(stored: StoredSubmission, attempt: AttemptMeta): void {

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { ContentCorruptionError, materializeInput } from "./materialize.js";
 import { makeDirProvisioner } from "./dir-provisioner.js";
 import { ProvisioningRejectedError } from "./dir-provisioner.js";
+import { executionEnv } from "./dir-provisioner.js";
 import type { TaskView, WorkspacePaths } from "./index.js";
 
 const view = { task: { inputs: [] }, profile: { profile: "https://jinn.network/task-profiles/repository-work/1.0" } } as unknown as TaskView;
@@ -70,5 +71,24 @@ describe("directory provisioner", () => {
     await chmod(join(target.input, "task.sealed"), 0o600);
     await writeFile(join(target.input, "task.sealed"), "mutated");
     expect((await provisioner.harvest(target, [])).integrityViolations).toContainEqual({ path: "task.sealed", reason: "input-mutated" });
+  });
+
+  it("forwards only declared path and pin environment keys", () => {
+    expect(executionEnv({
+      cwd: "/attempt/work",
+      env: {
+        JINN_ATTEMPT_INPUT: "/attempt/input",
+        JINN_ATTEMPT_UNDECLARED: "must-not-cross",
+        JINN_HARNESS_PIN_VERSION: "1.2.3",
+        JINN_LOADOUT_DIR: "/attempt/input/loadout",
+        OPENROUTER_API_KEY: "secrets/key",
+        LEAKED_TOKEN: "ambient-token",
+      },
+    })).toEqual({
+      JINN_ATTEMPT_INPUT: "/attempt/input",
+      JINN_HARNESS_PIN_VERSION: "1.2.3",
+      JINN_LOADOUT_DIR: "/attempt/input/loadout",
+      OPENROUTER_API_KEY: "secrets/key",
+    });
   });
 });

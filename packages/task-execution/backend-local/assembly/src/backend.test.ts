@@ -95,6 +95,7 @@ function fixture(
     launcher?: LauncherContract;
     secretForwardResolver?: LocalTaskExecutionBackendConfig["secretForwardResolver"];
     capabilityGrants?: LocalTaskExecutionBackendConfig["capabilityGrants"];
+    launcherDeployments?: LocalTaskExecutionBackendConfig["launcherDeployments"];
   } = {},
 ): LocalTaskExecutionBackend {
   const provisioner: ProvisionerContract = {
@@ -165,6 +166,9 @@ function fixture(
     ...(options.capabilityGrants === undefined
       ? {}
       : { capabilityGrants: options.capabilityGrants }),
+    ...(options.launcherDeployments === undefined
+      ? {}
+      : { launcherDeployments: options.launcherDeployments }),
     faults: { afterDeliveryCheckpoint: options.afterDeliveryCheckpoint },
   });
   backends.push(backend);
@@ -286,6 +290,63 @@ describe("result-envelope admission", () => {
 });
 
 describe("local TaskExecutionBackend submission path (C1)", () => {
+  test("uses the exact same deployment probe for enforced capability, preflight, and submit", async () => {
+    const probe = vi.fn(async () => ({
+      ready: true,
+      executable: { path: "/opt/jinn/fixture", digest: "a".repeat(64) },
+      models: ["fixture-model"],
+    }));
+    const backend = fixture(await stateRoot("deployment-pinning"), {
+      launcherDeployments: {
+        fixture: {
+          executable: { path: "/opt/jinn/fixture", digest: "a".repeat(64) },
+          probe,
+        },
+      },
+    });
+    expect((await backend.capabilities()).runPinning.keys).toContainEqual({
+      key: "harness", inventory: ["fixture"], posture: "enforced",
+    });
+    await expect(backend.preflight({ taskProfile: profile.profile })).resolves.toEqual({ ready: true });
+    const task = taskBytes();
+    await expect(backend.submit(task, submissionBytes(task))).resolves.toMatchObject({ accepted: true });
+    expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  test("rejects a swapped executable before setup or spawn", async () => {
+    const setup = vi.fn(async () => undefined);
+    const launcher: LauncherContract = {
+      id: "fixture",
+      capabilities: () => ({
+        taskProfiles: [profile.profile], inputMediaTypes: [], outputMediaTypes: [], structuredOutput: false,
+        resume: false, interruptionBehaviorDefault: "repeatable", secretForwards: [],
+        runPinning: { keys: [{ key: "harness", inventory: ["fixture"], posture: "enforced" }] },
+      }),
+      plan() { throw new Error("must not plan"); },
+    };
+    const root = await stateRoot("swapped-executable");
+    const backend = makeLocalTaskExecutionBackend({
+      stateRoot: root, source: "urn:test", executor: "urn:test", profileStore, launchers: [launcher],
+      provisioner: () => ({ id: "fixture", contract: {
+        workspaceKind: () => "dir", setup, executionEnv: (value) => ({ ...value.env }),
+        async harvest() { return { manifest: [], omissions: [], integrityViolations: [] }; },
+      } }),
+      provisionerCapabilities: { taskProfiles: [profile.profile], workspaceKinds: ["dir"], inputMediaTypes: [], outputMediaTypes: [], isolation: [] },
+      launcherDeployments: {
+        fixture: {
+          executable: { path: "/opt/jinn/fixture", digest: "a".repeat(64) },
+          async probe() { return { ready: true, executable: { path: "/tmp/swapped", digest: "a".repeat(64) } }; },
+        },
+      },
+    });
+    backends.push(backend);
+    const task = taskBytes();
+    await expect(backend.submit(task, submissionBytes(task))).resolves.toMatchObject({
+      accepted: false, error: { category: "unsupported-requirement", detail: "executable identity mismatch" },
+    });
+    expect(setup).not.toHaveBeenCalled();
+  });
+
   test("preflight scopes resolver-ready launchers and does not probe unavailable secret launchers", async () => {
     const secretProbe = vi.fn(async () => ({ ready: true }));
     const plainProbe = vi.fn(async () => ({ ready: true }));
@@ -326,7 +387,7 @@ describe("local TaskExecutionBackend submission path (C1)", () => {
 
     expect((await backend.capabilities()).taskProfiles).toEqual([profile.profile]);
     expect((await backend.capabilities()).runPinning.keys).toContainEqual({
-      key: "harness", inventory: ["plain"], posture: "enforced",
+      key: "harness", inventory: ["plain"], posture: "attested",
     });
     await expect(backend.preflight({ requirements: { harness: { id: "secret" } } }))
       .resolves.toMatchObject({ ready: false, error: { category: "backend-unavailable" } });

@@ -30,6 +30,8 @@ export interface AssembleCapabilitiesInput {
   readonly secretForwardResolverConfigured?: boolean;
   /** Linux custody support is dynamic; absent retains the non-Linux residual path. */
   readonly custody?: { readonly ready: boolean };
+  /** Only deployment-configured launchers may advertise direct pin enforcement. */
+  readonly enforcedLauncherIds?: ReadonlySet<string>;
 }
 
 function sortedUnique(values: Iterable<string>): string[] {
@@ -52,12 +54,14 @@ export function assembleCapabilities(
     input.provisioner.taskProfiles.filter((profile) => launcherProfiles.has(profile)),
   );
 
-  const inventoryByKey = new Map<string, string[]>();
+  const inventoryByKey = new Map<string, { inventory: string[]; enforced: boolean }>();
   for (const launcher of viableLaunchers) {
     for (const support of launcher.capabilities().runPinning.keys) {
-      const inventory = inventoryByKey.get(support.key) ?? [];
-      inventory.push(...support.inventory);
-      inventoryByKey.set(support.key, inventory);
+      const entry = inventoryByKey.get(support.key) ?? { inventory: [], enforced: true };
+      entry.inventory.push(...support.inventory);
+      entry.enforced &&= input.enforcedLauncherIds === undefined
+        || input.enforcedLauncherIds.has(launcher.id);
+      inventoryByKey.set(support.key, entry);
     }
   }
 
@@ -85,10 +89,10 @@ export function assembleCapabilities(
     runPinning: {
       keys: [...inventoryByKey]
         .sort(([left], [right]) => compareCodeUnitStrings(left, right))
-        .map(([key, inventory]) => ({
+        .map(([key, entry]) => ({
           key,
-          inventory: sortedUnique(inventory),
-          posture: "enforced",
+          inventory: sortedUnique(entry.inventory),
+          posture: entry.enforced ? "enforced" : "attested",
         })),
     },
   };
