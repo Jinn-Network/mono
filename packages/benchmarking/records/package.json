@@ -38,6 +38,7 @@
     "test": "vitest run",
     "generate:schemas": "yarn build && node scripts/generate-schemas.mjs --write",
     "check:schemas": "yarn build && node scripts/generate-schemas.mjs --check",
+    "check:schema-parity": "yarn build && node scripts/schema-parity.mjs",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
   },
@@ -51,6 +52,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "ajv": "8.17.1",
     "canonicalize": "^2.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"

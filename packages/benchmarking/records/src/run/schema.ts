@@ -8,6 +8,7 @@ import type { JsonValue } from "../json.js";
 import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
 import { isCalendarStrictRfc3339 } from "../rfc3339.js";
 import { ArmIdSchema, ReplicateSchema } from "./cells.js";
+import { exactDecimalInUnitInterval } from "../decimal.js";
 
 const Rfc3339 = z.string().refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp");
 
@@ -78,8 +79,7 @@ export const RunRecordSchema = topLevelRecordSchema({
     closeAt: Rfc3339,
   })
   .superRefine((run, ctx) => {
-    const floor = Number(run.policy.completenessFloor);
-    if (!(floor > 0 && floor <= 1)) {
+    if (!exactDecimalInUnitInterval(run.policy.completenessFloor)) {
       ctx.addIssue({
         code: "custom",
         message: "policy.completenessFloor must be in (0,1] (§7.1)",
@@ -97,6 +97,15 @@ export const RunRecordSchema = topLevelRecordSchema({
 
     const seenByBytes = new Map<string, number>();
     run.arms.forEach((arm, index) => {
+      for (const key of Object.keys(arm.pinning)) {
+        if (Object.hasOwn(run.policy.submissionBaseline, key)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `arms[${index}].pinning.${key} collides with policy.submissionBaseline.${key} (§7.79)`,
+            path: ["arms", index, "pinning", key],
+          });
+        }
+      }
       const bytes = pinningBytes(arm.pinning);
       const firstIndex = seenByBytes.get(bytes);
       if (firstIndex !== undefined) {

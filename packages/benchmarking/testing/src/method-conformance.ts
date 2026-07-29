@@ -289,7 +289,7 @@ function normalizeFixtureMatrix(matrix: MutableFixtureMatrix, matrixIndex: numbe
   matrix.completeness.judged = matrix.cells.filter((cell) => cell.outcome === "judged").length;
   if (matrix.completeness.runOutcome !== "cancelled") {
     const denominator = matrix.cells.filter((cell) => cell.outcome !== "excluded").length;
-    const ratio = denominator === 0 ? 1 : matrix.completeness.judged / denominator;
+    const ratio = denominator === 0 ? 0 : matrix.completeness.judged / denominator;
     matrix.completeness.runOutcome = ratio >= Number(matrix.completeness.floor) ? "complete" : "partial";
   }
 }
@@ -443,6 +443,7 @@ function prepareFixture(fixture: MethodFixture): PreparedMethodFixture {
         },
       },
       outputs: [{ name: "result", mediaType: "application/json", required: true }],
+      evaluation: { digest: { sha256: "e".repeat(64) } },
     });
     const exactDigest = documentDigest(task);
     taskBytes.set(exactDigest, task);

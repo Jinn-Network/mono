@@ -13,6 +13,7 @@ import {
   TaskDigestHexSchema,
   cellKey as computeCellKey,
 } from "../run/cells.js";
+import { exactDecimalInUnitInterval, meetsExactDecimalFloor } from "../decimal.js";
 
 const Rfc3339 = z.string().refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp");
 
@@ -410,8 +411,7 @@ export const MatrixRecordSchema = topLevelRecordSchema({
         path: ["completeness", "judged"],
       });
     }
-    const floor = Number(matrix.completeness.floor);
-    if (!(floor > 0 && floor <= 1)) {
+    if (!exactDecimalInUnitInterval(matrix.completeness.floor)) {
       ctx.addIssue({
         code: "custom",
         message: "completeness.floor must be in (0,1] (§8.1)",
@@ -419,7 +419,7 @@ export const MatrixRecordSchema = topLevelRecordSchema({
       });
     } else {
       const denominator = matrix.cells.length - excludedKeys.length;
-      const floorPassed = (denominator === 0 ? 1 : judged / denominator) >= floor;
+      const floorPassed = meetsExactDecimalFloor(judged, denominator, matrix.completeness.floor);
       if (matrix.completeness.runOutcome === "complete" && !floorPassed) {
         ctx.addIssue({
           code: "custom",

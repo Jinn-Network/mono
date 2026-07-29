@@ -41,6 +41,7 @@ export { clusteredVariance, mcnemarExact, pairedMcnemar } from "./stats/paired-m
 export type { ClusteredVariance, DiscordantPair, PairedMcnemarResult } from "./stats/paired-mcnemar.js";
 export {
   nonInferiorityIut,
+  MAX_NONINFERIORITY_RESAMPLES_V1,
   nonInferiorityVerdict,
   pairedCostVerdict,
   pairedRateDiffLowerBound,

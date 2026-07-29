@@ -24,6 +24,8 @@ export {
 
 // --- sealing primitives (order, hashing, canonicalization, I-JSON) ---
 export { compareCodeUnitStrings } from "./order.js";
+export { exactDecimalInUnitInterval, meetsExactDecimalFloor, parseExactDecimal, scaleDecimal } from "./decimal.js";
+export type { ExactDecimal } from "./decimal.js";
 export { documentDigest, sha256Hex } from "./hashing.js";
 export { serializeCanonicalJson } from "./canonical.js";
 export {
@@ -58,6 +60,7 @@ export {
   checkItemDistinctness,
   checkJudgeability,
   classifyVersionBump,
+  resolveBenchmarkTaskProvenance,
 } from "./benchmark/checks.js";
 export type {
   BenchmarkPredecessorCheck,
@@ -65,6 +68,7 @@ export type {
   JudgeabilityInvalidItem,
   JudgeabilityRevealContext,
   TaskBytesResolver,
+  BenchmarkTaskProvenance,
   VersionBump,
 } from "./benchmark/checks.js";
 export { checkRevealConsistency } from "./benchmark/reveal.js";

@@ -10,6 +10,7 @@ import {
   checkItemDistinctness,
   checkJudgeability,
   classifyVersionBump,
+  resolveBenchmarkTaskProvenance,
 } from "./checks.js";
 
 function loadRecord(name: string) {
@@ -160,6 +161,22 @@ describe("checkJudgeability", () => {
     expect(checkJudgeability(benchmarkWith([digest]), () => missingTimestamp)).toEqual({
       ok: false, invalid: [{ taskDigest: digest, reason: "invalid-provenance" }], unresolved: [],
     });
+  });
+
+  test("refuses a valid source accompanied by a malformed present sourceCommitment", () => {
+    const bytes = sealTask({
+      protocol: "https://jinn.network/profiles/task-execution/1.0", profile: { digest: { sha256: DIGEST_B } },
+      instructions: "do it", outputs: [], evaluation: { digest: { sha256: DIGEST_C } },
+      payload: { provenance: { source: "fixture", sourceCommitment: "not-a-digest", timestamp: "2026-07-29T00:00:00Z" } },
+    });
+    const digest = bareDigest(bytes);
+    expect(resolveBenchmarkTaskProvenance(digest, () => bytes)).toEqual({ ok: false, reason: "invalid-provenance" });
+  });
+
+  test("refuses canonical bytes that are not a Task document", () => {
+    const bytes = new TextEncoder().encode('{"payload":{"provenance":{"source":"x","timestamp":"2026-07-29T00:00:00Z"}}}');
+    const digest = bareDigest(bytes);
+    expect(resolveBenchmarkTaskProvenance(digest, () => bytes)).toEqual({ ok: false, reason: "invalid-task" });
   });
 
   test("rejects exact real-profile sealed Task bytes carrying an impossible civil provenance date", () => {

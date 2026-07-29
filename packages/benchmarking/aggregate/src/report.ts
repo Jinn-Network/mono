@@ -67,7 +67,10 @@ function parseExactMatrix(bytes: Uint8Array): ExactMatrixSubject {
  * Derives lossless one-to-one Report disclosures from exact canonical subject bytes. No counts,
  * floors, arm IDs, run outcomes, or flags are merged across subjects.
  */
-export function deriveDisclosures(subjectBytes: readonly Uint8Array[]): Disclosures {
+export function deriveDisclosures(
+  subjectBytes: readonly Uint8Array[],
+  resolveRunBytes: (digest: string) => Uint8Array | undefined,
+): Disclosures {
   return {
     perSubject: subjectBytes.map((bytes) => {
       const subject = parseExactMatrix(bytes);
@@ -78,10 +81,15 @@ export function deriveDisclosures(subjectBytes: readonly Uint8Array[]): Disclosu
         pinningAxes.map((axis) => [axis, { match: 0, mismatch: 0, unverifiable: 0 }]),
       ) as Disclosures["perSubject"][number]["pinning"];
       let independence = 0;
+      const run = resolveRun(`sha256:${matrix.run.digest.sha256}`, { resolveRunBytes });
       for (const cell of matrix.cells) {
         integrityTiers[cell.integrityTier] += 1;
         for (const axis of pinningAxes) pinning[axis][cell.verification[axis]] += 1;
-        if (cell.verification.checksFailed.includes("evaluator-independence")) independence += 1;
+        if (
+          cell.outcome === "judged"
+          && run.policy.independence === "disclosed"
+          && cell.verification.checksFailed.includes("evaluator-independence")
+        ) independence += 1;
       }
       return {
         subjectSha256: stripSha256Prefix(subject.digest),
@@ -302,7 +310,7 @@ export async function produceReport(
     throw new Error(`produceReport: benchmark-comparability: ${comparability.detail}`);
   }
 
-  const derivedDisclosures = deriveDisclosures(input.subjects);
+  const derivedDisclosures = deriveDisclosures(input.subjects, input.resolveRunBytes);
   if (input.disclosures !== undefined && !exactJsonEqual(input.disclosures, derivedDisclosures)) {
     throw new Error("produceReport: disclosures must be derived faithfully from exact subject bytes");
   }
@@ -515,7 +523,9 @@ export async function verifyReport(
       detail: `sealed preregistered=${String(record.preregistered)} but exact resolved Runs derive ${preregistered}`,
     };
   }
-  const recomputedDisclosures = deriveDisclosures(input.subjects);
+  let recomputedDisclosures: Disclosures;
+  try { recomputedDisclosures = deriveDisclosures(input.subjects, ports.resolveRunBytes); }
+  catch (cause) { return { ok: false, check: "disclosures-faithfulness", detail: String(cause) }; }
   if (!exactJsonEqual(recomputedDisclosures, record.disclosures)) {
     return {
       ok: false,

@@ -22,6 +22,55 @@ export function checkItemDistinctness(
 
 export type TaskBytesResolver = (taskDigest: string) => Uint8Array | undefined;
 
+/** Exact canonical Task/provenance admission, shared by judgeability and aggregate consumers. */
+export type BenchmarkTaskProvenance = {
+  readonly timestamp: string;
+  readonly cluster: { readonly tag: "source" | "sourceCommitment"; readonly value: string };
+};
+
+function hasOwn(object: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+export function resolveBenchmarkTaskProvenance(
+  taskDigest: string,
+  resolver: TaskBytesResolver,
+): { ok: true; provenance: BenchmarkTaskProvenance } | { ok: false; reason: JudgeabilityReason | "unavailable" } {
+  const taskBytes = resolver(taskDigest);
+  if (taskBytes === undefined) return { ok: false, reason: "unavailable" };
+  if (sha256Hex(taskBytes) !== taskDigest.replace(/^sha256:/, "")) return { ok: false, reason: "digest-mismatch" };
+  let parsed: unknown;
+  try { parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(taskBytes)); }
+  catch { return { ok: false, reason: "invalid-task" }; }
+  const task = TaskSpecificationSchema.safeParse(parsed);
+  if (!task.success) return { ok: false, reason: "invalid-task" };
+  try {
+    const canonical = serializeCanonicalJson(task.data as JsonValue);
+    if (canonical.length !== taskBytes.length || canonical.some((byte, index) => byte !== taskBytes[index])) {
+      return { ok: false, reason: "invalid-task" };
+    }
+  } catch { return { ok: false, reason: "invalid-task" }; }
+  if (!LowercaseSha256HexSchema.safeParse(task.data.evaluation?.digest?.sha256).success) {
+    return { ok: false, reason: "missing-evaluation-digest" };
+  }
+  const payload = task.data.payload;
+  const provenance = typeof payload === "object" && payload !== null && !Array.isArray(payload)
+    ? (payload as Record<string, unknown>)["provenance"] : undefined;
+  if (typeof provenance !== "object" || provenance === null || Array.isArray(provenance)) return { ok: false, reason: "invalid-provenance" };
+  const fields = provenance as Record<string, unknown>;
+  const sourcePresent = hasOwn(fields, "source");
+  const commitmentPresent = hasOwn(fields, "sourceCommitment");
+  if (sourcePresent === commitmentPresent || !isCalendarStrictRfc3339(fields["timestamp"])) return { ok: false, reason: "invalid-provenance" };
+  if (sourcePresent) {
+    return typeof fields["source"] === "string" && fields["source"].length > 0
+      ? { ok: true, provenance: { timestamp: fields["timestamp"] as string, cluster: { tag: "source", value: fields["source"] } } }
+      : { ok: false, reason: "invalid-provenance" };
+  }
+  return typeof fields["sourceCommitment"] === "string" && /^sha256:[a-f0-9]{64}$/.test(fields["sourceCommitment"])
+    ? { ok: true, provenance: { timestamp: fields["timestamp"] as string, cluster: { tag: "sourceCommitment", value: fields["sourceCommitment"] } } }
+    : { ok: false, reason: "invalid-provenance" };
+}
+
 /** Trusted, caller-supplied facts needed to distinguish genuinely pre-reveal material. */
 export type JudgeabilityRevealContext =
   | { readonly kind: "scheduled"; readonly trustedAtTime: string }
@@ -34,40 +83,8 @@ export interface JudgeabilityInvalidItem {
 }
 
 function inspectTask(taskDigest: string, taskBytes: Uint8Array): JudgeabilityReason | undefined {
-  if (sha256Hex(taskBytes) !== taskDigest) return "digest-mismatch";
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(taskBytes));
-  } catch {
-    return "invalid-task";
-  }
-  const task = TaskSpecificationSchema.safeParse(parsed);
-  if (!task.success) return "invalid-task";
-  try {
-    const sealedBytes = serializeCanonicalJson(task.data as JsonValue);
-    if (
-      sealedBytes.length !== taskBytes.length
-      || sealedBytes.some((byte, index) => byte !== taskBytes[index])
-    ) return "invalid-task";
-  } catch {
-    return "invalid-task";
-  }
-  const evaluationDigest = task.data.evaluation?.digest?.sha256;
-  if (!LowercaseSha256HexSchema.safeParse(evaluationDigest).success) return "missing-evaluation-digest";
-  const payload = task.data.payload;
-  const provenance = typeof payload === "object" && payload !== null && !Array.isArray(payload)
-    ? (payload as Record<string, unknown>)["provenance"]
-    : undefined;
-  if (typeof provenance !== "object" || provenance === null || Array.isArray(provenance)) return "invalid-provenance";
-  const fields = provenance as Record<string, unknown>;
-  const timestamp = fields["timestamp"];
-  const source = fields["source"];
-  const commitment = fields["sourceCommitment"];
-  const sourceOk = typeof source === "string" && source.length > 0;
-  const commitmentOk = typeof commitment === "string" && /^sha256:[a-f0-9]{64}$/.test(commitment);
-  const timestampOk = isCalendarStrictRfc3339(timestamp);
-  if (!timestampOk || sourceOk === commitmentOk) return "invalid-provenance";
-  return undefined;
+  const result = resolveBenchmarkTaskProvenance(taskDigest, (digest) => digest === taskDigest ? taskBytes : undefined);
+  return result.ok || result.reason === "unavailable" ? undefined : result.reason;
 }
 
 /**

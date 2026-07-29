@@ -190,7 +190,8 @@ function forbiddenImports(sourceRoot, forbiddenPackages, forbiddenRoots = []) {
 }
 
 function assertBoundary(sourceRoot, forbiddenPackages, forbiddenRoots = []) {
-  assert.deepEqual(forbiddenImports(sourceRoot, forbiddenPackages, forbiddenRoots), [],
+  const production = files(sourceRoot).filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
+  assert.deepEqual(forbiddenImportsInFiles(production, forbiddenPackages, forbiddenRoots), [],
     `${relative(root, sourceRoot)} crosses a benchmarking architecture boundary`);
 }
 
@@ -280,6 +281,30 @@ test('locale-sensitive API detection catches member calls, optional chaining, an
     ].join('\n'));
     assert.deepEqual(localeSensitiveUsesInFiles([join(source, 'clean.ts')]), []);
   } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('ambient-network detection catches direct and global API escapes', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-benchmarking-network-boundary-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'source.ts'), [
+      'fetch("https://example.test");',
+      'globalThis?.WebSocket;',
+      'global["EventSource"];',
+      '// XMLHttpRequest is forbidden, but this comment is inert.',
+    ].join('\n'));
+    assert.equal(ambientNetworkUsesInFiles(files(source)).length, 4);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('Benchmarking production source never uses ambient network APIs', () => {
+  for (const directory of benchmarkingDirectories) {
+    const source = join(packages, directory, 'src');
+    if (!existsSync(source)) continue;
+    const production = files(source).filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
+    assert.deepEqual(ambientNetworkUsesInFiles(production), [], `${directory} production source must receive I/O through injected ports`);
+  }
 });
 
 test('Benchmarking production source never orders or formats with the host locale', () => {

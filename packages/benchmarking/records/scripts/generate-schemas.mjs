@@ -15,6 +15,32 @@ function jsonBytes(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+const NAMESPACED = "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*://.+)$";
+const UNIT_DECIMAL = "^(?:0*1(?:\\.0+)?|0*0\\.(?:0*[1-9]\\d*))$";
+
+/** Draft 2020-12 cannot express Zod's refinements.  Preserve the open extension wire form,
+ * while making every representable top-level/floor constraint independently enforceable. */
+function postProcess(filename, schema) {
+  const known = Object.keys(schema.properties ?? {});
+  schema.propertyNames = { anyOf: [{ enum: known }, { pattern: NAMESPACED }] };
+  schema.$comment = "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants.";
+  if (filename === "run.schema.json") {
+    schema.properties.policy.properties.completenessFloor.pattern = UNIT_DECIMAL;
+    schema.properties.policy.properties.completenessFloor.$comment = "Runtime check: exact BigInt completeness comparison.";
+    schema.properties.closeAt.format = "date-time";
+  }
+  if (filename === "matrix.schema.json") {
+    schema.properties.completeness.properties.floor.pattern = UNIT_DECIMAL;
+    schema.properties.completeness.properties.floor.$comment = "Runtime check: exact BigInt completeness comparison and outcome derivation.";
+    schema.properties.attrition.properties.perArm.propertyNames = { anyOf: [{ pattern: "^[A-Za-z][A-Za-z0-9._-]{0,63}$" }] };
+    schema.properties.closeBoundary.properties.at.format = "date-time";
+  }
+  if (filename === "benchmark.schema.json" && schema.properties.reveal?.properties?.notBefore !== undefined) {
+    schema.properties.reveal.properties.notBefore.format = "date-time";
+  }
+  return schema;
+}
+
 const { BenchmarkRecordSchema } = await import("../dist/benchmark/schema.js");
 const { RunRecordSchema } = await import("../dist/run/schema.js");
 const { MatrixRecordSchema } = await import("../dist/matrix/schema.js");
@@ -29,7 +55,7 @@ const FAMILIES = [
 
 const assets = new Map();
 for (const [filename, schema] of FAMILIES) {
-  assets.set(filename, jsonBytes(z.toJSONSchema(schema, { target: "draft-2020-12" })));
+  assets.set(filename, jsonBytes(postProcess(filename, z.toJSONSchema(schema, { target: "draft-2020-12" }))));
 }
 
 const drift = [];

@@ -13,6 +13,15 @@ export interface TaskRates {
   pB: number;
 }
 
+/** Versioned resource bound; validate before allocating a bootstrap result array. */
+export const MAX_NONINFERIORITY_RESAMPLES_V1 = 100_000;
+
+function assertResamples(resamples: number, name: string): void {
+  if (!Number.isInteger(resamples) || resamples <= 0 || resamples > MAX_NONINFERIORITY_RESAMPLES_V1) {
+    throw new Error(`${name}: resamples must be a positive integer <= ${MAX_NONINFERIORITY_RESAMPLES_V1}`);
+  }
+}
+
 export interface RateCiOptions {
   seed: number;
   alpha?: number;
@@ -70,9 +79,7 @@ export function pairedRateDiffBca(
   if (!(alpha > 0 && alpha < 1)) {
     throw new Error("pairedRateDiffBca: alpha must be in (0,1)");
   }
-  if (!Number.isInteger(resamples) || resamples <= 0) {
-    throw new Error("pairedRateDiffBca: resamples must be a positive integer");
-  }
+  assertResamples(resamples, "pairedRateDiffBca");
   const n = rates.length;
   if (n === 0) throw new Error("pairedRateDiffBca: empty sample");
   const deltas = rates.map((r) => r.pB - r.pA);
@@ -144,7 +151,7 @@ export function clusteredPairedRateDiffBca(
   const alpha = opts.alpha ?? 0.05;
   const resamples = opts.resamples ?? 10_000;
   if (!(alpha > 0 && alpha < 1)) throw new Error("clusteredPairedRateDiffBca: alpha must be in (0,1)");
-  if (!Number.isInteger(resamples) || resamples <= 0) throw new Error("clusteredPairedRateDiffBca: resamples must be a positive integer");
+  assertResamples(resamples, "clusteredPairedRateDiffBca");
   const compare = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
   const ordered = [...rates].sort((left, right) => compare(left.taskDigest, right.taskDigest));
   const groups = new Map<string, { key: ["source" | "sourceCommitment", string]; members: ClusteredTaskRate[] }>();
@@ -259,18 +266,19 @@ export interface CostVerdictResult {
 /** One-sided Wilcoxon signed-rank test that the median paired cost difference is < 0 (candidate
  * cheaper), using a normal approximation with a continuity correction. */
 export function pairedCostVerdict(
-  costDiffs: readonly number[],
+  costDiffs: readonly (number | bigint)[],
   opts: { minN?: number; alpha?: number } = {},
 ): CostVerdictResult {
   const minN = opts.minN ?? 10;
   const alpha = opts.alpha ?? 0.05;
-  const nonzero = costDiffs.filter((d) => d !== 0);
+  const zero = typeof costDiffs[0] === "bigint" ? 0n : 0;
+  const nonzero = costDiffs.filter((d) => d !== zero);
   if (nonzero.length < minN) return { verdict: "inconclusive", pValue: null, n: nonzero.length };
 
-  const ranks = rankAbs(nonzero.map(Math.abs));
+  const ranks = rankAbs(nonzero.map((value) => typeof value === "bigint" ? (value < 0n ? -value : value) : Math.abs(value)));
   let wPlus = 0;
   nonzero.forEach((d, i) => {
-    if (d >= 0) wPlus += ranks[i]!;
+    if (typeof d === "bigint" ? d >= 0n : d >= 0) wPlus += ranks[i]!;
   });
   const n = nonzero.length;
   const meanW = (n * (n + 1)) / 4;
@@ -280,13 +288,15 @@ export function pairedCostVerdict(
   return { verdict: pValue < alpha ? "lower" : "not-lower", pValue, n };
 }
 
-function rankAbs(absVals: readonly number[]): number[] {
-  const idx = absVals.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+function rankAbs(absVals: readonly (number | bigint)[]): number[] {
+  const compare = (a: number | bigint, b: number | bigint): number =>
+    typeof a === "bigint" && typeof b === "bigint" ? (a < b ? -1 : a > b ? 1 : 0) : Number(a) - Number(b);
+  const idx = absVals.map((v, i) => ({ v, i })).sort((a, b) => compare(a.v, b.v));
   const ranks = new Array<number>(absVals.length);
   let i = 0;
   while (i < idx.length) {
     let j = i;
-    while (j + 1 < idx.length && idx[j + 1]!.v === idx[i]!.v) j += 1;
+    while (j + 1 < idx.length && compare(idx[j + 1]!.v, idx[i]!.v) === 0) j += 1;
     const avg = (i + j + 2) / 2;
     for (let k = i; k <= j; k += 1) ranks[idx[k]!.i] = avg;
     i = j + 1;

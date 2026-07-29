@@ -2,6 +2,7 @@ import {
   compareCalendarStrictRfc3339Instants,
   isCalendarStrictRfc3339,
   parseRun,
+  resolveBenchmarkTaskProvenance as resolveRecordTaskProvenance,
   sealRun,
   type MatrixRecord,
   type RunRecord,
@@ -32,7 +33,8 @@ export type MethodInputErrorCode =
   | "anchored-announcement-unavailable"
   | "anchored-announcement-unverified"
   | "anchored-announcement-malformed"
-  | "incompatible-run-replicates";
+  | "incompatible-run-replicates"
+  | "method-incompatible-cost-unit";
 
 /** Typed, stable fail-closed method-input failure. `digest` always names the exact requested
  * record reference whose bytes were unavailable, malformed, mismatched, or incompatible. */
@@ -270,43 +272,13 @@ export function resolveTaskProvenance(
   input: Pick<MethodComputeInput, "resolveTaskBytes">,
 ): ResolvedTaskProvenance {
   const digest = `sha256:${taskDigestHex}`;
-  const bytes = requireResolvedBytes(
-    digest,
-    input.resolveTaskBytes,
-    "task-record-unavailable",
-    "task-record-digest-mismatch",
-  );
-  const task = parseCanonicalJson(bytes, "task-record-malformed", digest);
-  const payload = task["payload"];
-  const provenance = isObject(payload) ? payload["provenance"] : undefined;
-  if (!isObject(provenance)) {
-    throw new MethodInputError("task-record-malformed", digest, "payload.provenance is required");
-  }
-  const source = provenance["source"];
-  const sourceCommitment = provenance["sourceCommitment"];
-  const hasSource = typeof source === "string" && source.length > 0;
-  const hasCommitment = typeof sourceCommitment === "string" && /^sha256:[a-f0-9]{64}$/.test(sourceCommitment);
-  if (hasSource === hasCommitment) {
-    throw new MethodInputError(
-      "task-provenance-source-missing",
-      digest,
-      "payload.provenance must carry exactly one non-empty source or lowercase sha256 sourceCommitment",
-    );
-  }
-  const timestamp = provenance["timestamp"];
-  if (!isCalendarStrictRfc3339(timestamp)) {
-    throw new MethodInputError(
-      "task-provenance-timestamp-missing",
-      digest,
-      "payload.provenance.timestamp must be RFC 3339",
-    );
-  }
-  return {
-    timestamp,
-    cluster: hasSource
-      ? { tag: "source", value: source as string }
-      : { tag: "sourceCommitment", value: sourceCommitment as string },
-  };
+  const resolved = resolveRecordTaskProvenance(digest, input.resolveTaskBytes);
+  if (resolved.ok) return resolved.provenance;
+  const code = resolved.reason === "unavailable" ? "task-record-unavailable"
+    : resolved.reason === "digest-mismatch" ? "task-record-digest-mismatch"
+      : resolved.reason === "invalid-provenance" ? "task-provenance-source-missing"
+        : "task-record-malformed";
+  throw new MethodInputError(code, digest, `records Task admission refused: ${resolved.reason}`);
 }
 
 export function resolveAnchoredAnnouncementTime(

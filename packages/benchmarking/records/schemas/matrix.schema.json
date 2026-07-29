@@ -73,7 +73,8 @@
       "type": "object",
       "properties": {
         "at": {
-          "type": "string"
+          "type": "string",
+          "format": "date-time"
         },
         "anchor": {
           "type": "object",
@@ -323,8 +324,11 @@
         "perArm": {
           "type": "object",
           "propertyNames": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+              }
+            ]
           },
           "additionalProperties": {
             "type": "object",
@@ -412,7 +416,8 @@
         },
         "floor": {
           "type": "string",
-          "pattern": "^\\d+(\\.\\d+)?$"
+          "pattern": "^(?:0*1(?:\\.0+)?|0*0\\.(?:0*[1-9]\\d*))$",
+          "$comment": "Runtime check: exact BigInt completeness comparison and outcome derivation."
         },
         "runOutcome": {
           "type": "string",
@@ -458,5 +463,25 @@
     "completeness",
     "assembly"
   ],
-  "additionalProperties": {}
+  "additionalProperties": {},
+  "propertyNames": {
+    "anyOf": [
+      {
+        "enum": [
+          "protocol",
+          "run",
+          "closeBoundary",
+          "cells",
+          "exclusions",
+          "attrition",
+          "completeness",
+          "assembly"
+        ]
+      },
+      {
+        "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*://.+)$"
+      }
+    ]
+  },
+  "$comment": "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants."
 }

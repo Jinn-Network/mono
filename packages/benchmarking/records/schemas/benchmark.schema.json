@@ -169,7 +169,8 @@
           ]
         },
         "notBefore": {
-          "type": "string"
+          "type": "string",
+          "format": "date-time"
         }
       },
       "required": [
@@ -192,5 +193,27 @@
     "items",
     "reveal"
   ],
-  "additionalProperties": {}
+  "additionalProperties": {},
+  "propertyNames": {
+    "anyOf": [
+      {
+        "enum": [
+          "protocol",
+          "name",
+          "description",
+          "author",
+          "version",
+          "supersedes",
+          "items",
+          "reveal",
+          "license",
+          "citation"
+        ]
+      },
+      {
+        "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*://.+)$"
+      }
+    ]
+  },
+  "$comment": "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants."
 }

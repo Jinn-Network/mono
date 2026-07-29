@@ -94,7 +94,7 @@ function rederiveConvenienceViews(matrix: MutableMatrix): void {
   matrix.completeness.expected = matrix.cells.length;
   matrix.completeness.judged = matrix.cells.filter((cell) => cell.outcome === "judged").length;
   const denominator = matrix.cells.filter((cell) => cell.outcome !== "excluded").length;
-  const completeness = denominator === 0 ? 1 : matrix.completeness.judged / denominator;
+  const completeness = denominator === 0 ? 0 : matrix.completeness.judged / denominator;
   matrix.completeness.runOutcome = completeness >= Number(matrix.completeness.floor) ? "complete" : "partial";
 }
 
@@ -339,8 +339,10 @@ describe("MatrixRecordSchema / parseMatrix / sealMatrix", () => {
 
   test("requires exclusions to be one-to-one with excluded cells and carry a non-empty policy reason", () => {
     const value = validMatrix();
-    value.cells[0]!.outcome = "excluded";
-    value.cells[0]!.validVerdicts = [];
+    for (const cell of value.cells) {
+      cell.outcome = "excluded";
+      cell.validVerdicts = [];
+    }
     rederiveConvenienceViews(value);
     expect(() => sealMatrix(value)).not.toThrow();
 
@@ -397,6 +399,17 @@ describe("MatrixRecordSchema / parseMatrix / sealMatrix", () => {
     const value = validMatrix();
     mutate(value);
     expect(() => sealMatrix(value)).toThrow(InvalidDocumentError);
+  });
+
+  test("never permits complete for an all-excluded zero-denominator Matrix", () => {
+    const value = validMatrix();
+    value.cells[0]!.outcome = "excluded";
+    value.cells[0]!.validVerdicts = [];
+    rederiveConvenienceViews(value);
+    value.completeness.runOutcome = "complete";
+    expect(() => sealMatrix(value)).toThrow(InvalidDocumentError);
+    value.completeness.runOutcome = "partial";
+    expect(() => sealMatrix(value)).not.toThrow();
   });
 
   test.each([

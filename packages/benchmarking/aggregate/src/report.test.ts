@@ -6,6 +6,7 @@ import {
   sealReport,
   sealRun,
 } from "@jinn-network/benchmarking-records";
+import { sealTask } from "@jinn-network/task-execution-protocol";
 import {
   canonicalJsonBytes,
   dssePreAuthEncoding,
@@ -188,14 +189,11 @@ function crossVersionPairedFixture(sharedTask: boolean): Fixture {
   };
 
   for (let index = 0; index < 2; index += 1) {
-    const taskBytes = canonicalJsonBytes({
-      payload: {
-        provenance: {
-          source: "fixture/shared-repository",
-          timestamp: "2026-07-29T00:00:00Z",
-          ...(sharedTask ? {} : { revision: index }),
-        },
-      },
+    const taskBytes = sealTask({
+      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      profile: { digest: { sha256: "a".repeat(64) } }, instructions: sharedTask ? "shared" : `revision-${index}`,
+      outputs: [], evaluation: { digest: { sha256: "d".repeat(64) } },
+      payload: { provenance: { source: "fixture/shared-repository", timestamp: "2026-07-29T00:00:00Z" } },
     });
     const taskDigest = recordDigest(taskBytes);
     taskMap.set(taskDigest, taskBytes);
@@ -447,7 +445,7 @@ test("verifyReport rejects an impossible civil effective-time context before tru
 describe("deriveDisclosures", () => {
   test("is lossless, one-to-one, digest-bound, and subject-ordered", () => {
     const fixture = makeFixture({ subjectCount: 2 });
-    const disclosures = deriveDisclosures(fixture.subjectBytes);
+    const disclosures = deriveDisclosures(fixture.subjectBytes, fixture.ports.resolveRunBytes);
     expect(disclosures.perSubject).toHaveLength(2);
     expect(disclosures.perSubject.map((entry) => entry.subjectSha256)).toEqual(
       fixture.subjectBytes.map((bytes) => recordDigest(bytes).slice("sha256:".length)),

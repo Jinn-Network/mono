@@ -7,6 +7,7 @@ import {
   pairedRateDiffLowerBound,
   xorshift32,
   clusteredPairedRateDiffBca,
+  MAX_NONINFERIORITY_RESAMPLES_V1,
 } from "./noninferiority.js";
 
 describe("xorshift32-v1", () => {
@@ -24,6 +25,15 @@ describe("xorshift32-v1", () => {
   test.each([0, -1, 1.5, 4_294_967_296])("rejects invalid seed %s", (seed) => {
     expect(() => xorshift32(seed)).toThrow(/nonzero unsigned 32-bit/);
   });
+});
+
+test("resampling helpers reject max-plus-one before work and retain the v1 maximum", () => {
+  expect(MAX_NONINFERIORITY_RESAMPLES_V1).toBe(100_000);
+  expect(() => pairedRateDiffBca([{ pA: 0, pB: 1 }], { seed: 1, resamples: 100_001 })).toThrow(/100000/);
+});
+
+test("Wilcoxon ranking preserves bigint magnitudes and exact ties", () => {
+  expect(pairedCostVerdict(Array.from({ length: 10 }, () => -9_007_199_254_740_993n))).toEqual({ verdict: "lower", pValue: expect.any(Number), n: 10 });
 });
 
 describe("pairedRateDiffLowerBound", () => {

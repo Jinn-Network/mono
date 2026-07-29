@@ -11,7 +11,8 @@ imports the run orchestrator or a concrete execution backend.
 
 Consumers create the real registry with `createMethodRegistry()` and run
 `describeMethodRegistryConformance(registry)` from `@jinn-network/benchmarking-testing` in their
-Vitest suite. This package runs that driver itself in `src/method-conformance.test.ts`.
+Vitest suite. The checked-in consumer entrypoint is
+`packages/benchmarking/testing/src/aggregate-conformance.test.ts`.
 
 ## Reports
 

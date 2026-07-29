@@ -3,6 +3,9 @@ import {
   BENCHMARKING_METHOD_VERSION,
   compareCodeUnitStrings,
   isCalendarStrictRfc3339,
+  parseExactDecimal,
+  meetsExactDecimalFloor,
+  scaleDecimal,
   sealMatrix,
   type MatrixRecord,
 } from "@jinn-network/benchmarking-records";
@@ -17,7 +20,7 @@ import {
   resolveTaskProvenance,
   resolveVerdictOutcome,
 } from "./resolved-inputs.js";
-import { clusteredPairedRateDiffBca, nonInferiorityIut, nonInferiorityVerdict, pairedCostVerdict, type NonInferiorityOptions } from "./stats/noninferiority.js";
+import { clusteredPairedRateDiffBca, MAX_NONINFERIORITY_RESAMPLES_V1, nonInferiorityIut, nonInferiorityVerdict, pairedCostVerdict, type NonInferiorityOptions } from "./stats/noninferiority.js";
 import { pairedMcnemar } from "./stats/paired-mcnemar.js";
 import { avgAtOne, passAtK } from "./stats/pass-at-k.js";
 import { wilsonInterval } from "./stats/wilson.js";
@@ -185,7 +188,7 @@ const METHOD_METADATA = {
   }),
   noninferiorityIut: metadata({
     requiredInputs: ["matrix.cells", "matrix.cost", "referenced-verdicts", "exact-task-bytes", "task-provenance-source-family"],
-    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate", "seed", "resamples"], properties: { verdictRule: VERDICT_RULE_PROPERTY, baseline: { type: "string" }, candidate: { type: "string" }, seed: { type: "integer", minimum: 1, maximum: 4_294_967_295 }, resamples: { type: "integer", minimum: 1 } }, additionalProperties: false },
+    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate", "seed", "resamples"], properties: { verdictRule: VERDICT_RULE_PROPERTY, baseline: { type: "string" }, candidate: { type: "string" }, seed: { type: "integer", minimum: 1, maximum: 4_294_967_295 }, resamples: { type: "integer", minimum: 1, maximum: MAX_NONINFERIORITY_RESAMPLES_V1 } }, additionalProperties: false },
     outputShape: "BCa quality lower bound AND one-sided paired-cost Wilcoxon + exclusions + conflicted cells",
     exclusionRule: "paired both-arm judged cells; cost only both-solve pairs; report remainder",
     clusteringRule: "task-provenance-source",
@@ -557,7 +560,7 @@ function restrictMatrixToTasks(matrix: MatrixRecord, keptTaskDigests: ReadonlySe
   }
   const judged = cells.filter((cell) => cell.outcome === "judged").length;
   const denominator = cells.length - exclusions.length;
-  const floorPassed = (denominator === 0 ? 1 : judged / denominator) >= Number(matrix.completeness.floor);
+  const floorPassed = meetsExactDecimalFloor(judged, denominator, matrix.completeness.floor);
   return {
     ...matrix,
     cells,
@@ -705,6 +708,9 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
     const candidate = requireStringParam(input.parameters, "candidate");
     const seed = requireIntegerParam(input.parameters, "seed");
     const resamples = requireIntegerParam(input.parameters, "resamples");
+    if (resamples <= 0 || resamples > MAX_NONINFERIORITY_RESAMPLES_V1) {
+      throw new MethodInputError("method-incompatible-cost-unit", "resamples", `resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
+    }
 
     type RelevantCell = {
       readonly cellKey: string;
@@ -769,8 +775,9 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
     }
     qualityExcludedCellKeys.sort(compareCodeUnitStrings);
 
-    const costDiffs: number[] = [];
+    const costDiffs: bigint[] = [];
     const costIncludedCellKeys = new Set<string>();
+    let costUnit: string | undefined;
     for (const cells of byTask.values()) {
       const coordinates = new Map<number, RelevantCell[]>();
       for (const cell of cells) {
@@ -784,19 +791,23 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
         if (baselineCells.length !== 1 || candidateCells.length !== 1) continue;
         const a = baselineCells[0]!;
         const b = candidateCells[0]!;
-        if (
-          a.value !== "pass"
-          || b.value !== "pass"
-          || a.cost === undefined
-          || b.cost === undefined
-          || a.cost.unit !== b.cost.unit
-        ) {
+        if (a.value !== "pass" || b.value !== "pass" || a.cost === undefined || b.cost === undefined) {
           continue;
         }
-        const aCost = Number(a.cost.value);
-        const bCost = Number(b.cost.value);
-        if (!Number.isFinite(aCost) || !Number.isFinite(bCost)) continue;
-        costDiffs.push(bCost - aCost);
+        if (a.cost.unit !== b.cost.unit) {
+          throw new MethodInputError("method-incompatible-cost-unit", a.cellKey, "both-solve pair uses different cost units");
+        }
+        if (costUnit !== undefined && costUnit !== a.cost.unit) {
+          throw new MethodInputError("method-incompatible-cost-unit", a.cellKey, "included both-solve pairs must share one cost unit");
+        }
+        const aCost = parseExactDecimal(a.cost.value);
+        const bCost = parseExactDecimal(b.cost.value);
+        if (aCost === undefined || bCost === undefined) {
+          throw new MethodInputError("method-incompatible-cost-unit", a.cellKey, "cost value is not an exact decimal");
+        }
+        costUnit = a.cost.unit;
+        const scale = aCost.scale > bCost.scale ? aCost.scale : bCost.scale;
+        costDiffs.push(scaleDecimal(bCost, scale) - scaleDecimal(aCost, scale));
         costIncludedCellKeys.add(a.cellKey);
         costIncludedCellKeys.add(b.cellKey);
       }

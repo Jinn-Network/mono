@@ -12,7 +12,7 @@ function baseInput(overrides: Partial<MethodComputeInput> = {}): MethodComputeIn
     cells: [],
     exclusions: [],
     attrition: { perArm: {}, asymmetryFlags: [] },
-    completeness: { expected: 0, judged: 0, floor: "1", runOutcome: "complete" },
+    completeness: { expected: 0, judged: 0, floor: "1", runOutcome: "partial" },
     assembly: { procedure: "jinn.benchmarking.assembly", version: "1.0" },
   });
   return {

@@ -73,6 +73,21 @@ describe("RunRecordSchema / parseRun / sealRun", () => {
     expect(() => sealRun(value)).toThrow(InvalidDocumentError);
   });
 
+  test("keeps an arbitrarily tiny positive floor and rejects a value mathematically above one", () => {
+    const tiny = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
+    (tiny.policy as Record<string, unknown>).completenessFloor = `0.${"0".repeat(400)}1`;
+    expect(sealRun(tiny).bytes).toBeInstanceOf(Uint8Array);
+    (tiny.policy as Record<string, unknown>).completenessFloor = "1.0000000000000000000000000000000001";
+    expect(() => sealRun(tiny)).toThrow(InvalidDocumentError);
+  });
+
+  test("rejects every baseline/pinning key collision at the exact arm key", () => {
+    const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
+    (value.policy as Record<string, unknown>).submissionBaseline = { model: { id: "same" } };
+    ((value.arms as Array<Record<string, unknown>>)[0]!.pinning as Record<string, unknown>).model = { id: "same" };
+    expect(() => sealRun(value)).toThrow(InvalidDocumentError);
+  });
+
   test("rejects a non-decimal-string completenessFloor", () => {
     const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
     (value.policy as Record<string, unknown>).completenessFloor = 0.8;

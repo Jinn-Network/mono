@@ -122,7 +122,8 @@
       "properties": {
         "completenessFloor": {
           "type": "string",
-          "pattern": "^\\d+(\\.\\d+)?$"
+          "pattern": "^(?:0*1(?:\\.0+)?|0*0\\.(?:0*[1-9]\\d*))$",
+          "$comment": "Runtime check: exact BigInt completeness comparison."
         },
         "cellWindow": {
           "type": "integer",
@@ -274,7 +275,8 @@
       "additionalProperties": false
     },
     "closeAt": {
-      "type": "string"
+      "type": "string",
+      "format": "date-time"
     }
   },
   "required": [
@@ -286,5 +288,27 @@
     "policy",
     "closeAt"
   ],
-  "additionalProperties": {}
+  "additionalProperties": {},
+  "propertyNames": {
+    "anyOf": [
+      {
+        "enum": [
+          "protocol",
+          "benchmark",
+          "owner",
+          "arms",
+          "replicates",
+          "policy",
+          "analysisPlan",
+          "budget",
+          "venue",
+          "closeAt"
+        ]
+      },
+      {
+        "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*://.+)$"
+      }
+    ]
+  },
+  "$comment": "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants."
 }

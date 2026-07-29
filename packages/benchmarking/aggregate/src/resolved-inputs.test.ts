@@ -4,6 +4,7 @@ import {
   sealDsseEnvelope,
 } from "@jinn-network/trust-core";
 import { describe, expect, test } from "vitest";
+import { sealTask } from "@jinn-network/task-execution-protocol";
 import {
   MethodInputError,
   resolveAnchoredAnnouncementTime,
@@ -16,6 +17,14 @@ function envelope(payloadBytes: Uint8Array): Uint8Array {
     payloadBytes,
     payloadType: "application/vnd.in-toto+json",
     signatures: [{ keyid: "did:key:zFixture", signature: Uint8Array.of(1) }],
+  });
+}
+
+function task(provenance: Record<string, unknown>): Uint8Array {
+  return sealTask({
+    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    profile: { digest: { sha256: "b".repeat(64) } }, instructions: "fixture", outputs: [],
+    evaluation: { digest: { sha256: "c".repeat(64) } }, payload: { provenance },
   });
 }
 
@@ -104,14 +113,7 @@ describe("exact referenced Verdict bytes", () => {
 
 describe("exact Task provenance bytes", () => {
   test("binds digest and accepts valid supplementary provenance strings", () => {
-    const bytes = canonicalJsonBytes({
-      payload: {
-        provenance: {
-          source: "repository/\u{1f680}",
-          timestamp: "2026-07-29T00:00:00Z",
-        },
-      },
-    });
+    const bytes = task({ source: "repository/\u{1f680}", timestamp: "2026-07-29T00:00:00Z" });
     const digest = recordDigest(bytes);
     expect(resolveTaskProvenance(digest.slice("sha256:".length), {
       resolveTaskBytes: () => bytes,
@@ -133,31 +135,24 @@ describe("exact Task provenance bytes", () => {
 
   test("uses a tagged plaintext-or-commitment source-family key and rejects ambiguous provenance", () => {
     const commitment = `sha256:${"c".repeat(64)}`;
-    const committed = canonicalJsonBytes({ payload: { provenance: { timestamp: "2026-07-29T00:00:00Z", sourceCommitment: commitment } } });
+    const committed = task({ timestamp: "2026-07-29T00:00:00Z", sourceCommitment: commitment });
     const digest = recordDigest(committed);
     expect(resolveTaskProvenance(digest.slice("sha256:".length), { resolveTaskBytes: () => committed }))
       .toEqual({ timestamp: "2026-07-29T00:00:00Z", cluster: { tag: "sourceCommitment", value: commitment } });
 
-    const ambiguous = canonicalJsonBytes({ payload: { provenance: { timestamp: "2026-07-29T00:00:00Z", source: "sha256:source", sourceCommitment: commitment } } });
+    const ambiguous = task({ timestamp: "2026-07-29T00:00:00Z", source: "sha256:source", sourceCommitment: commitment });
     const ambiguousDigest = recordDigest(ambiguous);
     expect(() => resolveTaskProvenance(ambiguousDigest.slice("sha256:".length), { resolveTaskBytes: () => ambiguous }))
       .toThrow(expect.objectContaining({ code: "task-provenance-source-missing" }));
   });
 
   test("rejects an impossible civil Task provenance timestamp", () => {
-    const bytes = canonicalJsonBytes({
-      payload: {
-        provenance: {
-          source: "fixture",
-          timestamp: "2026-02-30T00:00:00Z",
-        },
-      },
-    });
+    const bytes = task({ source: "fixture", timestamp: "2026-02-30T00:00:00Z" });
     const digest = recordDigest(bytes);
     expect(() => resolveTaskProvenance(digest.slice("sha256:".length), {
       resolveTaskBytes: () => bytes,
     })).toThrow(expect.objectContaining({
-      code: "task-provenance-timestamp-missing",
+      code: "task-provenance-source-missing",
       digest,
     }));
   });
