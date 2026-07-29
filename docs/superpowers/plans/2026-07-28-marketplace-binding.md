@@ -1087,3 +1087,26 @@ package gates, the live ephemeral/fork suite, TEP/evidence/trust/discovery consu
 guard trio, packed consumer, contract compile/targeted tests, workflow lint, raw-control scan, and
 a new independent whole-design review. M6 remains blocked on that GREEN verdict and the Phase 4
 backend-local assembly gate.
+
+## Addendum 2026-07-29-p — admission dominance and monotonic finalization
+
+The fifth fresh whole-component review at marketplace stream head
+`3d2794fac35ae61774e40d249ecbd911b591f9f4` is **RED** despite the complete M0–M5
+mechanical gate being green. Program rulings §7.116–§7.117 bind the repair:
+
+1. a rejected Task tombstone dominates every later task-scoped event in both today and revised
+   generations; claims, solution/verdict/refund/evaluation facts, and all reopening/closing facts
+   are refused as `task-not-admissible`, excluded from accepted events, and produce no protocol
+   or announcement effect; a raw Mech delivery may remain only as an unbound join fact; and
+2. verdict finalization, refund, and requester close persist explicit monotonic terminal Task
+   causes. Release/expiry may finish already-live Attempts but cannot reopen the Task, while
+   later claims/top-ups are refused and no reopening identity or `available` announcement is
+   emitted.
+
+The repair remains M0–M5 only and is test-first. It adds exact split-batch today/revised
+reject→claim/delivery/verdict/refund/evaluation/reopening vectors plus verdict→release,
+refund→expiry, and refund→top-up reducer/announcement vectors. It reruns the complete
+binding/projector/testing/pipeline package gates, live ephemeral/fork suite, evidence/TEP/trust/
+discovery consumers, marketplace guard trio and packed consumer, contract compile/targeted
+tests, workflow lint, raw-control scan, and a new independent whole-design review. M6 remains
+blocked on that GREEN verdict and the Phase 4 backend-local assembly gate.

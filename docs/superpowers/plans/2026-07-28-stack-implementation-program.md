@@ -1090,6 +1090,24 @@ Confirmed by the operator at the program gate (2026-07-28):
     ambient forms, is detected in production source. Comments and inert string literals do not
     count as executable findings. Positive canaries cover each access form and negative canaries
     cover comments/strings, so a comment cannot satisfy the scanner self-test.
+116. **A rejected marketplace Task tombstone dominates every later task-scoped fact in both
+    generations:** once Task material fails its exact admission join, the projector retains only
+    the permanent non-admissible tombstone. Every later claim, solution-delivery claim,
+    verdict/finalization, refund, evaluation, release, expiry, top-up, close, replay, or
+    split-batch fact for that Task is refused as `task-not-admissible`, excluded from the
+    accepted-event set, and produces no Attempt, Delivery, terminal, availability, publication,
+    archive, or signing effect. A raw Mech `Deliver` may remain only as an unbound join fact and
+    can never acquire downstream meaning through the rejected Task. Exact today- and
+    revised-mode reject-then-lifecycle vectors assert the complete state, refusals, accepted
+    events, observations, announcements, and zero side effects.
+117. **Marketplace verdict finalization and refund are monotonic terminal Task causes:** Task
+    state persists an explicit terminal cause for `finalized`, `refunded`, and
+    `requester-closed`; availability calculation treats all three as permanently closed.
+    Release or expiry may still terminalize an already-live Attempt after finalization/refund,
+    but cannot reopen the Task or emit a reopening identity/announcement. Later claims and
+    top-ups are refused, and replay or a batch boundary cannot erase the terminal cause. Exact
+    split-batch verdict→release, refund→expiry, and refund→top-up vectors assert persistent
+    state, full observations/refusals, and no new `available` announcement.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 
