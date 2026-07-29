@@ -53,7 +53,7 @@ export interface ExecutionWiringEntry {
   readonly model: string;
   readonly plugins: readonly string[];
   readonly credentialRef: string;
-  /** Effective backend isolation resolved for this wiring entry. */
+  /** Descriptive intended isolation; sealed requirements + backend preflight remain authoritative. */
   readonly isolationPolicy: string;
   readonly legacyManifestDigest?: string;
 }

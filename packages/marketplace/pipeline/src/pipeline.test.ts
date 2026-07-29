@@ -122,6 +122,36 @@ function createPreflightBackend(options?: {
   };
 }
 
+function createIsolationBackend(input: {
+  inventory?: readonly string[];
+  posture?: "enforced" | "attested";
+  isolation?: string[];
+  preflight?: TaskExecutionBackend["preflight"];
+} = {}): TaskExecutionBackend {
+  const isolationSupport = input.inventory === undefined
+    ? []
+    : [{
+        key: "isolationPolicy",
+        inventory: input.inventory,
+        posture: input.posture ?? "enforced",
+      } satisfies RunPinningKeySupport];
+  return createPreflightBackend({
+    runPinning: [...DEFAULT_RUN_PINNING, ...isolationSupport],
+    capabilities: {
+      isolation: input.isolation ?? [...(input.inventory ?? [])],
+    },
+    ...(input.preflight === undefined ? {} : { preflight: input.preflight }),
+  });
+}
+
+function claimTaskSpy() {
+  return vi.fn(async () => ({
+    attemptIndex: 3,
+    requestId: REQUEST_ID,
+    txHash: CLAIM_TX,
+  }));
+}
+
 function settlementPortsForDelivery(deliveryBytes: Uint8Array): PipelinePorts["settlement"] {
   const sha256Digest = `sha256:${sha256Hex(deliveryBytes)}` as const;
   const keccak = keccakEvidenceHash(deliveryBytes);
@@ -236,6 +266,156 @@ describe("runPipeline", () => {
     );
     expect(result).toEqual({ kind: "not-claimed", reason: "pinning-mismatch" });
     expect(claimTask).not.toHaveBeenCalled();
+  });
+
+  test("wiring isolation label cannot substitute for enforced backend support", async () => {
+    const claimTask = claimTaskSpy();
+    const result = await runPipeline(
+      {
+        facts: baseFacts({
+          requirements: { isolationPolicy: "workspace-snapshot" },
+          runPinning: { isolationPolicy: "workspace-snapshot" },
+        }),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      PIPELINE_CONFIG,
+      createIsolationBackend({
+        inventory: ["workspace-snapshot"],
+        posture: "attested",
+        isolation: ["workspace-snapshot"],
+      }),
+      makePorts({ claim: { ...makePorts().claim, claimTask } }),
+    );
+
+    expect(result).toEqual({ kind: "not-claimed", reason: "unsupported-requirement" });
+    expect(claimTask).not.toHaveBeenCalled();
+  });
+
+  test("does not claim when isolation capability support is absent", async () => {
+    const claimTask = claimTaskSpy();
+    const result = await runPipeline(
+      {
+        facts: baseFacts({
+          requirements: { isolationPolicy: "workspace-snapshot" },
+          runPinning: { isolationPolicy: "workspace-snapshot" },
+        }),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      PIPELINE_CONFIG,
+      createIsolationBackend({ isolation: ["workspace-snapshot"] }),
+      makePorts({ claim: { ...makePorts().claim, claimTask } }),
+    );
+
+    expect(result).toEqual({ kind: "not-claimed", reason: "unsupported-requirement" });
+    expect(claimTask).not.toHaveBeenCalled();
+  });
+
+  test("does not claim through unrestricted isolation inventory", async () => {
+    const claimTask = claimTaskSpy();
+    const result = await runPipeline(
+      {
+        facts: baseFacts({
+          requirements: { isolationPolicy: "workspace-snapshot" },
+          runPinning: { isolationPolicy: "workspace-snapshot" },
+        }),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      PIPELINE_CONFIG,
+      createIsolationBackend({
+        inventory: ["*"],
+        posture: "enforced",
+        isolation: ["unrestricted"],
+      }),
+      makePorts({ claim: { ...makePorts().claim, claimTask } }),
+    );
+
+    expect(result).toEqual({ kind: "not-claimed", reason: "unsupported-requirement" });
+    expect(claimTask).not.toHaveBeenCalled();
+  });
+
+  test("does not claim when sealed and discovery isolation policies mismatch", async () => {
+    const claimTask = claimTaskSpy();
+    const result = await runPipeline(
+      {
+        facts: baseFacts({
+          requirements: { isolationPolicy: "ephemeral-container" },
+          runPinning: { isolationPolicy: "workspace-snapshot" },
+        }),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      PIPELINE_CONFIG,
+      createIsolationBackend({
+        inventory: ["workspace-snapshot", "ephemeral-container"],
+        posture: "enforced",
+        isolation: ["workspace-snapshot", "ephemeral-container"],
+      }),
+      makePorts({ claim: { ...makePorts().claim, claimTask } }),
+    );
+
+    expect(result).toEqual({ kind: "not-claimed", reason: "unsupported-requirement" });
+    expect(claimTask).not.toHaveBeenCalled();
+  });
+
+  test("does not claim when discovery isolation is absent from sealed requirements", async () => {
+    const claimTask = claimTaskSpy();
+    const result = await runPipeline(
+      {
+        facts: baseFacts({
+          requirements: {},
+          runPinning: { isolationPolicy: "workspace-snapshot" },
+        }),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      PIPELINE_CONFIG,
+      createIsolationBackend({
+        inventory: ["workspace-snapshot"],
+        posture: "enforced",
+        isolation: ["workspace-snapshot"],
+      }),
+      makePorts({ claim: { ...makePorts().claim, claimTask } }),
+    );
+
+    expect(result).toEqual({ kind: "not-claimed", reason: "unsupported-requirement" });
+    expect(claimTask).not.toHaveBeenCalled();
+  });
+
+  test("claims only when sealed isolation has enforced capability and ready preflight", async () => {
+    const claimTask = vi.fn(async () => ({
+      attemptIndex: 3,
+      requestId: REQUEST_ID,
+      txHash: CLAIM_TX,
+    }));
+    const preflight = vi.fn(async (): Promise<PreflightReport> => ({ ready: true }));
+    const result = await runPipeline(
+      {
+        facts: baseFacts({
+          requirements: { isolationPolicy: "workspace-snapshot" },
+          runPinning: { isolationPolicy: "workspace-snapshot" },
+        }),
+        taskBytes: goldenTask(),
+        submissionBytes: goldenSubmission(goldenTask()),
+      },
+      PIPELINE_CONFIG,
+      createIsolationBackend({
+        inventory: ["workspace-snapshot"],
+        posture: "enforced",
+        isolation: ["workspace-snapshot"],
+        preflight,
+      }),
+      makePorts({ claim: { ...makePorts().claim, claimTask } }),
+    );
+
+    expect(result.kind).toBe("delivered");
+    expect(preflight).toHaveBeenCalledWith({
+      taskProfile: PROFILE_URI,
+      requirements: { isolationPolicy: "workspace-snapshot" },
+    });
+    expect(claimTask).toHaveBeenCalledOnce();
   });
 
   test("does not claim on profile-mismatch preclaim gate", async () => {

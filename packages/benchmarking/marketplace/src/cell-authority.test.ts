@@ -352,6 +352,53 @@ describe("selectAccountedAttempt", () => {
 });
 
 describe("authorizeCellFromProjection attempt selection", () => {
+  test("refused duplicate creation cannot shadow authoritative cell fields", async () => {
+    const sealed = buildSealedSubmission();
+    const base = enrichedEvents(`0x${sealed.digest.slice("sha256:".length)}`);
+    const valid = attemptEvent({
+      attemptIndex: 0,
+      requestId: `0x${"9".repeat(64)}` as Hex,
+      blockNumber: 99,
+    });
+    const refusedDuplicate = {
+      ...valid,
+      derivation: {
+        ...valid.derivation,
+        blockNumber: 100,
+        blockHash: `0x${"a".repeat(64)}` as Hex,
+        txHash: `0x${"b".repeat(64)}` as Hex,
+        logIndex: 8,
+      },
+      facts: {
+        ...valid.facts,
+        deliveryRate: 999n,
+        operator: "0x9999999999999999999999999999999999999999" as Address,
+      },
+    } as ObservationMarketplaceEvent;
+    const projection = projectionWithAttempts(base, [valid, refusedDuplicate]);
+
+    const cell = await authorizeCellFromProjection({
+      runDigest: RUN_DIGEST,
+      candidate: {
+        cellKey: CELL_KEY,
+        armId: "armA",
+        replicate: 1,
+        taskDigest: TASK_DIGEST,
+        dispatches: 1,
+      },
+      projection,
+      material: { sealedSubmissionBytes: () => sealed.bytes },
+    });
+
+    expect(cell?.attempt).toBe(deriveMarketplaceAttemptUri({
+      chainId: 84532,
+      coordinator: COORDINATOR,
+      taskId: 42n,
+      attemptIndex: 0,
+    }));
+    expect(cell?.submissionDigest).toBe(sealed.digest);
+  });
+
   test("selects later delivered attempt over earlier undelivered attempt", async () => {
     const sealed = buildSealedSubmission();
     const base = enrichedEvents(`0x${sealed.digest.slice("sha256:".length)}`);

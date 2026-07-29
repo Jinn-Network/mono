@@ -116,6 +116,7 @@ export function isEventAuthorityEligible(
 
 export interface AuthorityProjection {
   readonly observations: readonly MarketplaceProtocolObservation[];
+  /** Finality/orphan-eligible events accepted by the projector reducer, in canonical order. */
   readonly events: readonly ObservationMarketplaceEvent[];
   readonly state: MarketplaceProjectionState;
 }
@@ -124,7 +125,8 @@ export interface AuthorityProjection {
  * Private package authority projection (program §7.138). Host callbacks receive observations
  * only; eligible events and reducer state stay inside the package boundary.
  *
- * Eligibility is enforced before reduce — ineligible facts never mutate projector state.
+ * Eligibility is enforced before reduce, then the reducer's accepted transcript is frozen as
+ * authority — ineligible and reducer-refused facts never enter state or downstream indexes.
  */
 export function deriveAuthorityProjection(
   events: readonly ObservationMarketplaceEvent[],
@@ -147,7 +149,7 @@ export function deriveAuthorityProjection(
       finalizedThroughAnchor,
       orphaned,
     ),
-    events: eligibleEvents,
+    events: reduced.events,
     state: reduced.state,
   };
 }

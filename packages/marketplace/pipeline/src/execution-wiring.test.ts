@@ -42,7 +42,7 @@ describe("execution wiring", () => {
     expect(wiringHonorsPinning({ runPinning: { loadout: "lint" } }, WIRING)).toBe(false);
   });
 
-  test("fails closed when isolation is the only hostile pin mismatch", () => {
+  test("treats the wiring isolation label as descriptive rather than authority", () => {
     expect(wiringHonorsPinning({
       runPinning: {
         harness: WIRING.harness,
@@ -50,7 +50,7 @@ describe("execution wiring", () => {
         loadout: "tests",
         isolationPolicy: "ephemeral-container",
       },
-    }, WIRING)).toBe(false);
+    }, WIRING)).toBe(true);
     expect(wiringHonorsPinning({
       runPinning: { isolationPolicy: "workspace-snapshot" },
     }, WIRING)).toBe(true);
