@@ -1,0 +1,178 @@
+name: Benchmarking CI
+
+on:
+  pull_request:
+  push:
+    branches: [next]
+    paths:
+      - "packages/benchmarking/**"
+      - ".github/scripts/benchmarking-*.test.mjs"
+      - ".github/workflows/benchmarking-ci.yml"
+      - "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md"
+
+permissions:
+  contents: read
+
+env:
+  BENCHMARKING_ROOT: packages/benchmarking
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify package inventory and dependency graph
+        run: node --test .github/scripts/benchmarking-package-inventory.test.mjs
+      - name: Verify source boundaries and canaries
+        run: node --test .github/scripts/benchmarking-source-boundaries.test.mjs
+
+  records:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependency from source (task-execution-protocol, §7.8)
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+      - name: Verify Benchmarking Records
+        working-directory: packages/benchmarking/records
+        run: |
+          yarn install --immutable
+          yarn check:schemas
+          yarn check:schema-parity
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Benchmarking Records distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarking-records-dist
+          path: packages/benchmarking/records/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  aggregate:
+    needs: [records]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependencies from source (§7.8)
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+      - name: Verify Benchmarking Aggregate
+        working-directory: packages/benchmarking/aggregate
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Benchmarking Aggregate distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarking-aggregate-dist
+          path: packages/benchmarking/aggregate/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  testing:
+    needs: [records, aggregate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependencies from source (§7.8)
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
+      - name: Verify Benchmarking Testing (mandatory M1-M3 conformance)
+        working-directory: packages/benchmarking/testing
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Benchmarking Testing distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarking-testing-dist
+          path: packages/benchmarking/testing/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    needs: [architecture, records, testing, aggregate]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Benchmarking CI stage to succeed
+        env:
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
+          RECORDS_RESULT: ${{ needs.records.result }}
+          TESTING_RESULT: ${{ needs.testing.result }}
+          AGGREGATE_RESULT: ${{ needs.aggregate.result }}
+        run: |
+          for result in \
+            "$ARCHITECTURE_RESULT" \
+            "$RECORDS_RESULT" \
+            "$TESTING_RESULT" \
+            "$AGGREGATE_RESULT"; do
+            test "$result" = "success"
+          done
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore all package distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: benchmarking-*-dist
+          path: .benchmarking-dist
+      - name: Place package distributions
+        run: |
+          mkdir -p packages/benchmarking/records/dist
+          cp -R .benchmarking-dist/benchmarking-records-dist/. packages/benchmarking/records/dist/
+          mkdir -p packages/benchmarking/testing/dist
+          cp -R .benchmarking-dist/benchmarking-testing-dist/. packages/benchmarking/testing/dist/
+          mkdir -p packages/benchmarking/aggregate/dist
+          cp -R .benchmarking-dist/benchmarking-aggregate-dist/. packages/benchmarking/aggregate/dist/
+      - name: Build cross-tree portal dependencies from source (§7.8)
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+      - name: Compile packed public entrypoint consumers
+        run: node .github/scripts/benchmarking-packed-types.test.mjs

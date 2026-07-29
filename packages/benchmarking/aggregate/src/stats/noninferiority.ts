@@ -1,0 +1,466 @@
+/**
+ * `noninferiority-iut@1` (design §9.2): the capability-eval composite intersection-union gate.
+ * Ported from `client/src/eval/capability-stats.ts` (adoption, not invention — the design names
+ * this file as the seed, plan M3 Task 3.2). PASS requires BOTH legs to independently reject
+ * their null at `alpha`: quality is non-inferior (one-sided BCa bootstrap lower bound above
+ * `-deltaAbs`, AND the mean relative regression under `relativeCap`) AND cost is strictly lower
+ * (one-sided Wilcoxon signed-rank on both-solve pairs). Either leg reporting insufficient data
+ * makes the overall verdict INCONCLUSIVE unless the other leg has already decisively FAILed.
+ */
+
+export interface TaskRates {
+  pA: number;
+  pB: number;
+}
+
+/** Versioned resource bound; validate before allocating a bootstrap result array. */
+export const MAX_NONINFERIORITY_RESAMPLES_V1 = 100_000;
+
+function assertResamples(resamples: number, name: string): void {
+  if (!Number.isInteger(resamples) || resamples <= 0 || resamples > MAX_NONINFERIORITY_RESAMPLES_V1) {
+    throw new Error(`${name}: resamples must be a positive integer <= ${MAX_NONINFERIORITY_RESAMPLES_V1}`);
+  }
+}
+
+export interface RateCiOptions {
+  seed: number;
+  alpha?: number;
+  resamples?: number;
+}
+
+export interface PairedRateDiffBcaResult {
+  readonly observed: number;
+  readonly lowerBound: number;
+  readonly acceleration: number;
+  readonly biasCorrection: number;
+  readonly adjustedQuantile: number;
+  readonly adjustedIndex: number;
+  /** Exactly one xorshift32-v1 draw per task position in every resample. */
+  readonly draws: number;
+}
+
+export interface ClusteredTaskRate extends TaskRates {
+  readonly taskDigest: string;
+  readonly cluster: readonly ["source" | "sourceCommitment", string];
+}
+
+export interface ClusteredPairedRateDiffBcaResult extends PairedRateDiffBcaResult {
+  readonly unit: "source-cluster";
+  readonly clusters: readonly {
+    readonly key: readonly ["source" | "sourceCommitment", string];
+    readonly members: readonly string[];
+  }[];
+}
+
+/** Exact program §7.26 xorshift32-v1 stream. One call performs each transition with explicit
+ * uint32 truncation and returns one unsigned 32-bit draw. */
+export function xorshift32(seed: number): () => number {
+  if (!Number.isInteger(seed) || seed <= 0 || seed > 0xffff_ffff) {
+    throw new Error("xorshift32-v1 seed must be a nonzero unsigned 32-bit integer");
+  }
+  let state = seed >>> 0;
+  return () => {
+    state = (state ^ ((state << 13) >>> 0)) >>> 0;
+    state = (state ^ (state >>> 17)) >>> 0;
+    state = (state ^ ((state << 5) >>> 0)) >>> 0;
+    return state;
+  };
+}
+
+/** One-sided BCa replay details for mean(delta_i), delta_i = pB - pA. Bootstrap
+ * sampling uses exactly one xorshift32-v1 uint32 draw per sampled position. The jackknife
+ * acceleration pass is deterministic and consumes no PRNG draws. */
+export function pairedRateDiffBca(
+  rates: readonly TaskRates[],
+  opts: RateCiOptions,
+): PairedRateDiffBcaResult {
+  const alpha = opts.alpha ?? 0.05;
+  const resamples = opts.resamples ?? 10_000;
+  if (!(alpha > 0 && alpha < 1)) {
+    throw new Error("pairedRateDiffBca: alpha must be in (0,1)");
+  }
+  assertResamples(resamples, "pairedRateDiffBca");
+  const n = rates.length;
+  if (n === 0) throw new Error("pairedRateDiffBca: empty sample");
+  const deltas = rates.map((r) => r.pB - r.pA);
+  const mean = (xs: readonly number[]): number => xs.reduce((s, x) => s + x, 0) / xs.length;
+  const observed = mean(deltas);
+  const nextU32 = xorshift32(opts.seed);
+
+  const means: number[] = [];
+  let draws = 0;
+  for (let b = 0; b < resamples; b += 1) {
+    let s = 0;
+    for (let i = 0; i < n; i += 1) {
+      const index = Math.floor((nextU32() / 4_294_967_296) * n);
+      draws += 1;
+      s += deltas[index]!;
+    }
+    means.push(s / n);
+  }
+  means.sort((a, b) => a - b);
+
+  const below = means.filter((m) => m < observed).length;
+  const z0 = invNorm(Math.min(Math.max(below / resamples, 1e-6), 1 - 1e-6));
+  let acceleration = 0;
+  if (n > 1) {
+    const jackknife = deltas.map((_, omitted) => {
+      let sum = 0;
+      for (let index = 0; index < n; index += 1) {
+        if (index !== omitted) sum += deltas[index]!;
+      }
+      return sum / (n - 1);
+    });
+    const jackknifeMean = mean(jackknife);
+    const numerator = jackknife.reduce(
+      (sum, estimate) => sum + Math.pow(jackknifeMean - estimate, 3),
+      0,
+    );
+    const sumSquares = jackknife.reduce(
+      (sum, estimate) => sum + Math.pow(jackknifeMean - estimate, 2),
+      0,
+    );
+    const denominator = 6 * Math.pow(sumSquares, 1.5);
+    acceleration = denominator === 0 ? 0 : numerator / denominator;
+  }
+  const zAlpha = invNorm(alpha);
+  const zCombined = z0 + zAlpha;
+  const denominator = 1 - acceleration * zCombined;
+  const adjustedZ = denominator === 0
+    ? (zCombined < 0 ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY)
+    : z0 + zCombined / denominator;
+  const adj = normCdf(adjustedZ);
+  const idx = Math.min(resamples - 1, Math.max(0, Math.floor(adj * resamples)));
+  return {
+    observed,
+    lowerBound: means[idx]!,
+    acceleration,
+    biasCorrection: z0,
+    adjustedQuantile: adj,
+    adjustedIndex: idx,
+    draws,
+  };
+}
+
+/** §7.47 deterministic whole-source-cluster BCa bootstrap. Cluster/member ordering is explicit
+ * UTF-16 code-unit ordering; every draw selects a whole cluster and never draws within it. */
+export function clusteredPairedRateDiffBca(
+  rates: readonly ClusteredTaskRate[],
+  opts: RateCiOptions,
+): ClusteredPairedRateDiffBcaResult {
+  const alpha = opts.alpha ?? 0.05;
+  const resamples = opts.resamples ?? 10_000;
+  if (!(alpha > 0 && alpha < 1)) throw new Error("clusteredPairedRateDiffBca: alpha must be in (0,1)");
+  assertResamples(resamples, "clusteredPairedRateDiffBca");
+  const compare = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
+  const ordered = [...rates].sort((left, right) => compare(left.taskDigest, right.taskDigest));
+  const groups = new Map<string, { key: ["source" | "sourceCommitment", string]; members: ClusteredTaskRate[] }>();
+  for (const rate of ordered) {
+    const key = JSON.stringify(rate.cluster);
+    const group = groups.get(key);
+    if (group !== undefined) group.members.push(rate);
+    else groups.set(key, { key: [rate.cluster[0], rate.cluster[1]], members: [rate] });
+  }
+  const clusters = [...groups.values()].sort((left, right) => {
+    const tag = compare(left.key[0], right.key[0]);
+    return tag === 0 ? compare(left.key[1], right.key[1]) : tag;
+  });
+  if (clusters.length < 2) throw new Error("clusteredPairedRateDiffBca: at least two source clusters are required");
+  const delta = (rate: TaskRates): number => rate.pB - rate.pA;
+  const mean = (members: readonly ClusteredTaskRate[]): number => members.reduce((sum, rate) => sum + delta(rate), 0) / members.length;
+  const observed = mean(ordered);
+  const next = xorshift32(opts.seed);
+  const means: number[] = [];
+  let draws = 0;
+  for (let replicate = 0; replicate < resamples; replicate += 1) {
+    const sample: ClusteredTaskRate[] = [];
+    for (let position = 0; position < clusters.length; position += 1) {
+      const index = Math.floor((next() / 4_294_967_296) * clusters.length);
+      draws += 1;
+      sample.push(...clusters[index]!.members);
+    }
+    means.push(mean(sample));
+  }
+  means.sort((left, right) => left - right);
+  const below = means.filter((value) => value < observed).length;
+  const biasCorrection = invNorm(Math.min(Math.max(below / resamples, 1e-6), 1 - 1e-6));
+  const jackknife = clusters.map((_cluster, omitted) => mean(clusters.filter((_, index) => index !== omitted).flatMap((cluster) => cluster.members)));
+  const jackknifeMean = jackknife.reduce((sum, value) => sum + value, 0) / jackknife.length;
+  const numerator = jackknife.reduce((sum, value) => sum + Math.pow(jackknifeMean - value, 3), 0);
+  const sumSquares = jackknife.reduce((sum, value) => sum + Math.pow(jackknifeMean - value, 2), 0);
+  const acceleration = sumSquares === 0 ? 0 : numerator / (6 * Math.pow(sumSquares, 1.5));
+  const zCombined = biasCorrection + invNorm(alpha);
+  const denominator = 1 - acceleration * zCombined;
+  const adjustedZ = denominator === 0
+    ? (zCombined < 0 ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY)
+    : biasCorrection + zCombined / denominator;
+  const adjustedQuantile = normCdf(adjustedZ);
+  const adjustedIndex = Math.min(resamples - 1, Math.max(0, Math.floor(adjustedQuantile * resamples)));
+  return {
+    observed, lowerBound: means[adjustedIndex]!, acceleration, biasCorrection, adjustedQuantile,
+    adjustedIndex, draws, unit: "source-cluster",
+    clusters: clusters.map((cluster) => ({ key: cluster.key, members: cluster.members.map((member) => member.taskDigest) })),
+  };
+}
+
+/** One-sided BCa lower confidence bound. */
+export function pairedRateDiffLowerBound(rates: readonly TaskRates[], opts: RateCiOptions): number {
+  return pairedRateDiffBca(rates, opts).lowerBound;
+}
+
+export interface NonInferiorityOptions extends RateCiOptions {
+  deltaAbs?: number;
+  relativeCap?: number;
+  stockBaseRate?: number;
+  /** Below this many paired tasks, the quality leg is inconclusive rather than a weak PASS/FAIL
+   * (design §9.3 spirit: a method never manufactures confidence from too little data). */
+  minN?: number;
+  /** A method-specific deterministic bootstrap lower bound (source-cluster bootstrap in §7.47). */
+  lowerBound?: number;
+}
+
+export type QualityVerdict = "pass" | "fail" | "inconclusive";
+
+export interface NonInferiorityResult {
+  readonly verdict: QualityVerdict;
+  readonly lowerBound: number | null;
+  readonly deltaAbs: number;
+  readonly relativeRegression: number | null;
+  readonly reasons: readonly string[];
+}
+
+export function nonInferiorityVerdict(rates: readonly TaskRates[], opts: NonInferiorityOptions): NonInferiorityResult {
+  const minN = opts.minN ?? 5;
+  if (rates.length < minN) {
+    return {
+      verdict: "inconclusive",
+      lowerBound: null,
+      deltaAbs: opts.deltaAbs ?? 0.05,
+      relativeRegression: null,
+      reasons: [`fewer than minN=${minN} paired tasks (got ${rates.length})`],
+    };
+  }
+  const deltaAbs = opts.deltaAbs ?? 0.05;
+  const relativeCap = opts.relativeCap ?? 0.15;
+  const lowerBound = opts.lowerBound ?? pairedRateDiffLowerBound(rates, opts);
+  const meanA = rates.reduce((s, r) => s + r.pA, 0) / rates.length;
+  const meanB = rates.reduce((s, r) => s + r.pB, 0) / rates.length;
+  const absRegression = Math.max(0, meanA - meanB);
+  const stockBaseRate = opts.stockBaseRate ?? meanA;
+  const relativeRegression = stockBaseRate > 0 ? absRegression / stockBaseRate : 0;
+
+  const reasons: string[] = [];
+  const absOk = lowerBound > -deltaAbs;
+  if (!absOk) reasons.push(`absolute NI failed: lower bound ${lowerBound.toFixed(3)} <= -delta (${-deltaAbs})`);
+  const relOk = relativeRegression <= relativeCap;
+  if (!relOk) reasons.push(`relative guard failed: regression ${(relativeRegression * 100).toFixed(1)}% > cap ${(relativeCap * 100).toFixed(0)}%`);
+  return { verdict: absOk && relOk ? "pass" : "fail", lowerBound, deltaAbs, relativeRegression, reasons };
+}
+
+export interface CostVerdictResult {
+  readonly verdict: "lower" | "not-lower" | "inconclusive";
+  readonly pValue: number | null;
+  readonly n: number;
+  /** Present when callers supplied exact decimal coefficient/scale differences. */
+  readonly scale?: bigint;
+  /** Parallel to differences when any exact Task difference has a non-unit divisor. */
+  readonly divisors?: readonly bigint[];
+  /** Included nonzero differences rescaled to `scale`, in pair order. */
+  readonly differences?: readonly bigint[];
+}
+
+/** A signed decimal difference held exactly until the complete comparison fixes its scale. */
+export interface ExactCostDifference {
+  readonly coefficient: bigint;
+  readonly scale: bigint;
+  /** Positive denominator of coefficient / (divisor × 10^scale). */
+  readonly divisor?: bigint;
+}
+
+/** One-sided Wilcoxon signed-rank test that the median paired cost difference is < 0 (candidate
+ * cheaper), using a normal approximation with a continuity correction. */
+export function pairedCostVerdict(
+  costDiffs: readonly (number | bigint | ExactCostDifference)[],
+  opts: { minN?: number; alpha?: number } = {},
+): CostVerdictResult {
+  const minN = opts.minN ?? 10;
+  const alpha = opts.alpha ?? 0.05;
+  const exact = costDiffs.length > 0 && typeof costDiffs[0] === "object";
+  const replay = exact ? normalizeCostDifferences(costDiffs as readonly ExactCostDifference[]) : undefined;
+  if (replay !== undefined) return pairedExactCostVerdict(replay, opts);
+  const normalized: readonly (number | bigint)[] = costDiffs as readonly (number | bigint)[];
+  const zero = typeof normalized[0] === "bigint" ? 0n : 0;
+  const nonzero = normalized.filter((difference) => difference !== zero);
+  if (nonzero.length < minN) {
+    return {
+      verdict: "inconclusive",
+      pValue: null,
+      n: nonzero.length,
+    };
+  }
+
+  const ranks = rankAbs(nonzero.map((value) => typeof value === "bigint" ? (value < 0n ? -value : value) : Math.abs(value)));
+  let wPlus = 0;
+  nonzero.forEach((d, i) => {
+    if (typeof d === "bigint" ? d >= 0n : d >= 0) wPlus += ranks[i]!;
+  });
+  const n = nonzero.length;
+  const meanW = (n * (n + 1)) / 4;
+  const sdW = Math.sqrt((n * (n + 1) * (2 * n + 1)) / 24);
+  const z = (wPlus - meanW + 0.5) / sdW;
+  const pValue = normCdf(z);
+  return {
+    verdict: pValue < alpha ? "lower" : "not-lower",
+    pValue,
+    n,
+  };
+}
+
+function normalizeCostDifferences(differences: readonly ExactCostDifference[]): {
+  readonly scale: bigint;
+  readonly differences: readonly bigint[];
+  readonly divisors: readonly bigint[];
+} {
+  const scale = differences.reduce((maximum, difference) => {
+    if (difference.scale < 0n) throw new Error("cost difference scale must be nonnegative");
+    return difference.scale > maximum ? difference.scale : maximum;
+  }, 0n);
+  const normalized = differences.map((difference) => {
+    let coefficient = difference.coefficient * (10n ** (scale - difference.scale));
+    let divisor = difference.divisor ?? 1n;
+    if (divisor <= 0n) throw new Error("cost difference divisor must be positive");
+    const common = gcd(coefficient, divisor);
+    coefficient /= common;
+    divisor /= common;
+    return { coefficient, divisor };
+  });
+  return {
+    scale,
+    differences: normalized.map((difference) => difference.coefficient),
+    divisors: normalized.map((difference) => difference.divisor),
+  };
+}
+
+function gcd(left: bigint, right: bigint): bigint {
+  let a = left < 0n ? -left : left;
+  let b = right < 0n ? -right : right;
+  while (b !== 0n) [a, b] = [b, a % b];
+  return a;
+}
+
+function pairedExactCostVerdict(
+  replay: { readonly scale: bigint; readonly differences: readonly bigint[]; readonly divisors: readonly bigint[] },
+  opts: { minN?: number; alpha?: number },
+): CostVerdictResult {
+  const minN = opts.minN ?? 10;
+  const alpha = opts.alpha ?? 0.05;
+  const nonzero = replay.differences
+    .map((difference, index) => ({ difference, divisor: replay.divisors[index]! }))
+    .filter(({ difference }) => difference !== 0n);
+  const publicReplay = {
+    scale: replay.scale,
+    differences: nonzero.map(({ difference }) => difference),
+    ...(replay.divisors.some((divisor) => divisor > 1n) ? { divisors: nonzero.map(({ divisor }) => divisor) } : {}),
+  };
+  if (nonzero.length < minN) {
+    return { verdict: "inconclusive", pValue: null, n: nonzero.length, ...publicReplay };
+  }
+  const ranks = rankExactAbs(nonzero);
+  let wPlus = 0;
+  nonzero.forEach(({ difference }, index) => {
+    if (difference >= 0n) wPlus += ranks[index]!;
+  });
+  const n = nonzero.length;
+  const meanW = (n * (n + 1)) / 4;
+  const sdW = Math.sqrt((n * (n + 1) * (2 * n + 1)) / 24);
+  const pValue = normCdf((wPlus - meanW + 0.5) / sdW);
+  return { verdict: pValue < alpha ? "lower" : "not-lower", pValue, n, ...publicReplay };
+}
+
+function rankExactAbs(values: readonly { readonly difference: bigint; readonly divisor: bigint }[]): number[] {
+  const abs = (value: bigint) => value < 0n ? -value : value;
+  const indices = values.map((value, index) => ({ ...value, index })).sort((left, right) => {
+    const leftCross = abs(left.difference) * right.divisor;
+    const rightCross = abs(right.difference) * left.divisor;
+    return leftCross < rightCross ? -1 : leftCross > rightCross ? 1 : 0;
+  });
+  const ranks = new Array<number>(values.length);
+  let start = 0;
+  while (start < indices.length) {
+    let end = start;
+    while (
+      end + 1 < indices.length
+      && abs(indices[end]!.difference) * indices[end + 1]!.divisor
+        === abs(indices[end + 1]!.difference) * indices[end]!.divisor
+    ) end += 1;
+    const rank = (start + end + 2) / 2;
+    for (let index = start; index <= end; index += 1) ranks[indices[index]!.index] = rank;
+    start = end + 1;
+  }
+  return ranks;
+}
+
+function rankAbs(absVals: readonly (number | bigint)[]): number[] {
+  const compare = (a: number | bigint, b: number | bigint): number =>
+    typeof a === "bigint" && typeof b === "bigint" ? (a < b ? -1 : a > b ? 1 : 0) : Number(a) - Number(b);
+  const idx = absVals.map((v, i) => ({ v, i })).sort((a, b) => compare(a.v, b.v));
+  const ranks = new Array<number>(absVals.length);
+  let i = 0;
+  while (i < idx.length) {
+    let j = i;
+    while (j + 1 < idx.length && compare(idx[j + 1]!.v, idx[i]!.v) === 0) j += 1;
+    const avg = (i + j + 2) / 2;
+    for (let k = i; k <= j; k += 1) ranks[idx[k]!.i] = avg;
+    i = j + 1;
+  }
+  return ranks;
+}
+
+export type NonInferiorityIutVerdict = "PASS" | "FAIL" | "INCONCLUSIVE";
+
+export interface NonInferiorityIutResult {
+  readonly verdict: NonInferiorityIutVerdict;
+  readonly quality: NonInferiorityResult;
+  readonly cost: CostVerdictResult;
+}
+
+/** The intersection-union composition (design §9.2): PASS only if both legs independently
+ * reject their null; a decisive FAIL on either leg dominates an inconclusive other leg. */
+export function nonInferiorityIut(quality: NonInferiorityResult, cost: CostVerdictResult): NonInferiorityIutVerdict {
+  if (quality.verdict === "fail" || cost.verdict === "not-lower") return "FAIL";
+  if (quality.verdict === "inconclusive" || cost.verdict === "inconclusive") return "INCONCLUSIVE";
+  return "PASS";
+}
+
+// --- normal helpers (kept local, ported from the seed) ---
+function normCdf(x: number): number {
+  return 0.5 * (1 + erf(x / Math.SQRT2));
+}
+function erf(x: number): number {
+  const t = 1 / (1 + 0.3275911 * Math.abs(x));
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  return x >= 0 ? y : -y;
+}
+function invNorm(p: number): number {
+  // Beasley-Springer/Moro; adequate for CI index selection.
+  const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2, 1.383577518672690e2, -3.066479806614716e1, 2.506628277459239e0];
+  const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2, 6.680131188771972e1, -1.328068155288572e1];
+  const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0, -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0];
+  const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0, 3.754408661907416e0];
+  const pl = 0.02425;
+  let q: number, r: number;
+  if (p < pl) {
+    q = Math.sqrt(-2 * Math.log(p));
+    return (((((c[0]! * q + c[1]!) * q + c[2]!) * q + c[3]!) * q + c[4]!) * q + c[5]!)
+      / ((((d[0]! * q + d[1]!) * q + d[2]!) * q + d[3]!) * q + 1);
+  }
+  if (p > 1 - pl) {
+    q = Math.sqrt(-2 * Math.log(1 - p));
+    return -(((((c[0]! * q + c[1]!) * q + c[2]!) * q + c[3]!) * q + c[4]!) * q + c[5]!)
+      / ((((d[0]! * q + d[1]!) * q + d[2]!) * q + d[3]!) * q + 1);
+  }
+  q = p - 0.5;
+  r = q * q;
+  return (((((a[0]! * r + a[1]!) * r + a[2]!) * r + a[3]!) * r + a[4]!) * r + a[5]!) * q
+    / (((((b[0]! * r + b[1]!) * r + b[2]!) * r + b[3]!) * r + b[4]!) * r + 1);
+}

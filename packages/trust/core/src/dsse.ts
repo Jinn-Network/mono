@@ -80,6 +80,10 @@ function decodeBase64Strict(value: string): Uint8Array | undefined {
   }
 }
 
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  return left.length === right.length && left.every((byte, index) => byte === right[index]);
+}
+
 export interface DsseEnvelopeSignature {
   readonly keyid?: string;
   readonly sig: string;
@@ -122,6 +126,11 @@ export interface SealDsseEnvelopeInput {
 export function sealDsseEnvelope(input: SealDsseEnvelopeInput): Uint8Array {
   if (input.signatures.length === 0) {
     invalidInput("A DSSE envelope requires at least one signature.");
+  }
+  for (const [index, signature] of input.signatures.entries()) {
+    if (signature.signature.length === 0) {
+      invalidInput(`DSSE envelope signature ${index} must contain non-empty bytes.`);
+    }
   }
   const envelope: DsseEnvelope = {
     payloadType: input.payloadType ?? DSSE_PAYLOAD_TYPE,
@@ -188,6 +197,78 @@ export function parseDsseEnvelope(bytes: Uint8Array): ParsedDsseEnvelope {
     payloadBytes,
     signatures,
   };
+}
+
+/**
+ * Parses only the exact byte encoding emitted by `sealDsseEnvelope`.
+ *
+ * This authority-bearing boundary is intentionally stricter than structural
+ * `parseDsseEnvelope`: the envelope and signature member shapes are closed, every base64 value
+ * is decoded, and the decoded values are reconstructed through the sole producer before exact
+ * byte comparison. That rejects alternate JSON/base64 spellings without changing the signed
+ * DSSE PAE semantics.
+ */
+export function parseExactDsseEnvelope(bytes: Uint8Array): ParsedDsseEnvelope {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch (cause) {
+    invalidInput("DSSE envelope bytes are not valid UTF-8 JSON.", cause);
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    invalidInput("DSSE envelope must be a JSON object.");
+  }
+  const envelope = raw as Record<string, unknown>;
+  if (
+    Object.keys(envelope).length !== 3
+    || !Object.hasOwn(envelope, "payload")
+    || !Object.hasOwn(envelope, "payloadType")
+    || !Object.hasOwn(envelope, "signatures")
+  ) {
+    invalidInput("DSSE envelope must contain exactly payload, payloadType, and signatures.");
+  }
+  if (!Array.isArray(envelope["signatures"]) || envelope["signatures"].length === 0) {
+    invalidInput("DSSE envelope requires at least one signature.");
+  }
+  for (const [index, rawSignature] of envelope["signatures"].entries()) {
+    if (
+      typeof rawSignature !== "object"
+      || rawSignature === null
+      || Array.isArray(rawSignature)
+    ) {
+      invalidInput(`DSSE envelope signature ${index} must be an object.`);
+    }
+    const signature = rawSignature as Record<string, unknown>;
+    const keyCount = Object.keys(signature).length;
+    if (
+      !Object.hasOwn(signature, "sig")
+      || (keyCount !== 1 && keyCount !== 2)
+      || (keyCount === 2 && !Object.hasOwn(signature, "keyid"))
+    ) {
+      invalidInput(`DSSE envelope signature ${index} must contain exactly sig and optional keyid.`);
+    }
+  }
+
+  const parsed = parseDsseEnvelope(bytes);
+  const signatures = parsed.signatures.map((signature, index): DsseProducedSignature => {
+    const decoded = decodeBase64Strict(signature.sig);
+    if (decoded === undefined || decoded.length === 0) {
+      invalidInput(`DSSE envelope signature ${index} must decode to non-empty bytes.`);
+    }
+    return {
+      signature: decoded,
+      ...(signature.keyid === undefined ? {} : { keyid: signature.keyid }),
+    };
+  }) as [DsseProducedSignature, ...DsseProducedSignature[]];
+  const reconstructed = sealDsseEnvelope({
+    payloadType: parsed.payloadType,
+    payloadBytes: parsed.payloadBytes,
+    signatures,
+  });
+  if (!bytesEqual(bytes, reconstructed)) {
+    invalidInput("DSSE envelope bytes are not the exact producer encoding.");
+  }
+  return parsed;
 }
 
 // ---------------------------------------------------------------------------

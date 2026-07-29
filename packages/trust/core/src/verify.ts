@@ -4,6 +4,7 @@ import { ceremonyEvidenceDigest, verifyEoaCeremony } from "./ceremony.js";
 import { canonicalJsonBytes } from "./canonical-json.js";
 import { dssePreAuthEncoding, sealDsseEnvelope } from "./dsse.js";
 import { TRUST_KEY_BINDING_MEDIA_TYPE } from "./identifiers.js";
+import { compareCalendarStrictRfc3339Instants, isCalendarStrictRfc3339 } from "./rfc3339.js";
 import type { DsseChainVerifier } from "./policy.js";
 import type { Strength } from "./key-binding.js";
 import type { VoucherIdentity } from "./spellings.js";
@@ -244,7 +245,11 @@ async function checkRevocation(
   for (const entry of resolved.revocations) {
     // §7.4b: never retroactive -- a revocation anchored after the
     // evidence's effective time attributes nothing before it.
-    if (entry.effectiveTime > atTime) continue;
+    const comparison = compareCalendarStrictRfc3339Instants(entry.effectiveTime, atTime);
+    if (comparison === undefined) {
+      return { ok: false, detail: "revocation effectiveTime is not a calendar-valid RFC 3339 authority time." };
+    }
+    if (comparison > 0) continue;
     // eslint-disable-next-line no-await-in-loop -- revocations lists are small; sequential is fine.
     if (await isRevocationAuthorized(resolved, entry, deps)) {
       return {
@@ -289,6 +294,9 @@ export async function verifyEnvelopeBinding(
   input: VerifyEnvelopeBindingInput,
   deps: VerifyEnvelopeBindingDeps,
 ): Promise<VerificationOutcome> {
+  if (!isCalendarStrictRfc3339(input.atTime)) {
+    return { ok: false, reason: "window-violation", detail: "atTime is not a calendar-valid RFC 3339 authority time." };
+  }
   // Step 1: verify the DSSE envelope offline against K.
   const { validSignerKeyids } = deps.dsseVerifier(input.envelopeBytes);
   if (!validSignerKeyids.includes(input.key)) {
@@ -323,7 +331,11 @@ export async function verifyEnvelopeBinding(
 
   // Step 4: validity window, scope, consent chain, absence of anchored
   // revocation.
-  if (input.atTime < resolved.effectiveStart) {
+  const startComparison = compareCalendarStrictRfc3339Instants(input.atTime, resolved.effectiveStart);
+  if (startComparison === undefined) {
+    return { ok: false, resolvedBinding: resolved, reason: "window-violation", detail: "binding effectiveStart is not a calendar-valid RFC 3339 authority time." };
+  }
+  if (startComparison < 0) {
     return {
       ok: false,
       resolvedBinding: resolved,
@@ -331,7 +343,13 @@ export async function verifyEnvelopeBinding(
       detail: `atTime "${input.atTime}" precedes the binding's effective start "${resolved.effectiveStart}".`,
     };
   }
-  if (resolved.binding.expiresAt !== undefined && input.atTime > resolved.binding.expiresAt) {
+  const expiryComparison = resolved.binding.expiresAt === undefined
+    ? undefined
+    : compareCalendarStrictRfc3339Instants(input.atTime, resolved.binding.expiresAt);
+  if (resolved.binding.expiresAt !== undefined && expiryComparison === undefined) {
+    return { ok: false, resolvedBinding: resolved, reason: "window-violation", detail: "binding expiresAt is not a calendar-valid RFC 3339 authority time." };
+  }
+  if (expiryComparison !== undefined && expiryComparison > 0) {
     return {
       ok: false,
       resolvedBinding: resolved,

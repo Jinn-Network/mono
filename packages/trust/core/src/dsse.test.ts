@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { DSSE_PAYLOAD_TYPE, TRUST_KEY_BINDING_MEDIA_TYPE } from "./identifiers.js";
 import {
   dssePreAuthEncoding,
+  parseExactDsseEnvelope,
   parseDsseEnvelope,
   parseSignedRecordEnvelope,
   sealDsseEnvelope,
@@ -50,6 +51,14 @@ describe("sealDsseEnvelope / parseDsseEnvelope", () => {
     ).toThrow();
   });
 
+  test("rejects every zero-length producer signature so accepted envelopes exact-parse", () => {
+    const payloadBytes = new TextEncoder().encode("{}");
+    expect(() => sealDsseEnvelope({
+      payloadBytes,
+      signatures: [{ signature: new Uint8Array() }],
+    })).toThrow(/non-empty/);
+  });
+
   test("defaults payloadType to DSSE_PAYLOAD_TYPE but accepts an override (TEP §21.2: a signed record's DSSE payloadType is the record's own media type)", () => {
     const payloadBytes = new TextEncoder().encode('{"hello":"world"}');
     const envelopeBytes = sealDsseEnvelope({
@@ -59,6 +68,56 @@ describe("sealDsseEnvelope / parseDsseEnvelope", () => {
     });
     const parsed = parseDsseEnvelope(envelopeBytes);
     expect(parsed.payloadType).toBe(TRUST_KEY_BINDING_MEDIA_TYPE);
+  });
+});
+
+describe("parseExactDsseEnvelope", () => {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  const payloadBytes = encoder.encode("{}");
+  const envelopeBytes = sealDsseEnvelope({
+    payloadBytes,
+    payloadType: "application/example+json",
+    signatures: [
+      { keyid: "did:key:zFixture", signature: Uint8Array.of(0xfb) },
+      { keyid: "did:key:zSecond", signature: Uint8Array.of(1, 2) },
+    ],
+  });
+  const envelope = JSON.parse(decoder.decode(envelopeBytes)) as {
+    payload: string;
+    payloadType: string;
+    signatures: Array<{ keyid: string; sig: string }>;
+  };
+
+  test("accepts the exact producer encoding and preserves ordered signatures", () => {
+    expect(parseExactDsseEnvelope(envelopeBytes)).toMatchObject({
+      payloadType: "application/example+json",
+      payloadBytes,
+      signatures: [
+        { keyid: "did:key:zFixture", sig: "+w==" },
+        { keyid: "did:key:zSecond", sig: "AQI=" },
+      ],
+    });
+  });
+
+  test.each([
+    ["pretty", encoder.encode(`${JSON.stringify(envelope, null, 2)}\n`)],
+    ["reordered", encoder.encode(JSON.stringify({
+      signatures: envelope.signatures,
+      payloadType: envelope.payloadType,
+      payload: envelope.payload,
+    }))],
+    ["trailing", encoder.encode(`${decoder.decode(envelopeBytes)} `)],
+    ["duplicate", encoder.encode(
+      `{"payload":${JSON.stringify(envelope.payload)},"payload":${JSON.stringify(envelope.payload)},"payloadType":${JSON.stringify(envelope.payloadType)},"signatures":${JSON.stringify(envelope.signatures)}}`,
+    )],
+    ["extra", encoder.encode(JSON.stringify({ ...envelope, extra: true }))],
+    ["non-producer-base64", encoder.encode(JSON.stringify({
+      ...envelope,
+      signatures: [{ ...envelope.signatures[0], sig: "-w==" }],
+    }))],
+  ])("rejects the byte-distinct %s representation", (_name, bytes) => {
+    expect(() => parseExactDsseEnvelope(bytes)).toThrow();
   });
 });
 
