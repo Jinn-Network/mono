@@ -3,6 +3,7 @@ import { chmod, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/prom
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { ContentCorruptionError, materializeInput } from "./materialize.js";
 import { makeDirProvisioner } from "./dir-provisioner.js";
 import { ProvisioningRejectedError } from "./dir-provisioner.js";
 import type { TaskView, WorkspacePaths } from "./index.js";
@@ -16,6 +17,22 @@ async function paths(): Promise<WorkspacePaths> {
 }
 
 describe("directory provisioner", () => {
+  it("decodes canonical inline base64 to the exact binary bytes before digesting and writing", async () => {
+    const target = await paths();
+    const bytes = Buffer.from([0, 255, 10, 32]);
+    await materializeInput({ name: "binary", content: bytes.toString("base64"), digest: { sha256: createHash("sha256").update(bytes).digest("hex") } }, target.input, async () => {
+      throw new Error("inline content must not fetch");
+    });
+    await expect(readFile(join(target.input, "binary"))).resolves.toEqual(bytes);
+  });
+
+  it("rejects malformed and noncanonical inline base64 before writing", async () => {
+    const target = await paths();
+    for (const content of ["a", "YWJj=", "YQ", "YR=="]) {
+      await expect(materializeInput({ name: `bad-${content.length}`, content }, target.input, async () => new Uint8Array())).rejects.toBeInstanceOf(ContentCorruptionError);
+    }
+  });
+
   it("creates the complete directory contract with a private secrets directory", async () => {
     const target = await paths();
     await makeDirProvisioner({ sealedTaskBytes: Buffer.from('{"task":true}'), dispatchContextBytes: Buffer.from("{}"), runtime }).setup(view, target, []);

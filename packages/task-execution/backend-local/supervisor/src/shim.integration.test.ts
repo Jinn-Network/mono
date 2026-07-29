@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -75,4 +75,20 @@ it("relays a nonce-bound cancellation command from the shim to the harness subtr
   const outcome = await waitForJson(join(metaDir, "outcome.json"));
   expect(outcome).toMatchObject({ attemptId: "attempt-3", nonce: "nonce-3", termSignal: "SIGTERM" });
   expect(Number(fingerprint["pid"])).toBeGreaterThan(0);
+});
+
+it("substitutes a declared secret reference with its absolute attempt-local path without changing file bytes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "jinn-shim-secret-path-"));
+  dirs.push(root);
+  const metaDir = join(root, "meta"); const secretsDir = join(root, "secrets"); const seen = join(root, "seen");
+  mkdirSync(metaDir, { recursive: true }); mkdirSync(secretsDir, { recursive: true });
+  const bytes = Buffer.from([0, 255, 10, 32]);
+  writeFileSync(join(secretsDir, "credential"), bytes, { mode: 0o600 });
+  spawnShim(
+    { attemptId: "attempt-secret-path", nonce: "nonce-secret-path", metaDir, secretsDir },
+    { argv: [process.execPath, "-e", `require('node:fs').writeFileSync(${JSON.stringify(seen)},process.env.CREDENTIAL_PATH)`], env: { CREDENTIAL_PATH: "secrets/credential" }, cwd: root },
+  );
+  await waitForJson(join(metaDir, "outcome.json"));
+  expect(readFileSync(seen, "utf8")).toBe(realpathSync(join(secretsDir, "credential")));
+  expect(readFileSync(join(secretsDir, "credential"))).toEqual(bytes);
 });

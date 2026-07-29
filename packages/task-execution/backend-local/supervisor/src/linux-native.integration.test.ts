@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { accessSync, constants, mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { accessSync, constants, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -91,6 +91,22 @@ describe.runIf(linux)("Linux native custody shim", () => {
     const outcome = await waitFor(() => readOutcome(meta, "nonce-good") ?? undefined, "natural outcome");
     expect(outcome.exitCode).toBe(0);
     expect(outcome.termSignal).toBeNull();
+  });
+
+  it("forwards a declared secret as its verified attempt-local absolute path without reading its bytes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "jinn-linux-native-secret-"));
+    dirs.push(root);
+    const meta = join(root, "meta"); const secrets = join(root, "secrets"); const seen = join(root, "seen");
+    mkdirSync(meta, { recursive: true }); mkdirSync(secrets, { recursive: true });
+    const bytes = Buffer.from([0, 255, 10, 32]);
+    writeFileSync(join(secrets, "forward"), bytes, { mode: 0o600 });
+    spawnShim({ attemptId: "attempt-secret", nonce: "nonce-secret", metaDir: meta, secretsDir: secrets }, {
+      argv: [process.execPath, "-e", `require('node:fs').writeFileSync(${JSON.stringify(seen)},process.env.SECRET_PATH)`],
+      env: { SECRET_PATH: "secrets/forward" }, cwd: root,
+    });
+    await waitFor(() => readOutcome(meta, "nonce-secret") ?? undefined, "secret-forward outcome");
+    expect(readFileSync(seen, "utf8")).toBe(join(secrets, "forward"));
+    expect(readFileSync(join(secrets, "forward"))).toEqual(bytes);
   });
 
   it("persists actual live residual pids when the bounded group cleanup expires", async () => {

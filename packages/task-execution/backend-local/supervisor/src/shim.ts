@@ -14,6 +14,8 @@ export interface ShimFingerprint {
   readonly nonce: string;
   /** Supplementary (not part of the required 3-field fingerprint): the harness's own pid, which is also its own pgid (spawned `detached: true`) — the cancellation ladder's direct signal target. */
   readonly harnessPid?: number;
+  /** Published exactly once after cancellation handling and the child target are ready. */
+  readonly ready?: true;
 }
 
 /** `meta/outcome.json` (design §6.1 step 6). */
@@ -109,14 +111,15 @@ export function requestShimCancellation(metaDir: string, expected: ShimFingerpri
 
 /** Atomically writes the shim's fingerprint to `meta/shim.json` (design §6.1 step 3). */
 export function writeShimFingerprint(metaDir: string, fingerprint: ShimFingerprint): void {
-  atomicWriteFileSync(shimJsonPath(metaDir), JSON.stringify(fingerprint));
+  atomicWriteFileSync(shimJsonPath(metaDir), JSON.stringify({ ...fingerprint, ready: true }));
 }
 
 /** Reads `meta/shim.json`, or `null` if the shim has never written one. */
 export function readShimFingerprint(metaDir: string): ShimFingerprint | null {
   const raw = readAtomicFileSync(shimJsonPath(metaDir));
   if (raw === undefined) return null;
-  return JSON.parse(raw) as ShimFingerprint;
+  const fingerprint = JSON.parse(raw) as ShimFingerprint;
+  return fingerprint.ready === true ? fingerprint : null;
 }
 
 /**

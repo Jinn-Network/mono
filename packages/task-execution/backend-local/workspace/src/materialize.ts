@@ -8,12 +8,22 @@ export class ContentCorruptionError extends Error {
   constructor() { super("fetched input digest does not match its declared sha256"); }
 }
 
+/** Standard, padded base64 only; Buffer's decoder intentionally accepts looser spellings. */
+function decodeCanonicalBase64(content: string): Uint8Array {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(content)) {
+    throw new ContentCorruptionError();
+  }
+  const bytes = Buffer.from(content, "base64");
+  if (bytes.toString("base64") !== content) throw new ContentCorruptionError();
+  return bytes;
+}
+
 export async function materializeInput(
   descriptor: ResourceDescriptor,
   inputDir: string,
   fetchInput: (descriptor: ResourceDescriptor) => Promise<Uint8Array>,
 ): Promise<void> {
-  const bytes = descriptor.content === undefined ? await fetchInput(descriptor) : Buffer.from(descriptor.content);
+  const bytes = descriptor.content === undefined ? await fetchInput(descriptor) : decodeCanonicalBase64(descriptor.content);
   const expected = descriptor.digest?.sha256;
   if (expected !== undefined && createHash("sha256").update(bytes).digest("hex") !== expected) throw new ContentCorruptionError();
   await mkdir(inputDir, { recursive: true });

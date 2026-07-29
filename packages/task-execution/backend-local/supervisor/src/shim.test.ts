@@ -25,7 +25,7 @@ describe("fingerprint round trip", () => {
   it("writes and reads back the shim fingerprint atomically", () => {
     const metaDir = tempMetaDir();
     writeShimFingerprint(metaDir, { pid: 4242, startTime: 111, nonce: "n1" });
-    expect(readShimFingerprint(metaDir)).toEqual({ pid: 4242, startTime: 111, nonce: "n1" });
+    expect(readShimFingerprint(metaDir)).toEqual({ pid: 4242, startTime: 111, nonce: "n1", ready: true });
   });
 
   it("returns null when no fingerprint has been written", () => {

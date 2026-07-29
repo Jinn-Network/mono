@@ -18,7 +18,7 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import {
-  closeSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, writeSync,
+  closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -67,9 +67,19 @@ function atomicWriteFileSync(path: string, data: string): void {
 function resolveSecretReferences(env: Readonly<Record<string, string>>, secretsDir: string | undefined): Record<string, string> {
   const resolved: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
-    const match = /^secrets\/(.+)$/.exec(value);
+    const match = /^secrets\/([A-Za-z0-9][A-Za-z0-9._-]*)$/u.exec(value);
     if (match && secretsDir) {
-      resolved[key] = readFileSync(join(secretsDir, match[1]!), "utf8").trim();
+      const root = realpathSync(secretsDir);
+      const candidate = join(root, match[1]!);
+      const entry = lstatSync(candidate);
+      if (!entry.isFile() || entry.isSymbolicLink()) throw new Error(`invalid secret forward ${value}`);
+      const verified = realpathSync(candidate);
+      if (dirname(verified) !== root) throw new Error(`secret forward escaped attempt directory: ${value}`);
+      // Secret forwards deliberately remain file paths. Reading their contents here would turn
+      // binary values or trailing whitespace into environment data and violate the launch plan.
+      resolved[key] = verified;
+    } else if (value.startsWith("secrets/")) {
+      throw new Error(`invalid secret forward ${value}`);
     } else {
       resolved[key] = value;
     }
@@ -154,11 +164,10 @@ async function main(): Promise<void> {
     });
   }
 
-  // Step 3: write the fingerprint atomically, BEFORE spawning the harness. Its marker comes
-  // from the same native process-table representation recovery probes.
+  // Use the same native process-table representation recovery probes use. The only published
+  // fingerprint is delayed until the cancellation handler and its harness target both exist.
   const startTime = ownProcessStartTime();
   const shimJsonPath = join(metaDir, "shim.json");
-  atomicWriteFileSync(shimJsonPath, JSON.stringify({ pid: process.pid, startTime, nonce }));
 
   // Step 4: resolve secret references AT EXEC (never written to metaDir) and spawn the harness.
   // `detached: true` makes the harness its own session/process-group leader — this is what lets
@@ -215,7 +224,7 @@ async function main(): Promise<void> {
   // IS its own pgid (detached: true makes it a session/group leader). Publish it only after the
   // control handler exists, so a supervisor that sees this ready fingerprint can never signal a
   // shim before it is able to relay the nonce-bound command.
-  atomicWriteFileSync(shimJsonPath, JSON.stringify({ pid: process.pid, startTime, nonce, harnessPid: harness.pid }));
+  atomicWriteFileSync(shimJsonPath, JSON.stringify({ pid: process.pid, startTime, nonce, harnessPid: harness.pid, ready: true }));
 
   // Step 5: heartbeat loop — a monotonic timestamp touched periodically (default 15s, §6.6).
   const heartbeatTimer = setInterval(() => {

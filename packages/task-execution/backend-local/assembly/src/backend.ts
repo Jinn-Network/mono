@@ -1337,6 +1337,19 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     append("exec-finished", { exitCode: input.execution.exitCode ?? null, termSignal: input.execution.signal ?? null });
     append("harvest-started", {});
     await this.config.faults?.onCompletionPhase?.("before-harvest");
+    // The shim's bounded cleanup result is authoritative: waiting for generic group emptiness
+    // first would turn a deliberate ceiling terminal into an unrelated harvest failure.
+    const cancellationResult = readShimCancellationResult(input.paths.meta, input.attempt.nonce);
+    if (cancellationResult !== null && cancellationResult.residualPids.length > 0) {
+      this.appendTerminal(attempt, {
+        state: "failed",
+        blame: "infrastructure",
+        category: "backend-unavailable",
+        detail: `residual live processes: ${cancellationResult.residualPids.join(",")}`,
+        residualPids: cancellationResult.residualPids,
+      });
+      return;
+    }
     let harvest: HarvestResult;
     const harvested = this.journal(attempt).read().find((event) => event.type === "harvested");
     try {
@@ -1353,17 +1366,6 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     }
     if (harvested === undefined) append("harvested", { manifest: harvest.manifest, omissions: harvest.omissions, integrityViolations: harvest.integrityViolations });
     await this.config.faults?.onCompletionPhase?.("after-harvest");
-    const cancellationResult = readShimCancellationResult(input.paths.meta, input.attempt.nonce);
-    if (cancellationResult !== null && cancellationResult.residualPids.length > 0) {
-      this.appendTerminal(attempt, {
-        state: "failed",
-        blame: "infrastructure",
-        category: "backend-unavailable",
-        detail: `residual live processes: ${cancellationResult.residualPids.join(",")}`,
-        residualPids: cancellationResult.residualPids,
-      });
-      return;
-    }
     const envelope = this.readResultEnvelope(input.paths, input.plan, harvest);
     const interpreted = interpretResult(input.plan, input.execution, envelope);
     const observedEvidence = this.journal(attempt).read()
