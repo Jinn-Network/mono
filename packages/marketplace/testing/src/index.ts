@@ -1,1 +1,2 @@
-export { assessTodayEscrowLifecycle } from "./escrow-lifecycle.js";
+export { describeEscrowLifecycle } from "./escrow-lifecycle.js";
+export type { ForkEscrowContext } from "./escrow-lifecycle.js";
