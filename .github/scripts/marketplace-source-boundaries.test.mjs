@@ -289,6 +289,7 @@ test('marketplace exports stay root-only except for the native testing conforman
     // profile checks into a parameter of the unmodified TEP core kit (ruling §7.19).
     ['testing', '@jinn-network/marketplace-testing', [
       '.', './backend-conformance', './named-check-fixtures', './projector-conformance',
+      './revised-contract-conformance',
     ]],
   ]) {
     const manifest = JSON.parse(readFileSync(join(packages, directory, 'package.json'), 'utf8'));

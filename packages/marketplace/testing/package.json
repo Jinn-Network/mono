@@ -31,6 +31,10 @@
     "./projector-conformance": {
       "import": "./dist/projector-conformance.js",
       "types": "./dist/projector-conformance.d.ts"
+    },
+    "./revised-contract-conformance": {
+      "import": "./dist/revised-contract-conformance.js",
+      "types": "./dist/revised-contract-conformance.d.ts"
     }
   },
   "files": [
