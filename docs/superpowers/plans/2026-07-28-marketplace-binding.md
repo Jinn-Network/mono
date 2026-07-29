@@ -959,3 +959,19 @@ explicitly rather than placing the receipt in an unrelated field:
 7. Trust scope parsing follows program §7.45: a real sealed KeyBinding may carry the absolute
    admission-receipt scope URI. M5 must prove the cryptographic check against that parsed binding,
    never a fake resolver object that the trust schema itself could not produce.
+
+## Addendum 2026-07-29-k — verdict gate feeds the announcement projector
+
+Program ruling §7.49 freezes the M5.3 widening required by design §6.4. On each
+`VerdictDeliveryClaimed`, the announcement projector resolves the evaluation Delivery material
+once and gives those exact bytes plus the decoded event to a host-injected
+`verifyVerdictObservation` port. The port returns the named-check gate and optional strict
+Statement verdict. The projector itself maps that verdict through
+`decisionGradeVerdictCode` and compares it with the event's code.
+
+Missing verification, a false gate, a missing/unmappable verdict, or mismatch suppresses both
+the evaluation Delivery announcement and its verdict-driven Submission withdrawal, performs no
+record write, and returns a typed `verdict-observation-refused` entry with the derivation and
+failures. Success adds the exact signed fact
+`https://jinn.network/facts/marketplace-verdict-correspondence/1.0`:
+`{ onChainVerdictCode, statementVerdict }`. Existing non-verdict projection is unchanged.

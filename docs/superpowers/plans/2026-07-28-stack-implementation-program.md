@@ -524,6 +524,52 @@ Confirmed by the operator at the program gate (2026-07-28):
     one-sided paired-task Wilcoxon from design §9.2. This supersedes §7.26's task-position
     resampling only for this method's quality bootstrap; seed validation and xorshift transition
     semantics are unchanged.
+48. **Backend restart recovery reconstructs contracts from durable identity, never host memory:**
+    the assembly's provisioner injection returns
+    `{ id, contract: ProvisionerContract }`, where `id` is a stable non-empty implementation
+    identifier. `spawn-intended` durably carries that id and the complete canonical LaunchPlan
+    (including blame rules and secret references, never secret values). The backend also writes
+    its exact dispatch-context bytes under backend-owned `meta/` before provisioner setup; the
+    already-persisted sealed Task and Submission bytes remain authoritative. Recovery re-reads
+    and seal-validates those exact bytes, re-resolves the digest-pinned profile, re-runs the pure
+    requirements merge, reconstructs the same `LocalProvisionerInput`, and calls the injected
+    selection once. Its returned id must byte-equal the journaled id or recovery fails loud as
+    `contradictory`/backend unavailable; the returned contract may then perform idempotent
+    harvest. The provisioner selector is therefore required to be deterministic and
+    registry-backed for identical input, and provisioner contracts may not depend on lost
+    per-process state for `harvest`. Recovery parses the journaled LaunchPlan and never calls a
+    launcher or re-plans.
+
+    Evidence capture resumes its existing
+    `meta/evidence-recording` through the execution-recorder's public `resume` operation; it
+    never calls `start` again and never mints a replacement Execution ID. Required capture
+    (`always`) fails terminally if that durable recording is missing/corrupt; best-effort capture
+    records the degradation and continues. Late matching outcomes, harvesting, and recording
+    all flow through one idempotent completion routine using this reconstructed context.
+    Delivery remains the seal-once checkpoint: if present, recovery only re-records its exact
+    bytes. This is the reconstruction seam implied by backend design §6.4/§7.4/§8.1 and does not
+    persist executable code or a provisioner object.
+49. **Marketplace verdict announcements are verified before projection:** the announcement
+    projector gains a host-injected, required-on-`VerdictDeliveryClaimed`
+    `verifyVerdictObservation(event, material)` port. It receives the exact decoded chain event
+    and the exact evaluation Delivery material already selected for announcement, and returns
+    `{ gate: VerdictObservationGate, statementVerdict? }`, where the optional value is only
+    `"pass" | "fail" | "inconclusive"`. The projector independently compares the event's
+    `verdictCode` to §7.41's strict `decisionGradeVerdictCode(statementVerdict)`: it never
+    accepts a host-returned copy of the on-chain code. A missing port, non-decision-grade gate,
+    missing/unmappable Statement verdict, or code mismatch suppresses both the evaluation
+    Delivery announcement and the verdict-caused Submission withdrawal. The result exposes a
+    typed `verdict-observation-refused` entry carrying derivation, on-chain code, optional
+    Statement verdict, and exact failures; it does not silently drop the divergence.
+
+    On success, the available evaluation Delivery announcement's signed `facts` includes
+    `https://jinn.network/facts/marketplace-verdict-correspondence/1.0` with exactly
+    `{ onChainVerdictCode, statementVerdict }`. The material is resolved once and the same bytes
+    feed both verification and record publication. Non-verdict flows are unchanged. Existing M4
+    fixtures inject a conforming verifier; tests prove absent/failed/mismatched verification
+    causes zero record writes and no withdrawal. This realizes marketplace design §6.4's
+    off-chain decision-grade gate without moving trust resolution or Statement parsing into the
+    chain decoder.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

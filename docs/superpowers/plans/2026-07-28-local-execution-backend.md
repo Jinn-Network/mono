@@ -695,3 +695,20 @@ shortcut; the root lock must use atomic owner publication plus PID/start-marker/
 reclamation; terminal cleanup runs in `finally`; and all four backend-local canonical serializers
 recursively reject lone surrogates. The conformance kit replaces coarse `toBeDefined()` checks
 with exact supervisor outcomes and runs a real no-shortcut assembly/evaluation Attempt.
+
+## Addendum 2026-07-29-d — durable recovery reconstruction
+
+Program ruling §7.48 closes the restart seam exposed by the independent-review repair.
+The assembly provisioner injection returns a stable `{ id, contract }` selection. The complete
+canonical LaunchPlan plus that id is fsynced in `spawn-intended`; exact dispatch-context bytes
+are persisted under backend-owned `meta/` before setup. Recovery re-validates the already
+persisted sealed Task/Submission, rebuilds the same profile/effective-requirements/input context,
+and calls the deterministic, registry-backed selector once. A returned id differing from the
+journal is a fail-loud contradiction. The journaled plan is parsed directly; launchers are never
+called on recovery and provisioner objects/executable code are never persisted.
+
+The evidence join resumes the existing `meta/evidence-recording` through execution-recorder's
+public `resume` operation, retaining its Execution ID. Required capture fails terminally on
+missing/corrupt state; best-effort capture records degradation. Late outcome ingestion,
+idempotent harvest, evidence finalization, Delivery checkpointing, and terminalization share one
+completion routine. A present Delivery checkpoint is only re-recorded byte-for-byte.
