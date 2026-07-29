@@ -405,21 +405,26 @@ async function admissionReceiptFailure(
   });
   if (!structural.ok) return structural.reason;
 
-  const verified = await verifyEnvelopeBinding(
-    {
-      envelopeBytes: input.admissionReceipt.envelopeBytes,
-      key: input.admissionReceipt.signerKey,
-      agent: structural.issuer,
-      family: ADMISSION_RECEIPT_TRUST_SCOPE,
-      atTime: input.admissionReceipt.effectiveTime,
-    },
-    {
-      bindingResolver: ports.bindingResolver,
-      witnessVerifier: ports.witnessVerifier,
-      dsseVerifier: ports.dsseVerifier,
-      policy: ports.admissionAgentPolicy,
-    },
-  );
+  let verified;
+  try {
+    verified = await verifyEnvelopeBinding(
+      {
+        envelopeBytes: input.admissionReceipt.envelopeBytes,
+        key: input.admissionReceipt.signerKey,
+        agent: structural.issuer,
+        family: ADMISSION_RECEIPT_TRUST_SCOPE,
+        atTime: input.admissionReceipt.effectiveTime,
+      },
+      {
+        bindingResolver: ports.bindingResolver,
+        witnessVerifier: ports.witnessVerifier,
+        dsseVerifier: ports.dsseVerifier,
+        policy: ports.admissionAgentPolicy,
+      },
+    );
+  } catch (cause) {
+    return `admission-agent envelope binding dependency failed: ${String(cause)}`;
+  }
   return verified.ok
     ? undefined
     : `admission-agent envelope binding failed: ${verified.reason ?? "unknown"}${verified.detail === undefined ? "" : `: ${verified.detail}`}`;
@@ -445,19 +450,24 @@ async function requesterAuthenticationFailure(
   if (signedSubmission.payloadType !== SUBMISSION_DSSE_PAYLOAD_TYPE) {
     return `requester DSSE payloadType "${signedSubmission.payloadType}" is not ${SUBMISSION_DSSE_PAYLOAD_TYPE}`;
   }
-  const outcome = await authenticateRequester(
-    {
-      envelopeBytes: input.requesterAuthentication.envelopeBytes,
-      key: input.requesterAuthentication.signerKey,
-      requesterAgent: context.subjectSubmission.requester,
-      sealingTime: input.requesterAuthentication.sealingTime,
-    },
-    {
-      bindingResolver: ports.bindingResolver,
-      dsseVerifier: ports.dsseVerifier,
-      ...(ports.requesterPolicy === undefined ? {} : { policy: ports.requesterPolicy }),
-    },
-  );
+  let outcome;
+  try {
+    outcome = await authenticateRequester(
+      {
+        envelopeBytes: input.requesterAuthentication.envelopeBytes,
+        key: input.requesterAuthentication.signerKey,
+        requesterAgent: context.subjectSubmission.requester,
+        sealingTime: input.requesterAuthentication.sealingTime,
+      },
+      {
+        bindingResolver: ports.bindingResolver,
+        dsseVerifier: ports.dsseVerifier,
+        ...(ports.requesterPolicy === undefined ? {} : { policy: ports.requesterPolicy }),
+      },
+    );
+  } catch (cause) {
+    return `requester authentication dependency failed: ${String(cause)}`;
+  }
   return outcome.ok ? undefined : outcome.reason ?? "requester authentication failed";
 }
 
@@ -562,22 +572,32 @@ export async function gateVerdictObservation(
           + `claim block time "${input.verdict.claimBlockTime}"`,
       });
     } else {
-      const envelopeBinding = await verifyEnvelopeBinding(
-        {
-          envelopeBytes: input.verdict.envelopeBytes,
-          key: input.verdict.signerKey,
-          agent: statement.predicate.evaluator.id,
-          family: "verdicts",
-          atTime: evaluatedAt,
-        },
-        {
-          bindingResolver: ports.bindingResolver,
-          witnessVerifier: ports.witnessVerifier,
-          dsseVerifier: ports.dsseVerifier,
-          ...(ports.evaluatorPolicy === undefined ? {} : { policy: ports.evaluatorPolicy }),
-        },
-      );
-      if (!envelopeBinding.ok) {
+      let envelopeBinding;
+      try {
+        envelopeBinding = await verifyEnvelopeBinding(
+          {
+            envelopeBytes: input.verdict.envelopeBytes,
+            key: input.verdict.signerKey,
+            agent: statement.predicate.evaluator.id,
+            family: "verdicts",
+            atTime: evaluatedAt,
+          },
+          {
+            bindingResolver: ports.bindingResolver,
+            witnessVerifier: ports.witnessVerifier,
+            dsseVerifier: ports.dsseVerifier,
+            ...(ports.evaluatorPolicy === undefined ? {} : { policy: ports.evaluatorPolicy }),
+          },
+        );
+      } catch (cause) {
+        failures.push({
+          check: "settlement-join",
+          detail: `verdict envelope binding dependency failed: ${String(cause)}`,
+        });
+      }
+      if (envelopeBinding === undefined) {
+        // The dependency exception is already represented as a typed named-check failure.
+      } else if (!envelopeBinding.ok) {
         failures.push({
           check: "settlement-join",
           detail:
@@ -585,18 +605,26 @@ export async function gateVerdictObservation(
             + `${envelopeBinding.detail === undefined ? "" : `: ${envelopeBinding.detail}`}`,
         });
       } else {
-        const join = await settlementJoinCheck(
-          {
-            verdictKey: input.verdict.signerKey,
-            settlementDeclarationKey: input.verdict.settlementDeclarationKey,
-            claimedEvaluatorAgent: statement.predicate.evaluator.id,
-            family: "verdicts",
-            envelopeEffectiveTime: evaluatedAt,
-            claimTime: input.verdict.claimBlockTime,
-          },
-          { bindingResolver: ports.bindingResolver },
-        );
-        if (!join.ok) {
+        let join;
+        try {
+          join = await settlementJoinCheck(
+            {
+              verdictKey: input.verdict.signerKey,
+              settlementDeclarationKey: input.verdict.settlementDeclarationKey,
+              claimedEvaluatorAgent: statement.predicate.evaluator.id,
+              family: "verdicts",
+              envelopeEffectiveTime: evaluatedAt,
+              claimTime: input.verdict.claimBlockTime,
+            },
+            { bindingResolver: ports.bindingResolver },
+          );
+        } catch (cause) {
+          failures.push({
+            check: "settlement-join",
+            detail: `settlement join dependency failed: ${String(cause)}`,
+          });
+        }
+        if (join !== undefined && !join.ok) {
           failures.push({
             check: "settlement-join",
             detail: join.reason ?? "settlement join failed",

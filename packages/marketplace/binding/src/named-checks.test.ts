@@ -511,4 +511,52 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
       failures: [{ check: "verdict-correspondence", detail: expect.any(String) }],
     });
   });
+
+  test.each([
+    {
+      name: "admission receipt verification",
+      throwingKey: ADMISSION_KEY,
+      expectedCheck: "admission-receipt",
+    },
+    {
+      name: "requester authentication",
+      throwingKey: REQUESTER_KEY,
+      expectedCheck: "requester-authentication",
+    },
+    {
+      name: "verdict envelope binding",
+      throwingKey: VERDICT_KEY,
+      expectedCheck: "settlement-join",
+    },
+    {
+      name: "settlement declaration join",
+      throwingKey: SETTLEMENT_KEY,
+      expectedCheck: "settlement-join",
+    },
+  ])("turns a thrown $name dependency into a named refusal", async ({
+    throwingKey,
+    expectedCheck,
+  }) => {
+    const fixture = makeFixture();
+    const base = makePorts();
+    const ports: VerdictObservationGatePorts = {
+      ...base,
+      bindingResolver: {
+        async resolveBinding(query, atTime) {
+          if (query.key === throwingKey) {
+            throw new Error(`fixture resolver failure for ${throwingKey}`);
+          }
+          return base.bindingResolver.resolveBinding(query, atTime);
+        },
+      },
+    };
+
+    await expect(gateVerdictObservation(fixture.input, ports)).resolves.toEqual({
+      decisionGrade: false,
+      failures: [{
+        check: expectedCheck,
+        detail: expect.stringContaining(`fixture resolver failure for ${throwingKey}`),
+      }],
+    });
+  });
 });
