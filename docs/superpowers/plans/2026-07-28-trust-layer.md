@@ -660,6 +660,18 @@ Everything below is named in the design/brief and explicitly NOT built by this p
 - **§18 step 7 — Grant resolution in backends** (the 5-step obligation §8.3). The backend-local plan implements the minimum it needs locally (workspace provisioner resolving `capabilityGrants` into `secrets/` for the evaluation harness signer, per the coordinator brief); the general backend resolution obligation + R18 caller-authentication (ERC-8128 generalized) is future work consuming `trust-core`.
 - **§18 step 8 — Verifier / admission-agent / witness-verifier policy integration** (B.2 staging). Future consumers of the `POLICY_PURPOSES` this plan registers.
 - **Carried TEP §20 wording amendment** (§8.1/§15/§20): identity-level delegation ("key K may sign for O") is the binding `scope` (§7.1), NOT an in-toto authorization statement. The program doc lands this amendment against the TEP spec — **not a code change here**.
+
+## Addendum 2026-07-29-a — scope extension grammar (program §7.45)
+
+Design §7.1's `scope` vocabulary permits namespaced extensions. That phrase now carries the
+stack's TEP §21.3 grammar: reverse-DNS names or absolute URIs. `ScopeSchema` keeps
+`deliveries`, `verdicts`, `observations`, `authorizations`, and `bindings`, while also accepting
+valid extension names such as
+`https://jinn.network/trust-scopes/admission-receipts/1.0` and the existing `jinn:...`
+absolute-URI form. Relative/bare strings, malformed URI authority/scheme, whitespace/control
+characters, and malformed reverse-DNS labels remain invalid. A real KeyBinding
+seal/parse/verify fixture carries the admission-receipt scope so downstream receipt verification
+cannot be proven only against an impossible hand-built resolver value.
 - **Scheme-IRI registration** (did:pkh / did:key / CAIP-19 / GitHub `identifier` `propertyID` IRIs) — ONE shared follow-up across TEP §28 / profiles §17 / trust §20; program doc tracks it once.
 - **Media-type IANA registration** for `application/vnd.jinn.trust.*` — recorded non-blocking follow-up (brief mandate 4). Vendor-tree names used as-is now.
 - Non-goals per design §19: reputation scoring, Sybil/challenge/evaluator economics (Phase B.2), accreditation ecosystems, DID resolution infrastructure, VC issuance, key-custody/HSM guidance.

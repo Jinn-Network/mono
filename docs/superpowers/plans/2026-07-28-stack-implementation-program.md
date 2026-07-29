@@ -479,6 +479,16 @@ Confirmed by the operator at the program gate (2026-07-28):
     context and requires byte equality before any adapter/verdict credit. It accepts no
     evaluator-selected alternate pair and adds no second host assertion; backend §7.34 remains
     responsible only for internal consistency of the pair it was dispatched.
+45. **Trust scope extensions use the stack extension-name grammar:** the trust design's
+    “namespaced extensions” means TEP §21.3 reverse-DNS or absolute-URI names, not only the
+    implementation's narrower `namespace:token` regex. `ScopeSchema` therefore keeps the five
+    closed vocabulary values and also accepts syntactically valid reverse-DNS names and absolute
+    URIs, including §7.42's
+    `https://jinn.network/trust-scopes/admission-receipts/1.0`. It rejects relative/bare names,
+    malformed schemes/authorities, whitespace or control characters, and reverse-DNS labels
+    with empty/leading-hyphen/trailing-hyphen components. Existing `jinn:...` absolute-URI scope
+    values remain valid. The trust-core sealing/validation fixture must use the admission scope
+    in a real KeyBinding so M5 cannot pass through an impossible fake resolver state.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

@@ -956,3 +956,6 @@ explicitly rather than placing the receipt in an unrelated field:
 6. Named checks receive the settlement-authorized Task/Delivery/Results/subject Submission and
    actual evaluation Task bytes, then re-derive and byte-compare that exact context. The
    evaluator never selects the credited pair.
+7. Trust scope parsing follows program §7.45: a real sealed KeyBinding may carry the absolute
+   admission-receipt scope URI. M5 must prove the cryptographic check against that parsed binding,
+   never a fake resolver object that the trust schema itself could not produce.
