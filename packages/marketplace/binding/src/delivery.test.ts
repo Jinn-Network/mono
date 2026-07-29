@@ -32,6 +32,19 @@ function deliveryBytes(input: {
   });
 }
 
+/** Admission tests for invalid Unicode must not route through protocol sealing. */
+function deliveryBytesFromRecord(record: Record<string, unknown>): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(record));
+}
+
+function deliveryRecordWithMutation(
+  mutate: (record: Record<string, unknown>) => void,
+): Uint8Array {
+  const record = JSON.parse(new TextDecoder().decode(deliveryBytes())) as Record<string, unknown>;
+  mutate(record);
+  return deliveryBytesFromRecord(record);
+}
+
 describe("convergeDelivery", () => {
   test("validates, pins the exact sealed bytes, and computes both today-mode digests from them", async () => {
     const sealed = deliveryBytes();
@@ -80,12 +93,35 @@ describe("convergeDelivery", () => {
 
   test("rejects an unpaired UTF-16 surrogate before pinning", async () => {
     const unpairedHighSurrogate = String.fromCharCode(0xd800);
-    const sealedByCurrentProtocol = deliveryBytes({ summary: unpairedHighSurrogate });
+    const admittedBytes = deliveryRecordWithMutation((record) => {
+      record.summary = unpairedHighSurrogate;
+    });
     const pinned: Uint8Array[] = [];
 
     await expect(
       convergeDelivery(
-        sealedByCurrentProtocol,
+        admittedBytes,
+        { pin: async (bytes) => { pinned.push(bytes); } },
+      ),
+    ).rejects.toMatchObject({
+      kind: "invalid-delivery",
+      detail: expect.stringContaining("unpaired UTF-16 surrogate"),
+    });
+    expect(pinned).toEqual([]);
+  });
+
+  test("rejects an unpaired UTF-16 surrogate in a nested extension value before pinning", async () => {
+    const unpairedLowSurrogate = String.fromCharCode(0xdc00);
+    const admittedBytes = deliveryRecordWithMutation((record) => {
+      record["https://example.test/extension"] = {
+        note: unpairedLowSurrogate,
+      };
+    });
+    const pinned: Uint8Array[] = [];
+
+    await expect(
+      convergeDelivery(
+        admittedBytes,
         { pin: async (bytes) => { pinned.push(bytes); } },
       ),
     ).rejects.toMatchObject({

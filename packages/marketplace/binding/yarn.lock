@@ -82,7 +82,6 @@ __metadata:
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
     "@noble/hashes": "npm:2.2.0"
     ajv: "npm:8.17.1"
-    canonicalize: "npm:3.0.0"
     safe-regex: "npm:2.1.1"
     zod: "npm:4.4.3"
   languageName: node
@@ -518,15 +517,6 @@ __metadata:
   version: 2.0.1
   resolution: "assertion-error@npm:2.0.1"
   checksum: 10c0/bbbcb117ac6480138f8c93cf7f535614282dea9dc828f540cdece85e3c665e8f78958b96afac52f29ff883c72638e6a87d469ecc9fe5bc902df03ed24a55dba8
-  languageName: node
-  linkType: hard
-
-"canonicalize@npm:3.0.0":
-  version: 3.0.0
-  resolution: "canonicalize@npm:3.0.0"
-  bin:
-    canonicalize: bin/canonicalize.js
-  checksum: 10c0/d197ce019d12f41f9d81a79e04015b8e8ca5fda78d0d67c3d1f309dd09f32a039d4654c5a2563d884385ae151c6f56a79f38e900020e2921f7dbe093f29dc4ac
   languageName: node
   linkType: hard
 
