@@ -42,5 +42,6 @@
     "durableSeqBeforeResumption": 3,
     "durableSeqAfterFinal": 5,
     "note": "the re-appended record correctly reuses seq 3 (max(intact seq=2)+1), demonstrating the torn record at the old claimed seq 3 is discarded wholesale and never blocks reuse of that seq number"
-  }
+  },
+  "conformance": { "reality": { "processAlive": false, "shimFingerprintPresent": false, "outcomeFilePresent": true, "nonceMatches": true }, "expectedResult": { "classification": "matching", "action": "terminal-record-wins" } }
 }

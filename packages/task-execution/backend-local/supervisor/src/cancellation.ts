@@ -4,6 +4,10 @@ export interface CancellationAttempt {
   readonly terminalState?: string;
   /** A durable cancel-requested event already exists; repeated calls must have no signal effects. */
   readonly cancellationRequested?: boolean;
+  /** Cancellation before exec-started is a rejected, never-executed attempt (§6.5). */
+  readonly phase?: "provisioning";
+  /** Deadline enforcement uses the same ladder but projects its signal outcome as expired (§6.6). */
+  readonly requestedTerminalState?: "cancelled" | "expired";
 }
 export interface CancellationDriver {
   signalTerm(): void | Promise<void>;
@@ -23,6 +27,7 @@ export interface CancellationResult {
 export async function runCancellationLadder(attempt: CancellationAttempt, driver: CancellationDriver, options: CancellationOptions = {}): Promise<CancellationResult> {
   if (attempt.terminalState !== undefined) return { requested: false, terminalState: attempt.terminalState };
   if (attempt.cancellationRequested) return { requested: false, terminalState: "cancelling" };
+  if (attempt.phase === "provisioning") return { requested: true, terminalState: "rejected" };
   const graceMs = options.graceMs ?? 10_000;
   const ceilingMs = options.killPollCeilingMs ?? 30_000;
   const now = options.nowMs ?? Date.now;
@@ -41,7 +46,9 @@ export async function runCancellationLadder(attempt: CancellationAttempt, driver
   // A recorded normal exit is authoritative; a signal delivered by this ladder is not a
   // natural failure and therefore resolves to cancelled after harvest.
   if (outcome?.exitCode === 0 && outcome.termSignal === null) return { requested: true, terminalState: "delivered", outcome };
-  if (outcome?.termSignal === "SIGTERM" || outcome?.termSignal === "SIGKILL") return { requested: true, terminalState: "cancelled", outcome };
+  if (outcome?.termSignal === "SIGTERM" || outcome?.termSignal === "SIGKILL") {
+    return { requested: true, terminalState: attempt.requestedTerminalState ?? "cancelled", outcome };
+  }
   if (outcome !== null) return { requested: true, terminalState: "failed", outcome };
-  return { requested: true, terminalState: "cancelled" };
+  return { requested: true, terminalState: attempt.requestedTerminalState ?? "cancelled" };
 }

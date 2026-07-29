@@ -4,6 +4,32 @@ import { describe, expect, it, vi } from "vitest";
 import { runCancellationLadder } from "./cancellation.js";
 
 describe("runCancellationLadder", () => {
+  it("preserves an expiry terminal after the signal ladder and rejects before execution without signaling", async () => {
+    const expired = await runCancellationLadder({ requestedTerminalState: "expired" }, {
+      signalTerm: () => undefined,
+      signalKill: () => undefined,
+      isSubtreeEmpty: () => true,
+      readOutcome: () => ({ exitCode: null, termSignal: "SIGTERM" }),
+      harvest: () => undefined,
+    }, { graceMs: 0, killPollCeilingMs: 0 });
+    expect(expired).toEqual({
+      requested: true,
+      terminalState: "expired",
+      outcome: { exitCode: null, termSignal: "SIGTERM" },
+    });
+
+    const calls: string[] = [];
+    const rejected = await runCancellationLadder({ phase: "provisioning" }, {
+      signalTerm: () => { calls.push("term"); },
+      signalKill: () => { calls.push("kill"); },
+      isSubtreeEmpty: () => true,
+      readOutcome: () => null,
+      harvest: () => { calls.push("harvest"); },
+    });
+    expect(rejected).toEqual({ requested: true, terminalState: "rejected" });
+    expect(calls).toEqual([]);
+  });
+
   it("does not use cancellation as the outcome channel when a natural success races ahead", async () => {
     const result = await runCancellationLadder({ terminalState: undefined }, {
       signalTerm: vi.fn(), signalKill: vi.fn(), isSubtreeEmpty: vi.fn(() => true),

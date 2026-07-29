@@ -33,5 +33,6 @@
     "durableSeq": 4,
     "intactEventCount": 3,
     "note": "record 4 is discarded wholesale (JSONL torn-tail tolerance, design §6.2); durableSeq is max(intact seq)+1 = 4, not 5 — the torn record's claimed seq is never trusted"
-  }
+  },
+  "conformance": { "reality": { "processAlive": true, "shimFingerprintPresent": true, "outcomeFilePresent": false }, "expectedResult": { "classification": "matching", "action": "resume-supervision" } }
 }

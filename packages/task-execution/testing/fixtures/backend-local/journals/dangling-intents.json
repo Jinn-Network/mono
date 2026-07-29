@@ -25,5 +25,6 @@
     "action": "lost",
     "blame": "infrastructure",
     "note": "distinct from the never-executed 'engaged, no spawn-intent' row (→ rejected) — here the intent WAS journaled, so the never-executed guarantee does not apply; the attempt is lost, not rejected"
-  }
+  },
+  "conformance": { "reality": { "processAlive": false, "shimFingerprintPresent": false, "outcomeFilePresent": false }, "expectedResult": { "classification": "absent", "action": "lost", "terminalState": "lost", "blame": "infrastructure" } }
 }

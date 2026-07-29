@@ -9,9 +9,12 @@ export { foldAttemptRecord } from "./attempt-record.js";
 export { reconcileAttempt } from "./reconciler.js";
 export { runCancellationLadder } from "./cancellation.js";
 export { armDeadline, heartbeatIsStale } from "./deadline.js";
+export { cleanupHarnessSubtree, establishSubreaperCustody, installCustodianSignalGuards } from "./shim-control.js";
+export type { ShimCleanupPort, ShimSubreaperPort, ShimSignalGuardPort } from "./shim-control.js";
 export {
   listProcessGroupPids,
   nativeCustodySupport,
+  fingerprintAlive,
   probeShimAlive,
   readHeartbeat,
   readShimCancellationResult,
@@ -19,8 +22,10 @@ export {
   readProcessStartTime,
   readShimFingerprint,
   requestShimCancellation,
+  buildShimSpawn,
   spawnShim,
   writeShimCancellationCommand,
+  writeOutcomeFile,
 } from "./shim.js";
 export type { OutcomeFile, ShimCancellationCommand, ShimCancellationResult, ShimFingerprint } from "./shim.js";
 export type { JournalEvent, JournalEventIntent, SubmissionEvent, SubmissionEventIntent } from "./journal-types.js";

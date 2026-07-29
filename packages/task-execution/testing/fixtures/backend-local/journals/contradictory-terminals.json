@@ -44,5 +44,6 @@
     "rejectedTerminalSeq": 4,
     "contradictoryFlag": true,
     "note": "seq 3 (first by seq) wins and stands as the recorded terminal; seq 4 is rejected+flagged, never a corrective replacement (it is not preceded by a `lost` terminal — contrast journals/rebuild-identity-style lost-then-corrective handling, which is the ONE sanctioned exception)"
-  }
+  },
+  "conformance": { "reality": { "shimFingerprintVerifiedSurvivorsAlive": true, "pids": [4400, 4401] }, "expectedResult": { "classification": "contradictory", "action": "terminal-record-wins-kill-survivors", "killedPids": [4400, 4401] } }
 }

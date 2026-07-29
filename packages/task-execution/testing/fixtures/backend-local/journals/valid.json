@@ -49,5 +49,6 @@
     "intactEventCount": 5,
     "terminalState": "delivered",
     "note": "the happy path baseline every other golden journal fixture is a scripted variant of"
-  }
+  },
+  "conformance": { "reality": { "processAlive": false, "shimFingerprintPresent": false, "outcomeFilePresent": true, "nonceMatches": true }, "expectedResult": { "classification": "matching", "action": "terminal-record-wins" } }
 }

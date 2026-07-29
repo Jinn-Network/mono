@@ -5,6 +5,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { atomicWriteFileSync, readAtomicFileSync } from "./fs-atomic.js";
+import { establishSubreaperCustody } from "./shim-control.js";
 import type { SpawnRequest } from "./attempt-identity.js";
 
 /** The shim's `(pid, start-time)` fingerprint plus the attempt nonce (design §6.1 step 3, frozen interface §14 item 2). Every liveness conclusion passes through this — a bare PID is never trusted. */
@@ -77,7 +78,8 @@ export function nativeCustodySupport(): { readonly ready: boolean; readonly subr
   if (result.status !== 0) return { ready: false, subreaper: false, detail: result.stderr.trim() || "PR_SET_CHILD_SUBREAPER probe failed" };
   try {
     const parsed = JSON.parse(result.stdout) as { ready?: boolean; subreaper?: boolean };
-    return parsed.ready === true && parsed.subreaper === true
+    const custody = establishSubreaperCustody({ enableSubreaper: () => parsed.ready === true && parsed.subreaper === true });
+    return custody.subreaper
       ? { ready: true, subreaper: true }
       : { ready: false, subreaper: false, detail: "native custody probe did not confirm subreaper" };
   } catch {
