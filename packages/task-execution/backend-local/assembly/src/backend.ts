@@ -198,6 +198,12 @@ export interface LocalProvisionerInput {
   readonly attempt: AttemptIdentity;
 }
 
+/** Durable selector result: recovery replays this identity, never heuristically picks a provisioner. */
+export interface SelectedProvisioner {
+  readonly id: string;
+  readonly contract: ProvisionerContract;
+}
+
 export interface LocalBackendFaults {
   /** Test-only crash injection after the Delivery checkpoint is durable but before its event. */
   readonly afterDeliveryCheckpoint?: () => void;
@@ -212,7 +218,7 @@ export interface LocalTaskExecutionBackendConfig {
     descriptor: TaskSpecification["profile"],
   ) => TaskProfileDocument;
   readonly launchers: readonly LauncherContract[];
-  readonly provisioner: (input: LocalProvisionerInput) => ProvisionerContract;
+  readonly provisioner: (input: LocalProvisionerInput) => SelectedProvisioner;
   readonly provisionerCapabilities: ProvisionerCapabilities;
   readonly maxConcurrentAttempts?: number;
   readonly recorderAvailability?: RecorderAvailability;
@@ -692,13 +698,15 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       effectiveRequirements: merged.effective,
       profile: resolvedProfile,
     };
-    const provisioner = this.config.provisioner({
+    const selectedProvisioner = this.config.provisioner({
       sealedTaskBytes: taskBytes.slice(),
       dispatchContextBytes,
       task,
       submission,
       attempt: identity,
     });
+    const provisioner = selectedProvisioner.contract;
+    atomicWrite(join(this.paths(attempt).meta, "dispatch-context.sealed"), dispatchContextBytes);
     const grants = submission.capabilityGrants === undefined
       ? []
       : [...(this.config.capabilityGrants?.(submission.capabilityGrants) ?? [])];
@@ -754,6 +762,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         env: { ...spawn.env },
         cwd: spawn.cwd,
         validExitCodes: [...plan.validExitCodes],
+        ...(plan.blameExitCodes === undefined ? {} : { blameExitCodes: plan.blameExitCodes }),
         resultContract: plan.resultContract,
         interruptionBehavior: plan.interruptionBehavior,
         ...(plan.secretForwards === undefined ? {} : { secretForwards: plan.secretForwards }),
@@ -765,6 +774,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         details: {
           nonce: submission.nonce,
           launcher: launcher.id,
+          provisioner: selectedProvisioner.id,
           launchPlanDigest: documentDigest(planBytes),
           launchPlan: JSON.parse(textDecoder.decode(planBytes)),
           source: this.config.source,

@@ -140,7 +140,7 @@ function fixture(
     executor: "urn:jinn:agent:assembly-test",
     profileStore,
     launchers: [launcher],
-    provisioner: () => provisioner,
+    provisioner: () => ({ id: "fixture", contract: provisioner }),
     provisionerCapabilities: {
       taskProfiles: [profile.profile],
       workspaceKinds: ["dir"],

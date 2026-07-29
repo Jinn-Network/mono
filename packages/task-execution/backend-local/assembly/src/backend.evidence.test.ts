@@ -113,7 +113,7 @@ function backend(
     executor: "https://jinn.network/software/fake-launcher",
     profileStore,
     launchers: [launcher],
-    provisioner: () => provisioner,
+    provisioner: () => ({ id: "fixture", contract: provisioner }),
     provisionerCapabilities: {
       taskProfiles: [profile.profile],
       workspaceKinds: ["dir"],

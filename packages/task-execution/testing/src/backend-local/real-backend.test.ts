@@ -83,7 +83,7 @@ function baseConfig(stateRoot: string): LocalTaskExecutionBackendConfig {
     // semantics; assembly component tests separately exercise strict digest-pinned resolveProfile.
     resolveTaskProfile: () => profile,
     launchers: [launcher],
-    provisioner: () => provisioner,
+    provisioner: () => ({ id: "fixture", contract: provisioner }),
     provisionerCapabilities: {
       taskProfiles: [profile.profile],
       workspaceKinds: ["dir"],
