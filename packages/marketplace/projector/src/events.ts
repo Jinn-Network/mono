@@ -155,8 +155,14 @@ export const REVISED_PROJECTOR_EVENTS_ABI = [
 const V3_ROUTER_EVENTS_ABI = JINN_ROUTER_V3_ABI.filter(
   (entry) => entry.type === "event",
 );
+const TODAY_ROUTER_EVENT_TOPICS = new Set(
+  V3_ROUTER_EVENTS_ABI.map((event) => toEventSelector(event)),
+);
 const TODAY_PROJECTOR_EVENTS_ABI = [...V3_ROUTER_EVENTS_ABI, ...MECH_ABI] as const;
 const REVISED_DECODE_EVENTS_ABI = [...REVISED_PROJECTOR_EVENTS_ABI, ...MECH_ABI] as const;
+const REVISED_ROUTER_EVENT_TOPICS = new Set(
+  REVISED_PROJECTOR_EVENTS_ABI.map((event) => toEventSelector(event)),
+);
 
 const TODAY_EVENT_TOPICS = new Set(
   TODAY_PROJECTOR_EVENTS_ABI.map((event) => toEventSelector(event)),
@@ -193,9 +199,16 @@ function authorizedOrigin(
 ): boolean {
   if (log.chainId !== authority.config.chainId || log.topics.length === 0) return false;
   const topic = log.topics[0]!;
-  if (MECH_EVENT_TOPICS.has(topic)) return authority.isAuthorizedMechOrigin(log.address);
-  return sameEvmAddress(log.address, authority.config.jinnRouter)
-    || sameEvmAddress(log.address, authority.config.taskCoordinator);
+  if (MECH_EVENT_TOPICS.has(topic)) {
+    return authority.isAuthorizedMechOrigin(log.address);
+  }
+  const routerTopics = authority.config.generation === "today"
+    ? TODAY_ROUTER_EVENT_TOPICS
+    : REVISED_ROUTER_EVENT_TOPICS;
+  if (routerTopics.has(topic)) {
+    return sameEvmAddress(log.address, authority.config.jinnRouter);
+  }
+  return false;
 }
 
 export interface MarketplaceRawLog extends DerivationLog {

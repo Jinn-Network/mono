@@ -65,6 +65,12 @@ interface FixtureLog {
 
 const encoder = new TextEncoder();
 const SUBMISSION_BYTES = encoder.encode('{"record":"submission"}');
+
+function stringifyProjectionState(state: unknown): string {
+  return JSON.stringify(state, (_key, value) =>
+    typeof value === "bigint" ? value.toString() : value,
+  );
+}
 const DELIVERY_BYTES = encoder.encode('{"record":"delivery"}');
 const EVALUATION_BYTES = encoder.encode('{"record":"evaluation-delivery"}');
 
@@ -540,7 +546,7 @@ async function projectFixtureInternal(
     derivations,
     observationBytes: encoder.encode(JSON.stringify(observations)),
     announcementBytes: encoder.encode(JSON.stringify(announcements)),
-    stateBytes: encoder.encode(JSON.stringify(state)),
+    stateBytes: encoder.encode(stringifyProjectionState(state)),
   };
   return {
     events,
@@ -571,7 +577,7 @@ const subject: MarketplaceProjectorConformanceSubject = {
       replayObservations: replayTransition.observations,
       replayAnnouncements: replayAnnouncements.announcements,
       stateBytesAfterReplay: encoder.encode(
-        JSON.stringify(replayTransition.state),
+        stringifyProjectionState(replayTransition.state),
       ),
     };
   },

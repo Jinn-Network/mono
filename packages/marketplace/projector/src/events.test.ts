@@ -17,9 +17,15 @@ import {
   marketplaceEventOriginAuthority,
   type MarketplaceRawLog,
 } from "./events.js";
+import {
+  createMarketplaceProjectionState,
+  reduceMarketplaceProjection,
+  type ObservationProjectionContext,
+} from "./observe.js";
 import { BASE_SEPOLIA_TODAY } from "@jinn-network/marketplace-binding";
 
 const ROUTER = "0x1111111111111111111111111111111111111111" satisfies Address;
+const COORDINATOR = "0x9999999999999999999999999999999999999999" satisfies Address;
 const MECH = "0x2222222222222222222222222222222222222222" satisfies Address;
 const OPERATOR = "0x3333333333333333333333333333333333333333" satisfies Address;
 const PRIORITY_MECH = "0x4444444444444444444444444444444444444444" satisfies Address;
@@ -93,10 +99,32 @@ function decodeMarketplaceLogs(logs: readonly MarketplaceRawLog[], generation: "
     ...BASE_SEPOLIA_TODAY,
     generation,
     jinnRouter: ROUTER,
-    taskCoordinator: "0x9999999999999999999999999999999999999999",
+    taskCoordinator: COORDINATOR,
     mechMarketplace: MECH,
   }, (address) => address.toLowerCase() === MECH.toLowerCase()));
 }
+
+function authority(generation: "today" | "revised", mechAuthorized = true) {
+  return marketplaceEventOriginAuthority({
+    ...BASE_SEPOLIA_TODAY,
+    generation,
+    jinnRouter: ROUTER,
+    taskCoordinator: COORDINATOR,
+    mechMarketplace: MECH,
+  }, (address) => mechAuthorized && address.toLowerCase() === MECH.toLowerCase());
+}
+
+const PROJECTION: ObservationProjectionContext = {
+  taskCoordinator: COORDINATOR,
+  timestamp: "2026-07-29T12:00:00Z",
+  submission: "urn:uuid:11111111-1111-4111-8111-111111111111",
+  taskDigest: `sha256:${"7".repeat(64)}`,
+  effectiveDeadline: "2026-07-30T12:00:00Z",
+  dispatchContext: {
+    uri: "urn:jinn:marketplace:dispatch-context:42:3",
+    digest: { sha256: "8".repeat(64) },
+  },
+};
 
 describe("decodeMarketplaceLogs", () => {
   test("isolates changed V3 and V4 router topics by contract generation", () => {
@@ -631,7 +659,7 @@ describe("decodeMarketplaceLogs", () => {
   });
 
   test("ignores ABI-shaped logs from unauthorized contract addresses", () => {
-    const spoofedRouter = getAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001");
+    const spoofed = getAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001");
     const taskCreatedTopics = encodeEventTopics({
       abi: JINN_ROUTER_V3_ABI,
       eventName: "TaskCreated",
@@ -646,27 +674,450 @@ describe("decodeMarketplaceLogs", () => {
       ],
       [`0x${"9".repeat(64)}`, 5, 100n, 200n],
     );
-    const deliverTopics = encodeEventTopics({
-      abi: MECH_ABI,
-      eventName: "Deliver",
-      args: {
-        mech: OPERATOR,
-        mechServiceMultisig: OPERATOR,
-      },
+    const attemptTopics = encodeEventTopics({
+      abi: JINN_ROUTER_V3_ABI,
+      eventName: "TaskAttemptCreated",
+      args: { taskId: 42n, attemptIndex: 3, requestId: REQUEST_ID },
     });
-    const deliverData = encodeAbiParameters(
+    const attemptData = encodeAbiParameters(
       [
-        { name: "requestId", type: "bytes32" },
+        { name: "operator", type: "address" },
+        { name: "priorityMech", type: "address" },
         { name: "deliveryRate", type: "uint256" },
-        { name: "data", type: "bytes" },
       ],
-      [REQUEST_ID, 10n, `0x${"a".repeat(64)}`],
+      [OPERATOR, PRIORITY_MECH, 10n],
     );
 
-    expect(decodeMarketplaceLogs([
-      log({ address: spoofedRouter, topics: exactTopics(taskCreatedTopics), data: taskCreatedData }),
-      log({ address: spoofedRouter, topics: exactTopics(deliverTopics), data: deliverData }),
-    ], "today")).toEqual([]);
+    expect(decodeWithAuthority([
+      log({ address: spoofed, topics: exactTopics(taskCreatedTopics), data: taskCreatedData }),
+      log({ address: COORDINATOR, topics: exactTopics(attemptTopics), data: attemptData }),
+    ], authority("today"))).toEqual([]);
+  });
+
+  test.each([
+    {
+      generation: "today" as const,
+      eventName: "TaskCreated",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: JINN_ROUTER_V3_ABI,
+          eventName: "TaskCreated",
+          args: { creator: CREATOR, taskId: 42n, manifestDigest: `0x${"a".repeat(64)}` },
+        });
+        const data = encodeAbiParameters(
+          [
+            { name: "taskCidDigest", type: "bytes32" },
+            { name: "maxClaims", type: "uint32" },
+            { name: "solutionBudget", type: "uint256" },
+            { name: "verdictBudget", type: "uint256" },
+          ],
+          [`0x${"9".repeat(64)}`, 5, 100n, 200n],
+        );
+        return log({ topics: exactTopics(topics), data });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "today" as const,
+      eventName: "TaskAttemptCreated",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: JINN_ROUTER_V3_ABI,
+          eventName: "TaskAttemptCreated",
+          args: { taskId: 42n, attemptIndex: 3, requestId: REQUEST_ID },
+        });
+        const data = encodeAbiParameters(
+          [
+            { name: "operator", type: "address" },
+            { name: "priorityMech", type: "address" },
+            { name: "deliveryRate", type: "uint256" },
+          ],
+          [OPERATOR, PRIORITY_MECH, 10n],
+        );
+        return log({ topics: exactTopics(topics), data });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "today" as const,
+      eventName: "EvaluationAttemptCreated",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: JINN_ROUTER_V3_ABI,
+          eventName: "EvaluationAttemptCreated",
+          args: { taskId: 42n, attemptIndex: 3, verdictIndex: 1 },
+        });
+        const data = encodeAbiParameters(
+          [
+            { name: "requestId", type: "bytes32" },
+            { name: "evaluator", type: "address" },
+            { name: "priorityMech", type: "address" },
+            { name: "deliveryRate", type: "uint256" },
+          ],
+          [REQUEST_ID, OPERATOR, PRIORITY_MECH, 10n],
+        );
+        return log({ topics: exactTopics(topics), data });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "today" as const,
+      eventName: "SolutionDeliveryClaimed",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: JINN_ROUTER_V3_ABI,
+          eventName: "SolutionDeliveryClaimed",
+          args: { operator: OPERATOR, requestId: REQUEST_ID, taskId: 42n },
+        });
+        const data = encodeAbiParameters([{ name: "attemptIndex", type: "uint32" }], [3]);
+        return log({ topics: exactTopics(topics), data });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "today" as const,
+      eventName: "VerdictDeliveryClaimed",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: JINN_ROUTER_V3_ABI,
+          eventName: "VerdictDeliveryClaimed",
+          args: { evaluator: OPERATOR, requestId: REQUEST_ID, taskId: 42n },
+        });
+        const data = encodeAbiParameters(
+          [
+            { name: "attemptIndex", type: "uint32" },
+            { name: "verdictIndex", type: "uint32" },
+            { name: "verdictCode", type: "uint8" },
+          ],
+          [3, 1, 1],
+        );
+        return log({ topics: exactTopics(topics), data });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "today" as const,
+      eventName: "TaskBudgetRefunded",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: JINN_ROUTER_V3_ABI,
+          eventName: "TaskBudgetRefunded",
+          args: { taskId: 42n, creator: CREATOR },
+        });
+        const data = encodeAbiParameters(
+          [
+            { name: "solutionAmount", type: "uint256" },
+            { name: "verdictAmount", type: "uint256" },
+          ],
+          [10n, 20n],
+        );
+        return log({ topics: exactTopics(topics), data });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "today" as const,
+      eventName: "Deliver",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: MECH_ABI,
+          eventName: "Deliver",
+          args: { mech: MECH, mechServiceMultisig: OPERATOR },
+        });
+        const data = encodeAbiParameters(
+          [
+            { name: "requestId", type: "bytes32" },
+            { name: "deliveryRate", type: "uint256" },
+            { name: "data", type: "bytes" },
+          ],
+          [REQUEST_ID, 10n, `0x${"a".repeat(64)}`],
+        );
+        return log({ address: MECH, topics: exactTopics(topics), data });
+      },
+      contract: "mech" as const,
+    },
+    {
+      generation: "revised" as const,
+      eventName: "TaskCreated",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: V4_TASK_CREATED_ABI,
+          eventName: "TaskCreated",
+          args: {
+            creator: CREATOR,
+            taskCidDigest: `0x${"a".repeat(64)}`,
+            submissionDigest: `0x${"b".repeat(64)}`,
+          },
+        });
+        const data = encodeAbiParameters(
+          V4_TASK_CREATED_ABI[0].inputs.filter((input) => !input.indexed),
+          [42n, 2, 1, 1_800_000_000n, 0n, 3600n, 1, true, 10n, 20n, 100n, 200n],
+        );
+        return log({ topics: exactTopics(topics), data });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "revised" as const,
+      eventName: "TaskAttemptCreated",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: REVISED_COMMON_PROJECTOR_EVENTS_ABI,
+          eventName: "TaskAttemptCreated",
+          args: { operator: OPERATOR, priorityMech: PRIORITY_MECH, requestId: REQUEST_ID },
+        });
+        const data = encodeAbiParameters(
+          [
+            { name: "taskId", type: "uint256" },
+            { name: "attemptIndex", type: "uint32" },
+            { name: "attemptDeadline", type: "uint64" },
+            { name: "deliveryRate", type: "uint256" },
+          ],
+          [42n, 3, 1_800_000_000n, 10n],
+        );
+        return log({ topics: exactTopics(topics), data });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "revised" as const,
+      eventName: "EvaluationAttemptCreated",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: REVISED_COMMON_PROJECTOR_EVENTS_ABI,
+          eventName: "EvaluationAttemptCreated",
+          args: { evaluator: OPERATOR, priorityMech: PRIORITY_MECH, requestId: REQUEST_ID },
+        });
+        const data = encodeAbiParameters(
+          [
+            { name: "taskId", type: "uint256" },
+            { name: "attemptIndex", type: "uint32" },
+            { name: "verdictIndex", type: "uint32" },
+            { name: "attemptDeadline", type: "uint64" },
+            { name: "deliveryRate", type: "uint256" },
+          ],
+          [42n, 3, 1, 1_800_000_000n, 10n],
+        );
+        return log({ topics: exactTopics(topics), data });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "revised" as const,
+      eventName: "SolutionDeliveryClaimed",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: REVISED_COMMON_PROJECTOR_EVENTS_ABI,
+          eventName: "SolutionDeliveryClaimed",
+          args: {
+            operator: OPERATOR,
+            requestId: REQUEST_ID,
+            deliveryDigest: `0x${"c".repeat(64)}`,
+          },
+        });
+        const data = encodeAbiParameters(
+          [{ name: "taskId", type: "uint256" }, { name: "attemptIndex", type: "uint32" }],
+          [42n, 3],
+        );
+        return log({ topics: exactTopics(topics), data });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "revised" as const,
+      eventName: "VerdictDeliveryClaimed",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: REVISED_COMMON_PROJECTOR_EVENTS_ABI,
+          eventName: "VerdictDeliveryClaimed",
+          args: {
+            evaluator: OPERATOR,
+            requestId: REQUEST_ID,
+            evaluationDeliveryDigest: `0x${"d".repeat(64)}`,
+          },
+        });
+        const data = encodeAbiParameters(
+          [
+            { name: "taskId", type: "uint256" },
+            { name: "attemptIndex", type: "uint32" },
+            { name: "verdictIndex", type: "uint32" },
+            { name: "verdictCode", type: "uint8" },
+          ],
+          [42n, 3, 1, 1],
+        );
+        return log({ topics: exactTopics(topics), data });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "revised" as const,
+      eventName: "TaskBudgetRefunded",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: REVISED_COMMON_PROJECTOR_EVENTS_ABI,
+          eventName: "TaskBudgetRefunded",
+          args: { taskId: 42n, creator: CREATOR },
+        });
+        const data = encodeAbiParameters(
+          [
+            { name: "solutionAmount", type: "uint256" },
+            { name: "verdictAmount", type: "uint256" },
+          ],
+          [10n, 20n],
+        );
+        return log({ topics: exactTopics(topics), data });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "revised" as const,
+      eventName: "AttemptsAdded",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: V4_ATTEMPTS_ADDED_ABI,
+          eventName: "AttemptsAdded",
+          args: { taskId: 42n, creator: CREATOR },
+        });
+        const data = encodeAbiParameters(
+          [{ name: "added", type: "uint32" }, { name: "newMaxTotal", type: "uint32" }],
+          [2, 5],
+        );
+        return log({ topics: exactTopics(topics), data });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "revised" as const,
+      eventName: "AttemptExpired",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: REVISED_PROJECTOR_EVENTS_ABI,
+          eventName: "AttemptExpired",
+          args: { taskId: 42n, attemptIndex: 3, operator: OPERATOR },
+        });
+        return log({ topics: exactTopics(topics), data: "0x" });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "revised" as const,
+      eventName: "AttemptReleased",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: REVISED_PROJECTOR_EVENTS_ABI,
+          eventName: "AttemptReleased",
+          args: { taskId: 42n, attemptIndex: 3, operator: OPERATOR },
+        });
+        return log({ topics: exactTopics(topics), data: "0x" });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "revised" as const,
+      eventName: "TaskClosed",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: REVISED_PROJECTOR_EVENTS_ABI,
+          eventName: "TaskClosed",
+          args: { taskId: 42n, creator: CREATOR },
+        });
+        return log({ topics: exactTopics(topics), data: "0x" });
+      },
+      contract: "router" as const,
+    },
+    {
+      generation: "revised" as const,
+      eventName: "Deliver",
+      build: () => {
+        const topics = encodeEventTopics({
+          abi: MECH_ABI,
+          eventName: "Deliver",
+          args: { mech: MECH, mechServiceMultisig: OPERATOR },
+        });
+        const data = encodeAbiParameters(
+          [
+            { name: "requestId", type: "bytes32" },
+            { name: "deliveryRate", type: "uint256" },
+            { name: "data", type: "bytes" },
+          ],
+          [REQUEST_ID, 10n, `0x${"a".repeat(64)}`],
+        );
+        return log({ address: MECH, topics: exactTopics(topics), data });
+      },
+      contract: "mech" as const,
+    },
+  ])(
+    "$generation $eventName accepts only its configured $contract origin",
+    ({ generation, eventName, build, contract }) => {
+      const sample = build();
+      const positiveAddress = contract === "mech" ? MECH : ROUTER;
+      const spoofed = getAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001");
+      expect(decodeWithAuthority([
+        log({ ...sample, address: positiveAddress }),
+      ], authority(generation))).toEqual([
+        expect.objectContaining({ event: eventName }),
+      ]);
+      expect(decodeWithAuthority([
+        log({ ...sample, address: spoofed }),
+      ], authority(generation))).toEqual([]);
+      if (contract === "router") {
+        expect(decodeWithAuthority([
+          log({ ...sample, address: COORDINATOR }),
+        ], authority(generation))).toEqual([]);
+      } else {
+        expect(decodeWithAuthority([
+          log({ ...sample, address: ROUTER }),
+        ], authority(generation))).toEqual([]);
+        expect(decodeWithAuthority([
+          log({ ...sample, address: MECH }),
+        ], authority(generation, false))).toEqual([]);
+      }
+    },
+  );
+
+  test("decode→reduce drops hostile origins before reducer observations or bindings", () => {
+    const taskCreatedTopics = encodeEventTopics({
+      abi: JINN_ROUTER_V3_ABI,
+      eventName: "TaskCreated",
+      args: { creator: CREATOR, taskId: 42n, manifestDigest: `0x${"a".repeat(64)}` },
+    });
+    const taskCreatedData = encodeAbiParameters(
+      [
+        { name: "taskCidDigest", type: "bytes32" },
+        { name: "maxClaims", type: "uint32" },
+        { name: "solutionBudget", type: "uint256" },
+        { name: "verdictBudget", type: "uint256" },
+      ],
+      [`0x${"9".repeat(64)}`, 5, 100n, 200n],
+    );
+    const attemptTopics = encodeEventTopics({
+      abi: JINN_ROUTER_V3_ABI,
+      eventName: "TaskAttemptCreated",
+      args: { taskId: 42n, attemptIndex: 3, requestId: REQUEST_ID },
+    });
+    const attemptData = encodeAbiParameters(
+      [
+        { name: "operator", type: "address" },
+        { name: "priorityMech", type: "address" },
+        { name: "deliveryRate", type: "uint256" },
+      ],
+      [OPERATOR, PRIORITY_MECH, 10n],
+    );
+    const decoded = decodeWithAuthority([
+      log({ address: ROUTER, topics: exactTopics(taskCreatedTopics), data: taskCreatedData }),
+      log({ address: COORDINATOR, topics: exactTopics(attemptTopics), data: attemptData }),
+    ], authority("today"));
+    expect(decoded.map(({ event }) => event)).toEqual(["TaskCreated"]);
+    const initial = createMarketplaceProjectionState();
+    const reduced = reduceMarketplaceProjection(
+      decoded.map((event) => ({ ...event, projection: PROJECTION })),
+      initial,
+    );
+    expect(reduced.events.map(({ event }) => event)).toEqual(["TaskCreated"]);
+    expect(reduced.events.some(({ event }) => event === "TaskAttemptCreated")).toBe(false);
+    expect(reduced.refusals).toEqual([]);
+    expect(reduced.state.requestIdBindings).toEqual({});
+    expect(Object.keys(reduced.state.pendingMechDeliveries)).toHaveLength(0);
   });
 
   test("ignores unknown logs instead of manufacturing event facts", () => {

@@ -113,6 +113,18 @@ export interface MarketplaceProjectionState {
   tasks: Record<string, MarketplaceTaskProjection>;
   /** External Mech delivery facts waiting for their router claim. */
   pendingMechDeliveries: Record<string, PendingMechDelivery>;
+  /**
+   * Persistent request-ID bindings keyed `chainId:normalizedRequestId`. Attempt-creation
+   * events register here; any distinct-log reuse or contradictory rebinding is refused.
+   */
+  requestIdBindings: Record<string, RequestIdBinding>;
+}
+
+interface RequestIdBinding {
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+  readonly role: "task-attempt" | "evaluation-attempt";
+  readonly verdictIndex?: number;
 }
 
 export interface MarketplaceProjectionTransition {
@@ -135,6 +147,7 @@ export interface MarketplaceProjectionRefusal {
     | "task-not-admissible"
     | "task-closed"
     | "attempt-identity-regressing"
+    | "request-id-reused"
     | "attempt-not-live"
     | "capacity-contradiction";
   readonly derivation: MarketplaceEvent["derivation"];
@@ -149,6 +162,7 @@ export function createMarketplaceProjectionState(): MarketplaceProjectionState {
     sequenceBySourceSubject: {},
     tasks: {},
     pendingMechDeliveries: {},
+    requestIdBindings: {},
   };
 }
 
@@ -203,6 +217,7 @@ export function cloneMarketplaceProjectionState(
         },
       ]),
     ),
+    requestIdBindings: { ...state.requestIdBindings },
   };
 }
 
@@ -286,6 +301,22 @@ function logIdentity(event: ObservationMarketplaceEvent): string {
     derivation.txHash.toLowerCase(),
     derivation.logIndex,
   ].join(":");
+}
+
+function requestIdBindingKey(chainId: number, requestId: Hex): string {
+  return `${chainId}:${requestId.toLowerCase()}`;
+}
+
+function registerRequestIdBinding(
+  state: MarketplaceProjectionState,
+  chainId: number,
+  requestId: Hex,
+  binding: RequestIdBinding,
+): boolean {
+  const key = requestIdBindingKey(chainId, requestId);
+  if (state.requestIdBindings[key] !== undefined) return false;
+  state.requestIdBindings[key] = binding;
+  return true;
 }
 
 function sequenceStreamKey(source: string, subject: string): string {
@@ -503,6 +534,14 @@ export function reduceMarketplaceProjection(
           || event.facts.attemptIndex <= taskCapacity.highestAttemptIndex
         ) {
           refuse(event, "attempt-identity-regressing", event.facts.taskId, event.facts.attemptIndex);
+          break;
+        }
+        if (!registerRequestIdBinding(state, event.derivation.chainId, event.facts.requestId, {
+          taskId: event.facts.taskId,
+          attemptIndex: event.facts.attemptIndex,
+          role: "task-attempt",
+        })) {
+          refuse(event, "request-id-reused", event.facts.taskId, event.facts.attemptIndex);
           break;
         }
         // Today has no release/expiry; every chain claim remains a monotonic occupancy fact.
@@ -790,6 +829,15 @@ export function reduceMarketplaceProjection(
         }
         if (!admissibleTask(task)) {
           refuse(event, "unknown-task", event.facts.taskId, event.facts.attemptIndex);
+          break;
+        }
+        if (!registerRequestIdBinding(state, event.derivation.chainId, event.facts.requestId, {
+          taskId: event.facts.taskId,
+          attemptIndex: event.facts.attemptIndex,
+          role: "evaluation-attempt",
+          verdictIndex: event.facts.verdictIndex,
+        })) {
+          refuse(event, "request-id-reused", event.facts.taskId, event.facts.attemptIndex);
         }
         break;
       }
