@@ -579,6 +579,127 @@ describe("projectObservations", () => {
     });
   });
 
+  test("a rejected today Task tombstone dominates every task-scoped lifecycle fact but keeps Deliver unbound", () => {
+    const rejected = projectable({
+      event: "TaskCreated",
+      facts: {
+        creator: CREATOR, taskCidDigest: `0x${"0".repeat(64)}`,
+        taskId: 42n, manifestDigest: `0x${"1".repeat(64)}`, maxClaims: 1,
+        solutionBudget: 100n, verdictBudget: 20n,
+      },
+      derivation: derivation("TaskCreated", 110),
+    });
+    const state = reduceMarketplaceProjection([rejected], createMarketplaceProjectionState()).state;
+    const verdict = projectable({
+      event: "VerdictDeliveryClaimed",
+      facts: { evaluator: OPERATOR, taskId: 42n, attemptIndex: 3, verdictIndex: 0, requestId: REQUEST_ID, verdictCode: 1 },
+      derivation: derivation("VerdictDeliveryClaimed", 114),
+    });
+    const refund = projectable({
+      event: "TaskBudgetRefunded",
+      facts: { taskId: 42n, creator: CREATOR, solutionAmount: 1n, verdictAmount: 1n },
+      derivation: derivation("TaskBudgetRefunded", 115),
+    });
+    const evaluation = projectable({
+      event: "EvaluationAttemptCreated",
+      facts: { taskId: 42n, attemptIndex: 3, verdictIndex: 0, evaluator: OPERATOR, priorityMech: OPERATOR, requestId: REQUEST_ID, deliveryRate: 1n },
+      derivation: derivation("EvaluationAttemptCreated", 116),
+    });
+    const result = reduceMarketplaceProjection([
+      claim,
+      deliver(),
+      solutionClaimed,
+      verdict,
+      refund,
+      evaluation,
+    ], state);
+
+    expect(result.events).toEqual([expect.objectContaining({ event: "Deliver" })]);
+    expect(result.observations).toEqual([]);
+    expect(result.availabilityOpenedLogIds).toEqual([]);
+    expect(result.refusals).toEqual([
+      expect.objectContaining({ reason: "task-not-admissible", taskId: 42n, attemptIndex: 3 }),
+      expect.objectContaining({ reason: "task-not-admissible", taskId: 42n, attemptIndex: 3 }),
+      expect.objectContaining({ reason: "task-not-admissible", taskId: 42n, attemptIndex: 3 }),
+      expect.objectContaining({ reason: "task-not-admissible", taskId: 42n }),
+      expect.objectContaining({ reason: "task-not-admissible", taskId: 42n, attemptIndex: 3 }),
+    ]);
+    expect(Object.keys(result.state.pendingMechDeliveries)).toHaveLength(1);
+  });
+
+  test.each([
+    ["finalized", "VerdictDeliveryClaimed", "AttemptReleased"],
+    ["refunded", "TaskBudgetRefunded", "AttemptExpired"],
+  ] as const)(
+    "%s is a permanent Task terminal cause while a live Attempt may finish",
+    (_cause, terminalEvent, lifecycleEvent) => {
+      const task = projectable({
+        event: "TaskCreated",
+        facts: {
+          creator: CREATOR, taskCidDigest: `0x${"7".repeat(64)}`,
+          submissionDigest: `0x${"d".repeat(64)}`, taskId: 42n, maxTotal: 1,
+          maxConcurrent: 1, submissionDeadline: 1_800_000_000n, closeAt: 0n,
+          responseTimeout: 3600n, minVerdicts: 1, requireDistinctEvaluator: true,
+          solutionMaxDeliveryRate: 10n, verdictMaxDeliveryRate: 20n,
+          solutionBudget: 100n, verdictBudget: 20n,
+        },
+        derivation: derivation("TaskCreated", 120, "revised"),
+      });
+      const engaged = projectable({
+        event: "TaskAttemptCreated",
+        facts: { taskId: 42n, attemptIndex: 3, operator: OPERATOR, requestId: REQUEST_ID, priorityMech: OPERATOR, attemptDeadline: 1_800_000_000n, deliveryRate: 10n },
+        derivation: derivation("TaskAttemptCreated", 121, "revised"),
+      });
+      const terminal = terminalEvent === "VerdictDeliveryClaimed"
+        ? projectable({ event: terminalEvent, facts: { evaluator: OPERATOR, taskId: 42n, attemptIndex: 3, verdictIndex: 0, requestId: REQUEST_ID, verdictCode: 1 }, derivation: derivation(terminalEvent, 122, "revised") })
+        : projectable({ event: terminalEvent, facts: { taskId: 42n, creator: CREATOR, solutionAmount: 1n, verdictAmount: 1n }, derivation: derivation(terminalEvent, 122, "revised") });
+      const lifecycle = projectable({ event: lifecycleEvent, facts: { taskId: 42n, attemptIndex: 3, operator: OPERATOR }, derivation: derivation(lifecycleEvent, 123, "revised") });
+      const initial = reduceMarketplaceProjection([task, engaged], createMarketplaceProjectionState());
+      const closed = reduceMarketplaceProjection([terminal], initial.state);
+      const after = reduceMarketplaceProjection([lifecycle], closed.state);
+      const retry = reduceMarketplaceProjection([{
+        ...engaged,
+        facts: { ...engaged.facts, attemptIndex: 4 },
+        derivation: derivation("TaskAttemptCreated", 124, "revised"),
+      } as ObservationMarketplaceEvent], after.state);
+      const topUp = reduceMarketplaceProjection([projectable({
+        event: "AttemptsAdded", facts: { taskId: 42n, creator: CREATOR, added: 1, newMaxTotal: 2 },
+        derivation: derivation("AttemptsAdded", 125, "revised"),
+      })], after.state);
+
+      const taskState = Object.values(after.state.tasks)[0]!;
+      expect(taskState).toMatchObject({ availability: "closed", terminalCause: _cause, liveAttemptIndices: {} });
+      expect(after.availabilityOpenedLogIds).toEqual([]);
+      expect(retry.refusals.map(({ reason }) => reason)).toEqual(["task-closed"]);
+      expect(topUp.refusals.map(({ reason }) => reason)).toEqual(["task-closed"]);
+    },
+  );
+
+  test("today finalization closes the Task permanently before a later claim", () => {
+    const created = projectable({
+      event: "TaskCreated",
+      facts: { creator: CREATOR, taskCidDigest: `0x${"7".repeat(64)}`, taskId: 42n, manifestDigest: `0x${"1".repeat(64)}`, maxClaims: 2, solutionBudget: 100n, verdictBudget: 20n },
+      derivation: derivation("TaskCreated", 130),
+    });
+    const verdict = projectable({
+      event: "VerdictDeliveryClaimed",
+      facts: { evaluator: OPERATOR, requestId: REQUEST_ID, taskId: 42n, attemptIndex: 3, verdictIndex: 0, verdictCode: 1 },
+      derivation: derivation("VerdictDeliveryClaimed", 131),
+    });
+    const afterVerdict = reduceMarketplaceProjection([created, verdict], createMarketplaceProjectionState());
+    const laterClaim = reduceMarketplaceProjection([{
+      ...claim,
+      derivation: derivation("TaskAttemptCreated", 132),
+      facts: { ...claim.facts, attemptIndex: 4 },
+    } as ObservationMarketplaceEvent], afterVerdict.state);
+
+    expect(Object.values(afterVerdict.state.tasks)[0]).toMatchObject({ terminalCause: "finalized", availability: "closed" });
+    expect(laterClaim).toMatchObject({
+      events: [], observations: [], availabilityOpenedLogIds: [],
+      refusals: [expect.objectContaining({ reason: "task-closed", taskId: 42n, attemptIndex: 4 })],
+    });
+  });
+
   test.each(["AttemptReleased", "AttemptExpired"] as const)(
     "TaskClosed remains terminal across a later %s batch", (lifecycleEvent) => {
       const revisedTask = projectable({

@@ -66,7 +66,9 @@ interface AdmissibleTaskProjection {
   seenAttemptIndices: Record<string, true>;
   highestAttemptIndex: number;
   availability: "open" | "closed";
-  /** `TaskClosed` is monotonic and dominates capacity reopening. */
+  /** Terminal Task causes are monotonic and dominate capacity reopening. */
+  terminalCause?: "finalized" | "refunded" | "requester-closed";
+  /** Backward-compatible marker retained for persisted requester-closed state. */
   requesterClosed?: true;
   /** Revised creation anchor used to admit every later availability re-opening. */
   submissionAnchor?: {
@@ -89,6 +91,7 @@ interface RejectedTaskTombstone {
   readonly seenAttemptIndices?: never;
   readonly highestAttemptIndex?: never;
   readonly availability?: never;
+  readonly terminalCause?: never;
   readonly requesterClosed?: never;
   readonly submissionAnchor?: never;
   readonly submissionTerms?: never;
@@ -400,7 +403,7 @@ export function reduceMarketplaceProjection(
   }
 
   function updateAvailability(task: AdmissibleTaskProjection): "open" | "closed" {
-    if (task.requesterClosed === true) return "closed";
+    if (task.terminalCause !== undefined || task.requesterClosed === true) return "closed";
     return Object.keys(task.liveAttemptIndices).length >= task.maxTotal ? "closed" : "open";
   }
 
@@ -480,17 +483,20 @@ export function reduceMarketplaceProjection(
       case "TaskAttemptCreated": {
         const key = taskKey(event, event.facts.taskId);
         const taskCapacity = state.tasks[key];
+        if (taskCapacity?.admission === "rejected") {
+          refuse(event, "task-not-admissible", event.facts.taskId, event.facts.attemptIndex);
+          break;
+        }
+        if (
+          admissibleTask(taskCapacity)
+          && (taskCapacity.terminalCause !== undefined || taskCapacity.requesterClosed === true)
+        ) {
+          refuse(event, "task-closed", event.facts.taskId, event.facts.attemptIndex);
+          break;
+        }
         if (event.derivation.contractGeneration === "revised") {
-          if (taskCapacity?.admission === "rejected") {
-            refuse(event, "task-not-admissible", event.facts.taskId, event.facts.attemptIndex);
-            break;
-          }
           if (!admissibleTask(taskCapacity)) {
             refuse(event, "unknown-task", event.facts.taskId, event.facts.attemptIndex);
-            break;
-          }
-          if (taskCapacity.requesterClosed === true) {
-            refuse(event, "task-closed", event.facts.taskId, event.facts.attemptIndex);
             break;
           }
           if (
@@ -563,6 +569,11 @@ export function reduceMarketplaceProjection(
       }
 
       case "SolutionDeliveryClaimed": {
+        const task = state.tasks[taskKey(event, event.facts.taskId)];
+        if (task?.admission === "rejected") {
+          refuse(event, "task-not-admissible", event.facts.taskId, event.facts.attemptIndex);
+          break;
+        }
         const attempt = attemptFor(event, event.facts.taskId, event.facts.attemptIndex);
         const pendingKey = pendingDeliveryKey(event, event.facts.requestId);
         const mechDelivery = state.pendingMechDeliveries[pendingKey];
@@ -625,6 +636,15 @@ export function reduceMarketplaceProjection(
       }
 
       case "VerdictDeliveryClaimed": {
+        const task = state.tasks[taskKey(event, event.facts.taskId)];
+        if (task?.admission === "rejected") {
+          refuse(event, "task-not-admissible", event.facts.taskId, event.facts.attemptIndex);
+          break;
+        }
+        if (admissibleTask(task)) {
+          task.terminalCause ??= "finalized";
+          task.availability = "closed";
+        }
         const attempt = attemptFor(event, event.facts.taskId, event.facts.attemptIndex);
         emit(
           event,
@@ -659,7 +679,7 @@ export function reduceMarketplaceProjection(
         const wasClosed = taskCapacity.availability === "closed";
         delete taskCapacity.liveAttemptIndices[String(event.facts.attemptIndex)];
         taskCapacity.availability = updateAvailability(taskCapacity);
-        if (wasClosed && taskCapacity.availability === "open" && taskCapacity.requesterClosed !== true) availabilityOpenedLogIds.push(identity);
+        if (wasClosed && taskCapacity.availability === "open" && taskCapacity.terminalCause === undefined && taskCapacity.requesterClosed !== true) availabilityOpenedLogIds.push(identity);
         emit(
           event,
           "network.jinn.task-execution.attempt-terminal.v1",
@@ -687,7 +707,7 @@ export function reduceMarketplaceProjection(
         const wasClosed = taskCapacity.availability === "closed";
         delete taskCapacity.liveAttemptIndices[String(event.facts.attemptIndex)];
         taskCapacity.availability = updateAvailability(taskCapacity);
-        if (wasClosed && taskCapacity.availability === "open" && taskCapacity.requesterClosed !== true) availabilityOpenedLogIds.push(identity);
+        if (wasClosed && taskCapacity.availability === "open" && taskCapacity.terminalCause === undefined && taskCapacity.requesterClosed !== true) availabilityOpenedLogIds.push(identity);
         emit(
           event,
           "network.jinn.task-execution.attempt-terminal.v1",
@@ -697,7 +717,16 @@ export function reduceMarketplaceProjection(
         break;
       }
 
-      case "TaskBudgetRefunded":
+      case "TaskBudgetRefunded": {
+        const task = state.tasks[taskKey(event, event.facts.taskId)];
+        if (task?.admission === "rejected") {
+          refuse(event, "task-not-admissible", event.facts.taskId);
+          break;
+        }
+        if (admissibleTask(task)) {
+          task.terminalCause ??= "refunded";
+          task.availability = "closed";
+        }
         emit(
           event,
           "network.jinn.task-execution.submission-closed.v1",
@@ -705,6 +734,7 @@ export function reduceMarketplaceProjection(
           { reason: "requester-close" },
         );
         break;
+      }
 
       case "TaskClosed": {
         const key = taskKey(event, event.facts.taskId);
@@ -714,6 +744,7 @@ export function reduceMarketplaceProjection(
           break;
         }
         if (admissibleTask(task)) {
+          task.terminalCause ??= "requester-closed";
           task.requesterClosed = true;
           task.availability = "closed";
         }
@@ -737,7 +768,7 @@ export function reduceMarketplaceProjection(
           refuse(event, "unknown-task", event.facts.taskId);
           break;
         }
-        if (existing.requesterClosed === true) {
+        if (existing.terminalCause !== undefined || existing.requesterClosed === true) {
           refuse(event, "task-closed", event.facts.taskId);
           break;
         }
@@ -757,8 +788,13 @@ export function reduceMarketplaceProjection(
 
       // Evaluation execution is projected by the M5 requester-sealed evaluation leg. This
       // on-chain event alone does not carry the distinct evaluation Task/Submission identities.
-      case "EvaluationAttemptCreated":
+      case "EvaluationAttemptCreated": {
+        const task = state.tasks[taskKey(event, event.facts.taskId)];
+        if (task?.admission === "rejected") {
+          refuse(event, "task-not-admissible", event.facts.taskId, event.facts.attemptIndex);
+        }
         break;
+      }
     }
     if (!eventRefused) acceptedEvents.push(event);
   }

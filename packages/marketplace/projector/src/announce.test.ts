@@ -830,4 +830,33 @@ describe("projectAnnouncements", () => {
     expect(result.announcements).toEqual([]);
     expect(result.entries).toEqual([]);
   });
+
+  test.each([
+    ["verdict then release", "VerdictDeliveryClaimed", "AttemptReleased"],
+    ["refund then expiry", "TaskBudgetRefunded", "AttemptExpired"],
+    ["refund then top-up", "TaskBudgetRefunded", "AttemptsAdded"],
+  ] as const)(
+    "%s never emits a reopening available announcement across a batch boundary",
+    async (_name, terminalName, laterName) => {
+      const opening = transition([task(), claim()]);
+      const terminal = terminalName === "VerdictDeliveryClaimed"
+        ? projectable({
+            event: terminalName,
+            facts: { evaluator: OPERATOR, requestId: REQUEST_ID, taskId: 42n, attemptIndex: 3, verdictIndex: 0, verdictCode: 1 },
+            derivation: derivation(terminalName, 80),
+          })
+        : close();
+      const closed = transition([terminal], opening.state);
+      const later = laterName === "AttemptsAdded"
+        ? projectable({ event: laterName, facts: { taskId: 42n, creator: CREATOR, added: 1, newMaxTotal: 3 }, derivation: derivation(laterName, 81, "revised") })
+        : projectable({ event: laterName, facts: { taskId: 42n, attemptIndex: 3, operator: OPERATOR }, derivation: derivation(laterName, 81, "revised") } as MarketplaceEvent);
+      const after = transition([later], closed.state);
+      const result = await projectAnnouncements(after, makePorts().ports);
+
+      expect(after.availabilityOpenedLogIds).toEqual([]);
+      expect(result.announcements.filter((announcement) => announcement.action === "available")).toEqual([]);
+      expect(result.entries).toEqual([]);
+      expect(result.refusals).toEqual([]);
+    },
+  );
 });
