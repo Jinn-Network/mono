@@ -5,6 +5,7 @@ import { documentDigest } from "../hashing.js";
 import { BenchmarkRecordSchema, sealBenchmark } from "./schema.js";
 import {
   checkBenchmarkPredecessor,
+  checkBenchmarkTransition,
   checkComparability,
   checkItemDistinctness,
   checkJudgeability,
@@ -20,7 +21,7 @@ const DIGEST_A = "7afaa346b4bf92bf9dc21e9ae809887412a86beb766842e99df7fee6573a47
 const DIGEST_B = "78686d2704d4d6900bb73f4941aa661a26a09f4346ab5e83281c0a18830ad1dd";
 const DIGEST_C = "1724980aa084bbaa16a8a69b664b783799bc75f8abe13ffc65b76843564fbbff";
 
-function benchmarkWith(items: string[], overrides: Record<string, unknown> = {}) {
+function benchmarkWith(items: readonly string[], overrides: Record<string, unknown> = {}) {
   return BenchmarkRecordSchema.parse({
     protocol: "https://jinn.network/protocols/benchmarking/1.0",
     name: "n",
@@ -56,6 +57,10 @@ describe("checkJudgeability", () => {
       protocol: "https://jinn.network/profiles/task-execution/1.0",
       profile: { digest: { sha256: DIGEST_B } },
       instructions,
+      payload: {
+        language: "TypeScript",
+        provenance: { kind: "mined", source: "fixture-source", timestamp: "2026-07-29T00:00:00Z" },
+      },
       outputs: [],
       evaluation: { digest: { sha256: DIGEST_C } },
     });
@@ -119,6 +124,18 @@ describe("checkJudgeability", () => {
       ok: false,
       invalid: [{ taskDigest: digest, reason: "invalid-task" }],
       unresolved: [],
+    });
+  });
+
+  test("requires timestamp and exactly one plaintext source or lowercase sha256 source commitment", () => {
+    const missingTimestamp = sealTask({
+      protocol: "https://jinn.network/profiles/task-execution/1.0", profile: { digest: { sha256: DIGEST_B } },
+      instructions: "do it", outputs: [], evaluation: { digest: { sha256: DIGEST_C } },
+      payload: { provenance: { source: "fixture" } },
+    });
+    const digest = bareDigest(missingTimestamp);
+    expect(checkJudgeability(benchmarkWith([digest]), () => missingTimestamp)).toEqual({
+      ok: false, invalid: [{ taskDigest: digest, reason: "invalid-provenance" }], unresolved: [],
     });
   });
 });
@@ -207,6 +224,41 @@ describe("checkBenchmarkPredecessor", () => {
       ok: false,
       reason: "missing-supersedes",
     });
+  });
+});
+
+describe("checkBenchmarkTransition", () => {
+  function successor(predecessor: ReturnType<typeof sealBenchmark>, items: readonly string[], version: string) {
+    return benchmarkWith(items, {
+      version,
+      supersedes: { digest: { sha256: predecessor.digest.slice("sha256:".length) } },
+    });
+  }
+
+  test("binds exact predecessor bytes and accepts only a matching increasing bump", () => {
+    const predecessor = sealBenchmark(benchmarkWith([DIGEST_A], { version: "1.0.0" }));
+    expect(checkBenchmarkTransition(
+      successor(predecessor, [DIGEST_A, DIGEST_B], "1.1.0"), predecessor.bytes,
+    )).toEqual({ ok: true, bump: "minor" });
+  });
+
+  test.each([
+    ["downgrade", [DIGEST_A], "0.9.0", "version-not-increasing"],
+    ["unchanged", [DIGEST_A], "1.0.0", "version-not-increasing"],
+    ["build-only", [DIGEST_A], "1.0.0+build.2", "version-not-increasing"],
+    ["wrong patch", [DIGEST_A, DIGEST_B], "1.0.1", "wrong-bump"],
+    ["wrong minor", [DIGEST_A], "1.1.0", "wrong-bump"],
+    ["wrong major", [DIGEST_B], "1.1.0", "wrong-bump"],
+  ] as const)("rejects %s transition", (_name, items, version, reason) => {
+    const predecessor = sealBenchmark(benchmarkWith([DIGEST_A], { version: "1.0.0" }));
+    expect(checkBenchmarkTransition(successor(predecessor, items, version), predecessor.bytes))
+      .toMatchObject({ ok: false, reason });
+  });
+
+  test("accepts SemVer prerelease-to-release precedence within the classified patch class", () => {
+    const predecessor = sealBenchmark(benchmarkWith([DIGEST_A], { version: "1.0.0-rc.1" }));
+    expect(checkBenchmarkTransition(successor(predecessor, [DIGEST_A], "1.0.0"), predecessor.bytes))
+      .toEqual({ ok: true, bump: "patch" });
   });
 });
 

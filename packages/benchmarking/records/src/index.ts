@@ -49,6 +49,7 @@ export { BenchmarkRecordSchema, itemTaskDigest, parseBenchmark, sealBenchmark } 
 export type { BenchmarkItem, BenchmarkRecord } from "./benchmark/schema.js";
 export {
   checkBenchmarkPredecessor,
+  checkBenchmarkTransition,
   checkComparability,
   checkItemDistinctness,
   checkJudgeability,
@@ -56,6 +57,7 @@ export {
 } from "./benchmark/checks.js";
 export type {
   BenchmarkPredecessorCheck,
+  BenchmarkTransitionCheck,
   JudgeabilityInvalidItem,
   TaskBytesResolver,
   VersionBump,

@@ -21,7 +21,7 @@ export function checkItemDistinctness(
 
 export type TaskBytesResolver = (taskDigest: string) => Uint8Array | undefined;
 
-type JudgeabilityReason = "digest-mismatch" | "invalid-task" | "missing-evaluation-digest";
+type JudgeabilityReason = "digest-mismatch" | "invalid-task" | "missing-evaluation-digest" | "invalid-provenance";
 export interface JudgeabilityInvalidItem {
   readonly taskDigest: string;
   readonly reason: JudgeabilityReason;
@@ -48,6 +48,21 @@ function inspectTask(taskDigest: string, taskBytes: Uint8Array): JudgeabilityRea
   }
   const evaluationDigest = task.data.evaluation?.digest?.sha256;
   if (!LowercaseSha256HexSchema.safeParse(evaluationDigest).success) return "missing-evaluation-digest";
+  const payload = task.data.payload;
+  const provenance = typeof payload === "object" && payload !== null && !Array.isArray(payload)
+    ? (payload as Record<string, unknown>)["provenance"]
+    : undefined;
+  if (typeof provenance !== "object" || provenance === null || Array.isArray(provenance)) return "invalid-provenance";
+  const fields = provenance as Record<string, unknown>;
+  const timestamp = fields["timestamp"];
+  const source = fields["source"];
+  const commitment = fields["sourceCommitment"];
+  const sourceOk = typeof source === "string" && source.length > 0;
+  const commitmentOk = typeof commitment === "string" && /^sha256:[a-f0-9]{64}$/.test(commitment);
+  const timestampOk = typeof timestamp === "string"
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(timestamp)
+    && !Number.isNaN(Date.parse(timestamp));
+  if (!timestampOk || sourceOk === commitmentOk) return "invalid-provenance";
   return undefined;
 }
 
@@ -113,6 +128,84 @@ export function checkBenchmarkPredecessor(
   return actual === expected
     ? { ok: true }
     : { ok: false, reason: "digest-mismatch", expected, actual };
+}
+
+interface SemVer {
+  readonly major: number;
+  readonly minor: number;
+  readonly patch: number;
+  readonly prerelease: readonly string[];
+}
+
+/** Complete SemVer 2.0.0 parser. Build metadata is deliberately excluded from precedence. */
+function parseSemVer(value: string): SemVer | undefined {
+  const match = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[0-9]*[A-Za-z-][0-9A-Za-z-]*|[1-9][0-9]*)(?:\.(?:0|[0-9]*[A-Za-z-][0-9A-Za-z-]*|[1-9][0-9]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(value);
+  if (match === null) return undefined;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    prerelease: match[4] === undefined ? [] : match[4].split("."),
+  };
+}
+
+function comparePrerelease(left: readonly string[], right: readonly string[]): number {
+  if (left.length === 0 || right.length === 0) return left.length === right.length ? 0 : left.length === 0 ? 1 : -1;
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const a = left[index];
+    const b = right[index];
+    if (a === undefined) return -1;
+    if (b === undefined) return 1;
+    if (a === b) continue;
+    const aNumeric = /^[0-9]+$/.test(a);
+    const bNumeric = /^[0-9]+$/.test(b);
+    if (aNumeric && bNumeric) return Number(a) < Number(b) ? -1 : 1;
+    if (aNumeric) return -1;
+    if (bNumeric) return 1;
+    return compareCodeUnitStrings(a, b);
+  }
+  return 0;
+}
+
+function compareSemVer(left: SemVer, right: SemVer): number {
+  for (const key of ["major", "minor", "patch"] as const) {
+    if (left[key] !== right[key]) return left[key] < right[key] ? -1 : 1;
+  }
+  return comparePrerelease(left.prerelease, right.prerelease);
+}
+
+export type BenchmarkTransitionCheck =
+  | { ok: true; bump: VersionBump }
+  | { ok: false; reason: "missing-supersedes" | "invalid-predecessor" | "digest-mismatch" | "invalid-version" | "version-not-increasing" | "wrong-bump" };
+
+/**
+ * Cross-record §6.2 transition check. It first binds exact predecessor bytes, then requires a
+ * strictly increasing SemVer 2 precedence and a content-class-consistent version bump.
+ */
+export function checkBenchmarkTransition(
+  next: BenchmarkRecord,
+  predecessorBytes: Uint8Array,
+): BenchmarkTransitionCheck {
+  const predecessor = checkBenchmarkPredecessor(next, predecessorBytes);
+  if (!predecessor.ok) return { ok: false, reason: predecessor.reason };
+  let previous: BenchmarkRecord;
+  try {
+    previous = parseBenchmark(predecessorBytes);
+  } catch {
+    return { ok: false, reason: "invalid-predecessor" };
+  }
+  const from = parseSemVer(previous.version);
+  const to = parseSemVer(next.version);
+  if (from === undefined || to === undefined) return { ok: false, reason: "invalid-version" };
+  if (compareSemVer(to, from) <= 0) return { ok: false, reason: "version-not-increasing" };
+  const bump = classifyVersionBump(previous, next);
+  const core = bump === "major" ? to.major > from.major
+    : bump === "minor" ? to.major === from.major && to.minor > from.minor
+      : to.major === from.major && to.minor === from.minor && to.patch === from.patch
+        ? true
+        : to.major === from.major && to.minor === from.minor && to.patch > from.patch;
+  return core ? { ok: true, bump } : { ok: false, reason: "wrong-bump" };
 }
 
 /**
