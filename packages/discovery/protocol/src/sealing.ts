@@ -1,4 +1,3 @@
-import canonicalize from "canonicalize";
 import { recordDigest } from "./hashing.js";
 
 const encoder = new TextEncoder();
@@ -133,11 +132,27 @@ function cloneCanonicalJsonValue(value: unknown): CanonicalJsonValue {
   return visit(value);
 }
 
-export function sealJson(value: unknown): { bytes: Uint8Array; digest: `sha256:${string}` } {
-  const encoded = canonicalize(cloneCanonicalJsonValue(value));
-  if (encoded === undefined) {
-    throw new Error("Value cannot be serialized as canonical JSON.");
+function compareCodeUnitStrings(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function serializeCanonicalJson(value: CanonicalJsonValue): string {
+  if (value === null) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((element) => serializeCanonicalJson(element)).join(",")}]`;
   }
-  const bytes = encoder.encode(encoded);
+  const keys = Object.keys(value).sort(compareCodeUnitStrings);
+  return `{${keys
+    .map((key) => `${JSON.stringify(key)}:${serializeCanonicalJson(value[key]!)}`)
+    .join(",")}}`;
+}
+
+export function sealJson(value: unknown): { bytes: Uint8Array; digest: `sha256:${string}` } {
+  const bytes = encoder.encode(serializeCanonicalJson(cloneCanonicalJsonValue(value)));
   return { bytes, digest: recordDigest(bytes) };
 }

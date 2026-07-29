@@ -4,9 +4,9 @@ import { timingSafeEqual } from "node:crypto";
 
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
-import canonicalize from "canonicalize";
 
 import { ProfilesError } from "./errors.js";
+import { compareCodeUnitStrings } from "./order.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -143,12 +143,22 @@ function cloneCanonicalJsonValue(value: unknown): CanonicalJsonValue {
   return visit(value);
 }
 
-export function canonicalJsonBytes(value: unknown): Uint8Array {
-  const encoded = canonicalize(cloneCanonicalJsonValue(value));
-  if (encoded === undefined) {
-    throw new ProfilesError("invalid-document", "Value cannot be serialized as canonical JSON.");
+function serializeCanonicalJson(value: CanonicalJsonValue): string {
+  if (value === null) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((element) => serializeCanonicalJson(element)).join(",")}]`;
   }
-  return encoder.encode(encoded);
+  const keys = Object.keys(value).sort(compareCodeUnitStrings);
+  return `{${keys
+    .map((key) => `${JSON.stringify(key)}:${serializeCanonicalJson(value[key]!)}`)
+    .join(",")}}`;
+}
+
+export function canonicalJsonBytes(value: unknown): Uint8Array {
+  return encoder.encode(serializeCanonicalJson(cloneCanonicalJsonValue(value)));
 }
 
 export function decodeUtf8(bytes: Uint8Array): string {

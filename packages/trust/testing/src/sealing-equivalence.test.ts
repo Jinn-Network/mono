@@ -206,6 +206,60 @@ describe("stack-wide raw-JCS conformance (program rulings §7.1/§7.14/§7.24)",
     ).toBe('{"text":"𠜎","😀":"supplementary 😀"}');
   });
 
+  test("all public canonical-byte APIs ignore inherited Array.prototype.toJSON", () => {
+    const original = Object.getOwnPropertyDescriptor(Array.prototype, "toJSON");
+    try {
+      Object.defineProperty(Array.prototype, "toJSON", {
+        configurable: true,
+        enumerable: false,
+        value: () => "hijacked",
+        writable: true,
+      });
+
+      for (const implementation of rawJcsImplementations) {
+        expect(
+          new TextDecoder().decode(
+            implementation.canonicalJsonBytes([1, { nested: [2] }]),
+          ),
+          implementation.name,
+        ).toBe('[1,{"nested":[2]}]');
+      }
+    } finally {
+      if (original === undefined) {
+        delete (Array.prototype as { toJSON?: unknown }).toJSON;
+      } else {
+        Object.defineProperty(Array.prototype, "toJSON", original);
+      }
+    }
+  });
+
+  test("all public canonical-byte APIs ignore inherited Object.prototype.toJSON", () => {
+    const original = Object.getOwnPropertyDescriptor(Object.prototype, "toJSON");
+    try {
+      Object.defineProperty(Object.prototype, "toJSON", {
+        configurable: true,
+        enumerable: false,
+        value: () => "hijacked",
+        writable: true,
+      });
+
+      for (const implementation of rawJcsImplementations) {
+        expect(
+          new TextDecoder().decode(
+            implementation.canonicalJsonBytes({ alpha: [1], nested: { beta: 2 } }),
+          ),
+          implementation.name,
+        ).toBe('{"alpha":[1],"nested":{"beta":2}}');
+      }
+    } finally {
+      if (original === undefined) {
+        delete (Object.prototype as { toJSON?: unknown }).toJSON;
+      } else {
+        Object.defineProperty(Object.prototype, "toJSON", original);
+      }
+    }
+  });
+
   test("all public canonical-byte APIs reject the same hostile fixtures", () => {
     const symbolKeyed = { [Symbol("unsupported-key")]: "value" };
     const inherited = Object.assign(Object.create({ inherited: true }), { own: true });
