@@ -47,7 +47,6 @@ import type {
 import {
   documentDigest,
   foldObservations,
-  formatSequence,
   isValidUrnUuid,
   mergeRequirements,
   sealDelivery,
@@ -83,6 +82,13 @@ import {
   CapacityGate,
   type StateRootWriter,
 } from "./capacity.js";
+import {
+  assembleCapabilities,
+  type CapabilityProvisionerConfig,
+  type RecorderAvailability,
+  type TrustKeyConfig,
+} from "./capabilities.js";
+import { projectObservations } from "./observation.js";
 
 // Core requirement comparison classes (profiles §5.1 / program §7.3). Profile-added entries
 // are overlaid after resolution, so the resolved document is authoritative for its own keys.
@@ -165,14 +171,7 @@ function errorCategory(error: unknown): TaskExecutionError {
   });
 }
 
-export interface ProvisionerCapabilities {
-  readonly taskProfiles: readonly string[];
-  readonly workspaceKinds: readonly WorkspaceKind[];
-  readonly inputMediaTypes: readonly string[];
-  readonly outputMediaTypes: readonly string[];
-  readonly maxArtifactBytes?: number;
-  readonly isolation: readonly string[];
-}
+export interface ProvisionerCapabilities extends CapabilityProvisionerConfig {}
 
 export interface LocalProvisionerInput {
   readonly sealedTaskBytes: Uint8Array;
@@ -199,6 +198,8 @@ export interface LocalTaskExecutionBackendConfig {
   readonly provisioner: (input: LocalProvisionerInput) => ProvisionerContract;
   readonly provisionerCapabilities: ProvisionerCapabilities;
   readonly maxConcurrentAttempts?: number;
+  readonly recorderAvailability?: RecorderAvailability;
+  readonly trustKeys?: TrustKeyConfig;
   readonly capabilityGrants?: (
     grants: Readonly<Record<string, unknown>>,
   ) => readonly CapabilityGrant[];
@@ -399,43 +400,12 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   }
 
   private capabilitiesValue(): BackendCapabilities {
-    const taskProfiles = [...new Set(
-      this.config.launchers.flatMap((launcher) => [...launcher.capabilities().taskProfiles]),
-    )].filter((profile) => this.config.provisionerCapabilities.taskProfiles.includes(profile));
-    const runPinning = new Map<string, Set<string>>();
-    for (const launcher of this.config.launchers) {
-      for (const support of launcher.capabilities().runPinning.keys) {
-        const inventory = runPinning.get(support.key) ?? new Set<string>();
-        for (const item of support.inventory) inventory.add(item);
-        runPinning.set(support.key, inventory);
-      }
-    }
-    return {
-      taskProfiles,
-      inputMediaTypes: [...this.config.provisionerCapabilities.inputMediaTypes],
-      outputMediaTypes: [...this.config.provisionerCapabilities.outputMediaTypes],
-      ...(this.config.provisionerCapabilities.maxArtifactBytes === undefined
-        ? {}
-        : { maxArtifactBytes: this.config.provisionerCapabilities.maxArtifactBytes }),
-      cancel: true,
-      watch: true,
-      preflight: true,
-      fetchArtifact: true,
-      confidentialInputs: true,
-      signedObservations: false,
-      signedDeliveries: false,
-      evidenceCapture: "none",
-      deadlineEnforcement: true,
-      isolation: [...this.config.provisionerCapabilities.isolation],
-      attempts: { maxTotal: [1, 1], maxConcurrent: [1, 1] },
-      runPinning: {
-        keys: [...runPinning].map(([key, inventory]) => ({
-          key,
-          inventory: [...inventory],
-          posture: "enforced" as const,
-        })),
-      },
-    };
+    return assembleCapabilities({
+      launchers: this.config.launchers,
+      provisioner: this.config.provisionerCapabilities,
+      recorderAvailability: this.config.recorderAvailability ?? "none",
+      trustKeys: this.config.trustKeys ?? {},
+    });
   }
 
   async capabilities(): Promise<BackendCapabilities> {
@@ -905,127 +875,8 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   }
 
   private observations(attempt: AttemptUri): ProtocolObservation[] {
-    const events = this.journal(attempt).read();
-    const engaged = events.find((event) => event.type === "attempt-engaged");
-    const authoritativeSource =
-      typeof engaged?.details["source"] === "string"
-        ? engaged.details["source"]
-        : this.config.source;
-    const taskDigest =
-      typeof engaged?.details["taskDigest"] === "string"
-        ? engaged.details["taskDigest"] as `sha256:${string}`
-        : undefined;
-    return events.flatMap((event) => {
-      const base = {
-        specversion: "1.0" as const,
-        id: `${authoritativeSource}/${event.attemptId}/${event.seq}`,
-        source: authoritativeSource,
-        subject: event.attemptId,
-        time: event.time,
-        datacontenttype: "application/json" as const,
-        sequence: formatSequence(BigInt(event.seq)),
-        ...(taskDigest === undefined ? {} : { taskdigest: taskDigest }),
-      };
-      switch (event.type) {
-        case "attempt-engaged":
-          return [{
-            ...base,
-            type: "network.jinn.task-execution.attempt-engaged.v1" as const,
-            data: {
-              attempt: event.details["attempt"],
-              task: event.details["taskDigest"],
-              submission: event.details["submission"],
-              executor: event.details["executor"],
-              effectiveDeadline: event.details["effectiveDeadline"],
-              source: authoritativeSource,
-              dispatchContext: event.details["dispatchContext"],
-              ...(event.details["annotations"] === undefined
-                ? {}
-                : { annotations: event.details["annotations"] }),
-            },
-          } as ProtocolObservation];
-        case "attempt-started":
-        case "spawned":
-          return [{
-            ...base,
-            type: "network.jinn.task-execution.attempt-started.v1" as const,
-            data: {
-              startedAt:
-                typeof event.details["startedAt"] === "string"
-                  ? event.details["startedAt"]
-                  : event.time,
-              ...(typeof event.details["executor"] === "string"
-                ? { executor: event.details["executor"] }
-                : {}),
-            },
-          } as ProtocolObservation];
-        case "cancel-requested":
-          return [{
-            ...base,
-            type: "network.jinn.task-execution.cancel-requested.v1" as const,
-            data: {
-              reason: String(event.details["reason"] ?? "cancel requested"),
-              requestedBy: String(event.details["requestedBy"] ?? "backend caller"),
-            },
-          } as ProtocolObservation];
-        case "cancel-acknowledged":
-          return [{
-            ...base,
-            type: "network.jinn.task-execution.cancel-acknowledged.v1" as const,
-            data: {
-              acknowledgedBy: String(
-                event.details["acknowledgedBy"] ?? this.config.source,
-              ),
-            },
-          } as ProtocolObservation];
-        case "delivery-recorded":
-          return [{
-            ...base,
-            type: "network.jinn.task-execution.delivery-recorded.v1" as const,
-            data: {
-              digest: event.details["digest"],
-              ...(event.details["locators"] === undefined
-                ? {}
-                : { locators: event.details["locators"] }),
-            },
-          } as ProtocolObservation];
-        case "attempt-terminal":
-          return [{
-            ...base,
-            type: "network.jinn.task-execution.attempt-terminal.v1" as const,
-            data: {
-              state: event.details["state"],
-              ...(event.details["blame"] === undefined
-                ? {}
-                : { blame: event.details["blame"] }),
-              ...(event.details["category"] === undefined
-                ? {}
-                : { category: event.details["category"] }),
-              ...(event.details["detail"] === undefined
-                ? {}
-                : { detail: event.details["detail"] }),
-            },
-          } as ProtocolObservation];
-        case "progress":
-        case "spawn-intended":
-        case "exec-finished":
-        case "harvest-started":
-        case "harvested":
-        case "delivery-checkpointed":
-        case "reconciliation":
-          return [{
-            ...base,
-            type: "network.jinn.task-execution.progress.v1" as const,
-            data: {
-              message: event.displayMessage ?? event.type,
-              ...(typeof event.details["fraction"] === "number"
-                ? { fraction: event.details["fraction"] }
-                : {}),
-            },
-          } as ProtocolObservation];
-        default:
-          return [];
-      }
+    return projectObservations(this.journal(attempt).read(), {
+      defaultSource: this.config.source,
     });
   }
 
@@ -1198,6 +1049,9 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
           break;
         case "network.jinn.task-execution.cancel-acknowledged.v1":
           type = "cancel-acknowledged";
+          break;
+        case "network.jinn.task-execution.execution-observed.v1":
+          type = "execution-observed";
           break;
         case "network.jinn.task-execution.attempt-terminal.v1":
           type = "attempt-terminal";

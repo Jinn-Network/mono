@@ -28,6 +28,8 @@ export const JOURNAL_EVENT_TYPES = [
   "harvest-started",
   /** Harvest complete; `out/` collection frozen into a manifest. */
   "harvested",
+  /** Execution Evidence finalization receipt observed; carries Execution ID + record ref. */
+  "execution-observed",
   /** The Delivery has been sealed once and checkpointed (§9.1 seal-once); not yet recorded as an observation. */
   "delivery-checkpointed",
   "delivery-recorded",

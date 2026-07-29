@@ -9,3 +9,12 @@ export type {
   LocalTaskExecutionBackendConfig,
   ProvisionerCapabilities,
 } from "./backend.js";
+export { assembleCapabilities } from "./capabilities.js";
+export type {
+  AssembleCapabilitiesInput,
+  CapabilityProvisionerConfig,
+  RecorderAvailability,
+  TrustKeyConfig,
+} from "./capabilities.js";
+export { projectObservations } from "./observation.js";
+export type { ProjectableJournalEvent } from "./observation.js";
