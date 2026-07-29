@@ -101,7 +101,7 @@ try {
 
   await writeFile(
     join(consumer, "packed-types.ts"),
-    `import "@jinn-network/marketplace-testing";\n`,
+    `import "@jinn-network/marketplace-testing";\nimport "@jinn-network/marketplace-testing/backend-conformance";\n`,
   );
   await writeFile(
     join(consumer, "tsconfig.json"),
@@ -128,6 +128,7 @@ try {
     `
 import { readFile, readdir } from "node:fs/promises";
 import "@jinn-network/marketplace-testing";
+import "@jinn-network/marketplace-testing/backend-conformance";
 
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();

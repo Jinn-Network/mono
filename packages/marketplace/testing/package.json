@@ -19,6 +19,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./backend-conformance": {
+      "import": "./dist/backend-conformance.js",
+      "types": "./dist/backend-conformance.d.ts"
     }
   },
   "files": [

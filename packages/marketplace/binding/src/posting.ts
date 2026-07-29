@@ -106,7 +106,7 @@ export async function postTask(
 
   const boundTaskDigestHex = submission.task.digest?.["sha256"];
   if (boundTaskDigestHex !== taskDigestHex) {
-    throw new TaskExecutionError("invalid-document", {
+    throw new TaskExecutionError("invalid-reference", {
       detail:
         `Submission's task digest (sha256:${boundTaskDigestHex ?? "none"}) does not match the `
         + `provided Task bytes' digest (${taskDigest}) -- refusing to broadcast a mismatched pair (§6.1)`,

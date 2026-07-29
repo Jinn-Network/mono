@@ -205,8 +205,53 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  anvil-fork:
+    needs: [binding, projector]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Install Foundry (Anvil)
+        uses: foundry-rs/foundry-toolchain@v1
+      - name: Build cross-tree portal dependencies from source (§7.8)
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/task-execution/testing && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/trust/resolve && yarn install --immutable && yarn build)
+          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
+          (cd packages/discovery/serve && yarn install --immutable && yarn build)
+          (cd packages/discovery/testing && yarn install --immutable && yarn build)
+      - name: Restore Marketplace Binding distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: marketplace-binding-dist
+          path: packages/marketplace/binding/dist
+      - name: Restore Marketplace Projector distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: marketplace-projector-dist
+          path: packages/marketplace/projector/dist
+      - name: Install Marketplace Testing toolchain
+        working-directory: packages/marketplace/testing
+        run: yarn install --immutable
+      - name: Run Anvil-fork marketplace conformance (§13 / M2.5)
+        working-directory: packages/marketplace/testing
+        env:
+          JINN_MARKETPLACE_FORK_RPC_URL: ${{ secrets.JINN_MARKETPLACE_FORK_RPC_URL }}
+        run: yarn vitest run src/backend-conformance.test.ts
+
   verify:
-    needs: [architecture, binding, projector, pipeline, testing]
+    needs: [architecture, binding, projector, pipeline, testing, anvil-fork]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -217,13 +262,15 @@ jobs:
           PROJECTOR_RESULT: ${{ needs.projector.result }}
           PIPELINE_RESULT: ${{ needs.pipeline.result }}
           TESTING_RESULT: ${{ needs.testing.result }}
+          ANVIL_FORK_RESULT: ${{ needs.anvil-fork.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
             "$BINDING_RESULT" \
             "$PROJECTOR_RESULT" \
             "$PIPELINE_RESULT" \
-            "$TESTING_RESULT"; do
+            "$TESTING_RESULT" \
+            "$ANVIL_FORK_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4

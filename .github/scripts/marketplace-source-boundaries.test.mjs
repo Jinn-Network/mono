@@ -60,14 +60,20 @@ const PIPELINE_FORBIDDEN_PACKAGES = [
 // testing consumes marketplace-{binding,projector} + task-execution-testing +
 // record-discovery-testing (the kits it builds on); never pipeline (pipeline is a composition
 // LIBRARY exercised by its own tests, not by this conformance kit), never the embedder-only
-// backend-local internals, never trust-* directly (reused via the trust kit fixtures the design
-// names, not a direct import here at M0-M1 scope).
+// backend-local internals. Revised at M2.5 (this was "never trust-* directly ... at M0-M1
+// scope" before M2.5 existed, per M0.1's own "later tasks extend the guard as they register
+// modules"): the native §16.2 profile conformance (M2.5) composes the trust verification
+// procedures `authenticateRequester`/`verifyEnvelopeBinding` directly
+// (`@jinn-network/trust-core`, implemented by `@jinn-network/trust-resolve`) -- both were already
+// declared as `testing`'s devDependencies at M0.1 in anticipation of this. `trust-testing` stays
+// forbidden (no fixture package exists to reuse yet; M2.5 builds its own trust test doubles
+// inline, mirroring `packages/trust/core/src/verify.test.ts`'s own pattern).
 const TESTING_FORBIDDEN_PACKAGES = [
   '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
   '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-backend-local',
   '@jinn-network/marketplace-pipeline',
   '@jinn-network/record-discovery-client',
-  '@jinn-network/trust-core', '@jinn-network/trust-resolve', '@jinn-network/trust-testing',
+  '@jinn-network/trust-testing',
 ];
 
 // The one backend-local package every marketplace package but binding/projector/testing must
@@ -264,16 +270,18 @@ test('no marketplace package imports the backend-local component internals (ruli
   assertBoundary(join(packages, 'pipeline', 'src'), BACKEND_LOCAL_INTERNALS);
 });
 
-test('each marketplace package exports map is a single "." entry', () => {
-  for (const [directory, name] of [
-    ['binding', '@jinn-network/marketplace-binding'],
-    ['projector', '@jinn-network/marketplace-projector'],
-    ['pipeline', '@jinn-network/marketplace-pipeline'],
-    ['testing', '@jinn-network/marketplace-testing'],
+test('marketplace exports stay root-only except for the M2.5 testing conformance subpath', () => {
+  for (const [directory, name, entries] of [
+    ['binding', '@jinn-network/marketplace-binding', ['.']],
+    ['projector', '@jinn-network/marketplace-projector', ['.']],
+    ['pipeline', '@jinn-network/marketplace-pipeline', ['.']],
+    // The native §16.2 suite is intentionally a public testing subpath; it does not turn the
+    // profile checks into a parameter of the unmodified TEP core kit (ruling §7.19).
+    ['testing', '@jinn-network/marketplace-testing', ['.', './backend-conformance']],
   ]) {
     const manifest = JSON.parse(readFileSync(join(packages, directory, 'package.json'), 'utf8'));
-    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.'],
-      `${name} must declare exactly one export entry ('.')`);
+    assert.deepEqual(Object.keys(manifest.exports ?? {}), entries,
+      `${name} exports do not match the marketplace public-surface contract`);
   }
 });
 

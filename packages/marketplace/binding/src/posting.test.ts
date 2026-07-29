@@ -90,7 +90,7 @@ describe("postTask", () => {
     expect(capturedValue).toBe(10n + 5n);
   });
 
-  test("enforces the digest-join before broadcast: a mismatched task digest rejects invalid-document, never reaching the safe port", async () => {
+  test("enforces the digest-join before broadcast: a mismatched task digest rejects invalid-reference, never reaching the safe port", async () => {
     const task = goldenTask();
     const otherTask = sealTask({
       protocol: "https://jinn.network/profiles/task-execution/1.0",
@@ -106,7 +106,7 @@ describe("postTask", () => {
     const ports = makePorts(broadcast);
 
     await expect(postTask(task, submissionForOtherTask, TERMS, BASE_SEPOLIA_TODAY, CREATOR_SAFE, ports)).rejects.toMatchObject(
-      { category: "invalid-document" },
+      { category: "invalid-reference" },
     );
     expect(broadcast).not.toHaveBeenCalled();
   });

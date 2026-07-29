@@ -42,6 +42,12 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
+function requestedPinningId(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const id = (value as Record<string, unknown>)["id"];
+  return typeof id === "string" ? id : undefined;
+}
+
 /**
  * The requester-facing marketplace `TaskExecutionBackend` (design §7, §13). `config` selects the
  * chain-generation-specific addresses (M0.3); `ports` supplies the posting mechanics (M2.3) and
@@ -91,6 +97,21 @@ export function makeMarketplaceBackend(
     const task = taskParsed as TaskSpecification;
     const submission = submissionParsed as SubmissionRecord;
 
+    // A sealed Submission commits to the exact Task bytes it was paired with. This is a bad
+    // reference, rather than a malformed document: both documents have already passed schema
+    // validation, but they do not belong together (§8).
+    const taskDigest = documentDigest(taskBytes);
+    const submissionDigest = documentDigest(submissionBytes);
+    const boundTaskDigestHex = submission.task.digest?.sha256;
+    if (boundTaskDigestHex !== taskDigest.replace(/^sha256:/, "")) {
+      return {
+        accepted: false,
+        error: new TaskExecutionError("invalid-reference", {
+          detail: `Submission's task digest (sha256:${boundTaskDigestHex ?? "none"}) does not match the provided Task bytes' digest (${taskDigest})`,
+        }),
+      };
+    }
+
     // TEP §12.2 idempotent resubmission: same (requester, idempotencyKey) scope. Byte-identical
     // resubmission returns the existing ack; a same-key/different-bytes resubmission is a typed
     // `submission-conflict`. This is a DIFFERENT concern from postTask's broadcast-crash WAL
@@ -109,6 +130,65 @@ export function makeMarketplaceBackend(
       };
     }
 
+    const backendCapabilities = await marketplaceCapabilities();
+    for (const [key, value] of Object.entries(submission.requirements ?? {})) {
+      const support = backendCapabilities.runPinning.keys.find((entry) => entry.key === key);
+      if (support === undefined) {
+        return {
+          accepted: false,
+          error: new TaskExecutionError("unsupported-requirement", {
+            detail: `run-pinning key "${key}" is not declared in this backend's capability inventory`,
+            annotations: { key },
+          }),
+        };
+      }
+      const requestedId = requestedPinningId(value);
+      if (support.inventory.length > 0 && !support.inventory.includes("*")
+        && (requestedId === undefined || !support.inventory.includes(requestedId))) {
+        return {
+          accepted: false,
+          error: new TaskExecutionError("unsupported-requirement", {
+            detail: `run-pinning key "${key}" requested a value outside this backend's declared inventory`,
+            annotations: { key },
+          }),
+        };
+      }
+    }
+
+    // M2.4 declares neither an evaluation profile nor a capability-grant resolver. The
+    // marketplace must reject supplied values instead of silently dropping them (§8).
+    if (submission.evaluationRequirements !== undefined) {
+      return {
+        accepted: false,
+        error: new TaskExecutionError("unsupported-requirement", {
+          detail: "this backend declares no evaluation profile and cannot honor evaluationRequirements (§8)",
+          annotations: { key: "evaluationRequirements" },
+        }),
+      };
+    }
+    if (submission.capabilityGrants !== undefined) {
+      return {
+        accepted: false,
+        error: new TaskExecutionError("unsupported-requirement", {
+          detail: "this backend does not resolve capabilityGrants (§8)",
+          annotations: { key: "capabilityGrants" },
+        }),
+      };
+    }
+    for (const key of ["maxTotal", "maxConcurrent"] as const) {
+      const requested = submission.attempts?.[key];
+      const declared = backendCapabilities.attempts[key];
+      if (requested !== undefined && (declared === undefined || requested < declared[0] || requested > declared[1])) {
+        return {
+          accepted: false,
+          error: new TaskExecutionError("unsupported-requirement", {
+            detail: `attempts.${key} value ${requested} is outside this backend's declared bounds ${declared === undefined ? "(not declared)" : `[${declared[0]}, ${declared[1]}]`}`,
+            annotations: { key: `attempts.${key}` },
+          }),
+        };
+      }
+    }
+
     const merged = mergeRequirements(task.requirements, submission.requirements, MARKETPLACE_CORE_KEY_CLASSES);
     if (!merged.ok) {
       return {
@@ -120,7 +200,6 @@ export function makeMarketplaceBackend(
       };
     }
 
-    const backendCapabilities = await marketplaceCapabilities();
     const honorResult = honorOrRejectToday(submission, merged.effective, backendCapabilities);
     if (!honorResult.ok) {
       return {
@@ -146,8 +225,6 @@ export function makeMarketplaceBackend(
       throw err;
     }
 
-    const taskDigest = documentDigest(taskBytes);
-    const submissionDigest = documentDigest(submissionBytes);
     await ports.observe.recordSubmission({
       taskDigest,
       submissionDigest,
