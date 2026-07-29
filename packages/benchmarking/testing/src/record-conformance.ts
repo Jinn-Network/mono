@@ -18,6 +18,7 @@ import {
   sealMatrix,
   sealReport,
   sealRun,
+  type BenchmarkRecord,
   type RecordKind,
 } from "@jinn-network/benchmarking-records";
 import { describe, expect, test } from "vitest";
@@ -94,10 +95,15 @@ export function describeRecordConformance(): void {
     });
 
     describe("benchmark-judgeability (committed-not-revealed)", () => {
-      test("a committed benchmark with no Task bytes reports unevaluated", async () => {
+      test("a committed benchmark with no Task bytes fails closed without trusted pre-reveal context", async () => {
         const committed = await loadRevealCommitted();
-        const result = checkJudgeability(committed as never);
-        expect(result).toEqual({ status: "unevaluated", reason: "committed-not-revealed" });
+        const benchmark = committed as BenchmarkRecord;
+        const result = checkJudgeability(benchmark);
+        expect(result).toEqual({
+          ok: false,
+          invalid: [],
+          unresolved: benchmark.items.map((item) => item.task.digest.sha256),
+        });
       });
     });
 

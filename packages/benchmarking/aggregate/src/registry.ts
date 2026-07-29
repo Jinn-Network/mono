@@ -688,7 +688,7 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
   ...METHOD_METADATA.noninferiorityIut,
   id: BENCHMARKING_METHOD_IDS.noninferiorityIut,
   version: BENCHMARKING_METHOD_VERSION,
-  versionRobust: false,
+  versionRobust: true,
   compute(input) {
     const baseline = requireStringParam(input.parameters, "baseline");
     const candidate = requireStringParam(input.parameters, "candidate");

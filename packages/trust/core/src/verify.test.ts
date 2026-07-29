@@ -377,6 +377,24 @@ describe("verifyEnvelopeBinding", () => {
     expect(afterOutcome.ok).toBe(true);
   });
 
+  test("rejects a lexically later offset-spelled revocation that is instant-earlier than the evidence", async () => {
+    const binding = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+      voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+    });
+    const resolver = new FakeBindingResolver().register({
+      key: KEY_2,
+      agent: AGENT,
+      resolved: resolvedBinding({ binding, revocations: [revocationEntry(VOUCHER_DID, "2026-07-29T01:00:00+02:00")] }),
+    });
+    const outcome = await verifyEnvelopeBinding(
+      { envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2), key: KEY_2, agent: AGENT, family: "deliveries", atTime: "2026-07-29T00:00:00Z" },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
+    );
+    expect(outcome).toMatchObject({ ok: false, reason: "revoked" });
+  });
+
   test("a revocation signed by a key with no authority over the binding does not revoke", async () => {
     const binding = keyBinding({
       agent: AGENT,

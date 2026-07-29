@@ -39,6 +39,24 @@ describe("BenchmarkRecordSchema / parseBenchmark / sealBenchmark", () => {
     })).toThrow(InvalidDocumentError);
   });
 
+  test.each([
+    "2016-12-31T23:59:60Z",
+    "2017-01-01T00:59:60+01:00",
+  ])("accepts a calendar-valid reveal.notBefore leap second unchanged: %s", (notBefore) => {
+    const value = loadFixture("minimal.json") as Record<string, unknown>;
+    const sealed = sealBenchmark({ ...value, reveal: { policy: "scheduled", notBefore } });
+    expect(parseBenchmark(sealed.bytes).reveal.notBefore).toBe(notBefore);
+  });
+
+  test.each([
+    "2016-12-30T23:59:60Z",
+    "2026-02-30T00:00:00Z",
+    "2026-01-01T00:00:00+24:00",
+  ])("rejects invalid calendar reveal.notBefore spelling: %s", (notBefore) => {
+    const value = loadFixture("minimal.json") as Record<string, unknown>;
+    expect(() => sealBenchmark({ ...value, reveal: { policy: "scheduled", notBefore } })).toThrow(InvalidDocumentError);
+  });
+
   test("invalid-duplicate-item.json is schema-VALID (distinctness is a separate named check)", () => {
     const duplicate = loadFixture("invalid-duplicate-item.json");
     expect(() => BenchmarkRecordSchema.parse(duplicate)).not.toThrow();

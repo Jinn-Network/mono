@@ -4,7 +4,7 @@ import { serializeCanonicalJson } from "../canonical.js";
 import { LowercaseSha256HexSchema } from "../descriptors.js";
 import { documentDigest, sha256Hex } from "../hashing.js";
 import type { JsonValue } from "../json.js";
-import { isCalendarStrictRfc3339 } from "../rfc3339.js";
+import { compareCalendarStrictRfc3339Instants, isCalendarStrictRfc3339 } from "../rfc3339.js";
 import { itemTaskDigest, parseBenchmark, type BenchmarkRecord } from "./schema.js";
 
 /** Named check `benchmark-item-distinctness` (§6.1): item Task digests must be distinct. */
@@ -21,6 +21,11 @@ export function checkItemDistinctness(
 }
 
 export type TaskBytesResolver = (taskDigest: string) => Uint8Array | undefined;
+
+/** Trusted, caller-supplied facts needed to distinguish genuinely pre-reveal material. */
+export type JudgeabilityRevealContext =
+  | { readonly kind: "scheduled"; readonly trustedAtTime: string }
+  | { readonly kind: "after-run"; readonly trustedRunNotClosed: true };
 
 type JudgeabilityReason = "digest-mismatch" | "invalid-task" | "missing-evaluation-digest" | "invalid-provenance";
 export interface JudgeabilityInvalidItem {
@@ -74,6 +79,7 @@ function inspectTask(taskDigest: string, taskBytes: Uint8Array): JudgeabilityRea
 export function checkJudgeability(
   rec: BenchmarkRecord,
   taskBytesResolver?: TaskBytesResolver,
+  revealContext?: JudgeabilityRevealContext,
 ):
   | { ok: true }
   | { ok: false; invalid: JudgeabilityInvalidItem[]; unresolved: string[] }
@@ -92,10 +98,19 @@ export function checkJudgeability(
   }
   if (invalid.length > 0) return { ok: false, invalid, unresolved };
   if (unresolved.length > 0) {
-    if (taskBytesResolver === undefined) {
-      return { status: "unevaluated", reason: "committed-not-revealed" };
+    const scheduledNotBefore = rec.reveal.policy === "scheduled" ? rec.reveal.notBefore : undefined;
+    const scheduledComparison = scheduledNotBefore !== undefined && revealContext?.kind === "scheduled"
+      ? compareCalendarStrictRfc3339Instants(revealContext.trustedAtTime, scheduledNotBefore)
+      : undefined;
+    const isTrustedPreReveal = rec.reveal.policy === "scheduled"
+      ? scheduledComparison !== undefined && scheduledComparison < 0
+      : rec.reveal.policy === "after-run"
+        && revealContext?.kind === "after-run"
+        && revealContext.trustedRunNotClosed === true;
+    if (isTrustedPreReveal) {
+      return { status: "unevaluated", reason: "committed-not-revealed", unresolved, invalid: [] };
     }
-    return { status: "unevaluated", reason: "committed-not-revealed", unresolved, invalid: [] };
+    return { ok: false, invalid: [], unresolved };
   }
   return { ok: true };
 }

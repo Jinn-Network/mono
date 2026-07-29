@@ -104,6 +104,13 @@ test("Matrix rejects an impossible civil closeBoundary.at date", () => {
   expect(() => sealMatrix(matrix)).toThrow(InvalidDocumentError);
 });
 
+test("Matrix accepts a calendar-valid closeBoundary leap second unchanged", () => {
+  const matrix = loadFixture("minimal.json") as Record<string, unknown>;
+  (matrix.closeBoundary as Record<string, unknown>).at = "2016-12-31T23:59:60Z";
+  const sealed = sealMatrix(matrix);
+  expect(parseMatrix(sealed.bytes).closeBoundary.at).toBe("2016-12-31T23:59:60Z");
+});
+
 describe("OUTCOME_VOCABULARY", () => {
   test("is the frozen six-value set (§8.2/§14.1)", () => {
     expect(OUTCOME_VOCABULARY).toEqual([

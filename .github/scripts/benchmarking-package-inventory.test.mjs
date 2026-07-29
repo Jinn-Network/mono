@@ -74,8 +74,7 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), targetDir) || '.'}`;
 }
 
-test('the benchmarking package inventory is explicit and has one manifest per package', () => {
-  assert.equal(BENCHMARKING_PACKAGES.length, 3);
+test('the benchmarking package inventory is explicit and derives cardinality from the live declaration', () => {
   for (const [directory, expectedName] of BENCHMARKING_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);
@@ -91,8 +90,14 @@ test('the benchmarking package inventory is explicit and has one manifest per pa
       return /^@jinn-network\/benchmarking-/.test(name)
         ? [[relative(packageRoot, dirname(packageJson)), name]]
         : [];
-    }).sort(([left], [right]) => left.localeCompare(right));
+  }).sort(([left], [right]) => left.localeCompare(right));
   assert.deepEqual(actual, [...BENCHMARKING_PACKAGES].sort(([left], [right]) => left.localeCompare(right)));
+  assert.equal(actual.length, BENCHMARKING_PACKAGES.length);
+});
+
+test('the inventory guard itself contains no hardcoded package-cardinality assertion', () => {
+  const source = readFileSync(import.meta.filename, 'utf8');
+  assert.doesNotMatch(source, /BENCHMARKING_PACKAGES\.length\s*,\s*\d+/);
 });
 
 test('benchmarking package Jinn dependencies and portal resolutions match the approved graph', () => {

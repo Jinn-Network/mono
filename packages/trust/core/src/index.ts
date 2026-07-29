@@ -1,4 +1,5 @@
 export * from "./order.js";
+export * from "./rfc3339.js";
 export * from "./canonical-json.js";
 export * from "./hashing.js";
 export * from "./dsse.js";

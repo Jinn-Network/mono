@@ -17,6 +17,7 @@ function loadJson(relativePath: string): unknown {
 }
 
 const DIGEST = "7afaa346b4bf92bf9dc21e9ae809887412a86beb766842e99df7fee6573a4781";
+const RUN_DIGEST = `sha256:${"r".replace("r", "a").repeat(64)}`;
 
 describe("cellKey / parseCellKey", () => {
   test("shape: <taskDigest>/<armId>/<replicate>, 1-based minimal decimal", () => {
@@ -126,8 +127,8 @@ describe("expectedCellSet / expectedCellCount", () => {
 describe("submissionExtensionBlock", () => {
   test("emits exactly {run, cellKey, armId} (Addendum 2026-07-28-b, mandatory)", () => {
     const key = cellKey(DIGEST, "armA", 1);
-    const block = submissionExtensionBlock("sha256:runrundigest", key, "armA");
-    expect(block).toEqual({ run: "sha256:runrundigest", cellKey: key, armId: "armA" });
+    const block = submissionExtensionBlock(RUN_DIGEST, key, "armA");
+    expect(block).toEqual({ run: RUN_DIGEST, cellKey: key, armId: "armA" });
     expect(Object.keys(block).sort()).toEqual(["armId", "cellKey", "run"]);
   });
 
@@ -135,29 +136,39 @@ describe("submissionExtensionBlock", () => {
     expect(() => submissionExtensionBlock("sha256:r", `${DIGEST}/arm A/1`, "arm A")).toThrow();
     expect(() => submissionExtensionBlock("sha256:r", `${DIGEST}/armA/1`, "armB")).toThrow();
   });
+
+  test.each(["a".repeat(64), `sha256:${"a".repeat(63)}`, `sha256:${"A".repeat(64)}`, "sha256:not-hex"])
+  ("rejects malformed run identity before producing annotations: %s", (runDigest) => {
+    expect(() => submissionExtensionBlock(runDigest, cellKey(DIGEST, "armA", 1), "armA")).toThrow();
+  });
 });
 
 describe("cellIdempotencyKey", () => {
   test("is distinct across dispatch indices for the same (run, cell)", () => {
     const key = cellKey(DIGEST, "armA", 1);
-    const first = cellIdempotencyKey("sha256:runrundigest", key, 1);
-    const second = cellIdempotencyKey("sha256:runrundigest", key, 2);
+    const first = cellIdempotencyKey(RUN_DIGEST, key, 1);
+    const second = cellIdempotencyKey(RUN_DIGEST, key, 2);
     expect(first).not.toBe(second);
   });
 
   test("is stable for the same (run, cell, dispatch) tuple", () => {
     const key = cellKey(DIGEST, "armA", 1);
-    expect(cellIdempotencyKey("sha256:r", key, 1)).toBe(cellIdempotencyKey("sha256:r", key, 1));
+    expect(cellIdempotencyKey(RUN_DIGEST, key, 1)).toBe(cellIdempotencyKey(RUN_DIGEST, key, 1));
   });
 
   test("rejects a non-positive dispatch index", () => {
     const key = cellKey(DIGEST, "armA", 1);
-    expect(() => cellIdempotencyKey("sha256:r", key, 0)).toThrow();
+    expect(() => cellIdempotencyKey(RUN_DIGEST, key, 0)).toThrow();
   });
 
   test("rejects an unsafe dispatch index or malformed cellKey", () => {
     const key = cellKey(DIGEST, "armA", 1);
-    expect(() => cellIdempotencyKey("sha256:r", key, Number.MAX_SAFE_INTEGER + 1)).toThrow();
-    expect(() => cellIdempotencyKey("sha256:r", `${DIGEST.toUpperCase()}/armA/1`, 1)).toThrow();
+    expect(() => cellIdempotencyKey(RUN_DIGEST, key, Number.MAX_SAFE_INTEGER + 1)).toThrow();
+    expect(() => cellIdempotencyKey(RUN_DIGEST, `${DIGEST.toUpperCase()}/armA/1`, 1)).toThrow();
+  });
+
+  test.each(["a".repeat(64), `sha256:${"a".repeat(63)}`, `sha256:${"A".repeat(64)}`, "sha256:not-hex"])
+  ("rejects malformed run identity before deriving an idempotency key: %s", (runDigest) => {
+    expect(() => cellIdempotencyKey(runDigest, cellKey(DIGEST, "armA", 1), 1)).toThrow();
   });
 });

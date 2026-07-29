@@ -33,9 +33,10 @@ describe("createMethodRegistry", () => {
   test("exports the default registry through the package barrel", () => {
     expect(BENCHMARKING_METHOD_REGISTRY.get("jinn.benchmarking.method/wilson", "1")).toBeDefined();
   });
-  test("declares only the task-paired method version-robust for cross-Benchmark comparisons", () => {
+  test("declares both Task-paired methods version-robust for cross-Benchmark comparisons", () => {
     const registry = createMethodRegistry();
     expect(registry.get("jinn.benchmarking.method/paired-mcnemar", "1")?.versionRobust).toBe(true);
+    expect(registry.get("jinn.benchmarking.method/noninferiority-iut", "1")?.versionRobust).toBe(true);
     expect(registry.get("jinn.benchmarking.method/wilson", "1")?.versionRobust).toBe(false);
   });
   test("returns undefined for an unregistered id/version", () => {

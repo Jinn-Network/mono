@@ -14,8 +14,7 @@ import {
   cellKey as computeCellKey,
 } from "../run/cells.js";
 
-const Rfc3339 = z.string().datetime({ offset: true })
-  .refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp");
+const Rfc3339 = z.string().refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp");
 
 /** A decimal-string quantity (program §7.1/§7.14: fractional numbers are strings). */
 const DecimalString = z.string().regex(/^\d+(\.\d+)?$/, "must be a decimal string");

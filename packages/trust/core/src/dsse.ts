@@ -127,6 +127,11 @@ export function sealDsseEnvelope(input: SealDsseEnvelopeInput): Uint8Array {
   if (input.signatures.length === 0) {
     invalidInput("A DSSE envelope requires at least one signature.");
   }
+  for (const [index, signature] of input.signatures.entries()) {
+    if (signature.signature.length === 0) {
+      invalidInput(`DSSE envelope signature ${index} must contain non-empty bytes.`);
+    }
+  }
   const envelope: DsseEnvelope = {
     payloadType: input.payloadType ?? DSSE_PAYLOAD_TYPE,
     payload: encodeBase64(input.payloadBytes),

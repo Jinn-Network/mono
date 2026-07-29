@@ -933,9 +933,11 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
     test("comparability rejects marginal cross-version subjects and Bradley–Terry remains unavailable", () => {
       const wilson = registry.get("jinn.benchmarking.method/wilson", "1")!;
       const paired = registry.get("jinn.benchmarking.method/paired-mcnemar", "1")!;
+      const noninferiority = registry.get("jinn.benchmarking.method/noninferiority-iut", "1")!;
       const subjects = [{ benchmarkDigest: "sha256:aa" }, { benchmarkDigest: "sha256:bb" }];
       expect(checkComparability(subjects, { versionRobust: wilson.versionRobust }).ok).toBe(false);
       expect(paired.versionRobust).toBe(true);
+      expect(noninferiority.versionRobust).toBe(true);
 
       const bradleyTerry = registry.get("jinn.benchmarking.method/bradley-terry", "1")!;
       expect(bradleyTerry).toMatchObject({

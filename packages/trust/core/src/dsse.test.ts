@@ -51,6 +51,14 @@ describe("sealDsseEnvelope / parseDsseEnvelope", () => {
     ).toThrow();
   });
 
+  test("rejects every zero-length producer signature so accepted envelopes exact-parse", () => {
+    const payloadBytes = new TextEncoder().encode("{}");
+    expect(() => sealDsseEnvelope({
+      payloadBytes,
+      signatures: [{ signature: new Uint8Array() }],
+    })).toThrow(/non-empty/);
+  });
+
   test("defaults payloadType to DSSE_PAYLOAD_TYPE but accepts an override (TEP §21.2: a signed record's DSSE payloadType is the record's own media type)", () => {
     const payloadBytes = new TextEncoder().encode('{"hello":"world"}');
     const envelopeBytes = sealDsseEnvelope({

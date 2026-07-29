@@ -9,6 +9,7 @@ import {
 import {
   canonicalJsonBytes,
   dssePreAuthEncoding,
+  parseExactDsseEnvelope,
   parseDsseEnvelope,
   recordDigest,
   sealDsseEnvelope,
@@ -459,6 +460,20 @@ describe("deriveDisclosures", () => {
 });
 
 describe("byte-first produceReport / verifyReport", () => {
+  test("Report producer envelope exact-parses and refuses an empty producer signature", async () => {
+    const fixture = makeFixture();
+    const produced = await produce(fixture);
+    expect(parseExactDsseEnvelope(produced.envelope).payloadBytes).toEqual(produced.bytes);
+    const emptySigner: DsseSigner = async () => [{ keyid: REPORT_KEY, signature: new Uint8Array() }];
+    await expect(produceReport({
+      ...fixture.ports,
+      subjects: fixture.subjectBytes,
+      method: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} },
+      verdictRule: "unanimous",
+      author: AUTHOR,
+    }, emptySigner)).rejects.toThrow(/non-empty/);
+  });
+
   test("positive exact-byte path verifies signature, author, scope, time, subjects, and replay", async () => {
     const fixture = makeFixture();
     const produced = await produce(fixture);
@@ -696,6 +711,27 @@ describe("byte-first produceReport / verifyReport", () => {
       },
       signer,
     )).rejects.toThrow(/identical Task-digest pairing/);
+  });
+
+  test("noninferiority-iut cross-Benchmark report accepts only its exact shared eligible Task pairing", async () => {
+    const fixture = crossVersionPairedFixture(true);
+    const produced = await produceReport({
+      ...fixture.ports,
+      subjects: fixture.subjectBytes,
+      method: {
+        id: "jinn.benchmarking.method/noninferiority-iut",
+        version: "1",
+        parameters: { baseline: "armA", candidate: "armB", seed: 1, resamples: 1 },
+      },
+      verdictRule: "unanimous",
+      author: AUTHOR,
+    }, signer);
+    const perSubject = (produced.record.results as {
+      perSubject: Array<{ results: { pairing: { taskDigests: string[] } } }>;
+    }).perSubject;
+    expect(perSubject).toHaveLength(2);
+    expect(perSubject[0]!.results.pairing.taskDigests).toEqual(perSubject[1]!.results.pairing.taskDigests);
+    expect(perSubject[0]!.results.pairing.taskDigests).toHaveLength(1);
   });
 
   test("verification instant is explicit context and invalid input fails before trust resolution", async () => {

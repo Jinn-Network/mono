@@ -63,6 +63,7 @@ export type {
   BenchmarkPredecessorCheck,
   BenchmarkTransitionCheck,
   JudgeabilityInvalidItem,
+  JudgeabilityRevealContext,
   TaskBytesResolver,
   VersionBump,
 } from "./benchmark/checks.js";

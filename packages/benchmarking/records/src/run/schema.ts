@@ -9,8 +9,7 @@ import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../seal
 import { isCalendarStrictRfc3339 } from "../rfc3339.js";
 import { ArmIdSchema, ReplicateSchema } from "./cells.js";
 
-const Rfc3339 = z.string().datetime({ offset: true })
-  .refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp");
+const Rfc3339 = z.string().refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp");
 
 /**
  * A decimal-string quantity (program §7.1/§7.14: sealed bytes admit only exact I-JSON integer

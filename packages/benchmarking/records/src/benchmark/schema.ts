@@ -22,9 +22,7 @@ const BenchmarkItemSchema = z.object({
 
 const RevealSchema = z.object({
   policy: z.enum(["immediate", "scheduled", "after-run"]),
-  notBefore: z.string().datetime({ offset: true })
-    .refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp")
-    .optional(),
+  notBefore: z.string().refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp").optional(),
 });
 
 export const BenchmarkRecordSchema = topLevelRecordSchema({

@@ -36,6 +36,13 @@ describe("RunRecordSchema / parseRun / sealRun", () => {
     expect(() => sealRun(value)).toThrow(InvalidDocumentError);
   });
 
+  test("accepts a calendar-valid closeAt leap second unchanged", () => {
+    const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
+    value.closeAt = "2016-12-31T23:59:60Z";
+    const sealed = sealRun(value);
+    expect(parseRun(sealed.bytes).closeAt).toBe("2016-12-31T23:59:60Z");
+  });
+
   test("invalid-missing-closeAt.json is rejected as invalid-document", () => {
     const missing = loadFixture("invalid-missing-closeAt.json");
     expect(() => parseRun(new TextEncoder().encode(JSON.stringify(missing)))).toThrow(InvalidDocumentError);

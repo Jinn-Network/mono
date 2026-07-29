@@ -47,9 +47,26 @@ describe("checkItemDistinctness", () => {
 });
 
 describe("checkJudgeability", () => {
-  test("reports unevaluated (committed-not-revealed) when no taskBytesResolver is given", () => {
+  test("fails closed with every unavailable digest when immediate Task bytes have no resolver", () => {
+    const rec = benchmarkWith([DIGEST_A, DIGEST_B]);
+    expect(checkJudgeability(rec)).toEqual({ ok: false, invalid: [], unresolved: [DIGEST_A, DIGEST_B] });
+  });
+
+  test("reports committed-not-revealed only strictly before a valid scheduled notBefore", () => {
     const rec = benchmarkWith([DIGEST_A], { reveal: { policy: "scheduled" } });
-    expect(checkJudgeability(rec)).toEqual({ status: "unevaluated", reason: "committed-not-revealed" });
+    const scheduled = benchmarkWith([DIGEST_A], { reveal: { policy: "scheduled", notBefore: "2026-07-29T00:00:00Z" } });
+    expect(checkJudgeability(scheduled, () => undefined, { kind: "scheduled", trustedAtTime: "2026-07-28T23:59:59.999999999Z" }))
+      .toEqual({ status: "unevaluated", reason: "committed-not-revealed", unresolved: [DIGEST_A], invalid: [] });
+    expect(checkJudgeability(scheduled, () => undefined, { kind: "scheduled", trustedAtTime: "2026-07-29T00:00:00Z" }))
+      .toEqual({ ok: false, invalid: [], unresolved: [DIGEST_A] });
+    expect(checkJudgeability(rec, () => undefined)).toEqual({ ok: false, invalid: [], unresolved: [DIGEST_A] });
+  });
+
+  test("allows after-run committed-not-revealed only with an explicit trusted not-closed context", () => {
+    const rec = benchmarkWith([DIGEST_A], { reveal: { policy: "after-run" } });
+    expect(checkJudgeability(rec, () => undefined, { kind: "after-run", trustedRunNotClosed: true }))
+      .toEqual({ status: "unevaluated", reason: "committed-not-revealed", unresolved: [DIGEST_A], invalid: [] });
+    expect(checkJudgeability(rec, () => undefined)).toEqual({ ok: false, invalid: [], unresolved: [DIGEST_A] });
   });
 
   function validTaskBytes(

@@ -12,6 +12,7 @@ export interface CellCoord {
 }
 
 export const TaskDigestHexSchema = LowercaseSha256HexSchema;
+const RunDigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/, "runDigest must be sha256:<64 lowercase hex>");
 
 export const ArmIdSchema = z.string().regex(
   /^[A-Za-z0-9_-]{1,64}$/,
@@ -112,12 +113,13 @@ export function submissionExtensionBlock(
   cell: string,
   armId: string,
 ): CellDispatchAnnotations {
+  const exactRunDigest = RunDigestSchema.parse(runDigest);
   const coordinate = parseCellKey(cell);
   const exactArmId = ArmIdSchema.parse(armId);
   if (coordinate.armId !== exactArmId) {
     throw new Error("annotation armId must exactly match the cellKey armId (§7.3)");
   }
-  return { run: runDigest, cellKey: coordinate.cellKey, armId: exactArmId };
+  return { run: exactRunDigest, cellKey: coordinate.cellKey, armId: exactArmId };
 }
 
 // Frozen name-construction delimiter (mirrors TEP identifiers.ts's `deriveAttemptUri` precedent):
@@ -133,9 +135,10 @@ const IDEMPOTENCY_KEY_UNIT_SEPARATOR = "\u001f";
  * stack's 1-based `replicate` convention.
  */
 export function cellIdempotencyKey(runDigest: string, cell: string, dispatch: number): string {
+  const exactRunDigest = RunDigestSchema.parse(runDigest);
   const exactCell = parseCellKey(cell).cellKey;
   if (!Number.isSafeInteger(dispatch) || dispatch < 1) {
     throw new Error("dispatch must be a 1-based positive integer (§7.3)");
   }
-  return [runDigest, exactCell, String(dispatch)].join(IDEMPOTENCY_KEY_UNIT_SEPARATOR);
+  return [exactRunDigest, exactCell, String(dispatch)].join(IDEMPOTENCY_KEY_UNIT_SEPARATOR);
 }
