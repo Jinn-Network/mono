@@ -20,4 +20,5 @@ the marketplace plan's dependency block). Declaring a portal resolution to a non
 directory would break `yarn install` for this skeleton. The dependency edge lands with the
 package's real implementation at Milestone M6 (Phase 6, extension wave 2), once the assembly
 package exists — per program §7.6 ("guard-suite ownership ... extended by every later package
-registration").
+registration"). The M0 negative-scope test prevents runtime API from leaking before that gate;
+Milestone M6 replaces it with tests for the implemented pipeline contract.
