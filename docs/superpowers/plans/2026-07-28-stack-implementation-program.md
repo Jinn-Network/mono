@@ -1051,6 +1051,18 @@ Confirmed by the operator at the program gate (2026-07-28):
     full emitted observations, refusals (including kind and derivation), accepted-event set,
     processed log identities, announcements, and returned persistent state. No partial matcher or
     erased processed-log field may make the §7.75 contract vacuous.
+111. **Attempt nonce transport is binary-safe and does not narrow the protocol string:** the
+    Submission nonce remains any I-JSON Unicode-scalar string, including an escaped U+0000.
+    Because argv/env values cannot contain NUL, the supervisor-to-shim control document carries
+    identity as length-delimited UTF-8 or an exact canonical JSON string token rather than a C
+    string. The process environment carries a versioned, deterministic, reversible unpadded
+    base64url encoding of those UTF-8 bytes; it never carries a lossy/truncated literal. Both
+    platform shims decode/compare the same identity and persist the exact original nonce in
+    fingerprint, cancellation, outcome, and journal JSON. U+0000, escaped control characters,
+    supplementary Unicode (including escaped surrogate-pair input), quotes, backslashes, and a
+    long legal nonce have cross-platform exact-round-trip vectors. This encoding clarification
+    supersedes design §6.1's implication that every nonce can ride literally in `execve`
+    environment strings; it does not change the Submission schema.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

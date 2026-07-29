@@ -761,3 +761,20 @@ The repair remains within Milestones A–D. It must be test-first, retain the re
 integration gate (with explicit platform skips elsewhere), and pass every package gate,
 task-execution/evidence guard trio, workflow lint, packed consumer, raw-control scan, and a fresh
 independent whole-component design review before the stream may merge.
+
+## Addendum 2026-07-29-g — binary-safe Attempt nonce transport
+
+The first §7.85–§7.101 repair stage surfaced one real design/transport contradiction:
+`Submission.nonce` is an unrestricted I-JSON string, while POSIX argv and environment strings
+cannot represent embedded U+0000. Program ruling §7.111 resolves it without narrowing the
+protocol. Shim control carries the original nonce in a binary-safe length-delimited or exact
+canonical-token representation, and process tagging uses one versioned reversible unpadded
+base64url encoding of the nonce's UTF-8 scalar bytes. Both platform paths restore and persist the
+exact original in every durable JSON identity check.
+
+The follow-up stage must also finish the already-binding gaps left open at partial backend commit
+`f56b6e28909b4d874595d29223d63a27c6eff2e5`: native JSON admission handles complete Unicode
+and is not a substring parser; residual PIDs appear in the exact terminal observation; and the
+supervisor conformance kit executes complete distinct fixture outcomes with a failing negative
+control. Escaped source literals—not raw control bytes—cover U+0000, supplementary Unicode,
+quotes, backslashes, and length boundaries.
