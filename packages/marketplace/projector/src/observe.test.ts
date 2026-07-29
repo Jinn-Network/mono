@@ -110,6 +110,20 @@ const claim = projectable({
   derivation: derivation("TaskAttemptCreated", 1),
 });
 
+const todayTaskCreated = projectable({
+  event: "TaskCreated",
+  facts: {
+    creator: CREATOR,
+    taskId: 42n,
+    manifestDigest: `0x${"0".repeat(64)}`,
+    taskCidDigest: `0x${"7".repeat(64)}`,
+    maxClaims: 2,
+    solutionBudget: 100n,
+    verdictBudget: 20n,
+  },
+  derivation: derivation("TaskCreated", 0),
+});
+
 function deliver(
   chainKeccak: Hex = `0x${"b".repeat(64)}`,
 ): ObservationMarketplaceEvent {
@@ -243,12 +257,10 @@ describe("projectObservations", () => {
       } as MarketplaceEvent);
 
       const state = createMarketplaceProjectionState();
-      if (generation === "revised") {
-        state.tasks["84532:0x1111111111111111111111111111111111111111:42"] = {
-          maxTotal: 2, liveAttemptIndices: {}, seenAttemptIndices: {},
-          highestAttemptIndex: -1, availability: "open",
-        };
-      }
+      state.tasks["84532:0x1111111111111111111111111111111111111111:42"] = {
+        maxTotal: 2, liveAttemptIndices: {}, seenAttemptIndices: {},
+        highestAttemptIndex: -1, availability: "open",
+      };
       const observation = projectObservations([routedClaim], state)[0]!;
       expect(observation.subject).toBe(ATTEMPT);
       expect(observation.subject).not.toBe(deriveMarketplaceAttemptUri({
@@ -261,21 +273,7 @@ describe("projectObservations", () => {
   );
 
   test("projects posting and claim into exact TEP observations using the protocol-owned Attempt URI", () => {
-    const task = projectable({
-      event: "TaskCreated",
-      facts: {
-        creator: CREATOR,
-        taskId: 42n,
-        manifestDigest: `0x${"0".repeat(64)}`,
-        taskCidDigest: `0x${"7".repeat(64)}`,
-        maxClaims: 2,
-        solutionBudget: 100n,
-        verdictBudget: 20n,
-      },
-      derivation: derivation("TaskCreated", 0),
-    });
-
-    expect(projectObservations([task, claim])).toEqual([
+    expect(projectObservations([todayTaskCreated, claim])).toEqual([
       {
         ...base("network.jinn.task-execution.submission-accepted.v1", SUBMISSION, 1n, 0, "TaskCreated"),
         data: { submission: SUBMISSION, task: TASK_DIGEST },
@@ -300,12 +298,13 @@ describe("projectObservations", () => {
   });
 
   test("emits delivery-recorded only when the joined today sha256↔keccak correspondence is exact", () => {
-    expect(projectObservations([claim, deliver(), solutionClaimed]).at(-1)).toEqual({
+    expect(projectObservations([todayTaskCreated, claim, deliver(), solutionClaimed]).at(-1)).toEqual({
       ...base("network.jinn.task-execution.delivery-recorded.v1", ATTEMPT, 2n, 3, "SolutionDeliveryClaimed"),
       data: { digest: `sha256:${"a".repeat(64)}` },
     });
 
     const mismatch = projectObservations([
+      todayTaskCreated,
       claim,
       deliver(`0x${"c".repeat(64)}`),
       solutionClaimed,
@@ -323,6 +322,39 @@ describe("projectObservations", () => {
         type === "network.jinn.task-execution.delivery-recorded.v1"
       ),
     ).toBe(false);
+  });
+
+  test("today mode refuses unknown-task and regressing attempt identity without observations", () => {
+    const unknown = reduceMarketplaceProjection([claim], createMarketplaceProjectionState());
+    expect(unknown).toEqual({
+      state: {
+        ...createMarketplaceProjectionState(),
+        processedLogIds: [
+          `${claim.derivation.chainId}:${claim.derivation.contract.toLowerCase()}:${claim.derivation.blockHash.toLowerCase()}:${claim.derivation.txHash.toLowerCase()}:${claim.derivation.logIndex}`,
+        ],
+      },
+      events: [],
+      observations: [],
+      availabilityOpenedLogIds: [],
+      refusals: [{
+        kind: "marketplace-projection-refused",
+        reason: "unknown-task",
+        derivation: claim.derivation,
+        taskId: 42n,
+        attemptIndex: 3,
+      }],
+    });
+
+    const admitted = reduceMarketplaceProjection([todayTaskCreated, claim], createMarketplaceProjectionState());
+    const regressing = reduceMarketplaceProjection([
+      {
+        ...claim,
+        facts: { ...claim.facts, attemptIndex: 2 },
+        derivation: { ...claim.derivation, txHash: `0x${"c".repeat(64)}`, logIndex: 4 },
+      } as ObservationMarketplaceEvent,
+    ], admitted.state);
+    expect(regressing.observations).toEqual([]);
+    expect(regressing.refusals.map(({ reason }) => reason)).toEqual(["attempt-identity-regressing"]);
   });
 
   test("uses only the V4 router sha256 anchor for revised delivery identity", () => {
@@ -860,7 +892,7 @@ describe("projectObservations", () => {
   });
 
   test("every emitted object conforms to the protocol observation schema", () => {
-    const observations = projectObservations([claim, deliver(), solutionClaimed]);
+    const observations = projectObservations([todayTaskCreated, claim, deliver(), solutionClaimed]);
     expect(observations.map((item) => ProtocolObservationSchema.safeParse(item).success)).toEqual(
       observations.map(() => true),
     );
@@ -868,11 +900,11 @@ describe("projectObservations", () => {
 
   test("caller-owned reducer state makes duplicate log replay emit nothing", () => {
     const initial = createMarketplaceProjectionState();
-    const first = reduceMarketplaceProjection([claim], initial);
+    const first = reduceMarketplaceProjection([todayTaskCreated, claim], initial);
     const replay = reduceMarketplaceProjection([claim], first.state);
 
-    expect(first.events).toEqual([claim]);
-    expect(first.observations).toHaveLength(1);
+    expect(first.events).toEqual([todayTaskCreated, claim]);
+    expect(first.observations).toHaveLength(2);
     expect(replay.events).toEqual([]);
     expect(replay.observations).toEqual([]);
     expect(replay.state).toEqual(first.state);
@@ -880,14 +912,14 @@ describe("projectObservations", () => {
   });
 
   test("full replay equals ordered split batches and carries a Deliver join across the boundary", () => {
-    const events = [claim, deliver(), solutionClaimed];
+    const events = [todayTaskCreated, claim, deliver(), solutionClaimed];
     const full = reduceMarketplaceProjection(
       events,
       createMarketplaceProjectionState(),
     );
 
     const one = reduceMarketplaceProjection(
-      [claim],
+      [todayTaskCreated, claim],
       createMarketplaceProjectionState(),
     );
     const two = reduceMarketplaceProjection([deliver()], one.state);

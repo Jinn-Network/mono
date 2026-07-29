@@ -17,12 +17,24 @@ import type { PostingOutcome } from "./broadcast-intent.js";
 
 type AttemptUri = `urn:uuid:${string}`;
 
-/** What `observe.lookupSubmissionByScope` needs to answer TEP §12.2 idempotent-resubmission (must match by exact bytes, never by field equality). */
+/** Durable requester-scope completion record for TEP §12.2 idempotent resubmission (must match by exact bytes, never by field equality). */
 export interface SubmissionScopeRecord {
   readonly submissionUri: SubmissionUri;
   readonly digest: `sha256:${string}`;
   readonly submissionBytes: Uint8Array;
 }
+
+declare const submissionScopeOwnerTokenBrand: unique symbol;
+/** Durable, unguessable authority held only by the atomically accepted requester-scope owner. */
+export type SubmissionScopeOwnerToken = string & {
+  readonly [submissionScopeOwnerTokenBrand]: "SubmissionScopeOwnerToken";
+};
+
+export type SubmissionScopeClaim =
+  | { readonly kind: "owner"; readonly ownerToken: SubmissionScopeOwnerToken }
+  | { readonly kind: "pending" }
+  | { readonly kind: "resolved"; readonly record: SubmissionScopeRecord }
+  | { readonly kind: "conflict" };
 
 export interface RecordSubmissionInput {
   readonly taskDigest: `sha256:${string}`;
@@ -40,8 +52,16 @@ export interface RecordSubmissionInput {
  * implementation replaces it without changing this shape.
  */
 export interface MarketplaceObservePort {
-  lookupSubmissionByScope(requester: string, idempotencyKey: string): Promise<SubmissionScopeRecord | undefined>;
-  recordSubmission(input: RecordSubmissionInput): Promise<void>;
+  /**
+   * Linearizable requester/idempotency ownership. The exact Submission bytes and digest are
+   * bound before callers may upload, create a posting intent, or exercise wallet authority.
+   */
+  claimSubmissionScope(input: SubmissionScopeRecord & {
+    readonly requester: string;
+    readonly idempotencyKey: string;
+  }): Promise<SubmissionScopeClaim>;
+  /** Only the owner returned by `claimSubmissionScope` may publish the durable completion. */
+  resolveSubmissionScope(input: RecordSubmissionInput, ownerToken: SubmissionScopeOwnerToken): Promise<void>;
   observe(ref: SubmissionUri | AttemptUri): Promise<ObservationSnapshot>;
   recover(ref: SubmissionUri | AttemptUri): Promise<ReconciliationReport>;
   drive(attempt: AttemptUri, observations: readonly ProtocolObservation[]): Promise<void>;

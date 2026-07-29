@@ -83,6 +83,60 @@ function invalidUtf8(value: Uint8Array): Uint8Array {
 }
 
 describe("makeMarketplaceBackend -- submit", () => {
+  test("linearizes simultaneous requester-scope contenders before any upload, intent, or broadcast", async () => {
+    const ports = makeTestPorts();
+    const broadcasts: unknown[] = [];
+    const pinned: Uint8Array[] = [];
+    ports.posting.safe.broadcastCreateTask = async (input) => {
+      broadcasts.push(input);
+      return { taskId: 91n, txHash: `0x${"9".repeat(64)}` };
+    };
+    ports.posting.ipfs.pin = async (value) => { pinned.push(value.slice()); };
+
+    const task = goldenTask();
+    const requester = "urn:uuid:00000000-0000-4000-8000-000000000091";
+    const idempotencyKey = "simultaneous-submission-scope";
+    const first = goldenSubmission(task, { requester, idempotencyKey, nonce: "first" });
+    const second = goldenSubmission(task, { requester, idempotencyKey, nonce: "second" });
+
+    const claimScope = ports.observe.claimSubmissionScope.bind(ports.observe);
+    let entered = 0;
+    let releaseBarrier: (() => void) | undefined;
+    const barrier = new Promise<void>((resolve) => { releaseBarrier = resolve; });
+    ports.observe.claimSubmissionScope = async (input) => {
+      const claim = await claimScope(input);
+      entered += 1;
+      if (entered === 2) releaseBarrier?.();
+      await barrier;
+      return claim;
+    };
+    const backend = makeMarketplaceBackend(BASE_SEPOLIA_TODAY, ports);
+
+    const outcomes = await Promise.all([backend.submit(task, first), backend.submit(task, second)]);
+
+    expect(outcomes.map((outcome) => outcome.accepted
+      ? { accepted: true, submission: outcome.submission, digest: outcome.digest }
+      : { accepted: false, category: outcome.error.category, retryable: outcome.error.retryable ?? false },
+    )).toEqual([
+      {
+        accepted: true,
+        submission: JSON.parse(text(first)).submission,
+        digest: documentDigest(first),
+      },
+      { accepted: false, category: "submission-conflict", retryable: false },
+    ]);
+    expect(broadcasts).toHaveLength(1);
+    expect(pinned).toEqual([task, first]);
+
+    await expect(backend.submit(task, first)).resolves.toEqual({
+      accepted: true,
+      submission: JSON.parse(text(first)).submission,
+      digest: documentDigest(first),
+    });
+    expect(broadcasts).toHaveLength(1);
+    expect(pinned).toEqual([task, first]);
+  });
+
   test("a valid Submission is accepted, calls postTask, and returns an ack carrying the SubmissionUri", async () => {
     const backend = makeMarketplaceBackend(BASE_SEPOLIA_TODAY, makeTestPorts());
     const task = goldenTask();
@@ -287,7 +341,7 @@ describe("makeMarketplaceBackend -- submit", () => {
     "rejects a $label before idempotency capture, WAL, upload, or broadcast",
     async ({ mutate }) => {
       const ports = makeTestPorts();
-      const scopeLookup = vi.spyOn(ports.observe, "lookupSubmissionByScope");
+      const scopeClaim = vi.spyOn(ports.observe, "claimSubmissionScope");
       const intentClaim = vi.spyOn(ports.posting.intents, "claim");
       const upload = vi.spyOn(ports.posting.ipfs, "pin");
       const broadcast = vi.spyOn(ports.posting.safe, "broadcastCreateTask");
@@ -303,7 +357,7 @@ describe("makeMarketplaceBackend -- submit", () => {
       expect(ack.accepted).toBe(false);
       if (ack.accepted) throw new Error("unreachable");
       expect(ack.error.category).toBe("invalid-document");
-      expect(scopeLookup).not.toHaveBeenCalled();
+      expect(scopeClaim).not.toHaveBeenCalled();
       expect(intentClaim).not.toHaveBeenCalled();
       expect(upload).not.toHaveBeenCalled();
       expect(broadcast).not.toHaveBeenCalled();

@@ -96,6 +96,7 @@ function revisedFacts(overrides: Partial<{
 function makePorts(input: {
   readonly verification?: SettlementGradeVerification;
   readonly facts?: ReturnType<typeof todayFacts> | ReturnType<typeof revisedFacts>;
+  readonly mechFacts?: { readonly requestId: `0x${string}`; readonly sha256CidDigest: `sha256:${string}` };
   readonly chainStatus?:
     | "settled"
     | "already-settled"
@@ -111,7 +112,25 @@ function makePorts(input: {
       pinned.push(bytes);
     }),
     verifySettlementGrade: vi.fn(async () => input.verification ?? VERIFIED),
-    readDeliveryFacts: vi.fn(async () => input.facts ?? todayFacts()),
+    readMechDeliveryFacts: vi.fn(async () => {
+      const facts = input.facts ?? todayFacts();
+      return input.mechFacts ?? {
+        requestId: facts.requestId,
+        sha256CidDigest: facts.generation === "today"
+          ? facts.sha256CidDigest
+          : facts.sha256Digest,
+      };
+    }),
+    readRouterDeliveryFacts: vi.fn(async () => {
+      const facts = input.facts ?? todayFacts();
+      return facts.generation === "today"
+        ? {
+            generation: "today" as const,
+            requestId: facts.requestId,
+            keccakEvidenceHash: facts.keccakEvidenceHash,
+          }
+        : facts;
+    }),
     claimSolutionDelivery: vi.fn(async () => ({
       status: input.chainStatus ?? "settled",
     })),
@@ -119,6 +138,35 @@ function makePorts(input: {
 }
 
 describe("settleDelivery settlement-grade gate", () => {
+  test("reads router delivery facts only after its claim transaction creates them", async () => {
+    const ports = makePorts();
+    const mutablePorts = ports as { -readonly [Key in keyof SettlementPorts]: SettlementPorts[Key] };
+    const effects: string[] = [];
+    let routerFactExists = false;
+    mutablePorts.verifySettlementGrade = vi.fn(async () => {
+      effects.push("verify");
+      return VERIFIED;
+    });
+    mutablePorts.pin = vi.fn(async () => {
+      effects.push("pin");
+    });
+    mutablePorts.readRouterDeliveryFacts = vi.fn(async () => {
+      effects.push("router-read");
+      if (!routerFactExists) throw new Error("router delivery fact does not exist before claim");
+      return todayFacts();
+    });
+    mutablePorts.claimSolutionDelivery = vi.fn(async () => {
+      effects.push("claim");
+      routerFactExists = true;
+      return { status: "settled" as const };
+    });
+
+    await expect(
+      settleDelivery(ATTEMPT, SEALED_DELIVERY, BASE_SEPOLIA_TODAY, ports),
+    ).resolves.toEqual({ settled: true, state: "delivered" });
+    expect(effects).toEqual(["verify", "pin", "claim", "router-read"]);
+  });
+
   test("today mode verifies exact bytes and chain correspondence before pinning and claiming", async () => {
     const ports = makePorts();
 
@@ -167,7 +215,8 @@ describe("settleDelivery settlement-grade gate", () => {
       detail: "Delivery bytes do not equal protocol canonical sealed bytes",
     });
     expect(ports.verifySettlementGrade).not.toHaveBeenCalled();
-    expect(ports.readDeliveryFacts).not.toHaveBeenCalled();
+    expect(ports.readMechDeliveryFacts).not.toHaveBeenCalled();
+    expect(ports.readRouterDeliveryFacts).not.toHaveBeenCalled();
     expect(ports.pinned).toEqual([]);
     expect(ports.claimSolutionDelivery).not.toHaveBeenCalled();
   });
@@ -202,7 +251,8 @@ describe("settleDelivery settlement-grade gate", () => {
       settleDelivery(ATTEMPT, sealed, BASE_SEPOLIA_TODAY, ports),
     ).resolves.toEqual(expected);
     expect(ports.verifySettlementGrade).not.toHaveBeenCalled();
-    expect(ports.readDeliveryFacts).not.toHaveBeenCalled();
+    expect(ports.readMechDeliveryFacts).not.toHaveBeenCalled();
+    expect(ports.readRouterDeliveryFacts).not.toHaveBeenCalled();
     expect(ports.pinned).toEqual([]);
     expect(ports.claimSolutionDelivery).not.toHaveBeenCalled();
   });
@@ -322,7 +372,8 @@ describe("settleDelivery settlement-grade gate", () => {
     await expect(
       settleDelivery(ATTEMPT, SEALED_DELIVERY, BASE_SEPOLIA_TODAY, ports),
     ).resolves.toEqual(expected);
-    expect(ports.readDeliveryFacts).not.toHaveBeenCalled();
+    expect(ports.readMechDeliveryFacts).not.toHaveBeenCalled();
+    expect(ports.readRouterDeliveryFacts).not.toHaveBeenCalled();
     expect(ports.pinned).toEqual([]);
     expect(ports.claimSolutionDelivery).not.toHaveBeenCalled();
   });
@@ -351,6 +402,7 @@ describe("settleDelivery settlement-grade gate", () => {
   test.each([
     {
       label: "an all-zero router evidence hash",
+      afterClaim: true,
       facts: todayFacts({ keccakEvidenceHash: ZERO_HASH }),
       expected: {
         settled: false,
@@ -361,6 +413,7 @@ describe("settleDelivery settlement-grade gate", () => {
     },
     {
       label: "a different requestId",
+      afterClaim: false,
       facts: todayFacts({ requestId: OTHER_REQUEST_ID }),
       expected: {
         settled: false,
@@ -372,6 +425,7 @@ describe("settleDelivery settlement-grade gate", () => {
     },
     {
       label: "a sha256 digest divergence",
+      afterClaim: false,
       facts: todayFacts({ sha256CidDigest: `sha256:${"e".repeat(64)}` }),
       expected: {
         settled: false,
@@ -390,6 +444,7 @@ describe("settleDelivery settlement-grade gate", () => {
     },
     {
       label: "a keccak digest divergence",
+      afterClaim: true,
       facts: todayFacts({ keccakEvidenceHash: `0x${"f".repeat(64)}` }),
       expected: {
         settled: false,
@@ -409,19 +464,26 @@ describe("settleDelivery settlement-grade gate", () => {
   ])("rejects today-mode chain facts with $label before pin or claim", async ({
     facts,
     expected,
+    afterClaim,
   }) => {
     const ports = makePorts({ facts });
     await expect(
       settleDelivery(ATTEMPT, SEALED_DELIVERY, BASE_SEPOLIA_TODAY, ports),
     ).resolves.toEqual(expected);
-    expect(ports.pinned).toEqual([]);
-    expect(ports.claimSolutionDelivery).not.toHaveBeenCalled();
+    if (afterClaim) {
+      expect(ports.pinned).toEqual([SEALED_DELIVERY]);
+      expect(ports.claimSolutionDelivery).toHaveBeenCalledOnce();
+    } else {
+      expect(ports.pinned).toEqual([]);
+      expect(ports.claimSolutionDelivery).not.toHaveBeenCalled();
+    }
   });
 
   test("rejects a revised-mode sha256 anchor divergence without inventing a today-mode keccak fact", async () => {
     const onChainDigest = `sha256:${"e".repeat(64)}` as const;
     const ports = makePorts({
       facts: revisedFacts({ sha256Digest: onChainDigest }),
+      mechFacts: { requestId: REQUEST_ID, sha256CidDigest: DELIVERY_SHA256 },
     });
     await expect(
       settleDelivery(ATTEMPT, SEALED_DELIVERY, REVISED_CONFIG, ports),
@@ -433,8 +495,8 @@ describe("settleDelivery settlement-grade gate", () => {
       asserted: { sha256Digest: DELIVERY_SHA256 },
       onChain: { sha256Digest: onChainDigest },
     });
-    expect(ports.pinned).toEqual([]);
-    expect(ports.claimSolutionDelivery).not.toHaveBeenCalled();
+    expect(ports.pinned).toEqual([SEALED_DELIVERY]);
+    expect(ports.claimSolutionDelivery).toHaveBeenCalledOnce();
   });
 
   test("rejects chain facts from a different contract generation", async () => {
@@ -448,8 +510,8 @@ describe("settleDelivery settlement-grade gate", () => {
       expectedGeneration: "today",
       actualGeneration: "revised",
     });
-    expect(ports.pinned).toEqual([]);
-    expect(ports.claimSolutionDelivery).not.toHaveBeenCalled();
+    expect(ports.pinned).toEqual([SEALED_DELIVERY]);
+    expect(ports.claimSolutionDelivery).toHaveBeenCalledOnce();
   });
 
   test.each([

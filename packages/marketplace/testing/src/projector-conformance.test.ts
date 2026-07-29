@@ -11,7 +11,7 @@ import {
   type SourceHead,
 } from "@jinn-network/record-discovery-protocol";
 import type { BlobStore } from "@jinn-network/record-discovery-serve";
-import { MECH_ABI } from "@jinn-network/marketplace-binding";
+import { BASE_SEPOLIA_TODAY, MECH_ABI } from "@jinn-network/marketplace-binding";
 import {
   foldObservations,
   type ProtocolObservation,
@@ -21,6 +21,7 @@ import {
   appendSignedReorgCorrection,
   createMarketplaceProjectionState,
   decodeMarketplaceLogs,
+  marketplaceEventOriginAuthority,
   foldCanonicalMarketplaceObservations,
   projectAnnouncements,
   projectReorgObservation,
@@ -139,7 +140,14 @@ function enrichedEvents(
   const logs = asFixtureLogs(fixture);
   const decoded = decodeMarketplaceLogs(
     logs.map(rawLog),
-    fixture.generation,
+    marketplaceEventOriginAuthority({
+      ...BASE_SEPOLIA_TODAY,
+      generation: fixture.generation,
+      jinnRouter: logs.find((log) => log.event !== "Deliver")!.address,
+      taskCoordinator: logs.find((log) => log.event !== "Deliver")!.address,
+      mechMarketplace: logs.find((log) => log.event === "Deliver")?.address
+        ?? BASE_SEPOLIA_TODAY.mechMarketplace,
+    }, (address) => logs.some((log) => log.event === "Deliver" && log.address.toLowerCase() === address.toLowerCase())),
   );
   if (decoded.length !== logs.length) {
     throw new Error(`fixture ${fixture.name} did not decode one event per log`);

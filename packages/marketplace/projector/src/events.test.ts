@@ -13,9 +13,11 @@ import { describe, expect, test } from "vitest";
 import {
   REVISED_COMMON_PROJECTOR_EVENTS_ABI,
   REVISED_PROJECTOR_EVENTS_ABI,
-  decodeMarketplaceLogs,
+  decodeMarketplaceLogs as decodeWithAuthority,
+  marketplaceEventOriginAuthority,
   type MarketplaceRawLog,
 } from "./events.js";
+import { BASE_SEPOLIA_TODAY } from "@jinn-network/marketplace-binding";
 
 const ROUTER = "0x1111111111111111111111111111111111111111" satisfies Address;
 const MECH = "0x2222222222222222222222222222222222222222" satisfies Address;
@@ -84,6 +86,16 @@ function exactTopics(
     if (typeof topic !== "string") throw new TypeError("fixture topic must be a single encoded hex value");
     return topic;
   });
+}
+
+function decodeMarketplaceLogs(logs: readonly MarketplaceRawLog[], generation: "today" | "revised") {
+  return decodeWithAuthority(logs, marketplaceEventOriginAuthority({
+    ...BASE_SEPOLIA_TODAY,
+    generation,
+    jinnRouter: ROUTER,
+    taskCoordinator: "0x9999999999999999999999999999999999999999",
+    mechMarketplace: MECH,
+  }, (address) => address.toLowerCase() === MECH.toLowerCase()));
 }
 
 describe("decodeMarketplaceLogs", () => {
@@ -616,6 +628,45 @@ describe("decodeMarketplaceLogs", () => {
       },
     ]);
     expect(decodeMarketplaceLogs([revisedLog], "today")).toEqual([]);
+  });
+
+  test("ignores ABI-shaped logs from unauthorized contract addresses", () => {
+    const spoofedRouter = getAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001");
+    const taskCreatedTopics = encodeEventTopics({
+      abi: JINN_ROUTER_V3_ABI,
+      eventName: "TaskCreated",
+      args: { creator: CREATOR, taskId: 42n, manifestDigest: `0x${"a".repeat(64)}` },
+    });
+    const taskCreatedData = encodeAbiParameters(
+      [
+        { name: "taskCidDigest", type: "bytes32" },
+        { name: "maxClaims", type: "uint32" },
+        { name: "solutionBudget", type: "uint256" },
+        { name: "verdictBudget", type: "uint256" },
+      ],
+      [`0x${"9".repeat(64)}`, 5, 100n, 200n],
+    );
+    const deliverTopics = encodeEventTopics({
+      abi: MECH_ABI,
+      eventName: "Deliver",
+      args: {
+        mech: OPERATOR,
+        mechServiceMultisig: OPERATOR,
+      },
+    });
+    const deliverData = encodeAbiParameters(
+      [
+        { name: "requestId", type: "bytes32" },
+        { name: "deliveryRate", type: "uint256" },
+        { name: "data", type: "bytes" },
+      ],
+      [REQUEST_ID, 10n, `0x${"a".repeat(64)}`],
+    );
+
+    expect(decodeMarketplaceLogs([
+      log({ address: spoofedRouter, topics: exactTopics(taskCreatedTopics), data: taskCreatedData }),
+      log({ address: spoofedRouter, topics: exactTopics(deliverTopics), data: deliverData }),
+    ], "today")).toEqual([]);
   });
 
   test("ignores unknown logs instead of manufacturing event facts", () => {

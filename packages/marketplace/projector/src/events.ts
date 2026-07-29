@@ -3,6 +3,7 @@
 import {
   JINN_ROUTER_V3_ABI,
   MECH_ABI,
+  type MarketplaceChainConfig,
   type ContractGeneration,
 } from "@jinn-network/marketplace-binding";
 import {
@@ -163,6 +164,39 @@ const TODAY_EVENT_TOPICS = new Set(
 const REVISED_EVENT_TOPICS = new Set(
   REVISED_DECODE_EVENTS_ABI.map((event) => toEventSelector(event)),
 );
+const MECH_EVENT_TOPICS = new Set(MECH_ABI.map((event) => toEventSelector(event)));
+
+/**
+ * Explicit decode authority: configuration supplies exact chain/router/coordinator identities;
+ * the host supplies the deployment's dynamic authorized-Mech membership rule. No ABI-shaped log
+ * crosses this boundary until its origin is authorized for the relevant event family.
+ */
+export interface MarketplaceEventOriginAuthority {
+  readonly config: MarketplaceChainConfig;
+  readonly isAuthorizedMechOrigin: (address: Address) => boolean;
+}
+
+export function marketplaceEventOriginAuthority(
+  config: MarketplaceChainConfig,
+  isAuthorizedMechOrigin: (address: Address) => boolean,
+): MarketplaceEventOriginAuthority {
+  return { config, isAuthorizedMechOrigin };
+}
+
+function sameEvmAddress(left: Address, right: Address): boolean {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
+function authorizedOrigin(
+  log: MarketplaceRawLog,
+  authority: MarketplaceEventOriginAuthority,
+): boolean {
+  if (log.chainId !== authority.config.chainId || log.topics.length === 0) return false;
+  const topic = log.topics[0]!;
+  if (MECH_EVENT_TOPICS.has(topic)) return authority.isAuthorizedMechOrigin(log.address);
+  return sameEvmAddress(log.address, authority.config.jinnRouter)
+    || sameEvmAddress(log.address, authority.config.taskCoordinator);
+}
 
 export interface MarketplaceRawLog extends DerivationLog {
   readonly topics: readonly Hex[];
@@ -599,8 +633,9 @@ function revisedEvent(
  */
 export function decodeMarketplaceLogs(
   logs: readonly MarketplaceRawLog[],
-  generation: ContractGeneration,
+  authority: MarketplaceEventOriginAuthority,
 ): MarketplaceEvent[] {
+  const generation = authority.config.generation;
   const abi = generation === "today"
     ? TODAY_PROJECTOR_EVENTS_ABI
     : REVISED_DECODE_EVENTS_ABI;
@@ -609,6 +644,7 @@ export function decodeMarketplaceLogs(
 
   for (const log of logs) {
     if (log.topics.length === 0) continue;
+    if (!authorizedOrigin(log, authority)) continue;
     try {
       const decoded = decodeEventLog({
         abi,

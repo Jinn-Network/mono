@@ -84,6 +84,8 @@ export type {
   MarketplaceLifecyclePorts,
   MarketplaceObservePort,
   RecordSubmissionInput,
+  SubmissionScopeClaim,
+  SubmissionScopeOwnerToken,
   SubmissionScopeRecord,
 } from "./backend-ports.js";
 
@@ -105,18 +107,19 @@ export type {
 } from "./delivery.js";
 export { settleDelivery, mapRaceLoss } from "./settlement.js";
 export type {
-  DeliveryChainFacts,
+  MechDeliveryFacts,
+  RouterDeliveryFacts,
   DispatchBindingCheck,
   EvaluationSpecificationCheck,
   ExecutorBindingCheck,
-  RevisedDeliveryFacts,
+  RevisedRouterDeliveryFacts,
   SettlementAttempt,
   SettlementGateFailure,
   SettlementGradeVerification,
   SettlementGradeVerificationInput,
   SettlementPorts,
   SettlementResult,
-  TodayDeliveryFacts,
+  TodayRouterDeliveryFacts,
 } from "./settlement.js";
 export { closeSubmission, releaseAttempt, signalCancel } from "./lifecycle.js";
 

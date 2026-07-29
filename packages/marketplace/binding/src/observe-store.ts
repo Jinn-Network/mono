@@ -30,7 +30,7 @@ import {
 import { TaskExecutionError, type DeliveryRef, type ObservationCursor, type ObservationSnapshot, type ReconciliationReport, type SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { MarketplaceChainConfig } from "./addresses.js";
 import { deriveMarketplaceAttemptUri } from "./attempt-uri.js";
-import type { MarketplaceObservePort, RecordSubmissionInput, SubmissionScopeRecord } from "./backend-ports.js";
+import type { MarketplaceObservePort, RecordSubmissionInput, SubmissionScopeOwnerToken, SubmissionScopeRecord } from "./backend-ports.js";
 
 type AttemptUri = `urn:uuid:${string}`;
 
@@ -44,6 +44,14 @@ interface AttemptMeta {
 const SOURCE = "urn:jinn:marketplace:binding:stub-observe-store";
 const EXECUTOR = "urn:jinn:agent:marketplace-stub-self-claim";
 
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) return false;
+  }
+  return true;
+}
+
 export interface InMemoryMarketplaceObserveStore extends MarketplaceObservePort {
   /** Test-only introspection: every submission scope recorded, keyed `requester\u001fidempotencyKey`. */
   readonly scopes: ReadonlyMap<string, SubmissionScopeRecord>;
@@ -53,6 +61,11 @@ export interface InMemoryMarketplaceObserveStore extends MarketplaceObservePort 
 export function createInMemoryMarketplaceObserveStore(config: MarketplaceChainConfig): InMemoryMarketplaceObserveStore {
   const scopeDelimiter = "\u001f";
   const scopes = new Map<string, SubmissionScopeRecord>();
+  const pendingScopes = new Map<string, SubmissionScopeRecord & {
+    readonly requester: string;
+    readonly idempotencyKey: string;
+    readonly ownerToken: SubmissionScopeOwnerToken;
+  }>();
   const attemptMeta = new Map<AttemptUri, AttemptMeta>();
   const submissionToAttempt = new Map<SubmissionUri, AttemptUri>();
   const logs = new Map<AttemptUri, ProtocolObservation[]>();
@@ -92,18 +105,43 @@ export function createInMemoryMarketplaceObserveStore(config: MarketplaceChainCo
   return {
     scopes,
 
-    async lookupSubmissionByScope(requester, idempotencyKey) {
-      return scopes.get(`${requester}${scopeDelimiter}${idempotencyKey}`);
+    async claimSubmissionScope(input) {
+      const key = `${input.requester}${scopeDelimiter}${input.idempotencyKey}`;
+      const completed = scopes.get(key);
+      if (completed !== undefined) {
+        return bytesEqual(completed.submissionBytes, input.submissionBytes)
+          ? { kind: "resolved" as const, record: completed }
+          : { kind: "conflict" as const };
+      }
+      const pending = pendingScopes.get(key);
+      if (pending !== undefined) {
+        return bytesEqual(pending.submissionBytes, input.submissionBytes)
+          ? { kind: "pending" as const }
+          : { kind: "conflict" as const };
+      }
+      const ownerToken = `submission-scope-owner:${crypto.randomUUID()}` as SubmissionScopeOwnerToken;
+      pendingScopes.set(key, { ...input, ownerToken });
+      return { kind: "owner" as const, ownerToken };
     },
 
-    async recordSubmission(input: RecordSubmissionInput): Promise<void> {
+    async resolveSubmissionScope(input: RecordSubmissionInput, ownerToken: SubmissionScopeOwnerToken): Promise<void> {
       const submission = input.submission as SubmissionRecord;
       const submissionUri = submission.submission as SubmissionUri;
-      scopes.set(`${submission.requester}${scopeDelimiter}${submission.idempotencyKey}`, {
+      const key = `${submission.requester}${scopeDelimiter}${submission.idempotencyKey}`;
+      const pending = pendingScopes.get(key);
+      if (pending === undefined || pending.ownerToken !== ownerToken) {
+        throw new Error("only the claimed requester-scope owner may resolve a Submission");
+      }
+      if (!bytesEqual(pending.submissionBytes, input.submissionBytes) || pending.digest !== input.submissionDigest) {
+        throw new Error("requester-scope completion does not match its claimed exact Submission");
+      }
+      const completed = {
         submissionUri,
         digest: input.submissionDigest,
         submissionBytes: input.submissionBytes,
-      });
+      };
+      scopes.set(key, completed);
+      pendingScopes.delete(key);
 
       // Self-claim (design §5.3), stub-only -- see module doc.
       const attemptIndex = nextAttemptIndex;

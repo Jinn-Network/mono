@@ -69,34 +69,44 @@ export interface SettlementGradeVerificationInput {
   readonly config: MarketplaceChainConfig;
 }
 
-export interface TodayDeliveryFacts {
-  readonly generation: "today";
-  /** Join key shared by the Mech Deliver and router facts. */
+/** The independently available Mech fact that must exist before a settlement claim. */
+export interface MechDeliveryFacts {
   readonly requestId: Hex;
   /** sha256 raw-CID digest from the Mech Deliver event. */
   readonly sha256CidDigest: `sha256:${string}`;
+}
+
+/** Router facts are authoritative only after the claim transaction (or an already-settled read). */
+export interface TodayRouterDeliveryFacts {
+  readonly generation: "today";
+  readonly requestId: Hex;
   /** keccak evidence hash recorded by the today-generation router. */
   readonly keccakEvidenceHash: Hex;
 }
 
-export interface RevisedDeliveryFacts {
+export interface RevisedRouterDeliveryFacts {
   readonly generation: "revised";
   readonly requestId: Hex;
   /** Revised contracts anchor only the exact Delivery's sha256 digest. */
   readonly sha256Digest: `sha256:${string}`;
 }
 
-export type DeliveryChainFacts = TodayDeliveryFacts | RevisedDeliveryFacts;
+export type RouterDeliveryFacts = TodayRouterDeliveryFacts | RevisedRouterDeliveryFacts;
 
 export interface SettlementPorts {
   readonly pin: IpfsPinPort["pin"];
   readonly verifySettlementGrade: (
     input: SettlementGradeVerificationInput,
   ) => Promise<SettlementGradeVerification>;
-  readonly readDeliveryFacts: (input: {
+  readonly readMechDeliveryFacts: (input: {
     readonly requestId: Hex;
     readonly config: MarketplaceChainConfig;
-  }) => Promise<DeliveryChainFacts>;
+  }) => Promise<MechDeliveryFacts>;
+  /** Called only after `claimSolutionDelivery` returns `settled` or `already-settled`. */
+  readonly readRouterDeliveryFacts: (input: {
+    readonly requestId: Hex;
+    readonly config: MarketplaceChainConfig;
+  }) => Promise<RouterDeliveryFacts>;
   readonly claimSolutionDelivery: (input: {
     readonly requestId: Hex;
     readonly solutionDigest: Hex;
@@ -226,14 +236,63 @@ function verificationFailure(
   return undefined;
 }
 
-function chainFactsFailure(
+function mechFactsFailure(
   attempt: SettlementAttempt,
   config: MarketplaceChainConfig,
   delivery: {
     readonly sha256Digest: `sha256:${string}`;
     readonly keccakEvidenceHash: Hex;
   },
-  facts: DeliveryChainFacts,
+  facts: MechDeliveryFacts,
+): SettlementGateFailure | undefined {
+  if (facts.requestId !== attempt.requestId) {
+    return {
+      settled: false,
+      state: "rejected",
+      kind: "request-id-mismatch",
+      expectedRequestId: attempt.requestId,
+      actualRequestId: facts.requestId,
+    };
+  }
+
+  if (facts.sha256CidDigest !== delivery.sha256Digest) {
+    if (config.generation === "revised") {
+      return {
+        settled: false,
+        state: "rejected",
+        kind: "digest-divergence",
+        generation: "revised",
+        asserted: { sha256Digest: delivery.sha256Digest },
+        onChain: { sha256Digest: facts.sha256CidDigest },
+      };
+    }
+    return {
+      settled: false,
+      state: "rejected",
+      kind: "digest-divergence",
+      generation: "today",
+      asserted: {
+        sha256Digest: delivery.sha256Digest,
+        keccakEvidenceHash: delivery.keccakEvidenceHash,
+      },
+      onChain: {
+        sha256CidDigest: facts.sha256CidDigest,
+        keccak: delivery.keccakEvidenceHash,
+      },
+    };
+  }
+  return undefined;
+}
+
+function routerFactsFailure(
+  attempt: SettlementAttempt,
+  config: MarketplaceChainConfig,
+  delivery: {
+    readonly sha256Digest: `sha256:${string}`;
+    readonly keccakEvidenceHash: Hex;
+  },
+  mechFacts: MechDeliveryFacts,
+  facts: RouterDeliveryFacts,
 ): SettlementGateFailure | undefined {
   if (facts.generation !== config.generation) {
     return {
@@ -253,7 +312,6 @@ function chainFactsFailure(
       actualRequestId: facts.requestId,
     };
   }
-
   if (facts.generation === "today") {
     if (facts.keccakEvidenceHash === `0x${"0".repeat(64)}`) {
       return {
@@ -266,7 +324,7 @@ function chainFactsFailure(
     const correspondence = checkDeliveryCorrespondence({
       sha256Digest: delivery.sha256Digest,
       keccakEvidenceHash: delivery.keccakEvidenceHash,
-      onChainSha256CidDigest: facts.sha256CidDigest,
+      onChainSha256CidDigest: mechFacts.sha256CidDigest,
       onChainKeccak: facts.keccakEvidenceHash,
     });
     if (!correspondence.ok) {
@@ -282,7 +340,7 @@ function chainFactsFailure(
     return undefined;
   }
 
-  if (facts.sha256Digest !== delivery.sha256Digest) {
+  if (facts.sha256Digest !== delivery.sha256Digest || mechFacts.sha256CidDigest !== delivery.sha256Digest) {
     return {
       settled: false,
       state: "rejected",
@@ -339,12 +397,12 @@ export async function settleDelivery(
   const rejectedVerification = verificationFailure(attempt, verification);
   if (rejectedVerification !== undefined) return rejectedVerification;
 
-  const facts = await ports.readDeliveryFacts({
+  const mechFacts = await ports.readMechDeliveryFacts({
     requestId: attempt.requestId,
     config,
   });
-  const rejectedFacts = chainFactsFailure(attempt, config, delivery, facts);
-  if (rejectedFacts !== undefined) return rejectedFacts;
+  const rejectedMechFacts = mechFactsFailure(attempt, config, delivery, mechFacts);
+  if (rejectedMechFacts !== undefined) return rejectedMechFacts;
 
   await ports.pin(sealedDeliveryBytes);
   const solutionDigest = config.generation === "today"
@@ -355,6 +413,12 @@ export async function settleDelivery(
     solutionDigest,
   });
   if (result.status === "settled" || result.status === "already-settled") {
+    const routerFacts = await ports.readRouterDeliveryFacts({
+      requestId: attempt.requestId,
+      config,
+    });
+    const rejectedRouterFacts = routerFactsFailure(attempt, config, delivery, mechFacts, routerFacts);
+    if (rejectedRouterFacts !== undefined) return rejectedRouterFacts;
     return { settled: true, state: "delivered" };
   }
   return {

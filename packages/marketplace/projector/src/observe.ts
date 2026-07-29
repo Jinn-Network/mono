@@ -494,27 +494,21 @@ export function reduceMarketplaceProjection(
           refuse(event, "task-closed", event.facts.taskId, event.facts.attemptIndex);
           break;
         }
-        if (event.derivation.contractGeneration === "revised") {
-          if (!admissibleTask(taskCapacity)) {
-            refuse(event, "unknown-task", event.facts.taskId, event.facts.attemptIndex);
-            break;
-          }
-          if (
-            taskCapacity.seenAttemptIndices[String(event.facts.attemptIndex)] !== undefined
-            || event.facts.attemptIndex <= taskCapacity.highestAttemptIndex
-          ) {
-            refuse(event, "attempt-identity-regressing", event.facts.taskId, event.facts.attemptIndex);
-            break;
-          }
-          taskCapacity.seenAttemptIndices[String(event.facts.attemptIndex)] = true;
-          taskCapacity.liveAttemptIndices[String(event.facts.attemptIndex)] = true;
-          taskCapacity.highestAttemptIndex = event.facts.attemptIndex;
-        } else if (admissibleTask(taskCapacity)) {
-          // Today has no release/expiry; every chain claim remains a monotonic occupancy fact.
-          taskCapacity.seenAttemptIndices[String(event.facts.attemptIndex)] = true;
-          taskCapacity.liveAttemptIndices[String(event.facts.attemptIndex)] = true;
-          taskCapacity.highestAttemptIndex = Math.max(taskCapacity.highestAttemptIndex, event.facts.attemptIndex);
+        if (!admissibleTask(taskCapacity)) {
+          refuse(event, "unknown-task", event.facts.taskId, event.facts.attemptIndex);
+          break;
         }
+        if (
+          taskCapacity.seenAttemptIndices[String(event.facts.attemptIndex)] !== undefined
+          || event.facts.attemptIndex <= taskCapacity.highestAttemptIndex
+        ) {
+          refuse(event, "attempt-identity-regressing", event.facts.taskId, event.facts.attemptIndex);
+          break;
+        }
+        // Today has no release/expiry; every chain claim remains a monotonic occupancy fact.
+        taskCapacity.seenAttemptIndices[String(event.facts.attemptIndex)] = true;
+        taskCapacity.liveAttemptIndices[String(event.facts.attemptIndex)] = true;
+        taskCapacity.highestAttemptIndex = event.facts.attemptIndex;
         const attempt = attemptFor(event, event.facts.taskId, event.facts.attemptIndex);
         const effectiveDeadline = "attemptDeadline" in event.facts
           ? unixSecondsToRfc3339(event.facts.attemptDeadline)
@@ -792,6 +786,10 @@ export function reduceMarketplaceProjection(
         const task = state.tasks[taskKey(event, event.facts.taskId)];
         if (task?.admission === "rejected") {
           refuse(event, "task-not-admissible", event.facts.taskId, event.facts.attemptIndex);
+          break;
+        }
+        if (!admissibleTask(task)) {
+          refuse(event, "unknown-task", event.facts.taskId, event.facts.attemptIndex);
         }
         break;
       }

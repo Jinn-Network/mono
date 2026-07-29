@@ -37,7 +37,7 @@ import {
   signalCancel,
 } from "./lifecycle.js";
 import { postTask } from "./posting.js";
-import type { MarketplaceBackendPorts } from "./backend-ports.js";
+import type { MarketplaceBackendPorts, SubmissionScopeRecord } from "./backend-ports.js";
 
 type AttemptUri = `urn:uuid:${string}`;
 
@@ -180,24 +180,6 @@ export function makeMarketplaceBackend(
       };
     }
 
-    // TEP §12.2 idempotent resubmission: same (requester, idempotencyKey) scope. Byte-identical
-    // resubmission returns the existing ack; a same-key/different-bytes resubmission is a typed
-    // `submission-conflict`. This is a DIFFERENT concern from postTask's broadcast-crash WAL
-    // (broadcast-intent.ts) -- that guards the chain broadcast itself, this guards the
-    // application-level submit contract.
-    const existingScope = await ports.observe.lookupSubmissionByScope(submission.requester, submission.idempotencyKey);
-    if (existingScope !== undefined) {
-      if (bytesEqual(existingScope.submissionBytes, submissionBytes)) {
-        return { accepted: true, submission: existingScope.submissionUri, digest: existingScope.digest };
-      }
-      return {
-        accepted: false,
-        error: new TaskExecutionError("submission-conflict", {
-          detail: `idempotencyKey "${submission.idempotencyKey}" already used with different Submission bytes in this scope`,
-        }),
-      };
-    }
-
     const backendCapabilities = await marketplaceCapabilities();
     for (const [key, value] of Object.entries(submission.requirements ?? {})) {
       const support = backendCapabilities.runPinning.keys.find((entry) => entry.key === key);
@@ -278,6 +260,42 @@ export function makeMarketplaceBackend(
       };
     }
 
+    // This claim is deliberately after the pure admission/requirements checks but before every
+    // external effect. It is the durable linearization point for TEP §12.2; the posting-intent
+    // WAL remains the recovery record for the resulting chain broadcast.
+    const scope: SubmissionScopeRecord & { requester: string; idempotencyKey: string } = {
+      requester: submission.requester,
+      idempotencyKey: submission.idempotencyKey,
+      submissionUri: submission.submission as SubmissionUri,
+      digest: submissionDigest,
+      submissionBytes,
+    };
+    const scopeClaim = await ports.observe.claimSubmissionScope(scope);
+    if (scopeClaim.kind === "resolved") {
+      return {
+        accepted: true,
+        submission: scopeClaim.record.submissionUri,
+        digest: scopeClaim.record.digest,
+      };
+    }
+    if (scopeClaim.kind === "conflict") {
+      return {
+        accepted: false,
+        error: new TaskExecutionError("submission-conflict", {
+          detail: `idempotencyKey "${submission.idempotencyKey}" already used with different Submission bytes in this scope`,
+        }),
+      };
+    }
+    if (scopeClaim.kind === "pending") {
+      return {
+        accepted: false,
+        error: new TaskExecutionError("backend-unavailable", {
+          detail: `idempotencyKey "${submission.idempotencyKey}" is pending under its durable requester-scope owner`,
+          retryable: true,
+        }),
+      };
+    }
+
     let outcome;
     try {
       outcome = await postTask(taskBytes, submissionBytes, ports.terms, config, ports.creatorSafe, ports.posting);
@@ -292,13 +310,13 @@ export function makeMarketplaceBackend(
       throw err;
     }
 
-    await ports.observe.recordSubmission({
+    await ports.observe.resolveSubmissionScope({
       taskDigest,
       submissionDigest,
       submissionBytes,
       submission,
       outcome,
-    });
+    }, scopeClaim.ownerToken);
 
     return { accepted: true, submission: submission.submission as SubmissionUri, digest: submissionDigest };
   }
