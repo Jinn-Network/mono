@@ -19,64 +19,33 @@ function stripSha256Prefix(digest: `sha256:${string}`): string {
   return digest.slice("sha256:".length);
 }
 
-const NON_JUDGED_OUTCOMES = ["unjudged", "unscorable", "expired", "invalidated", "excluded"] as const;
-
 /**
- * Derives the Report `disclosures` block (§9.1) from its subject matrices — carried whole, never
- * hand-authored. A single subject's completeness/attrition ride through verbatim; multiple
- * subjects sum their counts (documented aggregation policy; the design does not specify a
- * multi-subject rule). Cross-checked against the M1 golden fixture pair (report/valid.json's
- * disclosures block is exactly `deriveDisclosures([the parsed matrix/valid.json])`).
+ * Derives the lossless one-to-one Report disclosures required by program §7.23. No counts,
+ * floors, arm IDs, run outcomes, or flags are merged across Matrix subjects.
  */
 export function deriveDisclosures(subjects: readonly MatrixRecord[]): Disclosures {
-  const integrityTiers = { "re-derivable": 0, "attested-only": 0 };
-  const pinningAxes = ["harness", "model", "loadout", "isolation"] as const;
-  const pinning = Object.fromEntries(
-    pinningAxes.map((axis) => [axis, { match: 0, mismatch: 0, unverifiable: 0 }]),
-  ) as Disclosures["pinning"];
-  let independence = 0;
-  let expected = 0;
-  let judged = 0;
-  let floorMin: number | undefined;
-  let anyPartialOrCancelled = false;
-  const asymmetryFlags = new Set<string>();
-  const perArmNonJudged = new Map<string, number>();
-
-  for (const matrix of subjects) {
-    for (const cell of matrix.cells) {
-      integrityTiers[cell.integrityTier] += 1;
-      for (const axis of pinningAxes) pinning[axis][cell.verification[axis]] += 1;
-      if (cell.verification.checksFailed.includes("evaluator-independence")) independence += 1;
-    }
-    expected += matrix.completeness.expected;
-    judged += matrix.completeness.judged;
-    const floor = Number(matrix.completeness.floor);
-    floorMin = floorMin === undefined ? floor : Math.min(floorMin, floor);
-    if (matrix.completeness.runOutcome !== "complete") anyPartialOrCancelled = true;
-    for (const flag of matrix.attrition.asymmetryFlags) asymmetryFlags.add(flag);
-    for (const [armId, arm] of Object.entries(matrix.attrition.perArm)) {
-      const nonJudged = NON_JUDGED_OUTCOMES.reduce((sum, outcome) => sum + arm[outcome], 0);
-      perArmNonJudged.set(armId, (perArmNonJudged.get(armId) ?? 0) + nonJudged);
-    }
-  }
-
   return {
-    integrityTiers,
-    pinning,
-    independence,
-    completeness: {
-      expected,
-      judged,
-      floor: (floorMin ?? 0).toString(),
-      runOutcome: anyPartialOrCancelled ? "partial" : "complete",
-    },
-    attrition: {
-      asymmetryFlags: [...asymmetryFlags].sort(),
-      perArm: Object.fromEntries(
-        [...perArmNonJudged.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-          .map(([armId, nonJudged]) => [armId, { nonJudged }]),
-      ),
-    },
+    perSubject: subjects.map((matrix) => {
+      const integrityTiers = { "re-derivable": 0, "attested-only": 0 };
+      const pinningAxes = ["harness", "model", "loadout", "isolation"] as const;
+      const pinning = Object.fromEntries(
+        pinningAxes.map((axis) => [axis, { match: 0, mismatch: 0, unverifiable: 0 }]),
+      ) as Disclosures["perSubject"][number]["pinning"];
+      let independence = 0;
+      for (const cell of matrix.cells) {
+        integrityTiers[cell.integrityTier] += 1;
+        for (const axis of pinningAxes) pinning[axis][cell.verification[axis]] += 1;
+        if (cell.verification.checksFailed.includes("evaluator-independence")) independence += 1;
+      }
+      return {
+        subjectSha256: stripSha256Prefix(sealMatrix(matrix).digest),
+        integrityTiers,
+        pinning,
+        independence,
+        completeness: matrix.completeness,
+        attrition: matrix.attrition,
+      };
+    }),
   };
 }
 
@@ -133,6 +102,9 @@ export async function produceReport(input: ProduceReportInput, signer: DsseSigne
   const method: Method | undefined = input.registry.get(input.method.id, input.method.version);
   if (method === undefined) {
     throw new Error(`produceReport: method ${input.method.id}@${input.method.version} is not registered`);
+  }
+  if (method.computeAvailability !== "available" || method.compute === undefined) {
+    throw new Error(`produceReport: method ${input.method.id}@${input.method.version} is unavailable`);
   }
   const parameters = { ...input.method.parameters, verdictRule: input.verdictRule };
   const results = method.compute(computeInputFor(input, input.subjects, parameters, input.verdictRule));
@@ -196,6 +168,9 @@ export function verifyReport(
   const method = ports.registry.get(record.method.id, record.method.version);
   if (method === undefined) {
     return { ok: false, check: "report-recompute", detail: `method ${record.method.id}@${record.method.version} is not registered` };
+  }
+  if (method.computeAvailability !== "available" || method.compute === undefined) {
+    return { ok: false, check: "report-recompute", detail: `method ${record.method.id}@${record.method.version} is unavailable` };
   }
   const benchmarkDigests = subjects.map((matrix) => {
     const runDigest = matrix.run.digest?.["sha256"];

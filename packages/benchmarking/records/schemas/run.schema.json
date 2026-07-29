@@ -7,41 +7,67 @@
       "const": "https://jinn.network/protocols/benchmarking/1.0"
     },
     "benchmark": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "uri": {
-          "type": "string"
-        },
-        "digest": {
+      "allOf": [
+        {
           "type": "object",
-          "propertyNames": {
-            "type": "string"
-          },
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "mediaType": {
-          "type": "string"
-        },
-        "downloadLocation": {
-          "type": "string"
-        },
-        "annotations": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string"
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "uri": {
+              "type": "string"
+            },
+            "digest": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "downloadLocation": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            },
+            "content": {
+              "type": "string"
+            }
           },
           "additionalProperties": {}
         },
-        "content": {
-          "type": "string"
+        {
+          "type": "object",
+          "properties": {
+            "digest": {
+              "type": "object",
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "digest"
+          ],
+          "additionalProperties": false
         }
-      },
-      "additionalProperties": {}
+      ]
     },
     "owner": {
       "type": "string"

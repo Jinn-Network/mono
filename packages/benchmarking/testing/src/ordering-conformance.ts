@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { submissionExtensionBlock } from "@jinn-network/benchmarking-records";
 import { describe, expect, test } from "vitest";
 
@@ -28,6 +30,14 @@ export interface OrderingLegs {
  * (M4/M7 territory, see this package's README) — omitted legs are reported, not silently skipped.
  */
 export function describeOrderingConformance(legs: OrderingLegs = {}): void {
+  const transcript = JSON.parse(readFileSync(
+    fileURLToPath(new URL("../fixtures/ordering/transcripts.json", import.meta.url)),
+    "utf8",
+  )) as {
+    anchoredPositive: NonNullable<OrderingLegs["anchored"]>;
+    anchoredViolation: NonNullable<OrderingLegs["anchored"]>;
+    localAppendOrder: NonNullable<OrderingLegs["localAppendOrder"]> & { decisionGrade: false };
+  };
   describe("benchmarking ordering conformance: preregistration-precedes-dispatch (design §7.2/§16)", () => {
     describe("leg (a): structural (the extension block commits to a specific Run digest)", () => {
       test("a dispatched cell's extension block carries its own Run digest, cellKey, and armId", () => {
@@ -47,6 +57,10 @@ export function describeOrderingConformance(legs: OrderingLegs = {}): void {
     });
 
     describe("leg (b): anchored (a chain-observed Run announcement at/before the earliest cell post)", () => {
+      test("the kit oracle includes both a positive transcript and a detected violation", () => {
+        expect(transcript.anchoredPositive.violatesOrder).toBe(false);
+        expect(transcript.anchoredViolation.violatesOrder).toBe(true);
+      });
       test.runIf(legs.anchored !== undefined)("the announcement precedes the earliest cell post", () => {
         expect(legs.anchored!.violatesOrder).toBe(false);
         expect(new Date(legs.anchored!.runAnnouncedAt).getTime())
@@ -60,6 +74,12 @@ export function describeOrderingConformance(legs: OrderingLegs = {}): void {
     });
 
     describe("leg (c): local append-order-only (labeled non-decision-grade, §12.2)", () => {
+      test("the kit oracle labels local append order non-decision-grade", () => {
+        expect(transcript.localAppendOrder).toMatchObject({
+          runAppendedBeforeCells: true,
+          decisionGrade: false,
+        });
+      });
       test.runIf(legs.localAppendOrder !== undefined)(
         "the Run record was appended before its cells, in local append order",
         () => {

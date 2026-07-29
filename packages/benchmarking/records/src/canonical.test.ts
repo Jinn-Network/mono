@@ -1,9 +1,14 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import canonicalize from "canonicalize";
 import { serializeCanonicalJson } from "./canonical.js";
 import { IJsonNumberError, UndefinedArrayElementError, type JsonValue } from "./json.js";
 
 const decode = (b: Uint8Array) => new TextDecoder().decode(b);
+const loadUnicodeFixture = (name: string): JsonValue => JSON.parse(readFileSync(
+  new URL(`../fixtures/equivalence/${name}`, import.meta.url),
+  "utf8",
+)) as JsonValue;
 
 describe("serializeCanonicalJson", () => {
   test("is insensitive to source key order", () => {
@@ -44,5 +49,18 @@ describe("serializeCanonicalJson", () => {
     } catch (error: unknown) {
       expect((error as { category?: string }).category).toBe("invalid-document");
     }
+  });
+
+  test.each([
+    ["string value", loadUnicodeFixture("unicode-invalid-value.json")],
+    ["object key", loadUnicodeFixture("unicode-invalid-key.json")],
+    ["nested string", { nested: ["ok", "\uDFFF"] }],
+  ])("rejects an unpaired surrogate in a %s", (_label, value) => {
+    expect(() => serializeCanonicalJson(value)).toThrow(/unpaired UTF-16 surrogate/);
+  });
+
+  test("accepts and preserves a valid supplementary-plane scalar", () => {
+    const value = loadUnicodeFixture("unicode-valid.json");
+    expect(decode(serializeCanonicalJson(value))).toBe('{"emoji-🚀":"astral-🧪"}');
   });
 });

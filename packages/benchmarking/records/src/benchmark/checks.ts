@@ -1,4 +1,9 @@
 import { compareCodeUnitStrings } from "../order.js";
+import { TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
+import { serializeCanonicalJson } from "../canonical.js";
+import { LowercaseSha256HexSchema } from "../descriptors.js";
+import { sha256Hex } from "../hashing.js";
+import type { JsonValue } from "../json.js";
 import { itemTaskDigest, type BenchmarkRecord } from "./schema.js";
 
 /** Named check `benchmark-item-distinctness` (§6.1): item Task digests must be distinct. */
@@ -16,19 +21,34 @@ export function checkItemDistinctness(
 
 export type TaskBytesResolver = (taskDigest: string) => Uint8Array | undefined;
 
-function hasEvaluationDescriptor(taskBytes: Uint8Array): boolean {
+type JudgeabilityReason = "digest-mismatch" | "invalid-task" | "missing-evaluation-digest";
+export interface JudgeabilityInvalidItem {
+  readonly taskDigest: string;
+  readonly reason: JudgeabilityReason;
+}
+
+function inspectTask(taskDigest: string, taskBytes: Uint8Array): JudgeabilityReason | undefined {
+  if (sha256Hex(taskBytes) !== taskDigest) return "digest-mismatch";
   let parsed: unknown;
   try {
-    parsed = JSON.parse(new TextDecoder().decode(taskBytes));
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(taskBytes));
   } catch {
-    return false;
+    return "invalid-task";
   }
-  return (
-    typeof parsed === "object"
-    && parsed !== null
-    && "evaluation" in parsed
-    && (parsed as { evaluation?: unknown }).evaluation !== undefined
-  );
+  const task = TaskSpecificationSchema.safeParse(parsed);
+  if (!task.success) return "invalid-task";
+  try {
+    const sealedBytes = serializeCanonicalJson(task.data as JsonValue);
+    if (
+      sealedBytes.length !== taskBytes.length
+      || sealedBytes.some((byte, index) => byte !== taskBytes[index])
+    ) return "invalid-task";
+  } catch {
+    return "invalid-task";
+  }
+  const evaluationDigest = task.data.evaluation?.digest?.sha256;
+  if (!LowercaseSha256HexSchema.safeParse(evaluationDigest).success) return "missing-evaluation-digest";
+  return undefined;
 }
 
 /**
@@ -42,38 +62,47 @@ export function checkJudgeability(
   taskBytesResolver?: TaskBytesResolver,
 ):
   | { ok: true }
-  | { ok: false; unevaluated: string[] }
-  | { status: "unevaluated"; reason: "committed-not-revealed" } {
-  const missingEvaluation: string[] = [];
-  let anyBytesMissing = false;
+  | { ok: false; invalid: JudgeabilityInvalidItem[]; unresolved: string[] }
+  | { status: "unevaluated"; reason: "committed-not-revealed"; unresolved?: string[]; invalid?: readonly [] } {
+  const invalid: JudgeabilityInvalidItem[] = [];
+  const unresolved: string[] = [];
   for (const item of rec.items) {
     const digest = itemTaskDigest(item);
     const bytes = taskBytesResolver?.(digest);
     if (bytes === undefined) {
-      anyBytesMissing = true;
+      unresolved.push(digest);
       continue;
     }
-    if (!hasEvaluationDescriptor(bytes)) missingEvaluation.push(digest);
+    const reason = inspectTask(digest, bytes);
+    if (reason !== undefined) invalid.push({ taskDigest: digest, reason });
   }
-  if (anyBytesMissing) return { status: "unevaluated", reason: "committed-not-revealed" };
-  return missingEvaluation.length > 0 ? { ok: false, unevaluated: missingEvaluation } : { ok: true };
+  if (invalid.length > 0) return { ok: false, invalid, unresolved };
+  if (unresolved.length > 0) {
+    if (taskBytesResolver === undefined) {
+      return { status: "unevaluated", reason: "committed-not-revealed" };
+    }
+    return { status: "unevaluated", reason: "committed-not-revealed", unresolved, invalid: [] };
+  }
+  return { ok: true };
 }
 
 export type VersionBump = "patch" | "minor" | "major";
 
 /**
- * §6.2 versioning classifier: patch (metadata-only, item list byte-identical by digest set),
- * minor (items added only), major (items removed or changed — a changed item's Task digest
- * differs, which is indistinguishable here from removal-plus-addition).
+ * §6.2 versioning classifier: patch only when the ordered item list is byte-identical; minor
+ * only when new entries are appended after the exact existing ordered prefix; otherwise major.
  */
 export function classifyVersionBump(prev: BenchmarkRecord, next: BenchmarkRecord): VersionBump {
-  const prevDigests = prev.items.map(itemTaskDigest);
-  const nextDigests = next.items.map(itemTaskDigest);
-  const nextSet = new Set(nextDigests);
-  const prevSet = new Set(prevDigests);
-  if (prevDigests.some((digest) => !nextSet.has(digest))) return "major";
-  if (nextDigests.some((digest) => !prevSet.has(digest))) return "minor";
-  return "patch";
+  const prevItems = prev.items.map((item) => serializeCanonicalJson(item as JsonValue));
+  const nextItems = next.items.map((item) => serializeCanonicalJson(item as JsonValue));
+  const sharedPrefixIsIdentical = prevItems.every((bytes, index) => {
+    const candidate = nextItems[index];
+    return candidate !== undefined
+      && bytes.length === candidate.length
+      && bytes.every((byte, offset) => byte === candidate[offset]);
+  });
+  if (!sharedPrefixIsIdentical || nextItems.length < prevItems.length) return "major";
+  return nextItems.length === prevItems.length ? "patch" : "minor";
 }
 
 /**

@@ -30,9 +30,25 @@ export interface MethodComputeInput {
 export interface Method {
   readonly id: string;
   readonly version: string;
-  /** Only methods that pair shared Task digests may compare matrices from Benchmark versions. */
+  readonly requiredInputs: readonly string[];
+  readonly parameterSchema: {
+    readonly type: "object";
+    readonly required: readonly string[];
+    readonly properties: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+    readonly additionalProperties: boolean;
+  };
+  readonly outputShape: string;
+  readonly exclusionRule: string;
+  readonly clusteringRule: string;
+  readonly referenceSet: "v1-reference" | "registered-non-reference";
+  readonly deterministic: true;
+  readonly resamplingProcedure?: string;
+  readonly computeAvailability: "available" | "unavailable";
   readonly versionRobust: boolean;
-  compute(input: MethodComputeInput): unknown;
+  validateParameters(parameters: Readonly<Record<string, unknown>>):
+    | { readonly ok: true }
+    | { readonly ok: false; readonly issues: readonly string[] };
+  readonly compute?: (input: MethodComputeInput) => unknown;
 }
 
 /** The method-URI + version registry (design §9.2, §14.7). */

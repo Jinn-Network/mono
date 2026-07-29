@@ -1,6 +1,8 @@
 import { z } from "zod";
-import { ResourceDescriptorSchema, Sha256Digest } from "@jinn-network/task-execution-protocol";
+import { Sha256Digest } from "@jinn-network/task-execution-protocol";
+import { DigestBearingResourceDescriptorSchema } from "../descriptors.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
+import { assertIJsonStrings } from "../json.js";
 import { compareCodeUnitStrings } from "../order.js";
 import { InvalidDocumentError, sealWithSchema, type SealedRecord } from "../sealing.js";
 import { cellKey as computeCellKey } from "../run/cells.js";
@@ -90,12 +92,12 @@ const ArmAttritionSchema = z.object({
   replacements: z.number().int().nonnegative(),
 });
 
-const AttritionSchema = z.object({
+export const AttritionSchema = z.object({
   perArm: z.record(z.string(), ArmAttritionSchema),
   asymmetryFlags: z.array(z.string()),
 });
 
-const CompletenessSchema = z.object({
+export const CompletenessSchema = z.object({
   expected: z.number().int().nonnegative(),
   judged: z.number().int().nonnegative(),
   floor: DecimalString,
@@ -127,7 +129,7 @@ const NAMESPACED_EXTENSION_KEY = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*\/[A-Za-
 export const MatrixRecordSchema = z
   .object({
     protocol: z.literal(BENCHMARKING_PROTOCOL),
-    run: ResourceDescriptorSchema,
+    run: DigestBearingResourceDescriptorSchema,
     closeBoundary: CloseBoundarySchema,
     cells: z.array(MatrixCellSchema),
     exclusions: z.array(ExclusionSchema),
@@ -227,6 +229,7 @@ export function parseMatrix(bytes: Uint8Array): MatrixRecord {
   } catch {
     throw new InvalidDocumentError([{ path: "", message: "not valid JSON" }]);
   }
+  assertIJsonStrings(json);
   const parsed = MatrixRecordSchema.safeParse(json);
   if (!parsed.success) {
     throw new InvalidDocumentError(

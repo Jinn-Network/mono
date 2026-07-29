@@ -122,7 +122,7 @@ describe("paired-mcnemar@1: the excluded remainder (§9.3)", () => {
       [digest("t1b"), { verdict: "fail" }],
       [digest("t2a"), { verdict: "pass" }],
     ]);
-    const results = method.compute(baseInput({
+    const results = method.compute!(baseInput({
       matrices: [matrix],
       parameters: { baseline: "armA", candidate: "armB" },
       resolveVerdict: (d) => outcomes.get(d),
@@ -158,7 +158,7 @@ describe("noninferiority-iut@1", () => {
       outcomes.set(digest(`t${i}b`), { verdict: "pass" });
     }
     const matrix = buildMatrix(cells);
-    const results = method.compute(baseInput({
+    const results = method.compute!(baseInput({
       matrices: [matrix],
       parameters: {
         baseline: "armA",
@@ -175,35 +175,19 @@ describe("noninferiority-iut@1", () => {
   test("requires MethodComputeInput.rng", () => {
     const registry = createMethodRegistry();
     const method = registry.get("jinn.benchmarking.method/noninferiority-iut", "1")!;
-    expect(() => method.compute(baseInput({ parameters: { baseline: "armA", candidate: "armB", stockBaseRate: 0.5 } }))).toThrow();
+    expect(() => method.compute!(baseInput({ parameters: { baseline: "armA", candidate: "armB", stockBaseRate: 0.5 } }))).toThrow();
   });
 });
 
 describe("bradley-terry@1", () => {
-  test("registered and computes real strengths over a resolved matrix (armA passes both tasks, armB neither)", () => {
+  test("is registered as non-reference and unavailable until a pairwise input record is frozen", () => {
     const registry = createMethodRegistry();
     const method = registry.get("jinn.benchmarking.method/bradley-terry", "1")!;
-    const matrix = buildMatrix([
-      cell("t1", "armA", "judged", [digest("t1a")]),
-      cell("t1", "armB", "judged", [digest("t1b")]),
-      cell("t2", "armA", "judged", [digest("t2a")]),
-      cell("t2", "armB", "judged", [digest("t2b")]),
-    ]);
-    const outcomes = new Map<string, VerdictOutcome>([
-      [digest("t1a"), { verdict: "pass" }],
-      [digest("t1b"), { verdict: "fail" }],
-      [digest("t2a"), { verdict: "pass" }],
-      [digest("t2b"), { verdict: "fail" }],
-    ]);
-    const results = method.compute(baseInput({
-      matrices: [matrix],
-      resolveVerdict: (d) => outcomes.get(d),
-    })) as { strengths: Record<string, string>; converged: boolean };
-    expect(results.converged).toBe(true);
-    // armB never wins (both its cells fail), so it never appears as a winner or loser -- only
-    // armA (which won both its cells) and the synthetic "baseline" node are present.
-    expect(Object.keys(results.strengths).sort()).toEqual(["armA", "baseline"]);
-    expect(Number(results.strengths["armA"])).toBeGreaterThan(Number(results.strengths["baseline"]));
+    expect(method).toMatchObject({
+      referenceSet: "registered-non-reference",
+      computeAvailability: "unavailable",
+    });
+    expect(method.compute).toBeUndefined();
   });
 });
 
@@ -211,7 +195,7 @@ describe("clean-subset@1: error handling", () => {
   test("throws when MethodComputeInput.registry is not supplied", () => {
     const registry = createMethodRegistry();
     const method = registry.get("jinn.benchmarking.method/clean-subset", "1")!;
-    expect(() => method.compute(baseInput({
+    expect(() => method.compute!(baseInput({
       parameters: { cutoff: "2026-01-01T00:00:00Z", basis: "self-declared", delegate: { id: "x", version: "1" } },
     }))).toThrow(/registry/);
   });
@@ -219,7 +203,7 @@ describe("clean-subset@1: error handling", () => {
   test("throws when the declared delegate is not registered", () => {
     const registry = createMethodRegistry();
     const method = registry.get("jinn.benchmarking.method/clean-subset", "1")!;
-    expect(() => method.compute(baseInput({
+    expect(() => method.compute!(baseInput({
       registry,
       parameters: { cutoff: "2026-01-01T00:00:00Z", basis: "self-declared", delegate: { id: "not-registered", version: "1" } },
     }))).toThrow(/not registered/);

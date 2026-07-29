@@ -222,7 +222,9 @@ describe("produceReport / verifyReport round trip", () => {
         verdictRule: "unanimous",
         resolveVerdict,
         registry,
-        disclosures: { ...deriveDisclosures([matrix]), independence: 1 },
+        disclosures: {
+          perSubject: deriveDisclosures([matrix]).perSubject.map((entry) => ({ ...entry, independence: 1 })),
+        },
         author: "urn:uuid:11111111-1111-5111-8111-111111111111",
       },
       fakeSigner,

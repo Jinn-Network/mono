@@ -1,5 +1,5 @@
 import { compareCodeUnitStrings } from "./order.js";
-import { assertIJsonInteger, UndefinedArrayElementError, type JsonValue } from "./json.js";
+import { assertIJsonInteger, assertIJsonString, UndefinedArrayElementError, type JsonValue } from "./json.js";
 
 const encoder = new TextEncoder();
 
@@ -8,7 +8,10 @@ function serialize(value: JsonValue): string {
   if (value === null) return "null";
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "number") { assertIJsonInteger(value); return String(value); }
-  if (typeof value === "string") return JSON.stringify(value); // JCS string escaping (I-JSON subset)
+  if (typeof value === "string") {
+    assertIJsonString(value);
+    return JSON.stringify(value);
+  }
   if (Array.isArray(value)) {
     // JCS has no "undefined" token — an array element that is undefined (unlike an object
     // member, it has no key to omit by) is rejected outright rather than silently corrupting
@@ -26,7 +29,10 @@ function serialize(value: JsonValue): string {
   const keys = Object.keys(value)
     .filter((k) => value[k] !== undefined)
     .sort(compareCodeUnitStrings); // sorted array drives emission
-  return `{${keys.map((k) => `${JSON.stringify(k)}:${serialize(value[k])}`).join(",")}}`;
+  return `{${keys.map((k) => {
+    assertIJsonString(k);
+    return `${JSON.stringify(k)}:${serialize(value[k])}`;
+  }).join(",")}}`;
 }
 
 /** RFC 8785 JCS over the I-JSON-integer subset; those bytes are the document forever (§6.1). */

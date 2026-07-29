@@ -114,4 +114,14 @@ describe("MatrixRecordSchema / parseMatrix / sealMatrix", () => {
     ];
     expect(() => sealMatrix(value)).toThrow(InvalidDocumentError);
   });
+
+  test.each([
+    (loadFixture("invalid-run-uri-only.json") as { run: unknown }).run,
+    { digest: { sha256: "A".repeat(64) } },
+    { digest: { sha256: "short" } },
+  ])("rejects a Matrix Run link without a canonical lowercase sha256 digest", (run) => {
+    const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
+    value.run = run;
+    expect(() => sealMatrix(value)).toThrow(InvalidDocumentError);
+  });
 });

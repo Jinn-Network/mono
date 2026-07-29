@@ -49,14 +49,45 @@ describe("BenchmarkRecordSchema / parseBenchmark / sealBenchmark", () => {
   });
 
   test("an item's task ResourceDescriptor without a sha256 digest is rejected", () => {
+    const value = loadFixture("invalid-item-uri-only.json");
+    expect(() => sealBenchmark(value)).toThrow();
+  });
+
+  test.each([
+    "not-hex",
+    "A".repeat(64),
+    "a".repeat(63),
+  ])("rejects a non-canonical Benchmark item sha256 digest: %s", (sha256) => {
     const value = {
       protocol: "https://jinn.network/protocols/benchmarking/1.0",
-      name: "no-digest",
+      name: "bad-digest",
       description: "d",
       version: "1.0.0",
-      items: [{ task: { uri: "https://example.test/task" } }],
+      items: [{ task: { digest: { sha256 } } }],
       reveal: { policy: "immediate" },
     };
-    expect(() => sealBenchmark(value)).toThrow();
+    expect(() => sealBenchmark(value)).toThrow(InvalidDocumentError);
+  });
+
+  test("rejects a non-IRI author", () => {
+    const value = loadFixture("minimal.json") as Record<string, unknown>;
+    expect(() => sealBenchmark({ ...value, author: "not an iri" })).toThrow(InvalidDocumentError);
+  });
+
+  test.each([
+    ["string value", (value: Record<string, unknown>) => { value.description = "\uD800"; }],
+    ["extension key", (value: Record<string, unknown>) => { value["bad\uDC00"] = "value"; }],
+  ])("rejects an unpaired surrogate in received record %s", (_label, mutate) => {
+    const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
+    mutate(value);
+    const bytes = new TextEncoder().encode(JSON.stringify(value));
+    expect(() => parseBenchmark(bytes)).toThrow(/unpaired UTF-16 surrogate/);
+  });
+
+  test("accepts a supplementary-plane scalar in received record strings and keys", () => {
+    const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
+    value.description = "astral-\u{1F9EA}";
+    value["emoji-\u{1F680}"] = "ok";
+    expect(parseBenchmark(new TextEncoder().encode(JSON.stringify(value)))).toMatchObject(value);
   });
 });

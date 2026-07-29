@@ -20,17 +20,45 @@ export interface MethodComputeInput {
   readonly resolveVerdict: (verdictDigest: string) => VerdictOutcome | undefined;
   readonly resolveClusterKey?: (taskDigest: string) => string | undefined;
   readonly resolveTaskTimestamp?: (taskDigest: string) => string | undefined;
-  readonly rng?: () => number;
   /** `clean-subset@1`'s delegate call (§9.2: "restrict... then delegate to another method") is
    * the only method that needs this — every other method ignores it. */
   readonly registry?: MethodRegistry;
 }
 
-/** A registered §9.2 method: identified by URI + version, computing `results` from a matrix. */
+export type MethodReferenceSet = "v1-reference" | "registered-non-reference";
+export type ComputeAvailability = "available" | "unavailable";
+
+export interface DeclarativeParameterSchema {
+  readonly type: "object";
+  readonly required: readonly string[];
+  readonly properties: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  readonly additionalProperties: boolean;
+}
+
+export type ParameterValidationResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly issues: readonly string[] };
+
+/**
+ * A registered §9.2 method is a declarative spec, not merely a dispatch function. The metadata
+ * is part of the frozen registry contract and is fixture-pinned by the kit.
+ */
 export interface Method {
   readonly id: string;
   readonly version: string;
-  compute(input: MethodComputeInput): unknown;
+  readonly requiredInputs: readonly string[];
+  readonly parameterSchema: DeclarativeParameterSchema;
+  readonly outputShape: string;
+  readonly exclusionRule: string;
+  readonly clusteringRule: string;
+  readonly referenceSet: MethodReferenceSet;
+  readonly deterministic: true;
+  /** Required for resampling methods; omitted when the method is deterministic without PRNG. */
+  readonly resamplingProcedure?: string;
+  readonly computeAvailability: ComputeAvailability;
+  readonly versionRobust: boolean;
+  validateParameters(parameters: Readonly<Record<string, unknown>>): ParameterValidationResult;
+  readonly compute?: (input: MethodComputeInput) => unknown;
 }
 
 /** The kit's injected shape (design §16): `aggregate` implements this over its seven methods. */

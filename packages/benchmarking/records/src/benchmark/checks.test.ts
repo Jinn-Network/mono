@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
+import { sealTask } from "@jinn-network/task-execution-protocol";
+import { documentDigest } from "../hashing.js";
 import { BenchmarkRecordSchema } from "./schema.js";
 import {
   checkComparability,
@@ -48,25 +50,75 @@ describe("checkJudgeability", () => {
     expect(checkJudgeability(rec)).toEqual({ status: "unevaluated", reason: "committed-not-revealed" });
   });
 
-  test("reports unevaluated when the resolver has bytes for some items but not others", () => {
-    const rec = benchmarkWith([DIGEST_A, DIGEST_B], { reveal: { policy: "scheduled" } });
-    const taskBytes = new TextEncoder().encode(JSON.stringify({ evaluation: { digest: { sha256: DIGEST_C } } }));
-    const result = checkJudgeability(rec, (digest) => (digest === DIGEST_A ? taskBytes : undefined));
-    expect(result).toEqual({ status: "unevaluated", reason: "committed-not-revealed" });
+  function validTaskBytes(instructions = "do it"): Uint8Array {
+    return sealTask({
+      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      profile: { digest: { sha256: DIGEST_B } },
+      instructions,
+      outputs: [],
+      evaluation: { digest: { sha256: DIGEST_C } },
+    });
+  }
+
+  function bareDigest(bytes: Uint8Array): string {
+    return documentDigest(bytes).slice("sha256:".length);
+  }
+
+  test("reports known invalidity together with unresolved coverage", () => {
+    const validBytes = validTaskBytes();
+    const invalidBytes = new TextEncoder().encode("{not-json");
+    const badDigest = DIGEST_A;
+    const invalidDigest = bareDigest(invalidBytes);
+    const rec = benchmarkWith([badDigest, invalidDigest, DIGEST_C], { reveal: { policy: "scheduled" } });
+    const result = checkJudgeability(rec, (digest) => (
+      digest === badDigest ? validBytes
+        : digest === invalidDigest ? invalidBytes
+          : undefined
+    ));
+    expect(result).toEqual({
+      ok: false,
+      invalid: [
+        { taskDigest: badDigest, reason: "digest-mismatch" },
+        { taskDigest: invalidDigest, reason: "invalid-task" },
+      ],
+      unresolved: [DIGEST_C],
+    });
   });
 
-  test("passes when every resolved Task carries an evaluation descriptor", () => {
-    const rec = benchmarkWith([DIGEST_A, DIGEST_B]);
-    const taskBytes = new TextEncoder().encode(JSON.stringify({ evaluation: { digest: { sha256: DIGEST_C } } }));
-    expect(checkJudgeability(rec, () => taskBytes)).toEqual({ ok: true });
+  test("passes only when exact committed Task bytes are valid and carry a digest-bearing evaluation descriptor", () => {
+    const first = validTaskBytes("first");
+    const second = validTaskBytes("second");
+    const rec = benchmarkWith([bareDigest(first), bareDigest(second)]);
+    expect(checkJudgeability(rec, (digest) => digest === bareDigest(first) ? first : second)).toEqual({ ok: true });
   });
 
-  test("fails, naming unevaluated digests, when a resolved Task lacks an evaluation descriptor", () => {
-    const rec = benchmarkWith([DIGEST_A, DIGEST_B]);
-    const withEvaluation = new TextEncoder().encode(JSON.stringify({ evaluation: { digest: { sha256: DIGEST_C } } }));
-    const withoutEvaluation = new TextEncoder().encode(JSON.stringify({ instructions: "do it" }));
-    const result = checkJudgeability(rec, (digest) => (digest === DIGEST_A ? withoutEvaluation : withEvaluation));
-    expect(result).toEqual({ ok: false, unevaluated: [DIGEST_A] });
+  test("rejects a valid sealed Task whose evaluation descriptor has no canonical sha256 digest", () => {
+    const taskBytes = sealTask({
+      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      profile: { digest: { sha256: DIGEST_B } },
+      instructions: "do it",
+      outputs: [],
+      evaluation: { uri: "https://example.test/evaluation" },
+    });
+    const digest = bareDigest(taskBytes);
+    expect(checkJudgeability(benchmarkWith([digest]), () => taskBytes)).toEqual({
+      ok: false,
+      invalid: [{ taskDigest: digest, reason: "missing-evaluation-digest" }],
+      unresolved: [],
+    });
+  });
+
+  test("rejects schema-valid Task JSON that was not sealed as exact canonical bytes", () => {
+    const sealed = validTaskBytes();
+    const prettyBytes = new TextEncoder().encode(
+      `${JSON.stringify(JSON.parse(new TextDecoder().decode(sealed)), null, 2)}\n`,
+    );
+    const digest = bareDigest(prettyBytes);
+    expect(checkJudgeability(benchmarkWith([digest]), () => prettyBytes)).toEqual({
+      ok: false,
+      invalid: [{ taskDigest: digest, reason: "invalid-task" }],
+      unresolved: [],
+    });
   });
 });
 
@@ -92,6 +144,33 @@ describe("classifyVersionBump", () => {
   test("major: an item changed (old digest gone, new digest present)", () => {
     const prev = benchmarkWith([DIGEST_A, DIGEST_B], { version: "1.1.0" });
     const next = benchmarkWith([DIGEST_A, DIGEST_C], { version: "2.0.0" });
+    expect(classifyVersionBump(prev, next)).toBe("major");
+  });
+
+  test("major: reordering existing items changes ordered identity", () => {
+    const prev = benchmarkWith([DIGEST_A, DIGEST_B], { version: "1.0.0" });
+    const next = benchmarkWith([DIGEST_B, DIGEST_A], { version: "2.0.0" });
+    expect(classifyVersionBump(prev, next)).toBe("major");
+  });
+
+  test("major: inserting an item into the existing ordered sequence is not append-only", () => {
+    const prev = benchmarkWith([DIGEST_A, DIGEST_B], { version: "1.0.0" });
+    const next = benchmarkWith([DIGEST_A, DIGEST_C, DIGEST_B], { version: "2.0.0" });
+    expect(classifyVersionBump(prev, next)).toBe("major");
+  });
+
+  test("major: changing an item descriptor hint changes the ordered item bytes even when its digest is unchanged", () => {
+    const prev = benchmarkWith([DIGEST_A], { version: "1.0.0" });
+    const next = BenchmarkRecordSchema.parse({
+      ...prev,
+      version: "2.0.0",
+      items: [{
+        task: {
+          digest: { sha256: DIGEST_A },
+          uri: "https://example.test/revealed/task-a.json",
+        },
+      }],
+    });
     expect(classifyVersionBump(prev, next)).toBe("major");
   });
 });

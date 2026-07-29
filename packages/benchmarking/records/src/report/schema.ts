@@ -1,10 +1,9 @@
 import { z } from "zod";
-import { ResourceDescriptorSchema } from "@jinn-network/task-execution-protocol";
+import { AgentIriSchema, DigestBearingResourceDescriptorSchema, LowercaseSha256HexSchema } from "../descriptors.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
+import { AttritionSchema, CompletenessSchema } from "../matrix/schema.js";
+import { assertIJsonStrings } from "../json.js";
 import { InvalidDocumentError, sealWithSchema, type SealedRecord } from "../sealing.js";
-
-/** A decimal-string quantity (program §7.1/§7.14: fractional numbers are strings). */
-const DecimalString = z.string().regex(/^\d+(\.\d+)?$/, "must be a decimal string");
 
 const MethodRefSchema = z.object({
   id: z.string(),
@@ -30,30 +29,23 @@ const PinningDisclosureSchema = z.object({
   isolation: PinningAxisCountsSchema,
 });
 
-const DisclosureCompletenessSchema = z.object({
-  expected: z.number().int().nonnegative(),
-  judged: z.number().int().nonnegative(),
-  floor: DecimalString,
-  runOutcome: z.enum(["complete", "partial", "cancelled"]),
-});
-
-const DisclosureAttritionSchema = z.object({
-  asymmetryFlags: z.array(z.string()),
-  perArm: z.record(z.string(), z.object({ nonJudged: z.number().int().nonnegative() })),
-});
-
-const DisclosuresSchema = z.object({
+const PerSubjectDisclosureSchema = z.object({
+  subjectSha256: LowercaseSha256HexSchema,
   integrityTiers: IntegrityTiersSchema,
   pinning: PinningDisclosureSchema,
   independence: z.number().int().nonnegative(),
-  completeness: DisclosureCompletenessSchema,
-  attrition: DisclosureAttritionSchema,
+  completeness: CompletenessSchema,
+  attrition: AttritionSchema,
+});
+
+const DisclosuresSchema = z.object({
+  perSubject: z.array(PerSubjectDisclosureSchema),
 });
 
 export const ReportRecordSchema = z
   .object({
     protocol: z.literal(BENCHMARKING_PROTOCOL),
-    subjects: z.array(ResourceDescriptorSchema).min(1),
+    subjects: z.array(DigestBearingResourceDescriptorSchema).min(1),
     method: MethodRefSchema,
     preregistered: z.boolean().optional(),
     results: z.unknown(),
@@ -63,7 +55,7 @@ export const ReportRecordSchema = z
     // generic "required" type error.
     disclosures: DisclosuresSchema.optional(),
     limitations: z.array(z.string()).optional(),
-    author: z.string(),
+    author: AgentIriSchema,
   })
   .loose() // open to namespaced extensions (TEP §21.3)
   .superRefine((report, ctx) => {
@@ -73,7 +65,37 @@ export const ReportRecordSchema = z
         message: "disclosures is required (§9.1: a report that hides attrition is malformed)",
         path: ["disclosures"],
       });
+      return;
     }
+
+    if (report.disclosures.perSubject.length !== report.subjects.length) {
+      ctx.addIssue({
+        code: "custom",
+        message: "disclosures.perSubject must have the same length and order as subjects",
+        path: ["disclosures", "perSubject"],
+      });
+    }
+
+    const seen = new Set<string>();
+    report.subjects.forEach((subject, index) => {
+      const digest = subject.digest.sha256;
+      if (seen.has(digest)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `duplicate Report subject digest "${digest}"`,
+          path: ["subjects", index],
+        });
+      }
+      seen.add(digest);
+      const disclosure = report.disclosures?.perSubject[index];
+      if (disclosure !== undefined && disclosure.subjectSha256 !== digest) {
+        ctx.addIssue({
+          code: "custom",
+          message: "per-subject disclosure digest/order does not match subjects",
+          path: ["disclosures", "perSubject", index, "subjectSha256"],
+        });
+      }
+    });
   });
 
 export type ReportRecord = z.infer<typeof ReportRecordSchema>;
@@ -86,6 +108,7 @@ export function parseReport(bytes: Uint8Array): ReportRecord {
   } catch {
     throw new InvalidDocumentError([{ path: "", message: "not valid JSON" }]);
   }
+  assertIJsonStrings(json);
   const parsed = ReportRecordSchema.safeParse(json);
   if (!parsed.success) {
     throw new InvalidDocumentError(

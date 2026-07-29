@@ -26,10 +26,23 @@ export {
 export { compareCodeUnitStrings } from "./order.js";
 export { documentDigest, sha256Hex } from "./hashing.js";
 export { serializeCanonicalJson } from "./canonical.js";
-export { IJsonNumberError, UndefinedArrayElementError, assertIJsonInteger } from "./json.js";
+export {
+  IJsonNumberError,
+  IJsonStringError,
+  UndefinedArrayElementError,
+  assertIJsonInteger,
+  assertIJsonString,
+  assertIJsonStrings,
+} from "./json.js";
 export type { JsonValue } from "./json.js";
 export { InvalidDocumentError, sealRecord, sealWithSchema } from "./sealing.js";
 export type { SealedRecord, ValidationIssue } from "./sealing.js";
+export {
+  AgentIriSchema,
+  DigestBearingResourceDescriptorSchema,
+  LowercaseSha256HexSchema,
+} from "./descriptors.js";
+export type { DigestBearingResourceDescriptor } from "./descriptors.js";
 
 // --- the Benchmark record (§6) ---
 export { BenchmarkRecordSchema, itemTaskDigest, parseBenchmark, sealBenchmark } from "./benchmark/schema.js";
@@ -40,7 +53,7 @@ export {
   checkJudgeability,
   classifyVersionBump,
 } from "./benchmark/checks.js";
-export type { TaskBytesResolver, VersionBump } from "./benchmark/checks.js";
+export type { JudgeabilityInvalidItem, TaskBytesResolver, VersionBump } from "./benchmark/checks.js";
 export { checkRevealConsistency } from "./benchmark/reveal.js";
 export type { RevealCoverage } from "./benchmark/reveal.js";
 

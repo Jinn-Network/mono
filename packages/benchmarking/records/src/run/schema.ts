@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { RequirementsMap, ResourceDescriptorSchema } from "@jinn-network/task-execution-protocol";
+import { RequirementsMap } from "@jinn-network/task-execution-protocol";
 import { serializeCanonicalJson } from "../canonical.js";
+import { AgentIriSchema, DigestBearingResourceDescriptorSchema } from "../descriptors.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
-import type { JsonValue } from "../json.js";
+import { assertIJsonStrings, type JsonValue } from "../json.js";
 import { InvalidDocumentError, sealWithSchema, type SealedRecord } from "../sealing.js";
 
 const Rfc3339 = z.string().datetime({ offset: true });
@@ -22,7 +23,7 @@ const ArmIdSchema = z.string().regex(
 const ArmSchema = z.object({
   armId: ArmIdSchema,
   pinning: RequirementsMap,
-  execution: z.object({ allowlist: z.array(z.string()) }).optional(),
+  execution: z.object({ allowlist: z.array(AgentIriSchema) }).optional(),
 });
 
 const ReplacementPolicySchema = z.object({
@@ -42,7 +43,7 @@ const RunPolicySchema = z.object({
   independence: z.enum(["gating", "disclosed"]),
   evaluation: EvaluationPolicySchema,
   submissionBaseline: RequirementsMap,
-  participantExclusions: z.array(z.string()).optional(),
+  participantExclusions: z.array(AgentIriSchema).optional(),
 });
 
 const AnalysisPlanEntrySchema = z.object({
@@ -69,8 +70,8 @@ function pinningBytes(pinning: Record<string, unknown> | undefined): string {
 export const RunRecordSchema = z
   .object({
     protocol: z.literal(BENCHMARKING_PROTOCOL),
-    benchmark: ResourceDescriptorSchema,
-    owner: z.string(),
+    benchmark: DigestBearingResourceDescriptorSchema,
+    owner: AgentIriSchema,
     arms: z.array(ArmSchema).min(1),
     replicates: z.number().int().positive(),
     policy: RunPolicySchema,
@@ -87,6 +88,14 @@ export const RunRecordSchema = z
         code: "custom",
         message: "policy.completenessFloor must be in (0,1] (§7.1)",
         path: ["policy", "completenessFloor"],
+      });
+    }
+
+    if (run.venue?.kind === "open-competition" && run.policy.independence !== "gating") {
+      ctx.addIssue({
+        code: "custom",
+        message: 'policy.independence must be "gating" for open-competition venues (§7.1)',
+        path: ["policy", "independence"],
       });
     }
 
@@ -130,6 +139,7 @@ export function parseRun(bytes: Uint8Array): RunRecord {
   } catch {
     throw new InvalidDocumentError([{ path: "", message: "not valid JSON" }]);
   }
+  assertIJsonStrings(json);
   const parsed = RunRecordSchema.safeParse(json);
   if (!parsed.success) {
     throw new InvalidDocumentError(

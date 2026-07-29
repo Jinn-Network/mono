@@ -60,7 +60,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  testing:
+  aggregate:
     needs: [records]
     runs-on: ubuntu-latest
     steps:
@@ -75,26 +75,26 @@ jobs:
       - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
-          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
-      - name: Verify Benchmarking Testing (conformance kit)
-        working-directory: packages/benchmarking/testing
+      - name: Verify Benchmarking Aggregate
+        working-directory: packages/benchmarking/aggregate
         run: |
           yarn install --immutable
           yarn typecheck
           yarn test
           yarn build
           yarn pack:smoke
-      - name: Upload Benchmarking Testing distribution
+      - name: Upload Benchmarking Aggregate distribution
         uses: actions/upload-artifact@v4
         with:
-          name: benchmarking-testing-dist
-          path: packages/benchmarking/testing/dist
+          name: benchmarking-aggregate-dist
+          path: packages/benchmarking/aggregate/dist
           if-no-files-found: error
           retention-days: 1
 
-  aggregate:
-    needs: [records, testing]
+  testing:
+    needs: [records, aggregate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -111,20 +111,20 @@ jobs:
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
-          (cd packages/benchmarking/testing && yarn install --immutable && yarn build)
-      - name: Verify Benchmarking Aggregate
-        working-directory: packages/benchmarking/aggregate
+          (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
+      - name: Verify Benchmarking Testing (conformance kit)
+        working-directory: packages/benchmarking/testing
         run: |
           yarn install --immutable
           yarn typecheck
           yarn test
           yarn build
           yarn pack:smoke
-      - name: Upload Benchmarking Aggregate distribution
+      - name: Upload Benchmarking Testing distribution
         uses: actions/upload-artifact@v4
         with:
-          name: benchmarking-aggregate-dist
-          path: packages/benchmarking/aggregate/dist
+          name: benchmarking-testing-dist
+          path: packages/benchmarking/testing/dist
           if-no-files-found: error
           retention-days: 1
 

@@ -34,18 +34,12 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/task-execution-profiles',
       '@jinn-network/task-execution-protocol',
     ],
-    devDependencies: [], optionalDependencies: [], peerDependencies: [],
+    devDependencies: ['@jinn-network/benchmarking-aggregate', '@jinn-network/trust-core'],
+    optionalDependencies: [], peerDependencies: [],
   }],
   ['aggregate', {
     dependencies: ['@jinn-network/benchmarking-records', '@jinn-network/trust-core'],
-    // task-execution-protocol/profiles are transitively required to resolve
-    // benchmarking-testing's own portal deps under a standalone (non-workspace) yarn project —
-    // aggregate/src never imports either directly (source-boundaries guard enforces this).
-    devDependencies: [
-      '@jinn-network/benchmarking-testing',
-      '@jinn-network/task-execution-profiles',
-      '@jinn-network/task-execution-protocol',
-    ],
+    devDependencies: ['@jinn-network/task-execution-protocol'],
     optionalDependencies: [], peerDependencies: [],
   }],
 ]);

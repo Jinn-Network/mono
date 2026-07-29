@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { ResourceDescriptorSchema } from "@jinn-network/task-execution-protocol";
+import { AgentIriSchema, DigestBearingResourceDescriptorSchema } from "../descriptors.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
+import { assertIJsonStrings } from "../json.js";
 import { InvalidDocumentError, sealWithSchema, type SealedRecord } from "../sealing.js";
 
 // A SemVer 2.0.0 version string (§6.1/§6.2).
@@ -11,10 +13,7 @@ const SemVer = z.string().regex(
 
 // §6.1: a Benchmark item's task reference always commits to a sha256 digest — unlike a general
 // ResourceDescriptor (satisfiable by uri/digest/content alone), an item's identity is content.
-const BenchmarkTaskReferenceSchema = ResourceDescriptorSchema.refine(
-  (descriptor) => typeof descriptor.digest?.sha256 === "string",
-  { message: "Benchmark item's task ResourceDescriptor requires a sha256 digest entry (§6.1)" },
-);
+const BenchmarkTaskReferenceSchema = DigestBearingResourceDescriptorSchema;
 
 const BenchmarkItemSchema = z.object({
   task: BenchmarkTaskReferenceSchema,
@@ -30,7 +29,7 @@ export const BenchmarkRecordSchema = z
     protocol: z.literal(BENCHMARKING_PROTOCOL),
     name: z.string(),
     description: z.string(),
-    author: z.string().optional(),
+    author: AgentIriSchema.optional(),
     version: SemVer,
     supersedes: ResourceDescriptorSchema.optional(),
     items: z.array(BenchmarkItemSchema),
@@ -60,6 +59,7 @@ export function parseBenchmark(bytes: Uint8Array): BenchmarkRecord {
   } catch {
     throw new InvalidDocumentError([{ path: "", message: "not valid JSON" }]);
   }
+  assertIJsonStrings(json);
   const parsed = BenchmarkRecordSchema.safeParse(json);
   if (!parsed.success) {
     throw new InvalidDocumentError(

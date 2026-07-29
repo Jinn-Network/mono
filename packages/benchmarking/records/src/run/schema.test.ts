@@ -80,4 +80,42 @@ describe("RunRecordSchema / parseRun / sealRun", () => {
     (value.arms as Array<Record<string, unknown>>)[0].armId = "bad/arm";
     expect(() => sealRun(value)).toThrow(InvalidDocumentError);
   });
+
+  test.each([
+    (loadFixture("invalid-benchmark-uri-only.json") as { benchmark: unknown }).benchmark,
+    { digest: { sha256: "A".repeat(64) } },
+    { digest: { sha256: "abc" } },
+  ])("rejects a Run Benchmark link without a canonical lowercase sha256 digest", (benchmark) => {
+    const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
+    value.benchmark = benchmark;
+    expect(() => sealRun(value)).toThrow(InvalidDocumentError);
+  });
+
+  test("requires independence gating on an open-competition venue", () => {
+    const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
+    value.venue = { kind: "open-competition" };
+    (value.policy as Record<string, unknown>).independence = "disclosed";
+    expect(() => sealRun(value)).toThrow(InvalidDocumentError);
+  });
+
+  test("accepts an open-competition venue when evaluator independence is gating", () => {
+    const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
+    value.venue = { kind: "open-competition" };
+    (value.policy as Record<string, unknown>).independence = "gating";
+    expect(() => sealRun(value)).not.toThrow();
+  });
+
+  test.each([
+    ["owner", (value: Record<string, unknown>) => { value.owner = "not an iri"; }],
+    ["allowlist", (value: Record<string, unknown>) => {
+      ((value.arms as Array<Record<string, unknown>>)[0]).execution = { allowlist: ["not an iri"] };
+    }],
+    ["participant exclusions", (value: Record<string, unknown>) => {
+      (value.policy as Record<string, unknown>).participantExclusions = ["not an iri"];
+    }],
+  ])("rejects a non-IRI %s identity", (_label, mutate) => {
+    const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
+    mutate(value);
+    expect(() => sealRun(value)).toThrow(InvalidDocumentError);
+  });
 });

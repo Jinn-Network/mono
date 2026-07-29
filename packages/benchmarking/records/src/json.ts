@@ -9,6 +9,46 @@ export class IJsonNumberError extends Error {
   }
 }
 
+export class IJsonStringError extends Error {
+  readonly category = "invalid-document" as const;
+  constructor(readonly value: string) {
+    super("string contains an unpaired UTF-16 surrogate and is not an I-JSON Unicode scalar sequence");
+    this.name = "IJsonStringError";
+  }
+}
+
+/** I-JSON strings contain Unicode scalar values, never isolated UTF-16 surrogate code units. */
+export function assertIJsonString(value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) throw new IJsonStringError(value);
+      index += 1;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      throw new IJsonStringError(value);
+    }
+  }
+}
+
+/** Recursively enforces the I-JSON Unicode-scalar rule over parsed values and member names. */
+export function assertIJsonStrings(value: unknown): void {
+  if (typeof value === "string") {
+    assertIJsonString(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const element of value) assertIJsonStrings(element);
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, member] of Object.entries(value)) {
+      assertIJsonString(key);
+      assertIJsonStrings(member);
+    }
+  }
+}
+
 /**
  * Thrown when canonicalization reaches an array element that is `undefined`. JCS has no
  * "undefined" token (§6.1) — object members whose value is `undefined` are omitted (mirroring

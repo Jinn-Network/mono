@@ -2,12 +2,130 @@ import { BENCHMARKING_METHOD_IDS, BENCHMARKING_METHOD_VERSION, compareCodeUnitSt
 import { filterByCutoff } from "./clean-subset.js";
 import { selectScorableCells, type CellRef } from "./exclusion.js";
 import type { Method, MethodComputeInput, MethodRegistry, VerdictOutcome } from "./method.js";
-import { fitBradleyTerry } from "./stats/bradley-terry.js";
 import { nonInferiorityIut, nonInferiorityVerdict, pairedCostVerdict, type NonInferiorityOptions } from "./stats/noninferiority.js";
 import { pairedMcnemar } from "./stats/paired-mcnemar.js";
 import { avgAtOne, passAtK } from "./stats/pass-at-k.js";
 import { wilsonInterval } from "./stats/wilson.js";
 import { reduceValidVerdicts, type VerdictReduction } from "./verdict-rule.js";
+
+type MethodMetadata = Omit<Method, "id" | "version" | "versionRobust" | "compute">;
+
+function validateParameters(
+  schema: Method["parameterSchema"],
+  parameters: Readonly<Record<string, unknown>>,
+): { ok: true } | { ok: false; issues: string[] } {
+  const issues: string[] = [];
+  for (const required of schema.required) {
+    if (!Object.hasOwn(parameters, required)) issues.push(`missing required parameter "${required}"`);
+  }
+  if (!schema.additionalProperties) {
+    for (const key of Object.keys(parameters)) {
+      if (!Object.hasOwn(schema.properties, key)) issues.push(`unknown parameter "${key}"`);
+    }
+  }
+  for (const [key, rule] of Object.entries(schema.properties)) {
+    const value = parameters[key];
+    if (value === undefined) continue;
+    if (Array.isArray(rule["enum"]) && !(rule["enum"] as unknown[]).includes(value)) {
+      issues.push(`parameter "${key}" is outside its enum`);
+    }
+    if (rule["type"] === "string" && typeof value !== "string") issues.push(`parameter "${key}" must be a string`);
+    if (rule["type"] === "integer" && (typeof value !== "number" || !Number.isInteger(value))) {
+      issues.push(`parameter "${key}" must be an integer`);
+    }
+    if (rule["type"] === "object" && (typeof value !== "object" || value === null || Array.isArray(value))) {
+      issues.push(`parameter "${key}" must be an object`);
+    }
+    if (typeof rule["minimum"] === "number" && typeof value === "number" && value < rule["minimum"]) {
+      issues.push(`parameter "${key}" must be >= ${rule["minimum"]}`);
+    }
+  }
+  return issues.length === 0 ? { ok: true } : { ok: false, issues };
+}
+
+function metadata(input: Omit<MethodMetadata, "validateParameters">): MethodMetadata {
+  return {
+    ...input,
+    validateParameters(parameters) {
+      return validateParameters(input.parameterSchema, parameters);
+    },
+  };
+}
+
+const VERDICT_RULE_PROPERTY = { enum: ["sole", "unanimous", "any-pass", "majority"] };
+const METHOD_METADATA = {
+  wilson: metadata({
+    requiredInputs: ["matrix.cells", "referenced-verdicts"],
+    parameterSchema: { type: "object", required: ["verdictRule"], properties: { verdictRule: VERDICT_RULE_PROPERTY }, additionalProperties: false },
+    outputShape: "per-arm pass rate + Wilson interval + conflicted cells",
+    exclusionRule: "judged-only; conflicted dropped-with-report",
+    clusteringRule: "none",
+    referenceSet: "v1-reference",
+    deterministic: true,
+    computeAvailability: "available",
+  }),
+  avgAtK: metadata({
+    requiredInputs: ["matrix.cells", "referenced-verdicts"],
+    parameterSchema: { type: "object", required: ["verdictRule"], properties: { verdictRule: VERDICT_RULE_PROPERTY }, additionalProperties: false },
+    outputShape: "per-arm per-task repetition rate + arm mean + conflicted cells",
+    exclusionRule: "judged-only; preserve arm identity",
+    clusteringRule: "none",
+    referenceSet: "v1-reference",
+    deterministic: true,
+    computeAvailability: "available",
+  }),
+  passAtK: metadata({
+    requiredInputs: ["matrix.cells", "referenced-verdicts"],
+    parameterSchema: { type: "object", required: ["verdictRule", "k"], properties: { verdictRule: VERDICT_RULE_PROPERTY, k: { type: "integer", minimum: 1 } }, additionalProperties: false },
+    outputShape: "per-arm per-task unbiased pass@k + arm mean + conflicted cells",
+    exclusionRule: "judged-only; preserve arm identity",
+    clusteringRule: "none",
+    referenceSet: "v1-reference",
+    deterministic: true,
+    computeAvailability: "available",
+  }),
+  pairedMcnemar: metadata({
+    requiredInputs: ["matrix.cells", "referenced-verdicts", "task-provenance-source"],
+    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate"], properties: { verdictRule: VERDICT_RULE_PROPERTY, baseline: { type: "string" }, candidate: { type: "string" } }, additionalProperties: false },
+    outputShape: "paired exact McNemar + provenance-cluster correction + excluded cells",
+    exclusionRule: "pair shared task digests judged in both arms; report full remainder",
+    clusteringRule: "task-provenance-source",
+    referenceSet: "v1-reference",
+    deterministic: true,
+    computeAvailability: "available",
+  }),
+  noninferiorityIut: metadata({
+    requiredInputs: ["matrix.cells", "matrix.cost", "referenced-verdicts"],
+    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate", "seed", "resamples"], properties: { verdictRule: VERDICT_RULE_PROPERTY, baseline: { type: "string" }, candidate: { type: "string" }, seed: { type: "integer", minimum: 1 }, resamples: { type: "integer", minimum: 100 } }, additionalProperties: false },
+    outputShape: "BCa quality lower bound AND one-sided paired-cost Wilcoxon + exclusions + conflicted cells",
+    exclusionRule: "paired both-arm judged cells; cost only both-solve pairs; report remainder",
+    clusteringRule: "task-provenance-source",
+    referenceSet: "v1-reference",
+    deterministic: true,
+    resamplingProcedure: "xorshift32-v1; sample paired tasks with replacement; one uint32 draw per position; index=floor(uint32/2^32*n); BCa uses jackknife acceleration",
+    computeAvailability: "available",
+  }),
+  cleanSubset: metadata({
+    requiredInputs: ["matrix.cells", "referenced-verdicts", "exact-task-bytes-or-anchored-benchmark-announcement"],
+    parameterSchema: { type: "object", required: ["verdictRule", "basis", "cutoff", "delegate"], properties: { verdictRule: VERDICT_RULE_PROPERTY, basis: { enum: ["self-declared", "announcement-anchored"] }, cutoff: { type: "string", format: "date-time" }, delegate: { type: "object" } }, additionalProperties: false },
+    outputShape: "named contamination subset + delegated results + conflicted cells",
+    exclusionRule: "predicate exclusions reported before delegate exclusions",
+    clusteringRule: "delegate-defined",
+    referenceSet: "v1-reference",
+    deterministic: true,
+    computeAvailability: "available",
+  }),
+  bradleyTerry: metadata({
+    requiredInputs: ["pairwise-judgment-records (not frozen in v1)"],
+    parameterSchema: { type: "object", required: [], properties: {}, additionalProperties: false },
+    outputShape: "unavailable until genuine pairwise judgment input is frozen",
+    exclusionRule: "unavailable",
+    clusteringRule: "unavailable",
+    referenceSet: "registered-non-reference",
+    deterministic: true,
+    computeAvailability: "unavailable",
+  }),
+} as const;
 
 function fixed4(x: number): string {
   return x.toFixed(4);
@@ -51,6 +169,7 @@ function reduceScoredCells(input: MethodComputeInput): { decisive: (CellRef & { 
 // --- wilson@1 (design §9.2) ------------------------------------------------------------------
 
 const wilsonMethod: Method = {
+  ...METHOD_METADATA.wilson,
   id: BENCHMARKING_METHOD_IDS.wilson,
   version: BENCHMARKING_METHOD_VERSION,
   versionRobust: false,
@@ -92,6 +211,7 @@ function perTaskReplicateCounts(input: MethodComputeInput): Map<string, { n: num
 }
 
 const avgAtKMethod: Method = {
+  ...METHOD_METADATA.avgAtK,
   id: BENCHMARKING_METHOD_IDS.avgAtK,
   version: BENCHMARKING_METHOD_VERSION,
   versionRobust: false,
@@ -114,6 +234,7 @@ const avgAtKMethod: Method = {
 };
 
 const passAtKMethod: Method = {
+  ...METHOD_METADATA.passAtK,
   id: BENCHMARKING_METHOD_IDS.passAtK,
   version: BENCHMARKING_METHOD_VERSION,
   versionRobust: false,
@@ -140,6 +261,7 @@ const passAtKMethod: Method = {
 // --- paired-mcnemar@1 (design §9.2) ------------------------------------------------------------
 
 const pairedMcnemarMethod: Method = {
+  ...METHOD_METADATA.pairedMcnemar,
   id: BENCHMARKING_METHOD_IDS.pairedMcnemar,
   version: BENCHMARKING_METHOD_VERSION,
   versionRobust: true,
@@ -194,6 +316,7 @@ const pairedMcnemarMethod: Method = {
 // --- clean-subset@1 (design §9.2) --------------------------------------------------------------
 
 const cleanSubsetMethod: Method = {
+  ...METHOD_METADATA.cleanSubset,
   id: BENCHMARKING_METHOD_IDS.cleanSubset,
   version: BENCHMARKING_METHOD_VERSION,
   versionRobust: false,
@@ -208,6 +331,9 @@ const cleanSubsetMethod: Method = {
     if (input.registry === undefined) throw new Error("clean-subset@1 requires MethodComputeInput.registry to resolve its delegate");
     const delegateMethod = input.registry.get(delegate.id, delegate.version);
     if (delegateMethod === undefined) throw new Error(`clean-subset@1: delegate ${delegate.id}@${delegate.version} is not registered`);
+    if (delegateMethod.computeAvailability !== "available" || delegateMethod.compute === undefined) {
+      throw new Error(`clean-subset@1: delegate ${delegate.id}@${delegate.version} is unavailable`);
+    }
 
     const allTaskDigests = [...new Set(input.matrices.flatMap((matrix) => matrix.cells.map((cell) => cell.taskDigest)))];
     const resolveTimestamp = input.resolveTaskTimestamp ?? (() => undefined);
@@ -230,13 +356,12 @@ const cleanSubsetMethod: Method = {
 };
 
 // --- noninferiority-iut@1 and bradley-terry@1 (design §9.2) -----------------------------------
-// Neither is exercised by the kit's fixture-pinned method-conformance driver in this wave (the
-// former needs a deterministic bootstrap seed threaded through a fixture; the latter is
-// registered-but-not-in-the-v1-reference-set by design). Both are real, working Method
-// implementations composed directly from the stats library — never a throwing stub — and are
-// covered by this package's own registry.test.ts. See the package README.
+// noninferiority-iut is a v1 reference method. Bradley–Terry is registered for identity and
+// discovery only: v1 has no frozen pairwise-judgment input record, so its declarative metadata
+// truthfully marks compute unavailable.
 
 const nonInferiorityIutMethod: Method = {
+  ...METHOD_METADATA.noninferiorityIut,
   id: BENCHMARKING_METHOD_IDS.noninferiorityIut,
   version: BENCHMARKING_METHOD_VERSION,
   versionRobust: false,
@@ -287,21 +412,10 @@ const nonInferiorityIutMethod: Method = {
 };
 
 const bradleyTerryMethod: Method = {
+  ...METHOD_METADATA.bradleyTerry,
   id: BENCHMARKING_METHOD_IDS.bradleyTerry,
   version: BENCHMARKING_METHOD_VERSION,
   versionRobust: false,
-  compute(input) {
-    const { decisive } = reduceScoredCells(input);
-    const wins = decisive
-      .filter((cell) => cell.value === "pass")
-      .map((cell) => ({ winner: cell.armId, loser: "baseline" }));
-    const result = fitBradleyTerry(wins);
-    return {
-      strengths: Object.fromEntries(Object.entries(result.strengths).map(([armId, strength]) => [armId, fixed4(strength)])),
-      converged: result.converged,
-      iterations: result.iterations,
-    };
-  },
 };
 
 // --- the registry -------------------------------------------------------------------------------
