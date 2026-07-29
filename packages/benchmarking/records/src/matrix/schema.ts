@@ -13,7 +13,7 @@ import {
   TaskDigestHexSchema,
   cellKey as computeCellKey,
 } from "../run/cells.js";
-import { validateCompletenessOutcome } from "../completeness.js";
+import { NonnegativeSafeIntegerSchema as CompletenessCountSchema, validateCompletenessOutcome } from "../completeness.js";
 
 const Rfc3339 = z.string().refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp");
 
@@ -134,8 +134,8 @@ export const AttritionSchema = z.object({
 });
 
 export const CompletenessSchema = z.object({
-  expected: z.number().int().nonnegative(),
-  judged: z.number().int().nonnegative(),
+  expected: CompletenessCountSchema,
+  judged: CompletenessCountSchema,
   floor: DecimalString,
   runOutcome: z.enum(["complete", "partial", "cancelled"]),
 });
@@ -440,6 +440,7 @@ export const MatrixRecordSchema = topLevelRecordSchema({
       excludedKeys.length,
       ctx,
       ["completeness"],
+      ["attrition"],
     );
 
     if (!isSortedUnique(matrix.attrition.asymmetryFlags)) {

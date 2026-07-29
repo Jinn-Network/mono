@@ -41,7 +41,11 @@ function postProcess(filename, schema) {
   preserveDescriptorHints(schema);
   const known = Object.keys(schema.properties ?? {});
   schema.propertyNames = { anyOf: [{ enum: known }, { pattern: NAMESPACED }] };
-  schema.$comment = "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants.";
+  if (filename === "report.schema.json") {
+    schema.$comment = "Runtime checks: cross-record references, canonical byte equality, and Report cross-field invariants.";
+  } else {
+    schema.$comment = "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants.";
+  }
   if (filename === "run.schema.json") {
     schema.properties.policy.properties.completenessFloor.pattern = UNIT_DECIMAL;
     schema.properties.policy.properties.completenessFloor.$comment = "Runtime check: exact BigInt completeness comparison.";
@@ -72,6 +76,12 @@ function postProcess(filename, schema) {
     schema.properties.completeness.properties.floor.pattern = UNIT_DECIMAL;
     schema.properties.completeness.properties.floor.$comment = "Runtime check: exact BigInt completeness comparison and outcome derivation.";
     schema.properties.closeBoundary.properties.at.format = "date-time";
+  }
+  if (filename === "report.schema.json") {
+    const perSubjectCompleteness = schema.properties.disclosures.properties.perSubject.items.properties.completeness;
+    perSubjectCompleteness.properties.floor.pattern = UNIT_DECIMAL;
+    perSubjectCompleteness.properties.floor.$comment = "Runtime check: exact BigInt completeness comparison and outcome derivation.";
+    perSubjectCompleteness.$comment = "Runtime check: per-subject completeness partition (expected, judged, attrition excluded) and runOutcome floor pairing (§8.1, §9.1).";
   }
   replaceArmMaps(schema);
   if (filename === "benchmark.schema.json" && schema.properties.reveal?.properties?.notBefore !== undefined) {

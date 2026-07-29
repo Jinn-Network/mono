@@ -118,4 +118,60 @@ assert(reportCheck(reportAllExcluded), "report/all-excluded-complete: Draft 2020
 reportAllExcluded.disclosures.perSubject[0].completeness.runOutcome = "partial";
 assert(ReportRecordSchema.safeParse(reportAllExcluded).success && reportCheck(reportAllExcluded), "report/all-excluded-partial: runtime and Draft 2020-12 must accept partial when every cell is excluded");
 
+const reportSchemaDoc = await readJson(join(schemas, "report.schema.json"));
+const reportCompleteness = reportSchemaDoc.properties.disclosures.properties.perSubject.items.properties.completeness;
+assert(
+  reportCompleteness.$comment === "Runtime check: per-subject completeness partition (expected, judged, attrition excluded) and runOutcome floor pairing (§8.1, §9.1).",
+  "report/disclosures/perSubject/completeness must document runtime-only partition validation",
+);
+assert(
+  reportCompleteness.properties.floor.$comment === "Runtime check: exact BigInt completeness comparison and outcome derivation.",
+  "report/disclosures/perSubject/completeness.floor must document runtime-only decimal comparison",
+);
+assert(
+  reportSchemaDoc.$comment === "Runtime checks: cross-record references, canonical byte equality, and Report cross-field invariants.",
+  "report top-level comment must name Report invariants only",
+);
+
+const partitionHostile = await readJson(join(fixtures, "report", "minimal.json"));
+partitionHostile.disclosures.perSubject[0].attrition = {
+  perArm: {
+    armA: {
+      expected: 4, judged: 4, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 2, replacements: 0,
+    },
+  },
+  asymmetryFlags: [],
+};
+partitionHostile.disclosures.perSubject[0].completeness = { expected: 4, judged: 4, floor: "1", runOutcome: "complete" };
+assert(!ReportRecordSchema.safeParse(partitionHostile).success, "report/partition-judged-overflow: runtime must reject judged above eligible");
+assert(reportCheck(partitionHostile), "report/partition-judged-overflow: Draft 2020-12 accepts shape (semantic gate is runtime-only)");
+
+const excludedOverflow = await readJson(join(fixtures, "report", "minimal.json"));
+excludedOverflow.disclosures.perSubject[0].attrition = {
+  perArm: {
+    armA: {
+      expected: 2, judged: 0, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 2, replacements: 0,
+    },
+    armB: {
+      expected: 1, judged: 0, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 1, replacements: 0,
+    },
+  },
+  asymmetryFlags: [],
+};
+excludedOverflow.disclosures.perSubject[0].completeness = { expected: 2, judged: 0, floor: "1", runOutcome: "partial" };
+assert(!ReportRecordSchema.safeParse(excludedOverflow).success, "report/partition-excluded-overflow: runtime must reject excluded above expected");
+assert(reportCheck(excludedOverflow), "report/partition-excluded-overflow: Draft 2020-12 accepts shape (semantic gate is runtime-only)");
+
+const partitionEdge = await readJson(join(fixtures, "report", "minimal.json"));
+partitionEdge.disclosures.perSubject[0].attrition = {
+  perArm: {
+    armA: {
+      expected: 2, judged: 2, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 0, replacements: 0,
+    },
+  },
+  asymmetryFlags: [],
+};
+partitionEdge.disclosures.perSubject[0].completeness = { expected: 2, judged: 2, floor: "1", runOutcome: "complete" };
+assert(ReportRecordSchema.safeParse(partitionEdge).success && reportCheck(partitionEdge), "report/partition-judged-equals-eligible: runtime and Draft 2020-12 must accept the edge");
+
 console.log("Draft 2020-12 schema parity: bidirectional corpus + extension/descriptor/arm/time/floor/aggregate vectors passed.");

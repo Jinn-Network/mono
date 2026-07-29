@@ -269,7 +269,8 @@
                   },
                   "floor": {
                     "type": "string",
-                    "pattern": "^\\d+(\\.\\d+)?$"
+                    "pattern": "^(?:0*1(?:\\.0+)?|0*0\\.(?:0*[1-9]\\d*))$",
+                    "$comment": "Runtime check: exact BigInt completeness comparison and outcome derivation."
                   },
                   "runOutcome": {
                     "type": "string",
@@ -286,7 +287,8 @@
                   "floor",
                   "runOutcome"
                 ],
-                "additionalProperties": false
+                "additionalProperties": false,
+                "$comment": "Runtime check: per-subject completeness partition (expected, judged, attrition excluded) and runOutcome floor pairing (§8.1, §9.1)."
               },
               "attrition": {
                 "type": "object",
@@ -424,5 +426,5 @@
       }
     ]
   },
-  "$comment": "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants."
+  "$comment": "Runtime checks: cross-record references, canonical byte equality, and Report cross-field invariants."
 }

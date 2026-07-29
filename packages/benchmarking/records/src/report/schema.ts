@@ -88,12 +88,15 @@ export const ReportRecordSchema = topLevelRecordSchema({
         });
       }
       if (disclosure !== undefined) {
+        const attritionPath = ["disclosures", "perSubject", index, "attrition"] as const;
+        const excludedCount = sumAttritionExcluded(disclosure.attrition, ctx, attritionPath);
         validateCompletenessOutcome(
           disclosure.completeness,
           disclosure.completeness.judged,
-          sumAttritionExcluded(disclosure.attrition),
+          excludedCount,
           ctx,
           ["disclosures", "perSubject", index, "completeness"],
+          attritionPath,
         );
       }
     });

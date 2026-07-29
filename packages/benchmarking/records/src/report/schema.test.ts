@@ -183,4 +183,114 @@ describe("ReportRecordSchema / parseReport / sealReport", () => {
     value.disclosures.perSubject[0]!.completeness.runOutcome = "partial";
     expect(() => sealReport(value)).not.toThrow();
   });
+
+  function reportDisclosureHostile(
+    mutate: (entry: {
+      completeness: { expected: number; judged: number; floor: string; runOutcome: string };
+      attrition: {
+        perArm: Record<string, {
+          expected: number; judged: number; unjudged: number; unscorable: number;
+          expired: number; invalidated: number; excluded: number; replacements: number;
+        }>;
+        asymmetryFlags: string[];
+      };
+    }) => void,
+  ): Record<string, unknown> {
+    const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown> & {
+      disclosures: { perSubject: Array<{
+        completeness: { expected: number; judged: number; floor: string; runOutcome: string };
+        attrition: {
+          perArm: Record<string, {
+            expected: number; judged: number; unjudged: number; unscorable: number;
+            expired: number; invalidated: number; excluded: number; replacements: number;
+          }>;
+          asymmetryFlags: string[];
+        };
+      }> };
+    };
+    mutate(value.disclosures.perSubject[0]!);
+    return value;
+  }
+
+  test("rejects judged overflow against eligible partition regardless of runOutcome", () => {
+    const complete = reportDisclosureHostile((entry) => {
+      entry.attrition = {
+        perArm: {
+          armA: {
+            expected: 4, judged: 4, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 2, replacements: 0,
+          },
+        },
+        asymmetryFlags: [],
+      };
+      entry.completeness = { expected: 4, judged: 4, floor: "1", runOutcome: "complete" };
+    });
+    expect(() => sealReport(complete)).toThrow(InvalidDocumentError);
+    try {
+      sealReport(complete);
+      expect.unreachable();
+    } catch (error) {
+      expect((error as InvalidDocumentError).errors).toContainEqual({
+        path: "disclosures.perSubject.0.completeness.judged",
+        message: "completeness.judged must not exceed the eligible cell count (expected minus excluded) (§8.1)",
+      });
+    }
+
+    const partial = reportDisclosureHostile((entry) => {
+      entry.attrition.perArm.armA = {
+        expected: 1, judged: 1, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 1, replacements: 0,
+      };
+      entry.completeness = { expected: 1, judged: 1, floor: "1", runOutcome: "partial" };
+    });
+    expect(() => sealReport(partial)).toThrow(InvalidDocumentError);
+
+    const cancelled = reportDisclosureHostile((entry) => {
+      entry.attrition.perArm.armA = {
+        expected: 4, judged: 4, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 2, replacements: 0,
+      };
+      entry.completeness = { expected: 4, judged: 4, floor: "1", runOutcome: "cancelled" };
+    });
+    expect(() => sealReport(cancelled)).toThrow(InvalidDocumentError);
+  });
+
+  test("rejects excluded counts above completeness.expected at the attrition boundary", () => {
+    const value = reportDisclosureHostile((entry) => {
+      entry.attrition = {
+        perArm: {
+          armA: {
+            expected: 2, judged: 0, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 2, replacements: 0,
+          },
+          armB: {
+            expected: 1, judged: 0, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 1, replacements: 0,
+          },
+        },
+        asymmetryFlags: [],
+      };
+      entry.completeness = { expected: 2, judged: 0, floor: "1", runOutcome: "partial" };
+    });
+    expect(() => sealReport(value)).toThrow(InvalidDocumentError);
+    try {
+      sealReport(value);
+      expect.unreachable();
+    } catch (error) {
+      expect((error as InvalidDocumentError).errors).toContainEqual({
+        path: "disclosures.perSubject.0.attrition",
+        message: "attrition excluded count must not exceed completeness.expected (§8.1)",
+      });
+    }
+  });
+
+  test("accepts judged equal to eligible at the partition edge", () => {
+    const value = reportDisclosureHostile((entry) => {
+      entry.attrition = {
+        perArm: {
+          armA: {
+            expected: 2, judged: 2, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 0, replacements: 0,
+          },
+        },
+        asymmetryFlags: [],
+      };
+      entry.completeness = { expected: 2, judged: 2, floor: "1", runOutcome: "complete" };
+    });
+    expect(() => sealReport(value)).not.toThrow();
+  });
 });
