@@ -53,24 +53,12 @@ export const ReportRecordSchema = topLevelRecordSchema({
     method: MethodRefSchema,
     preregistered: z.boolean().optional(),
     results: JsonValueSchema,
-    // Required (§9.1: a report that hides attrition is malformed) — see the superRefine below,
-    // which is what actually gates this: keeping the raw shape optional lets a document that
-    // omits `disclosures` entirely reach a named, message-bearing refine issue instead of a
-    // generic "required" type error.
-    disclosures: DisclosuresSchema.optional(),
+    // Required in both runtime and exported Draft 2020-12 wire contracts (§7.113).
+    disclosures: DisclosuresSchema,
     limitations: z.array(z.string()).optional(),
     author: AgentIriSchema,
   })
   .superRefine((report, ctx) => {
-    if (report.disclosures === undefined) {
-      ctx.addIssue({
-        code: "custom",
-        message: "disclosures is required (§9.1: a report that hides attrition is malformed)",
-        path: ["disclosures"],
-      });
-      return;
-    }
-
     if (report.disclosures.perSubject.length !== report.subjects.length) {
       ctx.addIssue({
         code: "custom",

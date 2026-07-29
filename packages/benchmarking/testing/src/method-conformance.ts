@@ -804,36 +804,64 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
       }
     });
 
-    test("paired McNemar reports the full excluded remainder and pins provenance-source clustering", async () => {
-      const fixture = await loadJson<{
-        matrix: unknown;
-        verdictOutcomes: Record<string, VerdictOutcome>;
-        clusterKeys: Record<string, string>;
-        parameters: Record<string, unknown>;
-        expected: { clusteringBasis: string; excludedCount: number; excludedCellKeys: string[] };
-      }>("paired-contract.json");
-      const prepared = prepareFixture({
-        methodId: "jinn.benchmarking.method/paired-mcnemar",
-        methodVersion: "1",
-        parameters: fixture.parameters,
-        verdictRule: "unanimous",
-        matrices: [fixture.matrix],
-        verdictOutcomes: fixture.verdictOutcomes,
-        clusterKeys: fixture.clusterKeys,
-        runReplicates: 2,
-        expectedResults: {},
-      });
+    test("paired McNemar R=1 fixture consumes its complete missing/conflicted/one-sided remainder and provenance clustering basis", async () => {
+      const fixture = await loadFixture("paired-exclusion-r1.json");
+      const prepared = prepareFixture(fixture);
       const method = registry.get("jinn.benchmarking.method/paired-mcnemar", "1")!;
-      expect(() => method.compute!({
+      const results = method.compute!({
         subjects: prepared.subjects,
         parameters: { ...fixture.parameters, verdictRule: "unanimous" },
         verdictRule: "unanimous",
         registry,
         ...prepared.ports,
-      })).toThrow(expect.objectContaining({
-        name: "MethodInputError",
-        code: "incompatible-run-replicates",
-      }));
+      });
+      expect(results).toEqual(prepared.expectedResults);
+      const expected = onlySubjectResults(prepared.expectedResults as MethodResults) as {
+        excluded: { count: number; cellKeys: string[] };
+        conflicted: { count: number; cellKeys: string[] };
+        clustering: { basis: string; clusters: number };
+      };
+      expect(expected.excluded.count).toBe(expected.excluded.cellKeys.length);
+      expect(expected.conflicted.count).toBe(expected.conflicted.cellKeys.length);
+      expect(expected.clustering).toEqual({ basis: "task-provenance-source", clusters: 1 });
+    });
+
+    test("paired McNemar rejects the separate R>1 fixture before pairing", async () => {
+      const fixture = await loadJson<{
+        matrix: unknown; verdictOutcomes: Record<string, VerdictOutcome>; clusterKeys: Record<string, string>; parameters: Record<string, unknown>;
+      }>("paired-contract.json");
+      const prepared = prepareFixture({ methodId: "jinn.benchmarking.method/paired-mcnemar", methodVersion: "1", parameters: fixture.parameters, verdictRule: "unanimous", matrices: [fixture.matrix], verdictOutcomes: fixture.verdictOutcomes, clusterKeys: fixture.clusterKeys, runReplicates: 2, expectedResults: {} });
+      const method = registry.get("jinn.benchmarking.method/paired-mcnemar", "1")!;
+      expect(() => method.compute!({ subjects: prepared.subjects, parameters: { ...fixture.parameters, verdictRule: "unanimous" }, verdictRule: "unanimous", registry, ...prepared.ports })).toThrow(expect.objectContaining({ name: "MethodInputError", code: "incompatible-run-replicates" }));
+    });
+
+    test("noninferiority cost replay normalizes eight long -0.9 and two long +0.10 differences at one comparison-wide scale", async () => {
+      const fixture = await loadFixture("noninferiority-pass.json");
+      const semantic = structuredClone(fixture) as MethodFixture;
+      const matrix = semantic.matrices[0] as { cells: Array<{ taskDigest: string; armId: string; cost?: { value: string; unit: string; source: "reported" | "settled" } }> };
+      const taskDigests = [...new Set(matrix.cells.map((cell) => cell.taskDigest))];
+      const cheaper = new Set(taskDigests.slice(0, 8));
+      const nineTenths = `0.9${"0".repeat(39)}`;
+      const oneTenth = `0.10${"0".repeat(38)}`;
+      for (const cell of matrix.cells) {
+        const candidate = cell.armId === "armB";
+        const isCheaper = cheaper.has(cell.taskDigest);
+        cell.cost = { value: candidate === isCheaper ? "0" : (isCheaper ? nineTenths : oneTenth), unit: "USD", source: "reported" };
+      }
+      const prepared = prepareFixture(semantic);
+      const method = registry.get("jinn.benchmarking.method/noninferiority-iut", "1")!;
+      const result = onlySubjectResults(method.compute!({ subjects: prepared.subjects, parameters: { ...semantic.parameters, verdictRule: semantic.verdictRule }, verdictRule: semantic.verdictRule, registry, ...prepared.ports })) as {
+        verdict: string; cost: { verdict: string; pValue: string; n: number; replay: { scale: string; differences: string[] } };
+      };
+      expect(result.verdict).toBe("PASS");
+      expect(result.cost).toEqual({
+        verdict: "lower", pValue: "0.0072", n: 10, excluded: { count: 0, cellKeys: [] },
+        replay: { scale: "40", differences: [
+          `-9${"0".repeat(39)}`, `1${"0".repeat(39)}`,
+          `-9${"0".repeat(39)}`, `-9${"0".repeat(39)}`, `-9${"0".repeat(39)}`,
+          `1${"0".repeat(39)}`, ...Array.from({ length: 4 }, () => `-9${"0".repeat(39)}`),
+        ] },
+      });
     });
 
     test("paired McNemar R=1 exact fixture computes with mandatory provenance clustering", async () => {

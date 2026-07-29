@@ -20,7 +20,7 @@ import {
   resolveTaskProvenance,
   resolveVerdictOutcome,
 } from "./resolved-inputs.js";
-import { clusteredPairedRateDiffBca, MAX_NONINFERIORITY_RESAMPLES_V1, nonInferiorityIut, nonInferiorityVerdict, pairedCostVerdict, type NonInferiorityOptions } from "./stats/noninferiority.js";
+import { clusteredPairedRateDiffBca, MAX_NONINFERIORITY_RESAMPLES_V1, nonInferiorityIut, nonInferiorityVerdict, pairedCostVerdict, type ExactCostDifference, type NonInferiorityOptions } from "./stats/noninferiority.js";
 import { pairedMcnemar } from "./stats/paired-mcnemar.js";
 import { avgAtOne, passAtK } from "./stats/pass-at-k.js";
 import { wilsonInterval } from "./stats/wilson.js";
@@ -775,7 +775,7 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
     }
     qualityExcludedCellKeys.sort(compareCodeUnitStrings);
 
-    const costDiffs: bigint[] = [];
+    const costDiffs: ExactCostDifference[] = [];
     const costIncludedCellKeys = new Set<string>();
     let costUnit: string | undefined;
     for (const cells of byTask.values()) {
@@ -806,8 +806,13 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
           throw new MethodInputError("method-incompatible-cost-unit", a.cellKey, "cost value is not an exact decimal");
         }
         costUnit = a.cost.unit;
+        // Do not normalize within a pair. Equivalent decimal spellings must share the one
+        // comparison-wide scale selected by pairedCostVerdict before ranks/ties are computed.
         const scale = aCost.scale > bCost.scale ? aCost.scale : bCost.scale;
-        costDiffs.push(scaleDecimal(bCost, scale) - scaleDecimal(aCost, scale));
+        costDiffs.push({
+          coefficient: scaleDecimal(bCost, scale) - scaleDecimal(aCost, scale),
+          scale,
+        });
         costIncludedCellKeys.add(a.cellKey);
         costIncludedCellKeys.add(b.cellKey);
       }
@@ -851,6 +856,10 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
         verdict: cost.verdict,
         pValue: cost.pValue === null ? null : fixed4(cost.pValue),
         n: cost.n,
+        ...(cost.scale === undefined || cost.scale === 0n ? {} : { replay: {
+          scale: cost.scale.toString(),
+          differences: cost.differences!.map((difference) => difference.toString()),
+        } }),
         excluded: { count: costExcludedCellKeys.length, cellKeys: costExcludedCellKeys },
       },
       excluded: {

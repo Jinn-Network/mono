@@ -80,13 +80,34 @@ const TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_AGGREGATE = [
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
 const ambientNetworkIdentifier = new RegExp(
-  String.raw`(?<![\w$."'\x60])(?:${AMBIENT_NETWORK_APIS.join('|')})\b`,
+  String.raw`(?<![\w$.?"'\x60])(?:${AMBIENT_NETWORK_APIS.join('|')})\b`,
   'g',
 );
 const ambientNetworkGlobal = new RegExp(
-  String.raw`\b(?:globalThis|global)\s*(?:(?:\.|\?\.)\s*(?:${AMBIENT_NETWORK_APIS.join('|')})\b|(?:\?\.)?\s*\[\s*["'](?:${AMBIENT_NETWORK_APIS.join('|')})["']\s*\])`,
+  String.raw`\b(?:globalThis|global|window|self)\s*(?:\.|\?\.)\s*(?:${AMBIENT_NETWORK_APIS.join('|')})\b`,
   'g',
 );
+
+/** Replace comments and inert string literals with whitespace without changing code layout.
+ * This is deliberately small: the guard needs lexical, not semantic, understanding, and a
+ * template literal is inert unless its interpolation is explicitly evaluated elsewhere. */
+function executableSource(source) {
+  let result = '';
+  let state = 'code';
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (state === 'code' && char === '/' && next === '/') { state = 'line-comment'; result += '  '; index += 1; continue; }
+    if (state === 'code' && char === '/' && next === '*') { state = 'block-comment'; result += '  '; index += 1; continue; }
+    if (state === 'code' && (char === '"' || char === "'" || char === '`')) { state = char; result += ' '; continue; }
+    if (state === 'line-comment' && (char === '\n' || char === '\r')) { state = 'code'; result += char; continue; }
+    if (state === 'block-comment' && char === '*' && next === '/') { state = 'code'; result += '  '; index += 1; continue; }
+    if ((state === '"' || state === "'" || state === '`') && char === '\\') { result += '  '; index += 1; continue; }
+    if ((state === '"' || state === "'" || state === '`') && char === state) { state = 'code'; result += ' '; continue; }
+    result += state === 'code' ? char : (char === '\n' || char === '\r' ? char : ' ');
+  }
+  return result;
+}
 
 // Canonical benchmarking bytes must not depend on the host locale or the bundled ICU data.
 // These APIs all consult one or both, so an ordering or formatting decision made with them can
@@ -111,7 +132,7 @@ const localeSensitiveIntl = new RegExp(
 
 function localeSensitiveUsesInFiles(sourceFiles) {
   return sourceFiles.flatMap((file) => {
-    const source = readFileSync(file, 'utf8');
+    const source = executableSource(readFileSync(file, 'utf8'));
     return [
       ...[...source.matchAll(localeSensitiveMember)],
       ...[...source.matchAll(localeSensitiveIntl)],
@@ -121,7 +142,7 @@ function localeSensitiveUsesInFiles(sourceFiles) {
 
 function ambientNetworkUsesInFiles(sourceFiles) {
   return sourceFiles.flatMap((file) => {
-    const source = readFileSync(file, 'utf8');
+    const source = executableSource(readFileSync(file, 'utf8'));
     const identifiers = [...source.matchAll(ambientNetworkIdentifier)]
       .map((match) => `${relative(root, file)} -> ${match[0]}`);
     const globals = [...source.matchAll(ambientNetworkGlobal)]
@@ -283,18 +304,24 @@ test('locale-sensitive API detection catches member calls, optional chaining, an
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
-test('ambient-network detection catches direct and global API escapes', () => {
+test('ambient-network detection catches executable bare and browser-alias API escapes while ignoring comments and inert strings', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'jinn-benchmarking-network-boundary-'));
   try {
     const source = join(fixture, 'src');
     mkdirSync(source);
     writeFileSync(join(source, 'source.ts'), [
       'fetch("https://example.test");',
-      'globalThis?.WebSocket;',
-      'global["EventSource"];',
+      'new XMLHttpRequest();',
+      'new WebSocket("wss://example.test");',
+      'new EventSource("https://example.test");',
+      'globalThis.fetch("https://example.test");',
+      'window?.fetch("https://example.test");',
+      'self.fetch("https://example.test");',
       '// XMLHttpRequest is forbidden, but this comment is inert.',
+      '/* window.fetch and self.WebSocket are inert comments. */',
+      'const prose = "fetch globalThis.fetch window.XMLHttpRequest self.WebSocket";',
     ].join('\n'));
-    assert.equal(ambientNetworkUsesInFiles(files(source)).length, 4);
+    assert.equal(ambientNetworkUsesInFiles(files(source)).length, 7);
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 

@@ -68,7 +68,7 @@
             "required": [
               "digest"
             ],
-            "additionalProperties": false
+            "additionalProperties": {}
           }
         ]
       }
@@ -401,6 +401,7 @@
     "subjects",
     "method",
     "results",
+    "disclosures",
     "author"
   ],
   "additionalProperties": {},
@@ -419,7 +420,7 @@
         ]
       },
       {
-        "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*://.+)$"
+        "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+)$"
       }
     ]
   },

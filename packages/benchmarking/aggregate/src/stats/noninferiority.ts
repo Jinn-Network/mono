@@ -261,19 +261,40 @@ export interface CostVerdictResult {
   readonly verdict: "lower" | "not-lower" | "inconclusive";
   readonly pValue: number | null;
   readonly n: number;
+  /** Present when callers supplied exact decimal coefficient/scale differences. */
+  readonly scale?: bigint;
+  /** Included nonzero differences rescaled to `scale`, in pair order. */
+  readonly differences?: readonly bigint[];
+}
+
+/** A signed decimal difference held exactly until the complete comparison fixes its scale. */
+export interface ExactCostDifference {
+  readonly coefficient: bigint;
+  readonly scale: bigint;
 }
 
 /** One-sided Wilcoxon signed-rank test that the median paired cost difference is < 0 (candidate
  * cheaper), using a normal approximation with a continuity correction. */
 export function pairedCostVerdict(
-  costDiffs: readonly (number | bigint)[],
+  costDiffs: readonly (number | bigint | ExactCostDifference)[],
   opts: { minN?: number; alpha?: number } = {},
 ): CostVerdictResult {
   const minN = opts.minN ?? 10;
   const alpha = opts.alpha ?? 0.05;
-  const zero = typeof costDiffs[0] === "bigint" ? 0n : 0;
-  const nonzero = costDiffs.filter((d) => d !== zero);
-  if (nonzero.length < minN) return { verdict: "inconclusive", pValue: null, n: nonzero.length };
+  const exact = costDiffs.length > 0 && typeof costDiffs[0] === "object";
+  const replay = exact ? normalizeCostDifferences(costDiffs as readonly ExactCostDifference[]) : undefined;
+  const normalized: readonly (number | bigint)[] = replay?.differences
+    ?? costDiffs as readonly (number | bigint)[];
+  const zero = typeof normalized[0] === "bigint" ? 0n : 0;
+  const nonzero = normalized.filter((difference) => difference !== zero);
+  if (nonzero.length < minN) {
+    return {
+      verdict: "inconclusive",
+      pValue: null,
+      n: nonzero.length,
+      ...(replay === undefined ? {} : { scale: replay.scale, differences: nonzero as bigint[] }),
+    };
+  }
 
   const ranks = rankAbs(nonzero.map((value) => typeof value === "bigint" ? (value < 0n ? -value : value) : Math.abs(value)));
   let wPlus = 0;
@@ -285,7 +306,27 @@ export function pairedCostVerdict(
   const sdW = Math.sqrt((n * (n + 1) * (2 * n + 1)) / 24);
   const z = (wPlus - meanW + 0.5) / sdW;
   const pValue = normCdf(z);
-  return { verdict: pValue < alpha ? "lower" : "not-lower", pValue, n };
+  return {
+    verdict: pValue < alpha ? "lower" : "not-lower",
+    pValue,
+    n,
+    ...(replay === undefined ? {} : { scale: replay.scale, differences: nonzero as bigint[] }),
+  };
+}
+
+function normalizeCostDifferences(differences: readonly ExactCostDifference[]): {
+  readonly scale: bigint;
+  readonly differences: readonly bigint[];
+} {
+  const scale = differences.reduce((maximum, difference) => {
+    if (difference.scale < 0n) throw new Error("cost difference scale must be nonnegative");
+    return difference.scale > maximum ? difference.scale : maximum;
+  }, 0n);
+  return {
+    scale,
+    differences: differences.map((difference) =>
+      difference.coefficient * (10n ** (scale - difference.scale))),
+  };
 }
 
 function rankAbs(absVals: readonly (number | bigint)[]): number[] {

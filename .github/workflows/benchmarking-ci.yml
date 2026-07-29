@@ -48,6 +48,7 @@ jobs:
         run: |
           yarn install --immutable
           yarn check:schemas
+          yarn check:schema-parity
           yarn typecheck
           yarn test
           yarn build

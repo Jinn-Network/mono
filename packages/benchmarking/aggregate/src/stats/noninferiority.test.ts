@@ -251,6 +251,30 @@ describe("nonInferiorityVerdict", () => {
 });
 
 describe("pairedCostVerdict", () => {
+  test("normalizes every exact decimal difference to the comparison-wide scale before Wilcoxon ranks", () => {
+    // Eight -0.9 values and two +0.10 values are tied at |-0.9| versus |+0.10|
+    // only after every coefficient is rescaled to the common scale 40.  Per-pair scaling
+    // incorrectly turns both magnitudes into 9 and yields the opposite result.
+    const diffs = [
+      ...Array.from({ length: 8 }, () => ({ coefficient: -9n, scale: 1n })),
+      ...Array.from({ length: 2 }, () => ({
+        coefficient: 1000000000000000000000000000000000000000n,
+        scale: 40n,
+      })),
+    ];
+    expect(pairedCostVerdict(diffs)).toEqual({
+      verdict: "lower",
+      pValue: expect.any(Number),
+      n: 10,
+      scale: 40n,
+      differences: [
+        ...Array.from({ length: 8 }, () => -9000000000000000000000000000000000000000n),
+        1000000000000000000000000000000000000000n,
+        1000000000000000000000000000000000000000n,
+      ],
+    });
+  });
+
   test("below minN, inconclusive", () => {
     expect(pairedCostVerdict([-1, -2, -3])).toEqual({ verdict: "inconclusive", pValue: null, n: 3 });
   });

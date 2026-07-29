@@ -15,12 +15,30 @@ function jsonBytes(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
-const NAMESPACED = "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*://.+)$";
+const NAMESPACED = "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+)$";
 const UNIT_DECIMAL = "^(?:0*1(?:\\.0+)?|0*0\\.(?:0*[1-9]\\d*))$";
+
+/** Zod's ResourceDescriptor.and({ digest }) emits a closed second allOf member. Runtime keeps
+ * descriptor hints (notably optional `name`), so keep the digest member open and let the first
+ * member define the descriptor wire vocabulary. */
+function preserveDescriptorHints(node) {
+  if (Array.isArray(node)) {
+    node.forEach(preserveDescriptorHints);
+    return;
+  }
+  if (node === null || typeof node !== "object") return;
+  if (Array.isArray(node.allOf) && node.allOf.length === 2) {
+    const digestMember = node.allOf.find((member) =>
+      member?.properties?.digest !== undefined && member?.additionalProperties === false);
+    if (digestMember?.additionalProperties === false) digestMember.additionalProperties = {};
+  }
+  Object.values(node).forEach(preserveDescriptorHints);
+}
 
 /** Draft 2020-12 cannot express Zod's refinements.  Preserve the open extension wire form,
  * while making every representable top-level/floor constraint independently enforceable. */
 function postProcess(filename, schema) {
+  preserveDescriptorHints(schema);
   const known = Object.keys(schema.properties ?? {});
   schema.propertyNames = { anyOf: [{ enum: known }, { pattern: NAMESPACED }] };
   schema.$comment = "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants.";

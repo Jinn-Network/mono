@@ -48,7 +48,7 @@ describe("ReportRecordSchema / parseReport / sealReport", () => {
     ]);
   });
 
-  test("invalid-missing-disclosures.json fails via the disclosures-required refine (§9.1)", () => {
+  test("invalid-missing-disclosures.json fails the required disclosures wire contract (§9.1)", () => {
     const missing = loadFixture("invalid-missing-disclosures.json");
     expect(() => sealReport(missing)).toThrow(InvalidDocumentError);
     try {
@@ -56,9 +56,7 @@ describe("ReportRecordSchema / parseReport / sealReport", () => {
       expect.unreachable();
     } catch (error) {
       const issues = (error as InvalidDocumentError).errors;
-      expect(issues).toEqual([
-        { path: "disclosures", message: "disclosures is required (§9.1: a report that hides attrition is malformed)" },
-      ]);
+      expect(issues).toEqual([{ path: "disclosures", message: "Invalid input: expected object, received undefined" }]);
     }
   });
 

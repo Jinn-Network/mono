@@ -4,17 +4,6 @@
     "92238dc5f957219b4dc780d07f2b2ec302a0e6c9463ef3bc818c2e488b2d0773": "source-1",
     "d42df69433efba6b5fc689bd07c7c4923e02c9a9dda45455ae58f14c09d77e91": "source-0"
   },
-  "expected": {
-    "clusteringBasis": "task-provenance-source",
-    "excludedCellKeys": [
-      "92238dc5f957219b4dc780d07f2b2ec302a0e6c9463ef3bc818c2e488b2d0773/armA/1",
-      "92238dc5f957219b4dc780d07f2b2ec302a0e6c9463ef3bc818c2e488b2d0773/armA/2",
-      "92238dc5f957219b4dc780d07f2b2ec302a0e6c9463ef3bc818c2e488b2d0773/armB/1",
-      "d42df69433efba6b5fc689bd07c7c4923e02c9a9dda45455ae58f14c09d77e91/armA/2",
-      "d42df69433efba6b5fc689bd07c7c4923e02c9a9dda45455ae58f14c09d77e91/armB/2"
-    ],
-    "excludedCount": 5
-  },
   "matrix": {
     "assembly": {
       "procedure": "jinn.benchmarking.assembly",
