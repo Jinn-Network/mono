@@ -773,6 +773,27 @@ Confirmed by the operator at the program gate (2026-07-28):
     removing a row changes the effective count without a second numeric edit. This is the
     benchmarking application of §7.6 and must be covered by a guard self-test, not merely a
     source comment.
+70. **Benchmark Cartesian cardinality is exact and bounded before enumeration:** the records
+    package computes `|items| × |arms| × replicates` with `BigInt`. `expectedCellCount` converts
+    to `number` only after proving the result is a safe integer; otherwise it throws a typed
+    range error carrying the exact decimal cardinality. `expectedCellSet` invokes the same exact
+    preflight before its first allocation or loop and additionally refuses a package-exported
+    implementation ceiling of **1,000,000 materialized cells**. The exact count helper remains
+    usable above that materialization ceiling when its result is safe, so future quote/planning
+    code can report size without allocating the set. A schema-valid
+    `replicates = Number.MAX_SAFE_INTEGER` vector with at least three Cartesian positions must
+    fail before rounded conversion or iteration, and a `1,000,001`-cell vector must return an
+    exact count but refuse materialization. This operational ceiling does not make the sealed Run
+    invalid; it is the explicit bound of this array-returning helper.
+71. **Per-arm methods retain every Matrix arm even when it has zero decisive cells:**
+    `wilson@1`, `avg-at-k@1`, and `pass-at-k@1` seed their result arm set from all arm identities
+    present in the exact subject Matrix cells, in UTF-16 code-unit order, before verdict
+    reduction. A fully attrited arm therefore remains explicit: Wilson reports its existing
+    zero-scorable result (`n: 0`, zero estimate/interval), while avg/pass report an empty
+    `perTask`, zero mean, and every subject Task digest in `missingTaskDigests`; pass-at-k records
+    no invented incompatibility for a Task with no decisive observation. Conflicted and other
+    exclusions retain their existing disclosures. A two-arm fixture with one fully
+    expired/excluded arm pins the complete result for all three methods.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

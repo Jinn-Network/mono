@@ -1000,3 +1000,22 @@ package and guard command remained green. Program rulings §7.63–§7.69 freeze
 The repair is test-first and runs the complete records, aggregate, testing, trust-core, profiles,
 inventory, boundary, packed-type, pack, and workflow-definition gates. M4 remains blocked until a
 new independent whole-design review of the exact repaired head returns GREEN.
+
+## Addendum 2026-07-29-k — exact Cartesian bounds and fully attrited arms
+
+The eighth fresh M1–M3 review found two remaining semantic gaps after independently clearing every
+§7.63–§7.69 repair. Program rulings §7.70–§7.71 are binding:
+
+1. Cartesian cardinality is computed with `BigInt` and must be proven safe before conversion.
+   The array-returning `expectedCellSet` shares that preflight and has an explicit one-million-cell
+   materialization ceiling; the count helper remains exact and usable for larger safe counts.
+   A valid maximum-safe replicate count can no longer round or begin an effectively unbounded
+   loop.
+2. Wilson, avg-at-k, and pass-at-k seed results from every arm represented by the subject Matrix,
+   not only arms with decisive cells. A fully attrited arm remains visible with the methods'
+   existing zero-scorable/empty-per-task shapes and complete missing-Task disclosure.
+
+The repair adds the exact overflow and materialization-bound vectors plus one sealed two-arm
+fully-attrited fixture exercised by all three methods. Records, aggregate, testing, trust,
+profiles, schema/profile pins, package gates, guards, packs, and workflows run again. M4 remains
+blocked until another fresh whole-design review returns GREEN.
