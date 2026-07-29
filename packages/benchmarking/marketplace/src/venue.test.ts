@@ -405,10 +405,10 @@ describe("runOnMarketplace", () => {
       }),
       rawLog({
         event: "Deliver",
-        blockNumber: 103,
-        blockHash: "0x9999999999999999999999999999999999999999999999999999999999999999",
-        txHash: "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-        logIndex: 0,
+        blockNumber: 102,
+        blockHash: "0x8888888888888888888888888888888888888888888888888888888888888888",
+        txHash: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        logIndex: 1,
         finalityTier: "finalized",
         args: {
           mech: MECH,
@@ -428,10 +428,10 @@ describe("runOnMarketplace", () => {
       }),
       rawLog({
         event: "SolutionDeliveryClaimed",
-        blockNumber: 104,
-        blockHash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        txHash: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-        logIndex: 0,
+        blockNumber: 102,
+        blockHash: "0x8888888888888888888888888888888888888888888888888888888888888888",
+        txHash: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        logIndex: 2,
         finalityTier: "finalized",
         args: {
           operator: "0x3333333333333333333333333333333333333333",
@@ -446,8 +446,8 @@ describe("runOnMarketplace", () => {
       "2026-08-03T09:00:00Z",
       "2026-08-03T09:00:01Z",
       "2026-08-03T09:00:02Z",
-      "2026-08-03T09:00:03Z",
-      "2026-08-03T09:00:04Z",
+      "2026-08-03T09:00:02Z",
+      "2026-08-03T09:00:02Z",
     ];
     const enriched = decodePipelineLogs(
       logs,

@@ -1771,6 +1771,8 @@ describe("projectObservations", () => {
 
 describe("revised preparation identity and forfeiture", () => {
   const DELIVERY_DIGEST = `0x${"b".repeat(64)}` satisfies Hex;
+  const VERDICT_REQUEST_ID = `0x${"8".repeat(64)}` satisfies Hex;
+  const VERDICT_DIGEST = `0x${"c".repeat(64)}` satisfies Hex;
   const REQUEST_DATA = encodeRevisedRequestData({
     legKind: 1,
     taskId: 42n,
@@ -1838,7 +1840,10 @@ describe("revised preparation identity and forfeiture", () => {
       requestData: REQUEST_DATA,
       deliveryData: `0x${"a".repeat(64)}`,
     },
-    derivation: derivation("Deliver", 203, "revised"),
+    derivation: {
+      ...derivation("Deliver", 203, "revised"),
+      contract: OPERATOR,
+    },
   }, {
     deliveryCorrespondence: {
       sha256Digest: `sha256:${"a".repeat(64)}`,
@@ -1859,6 +1864,155 @@ describe("revised preparation identity and forfeiture", () => {
     },
     derivation: derivation("SolutionDeliveryClaimed", 204, "revised"),
   });
+
+  const evaluationClaim = projectable({
+    event: "EvaluationAttemptCreated",
+    facts: {
+      taskId: 42n,
+      attemptIndex: 3,
+      verdictIndex: 1,
+      evaluator: CREATOR,
+      priorityMech: CREATOR,
+      attemptDeadline: 1_800_000_002n,
+      deliveryRate: 20n,
+    },
+    derivation: derivation("EvaluationAttemptCreated", 205, "revised"),
+  });
+
+  const verdictPrepared = projectable({
+    event: "VerdictDeliveryPrepared",
+    facts: {
+      evaluator: CREATOR,
+      expectedRequestId: VERDICT_REQUEST_ID,
+      taskId: 42n,
+      attemptIndex: 3,
+      verdictIndex: 1,
+      nonce: 8n,
+      deliveryDigest: VERDICT_DIGEST,
+      verdictCode: 1,
+    },
+    derivation: derivation("VerdictDeliveryPrepared", 210, "revised"),
+  });
+
+  const verdictMarketplaceDelivery = projectable({
+    event: "Deliver",
+    facts: {
+      mech: CREATOR,
+      mechServiceMultisig: CREATOR,
+      requestId: VERDICT_REQUEST_ID,
+      deliveryRate: 20n,
+      requestData: encodeRevisedRequestData({
+        legKind: 2,
+        taskId: 42n,
+        attemptIndex: 3,
+        verdictIndex: 1,
+        deliveryDigest: VERDICT_DIGEST,
+        verdictCode: 1,
+      }),
+      deliveryData: `0x${"e".repeat(64)}`,
+    },
+    derivation: {
+      ...derivation("Deliver", 211, "revised"),
+      contract: CREATOR,
+    },
+  });
+
+  const verdictClaimed = projectable({
+    event: "VerdictDeliveryClaimed",
+    facts: {
+      evaluator: CREATOR,
+      requestId: VERDICT_REQUEST_ID,
+      taskId: 42n,
+      attemptIndex: 3,
+      verdictIndex: 1,
+      evaluationDeliveryDigest: VERDICT_DIGEST,
+      verdictCode: 1,
+    },
+    derivation: derivation("VerdictDeliveryClaimed", 212, "revised"),
+  });
+
+  function withDerivation(
+    event: ObservationMarketplaceEvent,
+    overrides: Partial<DerivationAnnotation>,
+  ): ObservationMarketplaceEvent {
+    return {
+      ...event,
+      derivation: { ...event.derivation, ...overrides },
+    } as ObservationMarketplaceEvent;
+  }
+
+  const atomicHostiles: readonly {
+    readonly name: string;
+    readonly preparation?: ObservationMarketplaceEvent;
+    readonly delivery: ObservationMarketplaceEvent;
+    readonly claim?: ObservationMarketplaceEvent;
+    readonly verdictPreparation?: ObservationMarketplaceEvent;
+    readonly verdictDelivery: ObservationMarketplaceEvent;
+    readonly verdictClaim?: ObservationMarketplaceEvent;
+  }[] = [
+    {
+      name: "different transaction",
+      delivery: withDerivation(marketplaceDelivery, {
+        txHash: `0x${"9".repeat(64)}`,
+      }),
+      verdictDelivery: withDerivation(verdictMarketplaceDelivery, {
+        txHash: `0x${"9".repeat(64)}`,
+      }),
+    },
+    {
+      name: "different block",
+      delivery: withDerivation(marketplaceDelivery, {
+        blockHash: `0x${"9".repeat(64)}`,
+      }),
+      verdictDelivery: withDerivation(verdictMarketplaceDelivery, {
+        blockHash: `0x${"9".repeat(64)}`,
+      }),
+    },
+    {
+      name: "reversed Deliver and claim indexes",
+      delivery: withDerivation(marketplaceDelivery, { logIndex: 204 }),
+      claim: withDerivation(claimed, { logIndex: 203 }),
+      verdictDelivery: withDerivation(verdictMarketplaceDelivery, { logIndex: 212 }),
+      verdictClaim: withDerivation(verdictClaimed, { logIndex: 211 }),
+    },
+    {
+      name: "equal preparation and Deliver indexes",
+      delivery: withDerivation(marketplaceDelivery, { logIndex: 202 }),
+      verdictDelivery: withDerivation(verdictMarketplaceDelivery, { logIndex: 210 }),
+    },
+    {
+      name: "missing Deliver transaction identity",
+      delivery: withDerivation(marketplaceDelivery, {
+        txHash: "" as Hex,
+      }),
+      verdictDelivery: withDerivation(verdictMarketplaceDelivery, {
+        txHash: "" as Hex,
+      }),
+    },
+    {
+      name: "missing Deliver block identity",
+      delivery: withDerivation(marketplaceDelivery, {
+        blockHash: "" as Hex,
+      }),
+      verdictDelivery: withDerivation(verdictMarketplaceDelivery, {
+        blockHash: "" as Hex,
+      }),
+    },
+    {
+      name: "missing preparation transaction identity",
+      preparation: withDerivation(prepared, { txHash: "" as Hex }),
+      delivery: marketplaceDelivery,
+      verdictPreparation: withDerivation(verdictPrepared, { txHash: "" as Hex }),
+      verdictDelivery: verdictMarketplaceDelivery,
+    },
+    {
+      name: "missing claim block identity",
+      delivery: marketplaceDelivery,
+      claim: withDerivation(claimed, { blockHash: "" as Hex }),
+      verdictDelivery: verdictMarketplaceDelivery,
+      verdictClaim: withDerivation(verdictClaimed, { blockHash: "" as Hex }),
+    },
+  ];
 
   test("joins claim, prepare, signed Deliver, and router claim without claim-time request identity", () => {
     const output = reduceMarketplaceProjection(
@@ -1882,6 +2036,96 @@ describe("revised preparation identity and forfeiture", () => {
       status: "claimed",
     });
     expect(Object.values(output.state.tasks)[0]?.liveAttemptIndices).toEqual({});
+  });
+
+  test.each(atomicHostiles)(
+    "refuses non-atomic solution settlement with $name",
+    ({ preparation, delivery, claim: hostileClaim }) => {
+      const output = reduceMarketplaceProjection(
+        [
+          revisedTask,
+          revisedClaim,
+          preparation ?? prepared,
+          delivery,
+          hostileClaim ?? claimed,
+        ],
+        createMarketplaceProjectionState(),
+      );
+
+      expect(output.refusals.map(({ reason }) => reason)).toContain(
+        "receipt-continuity-mismatch",
+      );
+      expect(output.observations.some(({ type }) =>
+        type === "network.jinn.task-execution.delivery-recorded.v1"
+      )).toBe(false);
+      expect(output.state.requestIdBindings[
+        `84532:${REQUEST_ID.toLowerCase()}`
+      ]?.status).not.toBe("claimed");
+    },
+  );
+
+  test("refuses solution Deliver before preparation", () => {
+    const output = reduceMarketplaceProjection(
+      [revisedTask, revisedClaim, marketplaceDelivery, prepared, claimed],
+      createMarketplaceProjectionState(),
+    );
+
+    expect(output.refusals).toHaveLength(2);
+    expect(output.observations.some(({ type }) =>
+      type === "network.jinn.task-execution.delivery-recorded.v1"
+    )).toBe(false);
+  });
+
+  test.each(atomicHostiles)(
+    "refuses non-atomic verdict settlement with $name",
+    ({ verdictPreparation, verdictDelivery, verdictClaim: hostileClaim }) => {
+      const output = reduceMarketplaceProjection(
+        [
+          revisedTask,
+          revisedClaim,
+          prepared,
+          marketplaceDelivery,
+          claimed,
+          evaluationClaim,
+          verdictPreparation ?? verdictPrepared,
+          verdictDelivery,
+          hostileClaim ?? verdictClaimed,
+        ],
+        createMarketplaceProjectionState(),
+      );
+
+      expect(output.refusals.map(({ reason }) => reason)).toContain(
+        "receipt-continuity-mismatch",
+      );
+      expect(output.observations.filter(({ type }) =>
+        type === "network.jinn.task-execution.attempt-terminal.v1"
+      )).toHaveLength(0);
+      expect(output.state.requestIdBindings[
+        `84532:${VERDICT_REQUEST_ID.toLowerCase()}`
+      ]?.status).not.toBe("claimed");
+    },
+  );
+
+  test("refuses verdict Deliver before preparation", () => {
+    const output = reduceMarketplaceProjection(
+      [
+        revisedTask,
+        revisedClaim,
+        prepared,
+        marketplaceDelivery,
+        claimed,
+        evaluationClaim,
+        verdictMarketplaceDelivery,
+        verdictPrepared,
+        verdictClaimed,
+      ],
+      createMarketplaceProjectionState(),
+    );
+
+    expect(output.refusals).toHaveLength(2);
+    expect(output.observations.filter(({ type }) =>
+      type === "network.jinn.task-execution.attempt-terminal.v1"
+    )).toHaveLength(0);
   });
 
   test("delivery and claim transitions preserve the caller-owned prepared state", () => {

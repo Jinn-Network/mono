@@ -123,7 +123,7 @@ function solutionPrepared(input: {
       event: "SolutionDeliveryPrepared",
       blockNumber: input.blockNumber,
       blockHash: input.blockHash,
-      txHash: `0x${String(input.attemptIndex + 5).padStart(64, "c")}` as Hex,
+      txHash: input.requestId,
       logIndex: 0,
       finalityTier: input.finalityTier ?? "finalized",
       contractGeneration: "revised",
@@ -155,8 +155,8 @@ function solutionClaimed(input: {
       event: "SolutionDeliveryClaimed",
       blockNumber: input.blockNumber,
       blockHash: input.blockHash,
-      txHash: `0x${String(input.attemptIndex + 10).padStart(64, "b")}` as Hex,
-      logIndex: 0,
+      txHash: input.requestId,
+      logIndex: 2,
       finalityTier: input.finalityTier ?? "finalized",
       contractGeneration: "revised",
     },
@@ -186,7 +186,7 @@ function solutionDelivered(input: {
       event: "Deliver",
       blockNumber: input.blockNumber,
       blockHash: input.blockHash,
-      txHash: `0x${String(input.attemptIndex + 20).padStart(64, "d")}` as Hex,
+      txHash: input.requestId,
       logIndex: 1,
       finalityTier: "finalized",
       contractGeneration: "revised",
@@ -221,13 +221,13 @@ describe("deriveAuthorityProjection ordering", () => {
     const validPreparation = solutionPrepared({
       attemptIndex: 0,
       requestId: REQUEST_ELIGIBLE,
-      blockNumber: 101,
-      blockHash: `0x${"8".repeat(64)}`,
+      blockNumber: 103,
+      blockHash: `0x${"a".repeat(64)}`,
     });
     const refusedPreparation = solutionPrepared({
       attemptIndex: 0,
       requestId: REQUEST_ORPHAN,
-      blockNumber: 102,
+      blockNumber: 104,
       blockHash: `0x${"9".repeat(64)}`,
     });
     const delivered = solutionDelivered({
@@ -272,9 +272,9 @@ describe("deriveAuthorityProjection ordering", () => {
       taskCreated(),
       validAttempt,
       validPreparation,
-      refusedPreparation,
       delivered,
       validClaim,
+      refusedPreparation,
       refusedCreation,
       refusedDuplicateClaim,
       refusedCrossAttemptClaim,
@@ -357,8 +357,8 @@ describe("deriveAuthorityProjection ordering", () => {
     const eligiblePreparation = solutionPrepared({
       attemptIndex: 0,
       requestId: REQUEST_ELIGIBLE,
-      blockNumber: 101,
-      blockHash: "0x7777777777777777777777777777777777777777777777777777777777777777",
+      blockNumber: 102,
+      blockHash: "0x8888888888888888888888888888888888888888888888888888888888888888",
     });
     const eligibleSettlement = solutionClaimed({
       attemptIndex: 0,

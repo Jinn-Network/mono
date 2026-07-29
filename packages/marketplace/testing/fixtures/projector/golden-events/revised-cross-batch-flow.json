@@ -109,7 +109,7 @@
       "blockNumber": "102",
       "blockHash": "0x1212121212121212121212121212121212121212121212121212121212121212",
       "transactionHash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      "logIndex": 0,
+      "logIndex": 1,
       "finalityTier": "finalized",
       "args": {
         "mech": "0x2222222222222222222222222222222222222222",
@@ -136,10 +136,10 @@
       "event": "SolutionDeliveryClaimed",
       "chainId": 84532,
       "address": "0x1111111111111111111111111111111111111111",
-      "blockNumber": "103",
-      "blockHash": "0x1313131313131313131313131313131313131313131313131313131313131313",
-      "transactionHash": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-      "logIndex": 0,
+      "blockNumber": "102",
+      "blockHash": "0x1212121212121212121212121212121212121212121212121212121212121212",
+      "transactionHash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "logIndex": 2,
       "finalityTier": "finalized",
       "args": {
         "operator": "0x2222222222222222222222222222222222222222",
@@ -149,7 +149,7 @@
         "attemptIndex": "3"
       },
       "projection": {
-        "timestamp": "2026-07-29T12:03:00Z",
+        "timestamp": "2026-07-29T12:02:00Z",
         "submission": "urn:uuid:11111111-1111-4111-8111-111111111111",
         "taskDigest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
         "effectiveDeadline": "2026-07-30T12:00:00Z",
@@ -256,10 +256,10 @@
       "event": "Deliver",
       "chainId": 84532,
       "address": "0x5555555555555555555555555555555555555555",
-      "blockNumber": "107",
-      "blockHash": "0x1717171717171717171717171717171717171717171717171717171717171717",
-      "transactionHash": "0xf3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3",
-      "logIndex": 0,
+      "blockNumber": "106",
+      "blockHash": "0x1616161616161616161616161616161616161616161616161616161616161616",
+      "transactionHash": "0xf2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2",
+      "logIndex": 1,
       "finalityTier": "finalized",
       "args": {
         "mech": "0x5555555555555555555555555555555555555555",
@@ -270,7 +270,7 @@
         "deliveryData": "0x5678"
       },
       "projection": {
-        "timestamp": "2026-07-29T12:07:00Z",
+        "timestamp": "2026-07-29T12:06:00Z",
         "submission": "urn:uuid:11111111-1111-4111-8111-111111111111",
         "taskDigest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
         "effectiveDeadline": "2026-07-30T12:00:00Z",
@@ -286,10 +286,10 @@
       "event": "VerdictDeliveryClaimed",
       "chainId": 84532,
       "address": "0x1111111111111111111111111111111111111111",
-      "blockNumber": "108",
-      "blockHash": "0x1818181818181818181818181818181818181818181818181818181818181818",
-      "transactionHash": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-      "logIndex": 0,
+      "blockNumber": "106",
+      "blockHash": "0x1616161616161616161616161616161616161616161616161616161616161616",
+      "transactionHash": "0xf2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2",
+      "logIndex": 2,
       "finalityTier": "finalized",
       "args": {
         "evaluator": "0x5555555555555555555555555555555555555555",
@@ -301,7 +301,7 @@
         "verdictCode": "1"
       },
       "projection": {
-        "timestamp": "2026-07-29T12:08:00Z",
+        "timestamp": "2026-07-29T12:06:00Z",
         "submission": "urn:uuid:11111111-1111-4111-8111-111111111111",
         "taskDigest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
         "effectiveDeadline": "2026-07-30T12:00:00Z",
@@ -317,8 +317,8 @@
   "expect": {
     "observationCount": 6,
     "announcementCount": 4,
-    "observationSha256": "sha256:ec9df25e61fed0888c84d4081ad94662e7505d0f7bef3c395487172e07a554b0",
-    "announcementSha256": "sha256:eb90660dd3ce29ccea52c120c5ff9ea3bc72cea2d675517bd79c0c72bdeb8680",
+    "observationSha256": "sha256:318410c5c0a63cbf94a2911f33ba1351521cd1a75948601c5691962b17f54a27",
+    "announcementSha256": "sha256:0ae12809553c40c706c45394107cec38daa9220933659a4e9b4cda9056015614",
     "requiredObservationTypes": [
       "network.jinn.task-execution.submission-accepted.v1",
       "network.jinn.task-execution.attempt-engaged.v1",

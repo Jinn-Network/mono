@@ -54,9 +54,16 @@ export type MarketplaceProtocolObservation = ProtocolObservation & {
   };
 };
 
+interface ReceiptPosition {
+  readonly blockHash: Hex;
+  readonly txHash: Hex;
+  readonly logIndex: number;
+}
+
 interface PendingMechDelivery {
   readonly data: Hex;
   readonly requestData?: Hex;
+  readonly receipt?: ReceiptPosition;
   readonly deliveryCorrespondence?: NonNullable<
     ObservationProjectionContext["deliveryCorrespondence"]
   >;
@@ -154,6 +161,7 @@ interface RequestIdBinding {
   readonly deliveryDigest?: Hex;
   readonly verdictCode?: number;
   readonly nonce?: bigint;
+  readonly preparation?: ReceiptPosition;
   status?: "claimed" | "prepared" | "delivered" | "forfeited";
 }
 
@@ -207,6 +215,7 @@ export interface MarketplaceProjectionRefusal {
     | "preparation-mismatch"
     | "deliver-request-data-invalid"
     | "deliver-request-data-mismatch"
+    | "receipt-continuity-mismatch"
     | "reservation-not-prepared"
     | "reservation-not-delivered";
   readonly derivation: MarketplaceEvent["derivation"];
@@ -272,6 +281,9 @@ export function cloneMarketplaceProjectionState(
           ...(value.requestData === undefined
             ? {}
             : { requestData: value.requestData.slice() as Hex }),
+          ...(value.receipt === undefined
+            ? {}
+            : { receipt: { ...value.receipt } }),
           ...(value.deliveryCorrespondence === undefined
             ? {}
             : {
@@ -285,7 +297,12 @@ export function cloneMarketplaceProjectionState(
     requestIdBindings: Object.fromEntries(
       Object.entries(state.requestIdBindings).map(([key, value]) => [
         key,
-        { ...value },
+        {
+          ...value,
+          ...(value.preparation === undefined
+            ? {}
+            : { preparation: { ...value.preparation } }),
+        },
       ]),
     ),
     evaluationIdentities: Object.fromEntries(
@@ -392,6 +409,38 @@ function logIdentity(event: ObservationMarketplaceEvent): string {
     derivation.txHash.toLowerCase(),
     derivation.logIndex,
   ].join(":");
+}
+
+const CANONICAL_HASH = /^0x[0-9a-f]{64}$/;
+
+function receiptPosition(
+  derivation: MarketplaceEvent["derivation"],
+): ReceiptPosition | undefined {
+  if (
+    !CANONICAL_HASH.test(derivation.blockHash)
+    || !CANONICAL_HASH.test(derivation.txHash)
+    || !Number.isSafeInteger(derivation.logIndex)
+    || derivation.logIndex < 0
+  ) {
+    return undefined;
+  }
+  return {
+    blockHash: derivation.blockHash,
+    txHash: derivation.txHash,
+    logIndex: derivation.logIndex,
+  };
+}
+
+function followsInSameReceipt(
+  earlier: ReceiptPosition | undefined,
+  laterDerivation: MarketplaceEvent["derivation"],
+): boolean {
+  const later = receiptPosition(laterDerivation);
+  return earlier !== undefined
+    && later !== undefined
+    && earlier.blockHash === later.blockHash
+    && earlier.txHash === later.txHash
+    && earlier.logIndex < later.logIndex;
 }
 
 function requestIdBindingKey(chainId: number, requestId: Hex): string {
@@ -790,6 +839,16 @@ export function reduceMarketplaceProjection(
           );
           break;
         }
+        const preparation = receiptPosition(event.derivation);
+        if (preparation === undefined) {
+          refuse(
+            event,
+            "receipt-continuity-mismatch",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
         if (!registerRequestIdBinding(
           state,
           event.derivation.chainId,
@@ -805,6 +864,7 @@ export function reduceMarketplaceProjection(
             deliveryDigest: event.facts.deliveryDigest,
             verdictCode: 0,
             nonce: event.facts.nonce,
+            preparation,
             status: "prepared",
           },
         )) {
@@ -860,6 +920,16 @@ export function reduceMarketplaceProjection(
           );
           break;
         }
+        const preparation = receiptPosition(event.derivation);
+        if (preparation === undefined) {
+          refuse(
+            event,
+            "receipt-continuity-mismatch",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
         if (!registerRequestIdBinding(
           state,
           event.derivation.chainId,
@@ -876,6 +946,7 @@ export function reduceMarketplaceProjection(
             deliveryDigest: event.facts.deliveryDigest,
             verdictCode: event.facts.verdictCode,
             nonce: event.facts.nonce,
+            preparation,
             status: "prepared",
           },
         )) {
@@ -905,6 +976,7 @@ export function reduceMarketplaceProjection(
           const binding = state.requestIdBindings[
             requestIdBindingKey(event.derivation.chainId, event.facts.requestId)
           ];
+          const deliveryReceipt = receiptPosition(event.derivation);
           const kind = decoded.legKind === REVISED_LEG_SOLUTION
             ? "solution"
             : decoded.legKind === REVISED_LEG_VERDICT
@@ -933,10 +1005,23 @@ export function reduceMarketplaceProjection(
             );
             break;
           }
+          if (
+            deliveryReceipt === undefined
+            || !followsInSameReceipt(binding.preparation, event.derivation)
+          ) {
+            refuse(
+              event,
+              "receipt-continuity-mismatch",
+              decoded.taskId,
+              decoded.attemptIndex,
+            );
+            break;
+          }
           binding.status = "delivered";
           state.pendingMechDeliveries[pendingKey] = {
             data: event.facts.deliveryData,
             requestData: event.facts.requestData,
+            receipt: deliveryReceipt,
             ...(event.projection.deliveryCorrespondence === undefined
               ? {}
               : {
@@ -1000,6 +1085,21 @@ export function reduceMarketplaceProjection(
           refuse(
             event,
             "reservation-not-delivered",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (
+          "deliveryDigest" in event.facts
+          && (
+            !followsInSameReceipt(binding?.preparation, event.derivation)
+            || !followsInSameReceipt(mechDelivery?.receipt, event.derivation)
+          )
+        ) {
+          refuse(
+            event,
+            "receipt-continuity-mismatch",
             event.facts.taskId,
             event.facts.attemptIndex,
           );
@@ -1099,6 +1199,18 @@ export function reduceMarketplaceProjection(
             refuse(
               event,
               "reservation-not-delivered",
+              event.facts.taskId,
+              event.facts.attemptIndex,
+            );
+            break;
+          }
+          if (
+            !followsInSameReceipt(binding.preparation, event.derivation)
+            || !followsInSameReceipt(mechDelivery.receipt, event.derivation)
+          ) {
+            refuse(
+              event,
+              "receipt-continuity-mismatch",
               event.facts.taskId,
               event.facts.attemptIndex,
             );

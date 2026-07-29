@@ -18,6 +18,7 @@ import {
 } from "@jinn-network/marketplace-projector";
 import {
   documentDigest,
+  sealDelivery,
   sealSubmission,
 } from "@jinn-network/task-execution-protocol";
 import {
@@ -183,7 +184,11 @@ function attemptEvent(input: {
   } as ObservationMarketplaceEvent;
 }
 
-function deliveryEvent(attemptIndex: number, requestId: Hex): ObservationMarketplaceEvent {
+function deliveryEvent(
+  attemptIndex: number,
+  requestId: Hex,
+  deliveryDigest: Hex = `0x${"d".repeat(64)}`,
+): ObservationMarketplaceEvent {
   return {
     event: "SolutionDeliveryClaimed",
     derivation: {
@@ -193,7 +198,7 @@ function deliveryEvent(attemptIndex: number, requestId: Hex): ObservationMarketp
       blockNumber: 101 + attemptIndex,
       blockHash: `0x${String(attemptIndex + 7).padStart(64, "7")}` as Hex,
       txHash: `0x${String(attemptIndex + 20).padStart(64, "b")}` as Hex,
-      logIndex: 0,
+      logIndex: 2,
       finalityTier: "finalized",
       contractGeneration: "revised",
     },
@@ -212,7 +217,7 @@ function deliveryEvent(attemptIndex: number, requestId: Hex): ObservationMarketp
       taskId: 42n,
       attemptIndex,
       requestId,
-      deliveryDigest: `0x${"d".repeat(64)}` as Hex,
+      deliveryDigest,
       operator: OPERATOR,
     },
   } as ObservationMarketplaceEvent;
@@ -245,7 +250,6 @@ function projectionWithAttempts(
       derivation: {
         ...settlement.derivation,
         event: "SolutionDeliveryPrepared",
-        blockNumber: settlement.derivation.blockNumber - 1,
         logIndex: 0,
       },
       projection: settlement.projection,
@@ -404,20 +408,35 @@ describe("authorizeCellFromProjection attempt selection", () => {
     const base = enrichedEvents(`0x${sealed.digest.slice("sha256:".length)}`);
     const request0 = `0x${"a".repeat(64)}` as Hex;
     const request1 = `0x${"b".repeat(64)}` as Hex;
-    const projection = projectionWithAttempts(
-      base,
-      [
-        attemptEvent({ attemptIndex: 0, requestId: request0, blockNumber: 99 }),
-        attemptEvent({ attemptIndex: 1, requestId: request1, blockNumber: 100 }),
-      ],
-      [deliveryEvent(1, request1)],
-    );
     const attempt1 = deriveMarketplaceAttemptUri({
       chainId: 84532,
       coordinator: COORDINATOR,
       taskId: 42n,
       attemptIndex: 1,
     });
+    const deliveryBytes = sealDelivery({
+      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      attempt: attempt1,
+      task: `sha256:${TASK_DIGEST}`,
+      outputs: [],
+      outcome: "fulfilled",
+      executionIds: ["urn:uuid:44444444-4444-4444-8444-444444444444"],
+      evidenceRecords: [],
+      createdAt: "2026-08-01T00:00:01Z",
+    });
+    const deliveryDigest = documentDigest(deliveryBytes);
+    const projection = projectionWithAttempts(
+      base,
+      [
+        attemptEvent({ attemptIndex: 0, requestId: request0, blockNumber: 99 }),
+        attemptEvent({ attemptIndex: 1, requestId: request1, blockNumber: 100 }),
+      ],
+      [deliveryEvent(
+        1,
+        request1,
+        `0x${deliveryDigest.slice("sha256:".length)}` as Hex,
+      )],
+    );
     const candidate: ProjectorCellJoinCandidate = {
       cellKey: CELL_KEY,
       armId: "armA",
@@ -430,7 +449,10 @@ describe("authorizeCellFromProjection attempt selection", () => {
       runDigest: RUN_DIGEST,
       candidate,
       projection,
-      material: { sealedSubmissionBytes: () => sealed.bytes },
+      material: {
+        sealedSubmissionBytes: () => sealed.bytes,
+        sealedDeliveryBytes: () => deliveryBytes,
+      },
     });
     expect(cell?.attempt).toBe(attempt1);
   });
