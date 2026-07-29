@@ -1313,3 +1313,14 @@ from the settlement `(Task, Delivery)` pair alone. The implementation crosswalk 
 its existing exact bytes/digest; the marketplace decision-grade profile requires the receipt and
 byte-compares the receipt-bearing derivation against the settlement-fixed context. No receipt is
 hidden in profile parameters or capability grants.
+
+## Addendum 2026-07-29-c — benchmark-eligible provenance is a consumer refinement
+
+Program ruling §7.46 does not change or re-seal `repository-work/1.0`. The published generic
+profile remains valid with its optional `provenance { kind, sourceCommitment? }` block. A
+benchmarking consumer applies a stricter eligibility rule to a Task it includes in a Benchmark:
+valid RFC 3339 `provenance.timestamp` plus exactly one non-empty plaintext `provenance.source` or
+lowercase sha256 `provenance.sourceCommitment`. The latter is an opaque, stable source-family
+grouping claim. Those additional properties are already legal under the generic profile's
+extension-permitting payload schema; their benchmarking meaning and requirement are owned by the
+Benchmark judgeability check, not retroactively by the profile document.

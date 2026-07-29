@@ -895,3 +895,44 @@ unresolved Benchmark identity; keep arm identity in repetition estimators; requi
 provenance cluster; bind clean-subset basis to its acquisition procedure; keep
 `bradley-terry@1` registered/non-reference/unavailable until genuine pairwise inputs exist; and
 apply program §7.24's I-JSON Unicode-scalar rule.
+
+## Addendum 2026-07-29-f — benchmark-eligible provenance refinement
+
+The second independent M1–M3 review found that benchmarking design §6.1/§9.2 requires a source
+family and creation time that the authoritative `repository-work/1.0` document does not require.
+Program ruling §7.46 resolves the interface conflict without changing that generic profile or its
+pinned digest:
+
+1. Any Task referenced by a Benchmark is a stricter consumer-side subset. Once exact Task bytes
+   are available, `benchmark-judgeability` requires a valid RFC 3339
+   `payload.provenance.timestamp` and exactly one of a non-empty `payload.provenance.source` or a
+   lowercase `sha256:<64 hex>` `payload.provenance.sourceCommitment`.
+2. A commitment is an opaque, stable, author-claimed source-family grouping token. Its tagged
+   value, or the tagged plaintext source, is the only clustering key. A Report author cannot
+   provide or rewrite it.
+3. All clustering methods resolve the exact participating Task bytes and disclose clustering
+   basis and count. This includes `noninferiority-iut@1`; declaring the rule without applying it
+   is nonconforming.
+4. Provenance failure is a judgeability failure (or `unevaluated` before reveal), not a late
+   statistical surprise. Benchmarking fixtures use a real published Task profile plus this
+   refinement rather than profileless payload inventions.
+
+The same review's SemVer finding is a direct §6.2 defect: the cross-record transition check must
+bind predecessor bytes, require strictly increasing SemVer precedence (build metadata alone does
+not increase precedence), and require the first changed core component — or a same-core
+prerelease precedence increase — to agree with the classified patch/minor/major content change.
+Downgrades, equal precedence, and wrong bump classes fail closed.
+
+## Addendum 2026-07-29-g — non-inferiority cluster bootstrap
+
+Program ruling §7.47 closes the replay ambiguity exposed by the second review. The
+`noninferiority-iut@1` quality BCa leg resamples whole provenance-source clusters, not individual
+Tasks: sort tagged cluster keys and member Task digests by UTF-16 code units; draw exactly `C`
+clusters with replacement per resample using one xorshift32-v1 draw per cluster position; expand
+all members of each sampled cluster; compute the task-weighted mean; and derive acceleration by
+deleting one whole cluster at a time without consuming PRNG draws. Fewer than two clusters is
+`INCONCLUSIVE`, never an iid fallback. Exact cluster membership/basis/count, bootstrap unit, and
+draw count are disclosed. The cost leg stays the separately frozen paired-task Wilcoxon.
+
+This supersedes Addendum e's task-position sampling only for this quality bootstrap; the same
+nonzero uint32 seed and xorshift transition rules remain binding.

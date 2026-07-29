@@ -489,6 +489,41 @@ Confirmed by the operator at the program gate (2026-07-28):
     with empty/leading-hyphen/trailing-hyphen components. Existing `jinn:...` absolute-URI scope
     values remain valid. The trust-core sealing/validation fixture must use the admission scope
     in a real KeyBinding so M5 cannot pass through an impossible fake resolver state.
+46. **Benchmark eligibility refines, but does not re-digest, Task profiles:** the generic
+    `repository-work/1.0` profile remains authoritative with its existing optional
+    `payload.provenance { kind, sourceCommitment? }` surface and pinned bytes. A Task referenced
+    by a Benchmark is a stricter consumer-side subset: once its exact bytes are available,
+    `benchmark-judgeability` requires `payload.provenance.timestamp` as a valid RFC 3339 string
+    and exactly one source-family claim:
+    (a) a non-empty `source` string, or
+    (b) `sourceCommitment` in lowercase `sha256:<64 hex>` form. A commitment is an opaque,
+    author-claimed, stable grouping token: within a Benchmark, equal source families must use
+    equal commitments and unequal asserted families must use unequal commitments; it need not
+    disclose the source and sealing does not attest the claim. The pinned clustering key is the
+    tagged pair `("source", source)` or `("sourceCommitment", sourceCommitment)`, never an
+    author-supplied Report parameter and never an untagged concatenation. All clustering methods,
+    including `noninferiority-iut@1`, resolve every participating Task and disclose the basis and
+    cluster count in their results. Missing, ambiguous, malformed, unavailable, digest-mismatched,
+    or noncanonical provenance fails closed (or remains `unevaluated` before scheduled reveal)
+    at Benchmark judgeability, rather than first failing during Report computation. Optional
+    quality/canary provenance fields remain sealed author claims with no additional v1 core
+    semantics. This reconciles benchmarking design §6.1/§9.2 with profiles design §8 without
+    altering the generic profile document or its digest.
+47. **`noninferiority-iut@1` uses a deterministic source-cluster bootstrap:** for its quality
+    BCa leg, exact paired Tasks are grouped by §7.46's tagged source-family key. Cluster keys and
+    members are UTF-16 code-unit ordered. With `C` clusters, each resample draws exactly `C`
+    cluster indices with replacement from the xorshift32-v1 stream (one uint32 transition per
+    cluster position), concatenates every member of each drawn cluster in member order, and
+    computes the task-weighted mean quality difference over that expanded sample. Thus the draw
+    count is exactly `resamples * C`; no second within-cluster draw occurs. The observed estimate
+    remains the task-weighted mean over all paired Tasks. BCa acceleration uses deterministic
+    leave-one-whole-cluster-out jackknife estimates and consumes no PRNG draws. Fewer than two
+    source clusters makes the quality leg `INCONCLUSIVE`; it must not fall back to task-level
+    resampling. Results disclose `basis`, `count`, tagged cluster membership, bootstrap unit
+    `"source-cluster"`, and draw count. The separately specified both-solve cost leg remains the
+    one-sided paired-task Wilcoxon from design §9.2. This supersedes §7.26's task-position
+    resampling only for this method's quality bootstrap; seed validation and xorshift transition
+    semantics are unchanged.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 
