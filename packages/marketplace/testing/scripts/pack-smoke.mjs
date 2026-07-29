@@ -6,11 +6,20 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Cross-tree + sibling portal dependencies (§7.8), packed in dependency order (leaves first).
+// task-execution-testing's runtime closure includes backend-local/{supervisor,workspace,
+// launchers,assembly} plus the assembly's evidence contract deps.
 const dependencyChain = [
   ["@jinn-network/evidence-protocol", join(packageRoot, "..", "..", "evidence", "protocol")],
+  ["@jinn-network/evidence-repository", join(packageRoot, "..", "..", "evidence", "repository")],
+  ["@jinn-network/evidence-discovery", join(packageRoot, "..", "..", "evidence", "discovery")],
+  ["@jinn-network/execution-recorder", join(packageRoot, "..", "..", "evidence", "execution-recorder")],
   ["@jinn-network/task-execution-protocol", join(packageRoot, "..", "..", "task-execution", "protocol")],
   ["@jinn-network/task-execution-backend", join(packageRoot, "..", "..", "task-execution", "backend")],
   ["@jinn-network/task-execution-profiles", join(packageRoot, "..", "..", "task-execution", "profiles")],
+  ["@jinn-network/task-execution-supervisor", join(packageRoot, "..", "..", "task-execution", "backend-local", "supervisor")],
+  ["@jinn-network/task-execution-workspace", join(packageRoot, "..", "..", "task-execution", "backend-local", "workspace")],
+  ["@jinn-network/task-execution-launchers", join(packageRoot, "..", "..", "task-execution", "backend-local", "launchers")],
+  ["@jinn-network/task-execution-backend-local", join(packageRoot, "..", "..", "task-execution", "backend-local", "assembly")],
   ["@jinn-network/task-execution-testing", join(packageRoot, "..", "..", "task-execution", "testing")],
   ["@jinn-network/trust-core", join(packageRoot, "..", "..", "trust", "core")],
   ["@jinn-network/trust-resolve", join(packageRoot, "..", "..", "trust", "resolve")],

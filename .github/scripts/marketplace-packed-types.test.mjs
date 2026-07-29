@@ -33,12 +33,21 @@ const codeEntrypoints = [
 // record-discovery-{protocol,serve} + their own trust-core/record-discovery-testing shadow
 // deps; testing adds task-execution-testing + record-discovery-testing, then trust-testing for
 // M5.3's real sealed binding fixtures and evidence-protocol for §7.55 exact family validation.
+// task-execution-testing's runtime closure includes backend-local/{supervisor,workspace,
+// launchers,assembly} plus the assembly's evidence contract deps — packed before testing.
 // Pipeline and testing's shadow closures are covered below.
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
+  ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
+  ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
+  ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
+  ['@jinn-network/task-execution-supervisor', join(root, 'packages', 'task-execution', 'backend-local', 'supervisor')],
+  ['@jinn-network/task-execution-workspace', join(root, 'packages', 'task-execution', 'backend-local', 'workspace')],
+  ['@jinn-network/task-execution-launchers', join(root, 'packages', 'task-execution', 'backend-local', 'launchers')],
+  ['@jinn-network/task-execution-backend-local', join(root, 'packages', 'task-execution', 'backend-local', 'assembly')],
   ['@jinn-network/task-execution-testing', join(root, 'packages', 'task-execution', 'testing')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
   ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
