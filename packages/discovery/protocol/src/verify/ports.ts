@@ -86,7 +86,16 @@ export interface SubstrateChecker {
 // declarative (field labeling); this port supplies the bytes->values
 // extraction the declarative card lacks.
 
-export type RecordFactValue = string | number | boolean | undefined; // undefined = uncomputable
+/** A single CloudEvents-compatible fact scalar (program §7.129). */
+export type RecordFactScalar = string | number | boolean;
+
+/**
+ * A recomputed record-fact value (program §7.129): a scalar, an ordered
+ * scalar array for genuinely plural record fields, or `undefined` when the
+ * value is uncomputable (facts-consistency → `indeterminate`). Arrays are
+ * not CloudEvents scalars and must never be declared `cloudEvents`-liftable.
+ */
+export type RecordFactValue = RecordFactScalar | readonly RecordFactScalar[] | undefined;
 
 /** Referenced-record bytes, if available. Quoted method name -- see the comment above `RecordFetcher`. */
 export interface ReferencedBytes {

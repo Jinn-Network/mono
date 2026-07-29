@@ -59,6 +59,21 @@ describe("parseFactsProfile", () => {
     ]);
     expect(parseFactsProfile(profile)).toEqual(profile);
   });
+
+  it("rejects array as a CloudEvents scalar (program §7.129)", () => {
+    const withArrayScalar = {
+      ...baseProfile([{ name: "matrixDigests", class: "record", referenceBearing: true }]),
+      fields: [
+        {
+          name: "matrixDigests",
+          class: "record",
+          referenceBearing: true,
+          cloudEvents: { attribute: "matrices", scalar: "array" },
+        },
+      ],
+    };
+    expect(() => parseFactsProfile(withArrayScalar)).toThrow();
+  });
 });
 
 describe("referenceBearingFields", () => {

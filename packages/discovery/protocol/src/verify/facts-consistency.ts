@@ -1,7 +1,35 @@
 import type { FactsProfileDocument } from "../facts-profile.js";
 import type { AnnouncedItem } from "../item.js";
-import type { FactsRecompute, ReferencedBytes, RecordFetcher } from "./ports.js";
+import type {
+  FactsRecompute,
+  RecordFactScalar,
+  RecordFactValue,
+  ReferencedBytes,
+  RecordFetcher,
+} from "./ports.js";
 import type { FactsConsistency } from "./outcomes.js";
+
+function isRecordFactScalar(value: unknown): value is RecordFactScalar {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+/**
+ * Exact facts-consistency equality (program §7.129): scalars use `===`;
+ * arrays compare by exact length and element value in record order.
+ */
+export function recordFactValuesEqual(
+  recomputed: Exclude<RecordFactValue, undefined>,
+  announced: unknown,
+): boolean {
+  if (Array.isArray(recomputed)) {
+    if (!Array.isArray(announced) || announced.length !== recomputed.length) return false;
+    for (let i = 0; i < recomputed.length; i++) {
+      if (!isRecordFactScalar(announced[i]) || announced[i] !== recomputed[i]) return false;
+    }
+    return true;
+  }
+  return recomputed === announced;
+}
 
 // Named check: facts-consistency (design §5.4, §10.4 step 2, program §7.13).
 // Recomputes each RECORD-classed fact from the record's own fetched bytes
@@ -75,7 +103,7 @@ export async function factsConsistency(params: {
     if (!Object.prototype.hasOwnProperty.call(card, field.name)) continue; // not announced -- nothing to check (§15/§18 unknown-field skip is symmetric: extra card fields the profile doesn't name are likewise never visited)
     const recomputedValue = recomputed[field.name];
     if (recomputedValue === undefined) return "indeterminate";
-    if (recomputedValue !== card[field.name]) return "inconsistent";
+    if (!recordFactValuesEqual(recomputedValue, card[field.name])) return "inconsistent";
   }
   return "consistent";
 }
