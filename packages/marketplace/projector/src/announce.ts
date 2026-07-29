@@ -92,10 +92,15 @@ function encodeBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-async function signEntry(
+export async function signAnnouncementEntry(
   entry: AnnouncementEntry,
   signer: ScopedDiscoverySigner,
 ): Promise<DsseEnvelope> {
+  if (signer.scope !== DISCOVERY_SIGNING_SCOPE) {
+    throw new Error(
+      `announcement signer must be bound to DISCOVERY_SIGNING_SCOPE "${DISCOVERY_SIGNING_SCOPE}"`,
+    );
+  }
   const { bytes } = sealJson(entry);
   const signatures = await signer.sign(dssePreAuthEncoding(MEDIA_ENTRY, bytes));
   return {
@@ -399,7 +404,7 @@ export async function projectAnnouncements(
       timestamp: event.projection.timestamp,
       announcements: projected as Announcement[],
     };
-    const signature = await signEntry(entry, ports.signer);
+    const signature = await signAnnouncementEntry(entry, ports.signer);
     const sealed = sealJson(entry);
     await writeRecord(ports.store, sealed.bytes, MEDIA_ENTRY);
     entries.push({ entry, signature });
