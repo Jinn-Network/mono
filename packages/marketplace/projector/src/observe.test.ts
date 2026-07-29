@@ -2244,19 +2244,6 @@ describe("revised preparation identity and forfeiture", () => {
     derivation: derivation("VerdictForfeited", 213, "revised"),
   });
 
-  const verdictReservationForfeited = projectable({
-    event: "ReservationForfeited",
-    facts: {
-      taskId: 42n,
-      attemptIndex: 3,
-      verdictIndex: 1,
-      requestId: VERDICT_REQUEST_ID,
-      rate: 20n,
-      legKind: 2,
-    },
-    derivation: derivation("ReservationForfeited", 214, "revised"),
-  });
-
   function hasSettlementSideEffects(output: ReturnType<typeof reduceMarketplaceProjection>): boolean {
     return output.observations.some(({ type }) =>
       type === "network.jinn.task-execution.delivery-recorded.v1"
@@ -2574,18 +2561,6 @@ describe("revised generation refuses today-shaped settlement", () => {
       attemptIndex: 3,
     },
     derivation: derivation("SolutionDeliveryClaimed", 304, "today"),
-  });
-
-  const revisedShapedSolutionClaim = projectable({
-    event: "SolutionDeliveryClaimed",
-    facts: {
-      operator: OPERATOR,
-      requestId: REQUEST_ID,
-      taskId: 42n,
-      attemptIndex: 3,
-      deliveryDigest: DELIVERY_DIGEST,
-    },
-    derivation: derivation("SolutionDeliveryClaimed", 305, "revised"),
   });
 
   const todayShapedVerdictClaim = projectable({
