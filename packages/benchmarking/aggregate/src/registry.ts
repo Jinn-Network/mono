@@ -326,3 +326,6 @@ export function createMethodRegistry(): MethodRegistry {
     },
   };
 }
+
+/** The complete v1 registry exposed to package consumers and packed integrations. */
+export const BENCHMARKING_METHOD_REGISTRY: MethodRegistry = createMethodRegistry();

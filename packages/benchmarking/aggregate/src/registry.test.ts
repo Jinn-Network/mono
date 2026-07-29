@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { parseMatrix, sealMatrix, type MatrixRecord } from "@jinn-network/benchmarking-records";
 import { describe, expect, test } from "vitest";
+import { BENCHMARKING_METHOD_REGISTRY } from "./index.js";
 import { createMethodRegistry } from "./registry.js";
 import type { MethodComputeInput, VerdictOutcome } from "./method.js";
 
@@ -77,6 +78,9 @@ function baseInput(overrides: Partial<MethodComputeInput> = {}): MethodComputeIn
 }
 
 describe("createMethodRegistry", () => {
+  test("exports the default registry through the package barrel", () => {
+    expect(BENCHMARKING_METHOD_REGISTRY.get("jinn.benchmarking.method/wilson", "1")).toBeDefined();
+  });
   test("declares only the task-paired method version-robust for cross-Benchmark comparisons", () => {
     const registry = createMethodRegistry();
     expect(registry.get("jinn.benchmarking.method/paired-mcnemar", "1")?.versionRobust).toBe(true);

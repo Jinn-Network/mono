@@ -3,7 +3,7 @@
 // Matrix carries no aggregate of any kind). Dependency boundary: records + trust-core only.
 
 // --- the method registry + local types (design §9.2, §14.7) ---
-export { createMethodRegistry } from "./registry.js";
+export { BENCHMARKING_METHOD_REGISTRY, createMethodRegistry } from "./registry.js";
 export type { Method, MethodComputeInput, MethodRegistry, VerdictOutcome, VerdictRuleName } from "./method.js";
 
 // --- the contract-wide verdictRule reduction (design §9.2) ---
