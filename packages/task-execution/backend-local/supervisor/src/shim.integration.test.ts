@@ -4,7 +4,12 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { spawnShim } from "./shim.js";
+import {
+  readShimFingerprint,
+  requestShimCancellation,
+  spawnShim,
+  writeShimCancellationCommand,
+} from "./shim.js";
 
 const dirs: string[] = [];
 const waitForJson = async (path: string): Promise<Record<string, unknown>> => {
@@ -47,4 +52,27 @@ it("survives SIGTERM aimed at its group and remains the outcome recorder", async
   process.kill(Number(fingerprint["pid"]), "SIGTERM");
   const outcome = await waitForJson(join(metaDir, "outcome.json"));
   expect(outcome).toMatchObject({ exitCode: 0, termSignal: null });
+});
+
+it("relays a nonce-bound cancellation command from the shim to the harness subtree", async () => {
+  const root = mkdtempSync(join(tmpdir(), "jinn-shim-cancel-relay-"));
+  dirs.push(root);
+  const metaDir = join(root, "meta");
+  const secretsDir = join(root, "secrets");
+  mkdirSync(metaDir, { recursive: true });
+  mkdirSync(secretsDir, { recursive: true });
+  spawnShim(
+    { attemptId: "attempt-3", nonce: "nonce-3", metaDir, secretsDir },
+    { argv: [process.execPath, "-e", "setInterval(() => {}, 1_000)"], env: {}, cwd: root },
+  );
+  const fingerprint = await waitForJson(join(metaDir, "shim.json"));
+  writeShimCancellationCommand(metaDir, {
+    nonce: "nonce-3",
+    graceMs: 0,
+    killPollCeilingMs: 100,
+  });
+  expect(requestShimCancellation(metaDir, readShimFingerprint(metaDir)!)).toBe(true);
+  const outcome = await waitForJson(join(metaDir, "outcome.json"));
+  expect(outcome).toMatchObject({ attemptId: "attempt-3", nonce: "nonce-3", termSignal: "SIGTERM" });
+  expect(Number(fingerprint["pid"])).toBeGreaterThan(0);
 });

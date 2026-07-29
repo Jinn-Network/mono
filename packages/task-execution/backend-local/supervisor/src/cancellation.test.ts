@@ -28,4 +28,27 @@ describe("runCancellationLadder", () => {
     });
     expect(result).toEqual({ requested: false, terminalState: "delivered" });
   });
+
+  it("does not signal the harness twice when cancellation is already requested", async () => {
+    const signalTerm = vi.fn();
+    const signalKill = vi.fn();
+    let now = 0;
+    const result = await runCancellationLadder({ cancellationRequested: true }, {
+      signalTerm, signalKill, isSubtreeEmpty: vi.fn(() => false), readOutcome: vi.fn(() => null), harvest: vi.fn(),
+      sleep: () => { now += 25; },
+    }, { graceMs: 0, killPollCeilingMs: 25, nowMs: () => now });
+    expect(result).toEqual({ requested: false, terminalState: "cancelling" });
+    expect(signalTerm).not.toHaveBeenCalled();
+    expect(signalKill).not.toHaveBeenCalled();
+  });
+
+  it("records a cancellation signal as cancelled while preserving harvest", async () => {
+    const harvest = vi.fn();
+    const result = await runCancellationLadder({}, {
+      signalTerm: vi.fn(), signalKill: vi.fn(), isSubtreeEmpty: vi.fn(() => true),
+      readOutcome: vi.fn(() => ({ exitCode: null, termSignal: "SIGTERM" })), harvest,
+    });
+    expect(result).toMatchObject({ requested: true, terminalState: "cancelled", outcome: { exitCode: null, termSignal: "SIGTERM" } });
+    expect(harvest).toHaveBeenCalledOnce();
+  });
 });

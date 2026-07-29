@@ -14,6 +14,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import type {
   AttemptUri,
@@ -75,15 +76,19 @@ import type {
 } from "@jinn-network/task-execution-supervisor";
 import {
   foldAttemptRecord,
+  heartbeatIsStale,
   listProcessGroupPids,
   openAttemptJournal,
   openSubmissionSegment,
   probeShimAlive,
+  readHeartbeat,
+  readShimCancellationResult,
   readOutcome,
   readShimFingerprint,
   reconcileAttempt,
-  runCancellationLadder,
+  requestShimCancellation,
   spawnShim,
+  writeShimCancellationCommand,
 } from "@jinn-network/task-execution-supervisor";
 import type {
   CapabilityGrant,
@@ -166,6 +171,27 @@ function validProvisionerId(value: string): boolean {
     } else if (code >= 0xdc00 && code <= 0xdfff) return false;
   }
   return true;
+}
+
+function monotonicNowNs(): bigint {
+  return process.hrtime.bigint();
+}
+
+function monotonicClockIdentity(): string | undefined {
+  try {
+    if (process.platform === "linux") return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    if (process.platform === "darwin") {
+      const boot = execFileSync("sysctl", ["-n", "kern.boottime"], { encoding: "utf8" }).trim();
+      return boot.length === 0 ? undefined : `darwin:${boot}`;
+    }
+  } catch {
+    // A platform without a durable boot identity cannot safely re-arm a relative duration.
+  }
+  return undefined;
+}
+
+function positiveSafeDuration(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -439,6 +465,9 @@ export interface LocalTaskExecutionBackendConfig {
     grants: Readonly<Record<string, unknown>>,
   ) => readonly CapabilityGrant[];
   readonly secretForwardResolver?: SecretForwardResolver;
+  readonly cancellationGraceMs?: number;
+  readonly cancellationKillPollCeilingMs?: number;
+  readonly heartbeatIntervalMs?: number;
   readonly now?: () => string;
   readonly faults?: LocalBackendFaults;
 }
@@ -457,6 +486,9 @@ interface AttemptMeta {
   readonly task: `sha256:${string}`;
   readonly submission: SubmissionUri;
   readonly effectiveDeadline: string;
+  readonly maxAttemptDurationMs?: number;
+  readonly execStartedAtMonotonicNs?: string;
+  readonly monotonicClockIdentity?: string;
   readonly annotations?: Readonly<Record<string, unknown>>;
 }
 
@@ -770,11 +802,23 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       });
     }
 
+    const requestedMaxAttemptDurationMs = merged.effective["maxAttemptDurationMs"];
+    const maxAttemptDurationMs = requestedMaxAttemptDurationMs === undefined
+      ? undefined
+      : positiveSafeDuration(requestedMaxAttemptDurationMs);
+    if (requestedMaxAttemptDurationMs !== undefined && maxAttemptDurationMs === undefined) {
+      return this.reject(submissionUri, "invalid-document", {
+        detail: "requirement \"maxAttemptDurationMs\" must be a positive safe integer",
+        annotations: { key: "maxAttemptDurationMs" },
+      });
+    }
+
     const capabilities = this.capabilitiesValue();
     const supportByKey = new Map(
       capabilities.runPinning.keys.map((support) => [support.key, support]),
     );
     for (const [key, value] of Object.entries(merged.effective)) {
+      if (key === "maxAttemptDurationMs") continue;
       const support = supportByKey.get(key);
       if (support === undefined) {
         return this.reject(submissionUri, "unsupported-requirement", {
@@ -873,6 +917,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       task: taskDigest,
       submission: submissionUri,
       effectiveDeadline: submission.deadline,
+      ...(maxAttemptDurationMs === undefined ? {} : { maxAttemptDurationMs }),
       ...(submission.annotations === undefined
         ? {}
         : { annotations: submission.annotations }),
@@ -1159,8 +1204,11 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       nonce: input.attempt.nonce,
       metaDir: input.paths.meta,
       secretsDir: input.paths.secrets,
+      ...(this.config.heartbeatIntervalMs === undefined ? {} : { heartbeatMs: this.config.heartbeatIntervalMs }),
     }, input.spawn);
     const fingerprint = await this.waitForShimFingerprint(input.paths.meta);
+    const execStartedAtMonotonicNs = monotonicNowNs().toString();
+    const clockIdentity = monotonicClockIdentity();
     this.journal(attempt).append({
       attemptId: attempt,
       type: "spawned",
@@ -1179,12 +1227,29 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       details: {
         startedAt: this.now(),
         executor: this.config.executor,
+        ...(this.attempts.get(attempt)?.maxAttemptDurationMs === undefined
+          ? {}
+          : { maxAttemptDurationMs: this.attempts.get(attempt)!.maxAttemptDurationMs }),
+        execStartedAtMonotonicNs,
+        ...(clockIdentity === undefined ? {} : { monotonicClockIdentity: clockIdentity }),
         source: this.config.source,
       },
     });
+    const currentMetadata = this.attempts.get(attempt);
+    if (currentMetadata !== undefined) {
+      const updated: AttemptMeta = {
+        ...currentMetadata,
+        execStartedAtMonotonicNs,
+        ...(clockIdentity === undefined ? {} : { monotonicClockIdentity: clockIdentity }),
+      };
+      this.attempts.set(attempt, updated);
+      this.persistAttemptMetadata(updated);
+    }
+    this.armExpiry(attempt);
+    this.relayPendingCancellation(attempt);
 
     await this.config.faults?.onCompletionPhase?.("before-outcome-wait");
-    const execution = await this.waitForOutcome(input.paths.meta, input.attempt.nonce);
+    const execution = await this.waitForOutcome(attempt, input.paths.meta, input.attempt.nonce);
     await this.config.faults?.onCompletionPhase?.("after-outcome");
     await this.completeAttempt({ ...input, execution, capture, capturePosture });
   }
@@ -1227,6 +1292,17 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     }
     if (harvested === undefined) append("harvested", { manifest: harvest.manifest, omissions: harvest.omissions, integrityViolations: harvest.integrityViolations });
     await this.config.faults?.onCompletionPhase?.("after-harvest");
+    const cancellationResult = readShimCancellationResult(input.paths.meta, input.attempt.nonce);
+    if (cancellationResult !== null && cancellationResult.residualPids.length > 0) {
+      this.appendTerminal(attempt, {
+        state: "failed",
+        blame: "infrastructure",
+        category: "backend-unavailable",
+        detail: `residual live processes: ${cancellationResult.residualPids.join(",")}`,
+        residualPids: cancellationResult.residualPids,
+      });
+      return;
+    }
     const envelope = this.readResultEnvelope(input.paths, input.plan, harvest);
     const interpreted = interpretResult(input.plan, input.execution, envelope);
     const observedEvidence = this.journal(attempt).read()
@@ -1248,6 +1324,22 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     }
     if (receipt !== undefined) append("execution-observed", { executionId: receipt.executionId, evidenceRecord: receipt.record });
     await this.config.faults?.onCompletionPhase?.("after-evidence");
+    // Cancellation is an intent, never an outcome channel.  The shim remains the sole outcome
+    // recorder: only a signal outcome after that intent becomes `cancelled`; a natural exit
+    // continues through normal interpretation and therefore wins a race with cancellation.
+    const cancellationRequested = this.journal(attempt).read().some(
+      (event) => event.type === "cancel-requested",
+    );
+    if (cancellationRequested && input.execution.signal !== undefined) {
+      const deadlineRequested = this.journal(attempt).read().some(
+        (event) => event.type === "cancel-requested" && event.details["deadline"] === true,
+      );
+      this.appendTerminal(attempt, {
+        state: deadlineRequested ? "expired" : "cancelled",
+        detail: input.execution.signal,
+      });
+      return;
+    }
     if (interpreted.state === "failed") {
       this.appendTerminal(attempt, { state: "failed", blame: interpreted.blame ?? "task", category: "protocol-violation", detail: interpreted.reasonCode ?? "executor reported failure" });
       return;
@@ -1306,8 +1398,9 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     return parsed as ResultEnvelope;
   }
 
-  private async waitForOutcome(meta: string, nonce: string): Promise<{ readonly exitCode?: number; readonly signal?: string }> {
+  private async waitForOutcome(attempt: AttemptUri, meta: string, nonce: string): Promise<{ readonly exitCode?: number; readonly signal?: string }> {
     for (;;) {
+      this.recordHeartbeatStaleness(attempt, meta);
       const outcome = readOutcome(meta, nonce);
       if (outcome !== null) {
         return {
@@ -1512,8 +1605,12 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         idempotencyKey: stored.parsed.idempotencyKey,
       } satisfies PersistedSubmission as unknown as JsonValue),
     );
+    this.persistAttemptMetadata(attempt);
+  }
+
+  private persistAttemptMetadata(attempt: AttemptMeta): void {
     atomicWrite(
-      join(this.paths(stored.attempt).meta, "attempt.json"),
+      join(this.paths(attempt.attempt).meta, "attempt.json"),
       serializeCanonicalJson(attempt as unknown as JsonValue),
     );
   }
@@ -1642,6 +1739,17 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         terminalState: snapshot.descriptor.derived.state,
       };
     }
+    if (this.journal(attempt).read().some((event) => event.type === "cancel-requested")) {
+      return { requested: true };
+    }
+    this.requestStop(attempt, reason, false);
+    return { requested: true };
+  }
+
+  /** Requests the shim-owned termination ladder. It intentionally records intent, not outcome. */
+  private requestStop(attempt: AttemptUri, reason: string, deadline: boolean): void {
+    if (foldAttemptRecord(this.journal(attempt).read()).terminal) return;
+    if (this.journal(attempt).read().some((event) => event.type === "cancel-requested")) return;
     this.journal(attempt).append({
       attemptId: attempt,
       type: "cancel-requested",
@@ -1649,26 +1757,110 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       details: {
         reason,
         requestedBy: "TaskExecutionBackend.cancel",
+        ...(deadline ? { deadline: true } : {}),
         source: this.config.source,
       },
     });
+    this.relayPendingCancellation(attempt);
+  }
+
+  /** The assembly records intent, then wakes only the fingerprint-verified shim. */
+  private relayPendingCancellation(attempt: AttemptUri): void {
+    if (!this.journal(attempt).read().some((event) => event.type === "cancel-requested")) return;
     const paths = this.paths(attempt);
     const fingerprint = readShimFingerprint(paths.meta);
-    if (fingerprint?.harnessPid !== undefined) {
-      const harnessPid = fingerprint.harnessPid;
-      void runCancellationLadder({}, {
-        signalTerm: () => { try { process.kill(-harnessPid, "SIGTERM"); } catch { /* exited races are resolved from outcome */ } },
-        signalKill: () => { try { process.kill(-harnessPid, "SIGKILL"); } catch { /* exited races are resolved from outcome */ } },
-        isSubtreeEmpty: () => {
-          try { process.kill(-harnessPid, 0); return false; } catch { return true; }
-        },
-        readOutcome: () => readOutcome(paths.meta, fingerprint.nonce),
-        harvest: () => undefined,
-        listPids: () => [harnessPid],
-        sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
-      }).catch(() => undefined);
+    if (fingerprint === null) return;
+    writeShimCancellationCommand(paths.meta, {
+      nonce: fingerprint.nonce,
+      graceMs: this.config.cancellationGraceMs ?? 10_000,
+      killPollCeilingMs: this.config.cancellationKillPollCeilingMs ?? 30_000,
+    });
+    requestShimCancellation(paths.meta, fingerprint);
+  }
+
+  /** Deadline timing starts at `attempt-started`; preparation is deliberately excluded. */
+  private armExpiry(attempt: AttemptUri, recovering = false): void {
+    const metadata = this.attempts.get(attempt);
+    if (metadata === undefined) return;
+    const dueAt = Date.parse(metadata.effectiveDeadline);
+    const maximumTimerDelayMs = 2_147_483_647;
+    if (Number.isFinite(dueAt)) {
+      const schedule = (): void => {
+        const remainingMs = Math.max(0, dueAt - Date.now());
+        const timer = setTimeout(
+          remainingMs > maximumTimerDelayMs
+            ? schedule
+            : () => this.requestStop(attempt, "execution deadline expired", true),
+          Math.min(remainingMs, maximumTimerDelayMs),
+        );
+        timer.unref();
+      };
+      schedule();
     }
-    return { requested: true };
+    if (metadata.maxAttemptDurationMs === undefined) return;
+    const startedNs = metadata.execStartedAtMonotonicNs;
+    const identity = metadata.monotonicClockIdentity;
+    const currentIdentity = monotonicClockIdentity();
+    if (startedNs === undefined || (recovering && (identity === undefined || currentIdentity === undefined || identity !== currentIdentity))) {
+      this.journal(attempt).append({
+        attemptId: attempt,
+        type: "progress",
+        time: this.now(),
+        details: { degradation: "relative-deadline-monotonic-unavailable", source: this.config.source },
+      });
+      this.requestStop(attempt, "relative execution deadline cannot be safely re-armed", true);
+      return;
+    }
+    let elapsedMs: number;
+    try {
+      const elapsedNs = monotonicNowNs() - BigInt(startedNs);
+      if (elapsedNs < 0n) throw new Error("monotonic clock reset");
+      elapsedMs = Number(elapsedNs / 1_000_000n);
+      if (!Number.isSafeInteger(elapsedMs)) throw new Error("monotonic duration is unusable");
+    } catch {
+      this.journal(attempt).append({
+        attemptId: attempt,
+        type: "progress",
+        time: this.now(),
+        details: { degradation: "relative-deadline-monotonic-unavailable", source: this.config.source },
+      });
+      this.requestStop(attempt, "relative execution deadline cannot be safely re-armed", true);
+      return;
+    }
+    const scheduleRelative = (): void => {
+      const nowElapsedMs = Number((monotonicNowNs() - BigInt(startedNs)) / 1_000_000n);
+      const remainingMs = Math.max(0, metadata.maxAttemptDurationMs! - nowElapsedMs);
+      const timer = setTimeout(
+        remainingMs > maximumTimerDelayMs
+          ? scheduleRelative
+          : () => this.requestStop(attempt, "execution deadline expired", true),
+        Math.min(remainingMs, maximumTimerDelayMs),
+      );
+      timer.unref();
+    };
+    // `elapsedMs` establishes that the stored monotonic reading is usable before a timer is armed.
+    void elapsedMs;
+    scheduleRelative();
+  }
+
+  private recordHeartbeatStaleness(attempt: AttemptUri, meta: string): void {
+    if (this.journal(attempt).read().some((event) => event.type === "progress" && event.details["degradation"] === "heartbeat-stale")) return;
+    const heartbeat = readHeartbeat(meta);
+    if (heartbeat === null) return;
+    try {
+      const lastMonotonicMs = Number(BigInt(heartbeat.monotonicMs) / 1_000_000n);
+      const nowMonotonicMs = Number(monotonicNowNs() / 1_000_000n);
+      if (!Number.isSafeInteger(lastMonotonicMs) || !Number.isSafeInteger(nowMonotonicMs)
+        || !heartbeatIsStale({ lastMonotonicMs, nowMonotonicMs, intervalMs: this.config.heartbeatIntervalMs ?? 15_000 })) return;
+      this.journal(attempt).append({
+        attemptId: attempt,
+        type: "progress",
+        time: this.now(),
+        details: { degradation: "heartbeat-stale", source: this.config.source },
+      });
+    } catch {
+      // A malformed executor-owned heartbeat is not an outcome and must not kill the attempt.
+    }
   }
 
   private reconstructRecoveryContext(
@@ -1957,8 +2149,11 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       await this.completeAttempt({ attempt: recovered.identity, taskBytes: recovered.taskBytes, task: recovered.task, paths, provisioner: recovered.provisioner, plan: recovered.plan, execution, capture, capturePosture: posture });
     } else if (reconciliation.classification === "matching") {
       // The real shim remains the custodian; recovery only resumes observation and completion.
+      // The durable monotonic start reading is re-armed only when it belongs to this same boot.
+      const metadata = this.attempts.get(attempt);
+      if (metadata !== undefined) this.armExpiry(attempt, true);
       const posture = this.config.recorderAvailability ?? "none";
-      const worker = this.waitForOutcome(paths.meta, recovered.identity.nonce)
+      const worker = this.waitForOutcome(attempt, paths.meta, recovered.identity.nonce)
         .then(async (execution) => this.completeAttempt({ attempt: recovered.identity, taskBytes: recovered.taskBytes, task: recovered.task, paths, provisioner: recovered.provisioner, plan: recovered.plan, execution, capture: await this.resumeEvidenceCapture(attempt, paths, posture), capturePosture: posture }))
         .catch((error: unknown) => {
           if (!foldAttemptRecord(this.journal(attempt).read()).terminal) {

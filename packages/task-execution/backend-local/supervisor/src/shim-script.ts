@@ -18,7 +18,7 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import {
-  closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync,
+  closeSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -36,6 +36,12 @@ interface ShimSpawnRequest {
   /** Optional stdout/stderr redirect targets under `logs/` (the shim never lets the harness inherit its own stdio — design §7.1: `logs/` is backend-written, outside the executor's write surface). */
   readonly stdoutPath?: string;
   readonly stderrPath?: string;
+}
+
+interface ShimCancellationCommand {
+  readonly nonce: string;
+  readonly graceMs: number;
+  readonly killPollCeilingMs: number;
 }
 
 function atomicWriteFileSync(path: string, data: string): void {
@@ -75,6 +81,36 @@ function openLogFd(path: string | undefined): number | "ignore" {
   if (path === undefined) return "ignore";
   mkdirSync(dirname(path), { recursive: true });
   return openSync(path, "a");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function processGroupPids(pgid: number): number[] {
+  if (!Number.isSafeInteger(pgid) || pgid <= 0) return [];
+  if (process.platform !== "linux") {
+    try {
+      const rows = execFileSync("ps", ["-axo", "pid=,pgid="], { encoding: "utf8" });
+      return rows.split("\n").flatMap((row) => {
+        const [pidText, groupText] = row.trim().split(/\s+/);
+        const pid = Number(pidText);
+        return Number.isSafeInteger(pid) && pid > 0 && Number(groupText) === pgid ? [pid] : [];
+      }).sort((left, right) => left - right);
+    } catch {
+      return [];
+    }
+  }
+  const pids: number[] = [];
+  for (const entry of readdirSync("/proc", { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^\d+$/u.test(entry.name)) continue;
+    try {
+      const stat = readFileSync(`/proc/${entry.name}/stat`, "utf8");
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
+      if (Number(fields[2]) === pgid) pids.push(Number(entry.name));
+    } catch { /* process raced away */ }
+  }
+  return pids.sort((left, right) => left - right);
 }
 
 /** Uses the same native process-table marker as recovery; never mix wall time with kernel ticks. */
@@ -143,10 +179,42 @@ async function main(): Promise<void> {
     stdio: ["ignore", stdout, stderr],
   });
 
+  let cancellationInFlight = false;
+  const relayCancellation = async (): Promise<void> => {
+    if (cancellationInFlight || harness.pid === undefined) return;
+    let command: ShimCancellationCommand;
+    try {
+      command = JSON.parse(readFileSync(join(metaDir, "cancellation-command.json"), "utf8")) as ShimCancellationCommand;
+    } catch {
+      return;
+    }
+    if (command.nonce !== nonce
+      || !Number.isSafeInteger(command.graceMs) || command.graceMs < 0
+      || !Number.isSafeInteger(command.killPollCeilingMs) || command.killPollCeilingMs < 0) return;
+    cancellationInFlight = true;
+    const pgid = harness.pid;
+    try { process.kill(-pgid, "SIGTERM"); } catch { /* an exit race is resolved by outcome.json */ }
+    if (command.graceMs > 0) await sleep(command.graceMs);
+    if (processGroupPids(pgid).length > 0) {
+      try { process.kill(-pgid, "SIGKILL"); } catch { /* an exit race is resolved below */ }
+    }
+    const started = Date.now();
+    while (processGroupPids(pgid).length > 0 && Date.now() - started < command.killPollCeilingMs) {
+      await sleep(Math.min(25, command.killPollCeilingMs));
+    }
+    atomicWriteFileSync(join(metaDir, "cancellation-result.json"), JSON.stringify({
+      nonce,
+      residualPids: processGroupPids(pgid),
+    }));
+  };
+  // SIGUSR1 is a dedicated control signal, never forwarded to the harness. The durable command
+  // binds it to this shim nonce and makes a duplicated signal harmless.
+  process.on("SIGUSR1", () => { void relayCancellation(); });
+
   // Supplementary metadata (not part of the required 3-field fingerprint): the harness's own pid
-  // IS its own pgid (detached: true makes it a session/group leader), so cancellation code can
-  // target it directly without re-deriving it. Written as a second atomic update, immediately
-  // after spawn — the fingerprint proper was already durable before this point.
+  // IS its own pgid (detached: true makes it a session/group leader). Publish it only after the
+  // control handler exists, so a supervisor that sees this ready fingerprint can never signal a
+  // shim before it is able to relay the nonce-bound command.
   atomicWriteFileSync(shimJsonPath, JSON.stringify({ pid: process.pid, startTime, nonce, harnessPid: harness.pid }));
 
   // Step 5: heartbeat loop — a monotonic timestamp touched periodically (default 15s, §6.6).

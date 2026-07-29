@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export interface CancellationAttempt { readonly terminalState?: string }
+export interface CancellationAttempt {
+  readonly terminalState?: string;
+  /** A durable cancel-requested event already exists; repeated calls must have no signal effects. */
+  readonly cancellationRequested?: boolean;
+}
 export interface CancellationDriver {
   signalTerm(): void | Promise<void>;
   signalKill(): void | Promise<void>;
@@ -18,6 +22,7 @@ export interface CancellationResult {
 /** Signals only the harness subtree through its shim-facing driver; cancellation never authors an outcome. */
 export async function runCancellationLadder(attempt: CancellationAttempt, driver: CancellationDriver, options: CancellationOptions = {}): Promise<CancellationResult> {
   if (attempt.terminalState !== undefined) return { requested: false, terminalState: attempt.terminalState };
+  if (attempt.cancellationRequested) return { requested: false, terminalState: "cancelling" };
   const graceMs = options.graceMs ?? 10_000;
   const ceilingMs = options.killPollCeilingMs ?? 30_000;
   const now = options.nowMs ?? Date.now;
@@ -33,7 +38,10 @@ export async function runCancellationLadder(attempt: CancellationAttempt, driver
   }
   const outcome = await driver.readOutcome();
   await driver.harvest();
+  // A recorded normal exit is authoritative; a signal delivered by this ladder is not a
+  // natural failure and therefore resolves to cancelled after harvest.
   if (outcome?.exitCode === 0 && outcome.termSignal === null) return { requested: true, terminalState: "delivered", outcome };
+  if (outcome?.termSignal === "SIGTERM" || outcome?.termSignal === "SIGKILL") return { requested: true, terminalState: "cancelled", outcome };
   if (outcome !== null) return { requested: true, terminalState: "failed", outcome };
   return { requested: true, terminalState: "cancelled" };
 }

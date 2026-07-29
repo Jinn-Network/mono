@@ -36,6 +36,52 @@ function outcomeJsonPath(metaDir: string): string {
 function heartbeatPath(metaDir: string): string {
   return join(metaDir, "heartbeat");
 }
+function cancellationCommandPath(metaDir: string): string {
+  return join(metaDir, "cancellation-command.json");
+}
+function cancellationResultPath(metaDir: string): string {
+  return join(metaDir, "cancellation-result.json");
+}
+
+/** Durable, nonce-bound request for the shim to own the harness-subtree termination ladder. */
+export interface ShimCancellationCommand {
+  readonly nonce: string;
+  readonly graceMs: number;
+  readonly killPollCeilingMs: number;
+}
+
+export interface ShimCancellationResult {
+  readonly nonce: string;
+  readonly residualPids: readonly number[];
+}
+
+export function writeShimCancellationCommand(metaDir: string, command: ShimCancellationCommand): void {
+  atomicWriteFileSync(cancellationCommandPath(metaDir), JSON.stringify(command));
+}
+
+export function readShimCancellationResult(metaDir: string, expectedNonce: string): ShimCancellationResult | null {
+  const raw = readAtomicFileSync(cancellationResultPath(metaDir));
+  if (raw === undefined) return null;
+  const value = JSON.parse(raw) as ShimCancellationResult;
+  return value.nonce === expectedNonce ? value : null;
+}
+
+/**
+ * Signals only a fingerprint-verified shim after its command is durable. The shim, never the
+ * assembly, owns TERM → grace → KILL for the harness process group.
+ */
+export function requestShimCancellation(metaDir: string, expected: ShimFingerprint): boolean {
+  const current = probeShimAlive(metaDir);
+  if (current.fingerprint === null || !current.alive
+    || current.fingerprint.nonce !== expected.nonce
+    || !fingerprintAlive(expected, current.fingerprint)) return false;
+  try {
+    process.kill(expected.pid, "SIGUSR1");
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Atomically writes the shim's fingerprint to `meta/shim.json` (design §6.1 step 3). */
 export function writeShimFingerprint(metaDir: string, fingerprint: ShimFingerprint): void {

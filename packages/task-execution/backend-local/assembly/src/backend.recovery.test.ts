@@ -116,7 +116,10 @@ function paths(root: string, attempt: string): WorkspacePaths {
 }
 
 let sequence = 0;
-function documents(): { readonly task: Uint8Array; readonly submission: Uint8Array } {
+function documents(
+  deadline = "2099-01-01T00:00:00Z",
+  maxAttemptDurationMs?: number,
+): { readonly task: Uint8Array; readonly submission: Uint8Array } {
   sequence += 1;
   const task = sealTask({
     protocol: "https://jinn.network/profiles/task-execution/1.0",
@@ -126,6 +129,7 @@ function documents(): { readonly task: Uint8Array; readonly submission: Uint8Arr
     },
     instructions: "Exercise restart recovery.",
     outputs: [{ name: "patch", mediaType: "text/x-diff", required: false }],
+    ...(maxAttemptDurationMs === undefined ? {} : { requirements: { maxAttemptDurationMs } }),
   });
   return {
     task,
@@ -136,7 +140,7 @@ function documents(): { readonly task: Uint8Array; readonly submission: Uint8Arr
       requester: "urn:uuid:42000000-0000-4000-8000-000000000001",
       idempotencyKey: `recovery-${sequence}`,
       nonce: `recovery-nonce-${sequence}`,
-      deadline: "2099-01-01T00:00:00Z",
+      deadline,
     }),
   };
 }
@@ -154,6 +158,7 @@ interface BackendFixtureOptions {
   readonly harvest?: HarvestResult;
   readonly plan?: (view: TaskView, workspace: WorkspacePaths) => LaunchPlan;
   readonly recorderAvailability?: "none" | "available" | "always";
+  readonly heartbeatIntervalMs?: number;
   readonly evidenceRepository?: InMemoryEvidenceRepository;
 }
 
@@ -221,6 +226,7 @@ function fixture(root: string, options: BackendFixtureOptions = {}): LocalTaskEx
       isolation: ["process"],
     },
     recorderAvailability: options.recorderAvailability ?? "none",
+    ...(options.heartbeatIntervalMs === undefined ? {} : { heartbeatIntervalMs: options.heartbeatIntervalMs }),
     ...(repository === undefined
       ? {}
       : {
@@ -248,8 +254,10 @@ function fixture(root: string, options: BackendFixtureOptions = {}): LocalTaskEx
 
 async function submit(
   backend: LocalTaskExecutionBackend,
+  deadline?: string,
+  maxAttemptDurationMs?: number,
 ): Promise<{ readonly attempt: `urn:uuid:${string}`; readonly task: Uint8Array; readonly submission: Uint8Array }> {
-  const { task, submission } = documents();
+  const { task, submission } = documents(deadline, maxAttemptDurationMs);
   const acknowledgement = await backend.submit(task, submission);
   if (!acknowledgement.accepted) throw acknowledgement.error;
   return {
@@ -721,5 +729,90 @@ describe("restart reconstruction and §6.4 actions", () => {
       category: "invalid-document",
     });
     pause.release();
+  });
+
+  test("cancellation records once, signals the real shim subtree, then harvests and terminalizes cancelled", async () => {
+    const root = await stateRoot("cancel-completion");
+    const harvestCalls = { value: 0 };
+    const backend = fixture(root, { processDelayMs: 30_000, harvestCalls });
+    const { attempt } = await submit(backend);
+    await waitFor(
+      () => readShimFingerprint(paths(root, attempt).meta)?.harnessPid !== undefined,
+      "shim did not publish harness pid before cancellation",
+    );
+
+    expect(await backend.cancel(attempt, "operator stop")).toEqual({ requested: true });
+    expect(await backend.cancel(attempt, "duplicate stop")).toEqual({ requested: true });
+    await backend.drain();
+
+    expect(await terminalState(backend, attempt)).toBe("cancelled");
+    expect(harvestCalls.value).toBe(1);
+    const events = await journalEvents(root, attempt);
+    expect(events.filter(({ type }) => type === "cancel-requested")).toHaveLength(1);
+    expect(events.filter(({ type }) => type === "attempt-terminal").map(({ details }) => details["state"])).toEqual(["cancelled"]);
+  });
+
+  test("an execution deadline uses the same shim ladder, harvests, and terminalizes expired", async () => {
+    const root = await stateRoot("deadline-completion");
+    const harvestCalls = { value: 0 };
+    const backend = fixture(root, { processDelayMs: 30_000, harvestCalls });
+    const { attempt } = await submit(backend, new Date(Date.now() + 250).toISOString());
+    await backend.drain();
+
+    expect(await terminalState(backend, attempt)).toBe("expired");
+    expect(harvestCalls.value).toBe(1);
+    const events = await journalEvents(root, attempt);
+    expect(events.filter(({ type }) => type === "cancel-requested").map(({ details }) => details["reason"])).toEqual(["execution deadline expired"]);
+    expect(events.filter(({ type }) => type === "attempt-terminal").map(({ details }) => details["state"])).toEqual(["expired"]);
+  });
+
+  test("a positive effective relative duration is armed only after execution starts and terminalizes expired", async () => {
+    const root = await stateRoot("relative-deadline");
+    const backend = fixture(root, { processDelayMs: 30_000 });
+    const { attempt } = await submit(backend, undefined, 100);
+
+    expect(await terminalState(backend, attempt)).toBe("expired");
+    const metadata = JSON.parse(await readFile(join(paths(root, attempt).meta, "attempt.json"), "utf8")) as Record<string, unknown>;
+    expect(metadata).toMatchObject({ maxAttemptDurationMs: 100, execStartedAtMonotonicNs: expect.any(String), monotonicClockIdentity: expect.any(String) });
+  });
+
+  test("rejects a non-positive relative execution allowance before creating an attempt", async () => {
+    const root = await stateRoot("invalid-relative-deadline");
+    const backend = fixture(root);
+    const { task, submission } = documents(undefined, 0);
+
+    const acknowledgement = await backend.submit(task, submission);
+    expect(acknowledgement.accepted).toBe(false);
+    if (acknowledgement.accepted) throw new Error("expected invalid relative duration to be rejected");
+    expect(acknowledgement.error.category).toBe("invalid-document");
+  });
+
+  test("a reset monotonic identity on recovery fails closed through the shim deadline path", async () => {
+    const root = await stateRoot("relative-deadline-reset");
+    const first = fixture(root, { processDelayMs: 30_000 });
+    const { attempt } = await submit(first, undefined, 30_000);
+    await waitFor(() => readShimFingerprint(paths(root, attempt).meta) !== null, "shim did not start");
+    const metadataPath = join(paths(root, attempt).meta, "attempt.json");
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+    await writeFile(metadataPath, JSON.stringify({ ...metadata, monotonicClockIdentity: "reset-boot" }));
+    first.close();
+
+    const recovered = fixture(root, { processDelayMs: 30_000 });
+    expect(await recovered.recover(attempt)).toEqual({ classification: "matching" });
+    expect(await terminalState(recovered, attempt)).toBe("expired");
+    const events = await journalEvents(root, attempt);
+    expect(events.filter(({ type, details }) => type === "progress" && details["degradation"] === "relative-deadline-monotonic-unavailable")).toHaveLength(1);
+  });
+
+  test("a stale shim heartbeat records one degradation while waiting without killing the attempt", async () => {
+    const root = await stateRoot("heartbeat-stale");
+    const backend = fixture(root, { processDelayMs: 150, heartbeatIntervalMs: 10_000 });
+    const { attempt } = await submit(backend);
+    await waitFor(() => readShimFingerprint(paths(root, attempt).meta) !== null, "shim did not start");
+    await writeFile(join(paths(root, attempt).meta, "heartbeat"), JSON.stringify({ monotonicMs: "0", wallClock: "1970-01-01T00:00:00.000Z" }));
+
+    expect(await terminalState(backend, attempt)).toBe("delivered");
+    const events = await journalEvents(root, attempt);
+    expect(events.filter(({ type, details }) => type === "progress" && details["degradation"] === "heartbeat-stale")).toHaveLength(1);
   });
 });
