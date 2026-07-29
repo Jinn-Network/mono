@@ -9,6 +9,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -815,6 +816,9 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         });
       }
     } catch (error) {
+      // Terminal planning/materialization failures must never retain a secret forward.
+      rmSync(this.paths(attempt).secrets, { recursive: true, force: true });
+      rmSync(this.paths(attempt).tmp, { recursive: true, force: true });
       this.journal(attempt).append({
         attemptId: attempt,
         type: "attempt-terminal",
