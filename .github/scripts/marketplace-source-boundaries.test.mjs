@@ -270,14 +270,14 @@ test('no marketplace package imports the backend-local component internals (ruli
   assertBoundary(join(packages, 'pipeline', 'src'), BACKEND_LOCAL_INTERNALS);
 });
 
-test('marketplace exports stay root-only except for the M2.5 testing conformance subpath', () => {
+test('marketplace exports stay root-only except for the native testing conformance subpaths', () => {
   for (const [directory, name, entries] of [
     ['binding', '@jinn-network/marketplace-binding', ['.']],
     ['projector', '@jinn-network/marketplace-projector', ['.']],
     ['pipeline', '@jinn-network/marketplace-pipeline', ['.']],
     // The native §16.2 suite is intentionally a public testing subpath; it does not turn the
     // profile checks into a parameter of the unmodified TEP core kit (ruling §7.19).
-    ['testing', '@jinn-network/marketplace-testing', ['.', './backend-conformance']],
+    ['testing', '@jinn-network/marketplace-testing', ['.', './backend-conformance', './projector-conformance']],
   ]) {
     const manifest = JSON.parse(readFileSync(join(packages, directory, 'package.json'), 'utf8'));
     assert.deepEqual(Object.keys(manifest.exports ?? {}), entries,

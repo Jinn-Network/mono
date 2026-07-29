@@ -23,10 +23,15 @@
     "./backend-conformance": {
       "import": "./dist/backend-conformance.js",
       "types": "./dist/backend-conformance.d.ts"
+    },
+    "./projector-conformance": {
+      "import": "./dist/projector-conformance.js",
+      "types": "./dist/projector-conformance.d.ts"
     }
   },
   "files": [
     "dist/",
+    "fixtures/",
     "README.md"
   ],
   "publishConfig": {

@@ -12,9 +12,9 @@ See the design: `docs/superpowers/specs/2026-07-28-marketplace-binding-design.md
 Implementation plan: `docs/superpowers/plans/2026-07-28-marketplace-binding.md` (Milestones
 M2.5, M3.5, M4.5, M5.3, M7.2 register this kit's suites).
 
-## Status
+## Suites
 
-Scaffold only (plan Milestone M0). Once the components it exercises land, this package will run:
+The package currently runs:
 
 - the TEP core kit's `describeTaskExecutionBackendContract` **un-parameterized**, as a sanity
   suite (ruling §7.19) — the core kit stays profile-agnostic;
@@ -25,8 +25,10 @@ Scaffold only (plan Milestone M0). Once the components it exercises land, this p
   `@jinn-network/record-discovery-testing`'s `reorged` + `derivation-consistency` conformance
   vectors as building blocks (neither kit exports a profile-parameterized or
   projector-determinism describe-function to re-expose, per Finding F6);
-- the anvil-fork escrow-lifecycle fixtures (both contract generations) and the Attempt-URI
-  two-party agreement checks (requester/operator/third-party independent computation).
+- the today-generation anvil-fork escrow-lifecycle fixtures and the Attempt-URI two-party
+  agreement checks (requester/operator/third-party independent computation).
+
+The evaluation-leg and revised-contract suites remain later milestones in the same plan.
 
 Consumed by component packages as a **devDependency only, never a production dependency** — but
 note this kit does not itself appear in `binding`/`projector`/`pipeline`'s `package.json`

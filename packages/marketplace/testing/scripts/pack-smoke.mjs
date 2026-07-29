@@ -54,7 +54,15 @@ function output(command, args, options = {}) {
 }
 
 function assertArchiveShape(entries) {
-  for (const required of ["package/README.md", "package/dist/index.d.ts", "package/dist/index.js"]) {
+  for (const required of [
+    "package/README.md",
+    "package/dist/index.d.ts",
+    "package/dist/index.js",
+    "package/dist/projector-conformance.d.ts",
+    "package/dist/projector-conformance.js",
+    "package/fixtures/projector/golden-events/revised-task-created.json",
+    "package/fixtures/projector/reorg-scenarios/revised-task-created-reorg.json",
+  ]) {
     if (!entries.includes(required)) {
       throw new Error(`marketplace-testing archive is missing ${required}`);
     }
@@ -101,7 +109,7 @@ try {
 
   await writeFile(
     join(consumer, "packed-types.ts"),
-    `import "@jinn-network/marketplace-testing";\nimport "@jinn-network/marketplace-testing/backend-conformance";\n`,
+    `import "@jinn-network/marketplace-testing";\nimport "@jinn-network/marketplace-testing/backend-conformance";\nimport "@jinn-network/marketplace-testing/projector-conformance";\n`,
   );
   await writeFile(
     join(consumer, "tsconfig.json"),
@@ -129,6 +137,7 @@ try {
 import { readFile, readdir } from "node:fs/promises";
 import "@jinn-network/marketplace-testing";
 import "@jinn-network/marketplace-testing/backend-conformance";
+import "@jinn-network/marketplace-testing/projector-conformance";
 
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
