@@ -14,6 +14,7 @@ import {
 } from "./shim.js";
 
 const dirs: string[] = [];
+const residualPids: number[] = [];
 const linux = process.platform === "linux";
 const waitFor = async <T>(fn: () => T | undefined, label: string): Promise<T> => {
   for (let index = 0; index < 300; index += 1) {
@@ -24,7 +25,10 @@ const waitFor = async <T>(fn: () => T | undefined, label: string): Promise<T> =>
   throw new Error(`timed out: ${label}`);
 };
 
-afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => {
+  for (const pid of residualPids.splice(0)) { try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ } }
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 describe.runIf(linux)("Linux native custody shim", () => {
   it("fails closed when the native custody probe cannot establish mandatory subreaper support", () => {
@@ -59,6 +63,9 @@ describe.runIf(linux)("Linux native custody shim", () => {
     expect(requestShimCancellation(meta, fingerprint)).toBe(true);
     const outcome = await waitFor(() => readOutcome(meta, "nonce-linux") ?? undefined, "native outcome");
     expect(outcome.termSignal).toBeNull();
+    expect(Number.isFinite(Date.parse(outcome.startedAt))).toBe(true);
+    expect(Number.isFinite(Date.parse(outcome.finishedAt))).toBe(true);
+    expect(Date.parse(outcome.finishedAt)).toBeGreaterThanOrEqual(Date.parse(outcome.startedAt));
     const custody = JSON.parse(readFileSync(join(meta, "custody.json"), "utf8")) as Record<string, unknown>;
     expect(custody["subreaper"]).toBe(true);
     let cgroupWritable = true;
@@ -85,4 +92,38 @@ describe.runIf(linux)("Linux native custody shim", () => {
     expect(outcome.exitCode).toBe(0);
     expect(outcome.termSignal).toBeNull();
   });
+
+  it("persists actual live residual pids when the bounded group cleanup expires", async () => {
+    const root = mkdtempSync(join(tmpdir(), "jinn-linux-native-residual-"));
+    dirs.push(root);
+    const meta = join(root, "meta"); const secrets = join(root, "secrets");
+    mkdirSync(meta, { recursive: true }); mkdirSync(secrets, { recursive: true });
+    const childPid = join(root, "stubborn.pid");
+    const leaderProgram = `const kid=require('node:child_process').spawn('/bin/sh',['-c',${JSON.stringify("trap '' TERM; while :; do sleep 1; done")}],{stdio:'ignore'});require('node:fs').writeFileSync(${JSON.stringify(childPid)},String(kid.pid));setInterval(()=>{},1000)`;
+    const prior = process.env["JINN_NATIVE_CUSTODY_TEST_SKIP_KILL"];
+    process.env["JINN_NATIVE_CUSTODY_TEST_SKIP_KILL"] = "1";
+    try {
+      spawnShim({ attemptId: "attempt-residual", nonce: "nonce-residual", metaDir: meta, secretsDir: secrets }, {
+        argv: [process.execPath, "-e", leaderProgram], env: {}, cwd: root,
+      });
+      const fingerprint = await waitFor(() => readShimFingerprint(meta) ?? undefined, "ready fingerprint");
+      await waitFor(() => { try { return Number(readFileSync(childPid, "utf8")); } catch { return undefined; } }, "stubborn descendant");
+      writeShimCancellationCommand(meta, { nonce: "nonce-residual", graceMs: 0, killPollCeilingMs: 30 });
+      expect(requestShimCancellation(meta, fingerprint)).toBe(true);
+      const result = await waitFor(() => {
+        try { return JSON.parse(readFileSync(join(meta, "cancellation-result.json"), "utf8")) as { residualPids: number[] }; } catch { return undefined; }
+      }, "residual result");
+      expect(result.residualPids.length).toBeGreaterThan(0);
+      expect([...result.residualPids].sort((left, right) => left - right)).toEqual(result.residualPids);
+      for (const pid of result.residualPids) { process.kill(pid, 0); residualPids.push(pid); }
+      const custody = await waitFor(() => {
+        try { return JSON.parse(readFileSync(join(meta, "custody.json"), "utf8")) as Record<string, unknown>; } catch { return undefined; }
+      }, "residual custody outcome");
+      expect(custody["leaderReapedAfterGroupEmpty"]).toBe(false);
+      expect(custody["groupEmpty"]).toBe(false);
+    } finally {
+      if (prior === undefined) delete process.env["JINN_NATIVE_CUSTODY_TEST_SKIP_KILL"];
+      else process.env["JINN_NATIVE_CUSTODY_TEST_SKIP_KILL"] = prior;
+    }
+  }, 10_000);
 });
