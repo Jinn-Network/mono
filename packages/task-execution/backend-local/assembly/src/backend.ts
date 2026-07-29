@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  constants,
   closeSync,
   existsSync,
   fsyncSync,
@@ -1145,7 +1146,14 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     const out = realpathSync(paths.out);
     const resolved = realpathSync(path);
     if (!resolved.startsWith(`${out}/`)) throw new Error("launcher result envelope escaped out/");
-    const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(resolved)));
+    const fd = openSync(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
+    let bytes: Buffer;
+    try {
+      bytes = readFileSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       throw new Error("launcher result envelope must be a JSON object");
     }
