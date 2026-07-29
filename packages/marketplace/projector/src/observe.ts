@@ -161,8 +161,10 @@ interface RequestIdBinding {
   readonly deliveryDigest?: Hex;
   readonly verdictCode?: number;
   readonly nonce?: bigint;
-  readonly preparation?: ReceiptPosition;
+  readonly   preparation?: ReceiptPosition;
   status?: "claimed" | "prepared" | "delivered" | "forfeited";
+  /** Prevents duplicate attempt-terminal emissions across coordinator/reservation forfeit. */
+  forfeitTerminalEmitted?: true;
 }
 
 interface AttemptEngagement {
@@ -217,7 +219,8 @@ export interface MarketplaceProjectionRefusal {
     | "deliver-request-data-mismatch"
     | "receipt-continuity-mismatch"
     | "reservation-not-prepared"
-    | "reservation-not-delivered";
+    | "reservation-not-delivered"
+    | "engagement-forfeited";
   readonly derivation: MarketplaceEvent["derivation"];
   readonly taskId: bigint;
   readonly attemptIndex?: number;
@@ -478,6 +481,55 @@ function evaluationEngagementKey(
 
 function sameAddress(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
+}
+
+type ContractGeneration = "today" | "revised";
+
+function taskContractGeneration(
+  task: MarketplaceTaskProjection | undefined,
+): ContractGeneration | undefined {
+  if (task === undefined || task.admission === "rejected") return undefined;
+  const generation = task.submissionTerms?.contractGeneration;
+  return generation === "revised" || generation === "today"
+    ? generation
+    : undefined;
+}
+
+function bindingContractGeneration(binding: RequestIdBinding): ContractGeneration {
+  return binding.role === "task-attempt" || binding.role === "evaluation-attempt"
+    ? "today"
+    : "revised";
+}
+
+function isDeliverableAttemptEngagement(
+  engagement: AttemptEngagement | undefined,
+): engagement is AttemptEngagement {
+  return engagement !== undefined
+    && (engagement.status === "live" || engagement.status === "prepared");
+}
+
+function isDeliverableEvaluationEngagement(
+  engagement: EvaluationEngagement | undefined,
+): engagement is EvaluationEngagement {
+  return engagement !== undefined
+    && (engagement.status === "live" || engagement.status === "prepared");
+}
+
+function forfeitPreparedOrDeliveredBindings(
+  state: MarketplaceProjectionState,
+  chainId: number,
+  predicate: (binding: RequestIdBinding) => boolean,
+): boolean {
+  let hadDeliveredBinding = false;
+  for (const [key, binding] of Object.entries(state.requestIdBindings)) {
+    if (!key.startsWith(`${chainId}:`) || !predicate(binding)) continue;
+    if (binding.status === "delivered") hadDeliveredBinding = true;
+    if (binding.status === "prepared" || binding.status === "delivered") {
+      binding.status = "forfeited";
+      delete state.pendingMechDeliveries[key];
+    }
+  }
+  return hadDeliveredBinding;
 }
 
 function evaluationVerdictIdentityRefused(
@@ -965,6 +1017,20 @@ export function reduceMarketplaceProjection(
 
       case "Deliver": {
         const pendingKey = pendingDeliveryKey(event, event.facts.requestId);
+        const bindingKey = requestIdBindingKey(
+          event.derivation.chainId,
+          event.facts.requestId,
+        );
+        const existingBinding = state.requestIdBindings[bindingKey];
+        if (existingBinding?.status === "forfeited") {
+          refuse(
+            event,
+            "engagement-forfeited",
+            existingBinding.taskId,
+            existingBinding.attemptIndex,
+          );
+          break;
+        }
         if ("requestData" in event.facts) {
           let decoded;
           try {
@@ -973,9 +1039,7 @@ export function reduceMarketplaceProjection(
             refuse(event, "deliver-request-data-invalid", 0n);
             break;
           }
-          const binding = state.requestIdBindings[
-            requestIdBindingKey(event.derivation.chainId, event.facts.requestId)
-          ];
+          const binding = state.requestIdBindings[bindingKey];
           const deliveryReceipt = receiptPosition(event.derivation);
           const kind = decoded.legKind === REVISED_LEG_SOLUTION
             ? "solution"
@@ -1000,6 +1064,32 @@ export function reduceMarketplaceProjection(
             refuse(
               event,
               "deliver-request-data-mismatch",
+              decoded.taskId,
+              decoded.attemptIndex,
+            );
+            break;
+          }
+          const attempt = attemptFor(event, decoded.taskId, decoded.attemptIndex);
+          const engagement = kind === "solution"
+            ? state.attemptEngagements[attempt]
+            : undefined;
+          const evaluation = kind === "verdict"
+            ? state.evaluationEngagements[evaluationEngagementKey(
+              event,
+              decoded.taskId,
+              decoded.attemptIndex,
+              decoded.verdictIndex,
+            )]
+            : undefined;
+          if (
+            (kind === "solution" && !isDeliverableAttemptEngagement(engagement))
+            || (kind === "verdict" && !isDeliverableEvaluationEngagement(evaluation))
+          ) {
+            refuse(
+              event,
+              engagement?.status === "forfeited" || evaluation?.status === "forfeited"
+                ? "engagement-forfeited"
+                : "attempt-not-live",
               decoded.taskId,
               decoded.attemptIndex,
             );
@@ -1031,6 +1121,18 @@ export function reduceMarketplaceProjection(
           };
           break;
         }
+        if (
+          existingBinding !== undefined
+          && bindingContractGeneration(existingBinding) === "revised"
+        ) {
+          refuse(
+            event,
+            "deliver-request-data-invalid",
+            existingBinding.taskId,
+            existingBinding.attemptIndex,
+          );
+          break;
+        }
         state.pendingMechDeliveries[pendingKey] = {
           data: event.facts.data,
           ...(event.projection.deliveryCorrespondence === undefined
@@ -1049,8 +1151,33 @@ export function reduceMarketplaceProjection(
           refuse(event, "task-not-admissible", event.facts.taskId, event.facts.attemptIndex);
           break;
         }
+        const attempt = attemptFor(event, event.facts.taskId, event.facts.attemptIndex);
+        const engagement = state.attemptEngagements[attempt];
+        const authoritativeGeneration = taskContractGeneration(task)
+          ?? engagement?.generation;
         if (
-          event.derivation.contractGeneration === "revised"
+          authoritativeGeneration === "revised"
+          && !("deliveryDigest" in event.facts)
+        ) {
+          refuse(
+            event,
+            "reservation-not-delivered",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (engagement?.status === "forfeited") {
+          refuse(
+            event,
+            "engagement-forfeited",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (
+          authoritativeGeneration === "revised"
           && !admissibleTask(task)
         ) {
           refuse(
@@ -1061,12 +1188,20 @@ export function reduceMarketplaceProjection(
           );
           break;
         }
-        const attempt = attemptFor(event, event.facts.taskId, event.facts.attemptIndex);
         const pendingKey = pendingDeliveryKey(event, event.facts.requestId);
         const mechDelivery = state.pendingMechDeliveries[pendingKey];
         const binding = state.requestIdBindings[
           requestIdBindingKey(event.derivation.chainId, event.facts.requestId)
         ];
+        if (binding?.status === "forfeited") {
+          refuse(
+            event,
+            "engagement-forfeited",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
         if (
           "deliveryDigest" in event.facts
           && (
@@ -1176,12 +1311,52 @@ export function reduceMarketplaceProjection(
           refuse(event, "task-not-admissible", event.facts.taskId, event.facts.attemptIndex);
           break;
         }
-        if (event.derivation.contractGeneration === "revised") {
+        const evaluation = state.evaluationEngagements[
+          evaluationEngagementKey(
+            event,
+            event.facts.taskId,
+            event.facts.attemptIndex,
+            event.facts.verdictIndex,
+          )
+        ];
+        const authoritativeGeneration = taskContractGeneration(task)
+          ?? evaluation?.generation;
+        if (
+          authoritativeGeneration === "revised"
+          && !("evaluationDeliveryDigest" in event.facts)
+        ) {
+          refuse(
+            event,
+            "reservation-not-delivered",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (evaluation?.status === "forfeited") {
+          refuse(
+            event,
+            "engagement-forfeited",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (authoritativeGeneration === "revised") {
           const pendingKey = pendingDeliveryKey(event, event.facts.requestId);
           const mechDelivery = state.pendingMechDeliveries[pendingKey];
           const binding = state.requestIdBindings[
             requestIdBindingKey(event.derivation.chainId, event.facts.requestId)
           ];
+          if (binding?.status === "forfeited") {
+            refuse(
+              event,
+              "engagement-forfeited",
+              event.facts.taskId,
+              event.facts.attemptIndex,
+            );
+            break;
+          }
           if (
             !("evaluationDeliveryDigest" in event.facts)
             || mechDelivery?.requestData === undefined
@@ -1218,14 +1393,6 @@ export function reduceMarketplaceProjection(
           }
           delete state.pendingMechDeliveries[pendingKey];
           binding.status = "claimed";
-          const evaluation = state.evaluationEngagements[
-            evaluationEngagementKey(
-              event,
-              event.facts.taskId,
-              event.facts.attemptIndex,
-              event.facts.verdictIndex,
-            )
-          ];
           if (evaluation !== undefined) evaluation.status = "delivered";
         }
         if (admissibleTask(task)) {
@@ -1347,9 +1514,38 @@ export function reduceMarketplaceProjection(
           );
           break;
         }
+        const hadDeliveredBinding = forfeitPreparedOrDeliveredBindings(
+          state,
+          event.derivation.chainId,
+          (binding) =>
+            binding.taskId === event.facts.taskId
+            && binding.attemptIndex === event.facts.attemptIndex
+            && binding.kind === "solution",
+        );
         delete task.liveAttemptIndices[String(event.facts.attemptIndex)];
         task.availability = updateAvailability(task);
         engagement.status = "forfeited";
+        if (!hadDeliveredBinding) {
+          for (const binding of Object.values(state.requestIdBindings)) {
+            if (
+              binding.taskId === event.facts.taskId
+              && binding.attemptIndex === event.facts.attemptIndex
+              && binding.kind === "solution"
+            ) {
+              binding.forfeitTerminalEmitted = true;
+            }
+          }
+          emit(
+            event,
+            "network.jinn.task-execution.attempt-terminal.v1",
+            attempt,
+            {
+              state: "failed",
+              category: "result-unavailable",
+              detail: "delivery reservation forfeited",
+            },
+          );
+        }
         break;
       }
 
@@ -1378,6 +1574,15 @@ export function reduceMarketplaceProjection(
           );
           break;
         }
+        forfeitPreparedOrDeliveredBindings(
+          state,
+          event.derivation.chainId,
+          (binding) =>
+            binding.taskId === event.facts.taskId
+            && binding.attemptIndex === event.facts.attemptIndex
+            && binding.verdictIndex === event.facts.verdictIndex
+            && binding.kind === "verdict",
+        );
         engagement.status = "forfeited";
         break;
       }
@@ -1395,12 +1600,73 @@ export function reduceMarketplaceProjection(
             : undefined;
         if (
           binding === undefined
-          || binding.status !== "delivered"
           || binding.kind !== expectedKind
           || binding.taskId !== event.facts.taskId
           || binding.attemptIndex !== event.facts.attemptIndex
           || (binding.verdictIndex ?? 0) !== event.facts.verdictIndex
           || binding.deliveryRate !== event.facts.rate
+        ) {
+          refuse(
+            event,
+            "reservation-not-delivered",
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          break;
+        }
+        if (binding.status === "forfeited") {
+          if (binding.forfeitTerminalEmitted === true) {
+            break;
+          }
+          if (expectedKind !== "solution") {
+            const evaluation = state.evaluationEngagements[
+              evaluationEngagementKey(
+                event,
+                event.facts.taskId,
+                event.facts.attemptIndex,
+                event.facts.verdictIndex,
+              )
+            ];
+            if (evaluation !== undefined) evaluation.status = "forfeited";
+            binding.forfeitTerminalEmitted = true;
+            break;
+          }
+          const task = state.tasks[taskKey(event, event.facts.taskId)];
+          if (!admissibleTask(task)) {
+            refuse(
+              event,
+              task?.admission === "rejected"
+                ? "task-not-admissible"
+                : "unknown-task",
+              event.facts.taskId,
+              event.facts.attemptIndex,
+            );
+            break;
+          }
+          const attempt = attemptFor(
+            event,
+            event.facts.taskId,
+            event.facts.attemptIndex,
+          );
+          delete task.liveAttemptIndices[String(event.facts.attemptIndex)];
+          task.availability = updateAvailability(task);
+          const engagement = state.attemptEngagements[attempt];
+          if (engagement !== undefined) engagement.status = "forfeited";
+          binding.forfeitTerminalEmitted = true;
+          emit(
+            event,
+            "network.jinn.task-execution.attempt-terminal.v1",
+            attempt,
+            {
+              state: "failed",
+              category: "result-unavailable",
+              detail: "delivery reservation forfeited",
+            },
+          );
+          break;
+        }
+        if (
+          binding.status !== "delivered"
           || state.pendingMechDeliveries[
             pendingDeliveryKey(event, event.facts.requestId)
           ] === undefined
@@ -1439,6 +1705,7 @@ export function reduceMarketplaceProjection(
           task.availability = updateAvailability(task);
           const engagement = state.attemptEngagements[attempt];
           if (engagement !== undefined) engagement.status = "forfeited";
+          binding.forfeitTerminalEmitted = true;
           emit(
             event,
             "network.jinn.task-execution.attempt-terminal.v1",
@@ -1459,6 +1726,7 @@ export function reduceMarketplaceProjection(
             )
           ];
           if (evaluation !== undefined) evaluation.status = "forfeited";
+          binding.forfeitTerminalEmitted = true;
         }
         break;
       }
