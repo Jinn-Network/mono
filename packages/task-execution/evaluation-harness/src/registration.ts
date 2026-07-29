@@ -46,12 +46,23 @@ function nonEmpty(value: string, field: string): void {
   }
 }
 
+/** A grant key is an exact logical handle, never a path selected by a Task. */
+function signerHandle(value: string): void {
+  nonEmpty(value, "signer.handle");
+  if (
+    value === "." || value === ".." || value.includes("/")
+    || value.includes("\\") || /[\u0000-\u001f\u007f]/u.test(value)
+  ) {
+    throw new TypeError("signer.handle must be one portable logical handle");
+  }
+}
+
 export function defineEvaluatorRegistration(
   registration: EvaluatorRegistration,
 ): EvaluatorRegistration {
   nonEmpty(registration.registrationId, "registrationId");
   nonEmpty(registration.evaluatorIdentity.id, "evaluatorIdentity.id");
-  nonEmpty(registration.signer.handle, "signer.handle");
+  signerHandle(registration.signer.handle);
   if (!INTERRUPTION_BEHAVIORS.includes(registration.interruptionBehavior)) {
     throw new TypeError("interruptionBehavior is invalid");
   }

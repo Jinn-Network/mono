@@ -209,7 +209,7 @@ function documents(): Documents {
     nonce: crypto.randomUUID(),
     deadline: "2099-01-01T00:00:00.000Z",
     capabilityGrants: {
-      "evaluator-agent-key": {
+      "evaluator-agent-key.pem": {
         reference: "test:evaluator-agent-key",
       },
     },
@@ -276,11 +276,6 @@ async function backendFixture(
 ): Promise<BackendFixture> {
   const pathsByAttempt = new Map<string, WorkspacePaths>();
   const registration = evaluatorRegistration();
-  const signerSecretForward = {
-    grantKey: "evaluator-agent-key",
-    target: "evaluator-agent-key.pem",
-  } as const;
-  expect(registration.signer.handle).toBe(signerSecretForward.target);
   const resolvedSigner = encoder.encode(privateKeyText);
   const deploymentModule = join(root, "evaluation-deployment.mjs");
   await writeFile(
@@ -352,7 +347,7 @@ export const evaluationHarnessDeployment = {
             ),
           );
           expect(grants).toEqual([{
-            key: "evaluator-agent-key",
+            key: "evaluator-agent-key.pem",
             descriptor: { reference: "test:evaluator-agent-key" },
           }]);
           await Promise.all([
@@ -402,6 +397,24 @@ export const evaluationHarnessDeployment = {
       outputMediaTypes: ["application/vnd.in-toto+json"],
       isolation: ["process"],
     },
+    launcherDeployments: {
+      [launcher.id]: {
+        executable: {
+          path: compiledHarnessEntrypoint,
+          digest: "a".repeat(64),
+        },
+        async probe() {
+          return {
+            ready: true,
+            executable: {
+              path: compiledHarnessEntrypoint,
+              digest: "a".repeat(64),
+            },
+            harnessVersions: ["0.1.0"],
+          };
+        },
+      },
+    },
     capabilityGrants(grants) {
       return Object.entries(grants).map(([key, descriptor]) => ({
         key,
@@ -410,7 +423,7 @@ export const evaluationHarnessDeployment = {
     },
     secretForwardResolver: {
       async resolve({ grantKey, descriptor }) {
-        expect(grantKey).toBe(signerSecretForward.grantKey);
+        expect(grantKey).toBe(registration.signer.handle);
         expect(descriptor).toEqual({ reference: "test:evaluator-agent-key" });
         return resolvedSigner;
       },
@@ -444,6 +457,100 @@ async function textFiles(root: string): Promise<string> {
 }
 
 describe("evaluationLauncher", () => {
+  test("rejects ambiguous deployment-wide signer or recovery facts", () => {
+    const configured = evaluatorRegistration();
+    expect(() => makeEvaluationLauncher({
+      registrations: [
+        configured,
+        defineEvaluatorRegistration({
+          ...configured,
+          registrationId: "different-recovery",
+          interruptionBehavior: "nonrepeatable",
+        }),
+      ],
+    })).toThrow("ambiguous interruption behavior");
+    expect(() => makeEvaluationLauncher({
+      registrations: [
+        configured,
+        defineEvaluatorRegistration({
+          ...configured,
+          registrationId: "different-signer",
+          signer: { handle: "ordinary-key" },
+        }),
+      ],
+    })).toThrow("ambiguous signer forward");
+  });
+
+  test("rejects a missing registration selector before a plan exists", () => {
+    const launcher = makeEvaluationLauncher({ registrations: [evaluatorRegistration()] });
+    expect(() => launcher.plan({
+      task: {}, effectiveRequirements: {}, profile: evaluationProfile,
+    } as TaskView, {
+      root: "/a", input: "/a/input", work: "/a/work", out: "/a/out", logs: "/a/logs", harnessState: "/a/state", secrets: "/a/secrets", tmp: "/a/tmp", meta: "/a/meta",
+    }, { attemptUri: "urn:uuid:00000000-0000-4000-8000-000000000004", nonce: "n", attemptNumber: 1 })).toThrow("requires a registration selector");
+  });
+
+  test("rejects an unconfigured selector result before a plan exists", () => {
+    const configured = evaluatorRegistration();
+    const launcher = makeEvaluationLauncher({
+      registrations: [configured],
+      selectRegistration: () => ({ ...configured, registrationId: "not-configured" }),
+    });
+    expect(() => launcher.plan({
+      task: {}, effectiveRequirements: {}, profile: evaluationProfile,
+    } as TaskView, {
+      root: "/a", input: "/a/input", work: "/a/work", out: "/a/out", logs: "/a/logs", harnessState: "/a/state", secrets: "/a/secrets", tmp: "/a/tmp", meta: "/a/meta",
+    }, { attemptUri: "urn:uuid:00000000-0000-4000-8000-000000000004", nonce: "n", attemptNumber: 1 })).toThrow("selected an unconfigured registration");
+  });
+
+  test("rejects duplicate configured registration ids before a plan exists", () => {
+    const configured = evaluatorRegistration();
+    expect(() => makeEvaluationLauncher({ registrations: [configured, configured] }))
+      .toThrow("unique");
+  });
+
+  test("derives signer and recovery facts from the configured registration, not a same-id selector forgery", () => {
+    const configured = evaluatorRegistration();
+    const forged = defineEvaluatorRegistration({
+      ...configured,
+      signer: { handle: "forged-key.pem" },
+      interruptionBehavior: "nonrepeatable",
+    });
+    const launcher = makeEvaluationLauncher({
+      registrations: [configured],
+      selectRegistration: () => forged,
+      deploymentModule: "file:///host/deployment.mjs",
+      entrypoint: "/opt/jinn/bin.js",
+    });
+    const docs = documents();
+    const plan = launcher.plan({
+      task: JSON.parse(decoder.decode(docs.evaluationTask)), effectiveRequirements: {}, profile: evaluationProfile,
+    } as TaskView, {
+      root: "/a", input: "/a/input", work: "/a/work", out: "/a/out", logs: "/a/logs", harnessState: "/a/state", secrets: "/a/secrets", tmp: "/a/tmp", meta: "/a/meta",
+    }, { attemptUri: "urn:uuid:00000000-0000-4000-8000-000000000004", nonce: "n", attemptNumber: 1 });
+    expect(plan).toMatchObject({
+      interruptionBehavior: configured.interruptionBehavior,
+      secretForwards: [{ grantKey: configured.signer.handle, target: configured.signer.handle }],
+    });
+  });
+
+  test("forwards an ordinary signer handle without suffix rewriting", () => {
+    const configured = defineEvaluatorRegistration({
+      ...evaluatorRegistration(),
+      signer: { handle: "ordinary-key" },
+    });
+    const launcher = makeEvaluationLauncher({
+      registrations: [configured],
+      selectRegistration: () => configured,
+    });
+    const plan = launcher.plan({
+      task: {}, effectiveRequirements: {}, profile: evaluationProfile,
+    } as TaskView, {
+      root: "/a", input: "/a/input", work: "/a/work", out: "/a/out", logs: "/a/logs", harnessState: "/a/state", secrets: "/a/secrets", tmp: "/a/tmp", meta: "/a/meta",
+    }, { attemptUri: "urn:uuid:00000000-0000-4000-8000-000000000004", nonce: "n", attemptNumber: 1 });
+    expect(plan.secretForwards).toEqual([{ grantKey: "ordinary-key", target: "ordinary-key" }]);
+  });
+
   test("is a pure evaluation-profile launcher with only reference/path configuration", () => {
     const launcher = makeEvaluationLauncher({
       deploymentModule: "file:///host/evaluation-deployment.mjs",
@@ -505,7 +612,7 @@ describe("evaluationLauncher", () => {
       TMPDIR: paths.tmp,
     });
     expect(first.secretForwards).toEqual([
-      { grantKey: "evaluator-agent-key", target: "evaluator-agent-key.pem" },
+      { grantKey: "evaluator-agent-key.pem", target: "evaluator-agent-key.pem" },
     ]);
     expect(launcher.capabilities().secretForwards).toEqual(first.secretForwards);
     expect(Object.keys(first.env)).toEqual(

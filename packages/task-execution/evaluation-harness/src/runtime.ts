@@ -40,7 +40,10 @@ import {
   type ExactEvaluationMaterial,
   type ResourceDescriptor,
 } from "./adapter.js";
-import type { EvaluatorRegistration } from "./registration.js";
+import {
+  type EvaluatorRegistration,
+  validateEvaluatorRegistrationSet,
+} from "./registration.js";
 import { makeSecretsSigner } from "./sign.js";
 
 export const EVALUATION_HARNESS_EXIT_INVALID_INPUT = 65;
@@ -415,7 +418,7 @@ function selectRegistration(
   specification: EvaluationSpec,
   selectedId?: string,
 ): EvaluatorRegistration {
-  const compatible = deployment.registrations.filter((registration) =>
+  const compatible = validateEvaluatorRegistrationSet(deployment.registrations).filter((registration) =>
     (selectedId === undefined || registration.registrationId === selectedId)
     &&
     registration.specificationCompatibility(specification)

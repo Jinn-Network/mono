@@ -26,6 +26,7 @@ import {
 } from "@jinn-network/task-execution-protocol";
 import {
   openAttemptJournal,
+  listProcessGroupPids,
   probeShimAlive,
   readShimFingerprint,
   type JournalEvent,
@@ -471,6 +472,13 @@ describe("restart reconstruction and §6.4 actions", () => {
       nonce: `${outcome.nonce}-foreign`,
     }));
     first.close();
+    const fingerprint = readShimFingerprint(workspace.meta);
+    await waitFor(
+      () => !probeShimAlive(workspace.meta).alive
+        && (fingerprint?.harnessPid === undefined
+          || listProcessGroupPids(fingerprint.harnessPid).length === 0),
+      "completed harness did not relinquish its process group",
+    );
 
     const recovered = fixture(root);
     expect(await recovered.recover(attempt)).toEqual({
@@ -583,13 +591,18 @@ describe("restart reconstruction and §6.4 actions", () => {
 
   test("two non-lost terminals preserve the first and persist the contradiction during recovery", async () => {
     const root = await stateRoot("contradictory-terminals");
+    const pause = barrier();
     const first = fixture(root, {
-      plan() {
-        throw new Error("fixture planning failure");
-      },
+      completionBarrier: { phase: "before-outcome-wait", barrier: pause },
     });
     const { attempt } = await submit(first);
+    await pause.entered;
     const journal = openAttemptJournal(paths(root, attempt).meta);
+    journal.append({
+      attemptId: attempt,
+      type: "attempt-terminal",
+      details: { state: "failed", blame: "task", source: "urn:jinn:backend-local:recovery-test" },
+    });
     expect(() => journal.append({
       attemptId: attempt,
       type: "attempt-terminal",
@@ -604,24 +617,26 @@ describe("restart reconstruction and §6.4 actions", () => {
       ({ type, details }) => type === "reconciliation"
         && details["classification"] === "contradictory",
     )).toBe(true);
+    pause.release();
   });
 
   test("engaged-without-intent rejects never-executed; intent-without-reality becomes lost", async () => {
     const engagedRoot = await stateRoot("engaged");
+    const pause = barrier();
     const engaged = fixture(engagedRoot, {
-      plan() {
-        throw new Error("fixture planning refusal");
-      },
+      completionBarrier: { phase: "before-outcome-wait", barrier: pause },
     });
     const engagedAttempt = (await submit(engaged)).attempt;
+    await pause.entered;
     await replaceJournal(engagedRoot, engagedAttempt, (events) =>
-      events.filter(({ type }) => type !== "attempt-terminal"));
+      events.filter(({ type }) => type === "attempt-engaged"));
     engaged.close();
     const engagedRecovered = fixture(engagedRoot);
     expect((await engagedRecovered.recover(engagedAttempt)).classification).toBe("absent");
     const engagedTerminal = (await journalEvents(engagedRoot, engagedAttempt))
       .find(({ type }) => type === "attempt-terminal");
     expect(engagedTerminal?.details).toMatchObject({ state: "rejected", neverExecuted: true });
+    pause.release();
 
     const intendedRoot = await stateRoot("intended");
     const intended = fixture(intendedRoot, {

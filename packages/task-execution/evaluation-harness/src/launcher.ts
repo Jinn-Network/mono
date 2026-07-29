@@ -23,10 +23,6 @@ import {
 } from "./registration.js";
 
 export const EVALUATION_LAUNCHER_ID = "evaluation-harness";
-const DEFAULT_SIGNER_SECRET_FORWARD = {
-  grantKey: "evaluator-agent-key",
-  target: "evaluator-agent-key.pem",
-} as const;
 
 /**
  * The default launcher module is deliberately adapter-empty. Concrete evaluator registrations
@@ -65,10 +61,11 @@ function nonEmpty(value: string, label: string): string {
 
 function launcherCapabilities(
   interruptionBehavior: InterruptionBehavior,
-  signerSecretForward: { readonly grantKey: string; readonly target: string },
+  secretForwards: readonly { readonly grantKey: string; readonly target: string }[],
+  configured: boolean,
 ): LauncherCapabilities {
   return {
-    taskProfiles: [EVALUATION_TASK_PROFILE_URI],
+    taskProfiles: configured ? [EVALUATION_TASK_PROFILE_URI] : [],
     inputMediaTypes: [
       "application/json",
       "application/vnd.jinn.task-execution.evaluation-spec.v1+json",
@@ -79,7 +76,7 @@ function launcherCapabilities(
     structuredOutput: false,
     resume: interruptionBehavior === "recoverable",
     interruptionBehaviorDefault: interruptionBehavior,
-    secretForwards: [signerSecretForward],
+    secretForwards,
     runPinning: {
       keys: [{
         key: "harness",
@@ -144,7 +141,7 @@ function launchPlan(
     },
     interruptionBehavior: registration.interruptionBehavior,
     secretForwards: [{
-      grantKey: registration.signer.handle.replace(/\.pem$/u, ""),
+      grantKey: registration.signer.handle,
       target: registration.signer.handle,
     }],
   };
@@ -168,12 +165,27 @@ export function makeEvaluationLauncher(
     "nodeExecutable",
   );
   const registrations = validateEvaluatorRegistrationSet(options.registrations ?? []);
+  const interruptionBehaviors = new Set(registrations.map((registration) => registration.interruptionBehavior));
+  if (interruptionBehaviors.size > 1) {
+    throw new TypeError("evaluation launcher registrations have ambiguous interruption behavior");
+  }
+  const signerHandles = new Set(registrations.map((registration) => registration.signer.handle));
+  if (signerHandles.size > 1) {
+    throw new TypeError("evaluation launcher registrations have ambiguous signer forward");
+  }
+  const registrationForwards = registrations.length === 0
+    ? []
+    : [{
+      grantKey: registrations[0]!.signer.handle,
+      target: registrations[0]!.signer.handle,
+    }];
   const selectedRegistration = (view: TaskView): EvaluatorRegistration => {
     if (options.selectRegistration === undefined) {
       throw new TypeError("evaluation launcher requires a registration selector");
     }
-    const registration = options.selectRegistration(view);
-    if (!registrations.some((candidate) => candidate.registrationId === registration.registrationId)) {
+    const selected = options.selectRegistration(view);
+    const registration = registrations.find((candidate) => candidate.registrationId === selected.registrationId);
+    if (registration === undefined) {
       throw new TypeError("evaluation launcher selected an unconfigured registration");
     }
     return registration;
@@ -181,18 +193,18 @@ export function makeEvaluationLauncher(
 
   return Object.freeze({
     id: EVALUATION_LAUNCHER_ID,
-    capabilities: () => launcherCapabilities("repeatable", DEFAULT_SIGNER_SECRET_FORWARD),
+    capabilities: () => launcherCapabilities(
+      registrations[0]?.interruptionBehavior ?? "repeatable",
+      registrationForwards,
+      registrations.length > 0,
+    ),
     ...(options.probe === undefined ? {} : { probe: options.probe }),
     plan(
       view: TaskView,
       paths: WorkspacePaths,
-      attempt: AttemptIdentity,
+    attempt: AttemptIdentity,
     ) {
       const registration = selectedRegistration(view);
-      const signerSecretForward = {
-        grantKey: registration.signer.handle.replace(/\.pem$/u, ""),
-        target: registration.signer.handle,
-      };
       return launchPlan(
         deploymentModule,
         entrypoint,

@@ -66,6 +66,20 @@ describe("EvaluatorRegistration", () => {
     })).toThrow("registrationId must be non-empty");
   });
 
+  test("rejects a signer path rather than treating it as a secret handle", () => {
+    expect(() => defineEvaluatorRegistration({
+      ...registration("repeatable"),
+      signer: { handle: "../evaluator-agent-key.pem" },
+    })).toThrow("portable logical handle");
+  });
+
+  test("rejects an invalid recovery behavior before a Task can select it", () => {
+    expect(() => defineEvaluatorRegistration({
+      ...registration("repeatable"),
+      interruptionBehavior: "invented" as InterruptionBehavior,
+    })).toThrow("interruptionBehavior is invalid");
+  });
+
   test("does not permit an adapter to own fixed authority fields", () => {
     const value = registration("repeatable");
     expect(Object.keys(value.adapter)).toEqual(["evaluate"]);

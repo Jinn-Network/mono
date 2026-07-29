@@ -1009,6 +1009,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       profile: resolvedProfile,
     };
     let selectedLauncher: LauncherContract;
+    let preplanned: LaunchPlan;
     try {
       selectedLauncher = this.selectLauncher(view);
       const deployment = this.config.launcherDeployments?.[selectedLauncher.id];
@@ -1033,6 +1034,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
           });
         }
       }
+      preplanned = selectedLauncher.plan(view, this.paths(attempt), identity);
     } catch (error) {
       this.capacity.release(attempt);
       const mapped = errorCategory(error);
@@ -1139,7 +1141,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
 
     try {
       const launcher = selectedLauncher;
-      const plan = launcher.plan(view, this.paths(attempt), identity);
+      const plan = preplanned;
       const spawn: SpawnRequest = {
         argv: plan.argv,
         env: provisioner.executionEnv({ env: plan.env, cwd: plan.cwd }),

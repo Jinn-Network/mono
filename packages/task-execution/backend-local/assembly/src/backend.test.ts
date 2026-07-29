@@ -457,15 +457,12 @@ describe("local TaskExecutionBackend submission path (C1)", () => {
       capabilityGrants: { key: { reference: "opaque" } },
       requirements: { harness: { id: "fixture" } },
     }));
-    expect(ack.accepted).toBe(true);
-    if (!ack.accepted) throw new Error("unreachable");
-    await backend.drain();
+    expect(ack).toMatchObject({ accepted: false, error: { category: "unsupported-requirement" } });
     expect(resolve).not.toHaveBeenCalled();
     const events = (await Promise.all((await allFiles(root))
       .filter((path) => path.endsWith("journal.jsonl"))
       .map((path) => readFile(path, "utf8")))).join("\n");
-    expect(events).not.toContain('"type":"spawned"');
-    expect(events).toContain('"neverExecuted":true');
+    expect(events).not.toContain('"type":"spawn-intended"');
   });
 
   test.runIf(process.platform === "linux")("fails preflight closed and withdraws custody claims when the Linux probe fails", async () => {
