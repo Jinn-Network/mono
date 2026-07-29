@@ -397,6 +397,20 @@ Confirmed by the operator at the program gate (2026-07-28):
     the already named residual. macOS retains the design's process-group residual. If required
     custody support is unavailable, preflight/capabilities fail closed rather than advertising
     cancellation or active deadlines that the assembly cannot enforce.
+37. **The claim-evidence writer and bound are deployment contracts, not guessed constants:**
+    the evaluation harness defines a narrow injected `EvidenceRepositoryWriter` whose
+    `putClaimEvidence({ name, bytes, mediaType? }, { signal? })` stores the exact bytes through
+    the deployment's ordinary Evidence Repository and returns the complete `ResourceDescriptor`.
+    `EvaluationHarnessDeployment` also requires an explicit positive safe-integer
+    `maxClaimEvidenceBytes`; content exceeding it fails before repository I/O. The harness
+    validates the returned descriptor, requires its `name` and optional `mediaType` to equal the
+    adapter claim, forbids returned inline `content`, and passes that returned descriptor
+    unchanged to Attestation Issuer. It does not synthesize a descriptor from a locally computed
+    digest or accept a write receipt alone. A missing/invalid limit, missing writer, malformed or
+    contradictory descriptor, or failed store is an operational no-verdict failure. A host
+    adapter over `EvidenceRepository.putArtifact` may form the descriptor from the repository's
+    trusted write receipt; the harness itself neither imports a concrete repository nor invents
+    a second artifact store.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

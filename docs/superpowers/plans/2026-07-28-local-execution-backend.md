@@ -654,7 +654,7 @@ scopes the `attempts` honor-or-reject to the single caller-identified attempt (c
 
 ## Addendum 2026-07-29-c — independent design-review fix rulings
 
-Program rulings §7.33–§7.36 resolve the backend/harness review's implementation seams:
+Program rulings §7.33–§7.37 resolve the backend/harness review's implementation seams:
 
 1. Opaque capability-grant handles are redeemed by a host-injected `SecretForwardResolver`
    after durable `spawn-intended` and immediately before the real shim spawn. The resolver writes
@@ -673,6 +673,14 @@ Program rulings §7.33–§7.36 resolve the backend/harness review's implementat
    process-table fingerprint, zombie-pinned group-empty ordering, and delegated cgroup use where
    available are implemented and fail closed when mandatory custody is unavailable; macOS keeps
    the design's named process-group residual.
+5. The claim-evidence seam is a narrow injected `EvidenceRepositoryWriter` returning a complete
+   repository-authored `ResourceDescriptor`, paired with a required deployment-specific positive
+   safe-integer `maxClaimEvidenceBytes`. The runtime rejects over-limit content before I/O,
+   validates returned descriptor/name/media-type agreement, forbids returned inline content, and
+   passes the descriptor unchanged to the issuer. Missing or invalid configuration, store
+   failure, or a contradictory descriptor is an operational no-verdict path. This is program
+   ruling §7.37; it avoids both an arbitrary stack-wide byte constant and a locally synthesized
+   descriptor.
 
 The accepted review findings also require, without further semantic amendment: assembly
 execution/cancel/recover/deadline must use the real supervisor rather than a host `execute`
