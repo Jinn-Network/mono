@@ -78,4 +78,305 @@ describe("today-generation escrow lifecycle fixture (§13)", () => {
       await describeEscrowLifecycle({ ...BASE_SEPOLIA_TODAY, generation: "today", jinnRouter: router, taskCoordinator: coordinator, mechMarketplace: marketplace, activityChecker: activity }, ctx, "today");
     } finally { anvil.kill(); }
   }, 60_000);
+
+  test("drives a mined losing settlement through the real race-loss lifecycle without verdict or refund writes", async () => {
+    const port = 10_200 + (process.pid % 500);
+    const url = `http://127.0.0.1:${port}`;
+    const anvil = spawn("anvil", [
+      "--fork-url",
+      process.env.JINN_MARKETPLACE_FORK_RPC_URL ?? "https://base-sepolia.publicnode.com",
+      "--port",
+      String(port),
+      "--silent",
+    ]);
+    const ready = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), 12_000);
+      const poll = setInterval(async () => {
+        try {
+          await fetch(url, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}',
+          });
+          clearInterval(poll);
+          clearTimeout(timer);
+          resolve(true);
+        } catch {}
+      }, 150);
+    });
+    if (!ready) {
+      anvil.kill();
+      throw new Error("Anvil/Base-Sepolia fork prerequisite unavailable; fixture did not run");
+    }
+
+    try {
+      const account = privateKeyToAccount(DEV_KEY);
+      const publicClient = createPublicClient({ transport: http(url) });
+      const wallet = createWalletClient({ account, transport: http(url) });
+      const deploy = async (
+        value: { abi: Abi; bytecode: Hex },
+        args: readonly unknown[] = [],
+      ) => {
+        const hash = await wallet.deployContract({
+          ...value,
+          args,
+          account,
+          chain: null,
+        } as never);
+        const receipt = await publicClient.waitForTransactionReceipt({ hash });
+        return receipt.contractAddress as Address;
+      };
+      const [coordinatorA, routerA, marketplaceA, activityA, mechA] = await Promise.all([
+        artifact("src/tasks/TaskCoordinator.sol/TaskCoordinator.json"),
+        artifact("src/staking/JinnRouterV3.sol/JinnRouterV3.json"),
+        artifact("src/stubs/TaskCoordinatorTestMocks.sol/MockTaskMarketplace.json"),
+        artifact("src/stubs/TaskCoordinatorTestMocks.sol/MockTaskActivityChecker.json"),
+        artifact("src/stubs/TaskCoordinatorTestMocks.sol/MockTaskMechWithDelivery.json"),
+      ]);
+      const coordinator = await deploy(coordinatorA);
+      const marketplace = await deploy(marketplaceA);
+      const activity = await deploy(activityA);
+      const router = await deploy(routerA);
+      const write = async (
+        address: Address,
+        abi: Abi,
+        functionName: string,
+        args: readonly unknown[] = [],
+        value?: bigint,
+      ) => {
+        const hash = await wallet.writeContract({
+          address,
+          abi,
+          functionName,
+          args,
+          value,
+          account,
+        } as never);
+        return publicClient.waitForTransactionReceipt({ hash });
+      };
+      await write(coordinator, coordinatorA.abi, "initialize", [account.address, router]);
+      await write(router, routerA.abi, "initialize", [
+        account.address,
+        marketplace,
+        coordinator,
+        activity,
+      ]);
+      const mech = await deploy(mechA, [
+        parseEther("0.0001"),
+        NATIVE_PAYMENT,
+        account.address,
+        marketplace,
+      ]);
+
+      let taskId = 0n;
+      let requestId = `0x${"0".repeat(64)}` as Hex;
+      let paymentBeforeTerminal: readonly unknown[] | undefined;
+      const verdict = vi.fn(async () => {
+        await write(router, routerA.abi, "claimEvaluation", [
+          taskId,
+          0,
+          mech,
+          `0x${"8".repeat(64)}`,
+        ]);
+      });
+      const refund = vi.fn(async () => {
+        const before = await publicClient.readContract({
+          address: router,
+          abi: routerA.abi,
+          functionName: "taskPayments",
+          args: [taskId],
+        }) as readonly unknown[];
+        await write(router, routerA.abi, "refundUnusedTaskBudget", [taskId]);
+        const after = await publicClient.readContract({
+          address: router,
+          abi: routerA.abi,
+          functionName: "taskPayments",
+          args: [taskId],
+        }) as readonly unknown[];
+        return {
+          refunded:
+            (before[6] as bigint) +
+            (before[7] as bigint) -
+            (after[6] as bigint) -
+            (after[7] as bigint),
+        };
+      });
+      const context: ForkEscrowContext = {
+        post: async () => {
+          const creatorBalanceBefore = await publicClient.getBalance({
+            address: account.address,
+          });
+          const receipt = await write(
+            router,
+            routerA.abi,
+            "createTask",
+            [
+              `0x${"6".repeat(64)}`,
+              `0x${"7".repeat(64)}`,
+              { maxClaims: 2, allowSolverSelfEvaluation: true },
+              parseEther("0.0001"),
+              parseEther("0.0001"),
+              60n,
+            ],
+            parseEther("0.0004"),
+          );
+          const created = receipt.logs
+            .map((log) => {
+              try {
+                return decodeEventLog({
+                  abi: routerA.abi,
+                  data: log.data,
+                  topics: log.topics,
+                });
+              } catch {
+                return undefined;
+              }
+            })
+            .find((event) => event?.eventName === "TaskCreated") as
+            | { args?: { taskId?: bigint } }
+            | undefined;
+          if (created?.args?.taskId === undefined) throw new Error("TaskCreated was absent");
+          taskId = created.args.taskId;
+          return {
+            taskId,
+            creatorBalanceBefore,
+            creatorBalanceAfterPost: await publicClient.getBalance({
+              address: account.address,
+            }),
+          };
+        },
+        claim: async () => {
+          const before = await publicClient.readContract({
+            address: router,
+            abi: routerA.abi,
+            functionName: "taskPayments",
+            args: [taskId],
+          }) as { solutionBudgetRemaining: bigint };
+          await write(router, routerA.abi, "claimTask", [taskId, mech]);
+          const after = await publicClient.readContract({
+            address: router,
+            abi: routerA.abi,
+            functionName: "taskPayments",
+            args: [taskId],
+          }) as { solutionBudgetRemaining: bigint };
+          const attempt = await publicClient.readContract({
+            address: coordinator,
+            abi: coordinatorA.abi,
+            functionName: "getAttempt",
+            args: [taskId, 0],
+          }) as { requestId: Hex };
+          requestId = attempt.requestId;
+          return {
+            requestId,
+            solutionBudgetBefore: before.solutionBudgetRemaining,
+            solutionBudgetAfter: after.solutionBudgetRemaining,
+          };
+        },
+        deliver: async () => {
+          await write(
+            mech,
+            mechA.abi,
+            "deliverToMarketplace",
+            [[requestId], ["0x726163652d6c6f7373"]],
+          );
+        },
+        settle: async () => {
+          expect(await publicClient.readContract({
+            address: router,
+            abi: routerA.abi,
+            functionName: "claimed",
+            args: [requestId],
+          })).toBe(false);
+          paymentBeforeTerminal = await publicClient.readContract({
+            address: router,
+            abi: routerA.abi,
+            functionName: "taskPayments",
+            args: [taskId],
+          }) as readonly unknown[];
+
+          await write(
+            router,
+            routerA.abi,
+            "claimSolutionDelivery",
+            [requestId, `0x${"9".repeat(64)}`],
+          );
+          expect(await publicClient.readContract({
+            address: router,
+            abi: routerA.abi,
+            functionName: "claimed",
+            args: [requestId],
+          })).toBe(true);
+          expect(await publicClient.readContract({
+            address: router,
+            abi: routerA.abi,
+            functionName: "solutionDeliveryClaimed",
+            args: [requestId],
+          })).toBe(true);
+
+          const losingHash = await wallet.writeContract({
+            address: router,
+            abi: routerA.abi,
+            functionName: "claimSolutionDelivery",
+            args: [requestId, `0x${"a".repeat(64)}`],
+            gas: 1_000_000n,
+            account,
+          } as never);
+          const losingReceipt = await publicClient.waitForTransactionReceipt({
+            hash: losingHash,
+          });
+          expect(losingReceipt.status).toBe("reverted");
+          expect(await publicClient.readContract({
+            address: router,
+            abi: routerA.abi,
+            functionName: "claimed",
+            args: [requestId],
+          })).toBe(true);
+          const attempt = await publicClient.readContract({
+            address: coordinator,
+            abi: coordinatorA.abi,
+            functionName: "getAttempt",
+            args: [taskId, 0],
+          }) as { solutionCidDigest: Hex; status: number };
+          expect(attempt.solutionCidDigest).toBe(`0x${"9".repeat(64)}`);
+          expect(attempt.status).toBe(3);
+          return { raceLost: true };
+        },
+        verdict,
+        refund,
+      };
+
+      await describeEscrowLifecycle(
+        {
+          ...BASE_SEPOLIA_TODAY,
+          generation: "today",
+          jinnRouter: router,
+          taskCoordinator: coordinator,
+          mechMarketplace: marketplace,
+          activityChecker: activity,
+        },
+        context,
+        "today",
+      );
+
+      const paymentAfter = await publicClient.readContract({
+        address: router,
+        abi: routerA.abi,
+        functionName: "taskPayments",
+        args: [taskId],
+      }) as readonly unknown[];
+      const attemptAfter = await publicClient.readContract({
+        address: coordinator,
+        abi: coordinatorA.abi,
+        functionName: "getAttempt",
+        args: [taskId, 0],
+      }) as { verdictCount: number };
+      expect(verdict).not.toHaveBeenCalled();
+      expect(refund).not.toHaveBeenCalled();
+      expect(paymentBeforeTerminal).toBeDefined();
+      expect(paymentAfter.slice(6, 10)).toEqual(paymentBeforeTerminal?.slice(6, 10));
+      expect(attemptAfter.verdictCount).toBe(0);
+    } finally {
+      anvil.kill();
+    }
+  }, 60_000);
 });
