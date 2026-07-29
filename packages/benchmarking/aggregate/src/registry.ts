@@ -2,6 +2,7 @@ import {
   BENCHMARKING_METHOD_IDS,
   BENCHMARKING_METHOD_VERSION,
   compareCodeUnitStrings,
+  isCalendarStrictRfc3339,
   sealMatrix,
   type MatrixRecord,
 } from "@jinn-network/benchmarking-records";
@@ -85,10 +86,7 @@ function validateParameters(
     if (
       rule["format"] === "date-time"
       && typeof value === "string"
-      && (
-        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
-        || Number.isNaN(Date.parse(value))
-      )
+      && !isCalendarStrictRfc3339(value)
     ) {
       issues.push(`parameter "${key}" must be an RFC 3339 date-time`);
     }

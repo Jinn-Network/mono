@@ -52,14 +52,20 @@ describe("checkJudgeability", () => {
     expect(checkJudgeability(rec)).toEqual({ status: "unevaluated", reason: "committed-not-revealed" });
   });
 
-  function validTaskBytes(instructions = "do it"): Uint8Array {
+  function validTaskBytes(
+    instructions = "do it",
+    timestamp = "2026-07-29T00:00:00Z",
+  ): Uint8Array {
     return sealTask({
       protocol: "https://jinn.network/profiles/task-execution/1.0",
-      profile: { digest: { sha256: DIGEST_B } },
+      profile: {
+        uri: "https://jinn.network/task-profiles/repository-work/1.0",
+        digest: { sha256: "829c28d91e324098739bcd6dfd3e32f7c6902efd737333c8f5659dc354a0475a" },
+      },
       instructions,
       payload: {
         language: "TypeScript",
-        provenance: { kind: "mined", source: "fixture-source", timestamp: "2026-07-29T00:00:00Z" },
+        provenance: { kind: "mined", source: "fixture-source", timestamp },
       },
       outputs: [],
       evaluation: { digest: { sha256: DIGEST_C } },
@@ -136,6 +142,16 @@ describe("checkJudgeability", () => {
     const digest = bareDigest(missingTimestamp);
     expect(checkJudgeability(benchmarkWith([digest]), () => missingTimestamp)).toEqual({
       ok: false, invalid: [{ taskDigest: digest, reason: "invalid-provenance" }], unresolved: [],
+    });
+  });
+
+  test("rejects exact real-profile sealed Task bytes carrying an impossible civil provenance date", () => {
+    const taskBytes = validTaskBytes("calendar-invalid", "2026-02-30T00:00:00Z");
+    const digest = bareDigest(taskBytes);
+    expect(checkJudgeability(benchmarkWith([digest]), () => taskBytes)).toEqual({
+      ok: false,
+      invalid: [{ taskDigest: digest, reason: "invalid-provenance" }],
+      unresolved: [],
     });
   });
 });

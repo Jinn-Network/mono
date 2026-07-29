@@ -107,6 +107,101 @@ describe("clusteredPairedRateDiffBca", () => {
     expect(() => clusteredPairedRateDiffBca(clustered.slice(0, 2), { seed: 1, resamples: 10 }))
       .toThrow(/at least two source clusters/);
   });
+
+  test("pins the non-vacuous whole-source-cluster BCa oracle and grouping discriminator", () => {
+    const commitment = `sha256:${"9".repeat(64)}`;
+    const rates = [
+      { taskDigest: "a".repeat(64), cluster: ["source", "family-b"] as const, pA: 4 / 5, pB: 2 / 5 },
+      { taskDigest: "b".repeat(64), cluster: ["source", "family-a"] as const, pA: 3 / 5, pB: 1 / 2 },
+      { taskDigest: "c".repeat(64), cluster: ["source", "family-a"] as const, pA: 2 / 5, pB: 2 / 5 },
+      { taskDigest: "d".repeat(64), cluster: ["sourceCommitment", commitment] as const, pA: 2 / 5, pB: 9 / 20 },
+      { taskDigest: "e".repeat(64), cluster: ["sourceCommitment", commitment] as const, pA: 1 / 2, pB: 3 / 5 },
+      { taskDigest: "f".repeat(64), cluster: ["sourceCommitment", commitment] as const, pA: 1 / 5, pB: 4 / 5 },
+    ];
+
+    const result = clusteredPairedRateDiffBca(rates, { seed: 1, resamples: 1_000 });
+    expect({
+      observed: result.observed,
+      lowerBound: result.lowerBound,
+      biasCorrection: result.biasCorrection,
+      adjustedQuantile: result.adjustedQuantile,
+      adjustedIndex: result.adjustedIndex,
+      draws: result.draws,
+      unit: result.unit,
+    }).toEqual({
+      observed: 0.04166666666666668,
+      lowerBound: -0.225,
+      biasCorrection: -0.0828132919872456,
+      adjustedQuantile: 0.05033626184818413,
+      adjustedIndex: 50,
+      draws: 3_000,
+      unit: "source-cluster",
+    });
+    expect(result.acceleration).toBeCloseTo(0.0627085632050839, 15);
+    const expectedClusters = [
+      { key: ["source", "family-a"], members: ["b".repeat(64), "c".repeat(64)] },
+      { key: ["source", "family-b"], members: ["a".repeat(64)] },
+      {
+        key: ["sourceCommitment", commitment],
+        members: ["d".repeat(64), "e".repeat(64), "f".repeat(64)],
+      },
+    ] as const;
+    expect(result.clusters).toEqual(expectedClusters);
+
+    const rateByDigest = new Map(rates.map((rate) => [rate.taskDigest, rate]));
+    const jackknifeEstimates = expectedClusters.map((_cluster, omitted) => {
+      const remaining = expectedClusters
+        .filter((_candidate, index) => index !== omitted)
+        .flatMap((cluster) => cluster.members)
+        .map((taskDigest) => rateByDigest.get(taskDigest)!);
+      return remaining.reduce((sum, rate) => sum + (rate.pB - rate.pA), 0) / remaining.length;
+    });
+    expect(jackknifeEstimates).toHaveLength(3);
+    expect(jackknifeEstimates[0]).toBeCloseTo(0.0875, 15);
+    expect(jackknifeEstimates[1]).toBeCloseTo(0.13, 15);
+    expect(jackknifeEstimates[2]).toBeCloseTo(-0.16666666666666666, 15);
+
+    const next = xorshift32(1);
+    // These are the exact IEEE-754 subtraction results of the six rational rate pairs above.
+    // Keeping them literal makes the strict-below oracle independent of the production delta
+    // helper while preserving the finite-stream equality boundary.
+    const clusterDeltas = [
+      [-0.09999999999999998, 0],
+      [-0.4],
+      [0.04999999999999999, 0.09999999999999998, 0.6000000000000001],
+    ];
+    let belowObserved = 0;
+    for (let replicate = 0; replicate < 1_000; replicate += 1) {
+      const sampled: number[] = [];
+      for (let position = 0; position < 3; position += 1) {
+        sampled.push(...clusterDeltas[Math.floor((next() / 4_294_967_296) * 3)]!);
+      }
+      const estimate = sampled.reduce((sum, value) => sum + value, 0) / sampled.length;
+      if (estimate < result.observed) belowObserved += 1;
+    }
+    expect(belowObserved).toBe(467);
+
+    const regrouped = rates.map((rate) => rate.taskDigest === "b".repeat(64)
+      ? { ...rate, cluster: ["source", "family-b"] as const }
+      : rate);
+    const regroupedResult = clusteredPairedRateDiffBca(regrouped, { seed: 1, resamples: 1_000 });
+    expect({
+      observed: regroupedResult.observed,
+      lowerBound: regroupedResult.lowerBound,
+      biasCorrection: regroupedResult.biasCorrection,
+      adjustedQuantile: regroupedResult.adjustedQuantile,
+      adjustedIndex: regroupedResult.adjustedIndex,
+      draws: regroupedResult.draws,
+    }).toEqual({
+      observed: 0.04166666666666668,
+      lowerBound: -0.2,
+      biasCorrection: -0.002506630902398872,
+      adjustedQuantile: 0.05667480707950723,
+      adjustedIndex: 56,
+      draws: 3_000,
+    });
+    expect(regroupedResult.acceleration).toBeCloseTo(0.025555839127816213, 15);
+  });
 });
 
 describe("nonInferiorityVerdict", () => {

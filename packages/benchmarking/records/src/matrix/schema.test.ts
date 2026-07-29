@@ -98,6 +98,12 @@ function rederiveConvenienceViews(matrix: MutableMatrix): void {
   matrix.completeness.runOutcome = completeness >= Number(matrix.completeness.floor) ? "complete" : "partial";
 }
 
+test("Matrix rejects an impossible civil closeBoundary.at date", () => {
+  const matrix = validMatrix();
+  (matrix.closeBoundary as Record<string, unknown>).at = "2026-02-30T00:00:00Z";
+  expect(() => sealMatrix(matrix)).toThrow(InvalidDocumentError);
+});
+
 describe("OUTCOME_VOCABULARY", () => {
   test("is the frozen six-value set (§8.2/§14.1)", () => {
     expect(OUTCOME_VOCABULARY).toEqual([

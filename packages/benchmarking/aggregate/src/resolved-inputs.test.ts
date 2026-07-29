@@ -44,6 +44,19 @@ describe("exact referenced Verdict bytes", () => {
     })).toEqual({ verdict: "pass" });
   });
 
+  test("rejects a Result Evaluation with an impossible civil evaluatedAt date", () => {
+    const statement = validStatement();
+    (statement["predicate"] as Record<string, unknown>)["evaluatedAt"] = "2026-02-30T00:00:00Z";
+    const bytes = envelope(canonicalJsonBytes(statement));
+    const digest = recordDigest(bytes);
+    expect(() => resolveVerdictOutcome(digest, {
+      resolveVerdictBytes: () => bytes,
+    })).toThrow(expect.objectContaining({
+      code: "verdict-record-malformed",
+      digest,
+    }));
+  });
+
   test("names unavailable, digest-mismatched, and malformed exact references", () => {
     const missing = `sha256:${"b".repeat(64)}`;
     expect(() => resolveVerdictOutcome(missing, { resolveVerdictBytes: () => undefined }))
@@ -129,6 +142,24 @@ describe("exact Task provenance bytes", () => {
     const ambiguousDigest = recordDigest(ambiguous);
     expect(() => resolveTaskProvenance(ambiguousDigest.slice("sha256:".length), { resolveTaskBytes: () => ambiguous }))
       .toThrow(expect.objectContaining({ code: "task-provenance-source-missing" }));
+  });
+
+  test("rejects an impossible civil Task provenance timestamp", () => {
+    const bytes = canonicalJsonBytes({
+      payload: {
+        provenance: {
+          source: "fixture",
+          timestamp: "2026-02-30T00:00:00Z",
+        },
+      },
+    });
+    const digest = recordDigest(bytes);
+    expect(() => resolveTaskProvenance(digest.slice("sha256:".length), {
+      resolveTaskBytes: () => bytes,
+    })).toThrow(expect.objectContaining({
+      code: "task-provenance-timestamp-missing",
+      digest,
+    }));
   });
 });
 
@@ -258,6 +289,13 @@ describe("authenticated anchored announcement evidence", () => {
       {
         ok: true as const,
         source,
+        verifiedEntryDigests: [entryDigest],
+        headDigest: entryDigest,
+        anchor: { digest: entryDigest, anchorTime: "2026-02-30T00:00:00Z" },
+      },
+      {
+        ok: true as const,
+        source,
         verifiedEntryDigests: [`sha256:${"a".repeat(64)}`],
         headDigest: `sha256:${"a".repeat(64)}`,
         anchor: { digest: `sha256:${"a".repeat(64)}`, anchorTime: "2026-07-29T00:00:00Z" },
@@ -279,6 +317,20 @@ describe("authenticated anchored announcement evidence", () => {
         digest: benchmarkDigest,
       }));
     }
+  });
+
+  test("rejects an impossible civil signed entry timestamp before invoking verification", () => {
+    const envelopeBytes = signedEntry(entryBytes({
+      timestamp: "2026-02-30T00:00:00Z",
+    }));
+    expect(() => resolveAnchoredAnnouncementTime(
+      benchmarkDigest,
+      envelopeBytes,
+      () => { throw new Error("must not verify a calendar-invalid entry"); },
+    )).toThrow(expect.objectContaining({
+      code: "anchored-announcement-malformed",
+      digest: benchmarkDigest,
+    }));
   });
 
   test("rejects a signed payload under the wrong DSSE media type", () => {

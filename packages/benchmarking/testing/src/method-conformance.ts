@@ -44,6 +44,33 @@ interface MethodFixture {
   readonly expectedResults: unknown;
 }
 
+interface ClusterBcaOracleFixture {
+  readonly methodId: string;
+  readonly methodVersion: string;
+  readonly parameters: Record<string, unknown>;
+  readonly verdictRule: VerdictRuleName;
+  readonly oracle: {
+    readonly alpha: number;
+    readonly minN: number;
+    readonly deltaAbs: number;
+    readonly relativeCap: number;
+  };
+  readonly tasks: readonly {
+    readonly taskDigest: string;
+    readonly pA: readonly [number, number];
+    readonly pB: readonly [number, number];
+    readonly provenance: { readonly source?: string; readonly sourceCommitment?: string };
+  }[];
+  readonly expectedPrimitive: unknown;
+  readonly expectedPublic: unknown;
+  readonly regroup: {
+    readonly taskDigest: string;
+    readonly provenance: { readonly source: string };
+    readonly expectedPrimitive: unknown;
+    readonly expectedPublic: unknown;
+  };
+}
+
 interface MethodSpecFixture {
   readonly id: string;
   readonly version: string;
@@ -158,6 +185,7 @@ interface MutableFixtureCell {
   verdicts: string[];
   validVerdicts: string[];
   outcome: "judged" | "unjudged" | "unscorable" | "expired" | "invalidated" | "excluded";
+  integrityTier?: "re-derivable" | "attested-only";
   verification: {
     harness: "match" | "mismatch" | "unverifiable";
     model: "match" | "mismatch" | "unverifiable";
@@ -294,6 +322,89 @@ function onlySubjectResults(results: MethodResults): unknown {
   expect(results.perSubject).toHaveLength(1);
   return results.perSubject[0]!.results;
 }
+
+function clusterBcaMethodFixture(
+  fixture: ClusterBcaOracleFixture,
+  regroup = false,
+): MethodFixture {
+  const verdictOutcomes: Record<string, VerdictOutcome> = {};
+  let verdictIndex = 1;
+  const cells: MutableFixtureCell[] = [];
+  for (const task of fixture.tasks) {
+    for (const [armId, rate] of [["armA", task.pA], ["armB", task.pB]] as const) {
+      const [numerator, denominator] = rate;
+      const replicates = 20;
+      const passes = numerator * (replicates / denominator);
+      for (let replicate = 1; replicate <= replicates; replicate += 1) {
+        const verdictDigest = `sha256:${(verdictIndex++).toString(16).padStart(64, "0")}`;
+        verdictOutcomes[verdictDigest] = { verdict: replicate <= passes ? "pass" : "fail" };
+        cells.push({
+          cellKey: `${task.taskDigest}/${armId}/${replicate}`,
+          taskDigest: task.taskDigest,
+          armId,
+          replicate,
+          dispatches: 1,
+          verdicts: [verdictDigest],
+          validVerdicts: [verdictDigest],
+          outcome: "judged",
+          integrityTier: "re-derivable",
+          verification: {
+            harness: "match",
+            model: "match",
+            loadout: "match",
+            isolation: "match",
+            checksFailed: [],
+          },
+        });
+      }
+    }
+  }
+  const taskProvenance = Object.fromEntries(fixture.tasks.map((task) => [
+    task.taskDigest,
+    regroup && task.taskDigest === fixture.regroup.taskDigest
+      ? fixture.regroup.provenance
+      : task.provenance,
+  ]));
+  return {
+    methodId: fixture.methodId,
+    methodVersion: fixture.methodVersion,
+    parameters: fixture.parameters,
+    verdictRule: fixture.verdictRule,
+    matrices: [{
+      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      run: { digest: { sha256: "0".repeat(64) } },
+      closeBoundary: { at: "2026-08-04T00:00:00Z" },
+      cells,
+      exclusions: [],
+      attrition: { perArm: {}, asymmetryFlags: [] },
+      completeness: { expected: 0, judged: 0, floor: "1", runOutcome: "complete" },
+      assembly: { procedure: "jinn.benchmarking.assembly", version: "1.0" },
+    }],
+    verdictOutcomes,
+    taskProvenance,
+    runReplicates: 20,
+    expectedResults: {},
+  };
+}
+
+function exactTaskDigestsByFixtureLabel(
+  prepared: PreparedMethodFixture,
+): ReadonlyMap<string, string> {
+  const byLabel = new Map<string, string>();
+  for (const [digest, bytes] of prepared.taskBytes) {
+    const task = JSON.parse(new TextDecoder().decode(bytes)) as { instructions: string };
+    byLabel.set(task.instructions.slice("Fixture task ".length), digest.slice("sha256:".length));
+  }
+  return byLabel;
+}
+
+function expectedPublicForPrepared(
+  expected: unknown,
+  prepared: PreparedMethodFixture,
+): unknown {
+  return sortIdentifierArraysDeep(mapStringsDeep(expected, exactTaskDigestsByFixtureLabel(prepared)));
+}
+
 
 /**
  * Turns the readable semantic fixture labels into exact canonical record bytes before invoking a
@@ -482,6 +593,73 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
   describe("benchmarking method-registry conformance (design §9.2/§16)", () => {
     test("fixture set is non-empty", async () => {
       expect((await computeFixtureNames()).length).toBeGreaterThan(0);
+    });
+
+    test("pins the mandatory non-vacuous whole-source-cluster BCa oracle and re-sealed grouping discriminator", async () => {
+      const fixture = await loadJson<ClusterBcaOracleFixture>("noninferiority-cluster-bca.json");
+      expect(fixture.oracle).toEqual({
+        alpha: 0.05,
+        minN: 5,
+        deltaAbs: 0.05,
+        relativeCap: 0.15,
+      });
+      expect(fixture.expectedPrimitive).toEqual({
+        observed: 0.04166666666666668,
+        lowerBound: -0.225,
+        acceleration: 0.0627085632050839,
+        biasCorrection: -0.0828132919872456,
+        adjustedQuantile: 0.05033626184818413,
+        adjustedIndex: 50,
+        draws: 3_000,
+        unit: "source-cluster",
+      });
+
+      const groupedSemantic = clusterBcaMethodFixture(fixture);
+      const regroupedSemantic = clusterBcaMethodFixture(fixture, true);
+      expect(regroupedSemantic.parameters).toEqual(groupedSemantic.parameters);
+      expect(regroupedSemantic.matrices).toEqual(groupedSemantic.matrices);
+      expect(regroupedSemantic.verdictOutcomes).toEqual(groupedSemantic.verdictOutcomes);
+
+      const grouped = prepareFixture(groupedSemantic);
+      const regrouped = prepareFixture(regroupedSemantic);
+      const groupedDigests = exactTaskDigestsByFixtureLabel(grouped);
+      const regroupedDigests = exactTaskDigestsByFixtureLabel(regrouped);
+      for (const task of fixture.tasks) {
+        if (task.taskDigest === fixture.regroup.taskDigest) {
+          expect(regroupedDigests.get(task.taskDigest)).not.toBe(groupedDigests.get(task.taskDigest));
+        } else {
+          expect(regroupedDigests.get(task.taskDigest)).toBe(groupedDigests.get(task.taskDigest));
+        }
+      }
+
+      const method = registry.get(fixture.methodId, fixture.methodVersion)!;
+      const compute = (prepared: PreparedMethodFixture) => onlySubjectResults(method.compute!({
+        subjects: prepared.subjects,
+        parameters: { ...fixture.parameters, verdictRule: fixture.verdictRule },
+        verdictRule: fixture.verdictRule,
+        registry,
+        ...prepared.ports,
+      })) as { quality: unknown; bootstrap: unknown };
+      const groupedResult = compute(grouped);
+      expect({
+        quality: groupedResult.quality,
+        bootstrap: groupedResult.bootstrap,
+      }).toEqual(expectedPublicForPrepared(fixture.expectedPublic, grouped));
+
+      const regroupedResult = compute(regrouped);
+      expect({
+        quality: regroupedResult.quality,
+        bootstrap: regroupedResult.bootstrap,
+      }).toEqual(expectedPublicForPrepared(fixture.regroup.expectedPublic, regrouped));
+      expect(fixture.regroup.expectedPrimitive).toEqual({
+        observed: 0.04166666666666668,
+        lowerBound: -0.2,
+        acceleration: 0.025555839127816213,
+        biasCorrection: -0.002506630902398872,
+        adjustedQuantile: 0.05667480707950723,
+        adjustedIndex: 56,
+        draws: 3_000,
+      });
     });
 
     test("method fixtures materialize real published repository-work profile Tasks", async () => {

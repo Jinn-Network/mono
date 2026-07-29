@@ -5,6 +5,7 @@ import { topLevelRecordSchema } from "../extensions.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
 import { compareCodeUnitStrings } from "../order.js";
 import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
+import { isCalendarStrictRfc3339 } from "../rfc3339.js";
 import {
   ArmIdSchema,
   CellKeySchema,
@@ -13,7 +14,8 @@ import {
   cellKey as computeCellKey,
 } from "../run/cells.js";
 
-const Rfc3339 = z.string().datetime({ offset: true });
+const Rfc3339 = z.string().datetime({ offset: true })
+  .refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp");
 
 /** A decimal-string quantity (program §7.1/§7.14: fractional numbers are strings). */
 const DecimalString = z.string().regex(/^\d+(\.\d+)?$/, "must be a decimal string");

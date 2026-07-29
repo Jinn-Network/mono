@@ -31,6 +31,14 @@ describe("BenchmarkRecordSchema / parseBenchmark / sealBenchmark", () => {
     expect(parsed.supersedes).toBeUndefined();
   });
 
+  test("rejects an impossible civil reveal.notBefore date", () => {
+    const value = loadFixture("minimal.json") as Record<string, unknown>;
+    expect(() => sealBenchmark({
+      ...value,
+      reveal: { policy: "scheduled", notBefore: "2026-02-30T00:00:00Z" },
+    })).toThrow(InvalidDocumentError);
+  });
+
   test("invalid-duplicate-item.json is schema-VALID (distinctness is a separate named check)", () => {
     const duplicate = loadFixture("invalid-duplicate-item.json");
     expect(() => BenchmarkRecordSchema.parse(duplicate)).not.toThrow();

@@ -93,6 +93,23 @@ describe("subject-scoped method inputs", () => {
 });
 
 describe("clean-subset@1: error handling", () => {
+  test("rejects an impossible civil cutoff through the shared method-parameter validator", () => {
+    const method = createMethodRegistry().get("jinn.benchmarking.method/clean-subset", "1")!;
+    expect(method.validateParameters({
+      verdictRule: "unanimous",
+      basis: "self-declared",
+      cutoff: "2026-02-30T00:00:00Z",
+      delegate: {
+        id: "jinn.benchmarking.method/wilson",
+        version: "1",
+        parameters: {},
+      },
+    })).toEqual({
+      ok: false,
+      issues: ['parameter "cutoff" must be an RFC 3339 date-time'],
+    });
+  });
+
   test("throws when MethodComputeInput.registry is not supplied", () => {
     const registry = createMethodRegistry();
     const method = registry.get("jinn.benchmarking.method/clean-subset", "1")!;

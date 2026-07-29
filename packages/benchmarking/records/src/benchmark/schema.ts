@@ -3,6 +3,7 @@ import { AgentIriSchema, DigestBearingResourceDescriptorSchema } from "../descri
 import { topLevelRecordSchema } from "../extensions.js";
 import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
 import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
+import { isCalendarStrictRfc3339 } from "../rfc3339.js";
 
 // The complete SemVer 2.0.0 grammar (§6.1/§6.2): core numeric identifiers and numeric
 // prerelease identifiers forbid leading zeroes; build identifiers deliberately do not.
@@ -21,7 +22,9 @@ const BenchmarkItemSchema = z.object({
 
 const RevealSchema = z.object({
   policy: z.enum(["immediate", "scheduled", "after-run"]),
-  notBefore: z.string().datetime({ offset: true }).optional(),
+  notBefore: z.string().datetime({ offset: true })
+    .refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp")
+    .optional(),
 });
 
 export const BenchmarkRecordSchema = topLevelRecordSchema({

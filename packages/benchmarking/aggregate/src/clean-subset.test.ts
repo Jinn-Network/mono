@@ -30,4 +30,22 @@ describe("filterByCutoff (design §9.2 clean-subset@1)", () => {
   test("rejects a malformed cutoff", () => {
     expect(() => filterByCutoff(["t1"], "not-a-date", resolve)).toThrow();
   });
+
+  test("rejects an impossible civil cutoff before comparing timestamps", () => {
+    expect(() => filterByCutoff(["t1"], "2026-02-30T00:00:00Z", resolve)).toThrow(
+      /valid RFC 3339/,
+    );
+  });
+
+  test("conservatively excludes an impossible civil resolved timestamp", () => {
+    const result = filterByCutoff(
+      ["calendar-invalid"],
+      "2026-02-01T00:00:00Z",
+      () => "2026-02-30T00:00:00Z",
+    );
+    expect(result).toEqual({
+      kept: [],
+      excludedByPredicate: ["calendar-invalid"],
+    });
+  });
 });

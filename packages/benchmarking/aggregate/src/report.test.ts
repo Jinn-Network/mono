@@ -392,6 +392,24 @@ async function produce(fixture: Fixture) {
   );
 }
 
+test("verifyReport rejects an impossible civil effective-time context before trust resolution", async () => {
+  const fixture = makeFixture();
+  const produced = await produce(fixture);
+  const result = await verifyReport(
+    {
+      envelopeBytes: produced.envelope,
+      subjects: fixture.subjectBytes,
+      effectiveTime: "2026-02-30T00:00:00Z",
+    },
+    verificationPorts(fixture.ports, produced.envelope),
+  );
+  expect(result).toEqual({
+    ok: false,
+    check: "report-authenticity",
+    detail: "effectiveTime context must be an explicit RFC 3339 verification instant",
+  });
+});
+
 describe("deriveDisclosures", () => {
   test("is lossless, one-to-one, digest-bound, and subject-ordered", () => {
     const fixture = makeFixture({ subjectCount: 2 });

@@ -4,6 +4,7 @@ import { serializeCanonicalJson } from "../canonical.js";
 import { LowercaseSha256HexSchema } from "../descriptors.js";
 import { documentDigest, sha256Hex } from "../hashing.js";
 import type { JsonValue } from "../json.js";
+import { isCalendarStrictRfc3339 } from "../rfc3339.js";
 import { itemTaskDigest, parseBenchmark, type BenchmarkRecord } from "./schema.js";
 
 /** Named check `benchmark-item-distinctness` (§6.1): item Task digests must be distinct. */
@@ -59,9 +60,7 @@ function inspectTask(taskDigest: string, taskBytes: Uint8Array): JudgeabilityRea
   const commitment = fields["sourceCommitment"];
   const sourceOk = typeof source === "string" && source.length > 0;
   const commitmentOk = typeof commitment === "string" && /^sha256:[a-f0-9]{64}$/.test(commitment);
-  const timestampOk = typeof timestamp === "string"
-    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(timestamp)
-    && !Number.isNaN(Date.parse(timestamp));
+  const timestampOk = isCalendarStrictRfc3339(timestamp);
   if (!timestampOk || sourceOk === commitmentOk) return "invalid-provenance";
   return undefined;
 }

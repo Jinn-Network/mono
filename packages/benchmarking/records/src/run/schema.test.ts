@@ -30,6 +30,12 @@ describe("RunRecordSchema / parseRun / sealRun", () => {
     expect(parsed.venue).toBeUndefined();
   });
 
+  test("rejects an impossible civil closeAt date", () => {
+    const value = JSON.parse(JSON.stringify(loadFixture("minimal.json"))) as Record<string, unknown>;
+    value.closeAt = "2026-02-30T00:00:00Z";
+    expect(() => sealRun(value)).toThrow(InvalidDocumentError);
+  });
+
   test("invalid-missing-closeAt.json is rejected as invalid-document", () => {
     const missing = loadFixture("invalid-missing-closeAt.json");
     expect(() => parseRun(new TextEncoder().encode(JSON.stringify(missing)))).toThrow(InvalidDocumentError);

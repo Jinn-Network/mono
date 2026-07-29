@@ -1,4 +1,6 @@
 import {
+  calendarStrictRfc3339EpochMilliseconds,
+  isCalendarStrictRfc3339,
   parseRun,
   sealRun,
   type MatrixRecord,
@@ -137,12 +139,6 @@ function requireResolvedBytes(
   return bytes;
 }
 
-function isRfc3339(value: unknown): value is string {
-  return typeof value === "string"
-    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
-    && !Number.isNaN(Date.parse(value));
-}
-
 /**
  * Smallest exact Result Evaluation Statement validator needed by aggregation. It intentionally
  * does not recreate the profiles package: only the frozen identity, outcome, evaluator, and
@@ -214,7 +210,7 @@ export function resolveVerdictOutcome(
   if (!isObject(predicate)) {
     throw new MethodInputError("verdict-record-malformed", digest, "predicate must be an object");
   }
-  if (!isRfc3339(predicate["evaluatedAt"])) {
+  if (!isCalendarStrictRfc3339(predicate["evaluatedAt"])) {
     throw new MethodInputError("verdict-record-malformed", digest, "evaluatedAt must be RFC 3339");
   }
   const evaluator = predicate["evaluator"];
@@ -298,7 +294,7 @@ export function resolveTaskProvenance(
     );
   }
   const timestamp = provenance["timestamp"];
-  if (!isRfc3339(timestamp)) {
+  if (!isCalendarStrictRfc3339(timestamp)) {
     throw new MethodInputError(
       "task-provenance-timestamp-missing",
       digest,
@@ -382,7 +378,7 @@ export function resolveAnchoredAnnouncementTime(
     ) {
       throw new Error("entry genesis sequence/previous linkage is inconsistent");
     }
-    if (!isRfc3339(entry["timestamp"])) {
+    if (!isCalendarStrictRfc3339(entry["timestamp"])) {
       throw new Error("entry timestamp must be RFC 3339");
     }
   } catch (cause) {
@@ -432,10 +428,13 @@ export function resolveAnchoredAnnouncementTime(
     && new Set(chain).size === chain.length
     && chain.includes(entryDigest)
     && chain[chain.length - 1] === verification.headDigest;
+  const anchorTimeMs = calendarStrictRfc3339EpochMilliseconds(verification.anchor.anchorTime);
+  const entryTimeMs = calendarStrictRfc3339EpochMilliseconds(entry["timestamp"] as string);
   const anchorIsExact = exactDigest(verification.headDigest)
     && verification.anchor.digest === verification.headDigest
-    && isRfc3339(verification.anchor.anchorTime)
-    && Date.parse(verification.anchor.anchorTime) >= Date.parse(entry["timestamp"] as string);
+    && anchorTimeMs !== undefined
+    && entryTimeMs !== undefined
+    && anchorTimeMs >= entryTimeMs;
   if (!sourceMatches || !chainIsExact || !anchorIsExact) {
     throw new MethodInputError(
       "anchored-announcement-unverified",

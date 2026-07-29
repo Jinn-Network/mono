@@ -1,0 +1,174 @@
+{
+  "methodId": "jinn.benchmarking.method/noninferiority-iut",
+  "methodVersion": "1",
+  "parameters": {
+    "baseline": "armA",
+    "candidate": "armB",
+    "seed": 1,
+    "resamples": 1000
+  },
+  "verdictRule": "unanimous",
+  "oracle": {
+    "alpha": 0.05,
+    "minN": 5,
+    "deltaAbs": 0.05,
+    "relativeCap": 0.15
+  },
+  "tasks": [
+    {
+      "taskDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "pA": [4, 5],
+      "pB": [2, 5],
+      "provenance": { "source": "family-b" }
+    },
+    {
+      "taskDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "pA": [3, 5],
+      "pB": [1, 2],
+      "provenance": { "source": "family-a" }
+    },
+    {
+      "taskDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "pA": [2, 5],
+      "pB": [2, 5],
+      "provenance": { "source": "family-a" }
+    },
+    {
+      "taskDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "pA": [2, 5],
+      "pB": [9, 20],
+      "provenance": {
+        "sourceCommitment": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+      }
+    },
+    {
+      "taskDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "pA": [1, 2],
+      "pB": [3, 5],
+      "provenance": {
+        "sourceCommitment": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+      }
+    },
+    {
+      "taskDigest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "pA": [1, 5],
+      "pB": [4, 5],
+      "provenance": {
+        "sourceCommitment": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+      }
+    }
+  ],
+  "expectedPrimitive": {
+    "observed": 0.04166666666666668,
+    "lowerBound": -0.225,
+    "acceleration": 0.0627085632050839,
+    "biasCorrection": -0.0828132919872456,
+    "adjustedQuantile": 0.05033626184818413,
+    "adjustedIndex": 50,
+    "draws": 3000,
+    "unit": "source-cluster"
+  },
+  "expectedPublic": {
+    "quality": {
+      "verdict": "fail",
+      "lowerBound": "-0.2250",
+      "relativeRegression": "0.0000",
+      "reasons": [
+        "absolute NI failed: lower bound -0.225 <= -delta (-0.05)"
+      ]
+    },
+    "bootstrap": {
+      "procedure": "xorshift32-v1",
+      "seed": 1,
+      "resamples": 1000,
+      "basis": "task-provenance-source-family",
+      "count": 3,
+      "unit": "source-cluster",
+      "draws": 3000,
+      "clusters": [
+        {
+          "key": ["source", "family-a"],
+          "members": [
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          ]
+        },
+        {
+          "key": ["source", "family-b"],
+          "members": [
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          ]
+        },
+        {
+          "key": [
+            "sourceCommitment",
+            "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+          ],
+          "members": [
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          ]
+        }
+      ]
+    }
+  },
+  "regroup": {
+    "taskDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "provenance": { "source": "family-b" },
+    "expectedPrimitive": {
+      "observed": 0.04166666666666668,
+      "lowerBound": -0.2,
+      "acceleration": 0.025555839127816213,
+      "biasCorrection": -0.002506630902398872,
+      "adjustedQuantile": 0.05667480707950723,
+      "adjustedIndex": 56,
+      "draws": 3000
+    },
+    "expectedPublic": {
+      "quality": {
+        "verdict": "fail",
+        "lowerBound": "-0.2000",
+        "relativeRegression": "0.0000",
+        "reasons": [
+          "absolute NI failed: lower bound -0.200 <= -delta (-0.05)"
+        ]
+      },
+      "bootstrap": {
+        "procedure": "xorshift32-v1",
+        "seed": 1,
+        "resamples": 1000,
+        "basis": "task-provenance-source-family",
+        "count": 3,
+        "unit": "source-cluster",
+        "draws": 3000,
+        "clusters": [
+          {
+            "key": ["source", "family-a"],
+            "members": [
+              "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            ]
+          },
+          {
+            "key": ["source", "family-b"],
+            "members": [
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            ]
+          },
+          {
+            "key": [
+              "sourceCommitment",
+              "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+            ],
+            "members": [
+              "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

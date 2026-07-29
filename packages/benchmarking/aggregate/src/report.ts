@@ -1,6 +1,7 @@
 import {
   BENCHMARKING_PROTOCOL,
   BENCHMARKING_REPORTS_SCOPE,
+  isCalendarStrictRfc3339,
   REPORT_MEDIA_TYPE,
   parseMatrix,
   parseReport,
@@ -357,11 +358,6 @@ export interface VerifyReportPorts extends MethodPorts {
   readonly trust: VerifyEnvelopeBindingDeps;
 }
 
-function validVerificationInstant(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
-    && !Number.isNaN(Date.parse(value));
-}
-
 /**
  * Verifies from exact received bytes: DSSE media/payload/signature/trust, exact subject bytes and
  * order, method replay, resolved comparability, universal preregistration, and disclosures.
@@ -370,7 +366,7 @@ export async function verifyReport(
   input: VerifyReportInput,
   ports: VerifyReportPorts,
 ): Promise<VerifyReportResult> {
-  if (!validVerificationInstant(input.effectiveTime)) {
+  if (!isCalendarStrictRfc3339(input.effectiveTime)) {
     return {
       ok: false,
       check: "report-authenticity",
