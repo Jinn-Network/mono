@@ -275,6 +275,49 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  facts-benchmarking:
+    needs: [foundation, testing]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependencies from source (trust-core, task-execution-protocol, benchmarking-records, §7.8)
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+      - name: Restore Record Discovery Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: record-discovery-protocol-dist
+          path: packages/discovery/protocol/dist
+      - name: Restore Record Discovery Testing distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: record-discovery-testing-dist
+          path: packages/discovery/testing/dist
+      - name: Verify Record Discovery Facts (Benchmarking)
+        working-directory: packages/discovery/facts/benchmarking
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Record Discovery Facts (Benchmarking) distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: record-discovery-facts-benchmarking-dist
+          path: packages/discovery/facts/benchmarking/dist
+          if-no-files-found: error
+          retention-days: 1
+
   sources-evidence-journal:
     needs: [foundation, serve]
     runs-on: ubuntu-latest
@@ -320,7 +363,7 @@ jobs:
           retention-days: 1
 
   verify:
-    needs: [architecture, foundation, testing, serve, client, facts-evidence, facts-trust, facts-task-execution, sources-evidence-journal]
+    needs: [architecture, foundation, testing, serve, client, facts-evidence, facts-trust, facts-task-execution, facts-benchmarking, sources-evidence-journal]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -334,6 +377,7 @@ jobs:
           FACTS_EVIDENCE_RESULT: ${{ needs.facts-evidence.result }}
           FACTS_TRUST_RESULT: ${{ needs.facts-trust.result }}
           FACTS_TASK_EXECUTION_RESULT: ${{ needs.facts-task-execution.result }}
+          FACTS_BENCHMARKING_RESULT: ${{ needs.facts-benchmarking.result }}
           SOURCES_EVIDENCE_JOURNAL_RESULT: ${{ needs.sources-evidence-journal.result }}
         run: |
           for result in \
@@ -345,6 +389,7 @@ jobs:
             "$FACTS_EVIDENCE_RESULT" \
             "$FACTS_TRUST_RESULT" \
             "$FACTS_TASK_EXECUTION_RESULT" \
+            "$FACTS_BENCHMARKING_RESULT" \
             "$SOURCES_EVIDENCE_JOURNAL_RESULT"; do
             test "$result" = "success"
           done
@@ -367,6 +412,7 @@ jobs:
             [protocol]=protocol [testing]=testing [serve]=serve [client]=client
             [facts-evidence]=facts/evidence [facts-trust]=facts/trust
             [facts-task-execution]=facts/task-execution
+            [facts-benchmarking]=facts/benchmarking
             [source-evidence-journal]=sources/evidence-journal
           )
           for package in "${!target[@]}"; do
@@ -381,5 +427,6 @@ jobs:
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
       - name: Compile packed public entrypoint consumers
         run: node .github/scripts/record-discovery-packed-types.test.mjs
