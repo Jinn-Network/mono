@@ -6,6 +6,7 @@ import {
   cellKey,
   expectedCellCount,
   expectedCellSet,
+  MAX_MATERIALIZED_CELLS,
   parseCellKey,
   submissionExtensionBlock,
 } from "./cells.js";
@@ -121,6 +122,55 @@ describe("expectedCellSet / expectedCellCount", () => {
     const keys = coords.map((c) => c.cellKey);
     expect(new Set(keys).size).toBe(12);
     expect(keys).toEqual([...keys].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+  });
+
+  test("rejects an unsafe exact Cartesian cardinality before converting or enumerating", () => {
+    const threeItemBench = BenchmarkRecordSchema.parse({
+      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      name: "three-position-overflow",
+      description: "d",
+      version: "1.0.0",
+      items: [
+        { task: { digest: { sha256: "1".repeat(64) } } },
+        { task: { digest: { sha256: "2".repeat(64) } } },
+        { task: { digest: { sha256: "3".repeat(64) } } },
+      ],
+      reveal: { policy: "immediate" },
+    });
+    const oneArmRun = RunRecordSchema.parse({
+      ...RunRecordSchema.parse(loadJson("../../fixtures/run/minimal.json")),
+      arms: [{ armId: "armA", pinning: { model: { id: "m1" } } }],
+      replicates: Number.MAX_SAFE_INTEGER,
+    });
+
+    expect(() => expectedCellCount(threeItemBench, oneArmRun)).toThrow(
+      "expected cell cardinality exceeds Number.MAX_SAFE_INTEGER: 27021597764222973",
+    );
+    expect(() => expectedCellSet(threeItemBench, oneArmRun)).toThrow(
+      "expected cell cardinality exceeds Number.MAX_SAFE_INTEGER: 27021597764222973",
+    );
+  });
+
+  test("reports a safe million-plus count but refuses materialization before iteration", () => {
+    const oneItemBench = BenchmarkRecordSchema.parse({
+      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      name: "materialization-bound",
+      description: "d",
+      version: "1.0.0",
+      items: [{ task: { digest: { sha256: "1".repeat(64) } } }],
+      reveal: { policy: "immediate" },
+    });
+    const oneArmRun = RunRecordSchema.parse({
+      ...RunRecordSchema.parse(loadJson("../../fixtures/run/minimal.json")),
+      arms: [{ armId: "armA", pinning: { model: { id: "m1" } } }],
+      replicates: 1_000_001,
+    });
+
+    expect(MAX_MATERIALIZED_CELLS).toBe(1_000_000);
+    expect(expectedCellCount(oneItemBench, oneArmRun)).toBe(1_000_001);
+    expect(() => expectedCellSet(oneItemBench, oneArmRun)).toThrow(
+      "expected cell set exceeds MAX_MATERIALIZED_CELLS (1000000): 1000001",
+    );
   });
 });
 

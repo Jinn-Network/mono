@@ -11,6 +11,9 @@ export interface CellCoord {
   replicate: number;
 }
 
+/** Hard bound for the array-returning helper; exact counts remain available above this limit. */
+export const MAX_MATERIALIZED_CELLS = 1_000_000;
+
 export const TaskDigestHexSchema = LowercaseSha256HexSchema;
 const RunDigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/, "runDigest must be sha256:<64 lowercase hex>");
 
@@ -75,6 +78,12 @@ export function parseCellKey(key: string): CellCoord {
  * lexicographically by `cellKey` (UTF-16 code-unit order, §8.3).
  */
 export function expectedCellSet(bench: BenchmarkRecord, run: RunRecord): CellCoord[] {
+  const count = expectedCellCount(bench, run);
+  if (count > MAX_MATERIALIZED_CELLS) {
+    throw new RangeError(
+      `expected cell set exceeds MAX_MATERIALIZED_CELLS (${MAX_MATERIALIZED_CELLS}): ${count}`,
+    );
+  }
   const coords: CellCoord[] = [];
   for (const item of bench.items) {
     const taskDigest = itemTaskDigest(item);
@@ -89,7 +98,11 @@ export function expectedCellSet(bench: BenchmarkRecord, run: RunRecord): CellCoo
 
 /** `|items| × |arms| × replicates` (§7.3), without materializing the full set. */
 export function expectedCellCount(bench: BenchmarkRecord, run: RunRecord): number {
-  return bench.items.length * run.arms.length * run.replicates;
+  const cardinality = BigInt(bench.items.length) * BigInt(run.arms.length) * BigInt(run.replicates);
+  if (cardinality > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new RangeError(`expected cell cardinality exceeds Number.MAX_SAFE_INTEGER: ${cardinality}`);
+  }
+  return Number(cardinality);
 }
 
 /**

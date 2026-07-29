@@ -82,6 +82,7 @@ export {
   cellKey,
   expectedCellCount,
   expectedCellSet,
+  MAX_MATERIALIZED_CELLS,
   parseCellKey,
   submissionExtensionBlock,
 } from "./run/cells.js";

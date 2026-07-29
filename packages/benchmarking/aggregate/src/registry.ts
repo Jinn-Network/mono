@@ -254,6 +254,12 @@ function reduceScoredCells(input: SingleSubjectComputeInput): { decisive: (CellR
   return { decisive, conflictedCellKeys };
 }
 
+/** Every arm represented by the exact subject Matrix, including arms with no decisive cells. */
+function subjectArmIds(input: SingleSubjectComputeInput): string[] {
+  return [...new Set(input.matrices.flatMap((matrix) => matrix.cells.map((cell) => cell.armId)))]
+    .sort(compareCodeUnitStrings);
+}
+
 // --- wilson@1 (design §9.2) ------------------------------------------------------------------
 
 const wilsonMethod: SingleSubjectMethod = {
@@ -262,8 +268,10 @@ const wilsonMethod: SingleSubjectMethod = {
   version: BENCHMARKING_METHOD_VERSION,
   versionRobust: false,
   compute(input) {
+    const armIds = subjectArmIds(input);
     const { decisive, conflictedCellKeys } = reduceScoredCells(input);
     const perArm = new Map<string, { passed: number; scorable: number }>();
+    for (const armId of armIds) perArm.set(armId, { passed: 0, scorable: 0 });
     for (const cell of decisive) {
       const bucket = perArm.get(cell.armId) ?? { passed: 0, scorable: 0 };
       bucket.scorable += 1;
@@ -271,7 +279,7 @@ const wilsonMethod: SingleSubjectMethod = {
       perArm.set(cell.armId, bucket);
     }
     const arms: Record<string, unknown> = {};
-    for (const armId of [...perArm.keys()].sort(compareCodeUnitStrings)) {
+    for (const armId of armIds) {
       const { passed, scorable } = perArm.get(armId)!;
       const { p, lo, hi } = wilsonInterval(passed, scorable);
       arms[armId] = { n: scorable, passRate: fixed4(p), wilsonInterval: { low: fixed4(lo), high: fixed4(hi) } };
@@ -288,11 +296,14 @@ const wilsonMethod: SingleSubjectMethod = {
 
 function perArmTaskReplicateCounts(input: SingleSubjectComputeInput): {
   perArmTask: Map<string, Map<string, { n: number; c: number; cellKeys: string[] }>>;
+  armIds: string[];
   taskDigests: string[];
   conflictedCellKeys: string[];
 } {
+  const armIds = subjectArmIds(input);
   const { decisive, conflictedCellKeys } = reduceScoredCells(input);
   const perArmTask = new Map<string, Map<string, { n: number; c: number; cellKeys: string[] }>>();
+  for (const armId of armIds) perArmTask.set(armId, new Map());
   for (const cell of decisive) {
     const perTask = perArmTask.get(cell.armId) ?? new Map<string, { n: number; c: number; cellKeys: string[] }>();
     const bucket = perTask.get(cell.taskDigest) ?? { n: 0, c: 0, cellKeys: [] };
@@ -305,7 +316,7 @@ function perArmTaskReplicateCounts(input: SingleSubjectComputeInput): {
   const taskDigests = [...new Set(
     input.matrices.flatMap((matrix) => matrix.cells.map((cell) => cell.taskDigest)),
   )].sort(compareCodeUnitStrings);
-  return { perArmTask, taskDigests, conflictedCellKeys };
+  return { perArmTask, armIds, taskDigests, conflictedCellKeys };
 }
 
 const avgAtKMethod: SingleSubjectMethod = {
@@ -314,9 +325,9 @@ const avgAtKMethod: SingleSubjectMethod = {
   version: BENCHMARKING_METHOD_VERSION,
   versionRobust: false,
   compute(input) {
-    const { perArmTask, taskDigests, conflictedCellKeys } = perArmTaskReplicateCounts(input);
+    const { perArmTask, armIds, taskDigests, conflictedCellKeys } = perArmTaskReplicateCounts(input);
     const arms: Record<string, unknown> = {};
-    for (const armId of [...perArmTask.keys()].sort(compareCodeUnitStrings)) {
+    for (const armId of armIds) {
       const perTask = perArmTask.get(armId)!;
       const perTaskResults: Record<string, unknown> = {};
       let sum = 0;
@@ -347,7 +358,7 @@ const passAtKMethod: SingleSubjectMethod = {
   versionRobust: false,
   compute(input) {
     const k = requireIntegerParam(input.parameters, "k");
-    const { perArmTask, taskDigests, conflictedCellKeys } = perArmTaskReplicateCounts(input);
+    const { perArmTask, armIds, taskDigests, conflictedCellKeys } = perArmTaskReplicateCounts(input);
     const arms: Record<string, unknown> = {};
     const incompatibleTasks: {
       armId: string;
@@ -357,7 +368,7 @@ const passAtKMethod: SingleSubjectMethod = {
       reason: "k-exceeds-observed-replicates";
       cellKeys: string[];
     }[] = [];
-    for (const armId of [...perArmTask.keys()].sort(compareCodeUnitStrings)) {
+    for (const armId of armIds) {
       const perTask = perArmTask.get(armId)!;
       const perTaskResults: Record<string, unknown> = {};
       let sum = 0;
