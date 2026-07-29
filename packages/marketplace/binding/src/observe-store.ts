@@ -26,6 +26,7 @@ import {
   foldObservations,
   serializeCanonicalJson,
   sha256Hex,
+  type JsonValue,
 } from "@jinn-network/task-execution-protocol";
 import { TaskExecutionError, type DeliveryRef, type ObservationCursor, type ObservationSnapshot, type ReconciliationReport, type SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { MarketplaceChainConfig } from "./addresses.js";
@@ -143,23 +144,28 @@ export function createInMemoryMarketplaceObserveStore(config: MarketplaceChainCo
       scopes.set(key, completed);
       pendingScopes.delete(key);
 
-      // Self-claim (design §5.3), stub-only -- see module doc.
+      // Self-claim (design §5.3), stub-only -- see module doc. Two-party engagement (TEP
+      // Addendum 2026-07-28-b) adopts the caller-minted Attempt URI + dispatch-context instead.
       const attemptIndex = nextAttemptIndex;
       nextAttemptIndex += 1;
-      const attempt = deriveMarketplaceAttemptUri({
-        chainId: config.chainId,
-        coordinator: config.taskCoordinator,
-        taskId: input.outcome.taskId,
-        attemptIndex,
-      });
+      const attempt = input.engagement !== undefined
+        ? input.engagement.attemptUri
+        : deriveMarketplaceAttemptUri({
+          chainId: config.chainId,
+          coordinator: config.taskCoordinator,
+          taskId: input.outcome.taskId,
+          attemptIndex,
+        });
 
-      const dispatchContext = {
-        taskDigest: input.taskDigest,
-        submission: submissionUri,
-        nonce: submission.nonce,
-        attempt,
-      };
-      const dispatchContextBytes = serializeCanonicalJson(dispatchContext);
+      const dispatchContext = input.engagement !== undefined
+        ? input.engagement.dispatchContext
+        : {
+          taskDigest: input.taskDigest,
+          submission: submissionUri,
+          nonce: submission.nonce,
+          attempt,
+        };
+      const dispatchContextBytes = serializeCanonicalJson(dispatchContext as JsonValue);
       const dispatchContextDescriptor: ResourceDescriptor = {
         uri: `urn:jinn:marketplace:dispatch-context:${attempt}`,
         digest: { sha256: sha256Hex(dispatchContextBytes) },

@@ -272,6 +272,97 @@ describe("makeMarketplaceBackend -- submit", () => {
     expect(broadcast).not.toHaveBeenCalled();
   });
 
+  // TEP Addendum 2026-07-28-b / marketplace-binding-design Finding F4: the requester-facing
+  // marketplace backend must honor the optional third engagement parameter on submit.
+  test("two-party engagement adopts the caller-minted Attempt URI instead of minting one", async () => {
+    const backend = makeMarketplaceBackend(BASE_SEPOLIA_TODAY, makeTestPorts());
+    const task = goldenTask();
+    const submissionUri = `urn:uuid:${crypto.randomUUID()}` as const;
+    const nonce = "two-party-adopt-nonce";
+    const submission = goldenSubmission(task, { submission: submissionUri, nonce });
+    const attemptUri = `urn:uuid:${crypto.randomUUID()}` as const;
+
+    const ack = await backend.submit(task, submission, {
+      attemptUri,
+      dispatchContext: {
+        taskDigest: documentDigest(task),
+        submission: submissionUri,
+        nonce,
+        attempt: attemptUri,
+      },
+    });
+
+    expect(ack.accepted).toBe(true);
+    if (!ack.accepted) throw new Error("unreachable");
+    expect((await backend.observe(ack.submission)).descriptor.attempt).toBe(attemptUri);
+  });
+
+  test("two-party engagement rejects a malformed Attempt URI as invalid-document before durable work", async () => {
+    const ports = makeTestPorts();
+    const broadcast = vi.fn(ports.posting.safe.broadcastCreateTask);
+    ports.posting.safe.broadcastCreateTask = broadcast;
+    const claimScope = vi.fn(ports.observe.claimSubmissionScope.bind(ports.observe));
+    ports.observe.claimSubmissionScope = claimScope;
+    const backend = makeMarketplaceBackend(BASE_SEPOLIA_TODAY, ports);
+
+    const task = goldenTask();
+    const submissionUri = `urn:uuid:${crypto.randomUUID()}` as const;
+    const nonce = "two-party-malformed-nonce";
+    const submission = goldenSubmission(task, { submission: submissionUri, nonce });
+    const malformedAttemptUri = "urn:uuid:not-a-real-uuid" as const;
+
+    const ack = await backend.submit(task, submission, {
+      attemptUri: malformedAttemptUri,
+      dispatchContext: {
+        taskDigest: documentDigest(task),
+        submission: submissionUri,
+        nonce,
+        attempt: malformedAttemptUri,
+      },
+    });
+
+    expect(ack.accepted).toBe(false);
+    if (ack.accepted) throw new Error("unreachable");
+    expect(ack.error).toBeInstanceOf(TaskExecutionError);
+    expect(ack.error.category).toBe("invalid-document");
+    expect(claimScope).not.toHaveBeenCalled();
+    expect(broadcast).not.toHaveBeenCalled();
+  });
+
+  test("two-party engagement scopes attempts honor-or-reject away from single-party capability bounds", async () => {
+    const backend = makeMarketplaceBackend(BASE_SEPOLIA_TODAY, makeTestPorts());
+    const capabilities = await backend.capabilities();
+    const declaredMaxTotal = capabilities.attempts.maxTotal;
+    if (declaredMaxTotal === undefined) {
+      throw new Error("fixture expects marketplace backend to declare attempts.maxTotal");
+    }
+    const outOfRange = declaredMaxTotal[1] + 1;
+
+    const task = goldenTask();
+    const submissionUri = `urn:uuid:${crypto.randomUUID()}` as const;
+    const nonce = "two-party-scoped-nonce";
+    const submission = goldenSubmission(task, {
+      submission: submissionUri,
+      nonce,
+      attempts: { maxTotal: outOfRange },
+    });
+    const attemptUri = `urn:uuid:${crypto.randomUUID()}` as const;
+
+    const ack = await backend.submit(task, submission, {
+      attemptUri,
+      dispatchContext: {
+        taskDigest: documentDigest(task),
+        submission: submissionUri,
+        nonce,
+        attempt: attemptUri,
+      },
+    });
+
+    expect(ack.accepted).toBe(true);
+    if (!ack.accepted) throw new Error("unreachable");
+    expect((await backend.observe(ack.submission)).descriptor.attempt).toBe(attemptUri);
+  });
+
   test.each([
     {
       label: "pretty-printed Task",

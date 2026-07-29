@@ -20,10 +20,17 @@ const MARKETPLACE_PACKAGES = [
 // (record-discovery-package-inventory.test.mjs precedent).
 const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
+  ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
+  ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
+  ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
+  ['@jinn-network/task-execution-backend-local', join(root, 'packages', 'task-execution', 'backend-local', 'assembly')],
+  ['@jinn-network/task-execution-launchers', join(root, 'packages', 'task-execution', 'backend-local', 'launchers')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
+  ['@jinn-network/task-execution-supervisor', join(root, 'packages', 'task-execution', 'backend-local', 'supervisor')],
   ['@jinn-network/task-execution-testing', join(root, 'packages', 'task-execution', 'testing')],
+  ['@jinn-network/task-execution-workspace', join(root, 'packages', 'task-execution', 'backend-local', 'workspace')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
   ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
   ['@jinn-network/trust-testing', join(root, 'packages', 'trust', 'testing')],
@@ -109,15 +116,23 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/task-execution-testing',
       '@jinn-network/trust-testing',
     ],
-    // Shadow devDependencies: the full transitive closure reachable via the five declared
+    // Shadow devDependencies: the full transitive closure reachable via the declared
     // dependencies above (marketplace-binding, marketplace-projector, record-discovery-testing,
-    // task-execution-testing, trust-testing).
+    // task-execution-testing, trust-testing), including task-execution-testing's backend-local
+    // runtime slice and the assembly's evidence contract deps.
     devDependencies: [
+      '@jinn-network/evidence-discovery',
+      '@jinn-network/evidence-repository',
+      '@jinn-network/execution-recorder',
       '@jinn-network/record-discovery-protocol',
       '@jinn-network/record-discovery-serve',
       '@jinn-network/task-execution-backend',
+      '@jinn-network/task-execution-backend-local',
+      '@jinn-network/task-execution-launchers',
       '@jinn-network/task-execution-profiles',
       '@jinn-network/task-execution-protocol',
+      '@jinn-network/task-execution-supervisor',
+      '@jinn-network/task-execution-workspace',
       '@jinn-network/trust-core',
       '@jinn-network/trust-resolve',
     ],
