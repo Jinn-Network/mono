@@ -2226,4 +2226,473 @@ describe("revised preparation identity and forfeiture", () => {
     });
     expect(Object.values(output.state.tasks)[0]?.liveAttemptIndices).toEqual({});
   });
+
+  const attemptForfeited = projectable({
+    event: "AttemptForfeited",
+    facts: { taskId: 42n, attemptIndex: 3, operator: OPERATOR },
+    derivation: derivation("AttemptForfeited", 208, "revised"),
+  });
+
+  const verdictForfeited = projectable({
+    event: "VerdictForfeited",
+    facts: {
+      taskId: 42n,
+      attemptIndex: 3,
+      verdictIndex: 1,
+      evaluator: CREATOR,
+    },
+    derivation: derivation("VerdictForfeited", 213, "revised"),
+  });
+
+  const verdictReservationForfeited = projectable({
+    event: "ReservationForfeited",
+    facts: {
+      taskId: 42n,
+      attemptIndex: 3,
+      verdictIndex: 1,
+      requestId: VERDICT_REQUEST_ID,
+      rate: 20n,
+      legKind: 2,
+    },
+    derivation: derivation("ReservationForfeited", 214, "revised"),
+  });
+
+  function hasSettlementSideEffects(output: ReturnType<typeof reduceMarketplaceProjection>): boolean {
+    return output.observations.some(({ type }) =>
+      type === "network.jinn.task-execution.delivery-recorded.v1"
+      || type === "network.jinn.task-execution.attempt-terminal.v1"
+      || type === "network.jinn.task-execution.submission-closed.v1"
+    );
+  }
+
+  test("prepare→forfeit blocks later Deliver and claim with zero settlement side effects", () => {
+    const afterForfeit = reduceMarketplaceProjection(
+      [revisedTask, revisedClaim, prepared, attemptForfeited],
+      createMarketplaceProjectionState(),
+    );
+    expect(afterForfeit.refusals).toEqual([]);
+    expect(afterForfeit.observations.map(({ type }) => type)).toEqual([
+      "network.jinn.task-execution.submission-accepted.v1",
+      "network.jinn.task-execution.attempt-engaged.v1",
+      "network.jinn.task-execution.attempt-terminal.v1",
+    ]);
+    expect(afterForfeit.state.attemptEngagements[ATTEMPT]?.status).toBe("forfeited");
+    expect(afterForfeit.state.requestIdBindings[
+      `84532:${REQUEST_ID.toLowerCase()}`
+    ]?.status).toBe("forfeited");
+    expect(afterForfeit.state.pendingMechDeliveries).toEqual({});
+
+    const afterDeliver = reduceMarketplaceProjection(
+      [marketplaceDelivery],
+      afterForfeit.state,
+    );
+    expect(afterDeliver.refusals.map(({ reason }) => reason)).toContain("engagement-forfeited");
+    expect(hasSettlementSideEffects(afterDeliver)).toBe(false);
+
+    const afterClaim = reduceMarketplaceProjection([claimed], afterDeliver.state);
+    expect(afterClaim.refusals.map(({ reason }) => reason)).toContain("engagement-forfeited");
+    expect(hasSettlementSideEffects(afterClaim)).toBe(false);
+  });
+
+  test("prepare→Deliver→forfeit blocks later claim with zero settlement side effects", () => {
+    const afterDeliver = reduceMarketplaceProjection(
+      [revisedTask, revisedClaim, prepared, marketplaceDelivery],
+      createMarketplaceProjectionState(),
+    );
+    expect(afterDeliver.refusals).toEqual([]);
+    expect(afterDeliver.state.requestIdBindings[
+      `84532:${REQUEST_ID.toLowerCase()}`
+    ]?.status).toBe("delivered");
+
+    const afterForfeit = reduceMarketplaceProjection(
+      [attemptForfeited],
+      afterDeliver.state,
+    );
+    expect(afterForfeit.refusals).toEqual([]);
+    expect(afterForfeit.state.attemptEngagements[ATTEMPT]?.status).toBe("forfeited");
+    expect(afterForfeit.state.requestIdBindings[
+      `84532:${REQUEST_ID.toLowerCase()}`
+    ]?.status).toBe("forfeited");
+    expect(afterForfeit.state.pendingMechDeliveries).toEqual({});
+
+    const afterClaim = reduceMarketplaceProjection([claimed], afterForfeit.state);
+    expect(afterClaim.refusals.map(({ reason }) => reason)).toContain("engagement-forfeited");
+    expect(hasSettlementSideEffects(afterClaim)).toBe(false);
+    expect(afterClaim.observations.some(({ type }) =>
+      type === "network.jinn.task-execution.delivery-recorded.v1"
+    )).toBe(false);
+  });
+
+  test("coordinator-only AttemptForfeited quarantines prepared binding without ReservationForfeited", () => {
+    const output = reduceMarketplaceProjection(
+      [revisedTask, revisedClaim, prepared, attemptForfeited],
+      createMarketplaceProjectionState(),
+    );
+    expect(output.refusals).toEqual([]);
+    expect(output.state.requestIdBindings[
+      `84532:${REQUEST_ID.toLowerCase()}`
+    ]).toMatchObject({ status: "forfeited", kind: "solution" });
+    expect(output.state.pendingMechDeliveries).toEqual({});
+    expect(output.observations.filter(({ type }) =>
+      type === "network.jinn.task-execution.attempt-terminal.v1"
+    )).toHaveLength(1);
+  });
+
+  test("paired AttemptForfeited then ReservationForfeited is idempotent without duplicate terminal effects", () => {
+    const pairedReservation = projectable({
+      event: "ReservationForfeited",
+      facts: {
+        taskId: 42n,
+        attemptIndex: 3,
+        verdictIndex: 0,
+        requestId: REQUEST_ID,
+        rate: 10n,
+        legKind: 1,
+      },
+      derivation: {
+        ...derivation("ReservationForfeited", 209, "revised"),
+        txHash: attemptForfeited.derivation.txHash,
+        logIndex: 209,
+      },
+    });
+    const output = reduceMarketplaceProjection(
+      [
+        revisedTask,
+        revisedClaim,
+        prepared,
+        marketplaceDelivery,
+        attemptForfeited,
+        pairedReservation,
+      ],
+      createMarketplaceProjectionState(),
+    );
+    expect(output.refusals).toEqual([]);
+    expect(output.observations.filter(({ type }) =>
+      type === "network.jinn.task-execution.attempt-terminal.v1"
+    )).toHaveLength(1);
+    expect(output.state.requestIdBindings[
+      `84532:${REQUEST_ID.toLowerCase()}`
+    ]?.status).toBe("forfeited");
+  });
+
+  test("duplicate ReservationForfeited replay is idempotent", () => {
+    const forfeited = projectable({
+      event: "ReservationForfeited",
+      facts: {
+        taskId: 42n,
+        attemptIndex: 3,
+        verdictIndex: 0,
+        requestId: REQUEST_ID,
+        rate: 10n,
+        legKind: 1,
+      },
+      derivation: derivation("ReservationForfeited", 207, "revised"),
+    });
+    const first = reduceMarketplaceProjection(
+      [revisedTask, revisedClaim, prepared, marketplaceDelivery, forfeited],
+      createMarketplaceProjectionState(),
+    );
+    const replay = reduceMarketplaceProjection([forfeited], first.state);
+    expect(replay).toEqual({
+      state: first.state,
+      events: [],
+      observations: [],
+      availabilityOpenedLogIds: [],
+      refusals: [],
+    });
+  });
+
+  test("VerdictForfeited blocks verdict Deliver and claim", () => {
+    const afterSolution = reduceMarketplaceProjection(
+      [revisedTask, revisedClaim, prepared, marketplaceDelivery, claimed],
+      createMarketplaceProjectionState(),
+    );
+    const afterEval = reduceMarketplaceProjection(
+      [evaluationClaim, verdictPrepared],
+      afterSolution.state,
+    );
+    const afterForfeit = reduceMarketplaceProjection(
+      [verdictForfeited],
+      afterEval.state,
+    );
+    expect(afterForfeit.refusals).toEqual([]);
+    expect(afterForfeit.state.evaluationEngagements[
+      `84532:${COORDINATOR.toLowerCase()}:42:3:1`
+    ]?.status).toBe("forfeited");
+    expect(afterForfeit.state.requestIdBindings[
+      `84532:${VERDICT_REQUEST_ID.toLowerCase()}`
+    ]?.status).toBe("forfeited");
+
+    const afterDeliver = reduceMarketplaceProjection(
+      [verdictMarketplaceDelivery],
+      afterForfeit.state,
+    );
+    expect(afterDeliver.refusals.map(({ reason }) => reason)).toContain("engagement-forfeited");
+    expect(hasSettlementSideEffects(afterDeliver)).toBe(false);
+
+    const afterClaim = reduceMarketplaceProjection(
+      [verdictClaimed],
+      afterDeliver.state,
+    );
+    expect(afterClaim.refusals.map(({ reason }) => reason)).toContain("engagement-forfeited");
+    expect(afterClaim.observations.filter(({ type }) =>
+      type === "network.jinn.task-execution.attempt-terminal.v1"
+    )).toHaveLength(0);
+  });
+
+  test("paired verdict forfeit then ReservationForfeited is idempotent", () => {
+    const paired = projectable({
+      event: "ReservationForfeited",
+      facts: {
+        taskId: 42n,
+        attemptIndex: 3,
+        verdictIndex: 1,
+        requestId: VERDICT_REQUEST_ID,
+        rate: 20n,
+        legKind: 2,
+      },
+      derivation: {
+        ...derivation("ReservationForfeited", 215, "revised"),
+        txHash: verdictForfeited.derivation.txHash,
+        logIndex: 215,
+      },
+    });
+    const output = reduceMarketplaceProjection(
+      [
+        revisedTask,
+        revisedClaim,
+        prepared,
+        marketplaceDelivery,
+        claimed,
+        evaluationClaim,
+        verdictPrepared,
+        verdictMarketplaceDelivery,
+        verdictForfeited,
+        paired,
+      ],
+      createMarketplaceProjectionState(),
+    );
+    expect(output.refusals).toEqual([]);
+    expect(output.state.requestIdBindings[
+      `84532:${VERDICT_REQUEST_ID.toLowerCase()}`
+    ]?.status).toBe("forfeited");
+    expect(output.state.evaluationEngagements[
+      `84532:${COORDINATOR.toLowerCase()}:42:3:1`
+    ]?.status).toBe("forfeited");
+    expect(output.observations.some(({ type }) =>
+      type === "network.jinn.task-execution.delivery-recorded.v1"
+    )).toBe(true);
+  });
+});
+
+describe("revised generation refuses today-shaped settlement", () => {
+  const DELIVERY_DIGEST = `0x${"b".repeat(64)}` satisfies Hex;
+  const VERDICT_REQUEST_ID = `0x${"8".repeat(64)}` satisfies Hex;
+  const VERDICT_DIGEST = `0x${"c".repeat(64)}` satisfies Hex;
+  const REQUEST_DATA = encodeRevisedRequestData({
+    legKind: 1,
+    taskId: 42n,
+    attemptIndex: 3,
+    verdictIndex: 0,
+    deliveryDigest: DELIVERY_DIGEST,
+    verdictCode: 0,
+  });
+
+  const revisedTask = projectable({
+    event: "TaskCreated",
+    facts: {
+      creator: CREATOR,
+      taskCidDigest: `0x${"7".repeat(64)}`,
+      submissionDigest: `0x${"d".repeat(64)}`,
+      taskId: 42n,
+      maxTotal: 2,
+      maxConcurrent: 1,
+      submissionDeadline: 1_800_000_000n,
+      closeAt: 0n,
+      responseTimeout: 3600n,
+      minVerdicts: 1,
+      requireDistinctEvaluator: true,
+      solutionMaxDeliveryRate: 10n,
+      verdictMaxDeliveryRate: 20n,
+      solutionBudget: 20n,
+      verdictBudget: 40n,
+    },
+    derivation: derivation("TaskCreated", 300, "revised"),
+  });
+
+  const revisedClaim = projectable({
+    event: "TaskAttemptCreated",
+    facts: {
+      taskId: 42n,
+      attemptIndex: 3,
+      operator: OPERATOR,
+      priorityMech: OPERATOR,
+      attemptDeadline: 1_800_000_001n,
+      deliveryRate: 10n,
+    },
+    derivation: derivation("TaskAttemptCreated", 301, "revised"),
+  });
+
+  const prepared = projectable({
+    event: "SolutionDeliveryPrepared",
+    facts: {
+      operator: OPERATOR,
+      expectedRequestId: REQUEST_ID,
+      taskId: 42n,
+      attemptIndex: 3,
+      nonce: 7n,
+      deliveryDigest: DELIVERY_DIGEST,
+    },
+    derivation: derivation("SolutionDeliveryPrepared", 302, "revised"),
+  });
+
+  const todayShapedDeliver = projectable({
+    event: "Deliver",
+    facts: {
+      mech: OPERATOR,
+      mechServiceMultisig: OPERATOR,
+      requestId: REQUEST_ID,
+      deliveryRate: 10n,
+      data: `0x${"a".repeat(64)}`,
+    },
+    derivation: derivation("Deliver", 303, "today"),
+  }, {
+    deliveryCorrespondence: {
+      sha256Digest: `sha256:${"a".repeat(64)}`,
+      keccakEvidenceHash: DELIVERY_DIGEST,
+      onChainSha256CidDigest: `sha256:${"a".repeat(64)}`,
+      onChainKeccak: DELIVERY_DIGEST,
+    },
+  });
+
+  const todayShapedSolutionClaim = projectable({
+    event: "SolutionDeliveryClaimed",
+    facts: {
+      operator: OPERATOR,
+      requestId: REQUEST_ID,
+      taskId: 42n,
+      attemptIndex: 3,
+    },
+    derivation: derivation("SolutionDeliveryClaimed", 304, "today"),
+  });
+
+  const revisedShapedSolutionClaim = projectable({
+    event: "SolutionDeliveryClaimed",
+    facts: {
+      operator: OPERATOR,
+      requestId: REQUEST_ID,
+      taskId: 42n,
+      attemptIndex: 3,
+      deliveryDigest: DELIVERY_DIGEST,
+    },
+    derivation: derivation("SolutionDeliveryClaimed", 305, "revised"),
+  });
+
+  const todayShapedVerdictClaim = projectable({
+    event: "VerdictDeliveryClaimed",
+    facts: {
+      evaluator: CREATOR,
+      requestId: VERDICT_REQUEST_ID,
+      taskId: 42n,
+      attemptIndex: 3,
+      verdictIndex: 1,
+      verdictCode: 1,
+    },
+    derivation: derivation("VerdictDeliveryClaimed", 306, "today"),
+  });
+
+  test("revised task refuses today-shaped Deliver without requestData", () => {
+    const output = reduceMarketplaceProjection(
+      [revisedTask, revisedClaim, prepared, todayShapedDeliver],
+      createMarketplaceProjectionState(),
+    );
+    expect(output.refusals.map(({ reason }) => reason)).toContain("deliver-request-data-invalid");
+    expect(output.observations.some(({ type }) =>
+      type === "network.jinn.task-execution.delivery-recorded.v1"
+    )).toBe(false);
+    expect(output.state.pendingMechDeliveries).toEqual({});
+  });
+
+  test("revised task refuses today-shaped solution claim without deliveryDigest", () => {
+    const revisedDeliver = projectable({
+      event: "Deliver",
+      facts: {
+        mech: OPERATOR,
+        mechServiceMultisig: OPERATOR,
+        requestId: REQUEST_ID,
+        deliveryRate: 10n,
+        requestData: REQUEST_DATA,
+        deliveryData: `0x${"a".repeat(64)}`,
+      },
+      derivation: derivation("Deliver", 303, "revised"),
+    });
+    const afterDeliver = reduceMarketplaceProjection(
+      [revisedTask, revisedClaim, prepared, revisedDeliver],
+      createMarketplaceProjectionState(),
+    );
+    const output = reduceMarketplaceProjection(
+      [todayShapedSolutionClaim],
+      afterDeliver.state,
+    );
+    expect(output.refusals.map(({ reason }) => reason)).toContain("reservation-not-delivered");
+    expect(output.observations.some(({ type }) =>
+      type === "network.jinn.task-execution.delivery-recorded.v1"
+    )).toBe(false);
+  });
+
+  test("generation-label spoof cannot bypass revised settlement requirements", () => {
+    const spoofedTodayClaim = {
+      ...todayShapedSolutionClaim,
+      derivation: derivation("SolutionDeliveryClaimed", 307, "today"),
+    } as ObservationMarketplaceEvent;
+    const revisedDeliver = projectable({
+      event: "Deliver",
+      facts: {
+        mech: OPERATOR,
+        mechServiceMultisig: OPERATOR,
+        requestId: REQUEST_ID,
+        deliveryRate: 10n,
+        requestData: REQUEST_DATA,
+        deliveryData: `0x${"a".repeat(64)}`,
+      },
+      derivation: {
+        ...derivation("Deliver", 303, "revised"),
+        blockHash: BLOCK_HASH,
+        txHash: TX_HASH,
+        logIndex: 303,
+      },
+    });
+    const afterDeliver = reduceMarketplaceProjection(
+      [revisedTask, revisedClaim, prepared, revisedDeliver],
+      createMarketplaceProjectionState(),
+    );
+    const output = reduceMarketplaceProjection([spoofedTodayClaim], afterDeliver.state);
+    expect(output.refusals.map(({ reason }) => reason)).toContain("reservation-not-delivered");
+    expect(output.observations.some(({ type }) =>
+      type === "network.jinn.task-execution.delivery-recorded.v1"
+    )).toBe(false);
+  });
+
+  test("revised task refuses today-shaped verdict claim without evaluationDeliveryDigest", () => {
+    const output = reduceMarketplaceProjection(
+      [revisedTask, revisedClaim, todayShapedVerdictClaim],
+      createMarketplaceProjectionState(),
+    );
+    expect(output.refusals.map(({ reason }) => reason)).toContain("reservation-not-delivered");
+    expect(output.observations.filter(({ type }) =>
+      type === "network.jinn.task-execution.attempt-terminal.v1"
+      || type === "network.jinn.task-execution.submission-closed.v1"
+    )).toHaveLength(0);
+  });
+
+  test("today task preserves today-shaped Deliver and claim correspondence", () => {
+    const output = reduceMarketplaceProjection(
+      [todayTaskCreated, claim, deliver(), solutionClaimed],
+      createMarketplaceProjectionState(),
+    );
+    expect(output.refusals).toEqual([]);
+    expect(output.observations.at(-1)?.type).toBe(
+      "network.jinn.task-execution.delivery-recorded.v1",
+    );
+  });
 });
