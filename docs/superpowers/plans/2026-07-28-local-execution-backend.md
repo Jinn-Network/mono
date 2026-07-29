@@ -654,7 +654,7 @@ scopes the `attempts` honor-or-reject to the single caller-identified attempt (c
 
 ## Addendum 2026-07-29-c — independent design-review fix rulings
 
-Program rulings §7.33–§7.37 resolve the backend/harness review's implementation seams:
+Program rulings §7.33–§7.38 resolve the backend/harness review's implementation seams:
 
 1. Opaque capability-grant handles are redeemed by a host-injected `SecretForwardResolver`
    after durable `spawn-intended` and immediately before the real shim spawn. The resolver writes
@@ -681,6 +681,13 @@ Program rulings §7.33–§7.37 resolve the backend/harness review's implementat
    failure, or a contradictory descriptor is an operational no-verdict path. This is program
    ruling §7.37; it avoids both an arbitrary stack-wide byte constant and a locally synthesized
    descriptor.
+6. A launcher declares each secret forward as `(grantKey,target)` in `LaunchPlan`; targets are
+   unique portable basenames under the Attempt's `secrets/`. The host resolver receives the
+   matching opaque grant descriptor and returns owned bytes, while backend-owned post-intent,
+   pre-shim code performs the exclusive no-follow `0600` write and zeroes transient buffers.
+   Env references must match declarations; file-reading harnesses may declare a forward without
+   an env entry. Missing resolver/grant, invalid or existing target, symlink, or failed
+   resolution/write fails before spawn and cleans up. This is program ruling §7.38.
 
 The accepted review findings also require, without further semantic amendment: assembly
 execution/cancel/recover/deadline must use the real supervisor rather than a host `execute`

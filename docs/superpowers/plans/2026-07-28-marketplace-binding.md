@@ -928,3 +928,31 @@ remains contradictory and is evidence of the branch change, not the chain-curren
 M4.5 pins all three outcomes (raw contradiction, canonical `lost`, later genuine correction) and
 proves that observations lacking exact derivation provenance cannot enter the marketplace
 canonical selector. No generic chain-awareness or new terminal transition is added to TEP.
+
+## Addendum 2026-07-29-j — evaluation-leg contract rulings (program §7.39–§7.44)
+
+The M5 pre-implementation review exposed a real contradiction between profiles §9.1's
+pair-derived bytes and §7.6's mandatory admission-receipt input. The binding resolves it
+explicitly rather than placing the receipt in an unrelated field:
+
+1. The subject Submission annotation
+   `https://jinn.network/annotations/admission-receipt/1.0` carries a
+   `ResourceDescriptor` named `admission-receipt`. `deriveEvaluationTask` accepts that optional
+   descriptor and appends it to the derived Task's inputs after the sorted subject artifacts.
+   Marketplace decision-grade evaluation requires it; the evaluation Submission does not
+   duplicate it in `profileParameters`, grants, or a top-level extension.
+2. `deriveAndSealEvaluationSubmission` accepts a closed `submissionFields` object plus the exact
+   subject settlement context, `capabilityGrants`, `publicSpec`, and explicit sealer role. It
+   produces separate sealed Task and Submission triples. Evaluator sealing is legal only for a
+   fully public, grant-free case; sealing produces canonical TEP bytes, not a DSSE signature.
+3. A conforming Result Evaluation maps `pass → Pass`, `fail → Fail`, and
+   `inconclusive → Unresolved`. On-chain `Invalid` has no conforming decision-grade Statement
+   counterpart and is refused by the named gate.
+4. Receipt validation checks exact envelope digest, structural subjects, DSSE signature, and
+   issuer binding at trusted anchored receipt time under policy purpose `admission-agent` and
+   trust scope `https://jinn.network/trust-scopes/admission-receipts/1.0`.
+5. Verdict `evaluatedAt` must be valid RFC 3339 and no later than the canonical claim-block time;
+   exact timestamp equality is not required and no arbitrary tolerance is introduced.
+6. Named checks receive the settlement-authorized Task/Delivery/Results/subject Submission and
+   actual evaluation Task bytes, then re-derive and byte-compare that exact context. The
+   evaluator never selects the credited pair.

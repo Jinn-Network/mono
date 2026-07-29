@@ -411,6 +411,74 @@ Confirmed by the operator at the program gate (2026-07-28):
     adapter over `EvidenceRepository.putArtifact` may form the descriptor from the repository's
     trusted write receipt; the harness itself neither imports a concrete repository nor invents
     a second artifact store.
+38. **Secret forwards are explicit launch declarations with backend-owned materialization:**
+    `LaunchPlan` gains `secretForwards?: Array<{ grantKey: string; target: string }>`; `target`
+    is a unique portable basename under that Attempt's `secrets/`, never an absolute path,
+    separator, `.`/`..`, symlink, or resolver-selected location. Every `env` value of the form
+    `secrets/<target>` must have exactly one declaration; a file-reading harness may declare a
+    forward without putting its path in `env`. The fsynced spawn intent may carry only
+    `(grantKey,target)`, never a grant descriptor or resolved bytes. The host-injected
+    `SecretForwardResolver.resolve({ attempt, grantKey, descriptor }, { signal? })` returns an
+    owned `Uint8Array`; after the intent and immediately before shim spawn, backend-owned code
+    snapshots it, writes the declared target with no-follow/exclusive `0600` semantics under the
+    verified `0700` directory, and zeroes the transient buffers. Missing/duplicate grants,
+    missing resolver, invalid targets, symlinks, existing targets, or resolution/write failure
+    fail before spawn, append a never-executed failure, and run terminal cleanup. Preflight and
+    capabilities fail closed when a selected launcher requires forwards but no resolver exists.
+39. **Admission receipts remain in their normative data path and extend exact derivation:**
+    the subject Submission carries one `ResourceDescriptor` named `admission-receipt` at
+    annotation key `https://jinn.network/annotations/admission-receipt/1.0`. The marketplace
+    binding extracts that exact descriptor and the profiles `deriveEvaluationTask` input gains
+    optional `admissionReceipt`; when present, the descriptor is appended after the
+    name-sorted subject artifacts in the derived Task's `inputs`. The generic no-receipt case
+    retains its existing bytes and digest. Marketplace decision-grade evaluation requires the
+    receipt. This resolves the profiles §7.6 requirement to carry the receipt into the
+    evaluation Task; it must not be hidden in `profileParameters`, a capability grant, or an
+    unrelated top-level Submission extension. The evaluation Submission does not duplicate the
+    receipt: it binds the newly derived Task and carries only dispatch fields and the private
+    material's `capabilityGrants`.
+40. **The M5 evaluation-sealing helper has a closed caller surface:** it accepts the exact
+    settlement-context subject Task, subject Submission, Delivery, Results, EvaluationSpec
+    digest, an explicit `submissionFields` object (`submission`, `requester`,
+    `idempotencyKey`, `nonce`, `deadline`, and the allowed optional TEP dispatch fields), the
+    new evaluation Submission's `capabilityGrants`, `publicSpec`, and
+    `sealerRole: "requester" | "evaluator"`. Protocol and task reference are produced, never
+    caller-overridden. It returns
+    `{ task: { document, bytes, digest }, submission: { document, bytes, digest } }`; “seal”
+    means canonical TEP bytes, not a DSSE signature. The named-check input separately carries
+    the requester-signed Submission envelope. Evaluator sealing is allowed only when
+    `publicSpec === true` and `capabilityGrants` is empty; every private/grant-bearing case
+    requires `sealerRole: "requester"`.
+41. **Decision-grade Result Evaluation uses the Result Evaluation wire vocabulary:** after
+    parsing a conforming Statement, `pass → Pass`, `fail → Fail`, and
+    `inconclusive → Unresolved`. `Invalid` has no conforming Result Evaluation verdict value:
+    operational failures are no-verdict paths, so an on-chain `Invalid` claim cannot match a
+    decision-grade Statement. The broader today-mode venue decoder may continue recognizing
+    legacy `INVALID`, but M5's named gate must not use that permissive mapping or manufacture a
+    Statement verdict.
+42. **Admission-receipt validity includes cryptographic identity and exact-byte binding:**
+    after the profiles structural/subject check, the marketplace gate verifies the exact
+    receipt envelope digest against the descriptor carried through §7.39 and calls
+    `verifyEnvelopeBinding` with the DSSE signer key, structurally declared issuer Agent IRI,
+    trusted receipt effective time, deployment policy purpose `admission-agent`, and namespaced
+    trust scope `https://jinn.network/trust-scopes/admission-receipts/1.0`. The effective time
+    is supplied by trusted anchored receipt metadata, never an untrusted free-form payload
+    assertion. A missing signer/effective time, wrong digest, invalid signature, unbound issuer,
+    scope/policy failure, or subject mismatch fails the named check.
+43. **Verdict effective-time cross-check is ordered, not exact-equality:** the signed Result
+    Evaluation's RFC 3339 `evaluatedAt` is its envelope effective time; the claim block's
+    canonical timestamp is the settlement claim time. Both must parse, and claim time must be
+    greater than or equal to effective time. Exact instant equality is neither required nor
+    normally possible; no arbitrary global tolerance is invented. The settlement join still
+    resolves the verdict key at effective time and the settling actor at both effective and
+    claim time, so later revocation or a future-dated verdict fails closed.
+44. **The marketplace, not the evaluator, fixes the named-check pair:** gate input carries the
+    exact settlement-authorized subject Task/Delivery/Result descriptors and bytes, the subject
+    Submission with §7.39's receipt descriptor, the EvaluationSpec, and the actual evaluation
+    Task bytes. The gate re-runs the full profiles derivation over that supplied settlement
+    context and requires byte equality before any adapter/verdict credit. It accepts no
+    evaluator-selected alternate pair and adds no second host assertion; backend §7.34 remains
+    responsible only for internal consistency of the pair it was dispatched.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 

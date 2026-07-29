@@ -1300,3 +1300,16 @@ Named explicitly so nothing is silently assumed in-lane:
 - `PROFILE_SCHEMA_MAX_BYTES` / `PROFILE_SCHEMA_MAX_DEPTH` / `PROFILE_SCHEMA_MAX_PATTERN_LENGTH`
   concrete constants (proposed 262144 / 32 / 1024) — profile-format constants, program-gate
   confirmable.
+
+## Addendum 2026-07-29-b — admission-receipt derivation crosswalk (program §7.39)
+
+Profiles §7.6 requires the subject Submission's admission-receipt reference to be carried into
+the evaluation Task as an input descriptor, while §9.1 originally described the Task as derived
+from the settlement `(Task, Delivery)` pair alone. The implementation crosswalk is now explicit:
+`deriveEvaluationTask` gains optional `admissionReceipt`, a `ResourceDescriptor` named
+`admission-receipt`, and appends it after the name-sorted subject-artifact descriptors in
+`inputs`. Its reference comes from the subject Submission annotation
+`https://jinn.network/annotations/admission-receipt/1.0`. The no-receipt generic derivation keeps
+its existing exact bytes/digest; the marketplace decision-grade profile requires the receipt and
+byte-compares the receipt-bearing derivation against the settlement-fixed context. No receipt is
+hidden in profile parameters or capability grants.
