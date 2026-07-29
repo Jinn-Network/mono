@@ -1,0 +1,212 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { atomicWriteFileSync, readAtomicFileSync } from "./fs-atomic.js";
+import type { SpawnRequest } from "./attempt-identity.js";
+
+/** The shim's `(pid, start-time)` fingerprint plus the attempt nonce (design §6.1 step 3, frozen interface §14 item 2). Every liveness conclusion passes through this — a bare PID is never trusted. */
+export interface ShimFingerprint {
+  readonly pid: number;
+  readonly startTime: number;
+  readonly nonce: string;
+  /** Supplementary (not part of the required 3-field fingerprint): the harness's own pid, which is also its own pgid (spawned `detached: true`) — the cancellation ladder's direct signal target. */
+  readonly harnessPid?: number;
+}
+
+/** `meta/outcome.json` (design §6.1 step 6). */
+export interface OutcomeFile {
+  readonly attemptId: string;
+  readonly nonce: string;
+  readonly exitCode: number | null;
+  readonly termSignal: string | null;
+  readonly startedAt: string;
+  readonly finishedAt: string;
+  readonly spawnError?: string;
+}
+
+function shimJsonPath(metaDir: string): string {
+  return join(metaDir, "shim.json");
+}
+function outcomeJsonPath(metaDir: string): string {
+  return join(metaDir, "outcome.json");
+}
+function heartbeatPath(metaDir: string): string {
+  return join(metaDir, "heartbeat");
+}
+
+/** Atomically writes the shim's fingerprint to `meta/shim.json` (design §6.1 step 3). */
+export function writeShimFingerprint(metaDir: string, fingerprint: ShimFingerprint): void {
+  atomicWriteFileSync(shimJsonPath(metaDir), JSON.stringify(fingerprint));
+}
+
+/** Reads `meta/shim.json`, or `null` if the shim has never written one. */
+export function readShimFingerprint(metaDir: string): ShimFingerprint | null {
+  const raw = readAtomicFileSync(shimJsonPath(metaDir));
+  if (raw === undefined) return null;
+  return JSON.parse(raw) as ShimFingerprint;
+}
+
+/**
+ * Pure fingerprint comparison (design §6.1 step 3): a fingerprint binds `(pid, start-time)`, so a
+ * recycled PID with a DIFFERENT start-time reads as not-alive. `actual` is `undefined` when the
+ * pid does not currently exist (or its start time could not be verified) in the process table.
+ */
+export function fingerprintAlive(
+  fingerprint: Pick<ShimFingerprint, "pid" | "startTime">,
+  actual: { readonly pid: number; readonly startTime: number } | undefined,
+): boolean {
+  return actual !== undefined && actual.pid === fingerprint.pid && actual.startTime === fingerprint.startTime;
+}
+
+/** Atomically writes `meta/outcome.json` (test/orchestration helper mirroring what the real shim script does internally — the shim script's own copy stays self-contained per its file-level doc comment). */
+export function writeOutcomeFile(metaDir: string, outcome: OutcomeFile): void {
+  atomicWriteFileSync(outcomeJsonPath(metaDir), JSON.stringify(outcome));
+}
+
+/**
+ * Reads `meta/outcome.json`. Returns `null` if absent (never a partial parse — the write is
+ * atomic, so the file is either whole or missing), or if `expectedNonce` is supplied and does
+ * not match the recorded nonce (design §6.4 "stale/foreign" row — treated as absent, never
+ * trusted).
+ */
+export function readOutcome(metaDir: string, expectedNonce?: string): OutcomeFile | null {
+  const raw = readAtomicFileSync(outcomeJsonPath(metaDir));
+  if (raw === undefined) return null;
+  const outcome = JSON.parse(raw) as OutcomeFile;
+  if (expectedNonce !== undefined && outcome.nonce !== expectedNonce) return null;
+  return outcome;
+}
+
+export interface Heartbeat {
+  readonly monotonicMs: string;
+  readonly wallClock: string;
+}
+
+/** Reads `meta/heartbeat`, or `null` if the shim has not touched it yet. */
+export function readHeartbeat(metaDir: string): Heartbeat | null {
+  const raw = readAtomicFileSync(heartbeatPath(metaDir));
+  if (raw === undefined) return null;
+  return JSON.parse(raw) as Heartbeat;
+}
+
+/**
+ * Best-effort OS process-start-time probe (design §6.1: "a bare PID is never trusted"). Linux
+ * reads `/proc/<pid>/stat` field 22 (start-time in clock ticks since boot — stable and
+ * comparable across two probes of the same running kernel, so no clock-tick-to-wallclock
+ * conversion is needed). macOS has no `/proc`; falls back to `ps -o lstart=`, parsed to epoch
+ * ms. Returns `undefined` if the pid does not exist or the platform probe fails — callers treat
+ * an unverifiable start time as not-alive (fail-safe, matching "never trust a bare PID").
+ */
+export function readProcessStartTime(pid: number): number | undefined {
+  try {
+    if (process.platform === "linux") {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      // Field 22 (starttime) follows the `(comm)` parenthesized field, which may itself contain
+      // spaces/parens — split on the LAST `)` to skip past it safely.
+      const afterComm = stat.slice(stat.lastIndexOf(")") + 2).trim();
+      const fields = afterComm.split(/\s+/);
+      const starttimeField = fields[19]; // 0-indexed from field 3 (state) => field 22 is index 22-3=19
+      if (starttimeField === undefined) return undefined;
+      const ticks = Number(starttimeField);
+      return Number.isFinite(ticks) ? ticks : undefined;
+    }
+    // macOS / other POSIX: shell out to `ps`, a standard system utility.
+    const out = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8" }).trim();
+    if (!out) return undefined;
+    const ms = new Date(out).getTime();
+    return Number.isFinite(ms) ? ms : undefined;
+  } catch {
+    return undefined; // pid not found, or the platform probe is unavailable — unverifiable
+  }
+}
+
+/** Probes whether the shim recorded at `metaDir` is genuinely alive right now (fingerprint verified against the live process table, not a bare PID check). */
+export function probeShimAlive(metaDir: string): { readonly alive: boolean; readonly fingerprint: ShimFingerprint | null } {
+  const fingerprint = readShimFingerprint(metaDir);
+  if (fingerprint === null) return { alive: false, fingerprint: null };
+  const actualStartTime = readProcessStartTime(fingerprint.pid);
+  const alive = actualStartTime !== undefined
+    && fingerprintAlive(fingerprint, { pid: fingerprint.pid, startTime: actualStartTime });
+  return { alive, fingerprint };
+}
+
+/**
+ * Resolves the shim script's own entry point next to `shim.ts`/`shim.js` — `./shim-script.js`
+ * post-build (production), falling back to `./shim-script.ts` pre-build (dev/test, run directly
+ * under Node's native TypeScript support; the shim script is import-free so this needs no loader
+ * or bundler). Throws if neither exists — a packaging error, not a runtime one.
+ */
+export function resolveShimScriptEntry(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const compiled = join(here, "shim-script.js");
+  if (existsSync(compiled)) return compiled;
+  const source = join(here, "shim-script.ts");
+  if (existsSync(source)) return source;
+  throw new Error(`shim.ts: could not resolve shim-script next to ${here} (looked for shim-script.js and shim-script.ts)`);
+}
+
+/** Writes the harness `SpawnRequest` the shim script reads at startup (`env` may carry `secrets/<name>` REFERENCES, resolved by the shim at exec — never resolved here). */
+export function writeSpawnRequestSpec(
+  metaDir: string,
+  spawn: SpawnRequest & { readonly stdoutPath?: string; readonly stderrPath?: string },
+): string {
+  const path = join(metaDir, "spawn-request.json");
+  atomicWriteFileSync(path, JSON.stringify(spawn));
+  return path;
+}
+
+export interface BuildShimSpawnRequest {
+  readonly attemptId: string;
+  readonly nonce: string;
+  readonly metaDir: string;
+  readonly secretsDir: string;
+  readonly heartbeatMs?: number;
+}
+
+/**
+ * Pure: builds the argv/env for spawning the shim process itself — `JINN_ATTEMPT_ID`/
+ * `JINN_ATTEMPT_NONCE` are set on the SHIM's OWN environment here, so they are present from the
+ * instant the shim process exists (design §6.1: "env-tagged from fork"), not merely passed as an
+ * argument the shim would have to parse.
+ */
+export function buildShimSpawn(request: BuildShimSpawnRequest): {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly env: Readonly<Record<string, string>>;
+} {
+  const specPath = join(request.metaDir, "spawn-request.json");
+  return {
+    command: process.execPath,
+    args: [resolveShimScriptEntry(), specPath],
+    env: {
+      ...(process.env as Record<string, string>),
+      JINN_ATTEMPT_ID: request.attemptId,
+      JINN_ATTEMPT_NONCE: request.nonce,
+      JINN_ATTEMPT_META_DIR: request.metaDir,
+      JINN_ATTEMPT_SECRETS_DIR: request.secretsDir,
+      ...(request.heartbeatMs === undefined ? {} : { JINN_ATTEMPT_HEARTBEAT_MS: String(request.heartbeatMs) }),
+    },
+  };
+}
+
+/**
+ * Spawns the real shim process (`setsid`/session+process-group leadership is `detached: true` on
+ * POSIX — Node calls `setsid()` for the child before exec, no native addon required). The
+ * returned `ChildProcess` is detached and `unref()`'d: it survives the calling process exiting,
+ * matching "a restarted supervisor has lost `waitpid` rights over its former children forever;
+ * the outcome file is readable regardless of who is alive" (design §6.1).
+ */
+export function spawnShim(request: BuildShimSpawnRequest, harness: SpawnRequest & { readonly stdoutPath?: string; readonly stderrPath?: string }): ChildProcess {
+  writeSpawnRequestSpec(request.metaDir, harness);
+  const built = buildShimSpawn(request);
+  const child = spawn(built.command, built.args as string[], {
+    env: built.env as NodeJS.ProcessEnv,
+    detached: true,
+    stdio: ["ignore", "ignore", "ignore"],
+  });
+  child.unref();
+  return child;
+}
