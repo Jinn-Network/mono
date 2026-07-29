@@ -835,3 +835,48 @@ The `protocol` field of all four benchmarking record kinds is the https URL form
 discovery convention. The design's literal bare token `jinn.benchmarking/1.0` is superseded on
 this point (operator ruling, 2026-07-28, program §10 gate). All schemas, sealed goldens, and
 pinned digests use the URL form from day one.
+
+## Addendum 2026-07-29-d — independent M1–M3 design-review rulings
+
+The first independent M1–M3 design review rejected the implementation and surfaced one
+frozen-interface ambiguity plus one under-specified deterministic-method detail. The following
+rules are binding on the repair and supersede any singular/collapsed reading of M3.3:
+
+1. **Plural Report disclosures are lossless.** `subjects[]` remains plural.
+   `disclosures.perSubject[]` has exactly the same length and order. Each entry contains
+   `subjectSha256` (the corresponding subject descriptor's exact lowercase-hex sha256) and
+   carries that Matrix's `integrityTiers`, `pinning`, `independence`, `completeness`, and
+   `attrition` blocks verbatim. Production and verification reject missing, duplicate,
+   reordered, mismatched, or rewritten entries. V1 defines no authoritative cross-subject
+   disclosure aggregate; consumers may derive convenience views outside the sealed Report.
+2. **Pre-registration across plural subjects is universal.** Producers derive
+   `preregistered`; callers do not assert it. `true` means the exact method tuple — id,
+   version, contract-wide `verdictRule`, and the complete parameters object — occurs in every
+   resolved subject Run's `analysisPlan[]`. Missing/unresolvable Runs or any byte-distinct tuple
+   yield false/absence; a Report claiming true in those cases fails verification.
+3. **Reference methods are replay-deterministic.** No method accepts an unsealed RNG or
+   author-supplied derived observations. Every result is derived from exact subject bytes,
+   exact referenced-record bytes, and the sealed method tuple. A bootstrap method's parameters
+   declare its seed and resample count; its registry spec declares the exact PRNG/resampling
+   procedure, and independent fixtures pin the result. `noninferiority-iut@1` derives paired
+   quality and both-solve costs from Matrix cells, implements actual BCa including jackknife
+   acceleration, reports excluded pairs, and returns PASS/FAIL/INCONCLUSIVE through the
+   specified intersection-union rule.
+4. **Report verification starts from received bytes.** It consumes the exact Report DSSE
+   envelope bytes and exact subject Matrix bytes, verifies payload/media type/signature
+   offline, resolves signer-to-`author` binding at the effective time under
+   `jinn:benchmarking-reports`, and hashes subject bytes without re-sealing parsed objects.
+   Missing, malformed, revoked, wrong-scope, wrong-author, substituted, or noncanonical inputs
+   fail closed with a named check.
+5. **The kit remains prior to its consumers.** M2 lands the complete miniature-run,
+   assembly/ordering, method, comparability, clustering, exclusion, and export fixture corpus
+   plus real injected drivers. Future implementation drivers may compile without invocation,
+   but their byte-exact oracles and mandatory cases are not deferred to M4/M5.
+
+The review's remaining findings are direct design/plan violations, not new choices: enforce
+digest-bearing record references; validate Task/evaluation judgeability and ordered Benchmark
+versioning; require open-competition independence gating; fail closed on missing verdicts and
+unresolved Benchmark identity; keep arm identity in repetition estimators; require the pinned
+provenance cluster; bind clean-subset basis to its acquisition procedure; keep
+`bradley-terry@1` registered/non-reference/unavailable until genuine pairwise inputs exist; and
+apply program §7.24's I-JSON Unicode-scalar rule.

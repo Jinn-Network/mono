@@ -262,6 +262,28 @@ Confirmed by the operator at the program gate (2026-07-28):
     minted URI back into the Matrix `attempt` field; resumption idempotency rides the stable
     Submission digest + idempotency key. `deriveAttemptUri` is a two-party concern and enters
     benchmarking only in its marketplace mode via the binding.
+23. **Benchmarking Report plural subjects + pre-registration:** a v1 Report's disclosures are
+    lossless and one-to-one with `subjects[]`: `disclosures.perSubject[]` has the same length
+    and order, each entry names the corresponding Matrix's exact lowercase-hex sha256 digest
+    and carries that Matrix's integrity-tier, pinning, independence, completeness, and
+    attrition blocks verbatim. No sealed aggregate may merge repeated arm IDs, collapse
+    outcomes, choose a shared floor, or deduplicate flags across subjects; any convenience
+    aggregate is a separate derived view. `preregistered: true` is producer-derived and valid
+    only when the exact method tuple (id, version, verdict rule, and all parameters) appears in
+    every resolved subject Run's `analysisPlan[]`; an unresolved Run or any mismatch forbids
+    `true` and makes verification of a claimed `true` fail closed.
+24. **I-JSON Unicode scalar enforcement:** every stack canonical sealer recursively rejects an
+    unpaired UTF-16 surrogate in any object key or string value before JCS serialization.
+    Valid supplementary-plane scalar values (a well-formed surrogate pair in JavaScript) remain
+    accepted. The ground-truth fix lands across every copied sealer with shared positive and
+    negative equivalence fixtures; byte-equivalence alone is not conformance when every copy
+    accepts the same illegal input.
+25. **Conformance-kit dependency direction:** a conformance/testing package consumes the
+    implementation packages it tests. An implementation package never imports its testing kit,
+    including from its own test sources or through a dev-only portal; such an edge makes the
+    standalone CI build graph cyclic and can pass locally only because of stale `dist`
+    artifacts. Concrete-subject adapters and kit invocations live in the testing package or a
+    later consumer.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 
