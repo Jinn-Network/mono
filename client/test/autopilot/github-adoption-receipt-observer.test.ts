@@ -367,6 +367,34 @@ describe('observeExactAutopilotAdoptionReceipt', () => {
     expect(port.listPrIssueComments).toHaveBeenCalledTimes(2);
   });
 
+  it('accepts equivalent canonical base16 and base32 envelope CIDs', async () => {
+    const base32Cid =
+      'bafkreicpbp2wwwnggyqh32rgqnxwx742kwcpfh5gc4g7orccw2r2zv6gj4';
+    const base16Cid =
+      'f015512204f0bf56b59a636207dea26836f6bff9a5584f29fa6170df74442b6a3acd7c64f';
+    const receipt = AutopilotAdoptionReceiptSchema.parse({
+      ...acceptedSolution,
+      deliveryEnvelopeCid: base32Cid,
+    });
+    const expectedCorrelation = {
+      ...mutation.correlation,
+      deliveryEnvelopeCid: base16Cid,
+    };
+    const port = githubPort({
+      pages: { first: { comments: [comment(receipt)] } },
+    });
+
+    await expect(observeExactAutopilotAdoptionReceipt({
+      expectedRole: 'solution',
+      expectedCorrelation,
+      receiptAuthors: session.receiptAuthors,
+      github: port,
+    })).resolves.toEqual({
+      state: 'accepted',
+      receipt,
+    });
+  });
+
   it('fails closed on accepted/rejected and different exact receipts', async () => {
     const differentAccepted = AutopilotAdoptionReceiptSchema.parse({
       ...acceptedSolution,
@@ -964,6 +992,31 @@ describe('autopilotEvaluationContextResolver', () => {
     })).resolves.toMatchObject({
       state: 'contradictory',
       detail: expect.stringMatching(/distinct/i),
+    });
+  });
+
+  it('builds same-Safe context only with the explicit canary opt-in', async () => {
+    const resolver = createAutopilotEvaluationContextResolver({
+      github: githubPort(),
+      allowSelfEvaluation: true,
+    });
+    await expect(resolver.resolve({
+      task: taskSpec(),
+      solution: mutation,
+      taskId: mutation.correlation.taskId,
+      attemptIndex: mutation.correlation.attemptIndex,
+      requestId: mutation.correlation.requestId,
+      solutionEnvelopeCid: mutation.correlation.deliveryEnvelopeCid,
+      solutionOperatorSafe: solutionSafe,
+      evaluatorOperatorSafe: `0x${solutionSafe.slice(2).toUpperCase()}`,
+    })).resolves.toMatchObject({
+      state: 'accepted',
+      context: {
+        operators: {
+          solutionSafe,
+          evaluatorSafe: `0x${solutionSafe.slice(2).toUpperCase()}`,
+        },
+      },
     });
   });
 });

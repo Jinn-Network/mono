@@ -76,6 +76,11 @@ export interface MechAdapterConfig {
    */
   evaluatorEnabled?: boolean;
   /**
+   * Test/canary-only opt-in for one Safe to solve and evaluate an Autopilot
+   * Task. Omitted/false preserves independent-evaluator admission.
+   */
+  allowAutopilotSelfEvaluation?: boolean;
+  /**
    * Optional lifecycle read port for Autopilot evaluation admission. The
    * adapter never fabricates an adoption receipt: without an accepted,
    * correlation-exact observation the Solution remains pending.

@@ -141,6 +141,7 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   fetchSignedTaskFromIpfs: vi.fn().mockResolvedValue(signedTask()),
   fetchSignedEnvelopeFromIpfs: vi.fn().mockResolvedValue(null),
   digestHexToGatewayUrl: vi.fn(),
+  rawSha256CidsEqual: vi.fn((left: string, right: string) => left === right),
 }));
 
 // MOCK_JUSTIFICATION: digest.js is a pure CID-to-digest transform; mocking it pins the output so manifest-filter assertions use a deterministic digest.

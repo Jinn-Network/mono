@@ -6,6 +6,7 @@ import {
   type JinnRepoAutopilotSessionTask,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 import {
+  allowAutopilotSelfEvaluationFromEnv,
   admitAutopilotEvaluationOpportunity,
   type AutopilotEvaluationContextObservation,
 } from '../../../src/harnesses/impls/jinn-repo-evaluator/autopilot-evaluation-context.js';
@@ -162,6 +163,47 @@ describe('admitAutopilotEvaluationOpportunity', () => {
     });
   });
 
+  it('accepts equivalent canonical base16 and base32 envelope CIDs', () => {
+    const base32Cid =
+      'bafkreicpbp2wwwnggyqh32rgqnxwx742kwcpfh5gc4g7orccw2r2zv6gj4';
+    const base16Cid =
+      'f015512204f0bf56b59a636207dea26836f6bff9a5584f29fa6170df74442b6a3acd7c64f';
+    const source = solution();
+    const value = evaluationContext();
+    const receipt = value.solution.adoptionReceipt;
+    const result = admitAutopilotEvaluationOpportunity({
+      task: task(),
+      solution: {
+        ...source,
+        correlation: {
+          ...source.correlation,
+          deliveryEnvelopeCid: base16Cid,
+        },
+      },
+      taskId: '501',
+      attemptIndex: 0,
+      requestId: '0xsolution',
+      solutionEnvelopeCid: base16Cid,
+      solutionOperatorSafe: `0x${'a'.repeat(40)}`,
+      evaluatorOperatorSafe: `0x${'b'.repeat(40)}`,
+      observation: observation({
+        ...value,
+        correlation: {
+          ...value.correlation,
+          deliveryEnvelopeCid: base32Cid,
+        },
+        solution: {
+          ...value.solution,
+          adoptionReceipt: {
+            ...receipt,
+            deliveryEnvelopeCid: base32Cid,
+          },
+        },
+      } as AutopilotEvaluationContext),
+    });
+    expect(result).toMatchObject({ kind: 'accepted' });
+  });
+
   it.each([
     ['missing', undefined],
     ['pending', { state: 'pending', detail: 'not published' }],
@@ -194,6 +236,49 @@ describe('admitAutopilotEvaluationOpportunity', () => {
       kind: 'pending',
       reason: expect.stringContaining('self-evaluation'),
     });
+  });
+
+  it('allows canonical Safe self-evaluation only with the explicit canary opt-in', () => {
+    const value = evaluationContext();
+    const sameSafe = `0x${'a'.repeat(40)}`;
+    const result = admitAutopilotEvaluationOpportunity({
+      task: task(),
+      solution: solution(),
+      taskId: '501',
+      attemptIndex: 0,
+      requestId: '0xsolution',
+      solutionEnvelopeCid: 'bafy-solution',
+      solutionOperatorSafe: sameSafe,
+      evaluatorOperatorSafe: sameSafe,
+      allowSelfEvaluation: true,
+      observation: observation({
+        ...value,
+        operators: {
+          solutionSafe: sameSafe,
+          evaluatorSafe: sameSafe,
+        },
+      } as AutopilotEvaluationContext),
+    });
+    expect(result).toEqual({
+      kind: 'accepted',
+      context: {
+        ...value,
+        operators: {
+          solutionSafe: sameSafe,
+          evaluatorSafe: sameSafe,
+        },
+      },
+    });
+  });
+
+  it('parses the self-evaluation canary env flag narrowly', () => {
+    expect(allowAutopilotSelfEvaluationFromEnv({})).toBe(false);
+    expect(allowAutopilotSelfEvaluationFromEnv({
+      JINN_AUTOPILOT_ALLOW_SELF_EVALUATION: 'yes',
+    })).toBe(true);
+    expect(allowAutopilotSelfEvaluationFromEnv({
+      JINN_AUTOPILOT_ALLOW_SELF_EVALUATION: 'enabled',
+    })).toBe(false);
   });
 
   it.each([

@@ -186,6 +186,8 @@ function buildContext(
 export function createAutopilotEvaluationContextResolver(options: {
   readonly github: AutopilotGitHubReadPort;
   readonly maxPages?: number;
+  /** Test/canary-only opt-in; default keeps independent-Safe admission. */
+  readonly allowSelfEvaluation?: boolean;
 }): AutopilotEvaluationContextResolver {
   return {
     async resolve(
@@ -197,7 +199,10 @@ export function createAutopilotEvaluationContextResolver(options: {
       ) {
         return contradictory('Solution and evaluator Safe identities must be valid');
       }
-      if (sameSafe(input.solutionOperatorSafe, input.evaluatorOperatorSafe)) {
+      if (
+        sameSafe(input.solutionOperatorSafe, input.evaluatorOperatorSafe)
+        && options.allowSelfEvaluation !== true
+      ) {
         return contradictory('Solution and evaluator Safes must be distinct');
       }
 

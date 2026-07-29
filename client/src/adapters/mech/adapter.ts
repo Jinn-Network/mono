@@ -1331,6 +1331,7 @@ export class MechAdapter implements ExecutionAdapter {
         solutionEnvelopeCid,
         solutionOperatorSafe: solution.operator,
         evaluatorOperatorSafe: this.config.safeAddress,
+        allowSelfEvaluation: this.config.allowAutopilotSelfEvaluation,
         observation,
       });
       if (admission.kind !== 'accepted') {

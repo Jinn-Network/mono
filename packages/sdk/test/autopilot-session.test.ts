@@ -455,17 +455,21 @@ describe('AutopilotEvaluationContextSchema', () => {
     })).toThrow();
   });
 
-  it('rejects self-evaluation and every stale head/generation/ref binding', () => {
+  it('accepts a same-Safe context so execution policy can gate testnet self-evaluation', () => {
     const value = evaluationContext();
     const operators = value.operators as Record<string, unknown>;
-    expect(() => AutopilotEvaluationContextSchema.parse({
+    const sameSafe = {
       ...value,
       operators: {
         ...operators,
         evaluatorSafe: operators.solutionSafe,
       },
-    })).toThrow();
+    };
+    expect(AutopilotEvaluationContextSchema.parse(sameSafe)).toEqual(sameSafe);
+  });
 
+  it('rejects every stale head/generation/ref binding', () => {
+    const value = evaluationContext();
     const reviewTarget = value.reviewTarget as Record<string, unknown>;
     for (const [field, replacement] of [
       ['resultingHead', '9'.repeat(40)],

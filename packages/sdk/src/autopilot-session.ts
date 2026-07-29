@@ -455,7 +455,9 @@ const AutopilotEvaluationCorrelationSchema = AutopilotReviewCorrelationSchema.ex
  * been adopted and claimed through the Router. It is intentionally one strict
  * codec rather than a bag of Task.context fields: the accepted Solution
  * receipt, source correlation, full PR target, and the two canonical Safe
- * identities must agree before any semantic agent can run.
+ * identities must agree before any semantic agent can run. Whether those
+ * identities may be equal is an execution-policy decision enforced by
+ * evaluator admission, not a wire-format constraint.
  */
 export const AutopilotEvaluationContextSchema = z.object({
   schemaVersion: z.literal('jinn-autopilot-evaluation-context.v1'),
@@ -486,12 +488,8 @@ export const AutopilotEvaluationContextSchema = z.object({
   const mismatch = (path: Array<string | number>, message: string): void => {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path, message });
   };
-  const { session, reviewTarget, correlation, operators } = value;
+  const { session, reviewTarget, correlation } = value;
   const receipt = value.solution.adoptionReceipt;
-
-  if (operators.solutionSafe.toLowerCase() === operators.evaluatorSafe.toLowerCase()) {
-    mismatch(['operators', 'evaluatorSafe'], 'Evaluator Safe must differ from Solution Safe');
-  }
 
   const targetBindings: Array<[unknown, unknown, Array<string | number>, string]> = [
     [reviewTarget.repository, session.repository, ['reviewTarget', 'repository'], 'repository'],

@@ -5,6 +5,7 @@ import {
   type JinnRepoAutopilotSessionTask,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 import { isDeepStrictEqual } from 'node:util';
+import { rawSha256CidsEqual } from '../../../adapters/mech/ipfs.js';
 
 export type AutopilotEvaluationContextObservation =
   | {
@@ -35,7 +36,19 @@ export interface AutopilotEvaluationOpportunityInput {
   solutionEnvelopeCid: string;
   solutionOperatorSafe: string;
   evaluatorOperatorSafe: string;
+  /**
+   * Explicit test/canary escape hatch. Production remains fail-closed unless
+   * the daemon was launched with the corresponding environment flag.
+   */
+  allowSelfEvaluation?: boolean;
   observation?: AutopilotEvaluationContextObservation;
+}
+
+export function allowAutopilotSelfEvaluationFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const value = env['JINN_AUTOPILOT_ALLOW_SELF_EVALUATION']?.trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
 }
 
 function sameJson(left: unknown, right: unknown): boolean {
@@ -55,7 +68,10 @@ function sameSafe(left: string, right: string): boolean {
 export function admitAutopilotEvaluationOpportunity(
   input: AutopilotEvaluationOpportunityInput,
 ): AutopilotEvaluationAdmission {
-  if (sameSafe(input.solutionOperatorSafe, input.evaluatorOperatorSafe)) {
+  if (
+    sameSafe(input.solutionOperatorSafe, input.evaluatorOperatorSafe)
+    && input.allowSelfEvaluation !== true
+  ) {
     return {
       kind: 'pending',
       reason: 'Autopilot self-evaluation is not permitted',
@@ -119,7 +135,11 @@ export function admitAutopilotEvaluationOpportunity(
       ['prNumber', sourceCorrelation.prNumber],
       ['expectedHead', sourceCorrelation.expectedHead],
     ] as const
-  ).every(([key, expected]) => context.correlation[key] === expected);
+  ).every(([key, expected]) => (
+    key === 'deliveryEnvelopeCid'
+      ? rawSha256CidsEqual(context.correlation[key], String(expected))
+      : context.correlation[key] === expected
+  ));
 
   if (
     !correlationMatches

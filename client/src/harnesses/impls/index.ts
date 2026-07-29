@@ -137,6 +137,8 @@ export interface HarnessEnv {
   semanticEvaluatorRunnerResolver?: SemanticAgentRunnerResolver;
   /** Isolated immutable verifier for Autopilot exact-head evaluation. */
   immutableMechanicalVerifier?: ImmutableMechanicalVerifier;
+  /** Test/canary-only opt-in for same-Safe Autopilot evaluation. */
+  allowAutopilotSelfEvaluation?: boolean;
 }
 
 /**
@@ -249,6 +251,7 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
       stub: isStub,
       semanticAgentRunnerResolver: env.semanticEvaluatorRunnerResolver,
       immutableMechanicalVerifier: env.immutableMechanicalVerifier,
+      allowSelfEvaluation: env.allowAutopilotSelfEvaluation,
       implStateDir: env.implStateDirRoot
         ? `${env.implStateDirRoot}/jinn-repo-evaluator`
         : undefined,

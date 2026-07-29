@@ -17,6 +17,7 @@ import type {
   AdoptionReceiptObserver,
   PersistedTaskRun,
 } from '../types/task-run.js';
+import { rawSha256CidsEqual } from '../adapters/mech/ipfs.js';
 
 const DEFAULT_MAX_PAGES = 100;
 
@@ -262,6 +263,10 @@ function receiptCorrelation(
   });
 }
 
+function sameEnvelopeCid(left: string, right: string): boolean {
+  return rawSha256CidsEqual(left, right);
+}
+
 function matchesStableDelivery(
   receipt: AutopilotAdoptionReceipt,
   input: ObserveExactAutopilotAdoptionReceiptInput,
@@ -271,7 +276,10 @@ function matchesStableDelivery(
     && receipt.taskId === expected.taskId
     && receipt.attemptIndex === expected.attemptIndex
     && receipt.requestId === expected.requestId
-    && receipt.deliveryEnvelopeCid === expected.deliveryEnvelopeCid
+    && sameEnvelopeCid(
+      receipt.deliveryEnvelopeCid,
+      expected.deliveryEnvelopeCid,
+    )
     && receipt.v2AttemptId === expected.v2AttemptId;
 }
 
@@ -294,7 +302,12 @@ function matchesExpectedCorrelation(
     'reviewGeneration',
     'reviewRefOid',
   ] as const).every((key) => (
-    expected[key] === undefined || expected[key] === actual[key]
+    expected[key] === undefined
+    || (
+      key === 'deliveryEnvelopeCid'
+        ? sameEnvelopeCid(expected[key], actual[key])
+        : expected[key] === actual[key]
+    )
   ));
 }
 

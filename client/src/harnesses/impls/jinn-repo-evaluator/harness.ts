@@ -58,6 +58,7 @@ import type {
   ImmutableMechanicalVerifier,
 } from './autopilot-mechanical-runner.js';
 import {
+  allowAutopilotSelfEvaluationFromEnv,
   admitAutopilotEvaluationOpportunity,
 } from './autopilot-evaluation-context.js';
 import {
@@ -125,7 +126,10 @@ function summarizeZodError(error: {
   return error.issues.map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`).join('; ');
 }
 
-function parseAutopilotEvaluationTask(task: Task):
+function parseAutopilotEvaluationTask(
+  task: Task,
+  allowSelfEvaluation: boolean,
+):
   | {
       ok: true;
       context: ReturnType<typeof AutopilotEvaluationContextSchema.parse>;
@@ -201,6 +205,7 @@ function parseAutopilotEvaluationTask(task: Task):
     solutionEnvelopeCid,
     solutionOperatorSafe: envelope.participant.safeAddress,
     evaluatorOperatorSafe: parsedContext.data.operators.evaluatorSafe,
+    allowSelfEvaluation,
     observation: {
       state: 'accepted',
       context: parsedContext.data,
@@ -244,6 +249,8 @@ export interface JinnRepoEvaluatorHarnessOptions {
   immutableMechanicalVerifier?: ImmutableMechanicalVerifier;
   /** Per-SolverNet semantic runtime resolver, injectable for hermetic tests. */
   semanticAgentRunnerResolver?: SemanticAgentRunnerResolver;
+  /** Test/canary-only override; defaults from the explicit env flag. */
+  allowSelfEvaluation?: boolean;
 }
 
 export class JinnRepoEvaluatorHarness implements Harness {
@@ -258,6 +265,7 @@ export class JinnRepoEvaluatorHarness implements Harness {
   private readonly mechanicalRunner: AutopilotMechanicalRunner;
   private readonly immutableMechanicalVerifier: ImmutableMechanicalVerifier | undefined;
   private readonly semanticAgentRunnerResolver: SemanticAgentRunnerResolver | undefined;
+  private readonly allowSelfEvaluation: boolean;
   private readonly verifierReadinessCache: AutopilotReadinessCache = {};
   private readonly semanticReadinessCache =
     new WeakMap<SemanticAgentRunner, AutopilotReadinessCache>();
@@ -283,6 +291,8 @@ export class JinnRepoEvaluatorHarness implements Harness {
         immutableVerifier: opts.immutableMechanicalVerifier,
       });
     this.semanticAgentRunnerResolver = opts.semanticAgentRunnerResolver;
+    this.allowSelfEvaluation =
+      opts.allowSelfEvaluation ?? allowAutopilotSelfEvaluationFromEnv();
   }
 
   supports(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
@@ -322,7 +332,7 @@ export class JinnRepoEvaluatorHarness implements Harness {
       return { ok: false, reason: 'role is not evaluation' };
     }
     if (rawTaskSpecSource(task.spec) === 'autopilot-session') {
-      const parsed = parseAutopilotEvaluationTask(task);
+      const parsed = parseAutopilotEvaluationTask(task, this.allowSelfEvaluation);
       if (!parsed.ok) return { ok: false, reason: parsed.reason };
       if (!this.semanticAgentRunnerResolver) {
         return {
@@ -457,7 +467,10 @@ export class JinnRepoEvaluatorHarness implements Harness {
     // SkippableError and be re-attempted forever).
     const rawSource = rawTaskSpecSource(ctx.task.spec);
     if (rawSource === 'autopilot-session') {
-      const parsed = parseAutopilotEvaluationTask(ctx.task);
+      const parsed = parseAutopilotEvaluationTask(
+        ctx.task,
+        this.allowSelfEvaluation,
+      );
       if (!parsed.ok) {
         throw new SkippableError(
           'autopilot_eval_pending',

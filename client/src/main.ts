@@ -78,6 +78,7 @@ import { createMutableJoinedSolverNetsView } from './harnesses/engine/engine.js'
 import { createAutopilotEvaluationContextResolver } from './autopilot/autopilot-evaluation-context-resolver.js';
 import { createAutopilotGitHubAdoptionReceiptObserver } from './autopilot/github-adoption-receipt-observer.js';
 import { createJinnMonoGitHubAdoptionReadPort } from './autopilot/github-rest-adoption-read.js';
+import { allowAutopilotSelfEvaluationFromEnv } from './harnesses/impls/jinn-repo-evaluator/autopilot-evaluation-context.js';
 import { createJoinApplier } from './daemon/join-applier.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import {
@@ -1437,8 +1438,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       ?? process.env['GH_TOKEN']
       ?? process.env['GITHUB_TOKEN'],
   });
+  const allowAutopilotSelfEvaluation =
+    allowAutopilotSelfEvaluationFromEnv();
   const autopilotEvaluationContextResolver =
-    createAutopilotEvaluationContextResolver({ github: autopilotGitHubRead });
+    createAutopilotEvaluationContextResolver({
+      github: autopilotGitHubRead,
+      allowSelfEvaluation: allowAutopilotSelfEvaluation,
+    });
   const autopilotAdoptionReceiptObserver =
     createAutopilotGitHubAdoptionReceiptObserver({ github: autopilotGitHubRead });
 
@@ -1457,6 +1463,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     evictionRecovery,
     taskDiscovery,
     evaluatorEnabled,
+    allowAutopilotSelfEvaluation,
     autopilotEvaluationContextResolver,
   }, sharedStore);
 
@@ -1581,6 +1588,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         configuredCodexPath: config.codexPath,
       }),
     immutableMechanicalVerifier: makeDockerImmutableMechanicalVerifier(),
+    allowAutopilotSelfEvaluation,
   })) {
     implRegistry.register(impl);
   }

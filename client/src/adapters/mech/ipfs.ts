@@ -307,6 +307,17 @@ export function rawSha256CidToDigestHex(cid: string): Hex {
   return `0x${Buffer.from(bytes.slice(4)).toString('hex')}` as Hex;
 }
 
+/** Compare canonical raw/sha2-256 CIDv1 values across multibase encodings. */
+export function rawSha256CidsEqual(left: string, right: string): boolean {
+  if (left === right) return true;
+  try {
+    return rawSha256CidToDigestHex(left).toLowerCase()
+      === rawSha256CidToDigestHex(right).toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Construct an Autonolas IPFS gateway URL from a raw SHA256 digest hex string.
  */

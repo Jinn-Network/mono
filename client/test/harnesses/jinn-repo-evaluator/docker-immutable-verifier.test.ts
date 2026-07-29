@@ -21,10 +21,10 @@ describe('Docker immutable mechanical verifier', () => {
   });
 
   it('prepares the pinned image and validates its offline native toolchain', async () => {
-    const labels: string[] = [];
+    const calls: Array<{ args: readonly string[]; label: string }> = [];
     const verifier = makeDockerImmutableMechanicalVerifier({
-      runDocker: async (_args, label) => {
-        labels.push(label);
+      runDocker: async (args, label) => {
+        calls.push({ args, label });
         return label === 'verification-image-inspect'
           ? { status: 'failed', detail: 'not found' }
           : { status: 'passed' };
@@ -32,12 +32,16 @@ describe('Docker immutable mechanical verifier', () => {
     });
 
     await expect(verifier.isReady?.()).resolves.toEqual({ ready: true });
-    expect(labels).toEqual([
+    expect(calls.map(({ label }) => label)).toEqual([
       'docker-readiness',
       'verification-image-inspect',
       'verification-image-pull',
       'verification-native-toolchain-smoke',
     ]);
+    expect(
+      calls.find(({ label }) =>
+        label === 'verification-native-toolchain-smoke')?.args,
+    ).toContain('/tmp:rw,exec,nosuid,nodev,size=134217728');
   });
 
   it('copies the checkout read-only and executes candidate checks offline', async () => {
@@ -75,7 +79,7 @@ describe('Docker immutable mechanical verifier', () => {
       '/source:rw,nosuid,nodev,noexec,size=1073741824',
     );
     expect(create.args).toContain(
-      '/workspace:rw,nosuid,nodev,size=6442450944',
+      '/workspace:rw,exec,nosuid,nodev,size=6442450944',
     );
     expect(create.args).toContain('8g');
     expect(create.args).toContain('YARN_IGNORE_PATH=1');
