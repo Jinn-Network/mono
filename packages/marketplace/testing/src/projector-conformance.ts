@@ -85,6 +85,16 @@ export interface MarketplaceProjectorConformanceSubject {
   projectReorg(
     fixture: MarketplaceProjectorReorgFixture,
   ): Promise<MarketplaceProjectorReorgRun>;
+  /**
+   * Runs the projected annotation through the consumer's discovery item-verification path under
+   * the requested substrate outcome. Reference implementations should delegate to
+   * `record-discovery-protocol.verifyItem`, not echo `substrateOutcome`.
+   */
+  verifyDerivation(
+    fixture: MarketplaceProjectorFixture,
+    derivation: ProjectedDerivation,
+    substrateOutcome: DerivationOutcome,
+  ): Promise<DerivationOutcome>;
 }
 
 const fixturesRoot = fileURLToPath(
@@ -115,55 +125,7 @@ function sha256(bytes: Uint8Array): `sha256:${string}` {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 }
 
-function sameDerivation(
-  left: ProjectedDerivation,
-  right: ProjectedDerivation,
-): boolean {
-  return left.chainId === right.chainId
-    && left.contract === right.contract
-    && left.event === right.event
-    && left.blockNumber === right.blockNumber
-    && left.blockHash === right.blockHash
-    && left.txHash === right.txHash
-    && left.logIndex === right.logIndex
-    && left.finalityTier === right.finalityTier
-    && left.contractGeneration === right.contractGeneration;
-}
-
-type DerivationOutcome = "present" | "fabricated" | "reorged-away";
-
-function classifyDerivation(
-  derivation: ProjectedDerivation,
-  substrate: {
-    readonly logs: readonly ProjectedDerivation[];
-    readonly reorgedBlockHashes: readonly string[];
-  },
-): DerivationOutcome {
-  if (substrate.reorgedBlockHashes.includes(derivation.blockHash)) {
-    return "reorged-away";
-  }
-  return substrate.logs.some((candidate) =>
-    sameDerivation(candidate, derivation)
-  )
-    ? "present"
-    : "fabricated";
-}
-
-function substrateFor(
-  derivation: ProjectedDerivation,
-  outcome: DerivationOutcome,
-): {
-  readonly logs: readonly ProjectedDerivation[];
-  readonly reorgedBlockHashes: readonly string[];
-} {
-  if (outcome === "present") {
-    return { logs: [{ ...derivation }], reorgedBlockHashes: [] };
-  }
-  if (outcome === "reorged-away") {
-    return { logs: [], reorgedBlockHashes: [derivation.blockHash] };
-  }
-  return { logs: [], reorgedBlockHashes: [] };
-}
+export type DerivationOutcome = "present" | "fabricated" | "reorged-away";
 
 /**
  * Authors projector #1's determinism and reorg contract natively. Discovery contributes only its
@@ -221,9 +183,10 @@ export function describeMarketplaceProjectorConformance(
           const expected = (vector.expect as { derivation: DerivationOutcome })
             .derivation;
           expect(
-            classifyDerivation(
+            await projector.verifyDerivation(
+              fixture,
               derivation,
-              substrateFor(derivation, expected),
+              expected,
             ),
             vector.description,
           ).toBe(expected);

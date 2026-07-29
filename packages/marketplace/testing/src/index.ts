@@ -6,6 +6,7 @@ export {
   loadMarketplaceProjectorReorgFixtures,
 } from "./projector-conformance.js";
 export type {
+  DerivationOutcome,
   MarketplaceProjectorConformanceRun,
   MarketplaceProjectorConformanceSubject,
   MarketplaceProjectorFixture,

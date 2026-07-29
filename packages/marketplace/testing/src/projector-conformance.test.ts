@@ -3,7 +3,10 @@
 import {
   DISCOVERY_SIGNING_SCOPE,
   RECORD_KINDS,
+  recordDigest,
   sealJson,
+  verifyItem,
+  type AnnouncedItem,
   type FactsRecompute,
 } from "@jinn-network/record-discovery-protocol";
 import type { BlobStore } from "@jinn-network/record-discovery-serve";
@@ -27,9 +30,11 @@ import {
 } from "viem";
 import {
   describeMarketplaceProjectorConformance,
+  type DerivationOutcome,
   type MarketplaceProjectorConformanceSubject,
   type MarketplaceProjectorFixture,
   type MarketplaceProjectorReorgFixture,
+  type ProjectedDerivation,
 } from "./projector-conformance.js";
 
 interface FixtureLog {
@@ -173,11 +178,18 @@ function ports(): AnnouncementProjectionPorts {
   };
 }
 
+async function projectFixture(
+  fixture: MarketplaceProjectorFixture | MarketplaceProjectorReorgFixture,
+) {
+  const events = enrichedEvents(fixture);
+  const observations = projectObservations(events);
+  const projected = await projectAnnouncements(events, ports());
+  return { events, observations, projected };
+}
+
 const subject: MarketplaceProjectorConformanceSubject = {
   async project(fixture) {
-    const events = enrichedEvents(fixture);
-    const observations = projectObservations(events);
-    const projected = await projectAnnouncements(events, ports());
+    const { events, observations, projected } = await projectFixture(fixture);
     const announcements = projected.announcements;
     return {
       observations,
@@ -189,8 +201,7 @@ const subject: MarketplaceProjectorConformanceSubject = {
   },
 
   async projectReorg(fixture) {
-    const events = enrichedEvents(fixture);
-    const projected = await projectAnnouncements(events, ports());
+    const { projected } = await projectFixture(fixture);
     const prior = projected.announcements.find((announcement) =>
       announcement.action === "available"
     );
@@ -218,6 +229,88 @@ const subject: MarketplaceProjectorConformanceSubject = {
       expectedPreviousDigest: before.digest,
       signatureCount: signed.signature?.signatures.length ?? 0,
     };
+  },
+
+  async verifyDerivation(
+    fixture: MarketplaceProjectorFixture,
+    derivation: ProjectedDerivation,
+    substrateOutcome: DerivationOutcome,
+  ) {
+    const { projected } = await projectFixture(fixture);
+    const available = projected.announcements.find((announcement) =>
+      announcement.action === "available"
+      && announcement.derivation.txHash === derivation.txHash
+      && announcement.derivation.logIndex === derivation.logIndex
+    );
+    if (available === undefined || available.action !== "available") {
+      throw new Error(`fixture ${fixture.name} projected no matching availability`);
+    }
+    const signedEntry = projected.entries.find(({ entry }) =>
+      entry.announcements.some((announcement) =>
+        announcement.announcementId === available.announcementId
+      )
+    );
+    if (signedEntry === undefined) {
+      throw new Error(`fixture ${fixture.name} projected no citing entry`);
+    }
+    const sealedEntry = sealJson(signedEntry.entry);
+    const item: AnnouncedItem = {
+      record: available.record,
+      facts: available.facts,
+      locations: available.locations,
+      provenance: {
+        source: signedEntry.entry.source,
+        entry: sealedEntry.digest,
+        announcementId: available.announcementId,
+        derivation: available.derivation,
+      },
+    };
+    const outcome = await verifyItem({
+      item,
+      decisionGrade: true,
+      ports: {
+        records: {
+          async "fetch"(digest) {
+            if (digest !== recordDigest(SUBMISSION_BYTES)) {
+              throw new Error(`unexpected record digest: ${digest}`);
+            }
+            return SUBMISSION_BYTES;
+          },
+        },
+        entries: {
+          async "fetch"(digest) {
+            if (digest !== sealedEntry.digest) {
+              throw new Error(`unexpected entry digest: ${digest}`);
+            }
+            return sealedEntry.bytes;
+          },
+        },
+        keys: {
+          async resolve() { return []; },
+          async everBound() { return false; },
+        },
+        sigs: { async verify() { return false; } },
+        factsRecompute: ports().factsRecompute,
+        substrate: {
+          async check(received) {
+            if (JSON.stringify(received) !== JSON.stringify(derivation)) {
+              throw new Error("discovery verification did not receive the exact projected derivation");
+            }
+            return substrateOutcome;
+          },
+        },
+        async verifiedChain(cursor) {
+          return cursor.sequence === signedEntry.entry.sequence
+            && cursor.entry === sealedEntry.digest;
+        },
+      },
+    });
+    if (outcome.status !== "verified" || outcome.derivation === undefined) {
+      throw new Error(
+        `discovery item verification failed for ${fixture.name}: ${outcome.status}`,
+      );
+    }
+    return outcome.derivation;
   },
 };
 
