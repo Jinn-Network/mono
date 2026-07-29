@@ -14,8 +14,8 @@ import {
 } from "@jinn-network/task-execution-protocol";
 import {
   describeTaskExecutionBackendContract,
-  type TestableBackend,
-} from "@jinn-network/task-execution-testing";
+} from "../backend-contract.js";
+import type { TestableBackend } from "../fake-backend.js";
 import { describe, expect, test } from "vitest";
 
 const PROFILE = {
