@@ -8,6 +8,7 @@ import {
   openSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -1018,7 +1019,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       },
     });
 
-    const envelope = this.readResultEnvelope(input.paths, input.plan);
+    const envelope = this.readResultEnvelope(input.paths, input.plan, harvest);
     const interpreted = interpretResult(
       input.plan,
       {
@@ -1124,7 +1125,11 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     throw new Error("shim did not publish a fingerprint");
   }
 
-  private readResultEnvelope(paths: WorkspacePaths, plan: LaunchPlan): ResultEnvelope | undefined {
+  private readResultEnvelope(
+    paths: WorkspacePaths,
+    plan: LaunchPlan,
+    harvest: { readonly manifest: readonly { readonly path: string }[]; readonly integrityViolations: readonly { readonly path: string }[] },
+  ): ResultEnvelope | undefined {
     const artifact = plan.resultContract.structuredOutputArtifact;
     if (artifact === undefined) return undefined;
     if (!artifact.startsWith("out/") || artifact.includes("..") || artifact.includes("\\")) {
@@ -1132,7 +1137,15 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     }
     const path = join(paths.root, artifact);
     if (!existsSync(path)) return undefined;
-    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    const relative = artifact.slice("out/".length);
+    if (!harvest.manifest.some((entry) => entry.path === relative)
+      || harvest.integrityViolations.some((entry) => entry.path === relative)) {
+      throw new Error("launcher result envelope was not admitted by verified harvest");
+    }
+    const out = realpathSync(paths.out);
+    const resolved = realpathSync(path);
+    if (!resolved.startsWith(`${out}/`)) throw new Error("launcher result envelope escaped out/");
+    const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(resolved)));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       throw new Error("launcher result envelope must be a JSON object");
     }
