@@ -11,6 +11,12 @@ export interface DirProvisionerOptions {
   readonly sealedTaskBytes?: Uint8Array;
   readonly dispatchContextBytes?: Uint8Array;
   readonly fetchInput?: (descriptor: ResourceDescriptor) => Promise<Uint8Array>;
+  readonly runtime?: { readonly assertHarnessGroupEmpty: (paths: WorkspacePaths) => Promise<void> | void };
+}
+export class ProvisioningRejectedError extends Error {
+  readonly category = "rejected" as const;
+  readonly neverExecuted = true as const;
+  constructor(readonly reason: string, cause?: unknown) { super(`provisioning rejected: ${reason}`, { cause }); }
 }
 
 export function makeDirProvisioner(options: DirProvisionerOptions = {}): ProvisionerContract {
@@ -23,10 +29,16 @@ export function makeDirProvisioner(options: DirProvisionerOptions = {}): Provisi
       await chmod(paths.secrets, 0o700);
       if (options.sealedTaskBytes) await writeFile(join(paths.input, "task.sealed"), options.sealedTaskBytes, { mode: 0o400 });
       if (options.dispatchContextBytes) await writeFile(join(paths.input, "dispatch-context.json"), options.dispatchContextBytes, { mode: 0o400 });
-      for (const input of view.task.inputs ?? []) await materializeInput(input, paths.input, options.fetchInput ?? (async () => { throw new Error("input fetcher unavailable"); }));
-      await resolveGrantsToSecrets(grants, paths.secrets);
+      try {
+        for (const input of view.task.inputs ?? []) await materializeInput(input, paths.input, options.fetchInput ?? (async () => { throw new Error("input fetcher unavailable"); }));
+        await resolveGrantsToSecrets(grants, paths.secrets);
+      } catch (error) { throw new ProvisioningRejectedError(error instanceof Error ? error.message : "setup-failed", error); }
     },
     executionEnv(launch: LaunchEnv): Record<string, string> { return { ...launch.env }; },
-    harvest,
+    async harvest(paths, outputs) {
+      if (!options.runtime?.assertHarnessGroupEmpty) throw new Error("harvest requires assertHarnessGroupEmpty runtime port");
+      await options.runtime.assertHarnessGroupEmpty(paths);
+      return harvest(paths, outputs);
+    },
   };
 }

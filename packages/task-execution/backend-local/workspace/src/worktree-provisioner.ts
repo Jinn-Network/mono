@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { rm } from "node:fs/promises";
 import type { ProvisionerContract } from "./contract.js";
 import { makeDirProvisioner, type DirProvisionerOptions } from "./dir-provisioner.js";
 
@@ -8,6 +9,9 @@ export function makeWorktreeProvisioner(options: WorktreeProvisionerOptions): Pr
   const base = makeDirProvisioner(options);
   return { ...base, workspaceKind: () => "worktree", async setup(view, paths, grants) {
     await base.setup(view, paths, grants);
+    // base setup establishes the common directory contract, but git requires its worktree
+    // destination not to exist; only the executor cwd is removed and recreated by git.
+    await rm(paths.work, { recursive: true, force: true });
     await new Promise<void>((resolve, reject) => {
       const child = spawn("git", ["-C", options.referenceRepository, "worktree", "add", "--detach", paths.work, options.oid]);
       child.once("error", reject); child.once("close", (code) => code === 0 ? resolve() : reject(new Error(`git worktree add exited ${code}`)));
