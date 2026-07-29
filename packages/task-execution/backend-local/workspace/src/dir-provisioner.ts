@@ -73,6 +73,7 @@ export function executionEnv(launch: LaunchEnv): Record<string, string> {
     "CODEX_HOME",
     "HERMES_HOME",
     "TMPDIR",
+    "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
   ]);
   for (const [key, value] of Object.entries(launch.env)) {
