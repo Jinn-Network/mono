@@ -92,7 +92,7 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/task-execution-backend-local@npm:0.1.0, @jinn-network/task-execution-backend-local@workspace:.":
+"@jinn-network/task-execution-backend-local@workspace:.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/task-execution-backend-local@workspace:."
   dependencies:
@@ -105,7 +105,6 @@ __metadata:
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
     "@jinn-network/task-execution-supervisor": "npm:0.1.0"
-    "@jinn-network/task-execution-testing": "npm:0.1.0"
     "@jinn-network/task-execution-workspace": "npm:0.1.0"
     "@types/node": "npm:^22.0.0"
     typescript: "npm:^5.9.3"
@@ -160,24 +159,6 @@ __metadata:
   dependencies:
     "@jinn-network/task-execution-backend": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
-  languageName: node
-  linkType: soft
-
-"@jinn-network/task-execution-testing@portal:../../testing::locator=%40jinn-network%2Ftask-execution-backend-local%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/task-execution-testing@portal:../../testing::locator=%40jinn-network%2Ftask-execution-backend-local%40workspace%3A."
-  dependencies:
-    "@jinn-network/task-execution-backend": "npm:0.1.0"
-    "@jinn-network/task-execution-backend-local": "npm:0.1.0"
-    "@jinn-network/task-execution-launchers": "npm:0.1.0"
-    "@jinn-network/task-execution-protocol": "npm:0.1.0"
-    "@jinn-network/task-execution-supervisor": "npm:0.1.0"
-    "@jinn-network/task-execution-workspace": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 

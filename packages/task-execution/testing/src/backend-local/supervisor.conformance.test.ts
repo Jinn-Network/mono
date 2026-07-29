@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeAttemptSupervisorContract } from "@jinn-network/task-execution-testing/backend-local";
-import { foldAttemptRecord } from "./attempt-record.js";
-import { runCancellationLadder } from "./cancellation.js";
-import { reconcileAttempt } from "./reconciler.js";
+import { foldAttemptRecord, reconcileAttempt, runCancellationLadder } from "@jinn-network/task-execution-supervisor";
+import { describeAttemptSupervisorContract } from "./supervisor-contract.js";
 
 describeAttemptSupervisorContract(() => ({
   reconcile(journal, reality) {
     const events = journal as Parameters<typeof foldAttemptRecord>[0];
-    const record = foldAttemptRecord(events);
-    return { ...reconcileAttempt(record, {
+    return { ...reconcileAttempt(foldAttemptRecord(events), {
       processAlive: reality["processAlive"] as boolean | undefined,
       shimAlive: reality["shimFingerprintPresent"] as boolean | undefined,
       outcomePresent: reality["outcomeFilePresent"] as boolean | undefined,
@@ -19,9 +16,6 @@ describeAttemptSupervisorContract(() => ({
     }) };
   },
   cancel() {
-    return runCancellationLadder({}, {
-      signalTerm: () => undefined, signalKill: () => undefined, isSubtreeEmpty: () => true,
-      readOutcome: () => null, harvest: () => undefined,
-    }).then((result) => ({ ...result }));
+    return runCancellationLadder({}, { signalTerm: () => undefined, signalKill: () => undefined, isSubtreeEmpty: () => true, readOutcome: () => null, harvest: () => undefined }).then((result) => ({ ...result }));
   },
 }));

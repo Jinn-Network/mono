@@ -48,7 +48,6 @@
   },
   "devDependencies": {
     "@jinn-network/evidence-protocol": "0.1.0",
-    "@jinn-network/task-execution-testing": "0.1.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"
@@ -63,7 +62,6 @@
     "@jinn-network/task-execution-profiles": "portal:../../profiles",
     "@jinn-network/task-execution-protocol": "portal:../../protocol",
     "@jinn-network/task-execution-supervisor": "portal:../supervisor",
-    "@jinn-network/task-execution-testing": "portal:../../testing",
     "@jinn-network/task-execution-workspace": "portal:../workspace"
   }
 }
