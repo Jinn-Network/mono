@@ -273,6 +273,22 @@ describe("result-envelope admission", () => {
 });
 
 describe("local TaskExecutionBackend submission path (C1)", () => {
+  test.runIf(process.platform === "linux")("fails preflight closed and withdraws custody claims when the Linux probe fails", async () => {
+    const root = await stateRoot("custody-probe-failure");
+    const prior = process.env["JINN_NATIVE_CUSTODY_BINARY"];
+    process.env["JINN_NATIVE_CUSTODY_BINARY"] = join(root, "missing-native-custodian");
+    try {
+      const backend = fixture(root);
+      backends.push(backend);
+      expect((await backend.preflight({})).ready).toBe(false);
+      expect((await backend.capabilities()).cancel).toBe(false);
+      expect((await backend.capabilities()).deadlineEnforcement).toBe(false);
+    } finally {
+      if (prior === undefined) delete process.env["JINN_NATIVE_CUSTODY_BINARY"];
+      else process.env["JINN_NATIVE_CUSTODY_BINARY"] = prior;
+    }
+  });
+
   test("rejects hostile provisioner identities before setup", async () => {
     const backend = fixture(await stateRoot("provisioner-id"), { provisionerId: "\u0000" });
     const task = taskBytes();

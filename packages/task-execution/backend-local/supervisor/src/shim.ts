@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +41,30 @@ function cancellationCommandPath(metaDir: string): string {
 }
 function cancellationResultPath(metaDir: string): string {
   return join(metaDir, "cancellation-result.json");
+}
+
+function nativeShimPath(): string {
+  const configured = process.env["JINN_NATIVE_CUSTODY_BINARY"];
+  if (configured !== undefined) return configured;
+  const here = dirname(fileURLToPath(import.meta.url));
+  return join(here, "..", "dist", "native", "jinn-attempt-shim");
+}
+
+/** Linux custody is mandatory: a missing/failed native probe is never silently downgraded. */
+export function nativeCustodySupport(): { readonly ready: boolean; readonly subreaper: boolean; readonly detail?: string } {
+  if (process.platform !== "linux") return { ready: true, subreaper: false, detail: "macOS process-group residual" };
+  const binary = nativeShimPath();
+  if (!existsSync(binary)) return { ready: false, subreaper: false, detail: "Linux native custody binary is missing; run the package build" };
+  const result = spawnSync(binary, ["--probe"], { encoding: "utf8" });
+  if (result.status !== 0) return { ready: false, subreaper: false, detail: result.stderr.trim() || "PR_SET_CHILD_SUBREAPER probe failed" };
+  try {
+    const parsed = JSON.parse(result.stdout) as { ready?: boolean; subreaper?: boolean };
+    return parsed.ready === true && parsed.subreaper === true
+      ? { ready: true, subreaper: true }
+      : { ready: false, subreaper: false, detail: "native custody probe did not confirm subreaper" };
+  } catch {
+    return { ready: false, subreaper: false, detail: "native custody probe emitted malformed output" };
+  }
 }
 
 /** Durable, nonce-bound request for the shim to own the harness-subtree termination ladder. */
@@ -247,6 +271,36 @@ export function writeSpawnRequestSpec(
   return path;
 }
 
+function nativeString(value: string): Buffer {
+  const bytes = Buffer.from(value, "utf8");
+  const length = Buffer.allocUnsafe(4);
+  length.writeUInt32LE(bytes.length, 0);
+  return Buffer.concat([length, bytes]);
+}
+
+/** Bounded length-delimited internal wire format: no JSON parser/native dependency required. */
+function writeNativeSpawnSpec(
+  request: BuildShimSpawnRequest,
+  harness: SpawnRequest & { readonly stdoutPath?: string; readonly stderrPath?: string },
+): string {
+  const strings = [request.attemptId, request.nonce, request.metaDir, request.secretsDir, harness.cwd, harness.stdoutPath ?? "", harness.stderrPath ?? ""];
+  const parts: Buffer[] = [Buffer.from("JNSP1", "ascii"), ...strings.map(nativeString)];
+  const count = (value: number): void => { const bytes = Buffer.allocUnsafe(4); bytes.writeUInt32LE(value, 0); parts.push(bytes); };
+  count(request.heartbeatMs ?? 15_000);
+  count(harness.argv.length);
+  for (const arg of harness.argv) parts.push(nativeString(arg));
+  const envEntries = [
+    ...Object.entries(harness.env).map(([key, value]) => `${key}=${value}`),
+    `JINN_ATTEMPT_ID=${request.attemptId}`,
+    `JINN_ATTEMPT_NONCE=${request.nonce}`,
+  ];
+  count(envEntries.length);
+  for (const entry of envEntries) parts.push(nativeString(entry));
+  const path = join(request.metaDir, "spawn-request.native");
+  atomicWriteFileSync(path, Buffer.concat(parts));
+  return path;
+}
+
 export interface BuildShimSpawnRequest {
   readonly attemptId: string;
   readonly nonce: string;
@@ -289,6 +343,21 @@ export function buildShimSpawn(request: BuildShimSpawnRequest): {
  * the outcome file is readable regardless of who is alive" (design §6.1).
  */
 export function spawnShim(request: BuildShimSpawnRequest, harness: SpawnRequest & { readonly stdoutPath?: string; readonly stderrPath?: string }): ChildProcess {
+  if (process.platform === "linux") {
+    const support = nativeCustodySupport();
+    if (!support.ready) throw new Error(support.detail ?? "Linux native custody is not ready");
+    const child = spawn(nativeShimPath(), [writeNativeSpawnSpec(request, harness)], {
+      env: {
+        ...(process.env as Record<string, string>),
+        JINN_ATTEMPT_ID: request.attemptId,
+        JINN_ATTEMPT_NONCE: request.nonce,
+      },
+      detached: true,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    child.unref();
+    return child;
+  }
   writeSpawnRequestSpec(request.metaDir, harness);
   const built = buildShimSpawn(request);
   const child = spawn(built.command, built.args as string[], {

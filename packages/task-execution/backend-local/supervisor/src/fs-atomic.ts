@@ -20,7 +20,7 @@ import { dirname } from "node:path";
  */
 export function atomicWriteFileSync(
   path: string,
-  data: string,
+  data: string | Uint8Array,
   options?: { beforeRename?: () => void },
 ): void {
   const dir = dirname(path);
@@ -28,7 +28,8 @@ export function atomicWriteFileSync(
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const fd = openSync(tmp, "w");
   try {
-    writeSync(fd, data);
+    if (typeof data === "string") writeSync(fd, data);
+    else writeSync(fd, data);
     fsyncSync(fd);
   } finally {
     closeSync(fd);

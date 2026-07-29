@@ -19,3 +19,15 @@ await new Promise((resolve, reject) => {
     else reject(new Error(`TypeScript build exited with ${code}`));
   });
 });
+
+await new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, ["scripts/build-native.mjs"], {
+    cwd: packageRoot,
+    stdio: "inherit",
+  });
+  child.once("error", reject);
+  child.once("exit", (code) => {
+    if (code === 0) resolve();
+    else reject(new Error(`native custody build exited with ${code}`));
+  });
+});

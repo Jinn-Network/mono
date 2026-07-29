@@ -23,6 +23,7 @@
   },
   "files": [
     "dist/",
+    "native/jinn-attempt-shim.c",
     "README.md"
   ],
   "publishConfig": {
@@ -31,7 +32,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
+    "test": "yarn build && vitest run",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
   },

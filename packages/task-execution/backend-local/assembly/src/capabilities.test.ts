@@ -116,4 +116,18 @@ describe("assembleCapabilities", () => {
     expect(capabilities.signedObservations).toBe(true);
     expect(capabilities.signedDeliveries).toBe(false);
   });
+
+  test("withdraws cancellation and active deadlines when Linux custody is unavailable", () => {
+    const capabilities = assembleCapabilities({
+      launchers: [launcher("fixture", ["profile:one"])],
+      provisioner: {
+        taskProfiles: ["profile:one"], workspaceKinds: ["dir"], inputMediaTypes: [], outputMediaTypes: [], isolation: ["process"],
+      },
+      recorderAvailability: "none",
+      trustKeys: {},
+      custody: { ready: false },
+    });
+    expect(capabilities.cancel).toBe(false);
+    expect(capabilities.deadlineEnforcement).toBe(false);
+  });
 });

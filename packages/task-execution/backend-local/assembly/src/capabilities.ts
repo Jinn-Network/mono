@@ -26,6 +26,8 @@ export interface AssembleCapabilitiesInput {
   readonly provisioner: CapabilityProvisionerConfig;
   readonly recorderAvailability: RecorderAvailability;
   readonly trustKeys: TrustKeyConfig;
+  /** Linux custody support is dynamic; absent retains the non-Linux residual path. */
+  readonly custody?: { readonly ready: boolean };
 }
 
 function sortedUnique(values: Iterable<string>): string[] {
@@ -61,7 +63,7 @@ export function assembleCapabilities(
     ...(input.provisioner.maxArtifactBytes === undefined
       ? {}
       : { maxArtifactBytes: input.provisioner.maxArtifactBytes }),
-    cancel: true,
+    cancel: input.custody?.ready ?? true,
     watch: true,
     preflight: true,
     fetchArtifact: true,
@@ -69,7 +71,7 @@ export function assembleCapabilities(
     signedObservations: input.trustKeys.observationSigningKeyConfigured === true,
     signedDeliveries: input.trustKeys.deliverySigningKeyConfigured === true,
     evidenceCapture: input.recorderAvailability,
-    deadlineEnforcement: true,
+    deadlineEnforcement: input.custody?.ready ?? true,
     isolation: sortedUnique(input.provisioner.isolation),
     attempts: {
       maxTotal: [1, 1],

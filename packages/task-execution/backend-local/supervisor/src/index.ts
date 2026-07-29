@@ -11,6 +11,7 @@ export { runCancellationLadder } from "./cancellation.js";
 export { armDeadline, heartbeatIsStale } from "./deadline.js";
 export {
   listProcessGroupPids,
+  nativeCustodySupport,
   probeShimAlive,
   readHeartbeat,
   readShimCancellationResult,

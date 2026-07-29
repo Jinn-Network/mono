@@ -88,6 +88,7 @@ import {
   reconcileAttempt,
   requestShimCancellation,
   spawnShim,
+  nativeCustodySupport,
   writeShimCancellationCommand,
 } from "@jinn-network/task-execution-supervisor";
 import type {
@@ -689,6 +690,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       provisioner: this.config.provisionerCapabilities,
       recorderAvailability: this.config.recorderAvailability ?? "none",
       trustKeys: this.config.trustKeys ?? {},
+      custody: nativeCustodySupport(),
     });
   }
 
@@ -698,6 +700,16 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
 
   async preflight(_request: PreflightRequest): Promise<PreflightReport> {
     this.assertWriter();
+    const custody = nativeCustodySupport();
+    if (!custody.ready) {
+      return {
+        ready: false,
+        detail: custody.detail ?? "attempt custody support is unavailable",
+        error: new TaskExecutionError("backend-unavailable", {
+          detail: custody.detail ?? "attempt custody support is unavailable",
+        }),
+      };
+    }
     const probes: ProbeResult[] = await Promise.all(
       this.config.launchers.map(
         async (launcher): Promise<ProbeResult> =>
