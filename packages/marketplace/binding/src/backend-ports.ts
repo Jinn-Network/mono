@@ -9,6 +9,7 @@ import type {
   ObservationSnapshot,
   ReconciliationReport,
   SubmissionUri,
+  TwoPartyEngagement,
 } from "@jinn-network/task-execution-backend";
 import type { ProtocolObservation } from "@jinn-network/task-execution-protocol";
 import type { Address } from "viem";
@@ -42,6 +43,12 @@ export interface RecordSubmissionInput {
   readonly submissionBytes: Uint8Array;
   readonly submission: unknown; // the parsed SubmissionRecord (kept `unknown` here to avoid a protocol-type import cycle; `observe-store.ts` narrows it)
   readonly outcome: PostingOutcome;
+  /**
+   * When present (TEP Addendum 2026-07-28-b), the observe port adopts the caller-minted
+   * Attempt URI and records `dispatchContext` verbatim instead of minting a deterministic
+   * self-claim URI for the stub/conformance path.
+   */
+  readonly engagement?: TwoPartyEngagement;
 }
 
 /**

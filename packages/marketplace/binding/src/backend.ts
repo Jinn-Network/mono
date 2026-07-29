@@ -14,9 +14,10 @@
 // M2.5). `MarketplaceTestableBackend` below is a local, hand-rolled type matching that seam's
 // exact shape; TypeScript's structural typing lets `marketplace-testing` pass this backend to
 // `describeTaskExecutionBackendContract` without a cast.
-import { TaskExecutionError, type BackendCapabilities, type CancelAck, type DeliveryRef, type ObservationCursor, type ObservationSnapshot, type PreflightReport, type PreflightRequest, type ReconciliationReport, type SubmissionAck, type SubmissionUri, type TaskExecutionBackend } from "@jinn-network/task-execution-backend";
+import { TaskExecutionError, type BackendCapabilities, type CancelAck, type DeliveryRef, type ObservationCursor, type ObservationSnapshot, type PreflightReport, type PreflightRequest, type ReconciliationReport, type SubmissionAck, type SubmissionUri, type TaskExecutionBackend, type TwoPartyEngagement } from "@jinn-network/task-execution-backend";
 import {
   documentDigest,
+  isValidUrnUuid,
   mergeRequirements,
   sealSubmission,
   sealTask,
@@ -142,7 +143,22 @@ export function makeMarketplaceBackend(
     return marketplaceCapabilities({ cancel: ports.lifecycle !== undefined });
   }
 
-  async function submit(taskBytes: Uint8Array, submissionBytes: Uint8Array): Promise<SubmissionAck> {
+  async function submit(
+    taskBytes: Uint8Array,
+    submissionBytes: Uint8Array,
+    engagement?: TwoPartyEngagement,
+  ): Promise<SubmissionAck> {
+    // TEP Addendum 2026-07-28-b: malformed caller-minted Attempt URIs are rejected at the call
+    // boundary before any document admission, durable scope claim, or chain/IPFS effect.
+    if (engagement !== undefined && !isValidUrnUuid(engagement.attemptUri)) {
+      return {
+        accepted: false,
+        error: new TaskExecutionError("invalid-document", {
+          detail: `engagement.attemptUri "${engagement.attemptUri}" is not a well-formed urn:uuid`,
+        }),
+      };
+    }
+
     const taskAdmission = admitCanonicalDocument<TaskSpecification>(
       taskBytes,
       "Task",
@@ -224,17 +240,22 @@ export function makeMarketplaceBackend(
       }
     }
 
-    for (const key of ["maxTotal", "maxConcurrent"] as const) {
-      const requested = submission.attempts?.[key];
-      const declared = backendCapabilities.attempts[key];
-      if (requested !== undefined && (declared === undefined || requested < declared[0] || requested > declared[1])) {
-        return {
-          accepted: false,
-          error: new TaskExecutionError("unsupported-requirement", {
-            detail: `attempts.${key} value ${requested} is outside this backend's declared bounds ${declared === undefined ? "(not declared)" : `[${declared[0]}, ${declared[1]}]`}`,
-            annotations: { key: `attempts.${key}` },
-          }),
-        };
+    // TEP Addendum 2026-07-28-b / Finding F4: two-party mode concerns the single caller-
+    // identified attempt; an external chain enforces maxClaims, so single-party attempts
+    // capability bounds are not applied here.
+    if (engagement === undefined) {
+      for (const key of ["maxTotal", "maxConcurrent"] as const) {
+        const requested = submission.attempts?.[key];
+        const declared = backendCapabilities.attempts[key];
+        if (requested !== undefined && (declared === undefined || requested < declared[0] || requested > declared[1])) {
+          return {
+            accepted: false,
+            error: new TaskExecutionError("unsupported-requirement", {
+              detail: `attempts.${key} value ${requested} is outside this backend's declared bounds ${declared === undefined ? "(not declared)" : `[${declared[0]}, ${declared[1]}]`}`,
+              annotations: { key: `attempts.${key}` },
+            }),
+          };
+        }
       }
     }
 
@@ -316,6 +337,7 @@ export function makeMarketplaceBackend(
       submissionBytes,
       submission,
       outcome,
+      ...(engagement !== undefined ? { engagement } : {}),
     }, scopeClaim.ownerToken);
 
     return { accepted: true, submission: submission.submission as SubmissionUri, digest: submissionDigest };
