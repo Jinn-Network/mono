@@ -94,6 +94,12 @@ export type {
 
 export {
   GitOidSchema,
+  ISSUE_RELAY_MAX_ACCEPTANCE_ITEMS,
+  ISSUE_RELAY_MAX_CHECKS,
+  ISSUE_RELAY_MAX_FINDINGS,
+  ISSUE_RELAY_MAX_FINDING_DETAIL_BYTES,
+  ISSUE_RELAY_MAX_FINDING_TITLE_BYTES,
+  ISSUE_RELAY_MAX_REPOSITORY_BYTES,
   IssueRelayAdoptionReceiptV1Schema,
   IssueRelayCorrelationV1Schema,
   IssueRelayEvaluationAnchorV1Schema,
@@ -118,6 +124,10 @@ export type {
 export {
   formatIssueRelayAdoptionReceiptComment,
   formatIssueRelayEvaluationAnchorComment,
+  parseIssueRelayAssuranceComment,
   parseIssueRelayAdoptionReceiptComment,
   parseIssueRelayEvaluationAnchorComment,
+} from '../issue-relay-comment.js';
+export type {
+  ParsedIssueRelayAssuranceComment,
 } from '../issue-relay-comment.js';

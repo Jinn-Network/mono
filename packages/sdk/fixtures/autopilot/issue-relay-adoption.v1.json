@@ -11,7 +11,7 @@
     "deliveryEnvelopeCid": "bafyrelay42"
   },
   "targetRepository": "Jinn-Network/mono",
-  "workspaceRepository": "Jinn-Network/mono",
+  "workspaceRepository": "jinn-relay/mono",
   "issueNumber": 1889,
   "prNumber": 42,
   "headRef": "relay/1889",

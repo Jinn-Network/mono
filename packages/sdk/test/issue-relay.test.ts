@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +16,23 @@ const fixtureDirectory = fileURLToPath(new URL('../fixtures/autopilot/', import.
 
 function fixture(name: string): unknown {
   return JSON.parse(readFileSync(`${fixtureDirectory}${name}.json`, 'utf8')) as unknown;
+}
+
+function canonicalJson(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value as Record<string, unknown>).sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(
+        (value as Record<string, unknown>)[key],
+      )}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function canonicalDigest(value: unknown): `sha256:${string}` {
+  return `sha256:${createHash('sha256').update(canonicalJson(value)).digest('hex')}`;
 }
 
 const initialRound = {
@@ -35,6 +53,17 @@ describe('IssueRelayRoundV1Schema', () => {
       round: 0,
       purpose: 'initial',
     });
+  });
+
+  it('rejects findings on an initial round', () => {
+    expect(IssueRelayRoundV1Schema.safeParse({
+      ...initialRound,
+      findings: [{
+        code: 'not-initial',
+        title: 'Initial work cannot carry repair findings',
+        detail: 'Findings are reserved for repair rounds.',
+      }],
+    }).success).toBe(false);
   });
 
   it('rejects a PR number on an initial round', () => {
@@ -92,6 +121,7 @@ const repairRound = {
   ...initialRound,
   round: 1,
   purpose: 'repair' as const,
+  workspaceRepository: 'jinn-relay/mono',
   prNumber: 42,
   findings: [{ code: 'test-failure', title: 'Test fails', detail: 'The test fails.' }],
 };
@@ -101,7 +131,7 @@ const acceptedReceipt = {
   disposition: 'accepted' as const,
   correlation,
   targetRepository: 'Jinn-Network/mono',
-  workspaceRepository: 'Jinn-Network/mono',
+  workspaceRepository: 'jinn-relay/mono',
   issueNumber: 1889,
   prNumber: 42,
   headRef: 'relay/1889',
@@ -116,13 +146,13 @@ const anchor = {
   schemaVersion: 'jinn-issue-relay-evaluation-anchor.v1' as const,
   correlation,
   targetRepository: 'Jinn-Network/mono',
-  workspaceRepository: 'Jinn-Network/mono',
+  workspaceRepository: 'jinn-relay/mono',
   prNumber: 42,
   targetBase: 'main',
   baseOid: oid,
   headRef: 'relay/1889',
   evaluatedHead: '2'.repeat(40),
-  adoptionReceiptDigest: 'sha256:3dafed6b323a92e7d5aa1c011490270f24f853da52da2fd18aba43cfbdc398c3',
+  adoptionReceiptDigest: canonicalDigest(acceptedReceipt),
   checksDigest: `sha256:${'d'.repeat(64)}`,
   anchoredAt: '2026-07-28T12:01:00.000Z',
 };
@@ -143,7 +173,7 @@ const context = {
   correlation,
   reviewTarget: {
     targetRepository: 'Jinn-Network/mono',
-    workspaceRepository: 'Jinn-Network/mono',
+    workspaceRepository: 'jinn-relay/mono',
     issueNumber: 1889,
     prNumber: 42,
     targetBase: 'main',
@@ -202,6 +232,39 @@ describe('Issue Relay evidence contracts', () => {
       evaluationAnchor: {
         ...anchor,
         adoptionReceiptDigest: `sha256:${'c'.repeat(64)}`,
+      },
+    }).success).toBe(false);
+  });
+
+  it('bounds acceptance evidence and exact-head check collections', () => {
+    expect(IssueRelayEvaluationContextV1Schema.safeParse({
+      ...context,
+      goal: {
+        ...context.goal,
+        acceptanceEvidence: Array.from(
+          { length: 51 },
+          (_, index) => `Acceptance item ${index}`,
+        ),
+      },
+    }).success).toBe(false);
+    expect(IssueRelayEvaluationContextV1Schema.safeParse({
+      ...context,
+      checks: {
+        ...context.checks,
+        required: Array.from(
+          { length: 101 },
+          (_, index) => ({ name: `required-${index}`, status: 'passed' as const }),
+        ),
+      },
+    }).success).toBe(false);
+    expect(IssueRelayEvaluationContextV1Schema.safeParse({
+      ...context,
+      checks: {
+        ...context.checks,
+        optional: Array.from(
+          { length: 101 },
+          (_, index) => ({ name: `optional-${index}`, status: 'pending' as const }),
+        ),
       },
     }).success).toBe(false);
   });

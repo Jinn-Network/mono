@@ -2,10 +2,17 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod/v3';
 import { GitHubRepositorySlugSchema } from './autopilot-session.js';
 
-const MAX_FINDINGS = 50;
-const MAX_FINDING_TITLE_BYTES = 240;
-const MAX_FINDING_DETAIL_BYTES = 8 * 1024;
-const MAX_REPOSITORY_BYTES = 200;
+export const ISSUE_RELAY_MAX_FINDINGS = 50;
+export const ISSUE_RELAY_MAX_ACCEPTANCE_ITEMS = 50;
+export const ISSUE_RELAY_MAX_CHECKS = 100;
+export const ISSUE_RELAY_MAX_FINDING_TITLE_BYTES = 240;
+export const ISSUE_RELAY_MAX_FINDING_DETAIL_BYTES = 8 * 1024;
+export const ISSUE_RELAY_MAX_REPOSITORY_BYTES = 200;
+
+const MAX_FINDINGS = ISSUE_RELAY_MAX_FINDINGS;
+const MAX_FINDING_TITLE_BYTES = ISSUE_RELAY_MAX_FINDING_TITLE_BYTES;
+const MAX_FINDING_DETAIL_BYTES = ISSUE_RELAY_MAX_FINDING_DETAIL_BYTES;
+const MAX_REPOSITORY_BYTES = ISSUE_RELAY_MAX_REPOSITORY_BYTES;
 
 export const Sha256DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 export const GitOidSchema = z.string().regex(/^[0-9a-f]{40}$/);
@@ -70,7 +77,7 @@ const roundCommonFields = {
 const InitialIssueRelayRoundV1Schema = z.object({
   ...roundCommonFields,
   purpose: z.literal('initial'),
-  findings: z.array(IssueRelayFindingV1Schema).max(MAX_FINDINGS),
+  findings: z.array(IssueRelayFindingV1Schema).length(0),
   prNumber: z.never().optional(),
 }).strict();
 
@@ -295,7 +302,9 @@ export const IssueRelayEvaluationContextV1Schema = z.object({
   goal: z.object({
     snapshotDigest: Sha256DigestSchema,
     problemStatement: boundedText(MAX_FINDING_DETAIL_BYTES, 'Problem statement'),
-    acceptanceEvidence: z.array(boundedText(MAX_FINDING_DETAIL_BYTES, 'Acceptance evidence')),
+    acceptanceEvidence: z.array(
+      boundedText(MAX_FINDING_DETAIL_BYTES, 'Acceptance evidence'),
+    ).max(ISSUE_RELAY_MAX_ACCEPTANCE_ITEMS),
     verificationProfile: z.literal('jinn-mono.v1'),
   }).strict(),
   operators: z.object({
@@ -322,12 +331,12 @@ export const IssueRelayEvaluationContextV1Schema = z.object({
       name: CheckNameSchema,
       status: z.literal('passed'),
       url: OptionalCheckUrlSchema,
-    }).strict()),
+    }).strict()).max(ISSUE_RELAY_MAX_CHECKS),
     optional: z.array(z.object({
       name: CheckNameSchema,
       status: z.enum(['passed', 'failed', 'pending']),
       url: OptionalCheckUrlSchema,
-    }).strict()),
+    }).strict()).max(ISSUE_RELAY_MAX_CHECKS),
   }).strict(),
 }).strict().superRefine((value, ctx) => {
   const reject = (path: Array<string | number>, message: string): void => {

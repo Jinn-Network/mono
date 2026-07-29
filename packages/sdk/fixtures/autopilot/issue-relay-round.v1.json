@@ -4,7 +4,7 @@
   "round": 1,
   "snapshotDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "targetRepository": "Jinn-Network/mono",
-  "workspaceRepository": "Jinn-Network/mono",
+  "workspaceRepository": "jinn-relay/mono",
   "inputHead": "1111111111111111111111111111111111111111",
   "purpose": "repair",
   "findings": [

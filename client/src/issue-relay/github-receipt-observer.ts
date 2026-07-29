@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod/v3';
 import {
+  ISSUE_RELAY_MAX_ACCEPTANCE_ITEMS,
+  ISSUE_RELAY_MAX_FINDINGS,
   IssueRelayAdoptionReceiptV1Schema,
   IssueRelayEvaluationAnchorV1Schema,
+  IssueRelayFindingV1Schema,
   IssueRelayRoundV1Schema,
-  parseIssueRelayAdoptionReceiptComment,
-  parseIssueRelayEvaluationAnchorComment,
+  parseIssueRelayAssuranceComment,
   type IssueRelayAdoptionReceiptV1,
   type IssueRelayCorrelationV1,
   type IssueRelayEvaluationAnchorV1,
@@ -15,6 +17,7 @@ import {
 const DEFAULT_MAX_PAGES = 20;
 const MAX_MAX_PAGES = 100;
 const GENERATION_MARKER = '<!-- jinn-issue-relay:generation:v1 -->';
+const ASSURANCE_MARKER = '<!-- jinn-issue-relay:assurance:v1 -->';
 const MAX_MARKER_BYTES = 256 * 1024;
 const GitOidSchema = z.string().regex(/^[0-9a-f]{40}$/);
 const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
@@ -107,6 +110,13 @@ function githubString(
 
 function githubPositiveInteger(value: unknown, label: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`Malformed GitHub ${label}`);
+  }
+  return value;
+}
+
+function githubNonNegativeInteger(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`Malformed GitHub ${label}`);
   }
   return value;
@@ -341,8 +351,10 @@ export function createIssueRelayGitHubRestReadPort(
       );
       const checkRunRows = githubArray(checkRuns['check_runs'], 'check runs');
       if (
-        typeof checkRuns['total_count'] === 'number'
-        && checkRuns['total_count'] !== checkRunRows.length
+        githubNonNegativeInteger(
+          checkRuns['total_count'],
+          'check-runs total_count',
+        ) !== checkRunRows.length
       ) {
         throw new Error('GitHub check-runs response is incomplete');
       }
@@ -357,8 +369,10 @@ export function createIssueRelayGitHubRestReadPort(
         'commit statuses',
       );
       if (
-        typeof combinedStatus['total_count'] === 'number'
-        && combinedStatus['total_count'] !== statusRows.length
+        githubNonNegativeInteger(
+          combinedStatus['total_count'],
+          'commit-status total_count',
+        ) !== statusRows.length
       ) {
         throw new Error('GitHub commit-status response is incomplete');
       }
@@ -465,7 +479,8 @@ const SnapshotSchema = z.object({
   }).strict(),
   language: z.literal('typescript'),
   verificationProfile: z.literal('jinn-mono.v1'),
-  acceptanceEvidence: z.array(NonEmptyStringSchema),
+  acceptanceEvidence: z.array(NonEmptyStringSchema)
+    .max(ISSUE_RELAY_MAX_ACCEPTANCE_ITEMS),
   admissionPolicyVersion: z.literal('jinn-issue-relay-admission.v1'),
   capturedAt: TimestampSchema,
   schemaVersion: z.literal('jinn-issue-relay-snapshot.v1'),
@@ -477,10 +492,24 @@ const MarkerRoundSchema = z.object({
   purpose: z.enum(['initial', 'repair']),
   workspaceRepository: NonEmptyStringSchema,
   inputHead: GitOidSchema,
+  findings: z.array(IssueRelayFindingV1Schema)
+    .max(ISSUE_RELAY_MAX_FINDINGS)
+    .optional(),
+  prNumber: z.number().int().positive().optional(),
+  fundingIntent: z.object({
+    taskKey: NonEmptyStringSchema,
+    creatorSafe: SafeSchema,
+    solverNetManifestCid: NonEmptyStringSchema,
+    requestDigest: DigestSchema,
+    maximumSpendWei: z.string().regex(/^[1-9][0-9]*$/),
+    spendWei: z.string().regex(/^[1-9][0-9]*$/),
+    preparedAt: TimestampSchema,
+  }).strict().optional(),
   task: z.object({
     taskKey: NonEmptyStringSchema,
     taskId: NonEmptyStringSchema,
     taskCid: NonEmptyStringSchema,
+    spendWei: z.string().regex(/^[1-9][0-9]*$/),
     fundedAt: TimestampSchema,
   }).strict().optional(),
   solution: z.object({
@@ -491,17 +520,27 @@ const MarkerRoundSchema = z.object({
   adoption: z.object({
     disposition: z.enum(['accepted', 'rejected']),
     resultingHead: GitOidSchema.optional(),
+    prNumber: z.number().int().positive().optional(),
     receiptDigest: DigestSchema,
+    recordedAt: TimestampSchema.optional(),
   }).strict().optional(),
   checks: z.object({
     head: GitOidSchema,
     status: z.enum(['pending', 'passed', 'failed']),
     digest: DigestSchema,
+    observedAt: TimestampSchema.optional(),
+  }).strict().optional(),
+  evaluation: z.object({
+    head: GitOidSchema,
+    anchorDigest: DigestSchema,
+    anchoredAt: TimestampSchema,
   }).strict().optional(),
   verdict: z.object({
     outcome: z.enum(['pass', 'request-changes', 'human', 'unresolved']),
     evaluatedHead: GitOidSchema,
+    evaluatorSafe: SafeSchema.optional(),
     envelopeCid: NonEmptyStringSchema,
+    observedAt: TimestampSchema.optional(),
   }).strict().optional(),
 }).strict();
 
@@ -513,6 +552,7 @@ const IssueRelayGenerationMarkerSchema = z.object({
     'awaiting-clarification',
     'refused',
     'admitted',
+    'funding',
     'submitted',
     'solution-delivered',
     'draft-open',
@@ -530,6 +570,13 @@ const IssueRelayGenerationMarkerSchema = z.object({
     branch: NonEmptyStringSchema,
     head: GitOidSchema,
     draft: z.boolean(),
+    targetRepository: NonEmptyStringSchema.optional(),
+    targetRepositoryId: NonEmptyStringSchema.optional(),
+    forkRepository: NonEmptyStringSchema.optional(),
+    forkRepositoryId: NonEmptyStringSchema.optional(),
+    forkParentRepositoryId: NonEmptyStringSchema.optional(),
+    visibility: z.enum(['PUBLIC', 'PRIVATE', 'INTERNAL']).optional(),
+    managedFork: z.boolean().optional(),
   }).strict().optional(),
   cancellation: z.object({
     requestedAt: TimestampSchema,
@@ -639,16 +686,6 @@ function sameCorrelation(
     && left.round === right.round
     && left.snapshotDigest === right.snapshotDigest
     && left.taskId === right.taskId
-    && left.attemptIndex === right.attemptIndex
-    && left.requestId === right.requestId
-    && left.deliveryEnvelopeCid === right.deliveryEnvelopeCid;
-}
-
-function sameStableDelivery(
-  left: IssueRelayCorrelationV1,
-  right: IssueRelayCorrelationV1,
-): boolean {
-  return left.taskId === right.taskId
     && left.attemptIndex === right.attemptIndex
     && left.requestId === right.requestId
     && left.deliveryEnvelopeCid === right.deliveryEnvelopeCid;
@@ -790,23 +827,32 @@ export async function observeExactIssueRelayEvaluationReceipts(input: {
   }
   const authorizedComments = prComments.filter((comment) =>
     normalizedLogin(comment.authorLogin) === bot);
-  const receipts = uniqueCanonical(authorizedComments
-    .map((comment) => parseIssueRelayAdoptionReceiptComment(comment.body))
-    .filter((value): value is IssueRelayAdoptionReceiptV1 => value !== null)
-    .filter((value) => sameStableDelivery(value.correlation, input.correlation)));
-  if (receipts.length === 0) {
-    return { state: 'pending', detail: 'No exact accepted Relay adoption receipt is observable' };
+  const assuranceComments = authorizedComments.filter((comment) =>
+    comment.body === ASSURANCE_MARKER
+    || comment.body.startsWith(`${ASSURANCE_MARKER}\n`));
+  if (assuranceComments.length === 0) {
+    return { state: 'pending', detail: 'No exact service-authored Relay assurance comment is observable' };
   }
-  if (new Set(receipts.map((value) => value.disposition)).size > 1) {
-    return contradictory('Authorized accepted and rejected Relay receipts exist for the same delivery');
+  if (assuranceComments.length !== 1) {
+    return contradictory('Conflicting service-authored Relay assurance comments are observable');
   }
-  if (
-    receipts.length !== 1
-    || !sameCorrelation(receipts[0]!.correlation, input.correlation)
-  ) {
-    return contradictory('Relay adoption receipt correlation is conflicting');
+  let assurance: ReturnType<typeof parseIssueRelayAssuranceComment>;
+  try {
+    assurance = parseIssueRelayAssuranceComment(
+      assuranceComments[0]!.body,
+      input.correlation,
+    );
+  } catch (error) {
+    return contradictory(
+      error instanceof Error ? error.message : String(error),
+    );
   }
-  const parsedReceipt = IssueRelayAdoptionReceiptV1Schema.safeParse(receipts[0]);
+  if (assurance === null) {
+    return { state: 'pending', detail: 'No exact Relay adoption receipt is present in the assurance comment' };
+  }
+  const parsedReceipt = IssueRelayAdoptionReceiptV1Schema.safeParse(
+    assurance.receipt,
+  );
   if (!parsedReceipt.success) return contradictory('Relay adoption receipt is malformed');
   const receipt = parsedReceipt.data as IssueRelayAdoptionReceiptV1;
   const markerAdoption = marker.rounds[input.round.round]!.adoption;
@@ -830,20 +876,12 @@ export async function observeExactIssueRelayEvaluationReceipts(input: {
     };
   }
 
-  const anchors = uniqueCanonical(authorizedComments
-    .map((comment) => parseIssueRelayEvaluationAnchorComment(comment.body))
-    .filter((value): value is IssueRelayEvaluationAnchorV1 => value !== null)
-    .filter((value) => sameStableDelivery(value.correlation, input.correlation)));
-  if (anchors.length === 0) {
+  if (assurance.anchor === undefined) {
     return { state: 'pending', detail: 'No exact Relay evaluation anchor is observable' };
   }
-  if (
-    anchors.length !== 1
-    || !sameCorrelation(anchors[0]!.correlation, input.correlation)
-  ) {
-    return contradictory('Relay evaluation anchor correlation is conflicting');
-  }
-  const parsedAnchor = IssueRelayEvaluationAnchorV1Schema.safeParse(anchors[0]);
+  const parsedAnchor = IssueRelayEvaluationAnchorV1Schema.safeParse(
+    assurance.anchor,
+  );
   if (!parsedAnchor.success) return contradictory('Relay evaluation anchor is malformed');
   const anchor = parsedAnchor.data as IssueRelayEvaluationAnchorV1;
 
@@ -865,10 +903,34 @@ export async function observeExactIssueRelayEvaluationReceipts(input: {
     };
   }
   const markerRound = marker.rounds[input.round.round]!;
+  const markerPr = marker.pr!;
+  const markerRepositoryIdentity = [
+    markerPr.targetRepository,
+    markerPr.targetRepositoryId,
+    markerPr.forkRepository,
+    markerPr.forkRepositoryId,
+    markerPr.forkParentRepositoryId,
+    markerPr.visibility,
+    markerPr.managedFork,
+  ];
+  if (
+    markerRepositoryIdentity.some((value) => value !== undefined)
+    && (
+      markerRepositoryIdentity.some((value) => value === undefined)
+      || markerPr.targetRepository !== receipt.targetRepository
+      || markerPr.forkRepository !== receipt.workspaceRepository
+      || markerPr.targetRepositoryId === markerPr.forkRepositoryId
+      || markerPr.forkParentRepositoryId !== markerPr.targetRepositoryId
+      || markerPr.visibility !== 'PUBLIC'
+      || markerPr.managedFork !== true
+    )
+  ) {
+    return contradictory('Relay marker managed-fork identity is contradictory');
+  }
   const bindings: Array<[unknown, unknown, string]> = [
-    [marker.pr!.number, receipt.prNumber, 'issue marker pull request'],
-    [marker.pr!.head, receipt.resultingHead, 'issue marker head'],
-    [marker.pr!.branch, receipt.headRef, 'issue marker head ref'],
+    [markerPr.number, receipt.prNumber, 'issue marker pull request'],
+    [markerPr.head, receipt.resultingHead, 'issue marker head'],
+    [markerPr.branch, receipt.headRef, 'issue marker head ref'],
     [markerRound.adoption?.resultingHead, receipt.resultingHead, 'marker adoption head'],
     [markerRound.adoption?.receiptDigest, anchor.adoptionReceiptDigest, 'adoption receipt digest'],
     [markerRound.checks?.head, receipt.resultingHead, 'marker check head'],

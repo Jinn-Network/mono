@@ -22,6 +22,7 @@ import {
   TaskSubmitRequestV1Schema,
   TaskSubmitResultV1Schema,
   parseAutopilotAdoptionReceiptComment,
+  parseIssueRelayAssuranceComment,
   type AcceptedSolutionAdoptionReceipt,
   type AutopilotDeliveryContradictionReason,
   type AutopilotDeliveryCommandResultV1,
@@ -70,6 +71,23 @@ const decoderByManifestName = {
     IssueRelayRoundV1Schema.safeParse(JSON.parse(text)).success,
   'IssueRelayAdoptionReceiptV1Schema': (text: string) =>
     IssueRelayAdoptionReceiptV1Schema.safeParse(JSON.parse(text)).success,
+  'IssueRelayAssuranceComment': (text: string) => {
+    try {
+      return parseIssueRelayAssuranceComment(text, {
+        generation:
+          'R_kgDOExample:101:sha256:dd2241a3f2e4865b572fc038b6d52fd91823f7c534c6672507c3a31a46d152b1',
+        round: 1,
+        snapshotDigest:
+          'sha256:dd2241a3f2e4865b572fc038b6d52fd91823f7c534c6672507c3a31a46d152b1',
+        taskId: '124',
+        attemptIndex: 0,
+        requestId: `0x${'9'.repeat(64)}`,
+        deliveryEnvelopeCid: `f01551220${'4'.repeat(64)}`,
+      })?.anchor !== undefined;
+    } catch {
+      return false;
+    }
+  },
   'TaskSubmitRequestV1Schema': (text: string) =>
     TaskSubmitRequestV1Schema.safeParse(JSON.parse(text)).success,
   'TaskSubmitResultV1Schema': (text: string) =>

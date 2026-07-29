@@ -3,10 +3,10 @@
 #
 # Deterministically materialises the task repository at `$WORKING_DIR/repo` at
 # `base_commit` BEFORE the solver agent runs, so the agent never has to set it
-# up itself. The jinn-repo repo is always `Jinn-Network/mono`; `base_commit` is
-# frequently off the default branch (the commit the merged PR branched from), so
-# a `git clone` + `git checkout <SHA>` fails. This hook does what the task SKILL
-# documents — fetch the exact SHA — deterministically.
+# up itself. Ordinary tasks use `Jinn-Network/mono`; Relay repair tasks use the
+# exact public managed-fork workspace. `base_commit` is frequently off the
+# default branch, so a `git clone` + `git checkout <SHA>` fails. This hook does
+# what the task SKILL documents — fetch the exact SHA — deterministically.
 #
 # Inputs (env, set by the harness adapter):
 #   WORKING_DIR / JINN_WORKING_DIR — the episode working dir (holds task.json)
@@ -60,6 +60,10 @@ esac
   log "task.json has an unsafe workspace repository — skip (not a GitHub owner/name slug)"
   exit 0
 }
+[[ "$BASE" =~ ^[0-9a-f]{40}$ ]] || {
+  log "task.json has an unsafe base_commit — skip (expected a lowercase 40-hex OID)"
+  exit 0
+}
 
 REPO_DIR="$WD/repo"
 if [[ -d "$REPO_DIR/.git" ]]; then
@@ -80,6 +84,7 @@ if ! (
   git checkout --quiet FETCH_HEAD
 ); then
   log "WARNING: provisioning failed for $REPO @ $BASE — agent will fall back to the task SKILL"
+  rm -rf "$REPO_DIR"
   exit 0
 fi
 
@@ -88,5 +93,6 @@ if [[ "$HEAD_SHA" == "$BASE" ]]; then
   log "repo ready at $BASE"
 else
   log "WARNING: HEAD=$HEAD_SHA != base_commit=$BASE"
+  rm -rf "$REPO_DIR"
 fi
 exit 0

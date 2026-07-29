@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -18,7 +26,10 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-async function runSessionStart(spec: Record<string, unknown>): Promise<string[]> {
+async function runSessionStartProbe(
+  spec: Record<string, unknown>,
+  gitHead = BASE_COMMIT,
+): Promise<{ readonly gitArgs: string[]; readonly repoExists: boolean }> {
   const workingDir = await mkdtemp(join(tmpdir(), 'jinn-repo-runtime-session-start-'));
   tempDirs.push(workingDir);
   const binDir = join(workingDir, 'bin');
@@ -43,17 +54,33 @@ async function runSessionStart(spec: Record<string, unknown>): Promise<string[]>
       ...process.env,
       WORKING_DIR: workingDir,
       GIT_LOG: gitLog,
-      GIT_HEAD: BASE_COMMIT,
+      GIT_HEAD: gitHead,
       PATH: `${binDir}:${process.env.PATH ?? ''}`,
     },
   });
   expect(result.stdout).toBe('');
 
   try {
-    return (await readFile(gitLog, 'utf8')).trim().split('\n').filter(Boolean);
+    return {
+      gitArgs: (await readFile(gitLog, 'utf8')).trim().split('\n').filter(Boolean),
+      repoExists: await access(join(workingDir, 'repo')).then(
+        () => true,
+        () => false,
+      ),
+    };
   } catch {
-    return [];
+    return {
+      gitArgs: [],
+      repoExists: await access(join(workingDir, 'repo')).then(
+        () => true,
+        () => false,
+      ),
+    };
   }
+}
+
+async function runSessionStart(spec: Record<string, unknown>): Promise<string[]> {
+  return (await runSessionStartProbe(spec)).gitArgs;
 }
 
 function liveIssueSpec(workspaceRepository?: string): Record<string, unknown> {
@@ -109,5 +136,28 @@ describe('jinn-repo-runtime session-start hook', () => {
     });
 
     expect(gitArgs).toEqual([]);
+  });
+
+  it.each([
+    ['short', 'abc123'],
+    ['uppercase', 'A'.repeat(40)],
+    ['non-hex', 'g'.repeat(40)],
+  ])('rejects a %s base commit before spawning Git', async (_label, baseCommit) => {
+    const gitArgs = await runSessionStart({
+      ...liveIssueSpec(),
+      base_commit: baseCommit,
+    });
+
+    expect(gitArgs).toEqual([]);
+  });
+
+  it('removes the checkout when post-check HEAD differs from the requested base', async () => {
+    const result = await runSessionStartProbe(
+      liveIssueSpec(),
+      'b'.repeat(40),
+    );
+
+    expect(result.gitArgs).toContain(`fetch --depth 1 --quiet origin ${BASE_COMMIT}`);
+    expect(result.repoExists).toBe(false);
   });
 });

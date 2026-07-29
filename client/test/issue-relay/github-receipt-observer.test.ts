@@ -114,6 +114,7 @@ function markerRound(
       taskKey: `issue-relay:${round.generation}:round:0`,
       taskId: correlation.taskId,
       taskCid: 'bafy-task',
+      spendWei: '1',
       fundedAt: '2026-07-28T12:05:00.000Z',
     },
     solution: {
@@ -177,6 +178,13 @@ function generationMarker(overrides: Record<string, unknown> = {}): string {
       branch: receipt.headRef,
       head,
       draft: true,
+      targetRepository: round.targetRepository,
+      targetRepositoryId: 'R_kgDOExample',
+      forkRepository: receipt.workspaceRepository,
+      forkRepositoryId: 'R_kgDORelayFork',
+      forkParentRepositoryId: 'R_kgDOExample',
+      visibility: 'PUBLIC',
+      managedFork: true,
     },
     updatedAt: '2026-07-28T12:12:00.000Z',
     ...overrides,
@@ -205,6 +213,16 @@ function comment(
   };
 }
 
+function assuranceComment(...blocks: readonly string[]): string {
+  return [
+    '<!-- jinn-issue-relay:assurance:v1 -->',
+    '',
+    '# Relay assurance',
+    '',
+    ...blocks.flatMap((block) => [block, '']),
+  ].join('\n');
+}
+
 function port(input: {
   issuePages?: Readonly<Record<string, IssueRelayGitHubCommentPage>>;
   prPages?: Readonly<Record<string, IssueRelayGitHubCommentPage>>;
@@ -220,8 +238,10 @@ function port(input: {
   const prPages = input.prPages ?? {
     first: {
       comments: [
-        comment(2, formatIssueRelayAdoptionReceiptComment(receipt)),
-        comment(3, formatIssueRelayEvaluationAnchorComment(anchor)),
+        comment(2, assuranceComment(
+          formatIssueRelayAdoptionReceiptComment(receipt),
+          formatIssueRelayEvaluationAnchorComment(anchor),
+        )),
       ],
     },
   };
@@ -264,6 +284,34 @@ function observe(github: IssueRelayGitHubReadPort, maxPages?: number) {
 }
 
 describe('observeExactIssueRelayEvaluationReceipts', () => {
+  it('consumes receipt and anchor evidence from the one composed assurance comment', async () => {
+    const assurance = [
+      '<!-- jinn-issue-relay:assurance:v1 -->',
+      '',
+      '# IN PROGRESS',
+      '',
+      '<details>',
+      '<summary>Technical receipts and evidence</summary>',
+      '',
+      formatIssueRelayAdoptionReceiptComment(receipt),
+      '',
+      formatIssueRelayEvaluationAnchorComment(anchor),
+      '',
+      '</details>',
+    ].join('\n');
+    const github = port({
+      prPages: {
+        first: { comments: [comment(2, assurance)] },
+      },
+    });
+
+    await expect(observe(github)).resolves.toMatchObject({
+      state: 'accepted',
+      receipt,
+      anchor,
+    });
+  });
+
   it('paginates both surfaces within a hard bound and accepts exact Relay receipts', async () => {
     const github = port({
       issuePages: {
@@ -272,11 +320,14 @@ describe('observeExactIssueRelayEvaluationReceipts', () => {
       },
       prPages: {
         first: {
-          comments: [comment(2, formatIssueRelayAdoptionReceiptComment(receipt))],
+          comments: [comment(2, 'unrelated Relay progress comment')],
           nextCursor: 'second',
         },
         second: {
-          comments: [comment(3, formatIssueRelayEvaluationAnchorComment(anchor))],
+          comments: [comment(3, assuranceComment(
+            formatIssueRelayAdoptionReceiptComment(receipt),
+            formatIssueRelayEvaluationAnchorComment(anchor),
+          ))],
         },
       },
     });
@@ -332,6 +383,35 @@ describe('observeExactIssueRelayEvaluationReceipts', () => {
     });
   });
 
+  it('rejects a production marker whose managed-fork identity contradicts the receipt', async () => {
+    const github = port({
+      issuePages: {
+        first: {
+          comments: [comment(1, generationMarker({
+            pr: {
+              number: prNumber,
+              branch: receipt.headRef,
+              head,
+              draft: true,
+              targetRepository: round.targetRepository,
+              targetRepositoryId: 'R_kgDOExample',
+              forkRepository: 'attacker/mono',
+              forkRepositoryId: 'R_kgDOAttackerFork',
+              forkParentRepositoryId: 'R_kgDOExample',
+              visibility: 'PUBLIC',
+              managedFork: true,
+            },
+          }))],
+        },
+      },
+    });
+
+    await expect(observe(github)).resolves.toMatchObject({
+      state: 'contradictory',
+      detail: expect.stringMatching(/managed-fork identity/i),
+    });
+  });
+
   it('keeps an otherwise exact receipt pending after the PR head moves', async () => {
     await expect(observe(port({ headSha: '9'.repeat(40) }))).resolves.toMatchObject({
       state: 'pending',
@@ -352,9 +432,11 @@ describe('observeExactIssueRelayEvaluationReceipts', () => {
       prPages: {
         first: {
           comments: [
-            comment(2, formatIssueRelayAdoptionReceiptComment(receipt)),
-            comment(3, formatIssueRelayAdoptionReceiptComment(rejected)),
-            comment(4, formatIssueRelayEvaluationAnchorComment(anchor)),
+            comment(2, assuranceComment(
+              formatIssueRelayAdoptionReceiptComment(receipt),
+              formatIssueRelayAdoptionReceiptComment(rejected),
+              formatIssueRelayEvaluationAnchorComment(anchor),
+            )),
           ],
         },
       },
@@ -392,7 +474,9 @@ describe('observeExactIssueRelayEvaluationReceipts', () => {
       prPages: {
         first: {
           comments: [
-            comment(2, formatIssueRelayAdoptionReceiptComment(rejected)),
+            comment(2, assuranceComment(
+              formatIssueRelayAdoptionReceiptComment(rejected),
+            )),
           ],
         },
       },
@@ -442,7 +526,9 @@ describe('observeExactIssueRelayEvaluationReceipts', () => {
       prPages: {
         first: {
           comments: [
-            comment(2, formatIssueRelayAdoptionReceiptComment(rejected)),
+            comment(2, assuranceComment(
+              formatIssueRelayAdoptionReceiptComment(rejected),
+            )),
           ],
         },
       },
@@ -480,7 +566,9 @@ describe('observeExactIssueRelayEvaluationReceipts', () => {
       prPages: {
         first: {
           comments: [
-            comment(2, formatIssueRelayAdoptionReceiptComment(rejected)),
+            comment(2, assuranceComment(
+              formatIssueRelayAdoptionReceiptComment(rejected),
+            )),
           ],
         },
       },
@@ -513,8 +601,10 @@ describe('observeExactIssueRelayEvaluationReceipts', () => {
       prPages: {
         first: {
           comments: [
-            comment(2, formatIssueRelayAdoptionReceiptComment(receipt)),
-            comment(3, formatIssueRelayEvaluationAnchorComment(wrongAnchor)),
+            comment(2, assuranceComment(
+              formatIssueRelayAdoptionReceiptComment(receipt),
+              formatIssueRelayEvaluationAnchorComment(wrongAnchor),
+            )),
           ],
         },
       },
@@ -593,7 +683,10 @@ describe('createIssueRelayGitHubRestReadPort', () => {
           ? [{
               id: 2,
               user: { login: BOT },
-              body: formatIssueRelayAdoptionReceiptComment(receipt),
+              body: assuranceComment(
+                formatIssueRelayAdoptionReceiptComment(receipt),
+                formatIssueRelayEvaluationAnchorComment(anchor),
+              ),
               created_at: '2026-07-28T12:12:00.000Z',
               updated_at: '2026-07-28T12:12:00.000Z',
             }]
@@ -616,7 +709,7 @@ describe('createIssueRelayGitHubRestReadPort', () => {
                 ],
               }
             : url.includes('/status?')
-              ? { statuses: [] }
+              ? { total_count: 0, statuses: [] }
               : {
                   number: prNumber,
                   base: {
@@ -685,5 +778,48 @@ describe('createIssueRelayGitHubRestReadPort', () => {
       const init = call[1] as RequestInit | undefined;
       expect(new Headers(init?.headers).has('authorization')).toBe(false);
     }
+  });
+
+  it.each([
+    ['check runs', { total_count: undefined, check_runs: [] }, { total_count: 0, statuses: [] }],
+    ['commit statuses', { total_count: 0, check_runs: [] }, { statuses: [] }],
+  ])('fails closed when %s omits total_count', async (
+    _label,
+    checkRuns,
+    statuses,
+  ) => {
+    const fetchImpl = vi.fn(async (request: string | URL | Request) => {
+      const url = String(request);
+      const value = url.includes('/check-runs')
+        ? checkRuns
+        : url.includes('/status?')
+          ? statuses
+          : {
+              number: prNumber,
+              base: {
+                ref: anchor.targetBase,
+                sha: baseOid,
+                repo: { full_name: round.targetRepository },
+              },
+              head: {
+                ref: receipt.headRef,
+                sha: head,
+                repo: { full_name: receipt.workspaceRepository },
+              },
+            };
+      return new Response(JSON.stringify(value), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const github = createIssueRelayGitHubRestReadPort({
+      baseUrl: 'https://api.github.test',
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await expect(github.readPullRequest({
+      repository: round.targetRepository,
+      prNumber,
+    })).rejects.toThrow(/total_count|incomplete|malformed/i);
   });
 });
