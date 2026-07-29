@@ -83,8 +83,8 @@ export interface PairedMcnemarResult {
   readonly concordantPass: number;
   readonly concordantFail: number;
   readonly pValue: number;
-  readonly clustering: { readonly basis: "provenance-source" | "none"; readonly clusters: number };
-  /** Present only when `clustering.basis === "provenance-source"` (a resolver was supplied). */
+  readonly clustering: { readonly basis: "task-provenance-source" | "none"; readonly clusters: number };
+  /** Present only when `clustering.basis === "task-provenance-source"` (a resolver was supplied). */
   readonly clusteredPValue?: number;
   readonly designEffect?: number;
 }
@@ -142,7 +142,7 @@ export function pairedMcnemar(
     concordantPass,
     concordantFail,
     pValue,
-    clustering: { basis: "provenance-source", clusters: variance.clusters },
+    clustering: { basis: "task-provenance-source", clusters: variance.clusters },
     clusteredPValue,
     designEffect: variance.designEffect,
   };

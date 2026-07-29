@@ -1,0 +1,361 @@
+import {
+  parseRun,
+  sealRun,
+  type MatrixRecord,
+  type RunRecord,
+} from "@jinn-network/benchmarking-records";
+import {
+  canonicalJsonBytes,
+  parseDsseEnvelope,
+  recordDigest,
+} from "@jinn-network/trust-core";
+import type {
+  MethodComputeInput,
+  VerifiedAnchoredBenchmarkAnnouncement,
+  VerdictOutcome,
+} from "./method.js";
+
+export type MethodInputErrorCode =
+  | "verdict-record-unavailable"
+  | "verdict-record-digest-mismatch"
+  | "verdict-record-malformed"
+  | "run-record-unavailable"
+  | "run-record-digest-mismatch"
+  | "run-record-malformed"
+  | "task-record-unavailable"
+  | "task-record-digest-mismatch"
+  | "task-record-malformed"
+  | "task-provenance-source-missing"
+  | "task-provenance-timestamp-missing"
+  | "anchored-announcement-unavailable"
+  | "anchored-announcement-unverified"
+  | "anchored-announcement-malformed"
+  | "incompatible-run-replicates";
+
+/** Typed, stable fail-closed method-input failure. `digest` always names the exact requested
+ * record reference whose bytes were unavailable, malformed, mismatched, or incompatible. */
+export class MethodInputError extends Error {
+  readonly name = "MethodInputError";
+
+  constructor(
+    readonly code: MethodInputErrorCode,
+    readonly digest: string,
+    detail: string,
+  ) {
+    super(`${code}: ${digest}: ${detail}`);
+  }
+}
+
+const IN_TOTO_STATEMENT_TYPE = "https://in-toto.io/Statement/v1";
+const RESULT_EVALUATION_PREDICATE_TYPE =
+  "https://jinn.network/attestations/result-evaluation/v1";
+const VERDICT_PAYLOAD_TYPE = "application/vnd.in-toto+json";
+const DISCOVERY_ENTRY_PAYLOAD_TYPE = "application/vnd.jinn.discovery.entry.v1+json";
+const DISCOVERY_PROTOCOL = "https://jinn.network/record-discovery/1.0";
+const BENCHMARK_RECORD_KIND = "https://jinn.network/records/benchmark/1.0";
+
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  return left.length === right.length && left.every((byte, index) => byte === right[index]);
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assertUnicodeScalars(value: unknown, digest: string, code: MethodInputErrorCode): void {
+  const assertString = (text: string): void => {
+    for (let index = 0; index < text.length; index += 1) {
+      const unit = text.charCodeAt(index);
+      if (unit >= 0xd800 && unit <= 0xdbff) {
+        const next = text.charCodeAt(index + 1);
+        if (!(next >= 0xdc00 && next <= 0xdfff)) {
+          throw new MethodInputError(code, digest, "JSON contains an unpaired high surrogate");
+        }
+        index += 1;
+      } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+        throw new MethodInputError(code, digest, "JSON contains an unpaired low surrogate");
+      }
+    }
+  };
+  if (typeof value === "string") {
+    assertString(value);
+  } else if (Array.isArray(value)) {
+    for (const item of value) assertUnicodeScalars(item, digest, code);
+  } else if (isObject(value)) {
+    for (const [key, nested] of Object.entries(value)) {
+      assertString(key);
+      assertUnicodeScalars(nested, digest, code);
+    }
+  }
+}
+
+function parseCanonicalJson(
+  bytes: Uint8Array,
+  code: MethodInputErrorCode,
+  digest: string,
+): Record<string, unknown> {
+  let value: unknown;
+  try {
+    value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch (cause) {
+    throw new MethodInputError(code, digest, `bytes are not valid UTF-8 JSON: ${String(cause)}`);
+  }
+  if (!isObject(value)) {
+    throw new MethodInputError(code, digest, "canonical payload must be a JSON object");
+  }
+  assertUnicodeScalars(value, digest, code);
+  let canonical: Uint8Array;
+  try {
+    canonical = canonicalJsonBytes(value);
+  } catch (cause) {
+    throw new MethodInputError(code, digest, `payload is outside canonical I-JSON: ${String(cause)}`);
+  }
+  if (!bytesEqual(bytes, canonical)) {
+    throw new MethodInputError(code, digest, "payload bytes are not the exact canonical encoding");
+  }
+  return value;
+}
+
+function requireResolvedBytes(
+  digest: string,
+  resolve: (digest: string) => Uint8Array | undefined,
+  unavailableCode: MethodInputErrorCode,
+  mismatchCode: MethodInputErrorCode,
+): Uint8Array {
+  const bytes = resolve(digest);
+  if (bytes === undefined) {
+    throw new MethodInputError(unavailableCode, digest, "resolver returned no bytes");
+  }
+  const actual = recordDigest(bytes);
+  if (actual !== digest) {
+    throw new MethodInputError(
+      mismatchCode,
+      digest,
+      `resolved exact bytes hash to ${actual}`,
+    );
+  }
+  return bytes;
+}
+
+function isRfc3339(value: unknown): value is string {
+  return typeof value === "string"
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+    && !Number.isNaN(Date.parse(value));
+}
+
+/**
+ * Smallest exact Result Evaluation Statement validator needed by aggregation. It intentionally
+ * does not recreate the profiles package: only the frozen identity, outcome, evaluator, and
+ * effective-time fields consumed at this boundary are accepted, with no normalization.
+ */
+export function resolveVerdictOutcome(
+  digest: string,
+  input: Pick<MethodComputeInput, "resolveVerdictBytes">,
+): VerdictOutcome {
+  const envelopeBytes = requireResolvedBytes(
+    digest,
+    input.resolveVerdictBytes,
+    "verdict-record-unavailable",
+    "verdict-record-digest-mismatch",
+  );
+  let envelope: ReturnType<typeof parseDsseEnvelope>;
+  try {
+    envelope = parseDsseEnvelope(envelopeBytes);
+  } catch (cause) {
+    throw new MethodInputError(
+      "verdict-record-malformed",
+      digest,
+      `invalid DSSE envelope: ${String(cause)}`,
+    );
+  }
+  if (envelope.payloadType !== VERDICT_PAYLOAD_TYPE) {
+    throw new MethodInputError(
+      "verdict-record-malformed",
+      digest,
+      `payloadType must be ${VERDICT_PAYLOAD_TYPE}`,
+    );
+  }
+  const statement = parseCanonicalJson(
+    envelope.payloadBytes,
+    "verdict-record-malformed",
+    digest,
+  );
+  if (statement["_type"] !== IN_TOTO_STATEMENT_TYPE) {
+    throw new MethodInputError("verdict-record-malformed", digest, "invalid Statement _type");
+  }
+  if (statement["predicateType"] !== RESULT_EVALUATION_PREDICATE_TYPE) {
+    throw new MethodInputError("verdict-record-malformed", digest, "invalid predicateType");
+  }
+  if (!Array.isArray(statement["subject"]) || statement["subject"].length === 0) {
+    throw new MethodInputError("verdict-record-malformed", digest, "subject must be non-empty");
+  }
+  for (const subject of statement["subject"]) {
+    if (!isObject(subject) || typeof subject["name"] !== "string" || subject["name"].length === 0) {
+      throw new MethodInputError(
+        "verdict-record-malformed",
+        digest,
+        "every subject must carry a non-empty name",
+      );
+    }
+    const subjectDigest = subject["digest"];
+    if (
+      !isObject(subjectDigest)
+      || typeof subjectDigest["sha256"] !== "string"
+      || !/^[a-f0-9]{64}$/.test(subjectDigest["sha256"])
+    ) {
+      throw new MethodInputError(
+        "verdict-record-malformed",
+        digest,
+        "every subject must carry one exact lowercase sha256 digest",
+      );
+    }
+  }
+  const predicate = statement["predicate"];
+  if (!isObject(predicate)) {
+    throw new MethodInputError("verdict-record-malformed", digest, "predicate must be an object");
+  }
+  if (!isRfc3339(predicate["evaluatedAt"])) {
+    throw new MethodInputError("verdict-record-malformed", digest, "evaluatedAt must be RFC 3339");
+  }
+  const evaluator = predicate["evaluator"];
+  if (!isObject(evaluator) || typeof evaluator["id"] !== "string" || evaluator["id"].length === 0) {
+    throw new MethodInputError("verdict-record-malformed", digest, "evaluator.id is required");
+  }
+  if (typeof predicate["taskSubject"] !== "string" || predicate["taskSubject"].length === 0) {
+    throw new MethodInputError("verdict-record-malformed", digest, "taskSubject is required");
+  }
+  if (
+    !Array.isArray(predicate["resultSubjects"])
+    || predicate["resultSubjects"].length === 0
+    || predicate["resultSubjects"].some((name) => typeof name !== "string" || name.length === 0)
+  ) {
+    throw new MethodInputError("verdict-record-malformed", digest, "resultSubjects is invalid");
+  }
+  const verdict = predicate["verdict"];
+  if (verdict !== "pass" && verdict !== "fail" && verdict !== "inconclusive") {
+    throw new MethodInputError("verdict-record-malformed", digest, "verdict is invalid");
+  }
+  return { verdict };
+}
+
+export function resolveRun(
+  digest: string,
+  input: Pick<MethodComputeInput, "resolveRunBytes">,
+): RunRecord {
+  const bytes = requireResolvedBytes(
+    digest,
+    input.resolveRunBytes,
+    "run-record-unavailable",
+    "run-record-digest-mismatch",
+  );
+  try {
+    const record = parseRun(bytes);
+    if (!bytesEqual(bytes, sealRun(record).bytes)) {
+      throw new Error("Run bytes are not canonical");
+    }
+    return record;
+  } catch (cause) {
+    throw new MethodInputError("run-record-malformed", digest, String(cause));
+  }
+}
+
+export function matrixRunDigest(matrix: MatrixRecord): string {
+  return `sha256:${matrix.run.digest.sha256}`;
+}
+
+export interface ResolvedTaskProvenance {
+  readonly source: string;
+  readonly timestamp: string;
+}
+
+export function resolveTaskProvenance(
+  taskDigestHex: string,
+  input: Pick<MethodComputeInput, "resolveTaskBytes">,
+): ResolvedTaskProvenance {
+  const digest = `sha256:${taskDigestHex}`;
+  const bytes = requireResolvedBytes(
+    digest,
+    input.resolveTaskBytes,
+    "task-record-unavailable",
+    "task-record-digest-mismatch",
+  );
+  const task = parseCanonicalJson(bytes, "task-record-malformed", digest);
+  const payload = task["payload"];
+  const provenance = isObject(payload) ? payload["provenance"] : undefined;
+  if (!isObject(provenance)) {
+    throw new MethodInputError("task-record-malformed", digest, "payload.provenance is required");
+  }
+  const source = provenance["source"];
+  if (typeof source !== "string" || source.length === 0) {
+    throw new MethodInputError(
+      "task-provenance-source-missing",
+      digest,
+      "payload.provenance.source is required",
+    );
+  }
+  const timestamp = provenance["timestamp"];
+  if (!isRfc3339(timestamp)) {
+    throw new MethodInputError(
+      "task-provenance-timestamp-missing",
+      digest,
+      "payload.provenance.timestamp must be RFC 3339",
+    );
+  }
+  return { source, timestamp };
+}
+
+export function resolveAnchoredAnnouncementTime(
+  benchmarkDigest: string,
+  proof: VerifiedAnchoredBenchmarkAnnouncement | undefined,
+): string {
+  if (proof === undefined) {
+    throw new MethodInputError(
+      "anchored-announcement-unavailable",
+      benchmarkDigest,
+      "resolver returned no authenticated announcement evidence",
+    );
+  }
+  if (proof.verification !== "verified" || !isRfc3339(proof.anchoredAt)) {
+    throw new MethodInputError(
+      "anchored-announcement-unverified",
+      benchmarkDigest,
+      "anchoring evidence/time was not verifier-authenticated",
+    );
+  }
+  try {
+    const envelope = parseDsseEnvelope(proof.envelopeBytes);
+    if (envelope.payloadType !== DISCOVERY_ENTRY_PAYLOAD_TYPE) {
+      throw new Error(`payloadType must be ${DISCOVERY_ENTRY_PAYLOAD_TYPE}`);
+    }
+    if (!bytesEqual(envelope.payloadBytes, proof.entryBytes)) {
+      throw new Error("signed envelope payload does not equal the supplied exact entry bytes");
+    }
+    const entry = parseCanonicalJson(
+      proof.entryBytes,
+      "anchored-announcement-malformed",
+      benchmarkDigest,
+    );
+    if (entry["protocol"] !== DISCOVERY_PROTOCOL) {
+      throw new Error(`entry protocol must be ${DISCOVERY_PROTOCOL}`);
+    }
+    const announcements = entry["announcements"];
+    const namesBenchmark = Array.isArray(announcements) && announcements.some((announcement) => {
+      if (!isObject(announcement) || announcement["action"] !== "available") return false;
+      const record = announcement["record"];
+      return isObject(record)
+        && record["kind"] === BENCHMARK_RECORD_KIND
+        && record["digest"] === benchmarkDigest;
+    });
+    if (!namesBenchmark) {
+      throw new Error("signed entry does not announce the requested Benchmark digest");
+    }
+  } catch (cause) {
+    if (cause instanceof MethodInputError) throw cause;
+    throw new MethodInputError(
+      "anchored-announcement-malformed",
+      benchmarkDigest,
+      String(cause),
+    );
+  }
+  return proof.anchoredAt;
+}

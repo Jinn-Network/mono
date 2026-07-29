@@ -167,8 +167,17 @@
   "expectedResults": {
     "basis": "self-declared",
     "cutoff": "2026-03-01T00:00:00Z",
-    "kept": 2,
-    "excludedByPredicate": 2,
+    "keptTaskDigests": [
+      "553499d3f52c63b400f9b783513d5eb2f4522c1ab834e2b1e377ead50c162d4d",
+      "8e6ac9e6a6feaddeaa0abe6284a05f752ec121dcab7aad18d01911cc69ac4937"
+    ],
+    "excludedByPredicate": {
+      "count": 2,
+      "cellKeys": [
+        "948ed470b77c84689b88c5afc5cdf4c5a790a36b1a0a47baedaaed11c915400c/armA/1",
+        "bdbd14aa88d74c75d91de580a046080feabba1a0d6653360c69d221ce9e77716/armA/1"
+      ]
+    },
     "delegate": {
       "verdictRule": "unanimous",
       "arms": {
@@ -185,6 +194,10 @@
         "count": 0,
         "cellKeys": []
       }
+    },
+    "conflicted": {
+      "count": 0,
+      "cellKeys": []
     }
   }
 }

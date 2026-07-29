@@ -124,18 +124,33 @@ describe("method fixture/spec completeness", () => {
     expect(cases.pairedExclusions).toBe(true);
     expect(cases.pinnedClustering).toBe("task-provenance-source");
     expect(cases.comparability).toMatchObject({ marginalCrossVersion: "reject" });
+    expect(cases.replicateBoundary.pairedMcnemar).toEqual({
+      r1: "compute-exact",
+      rGreaterThan1: "typed-incompatible-input",
+    });
   });
 
-  test("includes an exact deterministic noninferiority fixture and Bradley–Terry metadata fixture", async () => {
-    const noninferiority = await fixtureJson("methods/noninferiority-iut.json");
+  test("includes exact deterministic PASS/FAIL/INCONCLUSIVE noninferiority fixtures and Bradley–Terry metadata", async () => {
+    const noninferiority = await Promise.all([
+      fixtureJson("methods/noninferiority-pass.json"),
+      fixtureJson("methods/noninferiority-fail.json"),
+      fixtureJson("methods/noninferiority-inconclusive.json"),
+    ]);
     const bradleyTerry = await fixtureJson("methods/bradley-terry.json");
-    expect(noninferiority.parameters).toMatchObject({
-      seed: expect.any(Number),
-      resamples: expect.any(Number),
-    });
-    expect(noninferiority.expectedResults.verdict).toMatch(/^(pass|fail|inconclusive)$/);
-    expect(noninferiority.expectedResults.excluded.count)
-      .toBe(noninferiority.expectedResults.excluded.cellKeys.length);
+    expect(noninferiority.map((fixture) => fixture.expectedResults.verdict)).toEqual([
+      "PASS",
+      "FAIL",
+      "INCONCLUSIVE",
+    ]);
+    for (const fixture of noninferiority) {
+      expect(fixture.parameters).toMatchObject({
+        seed: expect.any(Number),
+        resamples: expect.any(Number),
+      });
+      expect(fixture.expectedResults.bootstrap.procedure).toBe("xorshift32-v1");
+      expect(fixture.expectedResults.excluded.count)
+        .toBe(fixture.expectedResults.excluded.cellKeys.length);
+    }
     expect(bradleyTerry).toMatchObject({
       computeAvailability: "unavailable",
       expectedCompute: "reject",

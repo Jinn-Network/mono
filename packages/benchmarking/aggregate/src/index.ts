@@ -4,7 +4,16 @@
 
 // --- the method registry + local types (design §9.2, §14.7) ---
 export { BENCHMARKING_METHOD_REGISTRY, createMethodRegistry } from "./registry.js";
-export type { Method, MethodComputeInput, MethodRegistry, VerdictOutcome, VerdictRuleName } from "./method.js";
+export type {
+  Method,
+  MethodComputeInput,
+  MethodRegistry,
+  VerifiedAnchoredBenchmarkAnnouncement,
+  VerdictOutcome,
+  VerdictRuleName,
+} from "./method.js";
+export { MethodInputError } from "./resolved-inputs.js";
+export type { MethodInputErrorCode } from "./resolved-inputs.js";
 
 // --- the contract-wide verdictRule reduction (design §9.2) ---
 export { reduceValidVerdicts } from "./verdict-rule.js";
@@ -30,6 +39,7 @@ export {
   nonInferiorityVerdict,
   pairedCostVerdict,
   pairedRateDiffLowerBound,
+  xorshift32,
 } from "./stats/noninferiority.js";
 export type {
   CostVerdictResult,
@@ -52,6 +62,7 @@ export type {
   ProduceReportInput,
   ProducedReport,
   VerifyReportCheck,
+  VerifyReportInput,
   VerifyReportPorts,
   VerifyReportResult,
 } from "./report.js";

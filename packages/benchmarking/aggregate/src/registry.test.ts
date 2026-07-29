@@ -1,78 +1,16 @@
-import { createHash } from "node:crypto";
-import { parseMatrix, sealMatrix, type MatrixRecord } from "@jinn-network/benchmarking-records";
 import { describe, expect, test } from "vitest";
 import { BENCHMARKING_METHOD_REGISTRY } from "./index.js";
 import { createMethodRegistry } from "./registry.js";
-import type { MethodComputeInput, VerdictOutcome } from "./method.js";
-
-const RUN_DESCRIPTOR = { digest: { sha256: "a".repeat(64) } };
-const CLOSE_BOUNDARY = { at: "2026-08-04T00:00:00Z" };
-const ASSEMBLY = { procedure: "jinn.benchmarking.assembly", version: "1.0" };
-const MATCH_ALL = { harness: "match", model: "match", loadout: "match", isolation: "match", checksFailed: [] };
-
-function sha256Hex(label: string): string {
-  return createHash("sha256").update(label, "utf8").digest("hex");
-}
-function taskDigest(label: string): string {
-  return sha256Hex(`task/${label}`);
-}
-function cellKey(task: string, armId: string, replicate: number): string {
-  return `${task}/${armId}/${replicate}`;
-}
-function digest(label: string): string {
-  return `sha256:${sha256Hex(`verdict/${label}`)}`;
-}
-
-function cell(
-  taskLabel: string,
-  armId: string,
-  outcome: string,
-  verdicts: string[] = [],
-): Record<string, unknown> {
-  const task = taskDigest(taskLabel);
-  return {
-    cellKey: cellKey(task, armId, 1),
-    taskDigest: task,
-    armId,
-    replicate: 1,
-    dispatches: 1,
-    accounted: 1,
-    verdicts,
-    validVerdicts: verdicts,
-    outcome,
-    verification: MATCH_ALL,
-    integrityTier: "re-derivable",
-  };
-}
-
-function buildMatrix(cells: Record<string, unknown>[]): MatrixRecord {
-  const perArm: Record<string, Record<string, number>> = {};
-  for (const c of cells) {
-    const armId = c["armId"] as string;
-    const outcome = c["outcome"] as string;
-    perArm[armId] ??= { expected: 0, judged: 0, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 0, replacements: 0 };
-    perArm[armId]!["expected"] += 1;
-    perArm[armId]![outcome] += 1;
-  }
-  const document = {
-    protocol: "https://jinn.network/protocols/benchmarking/1.0",
-    run: RUN_DESCRIPTOR,
-    closeBoundary: CLOSE_BOUNDARY,
-    cells,
-    exclusions: [],
-    attrition: { perArm, asymmetryFlags: [] },
-    completeness: { expected: cells.length, judged: cells.filter((c) => c["outcome"] === "judged").length, floor: "0.5", runOutcome: "complete" },
-    assembly: ASSEMBLY,
-  };
-  return parseMatrix(sealMatrix(document).bytes);
-}
+import type { MethodComputeInput } from "./method.js";
 
 function baseInput(overrides: Partial<MethodComputeInput> = {}): MethodComputeInput {
   return {
     matrices: [],
     parameters: {},
     verdictRule: "unanimous",
-    resolveVerdict: () => undefined,
+    resolveVerdictBytes: () => undefined,
+    resolveRunBytes: () => undefined,
+    resolveTaskBytes: () => undefined,
     ...overrides,
   };
 }
@@ -105,77 +43,6 @@ describe("createMethodRegistry", () => {
     ] as const) {
       expect(registry.get(id, version), `${id}@${version}`).toBeDefined();
     }
-  });
-});
-
-describe("paired-mcnemar@1: the excluded remainder (§9.3)", () => {
-  test("a task judged in only one arm is excluded, its cellKey reported, and it never enters the pair count", () => {
-    const registry = createMethodRegistry();
-    const method = registry.get("jinn.benchmarking.method/paired-mcnemar", "1")!;
-    const matrix = buildMatrix([
-      cell("t1", "armA", "judged", [digest("t1a")]),
-      cell("t1", "armB", "judged", [digest("t1b")]),
-      cell("t2", "armA", "judged", [digest("t2a")]), // no armB counterpart -- unpaired
-    ]);
-    const outcomes = new Map<string, VerdictOutcome>([
-      [digest("t1a"), { verdict: "pass" }],
-      [digest("t1b"), { verdict: "fail" }],
-      [digest("t2a"), { verdict: "pass" }],
-    ]);
-    const results = method.compute!(baseInput({
-      matrices: [matrix],
-      parameters: { baseline: "armA", candidate: "armB" },
-      resolveVerdict: (d) => outcomes.get(d),
-    })) as { pairs: number; excluded: { count: number; cellKeys: string[] } };
-    expect(results.pairs).toBe(1);
-    expect(results.excluded.count).toBe(1);
-    expect(results.excluded.cellKeys).toEqual([cellKey(taskDigest("t2"), "armA", 1)]);
-  });
-});
-
-describe("noninferiority-iut@1", () => {
-  function mulberry32(seed: number): () => number {
-    let state = seed;
-    return () => {
-      state |= 0;
-      state = (state + 0x6d2b79f5) | 0;
-      let t = Math.imul(state ^ (state >>> 15), 1 | state);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
-
-  test("PASS: candidate strictly better and strictly cheaper on every paired task", () => {
-    const registry = createMethodRegistry();
-    const method = registry.get("jinn.benchmarking.method/noninferiority-iut", "1")!;
-    const cells = Array.from({ length: 6 }, (_, i) => [
-      cell(`t${i}`, "armA", "judged", [digest(`t${i}a`)]),
-      cell(`t${i}`, "armB", "judged", [digest(`t${i}b`)]),
-    ]).flat();
-    const outcomes = new Map<string, VerdictOutcome>();
-    for (let i = 0; i < 6; i += 1) {
-      outcomes.set(digest(`t${i}a`), { verdict: "fail" });
-      outcomes.set(digest(`t${i}b`), { verdict: "pass" });
-    }
-    const matrix = buildMatrix(cells);
-    const results = method.compute!(baseInput({
-      matrices: [matrix],
-      parameters: {
-        baseline: "armA",
-        candidate: "armB",
-        stockBaseRate: 0.5,
-        costDiffs: [-10, -9, -8, -7, -6, -5, -4, -3, -2, -1],
-      },
-      resolveVerdict: (d) => outcomes.get(d),
-      rng: mulberry32(1),
-    })) as { verdict: string };
-    expect(results.verdict).toBe("PASS");
-  });
-
-  test("requires MethodComputeInput.rng", () => {
-    const registry = createMethodRegistry();
-    const method = registry.get("jinn.benchmarking.method/noninferiority-iut", "1")!;
-    expect(() => method.compute!(baseInput({ parameters: { baseline: "armA", candidate: "armB", stockBaseRate: 0.5 } }))).toThrow();
   });
 });
 

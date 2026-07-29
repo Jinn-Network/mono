@@ -1,7 +1,15 @@
 import { BENCHMARKING_METHOD_IDS, BENCHMARKING_METHOD_VERSION, compareCodeUnitStrings } from "@jinn-network/benchmarking-records";
 import { filterByCutoff } from "./clean-subset.js";
 import { selectScorableCells, type CellRef } from "./exclusion.js";
-import type { Method, MethodComputeInput, MethodRegistry, VerdictOutcome } from "./method.js";
+import type { Method, MethodComputeInput, MethodRegistry } from "./method.js";
+import {
+  MethodInputError,
+  matrixRunDigest,
+  resolveAnchoredAnnouncementTime,
+  resolveRun,
+  resolveTaskProvenance,
+  resolveVerdictOutcome,
+} from "./resolved-inputs.js";
 import { nonInferiorityIut, nonInferiorityVerdict, pairedCostVerdict, type NonInferiorityOptions } from "./stats/noninferiority.js";
 import { pairedMcnemar } from "./stats/paired-mcnemar.js";
 import { avgAtOne, passAtK } from "./stats/pass-at-k.js";
@@ -38,6 +46,57 @@ function validateParameters(
     }
     if (typeof rule["minimum"] === "number" && typeof value === "number" && value < rule["minimum"]) {
       issues.push(`parameter "${key}" must be >= ${rule["minimum"]}`);
+    }
+    if (typeof rule["maximum"] === "number" && typeof value === "number" && value > rule["maximum"]) {
+      issues.push(`parameter "${key}" must be <= ${rule["maximum"]}`);
+    }
+    if (
+      rule["format"] === "date-time"
+      && typeof value === "string"
+      && (
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+        || Number.isNaN(Date.parse(value))
+      )
+    ) {
+      issues.push(`parameter "${key}" must be an RFC 3339 date-time`);
+    }
+  }
+  const baseline = parameters["baseline"];
+  const candidate = parameters["candidate"];
+  if (
+    typeof baseline === "string"
+    && typeof candidate === "string"
+    && baseline === candidate
+  ) {
+    issues.push('parameters "baseline" and "candidate" must name distinct arms');
+  }
+  const delegate = parameters["delegate"];
+  if (delegate !== undefined) {
+    if (typeof delegate !== "object" || delegate === null || Array.isArray(delegate)) {
+      issues.push('parameter "delegate" must be an object');
+    } else {
+      const value = delegate as Record<string, unknown>;
+      for (const key of ["id", "version", "parameters"]) {
+        if (!Object.hasOwn(value, key)) issues.push(`parameter "delegate" is missing "${key}"`);
+      }
+      for (const key of Object.keys(value)) {
+        if (!["id", "version", "parameters"].includes(key)) {
+          issues.push(`parameter "delegate" has unknown property "${key}"`);
+        }
+      }
+      if (typeof value["id"] !== "string" || value["id"].length === 0) {
+        issues.push('parameter "delegate.id" must be a non-empty string');
+      }
+      if (typeof value["version"] !== "string" || value["version"].length === 0) {
+        issues.push('parameter "delegate.version" must be a non-empty string');
+      }
+      if (
+        typeof value["parameters"] !== "object"
+        || value["parameters"] === null
+        || Array.isArray(value["parameters"])
+      ) {
+        issues.push('parameter "delegate.parameters" must be an object');
+      }
     }
   }
   return issues.length === 0 ? { ok: true } : { ok: false, issues };
@@ -96,7 +155,7 @@ const METHOD_METADATA = {
   }),
   noninferiorityIut: metadata({
     requiredInputs: ["matrix.cells", "matrix.cost", "referenced-verdicts"],
-    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate", "seed", "resamples"], properties: { verdictRule: VERDICT_RULE_PROPERTY, baseline: { type: "string" }, candidate: { type: "string" }, seed: { type: "integer", minimum: 1 }, resamples: { type: "integer", minimum: 100 } }, additionalProperties: false },
+    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate", "seed", "resamples"], properties: { verdictRule: VERDICT_RULE_PROPERTY, baseline: { type: "string" }, candidate: { type: "string" }, seed: { type: "integer", minimum: 1, maximum: 4_294_967_295 }, resamples: { type: "integer", minimum: 1 } }, additionalProperties: false },
     outputShape: "BCa quality lower bound AND one-sided paired-cost Wilcoxon + exclusions + conflicted cells",
     exclusionRule: "paired both-arm judged cells; cost only both-solve pairs; report remainder",
     clusteringRule: "task-provenance-source",
@@ -155,8 +214,7 @@ function reduceScoredCells(input: MethodComputeInput): { decisive: (CellRef & { 
     const { scored } = selectScorableCells(matrix);
     for (const ref of scored) {
       const outcomes = ref.validVerdicts
-        .map((digest) => input.resolveVerdict(digest))
-        .filter((outcome): outcome is VerdictOutcome => outcome !== undefined);
+        .map((digest) => resolveVerdictOutcome(digest, input));
       const reduction: VerdictReduction = reduceValidVerdicts(outcomes, input.verdictRule);
       if ("conflicted" in reduction) conflictedCellKeys.push(ref.cellKey);
       else decisive.push({ ...ref, value: reduction.value });
@@ -198,16 +256,25 @@ const wilsonMethod: Method = {
 
 // --- avg-at-k@1 / pass-at-k@1 (design §9.2) --------------------------------------------------
 
-function perTaskReplicateCounts(input: MethodComputeInput): Map<string, { n: number; c: number }> {
-  const { decisive } = reduceScoredCells(input);
-  const perTask = new Map<string, { n: number; c: number }>();
+function perArmTaskReplicateCounts(input: MethodComputeInput): {
+  perArmTask: Map<string, Map<string, { n: number; c: number }>>;
+  taskDigests: string[];
+  conflictedCellKeys: string[];
+} {
+  const { decisive, conflictedCellKeys } = reduceScoredCells(input);
+  const perArmTask = new Map<string, Map<string, { n: number; c: number }>>();
   for (const cell of decisive) {
+    const perTask = perArmTask.get(cell.armId) ?? new Map<string, { n: number; c: number }>();
     const bucket = perTask.get(cell.taskDigest) ?? { n: 0, c: 0 };
     bucket.n += 1;
     if (cell.value === "pass") bucket.c += 1;
     perTask.set(cell.taskDigest, bucket);
+    perArmTask.set(cell.armId, perTask);
   }
-  return perTask;
+  const taskDigests = [...new Set(
+    input.matrices.flatMap((matrix) => matrix.cells.map((cell) => cell.taskDigest)),
+  )].sort(compareCodeUnitStrings);
+  return { perArmTask, taskDigests, conflictedCellKeys };
 }
 
 const avgAtKMethod: Method = {
@@ -216,19 +283,28 @@ const avgAtKMethod: Method = {
   version: BENCHMARKING_METHOD_VERSION,
   versionRobust: false,
   compute(input) {
-    const perTask = perTaskReplicateCounts(input);
-    const perTaskResults: Record<string, unknown> = {};
-    let sum = 0;
-    for (const taskDigest of [...perTask.keys()].sort(compareCodeUnitStrings)) {
-      const { n, c } = perTask.get(taskDigest)!;
-      const rate = avgAtOne(n, c);
-      sum += rate;
-      perTaskResults[taskDigest] = { n, c, avgRate: fixed4(rate) };
+    const { perArmTask, taskDigests, conflictedCellKeys } = perArmTaskReplicateCounts(input);
+    const arms: Record<string, unknown> = {};
+    for (const armId of [...perArmTask.keys()].sort(compareCodeUnitStrings)) {
+      const perTask = perArmTask.get(armId)!;
+      const perTaskResults: Record<string, unknown> = {};
+      let sum = 0;
+      for (const taskDigest of [...perTask.keys()].sort(compareCodeUnitStrings)) {
+        const { n, c } = perTask.get(taskDigest)!;
+        const rate = avgAtOne(n, c);
+        sum += rate;
+        perTaskResults[taskDigest] = { n, c, avgRate: fixed4(rate) };
+      }
+      arms[armId] = {
+        perTask: perTaskResults,
+        mean: fixed4(perTask.size > 0 ? sum / perTask.size : 0),
+        missingTaskDigests: taskDigests.filter((digest) => !perTask.has(digest)),
+      };
     }
     return {
       verdictRule: input.verdictRule,
-      perTask: perTaskResults,
-      mean: fixed4(perTask.size > 0 ? sum / perTask.size : 0),
+      arms,
+      conflicted: { count: conflictedCellKeys.length, cellKeys: conflictedCellKeys },
     };
   },
 };
@@ -240,20 +316,29 @@ const passAtKMethod: Method = {
   versionRobust: false,
   compute(input) {
     const k = requireIntegerParam(input.parameters, "k");
-    const perTask = perTaskReplicateCounts(input);
-    const perTaskResults: Record<string, unknown> = {};
-    let sum = 0;
-    for (const taskDigest of [...perTask.keys()].sort(compareCodeUnitStrings)) {
-      const { n, c } = perTask.get(taskDigest)!;
-      const value = passAtK(n, c, k);
-      sum += value;
-      perTaskResults[taskDigest] = { n, c, passAtK: fixed4(value) };
+    const { perArmTask, taskDigests, conflictedCellKeys } = perArmTaskReplicateCounts(input);
+    const arms: Record<string, unknown> = {};
+    for (const armId of [...perArmTask.keys()].sort(compareCodeUnitStrings)) {
+      const perTask = perArmTask.get(armId)!;
+      const perTaskResults: Record<string, unknown> = {};
+      let sum = 0;
+      for (const taskDigest of [...perTask.keys()].sort(compareCodeUnitStrings)) {
+        const { n, c } = perTask.get(taskDigest)!;
+        const value = passAtK(n, c, k);
+        sum += value;
+        perTaskResults[taskDigest] = { n, c, passAtK: fixed4(value) };
+      }
+      arms[armId] = {
+        perTask: perTaskResults,
+        mean: fixed4(perTask.size > 0 ? sum / perTask.size : 0),
+        missingTaskDigests: taskDigests.filter((digest) => !perTask.has(digest)),
+      };
     }
     return {
       verdictRule: input.verdictRule,
       k,
-      perTask: perTaskResults,
-      mean: fixed4(perTask.size > 0 ? sum / perTask.size : 0),
+      arms,
+      conflicted: { count: conflictedCellKeys.length, cellKeys: conflictedCellKeys },
     };
   },
 };
@@ -268,33 +353,100 @@ const pairedMcnemarMethod: Method = {
   compute(input) {
     const baseline = requireStringParam(input.parameters, "baseline");
     const candidate = requireStringParam(input.parameters, "candidate");
-    const { decisive, conflictedCellKeys } = reduceScoredCells(input);
-
-    const byTaskArm = new Map<string, Map<string, { value: "pass" | "fail"; cellKey: string }>>();
-    for (const cell of decisive) {
-      if (cell.armId !== baseline && cell.armId !== candidate) continue;
-      const perArm = byTaskArm.get(cell.taskDigest) ?? new Map();
-      perArm.set(cell.armId, { value: cell.value, cellKey: cell.cellKey });
-      byTaskArm.set(cell.taskDigest, perArm);
+    for (const matrix of input.matrices) {
+      const runDigest = matrixRunDigest(matrix);
+      const run = resolveRun(runDigest, input);
+      if (run.replicates !== 1) {
+        throw new MethodInputError(
+          "incompatible-run-replicates",
+          runDigest,
+          `paired-mcnemar@1 requires Run.replicates === 1; got ${run.replicates}`,
+        );
+      }
     }
 
-    const outcomes: { taskDigest: string; baseline: "pass" | "fail"; candidate: "pass" | "fail" }[] = [];
-    const excludedCellKeys: string[] = [...conflictedCellKeys];
-    for (const taskDigest of [...byTaskArm.keys()].sort(compareCodeUnitStrings)) {
-      const perArm = byTaskArm.get(taskDigest)!;
-      const baselineCell = perArm.get(baseline);
-      const candidateCell = perArm.get(candidate);
-      if (baselineCell && candidateCell) {
-        outcomes.push({ taskDigest, baseline: baselineCell.value, candidate: candidateCell.value });
+    type RelevantCell = {
+      readonly cellKey: string;
+      readonly taskDigest: string;
+      readonly armId: string;
+      readonly value?: "pass" | "fail";
+      readonly conflicted: boolean;
+    };
+    const relevant: RelevantCell[] = [];
+    const conflictedCellKeys: string[] = [];
+    for (const matrix of input.matrices) {
+      for (const cell of matrix.cells) {
+        if (cell.armId !== baseline && cell.armId !== candidate) continue;
+        if (cell.outcome !== "judged") {
+          relevant.push({
+            cellKey: cell.cellKey,
+            taskDigest: cell.taskDigest,
+            armId: cell.armId,
+            conflicted: false,
+          });
+          continue;
+        }
+        const reduction = reduceValidVerdicts(
+          cell.validVerdicts.map((digest) => resolveVerdictOutcome(digest, input)),
+          input.verdictRule,
+        );
+        if ("conflicted" in reduction) {
+          conflictedCellKeys.push(cell.cellKey);
+          relevant.push({
+            cellKey: cell.cellKey,
+            taskDigest: cell.taskDigest,
+            armId: cell.armId,
+            conflicted: true,
+          });
+        } else {
+          relevant.push({
+            cellKey: cell.cellKey,
+            taskDigest: cell.taskDigest,
+            armId: cell.armId,
+            value: reduction.value,
+            conflicted: false,
+          });
+        }
+      }
+    }
+
+    const byTask = new Map<string, RelevantCell[]>();
+    for (const cell of relevant) {
+      const cells = byTask.get(cell.taskDigest) ?? [];
+      cells.push(cell);
+      byTask.set(cell.taskDigest, cells);
+    }
+    const outcomes: {
+      taskDigest: string;
+      baseline: "pass" | "fail";
+      candidate: "pass" | "fail";
+    }[] = [];
+    const excludedCellKeys: string[] = [];
+    const clusterKeys = new Map<string, string>();
+    for (const taskDigest of [...byTask.keys()].sort(compareCodeUnitStrings)) {
+      const cells = byTask.get(taskDigest)!;
+      const baselineCells = cells.filter((cell) => cell.armId === baseline && cell.value !== undefined);
+      const candidateCells = cells.filter((cell) => cell.armId === candidate && cell.value !== undefined);
+      if (baselineCells.length === 1 && candidateCells.length === 1) {
+        outcomes.push({
+          taskDigest,
+          baseline: baselineCells[0]!.value!,
+          candidate: candidateCells[0]!.value!,
+        });
+        clusterKeys.set(taskDigest, resolveTaskProvenance(taskDigest, input).source);
       } else {
-        if (baselineCell) excludedCellKeys.push(baselineCell.cellKey);
-        if (candidateCell) excludedCellKeys.push(candidateCell.cellKey);
+        excludedCellKeys.push(...cells.map((cell) => cell.cellKey));
+      }
+      for (const cell of cells) {
+        if (cell.value === undefined && !excludedCellKeys.includes(cell.cellKey)) {
+          excludedCellKeys.push(cell.cellKey);
+        }
       }
     }
     excludedCellKeys.sort(compareCodeUnitStrings);
+    conflictedCellKeys.sort(compareCodeUnitStrings);
 
-    const resolveClusterKey = input.resolveClusterKey;
-    const result = pairedMcnemar(outcomes, resolveClusterKey);
+    const result = pairedMcnemar(outcomes, (taskDigest) => clusterKeys.get(taskDigest));
     return {
       verdictRule: input.verdictRule,
       baseline,
@@ -304,11 +456,13 @@ const pairedMcnemarMethod: Method = {
       regressed: result.regressed,
       concordantPass: result.concordantPass,
       concordantFail: result.concordantFail,
+      pairing: { taskDigests: outcomes.map((outcome) => outcome.taskDigest) },
       excluded: { count: excludedCellKeys.length, cellKeys: excludedCellKeys },
       pValue: fixed4(result.pValue),
       clustering: result.clustering,
       ...(result.clusteredPValue === undefined ? {} : { clusteredPValue: fixed4(result.clusteredPValue) }),
       ...(result.designEffect === undefined ? {} : { designEffect: fixed4(result.designEffect) }),
+      conflicted: { count: conflictedCellKeys.length, cellKeys: conflictedCellKeys },
     };
   },
 };
@@ -334,11 +488,48 @@ const cleanSubsetMethod: Method = {
     if (delegateMethod.computeAvailability !== "available" || delegateMethod.compute === undefined) {
       throw new Error(`clean-subset@1: delegate ${delegate.id}@${delegate.version} is unavailable`);
     }
+    const delegateParameters = {
+      ...(delegate.parameters ?? {}),
+      verdictRule: input.verdictRule,
+    };
+    const delegateValidation = delegateMethod.validateParameters(delegateParameters);
+    if (!delegateValidation.ok) {
+      throw new Error(
+        `clean-subset@1: invalid delegate parameters: ${delegateValidation.issues.join("; ")}`,
+      );
+    }
 
-    const allTaskDigests = [...new Set(input.matrices.flatMap((matrix) => matrix.cells.map((cell) => cell.taskDigest)))];
-    const resolveTimestamp = input.resolveTaskTimestamp ?? (() => undefined);
-    const { kept, excludedByPredicate } = filterByCutoff(allTaskDigests, cutoff, resolveTimestamp);
+    const allTaskDigests = [...new Set(
+      input.matrices.flatMap((matrix) => matrix.cells.map((cell) => cell.taskDigest)),
+    )].sort(compareCodeUnitStrings);
+    const timestamps = new Map<string, string>();
+    if (basis === "self-declared") {
+      for (const taskDigest of allTaskDigests) {
+        timestamps.set(taskDigest, resolveTaskProvenance(taskDigest, input).timestamp);
+      }
+    } else if (basis === "announcement-anchored") {
+      for (const matrix of input.matrices) {
+        const run = resolveRun(matrixRunDigest(matrix), input);
+        const benchmarkDigest = `sha256:${run.benchmark.digest.sha256}`;
+        const timestamp = resolveAnchoredAnnouncementTime(
+          benchmarkDigest,
+          input.resolveAnchoredBenchmarkAnnouncement?.(benchmarkDigest),
+        );
+        for (const taskDigest of new Set(matrix.cells.map((cell) => cell.taskDigest))) {
+          const existing = timestamps.get(taskDigest);
+          if (existing === undefined || timestamp < existing) timestamps.set(taskDigest, timestamp);
+        }
+      }
+    } else {
+      throw new Error(`clean-subset@1: unsupported basis "${basis}"`);
+    }
+    const { kept, excludedByPredicate } = filterByCutoff(
+      allTaskDigests,
+      cutoff,
+      (taskDigest) => timestamps.get(taskDigest),
+    );
     const keptSet = new Set(kept);
+    const excludedSet = new Set(excludedByPredicate);
 
     const filteredMatrices = input.matrices.map((matrix) => ({
       ...matrix,
@@ -348,10 +539,29 @@ const cleanSubsetMethod: Method = {
     const delegateResults = delegateMethod.compute({
       ...input,
       matrices: filteredMatrices as typeof input.matrices,
-      parameters: delegate.parameters ?? {},
+      parameters: delegateParameters,
     });
+    const excludedCellKeys = input.matrices
+      .flatMap((matrix) => matrix.cells)
+      .filter((cell) => excludedSet.has(cell.taskDigest))
+      .map((cell) => cell.cellKey)
+      .sort(compareCodeUnitStrings);
+    const delegateConflicted = (
+      typeof delegateResults === "object"
+      && delegateResults !== null
+      && "conflicted" in delegateResults
+    )
+      ? (delegateResults as { conflicted: unknown }).conflicted
+      : { count: 0, cellKeys: [] };
 
-    return { basis, cutoff, kept: kept.length, excludedByPredicate: excludedByPredicate.length, delegate: delegateResults };
+    return {
+      basis,
+      cutoff,
+      keptTaskDigests: kept,
+      excludedByPredicate: { count: excludedCellKeys.length, cellKeys: excludedCellKeys },
+      delegate: delegateResults,
+      conflicted: delegateConflicted,
+    };
   },
 };
 
@@ -368,45 +578,141 @@ const nonInferiorityIutMethod: Method = {
   compute(input) {
     const baseline = requireStringParam(input.parameters, "baseline");
     const candidate = requireStringParam(input.parameters, "candidate");
-    const stockBaseRate = input.parameters["stockBaseRate"];
-    if (typeof stockBaseRate !== "number") throw new Error('method parameter "stockBaseRate" must be a number');
-    if (input.rng === undefined) throw new Error("noninferiority-iut@1 requires MethodComputeInput.rng (bootstrap)");
+    const seed = requireIntegerParam(input.parameters, "seed");
+    const resamples = requireIntegerParam(input.parameters, "resamples");
 
-    const { decisive } = reduceScoredCells(input);
-    const byTaskArm = new Map<string, Map<string, "pass" | "fail">>();
-    for (const cell of decisive) {
-      if (cell.armId !== baseline && cell.armId !== candidate) continue;
-      const perArm = byTaskArm.get(cell.taskDigest) ?? new Map();
-      perArm.set(cell.armId, cell.value);
-      byTaskArm.set(cell.taskDigest, perArm);
+    type RelevantCell = {
+      readonly cellKey: string;
+      readonly taskDigest: string;
+      readonly armId: string;
+      readonly replicate: number;
+      readonly value?: "pass" | "fail";
+      readonly cost?: { readonly value: string; readonly unit: string };
+    };
+    const relevant: RelevantCell[] = [];
+    const conflictedCellKeys: string[] = [];
+    for (const matrix of input.matrices) {
+      for (const cell of matrix.cells) {
+        if (cell.armId !== baseline && cell.armId !== candidate) continue;
+        let value: "pass" | "fail" | undefined;
+        if (cell.outcome === "judged") {
+          const reduction = reduceValidVerdicts(
+            cell.validVerdicts.map((digest) => resolveVerdictOutcome(digest, input)),
+            input.verdictRule,
+          );
+          if ("conflicted" in reduction) conflictedCellKeys.push(cell.cellKey);
+          else value = reduction.value;
+        }
+        relevant.push({
+          cellKey: cell.cellKey,
+          taskDigest: cell.taskDigest,
+          armId: cell.armId,
+          replicate: cell.replicate,
+          ...(value === undefined ? {} : { value }),
+          ...(cell.cost === undefined
+            ? {}
+            : { cost: { value: cell.cost.value, unit: cell.cost.unit } }),
+        });
+      }
+    }
+
+    const byTask = new Map<string, RelevantCell[]>();
+    for (const cell of relevant) {
+      const cells = byTask.get(cell.taskDigest) ?? [];
+      cells.push(cell);
+      byTask.set(cell.taskDigest, cells);
     }
     const rates: { pA: number; pB: number }[] = [];
-    const costDiffs: number[] = [];
-    for (const perArm of byTaskArm.values()) {
-      const a = perArm.get(baseline);
-      const b = perArm.get(candidate);
-      if (a === undefined || b === undefined) continue;
-      rates.push({ pA: a === "pass" ? 1 : 0, pB: b === "pass" ? 1 : 0 });
+    const pairedTaskDigests: string[] = [];
+    const qualityExcludedCellKeys: string[] = [];
+    const qualityIncludedCellKeys = new Set<string>();
+    for (const taskDigest of [...byTask.keys()].sort(compareCodeUnitStrings)) {
+      const cells = byTask.get(taskDigest)!;
+      const baselineCells = cells.filter((cell) => cell.armId === baseline && cell.value !== undefined);
+      const candidateCells = cells.filter((cell) => cell.armId === candidate && cell.value !== undefined);
+      if (baselineCells.length > 0 && candidateCells.length > 0) {
+        rates.push({
+          pA: baselineCells.filter((cell) => cell.value === "pass").length / baselineCells.length,
+          pB: candidateCells.filter((cell) => cell.value === "pass").length / candidateCells.length,
+        });
+        pairedTaskDigests.push(taskDigest);
+        for (const cell of [...baselineCells, ...candidateCells]) qualityIncludedCellKeys.add(cell.cellKey);
+      }
+      for (const cell of cells) {
+        if (!qualityIncludedCellKeys.has(cell.cellKey)) qualityExcludedCellKeys.push(cell.cellKey);
+      }
     }
-    const costsParam = input.parameters["costDiffs"];
-    if (Array.isArray(costsParam)) {
-      for (const value of costsParam) if (typeof value === "number") costDiffs.push(value);
-    }
+    qualityExcludedCellKeys.sort(compareCodeUnitStrings);
 
-    const options: NonInferiorityOptions = { rng: input.rng, stockBaseRate };
+    const costDiffs: number[] = [];
+    const costIncludedCellKeys = new Set<string>();
+    for (const cells of byTask.values()) {
+      const coordinates = new Map<number, RelevantCell[]>();
+      for (const cell of cells) {
+        const bucket = coordinates.get(cell.replicate) ?? [];
+        bucket.push(cell);
+        coordinates.set(cell.replicate, bucket);
+      }
+      for (const bucket of coordinates.values()) {
+        const baselineCells = bucket.filter((cell) => cell.armId === baseline);
+        const candidateCells = bucket.filter((cell) => cell.armId === candidate);
+        if (baselineCells.length !== 1 || candidateCells.length !== 1) continue;
+        const a = baselineCells[0]!;
+        const b = candidateCells[0]!;
+        if (
+          a.value !== "pass"
+          || b.value !== "pass"
+          || a.cost === undefined
+          || b.cost === undefined
+          || a.cost.unit !== b.cost.unit
+        ) {
+          continue;
+        }
+        const aCost = Number(a.cost.value);
+        const bCost = Number(b.cost.value);
+        if (!Number.isFinite(aCost) || !Number.isFinite(bCost)) continue;
+        costDiffs.push(bCost - aCost);
+        costIncludedCellKeys.add(a.cellKey);
+        costIncludedCellKeys.add(b.cellKey);
+      }
+    }
+    const costExcludedCellKeys = relevant
+      .filter((cell) => !costIncludedCellKeys.has(cell.cellKey))
+      .map((cell) => cell.cellKey)
+      .sort(compareCodeUnitStrings);
+
+    const options: NonInferiorityOptions = { seed, resamples };
     const quality = rates.length > 0
       ? nonInferiorityVerdict(rates, options)
       : { verdict: "inconclusive" as const, lowerBound: null, deltaAbs: 0.05, relativeRegression: null, reasons: ["no paired tasks"] };
     const cost = pairedCostVerdict(costDiffs);
     return {
+      verdictRule: input.verdictRule,
+      baseline,
+      candidate,
       verdict: nonInferiorityIut(quality, cost),
+      pairing: { taskDigests: pairedTaskDigests },
       quality: {
         verdict: quality.verdict,
         lowerBound: quality.lowerBound === null ? null : fixed4(quality.lowerBound),
         relativeRegression: quality.relativeRegression === null ? null : fixed4(quality.relativeRegression),
         reasons: quality.reasons,
       },
-      cost: { verdict: cost.verdict, pValue: cost.pValue === null ? null : fixed4(cost.pValue), n: cost.n },
+      cost: {
+        verdict: cost.verdict,
+        pValue: cost.pValue === null ? null : fixed4(cost.pValue),
+        n: cost.n,
+        excluded: { count: costExcludedCellKeys.length, cellKeys: costExcludedCellKeys },
+      },
+      excluded: {
+        count: qualityExcludedCellKeys.length,
+        cellKeys: qualityExcludedCellKeys,
+      },
+      conflicted: {
+        count: conflictedCellKeys.length,
+        cellKeys: conflictedCellKeys.sort(compareCodeUnitStrings),
+      },
+      bootstrap: { procedure: "xorshift32-v1", seed, resamples },
     };
   },
 };

@@ -1,6 +1,7 @@
 import { BENCHMARKING_METHOD_REGISTRY } from "@jinn-network/benchmarking-aggregate";
 import { describe } from "vitest";
 import { describeMethodRegistryConformance } from "./method-conformance.js";
+import type { MethodRegistry } from "./method-types.js";
 
 /**
  * Program §7.25: the kit consumes its concrete subject, never vice versa. Stage 1 freezes the
@@ -11,5 +12,7 @@ const describeAggregate = process.env["BENCHMARKING_AGGREGATE_CONFORMANCE"] === 
   : describe.skip;
 
 describeAggregate("aggregate method conformance (enabled by review fix stage 2)", () => {
-  describeMethodRegistryConformance(BENCHMARKING_METHOD_REGISTRY);
+  // The kit lands before the repaired consumer. Keep the adapter compiling while the opt-in
+  // runtime suite supplies the intentional RED proof against the previous aggregate surface.
+  describeMethodRegistryConformance(BENCHMARKING_METHOD_REGISTRY as unknown as MethodRegistry);
 });

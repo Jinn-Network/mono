@@ -98,7 +98,7 @@ const MATCH_ALL = { harness: "match", model: "match", loadout: "match", isolatio
  * @param opts.verdicts array of verdict labels (each hashed to a digest); first is the delivered
  *   Result Evaluation Statement referenced by `verdicts[]`
  * @param opts.validVerdicts subset of `opts.verdicts` that are structurally valid (verdict-spec-match
- *   + verdict-consistency passed) -- the ones a Method's `resolveVerdict` port can resolve
+ *   + verdict-consistency passed) -- the ones a Method's exact-byte resolver can resolve
  */
 function cell(taskLabel, armId, replicate, opts) {
   const task = taskDigest(taskLabel);
@@ -120,6 +120,7 @@ function cell(taskLabel, armId, replicate, opts) {
     outcome: opts.outcome,
     verification: MATCH_ALL,
     integrityTier: "re-derivable",
+    ...(opts.cost === undefined ? {} : { cost: { value: opts.cost, unit: "USD", source: "reported" } }),
   };
 }
 
@@ -208,12 +209,17 @@ const t1Outcomes = ["pass", "pass", "fail"];
 const t2Outcomes = ["pass", "fail", "fail"];
 const passKT1 = passKCells("passk/t1", "armA", t1Outcomes);
 const passKT2 = passKCells("passk/t2", "armA", t2Outcomes);
-const passKCellsAll = [...passKT1, ...passKT2];
+const armBT1Outcomes = ["fail", "fail", "fail"];
+const passKArmBT1 = passKCells("passk/t1", "armB", armBT1Outcomes);
+const passKCellsAll = [...passKT1, ...passKT2, ...passKArmBT1];
 const passKVerdictOutcomes = {};
 [["passk/t1", t1Outcomes], ["passk/t2", t2Outcomes]].forEach(([label, outcomes]) => {
   outcomes.forEach((kind, index) => {
     passKVerdictOutcomes[digest(`${label}/armA/verdict/v${index + 1}`)] = verdictOutcome(kind);
   });
+});
+armBT1Outcomes.forEach((kind, index) => {
+  passKVerdictOutcomes[digest(`passk/t1/armB/verdict/v${index + 1}`)] = verdictOutcome(kind);
 });
 
 const t1PassAt2 = passAtK(3, 2, 2);
@@ -230,11 +236,24 @@ const passAtKFixture = {
   expectedResults: {
     verdictRule: "unanimous",
     k: 2,
-    perTask: {
-      [taskDigest("passk/t1")]: { n: 3, c: 2, passAtK: fixed4(t1PassAt2) },
-      [taskDigest("passk/t2")]: { n: 3, c: 1, passAtK: fixed4(t2PassAt2) },
+    arms: {
+      armA: {
+        perTask: {
+          [taskDigest("passk/t1")]: { n: 3, c: 2, passAtK: fixed4(t1PassAt2) },
+          [taskDigest("passk/t2")]: { n: 3, c: 1, passAtK: fixed4(t2PassAt2) },
+        },
+        mean: fixed4((t1PassAt2 + t2PassAt2) / 2),
+        missingTaskDigests: [],
+      },
+      armB: {
+        perTask: {
+          [taskDigest("passk/t1")]: { n: 3, c: 0, passAtK: fixed4(0) },
+        },
+        mean: fixed4(0),
+        missingTaskDigests: [taskDigest("passk/t2")],
+      },
     },
-    mean: fixed4((t1PassAt2 + t2PassAt2) / 2),
+    conflicted: { count: 0, cellKeys: [] },
   },
 };
 
@@ -247,11 +266,24 @@ const avgAtKFixture = {
   verdictOutcomes: passKVerdictOutcomes,
   expectedResults: {
     verdictRule: "unanimous",
-    perTask: {
-      [taskDigest("passk/t1")]: { n: 3, c: 2, avgRate: fixed4(2 / 3) },
-      [taskDigest("passk/t2")]: { n: 3, c: 1, avgRate: fixed4(1 / 3) },
+    arms: {
+      armA: {
+        perTask: {
+          [taskDigest("passk/t1")]: { n: 3, c: 2, avgRate: fixed4(2 / 3) },
+          [taskDigest("passk/t2")]: { n: 3, c: 1, avgRate: fixed4(1 / 3) },
+        },
+        mean: fixed4(avgAt1),
+        missingTaskDigests: [],
+      },
+      armB: {
+        perTask: {
+          [taskDigest("passk/t1")]: { n: 3, c: 0, avgRate: fixed4(0) },
+        },
+        mean: fixed4(0),
+        missingTaskDigests: [taskDigest("passk/t2")],
+      },
     },
-    mean: fixed4(avgAt1),
+    conflicted: { count: 0, cellKeys: [] },
   },
 };
 
@@ -291,9 +323,15 @@ const mcnemarFixture = {
     regressed: 1,
     concordantPass: 1,
     concordantFail: 1,
+    pairing: {
+      taskDigests: pairedOutcomes.map(([label]) => taskDigest(label)).sort(),
+    },
     excluded: { count: 0, cellKeys: [] },
     pValue: fixed4(mcnemarP),
-    clustering: { basis: "none", clusters: 4 },
+    clustering: { basis: "task-provenance-source", clusters: 4 },
+    clusteredPValue: "0.3173",
+    designEffect: "1.0000",
+    conflicted: { count: 0, cellKeys: [] },
   },
 };
 
@@ -336,8 +374,14 @@ const cleanSubsetFixture = {
   expectedResults: {
     basis: "self-declared",
     cutoff: "2026-03-01T00:00:00Z",
-    kept: 2,
-    excludedByPredicate: 2,
+    keptTaskDigests: [taskDigest("clean/t3"), taskDigest("clean/t4")].sort(),
+    excludedByPredicate: {
+      count: 2,
+      cellKeys: [
+        cellKey(taskDigest("clean/t1"), "armA", 1),
+        cellKey(taskDigest("clean/t2"), "armA", 1),
+      ].sort(),
+    },
     delegate: {
       verdictRule: "unanimous",
       arms: {
@@ -349,8 +393,135 @@ const cleanSubsetFixture = {
       },
       conflicted: { count: 0, cellKeys: [] },
     },
+    conflicted: { count: 0, cellKeys: [] },
   },
 };
+
+// --- fixture 5: noninferiority-iut@1 exact deterministic replay ------------------------------
+
+function erf(x) {
+  const t = 1 / (1 + 0.3275911 * Math.abs(x));
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  return x >= 0 ? y : -y;
+}
+function normCdf(x) {
+  return 0.5 * (1 + erf(x / Math.SQRT2));
+}
+function tiedNegativeWilcoxonP(n) {
+  const meanW = (n * (n + 1)) / 4;
+  const sdW = Math.sqrt((n * (n + 1) * (2 * n + 1)) / 24);
+  return normCdf((0 - meanW + 0.5) / sdW);
+}
+
+function noninferiorityFixture(name, baselineOutcomes, candidateOutcomes) {
+  const cells = [];
+  const verdictOutcomes = {};
+  const taskDigests = [];
+  const costExcluded = [];
+  for (let index = 0; index < baselineOutcomes.length; index++) {
+    const label = `noninferiority/${name}/t${String(index + 1).padStart(2, "0")}`;
+    const task = taskDigest(label);
+    taskDigests.push(task);
+    const baseline = baselineOutcomes[index];
+    const candidate = candidateOutcomes[index];
+    const baselineCell = cell(label, "armA", 1, {
+      outcome: "judged",
+      verdicts: ["v"],
+      validVerdicts: ["v"],
+      cost: "2",
+    });
+    const candidateCell = cell(label, "armB", 1, {
+      outcome: "judged",
+      verdicts: ["v"],
+      validVerdicts: ["v"],
+      cost: "1",
+    });
+    cells.push(baselineCell, candidateCell);
+    verdictOutcomes[digest(`${label}/armA/verdict/v`)] = verdictOutcome(baseline);
+    verdictOutcomes[digest(`${label}/armB/verdict/v`)] = verdictOutcome(candidate);
+    if (baseline !== "pass" || candidate !== "pass") {
+      costExcluded.push(baselineCell.cellKey, candidateCell.cellKey);
+    }
+  }
+  taskDigests.sort();
+  costExcluded.sort();
+
+  const n = baselineOutcomes.length;
+  const enoughQuality = n >= 5;
+  const meanA = baselineOutcomes.filter((outcome) => outcome === "pass").length / n;
+  const meanB = candidateOutcomes.filter((outcome) => outcome === "pass").length / n;
+  const delta = meanB - meanA;
+  const relativeRegression = meanA > 0 ? Math.max(0, meanA - meanB) / meanA : 0;
+  const qualityVerdict = !enoughQuality
+    ? "inconclusive"
+    : delta > -0.05 && relativeRegression <= 0.15
+      ? "pass"
+      : "fail";
+  const bothSolve = baselineOutcomes.filter((outcome, index) =>
+    outcome === "pass" && candidateOutcomes[index] === "pass").length;
+  const costVerdict = bothSolve < 10 ? "inconclusive" : "lower";
+  const overall = qualityVerdict === "fail"
+    ? "FAIL"
+    : qualityVerdict === "inconclusive" || costVerdict === "inconclusive"
+      ? "INCONCLUSIVE"
+      : "PASS";
+
+  return {
+    methodId: "jinn.benchmarking.method/noninferiority-iut",
+    methodVersion: "1",
+    parameters: { baseline: "armA", candidate: "armB", seed: 123456789, resamples: 1000 },
+    verdictRule: "unanimous",
+    matrices: [matrix(cells)],
+    verdictOutcomes,
+    expectedResults: {
+      verdictRule: "unanimous",
+      baseline: "armA",
+      candidate: "armB",
+      verdict: overall,
+      pairing: { taskDigests },
+      quality: {
+        verdict: qualityVerdict,
+        lowerBound: enoughQuality ? fixed4(delta) : null,
+        relativeRegression: enoughQuality ? fixed4(relativeRegression) : null,
+        reasons: !enoughQuality
+          ? [`fewer than minN=5 paired tasks (got ${n})`]
+          : qualityVerdict === "fail"
+            ? [
+                `absolute NI failed: lower bound ${delta.toFixed(3)} <= -delta (-0.05)`,
+                ...(relativeRegression > 0.15
+                  ? [`relative guard failed: regression ${(relativeRegression * 100).toFixed(1)}% > cap 15%`]
+                  : []),
+              ]
+            : [],
+      },
+      cost: {
+        verdict: costVerdict,
+        pValue: costVerdict === "lower" ? fixed4(tiedNegativeWilcoxonP(bothSolve)) : null,
+        n: bothSolve,
+        excluded: { count: costExcluded.length, cellKeys: costExcluded },
+      },
+      excluded: { count: 0, cellKeys: [] },
+      conflicted: { count: 0, cellKeys: [] },
+      bootstrap: { procedure: "xorshift32-v1", seed: 123456789, resamples: 1000 },
+    },
+  };
+}
+
+const noninferiorityPassFixture = noninferiorityFixture(
+  "pass",
+  Array(10).fill("pass"),
+  Array(10).fill("pass"),
+);
+const noninferiorityFailFixture = noninferiorityFixture(
+  "fail",
+  Array(10).fill("pass"),
+  Array(10).fill("fail"),
+);
+const noninferiorityInconclusiveFixture = noninferiorityFixture(
+  "inconclusive",
+  Array(3).fill("pass"),
+  Array(3).fill("pass"),
+);
 
 // --- write ------------------------------------------------------------------------------------
 
@@ -360,6 +531,9 @@ const fixtures = {
   "avg-at-k": avgAtKFixture,
   "paired-mcnemar": mcnemarFixture,
   "clean-subset": cleanSubsetFixture,
+  "noninferiority-pass": noninferiorityPassFixture,
+  "noninferiority-fail": noninferiorityFailFixture,
+  "noninferiority-inconclusive": noninferiorityInconclusiveFixture,
 };
 
 for (const [name, fixture] of Object.entries(fixtures)) {

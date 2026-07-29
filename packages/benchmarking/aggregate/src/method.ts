@@ -19,11 +19,20 @@ export interface MethodComputeInput {
   readonly matrices: readonly MatrixRecord[];
   readonly parameters: Readonly<Record<string, unknown>>;
   readonly verdictRule: VerdictRuleName;
-  readonly resolveVerdict: (verdictDigest: string) => VerdictOutcome | undefined;
-  readonly resolveClusterKey?: (taskDigest: string) => string | undefined;
-  readonly resolveTaskTimestamp?: (taskDigest: string) => string | undefined;
-  readonly rng?: () => number;
+  readonly resolveVerdictBytes: (verdictDigest: string) => Uint8Array | undefined;
+  readonly resolveRunBytes: (runDigest: string) => Uint8Array | undefined;
+  readonly resolveTaskBytes: (taskDigest: string) => Uint8Array | undefined;
+  readonly resolveAnchoredBenchmarkAnnouncement?: (
+    benchmarkDigest: string,
+  ) => VerifiedAnchoredBenchmarkAnnouncement | undefined;
   readonly registry?: MethodRegistry;
+}
+
+export interface VerifiedAnchoredBenchmarkAnnouncement {
+  readonly envelopeBytes: Uint8Array;
+  readonly entryBytes: Uint8Array;
+  readonly anchoredAt: string;
+  readonly verification: "verified";
 }
 
 /** A registered §9.2 method: identified by URI + version, computing `results` from a matrix. */

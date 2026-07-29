@@ -1,25 +1,34 @@
 import type { MatrixRecord } from "@jinn-network/benchmarking-records";
-import type { VerdictOutcome } from "@jinn-network/task-execution-profiles";
-
 /** The contract-wide multi-verdict reduction name (design §9.2) — never a report-time free string. */
 export type VerdictRuleName = "sole" | "unanimous" | "any-pass" | "majority";
 
+export interface VerifiedAnchoredBenchmarkAnnouncement {
+  /** Exact signed discovery Announcement Entry envelope bytes. */
+  readonly envelopeBytes: Uint8Array;
+  /** Exact canonical Announcement Entry payload bytes authenticated by `envelopeBytes`. */
+  readonly entryBytes: Uint8Array;
+  /** Verifier-authenticated anchor time, never an author-supplied timestamp callback. */
+  readonly anchoredAt: string;
+  readonly verification: "verified";
+}
+
 /**
  * The injected shape every §9.2 method's `compute()` receives. Pure — no I/O, no marketplace or
- * evidence imports (tier-3 `aggregate`, design §15). `resolveVerdict` dereferences a matrix
- * cell's `validVerdicts[]` digest to its resolved pass/fail/inconclusive outcome (the Matrix
- * record itself carries no aggregate of any kind, tenet 3, so this is how a Method reads what
- * each verdict actually decided). `resolveClusterKey` and `resolveTaskTimestamp` are optional
- * ports a method MAY consult; a report-time `parameters` value can never substitute for either
- * (design §9.2: the clustering key and the clean-subset basis are not report-time parameters).
+ * evidence imports (tier-3 `aggregate`, design §15). Every resolver returns exact bytes and the
+ * implementation binds the requested digest to those bytes before use. Verdict outcomes,
+ * provenance-source clusters, self-declared provenance timestamps, Run replicate counts, and
+ * pre-registration facts are parsed from those exact bytes — never supplied as derived callbacks.
  */
 export interface MethodComputeInput {
   readonly matrices: readonly MatrixRecord[];
   readonly parameters: Readonly<Record<string, unknown>>;
   readonly verdictRule: VerdictRuleName;
-  readonly resolveVerdict: (verdictDigest: string) => VerdictOutcome | undefined;
-  readonly resolveClusterKey?: (taskDigest: string) => string | undefined;
-  readonly resolveTaskTimestamp?: (taskDigest: string) => string | undefined;
+  readonly resolveVerdictBytes: (verdictDigest: string) => Uint8Array | undefined;
+  readonly resolveRunBytes: (runDigest: string) => Uint8Array | undefined;
+  readonly resolveTaskBytes: (taskDigest: string) => Uint8Array | undefined;
+  readonly resolveAnchoredBenchmarkAnnouncement?: (
+    benchmarkDigest: string,
+  ) => VerifiedAnchoredBenchmarkAnnouncement | undefined;
   /** `clean-subset@1`'s delegate call (§9.2: "restrict... then delegate to another method") is
    * the only method that needs this — every other method ignores it. */
   readonly registry?: MethodRegistry;

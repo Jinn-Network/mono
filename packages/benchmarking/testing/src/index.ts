@@ -20,6 +20,7 @@ export type {
   MethodReferenceSet,
   MethodRegistry,
   ParameterValidationResult,
+  VerifiedAnchoredBenchmarkAnnouncement,
   VerdictRuleName,
 } from "./method-types.js";
 

@@ -380,14 +380,30 @@
     "regressed": 1,
     "concordantPass": 1,
     "concordantFail": 1,
+    "pairing": {
+      "taskDigests": [
+        "4531af346a764e248510ba6cbe3b3e324c6da4397a7bcacf020c97f5f65c7ad3",
+        "7837a9f4994c7a285d92cbc8024fe49014e7abb4a908bd4336230d9e74df147a",
+        "97f5fdc442fb7574d19e707790c4d77930c29117bf312914ac26e219e99f6009",
+        "bde1ed4a4985cdcd3941571212958676e72bb6999cb259748a579cf2fe5f4201",
+        "db97c7435d2682f6f22137cca471b1e8cee6dd71d91e620249207fc65abc5f60",
+        "e3f48b9f67e6e28f49715244a8063f62c73b73fd5d9c59be4466419b0e0f1c61"
+      ]
+    },
     "excluded": {
       "count": 0,
       "cellKeys": []
     },
     "pValue": "0.6250",
     "clustering": {
-      "basis": "none",
+      "basis": "task-provenance-source",
       "clusters": 4
+    },
+    "clusteredPValue": "0.3173",
+    "designEffect": "1.0000",
+    "conflicted": {
+      "count": 0,
+      "cellKeys": []
     }
   }
 }

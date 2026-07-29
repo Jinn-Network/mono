@@ -95,7 +95,7 @@ describe("pairedMcnemar", () => {
     const result = pairedMcnemar(outcomes, (taskDigest) =>
       taskDigest === "t2" || taskDigest === "t3" ? "repoA" : taskDigest);
     expect(result.pValue).toBeCloseTo(0.625, 12); // the exact test never changes
-    expect(result.clustering.basis).toBe("provenance-source");
+    expect(result.clustering.basis).toBe("task-provenance-source");
     // clusters: repoA{t2,t3}, t4, t5 -> 3 clusters over 4 discordant pairs.
     expect(result.clustering.clusters).toBe(3);
     // t2+t3 agree in direction (both improved), so the cluster-robust variance (6) exceeds the

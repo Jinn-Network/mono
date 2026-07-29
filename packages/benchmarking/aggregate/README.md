@@ -15,8 +15,14 @@ Vitest suite. This package runs that driver itself in `src/method-conformance.te
 
 ## Reports
 
-`produceReport()` receives subject matrices, a registered method, verdict-resolution ports, and an
-injected trust-core `DsseSigner`. It derives disclosures from the matrices, seals the Report using
-the records package, and signs the exact sealed bytes as the DSSE payload. `verifyReport()` binds
-the supplied matrices to the Report's sealed subject digests, recomputes results and disclosures,
-and enforces benchmark comparability from the registered method declaration.
+`produceReport()` receives exact canonical Matrix bytes, a registered method, exact-byte
+Verdict/Run/Task resolvers, and an injected trust-core `DsseSigner`. It derives lossless
+disclosures from the matrices, seals the Report using the records package, and signs the exact
+sealed bytes as the DSSE payload.
+
+`verifyReport()` receives the exact DSSE envelope bytes, exact Matrix subject bytes in sealed
+order, and an explicit verification `effectiveTime`. It verifies the envelope signer against the
+Report author under the benchmarking-report trust scope, binds every referenced byte sequence to
+its digest, recomputes results and disclosures, and checks resolved Run comparability and universal
+preregistration. The Report has no sealed timestamp, so `effectiveTime` is verifier context only;
+it is never inferred from a Report field or callback.

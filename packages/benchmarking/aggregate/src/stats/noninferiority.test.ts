@@ -4,19 +4,25 @@ import {
   nonInferiorityVerdict,
   pairedCostVerdict,
   pairedRateDiffLowerBound,
+  xorshift32,
 } from "./noninferiority.js";
 
-/** Deterministic PRNG (mulberry32) so bootstrap tests are reproducible. */
-function mulberry32(seed: number): () => number {
-  let state = seed;
-  return () => {
-    state |= 0;
-    state = (state + 0x6d2b79f5) | 0;
-    let t = Math.imul(state ^ (state >>> 15), 1 | state);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+describe("xorshift32-v1", () => {
+  test("pins the exact first five uint32 draws for seed=1", () => {
+    const next = xorshift32(1);
+    expect(Array.from({ length: 5 }, () => next())).toEqual([
+      270369,
+      67634689,
+      2647435461,
+      307599695,
+      2398689233,
+    ]);
+  });
+
+  test.each([0, -1, 1.5, 4_294_967_296])("rejects invalid seed %s", (seed) => {
+    expect(() => xorshift32(seed)).toThrow(/nonzero unsigned 32-bit/);
+  });
+});
 
 describe("pairedRateDiffLowerBound", () => {
   test("zero-variance input (all deltas identical): the bootstrap lower bound is EXACTLY the observed mean, for any seed", () => {
@@ -25,19 +31,19 @@ describe("pairedRateDiffLowerBound", () => {
     // property, not merely re-running the implementation.
     const rates = [{ pA: 0.5, pB: 0.6 }, { pA: 0.4, pB: 0.5 }, { pA: 0.3, pB: 0.4 }];
     for (const seed of [1, 2, 42]) {
-      const bound = pairedRateDiffLowerBound(rates, { rng: mulberry32(seed), resamples: 500 });
+      const bound = pairedRateDiffLowerBound(rates, { seed, resamples: 500 });
       expect(bound).toBeCloseTo(0.1, 12);
     }
   });
 
   test("rejects an empty sample", () => {
-    expect(() => pairedRateDiffLowerBound([], { rng: mulberry32(1) })).toThrow();
+    expect(() => pairedRateDiffLowerBound([], { seed: 1 })).toThrow();
   });
 
   test("a lower bound never exceeds the observed mean delta", () => {
     const rates = [{ pA: 0.2, pB: 0.5 }, { pA: 0.3, pB: 0.3 }, { pA: 0.4, pB: 0.6 }, { pA: 0.1, pB: 0.5 }];
     const observedMean = rates.reduce((s, r) => s + (r.pB - r.pA), 0) / rates.length;
-    const bound = pairedRateDiffLowerBound(rates, { rng: mulberry32(7), resamples: 2000 });
+    const bound = pairedRateDiffLowerBound(rates, { seed: 7, resamples: 2000 });
     expect(bound).toBeLessThanOrEqual(observedMean + 1e-9);
   });
 });
@@ -47,7 +53,7 @@ describe("nonInferiorityVerdict", () => {
 
   test("below minN, the quality leg is inconclusive rather than a weak pass/fail", () => {
     const result = nonInferiorityVerdict([{ pA: 0.5, pB: 0.6 }], {
-      rng: mulberry32(1),
+      seed: 1,
       stockBaseRate: 0.5,
       minN: 5,
     });
@@ -57,7 +63,7 @@ describe("nonInferiorityVerdict", () => {
 
   test("a clear, constant improvement passes both the absolute and relative checks", () => {
     const result = nonInferiorityVerdict(constantImprovingRates, {
-      rng: mulberry32(3),
+      seed: 3,
       stockBaseRate: 0.5,
       resamples: 500,
     });
@@ -68,7 +74,7 @@ describe("nonInferiorityVerdict", () => {
   test("a regression beyond deltaAbs fails the absolute check", () => {
     const regressingRates = Array.from({ length: 6 }, () => ({ pA: 0.6, pB: 0.5 })); // delta = -0.1
     const result = nonInferiorityVerdict(regressingRates, {
-      rng: mulberry32(3),
+      seed: 3,
       stockBaseRate: 0.6,
       deltaAbs: 0.05,
       resamples: 500,
