@@ -746,3 +746,19 @@ post, claim, solution delivery, evaluation claim, verdict delivery, settlement/f
 refund, and race-loss assertions must be actual local-chain calls and state reads. This local
 fixture deployment is test setup, not an on-chain deployment program task. M2's separate fork
 suite remains responsible for proving the deployed-address `createTask` wiring.
+
+## Addendum 2026-07-29-e — revised lifecycle event ABI (program ruling §7.28)
+
+M4.1 freezes the revised-generation lifecycle event shapes consumed by the projector and later
+implemented by M7:
+
+- `AttemptExpired(uint256 indexed taskId, uint32 indexed attemptIndex, address indexed operator)`
+- `AttemptReleased(uint256 indexed taskId, uint32 indexed attemptIndex, address indexed operator)`
+- `TaskClosed(uint256 indexed taskId, address indexed creator)`
+
+The expiry/release triples are the exact attributable engagement facts required by design §5.2.
+`TaskClosed` includes the creator because design §5.1 requires parties in indexed topics; a
+task-id-only event is not event-complete. Refund value remains the separate
+`TaskBudgetRefunded` economic fact under the one-event-per-fact rule. M4 decodes these events
+only behind `generation: revised` and its fixtures are the ABI contract M7.1/M7.2/M7.3 must
+implement and prove exactly. Today mode never invents these events.

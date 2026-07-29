@@ -301,6 +301,16 @@ Confirmed by the operator at the program gate (2026-07-28):
     per-task rates/costs under its own declared contract). The kit carries both an exact
     single-replicate McNemar fixture and a multi-replicate fail-closed fixture; every excluded
     cell key remains reported deterministically.
+28. **Revised marketplace lifecycle event ABI:** projector M4 freezes the revised-generation
+    lifecycle-event contract that Solidity M7 must implement. `AttemptExpired` and
+    `AttemptReleased` each carry `(uint256 indexed taskId, uint32 indexed attemptIndex,
+    address indexed operator)`, exactly the attributable engagement fact required by design
+    §5.2. `TaskClosed` carries `(uint256 indexed taskId, address indexed creator)`: the close
+    fact names both the task and the authorized party, satisfying event completeness's
+    indexed-party rule. Refund value is a distinct economic fact and therefore remains a
+    separate `TaskBudgetRefunded` event rather than being folded into `TaskClosed`. M4 decodes
+    these shapes only behind `generation: revised`; today mode never fabricates them. M7's
+    compiled ABIs and lifecycle tests must prove exact agreement with the projector fixture.
 
 ## 8. Follow-ups registry (recorded once; none block v1)
 
