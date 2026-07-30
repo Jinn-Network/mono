@@ -39,7 +39,7 @@ jobs:
           version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
       - run: yarn compile
       - name: Build marketplace-testing adapter dependency from source (§7.8)
-        working-directory: ..
+        working-directory: ${{ github.workspace }}
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
@@ -48,10 +48,10 @@ jobs:
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/trust/resolve && yarn install --immutable && yarn build)
-          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/discovery/protocol && yarn install --immutable && yarn build)
           (cd packages/discovery/serve && yarn install --immutable && yarn build)
           (cd packages/discovery/testing && yarn install --immutable && yarn build)
+          (cd packages/trust/testing && yarn install --immutable && yarn build)
           (cd packages/marketplace/binding && yarn install --immutable && yarn build)
           (cd packages/marketplace/projector && yarn install --immutable && yarn build)
           (cd packages/marketplace/testing && yarn install --immutable && yarn build)

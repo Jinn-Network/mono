@@ -19,11 +19,9 @@ await new Promise((resolve, reject) => {
   child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`native custody compile exited with ${code}`)));
 });
 
-if (process.env.JINN_NATIVE_CUSTODY_BUILD_TESTING === "1") {
-  const testOutput = join(root, "dist", "native", "jinn-attempt-shim-test");
-  await new Promise((resolve, reject) => {
-    const child = spawn(process.env.CC ?? "cc", ["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-DJINN_NATIVE_CUSTODY_TESTING", source, "-o", testOutput], { stdio: "inherit" });
-    child.once("error", reject);
-    child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`test native custody compile exited with ${code}`)));
-  });
-}
+const testOutput = join(root, "dist", "native", "jinn-attempt-shim-test");
+await new Promise((resolve, reject) => {
+  const child = spawn(process.env.CC ?? "cc", ["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-DJINN_NATIVE_CUSTODY_TESTING", source, "-o", testOutput], { stdio: "inherit" });
+  child.once("error", reject);
+  child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`test native custody compile exited with ${code}`)));
+});

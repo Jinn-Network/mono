@@ -32,12 +32,17 @@ function run(command, args, options = {}) {
   });
 }
 
+async function packPortal(root, out) {
+  await run("corepack", ["yarn@4.13.0", "install", "--immutable"], { cwd: root });
+  await run("corepack", ["yarn@4.13.0", "pack", "--out", out], { cwd: root });
+}
+
 try {
-  await run("yarn", ["pack", "--out", trustCoreArchive], { cwd: trustCoreRoot });
-  await run("yarn", ["pack", "--out", protocolArchive], { cwd: protocolRoot });
-  await run("yarn", ["pack", "--out", taskExecutionProtocolArchive], { cwd: taskExecutionProtocolRoot });
-  await run("yarn", ["pack", "--out", benchmarkingRecordsArchive], { cwd: benchmarkingRecordsRoot });
-  await run("yarn", ["pack", "--out", archive], { cwd: packageRoot });
+  await packPortal(trustCoreRoot, trustCoreArchive);
+  await packPortal(protocolRoot, protocolArchive);
+  await packPortal(taskExecutionProtocolRoot, taskExecutionProtocolArchive);
+  await packPortal(benchmarkingRecordsRoot, benchmarkingRecordsArchive);
+  await packPortal(packageRoot, archive);
 
   await mkdir(consumer);
   await writeFile(

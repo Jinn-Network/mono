@@ -123,6 +123,9 @@ jobs:
         with:
           name: record-discovery-testing-dist
           path: packages/discovery/testing/dist
+      - name: Install Record Discovery Protocol toolchain (packed-smoke dependency)
+        working-directory: packages/discovery/protocol
+        run: yarn install --immutable
       - name: Install Record Discovery Testing toolchain (packed-smoke dependency)
         working-directory: packages/discovery/testing
         run: yarn install --immutable
@@ -167,6 +170,9 @@ jobs:
         with:
           name: record-discovery-testing-dist
           path: packages/discovery/testing/dist
+      - name: Install Record Discovery Protocol toolchain (packed-smoke dependency)
+        working-directory: packages/discovery/protocol
+        run: yarn install --immutable
       - name: Install Record Discovery Testing toolchain (packed-smoke dependency)
         working-directory: packages/discovery/testing
         run: yarn install --immutable
@@ -335,6 +341,12 @@ jobs:
         with:
           name: record-discovery-testing-dist
           path: packages/discovery/testing/dist
+      - name: Install Record Discovery Protocol toolchain (packed-smoke dependency)
+        working-directory: packages/discovery/protocol
+        run: yarn install --immutable
+      - name: Install Record Discovery Testing toolchain (packed-smoke dependency)
+        working-directory: packages/discovery/testing
+        run: yarn install --immutable
       - name: Verify Record Discovery Facts (Benchmarking)
         working-directory: packages/discovery/facts/benchmarking
         run: |

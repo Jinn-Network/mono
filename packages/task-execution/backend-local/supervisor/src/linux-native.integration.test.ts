@@ -92,7 +92,8 @@ describe.runIf(linux)("Linux native custody shim", () => {
       `const file=${JSON.stringify(pidsPath)};const code=${JSON.stringify(sleeper)};`,
       "const session=spawn(process.execPath,['-e',code],{detached:true,stdio:'ignore'});session.unref();",
       `spawn(process.execPath,['-e',${JSON.stringify(doubleForkProgram)}],{stdio:'ignore'});`,
-      "setTimeout(()=>{const double=Number(fs.readFileSync(file+'.double','utf8'));fs.writeFileSync(file,JSON.stringify({session:session.pid,double}));},25);setInterval(()=>{},1000);",
+      "const writeEscaped=()=>{try{const double=Number(fs.readFileSync(file+'.double','utf8'));fs.writeFileSync(file,JSON.stringify({session:session.pid,double}));}catch{setTimeout(writeEscaped,5);}};",
+      "setTimeout(writeEscaped,0);setInterval(()=>{},1000);",
     ].join("");
     spawnShim({ attemptId: "attempt-escape", nonce: "nonce-escape", metaDir: meta, secretsDir: secrets }, {
       argv: [process.execPath, "-e", program], env: {}, cwd: root,

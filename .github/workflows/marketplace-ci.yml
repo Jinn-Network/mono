@@ -144,6 +144,8 @@ jobs:
           (cd packages/task-execution/testing && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/trust/resolve && yarn install --immutable && yarn build)
+          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/testing && yarn install --immutable && yarn build)
       - name: Restore Marketplace Binding distribution
         uses: actions/download-artifact@v4
         with:
@@ -199,6 +201,7 @@ jobs:
           (cd packages/discovery/protocol && yarn install --immutable && yarn build)
           (cd packages/discovery/serve && yarn install --immutable && yarn build)
           (cd packages/discovery/testing && yarn install --immutable && yarn build)
+          (cd packages/trust/testing && yarn install --immutable && yarn build)
       - name: Restore Marketplace Binding distribution
         uses: actions/download-artifact@v4
         with:
@@ -263,6 +266,7 @@ jobs:
           (cd packages/discovery/protocol && yarn install --immutable && yarn build)
           (cd packages/discovery/serve && yarn install --immutable && yarn build)
           (cd packages/discovery/testing && yarn install --immutable && yarn build)
+          (cd packages/trust/testing && yarn install --immutable && yarn build)
       - name: Restore Marketplace Binding distribution
         uses: actions/download-artifact@v4
         with:
@@ -273,6 +277,10 @@ jobs:
         with:
           name: marketplace-projector-dist
           path: packages/marketplace/projector/dist
+      - name: Install cross-marketplace toolchains (packed-smoke dependencies)
+        run: |
+          (cd packages/marketplace/binding && yarn install --immutable)
+          (cd packages/marketplace/projector && yarn install --immutable)
       - name: Install Marketplace Testing toolchain
         working-directory: packages/marketplace/testing
         run: yarn install --immutable
