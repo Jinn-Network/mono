@@ -75,7 +75,12 @@ export interface PredictionFixture {
 }
 
 const MARKET = { marketId: "0x5150", conditionId: "0xABCDEF" } as const;
-const WINDOW = { startTs: 1_780_000_000_000, endTs: 1_780_086_400_000 } as const;
+// 2026-05-31T12:00:00.000Z .. 2026-06-01T12:00:00.000Z — a 24h span, the maximum the legacy
+// task schema allows (`client/src/types/prediction.ts:67` refines
+// `window.endTs - window.startTs <= 86_400_000`). It brackets the `submittedAt` instant every
+// in-window fixture uses ("2026-06-01T00:00:00.000Z" = 1_780_272_000_000) and still excludes
+// the deliberately-late-rejected fixture's "2026-05-01T00:00:00.000Z".
+const WINDOW = { startTs: 1_780_228_800_000, endTs: 1_780_315_200_000 } as const;
 
 function result(payload: Record<string, unknown>): Uint8Array {
   return encoder.encode(JSON.stringify(payload));
