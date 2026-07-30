@@ -38,6 +38,25 @@ The package currently runs:
 
 The revised-contract suite remains a later milestone in the same plan.
 
+The **venue conformance kit** (operator-daemon composition design §6.6) is the subject-parameterized
+suite the tier-3 chain adapters must satisfy. It publishes four subpath exports from
+`@jinn-network/marketplace-testing/venue-conformance`: the legacy-derived revert-classification
+fixtures and their driver (`VENUE_REVERT_FIXTURES`, `describeVenueRevertClassification`), the
+broadcast-profile driver (`describeBroadcastProfileConformance`, seven relayer obligations), the
+log-source driver (`describeLogSourceConformance`, seven chunking and dual-cursor obligations), and
+the Anvil-fork integration backbone (`withForkVenue`, `describeForkVenueConformance`). Every driver
+declares its own subject interfaces and imports nothing from
+`@jinn-network/marketplace-venue-base`, so the kit's fixtures are authoritative before an
+implementation exists; `src/venue-conformance.test.ts` is the runner that binds the real
+`createBaseVenue` facade to all four. Run it with:
+
+```bash
+yarn vitest run src/venue-conformance.test.ts
+```
+
+The fork blocks need Foundry's `anvil` on `PATH` and a reachable Base Sepolia RPC (override with
+`JINN_MARKETPLACE_FORK_RPC_URL`); without `anvil` they report skipped, never failed.
+
 Consumed by component packages as a **devDependency only, never a production dependency** — but
 note this kit does not itself appear in `binding`/`projector`/`pipeline`'s `package.json`
 (see `binding`'s README for why: a two-way portal cycle breaks the standalone `node-modules`
