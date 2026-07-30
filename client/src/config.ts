@@ -30,6 +30,7 @@ import {
   ExecutionWiringConfigEntrySchema,
   PostingConfigEntrySchema,
 } from './config/shape-v2.js';
+import { migrateConfigShapeV2, type ConfigMigrationReport } from './config/migrate-shape-v2.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -956,6 +957,13 @@ export function backfillJoinedProviders(merged: Record<string, unknown>): number
   return backfilled;
 }
 
+let lastConfigMigrationReport: ConfigMigrationReport | undefined;
+
+/** The shape-v2 auto-migration report from the most recent `loadConfig` call, if it migrated. Task 4 reads it. */
+export function getLastConfigMigrationReport(): ConfigMigrationReport | undefined {
+  return lastConfigMigrationReport;
+}
+
 /**
  * Load config with resolution: env > config file > defaults.
  *
@@ -1382,6 +1390,28 @@ export function loadConfig(configPath?: string): JinnConfig {
   // the on-disk config re-persists provider first-class on the operator's next
   // join via the SPA; a load-time-only backfill keeps existing files loading.
   backfillJoinedProviders(merged);
+
+  // Auto-migrate joined SolverNets / launched records into the stage-1
+  // shape-v2 keys (`claimPolicy`, `executionWiring`, `posting`). Additive,
+  // atomic, idempotent (stage-1 contract 4) — safe to call on every boot. A
+  // read-only mount degrades to a warning, matching
+  // `persistLegacySolverNetsMigration` above. See
+  // docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md Task 3.
+  try {
+    const report = migrateConfigShapeV2({ configPath: filePath });
+    if (report.migrated) {
+      const migratedRaw = existsSync(filePath)
+        ? (JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>)
+        : {};
+      merged['configShapeVersion'] = CONFIG_SHAPE_VERSION;
+      merged['claimPolicy'] = migratedRaw['claimPolicy'];
+      merged['executionWiring'] = migratedRaw['executionWiring'];
+      merged['posting'] = migratedRaw['posting'];
+      lastConfigMigrationReport = report;
+    }
+  } catch (error) {
+    console.warn(`[config] shape-v2 migration skipped: ${String(error)}`);
+  }
 
   // 3. Validate
   const result = JinnConfigSchema.safeParse(merged);
