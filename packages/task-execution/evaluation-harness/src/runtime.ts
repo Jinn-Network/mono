@@ -622,7 +622,21 @@ async function atomicExclusiveWrite(
   const file = await open(temporary, "wx", 0o600);
   try {
     await file.writeFile(bytes);
-    await file.sync();
+    try {
+      await file.sync();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      const code =
+        typeof cause === "object" &&
+        cause !== null &&
+        "code" in cause &&
+        typeof (cause as { code: unknown }).code === "string"
+          ? (cause as { code: string }).code
+          : "";
+      if (code !== "ENOSYS" && message !== "Method not implemented.") {
+        throw cause;
+      }
+    }
   } finally {
     await file.close();
   }
