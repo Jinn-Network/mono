@@ -159,13 +159,16 @@
   .contrast__wager { margin: 48px 0 0; max-width: 62ch; font-size: 15px; line-height: 1.7; text-wrap: pretty; }
   .contrast__tradeoff { margin: 20px 0 0; max-width: 62ch; font-size: 14px; line-height: 1.7; color: var(--fg-muted); text-wrap: pretty; }
 
-  /* Earning */
-  .earning { background: var(--bg-sunken); }
-  .earning__inner { padding-top: clamp(48px, 8vw, 96px); padding-bottom: clamp(48px, 8vw, 96px); }
-  .earning__block { border-top: 1px solid var(--border-gold); padding-top: 40px; max-width: 760px; }
-  .earning__block .label { margin-bottom: 24px; }
-  .earning__block h2 { font-size: clamp(28px, 4vw, 44px); line-height: 1.15; margin: 0 0 20px; max-width: 22ch; }
-  .earning__block p { margin: 0; max-width: 58ch; font-size: 14px; line-height: 1.7; color: var(--fg-muted); text-wrap: pretty; }
+  /* Built on Jinn */
+  .boundary { background: var(--bg-sunken); }
+  .boundary h2 { font-size: clamp(28px, 4vw, 44px); line-height: 1.15; margin: 0 0 40px; max-width: 26ch; }
+  .boundary .label { margin-bottom: 20px; }
+  .boundary__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .boundary__item {
+    font-size: 13px; color: var(--fg);
+    border: 1px solid var(--border); border-radius: 4px; padding: 14px 16px;
+  }
+  .boundary__after { margin: 32px 0 0; max-width: 62ch; font-size: 14px; line-height: 1.7; color: var(--fg-muted); text-wrap: pretty; }
 
   /* Closing */
   .closing {
@@ -327,14 +330,25 @@
     </div>
   </section>
 
-  <!-- Earning -->
-  <section class="section earning">
-    <div class="container earning__inner">
-      <div class="earning__block">
-        <div class="label label--gold">Earning</div>
-        <h2>Verified contributions earn OLAS.</h2>
-        <p>Contributions earn only when they pass verification. No token is needed to use Jinn.</p>
+  <!-- Built on Jinn -->
+  <section class="section boundary">
+    <div class="container section-pad">
+      <div class="label label--gold">The boundary</div>
+      <h2>Jinn coordinates the work and keeps the records. Everything else is built on top.</h2>
+      <div class="boundary__grid">
+        <div class="boundary__item">Repository maintenance</div>
+        <div class="boundary__item">Research tools</div>
+        <div class="boundary__item">Benchmarking platforms</div>
+        <div class="boundary__item">Audit trails</div>
+        <div class="boundary__item">Reputation systems</div>
+        <div class="boundary__item">Skill libraries</div>
+        <div class="boundary__item">Dataset builders</div>
+        <div class="boundary__item">Fine-tuning services</div>
+        <div class="boundary__item">Agent tuning</div>
+        <div class="boundary__item">Agent memory</div>
+        <div class="boundary__item">Reinforcement learning</div>
       </div>
+      <p class="boundary__after">These are applications, not Jinn. They may request work, perform it, use the records, or all three. Jinn doesn't decide what any record means — each application decides what it trusts and how it uses it.</p>
     </div>
   </section>
 
