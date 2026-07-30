@@ -95,6 +95,16 @@ gates.
   `configShapeVersion: 2`, `claimPolicy`, `executionWiring[]` (entries carry
   `legacyManifestDigest`), `posting[]`.
 - CLI verbs: `jinn policy`, `jinn wiring` (§9 of the spec).
+- Cross-plan factory surface (coordinator ruling, binding on the venue-base and stage
+  plans): `venue-base` exports one facade `createBaseVenue(config)` returning
+  `{ claim: ClaimPorts, settlement: SettlementPorts, lifecycle: MarketplaceLifecyclePorts,
+  finality: FinalityPort, deliveryWait: DeliveryWaitPort, release: ReleaseAttemptPort,
+  observe: MarketplaceObservePort, safe: SafeBroadcastPort, logSource, intents }` with
+  `config = { chain, publicClient, walletClient, safeAddress, stateDbPath }` (per-port
+  factories may exist underneath; the facade is the supported composition surface).
+  `transport-http` exports `createFsBlobStore(rootDir)`, `createArchiveHttpHandler(opts)`
+  (fetch-style, mountable under a Hono route), `createHttpTransport(baseUrl, fetchLike)`,
+  `createSseStreamTransport(baseUrl, fetchLike)`.
 
 ## 6. Cross-plan contracts (binding on every component plan)
 
