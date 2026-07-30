@@ -1,0 +1,117 @@
+name: Stack npm Publish
+
+# The 45 platform packages publish as one coherent set in dependency-graph order.
+# Branch-aware by design (#2293, plan decision D1): the packages live on
+# integration/evidence-v1 today and land on next when integration merges. Both
+# branches trigger; the existence guard makes the trigger a no-op wherever the
+# package set is absent.
+#
+# Trusted publishing (OIDC): register this single workflow filename on npmjs for
+# every package the registration artifact lists. Leave the optional npmjs
+# Environment field blank. See docs/runbooks/stack-npm-publishing.md.
+on:
+  push:
+    branches: [integration/evidence-v1, next]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Published stack release tag to recover, for example stack-v0.1.0'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  checks: read
+
+concurrency:
+  group: stack-npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: stack-canary
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'stack-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: npm-publish
+    env:
+      JINN_BUILD_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Verify exact publish commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          if [ "${ACTUAL_SHA}" != "${JINN_BUILD_COMMIT}" ]; then
+            echo "::error::Checked out ${ACTUAL_SHA}, expected publish commit ${JINN_BUILD_COMMIT}"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - run: npm install -g npm@11.16.0
+      - run: corepack enable
+
+      - name: Guard on an empty platform package set
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node .github/scripts/publish-stack.mjs --mode canary --sha "${JINN_BUILD_COMMIT}" --dry-run; then
+            echo "present=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::notice::No platform package set on this ref; nothing to publish."
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Verify the six platform tree CI workflows
+        if: steps.guard.outputs.present == 'true'
+        uses: actions/github-script@v7
+        env:
+          PUBLISH_SHA: ${{ env.JINN_BUILD_COMMIT }}
+        with:
+          script: |
+            const required = [
+              'Evidence CI',
+              'Trust CI',
+              'Task Execution CI',
+              'Record Discovery CI',
+              'Marketplace CI',
+              'Benchmarking CI',
+            ];
+            const { data } = await github.rest.checks.listForRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: process.env.PUBLISH_SHA,
+              per_page: 100,
+            });
+            const failed = [];
+            for (const name of required) {
+              const runs = data.check_runs.filter((run) => run.name.startsWith(name));
+              for (const run of runs) {
+                if (run.status === 'completed' && run.conclusion !== 'success' && run.conclusion !== 'skipped' && run.conclusion !== 'neutral') {
+                  failed.push(`${run.name}: ${run.conclusion}`);
+                }
+              }
+            }
+            if (failed.length > 0) {
+              core.setFailed(`Platform tree CI concluded failure at ${process.env.PUBLISH_SHA}: ${failed.join('; ')}`);
+            } else {
+              core.notice(`No platform tree CI failure at ${process.env.PUBLISH_SHA}`);
+            }
+
+      - name: Publish the platform package set
+        if: steps.guard.outputs.present == 'true' && github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .github/scripts/publish-stack.mjs --mode canary --sha "${JINN_BUILD_COMMIT}"
