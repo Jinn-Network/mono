@@ -11,3 +11,4 @@ export * from "./handler.js";
 export * from "./sse.js";
 export * from "./advertise.js";
 export * from "./fetch-transport.js";
+export * from "./sse-transport.js";
