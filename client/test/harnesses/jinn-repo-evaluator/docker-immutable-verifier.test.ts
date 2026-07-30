@@ -70,27 +70,23 @@ describe('Docker immutable mechanical verifier', () => {
     expect(create.args).toContain('--rm');
     expect(create.args).toContain('jinn.autopilot.evaluator-verification=true');
     expect(create.args).toContain('sleep 7200');
-    expect(create.args.join(' ')).not.toContain('/trusted/exact-head');
+    expect(create.args).toContain('--read-only');
     expect(create.args).toContain(
-      '/source:rw,nosuid,nodev,noexec,size=1073741824',
+      'type=bind,src=/trusted/exact-head,dst=/source,readonly',
     );
     expect(create.args).toContain(
-      '/workspace:rw,nosuid,nodev,size=6442450944',
+      '/workspace:rw,exec,nosuid,nodev,size=6442450944',
     );
+    expect(create.args).toContain('TMPDIR=/workspace/.jinn-tmp');
     expect(create.args).toContain('8g');
     expect(create.args).toContain('YARN_IGNORE_PATH=1');
     expect(create.args).toContain('YARN_NODE_LINKER=node-modules');
     expect(create.args).toContain('YARN_ENABLE_SCRIPTS=false');
     expect(calls.find(({ label }) => label === 'sandbox-source-upload'))
-      .toEqual({
-        args: [
-          'cp',
-          '/trusted/exact-head/.',
-          'jinn-evaluator-verify-test:/source',
-        ],
-        label: 'sandbox-source-upload',
-      });
+      .toBeUndefined();
     const seed = calls.find(({ label }) => label === 'sandbox-source-copy')!;
+    expect(seed.args.join(' ')).toContain('.jinn-tmp');
+    expect(seed.args.join(' ')).toContain('--no-same-owner');
     expect(seed.args.join(' ')).toContain('node_modules');
     expect(seed.args.join(' ')).toContain('dist');
     const candidate = calls.filter(({ label }) =>
@@ -127,6 +123,11 @@ describe('Docker immutable mechanical verifier', () => {
       label.endsWith(':trusted-native-rebuild')
     )) {
       expect(rebuild.args).toContain('npm_config_nodedir=/usr/local');
+      expect(rebuild.args.join(' ')).toContain('node-gyp');
+      expect(rebuild.args).toContain('rebuild');
+      expect(rebuild.args).toContain('--offline');
+      expect(rebuild.args.join(' ')).toContain('/node_modules/better-sqlite3');
+      expect(rebuild.args).not.toContain('yarn@4.13.0');
     }
     const labels = calls.map(({ label }) => label);
     expect(labels.indexOf('packages/sdk:trusted-bootstrap-build'))
@@ -138,6 +139,51 @@ describe('Docker immutable mechanical verifier', () => {
     expect(labels.indexOf('packages/layer:trusted-bootstrap-build'))
       .toBeLessThan(labels.indexOf('client:typecheck'));
     expect(calls.at(-1)?.label).toBe('sandbox-container-remove');
+  });
+
+  it('bind-mounts verify overlay files and skips scaffold tests when configured', async () => {
+    const previous = process.env.JINN_AUTOPILOT_VERIFY_OVERLAY_DIR;
+    process.env.JINN_AUTOPILOT_VERIFY_OVERLAY_DIR = '/trusted/verify-overlay';
+    const calls: Array<{ args: readonly string[]; label: string }> = [];
+    const verifier = makeDockerImmutableMechanicalVerifier({
+      containerName: () => 'jinn-evaluator-verify-overlay',
+      pathExists: async () => false,
+      runDocker: async (args, label) => {
+        calls.push({ args, label });
+        return { status: 'passed' };
+      },
+    });
+
+    try {
+      await expect(verifier.verify({
+        context: CONTEXT,
+        checkoutDir: '/trusted/exact-head',
+        changedFiles: ['client/src/harnesses/engine/engine.ts'],
+      })).resolves.toEqual({
+        kind: 'passed',
+        checks: ['client:typecheck', 'client:test'],
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env.JINN_AUTOPILOT_VERIFY_OVERLAY_DIR;
+      } else {
+        process.env.JINN_AUTOPILOT_VERIFY_OVERLAY_DIR = previous;
+      }
+    }
+
+    const create = calls.find(({ label }) => label === 'sandbox-container-create')!;
+    expect(create.args).toContain(
+      'type=bind,src=/trusted/verify-overlay,dst=/overlay,readonly',
+    );
+    const overlayCopy = calls.find(({ label }) => label === 'sandbox-overlay-copy')!;
+    expect(overlayCopy.args.join(' ')).toContain('/overlay/client/vitest.config.ts');
+    expect(overlayCopy.args.join(' ')).toContain(
+      '/workspace/client/src/api/loop-completion-build.ts',
+    );
+    const clientTest = calls.find(({ label }) => label === 'client:test')!;
+    expect(clientTest.args).toContain('JINN_TEST_SKIP_PLUGIN_SCAFFOLD=1');
+    expect(clientTest.args).toContain('SKIP_HL_TESTS=1');
+    expect(clientTest.args).toContain('JINN_TEST_SKIP_ANVIL=1');
   });
 
   it('removes the container with a fresh signal after session cancellation', async () => {

@@ -21,6 +21,23 @@ const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const LOG_LIMIT = 4000;
 const CLEANUP_TIMEOUT_MS = 30_000;
 const READINESS_TIMEOUT_MS = 3 * 60_000;
+const NODE_GYP_BIN =
+  '/usr/local/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js';
+
+/** Mirrors Autopilot `MARKETPLACE_VERIFICATION_OVERLAY_RELATIVE_PATHS`. */
+const MARKETPLACE_VERIFICATION_OVERLAY_RELATIVE_PATHS = [
+  'client/vitest.config.ts',
+  'client/test/cli/commands/create.test.ts',
+  'client/src/api/loop-completion-build.ts',
+] as const;
+
+function marketplaceVerificationOverlayDir(
+  environment: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const raw = environment.JINN_AUTOPILOT_VERIFY_OVERLAY_DIR;
+  if (raw === undefined || raw.trim() === '') return undefined;
+  return raw.trim();
+}
 
 export type DockerVerificationCommandResult =
   | { readonly status: 'passed' }
@@ -84,8 +101,10 @@ async function defaultDockerRunner(
 
 function dockerSandboxArgs(input: {
   readonly name: string;
+  readonly checkoutDir: string;
+  readonly overlayDir?: string;
 }): string[] {
-  return [
+  const args = [
     'run',
     '--detach',
     '--rm',
@@ -99,10 +118,18 @@ function dockerSandboxArgs(input: {
     '--memory', '8g',
     '--cpus', '4',
     '--tmpfs', '/tmp:rw,noexec,nosuid,size=67108864',
-    '--tmpfs', '/source:rw,nosuid,nodev,noexec,size=1073741824',
-    '--tmpfs', '/workspace:rw,nosuid,nodev,size=6442450944',
+    // `docker cp` into a `--read-only` container is refused outright by the
+    // daemon, tmpfs mounts notwithstanding. The sandbox only ever reads /source.
+    '--mount', `type=bind,src=${input.checkoutDir},dst=/source,readonly`,
+    ...(input.overlayDir === undefined
+      ? []
+      : ['--mount', `type=bind,src=${input.overlayDir},dst=/overlay,readonly`]),
+    '--tmpfs', '/workspace:rw,exec,nosuid,nodev,size=6442450944',
     '--env', 'HOME=/workspace/.jinn-home',
     '--env', 'XDG_CACHE_HOME=/workspace/.jinn-home/cache',
+    // Yarn stages tarball-to-zip conversions in TMPDIR; the hardened 64 MiB
+    // /tmp overflows there, so point it at the large /workspace tmpfs.
+    '--env', 'TMPDIR=/workspace/.jinn-tmp',
     '--env', 'COREPACK_HOME=/workspace/.jinn-corepack',
     '--env', 'COREPACK_ENABLE_DOWNLOAD_PROMPT=0',
     '--env', 'YARN_IGNORE_PATH=1',
@@ -116,6 +143,7 @@ function dockerSandboxArgs(input: {
     // tmpfs-backed container alive indefinitely.
     'sleep 7200',
   ];
+  return args;
 }
 
 function downstreamScopes(changedFiles: readonly string[]): PackageScope[] {
@@ -322,9 +350,12 @@ export function makeDockerImmutableMechanicalVerifier(options: {
         }
       };
 
+      const overlayDir = marketplaceVerificationOverlayDir();
       const created = await run(
         dockerSandboxArgs({
           name: container,
+          checkoutDir: input.checkoutDir,
+          ...(overlayDir === undefined ? {} : { overlayDir }),
         }),
         'sandbox-container-create',
       );
@@ -335,31 +366,42 @@ export function makeDockerImmutableMechanicalVerifier(options: {
       }
       containerCreated = true;
       try {
-        const uploaded = await run([
-          'cp',
-          `${input.checkoutDir}/.`,
-          `${container}:/source`,
-        ], 'sandbox-source-upload');
-        if (uploaded.status === 'failed') {
-          throw new Error(
-            `Docker evaluator source upload failed: ${uploaded.detail}`,
-          );
-        }
         const seeded = await run([
           'exec',
           '--workdir', '/workspace',
           container,
           'sh',
           '-ceu',
-          "tar -C /source --exclude='.git' --exclude='node_modules'"
+          'mkdir -p /workspace/.jinn-tmp && '
+            + "tar -C /source --exclude='.git' --exclude='node_modules'"
             + " --exclude='*/node_modules' --exclude='dist' --exclude='*/dist'"
             + " --exclude='.yarn/cache' --exclude='*/.yarn/cache'"
-            + ' -cf - . | tar -C /workspace -xf -',
+            + ' -cf - . | tar -C /workspace -xf - --no-same-owner',
         ], 'sandbox-source-copy');
         if (seeded.status === 'failed') {
           throw new Error(
             `Docker evaluator snapshot failed: ${seeded.detail}`,
           );
+        }
+        if (overlayDir !== undefined) {
+          const overlayCopy = MARKETPLACE_VERIFICATION_OVERLAY_RELATIVE_PATHS
+            .map((relativePath) =>
+              `cp /overlay/${relativePath} /workspace/${relativePath}`
+            )
+            .join(' && ');
+          const overlaid = await run([
+            'exec',
+            '--workdir', '/workspace',
+            container,
+            'sh',
+            '-ceu',
+            overlayCopy,
+          ], 'sandbox-overlay-copy');
+          if (overlaid.status === 'failed') {
+            throw new Error(
+              `Docker evaluator overlay copy failed: ${overlaid.detail}`,
+            );
+          }
         }
 
         const requiredRoots = new Set(scopes.map(({ pkg }) => pkg.root));
@@ -436,15 +478,14 @@ export function makeDockerImmutableMechanicalVerifier(options: {
           const label = `${root}:trusted-native-rebuild`;
           const rebuilt = await run([
             'exec',
-            '--env', 'YARN_ENABLE_SCRIPTS=true',
             '--env', 'npm_config_nodedir=/usr/local',
             '--env', 'npm_config_build_from_source=true',
-            '--workdir', `/workspace/${root}`,
+            '--workdir', `/workspace/${root}/node_modules/better-sqlite3`,
             container,
-            'corepack',
-            'yarn@4.13.0',
+            'node',
+            NODE_GYP_BIN,
             'rebuild',
-            'better-sqlite3',
+            '--offline',
           ], label);
           if (rebuilt.status === 'failed') {
             return {
@@ -531,8 +572,16 @@ export function makeDockerImmutableMechanicalVerifier(options: {
           const testArgs = existingTests.length === 0
             ? [scope.pkg.testScript]
             : ['vitest', 'run', ...existingTests];
+          const overlayTestEnv = overlayDir === undefined
+            ? []
+            : [
+              '--env', 'JINN_TEST_SKIP_PLUGIN_SCAFFOLD=1',
+              '--env', 'SKIP_HL_TESTS=1',
+              '--env', 'JINN_TEST_SKIP_ANVIL=1',
+            ];
           const tested = await run([
             'exec',
+            ...overlayTestEnv,
             '--workdir', `/workspace/${scope.pkg.root}`,
             container,
             'corepack',
