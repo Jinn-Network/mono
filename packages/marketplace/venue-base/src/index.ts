@@ -51,6 +51,12 @@ export {
 } from "./waiters/finality.js";
 export type { FinalityWaiterOptions } from "./waiters/finality.js";
 export {
+  DEFAULT_DELIVERY_POLL_INTERVAL_MS,
+  DEFAULT_DELIVERY_TIMEOUT_MS,
+  createDeliveryWaiter,
+} from "./waiters/delivery.js";
+export type { DeliveryWaiterOptions } from "./waiters/delivery.js";
+export {
   createClaimPreflight,
   createClaimWriter,
   decodeAttemptFromLogs,
