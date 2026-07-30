@@ -108,10 +108,11 @@ jobs:
           MANUAL_RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
           PACKAGE_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
+          SDK_PACKAGE_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('../packages/sdk/package.json','utf8')).version)")
           if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ]; then
             PUBLISH_VERSION="${PACKAGE_VERSION}-canary.sha.${JINN_BUILD_COMMIT}"
             DIST_TAG="canary"
-            SDK_SPEC="@jinn-network/sdk@0.1.1-canary.sha.${JINN_BUILD_COMMIT}"
+            SDK_SPEC="@jinn-network/sdk@${SDK_PACKAGE_VERSION}-canary.sha.${JINN_BUILD_COMMIT}"
           else
             RELEASE_TAG="${MANUAL_RELEASE_TAG:-${{ github.event.release.tag_name }}}"
             if [ -z "${RELEASE_TAG}" ]; then
@@ -175,15 +176,17 @@ jobs:
             echo "publish_version=${PUBLISH_VERSION}"
             echo "dist_tag=${DIST_TAG}"
             echo "release_tag=${RELEASE_TAG:-}"
-            echo "sdk_spec=${SDK_SPEC:-@jinn-network/sdk@0.1.1}"
+            echo "sdk_version=${SDK_PACKAGE_VERSION}"
+            echo "sdk_spec=${SDK_SPEC:-@jinn-network/sdk@${SDK_PACKAGE_VERSION}}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Require published SDK
         if: steps.meta.outputs.dist_tag == 'latest'
         run: |
-          SDK_VERSION="$(npm view @jinn-network/sdk@0.1.1 version)"
-          if [ "${SDK_VERSION}" != "0.1.1" ]; then
-            echo "::error::Stable client release requires @jinn-network/sdk@0.1.1"
+          EXPECTED_SDK="${{ steps.meta.outputs.sdk_version }}"
+          SDK_VERSION="$(npm view "@jinn-network/sdk@${EXPECTED_SDK}" version)"
+          if [ "${SDK_VERSION}" != "${EXPECTED_SDK}" ]; then
+            echo "::error::Stable client release requires @jinn-network/sdk@${EXPECTED_SDK}"
             exit 1
           fi
 
@@ -290,7 +293,7 @@ jobs:
             fs.writeFileSync(pluginPath, JSON.stringify(plugin, null, 2) + '\n');
             const sdkPath = '../packages/sdk/package.json';
             const sdk = JSON.parse(fs.readFileSync(sdkPath, 'utf8'));
-            sdk.version = '0.1.1-canary.sha.${JINN_BUILD_COMMIT}';
+            sdk.version = sdk.version + '-canary.sha.' + process.env.JINN_BUILD_COMMIT;
             fs.writeFileSync(sdkPath, JSON.stringify(sdk, null, 2) + '\n');
           "
 
@@ -543,7 +546,7 @@ jobs:
         if: steps.meta.outputs.dist_tag == 'latest'
         shell: bash
         env:
-          SDK_SPEC: '@jinn-network/sdk@0.1.1'
+          SDK_SPEC: '@jinn-network/sdk@${{ steps.meta.outputs.sdk_version }}'
           CLIENT_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
         run: node scripts/external-consumer-acceptance.mjs --registry --sdk-spec "${SDK_SPEC}" --client-spec "${CLIENT_SPEC}"
 

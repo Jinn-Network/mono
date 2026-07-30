@@ -498,3 +498,13 @@ test('a forced watchdog/completion race leaves one current train alert', async (
     'the duplicate must not remain as an orphan open issue',
   );
 });
+
+test('npm-publish.yml carries no hard-coded @jinn-network/sdk version literal', () => {
+  // The sdk version must be derived from packages/sdk/package.json at run
+  // time (marketplace-surfaces design §6 R1): a pinned literal red-lines
+  // every client canary the moment the sdk version bumps.
+  const pinned = publish.match(/@jinn-network\/sdk@\d+\.\d+\.\d+/g) ?? [];
+  assert.deepEqual(pinned, [], `hard-coded sdk version literals: ${pinned.join(', ')}`);
+  const versionAssignments = publish.match(/sdk\.version\s*=\s*'\d+\.\d+\.\d+/g) ?? [];
+  assert.deepEqual(versionAssignments, [], 'sdk.version must derive from the manifest, not a literal');
+});
