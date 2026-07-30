@@ -72,3 +72,11 @@ test('the stable lane runs the registry-backed fixture gate before publishing', 
   assert.ok(gateAt > -1, 'the registry-backed fixture gate must exist');
   assert.ok(gateAt < publishAt, 'the fixture gate must precede the stable publish');
 });
+
+test('the profile root is built and signed as an uploadable artifact', () => {
+  assert.match(workflow, /name: jinn-profile-root/);
+  const buildAt = workflow.indexOf('name: Build the static profile root');
+  const signAt = workflow.indexOf('name: Sign the profile manifest');
+  assert.ok(buildAt > -1 && signAt > buildAt, 'the manifest is signed after it is built');
+  assert.match(workflow, /JINN_PROFILE_MANIFEST_SIGNING_KEY: \$\{\{ secrets\.JINN_PROFILE_MANIFEST_SIGNING_KEY \}\}/);
+});

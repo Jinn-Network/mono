@@ -233,3 +233,27 @@ jobs:
           name: stack-trusted-publishers
           path: ${{ runner.temp }}/registrations
           if-no-files-found: error
+
+  profile-root:
+    name: Profile root artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Build the static profile root
+        run: node .github/scripts/build-profile-root.mjs --out "${RUNNER_TEMP}/profile-root" --commit "${GITHUB_SHA}"
+      - name: Sign the profile manifest
+        env:
+          JINN_PROFILE_MANIFEST_SIGNING_KEY: ${{ secrets.JINN_PROFILE_MANIFEST_SIGNING_KEY }}
+          JINN_PROFILE_MANIFEST_KEY_ID: ${{ vars.JINN_PROFILE_MANIFEST_KEY_ID }}
+        run: node .github/scripts/sign-profile-manifest.mjs --root "${RUNNER_TEMP}/profile-root"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jinn-profile-root
+          path: ${{ runner.temp }}/profile-root
+          if-no-files-found: error
