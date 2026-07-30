@@ -88,6 +88,7 @@ describe.runIf(linux)("Linux native custody shim", () => {
       `fs.writeFileSync(${JSON.stringify(`${pidsPath}.double`)},String(child.pid));child.unref();process.exit(0);`,
     ].join("");
     const program = [
+      "process.on('SIGTERM',()=>{});",
       "const {spawn}=require('node:child_process');const fs=require('node:fs');",
       `const file=${JSON.stringify(pidsPath)};const code=${JSON.stringify(sleeper)};`,
       "const session=spawn(process.execPath,['-e',code],{detached:true,stdio:'ignore'});session.unref();",

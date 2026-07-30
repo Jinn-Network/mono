@@ -193,6 +193,7 @@ jobs:
       - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/discovery/protocol && yarn install --immutable && yarn build)

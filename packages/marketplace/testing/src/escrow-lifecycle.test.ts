@@ -14,6 +14,16 @@ async function artifact(path: string): Promise<{ abi: Abi; bytecode: Hex }> {
   return JSON.parse(await readFile(new URL(`contracts/artifacts/${path}`, ROOT), "utf8")) as { abi: Abi; bytecode: Hex };
 }
 
+async function anvilAvailable(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = spawn("anvil", ["--version"]);
+    probe.on("error", () => resolve(false));
+    probe.on("exit", (code) => resolve(code === 0));
+  });
+}
+
+const hasAnvil = await anvilAvailable();
+
 describe("today-generation escrow lifecycle fixture (§13)", () => {
   test("drives real transaction legs through the fork context and asserts claim-time-spend plus race-loss", async () => {
     const context: ForkEscrowContext = {
@@ -45,6 +55,7 @@ describe("today-generation escrow lifecycle fixture (§13)", () => {
     expect(context.refund).not.toHaveBeenCalled();
   });
 
+  describe.runIf(hasAnvil)("Anvil fork of Base Sepolia (§13)", () => {
   test("runs post, claim, solution/evaluation delivery, settlement, finalization and refund against deployed local contracts", async () => {
     const port = 9700 + (process.pid % 500);
     const url = `http://127.0.0.1:${port}`;
@@ -379,4 +390,5 @@ describe("today-generation escrow lifecycle fixture (§13)", () => {
       anvil.kill();
     }
   }, 60_000);
+  });
 });
