@@ -19,6 +19,7 @@ const DISCOVERY_PACKAGES = [
   ['facts/task-execution', '@jinn-network/record-discovery-facts-task-execution'],
   ['facts/benchmarking', '@jinn-network/record-discovery-facts-benchmarking'],
   ['sources/evidence-journal', '@jinn-network/record-discovery-source-evidence-journal'],
+  ['transport-http', '@jinn-network/record-discovery-transport-http'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/discovery; map name -> absolute dir.
@@ -109,6 +110,21 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   // "every Jinn package anywhere in the graph gets its own resolutions
   // entry" precedent recorded above for testing/serve/client/facts-*.
   ['sources/evidence-journal', { dependencies: ['@jinn-network/evidence-discovery', '@jinn-network/evidence-repository', '@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve'], devDependencies: ['@jinn-network/evidence-protocol', '@jinn-network/record-discovery-testing', '@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
+  // transport-http is the discovery tree's tier-3 adapter package: it
+  // implements serve's BlobStore/PingTransport ports and client's
+  // Transport/StreamTransport ports, so it is the one package that
+  // legitimately depends on BOTH sides of the serve/client boundary.
+  // Both edges are `import type` only -- no runtime import crosses them
+  // (asserted by the source-boundaries guard) -- but they must be
+  // production `dependencies` so the packed .d.ts files resolve for
+  // downstream consumers. record-discovery-testing is the dev-only
+  // conformance kit; trust-core is the same shadow devDependency +
+  // portal resolution every protocol-consuming package in this tree
+  // carries (client declares trust-core as a production dependency, so
+  // yarn's per-project resolution for this standalone project needs a
+  // matching top-level override even though transport-http's own source
+  // never imports it).
+  ['transport-http', { dependencies: ['@jinn-network/record-discovery-client', '@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve'], devDependencies: ['@jinn-network/record-discovery-testing', '@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
 ]);
 
 function readPackage(directory) {
