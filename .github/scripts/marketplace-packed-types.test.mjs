@@ -14,6 +14,7 @@ const packages = [
   ['binding', '@jinn-network/marketplace-binding'],
   ['projector', '@jinn-network/marketplace-projector'],
   ['pipeline', '@jinn-network/marketplace-pipeline'],
+  ['venue-base', '@jinn-network/marketplace-venue-base'],
   ['testing', '@jinn-network/marketplace-testing'],
 ];
 
@@ -21,6 +22,7 @@ const codeEntrypoints = [
   '@jinn-network/marketplace-binding',
   '@jinn-network/marketplace-projector',
   '@jinn-network/marketplace-pipeline',
+  '@jinn-network/marketplace-venue-base',
   '@jinn-network/marketplace-testing',
   '@jinn-network/marketplace-testing/backend-conformance',
   '@jinn-network/marketplace-testing/named-check-fixtures',

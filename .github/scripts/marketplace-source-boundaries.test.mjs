@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'marketplace');
-const marketplaceDirectories = ['binding', 'projector', 'pipeline', 'testing'];
+const marketplaceDirectories = ['binding', 'projector', 'pipeline', 'venue-base', 'testing'];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'), join(root, 'client'),
   ...['autopilot', 'core', 'indexer', 'indexer-enrichment', 'layer', 'plugin', 'sdk']
@@ -57,6 +57,45 @@ const PIPELINE_FORBIDDEN_PACKAGES = [
   '@jinn-network/record-discovery-client', '@jinn-network/record-discovery-testing',
   '@jinn-network/trust-core', '@jinn-network/trust-resolve', '@jinn-network/trust-testing',
 ];
+// venue-base is the tier-3 chain-adapter tree (composition design §6.1): it consumes the
+// binding's port surface (including the three pipeline-declared ports re-exported there at
+// stage 0) and the projector's decode/finality/observe machinery. It may NEVER import
+// marketplace-pipeline (program §6 contract 8), never the backend-local internals, never
+// marketplace-testing (one-directional kit rule), and never a record-discovery package
+// directly -- the projector is the one chain-reading machine and owns that edge.
+const VENUE_BASE_FORBIDDEN_PACKAGES = [
+  '@jinn-network/marketplace-pipeline', '@jinn-network/marketplace-testing',
+  '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
+  '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-testing',
+  '@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve',
+  '@jinn-network/record-discovery-client', '@jinn-network/record-discovery-testing',
+];
+
+// Signer-injection only (program §6 contract 11 / design §6.1 npm posture): venue-base holds
+// no key material and no key-loading code. Injected viem WalletClients are the only signing
+// authority. Banned on venue-base production source.
+const KEY_MATERIAL_APIS = [
+  'privateKeyToAccount', 'mnemonicToAccount', 'hdKeyToAccount', 'generatePrivateKey',
+  'privateKeyToAddress', 'toAccount',
+];
+const keyMaterialIdentifier = new RegExp(
+  String.raw`(?<![\w$."'\x60])(?:${KEY_MATERIAL_APIS.join('|')})\b`, 'g',
+);
+
+// Storage location is a host parameter (`config.stateDbPath`), never an absolute default.
+const HOST_PATH_APIS = ['homedir', 'userInfo'];
+const hostPathIdentifier = new RegExp(
+  String.raw`(?<![\w$."'\x60])(?:${HOST_PATH_APIS.join('|')})\b|(?:~\/\.jinn)`, 'g',
+);
+
+function matchesInFiles(sourceFiles, pattern) {
+  return sourceFiles.flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    return [...source.matchAll(pattern)].map((match) => `${relative(root, file)} -> ${match[0]}`);
+  }).sort();
+}
+
 // testing consumes marketplace-{binding,projector} + task-execution-testing +
 // record-discovery-testing (the kits it builds on); never pipeline (pipeline is a composition
 // LIBRARY exercised by its own tests, not by this conformance kit), never the embedder-only
@@ -267,6 +306,33 @@ test('marketplace-testing production source stays within its architecture bounda
   assertBoundary(join(packages, 'testing', 'src'), TESTING_FORBIDDEN_PACKAGES, APPLICATION_AND_LEGACY_ROOTS);
 });
 
+test('marketplace-venue-base production source stays within its architecture boundary', () => {
+  const productionFiles = files(join(packages, 'venue-base', 'src')).filter(
+    (file) => !/\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(file),
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(productionFiles, VENUE_BASE_FORBIDDEN_PACKAGES, APPLICATION_AND_LEGACY_ROOTS),
+    [],
+    'packages/marketplace/venue-base/src crosses a marketplace architecture boundary',
+  );
+});
+
+test('marketplace-venue-base never loads or derives key material (signer-injection only)', () => {
+  const productionFiles = files(join(packages, 'venue-base', 'src')).filter(
+    (file) => !/\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(file),
+  );
+  assert.deepEqual(matchesInFiles(productionFiles, keyMaterialIdentifier), [],
+    'venue-base is signer-injection only: no keystore, no key-loading code, no key material');
+});
+
+test('marketplace-venue-base never hardcodes a host storage location', () => {
+  const productionFiles = files(join(packages, 'venue-base', 'src')).filter(
+    (file) => !/\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(file),
+  );
+  assert.deepEqual(matchesInFiles(productionFiles, hostPathIdentifier), [],
+    'venue-base persists only under the host-supplied config.stateDbPath');
+});
+
 test('no marketplace package imports the backend-local component internals (ruling §7.18)', () => {
   for (const directory of marketplaceDirectories) {
     if (directory === 'pipeline') continue; // pipeline may import the assembly (-backend-local) only, checked above
@@ -285,6 +351,7 @@ test('marketplace exports stay root-only except for the native testing conforman
     ['binding', '@jinn-network/marketplace-binding', ['.']],
     ['projector', '@jinn-network/marketplace-projector', ['.']],
     ['pipeline', '@jinn-network/marketplace-pipeline', ['.']],
+    ['venue-base', '@jinn-network/marketplace-venue-base', ['.']],
     // The native §16.2 suite is intentionally a public testing subpath; it does not turn the
     // profile checks into a parameter of the unmodified TEP core kit (ruling §7.19).
     ['testing', '@jinn-network/marketplace-testing', [
