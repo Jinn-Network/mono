@@ -51,7 +51,7 @@ import {
 import {
   loadHeldOutSlate,
   type LoadedHeldOutSlate,
-} from '@jinn-network/sdk/solvernets/swe-rebench-v2-held-out-slate';
+} from '@jinn-network/benchmarking-records/slates/swe-rebench-v2-held-out';
 import {
   computeActiveOperators,
   computeActiveWindow,

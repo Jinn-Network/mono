@@ -31,11 +31,23 @@ jobs:
 
       - run: corepack enable
 
-      # The indexer depends on @jinn-network/sdk via `portal:../sdk`, whose
-      # exports map points at compiled dist/*.js. dist/ is gitignored, so the
-      # SDK must be built before any indexer step resolves it.
-      - name: Build @jinn-network/sdk
-        working-directory: packages/sdk
+      - name: Indexer boundary guard
+        working-directory: ${{ github.workspace }}
+        run: node --test .github/scripts/indexer-boundaries.test.mjs
+
+      # The indexer depends on @jinn-network/benchmarking-records via
+      # `portal:../benchmarking/records`, whose exports map points at
+      # compiled dist/*.js. dist/ is gitignored, so benchmarking-records
+      # must be built before any indexer step resolves it. records itself
+      # depends on task-execution-protocol via portal, so that cross-tree
+      # dependency must be built first too (§7.8 precedent, see
+      # benchmarking-ci.yml's `records` job).
+      - name: Build cross-tree portal dependency from source (task-execution-protocol, §7.8)
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+
+      - name: Build @jinn-network/benchmarking-records
+        working-directory: packages/benchmarking/records
         run: |
           yarn install --immutable
           yarn build
