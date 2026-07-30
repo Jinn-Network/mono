@@ -41,14 +41,14 @@ describe("venue state database", () => {
     } finally { second.close(); }
   });
 
-  test("declares all six tables plus metadata", () => {
+  test("declares all eight tables plus metadata", () => {
     const state = openVenueState(path);
     try {
       const names = (state.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as
         { name: string }[]).map((row) => row.name).filter((name) => !name.startsWith("sqlite_")).sort();
       expect(names).toEqual([
-        "broadcast_locks", "cancel_signals", "log_cursors", "orphaned_blocks",
-        "posting_intents", "tx_submissions", "venue_state_metadata",
+        "attempt_deliveries", "broadcast_locks", "cancel_signals", "log_cursors", "orphaned_blocks",
+        "posting_intents", "submission_scopes", "tx_submissions", "venue_state_metadata",
       ]);
     } finally { state.close(); }
   });

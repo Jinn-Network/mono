@@ -77,3 +77,4 @@ export {
   createOnChainPostingScan,
   drainPostingIntents,
 } from "./intents/drain.js";
+export { createProjectorObservePort } from "./observe/projector-observe.js";

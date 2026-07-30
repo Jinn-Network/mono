@@ -4,8 +4,11 @@
 // orphaned-block set the projector's correction path reads, the transactional posting-intent
 // outbox and the cross-process broadcast lock. See `docs/superpowers/plans/2026-07-30-marketplace-venue-base.md`
 // Task 6 for the design rationale behind each table. Task 13 adds `cancel_signals` (schema
-// version 2): the durable, idempotent requester cancellation signal.
-export const VENUE_STATE_SCHEMA_VERSION = 2 as const;
+// version 2): the durable, idempotent requester cancellation signal. Task 16 adds
+// `submission_scopes` and `attempt_deliveries` (schema version 3): the durable half of the
+// projector-backed `MarketplaceObservePort` -- linearizable requester-scope ownership and
+// recorded Delivery bytes.
+export const VENUE_STATE_SCHEMA_VERSION = 3 as const;
 
 export const SCHEMA_SQL = `
 CREATE TABLE venue_state_metadata (
@@ -104,5 +107,31 @@ CREATE TABLE broadcast_locks (
   acquired_at_ms INTEGER NOT NULL,
   expires_at_ms INTEGER NOT NULL,
   PRIMARY KEY (chain_id, sender)
+);
+
+-- Linearizable requester-scope ownership (TEP §12.2 idempotent resubmission). Matching is by
+-- EXACT Submission bytes, never by field equality: \`submission_bytes\` is the identity.
+CREATE TABLE submission_scopes (
+  requester TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  submission_uri TEXT NOT NULL,
+  digest TEXT NOT NULL,
+  submission_bytes BLOB NOT NULL,
+  owner_token TEXT NOT NULL,
+  resolved_at_ms INTEGER,
+  resolved_task_id TEXT,
+  resolved_tx_hash TEXT,
+  engagement_attempt TEXT,
+  dispatch_context_json TEXT,
+  PRIMARY KEY (requester, idempotency_key)
+);
+
+-- Recorded Delivery bytes per Attempt, addressed by their own sha256 digest.
+CREATE TABLE attempt_deliveries (
+  attempt TEXT NOT NULL,
+  digest TEXT NOT NULL,
+  delivery_bytes BLOB NOT NULL,
+  recorded_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (attempt, digest)
 );
 `;
