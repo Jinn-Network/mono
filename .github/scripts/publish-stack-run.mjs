@@ -146,8 +146,23 @@ export async function publishWave(artifacts, options) {
   }
 }
 
+export function verifyCoherentSet(artifacts, options) {
+  const { distTag, version, exec = defaultExec, npmCommand = 'npm', repoRoot } = options;
+  const context = { exec, npmCommand, repoRoot };
+  for (const artifact of artifacts) {
+    const actual = registryIntegrity(artifact.spec, context);
+    if (actual === null) {
+      throw new Error(`partially-published platform set at ${version}: ${artifact.name} is missing from the registry`);
+    }
+    assertIntegrity(artifact, actual, 'final');
+    assertDistTag(artifact, registryDistTag(artifact.name, distTag, context), version, distTag, 'final');
+  }
+  console.log(`verified coherent platform set ${version} at ${distTag} across ${artifacts.length} packages`);
+}
+
 export async function runPublish(plan, args) {
   const tarballsDir = mkdtempSync(join(tmpdir(), 'jinn-stack-publish-'));
+  const allArtifacts = [];
   try {
     for (const [index, wave] of plan.waves.entries()) {
       const artifacts = await packWave(wave, {
@@ -159,7 +174,14 @@ export async function runPublish(plan, args) {
       });
       console.log(`wave ${index}: packed ${artifacts.length} packages`);
       await publishWave(artifacts, { distTag: plan.distTag, npmCommand: args.npmCommand, repoRoot: args.repoRoot });
+      allArtifacts.push(...artifacts);
     }
+    verifyCoherentSet(allArtifacts, {
+      distTag: plan.distTag,
+      version: plan.version,
+      npmCommand: args.npmCommand,
+      repoRoot: args.repoRoot,
+    });
   } finally {
     rmSync(tarballsDir, { recursive: true, force: true });
   }

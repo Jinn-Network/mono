@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { packWave, publishWave } from './publish-stack-run.mjs';
+import { packWave, publishWave, verifyCoherentSet } from './publish-stack-run.mjs';
 
 const SHA = 'c'.repeat(40);
 
@@ -219,5 +219,41 @@ test('publishWave rejects a dist-tag that did not move to this version', async (
       },
     }),
     /preflight latest mismatch for @jinn-network\/trust-core: expected 0\.1\.0, got 0\.0\.9/,
+  );
+});
+
+test('verifyCoherentSet passes when every package resolves at the published version', () => {
+  const artifacts = [
+    { name: '@jinn-network/trust-core', spec: '@jinn-network/trust-core@0.1.0', integrity: 'sha512-AAA' },
+    { name: '@jinn-network/trust-resolve', spec: '@jinn-network/trust-resolve@0.1.0', integrity: 'sha512-BBB' },
+  ];
+  const integrities = { '@jinn-network/trust-core@0.1.0': 'sha512-AAA', '@jinn-network/trust-resolve@0.1.0': 'sha512-BBB' };
+  verifyCoherentSet(artifacts, {
+    distTag: 'latest',
+    version: '0.1.0',
+    repoRoot: '/tmp',
+    exec: (command, args) => (args[2] === 'dist.integrity'
+      ? { status: 0, stdout: JSON.stringify(integrities[args[1]]), stderr: '' }
+      : { status: 0, stdout: '"0.1.0"', stderr: '' }),
+  });
+});
+
+test('verifyCoherentSet names the partially-published graph', () => {
+  const artifacts = [
+    { name: '@jinn-network/trust-core', spec: '@jinn-network/trust-core@0.1.0', integrity: 'sha512-AAA' },
+    { name: '@jinn-network/trust-resolve', spec: '@jinn-network/trust-resolve@0.1.0', integrity: 'sha512-BBB' },
+  ];
+  assert.throws(
+    () => verifyCoherentSet(artifacts, {
+      distTag: 'latest',
+      version: '0.1.0',
+      repoRoot: '/tmp',
+      exec: (command, args) => {
+        if (args[1] === '@jinn-network/trust-resolve@0.1.0') return { status: 1, stdout: '', stderr: 'npm error code E404' };
+        if (args[2] === 'dist.integrity') return { status: 0, stdout: '"sha512-AAA"', stderr: '' };
+        return { status: 0, stdout: '"0.1.0"', stderr: '' };
+      },
+    }),
+    /partially-published platform set at 0\.1\.0: @jinn-network\/trust-resolve is missing from the registry/,
   );
 });
