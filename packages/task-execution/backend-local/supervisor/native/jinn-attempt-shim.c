@@ -121,7 +121,10 @@ static void atomic_write(const char *path, const char *text) {
 
 static char *json_quote(const char *value) {
   size_t length = strlen(value), capacity = length * 6 + 3, offset = 0; char *out = malloc(capacity);
-  if (out == NULL) return NULL; out[offset++] = '"';
+  if (out == NULL) {
+    return NULL;
+  }
+  out[offset++] = '"';
   for (size_t index = 0; index < length; index++) {
     unsigned char byte = (unsigned char)value[index];
     if (byte == '"' || byte == '\\') { out[offset++] = '\\'; out[offset++] = (char)byte; }
@@ -151,8 +154,16 @@ static int compare_pid(const void *left, const void *right) { pid_t a = *(const 
 static pid_t process_parent(pid_t pid) {
   char path[64], stat_text[512], state = 0; long parent = 0, group = 0;
   snprintf(path, sizeof(path), "/proc/%ld/stat", (long)pid); int fd = open(path, O_RDONLY);
-  if (fd < 0) return -1; ssize_t count = read(fd, stat_text, sizeof(stat_text) - 1); close(fd);
-  if (count <= 0) return -1; stat_text[count] = 0; char *after_name = strrchr(stat_text, ')');
+  if (fd < 0) {
+    return -1;
+  }
+  ssize_t count = read(fd, stat_text, sizeof(stat_text) - 1);
+  close(fd);
+  if (count <= 0) {
+    return -1;
+  }
+  stat_text[count] = 0;
+  char *after_name = strrchr(stat_text, ')');
   if (after_name == NULL || sscanf(after_name + 2, "%c %ld %ld", &state, &parent, &group) != 3) return -1;
   return (pid_t)parent;
 }
@@ -217,7 +228,12 @@ static int read_cancellation(const spawn_spec *spec, uint32_t *grace, uint32_t *
   json_reader expected_reader = { .cursor = (const unsigned char *)spec->nonce, .end = (const unsigned char *)spec->nonce + strlen(spec->nonce) };
   if (valid && (json_read_string(&expected_reader, &expected_nonce) != 0 || expected_reader.cursor != expected_reader.end || requested_nonce.length != expected_nonce.length || memcmp(requested_nonce.bytes, expected_nonce.bytes, requested_nonce.length) != 0)) valid = 0;
   json_bytes_clear(&requested_nonce); json_bytes_clear(&expected_nonce); free(json);
-  if (!valid) return 0; *grace = parsed_grace; *ceiling = parsed_ceiling; return 1;
+  if (!valid) {
+    return 0;
+  }
+  *grace = parsed_grace;
+  *ceiling = parsed_ceiling;
+  return 1;
 }
 
 static void write_pid_result(const spawn_spec *spec, const char *name, const pid_list *pids) {

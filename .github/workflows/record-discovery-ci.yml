@@ -76,6 +76,12 @@ jobs:
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
+      - name: Build cross-tree portal dependency from source (trust-core, §7.8)
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+      - name: Install Record Discovery Protocol toolchain (packed-smoke dependency)
+        working-directory: packages/discovery/protocol
+        run: yarn install --immutable
       - name: Verify Record Discovery Testing kit
         working-directory: packages/discovery/testing
         run: |
@@ -93,7 +99,7 @@ jobs:
           retention-days: 1
 
   serve:
-    needs: [foundation]
+    needs: [foundation, testing]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -112,6 +118,14 @@ jobs:
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
+      - name: Restore Record Discovery Testing distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: record-discovery-testing-dist
+          path: packages/discovery/testing/dist
+      - name: Install Record Discovery Testing toolchain (packed-smoke dependency)
+        working-directory: packages/discovery/testing
+        run: yarn install --immutable
       - name: Verify Record Discovery Serve
         working-directory: packages/discovery/serve
         run: |
@@ -129,7 +143,7 @@ jobs:
           retention-days: 1
 
   client:
-    needs: [foundation]
+    needs: [foundation, testing]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -148,6 +162,14 @@ jobs:
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
+      - name: Restore Record Discovery Testing distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: record-discovery-testing-dist
+          path: packages/discovery/testing/dist
+      - name: Install Record Discovery Testing toolchain (packed-smoke dependency)
+        working-directory: packages/discovery/testing
+        run: yarn install --immutable
       - name: Verify Record Discovery Client
         working-directory: packages/discovery/client
         run: |
@@ -176,8 +198,9 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
-      - name: Build cross-tree portal dependencies from source (evidence-protocol, evidence-repository, evidence-discovery, §7.8)
+      - name: Build cross-tree portal dependencies from source (evidence-protocol, evidence-repository, evidence-discovery, trust-core, §7.8)
         run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
@@ -186,6 +209,9 @@ jobs:
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
+      - name: Install Record Discovery Protocol toolchain (packed-smoke dependency)
+        working-directory: packages/discovery/protocol
+        run: yarn install --immutable
       - name: Verify Record Discovery Facts (Evidence)
         working-directory: packages/discovery/facts/evidence
         run: |
@@ -222,6 +248,9 @@ jobs:
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
+      - name: Install Record Discovery Protocol toolchain (packed-smoke dependency)
+        working-directory: packages/discovery/protocol
+        run: yarn install --immutable
       - name: Verify Record Discovery Facts (Trust)
         working-directory: packages/discovery/facts/trust
         run: |
@@ -250,8 +279,9 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
-      - name: Build cross-tree portal dependencies from source (task-execution-protocol, task-execution-profiles, §7.8)
+      - name: Build cross-tree portal dependencies from source (trust-core, task-execution-protocol, task-execution-profiles, §7.8)
         run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
       - name: Restore Record Discovery Protocol distribution
@@ -259,6 +289,9 @@ jobs:
         with:
           name: record-discovery-protocol-dist
           path: packages/discovery/protocol/dist
+      - name: Install Record Discovery Protocol toolchain (packed-smoke dependency)
+        working-directory: packages/discovery/protocol
+        run: yarn install --immutable
       - name: Verify Record Discovery Facts (Task Execution)
         working-directory: packages/discovery/facts/task-execution
         run: |

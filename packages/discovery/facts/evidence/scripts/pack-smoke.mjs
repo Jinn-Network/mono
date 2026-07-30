@@ -36,13 +36,18 @@ function run(command, args, options = {}) {
   });
 }
 
+async function packPortal(root, out) {
+  await run("corepack", ["yarn@4.13.0", "install", "--immutable"], { cwd: root });
+  await run("corepack", ["yarn@4.13.0", "pack", "--out", out], { cwd: root });
+}
+
 try {
-  await run("yarn", ["pack", "--out", trustCoreArchive], { cwd: trustCoreRoot });
-  await run("yarn", ["pack", "--out", protocolArchive], { cwd: protocolRoot });
-  await run("yarn", ["pack", "--out", evidenceProtocolArchive], { cwd: evidenceProtocolRoot });
-  await run("yarn", ["pack", "--out", evidenceRepositoryArchive], { cwd: evidenceRepositoryRoot });
-  await run("yarn", ["pack", "--out", evidenceDiscoveryArchive], { cwd: evidenceDiscoveryRoot });
-  await run("yarn", ["pack", "--out", archive], { cwd: packageRoot });
+  await packPortal(trustCoreRoot, trustCoreArchive);
+  await packPortal(protocolRoot, protocolArchive);
+  await packPortal(evidenceProtocolRoot, evidenceProtocolArchive);
+  await packPortal(evidenceRepositoryRoot, evidenceRepositoryArchive);
+  await packPortal(evidenceDiscoveryRoot, evidenceDiscoveryArchive);
+  await packPortal(packageRoot, archive);
 
   await mkdir(consumer);
   await writeFile(
