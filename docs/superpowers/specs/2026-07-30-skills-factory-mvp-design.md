@@ -237,9 +237,66 @@ Two consequences, both binding:
    `metadata` key asserting a benchmark; a frontmatter field is an assertion, not evidence. All
    credibility rests on the receipt being re-runnable — pinned slate, raw per-task results, and
    the rig in the same repo. Copy must present the field as a pointer, never as proof. Closing
-   that gap with independently anchored evidence is post-MVP (§6, v1.0 territory).
+   that gap with independently anchored evidence is post-MVP (§7, v1.0 territory).
 
-## 6. Explicitly cut (v1.0 territory, unchanged destination)
+## 6. Growth — the discovery trust barrier
+
+**The constraint** (raised by Oak, 2026-07-30): the registry is permissionless, but the *finding
+tools* are not neutral. Vercel's `find-skills` instructs the agent to filter candidates by
+
+- **install count** — prefer >1,000; treat <100 cautiously;
+- **publisher reputation** — prefer Vercel, Anthropic, Microsoft;
+- **repository stars** — treat <~100 skeptically.
+
+A new publisher fails all three on day one. Autonomous discovery does not bootstrap us; it
+rewards incumbency.
+
+**The reframe that makes it tractable:** those criteria are *prompt text in an open-source
+SKILL.md*, interpreted by the user's own agent, which then presents options for a human to
+approve. They are not enforced code and there is no gate to pass — it is a persuasion surface,
+and the reader is an LLM that can weigh evidence against a prior. Four layers follow, cheapest
+first.
+
+**L1 — Human-first bootstrap, with the thresholds as explicit targets.** The criteria name their
+own numbers, and they are one-good-launch numbers. Wave 1's incumbent table is the asset that
+clears them: a measurement nobody has published, about tools with hundreds of thousands of
+installs. Graduation condition, written into the plan: *announcement → ≥100 stars and ≥1,000
+installs → we exit the "treat skeptically" band and become recommendable under their own
+heuristics.* The human audience is the mechanism that unlocks the agent channel, not a
+consolation.
+
+**L2 — Upstream the criterion itself.** Open a PR to `vercel-labs/skills` proposing a fourth
+quality criterion: *reproducible evidence of effect — does the skill link a benchmark receipt
+(pinned task list, raw per-task results, rerun script)?* Docs-sized change, good for the
+ecosystem independent of us (their own guidance already worries about skill quality and
+security), and aligned with Vercel's interest in the registry not becoming a lemon market. If it
+lands, every agent running `find-skills` starts asking for receipts, and we are the only
+publisher holding them. If it is declined, the PR is still visible positioning. This is the
+honest form of "inject ourselves into the metadata": improve the finder rather than game it.
+
+**L3 — Write the frontmatter and README for the inspecting agent.** `find-skills` tells the agent
+to open the repository and present details before recommending. That agent sees `jinn.receipt`,
+`jinn.receipt-sha256`, `jinn.forked-from` (§5.1) and a README whose first line is the measured
+claim. A low install count is a *caution* in their heuristics, not a veto — and "zero installs,
+but carries a reproducible benchmark against the 556k-install skill it forked" is exactly the
+evidence that lets a reasoning agent justify overriding an install-count prior to its human.
+
+**L4 — Distribution through upstream's trust.** The upstream PR of a winning diff (§4) doubles as
+the growth channel: if the original author merges, the improvement reaches their install base and
+the trust barrier becomes the distribution path. The receipt is what makes that merge case
+arguable, and the PR is visible to the repo's watchers either way. Our fork ships regardless;
+acceptance is upside, never a dependency.
+
+**Deferred (post-MVP): our own evidence-ranked finder.** A finder that ranks by receipt rather
+than install count is the natural endgame of the receipts business, and wave 1 makes it useful on
+day one because it can rank skills we measured but do not own. It has the same cold-start problem
+one level up — someone must install the finder — so it follows L1, never precedes it.
+
+**Ruled out: gaming the trust metrics.** No install farming, no star exchanges, no sockpuppet
+publishers. It is the exact behavior the product exists to displace, the telemetry belongs to
+Vercel, and for a company whose only asset is trustworthy measurement, being caught is terminal.
+
+## 7. Explicitly cut (v1.0 territory, unchanged destination)
 
 No marketplace, no on-chain anchoring, no corpus reads/writes, no Hub, no powered
 promotion-grade statistics, no multi-profile portability claims, no non-coding niches, no
@@ -247,7 +304,7 @@ continuous re-benchmarking, no skill pricing, no security-audit program. The MVP
 *order* (demand surface first), not the destination; the v1.0 design remains the scaling
 reference.
 
-## 7. Risks
+## 8. Risks
 
 1. **All-null wave 1** — still the launch content, arguably the best version of it; wave 2
    retargets to "first skill with any measured effect."
@@ -261,8 +318,12 @@ reference.
    on a Python-heavy SWE slate; screening decides, and "not measurable on this slate" is stated
    rather than faked.
 6. **Compute/disk** — big-disk host, disk-floor guard, per-wave budget caps.
+7. **Discovery cold start** — the finder's own heuristics filter out new publishers (§6). The
+   MVP's demand path is therefore human-first by design; if the L1 thresholds are not cleared
+   after launch, agent-channel discovery stays closed and the receipts must carry the product on
+   human distribution alone.
 
-## 8. Registry landscape sources (2026-07-30)
+## 9. Registry landscape sources (2026-07-30)
 
 - skills.sh — leaderboard, install telemetry, `find-skills`: https://www.skills.sh/docs,
   https://github.com/vercel-labs/skills
