@@ -194,9 +194,25 @@ function localeSensitiveUsesInFiles(sourceFiles) {
   }).sort();
 }
 
+// A module specifier is a file PATH, not a use of an ambient API: the
+// package barrel's `export * from "./fetch-transport.js"` names a file,
+// and no string in a `from` / `import()` / `require()` clause can ever be
+// a call. Blank those specifiers before the identifier scan so the ban
+// stays about code rather than about what a module is named. Everything
+// else stays in scope, comments deliberately included -- the scan is raw
+// text, and that conservatism is the point.
+const MODULE_SPECIFIER = new RegExp(
+  String.raw`(\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)(["'\x60])(?:[^"'\x60\\\n]|\\.)*?\2`,
+  'g',
+);
+
+function withoutModuleSpecifiers(source) {
+  return source.replace(MODULE_SPECIFIER, (_match, clause, quote) => `${clause}${quote}${quote}`);
+}
+
 function ambientNetworkUsesInFiles(sourceFiles) {
   return sourceFiles.flatMap((file) => {
-    const source = readFileSync(file, 'utf8');
+    const source = withoutModuleSpecifiers(readFileSync(file, 'utf8'));
     const identifiers = [...source.matchAll(ambientNetworkIdentifier)]
       .map((match) => `${relative(root, file)} -> ${match[0]}`);
     const globals = [...source.matchAll(ambientNetworkGlobal)]
