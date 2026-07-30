@@ -76,3 +76,5 @@ export type {
   LogSourceCursor,
   LogSourceScenarioChain,
 } from "./venue-log-source-conformance.js";
+export { anvilAvailable, describeForkVenueConformance, withForkVenue } from "./venue-fork.js";
+export type { ForkVenueDeployment, ForkVenueSubject } from "./venue-fork.js";
