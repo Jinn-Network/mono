@@ -31,3 +31,16 @@ export type {
   SafeBroadcastReceipt,
   SafeBroadcastRequest,
 } from "./broadcast/safe-broadcaster.js";
+export { createCursorStore } from "./log-source/cursor-store.js";
+export type { CursorStore } from "./log-source/cursor-store.js";
+export {
+  DEFAULT_FINALITY_DEPTH_FALLBACK,
+  DEFAULT_LOG_CHUNK_BLOCKS,
+  createChainLogSource,
+} from "./log-source/chain-log-source.js";
+export type {
+  ChainLogBatch,
+  ChainLogCursor,
+  ChainLogSource,
+  ChainLogSourceOptions,
+} from "./log-source/chain-log-source.js";
