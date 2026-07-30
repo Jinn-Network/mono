@@ -91,7 +91,10 @@ jobs:
       - uses: actions/checkout@v7
 
       # Build context is packages/ (not packages/indexer/) so the Dockerfile can
-      # COPY and build @jinn-network/sdk, the indexer's `portal:../sdk` sibling.
+      # COPY and build the portal targets task-execution/protocol and
+      # benchmarking/records (the indexer's `portal:../benchmarking/records`
+      # sibling, which itself depends on task-execution/protocol via
+      # `portal:../../task-execution/protocol`).
       - name: Build indexer image
         working-directory: packages
         run: |
