@@ -131,3 +131,23 @@ describe("createArchiveHttpHandler", () => {
     expect(response.status).toBe(404);
   });
 });
+
+describe("createArchiveHttpHandler tail routing", () => {
+  it("serves the SSE tail when a tail source is injected, and only under the mount", async () => {
+    const { createInMemoryTailSource } = await import("./tail.js");
+    const tail = createInMemoryTailSource(4);
+    const handler = createArchiveHttpHandler({
+      reader: readerOf({}),
+      basePath: "/v1/archive",
+      tail: tail.source,
+    });
+
+    const response = await handler(new Request("http://host/v1/archive/sources/feed/tail"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+    await response.body!.cancel();
+
+    expect((await handler(new Request("http://host/sources/feed/tail"))).status).toBe(404);
+    expect((await handler(new Request("http://host/v1/archive/sources/FEED/tail"))).status).toBe(404);
+  });
+});

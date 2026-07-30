@@ -4,6 +4,7 @@ import type { BlobReader } from "./ports.js";
 import type { ArchiveTailSource } from "./tail.js";
 import type { ArchiveRoute } from "./paths.js";
 import { parseArchivePath, stripBasePath } from "./paths.js";
+import { openArchiveTailStream } from "./sse.js";
 
 // The HTTP handler over `serve`'s static layout (spec §6.2), under the
 // §7.3 wire profile:
@@ -89,7 +90,7 @@ export function createArchiveHttpHandler(options: ArchiveHttpHandlerOptions): Ar
 
     if (route.kind === "tail") {
       if (options.tail === undefined) return notFound();
-      return openTailStream(request, route.sourceName, options.tail);
+      return openArchiveTailStream(request, route.sourceName, options.tail);
     }
 
     const object = await options.reader.get(route.path);
@@ -126,10 +127,4 @@ export function createArchiveHttpHandler(options: ArchiveHttpHandlerOptions): Ar
     headers.set("content-length", String(object.bytes.length));
     return new Response(request.method === "HEAD" ? null : new Uint8Array(object.bytes), { status: 200, headers });
   };
-}
-
-// Wired in Task 8; declared here so the tail branch above compiles and
-// so the "no tail source injected" behavior is fixed from this task on.
-function openTailStream(_request: Request, _sourceName: string, _tail: ArchiveTailSource): Response {
-  return notFound();
 }

@@ -8,3 +8,4 @@ export * from "./fs-blob-store.js";
 export * from "./paths.js";
 export * from "./tail.js";
 export * from "./handler.js";
+export * from "./sse.js";
