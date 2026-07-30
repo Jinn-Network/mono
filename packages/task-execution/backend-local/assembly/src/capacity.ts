@@ -3,7 +3,6 @@
 import {
   closeSync,
   existsSync,
-  fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -14,7 +13,10 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { TaskExecutionError } from "@jinn-network/task-execution-backend";
-import { readProcessStartTime } from "@jinn-network/task-execution-supervisor";
+import {
+  fsyncBestEffortSync,
+  readProcessStartTime,
+} from "@jinn-network/task-execution-supervisor";
 
 export type CapacityAcquireResult =
   | { readonly acquired: true }
@@ -112,7 +114,7 @@ function publishLock(lockPath: string, record: LockRecord): boolean {
   try {
     ownerFd = openSync(ownerPath, "wx", 0o600);
     writeFileSync(ownerFd, JSON.stringify(record));
-    fsyncSync(ownerFd);
+    fsyncBestEffortSync(ownerFd);
     closeSync(ownerFd);
     ownerFd = undefined;
     // The canonical lock appears only after its complete owner record is durable.

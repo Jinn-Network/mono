@@ -29,7 +29,10 @@ import {
   type MeasurementMap,
   type VerifiedEvaluationSpecification,
 } from "@jinn-network/task-execution-profiles";
-import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
+import {
+  fsyncBestEffort,
+  type AttemptIdentity,
+} from "@jinn-network/task-execution-supervisor";
 import type { WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import {
   EvaluationOperationalError,
@@ -622,21 +625,7 @@ async function atomicExclusiveWrite(
   const file = await open(temporary, "wx", 0o600);
   try {
     await file.writeFile(bytes);
-    try {
-      await file.sync();
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      const code =
-        typeof cause === "object" &&
-        cause !== null &&
-        "code" in cause &&
-        typeof (cause as { code: unknown }).code === "string"
-          ? (cause as { code: string }).code
-          : "";
-      if (code !== "ENOSYS" && message !== "Method not implemented.") {
-        throw cause;
-      }
-    }
+    await fsyncBestEffort(file);
   } finally {
     await file.close();
   }

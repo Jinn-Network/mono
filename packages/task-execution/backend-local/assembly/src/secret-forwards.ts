@@ -1,7 +1,10 @@
 import { constants } from "node:fs";
 import { lstat, mkdir, open } from "node:fs/promises";
 import { basename, join } from "node:path";
-import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
+import {
+  fsyncBestEffort,
+  type AttemptIdentity,
+} from "@jinn-network/task-execution-supervisor";
 
 export interface SecretForwardDeclaration {
   readonly grantKey: string;
@@ -79,7 +82,7 @@ export async function materializeSecretForwards(input: {
       );
       try {
         await file.writeFile(snapshot);
-        await file.sync();
+        await fsyncBestEffort(file);
       } finally {
         await file.close();
       }

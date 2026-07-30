@@ -4,7 +4,6 @@ import {
   constants,
   closeSync,
   existsSync,
-  fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -16,6 +15,7 @@ import {
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
+import { fsyncBestEffortSync } from "@jinn-network/task-execution-supervisor";
 import type {
   AttemptUri,
   BackendCapabilities,
@@ -437,14 +437,14 @@ function atomicWrite(path: string, bytes: Uint8Array): void {
   const fd = openSync(temporary, "wx", 0o600);
   try {
     writeFileSync(fd, bytes);
-    fsyncSync(fd);
+    fsyncBestEffortSync(fd);
   } finally {
     closeSync(fd);
   }
   renameSync(temporary, path);
   const directoryFd = openSync(directory, "r");
   try {
-    fsyncSync(directoryFd);
+    fsyncBestEffortSync(directoryFd);
   } finally {
     closeSync(directoryFd);
   }
