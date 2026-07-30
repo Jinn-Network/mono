@@ -3,8 +3,9 @@
 // The venue state schema: the persistent submission ledger, the dual-mark chain cursor, the
 // orphaned-block set the projector's correction path reads, the transactional posting-intent
 // outbox and the cross-process broadcast lock. See `docs/superpowers/plans/2026-07-30-marketplace-venue-base.md`
-// Task 6 for the design rationale behind each table.
-export const VENUE_STATE_SCHEMA_VERSION = 1 as const;
+// Task 6 for the design rationale behind each table. Task 13 adds `cancel_signals` (schema
+// version 2): the durable, idempotent requester cancellation signal.
+export const VENUE_STATE_SCHEMA_VERSION = 2 as const;
 
 export const SCHEMA_SQL = `
 CREATE TABLE venue_state_metadata (
@@ -82,6 +83,17 @@ CREATE TABLE posting_intents (
 CREATE INDEX posting_intents_pending
   ON posting_intents (created_at)
   WHERE resolved_tx_hash IS NULL;
+
+-- Requester cancellation is a durable, idempotent signal; it never revokes a live attempt.
+-- The row IS the signal: a restart or replay reads it back and returns \`already-requested\`
+-- without emitting a second one.
+CREATE TABLE cancel_signals (
+  attempt TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  attempt_index INTEGER NOT NULL CHECK (attempt_index >= 0),
+  reason TEXT NOT NULL,
+  requested_at_ms INTEGER NOT NULL
+);
 
 -- The cross-process broadcast lock. One row per sender EOA; a lease expires so a crashed holder
 -- never wedges the sender forever.

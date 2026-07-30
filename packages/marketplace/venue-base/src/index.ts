@@ -63,3 +63,5 @@ export {
   createSettlementPorts,
 } from "./writers/settlement.js";
 export type { SettlementWriterInput } from "./writers/settlement.js";
+export { createLifecyclePorts, createReleasePort } from "./writers/lifecycle.js";
+export type { LifecycleWriterInput } from "./writers/lifecycle.js";
