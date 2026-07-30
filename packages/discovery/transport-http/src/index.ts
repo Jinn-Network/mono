@@ -4,3 +4,4 @@
 // can only reach these names through this file.
 
 export * from "./ports.js";
+export * from "./fs-blob-store.js";
