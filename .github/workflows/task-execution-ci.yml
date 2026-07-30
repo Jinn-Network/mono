@@ -246,6 +246,8 @@ jobs:
         with:
           name: task-execution-supervisor-dist
           path: packages/task-execution/backend-local/supervisor/dist
+      - name: Restore executable bit on native custody binaries
+        run: chmod +x packages/task-execution/backend-local/supervisor/dist/native/jinn-attempt-shim*
       - name: Restore Task Execution Workspace distribution
         uses: actions/download-artifact@v4
         with:
@@ -301,6 +303,8 @@ jobs:
         with:
           name: task-execution-supervisor-dist
           path: packages/task-execution/backend-local/supervisor/dist
+      - name: Restore executable bit on native custody binaries
+        run: chmod +x packages/task-execution/backend-local/supervisor/dist/native/jinn-attempt-shim*
       - name: Restore Task Execution Workspace distribution
         uses: actions/download-artifact@v4
         with:
@@ -385,6 +389,8 @@ jobs:
         with:
           name: task-execution-supervisor-dist
           path: packages/task-execution/backend-local/supervisor/dist
+      - name: Restore executable bit on native custody binaries
+        run: chmod +x packages/task-execution/backend-local/supervisor/dist/native/jinn-attempt-shim*
       - name: Restore Task Execution Workspace distribution
         uses: actions/download-artifact@v4
         with:

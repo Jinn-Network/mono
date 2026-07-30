@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { accessSync, chmodSync, constants, existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { atomicWriteFileSync, readAtomicFileSync } from "./fs-atomic.js";
@@ -73,15 +73,37 @@ function nativeShimPath(): string {
   return existsSync(testing) ? testing : production;
 }
 
+/** Artifact restores (and some pack/extract paths) drop the executable bit; restore it before probing. */
+function ensureNativeBinaryExecutable(binary: string): void {
+  try {
+    accessSync(binary, constants.X_OK);
+  } catch {
+    try {
+      chmodSync(binary, 0o755);
+    } catch {
+      // Probe below fails closed if the binary remains non-executable.
+    }
+  }
+}
+
+function probeFailureDetail(result: ReturnType<typeof spawnSync>): string {
+  const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
+  if (stderr.length > 0) return stderr;
+  const message = result.error?.message?.trim();
+  if (message !== undefined && message.length > 0) return message;
+  return "PR_SET_CHILD_SUBREAPER probe failed";
+}
+
 /** Linux custody is mandatory: a missing/failed native probe is never silently downgraded. */
 export function nativeCustodySupport(): { readonly ready: boolean; readonly subreaper: boolean; readonly detail?: string } {
   if (process.platform !== "linux") return { ready: true, subreaper: false, detail: "macOS process-group residual" };
   const binary = nativeShimPath();
   if (!existsSync(binary)) return { ready: false, subreaper: false, detail: "Linux native custody binary is missing; run the package build" };
+  ensureNativeBinaryExecutable(binary);
   const result = spawnSync(binary, ["--probe"], { encoding: "utf8" });
-  if (result.status !== 0) return { ready: false, subreaper: false, detail: result.stderr.trim() || "PR_SET_CHILD_SUBREAPER probe failed" };
+  if (result.status !== 0) return { ready: false, subreaper: false, detail: probeFailureDetail(result) };
   try {
-    const parsed = JSON.parse(result.stdout) as { ready?: boolean; subreaper?: boolean };
+    const parsed = JSON.parse(result.stdout ?? "") as { ready?: boolean; subreaper?: boolean };
     const custody = establishSubreaperCustody({ enableSubreaper: () => parsed.ready === true && parsed.subreaper === true });
     return custody.subreaper
       ? { ready: true, subreaper: true }

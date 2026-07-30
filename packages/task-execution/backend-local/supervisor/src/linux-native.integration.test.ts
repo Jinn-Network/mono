@@ -37,6 +37,27 @@ describe.runIf(linux)("Linux native custody shim", () => {
     expect(support.subreaper).toBe(true);
   });
 
+  it("fails closed without throwing when the probe binary is non-executable garbage (artifact bit loss / ENOEXEC)", () => {
+    const root = mkdtempSync(join(tmpdir(), "jinn-linux-probe-"));
+    dirs.push(root);
+    const bogus = join(root, "not-a-shim");
+    writeFileSync(bogus, "");
+    const previous = process.env["JINN_NATIVE_CUSTODY_BINARY"];
+    process.env["JINN_NATIVE_CUSTODY_BINARY"] = bogus;
+    try {
+      let support: ReturnType<typeof nativeCustodySupport> | undefined;
+      expect(() => {
+        support = nativeCustodySupport();
+      }).not.toThrow();
+      expect(support?.ready).toBe(false);
+      expect(support?.subreaper).toBe(false);
+      expect(typeof support?.detail).toBe("string");
+    } finally {
+      if (previous === undefined) delete process.env["JINN_NATIVE_CUSTODY_BINARY"];
+      else process.env["JINN_NATIVE_CUSTODY_BINARY"] = previous;
+    }
+  });
+
   it("adopts an orphan and retains the exited leader until the stubborn group descendant is killed", async () => {
     const root = mkdtempSync(join(tmpdir(), "jinn-linux-native-"));
     dirs.push(root);
