@@ -71,3 +71,9 @@ export {
 export type { SettlementWriterInput } from "./writers/settlement.js";
 export { createLifecyclePorts, createReleasePort } from "./writers/lifecycle.js";
 export type { LifecycleWriterInput } from "./writers/lifecycle.js";
+export { createSqlitePostingIntentStore } from "./intents/intent-store.js";
+export {
+  DEFAULT_POSTING_SCAN_LOOKBACK_BLOCKS,
+  createOnChainPostingScan,
+  drainPostingIntents,
+} from "./intents/drain.js";
