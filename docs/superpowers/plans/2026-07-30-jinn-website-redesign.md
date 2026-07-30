@@ -18,7 +18,7 @@
 - **Copy rule 4 — no "proven", "guaranteed", "best".** It is a bet until a public gate says otherwise.
 - **`BRAND.md` non-negotiables:** no emoji anywhere; no gradients as decoration; plain words whenever money or consent is on the line; softened-brutalist corners only — `--radius-1` 4px, `--radius-2` 6px, `--radius-3` 10px, `--radius-pill` for status chips.
 - **"Show, don't narrate" (`CLAUDE.md` §Frontends):** no caption or subtitle whose only job is restating what the UI already shows. Prose is allowed only in empty/fallback states and as the section arguments this plan specifies verbatim.
-- **British spelling in user-facing website copy** matches the existing page (`lang="en-GB"`, "organisational"). Code identifiers stay American per Rule 5.
+- **American English spelling throughout, including user-facing copy** — `CLAUDE.md` Rule 5 covers user-facing copy explicitly and names `distill`, never `distil`. The current page already uses zero British spellings. Leave the existing `lang="en-GB"` attribute alone (locale tag, not spelling; changing it is out of scope per Rule 3).
 - **Indexer endpoint (verified live 2026-07-30):** `GET https://jinn-indexer-production.up.railway.app/explorer/network` returns JSON, responds `200`, and sends `access-control-allow-origin: *` (cross-origin fetch from jinn.network works).
 - **Explorer routes (verified):** `https://explorer.jinn.network/`, `/solvernets`, `/operators`, `/corpus`.
 - **Never deploy.** `vercel deploy --prod` publishes to jinn.network and is a human-gated step (Task 10). Do not run it.
@@ -435,7 +435,7 @@ Replace the entire `<section class="section signal">…</section>` block with:
         </div>
         <div class="roles__card">
           <h3>Build on the work records</h3>
-          <p>Every job leaves a public trace: what was asked, what the agent did, what it produced, and how it was judged. Use those records to benchmark models, score performers, train agents, or distil skills.</p>
+          <p>Every job leaves a public trace: what was asked, what the agent did, what it produced, and how it was judged. Use those records to benchmark models, score performers, train agents, or distill skills.</p>
           <p class="roles__eg">Benchmarks · reputation · datasets · fine-tuning · agent memory</p>
           <a class="roles__action" href="https://explorer.jinn.network">Browse the records →</a>
         </div>
@@ -443,8 +443,6 @@ Replace the entire `<section class="section signal">…</section>` block with:
     </div>
   </section>
 ```
-
-Note `distil` in user-facing British copy on this page is spelled **distil**, matching `lang="en-GB"` — this is website copy, not a code identifier, so Rule 5's American-English requirement for identifiers does not apply. If a reviewer objects, `distill` is also acceptable; do not spend a cycle on it.
 
 - [ ] **Step 3: Verify**
 
