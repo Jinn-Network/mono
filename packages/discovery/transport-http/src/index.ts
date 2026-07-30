@@ -5,3 +5,4 @@
 
 export * from "./ports.js";
 export * from "./fs-blob-store.js";
+export * from "./paths.js";
