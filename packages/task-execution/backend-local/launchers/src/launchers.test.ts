@@ -37,4 +37,16 @@ describe("v1 launchers", () => {
     expect(interpretResult(plan, { exitCode: 0 }, { subtype: "error_max_turns" })).toMatchObject({ state: "delivered", outcome: "partial", recoveryAdvice: "resume-with-session" });
     expect(interpretResult(plan, { exitCode: 0 }).outcome).toBe("fulfilled");
   });
+
+  it("does not treat an unspecified blame-rule signal as matching every exit", () => {
+    const plan = {
+      validExitCodes: [0],
+      blameExitCodes: [
+        { match: { exitCode: 65 }, blame: "task", reasonCode: "invalid-evaluation-input" },
+        { match: { signal: "SIGKILL" }, blame: "infrastructure", reasonCode: "killed" },
+      ],
+    };
+    expect(interpretResult(plan, { exitCode: 1 }).reasonCode).toBe("invalid-exit");
+    expect(interpretResult(plan, { signal: "SIGKILL" }).reasonCode).toBe("killed");
+  });
 });

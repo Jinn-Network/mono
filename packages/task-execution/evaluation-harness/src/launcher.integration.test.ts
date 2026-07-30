@@ -612,6 +612,9 @@ describe("evaluationLauncher", () => {
       JINN_ATTEMPT_SECRETS: paths.secrets,
       JINN_ATTEMPT_META: paths.meta,
       TMPDIR: paths.tmp,
+      ...(process.env["NODE_OPTIONS"] === undefined || process.env["NODE_OPTIONS"]!.length === 0
+        ? {}
+        : { NODE_OPTIONS: process.env["NODE_OPTIONS"]! }),
     });
     expect(first.secretForwards).toEqual([
       { grantKey: "evaluator-agent-key.pem", target: "evaluator-agent-key.pem" },
