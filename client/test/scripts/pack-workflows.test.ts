@@ -25,7 +25,7 @@ function workflowStep(path: string, name: string): string {
 }
 
 describe('packed client workflow coverage', () => {
-  it('publishes client 0.2.2 with SDK 0.1.1 and wires the combined external consumer gate', () => {
+  it('publishes client 0.2.2 with SDK 0.2.0 and wires the combined external consumer gate', () => {
     const packageJson = JSON.parse(workflow('client/package.json')) as {
       version: string;
       scripts: Record<string, string>;
@@ -35,7 +35,7 @@ describe('packed client workflow coverage', () => {
     };
 
     expect(packageJson.version).toBe('0.2.2');
-    expect(sdkPackageJson.version).toBe('0.1.1');
+    expect(sdkPackageJson.version).toBe('0.2.0');
     expect(packageJson.scripts['consumer:acceptance']).toBe(
       'node scripts/external-consumer-acceptance.mjs',
     );
@@ -129,7 +129,7 @@ describe('packed client workflow coverage', () => {
     expect(clientPublish).toContain("github.event.workflow_run.event == 'push'");
     expect(clientPublish).toContain("github.event.workflow_run.conclusion == 'success'");
     expect(clientPublish).toContain('github.event.workflow_run.head_sha');
-    expect(clientPublish).toContain('@jinn-network/sdk@0.1.1-canary.sha.${JINN_BUILD_COMMIT}');
+    expect(clientPublish).toContain('@jinn-network/sdk@${SDK_PACKAGE_VERSION}-canary.sha.${JINN_BUILD_COMMIT}');
     expect(clientPublish).toContain('${PACKAGE_VERSION}-canary.sha.${JINN_BUILD_COMMIT}');
     expect(clientPublish).toContain('npm view "${PACKAGE_SPEC}" gitHead');
     expect(clientPublish).toContain('steps.existing.outputs.published');
@@ -229,13 +229,13 @@ describe('packed client workflow coverage', () => {
     expect(pack).toBeGreaterThan(builtLayouts);
   });
 
-  it('preserves stable release/manual entry points and requires SDK 0.1.1', () => {
+  it('preserves stable release/manual entry points and requires the manifest-derived SDK version', () => {
     const clientPublish = workflow('.github/workflows/npm-publish.yml');
     const sdkPublish = workflow('.github/workflows/sdk-npm-publish.yml');
 
     expect(clientPublish).toContain('release:');
     expect(clientPublish).toContain('workflow_dispatch:');
     expect(sdkPublish).toContain('release:');
-    expect(clientPublish).toContain('npm view @jinn-network/sdk@0.1.1 version');
+    expect(clientPublish).toContain('npm view "@jinn-network/sdk@${EXPECTED_SDK}" version');
   });
 });

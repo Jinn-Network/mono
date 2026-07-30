@@ -505,6 +505,12 @@ test('npm-publish.yml carries no hard-coded @jinn-network/sdk version literal', 
   // every client canary the moment the sdk version bumps.
   const pinned = publish.match(/@jinn-network\/sdk@\d+\.\d+\.\d+/g) ?? [];
   assert.deepEqual(pinned, [], `hard-coded sdk version literals: ${pinned.join(', ')}`);
-  const versionAssignments = publish.match(/sdk\.version\s*=\s*'\d+\.\d+\.\d+/g) ?? [];
+  const versionAssignments = publish.match(/sdk\.version\s*=\s*['"`]\d+\.\d+\.\d+/g) ?? [];
   assert.deepEqual(versionAssignments, [], 'sdk.version must derive from the manifest, not a literal');
+
+  // Positive companion: the negative assertions above must not pass simply
+  // because the derivation itself was deleted. Require the manifest read and
+  // its output wiring to still be present.
+  assert.match(publish, /packages\/sdk\/package\.json/, 'sdk version must be read from packages/sdk/package.json');
+  assert.match(publish, /sdk_version=/, 'sdk_version must be exposed as a step output');
 });
