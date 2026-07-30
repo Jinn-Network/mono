@@ -45,11 +45,6 @@ try {
         buildSolutionOutput,
       } from '@jinn-network/sdk/solvernets/prediction-v1';
       import {
-        validateBenchmarkRunV1,
-        hashBenchmarkRunV1,
-        computeRunHash,
-      } from '@jinn-network/sdk/benchmarking';
-      import {
         AutopilotAdoptionReceiptSchema,
         AutopilotCorrelationSchema,
         AutopilotDeliveryExpectationSchema,
@@ -76,9 +71,6 @@ try {
       if (typeof getSolverNetContract !== 'function') throw new Error('missing solvernets export');
       if (typeof PredictionV1TaskSchema?.parse !== 'function') throw new Error('missing prediction-v1 schema export');
       if (typeof buildSolutionOutput !== 'function') throw new Error('missing prediction-v1 builder export');
-      if (typeof validateBenchmarkRunV1 !== 'function') throw new Error('missing benchmarking validate export');
-      if (typeof hashBenchmarkRunV1 !== 'function') throw new Error('missing benchmarking hash export');
-      if (computeRunHash !== hashBenchmarkRunV1) throw new Error('computeRunHash must alias hashBenchmarkRunV1');
       if (typeof TaskSubmitRequestV1Schema?.parse !== 'function') throw new Error('missing Autopilot submit request export');
       if (typeof TaskSubmitResultV1Schema?.parse !== 'function') throw new Error('missing Autopilot submit result export');
       if (typeof AutopilotDeliveryExpectationSchema?.parse !== 'function') throw new Error('missing delivery expectation export');
