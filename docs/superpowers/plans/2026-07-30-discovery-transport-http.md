@@ -3874,3 +3874,93 @@ carries the dated refinement); F3 (replay-window field typed here, promotion int
 a follow-up); F4 (producer-side ping only); F5 (optional `ArchiveTailSource`, 404 absent).
 The dual `serve`+`client` production dependency is accepted with the inventory-guard
 justification comment.
+
+## Execution findings (2026-07-30)
+
+Recorded during execution of Tasks 1–15. F1–F5 above were ratified before execution and are
+not restated; everything here surfaced *while* building, and each names its disposition.
+Nothing was silently deviated from.
+
+**E1 — Task order: 7 before 6.** Task 6's `handler.ts` imports `ArchiveTailSource` from
+`./tail.js`, which Task 7 creates. Task 6's own parenthetical says "do Task 7 first if
+executing out of order," so Tasks 7 and 6 were executed in that order. *Disposition:* followed
+the plan's own instruction; the numbering is the only thing out of step.
+
+**E2 — the ambient-network guard flagged a module specifier, not a use.** The barrel's
+required `export * from "./fetch-transport.js"` matched the F1 ban on the *filename*. An
+executor first attempted to hide the string with unicode escapes; that was correctly refused
+and reverted — obfuscating source text to pass a compliance scanner is never an acceptable
+resolution. *Disposition:* narrowed the guard so specifier strings in `from` / `import()` /
+`require()` clauses are blanked before the identifier scan (commit `f0330c066`). Verified the
+ban still bites: a real `fetch(` and a real `new WebSocket(` in a non-allowlisted file each
+still fail, while `./evil-fetch-helper.js` as a specifier does not.
+
+**E3 — the guard scans raw text, comments included.** Plan-supplied comments containing the
+bare words `fetch` (Task 6) and `WebSocket` / `EventSource` (Task 8) tripped the ban in
+non-allowlisted files. *Disposition:* reworded the comments, meaning preserved. The
+conservatism is correct and deliberately left in place; note it when writing prose in
+`handler.ts` or `sse.ts`.
+
+**E4 — `coldSyncHint` keyed off the wrong cursor.** Task 8's literal implementation derived
+the cold-sync archive page from `tail.window().oldestCursor` (the relay's current buffer
+floor). Keying off the relay floor opens a gap between the consumer's last-seen entry and
+where it is told to restart. *Disposition:* it now echoes the consumer's own requested cursor,
+which is what the plan's own test asserts and what the §9.3 no-silent-gap rule requires.
+
+**E5 — plan-literal code did not typecheck.** `new Response(bytes)` where `bytes` is
+`Uint8Array<ArrayBufferLike>` is rejected as `BodyInit` under TS 5.9 with this repo's lib
+config. *Disposition:* wrapped the affected sites in `new Uint8Array(...)`, the pattern already
+used elsewhere in the repo. Behavior-neutral.
+
+**E6 — Task 4's atomicity test contradicted Task 4's implementation.** The test asserted the
+entries directory contains exactly the page file, but the implementation writes a
+`<path>.content-type` sidecar beside every object (intentionally — Task 5's grammar makes
+sidecars unreachable over HTTP). *Disposition:* the assertion now expects both names, which
+still fails if a `.tmp-*` file survives, so the atomicity property it exists to prove is
+intact.
+
+**E7 — the packed-types canary needs the whole discovery tree built.** It compiles a consumer
+against all ten packages, not just the four this tree types against, so verifying Task 3
+locally required building `facts/*`, `sources/evidence-journal` and their dependency chains.
+CI's job graph already handles this; only local runs are affected.
+
+**E8 — stated test counts are unreliable.** Several tasks' "Expected: N passed" lines are off
+by one against the literal test bodies the same task specifies (Task 5: 8 not 7; Task 8: 8 not
+9, and 21 not 22; Task 14's `Last-Event-ID` grep yields 1, not 2, because the prescribed
+addendum text names it once). *Disposition:* the real counts were reported and no content was
+invented to reach a stated number.
+
+**E9 — Task 13's integration tests passed on first run.** The plan expected fixture-wiring
+failures. Tasks 1–12 had wired everything correctly, so no production change was needed and
+none was made.
+
+### Robustness findings against untrusted remotes
+
+Both client transports pull from hosts the operator does not control. Four gaps were found by
+adversarial probing; two were fixed, two are referred to review.
+
+**E10 — unbounded read in `createHttpTransport` (FIXED, commit `9efaf3507`).** `maxBytes` was
+enforced only after `arrayBuffer()` had already buffered the whole body, so a source that
+omits `content-length` and never stops sending got an unbounded allocation. The ceiling now
+holds *during* the read. Enforcing a ceiling the plan already declares is faithful to it, so
+this was fixed rather than referred.
+
+**E11 — unbounded frame buffer in `createSseStreamTransport` (FIXED, same commit).** An
+endless `data:` line with no blank-line terminator grew the pending buffer forever. Added a
+1 MiB per-frame ceiling that closes the stream as terminal rather than reconnecting into the
+same relay. Both regression tests *hang* rather than fail when the fix is reverted, which
+states the vulnerability precisely.
+
+**E12 — cross-origin redirects are followed unchecked (REFERRED, not fixed).** Neither client
+transport inspects `response.url` or sets `redirect: "manual"`, so a 3xx to another origin is
+followed transparently; `client`'s `checkLocator` validates only the *original* locator's
+host. This is not fixable inside this package as specified — the `FetchLike` port's init type
+carries only `method` / `headers` / `body` / `signal`, with no redirect control — so closing
+it means widening the port, which is a design decision for the composition spec.
+
+**E13 — the SSE client parses LF framing only (REFERRED, not fixed).** Frames are split on
+`\n\n`; a relay emitting CRLF (which the SSE standard permits, and which some proxies and
+CDNs produce) is never parsed, and with E11's ceiling now in place such a stream closes as
+overflow rather than hanging. The normative producer here (`sse.ts`) emits LF, so the profile
+is self-consistent; generalizing the parser is an interop decision, and normalizing across
+chunk boundaries needs care with a split `\r` `\n` pair.
