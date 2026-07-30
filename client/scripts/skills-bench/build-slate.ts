@@ -13,6 +13,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { splitSlate, type SlateCandidate } from '../../src/skills-bench/slate.js';
 import {
@@ -79,7 +80,7 @@ function rankKey(seed: string, id: string): string {
  * this both dedupes and produces the seed-ranked ordering the CLI takes its
  * first `poolSize` candidates from in one pass.
  */
-function selectCandidates(pool: PoolTask[], seed: string, poolSize: number): SlateCandidate[] {
+export function selectCandidates(pool: PoolTask[], seed: string, poolSize: number): SlateCandidate[] {
   const excluded = loadActiveHeldOutSlateIds(SOLVER_TYPE, ACTIVE_HELD_OUT_SLATE_VERSIONS);
   const eligible = pool.filter((task) => !excluded.has(task.instance_id) && task.repo);
   const ranked = [...eligible].sort((a, b) =>
@@ -117,7 +118,10 @@ async function main(): Promise<void> {
   console.log(`wrote ${args.out}`);
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
+if (isMain) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}

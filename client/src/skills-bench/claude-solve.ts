@@ -16,7 +16,8 @@ export function buildClaudeArgs(opts: { prompt: string; model: string; maxTurns:
     '--output-format', 'json',
     '--model', opts.model,
     '--max-turns', String(opts.maxTurns),
-    '--dangerously-skip-permissions',
+    '--setting-sources', 'project',
+    '--permission-mode', 'bypassPermissions',
   ];
 }
 
@@ -47,17 +48,38 @@ export async function prepareBenchConfigDir(
   }
 }
 
+function toResult(o: Record<string, unknown>, raw: string): ClaudeRunResult {
+  return {
+    costUsd: typeof o.total_cost_usd === 'number' ? o.total_cost_usd : 0,
+    numTurns: typeof o.num_turns === 'number' ? o.num_turns : null,
+    isError: o.is_error === true,
+    sessionId: typeof o.session_id === 'string' ? o.session_id : null,
+    raw,
+  };
+}
+
+/** Tolerant of pretty-printed/multi-line JSON and a plain-text preamble
+ *  before the JSON object: whole-stdout parse first, then from the first
+ *  `{` to the end, then the original single-line scan. Only true garbage
+ *  falls through to isError: true. */
 export function parseClaudeJson(stdout: string): ClaudeRunResult {
+  const trimmed = stdout.trim();
+  try {
+    return toResult(JSON.parse(trimmed) as Record<string, unknown>, stdout);
+  } catch {
+    // fall through
+  }
+  const braceIndex = trimmed.indexOf('{');
+  if (braceIndex !== -1) {
+    try {
+      return toResult(JSON.parse(trimmed.slice(braceIndex)) as Record<string, unknown>, stdout);
+    } catch {
+      // fall through
+    }
+  }
   const line = stdout.split('\n').find((l) => l.trim().startsWith('{')) ?? '';
   try {
-    const o = JSON.parse(line) as Record<string, unknown>;
-    return {
-      costUsd: typeof o.total_cost_usd === 'number' ? o.total_cost_usd : 0,
-      numTurns: typeof o.num_turns === 'number' ? o.num_turns : null,
-      isError: o.is_error === true,
-      sessionId: typeof o.session_id === 'string' ? o.session_id : null,
-      raw: stdout,
-    };
+    return toResult(JSON.parse(line) as Record<string, unknown>, stdout);
   } catch {
     return { costUsd: 0, numTurns: null, isError: true, sessionId: null, raw: stdout };
   }

@@ -61,6 +61,13 @@ export async function pinSkill(opts: PinSkillOptions): Promise<SkillPin> {
   try {
     await exec('git', ['clone', '-q', opts.source, cloneDir]);
     await exec('git', ['-C', cloneDir, 'checkout', '-q', opts.commit]);
+    const { stdout: resolvedShaOut } = await exec('git', ['-C', cloneDir, 'rev-parse', 'HEAD']);
+    const resolvedSha = resolvedShaOut.trim();
+    if (/^[0-9a-f]{40}$/i.test(opts.commit) && resolvedSha !== opts.commit) {
+      throw new Error(
+        `pinned commit ${opts.commit} resolved to a different sha ${resolvedSha} at ${opts.source}`,
+      );
+    }
     const src = join(cloneDir, opts.skillPath);
     if (!existsSync(join(src, 'SKILL.md'))) {
       throw new Error(`no SKILL.md at ${opts.skillPath} in ${opts.source}@${opts.commit}`);
@@ -73,7 +80,7 @@ export async function pinSkill(opts: PinSkillOptions): Promise<SkillPin> {
     const pin: SkillPin = {
       name: opts.name,
       source: opts.source,
-      commit: opts.commit,
+      commit: resolvedSha,
       skillPath: opts.skillPath,
       sha256: await hashDir(dest),
       license: parseFrontmatterLicense(skillMd),

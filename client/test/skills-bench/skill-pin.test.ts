@@ -51,4 +51,22 @@ describe('pinSkill', () => {
       pinSkill({ name: 'nope', source: repoDir, commit, skillPath: 'skills/nope', destRoot }),
     ).rejects.toThrow(/skills\/nope/);
   });
+
+  it('resolves a branch name to its 40-hex commit sha rather than recording the branch name', async () => {
+    const { repoDir, commit } = await makeFixtureRepo();
+    const { stdout } = await exec('git', ['-C', repoDir, 'branch', '--show-current'], {});
+    const branch = stdout.trim();
+    expect(branch).not.toBe(''); // sanity: fixture repo must be on a named branch
+    const destRoot = await mkdtemp(join(tmpdir(), 'pins-'));
+    const pin = await pinSkill({
+      name: 'tdd',
+      source: repoDir,
+      commit: branch,
+      skillPath: 'skills/tdd',
+      destRoot,
+    });
+    expect(pin.commit).toBe(commit);
+    expect(pin.commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(pin.commit).not.toBe(branch);
+  });
 });

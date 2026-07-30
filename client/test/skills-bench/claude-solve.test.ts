@@ -8,14 +8,15 @@ import {
 } from '../../src/skills-bench/claude-solve.js';
 
 describe('buildClaudeArgs', () => {
-  it('pins model, print mode, JSON output, max turns, and skips permissions', () => {
+  it('pins model, print mode, JSON output, max turns, project settings, and bypass permission mode', () => {
     const args = buildClaudeArgs({ prompt: 'fix it', model: 'claude-sonnet-5', maxTurns: 40 });
     expect(args).toEqual([
       '-p', 'fix it',
       '--output-format', 'json',
       '--model', 'claude-sonnet-5',
       '--max-turns', '40',
-      '--dangerously-skip-permissions',
+      '--setting-sources', 'project',
+      '--permission-mode', 'bypassPermissions',
     ]);
   });
 });
@@ -68,5 +69,24 @@ describe('parseClaudeJson', () => {
   it('is tolerant of missing cost (costUsd 0) and non-JSON (isError true)', () => {
     expect(parseClaudeJson('{"type":"result","is_error":false}').costUsd).toBe(0);
     expect(parseClaudeJson('garbage').isError).toBe(true);
+  });
+
+  it('parses pretty-printed JSON spanning multiple lines', () => {
+    const pretty = JSON.stringify({
+      type: 'result', subtype: 'success', is_error: false, num_turns: 3,
+      session_id: 'sess-2', total_cost_usd: 0.07, result: 'done',
+    }, null, 2);
+    expect(parseClaudeJson(pretty)).toMatchObject({
+      costUsd: 0.07, numTurns: 3, isError: false, sessionId: 'sess-2',
+    });
+  });
+
+  it('parses JSON preceded by a plain-text preamble line', () => {
+    const withPreamble = `Loading model...\n${JSON.stringify({
+      type: 'result', is_error: false, num_turns: 5, session_id: 'sess-3', total_cost_usd: 0.2,
+    })}`;
+    expect(parseClaudeJson(withPreamble)).toMatchObject({
+      costUsd: 0.2, numTurns: 5, isError: false, sessionId: 'sess-3',
+    });
   });
 });
