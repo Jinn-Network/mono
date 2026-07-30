@@ -1,10 +1,13 @@
 # @jinn-network/indexer — production OCI image.
 #
 # Build context is the monorepo `packages/` directory (NOT packages/indexer/),
-# because the indexer depends on @jinn-network/sdk via `portal:../sdk`, which
-# resolves to a sibling directory outside packages/indexer/. The SDK's exports
-# map points at compiled dist/*.js, and dist/ is gitignored, so the SDK is built
-# inside this image before the indexer install resolves the portal symlink.
+# because the indexer depends on @jinn-network/benchmarking-records via
+# `portal:../benchmarking/records`, which resolves to a sibling directory
+# outside packages/indexer/ (records itself depends on
+# @jinn-network/task-execution-protocol via `portal:../../task-execution/protocol`).
+# Both packages' exports maps point at compiled dist/*.js, and dist/ is
+# gitignored, so both are built inside this image, in dependency order,
+# before the indexer install resolves the portal symlink.
 #
 # Build (from packages/):
 #   docker build -t jinn-indexer:latest -f indexer/deploy/Dockerfile .
@@ -23,14 +26,31 @@ ENV JINN_INDEXER_COMMIT=$JINN_INDEXER_COMMIT
 
 ENV YARN_NODE_LINKER=node-modules
 
-# Build @jinn-network/sdk first. The indexer's `portal:../sdk` dependency is a
-# symlink to /app/sdk, so its dist/ must exist before the indexer install and
-# must survive into the runtime stage (the symlink is followed at runtime).
-WORKDIR /app/sdk
-COPY sdk/package.json sdk/yarn.lock sdk/.yarnrc.yml ./
+# Build @jinn-network/task-execution-protocol first (§7.8 cross-tree portal
+# precedent, see benchmarking-ci.yml's `records` job). benchmarking-records'
+# `portal:../../task-execution/protocol` dependency is a symlink to
+# /app/task-execution/protocol, so its dist/ must exist before the records
+# install, and must survive into the runtime stage (the symlink is followed
+# at runtime).
+WORKDIR /app/task-execution/protocol
+COPY task-execution/protocol/package.json task-execution/protocol/yarn.lock task-execution/protocol/.yarnrc.yml ./
 RUN corepack enable && yarn install --immutable
-COPY sdk/tsconfig.json ./
-COPY sdk/src ./src
+COPY task-execution/protocol/tsconfig.json task-execution/protocol/tsconfig.build.json ./
+COPY task-execution/protocol/scripts ./scripts
+COPY task-execution/protocol/src ./src
+RUN yarn build
+
+# Build @jinn-network/benchmarking-records next. The indexer's
+# `portal:../benchmarking/records` dependency is a symlink to
+# /app/benchmarking/records, so its dist/ must exist before the indexer
+# install and must survive into the runtime stage (the symlink is followed
+# at runtime).
+WORKDIR /app/benchmarking/records
+COPY benchmarking/records/package.json benchmarking/records/yarn.lock benchmarking/records/.yarnrc.yml ./
+RUN corepack enable && yarn install --immutable
+COPY benchmarking/records/tsconfig.json benchmarking/records/tsconfig.build.json ./
+COPY benchmarking/records/scripts ./scripts
+COPY benchmarking/records/src ./src
 RUN yarn build
 
 # ── Indexer ──
@@ -66,9 +86,13 @@ ENV YARN_NODE_LINKER=node-modules
 
 WORKDIR /app/indexer
 
-# Copy the built SDK so the indexer's `portal:../sdk` symlink resolves at
-# runtime (node_modules/@jinn-network/sdk → ../sdk → /app/sdk/dist).
-COPY --from=build /app/sdk /app/sdk
+# Copy the built cross-tree portal dependencies so the indexer's
+# `portal:../benchmarking/records` symlink, and records' own
+# `portal:../../task-execution/protocol` symlink, resolve at runtime
+# (node_modules/@jinn-network/benchmarking-records → ../benchmarking/records
+# → /app/benchmarking/records/dist).
+COPY --from=build /app/task-execution/protocol /app/task-execution/protocol
+COPY --from=build /app/benchmarking/records /app/benchmarking/records
 
 # Copy built tree from build stage.
 COPY --from=build /app/indexer/node_modules ./node_modules

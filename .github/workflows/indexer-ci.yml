@@ -5,12 +5,18 @@ on:
     branches: [main, next]
     paths:
       - '.github/workflows/indexer-ci.yml'
+      - '.github/scripts/indexer-boundaries.test.mjs'
       - 'packages/indexer/**'
+      - 'packages/benchmarking/records/**'
+      - 'packages/task-execution/protocol/**'
   push:
     branches: [main, next]
     paths:
       - '.github/workflows/indexer-ci.yml'
+      - '.github/scripts/indexer-boundaries.test.mjs'
       - 'packages/indexer/**'
+      - 'packages/benchmarking/records/**'
+      - 'packages/task-execution/protocol/**'
 
 permissions:
   contents: read
@@ -43,6 +49,7 @@ jobs:
       # dependency must be built first too (§7.8 precedent, see
       # benchmarking-ci.yml's `records` job).
       - name: Build cross-tree portal dependency from source (task-execution-protocol, §7.8)
+        working-directory: ${{ github.workspace }}
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
 

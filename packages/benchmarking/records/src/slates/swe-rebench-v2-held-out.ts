@@ -87,6 +87,12 @@ export const HELD_OUT_SLATE_V1: HeldOutSlateArtifact = {
     'pandas-dev__pandas-60736',
   ],
 };
+// Frozen (not just declared "frozen" in prose): a hand-edit at this call site
+// throws in strict mode / silently no-ops otherwise, instead of drifting the
+// embedded artifact without anyone noticing. This is the mutation-protection
+// the removed runtime hash-check used to provide (see module header).
+Object.freeze(HELD_OUT_SLATE_V1.instanceIds);
+Object.freeze(HELD_OUT_SLATE_V1);
 
 const SLATES_BY_VERSION: Record<string, HeldOutSlateArtifact> = {
   v1: HELD_OUT_SLATE_V1,
