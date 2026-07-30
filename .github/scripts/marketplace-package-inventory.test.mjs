@@ -141,6 +141,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/evidence-protocol',
       '@jinn-network/marketplace-binding',
       '@jinn-network/marketplace-projector',
+      '@jinn-network/marketplace-venue-base',
       '@jinn-network/record-discovery-testing',
       '@jinn-network/task-execution-testing',
       '@jinn-network/trust-testing',

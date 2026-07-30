@@ -137,6 +137,7 @@ __metadata:
     "@jinn-network/execution-recorder": "npm:0.1.0"
     "@jinn-network/marketplace-binding": "npm:0.1.0"
     "@jinn-network/marketplace-projector": "npm:0.1.0"
+    "@jinn-network/marketplace-venue-base": "npm:0.1.0"
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     "@jinn-network/record-discovery-serve": "npm:0.1.0"
     "@jinn-network/record-discovery-testing": "npm:0.1.0"
@@ -161,6 +162,19 @@ __metadata:
     vitest:
       optional: true
   languageName: unknown
+  linkType: soft
+
+"@jinn-network/marketplace-venue-base@portal:../venue-base::locator=%40jinn-network%2Fmarketplace-testing%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/marketplace-venue-base@portal:../venue-base::locator=%40jinn-network%2Fmarketplace-testing%40workspace%3A."
+  dependencies:
+    "@jinn-network/marketplace-binding": "npm:0.1.0"
+    "@jinn-network/marketplace-projector": "npm:0.1.0"
+    "@jinn-network/task-execution-backend": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+    better-sqlite3: "npm:13.0.1"
+    viem: "npm:^2.0.0"
+  languageName: node
   linkType: soft
 
 "@jinn-network/record-discovery-protocol@portal:../../discovery/protocol::locator=%40jinn-network%2Fmarketplace-testing%40workspace%3A.":
@@ -728,6 +742,16 @@ __metadata:
   languageName: node
   linkType: hard
 
+"better-sqlite3@npm:13.0.1":
+  version: 13.0.1
+  resolution: "better-sqlite3@npm:13.0.1"
+  dependencies:
+    node-addon-api: "npm:^8.0.0"
+    node-gyp: "npm:latest"
+  checksum: 10c0/dab0d720e7b215490d68733c657de75f6fcffe1ce61d737ace9d2f195d02e90be9f19ced28f407247237aad7a5a371e044e601df9caa9d5617cff6a7a756ede5
+  languageName: node
+  linkType: hard
+
 "chai@npm:^6.2.2":
   version: 6.2.2
   resolution: "chai@npm:6.2.2"
@@ -1026,6 +1050,15 @@ __metadata:
   bin:
     nanoid: bin/nanoid.cjs
   checksum: 10c0/bbf2dcffe22d2b62d16de2711752070b539c0f644c7916f823ad6521986b2078cbe524f2d6240f58c46e9141ea0c7b87a029e100c0f7f175228cacaf30e41bba
+  languageName: node
+  linkType: hard
+
+"node-addon-api@npm:^8.0.0":
+  version: 8.9.0
+  resolution: "node-addon-api@npm:8.9.0"
+  dependencies:
+    node-gyp: "npm:latest"
+  checksum: 10c0/6d687ffbc66e9735f4182e4c05d137d083be1fa5972b1762307e007804a85b70f810fed5b908f27f48caa4ed831517c95eec5137c8a02eaa08893bdef7fec05e
   languageName: node
   linkType: hard
 

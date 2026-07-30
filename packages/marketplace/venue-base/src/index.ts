@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 
-// @jinn-network/marketplace-venue-base -- public surface. Populated task by task; the facade
-// `createBaseVenue` (Task 17) is the supported composition surface (program §5).
+// @jinn-network/marketplace-venue-base -- public surface. The facade `createBaseVenue` (Task 17)
+// is the supported composition surface (program §5); every other export is the per-port factory
+// underneath it, kept public for hosts that need finer-grained composition.
+export { createBaseVenue } from "./create-base-venue.js";
+export type { BaseVenue } from "./create-base-venue.js";
 export type { BaseVenueConfig } from "./config.js";
 export { VENUE_STATE_SCHEMA_VERSION, VenueStateError, openVenueState } from "./state/database.js";
 export type { VenueStateDatabase } from "./state/database.js";

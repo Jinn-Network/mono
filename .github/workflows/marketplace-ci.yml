@@ -353,6 +353,11 @@ jobs:
         env:
           JINN_MARKETPLACE_FORK_RPC_URL: ${{ secrets.JINN_MARKETPLACE_FORK_RPC_URL }}
         run: yarn vitest run src/backend-conformance.test.ts
+      - name: Run the Anvil-fork venue kit (§6.6)
+        working-directory: packages/marketplace/testing
+        env:
+          JINN_MARKETPLACE_FORK_RPC_URL: ${{ secrets.JINN_MARKETPLACE_FORK_RPC_URL }}
+        run: yarn vitest run src/venue-conformance.test.ts src/venue-fork.test.ts
 
   verify:
     needs: [architecture, binding, projector, pipeline, venue-base, testing, anvil-fork]
