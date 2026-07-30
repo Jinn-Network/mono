@@ -4470,3 +4470,93 @@ CREATE TABLE attempt_deliveries (
    already-delivered idempotency — homes in this tree. Its TDD content and execution live
    in the stage-1 plan's Task 8 (amended paths); its kit coverage rides that task. The
    completion checklist gains this row.
+
+## Execution findings (2026-07-31, recorded during execution)
+
+Tasks 1–18 executed in order. Every finding below was surfaced, dispositioned and carried into
+the tree; none was silently resolved. Blocking findings (F7, F9, F10) were fixed with their own
+commits.
+
+**Plan-text defects**
+
+1. **F1 — Task 1 Step 1 orders a manifest edit that Task 17 owns.** It appends
+   `@jinn-network/marketplace-venue-base` to the inventory guard's `testing` dependency graph, but
+   the matching `package.json` dependency only lands in Task 17. Adding it in Task 1 makes Task 1
+   Step 3's own "PASS" expectation false. *Disposition:* deferred the graph line to Task 17 and
+   landed both together there.
+2. **F2 — "run to verify it fails" does not fail for type-only changes.** These packages run
+   Vitest without a typecheck mode, so esbuild strips type-only imports and a test referencing a
+   non-existent exported type passes. *Disposition:* the red step for type-only work is
+   `yarn typecheck`, not `yarn vitest run`. Applied from Task 2 onward.
+3. **F4 — Task 3's supplied `venue-fixtures.test.ts` had four real bugs.** Its decodability test
+   swept the deliberately-undecoded-selector fixture; its coverage test ignored the
+   already-settled carve-out and so always reported the seven `ALREADY_SETTLED` names as missing;
+   its reference classifier special-cased only `RouterAlreadyClaimed` of the seven and had no
+   `user rejected` branch. *Disposition:* fixed in the test file. The fixture table itself was
+   correct and is unchanged.
+4. **F5 — Task 4's Files block omits `venue-broadcast-reference.ts`,** which its own Step 1 prose
+   requires and its driver test dynamically imports. *Disposition:* created; omission recorded.
+5. **F6 — the `git add` lines repeatedly omit `src/index.ts`** (Tasks 9, 10, 11, 12, 13) and
+   Task 13's Files block omits `src/state/schema.ts` even though its prose orders a schema-version
+   bump. *Disposition:* staged what each task's Files block and prose actually require.
+6. **F8 — Task 12's `classifySettlementRevert` lists only today-generation revert names.**
+   `JinnRouterV4` uses `RouterV4AlreadyClaimed` / `RouterV4WrongDeliveryOperator`, so the supplied
+   set silently misclassifies every revised-generation outcome as `rejected`. *Disposition:*
+   extended both sets with the V4 names.
+7. **F11 — `JINN_ROUTER_V4_ABI` is a function-only slice and declares no events.** Revised-mode
+   event decode has to use the projector's `REVISED_COMMON_PROJECTOR_EVENTS_ABI`. Discovered in
+   Task 11, applied consistently in Tasks 12, 13, 15 and 16.
+8. **F12 — `DeliveryWaitResult` has nowhere to carry a message.** Task 14's Step 1 asks for "the
+   loud error's message preserved on the returned state", but the frozen type's `ok: false`
+   variant carries only `kind` and an optional `AttemptState` enum. *Disposition:* returned the
+   real derived `AttemptState`, which is the maximal honest signal the type supports.
+
+**Blocking defects found and fixed**
+
+9. **F7 — the fork kit could never have run.** Its three `writeContract` call sites omitted
+   `chain`, so every fork run threw `ChainNotFoundError` before reaching an assertion. It went
+   unnoticed because `contracts/artifacts` was absent, which failed the suite earlier still.
+   *Fixed* (commit `a2d3c36fc`).
+10. **F9 — the Safe broadcaster could not express a MultiSend batch.** Task 12's revised-generation
+    settle sends a three-leg MultiSend as one `execTransaction`, but `SafeBroadcastRequest` had no
+    `operation` field and the outer call was pinned to CALL. A MultiSend routed by CALL runs every
+    inner leg with `msg.sender == MultiSend`, which the router's operator and party checks reject.
+    *Fixed:* `operation` added, defaulting to `0`; the settle batch passes `1` (commit `6589311f0`).
+11. **F10 — the fork kit ran against a Safe stub with no `execTransaction`.** `MockSafeWithNonce`
+    implements `nonce()` and nothing else, so the venue's single write path — the whole broadcast
+    profile — was unexercised and the four fork conformance tests were red on every run. *Fixed:*
+    the backbone now mints a real Safe v1.3.0 through the canonical proxy factory already deployed
+    on the forked chain. Three fixture bugs the stub had been masking surfaced and were fixed with
+    it: the mech's operator must be the Safe (the router checks the claimant against it), the
+    delivery fixture must go through the Safe, and the two fixture task posts must be sequential
+    because they share one auto-nonced EOA (commit `a16efdf5c`).
+12. **F13 — the one-slot claim test asserted an unreachable revert.** `TCMaxClaimsReached` cannot
+    fire on a one-slot task: the router escrows exactly one claim's worth per slot and rejects any
+    other `value`, so budget and ceiling always exhaust together and `RouterInsufficientTaskBudget`
+    fires first. *Disposition:* the assertion now names the obligation that actually holds — the
+    inner revert reaches the caller decoded, not as a raw selector.
+13. **F14 — test scaffolding was shipping in the published package.**
+    `broadcast/scripted-chain.fixture.ts` is test-only but is not a `.test.ts`, so
+    `tsconfig.build.json` emitted it into `dist/`. *Fixed:* `src/**/*.fixture.ts` excluded from the
+    build.
+14. **F15 — Task 17 left the consuming package's lockfile stale** after moving
+    `@types/better-sqlite3` into venue-base's runtime dependencies. `yarn install --immutable`
+    would have failed in CI. *Fixed* (commit `b7ae53b24`).
+
+**Environment, not plan**
+
+15. **F3 — `contracts/artifacts` was absent** at session start, which made the entire fork slice
+    unobservable and masked F7 and F10. Resolved by running `yarn compile` in `contracts/`. The
+    fork kit depends on compiled Hardhat artifacts; that dependency is worth stating in the CI
+    job's prerequisites.
+
+**Deliberately not resolved (carried to the program gate)**
+
+16. **Revised-generation settle's middle leg ABI is unconfirmed.** Task 12 implemented the deliver
+    leg of `settleRevisedSolutionDelivery` against
+    `deliverToMarketplace(bytes32[], bytes[])` — the only delivery-broadcast shape with
+    fork-tested evidence in this repo — but could not confirm it matches the real deployed
+    MechMarketplace's signed-delivery entry point. The revised generation has no fork coverage
+    (`deployRevised` throws a named error; V4's ERC20 + EIP-712 deploy shape differs structurally
+    from today's and no task in this plan exercises it). Confirm against the deployed contract
+    before any revised-generation live-chain use.

@@ -35,6 +35,10 @@
     "./revised-contract-conformance": {
       "import": "./dist/revised-contract-conformance.js",
       "types": "./dist/revised-contract-conformance.d.ts"
+    },
+    "./venue-conformance": {
+      "import": "./dist/venue-conformance.js",
+      "types": "./dist/venue-conformance.d.ts"
     }
   },
   "files": [
@@ -56,6 +60,7 @@
     "@jinn-network/evidence-protocol": "0.1.0",
     "@jinn-network/marketplace-binding": "0.1.0",
     "@jinn-network/marketplace-projector": "0.1.0",
+    "@jinn-network/marketplace-venue-base": "0.1.0",
     "@jinn-network/record-discovery-testing": "0.1.0",
     "@jinn-network/task-execution-testing": "0.1.0",
     "@jinn-network/trust-testing": "0.1.0",
@@ -95,6 +100,7 @@
     "@jinn-network/execution-recorder": "portal:../../evidence/execution-recorder",
     "@jinn-network/marketplace-binding": "portal:../binding",
     "@jinn-network/marketplace-projector": "portal:../projector",
+    "@jinn-network/marketplace-venue-base": "portal:../venue-base",
     "@jinn-network/record-discovery-protocol": "portal:../../discovery/protocol",
     "@jinn-network/record-discovery-serve": "portal:../../discovery/serve",
     "@jinn-network/record-discovery-testing": "portal:../../discovery/testing",
