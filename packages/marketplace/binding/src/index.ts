@@ -170,3 +170,12 @@ export type {
   EvaluationSubmissionFields,
   SealedDocumentTriple,
 } from "./evaluation-derive.js";
+
+// --- port-type home for the three pipeline-declared ports (design §6.1; stage 0) ---
+export type {
+  DeliveryWaitPort,
+  DeliveryWaitResult,
+  FinalityAwaitResult,
+  FinalityPort,
+  ReleaseAttemptPort,
+} from "./pipeline-ports.js";
