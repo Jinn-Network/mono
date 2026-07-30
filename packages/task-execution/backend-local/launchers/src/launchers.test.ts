@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { claudeCodeLauncher, codexLauncher, cursorLauncher, hermesLauncher, interpretResult } from "./index.js";
+import type { LaunchPlan } from "./contract.js";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
 
@@ -45,7 +46,7 @@ describe("v1 launchers", () => {
         { match: { exitCode: 65 }, blame: "task", reasonCode: "invalid-evaluation-input" },
         { match: { signal: "SIGKILL" }, blame: "infrastructure", reasonCode: "killed" },
       ],
-    };
+    } as LaunchPlan;
     expect(interpretResult(plan, { exitCode: 1 }).reasonCode).toBe("invalid-exit");
     expect(interpretResult(plan, { signal: "SIGKILL" }).reasonCode).toBe("killed");
   });
