@@ -160,7 +160,15 @@ async function deployToday(
     args: readonly unknown[] = [],
     value?: bigint,
   ) => {
-    const hash = await wallet.writeContract({ address, abi, functionName, args, value, account } as never);
+    const hash = await wallet.writeContract({
+      address,
+      abi,
+      functionName,
+      args,
+      value,
+      account,
+      chain: null,
+    } as never);
     return publicClient.waitForTransactionReceipt({ hash });
   };
 
@@ -285,6 +293,7 @@ async function postFixtureTask(
     ],
     value,
     account,
+    chain: null,
   } as never);
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   const created = receipt.logs
@@ -326,6 +335,7 @@ async function deliverFixture(deployment: ForkVenueDeployment, requestId: Hex): 
     functionName: "deliverToMarketplace",
     args: [[requestId], [toHex(deliveryBytes)]],
     account,
+    chain: null,
   } as never);
   await publicClient.waitForTransactionReceipt({ hash });
   return deliveryBytes;
