@@ -360,14 +360,10 @@ const MULTISEND_ABI = [{
  * Gnosis Safe `MultiSend.multiSend(bytes)` packed-transaction encoding: per call,
  * `operation(1 byte) | to(20 bytes) | value(32 bytes) | dataLength(32 bytes) | data`.
  *
- * KNOWN LIMITATION (flagged in the task report): `BaseVenueSafeBroadcaster.execute` (Task 8)
- * hardcodes the OUTER Safe `execTransaction` operation to `0` (Call). A true atomic MultiSend
- * batch that preserves `msg.sender == Safe` for each inner call requires the outer call to be a
- * DELEGATECALL (`operation = 1`) into the standard `MultiSend` contract; a regular CALL makes
- * `MultiSend` itself the inner `msg.sender`, which the router's operator/party checks would
- * reject. This function is structurally ready for that once Task 8 grows an `operation` field;
- * until then, `settleRevisedSolutionDelivery` sends one Safe transaction but is not correct
- * against a real deployed Safe.
+ * The OUTER Safe `execTransaction` carrying this payload MUST be a DELEGATECALL
+ * (`SafeBroadcastRequest.operation = 1`) into the `MultiSend` singleton: a plain CALL would make
+ * `MultiSend` the inner `msg.sender` and the router's operator/party checks would reject every
+ * leg. Each INNER leg stays `00` (Call) so it runs against its own target from the Safe.
  */
 function encodeMultiSendCalldata(calls: readonly BatchCall[]): Hex {
   const transactions = calls.map((call) => {
@@ -441,6 +437,8 @@ async function settleRevisedSolutionDelivery(
   try {
     const receipt = await input.broadcaster.execute({
       to: input.multiSendAddress ?? DEFAULT_MULTISEND_ADDRESS, value: 0n, data: batchData,
+      // DELEGATECALL: each inner leg must execute with `msg.sender == Safe`.
+      operation: 1,
       logicalTx: `settlement.settleRevisedSolutionDelivery:${args.taskId}:${args.attemptIndex}`,
     });
     if (receipt.alreadySettled) {

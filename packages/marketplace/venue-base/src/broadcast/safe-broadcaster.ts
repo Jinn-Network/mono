@@ -43,6 +43,13 @@ export interface SafeBroadcastRequest {
   readonly data: Hex;
   /** Logical operation identity; stored in the ledger so reconciliation never adopts a foreign tx. */
   readonly logicalTx: string;
+  /**
+   * Safe `Enum.Operation`: `0` = CALL (default), `1` = DELEGATECALL. A batched request routed
+   * through the MultiSend singleton MUST use `1`, otherwise every inner call executes with
+   * `msg.sender == MultiSend` instead of the Safe and the venue's operator checks reject it.
+   * A single-target call always uses `0`.
+   */
+  readonly operation?: 0 | 1;
 }
 
 export interface SafeBroadcastReceipt {
@@ -211,7 +218,10 @@ export function createSafeBroadcaster(input: {
       });
       const safeTxHash = await input.publicClient.readContract({
         address: input.safeAddress, abi: SAFE_ABI, functionName: "getTransactionHash",
-        args: [request.to, request.value, request.data, 0, 0n, 0n, 0n, ZERO_ADDRESS, ZERO_ADDRESS, safeNonce],
+        args: [
+          request.to, request.value, request.data, request.operation ?? 0,
+          0n, 0n, 0n, ZERO_ADDRESS, ZERO_ADDRESS, safeNonce,
+        ],
       });
       const signature = toSafeEthSignSignature(
         await input.walletClient.signMessage({ account: signer, message: { raw: safeTxHash as Hex } }) as Hex,
@@ -225,7 +235,10 @@ export function createSafeBroadcaster(input: {
         // the spread's wider static type can't satisfy without this assertion.
         txHash = await input.walletClient.writeContract({
           address: input.safeAddress, abi: SAFE_ABI, functionName: "execTransaction",
-          args: [request.to, request.value, request.data, 0, 0n, 0n, 0n, ZERO_ADDRESS, ZERO_ADDRESS, signature],
+          args: [
+            request.to, request.value, request.data, request.operation ?? 0,
+            0n, 0n, 0n, ZERO_ADDRESS, ZERO_ADDRESS, signature,
+          ],
           account: signer, chain: input.walletClient.chain, value: request.value, nonce: pinnedNonce, ...fees,
         } as unknown as Parameters<typeof input.walletClient.writeContract>[0]);
       } catch (writeError) {

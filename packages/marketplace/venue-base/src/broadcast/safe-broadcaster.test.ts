@@ -59,6 +59,20 @@ describe("Safe broadcaster (design §6.1 Safe broadcast, §7 ruling 1)", () => {
     expect(chain.lastWrite()?.args?.[1]).toBe(7n);
   });
 
+  test("defaults execTransaction to operation 0 (Call) and forwards operation 1 for a delegatecall batch", async () => {
+    const plain = buildScriptedChain();
+    await broadcaster(plain).execute({ to: TO, value: 0n, data: DATA, logicalTx: "claim" });
+    // execTransaction(to, value, data, operation, ...) — operation is the fourth argument.
+    expect(plain.lastWrite()?.args?.[3]).toBe(0);
+
+    const batched = buildScriptedChain();
+    await broadcaster(batched).execute({
+      to: TO, value: 0n, data: DATA, logicalTx: "settle", operation: 1,
+    });
+    // A MultiSend batch must delegatecall so each inner leg keeps `msg.sender == Safe`.
+    expect(batched.lastWrite()?.args?.[3]).toBe(1);
+  });
+
   test("serializes two concurrent executes: nonce N then N+1, never N twice", async () => {
     const chain = buildScriptedChain();
     const subject = broadcaster(chain);
