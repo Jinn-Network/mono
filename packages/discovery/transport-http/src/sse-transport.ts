@@ -24,7 +24,27 @@ import type { SseColdSyncHint, SseTerminalEventType } from "./sse.js";
 // recovery is the cold-sync path the terminal event names.
 
 const DEFAULT_RECONNECT_DELAY_MS = 3000;
+// A frame that never terminates would otherwise grow the pending buffer
+// without limit, so a hostile relay could exhaust a daemon that is doing
+// nothing but listening. One megabyte is far above any real entry frame
+// and far below anything that hurts.
+const DEFAULT_MAX_FRAME_BYTES = 1 << 20;
 const TERMINAL_EVENTS: readonly SseTerminalEventType[] = ["unknown-cursor", "cursor-too-old"];
+
+export class SseFrameOverflowError extends Error {
+  readonly url: string;
+  readonly maxFrameBytes: number;
+
+  constructor(url: string, maxFrameBytes: number) {
+    super(
+      `The tail at ${url} sent more than ${maxFrameBytes} bytes without completing a frame. `
+        + "Treating the stream as hostile and closing it.",
+    );
+    this.name = "SseFrameOverflowError";
+    this.url = url;
+    this.maxFrameBytes = maxFrameBytes;
+  }
+}
 
 export class SseTerminalError extends Error {
   readonly terminal: SseTerminalEventType;
@@ -46,6 +66,8 @@ export interface SseStreamTransportOptions {
   reconnectDelayMs?: number;
   /** Cap on consecutive reconnects; `undefined` (default) reconnects indefinitely. */
   maxReconnects?: number;
+  /** Ceiling on one unterminated frame before the stream is treated as hostile. Defaults to 1 MiB. */
+  maxFrameBytes?: number;
 }
 
 interface ParsedFrame {
@@ -92,6 +114,7 @@ export function createSseStreamTransport(
   options: SseStreamTransportOptions = {},
 ): StreamTransport {
   const reconnectDelayMs = options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;
+  const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES;
 
   return {
     connect(
@@ -150,6 +173,14 @@ export function createSseStreamTransport(
                 return "terminal";
               }
               if (frame.data !== "") onMessage(frame.data);
+            }
+            // Whatever is left is one frame still waiting for its blank-line
+            // terminator. Past the ceiling it is not a slow frame, it is a
+            // relay feeding an unbounded allocation -- stop rather than
+            // reconnect, the same way a typed terminal event stops.
+            if (buffered.length > maxFrameBytes) {
+              onError(new SseFrameOverflowError(target, maxFrameBytes));
+              return "terminal";
             }
             if (done) return "ended";
           }

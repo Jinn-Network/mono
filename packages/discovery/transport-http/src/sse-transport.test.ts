@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { FetchLike } from "./ports.js";
 import { createInMemoryTailSource } from "./tail.js";
 import { openArchiveTailStream } from "./sse.js";
-import { SseTerminalError, createSseStreamTransport } from "./sse-transport.js";
+import { SseFrameOverflowError, SseTerminalError, createSseStreamTransport } from "./sse-transport.js";
 
 function waitFor(predicate: () => boolean, label: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -171,5 +171,37 @@ describe("createSseStreamTransport", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(seen).toEqual(['{"n":1}']);
+  });
+
+  it("closes a stream that never terminates a frame, instead of buffering it forever", async () => {
+    // A relay that sends an endless `data:` line with no blank-line
+    // terminator would otherwise grow the pending buffer without limit in
+    // a daemon that is doing nothing but listening.
+    let chunksPulled = 0;
+    const fetchLike: FetchLike = async () => new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        chunksPulled += 1;
+        controller.enqueue(new TextEncoder().encode(chunksPulled === 1 ? "data: " : "x".repeat(512)));
+      },
+    }), { status: 200, headers: { "content-type": "text/event-stream" } });
+
+    const transport = createSseStreamTransport("https://archive.example", fetchLike, {
+      maxFrameBytes: 2048,
+      reconnectDelayMs: 1,
+    });
+    const errors: unknown[] = [];
+    const seen: string[] = [];
+
+    const subscription = transport.connect("/sources/feed/tail", (raw) => seen.push(raw), (error) => errors.push(error));
+    await waitFor(() => errors.length === 1, "the frame-overflow error");
+    subscription.close();
+
+    expect(errors[0]).toBeInstanceOf(SseFrameOverflowError);
+    expect(seen).toEqual([]);
+    // Terminal, not a reconnect loop: no second error follows.
+    const pulledAtStop = chunksPulled;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(errors).toHaveLength(1);
+    expect(chunksPulled).toBe(pulledAtStop);
   });
 });

@@ -98,6 +98,24 @@ describe("createHttpTransport", () => {
     const transport = createHttpTransport("https://archive.example", stub.fetchLike, { maxBytes: 1024 });
     await expect(transport.fetch("/records/deadbeef")).rejects.toBeInstanceOf(TransportOversizeError);
   });
+
+  it("stops reading an unbounded stream at the ceiling instead of draining it", async () => {
+    // A hostile source omits content-length and never stops sending. The
+    // ceiling has to hold DURING the read, so the proof is that the
+    // producer stops being pulled shortly after the cap, not that an
+    // error arrives once the whole body has already been buffered.
+    let chunksPulled = 0;
+    const stub = stubFetch(() => new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        chunksPulled += 1;
+        controller.enqueue(encoder.encode("x".repeat(256)));
+      },
+    }), { status: 200 }));
+
+    const transport = createHttpTransport("https://archive.example", stub.fetchLike, { maxBytes: 1024 });
+    await expect(transport.fetch("/records/deadbeef")).rejects.toBeInstanceOf(TransportOversizeError);
+    expect(chunksPulled).toBeLessThan(32);
+  });
 });
 
 // The hostile-locator guards (§7/§14) are `client`'s, not this

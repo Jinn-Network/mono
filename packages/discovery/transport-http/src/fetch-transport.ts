@@ -66,6 +66,49 @@ function resolveUrl(baseUrl: string, url: string): string {
   return `${baseUrl.replace(/\/+$/, "")}${url.startsWith("/") ? url : `/${url}`}`;
 }
 
+/**
+ * Reads a response body, stopping the moment it crosses `maxBytes`.
+ *
+ * A `Content-Length` check alone only bounds an honest source: a hostile
+ * one omits the header, and buffering the whole body before measuring it
+ * hands any remote an unbounded allocation in a long-lived daemon. The
+ * ceiling has to hold during the read, so this cancels the stream at the
+ * first chunk that crosses it rather than after the last one arrives.
+ */
+async function readBounded(response: Response, url: string, maxBytes: number): Promise<Uint8Array> {
+  const body = response.body;
+  if (!body) {
+    const whole = new Uint8Array(await response.arrayBuffer());
+    if (whole.length > maxBytes) throw new TransportOversizeError(url, whole.length, maxBytes);
+    return whole;
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (value !== undefined) {
+        total += value.length;
+        if (total > maxBytes) throw new TransportOversizeError(url, total, maxBytes);
+        chunks.push(value);
+      }
+      if (done) break;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
+}
+
 export function createHttpTransport(
   baseUrl: string,
   fetchLike: FetchLike = globalThis.fetch.bind(globalThis) as FetchLike,
@@ -108,10 +151,7 @@ export function createHttpTransport(
         throw new TransportOversizeError(target, declaredLength, maxBytes);
       }
 
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.length > maxBytes) {
-        throw new TransportOversizeError(target, bytes.length, maxBytes);
-      }
+      const bytes = await readBounded(response, target, maxBytes);
 
       const contentType = response.headers.get("content-type") ?? undefined;
       const etag = response.headers.get("etag");
