@@ -110,6 +110,14 @@
   .hero__link { font-size: 13px; color: var(--fg-muted); text-decoration: none; }
   .hero__link:hover { color: var(--sky-hover); }
 
+  /* Live network */
+  .stats__inner { padding-top: clamp(28px, 4vw, 40px); padding-bottom: clamp(28px, 4vw, 40px); }
+  .stats__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: clamp(20px, 4vw, 48px); }
+  .stats__cell { display: flex; flex-direction: column; gap: 6px; text-decoration: none; color: var(--fg); }
+  .stats__value { font-family: var(--serif); font-size: clamp(28px, 4vw, 44px); line-height: 1; color: var(--sky); }
+  .stats__cell:hover .stats__value { color: var(--sky-hover); }
+  .stats__fallback a { font-size: 13px; }
+
   /* How it learns */
   .learn h2 { font-size: clamp(30px, 4.5vw, 48px); line-height: 1.15; margin: 0 0 56px; max-width: 24ch; }
   .learn .label { margin-bottom: 20px; }
@@ -223,6 +231,16 @@
         <a class="btn" href="https://t.me/jinnNetwork">Join the Telegram</a>
         <a class="hero__link" href="https://explorer.jinn.network">Watch the network live →</a>
       </div>
+    </div>
+  </section>
+
+  <!-- Live network -->
+  <section class="section stats">
+    <div class="container stats__inner">
+      <div class="stats__fallback" id="net-fallback">
+        <a href="https://explorer.jinn.network">Watch the network live →</a>
+      </div>
+      <div class="stats__grid" id="net-grid" hidden></div>
     </div>
   </section>
 
@@ -381,5 +399,42 @@
     </div>
   </footer>
 
+<script>
+  (function () {
+    var API = 'https://jinn-indexer-production.up.railway.app/explorer/network';
+    var EXPLORER = 'https://explorer.jinn.network';
+    var METRICS = [
+      { key: 'tasksPosted',            label: 'Tasks posted',       href: EXPLORER + '/' },
+      { key: 'attempts',               label: 'Attempts',           href: EXPLORER + '/' },
+      { key: 'solverNetsRunning',      label: 'SolverNets running', href: EXPLORER + '/solvernets' },
+      { key: 'everAttemptedOperators', label: 'Operators',          href: EXPLORER + '/operators' }
+    ];
+    var grid = document.getElementById('net-grid');
+    var fallback = document.getElementById('net-fallback');
+    if (!grid || !fallback || !window.fetch) return;
+
+    fetch(API, { headers: { accept: 'application/json' } })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        var cells = METRICS.filter(function (m) {
+          return typeof data[m.key] === 'number' && data[m.key] > 0;
+        });
+        if (!cells.length) return;
+        grid.innerHTML = cells.map(function (m) {
+          return '<a class="stats__cell" href="' + m.href + '">'
+            + '<span class="stats__value">' + data[m.key].toLocaleString('en-GB') + '</span>'
+            + '<span class="label label--dim">' + m.label + '</span></a>';
+        }).join('');
+        grid.hidden = false;
+        fallback.hidden = true;
+      })
+      .catch(function () {
+        /* fallback link stays visible */
+      });
+  })();
+</script>
 </body>
 </html>
