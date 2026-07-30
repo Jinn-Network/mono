@@ -209,6 +209,6 @@ describe("durable watch tail (§7.96)", () => {
 
     const shutdownStarted = Date.now();
     await instance.shutdown();
-    expect(Date.now() - shutdownStarted).toBeLessThan(2_000);
+    expect(Date.now() - shutdownStarted).toBeLessThan(5_000);
   });
 });

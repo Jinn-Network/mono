@@ -394,7 +394,9 @@ export function spawnShim(request: BuildShimSpawnRequest, harness: SpawnRequest 
   if (process.platform === "linux") {
     const support = nativeCustodySupport();
     if (!support.ready) throw new Error(support.detail ?? "Linux native custody is not ready");
-    const child = spawn(nativeShimPath(), [writeNativeSpawnSpec(request, harness)], {
+    const binary = nativeShimPath();
+    ensureNativeBinaryExecutable(binary);
+    const child = spawn(binary, [writeNativeSpawnSpec(request, harness)], {
       env: {
         ...(process.env as Record<string, string>),
         JINN_ATTEMPT_ID: request.attemptId,

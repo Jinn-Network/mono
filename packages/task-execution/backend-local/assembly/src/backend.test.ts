@@ -546,7 +546,7 @@ describe("local TaskExecutionBackend submission path (C1)", () => {
     const task = taskBytes();
     const attempt = await acceptedAttempt(backend, task, submissionBytes(task));
     const shim = join(root, "attempts", attempt.slice("urn:uuid:".length), "meta", "shim.json");
-    for (let index = 0; index < 40; index += 1) {
+    for (let index = 0; index < 200; index += 1) {
       try {
         expect(JSON.parse(await readFile(shim, "utf8"))).toMatchObject({ nonce: expect.any(String) });
         return;

@@ -70,7 +70,14 @@ describe("marketplace backend conformance -- stub-chain (hermetic)", () => {
 // Anvil-fork run
 // ---------------------------------------------------------------------------
 
-const FORK_RPC_URL = process.env["JINN_MARKETPLACE_FORK_RPC_URL"] || "https://base-sepolia.publicnode.com";
+const FORK_RPC_CANDIDATES = [
+  process.env["JINN_MARKETPLACE_FORK_RPC_URL"],
+  "https://base-sepolia.publicnode.com",
+  "https://sepolia.base.org",
+  "https://base-sepolia-rpc.publicnode.com",
+].filter((url): url is string => typeof url === "string" && url.trim().length > 0);
+
+let FORK_RPC_URL = FORK_RPC_CANDIDATES[0] ?? "https://base-sepolia.publicnode.com";
 // A per-process port prevents an interrupted local run from sharing a fork (and account nonce
 // state) with the next run. CI may pin a port when its runner policy requires one.
 const ANVIL_PORT = Number(process.env["JINN_MARKETPLACE_ANVIL_PORT"] ?? 8600 + (process.pid % 1000));
@@ -90,6 +97,32 @@ async function isReachable(url: string): Promise<boolean> {
     });
     clearTimeout(timer);
     return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Publicnode intermittently 403s archive eth_getStorageAt; probe before committing the fork URL. */
+async function supportsArchiveReads(url: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8_000);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "eth_getStorageAt",
+        params: ["0x0000000000000000000000000000000000000001", "0x0", "0x1"],
+        id: 1,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!response.ok) return false;
+    const body = await response.json() as { result?: unknown; error?: { message?: string } };
+    if (body.error?.message?.toLowerCase().includes("archive")) return false;
+    return typeof body.result === "string";
   } catch {
     return false;
   }
@@ -121,24 +154,33 @@ async function serializeForkTransaction<T>(work: () => Promise<T>): Promise<T> {
 }
 
 async function startAnvilFork(): Promise<boolean> {
-  const [rpcReachable, hasAnvil] = await Promise.all([isReachable(FORK_RPC_URL), anvilAvailable()]);
-  if (!rpcReachable || !hasAnvil) return false;
+  const hasAnvil = await anvilAvailable();
+  if (!hasAnvil) return false;
 
-  anvilProcess = spawn("anvil", ["--fork-url", FORK_RPC_URL, "--port", String(ANVIL_PORT), "--silent"]);
-  const ready = await new Promise<boolean>((resolve) => {
-    const timer = setTimeout(() => resolve(false), 20_000);
-    const check = setInterval(() => {
-      isReachable(ANVIL_URL).then((up) => {
-        if (up) {
-          clearInterval(check);
-          clearTimeout(timer);
-          resolve(true);
-        }
-      }).catch(() => {});
-    }, 500);
-  });
-  if (!ready) stopAnvilFork();
-  return ready;
+  for (const candidate of FORK_RPC_CANDIDATES) {
+    if (!(await isReachable(candidate))) continue;
+    // Prefer archive-capable endpoints; still try non-archive as last resort within the list.
+    const archiveOk = await supportsArchiveReads(candidate);
+    if (!archiveOk && candidate !== FORK_RPC_CANDIDATES[FORK_RPC_CANDIDATES.length - 1]) continue;
+
+    FORK_RPC_URL = candidate;
+    anvilProcess = spawn("anvil", ["--fork-url", FORK_RPC_URL, "--port", String(ANVIL_PORT), "--silent"]);
+    const ready = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), 20_000);
+      const check = setInterval(() => {
+        isReachable(ANVIL_URL).then((up) => {
+          if (up) {
+            clearInterval(check);
+            clearTimeout(timer);
+            resolve(true);
+          }
+        }).catch(() => {});
+      }, 500);
+    });
+    if (ready) return true;
+    stopAnvilFork();
+  }
+  return false;
 }
 
 function stopAnvilFork(): void {

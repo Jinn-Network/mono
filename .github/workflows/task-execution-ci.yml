@@ -390,7 +390,10 @@ jobs:
           name: task-execution-supervisor-dist
           path: packages/task-execution/backend-local/supervisor/dist
       - name: Restore executable bit on native custody binaries
-        run: chmod +x packages/task-execution/backend-local/supervisor/dist/native/jinn-attempt-shim*
+        run: |
+          chmod +x packages/task-execution/backend-local/supervisor/dist/native/jinn-attempt-shim*
+          # Rebuild on this runner so artifact bit-loss cannot leave a non-exec probe/spawn path.
+          (cd packages/task-execution/backend-local/supervisor && node scripts/build-native.mjs)
       - name: Restore Task Execution Workspace distribution
         uses: actions/download-artifact@v4
         with:
