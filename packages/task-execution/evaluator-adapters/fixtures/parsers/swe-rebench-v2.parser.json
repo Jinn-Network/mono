@@ -1,0 +1,29 @@
+{
+  "parser": "network.jinn.parser.swe-rebench-v2",
+  "version": "1.0.0",
+  "input": {
+    "report": "one item of the upstream SWE-rebench-V2 scripts/eval report.json items[] array",
+    "graded": ["instance_id", "from_fail_to_pass", "failed_from_pass_to_pass", "passed_actual", "failed_actual", "exit_code", "log_path"],
+    "setupError": ["instance_id", "error"],
+    "log": "the concatenated container log, UTF-8, tail-capped by the caller"
+  },
+  "resolution": {
+    "rule": "resolved iff every declared failToPass transition now passes AND no declared passToPass transition broke",
+    "note": "the upstream passed_match field is NOT trusted: it compares the observed passing set to the union of declared transitions, which makes any instance whose test command runs extra tests structurally unscorable and penalises an added passing test"
+  },
+  "ungradeable": {
+    "rule": "a report is ungradeable when the eval process timed out or the harness produced no parseable report.json at all, or the upstream item carries a non-empty error, or lacks a numeric exit_code, or (container exit non-zero AND no declared failToPass passed AND every declared passToPass is reported broken AND the log matches a classified infrastructure signature)",
+    "classes": [
+      "eval_timeout", "eval_no_report",
+      "docker_unavailable", "docker_storage_io_error", "image_pull_failed",
+      "docker_credentials_error", "docker_run_failed", "patch_corrupt",
+      "patch_does_not_apply", "patch_merge_conflict", "workdir_not_git_repo",
+      "test_command_not_found", "install_build_failed", "venv_missing",
+      "image_arch_mismatch", "venv_collision", "pytest_missing",
+      "requests_dep_mismatch", "conftest_import_error",
+      "eval_setup_error", "eval_report_malformed"
+    ],
+    "note": "an ungradeable report yields no verdict; it is never reported as a failing verdict"
+  },
+  "measurements": { "passed": "boolean — the resolution rule's outcome" }
+}

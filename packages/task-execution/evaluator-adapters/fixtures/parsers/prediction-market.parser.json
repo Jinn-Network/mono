@@ -1,0 +1,23 @@
+{
+  "parser": "network.jinn.parser.prediction-market",
+  "version": "1.0.0",
+  "input": {
+    "result": "the solver Result document: probabilityYes (decimal string in [0,1]), submittedAt (RFC 3339), modelId",
+    "context": "the resolution snapshot: status (resolved|unresolved|invalid|cancelled|ambiguous), outcome (YES|NO), resolvedAt, marketId, conditionId, sourceUrl, and the consensus snapshot probabilityYes plus the submission window"
+  },
+  "checks": ["solution.envelope", "integrity.manifest_signature", "integrity.signedTask_ref", "solution.schema", "solution.window", "market.identity", "market.resolution"],
+  "verdict": {
+    "fail": "any check other than market.resolution reports FAIL",
+    "inconclusive": "market.resolution is not resolved, or integrity.signedTask_ref could not be verified trustlessly because the expected task CID is missing from context — the spec must declare an inconclusiveWhen predicate over the resolved measurement",
+    "pass": "every check passes and the market resolved with an outcome"
+  },
+  "scoring": {
+    "basis": "brier-loss.v1",
+    "rule": "brier = (probability - target)^2 with target 1 for YES and 0 for NO; spread = solverBrier - consensusBrier",
+    "encoding": "fixed six-fraction-digit decimal strings — never JSON numbers, per the I-JSON sealed-numbers rule"
+  },
+  "measurements": {
+    "integrity": "boolean", "resolved": "boolean", "outcomeYes": "boolean",
+    "solverBrier": "string", "consensusBrier": "string", "brierSpread": "string"
+  }
+}
