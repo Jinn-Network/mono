@@ -10,11 +10,17 @@ const root = resolve(import.meta.dirname, '../..');
 // scoped to the signer-accepting marketplace packages — NOT the whole
 // stack (the evidence repository uses node:fs by design). This guard is a
 // tripwire, not the control; the control is review plus signer-object-only
-// API shape. Future trees (venue-base, work-client) are picked up by
-// existence, so new signer-accepting packages inherit coverage.
+// API shape. It discovers exactly these two named future trees (venue-base,
+// work-client) by directory existence — not arbitrary new packages — so
+// the daemon-cutover and work-client sessions inherit coverage without
+// editing this list.
 const CUSTODY_SET = ['binding', 'pipeline', 'venue-base', 'work-client']
   .map((d) => join(root, 'packages', 'marketplace', d))
   .filter((d) => existsSync(d));
+// Floor on how many files the real-tree scan visits: if a future tree moves
+// its sources out of `src/` (or `sourceFiles` regresses to skip everything),
+// the scan would silently pass zero files instead of failing loud.
+const MIN_SCANNED_FILES = 20;
 
 // C2: no ambient authority acquisition — no env, no filesystem, no
 // process spawning, no keystore reads inside package sources.
@@ -43,22 +49,30 @@ function sourceFiles(dir, out = []) {
 
 function scan(dirs) {
   const violations = [];
+  let scannedFiles = 0;
   for (const dir of dirs) {
     const src = join(dir, 'src');
     if (!existsSync(src)) continue;
     for (const file of sourceFiles(src)) {
+      scannedFiles += 1;
       const text = readFileSync(file, 'utf8');
       for (const [pattern, label] of [...AMBIENT_PATTERNS, ...KEY_PATTERNS]) {
         if (pattern.test(text)) violations.push(`${file.slice(root.length + 1)}: ${label}`);
       }
     }
   }
-  return violations;
+  return { violations, scannedFiles };
 }
 
 test('custody set has no ambient authority or key-material surface', () => {
   assert.ok(CUSTODY_SET.length >= 2, 'custody set unexpectedly empty — check paths');
-  assert.deepEqual(scan(CUSTODY_SET), []);
+  const { violations, scannedFiles } = scan(CUSTODY_SET);
+  assert.deepEqual(violations, []);
+  assert.ok(
+    scannedFiles >= MIN_SCANNED_FILES,
+    `expected at least ${MIN_SCANNED_FILES} source files scanned, got ${scannedFiles} — ` +
+      'a future tree may have moved sources out of src/',
+  );
 });
 
 test('self-test: the scanner flags a violating fixture', () => {
@@ -72,7 +86,7 @@ test('self-test: the scanner flags a violating fixture', () => {
         '  return readFileSync(process.env.KEYSTORE_PATH ?? "", "utf8") + opts.privateKey;\n' +
         '}\n',
     );
-    const violations = scan([dir]);
+    const { violations } = scan([dir]);
     assert.ok(violations.some((v) => v.includes('filesystem import')));
     assert.ok(violations.some((v) => v.includes('process.env')));
     assert.ok(violations.some((v) => v.includes('key-material parameter')));
