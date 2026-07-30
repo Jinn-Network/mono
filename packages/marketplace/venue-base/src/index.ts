@@ -44,3 +44,9 @@ export type {
   ChainLogSource,
   ChainLogSourceOptions,
 } from "./log-source/chain-log-source.js";
+export {
+  DEFAULT_FINALITY_POLL_INTERVAL_MS,
+  DEFAULT_FINALITY_TIMEOUT_MS,
+  createFinalityWaiter,
+} from "./waiters/finality.js";
+export type { FinalityWaiterOptions } from "./waiters/finality.js";
