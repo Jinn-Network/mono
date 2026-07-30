@@ -55,9 +55,13 @@ Decisive properties:
   install telemetry from `npx skills add <owner>/<repo>`.
 - **Public install counts** (all-time, trending 24h, 8-week activity) — the MVP's demand signal
   is measured for us, for free.
-- **Autonomous discovery exists**: Vercel's `find-skills` skill (2.7M installs) lets agents
-  search the registry and install mid-task — exactly the permissionless agent-facing surface the
-  origin thread hypothesized.
+- **Agent-mediated discovery is plumbed in, throughput unverified**: Vercel's `find-skills`
+  skill (2.7M installs) instructs agents to search the registry mid-task and install with user
+  consent — the permissionless agent-facing surface the origin thread hypothesized. Caveat
+  (2026-07-30): installs of `find-skills` are not evidence of its use; no public metric
+  distinguishes agent-driven installs from human ones, and the count is likely inflated by
+  first-party promotion. Autonomous discovery is therefore a hypothesis the MVP observes
+  (install persistence after the announcement spike), not a premise it rests on.
 - **Cross-agent**: the CLI installs into Claude Code, Cursor, Windsurf, Copilot, Codex, Goose.
 - **Quality signals are thin** (an "official" badge, a security-audit filter). Nobody does
   efficacy evidence.
