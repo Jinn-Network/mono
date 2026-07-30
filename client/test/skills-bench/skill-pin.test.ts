@@ -9,7 +9,7 @@ import { pinSkill } from '../../src/skills-bench/skill-pin.js';
 
 const exec = promisify(execFile);
 
-async function makeFixtureRepo(): Promise<{ repoDir: string; commit: string }> {
+async function makeFixtureRepo(opts: { rootLicense?: string } = {}): Promise<{ repoDir: string; commit: string }> {
   const repoDir = await mkdtemp(join(tmpdir(), 'skill-fixture-'));
   await exec('git', ['init', '-q'], { cwd: repoDir });
   await exec('git', ['-C', repoDir, 'config', 'user.email', 't@t'], {});
@@ -19,6 +19,26 @@ async function makeFixtureRepo(): Promise<{ repoDir: string; commit: string }> {
     join(repoDir, 'skills', 'tdd', 'SKILL.md'),
     '---\nname: tdd\ndescription: Test-driven development workflow. Use when implementing features.\nlicense: MIT\n---\n\nBody.\n',
   );
+  if (opts.rootLicense !== undefined) {
+    await writeFile(join(repoDir, 'LICENSE'), opts.rootLicense);
+  }
+  await exec('git', ['-C', repoDir, 'add', '-A'], {});
+  await exec('git', ['-C', repoDir, 'commit', '-q', '-m', 'fixture'], {});
+  const { stdout } = await exec('git', ['-C', repoDir, 'rev-parse', 'HEAD'], {});
+  return { repoDir, commit: stdout.trim() };
+}
+
+async function makeFixtureRepoNoFrontmatterLicense(rootLicense: string): Promise<{ repoDir: string; commit: string }> {
+  const repoDir = await mkdtemp(join(tmpdir(), 'skill-fixture-nofm-'));
+  await exec('git', ['init', '-q'], { cwd: repoDir });
+  await exec('git', ['-C', repoDir, 'config', 'user.email', 't@t'], {});
+  await exec('git', ['-C', repoDir, 'config', 'user.name', 't'], {});
+  await mkdir(join(repoDir, 'skills', 'tdd'), { recursive: true });
+  await writeFile(
+    join(repoDir, 'skills', 'tdd', 'SKILL.md'),
+    '---\nname: tdd\ndescription: Test-driven development workflow. Use when implementing features.\n---\n\nBody.\n',
+  );
+  await writeFile(join(repoDir, 'LICENSE'), rootLicense);
   await exec('git', ['-C', repoDir, 'add', '-A'], {});
   await exec('git', ['-C', repoDir, 'commit', '-q', '-m', 'fixture'], {});
   const { stdout } = await exec('git', ['-C', repoDir, 'rev-parse', 'HEAD'], {});
@@ -68,5 +88,34 @@ describe('pinSkill', () => {
     expect(pin.commit).toBe(commit);
     expect(pin.commit).toMatch(/^[0-9a-f]{40}$/);
     expect(pin.commit).not.toBe(branch);
+  });
+
+  it('detects a repo-root LICENSE file as repoLicense alongside a frontmatter license (distinct provenance)', async () => {
+    const { repoDir, commit } = await makeFixtureRepo({ rootLicense: 'MIT License\n\nCopyright (c) 2026 Example\n' });
+    const destRoot = await mkdtemp(join(tmpdir(), 'pins-'));
+    const pin = await pinSkill({
+      name: 'tdd', source: repoDir, commit, skillPath: 'skills/tdd', destRoot,
+    });
+    expect(pin.license).toBe('MIT');
+    expect(pin.repoLicense).toBe('MIT License');
+  });
+
+  it('falls back to repoLicense when the frontmatter has no license key (license: null, repoLicense non-null)', async () => {
+    const { repoDir, commit } = await makeFixtureRepoNoFrontmatterLicense('MIT License\n\nCopyright (c) 2026 Example\n');
+    const destRoot = await mkdtemp(join(tmpdir(), 'pins-'));
+    const pin = await pinSkill({
+      name: 'tdd', source: repoDir, commit, skillPath: 'skills/tdd', destRoot,
+    });
+    expect(pin.license).toBeNull();
+    expect(pin.repoLicense).toBe('MIT License');
+  });
+
+  it('leaves repoLicense null when no repo-root license file exists', async () => {
+    const { repoDir, commit } = await makeFixtureRepo();
+    const destRoot = await mkdtemp(join(tmpdir(), 'pins-'));
+    const pin = await pinSkill({
+      name: 'tdd', source: repoDir, commit, skillPath: 'skills/tdd', destRoot,
+    });
+    expect(pin.repoLicense).toBeNull();
   });
 });

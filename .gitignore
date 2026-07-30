@@ -63,3 +63,8 @@ bench/slate/*
 !bench/slate/slate.json
 !bench/skills-repo-template/
 !bench/holdout-ledger.json
+# Isolated claude-code CLAUDE_CONFIG_DIR for run-bench.ts (--claude-config-dir,
+# default bench/.claude-bench-config) — holds credentials/session state and
+# must never be committed. Already covered by `bench/*` above; listed
+# explicitly (no negation) so it can never be silently un-ignored.
+bench/.claude-bench-config/

@@ -18,10 +18,25 @@ Everything through §7 (publish) is a real-money, real-Docker operation once you
   each grade spins up a Docker image per instance and the SWE-rebench images are large.
 - **Docker** running and reachable (`docker info` succeeds).
 - **Node 22** with `corepack enable` run once (pins Yarn to the `packageManager` field).
-- **claude-code CLI** authenticated (interactive login) — or `ANTHROPIC_API_KEY` set in the
-  environment. `run-bench.ts` spawns real `claude` subprocesses; either auth path works, and
-  `prepareBenchConfigDir` copies stored credentials into an isolated `CLAUDE_CONFIG_DIR` per run
-  so the operator's own user-level skills/plugins/memory never leak into an arm.
+- **An isolated `CLAUDE_CONFIG_DIR` with usable claude-code credentials — measured, not optional.**
+  `run-bench.ts` spawns real `claude` subprocesses under `--claude-config-dir` (default
+  `<repoRoot>/bench/.claude-bench-config`, stable and reusable across `--out` dirs — log into it
+  once, not once per run). Isolation is required: without it, the operator's own ambient
+  user-level skills/plugins/memory leak into every arm — including the baseline arm's "no skill
+  installed" claim — and the receipt stops being reproducible off this operator's machine (measured
+  empirically; see §8's skill-visibility matrix). One consequence measured on macOS: an isolated
+  `CLAUDE_CONFIG_DIR` severs Keychain-backed auth (`claude-code` on macOS stores credentials in the
+  Keychain, service "Claude Code-credentials", not in a `~/.claude/.credentials.json` file), so the
+  isolated dir starts with no usable credentials until you supply them via one of:
+  1. `export ANTHROPIC_API_KEY=...` — metered API billing; works headless, the route for the Linux
+     wave host.
+  2. One-time interactive login into the bench config dir:
+     `CLAUDE_CONFIG_DIR=<resolved --claude-config-dir path> claude`, then `/login` — keeps
+     subscription billing, credentials then persist in that dir across runs.
+
+  `run-bench.ts` runs a cheap auth preflight probe before any real (non-`--dry-run`) solve work and
+  aborts the whole run with both remediation routes spelled out if the probe fails — see §8 "Not
+  logged in / every solve fails instantly".
 - **`JINN_EVAL_DISK_FLOOR_GB=40`** in the environment before any real (non-`--dry-run`) run. The
   grader (`PythonEvalRunner`) reads this env var directly (no CLI flag) and prunes Docker /ABORTS
   the run cleanly if free disk falls below the floor — see §8 Troubleshooting.
@@ -80,20 +95,26 @@ yarn tsx scripts/skills-bench/pin-skill.ts \
 Each invocation writes `../bench/skills-under-test/<name>/` (default `--dest`; override with
 `--dest <path>` only if you need a different destination) containing the vendored `SKILL.md` tree
 plus a `pin.json` (`name`, `source`, `commit`, `skillPath`, `sha256` over the vendored bytes,
-`license` parsed from the SKILL.md frontmatter, `fetchedAt`). The command prints the same JSON to
-stdout — capture it in the pin commit message alongside the resolved sha.
+`license` parsed from the SKILL.md frontmatter, `repoLicense` detected from a repo-root
+LICENSE/LICENSE.md/LICENSE.txt/COPYING file when one exists, `fetchedAt`). The command prints the
+same JSON to stdout — capture it in the pin commit message alongside the resolved sha.
 
 Resolve the exact `--source` / `--skill-path` for `improve-codebase-architecture`,
 `vercel-react-best-practices`, and `frontend-design` from their skills.sh listing (leaderboard
 entry links to the source repo) before running — the spec (§3) names the targets, not the repo
 paths.
 
-**License gate.** After pinning, read each `pin.json`'s `license` field and record fork-eligibility
-in `bench/skills-under-test/LICENSES.md`: one row per skill (`name`, `license`, `fork-eligible:
-yes/no`, one-line rationale). Only a skill whose license permits redistribution and modification is
-a wave-2 fork candidate; the rest are measure-only for the wave-1 receipt. A `license: null` pin
-(no `license:` key in the upstream frontmatter) is fork-ineligible until an operator confirms terms
-directly with the upstream author — do not assume permissive by default.
+**License gate.** `license` (frontmatter-only) is the primary signal; `repoLicense` is a repo-level
+fallback — a crude label (first non-empty line of whichever license file was found), never parsed
+or validated, and never written into `license`. After pinning, read each `pin.json`'s `license`
+field and record fork-eligibility in `bench/skills-under-test/LICENSES.md`: one row per skill
+(`name`, `license`, `fork-eligible: yes/no`, one-line rationale). Only a skill whose license permits
+redistribution and modification is a wave-2 fork candidate; the rest are measure-only for the wave-1
+receipt. A `license: null` pin (no `license:` key in the upstream frontmatter) is fork-ineligible
+until an operator confirms terms directly with the upstream author — do not assume permissive by
+default, and a permissive-looking `repoLicense` next to a null `license` does **not** flip
+fork-eligibility on its own; it's a pointer for the operator to go verify, a human judgement call,
+not an automatic pass.
 
 ---
 
@@ -279,6 +300,43 @@ per the repo's external-communication rules (`CLAUDE.md` §External Communicatio
 ---
 
 ## 8. Troubleshooting
+
+**Not logged in / every solve fails instantly.** Symptom: every attempt fails immediately with
+`claude exited 1` / `"Not logged in · Please run /login"` in the solve error, `total_cost_usd: 0`,
+`num_turns: 1` (or the process never gets far enough to emit a turn) — zero spend, because nothing
+actually ran. Root cause (measured, see §1): the isolated `--claude-config-dir` has no usable
+credentials — on macOS this is expected the first time, because claude-code stores credentials in
+the Keychain (service "Claude Code-credentials"), not in a file the isolated dir can inherit. Fix
+with one of the two routes from §1 (`ANTHROPIC_API_KEY` or one-time interactive login into the
+resolved `--claude-config-dir` path), then re-run. As of this fix, `run-bench.ts` catches this
+*before* spending anything: it runs a one-shot auth preflight probe before any real solve work and
+aborts loud with both routes spelled out, rather than burning the whole slate on instant failures.
+
+**Run exits 0 with an empty (or near-empty) `attempts.jsonl`.** Prior to the live-smoke fixes this
+could happen silently — every solve failed but nothing tracked it as a run-level failure, so the
+process exited 0 and looked like a clean no-op. `run-bench.ts` now tracks solve failures the same
+way it tracks grade failures (`solveFailures`, logged and non-zero-exiting), and separately checks
+whether the run wrote **zero** outcomes to `attempts.jsonl` across a non-empty runnable set — that
+condition alone forces a loud "NOTHING WAS RECORDED" line and a non-zero exit, even if no individual
+attempt happened to land in either failure list (e.g. every instance failed at fetch/checkout,
+before any solve was attempted). Treat any non-zero exit from `run-bench.ts` as "this run needs
+attention," not just the previously-documented grade-failure case.
+
+**Skill-visibility matrix (measured, haiku, `-p`, scratch dirs) — why isolation is required and why
+`--safe-mode` can't be the treatment arm.** `run-bench.ts` uses `--setting-sources project` (via
+`buildClaudeArgs`) plus the isolated `CLAUDE_CONFIG_DIR`, not `--safe-mode`, because of this:
+
+| Flags | Ambient user skills (humanizer, file-issue, implement-issue, merge-batch, plugin skills, ...) | Mounted project skill (the arm under test) |
+|---|---|---|
+| default flags | Leak | Loads |
+| `--setting-sources project` | Still leak | Loads |
+| `--safe-mode` | Clean (CLI built-ins only) | Does **not** load |
+
+Only the isolated `CLAUDE_CONFIG_DIR` cuts the ambient-skill leak without also killing the mounted
+project skill — `--safe-mode` is clean on ambient skills but breaks the mount mechanism itself, so
+it cannot serve as the treatment arm. This is why isolation is a hard requirement (§1), not a nice-
+to-have: without it, the baseline arm's "no skill installed" claim is false on this operator's
+machine, and a receipt measured with ambient leakage isn't reproducible off it.
 
 **Docker wedge / grade timeout.** `PythonEvalRunner` raises `EvalCouldNotGradeError` on a genuine
 grading failure (image pull failure, timeout at `--grade-timeout-ms`, log-parse failure); `run-bench.ts`
@@ -472,8 +530,9 @@ a repo Jinn does not own), not something to automate.
 |---|---|---|
 | `pin-skill.ts` | `--name --source --commit --skill-path` | `--dest` (default `../bench/skills-under-test`) |
 | `build-slate.ts` | `--seed` | `--pool-size` (default 60), `--out` (default `../bench/slate/slate.json`) |
-| `run-bench.ts` | `--slate --arms --out` | `--dry-run`, `--half` (default `feedback`), `--model` (default `claude-sonnet-5`), `--repeats` (default 1), `--max-turns` (default 40), `--max-instances` (default unlimited), `--grade-timeout-ms` (default 600000), `--upstream-repo-dir` (default `~/.jinn-client/SWE-rebench-V2-upstream`), `--solve-concurrency` (default 1), `--candidate-id` (required with `--half holdout`), `--force-holdout-rerun` |
+| `run-bench.ts` | `--slate --arms --out` | `--dry-run`, `--half` (default `feedback`), `--model` (default `claude-sonnet-5`), `--repeats` (default 1), `--max-turns` (default 40), `--max-instances` (default unlimited), `--grade-timeout-ms` (default 600000), `--upstream-repo-dir` (default `~/.jinn-client/SWE-rebench-V2-upstream`), `--solve-concurrency` (default 1), `--candidate-id` (required with `--half holdout`), `--force-holdout-rerun`, `--claude-config-dir` (default `<repoRoot>/bench/.claude-bench-config` — stable, reusable across `--out` dirs; see §1) |
 | `render-receipts.ts` | `--run --slate --measured-on --out` | `--agent` (default `claude-code`), `--forked-from`, `--skill-source` — no `--half`: `slateHalf` is read from `--run`'s `bench-manifest.json` (`half`, recorded by `run-bench.ts`) |
 
-All flags verified 2026-07-30, re-verified 2026-07-30 (final-review.md fix round) against
+All flags verified 2026-07-30, re-verified 2026-07-30 (final-review.md fix round), re-verified
+2026-07-31 (live-smoke fix round: `--claude-config-dir` added) against
 `client/scripts/skills-bench/{pin-skill,build-slate,run-bench,render-receipts}.ts`.

@@ -27,7 +27,30 @@ export interface SkillPin {
   sha256: string;
   /** frontmatter `license` value, null when absent — Task 6 gates forking on it. */
   license: string | null;
+  /** Repo-root LICENSE/LICENSE.md/LICENSE.txt/COPYING fallback (first
+   *  non-empty line, truncated), null when none of those files exist.
+   *  Distinct provenance from `license` (frontmatter) — never write a
+   *  repo-level detection into `license`, and a permissive `repoLicense`
+   *  alongside a null `license` is a human judgement call, not automatic
+   *  fork eligibility (see docs/runbooks/skills-bench.md §2). */
+  repoLicense: string | null;
   fetchedAt: string;
+}
+
+const REPO_LICENSE_FILENAMES = ['LICENSE', 'LICENSE.md', 'LICENSE.txt', 'COPYING'];
+
+/** Crude repo-root license label for a human to follow up on — first
+ *  non-empty line of the first matching file found, truncated to 120 chars.
+ *  Never authoritative on its own; see `repoLicense` doc comment above. */
+async function detectRepoLicense(repoDir: string): Promise<string | null> {
+  for (const filename of REPO_LICENSE_FILENAMES) {
+    const path = join(repoDir, filename);
+    if (!existsSync(path)) continue;
+    const content = await readFile(path, 'utf8');
+    const firstLine = content.split('\n').map((l) => l.trim()).find((l) => l.length > 0);
+    if (firstLine) return firstLine.slice(0, 120);
+  }
+  return null;
 }
 
 async function hashDir(dir: string): Promise<string> {
@@ -84,6 +107,7 @@ export async function pinSkill(opts: PinSkillOptions): Promise<SkillPin> {
       skillPath: opts.skillPath,
       sha256: await hashDir(dest),
       license: parseFrontmatterLicense(skillMd),
+      repoLicense: await detectRepoLicense(cloneDir),
       fetchedAt: new Date().toISOString(),
     };
     await writeFile(join(dest, 'pin.json'), `${JSON.stringify(pin, null, 2)}\n`);

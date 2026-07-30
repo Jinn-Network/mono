@@ -58,6 +58,23 @@ export async function prepareBenchConfigDir(
   }
 }
 
+/** Message for a failed auth preflight probe (run-bench.ts, before any solve
+ *  work). Pure/testable: names why the isolated config dir is required (not
+ *  optional — dropping isolation lets ambient user-level skills leak into
+ *  the "no skill installed" baseline and makes receipts unreproducible off
+ *  this operator's machine) and both supported remediation routes. Never
+ *  reads, copies, or extracts a credential — detection + message only. */
+export function authPreflightFailureMessage(configDir: string): string {
+  return [
+    `[bench] auth preflight failed: the isolated CLAUDE_CONFIG_DIR (${configDir}) has no usable claude-code credentials.`,
+    `Isolation is required for a truthful baseline — an unisolated config dir lets the operator's ambient user-level skills/plugins leak into every arm, including the "no skill installed" baseline, and makes receipts unreproducible off this operator's machine.`,
+    `Fix with one of:`,
+    `  1. export ANTHROPIC_API_KEY=... (metered API billing; works headless — the route for the Linux wave host)`,
+    `  2. one-time interactive login into the bench config dir: CLAUDE_CONFIG_DIR=${configDir} claude` +
+      ` then /login (keeps subscription billing)`,
+  ].join('\n');
+}
+
 function toResult(o: Record<string, unknown>, raw: string): ClaudeRunResult {
   return {
     costUsd: typeof o.total_cost_usd === 'number' ? o.total_cost_usd : 0,

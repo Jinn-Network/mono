@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   buildClaudeArgs, mountSkill, unmountSkill, prepareBenchConfigDir, parseClaudeJson,
+  authPreflightFailureMessage,
 } from '../../src/skills-bench/claude-solve.js';
 
 const exec = promisify(execFile);
@@ -125,5 +126,19 @@ describe('parseClaudeJson', () => {
     expect(parseClaudeJson(withPreamble)).toMatchObject({
       costUsd: 0.2, numTurns: 5, isError: false, sessionId: 'sess-3',
     });
+  });
+});
+
+describe('authPreflightFailureMessage', () => {
+  it('names both remediation routes and the resolved config dir', () => {
+    const configDir = '/repo/bench/.claude-bench-config';
+    const msg = authPreflightFailureMessage(configDir);
+    // both routes named
+    expect(msg).toContain('ANTHROPIC_API_KEY');
+    expect(msg).toContain('/login');
+    // the config dir appears (identifies which dir has no usable creds, and
+    // is reused verbatim in the interactive-login remediation command)
+    const occurrences = msg.split(configDir).length - 1;
+    expect(occurrences).toBeGreaterThanOrEqual(2);
   });
 });

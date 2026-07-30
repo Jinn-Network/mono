@@ -20,7 +20,16 @@
  *     --arms ../bench/arms/wave1.json --model claude-sonnet-5 \
  *     --out ../bench/runs/wave1 [--repeats 1] [--max-turns 40] \
  *     [--max-instances N] [--grade-timeout-ms 600000] [--upstream-repo-dir PATH] \
- *     [--solve-concurrency N] [--candidate-id ID] [--force-holdout-rerun]
+ *     [--solve-concurrency N] [--candidate-id ID] [--force-holdout-rerun] \
+ *     [--claude-config-dir PATH]
+ *
+ * `--claude-config-dir` (default `<repoRoot>/bench/.claude-bench-config`) is
+ * the isolated `CLAUDE_CONFIG_DIR` claude-code auth lives in. It is stable
+ * and reusable across runs/--out dirs by design (an operator logs into it
+ * once, not once per run) — see docs/runbooks/skills-bench.md §1. Before any
+ * real (non-dry-run) solve work, a cheap auth preflight probe spawns claude
+ * against this dir and aborts the whole run with a clear message if it has
+ * no usable credentials — see `authPreflightFailureMessage`.
  *
  * `--half holdout` requires `--candidate-id <id>` and is one-shot per
  * candidate: `<repoRoot>/bench/holdout-ledger.json` (resolved from this
@@ -45,6 +54,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   buildClaudeArgs, mountSkill, unmountSkill, prepareBenchConfigDir, parseClaudeJson,
+  authPreflightFailureMessage,
 } from '../../src/skills-bench/claude-solve.js';
 import type { SkillsBenchSlate, SlateCandidate } from '../../src/skills-bench/slate.js';
 import {
@@ -92,6 +102,10 @@ interface BenchConfig {
   solveConcurrency: number;
   candidateId: string | undefined;
   forceHoldoutRerun: boolean;
+  /** Isolated CLAUDE_CONFIG_DIR claude-code auth lives in. Stable and
+   *  reusable across runs/--out dirs by design — see the module doc and
+   *  docs/runbooks/skills-bench.md §1. */
+  claudeConfigDir: string;
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-5';
@@ -112,6 +126,7 @@ function parseArgs(argv: string[]): BenchConfig {
     solveConcurrency: 1,
     candidateId: undefined,
     forceHoldoutRerun: false,
+    claudeConfigDir: join(repoRoot, 'bench', '.claude-bench-config'),
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -135,6 +150,7 @@ function parseArgs(argv: string[]): BenchConfig {
       case '--solve-concurrency': cfg.solveConcurrency = Math.max(1, Number(argv[++i]) || 1); break;
       case '--candidate-id': cfg.candidateId = String(argv[++i]); break;
       case '--force-holdout-rerun': cfg.forceHoldoutRerun = true; break;
+      case '--claude-config-dir': cfg.claudeConfigDir = resolve(String(argv[++i])); break;
       default: throw new Error(`unknown argument ${a}`);
     }
   }
@@ -305,6 +321,7 @@ async function solveAndGrade(
   spec: AttemptSpec,
   gradeQueue: SerialTaskQueue,
   gradeFailures: string[],
+  writtenKeys: string[],
 ): Promise<void> {
   const armDir = await createPilotWorkDir(cfg.outDir, `solve-${spec.arm.name}-${spec.repeat}-`);
   try {
@@ -354,6 +371,7 @@ async function solveAndGrade(
           costUsd: claudeResult.costUsd,
         };
         await appendAttempt(attemptsFile, outcome);
+        writtenKeys.push(key);
         const verdict = passed === null ? 'ungradeable' : passed ? 'passed' : 'failed';
         console.log(`[bench] graded ${instance.instance_id} arm=${spec.arm.name} → ${verdict}`);
       } catch (err) {
@@ -370,20 +388,32 @@ async function solveAndGrade(
 // Main
 // ---------------------------------------------------------------------------
 
+interface RunRealResult {
+  gradeFailures: string[];
+  /** Attempts that never reached the grade queue — claude spawn/exit failure,
+   *  patch recovery failure, etc. (F3: previously silently swallowed by the
+   *  per-spec `catch` below, which is how a run where every solve failed
+   *  instantly still exited 0). */
+  solveFailures: string[];
+  /** Count of outcomes actually appended to attempts.jsonl by this run. Zero
+   *  across a non-empty runnable set is a silence-looks-like-success signal
+   *  distinct from any individual solve/grade failure (e.g. every instance
+   *  failed at fetch/checkout, which isn't tracked in either failure list). */
+  outcomesWritten: number;
+}
+
 async function runReal(
   cfg: BenchConfig,
   specs: AttemptSpec[],
   attemptsFile: string,
   transcriptsDir: string,
-): Promise<string[]> {
-  const benchCfgDir = join(cfg.outDir, 'claude-config');
-  await prepareBenchConfigDir(benchCfgDir, {
-    sourceConfigDir: process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'),
-  });
-
+  benchCfgDir: string,
+): Promise<RunRealResult> {
   const hfFetcher = new HttpHfFetcher();
   const gradeQueue = new SerialTaskQueue();
   const gradeFailures: string[] = [];
+  const solveFailures: string[] = [];
+  const writtenKeys: string[] = [];
 
   const byInstance = new Map<string, AttemptSpec[]>();
   for (const spec of specs) {
@@ -425,9 +455,10 @@ async function runReal(
     try {
       for (const spec of instanceSpecs) {
         try {
-          await solveAndGrade(cfg, benchCfgDir, attemptsFile, transcriptsDir, instance, hfRow, baseDir, spec, gradeQueue, gradeFailures);
+          await solveAndGrade(cfg, benchCfgDir, attemptsFile, transcriptsDir, instance, hfRow, baseDir, spec, gradeQueue, gradeFailures, writtenKeys);
         } catch (solveErr) {
           console.warn(`[bench]   solve error for ${instanceId}/${spec.arm.name}/${spec.repeat}: ${(solveErr as Error).message} — skipping, continuing`);
+          solveFailures.push(attemptKey({ instanceId: spec.candidate.instance_id, arm: spec.arm.name, repeat: spec.repeat }));
         }
       }
     } finally {
@@ -436,11 +467,32 @@ async function runReal(
   });
 
   await gradeQueue.drain();
-  return gradeFailures;
+  return { gradeFailures, solveFailures, outcomesWritten: writtenKeys.length };
+}
+
+/** Cheap auth probe against the isolated bench config dir, run once before
+ *  any real solve work. Never in --dry-run (no claude spawn happens there
+ *  anyway). Aborts the whole run with `authPreflightFailureMessage` on
+ *  failure — never attempts to read/copy/extract a credential itself. */
+async function runAuthPreflight(cfg: BenchConfig, benchCfgDir: string): Promise<void> {
+  const probeCwd = await createPilotWorkDir(cfg.outDir, 'auth-probe-');
+  try {
+    const args = ['-p', 'ok', '--model', cfg.model, '--output-format', 'json', '--max-turns', '1'];
+    const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CONFIG_DIR: benchCfgDir };
+    const { stdout, exitCode } = await run('claude', args, { cwd: probeCwd, env });
+    const result = exitCode === 0 ? parseClaudeJson(stdout) : null;
+    if (exitCode !== 0 || !result || result.isError) {
+      throw new Error(authPreflightFailureMessage(benchCfgDir));
+    }
+    console.log('[bench] auth preflight ok');
+  } finally {
+    await rm(probeCwd, { recursive: true, force: true });
+  }
 }
 
 async function main(): Promise<void> {
   const cfg = parseArgs(process.argv.slice(2));
+  console.log(`[bench] claude config dir: ${cfg.claudeConfigDir}`);
   const slate = loadSlate(cfg.slatePath);
   const arms = loadArms(cfg.armsPath);
 
@@ -484,6 +536,13 @@ async function main(): Promise<void> {
     return;
   }
 
+  // F2: fail loud before any real solve work if the isolated config dir has
+  // no usable credentials — never in --dry-run (handled above by the return).
+  await prepareBenchConfigDir(cfg.claudeConfigDir, {
+    sourceConfigDir: process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'),
+  });
+  await runAuthPreflight(cfg, cfg.claudeConfigDir);
+
   if (cfg.half !== 'feedback') {
     // Every non-dry run that can touch holdout instances (--half holdout OR
     // --half both) records into the ledger, so the ledger is a complete audit
@@ -511,14 +570,36 @@ async function main(): Promise<void> {
     });
   }
 
-  const gradeFailures = await runReal(cfg, runnable, attemptsFile, transcriptsDir);
+  const { gradeFailures, solveFailures, outcomesWritten } = await runReal(cfg, runnable, attemptsFile, transcriptsDir, cfg.claudeConfigDir);
+
+  let hadFailure = false;
+  if (solveFailures.length > 0) {
+    console.error(
+      `[bench] ${solveFailures.length} attempt(s) failed before producing a gradeable patch and were ` +
+      `NOT logged (re-runnable on resume): ${solveFailures.join(', ')}`,
+    );
+    hadFailure = true;
+  }
   if (gradeFailures.length > 0) {
     console.error(
       `[bench] ${gradeFailures.length} attempt(s) hit an unexpected grade error and were NOT ` +
       `logged (re-runnable on resume): ${gradeFailures.join(', ')}`,
     );
-    process.exitCode = 1;
+    hadFailure = true;
   }
+  // F3: a run where every solve failed instantly (e.g. auth broke mid-run,
+  // every instance failed fetch/checkout) must not exit 0 with an empty
+  // attempts.jsonl just because no individual failure list happened to
+  // capture it — outcomesWritten is the ground-truth backstop.
+  if (outcomesWritten === 0) {
+    console.error(
+      `[bench] NOTHING WAS RECORDED — 0 outcomes were appended to ${attemptsFile} across ` +
+      `${runnable.length} runnable attempt(s). Treat this run as failed, not a clean no-op, even ` +
+      `though no individual attempt above may show as a failure.`,
+    );
+    hadFailure = true;
+  }
+  if (hadFailure) process.exitCode = 1;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
