@@ -36,6 +36,11 @@ and the application layer index
 
 ## 2. The layering law
 
+> **Owning home (2026-07-30):** the layering law, the platform boundary built on it, and the
+> repository topology are now owned by
+> [`2026-07-30-jinn-platform-architecture.md`](./2026-07-30-jinn-platform-architecture.md)
+> (DR-2026-07-30). This section remains as the index summary.
+
 Four tiers, defined in benchmarking
 [§2](./2026-07-28-benchmarking-application-design.md), extending the frozen dependency
 direction one level up:

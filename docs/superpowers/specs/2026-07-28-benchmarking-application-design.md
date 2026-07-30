@@ -87,6 +87,12 @@ first product-facing proof of it.
 
 ## 2. Position in the architecture
 
+> **Graduated 2026-07-30 (DR-2026-07-30).** The four-tier layering law introduced in this
+> section is now owned by
+> [`2026-07-30-jinn-platform-architecture.md`](./2026-07-30-jinn-platform-architecture.md) §3,
+> which builds the platform boundary on it. This section remains valid as the law's origin and
+> as this design's own positioning; cite the platform-architecture spec for the law itself.
+
 This design adopts (and this session introduces) a four-tier reading of the
 stack. The tiers extend the frozen dependency direction one level up:
 
