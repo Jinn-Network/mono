@@ -49,3 +49,14 @@ examples/external-restorer-impls/*/.yarn/install-state.gz
 # yarn PnP local install artefacts (per-machine; never committed)
 packages/*/.pnp.cjs
 packages/*/.pnp.loader.mjs
+
+# Skills-bench working data (docs/superpowers/plans/2026-07-30-skills-factory-mvp.md
+# File Structure) — gitignored except the committed slate, the vendored skill
+# pins, and the public skills-repo template. bench/runs/, bench/variants/,
+# bench/arms/, and bench/holdout-ledger.json stay ignored.
+bench/*
+!bench/skills-under-test/
+!bench/slate/
+bench/slate/*
+!bench/slate/slate.json
+!bench/skills-repo-template/
