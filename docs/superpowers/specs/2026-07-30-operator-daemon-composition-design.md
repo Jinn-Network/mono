@@ -213,6 +213,11 @@ Four placement notes:
   `DeliveryWaitPort`, `ReleaseAttemptPort`) are declared in the pipeline package. At stage 0
   they are re-exported from the binding's port surface so the adapter tree depends on
   binding types only, keeping tier-3 adapters off the application-shaped package.
+  *Corrected 2026-07-30 (planning consolidation, venue-base plan finding 1):* venue-base
+  additionally takes `marketplace-projector` as a production dependency — the log source
+  emits its types, the finality waiter applies its policy, projector-backed observe is
+  projector-shaped by definition. The operative clause is that `marketplace-pipeline` is
+  guard-forbidden in venue-base production source.
 - **npm posture (recorded for #2293).** `venue-base` is signer-injection-only: every port
   takes an injected viem `WalletClient`; the package contains no keystore, no key-loading
   code, and no key material ever. The external-consumer boundary rule ("no tx client in the
@@ -297,7 +302,11 @@ profile fixed at implementation." Ruling 3 closes it.
    are corrected append-only through signed retractions (binding §8), never rewritten.
 3. **Archive transport — compose: RFC 9110/9111 + SSE.** `ETag`/`If-None-Match` conditional
    GET on the head (the only mutable object); `Cache-Control: immutable` on digest paths and
-   archive pages; declared `Accept-Ranges: bytes` on blobs. The pull-tail is fixed as **SSE
+   archive pages *(refined 2026-07-30 at planning consolidation: `immutable` applies to
+   sealed pages — those with a successor — while the newest, still-growing page serves with
+   ETag + `no-cache`, since `serve` rewrites it on append; the replay-window advertisement
+   is typed in `transport-http` pending promotion into `serve`)*; declared
+   `Accept-Ranges: bytes` on blobs. The pull-tail is fixed as **SSE
    with `Last-Event-ID` carrying the relay cursor** — the boring standard for a
    server-to-client append-only feed (auto-reconnect, plain HTTP, stateless horizontal
    scale); WebSocket is justified only by mid-stream client-to-server messages, and our
@@ -410,7 +419,13 @@ the `SubmissionFacts` mapper accepts it as a declared bridge input until stage 5
 other direction, the loop stays closed because the converged Delivery is convergence, not
 wrapping (binding §6.3): the sealed marketplace-profile Delivery re-homes the
 `jinn.execution.v1` content the legacy evaluator already parses — verified by a stage-1
-fixture, not assumed.
+fixture, not assumed. *Corrected 2026-07-30 (planning consolidation, stage-1 plan finding
+D3): code investigation showed the fixture would be red — the backend's sealed TEP Delivery
+carries no `jinn.execution.v1` payload and the legacy evaluator's envelope parse throws.
+The ratified bridge is an optional namespaced `deliveryExtensions` hook on
+`LocalTaskExecutionBackendConfig` (permitted by `DeliveryRecordSchema`'s `.loose()` and TEP
+§21.3) carrying the legacy envelope content, plus a read-path preference in the mech
+adapter; both retire with the `legacyManifestDigest` bridge after stage 5.*
 
 **Drain rules (every retiring flow).** A hard swap is preceded by a drain: the retiring
 flow stops accepting new work and runs until its in-flight items reach terminal states

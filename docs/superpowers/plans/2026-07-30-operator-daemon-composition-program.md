@@ -125,7 +125,11 @@ gates.
 7. **Archive exposure scoping** — public subtree only; opt-in non-localhost bind;
    IP-disclosure copy (spec §6.2).
 8. **Port-type home** — the three pipeline-declared ports re-export from binding at
-   stage 0; venue-base depends on binding types only (spec §6.1).
+   stage 0; venue-base depends on binding types only (spec §6.1). *Corrected 2026-07-30 at
+   planning consolidation:* venue-base additionally takes `marketplace-projector` as a
+   production dependency (log-source types, finality policy, projector-backed observe are
+   projector-shaped by definition); the operative clause is that `marketplace-pipeline` is
+   guard-forbidden in venue-base.
 9. **Bridge-era documents** — projector synthesizes legacy facts cards under a `legacy`
    derivation annotation; converged-Delivery legacy-evaluator parseability is a stage-1
    fixture (spec §10).
@@ -151,3 +155,32 @@ no `sdk` retirement beyond the daemon's own consumption, no `core`/`layer`/`plug
 disposition, no earning recomposition, no config hot reload, no new protocol semantics, no
 mainnet decisions. Additionally: the npm publish path (#2293) is program-adjacent, not
 program work.
+
+## 9. Planning findings and rulings (2026-07-30)
+
+The four phase-0/stage-1 component plans were authored 2026-07-30 (parallel planning
+agents) and surfaced seventeen findings; every ruling is recorded as a dated amendment in
+the owning plan, and the ones that correct this plan or the spec carry inline dated notes
+there. Summary of the rulings that change scope or contracts:
+
+- **Contract 8 rescoped** (venue-base finding 1) — see the §6 inline correction.
+- **The marketplace deliver leg** (stage-1 F1) is venue-base's tenth deliverable; nothing
+  in the merged stack sends the Mech `Deliver` transaction today-mode settlement requires.
+  Executed by stage-1 Task 8 with amended paths.
+- **Stage-2 scope addition** (evaluator-adapters finding A): the container driver for
+  `deterministic-process` graders is a stage-2 host deliverable — nothing in the merged
+  stack executes a pinned grader image; the harness resolves and validates only. The
+  stage-2 plan must include it.
+- **No claim-nothing migration** (stage-1 F7 reversed): per-claim caps are optional; unset
+  maps to permissive pipeline caps with the host USD rolling-window gates as the operative
+  bound — behavior-identical per spec §9.
+- **The spec's §10 converged-Delivery parseability claim was falsified** by code
+  investigation (stage-1 finding D3): the backend's sealed TEP Delivery carries no
+  `jinn.execution.v1` content and the legacy evaluator's parse throws. Ratified bridge: the
+  namespaced `deliveryExtensions` hook (TEP §21.3-permitted, retires after stage 5). The
+  spec carries the dated correction.
+- **Follow-ups recorded here** (none block execution): config-precedence docs chore
+  (CLAUDE.md says file-over-env; code is env-over-file); legacy config-writer atomicity
+  (stage 3); notification-taxonomy drift; harness runtime's unreachable
+  `recorded-inconclusive` path; swe-rebench measurable score/count/cost fields
+  (profiles-owned); replay-window field promotion into `serve`.
