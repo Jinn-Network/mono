@@ -4,6 +4,7 @@
 - **Date:** 2026-07-07
 - **Author:** Oak (writing session)
 - **Status:** Standing infrastructure for the Jinn Harness Network v0 gate ([#1307](https://github.com/Jinn-Network/mono/issues/1307), [#1315](https://github.com/Jinn-Network/mono/issues/1315))
+- **Superseded for public surfaces (2026-07-30):** jinn.network now tells the platform/market story from the [2026-07-29 platform one-pager](2026-07-29-jinn-platform-one-pager.md), which is the copy source for the site. This spine's personal-agent framing ("a personal agent backed by a shared, verified memory") no longer governs the landing page. Its messaging guardrails — no "proven"/"guaranteed"/"best", plain words on money and consent, earn-not-paid, claim only what the chain shows — still apply to every surface. A versioned rewrite of the spine under the platform framing is outstanding.
 
 ## What this document is
 
