@@ -185,6 +185,56 @@ real tasks, resolve rate A% → B% [CI], reproduction in /receipts.*
 Announcement: one thread (Oak's channels) pointing at the receipts table. No submission flows
 anywhere; registries index the repo on their own.
 
+### 5.1 Skill packaging — the standard, unmodified; receipts by pointer
+
+Verified against the [Agent Skills specification](https://agentskills.io/specification) and the
+[skills CLI](https://github.com/vercel-labs/skills) on 2026-07-30.
+
+The spec permits exactly six frontmatter keys — `name` and `description` (required), plus
+`license`, `compatibility`, `metadata`, `allowed-tools`. Unknown top-level keys fail validation.
+`metadata` is the sanctioned extension point and is a **flat map of string keys to string
+values** (no nested objects). The CLI requires no manifest file; it scans conventional paths for
+`SKILL.md` and has no version concept of its own.
+
+**The receipt does not go in the frontmatter or the body.** `name` and `description` load into
+the agent's context at startup for *every installed skill in every session* (~100 tokens each),
+and `description` is the string the model matches a request against to decide whether to
+trigger. Benchmark claims there would tax every user on every session and dilute the matching
+surface, degrading trigger accuracy. The body loads whole on trigger, so receipt prose there is
+pure runtime cost that does not help the agent do the task.
+
+Frontmatter therefore carries **pointers**, and the receipt lives in the repo:
+
+```yaml
+---
+name: <skill-name>
+description: <pure trigger text — what it does and when to use it, nothing else>
+license: <upstream license>
+metadata:
+  jinn.receipt: https://github.com/Jinn-Network/skills/blob/main/receipts/<name>.md
+  jinn.receipt-sha256: "<hash of the receipt file>"
+  jinn.measured-on: "<date>"
+  jinn.forked-from: "<owner/repo@commit>"
+  version: "<n>"
+---
+```
+
+Keys are namespaced per the spec's collision guidance. This makes the claim machine-readable
+without inventing a registry or breaking any client. Human-facing display stays in the README
+(what registry pages surface) and `receipts/`.
+
+Two consequences, both binding:
+
+1. **The `description` is an optimization target, not ad space.** "Never triggered" is one of the
+   three failure modes the improvement loop reads out of transcripts (§4), and its fix *is*
+   editing the description. Keeping it clean protects the lever. When a fork changes the
+   description, the receipt must record that as part of what was measured.
+2. **The standard has no verification, and no artifact may imply otherwise.** Anyone can write a
+   `metadata` key asserting a benchmark; a frontmatter field is an assertion, not evidence. All
+   credibility rests on the receipt being re-runnable — pinned slate, raw per-task results, and
+   the rig in the same repo. Copy must present the field as a pointer, never as proof. Closing
+   that gap with independently anchored evidence is post-MVP (§6, v1.0 territory).
+
 ## 6. Explicitly cut (v1.0 territory, unchanged destination)
 
 No marketplace, no on-chain anchoring, no corpus reads/writes, no Hub, no powered
@@ -214,6 +264,9 @@ reference.
   https://github.com/vercel-labs/skills
 - Vercel KB — Agent Skills creation/installation:
   https://vercel.com/kb/guide/agent-skills-creating-installing-and-sharing-reusable-agent-context
+- Agent Skills specification (frontmatter keys, `metadata` shape, progressive disclosure):
+  https://agentskills.io/specification; Anthropic overview:
+  https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview
 - Secondary indexes: https://skillsmp.com/, https://claude-plugins.dev/skills,
   https://mcpservers.org/agent-skills, https://claudemarketplaces.com/
 - Adjacent academic activity (niche being circled, unoccupied): arXiv 2605.11418 (skill-registry
