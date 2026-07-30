@@ -50,3 +50,10 @@ export {
   createFinalityWaiter,
 } from "./waiters/finality.js";
 export type { FinalityWaiterOptions } from "./waiters/finality.js";
+export {
+  createClaimPreflight,
+  createClaimWriter,
+  decodeAttemptFromLogs,
+  encodeClaimTaskCalldata,
+} from "./writers/claim.js";
+export type { ClaimWriterInput } from "./writers/claim.js";
