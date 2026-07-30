@@ -116,6 +116,31 @@ jobs:
           set -euo pipefail
           node .github/scripts/publish-stack.mjs --mode canary --sha "${JINN_BUILD_COMMIT}"
 
+      - name: Wait for the platform set on the registry
+        if: steps.guard.outputs.present == 'true' && github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SET_VERSION="$(node -e "console.log(JSON.parse(require('fs').readFileSync('packages/trust/core/package.json','utf8')).version)")"
+          ACCEPTANCE_VERSION="${SET_VERSION}-canary.sha.${JINN_BUILD_COMMIT}"
+          echo "ACCEPTANCE_VERSION=${ACCEPTANCE_VERSION}" >> "${GITHUB_ENV}"
+          PROBE_PACKAGE="$(node -e "console.log(JSON.parse(require('fs').readFileSync('packages/task-execution/testing/package.json','utf8')).name)")"
+          for _ in $(seq 1 60); do
+            if npm view "${PROBE_PACKAGE}@${ACCEPTANCE_VERSION}" version >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::${PROBE_PACKAGE}@${ACCEPTANCE_VERSION} never became visible on the registry"
+          exit 1
+
+      - name: Registry consumer acceptance
+        if: steps.guard.outputs.present == 'true' && github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .github/scripts/stack-external-acceptance.mjs --version "${ACCEPTANCE_VERSION}"
+
   stack-stable:
     name: stack-stable
     if: (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'stack-v')) || github.event_name == 'workflow_dispatch'
@@ -159,6 +184,28 @@ jobs:
         run: |
           set -euo pipefail
           node .github/scripts/publish-stack.mjs --mode stable --release-tag "${RELEASE_TAG}"
+
+      - name: Wait for the platform set on the registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACCEPTANCE_VERSION="${RELEASE_TAG#stack-v}"
+          echo "ACCEPTANCE_VERSION=${ACCEPTANCE_VERSION}" >> "${GITHUB_ENV}"
+          PROBE_PACKAGE="$(node -e "console.log(JSON.parse(require('fs').readFileSync('packages/task-execution/testing/package.json','utf8')).name)")"
+          for _ in $(seq 1 60); do
+            if npm view "${PROBE_PACKAGE}@${ACCEPTANCE_VERSION}" version >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::${PROBE_PACKAGE}@${ACCEPTANCE_VERSION} never became visible on the registry"
+          exit 1
+
+      - name: Registry consumer acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .github/scripts/stack-external-acceptance.mjs --version "${ACCEPTANCE_VERSION}"
 
   registrations:
     name: Trusted-publisher registration list

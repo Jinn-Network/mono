@@ -52,3 +52,16 @@ test('the stable lane derives its version from a stack-v tag', () => {
 test('the stable lane refuses a release tag that is not on origin at the checked-out sha', () => {
   assert.match(workflow, /Release tag \$\{RELEASE_TAG\} points at/);
 });
+
+test('both lanes run external acceptance after publishing', () => {
+  const occurrences = workflow.split('name: Registry consumer acceptance').length - 1;
+  assert.equal(occurrences, 2, 'canary and stable lanes must each run external acceptance');
+  const canaryPublishAt = workflow.indexOf('name: Publish the platform package set');
+  const canaryAcceptAt = workflow.indexOf('name: Registry consumer acceptance');
+  assert.ok(canaryPublishAt < canaryAcceptAt, 'acceptance must follow the publish step');
+  assert.match(workflow, /node \.github\/scripts\/stack-external-acceptance\.mjs --version "\$\{ACCEPTANCE_VERSION\}"/);
+});
+
+test('acceptance waits for registry availability before installing', () => {
+  assert.match(workflow, /name: Wait for the platform set on the registry/);
+});
