@@ -218,6 +218,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
+      - name: Verify the publication surface
+        run: node --test .github/scripts/stack-publication-surface.test.mjs
       - name: Generate the registration list
         run: node .github/scripts/stack-trusted-publishers.mjs --out "${RUNNER_TEMP}/registrations"
       - uses: actions/upload-artifact@v4
