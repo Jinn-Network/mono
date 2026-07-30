@@ -100,10 +100,11 @@ function fixture(
 ): LocalTaskExecutionBackend {
   const provisioner: ProvisionerContract = {
     workspaceKind: () => "dir",
-    async setup() {
+    async setup(_view, workspace) {
       if (options.provisioningRejectReason !== undefined) {
         throw new ProvisioningRejectedError(options.provisioningRejectReason);
       }
+      await Promise.all(Object.values(workspace).map((path) => mkdir(path, { recursive: true })));
     },
     executionEnv: (launch) => ({ ...launch.env }),
     async harvest() {
