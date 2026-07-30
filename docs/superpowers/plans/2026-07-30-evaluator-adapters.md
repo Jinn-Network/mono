@@ -3718,6 +3718,246 @@ a real `out/verdict` DSSE envelope. It is the gate the program's stage-0 review 
       git commit -m "docs(task-execution): finalize the evaluator-adapters README and findings"
       ```
 
+## Execution findings (2026-07-30, recorded during execution)
+
+Findings raised while executing the tasks above, each with the adaptation actually taken.
+These are plan-vs-code mismatches, not design changes.
+
+**E1 (Task 1) — the plan's `package.json` devDependency/`resolutions` set is incomplete; the
+standalone install 404s.** `yarn install` failed with
+`YN0035: @jinn-network/evidence-repository@npm:0.1.0: Package not found` because two
+transitive links have no portal entry: `@jinn-network/attestation-issuer` (a plan-declared
+devDependency) has a production dependency on `@jinn-network/evidence-repository`, and
+`task-execution-supervisor` / `task-execution-launchers` transitively require
+`@jinn-network/task-execution-backend`. Neither appears in the plan's `resolutions`, so Yarn
+reached for the unpublished registry. *Adaptation:* added `@jinn-network/evidence-repository`
+(`portal:../../evidence/repository`) and `@jinn-network/task-execution-backend`
+(`portal:../backend`) to both `devDependencies` and `resolutions`, and mirrored the same two
+names into the package-inventory guard's `JINN_DEPENDENCY_GRAPH` entry (the guard asserts
+exact equality against the manifest). This is the same "transitive gap-fill" pattern the
+evaluation-harness manifest already documents for itself; the plan simply under-counted it by
+two. No production import crosses these edges — the source-boundary guard still forbids
+`task-execution-backend` and `task-execution-launchers` in production source.
+
+**E2 (Task 1) — the source-boundary guard could not be observed red.** The plan itself
+anticipates this ("Once `src/index.ts` exists from the previous step it passes"). The
+inventory guard's red (`missing package manifest: …/evaluator-adapters/package.json`, 2 of 3
+tests failing) served as the scaffold's failing gate. No adaptation needed; recorded so the
+absent red is not mistaken for a skipped step.
+
+**E3 (Task 2) — the swe-rebench semantics document's `ungradeable.classes` list is
+incomplete.** The plan's 19-entry array omits two real `EvalCouldNotGradeError` reason codes.
+Verified by the coordinator against the real file: `eval-runner.ts:472` throws
+`'eval_timeout'` when the python eval exceeds its wall clock, and `eval-runner.ts:485` throws
+`matchInfraSignature(stderr + stdout) ?? 'eval_no_report'` when `report.json` never parses.
+There are exactly five `EvalCouldNotGradeError(` call sites in that file; these are the only
+two the plan missed. *Adaptation:* added `"eval_timeout"` and `"eval_no_report"` to `classes`
+and extended `ungradeable.rule` to describe the "no parseable report at all" case. Note the
+digest consequence: the semantics document's bytes ARE the parser identity, so this
+correction changes `SWE_REBENCH_PARSER.digest` relative to a naive verbatim transcription —
+which is the mechanism working as designed.
+
+**E4 (Task 2) — the prediction semantics document mis-transcribes the legacy check set,
+check names, inconclusive rule, and status enum.** Four separate mismatches, all verified by
+the coordinator against the real files:
+- *Check names.* The plan writes `"result.schema"` / `"result.window"`. The real code emits
+  `'solution.schema'` (`prediction-v1-evaluator/index.ts:111,114`) and `'solution.window'`
+  (`:123,126`). Corrected to the real names.
+- *Check set.* The plan lists four checks; the cited range pushes seven —
+  `solution.envelope` (`:96,101`), `integrity.manifest_signature`, `integrity.signedTask_ref`,
+  `solution.schema`, `solution.window`, `market.identity` (`:238,241`), `market.resolution`
+  (`:136,138,140`). This is material, because the document's own `verdict.fail` rule ("any
+  check other than market.resolution reports FAIL") is only meaningful over a complete check
+  set. Corrected to all seven.
+- *Inconclusive trigger.* The plan says only "the market is not resolved". `deriveVerdict`
+  (`:225`) returns `INDETERMINATE` on *any* `INDETERMINATE` check, and
+  `checkTaskRefMissingExpected()` (`:108`) also returns `INDETERMINATE` when
+  `context.solutionTaskCid` is absent. Corrected to name both triggers.
+- *Status enum.* The plan writes `resolved|unresolved|unavailable`. No `'unavailable'` value
+  exists anywhere; the real `ResolutionSnapshot.status` is
+  `'unresolved' | 'resolved' | 'invalid' | 'cancelled' | 'ambiguous'`
+  (`client/src/venues/polymarket/client.ts:73`). Corrected to the real five-value enum.
+
+**E5 (Task 2) — one plan citation points at the wrong legacy file.** The plan sources the
+prediction document's `scoring` block from
+`client/src/harnesses/impls/prediction-v0-evaluator/score.ts`. That file implements a
+*different* scheme: basis `'brier.v1'`, formula `1 - (p - outcome)^2` (accuracy, not loss),
+encoded as a `1e18`-scaled BigInt string. The plan's stated `scoring` block is in fact
+accurate to **v1**'s `scoreBrier` (`prediction-v1-evaluator/index.ts:252-273`), verified by
+the coordinator: `scoreBasis: 'brier-loss.v1'`, `(solver - target) ** 2`,
+`.toFixed(6)` on all three fields. *Adaptation:* the document content stands (it is correct
+for v1, which is the evaluator being re-homed); the plan's v0 citation is the error and is
+recorded here rather than followed. The v0 path is legacy-superseded and is not re-homed.
+
+**E6 (Task 3) — four legacy citations point at the wrong lines; one points at the wrong
+function entirely.** Every provenance string in the plan's 18-fixture list was opened and
+checked against the real file. Results:
+- `eval.py:88-101` is cited as the source of the two upstream report shapes. It is not — those
+  lines are `load_specs_from_hf`'s HuggingFace rows-pagination logic. The function that
+  actually builds both report shapes is `build_report_item` at
+  `client/test/harnesses/impls/swe-rebench-v2-evaluator/fixtures/eval.py:356-382` (verified by
+  the coordinator). *Adaptation:* citation corrected.
+- The four 2026-05-14 triage fingerprint constants are each cited ~2 lines early. Real
+  positions in `client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts`:
+  `VENV_COLLISION` 578-582, `MISSING_PYTEST` 584-585, `REQUESTS_DEP_WARNING` 587-588,
+  `CONFTEST_IMPORT_ERROR` 590-591 (verified by the coordinator). The fixture *strings*
+  themselves were byte-accurate. *Adaptation:* line ranges corrected; fixture bytes unchanged.
+- `eval-runner.ts:478-489` is cited for the "report is not an object" fixture, but those lines
+  are the `JSON.parse`-failure branch (`eval_no_report`), a different path. The path that
+  actually produces `eval_report_malformed` for a non-object item is `:491-507` (the item
+  defaults to `{}`, then the missing-`exit_code` check fires). *Adaptation:* citation
+  corrected.
+- All other citations verified as matching.
+
+**E7 (Task 3) — one plan fixture did not exercise the behavior it claims to test.**
+`adversarial-truncated-log-with-no-marker` cites `eval-runner.ts:256-261` (`capLogTail` +
+signature matching), but its report data (`failed_from_pass_to_pass: []` against a
+one-element `passToPass`) leaves the `nothingPassed` gate closed, so
+`classifyInfrastructureSignature` is never reached and the fixture would pass for the wrong
+reason. *Adaptation:* the fixture's `failed_from_pass_to_pass` was opened so the gate fires
+and the no-signature fall-through is genuinely exercised. Expected outcome is unchanged
+(`graded`, `passed: false`) — the fixture now reaches that outcome through the cited code.
+
+**E8 (Task 3) — two ungradeable classes have no fixture, by construction.** `eval_timeout`
+and `eval_no_report` (added to the semantics document under E3) are raised *upstream* of the
+pure parser: they describe a grader run that produced no parseable report at all, which is
+the injected `GraderReportSource`'s failure domain, not the parser's `(report, log)` input
+domain. No fixture is possible for them in Task 3's shape. Recorded rather than papered over;
+the semantics document's `ungradeable` prose was written to cover the "no parseable report"
+case so the vocabulary stays honest about where each class originates.
+
+**E9 (Task 4) — the plan's own test contradicts the plan's own signature table.** The plan
+asserts `classifyInfrastructureSignature("docker: Error response from daemon: no such image")`
+returns `"docker_run_failed"`. That string matches two entries, and first-match-wins picks the
+earlier one: `image_pull_failed` (`/No such image|manifest unknown|pull access denied/`) sits
+at index 2, `docker_run_failed` (`/^docker: (?:error|Error response from daemon)/m`) at index
+4. The coordinator verified the real `INFRA_SIGNATURES` array
+(`client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:216-242`): 18 entries,
+and the plan's transcription is faithful in pattern, class, and — critically — order. So the
+implementation is right and the test literal is wrong. The real legacy suite hedges around
+exactly this ambiguity: `eval-runner.test.ts:628-632` asserts only `.not.toBeNull()` for a
+similarly overlapping docker string rather than pinning a class. *Adaptation:* the test's
+input string was changed to one that matches `docker_run_failed` unambiguously
+(`"docker: Error response from daemon: conflict: unable to remove repository reference"`),
+keeping the asserted class. The signature table was NOT reordered — reordering it would
+change real classification behavior to satisfy a bad test.
+
+*(Transcription note: the plan adds Unicode `u` flags to every regex the legacy table writes
+without them. Checked entry by entry — none of the 18 patterns contains a construct whose
+behavior differs under `u`, so this is cosmetic, not a behavioral divergence.)*
+
+**E10 (Task 6) — three prediction fixtures cite a code path that cannot see their input, and
+the legacy behavior there is an uncaught crash.** The `adversarial-result-is-not-json` /
+`-is-not-utf8` / `-is-empty` fixtures cite `prediction-v1-evaluator/index.ts:112-118`, the
+`catch` that converts a schema-validation throw into `solution.schema: FAIL`. Verified by the
+coordinator: that `try` opens at line 89 and wraps only `SignedEnvelopeSchema.parse` /
+`PredictionV1RestorationPayloadSchema.parse` — i.e. already-parsed JSON. The raw
+`JSON.parse(manifestJson)` sits at line 81, *outside* the try, unguarded. Malformed, empty, or
+non-UTF-8 input therefore throws uncaught and crashes the legacy evaluator's `run()`; it
+produces no check at all. *Adaptation:* citations corrected to `:80-81`, and the fixtures keep
+`verdict: "fail"` as an explicit, documented normalization rather than a literal port of the
+crash. This is the right verdict under the plan's own unscorable rule: a malformed solver
+Result is the solver's failure to deliver a valid result, not an infrastructure failure to
+grade one, so it is a graded `fail` and NOT an `EvaluationOperationalError`. Recorded in the
+fixture module and in `fixtures/prediction/README.md` so the divergence from legacy is not
+silent.
+
+**E11 (Task 6) — `adversarial-probability-out-of-range` cites the superseded v0 scorer.** The
+plan sources it from `prediction-v0-evaluator/score.ts:8-22`, which is v0's `computeScore`
+(basis `'brier.v1'`, per E5 a different scheme that is not being re-homed) and does not
+range-check probability at all. The real v1 mechanism that rejects `"1.500000"` is
+`DecimalProbabilitySchema` — verified by the coordinator at `packages/sdk/src/prediction-v1.ts:8-10`,
+regex `/^(0(\.\d+)?|1(\.0+)?)$/` — enforced inside `PredictionV1RestorationPayloadSchema.parse()`
+at `index.ts:110` and caught by the `:112-118` block. *Adaptation:* citation corrected to
+`index.ts:110-118`. Same genre of error as E5; the plan's two v0 citations are both wrong.
+
+**E12 (Task 6) — the plan's `PredictionResolutionSnapshot.status` union contains a fabricated
+member.** `"unavailable"` appears in no legacy file. Real declaration
+(`client/src/venues/polymarket/client.ts:69-77`):
+`status: 'unresolved' | 'resolved' | 'invalid' | 'cancelled' | 'ambiguous'`. *Adaptation:*
+type corrected to the real five-value enum. No fixture value used `'unavailable'`, so no
+fixture data changed. Consistent with E4, which corrected the same fabrication in the parser
+semantics document.
+
+**E13 (Task 7, found against Task 6's deliverable) — the prediction fixtures' shared `WINDOW`
+constant does not bracket the `submittedAt` instant the fixtures use.** Task 6 landed
+`WINDOW = { startTs: 1_780_000_000_000, endTs: 1_780_086_400_000 }`, which is
+2026-05-28T20:26:40Z .. 2026-05-29T20:26:40Z, while eight of ten fixtures submit at
+`"2026-06-01T00:00:00.000Z"` = 1_780_272_000_000 — three days late. The coordinator verified
+the arithmetic independently. Six fixtures hid it (they already expect `fail` for unrelated
+reasons); four did not, and a legacy-faithful window check correctly failed
+`scored-yes-solver-beats-consensus`, `scored-no-solver-worse-than-consensus`,
+`inconclusive-market-unresolved`, and `market-identity-condition-id-is-case-insensitive`.
+*Adaptation:* `WINDOW` corrected to
+`{ startTs: 1_780_228_800_000, endTs: 1_780_315_200_000 }` — 2026-05-31T12:00:00Z ..
+2026-06-01T12:00:00Z, exactly 86_400_000ms (the maximum the legacy task schema permits per
+`client/src/types/prediction.ts:67`), bracketing the in-window instant while still excluding
+`rejected-submission-outside-window`'s deliberate `"2026-05-01T00:00:00.000Z"`. No fixture's
+own `submittedAt` or `expect` field was touched. *Process note:* the executor refused to
+relax the parser's window check to make the fixtures pass and escalated instead. That is the
+correct call and worth recording — the fixture was wrong, not the parser.
+
+**E14 (Task 7) — the prediction parser implements 4 of the 7 real legacy checks, by
+construction.** `solution.envelope`, `integrity.manifest_signature`, and
+`integrity.signedTask_ref` need envelope, signature, and expected-task-CID data that the
+plan's own `PredictionParseInput` does not carry. Rather than widen the plan's interface
+unilaterally, the parser implements `solution.schema`, `solution.window`, `market.identity`,
+`market.resolution` and documents the omission in `parse.ts`. The three integrity checks are
+envelope-layer concerns that belong to the host/adapter edge, not the pure scorer. Recorded
+so the gap between the semantics document's seven-check list and the parser's four is
+explicit rather than discovered later.
+
+**E15 (Task 7) — the plan's stale 3-value status whitelist would have passed vacuously.** No
+Task 6 fixture exercises `invalid`, `cancelled`, or `ambiguous`, so a parser carrying the
+plan's fabricated `resolved|unresolved|unavailable` union would have gone green against all
+ten fixtures while mishandling three real venue states. *Adaptation:* the parser's whitelist
+was corrected to the real five-value union (per E12) and three explicit test cases were added
+for the previously-unexercised states.
+
+**E16 (Task 9) — the plan's `resolve()` test helper mirrors only one of the runtime's two
+gates.** `runEvaluationHarness` runs `enforceParserAllowlist(specification,
+deployment.parserAllowlist)` (`runtime.ts:755`) *before* `selectRegistration`
+(`runtime.ts:756`). The plan's helper replicates only `selectRegistration`, so Task 9's
+unlisted-parser and digest-drift refusals pass through gate 2's mechanism and error message
+("no host evaluator registration supports the EvaluationSpec") rather than gate 1's
+("EvaluationSpec parser is not deployment-allowlisted"). The refusal *outcome* is still
+correct because `matchesParser` and the allowlist both key off the same
+`parserAllowlistKey`, but the mechanism under test is not the one the runtime reaches first.
+The coordinator confirmed `enforceParserAllowlist` is a module-private function in
+`runtime.ts` with no export, so no unit test can reach gate 1 directly — the only way to
+exercise it is through `runEvaluationHarness` itself. *Disposition:* left as the plan
+specifies; Task 10 case 5 is the gate that must genuinely exercise `enforceParserAllowlist`
+end-to-end, and it is checked for exactly that in the component review.
+
+*Positive verification worth recording:* `parserAllowlistKey` really does incorporate the
+digest —
+`packages/task-execution/profiles/src/evaluation-spec/parser-registry.ts:10-12` returns
+`` `${parser.id}@${parser.version}#${parser.digest}` ``. So digest drift yields a different
+key and is refused. The "digest is the semantic commitment" property holds rather than being
+a fiction, which is what Task 2's whole semantics-document mechanism rests on.
+
+**E17 (Task 11, component review) — `evaluator_cost_usd` rides nowhere, and that is the
+honest outcome.** Amendment D says the legacy `score` / `passedCount` / `totalCount` /
+`evaluator_cost_usd` fields ride `detailedOutcome`. The count fields do
+(`failToPassExpected`, `failToPassSatisfied`, `passToPassExpected`, `passToPassBroken`,
+`containerExitCode`), and the legacy `score` is derivable from them. `evaluator_cost_usd`
+does not, because nothing in this package can compute it: the legacy value is grader
+wall-clock elapsed time × `JINN_EVAL_COMPUTE_USD_PER_HOUR`, and elapsed time belongs to
+whichever `GraderReportSource` actually runs the grader. The hermetic context-backed source
+runs nothing and so has no honest elapsed time. Emitting zero or a fabricated cost would be
+worse than omitting the field. *Disposition:* omitted here and documented in the package
+README; reintroduce it with the container-executing `GraderReportSource` in stage 2, alongside
+Finding A's driver. Non-blocking.
+
+**E18 (Task 11, component review) — the guard trio was verified by negative control, not by
+assuming green.** Both guards were made to fail on a deliberately introduced violation and
+then reverted: (a) adding `import { sealTask } from "@jinn-network/task-execution-protocol"`
+to production source drove the source-boundary guard to 6 pass / 1 fail with the message
+"evaluator-adapters production source crosses its approved contract boundary"; (b) adding an
+unapproved `@jinn-network/evidence-discovery` dependency to the manifest drove the
+package-inventory guard to 2 pass / 1 fail. Both returned to 7/7 and 3/3 after
+`git checkout --`. Recorded because a guard that has never been seen red is not evidence.
+
 ## Coordinator amendments (2026-07-30, binding on execution)
 
 Findings A–D ratified as proposed. A: this package defines the injected
