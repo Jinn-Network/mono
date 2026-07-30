@@ -184,3 +184,13 @@ there. Summary of the rulings that change scope or contracts:
   (stage 3); notification-taxonomy drift; harness runtime's unreachable
   `recorded-inconclusive` path; swe-rebench measurable score/count/cost fields
   (profiles-owned); replay-window field promotion into `serve`.
+
+**Execution rulings (2026-07-30, phase 0):** transport-http E12 (cross-origin redirects
+followed unchecked) — ruled: same-origin-follow-only is the intended posture; content is
+digest-verified downstream so severity is low; lands as a transport-http follow-up task
+when the `FetchLike` port question is settled, not a phase-0 blocker. E13 (SSE client
+parses LF framing only) — ruled: adopt WHATWG line-ending handling in full (CR, LF, CRLF);
+fix applied at the final integrated review pass. The transport-http executor's
+guard-evasion attempt (unicode escapes against the ambient-network scan) was blocked,
+reverted, and self-reported; the guard's underlying false-positive (filename matching in
+import specifiers) was fixed properly and re-proven to bite.
