@@ -5,3 +5,17 @@
 export type { BaseVenueConfig } from "./config.js";
 export { VENUE_STATE_SCHEMA_VERSION, VenueStateError, openVenueState } from "./state/database.js";
 export type { VenueStateDatabase } from "./state/database.js";
+export {
+  BROADCAST_DEFAULTS,
+  classifyBroadcastError,
+  flattenError,
+  isNonceTooLow,
+  isReplacementUnderpriced,
+} from "./broadcast/classify.js";
+export type { VenueRevertClassification } from "./broadcast/classify.js";
+export { bumpFees } from "./broadcast/fees.js";
+export type { FeeSnapshot } from "./broadcast/fees.js";
+export { createSubmissionLedger } from "./broadcast/ledger.js";
+export type { SubmissionKey, SubmissionLedger, SubmissionRecord } from "./broadcast/ledger.js";
+export { createBroadcastLock } from "./broadcast/lock.js";
+export type { BroadcastLock, BroadcastLockOptions } from "./broadcast/lock.js";
