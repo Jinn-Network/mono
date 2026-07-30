@@ -64,3 +64,15 @@ export type {
   VenueRevertClassifier,
   VenueRevertFixture,
 } from "./venue-fixtures.js";
+export { describeBroadcastProfileConformance } from "./venue-broadcast-conformance.js";
+export type {
+  BroadcastConformanceSubject,
+  BroadcastLedgerEntry,
+  BroadcastScenarioChain,
+} from "./venue-broadcast-conformance.js";
+export { describeLogSourceConformance } from "./venue-log-source-conformance.js";
+export type {
+  LogSourceConformanceSubject,
+  LogSourceCursor,
+  LogSourceScenarioChain,
+} from "./venue-log-source-conformance.js";
