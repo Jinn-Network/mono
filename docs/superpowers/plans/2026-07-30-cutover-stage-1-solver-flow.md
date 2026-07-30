@@ -4452,3 +4452,130 @@ adjusts the task's code accordingly.
    atomicity follow-up recommended for stage 3; notification-taxonomy drift recorded in the
    program follow-ups). **F8 accepted** — retirement by refusal at `canAcceptTask` /
    `watchForTasks`, no state deletion.
+
+## Execution findings (2026-07-31, partial execution — Tasks 0–3)
+
+Recorded during execution against the merged phase-0 head (`4cfd4caab`, all three component
+merges present). Execution reached **Task 3 of 19**; Tasks 4–19 are not started. Findings
+are surfaced, never silently resolved.
+
+### E1 — the plan never wires client onto the merged stack (blocking; resolved as Task 0)
+
+`client/package.json` at the session head declared **no** dependency on any stack package,
+yet Task 1's first line imports `@jinn-network/marketplace-pipeline`, and no task in the
+plan adds them. Resolved as a preamble commit: 15 direct runtime dependencies plus a
+24-entry `resolutions` block mapping the transitive closure to `portal:` paths, matching the
+pattern the package trees already use among themselves.
+
+### E2 — the assembly package name in the plan does not exist
+
+The plan imports `@jinn-network/task-execution-backend-local-assembly`. The merged package at
+`packages/task-execution/backend-local/assembly` is named
+**`@jinn-network/task-execution-backend-local`**. Every remaining task that consumes the
+assembly must use the real name.
+
+### E3 — portal-within-portal version conflict (blocking; resolved as Task 0)
+
+`yarn install` failed `YN0071`: the stack pins `better-sqlite3@13.0.1` (venue-base,
+evidence-local-runtime, evidence-catalog-sqlite) and `ajv@8.17.1` (task-execution-profiles)
+exactly, against client's `^12.10.0` / `^8.20.0`. Resolved by pinning both in client
+`resolutions`. This is a **major bump of the daemon's SQLite driver**; the full client suite
+is the gate and stays green on it.
+
+### E4 — `BaseVenueConfig` is not the plan's five-member config
+
+The plan's "Consumed cross-plan surfaces" block pins
+`{chain, publicClient, walletClient, safeAddress, stateDbPath}`. The merged
+`packages/marketplace/venue-base/src/config.ts` additionally **requires** `priorityMech`,
+`pin`, `verifySettlementGrade`, `isAuthorizedMechOrigin`, and
+`observations: () => Promise<readonly ProtocolObservation[]>`, plus optional `logSource` /
+`broadcast` / `finality` / `deliveryWait` option bags. Task 12's composition root must supply
+all ten. `observations` is a **sequencing constraint the plan does not mention**: venue-base's
+observe port is fed by the host's projector state (Task 9), so Task 12 must construct the
+projector before the venue.
+
+### E5 — the venue broadcaster's real shape is `execute`, not `broadcast`
+
+The plan's `BaseVenueSafe.broadcast({safeAddress,to,value,data}) => Hex` does not exist. The
+merged export is `BaseVenueSafeBroadcaster`:
+
+```ts
+execute(request: { to; value; data; logicalTx: string; operation?: 0 | 1 })
+  => Promise<SafeBroadcastReceipt>   // { txHash, blockNumber, blockHash, logs, alreadySettled }
+classify(error: unknown) => VenueRevertClassification
+```
+
+Three differences bind Task 7: `safeAddress` is fixed at factory time, not passed per call;
+`logicalTx` is **required** and load-bearing (the reconcile path adopts a pending tx only when
+`existing.logicalTx === request.logicalTx`, so a coarse or colliding value is a correctness
+bug, not a cosmetic one); and the return is a receipt, not a hash. Coordinator amendment 3
+binds Task 7 to this real export, so Task 7's `VenueBroadcaster` must be restated in `execute`
+terms and must carry the Safe address it is bound to, so `executeSafeTransaction` can still
+reject a mismatched `params.safeAddress` rather than silently broadcasting from the wrong Safe.
+
+### E6 — `executeSafeTransaction` has seven call sites, not five
+
+The plan names five in `client/src/adapters/mech/contracts.ts`. Two more exist off the
+marketplace path: `client/src/erc8004/plugin-registry.ts:242` and
+`client/src/erc8004/reputation.ts:494`. Re-pointing the one chokepoint therefore also moves
+the ERC-8004 legs onto the venue broadcaster. That is **consistent with** the
+single-broadcaster rule (one Safe, one nonce stack) and should be kept, but the plan's
+blast-radius rationale undercounted.
+
+### E7 — the repo imports `zod/v3`, not `zod`
+
+Every plan code block writes `import { z } from 'zod'`. `client/src/config.ts` and its
+siblings import `from 'zod/v3'` (zod v4 installed, v3-compat subpath; `JinnConfigSchema` is a
+`zod/v3` object). Mixing versions produces schemas that do not compose. Applied in Tasks 1 and
+3; binding on every remaining task that touches config schemas.
+
+### E8 — Task 3's `entry.model ?? ''` would brick the next boot (found and fixed)
+
+The plan's Task 3 Step-3 code maps a solver join's model as `entry.model ?? ''`, but
+`ExecutionWiringConfigEntrySchema.model` is `z.string().min(1)`. A real `joinedSolverNets`
+entry without a per-net `model` — the common case, since the daemon falls back to the
+operator's top-level `claudeModel` at solve time — migrates to `model: ''`, which fails
+validation and **throws on the following boot**. This reproduced against a real operator
+config. Fixed in Task 3 as `entry.model ?? raw.claudeModel ?? 'claude-haiku-4-5-20251001'`,
+matching the daemon's existing runtime fallback, with a regression test.
+
+### E9 — `loadConfig()` writes, and the suite calls it against the operator's live config
+
+Task 3 puts the migration inside `loadConfig`, following the file's established
+load-time-write pattern (`persistLegacySolverNetsMigration`, issue #445). Several existing
+tests call `loadConfig()` with **no argument**, which defaults to the operator's real
+`~/.jinn-client/config.json`. Running the client suite therefore migrated the live config on
+the executing machine — additively, with timestamped backups written beside it. This
+test-hygiene defect **pre-dates** this plan and already applied to the #445 migration; Task 3
+only made it consequential and visible. Recorded rather than patched, because the available
+in-scope patch (a `VITEST` guard) departs from the convention every other load-time migration
+in that file follows. The real fix is to make those tests pass an explicit path.
+
+### E10 — the Docker portal guard is unsatisfiable because of a stale `files` entry (blocking, out of scope)
+
+`client/test/scripts/dockerfile-workspace-portals.test.ts` derives its expectations from
+client's portal entries, so Task 0's dependency wiring put 24 new packages under it. Seven of
+its eight assertions now pass against the updated `client/Dockerfile`. The eighth cannot be
+satisfied from inside `client/`: `packages/discovery/serve/package.json` declares
+`files: ["dist/", "fixtures/", "README.md"]`, but that package has **never** had a `fixtures/`
+directory (stale since its scaffold commit `1fa25c9a8`; nothing in its build generates one).
+The guard requires a `COPY` for every non-`dist` publish path, while a sibling assertion in the
+same file requires every `COPY` source to exist — the pair is unsatisfiable until the stale
+entry is removed. `record-discovery-serve` cannot be demoted to a devDependency instead,
+because Task 9 imports `writeArchivePages` from it at runtime.
+
+**Fix (one line, outside this plan's write scope):** delete `"fixtures/",` from
+`packages/discovery/serve/package.json`. Benign for publishing — npm ignores missing `files`
+entries — so it only ever broke this inference.
+
+### Verification state at Task 3
+
+- `client` typecheck: **0 errors**.
+- `client` suite baseline at the session head, before any change: 787 files
+  (777 passed / 1 failed / 9 skipped), 7083 tests (7053 passed / 1 failed / 29 skipped). The
+  one failure is `test/_support/chain/anvil.test.ts > spawnAnvilFork > can set balance and mine
+  blocks`, which forks Base over the network; it passed on a later run, so it is a
+  network-dependent flake, not a standing red.
+- After Task 0: the same, plus the single E10 Docker-guard assertion.
+- Tasks 1–3 targeted suites: `test/config` **154 passed**, shape-v2 **7 passed**, atomic-write
+  **5 passed**, migrate-shape-v2 **9 passed**.
