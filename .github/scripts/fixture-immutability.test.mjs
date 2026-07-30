@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { compareFixtureManifests } from './fixture-immutability.mjs';
+import { assertMinorBump, compareFixtureManifests } from './fixture-immutability.mjs';
 
 const baseline = {
   version: 1,
@@ -73,5 +73,25 @@ test('a malformed erratum is refused', () => {
   assert.throws(
     () => compareFixtureManifests(baseline, unnamed, { label: 'packages/trust/core' }),
     /packages\/trust\/core: erratum names ghost\.json, which is not a fixture in this manifest/,
+  );
+});
+
+test('an addition against a published version requires a minor bump', () => {
+  assert.doesNotThrow(() => assertMinorBump('0.1.0', '0.2.0', { label: 'packages/trust/core', added: ['a.json'] }));
+  assert.doesNotThrow(() => assertMinorBump('0.1.0', '0.1.1', { label: 'packages/trust/core', added: [] }));
+  assert.throws(
+    () => assertMinorBump('0.1.0', '0.1.1', { label: 'packages/trust/core', added: ['a.json'] }),
+    /packages\/trust\/core: 1 fixture added since 0\.1\.0 \(a\.json\); a fixture addition is at least a minor bump, but 0\.1\.1 keeps minor 1/,
+  );
+});
+
+test('a major bump also satisfies the addition rule', () => {
+  assert.doesNotThrow(() => assertMinorBump('0.9.0', '1.0.0', { label: 'packages/trust/core', added: ['a.json'] }));
+});
+
+test('a version that goes backwards is refused outright', () => {
+  assert.throws(
+    () => assertMinorBump('0.2.0', '0.1.0', { label: 'packages/trust/core', added: [] }),
+    /packages\/trust\/core: candidate 0\.1\.0 is not ahead of the published 0\.2\.0/,
   );
 });

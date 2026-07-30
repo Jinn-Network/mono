@@ -179,6 +179,12 @@ jobs:
       - run: npm install -g npm@11.16.0
       - run: corepack enable
 
+      - name: Verify fixture immutability against the published set
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .github/scripts/fixture-immutability.mjs --registry-baseline --version "${RELEASE_TAG#stack-v}"
+
       - name: Publish the stable platform set
         shell: bash
         run: |

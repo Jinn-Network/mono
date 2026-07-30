@@ -65,3 +65,10 @@ test('both lanes run external acceptance after publishing', () => {
 test('acceptance waits for registry availability before installing', () => {
   assert.match(workflow, /name: Wait for the platform set on the registry/);
 });
+
+test('the stable lane runs the registry-backed fixture gate before publishing', () => {
+  const gateAt = workflow.indexOf('name: Verify fixture immutability against the published set');
+  const publishAt = workflow.indexOf('name: Publish the stable platform set');
+  assert.ok(gateAt > -1, 'the registry-backed fixture gate must exist');
+  assert.ok(gateAt < publishAt, 'the fixture gate must precede the stable publish');
+});
