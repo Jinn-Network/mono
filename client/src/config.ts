@@ -24,6 +24,12 @@ import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js'
 import { isOpenRouterModelId } from './harnesses/provider-ref.js';
 import { parseRpcUrls } from './rpc/transport.js';
 import { canonicalLocalHttpBaseUrl } from './local-provider-url.js';
+import {
+  CONFIG_SHAPE_VERSION,
+  ClaimPolicyConfigSchema,
+  ExecutionWiringConfigEntrySchema,
+  PostingConfigEntrySchema,
+} from './config/shape-v2.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -449,6 +455,17 @@ export const JinnConfigSchema = z.object({
       }),
     )
     .optional(),
+
+  /**
+   * Config shape v2 (stage-1 cutover, `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md`
+   * Task 1). Additive keys written *beside* `joinedSolverNets` by the boot
+   * migration (Task 3) — legacy keys survive until stage 5. All three are
+   * optional so an unmigrated config file still parses.
+   */
+  configShapeVersion: z.literal(CONFIG_SHAPE_VERSION).optional(),
+  claimPolicy: ClaimPolicyConfigSchema.optional(),
+  executionWiring: z.array(ExecutionWiringConfigEntrySchema).optional(),
+  posting: z.array(PostingConfigEntrySchema).optional(),
 
   /**
    * Set true once the operator clicks "Enter dashboard" at the end of the
