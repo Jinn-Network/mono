@@ -27,6 +27,7 @@ const codeEntrypoints = [
   '@jinn-network/marketplace-testing/backend-conformance',
   '@jinn-network/marketplace-testing/named-check-fixtures',
   '@jinn-network/marketplace-testing/projector-conformance',
+  '@jinn-network/marketplace-testing/venue-conformance',
 ];
 
 // Cross-tree Jinn dependencies each *then-present* marketplace package references, packed as

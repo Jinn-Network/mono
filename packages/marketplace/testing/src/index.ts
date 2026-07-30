@@ -55,3 +55,12 @@ export type {
   MarketplaceProjectorReplayRun,
   ProjectedDerivation,
 } from "./projector-conformance.js";
+export {
+  VENUE_REVERT_FIXTURES,
+  describeVenueRevertClassification,
+} from "./venue-fixtures.js";
+export type {
+  VenueRevertClassification,
+  VenueRevertClassifier,
+  VenueRevertFixture,
+} from "./venue-fixtures.js";
