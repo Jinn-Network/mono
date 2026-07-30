@@ -46,7 +46,7 @@ describe("v1 launchers", () => {
         { match: { exitCode: 65 }, blame: "task", reasonCode: "invalid-evaluation-input" },
         { match: { signal: "SIGKILL" }, blame: "infrastructure", reasonCode: "killed" },
       ],
-    } as LaunchPlan;
+    } as unknown as LaunchPlan;
     expect(interpretResult(plan, { exitCode: 1 }).reasonCode).toBe("invalid-exit");
     expect(interpretResult(plan, { signal: "SIGKILL" }).reasonCode).toBe("killed");
   });
