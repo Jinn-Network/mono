@@ -38,3 +38,17 @@ test('the workflow drives the derived publisher, never a hard-coded package list
 test('the workflow pins the npm CLI version trusted publishing requires', () => {
   assert.match(workflow, /npm install -g npm@11\.16\.0/);
 });
+
+test('the stable lane runs from the protected stable environment', () => {
+  assert.match(workflow, /name: stack-stable\n/);
+  assert.match(workflow, /environment: npm-stable-publish/);
+});
+
+test('the stable lane derives its version from a stack-v tag', () => {
+  assert.match(workflow, /node \.github\/scripts\/publish-stack\.mjs --mode stable --release-tag "\$\{RELEASE_TAG\}"/);
+  assert.match(workflow, /startsWith\(github\.event\.release\.tag_name, 'stack-v'\)/);
+});
+
+test('the stable lane refuses a release tag that is not on origin at the checked-out sha', () => {
+  assert.match(workflow, /Release tag \$\{RELEASE_TAG\} points at/);
+});

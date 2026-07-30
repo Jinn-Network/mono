@@ -115,3 +115,47 @@ jobs:
         run: |
           set -euo pipefail
           node .github/scripts/publish-stack.mjs --mode canary --sha "${JINN_BUILD_COMMIT}"
+
+  stack-stable:
+    name: stack-stable
+    if: (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'stack-v')) || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: npm-stable-publish
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Verify the release tag resolves on origin to this checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_SHA="$(git ls-remote origin "refs/tags/${RELEASE_TAG}" | awk '{print $1}' | head -n1)"
+          if [ -z "${TAG_SHA}" ]; then
+            echo "::error::Release tag ${RELEASE_TAG} does not exist on origin"
+            exit 1
+          fi
+          PEELED="$(git rev-parse "${RELEASE_TAG}^{commit}")"
+          RESOLVED="$(git rev-parse "${TAG_SHA}^{commit}")"
+          if [ "${PEELED}" != "${RESOLVED}" ]; then
+            echo "::error::Release tag ${RELEASE_TAG} points at ${RESOLVED}, not the checked-out ${PEELED}"
+            exit 1
+          fi
+          echo "JINN_BUILD_COMMIT=${PEELED}" >> "${GITHUB_ENV}"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - run: npm install -g npm@11.16.0
+      - run: corepack enable
+
+      - name: Publish the stable platform set
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .github/scripts/publish-stack.mjs --mode stable --release-tag "${RELEASE_TAG}"
