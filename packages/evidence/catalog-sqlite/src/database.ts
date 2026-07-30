@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 import { constants } from "node:fs";
-import { chmod, lstat, mkdir, open, unlink } from "node:fs/promises";
-import { dirname, parse, resolve } from "node:path";
+import { chmod, lstat, mkdir, open, realpath, unlink } from "node:fs/promises";
+import { dirname, parse, relative, resolve, sep } from "node:path";
 
 import Database from "better-sqlite3";
+
+import { EvidenceCatalogError } from "@jinn-network/evidence-discovery";
 
 import { catalogIoError } from "./errors.js";
 
@@ -19,10 +21,88 @@ function nodeErrorCode(error: unknown): string | undefined {
     : undefined;
 }
 
+function isFilesystemRootChild(path: string): boolean {
+  const absolute = resolve(path);
+  return dirname(absolute) === parse(absolute).root;
+}
+
+async function rejectNonPlatformAncestorSymlinks(path: string): Promise<void> {
+  const parsed = parse(path);
+  const relativePath = path.slice(parsed.root.length);
+  const segments = relativePath.split(/[\\/]/u).filter(Boolean);
+  let current = parsed.root;
+  for (const segment of segments) {
+    current = resolve(current, segment);
+    try {
+      const stat = await lstat(current);
+      if (stat.isSymbolicLink() && !isFilesystemRootChild(current)) {
+        throw catalogIoError(
+          undefined,
+          `SQLite Catalog parent path must be a non-symlink directory: ${current}`,
+        );
+      }
+    } catch (error) {
+      if (nodeErrorCode(error) === "ENOENT") return;
+      throw error;
+    }
+  }
+}
+
+async function canonicalizeConfiguredPath(path: string): Promise<string> {
+  const lexicalPath = resolve(path);
+  let unmanagedAncestor = dirname(lexicalPath);
+  for (;;) {
+    try {
+      await lstat(unmanagedAncestor);
+      break;
+    } catch (error) {
+      if (nodeErrorCode(error) !== "ENOENT") throw error;
+      const parent = dirname(unmanagedAncestor);
+      if (parent === unmanagedAncestor) {
+        throw catalogIoError(
+          error,
+          "No existing SQLite Catalog ancestor could be resolved.",
+        );
+      }
+      unmanagedAncestor = parent;
+    }
+  }
+  await rejectNonPlatformAncestorSymlinks(unmanagedAncestor);
+  let physicalAncestor: string;
+  try {
+    physicalAncestor = await realpath(unmanagedAncestor);
+    const stats = await lstat(physicalAncestor);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw catalogIoError(
+        undefined,
+        `SQLite Catalog ancestor must resolve to a directory: ${physicalAncestor}`,
+      );
+    }
+  } catch (error) {
+    if (error instanceof EvidenceCatalogError) throw error;
+    throw catalogIoError(
+      error,
+      "Failed to resolve the SQLite Catalog ancestor.",
+    );
+  }
+  const suffix = relative(unmanagedAncestor, lexicalPath);
+  if (
+    suffix === ".." ||
+    suffix.startsWith(`..${sep}`) ||
+    parse(suffix).root.length > 0
+  ) {
+    throw catalogIoError(
+      undefined,
+      "The SQLite Catalog path escapes its resolved ancestor.",
+    );
+  }
+  return resolve(physicalAncestor, suffix);
+}
+
 async function ensureSafeParentChain(parentPath: string): Promise<void> {
   const parsed = parse(parentPath);
-  const relative = parentPath.slice(parsed.root.length);
-  const segments = relative.split(/[\\/]/u).filter(Boolean);
+  const relativePath = parentPath.slice(parsed.root.length);
+  const segments = relativePath.split(/[\\/]/u).filter(Boolean);
   let current = parsed.root;
 
   for (const segment of segments) {
@@ -137,7 +217,7 @@ export async function openCatalogDatabase(
   path: string,
   createNew: boolean,
 ): Promise<OpenedCatalogDatabase> {
-  const databasePath = resolve(path);
+  const databasePath = await canonicalizeConfiguredPath(path);
   let database: Database.Database | undefined;
   let created = false;
   try {

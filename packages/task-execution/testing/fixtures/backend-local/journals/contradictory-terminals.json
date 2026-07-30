@@ -1,0 +1,49 @@
+{
+  "name": "contradictory-terminals",
+  "description": "Two non-lost terminals for the same nonce — never sanctioned (design §6.2 per-nonce terminal uniqueness, TEP §10.4 rule 4's first-terminal-wins enforced at the source). The second terminal is rejected and flagged; the first terminal by seq wins and the flag persists (§6.4 row 'two non-lost terminals, one nonce').",
+  "events": [
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000103",
+      "seq": 1,
+      "type": "attempt-engaged",
+      "time": "2026-07-28T00:00:00.000Z",
+      "details": { "submission": "urn:uuid:00000000-0000-0000-0000-0000000000f3", "taskDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000103",
+      "seq": 2,
+      "type": "spawned",
+      "time": "2026-07-28T00:00:00.250Z",
+      "details": { "nonce": "nonce-103", "pid": 4400, "startTime": 333333 }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000103",
+      "seq": 3,
+      "type": "attempt-terminal",
+      "time": "2026-07-28T00:02:00.000Z",
+      "displayMessage": "Delivered",
+      "details": { "state": "delivered", "exitCode": 0, "nonce": "nonce-103" },
+      "failsAttempt": false
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000103",
+      "seq": 4,
+      "type": "attempt-terminal",
+      "time": "2026-07-28T00:02:05.000Z",
+      "displayMessage": "A second, contradictory terminal for the same nonce — rejected at append",
+      "details": { "state": "failed", "blame": "infrastructure", "nonce": "nonce-103" },
+      "failsAttempt": false,
+      "rejectedAtAppend": true
+    }
+  ],
+  "expected": {
+    "durableSeq": 5,
+    "intactEventCount": 4,
+    "terminalState": "delivered",
+    "acceptedTerminalSeq": 3,
+    "rejectedTerminalSeq": 4,
+    "contradictoryFlag": true,
+    "note": "seq 3 (first by seq) wins and stands as the recorded terminal; seq 4 is rejected+flagged, never a corrective replacement (it is not preceded by a `lost` terminal — contrast journals/rebuild-identity-style lost-then-corrective handling, which is the ONE sanctioned exception)"
+  },
+  "conformance": { "reality": { "shimFingerprintVerifiedSurvivorsAlive": true, "pids": [4400, 4401] }, "expectedResult": { "classification": "contradictory", "action": "terminal-record-wins-kill-survivors", "killedPids": [4400, 4401] } }
+}

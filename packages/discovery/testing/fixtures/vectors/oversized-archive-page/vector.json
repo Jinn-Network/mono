@@ -1,0 +1,29 @@
+{
+  "name": "oversized-archive-page",
+  "kind": "source-chain",
+  "description": "A served archive page exceeds CEILINGS.archivePageBytes (4 MiB) -- HARD under the published-source profile (§5.1); walking that page is rejected.",
+  "input": {
+    "seed": {
+      "now": "2026-07-28T12:00:00.000Z",
+      "keys": [
+        {
+          "agent": "did:key:zAgentSourceOne",
+          "keyid": "key-1",
+          "validFrom": "2026-01-01T00:00:00.000Z",
+          "validTo": null,
+          "scope": "jinn:discovery-announcements"
+        }
+      ],
+      "hwm": null
+    },
+    "archivePage": {
+      "sourceName": "feed",
+      "page": "0000000000000001",
+      "declaredBytes": 4194305
+    }
+  },
+  "expect": {
+    "status": "broken-chain",
+    "at": "archive-page-ceiling"
+  }
+}

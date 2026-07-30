@@ -1,0 +1,12 @@
+{
+  "description": "A projection derivation annotation (design §6.2/§6.3) carrying its base fields plus the three registered standard additions ratified by program §7.21 / plan Addendum 2026-07-28-c (blockHash, finalityTier, contractGeneration). The implemented annotation schema is unknown-field-tolerant: these MUST pass through unstripped and unrejected to the injected SubstrateChecker.",
+  "chainId": 8453,
+  "contract": "0xfFa7118A3D820cd4E820010837D65FAfF463181B",
+  "event": "DeliveryPosted",
+  "blockNumber": 12345678,
+  "txHash": "0xabc0000000000000000000000000000000000000000000000000000000000000",
+  "logIndex": 3,
+  "blockHash": "0xdef0000000000000000000000000000000000000000000000000000000000000",
+  "finalityTier": "safe",
+  "contractGeneration": 2
+}

@@ -1,0 +1,11 @@
+{
+  "name": "subscribe-cursor-unknown-or-future",
+  "kind": "subscribe",
+  "description": "§9.3: an unknown or future cursor -- typed error, close; never guess.",
+  "input": {
+    "cursor": "cursor-that-was-never-issued-or-is-in-the-future"
+  },
+  "expect": {
+    "behavior": "typed-error-close"
+  }
+}

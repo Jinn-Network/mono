@@ -1,0 +1,16 @@
+{
+  "input": {
+    "family": "model-graded",
+    "block": {
+      "rubric": { "uri": "https://example.org/rubrics/code-review-quality" },
+      "judgeModel": {
+        "provider": "anthropic",
+        "modelId": "claude-opus-4-8",
+        "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "judgeOutputSchema": { "uri": "https://example.org/schemas/judge-output.json" },
+      "structuralGates": {}
+    }
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

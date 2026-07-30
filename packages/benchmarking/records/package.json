@@ -1,0 +1,60 @@
+{
+  "name": "@jinn-network/benchmarking-records",
+  "version": "0.1.0",
+  "description": "Sealed benchmarking record kinds (Benchmark, Run, Matrix, Report) and their record-level checks.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/benchmarking/records"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./schemas/*": "./schemas/*",
+    "./fixtures/*": "./fixtures/*"
+  },
+  "files": [
+    "dist/",
+    "schemas/",
+    "fixtures/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "generate:schemas": "yarn build && node scripts/generate-schemas.mjs --write",
+    "check:schemas": "yarn build && node scripts/generate-schemas.mjs --check",
+    "check:schema-parity": "yarn build && node scripts/schema-parity.mjs",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/task-execution-protocol": "0.1.0",
+    "@noble/hashes": "^2.2.0",
+    "zod": "4.4.3"
+  },
+  "resolutions": {
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ajv": "8.17.1",
+    "canonicalize": "^2.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  }
+}

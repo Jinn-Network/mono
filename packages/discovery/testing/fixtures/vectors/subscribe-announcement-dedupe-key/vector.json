@@ -1,0 +1,23 @@
+{
+  "name": "subscribe-announcement-dedupe-key",
+  "kind": "subscribe",
+  "description": "§9.1: the at-least-once dedupe key is (source identity, entry digest, announcementId) -- a redelivered event with the same tuple collapses to one.",
+  "input": {
+    "event": {
+      "sourceagent": "did:key:zAgentSourceOne",
+      "sourcename": "feed",
+      "entrydigest": "sha256:5d8bd89cd8c5b6b4d594bd9c0f5c205f61d34c894bf203b50e98d6b8e8c60aa3",
+      "announcementid": "dedupe-ann-1"
+    },
+    "redeliveredEvent": {
+      "sourceagent": "did:key:zAgentSourceOne",
+      "sourcename": "feed",
+      "entrydigest": "sha256:5d8bd89cd8c5b6b4d594bd9c0f5c205f61d34c894bf203b50e98d6b8e8c60aa3",
+      "announcementid": "dedupe-ann-1"
+    }
+  },
+  "expect": {
+    "dedupeKey": "did:key:zAgentSourceOne feed sha256:5d8bd89cd8c5b6b4d594bd9c0f5c205f61d34c894bf203b50e98d6b8e8c60aa3 dedupe-ann-1",
+    "redeliveryDeduped": true
+  }
+}

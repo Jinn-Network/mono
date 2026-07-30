@@ -1,0 +1,41 @@
+{
+  "description": "Cancellation races (design §6.5, frozen interface §14 item 6). Cancel is idempotent and never the outcome channel.",
+  "scenarios": [
+    {
+      "name": "cancel-vs-finish",
+      "description": "A natural exit races ahead of the cancel signal; the recorded outcome stands (the shim writes the true outcome on every path).",
+      "given": { "cancelRequestedAt": "T+0ms", "harnessNaturalExitAt": "T+5ms", "sigtermDeliveredAt": "T+50ms" },
+      "expected": { "recordedOutcome": { "exitCode": 0, "termSignal": null }, "terminalState": "delivered-or-failed-per-exit-record-not-cancelled" }
+    },
+    {
+      "name": "cancel-on-terminal-idempotency",
+      "description": "Cancelling an already-terminal Attempt returns a CancelAck naming the terminal state, never an error.",
+      "given": { "attemptAlreadyTerminal": "delivered", "cancelCalledAgain": true },
+      "expected": { "cancelAck": { "requested": false, "terminalState": "delivered" } }
+    },
+    {
+      "name": "harvest-after-cancel",
+      "description": "Harvest still runs on whatever out/ holds after cancellation.",
+      "given": { "cancelled": true, "outDirAtCancelTime": ["out/partial-result.txt"] },
+      "expected": { "harvestRuns": true, "manifest": ["out/partial-result.txt"], "terminalState": "cancelled" }
+    },
+    {
+      "name": "harvest-after-expiry",
+      "description": "Harvest still runs on whatever out/ holds after deadline expiry.",
+      "given": { "expired": true, "outDirAtExpiryTime": [] },
+      "expected": { "harvestRuns": true, "manifest": [], "terminalState": "expired" }
+    },
+    {
+      "name": "un-killable-group-member-bounded-poll",
+      "description": "If the poll ceiling elapses with the subtree non-empty (an un-killable escapee), the supervisor terminalizes anyway — failed[infrastructure] with a residual-live-processes annotation — rather than hanging non-terminal.",
+      "given": { "sigtermThenSigkillSent": true, "pollCeilingMs": 30000, "subtreeAfterCeiling": ["pid-9999-still-alive"] },
+      "expected": { "terminalState": "failed", "blame": "infrastructure", "annotation": { "residualPids": ["pid-9999-still-alive"] }, "neverHangsNonTerminal": true }
+    },
+    {
+      "name": "cancel-during-provisioning",
+      "description": "A cancel arriving during the setup phase (before exec-started) terminalizes as rejected.",
+      "given": { "phase": "setup", "cancelRequestedAt": "mid-setup" },
+      "expected": { "terminalState": "rejected", "neverExecuted": true }
+    }
+  ]
+}

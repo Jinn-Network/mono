@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "type": "string",
+      "const": "https://jinn.network/protocols/benchmarking/1.0"
+    },
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "author": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$"
+    },
+    "supersedes": {
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "uri": {
+              "type": "string"
+            },
+            "digest": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "downloadLocation": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            },
+            "content": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": {}
+        },
+        {
+          "type": "object",
+          "properties": {
+            "digest": {
+              "type": "object",
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "digest"
+          ],
+          "additionalProperties": {}
+        }
+      ]
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "allOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "uri": {
+                    "type": "string"
+                  },
+                  "digest": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "mediaType": {
+                    "type": "string"
+                  },
+                  "downloadLocation": {
+                    "type": "string"
+                  },
+                  "annotations": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "content": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "digest": {
+                    "type": "object",
+                    "properties": {
+                      "sha256": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      }
+                    },
+                    "required": [
+                      "sha256"
+                    ],
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "digest"
+                ],
+                "additionalProperties": {}
+              }
+            ]
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "reveal": {
+      "type": "object",
+      "properties": {
+        "policy": {
+          "type": "string",
+          "enum": [
+            "immediate",
+            "scheduled",
+            "after-run"
+          ]
+        },
+        "notBefore": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "policy"
+      ],
+      "additionalProperties": false
+    },
+    "license": {
+      "type": "string"
+    },
+    "citation": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocol",
+    "name",
+    "description",
+    "version",
+    "items",
+    "reveal"
+  ],
+  "additionalProperties": {},
+  "propertyNames": {
+    "anyOf": [
+      {
+        "enum": [
+          "protocol",
+          "name",
+          "description",
+          "author",
+          "version",
+          "supersedes",
+          "items",
+          "reveal",
+          "license",
+          "citation"
+        ]
+      },
+      {
+        "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+)$"
+      }
+    ]
+  },
+  "$comment": "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants."
+}

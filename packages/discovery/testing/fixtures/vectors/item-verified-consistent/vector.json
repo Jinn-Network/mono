@@ -1,0 +1,53 @@
+{
+  "name": "item-verified-consistent",
+  "kind": "item",
+  "description": "An ordinary author-source item whose facts recompute consistently and whose provenance is on the verified chain -- the baseline pass-through to record-protocol content verification (§10.4 step 5).",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://jinn.network/records/submission/1.0",
+        "digest": "sha256:a8be3fed9027048c3568b8906457de3e28aa1b38cffe3693644390aaf7934d20"
+      },
+      "facts": {
+        "taskDigest": "sha256:af3b96582b4ed142bf381fc161ac143718d61f263c38f4206a9c8c81d11e01d7"
+      },
+      "provenance": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "entry": "sha256:2e73daf73f4d5abb0f319b38e8dcf91c5a9d5bd247fb254a12f6ff0944d57f64",
+        "announcementId": "ann-8"
+      }
+    },
+    "fetchedBytes": {
+      "note": "item-verified-consistent fixture record bytes",
+      "kind": "submission"
+    },
+    "decisionGrade": false,
+    "citedEntry": {
+      "protocol": "https://jinn.network/record-discovery/1.0",
+      "source": {
+        "agent": "did:key:zAgentSourceOne",
+        "name": "feed"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00Z",
+      "announcements": [
+        {
+          "announcementId": "ann-8",
+          "action": "available",
+          "record": {
+            "kind": "https://jinn.network/records/submission/1.0",
+            "digest": "sha256:a8be3fed9027048c3568b8906457de3e28aa1b38cffe3693644390aaf7934d20"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "status": "verified",
+    "facts": "consistent"
+  }
+}

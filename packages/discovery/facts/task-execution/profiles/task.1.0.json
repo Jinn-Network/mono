@@ -1,0 +1,12 @@
+{
+  "protocol": "https://jinn.network/record-discovery/1.0",
+  "kind": "https://jinn.network/records/task/1.0",
+  "profile": "https://jinn.network/records/task/1.0/facts/1.0",
+  "fields": [
+    { "name": "profileUri", "class": "record", "cloudEvents": { "attribute": "profileuri", "scalar": "string" } },
+    { "name": "profileDigest", "class": "record", "referenceBearing": true },
+    { "name": "author", "class": "record" },
+    { "name": "evaluationDigest", "class": "record", "referenceBearing": true },
+    { "name": "supersedesDigest", "class": "record", "referenceBearing": true }
+  ]
+}

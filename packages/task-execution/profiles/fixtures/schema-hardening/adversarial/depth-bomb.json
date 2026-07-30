@@ -1,0 +1,6 @@
+{
+  "input": {
+    "nestDepth": 40
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

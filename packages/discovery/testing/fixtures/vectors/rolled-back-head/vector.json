@@ -1,0 +1,87 @@
+{
+  "name": "rolled-back-head",
+  "kind": "source-chain",
+  "description": "The presented head's sequence (1) is behind the consumer's high-water mark (5) -- no forward linkage exists from the HWM to this head (§10.3 step 4).",
+  "input": {
+    "seed": {
+      "now": "2026-07-28T12:00:00.000Z",
+      "keys": [
+        {
+          "agent": "did:key:zAgentSourceOne",
+          "keyid": "key-1",
+          "validFrom": "2026-01-01T00:00:00.000Z",
+          "validTo": null,
+          "scope": "jinn:discovery-announcements"
+        }
+      ],
+      "hwm": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "cursor": {
+          "sequence": "0000000000000005",
+          "entry": "sha256:fd9c86032838eb5e65d0f4ad6eb3af2d114ed16f4b729043cab3e2b7483decc9",
+          "issuedAt": "2026-07-27T12:00:00.000Z"
+        }
+      }
+    },
+    "firstAdoption": false,
+    "head": {
+      "protocol": "https://jinn.network/record-discovery/1.0",
+      "origin": "did:key:zAgentSourceOne/feed",
+      "sequence": "0000000000000001",
+      "entry": "sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642",
+      "issuedAt": "2026-07-28T12:00:00.000Z",
+      "refreshBy": "2026-07-29T12:00:00.000Z"
+    },
+    "headSignature": {
+      "payloadType": "application/vnd.jinn.record-discovery.head.v1+json",
+      "payload": "{\"entry\":\"sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642\",\"issuedAt\":\"2026-07-28T12:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"refreshBy\":\"2026-07-29T12:00:00.000Z\",\"sequence\":\"0000000000000001\"}",
+      "signatures": [
+        {
+          "keyid": "key-1",
+          "sig": "8cf223b6def3b6ea1a9e9ae5c05569fa689e830c6786c7a5c24d8fbb54f99bba:key-1"
+        }
+      ]
+    },
+    "entries": [
+      {
+        "entry": {
+          "protocol": "https://jinn.network/record-discovery/1.0",
+          "source": {
+            "agent": "did:key:zAgentSourceOne",
+            "name": "feed"
+          },
+          "sequence": "0000000000000001",
+          "previous": null,
+          "timestamp": "2026-07-28T12:00:00.000Z",
+          "announcements": [
+            {
+              "announcementId": "ann-1",
+              "action": "available",
+              "record": {
+                "kind": "https://jinn.network/records/submission/1.0",
+                "digest": "sha256:59908df50572502ceeabbcc669a28bcc5343d7564a581b9c9648479580f5b773"
+              }
+            }
+          ]
+        },
+        "signature": {
+          "payloadType": "application/vnd.jinn.record-discovery.entry.v1+json",
+          "payload": "{\"announcements\":[{\"action\":\"available\",\"announcementId\":\"ann-1\",\"record\":{\"digest\":\"sha256:59908df50572502ceeabbcc669a28bcc5343d7564a581b9c9648479580f5b773\",\"kind\":\"https://jinn.network/records/submission/1.0\"}}],\"previous\":null,\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"sequence\":\"0000000000000001\",\"source\":{\"agent\":\"did:key:zAgentSourceOne\",\"name\":\"feed\"},\"timestamp\":\"2026-07-28T12:00:00.000Z\"}",
+          "signatures": [
+            {
+              "keyid": "key-1",
+              "sig": "37a78af256d37608aa967f3406dc634da978f083fde5b733a1eefe63b15c0950:key-1"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "broken-chain",
+    "at": "linkage"
+  }
+}

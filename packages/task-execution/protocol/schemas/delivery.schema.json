@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "type": "string",
+      "format": "uri"
+    },
+    "attempt": {
+      "type": "string",
+      "pattern": "^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "task": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "uri": {
+                "type": "string"
+              },
+              "digest": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "mediaType": {
+                "type": "string"
+              },
+              "downloadLocation": {
+                "type": "string"
+              },
+              "annotations": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "content": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": {}
+          },
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "fulfilled",
+        "partial",
+        "escalation"
+      ]
+    },
+    "escalationReason": {
+      "type": "string"
+    },
+    "executionIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      }
+    },
+    "evidenceRecords": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "family": {
+            "type": "string",
+            "enum": [
+              "execution-evidence",
+              "result-evaluation",
+              "execution-verification"
+            ]
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "family",
+          "digest"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "supersedes": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    }
+  },
+  "required": [
+    "protocol",
+    "attempt",
+    "task",
+    "outputs",
+    "outcome",
+    "createdAt"
+  ],
+  "additionalProperties": {}
+}

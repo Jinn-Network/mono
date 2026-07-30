@@ -1,0 +1,13 @@
+{
+  "protocol": "https://jinn.network/record-discovery/1.0",
+  "kind": "https://jinn.network/records/delivery/1.0",
+  "profile": "https://jinn.network/records/delivery/1.0/facts/1.0",
+  "fields": [
+    { "name": "taskDigest", "class": "record", "referenceBearing": true },
+    { "name": "attemptUri", "class": "record" },
+    { "name": "outcome", "class": "record", "cloudEvents": { "attribute": "outcome", "scalar": "string" } },
+    { "name": "benchrun", "class": "record", "cloudEvents": { "attribute": "benchrun", "scalar": "string" } },
+    { "name": "benchcell", "class": "record", "cloudEvents": { "attribute": "benchcell", "scalar": "string" } },
+    { "name": "bencharm", "class": "record", "cloudEvents": { "attribute": "bencharm", "scalar": "string" } }
+  ]
+}

@@ -88,7 +88,7 @@
       "@type": "File",
       "name": "specification.md",
       "encodingFormat": "text/markdown",
-      "sha256": "1917764948761455490d2baa1e8fde98ee888813309207cc0f0798f971c1291e"
+      "sha256": "7295e98cecf49946c76428cead52d8be96af9f20efcd68cfa45a9ddfcfb4294a"
     },
     {
       "@id": "vocabulary.jsonld",

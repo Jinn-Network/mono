@@ -38,4 +38,30 @@ jobs:
         with:
           version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
       - run: yarn compile
+      - name: Build marketplace-testing adapter dependency from source (§7.8)
+        working-directory: ${{ github.workspace }}
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
+          (cd packages/task-execution/testing && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/trust/resolve && yarn install --immutable && yarn build)
+          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
+          (cd packages/discovery/serve && yarn install --immutable && yarn build)
+          (cd packages/discovery/testing && yarn install --immutable && yarn build)
+          (cd packages/trust/testing && yarn install --immutable && yarn build)
+          (cd packages/marketplace/binding && yarn install --immutable && yarn build)
+          (cd packages/marketplace/projector && yarn install --immutable && yarn build)
+          (cd packages/marketplace/testing && yarn install --immutable && yarn build)
       - run: yarn test

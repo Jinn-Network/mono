@@ -1,0 +1,13 @@
+{
+  "name": "subscribe-cursor-within-window",
+  "kind": "subscribe",
+  "description": "§9.3: a cursor within the declared replay window -- replay from position, then continue live.",
+  "input": {
+    "cursor": "cursor-3-of-10-within-replay-window",
+    "replayWindowSize": 10,
+    "cursorPosition": 3
+  },
+  "expect": {
+    "behavior": "replay-then-live"
+  }
+}

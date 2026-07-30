@@ -1,0 +1,213 @@
+{
+  "name": "consumer-ping-flood-debounce",
+  "kind": "consumer",
+  "description": "§7.4: pings are unauthenticated hints that only trigger rate-limited pulls -- a flood of 50 pings within one debounce window still issues at most one pull.",
+  "input": {
+    "pings": [
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:00.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:01.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:02.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:03.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:04.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:05.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:06.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:07.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:08.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:09.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:00.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:01.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:02.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:03.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:04.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:05.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:06.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:07.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:08.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:09.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:00.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:01.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:02.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:03.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:04.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:05.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:06.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:07.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:08.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:09.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:00.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:01.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:02.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:03.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:04.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:05.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:06.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:07.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:08.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:09.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:00.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:01.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:02.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:03.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:04.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:05.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:06.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:07.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:08.000Z"
+      },
+      {
+        "headUrl": "https://example.org/head",
+        "at": "2026-07-28T12:00:09.000Z"
+      }
+    ],
+    "debounceWindowMs": 5000
+  },
+  "expect": {
+    "pullsIssued": 1
+  }
+}

@@ -35,6 +35,15 @@
 
 ---
 
+## Addendum 2026-07-28 — baseline reconciliation
+
+_Added 2026-07-28 during Phase 0 program reconciliation. Where this section and the Execution-Baseline / guard-count text below differ, this section governs; the original plan body is retained unchanged for the record._
+
+- **Baseline moved to `3650ac65e`.** The current approved head of `integration/evidence-v1` is `3650ac65e`, a descendant of the `f65880c4e244e32334f0fed98bf00ff9b307e87d` named in the Global Constraints / Execution Baseline, so that section's `git merge-base --is-ancestor` assertion still passes — run from the current integration head, not the literal `f65880…`. `3650ac65e` contains PR #2226 (merge `9614fe7bc`): the UTF-16 code-unit canonical-byte ordering rule (evidence protocol design §5.1) and an **unconditional** `localeCompare` / `toLocale*` / `Intl` ban across all `packages/evidence/**` production source, enforced by a restructured `.github/scripts/evidence-source-boundaries.test.mjs`. Apply every guard-file edit (Task 1 and the final CI / packed-types work) against the **current on-disk content** of those files.
+- **Package counts are stale — compute them.** This plan's literals — "eleven manifests", the inventory length change `10 → 11`, and "21 public entrypoints across 11 Evidence packages" — predate the merged substrate, which already carries **11** evidence packages; `@jinn-network/evidence-retrieval` is the **12th**. Do not use these literals: read the live guard file and compute the new inventory count (current length + 1) and the packed-entrypoint total from the current package set. Land-order across the three surviving lanes is pinned by the program doc as **bridge → retrieval → contribution**, so retrieval lands **second** (inventory 12 → 13). Concurrent edits to the sorted guard lists are ordinary adjacent-line textual conflicts (index §6).
+- **Sorts stay code-unit.** Retrieval's `savedQueryDigest` is sealed over a hand-rolled canonical JSON built with the default `Object.keys().sort()` (UTF-16 code-unit) and is therefore already compliant. Keep every array/key sort on the default `.sort()` / a `compareCodeUnitStrings` helper (JCS key order); never introduce `localeCompare` or `Intl.Collator` (protocol design §5.1). No fixture digest changes.
+- **"Discovery" is the existing package, not the new protocol layer.** This plan's `@jinn-network/evidence-discovery` dependency — from which it imports `EvidenceRepositoryResolver`, `JsonValue`, and `PublishedEvidenceLocation` — is the **existing, frozen** Evidence-substrate Discovery package, NOT the 2026-07-27 Record Discovery Protocol layer (`docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md`). There is no collision: record-discovery §11 pins those `evidence-discovery` contracts unchanged (they map field-for-field under a defined, mechanical projection). No dependency change is required.
+
 ## Execution Baseline
 
 Use an isolated worktree created with `superpowers:using-git-worktrees`. Establish the reviewed base before Task 1:

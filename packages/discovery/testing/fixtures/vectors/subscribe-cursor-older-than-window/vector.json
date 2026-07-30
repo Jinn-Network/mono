@@ -1,0 +1,15 @@
+{
+  "name": "subscribe-cursor-older-than-window",
+  "kind": "subscribe",
+  "description": "§9.3: a cursor older than the replay window -- explicit `cursor-too-old` signal naming the cold-sync path (archive pages / source chains); never silent gap-skipping.",
+  "input": {
+    "cursor": "cursor-before-window-start",
+    "replayWindowSize": 10,
+    "cursorPosition": -5
+  },
+  "expect": {
+    "behavior": "cursor-too-old",
+    "detailCode": "cursor-too-old",
+    "namesColdSyncPath": true
+  }
+}

@@ -1,0 +1,484 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "type": "string",
+      "const": "https://jinn.network/protocols/benchmarking/1.0"
+    },
+    "run": {
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "uri": {
+              "type": "string"
+            },
+            "digest": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "downloadLocation": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            },
+            "content": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": {}
+        },
+        {
+          "type": "object",
+          "properties": {
+            "digest": {
+              "type": "object",
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "digest"
+          ],
+          "additionalProperties": {}
+        }
+      ]
+    },
+    "closeBoundary": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "anchor": {
+          "type": "object",
+          "properties": {
+            "chain": {
+              "type": "string"
+            },
+            "blockNumber": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "blockHash": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "chain",
+            "blockNumber",
+            "blockHash"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "at"
+      ],
+      "additionalProperties": false
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "cellKey": {
+            "type": "string"
+          },
+          "taskDigest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "armId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "replicate": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "dispatches": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "accounted": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "submission": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "attempt": {
+            "type": "string"
+          },
+          "delivery": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "verdicts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "validVerdicts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "judged",
+              "unjudged",
+              "unscorable",
+              "expired",
+              "invalidated",
+              "excluded"
+            ]
+          },
+          "verification": {
+            "type": "object",
+            "properties": {
+              "harness": {
+                "type": "string",
+                "enum": [
+                  "match",
+                  "mismatch",
+                  "unverifiable"
+                ]
+              },
+              "model": {
+                "type": "string",
+                "enum": [
+                  "match",
+                  "mismatch",
+                  "unverifiable"
+                ]
+              },
+              "loadout": {
+                "type": "string",
+                "enum": [
+                  "match",
+                  "mismatch",
+                  "unverifiable"
+                ]
+              },
+              "isolation": {
+                "type": "string",
+                "enum": [
+                  "match",
+                  "mismatch",
+                  "unverifiable"
+                ]
+              },
+              "checksFailed": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "harness",
+              "model",
+              "loadout",
+              "isolation",
+              "checksFailed"
+            ],
+            "additionalProperties": false
+          },
+          "integrityTier": {
+            "type": "string",
+            "enum": [
+              "re-derivable",
+              "attested-only"
+            ]
+          },
+          "solver": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "string",
+                "const": "unresolved"
+              }
+            ]
+          },
+          "evaluator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "string",
+                "const": "unresolved"
+              }
+            ]
+          },
+          "cost": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string",
+                "pattern": "^\\d+(\\.\\d+)?$"
+              },
+              "unit": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "reported",
+                  "settled"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "unit",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          "latencyMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "cellKey",
+          "taskDigest",
+          "armId",
+          "replicate",
+          "dispatches",
+          "verdicts",
+          "validVerdicts",
+          "outcome",
+          "verification",
+          "integrityTier"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "exclusions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "cellKey": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "cellKey",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "attrition": {
+      "type": "object",
+      "properties": {
+        "perArm": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "expected": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "judged": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "unjudged": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "unscorable": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "expired": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "invalidated": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "excluded": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "replacements": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "expected",
+              "judged",
+              "unjudged",
+              "unscorable",
+              "expired",
+              "invalidated",
+              "excluded",
+              "replacements"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "asymmetryFlags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "perArm",
+        "asymmetryFlags"
+      ],
+      "additionalProperties": false
+    },
+    "completeness": {
+      "type": "object",
+      "properties": {
+        "expected": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "judged": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "floor": {
+          "type": "string",
+          "pattern": "^(?:0*1(?:\\.0+)?|0*0\\.(?:0*[1-9]\\d*))$",
+          "$comment": "Runtime check: exact BigInt completeness comparison and outcome derivation."
+        },
+        "runOutcome": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "cancelled"
+          ]
+        }
+      },
+      "required": [
+        "expected",
+        "judged",
+        "floor",
+        "runOutcome"
+      ],
+      "additionalProperties": false
+    },
+    "assembly": {
+      "type": "object",
+      "properties": {
+        "procedure": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "procedure",
+        "version"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "protocol",
+    "run",
+    "closeBoundary",
+    "cells",
+    "exclusions",
+    "attrition",
+    "completeness",
+    "assembly"
+  ],
+  "additionalProperties": {},
+  "propertyNames": {
+    "anyOf": [
+      {
+        "enum": [
+          "protocol",
+          "run",
+          "closeBoundary",
+          "cells",
+          "exclusions",
+          "attrition",
+          "completeness",
+          "assembly"
+        ]
+      },
+      {
+        "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+)$"
+      }
+    ]
+  },
+  "$comment": "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants."
+}

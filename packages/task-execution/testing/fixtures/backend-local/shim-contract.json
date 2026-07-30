@@ -1,0 +1,47 @@
+{
+  "description": "The shim behavioral contract (design §6.1, frozen interface §14 item 2), exercised for real by supervisor/src/shim.test.ts + shim.integration.test.ts (Task A4); this kit encodes the same scenarios as fixtures so describeAttemptSupervisorContract can assert them generically once A5 assembles the full supervisor.",
+  "scenarios": [
+    {
+      "name": "outcome-file-atomicity-kill-9-between-temp-and-rename",
+      "description": "A kill -9 lands after the temp outcome file is fsynced but before the atomic rename to meta/outcome.json.",
+      "given": { "operation": "atomic-outcome-read", "step": "temp-written-and-fsynced", "thenKilled": "SIGKILL" },
+      "expect": { "outcomeFilePresent": false, "tempFileCleanedOrIgnored": true, "readOutcomeReturns": "null-never-partial-parse" }
+    },
+    {
+      "name": "fingerprint-vs-pid-reuse",
+      "description": "A fingerprint binds (pid, start-time); a recycled PID with a different start-time must read as not-alive.",
+      "given": { "operation": "fingerprint-check", "fingerprint": { "pid": 4242, "startTime": 111 }, "processTable": { "pid": 4242, "startTime": 999 } },
+      "expect": { "fingerprintAlive": false }
+    },
+    {
+      "name": "outcome-nonce-mismatch-rejected",
+      "description": "readOutcome rejects an outcome file whose nonce does not match the attempt's nonce.",
+      "given": { "operation": "outcome-nonce-check", "attemptNonce": "nonce-a", "outcomeFileNonce": "nonce-b" },
+      "expect": { "readOutcomeReturns": "null" }
+    },
+    {
+      "name": "group-kill-zombie-pinning",
+      "description": "Group-kill ordering does not reap the harness leader until AFTER the group signal, so the PGID cannot be recycled under the kill.",
+      "given": { "operation": "group-cleanup", "harnessSubtree": ["leader", "worker-1", "worker-2"] },
+      "expect": { "reapOrder": "signal-group-first-then-reap-leader", "pgidRecycleWindow": "closed" }
+    },
+    {
+      "name": "subreaper-adoption",
+      "description": "A daemonizing grandchild that detaches from the harness re-parents to the shim (PR_SET_CHILD_SUBREAPER on Linux), not to init — so it is still visible to the group scan.",
+      "given": { "operation": "subreaper-adoption", "platform": "linux", "grandchildDaemonizes": true },
+      "expect": { "reparentsTo": "shim", "visibleToGroupScan": true }
+    },
+    {
+      "name": "signal-survival-raced-ahead-success",
+      "description": "The shim traps SIGTERM/SIGINT/SIGHUP and ignores them at the shim's own level; it relays cancellation to the harness subtree only. A natural exit 0 that races ahead of a SIGTERM aimed at the subtree is recorded as such.",
+      "given": { "operation": "signal-survival", "signalSentToGroup": "SIGTERM", "harnessNaturalExit": { "raceOutcome": "harness-exits-0-before-signal-lands" } },
+      "expect": { "outcomeFile": { "exitCode": 0, "termSignal": null }, "shimSurvived": true }
+    },
+    {
+      "name": "env-tag-present-from-fork",
+      "description": "JINN_ATTEMPT_* is present in the shim's own environment from the instant the shim process exists (set by the supervisor at spawn, inherited across fork) — closing the invisible-orphan gap between fork and exec.",
+      "given": { "operation": "fork-time-tags", "probeWindow": "pre-exec" },
+      "expect": { "JINN_ATTEMPT_ID_PRESENT": true, "JINN_ATTEMPT_NONCE_PRESENT": true }
+    }
+  ]
+}

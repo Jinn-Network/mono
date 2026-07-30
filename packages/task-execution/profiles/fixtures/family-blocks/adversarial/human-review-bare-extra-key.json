@@ -1,0 +1,12 @@
+{
+  "input": {
+    "family": "human-review",
+    "block": {
+      "reviewForm": { "uri": "https://example.org/forms/qualitative-review-v1" },
+      "reviewerQualifications": { "domain": "backend-security", "minExperienceYears": 3 },
+      "attestationShape": { "requiresRationale": true },
+      "evalScript": "run.sh"
+    }
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

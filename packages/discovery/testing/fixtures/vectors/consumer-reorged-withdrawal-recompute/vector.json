@@ -1,0 +1,14 @@
+{
+  "name": "consumer-reorged-withdrawal-recompute",
+  "kind": "consumer",
+  "description": "§5.1/§6.2: a `reorged` withdrawal is the one reason code that must trigger consumer recompute (the substrate moved), even though the item is still not silently pruned.",
+  "input": {
+    "itemKind": "https://jinn.network/records/delivery/1.0",
+    "withdrawalReason": "reorged",
+    "itemPreviouslyIngested": true
+  },
+  "expect": {
+    "prunedFromDecisionStore": false,
+    "triggersRecompute": true
+  }
+}

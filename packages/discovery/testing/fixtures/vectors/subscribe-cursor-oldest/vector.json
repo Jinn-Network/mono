@@ -1,0 +1,12 @@
+{
+  "name": "subscribe-cursor-oldest",
+  "kind": "subscribe",
+  "description": "§9.3: the oldest requested position -- start of window.",
+  "input": {
+    "cursor": "oldest",
+    "replayWindowSize": 10
+  },
+  "expect": {
+    "behavior": "start-of-window"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "protocol": "https://jinn.network/record-discovery/1.0",
+  "meta": {
+    "counts": { "10": 10, "2": 2, "1": 1 },
+    "tags": ["b", "a", "c"],
+    "nested": {
+      "deep": {
+        "deeper": { "z": true, "a": false, "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111" }
+      }
+    }
+  },
+  "id": "abc"
+}

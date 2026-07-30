@@ -1,0 +1,77 @@
+{
+  "name": "@jinn-network/marketplace-pipeline",
+  "version": "0.1.0",
+  "description": "The daemon's marketplace application: claim predicate, execution wiring, caps, two-party engagement composition, and the §9 TaskEngine carve disposition (library, not a live cutover).",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/marketplace/pipeline"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/marketplace-binding": "0.1.0",
+    "@jinn-network/task-execution-backend": "0.1.0",
+    "@jinn-network/task-execution-backend-local": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0"
+  },
+  "devDependencies": {
+    "@jinn-network/evidence-discovery": "0.1.0",
+    "@jinn-network/evidence-protocol": "0.1.0",
+    "@jinn-network/evidence-repository": "0.1.0",
+    "@jinn-network/execution-recorder": "0.1.0",
+    "@jinn-network/task-execution-launchers": "0.1.0",
+    "@jinn-network/task-execution-profiles": "0.1.0",
+    "@jinn-network/task-execution-supervisor": "0.1.0",
+    "@jinn-network/task-execution-testing": "0.1.0",
+    "@jinn-network/task-execution-workspace": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0",
+    "@jinn-network/trust-resolve": "0.1.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/evidence-discovery": "portal:../../evidence/discovery",
+    "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
+    "@jinn-network/evidence-repository": "portal:../../evidence/repository",
+    "@jinn-network/execution-recorder": "portal:../../evidence/execution-recorder",
+    "@jinn-network/marketplace-binding": "portal:../binding",
+    "@jinn-network/task-execution-backend": "portal:../../task-execution/backend",
+    "@jinn-network/task-execution-backend-local": "portal:../../task-execution/backend-local/assembly",
+    "@jinn-network/task-execution-launchers": "portal:../../task-execution/backend-local/launchers",
+    "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
+    "@jinn-network/task-execution-supervisor": "portal:../../task-execution/backend-local/supervisor",
+    "@jinn-network/task-execution-testing": "portal:../../task-execution/testing",
+    "@jinn-network/task-execution-workspace": "portal:../../task-execution/backend-local/workspace",
+    "@jinn-network/trust-core": "portal:../../trust/core",
+    "@jinn-network/trust-resolve": "portal:../../trust/resolve"
+  }
+}

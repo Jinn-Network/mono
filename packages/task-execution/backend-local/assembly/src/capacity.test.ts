@@ -1,0 +1,72 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, test } from "vitest";
+import { acquireStateRootWriter, CapacityGate } from "./capacity.js";
+
+const roots: string[] = [];
+async function root(): Promise<string> {
+  const path = await mkdtemp(join(tmpdir(), "jinn-local-capacity-"));
+  roots.push(path);
+  return path;
+}
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+});
+
+describe("CapacityGate", () => {
+  test("never queues and reports backend-unavailable at the configured ceiling", () => {
+    const gate = new CapacityGate(1);
+    expect(gate.tryAcquire("attempt-1")).toEqual({ acquired: true });
+    expect(gate.tryAcquire("attempt-2")).toMatchObject({
+      acquired: false,
+      error: { category: "backend-unavailable" },
+    });
+    gate.release("attempt-1");
+    expect(gate.tryAcquire("attempt-2")).toEqual({ acquired: true });
+  });
+});
+
+describe("one live writer per state root", () => {
+  test("a second instance is unavailable until the first releases its lifetime lock", async () => {
+    const stateRoot = await root();
+    const first = acquireStateRootWriter(stateRoot);
+    const second = acquireStateRootWriter(stateRoot);
+    expect(first.acquired).toBe(true);
+    expect(second.acquired).toBe(false);
+    if (second.acquired) throw new Error("unreachable");
+    expect(second.error.category).toBe("backend-unavailable");
+
+    if (first.acquired) first.release();
+    const replacement = acquireStateRootWriter(stateRoot);
+    expect(replacement.acquired).toBe(true);
+    if (replacement.acquired) replacement.release();
+  });
+
+  test("reclaims a malformed legacy lock left before owner publication", async () => {
+    const stateRoot = await root();
+    await mkdir(join(stateRoot, "meta"), { recursive: true });
+    await writeFile(join(stateRoot, "meta", "backend.lock"), "{");
+
+    const writer = acquireStateRootWriter(stateRoot);
+
+    expect(writer.acquired).toBe(true);
+    if (writer.acquired) writer.release();
+  });
+
+  test("publishes the owner native process-start marker with its PID", async () => {
+    const stateRoot = await root();
+    const writer = acquireStateRootWriter(stateRoot);
+    expect(writer.acquired).toBe(true);
+    if (!writer.acquired) throw new Error("unreachable");
+
+    const owner = JSON.parse(
+      await readFile(join(stateRoot, "meta", "backend.lock"), "utf8"),
+    ) as { pid: number; startTime: number; token: string };
+    expect(owner.pid).toBe(process.pid);
+    expect(Number.isFinite(owner.startTime)).toBe(true);
+    expect(owner.token).toMatch(/^[0-9a-f-]{36}$/u);
+    writer.release();
+  });
+});

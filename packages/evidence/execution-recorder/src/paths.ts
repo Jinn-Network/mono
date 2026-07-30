@@ -7,9 +7,18 @@ import {
   open,
   type FileHandle,
 } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  dirname,
+  isAbsolute,
+  join,
+  parse,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
 import { ExecutionRecorderError } from "./errors.js";
+import { fsyncBestEffort } from "./fs-sync.js";
 
 export interface WorkspacePaths {
   readonly root: string;
@@ -77,6 +86,10 @@ export function assertWorkspaceContained(
  * missing-path behavior remain unchanged. Node does not expose openat-style
  * relative traversal, so a concurrent ancestor replacement remains a race
  * that callers must prevent.
+ *
+ * Stable platform aliases that are direct children of the filesystem root,
+ * such as macOS `/var` → `/private/var`, are allowed. Attacker-created
+ * symlinks under user-controlled ancestors remain forbidden.
  */
 export async function assertNoSymlinkPathComponents(path: string): Promise<void> {
   const components: string[] = [];
@@ -88,6 +101,7 @@ export async function assertNoSymlinkPathComponents(path: string): Promise<void>
     current = parent;
   }
 
+  const filesystemRoot = parse(components[0] ?? resolve(path)).root;
   for (const component of components) {
     let status;
     try {
@@ -96,7 +110,10 @@ export async function assertNoSymlinkPathComponents(path: string): Promise<void>
       if (nodeErrorCode(error) === "ENOENT") return;
       throw error;
     }
-    if (status.isSymbolicLink()) {
+    if (
+      status.isSymbolicLink() &&
+      dirname(component) !== filesystemRoot
+    ) {
       throw new ExecutionRecorderError(
         "UNSAFE_PATH",
         `Path must not contain symbolic links: ${component}`,
@@ -181,17 +198,7 @@ async function syncDirectory(path: string): Promise<void> {
       (constants.O_DIRECTORY ?? 0),
   );
   try {
-    try {
-      await handle.sync();
-    } catch (error) {
-      if (
-        !["EINVAL", "ENOSYS", "ENOTSUP"].includes(
-          nodeErrorCode(error) ?? "",
-        )
-      ) {
-        throw error;
-      }
-    }
+    await fsyncBestEffort(handle);
   } finally {
     await handle.close();
   }

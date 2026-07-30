@@ -1,0 +1,27 @@
+{
+  "input": {
+    "instance_id": "jinn-repo-live-000456",
+    "repo": "Jinn-Network/mono",
+    "base_commit": "0123456789abcdef0123456789abcdef01234567",
+    "problem_statement": "Investigate and repair the flaky claim-relayer health check.",
+    "language": "typescript",
+    "source": "live-issue",
+    "effort": "high"
+  },
+  "expect": {
+    "instructions": "Investigate and repair the flaky claim-relayer health check.",
+    "payload": {
+      "instance_id": "jinn-repo-live-000456",
+      "language": "typescript",
+      "provenance": { "kind": "live" }
+    },
+    "inputs": [
+      {
+        "name": "repository-state",
+        "uri": "https://github.com/Jinn-Network/mono",
+        "annotations": { "ref": "0123456789abcdef0123456789abcdef01234567" }
+      }
+    ],
+    "requirements": { "effort": "high" }
+  }
+}

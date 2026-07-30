@@ -1,0 +1,8 @@
+{
+  "input": {
+    "task": { "effort": "low" },
+    "submission": { "effort": "high" },
+    "keyClasses": { "effort": "floor" }
+  },
+  "expect": { "ok": true, "effective": { "effort": "high" } }
+}

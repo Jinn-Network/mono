@@ -1,0 +1,70 @@
+[
+  {
+    "specversion": "1.0",
+    "id": "evt-1",
+    "source": "urn:jinn:backend:local",
+    "subject": "urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa",
+    "time": "2026-07-28T00:00:00Z",
+    "datacontenttype": "application/json",
+    "sequence": "0000000000000001",
+    "taskdigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+    "type": "network.jinn.task-execution.attempt-engaged.v1",
+    "data": {
+      "attempt": "urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa",
+      "task": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+      "submission": "urn:uuid:bbbbbbbb-bbbb-5bbb-8bbb-bbbbbbbbbbbb",
+      "executor": "urn:jinn:agent:local-operator",
+      "effectiveDeadline": "2026-07-29T00:00:00Z",
+      "source": "urn:jinn:backend:local",
+      "dispatchContext": {
+        "uri": "https://example.test/dispatch-context/urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa.json",
+        "digest": {
+          "sha256": "83059a80576cb2b0687a920487755f7ebb6bf157fda64d6dfad639ace16dbd9a"
+        }
+      }
+    }
+  },
+  {
+    "specversion": "1.0",
+    "id": "evt-2",
+    "source": "urn:jinn:backend:local",
+    "subject": "urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa",
+    "time": "2026-07-28T00:01:00Z",
+    "datacontenttype": "application/json",
+    "sequence": "0000000000000002",
+    "taskdigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+    "type": "network.jinn.task-execution.attempt-started.v1",
+    "data": {
+      "startedAt": "2026-07-28T00:01:00Z",
+      "executor": "urn:jinn:agent:local-operator"
+    }
+  },
+  {
+    "specversion": "1.0",
+    "id": "evt-3",
+    "source": "urn:jinn:backend:local",
+    "subject": "urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa",
+    "time": "2026-07-28T00:05:00Z",
+    "datacontenttype": "application/json",
+    "sequence": "0000000000000003",
+    "taskdigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+    "type": "network.jinn.task-execution.delivery-recorded.v1",
+    "data": {
+      "digest": "sha256:7c75a5b04dca693d29c56bcf7213cea45338f32f8e0f2c2745775cb7e3c7cfdc"
+    }
+  },
+  {
+    "specversion": "1.0",
+    "id": "evt-4",
+    "source": "urn:jinn:backend:local",
+    "subject": "urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa",
+    "time": "2026-07-28T00:05:30Z",
+    "datacontenttype": "application/json",
+    "sequence": "0000000000000004",
+    "taskdigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+    "type": "network.jinn.task-execution.attempt-terminal.v1",
+    "data": {
+      "state": "delivered"
+    }
+  }
+]

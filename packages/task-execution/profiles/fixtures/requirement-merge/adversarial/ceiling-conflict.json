@@ -1,0 +1,8 @@
+{
+  "input": {
+    "task": { "maxAttemptDurationMs": 600000 },
+    "submission": { "maxAttemptDurationMs": 900000 },
+    "keyClasses": { "maxAttemptDurationMs": "ceiling" }
+  },
+  "expect": { "ok": false, "category": "invalid-document", "key": "maxAttemptDurationMs" }
+}

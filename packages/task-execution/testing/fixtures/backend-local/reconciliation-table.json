@@ -1,0 +1,126 @@
+{
+  "description": "Every design §6.4 recovery row, as a scenario with scripted process reality. `recover` folds the journal to expected state, probes reality (shim fingerprint + process-group scan for liveness, then the outcome file, nonce-checked), and classifies per TEP §12.2. Never blind-respawns.",
+  "rows": [
+    {
+      "name": "engaged-no-intent",
+      "journalPhase": "engaged, no spawn-intent",
+      "reality": { "processAlive": false, "shimFingerprintPresent": false, "outcomeFilePresent": false },
+      "classification": "absent, never-executed",
+      "action": "rejected",
+      "blame": null,
+      "notes": "resubmission-safe (§7.2) — nothing ever ran",
+      "script": { "journal": [{ "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "attempt-engaged", "time": "2026-07-28T00:00:00.000Z", "details": {} }], "reality": { "processAlive": false, "shimFingerprintPresent": false, "outcomeFilePresent": false } },
+      "expectedResult": { "classification": "absent-never-executed", "action": "rejected", "terminalState": "rejected" }
+    },
+    {
+      "name": "spawn-intended-absent",
+      "journalPhase": "spawn-intended",
+      "reality": { "processAlive": false, "shimFingerprintPresent": false, "outcomeFilePresent": false },
+      "classification": "absent",
+      "action": "lost",
+      "blame": "infrastructure",
+      "notes": "the intent was journaled but never completed spawning",
+      "script": { "journal": [{ "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "attempt-engaged", "time": "2026-07-28T00:00:00.000Z", "details": {} }, { "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "spawn-intended", "time": "2026-07-28T00:00:01.000Z", "details": { "nonce": "n" } }], "reality": { "processAlive": false, "shimFingerprintPresent": false, "outcomeFilePresent": false } },
+      "expectedResult": { "classification": "absent", "action": "lost", "terminalState": "lost", "blame": "infrastructure" }
+    },
+    {
+      "name": "orphaned-under-dead-shim",
+      "journalPhase": "spawn-intended or running",
+      "reality": { "processAlive": true, "shimFingerprintPresent": false, "outcomeFilePresent": false, "note": "env-tagged live process/group with no live shim" },
+      "classification": "orphaned",
+      "action": "kill-ladder-then-lost",
+      "blame": "infrastructure",
+      "notes": "custody is unrecoverable — no shim can capture the outcome; a reconciliation event names the killed PIDs",
+      "script": { "journal": [{ "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "spawned", "time": "2026-07-28T00:00:00.000Z", "details": { "nonce": "n" } }], "reality": { "processAlive": true, "shimFingerprintPresent": false, "outcomeFilePresent": false, "pids": [] } },
+      "expectedResult": { "classification": "orphaned", "action": "kill-ladder-then-lost", "terminalState": "lost", "blame": "infrastructure", "killedPids": [] }
+    },
+    {
+      "name": "matching",
+      "journalPhase": "running",
+      "reality": { "processAlive": true, "shimFingerprintPresent": true, "outcomeFilePresent": false },
+      "classification": "matching",
+      "action": "resume-supervision",
+      "blame": null,
+      "notes": "re-arm relative timers from exec-started on the monotonic clock (§6.6)",
+      "script": { "journal": [{ "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "spawned", "time": "2026-07-28T00:00:00.000Z", "details": { "nonce": "n" } }], "reality": { "processAlive": true, "shimFingerprintPresent": true, "outcomeFilePresent": false } },
+      "expectedResult": { "classification": "matching", "action": "resume-supervision" }
+    },
+    {
+      "name": "matching-late",
+      "journalPhase": "running",
+      "reality": { "processAlive": false, "shimFingerprintPresent": false, "outcomeFilePresent": true, "nonceMatches": true },
+      "classification": "matching (late)",
+      "action": "ingest-outcome-append-terminal",
+      "blame": null,
+      "notes": "process gone, outcome file present and nonce-verified",
+      "script": { "journal": [{ "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "spawned", "time": "2026-07-28T00:00:00.000Z", "details": { "nonce": "n" } }], "reality": { "processAlive": false, "shimFingerprintPresent": false, "outcomeFilePresent": true, "nonceMatches": true } },
+      "expectedResult": { "classification": "matching-late", "action": "ingest-outcome-append-terminal" }
+    },
+    {
+      "name": "stale-foreign-nonce-mismatch",
+      "journalPhase": "running",
+      "reality": { "processAlive": false, "shimFingerprintPresent": false, "outcomeFilePresent": true, "nonceMatches": false },
+      "classification": "stale/foreign",
+      "action": "ignore-outcome-file",
+      "blame": null,
+      "notes": "treated as absent — reconciled as if no outcome existed",
+      "script": { "journal": [{ "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "spawned", "time": "2026-07-28T00:00:00.000Z", "details": { "nonce": "n" } }], "reality": { "processAlive": false, "shimFingerprintPresent": false, "outcomeFilePresent": true, "nonceMatches": false } },
+      "expectedResult": { "classification": "stale-foreign", "action": "ignore-outcome-file" }
+    },
+    {
+      "name": "harvesting-resume",
+      "journalPhase": "harvesting",
+      "reality": { "processAlive": false },
+      "classification": "resume",
+      "action": "re-run-harvest-idempotently",
+      "blame": null,
+      "notes": "out/ is frozen once the process is gone — re-collection is deterministic and never drops outputs a partial harvest missed; then record and terminalize",
+      "script": { "journal": [{ "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "exec-finished", "time": "2026-07-28T00:00:00.000Z", "details": {} }, { "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "harvest-started", "time": "2026-07-28T00:00:01.000Z", "details": {} }], "reality": { "processAlive": false } },
+      "expectedResult": { "classification": "harvesting-resume", "action": "re-run-harvest-idempotently" }
+    },
+    {
+      "name": "recording-resume",
+      "journalPhase": "recording",
+      "reality": { "deliveryCheckpointPresent": true },
+      "classification": "resume",
+      "action": "re-write-delivery-from-checkpoint",
+      "blame": null,
+      "notes": "never re-assemble the Delivery — re-write verbatim from the seal-once checkpoint (§9.1), then emit delivery-recorded and terminalize",
+      "script": { "journal": [{ "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "exec-finished", "time": "2026-07-28T00:00:00.000Z", "details": {} }, { "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "harvest-started", "time": "2026-07-28T00:00:01.000Z", "details": {} }, { "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "harvested", "time": "2026-07-28T00:00:02.000Z", "details": {} }], "reality": { "deliveryCheckpointPresent": true } },
+      "expectedResult": { "classification": "recording-resume", "action": "re-write-delivery-from-checkpoint" }
+    },
+    {
+      "name": "terminal-with-survivors",
+      "journalPhase": "terminal",
+      "reality": { "shimFingerprintVerifiedSurvivorsAlive": true },
+      "classification": "contradictory",
+      "action": "fail-loud-terminal-record-wins-kill-survivors",
+      "blame": null,
+      "notes": "the terminal record wins; survivors get the kill ladder; a reconciliation event is appended",
+      "script": { "journal": [{ "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "attempt-terminal", "time": "2026-07-28T00:00:00.000Z", "details": { "state": "delivered" } }], "reality": { "shimFingerprintVerifiedSurvivorsAlive": true, "pids": [] } },
+      "expectedResult": { "classification": "contradictory", "action": "terminal-record-wins-kill-survivors", "killedPids": [] }
+    },
+    {
+      "name": "two-terminals-one-nonce",
+      "journalPhase": "terminal (duplicate)",
+      "reality": { "twoNonLostTerminalsSameNonce": true },
+      "classification": "contradictory",
+      "action": "first-by-seq-wins-persistent-flag",
+      "blame": null,
+      "notes": "matches journals/contradictory-terminals.json",
+      "script": { "journal": [{ "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "attempt-terminal", "time": "2026-07-28T00:00:00.000Z", "details": { "state": "delivered" } }, { "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "attempt-terminal", "time": "2026-07-28T00:00:01.000Z", "details": { "state": "failed" } }], "reality": { "pids": [] } },
+      "expectedResult": { "classification": "contradictory", "action": "terminal-record-wins-kill-survivors", "killedPids": [] }
+    },
+    {
+      "name": "lost-then-corrective",
+      "journalPhase": "terminal (lost, then corrected)",
+      "reality": { "priorTerminal": "lost", "outcomeRecoveredFromDisk": true },
+      "classification": "corrected",
+      "action": "accept-corrective-terminal-no-contradictory-flag",
+      "blame": null,
+      "notes": "TEP §10.4 rule 6 — the ONE sanctioned terminal-to-terminal transition; every other terminal-to-terminal transition is contradictory",
+      "script": { "journal": [{ "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000401", "type": "attempt-terminal", "time": "2026-07-28T00:00:00.000Z", "details": { "state": "lost" } }], "reality": { "outcomeFilePresent": true } },
+      "expectedResult": { "classification": "corrected", "action": "accept-corrective-terminal" }
+    }
+  ]
+}

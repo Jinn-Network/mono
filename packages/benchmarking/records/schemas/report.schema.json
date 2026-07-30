@@ -1,0 +1,430 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "type": "string",
+      "const": "https://jinn.network/protocols/benchmarking/1.0"
+    },
+    "subjects": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "uri": {
+                "type": "string"
+              },
+              "digest": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "mediaType": {
+                "type": "string"
+              },
+              "downloadLocation": {
+                "type": "string"
+              },
+              "annotations": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "content": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": {}
+          },
+          {
+            "type": "object",
+            "properties": {
+              "digest": {
+                "type": "object",
+                "properties": {
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                },
+                "required": [
+                  "sha256"
+                ],
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "digest"
+            ],
+            "additionalProperties": {}
+          }
+        ]
+      }
+    },
+    "method": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "parameters": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "parameters"
+      ],
+      "additionalProperties": false
+    },
+    "preregistered": {
+      "type": "boolean"
+    },
+    "results": {},
+    "disclosures": {
+      "type": "object",
+      "properties": {
+        "perSubject": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "subjectSha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "integrityTiers": {
+                "type": "object",
+                "properties": {
+                  "re-derivable": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "attested-only": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "re-derivable",
+                  "attested-only"
+                ],
+                "additionalProperties": false
+              },
+              "pinning": {
+                "type": "object",
+                "properties": {
+                  "harness": {
+                    "type": "object",
+                    "properties": {
+                      "match": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "mismatch": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "unverifiable": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "match",
+                      "mismatch",
+                      "unverifiable"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "match": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "mismatch": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "unverifiable": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "match",
+                      "mismatch",
+                      "unverifiable"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "loadout": {
+                    "type": "object",
+                    "properties": {
+                      "match": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "mismatch": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "unverifiable": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "match",
+                      "mismatch",
+                      "unverifiable"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "isolation": {
+                    "type": "object",
+                    "properties": {
+                      "match": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "mismatch": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "unverifiable": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "match",
+                      "mismatch",
+                      "unverifiable"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "harness",
+                  "model",
+                  "loadout",
+                  "isolation"
+                ],
+                "additionalProperties": false
+              },
+              "independence": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "completeness": {
+                "type": "object",
+                "properties": {
+                  "expected": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "judged": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "floor": {
+                    "type": "string",
+                    "pattern": "^(?:0*1(?:\\.0+)?|0*0\\.(?:0*[1-9]\\d*))$",
+                    "$comment": "Runtime check: exact BigInt completeness comparison and outcome derivation."
+                  },
+                  "runOutcome": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "cancelled"
+                    ]
+                  }
+                },
+                "required": [
+                  "expected",
+                  "judged",
+                  "floor",
+                  "runOutcome"
+                ],
+                "additionalProperties": false,
+                "$comment": "Runtime check: per-subject completeness partition (expected, judged, attrition excluded) and runOutcome floor pairing (§8.1, §9.1)."
+              },
+              "attrition": {
+                "type": "object",
+                "properties": {
+                  "perArm": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+                    },
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "expected": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "judged": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "unjudged": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "unscorable": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "expired": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "invalidated": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "excluded": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "replacements": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "expected",
+                        "judged",
+                        "unjudged",
+                        "unscorable",
+                        "expired",
+                        "invalidated",
+                        "excluded",
+                        "replacements"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "asymmetryFlags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "perArm",
+                  "asymmetryFlags"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "subjectSha256",
+              "integrityTiers",
+              "pinning",
+              "independence",
+              "completeness",
+              "attrition"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "perSubject"
+      ],
+      "additionalProperties": false
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "author": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocol",
+    "subjects",
+    "method",
+    "results",
+    "disclosures",
+    "author"
+  ],
+  "additionalProperties": {},
+  "propertyNames": {
+    "anyOf": [
+      {
+        "enum": [
+          "protocol",
+          "subjects",
+          "method",
+          "preregistered",
+          "results",
+          "disclosures",
+          "limitations",
+          "author"
+        ]
+      },
+      {
+        "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+)$"
+      }
+    ]
+  },
+  "$comment": "Runtime checks: cross-record references, canonical byte equality, and Report cross-field invariants."
+}

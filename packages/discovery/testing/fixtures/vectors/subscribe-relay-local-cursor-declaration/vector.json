@@ -1,0 +1,13 @@
+{
+  "name": "subscribe-relay-local-cursor-declaration",
+  "kind": "subscribe",
+  "description": "§9.3: relay cursors are relay-local and MUST be declared as such -- data-level ordering always comes from source-chain sequence, never from a relay's own numbering.",
+  "input": {
+    "relayId": "relay-a",
+    "cursor": "relay-a-local-cursor-42"
+  },
+  "expect": {
+    "cursorIsRelayLocal": true,
+    "dataOrderingComesFrom": "source-chain-sequence"
+  }
+}

@@ -1,0 +1,30 @@
+[
+  {
+    "specversion": "1.0",
+    "id": "evt-1",
+    "source": "urn:jinn:backend:adversarial",
+    "subject": "urn:uuid:f0000001-0000-5000-8000-000000000001",
+    "time": "2026-07-28T00:00:00Z",
+    "datacontenttype": "application/json",
+    "sequence": "0000000000000001",
+    "taskdigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+    "type": "network.jinn.task-execution.attempt-terminal.v1",
+    "data": {
+      "state": "cancelled"
+    }
+  },
+  {
+    "specversion": "1.0",
+    "id": "evt-2",
+    "source": "urn:jinn:backend:adversarial",
+    "subject": "urn:uuid:f0000001-0000-5000-8000-000000000001",
+    "time": "2026-07-28T00:01:00Z",
+    "datacontenttype": "application/json",
+    "sequence": "0000000000000002",
+    "taskdigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+    "type": "network.jinn.task-execution.attempt-started.v1",
+    "data": {
+      "startedAt": "2026-07-28T00:01:00Z"
+    }
+  }
+]

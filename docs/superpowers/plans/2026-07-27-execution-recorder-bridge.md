@@ -45,6 +45,14 @@ newline-delimited JSON over standard input/output,
   adapters, production configuration, release channels, deployment, migration,
   or cutover.
 
+## Addendum 2026-07-28 — baseline reconciliation
+
+_Added 2026-07-28 during Phase 0 program reconciliation. Where this section and the Preflight / guard-count text below differ, this section governs; the original plan body is retained unchanged for the record._
+
+- **Baseline moved to `3650ac65e`.** The current approved head of `integration/evidence-v1` is `3650ac65e`, a descendant of the `f65880c4e244e32334f0fed98bf00ff9b307e87d` named in the Preflight, so the Preflight's `git merge-base --is-ancestor f65880c4e244e32334f0fed98bf00ff9b307e87d HEAD` assertion still passes — run the plan from the current integration head, not the literal `f65880…`. `3650ac65e` contains PR #2226 (merge `9614fe7bc`), which added the UTF-16 code-unit canonical-byte ordering rule (evidence protocol design §5.1) and an **unconditional** `localeCompare` / `toLocale*` / `Intl` ban across all `packages/evidence/**` production source, enforced by a restructured `.github/scripts/evidence-source-boundaries.test.mjs`. Every guard-file edit this plan describes (Tasks 1 and 6) must be applied against the **current on-disk content** of those files, not the pre-#2226 shape the plan was drafted against.
+- **Package counts are stale — compute them.** This plan's inventory literals ("ninth package", "eight → nine manifests" in Task 1; the packed-types count in Task 6) predate the merged substrate, which already carries **11** evidence packages. `@jinn-network/execution-recorder-bridge` is the **12th** package at its land time. Do not use this plan's numeric literals: read the live guard file and compute the new count (current length + 1). Land-order across the three surviving application lanes is pinned by the program doc as **bridge → retrieval → contribution**; the inventory count each lane asserts therefore steps 11 → 12 → 13 → 14 in that order. Concurrent edits to the sorted guard lists are ordinary adjacent-line textual conflicts, not a serialization dependency (index §6).
+- **Sorts stay code-unit.** Any array or object-key sort that reaches canonical/sealed bytes must order by UTF-16 code unit (JS default `.sort()` / a per-package `compareCodeUnitStrings`, JCS key order) and must never use `localeCompare` or `Intl.Collator` (protocol design §5.1). The bridge itself produces **no** canonical or sealed bytes of its own — the Execution Recorder owns all serialization — so for this package the rule is a boundary-guard formality, and the only load-bearing #2226 reconciliation is landing the `evidence-source-boundaries.test.mjs` edit onto the restructured, ban-carrying file.
+
 ## Preflight
 
 Work from an isolated worktree branched off the recorded Evidence integration

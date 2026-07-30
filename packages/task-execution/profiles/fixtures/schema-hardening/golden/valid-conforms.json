@@ -1,0 +1,12 @@
+{
+  "input": {
+    "schema": {
+      "type": "object",
+      "properties": { "name": { "type": "string", "pattern": "^[a-z]+$" } },
+      "required": ["name"],
+      "additionalProperties": true
+    },
+    "payload": { "name": "abc" }
+  },
+  "expect": { "ok": true }
+}

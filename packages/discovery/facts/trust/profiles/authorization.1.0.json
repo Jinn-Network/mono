@@ -1,0 +1,11 @@
+{
+  "protocol": "https://jinn.network/record-discovery/1.0",
+  "kind": "https://jinn.network/records/authorization/1.0",
+  "profile": "https://jinn.network/records/authorization/1.0/facts/1.0",
+  "fields": [
+    { "name": "issuer", "class": "record", "cloudEvents": { "attribute": "issuer", "scalar": "string" } },
+    { "name": "audience", "class": "record" },
+    { "name": "expiry", "class": "record" },
+    { "name": "revocation", "class": "record", "referenceBearing": true }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "name": "@jinn-network/task-execution-launchers",
+  "version": "0.1.0",
+  "description": "The Executor Launcher contract and v1 launchers (claude-code, codex, hermes, cursor) for the Jinn Task Execution Protocol local backend. A launcher is a pure function from (TaskView, WorkspacePaths, AttemptIdentity) to a LaunchPlan; it never spawns. Depends on @jinn-network/task-execution-protocol, @jinn-network/task-execution-profiles, @jinn-network/task-execution-supervisor (AttemptIdentity), and @jinn-network/task-execution-workspace (TaskView/WorkspacePaths).",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/task-execution/backend-local/launchers"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/task-execution-profiles": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0",
+    "@jinn-network/task-execution-supervisor": "0.1.0",
+    "@jinn-network/task-execution-workspace": "0.1.0"
+  },
+  "devDependencies": {
+    "@jinn-network/task-execution-backend": "0.1.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/task-execution-backend": "portal:../../backend",
+    "@jinn-network/task-execution-profiles": "portal:../../profiles",
+    "@jinn-network/task-execution-protocol": "portal:../../protocol",
+    "@jinn-network/task-execution-supervisor": "portal:../supervisor",
+    "@jinn-network/task-execution-workspace": "portal:../workspace"
+  }
+}

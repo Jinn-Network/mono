@@ -1,0 +1,10 @@
+{
+  "protocol": "https://jinn.network/record-discovery/1.0",
+  "kind": "https://jinn.network/records/trust-policy/1.0",
+  "profile": "https://jinn.network/records/trust-policy/1.0/facts/1.0",
+  "fields": [
+    { "name": "version", "class": "record", "cloudEvents": { "attribute": "version", "scalar": "number" } },
+    { "name": "refreshBy", "class": "record" },
+    { "name": "predecessor", "class": "record", "referenceBearing": true }
+  ]
+}

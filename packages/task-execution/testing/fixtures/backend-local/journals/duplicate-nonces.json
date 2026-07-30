@@ -1,0 +1,38 @@
+{
+  "name": "duplicate-nonces",
+  "description": "Two distinct attempt numbers for the same Submission are journaled with the SAME nonce (an infrastructure bug, e.g. a nonce generator collision) — distinct from contradictory-terminals (which is one attempt, two terminal events). Ingest must treat the second spawn as stale/foreign the moment its nonce collides with a still-live attempt, never merge the two attempts' state.",
+  "events": [
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000104",
+      "seq": 1,
+      "type": "attempt-engaged",
+      "time": "2026-07-28T00:00:00.000Z",
+      "details": { "submission": "urn:uuid:00000000-0000-0000-0000-0000000000f4", "taskDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "attemptNumber": 1 }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000104",
+      "seq": 2,
+      "type": "spawned",
+      "time": "2026-07-28T00:00:00.250Z",
+      "details": { "nonce": "nonce-collision", "pid": 4500, "startTime": 444444 }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000105",
+      "seq": 1,
+      "type": "attempt-engaged",
+      "time": "2026-07-28T00:00:01.000Z",
+      "details": { "submission": "urn:uuid:00000000-0000-0000-0000-0000000000f4", "taskDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "attemptNumber": 2 }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000105",
+      "seq": 2,
+      "type": "spawned",
+      "time": "2026-07-28T00:00:01.250Z",
+      "details": { "nonce": "nonce-collision", "pid": 4501, "startTime": 444445 }
+    }
+  ],
+  "expected": {
+    "note": "an outcome file arriving with nonce 'nonce-collision' cannot be unambiguously attributed to attempt ...104 or ...105 — the nonce generator's collision-freedom is an infrastructure invariant this fixture documents as a MUST-NOT-HAPPEN case; a conforming supervisor detects the collision at append (nonce already live) and refuses the second spawn-intent, journaling an infrastructure-blamed rejection rather than silently accepting a colliding nonce"
+  },
+  "conformance": { "reality": { "processAlive": true, "shimFingerprintPresent": false, "outcomeFilePresent": false, "pids": [4500, 4501] }, "expectedResult": { "classification": "orphaned", "action": "kill-ladder-then-lost", "terminalState": "lost", "blame": "infrastructure", "killedPids": [4500, 4501] } }
+}
