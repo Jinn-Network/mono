@@ -9,3 +9,4 @@ export * from "./paths.js";
 export * from "./tail.js";
 export * from "./handler.js";
 export * from "./sse.js";
+export * from "./advertise.js";
