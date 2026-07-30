@@ -69,3 +69,41 @@ export function discoverStackPackages(repoRoot) {
   }
   return packages;
 }
+
+export const DEPENDENCY_SECTIONS = [
+  'dependencies',
+  'devDependencies',
+  'optionalDependencies',
+  'peerDependencies',
+];
+
+export function buildDependencyGraph(packages) {
+  const names = new Set(packages.map((pkg) => pkg.name));
+  const graph = new Map();
+  for (const pkg of packages) {
+    const edges = new Set();
+    for (const section of DEPENDENCY_SECTIONS) {
+      for (const dependency of Object.keys(pkg.manifest?.[section] ?? {})) {
+        if (dependency !== pkg.name && names.has(dependency)) edges.add(dependency);
+      }
+    }
+    graph.set(pkg.name, edges);
+  }
+  return graph;
+}
+
+export function topologicalWaves(graph) {
+  const remaining = new Set(graph.keys());
+  const waves = [];
+  while (remaining.size > 0) {
+    const wave = [...remaining]
+      .filter((name) => [...graph.get(name)].every((dependency) => !remaining.has(dependency)))
+      .sort();
+    if (wave.length === 0) {
+      throw new Error(`dependency cycle among platform packages: ${[...remaining].sort().join(', ')}`);
+    }
+    for (const name of wave) remaining.delete(name);
+    waves.push(wave);
+  }
+  return waves;
+}

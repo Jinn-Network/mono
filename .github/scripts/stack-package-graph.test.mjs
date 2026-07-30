@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
-import { STACK_ROOTS, discoverStackPackages } from './stack-package-graph.mjs';
+import { STACK_ROOTS, buildDependencyGraph, discoverStackPackages, topologicalWaves } from './stack-package-graph.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 
@@ -105,4 +105,69 @@ test('the real repository set is discovered without a hard-coded list', () => {
       `no packages discovered under ${root}`,
     );
   }
+});
+
+test('the graph keeps in-set edges from all four dependency sections and drops the rest', () => {
+  const packages = [
+    { directory: 'packages/trust/core', name: '@jinn-network/trust-core', manifest: { dependencies: { zod: '4.4.3' } } },
+    {
+      directory: 'packages/trust/resolve',
+      name: '@jinn-network/trust-resolve',
+      manifest: {
+        dependencies: { '@jinn-network/trust-core': '0.1.0', zod: '4.4.3' },
+        devDependencies: { '@jinn-network/trust-testing': '0.1.0', vitest: '4.1.8' },
+        peerDependencies: { vitest: '^4.1.8' },
+        optionalDependencies: {},
+      },
+    },
+    { directory: 'packages/trust/testing', name: '@jinn-network/trust-testing', manifest: { dependencies: { '@jinn-network/trust-core': '0.1.0' } } },
+  ];
+  const graph = buildDependencyGraph(packages);
+  assert.deepEqual([...graph.get('@jinn-network/trust-core')], []);
+  assert.deepEqual(
+    [...graph.get('@jinn-network/trust-resolve')].sort(),
+    ['@jinn-network/trust-core', '@jinn-network/trust-testing'],
+  );
+});
+
+test('a self-edge is ignored rather than reported as a cycle', () => {
+  const graph = buildDependencyGraph([
+    { directory: 'packages/trust/core', name: '@jinn-network/trust-core', manifest: { devDependencies: { '@jinn-network/trust-core': '0.1.0' } } },
+  ]);
+  assert.deepEqual([...graph.get('@jinn-network/trust-core')], []);
+  assert.deepEqual(topologicalWaves(graph), [['@jinn-network/trust-core']]);
+});
+
+test('waves are dependency-first and each wave is sorted', () => {
+  const graph = new Map([
+    ['c', new Set(['a', 'b'])],
+    ['b', new Set(['a'])],
+    ['a', new Set()],
+    ['d', new Set(['a'])],
+  ]);
+  assert.deepEqual(topologicalWaves(graph), [['a'], ['b', 'd'], ['c']]);
+});
+
+test('a cycle throws and names every member', () => {
+  const graph = new Map([
+    ['a', new Set(['b'])],
+    ['b', new Set(['a'])],
+    ['c', new Set()],
+  ]);
+  assert.throws(
+    () => topologicalWaves(graph),
+    /dependency cycle among platform packages: a, b/,
+  );
+});
+
+test('the real repository graph is acyclic and its first wave is the three sealed protocols', () => {
+  const waves = topologicalWaves(buildDependencyGraph(discoverStackPackages(repoRoot)));
+  assert.deepEqual(waves[0], [
+    '@jinn-network/evidence-protocol',
+    '@jinn-network/task-execution-protocol',
+    '@jinn-network/trust-core',
+  ]);
+  const flattened = waves.flat();
+  assert.equal(new Set(flattened).size, flattened.length, 'a package must appear in exactly one wave');
+  assert.ok(flattened.length >= 45);
 });
