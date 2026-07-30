@@ -19,6 +19,7 @@ import {
   createPublicClient,
   createWalletClient,
   decodeEventLog,
+  encodeFunctionData,
   http,
   parseEther,
   toHex,
@@ -28,6 +29,7 @@ import { describe, expect, test } from "vitest";
 import {
   JINN_ROUTER_V3_ABI,
   TASK_COORDINATOR_ABI,
+  executeSafeTransaction,
   type MarketplaceChainConfig,
 } from "@jinn-network/marketplace-binding";
 
@@ -53,6 +55,55 @@ const MOCK_MECH_DELIVER_ABI = [
       { name: "datas", type: "bytes[]" },
     ],
     outputs: [{ name: "deliveredRequests", type: "bool[]" }],
+  },
+] as const satisfies Abi;
+
+// Canonical Safe v1.3.0 singleton + proxy factory. Both are deployed on Base Sepolia at these
+// addresses, so a fork of that chain can mint a REAL Safe rather than a stub. This matters: the
+// venue's one transaction path is `execTransaction` under the relayer profile, and a stub without
+// `execTransaction`/`getTransactionHash`/`isOwner` would leave that whole path unexercised.
+const SAFE_SINGLETON = "0xd9Db270c1B5E3Bd161E8c8503c55cEABeE709552" as Address;
+const SAFE_PROXY_FACTORY = "0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2" as Address;
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
+
+const SAFE_SETUP_ABI = [
+  {
+    type: "function",
+    name: "setup",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "_owners", type: "address[]" },
+      { name: "_threshold", type: "uint256" },
+      { name: "to", type: "address" },
+      { name: "data", type: "bytes" },
+      { name: "fallbackHandler", type: "address" },
+      { name: "paymentToken", type: "address" },
+      { name: "payment", type: "uint256" },
+      { name: "paymentReceiver", type: "address" },
+    ],
+    outputs: [],
+  },
+] as const satisfies Abi;
+
+const SAFE_PROXY_FACTORY_ABI = [
+  {
+    type: "function",
+    name: "createProxyWithNonce",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "_singleton", type: "address" },
+      { name: "initializer", type: "bytes" },
+      { name: "saltNonce", type: "uint256" },
+    ],
+    outputs: [{ name: "proxy", type: "address" }],
+  },
+  {
+    type: "event",
+    name: "ProxyCreation",
+    inputs: [
+      { name: "proxy", type: "address", indexed: false },
+      { name: "singleton", type: "address", indexed: false },
+    ],
   },
 ] as const satisfies Abi;
 
@@ -142,6 +193,55 @@ async function killAndWait(child: ChildProcessWithoutNullStreams, timeoutMs = 50
 type ForkPublicClient = ReturnType<typeof createPublicClient>;
 type ForkWalletClient = ReturnType<typeof createWalletClient>;
 
+/**
+ * Mints a real Safe v1.3.0 through the canonical proxy factory already present on the forked
+ * chain, owned solely by `account` with threshold 1, and funds it so escrow-carrying calls can
+ * pay. The venue's single transaction path is `execTransaction`, so the fork suite must run
+ * against a genuine Safe -- a nonce-only stub would silently skip the whole broadcast profile.
+ */
+async function deploySafe(
+  publicClient: ForkPublicClient,
+  wallet: ForkWalletClient,
+  account: Address,
+): Promise<Address> {
+  const initializer = encodeFunctionData({
+    abi: SAFE_SETUP_ABI,
+    functionName: "setup",
+    args: [[account], 1n, ZERO_ADDRESS, "0x", ZERO_ADDRESS, ZERO_ADDRESS, 0n, ZERO_ADDRESS],
+  });
+  const createHash = await wallet.writeContract({
+    address: SAFE_PROXY_FACTORY,
+    abi: SAFE_PROXY_FACTORY_ABI,
+    functionName: "createProxyWithNonce",
+    args: [SAFE_SINGLETON, initializer, BigInt(`0x${randomBytes(8).toString("hex")}`)],
+    account,
+    chain: null,
+  } as never);
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: createHash });
+  const created = receipt.logs
+    .map((log) => {
+      try {
+        return decodeEventLog({ abi: SAFE_PROXY_FACTORY_ABI, data: log.data, topics: log.topics });
+      } catch {
+        return undefined;
+      }
+    })
+    .find((event) => event?.eventName === "ProxyCreation") as
+    | { args?: { proxy?: Address } }
+    | undefined;
+  const safe = created?.args?.proxy;
+  if (safe === undefined) throw new Error("Safe proxy creation did not emit ProxyCreation");
+
+  const fundHash = await wallet.sendTransaction({
+    account,
+    to: safe,
+    value: parseEther("1"),
+    chain: null,
+  } as never);
+  await publicClient.waitForTransactionReceipt({ hash: fundHash });
+  return safe;
+}
+
 async function deployToday(
   publicClient: ForkPublicClient,
   wallet: ForkWalletClient,
@@ -172,24 +272,25 @@ async function deployToday(
     return publicClient.waitForTransactionReceipt({ hash });
   };
 
-  const [coordinatorArtifact, routerArtifact, marketplaceArtifact, activityArtifact, mechArtifact, safeArtifact] =
+  const [coordinatorArtifact, routerArtifact, marketplaceArtifact, activityArtifact, mechArtifact] =
     await Promise.all([
       loadArtifact("src/tasks/TaskCoordinator.sol/TaskCoordinator.json"),
       loadArtifact("src/staking/JinnRouterV3.sol/JinnRouterV3.json"),
       loadArtifact("src/stubs/TaskCoordinatorTestMocks.sol/MockTaskMarketplace.json"),
       loadArtifact("src/stubs/TaskCoordinatorTestMocks.sol/MockTaskActivityChecker.json"),
       loadArtifact("src/stubs/TaskCoordinatorTestMocks.sol/MockTaskMechWithDelivery.json"),
-      loadArtifact("src/stubs/MockSafeWithNonce.sol/MockSafeWithNonce.json"),
     ]);
 
   const coordinator = await deploy(coordinatorArtifact);
   const marketplace = await deploy(marketplaceArtifact);
   const activity = await deploy(activityArtifact);
   const router = await deploy(routerArtifact);
-  const safe = await deploy(safeArtifact);
+  const safe = await deploySafe(publicClient, wallet, account);
   await write(coordinator, coordinatorArtifact.abi, "initialize", [account, router]);
   await write(router, routerArtifact.abi, "initialize", [account, marketplace, coordinator, activity]);
-  const mech = await deploy(mechArtifact, [parseEther("0.0001"), NATIVE_PAYMENT_TYPE, account, marketplace]);
+  // The mech's operator is the SAFE, not the signing EOA: the router checks the claimant against
+  // `mech.operator()`, and every venue write arrives as a Safe `execTransaction`.
+  const mech = await deploy(mechArtifact, [parseEther("0.0001"), NATIVE_PAYMENT_TYPE, safe, marketplace]);
 
   return {
     chain: {
@@ -277,6 +378,8 @@ async function postFixtureTask(
   const wallet = createWalletClient({ account, transport: http(deployment.rpcUrl) });
   const solutionMaxDeliveryRate = parseEther("0.0001");
   const verdictMaxDeliveryRate = parseEther("0.0001");
+  // The router escrows exactly one claim's worth of both rates per claim slot and rejects any
+  // other `value`, so a task's budget and its claim ceiling are always exhausted together.
   const value = (solutionMaxDeliveryRate + verdictMaxDeliveryRate) * BigInt(maxClaims);
 
   const hash = await wallet.writeContract({
@@ -322,22 +425,28 @@ async function postFixtureTask(
   return taskId;
 }
 
-/** Delivers a fixture solution for `requestId` through the deployed mech and returns the payload. */
+/**
+ * Delivers a fixture solution for `requestId` through the deployed mech and returns the payload.
+ * The mech only accepts its operator, which is the Safe, so the call goes out as a one-off Safe
+ * `execTransaction` via the binding's single-shot helper -- deliberately NOT the venue's own
+ * broadcaster, so the fixture never borrows the subject under test.
+ */
 async function deliverFixture(deployment: ForkVenueDeployment, requestId: Hex): Promise<Uint8Array> {
   const account = privateKeyToAccount(DEV_KEY);
   const publicClient = createPublicClient({ transport: http(deployment.rpcUrl) });
   const wallet = createWalletClient({ account, transport: http(deployment.rpcUrl) });
   const deliveryBytes = randomBytes(32);
 
-  const hash = await wallet.writeContract({
-    address: deployment.mech,
-    abi: MOCK_MECH_DELIVER_ABI,
-    functionName: "deliverToMarketplace",
-    args: [[requestId], [toHex(deliveryBytes)]],
-    account,
-    chain: null,
-  } as never);
-  await publicClient.waitForTransactionReceipt({ hash });
+  await executeSafeTransaction(publicClient, wallet, {
+    safeAddress: deployment.safe,
+    to: deployment.mech,
+    value: 0n,
+    data: encodeFunctionData({
+      abi: MOCK_MECH_DELIVER_ABI,
+      functionName: "deliverToMarketplace",
+      args: [[requestId], [toHex(deliveryBytes)]],
+    }),
+  });
   return deliveryBytes;
 }
 
@@ -369,7 +478,11 @@ export function describeForkVenueConformance(
       });
     }, 120_000);
 
-    test("a second claim on a one-slot task surfaces the decoded TCMaxClaimsReached inner revert", async () => {
+    // The exhausted-slot revert reaches the caller by NAME, not as a raw selector blob -- that
+    // legibility is the obligation. Which name fires is the venue's business: the router checks
+    // escrow before the coordinator checks the claim ceiling, and a task's escrow is sized to its
+    // ceiling exactly, so a one-slot task always reports the budget error first.
+    test("a second claim on a one-slot task surfaces a decoded inner revert, not a raw selector", async () => {
       await withForkVenue({
         generation: "today",
         async run(deployment) {
@@ -378,7 +491,7 @@ export function describeForkVenueConformance(
             const taskId = await postFixtureTask(deployment, { maxClaims: 1 });
             await subject.claim(taskId);
             await expect(subject.claim(taskId)).rejects.toThrow(
-              /TCMaxClaimsReached|TCOperatorClaimLimitReached/u,
+              /RouterInsufficientTaskBudget|TCMaxClaimsReached|TCOperatorClaimLimitReached/u,
             );
           } finally {
             subject.close();
@@ -413,7 +526,11 @@ export function describeForkVenueConformance(
         async run(deployment) {
           const subject = await build(deployment);
           try {
-            const [a, b] = await Promise.all([postFixtureTask(deployment), postFixtureTask(deployment)]);
+            // Posted sequentially: the fixture creator signs with the same EOA and viem assigns
+            // its nonce automatically, so concurrent posts would collide before the subject is
+            // even involved. The concurrency under test is the two claims sharing one Safe.
+            const a = await postFixtureTask(deployment);
+            const b = await postFixtureTask(deployment);
             const claims = await Promise.all([subject.claim(a), subject.claim(b)]);
             expect(new Set(claims.map((claim) => claim.txHash)).size).toBe(2);
           } finally {
