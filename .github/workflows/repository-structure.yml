@@ -20,6 +20,7 @@ jobs:
         with:
           node-version: 22
       - run: node --test .github/scripts/repository-gitlinks.test.mjs
+      - run: node --test .github/scripts/docs-key-guard.test.mjs
   evidence-architecture:
     name: Evidence package architecture
     runs-on: ubuntu-latest
