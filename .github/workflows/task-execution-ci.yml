@@ -311,6 +311,11 @@ jobs:
         with:
           name: task-execution-launchers-dist
           path: packages/task-execution/backend-local/launchers/dist
+      - name: Restore Task Execution Profiles distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-profiles-dist
+          path: packages/task-execution/profiles/dist
       - name: Install packed-smoke dependency toolchains
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable)
@@ -319,6 +324,17 @@ jobs:
           (cd packages/task-execution/backend-local/supervisor && yarn install --immutable)
           (cd packages/task-execution/backend-local/workspace && yarn install --immutable)
           (cd packages/task-execution/backend-local/launchers && yarn install --immutable)
+      - name: Build evidence contract packages from source (cross-tree CI convention, program §7.8)
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+      - name: Build Task Execution Backend Local assembly from source (testing imports it at typecheck)
+        working-directory: packages/task-execution/backend-local/assembly
+        run: |
+          yarn install --immutable
+          yarn build
       - name: Verify Task Execution Testing kit (including the ./backend-local conformance kit slice)
         working-directory: packages/task-execution/testing
         run: |
@@ -326,15 +342,6 @@ jobs:
           yarn typecheck
           yarn test
           yarn build
-      - name: Build evidence contract packages from source (cross-tree CI convention, program §7.8) for the testing kit's pack:smoke
-        run: |
-          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
-          (cd packages/evidence/repository && yarn install --immutable && yarn build)
-          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
-          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
-      - name: Assembly must have had a yarn install for its own prepack (testing's pack:smoke packs it too)
-        working-directory: packages/task-execution/backend-local/assembly
-        run: yarn install --immutable
       - name: Run Task Execution Testing kit pack:smoke
         working-directory: packages/task-execution/testing
         run: yarn pack:smoke

@@ -402,6 +402,9 @@ jobs:
       - name: Install Record Discovery Testing toolchain (packed-smoke dependency)
         working-directory: packages/discovery/testing
         run: yarn install --immutable
+      - name: Install Record Discovery Serve toolchain (runtime import of protocol)
+        working-directory: packages/discovery/serve
+        run: yarn install --immutable
       - name: Verify Record Discovery Source (Evidence Journal)
         working-directory: packages/discovery/sources/evidence-journal
         run: |

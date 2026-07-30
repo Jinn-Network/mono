@@ -196,6 +196,7 @@ jobs:
           (cd packages/task-execution/backend && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/trust/resolve && yarn install --immutable && yarn build)
           (cd packages/discovery/protocol && yarn install --immutable && yarn build)
           (cd packages/discovery/serve && yarn install --immutable && yarn build)
           (cd packages/marketplace/binding && yarn install --immutable && yarn build)
