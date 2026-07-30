@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "swebench/expected.json",
+      "sha256": "78a7948c6807ba8eb56b7638b49ff29d0ef9d1fe52c9165030b43a6c53c22f96"
+    },
+    {
+      "id": "swebench/row.json",
+      "sha256": "72c44c8a0e3a569794e3bac282bf522067f15b305ea84f065523f4c4975f774d"
+    }
+  ],
+  "errata": []
+}
