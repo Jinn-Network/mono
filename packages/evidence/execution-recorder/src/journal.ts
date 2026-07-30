@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 import type { Sha256Digest } from "@jinn-network/evidence-repository";
 
 import { assertRecorderOperationActive, ExecutionRecorderError } from "./errors.js";
+import { fsyncBestEffort } from "./fs-sync.js";
 import {
   WORKSPACE_FORMAT_VERSION,
   type JournalEntry,
@@ -131,7 +132,7 @@ async function syncDirectory(path: string): Promise<void> {
       (constants.O_DIRECTORY ?? 0),
   );
   try {
-    await handle.sync();
+    await fsyncBestEffort(handle);
   } finally {
     await handle.close();
   }
@@ -219,7 +220,7 @@ async function publishNewWorkspaceFile(
     await assertPinnedWorkspaceDirectory(paths, pinned);
     await handle.writeFile(bytes);
     if (process.platform !== "win32") await handle.chmod(0o600);
-    await handle.sync();
+    await fsyncBestEffort(handle);
     await handle.close();
     handle = undefined;
     assertRecorderOperationActive(signal);
