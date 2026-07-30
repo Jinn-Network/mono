@@ -9,7 +9,7 @@ const packages = join(root, 'packages', 'task-execution');
 const taskExecutionDirectories = [
   'protocol', 'backend', 'testing', 'profiles',
   'backend-local/supervisor', 'backend-local/workspace', 'backend-local/launchers', 'backend-local/assembly',
-  'evaluation-harness',
+  'evaluation-harness', 'evaluator-adapters',
 ];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
@@ -278,6 +278,27 @@ const EVALUATION_HARNESS_TEST_ALLOWED_EVIDENCE = [
 const EVALUATION_HARNESS_TEST_FORBIDDEN = TASK_EXECUTION_FOREIGN_PACKAGES
   .filter((name) => !EVALUATION_HARNESS_TEST_ALLOWED_EVIDENCE.includes(name));
 
+// evaluator-adapters (composition design §6.3) is a leaf: it consumes the adapter
+// contract, the EvaluationSpec vocabulary, and the Attempt identity, and imports no
+// evidence/trust/discovery package and no chain or network client in production.
+const EVALUATOR_ADAPTERS_PRODUCTION_FORBIDDEN = [
+  ...TASK_EXECUTION_FOREIGN_PACKAGES,
+  '@jinn-network/task-execution-backend',
+  '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-protocol',
+  '@jinn-network/task-execution-testing',
+  '@jinn-network/task-execution-workspace',
+];
+// Its tests drive the real harness runtime end-to-end, so they may seal Task/Delivery
+// documents and place workspace paths — but still touch no evidence runtime.
+const EVALUATOR_ADAPTERS_TEST_FORBIDDEN = [
+  ...TASK_EXECUTION_FOREIGN_PACKAGES
+    .filter((name) => name !== '@jinn-network/evidence-protocol'),
+  '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-testing',
+];
+
 // The downstream backend-local conformance test is the sanctioned real-assembly consumer
 // (backend plan C4, program §7.25). It injects the evidence repository/catalog test
 // implementations through the assembly-owned ports; no production testing-kit module may
@@ -380,6 +401,22 @@ test('task-execution source boundaries remain one-way across the approved graph'
     forbiddenImportsInFiles(harnessTests, EVALUATION_HARNESS_TEST_FORBIDDEN),
     [],
     'evaluation-harness tests may import only approved injected evidence bindings',
+  );
+
+  const adaptersSrc = join(packages, 'evaluator-adapters', 'src');
+  const adaptersTests = files(adaptersSrc)
+    .filter((file) => /\.test\.[cm]?[jt]sx?$/u.test(file));
+  const adaptersProduction = files(adaptersSrc)
+    .filter((file) => !adaptersTests.includes(file));
+  assert.deepEqual(
+    forbiddenImportsInFiles(adaptersProduction, EVALUATOR_ADAPTERS_PRODUCTION_FORBIDDEN),
+    [],
+    'evaluator-adapters production source crosses its approved contract boundary',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(adaptersTests, EVALUATOR_ADAPTERS_TEST_FORBIDDEN),
+    [],
+    'evaluator-adapters tests may import only the approved harness-driving surface',
   );
 });
 
