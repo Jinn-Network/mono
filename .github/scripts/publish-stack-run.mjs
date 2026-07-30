@@ -69,6 +69,83 @@ export async function packWave(wave, options) {
   return artifacts;
 }
 
+const RETRY_ATTEMPTS = Number.parseInt(process.env.JINN_NPM_REGISTRY_RETRY_ATTEMPTS ?? '12', 10);
+const RETRY_DELAY_MS = Number.parseInt(process.env.JINN_NPM_REGISTRY_RETRY_DELAY_MS ?? '5000', 10);
+
+function sleepSync(ms) {
+  if (ms <= 0) return;
+  spawnSync('sleep', [String(Math.max(1, Math.ceil(ms / 1000)))], { stdio: 'ignore' });
+}
+
+function viewJson(args, { exec, npmCommand = 'npm', repoRoot, attempts = 1, delayMs = 0 }, label) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const result = exec(npmCommand, args, repoRoot);
+    if (result.status === 0) {
+      try {
+        return JSON.parse(result.stdout);
+      } catch (error) {
+        throw new Error(`registry returned invalid JSON for ${label}: ${error?.message ?? String(error)}`);
+      }
+    }
+    const output = `${result.stdout}\n${result.stderr}`;
+    if (!/\bE404\b|404 Not Found/u.test(output)) {
+      throw new Error(`npm ${args.join(' ')} failed: ${output.trim()}`);
+    }
+    if (attempt < attempts - 1) sleepSync(delayMs);
+  }
+  return null;
+}
+
+export function registryIntegrity(spec, context) {
+  return viewJson(['view', spec, 'dist.integrity', '--json'], context, spec);
+}
+
+export function registryDistTag(name, distTag, context) {
+  return viewJson(['view', name, `dist-tags.${distTag}`, '--json'], context, name);
+}
+
+function assertIntegrity(artifact, actual, phase) {
+  if (actual !== artifact.integrity) {
+    throw new Error(`${phase} integrity mismatch for ${artifact.spec}: local ${artifact.integrity}, registry ${actual ?? '<missing>'}`);
+  }
+}
+
+function assertDistTag(artifact, actual, expectedVersion, distTag, phase) {
+  if (actual !== expectedVersion) {
+    throw new Error(
+      `${phase} ${distTag} mismatch for ${artifact.name}: expected ${expectedVersion}, got ${actual ?? '<missing>'}; `
+      + 'OIDC cannot repair an immutable version via npm dist-tag, refusing further publication',
+    );
+  }
+}
+
+export async function publishWave(artifacts, options) {
+  const { distTag, exec = defaultExec, npmCommand = 'npm', repoRoot } = options;
+  const context = { exec, npmCommand, repoRoot };
+  const version = artifacts[0]?.spec.slice(artifacts[0].spec.lastIndexOf('@') + 1);
+  const missing = [];
+  for (const artifact of artifacts) {
+    const actual = registryIntegrity(artifact.spec, context);
+    if (actual === null) {
+      missing.push(artifact);
+      continue;
+    }
+    assertIntegrity(artifact, actual, 'preflight');
+    assertDistTag(artifact, registryDistTag(artifact.name, distTag, context), version, distTag, 'preflight');
+    console.log(`already published with matching integrity: ${artifact.spec}`);
+  }
+  for (const artifact of missing) {
+    const result = exec(npmCommand, ['publish', artifact.tarball, '--access', 'public', '--provenance', '--tag', distTag], repoRoot);
+    if (result.status !== 0) {
+      throw new Error(`npm publish ${artifact.spec} failed: ${(result.stderr || result.stdout).trim()}`);
+    }
+    const retrying = { ...context, attempts: RETRY_ATTEMPTS, delayMs: RETRY_DELAY_MS };
+    assertIntegrity(artifact, registryIntegrity(artifact.spec, retrying), 'post-publish');
+    assertDistTag(artifact, registryDistTag(artifact.name, distTag, retrying), version, distTag, 'post-publish');
+    console.log(`published ${artifact.spec} at ${distTag}`);
+  }
+}
+
 export async function runPublish(plan, args) {
   const tarballsDir = mkdtempSync(join(tmpdir(), 'jinn-stack-publish-'));
   try {
@@ -81,6 +158,7 @@ export async function runPublish(plan, args) {
         tarballsDir,
       });
       console.log(`wave ${index}: packed ${artifacts.length} packages`);
+      await publishWave(artifacts, { distTag: plan.distTag, npmCommand: args.npmCommand, repoRoot: args.repoRoot });
     }
   } finally {
     rmSync(tarballsDir, { recursive: true, force: true });

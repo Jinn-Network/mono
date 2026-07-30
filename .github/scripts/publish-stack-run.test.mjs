@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { packWave } from './publish-stack-run.mjs';
+import { packWave, publishWave } from './publish-stack-run.mjs';
 
 const SHA = 'c'.repeat(40);
 
@@ -129,4 +129,95 @@ test('packWave rejects a tarball whose packed identity disagrees with the plan',
     rmSync(root, { recursive: true, force: true });
     rmSync(tarballsDir, { recursive: true, force: true });
   }
+});
+
+function registryExec(state) {
+  return (command, args) => {
+    if (args[0] === 'view') {
+      const [, spec, field] = args;
+      const record = state.get(spec);
+      if (!record) return { status: 1, stdout: '', stderr: 'npm error code E404\nnpm error 404 Not Found' };
+      if (field === 'dist.integrity') return { status: 0, stdout: JSON.stringify(record.integrity), stderr: '' };
+      return { status: 0, stdout: JSON.stringify(record.distTag), stderr: '' };
+    }
+    if (args[0] === 'publish') {
+      const spec = args.__spec;
+      state.set(spec, { integrity: args.__integrity, distTag: args[args.indexOf('--tag') + 1] });
+      return { status: 0, stdout: '', stderr: '' };
+    }
+    return { status: 0, stdout: '', stderr: '' };
+  };
+}
+
+test('publishWave skips an artifact already published with matching integrity', async () => {
+  const artifacts = [{ name: '@jinn-network/trust-core', spec: '@jinn-network/trust-core@0.1.0', tarball: '/tmp/a.tgz', integrity: 'sha512-AAA' }];
+  const published = [];
+  await publishWave(artifacts, {
+    distTag: 'canary',
+    repoRoot: '/tmp',
+    exec: (command, args) => {
+      if (args[0] === 'view' && args[2] === 'dist.integrity') return { status: 0, stdout: '"sha512-AAA"', stderr: '' };
+      if (args[0] === 'view') return { status: 0, stdout: '"0.1.0"', stderr: '' };
+      published.push(args);
+      return { status: 0, stdout: '', stderr: '' };
+    },
+  });
+  assert.deepEqual(published, []);
+});
+
+test('publishWave publishes a missing artifact and reverifies it', async () => {
+  const artifacts = [{ name: '@jinn-network/trust-core', spec: '@jinn-network/trust-core@0.1.0', tarball: '/tmp/a.tgz', integrity: 'sha512-AAA' }];
+  let exists = false;
+  const published = [];
+  await publishWave(artifacts, {
+    distTag: 'canary',
+    repoRoot: '/tmp',
+    exec: (command, args) => {
+      if (args[0] === 'view' && !exists) return { status: 1, stdout: '', stderr: 'npm error code E404' };
+      if (args[0] === 'view' && args[2] === 'dist.integrity') return { status: 0, stdout: '"sha512-AAA"', stderr: '' };
+      if (args[0] === 'view') return { status: 0, stdout: '"0.1.0"', stderr: '' };
+      published.push(args);
+      exists = true;
+      return { status: 0, stdout: '', stderr: '' };
+    },
+  });
+  assert.deepEqual(published, [['publish', '/tmp/a.tgz', '--access', 'public', '--provenance', '--tag', 'canary']]);
+});
+
+test('publishWave aborts the whole wave when a preflight integrity disagrees', async () => {
+  const artifacts = [
+    { name: '@jinn-network/trust-core', spec: '@jinn-network/trust-core@0.1.0', tarball: '/tmp/a.tgz', integrity: 'sha512-AAA' },
+    { name: '@jinn-network/trust-resolve', spec: '@jinn-network/trust-resolve@0.1.0', tarball: '/tmp/b.tgz', integrity: 'sha512-BBB' },
+  ];
+  const published = [];
+  await assert.rejects(
+    publishWave(artifacts, {
+      distTag: 'canary',
+      repoRoot: '/tmp',
+      exec: (command, args) => {
+        if (args[0] === 'view' && args[2] === 'dist.integrity') return { status: 0, stdout: '"sha512-DIFFERENT"', stderr: '' };
+        if (args[0] === 'view') return { status: 0, stdout: '"canary"', stderr: '' };
+        published.push(args);
+        return { status: 0, stdout: '', stderr: '' };
+      },
+    }),
+    /preflight integrity mismatch for @jinn-network\/trust-core@0\.1\.0: local sha512-AAA, registry sha512-DIFFERENT/,
+  );
+  assert.deepEqual(published, [], 'a preflight mismatch must abort before the first publish');
+});
+
+test('publishWave rejects a dist-tag that did not move to this version', async () => {
+  const artifacts = [{ name: '@jinn-network/trust-core', spec: '@jinn-network/trust-core@0.1.0', tarball: '/tmp/a.tgz', integrity: 'sha512-AAA' }];
+  await assert.rejects(
+    publishWave(artifacts, {
+      distTag: 'latest',
+      repoRoot: '/tmp',
+      exec: (command, args) => {
+        if (args[0] === 'view' && args[2] === 'dist.integrity') return { status: 0, stdout: '"sha512-AAA"', stderr: '' };
+        if (args[0] === 'view') return { status: 0, stdout: '"0.0.9"', stderr: '' };
+        return { status: 0, stdout: '', stderr: '' };
+      },
+    }),
+    /preflight latest mismatch for @jinn-network\/trust-core: expected 0\.1\.0, got 0\.0\.9/,
+  );
 });
