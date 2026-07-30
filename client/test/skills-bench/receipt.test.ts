@@ -32,6 +32,35 @@ describe('buildReceipt', () => {
   });
 });
 
+describe('buildReceipt with --repeats > 1', () => {
+  function oR(id: string, arm: string, repeat: number, passed: boolean | null): BenchOutcome {
+    return { instanceId: id, arm, repeat, passed, unscorable: passed === null, costUsd: 0.1 };
+  }
+
+  it('treats (instanceId, repeat) as the paired unit — repeats never collapse or double-count', () => {
+    // 2 instances x 2 repeats x 2 arms, outcomes differ per repeat within an instance.
+    const outcomes = [
+      oR('a', 'baseline', 0, false), oR('a', 'tdd', 0, true),   // improved
+      oR('a', 'baseline', 1, true), oR('a', 'tdd', 1, true),    // concordant pass
+      oR('b', 'baseline', 0, true), oR('b', 'tdd', 0, false),   // regressed
+      oR('b', 'baseline', 1, false), oR('b', 'tdd', 1, false),  // concordant fail
+    ];
+    const r = buildReceipt(outcomes, { baselineArm: 'baseline', treatmentArm: 'tdd', profile });
+    // n must count the 4 (instanceId, repeat) pairs, not the 2 distinct instances.
+    expect(r.n).toBe(4);
+    expect(r.excluded).toBe(0);
+    // improved/regressed must match the per-repeat pairing (one of each), not
+    // collapse to whatever the last repeat per instance happened to be.
+    expect(r.paired.improved).toBe(1);
+    expect(r.paired.regressed).toBe(1);
+    // passed/scorable must be consistent with n (4 pairs) on both arms.
+    expect(r.baseline.scorable).toBe(4);
+    expect(r.treatment.scorable).toBe(4);
+    expect(r.baseline.passed).toBe(2); // a#r1, b#r0
+    expect(r.treatment.passed).toBe(2); // a#r0, a#r1
+  });
+});
+
 describe('renderReceiptMd', () => {
   it('renders the receipt shape with the unconditional scope caveat', () => {
     const outcomes = [o('a', 'baseline', false), o('a', 'tdd', true)];

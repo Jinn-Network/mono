@@ -17,6 +17,13 @@ export interface BenchManifest {
   slateSha256: string;
   model: string;
   arms: { name: string; skillSha256: string | null }[];
+  /** Set only on a --dry-run manifest — the outcomes it guards are
+   *  synthesized, not real solves/grades. render-receipts.ts refuses to
+   *  render from a run dir carrying this flag, and the byte-exact manifest
+   *  guard (assertManifestCompatible) makes a real run collide with a
+   *  dry-run manifest in the same --out dir rather than silently resuming
+   *  fabricated outcomes. */
+  dryRun?: true;
 }
 
 export function attemptKey(o: { instanceId: string; arm: string; repeat: number }): string {

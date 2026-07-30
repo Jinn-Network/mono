@@ -39,4 +39,20 @@ describe('manifest guard', () => {
       assertManifestCompatible(file, { ...manifest, model: 'claude-haiku-4-5-20251001' }),
     ).rejects.toThrow(/manifest mismatch/);
   });
+
+  it('rejects a real manifest resuming a --out dir seeded by a dry run, and vice versa', async () => {
+    const dryManifest: BenchManifest = { ...manifest, dryRun: true };
+
+    // dry run wrote first → a later real run against the same --out dir must fail loud,
+    // not silently resume synthesized outcomes as if they were real solves/grades.
+    const dryFirst = join(await mkdtemp(join(tmpdir(), 'mf-dry-')), 'bench-manifest.json');
+    await assertManifestCompatible(dryFirst, dryManifest);
+    await expect(assertManifestCompatible(dryFirst, manifest)).rejects.toThrow(/manifest mismatch/);
+
+    // real run wrote first → a later --dry-run against the same --out dir must also fail
+    // loud, rather than silently mixing synthesized rows into a real attempts.jsonl.
+    const realFirst = join(await mkdtemp(join(tmpdir(), 'mf-real-')), 'bench-manifest.json');
+    await assertManifestCompatible(realFirst, manifest);
+    await expect(assertManifestCompatible(realFirst, dryManifest)).rejects.toThrow(/manifest mismatch/);
+  });
 });

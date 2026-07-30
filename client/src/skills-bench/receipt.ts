@@ -25,14 +25,23 @@ export interface ReceiptData {
   meanCostUsd: { baseline: number; treatment: number };
 }
 
+/** The paired unit is (instanceId, repeat), not instanceId alone — with
+ *  `--repeats > 1` each repeat is an independent trial and must stay a
+ *  distinct pair, or comparePaired's per-instance Map collapses repeats
+ *  (keeping only the last) while a naive instance-count would still count
+ *  every repeat, making `n`/`excluded` and improved/regressed disagree. */
+function pairId(o: BenchOutcome): string {
+  return `${o.instanceId}#r${o.repeat}`;
+}
+
 function armInputs(outcomes: BenchOutcome[], arm: string): PairedInput[] {
   return outcomes
     .filter((o) => o.arm === arm)
-    .map((o) => ({ instance_id: o.instanceId, passed: o.passed, unscorable: o.unscorable }));
+    .map((o) => ({ instance_id: pairId(o), passed: o.passed, unscorable: o.unscorable }));
 }
 
 function summarize(outcomes: BenchOutcome[], arm: string, pairedIds: Set<string>): ArmSummary {
-  const scored = outcomes.filter((o) => o.arm === arm && pairedIds.has(o.instanceId) && o.passed !== null);
+  const scored = outcomes.filter((o) => o.arm === arm && pairedIds.has(pairId(o)) && o.passed !== null);
   const passed = scored.filter((o) => o.passed === true).length;
   const { lo, hi } = wilsonInterval(passed, scored.length);
   return { passed, scorable: scored.length, lo, hi };

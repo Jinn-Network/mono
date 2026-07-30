@@ -12,7 +12,7 @@
  *   yarn tsx scripts/skills-bench/render-receipts.ts \
  *     --run ../bench/runs/wave1 --slate ../bench/slate/slate.json \
  *     --half both --measured-on 2026-08-01 --out ../bench/runs/wave1/receipts \
- *     [--agent claude-code]
+ *     [--agent claude-code] [--forked-from owner/repo@sha]
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -28,6 +28,7 @@ interface Args {
   measuredOn: string;
   outDir: string;
   agent: string;
+  forkedFrom: string | undefined;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -46,6 +47,7 @@ function parseArgs(argv: string[]): Args {
       case '--measured-on': args.measuredOn = String(argv[++i]); break;
       case '--out': args.outDir = resolve(String(argv[++i])); break;
       case '--agent': args.agent = String(argv[++i]); break;
+      case '--forked-from': args.forkedFrom = String(argv[++i]); break;
       default: throw new Error(`unknown argument ${a}`);
     }
   }
@@ -79,6 +81,12 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
   const manifest = await loadManifest(args.runDir);
+  if (manifest.dryRun) {
+    throw new Error(
+      `${join(args.runDir, 'bench-manifest.json')} is a dry-run manifest (dryRun: true) — ` +
+      `refusing to render receipts from synthesized outcomes. Use a real (non-dry-run) --out dir.`,
+    );
+  }
   const slate = await loadSlate(args.slatePath);
   if (slate.sha256 !== manifest.slateSha256) {
     throw new Error(
@@ -107,6 +115,7 @@ async function main(): Promise<void> {
         slateSha256: manifest.slateSha256,
         slateHalf: args.half,
         measuredOn: args.measuredOn,
+        forkedFrom: args.forkedFrom,
       },
     });
     await writeFile(join(args.outDir, `${arm.name}.md`), renderReceiptMd(data));

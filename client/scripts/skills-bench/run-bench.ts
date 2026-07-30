@@ -23,11 +23,14 @@
  *     [--solve-concurrency N] [--candidate-id ID] [--force-holdout-rerun]
  *
  * `--half holdout` requires `--candidate-id <id>` and is one-shot per
- * candidate: `../bench/holdout-ledger.json` records the run before it starts
- * (an aborted run still burns the slot), and a second attempt for the same
+ * candidate: `<repoRoot>/bench/holdout-ledger.json` (resolved from this
+ * script's own location, not CWD) records the run before it starts (an
+ * aborted run still burns the slot), and a second attempt for the same
  * candidate throws unless `--force-holdout-rerun` is passed (loud warning —
  * legitimate only when the prior run aborted before grading anything).
- * `--dry-run` never touches the ledger.
+ * `--half both` also records into the ledger (no block — see the holdout
+ * backstop recommendation in batch-b-review.md) so the ledger stays a
+ * complete audit trail. `--dry-run` never touches the ledger.
  *
  * arms file shape (baseline has skillDir null):
  *   [{ "name": "baseline", "skillDir": null },
@@ -37,7 +40,8 @@ import { spawn } from 'node:child_process';
 import { cp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   buildClaudeArgs, mountSkill, prepareBenchConfigDir, parseClaudeJson,
@@ -56,6 +60,13 @@ import { fetchPilotRawRow, parsePilotInstanceRow, type PilotInstance } from '../
 import { HttpHfFetcher } from '../../src/harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 import { PythonEvalRunner, EvalCouldNotGradeError } from '../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
 import type { HfRow } from '../../src/harnesses/impls/swe-rebench-v2-evaluator/index.js';
+
+// client/scripts/skills-bench/run-bench.ts -> client/scripts/skills-bench -> client/scripts -> client -> repo root
+// (same derivation as pin-skill.ts) — anchors bench/holdout-ledger.json to the
+// repo regardless of the operator's CWD (issue: a bare `resolve('../bench/...')`
+// is process.cwd()-relative and silently lands outside the repo when invoked
+// from anywhere but client/, voiding the one-shot holdout seal).
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 // ---------------------------------------------------------------------------
 // Config
@@ -293,6 +304,7 @@ async function solveAndGrade(
   baseDir: string,
   spec: AttemptSpec,
   gradeQueue: SerialTaskQueue,
+  gradeFailures: string[],
 ): Promise<void> {
   const armDir = await createPilotWorkDir(cfg.outDir, `solve-${spec.arm.name}-${spec.repeat}-`);
   try {
@@ -318,18 +330,31 @@ async function solveAndGrade(
     await writeFile(join(transcriptsDir, `${key}.json`), `${JSON.stringify({ ...claudeResult, patch }, null, 2)}\n`);
 
     gradeQueue.push(async () => {
-      const passed = await gradeAttempt(cfg, hfRow, patch);
-      const outcome: BenchOutcome = {
-        instanceId: spec.candidate.instance_id,
-        arm: spec.arm.name,
-        repeat: spec.repeat,
-        passed,
-        unscorable: passed === null,
-        costUsd: claudeResult.costUsd,
-      };
-      await appendAttempt(attemptsFile, outcome);
-      const verdict = passed === null ? 'ungradeable' : passed ? 'passed' : 'failed';
-      console.log(`[bench] graded ${instance.instance_id} arm=${spec.arm.name} → ${verdict}`);
+      // gradeAttempt already converts EvalCouldNotGradeError into passed=null
+      // (unscorable) — that is a legitimate grading outcome and is logged
+      // normally. Anything else thrown here is an unexpected infra failure
+      // (Docker, disk, network). It must NOT be folded into "unscorable" —
+      // that would misrepresent an infra outage as a harness verdict. Instead:
+      // log loudly, skip appendAttempt entirely (the attempt key stays absent
+      // from attempts.jsonl, so a resume re-runs it), and record it so main()
+      // can summarize + exit non-zero without aborting the rest of the run.
+      try {
+        const passed = await gradeAttempt(cfg, hfRow, patch);
+        const outcome: BenchOutcome = {
+          instanceId: spec.candidate.instance_id,
+          arm: spec.arm.name,
+          repeat: spec.repeat,
+          passed,
+          unscorable: passed === null,
+          costUsd: claudeResult.costUsd,
+        };
+        await appendAttempt(attemptsFile, outcome);
+        const verdict = passed === null ? 'ungradeable' : passed ? 'passed' : 'failed';
+        console.log(`[bench] graded ${instance.instance_id} arm=${spec.arm.name} → ${verdict}`);
+      } catch (err) {
+        console.error(`[bench] grade ERROR ${instance.instance_id} arm=${spec.arm.name}: ${(err as Error).message}`);
+        gradeFailures.push(key);
+      }
     });
   } finally {
     await rm(armDir, { recursive: true, force: true });
@@ -345,7 +370,7 @@ async function runReal(
   specs: AttemptSpec[],
   attemptsFile: string,
   transcriptsDir: string,
-): Promise<void> {
+): Promise<string[]> {
   const benchCfgDir = join(cfg.outDir, 'claude-config');
   await prepareBenchConfigDir(benchCfgDir, {
     sourceConfigDir: process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'),
@@ -353,6 +378,7 @@ async function runReal(
 
   const hfFetcher = new HttpHfFetcher();
   const gradeQueue = new SerialTaskQueue();
+  const gradeFailures: string[] = [];
 
   const byInstance = new Map<string, AttemptSpec[]>();
   for (const spec of specs) {
@@ -394,7 +420,7 @@ async function runReal(
     try {
       for (const spec of instanceSpecs) {
         try {
-          await solveAndGrade(cfg, benchCfgDir, attemptsFile, transcriptsDir, instance, hfRow, baseDir, spec, gradeQueue);
+          await solveAndGrade(cfg, benchCfgDir, attemptsFile, transcriptsDir, instance, hfRow, baseDir, spec, gradeQueue, gradeFailures);
         } catch (solveErr) {
           console.warn(`[bench]   solve error for ${instanceId}/${spec.arm.name}/${spec.repeat}: ${(solveErr as Error).message} — skipping, continuing`);
         }
@@ -405,6 +431,7 @@ async function runReal(
   });
 
   await gradeQueue.drain();
+  return gradeFailures;
 }
 
 async function main(): Promise<void> {
@@ -417,6 +444,7 @@ async function main(): Promise<void> {
     slateSha256: slate.sha256,
     model: cfg.model,
     arms: arms.map((arm) => ({ name: arm.name, skillSha256: arm.skillDir ? pinSha256(arm.skillDir) : null })),
+    ...(cfg.dryRun ? { dryRun: true as const } : {}),
   };
   await assertManifestCompatible(join(cfg.outDir, 'bench-manifest.json'), manifest);
 
@@ -450,21 +478,41 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (cfg.half === 'holdout') {
-    const ledgerFile = resolve('../bench/holdout-ledger.json');
-    if (cfg.forceHoldoutRerun) {
-      console.warn(
-        `[bench] --force-holdout-rerun set — skipping the one-shot holdout guard for candidate ` +
-        `'${cfg.candidateId}'. Legitimate only if the prior holdout run for this candidate aborted ` +
-        `before grading anything.`,
-      );
-    } else {
-      await assertHoldoutUnused(ledgerFile, cfg.candidateId!);
+  if (cfg.half !== 'feedback') {
+    // Every non-dry run that can touch holdout instances (--half holdout OR
+    // --half both) records into the ledger, so the ledger is a complete audit
+    // trail a receipt reader can inspect. Only --half holdout is *blocked* by
+    // the one-shot guard — wave 1's --half both is a pre-candidate baseline
+    // with no candidate id to key a block on (see batch-b-review.md "Holdout
+    // backstop — recommendation").
+    const ledgerFile = join(repoRoot, 'bench', 'holdout-ledger.json');
+    console.log(`[bench] holdout ledger: ${ledgerFile}`);
+    if (cfg.half === 'holdout') {
+      if (cfg.forceHoldoutRerun) {
+        console.warn(
+          `[bench] --force-holdout-rerun set — skipping the one-shot holdout guard for candidate ` +
+          `'${cfg.candidateId}'. Legitimate only if the prior holdout run for this candidate aborted ` +
+          `before grading anything.`,
+        );
+      } else {
+        await assertHoldoutUnused(ledgerFile, cfg.candidateId!);
+      }
     }
-    await recordHoldoutRun(ledgerFile, { candidateId: cfg.candidateId!, runDir: cfg.outDir, at: new Date().toISOString() });
+    await recordHoldoutRun(ledgerFile, {
+      candidateId: cfg.candidateId ?? '<pre-candidate>',
+      runDir: cfg.outDir,
+      at: new Date().toISOString(),
+    });
   }
 
-  await runReal(cfg, runnable, attemptsFile, transcriptsDir);
+  const gradeFailures = await runReal(cfg, runnable, attemptsFile, transcriptsDir);
+  if (gradeFailures.length > 0) {
+    console.error(
+      `[bench] ${gradeFailures.length} attempt(s) hit an unexpected grade error and were NOT ` +
+      `logged (re-runnable on resume): ${gradeFailures.join(', ')}`,
+    );
+    process.exitCode = 1;
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
