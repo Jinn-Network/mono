@@ -1,5 +1,20 @@
 # @jinn-network/indexer
 
+## Tier map (DR-2026-07-30 logical split, #2296 step 1)
+
+This package hosts two roles pending the physical split (#2296 step 2,
+gated on the operator-daemon cutover's discovery-serving stage):
+
+- **Projector role** (`src/` handlers, enrichment): aspirationally tier 3;
+  being replaced by the stack projector (`packages/marketplace/projector`
+  is projector #1). Post-split this process's role is hosted archive +
+  query plane.
+- **Explorer SPA** (`explorer/`, `src/api/explorer.ts`): tier 4 product;
+  physically separates at step 2.
+
+The legacy `@jinn-network/sdk` edge is severed and guarded
+(`.github/scripts/indexer-boundaries.test.mjs`).
+
 Ponder indexer for the Jinn protocol. Indexes four entities (Task, Attempt,
 SolverNetManifest, Envelope) from JinnRouter and IdentityRegistry events on
 Base Sepolia and Base mainnet.

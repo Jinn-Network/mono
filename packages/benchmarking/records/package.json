@@ -20,6 +20,10 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
+    "./slates/swe-rebench-v2-held-out": {
+      "import": "./dist/slates/swe-rebench-v2-held-out.js",
+      "types": "./dist/slates/swe-rebench-v2-held-out.d.ts"
+    },
     "./schemas/*": "./schemas/*",
     "./fixtures/*": "./fixtures/*"
   },
