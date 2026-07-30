@@ -3,9 +3,13 @@ import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import {
-  buildClaudeArgs, mountSkill, prepareBenchConfigDir, parseClaudeJson,
+  buildClaudeArgs, mountSkill, unmountSkill, prepareBenchConfigDir, parseClaudeJson,
 } from '../../src/skills-bench/claude-solve.js';
+
+const exec = promisify(execFile);
 
 describe('buildClaudeArgs', () => {
   it('pins model, print mode, JSON output, max turns, project settings, and bypass permission mode', () => {
@@ -31,6 +35,39 @@ describe('mountSkill', () => {
     expect(mounted).toBe(join(checkout, '.claude', 'skills', 'tdd'));
     expect(existsSync(join(mounted, 'SKILL.md'))).toBe(true);
     expect(existsSync(join(mounted, 'pin.json'))).toBe(false);
+  });
+});
+
+describe('unmountSkill', () => {
+  it('removes the .claude mount so a mounted-then-unmounted checkout produces a git diff with no .claude/ hunk (C1)', async () => {
+    const checkout = await mkdtemp(join(tmpdir(), 'co-git-'));
+    await exec('git', ['init', '-q'], { cwd: checkout });
+    await exec('git', ['-C', checkout, 'config', 'user.email', 't@t'], {});
+    await exec('git', ['-C', checkout, 'config', 'user.name', 't'], {});
+    await writeFile(join(checkout, 'a.py'), 'print("before")\n');
+    await exec('git', ['-C', checkout, 'add', '-A'], {});
+    await exec('git', ['-C', checkout, 'commit', '-q', '-m', 'init'], {});
+
+    const skillDir = await mkdtemp(join(tmpdir(), 'skill-'));
+    await writeFile(join(skillDir, 'SKILL.md'), '---\nname: tdd\ndescription: d\n---\nbody');
+    await writeFile(join(skillDir, 'pin.json'), '{}');
+    await mountSkill(checkout, skillDir, 'tdd');
+    expect(existsSync(join(checkout, '.claude', 'skills', 'tdd', 'SKILL.md'))).toBe(true);
+
+    // simulate the agent editing a source file during the solve
+    await writeFile(join(checkout, 'a.py'), 'print("after")\n');
+
+    await unmountSkill(checkout);
+    expect(existsSync(join(checkout, '.claude'))).toBe(false);
+
+    await exec('git', ['-C', checkout, 'add', '-A'], {});
+    const { stdout: names } = await exec('git', ['-C', checkout, 'diff', '--cached', '--name-only'], {});
+    const paths = names.trim().split('\n').filter(Boolean);
+    expect(paths).toEqual(['a.py']);
+    expect(paths.some((p) => p.startsWith('.claude/'))).toBe(false);
+
+    const { stdout: diff } = await exec('git', ['-C', checkout, 'diff', '--cached'], {});
+    expect(diff).not.toContain('.claude/');
   });
 });
 

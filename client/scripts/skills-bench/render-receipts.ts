@@ -11,8 +11,15 @@
  * Usage:
  *   yarn tsx scripts/skills-bench/render-receipts.ts \
  *     --run ../bench/runs/wave1 --slate ../bench/slate/slate.json \
- *     --half both --measured-on 2026-08-01 --out ../bench/runs/wave1/receipts \
- *     [--agent claude-code] [--forked-from owner/repo@sha]
+ *     --measured-on 2026-08-01 --out ../bench/runs/wave1/receipts \
+ *     [--agent claude-code] [--forked-from owner/repo@sha] [--skill-source owner/repo@sha]
+ *
+ * `slateHalf` on the rendered receipt is read straight from the run's
+ * `bench-manifest.json` (`half`, recorded by run-bench.ts when the run
+ * started) — never hand-typed here. A hand-typed --half could silently
+ * disagree with what was actually run and mislabel the receipt's scope
+ * (final-review.md C2); deriving it from the manifest removes that failure
+ * class entirely.
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -24,11 +31,11 @@ import type { SkillsBenchSlate } from '../../src/skills-bench/slate.js';
 interface Args {
   runDir: string;
   slatePath: string;
-  half: 'feedback' | 'holdout' | 'both';
   measuredOn: string;
   outDir: string;
   agent: string;
   forkedFrom: string | undefined;
+  skillSource: string | undefined;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -38,22 +45,16 @@ function parseArgs(argv: string[]): Args {
     switch (a) {
       case '--run': args.runDir = resolve(String(argv[++i])); break;
       case '--slate': args.slatePath = resolve(String(argv[++i])); break;
-      case '--half': {
-        const v = String(argv[++i]);
-        if (v !== 'feedback' && v !== 'holdout' && v !== 'both') throw new Error(`invalid --half ${v}`);
-        args.half = v;
-        break;
-      }
       case '--measured-on': args.measuredOn = String(argv[++i]); break;
       case '--out': args.outDir = resolve(String(argv[++i])); break;
       case '--agent': args.agent = String(argv[++i]); break;
       case '--forked-from': args.forkedFrom = String(argv[++i]); break;
+      case '--skill-source': args.skillSource = String(argv[++i]); break;
       default: throw new Error(`unknown argument ${a}`);
     }
   }
   if (!args.runDir) throw new Error('--run is required');
   if (!args.slatePath) throw new Error('--slate is required');
-  if (!args.half) throw new Error('--half is required');
   if (!args.measuredOn) throw new Error('--measured-on is required');
   if (!args.outDir) throw new Error('--out is required');
   return args as Args;
@@ -113,9 +114,11 @@ async function main(): Promise<void> {
         model: manifest.model,
         agent: args.agent,
         slateSha256: manifest.slateSha256,
-        slateHalf: args.half,
+        slateHalf: manifest.half,
         measuredOn: args.measuredOn,
         forkedFrom: args.forkedFrom,
+        skillSha256: arm.skillSha256 ?? undefined,
+        skillSource: args.skillSource,
       },
     });
     await writeFile(join(args.outDir, `${arm.name}.md`), renderReceiptMd(data));

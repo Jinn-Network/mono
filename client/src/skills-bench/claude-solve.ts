@@ -33,6 +33,16 @@ export async function mountSkill(checkoutDir: string, skillDir: string, name: st
   return dest;
 }
 
+/** Remove the mounted `.claude/` dir from the checkout. MUST run after the
+ *  claude spawn completes and BEFORE `recoverPatch` — `recoverPatch` runs
+ *  `git add -A` / `git diff --cached`, which stages untracked files by
+ *  design, so a still-mounted skill would ride along as an added file in
+ *  every treatment arm's graded patch (never in baseline's), a systematic,
+ *  one-directional asymmetry between the arms being compared. */
+export async function unmountSkill(checkoutDir: string): Promise<void> {
+  await rm(join(checkoutDir, '.claude'), { recursive: true, force: true });
+}
+
 /** Isolated CLAUDE_CONFIG_DIR: auth travels, nothing else does. User-level
  *  skills, plugins, memory, and settings must not leak into any arm — the
  *  baseline arm's claim is "no skill installed". */

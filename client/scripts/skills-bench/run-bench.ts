@@ -44,7 +44,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  buildClaudeArgs, mountSkill, prepareBenchConfigDir, parseClaudeJson,
+  buildClaudeArgs, mountSkill, unmountSkill, prepareBenchConfigDir, parseClaudeJson,
 } from '../../src/skills-bench/claude-solve.js';
 import type { SkillsBenchSlate, SlateCandidate } from '../../src/skills-bench/slate.js';
 import {
@@ -323,6 +323,11 @@ async function solveAndGrade(
     }
 
     const claudeResult = parseClaudeJson(stdout);
+    // Remove the mounted skill BEFORE recovering the patch — recoverPatch's
+    // `git add -A` stages untracked files by design, and a still-mounted
+    // skill would ship as an added file in every treatment arm's patch (see
+    // unmountSkill's doc comment / final-review.md C1).
+    if (spec.arm.skillDir) await unmountSkill(armDir);
     const patch = await recoverPatch(run, armDir);
 
     await mkdir(transcriptsDir, { recursive: true });
@@ -442,6 +447,7 @@ async function main(): Promise<void> {
   const manifest: BenchManifest = {
     version: 'skills-bench-manifest.v1',
     slateSha256: slate.sha256,
+    half: cfg.half,
     model: cfg.model,
     arms: arms.map((arm) => ({ name: arm.name, skillSha256: arm.skillDir ? pinSha256(arm.skillDir) : null })),
     ...(cfg.dryRun ? { dryRun: true as const } : {}),

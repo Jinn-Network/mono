@@ -73,4 +73,24 @@ describe('renderReceiptMd', () => {
     expect(md).toContain('slate sha256: deadbeef');
     expect(md).not.toMatch(/significan/i); // no significance language, ever (small-N honesty)
   });
+
+  it('renders skill bytes on the scope line when skillSha256 is present (final-review.md I7)', () => {
+    const outcomes = [o('a', 'baseline', false), o('a', 'tdd', true)];
+    const md = renderReceiptMd(
+      buildReceipt(outcomes, {
+        baselineArm: 'baseline',
+        treatmentArm: 'tdd',
+        profile: { ...profile, skillSha256: 'deadbeef'.repeat(8), skillSource: 'mattpocock/skills@abc123' },
+      }),
+    );
+    expect(md).toContain(`skill bytes: sha256 ${'deadbeef'.repeat(8)} · source mattpocock/skills@abc123`);
+  });
+
+  it('omits the skill bytes line when skillSha256 is absent (wave-1 baseline arm has no skill)', () => {
+    const outcomes = [o('a', 'baseline', false), o('a', 'tdd', true)];
+    const md = renderReceiptMd(
+      buildReceipt(outcomes, { baselineArm: 'baseline', treatmentArm: 'tdd', profile }),
+    );
+    expect(md).not.toContain('skill bytes:');
+  });
 });

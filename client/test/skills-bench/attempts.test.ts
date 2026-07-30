@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -27,7 +27,7 @@ describe('attempts log', () => {
 
 describe('manifest guard', () => {
   const manifest: BenchManifest = {
-    version: 'skills-bench-manifest.v1', slateSha256: 'abc', model: 'claude-sonnet-5',
+    version: 'skills-bench-manifest.v1', slateSha256: 'abc', half: 'feedback', model: 'claude-sonnet-5',
     arms: [{ name: 'baseline', skillSha256: null }, { name: 'tdd', skillSha256: 'def' }],
   };
 
@@ -37,6 +37,16 @@ describe('manifest guard', () => {
     await assertManifestCompatible(file, manifest);           // identical → ok
     await expect(
       assertManifestCompatible(file, { ...manifest, model: 'claude-haiku-4-5-20251001' }),
+    ).rejects.toThrow(/manifest mismatch/);
+  });
+
+  it('records half in the manifest and rejects a --half change against an existing --out dir', async () => {
+    const file = join(await mkdtemp(join(tmpdir(), 'mf-half-')), 'bench-manifest.json');
+    await assertManifestCompatible(file, manifest); // half: 'feedback'
+    const onDisk = JSON.parse(await readFile(file, 'utf8')) as BenchManifest;
+    expect(onDisk.half).toBe('feedback');
+    await expect(
+      assertManifestCompatible(file, { ...manifest, half: 'both' }),
     ).rejects.toThrow(/manifest mismatch/);
   });
 

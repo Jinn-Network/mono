@@ -176,21 +176,26 @@ rejects the mismatch (`dryRun: true` is part of the manifest bytes it compares).
 
 ## 5. Wave 1 full
 
-Same command, full model, full slate, fresh `--out`:
+Same command, full model, full slate, fresh `--out`. Wave 1 measures the incumbents' effect across
+the whole slate, so pass `--half both` explicitly — do not rely on the `feedback` default here:
 
 ```bash
 cd client
 yarn tsx scripts/skills-bench/run-bench.ts \
   --slate ../bench/slate/slate.json \
+  --half both \
   --arms ../bench/arms/wave1.json \
   --model claude-sonnet-5 \
   --out ../bench/runs/wave1
 ```
 
-`--half` defaults to `feedback`. Wave 1 measures the incumbents' effect broadly, not just on the
-sealed holdout — pass `--half both` explicitly if that is the intent for this run (it also seeds
-`bench/holdout-ledger.json` with a `<pre-candidate>` entry per the ledger's audit-trail design; see
-§8 and `src/skills-bench/holdout-guard.ts`).
+`--half both` also seeds `bench/holdout-ledger.json` with a `<pre-candidate>` entry per the
+ledger's audit-trail design; see §8 and `src/skills-bench/holdout-guard.ts`. `run-bench.ts` records
+the `--half` it actually ran with into `bench-manifest.json`'s `half` field — this is what
+`render-receipts.ts` (§6) reads to label the receipt's scope, not an operator-typed flag, so there
+is no way for the published receipt to disagree with what was actually run. Because wave 1 touches
+the holdout half, **§9's diagnosis step must read feedback-half transcripts only** — see §9's filter
+step before starting wave 2.
 
 **Budget note:** ≈30 tasks × 6 arms ≈ 180 solves + grades. Expect this to take days, not hours —
 each attempt is a real claude-code solve followed by a real Docker-based eval. It is safe to
@@ -214,17 +219,20 @@ cd client
 yarn tsx scripts/skills-bench/render-receipts.ts \
   --run ../bench/runs/wave1 \
   --slate ../bench/slate/slate.json \
-  --half both \
   --measured-on 2026-08-01 \
   --out ../bench/runs/wave1/receipts \
   --agent claude-code
 ```
 
-`--half` here describes what the receipt claims to have measured (must match what was actually run
-in `--run`'s `attempts.jsonl` — the renderer does not re-derive it). `--measured-on` is a plain
-`YYYY-MM-DD` string, not validated against anything — set it to the date the run completed.
-`--agent` defaults to `claude-code`; only pass `--forked-from <owner/repo@sha>` for a wave-2 fork
-receipt (§9), never for wave-1 (wave 1 has no fork).
+There is no `--half` flag on this script — the receipt's `slateHalf` is read directly from
+`--run`'s `bench-manifest.json` (`half`, recorded by `run-bench.ts` when the run started), so it can
+never disagree with what was actually run (§5). `--measured-on` is a plain `YYYY-MM-DD` string, not
+validated against anything — set it to the date the run completed. `--agent` defaults to
+`claude-code`; only pass `--forked-from <owner/repo@sha>` for a wave-2 fork
+receipt (§9), never for wave-1 (wave 1 has no fork). Pass `--skill-source <owner/repo@sha>` (the
+pinned original's `source`/`commit` from its `pin.json`, §2) to record which upstream bytes were
+measured on the receipt's `scope:` line — `skillSha256` is populated automatically from the run's
+`bench-manifest.json` arm entry, `--skill-source` is the human-readable pointer alongside it.
 
 The renderer refuses to run against a dry-run manifest (`dryRun: true` in
 `bench-manifest.json`) and refuses if `slate.json`'s `sha256` doesn't match the `slateSha256`
@@ -255,8 +263,10 @@ per the repo's external-communication rules (`CLAUDE.md` §External Communicatio
 1. Create `Jinn-Network/skills` from `bench/skills-repo-template/` (copy the template's
    `README.md`, `skills/`, `receipts/`, `rig/` layout as the starting tree).
 2. Copy the reviewed receipts (§6) into `receipts/<name>.md`, and copy `receipts/data/` — the frozen
-   `slate.json`, the run's `attempts.jsonl`, `bench-manifest.json`, and `transcripts/` — so every
-   receipt is reproducible from the repo alone (spec §1.6 success test).
+   `slate.json`, the run's `attempts.jsonl`, `bench-manifest.json`, `transcripts/`, and
+   `bench/holdout-ledger.json` (tracked in this repo, not gitignored — see `.gitignore`) — so every
+   receipt is reproducible from the repo alone and the ledger is a complete audit trail a reader of
+   the receipt can inspect (spec §1.6 success test).
 3. Regenerate the README's summary table from `receipts/SUMMARY.md` (never hand-write it — see
    `bench/skills-repo-template/README.md`'s comment).
 4. **Do not copy the skill directories into `skills/<name>/` yet.** Wave 1 publishes measurements,
@@ -305,10 +315,36 @@ Design reference: spec §4. Only a license-eligible target (§2) qualifies. Choo
 the wave-1 receipts (§6) — the skill with the clearest demonstrated headroom or the clearest
 demonstrated failure, not a guess.
 
-1. **Diagnose from traces.** Read the target's failing-run transcripts from
-   `../bench/runs/wave1/transcripts/` (filter by `arm=<target>`, `passed=false` in the matching
-   `attempts.jsonl` lines) for the dominant failure mode: never triggered, guidance too vague to
-   act on, or actively harmful on a task class.
+1. **Diagnose from traces — feedback-half transcripts only.** Wave 1 ran `--half both` (§5), so
+   `../bench/runs/wave1/transcripts/` contains **both** feedback- and holdout-instance transcripts.
+   Diagnosis must read feedback-half transcripts exclusively. Filter explicitly before opening
+   anything — do not eyeball filenames:
+
+   ```bash
+   # 1. The feedback-half instance ids from the frozen slate — the only ids safe to read for
+   #    wave-2 diagnosis.
+   jq -r '.feedback[].instance_id' ../bench/slate/slate.json | sort > /tmp/feedback-ids.txt
+
+   # 2. Transcript filenames are `<instanceId>|<arm>|<repeat>.json` — keep only the ones whose
+   #    instanceId (the part before the first `|`) is in the feedback set, further filtered to
+   #    the target arm and passed=false via attempts.jsonl.
+   for f in ../bench/runs/wave1/transcripts/*.json; do
+     id="$(basename "$f" | cut -d'|' -f1)"
+     grep -qxF "$id" /tmp/feedback-ids.txt && echo "$f"
+   done
+   ```
+
+   Cross-check each candidate id against `attempts.jsonl` (`arm=<target>`, `passed=false`) before
+   reading it, and read only that filtered list for the dominant failure mode: never triggered,
+   guidance too vague to act on, or actively harmful on a task class.
+
+   **Warning — this is an information boundary, not just a run-count guard.** The one-shot holdout
+   ledger (§8) blocks a second `--half holdout` *run* for a given candidate; it cannot un-read a
+   transcript. Opening a holdout-instance transcript at this step spends the holdout in information
+   terms — a variant designed with knowledge of a holdout failure is no longer a clean one-shot
+   against that half, even though every mechanical gate (ledger, manifest) stays green. Treat the
+   filtered list above as the entire diagnosis corpus; do not browse
+   `../bench/runs/wave1/transcripts/` directly.
 2. **Write K variant skill dirs** under `../bench/variants/<target>-v<k>/`, one per candidate fix —
    full revised `SKILL.md` files, not patches (spec §4 step 2). Build each variant's frontmatter
    with `buildSkillFrontmatter` from `src/skills-bench/frontmatter.ts` (six allowed keys only;
@@ -371,19 +407,21 @@ winning variant from §9 — no other variants (a holdout run is not another fee
 a second `--half holdout` attempt with the same id fails the one-shot guard (§8) unless the first
 attempt aborted before grading anything.
 
-Render the receipt with `--half holdout` and `--forked-from <owner/repo@sha>` (the pinned original's
-`source`/`commit` from its `pin.json`, §2):
+Render the receipt with `--forked-from <owner/repo@sha>` (the pinned original's `source`/`commit`
+from its `pin.json`, §2) and `--skill-source` for the same pointer on the `scope:` line. `slateHalf`
+is read from `bench-manifest.json`'s `half` field (recorded as `holdout` because §10's run above
+passed `--half holdout` — no `--half` flag on this script, see §6):
 
 ```bash
 cd client
 yarn tsx scripts/skills-bench/render-receipts.ts \
   --run ../bench/runs/wave2-holdout \
   --slate ../bench/slate/slate.json \
-  --half holdout \
   --measured-on <date> \
   --out ../bench/runs/wave2-holdout/receipts \
   --agent claude-code \
-  --forked-from <owner>/<repo>@<sha>
+  --forked-from <owner>/<repo>@<sha> \
+  --skill-source <owner>/<repo>@<sha>
 ```
 
 **Publish only if the fork wins** (net positive against the original on the holdout half, within
@@ -392,6 +430,35 @@ directory into the public repo's `skills/<name>/` (§7 step 4, now unblocked for
 its receipt and data. If it does not win, publish the finding anyway — a receipt showing the
 optimization loop found nothing is still an honest, publishable result (spec §8 risk 2) — but do
 not publish the fork as an installable skill.
+
+**Frontmatter packaging — spec §5.1 / §6 L3.** Before copying the winning fork's `SKILL.md` into
+`skills/<name>/`, rebuild its frontmatter with the `jinn.*` receipt-pointer block so the published
+skill points back at the receipt that measured it, composing `buildJinnReceiptMetadata` with
+`buildSkillFrontmatter` (`src/skills-bench/frontmatter.ts`):
+
+```ts
+import { buildJinnReceiptMetadata, buildSkillFrontmatter } from './src/skills-bench/frontmatter.js';
+
+const jinnMetadata = await buildJinnReceiptMetadata({
+  receiptUrl: 'https://github.com/Jinn-Network/skills/blob/main/receipts/<name>.md',
+  receiptFilePath: '../bench/runs/wave2-holdout/receipts/<name>.md',
+  measuredOn: '<date>', // same value passed to --measured-on above
+  forkedFrom: '<owner>/<repo>@<sha>',
+});
+
+const frontmatter = buildSkillFrontmatter({
+  name: '<name>',
+  description: '<the fork\'s final description>',
+  license: '<license>',
+  metadata: jinnMetadata,
+});
+```
+
+`jinnMetadata` carries `jinn.receipt` (the receipt's public URL), `jinn.receipt-sha256` (sha256 of
+the published receipt file — compute this against the receipt's *final* path in the public repo,
+after §7 step 2's copy, so the hash matches what a reader downloads), `jinn.measured-on`, and
+`jinn.forked-from`. Prepend `frontmatter` to the fork's body content to produce the final
+`SKILL.md` written into `skills/<name>/`.
 
 Offer the winning diff back to the original author as a PR regardless of outcome-driven publishing
 decisions above (spec §4, §6 L4) — this is also a human-gated external action (opening a PR against
@@ -406,6 +473,7 @@ a repo Jinn does not own), not something to automate.
 | `pin-skill.ts` | `--name --source --commit --skill-path` | `--dest` (default `../bench/skills-under-test`) |
 | `build-slate.ts` | `--seed` | `--pool-size` (default 60), `--out` (default `../bench/slate/slate.json`) |
 | `run-bench.ts` | `--slate --arms --out` | `--dry-run`, `--half` (default `feedback`), `--model` (default `claude-sonnet-5`), `--repeats` (default 1), `--max-turns` (default 40), `--max-instances` (default unlimited), `--grade-timeout-ms` (default 600000), `--upstream-repo-dir` (default `~/.jinn-client/SWE-rebench-V2-upstream`), `--solve-concurrency` (default 1), `--candidate-id` (required with `--half holdout`), `--force-holdout-rerun` |
-| `render-receipts.ts` | `--run --slate --half --measured-on --out` | `--agent` (default `claude-code`), `--forked-from` |
+| `render-receipts.ts` | `--run --slate --measured-on --out` | `--agent` (default `claude-code`), `--forked-from`, `--skill-source` — no `--half`: `slateHalf` is read from `--run`'s `bench-manifest.json` (`half`, recorded by `run-bench.ts`) |
 
-All flags verified 2026-07-30 against `client/scripts/skills-bench/{pin-skill,build-slate,run-bench,render-receipts}.ts`.
+All flags verified 2026-07-30, re-verified 2026-07-30 (final-review.md fix round) against
+`client/scripts/skills-bench/{pin-skill,build-slate,run-bench,render-receipts}.ts`.

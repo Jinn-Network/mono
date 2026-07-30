@@ -15,6 +15,12 @@ export interface BenchOutcome {
 export interface BenchManifest {
   version: 'skills-bench-manifest.v1';
   slateSha256: string;
+  /** Which slate half this run actually covers. Recorded by run-bench.ts at
+   *  the moment the run starts (not hand-typed later) so render-receipts.ts
+   *  can derive the receipt's slateHalf from the manifest instead of trusting
+   *  an operator-supplied --half flag that could silently disagree with what
+   *  was actually run (final-review.md C2). */
+  half: 'feedback' | 'holdout' | 'both';
   model: string;
   arms: { name: string; skillSha256: string | null }[];
   /** Set only on a --dry-run manifest — the outcomes it guards are

@@ -9,6 +9,11 @@ export interface ReceiptProfile {
   slateHalf: 'feedback' | 'holdout' | 'both';
   measuredOn: string;
   forkedFrom?: string;
+  /** sha256 of the measured skill's vendored bytes (manifest arms[].skillSha256) —
+   *  identifies exactly which version of the skill this receipt measured. */
+  skillSha256?: string;
+  /** pinned upstream provenance, e.g. `owner/repo@sha` (pin.json's source@commit). */
+  skillSource?: string;
 }
 
 export interface ArmSummary { passed: number; scorable: number; lo: number; hi: number }
@@ -104,6 +109,9 @@ export function renderReceiptMd(d: ReceiptData): string {
       `with skill $${d.meanCostUsd.treatment.toFixed(2)} (reported, never gates)`,
     `scope:      one agent configuration, one benchmark, this task list`,
     `            slate sha256: ${p.slateSha256} · measured ${p.measuredOn}`,
+    ...(p.skillSha256
+      ? [`            skill bytes: sha256 ${p.skillSha256}${p.skillSource ? ` · source ${p.skillSource}` : ''}`]
+      : []),
     `files:      per-task outcomes, run manifests, full agent transcripts, rerun script`,
     '```',
     '',
