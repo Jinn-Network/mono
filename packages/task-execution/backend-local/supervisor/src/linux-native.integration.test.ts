@@ -87,7 +87,9 @@ describe.runIf(linux)("Linux native custody shim", () => {
     expect(Number.isFinite(Date.parse(outcome.startedAt))).toBe(true);
     expect(Number.isFinite(Date.parse(outcome.finishedAt))).toBe(true);
     expect(Date.parse(outcome.finishedAt)).toBeGreaterThanOrEqual(Date.parse(outcome.startedAt));
-    const custody = JSON.parse(readFileSync(join(meta, "custody.json"), "utf8")) as Record<string, unknown>;
+    const custody = await waitFor(() => {
+      try { return JSON.parse(readFileSync(join(meta, "custody.json"), "utf8")) as Record<string, unknown>; } catch { return undefined; }
+    }, "native custody outcome");
     expect(custody["subreaper"]).toBe(true);
     let cgroupWritable = true;
     try { accessSync("/sys/fs/cgroup", constants.W_OK); } catch { cgroupWritable = false; }
@@ -129,7 +131,9 @@ describe.runIf(linux)("Linux native custody shim", () => {
     const outcome = await waitFor(() => readOutcome(meta, "nonce-escape") ?? undefined, "escape outcome");
     expect({ attemptId: outcome.attemptId, nonce: outcome.nonce, exitCode: outcome.exitCode, termSignal: outcome.termSignal }).toEqual({ attemptId: "attempt-escape", nonce: "nonce-escape", exitCode: null, termSignal: "SIGKILL" });
     for (const pid of [escaped.session, escaped.double]) expect(() => process.kill(pid, 0)).toThrow();
-    const custody = JSON.parse(readFileSync(join(meta, "custody.json"), "utf8")) as Record<string, unknown>;
+    const custody = await waitFor(() => {
+      try { return JSON.parse(readFileSync(join(meta, "custody.json"), "utf8")) as Record<string, unknown>; } catch { return undefined; }
+    }, "escape custody outcome");
     expect({ subreaper: custody["subreaper"], leaderReapedAfterGroupEmpty: custody["leaderReapedAfterGroupEmpty"], groupEmpty: custody["groupEmpty"] }).toEqual({ subreaper: true, leaderReapedAfterGroupEmpty: true, groupEmpty: true });
     expect(custody["adoptedChildrenReaped"]).toBeGreaterThanOrEqual(1);
   }, 10_000);
