@@ -20,7 +20,14 @@
  *     --arms ../bench/arms/wave1.json --model claude-sonnet-5 \
  *     --out ../bench/runs/wave1 [--repeats 1] [--max-turns 40] \
  *     [--max-instances N] [--grade-timeout-ms 600000] [--upstream-repo-dir PATH] \
- *     [--solve-concurrency N]
+ *     [--solve-concurrency N] [--candidate-id ID] [--force-holdout-rerun]
+ *
+ * `--half holdout` requires `--candidate-id <id>` and is one-shot per
+ * candidate: `../bench/holdout-ledger.json` records the run before it starts
+ * (an aborted run still burns the slot), and a second attempt for the same
+ * candidate throws unless `--force-holdout-rerun` is passed (loud warning —
+ * legitimate only when the prior run aborted before grading anything).
+ * `--dry-run` never touches the ledger.
  *
  * arms file shape (baseline has skillDir null):
  *   [{ "name": "baseline", "skillDir": null },
@@ -40,6 +47,7 @@ import {
   appendAttempt, assertManifestCompatible, attemptKey, loadAttempts,
   type BenchManifest, type BenchOutcome,
 } from '../../src/skills-bench/attempts.js';
+import { assertHoldoutUnused, recordHoldoutRun } from '../../src/skills-bench/holdout-guard.js';
 import {
   createPilotWorkDir, prepareBaseCheckout, recoverPatch, GitStepError,
 } from '../../src/pilot/repo.js';
@@ -71,6 +79,8 @@ interface BenchConfig {
   gradeTimeoutMs: number;
   upstreamRepoDir: string;
   solveConcurrency: number;
+  candidateId: string | undefined;
+  forceHoldoutRerun: boolean;
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-5';
@@ -89,6 +99,8 @@ function parseArgs(argv: string[]): BenchConfig {
     gradeTimeoutMs: 600_000,
     upstreamRepoDir: join(homedir(), '.jinn-client', 'SWE-rebench-V2-upstream'),
     solveConcurrency: 1,
+    candidateId: undefined,
+    forceHoldoutRerun: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -110,12 +122,15 @@ function parseArgs(argv: string[]): BenchConfig {
       case '--grade-timeout-ms': cfg.gradeTimeoutMs = Number(argv[++i]); break;
       case '--upstream-repo-dir': cfg.upstreamRepoDir = resolve(String(argv[++i])); break;
       case '--solve-concurrency': cfg.solveConcurrency = Math.max(1, Number(argv[++i]) || 1); break;
+      case '--candidate-id': cfg.candidateId = String(argv[++i]); break;
+      case '--force-holdout-rerun': cfg.forceHoldoutRerun = true; break;
       default: throw new Error(`unknown argument ${a}`);
     }
   }
   if (!cfg.slatePath) throw new Error('--slate is required');
   if (!cfg.armsPath) throw new Error('--arms is required');
   if (!cfg.outDir) throw new Error('--out is required');
+  if (cfg.half === 'holdout' && !cfg.candidateId) throw new Error('--half holdout requires --candidate-id <id>');
   return cfg;
 }
 
@@ -433,6 +448,20 @@ async function main(): Promise<void> {
       console.log(`[bench] dry-run result ${outcome.instanceId} arm=${outcome.arm} repeat=${outcome.repeat}: passed=${outcome.passed} cost=$${outcome.costUsd.toFixed(4)}`);
     }
     return;
+  }
+
+  if (cfg.half === 'holdout') {
+    const ledgerFile = resolve('../bench/holdout-ledger.json');
+    if (cfg.forceHoldoutRerun) {
+      console.warn(
+        `[bench] --force-holdout-rerun set — skipping the one-shot holdout guard for candidate ` +
+        `'${cfg.candidateId}'. Legitimate only if the prior holdout run for this candidate aborted ` +
+        `before grading anything.`,
+      );
+    } else {
+      await assertHoldoutUnused(ledgerFile, cfg.candidateId!);
+    }
+    await recordHoldoutRun(ledgerFile, { candidateId: cfg.candidateId!, runDir: cfg.outDir, at: new Date().toISOString() });
   }
 
   await runReal(cfg, runnable, attemptsFile, transcriptsDir);
