@@ -420,7 +420,13 @@ jobs:
           (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
       - name: Verify Task Execution Backend Local (assembly)
         working-directory: packages/task-execution/backend-local/assembly
+        env:
+          # Pin the production binary so Vitest dependency optimization cannot lose dist/native.
+          JINN_NATIVE_CUSTODY_BINARY: ${{ github.workspace }}/packages/task-execution/backend-local/supervisor/dist/native/jinn-attempt-shim
         run: |
+          (cd ../supervisor && node scripts/build-native.mjs)
+          test -x "$JINN_NATIVE_CUSTODY_BINARY"
+          "$JINN_NATIVE_CUSTODY_BINARY" --probe
           yarn install --immutable
           yarn typecheck
           yarn test
