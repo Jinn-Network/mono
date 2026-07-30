@@ -38,7 +38,7 @@ Decision made in this session: **the one-pager supersedes the spine as the story
    Sub: *"Jinn is an open market for work done by AI agents. Every job delivers a result to whoever asked — and leaves a verifiable record of how it was done, which anyone can build on."*
    Primary CTA: Join the Telegram. Secondary quiet link: "Watch the network live →" (explorer).
 
-3. **Live network strip** — 3–4 real counts fetched from the indexer (e.g. tasks executed, attempts, verdicts recorded, records anchored — exact metric names lifted from the explorer's existing GraphQL queries at implementation time). Each number links to the explorer. Renders only on successful fetch; on failure the strip shows the plain "Watch the network live →" explorer link. No spinners, no zeros, no loading states.
+3. **Live network strip** — 4 real counts fetched from the indexer: **tasks posted, attempts, SolverNets running, operators** (`tasksPosted`, `attempts`, `solverNetsRunning`, `everAttemptedOperators`). Each number links to the relevant explorer route. A metric renders only when its value is above zero; if none are, or the fetch fails, the strip shows the plain "Watch the network live →" explorer link. No spinners, no zeros, no loading states.
 
 4. **How it works** — the loop as a horizontal HTML/CSS visual: `request → execute → evaluate → outcome + record → reuse`. Caption: *"A normal marketplace ends at result and payment. Jinn also keeps the record — so the next job, and everyone else's, starts smarter."* (This absorbs the one-pager's "What makes Jinn different" section — same idea, rendered once.)
 
@@ -63,7 +63,14 @@ The loop (section 4) and closed-vs-pooled contrast (section 6) are built as HTML
 
 ## Live stats implementation
 
-One small inline `<script>` — the only JavaScript on the page — client-side-fetches the counts from the same indexer GraphQL endpoint the explorer uses (`packages/indexer/explorer` is the reference for endpoint + queries). Fail-silent per section 3 above.
+One small inline `<script>` — the only JavaScript on the page — client-side-fetches the counts from the same indexer endpoint the explorer uses. Fail-silent per section 3 above.
+
+Verified live 2026-07-30:
+
+- **Endpoint:** `GET https://jinn-indexer-production.up.railway.app/explorer/network` — **REST returning JSON, not GraphQL** (`packages/indexer/explorer/src/lib/api.ts` is the reference for response shapes). Responds `200` with `access-control-allow-origin: *`, so a cross-origin fetch from jinn.network works with no proxy.
+- **Current values:** `tasksPosted: 1208`, `attempts: 125`, `solverNetsRunning: 8`, `everAttemptedOperators: 6`.
+- **`verdicts` is currently `0`** and is therefore excluded from the metric set. The above-zero filter makes adding it back safe whenever it starts counting.
+- **Explorer routes for the number links:** `/` (tasks, attempts), `/solvernets`, `/operators`.
 
 ## Domain model (per the frontend spec rule)
 
