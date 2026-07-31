@@ -3149,4 +3149,3 @@ and packed public kit where required.
 
 All seven rows move from pending to commit SHA + red/green probe evidence only after
 red→green verification. L4 remains external/`not-evaluated`.
-
