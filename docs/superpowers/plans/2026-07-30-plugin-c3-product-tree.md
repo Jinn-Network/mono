@@ -1475,7 +1475,7 @@ This is where custody law C2 becomes structural. The module imports `node:path` 
 
 Precedence is defaults < file < environment, matching the daemon's documented `Config file first, env var override`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plugin/runtime/src/config.test.ts`:
 
@@ -1576,12 +1576,12 @@ describe("resolveRuntimeConfig", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test`
 Expected: FAIL — `Failed to resolve import "./config.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `plugin/runtime/src/config.ts`:
 
@@ -1702,17 +1702,17 @@ export function resolveRuntimeConfig(source: RuntimeConfigSource): RuntimeConfig
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test && yarn typecheck`
 Expected: PASS — 11 new tests (19 total).
 
-- [ ] **Step 5: Confirm the config module reaches for nothing ambient**
+- [x] **Step 5: Confirm the config module reaches for nothing ambient**
 
 Run: `grep -n "process\.\|node:fs\|node:os" plugin/runtime/src/config.ts || echo "clean"`
 Expected: `clean`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add plugin/runtime/src
