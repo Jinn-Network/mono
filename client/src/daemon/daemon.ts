@@ -35,6 +35,7 @@ import { gateClaimByAiUnits } from './ai-units-gate.js';
 import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
 import { blockIdUtc } from '../spend/ai-units.js';
 import { SkipLogDeduper } from './skip-log-dedup.js';
+import type { OperatorComposition } from './composition-root.js';
 
 type Corpus = CoreCorpus<SignedEnvelope>;
 
@@ -251,6 +252,15 @@ export interface DaemonConfig {
     stalenessFactor?: number;
     checkIntervalMs?: number;
   };
+
+  /**
+   * The stage-1 cutover composition root (Task 12, `client/src/daemon/composition-root.ts`):
+   * the assembled `LocalTaskExecutionBackend` + marketplace pipeline config/ports + venue.
+   * Optional so the many existing `new Daemon(...)` call sites (unit tests, non-cutover
+   * daemons) keep compiling. Threaded through the constructor only — Task 13 owns starting the
+   * work loop(s) that actually drive it via `start()`.
+   */
+  composition?: OperatorComposition;
 }
 
 export class Daemon {

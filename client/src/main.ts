@@ -2161,12 +2161,45 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     }
   }
 
+  // ── Stage-1 cutover composition root (Task 12) ─────────────────────────────
+  //
+  // Testnet-only: `MarketplaceChainConfig` (TaskCoordinator/JinnRouterV3 addresses) is only
+  // defined for Base Sepolia (`@jinn-network/marketplace-binding`'s `BASE_SEPOLIA_TODAY`) — no
+  // equivalent contracts are deployed on Base mainnet yet (see CLAUDE.md's Phase 2 rollout).
+  // `composition` stays `undefined` on mainnet; `DaemonConfig.composition` is optional and
+  // Task 13 owns starting the loops that would actually drive it.
+  let composition: import('./daemon/composition-root.js').OperatorComposition | undefined;
+  if (config.network === 'testnet') {
+    const { buildOperatorComposition } = await import('./daemon/composition-root.js');
+    const { BASE_SEPOLIA_TODAY } = await import('@jinn-network/marketplace-binding');
+    const { buildRepositoryWorkProfile, buildEvaluationTaskProfile, sealTaskProfile } =
+      await import('@jinn-network/task-execution-profiles');
+    const profileDocuments = [buildRepositoryWorkProfile(), buildEvaluationTaskProfile()];
+    const profilesByDigest = new Map(
+      profileDocuments.map((doc) => [sealTaskProfile(doc).digest, doc]),
+    );
+    composition = await buildOperatorComposition({
+      config,
+      publicClient,
+      walletClient: masterWallet,
+      safeAddress,
+      mechAddress,
+      chain: BASE_SEPOLIA_TODAY,
+      stateRoot: join(config.earningDir, '..', 'engine', 'backend'),
+      evidenceRoot: join(config.earningDir, '..', 'evidence'),
+      venueStateDbPath: join(config.earningDir, '..', 'venue', 'venue.db'),
+      profileStore: { get: (digest) => profilesByDigest.get(digest) },
+      ...(identityRegistryAddress ? { identityRegistryAddress } : {}),
+    });
+  }
+
   const daemon = new Daemon({
     adapter,
     runner,
     taskSources,
     dbPath: config.dbPath,
     store: sharedStore,
+    composition,
     apiServer: setupApiServer,
     pollIntervalMs: config.pollIntervalMs,
     apiPort: config.apiPort,
