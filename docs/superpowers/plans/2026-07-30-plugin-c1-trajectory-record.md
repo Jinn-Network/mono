@@ -3046,3 +3046,40 @@ peer ranges / Vite pins / pack-smoke scripts are unchanged.
 - [x] Named npm `11.19.0` install/assert step before every pack-smoke path (foundation, components, derivation, bridge, retrieval, trajectory, contribution, catalog-sqlite, local-runtime)
 - [x] Architecture test covers float / missing npm pin / forbidden legacy-peer-deps
 - [x] Local validation of architecture test + isolated npm 11.19.0 prefix install/assert
+
+---
+
+## 2026-07-31 final rereview findings resolution
+
+Append-only after C1-R1–R9. Ratified architecture/law unchanged. These are
+implementation / test / public-artifact / CI-script defects with demonstrated
+counterexamples. Historical checkboxes remain authoritative for earlier waves.
+
+| ID | Severity | Demonstrated counterexample | Minimal disposition | Red→green test | Final evidence |
+| --- | --- | --- | --- | --- | --- |
+| C1-R10 | Critical | Exact DSSE envelope with pretty-printed/noncanonical but schema-valid statement payload accepted; authority invoked; verify succeeds | After `parseExactDsseEnvelope` + strict closed statement validation, canonicalize validated statement via standard producer path and byte-compare to decoded `payloadBytes` before authority. Mismatch → L1 fail, authority uncalled. Close statement/predicate/descriptor schemas so unknown fields cannot normalize away. No new DSSE format; no signature verify before L1. | Pretty-print whitespace; reordered members; alternate escaping/number forms if schema admits numbers; duplicate keys; schema-valid noncanonical payload in exact envelope — each L1 fail, authority not called | [ ] pending |
+| C1-R11 | Critical | Authority-result validation via `Object.keys` misses non-enumerable own members/accessors; hidden undeclared members accepted; getters execute | Before any field read: reject Proxy; `Reflect.ownKeys` + own descriptors under typed-error normalization. Exact ordinary plain object; only declared string keys; all own fields enumerable data descriptors; no symbols/accessors/non-enumerable/prototype tricks/cycles/hostile nested arrays. Nested `signerKeyIds`/reason/diagnostics via descriptor.values. Malformed → L2 fail; getter counter zero. | Non-enumerable accessor/field; symbol; proxy traps; sparse/augmented/accessor/cyclic arrays; malformed descriptors; nested hostile results | [ ] pending |
+| C1-R12 | Important | Preflight incomplete for arrays: array accessors execute; cyclic arrays raw RangeError; Proxy trap raw error; attestation statement getter executes during sealing | Proxy-check every object including arrays before other reflection; normalize reflective failures to typed C1 errors. One WeakSet for all traversable object/array cycles. Descriptor-walk arrays (length + canonical index data descriptors only); recurse via descriptor.value. Preflight before Zod/property read in build/seal/verify for caller JSON; do not preflight signer/AbortSignal. Getter-zero tests for statement/build input, hostile arrays, cycles, Proxy traps. | Statement/build getters; hostile arrays top/nested/extension; cyclic array/object; Proxy traps; raw-error normalization | [ ] pending |
+| C1-R13 | Important | Runtime accepts `source.nativeTrace["network.jinn.note"]`; AJV rejects; top-level extension values unconstrained; `$comment` mislabels encoded completeness as runtime-only | Generated schema: deterministic `patternProperties`/`propertyNames` + recursive JsonValue at every runtime extension surface; core undeclared keys reject; top-level/nested extension values same recursive constraint (not `{}`). `$comment` lists only genuinely runtime-only refinements. AJV/runtime parity for valid extensions, arbitrary keys, invalid non-JSON, completeness. Regenerate pins. | Valid nested/top-level extensions pass+preserve; arbitrary key fails; undefined/non-JSON typed runtime failure; completeness parity | [ ] pending |
+| C1-R14 | Important | Packed kit covers only one envelope mutation, one malformed/false authority, one duplicate-link; omits most R1/R2/R3/R4 matrix | Port full public `testing` attack matrix: exact-envelope variants; all L3 link/entity/source mismatches; authority false/throw/malformed/hidden/proxy/cancel; hostile JSON getter-zero; retain correct signed-but-unfaithful L1–L3 pass / L4 replay-required. Pack smoke loads every fixture and runs expanded matrix. Minimal driver extension only if needed. No tautologies/private imports/skips. | Expanded packed kit matrix covering R1–R4/R10–R13 public cases; pack smoke all fixtures | [ ] pending |
+| C1-R15 | Important | Aggregate `verify` fails hermetically: `evidence-packed-types.test.mjs` runs `corepack yarn build` in trust-core without install; local preinstalled state masked it | Run `corepack yarn install --immutable` in `packages/trust/core` before build in packed-types script (match other deps). Guard ordering in script test if present. Validate via temp clone/worktree or temporary move of ignored install state with guaranteed restore. No trust-core source/lockfile edits. Keep Node/npm R9 pins. | Clean/simulated-clean trust-core install state → packed-types succeeds; ordering assertion | [ ] pending |
+| C1-R16 | Important | Workflow test compares step-name position while matching commands anywhere; count ≥9; mutant moving install after pack:smoke can pass | Semantic job/step parse (focused indentation-aware for this YAML). Exact expected pack-smoke job IDs. Ordered steps: named npm step must contain install + GITHUB_PATH + version assert and precede every `pack:smoke` step. Exact 11 setup-node jobs at 22.23.1. Mutation tests for name-before-but-command-after, omitted job, extra ungoverned pack-smoke job, missing PATH/assert, floating Node, legacy workaround. | Mutation suite fails on each listed mutant; green on current workflow | [ ] pending |
+| C1-R17 | Minor | `trajectoryFixtureUrl("..\\..\\outside")` escapes; POSIX treats backslashes literally before URL normalization | Reject raw backslashes and case-insensitive percent-encoded slash/backslash/separator forms (incl. double-encoded where bounded decoding reveals separator/traversal) before URL resolution. After resolution: file URL → filesystem path; separator-aware containment under canonical fixture root. Reject absolute URLs, drive-style, raw/encoded `..`, query/hash if outside contract. Valid nested names still work. | Raw `\\`, `%5c`, `%2f`, mixed case, double encoding, final-path escape; valid nested still OK | [ ] pending |
+
+### Implementation checklist (final rereview)
+
+- [ ] C1-R10 — statement payload canonical-byte equality before authority
+- [ ] C1-R11 — descriptor-safe authority-result closure; getter counter zero
+- [ ] C1-R12 — preflight arrays/proxies + attestation JSON inputs
+- [ ] C1-R13 — published JSON Schema extension parity + honest `$comment`
+- [ ] C1-R14 — public conformance kit full attack matrix + pack smoke
+- [ ] C1-R15 — hermetic trust-core install before packed-types build
+- [ ] C1-R16 — semantic Evidence CI architecture guard + mutation tests
+- [ ] C1-R17 — backslash/encoded-separator fixture containment
+
+### Acceptance
+
+All eight rows move from pending to commit SHA + command evidence only after
+red→green verification. L4 remains external/`not-evaluated`. Preserve R9 Node
+22.23.1 / npm 11.19.0 pins; no workaround weakening.
+
