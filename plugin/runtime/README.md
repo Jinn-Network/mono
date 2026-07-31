@@ -42,8 +42,9 @@ See `../../docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.
 ## Capture and local privacy
 
 **F-C4-T13-2:** capture registers only when the composition root injects `captureSigner` on
-`BinIo` / `io.captureSigner`. The default `jinn-plugin-runtime` entry omits it until C7 wires
-the host adapter signer.
+`BinIo` / `io.captureSigner`. The default `jinn-plugin-runtime` entry omits it. The
+`jinn-plugin-runtime-session` host entry loads an ephemeral local Ed25519 key under
+`<home>/capture-signer/` and injects it — production key custody remains a residual.
 
 Capture turns one observed agent session into two sealed products in your local archive: an
 **Execution Evidence record** — the same record family every producer on the platform writes

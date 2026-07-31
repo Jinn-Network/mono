@@ -118,18 +118,25 @@ class McpClient:
         self._process = None
         if process is None:
             return
-        for stream in (process.stdin, process.stdout, process.stderr):
-            try:
-                if stream is not None:
-                    stream.close()
-            except OSError:
-                pass
+        # Terminate before closing pipes. A long-lived Node runtime keeps reading
+        # stdin; closing stdout while the pump thread is blocked on readline()
+        # deadlocks teardown (doctor and every session client hit this path).
         if process.poll() is None:
             process.terminate()
             try:
                 process.wait(timeout=_TERMINATE_GRACE_S)
             except subprocess.TimeoutExpired:
                 process.kill()
+                try:
+                    process.wait(timeout=_TERMINATE_GRACE_S)
+                except subprocess.TimeoutExpired:
+                    pass
+        for stream in (process.stdin, process.stdout, process.stderr):
+            try:
+                if stream is not None:
+                    stream.close()
+            except OSError:
+                pass
         self._returncode = process.returncode
 
     def __enter__(self) -> "McpClient":
@@ -264,10 +271,22 @@ def _payload_of(result: Mapping[str, Any]) -> Dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {"value": parsed}
 
 
+def resolve_session_argv(resolution) -> Tuple[str, ...]:
+    """The session-role host composition entry, sibling of the tools bin."""
+    tools_bin = Path(resolution.argv[0])
+    session_bin = tools_bin.parent / "jinn-plugin-runtime-session"
+    if session_bin.is_file():
+        return (str(session_bin),)
+    # Development overrides may point at a bare bin; keep the legacy argv shape.
+    if len(resolution.argv) > 1:
+        return tuple(resolution.argv)
+    return (*resolution.argv, "serve", "--role", "session")
+
+
 def spawn_session_client(resolution, home: Path, timeout_s: float = DEFAULT_TIMEOUT_S) -> McpClient:
     """The adapter-spawned, session-role instance (the second MCP client)."""
     return McpClient(
-        argv=(*resolution.argv, "serve", "--role", "session"),
+        argv=resolve_session_argv(resolution),
         env={"JINN_PLUGIN_HOME": str(home)},
         timeout_s=timeout_s,
     )

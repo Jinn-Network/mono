@@ -86,3 +86,38 @@ def test_a_call_after_close_is_refused_rather_than_hanging():
     with pytest.raises(mcp_client.McpClientError) as caught:
         connected.call_tool("health", {})
     assert caught.value.code == "not-running"
+
+
+def test_spawn_session_client_prefers_the_session_host_bin(tmp_path):
+    import json
+    import stat
+
+    runtime_pin = importlib.import_module("jinn_plugin.runtime_pin")
+    (tmp_path / "runtime-pin.json").write_text(
+        json.dumps(
+            {
+                "package": "@jinn-network/plugin-runtime",
+                "version": "0.1.0",
+                "bin": "runtime/node_modules/.bin/jinn-plugin-runtime",
+            }
+        ),
+        encoding="utf-8",
+    )
+    bin_dir = tmp_path / "runtime" / "node_modules" / ".bin"
+    bin_dir.mkdir(parents=True)
+    tools = bin_dir / "jinn-plugin-runtime"
+    tools.write_text("#!/bin/sh\n", encoding="utf-8")
+    tools.chmod(tools.stat().st_mode | stat.S_IXUSR)
+    session = bin_dir / "jinn-plugin-runtime-session"
+    session.write_text("#!/bin/sh\n", encoding="utf-8")
+    session.chmod(session.stat().st_mode | stat.S_IXUSR)
+    package_dir = tmp_path / "runtime" / "node_modules" / "@jinn-network" / "plugin-runtime"
+    package_dir.mkdir(parents=True)
+    (package_dir / "package.json").write_text(
+        json.dumps({"name": "@jinn-network/plugin-runtime", "version": "0.1.0"}),
+        encoding="utf-8",
+    )
+
+    resolution = runtime_pin.resolve(tmp_path)
+    spawned = mcp_client.spawn_session_client(resolution, tmp_path / "home")
+    assert spawned._argv == (str(session),)

@@ -504,6 +504,18 @@ function isBinNodeFsProductionPath(filePath) {
   return filePath.endsWith('/src/bin-node-fs.ts') || filePath.endsWith('\\src\\bin-node-fs.ts');
 }
 
+function isProcessCompositionEntryPath(filePath) {
+  return filePath.endsWith('/src/bin.ts')
+    || filePath.endsWith('\\src\\bin.ts')
+    || filePath.endsWith('/src/session-host.ts')
+    || filePath.endsWith('\\src\\session-host.ts');
+}
+
+function isSessionHostSignerPath(filePath) {
+  return filePath.endsWith('/src/session-host-signer.ts')
+    || filePath.endsWith('\\src\\session-host-signer.ts');
+}
+
 function isAllowedCaptureProcessUse(node, ts, member, assignOps) {
   if (!CAPTURE_ALLOWED_PROCESS_MEMBERS.has(member)) return false;
   return !isAssignmentToExpression(node, node, ts, assignOps);
@@ -694,6 +706,7 @@ function scanSourceFile(filePath, content, options) {
     isBinEntry = false,
     isCaptureProduction = false,
     isBinNodeFsProduction = false,
+    isSessionHostSigner = false,
   } = options;
   const label = relativeFromRoot(filePath);
   const violations = [];
@@ -730,7 +743,7 @@ function scanSourceFile(filePath, content, options) {
   }
 
   let scope = new Scope(authCtx);
-  const ctx = { isBinEntry, isCaptureProduction, isBinNodeFsProduction, add, authCtx };
+  const ctx = { isBinEntry, isCaptureProduction, isBinNodeFsProduction, isSessionHostSigner, add, authCtx };
   const assignOps = assignmentOperatorKinds(ts);
 
   for (const stmt of sourceFile.statements) {
@@ -776,7 +789,7 @@ function scanSourceFile(filePath, content, options) {
     }
     if (isForbiddenFs(specifier)) {
       if (isBinEntry && isAllowedBinImport(specifier, node, ts)) return;
-      if (isCaptureProduction || isBinNodeFsProduction) return;
+      if (isCaptureProduction || isBinNodeFsProduction || isSessionHostSigner) return;
       add(specifier);
     }
   }
@@ -812,6 +825,7 @@ function scanSourceFile(filePath, content, options) {
   }
 
   function checkKeyMaterial(name, context) {
+    if (ctx.isSessionHostSigner) return;
     if (KEY_MATERIAL_NAME.test(name)) {
       add(`key-material ${context}: ${name}`);
     }
@@ -1342,14 +1356,16 @@ function scanSourceFile(filePath, content, options) {
 export function scanProductionSources(packages, scanOptions) {
   return packages.flatMap((pkg) => pkg.productionSourceFiles.flatMap((filePath) => {
     const content = scanOptions.readFile(filePath);
-    const isBinEntry = filePath.endsWith('/src/bin.ts') || filePath.endsWith('\\src\\bin.ts');
+    const isBinEntry = isProcessCompositionEntryPath(filePath);
     const isCaptureProduction = isCaptureProductionPath(filePath);
     const isBinNodeFsProduction = isBinNodeFsProductionPath(filePath);
+    const isSessionHostSigner = isSessionHostSignerPath(filePath);
     return scanSourceFile(filePath, content, {
       ...scanOptions,
       isBinEntry,
       isCaptureProduction,
       isBinNodeFsProduction,
+      isSessionHostSigner,
     });
   })).sort(compareCodeUnit);
 }
@@ -1358,6 +1374,8 @@ export {
   insideForbiddenRoot,
   isBinNodeFsProductionPath,
   isCaptureProductionPath,
+  isProcessCompositionEntryPath,
+  isSessionHostSignerPath,
   isForbiddenChildProcess,
   isForbiddenFs,
   isNetworkModule,

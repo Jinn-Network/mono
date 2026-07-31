@@ -1040,7 +1040,10 @@ test('plugin tree source boundaries hold and the manifest matches the approved s
     types: './dist/index.d.ts',
     import: './dist/index.js',
   });
-  assert.deepEqual(runtimeManifest.bin, { 'jinn-plugin-runtime': './dist/bin.js' });
+  assert.deepEqual(runtimeManifest.bin, {
+    'jinn-plugin-runtime': './dist/bin.js',
+    'jinn-plugin-runtime-session': './dist/session-host.js',
+  });
   assert.deepEqual(runtimeManifest.files.sort(), ['README.md', 'dist/']);
   assert.deepEqual(undeclaredRuntimeDependencies(runtimeManifest), []);
   assert.deepEqual(validateExactDependencySections(runtimeManifest), []);

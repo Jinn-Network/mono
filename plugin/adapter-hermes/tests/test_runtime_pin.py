@@ -36,6 +36,9 @@ def install_runtime(directory: Path, version: str = "0.1.0") -> Path:
     binary = bin_dir / "jinn-plugin-runtime"
     binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
+    session_binary = bin_dir / "jinn-plugin-runtime-session"
+    session_binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    session_binary.chmod(session_binary.stat().st_mode | stat.S_IXUSR)
     return binary
 
 

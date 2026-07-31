@@ -16,7 +16,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "jinn-plugin-runtime": "./dist/bin.js"
+    "jinn-plugin-runtime": "./dist/bin.js",
+    "jinn-plugin-runtime-session": "./dist/session-host.js"
   },
   "exports": {
     ".": {
