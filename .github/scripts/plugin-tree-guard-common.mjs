@@ -235,21 +235,6 @@ export function undeclaredProductionDependencies(manifest) {
   ).sort(compareCodeUnit);
 }
 
-function decodeExportPathBounded(relativePath) {
-  let current = relativePath;
-  for (let round = 0; round < 3; round += 1) {
-    if (!current.includes('%')) break;
-    try {
-      const decoded = decodeURIComponent(current);
-      if (decoded === current) break;
-      current = decoded;
-    } catch {
-      throw new Error('malformed percent encoding in export target');
-    }
-  }
-  return current;
-}
-
 function validateDistExportPath(relativePath, packageName, subpath, kind) {
   if (typeof relativePath !== 'string' || !relativePath.startsWith('./')) {
     throw new Error(`${packageName} exports ${kind} for ${subpath} must be relative: ${relativePath}`);
@@ -257,22 +242,27 @@ function validateDistExportPath(relativePath, packageName, subpath, kind) {
   if (relativePath.includes('\\')) {
     throw new Error(`${packageName} exports ${kind} for ${subpath} must not contain backslashes`);
   }
-  const decoded = decodeExportPathBounded(relativePath).replace(/\\/g, '/');
-  if (/[\0-\x1f\x7f]/.test(decoded)) {
+  if (relativePath.includes('%')) {
+    throw new Error(`${packageName} exports ${kind} for ${subpath} must not contain percent encoding`);
+  }
+  if (relativePath.includes('?') || relativePath.includes('#')) {
+    throw new Error(`${packageName} exports ${kind} for ${subpath} must not contain query or fragment`);
+  }
+  if (/[\0-\x1f\x7f]/.test(relativePath)) {
     throw new Error(`${packageName} exports ${kind} for ${subpath} contains control characters`);
   }
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(decoded) || decoded.includes('://')) {
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(relativePath) || relativePath.includes('://')) {
     throw new Error(`${packageName} exports ${kind} for ${subpath} must not use a URL`);
   }
-  if (!decoded.startsWith('./dist/')) {
+  if (!relativePath.startsWith('./dist/')) {
     throw new Error(`${packageName} exports ${kind} for ${subpath} must start with ./dist/`);
   }
-  for (const segment of decoded.slice(2).split('/')) {
+  for (const segment of relativePath.slice(2).split('/')) {
     if (segment === '..') {
       throw new Error(`${packageName} exports ${kind} for ${subpath} escapes dist/`);
     }
-    if (segment === '') {
-      throw new Error(`${packageName} exports ${kind} for ${subpath} contains encoded path separators`);
+    if (segment === '' || segment === '.') {
+      throw new Error(`${packageName} exports ${kind} for ${subpath} contains malformed path segments`);
     }
   }
 }

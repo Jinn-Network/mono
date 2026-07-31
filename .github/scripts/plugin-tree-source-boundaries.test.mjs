@@ -687,12 +687,14 @@ test('R-C3-39 rejects reordered export conditions and encoded traversal targets'
     /types before import/,
   );
   for (const [importTarget, expectPattern] of [
-    ['./dist/%2e%2e/outside.js', /escapes dist/],
-    ['./dist/%252e%252e/outside.js', /escapes dist/],
-    ['./dist/%2f/index.js', /encoded path separators/],
-    ['./dist/%5c/index.js', /encoded path separators|backslashes/],
+    ['./dist/%2e%2e/outside.js', /percent encoding/],
+    ['./dist/%252e%252e/outside.js', /percent encoding/],
+    ['./dist/%2f/index.js', /percent encoding/],
+    ['./dist/%5c/index.js', /percent encoding/],
     ['./dist\\index.js', /backslashes/],
     ['./outside.js', /dist/],
+    ['./dist/index.js?query=1', /query or fragment/],
+    ['./dist/index.js#frag', /query or fragment/],
   ]) {
     assert.throws(
       () => derivePublicCodeEntrypoints({
@@ -707,6 +709,83 @@ test('R-C3-39 rejects reordered export conditions and encoded traversal targets'
       expectPattern,
     );
   }
+});
+
+test('R-C3-43 rejects indirect ambient via reflection, sequence, and call wrappers', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-43-'));
+  try {
+    for (const [name, content, needle] of [
+      ['reflect-process.ts', 'export const leak = Reflect.get(globalThis, "process").env.SECRET;', 'Reflect.get globalThis.process'],
+      ['reflect-nonliteral.ts', 'const key = "fetch"; export const leak = Reflect.get(globalThis, key);', 'dynamic computed Reflect.get'],
+      ['comma-require.ts', 'export const fs = (0, require)("node:fs");', 'node:fs'],
+      ['require-call.ts', 'export const fs = require.call(null, "node:fs");', 'node:fs|nonliteral dynamic import'],
+      ['module-require.ts', 'export const fs = module.require("node:fs");', 'node:fs'],
+      ['fn-proto-call.ts', 'export const leak = Function.prototype.call.call(eval, null, "1");', 'dynamic evaluation'],
+    ]) {
+      const violations = scanFixtureSource(fixture, name, content);
+      const needles = needle.split('|');
+      assert.ok(
+        needles.some((part) => violations.some((entry) => entry.includes(part))),
+        `${name} must fail on ${needle}: ${violations.join('; ')}`,
+      );
+    }
+
+    const safeLocal = scanFixtureSource(fixture, 'safe-reflect.ts', [
+      'const local = { secret: 1 };',
+      'export const ok = Reflect.get(local, "secret");',
+    ].join('\n'));
+    assert.deepEqual(safeLocal, []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-44 rejects every ambient process mutation shape in bin', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-44-'));
+  try {
+    for (const [name, content, needle] of [
+      ['nullish-assign.ts', 'process.env.HOME ??= "/tmp";', 'forbidden bin process env mutation'],
+      ['logical-assign.ts', 'process.argv[0] ||= "node";', 'forbidden bin process argv mutation'],
+      ['object-assign.ts', 'Object.assign(process.env, { LEAK: "yes" });', 'forbidden bin process env mutation'],
+      ['reflect-set-argv.ts', 'Reflect.set(process.argv, 0, "bad");', 'forbidden bin process argv mutation'],
+      ['reflect-set-env-root.ts', 'Reflect.set(process, "env", {});', 'forbidden bin process process mutation'],
+      ['argv-push.ts', 'process.argv.push("--bad");', 'forbidden bin process.argv mutation'],
+    ]) {
+      const violations = scanFixtureSource(fixture, name, content, { isBinEntry: true });
+      assert.ok(violations.some((entry) => entry.includes(needle)), `${name} must fail on ${needle}`);
+    }
+
+    const allowed = scanFixtureSource(fixture, 'bin-read.ts', [
+      'process.env.JINN_PLUGIN_HOME;',
+      'process.argv.slice(2);',
+      'process.exitCode = 1;',
+    ].join('\n'), { isBinEntry: true });
+    assert.deepEqual(allowed, []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-50 lexical shadowing resolves bindings not identifier text', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-50-'));
+  try {
+    const safe = scanFixtureSource(fixture, 'shadow.ts', [
+      'function localFetch() { const fetch = () => "local"; return fetch(); }',
+      'function localEval() { const eval = () => "local"; return eval(); }',
+      'function localIntl() { const Intl = { Collator: class { compare() { return 0; } } }; return new Intl.Collator().compare("a", "b"); }',
+      'function localProcess() { const process = { env: { SAFE: "1" } }; return process.env.SAFE; }',
+      'import * as process from "./local-process.js";',
+      'export const viaNamespace = process.env.SAFE;',
+    ].join('\n'));
+    assert.deepEqual(safe.filter((entry) => entry.includes('process.env') || entry.includes('network global fetch') || entry.includes('Intl') || entry.includes('dynamic evaluation')), []);
+
+    const ambient = scanFixtureSource(fixture, 'ambient.ts', [
+      'export const viaFetch = fetch("https://example.com");',
+      'export const viaEval = eval("1");',
+      'new Intl.Collator("en-US").compare("a", "b");',
+      'export const viaProcess = process.env.HOME;',
+    ].join('\n'));
+    assert.ok(ambient.some((entry) => entry.includes('network global fetch')));
+    assert.ok(ambient.some((entry) => entry.includes('dynamic evaluation eval')));
+    assert.ok(ambient.some((entry) => entry.includes('Intl')));
+    assert.ok(ambient.some((entry) => entry.includes('process.env')));
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
 test('plugin tree source boundaries hold and the manifest matches the approved shape', () => {

@@ -82,7 +82,7 @@ function assertExportMutationsFail() {
     [{ name: '@jinn-network/nested', exports: { '.': { import: { nested: true } } } }, /malformed|requires string types and import|types before import/],
     [{ name: '@jinn-network/null-export', exports: { '.': null } }, /malformed/],
     [{ name: '@jinn-network/reordered', exports: { '.': { import: './dist/index.js', types: './dist/index.d.ts' } } }, /types before import/],
-    [{ name: '@jinn-network/encoded', exports: { '.': { types: './dist/%2e%2e/x.d.ts', import: './dist/%2e%2e/x.js' } } }, /dist/],
+    [{ name: '@jinn-network/encoded', exports: { '.': { types: './dist/%2e%2e/x.d.ts', import: './dist/%2e%2e/x.js' } } }, /percent encoding/],
   ];
   for (const [manifest, pattern] of cases) {
     try {
