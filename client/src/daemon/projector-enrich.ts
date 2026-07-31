@@ -27,10 +27,15 @@
  *   - `deliveryCorrespondence` (today-mode external Mech `Deliver` facts only) is a *different*
  *     kind of check: it recomputes the delivered content's real digests and compares them to
  *     on-chain facts, but a disagreement there is a legitimate protocol-level signal the reducer
- *     already knows how to reject on (`content-corruption`), not a reason to drop the event. Only
- *     genuine unresolvability (can't fetch the delivered bytes, can't read the on-chain fact) -
- *     leaves the field absent; the Deliver event itself is still admitted so its request/task
- *     identity is not silently lost.
+ *     already knows how to reject on (`content-corruption`), not a reason to drop the event.
+ *   - Unresolvable delivered content (the IPFS fetch itself fails) is DIFFERENT from a mismatch,
+ *     and is a drop, not an admit-without-the-field: a drop is retryable (the log id never enters
+ *     `processedLogIds`, so the next tick re-attempts it once IPFS catches up), while an admit is
+ *     permanent (the event is marked processed forever with the missing correspondence baked into
+ *     `pendingMechDeliveries`, and the later router claim is rejected for a fact a retry seconds
+ *     later would have supplied). Fail-closed means dropping the ambiguous "not fetched yet" case,
+ *     not admitting it as if it were a confirmed rejection -- only a genuinely on-chain-permanent
+ *     gap (no request reference at all) is a drop for a different, non-retryable reason.
  *
  * Resolution goes entirely through host-injected ports (`ProjectorEnrichPorts`) -- this module
  * never hard-wires an IPFS gateway URL or duplicates ABI/contract-read logic that belongs to the
@@ -285,11 +290,15 @@ export function createProjectorEnrich(
     }
     const deliveryBytes = await ports.fetchIpfsBytes(onChainSha256CidDigest);
     if (deliveryBytes === undefined) {
+      // Unresolvable-right-now is overwhelmingly transient (IPFS hasn't caught up yet) --
+      // dropping lets the next tick retry it. Admitting instead would permanently mark this log
+      // id processed with no correspondence, so a later, genuine "content is corrupt" rejection
+      // and a merely-not-yet-fetched delivery would be indistinguishable and both permanent.
       ports.logger?.warn(
-        `[projector-enrich] delivery content ${onChainSha256CidDigest} for requestId ${requestId} unresolvable `
-          + '-- admitting Deliver without deliveryCorrespondence',
+        `[projector-enrich] delivery content ${onChainSha256CidDigest} for requestId ${requestId} `
+          + 'unresolvable -- dropping Deliver so a later tick can retry',
       );
-      return { taskId: facts.taskId, attemptIndex: facts.attemptIndex, correspondence: undefined };
+      return undefined;
     }
     const sha256Digest = computeRawCodecCid(deliveryBytes).sha256Digest;
     const evidenceHash = keccakEvidenceHash(deliveryBytes);

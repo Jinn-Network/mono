@@ -289,7 +289,7 @@ describe('createProjectorEnrich', () => {
     expect(enriched).toBeUndefined();
   });
 
-  it('admits a today-mode Deliver without deliveryCorrespondence when the delivered content is unresolvable', async () => {
+  it('drops a today-mode Deliver whose delivered content is unresolvable, rather than admitting it without deliveryCorrespondence', async () => {
     const store = buildFixtureStore();
     const task = content({ instructions: 'restore service health' });
     const requestId = `0x${'d'.repeat(64)}` as Hex;
@@ -319,7 +319,10 @@ describe('createProjectorEnrich', () => {
 
     const enriched = await enrich(deliverEvent);
 
-    expect(enriched).toBeDefined();
-    expect(enriched?.projection.deliveryCorrespondence).toBeUndefined();
+    // Unresolvable-right-now is treated as transient (a retry next tick can supply it once IPFS
+    // catches up), not as a confirmed absence -- admitting it here would permanently mark the log
+    // id processed with no correspondence, indistinguishable from a genuine content-corruption
+    // rejection that a retry could never have fixed.
+    expect(enriched).toBeUndefined();
   });
 });
