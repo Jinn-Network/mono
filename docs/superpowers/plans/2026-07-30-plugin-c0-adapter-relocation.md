@@ -659,7 +659,7 @@ git commit -m "chore(plugin): point the plugin split workflow at plugin/frozen"
 
 **Scope note:** the program plan's C0 row says *re-point* the cold-stock gate. Fully **re-homing** it (moving `cold-stock-e2e.sh` and its 1,072-line driver `stage1-stock-product.py` out of the fork) stays with #2294, per spec §4.2: "its removal ordering is entangled with #2294 item 3 — the cold-stock gate re-homes or retires with the fork." See Finding F4.
 
-- [ ] **Step 1: Re-point the wheel source**
+- [x] **Step 1: Re-point the wheel source**
 
 In `apps/jinn-agent/scripts/cold-stock-e2e.sh`, replace:
 
@@ -673,7 +673,7 @@ with:
 python3 -m pip wheel --no-deps --wheel-dir "$WORK/wheels" "$REPO_ROOT/plugin/frozen"
 ```
 
-- [ ] **Step 2: Add `plugin/frozen/**` to both path filters**
+- [x] **Step 2: Add `plugin/frozen/**` to both path filters**
 
 In `.github/workflows/jinn-agent-ci.yml`, in the `on.pull_request.paths` list, replace:
 
@@ -745,7 +745,7 @@ with:
   workflow_dispatch:
 ```
 
-- [ ] **Step 3: Verify syntax and the in-fork static contract on the gate**
+- [x] **Step 3: Verify syntax and the in-fork static contract on the gate**
 
 Run:
 
@@ -769,7 +769,7 @@ Expected: `SHELL SYNTAX OK`; `PATH FILTERS OK`; `Cold-stock Stage 1 product gate
 
 (The in-fork static contract `apps/jinn-agent/tests/plugins/test_jinn_stage1_acceptance_gate.py` asserts membership only — `assert "apps/jinn-agent/**" in pull_request_paths` etc. — so additions are safe. It also asserts on the script body via `in` checks for `pip wheel`, `PLUGIN="$REPO_ROOT/packages/plugin"`, `stage1-stock-product.py` and `stage1-task-creator-acceptance.mjs`, none of which this edit touches.)
 
-- [ ] **Step 4: Verify the wheel builds from the new path**
+- [x] **Step 4: Verify the wheel builds from the new path**
 
 Run:
 
@@ -782,7 +782,7 @@ Expected: a built `jinn_plugin-0.1.0-py3-none-any.whl`. This exercises `plugin/f
 
 If `pip wheel` is unavailable locally, skip and record that the gate's own CI run is the verification; do not mark this step done on assumption.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/jinn-agent/scripts/cold-stock-e2e.sh .github/workflows/jinn-agent-ci.yml
