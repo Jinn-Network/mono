@@ -6941,3 +6941,8 @@ decided once rather than negotiated at integration.
 
 *Raised:* Task 6 implementation (2026-07-31).
 *Disposition:* build it (adapted in mcp/tools/pickup.ts). Plan consumed-interfaces and Task 6 body assumed `runPickup(index, request)`. Live C6 is `runPickup({ index, admission }, request)`. MCP `PickupDeps` now requires `admission: AdmissionFilter`; production calls the two-arg form. C6 untouched.
+
+**F-C7-T7-1 — SealedCapture has no top-level digest; seal tool projects record.digest.**
+
+*Raised:* Task 7 implementation (2026-07-31).
+*Disposition:* build it (adapted in mcp/tools/capture.ts). Plan assumed `result.capture.digest`. Live C4 `SealedCapture` carries the execution evidence reference at `capture.record.digest`. `handleCaptureSeal` projects that field into the tool JSON `digest` key.
