@@ -25,6 +25,7 @@ const packages = [
   ['execution-recorder-bridge', '@jinn-network/execution-recorder-bridge'],
   ['retrieval', '@jinn-network/evidence-retrieval'],
   ['contribution', '@jinn-network/evidence-contribution'],
+  ['trajectory', '@jinn-network/evidence-trajectory'],
 ];
 
 const codeEntrypoints = [
@@ -55,6 +56,8 @@ const codeEntrypoints = [
   '@jinn-network/evidence-retrieval/testing',
   '@jinn-network/evidence-contribution',
   '@jinn-network/evidence-contribution/testing',
+  '@jinn-network/evidence-trajectory',
+  '@jinn-network/evidence-trajectory/testing',
 ];
 
 function run(command, args, options = {}) {
