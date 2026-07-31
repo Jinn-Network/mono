@@ -1059,3 +1059,35 @@ export interface DebugReportManifest {
   files: string[];
   redaction: DebugReportRedactionSummary;
 }
+
+// ── Claim policy & wiring (OPERATOR-APP-SPEC §2.15) ──────────────────────────
+// Mirrors the daemon's `ClaimPolicyConfig` / `ExecutionWiringConfigEntry`
+// (client/src/config/shape-v2.ts) by hand — the dashboard SPA does not import
+// daemon-side modules.
+
+export type ClaimPolicyMode = 'claim-nothing' | 'every-runnable' | 'match-legacy-manifest-digest';
+
+export interface ClaimPolicyConfig {
+  mode: ClaimPolicyMode;
+  /** Decimal wei string. Optional — absent means the host's USD spend gates remain the bound. */
+  spendCapWei?: string;
+  /** Optional — absent means the host's USD spend gates remain the bound. */
+  aiUnitCap?: number;
+}
+
+export interface ExecutionWiringConfigEntry {
+  workKind: string;
+  harness: string;
+  model: string;
+  plugins: string[];
+  credentialRef: string;
+  isolationPolicy: string;
+  /** Set only for entries the shape-v2 boot migration derived from a legacy SolverNet membership. */
+  legacyManifestDigest?: string;
+}
+
+export interface ClaimPolicyResponse {
+  claimPolicy?: ClaimPolicyConfig;
+  executionWiring: ExecutionWiringConfigEntry[];
+  restartRequired: boolean;
+}

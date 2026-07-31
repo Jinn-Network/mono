@@ -38,6 +38,9 @@ import type {
   DebugReportManifest,
   RewardsResponse,
   ClaimRewardsResponse,
+  ClaimPolicyConfig,
+  ClaimPolicyResponse,
+  ExecutionWiringConfigEntry,
 } from './types.js';
 import type { ProviderRef } from '../../../../harnesses/provider-ref.js';
 
@@ -506,6 +509,19 @@ export const api = {
         '/v1/operator/onboarding-complete',
         { method: 'POST' },
       ),
+    getClaimPolicy: () => jfetch<ClaimPolicyResponse>('/v1/operator/claim-policy'),
+    setClaimPolicy: (body: { claimPolicy: ClaimPolicyConfig }) =>
+      jfetch<{ restartRequired: boolean }>('/v1/operator/claim-policy', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    setExecutionWiring: (body: { executionWiring: ExecutionWiringConfigEntry[] }) =>
+      jfetch<{ restartRequired: boolean }>('/v1/operator/execution-wiring', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
   },
   captures: {
     listPending: () => jfetch<CapturesListResponse>('/api/captures/pending'),

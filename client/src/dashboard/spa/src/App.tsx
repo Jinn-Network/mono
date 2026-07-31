@@ -21,6 +21,7 @@ import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 import { JoinFlow } from './pages/operator-catalog/JoinFlow.js';
 import { CapturesTab } from './captures/CapturesTab.js';
 import { OperatorShell } from './pages/operator/OperatorShell.js';
+import { ClaimPolicyTab } from './pages/operator/ClaimPolicyTab.js';
 import { MembershipsTab } from './pages/operator/MembershipsTab.js';
 import { RegistryTab } from './pages/operator/RegistryTab.js';
 import { NetworkTab } from './pages/operator/NetworkTab.js';
@@ -138,6 +139,11 @@ export default function App(): JSX.Element {
                   <CapturesTab />
                 </OperatorShell>
               </Route>
+              <Route path="/operator/claim-policy">
+                <OperatorShell>
+                  <ClaimPolicyTab onRestartPending={() => setRestartPending(true)} />
+                </OperatorShell>
+              </Route>
               <Route path="/operator/memberships">
                 <OperatorShell>
                   <MembershipsTab onRestartPending={() => setRestartPending(true)} />
@@ -158,7 +164,7 @@ export default function App(): JSX.Element {
                   <SecurityTab />
                 </OperatorShell>
               </Route>
-              <Route path="/operator"><Redirect to="/operator/memberships" /></Route>
+              <Route path="/operator"><Redirect to="/operator/claim-policy" /></Route>
               <Route path="/captures"><Redirect to="/operator/execution-data" /></Route>
               <Route path="/configuration"><ConfigurationRedirect /></Route>
               <Route path="/launcher/create"><LauncherCreatePage /></Route>
