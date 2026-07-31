@@ -2361,7 +2361,7 @@ Two invariants land here and are made permanent by the guard:
 1. **`process` is confined to `src/bin.ts`.** Custody law C2 says the runtime acquires no ambient authority; the boundary guard turns that from a claim into a build failure.
 2. **stdout is reserved for the MCP stdio transport.** C7 attaches an MCP server to stdout; a stray `console.log` anywhere in the tree would corrupt the protocol stream. Every diagnostic goes to stderr, and the only stdout write in the tree is the `health` subcommand's single JSON line.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plugin/runtime/src/bin.test.ts`:
 
@@ -2459,12 +2459,12 @@ describe("main", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test`
 Expected: FAIL — `Failed to resolve import "./bin.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `plugin/runtime/src/bin.ts`:
 
@@ -2590,12 +2590,12 @@ if (isProcessEntry()) {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test && yarn typecheck`
 Expected: PASS — 9 new tests (51 total).
 
-- [ ] **Step 5: Verify the built binary actually runs**
+- [x] **Step 5: Verify the built binary actually runs**
 
 ```bash
 cd plugin/runtime && yarn build
@@ -2612,7 +2612,7 @@ runtime configuration is invalid at logLevel: expected one of silent, error, war
 exit=2
 ```
 
-- [ ] **Step 6: Verify `serve` starts and exits cleanly on SIGTERM**
+- [x] **Step 6: Verify `serve` starts and exits cleanly on SIGTERM**
 
 ```bash
 cd plugin/runtime
@@ -2625,7 +2625,7 @@ cd -
 ```
 Expected: `exit=0`; the stderr file contains `{"level":"info","message":"runtime listening","transport":"none"}`; `wc -c` on the stdout file reports `0` — the process wrote nothing to stdout.
 
-- [ ] **Step 7: Add the custody and stdout canaries to the boundary guard**
+- [x] **Step 7: Add the custody and stdout canaries to the boundary guard**
 
 In `.github/scripts/plugin-tree-source-boundaries.test.mjs`, insert after the `manifest` / `localSpecifier` helpers:
 
@@ -2725,12 +2725,12 @@ test('ambient process surfaces are confined to the binary, and no key material e
 });
 ```
 
-- [ ] **Step 8: Run the guard and confirm the custody assertions pass**
+- [x] **Step 8: Run the guard and confirm the custody assertions pass**
 
 Run: `node --test .github/scripts/plugin-tree-source-boundaries.test.mjs`
 Expected: PASS — `# pass 10`, `# fail 0`. (The `MIN_SCANNED_FILES` floor of 8 is now met: `bin.ts`, `capability.ts`, `config.ts`, `errors.ts`, `health.ts`, `index.ts`, `logger.ts`, `runtime.ts`, `version.ts` plus the four test files.)
 
-- [ ] **Step 9: Run the custody negative test**
+- [x] **Step 9: Run the custody negative test**
 
 ```bash
 cat >> plugin/runtime/src/config.ts <<'EOF'
@@ -2742,7 +2742,7 @@ node --test .github/scripts/plugin-tree-source-boundaries.test.mjs
 ```
 Expected: the first guard run FAILS with `plugin/runtime/src/config.ts -> process.env` and the message naming custody law C2; after the revert it returns to `# pass 10`, `# fail 0`.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add plugin/runtime/src .github/scripts/plugin-tree-source-boundaries.test.mjs
@@ -3143,4 +3143,8 @@ Recorded per the designs-are-law rule (program §Global constraints). Each carri
 - **F-C3-11 — Task 2 Steps 3–4's full-suite negative gate is masked by `MIN_SCANNED_FILES` until Task 10.** The production-boundary test asserts the file-count floor *before* `assertBoundary`, and at Task 2 the tree has one source file, so a deliberate frozen-trio import never reaches the boundary assertion in the full suite (failure message stays the floor). **Disposition applied:** (1) the dedicated frozen-trio fixture test still red-lines name/subpath/relative escapes; (2) Task 2 verified `assertBoundary` on the real violated `index.ts` and captured the expected findings; (3) re-run Steps 3–4's full-suite red→green as part of Task 10's green gate once ≥8 source files exist.
 
 - **F-C3-12 — Task 4 Step 2's job-name regex also matches `on.push`.** The one-liner `/^  ([a-z-]+):$/gm` matches both `push:` under `on:` and the three jobs, so the printed string is `push architecture runtime verify` rather than the plan's `architecture runtime verify`. **Disposition:** no YAML change; the three jobs exist and are correctly named. Treat the Step 2 expected string as jobs-only and ignore the trigger key match.
+
+- **F-C3-13 — Task 9 home-directory test requires `configuration resolved` at the default log level.** The plan's `bin.ts` emits that record at `log.debug`, but the test runs `main(["health"], {}, …)` with no `JINN_PLUGIN_LOG_LEVEL`, so the default `info` level suppresses it. **Disposition applied:** emit `configuration resolved` at `info`. Topology and custody confinement unchanged.
+
+- **F-C3-14 — Node 22 top-level-await `serve` exits before SIGTERM without an event-loop keepalive.** With only signal listeners and no other handles, the process can exit (observed exit 13) before `kill -TERM`. **Disposition applied:** the process-entry `untilShutdown` holds a long `setInterval` cleared on signal; `main` starts the shutdown promise before the first `await` on the serve path so handlers are armed early. Tests still inject `untilShutdown`; only the process entry carries the keepalive.
 
