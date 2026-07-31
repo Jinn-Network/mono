@@ -578,7 +578,7 @@ git commit -m "chore(plugin): mirror the frozen adapter from plugin/frozen"
 - Consumes: `plugin/frozen/` (Task 2); the helper's env contract (Task 5) — `PLUGIN_DIR`, `SLIM_DIR`, `MONO_SHA`, `WORKFLOW_PATH`, and the emitted `$GITHUB_OUTPUT` key `changed`.
 - Produces: `PLUGIN_DIR: mono/plugin/frozen` in the mirror step. `WORKFLOW_PATH` stays `.github/workflows/jinn-plugin-split.yml`, so the `generated-by:` provenance line — and therefore the published tree — is unchanged.
 
-- [ ] **Step 1: Re-point `PLUGIN_DIR`**
+- [x] **Step 1: Re-point `PLUGIN_DIR`**
 
 In `.github/workflows/jinn-plugin-split.yml`, replace:
 
@@ -592,7 +592,7 @@ with:
           PLUGIN_DIR: mono/plugin/frozen
 ```
 
-- [ ] **Step 2: Re-point the two header comments**
+- [x] **Step 2: Re-point the two header comments**
 
 Replace:
 
@@ -626,7 +626,7 @@ with:
 # published to the root of Jinn-Network/jinn-plugin.
 ```
 
-- [ ] **Step 3: Verify the workflow parses and its safety assertions still hold**
+- [x] **Step 3: Verify the workflow parses and its safety assertions still hold**
 
 Run:
 
@@ -638,7 +638,7 @@ grep -c "secrets.JINN_PLUGIN_PUSH_TOKEN" .github/workflows/jinn-plugin-split.yml
 
 Expected: an env dict containing `'PLUGIN_DIR': 'mono/plugin/frozen'`; 19/19 pass (test `(l)` re-reads this YAML); `2`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .github/workflows/jinn-plugin-split.yml
