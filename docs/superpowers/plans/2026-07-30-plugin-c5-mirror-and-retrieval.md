@@ -5636,3 +5636,6 @@ Renamed `plugin/runtime/fixtures/corpus/README.md` → `NOTES.md` so Yarn's alwa
 
 README now documents corpus exports (`createCorpusCapability`, mirror/retrieval/reader/store, admission/chain-verification helpers), F1 fail-closed default vs `acknowledgeUnverifiedChain`, and that the binary still passes `capabilities: []`.
 
+### Acceptance
+
+**acceptance-complete** (2026-07-31) at exact head `4b3105fec300a9c9666cea33405c0c28ecd03eb2`. Scoped wave-2 rereview of C5-W1-1..2: **CLEAN**. PR comment: https://github.com/Jinn-Network/mono/pull/2344#issuecomment-5147485888. Named residuals deferred; do not block dependents.
