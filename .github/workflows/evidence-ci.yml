@@ -16,6 +16,7 @@ on:
       - "docs/superpowers/plans/2026-07-27-evidence-contribution.md"
       - "docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md"
       - "docs/superpowers/plans/2026-07-30-plugin-c1-trajectory-record.md"
+      - "docs/superpowers/plans/2026-07-30-plugin-c2-trace-decode.md"
 
 permissions:
   contents: read
@@ -412,6 +413,63 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  trace-decode:
+    name: Evidence Trace Decode
+    needs: [foundation, trajectory]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.1
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Install npm 11.19.0 for pack-smoke
+        run: |
+          npm install -g npm@11.19.0
+          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
+          hash -r || true
+          test "$(npm --version)" = "11.19.0"
+          command -v npm
+          npm --version
+      - name: Restore Evidence Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-protocol-dist
+          path: packages/evidence/protocol/dist
+      - name: Restore Evidence Trajectory distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-trajectory-dist
+          path: packages/evidence/trajectory/dist
+      - name: Build Trust Core distribution
+        working-directory: packages/trust/core
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Install packed-smoke dependency toolchains
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable)
+          (cd packages/evidence/trajectory && yarn install --immutable)
+      - name: Verify Evidence Trace Decode
+        working-directory: packages/evidence/trace-decode
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn check:fixtures
+          yarn pack:smoke
+      - name: Upload Evidence Trace Decode distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-trace-decode-dist
+          path: packages/evidence/trace-decode/dist
+          if-no-files-found: error
+          retention-days: 1
+
   contribution:
     name: Evidence Contribution
     needs: [foundation, components, derivation]
@@ -600,7 +658,7 @@ jobs:
           retention-days: 1
 
   verify:
-    needs: [architecture, foundation, components, derivation, execution-recorder-bridge, retrieval, contribution, catalog-sqlite, local-runtime, trajectory]
+    needs: [architecture, foundation, components, derivation, execution-recorder-bridge, retrieval, contribution, catalog-sqlite, local-runtime, trajectory, trace-decode]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -616,6 +674,7 @@ jobs:
           CATALOG_SQLITE_RESULT: ${{ needs['catalog-sqlite'].result }}
           LOCAL_RUNTIME_RESULT: ${{ needs['local-runtime'].result }}
           TRAJECTORY_RESULT: ${{ needs.trajectory.result }}
+          TRACE_DECODE_RESULT: ${{ needs['trace-decode'].result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
@@ -627,7 +686,8 @@ jobs:
             "$CONTRIBUTION_RESULT" \
             "$CATALOG_SQLITE_RESULT" \
             "$LOCAL_RUNTIME_RESULT" \
-            "$TRAJECTORY_RESULT"; do
+            "$TRAJECTORY_RESULT" \
+            "$TRACE_DECODE_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4
@@ -645,7 +705,7 @@ jobs:
           path: .evidence-dist
       - name: Place package distributions
         run: |
-          for package in protocol repository repository-oci repository-ipfs discovery catalog-sqlite execution-recorder attestation-issuer derivation publication local-runtime execution-recorder-bridge retrieval contribution trajectory; do
+          for package in protocol repository repository-oci repository-ipfs discovery catalog-sqlite execution-recorder attestation-issuer derivation publication local-runtime execution-recorder-bridge retrieval contribution trajectory trace-decode; do
             mkdir -p "packages/evidence/${package}/dist"
             cp -R ".evidence-dist/evidence-${package}-dist/." "packages/evidence/${package}/dist/"
           done
