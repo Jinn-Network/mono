@@ -2591,7 +2591,7 @@ git commit -m "feat(plugin-runtime): serving-plane, mirroring, and allowlist rep
 
 Per C3's rule the store is opened per operation and closed in a `finally` — `withCorpusMirrorStore` exists so no caller can forget.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/corpus/store.test.ts`:
 
@@ -2691,12 +2691,12 @@ describe("corpus mirror store", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test src/corpus/store.test.ts`
 Expected: FAIL — `Failed to resolve import "./store.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/corpus/store.ts`:
 
@@ -2813,12 +2813,12 @@ export async function withCorpusMirrorStore<T>(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test src/corpus/store.test.ts && yarn typecheck`
 Expected: PASS (6 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src/corpus
