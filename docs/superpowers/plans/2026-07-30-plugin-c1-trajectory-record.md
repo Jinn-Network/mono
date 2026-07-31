@@ -1562,7 +1562,7 @@ git commit -m "feat(evidence-trajectory): the sealed trajectory record schema an
 - Consumes: everything from Tasks 2–7.
 - Produces: the package's public API — the surface every later component and the C2 decoder import.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/index.test.ts`:
 
@@ -1606,12 +1606,12 @@ describe("public surface", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trajectory && yarn test`
 Expected: FAIL — the placeholder `index.ts` exports nothing.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/index.ts`:
 
@@ -1671,12 +1671,12 @@ export { TrajectoryRecordSchema, parseTrajectory, sealTrajectory } from "./schem
 export type { TrajectoryRecord } from "./schema.js";
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trajectory && yarn test && yarn typecheck && yarn build`
 Expected: PASS; `dist/` produced.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/evidence/trajectory/src
