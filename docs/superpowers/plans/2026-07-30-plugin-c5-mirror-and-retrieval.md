@@ -5599,5 +5599,14 @@ After Task 14, `yarn typecheck` and `yarn test` are green (251/251), inventory a
 
 **Alternate (weaker):** extend AST custody allowlists for named corpus files — requires C3/program ratification; not recommended.
 
-**Status:** blocking PR / acceptance until resolved. Repair is a fresh implementer task after coordinator ratification.
+**Status:** **ratified 2026-07-31 by program coordinator — preferred disposition.** Do **not**
+broaden the C3 allowlist. Inject a narrow filesystem port (and a nonce/`randomUUID` for
+temp-path uniqueness instead of `process.pid`) from `bin.ts` / capability factory into
+`createFileHighWaterMarkStore`, `tryAcquireSyncLock`, and `openCorpusMirrorStore`. Keep
+library modules free of `node:fs*` and ambient `process`. After green boundaries + full
+gates, open/update the PR targeting `plugin/c3-product-tree`, then await wave-1 review
+(two-wave cap).
+
+**Repair task (coordinator-dispatched):** implement preferred disposition; prove
+`plugin-tree-source-boundaries` green; push PR.
 
