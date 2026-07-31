@@ -81,3 +81,5 @@ export {
   drainPostingIntents,
 } from "./intents/drain.js";
 export { createProjectorObservePort } from "./observe/projector-observe.js";
+export { deliverToMarketplace, encodeMechDeliverCalldata } from "./deliver-leg.js";
+export type { MechDeliverInput } from "./deliver-leg.js";
