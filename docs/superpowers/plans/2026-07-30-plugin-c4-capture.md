@@ -315,11 +315,12 @@ Expected: a draft PR whose base is `plugin/c3-product-tree`. Confirm with `gh pr
 **Files:**
 - Modify: `plugin/runtime/package.json`
 - Modify: `.github/scripts/plugin-tree-package-inventory.test.mjs`
+- Modify: `.github/scripts/plugin-tree-guard-common.mjs`
 - Modify: `.github/workflows/plugin-tree-ci.yml`
 
 **Interfaces:**
 - Consumes: C3's guard scripts and CI workflow; the six stack packages named below.
-- Produces: `@jinn-network/execution-recorder`, `@jinn-network/evidence-local-runtime`, `@jinn-network/evidence-trajectory`, `@jinn-network/evidence-repository`, `@jinn-network/evidence-discovery`, `@jinn-network/evidence-protocol` resolvable from `plugin/runtime`, with the inventory guard asserting the exact set.
+- Produces: `@jinn-network/execution-recorder`, `@jinn-network/evidence-local-runtime`, `@jinn-network/evidence-trajectory`, `@jinn-network/evidence-repository`, `@jinn-network/evidence-discovery`, `@jinn-network/evidence-protocol` resolvable from `plugin/runtime`, with the inventory guard asserting the exact set and C3's closed-world `APPROVED_RUNTIME_*` maps updated to match (finding C4-P1 / sibling of C5-P2).
 
 - [ ] **Step 1: Extend the inventory guard first, so it fails**
 
@@ -342,7 +343,12 @@ In `.github/scripts/plugin-tree-package-inventory.test.mjs`, replace the `runtim
   }],
 ```
 
-This is the **only** guard edit the task needs. C3 pre-seeds `SIBLING_TREE_DIRS` and `PERMITTED_PACKAGES` with all seven packages, including `@jinn-network/evidence-discovery` (added at C4's request, C3 finding F-C3-9): `LocalEvidenceRuntime.catalog` is typed `EvidenceCatalogReader`, which is *declared* in `@jinn-network/evidence-discovery` (`packages/evidence/discovery/src/catalog/types.ts:225`) and only re-exported as a type by local-runtime (`packages/evidence/local-runtime/src/types.ts:4`, `:103`), so without it `tsc` cannot resolve the catalog type.
+This is **not** the only guard edit: C3 R-C3-63/64 also enforce exact maps in
+`.github/scripts/plugin-tree-guard-common.mjs`. After declaring package.json (Step 3),
+extend those maps in Step 3b — updating only `JINN_DEPENDENCY_GRAPH` leaves source-
+boundaries red on `validateExactDependencySections` / undeclared deps / resolutions.
+
+C3 pre-seeds `SIBLING_TREE_DIRS` and `PERMITTED_PACKAGES` with all seven packages, including `@jinn-network/evidence-discovery` (added at C4's request, C3 finding F-C3-9): `LocalEvidenceRuntime.catalog` is typed `EvidenceCatalogReader`, which is *declared* in `@jinn-network/evidence-discovery` (`packages/evidence/discovery/src/catalog/types.ts:225`) and only re-exported as a type by local-runtime (`packages/evidence/local-runtime/src/types.ts:4`, `:103`), so without it `tsc` cannot resolve the catalog type.
 
 > Name collision to keep straight: `@jinn-network/evidence-discovery` (the catalog contract, at `packages/evidence/discovery`) is a **different package** from the `@jinn-network/record-discovery-*` family (the announcement client, at `packages/discovery/*`) that C5 consumes. Both are permitted by the boundary guard.
 
@@ -378,6 +384,14 @@ In `plugin/runtime/package.json`, replace the `dependencies` and `resolutions` b
     "vite": "6.4.3"
   }
 ```
+
+- [ ] **Step 3b: Extend the closed-world approved maps (finding C4-P1)**
+
+In `.github/scripts/plugin-tree-guard-common.mjs`:
+
+1. `APPROVED_RUNTIME_DEPENDENCIES` — keep `zod: '4.4.3'`; add each of the six `@jinn-network/*` packages at `'0.1.0'`.
+2. `APPROVED_RUNTIME_RESOLUTIONS` — keep `vite: '6.4.3'`; add the six `portal:../../packages/...` entries exactly as in `package.json` `resolutions` (omit the `vite` duplicate if already present).
+3. `APPROVED_RUNTIME_DEV_DEPENDENCIES` — unchanged for C4 (no new types packages).
 
 - [ ] **Step 4: Build the portal targets and install**
 
@@ -423,7 +437,10 @@ Add the portal sources to the workflow's `paths` filter so a change to them re-r
 - [ ] **Step 7: Commit**
 
 ```bash
-git add plugin/runtime/package.json plugin/runtime/yarn.lock .github/scripts/plugin-tree-package-inventory.test.mjs .github/workflows/plugin-tree-ci.yml
+git add plugin/runtime/package.json plugin/runtime/yarn.lock \
+  .github/scripts/plugin-tree-package-inventory.test.mjs \
+  .github/scripts/plugin-tree-guard-common.mjs \
+  .github/workflows/plugin-tree-ci.yml
 git commit -m "chore(plugin-runtime): declare the capture stack dependencies and register them with the guards"
 ```
 
@@ -5626,3 +5643,16 @@ forward link via C1-owned `TRAJECTORY_RECORD_IDENTIFIER_PROPERTY`. **Signer:** C
 
 **Timebase:** C4 hook-produced trajectories use `timebase: "source-epoch-ns"` when feed
 carries real timestamps.
+
+## 2026-07-31 implementation-time finding (C4-P1)
+
+Surfaced as the C4 sibling of C5-P2 against accepted C3 head `ec57b5a2f` (C3 R-C3-63/64
+closed-world maps). Ratified by the program coordinator before Task 2; plan text above
+amended in place.
+
+**C4-P1 — closed-world exact maps omit C4 deps.** Updating only `JINN_DEPENDENCY_GRAPH`
+leaves Task 2 red on `validateExactDependencySections` / undeclared production deps /
+portal `resolutionViolations`. **Disposition (applied in Task 2 Steps 3b and 7):** extend
+`APPROVED_RUNTIME_DEPENDENCIES` and `APPROVED_RUNTIME_RESOLUTIONS` in
+`plugin-tree-guard-common.mjs` with C4's six `@jinn-network/*` packages and portal entries;
+include that file in the Task 2 commit list.
