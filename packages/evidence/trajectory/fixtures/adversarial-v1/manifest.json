@@ -31,6 +31,11 @@
       "expectedDisposition": "invalid-document"
     },
     {
+      "id": "nested-native-trace-key",
+      "description": "An undeclared key nested under source.nativeTrace.",
+      "expectedDisposition": "invalid-document"
+    },
+    {
       "id": "namespaced-extension-preserved",
       "description": "An unknown but namespaced extension key, which must survive round-trips.",
       "expectedDisposition": "accepted"

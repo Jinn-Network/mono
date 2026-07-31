@@ -142,6 +142,15 @@ const adversarial = {
       return document;
     },
   },
+  "nested-native-trace-key": {
+    description: "An undeclared key nested under source.nativeTrace.",
+    expectedDisposition: "invalid-document",
+    document: () => {
+      const document = valid();
+      document.source.nativeTrace.bad = true;
+      return document;
+    },
+  },
   "namespaced-extension-preserved": {
     description: "An unknown but namespaced extension key, which must survive round-trips.",
     expectedDisposition: "accepted",

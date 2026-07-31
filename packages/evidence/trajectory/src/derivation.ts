@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { isProxy } from "node:util/types";
+
 import {
   DSSE_PAYLOAD_TYPE,
   IN_TOTO_STATEMENT_TYPE,
@@ -8,7 +10,7 @@ import {
   type DsseSigner,
   dssePreAuthEncoding,
   isCalendarStrictRfc3339,
-  parseDsseEnvelope,
+  parseExactDsseEnvelope,
   sealSignedRecord,
 } from "@jinn-network/trust-core";
 import { z } from "zod";
@@ -30,6 +32,119 @@ import {
 import { InvalidDocumentError } from "./sealing.js";
 import { parseTrajectory } from "./schema.js";
 import { type Timebase, TIMEBASES } from "./timebase.js";
+
+export class TrajectoryDerivationCancelledError extends Error {
+  readonly category = "trajectory-derivation-cancelled" as const;
+  constructor(message = "trajectory derivation verification was cancelled") {
+    super(message);
+    this.name = "TrajectoryDerivationCancelledError";
+  }
+}
+
+function assertNotCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new TrajectoryDerivationCancelledError();
+}
+
+function isAbortLike(error: unknown): boolean {
+  if (error instanceof TrajectoryDerivationCancelledError) return true;
+  if (error instanceof DOMException && error.name === "AbortError") return true;
+  if (error instanceof Error && error.name === "AbortError") return true;
+  return false;
+}
+
+function isPlainDataRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  if (isProxy(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function envelopeSignerKeyIds(
+  signatures: readonly { readonly keyid?: string }[],
+): readonly string[] {
+  return signatures.flatMap((signature) =>
+    typeof signature.keyid === "string" && signature.keyid.length > 0 ? [signature.keyid] : [],
+  );
+}
+
+function validateAuthorityResult(
+  result: unknown,
+  envelopeKeyIds: readonly string[],
+):
+  | { readonly ok: true; readonly value: TrajectoryDerivationAuthorityVerifierResult }
+  | { readonly ok: false; readonly message: string } {
+  if (!isPlainDataRecord(result)) {
+    return { ok: false, message: "authority result must be a plain object" };
+  }
+  const allowed = new Set(["verified", "signerKeyIds", "reason", "detail"]);
+  for (const key of Object.keys(result)) {
+    const descriptor = Object.getOwnPropertyDescriptor(result, key);
+    if (descriptor?.get !== undefined || descriptor?.set !== undefined) {
+      return { ok: false, message: `authority result key "${key}" must be a data property` };
+    }
+    if (!allowed.has(key)) {
+      return { ok: false, message: `authority result has unknown key "${key}"` };
+    }
+  }
+  if (!Object.hasOwn(result, "verified") || typeof result["verified"] !== "boolean") {
+    return { ok: false, message: "authority result verified must be a boolean" };
+  }
+  if (result["verified"] === true) {
+    if (!Array.isArray(result["signerKeyIds"])) {
+      return { ok: false, message: "authority result signerKeyIds must be an array" };
+    }
+    const signerKeyIds = result["signerKeyIds"];
+    if (!signerKeyIds.every((entry) => typeof entry === "string" && entry.length > 0)) {
+      return { ok: false, message: "authority result signerKeyIds must contain only strings" };
+    }
+    if (envelopeKeyIds.length === 0) {
+      return { ok: false, message: "authority result signerKeyIds incompatible with envelope key IDs" };
+    }
+    for (const keyId of signerKeyIds) {
+      if (!envelopeKeyIds.includes(keyId)) {
+        return { ok: false, message: "authority result signerKeyIds must match envelope key IDs" };
+      }
+    }
+    if (result["detail"] !== undefined && typeof result["detail"] !== "string") {
+      return { ok: false, message: "authority result detail must be a string" };
+    }
+    return {
+      ok: true,
+      value: {
+        verified: true,
+        signerKeyIds,
+        ...(result["detail"] === undefined ? {} : { detail: result["detail"] as string }),
+      },
+    };
+  }
+  if (typeof result["reason"] !== "string" || result["reason"].length === 0) {
+    return { ok: false, message: "authority result reason must be a non-empty string when verified is false" };
+  }
+  if (result["signerKeyIds"] !== undefined) {
+    if (!Array.isArray(result["signerKeyIds"])) {
+      return { ok: false, message: "authority result signerKeyIds must be an array when present" };
+    }
+    if (!result["signerKeyIds"].every((entry) => typeof entry === "string")) {
+      return { ok: false, message: "authority result signerKeyIds must contain only strings" };
+    }
+  }
+  if (result["detail"] !== undefined && typeof result["detail"] !== "string") {
+    return { ok: false, message: "authority result detail must be a string" };
+  }
+  return {
+    ok: true,
+    value: {
+      verified: false,
+      reason: result["reason"] as string,
+      ...(result["signerKeyIds"] === undefined
+        ? {}
+        : { signerKeyIds: result["signerKeyIds"] as readonly string[] }),
+      ...(result["detail"] === undefined ? {} : { detail: result["detail"] as string }),
+    },
+  };
+}
+
+const REPOSITORY_SHA256 = /^sha256:[0-9a-f]{64}$/;
 
 const AbsoluteIri = z
   .string()
@@ -311,7 +426,7 @@ function identifierEntries(entity: JsonObject): readonly JsonObject[] {
   return (Array.isArray(identifier) ? identifier : [identifier]).filter(isObject);
 }
 
-function findForwardLinkMatches(
+function verifyForwardLink(
   executionRecordBytes: Uint8Array,
   nativeTraceHex: BareSha256Hex,
   trajectoryDigest: RepositorySha256Digest,
@@ -330,26 +445,44 @@ function findForwardLinkMatches(
     (entity): entity is JsonObject =>
       isObject(entity) && hasType(entity, "File") && entity["sha256"] === nativeTraceHex,
   );
+
   if (nativeTraceFiles.length === 0) {
     return {
       code: "l3-forward-link-missing",
       message: "execution record has no native-trace File entity matching attested digest",
     };
   }
-
-  let matchCount = 0;
-  for (const file of nativeTraceFiles) {
-    for (const identifier of identifierEntries(file)) {
-      if (identifier["propertyID"] !== TRAJECTORY_RECORD_IDENTIFIER_PROPERTY) continue;
-      if (identifier["value"] === trajectoryDigest) matchCount += 1;
-    }
+  if (nativeTraceFiles.length > 1) {
+    return {
+      code: "l3-forward-link-duplicate",
+      message: "multiple native-trace File entities match attested digest",
+    };
   }
 
-  if (matchCount === 0) {
+  const file = nativeTraceFiles[0]!;
+  const forwardLinks = identifierEntries(file).filter(
+    (identifier) => identifier["propertyID"] === TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+  );
+
+  if (forwardLinks.length === 0) {
     return { code: "l3-forward-link-missing", message: "trajectory forward link is missing" };
   }
-  if (matchCount > 1) {
-    return { code: "l3-forward-link-duplicate", message: "trajectory forward link is duplicated" };
+  if (forwardLinks.length > 1) {
+    return {
+      code: "l3-forward-link-duplicate",
+      message: "trajectory forward link is duplicated on native-trace entity",
+    };
+  }
+
+  const value = forwardLinks[0]!["value"];
+  if (typeof value !== "string" || !REPOSITORY_SHA256.test(value)) {
+    return { code: "l3-forward-link-mismatch", message: "trajectory forward link value is malformed" };
+  }
+  if (value !== trajectoryDigest) {
+    return {
+      code: "l3-forward-link-mismatch",
+      message: "trajectory forward link value does not match attestation subject",
+    };
   }
   return {};
 }
@@ -366,7 +499,7 @@ export async function verifyTrajectoryDerivationAttestation(
 
   let parsedEnvelope;
   try {
-    parsedEnvelope = parseDsseEnvelope(input.envelopeBytes);
+    parsedEnvelope = parseExactDsseEnvelope(input.envelopeBytes);
   } catch (error) {
     const message = error instanceof Error ? error.message : "malformed DSSE envelope";
     return {
@@ -423,9 +556,11 @@ export async function verifyTrajectoryDerivationAttestation(
   }
 
   const preAuthEncoding = dssePreAuthEncoding(DSSE_PAYLOAD_TYPE, parsedEnvelope.payloadBytes);
+  const envelopeKeyIds = envelopeSignerKeyIds(parsedEnvelope.signatures);
   let authorityResult: TrajectoryDerivationAuthorityVerifierResult;
   try {
-    authorityResult = await input.verifyAuthority({
+    assertNotCancelled(input.signal);
+    const rawAuthorityResult = await input.verifyAuthority({
       envelopeBytes: input.envelopeBytes,
       payloadType: DSSE_PAYLOAD_TYPE,
       payloadBytes: parsedEnvelope.payloadBytes,
@@ -434,7 +569,26 @@ export async function verifyTrajectoryDerivationAttestation(
       derivedAt: statement.predicate.derivedAt,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
+    assertNotCancelled(input.signal);
+    const validated = validateAuthorityResult(rawAuthorityResult, envelopeKeyIds);
+    if (!validated.ok) {
+      return {
+        ok: false,
+        failedLayer: 2,
+        statement,
+        layers: {
+          l1: { status: "pass" },
+          l2: { status: "fail", code: "l2-authority-malformed", message: validated.message },
+          l3: { status: "not-evaluated", reason: "l2-failed" },
+          l4,
+        },
+        reason: validated.message,
+        code: "l2-authority-malformed",
+      };
+    }
+    authorityResult = validated.value;
   } catch (error) {
+    if (isAbortLike(error)) throw new TrajectoryDerivationCancelledError();
     const message = error instanceof Error ? error.message : "authority verifier threw";
     return {
       ok: false,
@@ -451,7 +605,7 @@ export async function verifyTrajectoryDerivationAttestation(
     };
   }
 
-  if (!authorityResult.verified) {
+  if (authorityResult.verified !== true) {
     const message = authorityResult.reason;
     return {
       ok: false,
@@ -552,7 +706,7 @@ export async function verifyTrajectoryDerivationAttestation(
     };
   }
 
-  const forwardLink = findForwardLinkMatches(
+  const forwardLink = verifyForwardLink(
     input.executionRecordBytes,
     predicate.nativeTrace.digest.sha256,
     trajectoryDigest,

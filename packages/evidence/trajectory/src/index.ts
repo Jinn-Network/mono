@@ -52,7 +52,8 @@ export { deriveSpanId, deriveTraceId } from "./identity.js";
 export type { TraceIdInput } from "./identity.js";
 
 // Record kind
-export { isNamespacedExtensionKey, topLevelRecordSchema } from "./extensions.js";
+export { isNamespacedExtensionKey, topLevelRecordSchema, closedObjectSchema, JsonExtensionValueSchema } from "./extensions.js";
+export type { JsonExtensionValue } from "./extensions.js";
 export {
   AnyValueSchema,
   AttributeSchema,
@@ -71,6 +72,7 @@ export {
   buildTrajectoryDerivationStatement,
   sealTrajectoryDerivationAttestation,
   verifyTrajectoryDerivationAttestation,
+  TrajectoryDerivationCancelledError,
 } from "./derivation.js";
 export type {
   BuildTrajectoryDerivationStatementInput,
@@ -86,3 +88,4 @@ export type {
   TrajectoryDerivationVerificationResult,
   VerifyTrajectoryDerivationAttestationInput,
 } from "./derivation.js";
+export { preflightCanonicalInput } from "./preflight.js";

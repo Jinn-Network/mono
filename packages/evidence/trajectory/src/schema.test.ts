@@ -133,6 +133,12 @@ describe("trajectory record schema", () => {
     expect(TrajectoryRecordSchema.safeParse(withContent).success).toBe(false);
   });
 
+  test("rejects nested undeclared keys under source.nativeTrace", () => {
+    const invalid = record();
+    (invalid.source.nativeTrace as Record<string, unknown>).bad = true;
+    expect(TrajectoryRecordSchema.safeParse(invalid).success).toBe(false);
+  });
+
   test("rejects an unknown protocol literal", () => {
     expect(
       TrajectoryRecordSchema.safeParse({ ...record(), protocol: "https://example.test/x" })

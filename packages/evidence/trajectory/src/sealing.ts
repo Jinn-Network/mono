@@ -4,6 +4,7 @@ import type { z } from "zod";
 
 import { type JsonValue, serializeCanonicalJson } from "./canonical.js";
 import { documentDigest } from "./hashing.js";
+import { preflightCanonicalInput } from "./preflight.js";
 
 export interface SealedRecord {
   bytes: Uint8Array;
@@ -38,6 +39,17 @@ function issues(error: z.ZodError): readonly ValidationIssue[] {
 
 /** Validate against `schema`, then seal. Throws `InvalidDocumentError` on failure. */
 export function sealWithSchema<T>(schema: z.ZodType<T>, document: unknown): SealedRecord {
+  try {
+    preflightCanonicalInput(document);
+  } catch (error) {
+    throw new InvalidDocumentError([
+      {
+        path: "",
+        message:
+          error instanceof Error ? error.message : "document failed canonical preflight at sealing",
+      },
+    ]);
+  }
   const parsed = schema.safeParse(document);
   if (!parsed.success) throw new InvalidDocumentError(issues(parsed.error));
   return sealRecord(parsed.data as JsonValue);
@@ -60,6 +72,18 @@ export function parseExactWithSchema<T>(schema: z.ZodType<T>, bytes: Uint8Array)
     decoded = JSON.parse(text);
   } catch {
     throw new InvalidDocumentError([{ path: "", message: "bytes are not valid JSON" }]);
+  }
+
+  try {
+    preflightCanonicalInput(decoded);
+  } catch (error) {
+    throw new InvalidDocumentError([
+      {
+        path: "",
+        message:
+          error instanceof Error ? error.message : "document failed canonical preflight at parse",
+      },
+    ]);
   }
 
   const parsed = schema.safeParse(decoded);

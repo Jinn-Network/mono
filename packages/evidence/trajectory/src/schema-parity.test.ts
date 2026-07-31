@@ -3,8 +3,9 @@ import { readFile } from "node:fs/promises";
 import Ajv2020 from "ajv/dist/2020.js";
 import { describe, expect, test } from "vitest";
 
-import { loadGoldenJson, loadInvalidJson } from "./fixtures.js";
+import { loadGoldenJson, loadInvalidJson, readAdversarialJson } from "./fixtures.js";
 import { TRAJECTORY_RECORD_KIND } from "./identifiers.js";
+import { TrajectoryRecordSchema } from "./schema.js";
 
 const published = async (): Promise<Record<string, unknown>> =>
   JSON.parse(
@@ -27,9 +28,41 @@ describe("published JSON Schema", () => {
     const ajv = new Ajv2020({ strict: false });
     const validate = ajv.compile(await published());
     expect(validate(await loadInvalidJson("unknown-extension-key"))).toBe(false);
+    expect(validate(await readAdversarialJson("message-content-attribute", "document.json"))).toBe(
+      false,
+    );
+    expect(validate(await readAdversarialJson("full-with-skipped", "document.json"))).toBe(false);
+    expect(validate(await readAdversarialJson("nested-native-trace-key", "document.json"))).toBe(
+      false,
+    );
   });
 
-  test("documents the runtime-only checks it cannot express", async () => {
-    expect(String((await published()).$comment)).toContain("derived");
+  test("accepts namespaced extension fixtures under the standalone validator", async () => {
+    const ajv = new Ajv2020({ strict: false });
+    const validate = ajv.compile(await published());
+    expect(
+      validate(await readAdversarialJson("namespaced-extension-preserved", "document.json")),
+    ).toBe(true);
+  });
+
+  test("AJV and runtime agree on vocabulary/completeness adversarial cases", async () => {
+    const ajv = new Ajv2020({ strict: false });
+    const validate = ajv.compile(await published());
+    for (const id of ["message-content-attribute", "full-with-skipped", "nested-native-trace-key"]) {
+      const document = await readAdversarialJson(id, "document.json");
+      expect(validate(document)).toBe(false);
+      expect(TrajectoryRecordSchema.safeParse(document).success).toBe(false);
+    }
+    const accepted = await readAdversarialJson("namespaced-extension-preserved", "document.json");
+    expect(validate(accepted)).toBe(true);
+    expect(TrajectoryRecordSchema.safeParse(accepted).success).toBe(true);
+  });
+
+  test("documents runtime-only checks it cannot express", async () => {
+    const comment = String((await published()).$comment);
+    expect(comment).toContain("traceId");
+    expect(comment).toContain("spanId");
+    expect(comment).toContain("parentSpanId");
+    expect(comment).toContain("completeness");
   });
 });

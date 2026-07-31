@@ -35,13 +35,13 @@
               "required": [
                 "sha256"
               ],
-              "additionalProperties": {}
+              "additionalProperties": false
             }
           },
           "required": [
             "digest"
           ],
-          "additionalProperties": {}
+          "additionalProperties": false
         },
         "formatIri": {
           "type": "string",
@@ -151,7 +151,22 @@
               "properties": {
                 "key": {
                   "type": "string",
-                  "minLength": 1
+                  "enum": [
+                    "gen_ai.operation.name",
+                    "gen_ai.provider.name",
+                    "gen_ai.request.model",
+                    "gen_ai.response.model",
+                    "gen_ai.usage.input_tokens",
+                    "gen_ai.usage.output_tokens",
+                    "gen_ai.tool.name",
+                    "gen_ai.tool.call.id",
+                    "gen_ai.tool.type",
+                    "gen_ai.agent.name",
+                    "gen_ai.conversation.id",
+                    "jinn.trajectory.turn.role",
+                    "jinn.trajectory.source.ordinal",
+                    "jinn.trajectory.outcome"
+                  ]
                 },
                 "value": {
                   "type": "object",
@@ -201,7 +216,22 @@
                     "properties": {
                       "key": {
                         "type": "string",
-                        "minLength": 1
+                        "enum": [
+                          "gen_ai.operation.name",
+                          "gen_ai.provider.name",
+                          "gen_ai.request.model",
+                          "gen_ai.response.model",
+                          "gen_ai.usage.input_tokens",
+                          "gen_ai.usage.output_tokens",
+                          "gen_ai.tool.name",
+                          "gen_ai.tool.call.id",
+                          "gen_ai.tool.type",
+                          "gen_ai.agent.name",
+                          "gen_ai.conversation.id",
+                          "jinn.trajectory.turn.role",
+                          "jinn.trajectory.source.ordinal",
+                          "jinn.trajectory.outcome"
+                        ]
                       },
                       "value": {
                         "type": "object",
@@ -340,5 +370,98 @@
       }
     ]
   },
-  "$comment": "Structural validation only. Three checks are runtime-only and are not expressible here: traceId must equal the value derived from source.nativeTrace.digest and derivation; each spanId must equal the value derived from traceId and its ordinal; attributes must be sorted by key and unique."
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "completeness": {
+            "type": "object",
+            "properties": {
+              "decoded": {
+                "const": "full"
+              }
+            },
+            "required": [
+              "decoded"
+            ]
+          }
+        },
+        "required": [
+          "completeness"
+        ]
+      },
+      "then": {
+        "properties": {
+          "completeness": {
+            "properties": {
+              "skipped": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "completeness": {
+            "type": "object",
+            "properties": {
+              "decoded": {
+                "const": "partial"
+              }
+            },
+            "required": [
+              "decoded"
+            ]
+          }
+        },
+        "required": [
+          "completeness"
+        ]
+      },
+      "then": {
+        "properties": {
+          "completeness": {
+            "required": [
+              "skipped"
+            ],
+            "properties": {
+              "skipped": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "completeness": {
+            "type": "object",
+            "properties": {
+              "decoded": {
+                "const": "empty"
+              }
+            },
+            "required": [
+              "decoded"
+            ]
+          }
+        },
+        "required": [
+          "completeness"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spans": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ],
+  "$comment": "Structural validation only. Runtime refinements not expressible here: traceId must equal the value derived from source.nativeTrace.digest, formatIri, and derivation; each spanId must equal the value derived from traceId and its ordinal; parentSpanId must reference an earlier span in this record; attributes must be sorted by key and unique; completeness: full forbids skipped; partial requires skipped >= 1; empty requires spans.length === 0; source.execution is removed — execution binding is via derivation attestation and forward link."
 }

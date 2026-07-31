@@ -22,13 +22,52 @@ import {
 import { documentDigest } from "./hashing.js";
 import { TRAJECTORY_RECORD_IDENTIFIER_PROPERTY, TRAJECTORY_VOCABULARY_PROFILE } from "./identifiers.js";
 import { deriveSpanId, deriveTraceId } from "./identity.js";
-import { TrajectoryRecordSchema, parseTrajectory, sealTrajectory } from "./schema.js";
+import { TrajectoryRecordSchema, parseTrajectory, sealTrajectory, type TrajectoryRecord } from "./schema.js";
 
 const GOLDEN: readonly GoldenName[] = ["valid", "minimal"];
 
 const kitSigner: DsseSigner = async () => [
   { signature: new Uint8Array([9, 8, 7]), keyid: "kit-key" },
 ];
+
+type KitRecord = TrajectoryRecord;
+
+async function buildKitAttestation(record: KitRecord) {
+  const trajectorySealed = sealTrajectory(record);
+  const trajectoryDigest = trajectorySealed.digest;
+  const nativeSha = record.source.nativeTrace.digest.sha256;
+  const executionBytes = new TextEncoder().encode(
+    JSON.stringify({
+      "@context": "https://w3id.org/ro/crate/1.3/context",
+      "@graph": [
+        {
+          "@id": "trace/native.bin",
+          "@type": "File",
+          sha256: nativeSha,
+          identifier: {
+            "@type": "PropertyValue",
+            propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+            value: trajectoryDigest,
+          },
+        },
+      ],
+    }),
+  );
+  const statement = buildTrajectoryDerivationStatement({
+    producerId: "kit-producer",
+    executionDigest: documentDigest(executionBytes),
+    trajectoryDigest,
+    nativeTraceDigest: `sha256:${nativeSha}`,
+    formatIri: record.source.formatIri,
+    decoderId: record.derivation.decoderId,
+    decoderVersion: record.derivation.decoderVersion,
+    vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
+    timebase: record.timebase,
+    derivedAt: "2026-07-31T12:00:00Z",
+  });
+  const sealed = await sealTrajectoryDerivationAttestation({ statement, signer: kitSigner });
+  return { trajectorySealed, executionBytes, sealed };
+}
 
 /**
  * Record conformance for the Trajectory kind: schema validation, producer-side re-seal,
@@ -91,9 +130,43 @@ export function describeTrajectoryRecordConformance(): void {
       expect(() => parseTrajectory(nonCanonical)).toThrow();
     });
 
+    test("tail-truncated golden bytes fail parse", async () => {
+      const bytes = await loadGoldenBytes("valid");
+      expect(() => parseTrajectory(bytes.subarray(0, bytes.length - 4))).toThrow();
+    });
+
+    test("appended golden bytes fail parse", async () => {
+      const bytes = await loadGoldenBytes("valid");
+      const appended = new Uint8Array(bytes.length + 3);
+      appended.set(bytes);
+      appended.set(new TextEncoder().encode("xxx"), bytes.length);
+      expect(() => parseTrajectory(appended)).toThrow();
+    });
+
+    test("whole-list span fabrication fails schema validation", async () => {
+      const record = (await loadGoldenJson("valid")) as Record<string, unknown>;
+      const fabricated = {
+        ...record,
+        spans: [
+          {
+            spanId: "f".repeat(16),
+            parentSpanId: null,
+            name: "fabricated",
+            kind: 1,
+            startTimeUnixNano: "0",
+            endTimeUnixNano: "1",
+            attributes: [],
+            events: [],
+            status: { code: 1 },
+          },
+        ],
+      };
+      expect(TrajectoryRecordSchema.safeParse(fabricated).success).toBe(false);
+    });
+
     test("the adversarial corpus behaves exactly as its manifest declares", async () => {
       const manifest = await loadAdversarialManifest();
-      expect(manifest.fixtures.length).toBeGreaterThanOrEqual(4);
+      expect(manifest.fixtures.length).toBeGreaterThanOrEqual(8);
       for (const entry of manifest.fixtures) {
         const document = await readAdversarialJson(entry.id, "document.json");
         const accepted = TrajectoryRecordSchema.safeParse(document).success;
@@ -101,6 +174,14 @@ export function describeTrajectoryRecordConformance(): void {
           entry.expectedDisposition === "accepted",
         );
       }
+    });
+
+    test("namespaced extension round-trips through seal and parse", async () => {
+      const document = await readAdversarialJson("namespaced-extension-preserved", "document.json");
+      const sealed = sealTrajectory(document);
+      const parsed = parseTrajectory(sealed.bytes);
+      expect((parsed as Record<string, unknown>)["network.jinn.note"]).toBe("kept");
+      expect(sealTrajectory(parsed).digest).toBe(sealed.digest);
     });
 
     test("derivation attestation: malformed envelope fails L1 without calling authority", async () => {
@@ -116,12 +197,55 @@ export function describeTrajectoryRecordConformance(): void {
       expect(verifyAuthority).not.toHaveBeenCalled();
     });
 
-    test("derivation attestation: valid chain passes L1-L3; L4 is replay-required", async () => {
-      const record = await loadGoldenJson("valid");
+    test("derivation attestation: envelope mutation fails L1 without calling authority", async () => {
+      const record = (await loadGoldenJson("valid")) as TrajectoryRecord;
+      const { trajectorySealed, executionBytes, sealed } = await buildKitAttestation(record);
+      const verifyAuthority = vi.fn();
+      const envelope = JSON.parse(new TextDecoder().decode(sealed.envelopeBytes)) as Record<
+        string,
+        unknown
+      >;
+      envelope.forged = true;
+      const result = await verifyTrajectoryDerivationAttestation({
+        envelopeBytes: new TextEncoder().encode(JSON.stringify(envelope)),
+        executionRecordBytes: executionBytes,
+        trajectoryRecordBytes: trajectorySealed.bytes,
+        verifyAuthority,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.failedLayer).toBe(1);
+      expect(verifyAuthority).not.toHaveBeenCalled();
+    });
+
+    test("derivation attestation: malformed authority result fails L2", async () => {
+      const record = (await loadGoldenJson("valid")) as TrajectoryRecord;
+      const { trajectorySealed, executionBytes, sealed } = await buildKitAttestation(record);
+      const result = await verifyTrajectoryDerivationAttestation({
+        envelopeBytes: sealed.envelopeBytes,
+        executionRecordBytes: executionBytes,
+        trajectoryRecordBytes: trajectorySealed.bytes,
+        verifyAuthority: async () => ({ verified: "true", signerKeyIds: ["kit-key"] }) as never,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe("l2-authority-malformed");
+    });
+
+    test("derivation attestation: authority verified:false fails L2", async () => {
+      const record = (await loadGoldenJson("valid")) as TrajectoryRecord;
+      const { trajectorySealed, executionBytes, sealed } = await buildKitAttestation(record);
+      const result = await verifyTrajectoryDerivationAttestation({
+        envelopeBytes: sealed.envelopeBytes,
+        executionRecordBytes: executionBytes,
+        trajectoryRecordBytes: trajectorySealed.bytes,
+        verifyAuthority: async () => ({ verified: false, reason: "bad signature" }),
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe("l2-authority-rejected");
+    });
+
+    test("derivation attestation: duplicate forward link fails L3", async () => {
+      const record = (await loadGoldenJson("valid")) as TrajectoryRecord;
       const trajectorySealed = sealTrajectory(record);
-      const trajectoryDigest = trajectorySealed.digest;
-      const nativeSha = (record as { source: { nativeTrace: { digest: { sha256: string } } } })
-        .source.nativeTrace.digest.sha256;
       const executionBytes = new TextEncoder().encode(
         JSON.stringify({
           "@context": "https://w3id.org/ro/crate/1.3/context",
@@ -129,11 +253,66 @@ export function describeTrajectoryRecordConformance(): void {
             {
               "@id": "trace/native.bin",
               "@type": "File",
-              sha256: nativeSha,
+              sha256: record.source.nativeTrace.digest.sha256,
+              identifier: [
+                {
+                  "@type": "PropertyValue",
+                  propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+                  value: trajectorySealed.digest,
+                },
+                {
+                  "@type": "PropertyValue",
+                  propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+                  value: trajectorySealed.digest,
+                },
+              ],
+            },
+          ],
+        }),
+      );
+      const statement = buildTrajectoryDerivationStatement({
+        producerId: "kit-producer",
+        executionDigest: documentDigest(executionBytes),
+        trajectoryDigest: trajectorySealed.digest,
+        nativeTraceDigest: `sha256:${record.source.nativeTrace.digest.sha256}`,
+        formatIri: record.source.formatIri,
+        decoderId: record.derivation.decoderId,
+        decoderVersion: record.derivation.decoderVersion,
+        vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
+        timebase: record.timebase,
+        derivedAt: "2026-07-31T12:00:00Z",
+      });
+      const sealed = await sealTrajectoryDerivationAttestation({ statement, signer: kitSigner });
+      const result = await verifyTrajectoryDerivationAttestation({
+        envelopeBytes: sealed.envelopeBytes,
+        executionRecordBytes: executionBytes,
+        trajectoryRecordBytes: trajectorySealed.bytes,
+        verifyAuthority: async () => ({ verified: true, signerKeyIds: ["kit-key"] }),
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe("l3-forward-link-duplicate");
+    });
+
+    test("derivation attestation: signed-but-unfaithful passes L1-L3; L4 replay-required", async () => {
+      const record = (await loadGoldenJson("valid")) as TrajectoryRecord;
+      const faithful = await buildKitAttestation(record);
+      const spans = record.spans.map((span) => ({
+        ...span,
+        name: "substituted span content",
+      }));
+      const unfaithfulTrajectory = sealTrajectory({ ...record, spans });
+      const executionBytes = new TextEncoder().encode(
+        JSON.stringify({
+          "@context": "https://w3id.org/ro/crate/1.3/context",
+          "@graph": [
+            {
+              "@id": "trace/native.bin",
+              "@type": "File",
+              sha256: record.source.nativeTrace.digest.sha256,
               identifier: {
                 "@type": "PropertyValue",
                 propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-                value: trajectoryDigest,
+                value: unfaithfulTrajectory.digest,
               },
             },
           ],
@@ -142,19 +321,32 @@ export function describeTrajectoryRecordConformance(): void {
       const statement = buildTrajectoryDerivationStatement({
         producerId: "kit-producer",
         executionDigest: documentDigest(executionBytes),
-        trajectoryDigest,
-        nativeTraceDigest: `sha256:${nativeSha}`,
-        formatIri: (record as { source: { formatIri: string } }).source.formatIri,
-        decoderId: (record as { derivation: { decoderId: string } }).derivation.decoderId,
-        decoderVersion: (record as { derivation: { decoderVersion: string } }).derivation.decoderVersion,
+        trajectoryDigest: unfaithfulTrajectory.digest,
+        nativeTraceDigest: `sha256:${record.source.nativeTrace.digest.sha256}`,
+        formatIri: record.source.formatIri,
+        decoderId: record.derivation.decoderId,
+        decoderVersion: record.derivation.decoderVersion,
         vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
-        timebase: (record as { timebase: "source-epoch-ns" | "synthetic-ordinal" }).timebase,
+        timebase: record.timebase,
         derivedAt: "2026-07-31T12:00:00Z",
       });
-      const sealed = await sealTrajectoryDerivationAttestation({
-        statement,
-        signer: kitSigner,
+      const sealed = await sealTrajectoryDerivationAttestation({ statement, signer: kitSigner });
+      const result = await verifyTrajectoryDerivationAttestation({
+        envelopeBytes: sealed.envelopeBytes,
+        executionRecordBytes: executionBytes,
+        trajectoryRecordBytes: unfaithfulTrajectory.bytes,
+        verifyAuthority: async () => ({ verified: true, signerKeyIds: ["kit-key"] }),
       });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.layers.l4).toEqual({ status: "not-evaluated", reason: "replay-required" });
+      }
+      expect(faithful.trajectorySealed.digest).not.toBe(unfaithfulTrajectory.digest);
+    });
+
+    test("derivation attestation: valid chain passes L1-L3; L4 is replay-required", async () => {
+      const record = (await loadGoldenJson("valid")) as TrajectoryRecord;
+      const { trajectorySealed, executionBytes, sealed } = await buildKitAttestation(record);
       const result = await verifyTrajectoryDerivationAttestation({
         envelopeBytes: sealed.envelopeBytes,
         executionRecordBytes: executionBytes,

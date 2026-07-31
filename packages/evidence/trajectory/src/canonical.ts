@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { compareCodeUnitStrings } from "./order.js";
-import { isNamespacedExtensionKey } from "./extensions.js";
+import { preflightCanonicalInput } from "./preflight.js";
 
 export type JsonValue =
   | string
@@ -46,63 +46,16 @@ export class UnsupportedCanonicalValueError extends Error {
   }
 }
 
-function assertPlainObject(value: object, path: string): void {
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    throw new UnsupportedCanonicalValueError("non-plain object", path);
-  }
-}
-
 function assertCanonicalizable(value: unknown, path: string): void {
-  if (value === undefined) {
-    if (path === "") {
-      throw new UnsupportedCanonicalValueError("undefined", path);
-    }
-    return;
-  }
-  if (value === null || typeof value === "boolean") return;
-  if (typeof value === "string" || typeof value === "number") return;
-  if (typeof value === "bigint") {
-    throw new UnsupportedCanonicalValueError("bigint", path);
-  }
-  if (typeof value === "function" || typeof value === "symbol") {
-    throw new UnsupportedCanonicalValueError(typeof value, path);
-  }
-  if (value instanceof Date) {
-    throw new UnsupportedCanonicalValueError("Date", path);
-  }
-  if (value instanceof Map || value instanceof Set) {
-    throw new UnsupportedCanonicalValueError(value.constructor.name, path);
-  }
-  if (Array.isArray(value)) {
-    value.forEach((element, index) => {
-      if (element === undefined) throw new UndefinedArrayElementError();
-      assertCanonicalizable(element, `${path}[${String(index)}]`);
-    });
-    return;
-  }
-  if (typeof value === "object") {
-    assertPlainObject(value, path);
-    for (const [key, nested] of Object.entries(value)) {
-      if (nested === undefined) continue;
-      assertCanonicalizable(nested, path ? `${path}.${key}` : key);
-      if (
-        isNamespacedExtensionKey(key) &&
-        nested !== null &&
-        typeof nested === "object" &&
-        !Array.isArray(nested)
-      ) {
-        assertPlainObject(nested, path ? `${path}.${key}` : key);
-        for (const nestedKey of Object.keys(nested)) {
-          if (!isNamespacedExtensionKey(nestedKey)) {
-            throw new UnsupportedCanonicalValueError(
-              `non-namespaced extension key "${nestedKey}"`,
-              path ? `${path}.${key}.${nestedKey}` : `${key}.${nestedKey}`,
-            );
-          }
-        }
-      }
-    }
+  try {
+    preflightCanonicalInput(value);
+  } catch (error) {
+    if (error instanceof UndefinedArrayElementError) throw error;
+    if (error instanceof UnsupportedCanonicalValueError) throw error;
+    throw new UnsupportedCanonicalValueError(
+      error instanceof Error ? error.message : "preflight failed",
+      path,
+    );
   }
 }
 

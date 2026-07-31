@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 
-import { topLevelRecordSchema } from "./extensions.js";
+import { topLevelRecordSchema, closedObjectSchema } from "./extensions.js";
 import { TRAJECTORY_PROTOCOL, TRAJECTORY_VOCABULARY_PROFILE } from "./identifiers.js";
 import { deriveSpanId, deriveTraceId } from "./identity.js";
 import { type SealedRecord, parseExactWithSchema, sealWithSchema } from "./sealing.js";
@@ -18,11 +18,11 @@ const AbsoluteIri = z
   .regex(/^[A-Za-z][A-Za-z0-9+.-]*:[^\s]+$/u, "must be an absolute IRI");
 
 /** A digest-bound reference: acquisition hints may vary, identity may not. */
-const DigestBearingDescriptorSchema = z.looseObject({
+const DigestBearingDescriptorSchema = closedObjectSchema({
   name: z.string().min(1).optional(),
   mediaType: z.string().min(1).optional(),
   uri: z.string().min(1).optional(),
-  digest: z.looseObject({ sha256: LowercaseSha256Hex }),
+  digest: z.strictObject({ sha256: LowercaseSha256Hex }),
 });
 
 const SourceSchema = z.strictObject({
