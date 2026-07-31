@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'task-supply');
-const taskSupplyDirectories = ['admission'];
+const taskSupplyDirectories = ['admission', 'derivation'];
 
 // The whole task-supply tree is forbidden the frozen trio, every evidence/discovery/marketplace
 // package, every task-execution package, and every chain/storage client. Admission additionally
@@ -47,6 +47,45 @@ const ADMISSION_FORBIDDEN_EXTRA = [
   '@jinn-network/task-posting',
   '@jinn-network/task-curation',
 ];
+
+// Derivation's pinned output IS sealed Task + EvaluationSpec pairs, which only the packages that
+// own those two kinds can produce (`sealTask`, `sealEvaluationSpec`). So the tree-wide
+// `@jinn-network/task-execution-*` ban is carved out for exactly the two packages that own that
+// sealing, by exact name — the family wildcard still bans every other task-execution package.
+// Planning Finding (a): the design's §3.3 diagram omits this tier-3 -> tier-2 edge.
+const DERIVATION_TASK_EXECUTION_ALLOWED = [
+  '@jinn-network/task-execution-profiles',
+  '@jinn-network/task-execution-protocol',
+];
+
+// Derivation additionally may never import the two task-supply packages downstream of it, nor
+// trust-core: its dependency on admission is types-only and it re-implements its own canonical
+// JSON and digesting per the house per-package rule (program contract 3).
+const DERIVATION_FORBIDDEN_EXTRA = [
+  '@jinn-network/task-posting',
+  '@jinn-network/task-curation',
+  '@jinn-network/trust-core',
+];
+
+/**
+ * The tree-wide `@jinn-network/task-execution-*` wildcard, replaced by an explicit ban on every
+ * task-execution package that is NOT in `allowed`. The replacement list is read off the tree, so a
+ * task-execution package added later is banned by default rather than silently admitted.
+ */
+function derivationForbiddenPackages(allowed) {
+  const taskExecutionRoot = join(root, 'packages', 'task-execution');
+  const siblings = existsSync(taskExecutionRoot)
+    ? readdirSync(taskExecutionRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && existsSync(join(taskExecutionRoot, entry.name, 'package.json')))
+      .map((entry) => JSON.parse(readFileSync(join(taskExecutionRoot, entry.name, 'package.json'), 'utf8')).name)
+    : [];
+  const stillForbidden = siblings.filter((name) => !allowed.includes(name)).sort();
+  return [
+    ...TASK_SUPPLY_FOREIGN_PACKAGES.filter((forbidden) => forbidden !== '@jinn-network/task-execution-*'),
+    ...stillForbidden,
+    ...DERIVATION_FORBIDDEN_EXTRA,
+  ];
+}
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
 const ambientNetworkIdentifier = new RegExp(
@@ -301,6 +340,40 @@ test('task-supply source boundaries remain one-way across the approved graph', (
     [...TASK_SUPPLY_FOREIGN_PACKAGES, ...ADMISSION_FORBIDDEN_EXTRA],
     FORBIDDEN_ROOTS,
   );
+  // derivation imports environments/record, task-admission (types only), and the two
+  // task-execution packages that own Task and EvaluationSpec sealing (planning Finding (a)).
+  assertBoundary(
+    join(packages, 'derivation', 'src'),
+    derivationForbiddenPackages(DERIVATION_TASK_EXECUTION_ALLOWED),
+    FORBIDDEN_ROOTS,
+  );
+});
+
+test('derivation\'s task-execution carve-out admits exactly two packages and bans the rest', () => {
+  const forbidden = derivationForbiddenPackages(DERIVATION_TASK_EXECUTION_ALLOWED);
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-task-supply-derivation-carveout-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'allowed.ts'), DERIVATION_TASK_EXECUTION_ALLOWED
+      .map((name) => `import x from ${JSON.stringify(name)};`).join('\n'));
+    assert.deepEqual(forbiddenImports(source, forbidden), []);
+
+    const otherTaskExecution = readdirSync(join(root, 'packages', 'task-execution'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && existsSync(join(root, 'packages', 'task-execution', entry.name, 'package.json')))
+      .map((entry) => JSON.parse(readFileSync(join(root, 'packages', 'task-execution', entry.name, 'package.json'), 'utf8')).name)
+      .filter((name) => !DERIVATION_TASK_EXECUTION_ALLOWED.includes(name));
+    assert.ok(otherTaskExecution.length > 0, 'expected at least one non-allowed task-execution package');
+    writeFileSync(join(source, 'banned.ts'), [
+      ...otherTaskExecution.map((name) => `import y from ${JSON.stringify(name)};`),
+      'import z from "@jinn-network/trust-core";',
+      'import w from "@jinn-network/marketplace-binding";',
+    ].join('\n'));
+    assert.equal(
+      forbiddenImports(join(source, 'banned.ts'), forbidden).length,
+      otherTaskExecution.length + 2,
+    );
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
 test('locale-sensitive API detection catches member calls, optional chaining, and Intl', () => {

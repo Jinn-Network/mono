@@ -12,17 +12,23 @@ const consumerRoot = join(temporaryRoot, 'consumer');
 
 const packages = [
   ['admission', '@jinn-network/task-admission'],
+  ['derivation', '@jinn-network/task-derivation'],
 ];
 
 const codeEntrypoints = [
   '@jinn-network/task-admission',
   '@jinn-network/task-admission/testing',
+  '@jinn-network/task-derivation',
+  '@jinn-network/task-derivation/testing',
 ];
 
 // Cross-tree Jinn dependencies packed as file: deps so NodeNext resolves them.
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
+  ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
+  ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
 ];
 
 function run(command, args, options = {}) {
