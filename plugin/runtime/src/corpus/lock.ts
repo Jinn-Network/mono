@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { constants } from "node:fs";
-import { mkdir, open } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import Database from "better-sqlite3";
 
 import { CORPUS_ERROR_CODES, CorpusMirrorError, nodeErrorCode } from "./errors.js";
+import type { CorpusFilesystem } from "./fs.js";
 
 export const CORPUS_SYNC_LOCK_FORMAT = "jinn-corpus-mirror-sync-lock" as const;
 
@@ -18,10 +17,11 @@ function sqliteCode(error: unknown): string | undefined {
   return nodeErrorCode(error);
 }
 
-async function ensureLockFile(path: string): Promise<void> {
+async function ensureLockFile(path: string, fs: CorpusFilesystem): Promise<void> {
+  const { constants } = fs;
   try {
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-    const handle = await open(
+    await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const handle = await fs.open(
       path,
       constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0),
       0o600,
@@ -52,12 +52,15 @@ async function ensureLockFile(path: string): Promise<void> {
  * SQLite's unix VFS shares lock state across connections within one process,
  * so two instances in one process contend exactly as two processes do.
  */
-export async function tryAcquireSyncLock(path: string): Promise<CorpusSyncLock | undefined> {
-  await ensureLockFile(path);
+export async function tryAcquireSyncLock(options: {
+  readonly path: string;
+  readonly fs: CorpusFilesystem;
+}): Promise<CorpusSyncLock | undefined> {
+  await ensureLockFile(options.path, options.fs);
 
   let database: Database.Database | undefined;
   try {
-    database = new Database(path, { fileMustExist: true, timeout: 0 });
+    database = new Database(options.path, { fileMustExist: true, timeout: 0 });
     database.pragma("busy_timeout = 0");
     database.pragma("locking_mode = EXCLUSIVE");
     database.exec(
@@ -97,7 +100,7 @@ export async function tryAcquireSyncLock(path: string): Promise<CorpusSyncLock |
     if (["SQLITE_BUSY", "SQLITE_LOCKED"].includes(sqliteCode(error) ?? "")) return undefined;
     throw new CorpusMirrorError(
       CORPUS_ERROR_CODES.syncLockIo,
-      `Unable to acquire the mirror sync lock at ${path}.`,
+      `Unable to acquire the mirror sync lock at ${options.path}.`,
       { cause: error },
     );
   }

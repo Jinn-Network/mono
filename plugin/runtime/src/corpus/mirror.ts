@@ -22,6 +22,7 @@ import type { CorpusAdmission } from "./admission.js";
 import { adaptAnnouncementEntry } from "./announcements.js";
 import type { ChainVerification } from "./chain-verification.js";
 import { describeError } from "./errors.js";
+import type { CorpusFilesystem } from "./fs.js";
 import { tryAcquireSyncLock } from "./lock.js";
 import { createCorpusRepositoryResolver } from "./repositories.js";
 import { withCorpusMirrorStore, type OpenCorpusMirrorStoreOptions } from "./store.js";
@@ -52,6 +53,7 @@ export interface CreateCorpusMirrorOptions {
   readonly sources: readonly MirrorSourceConfig[];
   readonly maxEntriesPerSync: number;
   readonly lockPath: string;
+  readonly fs: CorpusFilesystem;
   readonly storePaths: OpenCorpusMirrorStoreOptions;
   readonly highWaterMarks: HighWaterMarkStore;
   readonly admission: CorpusAdmission;
@@ -198,7 +200,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
     async syncOnce(operation?: { readonly signal?: AbortSignal }): Promise<MirrorSyncOutcome> {
       let lock;
       try {
-        lock = await tryAcquireSyncLock(options.lockPath);
+        lock = await tryAcquireSyncLock({ path: options.lockPath, fs: options.fs });
       } catch (error) {
         options.log.warn("corpus.mirror.lock-failed", { message: describeError(error) });
         return { status: "failed", sources: [] };

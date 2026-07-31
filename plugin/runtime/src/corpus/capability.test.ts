@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { resolveRuntimeConfig } from "../config.js";
 import { createCorpusCapability } from "./capability.js";
 import { createFileHighWaterMarkStore } from "./high-water-mark.js";
+import { createNodeCorpusFilesystem } from "./node-fs.test.js";
 import { seedMirror } from "./testing-fixture.js";
+
+const corpusFs = createNodeCorpusFilesystem();
 
 let home: string;
 
@@ -38,6 +41,7 @@ function context(file?: unknown) {
 function capability(file?: unknown) {
   const built = createCorpusCapability({
     transport,
+    fs: corpusFs,
     dsseVerifier: () => ({ validSignerKeyids: [] }),
     readPolicyVersions: async () => [],
   });
@@ -87,6 +91,7 @@ describe("corpus capability", () => {
     // A position exists; the catalog was never populated.
     await createFileHighWaterMarkStore({
       filePath: built_context.config.mirrorStatePath,
+      fs: corpusFs,
     }).put(
       { agent: source().agent, name: source().name },
       { sequence: "0000000000000009", entry: `sha256:${"a".repeat(64)}`, issuedAt: "2026-07-30T00:00:00Z" },
@@ -110,11 +115,13 @@ describe("corpus capability", () => {
       {
         catalogPath: built_context.config.mirrorCatalogPath,
         objectsDirectory: built_context.config.mirrorObjectsDirectory,
+        fs: corpusFs,
       },
       source(),
     );
     await createFileHighWaterMarkStore({
       filePath: built_context.config.mirrorStatePath,
+      fs: corpusFs,
     }).put(
       { agent: source().agent, name: source().name },
       { sequence: "0000000000000001", entry: `sha256:${"a".repeat(64)}`, issuedAt: "2026-07-30T00:00:00Z" },
@@ -157,6 +164,7 @@ describe("corpus capability", () => {
   test("reports the trust policy as not fixable from this machine when unresolvable", async () => {
     const built = createCorpusCapability({
       transport,
+      fs: corpusFs,
       dsseVerifier: () => ({ validSignerKeyids: [] }),
       readPolicyVersions: async () => {
         throw new Error("policy directory unreadable");

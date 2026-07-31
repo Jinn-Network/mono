@@ -23,7 +23,11 @@ import {
 import { createFileHighWaterMarkStore } from "./high-water-mark.js";
 import { tryAcquireSyncLock } from "./lock.js";
 import { createCorpusMirror } from "./mirror.js";
+import { createNodeCorpusFilesystem } from "./node-fs.test.js";
 import { withCorpusMirrorStore } from "./store.js";
+import type { CorpusFilesystem } from "./fs.js";
+
+const corpusFs = createNodeCorpusFilesystem();
 
 // A minimal, well-formed execution-evidence record is loaded from the fixture
 // built in Task 14; this suite only needs bytes whose digest is stable and a
@@ -42,7 +46,7 @@ const source = {
 };
 
 let directory: string;
-let paths: { catalogPath: string; objectsDirectory: string };
+let paths: { catalogPath: string; objectsDirectory: string; fs: CorpusFilesystem };
 let lockPath: string;
 let statePath: string;
 
@@ -109,8 +113,9 @@ function mirror(overrides: Partial<Parameters<typeof createCorpusMirror>[0]> = {
     sources: [source],
     maxEntriesPerSync: 500,
     lockPath,
+    fs: corpusFs,
     storePaths: paths,
-    highWaterMarks: createFileHighWaterMarkStore({ filePath: statePath }),
+    highWaterMarks: createFileHighWaterMarkStore({ filePath: statePath, fs: corpusFs }),
     admission: createFollowedSourceAdmission([source]),
     chainVerification: createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGEMENT),
     transport,
@@ -124,6 +129,7 @@ beforeEach(async () => {
   paths = {
     catalogPath: join(directory, "mirror", "catalog.sqlite"),
     objectsDirectory: join(directory, "mirror", "objects"),
+    fs: corpusFs,
   };
   lockPath = join(directory, "mirror-sync.lock");
   statePath = join(directory, "mirror-state.json");
@@ -157,7 +163,7 @@ describe("mirror sync", () => {
   });
 
   test("advances the high-water mark to the newest walked entry", async () => {
-    const store = createFileHighWaterMarkStore({ filePath: statePath });
+    const store = createFileHighWaterMarkStore({ filePath: statePath, fs: corpusFs });
     await mirror({ highWaterMarks: store }).syncOnce();
     const mark = await store.get({ agent: AGENT, name: NAME });
     expect(mark?.sequence).toBe("0000000000000001");
@@ -165,7 +171,7 @@ describe("mirror sync", () => {
   });
 
   test("a second pass walks nothing new", async () => {
-    const marks = createFileHighWaterMarkStore({ filePath: statePath });
+    const marks = createFileHighWaterMarkStore({ filePath: statePath, fs: corpusFs });
     await mirror({ highWaterMarks: marks }).syncOnce();
     const second = await mirror({ highWaterMarks: marks }).syncOnce();
     expect(second.sources[0]!.entriesWalked).toBe(0);
@@ -173,7 +179,7 @@ describe("mirror sync", () => {
   });
 
   test("SKIPS without waiting when the lock is held, and never throws", async () => {
-    const held = await tryAcquireSyncLock(lockPath);
+    const held = await tryAcquireSyncLock({ path: lockPath, fs: corpusFs });
     try {
       const started = Date.now();
       const outcome = await mirror().syncOnce();

@@ -41,6 +41,11 @@ export {
   type CorpusErrorCode,
 } from "./errors.js";
 export {
+  createCorpusFilesystem,
+  type CorpusFileHandle,
+  type CorpusFilesystem,
+} from "./fs.js";
+export {
   HIGH_WATER_MARK_FORMAT,
   createFileHighWaterMarkStore,
 } from "./high-water-mark.js";

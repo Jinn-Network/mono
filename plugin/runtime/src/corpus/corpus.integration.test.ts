@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { resolveRuntimeConfig } from "../config.js";
 import { createCorpusCapability } from "./capability.js";
+import { createNodeCorpusFilesystem } from "./node-fs.test.js";
 import { buildFixtureArchive, fixtureTrustDsseVerifier } from "./testing-fixture.js";
+
+const corpusFs = createNodeCorpusFilesystem();
 
 let home: string;
 
@@ -38,6 +41,7 @@ describe("corpus end to end", () => {
 
     const capability = createCorpusCapability({
       transport: archive.transport,
+      fs: corpusFs,
       dsseVerifier: fixtureTrustDsseVerifier,
       readPolicyVersions: async () => archive.policyVersions,
       now: () => new Date("2026-07-30T00:00:00Z"),
@@ -80,6 +84,7 @@ describe("corpus end to end", () => {
           throw new Error("archive unreachable");
         },
       },
+      fs: corpusFs,
       dsseVerifier: fixtureTrustDsseVerifier,
       readPolicyVersions: async () => archive.policyVersions,
       now: () => new Date("2026-07-30T00:00:00Z"),
@@ -94,6 +99,7 @@ describe("corpus end to end", () => {
 
     const capability = createCorpusCapability({
       transport: archive.transport,
+      fs: corpusFs,
       dsseVerifier: fixtureTrustDsseVerifier,
       readPolicyVersions: async () => archive.policyVersions,
       now: () => new Date("2026-07-30T00:00:00Z"),
@@ -124,6 +130,7 @@ describe("corpus end to end", () => {
   test("FAIL-OPEN on absence: an empty corpus reads empty and work proceeds", async () => {
     const capability = createCorpusCapability({
       transport: { async fetch() { return { status: 404, bytes: new Uint8Array() }; } },
+      fs: corpusFs,
       dsseVerifier: () => ({ validSignerKeyids: [] }),
       readPolicyVersions: async () => [],
     });
@@ -152,6 +159,7 @@ describe("corpus end to end", () => {
     const build = () =>
       createCorpusCapability({
         transport: archive.slowTransport,
+        fs: corpusFs,
         dsseVerifier: fixtureTrustDsseVerifier,
         readPolicyVersions: async () => archive.policyVersions,
         now: () => new Date("2026-07-30T00:00:00Z"),

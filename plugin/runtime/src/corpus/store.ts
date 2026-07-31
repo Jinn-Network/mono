@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { lstat } from "node:fs/promises";
-
 import {
   createSqliteEvidenceCatalog,
   openSqliteEvidenceCatalog,
@@ -12,6 +10,7 @@ import type { EvidenceRepository } from "@jinn-network/evidence-repository";
 import { createFilesystemEvidenceRepository } from "@jinn-network/evidence-repository/fs";
 
 import { CORPUS_ERROR_CODES, CorpusMirrorError } from "./errors.js";
+import type { CorpusFilesystem } from "./fs.js";
 
 export const CORPUS_PROJECTOR_VERSION = "jinn-plugin-corpus-mirror/1.0.0" as const;
 
@@ -24,11 +23,12 @@ export interface CorpusMirrorStore {
 export interface OpenCorpusMirrorStoreOptions {
   readonly catalogPath: string;
   readonly objectsDirectory: string;
+  readonly fs: CorpusFilesystem;
   readonly now?: () => Date;
 }
 
-async function exists(path: string): Promise<boolean> {
-  return lstat(path).then(
+async function exists(fs: CorpusFilesystem, path: string): Promise<boolean> {
+  return fs.lstat(path).then(
     () => true,
     () => false,
   );
@@ -57,7 +57,7 @@ export async function openCorpusMirrorStore(
   });
 
   let catalog: SqliteEvidenceCatalog;
-  if (await exists(options.catalogPath)) {
+  if (await exists(options.fs, options.catalogPath)) {
     catalog = await openSqliteEvidenceCatalog({ databasePath: options.catalogPath });
   } else {
     try {
@@ -72,7 +72,7 @@ export async function openCorpusMirrorStore(
     } catch (error) {
       // `createSqliteEvidenceCatalog` reserves the file with O_CREAT|O_EXCL,
       // so a concurrent instance can win this race. Re-open rather than fail.
-      if (await exists(options.catalogPath)) {
+      if (await exists(options.fs, options.catalogPath)) {
         catalog = await openSqliteEvidenceCatalog({ databasePath: options.catalogPath });
       } else {
         throw new CorpusMirrorError(

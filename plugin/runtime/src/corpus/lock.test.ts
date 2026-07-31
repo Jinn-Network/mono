@@ -7,6 +7,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { CORPUS_SYNC_LOCK_FORMAT, tryAcquireSyncLock } from "./lock.js";
+import { createNodeCorpusFilesystem } from "./node-fs.test.js";
+
+const fs = createNodeCorpusFilesystem();
 
 let directory: string;
 let lockPath: string;
@@ -60,23 +63,23 @@ afterEach(async () => {
 
 describe("mirror sync lock", () => {
   test("acquires when free", async () => {
-    const lock = await tryAcquireSyncLock(lockPath);
+    const lock = await tryAcquireSyncLock({ path: lockPath, fs });
     expect(lock).toBeDefined();
     await lock!.close();
   });
 
   test("creates the lock file owner-only, making its parent directory", async () => {
-    const lock = await tryAcquireSyncLock(lockPath);
+    const lock = await tryAcquireSyncLock({ path: lockPath, fs });
     expect((await stat(lockPath)).mode & 0o777).toBe(0o600);
     await lock!.close();
   });
 
   test("SKIPS rather than waits when already held in this process", async () => {
-    const first = await tryAcquireSyncLock(lockPath);
+    const first = await tryAcquireSyncLock({ path: lockPath, fs });
     expect(first).toBeDefined();
 
     const started = Date.now();
-    const second = await tryAcquireSyncLock(lockPath);
+    const second = await tryAcquireSyncLock({ path: lockPath, fs });
     const elapsed = Date.now() - started;
 
     expect(second).toBeUndefined();
@@ -86,13 +89,13 @@ describe("mirror sync lock", () => {
   });
 
   test("SKIPS rather than waits when held by another process", async () => {
-    const lock = await tryAcquireSyncLock(lockPath);
+    const lock = await tryAcquireSyncLock({ path: lockPath, fs });
     await lock!.close();
 
     child = await startHolder(lockPath);
 
     const started = Date.now();
-    const attempt = await tryAcquireSyncLock(lockPath);
+    const attempt = await tryAcquireSyncLock({ path: lockPath, fs });
     const elapsed = Date.now() - started;
 
     expect(attempt).toBeUndefined();
@@ -100,15 +103,15 @@ describe("mirror sync lock", () => {
   });
 
   test("becomes acquirable again once the holder releases", async () => {
-    const first = await tryAcquireSyncLock(lockPath);
+    const first = await tryAcquireSyncLock({ path: lockPath, fs });
     await first!.close();
-    const second = await tryAcquireSyncLock(lockPath);
+    const second = await tryAcquireSyncLock({ path: lockPath, fs });
     expect(second).toBeDefined();
     await second!.close();
   });
 
   test("close is idempotent", async () => {
-    const lock = await tryAcquireSyncLock(lockPath);
+    const lock = await tryAcquireSyncLock({ path: lockPath, fs });
     await lock!.close();
     await expect(lock!.close()).resolves.toBeUndefined();
   });

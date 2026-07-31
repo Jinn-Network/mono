@@ -13,7 +13,11 @@ import {
   createFollowedSourceAdmission,
 } from "./admission.js";
 import { createCorpusRetrieval } from "./retrieve.js";
+import { createNodeCorpusFilesystem } from "./node-fs.test.js";
+import type { CorpusFilesystem } from "./fs.js";
 import { seedMirror, type SeededMirror } from "./testing-fixture.js";
+
+const corpusFs = createNodeCorpusFilesystem();
 
 const source = {
   agent: "https://agents.test/alice",
@@ -34,7 +38,7 @@ const admitAlice = composeAdmission(createFollowedSourceAdmission([source]), {
 });
 
 let directory: string;
-let paths: { catalogPath: string; objectsDirectory: string };
+let paths: { catalogPath: string; objectsDirectory: string; fs: CorpusFilesystem };
 let seeded: SeededMirror;
 
 function retrieval(overrides: Partial<Parameters<typeof createCorpusRetrieval>[0]> = {}) {
@@ -51,6 +55,7 @@ beforeEach(async () => {
   paths = {
     catalogPath: join(directory, "mirror", "catalog.sqlite"),
     objectsDirectory: join(directory, "mirror", "objects"),
+    fs: corpusFs,
   };
   seeded = await seedMirror(paths, source);
 });

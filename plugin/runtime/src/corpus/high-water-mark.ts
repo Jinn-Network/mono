@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type {
@@ -11,6 +10,7 @@ import type {
 import { z } from "zod";
 
 import { CORPUS_ERROR_CODES, CorpusMirrorError, describeError, nodeErrorCode } from "./errors.js";
+import type { CorpusFilesystem } from "./fs.js";
 import { compareCodeUnitStrings } from "./order.js";
 
 export const HIGH_WATER_MARK_FORMAT = "jinn-corpus-mirror-high-water-marks/1" as const;
@@ -44,7 +44,10 @@ function sourceKey(source: SourceIdentity): string {
  */
 export function createFileHighWaterMarkStore(options: {
   readonly filePath: string;
+  readonly fs: CorpusFilesystem;
+  readonly tempNonce?: () => string;
 }): HighWaterMarkStore {
+  const tempNonce = options.tempNonce ?? (() => crypto.randomUUID());
   let cache: Map<string, HighWaterMark> | undefined;
 
   async function load(): Promise<Map<string, HighWaterMark>> {
@@ -52,7 +55,7 @@ export function createFileHighWaterMarkStore(options: {
 
     let text: string;
     try {
-      text = await readFile(options.filePath, "utf8");
+      text = await options.fs.readFile(options.filePath, "utf8");
     } catch (error) {
       if (nodeErrorCode(error) === "ENOENT") {
         cache = new Map();
@@ -95,20 +98,21 @@ export function createFileHighWaterMarkStore(options: {
     }
     const body = `${JSON.stringify({ format: HIGH_WATER_MARK_FORMAT, marks: ordered }, null, 2)}\n`;
 
-    const temporaryPath = `${options.filePath}.${String(process.pid)}.tmp`;
+    const nonce = tempNonce();
+    const temporaryPath = `${options.filePath}.${nonce}.tmp`;
     try {
-      await mkdir(dirname(options.filePath), { recursive: true, mode: 0o700 });
-      await unlink(temporaryPath).catch(() => undefined);
-      const handle = await open(temporaryPath, "wx", 0o600);
+      await options.fs.mkdir(dirname(options.filePath), { recursive: true, mode: 0o700 });
+      await options.fs.unlink(temporaryPath).catch(() => undefined);
+      const handle = await options.fs.open(temporaryPath, "wx", 0o600);
       try {
         await handle.writeFile(body, "utf8");
         await handle.sync();
       } finally {
         await handle.close();
       }
-      await rename(temporaryPath, options.filePath);
+      await options.fs.rename(temporaryPath, options.filePath);
     } catch (error) {
-      await unlink(temporaryPath).catch(() => undefined);
+      await options.fs.unlink(temporaryPath).catch(() => undefined);
       throw new CorpusMirrorError(
         CORPUS_ERROR_CODES.highWaterMarkIo,
         `Unable to write the mirror state file at ${options.filePath}.`,

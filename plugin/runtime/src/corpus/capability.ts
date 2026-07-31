@@ -22,6 +22,7 @@ import {
   type ChainVerification,
 } from "./chain-verification.js";
 import { describeError } from "./errors.js";
+import type { CorpusFilesystem } from "./fs.js";
 import { createFileHighWaterMarkStore } from "./high-water-mark.js";
 import { createCorpusMirror, type CorpusMirror } from "./mirror.js";
 import { createCorpusReader, type CorpusReader } from "./read.js";
@@ -30,6 +31,7 @@ import { withCorpusMirrorStore } from "./store.js";
 
 export interface CreateCorpusCapabilityOptions {
   readonly transport: Transport;
+  readonly fs: CorpusFilesystem;
   /** Injected per custody law C1/C3 — C5 implements no cryptography. */
   readonly dsseVerifier: DsseChainVerifier;
   /** Host-supplied loader for the trust-policy version chain. */
@@ -221,9 +223,11 @@ export function createCorpusCapability(
         sources: state.corpus.sources,
         maxEntriesPerSync: state.corpus.maxEntriesPerSync,
         lockPath: state.config.mirrorLockPath,
+        fs: options.fs,
         storePaths: storePathsOf(state.config),
         highWaterMarks: createFileHighWaterMarkStore({
           filePath: state.config.mirrorStatePath,
+          fs: options.fs,
         }),
         admission: state.admission,
         chainVerification: state.chainVerification,
@@ -251,6 +255,7 @@ export function createCorpusCapability(
     return {
       catalogPath: config.mirrorCatalogPath,
       objectsDirectory: config.mirrorObjectsDirectory,
+      fs: options.fs,
       now,
     };
   }
@@ -340,7 +345,10 @@ export function createCorpusCapability(
       storePaths: storePathsOf(state.config),
       sources: state.corpus.sources,
       admission: state.admission,
-      highWaterMarks: createFileHighWaterMarkStore({ filePath: state.config.mirrorStatePath }),
+      highWaterMarks: createFileHighWaterMarkStore({
+        filePath: state.config.mirrorStatePath,
+        fs: options.fs,
+      }),
     });
   }
 

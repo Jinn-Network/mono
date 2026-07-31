@@ -22,6 +22,7 @@ describe("public surface", () => {
       "adaptAnnouncementEntry",
       "composeAdmission",
       "createCorpusCapability",
+      "createCorpusFilesystem",
       "createCorpusMirror",
       "createCorpusReader",
       "createCorpusRepositoryResolver",

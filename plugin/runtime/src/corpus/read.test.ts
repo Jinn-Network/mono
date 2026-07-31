@@ -11,7 +11,9 @@ import {
   createFollowedSourceAdmission,
 } from "./admission.js";
 import { createFileHighWaterMarkStore } from "./high-water-mark.js";
+import type { CorpusFilesystem } from "./fs.js";
 import { tryAcquireSyncLock } from "./lock.js";
+import { createNodeCorpusFilesystem } from "./node-fs.test.js";
 import { createCorpusReader, producerIdOf } from "./read.js";
 import { withCorpusMirrorStore } from "./store.js";
 import {
@@ -19,6 +21,8 @@ import {
   seedMirror,
   type SeededMirror,
 } from "./testing-fixture.js";
+
+const corpusFs = createNodeCorpusFilesystem();
 
 const source = {
   agent: "https://agents.test/alice",
@@ -42,7 +46,7 @@ function admitting(...producers: readonly string[]) {
 }
 
 let directory: string;
-let paths: { catalogPath: string; objectsDirectory: string };
+let paths: { catalogPath: string; objectsDirectory: string; fs: CorpusFilesystem };
 let statePath: string;
 let seeded: SeededMirror;
 
@@ -51,7 +55,7 @@ function reader(admission = admitting(ALICE)) {
     storePaths: paths,
     sources: [source],
     admission,
-    highWaterMarks: createFileHighWaterMarkStore({ filePath: statePath }),
+    highWaterMarks: createFileHighWaterMarkStore({ filePath: statePath, fs: corpusFs }),
   });
 }
 
@@ -60,6 +64,7 @@ beforeEach(async () => {
   paths = {
     catalogPath: join(directory, "mirror", "catalog.sqlite"),
     objectsDirectory: join(directory, "mirror", "objects"),
+    fs: corpusFs,
   };
   statePath = join(directory, "mirror-state.json");
   // Seeds three execution records: two by ALICE, one by MALLORY.
@@ -85,7 +90,7 @@ describe("corpus reader — the C6 seam", () => {
   });
 
   test("serves the current mirror while a sync lock is held elsewhere", async () => {
-    const held = await tryAcquireSyncLock(join(directory, "mirror-sync.lock"));
+    const held = await tryAcquireSyncLock({ path: join(directory, "mirror-sync.lock"), fs: corpusFs });
     try {
       const started = Date.now();
       const page = await reader().listRecords();
@@ -167,7 +172,7 @@ describe("corpus reader — the C6 seam", () => {
   });
 
   test("describeSources reports the followed archives and their sync position", async () => {
-    const marks = createFileHighWaterMarkStore({ filePath: statePath });
+    const marks = createFileHighWaterMarkStore({ filePath: statePath, fs: corpusFs });
     await marks.put(
       { agent: source.agent, name: source.name },
       { sequence: "0000000000000004", entry: `sha256:${"a".repeat(64)}`, issuedAt: "2026-07-30T00:00:00Z" },

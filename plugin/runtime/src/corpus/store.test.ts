@@ -10,15 +10,20 @@ import {
   openCorpusMirrorStore,
   withCorpusMirrorStore,
 } from "./store.js";
+import { createNodeCorpusFilesystem } from "./node-fs.test.js";
+import type { CorpusFilesystem } from "./fs.js";
+
+const corpusFs = createNodeCorpusFilesystem();
 
 let directory: string;
-let options: { catalogPath: string; objectsDirectory: string };
+let options: { catalogPath: string; objectsDirectory: string; fs: CorpusFilesystem };
 
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), "jinn-store-"));
   options = {
     catalogPath: join(directory, "mirror", "catalog.sqlite"),
     objectsDirectory: join(directory, "mirror", "objects"),
+    fs: corpusFs,
   };
 });
 
