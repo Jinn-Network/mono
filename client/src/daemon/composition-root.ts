@@ -367,18 +367,21 @@ export async function buildOperatorComposition(
     identityRegistryAddress: input.identityRegistryAddress,
   });
 
+  // `viem` is a direct `dependencies` entry of venue-base / binding / projector, and each
+  // `packages/` tree is its own yarn project, so every one installs a physically separate copy.
+  // TypeScript compares those declarations by identity, not shape, for viem's deeply recursive
+  // generic types (`Client`, `Account`, `NonceManager.consume`), and reports "two different types
+  // with this name exist, but they are unrelated" for byte-identical shapes. Pinning both sides to
+  // the same version (done) does not help, and a `paths` redirect does not reach the portal
+  // packages' own `.d.ts` resolution (tested). The real fix is making viem a required peer of
+  // those packages so the consumer's copy is used — a dependency-topology change outside this
+  // leg's scope. Recorded as finding E26. The cast names the exact expected type rather than
+  // `as never`, so it documents what is being asserted instead of erasing it.
+  type VenueClients = Parameters<typeof createBaseVenue>[0];
   const venue = createBaseVenue({
     chain: input.chain,
-    // `client`'s pinned `viem@2.0.0` range resolves to `2.55.8` while every independently
-    // installed portal package under `packages/` (venue-base, pipeline, binding — each its own
-    // yarn project, its own lockfile) resolves `2.55.10`. Both satisfy the `^2.0.0` range and
-    // are runtime-identical, but TS treats the two `PublicClient`/`WalletClient` shapes as
-    // nominally distinct ("Two different types with this name exist, but they are unrelated"),
-    // the first time client code has passed a live viem client across this portal boundary.
-    // Real fix is a `client/package.json` `resolutions.viem` pin + reinstall (E3's own
-    // precedent for `better-sqlite3`/`ajv`) — out of this task's 4-file write scope.
-    publicClient: input.publicClient as never,
-    walletClient: input.walletClient as never,
+    publicClient: input.publicClient as unknown as VenueClients['publicClient'],
+    walletClient: input.walletClient as unknown as VenueClients['walletClient'],
     safeAddress: input.safeAddress,
     stateDbPath: input.venueStateDbPath,
     priorityMech: input.mechAddress,
