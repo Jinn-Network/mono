@@ -20,7 +20,7 @@ export interface FrontmatterOptions {
  *  all. Embedded newlines are escaped to the two-character `\n` sequence so
  *  a multi-line value can never silently split into extra top-level lines
  *  in this repo's line-oriented lint. */
-function quoteYamlScalar(value: string): string {
+export function quoteYamlScalar(value: string): string {
   const escaped = value
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')

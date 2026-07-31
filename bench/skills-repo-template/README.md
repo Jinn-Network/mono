@@ -1,28 +1,54 @@
-# Skills, measured.
+# Jinn skills-eval — capability reports
 
-Agent skills with receipts: every skill in this repository links a benchmark
-receipt — a paired comparison against a no-skill baseline (and, for forks, the
-upstream original) on pinned real-world software tasks, with the raw per-task
-results and the rerun script alongside.
+Reproducible, paired measurements of publicly published agent skills. No skill lives here — the
+skill stays the author's, unforked, wherever it already is. This repository holds only the
+reports.
 
-| Skill | Receipt | Measured against | Net |
-|---|---|---|---|
-<!-- one row per published skill; generated from receipts/SUMMARY.md, never hand-written -->
+| Skill | Sha | Measured | Net | Report |
+|---|---|---|---|---|
+<!-- one row per reports/<skill>@<sha>/, generated from the reports index, never hand-written -->
 
-## Install
+## What a capability report is
 
-    npx skills add Jinn-Network/skills
+A capability report (`reports/<skill>@<sha>/report.md`) is a paired comparison: the skill's author
+publishes it, but the number comes from a domain-matched task set, a no-skill baseline, a pinned
+agent configuration, and a deterministic verifier — all included in `data/` next to the report, and
+all rerunnable with the command the report prints. A capability report is public evaluation, not
+certification: the `jinn.receipt` / `jinn.receipt-sha256` metadata keys a skill's frontmatter
+carries are pointers to this report, never proof by themselves. Re-run it, or disagree with the
+task selection and build your own.
 
-## What a receipt is — and is not
+Each report also states the skill's **trigger rate** — whether it actually loaded during the
+measured attempts, distinct from whether it changed the outcome. A null result with a low trigger
+rate reads as *not exercised on this task set*, never as *no effect*; the report says which one
+happened.
 
-A receipt is a reproducible measurement: pinned task list, pinned agent
-configuration, raw outcomes, rerun script (`rig/`). It is not a certification.
-The frontmatter `metadata` keys (`jinn.receipt`, `jinn.receipt-sha256`) are
-pointers to the receipt, never proof by themselves — re-run it, or disagree
-with the task selection and swap your own.
+Every author also receives a private annex, delivered directly and never published here: a
+per-failure-mode diagnosis (never triggered, triggered but vague, triggered and harmful) and
+suggested edits. The annex is how the number moves; the report is only the receipt of where it
+stood.
 
-Skills forked from upstream authors keep their license and attribution; the
-receipt records the upstream commit measured against, and improvements are
-offered back as PRs.
+## How to read one
+
+Start with the fenced summary block at the top of `report.md` — baseline and with-skill resolve
+rates, the paired delta, the Wilson interval, and the trigger rate. The per-task table below it
+breaks the same numbers out by task and repeat. `data/` holds the exact attempts log, run manifest,
+and task set the report was computed from; `rig/` points at the code that computed it.
+
+## Requesting an evaluation or re-evaluation
+
+Open an issue against [`Jinn-Network/mono`](https://github.com/Jinn-Network/mono) naming the skill
+and its repository. If you've already been measured and have since revised the skill, name the
+commit or tag of the revision — re-evaluation runs on tasks the prior diagnosis was never derived
+from, never on the tasks that produced it.
+
+## Versioning
+
+A new measured commit (sha) of a skill gets a new `reports/<skill>@<sha>/` directory. Nothing here
+is ever overwritten, so a report and the exact skill version it measured stay permanently paired.
+`jinn.receipt-sha256` in the skill's own frontmatter is a hash of the report file it points at — if
+the skill's author publishes a newer sha without a matching new report directory here, the badge
+and the metadata go stale and `jinn.receipt-sha256` no longer matches, which is how a stale badge is
+detected.
 
 Published by [Jinn](https://jinn.network), an open agentic knowledge economy.
