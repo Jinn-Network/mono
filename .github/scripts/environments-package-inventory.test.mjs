@@ -11,12 +11,16 @@ const DEPENDENCY_SECTIONS = [
 
 const ENVIRONMENT_PACKAGES = [
   ['record', '@jinn-network/environment-record'],
+  ['verification', '@jinn-network/environment-verification'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/environments; map name -> absolute dir
 // (benchmarking-package-inventory.test.mjs precedent).
 const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
+  ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+  ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
+  ['@jinn-network/trust-testing', join(root, 'packages', 'trust', 'testing')],
 ]);
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -28,6 +32,22 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['record', {
     dependencies: [],
     devDependencies: ['@jinn-network/evidence-protocol'],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
+  // `verification` is tier 3 and takes exactly the two package edges design §3.3 gives it:
+  // the record kind it verifies, and trust/core for DSSE + JCS + hashing. `trust-testing` is
+  // a test-only devDependency: the conformance kit signs with real deterministic keys.
+  // (This map records Jinn dependencies only; `vitest` is an optional peer, asserted below.)
+  ['verification', {
+    dependencies: [
+      '@jinn-network/environment-record',
+      '@jinn-network/trust-core',
+    ],
+    // `trust-resolve` is install-graph only: `trust-testing` is portal-consumed, and a
+    // portal's own resolutions do not apply, so its Jinn dependency must be resolved here.
+    // The source-boundary guard bans importing it from anywhere in this package.
+    devDependencies: ['@jinn-network/trust-resolve', '@jinn-network/trust-testing'],
     optionalDependencies: [],
     peerDependencies: [],
   }],
@@ -107,10 +127,16 @@ test('environments package Jinn dependencies and portal resolutions match the ap
 });
 
 test('every environments package declares Vitest as an exact optional peer where it ships a kit', () => {
-  const manifest = readPackage('record');
-  assert.deepEqual(Object.keys(manifest.exports).sort(), [
-    '.', './fixtures/*', './schemas/*', './testing',
+  const expectedExports = new Map([
+    ['record', ['.', './fixtures/*', './schemas/*', './testing']],
+    ['verification', ['.', './fixtures/*', './testing']],
   ]);
-  assert.equal(manifest.peerDependencies?.vitest, '^4.1.8');
-  assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+  assert.equal(expectedExports.size, ENVIRONMENT_PACKAGES.length);
+  for (const [directory] of ENVIRONMENT_PACKAGES) {
+    const manifest = readPackage(directory);
+    assert.deepEqual(Object.keys(manifest.exports).sort(), expectedExports.get(directory),
+      `${directory} has an unapproved export map`);
+    assert.equal(manifest.peerDependencies?.vitest, '^4.1.8');
+    assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+  }
 });

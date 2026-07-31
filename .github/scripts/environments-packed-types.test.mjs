@@ -12,17 +12,22 @@ const consumerRoot = join(temporaryRoot, 'consumer');
 
 const packages = [
   ['record', '@jinn-network/environment-record'],
+  ['verification', '@jinn-network/environment-verification'],
 ];
 
 const codeEntrypoints = [
   '@jinn-network/environment-record',
   '@jinn-network/environment-record/testing',
+  '@jinn-network/environment-verification',
+  '@jinn-network/environment-verification/testing',
 ];
 
-// `@jinn-network/environment-record` has NO Jinn runtime dependency, so the consumer project
-// needs no packed cross-tree portals. The loop below is kept so the moment this tree grows a
-// cross-tree edge, adding it here is the only change required.
-const CROSS_TREE_PACKAGES = [];
+// `@jinn-network/environment-record` has NO Jinn runtime dependency.
+// `@jinn-network/environment-verification` has one cross-tree edge — `trust-core` — which the
+// consumer project needs packed so the packed type surface resolves.
+const CROSS_TREE_PACKAGES = [
+  ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+];
 
 function run(command, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
