@@ -208,7 +208,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node .github/scripts/publish-stack.mjs --mode stable --release-tag "${RELEASE_TAG}"
+          node .github/scripts/publish-stack.mjs --mode stable --release-tag "${RELEASE_TAG}" --sha "${JINN_BUILD_COMMIT}"
 
       - name: Wait for the platform set on the registry
         shell: bash

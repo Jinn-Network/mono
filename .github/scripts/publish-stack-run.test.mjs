@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { packWave, publishWave, registryDistTag, verifyCoherentSet } from './publish-stack-run.mjs';
+import { packWave, publishWave, registryDistTag, runPublish, verifyCoherentSet } from './publish-stack-run.mjs';
 
 const SHA = 'c'.repeat(40);
 
@@ -129,6 +129,22 @@ test('packWave rejects a tarball whose packed identity disagrees with the plan',
     rmSync(root, { recursive: true, force: true });
     rmSync(tarballsDir, { recursive: true, force: true });
   }
+});
+
+test('runPublish refuses to run without a real commit sha, never substituting the version', async () => {
+  // Regression: the stable publish step invoked the driver with no --sha, and
+  // gitHead: args.sha ?? plan.version silently wrote the semver version string
+  // into every published manifest's gitHead field -- a field whose entire
+  // purpose is to record the source commit.
+  const plan = { waves: [], distTag: 'latest', version: '0.1.0', inSetNames: new Set() };
+  await assert.rejects(
+    runPublish(plan, { repoRoot: '/tmp', npmCommand: 'npm' }),
+    /runPublish requires a 40-character commit sha via --sha, got <missing>/,
+  );
+  await assert.rejects(
+    runPublish(plan, { repoRoot: '/tmp', npmCommand: 'npm', sha: '0.1.0' }),
+    /runPublish requires a 40-character commit sha via --sha, got 0\.1\.0/,
+  );
 });
 
 test('registryDistTag treats empty stdout on a zero exit as "tag not set", not invalid JSON', () => {

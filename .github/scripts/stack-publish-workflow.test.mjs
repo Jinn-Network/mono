@@ -88,8 +88,18 @@ test('the stable lane runs from the protected stable environment', () => {
 });
 
 test('the stable lane derives its version from a stack-v tag', () => {
-  assert.match(workflow, /node \.github\/scripts\/publish-stack\.mjs --mode stable --release-tag "\$\{RELEASE_TAG\}"/);
+  assert.match(workflow, /node \.github\/scripts\/publish-stack\.mjs --mode stable --release-tag "\$\{RELEASE_TAG\}" --sha "\$\{JINN_BUILD_COMMIT\}"/);
   assert.match(workflow, /startsWith\(github\.event\.release\.tag_name, 'stack-v'\)/);
+});
+
+test('the stable publish step passes the peeled release-tag commit as --sha', () => {
+  // Regression: an omitted --sha let runPublish's gitHead fall back to the
+  // semver version string, so every stable-lane manifest claimed
+  // gitHead: "0.1.0" instead of a real commit.
+  const stableAt = workflow.indexOf('name: stack-stable');
+  const publishAt = workflow.indexOf('name: Publish the stable platform set', stableAt);
+  const block = workflow.slice(stableAt, publishAt + 400);
+  assert.match(block, /--mode stable --release-tag "\$\{RELEASE_TAG\}" --sha "\$\{JINN_BUILD_COMMIT\}"/);
 });
 
 test('the stable lane refuses a release tag that is not on origin at the checked-out sha', () => {

@@ -165,7 +165,17 @@ export function verifyCoherentSet(artifacts, options) {
   console.log(`verified coherent platform set ${version} at ${distTag} across ${artifacts.length} packages`);
 }
 
+const COMMIT_SHA = /^[0-9a-f]{40}$/u;
+
 export async function runPublish(plan, args) {
+  // gitHead in the published manifest exists to record the source commit (plan
+  // decision D6). args.sha is undefined whenever the caller forgets --sha (the
+  // stable lane historically did); silently substituting plan.version there would
+  // write a semver string into a field whose entire purpose is a commit sha, so
+  // this refuses instead.
+  if (!COMMIT_SHA.test(String(args.sha))) {
+    throw new Error(`runPublish requires a 40-character commit sha via --sha, got ${args.sha ?? '<missing>'}`);
+  }
   const tarballsDir = mkdtempSync(join(tmpdir(), 'jinn-stack-publish-'));
   const allArtifacts = [];
   try {
@@ -173,7 +183,7 @@ export async function runPublish(plan, args) {
       const artifacts = await packWave(wave, {
         repoRoot: args.repoRoot,
         version: plan.version,
-        gitHead: args.sha ?? plan.version,
+        gitHead: args.sha,
         inSetNames: plan.inSetNames,
         tarballsDir,
       });
