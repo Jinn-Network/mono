@@ -238,6 +238,14 @@ describe("summarizeHealth", () => {
     Object.defineProperty(withHidden, "extra", { enumerable: false, value: "hidden" });
     expect(() => normalizeHealthCheck(withHidden)).toThrow(PluginRuntimeError);
   });
+
+  test("R-C3-61 rejects non-canonical array index keys like 00", () => {
+    const checks = [ok("archive")];
+    Object.assign(checks, { "00": ok("hidden") });
+    expect(() => summarizeHealth("0.1.0", checks)).toThrow(
+      expect.objectContaining({ code: RUNTIME_ERROR_CODES.healthInvalid }),
+    );
+  });
 });
 
 describe("RUNTIME_VERSION", () => {

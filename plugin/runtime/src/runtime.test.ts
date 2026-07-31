@@ -535,4 +535,48 @@ describe("createPluginRuntime", () => {
     await Promise.allSettled([healthPromise, stopPromise]);
     expect(events.indexOf("health-exit")).toBeLessThan(events.indexOf("stop"));
   });
+
+  test("R-C3-57 registers health before hooks and rejects reentrant stop", async () => {
+    const events: string[] = [];
+    let releaseHealth!: () => void;
+    const healthGate = new Promise<void>((resolve) => {
+      releaseHealth = resolve;
+    });
+    let runtime!: ReturnType<typeof createPluginRuntime>;
+    runtime = createPluginRuntime({
+      config,
+      capabilities: [{
+        name: "self-stop",
+        healthChecks: async () => {
+          events.push("health-enter");
+          void runtime.stop().catch((error: unknown) => {
+            const code = error instanceof PluginRuntimeError ? error.code : "unknown";
+            events.push(`stop-rejected:${code}`);
+          });
+          await healthGate;
+          events.push("health-exit");
+          return [];
+        },
+        stop: async () => {
+          events.push("capability-stop");
+        },
+      }],
+    });
+    await runtime.start();
+    const healthPromise = runtime.health();
+    await Promise.resolve();
+    expect(events).toEqual(["health-enter"]);
+    releaseHealth();
+    await healthPromise;
+    expect(events).toEqual(["health-enter", "stop-rejected:runtime-busy", "health-exit"]);
+    await runtime.stop();
+    expect(events).toEqual(["health-enter", "stop-rejected:runtime-busy", "health-exit", "capability-stop"]);
+  });
+
+  test("R-C3-57 rejects new health while stopping", async () => {
+    const runtime = createPluginRuntime({ config });
+    await runtime.start();
+    await runtime.stop();
+    await expect(runtime.health()).rejects.toMatchObject({ code: "runtime-not-started" });
+  });
 });

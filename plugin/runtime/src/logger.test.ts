@@ -337,4 +337,24 @@ describe("createLineLogger", () => {
     createLineLogger("debug", write).debug("deep", deep);
     expect(lines).toHaveLength(1);
   });
+
+  test("R-C3-62 validates hostile input before severity suppression", () => {
+    const { lines, write } = collect();
+    const { proxy, revoke } = Proxy.revocable({ note: "bad" }, {});
+    revoke();
+    expect(() => createLineLogger("warn", write).debug("ignored", proxy)).toThrow(
+      expect.objectContaining({ code: RUNTIME_ERROR_CODES.logInvalid }),
+    );
+    expect(lines).toEqual([]);
+  });
+
+  test("R-C3-61 rejects non-canonical array index keys in log fields", () => {
+    const { lines, write } = collect();
+    const fields: unknown[] = [true];
+    Object.assign(fields, { "00": "hidden" });
+    expect(() => createLineLogger("debug", write).debug("bad", { nested: fields })).toThrow(
+      expect.objectContaining({ code: RUNTIME_ERROR_CODES.logInvalid }),
+    );
+    expect(lines).toEqual([]);
+  });
 });

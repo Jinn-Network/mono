@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { resolveRuntimeConfig } from "./config.js";
+import { resolveRuntimeConfig, ENVIRONMENT_KEYS } from "./config.js";
 import { createLineLogger } from "./logger.js";
 import { createPluginRuntime } from "./runtime.js";
 import { describeUnknownError } from "./safe-error.js";
@@ -23,6 +23,30 @@ const USAGE = [
   "",
   "Environment: JINN_PLUGIN_HOME, JINN_PLUGIN_LOG_LEVEL",
 ].join("\n");
+
+const CONFIG_ENV_KEYS = [ENVIRONMENT_KEYS.home, ENVIRONMENT_KEYS.logLevel] as const;
+
+/** Reads only config keys from the live process environment into an owned snapshot. */
+export function readConfigEnvFromProcess(): Readonly<Record<string, string | undefined>> {
+  const snapshot = Object.create(null) as Record<string, string | undefined>;
+  for (const key of CONFIG_ENV_KEYS) {
+    const value = process.env[key];
+    if (value !== undefined) snapshot[key] = value;
+  }
+  return Object.freeze(snapshot);
+}
+
+/** Owned null-prototype snapshot of only the config keys resolveRuntimeConfig reads. */
+export function buildOwnedEnvSnapshot(
+  rawEnv: Readonly<Record<string, string | undefined>>,
+): Readonly<Record<string, string | undefined>> {
+  const snapshot = Object.create(null) as Record<string, string | undefined>;
+  for (const key of CONFIG_ENV_KEYS) {
+    const value = rawEnv[key];
+    if (value !== undefined) snapshot[key] = value;
+  }
+  return Object.freeze(snapshot);
+}
 
 /**
  * Everything the entry point is allowed to touch, injected so tests drive it without a
@@ -123,7 +147,7 @@ if (isProcessEntry()) {
       process.once("SIGTERM", finish);
     });
 
-  process.exitCode = await main(process.argv.slice(2), process.env, {
+  process.exitCode = await main(process.argv.slice(2), readConfigEnvFromProcess(), {
     writeOut: (line) => process.stdout.write(`${line}\n`),
     writeErr: (line) => process.stderr.write(`${line}\n`),
     homeDirectory: process.env.JINN_PLUGIN_HOME ?? join(homedir(), ".jinn-plugin"),

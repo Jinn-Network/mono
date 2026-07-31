@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import type { CapabilityContext, RuntimeCapability } from "./capability.js";
 import type { RuntimeConfig } from "./config.js";
 import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "./errors.js";
@@ -21,6 +23,8 @@ export interface PluginRuntime {
 }
 
 type RuntimeState = "idle" | "starting" | "running" | "stopping" | "cleanup-required";
+
+const lifecycleContext = new AsyncLocalStorage<{ readonly phase: "health" }>();
 
 function validateCapabilityConfiguration(capabilities: readonly RuntimeCapability[]): void {
   const seen = new Set<string>();
@@ -49,6 +53,15 @@ function safeLogError(log: RuntimeLogger, message: string, fields: Record<string
   }
 }
 
+function rejectReentrantLifecycleTransition(): void {
+  if (lifecycleContext.getStore()?.phase === "health") {
+    throw new PluginRuntimeError(
+      RUNTIME_ERROR_CODES.runtimeBusy,
+      "reentrant lifecycle transition from health",
+    );
+  }
+}
+
 /**
  * The capability container. It owns the lifecycle and nothing else: start in registration
  * order, stop in reverse, fold health checks in registration order.
@@ -62,13 +75,6 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
   const activeCapabilities: RuntimeCapability[] = [];
   let pendingCleanup: RuntimeCapability[] = [];
   const inFlightHealth = new Set<Promise<unknown>>();
-
-  const registerHealthOperation = <T>(operation: Promise<T>): Promise<T> => {
-    inFlightHealth.add(operation);
-    return operation.finally(() => {
-      inFlightHealth.delete(operation);
-    });
-  };
 
   const drainInFlightHealth = async (): Promise<void> => {
     while (inFlightHealth.size > 0) {
@@ -128,8 +134,30 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
     );
   };
 
+  const runHealthBody = async (): Promise<HealthReport> => {
+    const checks: HealthCheck[] = [];
+    for (const capability of capabilities) {
+      if (capability.healthChecks === undefined) continue;
+      try {
+        checks.push(...normalizeHealthChecks(await capability.healthChecks()));
+      } catch (error) {
+        if (isHealthInvalidError(error)) {
+          throw error;
+        }
+        checks.push({
+          name: capability.name,
+          ok: false,
+          detail: `the capability could not report its health: ${describeUnknownError(error)}`,
+          remedy: null,
+        });
+      }
+    }
+    return summarizeHealth(RUNTIME_VERSION, checks);
+  };
+
   return {
     async start(): Promise<void> {
+      rejectReentrantLifecycleTransition();
       if (state === "running") {
         throw new PluginRuntimeError(
           RUNTIME_ERROR_CODES.runtimeAlreadyStarted,
@@ -182,34 +210,40 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
     async health(): Promise<HealthReport> {
       if (state !== "running") {
         throw new PluginRuntimeError(
-          RUNTIME_ERROR_CODES.runtimeNotStarted,
-          "the runtime must be started before it can report health",
+          state === "stopping"
+            ? RUNTIME_ERROR_CODES.runtimeBusy
+            : RUNTIME_ERROR_CODES.runtimeNotStarted,
+          state === "stopping"
+            ? "the runtime is stopping and cannot accept new health checks"
+            : "the runtime must be started before it can report health",
         );
       }
 
-      return registerHealthOperation((async () => {
-        const checks: HealthCheck[] = [];
-        for (const capability of capabilities) {
-          if (capability.healthChecks === undefined) continue;
+      let resolve!: (value: HealthReport) => void;
+      let reject!: (error: unknown) => void;
+      const operation = new Promise<HealthReport>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      inFlightHealth.add(operation);
+
+      queueMicrotask(() => {
+        void lifecycleContext.run({ phase: "health" }, async () => {
           try {
-            checks.push(...normalizeHealthChecks(await capability.healthChecks()));
+            resolve(await runHealthBody());
           } catch (error) {
-            if (isHealthInvalidError(error)) {
-              throw error;
-            }
-            checks.push({
-              name: capability.name,
-              ok: false,
-              detail: `the capability could not report its health: ${describeUnknownError(error)}`,
-              remedy: null,
-            });
+            reject(error);
+          } finally {
+            inFlightHealth.delete(operation);
           }
-        }
-        return summarizeHealth(RUNTIME_VERSION, checks);
-      })());
+        });
+      });
+
+      return operation;
     },
 
     async stop(): Promise<void> {
+      rejectReentrantLifecycleTransition();
       if (state === "idle") return;
       if (state === "starting" || state === "stopping") {
         throw new PluginRuntimeError(

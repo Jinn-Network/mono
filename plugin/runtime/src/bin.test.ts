@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { main } from "./bin.js";
+import { main, buildOwnedEnvSnapshot } from "./bin.js";
 import { RUNTIME_VERSION } from "./version.js";
 
 const io = (untilShutdown: () => Promise<void> = async () => {}) => {
@@ -87,5 +87,17 @@ describe("main", () => {
     const { out, value } = io();
     await expect(main(["--version"], {}, value)).resolves.toBe(0);
     expect(out).toEqual([RUNTIME_VERSION]);
+  });
+
+  test("R-C3-59 buildOwnedEnvSnapshot exposes only config keys and isolates mutation", () => {
+    const raw = { JINN_PLUGIN_HOME: "/a", JINN_PLUGIN_LOG_LEVEL: "info", PATH: "/usr/bin", extra: "x" };
+    const snapshot = buildOwnedEnvSnapshot(raw);
+    expect(Object.getPrototypeOf(snapshot)).toBeNull();
+    expect(Object.keys(snapshot).sort()).toEqual(["JINN_PLUGIN_HOME", "JINN_PLUGIN_LOG_LEVEL"]);
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(() => {
+      (snapshot as Record<string, string>).JINN_PLUGIN_HOME = "/mutated";
+    }).toThrow();
+    expect(raw.JINN_PLUGIN_HOME).toBe("/a");
   });
 });

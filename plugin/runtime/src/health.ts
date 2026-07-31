@@ -3,6 +3,7 @@
 import { types } from "node:util";
 
 import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "./errors.js";
+import { isCanonicalArrayIndexKey } from "./hostile-array.js";
 
 /**
  * One doctor check. `remedy` is `null` when the state is not fixable from this machine —
@@ -99,9 +100,8 @@ function isPlainDenseArray(value: unknown): value is unknown[] {
       healthInvalid("health checks array must not define symbol keys");
     }
     if (key === "length") continue;
-    const numeric = Number(key);
-    if (!Number.isInteger(numeric) || numeric < 0 || numeric >= length) {
-      healthInvalid("health checks array has non-index properties");
+    if (!isCanonicalArrayIndexKey(key, length)) {
+      healthInvalid("health checks array has non-canonical index properties");
     }
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (descriptor === undefined) {

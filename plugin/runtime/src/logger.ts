@@ -3,6 +3,7 @@
 import { types } from "node:util";
 
 import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "./errors.js";
+import { isCanonicalArrayIndexKey } from "./hostile-array.js";
 
 export type LogLevel = "silent" | "error" | "warn" | "info" | "debug";
 
@@ -78,9 +79,8 @@ function isPlainDenseArray(value: unknown[]): void {
       logInvalid("log fields cannot use symbol array keys");
     }
     if (key === "length") continue;
-    const numeric = Number(key);
-    if (!Number.isInteger(numeric) || numeric < 0 || numeric >= length) {
-      logInvalid("log fields cannot use augmented arrays");
+    if (!isCanonicalArrayIndexKey(key, length)) {
+      logInvalid("log fields cannot use non-canonical array index keys");
     }
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (descriptor === undefined) {
@@ -217,8 +217,8 @@ export function createLineLogger(
     if (typeof message !== "string") {
       logInvalid("log message must be a primitive string");
     }
-    if (SEVERITY[entryLevel] > threshold) return;
     const normalized = normalizeLogFields(fields);
+    if (SEVERITY[entryLevel] > threshold) return;
     const record: Record<string, unknown> = { ...normalized };
     record.level = entryLevel;
     record.message = message;
