@@ -4,6 +4,13 @@
  * projection state, and publishes signed announcements into a local filesystem discovery
  * archive. Local-only in stage 1; stage 4 mounts the archive for serving.
  *
+ * `enrich` (finding E20 / close-out plan §C4) is built via `createProjectorEnrich`
+ * (`projector-enrich.ts`) -- it resolves the host-injected `ObservationProjectionContext` for
+ * each decoded event (Submission/Task digest join, deterministic block timestamp, dispatch
+ * context, today-mode delivery correspondence), failing closed (returning `undefined`, which
+ * `tick()` already filters out below) rather than ever fabricating a field. See that module's
+ * header for the full field-sourcing model.
+ *
  * Design decision (§C3): `logSource` is venue-base's own `ChainLogSource`
  * (`packages/marketplace/venue-base/src/log-source/chain-log-source.ts`), consumed directly
  * rather than adapted into a second `{fetchLogs, heads}` shape with its own reorg detection. The
@@ -52,6 +59,11 @@ export interface ProjectorLoopConfig {
   readonly logSource: ChainLogSource;
   readonly cursorStore: ProjectorCursorStore;
   readonly ports: ProjectorPortsInput;
+  /**
+   * Resolves the `ObservationProjectionContext` for a decoded event. Production wiring builds
+   * this via `createProjectorEnrich` (`projector-enrich.ts`); returns `undefined` (dropped, never
+   * fabricated) when the signed record it needs cannot be honestly resolved this tick.
+   */
   readonly enrich: (event: MarketplaceEvent) => Promise<ObservationMarketplaceEvent | undefined>;
   readonly pollIntervalMs: number;
   readonly store: Store;
