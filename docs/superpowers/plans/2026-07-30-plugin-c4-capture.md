@@ -5735,6 +5735,11 @@ that still fails escalates to the operator.
 
 ### Acceptance
 
+**acceptance-complete** (2026-07-31) at exact head `3e1a754dab1613d82e66ddb8f3f2caa1adcf7126`.
+Scoped wave-2 rereview of C4-W1-1..3: **CLEAN**. PR comment:
+https://github.com/Jinn-Network/mono/pull/2342#issuecomment-5147373301
+Named residuals (F-C4-4/5/6, F-C4-T13-2 until C7, packed-types env) deferred; do not block dependents.
+
 ### Red / Green
 
 - **C4-W1-1 Red:** trust-core built after the evidence loop in `plugin-tree-ci.yml` (exact-head `da9f57d57`) — trajectory build fails `Cannot find module '@jinn-network/trust-core'`
