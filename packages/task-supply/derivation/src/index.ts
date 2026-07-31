@@ -14,3 +14,10 @@ export {
   toBareHex,
 } from "./digest.js";
 export type { Sha256Digest } from "./digest.js";
+export {
+  SOURCE_COMMITMENT_RULE,
+  computeSourceCommitment,
+  sourceCommitmentPreImage,
+  statementDigest,
+} from "./source-commitment.js";
+export type { UpstreamIdentity } from "./source-commitment.js";
