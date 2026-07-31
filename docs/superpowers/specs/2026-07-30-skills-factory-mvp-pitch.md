@@ -2,6 +2,9 @@
 
 - **Date:** 2026-07-30
 - **Status:** draft copy for review; not published
+- **Superseded:** by the [v0.2 amendment](2026-07-30-skills-factory-mvp-design.md) to the design doc
+  (author-first pivot, 2026-07-31) — this pitch assumes the fork-publishing model that amendment
+  drops; rewrite pending post-pilot.
 - **Audience:** a technical reader who installs agent skills and has never heard of Jinn
 - **Design:** [`2026-07-30-skills-factory-mvp-design.md`](2026-07-30-skills-factory-mvp-design.md)
 - **Voice:** per [`BRAND.md`](../../../BRAND.md) — lead from the gap and the construction, antagonist
