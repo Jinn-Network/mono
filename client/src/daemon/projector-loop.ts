@@ -143,7 +143,10 @@ export class ProjectorLoop {
       headJson: nextHeadJson,
       stateJson: serializeProjectionState(transition.state),
     };
-    this.config.cursorStore.write(nextCursor);
+    // Cursor + state + every observation this tick projected all move together (finding E20 /
+    // close-out plan §C5) -- previously `transition.observations` was computed and discarded, so
+    // `BaseVenueConfig.observations` had nothing durable to read from.
+    this.config.cursorStore.write(nextCursor, transition.observations);
 
     return {
       announcements: result.announcements.length,

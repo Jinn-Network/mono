@@ -7,7 +7,7 @@ import type {
   EnvelopeProjectionQuery,
 } from '../corpus/types.js';
 import { ENGAGEMENT_LEDGER_SCHEMA } from '../daemon/engagement-ledger.js';
-import { PROJECTOR_CURSOR_SCHEMA } from '../daemon/projector-cursor.js';
+import { PROJECTOR_CURSOR_SCHEMA, PROJECTOR_OBSERVATIONS_SCHEMA } from '../daemon/projector-cursor.js';
 import { TASK_RUNS_SCHEMA, TaskRunPersistence } from '../harnesses/engine/persistence.js';
 import { PHASE_RUNS_SCHEMA, PhaseRunStore } from './phase-runs.js';
 import type { TaskRunReadModel } from '../types/task-run-read-model.js';
@@ -605,6 +605,7 @@ export class Store {
     this.db.exec(PHASE_RUNS_SCHEMA);
     this.db.exec(ENGAGEMENT_LEDGER_SCHEMA);
     this.db.exec(PROJECTOR_CURSOR_SCHEMA);
+    this.db.exec(PROJECTOR_OBSERVATIONS_SCHEMA);
     this.ensureArtifactsTaskColumns();
     this.ensureRewardClaimsTxIndex();
     this.ensureNetworkArtifactsPeerCatalogId();

@@ -302,4 +302,40 @@ describe('projector loop', () => {
     const result = await projector.tick();
     expect(result.announcements).toBe(0);
   });
+
+  // Finding E20: `ProjectorLoop.tick()` computed `transition.observations` and discarded it, so
+  // `BaseVenueConfig.observations` (venue-base's read of "every observation ever projected") had
+  // nothing durable to read from and was stubbed to `async () => []`. Close-out plan §C5.
+  it('persists transition.observations durably alongside the cursor on each tick', async () => {
+    const chain = buildScriptedChain();
+    chain.mine(120);
+    chain.setFinalized(120n);
+    chain.addLog(120n, taskCreatedLog());
+
+    const { projector, cursorStore } = loop({ chain, state });
+    const result = await projector.tick();
+
+    expect(result.announcements).toBe(1);
+    const observations = cursorStore.readObservations();
+    expect(observations).toHaveLength(1);
+    expect(observations[0]!.type).toBe('network.jinn.task-execution.submission-accepted.v1');
+    expect(observations[0]!.subject).toBe('urn:uuid:11111111-1111-4111-8111-111111111111');
+  });
+
+  it('accumulates observations across ticks in projection order, append-only', async () => {
+    const chain = buildScriptedChain();
+    chain.mine(120);
+    chain.setFinalized(120n);
+    chain.addLog(120n, taskCreatedLog());
+
+    const { projector, cursorStore } = loop({ chain, state });
+    await projector.tick();
+    expect(cursorStore.readObservations()).toHaveLength(1);
+
+    // A tick with no new logs must not touch (let alone clear) what is already durable.
+    chain.mine(5);
+    chain.setFinalized(125n);
+    await projector.tick();
+    expect(cursorStore.readObservations()).toHaveLength(1);
+  });
 });
