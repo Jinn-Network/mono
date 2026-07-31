@@ -6966,3 +6966,8 @@ decided once rather than negotiated at integration.
 
 *Raised:* Task 11 implementation (2026-07-31).
 *Disposition:* build it. Plan harness assumed zero-arg corpus + `relevanceIndex()`. Live harness: real capture with test signer, empty in-memory index, fail-closed retrieval, allow-all admission/classifier; `createMcpServer` + InMemoryTransport. Concurrent session opens on one home share one capture capability (separate instances raced on retention recovery). Feed lines use C4 integration shape. Guard allowlist updates for `bin-node-fs.ts` and packed-types portals bundled.
+
+**F-C7-T12-1 — Plan is_installed_plugin True test was non-functional; replaced with clear layout.**
+
+*Raised:* Task 12 implementation (2026-07-31).
+*Disposition:* build it (test adapted). Plan monkeypatch did not place plugin_dir under HERMES_HOME/plugins. Tests now assert False for repo checkout and True when plugin_dir is under tmp_path/plugins/jinn. Added `__init__.py` for conftest package load.
