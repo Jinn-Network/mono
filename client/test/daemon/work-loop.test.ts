@@ -445,4 +445,71 @@ describe('work loop', () => {
       reason: 'ai-units-capped',
     });
   });
+
+  // Finding E39: `WorkLoopOutcome`s were computed and discarded every tick, leaving an operator
+  // (or a diagnostic session) with no way to see why an announced card was not claimed. These
+  // tests cover the permanent fix: a structured per-tick log line naming each card's outcome,
+  // deduped so a steady-state loop does not spam the same line every poll.
+  describe('per-tick outcome logging (E39)', () => {
+    it('names each card outcome in a structured log line', async () => {
+      const info = vi.fn();
+      const { loop } = build({ claimGate: closedGate(), logger: { info, warn: vi.fn() } });
+
+      await loop.tick();
+
+      expect(info).toHaveBeenCalledOnce();
+      const payload = JSON.parse(info.mock.calls[0]![0] as string) as {
+        component: string;
+        cards: { card: string; workKind: string; reason: string }[];
+      };
+      expect(payload.component).toBe('work');
+      expect(payload.cards).toEqual([
+        { card: SUBMISSION_URI, workKind: WORK_KIND, reason: 'gate-closed' },
+      ]);
+    });
+
+    it('does not re-log an unchanged outcome set on the next tick', async () => {
+      const info = vi.fn();
+      const { loop } = build({ claimGate: closedGate(), logger: { info, warn: vi.fn() } });
+
+      await loop.tick();
+      await loop.tick();
+
+      expect(info).toHaveBeenCalledOnce();
+    });
+
+    it('re-logs once the outcome set changes', async () => {
+      const info = vi.fn();
+      let open = false;
+      const flippingGate: ClaimGate = {
+        isOpen: () => open,
+        waitUntilOpen: async () => undefined,
+      };
+      const { loop } = build({ claimGate: flippingGate, logger: { info, warn: vi.fn() } });
+
+      await loop.tick();
+      open = true;
+      await loop.tick();
+
+      expect(info).toHaveBeenCalledTimes(2);
+      const second = JSON.parse(info.mock.calls[1]![0] as string) as {
+        cards: { reason: string }[];
+      };
+      expect(second.cards[0]!.reason).not.toBe('gate-closed');
+    });
+
+    it('logs the zero-cards case, distinguishing an empty archive from a skipped card', async () => {
+      const info = vi.fn();
+      const { loop } = build({
+        archive: { since: async () => [] },
+        logger: { info, warn: vi.fn() },
+      });
+
+      await loop.tick();
+
+      expect(info).toHaveBeenCalledOnce();
+      const payload = JSON.parse(info.mock.calls[0]![0] as string) as { cards: unknown[] };
+      expect(payload.cards).toEqual([]);
+    });
+  });
 });

@@ -140,8 +140,36 @@ function idempotencyKeyFor(chain: { chainId: number; taskCoordinator: string }, 
   return `${chain.chainId}:${chain.taskCoordinator}:${taskId.toString()}`;
 }
 
+/**
+ * Renders a `WorkLoopOutcome` down to one diagnostic string. Skip reasons pass through as-is;
+ * pipeline outcomes are prefixed `pipeline:<kind>` and, for the two kinds that carry a
+ * machine-readable reason/detail beyond their `kind` tag, that reason is appended -- this is what
+ * makes `not-claimed` (predicate-declined / caps-exceeded / wiring-missing / ...) legible instead
+ * of collapsing to the same opaque "pipeline:not-claimed" line regardless of cause.
+ */
+function describeOutcome(outcome: WorkLoopOutcome): string {
+  if (outcome.kind === 'skipped') return outcome.reason;
+  const result = outcome.result;
+  switch (result.kind) {
+    case 'not-claimed':
+      return `pipeline:not-claimed:${result.reason}`;
+    case 'claim-refused':
+      return `pipeline:claim-refused:${result.reason}`;
+    case 'finality-failed':
+      return `pipeline:finality-failed:${result.finalityKind}`;
+    case 'submit-rejected':
+      return `pipeline:submit-rejected:${result.detail}`;
+    case 'delivery-wait-failed':
+      return `pipeline:delivery-wait-failed:${result.waitKind}`;
+    default:
+      return `pipeline:${result.kind}`;
+  }
+}
+
 export class WorkLoop {
   private stopped = false;
+  /** Last tick's serialized per-card outcome summary, for the log-on-change dedupe (E39). */
+  private lastLoggedOutcomeSummary: string | undefined;
 
   constructor(private readonly config: WorkLoopConfig) {}
 
@@ -154,11 +182,52 @@ export class WorkLoop {
     for (const card of cards) {
       results.push({ card: card.chain.submission, outcome: await this.processCard(card) });
     }
+    this.logOutcomes(cards, results);
     return results;
   }
 
   private logger(): { info(m: string): void; warn(m: string): void } {
     return this.config.logger ?? noopLogger;
+  }
+
+  /**
+   * Finding E39: `WorkLoopOutcome`s were computed and thrown away every tick, so an operator (or
+   * this diagnostic session) debugging "why didn't I claim?" had nothing to read. This is the
+   * permanent fix: one structured log line per tick naming every announced card's outcome by card
+   * identity + workKind, including the zero-cards case (itself diagnostic -- it pins the refusal
+   * to "the archive subscription produced nothing" rather than "the work loop skipped it").
+   *
+   * Dedupe: log only when the serialized outcome set differs from the last logged one. A steady
+   * daemon polling every few seconds against an unchanged archive would otherwise repeat the same
+   * line forever; this mirrors `SkipLogDeduper`'s log-on-transition-only pattern already used by
+   * the engine-watcher loop (`skip-log-dedup.ts`) rather than inventing a second convention. A
+   * bounded-interval re-log (e.g. "at least once a minute even if unchanged") was considered and
+   * rejected: a steady-state refusal needs exactly one clear line, not a heartbeat of copies -- an
+   * operator can already tell the loop is alive from other loops' liveness signals.
+   */
+  private logOutcomes(
+    cards: readonly AnnouncedSubmissionCard[],
+    results: readonly { card: string; outcome: WorkLoopOutcome }[],
+  ): void {
+    const summary = results.map((r, i) => ({
+      card: r.card,
+      workKind: cards[i]?.facts.workKind,
+      reason: describeOutcome(r.outcome),
+    }));
+    const serialized = JSON.stringify(summary);
+    if (serialized === this.lastLoggedOutcomeSummary) return;
+    this.lastLoggedOutcomeSummary = serialized;
+    const payload = {
+      ts: new Date().toISOString(),
+      level: 'info',
+      component: 'work',
+      msg:
+        summary.length === 0
+          ? 'no announced cards this tick'
+          : `${summary.length} announced card(s) this tick`,
+      cards: summary,
+    };
+    this.logger().info(JSON.stringify(payload));
   }
 
   private async processCard(card: AnnouncedSubmissionCard): Promise<WorkLoopOutcome> {
