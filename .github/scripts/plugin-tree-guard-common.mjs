@@ -25,6 +25,7 @@ export const APPROVED_RUNTIME_DEPENDENCIES = Object.freeze({
   '@jinn-network/record-discovery-client': '0.1.0',
   '@jinn-network/record-discovery-protocol': '0.1.0',
   '@jinn-network/trust-core': '0.1.0',
+  '@modelcontextprotocol/sdk': '1.29.0',
   'better-sqlite3': '13.0.1',
   zod: '4.4.3',
 });

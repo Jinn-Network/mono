@@ -292,8 +292,12 @@ test('undeclared third-party runtime dependencies and malformed versions are rej
     [],
   );
   assert.deepEqual(
+    undeclaredRuntimeDependencies({ dependencies: { '@modelcontextprotocol/sdk': '1.29.0' } }),
+    [],
+  );
+  assert.deepEqual(
     undeclaredRuntimeDependencies({ optionalDependencies: { '@modelcontextprotocol/sdk': '1.0.0' } }),
-    ['optionalDependencies:@modelcontextprotocol/sdk'],
+    [],
   );
   assert.deepEqual(
     undeclaredRuntimeDependencies({ peerDependencies: { '@noble/hashes': '1.0.0' } }),
