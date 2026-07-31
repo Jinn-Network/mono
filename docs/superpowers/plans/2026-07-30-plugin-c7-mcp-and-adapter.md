@@ -6961,3 +6961,8 @@ decided once rather than negotiated at integration.
 
 *Raised:* Task 10 implementation (2026-07-31).
 *Disposition:* build it. Session role requires `BinIo.captureSigner` or serve exits 1 naming F-C4-T13-2. Tools role needs no signer. Health never starts MCP stdio. Process entry still does not inject ambient signing authority.
+
+**F-C7-T11-1 — Concurrency harness uses minimal deps + shared capture per home.**
+
+*Raised:* Task 11 implementation (2026-07-31).
+*Disposition:* build it. Plan harness assumed zero-arg corpus + `relevanceIndex()`. Live harness: real capture with test signer, empty in-memory index, fail-closed retrieval, allow-all admission/classifier; `createMcpServer` + InMemoryTransport. Concurrent session opens on one home share one capture capability (separate instances raced on retention recovery). Feed lines use C4 integration shape. Guard allowlist updates for `bin-node-fs.ts` and packed-types portals bundled.
