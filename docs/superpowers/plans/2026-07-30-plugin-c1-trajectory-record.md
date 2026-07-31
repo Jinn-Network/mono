@@ -2227,7 +2227,7 @@ git commit -m "feat(evidence-trajectory): the record conformance kit"
 - Consumes: `TrajectoryRecordSchema`.
 - Produces: `schemas/trajectory.schema.json`, published at the `./schemas/*` subpath — the artifact that makes "a third party can verify without running Jinn code" mechanical rather than aspirational.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/schema-parity.test.ts`:
 
@@ -2269,12 +2269,12 @@ describe("published JSON Schema", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trajectory && yarn test`
 Expected: FAIL — `schemas/trajectory.schema.json` does not exist.
 
-- [ ] **Step 3: Write the generator**
+- [x] **Step 3: Write the generator**
 
 `scripts/generate-schemas.mjs`:
 
@@ -2332,12 +2332,12 @@ if (process.argv.includes("--write")) {
 }
 ```
 
-- [ ] **Step 4: Generate the schema and run the test**
+- [x] **Step 4: Generate the schema and run the test**
 
 Run: `cd packages/evidence/trajectory && yarn generate:schemas && yarn test && yarn typecheck`
 Expected: `schema written`; PASS (4 new tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/evidence/trajectory
