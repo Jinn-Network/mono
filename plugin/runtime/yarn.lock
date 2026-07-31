@@ -196,11 +196,82 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@jinn-network/evidence-catalog-sqlite@portal:../../packages/evidence/catalog-sqlite::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-catalog-sqlite@portal:../../packages/evidence/catalog-sqlite::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-discovery": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+    better-sqlite3: "npm:13.0.1"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/evidence-discovery@portal:../../packages/evidence/discovery::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-discovery@portal:../../packages/evidence/discovery::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/evidence-protocol@portal:../../packages/evidence/protocol::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-protocol@portal:../../packages/evidence/protocol::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  dependencies:
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/evidence-repository@portal:../../packages/evidence/repository::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-repository@portal:../../packages/evidence/repository::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/evidence-retrieval@portal:../../packages/evidence/retrieval::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-retrieval@portal:../../packages/evidence/retrieval::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-discovery": "npm:0.1.0"
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
 "@jinn-network/plugin-runtime@workspace:.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/plugin-runtime@workspace:."
   dependencies:
+    "@jinn-network/evidence-catalog-sqlite": "npm:0.1.0"
+    "@jinn-network/evidence-discovery": "npm:0.1.0"
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+    "@jinn-network/evidence-retrieval": "npm:0.1.0"
+    "@jinn-network/record-discovery-client": "npm:0.1.0"
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/trust-core": "npm:0.1.0"
+    "@types/better-sqlite3": "npm:7.6.11"
     "@types/node": "npm:22.20.1"
+    better-sqlite3: "npm:13.0.1"
     typescript: "npm:5.9.3"
     vitest: "npm:4.1.10"
     zod: "npm:4.4.3"
@@ -209,10 +280,56 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@jinn-network/record-discovery-client@portal:../../packages/discovery/client::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-client@portal:../../packages/discovery/client::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  dependencies:
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/trust-core": "npm:0.1.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/record-discovery-protocol@portal:../../packages/discovery/protocol::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-protocol@portal:../../packages/discovery/protocol::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  dependencies:
+    "@jinn-network/trust-core": "npm:0.1.0"
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/trust-core@portal:../../packages/trust/core::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/trust-core@portal:../../packages/trust/core::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  dependencies:
+    "@noble/curves": "npm:^2.0.0"
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
 "@jridgewell/sourcemap-codec@npm:^1.5.5":
   version: 1.5.5
   resolution: "@jridgewell/sourcemap-codec@npm:1.5.5"
   checksum: 10c0/f9e538f302b63c0ebc06eecb1dd9918dd4289ed36147a0ddce35d6ea4d7ebbda243cda7b2213b6a5e1d8087a298d5cf630fb2bd39329cdecb82017023f6081a0
+  languageName: node
+  linkType: hard
+
+"@noble/curves@npm:^2.0.0":
+  version: 2.2.0
+  resolution: "@noble/curves@npm:2.2.0"
+  dependencies:
+    "@noble/hashes": "npm:2.2.0"
+  checksum: 10c0/e545d3bb03ebedd5c04c2cab81342d64f5ce8a4c1019cfe207f3dc69174bc0ad7cfb50effc31bfa8616b8340900f445dd053da7454190428857c4eedd3b51413
+  languageName: node
+  linkType: hard
+
+"@noble/hashes@npm:2.2.0, @noble/hashes@npm:^2.2.0":
+  version: 2.2.0
+  resolution: "@noble/hashes@npm:2.2.0"
+  checksum: 10c0/cad8630c504d6b9271984f685cd0af9101b40988fc2dfbe17ccdf068a9941f95cc5c9957d89e9ca4b7ca94c15cb35f93510c5d53a09fbcc83ee503b93d0a1034
   languageName: node
   linkType: hard
 
@@ -398,6 +515,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/better-sqlite3@npm:7.6.11":
+  version: 7.6.11
+  resolution: "@types/better-sqlite3@npm:7.6.11"
+  dependencies:
+    "@types/node": "npm:*"
+  checksum: 10c0/6a7b8e5765f872404242ff9626edf4b4dd7974047144ba7254a59f4f1c196d05f8001323d0b526e8bbb3842bf541e341d74ca0164e50bd38fceaf3ef5d2a673d
+  languageName: node
+  linkType: hard
+
 "@types/chai@npm:^5.2.2":
   version: 5.2.3
   resolution: "@types/chai@npm:5.2.3"
@@ -419,6 +545,15 @@ __metadata:
   version: 1.0.9
   resolution: "@types/estree@npm:1.0.9"
   checksum: 10c0/3ad3286ca2988cd550dafb8f2ad599c8474868e954fa601a36655bdfefd8039f7c714b8c1c7f2ae219ffbd58bd4660e66fa7479a0120fc02d4777057d4865387
+  languageName: node
+  linkType: hard
+
+"@types/node@npm:*":
+  version: 26.1.2
+  resolution: "@types/node@npm:26.1.2"
+  dependencies:
+    undici-types: "npm:~8.3.0"
+  checksum: 10c0/a45503222c7db8f374afd5c9381db63dd95b6b1f703abea0890dd3d4a09eeb41da489e08a1a45baf18fe89fb77fbf310ff2789f680c490b04dafc41a60800a86
   languageName: node
   linkType: hard
 
@@ -524,6 +659,16 @@ __metadata:
   version: 2.0.1
   resolution: "assertion-error@npm:2.0.1"
   checksum: 10c0/bbbcb117ac6480138f8c93cf7f535614282dea9dc828f540cdece85e3c665e8f78958b96afac52f29ff883c72638e6a87d469ecc9fe5bc902df03ed24a55dba8
+  languageName: node
+  linkType: hard
+
+"better-sqlite3@npm:13.0.1":
+  version: 13.0.1
+  resolution: "better-sqlite3@npm:13.0.1"
+  dependencies:
+    node-addon-api: "npm:^8.0.0"
+    node-gyp: "npm:latest"
+  checksum: 10c0/dab0d720e7b215490d68733c657de75f6fcffe1ce61d737ace9d2f195d02e90be9f19ced28f407247237aad7a5a371e044e601df9caa9d5617cff6a7a756ede5
   languageName: node
   linkType: hard
 
@@ -750,6 +895,15 @@ __metadata:
   bin:
     nanoid: bin/nanoid.cjs
   checksum: 10c0/bbf2dcffe22d2b62d16de2711752070b539c0f644c7916f823ad6521986b2078cbe524f2d6240f58c46e9141ea0c7b87a029e100c0f7f175228cacaf30e41bba
+  languageName: node
+  linkType: hard
+
+"node-addon-api@npm:^8.0.0":
+  version: 8.9.1
+  resolution: "node-addon-api@npm:8.9.1"
+  dependencies:
+    node-gyp: "npm:latest"
+  checksum: 10c0/189160497de690479030b7b2f5641c38ffab8601c2ada6fcb8fe3718baf14af51d651528a49ec58de5dd602ff7858459d13facb71914669106f2c6cc6d9d50a5
   languageName: node
   linkType: hard
 
@@ -1025,6 +1179,13 @@ __metadata:
   version: 6.21.0
   resolution: "undici-types@npm:6.21.0"
   checksum: 10c0/c01ed51829b10aa72fc3ce64b747f8e74ae9b60eafa19a7b46ef624403508a54c526ffab06a14a26b3120d055e1104d7abe7c9017e83ced038ea5cf52f8d5e04
+  languageName: node
+  linkType: hard
+
+"undici-types@npm:~8.3.0":
+  version: 8.3.0
+  resolution: "undici-types@npm:8.3.0"
+  checksum: 10c0/c8aa7e2fbebfce519654dafadc0ece59be888d2ccaf180fb4495da875e7b536d2456345c384069c7e6f3e9c9ab7435f074957da306f142343eee86ff8048855a
   languageName: node
   linkType: hard
 

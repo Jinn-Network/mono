@@ -48,9 +48,25 @@ const SIBLING_TREE_DIRS = new Map([
 
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['runtime', {
-    dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [],
+    dependencies: [
+      '@jinn-network/evidence-catalog-sqlite',
+      '@jinn-network/evidence-discovery',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/evidence-repository',
+      '@jinn-network/evidence-retrieval',
+      '@jinn-network/record-discovery-client',
+      '@jinn-network/record-discovery-protocol',
+      '@jinn-network/trust-core',
+    ],
+    devDependencies: [],
+    optionalDependencies: [],
+    peerDependencies: [],
   }],
 ]);
+
+const COMPLETE_RUNTIME_DEPENDENCIES = { ...APPROVED_RUNTIME_DEPENDENCIES };
+const COMPLETE_RUNTIME_DEV_DEPENDENCIES = { ...APPROVED_RUNTIME_DEV_DEPENDENCIES };
+const COMPLETE_RUNTIME_RESOLUTIONS = { ...APPROVED_RUNTIME_RESOLUTIONS };
 
 function jinnDependencyNames(manifest, section) {
   return Object.keys(manifest[section] ?? {})
@@ -193,16 +209,24 @@ test('closed-world dependency and resolution maps reject undeclared and ranged e
     ['devDependencies:typescript=^5.9.3'],
   );
   assert.deepEqual(
-    resolutionViolations({ resolutions: { vite: '^6.4.3' } }, APPROVED_RUNTIME_RESOLUTIONS),
+    resolutionViolations(
+      { resolutions: { ...COMPLETE_RUNTIME_RESOLUTIONS, vite: '^6.4.3' } },
+      APPROVED_RUNTIME_RESOLUTIONS,
+    ),
     ['resolutions:vite=^6.4.3'],
   );
+  const { vite: _vite, ...resolutionsWithoutVite } = COMPLETE_RUNTIME_RESOLUTIONS;
   assert.deepEqual(
-    resolutionViolations({ resolutions: {} }, APPROVED_RUNTIME_RESOLUTIONS),
+    resolutionViolations({ resolutions: resolutionsWithoutVite }, APPROVED_RUNTIME_RESOLUTIONS),
     ['resolutions:vite=<missing>'],
   );
   assert.deepEqual(
-    unconsumedApprovedEntries({ devDependencies: { typescript: '5.9.3' } }, APPROVED_RUNTIME_DEV_DEPENDENCIES, 'devDependencies'),
-    ['devDependencies:@types/node', 'devDependencies:vitest'],
+    unconsumedApprovedEntries(
+      { devDependencies: { typescript: '5.9.3' } },
+      APPROVED_RUNTIME_DEV_DEPENDENCIES,
+      'devDependencies',
+    ),
+    ['devDependencies:@types/better-sqlite3', 'devDependencies:@types/node', 'devDependencies:vitest'],
   );
 });
 
@@ -217,19 +241,18 @@ test('dependency version probes reject wrong external, sibling, and portal forms
   );
   assert.deepEqual(
     unconsumedApprovedEntries({ dependencies: {} }, APPROVED_RUNTIME_DEPENDENCIES, 'dependencies'),
-    ['dependencies:zod'],
+    Object.keys(APPROVED_RUNTIME_DEPENDENCIES)
+      .map((name) => `dependencies:${name}`)
+      .sort(compareCodeUnit),
   );
 });
 
 test('R-C3-63 rejects duplicate and ranged entries in every dependency section', () => {
-  const completeDev = {
-    '@types/node': '22.20.1',
-    typescript: '5.9.3',
-    vitest: '4.1.10',
-  };
+  const completeDev = { ...COMPLETE_RUNTIME_DEV_DEPENDENCIES };
+  const completeDeps = { ...COMPLETE_RUNTIME_DEPENDENCIES };
   assert.deepEqual(
     validateExactDependencySections({
-      dependencies: { zod: '4.4.3' },
+      dependencies: completeDeps,
       devDependencies: completeDev,
       optionalDependencies: { zod: '4.4.3' },
     }),
@@ -237,7 +260,7 @@ test('R-C3-63 rejects duplicate and ranged entries in every dependency section',
   );
   assert.deepEqual(
     validateExactDependencySections({
-      dependencies: { zod: '4.4.3' },
+      dependencies: completeDeps,
       devDependencies: completeDev,
       peerDependencies: { zod: '^4.4.3' },
     }),
@@ -245,7 +268,7 @@ test('R-C3-63 rejects duplicate and ranged entries in every dependency section',
   );
   assert.deepEqual(
     validateExactDependencySections({
-      dependencies: { zod: '^4.4.3' },
+      dependencies: { ...completeDeps, zod: '^4.4.3' },
       devDependencies: completeDev,
     }),
     ['dependencies:zod=^4.4.3'],

@@ -12,11 +12,21 @@ const BUILD_ARTIFACTS = new Set(['node_modules', 'dist', 'coverage', '.git']);
 
 /** Exact install-time external dependency versions approved for C3 runtime. */
 export const APPROVED_RUNTIME_DEPENDENCIES = Object.freeze({
+  '@jinn-network/evidence-catalog-sqlite': '0.1.0',
+  '@jinn-network/evidence-discovery': '0.1.0',
+  '@jinn-network/evidence-protocol': '0.1.0',
+  '@jinn-network/evidence-repository': '0.1.0',
+  '@jinn-network/evidence-retrieval': '0.1.0',
+  '@jinn-network/record-discovery-client': '0.1.0',
+  '@jinn-network/record-discovery-protocol': '0.1.0',
+  '@jinn-network/trust-core': '0.1.0',
+  'better-sqlite3': '13.0.1',
   zod: '4.4.3',
 });
 
 /** Exact devDependency versions the guards version-control for plugin/runtime. */
 export const APPROVED_RUNTIME_DEV_DEPENDENCIES = Object.freeze({
+  '@types/better-sqlite3': '7.6.11',
   '@types/node': '22.20.1',
   typescript: '5.9.3',
   vitest: '4.1.10',
@@ -24,6 +34,14 @@ export const APPROVED_RUNTIME_DEV_DEPENDENCIES = Object.freeze({
 
 /** Exact resolutions the guards version-control for plugin/runtime. */
 export const APPROVED_RUNTIME_RESOLUTIONS = Object.freeze({
+  '@jinn-network/evidence-catalog-sqlite': 'portal:../../packages/evidence/catalog-sqlite',
+  '@jinn-network/evidence-discovery': 'portal:../../packages/evidence/discovery',
+  '@jinn-network/evidence-protocol': 'portal:../../packages/evidence/protocol',
+  '@jinn-network/evidence-repository': 'portal:../../packages/evidence/repository',
+  '@jinn-network/evidence-retrieval': 'portal:../../packages/evidence/retrieval',
+  '@jinn-network/record-discovery-client': 'portal:../../packages/discovery/client',
+  '@jinn-network/record-discovery-protocol': 'portal:../../packages/discovery/protocol',
+  '@jinn-network/trust-core': 'portal:../../packages/trust/core',
   vite: '6.4.3',
 });
 

@@ -56,6 +56,13 @@ jobs:
       # C4-C7 add a "Build cross-tree portal dependencies from source" step here, one
       # `(cd <package> && yarn install --immutable && yarn build)` line per portal
       # dependency, matching benchmarking-ci.yml.
+      - name: Build cross-tree portal dependencies from source
+        run: |
+          for pkg in trust/core discovery/protocol discovery/client \
+                     evidence/protocol evidence/repository evidence/discovery \
+                     evidence/catalog-sqlite evidence/retrieval; do
+            (cd "packages/$pkg" && yarn install --immutable && yarn build)
+          done
       - name: Verify Plugin Runtime
         working-directory: plugin/runtime
         run: |

@@ -232,12 +232,24 @@ test('undeclared third-party runtime dependencies and malformed versions are rej
     ['dependencies:lodash'],
   );
   assert.deepEqual(
-    undeclaredRuntimeDependencies({ dependencies: { 'better-sqlite3': '12.0.0' } }),
-    ['dependencies:better-sqlite3'],
+    undeclaredRuntimeDependencies({ dependencies: { 'better-sqlite3': '13.0.1' } }),
+    [],
   );
   assert.deepEqual(
-    undeclaredRuntimeDependencies({ dependencies: { 'better-sqlite3': '^12.0.0' } }),
-    ['dependencies:better-sqlite3'],
+    exactVersionViolations(
+      { dependencies: { 'better-sqlite3': '12.0.0' } },
+      APPROVED_RUNTIME_DEPENDENCIES,
+      'dependencies',
+    ),
+    ['dependencies:better-sqlite3=12.0.0'],
+  );
+  assert.deepEqual(
+    exactVersionViolations(
+      { dependencies: { 'better-sqlite3': '^12.0.0' } },
+      APPROVED_RUNTIME_DEPENDENCIES,
+      'dependencies',
+    ),
+    ['dependencies:better-sqlite3=^12.0.0'],
   );
   assert.deepEqual(
     undeclaredRuntimeDependencies({ optionalDependencies: { zod: '4.4.3' } }),
@@ -251,7 +263,7 @@ test('undeclared third-party runtime dependencies and malformed versions are rej
     undeclaredRuntimeDependencies({ peerDependencies: { '@noble/hashes': '1.0.0' } }),
     ['peerDependencies:@noble/hashes'],
   );
-  for (const pkg of PERMITTED_PACKAGES.filter((name) => name !== 'zod')) {
+  for (const pkg of PERMITTED_PACKAGES.filter((name) => !(name in APPROVED_RUNTIME_DEPENDENCIES))) {
     assert.deepEqual(
       undeclaredRuntimeDependencies({ dependencies: { [pkg]: '1.0.0' } }),
       [`dependencies:${pkg}`],
