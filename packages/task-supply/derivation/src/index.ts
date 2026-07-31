@@ -41,3 +41,5 @@ export type {
   DerivationStrategy,
   StrategyDeps,
 } from "./strategy.js";
+export { buildCandidateEvaluationSpec, buildSealedTask } from "./seal-pair.js";
+export type { SealedEvaluationSpec, SealedTask } from "./seal-pair.js";
