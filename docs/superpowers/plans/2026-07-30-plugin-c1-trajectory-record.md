@@ -3234,3 +3234,43 @@ required public case IDs (78 total); updated independent pin digest
 All six rows move from pending to commit SHA + exact red/green probe evidence only after
 red→green verification. Restack + exact-head Evidence CI confirmation required before
 handoff. L4 remains external/`not-evaluated`.
+
+## 2026-07-31 fifth exact-head whole-component review resolution
+
+Append-only after C1-R41–R46. Ratified law unchanged. Exact-probe-first: reproduce
+each reviewer probe RED before implementation; green exact probe + packed-public
+counterpart where required + full suite. Preserve two linkage modes, R24–R46 law,
+R9 toolchain pins, R15 hermetic packed-types, L4 external, no `legacy-peer-deps`.
+No check-off from broad tests alone. Base at review: `9f4925037` (fetch before push;
+restack only if advanced).
+
+| ID | Severity | Exact probe | Violated law | Minimal disposition | Red evidence | Green evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| C1-R47 | Critical | `{verified:true, signerKeyIds:[]}` passes; sealed-parent returns L2/L3 pass with vacuous attribution | L2 requires ≥1 verified signer bound to an envelope signature | `verified:true` requires dense nonempty unique nonempty string `signerKeyIds` under descriptor-safe closure; ≥1 envelope signature; every reported verified signer ID must match an actual validated envelope signature key ID per trust-core law (no duplicate-ID ambiguity). Preserve ratified rule on extra unverified envelope signatures; never vacuous attribution. `verified:false` follows existing reason/signers law. Source+packed: zero IDs, no signatures, empty/duplicate/unknown IDs, one/multiple valid matches, mixed actual/unknown. Reviewer sealed-parent probe fails L2 before L3; authority called once where appropriate | [ ] | [ ] |
+| C1-R48 | Important | Signer return may contain proxy/accessor signature values; trust-core access leaks raw Symbol/sentinel | Descriptor-snapshot signer output before trust-core consumes it | Treat signer return as hostile unknown. Proxy-first; exact standard dense unaugmented array; own data descriptors only. Each signature exact admitted plain object with exact own enumerable data fields; key ID primitive string; genuine signature byte/string per `DsseSigner` contract. Copy signature bytes via R51 intrinsic hardened copy before owned inert structure to trust-core. Malformed/trapping → `TrajectoryDerivationSigningError` (never raw/L1); cancellation priority per R45. Source+packed: array proxy/revoked/sparse/augmented; signature proxy/getters; keyid/sig getter; malformed; post-return mutation; valid unchanged | [ ] | [ ] |
+| C1-R49 | Important | `Array.isArray` precedes proxy rejection in identity, nested port statement, authority result; revoked inputs leak/misclassify | Proxy-first ordering on all remaining array/member paths | Audit every `Array.isArray`/`instanceof`/Object/Reflect/prototype/typed-array in public/untrusted paths; primitive/null then `isProxy` before all such ops recursively. `deriveTraceId` revoked → typed invalid; seal revoked statement typed invalid-input/signing; revoked authority result = malformed authority output (not generic callback error). Nested port members snapshot before shape ops. Source+packed revoked + throwing-trap probes; trap counts zero | [ ] | [ ] |
+| C1-R50 | Important | Digest format helpers `RegExp.test` coerces hostile inputs; `Symbol.toPrimitive` escapes | Primitive strings before regex | Every digest/ID/prefix/hex format helper accepts `unknown`; `typeof value === "string"` before regex/string methods; else typed `InvalidDocumentError`/document validation. No String/valueOf/toPrimitive/getter/coercion. Source+packed: object, String wrapper, Symbol, bigint, proxy, hostile `Symbol.toPrimitive`, valid canonical string | [ ] | [ ] |
+| C1-R51 | Important | `defensiveCopy` calls caller `.slice`; augmented Uint8Array getter leaks; SAB views can tear digests | Intrinsic byte snapshots; reject augmented/SAB views | Hardened byte snapshot: proxy-first; exact genuine ordinary `Uint8Array`; reject subclasses/exotic/augmented props; buffer/offset/length via safe intrinsic getters; reject `SharedArrayBuffer`-backed views at identity/hash/sign/verify boundaries; copy via intrinsic that cannot consult caller `.slice`/iterator/species/constructor. Uniform use in hashing, ports, signer/authority bytes, fixtures/public byte utilities. Tests: shadowed slice, augmented, subclass, proxy/revoked, SAB concurrent mutation, post-call ArrayBuffer mutation, ordinary bytes | [ ] | [ ] |
+| C1-R52 | Important | Fresh consumer installing only tarball fails importing `/testing` — undeclared `ajv` import in fourth-review probes; pack smoke installs AJV manually | Exported `/testing` runtime graph must declare AJV or not import it | Prefer minimal law-preserving choice: declare exact compatible `ajv` as regular dependency if exported runtime imports it; OR move AJV-only code out of testing runtime graph without weakening R29/R42/R43 public parity. No undeclared import. Manifest/lock/tier guards consistent; no legacy-peer-deps. Fresh isolated consumer installs **only** trajectory tarball (ordinary resolution), no explicit AJV install, imports root + `/testing`, runs public kit/AJV parity. Pack smoke removes AJV crutch; tarball manifest inspected | [ ] | [ ] |
+| C1-R53 | Important | Duplicate `uses:` on setup or duplicate `run:` on npm-pin step passes | Workflow parser rejects duplicate YAML mapping keys | Track raw mapping keys per job/step (incl. nested `with`) with indentation scope; reject duplicates before semantic validation. Reject duplicate `uses`/`run`/`name`/`with`/`working-directory`/`node-version`/job keys. Exact mutations + valid multiline run. Preserve checkout→step-local setup→npm→pack law | [ ] | [ ] |
+| C1-R54 | Important | Authority-abort case pre-aborts signal so callback never runs — tautological pre-abort retest | Callback executes then abort+throw | Packed case: signal starts live; authority increments count, aborts genuine controller inside callback, throws ordinary non-AbortError; verify throws typed cancellation (intrinsic post-callback/catch priority). Callback exactly once; ordinary error not surfaced/L2 not returned. Keep separate pre-abort callback-zero case. Prefer same case ID; update pin count/digest only if ID set changes. Mutation/probe shows old impl fails | [ ] | [ ] |
+| C1-R55 | Minor | Packed archive contains stale `dist/conformance-case-ids.{js,d.ts}` — build does not clean | Clean dist before every build/prepack; reject orphan output | Cross-platform checked script removes `dist` before tsc. Pack smoke seeds orphan, runs pack/prepack, asserts absent; inspect packed dist vs compiler output. Repeated clean checkout/build/pack same file list. Do not delete schemas/fixtures outside dist | [ ] | [ ] |
+| C1-R56 | Minor | README links missing `docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md` | README must not link missing design | Replace with existing checked-in refs: C1 component plan + canonical evidence architecture/execution-evidence design present at this head. Every relative link resolves from repo root. Do not add/copy shared design doc in C1 scope | [ ] | [ ] |
+
+### Implementation checklist (fifth exact-head whole-component)
+
+- [ ] C1-R47 — L2 nonempty verified signer IDs bound to envelope signatures (Critical)
+- [ ] C1-R48 — descriptor-snapshot hostile signer return before trust-core
+- [ ] C1-R49 — proxy-first on remaining array/member paths (identity/port/authority)
+- [ ] C1-R50 — digest/format helpers require primitive string before regex
+- [ ] C1-R51 — intrinsic byte snapshots; reject augmented/SAB views
+- [ ] C1-R52 — `/testing` declares AJV or removes undeclared import; tarball-only consumer
+- [ ] C1-R53 — CI workflow parser rejects duplicate YAML mapping keys
+- [ ] C1-R54 — authority-abort case executes callback then abort+ordinary throw
+- [ ] C1-R55 — clean dist before build/prepack; pack smoke rejects orphans
+- [ ] C1-R56 — README links only existing checked-in design/plan docs
+
+### Acceptance
+
+All ten rows move from pending to commit SHA + exact red/green probe evidence only after
+red→green verification. L4 remains external/`not-evaluated`.
