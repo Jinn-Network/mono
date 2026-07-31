@@ -498,7 +498,7 @@ git commit -m "feat(plugin-runtime): declare the corpus mirror's stack dependenc
 - Consumes: `PluginRuntimeError` from `plugin/runtime/src/errors.ts` (branch `plugin/c3-product-tree`).
 - Produces: `class CorpusMirrorError extends PluginRuntimeError` with `readonly code: string` and `readonly cause?: unknown`; `const CORPUS_ERROR_CODES` (frozen); `compareCodeUnitStrings(left: string, right: string): number`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/corpus/errors.test.ts`:
 
@@ -549,12 +549,12 @@ describe("compareCodeUnitStrings", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test src/corpus/errors.test.ts`
 Expected: FAIL — `Failed to resolve import "./errors.js"` from `src/corpus/errors.test.ts`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/corpus/order.ts`:
 
@@ -619,12 +619,12 @@ export function describeError(error: unknown): string {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test src/corpus/errors.test.ts && yarn typecheck`
 Expected: PASS (6 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src/corpus
