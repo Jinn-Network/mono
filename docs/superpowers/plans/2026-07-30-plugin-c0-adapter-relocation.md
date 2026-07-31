@@ -398,7 +398,7 @@ git commit -m "chore(plugin): read the layer runtime pin from plugin/frozen"
 
 This consumer is **not listed in the program plan's C0 row** (Finding F1). It currently passes through the shim, which is precisely the hazard: it would keep passing until #2294 deletes the fork, then break in an unrelated PR. The red phase below is the shim-aside rehearsal, which is the honest test of whether the re-point is load-bearing.
 
-- [ ] **Step 1: Park the shim and observe the failure**
+- [x] **Step 1: Park the shim and observe the failure**
 
 Run:
 
@@ -409,7 +409,7 @@ mv apps/jinn-agent/plugins/jinn /tmp/c0-shim-parked
 
 Expected: FAIL — `ENOENT: no such file or directory, open '…/apps/jinn-agent/plugins/jinn/layer-runtime.json'` in the test `pins the plugin-local runtime contract to this exact package version`.
 
-- [ ] **Step 2: Re-point the test**
+- [x] **Step 2: Re-point the test**
 
 In `packages/layer/test/architecture/package-contract.test.ts`, replace:
 
@@ -423,13 +423,13 @@ with:
         resolve(repoRoot, 'plugin/frozen/layer-runtime.json'),
 ```
 
-- [ ] **Step 3: Run the test with the shim still parked, to verify it passes on the real path**
+- [x] **Step 3: Run the test with the shim still parked, to verify it passes on the real path**
 
 Run: `(cd packages/layer && yarn vitest run test/architecture/package-contract.test.ts)`
 
 Expected: PASS (3 tests). Passing while the shim is absent proves the test now reads the relocated file, not the symlink.
 
-- [ ] **Step 4: Restore the shim and re-run**
+- [x] **Step 4: Restore the shim and re-run**
 
 Run:
 
@@ -441,7 +441,7 @@ git status --porcelain apps/jinn-agent/plugins/jinn        # must print nothing
 
 Expected: no git output (the symlink is back exactly as committed), then PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/layer/test/architecture/package-contract.test.ts
