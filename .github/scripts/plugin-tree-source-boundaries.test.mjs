@@ -194,6 +194,100 @@ function localSpecifier(fixtureDir, target) {
   return specifier.startsWith('.') ? specifier : `./${specifier}`;
 }
 
+const binEntry = join(runtimeSource, 'bin.ts');
+
+// Custody law C2: no ambient authority acquisition. The runtime reads the environment in
+// exactly one place — the binary — and hands the result to a pure resolver. `process` in
+// any other file is a boundary violation, not a style question.
+//
+// The same confinement protects the wire: stdout is reserved for the MCP stdio transport
+// (design §6.2), so a stray write anywhere else would corrupt the protocol stream.
+const PROCESS_SURFACES = [
+  [/process\s*(?:\.|\?\.)\s*env\b/g, 'process.env'],
+  [/process\s*(?:\.|\?\.)\s*argv\b/g, 'process.argv'],
+  [/process\s*(?:\.|\?\.)\s*stdout\b/g, 'process.stdout'],
+  [/(?<![\w$."'\x60])console\s*(?:\.|\?\.)\s*(?:log|info|debug|table|dir)\s*\(/g, 'console stdout write'],
+];
+
+function processSurfaceUsesInFiles(sourceFiles) {
+  return sourceFiles.flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    return PROCESS_SURFACES.flatMap(([pattern, label]) =>
+      [...source.matchAll(pattern)].map(() => `${relative(root, file)} -> ${label}`));
+  }).sort();
+}
+
+// Custody law C3: signer objects only. Key-construction helpers and key-material
+// parameter names are refused in any position (custody-boundaries.test.mjs precedent).
+// The runtime is read-plus-local-write and holds no keys (design §8.5).
+const KEY_MATERIAL_PATTERNS = [
+  [/privateKeyToAccount|mnemonicToAccount|hdKeyToAccount|generatePrivateKey/g, 'key-construction helper'],
+  [/\b(?:privateKey|mnemonic|seedPhrase)\s*[:?]/gi, 'key-material parameter or property'],
+];
+
+function keyMaterialUsesInFiles(sourceFiles) {
+  return sourceFiles.flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    return KEY_MATERIAL_PATTERNS.flatMap(([pattern, label]) =>
+      [...source.matchAll(pattern)].map(() => `${relative(root, file)} -> ${label}`));
+  }).sort();
+}
+
+test('the process-surface scanner catches env, argv, stdout, and console writes', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-custody-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'source.ts'), [
+      'const home = process.env.JINN_PLUGIN_HOME;',
+      'const args = process.argv.slice(2);',
+      'process.stdout.write("leak");',
+      'console.log("leak");',
+      'console.info("leak");',
+    ].join('\n'));
+    assert.equal(processSurfaceUsesInFiles(files(source)).length, 5);
+    writeFileSync(join(source, 'clean.ts'), [
+      'export const resolve = (env: Record<string, string | undefined>) => env.JINN_PLUGIN_HOME;',
+      'console.error("diagnostics go to stderr");',
+    ].join('\n'));
+    assert.deepEqual(processSurfaceUsesInFiles([join(source, 'clean.ts')]), []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('the key-material scanner catches construction helpers and parameter names', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-keys-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'source.ts'), [
+      'import { privateKeyToAccount } from "somewhere";',
+      'export function sign(options: { privateKey: string; mnemonic?: string }) {',
+      '  return privateKeyToAccount(options.privateKey);',
+      '}',
+    ].join('\n'));
+    assert.ok(keyMaterialUsesInFiles(files(source)).length >= 4);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('ambient process surfaces are confined to the binary, and no key material exists', () => {
+  const sourceFiles = files(runtimeSource);
+  const nonBin = sourceFiles.filter((file) => file !== binEntry);
+  assert.deepEqual(
+    processSurfaceUsesInFiles(nonBin),
+    [],
+    'only plugin/runtime/src/bin.ts may read the ambient environment or write stdout — '
+      + 'configuration is injected (custody law C2) and stdout is reserved for the MCP '
+      + 'stdio transport (design §6.2)',
+  );
+  assert.ok(existsSync(binEntry), 'plugin/runtime/src/bin.ts must exist to hold the confinement');
+  assert.deepEqual(
+    keyMaterialUsesInFiles(sourceFiles),
+    [],
+    'the runtime holds no keys and accepts no key material in any parameter position '
+      + '(custody law C3)',
+  );
+});
+
 test('the import scanner catches static, export, dynamic, require, and local-path escapes', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-boundary-'));
   try {
