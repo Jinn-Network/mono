@@ -60,6 +60,7 @@ import {
   resolveWiringEntry,
   runPipeline,
   type AnnouncedSubmissionCard,
+  type ExecutionWiringEntry,
   type PipelinePorts,
   type PipelineRunOutcome,
   type SubmissionFacts,
@@ -138,6 +139,39 @@ const noopLogger = { info: (): void => undefined, warn: (): void => undefined };
 
 function idempotencyKeyFor(chain: { chainId: number; taskCoordinator: string }, taskId: bigint): string {
   return `${chain.chainId}:${chain.taskCoordinator}:${taskId.toString()}`;
+}
+
+/**
+ * Finding E39 (diagnose→fix cycle 1): resolves a legacy-bridged card's real `workKind` against
+ * this operator's wiring config, by anchored manifest digest.
+ *
+ * `mapAnnouncedSubmissionToFacts` (package `facts-mapper.ts`) sets `facts.workKind` to the raw
+ * anchored `legacyManifestDigest` itself for any legacy-derivation card -- not a human-readable
+ * workKind -- because the projector that synthesizes these cards
+ * (`bridge-legacy-delivery.ts`'s `synthesizeLegacyFactsCard`) only ever sees the on-chain
+ * `TaskCreated` args, never the operator's wiring config, so it has no human name to put there.
+ * Every downstream consumer of `facts.workKind` disagrees with that: `buildClaimPredicate`'s
+ * `byWorkKind` lookup (`composition-root.ts`), this loop's own `resolveWiringEntry` call below,
+ * and `runPipeline`'s internal `resolveWiringEntry` call (`pipeline.ts`) all expect it to already
+ * be the wiring's own human key -- confirmed against `claim-predicate.test.ts`'s
+ * `matchLegacyManifestDigest` fixture, which models a legacy card as `{workKind: "repo-fix",
+ * legacyManifestDigest: "sha256:manifest-a"}`, i.e. `legacyManifestDigest` as a side-channel
+ * verification field, `workKind` unchanged. Left unfixed, EVERY legacy-bridged card is declined
+ * at the very first gate (`predicate-declined`) regardless of wiring, because no wiring entry's
+ * `workKind` string ever equals a digest.
+ *
+ * This is the one place with both the raw card and the operator's wiring in hand, so it resolves
+ * the substitution host-side rather than reaching into the package: find the wiring entry whose
+ * declared `legacyManifestDigest` matches this card's anchored one, and use ITS `workKind` from
+ * here on. No match -> `workKind` is left as the digest, and the pre-existing
+ * `wiring-missing`/`predicate-declined` refusal still fires correctly for a digest this operator
+ * genuinely has no wiring for.
+ */
+function resolveLegacyWorkKind(
+  legacyManifestDigest: string,
+  wiring: readonly ExecutionWiringEntry[],
+): string | undefined {
+  return wiring.find((entry) => entry.legacyManifestDigest === legacyManifestDigest)?.workKind;
 }
 
 /**
@@ -245,7 +279,20 @@ export class WorkLoop {
     if (!mapped.ok) {
       return { kind: 'skipped', reason: 'mapping-refused' };
     }
-    const facts = mapped.facts;
+    // E39 diagnose→fix cycle 1 (see `resolveLegacyWorkKind`'s doc comment): substitute the real
+    // wiring workKind in for a legacy card's raw manifest-digest placeholder before any
+    // downstream gate reads `facts.workKind`.
+    const facts =
+      mapped.facts.legacyManifestDigest === undefined
+        ? mapped.facts
+        : {
+            ...mapped.facts,
+            workKind:
+              resolveLegacyWorkKind(
+                mapped.facts.legacyManifestDigest,
+                this.config.composition.pipelineConfig.wiring,
+              ) ?? mapped.facts.workKind,
+          };
 
     // 3. Spend gates against the existing SQLite rolling-window accounting (spec §6.5). The
     // gate's `projectedUsdMicros` reuses the host's single `estimateAiUnits` figure — no separate

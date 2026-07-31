@@ -123,6 +123,36 @@ function card(): AnnouncedSubmissionCard {
   };
 }
 
+// E39 diagnose→fix cycle 1: a legacy-bridged card, as `bridge-legacy-delivery.ts`'s
+// `synthesizeLegacyFactsCard` actually produces one -- `facts` carries no `workKind` at all (the
+// projector has no wiring context to resolve one from), and `derivationKind`/`legacyManifestDigest`
+// mark it as legacy per `facts-mapper.ts`'s own contract.
+const LEGACY_MANIFEST_DIGEST = `0x${'e'.repeat(64)}`;
+
+function legacyCard(): AnnouncedSubmissionCard {
+  return {
+    record: { kind: RECORD_KINDS_SUBMISSION, digest: `sha256:${'d'.repeat(64)}` },
+    facts: {
+      taskDigest: TASK_DIGEST,
+      taskProfileUri: PROFILE_URI,
+    },
+    chain: {
+      taskId: TASK_ID,
+      submission: SUBMISSION_URI,
+      nonce: NONCE,
+      intendedSpendWei: 1n,
+    },
+    derivationKind: 'legacy',
+    legacyManifestDigest: LEGACY_MANIFEST_DIGEST,
+  };
+}
+
+// The operator's wiring, as it would actually be configured for a bridged legacy SolverNet: one
+// entry keyed by the human `workKind`, declaring which anchored manifest digest it bridges.
+const LEGACY_WIRING: readonly ExecutionWiringEntry[] = [
+  { ...WIRING[0]!, legacyManifestDigest: LEGACY_MANIFEST_DIGEST },
+];
+
 function backendCapabilities(): BackendCapabilities {
   return {
     taskProfiles: [PROFILE_URI],
@@ -443,6 +473,49 @@ describe('work loop', () => {
     expect((await loop.tick())[0]!.outcome).toEqual({
       kind: 'skipped',
       reason: 'ai-units-capped',
+    });
+  });
+
+  // Finding E39 (diagnose→fix cycle 1): `mapAnnouncedSubmissionToFacts` sets `facts.workKind` to
+  // the raw anchored manifest digest for a legacy-bridged card -- the projector that synthesizes
+  // it has no wiring context to resolve a human workKind from. Left unresolved, every wiring
+  // lookup downstream (this loop's own `resolveWiringEntry` call, and `runPipeline`'s internal
+  // one) fails, and the card is refused regardless of the operator's actual wiring config.
+  describe('legacy-bridged workKind resolution (E39)', () => {
+    const key = `${BASE_SEPOLIA_TODAY.chainId}:${BASE_SEPOLIA_TODAY.taskCoordinator}:${TASK_ID.toString()}`;
+
+    it('resolves the wiring workKind for a legacy card by its anchored manifest digest, and the full pipeline runs', async () => {
+      const base = composition();
+      const comp: OperatorComposition = {
+        ...base,
+        pipelineConfig: { ...base.pipelineConfig, wiring: LEGACY_WIRING },
+      };
+      const { loop, ledger } = build({
+        composition: comp,
+        archive: { since: async () => [legacyCard()] },
+      });
+
+      const [{ outcome }] = await loop.tick();
+
+      expect(outcome).toEqual({
+        kind: 'pipeline',
+        result: { kind: 'delivered', state: expect.anything() },
+      });
+      expect(ledger.get(key)!.workKind).toBe(WORK_KIND);
+    });
+
+    it('leaves workKind unresolved (and declines) when no wiring entry declares a matching manifest digest', async () => {
+      const { loop } = build({
+        // Default WIRING (no `legacyManifestDigest` on any entry) -> no match possible.
+        archive: { since: async () => [legacyCard()] },
+      });
+
+      const [{ outcome }] = await loop.tick();
+
+      expect(outcome).toEqual({
+        kind: 'pipeline',
+        result: { kind: 'not-claimed', reason: 'wiring-missing' },
+      });
     });
   });
 
