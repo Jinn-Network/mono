@@ -576,7 +576,7 @@ describe("C1-R3 authority result validation and cancellation", () => {
       {},
     );
     const result = await verifyWith(sealed, trajectorySealed, executionBytes, {
-      verifyAuthority: async () => proxy,
+      verifyAuthority: async () => proxy as never,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("l2-authority-malformed");
