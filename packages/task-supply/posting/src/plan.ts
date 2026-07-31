@@ -5,6 +5,7 @@
 // on -- deadline, closeAt, maxClaims, requester -- is decided here and carried, never read from a
 // host clock at execution time.
 import { postingEscrowValueWei } from "@jinn-network/marketplace-binding";
+import { PREFIXED_SHA256_PATTERN } from "./digest.js";
 import { compareCodeUnitStrings } from "./order.js";
 import type {
   PostingPlan,
@@ -20,6 +21,33 @@ function offsetIso(base: string, seconds: number): string {
     throw new Error(`policy.now must be an RFC 3339 timestamp with an offset, got ${base}`);
   }
   return new Date(parsed + seconds * 1_000).toISOString();
+}
+
+/**
+ * Both policy digest lists are membership-tested by exact string equality against `sha256:`-
+ * prefixed entry digests, so a list written in any other form matches nothing and the guard it was
+ * written for silently disarms: an excluded entry posts and its escrow is spent, and an
+ * already-posted entry is posted and escrowed a second time. Bare hex is the realistic mistake —
+ * it is the in-toto DigestSet form this stack writes elsewhere by law (program §5 contract 6) — so
+ * the list is validated rather than trusted, and a non-canonical entry fails the plan closed
+ * instead of quietly dropping out of the comparison.
+ */
+function digestSet(
+  values: readonly string[] | undefined,
+  field: string,
+): ReadonlySet<string> {
+  const digests = new Set<string>();
+  for (const value of values ?? []) {
+    if (!PREFIXED_SHA256_PATTERN.test(value)) {
+      throw new Error(
+        `policy.${field} entry ${JSON.stringify(value)} is not a sha256:-prefixed lower-case `
+          + "64-hex digest -- it would match no pool entry, so the batch would post and escrow the "
+          + "entry this list was written to hold back",
+      );
+    }
+    digests.add(value);
+  }
+  return digests;
 }
 
 /**
@@ -43,8 +71,8 @@ export function planPosting(
     ? undefined
     : offsetIso(policy.now, policy.closeAtSeconds);
 
-  const excluded = new Set(policy.excludedTaskDigests ?? []);
-  const posted = new Set(policy.postedTaskDigests ?? []);
+  const excluded = digestSet(policy.excludedTaskDigests, "excludedTaskDigests");
+  const posted = digestSet(policy.postedTaskDigests, "postedTaskDigests");
   const skipped: PostingSkip[] = [];
   const eligible: { readonly entry: PostingPoolEntry; readonly repost: boolean }[] = [];
 

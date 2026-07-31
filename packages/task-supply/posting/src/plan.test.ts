@@ -101,3 +101,39 @@ describe("planPosting", () => {
     expect(() => planPosting([entry("1")], { ...POLICY, deadlineSeconds: 0 })).toThrow(RangeError);
   });
 });
+
+// The digest-confusion fixture (program §5 contract 6). Both policy lists are compared by exact
+// string equality against `sha256:`-prefixed entry digests, so a list assembled from a bare-hex
+// source (in-toto DigestSet values are bare hex by law) would match nothing: the excluded entry
+// would post and its escrow would be spent, and the already-posted guard would silently disarm.
+// Every one of these forms is refused instead.
+describe("planPosting digest discipline", () => {
+  const CONFUSED = [
+    ["bare hex", "1".repeat(64)],
+    ["upper-case prefix", `SHA256:${"1".repeat(64)}`],
+    ["upper-case hex", `sha256:${"A".repeat(64)}`],
+    ["a bytes32 anchor", `0x${"1".repeat(64)}`],
+    ["truncated", `sha256:${"1".repeat(63)}`],
+    ["empty", ""],
+  ] as const;
+
+  test.each(CONFUSED)("refuses an excludedTaskDigests entry in %s form", (_form, digest) => {
+    expect(() => planPosting([entry("1")], { ...POLICY, excludedTaskDigests: [digest] }))
+      .toThrow(/excludedTaskDigests/u);
+  });
+
+  test.each(CONFUSED)("refuses a postedTaskDigests entry in %s form", (_form, digest) => {
+    expect(() => planPosting([entry("1")], { ...POLICY, postedTaskDigests: [digest] }))
+      .toThrow(/postedTaskDigests/u);
+  });
+
+  test("still accepts the canonical prefixed form both lists are written in", () => {
+    const plan = planPosting([entry("1"), entry("2")], {
+      ...POLICY,
+      excludedTaskDigests: [entry("1").taskDigest],
+      postedTaskDigests: [entry("2").taskDigest],
+    });
+    expect(plan.entries).toEqual([]);
+    expect(plan.skipped.map((skip) => skip.reason)).toEqual(["excluded", "already-posted"]);
+  });
+});
