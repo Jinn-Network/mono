@@ -13,7 +13,7 @@ import type { PortfolioV0Status } from './portfolio-v0-build.js';
 import type { PredictionV1Status } from './prediction-v1-build.js';
 import type { TaskRunsStatus } from './task-runs-build.js';
 import type { LoopCompletionStatus, ImplStateCadenceStatus } from './loop-completion-build.js';
-import type { EvidenceIndexingStatus } from '../daemon/evidence-driver.js';
+import type { EvidenceIndexingStatus } from '../types/evidence-indexing.js';
 import { DEFAULT_HARNESS_ROLLUP, type HarnessRollup } from './status-harness-rollup.js';
 import {
   buildCostSurfaceStatus,

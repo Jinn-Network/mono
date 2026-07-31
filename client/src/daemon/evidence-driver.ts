@@ -5,6 +5,7 @@
  * indexing-failure rollup.
  */
 import type { Store } from '../store/store.js';
+import type { EvidenceIndexingFailureSummary } from '../types/evidence-indexing.js';
 import { runLoop } from './loop-heartbeat.js';
 import type { OperatorEvidence } from './evidence-join.js';
 
@@ -43,18 +44,12 @@ export function decidePublication(
   return { publish: true };
 }
 
-/** One indexing failure, projected for the `/v1/status` rollup. */
-export interface EvidenceIndexingFailureSummary {
-  readonly reference: string;
-  readonly category: string;
-  readonly message: string;
-}
-
-/** The `/v1/status` indexing-failure rollup shape (see `gather-status.ts`). */
-export interface EvidenceIndexingStatus {
-  readonly failures: readonly EvidenceIndexingFailureSummary[];
-  readonly pending: number;
-}
+// The rollup shapes live under `src/types/` so the API tier can name them without importing
+// from `src/daemon/` (#1584 boundary). Re-exported here for the daemon-side consumers.
+export type {
+  EvidenceIndexingFailureSummary,
+  EvidenceIndexingStatus,
+} from '../types/evidence-indexing.js';
 
 export interface EvidenceDriverConfig {
   readonly evidence: OperatorEvidence;

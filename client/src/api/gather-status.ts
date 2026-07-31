@@ -50,7 +50,7 @@ import {
 import { gatherTaskRunsStatus, applyOutcomes } from './task-runs-build.js';
 import type { DiscoveryAPI, VerdictTallyResult } from '../discovery/types.js';
 import { gatherLoopCompletion, gatherImplStateCadence } from './loop-completion-build.js';
-import type { EvidenceDriverLoop } from '../daemon/evidence-driver.js';
+import type { EvidenceIndexingSource } from '../types/evidence-indexing.js';
 import { buildInfo } from '../build-info.js';
 import type { BalanceCacheEntry } from '../store/store.js';
 import {
@@ -219,7 +219,7 @@ export interface StatusGatherConfig {
    * indexing-failure list and its cached count of announcements pending
    * indexing. Returning `null`/absent ⇒ no `evidenceIndexing` block.
    */
-  evidenceDriver?: () => EvidenceDriverLoop | null;
+  evidenceDriver?: () => EvidenceIndexingSource | null;
 }
 
 function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
