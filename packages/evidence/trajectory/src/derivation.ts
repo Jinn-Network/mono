@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { isProxy } from "node:util/types";
+
 import {
   DSSE_PAYLOAD_TYPE,
   IN_TOTO_STATEMENT_TYPE,
@@ -24,6 +26,7 @@ import { type JsonValue, serializeCanonicalJson } from "./canonical.js";
 import { documentDigest } from "./hashing.js";
 import { verifyExecutionLinkage } from "./execution-linkage.js";
 import {
+  isAbortLikeError,
   isGenuineAbortSignal,
   normalizeThrownError,
   readAbortSignalAborted,
@@ -58,49 +61,9 @@ function assertNotCancelled(signal?: AbortSignal): void {
   if (readAbortSignalAborted(signal)) throw new TrajectoryDerivationCancelledError();
 }
 
-function readErrorName(error: object): string | undefined {
-  let descriptor = Object.getOwnPropertyDescriptor(error, "name");
-  if (descriptor?.get !== undefined) {
-    try {
-      const value = descriptor.get.call(error);
-      return typeof value === "string" ? value : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-  if (
-    descriptor !== undefined &&
-    Object.hasOwn(descriptor, "value") &&
-    typeof descriptor.value === "string"
-  ) {
-    return descriptor.value;
-  }
-  const prototype = Object.getPrototypeOf(error);
-  if (prototype !== null && prototype !== Object.prototype) {
-    descriptor = Object.getOwnPropertyDescriptor(prototype, "name");
-    if (descriptor?.get !== undefined) {
-      try {
-        const value = descriptor.get.call(error);
-        return typeof value === "string" ? value : undefined;
-      } catch {
-        return undefined;
-      }
-    }
-    if (
-      descriptor !== undefined &&
-      Object.hasOwn(descriptor, "value") &&
-      typeof descriptor.value === "string"
-    ) {
-      return descriptor.value;
-    }
-  }
-  return undefined;
-}
-
-function isAbortLike(error: unknown): boolean {
-  if (error instanceof TrajectoryDerivationCancelledError) return true;
-  if (typeof error !== "object" || error === null) return false;
-  return readErrorName(error) === "AbortError";
+function isTrajectoryDerivationCancelled(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || isProxy(error)) return false;
+  return error instanceof TrajectoryDerivationCancelledError;
 }
 
 function preflightAttestationJson(value: unknown, context: string): void {
@@ -523,7 +486,8 @@ export async function verifyTrajectoryDerivationAttestation(
     }
     authorityResult = validated.value;
   } catch (error) {
-    if (isAbortLike(error)) throw new TrajectoryDerivationCancelledError();
+    if (isTrajectoryDerivationCancelled(error)) throw error;
+    if (isAbortLikeError(error)) throw new TrajectoryDerivationCancelledError();
     const message = normalizeThrownError(error);
     return {
       ok: false,

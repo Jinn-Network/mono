@@ -882,13 +882,51 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
 
     test("proxy-throwing authority error normalizes without instanceof", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
+      let descriptorTraps = 0;
+      let prototypeTraps = 0;
       const result = await verifyWith(sealed, trajectorySealed, executionBytes, {
         verifyAuthority: async () => {
-          throw new Proxy(new Error("hostile"), {});
+          throw new Proxy(new Error("hostile"), {
+            getOwnPropertyDescriptor(target, property) {
+              descriptorTraps += 1;
+              return Reflect.getOwnPropertyDescriptor(target, property);
+            },
+            getPrototypeOf(target) {
+              prototypeTraps += 1;
+              return Reflect.getPrototypeOf(target);
+            },
+          });
         },
       });
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.code).toBe("l2-authority-error");
+      expect(descriptorTraps).toBe(0);
+      expect(prototypeTraps).toBe(0);
+    });
+
+    test("genuine AbortSignal with own aborted getter uses native cancellation state", async () => {
+      const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
+      const verifyAuthority = vi.fn(async () =>
+        ({ verified: true as const, signerKeyIds: ["test-key"] }),
+      );
+      const controller = new AbortController();
+      let ownAbortedGetterCalls = 0;
+      Object.defineProperty(controller.signal, "aborted", {
+        get: () => {
+          ownAbortedGetterCalls += 1;
+          return false;
+        },
+        configurable: true,
+      });
+      controller.abort();
+      await expect(
+        verifyWith(sealed, trajectorySealed, executionBytes, {
+          signal: controller.signal,
+          verifyAuthority,
+        }),
+      ).rejects.toBeInstanceOf(TrajectoryDerivationCancelledError);
+      expect(verifyAuthority).not.toHaveBeenCalled();
+      expect(ownAbortedGetterCalls).toBe(0);
     });
 
     test("fake AbortSignal with getter aborted is rejected before authority", async () => {
