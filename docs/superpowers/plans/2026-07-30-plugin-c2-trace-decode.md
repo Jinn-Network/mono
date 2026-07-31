@@ -2994,7 +2994,7 @@ git commit -m "feat(evidence-trace-decode): the pinned claude-code fixture corpu
 - Consumes: everything from Tasks 2–8.
 - Produces: `createDefaultDecoderRegistry(): DecoderRegistry`; `SHIPPED_DECODERS: readonly TraceDecoder[]`; the package's public API — the surface C6 and any third-party consumer imports.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/index.test.ts`:
 
@@ -3066,12 +3066,12 @@ describe("public surface", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trace-decode && yarn test`
 Expected: FAIL — the placeholder `index.ts` exports nothing.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/default-registry.ts`:
 
@@ -3154,12 +3154,12 @@ export {
 } from "./claude-code-stream-json.js";
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trace-decode && yarn test && yarn typecheck && yarn build`
 Expected: PASS; `dist/` produced.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/evidence/trace-decode/src
