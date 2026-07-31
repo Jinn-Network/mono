@@ -1,15 +1,21 @@
 /**
- * Composition root (cutover stage 1, Task 12) tests. `buildClaimPredicate` is pure and tested
- * directly; `buildOperatorComposition` is exercised end to end against a real
- * `LocalTaskExecutionBackend` + real evidence runtime + real trust-resolve/pipeline wiring, with
- * only `createBaseVenue` (chain I/O) and `openOperatorEvidence` (kept but hermetic — see below)
- * stubbed via `vi.mock`.
+ * Composition root (cutover stage 1, Task 12; C8 close-out) tests. `buildClaimPredicate` is pure
+ * and tested directly; `buildOperatorComposition` is exercised end to end against a real
+ * `LocalTaskExecutionBackend` + real evidence runtime + real trust-resolve/pipeline wiring +
+ * (C8) a real `ProjectorLoop`/`ClaimGate`/`EngagementLedger`/`verifySettlementGrade`, with only
+ * `createBaseVenue` (chain I/O) and `openOperatorEvidence` (kept but hermetic — see below)
+ * stubbed via `vi.mock`. `openVenueState`/`createChainLogSource` and the rest of
+ * `@jinn-network/marketplace-venue-base` stay real (pure local SQLite, no network) so the
+ * projector wiring this test proves is the actual production path.
  */
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { CLAIM_NOTHING } from '@jinn-network/marketplace-pipeline';
+import { Store } from '../../src/store/store.js';
+import { ProjectorCursorStore } from '../../src/daemon/projector-cursor.js';
+import { ProjectorLoop } from '../../src/daemon/projector-loop.js';
 
 const { createBaseVenueMock, safeExecuteMock, venueCloseMock } = vi.hoisted(() => ({
   createBaseVenueMock: vi.fn(),
@@ -17,9 +23,12 @@ const { createBaseVenueMock, safeExecuteMock, venueCloseMock } = vi.hoisted(() =
   venueCloseMock: vi.fn(),
 }));
 
-vi.mock('@jinn-network/marketplace-venue-base', () => ({
-  createBaseVenue: createBaseVenueMock,
-}));
+// Only `createBaseVenue` is replaced — `openVenueState`/`createChainLogSource` (C3) stay real so
+// the projector's log-source wiring this test exercises is production code, not a fake.
+vi.mock('@jinn-network/marketplace-venue-base', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@jinn-network/marketplace-venue-base')>();
+  return { ...actual, createBaseVenue: createBaseVenueMock };
+});
 
 const { openOperatorEvidenceMock, evidenceCloseMock } = vi.hoisted(() => ({
   openOperatorEvidenceMock: vi.fn(),
@@ -188,10 +197,17 @@ describe('buildOperatorComposition', () => {
       activityChecker: '0x6666666666666666666666666666666666666666',
       generation: 'today',
     };
+    const store = new Store(':memory:');
+    // publicClient stub sufficient for the projector's log-source construction (C3): the
+    // constructor does not eagerly call any of these — they're only invoked lazily from
+    // `tick()`/`hasCaughtUp()`, neither of which this test drives.
+    const publicClient = {
+      getBlock: async () => ({ number: 0n, hash: '0x' + '0'.repeat(64) }),
+    };
 
     const composition = await buildOperatorComposition({
       config: config as never,
-      publicClient: {} as never,
+      publicClient: publicClient as never,
       walletClient: { account: { address: safeAddress } } as never,
       safeAddress,
       mechAddress,
@@ -200,6 +216,7 @@ describe('buildOperatorComposition', () => {
       evidenceRoot,
       venueStateDbPath: join(stateRoot, 'venue.db'),
       profileStore: { get: () => undefined },
+      store,
     });
 
     // (a) the composition returns its own broadcaster (finding E16 / the C2 ruling: no
@@ -227,9 +244,78 @@ describe('buildOperatorComposition', () => {
       ]),
     );
 
-    // (e) close() closes the evidence runtime.
+    // (f) C8: the projector loop is real and constructible (not merely typed) — a `ProjectorLoop`
+    // instance with a working `hasCaughtUp()` (contract 3's claim-gate signal).
+    expect(composition.projector).toBeInstanceOf(ProjectorLoop);
+    expect(await composition.projector.hasCaughtUp()).toBe(false); // no cursor written yet
+
+    // (g) C8: the claim gate is real — closed until the projector catches up.
+    expect(composition.claimGate.isOpen()).toBe(false);
+
+    // (h) C5/C8: `observations` (passed to `createBaseVenue`) is backed by the real
+    // `ProjectorCursorStore`, not the old `async () => []` stub — proven by writing an
+    // observation directly to the same `Store` under the composition's own cursor key and
+    // reading it back through the exact function `createBaseVenue` was called with.
+    const cursorKey = `${chain.chainId}:${chain.taskCoordinator.toLowerCase()}`;
+    const cursorStore = new ProjectorCursorStore(store, cursorKey);
+    const fakeObservation = {
+      id: 'obs-1',
+      kind: 'network.jinn.task-execution.submission-accepted.v1',
+      data: {},
+    } as never;
+    cursorStore.write(
+      {
+        liveBlockNumber: 1n,
+        liveBlockHash: `0x${'1'.repeat(64)}`,
+        finalizedBlockNumber: 1n,
+        finalizedBlockHash: `0x${'1'.repeat(64)}`,
+        sequence: '0000000000000000',
+        entryDigest: null,
+        headJson: null,
+        stateJson: '{}',
+      },
+      [fakeObservation],
+    );
+    const venueConfig = createBaseVenueMock.mock.calls[0]![0] as { observations: () => Promise<unknown[]> };
+    await expect(venueConfig.observations()).resolves.toEqual([fakeObservation]);
+
+    // (i) C6/C8: `verifySettlementGrade` is C6's real implementation, not composition-root's
+    // deleted fail-closed stub — proven by seeding a matching engagement-ledger row and observing
+    // `dispatchBinding` flip to "verified" (the old stub reported "missing" unconditionally for
+    // every check, with no ledger dependency at all).
+    expect(composition.pipelinePorts.settlement.verifySettlementGrade).toBe(venueConfig['verifySettlementGrade' as never]);
+    const requestId = `0x${'a'.repeat(64)}` as const;
+    composition.engagementLedger.admitClaimIntent({
+      idempotencyKey: 'k1',
+      chainId: chain.chainId,
+      taskCoordinator: chain.taskCoordinator,
+      taskId: 1n,
+      workKind: 'QmSolver',
+      wiring: config.executionWiring[0] as never,
+    });
+    composition.engagementLedger.recordClaimed('k1', {
+      attemptIndex: 0,
+      attemptUri: 'urn:uuid:11111111-1111-4111-8111-111111111111',
+      claimTxHash: '0xabc',
+      requestId,
+    });
+    const grade = await composition.pipelinePorts.settlement.verifySettlementGrade({
+      attempt: { requestId, expectedDispatchContextDigest: `sha256:${'0'.repeat(64)}` } as never,
+      delivery: {} as never,
+      deliveryBytes: new Uint8Array(),
+      deliveryDigest: `sha256:${'0'.repeat(64)}`,
+      config: chain as never,
+    });
+    expect(grade.dispatchBinding.status).toBe('verified');
+    expect(grade.evaluationSpecification.status).toBe('not-applicable');
+    expect(grade.executorBinding.status).toBe('missing'); // no delivery ever carries the extension yet
+
+    // (e) close() closes the evidence runtime and both venue-state handles (finding: the
+    // composition's own `openVenueState` handle for the projector's log source, plus
+    // `createBaseVenue`'s own separate connection to the same file — see the file header).
     await composition.close();
     expect(evidenceCloseMock).toHaveBeenCalledTimes(1);
     expect(venueCloseMock).toHaveBeenCalledTimes(1);
+    store.close();
   });
 });

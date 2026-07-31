@@ -1,65 +1,105 @@
 /**
- * The composition root (cutover stage 1, Task 12): the only place in the repository that
- * assembles `LocalTaskExecutionBackendConfig`, `PipelineConfig`, and `PipelinePorts` from
- * operator config. See
- * `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md` Task 12.
+ * The composition root (cutover stage 1, Task 12; loop startup + real ports at close-out C8):
+ * the only place in the repository that assembles `LocalTaskExecutionBackendConfig`,
+ * `PipelineConfig`, `PipelinePorts`, and (C8) the projector loop + claim gate + engagement
+ * ledger from operator config. See
+ * `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md` Task 12 and the close-out
+ * addendum's C8.
  *
- * KNOWN GAPS — two subsystems this composition root would need don't exist anywhere in the
- * repository yet. Both were confirmed with the stage-1b coordinator before implementation
- * (rather than fabricated); both are wired as clearly-labeled, safe (empty / fail-closed)
- * placeholders so every OTHER port is real and correctly typed:
+ * CLOSED AT C8 (previously KNOWN GAPS 1 and 2 below):
  *
- *  1. `BaseVenueConfig.observations` — venue-base's observe port needs "every observation ever
- *     projected" (see `packages/marketplace/venue-base/src/observe/projector-observe.ts`).
- *     Producing that stream requires `ProjectorLoop`'s `enrich` function (resolving each decoded
- *     chain event's Submission identity, task digest, effective deadline, and dispatch context —
- *     see `client/src/daemon/projector-loop.ts`'s `ProjectorLoopConfig.enrich`), which is a
- *     REQUIRED host-injected dependency with no production implementation anywhere in
- *     `client/src` (only the Task 9 unit test's fake). Building a real one needs IPFS-backed
- *     submission/dispatch-context resolution — a genuine subsystem, not composition wiring, and
- *     out of this task's 4-file write scope. Stubbed to `async () => []`: the venue constructs
- *     cleanly and every other port (claim, settlement writer machinery, release, ipfs) is real,
- *     but `venue.observe` / `lifecycle` / `finality` will report "no Attempt" for every ref until
- *     a follow-up task builds the enrich/observation-accumulation subsystem. This composition is
- *     therefore NOT yet safe to run live settlement traffic through.
+ *  1. `BaseVenueConfig.observations` is now backed by a REAL, constructed `ProjectorLoop`
+ *     (log source via C3's `createProjectorLogSource`, enrich via C4's `createProjectorEnrich`,
+ *     durable observations via C5's `ProjectorCursorStore.readObservations()`) rather than
+ *     `async () => []`. Per finding E4 / C3's own docstring, the projector's `VenueStateDatabase`
+ *     is opened (via venue-base's `openVenueState`) and the projector is fully constructed
+ *     BEFORE `createBaseVenue`, since the venue's `observations` port needs the already-built
+ *     cursor store.
  *
- *  2. `verifySettlementGrade` — composed from `@jinn-network/trust-resolve`'s
- *     `createBindingResolver` + `createChainFactResolver` exactly as the plan directs, but their
- *     `BindingStore` / `AnchorReadClient` backing stores (the actual binding-registry index and
- *     anchor-observation surface) don't exist anywhere in the repo either. Per CLAUDE.md's phase
- *     rollout, "B.1 verifiability tier activation" is still forward-looking, not shipped. Wired
- *     against empty/fail-closed backing stores, so every check reports `"missing"` — never
- *     silently `"verified"`.
+ *  2. `verifySettlementGrade` is now C6's real implementation (`./settlement-grade.js`), wired
+ *     against this composition's own `EngagementLedger` and `ProfileStore`. The local fail-closed
+ *     stub that always reported `"missing"` is deleted.
  *
- *  3. CLOSED (cutover stage 1 close-out C7, finding E24). `LocalTaskExecutionBackendConfig`'s
- *     `deliveryExtensions` hook now attaches the bridge-era legacy execution envelope for real,
- *     given two things this composition root did not have before: (a) a synchronous signer --
- *     `CompositionRootInput.legacyBridgeSigner`, a new OPTIONAL field, because the only signer
- *     this input carried before (`input.walletClient`) is async-only (remote-signer / hardware-
- *     wallet compatible) and there is still no raw private key anywhere on this input; (b) a
- *     workKind-carrying seam -- `work-loop.ts` now calls the concrete
- *     `LocalTaskExecutionBackend.noteAttemptWorkKind(attemptUri, workKind, requestId)` (exposed
- *     here as `OperatorComposition.noteAttemptWorkKind`) at the SAME point it derives `attemptUri`
- *     for the engagement ledger, strictly before `backend.submit()` -- `attemptUri` is
- *     deterministic (`deriveMarketplaceAttemptUri`) so it is known ahead of submit and matches
- *     exactly what `backend.ts`'s `completeAttempt` later keys its own note lookup by.
- *     `legacyBridgeSigner` stays OPTIONAL and absent by default (`main.ts` does not supply one --
- *     out of this task's write scope): with no signer, `deliveryExtensions` stays the safe no-op
- *     `() => ({})` it always was. A follow-up task needs to give `main.ts` an actual synchronous
- *     secp256k1 signer (e.g. derived from the operator's own keystore) to activate this in
- *     production; `buildLegacyDeliveryExtensions` below is exported so that follow-up, and this
- *     composition's own tests, can drive the exact same wiring.
+ * NEW GAPS surfaced while closing 1 and 2 above — every one is REPORTED (loud-fail or documented
+ * `undefined`), never silently fabricated:
+ *
+ *  a. `resolveSubmissionBytes` / `resolveDispatchContext` (the enrich ports `createProjectorEnrich`
+ *     needs, `./projector-enrich.js`): for `BASE_SEPOLIA_TODAY` (today generation, the only real
+ *     `MarketplaceChainConfig` per finding E22), there is no on-chain Submission/dispatch-context
+ *     anchor at all, and NO production path anywhere in `client/src` produces a TEP
+ *     `SubmissionRecordSchema` document for a today-generation task (the legacy `CreatorLoop`
+ *     posts the older `SignedTaskV1` shape, which fails TEP schema validation), nor durably
+ *     persists a dispatch-context document keyed by taskId in a way this composition can read
+ *     BEFORE the venue exists (venue-base's own `submission_scopes` table -- the only production
+ *     dispatch-context store found -- is keyed by revised-generation requester/idempotencyKey and
+ *     is never populated for today-generation router/mech claims). Both ports are wired to always
+ *     report unresolvable (`undefined`), which `createProjectorEnrich` already treats as a
+ *     correct fail-closed drop (never fabricated, retried next tick). Practical consequence: no
+ *     event is ever admitted from live chain traffic today, so `observations` stays empty in
+ *     practice even though the STREAM machinery reading it is real (see (b) below for what
+ *     that implies downstream).
+ *  b. `verifyVerdictObservation` and `resolveRecord` for the `"delivery"` / `"evaluation-delivery"`
+ *     roles (the announcement ports `projectAnnouncements` needs, `./projector-ports.js`):
+ *     `verifyVerdictObservation`'s real form needs the SAME Phase-B binding-resolver backing
+ *     stores (`BindingStore`/`AnchorReadClient`/policy) already named absent by the old gap 2 --
+ *     confirmed again independently via `VerdictObservationGatePorts`
+ *     (`packages/marketplace/binding/src/named-checks.ts`). `resolveRecord` for delivery roles has
+ *     no lookup mechanism anywhere (no local cache of this operator's own delivered bytes keyed
+ *     by the claiming event). Both loudly throw a named error rather than returning empty/fake
+ *     material; `projectAnnouncements` treats a `verifyVerdictObservation` throw as a refusal
+ *     (fail-closed) and a `resolveRecord` throw as a failed (non-fatal, logged, retried) tick.
+ *     Because of (a), `transition.events` is always empty in this composition today, so neither
+ *     of these is actually reachable yet -- they exist so a FUTURE fix to (a) fails loud instead
+ *     of silently fabricating discovery entries.
+ *  c. Discovery-announcement signer / executor-binding key: no persistent per-operator Ed25519
+ *     signing identity exists anywhere in the repo for either purpose (discovery-entry signing or
+ *     the executor-binding DSSE envelope C6 checks for). A single ephemeral Ed25519 keypair is
+ *     generated per composition boot and used for both -- genuinely functional cryptography (a
+ *     signature under this key really does verify), but nothing yet treats this specific key as a
+ *     trusted, stable operator identity. `checkExecutorBinding` will legitimately report
+ *     `"missing"` against every real delivery until a persistent key AND a producer of the
+ *     `EXECUTOR_BINDING_EXTENSION_URI` envelope both exist (C7's bridge signs a DIFFERENT,
+ *     secp256k1 envelope -- see `bridge-legacy-delivery.ts`).
+ *  d. Double venue-state open (recorded per the task's own instruction, not worked around):
+ *     `createProjectorLogSource` needs an already-open `VenueStateDatabase`, opened here via
+ *     `openVenueState(input.venueStateDbPath)`, BEFORE `createBaseVenue` — but `createBaseVenue`
+ *     has no seam to accept a pre-opened handle and always opens its OWN second connection to the
+ *     SAME file. WAL journaling (venue-base's `openVenueState` enforces `journal_mode = WAL`)
+ *     makes two connections to one SQLite file safe; it is wasteful, not incorrect. Both handles
+ *     are closed on `composition.close()`.
+ *
+ * CLOSED (cutover stage 1 close-out C7, finding E24). `LocalTaskExecutionBackendConfig`'s
+ * `deliveryExtensions` hook now attaches the bridge-era legacy execution envelope for real,
+ * given two things this composition root did not have before: (a) a synchronous signer --
+ * `CompositionRootInput.legacyBridgeSigner`, a new OPTIONAL field, because the only signer
+ * this input carried before (`input.walletClient`) is async-only (remote-signer / hardware-
+ * wallet compatible) and there is still no raw private key anywhere on this input; (b) a
+ * workKind-carrying seam -- `work-loop.ts` now calls the concrete
+ * `LocalTaskExecutionBackend.noteAttemptWorkKind(attemptUri, workKind, requestId)` (exposed
+ * here as `OperatorComposition.noteAttemptWorkKind`) at the SAME point it derives `attemptUri`
+ * for the engagement ledger, strictly before `backend.submit()` -- `attemptUri` is
+ * deterministic (`deriveMarketplaceAttemptUri`) so it is known ahead of submit and matches
+ * exactly what `backend.ts`'s `completeAttempt` later keys its own note lookup by.
+ * `legacyBridgeSigner` stays OPTIONAL and absent by default (`main.ts` does not supply one --
+ * out of this task's write scope): with no signer, `deliveryExtensions` stays the safe no-op
+ * `() => ({})` it always was. A follow-up task needs to give `main.ts` an actual synchronous
+ * secp256k1 signer (e.g. derived from the operator's own keystore) to activate this in
+ * production; `buildLegacyDeliveryExtensions` below is exported so that follow-up, and this
+ * composition's own tests, can drive the exact same wiring.
  */
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 import type { Address, PublicClient, WalletClient } from 'viem';
-import { createBaseVenue, type BaseVenue } from '@jinn-network/marketplace-venue-base';
+import {
+  createBaseVenue,
+  openVenueState,
+  type BaseVenue,
+} from '@jinn-network/marketplace-venue-base';
 import type {
   ClaimPorts,
   MarketplaceChainConfig,
-  SettlementPorts,
 } from '@jinn-network/marketplace-binding';
 import { createRegistryPinPort } from '@jinn-network/marketplace-binding';
 import {
@@ -73,12 +113,6 @@ import {
   type PipelineConfig,
   type PipelinePorts,
 } from '@jinn-network/marketplace-pipeline';
-import {
-  createAnchorResolver,
-  createBindingResolver,
-  createChainFactResolver,
-  type BindingStore,
-} from '@jinn-network/trust-resolve';
 import {
   LocalTaskExecutionBackend,
   type LocalTaskExecutionBackendConfig,
@@ -103,13 +137,31 @@ import {
 // it at all).
 import type { ProfileStore } from '@jinn-network/task-execution-profiles';
 import type { JsonValue, ProtocolObservation } from '@jinn-network/task-execution-protocol';
+import { DISCOVERY_SIGNING_SCOPE, RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
+import type {
+  AnnouncementRecordMaterial,
+  AnnouncementRecordRole,
+  ObservationMarketplaceEvent,
+  ScopedDiscoverySigner,
+} from '@jinn-network/marketplace-projector';
 import { buildInfo } from '../build-info.js';
 import type { JinnConfig } from '../config.js';
 import type { ClaimPolicyConfig } from '../config/shape-v2.js';
 import { toPipelineWiring } from '../config/shape-v2.js';
 import type { VenueBroadcaster } from '../adapters/mech/safe.js';
+import type { Store } from '../store/store.js';
+import { fetchRawBytesFromIpfs } from '../adapters/mech/ipfs.js';
 import { openOperatorEvidence, type OperatorEvidence } from './evidence-join.js';
 import { buildLegacyExecutionEnvelope, LEGACY_ENVELOPE_EXTENSION_KEY } from './bridge-legacy-delivery.js';
+import { EngagementLedger } from './engagement-ledger.js';
+import { buildVerifySettlementGrade as buildRealVerifySettlementGrade } from './settlement-grade.js';
+import { createProjectorCatchUpGate, type ClaimGate } from './claim-gate.js';
+import { createFinalizedHeadReader, createProjectorLogSource } from './projector-log-source.js';
+import { createProjectorEnrich, type ProjectorEnrichPorts } from './projector-enrich.js';
+import { ProjectorCursorStore } from './projector-cursor.js';
+import { ProjectorLoop } from './projector-loop.js';
+import type { ProjectorPortsInput } from './projector-ports.js';
+import type { AnnouncedSubmissionCard, SealedDocuments } from './work-loop.js';
 
 export interface OperatorComposition {
   readonly backend: TaskExecutionBackend;
@@ -135,6 +187,24 @@ export interface OperatorComposition {
    * never supplied to this composition -- still safe to call unconditionally.
    */
   readonly noteAttemptWorkKind: (attempt: AttemptUri, workKind: string, requestId?: `0x${string}`) => void;
+  /**
+   * C8: the projector loop, fully constructed against real ports (C3 log source, C4 enrich, C5
+   * durable observations). The host (`daemon.ts`) owns starting/stopping it and registering it
+   * with the watchdog. `hasCaughtUp()` is contract 3's claim-gate signal — see `claimGate` below,
+   * which already wraps it.
+   */
+  readonly projector: ProjectorLoop;
+  /** Contract 3: opens once the projector's durable cursor reaches the finalized chain head. */
+  readonly claimGate: ClaimGate;
+  /** The engagement ledger this composition's `verifySettlementGrade` (C6) reads from — the same
+   * instance the work loop's `WorkLoopConfig.ledger` must be threaded, per contract 2. */
+  readonly engagementLedger: EngagementLedger;
+  /**
+   * Fetches the sealed Task/Submission document bytes for a discovered card
+   * (`WorkLoopConfig.readSealedDocuments`), via the same IPFS ports this composition already
+   * holds for the projector's enrich step.
+   */
+  readonly readSealedDocuments: (card: AnnouncedSubmissionCard) => Promise<SealedDocuments>;
   close(): Promise<void>;
 }
 
@@ -160,6 +230,14 @@ export interface CompositionRootInput {
    * always was.
    */
   readonly legacyBridgeSigner?: (hash: `0x${string}`) => `0x${string}`;
+  /**
+   * C8: the daemon's shared SQLite `Store` — backs the projector's durable cursor/observations
+   * (C5, `ProjectorCursorStore`) and the engagement ledger (C6). Required so this composition can
+   * assemble a real `ProjectorLoop`/`ClaimGate`/`EngagementLedger` rather than stubs.
+   */
+  readonly store: Store;
+  /** Projector poll interval (ms). Defaults to 5000, matching `LOOP_REGISTRY`'s entry. */
+  readonly projectorPollIntervalMs?: number;
   readonly logger?: { info(m: string): void; warn(m: string): void };
 }
 
@@ -324,42 +402,18 @@ function buildProvisioner(runtime: WorkspaceRuntimePorts) {
   });
 }
 
-// ── Settlement-grade verification (gap 2 — see file header) ─────────────────
+// ── Settlement-grade verification (CLOSED at C8 — see file header items 2, c) ───────────────
+//
+// `createBindingResolver`/`createChainFactResolver` (Phase-B binding-registry machinery) are
+// deliberately NOT composed here: their `BindingStore`/`AnchorReadClient` backing stores don't
+// exist anywhere in the repo (file header, new gap b), and C6's real `verifySettlementGrade`
+// (`./settlement-grade.js`) does not consume them either — its `executorBinding` check is a
+// genuine DSSE/Ed25519 verification that needs only a keyid + public key, not a binding resolver.
 
-function buildVerifySettlementGrade(input: {
-  readonly rpcUrl: string;
-  readonly identityRegistryAddress: string | undefined;
-}): SettlementPorts['verifySettlementGrade'] {
-  const emptyBindingStore: BindingStore = {
-    listBindingsForAgent: async () => [],
-    listRevocationsForTargets: async () => [],
-  };
-  const emptyAnchorResolver = createAnchorResolver({ client: { lookupAnchor: async () => null } });
-  const chainFacts =
-    input.identityRegistryAddress === undefined
-      ? undefined
-      : createChainFactResolver({
-          rpcUrl: input.rpcUrl,
-          identityRegistry: input.identityRegistryAddress,
-        });
-  // Composed per the plan's instruction so the wiring is real, not just typed — not yet
-  // load-bearing until a real BindingStore/AnchorReadClient exists (gap 2, file header).
-  const bindingResolver = createBindingResolver({
-    bindings: emptyBindingStore,
-    anchors: emptyAnchorResolver,
-    ...(chainFacts === undefined ? {} : { chainFacts }),
-  });
-  void bindingResolver;
-
-  const GAP_DETAIL = 'binding-registry infra not yet wired (composition-root gap 2)';
-  return async (verificationInput) => ({
-    executorBinding: { status: 'missing', detail: GAP_DETAIL },
-    dispatchBinding: { status: 'missing', detail: GAP_DETAIL },
-    evaluationSpecification:
-      verificationInput.attempt.taskEvaluationDigest === undefined
-        ? { status: 'not-applicable' }
-        : { status: 'missing', detail: GAP_DETAIL },
-  });
+/** Ephemeral per-boot Ed25519 identity — see file header item c. */
+function buildEphemeralExecutorKey(): { readonly keyId: string; readonly publicKey: import('node:crypto').KeyObject; readonly privateKey: import('node:crypto').KeyObject } {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  return { keyId: 'ephemeral-composition-key', publicKey, privateKey };
 }
 
 // ── Legacy bridge delivery extension (gap 3, closed — see file header) ──────
@@ -409,10 +463,250 @@ export function buildLegacyDeliveryExtensions(input: {
   };
 }
 
-// ── Observation feed (gap 1 — see file header) ───────────────────────────────
+// ── Projector wiring (CLOSED at C8 — see file header items 1, a, b, c, d) ────────────────────
+//
+// `TaskCoordinator.getRequestRef` / `getAttempt` — mirrors
+// `packages/marketplace/venue-base/src/writers/settlement.ts`'s (non-exported)
+// `readRouterDeliveryFacts` today-generation read exactly, per that module's own doc comment
+// directing a host-injected port to do this read rather than duplicate it inside the enrich
+// module itself.
+const REQUEST_REF_VIEW_ABI = [{
+  name: 'getRequestRef', type: 'function', stateMutability: 'view',
+  inputs: [{ name: 'requestId', type: 'bytes32' }],
+  outputs: [
+    { name: 'taskId', type: 'uint256' },
+    { name: 'attemptIndex', type: 'uint32' },
+    { name: 'exists', type: 'bool' },
+  ],
+}] as const;
 
-function buildObservations(): () => Promise<readonly ProtocolObservation[]> {
-  return async () => [];
+const GET_ATTEMPT_VIEW_ABI = [{
+  name: 'getAttempt', type: 'function', stateMutability: 'view',
+  inputs: [
+    { name: 'taskId', type: 'uint256' },
+    { name: 'attemptIndex', type: 'uint32' },
+  ],
+  outputs: [{
+    name: 'attempt', type: 'tuple',
+    components: [
+      { name: 'taskId', type: 'uint256' },
+      { name: 'attemptIndex', type: 'uint32' },
+      { name: 'operator', type: 'address' },
+      { name: 'requestId', type: 'bytes32' },
+      { name: 'solutionCidDigest', type: 'bytes32' },
+      { name: 'solutionWeight', type: 'uint256' },
+      { name: 'verdictCount', type: 'uint32' },
+      { name: 'status', type: 'uint8' },
+    ],
+  }],
+}] as const;
+
+/** Real (gap 1 CLOSED): a raw sha256-digest IPFS fetch, reusing the existing gateway machinery
+ * (`client/src/adapters/mech/ipfs.ts`) already proven for the rest of the daemon. */
+function buildFetchIpfsBytes(gatewayUrl: string): (digest: `sha256:${string}`) => Promise<Uint8Array | undefined> {
+  return async (digest) => {
+    const hex = digest.slice('sha256:'.length);
+    try {
+      return await fetchRawBytesFromIpfs(gatewayUrl, `f01551220${hex}`);
+    } catch {
+      return undefined;
+    }
+  };
+}
+
+/** Real (gap 1 CLOSED): today-generation on-chain delivery-fact read via `TaskCoordinator`. */
+function buildReadTodayDeliveryFacts(
+  publicClient: PublicClient,
+  taskCoordinator: Address,
+): ProjectorEnrichPorts['readTodayDeliveryFacts'] {
+  return async (requestId) => {
+    try {
+      const [taskId, attemptIndex, exists] = await publicClient.readContract({
+        address: taskCoordinator,
+        abi: REQUEST_REF_VIEW_ABI,
+        functionName: 'getRequestRef',
+        args: [requestId],
+      });
+      if (!exists) return undefined;
+      const attempt = await publicClient.readContract({
+        address: taskCoordinator,
+        abi: GET_ATTEMPT_VIEW_ABI,
+        functionName: 'getAttempt',
+        args: [taskId, attemptIndex],
+      });
+      return { taskId, attemptIndex, onChainKeccak: attempt.solutionCidDigest };
+    } catch {
+      return undefined;
+    }
+  };
+}
+
+/**
+ * New gap (a, file header): no production path resolves a TEP Submission or a dispatch-context
+ * document for a today-generation task anywhere in `client/src` — see the file header for why.
+ * Fails closed (`undefined`), which `createProjectorEnrich` already treats as "drop this event,
+ * retry next tick" — never a fabricated value. Logs the gap once, not once per event.
+ */
+function buildUnresolvedEnrichIdentityPorts(logger?: { warn(m: string): void }): {
+  readonly resolveSubmissionBytes: ProjectorEnrichPorts['resolveSubmissionBytes'];
+  readonly resolveDispatchContext: ProjectorEnrichPorts['resolveDispatchContext'];
+} {
+  let warned = false;
+  function warnOnce(): void {
+    if (warned) return;
+    warned = true;
+    logger?.warn(
+      '[composition-root] no production Submission/dispatch-context resolver exists for '
+      + 'today-generation tasks yet (file header gap a) — every projector event will be dropped '
+      + 'until a follow-up task builds one',
+    );
+  }
+  return {
+    resolveSubmissionBytes: async () => {
+      warnOnce();
+      return undefined;
+    },
+    resolveDispatchContext: async () => {
+      warnOnce();
+      return undefined;
+    },
+  };
+}
+
+/** New gap (b, file header): no Phase-B binding-resolver backing stores exist to verify a
+ * Result Evaluation Statement's decision-grade gate for real. Loudly refuses rather than
+ * fabricating a "verified" (or silently empty) result — `projectAnnouncements` turns this throw
+ * into a fail-closed refusal, never a silent pass. */
+function verifyVerdictObservationGap(): never {
+  throw new Error(
+    'verifyVerdictObservation has no production implementation: the Phase-B binding-resolver '
+    + 'backing stores (BindingStore/AnchorReadClient/policy) do not exist anywhere in the repo '
+    + '(composition-root.ts file header gap b)',
+  );
+}
+
+/** Real for "submission" (reuses `resolveSubmissionBytes`, gap a above); new gap (b) for
+ * "delivery"/"evaluation-delivery" — no lookup mechanism exists to resolve a Delivery's bytes
+ * from an on-chain-observed event alone. Both cases are unreachable in this composition today
+ * because gap (a) already drops every event before `resolveRecord` could ever be called — kept
+ * honest (throwing, not fabricating) so a future fix to (a) fails loud instead of silent. */
+function buildResolveRecord(
+  resolveSubmissionBytes: ProjectorEnrichPorts['resolveSubmissionBytes'],
+  chain: MarketplaceChainConfig,
+): (event: ObservationMarketplaceEvent, role: AnnouncementRecordRole) => Promise<AnnouncementRecordMaterial> {
+  return async (event, role) => {
+    if (role === 'submission' && 'taskId' in event.facts) {
+      const bytes = await resolveSubmissionBytes({
+        chainId: event.derivation.chainId,
+        taskCoordinator: chain.taskCoordinator,
+        taskId: event.facts.taskId,
+        generation: event.derivation.contractGeneration,
+      });
+      if (bytes !== undefined) return { kind: RECORD_KINDS.submission, bytes };
+    }
+    throw new Error(
+      `resolveRecord has no production implementation for role "${role}" (composition-root.ts `
+      + 'file header gap b)',
+    );
+  };
+}
+
+/**
+ * Assembles a fully-real `ProjectorLoop` (C3 log source, C4 enrich, C5 durable observations) plus
+ * the `ClaimGate` (contract 3) that wraps its `hasCaughtUp()`. Opens its OWN `VenueStateDatabase`
+ * handle via venue-base's `openVenueState` (file header gap d — a second, separate connection
+ * from whatever `createBaseVenue` opens internally to the SAME file; WAL-safe, documented rather
+ * than worked around) — the caller closes it.
+ */
+function buildProjector(input: {
+  readonly chain: MarketplaceChainConfig;
+  readonly publicClient: PublicClient;
+  readonly mechAddress: Address;
+  readonly venueStateDbPath: string;
+  readonly ipfsGatewayUrl: string;
+  readonly store: Store;
+  readonly pollIntervalMs: number;
+  readonly logger?: { info(m: string): void; warn(m: string): void };
+}): {
+  readonly projector: ProjectorLoop;
+  readonly claimGate: ClaimGate;
+  readonly observations: () => Promise<readonly ProtocolObservation[]>;
+  readonly closeState: () => void;
+} {
+  // Per finding E4 / C3's own docstring: this state handle, and the projector built from it,
+  // exist BEFORE `createBaseVenue` — `BaseVenueConfig.observations` below needs the already-built
+  // cursor store.
+  const venueState = openVenueState(input.venueStateDbPath);
+  const cursorKey = `${input.chain.chainId}:${input.chain.taskCoordinator.toLowerCase()}`;
+  const cursorStore = new ProjectorCursorStore(input.store, cursorKey);
+
+  const isAuthorizedMechOrigin = (address: Address): boolean =>
+    address.toLowerCase() === input.mechAddress.toLowerCase();
+
+  const logSource = createProjectorLogSource({
+    chain: input.chain,
+    publicClient: input.publicClient,
+    state: venueState,
+    mechAddresses: [input.mechAddress],
+  });
+
+  const fetchIpfsBytes = buildFetchIpfsBytes(input.ipfsGatewayUrl);
+  const identityPorts = buildUnresolvedEnrichIdentityPorts(input.logger);
+  const enrich = createProjectorEnrich({
+    chain: input.chain,
+    publicClient: input.publicClient,
+    fetchIpfsBytes,
+    resolveSubmissionBytes: identityPorts.resolveSubmissionBytes,
+    resolveDispatchContext: identityPorts.resolveDispatchContext,
+    readTodayDeliveryFacts: buildReadTodayDeliveryFacts(input.publicClient, input.chain.taskCoordinator),
+    ...(input.logger === undefined ? {} : { logger: input.logger }),
+  });
+
+  // Discovery-announcement signer (file header gap c): ephemeral per-boot Ed25519 identity —
+  // genuinely functional DSSE signing, no persistent operator discovery key exists yet.
+  const discoveryKey = generateKeyPairSync('ed25519');
+  const signer: ScopedDiscoverySigner = {
+    scope: DISCOVERY_SIGNING_SCOPE,
+    sign: async (pae) => [{ keyid: 'ephemeral-discovery-key', sig: new Uint8Array(cryptoSign(null, pae, discoveryKey.privateKey)) }],
+  };
+
+  const pageCountKey = `projector-page-count:${cursorKey}`;
+  const ports: ProjectorPortsInput = {
+    source: { agent: `urn:jinn:operator:${input.mechAddress.toLowerCase()}`, name: 'operator-projector' },
+    signer,
+    archiveRoot: join(input.venueStateDbPath, '..', 'discovery-archive'),
+    resolveRecord: buildResolveRecord(identityPorts.resolveSubmissionBytes, input.chain),
+    verifyVerdictObservation: verifyVerdictObservationGap,
+    referencedBytes: { fetch: fetchIpfsBytes },
+    readPageCount: () => Number.parseInt(input.store.getConfigValue(pageCountKey) ?? '0', 10),
+    writePageCount: (count) => input.store.setConfigValue(pageCountKey, String(count)),
+  };
+
+  const projector = new ProjectorLoop({
+    chain: input.chain,
+    logSource,
+    cursorStore,
+    ports,
+    enrich,
+    pollIntervalMs: input.pollIntervalMs,
+    store: input.store,
+    isAuthorizedMechOrigin,
+    readFinalizedBlockNumber: createFinalizedHeadReader(input.publicClient),
+    ...(input.logger === undefined ? {} : { logger: input.logger }),
+  });
+
+  const claimGate = createProjectorCatchUpGate({
+    hasCaughtUp: () => projector.hasCaughtUp(),
+    pollIntervalMs: input.pollIntervalMs,
+    ...(input.logger === undefined ? {} : { logger: input.logger }),
+  });
+
+  return {
+    projector,
+    claimGate,
+    observations: async () => cursorStore.readObservations(),
+    closeState: () => venueState.close(),
+  };
 }
 
 // ── Capability grants ────────────────────────────────────────────────────────
@@ -434,12 +728,32 @@ export async function buildOperatorComposition(
 ): Promise<OperatorComposition> {
   const { config } = input;
 
-  const observations = buildObservations();
   const fetchImpl = globalThis.fetch;
   const ipfsPin = createRegistryPinPort({ registryUrl: config.ipfsRegistryUrl, fetchImpl });
-  const verifySettlementGrade = buildVerifySettlementGrade({
-    rpcUrl: config.rpcUrl,
-    identityRegistryAddress: input.identityRegistryAddress,
+
+  // C8: the projector (log source + enrich + durable observations) is constructed BEFORE the
+  // venue — `BaseVenueConfig.observations` below needs the already-built cursor store (finding
+  // E4 / C3's own docstring).
+  const { projector, claimGate, observations, closeState } = buildProjector({
+    chain: input.chain,
+    publicClient: input.publicClient,
+    mechAddress: input.mechAddress,
+    venueStateDbPath: input.venueStateDbPath,
+    ipfsGatewayUrl: config.ipfsGatewayUrl,
+    store: input.store,
+    pollIntervalMs: input.projectorPollIntervalMs ?? 5000,
+    ...(input.logger === undefined ? {} : { logger: input.logger }),
+  });
+
+  // C6: the real `verifySettlementGrade`, wired against this composition's own engagement ledger
+  // and profile store — replaces the deleted fail-closed stub (file header items 2, c).
+  const engagementLedger = new EngagementLedger(input.store);
+  const executorKey = buildEphemeralExecutorKey();
+  const verifySettlementGrade = buildRealVerifySettlementGrade({
+    profileStore: input.profileStore,
+    engagementLedger,
+    executorKeyId: executorKey.keyId,
+    executorPublicKey: executorKey.publicKey,
   });
 
   // `viem` is a direct `dependencies` entry of venue-base / binding / projector, and each
@@ -541,6 +855,22 @@ export async function buildOperatorComposition(
     release: venue.release,
   };
 
+  const fetchIpfsBytes = buildFetchIpfsBytes(config.ipfsGatewayUrl);
+  const readSealedDocuments = async (card: AnnouncedSubmissionCard): Promise<SealedDocuments> => {
+    const taskDigest = card.facts['taskDigest'];
+    if (typeof taskDigest !== 'string' || !taskDigest.startsWith('sha256:')) {
+      throw new Error(`readSealedDocuments: card carries no valid taskDigest fact (${card.chain.submission})`);
+    }
+    const [taskBytes, submissionBytes] = await Promise.all([
+      fetchIpfsBytes(taskDigest as `sha256:${string}`),
+      fetchIpfsBytes(card.record.digest),
+    ]);
+    if (taskBytes === undefined || submissionBytes === undefined) {
+      throw new Error(`readSealedDocuments: could not resolve sealed documents for ${card.chain.submission}`);
+    }
+    return { taskBytes, submissionBytes };
+  };
+
   return {
     backend,
     pipelineConfig,
@@ -553,9 +883,16 @@ export async function buildOperatorComposition(
     broadcaster,
     noteAttemptWorkKind: (attempt, workKind, requestId) =>
       backend.noteAttemptWorkKind(attempt, workKind, requestId),
+    projector,
+    claimGate,
+    engagementLedger,
+    readSealedDocuments,
     async close(): Promise<void> {
       await evidence.close();
       venue.close();
+      // File header gap d: this composition's OWN `openVenueState` handle for the projector's
+      // log source, distinct from `createBaseVenue`'s own separate connection to the same file.
+      closeState();
     },
   };
 }

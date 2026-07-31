@@ -2164,14 +2164,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     }
   }
 
-  // ── Stage-1 cutover composition root (Task 12) ─────────────────────────────
+  // ── Stage-1 cutover composition root (Task 12; loops started at close-out C8) ──────────────
   //
   // Testnet-only: `MarketplaceChainConfig` (TaskCoordinator/JinnRouterV3 addresses) is only
   // defined for Base Sepolia (`@jinn-network/marketplace-binding`'s `BASE_SEPOLIA_TODAY`) — no
   // equivalent contracts are deployed on Base mainnet yet (see CLAUDE.md's Phase 2 rollout).
-  // `composition` stays `undefined` on mainnet; `DaemonConfig.composition` is optional and
-  // Task 13 owns starting the loops that would actually drive it.
+  // `composition` stays `undefined` on mainnet; `DaemonConfig.composition` is optional and the
+  // `work`/projector/evidence-driver config below is gated on it being defined.
   let composition: import('./daemon/composition-root.js').OperatorComposition | undefined;
+  let workLoopConfig: Omit<import('./daemon/work-loop.js').WorkLoopConfig, 'composition' | 'store'> | undefined;
   if (config.network === 'testnet') {
     const { buildOperatorComposition } = await import('./daemon/composition-root.js');
     const { BASE_SEPOLIA_TODAY } = await import('@jinn-network/marketplace-binding');
@@ -2192,6 +2193,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       evidenceRoot: join(config.earningDir, '..', 'evidence'),
       venueStateDbPath: join(config.earningDir, '..', 'venue', 'venue.db'),
       profileStore: { get: (digest) => profilesByDigest.get(digest) },
+      store: sharedStore,
       ...(identityRegistryAddress ? { identityRegistryAddress } : {}),
     });
 
@@ -2206,6 +2208,23 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     adapter.setBroadcaster(composition.broadcaster);
     deliveryDeps.broadcaster = composition.broadcaster;
     reputationFeedback?.client.setBroadcaster(composition.broadcaster);
+
+    // C8: the work loop's own config — `composition`/`store` are supplied by `Daemon` itself.
+    // `archive` is real-but-empty today: the projector's `resolveSubmissionBytes`/
+    // `resolveDispatchContext` have no production backing for today-generation tasks yet
+    // (composition-root.ts file header, gap a), so no event is ever admitted/announced and this
+    // operator's local discovery archive stays empty — traceable to that documented gap, not an
+    // arbitrary stub. `claimGate`/`ledger` reuse the SAME instances `verifySettlementGrade`
+    // already reads (contract 2's dispatch-binding correlation).
+    workLoopConfig = {
+      archive: { since: async () => [] },
+      ledger: composition.engagementLedger,
+      claimGate: composition.claimGate,
+      estimateAiUnits: () => 0,
+      readSealedDocuments: composition.readSealedDocuments,
+      pollIntervalMs: config.pollIntervalMs,
+      acceptLegacyCards: true,
+    };
   }
 
   const daemon = new Daemon({
@@ -2215,6 +2234,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     dbPath: config.dbPath,
     store: sharedStore,
     composition,
+    work: workLoopConfig,
     apiServer: setupApiServer,
     pollIntervalMs: config.pollIntervalMs,
     apiPort: config.apiPort,

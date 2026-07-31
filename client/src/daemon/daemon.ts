@@ -37,6 +37,8 @@ import { blockIdUtc } from '../spend/ai-units.js';
 import { SkipLogDeduper } from './skip-log-dedup.js';
 import type { OperatorComposition } from './composition-root.js';
 import { WorkLoop, type WorkLoopConfig } from './work-loop.js';
+import { EvidenceDriverLoop } from './evidence-driver.js';
+import type { ProjectorLoop } from './projector-loop.js';
 
 type Corpus = CoreCorpus<SignedEnvelope>;
 
@@ -256,25 +258,27 @@ export interface DaemonConfig {
 
   /**
    * The stage-1 cutover composition root (Task 12, `client/src/daemon/composition-root.ts`):
-   * the assembled `LocalTaskExecutionBackend` + marketplace pipeline config/ports + venue.
-   * Optional so the many existing `new Daemon(...)` call sites (unit tests, non-cutover
-   * daemons) keep compiling. Threaded through the constructor only — Task 13 owns starting the
-   * work loop(s) that actually drive it via `start()`.
+   * the assembled `LocalTaskExecutionBackend` + marketplace pipeline config/ports + venue +
+   * (C8) real projector loop + claim gate + engagement ledger. Optional so the many existing
+   * `new Daemon(...)` call sites (unit tests, non-cutover daemons) keep compiling. When present,
+   * `start()` also starts `composition.projector` and an `EvidenceDriverLoop` over
+   * `composition.evidence` (close-out C8) — see `work` below for the third loop.
    */
   composition?: OperatorComposition;
 
   /**
    * The work loop (Task 13, `client/src/daemon/work-loop.ts`): closes the claim-to-settle loop
    * against `composition`. Everything except `composition`/`store`, both of which the daemon
-   * supplies itself. Omitted, or `composition` absent -> the loop is not started. NOTE: this
-   * task's write scope covers only starting `work` here — `projector`/`evidence-driver` are NOT
-   * yet started by `daemon.start()` even though both are already-landed loop classes (Tasks 9,
-   * 11); `ProjectorLoop` in particular cannot be constructed from `composition` alone today (no
-   * `enrich`/`logSource`/`cursorStore`/`isAuthorizedMechOrigin` assembly exists anywhere in
-   * `client/src` — composition-root.ts's own file header names this as known gap 1). See the
-   * Task 13 execution report.
+   * supplies itself. Omitted, or `composition` absent -> the loop is not started.
    */
   work?: Omit<WorkLoopConfig, 'composition' | 'store'>;
+
+  /**
+   * Evidence-driver loop poll interval (ms), close-out C8. Only meaningful when `composition` is
+   * present — the loop drives `composition.evidence`'s local runtime `sync()` and publication
+   * policy (contract 6). Defaults to `LOOP_REGISTRY`'s own `evidence-driver` entry (30000).
+   */
+  evidenceDriverIntervalMs?: number;
 }
 
 export class Daemon {
@@ -298,6 +302,8 @@ export class Daemon {
   private harvestLoop?: HarvestLoop;
   private checkpointLoop?: CheckpointLoop;
   private workLoop?: WorkLoop;
+  private projectorLoop?: ProjectorLoop;
+  private evidenceDriverLoop?: EvidenceDriverLoop;
   private watchdogLoop?: WatchdogLoop;
   private skipLogDeduper = new SkipLogDeduper();
   private corpus?: Corpus;
@@ -376,6 +382,16 @@ export class Daemon {
     }
     if (config.composition && config.work) {
       this.workLoop = new WorkLoop({ ...config.work, composition: config.composition, store: this.store });
+    }
+    if (config.composition) {
+      // C8: the projector and evidence-driver loops are independent of `work` — both are started
+      // whenever a composition exists, regardless of whether the work loop is configured.
+      this.projectorLoop = config.composition.projector;
+      this.evidenceDriverLoop = new EvidenceDriverLoop({
+        evidence: config.composition.evidence,
+        intervalMs: config.evidenceDriverIntervalMs ?? 30_000,
+        store: this.store,
+      });
     }
   }
 
@@ -579,6 +595,32 @@ export class Daemon {
         }),
       );
     }
+    if (this.projectorLoop) {
+      this.loopPromises.push(
+        this.projectorLoop.run().catch(err => {
+          console.error('[daemon] projector loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'projector loop crashed',
+            errorCode: 'projector_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
+    if (this.evidenceDriverLoop) {
+      this.loopPromises.push(
+        this.evidenceDriverLoop.run().catch(err => {
+          console.error('[daemon] evidence-driver loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'evidence-driver loop crashed',
+            errorCode: 'evidence_driver_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
     // #1043 loop watchdog. Inert unless config.watchdog is supplied.
     //
     // IDEMPOTENCY (AC#3): the only recovery action is the watchdog's non-zero
@@ -601,6 +643,8 @@ export class Daemon {
       if (this.checkpointLoop) started.add('checkpoint');
       if (this.harvestLoop) started.add('harvest');
       if (this.workLoop) started.add('work');
+      if (this.projectorLoop) started.add('projector');
+      if (this.evidenceDriverLoop) started.add('evidence-driver');
       if (peers.length > 0) started.add('peer-sync');
       const overrides: Partial<Record<LoopName, number>> = {
         'engine-tick': interval,
@@ -610,6 +654,7 @@ export class Daemon {
         checkpoint: this.config.checkpoint?.intervalMs,
         harvest: this.config.harvest?.intervalMs,
         work: this.config.work?.pollIntervalMs,
+        'evidence-driver': this.config.evidenceDriverIntervalMs,
       };
       const registrations: WatchdogLoopRegistration[] = LOOP_REGISTRY
         .filter(r => started.has(r.name))
@@ -666,6 +711,8 @@ export class Daemon {
     this.harvestLoop?.stop();
     this.checkpointLoop?.stop();
     this.workLoop?.stop();
+    this.projectorLoop?.stop();
+    this.evidenceDriverLoop?.stop();
     this.peerSync?.stop();
     this.watchdogLoop?.stop();
 
