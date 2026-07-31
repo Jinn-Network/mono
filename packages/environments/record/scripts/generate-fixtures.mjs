@@ -98,6 +98,13 @@ const invalid = {
     document.invocations.test = [{ bin: "bash", args: ["-c", "pytest -q && echo done"] }];
     return document;
   },
+  "shell-command-exe-spelling": () => {
+    const document = imported();
+    // Nothing here trips the metacharacter rule — only the interpreter ban stands between
+    // this record and a literal shell invocation, and it has to see through the spelling.
+    document.invocations.test = [{ bin: "Bash.exe", args: ["-c", "pytest -q"] }];
+    return document;
+  },
   "bare-extension-key": () => ({ ...imported(), note: "not namespaced" }),
   "bare-hex-manifest-digest": () => {
     const document = imported();
@@ -110,7 +117,7 @@ const invalid = {
 const adversarial = {
   "index-digest-as-manifest": {
     description:
-      "The multi-arch index digest presented as the platform manifest digest. Behaviour claims "
+      "The multi-arch index digest presented as the platform manifest digest. Behavior claims "
       + "are per-platform facts; an index-level record would be a lie by aggregation.",
     expectedDisposition: "invalid-document",
     document: invalid["index-digest-as-manifest"],
@@ -126,6 +133,13 @@ const adversarial = {
     description: "An invocation that reintroduces shell interpolation by naming a shell as bin.",
     expectedDisposition: "invalid-document",
     document: invalid["shell-command"],
+  },
+  "shell-command-exe-spelling": {
+    description:
+      "The same shell invocation spelled to walk past a literal interpreter list: mixed case and "
+      + "a .exe suffix, with no metacharacter anywhere for the second rule to catch.",
+    expectedDisposition: "invalid-document",
+    document: invalid["shell-command-exe-spelling"],
   },
   "bare-extension-key": {
     description: "An un-namespaced extension key, indistinguishable from a smuggled core field.",

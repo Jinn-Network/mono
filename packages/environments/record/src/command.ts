@@ -3,11 +3,12 @@ import { z } from "zod";
 /**
  * Basenames this schema refuses as `bin`. A record that names a shell and passes a script
  * in `args` has reintroduced shell interpolation through the back door, which §4.2 forbids
- * outright.
+ * outright. Matching is over the **normalized** basename (see `normalizeBasename`), so this
+ * list spells each interpreter once and still catches `bash.exe`, `/bin/SH`, and `Bash`.
  */
 export const SHELL_INTERPRETERS = Object.freeze([
   "sh", "bash", "zsh", "dash", "ash", "ksh", "csh", "tcsh", "fish",
-  "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe",
+  "cmd", "powershell", "pwsh",
   "env",
 ] as const);
 
@@ -36,6 +37,20 @@ function basename(path: string): string {
 }
 
 /**
+ * Folds away the two spellings that make the interpreter ban a spelling test rather than a
+ * rule: case (`/bin/SH`, `Bash` — the filesystems that carry these names are case-folding)
+ * and a Windows executable suffix (`bash.exe`). Both the runtime refinement and the
+ * published schema's `SHELL_INTERPRETER_PATTERN` normalize the same way, so the two surfaces
+ * reach the same verdict.
+ */
+function normalizeBasename(name: string): string {
+  const lowercase = name.toLowerCase();
+  return lowercase.endsWith(".exe") ? lowercase.slice(0, -".exe".length) : lowercase;
+}
+
+const interpreter = new Set<string>(SHELL_INTERPRETERS.map(normalizeBasename));
+
+/**
  * Basenames a `bin` value names. A `bin` is one executable path, so this is normally one
  * name — but `"/usr/bin/env bash"` is a command line smuggled into the field, and its
  * whole-string basename (`"env bash"`) matches no interpreter. Splitting on whitespace
@@ -61,8 +76,7 @@ const EnvironmentVariableName = z
  */
 export const CommandSpecSchema = z.strictObject({
   bin: shellFreeString("bin").refine(
-    (value) => !binBasenames(value)
-      .some((name) => (SHELL_INTERPRETERS as readonly string[]).includes(name)),
+    (value) => !binBasenames(value).some((name) => interpreter.has(normalizeBasename(name))),
     { message: "bin must not be a shell interpreter; commands are shell-free (§4.2)" },
   ),
   args: z.array(shellFreeString("arg")),

@@ -41,7 +41,7 @@ export const environmentRecompute: RecordFactRecompute = async (bytes) => {
 /**
  * The leaf's `FactsRecompute` registry entry: the host assembles the tree-wide registry by
  * merging each leaf's export. Unknown kinds return `undefined`, preserving discovery's
- * unknown-kind skip behaviour.
+ * unknown-kind skip behavior.
  */
 export const ENVIRONMENTS_FACTS_RECOMPUTE: FactsRecompute = {
   get(kind: string): RecordFactRecompute | undefined {

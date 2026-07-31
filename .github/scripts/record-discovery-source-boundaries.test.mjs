@@ -331,6 +331,9 @@ test('record-discovery-facts-task-execution production source stays within its a
 
 test('record-discovery-facts-benchmarking production source stays within its architecture boundary', () => {
   assertBoundary(join(packages, 'facts', 'benchmarking', 'src'), FACTS_BENCHMARKING_FORBIDDEN_PACKAGES);
+});
+
+test('record-discovery-facts-environments production source stays within its architecture boundary', () => {
   assertBoundary(join(packages, 'facts', 'environments', 'src'), FACTS_ENVIRONMENTS_FORBIDDEN_PACKAGES);
 });
 

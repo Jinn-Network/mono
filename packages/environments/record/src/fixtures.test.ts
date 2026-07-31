@@ -23,6 +23,7 @@ const INVALID = [
   "index-digest-as-manifest",
   "reference-not-ending-in-digest",
   "shell-command",
+  "shell-command-exe-spelling",
   "bare-extension-key",
   "bare-hex-manifest-digest",
 ] as const;
@@ -56,6 +57,7 @@ describe("fixtures", () => {
       "recanonicalized-bytes",
       "reference-not-ending-in-digest",
       "shell-command",
+      "shell-command-exe-spelling",
     ]);
     for (const entry of manifest.fixtures) {
       if (entry.expectedDisposition === "invalid-bytes") {

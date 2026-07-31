@@ -53,6 +53,21 @@ describe("sealing", () => {
     }
   });
 
+  // zod's object copy does not carry a `__proto__` member across, so a document holding one
+  // would seal to bytes that quietly lack it. At a boundary whose whole job is "these bytes
+  // are the record forever", dropping content is worse than refusing it.
+  test("sealWithSchema refuses a __proto__ member rather than silently dropping it", () => {
+    const document = JSON.parse('{"alpha":1,"beta":"two","__proto__":{"polluted":true}}') as unknown;
+    expect(() => sealWithSchema(Example, document)).toThrow(InvalidDocumentError);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  test("sealWithSchema refuses a nested __proto__ member too", () => {
+    const Nested = z.strictObject({ inner: z.looseObject({ mechanism: z.string() }) });
+    const document = JSON.parse('{"inner":{"mechanism":"m","__proto__":{"x":1}}}') as unknown;
+    expect(() => sealWithSchema(Nested, document)).toThrow(InvalidDocumentError);
+  });
+
   test("parseExactWithSchema round-trips sealed bytes", () => {
     const bytes = sealWithSchema(Example, { alpha: 1, beta: "two" });
     expect(parseExactWithSchema(Example, bytes)).toEqual({ alpha: 1, beta: "two" });

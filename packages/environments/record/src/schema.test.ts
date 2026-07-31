@@ -208,6 +208,26 @@ describe("environment record schema", () => {
     ).toBe(true);
   });
 
+  // The namespacing rule is a TOP-LEVEL rule. Two nested nodes are open by declaration —
+  // `build.recipe` is an in-toto ResourceDescriptor (open by that standard) and
+  // `build.dependencyPinning` carries mechanism-specific members — and inside them a bare
+  // key is legitimate. Pinned here so the exemption is a decision, not an accident.
+  test("open nested nodes accept bare members; the top level still does not", () => {
+    const withBareNestedKeys = {
+      ...record(),
+      build: {
+        reproducibilityTier: 1,
+        recipe: { name: "Dockerfile", digest: { sha256: "d".repeat(64) }, bare: "kept" },
+        dependencyPinning: { mechanism: "pip-by-date", note: "kept" },
+      },
+    };
+    const parsed = EnvironmentRecordSchema.safeParse(withBareNestedKeys);
+    expect(parsed.success).toBe(true);
+    expect(JSON.parse(new TextDecoder().decode(sealEnvironmentRecord(withBareNestedKeys))))
+      .toMatchObject({ build: { recipe: { bare: "kept" }, dependencyPinning: { note: "kept" } } });
+    expect(EnvironmentRecordSchema.safeParse({ ...record(), bare: "kept" }).success).toBe(false);
+  });
+
   test("there is no status, health, or expiry field to set", () => {
     for (const key of ["status", "health", "expiresAt", "verified"]) {
       expect(

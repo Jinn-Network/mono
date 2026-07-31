@@ -45,6 +45,15 @@ describe("namespaced extension keys", () => {
     expect(isNamespacedExtensionKey("")).toBe(false);
   });
 
+  // `new URL` tolerates whitespace by percent-encoding it, which the published schema's
+  // `[^\s]+` does not. Sealing a key this package accepts and the schema it publishes
+  // rejects would hand a third party a different verdict on the same record.
+  test("rejects a URI name carrying whitespace, as the published schema does", () => {
+    expect(isNamespacedExtensionKey("http://example.test/ext a")).toBe(false);
+    expect(isNamespacedExtensionKey("http://example.test/\text")).toBe(false);
+    expect(isNamespacedExtensionKey("http://example.test/ext")).toBe(true);
+  });
+
   test("topLevelRecordSchema admits namespaced extras and refuses bare ones", () => {
     const schema = topLevelRecordSchema({ known: z.string() });
     expect(schema.safeParse({ known: "a", "network.jinn.note": "kept" }).success).toBe(true);

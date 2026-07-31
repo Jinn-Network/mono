@@ -34,10 +34,35 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
 }
 
 /**
+ * `JSON.parse` gives `__proto__` as an ordinary own member, but zod's object copy assigns
+ * through the prototype setter and the member never reaches the output. Validation would
+ * therefore succeed and the sealed bytes would quietly lack content the producer handed in.
+ * A seal that drops a member is worse than one that refuses the document, so this refuses.
+ */
+function assertNoPrototypeMember(value: unknown, path: string): void {
+  if (Array.isArray(value)) {
+    value.forEach((element, index) => assertNoPrototypeMember(element, `${path}${path ? "." : ""}${index}`));
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+  for (const [key, member] of Object.entries(value)) {
+    const memberPath = `${path}${path ? "." : ""}${key}`;
+    if (key === "__proto__") {
+      throw new InvalidDocumentError([{
+        path: memberPath,
+        message: 'a "__proto__" member cannot survive sealing and is refused, never dropped',
+      }]);
+    }
+    assertNoPrototypeMember(member, memberPath);
+  }
+}
+
+/**
  * Validate against `schema`, then canonicalize **once**. The returned bytes are the record
  * forever; its identity is `environmentRecordDigest` over them.
  */
 export function sealWithSchema<T>(schema: z.ZodType<T>, document: unknown): Uint8Array {
+  assertNoPrototypeMember(document, "");
   const parsed = schema.safeParse(document);
   if (!parsed.success) throw new InvalidDocumentError(validationIssues(parsed.error));
   return serializeCanonicalJson(parsed.data as JsonValue);

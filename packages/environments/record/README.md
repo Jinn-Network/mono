@@ -22,4 +22,11 @@ Digest discipline: every digest in the record body carries the `sha256:` prefix.
 DigestSet subject values, by contrast, are bare hex — `bareHexDigest` converts, and the
 conformance kit carries the confusion fixture.
 
+Rejections at the sealing boundary come in two spellings. `InvalidDocumentError` carries a
+schema failure, a refused `__proto__` member, or bytes that are not the one exact canonical
+encoding. `IJsonNumberError`, `IJsonStringError`, and `UndefinedArrayElementError` carry a
+value no canonical encoding admits at all — a fractional number or an unpaired surrogate
+inside an open node, an `undefined` array element. All four carry
+`category: "invalid-document"`; catch on that, not on `InvalidDocumentError` by class.
+
 Design reference: `../../../docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md` §4 — a claim this record never makes on its own behalf.

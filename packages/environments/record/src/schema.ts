@@ -86,7 +86,16 @@ export const EnvironmentParserSchema = z.strictObject({
   uri: NonEmpty.optional(),
 });
 
-/** in-toto v1 ResourceDescriptor shape, structurally mirrored (no cross-package import). */
+/**
+ * in-toto v1 ResourceDescriptor shape, structurally mirrored (no cross-package import).
+ *
+ * Open on purpose, and the one documented exemption from the namespacing rule together with
+ * `build.dependencyPinning`: in-toto declares this object extensible, so a bare member here
+ * is a descriptor field this mirror does not name, not a smuggled core field. The rule the
+ * record enforces is a top-level one — a bare key beside `kind`/`source`/`image` is
+ * `invalid-document`; a bare key inside these two open nodes round-trips. `schema.test.ts`
+ * pins both halves.
+ */
 const ResourceDescriptorSchema = z
   .looseObject({
     name: NonEmpty.optional(),
@@ -114,7 +123,12 @@ export const EnvironmentBuildSchema = z
     /** 0 pinned-image | 1 rebuildable | 2 bit-reproducible (§4.2). */
     reproducibilityTier: z.union([z.literal(0), z.literal(1), z.literal(2)]),
     recipe: ResourceDescriptorSchema.optional(),
-    /** Declaration of the time-travel mechanism used to pin dependencies. */
+    /**
+     * Declaration of the time-travel mechanism used to pin dependencies. Open beyond
+     * `mechanism` because the rest is mechanism-specific (`asOf`, an index URL, a lockfile
+     * digest) — see the ResourceDescriptor note above for why bare members are legitimate
+     * inside this node and nowhere at the top level.
+     */
     dependencyPinning: z.looseObject({ mechanism: NonEmpty }).optional(),
     provider: z.strictObject({ id: NonEmpty, version: NonEmpty }).optional(),
   })
@@ -179,6 +193,12 @@ export type EnvironmentRecord = z.infer<typeof EnvironmentRecordSchema>;
 /**
  * Validate, then canonicalize once. The returned bytes are the record forever; its identity
  * is `environmentRecordDigest(bytes)`.
+ *
+ * Throws `InvalidDocumentError` for a schema failure or a refused `__proto__` member, and
+ * `IJsonNumberError` / `IJsonStringError` / `UndefinedArrayElementError` for a value no
+ * canonical encoding admits (these reach the canonicalizer from the open nodes, which the
+ * schema does not type). All four carry `category: "invalid-document"` — catch on that
+ * rather than on `InvalidDocumentError` by class.
  */
 export function sealEnvironmentRecord(record: unknown): Uint8Array {
   return sealWithSchema(EnvironmentRecordSchema, record);

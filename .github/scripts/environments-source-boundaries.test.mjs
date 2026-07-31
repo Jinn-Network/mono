@@ -8,7 +8,7 @@ const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'environments');
 const environmentDirectories = ['record'];
 
-// `packages/environments/record` is tier 2: records and meaning, no behaviour. It declares
+// `packages/environments/record` is tier 2: records and meaning, no behavior. It declares
 // ZERO Jinn runtime dependencies (design §3.3: zod + noble-class primitives only), so every
 // Jinn package family is forbidden from production source. `@jinn-network/evidence-protocol`
 // is a test-only devDependency for the seal-equivalence fixtures (program §5 contract 3) and
@@ -461,23 +461,50 @@ test('Environments production source never orders or formats with the host local
 // production source or in the README.
 const BOUNDED_CLAIM_WORDS = /\b(deterministic|deterministically|verified|guaranteed|reliable)\b/iu;
 
+// A line is clean when it explicitly bounds the claim: it names the attestation layer that
+// owns the claim, or negates the claim itself. A bare `not` anywhere on the line is NOT a
+// bounding — "not required, and deterministic" would have walked straight through it — so
+// each negation below has to attach to a claim, not merely share a line with one.
+// Only phrases that BOUND a claim earn an exemption. A bare `not` does not: it can be
+// negating anything on the line ("the uri is not required, and the run is deterministic"),
+// which is how a real claim would slip past. Each token below either names the layer that
+// owns the claim or negates a claim outright.
+const BOUNDED_CLAIM_EXEMPTIONS = new RegExp([
+  'attestation', 'MUST NOT', 'never', 'bounded', 'K consecutive',
+  'no claim', 'no guarantee', 'makes no', 'cannot',
+  '(does|do|will|would|can|could|must|may|should)\\s+not\\s+(claim|assert|assess|guarantee|mean|imply|say)',
+].join('|'), 'iu');
+
+/** A line is a finding when it uses a claim word and nothing on it bounds the claim. */
+function isUnboundedClaim(line) {
+  return BOUNDED_CLAIM_WORDS.test(line) && !BOUNDED_CLAIM_EXEMPTIONS.test(line);
+}
+
+test('the bounded-claims canary reads negations that attach to a claim, not any stray "not"', () => {
+  assert.equal(isUnboundedClaim('the outcome-set is deterministic across hosts'), true);
+  // The hole this pins closed: "not" elsewhere on the line used to exempt the whole line.
+  assert.equal(isUnboundedClaim('the parser uri is not required, and the run is deterministic'), true);
+  assert.equal(isUnboundedClaim('this record does not claim the environment is deterministic'), false);
+  assert.equal(isUnboundedClaim('determinism is a bounded observation of the attestation layer'), false);
+  assert.equal(isUnboundedClaim('the record states what the environment is'), false);
+});
+
 test('environments source and docs make no unqualified determinism or verification claim', () => {
   const record = join(packages, 'record');
+  // The published JSON Schema is scanned too: its `title`, `description`, and `$comment`
+  // text is documentation this package ships to third parties, and the C1 plan's global
+  // constraint 8 covers it exactly as it covers the README.
   const candidates = [
     ...files(join(record, 'src')).filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file)),
     join(record, 'README.md'),
+    join(record, 'schemas', 'environment.schema.json'),
   ].filter((file) => existsSync(file));
 
   const findings = candidates.flatMap((file) => readFileSync(file, 'utf8')
     .split('\n')
-    .flatMap((line, index) => {
-      if (!BOUNDED_CLAIM_WORDS.test(line)) return [];
-      // A line is clean when it explicitly bounds the claim: it names the attestation layer
-      // that owns it, or negates the claim outright.
-      const bounded = /attestation|MUST NOT require|never|not\b|bounded|K consecutive|no claim/iu
-        .test(line);
-      return bounded ? [] : [`${relative(root, file)}:${index + 1} -> ${line.trim()}`];
-    }));
+    .flatMap((line, index) => (isUnboundedClaim(line)
+      ? [`${relative(root, file)}:${index + 1} -> ${line.trim()}`]
+      : [])));
 
   assert.deepEqual(findings, [],
     'unqualified determinism/verification language: the record asserts what an environment IS, '

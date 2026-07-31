@@ -27,6 +27,16 @@ describe("CommandSpecSchema", () => {
     }
   });
 
+  test("rejects a shell interpreter spelled with .exe or in another case", () => {
+    for (const bin of [
+      "bash.exe", "sh.exe", "zsh.exe", "dash.exe", "pwsh.EXE",
+      "/bin/SH", "Bash", "/usr/bin/env BASH", "C:/Windows/System32/cmd.EXE",
+    ]) {
+      const result = CommandSpecSchema.safeParse({ bin, args: ["-c", "pytest -q"] });
+      expect(result.success, `${bin} must be refused`).toBe(false);
+    }
+  });
+
   test("rejects shell metacharacters anywhere in bin, args, or cwd", () => {
     expect(CommandSpecSchema.safeParse({ bin: "pytest;rm -rf /", args: [] }).success).toBe(false);
     expect(CommandSpecSchema.safeParse({ bin: "pytest", args: ["-q && curl x"] }).success).toBe(false);

@@ -22,7 +22,7 @@ import {
 const GOLDEN: readonly GoldenName[] = ["imported", "tier-1", "extension"];
 
 /** Field names a sealed record must not carry: staleness is derived, never stored (§4.3). */
-const ABSENT_MUTABLE_STATUS_KEYS = ["status", "health", "expiresAt", "verified"]; // not one may appear
+const ABSENT_MUTABLE_STATUS_KEYS = ["status", "health", "expiresAt", "verified"]; // never present
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 

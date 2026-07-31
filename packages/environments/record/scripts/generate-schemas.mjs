@@ -32,10 +32,18 @@ const SHELL_FREE_PATTERN = `^[^${
   SHELL_METACHARACTERS.map((character) => CHARACTER_CLASS_ESCAPES.get(character) ?? character).join("")
 }]+$`;
 // Matches an interpreter basename in any position a `bin` value can hide one: whole string,
-// after a path separator, or as a whitespace-delimited token ("/usr/bin/env bash").
+// after a path separator, or as a whitespace-delimited token ("/usr/bin/env bash"). JSON
+// Schema patterns carry no flags, so the case-insensitivity and the `.exe` tolerance that
+// `normalizeBasename` gives the runtime are spelled out here, character class by character
+// class — the two surfaces must reach the same verdict on `bash.exe` and `/bin/SH`.
+const eitherCase = (name) => [...name]
+  .map((character) => (/[a-z]/u.test(character)
+    ? `[${character}${character.toUpperCase()}]`
+    : character.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")))
+  .join("");
 const SHELL_INTERPRETER_PATTERN = `(^|[/\\s])(${
-  SHELL_INTERPRETERS.map((name) => name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("|")
-})(\\s|$)`;
+  SHELL_INTERPRETERS.map((name) => eitherCase(name.toLowerCase().replace(/\.exe$/u, ""))).join("|")
+})(\\.[Ee][Xx][Ee])?(\\s|$)`;
 
 const shellFreeString = () => ({ pattern: SHELL_FREE_PATTERN });
 
@@ -78,7 +86,7 @@ schema.title = "Jinn environment record";
 schema.description =
   "A sealed description of one execution environment: one (source, image, platform, "
   + "invocations, parser) binding. The document asserts what the environment is, never that "
-  + "it works — behaviour claims live in separately published verification attestations.";
+  + "it works — behavior claims live in separately published verification attestations.";
 schema.propertyNames = {
   anyOf: [{ enum: Object.keys(schema.properties ?? {}) }, { pattern: NAMESPACED }],
 };
