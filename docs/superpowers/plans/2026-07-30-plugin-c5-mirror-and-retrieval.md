@@ -1819,7 +1819,7 @@ git commit -m "feat(plugin-runtime): required chain-verification posture for the
 - Consumes: `AnnouncementEntry`, `RECORD_KINDS`, `SOURCE_NAME_GRAMMAR`, `LOCATION_PROFILE_HTTPS`, `LOCATION_PROFILE_IPFS` from `@jinn-network/record-discovery-protocol` (`packages/discovery/protocol/src/identifiers.ts:14-38`, `src/entry.ts:31-38`); `EvidenceRecordAnnouncement` from `@jinn-network/evidence-discovery` (`packages/evidence/discovery/src/catalog/types.ts:181-190`); `EvidenceRecordFamily` from `@jinn-network/evidence-repository`; `CorpusAdmission` (Task 5); `MirrorSourceConfig` (Task 1).
 - Produces: `type ExclusionReason`; `interface ExcludedAnnouncement { announcementId: string; reason: ExclusionReason; detail: string }`; `interface AnnouncementAdaptation { announcements: readonly EvidenceRecordAnnouncement[]; excluded: readonly ExcludedAnnouncement[] }`; `adaptAnnouncementEntry(entry, source, admission): AnnouncementAdaptation`; `const FAMILY_BY_RECORD_KIND`; `sourceIdOf(source): string`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/corpus/announcements.test.ts`:
 
@@ -2008,12 +2008,12 @@ describe("announcement adaptation", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test src/corpus/announcements.test.ts`
 Expected: FAIL — `Failed to resolve import "./announcements.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/corpus/announcements.ts`:
 
@@ -2149,12 +2149,12 @@ export function adaptAnnouncementEntry(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test src/corpus/announcements.test.ts && yarn typecheck`
 Expected: PASS (10 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src/corpus
