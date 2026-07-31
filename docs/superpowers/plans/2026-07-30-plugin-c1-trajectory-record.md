@@ -680,7 +680,7 @@ git commit -m "feat(evidence-trajectory): digest and exact-bytes sealing primiti
 
 This task implements program finding **F1**: the upstream GenAI semantic conventions carry no release, no tag, and no schema URL, and every attribute is `stability: development`, so there is no upstream version to pin. Jinn therefore owns a versioned vocabulary profile that *cites* an upstream snapshot.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/vocabulary.test.ts`:
 
@@ -753,12 +753,12 @@ describe("vocabulary", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trajectory && yarn test`
 Expected: FAIL — `Failed to resolve import "./identifiers.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/identifiers.ts`:
 
@@ -849,12 +849,12 @@ export type GenAiAttributeKey = (typeof GEN_AI_ATTRIBUTES)[keyof typeof GEN_AI_A
 export type JinnAttributeKey = (typeof JINN_ATTRIBUTES)[keyof typeof JINN_ATTRIBUTES];
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trajectory && yarn test && yarn typecheck`
 Expected: PASS (9 new tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/evidence/trajectory/src
