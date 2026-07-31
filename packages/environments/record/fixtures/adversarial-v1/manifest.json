@@ -1,0 +1,44 @@
+{
+  "fixtures": [
+    {
+      "id": "index-digest-as-manifest",
+      "description": "The multi-arch index digest presented as the platform manifest digest. Behavior claims are per-platform facts; an index-level record would be a lie by aggregation.",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "reference-not-ending-in-digest",
+      "description": "An advisory pull reference that does not pin the record's own manifest digest, so it can resolve to different bytes than the record identifies.",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "shell-command",
+      "description": "An invocation that reintroduces shell interpolation by naming a shell as bin.",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "shell-command-exe-spelling",
+      "description": "The same shell invocation spelled to walk past a literal interpreter list: mixed case and a .exe suffix, with no metacharacter anywhere for the second rule to catch.",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "bare-extension-key",
+      "description": "An un-namespaced extension key, indistinguishable from a smuggled core field.",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "bare-hex-manifest-digest",
+      "description": "Digest confusion: an in-toto DigestSet subject spelling (bare hex) used in the record body, where every digest is sha256:-prefixed.",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "namespaced-extension-preserved",
+      "description": "A namespaced extension key, which must survive sealing and re-parsing.",
+      "expectedDisposition": "accepted"
+    },
+    {
+      "id": "recanonicalized-bytes",
+      "description": "The golden record re-serialized with pretty-printing: a valid document whose bytes are not the record's bytes, so it must not present as the same record.",
+      "expectedDisposition": "invalid-bytes"
+    }
+  ]
+}

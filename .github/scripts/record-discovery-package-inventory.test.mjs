@@ -18,6 +18,7 @@ const DISCOVERY_PACKAGES = [
   ['facts/trust', '@jinn-network/record-discovery-facts-trust'],
   ['facts/task-execution', '@jinn-network/record-discovery-facts-task-execution'],
   ['facts/benchmarking', '@jinn-network/record-discovery-facts-benchmarking'],
+  ['facts/environments', '@jinn-network/record-discovery-facts-environments'],
   ['sources/evidence-journal', '@jinn-network/record-discovery-source-evidence-journal'],
 ];
 
@@ -30,6 +31,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
   ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
+  ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
 ]);
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -96,6 +98,14 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   // leaf needs for yarn's per-project resolution of protocol's transitive
   // trust-core dependency.
   ['facts/benchmarking', { dependencies: ['@jinn-network/benchmarking-records', '@jinn-network/record-discovery-protocol'], devDependencies: ['@jinn-network/record-discovery-testing', '@jinn-network/task-execution-protocol', '@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
+  // facts/environments carries the one sanctioned edge between the discovery tree and the
+  // environments record-kind tree (discovery design §12; supply design §3.3): protocol +
+  // environment-record. It takes record-discovery-testing as a devDependency (the
+  // facts-consistency conformance driver) plus the same shadow trust-core portal resolution
+  // every protocol-consuming leaf needs for yarn's per-project resolution of protocol's
+  // transitive trust-core dependency. environment-record has no Jinn dependency of its own,
+  // so unlike facts/benchmarking this leaf needs no second shadow entry.
+  ['facts/environments', { dependencies: ['@jinn-network/environment-record', '@jinn-network/record-discovery-protocol'], devDependencies: ['@jinn-network/record-discovery-testing', '@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
   // sources/evidence-journal's own source imports protocol + serve +
   // evidence-discovery + evidence-repository (plan Task 25; program §6/F7
   // widens the "one edge per discovery leaf meets a record-kind tree" rule

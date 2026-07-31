@@ -39,7 +39,7 @@ export interface PostingIntentRecord extends PostingIntent {
   readonly resolved?: PostingOutcome;
 }
 
-interface OwnedPostingIntentRecord extends PostingIntentRecord {
+export interface OwnedPostingIntentRecord extends PostingIntentRecord {
   readonly ownerToken: PostingOwnerToken;
 }
 
