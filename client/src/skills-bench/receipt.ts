@@ -14,6 +14,17 @@ export interface ReceiptProfile {
   skillSha256?: string;
   /** pinned upstream provenance, e.g. `owner/repo@sha` (pin.json's source@commit). */
   skillSource?: string;
+  /** I1: which kind of pinned collection `slateSha256`/`slateHalf` actually
+   *  identifies. Defaults to `'slate'` for back-compat (every caller before
+   *  this field existed was rendering a `SkillsBenchSlate` receipt). A
+   *  `--task-set` report (capability-report.ts) reuses `slateSha256` for the
+   *  task set's own sha256 and `slateHalf` for the manifest's fixed
+   *  `'feedback'` value (see capability-report.ts's module doc) — those
+   *  fields are correctly reused, but the reader-facing strings must not
+   *  call a task set a "slate". Set by the render layer
+   *  (render-report.ts/render-receipts.ts) from which manifest fields are
+   *  present; never inferred here. */
+  identityKind?: 'slate' | 'task-set';
 }
 
 export interface ArmSummary { passed: number; scorable: number; lo: number; hi: number }
@@ -132,8 +143,14 @@ const pct = (x: number): string => `${(100 * x).toFixed(0)}%`;
  *  barely triggered but still moved the resolve rate by chance/noise would
  *  otherwise read as a real effect). "Low" is under 50%; `total === 0` (no
  *  known trigger data at all) is treated as low too — an unmeasured trigger
- *  rate is not evidence of a high one. */
-function isLowTriggerRate(triggerRate: TriggerRate | undefined): boolean {
+ *  rate is not evidence of a high one.
+ *
+ *  Exported (final-review C1): capability-report.ts's renderBadgeSvg reuses
+ *  this exact gate so the badge -- the artifact that travels furthest, often
+ *  further than report.md itself -- never renders a bare net delta when the
+ *  underlying trigger rate can't support reading it as evidence about the
+ *  skill. */
+export function isLowTriggerRate(triggerRate: TriggerRate | undefined): boolean {
   if (!triggerRate) return false;
   if (triggerRate.total === 0) return true;
   return triggerRate.triggered / triggerRate.total < 0.5;
@@ -144,10 +161,17 @@ export function renderReceiptMd(d: ReceiptData): string {
   const delta = d.treatment.passed - d.baseline.passed;
   const t = d.triggerRate;
   const lowTrigger = isLowTriggerRate(t);
+  // I1: a --task-set report must not speak slate vocabulary. slateSha256/
+  // slateHalf are reused unchanged for a task-set identity (see this file's
+  // ReceiptProfile.identityKind doc and capability-report.ts's module doc);
+  // only the reader-facing collection label changes here.
+  const isTaskSet = p.identityKind === 'task-set';
+  const collectionLabel = isTaskSet ? `task set ${p.slateSha256.slice(0, 8)}` : `${p.slateHalf} slate`;
+  const scopeLabel = isTaskSet ? 'task set sha256' : 'slate sha256';
   return [
     '```',
     `skill:      ${d.treatmentArm}${p.forkedFrom ? `, forked from ${p.forkedFrom}` : ''}`,
-    `measured:   ${d.n} paired tasks (${p.slateHalf} slate), ${d.excluded} excluded as ungradeable`,
+    `measured:   ${d.n} paired tasks (${collectionLabel}), ${d.excluded} excluded as ungradeable`,
     `agent:      ${p.agent}, ${p.model}, one pinned configuration`,
     `result:     baseline resolved ${d.baseline.passed}/${d.baseline.scorable} ` +
       `(95% Wilson ${pct(d.baseline.lo)}–${pct(d.baseline.hi)})`,
@@ -168,7 +192,7 @@ export function renderReceiptMd(d: ReceiptData): string {
     `cost:       mean per task — baseline $${d.meanCostUsd.baseline.toFixed(2)}, ` +
       `with skill $${d.meanCostUsd.treatment.toFixed(2)} (reported, never gates)`,
     `scope:      one agent configuration, one benchmark, this task list`,
-    `            slate sha256: ${p.slateSha256} · measured ${p.measuredOn}`,
+    `            ${scopeLabel}: ${p.slateSha256} · measured ${p.measuredOn}`,
     ...(p.skillSha256
       ? [`            skill bytes: sha256 ${p.skillSha256}${p.skillSource ? ` · source ${p.skillSource}` : ''}`]
       : []),
@@ -176,7 +200,7 @@ export function renderReceiptMd(d: ReceiptData): string {
     '```',
     '',
     `This is a small paired sample; the intervals above are wide by construction and`,
-    `no claim of a real effect is made. Reproduce it from the pinned slate and rig (see files).`,
+    `no claim of a real effect is made. Reproduce it from the pinned ${isTaskSet ? 'task set' : 'slate'} and rig (see files).`,
     ...(lowTrigger
       ? [
         '',

@@ -74,6 +74,39 @@ describe('renderReceiptMd', () => {
     expect(md).not.toMatch(/significan/i); // no significance language, ever (small-N honesty)
   });
 
+  // ---------------------------------------------------------------------------
+  // I1 (final-review C2): a --task-set report must not speak slate
+  // vocabulary. slateSha256/slateHalf are reused unchanged for the task-set
+  // identity (see ReceiptProfile.identityKind's doc comment); only the
+  // reader-facing labels change.
+  // ---------------------------------------------------------------------------
+
+  it('renders "task set" vocabulary instead of "slate" wording when identityKind is task-set (I1)', () => {
+    const outcomes = [o('a', 'baseline', false), o('a', 'tdd', true)];
+    const taskSetSha = 'deadbeef'.repeat(8);
+    const md = renderReceiptMd(
+      buildReceipt(outcomes, {
+        baselineArm: 'baseline', treatmentArm: 'tdd',
+        profile: { ...profile, identityKind: 'task-set', slateSha256: taskSetSha },
+      }),
+    );
+    expect(md).toContain(`measured:   1 paired tasks (task set ${taskSetSha.slice(0, 8)})`);
+    expect(md).toContain(`task set sha256: ${taskSetSha}`);
+    expect(md).toContain('Reproduce it from the pinned task set and rig');
+    expect(md).not.toContain('slate');
+  });
+
+  it('renders "slate" wording unchanged when identityKind is absent (back-compat default)', () => {
+    const outcomes = [o('a', 'baseline', false), o('a', 'tdd', true)];
+    const md = renderReceiptMd(
+      buildReceipt(outcomes, { baselineArm: 'baseline', treatmentArm: 'tdd', profile }),
+    );
+    expect(md).toContain('measured:   1 paired tasks (both slate)');
+    expect(md).toContain('slate sha256: deadbeef');
+    expect(md).toContain('Reproduce it from the pinned slate and rig');
+    expect(md).not.toContain('task set');
+  });
+
   it('renders skill bytes on the scope line when skillSha256 is present (final-review.md I7)', () => {
     const outcomes = [o('a', 'baseline', false), o('a', 'tdd', true)];
     const md = renderReceiptMd(

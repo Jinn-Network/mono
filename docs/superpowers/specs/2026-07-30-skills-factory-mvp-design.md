@@ -70,9 +70,9 @@ produces and stands behind is the report:
 
 - **Public evaluation** — a per-skill capability report: the domain-matched task set used (§2.2),
   the trigger rate (did the skill actually load on these tasks, §2.5), paired resolve-rate deltas
-  against a no-skill baseline with their confidence intervals, cost/token overhead, a per-task
-  outcome table, the raw run data, and a rerun script. Anyone can reproduce it or dispute the task
-  selection.
+  against a no-skill baseline with their confidence intervals, cost overhead (per-token accounting is
+  future work — not yet captured by the rig), a per-task outcome table, the raw run data, and a
+  rerun script. Anyone can reproduce it or dispute the task selection.
 - **Private annex** — delivered to the author only, never published: failing-transcript diagnosis
   (did the skill never trigger, trigger but give guidance too vague to act on, or trigger and
   actively mislead the agent) and suggested edits. This is the optimization half of the work, and it
@@ -321,6 +321,8 @@ One public GitHub repo, working name `Jinn-Network/skills-eval` (renamed from v0
 
 ```
 reports/<skill>@<sha>/report.md     public capability report: task set, trigger rate, deltas, CI, per-task table
+reports/<skill>@<sha>/badge.svg     small self-contained SVG badge — the distribution artifact (§1.1)
+reports/<skill>@<sha>/embed.md      badge image + report link + jinn.* metadata block, ready to paste
 reports/<skill>@<sha>/data/         pinned task set (or slate subset), run manifest, raw per-task results, transcripts
 rig/                                the orchestration script — open, so reports are reproducible, not claimed
 README.md                          reports index (skill, sha, date, headline delta) — generated, never hand-written

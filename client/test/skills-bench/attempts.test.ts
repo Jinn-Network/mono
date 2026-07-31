@@ -87,6 +87,17 @@ describe('manifest guard', () => {
     await assertManifestCompatible(file, manifest); // identical → ok
   });
 
+  it('records rigCommit in the manifest and rejects drift in it alone (final-review I4)', async () => {
+    const file = join(await mkdtemp(join(tmpdir(), 'mf-rig-')), 'bench-manifest.json');
+    const withCommit: BenchManifest = { ...manifest, rigCommit: 'abc123' };
+    await assertManifestCompatible(file, withCommit);
+    const onDisk = JSON.parse(await readFile(file, 'utf8')) as BenchManifest;
+    expect(onDisk.rigCommit).toBe('abc123');
+    await expect(
+      assertManifestCompatible(file, { ...withCommit, rigCommit: 'def456' }),
+    ).rejects.toThrow(/manifest mismatch/);
+  });
+
   it('rejects a real manifest resuming a --out dir seeded by a dry run, and vice versa', async () => {
     const dryManifest: BenchManifest = { ...manifest, dryRun: true };
 

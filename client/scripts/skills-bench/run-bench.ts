@@ -362,6 +362,29 @@ function run(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.Pro
   });
 }
 
+/** Final-review I4: `git rev-parse HEAD` of the repo at run start, recorded
+ *  into `BenchManifest.rigCommit` so a reader can pin the exact rig code
+ *  that produced this run's outcomes (see
+ *  bench/skills-repo-template/rig/README.md's "Reproduce" claim, which this
+ *  field is what makes true). Never blocks the run: a git failure (no
+ *  `.git`, git not on PATH, etc.) falls back to `'unknown'`, loud-logged so
+ *  the gap is visible rather than silently swallowed — this is a
+ *  provenance nicety, not a correctness gate. Uses the same CmdRunner-shaped
+ *  `run` helper as every other shell call in this file. */
+async function getRigCommit(): Promise<string> {
+  try {
+    const { stdout, exitCode } = await run('git', ['rev-parse', 'HEAD'], { cwd: repoRoot });
+    if (exitCode !== 0 || !stdout.trim()) throw new Error(`git rev-parse HEAD exited ${exitCode}`);
+    return stdout.trim();
+  } catch (err) {
+    console.error(
+      `[bench] WARNING: could not determine rig commit (${(err as Error).message}) — recording 'unknown' ` +
+      `in bench-manifest.json's rigCommit`,
+    );
+    return 'unknown';
+  }
+}
+
 function compactProcessOutput(value: string, limit = 4000): string {
   const trimmed = value.trim();
   if (trimmed.length <= limit) return trimmed;
@@ -851,6 +874,7 @@ function reportRunResult(
 async function runSlateMode(cfg: BenchConfig): Promise<void> {
   const slate = loadSlate(cfg.slatePath);
   const arms = loadArms(cfg.armsPath);
+  const rigCommit = await getRigCommit();
 
   const manifest: BenchManifest = {
     version: 'skills-bench-manifest.v1',
@@ -858,6 +882,7 @@ async function runSlateMode(cfg: BenchConfig): Promise<void> {
     half: cfg.half,
     model: cfg.model,
     arms: arms.map((arm) => ({ name: arm.name, skillSha256: arm.skillDir ? pinSha256(arm.skillDir) : null })),
+    rigCommit,
     ...(cfg.dryRun ? { dryRun: true as const } : {}),
   };
   await assertManifestCompatible(join(cfg.outDir, 'bench-manifest.json'), manifest);
@@ -966,6 +991,7 @@ async function runTaskSetMode(cfg: BenchConfig): Promise<void> {
   // --include-screened-out run against the same --out dir render
   // byte-identical manifests and silently collide (final-review C1).
   const screenedTasks = selectTasksForMeasurement(taskSet.tasks, { includeScreenedOut: cfg.includeScreenedOut });
+  const rigCommit = await getRigCommit();
 
   const manifest: BenchManifest = {
     version: 'skills-bench-manifest.v1',
@@ -975,6 +1001,7 @@ async function runTaskSetMode(cfg: BenchConfig): Promise<void> {
     arms: arms.map((arm) => ({ name: arm.name, skillSha256: arm.skillDir ? pinSha256(arm.skillDir) : null })),
     screeningRespected: !cfg.includeScreenedOut,
     eligibleTaskIds: screenedTasks.map((t) => t.id).sort(),
+    rigCommit,
     ...(cfg.dryRun ? { dryRun: true as const } : {}),
   };
   await assertManifestCompatible(join(cfg.outDir, 'bench-manifest.json'), manifest);

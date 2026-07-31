@@ -118,6 +118,47 @@ describe('buildCapabilityReport', () => {
     expect(t3.treatment).toEqual([{ repeat: 0, passed: null, triggered: null }]);
   });
 
+  // ---------------------------------------------------------------------------
+  // I8: an eligible task with no logged outcome (e.g. every solve failed
+  // before producing a gradeable patch — solveFailures, never appended to
+  // attempts.jsonl) must still appear as a row, per buildPerTaskRows's own
+  // doc comment. A screened-OUT task (not eligible for this run at all) must
+  // NOT appear — it's already accounted for by taskSetIdentity.screening.
+  // ---------------------------------------------------------------------------
+
+  it('includes an eligible task with zero logged outcomes as a row, never silently dropped (I8)', () => {
+    const withUnrun: SkillTaskSetV1 = {
+      ...taskSet,
+      tasks: [...taskSet.tasks, task('t4')],
+      screeningSummary: { ...taskSet.screeningSummary!, kept: ['t1', 't2', 't3', 't4'], droppedNoHeadroom: [] },
+    };
+    const report = buildCapabilityReport({ ...baseOptions(), taskSet: withUnrun });
+    const t4 = report.perTask.find((r) => r.taskId === 't4');
+    expect(t4).toBeDefined();
+    expect(t4!.baseline).toEqual([]);
+    expect(t4!.treatment).toEqual([]);
+  });
+
+  it('excludes a screened-out (ineligible) task from the per-task table entirely (I8)', () => {
+    const withScreenedOut: SkillTaskSetV1 = {
+      ...taskSet,
+      tasks: [...taskSet.tasks, task('t4')], // present in the set, but screened out below
+    };
+    // taskSet's own screeningSummary already lists 't4' in droppedNoHeadroom and NOT in kept.
+    const report = buildCapabilityReport({ ...baseOptions(), taskSet: withScreenedOut });
+    expect(report.perTask.some((r) => r.taskId === 't4')).toBe(false);
+  });
+
+  it('includes every task when the set has never been screened, whether or not it has outcomes', () => {
+    const unscreenedWithUnrun: SkillTaskSetV1 = {
+      ...taskSet,
+      tasks: [...taskSet.tasks, task('t4')],
+      screeningSummary: undefined,
+    };
+    const report = buildCapabilityReport({ ...baseOptions(), taskSet: unscreenedWithUnrun });
+    expect(report.perTask.map((r) => r.taskId)).toEqual(['t1', 't2', 't3', 't4']);
+  });
+
   it('composes the task-set identity from gradeability/screening summaries', () => {
     const report = buildCapabilityReport(baseOptions());
     expect(report.taskSetIdentity).toEqual({
@@ -165,6 +206,15 @@ describe('renderCapabilityReportMd', () => {
     expect(md).toContain(`sha256:     ${taskSet.sha256}`);
     expect(md).toContain('rerun: yarn tsx scripts/skills-bench/run-bench.ts');
     expect(md).toContain('data:  data/attempts.jsonl, data/bench-manifest.json, data/set.json');
+  });
+
+  it('renders "task set" vocabulary, never "slate", when the profile identityKind is task-set (I1)', () => {
+    const taskSetProfile: ReceiptProfile = { ...profile, identityKind: 'task-set' };
+    const report = buildCapabilityReport({ ...baseOptions(), profile: taskSetProfile });
+    const md = renderCapabilityReportMd(report);
+    expect(md).toContain(`measured:   ${report.receipt.n} paired tasks (task set ${taskSet.sha256.slice(0, 8)})`);
+    expect(md).toContain(`task set sha256: ${taskSet.sha256}`);
+    expect(md).not.toContain('slate');
   });
 
   it('renders a plain placeholder, never a broken table, when there are no per-task rows', () => {
@@ -237,6 +287,45 @@ describe('renderBadgeSvg', () => {
     const svg = renderBadgeSvg({ skill: '<tdd & "co">', verdictLine: 'net +2/12', measuredOn: '2026-08-01' });
     assertWellFormedXmlTags(svg);
     expect(svg).toContain('&lt;tdd &amp; &quot;co&quot;&gt;');
+  });
+
+  // ---------------------------------------------------------------------------
+  // C1: the badge — the artifact that travels furthest — must carry the same
+  // trigger-honesty caveat renderReceiptMd applies to report.md, never a bare
+  // net delta when the trigger rate can't support reading it as evidence.
+  // ---------------------------------------------------------------------------
+
+  it('renders the "not exercised on this task set" caveat instead of the bare delta when trigger rate is low (C1)', () => {
+    const svg = renderBadgeSvg({
+      skill: 'tdd', verdictLine: 'net +2/12 paired tasks vs. baseline', measuredOn: '2026-08-01',
+      triggerRate: { triggered: 1, total: 5, unknown: 0 }, // 20% — low
+    });
+    expect(svg).toContain('not exercised on this task set');
+    expect(svg).not.toContain('net +2/12');
+  });
+
+  it('renders "no session data" instead of the bare delta when triggerRate.total is 0 (C1)', () => {
+    const svg = renderBadgeSvg({
+      skill: 'tdd', verdictLine: 'net +2/12 paired tasks vs. baseline', measuredOn: '2026-08-01',
+      triggerRate: { triggered: 0, total: 0, unknown: 4 },
+    });
+    expect(svg).toContain('no session data');
+    expect(svg).not.toContain('net +2/12');
+  });
+
+  it('renders the bare net-delta verdict line unchanged when trigger rate is normal (high) (C1)', () => {
+    const svg = renderBadgeSvg({
+      skill: 'tdd', verdictLine: 'net +2/12 paired tasks vs. baseline', measuredOn: '2026-08-01',
+      triggerRate: { triggered: 4, total: 5, unknown: 0 }, // 80% — normal
+    });
+    expect(svg).toContain('net +2/12 paired tasks vs. baseline');
+    expect(svg).not.toContain('not exercised on this task set');
+    expect(svg).not.toContain('no session data');
+  });
+
+  it('renders the bare net-delta verdict line unchanged when no triggerRate is supplied at all (back-compat)', () => {
+    const svg = renderBadgeSvg({ skill: 'tdd', verdictLine: 'net +2/12 paired tasks vs. baseline', measuredOn: '2026-08-01' });
+    expect(svg).toContain('net +2/12 paired tasks vs. baseline');
   });
 });
 

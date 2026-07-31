@@ -33,6 +33,30 @@ function arg(name: string, fallback?: string): string {
   throw new Error(`missing --${name}`);
 }
 
+// ---------------------------------------------------------------------------
+// Pure arm-resolution logic — no filesystem. Extracted (final-review
+// recommendation) so this CLI's one integrity-sensitive check — a mistyped
+// --skill must fail loud, not silently under-burn the ledger — is directly
+// unit-testable, the same pattern list-failing-sessions.ts uses for
+// selectFailingSessions.
+// ---------------------------------------------------------------------------
+
+/** Resolves `skill` to a treatment arm (non-null `skillSha256`) in `manifest`,
+ *  or throws naming the arms actually available. `manifestPath` is only used
+ *  to compose the error message. */
+export function resolveTreatmentArm(
+  manifest: BenchManifest, skill: string, manifestPath: string,
+): { name: string; skillSha256: string } {
+  const arm = manifest.arms.find((a) => a.name === skill);
+  if (!arm || !arm.skillSha256) {
+    throw new Error(
+      `no treatment arm named '${skill}' with a skillSha256 in ${manifestPath} — available arms: ` +
+      manifest.arms.map((a) => a.name).join(', '),
+    );
+  }
+  return { name: arm.name, skillSha256: arm.skillSha256 };
+}
+
 async function main(): Promise<void> {
   const runDir = resolve(arg('run'));
   const skill = arg('skill');
@@ -41,13 +65,7 @@ async function main(): Promise<void> {
 
   const manifestPath = join(runDir, 'bench-manifest.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as BenchManifest;
-  const arm = manifest.arms.find((a) => a.name === skill);
-  if (!arm || !arm.skillSha256) {
-    throw new Error(
-      `no treatment arm named '${skill}' with a skillSha256 in ${manifestPath} — available arms: ` +
-      manifest.arms.map((a) => a.name).join(', '),
-    );
-  }
+  const arm = resolveTreatmentArm(manifest, skill, manifestPath);
 
   const ledgerFile = join(repoRoot, 'bench', 'reeval-ledger.json');
   const at = new Date().toISOString();

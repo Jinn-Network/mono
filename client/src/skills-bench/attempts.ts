@@ -52,6 +52,15 @@ export interface BenchManifest {
    *  dry-run manifest in the same --out dir rather than silently resuming
    *  fabricated outcomes. */
   dryRun?: true;
+  /** Final-review I4: `git rev-parse HEAD` of the repo, captured by
+   *  run-bench.ts at the moment this run started — the exact rig commit
+   *  that produced this manifest's outcomes, so a reader can pin it and
+   *  reproduce the run (see bench/skills-repo-template/rig/README.md's
+   *  "Reproduce" claim). `'unknown'` when `git rev-parse` itself failed
+   *  (loud-logged, never blocks the run). Optional for back-compat with
+   *  manifests written before this field existed — every manifest a current
+   *  run-bench.ts writes carries it. */
+  rigCommit?: string;
 }
 
 export function attemptKey(o: { instanceId: string; arm: string; repeat: number }): string {

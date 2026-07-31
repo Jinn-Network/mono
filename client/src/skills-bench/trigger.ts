@@ -45,6 +45,21 @@ import { join } from 'node:path';
  * comes back `is_error: true` (the call was made but the skill did not
  * actually load, e.g. a bad name). It never substring-matches skill names
  * against whole event bodies.
+ *
+ * INVARIANT (final-review I6): `detectSkillTrigger(text, skillName)` is
+ * called with the ARM NAME, not the skill's own frontmatter `name:` —
+ * because `mountSkill` (claude-solve.ts) mounts every arm to
+ * `.claude/skills/<arm.name>`, so `<arm.name>` IS the identity the model
+ * invokes via the `Skill` tool's `input.skill`, regardless of what the
+ * skill's own `SKILL.md` calls itself. If an operator names a revision arm
+ * something other than the skill's own name (e.g. `tdd-v2` in a §9 re-eval
+ * run), trigger detection silently reads 0% for that arm — not because the
+ * skill never loaded, but because nothing in the session ever says
+ * `input.skill === 'tdd-v2'`. This makes "arm name == the identity the model
+ * invokes under" load-bearing wherever this function is called
+ * (render-report.ts, render-receipts.ts, list-failing-sessions.ts) — those
+ * call sites MUST pass the same arm name that named the `--arms` entry
+ * `mountSkill` was given, never a separately-chosen display name.
  */
 
 /** Pure cwd-slug logic — the solve cwd is replaced 1:1, character by
@@ -140,4 +155,29 @@ export function detectSkillTrigger(jsonlText: string, skillName: string): Trigge
 
   const triggered = [...idOutcome.values()].some((outcome) => outcome !== 'error');
   return { triggered, evidence: triggered ? evidence : [] };
+}
+
+/** Cheap runtime half of the I6 invariant check above: scans every `Skill`
+ *  tool_use in the session for an `input.skill` that does NOT match
+ *  `expectedArmName` (case-insensitive) and returns the distinct other names
+ *  seen. A non-empty result is a warning signal, never a trigger-detection
+ *  input by itself — it means the model invoked a DIFFERENT skill name than
+ *  the one this arm was mounted under (e.g. the mounted skill's own
+ *  `SKILL.md` `name:` disagrees with the arm name it was mounted as), which
+ *  is exactly the silent-0%-trigger-rate failure mode the invariant above
+ *  warns about. Callers (render-report.ts) log this as a warning; it does
+ *  not change `detectSkillTrigger`'s result. */
+export function findMismatchedSkillInvocations(jsonlText: string, expectedArmName: string): string[] {
+  const target = expectedArmName.trim().toLowerCase();
+  const others = new Set<string>();
+  for (const { obj } of parseLines(jsonlText)) {
+    if (obj.type !== 'assistant') continue;
+    for (const block of contentBlocks(obj)) {
+      if (block.type !== 'tool_use' || block.name !== 'Skill') continue;
+      const input = block.input as Record<string, unknown> | undefined;
+      const skillInput = typeof input?.skill === 'string' ? input.skill.trim().toLowerCase() : '';
+      if (skillInput && skillInput !== target) others.add(skillInput);
+    }
+  }
+  return [...others].sort();
 }

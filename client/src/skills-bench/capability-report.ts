@@ -26,7 +26,7 @@
 import { attemptKey, type BenchOutcome } from './attempts.js';
 import { buildJinnReceiptMetadata, quoteYamlScalar } from './frontmatter.js';
 import {
-  buildReceipt, renderReceiptMd, summarizeTriggerRate,
+  buildReceipt, isLowTriggerRate, renderReceiptMd, summarizeTriggerRate,
   type ReceiptData, type ReceiptProfile, type TriggerRate,
 } from './receipt.js';
 import { isTaskGradeabilityPassing, type SkillTaskSetV1 } from './task-set.js';
@@ -172,9 +172,23 @@ export function buildCapabilityReport(opts: BuildCapabilityReportOptions): Capab
     triggerRate,
   });
 
+  // I8: every ELIGIBLE task gets a row, whether or not it has a logged
+  // outcome — a task that was eligible but whose solves all failed before
+  // producing a gradeable patch (solveFailures, never appended to
+  // attempts.jsonl) must still be visible in the public artifact, not
+  // silently disappear while taskSetIdentity.taskCount still counts it.
+  // "Eligible" = screening.kept when the set has screening receipts (a
+  // screened-OUT task was never a candidate for this run and is already
+  // accounted for by taskSetIdentity's screening summary — it does not need
+  // its own row); every task when the set has never been screened (nothing
+  // to exclude). Matches buildPerTaskRows's own doc comment ("still included
+  // with empty outcome arrays... renderer prints n/a").
+  const eligibleIds = opts.taskSet.screeningSummary
+    ? new Set(opts.taskSet.screeningSummary.kept)
+    : null;
   const taskIds = opts.taskSet.tasks
     .map((t) => t.id)
-    .filter((id) => opts.outcomes.some((o) => o.instanceId === id && (o.arm === opts.baselineArm || o.arm === opts.treatmentArm)));
+    .filter((id) => eligibleIds === null || eligibleIds.has(id));
   const perTask = buildPerTaskRows(opts.outcomes, taskIds, opts.baselineArm, opts.treatmentArm, opts.triggerByKey);
 
   return {
@@ -272,9 +286,23 @@ export function deriveVerdictLine(receipt: ReceiptData): string {
 export interface BadgeOptions {
   skill: string;
   /** Plain-text verdict, e.g. from `deriveVerdictLine` — never a pass/fail
-   *  judgment or a color. */
+   *  judgment or a color. Only rendered when `triggerRate` reads as a normal
+   *  (non-low) rate — see `triggerRate` below (final-review C1). */
   verdictLine: string;
   measuredOn: string;
+  /** Final-review C1: the same `TriggerRate` the report's receipt block was
+   *  built from. When `isLowTriggerRate(triggerRate)` is true (low or
+   *  unknown trigger rate — the identical gate `renderReceiptMd` uses), the
+   *  badge's second line renders the trigger-honesty caveat INSTEAD OF
+   *  `verdictLine` — the badge travels furthest of any artifact this rig
+   *  produces (often the only thing a reader ever sees, per spec §1.1), so
+   *  it must never carry a bare net delta the report itself would refuse to
+   *  present as unqualified evidence. Absent/undefined reads as "not low"
+   *  (back-compat: a caller with no trigger data at all should still pass an
+   *  explicit `{ triggered: 0, total: 0, unknown: 0 }`-shaped rate to get the
+   *  caveat; omitting the field entirely is only for badges that genuinely
+   *  have no trigger concept, e.g. none exist yet in this rig). */
+  triggerRate?: TriggerRate;
 }
 
 function escapeXml(value: string): string {
@@ -286,6 +314,22 @@ function escapeXml(value: string): string {
     .replace(/'/g, '&apos;');
 }
 
+/** The badge's second line (final-review C1): the plain net-delta verdict
+ *  when the trigger rate is normal, or the trigger-honesty caveat instead of
+ *  it when `isLowTriggerRate` says the rate is low or unknown — never both,
+ *  never the bare delta alongside the caveat. Mirrors `renderReceiptMd`'s
+ *  `lowTrigger` branch exactly (same gate, same two caveat strings) so the
+ *  badge can never disagree with the report it points at. */
+function badgeLine2(opts: BadgeOptions): string {
+  if (isLowTriggerRate(opts.triggerRate)) {
+    const caveat = !opts.triggerRate || opts.triggerRate.total === 0
+      ? 'no session data'
+      : 'not exercised on this task set';
+    return `${caveat} - measured ${opts.measuredOn}`;
+  }
+  return `${opts.verdictLine} - measured ${opts.measuredOn}`;
+}
+
 /** A small, self-contained flat SVG badge: two text lines (what was measured
  *  and when) inside a bordered box. No external fonts, images, or refs — a
  *  generic `font-family` name only, never an `@font-face`/`url()`/`xlink:href`
@@ -294,7 +338,7 @@ function escapeXml(value: string): string {
  *  (spec §4.1/§1.1). */
 export function renderBadgeSvg(opts: BadgeOptions): string {
   const line1 = `jinn capability report: ${opts.skill}`;
-  const line2 = `${opts.verdictLine} - measured ${opts.measuredOn}`;
+  const line2 = badgeLine2(opts);
   const charWidth = 6.2;
   const width = Math.max(220, Math.ceil(Math.max(line1.length, line2.length) * charWidth) + 16);
   const label = escapeXml(`${line1}; ${line2}`);
