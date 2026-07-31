@@ -331,7 +331,7 @@ Expected: `TREE IDENTITY PROVEN: 1073efeda203601ea99fa90f93a340e6dc377dd2`; then
 
 This task has a genuine red phase: the test builds its fixture in a fresh temp directory, so no symlink can mask the path change.
 
-- [ ] **Step 1: Move the test fixture to the new path (failing test first)**
+- [x] **Step 1: Move the test fixture to the new path (failing test first)**
 
 In `.github/scripts/layer-publish-workflow.test.mjs`, replace:
 
@@ -347,13 +347,13 @@ with:
     resolve(fixture, 'plugin/frozen/layer-runtime.json'),
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `node --test .github/scripts/layer-publish-workflow.test.mjs`
 
 Expected: FAIL — the verifier subprocess exits 1 with `layer stable release check failed: cannot read apps/jinn-agent/plugins/jinn/layer-runtime.json: ENOENT…`, so the "accepts a coherent release" assertion fails.
 
-- [ ] **Step 3: Re-point the verifier**
+- [x] **Step 3: Re-point the verifier**
 
 In `.github/scripts/verify-layer-stable-version.mjs`, replace:
 
@@ -367,7 +367,7 @@ with:
   const runtime = readJson('plugin/frozen/layer-runtime.json');
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run:
 
@@ -378,7 +378,7 @@ node .github/scripts/verify-layer-stable-version.mjs --root . --version 0.1.2
 
 Expected: all tests pass; then `layer stable release check: coherent 0.1.2 package and runtime pins`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .github/scripts/verify-layer-stable-version.mjs .github/scripts/layer-publish-workflow.test.mjs
