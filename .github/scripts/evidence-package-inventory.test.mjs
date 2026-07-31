@@ -24,6 +24,7 @@ const EVIDENCE_PACKAGES = [
   ['execution-recorder-bridge', '@jinn-network/execution-recorder-bridge'],
   ['retrieval', '@jinn-network/evidence-retrieval'],
   ['contribution', '@jinn-network/evidence-contribution'],
+  ['trajectory', '@jinn-network/evidence-trajectory'],
 ];
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -60,6 +61,12 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     optionalDependencies: [],
     peerDependencies: [],
   }],
+  ['trajectory', {
+    dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/trust-core'],
+    devDependencies: [],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
 ]);
 
 function readPackage(directory) {
@@ -86,13 +93,16 @@ function jinnDependencyNames(manifest, section) {
 }
 
 function expectedPortal(directory, dependencyName) {
+  if (dependencyName === '@jinn-network/trust-core') {
+    return 'portal:../../trust/core';
+  }
   const target = EVIDENCE_PACKAGES.find(([, name]) => name === dependencyName);
   assert.ok(target, `${directory} declares unknown Jinn dependency ${dependencyName}`);
   return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;
 }
 
-test('the evidence package inventory is explicit and has fourteen manifests', () => {
-  assert.equal(EVIDENCE_PACKAGES.length, 14);
+test('the evidence package inventory is explicit and has fifteen manifests', () => {
+  assert.equal(EVIDENCE_PACKAGES.length, 15);
   for (const [directory, expectedName] of EVIDENCE_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);
@@ -136,7 +146,7 @@ test('evidence package Jinn dependencies and portal resolutions match the approv
 });
 
 test('testing entrypoints declare Vitest as an exact optional peer', () => {
-  for (const directory of ['derivation', 'retrieval']) {
+  for (const directory of ['derivation', 'retrieval', 'trajectory']) {
     const manifest = readPackage(directory);
     assert.deepEqual(manifest.peerDependencies, { vitest: '^4.1.8' });
     assert.deepEqual(manifest.peerDependenciesMeta, {
