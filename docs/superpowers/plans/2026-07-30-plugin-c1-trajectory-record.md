@@ -3046,4 +3046,3 @@ peer ranges / Vite pins / pack-smoke scripts are unchanged.
 - [x] Named npm `11.19.0` install/assert step before every pack-smoke path (foundation, components, derivation, bridge, retrieval, trajectory, contribution, catalog-sqlite, local-runtime)
 - [x] Architecture test covers float / missing npm pin / forbidden legacy-peer-deps
 - [x] Local validation of architecture test + isolated npm 11.19.0 prefix install/assert
-
