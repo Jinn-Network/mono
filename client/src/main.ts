@@ -2232,6 +2232,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       readSealedDocuments: composition.readSealedDocuments,
       pollIntervalMs: config.pollIntervalMs,
       acceptLegacyCards: true,
+      // Finding E39: without a logger, `WorkLoopConfig.logger` falls back to a silent no-op
+      // (`work-loop.ts`'s `noopLogger`) and the per-tick outcome line (E39's fix) never reaches
+      // an operator. Same console-based shape every other loop in this file wires up.
+      logger: {
+        info: (message) => console.log(message),
+        warn: (message) => console.warn(message),
+      },
     };
   }
 

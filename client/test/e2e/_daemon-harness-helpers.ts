@@ -1422,6 +1422,10 @@ export async function startDaemon(
             readSealedDocuments: composition.readSealedDocuments,
             pollIntervalMs: 300,
             acceptLegacyCards: true,
+            // Finding E39: without a logger, `WorkLoopConfig.logger` falls back to a silent
+            // no-op and the per-tick outcome line (E39's fix) never reaches this rig's stdout —
+            // mirrors the composition logger a few lines above and main.ts's own workLoopConfig.
+            logger: { info: (m: string) => console.log(m), warn: (m: string) => console.warn(m) },
           },
         }
       : {}),
