@@ -13,6 +13,11 @@ trust policy. `result: "unstable"` records observed divergence. `result: "error"
 an infrastructure failure with its stage and taxonomy-coded reason. All three are signed,
 published, and equally first-class.
 
+`baseline` is present for every non-`error` result, so an `unstable` attestation's baseline
+is **run 0's observation** — one observation among divergent ones, not the environment's
+outcome-set. `runs.outcomeSetDigest` follows the same convention. Reading a baseline off an
+`unstable` attestation without also reading `failure.divergence` is reading past the claim.
+
 The protocol exercises the **image** at `image.manifestDigest`. At reproducibility tier 0
 it does not check that the image's workspace corresponds to `source.repo@source.commit`;
 that binding is a declaration this protocol does not check (design §5.2).

@@ -153,8 +153,8 @@ export async function verifyEnvironment(
   const controls = options.controls ?? DEFAULT_VERIFICATION_CONTROLS;
   const timeoutSeconds = options.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
 
-  // Subject identity: re-seal the parsed record. Sealing is deterministic
-  // (JCS-once), so this reproduces the record's identity bytes -- provided the
+  // Subject identity: re-seal the parsed record. Sealing is a pure JCS-once
+  // function, so this reproduces the record's identity bytes -- provided the
   // caller parsed exact bytes, which C1's parser enforces.
   const recordBytes = sealEnvironmentRecord(record);
   const recordDigestValue = PrefixedSha256Schema.parse(

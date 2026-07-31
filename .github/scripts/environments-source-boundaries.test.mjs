@@ -93,9 +93,14 @@ const VERIFICATION_FOREIGN_PACKAGES = [
 const FILESYSTEM_ALLOWED_SOURCES = [
   'verification/src/staged-state-store.ts',
   'verification/src/testing.ts',
-  // The store's own test drives it against a real temporary directory; naming the
-  // file keeps the allowlist explicit rather than exempting the whole test region.
+  // Three test files read from disk for reasons the suite cannot fake: the store's
+  // own test drives it against a real temporary directory, and the fixture-corpus
+  // and bounded-claims suites read this package's own shipped fixtures and source.
+  // They are named one by one so a new filesystem user still needs a deliberate
+  // edit here rather than inheriting a blanket test-region exemption.
   'verification/src/staged-state-store.test.ts',
+  'verification/src/testing.test.ts',
+  'verification/src/bounded-claims.test.ts',
 ];
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];

@@ -72,7 +72,7 @@ function fixedClock(): Clock {
   return { now: () => instants[Math.min(index++, instants.length - 1)]! };
 }
 
-/** Deterministic, non-cryptographic stand-in. Real keys arrive in T12 via
+/** Reproducible, non-cryptographic stand-in. Real keys arrive in T12 via
  * trust-testing's `createEoaTestSigner`. */
 const signer: DsseSigner = async (request) => [{
   keyid: "test-key",
