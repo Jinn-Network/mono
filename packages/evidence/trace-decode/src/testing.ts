@@ -30,6 +30,15 @@ import { FORMAT_IRI_PATTERN } from "./formats.js";
 import { createDecoderRegistry } from "./registry.js";
 
 export type { TraceDecoderFixture } from "./contract.js";
+export {
+  loadClaudeCodeFixtures,
+  loadDecoderFixtureManifest,
+  traceDecodeFixtureUrl,
+} from "./fixtures.js";
+export type {
+  DecoderFixtureManifest,
+  DecoderFixtureManifestEntry,
+} from "./fixtures.js";
 
 export interface TraceDecoderContractContext {
   readonly decoder: TraceDecoder;
@@ -53,6 +62,17 @@ function nativeTrace(bytes: Uint8Array) {
     mediaType: "application/octet-stream",
     digest: { sha256: sha256Hex(bytes) },
   };
+}
+
+function nativeTraceForSeal(decoder: TraceDecoder, bytes: Uint8Array) {
+  if (decoder.decoderId === "claude-code-stream-json") {
+    return {
+      name: "stdout.jsonl",
+      mediaType: "application/x-ndjson",
+      digest: { sha256: sha256Hex(bytes) },
+    };
+  }
+  return nativeTrace(bytes);
 }
 
 function traceIdFor(decoder: TraceDecoder, bytes: Uint8Array): string {
@@ -201,7 +221,7 @@ export function describeTraceDecoderContract(
       for (const fixture of context.fixtures) {
         const document = decodeTrajectory(registry, context.decoder.formatIri, {
           bytes: fixture.bytes,
-          nativeTrace: nativeTrace(fixture.bytes),
+          nativeTrace: nativeTraceForSeal(context.decoder, fixture.bytes),
         });
         const sealed = sealTrajectory(document);
         expect(parseTrajectory(sealed.bytes).traceId, fixture.id).toBe(document.traceId);
