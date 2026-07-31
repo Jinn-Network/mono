@@ -5,59 +5,24 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const evidenceRoot = join(root, 'packages', 'discovery');
-const temporaryRoot = await mkdtemp(join(tmpdir(), 'jinn-record-discovery-packed-types-'));
+const environmentsRoot = join(root, 'packages', 'environments');
+const temporaryRoot = await mkdtemp(join(tmpdir(), 'jinn-environments-packed-types-'));
 const archivesRoot = join(temporaryRoot, 'archives');
 const consumerRoot = join(temporaryRoot, 'consumer');
 
 const packages = [
-  ['protocol', '@jinn-network/record-discovery-protocol'],
-  ['testing', '@jinn-network/record-discovery-testing'],
-  ['serve', '@jinn-network/record-discovery-serve'],
-  ['client', '@jinn-network/record-discovery-client'],
-  ['facts/evidence', '@jinn-network/record-discovery-facts-evidence'],
-  ['facts/trust', '@jinn-network/record-discovery-facts-trust'],
-  ['facts/task-execution', '@jinn-network/record-discovery-facts-task-execution'],
-  ['facts/benchmarking', '@jinn-network/record-discovery-facts-benchmarking'],
-  ['facts/environments', '@jinn-network/record-discovery-facts-environments'],
-  ['sources/evidence-journal', '@jinn-network/record-discovery-source-evidence-journal'],
+  ['record', '@jinn-network/environment-record'],
 ];
 
 const codeEntrypoints = [
-  '@jinn-network/record-discovery-protocol',
-  '@jinn-network/record-discovery-testing',
-  '@jinn-network/record-discovery-serve',
-  '@jinn-network/record-discovery-client',
-  '@jinn-network/record-discovery-facts-evidence',
-  '@jinn-network/record-discovery-facts-trust',
-  '@jinn-network/record-discovery-facts-task-execution',
-  '@jinn-network/record-discovery-facts-benchmarking',
-  '@jinn-network/record-discovery-facts-environments',
-  '@jinn-network/record-discovery-source-evidence-journal',
+  '@jinn-network/environment-record',
+  '@jinn-network/environment-record/testing',
 ];
 
-// Cross-tree Jinn dependencies each *then-present* discovery package
-// references, packed as file: deps so NodeNext resolves them (program §7.8).
-// M1 seeds trust-core only; M7 adds evidence-protocol, evidence-repository,
-// and evidence-discovery (facts/evidence's dependency, including the
-// "/indexer" subpath its exported recompute fns use); M8 adds
-// task-execution-protocol AND task-execution-profiles as facts/task-
-// execution lands -- both, not profiles alone, because profiles' public
-// surface does not re-export Task/Submission/Delivery's schemas (see the
-// inventory guard's dependency-graph comment and facts/task-execution's
-// src/recompute.ts for the full rationale). sources/evidence-journal adds
-// no NEW cross-tree package here -- its evidence-protocol/evidence-
-// repository/evidence-discovery dependencies are already packed by M7.
-const CROSS_TREE_PACKAGES = [
-  ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
-  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
-  ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
-  ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
-  ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
-  ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
-  ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
-  ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
-];
+// `@jinn-network/environment-record` has NO Jinn runtime dependency, so the consumer project
+// needs no packed cross-tree portals. The loop below is kept so the moment this tree grows a
+// cross-tree edge, adding it here is the only change required.
+const CROSS_TREE_PACKAGES = [];
 
 function run(command, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
@@ -100,7 +65,7 @@ try {
   await mkdir(archivesRoot);
   const archives = new Map();
   for (const [directory, name] of packages) {
-    archives.set(name, await packOne(join(evidenceRoot, directory), name));
+    archives.set(name, await packOne(join(environmentsRoot, directory), name));
   }
   for (const [name, directory] of CROSS_TREE_PACKAGES) {
     archives.set(name, await packOne(directory, name));
@@ -130,7 +95,7 @@ try {
       .map((specifier, index) => `import type * as Entry${index} from ${JSON.stringify(specifier)};`)
       .join('\n')
       + '\n\n'
-      + `export type RecordDiscoveryEntrypoints = [\n${codeEntrypoints
+      + `export type EnvironmentsEntrypoints = [\n${codeEntrypoints
         .map((_, index) => `  typeof Entry${index},`)
         .join('\n')}\n];\n`,
   );
@@ -164,7 +129,7 @@ try {
   }
 
   console.log(
-    `Compiled a packed TypeScript consumer against ${codeEntrypoints.length} public code entrypoints across all ${packages.length} record discovery packages.`,
+    `Compiled a packed TypeScript consumer against ${codeEntrypoints.length} public code entrypoints across all ${packages.length} environments packages.`,
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });

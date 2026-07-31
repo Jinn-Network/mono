@@ -1,0 +1,13 @@
+{
+  "protocol": "https://jinn.network/record-discovery/1.0",
+  "kind": "https://jinn.network/records/environment/1.0",
+  "profile": "https://jinn.network/records/environment/1.0/facts/1.0",
+  "fields": [
+    { "name": "environmentRecordDigest", "class": "record" },
+    { "name": "source.repo", "class": "record", "cloudEvents": { "attribute": "repo", "scalar": "string" } },
+    { "name": "source.commit", "class": "record", "cloudEvents": { "attribute": "commit", "scalar": "string" } },
+    { "name": "image.manifestDigest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "image", "scalar": "string" } },
+    { "name": "image.platform", "class": "record", "cloudEvents": { "attribute": "platform", "scalar": "string" } },
+    { "name": "build.reproducibilityTier", "class": "record", "cloudEvents": { "attribute": "tier", "scalar": "number" } }
+  ]
+}
