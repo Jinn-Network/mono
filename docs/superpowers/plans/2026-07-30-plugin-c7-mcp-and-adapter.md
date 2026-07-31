@@ -6921,3 +6921,8 @@ eleven are already hyphenated, so this is the cheaper migration. The adapter mer
 never parses them, so nothing but the render depends on the outcome — which is precisely why it should be
 decided once rather than negotiated at integration.
 
+
+**F-C7-T1-1 — Task 1 inventory allowlist lives in guard-common, not the inventory test.**
+
+*Raised:* Task 1 implementation (2026-07-31).
+*Disposition:* build it. The plan named `.github/scripts/plugin-tree-package-inventory.test.mjs` as the place to list `@modelcontextprotocol/sdk` in the runtime's expected non-Jinn deps. The live allowlist is `APPROVED_RUNTIME_DEPENDENCIES` in `.github/scripts/plugin-tree-guard-common.mjs`. Task 1 updated guard-common (required) and adjusted a C3-pre-seeded `optionalDependencies` probe in `plugin-tree-source-boundaries.test.mjs` once the SDK became an approved production dependency. No product-code consequence; plan text above Task 1 Step 3 should be read as "update the approved-runtime allowlist (guard-common) so inventory passes."
