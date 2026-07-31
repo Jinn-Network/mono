@@ -2,7 +2,7 @@
  *  behaviour is unit-testable with an injected runner (the orchestrator's own
  *  I/O is validated by dry-run + smoke, per the pilot plan). */
 
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripTestPathHunks } from '../harnesses/impls/learner/restoration-patch.js';
@@ -68,9 +68,22 @@ export async function recoverPatch(run: CmdRunner, cwd: string): Promise<string>
  * Create an isolated checkout directory. Durable runs keep live work beneath
  * `<out>/work` so agent path protections see an operator-owned location;
  * legacy runs without `--out` retain the OS-temp fallback.
+ *
+ * Returns the REALPATH of the created directory, symlinks resolved — on
+ * macOS `/tmp` is itself a symlink to `/private/tmp` (and `os.tmpdir()`'s
+ * `/var/folders/...` is under `/private/var`), so a naive `mkdtemp` result
+ * does not match the canonicalized cwd a spawned child process (or the
+ * kernel's own getcwd()) reports. This directory is used both as a spawned
+ * `claude` process's `cwd` and, downstream, as the input to
+ * `sessionJsonlPath` (trigger.ts) to locate that same session's JSONL —
+ * `sessionJsonlPath`'s own doc comment requires an already-resolved,
+ * non-symlinked path from its caller precisely because claude-code slugs the
+ * real path. Returning the realpath here, once, at the source, is simpler
+ * than requiring every call site to remember to resolve it.
  */
 export async function createPilotWorkDir(outDir: string | undefined, prefix: string): Promise<string> {
   const root = outDir ? join(outDir, 'work') : tmpdir();
   await mkdir(root, { recursive: true });
-  return mkdtemp(join(root, prefix));
+  const dir = await mkdtemp(join(root, prefix));
+  return realpath(dir);
 }

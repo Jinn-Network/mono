@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPilotWorkDir, prepareBaseCheckout, recoverPatch, GitStepError, type CmdRunner } from '../../src/pilot/repo.js';
@@ -98,8 +99,30 @@ describe('pilot repo helpers', () => {
     const outDir = mkdtempSync(join(tmpdir(), 'pilot-work-root-'));
     try {
       const workDir = await createPilotWorkDir(outDir, 'solve-stock-0-');
-      expect(workDir.startsWith(join(outDir, 'work'))).toBe(true);
+      // Compare against the REALPATH of outDir, not outDir itself: on macOS
+      // tmpdir() lives under /var/folders/... and /var is a symlink to
+      // /private/var, so a naive startsWith(outDir) would spuriously fail
+      // now that createPilotWorkDir resolves symlinks in its return value
+      // (see its doc comment — this is the whole point of the fix).
+      const realOutDir = await realpath(outDir);
+      expect(workDir.startsWith(join(realOutDir, 'work'))).toBe(true);
       expect(existsSync(workDir)).toBe(true);
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves symlinked temp roots (e.g. macOS /tmp -> /private/tmp) so the returned path matches what a spawned child process\'s cwd resolves to', async () => {
+    // Regression for the skills-bench --out /tmp/... case: sessionJsonlPath
+    // (trigger.ts) requires its solveCwd argument to already be
+    // symlink-resolved, since claude-code itself slugs the OS-canonicalized
+    // cwd. A workDir still containing a symlink component would compute a
+    // project-dir slug that never matches what claude-code actually wrote,
+    // silently degrading every trigger-rate read to "unknown".
+    const outDir = mkdtempSync(join(tmpdir(), 'pilot-work-root-'));
+    try {
+      const workDir = await createPilotWorkDir(outDir, 'solve-stock-0-');
+      expect(workDir).toBe(await realpath(workDir));
     } finally {
       rmSync(outDir, { recursive: true, force: true });
     }
