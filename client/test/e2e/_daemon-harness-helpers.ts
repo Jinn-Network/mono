@@ -1249,6 +1249,15 @@ export async function startDaemon(
       },
       executionWiring,
       ipfsRegistryUrl: resolvedIpfsRegistryUrl,
+      // Last-mile fix: `buildOperatorComposition`'s projector (`resolveSubmissionBytes`'s IPFS
+      // fetch, `readSealedDocuments`) reads `config.ipfsGatewayUrl` via the SAME
+      // `buildFetchIpfsBytes` helper the MechAdapter above already uses `resolvedIpfsGatewayUrl`
+      // for -- this was an accidental omission (composition-root.ts's `fetchIpfsBytes` port always
+      // failed closed with no gateway URL, which was invisible while `resolveSubmissionBytes`
+      // never called it at all). Must be the SAME mock IPFS gateway the MechAdapter/creator write
+      // task documents to, or the composition reads from a different (real) gateway than the one
+      // this fixture's tasks are actually pinned to.
+      ipfsGatewayUrl: resolvedIpfsGatewayUrl,
       claudePath,
       codexPath: process.env['JINN_CODEX_PATH'] ?? 'codex',
       hermesPath: process.env['JINN_HERMES_PATH'] ?? 'hermes',
@@ -1588,11 +1597,20 @@ async function postSignedTaskOnChain(
     },
   };
 
-  // `taskCidDigest` = keccak256(JSON.stringify(signedTaskDoc)). The daemon
-  // derives the IPFS CID as `f01551220${digest.slice(2)}` from the on-chain
-  // event and fetches from the mock gateway at that path.
+  // `taskCidDigest` MUST be a real sha256 digest of the exact posted bytes, not an arbitrary
+  // lookup key: `composition-root.ts`'s `buildResolveSubmissionBytes` (the projector's TEP
+  // admission path) re-derives `sha256(fetchedBytes)` and cross-checks it against this on-chain
+  // value (`resolveTaskProjection`'s digest join) before admitting the event — a mismatch is a
+  // correct fail-closed drop, not a bug in that path. This was previously
+  // `keccak256(JSON.stringify(signedTaskDoc))` (an opaque mock-gateway lookup key, harmless while
+  // nothing ever verified it, but wrong now that something does). Real production posting
+  // (`adapter.ts`'s `uploadToIpfs` + `cidToDigestHex`) computes a genuine sha256-based CID digest
+  // over the uploaded bytes; this mirrors that, over the same JSON bytes the mock gateway serves
+  // back byte-identical (see `startMockIpfsServer`'s doc comment). The daemon still derives the
+  // IPFS CID as `f01551220${digest.slice(2)}` from the on-chain event and fetches from the mock
+  // gateway at that path — unchanged.
   const taskJson = JSON.stringify(signedTaskDoc);
-  const taskCidDigest = keccak256(toBytes(taskJson)) as `0x${string}`;
+  const taskCidDigest = `0x${createHash('sha256').update(taskJson).digest('hex')}` as `0x${string}`;
   mockIpfs.register(taskCidDigest, signedTaskDoc);
 
   const manifestDigest = keccak256(toBytes(manifestCid)) as `0x${string}`;

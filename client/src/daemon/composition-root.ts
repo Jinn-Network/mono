@@ -25,18 +25,42 @@
  *
  *  a. `resolveSubmissionBytes` / `resolveDispatchContext` (the enrich ports `createProjectorEnrich`
  *     needs, `./projector-enrich.js`): for `BASE_SEPOLIA_TODAY` (today generation, the only real
- *     `MarketplaceChainConfig` per finding E22), there is no on-chain Submission/dispatch-context
- *     anchor at all, and NO production path anywhere in `client/src` produces a TEP
- *     `SubmissionRecordSchema` document for a today-generation task (the legacy `CreatorLoop`
- *     posts the older `SignedTaskV1` shape, which fails TEP schema validation), nor durably
- *     persists a dispatch-context document keyed by taskId in a way this composition can read
- *     BEFORE the venue exists (venue-base's own `submission_scopes` table -- the only production
- *     dispatch-context store found -- is keyed by revised-generation requester/idempotencyKey and
- *     is never populated for today-generation router/mech claims). Both ports are wired to always
- *     report unresolvable (`undefined`), which `createProjectorEnrich` already treats as a
- *     correct fail-closed drop (never fabricated, retried next tick). Practical consequence: no
- *     event is ever admitted from live chain traffic today, so `observations` stays empty in
- *     practice even though the STREAM machinery reading it is real (see (b) below for what
+ *     `MarketplaceChainConfig` per finding E22), there is no on-chain Submission anchor at all,
+ *     and NO production path anywhere in `client/src` produces a TEP `SubmissionRecordSchema`
+ *     document for a today-generation task (the legacy `CreatorLoop` posts the older
+ *     `SignedTaskV1` shape, which fails TEP schema validation).
+ *
+ *     `resolveSubmissionBytes` half CLOSED (last-mile follow-up to commit 051bc63c6): the fix is
+ *     not a new Submission format, it is fetching the legacy document at all -- the on-chain
+ *     `TaskCoordinator.getTask(taskId).taskCidDigest` fact (read here via the SAME
+ *     `getTaskCidDigest` helper `adapter.ts`'s `restorationAnnouncementForTaskId`/
+ *     `recoverTaskPost` already use to read back the legacy creator's own posted tasks) names the
+ *     IPFS content; `buildResolveSubmissionBytes` below fetches it through this composition's own
+ *     `fetchIpfsBytes` port and hands the raw bytes to `createProjectorEnrich`, whose bridge-
+ *     synthesis path (finding E32, `parseLegacySignedTaskV1` -> `synthesizeLegacyTaskProjection`)
+ *     was already wired and waiting -- it simply never received real bytes to try. Fails closed on
+ *     any on-chain read failure, missing/zero digest, or IPFS miss; the caller's own digest join
+ *     against the on-chain anchor is an independent second check regardless of what this port
+ *     returns.
+ *
+ *     `resolveDispatchContext` STILL OPEN: no production path anywhere durably seals or persists
+ *     a dispatch-context document (TEP §9.3) keyed by taskId in a way this composition -- or any
+ *     OTHER reader, since the projector observes every operator's chain activity, not just this
+ *     one -- can read back BEFORE the venue exists. `pipeline.ts`'s `claim.dispatchContext` is
+ *     built entirely in-memory inside a single `runPipeline` call and never pinned/anchored
+ *     anywhere; venue-base's own `submission_scopes` table -- the only production dispatch-context
+ *     store found -- is keyed by revised-generation requester/idempotencyKey and is never
+ *     populated for today-generation router/mech claims; this composition's own
+ *     `engagement_ledger` (the one durable per-claim store it owns) records `attempt_uri`/
+ *     `request_id`/`claim_tx_hash` but no dispatch-context digest or descriptor at all (see
+ *     `engagement-ledger.ts`'s schema). Unlike the Submission gap, no bridge-synthesis function
+ *     for this shape exists anywhere in the repo, and inventing one here would mean fabricating a
+ *     `ResourceDescriptor` that points at a document nobody ever actually sealed -- exactly the
+ *     fabrication this module's fail-closed contract forbids. Wired to always report unresolvable
+ *     (`undefined`), which `createProjectorEnrich` already treats as a correct fail-closed drop
+ *     (never fabricated, retried next tick). Practical consequence: every event still drops here,
+ *     one step later than before -- `observations` stays empty in practice even though the STREAM
+ *     machinery reading it, and now the Submission leg of it, are real (see (b) below for what
  *     that implies downstream).
  *  b. `verifyVerdictObservation` and `resolveRecord` for the `"delivery"` / `"evaluation-delivery"`
  *     roles (the announcement ports `projectAnnouncements` needs, `./projector-ports.js`):
@@ -91,7 +115,7 @@ import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
-import type { Address, PublicClient, WalletClient } from 'viem';
+import type { Address, Hex, PublicClient, WalletClient } from 'viem';
 import {
   createBaseVenue,
   openVenueState,
@@ -151,6 +175,7 @@ import { toPipelineWiring } from '../config/shape-v2.js';
 import type { VenueBroadcaster } from '../adapters/mech/safe.js';
 import type { Store } from '../store/store.js';
 import { fetchRawBytesFromIpfs } from '../adapters/mech/ipfs.js';
+import { getTaskCidDigest } from '../adapters/mech/contracts.js';
 import { openOperatorEvidence, type OperatorEvidence } from './evidence-join.js';
 import { buildLegacyExecutionEnvelope, LEGACY_ENVELOPE_EXTENSION_KEY } from './bridge-legacy-delivery.js';
 import { EngagementLedger } from './engagement-ledger.js';
@@ -558,34 +583,76 @@ function buildReadTodayDeliveryFacts(
 }
 
 /**
- * New gap (a, file header): no production path resolves a TEP Submission or a dispatch-context
- * document for a today-generation task anywhere in `client/src` — see the file header for why.
- * Fails closed (`undefined`), which `createProjectorEnrich` already treats as "drop this event,
- * retry next tick" — never a fabricated value. Logs the gap once, not once per event.
+ * Real (gap a, file header — first half CLOSED): resolves a today-generation Submission by
+ * fetching the legacy `SignedTaskV1` document the legacy `CreatorLoop` actually posted, keyed off
+ * the ON-CHAIN `taskCidDigest` fact. Reuses the EXACT retrieval path the legacy `MechAdapter`
+ * already uses to read its own posted tasks back (`adapter.ts`'s
+ * `restorationAnnouncementForTaskId` / `recoverTaskPost`): `getTaskCidDigest` takes the ROUTER
+ * address (not the coordinator) and internally resolves `taskCoordinator()` from it before
+ * reading `getTask(taskId).taskCidDigest` — the same two-hop read `adapter.ts` performs, not a
+ * new one. The resulting bytes32 is converted to the raw-codec `sha256:` digest form and fetched
+ * through this composition's own `fetchIpfsBytes` port (same IPFS gateway machinery as
+ * `buildFetchIpfsBytes` above — the caller passes that exact port instance in).
+ *
+ * Fails closed (`undefined`) on ANY failure — no on-chain record for this taskId (`getTask`
+ * reverts), a malformed/zero digest, or an IPFS miss — exactly `createProjectorEnrich`'s
+ * documented "drop, retry next tick" contract. `createProjectorEnrich`'s own digest join
+ * (`resolveTaskProjection` re-derives the digest from the fetched bytes and compares it against
+ * the on-chain `TaskCreated.taskCidDigest` anchor) is an independent second check regardless of
+ * what this port returns, so a wrong fetch here still cannot slip a corrupted document past the
+ * join — this port only needs to be honest about failure, not the last line of defense.
+ *
+ * Exported so `client/test/daemon/*` can drive this exact production resolver against a fixture
+ * `publicClient`/`fetchIpfsBytes`, proving the bridge synthesis path end to end rather than
+ * against a hand-built test double.
  */
-function buildUnresolvedEnrichIdentityPorts(logger?: { warn(m: string): void }): {
-  readonly resolveSubmissionBytes: ProjectorEnrichPorts['resolveSubmissionBytes'];
-  readonly resolveDispatchContext: ProjectorEnrichPorts['resolveDispatchContext'];
-} {
+export function buildResolveSubmissionBytes(input: {
+  readonly publicClient: PublicClient;
+  readonly jinnRouter: Address;
+  readonly fetchIpfsBytes: (digest: `sha256:${string}`) => Promise<Uint8Array | undefined>;
+}): ProjectorEnrichPorts['resolveSubmissionBytes'] {
+  return async ({ taskId }) => {
+    let taskCidDigest: Hex;
+    try {
+      taskCidDigest = await getTaskCidDigest(input.publicClient, input.jinnRouter, taskId);
+    } catch {
+      return undefined;
+    }
+    if (!/^0x[0-9a-fA-F]{64}$/.test(taskCidDigest) || /^0x0{64}$/i.test(taskCidDigest)) {
+      // Malformed or all-zero digest: no task was ever posted under this id, or `getTask`
+      // returned a default-initialized record. Either way there is nothing honest to fetch.
+      return undefined;
+    }
+    return input.fetchIpfsBytes(`sha256:${taskCidDigest.slice(2).toLowerCase()}`);
+  };
+}
+
+/**
+ * New gap (a, file header — second half STILL OPEN): no production path anywhere durably seals
+ * or persists a dispatch-context document (TEP §9.3) for a today-generation task in a way this
+ * composition can read back — see the file header for the full accounting of every store checked
+ * (`pipeline.ts`'s in-memory `claim.dispatchContext`, venue-base's revised-only
+ * `submission_scopes`, this composition's own `engagement_ledger`) and why none of them qualify.
+ * Unlike `resolveSubmissionBytes` above, no bridge-synthesis function for this shape exists
+ * anywhere in the repo, and inventing one here would mean fabricating a `ResourceDescriptor` that
+ * points at a document nobody ever actually sealed. Fails closed (`undefined`), which
+ * `createProjectorEnrich` already treats as "drop this event, retry next tick" — never a
+ * fabricated value. Logs the gap once, not once per event.
+ */
+function buildUnresolvedDispatchContextPort(
+  logger?: { warn(m: string): void },
+): ProjectorEnrichPorts['resolveDispatchContext'] {
   let warned = false;
-  function warnOnce(): void {
-    if (warned) return;
-    warned = true;
-    logger?.warn(
-      '[composition-root] no production Submission/dispatch-context resolver exists for '
-      + 'today-generation tasks yet (file header gap a) — every projector event will be dropped '
-      + 'until a follow-up task builds one',
-    );
-  }
-  return {
-    resolveSubmissionBytes: async () => {
-      warnOnce();
-      return undefined;
-    },
-    resolveDispatchContext: async () => {
-      warnOnce();
-      return undefined;
-    },
+  return async () => {
+    if (!warned) {
+      warned = true;
+      logger?.warn(
+        '[composition-root] no production dispatch-context resolver exists for today-generation '
+        + 'tasks yet (file header gap a, second half) — every projector event still drops here, '
+        + 'one step later than before resolveSubmissionBytes was wired',
+      );
+    }
+    return undefined;
   };
 }
 
@@ -603,9 +670,10 @@ function verifyVerdictObservationGap(): never {
 
 /** Real for "submission" (reuses `resolveSubmissionBytes`, gap a above); new gap (b) for
  * "delivery"/"evaluation-delivery" — no lookup mechanism exists to resolve a Delivery's bytes
- * from an on-chain-observed event alone. Both cases are unreachable in this composition today
- * because gap (a) already drops every event before `resolveRecord` could ever be called — kept
- * honest (throwing, not fabricating) so a future fix to (a) fails loud instead of silent. */
+ * from an on-chain-observed event alone. Both cases are STILL unreachable in this composition
+ * today: `resolveSubmissionBytes` is real now, but gap (a)'s still-open `resolveDispatchContext`
+ * half drops every event inside `enrich()` before it ever reaches `resolveRecord` — kept honest
+ * (throwing, not fabricating) so a future fix to that half fails loud instead of silent. */
 function buildResolveRecord(
   resolveSubmissionBytes: ProjectorEnrichPorts['resolveSubmissionBytes'],
   chain: MarketplaceChainConfig,
@@ -667,13 +735,18 @@ function buildProjector(input: {
   });
 
   const fetchIpfsBytes = buildFetchIpfsBytes(input.ipfsGatewayUrl);
-  const identityPorts = buildUnresolvedEnrichIdentityPorts(input.logger);
+  const resolveSubmissionBytes = buildResolveSubmissionBytes({
+    publicClient: input.publicClient,
+    jinnRouter: input.chain.jinnRouter,
+    fetchIpfsBytes,
+  });
+  const resolveDispatchContext = buildUnresolvedDispatchContextPort(input.logger);
   const enrich = createProjectorEnrich({
     chain: input.chain,
     publicClient: input.publicClient,
     fetchIpfsBytes,
-    resolveSubmissionBytes: identityPorts.resolveSubmissionBytes,
-    resolveDispatchContext: identityPorts.resolveDispatchContext,
+    resolveSubmissionBytes,
+    resolveDispatchContext,
     readTodayDeliveryFacts: buildReadTodayDeliveryFacts(input.publicClient, input.chain.taskCoordinator),
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
@@ -691,7 +764,7 @@ function buildProjector(input: {
     source: { agent: `urn:jinn:operator:${input.mechAddress.toLowerCase()}`, name: 'operator-projector' },
     signer,
     archiveRoot: join(input.venueStateDbPath, '..', 'discovery-archive'),
-    resolveRecord: buildResolveRecord(identityPorts.resolveSubmissionBytes, input.chain),
+    resolveRecord: buildResolveRecord(resolveSubmissionBytes, input.chain),
     verifyVerdictObservation: verifyVerdictObservationGap,
     referencedBytes: { fetch: fetchIpfsBytes },
     readPageCount: () => Number.parseInt(input.store.getConfigValue(pageCountKey) ?? '0', 10),

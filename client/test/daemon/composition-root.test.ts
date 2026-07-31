@@ -388,3 +388,182 @@ describe('buildOperatorComposition', () => {
     store.close();
   });
 });
+
+describe('buildResolveSubmissionBytes (last-mile: gap a, first half CLOSED)', () => {
+  const JINN_ROUTER = '0x4444444444444444444444444444444444444444' as const;
+  const TASK_COORDINATOR = '0x3333333333333333333333333333333333333333' as const;
+  const CREATOR = '0x5555555555555555555555555555555555555555' as const;
+
+  /** A legacy `SignedTaskV1` document — what the legacy `CreatorLoop` actually posts (E32). */
+  function legacyTaskBytes(): Uint8Array {
+    return new TextEncoder().encode(JSON.stringify({
+      schemaVersion: 'task.v1',
+      id: 'legacy-task-1',
+      solverType: 'prediction.v1',
+      solverNetManifestCid: 'bafySolverNetManifest',
+      contractId: 'prediction',
+      contractVersion: 'v1',
+      role: 'restoration',
+      description: 'restore service health',
+      window: { startTs: 1000, endTs: 2000 },
+      spec: {},
+      eligibility: {},
+      claimPolicy: { maxClaims: 2 },
+      creator: { safeAddress: CREATOR, agentEoa: CREATOR },
+      createdAt: 1000,
+      signature: {
+        algo: 'secp256k1',
+        signer: CREATOR,
+        hash: `0x${'a'.repeat(64)}`,
+        sig: `0x${'b'.repeat(130)}`,
+      },
+    }));
+  }
+
+  /** Mocks the exact two-hop read `getTaskCidDigest` performs (router -> taskCoordinator -> getTask). */
+  function readContractMock(taskCidDigestBytes32: `0x${string}` | undefined) {
+    return vi.fn(async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'taskCoordinator') return TASK_COORDINATOR;
+      if (functionName === 'getTask') {
+        if (taskCidDigestBytes32 === undefined) throw new Error('no such task');
+        return [CREATOR, taskCidDigestBytes32] as const;
+      }
+      throw new Error(`unexpected functionName ${functionName}`);
+    });
+  }
+
+  it('fetches the legacy SignedTaskV1 document via the on-chain taskCidDigest and enriches end to end through resolveTaskProjection', async () => {
+    const { buildResolveSubmissionBytes } = await import('../../src/daemon/composition-root.js');
+    const { createProjectorEnrich } = await import('../../src/daemon/projector-enrich.js');
+    const { BASE_SEPOLIA_TODAY, computeRawCodecCid } = await import('@jinn-network/marketplace-binding');
+
+    const taskBytes = legacyTaskBytes();
+    const taskCidDigestHex = computeRawCodecCid(taskBytes).sha256Digest.slice('sha256:'.length);
+    const taskCidDigestBytes32 = `0x${taskCidDigestHex}` as const;
+
+    const publicClient = {
+      readContract: readContractMock(taskCidDigestBytes32),
+      getBlock: vi.fn(async () => ({ timestamp: 1_000_000_000n }) as never),
+    };
+    const fetchIpfsBytes = vi.fn(async (digest: `sha256:${string}`) =>
+      digest === `sha256:${taskCidDigestHex}` ? taskBytes : undefined,
+    );
+
+    const resolveSubmissionBytes = buildResolveSubmissionBytes({
+      publicClient: publicClient as never,
+      jinnRouter: JINN_ROUTER,
+      fetchIpfsBytes,
+    });
+
+    // (1) the port itself resolves the exact posted bytes.
+    const resolved = await resolveSubmissionBytes({
+      chainId: BASE_SEPOLIA_TODAY.chainId,
+      taskCoordinator: TASK_COORDINATOR,
+      taskId: 1n,
+      generation: 'today',
+    });
+    expect(resolved).toEqual(taskBytes);
+
+    // (2) end to end through `resolveTaskProjection` (internal to `createProjectorEnrich`): a real
+    // `TaskCreated` event, enriched with the production resolver, reaches the bridge-synthesis
+    // path (finding E32 / commit 051bc63c6) that was previously unreachable.
+    const dispatchContext = { uri: 'urn:jinn:marketplace:dispatch-context:1:0', digest: { sha256: '9'.repeat(64) } };
+    const enrich = createProjectorEnrich({
+      chain: { ...BASE_SEPOLIA_TODAY, taskCoordinator: TASK_COORDINATOR, jinnRouter: JINN_ROUTER },
+      publicClient: publicClient as never,
+      fetchIpfsBytes,
+      resolveSubmissionBytes,
+      resolveDispatchContext: async () => dispatchContext,
+      readTodayDeliveryFacts: async () => undefined,
+    });
+
+    const event = {
+      event: 'TaskCreated',
+      facts: {
+        creator: CREATOR,
+        taskId: 1n,
+        manifestDigest: `0x${'9'.repeat(64)}`,
+        taskCidDigest: taskCidDigestBytes32,
+        maxClaims: 2,
+        solutionBudget: 100n,
+        verdictBudget: 20n,
+      },
+      derivation: {
+        chainId: BASE_SEPOLIA_TODAY.chainId,
+        contract: JINN_ROUTER,
+        event: 'TaskCreated',
+        blockNumber: 10,
+        blockHash: `0x${'1'.repeat(64)}`,
+        txHash: `0x${'2'.repeat(64)}`,
+        logIndex: 0,
+        finalityTier: 'safe',
+        contractGeneration: 'today',
+      },
+    } as never;
+
+    const enriched = await enrich(event);
+    expect(enriched).toBeDefined();
+    expect(enriched?.projection.taskDigest).toBe(`sha256:${taskCidDigestHex}`);
+    expect(enriched?.projection.dispatchContext).toEqual(dispatchContext);
+  });
+
+  it('fails closed when the on-chain read reverts (no task posted under this id)', async () => {
+    const { buildResolveSubmissionBytes } = await import('../../src/daemon/composition-root.js');
+    const publicClient = { readContract: readContractMock(undefined) };
+    const resolveSubmissionBytes = buildResolveSubmissionBytes({
+      publicClient: publicClient as never,
+      jinnRouter: JINN_ROUTER,
+      fetchIpfsBytes: vi.fn(),
+    });
+
+    await expect(
+      resolveSubmissionBytes({
+        chainId: 84532,
+        taskCoordinator: TASK_COORDINATOR,
+        taskId: 999n,
+        generation: 'today',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('fails closed on an all-zero taskCidDigest without attempting an IPFS fetch', async () => {
+    const { buildResolveSubmissionBytes } = await import('../../src/daemon/composition-root.js');
+    const publicClient = { readContract: readContractMock(`0x${'0'.repeat(64)}`) };
+    const fetchIpfsBytes = vi.fn();
+    const resolveSubmissionBytes = buildResolveSubmissionBytes({
+      publicClient: publicClient as never,
+      jinnRouter: JINN_ROUTER,
+      fetchIpfsBytes,
+    });
+
+    await expect(
+      resolveSubmissionBytes({
+        chainId: 84532,
+        taskCoordinator: TASK_COORDINATOR,
+        taskId: 1n,
+        generation: 'today',
+      }),
+    ).resolves.toBeUndefined();
+    expect(fetchIpfsBytes).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the resolved digest has no content on IPFS', async () => {
+    const { buildResolveSubmissionBytes } = await import('../../src/daemon/composition-root.js');
+    const taskCidDigestBytes32 = `0x${'c'.repeat(64)}` as const;
+    const publicClient = { readContract: readContractMock(taskCidDigestBytes32) };
+    const resolveSubmissionBytes = buildResolveSubmissionBytes({
+      publicClient: publicClient as never,
+      jinnRouter: JINN_ROUTER,
+      fetchIpfsBytes: async () => undefined,
+    });
+
+    await expect(
+      resolveSubmissionBytes({
+        chainId: 84532,
+        taskCoordinator: TASK_COORDINATOR,
+        taskId: 1n,
+        generation: 'today',
+      }),
+    ).resolves.toBeUndefined();
+  });
+});
