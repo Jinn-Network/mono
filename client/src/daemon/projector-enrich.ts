@@ -227,6 +227,25 @@ function eventIdentity(event: TaskScopedEvent): EventIdentity {
 }
 
 /** Builds the enrich function `ProjectorLoopConfig.enrich` consumes. */
+/**
+ * Event kinds whose observation actually dereferences `projection.dispatchContext` — the
+ * `attempt-engaged` emission in `packages/marketplace/projector/src/observe.ts`. For every other
+ * kind the field is structurally required and functionally unread.
+ */
+const ENGAGEMENT_EVENTS: ReadonlySet<string> = new Set([
+  'TaskAttemptCreated',
+  'EvaluationAttemptCreated',
+]);
+
+/**
+ * A descriptor for an event that carries `dispatchContext` without reading it. It names the task
+ * it belongs to so it is never mistaken for a real engagement, and it is deliberately NOT a
+ * sealed document: nothing has been engaged yet, so there is nothing to seal.
+ */
+function unengagedDispatchContext(chainId: number, taskId: bigint): ResourceDescriptor {
+  return { uri: `urn:jinn:marketplace:unengaged:${chainId}:${taskId}` } as ResourceDescriptor;
+}
+
 export function createProjectorEnrich(
   ports: ProjectorEnrichPorts,
 ): (event: MarketplaceEvent) => Promise<ObservationMarketplaceEvent | undefined> {
@@ -427,8 +446,24 @@ export function createProjectorEnrich(
         actor,
       });
       if (dispatchContext === undefined) {
-        ports.logger?.warn(`[projector-enrich] no dispatch context resolved for task ${taskId} -- dropping`);
-        return undefined;
+        // Only the `attempt-engaged` emission ever READS `dispatchContext`
+        // (`packages/marketplace/projector/src/observe.ts:824`), and that emission is driven by
+        // `TaskAttemptCreated` / `EvaluationAttemptCreated` — events that exist only *because*
+        // this operator already claimed, which is the same moment the work loop seals the
+        // descriptor into the engagement ledger. Every other event kind carries the field
+        // structurally and never dereferences it.
+        //
+        // Requiring a resolved descriptor for all of them made the flow circular: `TaskCreated`
+        // was dropped for want of a document that cannot exist until a claim that `TaskCreated`
+        // is itself the trigger for. So the drop is scoped to the events that actually consume
+        // it; the rest carry an explicitly unengaged descriptor that names the task it belongs
+        // to and is never read.
+        if (ENGAGEMENT_EVENTS.has(event.event)) {
+          ports.logger?.warn(
+            `[projector-enrich] no dispatch context resolved for engaged attempt on task ${taskId} -- dropping`,
+          );
+          return undefined;
+        }
       }
 
       const projection: ObservationProjectionContext = {
@@ -437,7 +472,8 @@ export function createProjectorEnrich(
         submission: taskProjection.submission,
         taskDigest: taskProjection.taskDigest,
         effectiveDeadline: taskProjection.effectiveDeadline,
-        dispatchContext,
+        dispatchContext:
+          dispatchContext ?? unengagedDispatchContext(event.derivation.chainId, taskId),
         ...(deliveryCorrespondence === undefined ? {} : { deliveryCorrespondence }),
       };
       return { ...event, projection } as ObservationMarketplaceEvent;

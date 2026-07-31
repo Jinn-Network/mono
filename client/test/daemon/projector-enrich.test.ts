@@ -243,17 +243,24 @@ describe('createProjectorEnrich', () => {
     expect(enriched).toBeUndefined();
   });
 
-  it('drops an event whose dispatch context cannot be resolved', async () => {
+  // The dispatch context is sealed into the engagement ledger at CLAIM time, but `TaskCreated` is
+  // the event that triggers the claim — so requiring a resolved descriptor for it made the flow
+  // circular and dropped every task. Only the `attempt-engaged` emission dereferences the field
+  // (`packages/marketplace/projector/src/observe.ts:824`), and that emission is driven by events
+  // that exist because a claim already happened. So the drop is scoped to those events, and
+  // `TaskCreated` carries an explicitly unengaged descriptor it never reads.
+  it('admits a TaskCreated with an unengaged descriptor when no dispatch context exists yet', async () => {
     const store = buildFixtureStore();
     const task = content({ instructions: 'restore service health' });
     store.ipfs.set(task.digest, task.bytes);
     store.submissionsByTask.set(TASK_ID.toString(), submissionRecordBytes(task.digest.slice('sha256:'.length)));
-    // No dispatch context registered.
+    // No dispatch context registered — none can exist before the claim this event triggers.
 
     const enrich = createProjectorEnrich(buildPorts(store));
     const enriched = await enrich(taskCreatedEvent(task.digest.slice('sha256:'.length)));
 
-    expect(enriched).toBeUndefined();
+    expect(enriched).toBeDefined();
+    expect(enriched!.projection.dispatchContext.uri).toContain('unengaged');
   });
 
   it('enriches a real today-mode Mech Deliver, producing deliveryCorrespondence', async () => {
