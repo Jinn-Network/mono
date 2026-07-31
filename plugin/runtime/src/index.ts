@@ -16,6 +16,7 @@ export type { LogLevel, RuntimeLogger } from "./logger.js";
 export { createPluginRuntime } from "./runtime.js";
 export type { PluginRuntime, PluginRuntimeOptions } from "./runtime.js";
 export { RUNTIME_VERSION } from "./version.js";
+export * from "./corpus/index.js";
 
 // `bin.ts` is deliberately NOT re-exported: it reads the ambient environment, installs
 // signal handlers, and runs on import as a process entry point. Re-exporting it would
