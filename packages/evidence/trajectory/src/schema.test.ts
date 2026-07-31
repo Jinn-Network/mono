@@ -168,4 +168,19 @@ describe("trajectory record schema", () => {
     const empty = { ...record(), spans: [], completeness: { decoded: "empty" } };
     expect(TrajectoryRecordSchema.safeParse(empty).success).toBe(true);
   });
+
+  test("TrajectoryRecordSchema.safeParse rejects accessor keys without invoking getters", () => {
+    let getterCalls = 0;
+    const hostile = record();
+    Object.defineProperty(hostile, "forged", {
+      get: () => {
+        getterCalls += 1;
+        return "bad";
+      },
+      enumerable: true,
+      configurable: true,
+    });
+    expect(TrajectoryRecordSchema.safeParse(hostile).success).toBe(false);
+    expect(getterCalls).toBe(0);
+  });
 });

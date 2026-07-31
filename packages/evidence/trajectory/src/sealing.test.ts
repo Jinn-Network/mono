@@ -55,4 +55,22 @@ describe("sealing", () => {
       InvalidDocumentError,
     );
   });
+
+  test("parseExactWithSchema rejects UTF-8 BOM prefix", () => {
+    const sealed = sealWithSchema(Example, { alpha: 1, beta: "two" });
+    const bomPrefixed = new Uint8Array(sealed.bytes.length + 3);
+    bomPrefixed.set([0xef, 0xbb, 0xbf], 0);
+    bomPrefixed.set(sealed.bytes, 3);
+    expect(() => parseExactWithSchema(Example, bomPrefixed)).toThrow(InvalidDocumentError);
+  });
+
+  test("parseExactWithSchema rejects alternate unicode escape encoding", () => {
+    const alternate = new TextEncoder().encode('{"alpha":1,"beta":"\\u0074wo"}');
+    expect(() => parseExactWithSchema(Example, alternate)).toThrow(InvalidDocumentError);
+  });
+
+  test("parseExactWithSchema rejects pretty-printed whitespace", () => {
+    const pretty = new TextEncoder().encode('{\n  "alpha": 1,\n  "beta": "two"\n}');
+    expect(() => parseExactWithSchema(Example, pretty)).toThrow(InvalidDocumentError);
+  });
 });

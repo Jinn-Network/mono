@@ -9,7 +9,9 @@ export {
   TRAJECTORY_DERIVATION_PREDICATE_TYPE,
   TRAJECTORY_SUBJECT_NAME,
   TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+  LINKAGE_MODES,
 } from "./identifiers.js";
+export type { LinkageMode } from "./identifiers.js";
 export {
   GEN_AI_ATTRIBUTES,
   JINN_ATTRIBUTES,

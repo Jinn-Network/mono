@@ -19,8 +19,20 @@ implements L1–L3 only.
 | --- | --- | --- |
 | L1 | Structural envelope and statement shape | `verifyTrajectoryDerivationAttestation` |
 | L2 | Injected authority port (signature/key binding) | `verifyTrajectoryDerivationAttestation` |
-| L3 | Digest, field, and forward-link binding | `verifyTrajectoryDerivationAttestation` |
+| L3 | Digest, field, linkage-mode, and forward-link binding | `verifyTrajectoryDerivationAttestation` |
 | L4 | Replay against native source | Always `not-evaluated` / `replay-required` |
+
+## Linkage modes
+
+Every derivation attestation must declare a closed `linkageMode` on the signed predicate — there is
+no default and no inference:
+
+| Mode | Use | L3 rule |
+| --- | --- | --- |
+| `forward-linked` | C4 trajectory derivation | Exactly one C1 forward link on the primary Execution `subjectOf` native trace |
+| `sealed-parent` | C2 already-sealed parent Execution | Primary native trace must carry **no** C1 forward link |
+
+Both modes share the same Execution primary-trace resolution, digest binding, and L1–L2 integrity checks.
 
 ## Public API
 

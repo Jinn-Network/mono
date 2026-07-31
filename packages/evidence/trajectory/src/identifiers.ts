@@ -29,3 +29,8 @@ export const TRAJECTORY_SUBJECT_NAME = "trajectory.json" as const;
 /** C1 owns this IRI. Forward-link PropertyValue.value MUST be a repository digest. */
 export const TRAJECTORY_RECORD_IDENTIFIER_PROPERTY =
   "https://jinn.network/schemes/trajectory-record-sha256" as const;
+
+/** Closed linkage modes attested in derivation predicates. C2 uses sealed-parent; C4 uses forward-linked. */
+export const LINKAGE_MODES = ["forward-linked", "sealed-parent"] as const;
+
+export type LinkageMode = (typeof LINKAGE_MODES)[number];

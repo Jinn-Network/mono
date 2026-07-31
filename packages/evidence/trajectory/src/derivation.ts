@@ -22,13 +22,20 @@ import {
 } from "./digests.js";
 import { type JsonValue, serializeCanonicalJson } from "./canonical.js";
 import { documentDigest } from "./hashing.js";
+import { verifyExecutionLinkage } from "./execution-linkage.js";
 import {
+  isGenuineAbortSignal,
+  normalizeThrownError,
+  readAbortSignalAborted,
+} from "./hostile-reflection.js";
+import {
+  LINKAGE_MODES,
   TRAJECTORY_DERIVATION_PREDICATE_TYPE,
   TRAJECTORY_MEDIA_TYPE,
   TRAJECTORY_SUBJECT_NAME,
   TRAJECTORY_VOCABULARY_PROFILE,
-  TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
 } from "./identifiers.js";
+import type { LinkageMode } from "./identifiers.js";
 import { InvalidDocumentError } from "./sealing.js";
 import { parseTrajectory } from "./schema.js";
 import { preflightCanonicalInput } from "./preflight.js";
@@ -44,14 +51,56 @@ export class TrajectoryDerivationCancelledError extends Error {
 }
 
 function assertNotCancelled(signal?: AbortSignal): void {
-  if (signal?.aborted) throw new TrajectoryDerivationCancelledError();
+  if (signal === undefined) return;
+  if (!isGenuineAbortSignal(signal)) {
+    invalidInput("signal must be a genuine AbortSignal when present");
+  }
+  if (readAbortSignalAborted(signal)) throw new TrajectoryDerivationCancelledError();
+}
+
+function readErrorName(error: object): string | undefined {
+  let descriptor = Object.getOwnPropertyDescriptor(error, "name");
+  if (descriptor?.get !== undefined) {
+    try {
+      const value = descriptor.get.call(error);
+      return typeof value === "string" ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  if (
+    descriptor !== undefined &&
+    Object.hasOwn(descriptor, "value") &&
+    typeof descriptor.value === "string"
+  ) {
+    return descriptor.value;
+  }
+  const prototype = Object.getPrototypeOf(error);
+  if (prototype !== null && prototype !== Object.prototype) {
+    descriptor = Object.getOwnPropertyDescriptor(prototype, "name");
+    if (descriptor?.get !== undefined) {
+      try {
+        const value = descriptor.get.call(error);
+        return typeof value === "string" ? value : undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    if (
+      descriptor !== undefined &&
+      Object.hasOwn(descriptor, "value") &&
+      typeof descriptor.value === "string"
+    ) {
+      return descriptor.value;
+    }
+  }
+  return undefined;
 }
 
 function isAbortLike(error: unknown): boolean {
   if (error instanceof TrajectoryDerivationCancelledError) return true;
-  if (error instanceof DOMException && error.name === "AbortError") return true;
-  if (error instanceof Error && error.name === "AbortError") return true;
-  return false;
+  if (typeof error !== "object" || error === null) return false;
+  return readErrorName(error) === "AbortError";
 }
 
 function preflightAttestationJson(value: unknown, context: string): void {
@@ -86,7 +135,6 @@ function statementPayloadMatchesCanonical(
   return true;
 }
 
-const REPOSITORY_SHA256 = /^sha256:[0-9a-f]{64}$/;
 
 const AbsoluteIri = z
   .string()
@@ -112,6 +160,7 @@ const TrajectoryDerivationPredicateSchema = z.strictObject({
   decoderVersion: z.string().min(1),
   vocabularyProfile: z.literal(TRAJECTORY_VOCABULARY_PROFILE),
   timebase: z.enum(TIMEBASES),
+  linkageMode: z.enum(LINKAGE_MODES),
 });
 
 const TrajectoryDerivationStatementSchema = z.strictObject({
@@ -137,6 +186,7 @@ export interface BuildTrajectoryDerivationStatementInput {
   readonly decoderVersion: string;
   readonly vocabularyProfile: typeof TRAJECTORY_VOCABULARY_PROFILE;
   readonly timebase: Timebase;
+  readonly linkageMode: LinkageMode;
   readonly derivedAt: string;
 }
 
@@ -158,6 +208,7 @@ export interface TrajectoryDerivationPredicate {
   readonly decoderVersion: string;
   readonly vocabularyProfile: typeof TRAJECTORY_VOCABULARY_PROFILE;
   readonly timebase: Timebase;
+  readonly linkageMode: LinkageMode;
 }
 
 export interface TrajectoryDerivationStatement {
@@ -316,6 +367,7 @@ export function buildTrajectoryDerivationStatement(
       decoderVersion: port.decoderVersion,
       vocabularyProfile: port.vocabularyProfile as typeof TRAJECTORY_VOCABULARY_PROFILE,
       timebase: port.timebase,
+      linkageMode: port.linkageMode,
     },
   };
 
@@ -351,87 +403,6 @@ export async function sealTrajectoryDerivationAttestation(
 }
 
 type JsonObject = Record<string, unknown>;
-
-function isObject(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function entityTypes(entity: JsonObject): readonly string[] {
-  const type = entity["@type"];
-  if (type === undefined) return [];
-  return Array.isArray(type) ? type.map(String) : [String(type)];
-}
-
-function hasType(entity: JsonObject, type: string): boolean {
-  return entityTypes(entity).includes(type);
-}
-
-function identifierEntries(entity: JsonObject): readonly JsonObject[] {
-  const identifier = entity["identifier"];
-  if (identifier === undefined) return [];
-  return (Array.isArray(identifier) ? identifier : [identifier]).filter(isObject);
-}
-
-function verifyForwardLink(
-  executionRecordBytes: Uint8Array,
-  nativeTraceHex: BareSha256Hex,
-  trajectoryDigest: RepositorySha256Digest,
-): { readonly code?: string; readonly message?: string } {
-  let decoded: unknown;
-  try {
-    decoded = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(executionRecordBytes));
-  } catch {
-    return { code: "l3-forward-link-missing", message: "execution record is not valid JSON" };
-  }
-  if (!isObject(decoded) || !Array.isArray(decoded["@graph"])) {
-    return { code: "l3-forward-link-missing", message: "execution record has no @graph" };
-  }
-
-  const nativeTraceFiles = (decoded["@graph"] as unknown[]).filter(
-    (entity): entity is JsonObject =>
-      isObject(entity) && hasType(entity, "File") && entity["sha256"] === nativeTraceHex,
-  );
-
-  if (nativeTraceFiles.length === 0) {
-    return {
-      code: "l3-forward-link-missing",
-      message: "execution record has no native-trace File entity matching attested digest",
-    };
-  }
-  if (nativeTraceFiles.length > 1) {
-    return {
-      code: "l3-forward-link-duplicate",
-      message: "multiple native-trace File entities match attested digest",
-    };
-  }
-
-  const file = nativeTraceFiles[0]!;
-  const forwardLinks = identifierEntries(file).filter(
-    (identifier) => identifier["propertyID"] === TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-  );
-
-  if (forwardLinks.length === 0) {
-    return { code: "l3-forward-link-missing", message: "trajectory forward link is missing" };
-  }
-  if (forwardLinks.length > 1) {
-    return {
-      code: "l3-forward-link-duplicate",
-      message: "trajectory forward link is duplicated on native-trace entity",
-    };
-  }
-
-  const value = forwardLinks[0]!["value"];
-  if (typeof value !== "string" || !REPOSITORY_SHA256.test(value)) {
-    return { code: "l3-forward-link-mismatch", message: "trajectory forward link value is malformed" };
-  }
-  if (value !== trajectoryDigest) {
-    return {
-      code: "l3-forward-link-mismatch",
-      message: "trajectory forward link value does not match attestation subject",
-    };
-  }
-  return {};
-}
 
 function l4NotEvaluated(): TrajectoryDerivationLayerOutcome {
   return { status: "not-evaluated", reason: "replay-required" };
@@ -553,7 +524,7 @@ export async function verifyTrajectoryDerivationAttestation(
     authorityResult = validated.value;
   } catch (error) {
     if (isAbortLike(error)) throw new TrajectoryDerivationCancelledError();
-    const message = error instanceof Error ? error.message : "authority verifier threw";
+    const message = normalizeThrownError(error);
     return {
       ok: false,
       failedLayer: 2,
@@ -670,13 +641,14 @@ export async function verifyTrajectoryDerivationAttestation(
     };
   }
 
-  const forwardLink = verifyForwardLink(
+  const linkage = verifyExecutionLinkage(
     port.executionRecordBytes,
     predicate.nativeTrace.digest.sha256,
     trajectoryDigest,
+    predicate.linkageMode,
   );
-  if (forwardLink.code) {
-    const message = forwardLink.message ?? forwardLink.code;
+  if (linkage.code) {
+    const message = linkage.message ?? linkage.code;
     return {
       ok: false,
       failedLayer: 3,
@@ -684,11 +656,11 @@ export async function verifyTrajectoryDerivationAttestation(
       layers: {
         l1: { status: "pass" },
         l2: { status: "pass" },
-        l3: { status: "fail", code: forwardLink.code, message },
+        l3: { status: "fail", code: linkage.code, message },
         l4,
       },
       reason: message,
-      code: forwardLink.code,
+      code: linkage.code,
     };
   }
 

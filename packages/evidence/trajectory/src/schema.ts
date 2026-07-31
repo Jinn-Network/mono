@@ -6,6 +6,7 @@ import { topLevelRecordSchema, closedObjectSchema } from "./extensions.js";
 import { TRAJECTORY_PROTOCOL, TRAJECTORY_VOCABULARY_PROFILE } from "./identifiers.js";
 import { deriveSpanId, deriveTraceId } from "./identity.js";
 import { type SealedRecord, parseExactWithSchema, sealWithSchema } from "./sealing.js";
+import { preflightCanonicalInput } from "./preflight.js";
 import { SpanSchema } from "./span.js";
 import { TIMEBASES } from "./timebase.js";
 
@@ -45,7 +46,7 @@ const CompletenessSchema = z.strictObject({
   reason: z.string().min(1).optional(),
 });
 
-export const TrajectoryRecordSchema = topLevelRecordSchema({
+const TrajectoryRecordCoreSchema = topLevelRecordSchema({
   protocol: z.literal(TRAJECTORY_PROTOCOL),
   source: SourceSchema,
   derivation: DerivationSchema,
@@ -118,7 +119,23 @@ export const TrajectoryRecordSchema = topLevelRecordSchema({
   }
 });
 
-export type TrajectoryRecord = z.infer<typeof TrajectoryRecordSchema>;
+/** Public facade: descriptor preflight before any Zod object traversal. */
+export const TrajectoryRecordSchema = z
+  .unknown()
+  .superRefine((value, ctx) => {
+    try {
+      preflightCanonicalInput(value);
+    } catch (error) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          error instanceof Error ? error.message : "document failed canonical preflight at parse",
+      });
+    }
+  })
+  .pipe(TrajectoryRecordCoreSchema);
+
+export type TrajectoryRecord = z.infer<typeof TrajectoryRecordCoreSchema>;
 
 /** Parse sealed bytes, requiring them to be the one exact canonical encoding. */
 export function parseTrajectory(bytes: Uint8Array): TrajectoryRecord {

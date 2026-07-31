@@ -18,6 +18,7 @@ const baseBuildInput = {
   decoderVersion: "1.0.0",
   vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
   timebase: "synthetic-ordinal" as const,
+  linkageMode: "forward-linked" as const,
   derivedAt: "2026-07-31T12:00:00Z",
 };
 

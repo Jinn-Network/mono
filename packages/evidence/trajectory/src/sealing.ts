@@ -3,6 +3,7 @@
 import type { z } from "zod";
 
 import { type JsonValue, serializeCanonicalJson } from "./canonical.js";
+import { bytesEqual } from "./bytes.js";
 import { documentDigest } from "./hashing.js";
 import { preflightCanonicalInput } from "./preflight.js";
 
@@ -90,7 +91,7 @@ export function parseExactWithSchema<T>(schema: z.ZodType<T>, bytes: Uint8Array)
   if (!parsed.success) throw new InvalidDocumentError(issues(parsed.error));
 
   const recanonicalized = serializeCanonicalJson(parsed.data as JsonValue);
-  if (new TextDecoder().decode(recanonicalized) !== text) {
+  if (!bytesEqual(recanonicalized, bytes)) {
     throw new InvalidDocumentError([
       { path: "", message: "bytes are not the canonical encoding of this document" },
     ]);

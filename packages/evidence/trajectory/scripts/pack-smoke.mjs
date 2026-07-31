@@ -33,6 +33,7 @@ const REQUIRED_ENTRIES = [
   "package/fixtures/trajectory/valid.json",
   "package/fixtures/trajectory/valid.sha256",
   "package/fixtures/adversarial-v1/manifest.json",
+  "package/fixtures/derivation/execution-golden-base.json",
   "package/README.md",
   "package/package.json",
 ];
@@ -111,6 +112,19 @@ try {
       `private/test implementation material leaked into tarball: ${leaked.join(", ")}`,
     );
   }
+
+  const manifestEntry = entries.find((entry) =>
+    entry.endsWith("fixtures/adversarial-v1/manifest.json"),
+  );
+  assert.ok(manifestEntry, "packed adversarial manifest must be present");
+  const manifest = JSON.parse(
+    await output("tar", ["-xOf", trajectoryArchive, manifestEntry]),
+  );
+  assert.equal(
+    manifest.fixtures.length,
+    8,
+    "packed adversarial manifest must ship exactly eight fixtures",
+  );
 
   await mkdir(rootConsumer);
   await writeFile(

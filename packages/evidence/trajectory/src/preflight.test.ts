@@ -124,6 +124,7 @@ describe("canonical preflight", () => {
       decoderVersion: "1.0.0",
       vocabularyProfile: "https://jinn.network/profiles/trajectory-vocabulary/1.0",
       timebase: "synthetic-ordinal",
+      linkageMode: "forward-linked",
       derivedAt: "2026-07-31T12:00:00Z",
     });
     Object.defineProperty(statement, "forged", {

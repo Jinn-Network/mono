@@ -10,6 +10,19 @@ const workflowPath = resolve(root, '.github/workflows/evidence-ci.yml');
 
 const NODE_VERSION = '22.23.1';
 const NPM_STEP_NAME = 'Install npm 11.19.0 for pack-smoke';
+const REQUIRED_SETUP_NODE_JOBS = [
+  'architecture',
+  'foundation',
+  'components',
+  'derivation',
+  'execution-recorder-bridge',
+  'retrieval',
+  'trajectory',
+  'contribution',
+  'catalog-sqlite',
+  'local-runtime',
+  'verify',
+];
 const PACK_SMOKE_JOB_IDS = [
   'foundation',
   'components',
@@ -64,15 +77,28 @@ function parseJobs(source) {
   return jobs;
 }
 
+function setupNodeStepsInJob(jobBlock) {
+  return [...jobBlock.matchAll(/uses: actions\/setup-node@v4[\s\S]*?node-version:\s*([^\n]+)/g)];
+}
+
 export function validateEvidenceCiWorkflow(source) {
   const jobs = parseJobs(source);
-  const setupNodes = [
-    ...source.matchAll(/uses: actions\/setup-node@v4[\s\S]*?node-version:\s*([^\n]+)/g),
-  ];
-  assert.equal(setupNodes.length, 11, 'expected eleven setup-node steps');
-  for (const [, version] of setupNodes) {
-    assert.equal(version.trim(), NODE_VERSION, `setup-node must pin ${NODE_VERSION}`);
+
+  for (const jobId of REQUIRED_SETUP_NODE_JOBS) {
+    assert.ok(jobs.has(jobId), `missing required setup-node job ${jobId}`);
+    const setupNodes = setupNodeStepsInJob(jobs.get(jobId));
+    assert.equal(
+      setupNodes.length,
+      1,
+      `${jobId} must have exactly one setup-node step (found ${String(setupNodes.length)})`,
+    );
+    assert.equal(
+      setupNodes[0][1].trim(),
+      NODE_VERSION,
+      `${jobId} setup-node must pin ${NODE_VERSION}`,
+    );
   }
+
   assert.doesNotMatch(source, /node-version:\s*22\s*$/m);
   assert.doesNotMatch(source, /node-version:\s*['"]22['"]/);
   assert.doesNotMatch(source, /legacy-peer-deps/i);
@@ -104,8 +130,9 @@ export function validateEvidenceCiWorkflow(source) {
     }
   }
 
-  const extraPackSmokeJobs = [...jobs.entries()].filter(([jobId, block]) =>
-    !PACK_SMOKE_JOB_IDS.includes(jobId) && block.includes('pack:smoke'));
+  const extraPackSmokeJobs = [...jobs.entries()].filter(
+    ([jobId, block]) => !PACK_SMOKE_JOB_IDS.includes(jobId) && block.includes('pack:smoke'),
+  );
   assert.equal(extraPackSmokeJobs.length, 0, 'unexpected ungoverned pack-smoke jobs');
 }
 
@@ -145,7 +172,7 @@ test('mutation: omitted pack-smoke job fails', () => {
   const mutant = workflow.replace(/\n  trajectory:\n[\s\S]*?(?=\n  contribution:)/, '\n');
   expectValidationFailure(
     mutant,
-    /missing required pack-smoke job trajectory|expected eleven setup-node steps/,
+    /missing required pack-smoke job trajectory|missing required setup-node job trajectory/,
   );
 });
 
@@ -207,4 +234,31 @@ test('mutation: anonymous pack:smoke inserted before npm pin in trajectory job f
     '  trajectory:\n    name: Evidence Trajectory\n    needs: [foundation]\n    runs-on: ubuntu-latest\n    steps:\n      - run: yarn pack:smoke\n      - uses: actions/checkout@v4',
   );
   expectValidationFailure(mutant, /npm pin step must precede pack:smoke step at index 0/);
+});
+
+test('mutation: remove setup-node from trajectory job fails', () => {
+  const mutant = workflow.replace(
+    /(  trajectory:[\s\S]*?      - uses: actions\/checkout@v4\n)(      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
+    '$1',
+  );
+  expectValidationFailure(mutant, /trajectory must have exactly one setup-node step \(found 0\)/);
+});
+
+test('mutation: duplicate setup-node in architecture job fails', () => {
+  const mutant = workflow.replace(
+    /(  architecture:[\s\S]*?      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
+    '$1      - uses: actions/setup-node@v4\n        with:\n          node-version: 22.23.1\n',
+  );
+  expectValidationFailure(
+    mutant,
+    /architecture must have exactly one setup-node step \(found 2\)/,
+  );
+});
+
+test('mutation: wrong setup-node version in foundation job fails', () => {
+  const mutant = workflow.replace(
+    /(  foundation:[\s\S]*?node-version: )22\.23\.1/,
+    '$122.0.0',
+  );
+  expectValidationFailure(mutant, /foundation setup-node must pin 22\.23\.1/);
 });

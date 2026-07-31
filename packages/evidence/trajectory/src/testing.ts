@@ -14,6 +14,7 @@ import {
 } from "./fixtures.js";
 import { documentDigest } from "./hashing.js";
 import { deriveSpanId, deriveTraceId } from "./identity.js";
+import { InvalidDocumentError } from "./sealing.js";
 import { TrajectoryRecordSchema, parseTrajectory, sealTrajectory } from "./schema.js";
 
 const GOLDEN: readonly GoldenName[] = ["valid", "minimal"];
@@ -77,6 +78,20 @@ export function describeTrajectoryRecordConformance(): void {
       const record = await loadGoldenJson("valid");
       const nonCanonical = new TextEncoder().encode(JSON.stringify(record, null, 2));
       expect(() => parseTrajectory(nonCanonical)).toThrow();
+    });
+
+    test("UTF-8 BOM prefix is rejected at parse", async () => {
+      const bytes = await loadGoldenBytes("valid");
+      const bomPrefixed = new Uint8Array(bytes.length + 3);
+      bomPrefixed.set([0xef, 0xbb, 0xbf], 0);
+      bomPrefixed.set(bytes, 3);
+      expect(() => parseTrajectory(bomPrefixed)).toThrow(InvalidDocumentError);
+    });
+
+    test("invalid UTF-8 bytes are rejected at parse", () => {
+      expect(() => parseTrajectory(new Uint8Array([0xff, 0xfe, 0xfd]))).toThrow(
+        InvalidDocumentError,
+      );
     });
 
     test("tail-truncated golden bytes fail parse", async () => {

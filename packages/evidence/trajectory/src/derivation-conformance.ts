@@ -9,11 +9,21 @@ import {
   TrajectoryDerivationCancelledError,
   verifyTrajectoryDerivationAttestation,
 } from "./derivation.js";
+import {
+  encodeExecutionDocument,
+  loadExecutionGoldenBase,
+  patchExecutionGolden,
+} from "./execution-fixtures.js";
 import { documentDigest } from "./hashing.js";
-import { TRAJECTORY_RECORD_IDENTIFIER_PROPERTY, TRAJECTORY_VOCABULARY_PROFILE } from "./identifiers.js";
+import {
+  TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+  TRAJECTORY_VOCABULARY_PROFILE,
+  type LinkageMode,
+} from "./identifiers.js";
 import { deriveSpanId, deriveTraceId } from "./identity.js";
 import { InvalidDocumentError } from "./sealing.js";
-import { sealTrajectory } from "./schema.js";
+import { TrajectoryRecordSchema, sealTrajectory } from "./schema.js";
+import { loadGoldenJson } from "./fixtures.js";
 import { SPAN_KIND, STATUS_CODE } from "./span.js";
 
 const fixedSigner: DsseSigner = async () => [
@@ -65,47 +75,65 @@ function buildTrajectoryRecord(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function buildExecutionRecord(trajectoryDigest: `sha256:${string}`) {
+function buildStatementFields(
+  trajectoryDigest: `sha256:${string}`,
+  executionDigest: `sha256:${string}`,
+  linkageMode: LinkageMode,
+) {
   return {
-    "@context": "https://w3id.org/ro/crate/1.3/context",
-    "@graph": [
-      {
-        "@id": "trace/native.bin",
-        "@type": "File",
-        sha256: SOURCE_SHA,
-        identifier: {
-          "@type": "PropertyValue",
-          propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-          value: trajectoryDigest,
-        },
-      },
-    ],
-  };
-}
-
-async function buildValidAttestation(options: {
-  trajectoryOverrides?: Record<string, unknown>;
-  executionOverrides?: (trajectoryDigest: `sha256:${string}`) => unknown;
-} = {}) {
-  const trajectorySealed = sealTrajectory(buildTrajectoryRecord(options.trajectoryOverrides));
-  const executionObject =
-    options.executionOverrides?.(trajectorySealed.digest) ??
-    buildExecutionRecord(trajectorySealed.digest);
-  const executionBytes = new TextEncoder().encode(JSON.stringify(executionObject));
-  const statement = buildTrajectoryDerivationStatement({
     producerId: "producer-1",
-    executionDigest: documentDigest(executionBytes),
-    trajectoryDigest: trajectorySealed.digest,
-    nativeTraceDigest: `sha256:${SOURCE_SHA}`,
+    executionDigest,
+    trajectoryDigest,
+    nativeTraceDigest: `sha256:${SOURCE_SHA}` as const,
     formatIri: FORMAT_IRI,
     decoderId: DECODER.decoderId,
     decoderVersion: DECODER.decoderVersion,
     vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
-    timebase: "synthetic-ordinal",
+    timebase: "synthetic-ordinal" as const,
+    linkageMode,
     derivedAt: DERIVED_AT,
-  });
+  };
+}
+
+async function buildExecutionBytes(
+  trajectoryDigest: `sha256:${string}`,
+  linkageMode: LinkageMode,
+  executionPatch?: (
+    base: Record<string, unknown>,
+    ctx: { trajectoryDigest: `sha256:${string}`; linkageMode: LinkageMode },
+  ) => Record<string, unknown>,
+): Promise<Uint8Array> {
+  const goldenBase = await loadExecutionGoldenBase();
+  const executionObject =
+    executionPatch?.(goldenBase, { trajectoryDigest, linkageMode }) ??
+    patchExecutionGolden(goldenBase, {
+      nativeTraceSha256: SOURCE_SHA,
+      trajectoryDigest,
+      linkageMode,
+    });
+  return encodeExecutionDocument(executionObject);
+}
+
+async function buildValidAttestation(options: {
+  trajectoryOverrides?: Record<string, unknown>;
+  linkageMode?: LinkageMode;
+  executionPatch?: (
+    base: Record<string, unknown>,
+    ctx: { trajectoryDigest: `sha256:${string}`; linkageMode: LinkageMode },
+  ) => Record<string, unknown>;
+} = {}) {
+  const linkageMode = options.linkageMode ?? "forward-linked";
+  const trajectorySealed = sealTrajectory(buildTrajectoryRecord(options.trajectoryOverrides));
+  const executionBytes = await buildExecutionBytes(
+    trajectorySealed.digest,
+    linkageMode,
+    options.executionPatch,
+  );
+  const statement = buildTrajectoryDerivationStatement(
+    buildStatementFields(trajectorySealed.digest, documentDigest(executionBytes), linkageMode),
+  );
   const sealed = await sealTrajectoryDerivationAttestation({ statement, signer: fixedSigner });
-  return { trajectorySealed, executionBytes, sealed };
+  return { trajectorySealed, executionBytes, sealed, linkageMode };
 }
 
 function mutateEnvelopeBytes(
@@ -161,34 +189,35 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
     test("build rejects non-calendar-strict derivedAt", () => {
       expect(() =>
         buildTrajectoryDerivationStatement({
-          producerId: "producer-1",
-          executionDigest: `sha256:${"b".repeat(64)}`,
-          trajectoryDigest: `sha256:${"c".repeat(64)}`,
-          nativeTraceDigest: `sha256:${SOURCE_SHA}`,
-          formatIri: FORMAT_IRI,
-          decoderId: DECODER.decoderId,
-          decoderVersion: DECODER.decoderVersion,
-          vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
-          timebase: "synthetic-ordinal",
+          ...buildStatementFields(
+            `sha256:${"c".repeat(64)}`,
+            `sha256:${"b".repeat(64)}`,
+            "forward-linked",
+          ),
           derivedAt: "2026-07-31",
         }),
       ).toThrow(InvalidDocumentError);
     });
 
+    test("build rejects missing linkageMode", () => {
+      const input = buildStatementFields(
+        `sha256:${"c".repeat(64)}`,
+        `sha256:${"b".repeat(64)}`,
+        "forward-linked",
+      );
+      const { linkageMode: _removed, ...withoutMode } = input;
+      expect(() => buildTrajectoryDerivationStatement(withoutMode as never)).toThrow(
+        InvalidDocumentError,
+      );
+    });
+
     test("build input getter is not invoked during preflight", () => {
       let getterCalls = 0;
-      const input = {
-        producerId: "producer-1",
-        executionDigest: `sha256:${"b".repeat(64)}` as const,
-        trajectoryDigest: `sha256:${"c".repeat(64)}` as const,
-        nativeTraceDigest: `sha256:${SOURCE_SHA}` as const,
-        formatIri: FORMAT_IRI,
-        decoderId: DECODER.decoderId,
-        decoderVersion: DECODER.decoderVersion,
-        vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
-        timebase: "synthetic-ordinal" as const,
-        derivedAt: DERIVED_AT,
-      };
+      const input = buildStatementFields(
+        `sha256:${"c".repeat(64)}`,
+        `sha256:${"b".repeat(64)}`,
+        "forward-linked",
+      );
       Object.defineProperty(input, "forged", {
         get: () => {
           getterCalls += 1;
@@ -235,9 +264,8 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
     test("bad execution digest fails L3", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const result = await verifyWith(sealed, trajectorySealed, executionBytes);
-      const tamperedExecution = new TextEncoder().encode(
-        JSON.stringify(buildExecutionRecord(trajectorySealed.digest)).replace(SOURCE_SHA, "b".repeat(64)),
-      );
+      const tamperedExecution = new Uint8Array(executionBytes);
+      tamperedExecution[tamperedExecution.length - 2] ^= 0xff;
       const tampered = await verifyTrajectoryDerivationAttestation({
         envelopeBytes: sealed.envelopeBytes,
         executionRecordBytes: tamperedExecution,
@@ -250,13 +278,31 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
     });
 
     test("missing forward link fails L3", async () => {
-      const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
-        executionOverrides: () => ({
-          "@context": "https://w3id.org/ro/crate/1.3/context",
-          "@graph": [{ "@id": "trace/native.bin", "@type": "File", sha256: SOURCE_SHA }],
-        }),
+      const trajectorySealed = sealTrajectory(buildTrajectoryRecord());
+      const goldenBase = await loadExecutionGoldenBase();
+      const executionObject = patchExecutionGolden(goldenBase, {
+        nativeTraceSha256: SOURCE_SHA,
+        linkageMode: "forward-linked",
+        trajectoryDigest: trajectorySealed.digest,
       });
-      const result = await verifyWith(sealed, trajectorySealed, executionBytes);
+      const graph = executionObject["@graph"] as Record<string, unknown>[];
+      const trace = graph.find((entity) => entity["@id"] === "trace/trajectory.jsonl");
+      delete trace!.identifier;
+      const executionBytes = encodeExecutionDocument(executionObject);
+      const statement = buildTrajectoryDerivationStatement(
+        buildStatementFields(
+          trajectorySealed.digest,
+          documentDigest(executionBytes),
+          "forward-linked",
+        ),
+      );
+      const sealed = await sealTrajectoryDerivationAttestation({ statement, signer: fixedSigner });
+      const result = await verifyTrajectoryDerivationAttestation({
+        envelopeBytes: sealed.envelopeBytes,
+        executionRecordBytes: executionBytes,
+        trajectoryRecordBytes: trajectorySealed.bytes,
+        verifyAuthority: async () => ({ verified: true, signerKeyIds: ["test-key"] }),
+      });
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.code).toBe("l3-forward-link-missing");
     });
@@ -267,27 +313,46 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
           spans: [{ ...buildTrajectoryRecord().spans[0], name: "substituted span content" }],
         }),
       );
-      const executionBytes = new TextEncoder().encode(
-        JSON.stringify(buildExecutionRecord(unfaithfulTrajectory.digest)),
+      const executionBytes = await buildExecutionBytes(
+        unfaithfulTrajectory.digest,
+        "forward-linked",
       );
-      const statement = buildTrajectoryDerivationStatement({
-        producerId: "producer-1",
-        executionDigest: documentDigest(executionBytes),
-        trajectoryDigest: unfaithfulTrajectory.digest,
-        nativeTraceDigest: `sha256:${SOURCE_SHA}`,
-        formatIri: FORMAT_IRI,
-        decoderId: DECODER.decoderId,
-        decoderVersion: DECODER.decoderVersion,
-        vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
-        timebase: "synthetic-ordinal",
-        derivedAt: DERIVED_AT,
-      });
+      const statement = buildTrajectoryDerivationStatement(
+        buildStatementFields(
+          unfaithfulTrajectory.digest,
+          documentDigest(executionBytes),
+          "forward-linked",
+        ),
+      );
       const sealed = await sealTrajectoryDerivationAttestation({ statement, signer: fixedSigner });
       const result = await verifyWith(sealed, unfaithfulTrajectory, executionBytes);
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.layers.l4).toEqual({ status: "not-evaluated", reason: "replay-required" });
       }
+    });
+
+    test("sealed-parent golden execution passes L1-L3", async () => {
+      const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
+        linkageMode: "sealed-parent",
+      });
+      const result = await verifyWith(sealed, trajectorySealed, executionBytes);
+      expect(result.ok).toBe(true);
+    });
+
+    test("forward link on sealed-parent fails L3", async () => {
+      const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
+        linkageMode: "sealed-parent",
+        executionPatch: (base, ctx) =>
+          patchExecutionGolden(base, {
+            nativeTraceSha256: SOURCE_SHA,
+            linkageMode: "forward-linked",
+            trajectoryDigest: ctx.trajectoryDigest,
+          }),
+      });
+      const result = await verifyWith(sealed, trajectorySealed, executionBytes);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe("l3-forward-link-present");
     });
 
     test("valid attestation passes L1-L3 and leaves L4 not-evaluated", async () => {
@@ -308,7 +373,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
         (e.signatures as Record<string, unknown>[])[0]!.forged = true;
       }],
       ["non-canonical payload base64", (e: Record<string, unknown>) => {
-        e.payload = String(e.payload).replace(/=+$/, "");
+        e.payload = `${String(e.payload).slice(0, -2)}==`;
       }],
     ])("%s fails L1 without calling authority", async (_label, mutate) => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
@@ -375,93 +440,88 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
   });
 
   describe("unambiguous native-trace forward link", () => {
-    test("duplicate native-trace File entities fail L3", async () => {
+    test("decoy native-trace File with attestation naming decoy digest fails L3", async () => {
+      const decoySha = "d".repeat(64);
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
-        executionOverrides: (digest) => ({
-          "@context": "https://w3id.org/ro/crate/1.3/context",
-          "@graph": [
+        executionPatch: (base, ctx) =>
+          patchExecutionGolden(base, {
+            nativeTraceSha256: SOURCE_SHA,
+            trajectoryDigest: ctx.trajectoryDigest,
+            linkageMode: "forward-linked",
+            decoyNativeTraceSha256: decoySha,
+          }),
+      });
+      const statement = buildTrajectoryDerivationStatement({
+        ...buildStatementFields(
+          trajectorySealed.digest,
+          documentDigest(executionBytes),
+          "forward-linked",
+        ),
+        nativeTraceDigest: `sha256:${decoySha}`,
+      });
+      const decoySealed = await sealTrajectoryDerivationAttestation({
+        statement,
+        signer: fixedSigner,
+      });
+      const result = await verifyWith(decoySealed, trajectorySealed, executionBytes);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe("l3-source-mismatch");
+    });
+
+    test("duplicate forward links on primary native trace fail L3", async () => {
+      const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
+        executionPatch: (base, ctx) => {
+          const document = patchExecutionGolden(base, {
+            nativeTraceSha256: SOURCE_SHA,
+            trajectoryDigest: ctx.trajectoryDigest,
+            linkageMode: "forward-linked",
+          });
+          const graph = document["@graph"] as Record<string, unknown>[];
+          const trace = graph.find((entity) => entity["@id"] === "trace/trajectory.jsonl");
+          trace!.identifier = [
             {
-              "@id": "trace/native-a.bin",
-              "@type": "File",
-              sha256: SOURCE_SHA,
-              identifier: {
-                "@type": "PropertyValue",
-                propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-                value: digest,
-              },
+              "@type": "PropertyValue",
+              propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+              value: ctx.trajectoryDigest,
             },
             {
-              "@id": "trace/native-b.bin",
-              "@type": "File",
-              sha256: SOURCE_SHA,
-              identifier: {
-                "@type": "PropertyValue",
-                propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-                value: digest,
-              },
+              "@type": "PropertyValue",
+              propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+              value: ctx.trajectoryDigest,
             },
-          ],
-        }),
+          ];
+          return document;
+        },
       });
       const result = await verifyWith(sealed, trajectorySealed, executionBytes);
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.code).toBe("l3-forward-link-duplicate");
     });
 
-    test("duplicate forward links on sole entity fail L3", async () => {
+    test("correct and wrong forward links on primary native trace fail L3", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
-        executionOverrides: (digest) => ({
-          "@context": "https://w3id.org/ro/crate/1.3/context",
-          "@graph": [
+        executionPatch: (base, ctx) => {
+          const document = patchExecutionGolden(base, {
+            nativeTraceSha256: SOURCE_SHA,
+            trajectoryDigest: ctx.trajectoryDigest,
+            linkageMode: "forward-linked",
+          });
+          const graph = document["@graph"] as Record<string, unknown>[];
+          const trace = graph.find((entity) => entity["@id"] === "trace/trajectory.jsonl");
+          trace!.identifier = [
             {
-              "@id": "trace/native.bin",
-              "@type": "File",
-              sha256: SOURCE_SHA,
-              identifier: [
-                {
-                  "@type": "PropertyValue",
-                  propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-                  value: digest,
-                },
-                {
-                  "@type": "PropertyValue",
-                  propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-                  value: digest,
-                },
-              ],
+              "@type": "PropertyValue",
+              propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+              value: ctx.trajectoryDigest,
             },
-          ],
-        }),
-      });
-      const result = await verifyWith(sealed, trajectorySealed, executionBytes);
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.code).toBe("l3-forward-link-duplicate");
-    });
-
-    test("correct and wrong forward links on sole entity fail L3", async () => {
-      const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
-        executionOverrides: (digest) => ({
-          "@context": "https://w3id.org/ro/crate/1.3/context",
-          "@graph": [
             {
-              "@id": "trace/native.bin",
-              "@type": "File",
-              sha256: SOURCE_SHA,
-              identifier: [
-                {
-                  "@type": "PropertyValue",
-                  propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-                  value: digest,
-                },
-                {
-                  "@type": "PropertyValue",
-                  propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-                  value: `sha256:${"f".repeat(64)}`,
-                },
-              ],
+              "@type": "PropertyValue",
+              propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+              value: `sha256:${"f".repeat(64)}`,
             },
-          ],
-        }),
+          ];
+          return document;
+        },
       });
       const result = await verifyWith(sealed, trajectorySealed, executionBytes);
       expect(result.ok).toBe(false);
@@ -470,21 +530,21 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
 
     test("malformed forward link value fails L3", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
-        executionOverrides: () => ({
-          "@context": "https://w3id.org/ro/crate/1.3/context",
-          "@graph": [
-            {
-              "@id": "trace/native.bin",
-              "@type": "File",
-              sha256: SOURCE_SHA,
-              identifier: {
-                "@type": "PropertyValue",
-                propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-                value: "not-a-digest",
-              },
-            },
-          ],
-        }),
+        executionPatch: (base, ctx) => {
+          const document = patchExecutionGolden(base, {
+            nativeTraceSha256: SOURCE_SHA,
+            trajectoryDigest: ctx.trajectoryDigest,
+            linkageMode: "forward-linked",
+          });
+          const graph = document["@graph"] as Record<string, unknown>[];
+          const trace = graph.find((entity) => entity["@id"] === "trace/trajectory.jsonl");
+          trace!.identifier = {
+            "@type": "PropertyValue",
+            propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+            value: "not-a-digest",
+          };
+          return document;
+        },
       });
       const result = await verifyWith(sealed, trajectorySealed, executionBytes);
       expect(result.ok).toBe(false);
@@ -493,71 +553,69 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
 
     test("wrong digest forward link fails L3", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
-        executionOverrides: () => ({
-          "@context": "https://w3id.org/ro/crate/1.3/context",
-          "@graph": [
-            {
-              "@id": "trace/native.bin",
-              "@type": "File",
-              sha256: SOURCE_SHA,
-              identifier: {
-                "@type": "PropertyValue",
-                propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-                value: `sha256:${"e".repeat(64)}`,
-              },
-            },
-          ],
-        }),
+        executionPatch: (base, ctx) => {
+          const document = patchExecutionGolden(base, {
+            nativeTraceSha256: SOURCE_SHA,
+            linkageMode: "forward-linked",
+            trajectoryDigest: ctx.trajectoryDigest,
+          });
+          const graph = document["@graph"] as Record<string, unknown>[];
+          const trace = graph.find((entity) => entity["@id"] === "trace/trajectory.jsonl");
+          trace!.identifier = {
+            "@type": "PropertyValue",
+            propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+            value: `sha256:${"e".repeat(64)}`,
+          };
+          return document;
+        },
       });
       const result = await verifyWith(sealed, trajectorySealed, executionBytes);
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.code).toBe("l3-forward-link-mismatch");
     });
 
-    test("unrelated entity with correct link does not satisfy L3", async () => {
-      const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
-        executionOverrides: (digest) => ({
-          "@context": "https://w3id.org/ro/crate/1.3/context",
-          "@graph": [
-            {
-              "@id": "trace/other.bin",
-              "@type": "File",
-              sha256: "b".repeat(64),
-              identifier: {
-                "@type": "PropertyValue",
-                propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-                value: digest,
-              },
-            },
-          ],
-        }),
+    test("attestation naming decoy digest while decoy carries forward link fails L3", async () => {
+      const decoySha = "b".repeat(64);
+      const { trajectorySealed, executionBytes } = await buildValidAttestation({
+        executionPatch: (base, ctx) =>
+          patchExecutionGolden(base, {
+            nativeTraceSha256: SOURCE_SHA,
+            trajectoryDigest: ctx.trajectoryDigest,
+            linkageMode: "forward-linked",
+            decoyNativeTraceSha256: decoySha,
+          }),
       });
+      const statement = buildTrajectoryDerivationStatement({
+        ...buildStatementFields(
+          trajectorySealed.digest,
+          documentDigest(executionBytes),
+          "forward-linked",
+        ),
+        nativeTraceDigest: `sha256:${decoySha}`,
+      });
+      const sealed = await sealTrajectoryDerivationAttestation({ statement, signer: fixedSigner });
       const result = await verifyWith(sealed, trajectorySealed, executionBytes);
       expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.code).toBe("l3-forward-link-missing");
+      if (!result.ok) expect(result.code).toBe("l3-source-mismatch");
     });
 
-    test("wrong entity type with matching sha256 fails L3", async () => {
+    test("primary native trace with wrong entity type fails L3", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
-        executionOverrides: (digest) => ({
-          "@context": "https://w3id.org/ro/crate/1.3/context",
-          "@graph": [
-            {
-              "@id": "trace/native.bin",
-              "@type": "Dataset",
-              sha256: SOURCE_SHA,
-              identifier: {
-                "@type": "PropertyValue",
-                propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-                value: digest,
-              },
-            },
-          ],
-        }),
+        executionPatch: (base, ctx) => {
+          const document = patchExecutionGolden(base, {
+            nativeTraceSha256: SOURCE_SHA,
+            trajectoryDigest: ctx.trajectoryDigest,
+            linkageMode: "forward-linked",
+          });
+          const graph = document["@graph"] as Record<string, unknown>[];
+          const trace = graph.find((entity) => entity["@id"] === "trace/trajectory.jsonl");
+          trace!["@type"] = "Dataset";
+          return document;
+        },
       });
       const result = await verifyWith(sealed, trajectorySealed, executionBytes);
       expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.code).toBe("l3-forward-link-missing");
+      if (!result.ok) expect(result.code).toBe("l3-native-trace-missing");
     });
   });
 
@@ -749,18 +807,13 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
     });
 
     test("unknown statement field fails seal without calling signer", async () => {
-      const statement = buildTrajectoryDerivationStatement({
-        producerId: "producer-1",
-        executionDigest: `sha256:${"b".repeat(64)}`,
-        trajectoryDigest: `sha256:${"c".repeat(64)}`,
-        nativeTraceDigest: `sha256:${SOURCE_SHA}`,
-        formatIri: FORMAT_IRI,
-        decoderId: DECODER.decoderId,
-        decoderVersion: DECODER.decoderVersion,
-        vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
-        timebase: "synthetic-ordinal",
-        derivedAt: DERIVED_AT,
-      });
+      const statement = buildTrajectoryDerivationStatement(
+        buildStatementFields(
+          `sha256:${"c".repeat(64)}`,
+          `sha256:${"b".repeat(64)}`,
+          "forward-linked",
+        ),
+      );
       const withUnknown = { ...statement, forged: "bad" };
       const signer = vi.fn(async () =>
         [{ signature: new Uint8Array([1]), keyid: "test-key" }] as const,
@@ -785,6 +838,82 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.code).toBe("l1-payload-noncanonical");
       expect(verifyAuthority).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("R24-R29 packed kit probes", () => {
+    test("TrajectoryRecordSchema.safeParse does not invoke hostile getters", async () => {
+      let getterCalls = 0;
+      const document = await loadGoldenJson("valid");
+      Object.defineProperty(document, "forged", {
+        get: () => {
+          getterCalls += 1;
+          return "bad";
+        },
+        enumerable: true,
+        configurable: true,
+      });
+      expect(TrajectoryRecordSchema.safeParse(document).success).toBe(false);
+      expect(getterCalls).toBe(0);
+    });
+
+    test("non-callable verifyAuthority fails verify port before L1", async () => {
+      const verifyAuthority = vi.fn();
+      let getterCalls = 0;
+      const input: Record<string, unknown> = {
+        envelopeBytes: new Uint8Array([1]),
+        executionRecordBytes: new Uint8Array(),
+        trajectoryRecordBytes: new Uint8Array(),
+      };
+      Object.defineProperty(input, "verifyAuthority", {
+        get: () => {
+          getterCalls += 1;
+          return "not-a-function";
+        },
+        enumerable: true,
+        configurable: true,
+      });
+      await expect(verifyTrajectoryDerivationAttestation(input as never)).rejects.toThrow(
+        InvalidDocumentError,
+      );
+      expect(verifyAuthority).not.toHaveBeenCalled();
+      expect(getterCalls).toBe(0);
+    });
+
+    test("proxy-throwing authority error normalizes without instanceof", async () => {
+      const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
+      const result = await verifyWith(sealed, trajectorySealed, executionBytes, {
+        verifyAuthority: async () => {
+          throw new Proxy(new Error("hostile"), {});
+        },
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe("l2-authority-error");
+    });
+
+    test("fake AbortSignal with getter aborted is rejected before authority", async () => {
+      const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
+      const verifyAuthority = vi.fn(async () =>
+        ({ verified: true as const, signerKeyIds: ["test-key"] }),
+      );
+      let abortedGetterCalls = 0;
+      const fakeSignal = {};
+      Object.defineProperty(fakeSignal, "aborted", {
+        get: () => {
+          abortedGetterCalls += 1;
+          return false;
+        },
+        enumerable: true,
+        configurable: true,
+      });
+      await expect(
+        verifyWith(sealed, trajectorySealed, executionBytes, {
+          signal: fakeSignal as AbortSignal,
+          verifyAuthority,
+        }),
+      ).rejects.toThrow(InvalidDocumentError);
+      expect(verifyAuthority).not.toHaveBeenCalled();
+      expect(abortedGetterCalls).toBe(0);
     });
   });
 }

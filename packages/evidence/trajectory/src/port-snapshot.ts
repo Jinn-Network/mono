@@ -4,7 +4,12 @@ import { isProxy } from "node:util/types";
 
 import type { DsseSigner } from "@jinn-network/trust-core";
 
+import {
+  isGenuineAbortSignal,
+  isGenuineUint8Array,
+} from "./hostile-reflection.js";
 import { InvalidDocumentError } from "./sealing.js";
+import type { LinkageMode } from "./identifiers.js";
 import type { Timebase } from "./timebase.js";
 
 function invalidPort(message: string): never {
@@ -85,7 +90,7 @@ function requireString(value: unknown, field: string, context: string): string {
 }
 
 function requireUint8Array(value: unknown, field: string, context: string): Uint8Array {
-  if (!(value instanceof Uint8Array)) {
+  if (!isGenuineUint8Array(value)) {
     invalidPort(`${context}.${field} must be a Uint8Array`);
   }
   return value;
@@ -104,13 +109,10 @@ function requireFunction<T extends (...args: never[]) => unknown>(
 
 function optionalAbortSignal(value: unknown, field: string, context: string): AbortSignal | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "object" || value === null) {
+  if (!isGenuineAbortSignal(value)) {
     invalidPort(`${context}.${field} must be an AbortSignal when present`);
   }
-  if (!("aborted" in value) || typeof (value as AbortSignal).aborted !== "boolean") {
-    invalidPort(`${context}.${field} must be an AbortSignal when present`);
-  }
-  return value as AbortSignal;
+  return value;
 }
 
 const BUILD_KEYS = new Set([
@@ -123,6 +125,7 @@ const BUILD_KEYS = new Set([
   "decoderVersion",
   "vocabularyProfile",
   "timebase",
+  "linkageMode",
   "derivedAt",
 ]);
 
@@ -153,6 +156,7 @@ export interface BuildPortSnapshot {
   readonly decoderVersion: string;
   readonly vocabularyProfile: string;
   readonly timebase: Timebase;
+  readonly linkageMode: LinkageMode;
   readonly derivedAt: string;
 }
 
@@ -192,6 +196,11 @@ export function snapshotBuildPort(input: unknown): BuildPortSnapshot {
       "timebase",
       "derivation statement input",
     ) as Timebase,
+    linkageMode: requireString(
+      snapshot.linkageMode,
+      "linkageMode",
+      "derivation statement input",
+    ) as LinkageMode,
     derivedAt: requireString(snapshot.derivedAt, "derivedAt", "derivation statement input"),
   };
 }
