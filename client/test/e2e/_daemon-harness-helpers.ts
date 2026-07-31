@@ -1,5 +1,6 @@
 // client/test/e2e/_daemon-harness-helpers.ts
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { mkdtemp, readFile } from 'node:fs/promises';
@@ -452,6 +453,90 @@ export async function setupAnvilFixtureFromState(statePath: string): Promise<Dae
   };
 }
 
+// ── FORK-ONLY REMEDIATION (issue #2341 — NOT shipped, NOT a production fix) ────
+//
+// Live Base mainnet's ServiceRegistryL2 (0x3C1fF68f5aa342D296d4DEe4Bb1cACCA912D95fE)
+// has never whitelisted the stOLAS `gnosisSafeSameAddressMultisig` implementation
+// (0xFbBEc0C8b13B38a9aC0499694A69a10204c5E2aB) that ExternalStakingDistributor's
+// stake() path deploys services against:
+//
+//   cast call 0x3C1fF68f5aa342D296d4DEe4Bb1cACCA912D95fE \
+//     "mapMultisigs(address)(bool)" 0xFbBEc0C8b13B38a9aC0499694A69a10204c5E2aB \
+//     --rpc-url https://mainnet.base.org
+//   → false
+//
+// stake() reverts with UnauthorizedMultisig(0xFbBEc0C8b13B38a9aC0499694A69a10204c5E2aB)
+// (selector 0x14460f20). This is a LIVE-CHAIN breakage tracked at
+// https://github.com/Jinn-Network/mono/issues/2341 — Jinn does not own
+// ServiceRegistryL2 and cannot fix it there. Per Ruling 3 on that issue, the
+// harness MAY impersonate the registry owner on this Anvil FORK ONLY and apply
+// the missing whitelist entry so the e2e loop can exercise everything
+// downstream of bootstrap. This function must never run against a live chain —
+// it only ever touches an in-process Anvil fork's state.
+const SERVICE_REGISTRY_OWNER_ABI = parseAbi([
+  'function owner() view returns (address)',
+  'function mapMultisigs(address multisig) view returns (bool)',
+  'function changeMultisigPermission(address multisig, bool permission) external',
+]);
+
+async function remediateStOlasMultisigAuthorizationOnFork(rpcUrl: string): Promise<void> {
+  const publicClient = createPublicClient({ chain: base, transport: http(rpcUrl) });
+  const registry = CHAIN_CONFIG.serviceRegistry as Address;
+  const multisig = CHAIN_CONFIG.gnosisSafeSameAddressMultisig as Address;
+
+  const alreadyAuthorized = await publicClient.readContract({
+    address: registry,
+    abi: SERVICE_REGISTRY_OWNER_ABI,
+    functionName: 'mapMultisigs',
+    args: [multisig],
+  });
+  if (alreadyAuthorized) return;
+
+  const owner = getAddress(
+    await publicClient.readContract({
+      address: registry,
+      abi: SERVICE_REGISTRY_OWNER_ABI,
+      functionName: 'owner',
+    }),
+  ) as Address;
+
+  process.stdout.write(
+    `[fork-remediation #2341] ServiceRegistryL2.mapMultisigs(${multisig}) is false on the ` +
+    `forked chain (mirrors live Base mainnet). Impersonating registry owner ${owner} ` +
+    `INSIDE THIS ANVIL FORK ONLY to call changeMultisigPermission(${multisig}, true) — ` +
+    `this is test-setup remediation for a live-chain breakage, not something Jinn ships.\n`,
+  );
+
+  await anvilJsonRpc(rpcUrl, 'anvil_setBalance', [owner, '0x56BC75E2D63100000']); // 100 ETH for gas
+  await anvilJsonRpc(rpcUrl, 'anvil_impersonateAccount', [owner]);
+  try {
+    const ownerWallet = createWalletClient({ account: owner, chain: base, transport: http(rpcUrl) });
+    const hash = await ownerWallet.writeContract({
+      address: registry,
+      abi: SERVICE_REGISTRY_OWNER_ABI,
+      functionName: 'changeMultisigPermission',
+      args: [multisig, true],
+      account: owner,
+      chain: base,
+    });
+    await publicClient.waitForTransactionReceipt({ hash });
+  } finally {
+    await anvilJsonRpc(rpcUrl, 'anvil_stopImpersonatingAccount', [owner]);
+  }
+
+  const nowAuthorized = await publicClient.readContract({
+    address: registry,
+    abi: SERVICE_REGISTRY_OWNER_ABI,
+    functionName: 'mapMultisigs',
+    args: [multisig],
+  });
+  if (!nowAuthorized) {
+    throw new Error(
+      `[fork-remediation #2341] mapMultisigs(${multisig}) still false after changeMultisigPermission`,
+    );
+  }
+}
+
 /**
  * Run the FleetBootstrapper 11-step lifecycle to `complete` on the Anvil fork.
  * Funds the EOA via Anvil's anvil_setBalance (stOLAS mode — the distributor
@@ -466,6 +551,9 @@ export async function bootstrapStakedOperator(
   fixture: DaemonHarnessFixture,
 ): Promise<BootstrappedOperator> {
   const rpcUrl = fixture.anvil.rpcUrl;
+
+  // FORK-ONLY: see `remediateStOlasMultisigAuthorizationOnFork` above — issue #2341.
+  await remediateStOlasMultisigAuthorizationOnFork(rpcUrl);
 
   // Step 1: Create a temp earning dir under implStateRoot.
   const earningDir = await mkdtemp(join(fixture.implStateRoot, 'earning-'));
@@ -1183,6 +1271,41 @@ export async function startDaemon(
       generation: 'today',
     };
 
+    // Neither key has production key material yet (both left as explicit follow-ups by design
+    // — see `composition-root.ts`'s `CompositionRootInput.deliverySigningKey` /
+    // `.legacyBridgeSigner` doc comments). Without them the loop cannot close: no
+    // `deliverySigningKey` → `executorBinding` reports "missing" → `verificationFailure` REJECTS
+    // every settlement; no `legacyBridgeSigner` → `deliveryExtensions` stays `() => ({})` and the
+    // legacy evaluator gets no envelope. The e2e harness supplies real (test-only) key material
+    // for both so the full settlement path is genuinely exercised.
+
+    // 1. `deliverySigningKey` — real Ed25519 key, wired exactly as
+    //    `client/test/daemon/settlement-grade.test.ts`'s "REAL LocalTaskExecutionBackend delivery
+    //    (finding E31)" fixture drives `trustKeys.deliverySigningKey`.
+    const deliveryKeyPair = generateKeyPairSync('ed25519');
+    const deliverySigningKey = {
+      keyId: `e2e-daemon-harness-${label}`,
+      publicKey: deliveryKeyPair.publicKey,
+      sign: (payload: Uint8Array): Uint8Array =>
+        new Uint8Array(cryptoSign(null, payload, deliveryKeyPair.privateKey)),
+    };
+
+    // 2. `legacyBridgeSigner` — real synchronous secp256k1 signer, ported from
+    //    `client/test/bridge/converged-delivery-legacy-evaluator.test.ts`'s `syncSign`. Recovery
+    //    format is reordered to r||s||recovery (the convention `harnesses/engine/signing.ts`
+    //    uses); noble's own `'recovered'` format puts the recovery byte first.
+    const legacyBridgePrivateKey = secp256k1.utils.randomSecretKey();
+    const legacyBridgeSigner = (hash: `0x${string}`): `0x${string}` => {
+      const message = Buffer.from(hash.slice(2), 'hex');
+      const recovered = secp256k1.sign(message, legacyBridgePrivateKey, {
+        prehash: false,
+        format: 'recovered',
+      });
+      const recovery = recovered[0]!;
+      const rs = Buffer.from(recovered.slice(1));
+      return `0x${rs.toString('hex')}${recovery.toString(16).padStart(2, '0')}` as `0x${string}`;
+    };
+
     composition = await buildOperatorComposition({
       config: compositionConfig,
       publicClient: agentClients.publicClient,
@@ -1194,6 +1317,18 @@ export async function startDaemon(
       evidenceRoot: join(fixture.implStateRoot, `${label}-evidence`),
       venueStateDbPath: join(fixture.implStateRoot, `${label}-venue.db`),
       profileStore,
+      deliverySigningKey,
+      legacyBridgeSigner,
+      // C8: required — backs the projector's durable cursor/observations and the engagement
+      // ledger. Its absence here (an accidental omission, not intentional) is exactly what made
+      // `ProjectorLoop` crash on its first tick with `store.setConfigValue` on `undefined` —
+      // `store` is this same daemon's own SQLite `Store` (built above, step 3), not a separate
+      // instance.
+      store,
+      // Diagnostic only: surfaces composition-root.ts's own file-header gap (a) warnings
+      // ("no production Submission/dispatch-context resolver exists for today-generation tasks
+      // yet") on stdout so a stalled projector is diagnosable instead of silently ticking.
+      logger: { info: (m: string) => console.log(m), warn: (m: string) => console.warn(m) },
     });
     // Finding E16 / the C2 ruling: no process-global broadcaster — this daemon's ONE Safe
     // broadcaster (built above, bound to `operator.safeAddress`) is threaded explicitly to the
