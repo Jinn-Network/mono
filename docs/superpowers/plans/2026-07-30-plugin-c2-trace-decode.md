@@ -1104,7 +1104,7 @@ This is where "digest-bound" stops being a word. The decoder is handed bytes and
 
 `tryDecodeTrajectory` exists because a consumer whose decode is best-effort — an index that must still write metadata for a record whose trace it cannot read — should not be made to catch. It is the surface C6 consumes; the throwing form is for callers that must not proceed.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/decode.test.ts`:
 
@@ -1349,12 +1349,12 @@ describe("tryDecodeTrajectory", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trace-decode && yarn test`
 Expected: FAIL — `Failed to resolve import "./decode.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/decode.ts`:
 
@@ -1610,12 +1610,12 @@ export function tryDecodeTrajectory(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trace-decode && yarn test && yarn typecheck`
 Expected: PASS (13 new tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/evidence/trace-decode/src
