@@ -486,7 +486,7 @@ git commit -m "feat(evidence-trajectory): locale-free ordering and RFC 8785 cano
 - Consumes: `serializeCanonicalJson`, `JsonValue` (Task 2).
 - Produces: `sha256Hex(bytes: Uint8Array): string`; `documentDigest(bytes: Uint8Array): \`sha256:${string}\``; `interface SealedRecord { bytes: Uint8Array; digest: \`sha256:${string}\` }`; `sealRecord(value: JsonValue): SealedRecord`; `sealWithSchema<T>(schema: z.ZodType<T>, document: unknown): SealedRecord`; `parseExactWithSchema<T>(schema: z.ZodType<T>, bytes: Uint8Array): T`; `class InvalidDocumentError`; `interface ValidationIssue { path: string; message: string }`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/sealing.test.ts`:
 
@@ -551,12 +551,12 @@ describe("sealing", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trajectory && yarn test`
 Expected: FAIL — `Failed to resolve import "./hashing.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/hashing.ts`:
 
@@ -655,12 +655,12 @@ export function parseExactWithSchema<T>(schema: z.ZodType<T>, bytes: Uint8Array)
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trajectory && yarn test && yarn typecheck`
 Expected: PASS (7 new tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/evidence/trajectory/src
