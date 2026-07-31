@@ -5136,3 +5136,99 @@ two-daemons-one-process test was checked against a **reconstruction of the old m
 design**, where daemon A's first call succeeds, daemon B installing its broadcaster clobbers the
 shared slot, and daemon A's next call throws a Safe-mismatch error. That is the failure mode T2.2
 and `jinn-repo-loop.ts` would have hit in production.
+
+### E29 — the observation stream carries no bigints (C5 corrected the plan's premise)
+
+C5's brief asserted observations carry bigints "for the same reason the state does" and told the
+executor to verify rather than assume. It verified, and the premise was **wrong**: `emit()`
+(`packages/marketplace/projector/src/observe.ts`) `.toString()`s every bigint chain fact before it
+reaches `data`; `DerivationAnnotation.blockNumber` is typed `number`; and the frozen TEP
+`ProtocolObservationSchema` contains no `z.bigint()` anywhere. A real observation round-trips
+through plain `JSON.stringify` unchanged.
+
+The shared tagged codec was kept anyway, deliberately: `data` and
+`ResourceDescriptor.annotations` are structurally open `Record<string, unknown>` and are never
+schema-validated before persistence, so a future producer could put a bigint there. A
+defensive-coverage test injects one and proves the codec round-trips it while plain
+`JSON.stringify` throws. Recorded because the plan asserted a fact it had not checked, and the
+executor was right to check it.
+
+### E30 — `EngagementLedger` could not correlate a settlement to its engagement (C6 found, C7 fixed)
+
+C6 built the real `verifySettlementGrade` and immediately hit a wall: the ledger is keyed by
+`taskId` with **no `requestId` column**, so today-generation `dispatchBinding` had nothing to
+correlate against and honestly reported `"missing"` — which makes `verificationFailure` reject
+every settlement. This was invisible until settlement verification became real; the fail-closed
+stub masked it.
+
+C7 added `request_id` additively (`CREATE TABLE` declaration plus an `ensure*Column`
+`PRAGMA table_info` migration in `store.ts`, following the established pattern), populated it at
+claim time from the today-generation claim receipt, and implemented the indexed lookup. A test
+builds a pre-migration on-disk database by hand and proves the constructor migrates it without
+losing rows.
+
+### E31 — nothing signs deliveries, and the daemon says it does (**blocking for settlement**)
+
+C6's `executorBinding` check verifies a DSSE envelope carried on the delivery. **No production
+code produces one.** `grep -rn sealDsseEnvelope` across `packages/` and `client/src` finds zero
+production call sites — every hit is a test fixture or the `trust/core` definition.
+
+Worse, `TrustKeyConfig` (`capabilities.ts`) is purely declarative: `observationSigningKeyConfigured`
+and `deliverySigningKeyConfigured` are bare booleans carrying no key material, and
+`composition-root.ts` sets both unconditionally `true`. They feed
+`BackendCapabilities.signedObservations` / `signedDeliveries`, so **the daemon currently advertises
+that it signs deliveries when nothing does.** That is a capability lie, independent of settlement.
+
+C7 investigated whether the `deliveryExtensions` seam could close it and the answer is
+structurally **no**: `checkExecutorBinding` requires the DSSE payload to equal
+`sealDelivery(delivery minus that one extension)` — the entire settling Delivery including
+`outcome`, `evidenceRecords`, `executionIds`, `createdAt`. None of those are available to the hook;
+they are computed inside `completeAttempt` *after* it runs. A host-side hook cannot reconstruct
+byte-identical delivery bytes without duplicating backend.ts's private sealing logic, which is a
+permanent drift hazard.
+
+**Recommendation (needs a coordinator ruling):** give `deliverySigningKeyConfigured` real teeth — a
+signing-key field rather than a boolean — and implement a two-phase seal inside `completeAttempt`
+(seal minus the executor-binding key → sign → merge the signature in as one reserved field → final
+seal). It is bounded and needs no new subsystem, unlike E20 or the Phase-B `BindingStore`, but it
+is `backend.ts`'s responsibility, not the host's — and it is the moment to fix the capability-flag
+dishonesty. **Until it lands, `executorBinding` reports `"missing"` against every real delivery and
+no settlement can complete.**
+
+### E32 — the two generations' task documents do not meet (**blocking; the deepest gap in the stage**)
+
+C8 wired every port the projector needs and found the chain still cannot carry traffic, for a
+reason no earlier task reached: **nothing in the repository produces a today-generation TEP
+`SubmissionRecordSchema` document.** The legacy `CreatorLoop` posts the older `SignedTaskV1` shape,
+which fails TEP validation. So `resolveSubmissionBytes` returns `undefined` for every real task,
+every event is dropped by C4's fail-closed enrich, and the observation stream stays empty even
+though C5 persists it correctly and C8 wires it correctly.
+
+Three further ports have no production backing for the same class of reason, all wired to fail
+loudly rather than fabricate:
+- `resolveDispatchContext` — no durable dispatch-context store is reachable before the venue
+  exists; venue-base's `submission_scopes` table is revised-generation-only.
+- `verifyVerdictObservation` — needs the same Phase-B `BindingStore` / `AnchorReadClient` / policy
+  machinery already named absent, independently reconfirmed against
+  `named-checks.ts`'s `VerdictObservationGatePorts`.
+- Discovery-entry and executor-binding signing — **no persistent per-operator Ed25519 signing
+  identity exists** anywhere in the daemon.
+
+These are currently unreachable in practice rather than dangerous: because `resolveSubmissionBytes`
+always returns `undefined`, no event is admitted, so the announcement ports are never invoked. The
+machine is correctly assembled and correctly refuses to run on fuel that does not exist yet.
+
+**Disposition:** stage 1's solver flow cannot close a loop until a today-generation Submission
+producer exists — either the creator loop emits TEP Submission documents, or a bridge synthesizes
+them from `SignedTaskV1` (which is what contract 9's "legacy derivation annotation" anticipated,
+and which `synthesizeLegacyFactsCard` already does for the facts card but not for the Submission
+record). That is a design decision, not an implementation detail, and it is larger than this
+close-out leg. **Stopping at this boundary and reporting rather than improvising a Submission
+format.**
+
+### E33 — venue state is opened twice (minor, recorded)
+
+`composition-root.ts` opens `VenueStateDatabase` via `openVenueState(stateDbPath)` to give the
+projector's log source a handle, and `createBaseVenue` then opens its **own second connection to
+the same file**, because venue-base exposes no seam to accept a pre-opened handle. WAL makes this
+safe, just wasteful. Recorded rather than worked around; the fix is a venue-base signature change.
