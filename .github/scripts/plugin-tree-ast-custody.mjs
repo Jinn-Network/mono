@@ -500,6 +500,10 @@ function isCaptureProductionPath(filePath) {
   return filePath.includes('/src/capture/') || filePath.includes('\\src\\capture\\');
 }
 
+function isBinNodeFsProductionPath(filePath) {
+  return filePath.endsWith('/src/bin-node-fs.ts') || filePath.endsWith('\\src\\bin-node-fs.ts');
+}
+
 function isAllowedCaptureProcessUse(node, ts, member, assignOps) {
   if (!CAPTURE_ALLOWED_PROCESS_MEMBERS.has(member)) return false;
   return !isAssignmentToExpression(node, node, ts, assignOps);
@@ -689,6 +693,7 @@ function scanSourceFile(filePath, content, options) {
     forbiddenRoots = [],
     isBinEntry = false,
     isCaptureProduction = false,
+    isBinNodeFsProduction = false,
   } = options;
   const label = relativeFromRoot(filePath);
   const violations = [];
@@ -725,7 +730,7 @@ function scanSourceFile(filePath, content, options) {
   }
 
   let scope = new Scope(authCtx);
-  const ctx = { isBinEntry, isCaptureProduction, add, authCtx };
+  const ctx = { isBinEntry, isCaptureProduction, isBinNodeFsProduction, add, authCtx };
   const assignOps = assignmentOperatorKinds(ts);
 
   for (const stmt of sourceFile.statements) {
@@ -771,7 +776,7 @@ function scanSourceFile(filePath, content, options) {
     }
     if (isForbiddenFs(specifier)) {
       if (isBinEntry && isAllowedBinImport(specifier, node, ts)) return;
-      if (isCaptureProduction) return;
+      if (isCaptureProduction || isBinNodeFsProduction) return;
       add(specifier);
     }
   }
@@ -1339,16 +1344,19 @@ export function scanProductionSources(packages, scanOptions) {
     const content = scanOptions.readFile(filePath);
     const isBinEntry = filePath.endsWith('/src/bin.ts') || filePath.endsWith('\\src\\bin.ts');
     const isCaptureProduction = isCaptureProductionPath(filePath);
+    const isBinNodeFsProduction = isBinNodeFsProductionPath(filePath);
     return scanSourceFile(filePath, content, {
       ...scanOptions,
       isBinEntry,
       isCaptureProduction,
+      isBinNodeFsProduction,
     });
   })).sort(compareCodeUnit);
 }
 
 export {
   insideForbiddenRoot,
+  isBinNodeFsProductionPath,
   isCaptureProductionPath,
   isForbiddenChildProcess,
   isForbiddenFs,

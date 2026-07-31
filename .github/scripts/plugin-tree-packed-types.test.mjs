@@ -17,12 +17,17 @@ import {
 // npm ci resolves them without registry publishes (program §7.8).
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/evidence-catalog-sqlite', join(root, 'packages', 'evidence', 'catalog-sqlite')],
+  ['@jinn-network/evidence-derivation', join(root, 'packages', 'evidence', 'derivation')],
   ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
   ['@jinn-network/evidence-local-runtime', join(root, 'packages', 'evidence', 'local-runtime')],
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
   ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
+  ['@jinn-network/evidence-retrieval', join(root, 'packages', 'evidence', 'retrieval')],
+  ['@jinn-network/evidence-trace-decode', join(root, 'packages', 'evidence', 'trace-decode')],
   ['@jinn-network/evidence-trajectory', join(root, 'packages', 'evidence', 'trajectory')],
   ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
+  ['@jinn-network/record-discovery-client', join(root, 'packages', 'discovery', 'client')],
+  ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
 ];
 
@@ -139,6 +144,7 @@ async function runLiveConsumer(archives) {
       ...CROSS_TREE_PACKAGES.map(([name]) => [name, `file:${archives.get(name)}`]),
     ]),
     devDependencies: {
+      '@types/better-sqlite3': APPROVED_RUNTIME_DEV_DEPENDENCIES['@types/better-sqlite3'],
       '@types/node': APPROVED_RUNTIME_DEV_DEPENDENCIES['@types/node'],
       typescript: APPROVED_RUNTIME_DEV_DEPENDENCIES.typescript,
     },
