@@ -1,0 +1,29 @@
+{
+  "fixtures": [
+    {
+      "id": "partial-without-skipped",
+      "description": "A partial decode that does not report how many source records were skipped.",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "empty-with-spans",
+      "description": "An empty decode that nevertheless carries spans.",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "grafted-parent",
+      "description": "A span whose parent identifier belongs to no earlier span in this record.",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "substituted-source-digest",
+      "description": "Spans copied verbatim onto a different source digest — the derived identifiers no longer agree.",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "namespaced-extension-preserved",
+      "description": "An unknown but namespaced extension key, which must survive round-trips.",
+      "expectedDisposition": "accepted"
+    }
+  ]
+}

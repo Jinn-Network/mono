@@ -1,0 +1,76 @@
+{
+  "completeness": {
+    "decoded": "full"
+  },
+  "spans": [
+    {
+      "status": {
+        "code": 1
+      },
+      "events": [],
+      "attributes": [
+        {
+          "value": {
+            "stringValue": "anthropic"
+          },
+          "key": "gen_ai.provider.name"
+        },
+        {
+          "value": {
+            "intValue": "1024"
+          },
+          "key": "gen_ai.usage.input_tokens"
+        }
+      ],
+      "endTimeUnixNano": "2000",
+      "startTimeUnixNano": "1000",
+      "kind": 3,
+      "name": "chat anthropic/claude-opus-4.6",
+      "parentSpanId": null,
+      "spanId": "d190c77eafa866f4"
+    },
+    {
+      "status": {
+        "code": 1
+      },
+      "events": [],
+      "attributes": [
+        {
+          "value": {
+            "stringValue": "call_1"
+          },
+          "key": "gen_ai.tool.call.id"
+        },
+        {
+          "value": {
+            "stringValue": "read_file"
+          },
+          "key": "gen_ai.tool.name"
+        }
+      ],
+      "endTimeUnixNano": "3000",
+      "startTimeUnixNano": "2000",
+      "kind": 1,
+      "name": "execute_tool read_file",
+      "parentSpanId": "d190c77eafa866f4",
+      "spanId": "d71e294f4d4fbddb"
+    }
+  ],
+  "traceId": "5c3d6b4ee62986cd6153c20635cf543f",
+  "derivation": {
+    "vocabularyProfile": "https://jinn.network/profiles/trajectory-vocabulary/1.0",
+    "decoderVersion": "1.0.0",
+    "decoderId": "claude-code-stream-json"
+  },
+  "source": {
+    "formatIri": "https://jinn.network/formats/claude-code-stream-json/v1",
+    "nativeTrace": {
+      "digest": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "mediaType": "application/x-ndjson",
+      "name": "stdout.jsonl"
+    }
+  },
+  "protocol": "https://jinn.network/protocols/trajectory/1.0"
+}

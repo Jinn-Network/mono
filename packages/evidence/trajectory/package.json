@@ -43,6 +43,8 @@
     "test": "vitest run",
     "generate:schemas": "yarn build && node scripts/generate-schemas.mjs --write",
     "check:schemas": "yarn build && node scripts/generate-schemas.mjs --check",
+    "generate:fixtures": "yarn build && node scripts/generate-fixtures.mjs --write",
+    "check:fixtures": "yarn build && node scripts/generate-fixtures.mjs",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
   },
