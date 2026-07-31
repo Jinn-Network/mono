@@ -1637,7 +1637,7 @@ The tier-3 inclusion test is that the kit is proven passable by an implementatio
 
 The kit's byte→span fixtures *are* the determinism proof, not illustrations. A decoder that reached for the host clock, as the frozen parser does at `packages/core/src/trajectory/transcript-to-spans/claude-code-stream-json.ts:74`, fails the pinned-span assertion on its first run and the repeat-decode assertion on every run.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/kit.test.ts`:
 
@@ -1671,12 +1671,12 @@ describe("the in-tree fake", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trace-decode && yarn test`
 Expected: FAIL — `Failed to resolve import "./testing.js"`.
 
-- [ ] **Step 3: Write the kit and the fake**
+- [x] **Step 3: Write the kit and the fake**
 
 `src/testing.ts`:
 
@@ -2034,12 +2034,12 @@ export function lineEventsFixtures(): readonly TraceDecoderFixture[] {
 
 > `lineEventsFixture` calls the fake's own `lineEventsDrafts` to build its expectation, which would be circular for a *production* decoder. It is deliberate here: the fake's purpose is to exercise every kit assertion, not to be independently verified, and the real decoder's fixtures in Task 8 are pinned to files instead.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trace-decode && yarn test && yarn typecheck`
 Expected: PASS — the full contract suite runs green against the fake, plus the two fake-specific tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/evidence/trace-decode/src
