@@ -18,8 +18,13 @@ artifact containing:
   declared identifier rather than by source directory, and
   `.github/scripts/build-profile-root.test.mjs` guards the match against the real repository.
   A document with no such declared identifier (specification prose, JSON-LD vocabularies,
-  fixtures, sidecar digests) is served at its source-directory path instead, since it makes
-  no URI claim to violate;
+  fixtures) is served at its source-directory path instead, since it makes no URI claim to
+  violate. `.sha256` sidecars are the one exception: they are deliberately not served at all
+  (`.github/scripts/build-profile-root.mjs` skips every `*.sha256` file outright) because a
+  sidecar computed against the source-tree bytes would silently disagree with
+  `manifest.json`'s own digest of the served copy once identifier-based remapping moves a
+  document off its source path. `manifest.json` is the sole digest surface for the profile
+  root; the sidecars remain available inside the npm package for consumers that want them;
 - `manifest.json` — a SHA-256 digest of every served document, with its media type and
   source package;
 - `manifest.dsse.json` — a DSSE envelope over `manifest.json`'s exact bytes, present only
@@ -33,6 +38,22 @@ The profile URI is the name; the digests are the binding. A conformance claim ci
 digests, not bare URIs, so a hosting compromise or a quiet redeploy is detectable. Serving
 the documents without the manifest reintroduces trust-the-host into a stack whose every
 other link is a hash.
+
+## Deviation from the plan's source-directory list (D10)
+
+The implementation plan's Task 17 specifies `PROFILE_SOURCE_DIRECTORIES = ['profiles',
+'profile', 'schemas']`. `.github/scripts/build-profile-root.mjs` ships `['profiles',
+'profile']` — the bare top-level `schemas` entry is deliberately dropped, not a missed
+implementation step. No document under either package's bare top-level `schemas/`
+(`task-execution-protocol`, `benchmarking-records`) declares a `$id`, and no
+`https://jinn.network/schemas/...` identifier exists anywhere under `packages/`, so walking
+that directory would only ever produce source-path fallback entries with no
+`jinn.network` identity to protect. A `schemas/` nested under `profiles/` or `profile/`
+(as `evidence-protocol` and `evidence-repository-oci` do) is still walked, because that
+recursion happens through the `profiles`/`profile` entries above it, not through a bare
+top-level `schemas` entry. This is a ratified deviation, not an open item — do not "restore"
+the third entry without first re-deriving that a bare top-level `schemas/` document has
+grown a declared identifier.
 
 ## Human checklist: hosting and key provisioning
 
