@@ -13,6 +13,7 @@ import { documentDigest } from '@jinn-network/task-execution-protocol';
 import type { HarvestResult } from '@jinn-network/task-execution-workspace';
 import { keccak256 } from 'viem';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import type { SignedTaskV1 } from '../types/task-document.js';
 
 export const LEGACY_ENVELOPE_EXTENSION_KEY =
   'https://jinn.network/bridge/legacy-execution-envelope/1.0';
@@ -57,6 +58,43 @@ export function synthesizeLegacyFactsCard(anchored: {
     },
     derivationKind: 'legacy',
     legacyManifestDigest: anchored.manifestDigest,
+  };
+}
+
+/**
+ * The projector's synthesized bridge Submission-equivalent for a legacy-posted task (finding
+ * E32, ruling E32). A `today`-mode `CreatorLoop` posts the older `SignedTaskV1` document
+ * directly on-chain -- there is no separate sealed TEP Submission wrapping it. Per the
+ * composition spec §10 "Bridge-era document rules" and program cross-plan contract 9, until
+ * stage 3 the projector SYNTHESIZES the Submission-equivalent from the resolved SignedTaskV1
+ * bytes themselves under a `legacy` derivation annotation -- the same annotation contract
+ * `synthesizeLegacyFactsCard` above already established for `AnnouncedSubmissionCard`
+ * (`derivationKind`/`legacyManifestDigest`, Task 5/15).
+ *
+ * Unlike the sealed-Submission path, there is no separate Submission→Task indirection to join:
+ * the resolved bytes ARE the Task content, so `taskDigest` is the digest of the exact bytes
+ * passed in (the caller still cross-checks this against the on-chain anchor -- this function
+ * does not, so it stays a pure synthesis step), and `submission` is a stable synthetic UUID
+ * derived from that same digest (mirrors `synthesizeLegacyFactsCard`'s
+ * `uuidFromDigest(anchored.taskCidDigest)` above).
+ *
+ * Retires with the `legacyManifestDigest` bridge after stage 5 (contract 9): once the legacy
+ * `CreatorLoop` posts sealed TEP Submissions, `resolveTaskProjection` resolves a real Submission
+ * on its first attempt and never reaches this fallback.
+ */
+export function synthesizeLegacyTaskProjection(input: {
+  readonly task: SignedTaskV1;
+  readonly taskBytes: Uint8Array;
+}): {
+  readonly submission: `urn:uuid:${string}`;
+  readonly taskDigest: `sha256:${string}`;
+  readonly effectiveDeadline: string;
+} {
+  const taskDigest = documentDigest(input.taskBytes);
+  return {
+    submission: uuidFromDigest(taskDigest),
+    taskDigest,
+    effectiveDeadline: new Date(input.task.window.endTs * 1000).toISOString(),
   };
 }
 

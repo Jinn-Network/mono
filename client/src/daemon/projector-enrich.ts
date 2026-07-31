@@ -19,6 +19,16 @@
  *     own claim about its Task (`submission.task.digest.sha256`), cross-checked against the
  *     actual fetched Task bytes' locally-recomputed digest (`computeRawCodecCid`). Either leg
  *     failing to resolve, or the two legs disagreeing, is a drop.
+ *   - BRIDGE EXCEPTION (finding E32 / ruling E32): when the host-resolved bytes fail TEP
+ *     `SubmissionRecordSchema` validation, `resolveTaskProjection` tries once more against the
+ *     legacy `SignedTaskV1` shape the legacy `CreatorLoop` actually posts (no sealed Submission
+ *     exists for these tasks until stage 3). A valid `SignedTaskV1` is admitted as a
+ *     bridge-annotated synthetic Submission-equivalent (`legacy` derivation, see
+ *     `bridge-legacy-delivery.ts`'s `synthesizeLegacyTaskProjection`) -- there is no separate
+ *     Submission→Task indirection in this case, so the resolved bytes' own digest stands in for
+ *     both legs of the join, still cross-checked against the on-chain anchor below. A document
+ *     that is neither shape is genuinely malformed and still drops. Retires with the
+ *     `legacyManifestDigest` bridge after stage 5.
  *   - For `TaskCreated` specifically, the RAW on-chain `taskCidDigest` is *also* compared against
  *     that joined value. A mismatch there is deliberately dropped too (never let a corrupted
  *     digest reach the reducer as if it were trustworthy) -- but note the reducer
@@ -57,6 +67,8 @@ import type {
 } from '@jinn-network/marketplace-projector';
 import { SubmissionRecordSchema, type ResourceDescriptor } from '@jinn-network/task-execution-protocol';
 import type { Address, Hex, PublicClient } from 'viem';
+import { SignedTaskV1Schema } from '../types/task-document.js';
+import { synthesizeLegacyTaskProjection } from './bridge-legacy-delivery.js';
 
 type Sha256Digest = `sha256:${string}`;
 
@@ -122,20 +134,37 @@ function unixSecondsToRfc3339(seconds: bigint): string | undefined {
   return new Date(Number(milliseconds)).toISOString();
 }
 
-function parseSubmissionBytes(bytes: Uint8Array): ReturnType<typeof SubmissionRecordSchema.parse> | undefined {
+/** Decodes and JSON-parses resolved bytes. Never throws -- undefined on any decode failure. */
+function decodeJsonDocument(bytes: Uint8Array): unknown | undefined {
   let text: string;
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {
     return undefined;
   }
-  let document: unknown;
   try {
-    document = JSON.parse(text);
+    return JSON.parse(text);
   } catch {
     return undefined;
   }
+}
+
+function parseSubmissionBytes(bytes: Uint8Array): ReturnType<typeof SubmissionRecordSchema.parse> | undefined {
+  const document = decodeJsonDocument(bytes);
+  if (document === undefined) return undefined;
   const parsed = SubmissionRecordSchema.safeParse(document);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * Bridge fallback (finding E32 / ruling E32): the legacy `CreatorLoop` posts a `SignedTaskV1`
+ * document directly, with no sealed TEP Submission. Tried only after `parseSubmissionBytes`
+ * fails -- a document that is neither shape is genuinely malformed and still drops.
+ */
+function parseLegacySignedTaskV1(bytes: Uint8Array): ReturnType<typeof SignedTaskV1Schema.parse> | undefined {
+  const document = decodeJsonDocument(bytes);
+  if (document === undefined) return undefined;
+  const parsed = SignedTaskV1Schema.safeParse(document);
   return parsed.success ? parsed.data : undefined;
 }
 
@@ -236,8 +265,30 @@ export function createProjectorEnrich(
     }
     const record = parseSubmissionBytes(submissionBytes);
     if (record === undefined) {
-      ports.logger?.warn(`[projector-enrich] resolved Submission for task ${input.taskId} failed schema validation -- dropping`);
-      return undefined;
+      // Bridge synthesis path (finding E32 / ruling E32): the resolved bytes failed TEP
+      // `SubmissionRecordSchema` validation, but the legacy `CreatorLoop` posts a `SignedTaskV1`
+      // document directly -- there is no sealed Submission to fail. Per the composition spec
+      // §10 "Bridge-era document rules" and program cross-plan contract 9, a valid `SignedTaskV1`
+      // is admitted as a bridge-annotated synthetic Submission-equivalent (`legacy` derivation,
+      // same annotation contract as `synthesizeLegacyFactsCard`'s `AnnouncedSubmissionCard`,
+      // Task 5/15 -- see `bridge-legacy-delivery.ts`'s `synthesizeLegacyTaskProjection`). A
+      // document that is neither a valid Submission nor a valid `SignedTaskV1` is genuinely
+      // malformed and still drops. Retires with the `legacyManifestDigest` bridge after stage 5.
+      const legacyTask = parseLegacySignedTaskV1(submissionBytes);
+      if (legacyTask === undefined) {
+        ports.logger?.warn(`[projector-enrich] resolved Submission for task ${input.taskId} failed schema validation -- dropping`);
+        return undefined;
+      }
+      const synthesized = synthesizeLegacyTaskProjection({ task: legacyTask, taskBytes: submissionBytes });
+      if (input.onChainTaskDigest !== undefined && synthesized.taskDigest !== input.onChainTaskDigest) {
+        ports.logger?.warn(
+          `[projector-enrich] task ${input.taskId} digest join failed: on-chain anchor `
+            + `${input.onChainTaskDigest} disagrees with synthesized legacy SignedTaskV1 digest `
+            + `${synthesized.taskDigest} -- dropping`,
+        );
+        return undefined;
+      }
+      return synthesized;
     }
     const claimedHex = record.task.digest?.sha256;
     if (typeof claimedHex !== 'string' || !/^[0-9a-fA-F]{64}$/.test(claimedHex)) {

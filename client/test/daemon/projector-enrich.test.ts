@@ -51,6 +51,34 @@ function submissionRecordBytes(taskDigestHex: string): Uint8Array {
   }));
 }
 
+const LEGACY_WINDOW_END_TS = Math.floor(Date.parse(DEADLINE) / 1000);
+
+/** A legacy `SignedTaskV1` document -- what the legacy `CreatorLoop` actually posts (finding E32). */
+function legacySignedTaskV1Bytes(): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify({
+    schemaVersion: 'task.v1',
+    id: 'legacy-task-1',
+    solverType: 'prediction.v1',
+    solverNetManifestCid: 'bafySolverNetManifest',
+    contractId: 'prediction',
+    contractVersion: 'v1',
+    role: 'restoration',
+    description: 'restore service health',
+    window: { startTs: LEGACY_WINDOW_END_TS - 3600, endTs: LEGACY_WINDOW_END_TS },
+    spec: {},
+    eligibility: {},
+    claimPolicy: { maxClaims: 2 },
+    creator: { safeAddress: CREATOR, agentEoa: CREATOR },
+    createdAt: LEGACY_WINDOW_END_TS - 3600,
+    signature: {
+      algo: 'secp256k1',
+      signer: CREATOR,
+      hash: `0x${'a'.repeat(64)}`,
+      sig: `0x${'b'.repeat(130)}`,
+    },
+  }));
+}
+
 interface FixtureStore {
   readonly ipfs: Map<string, Uint8Array>;
   readonly submissionsByTask: Map<string, Uint8Array>;
@@ -323,6 +351,57 @@ describe('createProjectorEnrich', () => {
     // catches up), not as a confirmed absence -- admitting it here would permanently mark the log
     // id processed with no correspondence, indistinguishable from a genuine content-corruption
     // rejection that a retry could never have fixed.
+    expect(enriched).toBeUndefined();
+  });
+
+  // Bridge synthesis path (finding E32 / ruling E32): the legacy `CreatorLoop` posts a
+  // `SignedTaskV1` document directly, with no sealed TEP Submission. A previously-strict
+  // `SubmissionRecordSchema`-only validation dropped every one of these events; the ruling
+  // relaxes exactly this one case.
+  it('admits a today-mode TaskCreated whose resolved document is a legacy SignedTaskV1, synthesizing a bridge Submission-equivalent', async () => {
+    const store = buildFixtureStore();
+    const legacyTaskBytes = legacySignedTaskV1Bytes();
+    const legacyTaskDigest = computeRawCodecCid(legacyTaskBytes).sha256Digest;
+    // No separate Submission→Task indirection for the bridge path: `resolveSubmissionBytes`
+    // resolves the SignedTaskV1 bytes themselves, and there is nothing further to fetch from
+    // IPFS -- deliberately no `store.ipfs` entry.
+    store.submissionsByTask.set(TASK_ID.toString(), legacyTaskBytes);
+    store.dispatchContexts.set(TASK_ID.toString(), DISPATCH_CONTEXT);
+
+    const enrich = createProjectorEnrich(buildPorts(store));
+    const enriched = await enrich(taskCreatedEvent(legacyTaskDigest.slice('sha256:'.length)));
+
+    expect(enriched).toBeDefined();
+    expect(enriched?.projection.taskDigest).toBe(legacyTaskDigest);
+    expect(enriched?.projection.effectiveDeadline).toBe(new Date(LEGACY_WINDOW_END_TS * 1000).toISOString());
+    expect(enriched?.projection.submission).toMatch(/^urn:uuid:/);
+    expect(enriched?.projection.dispatchContext).toEqual(DISPATCH_CONTEXT);
+  });
+
+  it('still drops a today-mode TaskCreated whose resolved document is neither a valid Submission nor a valid SignedTaskV1', async () => {
+    const store = buildFixtureStore();
+    const garbage = new TextEncoder().encode(JSON.stringify({ not: 'a recognized document shape' }));
+    const garbageDigest = computeRawCodecCid(garbage).sha256Digest;
+    store.submissionsByTask.set(TASK_ID.toString(), garbage);
+    store.dispatchContexts.set(TASK_ID.toString(), DISPATCH_CONTEXT);
+
+    const enrich = createProjectorEnrich(buildPorts(store));
+    const enriched = await enrich(taskCreatedEvent(garbageDigest.slice('sha256:'.length)));
+
+    expect(enriched).toBeUndefined();
+  });
+
+  it('drops a legacy SignedTaskV1 whose on-chain taskCidDigest anchor disagrees with the resolved document itself', async () => {
+    const store = buildFixtureStore();
+    const legacyTaskBytes = legacySignedTaskV1Bytes();
+    const otherTask = content({ instructions: 'a completely different task' });
+    store.submissionsByTask.set(TASK_ID.toString(), legacyTaskBytes);
+    store.dispatchContexts.set(TASK_ID.toString(), DISPATCH_CONTEXT);
+
+    const enrich = createProjectorEnrich(buildPorts(store));
+    // On-chain anchor names a digest unrelated to the resolved legacy document's own digest.
+    const enriched = await enrich(taskCreatedEvent(otherTask.digest.slice('sha256:'.length)));
+
     expect(enriched).toBeUndefined();
   });
 });
