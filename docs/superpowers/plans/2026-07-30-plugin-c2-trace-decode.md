@@ -2065,7 +2065,7 @@ Three deliberate divergences from the frozen parser at `packages/core/src/trajec
 2. **No content.** The frozen parser inlines `message.content`, `tool.args`, and `tool.result` (lines 121, 200, 151). This decoder carries none of it (finding F5); each span carries `jinn.trajectory.source.ordinal`, and a consumer that needs text resolves it from the digest-bound bytes.
 3. **One `chat` span per model response**, not one per text block. A `chat` span in the GenAI conventions is one model call; tool calls are its children; user records are the call's input and produce no span of their own.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/claude-code-stream-json.test.ts`:
 
@@ -2259,12 +2259,12 @@ describe("claude-code-stream-json decoder", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trace-decode && yarn test`
 Expected: FAIL — `Failed to resolve import "./claude-code-stream-json.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/claude-code-stream-json.ts`:
 
@@ -2570,12 +2570,12 @@ export function createClaudeCodeStreamJsonDecoder(): TraceDecoder {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trace-decode && yarn test && yarn typecheck`
 Expected: PASS (13 new tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/evidence/trace-decode/src
