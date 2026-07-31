@@ -1,7 +1,21 @@
 /**
- * The projector loop (cutover stage 1, Task 9): reads venue chain events, decodes and reduces
- * them into the marketplace projection state, and publishes signed announcements into a local
- * filesystem discovery archive. Local-only in stage 1; stage 4 mounts the archive for serving.
+ * The projector loop (cutover stage 1, Task 9; production event feed added at finding E20 /
+ * close-out plan §C3): reads venue chain events, decodes and reduces them into the marketplace
+ * projection state, and publishes signed announcements into a local filesystem discovery
+ * archive. Local-only in stage 1; stage 4 mounts the archive for serving.
+ *
+ * Design decision (§C3): `logSource` is venue-base's own `ChainLogSource`
+ * (`packages/marketplace/venue-base/src/log-source/chain-log-source.ts`), consumed directly
+ * rather than adapted into a second `{fetchLogs, heads}` shape with its own reorg detection. The
+ * old shape duplicated exactly the judgment `ChainLogSource.poll()` already makes — a
+ * hash-verified `(blockNumber, blockHash)` comparison at the cursor position, rolling back to the
+ * durable finalized checkpoint and recording orphaned hashes on divergence — and two independent
+ * cursors making that same call is precisely the kind of disagreement that corrupts a fail-closed
+ * pipeline. Now only `ChainLogSource`'s own store decides what a reorg is and where to roll back
+ * to; this loop's `ProjectorCursorStore` mirrors whatever `poll()` reports (`nextCursor.live*` /
+ * `finalized*` below) purely for its own two jobs `ChainLogSource` has no notion of: the
+ * `MarketplaceProjectionState` and the announcement-chain head/sequence/digest. Built via
+ * `createProjectorLogSource` (`projector-log-source.ts`).
  */
 import type { Address } from 'viem';
 import {
@@ -15,9 +29,9 @@ import {
   type FinalityTier,
   type MarketplaceEvent,
   type MarketplaceProjectionState,
-  type MarketplaceRawLog,
   type ObservationMarketplaceEvent,
 } from '@jinn-network/marketplace-projector';
+import type { ChainLogSource } from '@jinn-network/marketplace-venue-base';
 import type { MarketplaceChainConfig } from '@jinn-network/marketplace-binding';
 import type { Store } from '../store/store.js';
 import { runLoop } from './loop-heartbeat.js';
@@ -34,13 +48,8 @@ const NO_ANNOUNCEMENTS_SEQUENCE = '0000000000000000';
 
 export interface ProjectorLoopConfig {
   readonly chain: MarketplaceChainConfig;
-  readonly logSource: {
-    fetchLogs(input: { fromBlock: bigint; toBlock: bigint }): Promise<MarketplaceRawLog[]>;
-    heads(): Promise<{
-      latest: { number: bigint; hash: `0x${string}` };
-      finalized: { number: bigint; hash: `0x${string}` };
-    }>;
-  };
+  /** venue-base's `ChainLogSource` — see the module comment's design decision. */
+  readonly logSource: ChainLogSource;
   readonly cursorStore: ProjectorCursorStore;
   readonly ports: ProjectorPortsInput;
   readonly enrich: (event: MarketplaceEvent) => Promise<ObservationMarketplaceEvent | undefined>;
@@ -56,6 +65,12 @@ export interface ProjectorLoopConfig {
   readonly isAuthorizedMechOrigin: (address: Address) => boolean;
   /** Default `'safe'` (finalityPolicy's own default): the announcement-publication threshold. */
   readonly announceAt?: FinalityTier;
+  /**
+   * Live "what does the chain report as finalized right now" query for `hasCaughtUp()` only.
+   * Never `logSource.poll()` — see the module comment. Built via `createFinalizedHeadReader`
+   * (`projector-log-source.ts`).
+   */
+  readonly readFinalizedBlockNumber: () => Promise<bigint>;
 }
 
 export class ProjectorLoop {
@@ -65,26 +80,23 @@ export class ProjectorLoop {
 
   /** One pass; exported so the boot catch-up gate can drive it synchronously. */
   async tick(): Promise<{ readonly announcements: number; readonly refusals: number; readonly caughtUp: boolean }> {
-    const heads = await this.config.logSource.heads();
-    let cursor = this.config.cursorStore.read();
-
-    if (
-      cursor !== undefined
-      && heads.latest.number === cursor.liveBlockNumber
-      && heads.latest.hash !== cursor.liveBlockHash
-    ) {
+    // `poll()` owns the reorg decision entirely: it hash-verifies its own persisted cursor,
+    // rolls back to the durable finalized checkpoint on divergence, records orphaned hashes, and
+    // returns logs re-scanned from the (possibly rolled-back) checkpoint forward. This loop makes
+    // no reorg judgment of its own — see the module comment's design decision.
+    const batch = await this.config.logSource.poll();
+    if (batch.reorg !== undefined) {
       this.config.logger?.warn(
-        `[projector] reorg detected at block ${cursor.liveBlockNumber}: `
-          + `expected hash ${cursor.liveBlockHash}, chain now reports ${heads.latest.hash}`,
+        `[projector] reorg detected: rolled back to block ${batch.reorg.rolledBackTo.blockNumber} `
+          + `(hash ${batch.reorg.rolledBackTo.blockHash}); `
+          + `orphaned ${batch.reorg.orphanedBlockHashes.length} block hash(es)`,
       );
-      cursor = this.config.cursorStore.rollbackToFinalized();
     }
 
-    const fromBlock = cursor === undefined ? heads.finalized.number : cursor.liveBlockNumber + 1n;
-    const rawLogs = await this.config.logSource.fetchLogs({ fromBlock, toBlock: heads.latest.number });
+    const cursor = this.config.cursorStore.read();
 
     const authority = marketplaceEventOriginAuthority(this.config.chain, this.config.isAuthorizedMechOrigin);
-    const decoded = decodeMarketplaceLogs(rawLogs, authority);
+    const decoded = decodeMarketplaceLogs(batch.logs, authority);
 
     const enriched = (await Promise.all(decoded.map((event) => this.config.enrich(event))))
       .filter((event): event is ObservationMarketplaceEvent => event !== undefined);
@@ -110,10 +122,10 @@ export class ProjectorLoop {
     const nextHeadJson = result.head !== undefined ? JSON.stringify(result.head) : (cursor?.headJson ?? null);
 
     const nextCursor: ProjectorCursor = {
-      liveBlockNumber: heads.latest.number,
-      liveBlockHash: heads.latest.hash,
-      finalizedBlockNumber: heads.finalized.number,
-      finalizedBlockHash: heads.finalized.hash,
+      liveBlockNumber: batch.cursor.blockNumber,
+      liveBlockHash: batch.cursor.blockHash,
+      finalizedBlockNumber: batch.finalizedCheckpoint.blockNumber,
+      finalizedBlockHash: batch.finalizedCheckpoint.blockHash,
       sequence: nextSequence,
       entryDigest: nextEntryDigest,
       headJson: nextHeadJson,
@@ -124,7 +136,7 @@ export class ProjectorLoop {
     return {
       announcements: result.announcements.length,
       refusals: transition.refusals.length + result.refusals.length,
-      caughtUp: nextCursor.finalizedBlockNumber >= heads.finalized.number,
+      caughtUp: nextCursor.finalizedBlockNumber >= batch.finalizedCheckpoint.blockNumber,
     };
   }
 
@@ -148,11 +160,16 @@ export class ProjectorLoop {
     this.stopped = true;
   }
 
-  /** Contract 3: has the durable cursor reached the finalized chain head? */
+  /**
+   * Contract 3: has the durable cursor reached the finalized chain head? Polled independently of
+   * `tick()` by the boot catch-up gate (`claim-gate.ts`), so this needs a live read of the
+   * chain's current finalized head — deliberately not `logSource.poll()`; see the module comment.
+   */
   async hasCaughtUp(): Promise<boolean> {
-    const heads = await this.config.logSource.heads();
     const cursor = this.config.cursorStore.read();
-    return cursor !== undefined && cursor.finalizedBlockNumber >= heads.finalized.number;
+    if (cursor === undefined) return false;
+    const liveFinalized = await this.config.readFinalizedBlockNumber();
+    return cursor.finalizedBlockNumber >= liveFinalized;
   }
 }
 

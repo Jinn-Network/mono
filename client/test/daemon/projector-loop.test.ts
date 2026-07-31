@@ -1,15 +1,105 @@
-import { describe, expect, it, vi } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { encodeAbiParameters, encodeEventTopics, type Address, type Hex } from 'viem';
+import { encodeAbiParameters, encodeEventTopics, type Address, type Hex, type PublicClient } from 'viem';
 import { BASE_SEPOLIA_TODAY, JINN_ROUTER_V3_ABI } from '@jinn-network/marketplace-binding';
 import { DISCOVERY_SIGNING_SCOPE } from '@jinn-network/record-discovery-protocol';
-import type { MarketplaceRawLog, ScopedDiscoverySigner } from '@jinn-network/marketplace-projector';
+import type { ScopedDiscoverySigner } from '@jinn-network/marketplace-projector';
 import { RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
+import { openVenueState, type VenueStateDatabase } from '@jinn-network/marketplace-venue-base';
 import { Store } from '../../src/store/store.js';
 import { ProjectorCursorStore } from '../../src/daemon/projector-cursor.js';
 import { ProjectorLoop, type ProjectorLoopConfig } from '../../src/daemon/projector-loop.js';
+import { createFinalizedHeadReader, createProjectorLogSource } from '../../src/daemon/projector-log-source.js';
+
+// --- A scripted, in-memory `PublicClient` double -- the same technique venue-base's own
+// `chain-log-source.test.ts` uses. This drives a REAL `ChainLogSource` (via
+// `createProjectorLogSource`) and a REAL `VenueStateDatabase`, so these tests exercise the
+// production adapter path end to end, not a `ProjectorLoop`-side fake of the log source. ---
+
+interface ScriptedBlockLog {
+  readonly address: Address;
+  readonly topics: readonly Hex[];
+  readonly data: Hex;
+  readonly transactionHash: Hex;
+  readonly logIndex: number;
+}
+
+function buildScriptedChain() {
+  const blocks: Hex[] = [];
+  let finalizedOverride: bigint | undefined;
+  let hashSeed = 0;
+  const logsByBlock = new Map<number, ScriptedBlockLog[]>();
+
+  function freshHash(): Hex {
+    hashSeed += 1;
+    return `0x${hashSeed.toString(16).padStart(64, '0')}` as Hex;
+  }
+  function mine(count: number): void {
+    for (let index = 0; index < count; index += 1) blocks.push(freshHash());
+  }
+  mine(1); // genesis (block 0)
+
+  const publicClient = {
+    async getBlock(args: { readonly blockTag?: 'latest' | 'finalized'; readonly blockNumber?: bigint } = {}) {
+      if (args.blockNumber !== undefined) {
+        const hash = blocks[Number(args.blockNumber)];
+        if (hash === undefined) throw new Error(`scripted chain: no block ${args.blockNumber}`);
+        return { number: args.blockNumber, hash };
+      }
+      if (args.blockTag === 'finalized') {
+        const number = finalizedOverride ?? BigInt(blocks.length - 1);
+        return { number, hash: blocks[Number(number)]! };
+      }
+      const number = BigInt(blocks.length - 1);
+      return { number, hash: blocks[Number(number)]! };
+    },
+    async getLogs(
+      args: { readonly address: readonly Address[]; readonly fromBlock: bigint; readonly toBlock: bigint },
+    ) {
+      const result: unknown[] = [];
+      for (let n = args.fromBlock; n <= args.toBlock; n += 1n) {
+        const entries = logsByBlock.get(Number(n)) ?? [];
+        for (const entry of entries) {
+          if (!args.address.some((a) => a.toLowerCase() === entry.address.toLowerCase())) continue;
+          result.push({
+            address: entry.address,
+            topics: entry.topics,
+            data: entry.data,
+            blockHash: blocks[Number(n)],
+            blockNumber: n,
+            transactionHash: entry.transactionHash,
+            transactionIndex: 0,
+            logIndex: entry.logIndex,
+            removed: false,
+          });
+        }
+      }
+      return result;
+    },
+  } as unknown as PublicClient;
+
+  return {
+    publicClient,
+    mine,
+    setFinalized(blockNumber: bigint): void {
+      finalizedOverride = blockNumber;
+    },
+    reorgFrom(blockNumber: bigint): void {
+      for (let index = Number(blockNumber); index < blocks.length; index += 1) blocks[index] = freshHash();
+    },
+    addLog(blockNumber: bigint, log: ScriptedBlockLog): void {
+      const key = Number(blockNumber);
+      const existing = logsByBlock.get(key) ?? [];
+      existing.push(log);
+      logsByBlock.set(key, existing);
+    },
+    latestBlockNumber: () => BigInt(blocks.length - 1),
+  };
+}
+
+type ScriptedChain = ReturnType<typeof buildScriptedChain>;
 
 // --- Fixtures (inlined: no shared `_projector-fixtures.ts` module is in this task's write
 // scope, so both the plan's proposed `taskCreatedLog()` and `fakeDiscoverySigner()` helpers
@@ -21,7 +111,7 @@ const MANIFEST_DIGEST = `0x${'9'.repeat(64)}` satisfies Hex;
 const TASK_CID_DIGEST = `0x${'a'.repeat(64)}` satisfies Hex;
 const TASK_DIGEST = `sha256:${'a'.repeat(64)}` as const;
 
-function taskCreatedLog(overrides: { finalityTier?: 'safe' | 'finalized' } = {}): MarketplaceRawLog {
+function taskCreatedLog(): ScriptedBlockLog {
   const topics = encodeEventTopics({
     abi: JINN_ROUTER_V3_ABI,
     eventName: 'TaskCreated',
@@ -37,15 +127,11 @@ function taskCreatedLog(overrides: { finalityTier?: 'safe' | 'finalized' } = {})
     [TASK_CID_DIGEST, 2, 100n, 20n],
   );
   return {
-    chainId: BASE_SEPOLIA_TODAY.chainId,
     address: BASE_SEPOLIA_TODAY.jinnRouter,
     topics: topics as readonly Hex[],
     data,
-    blockNumber: 120n,
-    blockHash: `0x${'1'.repeat(64)}`,
     transactionHash: `0x${'2'.repeat(64)}`,
     logIndex: 0,
-    finalityTier: overrides.finalityTier ?? 'safe',
   };
 }
 
@@ -58,19 +144,28 @@ function fakeDiscoverySigner(): ScopedDiscoverySigner {
   };
 }
 
-function loop(overrides: Partial<ProjectorLoopConfig> = {}): ProjectorLoop {
-  const store = new Store(':memory:');
+function loop(input: {
+  chain: ScriptedChain;
+  state: VenueStateDatabase;
+  store?: Store;
+  cursorStore?: ProjectorCursorStore;
+  logger?: { info(m: string): void; warn(m: string): void };
+  overrides?: Partial<ProjectorLoopConfig>;
+}): { readonly projector: ProjectorLoop; readonly cursorStore: ProjectorCursorStore } {
+  const store = input.store ?? new Store(':memory:');
+  const cursorStore = input.cursorStore ?? new ProjectorCursorStore(store, 'marketplace');
   const pageCounts = new Map<string, number>();
+  const logSource = createProjectorLogSource({
+    chain: BASE_SEPOLIA_TODAY,
+    publicClient: input.chain.publicClient,
+    state: input.state,
+    mechAddresses: [],
+    options: { startBlock: 0n },
+  });
   const config: ProjectorLoopConfig = {
     chain: BASE_SEPOLIA_TODAY,
-    logSource: {
-      fetchLogs: async () => [taskCreatedLog()],
-      heads: async () => ({
-        latest: { number: 120n, hash: `0x${'1'.repeat(64)}` },
-        finalized: { number: 120n, hash: `0x${'1'.repeat(64)}` },
-      }),
-    },
-    cursorStore: new ProjectorCursorStore(store, 'marketplace'),
+    logSource,
+    cursorStore,
     ports: {
       source: { agent: 'urn:jinn:operator:test', name: 'test-operator' },
       signer: fakeDiscoverySigner(),
@@ -103,80 +198,107 @@ function loop(overrides: Partial<ProjectorLoopConfig> = {}): ProjectorLoop {
     pollIntervalMs: 5,
     store,
     isAuthorizedMechOrigin: () => false,
-    ...overrides,
+    readFinalizedBlockNumber: createFinalizedHeadReader(input.chain.publicClient),
+    logger: input.logger,
+    ...input.overrides,
   };
-  return new ProjectorLoop(config);
+  return { projector: new ProjectorLoop(config), cursorStore };
 }
+
+let root: string;
+let state: VenueStateDatabase;
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'projector-loop-'));
+  state = openVenueState(join(root, 'venue.db'));
+});
+afterEach(() => {
+  state.close();
+  rmSync(root, { recursive: true, force: true });
+});
 
 describe('projector loop', () => {
   it('advances the durable cursor after a successful tick', async () => {
-    const store = new Store(':memory:');
-    const cursorStore = new ProjectorCursorStore(store, 'marketplace');
-    const projector = loop({ store, cursorStore });
+    const chain = buildScriptedChain();
+    chain.mine(120); // blocks 0..120
+    chain.setFinalized(120n);
+    chain.addLog(120n, taskCreatedLog());
+
+    const { projector, cursorStore } = loop({ chain, state });
     const result = await projector.tick();
+
     expect(result.caughtUp).toBe(true);
     expect(result.announcements).toBe(1);
     expect(cursorStore.read()!.finalizedBlockNumber).toBe(120n);
   });
 
-  it('reports not-caught-up while the finalized head is ahead of the cursor', async () => {
-    const projector = loop({
-      logSource: {
-        fetchLogs: async () => [],
-        heads: async () => ({
-          latest: { number: 5_000n, hash: `0x${'1'.repeat(64)}` },
-          finalized: { number: 4_900n, hash: `0x${'2'.repeat(64)}` },
-        }),
-      },
+  it('reports not caught up while the live finalized head is ahead of the durable cursor', async () => {
+    const chain = buildScriptedChain();
+    chain.mine(200);
+    chain.setFinalized(100n);
+
+    const { projector, cursorStore } = loop({ chain, state });
+    expect(await projector.hasCaughtUp()).toBe(false); // no cursor written yet
+
+    cursorStore.write({
+      liveBlockNumber: 100n,
+      liveBlockHash: `0x${'1'.repeat(64)}`,
+      finalizedBlockNumber: 50n,
+      finalizedBlockHash: `0x${'1'.repeat(64)}`,
+      sequence: '0000000000000000',
+      entryDigest: null,
+      headJson: null,
+      stateJson: '{}',
     });
-    expect(await projector.hasCaughtUp()).toBe(false);
+    expect(await projector.hasCaughtUp()).toBe(false); // cursor (50) behind live finalized (100)
+
+    cursorStore.write({
+      liveBlockNumber: 100n,
+      liveBlockHash: `0x${'1'.repeat(64)}`,
+      finalizedBlockNumber: 100n,
+      finalizedBlockHash: `0x${'1'.repeat(64)}`,
+      sequence: '0000000000000000',
+      entryDigest: null,
+      headJson: null,
+      stateJson: '{}',
+    });
+    expect(await projector.hasCaughtUp()).toBe(true); // cursor caught up to live finalized
   });
 
-  it('rolls back to the finalized checkpoint when the live block hash diverges', async () => {
-    const store = new Store(':memory:');
-    const cursorStore = new ProjectorCursorStore(store, 'marketplace');
-    cursorStore.write({
-      liveBlockNumber: 120n,
-      liveBlockHash: `0x${'9'.repeat(64)}`,
-      finalizedBlockNumber: 100n,
-      finalizedBlockHash: `0x${'2'.repeat(64)}`,
-      sequence: '0000000000000001',
-      entryDigest: `sha256:${'a'.repeat(64)}`,
-      headJson: null,
-      // A pre-existing cursor row's persisted state — a real empty projection state, not a bare
-      // `{}` (the plan's literal fixture): the reducer's `cloneMarketplaceProjectionState` reads
-      // fixed fields (`processedLogIds`, `tasks`, ...) unconditionally, so a bare `{}` here would
-      // throw before the reorg-warning assertion below is ever reached.
-      stateJson: JSON.stringify({
-        processedLogIds: [],
-        processedCorrectionIds: [],
-        sequenceBySourceSubject: {},
-        tasks: {},
-        pendingMechDeliveries: {},
-        requestIdBindings: {},
-        evaluationIdentities: {},
-        attemptEngagements: {},
-        evaluationEngagements: {},
-      }),
-    });
+  it('rolls back to the finalized checkpoint when the live block hash diverges (venue-base reorg detection)', async () => {
+    const chain = buildScriptedChain();
+    chain.mine(150); // blocks 0..150
+    chain.setFinalized(100n);
+    chain.addLog(140n, taskCreatedLog());
+
     const warn = vi.fn();
-    const projector = loop({ store, cursorStore, logger: { info: vi.fn(), warn } });
-    await projector.tick();
+    const { projector, cursorStore } = loop({ chain, state, logger: { info: vi.fn(), warn } });
+
+    const first = await projector.tick();
+    expect(first.announcements).toBe(1);
+    expect(cursorStore.read()!.liveBlockNumber).toBe(150n);
+    expect(cursorStore.read()!.finalizedBlockNumber).toBe(100n);
+    expect(warn).not.toHaveBeenCalled();
+
+    // Mutate the canonical hash at (and above) the live cursor's height -- venue-base's
+    // `ChainLogSource.poll()` owns detecting this, not the loop (see projector-loop.ts's design
+    // decision comment).
+    chain.reorgFrom(150n);
+
+    const second = await projector.tick();
     expect(warn.mock.calls.flat().join('\n')).toContain('reorg');
-    expect(cursorStore.read()!.liveBlockNumber).toBeGreaterThanOrEqual(100n);
+    expect(cursorStore.read()!.finalizedBlockNumber).toBe(100n);
+    expect(cursorStore.read()!.liveBlockNumber).toBe(150n);
+    expect(second.caughtUp).toBe(true);
   });
 
   it('never emits an announcement for an event below the finality policy threshold', async () => {
-    const projector = loop({
-      logSource: {
-        fetchLogs: async () => [taskCreatedLog({ finalityTier: 'safe' })],
-        heads: async () => ({
-          latest: { number: 120n, hash: `0x${'1'.repeat(64)}` },
-          finalized: { number: 90n, hash: `0x${'2'.repeat(64)}` },
-        }),
-      },
-      announceAt: 'finalized',
-    });
+    const chain = buildScriptedChain();
+    chain.mine(120);
+    chain.setFinalized(90n); // block 120 is above the finalized head -> tier "safe"
+    chain.addLog(120n, taskCreatedLog());
+
+    const { projector } = loop({ chain, state, overrides: { announceAt: 'finalized' } });
     const result = await projector.tick();
     expect(result.announcements).toBe(0);
   });
