@@ -50,6 +50,7 @@ import {
 import { gatherTaskRunsStatus, applyOutcomes } from './task-runs-build.js';
 import type { DiscoveryAPI, VerdictTallyResult } from '../discovery/types.js';
 import { gatherLoopCompletion, gatherImplStateCadence } from './loop-completion-build.js';
+import type { EvidenceDriverLoop } from '../daemon/evidence-driver.js';
 import { buildInfo } from '../build-info.js';
 import type { BalanceCacheEntry } from '../store/store.js';
 import {
@@ -211,6 +212,14 @@ export interface StatusGatherConfig {
    * any discovery failure degrades silently to `null`, never a wrong `'fail'`.
    */
   discovery?: DiscoveryAPI;
+  /**
+   * Optional getter for the live `EvidenceDriverLoop` instance (Task 12's
+   * composition root threads this through server.ts). When present,
+   * `/v1/status` carries an `evidenceIndexing` block: the driver's cached
+   * indexing-failure list and its cached count of announcements pending
+   * indexing. Returning `null`/absent ⇒ no `evidenceIndexing` block.
+   */
+  evidenceDriver?: () => EvidenceDriverLoop | null;
 }
 
 function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
@@ -907,6 +916,15 @@ export async function gatherStatusForApi(
   });
   if (status?.engine?.implStateDirRoot) {
     body.implStateCadence = gatherImplStateCadence(status.engine.implStateDirRoot);
+  }
+  // Evidence indexing-failure rollup (Task 11). Best-effort: absent driver ⇒
+  // no evidenceIndexing block; never blocks the status endpoint.
+  const evidenceDriver = status?.evidenceDriver?.();
+  if (evidenceDriver) {
+    body.evidenceIndexing = {
+      failures: await evidenceDriver.failures(),
+      pending: evidenceDriver.pending(),
+    };
   }
   const caps = status?.spendCaps;
   if (caps && Object.keys(caps).length > 0) {
