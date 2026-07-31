@@ -3114,4 +3114,3 @@ semantics, L4 external. No workaround weakening.
 
 All six rows move from pending to commit SHA + command evidence only after
 red→green verification. L4 remains external/`not-evaluated`.
-
