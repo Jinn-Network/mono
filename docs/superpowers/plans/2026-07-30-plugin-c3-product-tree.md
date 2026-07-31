@@ -3177,4 +3177,3 @@ Recorded per the coordinator's consolidated review. Historical task text above i
 - **R-C3-9 — C7 stderr expectation (Recommendation; RECORD ONLY).** F-C3-13's `configuration resolved` info-level line writes the resolved home path to stderr during normal health invocation. Stdout remains clean. **Disposition:** C7 doctor rendering/rehearsal should expect this line rather than classify it as protocol noise.
 
 - **R-C3-10 — C0+C3 integration proof (Recommendation; RECORD ONLY).** Program-level integration gate: once C0 and C3 heads are both review-clean, source-boundary guard must run on a temporary combined head containing actual `plugin/frozen` content, proving synthetic frozen-trio refusal also holds against the relocated tree. **Disposition:** do not merge C0 into C3 or alter branch topology in this wave.
-
