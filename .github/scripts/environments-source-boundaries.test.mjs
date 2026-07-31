@@ -93,6 +93,9 @@ const VERIFICATION_FOREIGN_PACKAGES = [
 const FILESYSTEM_ALLOWED_SOURCES = [
   'verification/src/staged-state-store.ts',
   'verification/src/testing.ts',
+  // The store's own test drives it against a real temporary directory; naming the
+  // file keeps the allowlist explicit rather than exempting the whole test region.
+  'verification/src/staged-state-store.test.ts',
 ];
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];

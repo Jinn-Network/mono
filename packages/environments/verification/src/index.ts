@@ -61,6 +61,26 @@ export {
   buildEnvironmentCandidatesFromRows,
   type UpstreamEnvironmentRow,
 } from "./import-source.js";
+export {
+  MAX_INFRASTRUCTURE_ATTEMPTS,
+  STAGED_DISPOSITIONS,
+  STAGED_STAGES,
+  STAGED_STATE_SCHEMA_VERSION,
+  advanceStagedJob,
+  createStagedStateFile,
+  dueStagedJobs,
+  parseStagedStateFile,
+  recordStagedAttested,
+  recordStagedFailure,
+  serializeStagedStateFile,
+  upsertStagedJobs,
+  type StagedDisposition,
+  type StagedJob,
+  type StagedStage,
+  type StagedStateFile,
+  type StagedStateStore,
+} from "./staged-state.js";
+export { createFileStagedStateStore } from "./staged-state-store.js";
 export { buildEnvironmentVerificationSubjects } from "./subject.js";
 export {
   DEFAULT_VERIFICATION_CONTROLS,
