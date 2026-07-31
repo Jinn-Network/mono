@@ -42,6 +42,9 @@ export const INSTALL_TIME_SECTIONS = Object.freeze([
 
 export const NON_NPM_DIRECTORIES = Object.freeze(['frozen', 'adapter-hermes']);
 
+/** Ephemeral guard self-test dirs under live plugin/ — skipped during default discovery. */
+export const GUARD_FIXTURE_DIR_PREFIX = '.plugin-tree-';
+
 /** Deterministic code-unit string compare — never localeCompare/Intl. */
 export function compareCodeUnit(left, right) {
   if (left < right) return -1;
@@ -121,12 +124,15 @@ function validatePackageTopology(packages) {
 }
 
 /**
- * Recurse every directory under plugin/, continue below discovered packages,
+ * Recurse every directory under a plugin tree root, continue below discovered packages,
  * fail on symlinks and ambiguous topology.
+ *
+ * @param {{ root?: string }} [options]
  */
-export function discoverPluginPackages() {
+export function discoverPluginPackages({ root: discoveryRoot = pluginRoot } = {}) {
   const packages = [];
   const topologyErrors = [];
+  const skipGuardFixtures = discoveryRoot === pluginRoot;
 
   function walk(directory, packagePath = '') {
     if (!existsSync(directory)) return;
@@ -137,6 +143,7 @@ export function discoverPluginPackages() {
     }
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       if (BUILD_ARTIFACTS.has(entry.name)) continue;
+      if (skipGuardFixtures && entry.name.startsWith(GUARD_FIXTURE_DIR_PREFIX)) continue;
       const child = join(directory, entry.name);
       const childPath = packagePath ? `${packagePath}/${entry.name}` : entry.name;
       if (entry.isSymbolicLink()) {
@@ -175,7 +182,7 @@ export function discoverPluginPackages() {
     }
   }
 
-  walk(pluginRoot);
+  walk(discoveryRoot);
   packages.sort((left, right) => compareCodeUnit(left.directory, right.directory));
   const globalErrors = validatePackageTopology(packages);
   if (globalErrors.length > 0) {

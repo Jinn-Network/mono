@@ -1,24 +1,22 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 
 import {
   APPROVED_RUNTIME_DEV_DEPENDENCIES,
   derivePublicCodeEntrypoints,
   discoverPluginPackages,
-  pluginRoot,
 } from './plugin-tree-guard-common.mjs';
 
-const treeRoot = pluginRoot;
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'jinn-plugin-tree-packed-types-'));
 const archivesRoot = join(temporaryRoot, 'archives');
 const consumerRoot = join(temporaryRoot, 'consumer');
 
-const packages = discoverPluginPackages();
-const multiExportFixture = mkdtempSync(join(treeRoot, '.plugin-tree-multi-export-'));
-const multiExportDir = join(multiExportFixture, 'multi-export-pkg');
+const livePackages = discoverPluginPackages();
+const multiExportRoot = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-multi-export-'));
+const multiExportDir = join(multiExportRoot, 'multi-export-pkg');
 mkdirSync(join(multiExportDir, 'dist'), { recursive: true });
 mkdirSync(join(multiExportDir, 'src'), { recursive: true });
 writeFileSync(join(multiExportDir, 'package.json'), JSON.stringify({
@@ -37,8 +35,8 @@ writeFileSync(join(multiExportDir, 'dist', 'extra.d.ts'), 'export declare const 
 writeFileSync(join(multiExportDir, 'src', 'index.ts'), 'export const root = 1;\n');
 writeFileSync(join(multiExportDir, 'src', 'extra.ts'), 'export const extra = 2;\n');
 
-const discoveredPackages = discoverPluginPackages();
-const multiExportPackage = discoveredPackages.find((pkg) => pkg.name === '@jinn-network/multi-export-fixture');
+const multiExportPackages = discoverPluginPackages({ root: multiExportRoot });
+const multiExportPackage = multiExportPackages.find((pkg) => pkg.name === '@jinn-network/multi-export-fixture');
 if (!multiExportPackage) {
   throw new Error('multi-export fixture package must be discovered before packed-types validation');
 }
@@ -47,7 +45,8 @@ if (multiExportEntrypoints.length !== 2) {
   throw new Error(`expected two public code entrypoints, got ${multiExportEntrypoints.length}`);
 }
 
-const allEntrypoints = discoveredPackages.flatMap((pkg) =>
+const packagesToPack = [...livePackages, multiExportPackage];
+const allEntrypoints = packagesToPack.flatMap((pkg) =>
   derivePublicCodeEntrypoints(pkg.manifest).map((entrypoint) => ({
     packageName: pkg.name,
     importSpecifier: entrypoint.subpath === '.'
@@ -91,7 +90,7 @@ async function packOne(directory, name) {
 try {
   await mkdir(archivesRoot);
   const archives = new Map();
-  for (const pkg of discoveredPackages) {
+  for (const pkg of packagesToPack) {
     archives.set(pkg.name, await packOne(pkg.absoluteDirectory, pkg.name));
   }
 
@@ -100,7 +99,7 @@ try {
     private: true,
     type: 'module',
     dependencies: Object.fromEntries(
-      discoveredPackages.map((pkg) => [pkg.name, `file:${archives.get(pkg.name)}`]),
+      packagesToPack.map((pkg) => [pkg.name, `file:${archives.get(pkg.name)}`]),
     ),
     devDependencies: {
       '@types/node': APPROVED_RUNTIME_DEV_DEPENDENCIES['@types/node'],
@@ -148,7 +147,7 @@ try {
   );
   await run(typescript, ['--project', 'tsconfig.json'], { cwd: consumerRoot });
 
-  for (const pkg of discoveredPackages.filter((entry) => entry.directory === 'runtime' || entry.name === '@jinn-network/multi-export-fixture')) {
+  for (const pkg of packagesToPack.filter((entry) => entry.directory === 'runtime' || entry.name === '@jinn-network/multi-export-fixture')) {
     const installed = JSON.parse(await readFile(
       join(consumerRoot, 'node_modules', ...pkg.name.split('/'), 'package.json'),
       'utf8',
@@ -162,9 +161,9 @@ try {
   }
 
   console.log(
-    `Compiled a hermetic packed TypeScript consumer against ${allEntrypoints.length} public code entrypoints across ${discoveredPackages.length} plugin tree packages.`,
+    `Compiled a hermetic packed TypeScript consumer against ${allEntrypoints.length} public code entrypoints across ${packagesToPack.length} plugin tree packages.`,
   );
 } finally {
-  rmSync(multiExportFixture, { recursive: true, force: true });
+  rmSync(multiExportRoot, { recursive: true, force: true });
   await rm(temporaryRoot, { recursive: true, force: true });
 }

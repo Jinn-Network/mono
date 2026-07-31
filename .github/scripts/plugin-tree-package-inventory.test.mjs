@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { test } from 'node:test';
 
@@ -83,16 +84,16 @@ test('the plugin tree inventory is explicit and derives cardinality from shared 
 });
 
 test('nested package discovery is visible to the inventory guard', () => {
-  const fixture = mkdtempSync(join(packageRoot, '.plugin-tree-nested-inventory-'));
+  const tempRoot = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-nested-inventory-'));
   try {
-    const nested = join(fixture, 'nested-pkg');
+    const nested = join(tempRoot, 'nested-pkg');
     mkdirSync(join(nested, 'src'), { recursive: true });
     writeFileSync(join(nested, 'package.json'), JSON.stringify({
-      name: '@jinn-network/nested-fixture',
+      name: '@jinn-network/nested-inventory-fixture',
       version: '0.0.0',
     }, null, 2));
     writeFileSync(join(nested, 'src', 'index.ts'), 'export const probe = 1;\n');
-    const discovered = discoverPluginPackages()
+    const discovered = discoverPluginPackages({ root: tempRoot })
       .map((pkg) => [pkg.directory, pkg.name])
       .sort(([leftDirectory], [rightDirectory]) =>
         compareCodeUnit(leftDirectory, rightDirectory));
@@ -103,8 +104,13 @@ test('nested package discovery is visible to the inventory guard', () => {
       declared,
       'undeclared nested package must diverge from declared inventory',
     );
-    assert.ok(discovered.some(([directory]) => directory.endsWith('nested-pkg')));
-  } finally { rmSync(fixture, { recursive: true, force: true }); }
+    assert.deepEqual(discovered, [['nested-pkg', '@jinn-network/nested-inventory-fixture']]);
+    assert.deepEqual(
+      discoverPluginPackages().map((pkg) => [pkg.directory, pkg.name]),
+      [...PLUGIN_PACKAGES],
+      'live plugin tree must not include ephemeral nested fixtures',
+    );
+  } finally { rmSync(tempRoot, { recursive: true, force: true }); }
 });
 
 test('the inventory guard itself contains no hardcoded package-cardinality assertion', () => {

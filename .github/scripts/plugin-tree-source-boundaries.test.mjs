@@ -254,20 +254,20 @@ test('every plugin-tree npm package is discovered recursively by the shared help
 });
 
 test('nested package discovery drives production scanning', () => {
-  const fixture = mkdtempSync(join(tree, '.plugin-tree-nested-boundary-'));
+  const tempRoot = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-nested-boundary-'));
   try {
-    const nested = join(fixture, 'nested-pkg');
+    const nested = join(tempRoot, 'nested-pkg');
     mkdirSync(join(nested, 'src'), { recursive: true });
     writeFileSync(join(nested, 'package.json'), JSON.stringify({
-      name: '@jinn-network/nested-fixture',
+      name: '@jinn-network/nested-boundary-fixture',
       version: '0.0.0',
     }, null, 2));
     writeFileSync(join(nested, 'src', 'leak.ts'), 'const home = process.env.HOME;\n');
-    const discovered = discoverPluginPackages().find((pkg) => pkg.directory.endsWith('nested-pkg'));
+    const discovered = discoverPluginPackages({ root: tempRoot }).find((pkg) => pkg.directory === 'nested-pkg');
     assert.ok(discovered, 'nested fixture package must be discovered');
     const violations = scanProductionSources([discovered], scanOptions());
     assert.ok(violations.length >= 1);
-  } finally { rmSync(fixture, { recursive: true, force: true }); }
+  } finally { rmSync(tempRoot, { recursive: true, force: true }); }
 });
 
 test('the import scanner catches static, export, dynamic, require, and local-path escapes', () => {
@@ -490,9 +490,9 @@ test('R-C3-21 key-material canary catches parameters, properties, and constructi
 });
 
 test('R-C3-22 discovery fails on symlinks and rejects wildcard exports', () => {
-  const fixture = mkdtempSync(join(tree, '.plugin-tree-rc3-22-'));
+  const tempRoot = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-22-'));
   try {
-    const nested = join(fixture, 'symlink-pkg');
+    const nested = join(tempRoot, 'symlink-pkg');
     mkdirSync(join(nested, 'src'), { recursive: true });
     writeFileSync(join(nested, 'package.json'), JSON.stringify({
       name: '@jinn-network/symlink-fixture',
@@ -501,10 +501,10 @@ test('R-C3-22 discovery fails on symlinks and rejects wildcard exports', () => {
     writeFileSync(join(nested, 'src', 'index.ts'), 'export const x = 1;\n');
     symlinkSync(join(nested, 'src', 'index.ts'), join(nested, 'src', 'alias.ts'));
     assert.throws(
-      () => discoverPluginPackages(),
+      () => discoverPluginPackages({ root: tempRoot }),
       /symlink in source tree/,
     );
-  } finally { rmSync(fixture, { recursive: true, force: true }); }
+  } finally { rmSync(tempRoot, { recursive: true, force: true }); }
 });
 
 test('R-C3-24 derives explicit public code entrypoints and rejects wildcards', () => {
