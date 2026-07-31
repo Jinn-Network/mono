@@ -2655,3 +2655,329 @@ Before C2 or C4 build on this package, one independent high-effort review checks
 - **2026-07-31 — Task 12 testing-region `node:fs` vs `node:fs/promises` (design-neutral guard-pattern alignment).** Step 2's verbatim boundary block forbids `TRAJECTORY_FORBIDDEN_PACKAGES` (which includes `node:fs`) on testing files. The inventory helper treats `node:fs/promises` as matching the `node:fs` prefix, so the testing region that legitimately imports `node:fs/promises` (fixtures.ts, schema-parity.test.ts) would fail. **Approved disposition:** keep historical Step 2 text; apply the same Contribution/Retrieval pattern already in this file — filter `node:fs` out of the testing-region forbidden list and assert testing files never import bare `node:fs`. Production still forbids both `node:fs` and `node:fs/promises`. Landed in commit `aa12c877e`.
 - **2026-07-31 — Task 12 pack-smoke consumer surface (mechanical adaptation beyond the three named substitutions).** Step 4 says copy derivation's `pack-smoke.mjs` with exactly three substitutions. A byte-faithful copy still asserts derivation exports; a passing trajectory smoke must assert trajectory public surface (`sealTrajectory`, `describeTrajectoryRecordConformance`, etc.). **Approved disposition:** keep the three named substitutions as the minimum; also retarget smoke consumers to trajectory exports. Not a design change. Landed in commit `aa12c877e`.
 - **2026-07-31 — Task 12 host note (not a plan defect): npm 10.9.8 + vitest 4.1.8 peer install in pack-smoke.** On this operator host (Homebrew Node 22 / npm 10.9.8), installing `vitest@4.1.8` into the pack-smoke consumer fails unless `NPM_CONFIG_LEGACY_PEER_DEPS=true`. Derivation's script has the same shape and no baked-in flag. **Proposed disposition:** treat as host/CI toolchain note; do not encode into the package unless CI reproduces it. Mechanical verify on this host used the env var; CI uses `actions/setup-node` Node 22 independently.
+
+---
+
+## 2026-07-31 component-review correction (operator-ratified)
+
+This section supersedes conflicting clauses in the plan body and in spec §7.2. Historical
+rationale is preserved above; implementers follow this section.
+
+### 1. Supersessions
+
+| Prior claim | Disposition |
+| --- | --- |
+| Span IDs / derived identity as "anti-forgery" or "refuse fabricated spans" | **Removed.** IDs are deterministic reference/order identifiers; they catch naive reordering only. Security: digest + DSSE attestation + L4 replay. |
+| `source.execution` on Trajectory `SourceSchema` | **Removed.** Execution relationship → derivation attestation + C4 Execution forward link. |
+| Two-level verification (seal/signature vs replay) | **Superseded** by four layers L1–L4 (below). |
+| F7 — skip record-layer DSSE; discovery announcements only | **Superseded** by typed Trajectory derivation attestation (not Trajectory JSON DSSE; not a fourth evidence family). |
+| F9 / `TIMEBASE_EXTENSION_KEY` namespaced extension only | **Superseded** by required first-class `timebase` on Trajectory record and attestation predicate. Extension key deprecated. |
+| `TraceIdInput` without `formatIri` | **Superseded** — `formatIri` is load-bearing for `deriveTraceId`. |
+| `full` completeness allowing `skipped` | **Tightened** — `full` forbids `skipped` (absent or rejected). |
+| Multi-algorithm digest support | **Restricted** — sha256 only for v1. |
+
+### 2. Settled identifiers and types (C1 owns)
+
+```ts
+export const TRAJECTORY_PROTOCOL = "https://jinn.network/protocols/trajectory/1.0" as const;
+export const TRAJECTORY_RECORD_KIND = "https://jinn.network/records/trajectory/1.0" as const;
+export const TRAJECTORY_MEDIA_TYPE = "application/vnd.jinn.trajectory.v1+json" as const;
+export const TRAJECTORY_VOCABULARY_PROFILE = "https://jinn.network/profiles/trajectory-vocabulary/1.0" as const;
+
+export const TRAJECTORY_DERIVATION_PREDICATE_TYPE =
+  "https://jinn.network/attestations/trajectory-derivation/v1" as const;
+
+export const TIMEBASES = ["source-epoch-ns", "synthetic-ordinal"] as const;
+export type Timebase = (typeof TIMEBASES)[number];
+
+interface TrajectoryRecord {
+  protocol: typeof TRAJECTORY_PROTOCOL;
+  source: {
+    nativeTrace: DigestBearingDescriptor; // digest.sha256 required
+    formatIri: string;
+  };
+  derivation: {
+    decoderId: string;
+    decoderVersion: string;
+    vocabularyProfile: typeof TRAJECTORY_VOCABULARY_PROFILE;
+  };
+  timebase: Timebase; // REQUIRED
+  traceId: string;
+  spans: Span[];
+  completeness: Completeness;
+}
+
+interface TraceIdInput {
+  readonly sourceDigest: string;
+  readonly formatIri: string;
+  readonly decoderId: string;
+  readonly decoderVersion: string;
+  readonly vocabularyProfile: string;
+}
+```
+
+**Timebase semantics:** `source-epoch-ns` — `startTimeUnixNano` / `endTimeUnixNano` are Unix
+epoch nanoseconds from the source (e.g. C4 hook feed). `synthetic-ordinal` — trace-relative
+ordinal ticks, first tick `"0"`; no wall clock; used when source lacks timestamps (e.g. C2
+`claude-code-stream-json`).
+
+**Attestation surface:** see §Interface closure (2026-07-31) for full TypeScript definitions.
+
+**Ownership:** C1 — record schema, timebase, identity, forward-link IRI, statement/predicate,
+build/seal/verify (L1–L3), trust-core DSSE, conformance kit. C2 — pure handoff of
+`BuildTrajectoryDerivationStatementInput` (no seal, no signer). C4 — build+seal with injected
+signer, `derivedAt`, durable `derivation-links/` persistence.
+
+### Interface closure (2026-07-31)
+
+Supersedes incomplete attestation types in §2 above. C1 public surface — full definitions.
+
+```ts
+/** Repository digest form — capture/repository APIs and forward-link PropertyValue.value */
+export type RepositorySha256Digest = `sha256:${string}`; // /^sha256:[0-9a-f]{64}$/
+
+/** ResourceDescriptor / in-toto digest.sha256 form — bare 64 lowercase hex */
+export type BareSha256Hex = string; // /^[0-9a-f]{64}$/
+
+export function toBareSha256Hex(digest: RepositorySha256Digest): BareSha256Hex;
+export function toRepositorySha256Digest(hex: BareSha256Hex): RepositorySha256Digest;
+// Throws InvalidDocumentError (or dedicated typed error) on mismatch — never silently coerce.
+
+export const TRAJECTORY_SUBJECT_NAME = "trajectory.json" as const;
+export const TRAJECTORY_RECORD_IDENTIFIER_PROPERTY =
+  "https://jinn.network/schemes/trajectory-record-sha256" as const;
+// C1 owns this IRI. C4 imports from @jinn-network/evidence-trajectory.
+// Forward-link PropertyValue.value MUST be RepositorySha256Digest of the Trajectory artifact.
+
+export interface BuildTrajectoryDerivationStatementInput {
+  readonly producerId: string; // non-empty
+  readonly executionDigest: RepositorySha256Digest;
+  readonly trajectoryDigest: RepositorySha256Digest;
+  readonly nativeTraceDigest: RepositorySha256Digest;
+  readonly formatIri: string; // absolute IRI
+  readonly decoderId: string; // /^[a-z][a-z0-9-]*$/
+  readonly decoderVersion: string; // non-empty
+  readonly vocabularyProfile: typeof TRAJECTORY_VOCABULARY_PROFILE;
+  readonly timebase: Timebase;
+  /** Capture/finalization instant — calendar-strict RFC 3339. No ambient clock in C1. */
+  readonly derivedAt: string;
+}
+
+export interface TrajectoryDerivationPredicate {
+  readonly derivedAt: string; // calendar-strict RFC 3339 (isCalendarStrictRfc3339 at build/verify)
+  readonly producer: { readonly id: string };
+  /** Stable binding to the sole subject entry; MUST equal TRAJECTORY_SUBJECT_NAME */
+  readonly trajectorySubject: typeof TRAJECTORY_SUBJECT_NAME;
+  readonly execution: {
+    readonly name: "execution.json";
+    readonly digest: { readonly sha256: BareSha256Hex };
+    readonly mediaType?: string;
+  };
+  readonly nativeTrace: {
+    readonly name: "native-trace.bin";
+    readonly digest: { readonly sha256: BareSha256Hex };
+  };
+  readonly formatIri: string;
+  readonly decoderId: string;
+  readonly decoderVersion: string;
+  readonly vocabularyProfile: typeof TRAJECTORY_VOCABULARY_PROFILE;
+  readonly timebase: Timebase;
+  // NO trajectory digest field — subject is the sole source of truth for Trajectory identity
+}
+
+export interface TrajectoryDerivationStatement {
+  readonly _type: typeof IN_TOTO_STATEMENT_TYPE; // from @jinn-network/evidence-protocol
+  readonly subject: readonly [
+    {
+      readonly name: typeof TRAJECTORY_SUBJECT_NAME;
+      readonly digest: { readonly sha256: BareSha256Hex };
+      readonly mediaType: typeof TRAJECTORY_MEDIA_TYPE;
+    }
+  ]; // exactly one subject
+  readonly predicateType: typeof TRAJECTORY_DERIVATION_PREDICATE_TYPE;
+  readonly predicate: TrajectoryDerivationPredicate;
+}
+
+export interface SealTrajectoryDerivationAttestationInput {
+  readonly statement: TrajectoryDerivationStatement;
+  readonly signer: DsseSigner; // from @jinn-network/trust-core
+  readonly signal?: AbortSignal;
+}
+
+export interface SealedTrajectoryDerivationAttestation {
+  readonly envelopeBytes: Uint8Array;
+  readonly payloadBytes: Uint8Array;
+  readonly statement: TrajectoryDerivationStatement;
+  /** Digest of envelopeBytes as RepositorySha256Digest */
+  readonly digest: RepositorySha256Digest;
+}
+
+/**
+ * Injected L2 authority port — dependency inversion, NOT a substitute verification standard.
+ * C5/C7 composition wires this to trust-layer signature + key-binding verification.
+ * C1 tests use fakes. C1 MUST NOT claim L2 success unless verified: true.
+ */
+export interface TrajectoryDerivationAuthorityVerifierInput {
+  readonly envelopeBytes: Uint8Array;
+  readonly payloadType: typeof DSSE_PAYLOAD_TYPE;
+  readonly payloadBytes: Uint8Array;
+  readonly preAuthEncoding: Uint8Array;
+  readonly producerId: string;
+  readonly derivedAt: string;
+  readonly signal?: AbortSignal;
+}
+
+export type TrajectoryDerivationAuthorityVerifierResult =
+  | { readonly verified: true; readonly signerKeyIds: readonly string[]; readonly detail?: string }
+  | { readonly verified: false; readonly signerKeyIds?: readonly string[]; readonly reason: string; readonly detail?: string };
+
+export type TrajectoryDerivationAuthorityVerifier = (
+  input: TrajectoryDerivationAuthorityVerifierInput,
+) => Promise<TrajectoryDerivationAuthorityVerifierResult>;
+
+export interface VerifyTrajectoryDerivationAttestationInput {
+  readonly envelopeBytes: Uint8Array;
+  readonly executionRecordBytes: Uint8Array;
+  readonly trajectoryRecordBytes: Uint8Array;
+  readonly verifyAuthority: TrajectoryDerivationAuthorityVerifier;
+  readonly signal?: AbortSignal;
+}
+
+export type TrajectoryDerivationLayerOutcome =
+  | { readonly status: "pass" }
+  | { readonly status: "fail"; readonly code: string; readonly message: string }
+  | { readonly status: "not-evaluated"; readonly reason: string };
+
+export interface TrajectoryDerivationVerificationLayers {
+  readonly l1: TrajectoryDerivationLayerOutcome;
+  readonly l2: TrajectoryDerivationLayerOutcome;
+  readonly l3: TrajectoryDerivationLayerOutcome;
+  readonly l4: TrajectoryDerivationLayerOutcome;
+}
+
+export type TrajectoryDerivationVerificationResult =
+  | {
+      readonly ok: true;
+      readonly statement: TrajectoryDerivationStatement;
+      readonly envelopeDigest: RepositorySha256Digest;
+      readonly layers: {
+        readonly l1: { readonly status: "pass" };
+        readonly l2: { readonly status: "pass" };
+        readonly l3: { readonly status: "pass" };
+        readonly l4: { readonly status: "not-evaluated"; readonly reason: "replay-required" };
+      };
+      readonly signerKeyIds: readonly string[];
+    }
+  | {
+      readonly ok: false;
+      readonly failedLayer: 1 | 2 | 3;
+      readonly statement?: TrajectoryDerivationStatement;
+      readonly layers: TrajectoryDerivationVerificationLayers;
+      readonly reason: string;
+      readonly code: string;
+    };
+```
+
+**Build/seal behavior:**
+- `buildTrajectoryDerivationStatement` — validates inputs (`derivedAt` via
+  `isCalendarStrictRfc3339` from trust-core); converts repository digests → bare hex in
+  ResourceDescriptors; returns statement with exactly one subject.
+- `sealTrajectoryDerivationAttestation` — canonicalize statement → `payloadBytes`;
+  `dssePreAuthEncoding(DSSE_PAYLOAD_TYPE, payloadBytes)` → injected `DsseSigner` →
+  `sealDsseEnvelope`; envelope digest = sha256 of envelope bytes as `RepositorySha256Digest`.
+- **Throw** on invalid caller input to build/seal; **return** `{ ok: false }` for verification
+  failures of supplied bytes. Malformed envelope → L1 fail; authority callback **not called**.
+
+**L3 checks (`verifyTrajectoryDerivationAttestation`):**
+1. `sha256(executionRecordBytes)` as repository digest equals attested execution digest
+2. `sha256(trajectoryRecordBytes)` equals sole subject digest
+3. `parseTrajectory(trajectoryRecordBytes)` matches statement: nativeTrace, formatIri, decoder,
+   vocabulary, timebase
+4. Execution Evidence: native-trace File entity whose bare hex equals attested native trace has
+   **exactly one** `identifier` with `propertyID === TRAJECTORY_RECORD_IDENTIFIER_PROPERTY` and
+   `value === trajectoryDigest` (repository form)
+5. Named L3 failure codes: `l3-execution-digest-mismatch`, `l3-trajectory-digest-mismatch`,
+   `l3-source-mismatch`, `l3-forward-link-missing`, `l3-forward-link-duplicate`,
+   `l3-forward-link-mismatch`
+
+**DSSE / guard obligations:**
+- `JINN_DEPENDENCY_GRAPH['trajectory'].dependencies` =
+  `['@jinn-network/evidence-protocol', '@jinn-network/trust-core']`
+- `package.json` resolutions: `portal:../protocol`; trust-core `portal:../../trust/core`
+- Inventory `expectedPortal` amended for `@jinn-network/trust-core` → `portal:../../trust/core`
+- `TRAJECTORY_ALLOWED_DEPENDENCIES` includes `@jinn-network/trust-core`
+- `TRAJECTORY_FORBIDDEN_PACKAGES` includes `@jinn-network/attestation-issuer`
+- CI/packed-types: download/build trust-core dist for portal smoke
+
+**F8 disposition:** Whole-artifact sealed digest supersedes per-span hash chain for **byte
+integrity**. Ordinal span/trace IDs remain **ordering/reference only** (not anti-forgery). DSSE
+derivation attestation provides **attribution**. L4 replay provides **factual verification**.
+
+### 3. Implementation checklist
+
+- [ ] Remove `source.execution` from `SourceSchema`; update fixtures/generator/tests.
+- [ ] Add required `timebase: Timebase` to `TrajectoryRecordSchema`; export `TIMEBASES`, `Timebase`.
+- [ ] Add `formatIri` to `TraceIdInput` and `deriveTraceId` framing inputs.
+- [ ] Completeness: `full` rejects `skipped`; `partial` requires `skipped >= 1`; `empty` requires `spans.length === 0`.
+- [ ] Closed vocabulary guard on span attributes; reject `message.content`, `tool.args`, `tool.result`, `gen_ai.system`, arbitrary keys.
+- [ ] `serializeCanonicalJson` fail-closed: throw typed errors (`UnsupportedCanonicalValueError` or extend existing) for top-level undefined, bigint, function, symbol, Date, Map, Set, class instances, non-plain values; extension slots cannot silently coerce to `{}`.
+- [ ] Digest claims sha256-only for v1.
+- [ ] Export `TRAJECTORY_SUBJECT_NAME`, `TRAJECTORY_RECORD_IDENTIFIER_PROPERTY`,
+  `RepositorySha256Digest`, `BareSha256Hex`, `toBareSha256Hex`, `toRepositorySha256Digest`.
+- [ ] Add `@jinn-network/trust-core` dependency + guard allowlist; forbid attestation-issuer.
+- [ ] Amend inventory `expectedPortal` for trust-core `portal:../../trust/core`.
+- [ ] Full attestation API per §Interface closure (2026-07-31); `derivedAt` required.
+- [ ] `verifyTrajectoryDerivationAttestation` with `verifyAuthority` port; L3 forward-link checks.
+- [ ] Kit: malformed envelope → L1 fail, authority not called; L2/L3/L4 cases per acceptance table.
+- [ ] `VOCABULARY_UPSTREAM.commit` via `git ls-remote <repo> refs/heads/main` at implementation; reject all-zero; evidence in PR — **do not guess SHA in design docs**.
+- [ ] Fixture path containment: resolved URL must stay under fixture root (resist percent-encoded traversal).
+- [ ] Pack smoke: invoke packed conformance kit with all kit-loaded fixtures; `TRAJECTORY_RESULT` CI variable name; no legacy-peer-deps behavior encoding.
+- [ ] Namespaced-key discipline at nested extension points; namespaced extension seal→parse→compare test.
+- [ ] Remove anti-forgery language from Task 5 / README / kit comments.
+
+### 4. Red→green acceptance tests
+
+| Test | Expectation |
+| --- | --- |
+| `serializeCanonicalJson` rejects undefined (top-level member skip ok; array element not), bigint, function, symbol, Date, Map, Set, class instance | Each throws typed error |
+| `TrajectoryRecordSchema` rejects `source.execution` if present | invalid |
+| `TrajectoryRecordSchema` requires `timebase` | invalid without |
+| `deriveTraceId` changes when `formatIri` changes | different traceId |
+| `full` + `skipped: 1` | rejected |
+| `partial` without `skipped` | rejected |
+| `empty` + spans | rejected |
+| Span with `message.content` attribute | rejected |
+| Malformed envelope → verify | L1 fail; `verifyAuthority` **not called** |
+| Authority returns `verified: false` | L2 fail |
+| Bad Execution digest vs bytes | L3 fail (`l3-execution-digest-mismatch`) |
+| Missing / duplicate / wrong forward link | L3 fail (named codes) |
+| Wrong source/format/decoder/timebase vs Trajectory bytes | L3 fail (`l3-source-mismatch`) |
+| Signed-but-unfaithful spans | L1–L3 pass; L4 `not-evaluated` |
+| Non-calendar-strict `derivedAt` in build input | throws typed error |
+| Namespaced extension round-trip | seal→parse→compare equal |
+| `trajectoryFixtureUrl("..%2F..")` or traversal | throws |
+| Pack smoke runs `describeTrajectoryRecordConformance` from packed tarball | PASS |
+
+### 5. Findings disposition table
+
+| ID | Finding | Kind | Disposition |
+| --- | --- | --- | --- |
+| Critical | Anti-forgery overclaim | Corrected claim | Remove language; kit documents honest outcomes; DSSE attributes; replay refutes at L4 |
+| Critical | Closed attribute vocabulary | Implementation | Guard admits only `GEN_AI_ATTRIBUTES` + `JINN_ATTRIBUTES`; adversarial reject list in schema/kit |
+| Critical | Remove `source.execution` | Implementation | Schema change; relationship via attestation + C4 forward link |
+| Critical | Required declared timebase | Implementation | First-class `timebase` before C2/C4 depend; C4 hook uses `source-epoch-ns`, C2 stream uses `synthetic-ordinal` |
+| Critical | F1 `VOCABULARY_UPSTREAM.commit` | Implementation | `git ls-remote` at implementation; reject `000…0`; PR evidence; no guessed SHA in docs |
+| Important | Four-layer verification | Implementation + claim | Kit distinguishes L1–L4; verify API L2+L3 only |
+| Important | Canonical serializer fail-closed | Implementation | Typed errors per rejected type; red→green tests |
+| Important | Adversarial/kit coverage | Implementation | Review attacks; extension round-trip test |
+| Important | Trace identity includes `formatIri` | Implementation | `TraceIdInput` + docs state identity fields |
+| Minor | Completeness refinements | Implementation | full/partial/empty rules above |
+| Minor | Fixture path containment | Implementation | `trajectoryFixtureUrl` rejects traversal |
+| Minor | Pack smoke invokes kit + fixtures | Implementation | No copy/paste derivation names; tautological negatives removed |
+| Minor | Namespaced-key discipline | Implementation | Nested extension points |
+| Minor | sha256-only digests | Implementation + claim | v1 restriction documented |
+| Minor | CI variable `TRAJECTORY_RESULT` | Implementation | Rename from prior name if present |
+| Minor | Host npm `edgesOut` crash | Note only | Infrastructure/toolchain; do not encode legacy-peer-deps in package |
+| F7 | Record-level DSSE skipped | Superseded | Trajectory derivation attestation (this correction) |
+| F8 | Hash chain superseded | Corrected claim | Whole-artifact digest for byte integrity; IDs ordering-only; DSSE attribution; L4 factual verification |
+| F9 | Timebase extension | Superseded | First-class `timebase` field |
