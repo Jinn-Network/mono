@@ -58,3 +58,22 @@ export {
   type EnvironmentVerificationStatement,
 } from "./statement.js";
 export { buildEnvironmentVerificationSubjects } from "./subject.js";
+export {
+  DEFAULT_VERIFICATION_CONTROLS,
+  verifyEnvironment,
+  type SealedAttestation,
+  type VerificationDeps,
+  type VerifyEnvironmentOptions,
+} from "./verify.js";
+export type {
+  ArtifactPutReceipt,
+  ArtifactStore,
+  Clock,
+  CommandSpec,
+  ContainerRunRequest,
+  ContainerRunResult,
+  ContainerRuntime,
+  EnvironmentParserIdentity,
+  ImagePullRequest,
+  ImagePullResult,
+} from "./ports.js";
