@@ -3,6 +3,7 @@
 import type { EnvironmentRecord } from "@jinn-network/environment-record";
 import type { Candidate } from "./candidate.js";
 import { documentDigest } from "./digest.js";
+import type { UpstreamRebenchRow } from "./strategies/import.js";
 
 const IMAGE_MANIFEST = `sha256:${"1".repeat(64)}`;
 const PARSER_DIGEST = `sha256:${"2".repeat(64)}`;
@@ -79,6 +80,26 @@ export function buildFixtureCandidate(overrides: Partial<Candidate> = {}): Candi
       },
     },
     rights: { sourceLicense: "Apache-2.0" },
+    ...overrides,
+  };
+}
+
+/** One upstream row against the fixture environment (`acme/widget@3333…`). */
+export function buildFixtureRow(
+  overrides: Partial<UpstreamRebenchRow> = {},
+): UpstreamRebenchRow {
+  return {
+    instance_id: "acme__widget-1234",
+    repo: "acme/widget",
+    base_commit: "3".repeat(40),
+    problem_statement: "Widget.resize() raises on zero width.\n",
+    language: "python",
+    patch: "--- a/widget.py\n+++ b/widget.py\n@@\n-raise\n+return 0\n",
+    test_patch: "--- a/tests/test_widget.py\n+++ b/tests/test_widget.py\n@@\n+def test_zero(): ...\n",
+    FAIL_TO_PASS: ["tests/test_widget.py::test_zero"],
+    PASS_TO_PASS: ["tests/test_widget.py::test_basic"],
+    license: "Apache-2.0",
+    timeout: 900,
     ...overrides,
   };
 }

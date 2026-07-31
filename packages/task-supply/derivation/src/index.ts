@@ -43,3 +43,14 @@ export type {
 } from "./strategy.js";
 export { buildCandidateEvaluationSpec, buildSealedTask } from "./seal-pair.js";
 export type { SealedEvaluationSpec, SealedTask } from "./seal-pair.js";
+export {
+  IMPORT_STRATEGY_ID,
+  PERMISSIVE_LICENSE_ALLOWLIST,
+  assessRow,
+  importStrategy,
+} from "./strategies/import.js";
+export type {
+  ImportStrategyInputs,
+  RowRejection,
+  UpstreamRebenchRow,
+} from "./strategies/import.js";
