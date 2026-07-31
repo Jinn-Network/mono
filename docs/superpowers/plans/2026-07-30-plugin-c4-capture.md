@@ -487,7 +487,7 @@ git commit -m "chore(plugin-runtime): declare the capture stack dependencies and
   ```
   Plus three new `RuntimeConfig` fields: `captureDirectory`, `captureRetentionDays`, `captureArchiveBusyTimeoutMs`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plugin/runtime/src/capture/paths.test.ts`:
 
@@ -606,7 +606,7 @@ describe("capture paths", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/paths.test.ts
@@ -614,7 +614,7 @@ cd plugin/runtime && yarn test src/capture/paths.test.ts
 
 Expected: FAIL — `Failed to resolve import "./paths.js"`.
 
-- [ ] **Step 2b: Capture FS/platform custody carve-out (finding F-C4-P3)**
+- [x] **Step 2b: Capture FS/platform custody carve-out (finding F-C4-P3)**
 
 C3 forbids `node:fs*` and ambient `process` outside `src/bin.ts`. Capture staging is local
 filesystem work by design (owner-only mkdir/chmod, session feed I/O). Before landing
@@ -643,7 +643,7 @@ In `.github/scripts/plugin-tree-ast-custody.mjs` / `scanProductionSources`:
 Do **not** broaden the carve-out to all of `plugin/runtime/src/`. Corpus (C5) gets its own
 disposition if needed.
 
-- [ ] **Step 3: Add the config fields**
+- [x] **Step 3: Add the config fields**
 
 In `plugin/runtime/src/config.ts`, extend the `RuntimeConfig` interface (do **not** introduce a second config type — C3's extension rule):
 
@@ -707,7 +707,7 @@ Then, inside the `Object.freeze({ … })` return, beside `archiveDirectory`:
 
 `captureDirectory` is derived, not independently overridable — the same treatment `archiveDirectory` gets. Precedence stays defaults < `file` < `env`, and `present()` already makes empty or whitespace env values non-overriding.
 
-- [ ] **Step 4: Write the implementation**
+- [x] **Step 4: Write the implementation**
 
 `plugin/runtime/src/capture/paths.ts`:
 
@@ -789,7 +789,7 @@ export async function ensureOwnerOnlyFile(path: string): Promise<void> {
 }
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/paths.test.ts && yarn typecheck
@@ -799,7 +799,7 @@ node --test .github/scripts/plugin-tree-source-boundaries.test.mjs
 Expected: PASS (7 tests; the two permission tests skip on Windows); custody carve-out green;
 non-capture FS ban still red in its existing probes.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add plugin/runtime/src \
