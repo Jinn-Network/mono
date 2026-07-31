@@ -2856,7 +2856,7 @@ git commit -m "feat(plugin-runtime): per-operation archive access with bounded b
 
 This is C6's door to a historical capture. `EVIDENCE_RECORD_FAMILIES` is closed (`packages/evidence/repository/src/types.ts:1-5`), so the trajectory record is a repository **artifact** and the catalog never projects it. The link lives inside the sealed execution record as an `identifier` on the native-trace entity — which the recorder emits from `ArtifactCapture.identifiers` (`packages/evidence/execution-recorder/src/graph.ts:402-404`). The full path for a historical capture is: catalog `findExecutions` → `repository.getRecord` → `trajectoryReferenceFromRecordBytes` → `loadTrajectoryRecord`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plugin/runtime/src/capture/link.test.ts`:
 
@@ -2956,7 +2956,7 @@ describe("loadTrajectoryRecord", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/link.test.ts
@@ -2964,7 +2964,7 @@ cd plugin/runtime && yarn test src/capture/link.test.ts
 
 Expected: FAIL — `Failed to resolve import "./link.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `plugin/runtime/src/capture/link.ts`:
 
@@ -3048,7 +3048,7 @@ export async function loadTrajectoryRecord(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/link.test.ts && yarn typecheck
@@ -3056,7 +3056,7 @@ cd plugin/runtime && yarn test src/capture/link.test.ts && yarn typecheck
 
 Expected: PASS (7 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src
