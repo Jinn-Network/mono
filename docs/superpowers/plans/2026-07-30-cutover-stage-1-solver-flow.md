@@ -4556,17 +4556,41 @@ in that file follows. The real fix is to make those tests pass an explicit path.
 `client/test/scripts/dockerfile-workspace-portals.test.ts` derives its expectations from
 client's portal entries, so Task 0's dependency wiring put 24 new packages under it. Seven of
 its eight assertions now pass against the updated `client/Dockerfile`. The eighth cannot be
-satisfied from inside `client/`: `packages/discovery/serve/package.json` declares
-`files: ["dist/", "fixtures/", "README.md"]`, but that package has **never** had a `fixtures/`
-directory (stale since its scaffold commit `1fa25c9a8`; nothing in its build generates one).
-The guard requires a `COPY` for every non-`dist` publish path, while a sibling assertion in the
-same file requires every `COPY` source to exist — the pair is unsatisfiable until the stale
-entry is removed. `record-discovery-serve` cannot be demoted to a devDependency instead,
-because Task 9 imports `writeArchivePages` from it at runtime.
+satisfied from inside `client/`: **`packages/discovery/serve` and `packages/discovery/client`**
+both declare `files: ["dist/", "fixtures/", "README.md"]`, but neither has **ever** had a
+`fixtures/` directory (stale since the discovery scaffold commits; nothing in either build
+generates one — the entry was evidently copied from `record-discovery-protocol`, which does
+have one). The guard requires a `COPY` for every non-`dist` publish path, while a sibling
+assertion in the same file requires every `COPY` source to exist — the pair is unsatisfiable
+until the stale entries are removed. Neither package can be demoted to a devDependency
+instead: Task 9 imports `writeArchivePages` from `record-discovery-serve` at runtime, and
+`record-discovery-client` is a runtime dependency of `transport-http`.
 
-**Fix (one line, outside this plan's write scope):** delete `"fixtures/",` from
-`packages/discovery/serve/package.json`. Benign for publishing — npm ignores missing `files`
-entries — so it only ever broke this inference.
+**Fix (one line each, outside this plan's write scope):** delete `"fixtures/",` from
+`packages/discovery/serve/package.json` and `packages/discovery/client/package.json`. Benign
+for publishing — npm ignores missing `files` entries — so it only ever broke this inference.
+
+### E11 — the bundled-workspace guard encoded two wrong assumptions (fixed in scope)
+
+Task 0's wiring also put the new packages under
+`client/test/scripts/bundled-workspaces.test.ts`, which failed for two independent reasons,
+both fixed here because both are client-side:
+
+1. It resolved a bundled workspace's path as `packages/<last npm-name segment>`. That holds
+   only for the four flat legacy packages; the stack packages are nested
+   (`@jinn-network/evidence-local-runtime` → `packages/evidence/local-runtime`). Now resolved
+   from the package's own `portal:` resolution, which is the ground truth, with an assertion
+   that the result stays inside the repository.
+2. Its second assertion — every runtime dependency of a bundled package must itself be a
+   client dependency — is a **real correctness rule** (a bundled tarball whose dependency is
+   absent cannot resolve at runtime) and Task 0's initial 15-package set violated it. The
+   bundled set is now closed under runtime dependencies: **26 packages**, with the
+   third-party leaves `safe-regex` and `@noble/curves` promoted into `dependencies`.
+
+That closure surfaced one more out-of-scope defect: `packages/marketplace/venue-base`
+declares **`@types/better-sqlite3` in `dependencies`**, not `devDependencies`. A types-only
+package has no business in a runtime dependency set; it forced `@types/better-sqlite3` into
+client's runtime `dependencies` to satisfy the rule. Worth fixing in venue-base.
 
 ### Verification state at Task 3
 

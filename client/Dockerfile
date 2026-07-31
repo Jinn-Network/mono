@@ -120,6 +120,23 @@ COPY packages/marketplace/venue-base/src/ ./packages/marketplace/venue-base/src/
 COPY packages/discovery/client/src/ ./packages/discovery/client/src/
 COPY packages/discovery/facts/task-execution/src/ ./packages/discovery/facts/task-execution/src/
 COPY packages/discovery/transport-http/src/ ./packages/discovery/transport-http/src/
+COPY packages/evidence/catalog-sqlite/README.md ./packages/evidence/catalog-sqlite/README.md
+COPY packages/evidence/discovery/README.md ./packages/evidence/discovery/README.md
+COPY packages/evidence/discovery/docs/ ./packages/evidence/discovery/docs/
+COPY packages/evidence/discovery/specifications/ ./packages/evidence/discovery/specifications/
+COPY packages/evidence/protocol/profiles/ ./packages/evidence/protocol/profiles/
+COPY packages/evidence/protocol/fixtures/ ./packages/evidence/protocol/fixtures/
+COPY packages/evidence/protocol/README.md ./packages/evidence/protocol/README.md
+COPY packages/evidence/repository/README.md ./packages/evidence/repository/README.md
+COPY packages/evidence/repository/specification.md ./packages/evidence/repository/specification.md
+COPY packages/evidence/execution-recorder/fixtures/ ./packages/evidence/execution-recorder/fixtures/
+COPY packages/evidence/execution-recorder/README.md ./packages/evidence/execution-recorder/README.md
+COPY packages/discovery/client/README.md ./packages/discovery/client/README.md
+COPY packages/task-execution/backend/README.md ./packages/task-execution/backend/README.md
+COPY packages/task-execution/backend-local/supervisor/native/jinn-attempt-shim.c ./packages/task-execution/backend-local/supervisor/native/jinn-attempt-shim.c
+COPY packages/task-execution/backend-local/supervisor/README.md ./packages/task-execution/backend-local/supervisor/README.md
+COPY packages/trust/core/fixtures/ ./packages/trust/core/fixtures/
+COPY packages/trust/core/README.md ./packages/trust/core/README.md
 
 # Publish-file payloads the bundled stack packages declare in their `files` arrays
 # (profiles, fixtures, schemas, READMEs). They must exist before
