@@ -226,7 +226,7 @@ That second line is the load-bearing one: the fork's **production** code imports
 - Consumes: `BASELINE_TREE` (Task 1).
 - Produces: the canonical frozen home `plugin/frozen/`, whose git tree object equals `BASELINE_TREE`; the runtime pin at `plugin/frozen/layer-runtime.json`; and the compatibility shim `apps/jinn-agent/plugins/jinn → ../../../plugin/frozen`, which every Task 3–8 re-point must be provably independent of (Task 10).
 
-- [ ] **Step 1: Move the directory**
+- [x] **Step 1: Move the directory**
 
 Run:
 
@@ -238,7 +238,7 @@ git status --porcelain | head -30
 
 Expected: 21 `R  apps/jinn-agent/plugins/jinn/... -> plugin/frozen/...` lines (git may render them as paired `D`/`A` until commit; either is fine — Step 3 is the real check).
 
-- [ ] **Step 2: Observe the fork break — this is the red phase**
+- [x] **Step 2: Observe the fork break — this is the red phase**
 
 Run:
 
@@ -249,7 +249,7 @@ test -f apps/jinn-agent/plugins/jinn/pyproject.toml && echo PRESENT || echo MISS
 
 Expected: `None`, then `MISSING`. The fork's production import (`hermes_cli/banner.py:907`), its bundled-plugin loader (`hermes_cli/plugins.py:65`, `get_bundled_plugins_dir()` = `<repo>/plugins`), and 34 in-fork test files are all broken at this instant. That is the fact the shim exists to answer.
 
-- [ ] **Step 3: Verify the moved content is byte-identical (pre-commit)**
+- [x] **Step 3: Verify the moved content is byte-identical (pre-commit)**
 
 Compare the base tree against the staged index, mode by mode and blob by blob. (The authoritative single-hash check — tree-object equality — needs a commit and lands in Step 7.)
 
@@ -264,7 +264,7 @@ diff \
 
 Expected: no diff output, then `CONTENT IDENTICAL`. Modes, blob ids, and relative paths all match.
 
-- [ ] **Step 4: Add the compatibility shim**
+- [x] **Step 4: Add the compatibility shim**
 
 Run:
 
@@ -279,7 +279,7 @@ Expected: a line beginning `120000` for `apps/jinn-agent/plugins/jinn`, and `../
 
 (Directory symlinks are an established pattern in this repository — 179 are already tracked, e.g. `.codex/skills/eng-day → ../../.claude/skills/eng-day`. The fork's bundled-plugin scan at `hermes_cli/plugins.py:1484-1485` uses `iterdir()` + `is_dir()`, which follow symlinks and reject nothing.)
 
-- [ ] **Step 5: Verify the fork is green again**
+- [x] **Step 5: Verify the fork is green again**
 
 Run:
 
@@ -293,7 +293,7 @@ Expected: a path ending `apps/jinn-agent/plugins/jinn/__init__.py`, then `PRESEN
 
 (`find_spec` locates without executing, so this needs none of the fork's Python dependencies. It exercises exactly the machinery `hermes_cli/banner.py:907` and `tests/plugins/test_jinn_*.py` rely on.)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A plugin/frozen apps/jinn-agent/plugins
@@ -304,7 +304,7 @@ keeps loading the adapter through a symlink at the old path until #2294 removes
 apps/jinn-agent."
 ```
 
-- [ ] **Step 7: Prove tree identity against the base**
+- [x] **Step 7: Prove tree identity against the base**
 
 Run:
 
