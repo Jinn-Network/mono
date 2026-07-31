@@ -1,4 +1,15 @@
 import { z } from "zod";
+import {
+  CurationInputError,
+  CurationInputRefSchema,
+  FreeTextSchema,
+  InstantSchema,
+  Sha256DigestSchema,
+  issueText,
+  refDedupeKey,
+} from "./schema.js";
+
+export { CurationInputError } from "./schema.js";
 
 /**
  * An RFC 3339 instant. In practice this is the Announcement Entry timestamp
@@ -20,14 +31,6 @@ export type Sha256Digest = `sha256:${string}`;
  */
 export type ObservedVerdict = "pass" | "fail" | "inconclusive";
 
-/** Thrown on any malformed input. This package fails closed and never guesses. */
-export class CurationInputError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = "CurationInputError";
-  }
-}
-
 /**
  * Provenance of one announced verdict, plus the attempt it judged.
  *
@@ -40,6 +43,10 @@ export class CurationInputError extends Error {
  * (`packages/discovery/facts/task-execution/profiles/delivery.1.0.json`). It rides on the
  * ref rather than beside it so that a row's `attempts` count stays re-derivable from
  * `inputRefs` alone -- which is what makes the projection incrementally foldable.
+ *
+ * The three free-text fields must carry no control character: the dedupe key is a
+ * separator-joined string, and a component carrying the separator would let one source forge
+ * a key collision with another source's ref (see `inputRefKey`).
  */
 export interface CurationInputRef {
   readonly source: { readonly agent: string; readonly name: string };
@@ -74,28 +81,12 @@ export interface CurationObservation {
   readonly ref: CurationInputRef;
 }
 
-const Sha256DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
-
-/** RFC 3339 date-time with a mandatory offset (`Z` or +/-HH:MM). */
-const InstantSchema = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/)
-  .refine((value) => !Number.isNaN(Date.parse(value)), "observedAt is not a real instant");
-
-const CurationInputRefSchema = z.object({
-  source: z.object({ agent: z.string().min(1), name: z.string().min(1) }),
-  entry: Sha256DigestSchema,
-  announcementId: z.string().min(1),
-  record: Sha256DigestSchema,
-  attemptUri: z.string().min(1),
-});
-
 const CurationObservationSchema = z.object({
   taskDigest: Sha256DigestSchema,
   verdict: z.enum(["pass", "fail", "inconclusive"]),
   observedAt: InstantSchema,
-  attribution: z.string().min(1),
-  benchmarkRun: z.string().min(1).optional(),
+  attribution: FreeTextSchema,
+  benchmarkRun: FreeTextSchema.optional(),
   ref: CurationInputRefSchema,
 });
 
@@ -103,22 +94,24 @@ export function parseCurationObservation(value: unknown): CurationObservation {
   const result = CurationObservationSchema.safeParse(value);
   if (!result.success) {
     throw new CurationInputError(
-      `malformed curation observation: ${result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
+      `malformed curation observation: ${issueText(result.error)}`,
       { cause: result.error },
     );
   }
   return result.data as CurationObservation;
 }
 
-/** Unit separator, written as an escape so no raw control byte appears in source. */
-const KEY_SEPARATOR = "\u001f";
-
 /**
  * The at-least-once dedupe key of the discovery subscribe plane -- the same
  * `(source agent, source name, entry digest, announcementId)` tuple as
  * `announcementDedupeKey` in `packages/discovery/protocol/src/cloudevents.ts`. Folding on
  * this key is what makes redelivery a no-op.
+ *
+ * The tuple is joined on the unit separator, so it is only unambiguous while no component
+ * contains one. A ref that breaks that rule is refused rather than keyed: an unescaped join
+ * over unvalidated text is forgeable, and a forged key would let one source's ref displace
+ * another's and silently drop an honest verdict from the published rate.
  */
 export function inputRefKey(ref: CurationInputRef): string {
-  return [ref.source.agent, ref.source.name, ref.entry, ref.announcementId].join(KEY_SEPARATOR);
+  return refDedupeKey(ref);
 }

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { foldCuration, projectCuration } from "./projection.js";
+import { CurationInputError } from "./observation.js";
 import type { CurationObservation } from "./observation.js";
 
 const observations = JSON.parse(
@@ -50,5 +51,32 @@ describe("foldCuration", () => {
     const folded = foldCuration(projectCuration(organic), pinned);
     expect(folded.rows.map((r) => r.bucket)).toEqual(["benchmark", "organic"]);
     expect(folded).toEqual(projectCuration(observations));
+  });
+
+  // A previous projection is an input, not a trusted intermediate. Folding an invalid row
+  // forward would publish a rate with no attribution-preserving inputs behind it.
+  it("rejects a previous projection whose rows violate the row invariant", () => {
+    const bareRate = {
+      rows: [
+        {
+          taskDigest: "not-a-digest",
+          bucket: "organic",
+          attempts: 0,
+          verdicts: 1_000_000,
+          passRate: { num: 999_999, den: 1_000_000 },
+          window: { first: "2026-07-31T00:00:00Z", last: "2026-07-31T01:00:00Z" },
+          inputRefs: [],
+        },
+      ],
+    };
+    expect(() => foldCuration(bareRate as never, [])).toThrow(CurationInputError);
+  });
+
+  it("rejects a previous projection whose counters contradict its inputRefs", () => {
+    const previous = projectCuration(observations);
+    const tampered = {
+      rows: previous.rows.map((row) => ({ ...row, inputRefs: row.inputRefs.slice(1) })),
+    };
+    expect(() => foldCuration(tampered as never, [])).toThrow(CurationInputError);
   });
 });

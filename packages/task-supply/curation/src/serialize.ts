@@ -1,4 +1,4 @@
-import { CurationInputError } from "./observation.js";
+import { CurationInputError, parseCurationRows } from "./schema.js";
 import type { CurationProjection, CurationRow } from "./projection.js";
 
 /**
@@ -37,32 +37,12 @@ export function serializeCurationProjection(projection: CurationProjection): str
   });
 }
 
-function assertRow(value: unknown, index: number): CurationRow {
-  const row = value as CurationRow | undefined;
-  if (row === undefined || typeof row !== "object") {
-    throw new CurationInputError(`row ${index} is not an object`);
-  }
-  const { attempts, verdicts, passRate, inputRefs } = row;
-  if (!Array.isArray(inputRefs)) throw new CurationInputError(`row ${index} has no inputRefs`);
-  if (inputRefs.length !== verdicts) {
-    throw new CurationInputError(
-      `row ${index}: verdicts (${verdicts}) does not match inputRefs (${inputRefs.length})`,
-    );
-  }
-  if (new Set(inputRefs.map((ref) => ref.attemptUri)).size !== attempts) {
-    throw new CurationInputError(`row ${index}: attempts does not match distinct inputRefs attempts`);
-  }
-  if (passRate.den > verdicts || passRate.num > passRate.den) {
-    throw new CurationInputError(`row ${index}: passRate is not a sub-count of verdicts`);
-  }
-  for (const n of [attempts, verdicts, passRate.num, passRate.den]) {
-    if (!Number.isInteger(n) || n < 0) {
-      throw new CurationInputError(`row ${index}: counters must be non-negative integers`);
-    }
-  }
-  return row;
-}
-
+/**
+ * Reads stored state back. The document is untrusted input and is validated exactly as
+ * strictly as an observation: digest form, bucket membership, instants, ref shape, dedupe-key
+ * uniqueness, and every counter against `inputRefs`. Rows are RECONSTRUCTED, never passed
+ * through, so nothing a foreign writer added rides along into the next fold.
+ */
 export function parseCurationProjection(text: string): CurationProjection {
   let parsed: unknown;
   try {
@@ -79,5 +59,5 @@ export function parseCurationProjection(text: string): CurationProjection {
   if (!Array.isArray(document.rows)) {
     throw new CurationInputError("stored curation projection has no rows array");
   }
-  return { rows: document.rows.map((row, index) => assertRow(row, index)) };
+  return { rows: parseCurationRows(document.rows) };
 }

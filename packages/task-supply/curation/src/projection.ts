@@ -1,12 +1,17 @@
 import {
-  CurationInputError,
-  inputRefKey,
   parseCurationObservation,
   type CurationInputRef,
   type CurationObservation,
   type Instant,
   type Sha256Digest,
 } from "./observation.js";
+import {
+  CurationInputError,
+  curationRowKey,
+  instantValue,
+  parseCurationRows,
+  refDedupeKey,
+} from "./schema.js";
 
 /**
  * Which population a row aggregates. Benchmark-pinned attempts are hammered at one task by a
@@ -63,23 +68,20 @@ interface RowAccumulator {
   readonly refs: Map<string, CurationInputRef>;
 }
 
-const ROW_KEY_SEPARATOR = "\u001f";
-
-function rowKey(taskDigest: string, bucket: CurationBucket): string {
-  return `${taskDigest}${ROW_KEY_SEPARATOR}${bucket}`;
+/**
+ * What has already been counted for one announcement dedupe key. `observation` is present only
+ * for announcements seen in THIS fold: a previous projection retains each ref but not the
+ * verdict behind it, so a redelivery against stored state can be checked for ref agreement but
+ * not for verdict agreement. That is the closure the fold buys, stated rather than hidden.
+ */
+interface SeenAnnouncement {
+  readonly rowKey: string;
+  readonly ref: CurationInputRef;
+  readonly observation?: CurationObservation;
 }
 
 function bucketOf(observation: CurationObservation): CurationBucket {
   return observation.benchmarkRun === undefined ? "organic" : "benchmark";
-}
-
-/** `Date.parse` is the one time primitive here, and it is pure. */
-function instantValue(value: Instant): number {
-  const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) {
-    throw new CurationInputError(`observedAt is not an RFC 3339 instant: ${value}`);
-  }
-  return parsed;
 }
 
 /** `<` on strings is UTF-16 code-unit order -- the tie-break that keeps equal instants stable. */
@@ -97,10 +99,47 @@ function later(a: Instant, b: Instant): Instant {
   return a > b ? a : b;
 }
 
+function sameRef(a: CurationInputRef, b: CurationInputRef): boolean {
+  return (
+    a.source.agent === b.source.agent &&
+    a.source.name === b.source.name &&
+    a.entry === b.entry &&
+    a.announcementId === b.announcementId &&
+    a.record === b.record &&
+    a.attemptUri === b.attemptUri
+  );
+}
+
+/**
+ * Two observations sharing a dedupe key must be the same observation. Dropping the second one
+ * silently would make the projection depend on arrival order and would leave the discarded
+ * announcement out of `inputRefs` entirely -- invisible in the published inputs, which is the
+ * one thing design F6 makes this unit responsible for. So it fails closed instead.
+ */
+function assertNoConflict(
+  seen: SeenAnnouncement,
+  rowKey: string,
+  observation: CurationObservation,
+): void {
+  const reject = (field: string): never => {
+    throw new CurationInputError(
+      `conflicting observations share the announcement dedupe key ` +
+        `(source ${observation.ref.source.agent}/${observation.ref.source.name}, ` +
+        `announcement ${observation.ref.announcementId}): ${field} differs`,
+    );
+  };
+  if (seen.rowKey !== rowKey) reject("the task or bucket it feeds");
+  if (!sameRef(seen.ref, observation.ref)) reject("the input ref");
+  const previous = seen.observation;
+  if (previous === undefined) return;
+  if (previous.verdict !== observation.verdict) reject("verdict");
+  if (previous.observedAt !== observation.observedAt) reject("observedAt");
+  if (previous.attribution !== observation.attribution) reject("attribution");
+  if (previous.benchmarkRun !== observation.benchmarkRun) reject("benchmarkRun");
+}
+
 function apply(accumulator: RowAccumulator, observation: CurationObservation): void {
-  const key = inputRefKey(observation.ref);
-  if (accumulator.refs.has(key)) return; // at-least-once redelivery is a no-op
-  accumulator.refs.set(key, observation.ref);
+  accumulator.refs.set(refDedupeKey(observation.ref), observation.ref);
   if (observation.verdict === "pass") accumulator.pass += 1;
   else if (observation.verdict === "fail") accumulator.fail += 1;
   else accumulator.inconclusive += 1;
@@ -123,8 +162,8 @@ function seed(observation: CurationObservation): RowAccumulator {
 
 function finalize(accumulator: RowAccumulator): CurationRow {
   const inputRefs = [...accumulator.refs.values()].sort((a, b) => {
-    const left = inputRefKey(a);
-    const right = inputRefKey(b);
+    const left = refDedupeKey(a);
+    const right = refDedupeKey(b);
     return left < right ? -1 : left > right ? 1 : 0;
   });
   const attempts = new Set(inputRefs.map((ref) => ref.attemptUri)).size;
@@ -140,23 +179,31 @@ function finalize(accumulator: RowAccumulator): CurationRow {
 }
 
 function compareRows(a: CurationRow, b: CurationRow): number {
-  const left = rowKey(a.taskDigest, a.bucket);
-  const right = rowKey(b.taskDigest, b.bucket);
+  const left = curationRowKey(a.taskDigest, a.bucket);
+  const right = curationRowKey(b.taskDigest, b.bucket);
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
 /**
- * Fold observations into a previous projection. Idempotent: an observation whose
- * `inputRefKey` is already present in the target row is dropped, so the subscribe plane's
- * at-least-once delivery cannot double-count. Task 6 pins that property.
+ * Fold observations into a previous projection. Idempotent: an exact redelivery of an
+ * announcement already counted is a no-op, so the subscribe plane's at-least-once delivery
+ * cannot double-count. A redelivery that DISAGREES with what was counted is not a redelivery
+ * and is refused (`CurationInputError`), because silently keeping the first one would make the
+ * published rate depend on arrival order.
+ *
+ * `previous` is validated exactly as strictly as an observation is: it is stored state, which
+ * is to say untrusted input, and a row whose counters outrun its `inputRefs` is a rate with no
+ * attribution-preserving inputs behind it.
  */
 export function foldCuration(
   previous: CurationProjection | undefined,
   observations: readonly CurationObservation[],
 ): CurationProjection {
   const accumulators = new Map<string, RowAccumulator>();
-  for (const row of previous?.rows ?? []) {
-    accumulators.set(rowKey(row.taskDigest, row.bucket), {
+  const seen = new Map<string, SeenAnnouncement>();
+  for (const row of previous === undefined ? [] : parseCurationRows(previous.rows)) {
+    const key = curationRowKey(row.taskDigest, row.bucket);
+    accumulators.set(key, {
       taskDigest: row.taskDigest,
       bucket: row.bucket,
       pass: row.passRate.num,
@@ -164,12 +211,20 @@ export function foldCuration(
       inconclusive: row.verdicts - row.passRate.den,
       first: row.window.first,
       last: row.window.last,
-      refs: new Map(row.inputRefs.map((ref) => [inputRefKey(ref), ref])),
+      refs: new Map(row.inputRefs.map((ref) => [refDedupeKey(ref), ref])),
     });
+    for (const ref of row.inputRefs) seen.set(refDedupeKey(ref), { rowKey: key, ref });
   }
   for (const raw of observations) {
     const observation = parseCurationObservation(raw);
-    const key = rowKey(observation.taskDigest, bucketOf(observation));
+    const key = curationRowKey(observation.taskDigest, bucketOf(observation));
+    const dedupeKey = refDedupeKey(observation.ref);
+    const already = seen.get(dedupeKey);
+    if (already !== undefined) {
+      assertNoConflict(already, key, observation);
+      continue; // an exact redelivery, and therefore a no-op
+    }
+    seen.set(dedupeKey, { rowKey: key, ref: observation.ref, observation });
     let accumulator = accumulators.get(key);
     if (accumulator === undefined) {
       accumulator = seed(observation);

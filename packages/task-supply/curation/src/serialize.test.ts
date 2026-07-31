@@ -5,6 +5,7 @@ import {
   serializeCurationProjection,
 } from "./serialize.js";
 import { projectCuration } from "./projection.js";
+import { CurationInputError } from "./observation.js";
 import type { CurationObservation } from "./observation.js";
 
 const observation = (verdict: "pass" | "fail", n: string): CurationObservation => ({
@@ -58,5 +59,89 @@ describe("serializeCurationProjection", () => {
     const tampered = JSON.parse(serializeCurationProjection(projection));
     tampered.rows[0].verdicts = 99;
     expect(() => parseCurationProjection(JSON.stringify(tampered))).toThrow(/inputRefs/i);
+  });
+});
+
+// The stored projection is an input like any other: it is validated with the same rigor as an
+// observation, so a stored row cannot launder a shape the observation boundary would refuse.
+describe("parseCurationProjection: the projection-in boundary", () => {
+  const tamper = (mutate: (document: any) => void): string => {
+    const document = JSON.parse(serializeCurationProjection(projection));
+    mutate(document);
+    return JSON.stringify(document);
+  };
+
+  it("rejects a bare-hex or junk task digest", () => {
+    expect(() => parseCurationProjection(tamper((d) => { d.rows[0].taskDigest = "c".repeat(64); })))
+      .toThrow(CurationInputError);
+    expect(() => parseCurationProjection(tamper((d) => { d.rows[0].taskDigest = "not-a-digest"; })))
+      .toThrow(CurationInputError);
+  });
+
+  it("rejects an unknown bucket", () => {
+    expect(() => parseCurationProjection(tamper((d) => { d.rows[0].bucket = "wharrgarbl"; })))
+      .toThrow(CurationInputError);
+  });
+
+  it("rejects a non-instant window", () => {
+    expect(() => parseCurationProjection(tamper((d) => { d.rows[0].window.first = "yesterday"; })))
+      .toThrow(CurationInputError);
+    expect(() => parseCurationProjection(tamper((d) => {
+      const { first, last } = d.rows[0].window;
+      d.rows[0].window = { first: last, last: first };
+    }))).toThrow(CurationInputError);
+  });
+
+  it("rejects a malformed input ref", () => {
+    expect(() => parseCurationProjection(tamper((d) => { d.rows[0].inputRefs[0].record = "nope"; })))
+      .toThrow(CurationInputError);
+    expect(() => parseCurationProjection(tamper((d) => { delete d.rows[0].inputRefs[0].attemptUri; })))
+      .toThrow(CurationInputError);
+  });
+
+  it("rejects a row whose inputRefs repeat one dedupe key", () => {
+    expect(() => parseCurationProjection(tamper((d) => {
+      d.rows[0].inputRefs = [d.rows[0].inputRefs[0], { ...d.rows[0].inputRefs[0] }];
+      d.rows[0].verdicts = 2;
+      d.rows[0].attempts = 1;
+      d.rows[0].passRate = { num: 1, den: 2 };
+    }))).toThrow(CurationInputError);
+  });
+
+  it("rejects two rows for the same task and bucket", () => {
+    expect(() => parseCurationProjection(tamper((d) => {
+      d.rows = [d.rows[0], JSON.parse(JSON.stringify(d.rows[0]))];
+    }))).toThrow(CurationInputError);
+  });
+
+  it("rejects one announcement feeding two rows", () => {
+    expect(() => parseCurationProjection(tamper((d) => {
+      const clone = JSON.parse(JSON.stringify(d.rows[0]));
+      clone.bucket = "benchmark";
+      d.rows = [clone, d.rows[0]];
+    }))).toThrow(CurationInputError);
+  });
+
+  it("throws CurationInputError -- never a raw TypeError -- for a null or truncated row", () => {
+    for (const rows of [[null], [{}], [{ taskDigest: `sha256:${"c".repeat(64)}` }]]) {
+      let thrown: unknown;
+      try {
+        parseCurationProjection(JSON.stringify({ format: CURATION_PROJECTION_FORMAT, rows }));
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(CurationInputError);
+    }
+  });
+
+  it("rejects an unknown key rather than carrying it through", () => {
+    expect(() => parseCurationProjection(tamper((d) => { d.rows[0].saturation = true; })))
+      .toThrow(CurationInputError);
+  });
+
+  it("normalizes row and input-ref order", () => {
+    const canonical = serializeCurationProjection(projection);
+    const shuffled = tamper((d) => { d.rows[0].inputRefs.reverse(); });
+    expect(serializeCurationProjection(parseCurationProjection(shuffled))).toBe(canonical);
   });
 });

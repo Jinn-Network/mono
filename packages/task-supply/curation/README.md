@@ -61,7 +61,20 @@ package.
 `announcementDedupeKey` in `packages/discovery/protocol/src/cloudevents.ts`. Folding on it is
 what makes redelivery a no-op.
 
-Malformed input throws `CurationInputError`. This package fails closed and never guesses.
+Malformed input throws `CurationInputError`. This package fails closed and never guesses:
+
+- **No control characters in free text.** `source.agent`, `source.name`, `announcementId`,
+  `attemptUri`, `attribution`, and `benchmarkRun` must carry none. The dedupe key is joined on
+  the unit separator, so a component containing one would re-partition the key and let a source
+  forge a collision with another source's ref.
+- **A dedupe key identifies one observation.** An exact redelivery is a no-op; a redelivery that
+  disagrees — different verdict, instant, attribution, subject task, bucket, or ref — is refused.
+  Keeping the first and dropping the second would make the published rate depend on arrival
+  order and would leave the discarded announcement out of `inputRefs`, invisible in the inputs.
+- **Stored state is input too.** `parseCurationProjection` and `foldCuration`'s `previous`
+  argument validate every row as strictly as an observation — digest form, bucket, instants, ref
+  shape, dedupe-key uniqueness across the whole projection, and every counter against
+  `inputRefs` — and reconstruct rows rather than passing the stored object through.
 
 ## Manipulation, and what this layer can and cannot do
 

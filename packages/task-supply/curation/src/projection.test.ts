@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { projectCuration, type CurationRow } from "./projection.js";
+import { CurationInputError } from "./observation.js";
 import type { CurationObservation, ObservedVerdict } from "./observation.js";
 
 let counter = 0;
@@ -82,6 +83,43 @@ describe("projectCuration", () => {
       observation("pass"),
     ]).rows;
     expect(rows.map((r) => r.taskDigest)).toEqual([`sha256:${"c".repeat(64)}`, other]);
+  });
+
+  it("treats an exact redelivery of one announcement as a no-op", () => {
+    const once = observation("pass");
+    const [row] = projectCuration([once, { ...once, ref: { ...once.ref } }]).rows;
+    expect(row.verdicts).toBe(1);
+    expect(row.inputRefs).toHaveLength(1);
+  });
+
+  // Dropping the second silently would make the rate depend on arrival order, and the dropped
+  // announcement would never appear in inputRefs -- the F6 failure mode in miniature.
+  it("rejects two observations that share a dedupe key but disagree, in either order", () => {
+    const first = observation("pass");
+    const conflicting: CurationObservation = {
+      ...first,
+      verdict: "fail",
+      ref: {
+        ...first.ref,
+        record: `sha256:${"5".repeat(64)}`,
+        attemptUri: "urn:uuid:0189d1c2-0000-7000-8000-0000000000ee",
+      },
+    };
+    expect(() => projectCuration([first, conflicting])).toThrow(CurationInputError);
+    expect(() => projectCuration([conflicting, first])).toThrow(CurationInputError);
+  });
+
+  it("rejects one announcement claiming two different subject tasks", () => {
+    const first = observation("pass");
+    const elsewhere: CurationObservation = { ...first, taskDigest: `sha256:${"e".repeat(64)}` };
+    expect(() => projectCuration([first, elsewhere])).toThrow(CurationInputError);
+    expect(() => projectCuration([elsewhere, first])).toThrow(CurationInputError);
+  });
+
+  it("rejects one announcement counted into two buckets", () => {
+    const first = observation("pass");
+    const pinned: CurationObservation = { ...first, benchmarkRun: `sha256:${"9".repeat(64)}` };
+    expect(() => projectCuration([first, pinned])).toThrow(CurationInputError);
   });
 
   it("rejects a malformed observation rather than skipping it", () => {
