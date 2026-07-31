@@ -3808,7 +3808,7 @@ Four properties this task establishes, each tested:
 
 **Health checks are deliberately two rows at most, and often one** (C5 finding F9, adopted as a cross-plan rule: *a check whose answer is the same on every install is a release note, not a health check*). An earlier draft of this task emitted a standing `capture.retention` row that was `ok: true` on every install and carried the policy text — that is documentation wearing a check's clothes, and it is now in the README instead. What remains varies by install: `capture-staging` fails when the staging tree is missing **or has been loosened past owner-only** (a restored backup, a synced folder, an unusual umask all do this), and `capture-stranded` is emitted **only when** the last sweep actually dropped unsealed feeds.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plugin/runtime/src/capture/capability.test.ts`:
 
@@ -4157,7 +4157,7 @@ describe("sealSession guards", () => {
 
 > The end-to-end behaviour of `sealSession` against a real archive — the sealed record, the trajectory artifact, protocol conformance, the marker, and retention — is Task 12's integration test. This file covers the guards, which need no archive.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/capability.test.ts
@@ -4165,7 +4165,7 @@ cd plugin/runtime && yarn test src/capture/capability.test.ts
 
 Expected: FAIL — `Failed to resolve import "./capability.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `plugin/runtime/src/capture/capability.ts`:
 
@@ -4678,7 +4678,7 @@ export function createCaptureCapability(
 
 > Hoist `EMPTY_RETENTION` above `sealInto` when writing the file — it is shown inline here for reading order, but a `const` used before its declaration is a temporal-dead-zone error at runtime.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/capability.test.ts && yarn typecheck
@@ -4686,7 +4686,7 @@ cd plugin/runtime && yarn test src/capture/capability.test.ts && yarn typecheck
 
 Expected: PASS (17 tests). The `capture-stranded` test exercises both arms.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src
