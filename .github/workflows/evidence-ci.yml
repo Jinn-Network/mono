@@ -30,7 +30,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.1
+      - name: Verify Evidence CI toolchain pins
+        run: node --test .github/scripts/evidence-ci-workflow.test.mjs
       - name: Verify package inventory and dependency graph
         run: node --test .github/scripts/evidence-package-inventory.test.mjs
       - name: Verify source boundaries and canaries
@@ -42,11 +44,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.1
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
+      - name: Install npm 11.19.0 for pack-smoke
+        run: |
+          npm install -g npm@11.19.0
+          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
+          hash -r || true
+          test "$(npm --version)" = "11.19.0"
+          command -v npm
+          npm --version
       - name: Verify Evidence Protocol
         working-directory: packages/evidence/protocol
         run: |
@@ -97,11 +107,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.1
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
+      - name: Install npm 11.19.0 for pack-smoke
+        run: |
+          npm install -g npm@11.19.0
+          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
+          hash -r || true
+          test "$(npm --version)" = "11.19.0"
+          command -v npm
+          npm --version
       - name: Restore Evidence Protocol distribution
         uses: actions/download-artifact@v4
         with:
@@ -193,11 +211,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.1
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
+      - name: Install npm 11.19.0 for pack-smoke
+        run: |
+          npm install -g npm@11.19.0
+          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
+          hash -r || true
+          test "$(npm --version)" = "11.19.0"
+          command -v npm
+          npm --version
       - name: Restore Evidence Protocol distribution
         uses: actions/download-artifact@v4
         with:
@@ -229,11 +255,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.1
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
+      - name: Install npm 11.19.0 for pack-smoke
+        run: |
+          npm install -g npm@11.19.0
+          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
+          hash -r || true
+          test "$(npm --version)" = "11.19.0"
+          command -v npm
+          npm --version
       - name: Restore Evidence Protocol distribution
         uses: actions/download-artifact@v4
         with:
@@ -278,11 +312,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.1
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
+      - name: Install npm 11.19.0 for pack-smoke
+        run: |
+          npm install -g npm@11.19.0
+          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
+          hash -r || true
+          test "$(npm --version)" = "11.19.0"
+          command -v npm
+          npm --version
       - name: Restore Evidence Protocol distribution
         uses: actions/download-artifact@v4
         with:
@@ -327,11 +369,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.1
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
+      - name: Install npm 11.19.0 for pack-smoke
+        run: |
+          npm install -g npm@11.19.0
+          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
+          hash -r || true
+          test "$(npm --version)" = "11.19.0"
+          command -v npm
+          npm --version
       - name: Restore Evidence Protocol distribution
         uses: actions/download-artifact@v4
         with:
@@ -370,11 +420,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.1
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
+      - name: Install npm 11.19.0 for pack-smoke
+        run: |
+          npm install -g npm@11.19.0
+          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
+          hash -r || true
+          test "$(npm --version)" = "11.19.0"
+          command -v npm
+          npm --version
       - name: Restore Evidence Protocol distribution
         uses: actions/download-artifact@v4
         with:
@@ -424,11 +482,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.1
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
+      - name: Install npm 11.19.0 for pack-smoke
+        run: |
+          npm install -g npm@11.19.0
+          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
+          hash -r || true
+          test "$(npm --version)" = "11.19.0"
+          command -v npm
+          npm --version
       - name: Restore Evidence Protocol distribution
         uses: actions/download-artifact@v4
         with:
@@ -472,11 +538,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.1
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
+      - name: Install npm 11.19.0 for pack-smoke
+        run: |
+          npm install -g npm@11.19.0
+          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
+          hash -r || true
+          test "$(npm --version)" = "11.19.0"
+          command -v npm
+          npm --version
       - name: Restore Evidence Protocol distribution
         uses: actions/download-artifact@v4
         with:
@@ -559,7 +633,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.1
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable

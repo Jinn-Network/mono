@@ -3037,13 +3037,13 @@ peer ranges / Vite pins / pack-smoke scripts are unchanged.
 | Disposition | Pin Evidence CI `actions/setup-node` to exact Node `22.23.1`; install and assert exact npm `11.19.0` (PATH/`GITHUB_PATH`) before every job/step path that runs package `pack:smoke` consumer install. Prefer one named reusable step. Keep Yarn 4.13.0 / corepack unchanged. **Forbidden:** `legacy-peer-deps`, package peer-range changes, Vite freeze, weakening immutable installs, skipping pack-smoke, modifying package scripts |
 | Rollback | Revert the workflow pin only if npm ≥11.19.0 is the proven root of a new regression **and** npm 10.9.8 + current registry graph is re-proven green without forbidden workarounds; do not silently reintroduce floating Node 22 or npm 10.9.8 while pack-smoke remains on the vulnerable Arborist path |
 | Architecture gate | Workflow architecture test fails if setup-node floats, if a pack-smoke job lacks the preceding npm 11.19.0 install/assert step, or if `legacy-peer-deps` appears in Evidence CI |
-| Final evidence | [ ] pending implementation |
+| Final evidence | `TBD` — eleven `setup-node` pins at `22.23.1`; nine jobs with `Install npm 11.19.0 for pack-smoke` before `pack:smoke`; `.github/scripts/evidence-ci-workflow.test.mjs` (4 tests); guards 18/18; isolated temp-prefix npm `11.19.0` assert OK; no `packages/**` changes |
 
 ### Implementation checklist (C1-R9)
 
-- [ ] Append this disposition (docs)
-- [ ] Pin every relevant Evidence CI `setup-node` to `22.23.1`
-- [ ] Named npm `11.19.0` install/assert step before every pack-smoke path (foundation, components, derivation, bridge, retrieval, trajectory, contribution, catalog-sqlite, local-runtime, etc.)
-- [ ] Architecture test covers float / missing npm pin / forbidden legacy-peer-deps
-- [ ] Local validation of architecture test + optional isolated npm 11.19.0 pack-smoke reproduction
+- [x] Append this disposition (docs) — `3d480e708`
+- [x] Pin every relevant Evidence CI `setup-node` to `22.23.1`
+- [x] Named npm `11.19.0` install/assert step before every pack-smoke path (foundation, components, derivation, bridge, retrieval, trajectory, contribution, catalog-sqlite, local-runtime)
+- [x] Architecture test covers float / missing npm pin / forbidden legacy-peer-deps
+- [x] Local validation of architecture test + isolated npm 11.19.0 prefix install/assert
 
