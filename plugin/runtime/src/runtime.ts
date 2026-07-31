@@ -20,7 +20,7 @@ export interface PluginRuntime {
   stop(): Promise<void>;
 }
 
-type RuntimeState = "idle" | "starting" | "running" | "stopping";
+type RuntimeState = "idle" | "starting" | "running" | "stopping" | "cleanup-required";
 
 function validateCapabilityConfiguration(capabilities: readonly RuntimeCapability[]): void {
   const seen = new Set<string>();
@@ -59,14 +59,20 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
   const context: CapabilityContext = { config: options.config, log };
 
   let state: RuntimeState = "idle";
-  const running: RuntimeCapability[] = [];
+  const activeCapabilities: RuntimeCapability[] = [];
+  let pendingCleanup: RuntimeCapability[] = [];
 
-  const stopRunning = async (): Promise<readonly string[]> => {
+  const stopTargetsInReverse = async (targets: readonly RuntimeCapability[]): Promise<readonly string[]> => {
     const failures: string[] = [];
-    while (running.length > 0) {
-      const capability = running.pop() as RuntimeCapability;
+    for (let index = targets.length - 1; index >= 0; index -= 1) {
+      const capability = targets[index] as RuntimeCapability;
       try {
         await capability.stop?.();
+        const activeIndex = activeCapabilities.indexOf(capability);
+        if (activeIndex >= 0) {
+          activeCapabilities.splice(activeIndex, 1);
+        }
+        pendingCleanup = pendingCleanup.filter((entry) => entry !== capability);
       } catch (error) {
         failures.push(`${capability.name}: ${describeUnknownError(error)}`);
         safeLogError(log, "capability failed to stop", {
@@ -78,19 +84,32 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
     return failures;
   };
 
+  const enterCleanupRequired = (): void => {
+    pendingCleanup = activeCapabilities.slice();
+    state = "cleanup-required";
+  };
+
   const failStart = async (
     capabilityName: string,
     error: unknown,
   ): Promise<never> => {
-    const rollbackFailures = await stopRunning();
-    state = "idle";
-    const parts = [`capability ${capabilityName} failed to start: ${describeUnknownError(error)}`];
-    if (rollbackFailures.length > 0) {
-      parts.push(`rollback failures: ${rollbackFailures.join("; ")}`);
+    const rollbackFailures = await stopTargetsInReverse(activeCapabilities.slice());
+    if (rollbackFailures.length > 0 || activeCapabilities.length > 0) {
+      enterCleanupRequired();
+      const parts = [`capability ${capabilityName} failed to start: ${describeUnknownError(error)}`];
+      if (rollbackFailures.length > 0) {
+        parts.push(`rollback failures: ${rollbackFailures.join("; ")}`);
+      }
+      throw new PluginRuntimeError(
+        RUNTIME_ERROR_CODES.capabilityStartFailed,
+        parts.join("; "),
+        { cause: error },
+      );
     }
+    state = "idle";
     throw new PluginRuntimeError(
       RUNTIME_ERROR_CODES.capabilityStartFailed,
-      parts.join("; "),
+      `capability ${capabilityName} failed to start: ${describeUnknownError(error)}`,
       { cause: error },
     );
   };
@@ -101,6 +120,12 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
         throw new PluginRuntimeError(
           RUNTIME_ERROR_CODES.runtimeAlreadyStarted,
           "the runtime is already started",
+        );
+      }
+      if (state === "cleanup-required") {
+        throw new PluginRuntimeError(
+          RUNTIME_ERROR_CODES.runtimeCleanupRequired,
+          "the runtime requires cleanup before it can start again",
         );
       }
       if (state === "starting" || state === "stopping") {
@@ -120,7 +145,7 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
           } catch (error) {
             await failStart(capability.name, error);
           }
-          running.push(capability);
+          activeCapabilities.push(capability);
         }
 
         try {
@@ -131,7 +156,9 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
 
         state = "running";
       } catch (error) {
-        if (state === "starting") {
+        if (state === "starting" && activeCapabilities.length > 0) {
+          enterCleanupRequired();
+        } else if (state === "starting") {
           state = "idle";
         }
         throw error;
@@ -174,9 +201,11 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
         );
       }
 
+      const targets = state === "cleanup-required"
+        ? pendingCleanup.slice()
+        : activeCapabilities.slice();
       state = "stopping";
-      const failures = await stopRunning();
-      state = "idle";
+      const failures = await stopTargetsInReverse(targets);
 
       try {
         log.debug("runtime stopped", {});
@@ -184,12 +213,18 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
         // Diagnostic logging must never abort stop reporting.
       }
 
-      if (failures.length > 0) {
+      if (failures.length > 0 || activeCapabilities.length > 0) {
+        enterCleanupRequired();
         throw new PluginRuntimeError(
           RUNTIME_ERROR_CODES.capabilityStopFailed,
-          `capabilities failed to stop: ${failures.join("; ")}`,
+          failures.length > 0
+            ? `capabilities failed to stop: ${failures.join("; ")}`
+            : "capabilities remain active after stop",
         );
       }
+
+      pendingCleanup = [];
+      state = "idle";
     },
   };
 }

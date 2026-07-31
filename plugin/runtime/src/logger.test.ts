@@ -30,6 +30,7 @@ describe("PluginRuntimeError", () => {
       "log-invalid",
       "runtime-already-started",
       "runtime-busy",
+      "runtime-cleanup-required",
       "runtime-not-started",
     ]);
   });
@@ -259,6 +260,37 @@ describe("createLineLogger", () => {
     });
     expect(() => createLineLogger("debug", write).debug("bad", { hostile })).toThrow(PluginRuntimeError);
     expect(getterRuns).toBe(0);
+    expect(lines).toEqual([]);
+  });
+
+  test("R-C3-49 preserves nested level and message fields exactly", () => {
+    const { lines, write } = collect();
+    createLineLogger("debug", write).debug("outer", {
+      nested: { level: "inner-level", message: "inner-message" },
+    });
+    expect(JSON.parse(lines[0]!)).toEqual({
+      level: "debug",
+      message: "outer",
+      nested: { level: "inner-level", message: "inner-message" },
+    });
+  });
+
+  test("R-C3-49 rejects symbol and non-enumerable field keys", () => {
+    const { lines, write } = collect();
+    const withSymbol: Record<string | symbol, unknown> = { safe: "ok" };
+    withSymbol[Symbol("hidden")] = "nope";
+    expect(() => createLineLogger("debug", write).debug("bad", withSymbol)).toThrow(PluginRuntimeError);
+    const withHidden: Record<string, unknown> = { safe: "ok" };
+    Object.defineProperty(withHidden, "hidden", { enumerable: false, value: "nope" });
+    expect(() => createLineLogger("debug", write).debug("bad", withHidden)).toThrow(PluginRuntimeError);
+    expect(lines).toEqual([]);
+  });
+
+  test("R-C3-49 rejects revoked proxy field objects", () => {
+    const { lines, write } = collect();
+    const { proxy, revoke } = Proxy.revocable({ safe: "ok" }, {});
+    revoke();
+    expect(() => createLineLogger("debug", write).debug("bad", { proxy })).toThrow(PluginRuntimeError);
     expect(lines).toEqual([]);
   });
 });

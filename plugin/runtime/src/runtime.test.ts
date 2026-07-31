@@ -411,4 +411,61 @@ describe("createPluginRuntime", () => {
     await starting;
     await runtime.stop();
   });
+
+  test("R-C3-46 failed stop blocks restart until cleanup retry succeeds", async () => {
+    let starts = 0;
+    let stopAttempts = 0;
+    const runtime = createPluginRuntime({
+      config,
+      capabilities: [{
+        name: "leaky",
+        start: async () => {
+          starts += 1;
+        },
+        stop: async () => {
+          stopAttempts += 1;
+          if (stopAttempts === 1) throw new Error("stop failed");
+        },
+      }],
+    });
+    await runtime.start();
+    expect(starts).toBe(1);
+    await expect(runtime.stop()).rejects.toMatchObject({ code: "capability-stop-failed" });
+    await expect(runtime.start()).rejects.toMatchObject({ code: "runtime-cleanup-required" });
+    await runtime.stop();
+    expect(stopAttempts).toBe(2);
+    await runtime.start();
+    expect(starts).toBe(2);
+    await runtime.stop();
+  });
+
+  test("R-C3-46 cleanup retries failed capabilities in reverse order", async () => {
+    const stops: string[] = [];
+    let failSecond = true;
+    const runtime = createPluginRuntime({
+      config,
+      capabilities: [
+        {
+          name: "first",
+          start: async () => {},
+          stop: async () => { stops.push("first"); },
+        },
+        {
+          name: "second",
+          start: async () => {},
+          stop: async () => {
+            stops.push("second");
+            if (failSecond) throw new Error("second stop failed");
+          },
+        },
+      ],
+    });
+    await runtime.start();
+    await expect(runtime.stop()).rejects.toMatchObject({ code: "capability-stop-failed" });
+    failSecond = false;
+    await runtime.stop();
+    expect(stops).toEqual(["second", "first", "second"]);
+    await runtime.start();
+    await runtime.stop();
+  });
 });

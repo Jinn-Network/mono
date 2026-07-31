@@ -25,6 +25,7 @@ export const RUNTIME_ERROR_CODES = Object.freeze({
   capabilityStartFailed: "capability-start-failed",
   capabilityStopFailed: "capability-stop-failed",
   capabilityConfigurationInvalid: "capability-configuration-invalid",
+  runtimeCleanupRequired: "runtime-cleanup-required",
 } as const);
 
 export type RuntimeErrorCode =

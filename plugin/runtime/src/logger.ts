@@ -33,20 +33,37 @@ function logInvalid(message: string): never {
   throw new PluginRuntimeError(RUNTIME_ERROR_CODES.logInvalid, message);
 }
 
+function rejectIfProxy(value: unknown, message: string): void {
+  try {
+    if (types.isProxy(value)) {
+      logInvalid(message);
+    }
+  } catch {
+    logInvalid(message);
+  }
+}
+
+function directPrototype(value: object): object | null {
+  try {
+    return Object.getPrototypeOf(value);
+  } catch {
+    return null;
+  }
+}
+
 function isPlainDataObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
-  if (types.isProxy(value)) {
-    return false;
-  }
-  const prototype = Object.getPrototypeOf(value);
+  rejectIfProxy(value, "log fields must not use proxy objects");
+  const prototype = directPrototype(value);
   return prototype === Object.prototype || prototype === null;
 }
 
 function isPlainDenseArray(value: unknown[]): void {
-  if (types.isProxy(value)) {
-    logInvalid("log fields cannot use proxy arrays");
+  rejectIfProxy(value, "log fields cannot use proxy arrays");
+  if (directPrototype(value) !== Array.prototype) {
+    logInvalid("log fields cannot use nonstandard arrays");
   }
   const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
   if (lengthDescriptor?.get !== undefined || lengthDescriptor?.set !== undefined) {
@@ -62,9 +79,7 @@ function isPlainDenseArray(value: unknown[]): void {
     if (!Number.isInteger(numeric) || numeric < 0 || numeric >= length) {
       logInvalid("log fields cannot use augmented arrays");
     }
-  }
-  for (let index = 0; index < length; index += 1) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (descriptor === undefined) {
       logInvalid("log fields cannot use sparse arrays");
     }
@@ -77,7 +92,11 @@ function isPlainDenseArray(value: unknown[]): void {
   }
 }
 
-function normalizeLogValue(value: unknown, activePath: Set<object>): unknown {
+function normalizeLogValue(
+  value: unknown,
+  activePath: Set<object>,
+  stripEnvelopeKeys: boolean,
+): unknown {
   if (value === null) return null;
   const valueType = typeof value;
   if (valueType === "string" || valueType === "boolean") return value;
@@ -90,10 +109,8 @@ function normalizeLogValue(value: unknown, activePath: Set<object>): unknown {
   if (valueType === "bigint" || valueType === "function" || valueType === "symbol" || valueType === "undefined") {
     logInvalid(`log fields cannot contain ${valueType}`);
   }
+  rejectIfProxy(value, "log fields cannot use proxy values");
   if (Array.isArray(value)) {
-    if (types.isProxy(value)) {
-      logInvalid("log fields cannot use proxy arrays");
-    }
     isPlainDenseArray(value);
     if (activePath.has(value)) {
       logInvalid("log fields cannot contain cycles");
@@ -106,10 +123,7 @@ function normalizeLogValue(value: unknown, activePath: Set<object>): unknown {
         if (descriptor === undefined) {
           logInvalid("log fields cannot use sparse arrays");
         }
-        if (descriptor.get !== undefined || descriptor.set !== undefined) {
-          logInvalid("log fields cannot use index accessors");
-        }
-        normalized.push(normalizeLogValue(descriptor.value, activePath));
+        normalized.push(normalizeLogValue(descriptor.value, activePath, false));
       }
       return normalized;
     } finally {
@@ -128,8 +142,11 @@ function normalizeLogValue(value: unknown, activePath: Set<object>): unknown {
   activePath.add(value);
   const normalized: Record<string, unknown> = {};
   try {
-    for (const key of Object.keys(value)) {
-      if (key === "level" || key === "message") continue;
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key === "symbol") {
+        logInvalid("log fields cannot use symbol keys");
+      }
+      if (stripEnvelopeKeys && (key === "level" || key === "message")) continue;
       if (DANGEROUS_FIELD_KEYS.has(key)) {
         logInvalid(`log fields cannot use dangerous key ${key}`);
       }
@@ -137,13 +154,16 @@ function normalizeLogValue(value: unknown, activePath: Set<object>): unknown {
         logInvalid(`log fields cannot use reserved key ${key}`);
       }
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (descriptor?.get !== undefined || descriptor?.set !== undefined) {
+      if (descriptor === undefined) {
+        logInvalid(`log field ${key} must be an own property`);
+      }
+      if (descriptor.get !== undefined || descriptor.set !== undefined) {
         logInvalid(`log fields must not use accessors for ${key}`);
       }
-      if (descriptor !== undefined && !descriptor.enumerable) {
+      if (!descriptor.enumerable) {
         logInvalid(`log field ${key} must be enumerable`);
       }
-      normalized[key] = normalizeLogValue(value[key], activePath);
+      normalized[key] = normalizeLogValue(descriptor.value, activePath, false);
     }
     return normalized;
   } finally {
@@ -156,7 +176,7 @@ export function normalizeLogFields(fields: unknown): Readonly<Record<string, unk
   if (!isPlainDataObject(fields)) {
     logInvalid("log fields must be a plain object");
   }
-  return Object.freeze(normalizeLogValue(fields, new Set()) as Record<string, unknown>);
+  return Object.freeze(normalizeLogValue(fields, new Set(), true) as Record<string, unknown>);
 }
 
 /**

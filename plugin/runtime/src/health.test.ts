@@ -224,6 +224,20 @@ describe("summarizeHealth", () => {
     expect(() => summarizeHealth(new String("0.1.0"), [])).toThrow(PluginRuntimeError);
     expect(() => summarizeHealth("", [])).toThrow(PluginRuntimeError);
   });
+
+  test("R-C3-48 rejects revoked proxy checks without raw TypeError", () => {
+    const { proxy, revoke } = Proxy.revocable(ok("archive"), {});
+    revoke();
+    expect(() => normalizeHealthCheck(proxy)).toThrow(PluginRuntimeError);
+  });
+
+  test("R-C3-48 rejects symbol and non-enumerable extra keys", () => {
+    const withSymbol = { ...ok("archive"), [Symbol("extra")]: "field" };
+    expect(() => normalizeHealthCheck(withSymbol)).toThrow(PluginRuntimeError);
+    const withHidden = { ...ok("archive") };
+    Object.defineProperty(withHidden, "extra", { enumerable: false, value: "hidden" });
+    expect(() => normalizeHealthCheck(withHidden)).toThrow(PluginRuntimeError);
+  });
 });
 
 describe("RUNTIME_VERSION", () => {

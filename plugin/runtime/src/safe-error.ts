@@ -11,30 +11,40 @@ function readOwnStringField(value: object, key: "message" | "code"): string | nu
   return typeof descriptor.value === "string" ? descriptor.value : null;
 }
 
+function directPrototype(value: object): object | null {
+  try {
+    return Object.getPrototypeOf(value);
+  } catch {
+    return null;
+  }
+}
+
 function isGenuinePluginRuntimeError(value: unknown): value is PluginRuntimeError {
-  if (!(value instanceof PluginRuntimeError) || types.isProxy(value)) {
+  if (typeof value !== "object" || value === null) {
     return false;
   }
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === PluginRuntimeError.prototype;
+  if (types.isProxy(value)) {
+    return false;
+  }
+  return directPrototype(value) === PluginRuntimeError.prototype;
 }
 
 function isPlainError(value: unknown): value is Error {
-  if (!(value instanceof Error) || types.isProxy(value)) {
+  if (typeof value !== "object" || value === null) {
     return false;
   }
-  const prototype = Object.getPrototypeOf(value);
+  if (types.isProxy(value)) {
+    return false;
+  }
+  const prototype = directPrototype(value);
   return prototype === Error.prototype || prototype === null;
 }
 
 export function isHealthInvalidError(error: unknown): boolean {
-  if (types.isProxy(error)) {
+  if (typeof error !== "object" || error === null || types.isProxy(error)) {
     return false;
   }
-  if (!(error instanceof PluginRuntimeError)) {
-    return false;
-  }
-  if (Object.getPrototypeOf(error) !== PluginRuntimeError.prototype) {
+  if (directPrototype(error) !== PluginRuntimeError.prototype) {
     return false;
   }
   return readOwnStringField(error, "code") === "health-invalid";

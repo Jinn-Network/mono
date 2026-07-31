@@ -72,4 +72,21 @@ describe("describeUnknownError", () => {
     });
     expect(describeUnknownError(error)).toBe("an unknown error occurred");
   });
+
+  test("R-C3-47 never uses instanceof on unknown input", () => {
+    let getPrototypeOfRuns = 0;
+    const proxyPrototype = new Proxy(Object.prototype, {
+      getPrototypeOf() {
+        getPrototypeOfRuns += 1;
+        return PluginRuntimeError.prototype;
+      },
+    });
+    const hostile = Object.create(proxyPrototype);
+    Object.defineProperty(hostile, "message", {
+      enumerable: true,
+      value: "trap",
+    });
+    expect(describeUnknownError(hostile)).toBe("an unknown error occurred");
+    expect(getPrototypeOfRuns).toBe(0);
+  });
 });

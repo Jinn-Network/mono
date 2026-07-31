@@ -26,25 +26,66 @@ function healthInvalid(message: string): never {
   throw new PluginRuntimeError(RUNTIME_ERROR_CODES.healthInvalid, message);
 }
 
+function rejectIfProxy(value: unknown, message: string): void {
+  try {
+    if (types.isProxy(value)) {
+      healthInvalid(message);
+    }
+  } catch {
+    healthInvalid(message);
+  }
+}
+
+function directPrototype(value: object): object | null {
+  try {
+    return Object.getPrototypeOf(value);
+  } catch {
+    return null;
+  }
+}
+
+function assertExactOwnStringKeys(value: object, allowed: readonly string[]): void {
+  const ownKeys = Reflect.ownKeys(value);
+  for (const key of ownKeys) {
+    if (typeof key === "symbol") {
+      healthInvalid("a health check must not define symbol keys");
+    }
+    if (!allowed.includes(key)) {
+      healthInvalid("a health check has unknown or missing fields");
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !descriptor.enumerable) {
+      healthInvalid(`a health check field ${key} must be enumerable`);
+    }
+    if (descriptor.get !== undefined || descriptor.set !== undefined) {
+      healthInvalid(`a health check must not use accessors for ${key}`);
+    }
+  }
+  for (const key of allowed) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) {
+      healthInvalid(`a health check is missing ${key}`);
+    }
+  }
+}
+
 function isPlainDataObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
-  if (types.isProxy(value)) {
+  rejectIfProxy(value, "a health check must not be a proxy object");
+  const prototype = directPrototype(value);
+  if (prototype !== Object.prototype && prototype !== null) {
     return false;
   }
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
+  return true;
 }
 
 function isPlainDenseArray(value: unknown): value is unknown[] {
-  if (types.isProxy(value)) {
-    healthInvalid("health checks must not be a proxy array");
-  }
+  rejectIfProxy(value, "health checks must not be a proxy array");
   if (!Array.isArray(value)) {
     healthInvalid("health checks must be an array");
   }
-  if (Object.getPrototypeOf(value) !== Array.prototype) {
+  if (directPrototype(value) !== Array.prototype) {
     healthInvalid("health checks must use a standard array prototype");
   }
   const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
@@ -52,7 +93,8 @@ function isPlainDenseArray(value: unknown): value is unknown[] {
     healthInvalid("health checks array must not use a length accessor");
   }
   const length = value.length;
-  for (const key of Reflect.ownKeys(value)) {
+  const ownKeys = Reflect.ownKeys(value);
+  for (const key of ownKeys) {
     if (typeof key === "symbol") {
       healthInvalid("health checks array must not define symbol keys");
     }
@@ -61,9 +103,7 @@ function isPlainDenseArray(value: unknown): value is unknown[] {
     if (!Number.isInteger(numeric) || numeric < 0 || numeric >= length) {
       healthInvalid("health checks array has non-index properties");
     }
-  }
-  for (let index = 0; index < length; index += 1) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (descriptor === undefined) {
       healthInvalid("health checks array must be dense");
     }
@@ -74,6 +114,11 @@ function isPlainDenseArray(value: unknown): value is unknown[] {
       healthInvalid("health checks array indices must be enumerable");
     }
   }
+  for (let index = 0; index < length; index += 1) {
+    if (!Object.prototype.hasOwnProperty.call(value, index)) {
+      healthInvalid("health checks array must be dense");
+    }
+  }
   return true;
 }
 
@@ -81,9 +126,6 @@ function readOwnDataProperty(
   value: Record<string, unknown>,
   key: string,
 ): unknown {
-  if (Object.prototype.hasOwnProperty.call(value, "toJSON")) {
-    healthInvalid("a health check must not define toJSON");
-  }
   const descriptor = Object.getOwnPropertyDescriptor(value, key);
   if (descriptor === undefined) {
     healthInvalid(`a health check is missing ${key}`);
@@ -99,14 +141,11 @@ function readOwnDataProperty(
 
 /** Descriptor-safe normalization for one capability-contributed health check. */
 export function normalizeHealthCheck(input: unknown): HealthCheck {
+  rejectIfProxy(input, "a health check must not be a proxy object");
   if (!isPlainDataObject(input)) {
     healthInvalid("a health check must be a plain object");
   }
-  const keys = Object.keys(input).sort();
-  const allowed = ["detail", "name", "ok", "remedy"];
-  if (keys.length !== allowed.length || !allowed.every((key) => keys.includes(key))) {
-    healthInvalid("a health check has unknown or missing fields");
-  }
+  assertExactOwnStringKeys(input, ["detail", "name", "ok", "remedy"]);
 
   const nameValue = readOwnDataProperty(input, "name");
   if (typeof nameValue !== "string" || nameValue.length === 0) {
