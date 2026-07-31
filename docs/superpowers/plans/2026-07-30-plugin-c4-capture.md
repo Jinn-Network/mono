@@ -1736,7 +1736,7 @@ Two decisions this task fixes, both recorded in the Findings section:
 1. **`source.execution` is omitted.** C1's `SourceSchema` makes it optional. The execution record's digest cannot exist yet — the feed must be attached as the native trace *before* `finalize()`, and the trajectory digest must exist *before* that so it can ride along as an identifier. The link is not lost: `source.nativeTrace.digest.sha256` is exactly the `sha256` the sealed execution record carries on its trace entity, so the pair is joinable in both directions by digest.
 2. **`completeness` is always `full`.** `parseSessionFeed` is strict — an uninterpretable feed is a refused capture, not a partial one — so there is no state in which some source lines were skipped.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plugin/runtime/src/capture/trajectory.test.ts`:
 
@@ -1853,7 +1853,7 @@ describe("buildTrajectoryRecord", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/trajectory.test.ts
@@ -1861,7 +1861,7 @@ cd plugin/runtime && yarn test src/capture/trajectory.test.ts
 
 Expected: FAIL — `Failed to resolve import "./trajectory.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation** (includes `timebase: "source-epoch-ns"` per 2026-07-31 amendment)
 
 `plugin/runtime/src/capture/trajectory.ts`:
 
@@ -1949,7 +1949,7 @@ export function buildTrajectoryRecord(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/trajectory.test.ts && yarn typecheck
@@ -1957,7 +1957,7 @@ cd plugin/runtime && yarn test src/capture/trajectory.test.ts && yarn typecheck
 
 Expected: PASS (9 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src
