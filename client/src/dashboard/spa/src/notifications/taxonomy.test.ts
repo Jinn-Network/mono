@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { CANONICAL_KINDS, isCanonicalKind } from './taxonomy.js';
 
 describe('taxonomy', () => {
-  it('lists exactly the 11 canonical kinds from OPERATOR-APP-SPEC §2.10', () => {
+  it('lists exactly the 12 canonical kinds from OPERATOR-APP-SPEC §2.10', () => {
     expect(CANONICAL_KINDS).toEqual([
       'funding_low',
       'funding_empty',
@@ -15,6 +15,7 @@ describe('taxonomy', () => {
       'no_solvernets_joined',
       'safe_binding_pending',
       'claim_failed',
+      'config_migrated',
     ]);
   });
 
