@@ -31,14 +31,40 @@ function convergedDelivery(legacyEnvelope: unknown): Uint8Array {
   } as never);
 }
 
+const AGENT = '0x1111111111111111111111111111111111111111' as const;
+const DIGEST = `sha256:${'e'.repeat(64)}` as const;
+
+// Shaped against the real `SignedEnvelopeSchema` (`packages/core/src/execution-envelope.ts`),
+// not the plan's sketch of it. The plan's literal used `generatedAt` as a string, a bare address
+// for `participant`, `{start,end}` for `window`, a `{kind,name,version}` executor, and omitted
+// `task` — five shapes the schema rejects. A fixture whose job is to prove the legacy evaluator
+// can parse this envelope is worthless if the envelope was never a legal one, so the fixture data
+// is corrected here. Every assertion below is unchanged.
 const LEGACY_ENVELOPE = {
   schemaVersion: 'jinn.execution.v1',
   solverType: 'prediction.v1',
   role: 'solution',
-  generatedAt: '2026-07-30T09:00:00.000Z',
-  participant: '0x1111111111111111111111111111111111111111',
-  window: { start: '2026-07-30T08:00:00.000Z', end: '2026-07-30T09:00:00.000Z' },
-  executor: { kind: 'harness', name: 'claude-code', version: '1.0.0' },
+  generatedAt: Date.parse('2026-07-30T09:00:00.000Z'),
+  task: {
+    cid: DIGEST,
+    onchainCreationTx: `0x${'1'.repeat(64)}`,
+    onchainCreationBlock: 120,
+    requestId: `0x${'2'.repeat(64)}`,
+  },
+  participant: { safeAddress: AGENT, agentEoa: AGENT },
+  window: {
+    startTs: Math.floor(Date.parse('2026-07-30T08:00:00.000Z') / 1000),
+    endTs: Math.floor(Date.parse('2026-07-30T09:00:00.000Z') / 1000),
+  },
+  executor: {
+    implName: 'claude-code',
+    implVersion: '1.0.0',
+    clientGitSha: 'deadbeef',
+    codeDigest: DIGEST,
+    runtimeBundleDigest: DIGEST,
+    plugins: [],
+    signingKey: { kind: 'agent-eoa', pubkey: AGENT },
+  },
   evidenceTier: 'self-signed',
   attestation: null,
   trajectory: null,
@@ -46,7 +72,7 @@ const LEGACY_ENVELOPE = {
   payload: { prediction: 0.42 },
   signature: {
     algo: 'secp256k1',
-    signer: '0x1111111111111111111111111111111111111111',
+    signer: AGENT,
     hash: `0x${'e'.repeat(64)}`,
     sig: `0x${'f'.repeat(130)}`,
   },
