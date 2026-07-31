@@ -94,8 +94,48 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  posting:
+    needs: [architecture, derivation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependencies from source
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/trust/resolve && yarn install --immutable && yarn build)
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/environments/record && yarn install --immutable && yarn build)
+          (cd packages/marketplace/binding && yarn install --immutable && yarn build)
+          (cd packages/task-supply/admission && yarn install --immutable && yarn build)
+          (cd packages/task-supply/derivation && yarn install --immutable && yarn build)
+      - name: Verify Task Posting
+        working-directory: packages/task-supply/posting
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Posting distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-supply-posting-dist
+          path: packages/task-supply/posting/dist
+          if-no-files-found: error
+          retention-days: 1
+
   verify:
-    needs: [architecture, admission, derivation]
+    needs: [architecture, admission, derivation, posting]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -104,11 +144,13 @@ jobs:
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
           ADMISSION_RESULT: ${{ needs.admission.result }}
           DERIVATION_RESULT: ${{ needs.derivation.result }}
+          POSTING_RESULT: ${{ needs.posting.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
             "$ADMISSION_RESULT" \
-            "$DERIVATION_RESULT"; do
+            "$DERIVATION_RESULT" \
+            "$POSTING_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4
@@ -130,12 +172,17 @@ jobs:
           cp -R .task-supply-dist/task-supply-admission-dist/. packages/task-supply/admission/dist/
           mkdir -p packages/task-supply/derivation/dist
           cp -R .task-supply-dist/task-supply-derivation-dist/. packages/task-supply/derivation/dist/
+          mkdir -p packages/task-supply/posting/dist
+          cp -R .task-supply-dist/task-supply-posting-dist/. packages/task-supply/posting/dist/
       - name: Build cross-tree portal dependencies from source
         run: |
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/trust/resolve && yarn install --immutable && yarn build)
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
           (cd packages/environments/record && yarn install --immutable && yarn build)
+          (cd packages/marketplace/binding && yarn install --immutable && yarn build)
       - name: Compile packed public entrypoint consumers
         run: node .github/scripts/task-supply-packed-types.test.mjs

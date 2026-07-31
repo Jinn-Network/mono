@@ -13,6 +13,7 @@ const consumerRoot = join(temporaryRoot, 'consumer');
 const packages = [
   ['admission', '@jinn-network/task-admission'],
   ['derivation', '@jinn-network/task-derivation'],
+  ['posting', '@jinn-network/task-posting'],
 ];
 
 const codeEntrypoints = [
@@ -20,15 +21,19 @@ const codeEntrypoints = [
   '@jinn-network/task-admission/testing',
   '@jinn-network/task-derivation',
   '@jinn-network/task-derivation/testing',
+  '@jinn-network/task-posting',
 ];
 
 // Cross-tree Jinn dependencies packed as file: deps so NodeNext resolves them.
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+  ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
+  ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
+  ['@jinn-network/marketplace-binding', join(root, 'packages', 'marketplace', 'binding')],
 ];
 
 function run(command, args, options = {}) {
@@ -104,7 +109,41 @@ try {
       + '\n\n'
       + `export type TaskSupplyEntrypoints = [\n${codeEntrypoints
         .map((_, index) => `  typeof Entry${index},`)
-        .join('\n')}\n];\n`,
+        .join('\n')}\n];\n`
+      // The namespace imports above prove every entrypoint resolves; posting's policy surface is
+      // additionally named symbol-by-symbol so a rename in the packed `.d.ts` is a compile error
+      // here rather than a silently-narrower public surface.
+      + [
+        '',
+        'import {',
+        '  executePosting,',
+        '  planPosting,',
+        '  buildDispatchSubmission,',
+        '  PostingRefusedError,',
+        '  POSTING_SUBMISSION_NAMESPACE,',
+        '} from "@jinn-network/task-posting";',
+        'import type {',
+        '  PostingApproval,',
+        '  PostingDeps,',
+        '  PostingPlan,',
+        '  PostingPlanEntry,',
+        '  PostingPolicy,',
+        '  PostingPoolEntry,',
+        '  PostingRunSummary,',
+        '  PostingSkip,',
+        '} from "@jinn-network/task-posting";',
+        '',
+        'export type PostingSurface = [',
+        '  typeof planPosting,',
+        '  typeof executePosting,',
+        '  typeof buildDispatchSubmission,',
+        '  typeof PostingRefusedError,',
+        '  typeof POSTING_SUBMISSION_NAMESPACE,',
+        '  PostingApproval, PostingDeps, PostingPlan, PostingPlanEntry,',
+        '  PostingPolicy, PostingPoolEntry, PostingRunSummary, PostingSkip,',
+        '];',
+        '',
+      ].join('\n'),
   );
   await writeFile(join(consumerRoot, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {

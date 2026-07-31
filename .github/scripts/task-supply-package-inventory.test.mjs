@@ -9,19 +9,23 @@ const DEPENDENCY_SECTIONS = [
   'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
 ];
 
-// C5 (posting) and C6 (curation) append their rows here as they land.
+// C6 (curation) appends its row here as it lands.
 const TASK_SUPPLY_PACKAGES = [
   ['admission', '@jinn-network/task-admission'],
   ['derivation', '@jinn-network/task-derivation'],
+  ['posting', '@jinn-network/task-posting'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/task-supply; map name -> absolute dir.
 const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+  ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
+  ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
+  ['@jinn-network/marketplace-binding', join(root, 'packages', 'marketplace', 'binding')],
 ]);
 
 // Admission consumes environments/record types + digests and trust-core's DSSE spine, and
@@ -48,6 +52,35 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     // trust-core (via admission) nor evidence-protocol (via environments/record) is published.
     // Declared here rather than as dependencies because derivation's source imports neither.
     portalResolutions: ['@jinn-network/trust-core', '@jinn-network/evidence-protocol'],
+  }],
+  // posting is an application over the binding (design §3.3): it consumes the marketplace
+  // binding's posting mechanics plus the D7 on-ramp adapters, the protocol package that owns
+  // Submission sealing, and derivation for the pool listing type ONLY (finding F-C5-5 — the
+  // source-boundary guard asserts that edge is `import type`).
+  ['posting', {
+    dependencies: [
+      '@jinn-network/marketplace-binding',
+      '@jinn-network/task-derivation',
+      '@jinn-network/task-execution-protocol',
+    ],
+    // Shadow devDependencies: marketplace-binding's own portal closure needs top-level
+    // resolutions in a standalone yarn project (marketplace inventory guard's documented
+    // pattern).
+    devDependencies: [
+      '@jinn-network/task-execution-backend',
+      '@jinn-network/task-execution-profiles',
+      '@jinn-network/trust-core',
+      '@jinn-network/trust-resolve',
+    ],
+    optionalDependencies: [], peerDependencies: [],
+    // Transitive portals reached through task-derivation (environments/record and its
+    // evidence-protocol dependency, plus task-admission). Posting's source imports none of
+    // them; yarn still needs the resolution to build the portal graph.
+    portalResolutions: [
+      '@jinn-network/environment-record',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/task-admission',
+    ],
   }],
 ]);
 
