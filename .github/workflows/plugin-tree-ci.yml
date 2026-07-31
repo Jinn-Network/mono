@@ -17,6 +17,7 @@ on:
       - "packages/evidence/**"
       - "packages/trust/core/**"
       - "docs/superpowers/plans/2026-07-30-plugin-c4-capture.md"
+      - "plugin/runtime/fixtures/**"
 
 permissions:
   contents: read
