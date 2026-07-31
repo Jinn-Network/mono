@@ -46,8 +46,16 @@ export { SAFE_ABI, buildSafeSignature, executeSafeTransaction } from "./venue/sa
 export type { SafeTransactionParams } from "./venue/safe.js";
 export { createEoaBroadcastPort } from "./venue/eoa-broadcast.js";
 export type { EoaBroadcastOptions } from "./venue/eoa-broadcast.js";
-export { DEFAULT_SCAN_BLOCK_RANGE, scanForOnChainMatch } from "./venue/task-created-scan.js";
-export type { AmbiguousMatchReport, OnChainMatchScanConfig } from "./venue/task-created-scan.js";
+export {
+  DEFAULT_CLAIM_SKEW_SECONDS,
+  DEFAULT_SCAN_BLOCK_RANGE,
+  scanForOnChainMatch,
+} from "./venue/task-created-scan.js";
+export type {
+  AmbiguousMatchReport,
+  OnChainMatchScanConfig,
+  StaleMatchReport,
+} from "./venue/task-created-scan.js";
 export { JINN_ROUTER_V3_ABI } from "./abis/jinn-router-v3.js";
 export { JINN_ROUTER_V4_ABI } from "./abis/revised-contracts.js";
 export { TASK_COORDINATOR_ABI } from "./abis/task-coordinator.js";
@@ -79,6 +87,10 @@ export {
   recoverPostingIntents,
 } from "./broadcast-intent.js";
 export { createFilePostingIntentStore } from "./posting-intent-file-store.js";
+export type {
+  FilePostingIntentStoreOptions,
+  MalformedIntentRecordReport,
+} from "./posting-intent-file-store.js";
 export type {
   OwnedPostingIntentRecord,
   PostingIntent,

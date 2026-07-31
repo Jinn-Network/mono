@@ -6,19 +6,26 @@
 // one suite against both.
 //
 // Atomicity, concretely:
-//   claim   -- a single `open(path, "wx")`. O_EXCL makes the OS pick the winner, so there is no
-//              read-then-write window and no racy lookup-then-unconditional-write (the port's
-//              stated prohibition).
+//   claim   -- write the whole record to a sibling temp, fsync it, then `link` it into place.
+//              `link` fails EEXIST atomically (the OS picks the winner, exactly like O_EXCL) but
+//              the bytes are already durable, so the record name never exists half-written or
+//              zero-length. That is what makes `claim` atomic in CONTENT and not merely in
+//              existence: there is no state a second claimant could read as "empty" and take
+//              over, which is the racy lookup-then-unconditional-write the port forbids.
 //   resolve -- write a sibling temp file, fsync it, `rename` it over the record. POSIX rename
 //              within one directory replaces atomically, so a reader sees the old record or the
 //              new one, never a half-written one.
 //   both    -- fsync the file and then the directory before returning. A write-ahead record that
 //              is only in the page cache is not a write-ahead record.
 //
+// A file this store did not write (empty, truncated, or otherwise unparseable) is never taken
+// over: `claim` refuses it, and `scanPending` quarantines it so one poisoned file cannot deny
+// recovery to every other pending intent in the directory.
+//
 // This store owns the crash-safety half only. It is NOT a cross-session "already posted" ledger;
 // a caller wanting full idempotent resubmission keeps its own completed-post record (see
 // broadcast-intent.ts's header).
-import { mkdir, open, readFile, readdir, rename, unlink } from "node:fs/promises";
+import { link, mkdir, open, readFile, readdir, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   OwnedPostingIntentRecord,
@@ -113,11 +120,31 @@ async function syncDirectory(directory: string): Promise<void> {
   }
 }
 
+/** A file `scanPending` skipped because it is not a readable intent record. */
+export interface MalformedIntentRecordReport {
+  /** File name within the store directory; the file is left on disk for an operator to inspect. */
+  readonly file: string;
+  readonly reason: string;
+}
+
+export interface FilePostingIntentStoreOptions {
+  /**
+   * Called once per file `scanPending` quarantines. A torn record is the likeliest artifact of the
+   * process death this store exists to survive, and throwing on it would make every OTHER pending
+   * intent in the directory unrecoverable until someone hand-deleted the bad file. The scan skips
+   * and reports instead; the claim path still fails closed on the same file.
+   */
+  readonly onMalformedRecord?: (report: MalformedIntentRecordReport) => void;
+}
+
 /**
  * @param directory absolute path the store owns; created on first write. One directory per
  * requester identity keeps `scanPending` scoped to the intents that identity may resolve.
  */
-export function createFilePostingIntentStore(directory: string): PostingIntentStore {
+export function createFilePostingIntentStore(
+  directory: string,
+  options: FilePostingIntentStoreOptions = {},
+): PostingIntentStore {
   let prepared: Promise<void> | undefined;
   const ensureDirectory = async (): Promise<void> => {
     prepared ??= mkdir(directory, { recursive: true }).then(() => undefined);
@@ -132,11 +159,24 @@ export function createFilePostingIntentStore(directory: string): PostingIntentSt
       if (errorCode(error) === "ENOENT") return undefined;
       throw error;
     }
-    if (text.trim() === "") return undefined; // a claim interrupted before its record was durable
+    // `claim` links a fully-written record into place, so this store never produces an empty one.
+    // An empty file is therefore foreign, and refusing it is the same fail-closed answer a
+    // truncated one gets -- never a takeover.
+    if (text.trim() === "") {
+      throw new Error(
+        `posting intent record ${name} is empty -- this store cannot have written it; refusing to `
+          + "claim over a record it does not own",
+      );
+    }
     return parse(text);
   };
 
-  const writeThroughRename = async (name: string, record: StoredRecord): Promise<void> => {
+  /** Writes the record to a durable temp, then hands it to `commit` under the record's own name. */
+  const writeDurableTemp = async (
+    name: string,
+    record: StoredRecord,
+    commit: (temporary: string, target: string) => Promise<void>,
+  ): Promise<void> => {
     const target = join(directory, name);
     const temporary = `${target}.${crypto.randomUUID()}.tmp`;
     const handle = await open(temporary, "wx");
@@ -147,12 +187,33 @@ export function createFilePostingIntentStore(directory: string): PostingIntentSt
       await handle.close();
     }
     try {
-      await rename(temporary, target);
-    } catch (error) {
+      await commit(temporary, target);
+    } finally {
+      // After `link` the target is a second name for the same inode, so dropping the temp is
+      // always correct; after `rename` the temp is already gone and the unlink is a no-op.
       await unlink(temporary).catch(() => undefined);
-      throw error;
     }
     await syncDirectory(directory);
+  };
+
+  const writeThroughRename = async (name: string, record: StoredRecord): Promise<void> => {
+    await writeDurableTemp(name, record, async (temporary, target) => {
+      await rename(temporary, target);
+    });
+  };
+
+  /** Creates the record under its own name, or reports that the name is already taken. */
+  const claimThroughLink = async (name: string, record: StoredRecord): Promise<boolean> => {
+    let created = true;
+    await writeDurableTemp(name, record, async (temporary, target) => {
+      try {
+        await link(temporary, target);
+      } catch (error) {
+        if (errorCode(error) !== "EEXIST") throw error;
+        created = false;
+      }
+    });
+    return created;
   };
 
   const requireOwned = async (key: PostingIntentKey, ownerToken: PostingOwnerToken) => {
@@ -178,38 +239,27 @@ export function createFilePostingIntentStore(directory: string): PostingIntentSt
         ownerToken: `posting-owner:${crypto.randomUUID()}`,
       };
 
-      let handle;
-      try {
-        handle = await open(join(directory, name), "wx");
-      } catch (error) {
-        if (errorCode(error) !== "EEXIST") throw error;
-        const existing = await readRecord(name);
-        if (existing === undefined) {
-          // A zero-length record provably precedes any broadcast: `postTask` broadcasts only
-          // after `claim` returns owner, and the record is durable before that. Taking it over is
-          // safe, and if two callers do so at once the loser's `fence` fails and it raises
-          // BroadcastUncertainError rather than posting twice -- at-most-once holds.
-          await writeThroughRename(name, record);
-          return { kind: "owner", intent, ownerToken: record.ownerToken as PostingOwnerToken };
-        }
-        if (existing.resolved !== undefined) {
-          return {
-            kind: "resolved",
-            outcome: { taskId: BigInt(existing.resolved.taskId), txHash: existing.resolved.txHash },
-          };
-        }
-        const { ownerToken: _ownerToken, resolved: _resolved, ...view } = toOwnedRecord(existing);
-        return { kind: "pending-other", intent: view };
+      if (await claimThroughLink(name, record)) {
+        return { kind: "owner", intent, ownerToken: record.ownerToken as PostingOwnerToken };
       }
 
-      try {
-        await handle.writeFile(serialize(record), "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
+      // The name was taken; the record under it is complete by construction. `readRecord` throws
+      // on anything this store did not write, which is the fail-closed answer -- never a takeover.
+      const existing = await readRecord(name);
+      if (existing === undefined) {
+        throw new Error(
+          `posting intent record ${name} existed when this claim was made and vanished before it `
+            + "could be read -- another writer is mutating this store's directory",
+        );
       }
-      await syncDirectory(directory);
-      return { kind: "owner", intent, ownerToken: record.ownerToken as PostingOwnerToken };
+      if (existing.resolved !== undefined) {
+        return {
+          kind: "resolved",
+          outcome: { taskId: BigInt(existing.resolved.taskId), txHash: existing.resolved.txHash },
+        };
+      }
+      const { ownerToken: _ownerToken, resolved: _resolved, ...view } = toOwnedRecord(existing);
+      return { kind: "pending-other", intent: view };
     },
 
     async fence(key: PostingIntentKey, ownerToken: PostingOwnerToken): Promise<boolean> {
@@ -259,8 +309,19 @@ export function createFilePostingIntentStore(directory: string): PostingIntentSt
       // way twice (localeCompare is banned in this tree -- see src/order.ts).
       const records: OwnedPostingIntentRecord[] = [];
       for (const name of names.filter((entry) => entry.endsWith(RECORD_SUFFIX)).sort(compareCodeUnitStrings)) {
-        // eslint-disable-next-line no-await-in-loop -- recovery scans are small and sequential.
-        const stored = await readRecord(name);
+        let stored: StoredRecord | undefined;
+        try {
+          // eslint-disable-next-line no-await-in-loop -- recovery scans are small and sequential.
+          stored = await readRecord(name);
+        } catch (error) {
+          // Quarantine, do not throw: one unreadable file must not make every other pending intent
+          // in this directory unrecoverable. The file stays on disk; the caller is told about it.
+          options.onMalformedRecord?.({
+            file: name,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+          continue;
+        }
         if (stored === undefined || stored.resolved !== undefined) continue;
         records.push(toOwnedRecord(stored));
       }

@@ -47,6 +47,29 @@ describe.each([
     if (second.kind === "pending-other") expect(second.intent.idempotencyKey).toBe("key-a");
   });
 
+  test("concurrent claims on one key produce exactly one owner", async () => {
+    // The port's stated prohibition: `claim` atomically creates ownership, never a racy
+    // lookup-then-unconditional-write. Racing N claimants is the only case that sees the
+    // difference -- every other case in this suite is sequential, and a racy adapter passes them.
+    const store = make();
+    const claims = await Promise.all(Array.from({ length: 8 }, async () => store.claim(intent("2"))));
+    expect(claims.filter((claim) => claim.kind === "owner")).toHaveLength(1);
+    expect(claims.filter((claim) => claim.kind === "pending-other")).toHaveLength(7);
+    expect(await store.scanPending()).toHaveLength(1);
+  });
+
+  test("pending-other never leaks the owner token or the resolution", async () => {
+    const store = make();
+    const claim = await store.claim(intent("3"));
+    if (claim.kind !== "owner") throw new Error("expected owner");
+    const second = await store.claim(intent("3"));
+    if (second.kind !== "pending-other") throw new Error("expected pending-other");
+    // `BroadcastUncertainError` embeds this view in its message, so a leak here prints an owner
+    // token into operator logs.
+    expect(Object.keys(second.intent)).not.toContain("ownerToken");
+    expect(Object.keys(second.intent)).not.toContain("resolved");
+  });
+
   test("a resolved key replays its outcome instead of re-claiming", async () => {
     const store = make();
     const claim = await store.claim(intent("b"));
