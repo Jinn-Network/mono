@@ -3152,3 +3152,29 @@ Recorded per the designs-are-law rule (program §Global constraints). Each carri
 
 - **F-C3-16 — Task 10 Step 9's `grep -n "plugin/" client/Dockerfile` matches the frozen `packages/plugin/` COPY lines.** Those lines are pre-existing and required; the product tree `plugin/` is absent. **Disposition:** treat the gate as "no product-tree path (`plugin/runtime`, root `plugin/`) in the operator image"; do not edit `client/Dockerfile`.
 
+---
+
+## Review amendments — 2026-07-31 (clean-slate consolidated review-fix wave)
+
+Recorded per the coordinator's consolidated review. Historical task text above is unchanged.
+
+- **R-C3-1 — Custody canary bypasses and dropped import bans (Important; IMPLEMENT).** The source-boundary guard's process-surface scanner detected only dotted `process.env`/`argv`/`stdout` and console writes. Independent probe proved these bypass forms passed unflagged outside `bin.ts`: `import { env, argv, stdout } from "node:process"`; equivalent imports from `process`; `process["env"]` bracket access; `const p = process; p.env` alias acquisition. The guard also lacked the custody precedent's `node:fs`/`fs` and `node:child_process`/`child_process` direct-import bans. **Disposition applied:** outside `plugin/runtime/src/bin.ts`, reject `node:process`/`process` module imports, bracket access to confined surfaces, and alias acquisition; across production source (excluding `bin.ts`, which holds `realpathSync` for entry detection), reject direct imports of `node:fs`/`fs` and `node:child_process`/`child_process` including subpaths. Self-tests added for each bypass form. **Evidence:** boundaries guard `# pass 14`; red probe showed dotted-only scanner `oldHits: 0` on combined bypass fixture; hardened scanner catches `moduleImports: 2`, `bracket: 1`, `alias: 1`.
+
+- **R-C3-2 — `PERMITTED_PACKAGES` must constrain third-party install-time deps (Important; IMPLEMENT).** The comment claimed anything not on the allowlist requires a reviewed edit, but the manifest assertion exempted every non-`@jinn-network/*` dependency. **Disposition applied:** `PERMITTED_PACKAGES` is authoritative for `dependencies`, `optionalDependencies`, and `peerDependencies`; `devDependencies` remain free. Separate Jinn graph/portal checks preserved. Negative self-test proves `lodash` in `dependencies` is rejected; `zod` remains admitted. No runtime dependency added or removed.
+
+- **R-C3-3 — Guard completeness asymmetry (Minor; FIX).** Inventory guard proved package-list completeness; source-boundary and packed-types guards hardcoded one package without discovery assertion. **Disposition applied:** `BOUNDARY_SCANNED_PACKAGES` in source-boundaries and `PACKED_TYPES_PACKAGES` in packed-types each proved against `discoveredPluginPackageDirectories()` so a future npm package under `plugin/` cannot be inventoried while silently omitted.
+
+- **R-C3-4 — Health validation escapes runtime error taxonomy; vacuous test (Minor; FIX).** `summarizeHealth` threw bare `Error` for empty name/detail and duplicate names. **Disposition applied:** added `health-invalid` to `RUNTIME_ERROR_CODES`; `summarizeHealth` throws `PluginRuntimeError` with that code; `runtime.test.ts` vacuous `.catch()` replaced with `rejects.toBeInstanceOf`; health and logger tests assert code membership. Component-extensible string error codes preserved.
+
+- **R-C3-5 — Keepalive cleanup on startup failure (Minor; RECORD ONLY, deferred to C4).** Process entry arms `untilShutdown()` before `runtime.start()`; future non-empty capabilities can make `start()` fail while signal timer/listeners remain armed. **Disposition:** C4's first non-empty capability wiring must add cancellable shutdown registration (or equivalent try/finally cleanup) and a startup-failure process test before accepting a capability that can fail. C3 ships `capabilities: []` — no live `start()` failure path exists today. Do not redesign `ProcessIo` API in this wave.
+
+- **R-C3-6 — Export condition order (Minor; FIX).** **Disposition applied:** root export condition reordered to `types` before `import` in `plugin/runtime/package.json`; manifest assertion updated. Design-neutral plan correction — historical text specified the opposite order.
+
+- **R-C3-7 — Task 10 expected test-file count (Minor; PLAN-ONLY).** Fresh full suite is **6 test files / 55 tests** (was 5 files / 54 tests at Task 10 close; one additional health validation test in this wave). Historical Step 8 expectation of 5 files preserved above.
+
+- **R-C3-8 — Contract 11 composition-root ambiguity (Recommendation; RECORD ONLY).** Program contract 11: composition root ("the binary, or a thin adapter beside it") may depend on `viem`; `plugin/runtime` may not. C3's binary lives inside `plugin/runtime` and the guard applies to that package. **Disposition:** non-blocking for C3 but blocking C5/C7 chain-facing wiring pending operator disposition. No `viem` added, runtime allowlist not weakened, no new package/path, no topology chosen.
+
+- **R-C3-9 — C7 stderr expectation (Recommendation; RECORD ONLY).** F-C3-13's `configuration resolved` info-level line writes the resolved home path to stderr during normal health invocation. Stdout remains clean. **Disposition:** C7 doctor rendering/rehearsal should expect this line rather than classify it as protocol noise.
+
+- **R-C3-10 — C0+C3 integration proof (Recommendation; RECORD ONLY).** Program-level integration gate: once C0 and C3 heads are both review-clean, source-boundary guard must run on a temporary combined head containing actual `plugin/frozen` content, proving synthetic frozen-trio refusal also holds against the relocated tree. **Disposition:** do not merge C0 into C3 or alter branch topology in this wave.
+
