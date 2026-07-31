@@ -1562,7 +1562,7 @@ git commit -m "feat(plugin-runtime): fail-closed source and producer admission o
 
 `packages/discovery/client/src/sync.ts:16-19` states the boundary plainly: *"Linkage depth here is data acquisition only -- `verify-driver.ts` (Task 20) is what actually VERIFIES the walked chain … this module just fetches and parses the wire bytes."* A mirror built on `coldSync`/`returningSync` alone therefore verifies nothing. This task makes that fact a *typed, required decision at construction* instead of an omission nobody notices.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/corpus/chain-verification.test.ts`:
 
@@ -1662,12 +1662,12 @@ describe("driver-backed chain verification", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test src/corpus/chain-verification.test.ts`
 Expected: FAIL — `Failed to resolve import "./chain-verification.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/corpus/chain-verification.ts`:
 
@@ -1796,12 +1796,12 @@ export function createDriverChainVerification(driver: VerifyDriver): ChainVerifi
 >       }
 > ```
 
-- [ ] **Step 4: Simplify the catch block as noted, then run the test**
+- [x] **Step 4: Simplify the catch block as noted, then run the test**
 
 Run: `cd plugin/runtime && yarn test src/corpus/chain-verification.test.ts && yarn typecheck`
 Expected: PASS (6 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src/corpus
