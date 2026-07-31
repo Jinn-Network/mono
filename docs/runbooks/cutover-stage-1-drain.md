@@ -2,22 +2,24 @@
 
 Contract 10. Run in order. Do not deploy with step 2 unfinished.
 
-> **Do not run this runbook yet.** The close-out leg (2026-07-31) built everything finding **E20**
-> named — the projector's production event feed, the enrich step, the durable observation stream —
-> plus a real `verifySettlementGrade`, a wired legacy bridge, and a per-daemon broadcaster. All
-> three loops now start on real ports. The loop still cannot close, for two reasons that are now
-> precisely located rather than diffuse:
+> **Do not run this runbook yet.** The final leg (2026-07-31) discharged every ruling: the bridge
+> synthesizes a Submission for legacy-posted tasks (E32), deliveries are signed with a real
+> executor key (E31), and the e2e gate now runs the full bootstrap and drives the projector into
+> stage-1 code (E37). The loop still does not close, and what remains is two named blockers rather
+> than a diffuse gap:
 >
-> - **E32** — nothing in the repository produces a today-generation TEP `Submission` document. The
->   legacy creator posts `SignedTaskV1`, which fails TEP validation, so the enrich step correctly
->   drops every event and the observation stream stays empty. Needs a design decision: either the
->   creator emits TEP Submissions, or a bridge synthesizes them.
-> - **E31** — nothing signs deliveries, so `executorBinding` reports `"missing"` and settlement is
->   rejected. `TrustKeyConfig` currently advertises that the daemon signs deliveries when it does
->   not. Needs a two-phase seal inside `completeAttempt`.
+> - **E35** — `ObservationProjectionContext.dispatchContext` has no honest source. Nothing seals or
+>   pins the descriptor: the pipeline builds it in memory and discards it, venue-base's
+>   `submission_scopes` is revised-generation-only, and the engagement ledger has no field for it.
+>   Unlike the Submission, spec §10 licenses no synthesis for this shape. **Needs a ruling of the
+>   same kind E32 got.**
+> - **E36** — restoration claiming has no live path. Task 16 correctly retired discovery from
+>   `watchForTasks()`, but its replacement was never wired: `main.ts` hardcodes
+>   `archive: { since: async () => [] }` and the e2e never constructs a `WorkLoop`. The old door is
+>   shut and the new one was never hung.
 >
 > See `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md`. Step 4's gate cannot pass
-> until both land. The runbook is settled now so it is ready when they do.
+> until both land. The runbook is settled and ready for when they do.
 
 ## 1. Stop claiming (previous canary, no new build)
 
