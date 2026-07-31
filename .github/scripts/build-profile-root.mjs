@@ -6,7 +6,15 @@ import { dirname, join, sep } from 'node:path';
 
 import { discoverStackPackages } from './stack-package-graph.mjs';
 
-export const PROFILE_SOURCE_DIRECTORIES = ['profiles', 'profile', 'schemas'];
+// Deliberately excludes a bare top-level 'schemas': the two packages that pack one
+// (task-execution-protocol, benchmarking-records) declare no $id on any document inside
+// it, so there is no https://jinn.network/... identity to serve it at. Nesting a
+// `schemas/` directory under `profiles/` or `profile/` (as evidence-protocol and
+// evidence-repository-oci do) is still walked, because that recursion happens through
+// PROFILE_SOURCE_DIRECTORIES' 'profiles'/'profile' entries below.
+export const PROFILE_SOURCE_DIRECTORIES = ['profiles', 'profile'];
+
+const JINN_NETWORK_ORIGIN = 'https://jinn.network/';
 
 const MEDIA_TYPES = new Map([
   ['.schema.json', 'application/schema+json'],
@@ -33,6 +41,38 @@ function walkFiles(directory, prefix, found) {
   return found;
 }
 
+// A document under fixtures/ is test data, not self-identity: fixture bodies legitimately
+// reuse `$id`/`profile`-shaped string values as inputs under test (e.g. a fixture that
+// exercises task-profile resolution literally contains `"profile": "https://jinn.network/..."`
+// as its payload), so fixtures are never eligible for declared-identifier remapping — they
+// are always served at their directory-derived path.
+function isFixturePath(servedPath) {
+  return servedPath.split('/').includes('fixtures');
+}
+
+// A JSON Schema document self-identifies with `$id`; a record-discovery facts-projection
+// profile document (packages/discovery/facts/*) self-identifies with a top-level `profile`
+// field naming itself (design §8.4's "published profile URIs resolve" gate covers both). A
+// document that declares neither has no claimed identity to violate, and is served at its
+// directory-derived path unchanged.
+function declaredIdentifier(servedPath, bytes) {
+  if (isFixturePath(servedPath)) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(bytes.toString('utf8'));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  for (const field of ['$id', 'profile']) {
+    const value = parsed[field];
+    if (typeof value === 'string' && value.startsWith(JINN_NETWORK_ORIGIN)) {
+      return value.slice(JINN_NETWORK_ORIGIN.length);
+    }
+  }
+  return null;
+}
+
 export function buildProfileRoot({ repoRoot, outDir, commit }) {
   const claims = new Map();
   const documents = [];
@@ -43,19 +83,20 @@ export function buildProfileRoot({ repoRoot, outDir, commit }) {
       const absolute = join(repoRoot, pkg.directory, source);
       if (!existsSync(absolute) || !statSync(absolute).isDirectory()) continue;
       for (const file of walkFiles(absolute, source, [])) {
-        const claimed = claims.get(file.servedPath);
-        if (claimed && claimed !== pkg.name) {
-          throw new Error(`${file.servedPath} is claimed by both ${claimed} and ${pkg.name}`);
-        }
-        claims.set(file.servedPath, pkg.name);
         const bytes = readFileSync(file.absolutePath);
+        const servedPath = declaredIdentifier(file.servedPath, bytes) ?? file.servedPath;
+        const claimed = claims.get(servedPath);
+        if (claimed && claimed !== pkg.name) {
+          throw new Error(`${servedPath} is claimed by both ${claimed} and ${pkg.name}`);
+        }
+        claims.set(servedPath, pkg.name);
         documents.push({
-          path: file.servedPath,
+          path: servedPath,
           sha256: createHash('sha256').update(bytes).digest('hex'),
           mediaType: mediaTypeFor(file.servedPath),
           sourcePackage: pkg.name,
         });
-        const target = join(outDir, ...file.servedPath.split('/'));
+        const target = join(outDir, ...servedPath.split('/'));
         mkdirSync(dirname(target), { recursive: true });
         copyFileSync(file.absolutePath, target);
       }

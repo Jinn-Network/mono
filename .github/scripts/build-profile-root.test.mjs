@@ -82,6 +82,109 @@ test('a colliding served path across two packages is refused', () => {
   }
 });
 
+test('a document is served at its declared $id, not its directory location', () => {
+  const root = mkdtempSync(join(tmpdir(), 'jinn-profile-root-'));
+  const packageDir = join(root, 'packages/evidence/repository-ipfs');
+  mkdirSync(join(packageDir, 'profile/v1'), { recursive: true });
+  writeFileSync(join(packageDir, 'package.json'), `${JSON.stringify({
+    name: '@jinn-network/evidence-repository-ipfs',
+    version: '0.1.0',
+    publishConfig: { access: 'public' },
+    files: ['dist/', 'profile/'],
+  }, null, 2)}\n`, 'utf8');
+  writeFileSync(
+    join(packageDir, 'profile/v1/registration.schema.json'),
+    JSON.stringify({ $id: 'https://jinn.network/profiles/evidence-repository-ipfs-registration/1/registration.schema.json' }),
+    'utf8',
+  );
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
+  try {
+    const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
+    assert.deepEqual(manifest.documents.map((d) => d.path), [
+      'profiles/evidence-repository-ipfs-registration/1/registration.schema.json',
+    ]);
+    assert.ok(existsSync(join(outDir, 'profiles/evidence-repository-ipfs-registration/1/registration.schema.json')));
+    assert.ok(!existsSync(join(outDir, 'profile/v1/registration.schema.json')));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('a record-discovery facts profile document is served at its declared "profile" field', () => {
+  const root = mkdtempSync(join(tmpdir(), 'jinn-profile-root-'));
+  const packageDir = join(root, 'packages/discovery/facts/evidence');
+  mkdirSync(join(packageDir, 'profiles'), { recursive: true });
+  writeFileSync(join(packageDir, 'package.json'), `${JSON.stringify({
+    name: '@jinn-network/record-discovery-facts-evidence',
+    version: '0.1.0',
+    publishConfig: { access: 'public' },
+    files: ['dist/', 'profiles/'],
+  }, null, 2)}\n`, 'utf8');
+  writeFileSync(
+    join(packageDir, 'profiles/execution-evidence.1.0.json'),
+    JSON.stringify({ profile: 'https://jinn.network/records/execution-evidence/1.0/facts/1.0' }),
+    'utf8',
+  );
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
+  try {
+    const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
+    assert.deepEqual(manifest.documents.map((d) => d.path), ['records/execution-evidence/1.0/facts/1.0']);
+    assert.equal(manifest.documents[0].mediaType, 'application/json');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('a fixture that reuses a "profile" value as test data is never treated as self-identifying', () => {
+  const root = mkdtempSync(join(tmpdir(), 'jinn-profile-root-'));
+  const packageDir = join(root, 'packages/task-execution/profiles');
+  mkdirSync(join(packageDir, 'profiles/fixtures/task-profile/golden'), { recursive: true });
+  writeFileSync(join(packageDir, 'package.json'), `${JSON.stringify({
+    name: '@jinn-network/task-execution-profiles',
+    version: '0.1.0',
+    publishConfig: { access: 'public' },
+    files: ['dist/', 'profiles/'],
+  }, null, 2)}\n`, 'utf8');
+  writeFileSync(
+    join(packageDir, 'profiles/fixtures/task-profile/golden/minimal-profile.json'),
+    JSON.stringify({ profile: 'https://jinn.network/task-profiles/example-domain/1.0' }),
+    'utf8',
+  );
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
+  try {
+    const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
+    assert.deepEqual(manifest.documents.map((d) => d.path), [
+      'profiles/fixtures/task-profile/golden/minimal-profile.json',
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('a flat top-level schemas/ directory is not part of the profile root', () => {
+  const root = mkdtempSync(join(tmpdir(), 'jinn-profile-root-'));
+  const packageDir = join(root, 'packages/task-execution/protocol');
+  mkdirSync(join(packageDir, 'schemas'), { recursive: true });
+  writeFileSync(join(packageDir, 'package.json'), `${JSON.stringify({
+    name: '@jinn-network/task-execution-protocol',
+    version: '0.1.0',
+    publishConfig: { access: 'public' },
+    files: ['dist/', 'schemas/'],
+  }, null, 2)}\n`, 'utf8');
+  writeFileSync(join(packageDir, 'schemas/task.schema.json'), '{"type":"object"}', 'utf8');
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
+  try {
+    const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
+    assert.deepEqual(manifest.documents, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
 test('manifestBytes are canonical and stable', () => {
   const manifest = { version: 1, generatedFrom: { repository: 'Jinn-Network/mono', commit: SHA }, documents: [] };
   assert.equal(manifestBytes(manifest), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -97,6 +200,36 @@ test('the real repository produces a non-empty profile root', () => {
       assert.match(document.sha256, /^[0-9a-f]{64}$/);
       assert.ok(existsSync(join(outDir, document.path)));
     }
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('URI resolution gate: every real document declaring a jinn.network identifier is served at exactly that path', () => {
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
+  try {
+    const manifest = buildProfileRoot({ repoRoot, outDir, commit: SHA });
+    let checked = 0;
+    for (const document of manifest.documents) {
+      if (document.path.split('/').includes('fixtures')) continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(readFileSync(join(outDir, document.path), 'utf8'));
+      } catch {
+        continue;
+      }
+      for (const field of ['$id', 'profile']) {
+        const value = parsed?.[field];
+        if (typeof value !== 'string' || !value.startsWith('https://jinn.network/')) continue;
+        checked += 1;
+        assert.equal(
+          `https://jinn.network/${document.path}`,
+          value,
+          `${document.path} declares ${field} ${value} but is served elsewhere`,
+        );
+      }
+    }
+    assert.ok(checked >= 20, `expected to check at least 20 self-declaring documents, checked ${checked}`);
   } finally {
     rmSync(outDir, { recursive: true, force: true });
   }
