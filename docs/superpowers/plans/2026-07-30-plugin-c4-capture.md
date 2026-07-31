@@ -5131,7 +5131,7 @@ git commit -m "test(plugin-runtime): end-to-end capture, protocol conformance, a
 - Consumes: every module from Tasks 3–11.
 - Produces: `@jinn-network/plugin-runtime`'s capture surface, the capability registered in the process, and green CI. After this task C6 can build on the branch.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plugin/runtime/src/capture/surface.test.ts`:
 
@@ -5196,7 +5196,7 @@ describe("public surface", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/surface.test.ts
@@ -5204,7 +5204,7 @@ cd plugin/runtime && yarn test src/capture/surface.test.ts
 
 Expected: FAIL — `index.ts` exports none of the capture names.
 
-- [ ] **Step 3: Export the capture surface**
+- [x] **Step 3: Export the capture surface**
 
 Append to `plugin/runtime/src/index.ts`:
 
@@ -5285,7 +5285,7 @@ export {
 export type { BuiltTrajectory } from "./capture/trajectory.js";
 ```
 
-- [ ] **Step 4: Register the capability in the process**
+- [x] **Step 4: Register the capability in the process**
 
 In `plugin/runtime/src/bin.ts`, read the package version (this file is the only one permitted to touch ambient state) and pass the capability to `createPluginRuntime`:
 
@@ -5303,7 +5303,7 @@ const runtime = createPluginRuntime({
 });
 ```
 
-- [ ] **Step 5: Write the privacy statement into the README**
+- [x] **Step 5: Write the privacy statement into the README**
 
 Append to `plugin/runtime/README.md`:
 
@@ -5380,7 +5380,7 @@ seal that finds the archive held waits, and after
 `JINN_PLUGIN_ARCHIVE_BUSY_TIMEOUT_MS` (10 s by default) reports `capture-archive-busy`.
 ```
 
-- [ ] **Step 6: Ship the fixtures in CI and run the whole tree**
+- [x] **Step 6: Ship the fixtures in CI and run the whole tree**
 
 In `.github/workflows/plugin-tree-ci.yml`, confirm the `runtime` job's verify step runs the whole suite (it already runs `yarn test`), and add the capture fixtures to the workflow's `paths` filter:
 
@@ -5388,7 +5388,7 @@ In `.github/workflows/plugin-tree-ci.yml`, confirm the `runtime` job's verify st
       - 'plugin/runtime/fixtures/**'
 ```
 
-- [ ] **Step 7: Run the full local verification**
+- [x] **Step 7: Run the full local verification**
 
 ```bash
 cd plugin/runtime && yarn install --immutable && yarn typecheck && yarn test && yarn build
@@ -5406,7 +5406,7 @@ node --test .github/scripts/evidence-source-boundaries.test.mjs
 
 Expected: every command PASS. The boundary guard is the one that proves the frozen trio was never touched.
 
-- [ ] **Step 8: Commit and mark the PR ready**
+- [x] **Step 8: Commit and mark the PR ready**
 
 ```bash
 git add plugin/runtime .github/workflows/plugin-tree-ci.yml
