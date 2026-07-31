@@ -51,7 +51,7 @@ describe('#1043 loop-heartbeat helper', () => {
     expect(getLoopTick(store, 'creator')).toBeNull();
   });
 
-  it('enumerates the twelve canonical watchdog loops', () => {
+  it('enumerates the thirteen canonical watchdog loops', () => {
     expect([...LOOP_NAMES].sort()).toEqual(
       [
         'balance-topup',
@@ -66,6 +66,7 @@ describe('#1043 loop-heartbeat helper', () => {
         'peer-sync',
         'projector',
         'reward-claim',
+        'work',
       ].sort(),
     );
   });

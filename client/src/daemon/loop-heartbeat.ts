@@ -18,7 +18,7 @@ import { emitEvent } from '../observability/emit-event.js';
 export const LOOP_HEARTBEAT_PREFIX = 'loop_heartbeat:';
 
 /**
- * The twelve canonical long-running loops the watchdog supervises, with their
+ * The thirteen canonical long-running loops the watchdog supervises, with their
  * default poll intervals and (for the for-await polling loops) a staleness
  * floor. The two for-await adapter loops (engine-watcher, delivery-watcher)
  * heartbeat at the poll-cycle tail inside the mech adapter so an
@@ -46,6 +46,7 @@ export const LOOP_REGISTRY = [
   { name: 'peer-sync', intervalMs: 60_000 },
   { name: 'projector', intervalMs: 5000, floorMs: 300_000 },
   { name: 'evidence-driver', intervalMs: 30_000, floorMs: 300_000 },
+  { name: 'work', intervalMs: 5000, floorMs: 300_000 },
 ] as const;
 
 export const LOOP_NAMES = LOOP_REGISTRY.map(r => r.name);

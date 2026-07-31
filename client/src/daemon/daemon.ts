@@ -36,6 +36,7 @@ import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
 import { blockIdUtc } from '../spend/ai-units.js';
 import { SkipLogDeduper } from './skip-log-dedup.js';
 import type { OperatorComposition } from './composition-root.js';
+import { WorkLoop, type WorkLoopConfig } from './work-loop.js';
 
 type Corpus = CoreCorpus<SignedEnvelope>;
 
@@ -261,6 +262,19 @@ export interface DaemonConfig {
    * work loop(s) that actually drive it via `start()`.
    */
   composition?: OperatorComposition;
+
+  /**
+   * The work loop (Task 13, `client/src/daemon/work-loop.ts`): closes the claim-to-settle loop
+   * against `composition`. Everything except `composition`/`store`, both of which the daemon
+   * supplies itself. Omitted, or `composition` absent -> the loop is not started. NOTE: this
+   * task's write scope covers only starting `work` here — `projector`/`evidence-driver` are NOT
+   * yet started by `daemon.start()` even though both are already-landed loop classes (Tasks 9,
+   * 11); `ProjectorLoop` in particular cannot be constructed from `composition` alone today (no
+   * `enrich`/`logSource`/`cursorStore`/`isAuthorizedMechOrigin` assembly exists anywhere in
+   * `client/src` — composition-root.ts's own file header names this as known gap 1). See the
+   * Task 13 execution report.
+   */
+  work?: Omit<WorkLoopConfig, 'composition' | 'store'>;
 }
 
 export class Daemon {
@@ -283,6 +297,7 @@ export class Daemon {
   private evictionLoop?: EvictionLoop;
   private harvestLoop?: HarvestLoop;
   private checkpointLoop?: CheckpointLoop;
+  private workLoop?: WorkLoop;
   private watchdogLoop?: WatchdogLoop;
   private skipLogDeduper = new SkipLogDeduper();
   private corpus?: Corpus;
@@ -358,6 +373,9 @@ export class Daemon {
     }
     if (config.checkpoint && config.checkpoint.intervalMs > 0) {
       this.checkpointLoop = new CheckpointLoop({ ...config.checkpoint, jinnStore: this.store });
+    }
+    if (config.composition && config.work) {
+      this.workLoop = new WorkLoop({ ...config.work, composition: config.composition, store: this.store });
     }
   }
 
@@ -548,6 +566,19 @@ export class Daemon {
         }),
       );
     }
+    if (this.workLoop) {
+      this.loopPromises.push(
+        this.workLoop.run().catch(err => {
+          console.error('[daemon] work loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'work loop crashed',
+            errorCode: 'work_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
     // #1043 loop watchdog. Inert unless config.watchdog is supplied.
     //
     // IDEMPOTENCY (AC#3): the only recovery action is the watchdog's non-zero
@@ -569,6 +600,7 @@ export class Daemon {
       if (this.evictionLoop) started.add('eviction-check');
       if (this.checkpointLoop) started.add('checkpoint');
       if (this.harvestLoop) started.add('harvest');
+      if (this.workLoop) started.add('work');
       if (peers.length > 0) started.add('peer-sync');
       const overrides: Partial<Record<LoopName, number>> = {
         'engine-tick': interval,
@@ -577,6 +609,7 @@ export class Daemon {
         'eviction-check': this.config.evictionCheck?.intervalMs,
         checkpoint: this.config.checkpoint?.intervalMs,
         harvest: this.config.harvest?.intervalMs,
+        work: this.config.work?.pollIntervalMs,
       };
       const registrations: WatchdogLoopRegistration[] = LOOP_REGISTRY
         .filter(r => started.has(r.name))
@@ -632,6 +665,7 @@ export class Daemon {
     this.evictionLoop?.stop();
     this.harvestLoop?.stop();
     this.checkpointLoop?.stop();
+    this.workLoop?.stop();
     this.peerSync?.stop();
     this.watchdogLoop?.stop();
 
