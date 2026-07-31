@@ -5332,3 +5332,59 @@ service 634, mech deployed, `setAgentWallet` bound — starts the daemon with al
 task, and drives the projector into stage-1 code. It stops at E35 with a named, decoded reason,
 and would stop at E36 even if E35 were resolved. **`e2e:daemon-harness` reaches and exercises
 stage-1 code; it does not close the loop.**
+
+## Execution findings (2026-07-31, leg G)
+
+### E38 — sealing the dispatch context at claim time is circular for the event that causes the claim (ruled fix applied)
+
+Ruling E35 (seal at claim time, home it in the engagement ledger) is right about authorship and
+about seal-once. It has one ordering consequence the ruling does not mention: `resolveDispatchContext`
+is called during **enrich**, which runs strictly *before* the claim that seals the descriptor. So
+`TaskCreated` was dropped for want of a document that cannot exist until a claim — and `TaskCreated`
+is the event that triggers that claim. The gate showed this directly:
+`[projector-enrich] no dispatch context resolved for task 1 -- dropping`.
+
+Resolved without touching the ruling: only the `attempt-engaged` emission ever **dereferences**
+`projection.dispatchContext` (`packages/marketplace/projector/src/observe.ts:824`), and it is driven
+by `TaskAttemptCreated` / `EvaluationAttemptCreated` — events that exist *because* a claim already
+happened, which is exactly when the ledger row is sealed. Every other event kind carries the field
+structurally and never reads it. The drop is therefore scoped to the consuming events; the rest
+carry an explicitly unengaged descriptor naming their task, deliberately **not** a sealed document,
+because nothing has been engaged yet. Fabricating a sealed-looking descriptor there would have been
+the fabrication E35 rightly refused.
+
+**Effect:** the projector now admits tasks and `[work] claim gate open` appears — the projector
+cursor reaches the finalized head and the work loop runs.
+
+### E39 — the loop still does not close: the work loop opens its gate but claims nothing (**precisely located, handoff**)
+
+Final gate state, `JINN_E2E_HARNESS=prediction-v1-baseline yarn e2e:daemon-harness`:
+
+```
+posted task:  id=1 cidDigest=0xcea3eb17...
+[work] claim gate open — the projector cursor reached the finalized chain head
+FATAL: waitForDaemonClaim: timed out after 120000ms waiting for TaskAttemptCreated (taskId=1)
+```
+
+Everything upstream now works: fork remediation, full bootstrap, all loops started, task posted,
+projector admits, claim gate opens. What does not happen is the claim itself, and the refusal is
+**silent** — no `[work]` line names a skipped card.
+
+The remaining surface is narrow and named: between `ProjectorCursorStore.readObservations()` and
+`WorkLoop.tick()`'s claim, one of three things is true, and the next session should instrument
+rather than guess:
+1. the projector persisted **no** `submission-accepted` observation for this task (so
+   `buildArchiveSubscription` has nothing to map);
+2. the archive subscription produced no card (its own fail-closed paths — log decode, digest
+   cross-check, IPFS fetch — all skip-and-warn, so a `[archive]` warning would show);
+3. the work loop produced a card but skipped it — `mapAnnouncedSubmissionToFacts` refusal, a
+   claim-predicate/caps decline, or `admitClaimIntent` returning false.
+
+`WorkLoop.tick()` already returns per-card `WorkLoopOutcome`s carrying exactly these reasons
+(`mapping-refused`, `gate-closed`, `ai-units-capped`, `spend-capped`, `already-engaged`); they are
+simply not logged. **Log them, re-run, and the answer falls out in one cycle.** Two notes from
+leg G worth carrying: `estimateAiUnits: () => 0` in the e2e fixture, and the archive subscription
+re-reads the task's `TaskCreated` log via `getTransactionReceipt` per card per tick with no cache.
+
+Stopping at this boundary deliberately: the diagnosis needs one instrumented run, and a guess
+dressed as a fix would be worth less than a precise handoff.
