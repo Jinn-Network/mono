@@ -3179,7 +3179,7 @@ git commit -m "feat(evidence-trace-decode): the default decoder registry and the
 - Consumes: the finished package.
 - Produces: green guards and CI for `@jinn-network/evidence-trace-decode`; the package is now safe for C6 to depend on.
 
-- [ ] **Step 1: Add the allowlist constants and the escape self-test**
+- [x] **Step 1: Add the allowlist constants and the escape self-test**
 
 In `.github/scripts/evidence-source-boundaries.test.mjs`, immediately after C1's `TRAJECTORY_FORBIDDEN_PACKAGES` block, add:
 
@@ -3259,7 +3259,7 @@ test('Trace Decode boundary checks catch package, I/O, and ambient-network escap
 });
 ```
 
-- [ ] **Step 2: Add the boundary block**
+- [x] **Step 2: Add the boundary block**
 
 Inside `test('evidence source boundaries remain one-way across the approved graph', …)`, immediately after C1's trajectory block, add:
 
@@ -3371,12 +3371,12 @@ Inside `test('evidence source boundaries remain one-way across the approved grap
   );
 ```
 
-- [ ] **Step 3: Run the boundary guard**
+- [x] **Step 3: Run the boundary guard**
 
 Run: `node --test .github/scripts/evidence-source-boundaries.test.mjs`
 Expected: PASS.
 
-- [ ] **Step 4: Add the pack smoke script**
+- [x] **Step 4: Add the pack smoke script**
 
 `packages/evidence/trace-decode/scripts/pack-smoke.mjs`:
 
@@ -3617,12 +3617,12 @@ describeTraceDecoderContract("packed claude-code-stream-json", async () => {
 
 The `/testing` consumer running the **whole conformance kit off the tarball, against the shipped fixtures**, is the assertion that matters here: it proves a third party can verify this decoder without cloning the repository.
 
-- [ ] **Step 5: Run the pack smoke**
+- [x] **Step 5: Run the pack smoke**
 
 Run: `cd packages/evidence/trace-decode && yarn build && yarn pack:smoke`
 Expected: PASS — tarball carries `dist/` and `fixtures/`, nothing leaks, and the packed kit runs green under real vitest.
 
-- [ ] **Step 6: Wire CI**
+- [x] **Step 6: Wire CI**
 
 In `.github/workflows/evidence-ci.yml`, add this plan to the `push` path filter, beside C1's entry:
 
@@ -3680,7 +3680,7 @@ Add the job immediately after C1's `trajectory` job:
 
 In the `verify` job: add `trace-decode` to `needs`; add `TRACE_DECODE_RESULT: ${{ needs['trace-decode'].result }}` to the env block and `"$TRACE_DECODE_RESULT" \` to the result loop; add `trace-decode` to the dist-placement `for package in …` list.
 
-- [ ] **Step 7: Run the full local verification**
+- [x] **Step 7: Run the full local verification**
 
 Run:
 
@@ -3696,7 +3696,7 @@ node --test .github/scripts/evidence-package-inventory.test.mjs && node --test .
 
 Expected: every command PASS. The packed-types run reports `… across all 16 evidence packages`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/evidence/trace-decode .github
@@ -3798,3 +3798,17 @@ guard's `resolved === declared` equality.
 `trace-decode` graph row for protocol + trust-core; require matching portal paths in
 `package.json` resolutions; keep `dependencies` trajectory-only; keep Task 10 import bans.
 Precedent: environments inventory already documents "a portal's own resolutions do not apply."
+
+## 2026-07-31 implementation-time finding (C2-F2)
+
+Surfaced during Task 10 pack-smoke against accepted C1 head (trajectory depends on
+`@jinn-network/trust-core`). Plan body's pack-smoke and CI job omitted trust-core.
+
+**C2-F2 — pack-smoke cannot install packed trajectory without trust-core.** npm 404s
+`@jinn-network/trust-core` when the consumer installs the packed trajectory archive.
+
+**Disposition (applied):** pack `packages/trust/core` in `pack-smoke.mjs` and add it to
+consumer `DEPENDENCIES` only (not to trace-decode `package.json` dependencies). CI
+`trace-decode` job builds trust-core and pins npm 11.19.0 / Node 22.23.1 to match the
+trajectory job. Also: exclude `trace-decode` from C1's trajectory-import forbid loop;
+allow `node:fs/promises` in the testing-file boundary filter (trajectory precedent).
