@@ -32,10 +32,10 @@ const ADMITTED_ATTRIBUTE_KEYS = [
   ...Object.values(JINN_ATTRIBUTES),
 ];
 
-const UINT64_DECIMAL_PATTERN =
-  "^(0|[1-9]\\d{0,18}|1[0-7]\\d{0,18}|18[0-3]\\d{0,17}|184[0-3]\\d{0,16}|1844[0-6]\\d{0,15}|18446[0-6]\\d{0,14}|184467[0-3]\\d{0,13}|1844674[0-3]\\d{0,12}|18446744[0-0]\\d{0,11}|184467440[0-6]\\d{0,10}|1844674407[0-2]\\d{0,9}|18446744073[0-6]\\d{0,8}|184467440737[0-0]\\d{0,7}|1844674407370[0-8]\\d{0,6}|18446744073709[0-4]\\d{0,5}|184467440737095[0-4]\\d{0,4}|1844674407370955[0-1]\\d{0,3}|18446744073709551[0-5]\\d{0,2}|184467440737095516[0-1]\\d{0,1}|1844674407370955161[0-5])$";
+const UINT64_DECIMAL_PATTERN = otlpBounds.uint64DecimalJsonSchemaPattern();
 
 const INT64_DECIMAL_SCHEMA_NODE = otlpBounds.int64DecimalJsonSchemaNode();
+const UINT64_DECIMAL_SCHEMA_PATTERN = UINT64_DECIMAL_PATTERN;
 
 const ANY_VALUE_DEF = {
   oneOf: [
@@ -162,6 +162,40 @@ function assertIntValueLaw(schema) {
   }
 }
 
+function assertUint64TimestampLaw(schema) {
+  const violations = [];
+
+  function walk(node, path) {
+    if (!node || typeof node !== "object") return;
+    if (node.type === "string" && node.pattern && node.pattern !== "^-?(0|[1-9]\\d*)$") {
+      if (
+        node.description?.includes("UnixNano") ||
+        node.title?.includes("UnixNano") ||
+        node.pattern === UINT64_DECIMAL_SCHEMA_PATTERN ||
+        node.pattern === "^(0|[1-9]\\d*)$"
+      ) {
+        if (node.pattern !== UINT64_DECIMAL_SCHEMA_PATTERN) {
+          violations.push(`${path}.pattern (${node.pattern})`);
+        }
+      }
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (Array.isArray(value)) {
+        value.forEach((entry, index) => walk(entry, `${path}/${key}[${index}]`));
+      } else if (value && typeof value === "object") {
+        walk(value, `${path}/${key}`);
+      }
+    }
+  }
+
+  walk(schema, "");
+  if (violations.length > 0) {
+    throw new Error(
+      `uint64 timestamp nodes diverge from generated law: ${violations.join(", ")}`,
+    );
+  }
+}
+
 function patchExtensionSurface(node, coreKeys) {
   if (!node || typeof node !== "object" || node.type !== "object") return;
   node.propertyNames = {
@@ -235,6 +269,7 @@ function buildTrajectoryRecordSchema() {
 
   patchUint64Timestamps(schema);
   assertIntValueLaw(schema);
+  assertUint64TimestampLaw(schema);
 
   schema.allOf = [
     {

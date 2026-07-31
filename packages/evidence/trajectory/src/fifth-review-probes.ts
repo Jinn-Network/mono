@@ -13,7 +13,6 @@ import {
 } from "./derivation.js";
 import { snapshotByteView } from "./byte-snapshot.js";
 import { toBareSha256Hex, toRepositorySha256Digest } from "./digests.js";
-import { sha256Hex } from "./hashing.js";
 import { deriveTraceId } from "./identity.js";
 import { TRAJECTORY_VOCABULARY_PROFILE } from "./identifiers.js";
 import { InvalidDocumentError } from "./sealing.js";
@@ -262,9 +261,10 @@ export function registerFifthReviewProbes(): void {
         sliceCalls += 1;
         return () => new Uint8Array([9]);
       },
+      enumerable: true,
       configurable: true,
     });
-    expect(sha256Hex(bytes)).toMatch(/^[0-9a-f]{64}$/);
+    expect(() => snapshotByteView(bytes, "view")).toThrow(TypeError);
     expect(sliceCalls).toBe(0);
   });
 

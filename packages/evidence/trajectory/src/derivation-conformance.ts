@@ -7,6 +7,7 @@ import { caseTest, caseTestManifestIntegrity } from "./conformance-case-runner.j
 import { registerThirdReviewProbes } from "./third-review-probes.js";
 import { registerFourthReviewProbes } from "./fourth-review-probes.js";
 import { registerFifthReviewProbes } from "./fifth-review-probes.js";
+import { registerSixthReviewProbes } from "./sixth-review-probes.js";
 
 import {
   buildTrajectoryDerivationStatement,
@@ -194,6 +195,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
     registerThirdReviewProbes();
     registerFourthReviewProbes();
     registerFifthReviewProbes();
+    registerSixthReviewProbes();
     caseTest("build-rejects-non-calendar-strict-derived-at", () => {
       expect(() =>
         buildTrajectoryDerivationStatement({

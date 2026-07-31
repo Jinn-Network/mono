@@ -17,7 +17,10 @@ function trapMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : "property-descriptor trap";
 }
 
-function isPlainDataObject(value: object, path: string): boolean {
+function classifyContainerPrototype(
+  value: object,
+  path: string,
+): "array" | "plain" | "prohibited" {
   if (isProxy(value)) unsupported("proxy", path);
   let prototype: object | null;
   try {
@@ -25,7 +28,16 @@ function isPlainDataObject(value: object, path: string): boolean {
   } catch {
     unsupported("proxy", path);
   }
-  return prototype === Object.prototype || prototype === null;
+  if (prototype === Array.prototype) return "array";
+  if (prototype === Object.prototype || prototype === null) return "plain";
+  if (prototype === Map.prototype) unsupported("Map", path);
+  if (prototype === Set.prototype) unsupported("Set", path);
+  if (prototype === Date.prototype) unsupported("Date", path);
+  unsupported("non-plain object", path);
+}
+
+function isPlainDataObject(value: object, path: string): boolean {
+  return classifyContainerPrototype(value, path) === "plain";
 }
 
 function inspectOwnProperties(value: object, path: string, seen: WeakSet<object>): void {
@@ -66,9 +78,11 @@ function inspectOwnProperties(value: object, path: string, seen: WeakSet<object>
     if (
       isNamespacedExtensionKey(String(key)) &&
       nested !== null &&
-      typeof nested === "object" &&
-      !Array.isArray(nested)
+      typeof nested === "object"
     ) {
+      if (isProxy(nested)) unsupported("proxy", childPath);
+      const nestedKind = classifyContainerPrototype(nested, childPath);
+      if (nestedKind === "array") unsupported("array", childPath);
       inspectExtensionObject(nested, childPath, seen);
       continue;
     }
@@ -148,11 +162,9 @@ function inspectValue(value: unknown, path: string, seen: WeakSet<object>): void
   if (typeof value === "bigint") unsupported("bigint", path);
   if (typeof value === "function" || typeof value === "symbol") unsupported(typeof value, path);
   if (typeof value === "object") {
-    if (isProxy(value)) unsupported("proxy", path);
-    if (value instanceof Date) unsupported("Date", path);
-    if (value instanceof Map || value instanceof Set) unsupported(value.constructor.name, path);
-    if (Array.isArray(value)) {
-      inspectArray(value, path, seen);
+    const kind = classifyContainerPrototype(value, path);
+    if (kind === "array") {
+      inspectArray(value as unknown[], path, seen);
       return;
     }
     inspectOwnProperties(value, path, seen);

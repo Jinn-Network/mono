@@ -138,7 +138,7 @@ export const TrajectoryRecordSchema = z
 export type TrajectoryRecord = z.infer<typeof TrajectoryRecordCoreSchema>;
 
 /** Parse sealed bytes, requiring them to be the one exact canonical encoding. */
-export function parseTrajectory(bytes: Uint8Array): TrajectoryRecord {
+export function parseTrajectory(bytes: unknown): TrajectoryRecord {
   return parseExactWithSchema(TrajectoryRecordSchema, bytes);
 }
 

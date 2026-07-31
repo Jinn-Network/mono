@@ -40,9 +40,9 @@ const REQUIRED_ENTRIES = [
   "package/package.json",
 ];
 
-const PACK_SMOKE_PINNED_CASE_COUNT = 94;
+const PACK_SMOKE_PINNED_CASE_COUNT = 108;
 const PACK_SMOKE_PINNED_CASE_DIGEST =
-  "a47379865c0610dfe8cecd2428f7aa5cf35189163c14f5f622a7e4b685974e10";
+  "c6f8a918e00998bfa2c1f6fb13aab85973819725a3f7d8c57fed0894c67a1cdf";
 const PACK_SMOKE_PINNED_CASE_IDS = Object.freeze([
   "build-rejects-non-calendar-strict-derived-at",
   "build-rejects-missing-linkage-mode",
@@ -138,6 +138,20 @@ const PACK_SMOKE_PINNED_CASE_IDS = Object.freeze([
   "byte-snapshot-shadowed-slice-zero",
   "byte-snapshot-hostile-views-fail",
   "byte-snapshot-ordinary-bytes-safe",
+  "ajv-packed-uint64-max-plus-one-fails",
+  "ajv-packed-int64-9464152666223001936-fails",
+  "preflight-revoked-extension-nested-proxy-fails",
+  "preflight-map-constructor-getter-zero",
+  "preflight-proxy-prototype-trap-zero",
+  "signer-output-subclass-array-fails",
+  "authority-signer-key-ids-subclass-array-fails",
+  "byte-snapshot-augmented-own-slice-fails",
+  "byte-snapshot-augmented-own-length-fails",
+  "parse-trajectory-hostile-length-getter-zero",
+  "parse-trajectory-sab-view-fails",
+  "parse-trajectory-caller-mutation-immune",
+  "preflight-valid-plain-control-unchanged",
+  "verify-authority-custom-prototype-array-fails",
 ]);
 
 function manifestDigest(ids) {

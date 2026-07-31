@@ -10,6 +10,72 @@ export const DECIMAL_UNSIGNED_PATTERN = /^(0|[1-9]\d*)$/;
 /** Signed decimal without leading zeros on the magnitude (except lone `0` / `-0`). */
 export const DECIMAL_SIGNED_PATTERN = /^-?(0|[1-9]\d*)$/;
 
+/**
+ * Deterministic JSON Schema pattern for canonical unsigned decimals 0..maxInclusive.
+ * Branches by decimal length and lexicographic prefix against MAX; no leading zero except `0`.
+ */
+function effectiveMaxDigitString(maxInclusive: bigint, digitLength: number): string {
+  const maxStr = maxInclusive.toString();
+  if (digitLength >= maxStr.length) return maxStr;
+  const allNines = "9".repeat(digitLength);
+  return BigInt(allNines) <= maxInclusive ? allNines : maxStr.slice(0, digitLength);
+}
+
+function buildUnsignedDecimalBranches(maxInclusive: bigint, includeZero: boolean): string[] {
+  const maxStr = maxInclusive.toString();
+  const branchSet = new Set<string>();
+  if (includeZero) branchSet.add("0");
+
+  for (let digitLength = 1; digitLength <= maxStr.length; digitLength += 1) {
+    const bound = effectiveMaxDigitString(maxInclusive, digitLength);
+    for (let index = 0; index < bound.length; index += 1) {
+      const prefix = bound.slice(0, index);
+      const maxDigit = Number(bound[index]);
+      for (let digit = 0; digit < maxDigit; digit += 1) {
+        if (index === 0 && digit === 0) continue;
+        const remaining = bound.length - index - 1;
+        const digitPart = `${prefix}${String(digit)}`;
+        branchSet.add(remaining === 0 ? digitPart : `${digitPart}[0-9]{${String(remaining)}}`);
+      }
+    }
+    branchSet.add(bound);
+  }
+
+  return [...branchSet];
+}
+
+export function buildCanonicalUnsignedDecimalJsonSchemaPattern(maxInclusive: bigint): string {
+  return `^(?:${buildUnsignedDecimalBranches(maxInclusive, true).join("|")})$`;
+}
+
+/** JSON Schema pattern for uint64 OTLP decimal strings. */
+export function uint64DecimalJsonSchemaPattern(): string {
+  return buildCanonicalUnsignedDecimalJsonSchemaPattern(UINT64_MAX);
+}
+
+function buildNegativeMagnitudeJsonSchemaPattern(maxMagnitudeInclusive: bigint): string {
+  return `^-(?:${buildUnsignedDecimalBranches(maxMagnitudeInclusive, false).join("|")})$`;
+}
+
+/** Draft-2020-12 node for exact signed int64 decimal strings (including `-0`). */
+export function int64DecimalJsonSchemaNode(): {
+  readonly type: "string";
+  readonly anyOf: readonly [
+    { readonly pattern: string },
+    { readonly pattern: string },
+    { readonly pattern: string },
+  ];
+} {
+  return {
+    type: "string",
+    anyOf: [
+      { pattern: "^-0$" },
+      { pattern: buildCanonicalUnsignedDecimalJsonSchemaPattern(INT64_MAX) },
+      { pattern: buildNegativeMagnitudeJsonSchemaPattern(-INT64_MIN) },
+    ],
+  };
+}
+
 export function isValidDecimalUint64(value: string): boolean {
   if (!DECIMAL_UNSIGNED_PATTERN.test(value)) return false;
   try {
@@ -30,92 +96,7 @@ export function isValidDecimalInt64(value: string): boolean {
   }
 }
 
-/** JSON Schema syntax gate for signed decimal strings (canonical form, including `-0`). */
-export const DECIMAL_SIGNED_JSON_SCHEMA_PATTERN = "^-?(0|[1-9]\\d*)$";
-
-/**
- * Positive int64 overflow branches for JSON Schema `not.anyOf` (canonical decimals only).
- * Matches values strictly greater than 9223372036854775807.
- */
-export const INT64_POSITIVE_OVERFLOW_JSON_SCHEMA_PATTERNS = [
-  "^922337203685477580[89]\\d*$",
-  "^92233720368547759\\d+$",
-  "^9223372036854776\\d+$",
-  "^922337203685477[89]\\d*$",
-  "^922337203685478\\d*$",
-  "^92233720368548\\d*$",
-  "^9223372036855\\d+$",
-  "^9223372036856\\d+$",
-  "^9223372036857\\d+$",
-  "^9223372036858\\d+$",
-  "^9223372036859\\d+$",
-  "^922337203686\\d*$",
-  "^92233720369\\d+$",
-  "^9223372037\\d+$",
-  "^922337203[89]\\d*$",
-  "^922337204\\d+$",
-  "^92233721\\d+$",
-  "^9223373\\d+$",
-  "^922338\\d+$",
-  "^92234\\d+$",
-  "^9224\\d+$",
-  "^923\\d+$",
-  "^93\\d+$",
-  "^[1-9]\\d{19,}$",
-] as const;
-
-/**
- * Negative int64 underflow branches for JSON Schema `not.anyOf` (canonical decimals only).
- * Matches values strictly less than -9223372036854775808.
- */
-export const INT64_NEGATIVE_OVERFLOW_JSON_SCHEMA_PATTERNS = [
-  "^-9223372036854775809$",
-  "^-92233720368547758[1-9]\\d*$",
-  "^-92233720368547759\\d*$",
-  "^-9223372036854776\\d+$",
-  "^-922337203685477[89]\\d*$",
-  "^-922337203685478\\d*$",
-  "^-92233720368548\\d*$",
-  "^-9223372036855\\d+$",
-  "^-9223372036856\\d+$",
-  "^-9223372036857\\d+$",
-  "^-9223372036858\\d+$",
-  "^-9223372036859\\d+$",
-  "^-922337203686\\d*$",
-  "^-92233720369\\d+$",
-  "^-9223372037\\d+$",
-  "^-922337203[89]\\d*$",
-  "^-922337204\\d+$",
-  "^-92233721\\d+$",
-  "^-9223373\\d+$",
-  "^-922338\\d+$",
-  "^-92234\\d+$",
-  "^-9224\\d+$",
-  "^-923\\d+$",
-  "^-93\\d+$",
-  "^-[1-9]\\d{19,}$",
-] as const;
-
-/** Draft-2020-12 node for exact signed int64 decimal strings. */
-export function int64DecimalJsonSchemaNode(): {
-  readonly type: "string";
-  readonly allOf: readonly [
-    { readonly pattern: string },
-    { readonly not: { readonly anyOf: readonly { readonly pattern: string }[] } },
-  ];
-} {
-  return {
-    type: "string",
-    allOf: [
-      { pattern: DECIMAL_SIGNED_JSON_SCHEMA_PATTERN },
-      {
-        not: {
-          anyOf: [
-            ...INT64_POSITIVE_OVERFLOW_JSON_SCHEMA_PATTERNS,
-            ...INT64_NEGATIVE_OVERFLOW_JSON_SCHEMA_PATTERNS,
-          ].map((pattern) => ({ pattern })),
-        },
-      },
-    ],
-  };
+/** Compile a JSON Schema pattern string to a RegExp (anchors preserved). */
+export function jsonSchemaPatternToRegExp(pattern: string): RegExp {
+  return new RegExp(pattern);
 }

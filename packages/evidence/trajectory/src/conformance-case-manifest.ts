@@ -99,6 +99,20 @@ export const TRAJECTORY_DERIVATION_CONFORMANCE_CASE_IDS = Object.freeze([
   "byte-snapshot-shadowed-slice-zero",
   "byte-snapshot-hostile-views-fail",
   "byte-snapshot-ordinary-bytes-safe",
+  "ajv-packed-uint64-max-plus-one-fails",
+  "ajv-packed-int64-9464152666223001936-fails",
+  "preflight-revoked-extension-nested-proxy-fails",
+  "preflight-map-constructor-getter-zero",
+  "preflight-proxy-prototype-trap-zero",
+  "signer-output-subclass-array-fails",
+  "authority-signer-key-ids-subclass-array-fails",
+  "byte-snapshot-augmented-own-slice-fails",
+  "byte-snapshot-augmented-own-length-fails",
+  "parse-trajectory-hostile-length-getter-zero",
+  "parse-trajectory-sab-view-fails",
+  "parse-trajectory-caller-mutation-immune",
+  "preflight-valid-plain-control-unchanged",
+  "verify-authority-custom-prototype-array-fails",
 ] as const);
 
 export type TrajectoryDerivationConformanceCaseId =

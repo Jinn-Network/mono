@@ -3,6 +3,7 @@
 import type { z } from "zod";
 
 import { type JsonValue, serializeCanonicalJson } from "./canonical.js";
+import { snapshotByteView } from "./byte-snapshot.js";
 import { bytesEqual } from "./bytes.js";
 import { documentDigest } from "./hashing.js";
 import { preflightCanonicalInput } from "./preflight.js";
@@ -60,10 +61,11 @@ export function sealWithSchema<T>(schema: z.ZodType<T>, document: unknown): Seal
  * Decode, validate, and require the input to be the one exact canonical encoding —
  * no consumer re-canonicalizes to check a digest.
  */
-export function parseExactWithSchema<T>(schema: z.ZodType<T>, bytes: Uint8Array): T {
+export function parseExactWithSchema<T>(schema: z.ZodType<T>, bytes: unknown): T {
+  const snapshot = snapshotByteView(bytes, "document bytes");
   let text: string;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    text = new TextDecoder("utf-8", { fatal: true }).decode(snapshot);
   } catch {
     throw new InvalidDocumentError([{ path: "", message: "bytes are not valid UTF-8" }]);
   }
@@ -91,7 +93,7 @@ export function parseExactWithSchema<T>(schema: z.ZodType<T>, bytes: Uint8Array)
   if (!parsed.success) throw new InvalidDocumentError(issues(parsed.error));
 
   const recanonicalized = serializeCanonicalJson(parsed.data as JsonValue);
-  if (!bytesEqual(recanonicalized, bytes)) {
+  if (!bytesEqual(recanonicalized, snapshot)) {
     throw new InvalidDocumentError([
       { path: "", message: "bytes are not the canonical encoding of this document" },
     ]);

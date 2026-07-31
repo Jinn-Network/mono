@@ -29,6 +29,15 @@ export function inspectDenseArrayDescriptors(
   if (isProxy(value)) {
     return { ok: false, message: `${path} must be a plain array` };
   }
+  let prototype: object | null;
+  try {
+    prototype = Object.getPrototypeOf(value);
+  } catch {
+    return { ok: false, message: `${path} must not be a revoked Proxy` };
+  }
+  if (prototype !== Array.prototype) {
+    return { ok: false, message: `${path} must be a standard Array` };
+  }
   if (!Array.isArray(value)) {
     return { ok: false, message: `${path} must be an array` };
   }

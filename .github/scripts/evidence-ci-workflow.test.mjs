@@ -86,60 +86,75 @@ function parseJobs(source) {
 
 function parseStepFields(step) {
   const fields = { uses: null, with: {}, run: null };
-  let inWith = false;
-  let withIndent = null;
   const stepLevelKeys = [];
   const withLevelKeys = [];
+  let inBlockScalar = false;
+  let blockScalarIndent = null;
+  let inWithBlock = false;
+
   for (const line of step.lines) {
-    if (/^ {6}- uses:/.test(line)) {
-      stepLevelKeys.push("uses");
-      fields.uses = line.trim().slice("- uses:".length).trim();
-      inWith = false;
-      withIndent = null;
-      continue;
-    }
-    if (/^ {8}uses:/.test(line)) {
-      stepLevelKeys.push("uses");
-      fields.uses = line.trim().slice("uses:".length).trim();
-      inWith = false;
-      withIndent = null;
-      continue;
-    }
-    if (/^ {8}with:/.test(line)) {
-      stepLevelKeys.push("with");
-      inWith = true;
-      withIndent = 10;
-      continue;
-    }
-    if (inWith && withIndent !== null) {
-      if (/^ {8}\S/.test(line) && !/^ {10}/.test(line)) {
-        inWith = false;
-        withIndent = null;
-      } else if (/^ {10}\S/.test(line)) {
-        const trimmed = line.trim();
-        const match = trimmed.match(/^([^:]+):\s*(.*)$/);
-        if (match) {
-          withLevelKeys.push(match[1]);
-          fields.with[match[1]] = match[2].trim();
-        }
+    if (inBlockScalar) {
+      if (line.trim() === "") continue;
+      const indent = line.match(/^ */)?.[0]?.length ?? 0;
+      if (indent <= blockScalarIndent) {
+        inBlockScalar = false;
+        blockScalarIndent = null;
+      } else {
         continue;
       }
     }
-    if (/^ {6}- run:/.test(line) || /^ {8}run:/.test(line)) {
-      stepLevelKeys.push("run");
-      fields.run = line.trim();
-      inWith = false;
-      withIndent = null;
+
+    const sequenceMatch = line.match(/^ {6}- ([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (sequenceMatch) {
+      stepLevelKeys.push(sequenceMatch[1]);
+      const key = sequenceMatch[1];
+      const value = sequenceMatch[2].trim();
+      if (key === "uses") fields.uses = value;
+      if (key === "run") {
+        fields.run = line.trim();
+        if (value === "|" || value === ">" || value === "|-" || value === ">-") {
+          inBlockScalar = true;
+          blockScalarIndent = 8;
+        }
+      }
+      if (key === "with") inWithBlock = true;
       continue;
     }
-    if (/^ {6}- name:/.test(line)) {
-      stepLevelKeys.push("name");
+
+    const stepMatch = line.match(/^ {8}([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (stepMatch) {
+      stepLevelKeys.push(stepMatch[1]);
+      const key = stepMatch[1];
+      const value = stepMatch[2].trim();
+      if (key === "uses") fields.uses = value;
+      if (key === "run") {
+        fields.run = line.trim();
+        if (value === "|" || value === ">" || value === "|-" || value === ">-") {
+          inBlockScalar = true;
+          blockScalarIndent = 8;
+        }
+      }
+      if (key === "with") {
+        inWithBlock = true;
+      } else {
+        inWithBlock = false;
+      }
       continue;
     }
-    if (/^ {8}working-directory:/.test(line)) {
-      stepLevelKeys.push("working-directory");
+
+    if (inWithBlock) {
+      const withMatch = line.match(/^ {10}([A-Za-z0-9_-]+):\s*(.*)$/);
+      if (withMatch) {
+        withLevelKeys.push(withMatch[1]);
+        fields.with[withMatch[1]] = withMatch[2].trim();
+        continue;
+      }
+      if (/^ {8}\S/.test(line) && !/^ {10}/.test(line)) {
+        inWithBlock = false;
+      }
     }
   }
+
   fields.stepLevelKeys = stepLevelKeys;
   fields.withLevelKeys = withLevelKeys;
   return fields;
@@ -506,4 +521,44 @@ test('mutation: duplicate node-version in setup with block fails', () => {
 test('mutation: duplicate job key fails', () => {
   const mutant = `${workflow}\n  trajectory:\n    runs-on: ubuntu-latest\n`;
   expectValidationFailure(mutant, /duplicate job key "trajectory"/);
+});
+
+test('mutation: duplicate indented step name inside npm step fails', () => {
+  const mutant = workflow.replace(
+    /(  trajectory:[\s\S]*?      - name: Install npm 11\.19\.0 for pack-smoke\n        run: \|)/,
+    '$1\n        name: duplicate step name',
+  );
+  expectValidationFailure(mutant, /duplicate YAML mapping key "name"/);
+});
+
+test('mutation: duplicate indented uses inside setup step fails', () => {
+  const mutant = workflow.replace(
+    /(  trajectory:[\s\S]*?      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
+    '$1        uses: actions/setup-node@v4\n',
+  );
+  expectValidationFailure(mutant, /duplicate YAML mapping key "uses"/);
+});
+
+test('mutation: duplicate working-directory inside step fails', () => {
+  const mutant = workflow.replace(
+    /(  trajectory:[\s\S]*?      - name: Enable Yarn 4\.13\.0\n)/,
+    '      - name: Enable Yarn 4.13.0\n        working-directory: packages/evidence/trajectory\n        working-directory: packages/evidence/trajectory\n',
+  );
+  expectValidationFailure(mutant, /duplicate YAML mapping key "working-directory"/);
+});
+
+test('mutation: colon-like line inside run block scalar does not false-positive', () => {
+  const mutant = workflow.replace(
+    /(  trajectory:[\s\S]*?      - name: Install npm 11\.19\.0 for pack-smoke\n        run: \|\n)(          npm install -g npm@11\.19\.0\n)/,
+    '$1          name: not-a-yaml-key\n$2',
+  );
+  assert.doesNotThrow(() => validateEvidenceCiWorkflow(mutant));
+});
+
+test('mutation: malformed dedent after block scalar still catches duplicate run', () => {
+  const mutant = workflow.replace(
+    /(  trajectory:[\s\S]*?      - name: Install npm 11\.19\.0 for pack-smoke\n        run: \|)/,
+    '$1\n        run: echo duplicate',
+  );
+  expectValidationFailure(mutant, /duplicate YAML mapping key "run"/);
 });

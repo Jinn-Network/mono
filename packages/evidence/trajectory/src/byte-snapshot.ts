@@ -2,17 +2,6 @@
 
 import { isProxy } from "node:util/types";
 
-function isKnownTypedArrayInstanceKey(keyStr: string): boolean {
-  if (keyStr === "length") return true;
-  if (/^(?:0|[1-9]\d*)$/u.test(keyStr)) return true;
-  let prototype: object | null = Uint8Array.prototype;
-  while (prototype !== null) {
-    if (Object.hasOwn(prototype, keyStr)) return true;
-    prototype = Object.getPrototypeOf(prototype);
-  }
-  return false;
-}
-
 function trapMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : "property-descriptor trap";
 }
@@ -58,6 +47,12 @@ export function snapshotByteView(value: unknown, context: string): Uint8Array {
   }
 
   const view = value as Uint8Array;
+  const buffer = readTypedArrayIntrinsic<ArrayBufferLike>("buffer", view);
+  if (typeof SharedArrayBuffer !== "undefined" && buffer instanceof SharedArrayBuffer) {
+    throw new TypeError(`${context} must not be backed by SharedArrayBuffer`);
+  }
+  const byteLength = readTypedArrayIntrinsic<number>("byteLength", view);
+
   let ownKeys: PropertyKey[];
   try {
     ownKeys = Reflect.ownKeys(view);
@@ -69,17 +64,14 @@ export function snapshotByteView(value: unknown, context: string): Uint8Array {
       throw new TypeError(`${context} must not have symbol own keys`);
     }
     const keyStr = String(key);
-    if (isKnownTypedArrayInstanceKey(keyStr)) {
-      continue;
+    if (!/^(?:0|[1-9]\d*)$/u.test(keyStr)) {
+      throw new TypeError(`${context} has augmented property "${keyStr}"`);
     }
-    throw new TypeError(`${context} has augmented property "${keyStr}"`);
+    const index = Number(keyStr);
+    if (index >= byteLength) {
+      throw new TypeError(`${context} has index ${keyStr} beyond length ${String(byteLength)}`);
+    }
   }
-
-  const buffer = readTypedArrayIntrinsic<ArrayBufferLike>("buffer", view);
-  if (typeof SharedArrayBuffer !== "undefined" && buffer instanceof SharedArrayBuffer) {
-    throw new TypeError(`${context} must not be backed by SharedArrayBuffer`);
-  }
-  const byteLength = readTypedArrayIntrinsic<number>("byteLength", view);
 
   const copy = new Uint8Array(byteLength);
   const subarray = Reflect.apply(
