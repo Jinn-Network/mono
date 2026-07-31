@@ -800,7 +800,7 @@ git commit -m "chore(plugin): build the cold-stock wheel from plugin/frozen"
 - Consumes: nothing from earlier tasks; this is a negative guard.
 - Produces: an assertion that the published-artifacts smoke workflow reaches into **neither** adapter path — it must install only from the published channels (`hermes plugins install Jinn-Network/jinn-plugin --enable`), never from the in-repo tree.
 
-- [ ] **Step 1: Strengthen the guard**
+- [x] **Step 1: Strengthen the guard**
 
 In `.github/scripts/published-artifacts-smoke-workflow.test.mjs`, replace:
 
@@ -815,13 +815,13 @@ with:
   assert.doesNotMatch(workflow, /plugin\/frozen/);
 ```
 
-- [ ] **Step 2: Run the suite**
+- [x] **Step 2: Run the suite**
 
 Run: `node --test .github/scripts/published-artifacts-smoke-workflow.test.mjs`
 
 Expected: PASS. (The smoke workflow installs from the published channel only, so both assertions hold; the second is what keeps that true after the relocation.)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .github/scripts/published-artifacts-smoke-workflow.test.mjs
