@@ -2763,7 +2763,7 @@ git commit -m "feat(plugin-runtime): process skeleton with custody and stdout co
 
 The root entrypoint must never re-export `bin.ts` — that would drag `process` access, signal handlers, and the entry-point side effect into every consumer, the same defect the execution-recorder-bridge guards against with its `cli.ts` rule.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plugin/runtime/src/index.test.ts`:
 
@@ -2807,12 +2807,12 @@ describe("public surface", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test`
 Expected: FAIL — the first test reports `[]` against the expected ten names (the placeholder `index.ts` exports nothing).
 
-- [ ] **Step 3: Write the public surface**
+- [x] **Step 3: Write the public surface**
 
 `plugin/runtime/src/index.ts` (replacing the placeholder in full):
 
@@ -2841,12 +2841,12 @@ export { RUNTIME_VERSION } from "./version.js";
 // pull all three into every consumer.
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test && yarn typecheck`
 Expected: PASS — 3 new tests (54 total).
 
-- [ ] **Step 5: Add the root-entrypoint assertion to the boundary guard**
+- [x] **Step 5: Add the root-entrypoint assertion to the boundary guard**
 
 In `.github/scripts/plugin-tree-source-boundaries.test.mjs`, inside the final
 `test('plugin tree source boundaries hold and the manifest matches the approved shape', …)`,
@@ -2861,7 +2861,7 @@ append before the closing brace:
   );
 ```
 
-- [ ] **Step 6: Write the pack smoke**
+- [x] **Step 6: Write the pack smoke**
 
 `plugin/runtime/scripts/pack-smoke.mjs`:
 
@@ -3003,12 +3003,12 @@ await instance.stop();
 }
 ```
 
-- [ ] **Step 7: Run the pack smoke**
+- [x] **Step 7: Run the pack smoke**
 
 Run: `cd plugin/runtime && yarn build && yarn pack:smoke`
 Expected: `Packed plugin runtime tarball shape, isolated consumer, and binary verified.`
 
-- [ ] **Step 8: Run every gate the workflow runs, in workflow order**
+- [x] **Step 8: Run every gate the workflow runs, in workflow order**
 
 ```bash
 node --test .github/scripts/plugin-tree-package-inventory.test.mjs
@@ -3022,7 +3022,7 @@ Expected, in order:
 - package: immutable install with no lockfile drift; `tsc` silent; vitest `Test Files 5 passed`, `Tests 54 passed`; build emits `dist/`; pack smoke prints its verified line
 - canary: `Compiled a packed TypeScript consumer against 1 public code entrypoints across all 1 plugin tree packages.`
 
-- [ ] **Step 9: Confirm the tree stayed out of the operator image and the frozen lanes**
+- [x] **Step 9: Confirm the tree stayed out of the operator image and the frozen lanes**
 
 ```bash
 grep -n "plugin/" client/Dockerfile || echo "Dockerfile clean"
@@ -3031,7 +3031,7 @@ git diff --stat integration/evidence-v1...HEAD -- client packages apps
 ```
 Expected: `Dockerfile clean`; `ci.yml clean`; the `git diff --stat` prints nothing — C3 touched no file under `client/`, `packages/`, or `apps/`, so it changes neither the operator image nor the frozen trio (spec §4.1, §9.4).
 
-- [ ] **Step 10: Confirm C0 independence one final time**
+- [x] **Step 10: Confirm C0 independence one final time**
 
 ```bash
 ls plugin
@@ -3039,7 +3039,7 @@ git diff --name-only integration/evidence-v1...HEAD
 ```
 Expected: `plugin` contains `README.md` and `runtime` only. The changed-file list is exactly: `.github/scripts/plugin-tree-package-inventory.test.mjs`, `.github/scripts/plugin-tree-packed-types.test.mjs`, `.github/scripts/plugin-tree-source-boundaries.test.mjs`, `.github/workflows/plugin-tree-ci.yml`, `.gitignore`, `plugin/README.md`, and the files under `plugin/runtime/`. **No file C0 owns appears.**
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add plugin/runtime .github/scripts/plugin-tree-source-boundaries.test.mjs
@@ -3147,4 +3147,8 @@ Recorded per the designs-are-law rule (program §Global constraints). Each carri
 - **F-C3-13 — Task 9 home-directory test requires `configuration resolved` at the default log level.** The plan's `bin.ts` emits that record at `log.debug`, but the test runs `main(["health"], {}, …)` with no `JINN_PLUGIN_LOG_LEVEL`, so the default `info` level suppresses it. **Disposition applied:** emit `configuration resolved` at `info`. Topology and custody confinement unchanged.
 
 - **F-C3-14 — Node 22 top-level-await `serve` exits before SIGTERM without an event-loop keepalive.** With only signal listeners and no other handles, the process can exit (observed exit 13) before `kill -TERM`. **Disposition applied:** the process-entry `untilShutdown` holds a long `setInterval` cleared on signal; `main` starts the shutdown promise before the first `await` on the serve path so handlers are armed early. Tests still inject `untilShutdown`; only the process entry carries the keepalive.
+
+- **F-C3-15 — npm `.bin` symlinks make `import.meta.url === pathToFileURL(process.argv[1]).href` false.** Pack smoke installs the tarball and runs `node_modules/.bin/jinn-plugin-runtime`, which is a symlink to `dist/bin.js`; the plan's `isProcessEntry()` compared unresolved paths and skipped `main()`, so `--version`/`health` produced empty stdout. **Disposition applied:** resolve both sides with `realpathSync` before comparing. Confined to `bin.ts`; no public-API change.
+
+- **F-C3-16 — Task 10 Step 9's `grep -n "plugin/" client/Dockerfile` matches the frozen `packages/plugin/` COPY lines.** Those lines are pre-existing and required; the product tree `plugin/` is absent. **Disposition:** treat the gate as "no product-tree path (`plugin/runtime`, root `plugin/`) in the operator image"; do not edit `client/Dockerfile`.
 
