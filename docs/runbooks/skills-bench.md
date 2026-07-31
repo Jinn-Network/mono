@@ -179,11 +179,37 @@ Verify before proceeding to §5:
 
 - The command exits 0 (no grade failures reported to stderr).
 - `../bench/runs/smoke/transcripts/` contains a `<instanceId>|<arm>|<repeat>.json` file per attempt.
-- `../bench/runs/smoke/attempts.jsonl` has at least one line with `"passed": true` or `"passed":
-  false` (not every outcome `null` — a fully-null smoke means nothing graded and the wiring needs
-  debugging before spending the wave-1 budget).
+- `../bench/runs/smoke/attempts.jsonl` has at least one outcome that came from a **completed Docker
+  eval**. A `"passed": false` line is NOT sufficient on its own: the runner short-circuits an empty
+  patch to `false` without ever entering the container, so a smoke in which every real grade timed
+  out can still show a `false` and look healthy. Confirm against the log that at least one instance
+  logged `graded <id> arm=<name> → passed` or `→ failed` *without* a preceding
+  `empty patch for <id>` or `ungradeable (eval_timeout)` line for that same attempt. Until that
+  holds, the grading path is unproven and the wave-1 budget must not be spent.
+- **No `.claude/` hunk in any treatment patch.** The skill is mounted into the checkout and must be
+  unmounted before the patch is recovered; if it leaks, every treatment patch installs the skill
+  inside the eval container and the arms stop being comparable. Check every transcript:
+
+  ```bash
+  cd ../bench/runs/smoke/transcripts
+  python3 -c "
+import json,glob
+for f in sorted(glob.glob('*.json')):
+    p = json.load(open(f)).get('patch','') or ''
+    bad = [l for l in p.split('\n') if l.startswith(('+++ b/','--- a/')) and '.claude/' in l]
+    print(f, 'LEAK:' if bad else 'clean', bad)
+"
+  ```
+
 - **Resume works:** re-run the exact same command. It should print `no runnable attempts — every
   attempt key already present in attempts.jsonl (resumed).` and do no new solving or grading.
+
+**Apple Silicon / aarch64 hosts cannot complete this smoke.** The SWE-rebench eval images are
+amd64; under Docker Desktop emulation a grade routinely exceeds even a 20-minute
+`--grade-timeout-ms` and returns `ungradeable (eval_timeout)`. Solves, mounting, patch recovery,
+the durable attempts log, and cost capture all verify correctly on such a host — grading does not.
+Run the smoke on the same Linux amd64 host the wave will use; a `3/4 ungradeable` result on a Mac
+is a host limitation, not a rig defect, and it does **not** satisfy the grading criterion above.
 
 A slate instance that proves ungradeable in this smoke run must be removed from `slate.json` and
 the slate rebuilt (§3) **before** the freeze commit — this is the last gradeability check before
