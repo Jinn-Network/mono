@@ -2915,25 +2915,25 @@ derivation attestation provides **attribution**. L4 replay provides **factual ve
 
 ### 3. Implementation checklist
 
-- [ ] Remove `source.execution` from `SourceSchema`; update fixtures/generator/tests.
-- [ ] Add required `timebase: Timebase` to `TrajectoryRecordSchema`; export `TIMEBASES`, `Timebase`.
-- [ ] Add `formatIri` to `TraceIdInput` and `deriveTraceId` framing inputs.
-- [ ] Completeness: `full` rejects `skipped`; `partial` requires `skipped >= 1`; `empty` requires `spans.length === 0`.
-- [ ] Closed vocabulary guard on span attributes; reject `message.content`, `tool.args`, `tool.result`, `gen_ai.system`, arbitrary keys.
-- [ ] `serializeCanonicalJson` fail-closed: throw typed errors (`UnsupportedCanonicalValueError` or extend existing) for top-level undefined, bigint, function, symbol, Date, Map, Set, class instances, non-plain values; extension slots cannot silently coerce to `{}`.
-- [ ] Digest claims sha256-only for v1.
-- [ ] Export `TRAJECTORY_SUBJECT_NAME`, `TRAJECTORY_RECORD_IDENTIFIER_PROPERTY`,
+- [x] Remove `source.execution` from `SourceSchema`; update fixtures/generator/tests.
+- [x] Add required `timebase: Timebase` to `TrajectoryRecordSchema`; export `TIMEBASES`, `Timebase`.
+- [x] Add `formatIri` to `TraceIdInput` and `deriveTraceId` framing inputs.
+- [x] Completeness: `full` rejects `skipped`; `partial` requires `skipped >= 1`; `empty` requires `spans.length === 0`.
+- [x] Closed vocabulary guard on span attributes; reject `message.content`, `tool.args`, `tool.result`, `gen_ai.system`, arbitrary keys.
+- [x] `serializeCanonicalJson` fail-closed: throw typed errors (`UnsupportedCanonicalValueError` or extend existing) for top-level undefined, bigint, function, symbol, Date, Map, Set, class instances, non-plain values; extension slots cannot silently coerce to `{}`.
+- [x] Digest claims sha256-only for v1.
+- [x] Export `TRAJECTORY_SUBJECT_NAME`, `TRAJECTORY_RECORD_IDENTIFIER_PROPERTY`,
   `RepositorySha256Digest`, `BareSha256Hex`, `toBareSha256Hex`, `toRepositorySha256Digest`.
-- [ ] Add `@jinn-network/trust-core` dependency + guard allowlist; forbid attestation-issuer.
-- [ ] Amend inventory `expectedPortal` for trust-core `portal:../../trust/core`.
-- [ ] Full attestation API per §Interface closure (2026-07-31); `derivedAt` required.
-- [ ] `verifyTrajectoryDerivationAttestation` with `verifyAuthority` port; L3 forward-link checks.
-- [ ] Kit: malformed envelope → L1 fail, authority not called; L2/L3/L4 cases per acceptance table.
-- [ ] `VOCABULARY_UPSTREAM.commit` via `git ls-remote <repo> refs/heads/main` at implementation; reject all-zero; evidence in PR — **do not guess SHA in design docs**.
-- [ ] Fixture path containment: resolved URL must stay under fixture root (resist percent-encoded traversal).
-- [ ] Pack smoke: invoke packed conformance kit with all kit-loaded fixtures; `TRAJECTORY_RESULT` CI variable name; no legacy-peer-deps behavior encoding.
-- [ ] Namespaced-key discipline at nested extension points; namespaced extension seal→parse→compare test.
-- [ ] Remove anti-forgery language from Task 5 / README / kit comments.
+- [x] Add `@jinn-network/trust-core` dependency + guard allowlist; forbid attestation-issuer.
+- [x] Amend inventory `expectedPortal` for trust-core `portal:../../trust/core`.
+- [x] Full attestation API per §Interface closure (2026-07-31); `derivedAt` required.
+- [x] `verifyTrajectoryDerivationAttestation` with `verifyAuthority` port; L3 forward-link checks.
+- [x] Kit: malformed envelope → L1 fail, authority not called; L2/L3/L4 cases per acceptance table.
+- [x] `VOCABULARY_UPSTREAM.commit` via `git ls-remote <repo> refs/heads/main` at implementation; reject all-zero; evidence in PR — commit `c739977ae690961f36e435504e5c1febaef1f7f3` (snapshot 2026-07-31).
+- [x] Fixture path containment: resolved URL must stay under fixture root (resist percent-encoded traversal).
+- [x] Pack smoke: invoke packed conformance kit with all kit-loaded fixtures; `TRAJECTORY_RESULT` CI variable name; no legacy-peer-deps behavior encoding.
+- [x] Namespaced-key discipline at nested extension points; namespaced extension seal→parse→compare test.
+- [x] Remove anti-forgery language from Task 5 / README / kit comments.
 
 ### 4. Red→green acceptance tests
 
