@@ -1,21 +1,33 @@
 # Runbook — skills-bench (Skills Factory MVP)
 
-**Spec:** `docs/superpowers/specs/2026-07-30-skills-factory-mvp-design.md` (product definition, rig
-design, wave 1/2 semantics, publishing surface). Read §2–§6 before running wave 2 — this runbook
-gives exact commands, the spec gives the reasoning behind them.
+**Spec:** `docs/superpowers/specs/2026-07-30-skills-factory-mvp-design.md` (v0.2 — capability-report
+product, measurement method, per-skill pilot flow, publishing surface). Read §1–§4 before running a
+pilot skill end to end — this runbook gives exact commands, the spec gives the reasoning behind them.
 
-**Audience:** the operator running the skills-bench rig end to end — pin, slate, run, render,
-publish, fork-and-improve. All commands below are run from `client/` unless noted otherwise.
+**Audience:** the operator running the skills-bench rig for one pilot skill at a time: pin the
+skill, author a domain-matched task set for it, validate and screen that task set, run the paired
+measurement on Haiku, render the public report, deliver the private annex, and — if the author
+revises — re-evaluate. All commands below are run from `client/` unless noted otherwise.
 
-**Scope:** wave 1 (benchmark the incumbents) and wave 2 (fork and improve the empirical target).
-Everything through §7 (publish) is a real-money, real-Docker operation once you drop `--dry-run`.
+**v0.1 wave flow retired, not deleted.** Through 2026-07-30 this runbook described a wave-1
+(benchmark five incumbents) / wave-2 (fork and improve the winner) flow. The spec's v0.2 revision
+note drops that model: Jinn does not fork skills and publishes no installable catalog — see the
+spec header for why (SWE-Skills-Bench already measured 49 skills at a scale a from-scratch wave 1
+could not match, and the author-first pivot). §2–§9 below are the per-skill pilot flow that
+replaces it. §10 keeps the swe-rebench-v2 slate machinery this runbook used to build wave 1 around,
+condensed: it survives as the screening/holdout substrate for general coding-workflow skills that
+don't warrant a bespoke task set, not as the primary or only measurement path.
+
+**Scope:** §2–§9 (per-skill pilot flow), §10 (generic-slate substrate, condensed), §11 (pilot-prep
+facts), §12 (troubleshooting). Everything from §6 onward (any real, non-`--dry-run` `run-bench.ts`
+invocation) is real-money, real-Docker.
 
 ---
 
 ## 1. Prerequisites
 
 - **Host:** Linux amd64, ≥100 GB free disk. This is a big-disk-host operation, never a laptop —
-  each grade spins up a Docker image per instance and the SWE-rebench images are large.
+  each grade spins up a Docker image per task and the pinned repo images can be large.
 - **Docker** running and reachable (`docker info` succeeds).
 - **Node 22** with `corepack enable` run once (pins Yarn to the `packageManager` field).
 - **An isolated `CLAUDE_CONFIG_DIR` with usable claude-code credentials — measured, not optional.**
@@ -23,41 +35,42 @@ Everything through §7 (publish) is a real-money, real-Docker operation once you
   `<repoRoot>/bench/.claude-bench-config`, stable and reusable across `--out` dirs — log into it
   once, not once per run). Isolation is required: without it, the operator's own ambient
   user-level skills/plugins/memory leak into every arm — including the baseline arm's "no skill
-  installed" claim — and the receipt stops being reproducible off this operator's machine (measured
-  empirically; see §8's skill-visibility matrix). One consequence measured on macOS: an isolated
+  installed" claim — and the report stops being reproducible off this operator's machine (measured
+  empirically; see §12's skill-visibility matrix). One consequence measured on macOS: an isolated
   `CLAUDE_CONFIG_DIR` severs Keychain-backed auth (`claude-code` on macOS stores credentials in the
   Keychain, service "Claude Code-credentials", not in a `~/.claude/.credentials.json` file), so the
   isolated dir starts with no usable credentials until you supply them via one of:
   1. `export ANTHROPIC_API_KEY=...` — metered API billing; works headless, the route for the Linux
-     wave host.
+     pilot host.
   2. One-time interactive login into the bench config dir:
      `CLAUDE_CONFIG_DIR=<resolved --claude-config-dir path> claude`, then `/login` — keeps
      subscription billing, credentials then persist in that dir across runs.
 
   `run-bench.ts` runs a cheap auth preflight probe before any real (non-`--dry-run`) solve work and
-  aborts the whole run with both remediation routes spelled out if the probe fails — see §8 "Not
+  aborts the whole run with both remediation routes spelled out if the probe fails — see §12 "Not
   logged in / every solve fails instantly".
 - **`JINN_EVAL_DISK_FLOOR_GB=40`** in the environment before any real (non-`--dry-run`) run. The
-  grader (`PythonEvalRunner`) reads this env var directly (no CLI flag) and prunes Docker /ABORTS
-  the run cleanly if free disk falls below the floor — see §8 Troubleshooting.
-- **swe-rebench upstream eval repo checked out.** The grader needs
-  `SWE-rebench/SWE-rebench-V2` on disk; point `run-bench.ts` at it with `--upstream-repo-dir
+  grader reads this env var directly (no CLI flag) and prunes Docker / aborts the run cleanly if
+  free disk falls below the floor — see §12 Troubleshooting. Both grade paths (the swe-rebench-v2
+  `PythonEvalRunner` and the authored-task-set `custom-grade.ts`) share this same disk-floor
+  plumbing.
+- **swe-rebench upstream eval repo checked out — §10 (generic slate) only.** The `--slate` grade
+  path needs `SWE-rebench/SWE-rebench-V2` on disk; point scripts at it with `--upstream-repo-dir
   <path>` (default `~/.jinn-client/SWE-rebench-V2-upstream`). If you've already run
   `jinn harnesses enable swe-rebench-v2-evaluator` on this host, that clone already exists at
   `<engine.implStateDirRoot>/swe-rebench-v2-evaluator/upstream/` — pass that path instead of
-  re-cloning.
+  re-cloning. An authored task set (§3–§9) needs no upstream repo — each task's own `image` already
+  carries (or can `git clone` on demand) its pinned `repo`@`commit`.
 
 Every command below assumes `cd client` first, and that `../bench/` resolves to the repo-root
 `bench/` directory (i.e. you are running from `client/`, not from the repo root).
 
 ---
 
-## 2. Pin the incumbents
+## 2. Pin the skill
 
-One `pin-skill.ts` invocation per wave-1 target. Resolve `--commit` to each repo's HEAD sha on pin
-day and record the resolved sha in the pin commit message (the script re-resolves and hard-fails
-if a 40-hex `--commit` doesn't match what it checks out, but a branch name or short ref should
-still be pinned to the exact sha you saw).
+One `pin-skill.ts` invocation for the pilot-cohort skill you're about to measure (see §11 for the
+cohort):
 
 ```bash
 cd client
@@ -66,277 +79,473 @@ yarn tsx scripts/skills-bench/pin-skill.ts \
   --source https://github.com/mattpocock/skills \
   --commit <resolved-sha> \
   --skill-path skills/tdd
-
-yarn tsx scripts/skills-bench/pin-skill.ts \
-  --name grill-me \
-  --source https://github.com/mattpocock/skills \
-  --commit <resolved-sha> \
-  --skill-path skills/grill-me
-
-yarn tsx scripts/skills-bench/pin-skill.ts \
-  --name improve-codebase-architecture \
-  --source <upstream-repo-url> \
-  --commit <resolved-sha> \
-  --skill-path <path-to-skill-in-that-repo>
-
-yarn tsx scripts/skills-bench/pin-skill.ts \
-  --name vercel-react-best-practices \
-  --source <upstream-repo-url> \
-  --commit <resolved-sha> \
-  --skill-path <path-to-skill-in-that-repo>
-
-yarn tsx scripts/skills-bench/pin-skill.ts \
-  --name frontend-design \
-  --source <upstream-repo-url> \
-  --commit <resolved-sha> \
-  --skill-path <path-to-skill-in-that-repo>
 ```
 
-Each invocation writes `../bench/skills-under-test/<name>/` (default `--dest`; override with
+Resolve `--commit` to the repo's HEAD sha on pin day and record the resolved sha in the pin commit
+message (the script re-resolves and hard-fails if a 40-hex `--commit` doesn't match what it checks
+out, but a branch name or short ref should still be pinned to the exact sha you saw).
+
+The invocation writes `../bench/skills-under-test/<name>/` (default `--dest`; override with
 `--dest <path>` only if you need a different destination) containing the vendored `SKILL.md` tree
 plus a `pin.json` (`name`, `source`, `commit`, `skillPath`, `sha256` over the vendored bytes,
 `license` parsed from the SKILL.md frontmatter, `repoLicense` detected from a repo-root
 LICENSE/LICENSE.md/LICENSE.txt/COPYING file when one exists, `fetchedAt`). The command prints the
 same JSON to stdout — capture it in the pin commit message alongside the resolved sha.
 
-Resolve the exact `--source` / `--skill-path` for `improve-codebase-architecture`,
-`vercel-react-best-practices`, and `frontend-design` from their skills.sh listing (leaderboard
-entry links to the source repo) before running — the spec (§3) names the targets, not the repo
-paths.
-
 **License gate.** `license` (frontmatter-only) is the primary signal; `repoLicense` is a repo-level
 fallback — a crude label (first non-empty line of whichever license file was found), never parsed
-or validated, and never written into `license`. After pinning, read each `pin.json`'s `license`
-field and record fork-eligibility in `bench/skills-under-test/LICENSES.md`: one row per skill
-(`name`, `license`, `fork-eligible: yes/no`, one-line rationale). Only a skill whose license permits
-redistribution and modification is a wave-2 fork candidate; the rest are measure-only for the wave-1
-receipt. A `license: null` pin (no `license:` key in the upstream frontmatter) is fork-ineligible
-until an operator confirms terms directly with the upstream author — do not assume permissive by
-default, and a permissive-looking `repoLicense` next to a null `license` does **not** flip
-fork-eligibility on its own; it's a pointer for the operator to go verify, a human judgement call,
-not an automatic pass.
+or validated, and never written into `license`. This gate matters less under the v0.2 model than it
+did for a fork (Jinn never forks the skill — §1.1 of the spec), but still record it: a null
+`license` (no `license:` key in the upstream frontmatter) means the report's embed snippet points
+back at a skill whose redistribution terms for its own content are unclear, which is worth a
+one-line note in the report, not a blocker to measuring it.
+
+A re-evaluation (§9) re-pins the revised commit the same way, under the same `--name` (the vendored
+`pin.json`'s `sha256` changes; the lineage identity for the reeval-guard ledger, §9, is the skill
+`--name`, unaffected by the re-pin).
 
 ---
 
-## 3. Build and freeze the slate
+## 3. Author the task set
+
+Build a `SkillTaskSetV1` (`client/src/skills-bench/task-set.ts`) for the skill — a domain-matched
+task set, not a draw from the generic swe-rebench pool (spec §2.2). Human-plus-agent work: author
+roughly twenty candidate tasks per skill, expecting the discrimination gate (§5) to keep roughly a
+dozen.
+
+**On-disk layout**, one directory per skill under `../bench/task-sets/<skill>/`:
+
+```
+../bench/task-sets/<skill>/
+  set.json
+  verifiers/
+    <task-id>_test.py       # one or more pytest verifier files per task
+  patches/
+    <task-id>.patch         # one known-good reference patch per task
+```
+
+`set.json` shape (`SkillTaskSetV1`):
+
+```json
+{
+  "version": "skill-task-set.v1",
+  "skill": "tdd",
+  "domain": "python",
+  "tasks": [
+    {
+      "id": "fix-widget-0001",
+      "repo": "org/widget-repo",
+      "commit": "<40-hex sha>",
+      "image": "org/widget-task:0001",
+      "requirement": {
+        "background": "...",
+        "requirement": "...",
+        "fileOps": "...",
+        "acceptance": "..."
+      },
+      "verifierFiles": ["verifiers/fix-widget-0001_test.py"],
+      "referencePatchFile": "patches/fix-widget-0001.patch",
+      "timeoutMs": 600000
+    }
+  ],
+  "sha256": "<computed — see below>"
+}
+```
+
+Per task:
+
+- **`repo`/`commit`/`image`** — a pinned repository, an exact commit, and a Docker image
+  `custom-grade.ts` can start (it reconciles `/workspace` to `repo`@`commit` via `git fetch`/
+  `checkout` if the image already bakes a checkout, or `git clone`s fresh if it doesn't — either
+  way the image must be able to reach `repo` over the network at grade time).
+- **`requirement`** — the four-part document spec §2.2 requires: `background`, `requirement`,
+  `fileOps`, `acceptance`. All four are mandatory (`validateTaskSet` refuses a task missing any
+  part). **Never name the skill under test** (or the arm name it will be mounted under) in any of
+  the four parts — `validateTaskSet` and, separately, `run-bench.ts`'s `assertNoArmNameLeak` both
+  fail loud on a leak, case-insensitively. An agent told "use test-driven development" in its task
+  prompt is not measuring whether `tdd` helps; it is measuring whether an instruction helps.
+- **`verifierFiles`** — one or more pytest files, paths relative to the task-set directory. A task
+  with zero verifier files is refused (`validateTaskSet`) — it can never grade.
+- **`referencePatchFile`** — a known-good fix, path relative to the task-set directory. This is
+  what the gradeability gate (§4) applies to prove the verifiers actually discriminate pass/fail.
+- **`timeoutMs`** (optional) — per-task grade wall-clock cap; falls back to the CLI's
+  `--grade-timeout-ms` / `custom-grade.ts`'s 10-minute default otherwise.
+
+**Computing `sha256`.** `hashTaskSet` (task-set.ts) hashes set membership plus every requirement,
+verifier file, and reference-patch file's bytes; `loadTaskSet` refuses to load a `set.json` whose
+declared `sha256` doesn't match a fresh recomputation. There is no dedicated CLI for this yet
+(task authoring is manual/agent work, not a shipped pipeline step) — compute and write it with a
+short throwaway script:
+
+```bash
+cd client
+cat > scripts/skills-bench/.tmp-hash-task-set.mjs <<'EOF'
+import { hashTaskSet } from '../../src/skills-bench/task-set.js';
+import { readFile, writeFile } from 'node:fs/promises';
+
+const dir = process.argv[2];
+const set = JSON.parse(await readFile(`${dir}/set.json`, 'utf8'));
+set.sha256 = await hashTaskSet(dir, set);
+await writeFile(`${dir}/set.json`, `${JSON.stringify(set, null, 2)}\n`);
+console.log(`sha256=${set.sha256}`);
+EOF
+yarn tsx scripts/skills-bench/.tmp-hash-task-set.mjs ../bench/task-sets/<skill>
+rm scripts/skills-bench/.tmp-hash-task-set.mjs
+```
+
+Re-run this any time you edit a task's requirement text, a verifier file, or a reference patch —
+`gradeability`/`screening` receipts (§4/§5) are deliberately excluded from the hash (they're derived
+receipts, written after authoring), so re-validating or re-screening never changes `sha256`, but
+editing the authored content always does.
+
+---
+
+## 4. Gradeability gate
+
+Zero-inference, mandatory, before any solve spend (spec §2.3). For every task (or one, with
+`--task`), `validate-task-set.ts` grades the known-good reference patch (must pass) and an empty
+patch (must fail, as a graded failure, never an error) through the real Docker grade path —
+Docker time only, no inference:
+
+```bash
+cd client
+yarn tsx scripts/skills-bench/validate-task-set.ts --task-set ../bench/task-sets/tdd
+# or one task at a time while authoring:
+yarn tsx scripts/skills-bench/validate-task-set.ts --task-set ../bench/task-sets/tdd --task fix-widget-0001
+```
+
+A passing task gets a `gradeability` receipt written into `set.json` (`status: 'pass'`,
+`checkedAt`, `referenceMs`, `emptyMs`, `gradeLogDigest`); a failing task has its (possibly stale)
+receipt cleared. Exit code is non-zero if any task in the set lacks a passing receipt after the run
+— including tasks this invocation didn't touch. `run-bench.ts --task-set` refuses the whole set
+(`assertTaskSetGradeable`) without every task carrying a passing receipt — this script is the only
+way to earn one.
+
+**The zarr lesson, generalized.** A verifier that grades fine in isolation can still fail to grade a
+real attempt (`conftest_import_error` and friends) — this gate is the direct fix: prove both
+directions actually reach a verdict before spending a single paid solve on the task.
+
+---
+
+## 5. Discrimination screen
+
+A task every configuration solves, or none solves, measures nothing (spec §2.4 — the step
+SWE-Skills-Bench's own construction skipped). `screen-task-set.ts` runs a baseline-only (no skill)
+sweep over every gradeability-passing task, Haiku, `--repeats` times, and keeps only the tasks the
+baseline fails outright or passes only marginally:
+
+```bash
+cd client
+yarn tsx scripts/skills-bench/screen-task-set.ts \
+  --task-set ../bench/task-sets/tdd \
+  --model claude-haiku-4-5-20251001
+```
+
+`--repeats` defaults to `2`, `--pass-threshold` to `1` (keep unless the baseline passed *every*
+repeat — spec §2.4's literal rule; tighten to e.g. `0.5` to also drop tasks the baseline mostly-but-
+not-always solves). `--out` defaults to `<task-set>/.screening-run` (a real, non-dry-run
+`run-bench.ts` subprocess this script drives internally with a synthesized
+`[{ name: 'baseline', skillDir: null }]` arms file and `--include-screened-out`, so a re-screen
+always covers every gradeability-passing task regardless of any prior screening receipts already on
+disk).
+
+This writes per-task `screening` receipts (`baselinePasses`, `attempts`, `keep`, `screenedAt`,
+`model`) plus a set-level `screeningSummary` (`kept`, `droppedNoHeadroom`, `droppedUngradeable`)
+back into `set.json` — membership never changes, a dropped task stays in the file with
+`keep: false`, so the screen is auditable, not asserted. `droppedUngradeable` is worth reading: a
+task that passed the zero-inference gradeability gate (§4) but produced an ungradeable outcome on a
+real baseline attempt is a latent verifier bug, not a screening decision.
+
+A task set with no screening receipts at all is not hard-blocked by `run-bench.ts` (§6) — it logs a
+warning and runs unscreened — but skipping this step means an uninterpretable result per spec §2.4;
+run it before every measured pass.
+
+---
+
+## 6. Paired measurement
+
+Run the paired comparison on the pinned Haiku profile (spec §2.6), screened tasks only:
+
+```bash
+cd client
+yarn tsx scripts/skills-bench/run-bench.ts \
+  --task-set ../bench/task-sets/tdd \
+  --arms ../bench/arms/tdd.json \
+  --model claude-haiku-4-5-20251001 \
+  --out ../bench/runs/tdd-pilot
+```
+
+`../bench/arms/tdd.json` is a two-entry array — baseline plus the one skill under test:
+
+```json
+[
+  { "name": "baseline", "skillDir": null },
+  { "name": "tdd", "skillDir": "../bench/skills-under-test/tdd" }
+]
+```
+
+Before any real solve work, `run-bench.ts --task-set` refuses loud (dry-run included) if any task
+lacks a passing gradeability receipt (§4) or if any non-baseline arm name leaks into a task's
+requirement text (`assertNoArmNameLeak` — the arm-name check is distinct from, and in addition to,
+`validateTaskSet`'s own `set.skill` check). It then applies the discrimination gate (§5): only
+`screening.keep === true` tasks run, unless the set has no screening receipts (warning, runs
+unscreened) or `--include-screened-out` is passed (loud warning, not recommended — spec §2.4). The
+manifest binds which decision applied (`screeningRespected`, `eligibleTaskIds`), so a screened run
+and an `--include-screened-out` run can never silently collide in the same `--out` dir.
+
+Every solve's session JSONL is copied next to its transcript as `<attemptKey>.session.jsonl` —
+this is the raw material the trigger-rate parser (`trigger.ts`) reads to detect whether the mounted
+skill actually loaded, never from asking the model. A missing/unresolvable session file is a loud
+warning, never fatal, and renders later as an *unknown* trigger status, never as "not triggered."
+
+Same resumability, auth-preflight, and manifest-guard posture as the generic-slate path (§10):
+`--dry-run` synthesizes fake outcomes and touches nothing real; a real run aborts loud before any
+solve if the isolated `--claude-config-dir` has no usable credentials; a rerun of the identical
+command skips every attempt key already logged in `attempts.jsonl`; a changed slate/model/arms/
+task-set under an existing `--out` throws (`assertManifestCompatible`) rather than silently
+resuming a different configuration. `--half` and `--candidate-id`/the holdout ledger are `--slate`-
+only concepts (§10) and are ignored for `--task-set` runs (the manifest's `half` field is fixed to
+`'feedback'` so the field stays populated without implying a real feedback/holdout split).
+
+**Budget note** (spec §3.3): roughly $10–25 of Haiku inference for the full paired run (baseline
+plus skill, about a dozen screened tasks). Docker/grading time, not inference, is the actual
+bottleneck — §4's gate is zero-inference precisely so cost falls on compute time before any real
+spend, not on solves that later turn out to have graded nothing.
+
+---
+
+## 7. Render + review
+
+```bash
+cd client
+yarn tsx scripts/skills-bench/render-report.ts \
+  --run ../bench/runs/tdd-pilot \
+  --task-set ../bench/task-sets/tdd \
+  --skill tdd \
+  --report-url https://github.com/Jinn-Network/skills-eval/blob/main/reports/tdd@<sha>/report.md \
+  --measured-on 2026-08-01
+```
+
+`--out` defaults to `<run>/report`; `--agent` defaults to `claude-code`; pass `--skill-source
+<owner>/<repo>@<sha>` (the pinned skill's `source`/`commit` from its `pin.json`, §2) to record the
+measured bytes on the report's `scope:` line. `--include-transcripts` copies full session
+transcripts into `data/` — leave it off by default (transcripts can embed the task repo's own
+content) unless you've reviewed them for anything sensitive.
+
+The renderer refuses a dry-run manifest and refuses a `--run`/`--task-set` pair whose sha256s
+disagree (both are integrity checks — if either fires, you're pointing at the wrong pair, not
+something to work around by editing either file). It writes, into `--out`:
+
+- **`report.md`** — the public capability report: task-set identity, the paired receipt block (N,
+  resolve rates, paired delta, Wilson interval), trigger rate, a per-task outcome table, links to
+  `data/` and the rerun command.
+- **`badge.svg`** — a small self-contained SVG badge.
+- **`embed.md`** — the badge image, a link to the report, and the `jinn.*` frontmatter metadata
+  block (`jinn.receipt`, `jinn.receipt-sha256`, `jinn.measured-on`, `version` — repointed at the
+  report, not a fork receipt; `jinn.forked-from` is dropped entirely, spec §4.1) — this is what the
+  author pastes into their own skill's frontmatter and README, not something to hand-assemble.
+- **`data/`** — `attempts.jsonl`, `bench-manifest.json`, `set.json` (and `transcripts/` if
+  `--include-transcripts`), so the report is reproducible from the repo alone.
+
+**Human review gate — mandatory before §8.** Read the rendered report against the spec's
+no-overclaim rules (§1.1, §2.7 "Statistics posture", §7 risk 5): N, resolve rates, paired delta, CI,
+and the plain-words caveat must all be present; no claim of significance beyond what the interval
+supports. **Trigger-rate reading guidance (spec §2.5, §7 risk 1):** a null result paired with a low
+trigger rate must be read and stated as *not exercised on this task set* — a discoverability
+problem — never as *no effect*; only report "no effect" against tasks the discrimination gate (§5)
+already proved had headroom. Do not proceed to §8 until the report has been read and passes this
+check.
+
+---
+
+## 8. Private annex
+
+Manual-first (spec §6: "no LLM-assisted annex authoring in the pilot") — a human reads the failing
+transcripts and writes the diagnosis, no automated tooling.
+
+1. **List the working set:**
+
+   ```bash
+   cd client
+   yarn tsx scripts/skills-bench/list-failing-sessions.ts --run ../bench/runs/tdd-pilot --arm tdd
+   ```
+
+   `--arm` selects the treatment arm; omit it and the script infers it when the run has exactly one
+   non-baseline arm (refuses to guess otherwise). Lists every treatment-arm attempt that did not
+   resolve — `regressed` (baseline passed, treatment didn't — the sharpest diagnosis case),
+   `failed` (concordant fail with the baseline, or no paired baseline attempt), or `ungradeable` —
+   each with its transcript path, session-JSONL path, and measured `triggered: yes/no/unknown`
+   status.
+
+2. **Write the annex** from `docs/templates/skills-eval-annex.md`, reading only the transcripts the
+   working set names. Every failing/regressed attempt sorts into exactly one of three failure modes
+   (never triggered / triggered but vague / triggered and harmful — spec §2.5, §3.1 step 6); a
+   category with no attempts says so plainly rather than being omitted. Suggested edits are
+   diff-sized, one per finding, never a rewrite.
+
+3. **Burn the diagnosis tasks for this skill's lineage:**
+
+   ```bash
+   cd client
+   yarn tsx scripts/skills-bench/record-annex.ts \
+     --run ../bench/runs/tdd-pilot --skill tdd --tasks fix-widget-0001,fix-widget-0004
+   ```
+
+   List every task id the annex's diagnosis actually reads from (the working set's task ids, or a
+   subset if you narrowed it) — these become permanently off-limits for measuring any future
+   revision of this skill (§9). `--skill` must name a treatment arm present in the run's
+   `bench-manifest.json`; the arm's `skillSha256` is recorded on the ledger entry for audit, but the
+   freshness check itself scopes by skill name across every recorded sha, not by this one sha alone
+   — see `reeval-guard.ts`'s module doc.
+
+4. **Deliver privately, never publish alongside the report.** The outreach/delivery framing is not
+   yet decided (spec §8's open policy question — publish-without-consent vs. private-first window,
+   deferred to Ritsu/Oak); `docs/templates/skills-eval-delivery.md` is a reserved stub for that copy,
+   not yet written. Until that's resolved, deliver the annex file directly, out of band.
+
+---
+
+## 9. Re-evaluation
+
+If the author revises the skill (spec §3.1 step 7): re-pin the revised commit (§2, same `--name`,
+new resolved sha), author or select the measurement task ids — a fresh task set, or the unburned
+remainder of the original ~20 candidates — and run the paired comparison again with `--reeval-of`:
+
+```bash
+cd client
+yarn tsx scripts/skills-bench/run-bench.ts \
+  --task-set ../bench/task-sets/tdd \
+  --arms ../bench/arms/tdd.json \
+  --model claude-haiku-4-5-20251001 \
+  --out ../bench/runs/tdd-pilot-r2 \
+  --reeval-of tdd
+```
+
+`--reeval-of <skill>` asserts, before any real solve work (skipped under `--dry-run`, like the
+generic-slate path's holdout ledger — §10), that none of this run's eligible task ids were already
+burned for `<skill>`'s lineage by a prior annex derivation (`assertReevalTasksFresh`,
+`reeval-guard.ts`, ledger at `<repoRoot>/bench/reeval-ledger.json`). Burns are keyed by skill name,
+not sha — a task the diagnosis for `tdd@sha1` was derived from stays off-limits for measuring
+`tdd@sha2`, `tdd@sha3`, and so on; a normal *first* evaluation of a skill omits `--reeval-of`
+entirely, since there's nothing to check yet. A caught overlap throws, listing the offending task
+ids. `--force-reeval` overrides the check with a loud warning — legitimate only when you've
+independently confirmed the overlap is not a genuine information leak (e.g. deliberately re-running
+the exact same unrevised task set); it requires `--reeval-of` and is refused otherwise.
+
+**This is an information boundary, not just a ledger entry** — the same caveat the v0.1 holdout
+ledger carried (§10): the ledger blocks a second *run* against burned tasks, it cannot un-read a
+transcript. Only measure a revision against tasks the annex diagnosis was never derived from.
+
+Render a new report the same way as §7, into a fresh `--out`/report dir — **a new measured sha gets
+a new `reports/<skill>@<sha>/` directory, never an overwrite** (spec §4), so a stale badge is
+detectable by comparing `jinn.receipt-sha256` against the current report's hash. A revision that
+measurably improves earns the badge; a revision that does not is reported honestly, and the offer to
+re-run again stands (spec §3.1 step 8).
+
+---
+
+## 10. Generic slate — screening/holdout substrate (condensed)
+
+The swe-rebench-v2 slate (v0.1's original mechanism) is not the primary pilot path — §2–§9 above is
+— but it survives as the screening/holdout substrate for general coding-workflow skills that don't
+warrant a bespoke authored task set (spec §2.1). Condensed reference, not a deleted capability:
+
+**Zero-inference pre-sweep, mandatory before slate freeze.** The zarr lesson applies here too: an
+empty-patch, zero-inference sweep finds ungradeable instances before any solve spend.
+
+```bash
+cd client
+yarn tsx scripts/skills-bench/sweep-gradeability.ts \
+  --slate ../bench/slate/slate.json
+```
+
+`--instances id1,id2` scopes to specific instances (default: every slate instance);
+`--timeout-ms` (default 3,600,000 = 60 min) and `--upstream-repo-dir` mirror `run-bench.ts`'s own
+flags; `--out` defaults to `gradeability-sweep.json` next to the slate. The report is durable/
+resumable (rewritten after every instance; a re-run skips instances already classified) and keyed to
+the slate's own `sha256` — a re-sweep against a changed slate starts fresh. An ungradeable instance
+feeds `build-slate.ts --exclude-instances`/`--exclude-file` below.
+
+**Build/freeze the slate:**
 
 ```bash
 cd client
 yarn tsx scripts/skills-bench/build-slate.ts \
   --seed jinn.skills-bench.v1 \
   --pool-size 60 \
-  --out ../bench/slate/slate.json
+  --out ../bench/slate/slate.json \
+  --exclude-instances zarr-developers__zarr-python-2629
 ```
 
-This sources candidates via the same HuggingFace historical-pool path as `build-pilot-slate.ts`,
-excludes every active cap-v0 held-out slate id, dedupes to at most 2 instances per repo, seed-ranks
-and takes the first `--pool-size` candidates, then splits into a 15-instance feedback half and a
-15-instance holdout half (`splitSlate`, fixed at `feedbackSize: 15, holdoutSize: 15` — not
-configurable from the CLI). Output: `sha256=<hash> feedback=15 holdout=15` on stdout, and
-`../bench/slate/slate.json` on disk.
+Sources candidates via the HuggingFace historical-pool path, excludes every active cap-v0 held-out
+slate id, applies `--exclude-instances`/`--exclude-file` (recorded in the written slate as
+`excluded: [{instance_id, reason}]`, included in the slate hash), dedupes to at most 2 instances per
+repo, seed-ranks and takes the first `--pool-size`, then splits into a 15/15 feedback/holdout pair
+(`splitSlate`, fixed sizes, not CLI-configurable). **Commit `slate.json` — the commit is the
+freeze.** Nothing downstream should run against an uncommitted or subsequently-edited slate;
+`render-receipts.ts` refuses to render if the file's `sha256` doesn't match a run's
+`bench-manifest.json`.
 
-**Commit `slate.json` — the commit is the freeze.** Nothing downstream (wave 1, wave 2 feedback
-rounds, the holdout run) should ever be run against an uncommitted or subsequently-edited
-`slate.json`; `render-receipts.ts` will refuse to render if the file's `sha256` doesn't match what
-a run's `bench-manifest.json` recorded (§6, §8).
-
-If the wave-1 smoke run (§4) finds an ungradeable instance, remove it from `slate.json` and rebuild
-the slate **before** this freeze commit — do not silently drop instances from a slate that has
-already been committed and run against.
-
----
-
-## 4. Wave 1 smoke
-
-Cheap, small model, capped instance count — verifies the wiring (real claude solve, real Docker
-grade) before spending the full wave-1 budget.
+**Run:**
 
 ```bash
 cd client
 yarn tsx scripts/skills-bench/run-bench.ts \
   --slate ../bench/slate/slate.json \
-  --arms ../bench/arms/wave1.json \
+  --half feedback \
+  --arms ../bench/arms/<name>.json \
   --model claude-haiku-4-5-20251001 \
-  --max-instances 2 \
-  --out ../bench/runs/smoke
+  --out ../bench/runs/<name>
 ```
 
-`../bench/arms/wave1.json` is an array with a `baseline` arm (`skillDir: null`) plus one entry per
-pinned wave-1 skill, e.g.:
+`--half feedback|holdout|both` (default `feedback`) selects which slate half to run. `--half
+holdout` requires `--candidate-id <id>` and is one-shot per candidate id — a second attempt for the
+same id throws (`holdout-guard.ts`'s ledger at `<repoRoot>/bench/holdout-ledger.json`) unless
+`--force-holdout-rerun` (legitimate only if the prior run aborted before grading anything). `--half
+feedback` never touches this ledger; iterate on the feedback half as many times as budget allows.
 
-```json
-[
-  { "name": "baseline", "skillDir": null },
-  { "name": "tdd", "skillDir": "../bench/skills-under-test/tdd" },
-  { "name": "grill-me", "skillDir": "../bench/skills-under-test/grill-me" },
-  { "name": "improve-codebase-architecture", "skillDir": "../bench/skills-under-test/improve-codebase-architecture" },
-  { "name": "vercel-react-best-practices", "skillDir": "../bench/skills-under-test/vercel-react-best-practices" },
-  { "name": "frontend-design", "skillDir": "../bench/skills-under-test/frontend-design" }
-]
-```
-
-Verify before proceeding to §5:
-
-- The command exits 0 (no grade failures reported to stderr).
-- `../bench/runs/smoke/transcripts/` contains a `<instanceId>|<arm>|<repeat>.json` file per attempt.
-- `../bench/runs/smoke/attempts.jsonl` has at least one outcome that came from a **completed Docker
-  eval**. A `"passed": false` line is NOT sufficient on its own: the runner short-circuits an empty
-  patch to `false` without ever entering the container, so a smoke in which every real grade timed
-  out can still show a `false` and look healthy. Confirm against the log that at least one instance
-  logged `graded <id> arm=<name> → passed` or `→ failed` *without* a preceding
-  `empty patch for <id>` or `ungradeable (eval_timeout)` line for that same attempt. Until that
-  holds, the grading path is unproven and the wave-1 budget must not be spent.
-- **No `.claude/` hunk in any treatment patch.** The skill is mounted into the checkout and must be
-  unmounted before the patch is recovered; if it leaks, every treatment patch installs the skill
-  inside the eval container and the arms stop being comparable. Check every transcript:
-
-  ```bash
-  cd ../bench/runs/smoke/transcripts
-  python3 -c "
-import json,glob
-for f in sorted(glob.glob('*.json')):
-    p = json.load(open(f)).get('patch','') or ''
-    bad = [l for l in p.split('\n') if l.startswith(('+++ b/','--- a/')) and '.claude/' in l]
-    print(f, 'LEAK:' if bad else 'clean', bad)
-"
-  ```
-
-- **Resume works:** re-run the exact same command. It should print `no runnable attempts — every
-  attempt key already present in attempts.jsonl (resumed).` and do no new solving or grading.
-
-**Apple Silicon / aarch64 hosts: raise the timeout, they do work.** The SWE-rebench eval images are
-amd64 and run under Docker Desktop's Rosetta emulation (confirm `UseVirtualizationFrameworkRosetta`
-is on — without it, emulation is far slower). A grade that takes a few minutes natively took
-**17.3 minutes** emulated in a measured run, so the 10-minute default and even a 20-minute
-`--grade-timeout-ms` return spurious `ungradeable (eval_timeout)` results. Pass
-`--grade-timeout-ms 3600000` (60 min) on such a host. A timeout is indistinguishable from a genuinely
-ungradeable instance in the outcome log, so an under-set timeout silently destroys slate coverage.
-
-**Disk cycles hard during grading.** One emulated grade took free space from 42 GB to 21 GB before
-the runner's per-round prune reclaimed it. Keep `JINN_EVAL_DISK_FLOOR_GB` above the transient peak
-(~22-25 GB with ~50 GB free) so the run aborts cleanly rather than exhausting the disk — on macOS,
-disk exhaustion during a full slate has crashed the host. Run `docker system prune -af --volumes`
-before a wave.
-
-**Wave-scale feasibility is the real aarch64 limit, not correctness.** At ~17 min per grade, serial
-grading, wave 1's ~180 attempts is roughly 50 hours of grading alone. Use the Linux amd64 host for
-waves; an aarch64 machine is fine for smoke runs and for proving the pipeline.
-
-A slate instance that proves ungradeable in this smoke run must be removed from `slate.json` and
-the slate rebuilt (§3) **before** the freeze commit — this is the last gradeability check before
-`slate.json` becomes immutable.
-
-`../bench/runs/smoke` is a real (non-dry-run) `--out` dir; it cannot be reused for `--dry-run`
-testing and a dry-run `--out` dir cannot later be reused for this smoke run — `assertManifestCompatible`
-rejects the mismatch (`dryRun: true` is part of the manifest bytes it compares).
-
----
-
-## 5. Wave 1 full
-
-Same command, full model, full slate, fresh `--out`. Wave 1 measures the incumbents' effect across
-the whole slate, so pass `--half both` explicitly — do not rely on the `feedback` default here:
-
-```bash
-cd client
-yarn tsx scripts/skills-bench/run-bench.ts \
-  --slate ../bench/slate/slate.json \
-  --half both \
-  --arms ../bench/arms/wave1.json \
-  --model claude-sonnet-5 \
-  --out ../bench/runs/wave1
-```
-
-`--half both` also seeds `bench/holdout-ledger.json` with a `<pre-candidate>` entry per the
-ledger's audit-trail design; see §8 and `src/skills-bench/holdout-guard.ts`. `run-bench.ts` records
-the `--half` it actually ran with into `bench-manifest.json`'s `half` field — this is what
-`render-receipts.ts` (§6) reads to label the receipt's scope, not an operator-typed flag, so there
-is no way for the published receipt to disagree with what was actually run. Because wave 1 touches
-the holdout half, **§9's diagnosis step must read feedback-half transcripts only** — see §9's filter
-step before starting wave 2.
-
-**Budget note:** ≈30 tasks × 6 arms ≈ 180 solves + grades. Expect this to take days, not hours —
-each attempt is a real claude-code solve followed by a real Docker-based eval. It is safe to
-interrupt (Ctrl-C) and resume: rerunning the identical command skips every attempt key already
-present in `attempts.jsonl` and only runs what's missing.
-
-If any attempt hits an unexpected grade error (Docker/disk/network infra failure, not a legitimate
-ungradeable verdict), the run logs it loudly, continues the rest of the batch, and exits non-zero
-with a summary line listing the failed attempt keys. Those keys are absent from `attempts.jsonl`,
-so a plain rerun of the same command retries exactly them.
-
-`--solve-concurrency N` (default 1) parallelizes across instances if the host has headroom; grading
-itself is always serialized through an internal queue regardless of `--solve-concurrency`.
-
----
-
-## 6. Render + review receipts
+**Render:**
 
 ```bash
 cd client
 yarn tsx scripts/skills-bench/render-receipts.ts \
-  --run ../bench/runs/wave1 \
+  --run ../bench/runs/<name> \
   --slate ../bench/slate/slate.json \
   --measured-on 2026-08-01 \
-  --out ../bench/runs/wave1/receipts \
+  --out ../bench/runs/<name>/receipts \
   --agent claude-code
 ```
 
-There is no `--half` flag on this script — the receipt's `slateHalf` is read directly from
-`--run`'s `bench-manifest.json` (`half`, recorded by `run-bench.ts` when the run started), so it can
-never disagree with what was actually run (§5). `--measured-on` is a plain `YYYY-MM-DD` string, not
-validated against anything — set it to the date the run completed. `--agent` defaults to
-`claude-code`; only pass `--forked-from <owner/repo@sha>` for a wave-2 fork
-receipt (§9), never for wave-1 (wave 1 has no fork). Pass `--skill-source <owner/repo@sha>` (the
-pinned original's `source`/`commit` from its `pin.json`, §2) to record which upstream bytes were
-measured on the receipt's `scope:` line — `skillSha256` is populated automatically from the run's
-`bench-manifest.json` arm entry, `--skill-source` is the human-readable pointer alongside it.
+`slateHalf` is read from the run's `bench-manifest.json`, never hand-typed. Pass `--skill-source
+<owner>/<repo>@<sha>` for the scope line. Output: one `receipts/<arm>.md` per non-baseline arm plus
+`receipts/SUMMARY.md`, generated, never hand-edited. Same human-review gate as §7 applies before any
+publication.
 
-The renderer refuses to run against a dry-run manifest (`dryRun: true` in
-`bench-manifest.json`) and refuses if `slate.json`'s `sha256` doesn't match the `slateSha256`
-recorded in `bench-manifest.json` — both are integrity checks, not something to work around by
-editing either file. If either fires, you're pointing `--run` or `--slate` at the wrong pair; fix
-the paths rather than the files.
-
-Output: one `receipts/<arm-name>.md` per non-baseline arm in the manifest (the baseline arm is
-whichever manifest arm has `skillSha256: null`), plus `receipts/SUMMARY.md` — a `| skill | baseline
-| with skill | net |` table, generated, never hand-edited.
-
-**Human review gate — mandatory before §7.** Read every rendered receipt against the spec's
-no-overclaim rules (design doc §1.6, §2 "Statistics posture", §8 risk 3): N, resolve rates, paired
-delta, CI, and the plain-words caveat must all be present; no claim of significance beyond what the
-interval supports; a `frontend-design` / `vercel-react-best-practices` receipt whose slate turned
-out to have too few applicable (Python-heavy SWE) tasks must say so rather than imply a measured
-effect it can't support (spec §8 risk 5). Do not proceed to publish until every receipt in the
-render output has been read and passes this check.
+**Reports registry (§4 of the spec):** `Jinn-Network/skills-eval` (renamed from v0.1's
+`Jinn-Network/skills` — no catalog, only reports). Copy from `bench/skills-repo-template/`:
+`reports/<skill>@<sha>/report.md` + `data/`, `rig/`, a generated `README.md` index. No `skills/`
+directory, no forked skill code, ever (spec §4).
 
 ---
 
-## 7. Publish (wave 1)
+## 11. Pilot-prep facts
 
-Publishing is an **external, human-gated action** — creating a public GitHub repo and pushing to
-it. Nothing in this runbook automates it; an operator performs each step and pushes deliberately,
-per the repo's external-communication rules (`CLAUDE.md` §External Communication).
+Recorded here per the v0.2 plan's execution-gated item (not build scope, reference only):
 
-1. Create `Jinn-Network/skills` from `bench/skills-repo-template/` (copy the template's
-   `README.md`, `skills/`, `receipts/`, `rig/` layout as the starting tree).
-2. Copy the reviewed receipts (§6) into `receipts/<name>.md`, and copy `receipts/data/` — the frozen
-   `slate.json`, the run's `attempts.jsonl`, `bench-manifest.json`, `transcripts/`, and
-   `bench/holdout-ledger.json` (tracked in this repo, not gitignored — see `.gitignore`) — so every
-   receipt is reproducible from the repo alone and the ledger is a complete audit trail a reader of
-   the receipt can inspect (spec §1.6 success test).
-3. Regenerate the README's summary table from `receipts/SUMMARY.md` (never hand-write it — see
-   `bench/skills-repo-template/README.md`'s comment).
-4. **Do not copy the skill directories into `skills/<name>/` yet.** Wave 1 publishes measurements,
-   not forks — the `skills/` tree stays empty (`.gitkeep` only) until a wave-2 fork wins its holdout
-   run (§9).
-5. Push and make the repo public. This is the human-gated step: confirm the receipts passed the
-   §6 review gate before pushing, and confirm no PII or secrets are in `receipts/data/transcripts/`
-   (transcripts are raw claude-code session output).
+- **Cohort:** `tdd` and `grill-me` (mattpocock, MIT-licensed, already pinned) anchor the pilot —
+  real, leaderboard-ranked coding-workflow skills, both inside the domain the task-authoring
+  machinery can measure. A third target is chosen at execution time from **SWE-Skills-Bench's own
+  harmful/null list** — deliberately re-measuring a skill the coarse cross-skill study already
+  scored zero-effect or actively harmful, on a narrower, better-matched task set (spec §1.4).
+- **Cost:** roughly $10–25 of Haiku inference per skill for the full paired run (spec §3.3) — see
+  §6's budget note.
+- **Host:** Linux amd64 for throughput (see §1) — an aarch64/Apple Silicon host is fine for proving
+  the pipeline (§4's gradeability gate, a small `--max-instances`-capped run) but not for a full
+  paired measurement at scale; see §12's aarch64 guidance for measured timings.
 
 ---
 
-## 8. Troubleshooting
+## 12. Troubleshooting
 
 **Not logged in / every solve fails instantly.** Symptom: every attempt fails immediately with
 `claude exited 1` / `"Not logged in · Please run /login"` in the solve error, `total_cost_usd: 0`,
@@ -345,19 +554,19 @@ actually ran. Root cause (measured, see §1): the isolated `--claude-config-dir`
 credentials — on macOS this is expected the first time, because claude-code stores credentials in
 the Keychain (service "Claude Code-credentials"), not in a file the isolated dir can inherit. Fix
 with one of the two routes from §1 (`ANTHROPIC_API_KEY` or one-time interactive login into the
-resolved `--claude-config-dir` path), then re-run. As of this fix, `run-bench.ts` catches this
-*before* spending anything: it runs a one-shot auth preflight probe before any real solve work and
-aborts loud with both routes spelled out, rather than burning the whole slate on instant failures.
+resolved `--claude-config-dir` path), then re-run. `run-bench.ts` catches this *before* spending
+anything: it runs a one-shot auth preflight probe before any real solve work and aborts loud with
+both routes spelled out, rather than burning the whole run on instant failures.
 
 **Run exits 0 with an empty (or near-empty) `attempts.jsonl`.** Prior to the live-smoke fixes this
 could happen silently — every solve failed but nothing tracked it as a run-level failure, so the
-process exited 0 and looked like a clean no-op. `run-bench.ts` now tracks solve failures the same
-way it tracks grade failures (`solveFailures`, logged and non-zero-exiting), and separately checks
-whether the run wrote **zero** outcomes to `attempts.jsonl` across a non-empty runnable set — that
-condition alone forces a loud "NOTHING WAS RECORDED" line and a non-zero exit, even if no individual
-attempt happened to land in either failure list (e.g. every instance failed at fetch/checkout,
-before any solve was attempted). Treat any non-zero exit from `run-bench.ts` as "this run needs
-attention," not just the previously-documented grade-failure case.
+process exited 0 and looked like a clean no-op. `run-bench.ts` tracks solve failures the same way it
+tracks grade failures (`solveFailures`, logged and non-zero-exiting), and separately checks whether
+the run wrote **zero** outcomes to `attempts.jsonl` across a non-empty runnable set — that condition
+alone forces a loud "NOTHING WAS RECORDED" line and a non-zero exit, even if no individual attempt
+happened to land in either failure list (e.g. every task failed at fetch/checkout, before any solve
+was attempted). Treat any non-zero exit from `run-bench.ts` as "this run needs attention," not just
+the previously-documented grade-failure case.
 
 **Skill-visibility matrix (measured, haiku, `-p`, scratch dirs) — why isolation is required and why
 `--safe-mode` can't be the treatment arm.** `run-bench.ts` uses `--setting-sources project` (via
@@ -371,193 +580,65 @@ attention," not just the previously-documented grade-failure case.
 
 Only the isolated `CLAUDE_CONFIG_DIR` cuts the ambient-skill leak without also killing the mounted
 project skill — `--safe-mode` is clean on ambient skills but breaks the mount mechanism itself, so
-it cannot serve as the treatment arm. This is why isolation is a hard requirement (§1), not a nice-
-to-have: without it, the baseline arm's "no skill installed" claim is false on this operator's
-machine, and a receipt measured with ambient leakage isn't reproducible off it.
+it cannot serve as the treatment arm. This is why isolation is a hard requirement (§1), not a
+nice-to-have: without it, the baseline arm's "no skill installed" claim is false on this operator's
+machine, and a report measured with ambient leakage isn't reproducible off it.
 
-**Docker wedge / grade timeout.** `PythonEvalRunner` raises `EvalCouldNotGradeError` on a genuine
-grading failure (image pull failure, timeout at `--grade-timeout-ms`, log-parse failure); `run-bench.ts`
-converts that into `passed: null` (`unscorable: true`) and logs `ungradeable (<reason>)` — this is a
-normal, publishable outcome, not an error, and the run continues. Raise `--grade-timeout-ms` (default
-600000 = 10 min) if timeouts are frequent and the host is just slow, not actually wedged.
+**Apple Silicon / aarch64 hosts: raise the timeout, they do work.** The swe-rebench eval images
+(§10's generic-slate grade path) are amd64 and run under Docker Desktop's Rosetta emulation (confirm
+`UseVirtualizationFrameworkRosetta` is on — without it, emulation is far slower). A grade that takes
+a few minutes natively took **17.3 minutes** emulated in a measured run, so the 10-minute default and
+even a 20-minute `--grade-timeout-ms` return spurious `ungradeable (eval_timeout)` results. Pass
+`--grade-timeout-ms 3600000` (60 min) on such a host. A timeout is indistinguishable from a genuinely
+ungradeable instance in the outcome log, so an under-set timeout silently destroys coverage. The
+authored-task-set grade path (`custom-grade.ts`, §4–§9) defaults to a 10-minute cap too
+(`DEFAULT_CUSTOM_GRADE_TIMEOUT_MS`, overridable per-task via `timeoutMs` in `set.json` or via
+`--grade-timeout-ms`) — the same emulation cost applies if a task's `image` is amd64-only.
+
+**Disk cycles hard during grading.** One emulated grade took free space from 42 GB to 21 GB before
+the runner's per-round prune reclaimed it. Keep `JINN_EVAL_DISK_FLOOR_GB` above the transient peak
+(~22-25 GB with ~50 GB free) so the run aborts cleanly rather than exhausting the disk — on macOS,
+disk exhaustion during a large run has crashed the host. Run `docker system prune -af --volumes`
+before a pilot run.
+
+**Pilot-scale feasibility is the real aarch64 limit, not correctness.** At ~17 min per grade, serial
+grading, even a screened dozen-task pilot run (baseline + skill, a couple of repeats) is hours of
+grading. Use the Linux amd64 host for a full paired measurement; an aarch64 machine is fine for
+proving the pipeline (§4's gradeability gate, a `--max-instances`-capped smoke) but not for §6/§9 at
+pilot scale.
+
+**Docker wedge / grade timeout.** Both grade paths raise a "could not grade" error (never a false
+verdict) on a genuine grading failure (image pull failure, timeout, log-parse/pytest-collection
+failure) — `EvalCouldNotGradeError` for the generic-slate path, `CustomGradeError` for the
+authored-task-set path — and both `run-bench.ts` modes convert it to `passed: null`
+(`unscorable: true`), logging `ungradeable (<reason>)`. This is a normal, publishable outcome, not an
+error, and the run continues. Raise `--grade-timeout-ms` (default 600000 = 10 min for both paths) if
+timeouts are frequent and the host is just slow, not actually wedged.
 
 **Disk floor abort.** If free disk on the grading host drops below `JINN_EVAL_DISK_FLOOR_GB` (env,
 default effectively required at 40 for this rig — see §1), the grader prunes Docker first and, if
 still short, raises `InsufficientDiskError` and the run for that attempt aborts (logged as an
-unexpected grade error per §5 — the attempt key is not written and will retry on resume). Free disk
+unexpected grade error — the attempt key is not written and will retry on resume). Free disk
 manually (`docker system prune`, clear old `../bench/runs/*` work dirs) and rerun the same command.
 
 **Manifest mismatch.** `assertManifestCompatible` byte-compares the JSON manifest it would write
-against what's already at `<out>/bench-manifest.json`. A mismatch (slate sha changed, model
-changed, arms file changed, or dry-run/real status flipped) throws `skills-bench manifest mismatch:
-... Use a fresh --out dir for a changed run.` This is a hard stop, not a warning — pick a new
-`--out` directory rather than editing the existing manifest or `attempts.jsonl` to match.
+against what's already at `<out>/bench-manifest.json`. A mismatch (slate/task-set sha changed, model
+changed, arms file changed, screening decision changed, or dry-run/real status flipped) throws
+`skills-bench manifest mismatch: ... Use a fresh --out dir for a changed run.` This is a hard stop,
+not a warning — pick a new `--out` directory rather than editing the existing manifest or
+`attempts.jsonl` to match.
 
-**Holdout guard refusal.** `--half holdout` without `--candidate-id <id>` fails argument parsing
-immediately (`--half holdout requires --candidate-id <id>`). A `--half holdout` run for a
-`--candidate-id` that already has an entry in `bench/holdout-ledger.json` (resolved from the repo
-root, not CWD) throws `holdout already consumed for candidate '<id>' ...` — the holdout is one-shot
-per candidate by design (spec §4 step 5, §9 below); an aborted run still burns the slot because the
-ledger records intent before grading starts. Use `--force-holdout-rerun` only when the prior run for
-that exact candidate aborted before grading anything — it skips the guard with a loud warning, not
-silently.
+**Holdout guard refusal (§10, `--slate` only).** `--half holdout` without `--candidate-id <id>`
+fails argument parsing immediately. A `--half holdout` run for a `--candidate-id` that already has
+an entry in `bench/holdout-ledger.json` (resolved from the repo root, not CWD) throws `holdout
+already consumed for candidate '<id>' ...` — one-shot per candidate by design; an aborted run still
+burns the slot because the ledger records intent before grading starts. Use `--force-holdout-rerun`
+only when the prior run for that exact candidate aborted before grading anything.
 
----
-
-## 9. Wave 2 loop (fork and improve)
-
-Design reference: spec §4. Only a license-eligible target (§2) qualifies. Choose the target from
-the wave-1 receipts (§6) — the skill with the clearest demonstrated headroom or the clearest
-demonstrated failure, not a guess.
-
-1. **Diagnose from traces — feedback-half transcripts only.** Wave 1 ran `--half both` (§5), so
-   `../bench/runs/wave1/transcripts/` contains **both** feedback- and holdout-instance transcripts.
-   Diagnosis must read feedback-half transcripts exclusively. Filter explicitly before opening
-   anything — do not eyeball filenames:
-
-   ```bash
-   # 1. The feedback-half instance ids from the frozen slate — the only ids safe to read for
-   #    wave-2 diagnosis.
-   jq -r '.feedback[].instance_id' ../bench/slate/slate.json | sort > /tmp/feedback-ids.txt
-
-   # 2. Transcript filenames are `<instanceId>|<arm>|<repeat>.json` — keep only the ones whose
-   #    instanceId (the part before the first `|`) is in the feedback set, further filtered to
-   #    the target arm and passed=false via attempts.jsonl.
-   for f in ../bench/runs/wave1/transcripts/*.json; do
-     id="$(basename "$f" | cut -d'|' -f1)"
-     grep -qxF "$id" /tmp/feedback-ids.txt && echo "$f"
-   done
-   ```
-
-   Cross-check each candidate id against `attempts.jsonl` (`arm=<target>`, `passed=false`) before
-   reading it, and read only that filtered list for the dominant failure mode: never triggered,
-   guidance too vague to act on, or actively harmful on a task class.
-
-   **Warning — this is an information boundary, not just a run-count guard.** The one-shot holdout
-   ledger (§8) blocks a second `--half holdout` *run* for a given candidate; it cannot un-read a
-   transcript. Opening a holdout-instance transcript at this step spends the holdout in information
-   terms — a variant designed with knowledge of a holdout failure is no longer a clean one-shot
-   against that half, even though every mechanical gate (ledger, manifest) stays green. Treat the
-   filtered list above as the entire diagnosis corpus; do not browse
-   `../bench/runs/wave1/transcripts/` directly.
-2. **Write K variant skill dirs** under `../bench/variants/<target>-v<k>/`, one per candidate fix —
-   full revised `SKILL.md` files, not patches (spec §4 step 2). Build each variant's frontmatter
-   with `buildSkillFrontmatter` from `src/skills-bench/frontmatter.ts` (six allowed keys only;
-   `name`/`description` required; `metadata` is a flat string map) so it stays spec-valid.
-3. **Build the wave-2 arms file** `../bench/arms/wave2-<target>.json`: the original pinned skill
-   plus each variant, e.g.:
-
-   ```json
-   [
-     { "name": "baseline", "skillDir": null },
-     { "name": "<target>-original", "skillDir": "../bench/skills-under-test/<target>" },
-     { "name": "<target>-v1", "skillDir": "../bench/variants/<target>-v1" },
-     { "name": "<target>-v2", "skillDir": "../bench/variants/<target>-v2" }
-   ]
-   ```
-
-4. **Run on the feedback half only:**
-
-   ```bash
-   cd client
-   yarn tsx scripts/skills-bench/run-bench.ts \
-     --slate ../bench/slate/slate.json \
-     --half feedback \
-     --arms ../bench/arms/wave2-<target>.json \
-     --model claude-sonnet-5 \
-     --out ../bench/runs/wave2-r<round>
-   ```
-
-5. **Render and compare** (§6's command, same `--half feedback`, pointed at
-   `../bench/runs/wave2-r<round>`). Keep the variant with the best net (`treatment.passed -
-   baseline.passed`, as `render-receipts.ts`'s `summaryRow` computes it) against the original.
-6. **Iterate** up to 3 rounds total (`wave2-r1`, `wave2-r2`, `wave2-r3`), each a fresh `--out`,
-   narrowing the variant set each round. The winner after the final round is the fork candidate.
-
-**`--half feedback` never touches the holdout ledger** — only `--half holdout` and `--half both`
-record into `bench/holdout-ledger.json` (§8). Iterate on the feedback half as many times as the
-round budget allows without any one-shot risk.
-
----
-
-## 10. Wave 2 holdout (one shot)
-
-The holdout half is touched exactly once per candidate. This is the number that goes in the
-receipt.
-
-```bash
-cd client
-yarn tsx scripts/skills-bench/run-bench.ts \
-  --slate ../bench/slate/slate.json \
-  --half holdout \
-  --candidate-id <target>-fork-v<k> \
-  --arms ../bench/arms/wave2-<target>-holdout.json \
-  --model claude-sonnet-5 \
-  --out ../bench/runs/wave2-holdout
-```
-
-`../bench/arms/wave2-<target>-holdout.json` contains only the baseline, the original, and the
-winning variant from §9 — no other variants (a holdout run is not another feedback round).
-`--candidate-id` is the ledger key; pick a stable id (e.g. `<target>-fork-v3`) before running, since
-a second `--half holdout` attempt with the same id fails the one-shot guard (§8) unless the first
-attempt aborted before grading anything.
-
-Render the receipt with `--forked-from <owner/repo@sha>` (the pinned original's `source`/`commit`
-from its `pin.json`, §2) and `--skill-source` for the same pointer on the `scope:` line. `slateHalf`
-is read from `bench-manifest.json`'s `half` field (recorded as `holdout` because §10's run above
-passed `--half holdout` — no `--half` flag on this script, see §6):
-
-```bash
-cd client
-yarn tsx scripts/skills-bench/render-receipts.ts \
-  --run ../bench/runs/wave2-holdout \
-  --slate ../bench/slate/slate.json \
-  --measured-on <date> \
-  --out ../bench/runs/wave2-holdout/receipts \
-  --agent claude-code \
-  --forked-from <owner>/<repo>@<sha> \
-  --skill-source <owner>/<repo>@<sha>
-```
-
-**Publish only if the fork wins** (net positive against the original on the holdout half, within
-the receipt's own stated caveats — do not round a noisy delta up to a claim): copy the fork's skill
-directory into the public repo's `skills/<name>/` (§7 step 4, now unblocked for this one skill) plus
-its receipt and data. If it does not win, publish the finding anyway — a receipt showing the
-optimization loop found nothing is still an honest, publishable result (spec §8 risk 2) — but do
-not publish the fork as an installable skill.
-
-**Frontmatter packaging — spec §5.1 / §6 L3.** Before copying the winning fork's `SKILL.md` into
-`skills/<name>/`, rebuild its frontmatter with the `jinn.*` receipt-pointer block so the published
-skill points back at the receipt that measured it, composing `buildJinnReceiptMetadata` with
-`buildSkillFrontmatter` (`src/skills-bench/frontmatter.ts`):
-
-```ts
-import { buildJinnReceiptMetadata, buildSkillFrontmatter } from './src/skills-bench/frontmatter.js';
-
-const jinnMetadata = await buildJinnReceiptMetadata({
-  receiptUrl: 'https://github.com/Jinn-Network/skills/blob/main/receipts/<name>.md',
-  receiptFilePath: '../bench/runs/wave2-holdout/receipts/<name>.md',
-  measuredOn: '<date>', // same value passed to --measured-on above
-  forkedFrom: '<owner>/<repo>@<sha>',
-});
-
-const frontmatter = buildSkillFrontmatter({
-  name: '<name>',
-  description: '<the fork\'s final description>',
-  license: '<license>',
-  metadata: jinnMetadata,
-});
-```
-
-`jinnMetadata` carries `jinn.receipt` (the receipt's public URL), `jinn.receipt-sha256` (sha256 of
-the published receipt file — compute this against the receipt's *final* path in the public repo,
-after §7 step 2's copy, so the hash matches what a reader downloads), `jinn.measured-on`, and
-`jinn.forked-from`. Prepend `frontmatter` to the fork's body content to produce the final
-`SKILL.md` written into `skills/<name>/`.
-
-Offer the winning diff back to the original author as a PR regardless of outcome-driven publishing
-decisions above (spec §4, §6 L4) — this is also a human-gated external action (opening a PR against
-a repo Jinn does not own), not something to automate.
+**Reeval guard refusal (§9, `--task-set` only).** `--reeval-of <skill>` throws listing the task ids
+if any of this run's eligible tasks were already burned for `<skill>`'s lineage by
+`record-annex.ts` — see §9. `--force-reeval` overrides it (requires `--reeval-of`; refused without
+it) with a loud warning, not silently.
 
 ---
 
@@ -566,10 +647,20 @@ a repo Jinn does not own), not something to automate.
 | Script | Required flags | Key optional flags |
 |---|---|---|
 | `pin-skill.ts` | `--name --source --commit --skill-path` | `--dest` (default `../bench/skills-under-test`) |
-| `build-slate.ts` | `--seed` | `--pool-size` (default 60), `--out` (default `../bench/slate/slate.json`) |
-| `run-bench.ts` | `--slate --arms --out` | `--dry-run`, `--half` (default `feedback`), `--model` (default `claude-sonnet-5`), `--repeats` (default 1), `--max-turns` (default 40), `--max-instances` (default unlimited), `--grade-timeout-ms` (default 600000), `--upstream-repo-dir` (default `~/.jinn-client/SWE-rebench-V2-upstream`), `--solve-concurrency` (default 1), `--candidate-id` (required with `--half holdout`), `--force-holdout-rerun`, `--claude-config-dir` (default `<repoRoot>/bench/.claude-bench-config` — stable, reusable across `--out` dirs; see §1) |
-| `render-receipts.ts` | `--run --slate --measured-on --out` | `--agent` (default `claude-code`), `--forked-from`, `--skill-source` — no `--half`: `slateHalf` is read from `--run`'s `bench-manifest.json` (`half`, recorded by `run-bench.ts`) |
+| `validate-task-set.ts` | `--task-set` | `--task` (one task instead of the whole set) |
+| `screen-task-set.ts` | `--task-set --model` | `--repeats` (default 2), `--pass-threshold` (default 1), `--out` (default `<task-set>/.screening-run`) |
+| `sweep-gradeability.ts` | `--slate` | `--instances` (comma-separated ids), `--timeout-ms` (default 3,600,000), `--upstream-repo-dir`, `--out` (default `<slate-dir>/gradeability-sweep.json`) |
+| `build-slate.ts` | `--seed` | `--pool-size` (default 60), `--out` (default `../bench/slate/slate.json`), `--exclude-instances`, `--exclude-file` |
+| `run-bench.ts` | `(--slate \| --task-set) --arms --out` | `--dry-run`; `--half` (default `feedback`, `--slate` only), `--candidate-id`/`--force-holdout-rerun` (`--half holdout`, `--slate` only); `--include-screened-out` (`--task-set` only); `--reeval-of`/`--force-reeval` (`--task-set` only); `--model` (default `claude-sonnet-5` — pin to `claude-haiku-4-5-20251001` for the pilot flow, spec §2.6); `--repeats` (default 1), `--max-turns` (default 40), `--max-instances` (default unlimited), `--grade-timeout-ms` (default 600000), `--upstream-repo-dir` (`--slate` only), `--solve-concurrency` (default 1), `--claude-config-dir` (default `<repoRoot>/bench/.claude-bench-config`) |
+| `render-report.ts` | `--run --task-set --skill --report-url` | `--out` (default `<run>/report`), `--measured-on` (default today), `--agent` (default `claude-code`), `--skill-source`, `--include-transcripts` |
+| `render-receipts.ts` | `--run --slate --measured-on --out` | `--agent` (default `claude-code`), `--forked-from`, `--skill-source` — no `--half`: `slateHalf` is read from `--run`'s `bench-manifest.json` |
+| `list-failing-sessions.ts` | `--run` | `--arm` (inferred if the run has exactly one non-baseline arm) |
+| `record-annex.ts` | `--run --skill --tasks` | — |
+| `regrade-probe.ts` | `--transcript --slate` | `--timeout-ms` (default 3,600,000), `--upstream-repo-dir` |
 
 All flags verified 2026-07-30, re-verified 2026-07-30 (final-review.md fix round), re-verified
-2026-07-31 (live-smoke fix round: `--claude-config-dir` added) against
-`client/scripts/skills-bench/{pin-skill,build-slate,run-bench,render-receipts}.ts`.
+2026-07-31 (live-smoke fix round: `--claude-config-dir` added), re-verified 2026-07-31 (v0.2 pivot:
+task-set/screening/reeval flags added, wave-flow commands removed) against
+`client/scripts/skills-bench/{pin-skill,validate-task-set,screen-task-set,sweep-gradeability,
+build-slate,run-bench,render-report,render-receipts,list-failing-sessions,record-annex,
+regrade-probe}.ts`.

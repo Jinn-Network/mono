@@ -68,6 +68,19 @@
  * selected for measurement) are recorded alongside `taskSetSha256`, so the
  * byte-exact manifest guard refuses to let a screened run and an
  * `--include-screened-out` run collide in the same `--out` dir.
+ *
+ * `--reeval-of <skill>` (spec §3.1 step 7, `reeval-guard.ts`) is the
+ * re-evaluation freshness check: it asserts none of this run's eligible task
+ * ids were already burned for `<skill>`'s lineage by a prior annex diagnosis
+ * (`record-annex.ts`) — burns are keyed by skill name, not sha, so a fresh
+ * revision still can't re-measure on tasks an earlier revision's annex was
+ * derived from. Task-set mode only (a normal first evaluation of a skill
+ * omits the flag entirely — nothing to check yet). Skipped under `--dry-run`
+ * (no real measurement happens, same posture as the slate path's holdout
+ * ledger). `--force-reeval` overrides the check with a loud warning —
+ * legitimate only when the operator has independently confirmed the overlap
+ * is not a genuine information leak (e.g. re-running the exact same
+ * unrevised task set on purpose).
  */
 import { spawn } from 'node:child_process';
 import { cp, copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
@@ -87,6 +100,7 @@ import {
   type BenchManifest, type BenchOutcome,
 } from '../../src/skills-bench/attempts.js';
 import { assertHoldoutUnused, recordHoldoutRun } from '../../src/skills-bench/holdout-guard.js';
+import { assertReevalTasksFresh } from '../../src/skills-bench/reeval-guard.js';
 import {
   loadTaskSet, assertTaskSetGradeable, assertNoArmNameLeak, selectTasksForMeasurement,
   type SkillTaskSetV1, type SkillTaskV1, type TaskRequirement,
@@ -143,11 +157,18 @@ interface BenchConfig {
    *  EVERY task regardless of `screening.keep`. Loud warning — see
    *  `selectTasksForMeasurement` (task-set.ts). Ignored in --slate mode. */
   includeScreenedOut: boolean;
+  /** --task-set only: the skill name whose re-evaluation freshness this run
+   *  must satisfy (spec §3.1 step 7, reeval-guard.ts) — undefined for a
+   *  normal first evaluation, which has nothing to check yet. */
+  reevalOf: string | undefined;
+  /** Loud override for the reeval-guard check above. Ignored (and refused,
+   *  see validation below) without --reeval-of. */
+  forceReeval: boolean;
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-5';
 
-function parseArgs(argv: string[]): BenchConfig {
+export function parseArgs(argv: string[]): BenchConfig {
   const cfg: BenchConfig = {
     dryRun: false,
     slatePath: '',
@@ -166,6 +187,8 @@ function parseArgs(argv: string[]): BenchConfig {
     forceHoldoutRerun: false,
     claudeConfigDir: join(repoRoot, 'bench', '.claude-bench-config'),
     includeScreenedOut: false,
+    reevalOf: undefined,
+    forceReeval: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -192,6 +215,8 @@ function parseArgs(argv: string[]): BenchConfig {
       case '--force-holdout-rerun': cfg.forceHoldoutRerun = true; break;
       case '--claude-config-dir': cfg.claudeConfigDir = resolve(String(argv[++i])); break;
       case '--include-screened-out': cfg.includeScreenedOut = true; break;
+      case '--reeval-of': cfg.reevalOf = String(argv[++i]); break;
+      case '--force-reeval': cfg.forceReeval = true; break;
       default: throw new Error(`unknown argument ${a}`);
     }
   }
@@ -200,6 +225,8 @@ function parseArgs(argv: string[]): BenchConfig {
   if (!cfg.armsPath) throw new Error('--arms is required');
   if (!cfg.outDir) throw new Error('--out is required');
   if (cfg.half === 'holdout' && !cfg.candidateId) throw new Error('--half holdout requires --candidate-id <id>');
+  if (cfg.reevalOf && cfg.slatePath) throw new Error('--reeval-of is --task-set only (holdout ledger already covers --slate)');
+  if (cfg.forceReeval && !cfg.reevalOf) throw new Error('--force-reeval requires --reeval-of <skill>');
   return cfg;
 }
 
@@ -988,6 +1015,28 @@ async function runTaskSetMode(cfg: BenchConfig): Promise<void> {
     sourceConfigDir: process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'),
   });
   await runAuthPreflight(cfg, cfg.claudeConfigDir);
+
+  // Re-evaluation freshness check (spec §3.1 step 7, reeval-guard.ts): only
+  // when --reeval-of names a skill. A normal first evaluation has no prior
+  // annex and skips this entirely — nothing to check yet. Checked against
+  // `tasks` (the actual measured population, post discrimination-gate and
+  // --max-instances slice), not the full task-set membership, since that's
+  // what this run is really about to measure. Placed after the --dry-run
+  // early return above, so this never runs for a dry-run — mirrors the
+  // slate path's holdout ledger, which also never touches its ledger under
+  // --dry-run.
+  if (cfg.reevalOf) {
+    const ledgerFile = join(repoRoot, 'bench', 'reeval-ledger.json');
+    console.log(`[bench] reeval ledger: ${ledgerFile}`);
+    if (cfg.forceReeval) {
+      console.warn(
+        `[bench] --force-reeval set — skipping the re-evaluation freshness guard for '${cfg.reevalOf}'. ` +
+        `Legitimate only if the overlap is not a genuine information leak.`,
+      );
+    } else {
+      await assertReevalTasksFresh(ledgerFile, { skill: cfg.reevalOf, taskIds: tasks.map((t) => t.id) });
+    }
+  }
 
   const { gradeFailures, solveFailures, outcomesWritten } = await runRealTaskSet(
     cfg, runnable, attemptsFile, transcriptsDir, cfg.claudeConfigDir, cfg.taskSetDir,
