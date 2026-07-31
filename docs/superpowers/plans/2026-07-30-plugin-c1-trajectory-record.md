@@ -3037,7 +3037,7 @@ peer ranges / Vite pins / pack-smoke scripts are unchanged.
 | Disposition | Pin Evidence CI `actions/setup-node` to exact Node `22.23.1`; install and assert exact npm `11.19.0` (PATH/`GITHUB_PATH`) before every job/step path that runs package `pack:smoke` consumer install. Prefer one named reusable step. Keep Yarn 4.13.0 / corepack unchanged. **Forbidden:** `legacy-peer-deps`, package peer-range changes, Vite freeze, weakening immutable installs, skipping pack-smoke, modifying package scripts |
 | Rollback | Revert the workflow pin only if npm ≥11.19.0 is the proven root of a new regression **and** npm 10.9.8 + current registry graph is re-proven green without forbidden workarounds; do not silently reintroduce floating Node 22 or npm 10.9.8 while pack-smoke remains on the vulnerable Arborist path |
 | Architecture gate | Workflow architecture test fails if setup-node floats, if a pack-smoke job lacks the preceding npm 11.19.0 install/assert step, or if `legacy-peer-deps` appears in Evidence CI |
-| Final evidence | `TBD` — eleven `setup-node` pins at `22.23.1`; nine jobs with `Install npm 11.19.0 for pack-smoke` before `pack:smoke`; `.github/scripts/evidence-ci-workflow.test.mjs` (4 tests); guards 18/18; isolated temp-prefix npm `11.19.0` assert OK; no `packages/**` changes |
+| Final evidence | `4290a826e` — eleven `setup-node` pins at `22.23.1`; nine jobs with `Install npm 11.19.0 for pack-smoke` before `pack:smoke`; `.github/scripts/evidence-ci-workflow.test.mjs` (4 tests); guards 18/18; isolated temp-prefix npm `11.19.0` assert OK; no `packages/**` changes |
 
 ### Implementation checklist (C1-R9)
 
