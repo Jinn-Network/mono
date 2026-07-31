@@ -74,4 +74,72 @@ describe("canonical preflight", () => {
       }),
     ).toThrow();
   });
+
+  test("rejects proxy arrays without invoking index getters", () => {
+    let getterCalls = 0;
+    const target = ["ok"];
+    const proxy = new Proxy(target, {
+      get(obj, prop) {
+        if (String(prop) === "0") getterCalls += 1;
+        return Reflect.get(obj, prop);
+      },
+    });
+    expect(() => preflightCanonicalInput({ items: proxy })).toThrow(UnsupportedCanonicalValueError);
+    expect(getterCalls).toBe(0);
+  });
+
+  test("rejects cyclic arrays with typed error", () => {
+    const cyclic: unknown[] = [1];
+    cyclic.push(cyclic);
+    expect(() => preflightCanonicalInput({ items: cyclic })).toThrow(UnsupportedCanonicalValueError);
+  });
+
+  test("rejects array index accessor without invoking getter", () => {
+    let getterCalls = 0;
+    const array: unknown[] = [1];
+    Object.defineProperty(array, 0, {
+      get: () => {
+        getterCalls += 1;
+        return 1;
+      },
+      enumerable: true,
+      configurable: true,
+    });
+    expect(() => preflightCanonicalInput({ items: array })).toThrow(UnsupportedCanonicalValueError);
+    expect(getterCalls).toBe(0);
+  });
+
+  test("seal rejects hostile statement getters before schema parse", async () => {
+    const { buildTrajectoryDerivationStatement, sealTrajectoryDerivationAttestation } = await import(
+      "./derivation.js"
+    );
+    let getterCalls = 0;
+    const statement = buildTrajectoryDerivationStatement({
+      producerId: "producer-1",
+      executionDigest: `sha256:${"b".repeat(64)}`,
+      trajectoryDigest: `sha256:${"c".repeat(64)}`,
+      nativeTraceDigest: `sha256:${"a".repeat(64)}`,
+      formatIri: "https://jinn.network/formats/claude-code-stream-json/v1",
+      decoderId: "claude-code-stream-json",
+      decoderVersion: "1.0.0",
+      vocabularyProfile: "https://jinn.network/profiles/trajectory-vocabulary/1.0",
+      timebase: "synthetic-ordinal",
+      derivedAt: "2026-07-31T12:00:00Z",
+    });
+    Object.defineProperty(statement, "forged", {
+      get: () => {
+        getterCalls += 1;
+        return "bad";
+      },
+      enumerable: true,
+      configurable: true,
+    });
+    await expect(
+      sealTrajectoryDerivationAttestation({
+        statement,
+        signer: async () => [{ signature: new Uint8Array([1]), keyid: "k" }],
+      }),
+    ).rejects.toThrow();
+    expect(getterCalls).toBe(0);
+  });
 });

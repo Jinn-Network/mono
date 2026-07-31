@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export type GoldenName = "valid" | "minimal";
 
@@ -18,26 +18,64 @@ export interface AdversarialManifest {
 
 const fixtureRoot = resolve(fileURLToPath(new URL("../fixtures", import.meta.url)));
 
+const ENCODED_SEPARATOR = /%(?:2f|5c|2e%2e|%2e%2e)/iu;
+
+function decodeFixturePathSegments(relativePath: string): string {
+  let decoded = relativePath;
+  for (let pass = 0; pass < 2; pass += 1) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      decoded = next;
+    } catch {
+      break;
+    }
+  }
+  return decoded;
+}
+
+function rejectTraversalSegments(relativePath: string): void {
+  if (relativePath.includes("\\")) {
+    throw new Error("trajectory fixture paths must stay inside fixtures/");
+  }
+  if (ENCODED_SEPARATOR.test(relativePath)) {
+    throw new Error("trajectory fixture paths must stay inside fixtures/");
+  }
+  const decoded = decodeFixturePathSegments(relativePath);
+  if (decoded.includes("\\")) {
+    throw new Error("trajectory fixture paths must stay inside fixtures/");
+  }
+  if (/(^|\/)\.\.(\/|$)/u.test(decoded)) {
+    throw new Error("trajectory fixture paths must stay inside fixtures/");
+  }
+  if (decoded.startsWith("/")) {
+    throw new Error("trajectory fixture paths must stay inside fixtures/");
+  }
+  if (/^[A-Za-z]:/u.test(decoded)) {
+    throw new Error("trajectory fixture paths must stay inside fixtures/");
+  }
+  if (/[?#]/u.test(relativePath)) {
+    throw new Error("trajectory fixture paths must stay inside fixtures/");
+  }
+}
+
 function assertContainedFixturePath(relativePath: string): void {
-  if (relativePath.startsWith("/")) {
-    throw new Error("trajectory fixture paths must stay inside fixtures/");
-  }
-  const segments = relativePath.split("/");
-  if (segments.includes("..")) {
-    throw new Error("trajectory fixture paths must stay inside fixtures/");
-  }
-  const resolved = resolve(fixtureRoot, relativePath);
-  const normalizedRoot = `${fixtureRoot}${fixtureRoot.endsWith("/") ? "" : "/"}`;
-  if (!resolved.startsWith(normalizedRoot) && resolved !== fixtureRoot) {
+  rejectTraversalSegments(relativePath);
+  const resolved = resolve(
+    fixtureRoot,
+    ...decodeFixturePathSegments(relativePath).split("/").filter(Boolean),
+  );
+  const rootWithSep = fixtureRoot.endsWith(sep) ? fixtureRoot : `${fixtureRoot}${sep}`;
+  if (resolved !== fixtureRoot && !resolved.startsWith(rootWithSep)) {
     throw new Error("trajectory fixture paths must stay inside fixtures/");
   }
 }
 
 /** Resolves a path inside the fixture corpus shipped by this package. */
 export function trajectoryFixtureUrl(relativePath: string): URL {
-  const decoded = decodeURIComponent(relativePath);
-  assertContainedFixturePath(decoded);
-  return new URL(`../fixtures/${relativePath}`, import.meta.url);
+  assertContainedFixturePath(relativePath);
+  const decoded = decodeFixturePathSegments(relativePath);
+  return pathToFileURL(resolve(fixtureRoot, ...decoded.split("/").filter(Boolean)));
 }
 
 async function bytes(relativePath: string): Promise<Uint8Array> {

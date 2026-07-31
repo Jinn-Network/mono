@@ -222,9 +222,10 @@ assert.equal("sha256Digest" in root, false);
   await writeFile(
     join(testingConsumer, "conformance.test.ts"),
     `
-import { describeTrajectoryRecordConformance } from "@jinn-network/evidence-trajectory/testing";
+import { describeTrajectoryDerivationAttestationConformance, describeTrajectoryRecordConformance } from "@jinn-network/evidence-trajectory/testing";
 
 describeTrajectoryRecordConformance();
+describeTrajectoryDerivationAttestationConformance();
 `,
   );
   await run(

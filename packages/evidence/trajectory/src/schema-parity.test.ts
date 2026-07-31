@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest";
 
 import { loadGoldenJson, loadInvalidJson, readAdversarialJson } from "./fixtures.js";
 import { TRAJECTORY_RECORD_KIND } from "./identifiers.js";
-import { TrajectoryRecordSchema } from "./schema.js";
+import { TrajectoryRecordSchema, parseTrajectory, sealTrajectory } from "./schema.js";
 
 const published = async (): Promise<Record<string, unknown>> =>
   JSON.parse(
@@ -45,6 +45,31 @@ describe("published JSON Schema", () => {
     ).toBe(true);
   });
 
+  test("accepts nested nativeTrace extension under AJV and runtime", async () => {
+    const golden = (await loadGoldenJson("valid")) as Record<string, unknown>;
+    const source = golden["source"] as Record<string, unknown>;
+    const nativeTrace = source["nativeTrace"] as Record<string, unknown>;
+    const withNested = {
+      ...golden,
+      source: {
+        ...source,
+        nativeTrace: {
+          ...nativeTrace,
+          "network.jinn.note": "nested kept",
+        },
+      },
+    };
+    const ajv = new Ajv2020({ strict: false });
+    const validate = ajv.compile(await published());
+    expect(validate(withNested)).toBe(true);
+    expect(TrajectoryRecordSchema.safeParse(withNested).success).toBe(true);
+    const sealed = sealTrajectory(withNested);
+    const parsed = parseTrajectory(sealed.bytes);
+    expect((parsed.source.nativeTrace as Record<string, unknown>)["network.jinn.note"]).toBe(
+      "nested kept",
+    );
+  });
+
   test("AJV and runtime agree on vocabulary/completeness adversarial cases", async () => {
     const ajv = new Ajv2020({ strict: false });
     const validate = ajv.compile(await published());
@@ -63,6 +88,6 @@ describe("published JSON Schema", () => {
     expect(comment).toContain("traceId");
     expect(comment).toContain("spanId");
     expect(comment).toContain("parentSpanId");
-    expect(comment).toContain("completeness");
+    expect(comment).not.toContain("completeness");
   });
 });

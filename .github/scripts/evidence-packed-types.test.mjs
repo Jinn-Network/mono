@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -88,9 +89,22 @@ function run(command, args, options = {}) {
 }
 
 try {
-  await run("corepack", ["yarn@4.13.0", "build"], {
-    cwd: join(evidenceRoot, "..", "trust", "core"),
-  });
+  const trustCoreRoot = join(evidenceRoot, '..', 'trust', 'core');
+  const packedTypesSource = await readFile(
+    join(root, '.github', 'scripts', 'evidence-packed-types.test.mjs'),
+    'utf8',
+  );
+  const installIndex = packedTypesSource.indexOf('yarn install --immutable');
+  const buildIndex = packedTypesSource.indexOf('yarn@4.13.0", "build"');
+  assert.ok(installIndex >= 0, 'packed-types script must run trust-core yarn install --immutable');
+  assert.ok(buildIndex >= 0, 'packed-types script must build trust-core');
+  assert.ok(
+    installIndex < buildIndex,
+    'trust-core yarn install --immutable must precede trust-core build in packed-types script',
+  );
+
+  await run('corepack', ['yarn@4.13.0', 'install', '--immutable'], { cwd: trustCoreRoot });
+  await run('corepack', ['yarn@4.13.0', 'build'], { cwd: trustCoreRoot });
   await mkdir(archivesRoot);
   const archives = new Map();
   const trustCorePacked = JSON.parse(await run(

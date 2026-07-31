@@ -1401,11 +1401,13 @@ test('evidence source boundaries remain one-way across the approved graph', () =
   const trajectorySource = join(trajectory, 'src');
   const trajectoryTestingEntry = join(trajectorySource, 'testing.ts');
   const trajectoryFixtureLoaders = join(trajectorySource, 'fixtures.ts');
+  const trajectoryConformance = join(trajectorySource, 'derivation-conformance.ts');
   const trajectoryTestRegex = /\.test\.[cm]?[jt]sx?$/u;
   const trajectorySourceFiles = files(trajectorySource);
   const trajectoryTestingFiles = trajectorySourceFiles.filter((file) =>
     file === trajectoryTestingEntry
       || file === trajectoryFixtureLoaders
+      || file === trajectoryConformance
       || trajectoryTestRegex.test(file));
   const trajectoryProductionFiles = trajectorySourceFiles.filter((file) =>
     !trajectoryTestingFiles.includes(file));
@@ -1482,7 +1484,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     forbiddenImportsInFiles(
       [join(trajectorySource, 'index.ts')],
       [],
-      [trajectoryTestingEntry, trajectoryFixtureLoaders],
+      [trajectoryTestingEntry, trajectoryFixtureLoaders, trajectoryConformance],
     ),
     [],
     'the Trajectory root entrypoint must not export testing.ts or fixtures.ts',

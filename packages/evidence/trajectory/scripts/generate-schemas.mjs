@@ -73,6 +73,38 @@ function closeUndeclaredNestedKeys(node) {
 
 closeUndeclaredNestedKeys(schema);
 
+schema.$defs = {
+  JsonExtensionValue: {
+    anyOf: [
+      { type: "string" },
+      { type: "integer" },
+      { type: "boolean" },
+      { type: "null" },
+      { type: "array", items: { $ref: "#/$defs/JsonExtensionValue" } },
+      {
+        type: "object",
+        propertyNames: { pattern: NAMESPACED },
+        additionalProperties: { $ref: "#/$defs/JsonExtensionValue" },
+      },
+    ],
+  },
+};
+
+function patchExtensionSurface(node, coreKeys) {
+  if (!node || typeof node !== "object" || node.type !== "object") return;
+  node.propertyNames = {
+    anyOf: [{ enum: [...coreKeys] }, { pattern: NAMESPACED }],
+  };
+  node.additionalProperties = { $ref: "#/$defs/JsonExtensionValue" };
+}
+
+patchExtensionSurface(schema, Object.keys(schema.properties ?? {}));
+
+const nativeTrace = schema.properties?.source?.properties?.nativeTrace;
+if (nativeTrace) {
+  patchExtensionSurface(nativeTrace, ["name", "mediaType", "uri", "digest"]);
+}
+
 schema.allOf = [
   {
     if: {
@@ -138,7 +170,6 @@ schema.$comment = [
   "each spanId must equal the value derived from traceId and its ordinal;",
   "parentSpanId must reference an earlier span in this record;",
   "attributes must be sorted by key and unique;",
-  "completeness: full forbids skipped; partial requires skipped >= 1; empty requires spans.length === 0;",
   "source.execution is removed — execution binding is via derivation attestation and forward link.",
 ].join(" ");
 

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { isProxy } from "node:util/types";
-
 import {
   DSSE_PAYLOAD_TYPE,
   IN_TOTO_STATEMENT_TYPE,
@@ -15,12 +13,14 @@ import {
 } from "@jinn-network/trust-core";
 import { z } from "zod";
 
+import { validateAuthorityResult } from "./authority-validation.js";
 import {
   type BareSha256Hex,
   type RepositorySha256Digest,
   toBareSha256Hex,
   toRepositorySha256Digest,
 } from "./digests.js";
+import { type JsonValue, serializeCanonicalJson } from "./canonical.js";
 import { documentDigest } from "./hashing.js";
 import {
   TRAJECTORY_DERIVATION_PREDICATE_TYPE,
@@ -31,6 +31,7 @@ import {
 } from "./identifiers.js";
 import { InvalidDocumentError } from "./sealing.js";
 import { parseTrajectory } from "./schema.js";
+import { preflightCanonicalInput } from "./preflight.js";
 import { type Timebase, TIMEBASES } from "./timebase.js";
 
 export class TrajectoryDerivationCancelledError extends Error {
@@ -52,11 +53,16 @@ function isAbortLike(error: unknown): boolean {
   return false;
 }
 
-function isPlainDataRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  if (isProxy(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
+function preflightAttestationJson(value: unknown, context: string): void {
+  try {
+    preflightCanonicalInput(value);
+  } catch (error) {
+    invalidInput(
+      error instanceof Error
+        ? `${context}: ${error.message}`
+        : `${context}: document failed canonical preflight`,
+    );
+  }
 }
 
 function envelopeSignerKeyIds(
@@ -67,81 +73,16 @@ function envelopeSignerKeyIds(
   );
 }
 
-function validateAuthorityResult(
-  result: unknown,
-  envelopeKeyIds: readonly string[],
-):
-  | { readonly ok: true; readonly value: TrajectoryDerivationAuthorityVerifierResult }
-  | { readonly ok: false; readonly message: string } {
-  if (!isPlainDataRecord(result)) {
-    return { ok: false, message: "authority result must be a plain object" };
+function statementPayloadMatchesCanonical(
+  statement: TrajectoryDerivationStatement,
+  payloadBytes: Uint8Array,
+): boolean {
+  const canonical = serializeCanonicalJson(statement as unknown as JsonValue);
+  if (canonical.length !== payloadBytes.length) return false;
+  for (let index = 0; index < canonical.length; index += 1) {
+    if (canonical[index] !== payloadBytes[index]) return false;
   }
-  const allowed = new Set(["verified", "signerKeyIds", "reason", "detail"]);
-  for (const key of Object.keys(result)) {
-    const descriptor = Object.getOwnPropertyDescriptor(result, key);
-    if (descriptor?.get !== undefined || descriptor?.set !== undefined) {
-      return { ok: false, message: `authority result key "${key}" must be a data property` };
-    }
-    if (!allowed.has(key)) {
-      return { ok: false, message: `authority result has unknown key "${key}"` };
-    }
-  }
-  if (!Object.hasOwn(result, "verified") || typeof result["verified"] !== "boolean") {
-    return { ok: false, message: "authority result verified must be a boolean" };
-  }
-  if (result["verified"] === true) {
-    if (!Array.isArray(result["signerKeyIds"])) {
-      return { ok: false, message: "authority result signerKeyIds must be an array" };
-    }
-    const signerKeyIds = result["signerKeyIds"];
-    if (!signerKeyIds.every((entry) => typeof entry === "string" && entry.length > 0)) {
-      return { ok: false, message: "authority result signerKeyIds must contain only strings" };
-    }
-    if (envelopeKeyIds.length === 0) {
-      return { ok: false, message: "authority result signerKeyIds incompatible with envelope key IDs" };
-    }
-    for (const keyId of signerKeyIds) {
-      if (!envelopeKeyIds.includes(keyId)) {
-        return { ok: false, message: "authority result signerKeyIds must match envelope key IDs" };
-      }
-    }
-    if (result["detail"] !== undefined && typeof result["detail"] !== "string") {
-      return { ok: false, message: "authority result detail must be a string" };
-    }
-    return {
-      ok: true,
-      value: {
-        verified: true,
-        signerKeyIds,
-        ...(result["detail"] === undefined ? {} : { detail: result["detail"] as string }),
-      },
-    };
-  }
-  if (typeof result["reason"] !== "string" || result["reason"].length === 0) {
-    return { ok: false, message: "authority result reason must be a non-empty string when verified is false" };
-  }
-  if (result["signerKeyIds"] !== undefined) {
-    if (!Array.isArray(result["signerKeyIds"])) {
-      return { ok: false, message: "authority result signerKeyIds must be an array when present" };
-    }
-    if (!result["signerKeyIds"].every((entry) => typeof entry === "string")) {
-      return { ok: false, message: "authority result signerKeyIds must contain only strings" };
-    }
-  }
-  if (result["detail"] !== undefined && typeof result["detail"] !== "string") {
-    return { ok: false, message: "authority result detail must be a string" };
-  }
-  return {
-    ok: true,
-    value: {
-      verified: false,
-      reason: result["reason"] as string,
-      ...(result["signerKeyIds"] === undefined
-        ? {}
-        : { signerKeyIds: result["signerKeyIds"] as readonly string[] }),
-      ...(result["detail"] === undefined ? {} : { detail: result["detail"] as string }),
-    },
-  };
+  return true;
 }
 
 const REPOSITORY_SHA256 = /^sha256:[0-9a-f]{64}$/;
@@ -333,6 +274,7 @@ function parseStatementBytes(payloadBytes: Uint8Array): TrajectoryDerivationStat
 export function buildTrajectoryDerivationStatement(
   input: BuildTrajectoryDerivationStatementInput,
 ): TrajectoryDerivationStatement {
+  preflightAttestationJson(input, "derivation statement input");
   if (!input.producerId) invalidInput("producerId must be non-empty");
   if (!isCalendarStrictRfc3339(input.derivedAt)) {
     invalidInput("derivedAt must be calendar-strict RFC 3339");
@@ -383,6 +325,7 @@ export function buildTrajectoryDerivationStatement(
 export async function sealTrajectoryDerivationAttestation(
   input: SealTrajectoryDerivationAttestationInput,
 ): Promise<SealedTrajectoryDerivationAttestation> {
+  preflightAttestationJson(input.statement, "derivation attestation statement");
   const validated = TrajectoryDerivationStatementSchema.safeParse(input.statement);
   if (!validated.success) invalidInput("statement failed structural validation");
   if (!isCalendarStrictRfc3339(validated.data.predicate.derivedAt)) {
@@ -552,6 +495,23 @@ export async function verifyTrajectoryDerivationAttestation(
       },
       reason: message,
       code: "l1-statement-malformed",
+    };
+  }
+
+  if (!statementPayloadMatchesCanonical(statement, parsedEnvelope.payloadBytes)) {
+    const message = "attestation payload is not the canonical encoding of the validated statement";
+    return {
+      ok: false,
+      failedLayer: 1,
+      statement,
+      layers: {
+        l1: { status: "fail", code: "l1-payload-noncanonical", message },
+        l2: { status: "not-evaluated", reason: "l1-failed" },
+        l3: { status: "not-evaluated", reason: "l1-failed" },
+        l4,
+      },
+      reason: message,
+      code: "l1-payload-noncanonical",
     };
   }
 

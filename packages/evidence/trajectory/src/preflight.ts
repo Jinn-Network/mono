@@ -9,6 +9,10 @@ function unsupported(valueType: string, path: string): never {
   throw new UnsupportedCanonicalValueError(valueType, path);
 }
 
+function trapMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : "property-descriptor trap";
+}
+
 function isPlainDataObject(value: object): boolean {
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
@@ -41,6 +45,9 @@ function inspectOwnProperties(value: object, path: string, seen: WeakSet<object>
     }
     if (!Object.hasOwn(descriptor, "value")) {
       unsupported("non-data property", childPath);
+    }
+    if (!descriptor.enumerable) {
+      unsupported("non-enumerable property", childPath);
     }
 
     const nested = descriptor.value;
@@ -85,10 +92,53 @@ function inspectExtensionObject(value: object, path: string, seen: WeakSet<objec
     if (!Object.hasOwn(descriptor, "value")) {
       unsupported("non-data property", childPath);
     }
+    if (!descriptor.enumerable) {
+      unsupported("non-enumerable property", childPath);
+    }
     if (!isNamespacedExtensionKey(String(key))) {
       unsupported(`non-namespaced extension key "${String(key)}"`, childPath);
     }
     inspectValue(descriptor.value, childPath, seen);
+  }
+}
+
+function inspectArray(value: unknown[], path: string, seen: WeakSet<object>): void {
+  if (seen.has(value)) unsupported("cycle", path);
+  seen.add(value);
+  if (isProxy(value)) unsupported("proxy", path);
+
+  let length = 0;
+  try {
+    const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+    if (lengthDescriptor?.get !== undefined || lengthDescriptor?.set !== undefined) {
+      unsupported("accessor property", `${path}.length`);
+    }
+    length = value.length;
+  } catch (cause) {
+    unsupported(`property-descriptor trap: ${trapMessage(cause)}`, `${path}.length`);
+  }
+
+  for (let index = 0; index < length; index += 1) {
+    const childPath = `${path}[${String(index)}]`;
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(value, index);
+    } catch (cause) {
+      unsupported(`property-descriptor trap: ${trapMessage(cause)}`, childPath);
+    }
+    if (descriptor === undefined) continue;
+    if (descriptor.get !== undefined || descriptor.set !== undefined) {
+      unsupported("accessor property", childPath);
+    }
+    if (!Object.hasOwn(descriptor, "value")) {
+      unsupported("non-data property", childPath);
+    }
+    if (!descriptor.enumerable) {
+      unsupported("non-enumerable property", childPath);
+    }
+    const element = descriptor.value;
+    if (element === undefined) throw new UndefinedArrayElementError();
+    inspectValue(element, childPath, seen);
   }
 }
 
@@ -104,10 +154,7 @@ function inspectValue(value: unknown, path: string, seen: WeakSet<object>): void
   if (value instanceof Date) unsupported("Date", path);
   if (value instanceof Map || value instanceof Set) unsupported(value.constructor.name, path);
   if (Array.isArray(value)) {
-    value.forEach((element, index) => {
-      if (element === undefined) throw new UndefinedArrayElementError();
-      inspectValue(element, `${path}[${String(index)}]`, seen);
-    });
+    inspectArray(value, path, seen);
     return;
   }
   if (typeof value === "object") {

@@ -41,7 +41,24 @@
           "required": [
             "digest"
           ],
-          "additionalProperties": false
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonExtensionValue"
+          },
+          "propertyNames": {
+            "anyOf": [
+              {
+                "enum": [
+                  "name",
+                  "mediaType",
+                  "uri",
+                  "digest"
+                ]
+              },
+              {
+                "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+)$"
+              }
+            ]
+          }
         },
         "formatIri": {
           "type": "string",
@@ -349,7 +366,9 @@
     "spans",
     "completeness"
   ],
-  "additionalProperties": {},
+  "additionalProperties": {
+    "$ref": "#/$defs/JsonExtensionValue"
+  },
   "$id": "https://jinn.network/records/trajectory/1.0/schema",
   "title": "Jinn Trajectory record",
   "propertyNames": {
@@ -369,6 +388,39 @@
         "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+)$"
       }
     ]
+  },
+  "$defs": {
+    "JsonExtensionValue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/JsonExtensionValue"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+)$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonExtensionValue"
+          }
+        }
+      ]
+    }
   },
   "allOf": [
     {
@@ -463,5 +515,5 @@
       }
     }
   ],
-  "$comment": "Structural validation only. Runtime refinements not expressible here: traceId must equal the value derived from source.nativeTrace.digest, formatIri, and derivation; each spanId must equal the value derived from traceId and its ordinal; parentSpanId must reference an earlier span in this record; attributes must be sorted by key and unique; completeness: full forbids skipped; partial requires skipped >= 1; empty requires spans.length === 0; source.execution is removed — execution binding is via derivation attestation and forward link."
+  "$comment": "Structural validation only. Runtime refinements not expressible here: traceId must equal the value derived from source.nativeTrace.digest, formatIri, and derivation; each spanId must equal the value derived from traceId and its ordinal; parentSpanId must reference an earlier span in this record; attributes must be sorted by key and unique; source.execution is removed — execution binding is via derivation attestation and forward link."
 }
