@@ -5251,3 +5251,84 @@ safe, just wasteful. Recorded rather than worked around; the fix is a venue-base
   `bootstrapStakedOperator` (`client/test/e2e/_daemon-harness-helpers.ts:516`) with the finding-E27
   revert, which is live Base-mainnet registry state and outside this repository. The gate never
   reaches any stage-1 code path, so it can neither confirm nor refute the loop closing.
+
+## Execution findings (2026-07-31, final leg F1–F4)
+
+### E34 — the E32 bridge synthesis, and the two stubs that hid it (F1, F4)
+
+The coordinator ruled that spec §10 and contract 9 already decided E32: the projector
+**synthesizes** the Submission for legacy-posted tasks under a `legacy` derivation annotation, and
+C4's strict TEP validation was fail-closed one level too early. Built as
+`synthesizeLegacyTaskProjection` (`bridge-legacy-delivery.ts`), sibling to the existing
+`synthesizeLegacyFactsCard`, with `resolveTaskProjection` falling back to `parseLegacySignedTaskV1`
+only after TEP parsing fails. Every other C4 drop was regression-pinned and still drops. The
+comment records that the synthesis retires with the `legacyManifestDigest` bridge after stage 5.
+
+The synthesis was then **unreachable for two more layers**, each invisible until the one above it
+was fixed — the reason this took four runs rather than one:
+
+1. `buildUnresolvedEnrichIdentityPorts` made `resolveSubmissionBytes` return `undefined`
+   unconditionally for today-generation. Fixed by reading the on-chain `taskCidDigest` through
+   `getTaskCidDigest` — the exact two-hop router→coordinator→`getTask()` read
+   `adapter.ts`'s `restorationAnnouncementForTaskId` already uses — and fetching through the
+   existing `fetchIpfsBytes` port.
+2. The e2e's `compositionConfig` never threaded `ipfsGatewayUrl`, so `buildFetchIpfsBytes(undefined)`
+   failed closed on every call. Invisible until something actually called it.
+3. **`postSignedTaskOnChain` computed `taskCidDigest = keccak256(JSON.stringify(doc))`** — an
+   opaque keccak lookup key, never a real sha256 content digest — while the synthesis cross-checks
+   it as `sha256(bytes)`. Harmless for as long as nothing verified it; a hard failure the moment
+   something did. Fixed to `sha256Hex(taskJson)`, matching what production `uploadToIpfs` /
+   `cidToDigestHex` posting actually computes. **This is the most valuable thing the gate found:**
+   a latent digest-semantics divergence between the test poster and production, which no unit test
+   could have surfaced because no unit test joined the two.
+
+### E35 — `resolveDispatchContext` has no honest source (**blocking, and it is a design gap**)
+
+After E34, enrichment reaches exactly one step further and stops:
+`[projector-enrich] no dispatch context resolved for task 1 -- dropping`.
+
+`ObservationProjectionContext.dispatchContext` is a `ResourceDescriptor` for the descriptor
+"sealed by the binding when it engaged the two-party backend". F4 checked every candidate store and
+found none:
+- `pipeline.ts`'s `claim.dispatchContext` is built **in memory inside one `runPipeline` call** and
+  never pinned or anchored.
+- venue-base's `submission_scopes` table is revised-generation-only.
+- this composition's own `engagement_ledger` records `attempt_uri` / `request_id` /
+  `claim_tx_hash` but carries no dispatch-context digest at all.
+
+Unlike the Submission (E32), **no bridge-synthesis contract exists for this shape** — spec §10 does
+not license synthesizing it, and inventing one means fabricating a `ResourceDescriptor` for a
+document nobody sealed. Left stubbed and documented rather than faked. **This needs a ruling of the
+same kind E32 got:** either the descriptor is sealed and pinned somewhere at claim time (a real
+change to the claim path), or spec §10 is extended to license a `legacy`-annotated synthetic
+dispatch context the way it already licenses the Submission.
+
+### E36 — restoration claiming has no live path at all (**blocking, structural**)
+
+Independent of E35, the loop cannot close because the new claim path is not connected:
+- Task 16 correctly retired `TaskCreated` / restoration discovery from
+  `MechAdapter.watchForTasks()` (`adapter.ts:1417-1421`) — the legacy path is closed by design.
+- Its replacement, `WorkLoop` fed by an `ArchiveSubscription` over projector-admitted
+  observations, is **never wired**: `main.ts` hardcodes `archive: { since: async () => [] }`, and
+  the daemon-harness e2e never constructs a `WorkLoop` at all (`config.work` unset, justified by a
+  now-stale comment citing the closed C8 gap).
+
+So the old door is shut and the new door was never hung. Even with E35 resolved, nothing would
+claim. `ArchiveSubscription` needs a real implementation over `ProjectorCursorStore.readObservations()`,
+and both `main.ts` and the e2e fixture need to construct the work loop.
+
+### E37 — the e2e gate now reaches stage-1 code (ruling 3 discharged)
+
+The fork remediation works: `remediateStOlasMultisigAuthorizationOnFork` reads the
+`ServiceRegistryL2` owner from the contract, and — only when
+`mapMultisigs(gnosisSafeSameAddressMultisig)` reads `false` — impersonates it on the Anvil fork to
+call `changeMultisigPermission(multisig, true)`. Loudly commented and linked to issue #2341; the
+live-chain breakage stays open there. Independently corroborated by
+`contracts/scripts/rehearse-stolas-service-migration.ts`, which documents the same
+`UnauthorizedMultisig` selector and the same owner/`mapMultisigs` ABI.
+
+**The gate now runs the full bootstrap** — Safe deployed, agentId minted, `stake()` confirmed,
+service 634, mech deployed, `setAgentWallet` bound — starts the daemon with all loops, posts a
+task, and drives the projector into stage-1 code. It stops at E35 with a named, decoded reason,
+and would stop at E36 even if E35 were resolved. **`e2e:daemon-harness` reaches and exercises
+stage-1 code; it does not close the loop.**
