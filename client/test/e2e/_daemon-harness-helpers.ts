@@ -1403,18 +1403,28 @@ export async function startDaemon(
     // apiToken: not passed because we injected apiServer with its own token above
     peers: [],
     creatorSafeAddress: operator.safeAddress,
-    // Step 6.5's composition (Task 18, opt-in via opts.enableComposition). `DaemonConfig.work` is
-    // deliberately NOT set: `WorkLoop` needs an `ArchiveSubscription` (projector-backed) and a
-    // `readSealedDocuments` port, and no production implementation of either exists anywhere in
-    // `client/src` today — the projector has no real `enrich`/log-source and
-    // `BaseVenueConfig.observations` is stubbed `async () => []` (composition-root.ts's own file
-    // header, gap 1 / Finding E20). `main.ts` itself does not set `config.work` either (see its
-    // "Task 13 owns starting the loops" comment) — so `composition` alone has no effect on which
-    // loops `Daemon` starts; it exists so a broadcaster is built and threaded to `mechAdapter` /
-    // `deliveryDeps` before `daemon.start()`, which every Safe-executed transaction now requires
-    // regardless of which loops run (Finding E16, `src/adapters/mech/safe.ts`'s
-    // `executeSafeTransaction`).
-    ...(composition ? { composition } : {}),
+    // Step 6.5's composition (Task 18, opt-in via opts.enableComposition). Finding E36 (ruled
+    // "build it"): `DaemonConfig.work` is now set alongside `composition` — `composition.archive`
+    // is the real `ArchiveSubscription` over the projector's durable observation stream
+    // (`archive-subscription.js`), and `composition.readSealedDocuments` mirrors main.ts's own
+    // `workLoopConfig` exactly (same `estimateAiUnits`/`acceptLegacyCards` values). Without this,
+    // `composition` only builds a broadcaster for `mechAdapter`/`deliveryDeps` and no loop ever
+    // claims — that was true before this ruling landed a real archive feed and is no longer the
+    // intended shape for a rig exercising the full claim-to-settle loop.
+    ...(composition
+      ? {
+          composition,
+          work: {
+            archive: composition.archive,
+            ledger: composition.engagementLedger,
+            claimGate: composition.claimGate,
+            estimateAiUnits: () => 0,
+            readSealedDocuments: composition.readSealedDocuments,
+            pollIntervalMs: 300,
+            acceptLegacyCards: true,
+          },
+        }
+      : {}),
     // subgraphUrl / nodeEndpoint / signer: omitted
     // rewardClaim / balanceTopup: omitted → those loops don't start
     restorationEngine: {

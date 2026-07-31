@@ -181,7 +181,8 @@ import { createProjectorEnrich, type ProjectorEnrichPorts } from './projector-en
 import { ProjectorCursorStore } from './projector-cursor.js';
 import { ProjectorLoop } from './projector-loop.js';
 import type { ProjectorPortsInput } from './projector-ports.js';
-import type { AnnouncedSubmissionCard, SealedDocuments } from './work-loop.js';
+import type { AnnouncedSubmissionCard, ArchiveSubscription, SealedDocuments } from './work-loop.js';
+import { buildArchiveSubscription } from './archive-subscription.js';
 
 export interface OperatorComposition {
   readonly backend: TaskExecutionBackend;
@@ -225,6 +226,15 @@ export interface OperatorComposition {
    * holds for the projector's enrich step.
    */
   readonly readSealedDocuments: (card: AnnouncedSubmissionCard) => Promise<SealedDocuments>;
+  /**
+   * Finding E36 (ruled "build it"): `WorkLoopConfig.archive` — turns this composition's own
+   * durable observation stream (C5's `ProjectorCursorStore.readObservations()`, the same store
+   * `venue`'s `observations` port above already reads) into `AnnouncedSubmissionCard`s. See
+   * `./archive-subscription.js` for the mapping (today-generation observations are, per the file
+   * header's gap (a), always legacy-derived — reuses `bridge-legacy-delivery.ts`'s
+   * `synthesizeLegacyFactsCard` rather than re-deriving that shape).
+   */
+  readonly archive: ArchiveSubscription;
   close(): Promise<void>;
 }
 
@@ -720,6 +730,11 @@ function buildProjector(input: {
   readonly projector: ProjectorLoop;
   readonly claimGate: ClaimGate;
   readonly observations: () => Promise<readonly ProtocolObservation[]>;
+  /** Same underlying `cursorStore.readObservations()` as `observations` above, exposed as a
+   *  plain sync accessor with its real `MarketplaceProtocolObservation[]` type (not the venue
+   *  port's async, loosely-typed `ProtocolObservation[]`) — `buildArchiveSubscription` (finding
+   *  E36) reads this directly rather than opening a second `ProjectorCursorStore`. */
+  readonly readObservations: () => readonly import('@jinn-network/marketplace-projector').MarketplaceProtocolObservation[];
   readonly closeState: () => void;
 } {
   // Per finding E4 / C3's own docstring: this state handle, and the projector built from it,
@@ -799,6 +814,7 @@ function buildProjector(input: {
     projector,
     claimGate,
     observations: async () => cursorStore.readObservations(),
+    readObservations: () => cursorStore.readObservations(),
     closeState: () => venueState.close(),
   };
 }
@@ -834,7 +850,7 @@ export async function buildOperatorComposition(
   // C8: the projector (log source + enrich + durable observations) is constructed BEFORE the
   // venue — `BaseVenueConfig.observations` below needs the already-built cursor store (finding
   // E4 / C3's own docstring).
-  const { projector, claimGate, observations, closeState } = buildProjector({
+  const { projector, claimGate, observations, readObservations, closeState } = buildProjector({
     chain: input.chain,
     publicClient: input.publicClient,
     mechAddress: input.mechAddress,
@@ -992,6 +1008,16 @@ export async function buildOperatorComposition(
     return { taskBytes, submissionBytes };
   };
 
+  // Finding E36 (ruled "build it"): the `ArchiveSubscription` `work-loop.ts`'s `WorkLoopConfig`
+  // needs, fed from this SAME `readObservations` accessor `venue`'s `observations` port above
+  // already reads (one `ProjectorCursorStore`, two consumers) — see `./archive-subscription.js`.
+  const archive = buildArchiveSubscription({
+    readObservations,
+    publicClient: input.publicClient,
+    fetchIpfsBytes,
+    ...(input.logger === undefined ? {} : { logger: input.logger }),
+  });
+
   return {
     backend,
     pipelineConfig,
@@ -1008,6 +1034,7 @@ export async function buildOperatorComposition(
     claimGate,
     engagementLedger,
     readSealedDocuments,
+    archive,
     async close(): Promise<void> {
       await evidence.close();
       venue.close();

@@ -2210,14 +2210,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     reputationFeedback?.client.setBroadcaster(composition.broadcaster);
 
     // C8: the work loop's own config — `composition`/`store` are supplied by `Daemon` itself.
-    // `archive` is real-but-empty today: the projector's `resolveSubmissionBytes`/
-    // `resolveDispatchContext` have no production backing for today-generation tasks yet
-    // (composition-root.ts file header, gap a), so no event is ever admitted/announced and this
-    // operator's local discovery archive stays empty — traceable to that documented gap, not an
-    // arbitrary stub. `claimGate`/`ledger` reuse the SAME instances `verifySettlementGrade`
-    // already reads (contract 2's dispatch-binding correlation).
+    // Finding E36 (ruled "build it"): `archive` is now fed from `composition.archive`, the real
+    // `ArchiveSubscription` over the projector's durable observation stream
+    // (`archive-subscription.js`). It stays empty in practice until the projector's own
+    // `resolveSubmissionBytes` (composition-root.ts file header, gap a) actually admits/announces
+    // a today-generation TaskCreated — a real, documented gap, not a stub this loop introduces.
+    // `claimGate`/`ledger` reuse the SAME instances `verifySettlementGrade` already reads
+    // (contract 2's dispatch-binding correlation).
     workLoopConfig = {
-      archive: { since: async () => [] },
+      archive: composition.archive,
       ledger: composition.engagementLedger,
       claimGate: composition.claimGate,
       estimateAiUnits: () => 0,
