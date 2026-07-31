@@ -2147,6 +2147,15 @@ export class FleetBootstrapper {
     return this.store.updateService(index, { step: 'service_deployed' });
   }
 
+  // KNOWN LIMITATION (Base mainnet, since block 48626242 / 2026-07-14): the
+  // same-address multisig implementation this step passes to
+  // ServiceManager.deploy was de-whitelisted by OLAS governance, so the deploy
+  // tx reverts UnauthorizedMultisig on chainId 8453. There is no whitelisted
+  // same-address replacement; the whitelisted implementations create a new
+  // Safe at deploy, which conflicts with this flow's premise that the
+  // pre-deployed operator Safe becomes the service multisig. See the comment
+  // on BASE_CONFIG.gnosisSafeSameAddressMultisig in contracts.ts. Base
+  // Sepolia is unaffected.
   private async stepSelfBondDeployService(
     state: FleetState,
     mnemonic: string,

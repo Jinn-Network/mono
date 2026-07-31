@@ -68,5 +68,16 @@ export const MECH_MARKETPLACE: Address = '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C
 /** Jinn staking contract / JinnRouter activity checker proxy (Base mainnet). */
 export const STAKING_CONTRACT: Address = '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54';
 
-/** stOLAS ExternalStakingDistributor (LemonTree, Base mainnet). */
+/**
+ * stOLAS ExternalStakingDistributor (LemonTree, Base mainnet).
+ *
+ * KNOWN LIMITATION (since Base block 48626242 / 2026-07-14): fresh
+ * `stake()` (serviceId = 0) reverts `UnauthorizedMultisig(0xFbBE…E2aB)` —
+ * the distributor's immutable `safeSameAddressMultisig` was de-whitelisted
+ * on ServiceRegistryL2 by OLAS governance, so it can no longer deploy new
+ * services. Not fixable in this repo: it needs either a governance
+ * re-whitelist or a new distributor deployment upstream. Re-deploys and
+ * `reStake()` of existing services go through the RecoveryModule
+ * (0x359d…E74c, still whitelisted) and keep working.
+ */
 export const STOLAS_DISTRIBUTOR: Address = '0x40abf47B926181148000DbCC7c8DE76A3a61a66f';
