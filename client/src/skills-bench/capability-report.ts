@@ -561,7 +561,7 @@ const BADGE_SUCCESS = '#527a70';
 /** break-red — segment 2 text color when the net paired delta is negative. */
 const BADGE_DANGER = '#934c4c';
 
-function escapeXml(value: string): string {
+export function escapeXml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
