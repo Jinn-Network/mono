@@ -30,6 +30,23 @@
  *     rollout, "B.1 verifiability tier activation" is still forward-looking, not shipped. Wired
  *     against empty/fail-closed backing stores, so every check reports `"missing"` — never
  *     silently `"verified"`.
+ *
+ *  3. (Task 15, coordinator amendment 4 / D3 ratified.) `LocalTaskExecutionBackendConfig`'s
+ *     `deliveryExtensions` hook is supplied (not a stub-shaped omission) but always returns `{}`
+ *     today, for two independently blocking reasons, neither fabricatable from this task's
+ *     4-file write scope: (a) the hook is synchronous (matches the backend's own synchronous
+ *     `sealDelivery` call site at completion time), but the only signer `CompositionRootInput`
+ *     carries is `input.walletClient`, whose signing methods are all async (remote-signer /
+ *     hardware-wallet compatible) — there is no raw private key or synchronous secp256k1 signer
+ *     anywhere on this input; (b) there is no reachable mapping from a sealed `TaskSpecification`
+ *     back to the `ExecutionWiringEntry`/workKind that produced it — `workKind` is computed once,
+ *     at claim time, by `mapAnnouncedSubmissionToFacts` from the announced card, and is not
+ *     carried by the Task document itself (`TaskSpecificationSchema` has no such field) nor
+ *     threaded through `runPipeline`/`backend.submit`/`completeAttempt`. The read path (mech
+ *     adapter's `legacyRestorationResultFromDelivery` preference) and the write seam (this field,
+ *     present and correctly spread into `sealDelivery`) are real; only the envelope content is
+ *     not yet populated. A follow-up task needs a synchronous signer port plus a workKind-
+ *     carrying seam from claim through to delivery to close this.
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -412,6 +429,11 @@ export async function buildOperatorComposition(
       : { secretForwardResolver: input.secretForwardResolver }),
     cancellationGraceMs: 30_000,
     heartbeatIntervalMs: 10_000,
+    // Bridge era only (Task 15, coordinator amendment 4 / D3 ratified; gap 3, file header): the
+    // hook is genuinely wired, but always returns no extension until a synchronous signer port
+    // and a claim-to-delivery workKind seam exist — see gap 3 above for why neither is
+    // fabricatable from this composition root today.
+    deliveryExtensions: () => ({}),
   };
   const backend = new LocalTaskExecutionBackend(backendConfig);
 

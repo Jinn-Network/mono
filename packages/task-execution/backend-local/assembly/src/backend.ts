@@ -517,6 +517,15 @@ export interface LocalTaskExecutionBackendConfig {
   readonly heartbeatIntervalMs?: number;
   readonly now?: () => string;
   readonly faults?: LocalBackendFaults;
+  /**
+   * Host-supplied namespaced Delivery extensions (TEP §21.3). Keys must be absolute URIs; the
+   * backend adds no semantics of its own. Used by the operator runtime's bridge era only.
+   */
+  readonly deliveryExtensions?: (input: {
+    readonly attempt: AttemptUri;
+    readonly harvest: HarvestResult;
+    readonly task: TaskSpecification;
+  }) => Readonly<Record<string, JsonValue>>;
 }
 
 interface StoredSubmission {
@@ -1582,7 +1591,15 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     }
     await this.invokeCompletionPhase("before-delivery-checkpoint");
     if (!this.workerMayContinue()) return;
-    const deliveryBytes = sealDelivery({ protocol: "https://jinn.network/profiles/task-execution/1.0", attempt, task: documentDigest(input.taskBytes), outputs: harvest.manifest.map((artifact) => ({ name: artifact.path, ...(artifact.mediaType === undefined ? {} : { mediaType: artifact.mediaType }), digest: { sha256: String(artifact.sha256).replace(/^sha256:/u, "") } })), outcome: interpreted.outcome ?? "fulfilled", ...(receipt === undefined ? {} : { evidenceRecords: [receipt.record], executionIds: [receipt.executionId] }), createdAt: this.now() });
+    const extensions = this.config.deliveryExtensions?.({ attempt, harvest, task: input.task }) ?? {};
+    for (const key of Object.keys(extensions)) {
+      if (!/^[a-z][a-z0-9+.-]*:/iu.test(key)) {
+        throw new Error("Delivery extension keys must be absolute URIs");
+      }
+    }
+    // Reserved keys win: `extensions` spreads first so no extension can shadow a canonical
+    // Delivery field below.
+    const deliveryBytes = sealDelivery({ ...extensions, protocol: "https://jinn.network/profiles/task-execution/1.0", attempt, task: documentDigest(input.taskBytes), outputs: harvest.manifest.map((artifact) => ({ name: artifact.path, ...(artifact.mediaType === undefined ? {} : { mediaType: artifact.mediaType }), digest: { sha256: String(artifact.sha256).replace(/^sha256:/u, "") } })), outcome: interpreted.outcome ?? "fulfilled", ...(receipt === undefined ? {} : { evidenceRecords: [receipt.record], executionIds: [receipt.executionId] }), createdAt: this.now() });
     await this.recordDelivery(attempt, deliveryBytes);
     this.appendTerminal(attempt, { state: "delivered", ...(interpreted.reasonCode === undefined ? {} : { detail: interpreted.reasonCode }) });
   }

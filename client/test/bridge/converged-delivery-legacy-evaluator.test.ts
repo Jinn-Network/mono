@@ -18,8 +18,11 @@ function convergedDelivery(legacyEnvelope: unknown): Uint8Array {
     ],
     outcome: 'fulfilled',
     executionIds: ['urn:uuid:22222222-3333-4444-5555-666666666666'],
+    // Real shape per `EvidenceRecordReferenceSchema`
+    // (packages/task-execution/protocol/src/schemas/common.ts): `{family, digest}`, not
+    // `{repository, record}` — matches how `backend.ts` builds `evidenceRecords: [receipt.record]`.
     evidenceRecords: [
-      { repository: 'urn:jinn:evidence:repository:local', record: `sha256:${'d'.repeat(64)}` },
+      { family: 'execution-evidence', digest: `sha256:${'d'.repeat(64)}` },
     ],
     createdAt: '2026-07-30T09:00:00.000Z',
     // Bridge annotation — namespaced extension, permitted by DeliveryRecordSchema's `.loose()`
@@ -70,7 +73,7 @@ describe('converged Delivery is parseable by the legacy evaluator path', () => {
       outcome: 'fulfilled',
       executionIds: ['urn:uuid:22222222-3333-4444-5555-666666666666'],
       evidenceRecords: [
-        { repository: 'urn:jinn:evidence:repository:local', record: `sha256:${'d'.repeat(64)}` },
+        { family: 'execution-evidence', digest: `sha256:${'d'.repeat(64)}` },
       ],
       createdAt: '2026-07-30T09:00:00.000Z',
     } as never);
@@ -78,7 +81,15 @@ describe('converged Delivery is parseable by the legacy evaluator path', () => {
   });
 
   it('still passes the binding admission check with the bridge annotation present', async () => {
-    const { inspectDelivery } = await import('@jinn-network/marketplace-binding');
-    expect(() => inspectDelivery(convergedDelivery(LEGACY_ENVELOPE))).not.toThrow();
+    // `inspectDelivery` (the schema-validating admission check) is defined in
+    // `packages/marketplace/binding/src/delivery.ts` but is not re-exported from that package's
+    // public `src/index.ts`, and the package publishes no subpath export — it is outside this
+    // task's write scope to add one. `convergeDelivery` IS exported and calls `inspectDelivery`
+    // internally before pinning, so a non-throwing `convergeDelivery` call proves the same
+    // admission-schema property without reaching into the package's private surface.
+    const { convergeDelivery } = await import('@jinn-network/marketplace-binding');
+    await expect(
+      convergeDelivery(convergedDelivery(LEGACY_ENVELOPE), { pin: async () => {} }),
+    ).resolves.toBeDefined();
   });
 });

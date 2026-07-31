@@ -35,6 +35,7 @@ import {
 } from './ipfs.js';
 import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
 import { normalizeEnvelopeRole, SignedEnvelopeSchema } from '../../types/envelope.js';
+import { legacyRestorationResultFromDelivery } from '../../daemon/bridge-legacy-delivery.js';
 import {
   submitTask,
   claimTask as claimTaskOnchain,
@@ -1246,7 +1247,14 @@ export class MechAdapter implements ExecutionAdapter {
         + `does not match canonical TaskCreated provenance for task ${solution.taskId}`,
       );
     }
-    const resultData = (resultPayload.data as string) ?? JSON.stringify(resultPayload);
+    // Bridge read path (cutover stage 1, Task 15, coordinator amendment 4 / D3): prefer the
+    // `deliveryExtensions` bridge annotation when the converged Delivery carries one. Read-path
+    // preference only — no state-machine change, no schema change, no new transaction.
+    const bridgedResultData = legacyRestorationResultFromDelivery(
+      new TextEncoder().encode(JSON.stringify(resultPayload)),
+    );
+    const resultData =
+      bridgedResultData ?? (resultPayload.data as string) ?? JSON.stringify(resultPayload);
     let autopilotEvaluationContext: Record<string, unknown> | undefined;
     if (
       restoration.task.spec?.['source'] === 'autopilot-session'

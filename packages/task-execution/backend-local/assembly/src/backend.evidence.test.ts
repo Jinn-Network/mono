@@ -14,6 +14,7 @@ import {
   type ProfileStore,
 } from "@jinn-network/task-execution-profiles";
 import {
+  DeliveryRecordSchema,
   documentDigest,
   sealSubmission,
   sealTask,
@@ -23,6 +24,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   makeLocalTaskExecutionBackend,
   type LocalTaskExecutionBackend,
+  type LocalTaskExecutionBackendConfig,
 } from "./backend.js";
 
 const roots: string[] = [];
@@ -72,6 +74,7 @@ function backend(
   root: string,
   repository: EvidenceRepository,
   onAwaitIndexed: () => void,
+  deliveryExtensions?: LocalTaskExecutionBackendConfig["deliveryExtensions"],
 ): LocalTaskExecutionBackend {
   const launcher: LauncherContract = {
     id: "fixture",
@@ -131,6 +134,7 @@ function backend(
         return { status: "not-announced", reference };
       },
     },
+    ...(deliveryExtensions === undefined ? {} : { deliveryExtensions }),
   });
 }
 
@@ -191,6 +195,52 @@ describe("backend evidence capture posture (C3)", () => {
       },
     };
     const instance = backend(await stateRoot(), repository, () => {});
+    const { task, submission } = documents();
+    const ack = await instance.submit(task, submission);
+    expect(ack.accepted).toBe(true);
+    if (!ack.accepted) throw new Error("unreachable");
+
+    const snapshot = await terminalSnapshot(instance, ack.submission);
+    expect(snapshot.descriptor.derived).toMatchObject({
+      state: "failed",
+      terminal: true,
+      blame: "infrastructure",
+    });
+    expect(await instance.deliveries(snapshot.descriptor.attempt)).toEqual([]);
+  });
+
+  test("carries a host-supplied namespaced Delivery extension into the sealed bytes", async () => {
+    const repository = new InMemoryEvidenceRepository();
+    const deliveryExtensions: LocalTaskExecutionBackendConfig["deliveryExtensions"] = () => ({
+      "https://jinn.network/bridge/legacy-execution-envelope/1.0":
+        "{\"schemaVersion\":\"jinn.execution.v1\"}",
+    });
+    const instance = backend(await stateRoot(), repository, () => {}, deliveryExtensions);
+    const { task, submission } = documents();
+    const ack = await instance.submit(task, submission);
+    expect(ack.accepted).toBe(true);
+    if (!ack.accepted) throw new Error("unreachable");
+
+    const snapshot = await terminalSnapshot(instance, ack.submission);
+    expect(snapshot.descriptor.derived).toMatchObject({ state: "delivered", terminal: true });
+
+    const refs = await instance.deliveries(snapshot.descriptor.attempt);
+    expect(refs).toHaveLength(1);
+    const deliveryBytes = await instance.fetchDelivery(refs[0]!);
+    const parsed = JSON.parse(new TextDecoder().decode(deliveryBytes)) as Record<string, unknown>;
+    expect(parsed["https://jinn.network/bridge/legacy-execution-envelope/1.0"]).toBe(
+      "{\"schemaVersion\":\"jinn.execution.v1\"}",
+    );
+    // The extension must not break canonical sealing or schema admission.
+    expect(() => DeliveryRecordSchema.parse(parsed)).not.toThrow();
+  });
+
+  test("refuses a non-namespaced extension key", async () => {
+    const repository = new InMemoryEvidenceRepository();
+    const deliveryExtensions: LocalTaskExecutionBackendConfig["deliveryExtensions"] = () => ({
+      data: "x",
+    });
+    const instance = backend(await stateRoot(), repository, () => {}, deliveryExtensions);
     const { task, submission } = documents();
     const ack = await instance.submit(task, submission);
     expect(ack.accepted).toBe(true);
