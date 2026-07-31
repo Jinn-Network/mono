@@ -25,6 +25,18 @@ export interface DeriveInput {
     services: { safeBound: boolean }[];
     joinedSolverNets: Record<string, unknown>;
     passwordRotatedAt?: string; // ISO
+    /**
+     * One-time shape-v2 config migration report — mirrors
+     * `client/src/api/status-build.ts`'s `ConfigMigrationStatus`. Present
+     * only on the boot where the daemon auto-migrated a legacy config.
+     */
+    configMigration?: {
+      shapeVersion: 2;
+      wiringEntries: number;
+      postingEntries: number;
+      backupPath?: string;
+      capsUnset: boolean;
+    };
   };
 }
 
@@ -145,6 +157,24 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
       kind: 'update_available',
       severity: 'info',
       message: `Daemon ${s.latestVersion} available (running ${s.daemonVersion}).`,
+    });
+  }
+
+  // Coordinator amendment 1 (F7 reversed — no claim-nothing migration): the
+  // one-time shape-v2 migration message is always informational, never
+  // action-required. The host's USD spend gates (spec §6.5) remain the
+  // operative bound regardless of whether per-claim caps got carried over —
+  // `capsUnset` only changes the message copy, never the severity.
+  if (s.configMigration !== undefined) {
+    const m = s.configMigration;
+    out.push({
+      kind: 'config_migrated',
+      severity: 'info',
+      message: m.capsUnset
+        ? 'Claim policy and execution wiring were created from your SolverNet memberships. Per-claim caps are not set; the USD spend gates remain active.'
+        : 'Claim policy and execution wiring were created from your SolverNet memberships.',
+      jumpTo: '/operator/claim-policy',
+      details: { wiringEntries: m.wiringEntries, postingEntries: m.postingEntries },
     });
   }
 

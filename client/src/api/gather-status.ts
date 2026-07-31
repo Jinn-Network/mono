@@ -11,6 +11,7 @@ type StatusBalanceRpc = Pick<PublicClient, 'getBalance' | 'readContract'>;
 import { base, baseSepolia, sepolia } from 'viem/chains';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
+import { getLastConfigMigrationReport } from '../config.js';
 import type { CredentialId } from '../spend/credential.js';
 import { isOverSpendCap } from '../spend/spend-cap.js';
 import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
@@ -632,6 +633,32 @@ export async function gatherGatheredStatusRaw(
     }
   }
 
+  // One-time shape-v2 config migration report (Task 3's `migrateConfigShapeV2`,
+  // read via `getLastConfigMigrationReport`). Present only on the boot where
+  // this operator's legacy config was auto-migrated this process start.
+  //
+  // Coordinator amendment 1 (F7 reversed — no claim-nothing migration):
+  // `capsUnset` is computed from the migrated `claimPolicy`'s cap fields
+  // being ABSENT (the schema makes them optional), not from a synthesized
+  // zero. It drives message copy only — the host's USD spend gates (spec
+  // §6.5) remain the operative bound either way.
+  const migrationReport = getLastConfigMigrationReport();
+  const configMigration =
+    migrationReport === undefined || !migrationReport.migrated
+      ? undefined
+      : {
+          shapeVersion: 2 as const,
+          wiringEntries: migrationReport.wiringEntries,
+          postingEntries: migrationReport.postingEntries,
+          ...(migrationReport.backupPath === undefined
+            ? {}
+            : { backupPath: migrationReport.backupPath }),
+          capsUnset:
+            status?.config?.claimPolicy === undefined ||
+            status.config.claimPolicy.spendCapWei === undefined ||
+            status.config.claimPolicy.aiUnitCap === undefined,
+        };
+
   let harnessRollup: ReturnType<typeof buildHarnessRollup> | undefined;
   try {
     const hr = status?.harnessReadiness?.();
@@ -711,6 +738,7 @@ export async function gatherGatheredStatusRaw(
     claimedByService: store.getClaimedRewardsByService(),
     claimedStakingRewardsLast24hWei: store.getClaimedRewardsLast24hWei(),
     harnessRollup,
+    configMigration,
   };
 
   if (!status) {

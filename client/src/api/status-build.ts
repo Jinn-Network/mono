@@ -112,6 +112,25 @@ export interface AiUnitsStatus {
   credentials: AiUnitsCredentialRow[];
 }
 
+/**
+ * One-time shape-v2 config migration report, present only on the boot where
+ * `migrateConfigShapeV2` produced a report with `migrated === true` (see
+ * `client/src/config/migrate-shape-v2.ts`, `getLastConfigMigrationReport`).
+ *
+ * `capsUnset` is true when the migrated `claimPolicy` is missing or its
+ * `spendCapWei`/`aiUnitCap` are unset. Per coordinator amendment 1 (F7
+ * reversed), this is informational, not action-required: the host's USD
+ * spend gates (spec §6.5) remain the operative bound whether or not
+ * per-claim caps are set — exactly today's behavior (spec §9).
+ */
+export interface ConfigMigrationStatus {
+  readonly shapeVersion: 2;
+  readonly wiringEntries: number;
+  readonly postingEntries: number;
+  readonly backupPath?: string;
+  readonly capsUnset: boolean;
+}
+
 export interface GatheredStatusRaw {
   /** sqlite_only: only SQLite-backed fields (e2e / API without fleet context). */
   hintsScope?: StatusHintsScope;
@@ -227,6 +246,8 @@ export interface GatheredStatusRaw {
   autoRestakeEnabled?: boolean;
   /** Configured EvictionLoop poll interval in milliseconds (0 when the loop is disabled). */
   evictionCheckIntervalMs?: number;
+  /** One-time shape-v2 config migration report (see `ConfigMigrationStatus`). */
+  configMigration?: ConfigMigrationStatus;
 }
 
 export interface StatusV1Response {
@@ -359,6 +380,8 @@ export interface StatusV1Response {
    * notification (issue #441).
    */
   security: { lastPasswordRotationAt: string | null };
+  /** One-time shape-v2 config migration report — see `GatheredStatusRaw.configMigration`. */
+  configMigration?: ConfigMigrationStatus;
 }
 
 /**
@@ -641,5 +664,6 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
     ...(raw.portfolioV0 !== undefined ? { portfolioV0: raw.portfolioV0 } : {}),
     ...(raw.predictionV1 !== undefined ? { predictionV1: raw.predictionV1 } : {}),
     ...(raw.taskRuns !== undefined ? { taskRuns: raw.taskRuns } : {}),
+    ...(raw.configMigration !== undefined ? { configMigration: raw.configMigration } : {}),
   };
 }

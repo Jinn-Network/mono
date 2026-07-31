@@ -148,6 +148,10 @@ export function mapStatusToDeriveInput(
       typeof s.security?.lastPasswordRotationAt === 'string'
         ? s.security.lastPasswordRotationAt
         : undefined,
+    // One-time shape-v2 migration report — copied straight through from
+    // `/v1/status.configMigration` (see `status-build.ts`). Absent on every
+    // boot after the first, so `config_migrated` fires at most once.
+    configMigration: s.configMigration,
   };
 }
 
