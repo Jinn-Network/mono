@@ -2010,7 +2010,7 @@ Each field exists to satisfy a named protocol constraint. The mapping, so the re
 
 Two further choices worth naming: the native trace moves **by path**, never by bytes (cross-plan contract 4 — MCP carries control and references; bulk bytes move on the filesystem), and every capture declares a single `executor-reported` origin, because every fact in the record derives from a feed the host reported and this runtime captured.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plugin/runtime/src/capture/assemble.test.ts`:
 
@@ -2259,7 +2259,7 @@ describe("buildFinalizeInput", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/assemble.test.ts
@@ -2267,7 +2267,7 @@ cd plugin/runtime && yarn test src/capture/assemble.test.ts
 
 Expected: FAIL — `Failed to resolve import "./assemble.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `plugin/runtime/src/capture/assemble.ts`:
 
@@ -2516,7 +2516,7 @@ export function buildFinalizeInput(input: CaptureAssemblyInput): FinalizeExecuti
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/assemble.test.ts && yarn typecheck
@@ -2524,7 +2524,7 @@ cd plugin/runtime && yarn test src/capture/assemble.test.ts && yarn typecheck
 
 Expected: PASS (14 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src
