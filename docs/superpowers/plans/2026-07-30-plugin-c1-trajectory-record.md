@@ -3306,3 +3306,29 @@ restack only if advanced).
 
 All six rows move from pending to commit SHA + exact red/green probe evidence only after
 red→green verification. L4 remains external/`not-evaluated`.
+
+## 2026-07-31 seventh exact-head whole-component review resolution
+
+Append-only after C1-R57–R62. Ratified law unchanged. Exact-probe-first: reproduce
+each reviewer probe RED before implementation; green exact probe + packed-public
+counterpart where required + full suite. Preserve two linkage modes, R24–R62 law,
+R9 toolchain pins, R15 hermetic packed-types, L4 external, no `legacy-peer-deps`.
+No check-off from broad tests alone. Base at review: `9f4925037` (fetch before push;
+restack only if advanced).
+
+| ID | Severity | Exact probe | Violated law | Minimal disposition | Red evidence | Green evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| C1-R63 | Important | Published `JsonExtensionValue` permits arrays, but preflight rejects ordinary namespaced extension value `["alpha","beta"]`; runtime/seal fail while AJV passes | Recursive extension arrays are valid and must preserve parity | Extension-value preflight routes exact standard arrays through shared dense-array inspector; recursively validate each element as an **extension value** (not top-level record/core object). Extension arrays may contain scalar/array/namespaced-extension-object recursively per published law; nested extension object keys remain namespaced; safe integers/strings/cycles/proxy/accessor/prototype closure retained. Do not weaken core record arrays or leak extension key law into core objects. Source+packed runtime/AJV parity: simple array, nested arrays, array of namespaced objects, mixed scalars valid; sparse/augmented/subclass/proxy/cycle/undefined/unsafe number/non-namespaced nested object fail. Build/seal/parse round-trip exact canonical bytes | [ ] | [ ] |
+| C1-R64 | Important | `instanceof SharedArrayBuffer` is realm-specific; current-realm Uint8Array over VM-realm SAB passes `sha256Hex` | Reject SharedArrayBuffer across realms via intrinsic Node detection | Use `isSharedArrayBuffer` from `node:util/types` (or equivalent realm-independent intrinsic) on the intrinsic buffer from the exact Uint8Array; no `instanceof SharedArrayBuffer` as authority. Apply uniformly in `snapshotByteView` and every public hash/parse/sign/verify path through it. Tests: current-realm SAB, VM-realm SAB with current-realm view, VM-realm view if accepted/rejected by exact Uint8Array law, ordinary cross-realm ArrayBuffer/view per explicit law, all public identity-bearing APIs. No torn digest | [ ] | [ ] |
+| C1-R65 | Important | Workflow scanner misses duplicate job-level `runs-on` and duplicate step `env.FOO` | Generic duplicate-key rejection for every YAML mapping scope | One block-scalar-aware indentation/context-stack scanner for **every YAML mapping object** in guarded workflow: root, `on`, `permissions`, top-level/job env, jobs, each job mapping, strategy/matrix/needs/with, steps, each step mapping, nested step env/with and other mappings. Each mapping context owns a key set; duplicate at same scope fails whether `- key:` or later indented key; same key in distinct scopes remains valid. Handle sequence-item boundaries and nested mappings; ignore colon-looking content inside `\|`/`>` until dedent; fail-closed on unsupported anchors/merge keys/ambiguous constructs. Exact reviewer mutations: duplicate job `runs-on`, step `env.FOO`, plus root/job env, with, step name/uses/run, job ID, nested matrix keys; valid repeated env key in different steps and valid multiline scripts pass. Semantic checkout/setup/npm/pack checks consume validated structure unchanged | [ ] | [ ] |
+
+### Implementation checklist (seventh exact-head whole-component)
+
+- [ ] C1-R63 — recursive extension-value arrays via dense-array inspector; runtime/AJV parity
+- [ ] C1-R64 — realm-independent `isSharedArrayBuffer` in snapshotByteView and identity paths
+- [ ] C1-R65 — generic duplicate-key scanner for every YAML mapping scope
+
+### Acceptance
+
+All three rows move from pending to commit SHA + exact red/green probe evidence only after
+red→green verification. L4 remains external/`not-evaluated`.
