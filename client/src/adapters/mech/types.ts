@@ -1,4 +1,5 @@
 import type { Address, WalletClient } from 'viem';
+import type { VenueBroadcaster } from './safe.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
 import type {
   AutopilotMutationResult,
@@ -75,6 +76,17 @@ export interface MechAdapterConfig {
    * Ref #547.
    */
   evaluatorEnabled?: boolean;
+  /**
+   * The single Safe broadcaster this operator's Safe transactions route through (finding E16 /
+   * the C2 ruling: per-daemon state, not a process-global). May be supplied at construction when
+   * the host already has one (CLI verbs); the daemon path (main.ts) supplies it later via
+   * `MechAdapter.setBroadcaster` once the composition root has built one, since composition is
+   * assembled after this adapter today. Left undefined when no composition exists (mainnet:
+   * `TaskCoordinator`/`JinnRouterV3` are not deployed there yet) — Safe-writing calls then fail
+   * loudly with `executeSafeTransaction`'s "no venue broadcaster supplied" error, same as before
+   * this ruling, just per-call rather than via an unset process-global.
+   */
+  broadcaster?: VenueBroadcaster;
   /**
    * Optional lifecycle read port for Autopilot evaluation admission. The
    * adapter never fabricates an adoption receipt: without an accepted,

@@ -60,13 +60,18 @@ export class SafePostBroadcastHookError extends Error {
 }
 
 /**
- * The generic venue-base broadcast port (execution finding E5). The composition root installs
- * exactly one broadcaster per process, bound to one Safe at construction — `execute` takes only
+ * The generic venue-base broadcast port (execution finding E5). Each daemon/CLI-verb/composition
+ * constructs exactly one broadcaster, bound to one Safe at construction — `execute` takes only
  * `{to, value, data, logicalTx, operation?}`, not `safeAddress`, and `SafeBroadcastReceipt`
  * (venue-base) structurally satisfies the narrower return shape below (it carries `txHash` plus
  * block/log/`alreadySettled` fields this port does not need). Kept as a structural port —
  * client/src/adapters never imports venue-base directly; the composition root (Task 12) is the
  * only place that binds a real `BaseVenueSafeBroadcaster` to this interface.
+ *
+ * Per finding E16 / the C2 ruling (cutover stage 1 close-out): there is NO process-global
+ * broadcaster. Each owner (composition root, CLI verb, e2e harness) constructs its own and
+ * threads it explicitly to `executeSafeTransaction` — this is what lets two daemons in one
+ * process each hold a different Safe's broadcaster without racing.
  */
 export interface VenueBroadcaster {
   /** The Safe this broadcaster is bound to — fixed at venue construction (finding E5). */
@@ -78,21 +83,6 @@ export interface VenueBroadcaster {
     readonly logicalTx: string;
     readonly operation?: 0 | 1;
   }): Promise<{ readonly txHash: `0x${string}` }>;
-}
-
-let venueBroadcaster: VenueBroadcaster | undefined;
-
-/** Installed once by the composition root. From stage 1 this is the only tx path (contract 12). */
-export function setVenueBroadcaster(broadcaster: VenueBroadcaster): void {
-  venueBroadcaster = broadcaster;
-}
-
-export function clearVenueBroadcaster(): void {
-  venueBroadcaster = undefined;
-}
-
-export function getVenueBroadcaster(): VenueBroadcaster | undefined {
-  return venueBroadcaster;
 }
 
 /**
@@ -113,24 +103,26 @@ function deriveLogicalTx(params: SafeTransactionParams): string {
 }
 
 /**
- * Single-broadcaster rule (composition design §6.1, cutover stage 1). Every legacy transaction
- * leg still calls this function with its exact original signature; from stage 1 it does nothing
- * but derive the logical-operation identity and hand the Safe call to the one installed
- * venue-base broadcaster. Two independent nonce stacks against one Safe is the #525/#562/#897
- * failure class and is excluded here by construction — venue-base owns the nonce ledger and
- * retry loop now (contract 12); `_publicClient`/`_walletClient` are accepted only so call sites
- * do not need to change.
+ * Single-broadcaster-per-Safe rule (composition design §6.1, cutover stage 1; per-daemon state
+ * per the C2 ruling). Every legacy transaction leg still calls this function with its exact
+ * original signature plus one addition — `broadcaster` is now supplied explicitly by the caller
+ * rather than read from module state — and does nothing but derive the logical-operation identity
+ * and hand the Safe call to that broadcaster. Two independent nonce stacks against one Safe is the
+ * #525/#562/#897 failure class and is excluded here by construction as long as every call site for
+ * a given Safe is threaded the SAME broadcaster instance (venue-base owns the nonce ledger and
+ * retry loop, contract 12); `_publicClient`/`_walletClient` are accepted only so call sites do not
+ * need to change their positional shape further.
  */
 export async function executeSafeTransaction(
   _publicClient: PublicClient,
   _walletClient: WalletClient,
   params: SafeTransactionParams,
+  broadcaster: VenueBroadcaster | undefined,
   options: SafeExecutionOptions = {},
 ): Promise<Hex> {
-  const broadcaster = venueBroadcaster;
   if (broadcaster === undefined) {
     throw new Error(
-      'executeSafeTransaction: no venue broadcaster installed — the composition root must call setVenueBroadcaster before any loop starts',
+      'executeSafeTransaction: no venue broadcaster supplied for this call — the caller (composition root, CLI verb, or harness) must construct one and pass it explicitly',
     );
   }
   if (broadcaster.safeAddress.toLowerCase() !== params.safeAddress.toLowerCase()) {

@@ -11,8 +11,11 @@ import { getJinnRouterAddress } from '../contracts/addresses.js';
 import { FleetStateStore } from '../earning/store.js';
 import { isOperationalServiceStep, type FleetState, type ServiceState } from '../earning/types.js';
 import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from '../earning/wallet.js';
+import { base as baseChain, baseSepolia } from 'viem/chains';
 import { createJinnPublicClient, createJinnWalletClient } from '../earning/viem-clients.js';
 import { MechAdapter } from '../adapters/mech/adapter.js';
+import { createClients } from '../adapters/mech/safe.js';
+import { createDirectSafeBroadcaster } from '../adapters/mech/direct-safe-broadcaster.js';
 import { Store } from '../store/store.js';
 import type { BuildEnvelopeInput } from '../errors/envelope.js';
 import { resolveCliPassword } from './password.js';
@@ -185,6 +188,22 @@ export async function createCliExecutionContext(
   const routerAddress = (chainConfig.jinnRouter ??
     getJinnRouterAddress(chainConfig.chainId)) as `0x${string}`;
 
+  // Finding E16 / the C2 ruling: `jinn tasks submit` is a standalone one-shot process with no
+  // composition root to borrow a broadcaster from, so it constructs its own — bound to this
+  // service's own Safe, signed by this service's own agent EOA (the same signer this adapter's
+  // Safe writes used before the venue-base cutover).
+  const broadcasterChain = config.network === 'testnet' ? baseSepolia : baseChain;
+  const broadcasterClients = createClients(
+    config.rpcUrl,
+    agentEoaPrivateKey as `0x${string}`,
+    broadcasterChain,
+  );
+  const broadcaster = createDirectSafeBroadcaster(
+    broadcasterClients.publicClient,
+    broadcasterClients.walletClient,
+    primaryService.safe_address as `0x${string}`,
+  );
+
   const adapter = new MechAdapter(
     {
       rpcUrl: config.rpcUrl,
@@ -198,6 +217,7 @@ export async function createCliExecutionContext(
       pollIntervalMs: config.pollIntervalMs,
       chainId: config.network === 'testnet' ? 84532 : 8453,
       routerClaimDeliveryVariant: chainConfig.routerClaimDeliveryVersion,
+      broadcaster,
     },
     jinnStore,
   );

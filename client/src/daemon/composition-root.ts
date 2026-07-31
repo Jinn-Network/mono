@@ -104,7 +104,7 @@ import { buildInfo } from '../build-info.js';
 import type { JinnConfig } from '../config.js';
 import type { ClaimPolicyConfig } from '../config/shape-v2.js';
 import { toPipelineWiring } from '../config/shape-v2.js';
-import { setVenueBroadcaster, clearVenueBroadcaster } from '../adapters/mech/safe.js';
+import type { VenueBroadcaster } from '../adapters/mech/safe.js';
 import { openOperatorEvidence, type OperatorEvidence } from './evidence-join.js';
 
 export interface OperatorComposition {
@@ -116,6 +116,14 @@ export interface OperatorComposition {
   readonly chain: MarketplaceChainConfig;
   readonly safeAddress: `0x${string}`;
   readonly mechAddress: `0x${string}`;
+  /**
+   * This composition's single Safe broadcaster (finding E16 / the C2 ruling: per-daemon state,
+   * not a process-global). Every legacy `executeSafeTransaction` call site the host wants routed
+   * through this Safe (`MechAdapter`, `DeliveryDeps`, `ReputationRegistryClient`, ...) must be
+   * threaded this SAME instance — two broadcasters against one Safe reopens the #525/#562/#897
+   * nonce-race class the single-broadcaster rule exists to close.
+   */
+  readonly broadcaster: VenueBroadcaster;
   close(): Promise<void>;
 }
 
@@ -392,11 +400,14 @@ export async function buildOperatorComposition(
     observations,
   });
 
-  // Contract 1: install before any loop can send a transaction through executeSafeTransaction.
-  setVenueBroadcaster({
+  // Contract 1 (finding E16 / C2 ruling: per-daemon state, not a process-global install). Built
+  // once per composition and returned on `OperatorComposition.broadcaster` — the host threads
+  // this SAME instance to every legacy `executeSafeTransaction` call site it wants routed through
+  // this Safe, before starting any loop that can write.
+  const broadcaster: VenueBroadcaster = {
     safeAddress: input.safeAddress,
     execute: (request) => venue.safe.execute(request),
-  });
+  };
 
   const evidence = await openOperatorEvidence({ rootDir: input.evidenceRoot });
 
@@ -466,10 +477,10 @@ export async function buildOperatorComposition(
     chain: input.chain,
     safeAddress: input.safeAddress,
     mechAddress: input.mechAddress,
+    broadcaster,
     async close(): Promise<void> {
       await evidence.close();
       venue.close();
-      clearVenueBroadcaster();
     },
   };
 }

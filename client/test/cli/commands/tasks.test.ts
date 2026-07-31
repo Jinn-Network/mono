@@ -13,9 +13,7 @@ import { Store } from '@/store/store.js';
 import { marketplaceTaskSelectionSidecarPath } from '@/tasks/submit-selection.js';
 import { canonicalJson } from '@/harnesses/engine/canonical-json.js';
 import {
-  clearVenueBroadcaster,
   executeSafeTransaction,
-  setVenueBroadcaster,
   SafePostBroadcastHookError,
 } from '@/adapters/mech/safe.js';
 import Database from 'better-sqlite3';
@@ -68,11 +66,12 @@ const SAFE_WRAPPER_TX_HASH = `0x${'9a'.repeat(32)}` as const;
 
 /**
  * Drives the real `executeSafeTransaction` chokepoint (single-broadcaster cutover — plan Task
- * 7). It requires a `VenueBroadcaster` bound to the Safe under test, so this helper installs a
- * stub one for the call and always clears it afterward. `writeContract` stands in for the
- * broadcaster's underlying wallet write; both existing usages exercise the `beforeBroadcast`
- * fence rejecting BEFORE the broadcaster is ever reached, so `writeContract` staying uncalled is
- * still the meaningful assertion.
+ * 7; per-daemon state — finding E16 / the C2 ruling). It requires a `VenueBroadcaster` bound to
+ * the Safe under test, so this helper builds a stub one and passes it explicitly on each call —
+ * no process-global to install or clear. `writeContract` stands in for the broadcaster's
+ * underlying wallet write; both existing usages exercise the `beforeBroadcast` fence rejecting
+ * BEFORE the broadcaster is ever reached, so `writeContract` staying uncalled is still the
+ * meaningful assertion.
  */
 async function postThroughSafeWalletBoundary(
   options: {
@@ -82,36 +81,33 @@ async function postThroughSafeWalletBoundary(
   writeContract: ReturnType<typeof vi.fn>,
 ) {
   const safeAddress = '0x00112233445566778899aabbccddeeff00112233' as const;
-  setVenueBroadcaster({
+  const broadcaster = {
     safeAddress,
-    execute: async (request) => ({
+    execute: async (request: unknown) => ({
       txHash: (await writeContract(request)) as typeof SAFE_WRAPPER_TX_HASH,
     }),
-  });
-  try {
-    const txHash = await executeSafeTransaction(
-      {} as never,
-      {} as never,
-      {
-        safeAddress,
-        to: '0x2222222222222222222222222222222222222222',
-        value: 0n,
-        data: '0xdeadbeef',
-      },
-      {
-        beforeBroadcast: options?.beforeBroadcast,
-        onBroadcast: options?.onTransactionHash,
-      },
-    );
-    return {
-      taskId: 'wallet-boundary-task',
-      taskCid: `f01551220${'ab'.repeat(32)}`,
-      txHash,
-      blockNumber: 88,
-    };
-  } finally {
-    clearVenueBroadcaster();
-  }
+  };
+  const txHash = await executeSafeTransaction(
+    {} as never,
+    {} as never,
+    {
+      safeAddress,
+      to: '0x2222222222222222222222222222222222222222',
+      value: 0n,
+      data: '0xdeadbeef',
+    },
+    broadcaster,
+    {
+      beforeBroadcast: options?.beforeBroadcast,
+      onBroadcast: options?.onTransactionHash,
+    },
+  );
+  return {
+    taskId: 'wallet-boundary-task',
+    taskCid: `f01551220${'ab'.repeat(32)}`,
+    txHash,
+    blockNumber: 88,
+  };
 }
 
 function request(overrides: Record<string, unknown> = {}) {

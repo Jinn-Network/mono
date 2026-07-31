@@ -13,7 +13,7 @@ import type {
   DeliveredResult,
 } from '../../types/index.js';
 import { TransientError, PermanentError, parseTask } from '../../types/index.js';
-import { createClients } from './safe.js';
+import { createClients, type VenueBroadcaster } from './safe.js';
 
 /**
  * Coalesce a string-or-array RPC input down to the head URL for display in
@@ -322,6 +322,15 @@ export class MechAdapter implements ExecutionAdapter {
    */
   public setEvaluatorEnabled(enabled: boolean): void {
     this.config.evaluatorEnabled = enabled;
+  }
+
+  /**
+   * Late-bind the Safe broadcaster this adapter's writes route through (finding E16 / the C2
+   * ruling). Needed because `main.ts` constructs this adapter before the composition root that
+   * owns the broadcaster; the daemon calls this once, before starting any loop that can write.
+   */
+  public setBroadcaster(broadcaster: VenueBroadcaster): void {
+    this.config.broadcaster = broadcaster;
   }
 
   async initialize(): Promise<void> {
@@ -703,6 +712,7 @@ export class MechAdapter implements ExecutionAdapter {
     const taskSubmission = await submitTask(
       this.publicClient,
       this.walletClient,
+      this.config.broadcaster,
       this.config.safeAddress,
       this.config.routerAddress,
       restorationDataHex,
@@ -1496,6 +1506,7 @@ export class MechAdapter implements ExecutionAdapter {
     const claimed = await claimTaskOnchain(
       this.publicClient,
       this.walletClient,
+      this.config.broadcaster,
       this.config.safeAddress,
       this.config.routerAddress,
       taskId,
@@ -1530,6 +1541,7 @@ export class MechAdapter implements ExecutionAdapter {
     await callDeliverToMarketplace(
       this.publicClient,
       this.walletClient,
+      this.config.broadcaster,
       this.config.safeAddress,
       this.config.mechContractAddress,
       [requestId as Hex],
@@ -1549,6 +1561,7 @@ export class MechAdapter implements ExecutionAdapter {
     const claimed = await claimEvaluationOnchain(
       this.publicClient,
       this.walletClient,
+      this.config.broadcaster,
       this.config.safeAddress,
       this.config.routerAddress,
       taskId,
@@ -1565,6 +1578,7 @@ export class MechAdapter implements ExecutionAdapter {
     await claimDelivery(
       this.publicClient,
       this.walletClient,
+      this.config.broadcaster,
       this.config.safeAddress,
       this.config.routerAddress,
       requestId as Hex,
@@ -1577,6 +1591,7 @@ export class MechAdapter implements ExecutionAdapter {
     await claimDelivery(
       this.publicClient,
       this.walletClient,
+      this.config.broadcaster,
       this.config.safeAddress,
       this.config.routerAddress,
       requestId as Hex,
@@ -1681,6 +1696,7 @@ export class MechAdapter implements ExecutionAdapter {
       await claimDelivery(
         this.publicClient,
         this.walletClient,
+        this.config.broadcaster,
         this.config.safeAddress,
         this.config.routerAddress,
         requestId as Hex,

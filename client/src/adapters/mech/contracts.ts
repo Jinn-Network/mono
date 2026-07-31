@@ -21,7 +21,7 @@ import {
 import { VerdictCode } from './verdict-code.js';
 import { STAKING_ABI, STOLAS_DISTRIBUTOR_ABI } from '../../earning/contracts.js';
 import { isUnauthorizedAccountError } from '../../errors/unauthorized-account.js';
-import { executeSafeTransaction } from './safe.js';
+import { executeSafeTransaction, type VenueBroadcaster } from './safe.js';
 import { formatKnownRevert, formatKnownRevertDetail } from './safe-revert.js';
 import {
   flattenErrorMessage,
@@ -221,6 +221,7 @@ export async function withEvictionRecovery<T>(
 export async function submitTask(
   publicClient: PublicClient,
   walletClient: WalletClient,
+  broadcaster: VenueBroadcaster | undefined,
   safeAddress: Address,
   routerAddress: Address,
   taskCidDigest: Hex,
@@ -266,6 +267,7 @@ export async function submitTask(
         value: taskBudget,
         data: calldata,
       },
+      broadcaster,
       {
         beforeBroadcast,
         onBroadcast: onTransactionHash,
@@ -414,6 +416,7 @@ export interface RouterTaskPolicy {
 export async function claimTask(
   publicClient: PublicClient,
   walletClient: WalletClient,
+  broadcaster: VenueBroadcaster | undefined,
   safeAddress: Address,
   routerAddress: Address,
   taskId: string | bigint,
@@ -436,7 +439,7 @@ export async function claimTask(
       to: routerAddress,
       value: 0n,
       data: calldata,
-    }),
+    }, broadcaster),
   );
 
   const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash, {
@@ -580,6 +583,7 @@ export async function isDeliveryAlreadyClaimed(
 export async function claimDelivery(
   publicClient: PublicClient,
   walletClient: WalletClient,
+  broadcaster: VenueBroadcaster | undefined,
   safeAddress: Address,
   routerAddress: Address,
   requestId: Hex,
@@ -636,7 +640,7 @@ export async function claimDelivery(
           to: routerAddress,
           value: 0n,
           data: calldata,
-        }),
+        }, broadcaster),
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -680,6 +684,7 @@ export async function claimDelivery(
 export async function claimEvaluation(
   publicClient: PublicClient,
   walletClient: WalletClient,
+  broadcaster: VenueBroadcaster | undefined,
   safeAddress: Address,
   routerAddress: Address,
   taskId: string | bigint,
@@ -704,7 +709,7 @@ export async function claimEvaluation(
       to: routerAddress,
       value: 0n,
       data: calldata,
-    }),
+    }, broadcaster),
   );
 
   const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash, {
@@ -1324,6 +1329,7 @@ const ALREADY_DELIVERED_PATTERNS = [
 export async function callDeliverToMarketplace(
   publicClient: PublicClient,
   walletClient: WalletClient,
+  broadcaster: VenueBroadcaster | undefined,
   safeAddress: Address,
   mechContractAddress: Address,
   requestIds: Hex[],
@@ -1347,7 +1353,7 @@ export async function callDeliverToMarketplace(
         to: mechContractAddress,
         value: 0n,
         data: calldata,
-      }),
+      }, broadcaster),
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

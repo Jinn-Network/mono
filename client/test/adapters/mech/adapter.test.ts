@@ -371,6 +371,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     expect(submitTask).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
+      undefined,
       TEST_CONFIG.safeAddress,
       TEST_CONFIG.routerAddress,
       TASK_CID_DIGEST,
@@ -991,6 +992,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     expect(claimEvaluation).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
+      undefined,
       TEST_CONFIG.safeAddress,
       TEST_CONFIG.routerAddress,
       '1',
@@ -1835,6 +1837,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     expect(claimTask).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
+      undefined,
       TEST_CONFIG.safeAddress,
       TEST_CONFIG.routerAddress,
       '1',
@@ -1867,6 +1870,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     expect(callDeliverToMarketplace).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
+      undefined,
       TEST_CONFIG.safeAddress,
       TEST_CONFIG.mechContractAddress,
       [REQUEST_ID],
@@ -1908,6 +1912,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     expect(claimDelivery).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
+      undefined,
       TEST_CONFIG.safeAddress,
       TEST_CONFIG.routerAddress,
       REQUEST_ID,
@@ -2226,6 +2231,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     expect(claimDelivery).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
+      undefined,
       TEST_CONFIG.safeAddress,
       TEST_CONFIG.routerAddress,
       REQUEST_ID,
@@ -2282,6 +2288,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     expect(claimDelivery).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
+      undefined,
       TEST_CONFIG.safeAddress,
       TEST_CONFIG.routerAddress,
       REQUEST_ID,
@@ -2354,6 +2361,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     expect(claimDelivery).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
+      undefined,
       TEST_CONFIG.safeAddress,
       TEST_CONFIG.routerAddress,
       REQUEST_ID,

@@ -889,17 +889,14 @@ export async function startDaemon(
    *   `main.ts`'s testnet branch. Requires `v3Env` (the composition's `MarketplaceChainConfig`
    *   is built entirely from the locally-deployed V3 addresses — there is no equivalent
    *   deployment to target on production Base mainnet, which is what `v3Env`-absent callers run
-   *   against). Defaults to `false` and is OPT-IN, not automatic, for one load-bearing reason:
-   *   `buildOperatorComposition` calls `setVenueBroadcaster(...)`, a single PROCESS-WIDE
-   *   singleton bound to exactly one Safe (`src/adapters/mech/safe.ts`'s "single-broadcaster
-   *   rule", cutover stage 1 design §6.1). `jinn-repo-loop.ts` / `jinn-repo-live-loop.ts` call
-   *   `startDaemon` TWICE in one process (two operators, op-a + op-b) — if this flag defaulted
-   *   to on, the second `startDaemon` call would silently rebind the module-level broadcaster to
-   *   op-b's Safe, and op-a's subsequent legacy Safe transactions (still very much in use — the
-   *   evaluation path, Task 16, is untouched) would then throw
-   *   "does not match the installed venue broadcaster's Safe". Opt-in keeps those two scripts
-   *   byte-for-byte unchanged; only `daemon-harness-cycle.ts` (this task's target, one operator
-   *   per process) sets it.
+   *   against). Defaults to `false` because it needs `v3Env`, not because of any process-wide
+   *   collision risk: as of finding E16 / the C2 ruling, `buildOperatorComposition` returns its
+   *   broadcaster on `OperatorComposition.broadcaster` instead of installing a process-global
+   *   singleton, and `startDaemon` threads that instance to `mechAdapter` / `deliveryDeps` itself
+   *   (see step 6.5/7 below) — two `startDaemon` calls in one process (T2.2's op-a + op-b) each
+   *   get their own broadcaster bound to their own Safe and no longer race. `jinn-repo-loop.ts` /
+   *   `jinn-repo-live-loop.ts` still don't pass this flag today (unrelated to this fix — see their
+   *   own callers), but nothing about the broadcaster design blocks them from doing so.
    */
   opts?: {
     polymarketGammaBaseUrl?: string;
@@ -1198,6 +1195,11 @@ export async function startDaemon(
       venueStateDbPath: join(fixture.implStateRoot, `${label}-venue.db`),
       profileStore,
     });
+    // Finding E16 / the C2 ruling: no process-global broadcaster — this daemon's ONE Safe
+    // broadcaster (built above, bound to `operator.safeAddress`) is threaded explicitly to the
+    // legacy `mechAdapter` too, before `daemon.start()`. `deliveryDeps` below is constructed
+    // AFTER this point so it picks the same instance up directly in its object literal.
+    mechAdapter.setBroadcaster(composition.broadcaster);
   }
 
   // 7. Wire packagingDeps, envelopeDeps, deliveryDeps (Task 5).
@@ -1231,6 +1233,10 @@ export async function startDaemon(
     routerAddress: (v3Env ? v3Env.routerAddress : routerAddress) as Address,
     claimDeliveryVariant: routerClaimDeliveryVariant as 'v1' | 'v2' | 'v3',
     // evictionRecovery: omitted — no master wallet in test
+    // Finding E16 / the C2 ruling: the SAME broadcaster instance `mechAdapter` above just picked
+    // up — undefined when `opts.enableComposition` was not set (no composition, no broadcaster,
+    // same as production on a network with no composition).
+    broadcaster: composition?.broadcaster,
   };
 
   // 8. Construct Daemon. Translation of main.ts §2046.
@@ -1260,9 +1266,10 @@ export async function startDaemon(
     // `BaseVenueConfig.observations` is stubbed `async () => []` (composition-root.ts's own file
     // header, gap 1 / Finding E20). `main.ts` itself does not set `config.work` either (see its
     // "Task 13 owns starting the loops" comment) — so `composition` alone has no effect on which
-    // loops `Daemon` starts; it exists so `setVenueBroadcaster` runs before `daemon.start()`,
-    // which every Safe-executed transaction now requires regardless of which loops run
-    // (Finding E16, `src/adapters/mech/safe.ts`'s `executeSafeTransaction`).
+    // loops `Daemon` starts; it exists so a broadcaster is built and threaded to `mechAdapter` /
+    // `deliveryDeps` before `daemon.start()`, which every Safe-executed transaction now requires
+    // regardless of which loops run (Finding E16, `src/adapters/mech/safe.ts`'s
+    // `executeSafeTransaction`).
     ...(composition ? { composition } : {}),
     // subgraphUrl / nodeEndpoint / signer: omitted
     // rewardClaim / balanceTopup: omitted → those loops don't start

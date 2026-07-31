@@ -154,10 +154,6 @@ describe('buildOperatorComposition', () => {
     });
 
     const { buildOperatorComposition } = await import('../../src/daemon/composition-root.js');
-    const { getVenueBroadcaster, clearVenueBroadcaster } = await import(
-      '../../src/adapters/mech/safe.js'
-    );
-    clearVenueBroadcaster();
 
     const stateRoot = mkdtempSync(join(tmpdir(), 'jinn-composition-state-'));
     const evidenceRoot = mkdtempSync(join(tmpdir(), 'jinn-composition-evidence-'));
@@ -206,11 +202,11 @@ describe('buildOperatorComposition', () => {
       profileStore: { get: () => undefined },
     });
 
-    // (a) the broadcaster is installed before the function returns.
-    const installed = getVenueBroadcaster();
-    expect(installed).toBeDefined();
-    expect(installed!.safeAddress).toBe(safeAddress);
-    await installed!.execute({ to: '0x00', value: 0n, data: '0x', logicalTx: 'x' });
+    // (a) the composition returns its own broadcaster (finding E16 / the C2 ruling: no
+    // process-global install — the host threads `composition.broadcaster` explicitly).
+    expect(composition.broadcaster).toBeDefined();
+    expect(composition.broadcaster.safeAddress).toBe(safeAddress);
+    await composition.broadcaster.execute({ to: '0x00', value: 0n, data: '0x', logicalTx: 'x' });
     expect(safeExecuteMock).toHaveBeenCalledTimes(1);
 
     // (b) pipelineConfig.wiring matches toPipelineWiring(config.executionWiring).
@@ -235,6 +231,5 @@ describe('buildOperatorComposition', () => {
     await composition.close();
     expect(evidenceCloseMock).toHaveBeenCalledTimes(1);
     expect(venueCloseMock).toHaveBeenCalledTimes(1);
-    expect(getVenueBroadcaster()).toBeUndefined();
   });
 });

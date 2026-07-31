@@ -53,6 +53,7 @@ describe('staking decoupled from the protocol loop (#773)', () => {
     const txHash = await claimDelivery(
       publicClient,
       makeWalletClient(),
+      undefined,
       SAFE_ADDRESS,
       ROUTER_ADDRESS,
       REQUEST_ID,
@@ -80,6 +81,7 @@ describe('staking decoupled from the protocol loop (#773)', () => {
       claimDelivery(
         publicClient,
         makeWalletClient(),
+        undefined,
         SAFE_ADDRESS,
         ROUTER_ADDRESS,
         REQUEST_ID,
