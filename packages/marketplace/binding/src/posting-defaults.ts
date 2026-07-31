@@ -20,19 +20,36 @@ export interface DefaultPostingTerms extends PostingTerms {
  *
  * `allowSolverSelfEvaluation: false` is not a default worth flipping casually -- it is the
  * self-evaluation prevention the recorder enforces.
+ *
+ * `maxClaims: 1` admits a single solver per post: the reference configuration is deliberately not
+ * competitive. One claim is the cheapest first post (the escrow is one solution + one verdict) and
+ * the right shape for a requester proving the loop; a requester who wants competing attempts raises
+ * it AND seals the same number into the Submission's `attempts.maxTotal` (see
+ * `assertMaxClaimsAgreement`).
  */
 export const DEFAULT_POSTING_TERMS: DefaultPostingTerms = {
   solutionMaxDeliveryRateWei: 1_000_000_000_000_000n, // 0.001 ETH
   verdictMaxDeliveryRateWei: 200_000_000_000_000n, // 0.0002 ETH
-  responseTimeoutSeconds: 86_400n,
+  // Read 2026-07-31 from the deployed Base Sepolia MechMarketplace
+  // 0xD3233FdAaB51E9775f6bFCE8242B02C181D7c0e7 (chainId 84532 -- the address
+  // JinnRouterV3.mechMarketplace() returns): minResponseTimeout() = 60, maxResponseTimeout() = 300.
+  // `JinnRouterV3.createTask` does NOT validate this value; it stores it and forwards it to the
+  // marketplace at CLAIM time, where an out-of-bounds value reverts. So a too-large default posts
+  // fine, locks msg.value in escrow, and then makes every claim on that task revert -- dead on
+  // arrival, refundable only via refundUnusedTaskBudget. 300s is the deployed ceiling: the longest
+  // delivery window this substrate admits.
+  responseTimeoutSeconds: 300n,
   allowSolverSelfEvaluation: false,
   maxClaims: 1,
 };
 
 /**
  * The escrow formula, in one place: `(solutionMaxDeliveryRateWei + verdictMaxDeliveryRateWei) x
- * maxClaims`. This is the exact `msg.value` `postTask` sends; `posting-defaults.test.ts` pins the
- * equality against the real `postTask` so the two cannot drift.
+ * maxClaims`. This is the `msg.value` `postTask` sends **when the sealed Submission's
+ * `attempts.maxTotal` equals `terms.maxClaims`** -- `postTask` takes its multiplier from the
+ * Submission and never reads `maxClaims`, so the two agree only when the caller has made them
+ * agree; `assertMaxClaimsAgreement` is how a caller establishes that. `posting-defaults.test.ts`
+ * pins both sides: the equality under agreement, and the silent 1x escrow under divergence.
  *
  * A colluding solver+evaluator pair can drain this escrow with a junk delivery and a friendly
  * verdict under today-mode `minVerdicts: 1`. That risk is marketplace-owned and named here so a

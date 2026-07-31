@@ -60,6 +60,41 @@ describe("DEFAULT_POSTING_TERMS", () => {
     expect(broadcastCreateTask.mock.calls[0]?.[0]?.value).toBe(postingEscrowValueWei(DEFAULT_POSTING_TERMS));
   });
 
+  test("responseTimeoutSeconds is inside the deployed marketplace's own bounds", () => {
+    // Read 2026-07-31 from the deployed Base Sepolia MechMarketplace
+    // 0xD3233FdAaB51E9775f6bFCE8242B02C181D7c0e7 (chainId 84532 -- the address
+    // JinnRouterV3.mechMarketplace() returns): minResponseTimeout() = 60, maxResponseTimeout() = 300.
+    // `createTask` does not validate this value; the marketplace does, at CLAIM time. An
+    // out-of-bounds default posts fine, escrows msg.value, and then makes every claim revert.
+    expect(DEFAULT_POSTING_TERMS.responseTimeoutSeconds).toBeGreaterThanOrEqual(60n);
+    expect(DEFAULT_POSTING_TERMS.responseTimeoutSeconds).toBeLessThanOrEqual(300n);
+  });
+
+  test("the escrow equality holds only while the Submission agrees with terms.maxClaims", async () => {
+    // `postTask`'s multiplier is the sealed Submission's `attempts.maxTotal`, NOT `terms.maxClaims`:
+    // raise `maxClaims` without a matching Submission and the poster silently gets a one-claim task
+    // at a fifth of the escrow it asked for. `assertMaxClaimsAgreement` is how a caller makes that
+    // unreachable; nothing inside `postTask` checks it.
+    const terms = { ...DEFAULT_POSTING_TERMS, maxClaims: 5 };
+    const taskBytes = goldenTask();
+    const submissionBytes = goldenSubmission(taskBytes, undefined);
+    const broadcastCreateTask = vi.fn<SafeBroadcastPort["broadcastCreateTask"]>(
+      async () => ({ taskId: 7n, txHash: `0x${"a".repeat(64)}` as const }),
+    );
+    const ports: PostingPorts = {
+      ipfs: { pin: async () => {} },
+      intents: createInMemoryPostingIntentStore(),
+      safe: { broadcastCreateTask },
+    };
+
+    await postTask(taskBytes, submissionBytes, terms, BASE_SEPOLIA_TODAY, CREATOR, ports);
+
+    expect(broadcastCreateTask.mock.calls[0]?.[0]?.value)
+      .toBe(postingEscrowValueWei({ ...terms, maxClaims: 1 }));
+    expect(broadcastCreateTask.mock.calls[0]?.[0]?.value).not.toBe(postingEscrowValueWei(terms));
+    expect(() => assertMaxClaimsAgreement(undefined, terms.maxClaims)).toThrow(/attempts\.maxTotal/u);
+  });
+
   test("the formula is (solutionRate + verdictRate) x maxClaims", () => {
     expect(postingEscrowValueWei({
       solutionMaxDeliveryRateWei: 10n,
