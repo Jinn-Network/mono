@@ -10,6 +10,15 @@ test('the canary lane triggers on both the integration branch and next', () => {
   assert.match(workflow, /branches:\s*\[integration\/evidence-v1, next\]/);
 });
 
+test('the concurrency group serializes across branches, not per-ref', () => {
+  // A per-ref group (stack-npm-publish-${{ github.ref }}) lets a push to
+  // integration/evidence-v1 and a push to next run simultaneously; both
+  // publish to the same per-package canary dist-tag and race, tripping
+  // verifyCoherentSet's dist-tag check on a benign, already-superseded tag.
+  assert.match(workflow, /group: stack-npm-publish\n/);
+  assert.doesNotMatch(workflow, /group: stack-npm-publish-\$\{\{ github\.ref \}\}/);
+});
+
 test('the workflow carries the OIDC permissions trusted publishing needs', () => {
   assert.match(workflow, /id-token: write/);
   assert.match(workflow, /checks: read/);

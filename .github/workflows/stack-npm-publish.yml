@@ -27,7 +27,12 @@ permissions:
   checks: read
 
 concurrency:
-  group: stack-npm-publish-${{ github.ref }}
+  # Deliberately branch-agnostic: the whole 45-package set republishes on every
+  # push regardless of which tree changed, so a push to integration/evidence-v1
+  # and a push to next must serialize, not race the same per-package canary
+  # dist-tag against each other (a cross-branch race spuriously trips
+  # verifyCoherentSet's dist-tag check with a benign, already-superseded tag).
+  group: stack-npm-publish
   cancel-in-progress: false
 
 jobs:
