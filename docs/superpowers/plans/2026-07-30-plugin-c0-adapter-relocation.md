@@ -1125,3 +1125,125 @@ The gate is `apps/jinn-agent/scripts/cold-stock-e2e.sh` (142 lines) plus `apps/j
 `.github/scripts/jinn-plugin-split.test.mjs` (19 tests, the entire safety contract of the publication path: token-free dry-run, publish-only-on-`refs/heads/main`, validation-before-destructive-mirror, provenance shape) is referenced by **no** workflow. `grep -rn "jinn-plugin-split.test" .github/workflows/` returns nothing. A regression in the mirror helper — including one introduced by C0 — would reach `main` unnoticed and take the published channel with it.
 
 **Disposition (proposed, not taken):** out of scope for a relocation, and adding a workflow is not a mechanical re-point. C0 runs the suite locally at Tasks 5, 6, 9 and 10 and attaches the output to the PR. **Proposed follow-up:** a small `chore` that adds a paths-filtered job running `node --test .github/scripts/jinn-plugin-split.test.mjs` on changes to `.github/scripts/jinn-plugin-split*.mjs` and `.github/workflows/jinn-plugin-split.yml`. The natural moment is #2294's own PR, which touches the same files. File it as an issue when C0 opens, so it is not discovered during a channel incident.
+
+---
+
+## Implementation amendment — 2026-07-31 (C0 review evidence)
+
+This section amends Task 10 pass conditions only. Historical Task 10 checkbox text is left unchanged.
+
+### Amendment A — Task 10 Step 1 consumer census (allowlist residual comments)
+
+**Finding:** Task 10 Step 1's checked-off census contradicts its original pass condition ("Expected: no output"). The prescribed grep finds exactly three comment-only historical references inside frozen-trio source:
+
+| File | Line | Nature |
+| --- | --- | --- |
+| `packages/layer/src/corpus-probes.ts` | 10 | JSDoc cross-reference to `doctor.py` |
+| `packages/layer/src/corpus-probes.ts` | 40 | JSDoc cross-reference to `doctor.py` |
+| `packages/layer/src/ledger.ts` | 40 | JSDoc cross-reference to `ledger_view.py` |
+
+These are **not** load-bearing path consumers. They do not read, resolve, or import from `apps/jinn-agent/plugins/jinn`; they document the fork-shaped contract the frozen adapter implements. Editing them would violate the freeze-preserving constraint on `packages/layer/src/**`.
+
+**Allowlist:** The three references above are explicitly allowlisted for C0's consumer census. They expire with C9 retirement / removal of the frozen tree (and the fork that owns the referenced Python modules).
+
+**Amended pass condition (Step 1):** no **non-allowlisted, load-bearing** old-path consumer remains under `.github/`, `packages/`, `client/`, `apps/jinn-agent/scripts/`, or `apps/jinn-agent/hermes_cli/` (excluding the `DO NOT EDIT HERE` historical-marker sites already documented in Step 1). Comment-only JSDoc cross-references in frozen-trio source are out of scope.
+
+**Behavioral proof:** Task 10 Step 2's shim-parked rehearsal remains the standing proof that every re-pointed runtime consumer works with the compatibility symlink absent.
+
+### Amendment B — Task 10 Step 4 freeze proof (reject invalid path-filtered `--stat`)
+
+**Finding:** Task 10 Step 4's path-filtered `git diff origin/integration/evidence-v1...HEAD --stat -- plugin/frozen` cannot meet its stated expectation ("zero insertions and zero deletions for `plugin/frozen`"). Filtering to `plugin/frozen` hides the deleted side of each rename and reports thousands of insertions, not zero. Tree-object equality and R100 rename evidence remain valid; the path-filtered `--stat` does not.
+
+**Disposition:** Reject the path-filtered `--stat` as an invalid freeze proof. The authoritative proofs are:
+
+#### B.1 — Tree-object equality
+
+```bash
+git rev-parse HEAD:plugin/frozen
+git rev-parse origin/integration/evidence-v1:apps/jinn-agent/plugins/jinn
+```
+
+**Expected (both lines identical, recorded at HEAD `bfe758daf111c37fb58ec21ba1feb8c33d84b83a`):**
+
+```
+1073efeda203601ea99fa90f93a340e6dc377dd2
+1073efeda203601ea99fa90f93a340e6dc377dd2
+```
+
+#### B.2 — Summary (21 × 100% renames + symlink create)
+
+```bash
+git diff --find-renames=100% --summary origin/integration/evidence-v1...HEAD -- plugin/frozen apps/jinn-agent/plugins
+```
+
+**Expected:**
+
+```
+ create mode 120000 apps/jinn-agent/plugins/jinn
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/.gitignore (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/README.md (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/__init__.py (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/capture_buffer.py (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/consent.py (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/corpus_view.py (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/distill.py (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/doctor.py (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/harness.py (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/history_view.py (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/jinn_layer.py (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/layer-runtime.json (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/pickup.py (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/plugin.yaml (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/pyproject.toml (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/session_bridge.py (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/session_view.py (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/skills_install.py (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/skin/jinn.yaml (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/soul/SOUL.md (100%)
+ rename {apps/jinn-agent/plugins/jinn => plugin/frozen}/style.py (100%)
+```
+
+(21 rename lines + 1 symlink create = 22 summary lines total.)
+
+#### B.3 — Numstat (zero churn on every rename; symlink insertion only)
+
+```bash
+git diff --find-renames=100% --numstat origin/integration/evidence-v1...HEAD -- plugin/frozen apps/jinn-agent/plugins
+```
+
+**Expected:**
+
+```
+1	0	apps/jinn-agent/plugins/jinn
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/.gitignore
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/README.md
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/__init__.py
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/capture_buffer.py
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/consent.py
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/corpus_view.py
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/distill.py
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/doctor.py
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/harness.py
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/history_view.py
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/jinn_layer.py
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/layer-runtime.json
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/pickup.py
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/plugin.yaml
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/pyproject.toml
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/session_bridge.py
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/session_view.py
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/skills_install.py
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/skin/jinn.yaml
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/soul/SOUL.md
+0	0	{apps/jinn-agent/plugins/jinn => plugin/frozen}/style.py
+```
+
+Every rename line shows `0\t0`; the only non-zero numstat is `1\t0` on the symlink path `apps/jinn-agent/plugins/jinn`.
+
+**Amended pass condition (Step 4):** reviewer confirms B.1–B.3 outputs match the expectations above (plus the tree-identity line from Task 9 Step 3). Do **not** use `git diff … --stat -- plugin/frozen` as a freeze proof.
+
+### Amendment C — deferred durable test pin (non-blocking)
+
+**Finding:** There is no durable CI test that pins the exact relocated `PLUGIN_DIR`, cold-stock wheel source, or `plugin/frozen/**` path-filter trigger. C0's present coverage is manual/rehearsal: tree-identity (Task 9 Step 3 / Amendment B.1), mirror dry-run bit-identity gate (Task 9 Step 2), static workflow/script checks (Tasks 5–8), and shim-parked rehearsal (Task 10 Step 2).
+
+**Disposition (non-blocking, deferred):** Assign durable pin coverage to **#2294 / C8's workflow-gate work**. This finding must not be silently discarded; it is tracked here until C8 lands a paths-filtered job or equivalent durable assertion. C0 does **not** expand code scope in this fix wave.
