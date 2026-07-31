@@ -917,7 +917,7 @@ git commit -m "feat(plugin-runtime): durable file-backed high-water-mark store f
 
 This is cross-plan contract 5's mechanism. The stack's precedent is `packages/evidence/local-runtime/src/lock.ts:36-48`, which takes the same SQLite `locking_mode = EXCLUSIVE` + `BEGIN EXCLUSIVE` lock — but that one **retries three times and then throws `ROOT_IN_USE`** (`lock.ts:24`, `:73-84`), because a local runtime that cannot open its root has failed. A mirror sync that cannot get the lock has **not** failed: another instance is already doing the work. So this variant does not retry and does not throw — it returns `undefined`, and the caller reports `skipped-locked`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/corpus/lock.test.ts`:
 
@@ -1039,12 +1039,12 @@ describe("mirror sync lock", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test src/corpus/lock.test.ts`
 Expected: FAIL — `Failed to resolve import "./lock.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/corpus/lock.ts`:
 
@@ -1155,12 +1155,12 @@ export async function tryAcquireSyncLock(path: string): Promise<CorpusSyncLock |
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test src/corpus/lock.test.ts && yarn typecheck`
 Expected: PASS (6 tests). The two skip tests must each report an elapsed time well under 1 s — that is the proof the lock skips rather than waits.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src/corpus
