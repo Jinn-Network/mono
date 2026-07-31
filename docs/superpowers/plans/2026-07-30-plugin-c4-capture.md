@@ -322,7 +322,7 @@ Expected: a draft PR whose base is `plugin/c3-product-tree`. Confirm with `gh pr
 - Consumes: C3's guard scripts and CI workflow; the six stack packages named below.
 - Produces: `@jinn-network/execution-recorder`, `@jinn-network/evidence-local-runtime`, `@jinn-network/evidence-trajectory`, `@jinn-network/evidence-repository`, `@jinn-network/evidence-discovery`, `@jinn-network/evidence-protocol` resolvable from `plugin/runtime`, with the inventory guard asserting the exact set and C3's closed-world `APPROVED_RUNTIME_*` maps updated to match (finding C4-P1 / sibling of C5-P2).
 
-- [ ] **Step 1: Extend the inventory guard first, so it fails**
+- [x] **Step 1: Extend the inventory guard first, so it fails**
 
 In `.github/scripts/plugin-tree-package-inventory.test.mjs`, replace the `runtime` row of `JINN_DEPENDENCY_GRAPH` with:
 
@@ -352,7 +352,7 @@ C3 pre-seeds `SIBLING_TREE_DIRS` and `PERMITTED_PACKAGES` with all seven package
 
 > Name collision to keep straight: `@jinn-network/evidence-discovery` (the catalog contract, at `packages/evidence/discovery`) is a **different package** from the `@jinn-network/record-discovery-*` family (the announcement client, at `packages/discovery/*`) that C5 consumes. Both are permitted by the boundary guard.
 
-- [ ] **Step 2: Run the guard to verify it fails**
+- [x] **Step 2: Run the guard to verify it fails**
 
 ```bash
 node --test .github/scripts/plugin-tree-package-inventory.test.mjs
@@ -360,7 +360,7 @@ node --test .github/scripts/plugin-tree-package-inventory.test.mjs
 
 Expected: FAIL — the declared dependency graph does not match `plugin/runtime/package.json`, which still declares only `zod`.
 
-- [ ] **Step 3: Declare the dependencies**
+- [x] **Step 3: Declare the dependencies**
 
 In `plugin/runtime/package.json`, replace the `dependencies` and `resolutions` blocks with:
 
@@ -385,7 +385,7 @@ In `plugin/runtime/package.json`, replace the `dependencies` and `resolutions` b
   }
 ```
 
-- [ ] **Step 3b: Extend the closed-world approved maps (finding C4-P1)**
+- [x] **Step 3b: Extend the closed-world approved maps (finding C4-P1)**
 
 In `.github/scripts/plugin-tree-guard-common.mjs`:
 
@@ -393,7 +393,7 @@ In `.github/scripts/plugin-tree-guard-common.mjs`:
 2. `APPROVED_RUNTIME_RESOLUTIONS` — keep `vite: '6.4.3'`; add the six `portal:../../packages/...` entries exactly as in `package.json` `resolutions` (omit the `vite` duplicate if already present).
 3. `APPROVED_RUNTIME_DEV_DEPENDENCIES` — unchanged for C4 (no new types packages).
 
-- [ ] **Step 4: Build the portal targets and install**
+- [x] **Step 4: Build the portal targets and install**
 
 `portal:` resolution consumes each target's `dist/`, so the six packages must be built before `plugin/runtime` installs:
 
@@ -405,7 +405,7 @@ cd plugin/runtime && yarn install && yarn typecheck
 
 Expected: every build succeeds; `yarn typecheck` in `plugin/runtime` PASSES with zero errors. (`catalog-sqlite` is built because `local-runtime` portals to it.)
 
-- [ ] **Step 5: Re-run all four guards**
+- [x] **Step 5: Re-run all four guards**
 
 ```bash
 node --test .github/scripts/plugin-tree-package-inventory.test.mjs
@@ -415,7 +415,7 @@ node --test .github/scripts/plugin-tree-packed-types.test.mjs
 
 Expected: all PASS. The boundary guard needs no edit — C3's allowlist already permits all six packages, and forbids the frozen trio by name.
 
-- [ ] **Step 6: Add the portal builds to CI**
+- [x] **Step 6: Add the portal builds to CI**
 
 In `.github/workflows/plugin-tree-ci.yml`, inside the `runtime` job and **before** its `yarn install --immutable` step, add:
 
@@ -434,7 +434,7 @@ Add the portal sources to the workflow's `paths` filter so a change to them re-r
       - 'docs/superpowers/plans/2026-07-30-plugin-c4-capture.md'
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add plugin/runtime/package.json plugin/runtime/yarn.lock \
