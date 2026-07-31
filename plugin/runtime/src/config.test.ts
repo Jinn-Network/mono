@@ -12,6 +12,9 @@ describe("resolveRuntimeConfig", () => {
     expect(resolveRuntimeConfig(base)).toEqual({
       homeDirectory: HOME,
       archiveDirectory: `${HOME}/archive`,
+      captureDirectory: `${HOME}/capture`,
+      captureRetentionDays: 30,
+      captureArchiveBusyTimeoutMs: 10_000,
       catalogPath: `${HOME}/catalog.sqlite`,
       indexPath: `${HOME}/index.sqlite`,
       mirrorStatePath: `${HOME}/mirror-state.json`,
