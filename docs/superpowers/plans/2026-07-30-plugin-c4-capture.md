@@ -4704,7 +4704,7 @@ git commit -m "feat(plugin-runtime): the capture capability — open, seal, aban
 - Consumes: the finished capability (Task 11); `validateExecutionEvidence` from `@jinn-network/evidence-protocol`; `openLocalEvidenceRuntime` from `@jinn-network/evidence-local-runtime`; `parseTrajectory` from `@jinn-network/evidence-trajectory`.
 - Produces: the evidence for the program's C4 gate — *"A real session captures to a sealed record that validates against `evidence/protocol`; retention sweep bounded and observable"* — plus the cross-plan contract 5 proof.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plugin/runtime/src/capture/capture.integration.test.ts`:
 
@@ -5085,7 +5085,7 @@ describe("fleet safety (cross-plan contract 5)", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/capture.integration.test.ts
@@ -5093,7 +5093,7 @@ cd plugin/runtime && yarn test src/capture/capture.integration.test.ts
 
 Expected: FAIL — the assertions are new; the first failure should be a real protocol or wiring gap, not a missing import (every module already exists). Read the `validateExecutionEvidence` diagnostics before changing anything: each diagnostic code maps to one row of the constraint table in "Stack surfaces this plan builds against".
 
-- [ ] **Step 3: Resolve the failures against the constraint table**
+- [x] **Step 3: Resolve the failures against the constraint table**
 
 Work the diagnostics in order. The expected class of fix is in `assemble.ts`, never in the recorder or the protocol:
 
@@ -5103,7 +5103,7 @@ Work the diagnostics in order. The expected class of fix is in `assemble.ts`, ne
 - `TRACE_CARDINALITY` → `attachNativeTrace` was not called, or `finalize` also passed one.
 - `DURATION_MISSING` / `EXECUTION_RELATION_INVALID` on `resourceUsage` → `startedAt`/`endedAt` are not both strict RFC 3339.
 
-- [ ] **Step 4: Run the whole suite**
+- [x] **Step 4: Run the whole suite**
 
 ```bash
 cd plugin/runtime && yarn test && yarn typecheck
@@ -5111,7 +5111,7 @@ cd plugin/runtime && yarn test && yarn typecheck
 
 Expected: PASS, with the integration file's eleven tests green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src
