@@ -105,6 +105,42 @@ test('packWave restores the manifest even when the build fails', async () => {
   }
 });
 
+test('packWave refuses to pack a manifest that still carries an out-of-set local specifier', async () => {
+  // Regression: transformManifestForPublish only rewrites in-set dependency
+  // specifiers and strips portal: resolutions -- an out-of-set devDependency
+  // carrying portal:/link:/file:/workspace: would otherwise pack and publish
+  // untouched, and every consumer's install would resolve a path that does not
+  // exist on their disk.
+  const { root, packageDir } = scratch();
+  const manifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
+  manifest.devDependencies = { '@some/local': 'portal:../thing' };
+  writeFileSync(join(packageDir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  const tarballsDir = mkdtempSync(join(tmpdir(), 'jinn-publish-tarballs-'));
+  const original = readFileSync(join(packageDir, 'package.json'), 'utf8');
+  const calls = [];
+  try {
+    await assert.rejects(
+      packWave(
+        [{ name: '@jinn-network/trust-core', directory: 'packages/trust/core', manifestPath: join(packageDir, 'package.json'), spec: 'x' }],
+        {
+          repoRoot: root,
+          version: '0.1.0',
+          gitHead: SHA,
+          inSetNames: new Set(['@jinn-network/trust-core']),
+          tarballsDir,
+          exec: fakeExec(root, calls, Buffer.from('tarball-bytes')),
+        },
+      ),
+      /packages\/trust\/core: packed manifest devDependencies\.@some\/local still carries local specifier portal:\.\.\/thing/,
+    );
+    assert.equal(readFileSync(join(packageDir, 'package.json'), 'utf8'), original, 'the manifest must still be restored');
+    assert.ok(!calls.some((call) => call.command === 'npm'), 'npm pack must never run once a local specifier is caught');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(tarballsDir, { recursive: true, force: true });
+  }
+});
+
 test('packWave rejects a tarball whose packed identity disagrees with the plan', async () => {
   const { root, packageDir } = scratch();
   const tarballsDir = mkdtempSync(join(tmpdir(), 'jinn-publish-tarballs-'));

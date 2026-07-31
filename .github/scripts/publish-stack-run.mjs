@@ -4,7 +4,28 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 
+import { DEPENDENCY_SECTIONS } from './stack-package-graph.mjs';
 import { applyPublishManifest } from './stack-publish-manifest.mjs';
+
+const LOCAL_SPECIFIER = /^(portal|link|file|workspace):/u;
+
+// Belt-and-suspenders check on the acceptance criterion's headline claim: no
+// portal:/link:/file:/workspace: specifier survives into a packed manifest.
+// transformManifestForPublish only rewrites in-set dependency specifiers and
+// strips portal: resolutions; an out-of-set devDependency carrying one of these
+// specifiers today would pack, publish, and 404 every consumer's install on a
+// path that does not exist on their disk, with CI green throughout. This runs
+// inside the mutation window that already exists between applyPublishManifest
+// and restore().
+function assertNoLocalSpecifiers(manifest, directory) {
+  for (const section of DEPENDENCY_SECTIONS) {
+    for (const [dependency, spec] of Object.entries(manifest[section] ?? {})) {
+      if (typeof spec === 'string' && LOCAL_SPECIFIER.test(spec)) {
+        throw new Error(`${directory}: packed manifest ${section}.${dependency} still carries local specifier ${spec}`);
+      }
+    }
+  }
+}
 
 export function defaultExec(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', env: publishEnv() });
@@ -38,6 +59,7 @@ export async function packWave(wave, options) {
     const { restore } = applyPublishManifest(entry.manifestPath, { version, gitHead, inSetNames });
     let packed;
     try {
+      assertNoLocalSpecifiers(JSON.parse(readFileSync(entry.manifestPath, 'utf8')), entry.directory);
       const result = requireSuccess(
         exec('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', tarballsDir], packageRoot),
         entry.directory,
