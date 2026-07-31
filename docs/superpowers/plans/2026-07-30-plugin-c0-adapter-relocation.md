@@ -460,7 +460,7 @@ git commit -m "chore(plugin): point the layer package-contract test at plugin/fr
 - Consumes: `plugin/frozen/` (Task 2).
 - Produces: the mirror helper's unchanged exported surface — `validatePluginDir(pluginDirPath)`, `validateMonoSha(monoSha)`, `validateMirrorDestination(pluginDir, slimCheckout)`, `mirrorContent(pluginDir, slimCheckout, {keep})`, `writeProvenance(slimCheckout, {monoSha, workflowPath})`, `inspectProvenance(slimCheckout, workflowPath)`, `treeChanged(slimCheckout)`, `buildCommitMessage({monoSha})`, `run({pluginDir, slimDir, monoSha, workflowPath}) → {changed, message}` — with two string constants changed: the default `PLUGIN_DIR` is now `plugin/frozen`, and the commit-message subject now names `plugin/frozen`. **The provenance file contract is untouched**: `writeProvenance` still emits exactly `source: Jinn-Network/mono@<sha>\ngenerated-by: <workflowPath>\n`, so the mirrored tree is unchanged.
 
-- [ ] **Step 1: Update the expected commit message (failing test first)**
+- [x] **Step 1: Update the expected commit message (failing test first)**
 
 In `.github/scripts/jinn-plugin-split.test.mjs`, replace:
 
@@ -476,13 +476,13 @@ with:
 
 **Do not touch line 305** (`'DO NOT EDIT HERE — edit apps/jinn-agent/plugins/jinn/ in Jinn-Network/mono.'`) — that string is the historical legacy-marker contract, tested by `(g) run repairs a legacy provenance marker`.
 
-- [ ] **Step 2: Run the suite to verify it fails**
+- [x] **Step 2: Run the suite to verify it fails**
 
 Run: `node --test .github/scripts/jinn-plugin-split.test.mjs`
 
 Expected: FAIL — 1 of 19, `(e) buildCommitMessage produces the canonical string from the mono SHA`, with the actual string still naming `apps/jinn-agent/plugins/jinn`.
 
-- [ ] **Step 3: Update `buildCommitMessage`**
+- [x] **Step 3: Update `buildCommitMessage`**
 
 In `.github/scripts/jinn-plugin-split.mjs`, replace:
 
@@ -496,13 +496,13 @@ with:
     `chore(plugin-split): mirror plugin/frozen @ ${monoSha}`,
 ```
 
-- [ ] **Step 4: Run the suite to verify it passes**
+- [x] **Step 4: Run the suite to verify it passes**
 
 Run: `node --test .github/scripts/jinn-plugin-split.test.mjs`
 
 Expected: PASS — 19/19.
 
-- [ ] **Step 5: Update the CLI default and the header comment**
+- [x] **Step 5: Update the CLI default and the header comment**
 
 In `.github/scripts/jinn-plugin-split.mjs`, replace:
 
@@ -530,7 +530,7 @@ with:
 // ROOT of the slim release repo `Jinn-Network/jinn-plugin` so that
 ```
 
-- [ ] **Step 6: Fence the legacy marker so a later reader does not "fix" it**
+- [x] **Step 6: Fence the legacy marker so a later reader does not "fix" it**
 
 In `.github/scripts/jinn-plugin-split.mjs`, replace:
 
@@ -549,7 +549,7 @@ with:
     lines.length === 3 &&
 ```
 
-- [ ] **Step 7: Verify the helper's default resolves and the suite is still green**
+- [x] **Step 7: Verify the helper's default resolves and the suite is still green**
 
 Run:
 
@@ -560,7 +560,7 @@ node --test .github/scripts/jinn-plugin-split.test.mjs
 
 Expected: `plugin/frozen`; then 19/19 pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add .github/scripts/jinn-plugin-split.mjs .github/scripts/jinn-plugin-split.test.mjs
