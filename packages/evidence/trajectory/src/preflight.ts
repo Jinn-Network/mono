@@ -40,6 +40,87 @@ function isPlainDataObject(value: object, path: string): boolean {
   return classifyContainerPrototype(value, path) === "plain";
 }
 
+function inspectExtensionArray(value: unknown[], path: string, seen: WeakSet<object>): void {
+  if (isProxy(value)) unsupported("proxy", path);
+  if (seen.has(value)) unsupported("cycle", path);
+  seen.add(value);
+
+  const inspected = inspectDenseArrayDescriptors(value, path);
+  if (!inspected.ok) {
+    if (inspected.undefinedElement) {
+      throw new UndefinedArrayElementError();
+    }
+    unsupported(inspected.message, path);
+  }
+
+  const length = inspected.length;
+  for (let index = 0; index < length; index += 1) {
+    const childPath = `${path}[${String(index)}]`;
+    inspectExtensionValue(readDenseArrayElement(value, index), childPath, seen);
+  }
+}
+
+function inspectExtensionObject(value: object, path: string, seen: WeakSet<object>): void {
+  if (seen.has(value)) unsupported("cycle", path);
+  if (isProxy(value)) unsupported("proxy", path);
+  if (!isPlainDataObject(value, path)) unsupported("non-plain object", path);
+
+  let descriptors: PropertyDescriptorMap;
+  try {
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch (cause) {
+    unsupported(
+      cause instanceof Error ? `property-descriptor trap: ${cause.message}` : "property-descriptor trap",
+      path,
+    );
+  }
+
+  seen.add(value);
+
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key === "symbol") unsupported("symbol key", `${path}.${String(key)}`);
+    const descriptor = descriptors[key as string]!;
+    const childPath = `${path}.${String(key)}`;
+    if (descriptor.get !== undefined || descriptor.set !== undefined) {
+      unsupported("accessor property", childPath);
+    }
+    if (!Object.hasOwn(descriptor, "value")) {
+      unsupported("non-data property", childPath);
+    }
+    if (!descriptor.enumerable) {
+      unsupported("non-enumerable property", childPath);
+    }
+    if (!isNamespacedExtensionKey(String(key))) {
+      unsupported(`non-namespaced extension key "${String(key)}"`, childPath);
+    }
+    inspectExtensionValue(descriptor.value, childPath, seen);
+  }
+}
+
+function inspectExtensionValue(value: unknown, path: string, seen: WeakSet<object>): void {
+  if (value === undefined) {
+    unsupported("undefined", path);
+  }
+  if (value === null || typeof value === "boolean") return;
+  if (typeof value === "string") return;
+  if (typeof value === "number") {
+    if (!Number.isInteger(value) || !Number.isSafeInteger(value)) {
+      throw new NonIJsonNumberError(value);
+    }
+    return;
+  }
+  if (typeof value === "bigint") unsupported("bigint", path);
+  if (typeof value === "function" || typeof value === "symbol") unsupported(typeof value, path);
+  if (typeof value === "object") {
+    const kind = classifyContainerPrototype(value, path);
+    if (kind === "array") {
+      inspectExtensionArray(value as unknown[], path, seen);
+      return;
+    }
+    inspectExtensionObject(value, path, seen);
+  }
+}
+
 function inspectOwnProperties(value: object, path: string, seen: WeakSet<object>): void {
   if (seen.has(value)) unsupported("cycle", path);
   seen.add(value);
@@ -75,54 +156,12 @@ function inspectOwnProperties(value: object, path: string, seen: WeakSet<object>
     const nested = descriptor.value;
     if (nested === undefined) continue;
 
-    if (
-      isNamespacedExtensionKey(String(key)) &&
-      nested !== null &&
-      typeof nested === "object"
-    ) {
-      if (isProxy(nested)) unsupported("proxy", childPath);
-      const nestedKind = classifyContainerPrototype(nested, childPath);
-      if (nestedKind === "array") unsupported("array", childPath);
-      inspectExtensionObject(nested, childPath, seen);
+    if (isNamespacedExtensionKey(String(key))) {
+      inspectExtensionValue(nested, childPath, seen);
       continue;
     }
 
     inspectValue(nested, childPath, seen);
-  }
-}
-
-function inspectExtensionObject(value: object, path: string, seen: WeakSet<object>): void {
-  if (seen.has(value)) unsupported("cycle", path);
-  if (isProxy(value)) unsupported("proxy", path);
-  if (!isPlainDataObject(value, path)) unsupported("non-plain object", path);
-
-  let descriptors: PropertyDescriptorMap;
-  try {
-    descriptors = Object.getOwnPropertyDescriptors(value);
-  } catch (cause) {
-    unsupported(
-      cause instanceof Error ? `property-descriptor trap: ${cause.message}` : "property-descriptor trap",
-      path,
-    );
-  }
-
-  for (const key of Reflect.ownKeys(descriptors)) {
-    if (typeof key === "symbol") unsupported("symbol key", `${path}.${String(key)}`);
-    const descriptor = descriptors[key as string]!;
-    const childPath = `${path}.${String(key)}`;
-    if (descriptor.get !== undefined || descriptor.set !== undefined) {
-      unsupported("accessor property", childPath);
-    }
-    if (!Object.hasOwn(descriptor, "value")) {
-      unsupported("non-data property", childPath);
-    }
-    if (!descriptor.enumerable) {
-      unsupported("non-enumerable property", childPath);
-    }
-    if (!isNamespacedExtensionKey(String(key))) {
-      unsupported(`non-namespaced extension key "${String(key)}"`, childPath);
-    }
-    inspectValue(descriptor.value, childPath, seen);
   }
 }
 

@@ -113,6 +113,22 @@ export const TRAJECTORY_DERIVATION_CONFORMANCE_CASE_IDS = Object.freeze([
   "parse-trajectory-caller-mutation-immune",
   "preflight-valid-plain-control-unchanged",
   "verify-authority-custom-prototype-array-fails",
+  "extension-value-array-simple-pass",
+  "extension-value-nested-arrays-pass",
+  "extension-value-array-of-objects-pass",
+  "extension-value-mixed-scalars-pass",
+  "extension-value-ajv-runtime-parity-pass",
+  "extension-value-array-sparse-fails",
+  "extension-value-array-subclass-fails",
+  "extension-value-array-proxy-fails",
+  "extension-value-array-cycle-fails",
+  "extension-value-array-unsafe-number-fails",
+  "extension-value-non-namespaced-object-fails",
+  "extension-value-seal-parse-roundtrip-pass",
+  "sha256Hex-current-realm-sab-rejects",
+  "sha256Hex-vm-realm-sab-rejects",
+  "snapshotByteView-vm-realm-sab-rejects",
+  "parse-trajectory-vm-realm-sab-rejects",
 ] as const);
 
 export type TrajectoryDerivationConformanceCaseId =

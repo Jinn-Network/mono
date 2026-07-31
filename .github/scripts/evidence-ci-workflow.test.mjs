@@ -160,6 +160,113 @@ function parseStepFields(step) {
   return fields;
 }
 
+const BLOCK_SCALAR_MARKERS = new Set(["|", ">", "|-", ">-", "|+", ">+"]);
+
+function lineIndent(line) {
+  const match = line.match(/^ */);
+  return match ? match[0].length : 0;
+}
+
+function isUnsupportedYamlConstruct(line) {
+  const trimmed = line.trim();
+  if (/^\*[^\s*]/.test(trimmed)) return true;
+  if (/&[^\s&]/.test(trimmed)) return true;
+  if (/<<:\s*/.test(trimmed)) return true;
+  return false;
+}
+
+function parseMappingKey(line) {
+  const sequence = line.match(/^(\s*)-\s+([A-Za-z0-9_.-]+):\s*(.*)$/);
+  if (sequence) {
+    return {
+      indent: sequence[1].length,
+      key: sequence[2],
+      rest: sequence[3].trim(),
+      sequenceItem: true,
+    };
+  }
+  const plain = line.match(/^(\s*)([A-Za-z0-9_.-]+):\s*(.*)$/);
+  if (plain) {
+    return {
+      indent: plain[1].length,
+      key: plain[2],
+      rest: plain[3].trim(),
+      sequenceItem: false,
+    };
+  }
+  return null;
+}
+
+function isBlockScalarStart(rest) {
+  if (rest === "") return false;
+  if (BLOCK_SCALAR_MARKERS.has(rest)) return true;
+  return rest.startsWith("|") || rest.startsWith(">");
+}
+
+/** Block-scalar-aware duplicate-key scan for every YAML mapping scope in the workflow. */
+export function assertUniqueYamlMappingKeys(source, contextLabel = "workflow") {
+  const lines = source.split("\n");
+  const stack = [{ indent: -1, keys: new Set(), label: contextLabel }];
+  let blockScalar = null;
+
+  for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {
+    const line = lines[lineNumber];
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) continue;
+
+    const indent = lineIndent(line);
+
+    if (blockScalar) {
+      if (trimmed === "") continue;
+      if (indent <= blockScalar.indent) {
+        blockScalar = null;
+      } else {
+        continue;
+      }
+    }
+
+    if (isUnsupportedYamlConstruct(line)) {
+      throw new Error(
+        `${contextLabel} line ${String(lineNumber + 1)}: unsupported YAML anchor/merge construct`,
+      );
+    }
+
+    const parsed = parseMappingKey(line);
+    if (!parsed) continue;
+
+    if (parsed.sequenceItem) {
+      while (stack.length > 1 && stack[stack.length - 1].indent >= parsed.indent) {
+        stack.pop();
+      }
+      stack.push({
+        indent: parsed.indent,
+        keys: new Set(),
+        label: `${contextLabel} line ${String(lineNumber + 1)} sequence item`,
+      });
+    } else {
+      while (stack.length > 1 && indent <= stack[stack.length - 1].indent) {
+        stack.pop();
+      }
+    }
+
+    const frame = stack[stack.length - 1];
+    if (frame.keys.has(parsed.key)) {
+      throw new Error(`${frame.label}: duplicate YAML mapping key "${parsed.key}"`);
+    }
+    frame.keys.add(parsed.key);
+
+    if (isBlockScalarStart(parsed.rest)) {
+      blockScalar = { indent: parsed.indent };
+    } else if (parsed.rest === "") {
+      stack.push({
+        indent: parsed.indent,
+        keys: new Set(),
+        label: `${frame.label}.${parsed.key}`,
+      });
+    }
+  }
+}
+
 function assertUniqueYamlKeys(keys, context) {
   const seen = new Set();
   for (const key of keys) {
@@ -194,6 +301,7 @@ function stepUsesSetupNode(step) {
 }
 
 export function validateEvidenceCiWorkflow(source) {
+  assertUniqueYamlMappingKeys(source);
   const jobs = parseJobs(source);
 
   for (const jobId of REQUIRED_SETUP_NODE_JOBS) {
@@ -228,18 +336,6 @@ export function validateEvidenceCiWorkflow(source) {
       NODE_VERSION,
       `${jobId} setup-node must pin ${NODE_VERSION} on its own with block (found ${String(setupNodeVersion)})`,
     );
-
-    for (let stepIndex = 0; stepIndex < steps.length; stepIndex += 1) {
-      const fields = parseStepFields(steps[stepIndex]);
-      assertUniqueYamlKeys(
-        fields.stepLevelKeys,
-        `${jobId} step ${String(stepIndex)}`,
-      );
-      assertUniqueYamlKeys(
-        fields.withLevelKeys,
-        `${jobId} step ${String(stepIndex)} with`,
-      );
-    }
   }
 
   assert.doesNotMatch(source, /node-version:\s*22\s*$/m);
@@ -515,12 +611,12 @@ test('mutation: duplicate node-version in setup with block fails', () => {
     /(  foundation:[\s\S]*?      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
     '$1          node-version: 22.23.1\n',
   );
-  expectValidationFailure(mutant, /foundation step \d+ with: duplicate YAML mapping key "node-version"/);
+  expectValidationFailure(mutant, /duplicate YAML mapping key "node-version"/);
 });
 
 test('mutation: duplicate job key fails', () => {
   const mutant = `${workflow}\n  trajectory:\n    runs-on: ubuntu-latest\n`;
-  expectValidationFailure(mutant, /duplicate job key "trajectory"/);
+  expectValidationFailure(mutant, /duplicate YAML mapping key "trajectory"/);
 });
 
 test('mutation: duplicate indented step name inside npm step fails', () => {
@@ -561,4 +657,44 @@ test('mutation: malformed dedent after block scalar still catches duplicate run'
     '$1\n        run: echo duplicate',
   );
   expectValidationFailure(mutant, /duplicate YAML mapping key "run"/);
+});
+
+test('mutation: duplicate job-level runs-on fails', () => {
+  const mutant = workflow.replace(
+    /(  trajectory:\n    name: Evidence Trajectory\n    needs: \[foundation\]\n    runs-on: ubuntu-latest\n)/,
+    '$1    runs-on: ubuntu-latest\n',
+  );
+  expectValidationFailure(mutant, /duplicate YAML mapping key "runs-on"/);
+});
+
+test('mutation: duplicate step env key fails', () => {
+  const mutant = workflow.replace(
+    /(  foundation:[\s\S]*?      - name: Enable Yarn 4\.13\.0\n        run: \|\n          corepack enable\n)/,
+    '$1        env:\n          FOO: one\n          FOO: two\n',
+  );
+  expectValidationFailure(mutant, /duplicate YAML mapping key "FOO"/);
+});
+
+test('mutation: duplicate root env key fails', () => {
+  const mutant = workflow.replace(
+    /^env:\n  EVIDENCE_ROOT: packages\/evidence\n/m,
+    'env:\n  EVIDENCE_ROOT: packages/evidence\n  EVIDENCE_ROOT: packages/evidence\n',
+  );
+  expectValidationFailure(mutant, /duplicate YAML mapping key "EVIDENCE_ROOT"/);
+});
+
+test('mutation: duplicate env key in different steps remains valid', () => {
+  const mutant = workflow.replace(
+    /(  foundation:[\s\S]*?      - name: Enable Yarn 4\.13\.0\n        run: \|\n          corepack enable\n)/,
+    '$1        env:\n          STEP_A: one\n      - name: Decoy second step\n        env:\n          STEP_A: two\n        run: echo ok\n',
+  );
+  assert.doesNotThrow(() => validateEvidenceCiWorkflow(mutant));
+});
+
+test('mutation: YAML merge key fails closed', () => {
+  const mutant = workflow.replace(
+    'permissions:\n  contents: read\n',
+    'permissions:\n  <<: *anchor\n  contents: read\n',
+  );
+  expectValidationFailure(mutant, /unsupported YAML anchor\/merge construct/);
 });

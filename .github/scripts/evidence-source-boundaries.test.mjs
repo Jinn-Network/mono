@@ -1406,6 +1406,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
   const trajectoryFourthReviewProbes = join(trajectorySource, 'fourth-review-probes.ts');
   const trajectoryFifthReviewProbes = join(trajectorySource, 'fifth-review-probes.ts');
   const trajectorySixthReviewProbes = join(trajectorySource, 'sixth-review-probes.ts');
+  const trajectorySeventhReviewProbes = join(trajectorySource, 'seventh-review-probes.ts');
   const trajectoryConformanceCaseManifest = join(trajectorySource, 'conformance-case-manifest.ts');
   const trajectoryConformanceCaseRunner = join(trajectorySource, 'conformance-case-runner.ts');
   const trajectoryExecutionFixtures = join(trajectorySource, 'execution-fixtures.ts');
@@ -1419,6 +1420,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
       || file === trajectoryFourthReviewProbes
       || file === trajectoryFifthReviewProbes
       || file === trajectorySixthReviewProbes
+      || file === trajectorySeventhReviewProbes
       || file === trajectoryConformanceCaseManifest
       || file === trajectoryConformanceCaseRunner
       || file === trajectoryExecutionFixtures

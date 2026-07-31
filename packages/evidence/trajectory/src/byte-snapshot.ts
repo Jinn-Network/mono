@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { isProxy } from "node:util/types";
+import { isProxy, isSharedArrayBuffer } from "node:util/types";
 
 function trapMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : "property-descriptor trap";
@@ -48,7 +48,7 @@ export function snapshotByteView(value: unknown, context: string): Uint8Array {
 
   const view = value as Uint8Array;
   const buffer = readTypedArrayIntrinsic<ArrayBufferLike>("buffer", view);
-  if (typeof SharedArrayBuffer !== "undefined" && buffer instanceof SharedArrayBuffer) {
+  if (isSharedArrayBuffer(buffer)) {
     throw new TypeError(`${context} must not be backed by SharedArrayBuffer`);
   }
   const byteLength = readTypedArrayIntrinsic<number>("byteLength", view);

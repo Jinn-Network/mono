@@ -40,9 +40,9 @@ const REQUIRED_ENTRIES = [
   "package/package.json",
 ];
 
-const PACK_SMOKE_PINNED_CASE_COUNT = 108;
+const PACK_SMOKE_PINNED_CASE_COUNT = 124;
 const PACK_SMOKE_PINNED_CASE_DIGEST =
-  "c6f8a918e00998bfa2c1f6fb13aab85973819725a3f7d8c57fed0894c67a1cdf";
+  "3b90333f4ccfa9483db3dde7826857397f1e7a56e71783dd4252a8fd8965b27f";
 const PACK_SMOKE_PINNED_CASE_IDS = Object.freeze([
   "build-rejects-non-calendar-strict-derived-at",
   "build-rejects-missing-linkage-mode",
@@ -152,6 +152,22 @@ const PACK_SMOKE_PINNED_CASE_IDS = Object.freeze([
   "parse-trajectory-caller-mutation-immune",
   "preflight-valid-plain-control-unchanged",
   "verify-authority-custom-prototype-array-fails",
+  "extension-value-array-simple-pass",
+  "extension-value-nested-arrays-pass",
+  "extension-value-array-of-objects-pass",
+  "extension-value-mixed-scalars-pass",
+  "extension-value-ajv-runtime-parity-pass",
+  "extension-value-array-sparse-fails",
+  "extension-value-array-subclass-fails",
+  "extension-value-array-proxy-fails",
+  "extension-value-array-cycle-fails",
+  "extension-value-array-unsafe-number-fails",
+  "extension-value-non-namespaced-object-fails",
+  "extension-value-seal-parse-roundtrip-pass",
+  "sha256Hex-current-realm-sab-rejects",
+  "sha256Hex-vm-realm-sab-rejects",
+  "snapshotByteView-vm-realm-sab-rejects",
+  "parse-trajectory-vm-realm-sab-rejects",
 ]);
 
 function manifestDigest(ids) {
