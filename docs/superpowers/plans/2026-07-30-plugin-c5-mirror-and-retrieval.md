@@ -3852,7 +3852,7 @@ git commit -m "feat(plugin-runtime): the corpus read seam with producer admissio
 
 The digest check is the stack's, not C5's: `validateCanonicalRecord` re-hashes fetched bytes and returns `RECORD_DIGEST_MISMATCH` at stage `"record"` (`packages/evidence/retrieval/src/validation.ts:60-68`). C5 adds a *second*, earlier refusal in the mirroring repository (Task 8). Both are tested, because they fire on different threats: the repository check stops a tampering upstream from poisoning the local store; the retrieval check stops a corrupt local store from serving bad bytes to the agent.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/corpus/retrieve.test.ts`:
 
@@ -4054,12 +4054,12 @@ describe("corpus retrieval", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test src/corpus/retrieve.test.ts`
 Expected: FAIL — `Failed to resolve import "./retrieve.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/corpus/retrieve.ts`:
 
@@ -4299,12 +4299,12 @@ export function createCorpusRetrieval(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test src/corpus/retrieve.test.ts && yarn typecheck`
 Expected: PASS (8 tests) once Task 14's `seedMirror` helper exists.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src/corpus
