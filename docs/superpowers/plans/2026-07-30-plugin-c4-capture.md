@@ -3139,7 +3139,7 @@ The policy is therefore stated exactly as it behaves, with no overclaim:
 
 > Session feeds and capture workspaces are duplicates of material already sealed in your archive. They are deleted once they are older than the retention window (30 days by default). Sealed records are never deleted: the local archive is append-only, and removing a sealed capture today means removing the archive directory. Captures older than the retention window are excluded from retrieval, so old sessions stop resurfacing in your context even while their records remain.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plugin/runtime/src/capture/retention.test.ts`:
 
@@ -3432,7 +3432,7 @@ describe("sweepCaptureRetention", () => {
 
 > The last assertion reads the module's own source to keep the policy text and the code comment from drifting apart; make the test `async` accordingly.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/retention.test.ts
@@ -3440,7 +3440,7 @@ cd plugin/runtime && yarn test src/capture/retention.test.ts
 
 Expected: FAIL — `Failed to resolve import "./retention.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `plugin/runtime/src/capture/retention.ts`:
 
@@ -3721,7 +3721,7 @@ export async function listStrandedSessionIds(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/retention.test.ts && yarn typecheck
@@ -3729,7 +3729,7 @@ cd plugin/runtime && yarn test src/capture/retention.test.ts && yarn typecheck
 
 Expected: PASS (16 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src
