@@ -874,7 +874,7 @@ git commit -m "feat(evidence-trajectory): record identifiers and the Jinn-owned 
 
 This is the record's anti-forgery mechanism: identifiers are a function of the declared inputs, so a consumer recomputes them from the record alone.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/identity.test.ts`:
 
@@ -933,12 +933,12 @@ describe("identity derivation", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trajectory && yarn test`
 Expected: FAIL — `Failed to resolve import "./identity.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/identity.ts`:
 
@@ -989,12 +989,12 @@ export function deriveSpanId(traceId: string, ordinal: number): string {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trajectory && yarn test && yarn typecheck`
 Expected: PASS (7 new tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/evidence/trajectory/src
