@@ -1014,7 +1014,7 @@ git commit -m "feat(evidence-trajectory): deterministic trace and span identifie
 
 The OTLP JSON encoding is followed exactly: hex ids, integer enum values, decimal-string 64-bit fields, attributes as an ordered key/value list. Because OTLP defines no canonical ordering, this profile fixes one — **attributes sorted by key** — which is what makes decoder determinism checkable (program finding F4).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/span.test.ts`:
 
@@ -1107,12 +1107,12 @@ describe("span schema", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trajectory && yarn test`
 Expected: FAIL — `Failed to resolve import "./span.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/span.ts`:
 
@@ -1228,12 +1228,12 @@ export type Span = z.infer<typeof SpanSchema>;
 
 > Note: `traceId` is deliberately **not** a per-span field. It is declared once on the record (Task 7), which removes a whole class of inconsistency and shrinks the record.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trajectory && yarn test && yarn typecheck`
 Expected: PASS (8 new tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/evidence/trajectory/src
