@@ -131,10 +131,20 @@ export function validateAuthorityResult(
   result: unknown,
   envelopeKeyIds: readonly string[],
 ): ValidationSuccess | ValidationFailure {
-  if (typeof result !== "object" || result === null || Array.isArray(result)) {
+  if (typeof result !== "object" || result === null) {
     return fail("authority result must be a plain object");
   }
-  if (!isPlainOrdinaryObject(result)) {
+  if (isProxy(result)) {
+    return fail("authority result must be a plain object");
+  }
+  if (Array.isArray(result)) {
+    return fail("authority result must be a plain object");
+  }
+  try {
+    if (!isPlainOrdinaryObject(result)) {
+      return fail("authority result must be a plain object");
+    }
+  } catch {
     return fail("authority result must be a plain object");
   }
 
@@ -187,8 +197,20 @@ export function validateAuthorityResult(
     const signerKeyIds = readStringArray(signerDescriptor.value, "authority result signerKeyIds", false);
     if (isValidationFailure(signerKeyIds)) return signerKeyIds;
 
+    if (signerKeyIds.length === 0) {
+      return fail("authority result signerKeyIds must be a non-empty array");
+    }
+    const uniqueSignerIds = new Set(signerKeyIds);
+    if (uniqueSignerIds.size !== signerKeyIds.length) {
+      return fail("authority result signerKeyIds must be unique");
+    }
+
     if (envelopeKeyIds.length === 0) {
       return fail("authority result signerKeyIds incompatible with envelope key IDs");
+    }
+    const uniqueEnvelopeIds = new Set(envelopeKeyIds);
+    if (uniqueEnvelopeIds.size !== envelopeKeyIds.length) {
+      return fail("envelope signature key IDs must be unique");
     }
     for (const keyId of signerKeyIds) {
       if (!envelopeKeyIds.includes(keyId)) {

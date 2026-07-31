@@ -115,5 +115,5 @@ const encoder = new TextEncoder();
 /** RFC 8785 JCS over the I-JSON-integer subset; those bytes are the document forever. */
 export function serializeCanonicalJson(value: JsonValue): Uint8Array {
   assertCanonicalizable(value, "");
-  return encoder.encode(serialize(value));
+  return new Uint8Array(encoder.encode(serialize(value)));
 }

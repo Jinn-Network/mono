@@ -51,5 +51,6 @@ Both modes share the same Execution primary-trace resolution, digest binding, an
 
 Regenerate both with `yarn generate:schemas`.
 
-See `../../../docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md` §7.2 and
-`../../../docs/superpowers/plans/2026-07-30-plugin-c1-trajectory-record.md` §2026-07-31.
+See [`../../../docs/superpowers/plans/2026-07-30-plugin-c1-trajectory-record.md`](../../../docs/superpowers/plans/2026-07-30-plugin-c1-trajectory-record.md),
+[`../../../docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md`](../../../docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md), and
+[`../../../docs/superpowers/specs/2026-07-23-jinn-execution-evidence-protocol-design.md`](../../../docs/superpowers/specs/2026-07-23-jinn-execution-evidence-protocol-design.md).

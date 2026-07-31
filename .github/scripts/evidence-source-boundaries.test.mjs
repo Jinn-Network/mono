@@ -298,11 +298,11 @@ const TRAJECTORY_ALLOWED_DEPENDENCIES = [
   '@jinn-network/evidence-protocol',
   '@jinn-network/trust-core',
   '@noble/hashes',
+  'ajv',
   'zod',
 ];
 const TRAJECTORY_ALLOWED_DEV_DEPENDENCIES = [
   '@types/node',
-  'ajv',
   'canonicalize',
   'typescript',
   'vitest',
@@ -1404,6 +1404,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
   const trajectoryConformance = join(trajectorySource, 'derivation-conformance.ts');
   const trajectoryThirdReviewProbes = join(trajectorySource, 'third-review-probes.ts');
   const trajectoryFourthReviewProbes = join(trajectorySource, 'fourth-review-probes.ts');
+  const trajectoryFifthReviewProbes = join(trajectorySource, 'fifth-review-probes.ts');
   const trajectoryConformanceCaseManifest = join(trajectorySource, 'conformance-case-manifest.ts');
   const trajectoryConformanceCaseRunner = join(trajectorySource, 'conformance-case-runner.ts');
   const trajectoryExecutionFixtures = join(trajectorySource, 'execution-fixtures.ts');
@@ -1415,6 +1416,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
       || file === trajectoryConformance
       || file === trajectoryThirdReviewProbes
       || file === trajectoryFourthReviewProbes
+      || file === trajectoryFifthReviewProbes
       || file === trajectoryConformanceCaseManifest
       || file === trajectoryConformanceCaseRunner
       || file === trajectoryExecutionFixtures

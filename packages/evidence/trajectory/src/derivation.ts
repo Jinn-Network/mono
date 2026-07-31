@@ -45,23 +45,17 @@ import { parseTrajectory } from "./schema.js";
 import { preflightCanonicalInput } from "./preflight.js";
 import { snapshotBuildPort, snapshotSealPort, snapshotVerifyPort } from "./port-snapshot.js";
 import { hardenedSchema } from "./schema-facade.js";
+import { snapshotSignerOutput } from "./signer-output-snapshot.js";
+import {
+  TrajectoryDerivationCancelledError,
+  TrajectoryDerivationSigningError,
+} from "./derivation-errors.js";
 import { type Timebase, TIMEBASES } from "./timebase.js";
 
-export class TrajectoryDerivationCancelledError extends Error {
-  readonly category = "trajectory-derivation-cancelled" as const;
-  constructor(message = "trajectory derivation verification was cancelled") {
-    super(message);
-    this.name = "TrajectoryDerivationCancelledError";
-  }
-}
-
-export class TrajectoryDerivationSigningError extends Error {
-  readonly category = "trajectory-derivation-signing-error" as const;
-  constructor(message = "trajectory derivation signing failed") {
-    super(message);
-    this.name = "TrajectoryDerivationSigningError";
-  }
-}
+export {
+  TrajectoryDerivationCancelledError,
+  TrajectoryDerivationSigningError,
+} from "./derivation-errors.js";
 
 function assertNotCancelled(signal?: AbortSignal): void {
   if (signal === undefined) return;
@@ -72,7 +66,8 @@ function assertNotCancelled(signal?: AbortSignal): void {
 }
 
 function isTrajectoryDerivationCancelled(error: unknown): boolean {
-  if (typeof error !== "object" || error === null || isProxy(error)) return false;
+  if (typeof error !== "object" || error === null) return false;
+  if (isProxy(error)) return false;
   return error instanceof TrajectoryDerivationCancelledError;
 }
 
@@ -378,7 +373,7 @@ export async function sealTrajectoryDerivationAttestation(
         ...(request.signal === undefined ? {} : { signal: request.signal }),
       });
       assertNotCancelled(port.signal);
-      return signatures;
+      return snapshotSignerOutput(signatures);
     } catch (error) {
       if (isTrajectoryDerivationCancelled(error)) throw error;
       if (port.signal !== undefined && readAbortSignalAborted(port.signal)) {
@@ -406,6 +401,36 @@ export async function sealTrajectoryDerivationAttestation(
 }
 
 type JsonObject = Record<string, unknown>;
+
+function authorityMalformedResult(
+  statement: TrajectoryDerivationStatement,
+  message: string,
+  l4: TrajectoryDerivationLayerOutcome,
+): TrajectoryDerivationVerificationResult {
+  return {
+    ok: false,
+    failedLayer: 2,
+    statement,
+    layers: {
+      l1: { status: "pass" },
+      l2: { status: "fail", code: "l2-authority-malformed", message },
+      l3: { status: "not-evaluated", reason: "l2-failed" },
+      l4,
+    },
+    reason: message,
+    code: "l2-authority-malformed",
+  };
+}
+
+function isRevokedProxyDeliveryError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || isProxy(error)) {
+    return false;
+  }
+  return (
+    error instanceof Error &&
+    /proxy that has been revoked|revoked Proxy/u.test(error.message)
+  );
+}
 
 function l4NotEvaluated(): TrajectoryDerivationLayerOutcome {
   return { status: "not-evaluated", reason: "replay-required" };
@@ -500,31 +525,31 @@ export async function verifyTrajectoryDerivationAttestation(
   let authorityResult: TrajectoryDerivationAuthorityVerifierResult;
   try {
     assertNotCancelled(port.signal);
-    const rawAuthorityResult = await port.verifyAuthority({
-      envelopeBytes: defensiveCopy(port.envelopeBytes),
-      payloadType: DSSE_PAYLOAD_TYPE,
-      payloadBytes: defensiveCopy(privatePayloadBytes),
-      preAuthEncoding: defensiveCopy(preAuthEncoding),
-      producerId: statement.predicate.producer.id,
-      derivedAt: statement.predicate.derivedAt,
-      ...(port.signal === undefined ? {} : { signal: port.signal }),
-    });
+    let rawAuthorityResult: unknown;
+    try {
+      rawAuthorityResult = await port.verifyAuthority({
+        envelopeBytes: defensiveCopy(port.envelopeBytes),
+        payloadType: DSSE_PAYLOAD_TYPE,
+        payloadBytes: defensiveCopy(privatePayloadBytes),
+        preAuthEncoding: defensiveCopy(preAuthEncoding),
+        producerId: statement.predicate.producer.id,
+        derivedAt: statement.predicate.derivedAt,
+        ...(port.signal === undefined ? {} : { signal: port.signal }),
+      });
+    } catch (error) {
+      if (isRevokedProxyDeliveryError(error)) {
+        return authorityMalformedResult(
+          statement,
+          "authority result must be a plain object",
+          l4,
+        );
+      }
+      throw error;
+    }
     assertNotCancelled(port.signal);
     const validated = validateAuthorityResult(rawAuthorityResult, envelopeKeyIds);
     if (!validated.ok) {
-      return {
-        ok: false,
-        failedLayer: 2,
-        statement,
-        layers: {
-          l1: { status: "pass" },
-          l2: { status: "fail", code: "l2-authority-malformed", message: validated.message },
-          l3: { status: "not-evaluated", reason: "l2-failed" },
-          l4,
-        },
-        reason: validated.message,
-        code: "l2-authority-malformed",
-      };
+      return authorityMalformedResult(statement, validated.message, l4);
     }
     authorityResult = validated.value;
   } catch (error) {

@@ -40,9 +40,9 @@ const REQUIRED_ENTRIES = [
   "package/package.json",
 ];
 
-const PACK_SMOKE_PINNED_CASE_COUNT = 78;
+const PACK_SMOKE_PINNED_CASE_COUNT = 94;
 const PACK_SMOKE_PINNED_CASE_DIGEST =
-  "d80aec258fec3a3f3b2c20d28d8273e44ab5b364c329eb06eeea3fb006a1b712";
+  "a47379865c0610dfe8cecd2428f7aa5cf35189163c14f5f622a7e4b685974e10";
 const PACK_SMOKE_PINNED_CASE_IDS = Object.freeze([
   "build-rejects-non-calendar-strict-derived-at",
   "build-rejects-missing-linkage-mode",
@@ -122,6 +122,22 @@ const PACK_SMOKE_PINNED_CASE_IDS = Object.freeze([
   "sha256Hex-prototype-trap-rejects",
   "seal-signer-throws-symbol-typed-signing-error",
   "authority-abort-signal-then-ordinary-throw-cancellation",
+  "l2-verified-empty-signer-key-ids-fails",
+  "l2-verified-no-envelope-signatures-fails",
+  "l2-verified-duplicate-signer-key-ids-fails",
+  "l2-verified-mixed-signer-key-ids-fails",
+  "sealed-parent-vacuous-l2-empty-signers-fails",
+  "signer-output-proxy-array-fails",
+  "signer-output-signature-getter-fails",
+  "signer-output-valid-unchanged",
+  "deriveTraceId-revoked-proxy-invalid",
+  "seal-revoked-statement-invalid",
+  "authority-revoked-result-malformed",
+  "digest-format-hostile-inputs-fail",
+  "digest-format-valid-canonical-pass",
+  "byte-snapshot-shadowed-slice-zero",
+  "byte-snapshot-hostile-views-fail",
+  "byte-snapshot-ordinary-bytes-safe",
 ]);
 
 function manifestDigest(ids) {
@@ -223,6 +239,11 @@ try {
     ["yarn@4.13.0", "pack", "--out", protocolArchive],
     { cwd: join(packagesRoot, "protocol") },
   );
+  await run("corepack", ["yarn@4.13.0", "build"], { cwd: packageRoot });
+  await writeFile(
+    join(packageRoot, "dist", "conformance-case-ids.js"),
+    "export const ORPHAN = true;\n",
+  );
   await run(
     "corepack",
     ["yarn@4.13.0", "pack", "--out", trajectoryArchive],
@@ -248,6 +269,9 @@ try {
     throw new Error(
       `private/test implementation material leaked into tarball: ${leaked.join(", ")}`,
     );
+  }
+  if (entries.some((entry) => entry.endsWith("dist/conformance-case-ids.js"))) {
+    throw new Error("packed dist must not contain stale orphan modules");
   }
 
   const manifestEntry = entries.find((entry) =>
@@ -307,6 +331,9 @@ assert.equal(typeof root.TrajectoryDerivationStatementSchema, "object");
 assert.equal(root.TRAJECTORY_RECORD_KIND, "https://jinn.network/records/trajectory/1.0");
 assert.equal("canonicalJsonBytes" in root, false);
 assert.equal("sha256Digest" in root, false);
+
+import Ajv2020 from "ajv/dist/2020.js";
+assert.equal(typeof Ajv2020, "function");
 `,
   );
   await run(process.execPath, [join(rootConsumer, "smoke.mjs")], {
@@ -353,6 +380,11 @@ assert.equal("sha256Digest" in root, false);
     "@jinn-network/trust-core" in (installedManifest.dependencies ?? {}),
     "packed trajectory must depend on @jinn-network/trust-core",
   );
+  assert.ok(
+    "ajv" in (installedManifest.dependencies ?? {}),
+    "packed trajectory must declare ajv as a regular dependency for /testing",
+  );
+  await access(join(rootConsumer, "node_modules", "ajv", "package.json"));
 
   await mkdir(testingConsumer);
   await writeFile(
@@ -367,7 +399,6 @@ assert.equal("sha256Digest" in root, false);
         typescript: "5.9.3",
         vite: "6.4.3",
         vitest: "4.1.8",
-        ajv: "8.17.1",
       },
     }),
   );
@@ -417,6 +448,14 @@ describeTrajectoryDerivationAttestationConformance();
     "npm",
     ["exec", "--", "vitest", "run", "conformance.test.ts"],
     { cwd: testingConsumer },
+  );
+  const testingManifest = JSON.parse(
+    await readFile(join(testingConsumer, "package.json"), "utf8"),
+  );
+  assert.equal(
+    testingManifest.dependencies?.ajv,
+    undefined,
+    "testing consumer must not explicitly install ajv",
   );
   console.log(
     "Packed trajectory root isolation, packed conformance kit, and archive boundary verified.",

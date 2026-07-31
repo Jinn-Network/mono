@@ -83,6 +83,22 @@ export const TRAJECTORY_DERIVATION_CONFORMANCE_CASE_IDS = Object.freeze([
   "sha256Hex-prototype-trap-rejects",
   "seal-signer-throws-symbol-typed-signing-error",
   "authority-abort-signal-then-ordinary-throw-cancellation",
+  "l2-verified-empty-signer-key-ids-fails",
+  "l2-verified-no-envelope-signatures-fails",
+  "l2-verified-duplicate-signer-key-ids-fails",
+  "l2-verified-mixed-signer-key-ids-fails",
+  "sealed-parent-vacuous-l2-empty-signers-fails",
+  "signer-output-proxy-array-fails",
+  "signer-output-signature-getter-fails",
+  "signer-output-valid-unchanged",
+  "deriveTraceId-revoked-proxy-invalid",
+  "seal-revoked-statement-invalid",
+  "authority-revoked-result-malformed",
+  "digest-format-hostile-inputs-fail",
+  "digest-format-valid-canonical-pass",
+  "byte-snapshot-shadowed-slice-zero",
+  "byte-snapshot-hostile-views-fail",
+  "byte-snapshot-ordinary-bytes-safe",
 ] as const);
 
 export type TrajectoryDerivationConformanceCaseId =

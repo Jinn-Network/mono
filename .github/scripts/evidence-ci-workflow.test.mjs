@@ -68,6 +68,13 @@ function parseJobs(source) {
   const jobsSection = source.slice(jobsStart + 6);
   const jobs = new Map();
   const matches = [...jobsSection.matchAll(/^  ([a-z0-9-]+):\n/gm)];
+  const seenJobIds = new Set();
+  for (const match of matches) {
+    if (seenJobIds.has(match[1])) {
+      throw new Error(`duplicate job key "${match[1]}"`);
+    }
+    seenJobIds.add(match[1]);
+  }
   for (let index = 0; index < matches.length; index += 1) {
     const name = matches[index][1];
     const start = matches[index].index ?? 0;
@@ -81,14 +88,25 @@ function parseStepFields(step) {
   const fields = { uses: null, with: {}, run: null };
   let inWith = false;
   let withIndent = null;
+  const stepLevelKeys = [];
+  const withLevelKeys = [];
   for (const line of step.lines) {
     if (/^ {6}- uses:/.test(line)) {
+      stepLevelKeys.push("uses");
       fields.uses = line.trim().slice("- uses:".length).trim();
       inWith = false;
       withIndent = null;
       continue;
     }
+    if (/^ {8}uses:/.test(line)) {
+      stepLevelKeys.push("uses");
+      fields.uses = line.trim().slice("uses:".length).trim();
+      inWith = false;
+      withIndent = null;
+      continue;
+    }
     if (/^ {8}with:/.test(line)) {
+      stepLevelKeys.push("with");
       inWith = true;
       withIndent = 10;
       continue;
@@ -101,18 +119,40 @@ function parseStepFields(step) {
         const trimmed = line.trim();
         const match = trimmed.match(/^([^:]+):\s*(.*)$/);
         if (match) {
+          withLevelKeys.push(match[1]);
           fields.with[match[1]] = match[2].trim();
         }
         continue;
       }
     }
     if (/^ {6}- run:/.test(line) || /^ {8}run:/.test(line)) {
+      stepLevelKeys.push("run");
       fields.run = line.trim();
       inWith = false;
       withIndent = null;
+      continue;
+    }
+    if (/^ {6}- name:/.test(line)) {
+      stepLevelKeys.push("name");
+      continue;
+    }
+    if (/^ {8}working-directory:/.test(line)) {
+      stepLevelKeys.push("working-directory");
     }
   }
+  fields.stepLevelKeys = stepLevelKeys;
+  fields.withLevelKeys = withLevelKeys;
   return fields;
+}
+
+function assertUniqueYamlKeys(keys, context) {
+  const seen = new Set();
+  for (const key of keys) {
+    if (seen.has(key)) {
+      throw new Error(`${context}: duplicate YAML mapping key "${key}"`);
+    }
+    seen.add(key);
+  }
 }
 
 function setupNodeVersionForStep(step) {
@@ -173,6 +213,18 @@ export function validateEvidenceCiWorkflow(source) {
       NODE_VERSION,
       `${jobId} setup-node must pin ${NODE_VERSION} on its own with block (found ${String(setupNodeVersion)})`,
     );
+
+    for (let stepIndex = 0; stepIndex < steps.length; stepIndex += 1) {
+      const fields = parseStepFields(steps[stepIndex]);
+      assertUniqueYamlKeys(
+        fields.stepLevelKeys,
+        `${jobId} step ${String(stepIndex)}`,
+      );
+      assertUniqueYamlKeys(
+        fields.withLevelKeys,
+        `${jobId} step ${String(stepIndex)} with`,
+      );
+    }
   }
 
   assert.doesNotMatch(source, /node-version:\s*22\s*$/m);
@@ -425,4 +477,33 @@ test('mutation: wrong-indentation node-version outside setup with fails', () => 
     mutant,
     /foundation setup-node must pin 22\.23\.1 on its own with block \(found undefined\)/,
   );
+});
+
+test('mutation: duplicate uses in trajectory setup step fails', () => {
+  const mutant = workflow.replace(
+    /(  trajectory:[\s\S]*?      - uses: actions\/setup-node@v4\n)(        with:\n          node-version: 22\.23\.1\n)/,
+    '$1        uses: actions/setup-node@v4\n$2',
+  );
+  expectValidationFailure(mutant, /duplicate YAML mapping key "uses"/);
+});
+
+test('mutation: duplicate run in trajectory npm step fails', () => {
+  const mutant = workflow.replace(
+    /(  trajectory:[\s\S]*?      - name: Install npm 11\.19\.0 for pack-smoke\n        run: \|)/,
+    '$1\n        run: echo duplicate',
+  );
+  expectValidationFailure(mutant, /duplicate YAML mapping key "run"/);
+});
+
+test('mutation: duplicate node-version in setup with block fails', () => {
+  const mutant = workflow.replace(
+    /(  foundation:[\s\S]*?      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
+    '$1          node-version: 22.23.1\n',
+  );
+  expectValidationFailure(mutant, /foundation step \d+ with: duplicate YAML mapping key "node-version"/);
+});
+
+test('mutation: duplicate job key fails', () => {
+  const mutant = `${workflow}\n  trajectory:\n    runs-on: ubuntu-latest\n`;
+  expectValidationFailure(mutant, /duplicate job key "trajectory"/);
 });

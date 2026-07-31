@@ -221,7 +221,13 @@ export interface SealPortSnapshot {
 
 export function snapshotSealPort(input: unknown): SealPortSnapshot {
   const snapshot = snapshotPortObject(input, SEAL_KEYS, SEAL_REQUIRED, "derivation seal input");
-  if (typeof snapshot.statement !== "object" || snapshot.statement === null || Array.isArray(snapshot.statement)) {
+  if (typeof snapshot.statement !== "object" || snapshot.statement === null) {
+    invalidPort("derivation seal input.statement must be an object");
+  }
+  if (isProxy(snapshot.statement)) {
+    invalidPort("derivation seal input.statement must not be a Proxy");
+  }
+  if (Array.isArray(snapshot.statement)) {
     invalidPort("derivation seal input.statement must be an object");
   }
   const signal = optionalAbortSignal(snapshot.signal, "signal", "derivation seal input");

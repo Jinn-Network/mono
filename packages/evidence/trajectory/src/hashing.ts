@@ -3,18 +3,18 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 
-import { defensiveCopy } from "./bytes.js";
-import { isGenuineUint8Array } from "./hostile-reflection.js";
+import { snapshotByteView } from "./byte-snapshot.js";
 
 function invalidBytesInput(message: string): never {
   throw new TypeError(message);
 }
 
 export function sha256Hex(bytes: Uint8Array): string {
-  if (!isGenuineUint8Array(bytes)) {
+  try {
+    return bytesToHex(sha256(snapshotByteView(bytes, "sha256Hex input")));
+  } catch {
     invalidBytesInput("sha256Hex requires a genuine Uint8Array");
   }
-  return bytesToHex(sha256(defensiveCopy(bytes)));
 }
 
 export function documentDigest(bytes: Uint8Array): `sha256:${string}` {

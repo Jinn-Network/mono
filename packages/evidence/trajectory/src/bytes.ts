@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** Returns an owned copy; callers may mutate without affecting the source. */
+import { snapshotByteView } from "./byte-snapshot.js";
+
+/** Returns an owned intrinsic copy; callers may mutate without affecting the source. */
 export function defensiveCopy(bytes: Uint8Array): Uint8Array {
-  return bytes.slice();
+  return snapshotByteView(bytes, "byte view");
 }
+
+export { snapshotByteView } from "./byte-snapshot.js";
 
 /** Constant-time length check then byte-wise equality. */
 export function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {

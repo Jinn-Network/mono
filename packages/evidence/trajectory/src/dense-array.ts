@@ -23,11 +23,14 @@ export function inspectDenseArrayDescriptors(
   value: unknown,
   path: string,
 ): DenseArrayResult {
-  if (!Array.isArray(value)) {
+  if (typeof value !== "object" || value === null) {
     return { ok: false, message: `${path} must be an array` };
   }
   if (isProxy(value)) {
     return { ok: false, message: `${path} must be a plain array` };
+  }
+  if (!Array.isArray(value)) {
+    return { ok: false, message: `${path} must be an array` };
   }
 
   let descriptors: PropertyDescriptorMap;

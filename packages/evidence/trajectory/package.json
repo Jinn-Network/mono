@@ -38,7 +38,7 @@
     "provenance": true
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "generate:schemas": "yarn build && node scripts/generate-schemas.mjs --write",
@@ -52,6 +52,7 @@
     "@jinn-network/evidence-protocol": "0.1.0",
     "@jinn-network/trust-core": "0.1.0",
     "@noble/hashes": "2.2.0",
+    "ajv": "8.17.1",
     "zod": "4.4.3"
   },
   "peerDependencies": {
@@ -64,7 +65,6 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "ajv": "8.17.1",
     "canonicalize": "3.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"

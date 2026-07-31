@@ -304,17 +304,20 @@ export function registerFourthReviewProbes(): void {
     );
     const sealed = await sealTrajectoryDerivationAttestation({ statement, signer: fixedSigner });
     const controller = new AbortController();
-    controller.abort();
+    let callbackCount = 0;
     await expect(
       verifyTrajectoryDerivationAttestation({
         envelopeBytes: sealed.envelopeBytes,
         executionRecordBytes: new TextEncoder().encode("{}"),
         trajectoryRecordBytes: new TextEncoder().encode("{}"),
         verifyAuthority: async () => {
+          callbackCount += 1;
+          controller.abort();
           throw new Error("ordinary authority failure");
         },
         signal: controller.signal,
       }),
     ).rejects.toBeInstanceOf(TrajectoryDerivationCancelledError);
+    expect(callbackCount).toBe(1);
   });
 }

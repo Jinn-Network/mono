@@ -28,11 +28,14 @@ function invalidTraceIdInput(message: string): never {
 }
 
 function snapshotTraceIdInput(input: TraceIdInput): TraceIdInput {
-  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+  if (typeof input !== "object" || input === null) {
     invalidTraceIdInput("trace id input must be a plain object");
   }
   if (isProxy(input)) {
     invalidTraceIdInput("trace id input must not be a Proxy");
+  }
+  if (Array.isArray(input)) {
+    invalidTraceIdInput("trace id input must be a plain object");
   }
 
   const allowed = new Set<string>(TRACE_ID_KEYS);
@@ -93,7 +96,7 @@ function snapshotTraceIdInput(input: TraceIdInput): TraceIdInput {
  * tuples share a preimage.
  */
 function frame(parts: readonly string[]): Uint8Array {
-  return encoder.encode(parts.map((part) => `${part.length}:${part}`).join(""));
+  return new Uint8Array(encoder.encode(parts.map((part) => `${part.length}:${part}`).join("")));
 }
 
 /**
