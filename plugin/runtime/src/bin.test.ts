@@ -1,9 +1,21 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import type { DsseSigner } from "@jinn-network/trust-core";
 import { describe, expect, test } from "vitest";
 
 import { main, buildOwnedEnvSnapshot } from "./bin.js";
 import { RUNTIME_VERSION } from "./version.js";
 
-const io = (untilShutdown: () => Promise<void> = async () => {}) => {
+const testSigner: DsseSigner = async () => [
+  { signature: new Uint8Array([1, 2, 3]), keyid: "test-key" },
+];
+
+const io = (
+  untilShutdown: () => Promise<void> = async () => {},
+  options: { homeDirectory?: string; captureSigner?: DsseSigner } = {},
+) => {
   const out: string[] = [];
   const err: string[] = [];
   return {
@@ -12,11 +24,16 @@ const io = (untilShutdown: () => Promise<void> = async () => {}) => {
     value: {
       writeOut: (line: string) => out.push(line),
       writeErr: (line: string) => err.push(line),
-      homeDirectory: "/srv/default-home",
+      homeDirectory: options.homeDirectory ?? "/srv/default-home",
       untilShutdown,
+      ...(options.captureSigner === undefined ? {} : { captureSigner: options.captureSigner }),
     },
   };
 };
+
+async function writableHome(): Promise<string> {
+  return mkdtemp(join(tmpdir(), "jinn-bin-"));
+}
 
 describe("main", () => {
   test("health prints one JSON report line to stdout and exits zero", async () => {
@@ -32,8 +49,9 @@ describe("main", () => {
     const gate = new Promise<void>((resolve) => {
       released = resolve;
     });
-    const { err, value } = io(() => gate);
-    const exit = main(["serve"], { JINN_PLUGIN_LOG_LEVEL: "debug" }, value);
+    const home = await writableHome();
+    const { err, value } = io(() => gate, { homeDirectory: home });
+    const exit = main(["serve", "--role", "tools"], { JINN_PLUGIN_LOG_LEVEL: "debug" }, value);
     released();
     await expect(exit).resolves.toBe(0);
     const messages = err.map((line) => JSON.parse(line).message);
@@ -42,14 +60,50 @@ describe("main", () => {
   });
 
   test("serve is the default command", async () => {
-    const { value } = io();
-    await expect(main([], {}, value)).resolves.toBe(0);
+    const home = await writableHome();
+    const { value } = io(async () => {}, { homeDirectory: home, captureSigner: testSigner });
+    await expect(main(["serve"], {}, value)).resolves.toBe(0);
   });
 
   test("serve writes nothing to stdout — it is reserved for the MCP transport", async () => {
-    const { out, value } = io();
-    await main(["serve"], { JINN_PLUGIN_LOG_LEVEL: "debug" }, value);
+    const home = await writableHome();
+    const { out, value } = io(async () => {}, { homeDirectory: home });
+    await main(["serve", "--role", "tools"], { JINN_PLUGIN_LOG_LEVEL: "debug" }, value);
     expect(out).toEqual([]);
+  });
+
+  test("serve defaults to the session role when captureSigner is injected", async () => {
+    const home = await writableHome();
+    const { err, value } = io(async () => {}, { homeDirectory: home, captureSigner: testSigner });
+    const code = await main(["serve"], {}, value);
+    expect(code).toBe(0);
+    expect(err.join("")).toContain("role=session");
+    expect(err.map((line) => JSON.parse(line).message)).toContain("mcp server listening (role=session)");
+  });
+
+  test("serve --role tools starts the read-only surface", async () => {
+    const home = await writableHome();
+    const { err, value } = io(async () => {}, { homeDirectory: home });
+    const code = await main(["serve", "--role", "tools"], {}, value);
+    expect(code).toBe(0);
+    expect(err.join("")).toContain("role=tools");
+  });
+
+  test("serve --role session without captureSigner fails with config-invalid", async () => {
+    const home = await writableHome();
+    const { err, value } = io(async () => {}, { homeDirectory: home });
+    const code = await main(["serve", "--role", "session"], {}, value);
+    expect(code).toBe(1);
+    expect(err.join("\n")).toContain("F-C4-T13-2");
+    expect(err.join("\n")).toContain("captureSigner");
+  });
+
+  test("an unknown role fails loudly with config-invalid", async () => {
+    const home = await writableHome();
+    const { err, value } = io(async () => {}, { homeDirectory: home });
+    const code = await main(["serve", "--role", "admin"], {}, value);
+    expect(code).toBe(1);
+    expect(err.join("\n")).toContain("--role must be one of");
   });
 
   test("the injected home directory is the default and the environment overrides it", async () => {
@@ -81,6 +135,7 @@ describe("main", () => {
     const { err, value } = io();
     await expect(main(["--help"], {}, value)).resolves.toBe(0);
     expect(err.join("\n")).toContain("usage: jinn-plugin-runtime");
+    expect(err.join("\n")).toContain("--role");
   });
 
   test("--version prints the version to stdout and exits zero", async () => {
