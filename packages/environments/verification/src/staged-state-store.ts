@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The only production filesystem surface in this package. The directory is an
-// argument, never ambient: nothing here reads process.env, and the guard's
+// argument, never ambient: nothing here reads the ambient environment, and the guard's
 // filesystem allowlist names exactly this file (Findings F-C2-5).
 
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";

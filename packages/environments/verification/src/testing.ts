@@ -53,7 +53,7 @@ export interface ScriptedContainerRuntime extends ContainerRuntime {
 
 /**
  * A fake container runtime with scripted outcomes. It touches nothing: no
- * registry, no daemon, no disk.
+ * registry, no container engine, no disk.
  */
 export function createScriptedContainerRuntime(
   scenario: ScriptedScenario,
