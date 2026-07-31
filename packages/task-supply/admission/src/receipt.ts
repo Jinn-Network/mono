@@ -68,7 +68,7 @@ function validatePolicy(receipt: DifferentialAdmissionReceiptV3): void {
       refuse("invalid-candidate", `receipt test path ${pathReceipt.testPath} is not normalized`);
     }
     if (seenPaths.has(pathReceipt.testPath)) {
-      refuse("duplicate-assertion-id", `receipt repeats test path ${pathReceipt.testPath}`);
+      refuse("invalid-candidate", `receipt repeats test path ${pathReceipt.testPath}`);
     }
     seenPaths.add(pathReceipt.testPath);
 
@@ -97,6 +97,39 @@ function validatePolicy(receipt: DifferentialAdmissionReceiptV3): void {
         );
       }
       owners.set(identifier, pathReceipt.testPath);
+    }
+  }
+  validateDeclaredTransitions(receipt);
+}
+
+/**
+ * Design §7.1's first bullet is scoped to *the candidate's* fail-to-pass and pass-to-pass tests:
+ * gold applied → the candidate's fail-to-pass tests pass and its pass-to-pass tests still pass.
+ * The receipt therefore may not carry declared transitions its own observations do not prove —
+ * otherwise an unsolvable pair (gold flips something else, or regresses a declared pass-to-pass)
+ * earns a signed receipt asserting the opposite.
+ */
+function validateDeclaredTransitions(receipt: DifferentialAdmissionReceiptV3): void {
+  const declared = receipt.task.transitions;
+  if (declared.failToPass.length === 0) {
+    refuse("no-discrimination", "the candidate declares no fail-to-pass assertion");
+  }
+  const provenFailToPass = new Set(receipt.testPaths.flatMap((path) => path.failToPass));
+  const provenPassToPass = new Set(receipt.testPaths.flatMap((path) => path.passToPass));
+  for (const identifier of declared.failToPass) {
+    if (!provenFailToPass.has(identifier)) {
+      refuse(
+        "transitions-mismatch",
+        `declared fail-to-pass ${identifier} is not proven by any test path's observations`,
+      );
+    }
+  }
+  for (const identifier of declared.passToPass) {
+    if (!provenPassToPass.has(identifier)) {
+      refuse(
+        "transitions-mismatch",
+        `declared pass-to-pass ${identifier} is not proven by any test path's observations`,
+      );
     }
   }
 }

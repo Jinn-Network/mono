@@ -77,4 +77,16 @@ describe("deriveTransitions", () => {
     expect(deriveTransitions(observation(["a"], []), observation([], ["a"])))
       .toStrictEqual({ failToPass: [], passToPass: [] });
   });
+
+  it("does not count an assertion absent from the empty-side reading as fail-to-pass", () => {
+    // Design 7.1: "no patch (empty) -> fail-to-pass tests fail" — an empty side that parsed
+    // nothing at all (a collection error, a broken container) is not evidence of
+    // discrimination, so absence must never read as failure.
+    expect(deriveTransitions(observation([], []), observation(["a", "b"], [])))
+      .toStrictEqual({ failToPass: [], passToPass: [] });
+    expect(deriveTransitions(
+      observation(["keeps"], ["target"]),
+      observation(["keeps", "target", "brand_new"], []),
+    )).toStrictEqual({ failToPass: ["target"], passToPass: ["keeps"] });
+  });
 });

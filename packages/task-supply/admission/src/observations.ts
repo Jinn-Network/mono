@@ -68,21 +68,28 @@ export function stableObservation(
 }
 
 /**
- * Fail-to-pass = failing (or absent) before, passing after. Pass-to-pass = passing on both sides.
- * Both are sorted by code unit so the receipt's bytes do not depend on the runner's emission
- * order.
+ * Fail-to-pass = **observed failing** before, passing after. Pass-to-pass = passing on both
+ * sides. Both are sorted by code unit so the receipt's bytes do not depend on the runner's
+ * emission order.
+ *
+ * Absence on the empty side is deliberately not failure (design §7.1: "no patch (empty) →
+ * fail-to-pass tests fail (2 runs) — the suite *discriminates*"). An empty side that parsed
+ * nothing at all — a collection error, an import error, a broken container, the
+ * environment-flakiness failure mode this program exists to catch — otherwise reads as full
+ * discrimination for every assertion the gold side happens to report.
  */
 export function deriveTransitions(
   before: Observation,
   after: Observation,
 ): { readonly failToPass: string[]; readonly passToPass: string[] } {
   const beforePassed = new Set(before.passed);
+  const beforeFailed = new Set(before.failed);
   const afterPassed = new Set(after.passed);
   const all = [
     ...new Set([...before.passed, ...before.failed, ...after.passed, ...after.failed]),
   ].sort(compareCodeUnitStrings);
   return {
-    failToPass: all.filter((id) => !beforePassed.has(id) && afterPassed.has(id)),
+    failToPass: all.filter((id) => beforeFailed.has(id) && afterPassed.has(id)),
     passToPass: all.filter((id) => beforePassed.has(id) && afterPassed.has(id)),
   };
 }

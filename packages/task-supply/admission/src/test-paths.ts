@@ -8,8 +8,17 @@ import { refuse } from "./refusals.js";
 /** The shell-free command shape, derived from C1's pinned schema (never re-declared). */
 export type CommandSpec = z.infer<typeof CommandSpecSchema>;
 
+// A test path becomes an argv element and a receipt field. Control characters belong in neither:
+// they are unrenderable in the receipt and are the classic smuggling vehicle in anything that
+// ever re-splits an argument list. Rejected in the same pass as traversal and option shapes.
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
+
 function segments(rawPath: string, label: string): string[] {
   if (rawPath === "") refuse("invalid-candidate", `${label} must not be empty`);
+  if (CONTROL_CHARACTERS.test(rawPath)) {
+    refuse("invalid-candidate", `${label} must not contain control characters`);
+  }
   if (path.isAbsolute(rawPath)) {
     refuse("invalid-candidate", `${label} must be repository-relative, not absolute`);
   }

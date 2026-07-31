@@ -4,6 +4,7 @@ import {
   environmentRecordDigest,
   sealEnvironmentRecord,
 } from "@jinn-network/environment-record";
+import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { describe, expect, it } from "vitest";
 import type {
   AdmissionCandidate,
@@ -13,6 +14,7 @@ import type {
 } from "./admit.js";
 import { ADMISSION_RECEIPT_SCHEMA_VERSION, DIFFERENTIAL_ADMISSION_POLICY_V3 } from "./identifiers.js";
 import type { DifferentialAdmissionReceiptV3 } from "./receipt.js";
+import { ADMISSION_REFUSAL_CODES } from "./refusals.js";
 
 const digest = (seed: string): `sha256:${string}` =>
   `sha256:${seed.repeat(64).slice(0, 64)}` as `sha256:${string}`;
@@ -85,7 +87,9 @@ export function goldenEnvironmentRecordBytes(): Uint8Array {
  * forbids importing profiles).
  */
 export function goldenEvaluationSpecBytes(blockOverrides: Record<string, unknown> = {}): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify({
+  // Canonical bytes — exactly what `sealEvaluationSpec` emits, and what admission requires: the
+  // receipt's evaluation-spec subject is the digest of these bytes.
+  return canonicalJsonBytes({
     protocol: "https://jinn.network/profiles/evaluation-spec/1.0",
     family: "deterministic-process",
     familyBlock: {
@@ -101,7 +105,7 @@ export function goldenEvaluationSpecBytes(blockOverrides: Record<string, unknown
       },
       ...blockOverrides,
     },
-  }));
+  });
 }
 
 export function goldenCandidate(overrides: Partial<AdmissionCandidate> = {}): AdmissionCandidate {
@@ -128,6 +132,19 @@ export function mismatchedImageCandidate(): AdmissionCandidate {
   });
 }
 
+/**
+ * The unsolvable-pair fixture (design §7.1, first bullet): the candidate declares — and its spec
+ * grades — a fail-to-pass assertion the gold patch never flips. Paired with `scriptedRunner()`,
+ * whose gold side flips `target` only, so `phantom` is declared and never proven.
+ */
+export function unprovenTransitionsCandidate(): AdmissionCandidate {
+  const transitions = { failToPass: ["target", "phantom"], passToPass: ["keeps"] };
+  return goldenCandidate({
+    transitions,
+    evaluationSpecBytes: goldenEvaluationSpecBytes({ transitions }),
+  });
+}
+
 /** A pure runner whose per-side answers are scripted; it never touches a container. */
 export function scriptedRunner(
   script: Partial<Record<"none" | "gold", EnvironmentRunObservation>> = {},
@@ -137,6 +154,23 @@ export function scriptedRunner(
     return script[request.patch.kind] ?? {
       passed: gold ? ["keeps", "target"] : ["keeps"],
       failed: gold ? [] : ["target"],
+      passedMatch: gold,
+      appliedPatchDigest: gold ? GOLD : null,
+    };
+  };
+}
+
+/**
+ * The blind-empty-side fixture (design §7.1, second bullet): the empty side parses nothing at all
+ * — a collection error, a broken container — while the gold side reports everything passing.
+ * Absence is not discrimination, so this must never be admitted.
+ */
+export function blindEmptySideRunner(): RunInEnvironmentPort {
+  return async (request: EnvironmentRunRequest) => {
+    const gold = request.patch.kind === "gold";
+    return {
+      passed: gold ? ["keeps", "target"] : [],
+      failed: [],
       passedMatch: gold,
       appliedPatchDigest: gold ? GOLD : null,
     };
@@ -213,6 +247,11 @@ scriptedRunner.refusalScenarios = {
     candidate: goldenCandidate,
     recordBytes: goldenEnvironmentRecordBytes,
   },
+  "transitions-mismatch": {
+    runner: scriptedRunner(),
+    candidate: unprovenTransitionsCandidate,
+    recordBytes: goldenEnvironmentRecordBytes,
+  },
   "unstable-observations": {
     runner: flakyRunner(),
     candidate: goldenCandidate,
@@ -224,8 +263,10 @@ export interface TaskAdmissionConformanceSubject {
   readonly admitCandidate: typeof import("./admit.js").admitCandidate;
   readonly goldenCandidate: typeof goldenCandidate;
   readonly goldenEnvironmentRecordBytes: typeof goldenEnvironmentRecordBytes;
+  readonly goldenReceipt: typeof goldenReceipt;
   readonly mismatchedImageCandidate: typeof mismatchedImageCandidate;
   readonly scriptedRunner: typeof scriptedRunner;
+  readonly verifyReceipt: typeof import("./receipt.js").verifyDifferentialAdmissionReceiptV3;
 }
 
 /** The admission conformance kit (spec §11). Green before derivation builds on this package. */
@@ -267,6 +308,45 @@ export function describeTaskAdmissionConformance(
       if (!("receipt" in result)) throw new Error("expected a receipt");
       expect(result.receipt.goldPatchHash).toMatch(/^sha256:[0-9a-f]{64}$/);
       expect(JSON.stringify(result.receipt)).not.toContain("diff --git");
+    });
+
+    it("round-trips the golden receipt, and its own, through policy validation", async () => {
+      const golden = subject.goldenReceipt();
+      expect(subject.verifyReceipt(golden)).toStrictEqual(golden);
+      const result = await subject.admitCandidate(
+        deps, subject.goldenCandidate(), subject.goldenEnvironmentRecordBytes(),
+      );
+      if (!("receipt" in result)) throw new Error("expected a receipt");
+      expect(subject.verifyReceipt(result.receipt)).toStrictEqual(result.receipt);
+    });
+
+    it("reaches every code in the closed refusal taxonomy", async () => {
+      const reached = new Set<string>();
+      for (const scenario of Object.values(subject.scriptedRunner.refusalScenarios)) {
+        const result = await subject.admitCandidate(
+          { issuer: "https://jinn.network/agents/kit", runInEnvironment: scenario.runner },
+          scenario.candidate(),
+          scenario.recordBytes(),
+        );
+        if ("refusal" in result) reached.add(result.refusal.code);
+      }
+      expect([...reached].sort()).toStrictEqual([...ADMISSION_REFUSAL_CODES]);
+    });
+
+    it("proves the candidate's own declared transitions, not merely some transition", async () => {
+      const result = await subject.admitCandidate(
+        deps, unprovenTransitionsCandidate(), subject.goldenEnvironmentRecordBytes(),
+      );
+      expect("refusal" in result && result.refusal.code).toBe("transitions-mismatch");
+    });
+
+    it("refuses an empty side that produced no reading at all", async () => {
+      const result = await subject.admitCandidate(
+        { issuer: "https://jinn.network/agents/kit", runInEnvironment: blindEmptySideRunner() },
+        subject.goldenCandidate(),
+        subject.goldenEnvironmentRecordBytes(),
+      );
+      expect("refusal" in result).toBe(true);
     });
   });
 }

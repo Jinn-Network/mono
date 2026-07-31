@@ -113,10 +113,36 @@ describe("DifferentialAdmissionReceiptV3", () => {
     expect(refusal.detail).toContain("keeps");
   });
 
+  it("refuses a receipt whose declared fail-to-pass is not proven by any path", () => {
+    const refusal = refusalOf(() => verifyDifferentialAdmissionReceiptV3({
+      ...receipt,
+      task: { ...receipt.task, transitions: { failToPass: ["phantom"], passToPass: ["keeps"] } },
+    }));
+    expect(refusal.code).toBe("transitions-mismatch");
+    expect(refusal.detail).toContain("phantom");
+  });
+
+  it("refuses a receipt whose declared pass-to-pass is not proven by any path", () => {
+    const refusal = refusalOf(() => verifyDifferentialAdmissionReceiptV3({
+      ...receipt,
+      task: { ...receipt.task, transitions: { failToPass: ["target"], passToPass: ["absent"] } },
+    }));
+    expect(refusal.code).toBe("transitions-mismatch");
+    expect(refusal.detail).toContain("absent");
+  });
+
+  it("refuses a receipt that declares no fail-to-pass assertion at all", () => {
+    const refusal = refusalOf(() => verifyDifferentialAdmissionReceiptV3({
+      ...receipt,
+      task: { ...receipt.task, transitions: { failToPass: [], passToPass: ["keeps"] } },
+    }));
+    expect(refusal.code).toBe("no-discrimination");
+  });
+
   it("refuses a repeated or unnormalized test path", () => {
     expect(refusalOf(() => verifyDifferentialAdmissionReceiptV3({
       ...receipt, testPaths: [receipt.testPaths[0], receipt.testPaths[0]],
-    })).code).toBe("duplicate-assertion-id");
+    })).code).toBe("invalid-candidate");
     expect(refusalOf(() => verifyDifferentialAdmissionReceiptV3({
       ...receipt,
       testPaths: [{ ...receipt.testPaths[0], testPath: "tests/./unit/test_thing.py" }],

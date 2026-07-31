@@ -6,6 +6,7 @@ import {
   type EnvironmentRecord,
 } from "@jinn-network/environment-record";
 import { canonicalJsonBytes, recordDigest } from "@jinn-network/trust-core";
+import { assertCanonicalSpecBytes, checkCandidateSpecConsistency } from "./candidate-spec.js";
 import { ADMISSION_RECEIPT_SCHEMA_VERSION, DIFFERENTIAL_ADMISSION_POLICY_V3 } from "./identifiers.js";
 import { checkInlineEnvironmentMatch } from "./inline-match.js";
 import { deriveTransitions, stableObservation } from "./observations.js";
@@ -13,7 +14,7 @@ import {
   verifyDifferentialAdmissionReceiptV3,
   type DifferentialAdmissionReceiptV3,
 } from "./receipt.js";
-import { AdmissionRefusalError, type AdmissionRefusal } from "./refusals.js";
+import { AdmissionRefusalError, refuse, type AdmissionRefusal } from "./refusals.js";
 import { normalizeRepositoryPath, targetTestCommandForPath, type CommandSpec } from "./test-paths.js";
 
 /** Which material a run applies. A selector, never content: admission holds no patch bytes. */
@@ -105,6 +106,10 @@ async function observeSide(
 ): Promise<EnvironmentRunObservation[]> {
   const observations: EnvironmentRunObservation[] = [];
   for (let attempt = 1; attempt <= DIFFERENTIAL_ADMISSION_POLICY_V3.observationsPerSide; attempt += 1) {
+    // Checked between cells, not just forwarded: an aborted admission must stop spending
+    // container runs. An abort is the caller's cancellation, never a candidate defect, so it
+    // propagates as the signal's own reason rather than as a refusal code.
+    deps.signal?.throwIfAborted();
     let observation: EnvironmentRunObservation;
     try {
       observation = await deps.runInEnvironment({ ...request, attempt: attempt as 1 | 2 });
@@ -145,14 +150,21 @@ export async function admitCandidate(
   environmentRecordBytes: Uint8Array,
 ): Promise<AdmissionResult> {
   try {
+    // Everything that can refuse a candidate on its own shape runs before the first container
+    // run: four runs and a signature are the expensive part of this function.
     const record = parseRecord(environmentRecordBytes);
     const environmentDigest = environmentRecordDigest(environmentRecordBytes) as `sha256:${string}`;
     const evaluationSpecDigest = recordDigest(candidate.evaluationSpecBytes);
-    const inlineMatch = checkInlineEnvironmentMatch(
-      record,
-      parseSpec(candidate.evaluationSpecBytes),
-      environmentDigest,
-    );
+    const evaluationSpec = parseSpec(candidate.evaluationSpecBytes);
+    assertCanonicalSpecBytes(candidate.evaluationSpecBytes, evaluationSpec);
+    const inlineMatch = checkInlineEnvironmentMatch(record, evaluationSpec, environmentDigest);
+    checkCandidateSpecConsistency(evaluationSpec, candidate);
+    if (candidate.testMaterialDigests.length === 0) {
+      refuse("invalid-candidate", "the candidate declares no test material");
+    }
+    if (candidate.testPaths.length === 0) {
+      refuse("invalid-candidate", "the candidate declares no test path");
+    }
 
     const testPaths = [];
     for (const rawPath of candidate.testPaths) {
@@ -170,13 +182,18 @@ export async function admitCandidate(
         ...base,
         patch: { kind: "gold", digest: candidate.goldPatchHash },
       });
-      const broken = stableObservation(brokenRuns.map(observationBody), "broken", testPath);
-      const fixed = stableObservation(fixedRuns.map(observationBody), "fixed", testPath);
+      const brokenBodies = brokenRuns.map(observationBody);
+      const fixedBodies = fixedRuns.map(observationBody);
+      const broken = stableObservation(brokenBodies, "broken", testPath);
+      const fixed = stableObservation(fixedBodies, "fixed", testPath);
       testPaths.push({
         testPath,
         commandHash: recordDigest(canonicalJsonBytes(command)),
-        broken: [broken, broken],
-        fixed: [fixed, fixed],
+        // One entry per actual run — `stableObservation` has already proven the two readings
+        // canonical-JSON identical, so these are equal bytes, but the receipt's advertised
+        // "per-path 2x2 observations" are the runs, not one reading written twice.
+        broken: brokenBodies,
+        fixed: fixedBodies,
         ...deriveTransitions(broken, fixed),
       });
     }

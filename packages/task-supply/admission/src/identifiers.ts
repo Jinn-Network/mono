@@ -29,6 +29,12 @@ export const DIFFERENTIAL_ADMISSION_POLICY_V3 = {
   admissionPolicyVersion: "https://jinn.network/task-admission/policy/3",
   /** Repeats per side, per path: empty x2 and gold x2. */
   observationsPerSide: 2,
+  /** The candidate's declared transitions must be the ones its EvaluationSpec grades against. */
+  requireCandidateSpecConsistency: true,
+  /** …and the ones its own observations prove (design §7.1, first bullet). */
+  requireDeclaredTransitionsProven: true,
+  /** An assertion counts as fail-to-pass only if the empty side observed it *failing*. */
+  requireEmptySideFailure: true,
   requireFailToPassPerPath: true,
   requireGloballyUniqueAssertionIds: true,
   requireInlineEnvironmentMatch: true,

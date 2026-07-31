@@ -7,7 +7,7 @@ import {
 } from "./refusals.js";
 
 describe("the refusal taxonomy", () => {
-  it("is closed and exactly these seven codes", () => {
+  it("is closed and exactly these eight codes", () => {
     expect([...ADMISSION_REFUSAL_CODES]).toStrictEqual([
       "duplicate-assertion-id",
       "env-record-mismatch",
@@ -15,6 +15,7 @@ describe("the refusal taxonomy", () => {
       "invalid-candidate",
       "invalid-environment-record",
       "no-discrimination",
+      "transitions-mismatch",
       "unstable-observations",
     ]);
   });

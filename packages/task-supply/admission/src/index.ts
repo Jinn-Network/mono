@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export * from "./admit.js";
+export * from "./candidate-spec.js";
 export * from "./identifiers.js";
 export * from "./inline-match.js";
 export * from "./observations.js";

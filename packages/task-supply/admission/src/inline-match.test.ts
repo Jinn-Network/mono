@@ -24,6 +24,7 @@ const inlineBlock = {
   image: { uri: `ghcr.io/example/env@${MANIFEST}`, digest: { sha256: MANIFEST.slice(7) } },
   platform: "linux/amd64",
   parser: { id: "pytest-log", version: "3", digest: PARSER },
+  testMaterial: [{ name: "test-patch", digest: { sha256: OTHER.slice(7) }, accessClass: "public" }],
   transitions: { failToPass: ["a"], passToPass: [] },
   timeout: 1800,
 };

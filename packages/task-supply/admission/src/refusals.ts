@@ -15,11 +15,16 @@ import { z } from "zod";
  *   required cell: it threw, or it reported applying material other than the candidate's
  *   declared gold patch.
  * - `invalid-candidate`       the candidate is structurally unusable: wrong grader family, a
- *   malformed inline block, a digest in the wrong spelling, or an unsafe test path.
+ *   malformed inline block, a digest in the wrong spelling, an unsafe test path, a repeated test
+ *   path, EvaluationSpec bytes that are not the document's canonical sealing, or inline test
+ *   material that is not the material the candidate declares.
  * - `invalid-environment-record`  the supplied record bytes do not parse, or the record does not
  *   support per-path targeted admission (no single targetable test command).
- * - `no-discrimination`       a test path produced no fail-to-pass assertion: the suite does not
- *   discriminate, so there is nothing to admit.
+ * - `no-discrimination`       a test path produced no fail-to-pass assertion, or the candidate
+ *   declares none: the suite does not discriminate, so there is nothing to admit.
+ * - `transitions-mismatch`    the candidate's declared transitions are not the ones its
+ *   EvaluationSpec grades against, or are not the ones its observations prove (design §7.1,
+ *   first bullet — the proof is scoped to *the candidate's* fail-to-pass and pass-to-pass tests).
  * - `unstable-observations`   the two repeats on a side were not canonical-JSON identical.
  */
 export const ADMISSION_REFUSAL_CODES = [
@@ -29,6 +34,7 @@ export const ADMISSION_REFUSAL_CODES = [
   "invalid-candidate",
   "invalid-environment-record",
   "no-discrimination",
+  "transitions-mismatch",
   "unstable-observations",
 ] as const;
 

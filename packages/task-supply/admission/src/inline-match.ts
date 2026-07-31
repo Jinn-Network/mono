@@ -9,7 +9,7 @@ const BARE_SHA256 = /^[0-9a-f]{64}$/;
 const PREFIXED_SHA256 = /^sha256:[0-9a-f]{64}$/;
 
 /**
- * The narrowest possible mirror of the three fields this rule enforces. Structurally identical to
+ * The narrowest possible mirror of the fields admission compares. Structurally a subset of
  * `DETERMINISTIC_PROCESS_SHAPE` in
  * `packages/task-execution/profiles/src/evaluation-spec/family-blocks.ts` — read, never imported
  * (design §3.3: admission consumes environments/record types and digests only). Loose objects:
@@ -26,11 +26,29 @@ const InlineParserSchema = z.strictObject({
   digest: z.string().regex(PREFIXED_SHA256),
 });
 
+const InlineTestMaterialSchema = z.looseObject({
+  digest: z.record(z.string(), z.string()),
+});
+
+const InlineTransitionsSchema = z.looseObject({
+  failToPass: z.array(z.string().min(1)),
+  passToPass: z.array(z.string().min(1)),
+});
+
+/**
+ * `testMaterial` and `transitions` are required here — not decoration: they are what the grader
+ * scores against, and admission reconciles both with the candidate's declared sets
+ * (candidate-spec.ts). A block missing either is not a gradeable deterministic-process block.
+ */
 const InlineProcessBlockSchema = z.looseObject({
   image: InlineImageSchema,
   platform: z.string().min(1),
   parser: InlineParserSchema,
+  testMaterial: z.array(InlineTestMaterialSchema),
+  transitions: InlineTransitionsSchema,
 });
+
+export type InlineProcessBlock = z.infer<typeof InlineProcessBlockSchema>;
 
 const EvaluationSpecShellSchema = z.looseObject({
   family: z.string(),
@@ -47,17 +65,58 @@ export interface InlineMatchReport {
   readonly specKeyPresent: boolean;
 }
 
-function manifestDigestFromDigestSet(digest: Record<string, string> | undefined): string | undefined {
+function sha256FromDigestSet(
+  digest: Record<string, string> | undefined,
+  label: string,
+): string | undefined {
   if (digest === undefined) return undefined;
   const value = digest["sha256"];
   if (value === undefined) return undefined;
   if (!BARE_SHA256.test(value)) {
     refuse(
       "invalid-candidate",
-      "inline image DigestSet sha256 must be bare lowercase hex (in-toto DigestSet values are never sha256:-prefixed)",
+      `${label} DigestSet sha256 must be bare lowercase hex (in-toto DigestSet values are never sha256:-prefixed)`,
     );
   }
   return `sha256:${value}`;
+}
+
+function manifestDigestFromDigestSet(digest: Record<string, string> | undefined): string | undefined {
+  return sha256FromDigestSet(digest, "inline image");
+}
+
+/**
+ * Read the block's `{family, familyBlock}` shell and its deterministic-process block. Exported so
+ * the environment rule (below) and the candidate-consistency rule (candidate-spec.ts) read one
+ * shape, not two.
+ */
+export function readInlineProcessBlock(evaluationSpec: unknown): InlineProcessBlock {
+  const shell = EvaluationSpecShellSchema.safeParse(evaluationSpec);
+  if (!shell.success) {
+    refuse("invalid-candidate", "the candidate EvaluationSpec is not a { family, familyBlock } document");
+  }
+  if (shell.data.family !== "deterministic-process") {
+    refuse(
+      "invalid-candidate",
+      `admission grades the deterministic-process family only, not "${shell.data.family}"`,
+    );
+  }
+  const block = InlineProcessBlockSchema.safeParse(shell.data.familyBlock);
+  if (!block.success) {
+    refuse("invalid-candidate", `the inline deterministic-process block is malformed: ${block.error.message}`);
+  }
+  return block.data;
+}
+
+/** The sha256 digests of the material the sealed spec grades against, in `sha256:` spelling. */
+export function testMaterialDigestsOf(block: InlineProcessBlock): string[] {
+  return block.testMaterial.map((material, index) => {
+    const digest = sha256FromDigestSet(material.digest, `inline test material ${index}`);
+    if (digest === undefined) {
+      refuse("invalid-candidate", `inline test material ${index} carries no sha256 digest`);
+    }
+    return digest;
+  });
 }
 
 function manifestDigestFromReference(uri: string | undefined): string | undefined {
@@ -85,23 +144,10 @@ export function checkInlineEnvironmentMatch(
   evaluationSpec: unknown,
   expectedRecordDigest: string,
 ): InlineMatchReport {
-  const shell = EvaluationSpecShellSchema.safeParse(evaluationSpec);
-  if (!shell.success) {
-    refuse("invalid-candidate", "the candidate EvaluationSpec is not a { family, familyBlock } document");
-  }
-  if (shell.data.family !== "deterministic-process") {
-    refuse(
-      "invalid-candidate",
-      `admission grades the deterministic-process family only, not "${shell.data.family}"`,
-    );
-  }
-  const block = InlineProcessBlockSchema.safeParse(shell.data.familyBlock);
-  if (!block.success) {
-    refuse("invalid-candidate", `the inline deterministic-process block is malformed: ${block.error.message}`);
-  }
+  const block = readInlineProcessBlock(evaluationSpec);
 
-  const fromDigestSet = manifestDigestFromDigestSet(block.data.image.digest);
-  const fromReference = manifestDigestFromReference(block.data.image.uri);
+  const fromDigestSet = manifestDigestFromDigestSet(block.image.digest);
+  const fromReference = manifestDigestFromReference(block.image.uri);
   if (fromDigestSet === undefined && fromReference === undefined) {
     refuse("invalid-candidate", "the inline image carries no manifest digest (needs a DigestSet or an @sha256: reference)");
   }
@@ -115,25 +161,25 @@ export function checkInlineEnvironmentMatch(
       `inline image manifest digest ${inlineManifest} is not the record's ${record.image.manifestDigest}`,
     );
   }
-  if (block.data.platform !== record.image.platform) {
+  if (block.platform !== record.image.platform) {
     refuse(
       "env-record-mismatch",
-      `inline platform ${block.data.platform} is not the record's ${record.image.platform}`,
+      `inline platform ${block.platform} is not the record's ${record.image.platform}`,
     );
   }
   if (
-    block.data.parser.id !== record.parser.id
-    || block.data.parser.version !== record.parser.version
-    || block.data.parser.digest !== record.parser.digest
+    block.parser.id !== record.parser.id
+    || block.parser.version !== record.parser.version
+    || block.parser.digest !== record.parser.digest
   ) {
     refuse(
       "env-record-mismatch",
-      `inline parser ${block.data.parser.id}@${block.data.parser.version} (${block.data.parser.digest}) is not the record's `
+      `inline parser ${block.parser.id}@${block.parser.version} (${block.parser.digest}) is not the record's `
         + `${record.parser.id}@${record.parser.version} (${record.parser.digest})`,
     );
   }
 
-  const specKey = (block.data as Record<string, unknown>)[ENVIRONMENT_RECORD_SPEC_KEY];
+  const specKey = (block as Record<string, unknown>)[ENVIRONMENT_RECORD_SPEC_KEY];
   let specKeyPresent = false;
   if (specKey !== undefined) {
     const reference = SpecEnvironmentReferenceSchema.safeParse(specKey);

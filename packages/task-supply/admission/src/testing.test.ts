@@ -1,33 +1,23 @@
-import { describe, expect, it } from "vitest";
 import { admitCandidate } from "./admit.js";
-import { ADMISSION_REFUSAL_CODES } from "./refusals.js";
+import { verifyDifferentialAdmissionReceiptV3 } from "./receipt.js";
 import {
   describeTaskAdmissionConformance,
   goldenCandidate,
   goldenEnvironmentRecordBytes,
+  goldenReceipt,
   mismatchedImageCandidate,
   scriptedRunner,
 } from "./testing.js";
 
+// The kit now carries the refusal-taxonomy sweep (every code reachable, and closed) and the
+// receipt round-trip itself, so a consumer running it against a substituted `admitCandidate` is
+// held to the same bar this package holds itself to.
 describeTaskAdmissionConformance("in-package", {
   admitCandidate,
   goldenCandidate,
   goldenEnvironmentRecordBytes,
+  goldenReceipt,
   mismatchedImageCandidate,
   scriptedRunner,
-});
-
-describe("the kit reaches every refusal code", () => {
-  it("covers the closed taxonomy", async () => {
-    const reached = new Set<string>();
-    for (const scenario of Object.values(scriptedRunner.refusalScenarios)) {
-      const result = await admitCandidate(
-        { runInEnvironment: scenario.runner, issuer: "https://jinn.network/agents/kit" },
-        scenario.candidate(),
-        scenario.recordBytes(),
-      );
-      if ("refusal" in result) reached.add(result.refusal.code);
-    }
-    expect([...reached].sort()).toStrictEqual([...ADMISSION_REFUSAL_CODES]);
-  });
+  verifyReceipt: verifyDifferentialAdmissionReceiptV3,
 });

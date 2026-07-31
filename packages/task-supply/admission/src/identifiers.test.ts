@@ -37,6 +37,9 @@ describe("identifiers", () => {
     expect(DIFFERENTIAL_ADMISSION_POLICY_V3).toStrictEqual({
       admissionPolicyVersion: "https://jinn.network/task-admission/policy/3",
       observationsPerSide: 2,
+      requireCandidateSpecConsistency: true,
+      requireDeclaredTransitionsProven: true,
+      requireEmptySideFailure: true,
       requireFailToPassPerPath: true,
       requireGloballyUniqueAssertionIds: true,
       requireInlineEnvironmentMatch: true,

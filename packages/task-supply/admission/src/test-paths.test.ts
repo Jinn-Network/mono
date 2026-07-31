@@ -31,6 +31,8 @@ describe("normalizeRepositoryPath", () => {
     ["../outside/test_thing.py", "must not contain traversal"],
     ["tests/../../test_thing.py", "must not contain traversal"],
     ["-rf/test_thing.py", "must not contain option-shaped segments"],
+    ["tests/test\u0000thing.py", "must not contain control characters"],
+    ["tests/test\nthing.py", "must not contain control characters"],
   ])("refuses %s as invalid-candidate", (rawPath, fragment) => {
     const refusal = refusalOf(() => normalizeRepositoryPath(rawPath, "test path"));
     expect(refusal.code).toBe("invalid-candidate");
