@@ -25,6 +25,7 @@ describe("PluginRuntimeError", () => {
       "capability-start-failed",
       "capability-stop-failed",
       "config-invalid",
+      "health-invalid",
       "runtime-already-started",
       "runtime-not-started",
     ]);

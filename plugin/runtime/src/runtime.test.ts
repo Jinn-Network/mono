@@ -222,8 +222,9 @@ describe("createPluginRuntime", () => {
 
   test("errors raised by the runtime are PluginRuntimeError", async () => {
     const runtime = createPluginRuntime({ config });
-    await runtime.health().catch((error: unknown) => {
-      expect(error).toBeInstanceOf(PluginRuntimeError);
-    });
+    await expect(runtime.health()).rejects.toBeInstanceOf(PluginRuntimeError);
+    await expect(runtime.start()).resolves.toBeUndefined();
+    await expect(runtime.start()).rejects.toBeInstanceOf(PluginRuntimeError);
+    await runtime.stop();
   });
 });

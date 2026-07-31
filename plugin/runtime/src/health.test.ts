@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 
+import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "./errors.js";
 import { summarizeHealth } from "./health.js";
 import { RUNTIME_VERSION } from "./version.js";
 
@@ -45,13 +46,34 @@ describe("summarizeHealth", () => {
   });
 
   test("rejects two checks with the same name", () => {
-    expect(() => summarizeHealth("0.1.0", [ok("a"), ok("a")])).toThrow(/duplicate health check/);
+    expect(() => summarizeHealth("0.1.0", [ok("a"), ok("a")])).toThrow(PluginRuntimeError);
+    try {
+      summarizeHealth("0.1.0", [ok("a"), ok("a")]);
+    } catch (error) {
+      expect(error).toMatchObject({ code: RUNTIME_ERROR_CODES.healthInvalid });
+    }
+  });
+
+  test("rejects a check with an empty name", () => {
+    expect(() =>
+      summarizeHealth("0.1.0", [{ name: "  ", ok: true, detail: "ready", remedy: null }]),
+    ).toThrow(PluginRuntimeError);
+    try {
+      summarizeHealth("0.1.0", [{ name: "  ", ok: true, detail: "ready", remedy: null }]);
+    } catch (error) {
+      expect(error).toMatchObject({ code: RUNTIME_ERROR_CODES.healthInvalid });
+    }
   });
 
   test("rejects a check with an empty detail", () => {
     expect(() =>
       summarizeHealth("0.1.0", [{ name: "a", ok: false, detail: "", remedy: null }]),
-    ).toThrow(/detail/);
+    ).toThrow(PluginRuntimeError);
+    try {
+      summarizeHealth("0.1.0", [{ name: "a", ok: false, detail: "", remedy: null }]);
+    } catch (error) {
+      expect(error).toMatchObject({ code: RUNTIME_ERROR_CODES.healthInvalid });
+    }
   });
 });
 

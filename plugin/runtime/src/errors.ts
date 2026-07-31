@@ -17,6 +17,7 @@ export class PluginRuntimeError extends Error {
 /** The codes the runtime container itself raises. */
 export const RUNTIME_ERROR_CODES = Object.freeze({
   configInvalid: "config-invalid",
+  healthInvalid: "health-invalid",
   runtimeAlreadyStarted: "runtime-already-started",
   runtimeNotStarted: "runtime-not-started",
   capabilityStartFailed: "capability-start-failed",

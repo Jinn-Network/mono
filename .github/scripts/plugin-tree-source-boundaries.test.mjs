@@ -8,6 +8,11 @@ const root = resolve(import.meta.dirname, '../..');
 const tree = join(root, 'plugin');
 const runtimeSource = join(tree, 'runtime', 'src');
 
+// Every npm package under plugin/ that the boundary scan must cover. The discovery test
+// below proves this list matches the live tree so a new package cannot be inventoried
+// while silently omitted from custody and import scans.
+const BOUNDARY_SCANNED_PACKAGES = ['runtime'];
+
 // Floor on how many files the real-tree scan visits, so a future source move cannot make
 // the scan silently pass zero files (custody-boundaries.test.mjs precedent).
 const MIN_SCANNED_FILES = 8;
@@ -28,10 +33,11 @@ const FROZEN_TRIO_ROOTS = [
 
 // The composition table of design §6.1, plus the two packages the program commissions
 // (C1 evidence-trajectory, C2 evidence-trace-decode) and the third-party libraries the
-// design names. Being permitted here grants nothing on its own — the inventory guard's
-// dependency graph is what admits a dependency. This list exists so that a normal
-// dependency addition by C4-C7 needs no edit to the boundary contract, and so that
-// anything NOT on it is a deliberate, reviewed decision.
+// design names. PERMITTED_PACKAGES is authoritative for runtime install-time dependency
+// declarations (dependencies, optionalDependencies, peerDependencies); devDependencies
+// remain free for tooling. Being permitted grants nothing on its own — the inventory
+// guard's dependency graph is what admits a Jinn dependency. Anything NOT on this list
+// requires a reviewed edit to both the list and the plan.
 const PERMITTED_PACKAGES = [
   '@jinn-network/evidence-catalog-sqlite',
   '@jinn-network/evidence-derivation',
@@ -188,6 +194,23 @@ function manifest(directory) {
   return JSON.parse(readFileSync(join(tree, directory, 'package.json'), 'utf8'));
 }
 
+function discoveredPluginPackageDirectories() {
+  if (!existsSync(tree)) return [];
+  return readdirSync(tree, { withFileTypes: true }).flatMap((entry) => {
+    if (!entry.isDirectory() || entry.name === 'node_modules') return [];
+    const child = join(tree, entry.name);
+    return existsSync(join(child, 'package.json')) ? [entry.name] : [];
+  }).sort();
+}
+
+function undeclaredRuntimeDependencies(manifest) {
+  return ['dependencies', 'optionalDependencies', 'peerDependencies'].flatMap((section) =>
+    Object.keys(manifest[section] ?? {})
+      .filter((dependency) => !PERMITTED_PACKAGES.includes(dependency))
+      .map((dependency) => `${section}:${dependency}`),
+  ).sort();
+}
+
 /** A `./`-prefixed relative specifier from `fixtureDir` to `target`. */
 function localSpecifier(fixtureDir, target) {
   const specifier = relative(fixtureDir, target).replaceAll('\\', '/');
@@ -206,8 +229,47 @@ const PROCESS_SURFACES = [
   [/process\s*(?:\.|\?\.)\s*env\b/g, 'process.env'],
   [/process\s*(?:\.|\?\.)\s*argv\b/g, 'process.argv'],
   [/process\s*(?:\.|\?\.)\s*stdout\b/g, 'process.stdout'],
+  [/process\s*\[\s*["'](?:env|argv|stdout)["']\s*\]/g, 'process bracket access'],
   [/(?<![\w$."'\x60])console\s*(?:\.|\?\.)\s*(?:log|info|debug|table|dir)\s*\(/g, 'console stdout write'],
 ];
+
+const PROCESS_MODULE_SPECIFIERS = new Set(['node:process', 'process']);
+
+// Tier-4 runtime may not acquire filesystem or subprocess primitives directly; stack
+// packages encapsulate these (custody-boundaries.test.mjs precedent).
+const FORBIDDEN_RUNTIME_DIRECT_IMPORTS = [
+  'node:fs',
+  'fs',
+  'node:child_process',
+  'child_process',
+];
+
+function processModuleImportsInFiles(sourceFiles) {
+  return sourceFiles.flatMap((file) =>
+    specifiers(readFileSync(file, 'utf8')).flatMap((specifier) =>
+      PROCESS_MODULE_SPECIFIERS.has(specifier)
+        ? [`${relative(root, file)} -> import ${specifier}`]
+        : []),
+  ).sort();
+}
+
+function processAliasUsesInFiles(sourceFiles) {
+  return sourceFiles.flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    const aliases = [...source.matchAll(/\b(?:const|let|var)\s+(\w+)\s*=\s*process\b/g)]
+      .map((match) => match[1]);
+    if (aliases.length === 0) return [];
+    return aliases.flatMap((alias) => {
+      const dotted = new RegExp(String.raw`\b${alias}\s*(?:\.|\?\.)\s*(?:env|argv|stdout)\b`, 'g');
+      const bracket = new RegExp(
+        String.raw`\b${alias}\s*\[\s*["'](?:env|argv|stdout)["']\s*\]`,
+        'g',
+      );
+      return [...source.matchAll(dotted), ...source.matchAll(bracket)]
+        .map(() => `${relative(root, file)} -> process alias ${alias}`);
+    });
+  }).sort();
+}
 
 function processSurfaceUsesInFiles(sourceFiles) {
   return sourceFiles.flatMap((file) => {
@@ -215,6 +277,26 @@ function processSurfaceUsesInFiles(sourceFiles) {
     return PROCESS_SURFACES.flatMap(([pattern, label]) =>
       [...source.matchAll(pattern)].map(() => `${relative(root, file)} -> ${label}`));
   }).sort();
+}
+
+function collectProcessCustodyViolations(sourceFiles) {
+  return [
+    ...processSurfaceUsesInFiles(sourceFiles),
+    ...processModuleImportsInFiles(sourceFiles),
+    ...processAliasUsesInFiles(sourceFiles),
+  ].sort();
+}
+
+function directImportForbidden(specifier) {
+  return FORBIDDEN_RUNTIME_DIRECT_IMPORTS.some((forbidden) =>
+    specifier === forbidden || specifier.startsWith(`${forbidden}/`));
+}
+
+function forbiddenDirectImportsInFiles(sourceFiles) {
+  return sourceFiles.flatMap((file) =>
+    specifiers(readFileSync(file, 'utf8')).flatMap((specifier) =>
+      directImportForbidden(specifier) ? [`${relative(root, file)} -> ${specifier}`] : []),
+  ).sort();
 }
 
 // Custody law C3: signer objects only. Key-construction helpers and key-material
@@ -233,7 +315,7 @@ function keyMaterialUsesInFiles(sourceFiles) {
   }).sort();
 }
 
-test('the process-surface scanner catches env, argv, stdout, and console writes', () => {
+test('the process-surface scanner catches env, argv, stdout, bracket access, and console writes', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-custody-'));
   try {
     const source = join(fixture, 'src');
@@ -242,16 +324,86 @@ test('the process-surface scanner catches env, argv, stdout, and console writes'
       'const home = process.env.JINN_PLUGIN_HOME;',
       'const args = process.argv.slice(2);',
       'process.stdout.write("leak");',
+      'const bracket = process["env"];',
       'console.log("leak");',
       'console.info("leak");',
     ].join('\n'));
-    assert.equal(processSurfaceUsesInFiles(files(source)).length, 5);
+    assert.equal(processSurfaceUsesInFiles(files(source)).length, 6);
     writeFileSync(join(source, 'clean.ts'), [
       'export const resolve = (env: Record<string, string | undefined>) => env.JINN_PLUGIN_HOME;',
       'console.error("diagnostics go to stderr");',
     ].join('\n'));
     assert.deepEqual(processSurfaceUsesInFiles([join(source, 'clean.ts')]), []);
   } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('the hardened process-surface scanner catches module imports and alias acquisition', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-custody-bypass-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'import-node.ts'), [
+      'import { env, argv, stdout } from "node:process";',
+      'export const leak = [env, argv, stdout];',
+    ].join('\n'));
+    writeFileSync(join(source, 'import-bare.ts'), [
+      'import process from "process";',
+      'export const args = process.argv;',
+    ].join('\n'));
+    writeFileSync(join(source, 'alias.ts'), [
+      'const p = process;',
+      'export const home = p.env;',
+    ].join('\n'));
+    const scanned = [
+      join(source, 'import-node.ts'),
+      join(source, 'import-bare.ts'),
+      join(source, 'alias.ts'),
+    ];
+    assert.ok(processModuleImportsInFiles(scanned).length >= 2);
+    assert.ok(processAliasUsesInFiles(scanned).length >= 1);
+    assert.ok(collectProcessCustodyViolations(scanned).length >= 3);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('production runtime source must not directly import node:fs or node:child_process', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-direct-import-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'source.ts'), [
+      'import { readFileSync } from "node:fs";',
+      'import { spawn } from "node:child_process";',
+      'import { readFile } from "node:fs/promises";',
+      'require("fs");',
+    ].join('\n'));
+    assert.equal(forbiddenDirectImportsInFiles(files(source)).length, 4);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('undeclared third-party runtime dependencies are rejected', () => {
+  assert.deepEqual(
+    undeclaredRuntimeDependencies({ dependencies: { zod: '4.4.3' } }),
+    [],
+  );
+  assert.deepEqual(
+    undeclaredRuntimeDependencies({ dependencies: { lodash: '4.17.21' } }),
+    ['dependencies:lodash'],
+  );
+  assert.ok(
+    undeclaredRuntimeDependencies({
+      dependencies: { zod: '4.4.3' },
+      devDependencies: { vitest: '4.1.8', lodash: '4.17.21' },
+    }).length === 0,
+    'devDependencies remain free for tooling',
+  );
+});
+
+test('every plugin-tree npm package is covered by the source-boundary scan', () => {
+  assert.deepEqual(
+    discoveredPluginPackageDirectories(),
+    [...BOUNDARY_SCANNED_PACKAGES].sort(),
+    'every package.json under plugin/ must be listed in BOUNDARY_SCANNED_PACKAGES',
+  );
 });
 
 test('the key-material scanner catches construction helpers and parameter names', () => {
@@ -273,7 +425,7 @@ test('ambient process surfaces are confined to the binary, and no key material e
   const sourceFiles = files(runtimeSource);
   const nonBin = sourceFiles.filter((file) => file !== binEntry);
   assert.deepEqual(
-    processSurfaceUsesInFiles(nonBin),
+    collectProcessCustodyViolations(nonBin),
     [],
     'only plugin/runtime/src/bin.ts may read the ambient environment or write stdout — '
       + 'configuration is injected (custody law C2) and stdout is reserved for the MCP '
@@ -285,6 +437,13 @@ test('ambient process surfaces are confined to the binary, and no key material e
     [],
     'the runtime holds no keys and accepts no key material in any parameter position '
       + '(custody law C3)',
+  );
+  const production = sourceFiles.filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
+  const productionNonBin = production.filter((file) => file !== binEntry);
+  assert.deepEqual(
+    forbiddenDirectImportsInFiles(productionNonBin),
+    [],
+    'plugin/runtime production source must not directly import node:fs or node:child_process',
   );
 });
 
@@ -435,11 +594,16 @@ test('plugin tree source boundaries hold and the manifest matches the approved s
       + 'no ./testing export (spec §9.4)',
   );
   assert.deepEqual(runtimeManifest.exports['.'], {
-    import: './dist/index.js',
     types: './dist/index.d.ts',
+    import: './dist/index.js',
   });
   assert.deepEqual(runtimeManifest.bin, { 'jinn-plugin-runtime': './dist/bin.js' });
   assert.deepEqual(runtimeManifest.files.sort(), ['README.md', 'dist/']);
+  assert.deepEqual(
+    undeclaredRuntimeDependencies(runtimeManifest),
+    [],
+    'every runtime install-time dependency must be on PERMITTED_PACKAGES',
+  );
   for (const section of [
     'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
   ]) {
@@ -447,10 +611,6 @@ test('plugin tree source boundaries hold and the manifest matches the approved s
       assert.ok(
         !FORBIDDEN_PACKAGES.some((forbidden) => packageSpecifierMatches(dependency, forbidden)),
         `runtime may not declare ${dependency} in ${section}`,
-      );
-      assert.ok(
-        PERMITTED_PACKAGES.includes(dependency) || !dependency.startsWith('@jinn-network/'),
-        `runtime declares Jinn dependency ${dependency}, which is not on the permitted list`,
       );
     }
   }

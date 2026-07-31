@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -13,6 +14,27 @@ const consumerRoot = join(temporaryRoot, 'consumer');
 const packages = [
   ['runtime', '@jinn-network/plugin-runtime'],
 ];
+
+// Every npm package under plugin/ that the packed-types canary must compile against.
+// The discovery assertion below proves this list matches the live tree.
+const PACKED_TYPES_PACKAGES = packages.map(([directory]) => directory);
+
+function discoveredPluginPackageDirectories() {
+  if (!existsSync(treeRoot)) return [];
+  return readdirSync(treeRoot, { withFileTypes: true }).flatMap((entry) => {
+    if (!entry.isDirectory() || entry.name === 'node_modules') return [];
+    const child = join(treeRoot, entry.name);
+    return existsSync(join(child, 'package.json')) ? [entry.name] : [];
+  }).sort();
+}
+
+const discovered = discoveredPluginPackageDirectories();
+if (JSON.stringify(discovered) !== JSON.stringify([...PACKED_TYPES_PACKAGES].sort())) {
+  throw new Error(
+    `every package.json under plugin/ must be listed in plugin-tree-packed-types packages `
+      + `(discovered ${JSON.stringify(discovered)}, declared ${JSON.stringify(PACKED_TYPES_PACKAGES)})`,
+  );
+}
 
 const codeEntrypoints = [
   '@jinn-network/plugin-runtime',

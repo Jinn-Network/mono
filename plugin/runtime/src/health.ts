@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "./errors.js";
+
 /**
  * One doctor check. `remedy` is `null` when the state is not fixable from this machine —
  * a channel outage, for example — so the host adapter reports a known-outage state
@@ -26,13 +28,22 @@ export function summarizeHealth(
   const seen = new Set<string>();
   for (const check of checks) {
     if (check.name.trim() === "") {
-      throw new Error("a health check must have a name");
+      throw new PluginRuntimeError(
+        RUNTIME_ERROR_CODES.healthInvalid,
+        "a health check must have a name",
+      );
     }
     if (check.detail.trim() === "") {
-      throw new Error(`health check ${check.name} must have a detail`);
+      throw new PluginRuntimeError(
+        RUNTIME_ERROR_CODES.healthInvalid,
+        `health check ${check.name} must have a detail`,
+      );
     }
     if (seen.has(check.name)) {
-      throw new Error(`duplicate health check name: ${check.name}`);
+      throw new PluginRuntimeError(
+        RUNTIME_ERROR_CODES.healthInvalid,
+        `duplicate health check name: ${check.name}`,
+      );
     }
     seen.add(check.name);
   }
