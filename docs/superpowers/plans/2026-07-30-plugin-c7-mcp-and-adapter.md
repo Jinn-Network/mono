@@ -6971,3 +6971,8 @@ decided once rather than negotiated at integration.
 
 *Raised:* Task 12 implementation (2026-07-31).
 *Disposition:* build it (test adapted). Plan monkeypatch did not place plugin_dir under HERMES_HOME/plugins. Tests now assert False for repo checkout and True when plugin_dir is under tmp_path/plugins/jinn. Added `__init__.py` for conftest package load.
+
+**F-C7-T19-1 — Adapter session spawn hit F-C4-T13-2: CLI serve --role session has no captureSigner.**
+
+*Raised:* Task 19 implementation (2026-07-31).
+*Disposition:* blocking for Gate C7 until Task 20 session-host bridge. `bin.ts` process entry must not inject `captureSigner` (surface test). Adapter spawned `jinn-plugin-runtime serve --role session` which exits without a host-injected signer. Unit tests used FakeClient and did not catch this. Task 20 must add a separate session-host composition entry that injects a local-only signer and retarget `spawn_session_client`.
