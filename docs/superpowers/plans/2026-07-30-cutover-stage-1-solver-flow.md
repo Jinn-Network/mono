@@ -4603,3 +4603,85 @@ client's runtime `dependencies` to satisfy the rule. Worth fixing in venue-base.
 - After Task 0: the same, plus the single E10 Docker-guard assertion.
 - Tasks 1–3 targeted suites: `test/config` **154 passed**, shape-v2 **7 passed**, atomic-write
   **5 passed**, migrate-shape-v2 **9 passed**.
+
+## Execution findings (2026-07-31, continued — Tasks 4 onward)
+
+Recorded by the adopting coordinator. The Tasks 0–3 findings above stand unchanged; the
+E-numbering continues.
+
+### E12 — a pinned inventory has to move with the surface it pins (fixed in scope)
+
+Two tasks added a symbol to a list that a test pins verbatim, and the plan mentioned neither:
+Task 4's `config_migrated` against `CANONICAL_KINDS` in
+`client/src/dashboard/spa/src/notifications/taxonomy.test.ts`, and Task 5's two new exports
+against the public-surface list in `packages/marketplace/pipeline/src/index.test.ts`. The plan
+defers the first to Task 17 ("Task 17 adds the three new stage-1 kinds to both sides"), which
+would have left a knowingly-red test standing across thirteen tasks — and a red suite you have
+learned to ignore stops being a signal for anything else. **Disposition:** the registry moves in
+the same commit as the symbol. Updating a pinned inventory to the new true inventory is not
+weakening a test; relaxing an assertion to hide a behavioral failure is, and that never
+happened here. `client/OPERATOR-APP-SPEC.md` §2.10 gained the matching `config_migrated` entry
+so code and canonical doc stay in step at every commit. Task 17 adds its two remaining kinds
+the same way.
+
+### E13 — Task 4's test literals crash rather than fail
+
+The plan's Task 4 Step-1 tests call `buildStatus(...)`, which does not exist — the real export
+is `assembleStatusV1` — and pass `{ configMigration } as never`, which throws before reaching
+any assertion (`assembleStatusV1` dereferences `raw.master.balanceWei` unconditionally, and
+`deriveNotifications` dereferences `input.bootstrap.mode`). Replaced with full fixtures mirroring
+each file's existing patterns, so the tests exercise real behavior. Assertions unchanged.
+
+### E14 — the fence no longer runs per retry attempt (behavior change, accepted)
+
+The deleted `executeSafeTransactionInner` re-evaluated `options.beforeBroadcast` on **every**
+retry attempt of a Safe execution. Task 7's chokepoint runs it exactly once, before handing the
+call to venue-base, because retries now live inside the venue broadcaster where the host's fence
+is not reachable. For the surviving legacy legs the fence is a claim-window / readiness gate, so
+firing it once at admission is the semantically defensible reading — but it **is** a behavior
+change, not a refactor, and it is the kind that only shows up under a slow chain. It belongs in
+venue-base's kit as a per-attempt fence hook if the per-attempt semantics are wanted back.
+
+### E15 — three deleted Safe cases have no venue-base counterpart
+
+Contract 12 says legacy behavior re-enters as venue-base kit fixtures. venue-base is outside this
+plan's write scope, so Task 7 deleted the client-side cases and audited coverage instead of
+moving them. Covered by venue-base today: nonce-too-low pinned-nonce refresh; reconcile on
+nonce-too-low; refusal to reconcile a foreign tx at the same nonce; receipt-path stale-nonce
+retryable while still owner. **Not covered — real coverage lost until venue-base's kit gains
+them:**
+
+1. estimate-path `GS026` retried while still owner,
+2. receipt-path `GS026` terminal when not owner,
+3. fence re-checked on every retry attempt (see E14 — the behavior itself is gone, so this one
+   is a decision to ratify, not a test to port).
+
+Partially covered: `SafePostBroadcastHookError` on an `onBroadcast` throw (client-only concept,
+retained and tested client-side); `GS026` priority over an unrelated inner revert
+(GS026-as-terminal is covered, the priority ordering is not); hook-fires-after-ledger-record
+(the ledger-before-wait mechanic is covered, the client hook interleaving is not).
+
+### E16 — the single broadcaster is a process-global, and three entry points never install one
+
+`executeSafeTransaction` now hard-fails with `no venue broadcaster installed` unless a
+composition root has called `setVenueBroadcaster`. Task 12 installs it before `new Daemon(...)`
+in `main.ts`, which covers the daemon. It does **not** cover:
+
+1. **Standalone CLI verbs** — `jinn tasks submit` (→ `contracts.ts submitTask`),
+   `jinn solver-plugins publish` / `revoke` (→ `erc8004/plugin-registry.ts`),
+   `jinn solver-plugins block` / `feedback` (→ `erc8004/reputation.ts`). Each is a real operator
+   surface that breaks at runtime until it installs a broadcaster of its own.
+   (`jinn solver-plugins read` is unaffected — no Safe write.)
+2. **The hermetic and e2e harnesses** — `test/hermetic/adapter-claim-delivery.test.ts`,
+   `test/hermetic/full-loop.test.ts`, and everything built by `startDaemon()` in
+   `client/test/e2e/_daemon-harness-helpers.ts`. All are excluded from the default `yarn test`
+   and run under separate gates, so the default suite stays green while these are broken.
+   **This is the gap most likely to be mistaken for "done".**
+3. A **design question the plan never asks**: the broadcaster is a module-level singleton, but
+   release scenario T2.2 runs several daemons in one process. One global broadcaster cannot
+   serve two Safes. The mismatched-Safe rejection added per finding E5 turns that into a loud
+   failure rather than a wrong-Safe broadcast, which is the right failure mode — but a
+   multi-daemon process still cannot work until the broadcaster is per-daemon state.
+
+Items 1 and 2 are in this stage's blast radius and are resolved at Task 12 or recorded there as
+carried gaps; item 3 needs a ruling.
