@@ -258,7 +258,7 @@ Repository files this plan edits: `plugin/runtime/package.json`, `.github/script
 - Consumes: `plugin/c3-product-tree` (the `plugin/runtime` tree, config, errors, capability seam, guards); `plugin/c1-trajectory-record` (`packages/evidence/trajectory`).
 - Produces: branch `plugin/c4-capture` whose head contains both, verified.
 
-- [ ] **Step 1: Create the branch from the base and merge C1**
+- [x] **Step 1: Create the branch from the base and merge C1**
 
 ```bash
 git fetch origin
@@ -268,7 +268,7 @@ git merge --no-ff origin/plugin/c1-trajectory-record -m "chore(plugin-runtime): 
 
 Expected: `Merge made by the 'ort' strategy.` with `packages/evidence/trajectory/**` and the four `.github/scripts/evidence-*` guard files listed. The two branches touch disjoint trees (C3 owns `plugin/**` and `.github/scripts/plugin-tree-*`; C1 owns `packages/evidence/trajectory/**` and `.github/scripts/evidence-*`), so a conflict here means one of them moved outside its lane — stop and raise it rather than resolving.
 
-- [ ] **Step 2: Prove C1 is intact on the merged head**
+- [x] **Step 2: Prove C1 is intact on the merged head**
 
 ```bash
 cd packages/evidence/trajectory && yarn install --immutable && yarn typecheck && yarn test && yarn build && yarn check:fixtures && yarn check:schemas
@@ -276,7 +276,7 @@ cd packages/evidence/trajectory && yarn install --immutable && yarn typecheck &&
 
 Expected: every command PASS; `dist/` produced.
 
-- [ ] **Step 3: Prove C3 is intact on the merged head**
+- [x] **Step 3: Prove C3 is intact on the merged head**
 
 ```bash
 cd plugin/runtime && yarn install --immutable && yarn typecheck && yarn test && yarn build
@@ -284,7 +284,7 @@ cd plugin/runtime && yarn install --immutable && yarn typecheck && yarn test && 
 
 Expected: every command PASS.
 
-- [ ] **Step 4: Prove both guard families are green on the merged head**
+- [x] **Step 4: Prove both guard families are green on the merged head**
 
 ```bash
 node --test .github/scripts/evidence-package-inventory.test.mjs
@@ -297,7 +297,7 @@ node --test .github/scripts/plugin-tree-packed-types.test.mjs
 
 Expected: all six PASS. This is the gate — if any fails, the merge is not green and no C4 work starts.
 
-- [ ] **Step 5: Push the branch and open the train's first PR against the base**
+- [x] **Step 5: Push the branch and open the train's first PR against the base**
 
 ```bash
 git push -u origin plugin/c4-capture
