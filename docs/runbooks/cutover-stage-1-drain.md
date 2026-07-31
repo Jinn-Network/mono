@@ -2,12 +2,22 @@
 
 Contract 10. Run in order. Do not deploy with step 2 unfinished.
 
-> **Do not run this runbook yet.** As executed on 2026-07-31, stage 1 does not close a loop:
-> the projector has no production event source or enrichment, so the venue's observe port is
-> stubbed empty and no code path can make the daemon claim a task. See execution finding **E20**
-> in `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md`. Step 4's gate cannot
-> pass until that follow-up lands. The runbook is written now so the drain procedure is settled
-> before it is needed, not so the deploy can proceed.
+> **Do not run this runbook yet.** The close-out leg (2026-07-31) built everything finding **E20**
+> named — the projector's production event feed, the enrich step, the durable observation stream —
+> plus a real `verifySettlementGrade`, a wired legacy bridge, and a per-daemon broadcaster. All
+> three loops now start on real ports. The loop still cannot close, for two reasons that are now
+> precisely located rather than diffuse:
+>
+> - **E32** — nothing in the repository produces a today-generation TEP `Submission` document. The
+>   legacy creator posts `SignedTaskV1`, which fails TEP validation, so the enrich step correctly
+>   drops every event and the observation stream stays empty. Needs a design decision: either the
+>   creator emits TEP Submissions, or a bridge synthesizes them.
+> - **E31** — nothing signs deliveries, so `executorBinding` reports `"missing"` and settlement is
+>   rejected. `TrustKeyConfig` currently advertises that the daemon signs deliveries when it does
+>   not. Needs a two-phase seal inside `completeAttempt`.
+>
+> See `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md`. Step 4's gate cannot pass
+> until both land. The runbook is settled now so it is ready when they do.
 
 ## 1. Stop claiming (previous canary, no new build)
 

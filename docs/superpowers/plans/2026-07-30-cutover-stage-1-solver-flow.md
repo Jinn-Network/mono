@@ -5232,3 +5232,22 @@ format.**
 projector's log source a handle, and `createBaseVenue` then opens its **own second connection to
 the same file**, because venue-base exposes no seam to accept a pre-opened handle. WAL makes this
 safe, just wasteful. Recorded rather than worked around; the fix is a venue-base signature change.
+
+### Verification state at end of the close-out leg (2026-07-31)
+
+- `client` full suite (`--no-file-parallelism`): **801 files passed / 0 failed / 9 skipped (810)**;
+  **7199 tests passed / 0 failed / 29 skipped (7228)**; exit 0. First fully green full-suite run of
+  this stage.
+- `client` typecheck **0 errors**; `yarn lint:no-late-mount` clean.
+- Touched package suites: `marketplace/pipeline` **52**, `marketplace/venue-base` **166**,
+  `task-execution/backend-local/assembly` **98 passed / 1 skipped**.
+- Guard trios: marketplace **13 / 2 / 1**, task-execution **7 / 3 / 1** — all green.
+- One regression was found only by the full suite and fixed: C2 threaded the broadcaster in at
+  argument index 2 of `claimDelivery` / `callDeliverToMarketplace`, and six assertions in
+  `test/harnesses/engine` pin those calls by index. C2's own gate covered `test/adapters`,
+  `test/daemon`, `test/erc8004` and `test/cli` but not `test/harnesses`. Same lesson as E23: a
+  per-task executor running targeted suites cannot see this class of break.
+- **`e2e:daemon-harness` — NOT RUN against stage-1 code, 4th consecutive attempt.** It fails at
+  `bootstrapStakedOperator` (`client/test/e2e/_daemon-harness-helpers.ts:516`) with the finding-E27
+  revert, which is live Base-mainnet registry state and outside this repository. The gate never
+  reaches any stage-1 code path, so it can neither confirm nor refute the loop closing.
