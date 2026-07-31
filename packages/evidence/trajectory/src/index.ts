@@ -76,6 +76,7 @@ export {
   sealTrajectoryDerivationAttestation,
   verifyTrajectoryDerivationAttestation,
   TrajectoryDerivationCancelledError,
+  TrajectoryDerivationSigningError,
   TrajectoryDerivationStatementSchema,
 } from "./derivation.js";
 export type {

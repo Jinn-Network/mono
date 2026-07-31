@@ -55,6 +55,14 @@ export class TrajectoryDerivationCancelledError extends Error {
   }
 }
 
+export class TrajectoryDerivationSigningError extends Error {
+  readonly category = "trajectory-derivation-signing-error" as const;
+  constructor(message = "trajectory derivation signing failed") {
+    super(message);
+    this.name = "TrajectoryDerivationSigningError";
+  }
+}
+
 function assertNotCancelled(signal?: AbortSignal): void {
   if (signal === undefined) return;
   if (!isGenuineAbortSignal(signal)) {
@@ -108,7 +116,9 @@ const AbsoluteIri = z
 const BareSha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/);
 
 const TrajectoryDerivationPredicateSchema = z.strictObject({
-  derivedAt: z.string(),
+  derivedAt: z
+    .string()
+    .refine(isCalendarStrictRfc3339, { message: "derivedAt must be calendar-strict RFC 3339" }),
   producer: z.strictObject({ id: z.string().min(1) }),
   trajectorySubject: z.literal(TRAJECTORY_SUBJECT_NAME),
   execution: z.strictObject({
@@ -375,7 +385,7 @@ export async function sealTrajectoryDerivationAttestation(
         throw new TrajectoryDerivationCancelledError();
       }
       if (isAbortLikeError(error)) throw new TrajectoryDerivationCancelledError();
-      throw error;
+      throw new TrajectoryDerivationSigningError();
     }
   };
 
@@ -519,6 +529,9 @@ export async function verifyTrajectoryDerivationAttestation(
     authorityResult = validated.value;
   } catch (error) {
     if (isTrajectoryDerivationCancelled(error)) throw error;
+    if (port.signal !== undefined && readAbortSignalAborted(port.signal)) {
+      throw new TrajectoryDerivationCancelledError();
+    }
     if (isAbortLikeError(error)) throw new TrajectoryDerivationCancelledError();
     const message = normalizeThrownError(error);
     return {

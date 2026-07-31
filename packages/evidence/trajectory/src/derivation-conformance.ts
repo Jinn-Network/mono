@@ -5,6 +5,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import { caseTest, caseTestManifestIntegrity } from "./conformance-case-runner.js";
 import { registerThirdReviewProbes } from "./third-review-probes.js";
+import { registerFourthReviewProbes } from "./fourth-review-probes.js";
 
 import {
   buildTrajectoryDerivationStatement,
@@ -190,6 +191,7 @@ async function verifyWith(
 export function describeTrajectoryDerivationAttestationConformance(): void {
   describe("Trajectory derivation attestation conformance", () => {
     registerThirdReviewProbes();
+    registerFourthReviewProbes();
     caseTest("build-rejects-non-calendar-strict-derived-at", () => {
       expect(() =>
         buildTrajectoryDerivationStatement({

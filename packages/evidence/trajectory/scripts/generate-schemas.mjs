@@ -11,6 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 
 const dist = await import(join(root, "dist", "index.js"));
+const otlpBounds = await import(join(root, "dist", "otlp-bounds.js"));
 
 const {
   TRAJECTORY_RECORD_KIND,
@@ -34,8 +35,36 @@ const ADMITTED_ATTRIBUTE_KEYS = [
 const UINT64_DECIMAL_PATTERN =
   "^(0|[1-9]\\d{0,18}|1[0-7]\\d{0,18}|18[0-3]\\d{0,17}|184[0-3]\\d{0,16}|1844[0-6]\\d{0,15}|18446[0-6]\\d{0,14}|184467[0-3]\\d{0,13}|1844674[0-3]\\d{0,12}|18446744[0-0]\\d{0,11}|184467440[0-6]\\d{0,10}|1844674407[0-2]\\d{0,9}|18446744073[0-6]\\d{0,8}|184467440737[0-0]\\d{0,7}|1844674407370[0-8]\\d{0,6}|18446744073709[0-4]\\d{0,5}|184467440737095[0-4]\\d{0,4}|1844674407370955[0-1]\\d{0,3}|18446744073709551[0-5]\\d{0,2}|184467440737095516[0-1]\\d{0,1}|1844674407370955161[0-5])$";
 
-const INT64_DECIMAL_PATTERN =
-  "^-?(0|[1-9]\\d{0,18}|1[0-7]\\d{0,18}|18[0-3]\\d{0,17}|184[0-3]\\d{0,16}|1844[0-6]\\d{0,15}|18446[0-6]\\d{0,14}|184467[0-3]\\d{0,13}|1844674[0-3]\\d{0,12}|18446744[0-0]\\d{0,11}|184467440[0-6]\\d{0,10}|1844674407[0-2]\\d{0,9}|18446744073[0-6]\\d{0,8}|184467440737[0-0]\\d{0,7}|1844674407370[0-8]\\d{0,6}|18446744073709[0-4]\\d{0,5}|184467440737095[0-4]\\d{0,4}|1844674407370955[0-1]\\d{0,3}|18446744073709551[0-5]\\d{0,2}|184467440737095516[0-1]\\d{0,1}|1844674407370955161[0-5])$";
+const INT64_DECIMAL_SCHEMA_NODE = otlpBounds.int64DecimalJsonSchemaNode();
+
+const ANY_VALUE_DEF = {
+  oneOf: [
+    {
+      type: "object",
+      required: ["stringValue"],
+      properties: { stringValue: { type: "string" } },
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      required: ["boolValue"],
+      properties: { boolValue: { type: "boolean" } },
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      required: ["intValue"],
+      properties: { intValue: { $ref: "#/$defs/Int64DecimalString" } },
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      required: ["doubleValue"],
+      properties: { doubleValue: { type: "string", pattern: "^-?\\d+(\\.\\d+)?$" } },
+      additionalProperties: false,
+    },
+  ],
+};
 
 function patchAttributeKeys(node) {
   if (!node || typeof node !== "object") return;
@@ -65,7 +94,7 @@ function closeUndeclaredNestedKeys(node) {
   }
 }
 
-function patchAnyValue(node) {
+function patchAnyValueRefs(node, parent, key) {
   if (!node || typeof node !== "object") return;
   if (
     node.type === "object" &&
@@ -73,20 +102,63 @@ function patchAnyValue(node) {
     node.properties?.boolValue &&
     node.properties?.intValue &&
     node.properties?.doubleValue &&
-    !node.oneOf
+    parent &&
+    key !== undefined
   ) {
-    node.oneOf = [
-      { type: "object", required: ["stringValue"], properties: { stringValue: node.properties.stringValue }, additionalProperties: false },
-      { type: "object", required: ["boolValue"], properties: { boolValue: node.properties.boolValue }, additionalProperties: false },
-      { type: "object", required: ["intValue"], properties: { intValue: node.properties.intValue }, additionalProperties: false },
-      { type: "object", required: ["doubleValue"], properties: { doubleValue: node.properties.doubleValue }, additionalProperties: false },
-    ];
-    delete node.properties;
-    delete node.additionalProperties;
+    parent[key] = { $ref: "#/$defs/AnyValue" };
+    return;
   }
-  for (const value of Object.values(node)) {
-    if (Array.isArray(value)) value.forEach(patchAnyValue);
-    else if (value && typeof value === "object") patchAnyValue(value);
+  if (node.type === "object" && node.oneOf && parent && key !== undefined) {
+    const looksLikeAnyValue = node.oneOf.every(
+      (branch) =>
+        branch.type === "object" &&
+        branch.additionalProperties === false &&
+        branch.required?.length === 1 &&
+        ["stringValue", "boolValue", "intValue", "doubleValue"].includes(branch.required[0]),
+    );
+    if (looksLikeAnyValue) {
+      parent[key] = { $ref: "#/$defs/AnyValue" };
+      return;
+    }
+  }
+  for (const [childKey, value] of Object.entries(node)) {
+    if (Array.isArray(value)) {
+      value.forEach((entry, index) => {
+        if (entry && typeof entry === "object") patchAnyValueRefs(entry, value, index);
+      });
+    } else if (value && typeof value === "object") {
+      patchAnyValueRefs(value, node, childKey);
+    }
+  }
+}
+
+function assertIntValueLaw(schema) {
+  const violations = [];
+  const expected = { $ref: "#/$defs/Int64DecimalString" };
+
+  function walk(node, path) {
+    if (!node || typeof node !== "object") return;
+    if (node.properties?.intValue) {
+      const actual = node.properties.intValue;
+      const matches =
+        actual.$ref === expected.$ref ||
+        JSON.stringify(actual) === JSON.stringify(INT64_DECIMAL_SCHEMA_NODE);
+      if (!matches) {
+        violations.push(`${path}.properties.intValue`);
+      }
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (Array.isArray(value)) {
+        value.forEach((entry, index) => walk(entry, `${path}/${key}[${index}]`));
+      } else if (value && typeof value === "object") {
+        walk(value, `${path}/${key}`);
+      }
+    }
+  }
+
+  walk(schema, "");
+  if (violations.length > 0) {
+    throw new Error(`intValue nodes diverge from Int64DecimalString law: ${violations.join(", ")}`);
   }
 }
 
@@ -149,17 +221,11 @@ function buildTrajectoryRecordSchema() {
         },
       ],
     },
-    AnyValue: {
-      oneOf: [
-        { type: "object", required: ["stringValue"], properties: { stringValue: { type: "string" } }, additionalProperties: false },
-        { type: "object", required: ["boolValue"], properties: { boolValue: { type: "boolean" } }, additionalProperties: false },
-        { type: "object", required: ["intValue"], properties: { intValue: { type: "string", pattern: INT64_DECIMAL_PATTERN } }, additionalProperties: false },
-        { type: "object", required: ["doubleValue"], properties: { doubleValue: { type: "string", pattern: "^-?\\d+(\\.\\d+)?$" } }, additionalProperties: false },
-      ],
-    },
+    Int64DecimalString: INT64_DECIMAL_SCHEMA_NODE,
+    AnyValue: ANY_VALUE_DEF,
   };
 
-  patchAnyValue(schema);
+  patchAnyValueRefs(schema);
   patchExtensionSurface(schema, Object.keys(schema.properties ?? {}));
 
   const nativeTrace = schema.properties?.source?.properties?.nativeTrace;
@@ -168,6 +234,7 @@ function buildTrajectoryRecordSchema() {
   }
 
   patchUint64Timestamps(schema);
+  assertIntValueLaw(schema);
 
   schema.allOf = [
     {
@@ -238,6 +305,7 @@ function buildTrajectoryRecordSchema() {
     "JsonExtensionValue numbers are I-JSON safe integers only (±9007199254740991).",
     "AnyValue must carry exactly one OTLP variant (stringValue, boolValue, intValue, or doubleValue).",
     "OTLP uint64 timestamps are decimal strings 0..18446744073709551615; intValue is int64 decimal.",
+    "derivedAt calendar-strict RFC 3339 refinements on derivation statements are enforced at runtime.",
   ].join(" ");
 
   return schema;
@@ -253,6 +321,30 @@ function buildDerivationStatementSchema() {
   schema.title = "Jinn Trajectory derivation statement";
   schema.additionalProperties = false;
 
+  if (schema.properties?.subject) {
+    schema.properties.subject = {
+      type: "array",
+      minItems: 1,
+      maxItems: 1,
+      items: schema.properties.subject.prefixItems?.[0] ?? {
+        type: "object",
+        properties: {
+          name: { type: "string", const: "trajectory.json" },
+          digest: {
+            type: "object",
+            properties: { sha256: { type: "string", pattern: "^[0-9a-f]{64}$" } },
+            required: ["sha256"],
+            additionalProperties: false,
+          },
+          mediaType: { type: "string", const: "application/vnd.jinn.trajectory.v1+json" },
+        },
+        required: ["name", "digest", "mediaType"],
+        additionalProperties: false,
+      },
+    };
+    delete schema.properties.subject.prefixItems;
+  }
+
   if (schema.properties?.predicate?.properties?.linkageMode) {
     schema.properties.predicate.properties.linkageMode = {
       type: "string",
@@ -262,6 +354,12 @@ function buildDerivationStatementSchema() {
   if (schema.properties?.predicate?.properties?.timebase) {
     schema.properties.predicate.properties.timebase = { type: "string", enum: [...TIMEBASES] };
   }
+  if (schema.properties?.predicate?.properties?.derivedAt) {
+    schema.properties.predicate.properties.derivedAt = {
+      type: "string",
+      format: "date-time",
+    };
+  }
 
   closeUndeclaredNestedKeys(schema);
 
@@ -269,6 +367,8 @@ function buildDerivationStatementSchema() {
     "Structural validation of the decoded DSSE/in-toto statement payload only.",
     "Does not validate envelope signatures or authority trust.",
     "linkageMode is required and closed to forward-linked | sealed-parent.",
+    "subject must contain exactly one trajectory.json entry.",
+    "derivedAt uses format date-time; calendar-strict RFC 3339 (leap days, timezone, no Date.parse rollover) is enforced at runtime.",
   ].join(" ");
 
   return schema;

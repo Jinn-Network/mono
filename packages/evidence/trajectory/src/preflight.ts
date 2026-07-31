@@ -19,7 +19,12 @@ function trapMessage(cause: unknown): string {
 
 function isPlainDataObject(value: object, path: string): boolean {
   if (isProxy(value)) unsupported("proxy", path);
-  const prototype = Object.getPrototypeOf(value);
+  let prototype: object | null;
+  try {
+    prototype = Object.getPrototypeOf(value);
+  } catch {
+    unsupported("proxy", path);
+  }
   return prototype === Object.prototype || prototype === null;
 }
 

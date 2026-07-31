@@ -186,59 +186,7 @@
                   ]
                 },
                 "value": {
-                  "type": "object",
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "required": [
-                        "stringValue"
-                      ],
-                      "properties": {
-                        "stringValue": {
-                          "type": "string"
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "required": [
-                        "boolValue"
-                      ],
-                      "properties": {
-                        "boolValue": {
-                          "type": "boolean"
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "required": [
-                        "intValue"
-                      ],
-                      "properties": {
-                        "intValue": {
-                          "type": "string",
-                          "pattern": "^-?(0|[1-9]\\d*)$"
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "required": [
-                        "doubleValue"
-                      ],
-                      "properties": {
-                        "doubleValue": {
-                          "type": "string",
-                          "pattern": "^-?\\d+(\\.\\d+)?$"
-                        }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
+                  "$ref": "#/$defs/AnyValue"
                 }
               },
               "required": [
@@ -286,59 +234,7 @@
                         ]
                       },
                       "value": {
-                        "type": "object",
-                        "oneOf": [
-                          {
-                            "type": "object",
-                            "required": [
-                              "stringValue"
-                            ],
-                            "properties": {
-                              "stringValue": {
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "boolValue"
-                            ],
-                            "properties": {
-                              "boolValue": {
-                                "type": "boolean"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "intValue"
-                            ],
-                            "properties": {
-                              "intValue": {
-                                "type": "string",
-                                "pattern": "^-?(0|[1-9]\\d*)$"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "doubleValue"
-                            ],
-                            "properties": {
-                              "doubleValue": {
-                                "type": "string",
-                                "pattern": "^-?\\d+(\\.\\d+)?$"
-                              }
-                            },
-                            "additionalProperties": false
-                          }
-                        ]
+                        "$ref": "#/$defs/AnyValue"
                       }
                     },
                     "required": [
@@ -493,6 +389,167 @@
         }
       ]
     },
+    "Int64DecimalString": {
+      "type": "string",
+      "allOf": [
+        {
+          "pattern": "^-?(0|[1-9]\\d*)$"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "pattern": "^922337203685477580[89]\\d*$"
+              },
+              {
+                "pattern": "^92233720368547759\\d+$"
+              },
+              {
+                "pattern": "^9223372036854776\\d+$"
+              },
+              {
+                "pattern": "^922337203685477[89]\\d*$"
+              },
+              {
+                "pattern": "^922337203685478\\d*$"
+              },
+              {
+                "pattern": "^92233720368548\\d*$"
+              },
+              {
+                "pattern": "^9223372036855\\d+$"
+              },
+              {
+                "pattern": "^9223372036856\\d+$"
+              },
+              {
+                "pattern": "^9223372036857\\d+$"
+              },
+              {
+                "pattern": "^9223372036858\\d+$"
+              },
+              {
+                "pattern": "^9223372036859\\d+$"
+              },
+              {
+                "pattern": "^922337203686\\d*$"
+              },
+              {
+                "pattern": "^92233720369\\d+$"
+              },
+              {
+                "pattern": "^9223372037\\d+$"
+              },
+              {
+                "pattern": "^922337203[89]\\d*$"
+              },
+              {
+                "pattern": "^922337204\\d+$"
+              },
+              {
+                "pattern": "^92233721\\d+$"
+              },
+              {
+                "pattern": "^9223373\\d+$"
+              },
+              {
+                "pattern": "^922338\\d+$"
+              },
+              {
+                "pattern": "^92234\\d+$"
+              },
+              {
+                "pattern": "^9224\\d+$"
+              },
+              {
+                "pattern": "^923\\d+$"
+              },
+              {
+                "pattern": "^93\\d+$"
+              },
+              {
+                "pattern": "^[1-9]\\d{19,}$"
+              },
+              {
+                "pattern": "^-9223372036854775809$"
+              },
+              {
+                "pattern": "^-92233720368547758[1-9]\\d*$"
+              },
+              {
+                "pattern": "^-92233720368547759\\d*$"
+              },
+              {
+                "pattern": "^-9223372036854776\\d+$"
+              },
+              {
+                "pattern": "^-922337203685477[89]\\d*$"
+              },
+              {
+                "pattern": "^-922337203685478\\d*$"
+              },
+              {
+                "pattern": "^-92233720368548\\d*$"
+              },
+              {
+                "pattern": "^-9223372036855\\d+$"
+              },
+              {
+                "pattern": "^-9223372036856\\d+$"
+              },
+              {
+                "pattern": "^-9223372036857\\d+$"
+              },
+              {
+                "pattern": "^-9223372036858\\d+$"
+              },
+              {
+                "pattern": "^-9223372036859\\d+$"
+              },
+              {
+                "pattern": "^-922337203686\\d*$"
+              },
+              {
+                "pattern": "^-92233720369\\d+$"
+              },
+              {
+                "pattern": "^-9223372037\\d+$"
+              },
+              {
+                "pattern": "^-922337203[89]\\d*$"
+              },
+              {
+                "pattern": "^-922337204\\d+$"
+              },
+              {
+                "pattern": "^-92233721\\d+$"
+              },
+              {
+                "pattern": "^-9223373\\d+$"
+              },
+              {
+                "pattern": "^-922338\\d+$"
+              },
+              {
+                "pattern": "^-92234\\d+$"
+              },
+              {
+                "pattern": "^-9224\\d+$"
+              },
+              {
+                "pattern": "^-923\\d+$"
+              },
+              {
+                "pattern": "^-93\\d+$"
+              },
+              {
+                "pattern": "^-[1-9]\\d{19,}$"
+              }
+            ]
+          }
+        }
+      ]
+    },
     "AnyValue": {
       "oneOf": [
         {
@@ -526,8 +583,7 @@
           ],
           "properties": {
             "intValue": {
-              "type": "string",
-              "pattern": "^-?(0|[1-9]\\d{0,18}|1[0-7]\\d{0,18}|18[0-3]\\d{0,17}|184[0-3]\\d{0,16}|1844[0-6]\\d{0,15}|18446[0-6]\\d{0,14}|184467[0-3]\\d{0,13}|1844674[0-3]\\d{0,12}|18446744[0-0]\\d{0,11}|184467440[0-6]\\d{0,10}|1844674407[0-2]\\d{0,9}|18446744073[0-6]\\d{0,8}|184467440737[0-0]\\d{0,7}|1844674407370[0-8]\\d{0,6}|18446744073709[0-4]\\d{0,5}|184467440737095[0-4]\\d{0,4}|1844674407370955[0-1]\\d{0,3}|18446744073709551[0-5]\\d{0,2}|184467440737095516[0-1]\\d{0,1}|1844674407370955161[0-5])$"
+              "$ref": "#/$defs/Int64DecimalString"
             }
           },
           "additionalProperties": false
@@ -641,5 +697,5 @@
       }
     }
   ],
-  "$comment": "Structural validation only. Runtime refinements not expressible here: traceId must equal the value derived from source.nativeTrace.digest, formatIri, and derivation; each spanId must equal the value derived from traceId and its ordinal; parentSpanId must reference an earlier span in this record; attributes must be sorted by key and unique; source.execution is removed — execution binding is via derivation attestation and forward link. JsonExtensionValue numbers are I-JSON safe integers only (±9007199254740991). AnyValue must carry exactly one OTLP variant (stringValue, boolValue, intValue, or doubleValue). OTLP uint64 timestamps are decimal strings 0..18446744073709551615; intValue is int64 decimal."
+  "$comment": "Structural validation only. Runtime refinements not expressible here: traceId must equal the value derived from source.nativeTrace.digest, formatIri, and derivation; each spanId must equal the value derived from traceId and its ordinal; parentSpanId must reference an earlier span in this record; attributes must be sorted by key and unique; source.execution is removed — execution binding is via derivation attestation and forward link. JsonExtensionValue numbers are I-JSON safe integers only (±9007199254740991). AnyValue must carry exactly one OTLP variant (stringValue, boolValue, intValue, or doubleValue). OTLP uint64 timestamps are decimal strings 0..18446744073709551615; intValue is int64 decimal. derivedAt calendar-strict RFC 3339 refinements on derivation statements are enforced at runtime."
 }

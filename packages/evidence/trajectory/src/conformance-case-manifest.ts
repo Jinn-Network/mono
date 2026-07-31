@@ -70,6 +70,19 @@ export const TRAJECTORY_DERIVATION_CONFORMANCE_CASE_IDS = Object.freeze([
   "otlp-int64-minus-zero-pass",
   "derivation-statement-schema-ajv-forward-linked",
   "derivation-statement-schema-ajv-sealed-parent",
+  "ajv-packed-int64-overflow-fails",
+  "ajv-packed-int64-min-boundary-pass",
+  "statement-schema-subject-empty-fails",
+  "statement-schema-subject-two-fails",
+  "statement-schema-derived-at-invalid-fails",
+  "statement-schema-derived-at-feb29-non-leap-fails",
+  "statement-schema-derived-at-leap-day-pass",
+  "preflight-revoked-proxy-typed-invalid",
+  "build-port-revoked-proxy-typed-invalid",
+  "deriveTraceId-hostile-getter-trap-zero",
+  "sha256Hex-prototype-trap-rejects",
+  "seal-signer-throws-symbol-typed-signing-error",
+  "authority-abort-signal-then-ordinary-throw-cancellation",
 ] as const);
 
 export type TrajectoryDerivationConformanceCaseId =

@@ -34,7 +34,13 @@ function snapshotPortObject(
   requiredKeys: ReadonlySet<string>,
   context: string,
 ): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (typeof value !== "object" || value === null) {
+    invalidPort(`${context} must be a plain object`);
+  }
+  if (isProxy(value)) {
+    invalidPort(`${context} must not be a Proxy`);
+  }
+  if (Array.isArray(value)) {
     invalidPort(`${context} must be a plain object`);
   }
   if (!isPlainOrdinaryObject(value)) {

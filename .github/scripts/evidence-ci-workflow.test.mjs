@@ -77,8 +77,53 @@ function parseJobs(source) {
   return jobs;
 }
 
+function parseStepFields(step) {
+  const fields = { uses: null, with: {}, run: null };
+  let inWith = false;
+  let withIndent = null;
+  for (const line of step.lines) {
+    if (/^ {6}- uses:/.test(line)) {
+      fields.uses = line.trim().slice("- uses:".length).trim();
+      inWith = false;
+      withIndent = null;
+      continue;
+    }
+    if (/^ {8}with:/.test(line)) {
+      inWith = true;
+      withIndent = 10;
+      continue;
+    }
+    if (inWith && withIndent !== null) {
+      if (/^ {8}\S/.test(line) && !/^ {10}/.test(line)) {
+        inWith = false;
+        withIndent = null;
+      } else if (/^ {10}\S/.test(line)) {
+        const trimmed = line.trim();
+        const match = trimmed.match(/^([^:]+):\s*(.*)$/);
+        if (match) {
+          fields.with[match[1]] = match[2].trim();
+        }
+        continue;
+      }
+    }
+    if (/^ {6}- run:/.test(line) || /^ {8}run:/.test(line)) {
+      fields.run = line.trim();
+      inWith = false;
+      withIndent = null;
+    }
+  }
+  return fields;
+}
+
+function setupNodeVersionForStep(step) {
+  const fields = parseStepFields(step);
+  if (fields.uses !== "actions/setup-node@v4") return undefined;
+  return fields.with["node-version"];
+}
+
 function setupNodeStepsInJob(jobBlock) {
-  return [...jobBlock.matchAll(/uses: actions\/setup-node@v4[\s\S]*?node-version:\s*([^\n]+)/g)];
+  const steps = parseSteps(jobBlock);
+  return steps.filter((step) => stepUsesSetupNode(step));
 }
 
 function checkoutStepsInJob(jobBlock) {
@@ -111,11 +156,6 @@ export function validateEvidenceCiWorkflow(source) {
       1,
       `${jobId} must have exactly one setup-node step (found ${String(setupNodes.length)})`,
     );
-    assert.equal(
-      setupNodes[0][1].trim(),
-      NODE_VERSION,
-      `${jobId} setup-node must pin ${NODE_VERSION}`,
-    );
 
     const steps = parseSteps(jobBlock);
     const checkoutIndex = steps.findIndex((step) => stepUsesCheckout(step));
@@ -125,6 +165,13 @@ export function validateEvidenceCiWorkflow(source) {
     assert.ok(
       checkoutIndex < setupIndex,
       `${jobId} checkout must precede setup-node (checkout=${String(checkoutIndex)} setup=${String(setupIndex)})`,
+    );
+
+    const setupNodeVersion = setupNodeVersionForStep(steps[setupIndex]);
+    assert.equal(
+      setupNodeVersion,
+      NODE_VERSION,
+      `${jobId} setup-node must pin ${NODE_VERSION} on its own with block (found ${String(setupNodeVersion)})`,
     );
   }
 
@@ -237,7 +284,7 @@ test('mutation: missing npm version assert fails', () => {
 
 test('mutation: floating Node 22 fails', () => {
   const mutant = workflow.replaceAll('node-version: 22.23.1', 'node-version: 22');
-  assert.throws(() => validateEvidenceCiWorkflow(mutant), /setup-node must pin 22\.23\.1/);
+  assert.throws(() => validateEvidenceCiWorkflow(mutant), /setup-node must pin 22\.23\.1 on its own with block/);
 });
 
 test('mutation: legacy-peer-deps workaround fails', () => {
@@ -325,5 +372,57 @@ test('mutation: wrong setup-node version in foundation job fails', () => {
     /(  foundation:[\s\S]*?node-version: )22\.23\.1/,
     '$122.0.0',
   );
-  expectValidationFailure(mutant, /foundation setup-node must pin 22\.23\.1/);
+  expectValidationFailure(mutant, /foundation setup-node must pin 22\.23\.1 on its own with block/);
+});
+
+test('mutation: bare setup-node with decoy node-version in later step fails', () => {
+  const mutant = workflow
+    .replace(
+      /(  trajectory:[\s\S]*?      - uses: actions\/setup-node@v4\n)(        with:\n          node-version: 22\.23\.1\n)/,
+      '$1',
+    )
+    .replace(
+      /(  trajectory:[\s\S]*?      - name: Enable Yarn 4\.13\.0\n)/,
+      '      - run: echo decoy\n        with:\n          node-version: 22.23.1\n$1',
+    );
+  expectValidationFailure(
+    mutant,
+    /trajectory setup-node must pin 22\.23\.1 on its own with block \(found undefined\)/,
+  );
+});
+
+test('mutation: job-level node-version decoy fails', () => {
+  const mutant = workflow.replace(
+    /(  trajectory:\n    name: Evidence Trajectory\n    needs: \[foundation\]\n    runs-on: ubuntu-latest\n)/,
+    '$1    env:\n      node-version: 22.23.1\n',
+  ).replace(
+    /(  trajectory:[\s\S]*?      - uses: actions\/setup-node@v4\n        with:\n          node-version: )22\.23\.1/,
+    '$122.0.0',
+  );
+  expectValidationFailure(
+    mutant,
+    /trajectory setup-node must pin 22\.23\.1 on its own with block/,
+  );
+});
+
+test('mutation: setup-node without with block fails', () => {
+  const mutant = workflow.replace(
+    /(  architecture:[\s\S]*?      - uses: actions\/setup-node@v4\n)(        with:\n          node-version: 22\.23\.1\n)/,
+    '$1',
+  );
+  expectValidationFailure(
+    mutant,
+    /architecture setup-node must pin 22\.23\.1 on its own with block \(found undefined\)/,
+  );
+});
+
+test('mutation: wrong-indentation node-version outside setup with fails', () => {
+  const mutant = workflow.replace(
+    /(  foundation:[\s\S]*?      - uses: actions\/setup-node@v4\n        with:\n)          node-version: 22\.23\.1\n/,
+    '$1        node-version: 22.23.1\n',
+  );
+  expectValidationFailure(
+    mutant,
+    /foundation setup-node must pin 22\.23\.1 on its own with block \(found undefined\)/,
+  );
 });
