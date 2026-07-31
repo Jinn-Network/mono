@@ -110,3 +110,17 @@ test('drift: the mirrored upstream shapes still carry the fields this package as
     assert.ok(names.includes(field), `delivery facts profile lost "${field}"`);
   }
 });
+
+// Constraint 14, at the wire: the serialized envelope is not a record envelope.
+test('serialization: the projection format token is not a record kind', () => {
+  const text = readFileSync(join(pkg, 'src', 'serialize.ts'), 'utf8');
+  assert.match(text, /CURATION_PROJECTION_FORMAT = "network\.jinn\.task-supply\.curation-projection\/1\.0"/);
+  const golden = JSON.parse(readFileSync(join(pkg, 'fixtures', 'projection-golden.json'), 'utf8'));
+  assert.deepEqual(Object.keys(golden).sort(), ['format', 'rows']);
+  assert.ok(!String(golden.format).startsWith('https://jinn.network/records/'));
+});
+
+// Plan Finding FC6-8: at the C3+C6 merge these assertions fold into
+// .github/scripts/task-supply-{package-inventory,source-boundaries,packed-types}.test.mjs and
+// this workflow folds into task-supply-ci.yml as one more job. Until then this file is the
+// curation package's only guard.
