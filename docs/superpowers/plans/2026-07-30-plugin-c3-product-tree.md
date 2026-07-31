@@ -488,7 +488,7 @@ git commit -m "feat(plugin-runtime): create the tier-4 product tree and its inve
 
 The allowlist is installed **now**, before any dependency exists, so that C4–C7 add dependencies without renegotiating the boundary — and so that the packages the design deliberately parks (the outbound publication lane) cannot arrive as a silent import. It anticipates exactly the composition table of design §6.1 plus the two packages the program commissions.
 
-- [ ] **Step 1: Write the guard**
+- [x] **Step 1: Write the guard**
 
 Create `.github/scripts/plugin-tree-source-boundaries.test.mjs`:
 
@@ -857,7 +857,7 @@ test('plugin tree source boundaries hold and the manifest matches the approved s
 });
 ```
 
-- [ ] **Step 2: Run the guard to verify it passes**
+- [x] **Step 2: Run the guard to verify it passes**
 
 Run: `node --test .github/scripts/plugin-tree-source-boundaries.test.mjs`
 Expected: PASS — `# pass 7`, `# fail 0`.
@@ -866,7 +866,7 @@ Expected: PASS — `# pass 7`, `# fail 0`.
 >
 > Actual expected at this step: `# pass 6`, `# fail 1`, the failure being exactly the file-count floor. Confirm the message names the floor and nothing else.
 
-- [ ] **Step 3: Run the negative test against the real package — the program's C3 gate**
+- [x] **Step 3: Run the negative test against the real package — the program's C3 gate**
 
 Program §6 requires that the guard trio red-lines a deliberate frozen-trio import. Prove it on the real file, not only on a fixture.
 
@@ -881,7 +881,7 @@ Expected: FAIL, with the boundary assertion reporting
 `plugin/runtime/src/index.ts -> @jinn-network/core` and the message
 `plugin/runtime/src crosses a plugin tree architecture boundary`.
 
-- [ ] **Step 4: Repeat for the other two frozen identities**
+- [x] **Step 4: Repeat for the other two frozen identities**
 
 ```bash
 git checkout plugin/runtime/src/index.ts
@@ -896,7 +896,7 @@ Expected: FAIL, reporting both
 `plugin/runtime/src/index.ts -> @jinn-network/jinn-layer` and
 `plugin/runtime/src/index.ts -> @jinn-network/plugin`.
 
-- [ ] **Step 5: Revert the deliberate violation and confirm the tree is clean**
+- [x] **Step 5: Revert the deliberate violation and confirm the tree is clean**
 
 ```bash
 git checkout plugin/runtime/src/index.ts
@@ -906,12 +906,12 @@ node --test .github/scripts/plugin-tree-source-boundaries.test.mjs
 
 Expected: `git status --porcelain` prints nothing; the guard returns to `# pass 6`, `# fail 1` (the file-count floor only).
 
-- [ ] **Step 6: Confirm the `plugin/frozen` ban works with C0 absent**
+- [x] **Step 6: Confirm the `plugin/frozen` ban works with C0 absent**
 
 Run: `ls plugin` and then `node --test --test-name-pattern 'frozen-root ban' .github/scripts/plugin-tree-source-boundaries.test.mjs`
 Expected: `ls plugin` shows `README.md` and `runtime` only — no `frozen`. The named test passes, proving the ban is path arithmetic and C3 does not wait for C0.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add .github/scripts/plugin-tree-source-boundaries.test.mjs
@@ -3137,3 +3137,7 @@ Recorded per the designs-are-law rule (program §Global constraints). Each carri
 - **F-C3-6 — "reports health" is under-specified for a runtime with no capabilities.** The brief asks for a skeleton that starts, reports health, and exits cleanly, but a capability-free runtime has nothing to check. **Proposed disposition:** the empty report (`{ ok: true, version, checks: [] }`) is the honest answer and is asserted as such, rather than inventing a synthetic "runtime is running" check that would always pass and teach C7 a bad pattern. What C3 delivers instead is the *contract* — including `remedy: null` as the first-class encoding of the spec §9.3 not-fixable-from-this-machine state, which the design describes in prose and no plan had yet given a representation.
 
 - **F-C3-7 — `plugin/runtime`'s version and the channel pin are not yet connected.** Program §4 settles `runtime-pin.json` (`{ package, version, bin }`) as C7's artifact and spec §9.3 requires the runtime to be published stable *before* the mirror re-point. C3 declares `version: "0.1.0"` and a `bin` name (`jinn-plugin-runtime`) that the pin must match, but nothing yet verifies the two agree. **Proposed disposition:** C7's plan should add an assertion that `runtime-pin.json`'s `package`, `version`, and `bin` match `plugin/runtime/package.json` — the analogue of `verify-layer-stable-version.mjs` for the new channel — and C8's cutover gate should treat a mismatch as the "pin cannot resolve" doctor state rather than a build error. No C3 change; recorded so the check has a named owner before the cutover rather than after it.
+
+- **F-C3-10 — Task 2 frozen-trio fixture expected paths assumed the fixture directory was a direct child of `plugin/`.** `mkdtempSync(join(tree, '.plugin-tree-frozen-boundary-'))` creates `plugin/.plugin-tree-frozen-boundary-*`, so `localSpecifier` yields `../../packages/{core,layer,plugin}/src` and `../frozen/jinn_layer.py`, not `../packages/...` and `./frozen/...`. **Disposition applied:** the committed guard asserts the nested-relative paths. No topology change.
+
+- **F-C3-11 — Task 2 Steps 3–4's full-suite negative gate is masked by `MIN_SCANNED_FILES` until Task 10.** The production-boundary test asserts the file-count floor *before* `assertBoundary`, and at Task 2 the tree has one source file, so a deliberate frozen-trio import never reaches the boundary assertion in the full suite (failure message stays the floor). **Disposition applied:** (1) the dedicated frozen-trio fixture test still red-lines name/subpath/relative escapes; (2) Task 2 verified `assertBoundary` on the real violated `index.ts` and captured the expected findings; (3) re-run Steps 3–4's full-suite red→green as part of Task 10's green gate once ≥8 source files exist.
