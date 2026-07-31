@@ -50,11 +50,13 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['runtime', {
     dependencies: [
       '@jinn-network/evidence-catalog-sqlite',
+      '@jinn-network/evidence-derivation',
       '@jinn-network/evidence-discovery',
       '@jinn-network/evidence-local-runtime',
       '@jinn-network/evidence-protocol',
       '@jinn-network/evidence-repository',
       '@jinn-network/evidence-retrieval',
+      '@jinn-network/evidence-trace-decode',
       '@jinn-network/evidence-trajectory',
       '@jinn-network/execution-recorder',
       '@jinn-network/record-discovery-client',

@@ -45,6 +45,11 @@ const portals = [
     archive: "evidence-discovery.tgz",
   },
   {
+    name: "@jinn-network/evidence-derivation",
+    root: join(repoRoot, "packages", "evidence", "derivation"),
+    archive: "evidence-derivation.tgz",
+  },
+  {
     name: "@jinn-network/evidence-retrieval",
     root: join(repoRoot, "packages", "evidence", "retrieval"),
     archive: "evidence-retrieval.tgz",
@@ -63,6 +68,11 @@ const portals = [
     name: "@jinn-network/evidence-trajectory",
     root: join(repoRoot, "packages", "evidence", "trajectory"),
     archive: "evidence-trajectory.tgz",
+  },
+  {
+    name: "@jinn-network/evidence-trace-decode",
+    root: join(repoRoot, "packages", "evidence", "trace-decode"),
+    archive: "evidence-trace-decode.tgz",
   },
   {
     name: "@jinn-network/record-discovery-client",

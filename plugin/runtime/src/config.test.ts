@@ -28,6 +28,19 @@ describe("resolveRuntimeConfig", () => {
         syncTimeoutMs: 30_000,
         acknowledgeUnverifiedChain: false,
       },
+      relevance: {
+        maxTerms: 10,
+        floor: 2,
+        searchLimit: 20,
+      },
+      projection: {
+        maxChars: 3500,
+        maxRecords: 2,
+      },
+      sensitivity: {
+        knownIdentities: [],
+        noncePath: `${HOME}/sensitivity-nonce`,
+      },
     });
   });
 
