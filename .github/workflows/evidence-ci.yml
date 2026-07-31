@@ -14,6 +14,8 @@ on:
       - "docs/superpowers/plans/2026-07-27-evidence-retrieval.md"
       - "docs/superpowers/specs/2026-07-26-evidence-contribution-design.md"
       - "docs/superpowers/plans/2026-07-27-evidence-contribution.md"
+      - "docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md"
+      - "docs/superpowers/plans/2026-07-30-plugin-c1-trajectory-record.md"
 
 permissions:
   contents: read
@@ -317,6 +319,44 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  trajectory:
+    name: Evidence Trajectory
+    needs: [foundation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Evidence Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-protocol-dist
+          path: packages/evidence/protocol/dist
+      - name: Install packed-smoke dependency toolchains
+        run: (cd packages/evidence/protocol && yarn install --immutable)
+      - name: Verify Evidence Trajectory
+        working-directory: packages/evidence/trajectory
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn check:fixtures
+          yarn check:schemas
+          yarn pack:smoke
+      - name: Upload Evidence Trajectory distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-trajectory-dist
+          path: packages/evidence/trajectory/dist
+          if-no-files-found: error
+          retention-days: 1
+
   contribution:
     name: Evidence Contribution
     needs: [foundation, components, derivation]
@@ -481,7 +521,7 @@ jobs:
           retention-days: 1
 
   verify:
-    needs: [architecture, foundation, components, derivation, execution-recorder-bridge, retrieval, contribution, catalog-sqlite, local-runtime]
+    needs: [architecture, foundation, components, derivation, execution-recorder-bridge, retrieval, contribution, catalog-sqlite, local-runtime, trajectory]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -496,6 +536,7 @@ jobs:
           CONTRIBUTION_RESULT: ${{ needs.contribution.result }}
           CATALOG_SQLITE_RESULT: ${{ needs['catalog-sqlite'].result }}
           LOCAL_RUNTIME_RESULT: ${{ needs['local-runtime'].result }}
+          TRAJECTORY: ${{ needs.trajectory.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
@@ -506,7 +547,8 @@ jobs:
             "$RETRIEVAL_RESULT" \
             "$CONTRIBUTION_RESULT" \
             "$CATALOG_SQLITE_RESULT" \
-            "$LOCAL_RUNTIME_RESULT"; do
+            "$LOCAL_RUNTIME_RESULT" \
+            "$TRAJECTORY"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4
@@ -524,7 +566,7 @@ jobs:
           path: .evidence-dist
       - name: Place package distributions
         run: |
-          for package in protocol repository repository-oci repository-ipfs discovery catalog-sqlite execution-recorder attestation-issuer derivation publication local-runtime execution-recorder-bridge retrieval contribution; do
+          for package in protocol repository repository-oci repository-ipfs discovery catalog-sqlite execution-recorder attestation-issuer derivation publication local-runtime execution-recorder-bridge retrieval contribution trajectory; do
             mkdir -p "packages/evidence/${package}/dist"
             cp -R ".evidence-dist/evidence-${package}-dist/." "packages/evidence/${package}/dist/"
           done

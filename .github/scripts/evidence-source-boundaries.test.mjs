@@ -291,6 +291,57 @@ const CONTRIBUTION_FORBIDDEN_PACKAGES = [
   'viem',
 ];
 
+// Trajectory is a tier-2 record kind: schemas, sealing, and derived identity. It composes
+// Protocol only, never a repository binding, discovery, a runtime, or any product tree,
+// and performs no I/O outside its fixture loaders in the testing region.
+const TRAJECTORY_ALLOWED_DEPENDENCIES = [
+  '@jinn-network/evidence-protocol',
+  '@noble/hashes',
+  'zod',
+];
+const TRAJECTORY_ALLOWED_DEV_DEPENDENCIES = [
+  '@types/node',
+  'ajv',
+  'canonicalize',
+  'typescript',
+  'vitest',
+];
+const TRAJECTORY_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const TRAJECTORY_FORBIDDEN_PACKAGES = [
+  '@jinn-network/attestation-issuer',
+  '@jinn-network/autopilot',
+  '@jinn-network/client',
+  '@jinn-network/core',
+  '@jinn-network/evidence-catalog-sqlite',
+  '@jinn-network/evidence-contribution',
+  '@jinn-network/evidence-derivation',
+  '@jinn-network/evidence-discovery',
+  '@jinn-network/evidence-local-runtime',
+  '@jinn-network/evidence-publication',
+  '@jinn-network/evidence-repository',
+  '@jinn-network/evidence-repository-ipfs',
+  '@jinn-network/evidence-repository-oci',
+  '@jinn-network/evidence-retrieval',
+  '@jinn-network/execution-recorder',
+  '@jinn-network/execution-recorder-bridge',
+  '@jinn-network/indexer',
+  '@jinn-network/jinn-layer',
+  '@jinn-network/marketplace',
+  '@jinn-network/plugin',
+  '@jinn-network/sdk',
+  'better-sqlite3',
+  'node:child_process',
+  'node:dgram',
+  'node:dns',
+  'node:fs',
+  'node:http',
+  'node:http2',
+  'node:https',
+  'node:net',
+  'node:tls',
+  'viem',
+];
+
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
 const ambientNetworkIdentifier = new RegExp(
   String.raw`(?<![\w$."'\x60])(?:${AMBIENT_NETWORK_APIS.join('|')})\b`,
@@ -756,6 +807,27 @@ test('Contribution boundary checks catch package, I/O, and ambient-network escap
     assert.equal(
       forbiddenImports(source, CONTRIBUTION_FORBIDDEN_PACKAGES).length,
       6,
+    );
+    assert.equal(ambientNetworkUsesInFiles(files(source)).length, 1);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('Trajectory boundary checks catch package, I/O, and ambient-network escapes', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-trajectory-boundary-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'source.ts'), [
+      'import "@jinn-network/plugin";',
+      'export * from "@jinn-network/core";',
+      'await import("@jinn-network/jinn-layer");',
+      'require("@jinn-network/evidence-local-runtime");',
+      'import "node:fs";',
+      'fetch;',
+    ].join('\n'));
+    assert.equal(
+      forbiddenImports(source, TRAJECTORY_FORBIDDEN_PACKAGES).length,
+      5,
     );
     assert.equal(ambientNetworkUsesInFiles(files(source)).length, 1);
   } finally { rmSync(fixture, { recursive: true, force: true }); }
@@ -1322,6 +1394,97 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     ),
     [],
     'the Contribution root entrypoint must not export testing.ts or testing-fixtures.ts',
+  );
+
+  const trajectory = join(packages, 'trajectory');
+  const trajectorySource = join(trajectory, 'src');
+  const trajectoryTestingEntry = join(trajectorySource, 'testing.ts');
+  const trajectoryFixtureLoaders = join(trajectorySource, 'fixtures.ts');
+  const trajectoryTestRegex = /\.test\.[cm]?[jt]sx?$/u;
+  const trajectorySourceFiles = files(trajectorySource);
+  const trajectoryTestingFiles = trajectorySourceFiles.filter((file) =>
+    file === trajectoryTestingEntry
+      || file === trajectoryFixtureLoaders
+      || trajectoryTestRegex.test(file));
+  const trajectoryProductionFiles = trajectorySourceFiles.filter((file) =>
+    !trajectoryTestingFiles.includes(file));
+  const trajectoryManifest = manifest('trajectory');
+  const trajectoryForeignRoots = evidenceDirectories
+    .filter((directory) => !['trajectory', 'protocol'].includes(directory))
+    .map((directory) => join(packages, directory));
+
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      trajectoryProductionFiles,
+      [...TRAJECTORY_FORBIDDEN_PACKAGES, 'vitest', 'node:fs/promises'],
+      [...trajectoryForeignRoots, ...trajectoryTestingFiles],
+    ),
+    [],
+    'Trajectory production source must not import forbidden packages, vitest, filesystem APIs, or the testing region',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      trajectoryTestingFiles,
+      TRAJECTORY_FORBIDDEN_PACKAGES.filter((dependency) => dependency !== 'node:fs'),
+      trajectoryForeignRoots,
+    ),
+    [],
+    'Trajectory testing files must not cross into foreign package roots',
+  );
+  assert.deepEqual(
+    trajectoryTestingFiles.flatMap((file) =>
+      specifiers(readFileSync(file, 'utf8'))
+        .filter((specifier) => specifier === 'node:fs')
+        .map((specifier) => `${relative(root, file)} -> ${specifier}`)),
+    [],
+    'the Trajectory testing region may only use node:fs/promises, never bare node:fs',
+  );
+  assert.deepEqual(
+    ambientNetworkUsesInFiles(trajectorySourceFiles),
+    [],
+    'Trajectory source must not use ambient network APIs',
+  );
+  assert.deepEqual(Object.keys(trajectoryManifest.exports).sort(), [
+    '.', './fixtures/*', './schemas/*', './testing',
+  ]);
+  assert.deepEqual(trajectoryManifest.exports['.'], {
+    import: './dist/index.js',
+    types: './dist/index.d.ts',
+  });
+  assert.deepEqual(trajectoryManifest.exports['./testing'], {
+    import: './dist/testing.js',
+    types: './dist/testing.d.ts',
+  });
+  assert.deepEqual(
+    Object.keys(trajectoryManifest.dependencies ?? {}).sort(),
+    TRAJECTORY_ALLOWED_DEPENDENCIES,
+  );
+  assert.deepEqual(
+    Object.keys(trajectoryManifest.devDependencies ?? {}).sort(),
+    TRAJECTORY_ALLOWED_DEV_DEPENDENCIES,
+  );
+  assert.deepEqual(
+    Object.keys(trajectoryManifest.peerDependencies ?? {}).sort(),
+    TRAJECTORY_ALLOWED_PEER_DEPENDENCIES,
+  );
+  assert.deepEqual(trajectoryManifest.peerDependenciesMeta, {
+    vitest: { optional: true },
+  });
+  for (const directory of evidenceDirectories.filter((entry) => entry !== 'trajectory')) {
+    assertBoundary(
+      join(packages, directory, 'src'),
+      ['@jinn-network/evidence-trajectory'],
+      [trajectory],
+    );
+  }
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      [join(trajectorySource, 'index.ts')],
+      [],
+      [trajectoryTestingEntry, trajectoryFixtureLoaders],
+    ),
+    [],
+    'the Trajectory root entrypoint must not export testing.ts or fixtures.ts',
   );
 
   for (const directory of evidenceDirectories) {
