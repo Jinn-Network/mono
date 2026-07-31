@@ -3191,3 +3191,46 @@ broad tests alone.
 
 All ten rows move from pending to commit SHA + exact red/green probe evidence only after
 red→green verification. L4 remains external/`not-evaluated`.
+
+## 2026-07-31 fourth exact-head whole-component review resolution
+
+Append-only after C1-R31–R40. Ratified law unchanged. Exact-probe-first: reproduce
+each reviewer probe RED before implementation; green exact probe + packed-public
+counterpart where required + full suite. Preserve two linkage modes, R24–R40 law,
+R9 toolchain pins, R15 hermetic packed-types, L4 external, no `legacy-peer-deps`.
+No check-off from broad tests alone. After green: restack onto latest
+`origin/integration/evidence-v1`, rerun gates, force-with-lease push.
+
+**Independent pack-smoke pin encoding (R41):** SHA-256 (hex lowercase) over the
+UTF-8 bytes of `TRAJECTORY_DERIVATION_CONFORMANCE_CASE_IDS` joined by U+000A (`\n`)
+with **no** trailing newline after the last ID. Neither count nor digest may be
+imported/generated from the package manifest at pack-smoke authoring time.
+Baseline at reviewed head `207b7c4db` (65 IDs): digest
+`320d1114185798d6c23e00a6cb40f2dea0ecf082cb1811a53ba17e1e20e0a898`. Update literal
+count/digest only when this wave legitimately appends required public case IDs
+(document new IDs + recomputed digest in Green evidence).
+
+| ID | Severity | Exact probe | Violated law | Minimal disposition | Red evidence | Green evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| C1-R41 | Important | Pack smoke derives expected IDs/count from packed manifest; deleting a case and its manifest entry still passes | Independent immutable pack pin | Hard-code literal expected count and ordered-manifest SHA-256 digest in `scripts/pack-smoke.mjs` (encoding above). Check packed export frozen/unique/ordered exact count+digest; runner IDs equal exactly once. Mutation tests: delete case+entry, rename both, duplicate, reorder, skip, extra — independent pin fails even when export+runner change together. Fixture manifest remains separate | [ ] | [ ] |
+| C1-R42 | Important | Installed AJV accepts `intValue` `9223372036854775808` in span/event attributes; inline AnyValue unbounded; `$defs.AnyValue` uses wrong signed bounds | One exact signed int64 AnyValue law everywhere | One generator source for int64 decimal `-9223372036854775808..9223372036854775807` matching runtime; every AnyValue site `$ref` `$defs.AnyValue` (or same helper). Generator assertion: every `intValue` node equals/refs exact law. Runtime/AJV/packed at every emitted location: min/max pass, max+1/min-1 fail, long/leading-zero/sign/`-0` per law; regenerate pin; tarball AJV reviewer probes fail | [ ] | [ ] |
+| C1-R43 | Important | Statement JSON Schema accepts empty/two-item subjects; runtime validators accept non-RFC3339 `derivedAt` that build/seal/verify later reject | Exact subject cardinality + calendar-strict RFC3339 at earliest public boundary | Runtime + published schema: `subject` `minItems:1` `maxItems:1` exact shape. Calendar-strict RFC3339 for `derivedAt` (syntax/timezone/calendar/leap/fraction; reject Date.parse rollover). Schema `format: "date-time"` + syntax constraints; packed AJV with standards-compliant format validator. Parity both modes: empty/1/2 subjects; leap/non-leap/timezone/whitespace. Exported statement validators reject invalid `derivedAt` on safeParse | [ ] | [ ] |
+| C1-R44 | Important | Nested revoked proxy raw TypeError in preflight; revoked build input raw; `deriveTraceId` hostile getter; `sha256Hex` proxied typed-array prototype trap | Close remaining public proxy/trap boundaries | R31 ordering everywhere incl. revoked proxies → typed invalid-input. Port-snapshot reject proxy before Reflect/Object. Harden identity helpers (exact own enumerable data descriptors). Harden hashing: proxy-first genuine byte-view, private owned copy before crypto. Enumerate remaining public utility exports. Source + packed probes; trap counters zero; no raw sentinel | [ ] | [ ] |
+| C1-R45 | Important | Signer throwing `Symbol` escapes raw; authority aborts signal then throws ordinary error → `l2-authority-error` not typed cancellation | Fully typed seal/verify callback failures and cancellation | Signer total catch: intrinsic aborted first; genuine AbortError; else documented typed seal/signing error — never raw/coerce hostile. Verify authority catch: if genuine signal now aborted → `TrajectoryDerivationCancelledError` regardless of ordinary throw; then AbortError; then typed L2. Symbol/bigint/proxy/accessor/toString/valueOf never escape. Source + packed kit matrix | [ ] | [ ] |
+| C1-R46 | Important | Bare setup-node + `node-version` moved into later decoy step is accepted | Bind setup-node config to its own parsed step | Semantic parser: each step owns `uses`/`with`/`run`; indentation terminates step-local `with`. Exactly one checkout then one setup-node whose **own** `with.node-version` equals pin. Decy/job-level/wrong-indent/duplicate-with/setup-without-with fail. Preserve R40 order checks. Exact reviewer mutation fails; workflow remains green | [ ] | [ ] |
+
+### Implementation checklist (fourth exact-head whole-component)
+
+- [ ] C1-R41 — independent pack-smoke count+digest pin + mutation self-tests
+- [ ] C1-R42 — one AnyValue int64 law everywhere (generator + runtime + AJV + packed)
+- [ ] C1-R43 — subject cardinality 1 + calendar-strict RFC3339 derivedAt parity
+- [ ] C1-R44 — close remaining public proxy/trap boundaries (preflight/port/identity/hash)
+- [ ] C1-R45 — typed seal/verify callback failures and abort-priority cancellation
+- [ ] C1-R46 — CI guard binds node-version to the setup-node step's own `with`
+- [ ] Restack onto latest `origin/integration/evidence-v1`; post-rebase gates; force-with-lease
+
+### Acceptance
+
+All six rows move from pending to commit SHA + exact red/green probe evidence only after
+red→green verification. Restack + exact-head Evidence CI confirmation required before
+handoff. L4 remains external/`not-evaluated`.
