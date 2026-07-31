@@ -46,10 +46,31 @@ test('the registration and profile-root jobs are gated on the same presence sign
   }
 });
 
-test('the tree CI gate names all six platform CI workflows', () => {
-  for (const name of ['Evidence CI', 'Trust CI', 'Task Execution CI', 'Record Discovery CI', 'Marketplace CI', 'Benchmarking CI']) {
-    assert.ok(workflow.includes(name), `the tree CI gate must name "${name}"`);
+test('the tree CI gate matches on the workflow file, not a check-run name prefix', () => {
+  // GitHub reports one check run per *job*, named after the job's display `name:`
+  // (or the job id) -- the workflow's own display name ("Evidence CI" etc.) lives
+  // on the check suite / workflow run, never on a check run. checks.listForRef +
+  // run.name.startsWith(workflowDisplayName) can therefore never match any of the
+  // six tree workflows' actual job names and fails open. Gate on the workflow
+  // *file* via actions.listWorkflowRuns instead, and paginate -- a single
+  // listForRef-style page can silently truncate on a busy sha.
+  for (const filename of [
+    'evidence-ci.yml',
+    'trust-ci.yml',
+    'task-execution-ci.yml',
+    'record-discovery-ci.yml',
+    'marketplace-ci.yml',
+    'benchmarking-ci.yml',
+  ]) {
+    assert.ok(workflow.includes(`'${filename}'`), `the tree CI gate must name the workflow file "${filename}"`);
   }
+  assert.match(workflow, /actions\.listWorkflowRuns/, 'the gate must query workflow runs by workflow file, not check-run name prefixes');
+  assert.doesNotMatch(workflow, /checks\.listForRef/, 'check-run name matching cannot see workflow-level names and must not be used');
+  assert.doesNotMatch(workflow, /run\.name\.startsWith/, 'must not resurrect the run.name.startsWith(...) check-run filter');
+});
+
+test('the tree CI gate paginates its workflow-run query', () => {
+  assert.match(workflow, /github\.paginate\(\s*github\.rest\.actions\.listWorkflowRuns/);
 });
 
 test('the workflow drives the derived publisher, never a hard-coded package list', () => {

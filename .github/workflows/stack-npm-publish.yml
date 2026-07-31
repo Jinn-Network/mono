@@ -91,26 +91,34 @@ jobs:
           PUBLISH_SHA: ${{ env.JINN_BUILD_COMMIT }}
         with:
           script: |
-            const required = [
-              'Evidence CI',
-              'Trust CI',
-              'Task Execution CI',
-              'Record Discovery CI',
-              'Marketplace CI',
-              'Benchmarking CI',
+            // GitHub reports one check run per *job*, named after the job's display
+            // `name:` (or the job id) -- the workflow's own display name (e.g.
+            // "Evidence CI") lives on the check suite / workflow run, never on a
+            // check run (see .github/workflows/main-base-guard.yml lines 8-12 for the
+            // same convention documented for check-run matching). Gate on the
+            // workflow *file* via listWorkflowRuns, one query per workflow, each
+            // paginated -- a single un-paginated page can silently truncate on a
+            // busy sha and fail open the same way a name-prefix filter does.
+            const workflowFiles = [
+              'evidence-ci.yml',
+              'trust-ci.yml',
+              'task-execution-ci.yml',
+              'record-discovery-ci.yml',
+              'marketplace-ci.yml',
+              'benchmarking-ci.yml',
             ];
-            const { data } = await github.rest.checks.listForRef({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              ref: process.env.PUBLISH_SHA,
-              per_page: 100,
-            });
             const failed = [];
-            for (const name of required) {
-              const runs = data.check_runs.filter((run) => run.name.startsWith(name));
+            for (const workflow_id of workflowFiles) {
+              const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id,
+                head_sha: process.env.PUBLISH_SHA,
+                per_page: 100,
+              });
               for (const run of runs) {
                 if (run.status === 'completed' && run.conclusion !== 'success' && run.conclusion !== 'skipped' && run.conclusion !== 'neutral') {
-                  failed.push(`${run.name}: ${run.conclusion}`);
+                  failed.push(`${workflow_id} run ${run.id}: ${run.conclusion}`);
                 }
               }
             }
