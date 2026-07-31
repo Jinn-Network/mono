@@ -4886,3 +4886,173 @@ a different nonce stack with its own lock, which is what the rule actually prote
   `JINN_E2E_HARNESS=claude-code` skipped cleanly (no `ANTHROPIC_API_KEY`) as designed.
 - The **testnet closed-loop gate (Task 19 step 4) was NOT run** — it is the human deploy gate, and
   E20 means it could not pass regardless.
+
+---
+
+# Close-out addendum (2026-07-31) — make the loop close
+
+Coordinator rulings on findings E16, E20, E21, E24 and on settlement grade. All five go one way:
+**stage 1 is not complete until the loop can close**, so the gapped surfaces are built here rather
+than deferred. Tasks are numbered `C1`–`C9` to keep them distinct from the plan's `1`–`19`.
+
+**Exit gate for this leg:** `e2e:daemon-harness` reaches and exercises stage-1 code — or a loud,
+precisely-located NOT RUN. The drain runbook's do-not-run banner lifts only if the loop closes.
+
+**Standing rules carry over unchanged:** contracts 1–12; TDD (failing test → see it fail →
+implement → pass); never weaken a test; a pinned inventory moves with the symbol that changes it;
+plan-vs-code mismatches get a finding, not a silent guess; `--no-file-parallelism` for
+`test/daemon` (finding E18).
+
+## Ruling summary
+
+1. **E20 folded in.** Build the projector's production event feed, the enrich step, and the
+   observations stream. (C3, C4, C5.)
+2. **Settlement grade is today-mode, not Phase B.** `verificationFailure`
+   (`packages/marketplace/binding/src/settlement.ts:233`) rejects unless `executorBinding` and
+   `dispatchBinding` are `"verified"`, and rejects `evaluationSpecification` on `"missing"` /
+   `"failed"`. Fail-closed therefore means **zero settlements ever** — it is not a safe default,
+   it is a broken one. Implement the checks for real. Note `EvaluationSpecificationCheck` admits
+   `"not-applicable"`, which `verificationFailure` does **not** reject: that is the correct status
+   for a solution delivery carrying no evaluation specification, and the proof obligation is a
+   test showing today-mode settlement proceeds on it. Anything genuinely Phase B (tier
+   attestations) gets an explicit finding plus proof that today-mode does not reject on it. (C6.)
+3. **E24 wired.** Build the sync signer port and the workKind-carrying seam. Task 14's red-first
+   bridge fixtures are the proof and must go green end-to-end. (C7.)
+4. **E16 ruled: per-daemon state.** No process-global broadcaster. CLI verbs and the e2e harness
+   construct their own. (C2.)
+5. **E21 ruled: pin `viem` in client `resolutions` and drop the `as never`.** (C1.)
+
+## C1 — pin `viem`, drop the composition-root cast
+
+**Files:** `client/package.json` (`resolutions`), `client/src/daemon/composition-root.ts`.
+**Why:** client resolves `viem@2.55.8`, every portal package `2.55.10`; TypeScript treats the two
+`PublicClient` / `WalletClient` declarations as nominally distinct, and Task 12 papered the
+boundary with `as never`. A cast at a composition boundary is exactly where a real type error
+hides. Follow the E3 precedent (`better-sqlite3`, `ajv` are already pinned this way).
+**Done when:** the cast is gone, `yarn typecheck` is 0, the full client suite is unchanged.
+
+## C2 — the broadcaster becomes per-daemon state
+
+**Files:** `client/src/adapters/mech/safe.ts`, `client/src/adapters/mech/contracts.ts`,
+`client/src/erc8004/{plugin-registry,reputation}.ts`, `client/src/daemon/composition-root.ts`,
+`client/src/main.ts`, the CLI verbs under `client/src/cli/commands/`,
+`client/test/e2e/_daemon-harness-helpers.ts`.
+**Why:** the module-global `setVenueBroadcaster` cannot serve two Safes, so release scenario T2.2
+and `jinn-repo-loop.ts` (two operators per process) cannot work; and the CLI verbs
+(`jinn tasks submit`, `jinn solver-plugins publish|revoke|block|feedback`) install no broadcaster
+at all and hard-fail.
+**Shape:** `executeSafeTransaction` takes the broadcaster explicitly — threaded from the
+composition, not read from module state. Keep the E5 bound-Safe mismatch rejection and the
+`logicalTx` derivation exactly as they are. The registry functions are deleted, not deprecated.
+**Done when:** no module-level broadcaster variable survives; each CLI verb constructs its own;
+two daemons in one process can each hold their own Safe, proven by a test.
+
+## C3 — the projector's production event feed
+
+**Files:** create `client/src/daemon/projector-log-source.ts`; modify
+`client/src/daemon/projector-loop.ts`.
+**Why:** `ProjectorLoopConfig.logSource`'s `{fetchLogs, heads}` has no implementation, and it is
+not even the same shape as venue-base's `ChainLogSource`
+(`poll` / `cursor` / `finalizedCheckpoint` / `logsInRange` / `orphanedBlockHashes` / `close`) —
+the plan's Task 9 Consumes line naming `venue.logSource` was wrong in kind, not just in name.
+**Shape:** adapt venue-base's `createChainLogSource` — which already does chunked `getLogs` sized
+to provider caps, a hash-verified `(blockNumber, blockHash)` high-water mark, dual live/finalized
+marks, and reorg rollback with orphaned-hash retention — to what the loop needs. Prefer consuming
+`ChainLogSource` directly over inventing a second cursor: venue-base's rollback semantics and the
+loop's `rollbackToFinalized()` must not disagree about what a reorg means. If they must stay
+separate, say why in a finding.
+**Done when:** the loop runs against a real `PublicClient` (Anvil is fine) and returns decoded
+events, with `isAuthorizedMechOrigin` supplied by the host per finding E4.
+
+## C4 — the enrich step
+
+**Files:** create `client/src/daemon/projector-enrich.ts`; modify
+`client/src/daemon/projector-loop.ts`.
+**Why:** `enrich` turns a decoded `MarketplaceEvent` into an `ObservationMarketplaceEvent` and has
+no production implementation — only Task 9's unit-test fake.
+**Shape:** produce a real `ObservationProjectionContext` (`packages/marketplace/projector/src/observe.ts:18`):
+`taskCoordinator`, `timestamp` (deterministic block timestamp in RFC 3339, **never** projector
+wall-clock), `submission`, `taskDigest` (after the Task/Submission/on-chain digest join),
+`effectiveDeadline`, `dispatchContext`, and — on external Mech Deliver facts —
+`deliveryCorrespondence`, which is mandatory before the matching router claim can project a
+delivery. Resolution goes through the IPFS ports the composition root already holds.
+**Fail-closed rule:** an event whose signed record cannot be resolved yet returns `undefined` and
+is dropped for this tick (the loop already handles that) — it must never be enriched with guessed
+or wall-clock values.
+**Done when:** a real `TaskCreated` plus a real Mech `Deliver` both enrich correctly against a
+fixture IPFS store, and an unresolvable record is dropped rather than faked.
+
+## C5 — the observations stream
+
+**Files:** modify `client/src/daemon/projector-cursor.ts` (durable observations),
+`client/src/daemon/projector-loop.ts`, `client/src/daemon/composition-root.ts`.
+**Why:** `BaseVenueConfig.observations` wants every observation ever projected;
+`ProjectorLoop.tick()` computes `transition.observations` and **discards it**, and `state_json`
+persists only `MarketplaceProjectionState`, which has no observations field and cannot be replayed
+into one without re-reducing the full admitted-event history.
+**Shape:** persist `MarketplaceProtocolObservation[]` append-only in the same SQLite transaction
+that advances the cursor and the projection state — all three move together or none do. Back
+`observations` from that table. Reuse the bigint-aware codec from finding E19; observations carry
+bigints for the same reason the state does.
+**Done when:** `venue.observe` resolves a real Attempt for a projected claim, and the composition
+root's `observations` is no longer a stub.
+
+## C6 — `verifySettlementGrade` for real
+
+**Files:** create `client/src/daemon/settlement-grade.ts`; modify
+`client/src/daemon/composition-root.ts`.
+**Why:** ruling 2. Fail-closed = zero settlements.
+**Shape:** three independent checks, never collapsed to a boolean.
+- `executorBinding` — DSSE verification over the exact `deliveryBytes` (the input carries them
+  precisely so the verifier uses them as payload identity), via `packages/trust/core` and the
+  binding's named-checks machinery.
+- `dispatchBinding` — from the engagement context the host already holds (the engagement ledger
+  row plus the claim-time identity), proving this operator's Safe is the party the venue engaged.
+- `evaluationSpecification` — presence from the profile; `"not-applicable"` when a solution
+  delivery carries no evaluation specification.
+**Done when:** a today-mode solution delivery settles end-to-end in a test, and each check has a
+negative test proving it rejects when it should. Any check that is genuinely Phase B gets a
+finding naming it plus a test proving today-mode does not reject on it.
+
+## C7 — wire the bridge
+
+**Files:** `client/src/daemon/composition-root.ts`,
+`packages/task-execution/backend-local/assembly/src/backend.ts` (workKind seam only),
+`client/src/daemon/{bridge-legacy-delivery,work-loop}.ts`.
+**Why:** `deliveryExtensions: () => ({})` closes F2 in mechanism only. Two blockers, both recorded
+under E24: the hook must be synchronous but the composition holds only an async `WalletClient`
+(no sync signer port), and there is no reachable mapping from a sealed `TaskSpecification` back to
+the `ExecutionWiringEntry` / `workKind` that produced it — `workKind` is computed once at claim
+time and never threaded through `backend.submit`.
+**Shape:** add a sync signer port to the composition input, and carry `workKind` through the
+submit seam so the hook can reach it. Keep the hook additive and the extension key namespaced;
+reserved keys stay unshadowable.
+**Done when:** Task 14's two bridge fixtures pass **end-to-end against a delivery this daemon
+actually produced**, not against a hand-built fixture — and `buildLegacyExecutionEnvelope` is
+exercised by a test rather than only by typecheck.
+
+## C8 — start the loops
+
+**Files:** `client/src/daemon/{daemon,composition-root}.ts`, `client/src/main.ts`.
+**Why:** Task 13 started only the work loop; the projector was not constructible and the evidence
+driver was left unwired. With C3–C5 done, all three can start.
+**Done when:** `daemon.start()` starts projector, work, and evidence-driver; the watchdog
+registers all three; and the claim gate (contract 3) actually gates on projector catch-up.
+
+## C9 — the e2e bootstrap failure, then the gate
+
+**Files:** whatever the diagnosis names; `client/test/e2e/**`.
+**Why:** `stOLAS stake()` reverts on the Base fork before the daemon starts, so the only automated
+closed-loop gate never reaches stage-1 code.
+**Shape:** diagnose first — anvil-version regression (pin it, with evidence), real bootstrap
+regression on the merged head (blocking finding), or upstream chain state (name the condition).
+Decode the revert selector; do not guess.
+**Done when:** `e2e:daemon-harness` reaches and exercises stage-1 code, or a NOT RUN that names
+the exact blocking line and the decoded revert.
+
+## Sequencing
+
+`C1` and `C2` are independent and go first (C1 removes a cast every later task would inherit; C2
+changes a signature C8 depends on). `C3 → C4 → C5` are strictly sequential. `C6` and `C7` are
+independent of the projector chain. `C8` needs C3–C5 and C2. `C9` runs last, but its **diagnosis**
+starts immediately and in parallel, because a dead gate changes what the leg can prove.
