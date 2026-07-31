@@ -6936,3 +6936,8 @@ decided once rather than negotiated at integration.
 
 *Raised:* Task 5 implementation (2026-07-31).
 *Disposition:* build it (adapted in `corpus-fetch.ts`). Plan assumed `result.bytes`, `result.producer`, `result.servingRoot`. Live shape uses `canonicalBytes`; producer comes from discovery indexer projection + `producerIdOf()`; serving root from `selectedLocation.publishedLocation`. Provenance fence still carries digest/producer/servingRoot/bytes/truncated/withheld receipts.
+
+**F-C7-T6-1 — C6 runPickup takes { index, admission }, not a bare index.**
+
+*Raised:* Task 6 implementation (2026-07-31).
+*Disposition:* build it (adapted in mcp/tools/pickup.ts). Plan consumed-interfaces and Task 6 body assumed `runPickup(index, request)`. Live C6 is `runPickup({ index, admission }, request)`. MCP `PickupDeps` now requires `admission: AdmissionFilter`; production calls the two-arg form. C6 untouched.
