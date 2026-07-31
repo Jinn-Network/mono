@@ -644,7 +644,7 @@ git commit -m "feat(plugin-runtime): corpus error codes and the locale-free comp
 
 `packages/discovery/client/src/high-water-mark.ts:17-18` ships only an in-memory store and says so: *"Positions are lost on process exit -- suitable for tests and short-lived processes only."* A session-scoped runtime that re-cold-syncs every session would storm the archive; this is the durable implementation of the same frozen port.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/corpus/high-water-mark.test.ts`:
 
@@ -750,12 +750,12 @@ describe("file-backed high-water-mark store", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test src/corpus/high-water-mark.test.ts`
 Expected: FAIL — `Failed to resolve import "./high-water-mark.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/corpus/high-water-mark.ts`:
 
@@ -892,12 +892,12 @@ export function createFileHighWaterMarkStore(options: {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test src/corpus/high-water-mark.test.ts && yarn typecheck`
 Expected: PASS (8 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src/corpus
