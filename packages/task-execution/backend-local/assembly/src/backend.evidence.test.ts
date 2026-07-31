@@ -254,4 +254,74 @@ describe("backend evidence capture posture (C3)", () => {
     });
     expect(await instance.deliveries(snapshot.descriptor.attempt)).toEqual([]);
   });
+
+  // Cutover stage 1 close-out C7 (finding E24): `deliveryExtensions` needs a way to reach the
+  // workKind (and, for today-generation claims, the requestId) that produced the attempt it is
+  // sealing a Delivery for -- `noteAttemptWorkKind` is that seam. A two-party caller knows
+  // `attempt` before it calls `submit()` (this is exactly how `work-loop.ts` uses it), so these
+  // tests drive the two-party path rather than the single-party one, matching production.
+  test("threads a host-noted workKind and requestId through to deliveryExtensions at delivery time", async () => {
+    const repository = new InMemoryEvidenceRepository();
+    const task = sealTask({
+      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      profile: {
+        uri: profile.profile,
+        digest: { sha256: sealedProfile.digest.slice("sha256:".length) },
+      },
+      instructions: "Capture this execution.",
+      outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
+    });
+    const taskDigest = documentDigest(task);
+    const submissionUri = `urn:uuid:${crypto.randomUUID()}` as const;
+    const nonce = crypto.randomUUID();
+    const submission = sealSubmission({
+      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      submission: submissionUri,
+      task: { digest: { sha256: taskDigest.slice("sha256:".length) } },
+      requester: "urn:uuid:20000000-0000-4000-8000-000000000002",
+      idempotencyKey: crypto.randomUUID(),
+      nonce,
+      deadline: "2099-01-01T00:00:00Z",
+    });
+    const attemptUri = `urn:uuid:${crypto.randomUUID()}` as const;
+    const requestId = `0x${"a".repeat(64)}` as const;
+    const seen: { readonly workKind?: string; readonly requestId?: `0x${string}` }[] = [];
+    const deliveryExtensions: LocalTaskExecutionBackendConfig["deliveryExtensions"] = (input) => {
+      seen.push({ workKind: input.workKind, requestId: input.requestId });
+      return {};
+    };
+    const instance = backend(await stateRoot(), repository, () => {}, deliveryExtensions);
+    // Noted BEFORE submit() -- the seam's whole point is that the caller knows the attempt's
+    // identity ahead of the two-party submit call.
+    instance.noteAttemptWorkKind(attemptUri, "repo-fix", requestId);
+
+    const ack = await instance.submit(task, submission, {
+      attemptUri,
+      dispatchContext: { taskDigest, submission: submissionUri, nonce, attempt: attemptUri },
+    });
+    expect(ack.accepted).toBe(true);
+    if (!ack.accepted) throw new Error("unreachable");
+
+    await terminalSnapshot(instance, ack.submission);
+    expect(seen).toEqual([{ workKind: "repo-fix", requestId }]);
+  });
+
+  test("leaves workKind/requestId absent from deliveryExtensions input when never noted", async () => {
+    const repository = new InMemoryEvidenceRepository();
+    const seen: Record<string, unknown>[] = [];
+    const deliveryExtensions: LocalTaskExecutionBackendConfig["deliveryExtensions"] = (input) => {
+      seen.push(input as unknown as Record<string, unknown>);
+      return {};
+    };
+    const instance = backend(await stateRoot(), repository, () => {}, deliveryExtensions);
+    const { task, submission } = documents();
+    const ack = await instance.submit(task, submission);
+    expect(ack.accepted).toBe(true);
+    if (!ack.accepted) throw new Error("unreachable");
+
+    await terminalSnapshot(instance, ack.submission);
+    expect(seen).toHaveLength(1);
+    expect("workKind" in seen[0]!).toBe(false);
+    expect("requestId" in seen[0]!).toBe(false);
+  });
 });

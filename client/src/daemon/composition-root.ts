@@ -31,22 +31,24 @@
  *     against empty/fail-closed backing stores, so every check reports `"missing"` — never
  *     silently `"verified"`.
  *
- *  3. (Task 15, coordinator amendment 4 / D3 ratified.) `LocalTaskExecutionBackendConfig`'s
- *     `deliveryExtensions` hook is supplied (not a stub-shaped omission) but always returns `{}`
- *     today, for two independently blocking reasons, neither fabricatable from this task's
- *     4-file write scope: (a) the hook is synchronous (matches the backend's own synchronous
- *     `sealDelivery` call site at completion time), but the only signer `CompositionRootInput`
- *     carries is `input.walletClient`, whose signing methods are all async (remote-signer /
- *     hardware-wallet compatible) — there is no raw private key or synchronous secp256k1 signer
- *     anywhere on this input; (b) there is no reachable mapping from a sealed `TaskSpecification`
- *     back to the `ExecutionWiringEntry`/workKind that produced it — `workKind` is computed once,
- *     at claim time, by `mapAnnouncedSubmissionToFacts` from the announced card, and is not
- *     carried by the Task document itself (`TaskSpecificationSchema` has no such field) nor
- *     threaded through `runPipeline`/`backend.submit`/`completeAttempt`. The read path (mech
- *     adapter's `legacyRestorationResultFromDelivery` preference) and the write seam (this field,
- *     present and correctly spread into `sealDelivery`) are real; only the envelope content is
- *     not yet populated. A follow-up task needs a synchronous signer port plus a workKind-
- *     carrying seam from claim through to delivery to close this.
+ *  3. CLOSED (cutover stage 1 close-out C7, finding E24). `LocalTaskExecutionBackendConfig`'s
+ *     `deliveryExtensions` hook now attaches the bridge-era legacy execution envelope for real,
+ *     given two things this composition root did not have before: (a) a synchronous signer --
+ *     `CompositionRootInput.legacyBridgeSigner`, a new OPTIONAL field, because the only signer
+ *     this input carried before (`input.walletClient`) is async-only (remote-signer / hardware-
+ *     wallet compatible) and there is still no raw private key anywhere on this input; (b) a
+ *     workKind-carrying seam -- `work-loop.ts` now calls the concrete
+ *     `LocalTaskExecutionBackend.noteAttemptWorkKind(attemptUri, workKind, requestId)` (exposed
+ *     here as `OperatorComposition.noteAttemptWorkKind`) at the SAME point it derives `attemptUri`
+ *     for the engagement ledger, strictly before `backend.submit()` -- `attemptUri` is
+ *     deterministic (`deriveMarketplaceAttemptUri`) so it is known ahead of submit and matches
+ *     exactly what `backend.ts`'s `completeAttempt` later keys its own note lookup by.
+ *     `legacyBridgeSigner` stays OPTIONAL and absent by default (`main.ts` does not supply one --
+ *     out of this task's write scope): with no signer, `deliveryExtensions` stays the safe no-op
+ *     `() => ({})` it always was. A follow-up task needs to give `main.ts` an actual synchronous
+ *     secp256k1 signer (e.g. derived from the operator's own keystore) to activate this in
+ *     production; `buildLegacyDeliveryExtensions` below is exported so that follow-up, and this
+ *     composition's own tests, can drive the exact same wiring.
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -63,6 +65,7 @@ import { createRegistryPinPort } from '@jinn-network/marketplace-binding';
 import {
   CLAIM_NOTHING,
   matchLegacyManifestDigest,
+  resolveWiringEntry,
   takeEveryRunnable,
   type ClaimPredicate,
   type ExecutionWiringEntry,
@@ -81,7 +84,7 @@ import {
   type LocalTaskExecutionBackendConfig,
   type LocalProvisionerInput,
 } from '@jinn-network/task-execution-backend-local';
-import type { TaskExecutionBackend } from '@jinn-network/task-execution-backend';
+import type { AttemptUri, TaskExecutionBackend } from '@jinn-network/task-execution-backend';
 import {
   claudeCodeLauncher,
   codexLauncher,
@@ -99,13 +102,14 @@ import {
 // Consumes block implies, by `@jinn-network/task-execution-workspace`, which does not export
 // it at all).
 import type { ProfileStore } from '@jinn-network/task-execution-profiles';
-import type { ProtocolObservation } from '@jinn-network/task-execution-protocol';
+import type { JsonValue, ProtocolObservation } from '@jinn-network/task-execution-protocol';
 import { buildInfo } from '../build-info.js';
 import type { JinnConfig } from '../config.js';
 import type { ClaimPolicyConfig } from '../config/shape-v2.js';
 import { toPipelineWiring } from '../config/shape-v2.js';
 import type { VenueBroadcaster } from '../adapters/mech/safe.js';
 import { openOperatorEvidence, type OperatorEvidence } from './evidence-join.js';
+import { buildLegacyExecutionEnvelope, LEGACY_ENVELOPE_EXTENSION_KEY } from './bridge-legacy-delivery.js';
 
 export interface OperatorComposition {
   readonly backend: TaskExecutionBackend;
@@ -124,6 +128,13 @@ export interface OperatorComposition {
    * nonce-race class the single-broadcaster rule exists to close.
    */
   readonly broadcaster: VenueBroadcaster;
+  /**
+   * The C7 workKind seam (finding E24): notes the workKind (and, for today-generation claims, the
+   * requestId) that will produce an attempt, so the legacy-bridge `deliveryExtensions` hook can
+   * read it back when it seals that attempt's Delivery. A no-op when `legacyBridgeSigner` was
+   * never supplied to this composition -- still safe to call unconditionally.
+   */
+  readonly noteAttemptWorkKind: (attempt: AttemptUri, workKind: string, requestId?: `0x${string}`) => void;
   close(): Promise<void>;
 }
 
@@ -140,6 +151,15 @@ export interface CompositionRootInput {
   readonly profileStore: ProfileStore;
   readonly identityRegistryAddress?: string;
   readonly secretForwardResolver?: LocalTaskExecutionBackendConfig['secretForwardResolver'];
+  /**
+   * Synchronous secp256k1 signer for the bridge-era legacy execution envelope (C7 / finding E24).
+   * No raw private key or synchronous signer exists anywhere else on this input (the only signer
+   * is the async viem `WalletClient`, incompatible with `deliveryExtensions`'s synchronous call
+   * site) -- a host that wants the legacy bridge active supplies this separately. Absent (the
+   * default; `main.ts` does not supply one today): `deliveryExtensions` stays the safe no-op it
+   * always was.
+   */
+  readonly legacyBridgeSigner?: (hash: `0x${string}`) => `0x${string}`;
   readonly logger?: { info(m: string): void; warn(m: string): void };
 }
 
@@ -342,6 +362,53 @@ function buildVerifySettlementGrade(input: {
   });
 }
 
+// ── Legacy bridge delivery extension (gap 3, closed — see file header) ──────
+
+/**
+ * Builds the `deliveryExtensions` hook that attaches the bridge-era legacy execution envelope
+ * (C7 / finding E24), given a synchronous signer. The attempt's workKind (and, for today-
+ * generation claims, requestId) must have been noted ahead of time via the `noteAttemptWorkKind`
+ * seam -- when it wasn't (no wiring entry resolves for the noted workKind, or nothing was ever
+ * noted for this attempt), the hook returns no extension rather than guessing.
+ *
+ * Exported so `client/test/bridge/*` can drive the exact hook production wires against a REAL
+ * `LocalTaskExecutionBackend`, proving the bridge fixtures against a delivery this backend
+ * actually produced rather than a hand-built one.
+ */
+export function buildLegacyDeliveryExtensions(input: {
+  readonly stateRoot: string;
+  readonly participant: `0x${string}`;
+  readonly wiring: readonly ExecutionWiringEntry[];
+  readonly sign: (hash: `0x${string}`) => `0x${string}`;
+}): NonNullable<LocalTaskExecutionBackendConfig['deliveryExtensions']> {
+  return ({ attempt, harvest, workKind, requestId }): Readonly<Record<string, JsonValue>> => {
+    if (workKind === undefined) return {};
+    const entry = resolveWiringEntry(workKind, input.wiring);
+    if (entry === undefined) return {};
+    // Matches `LocalTaskExecutionBackend`'s own `attemptRoot`/`paths.out` derivation exactly
+    // (`<stateRoot>/attempts/<attemptUuid>/out`) -- the backend does not expose `paths` to this
+    // hook, but the derivation is a pure function of `stateRoot` + `attempt`, both already held
+    // here.
+    const outputsRoot = join(input.stateRoot, 'attempts', attempt.slice('urn:uuid:'.length), 'out');
+    // Bridge-era stand-in: neither `deliveryExtensions` nor this composition root's claim-time
+    // state carries the harness's real start/end timestamps (see bridge-legacy-delivery.ts's
+    // function doc for the fields that remain placeholders and why).
+    const now = new Date().toISOString();
+    const { json } = buildLegacyExecutionEnvelope({
+      solverType: workKind,
+      participant: input.participant,
+      harness: entry.harness,
+      harvest,
+      outputsRoot,
+      startedAt: now,
+      endedAt: now,
+      sign: input.sign,
+      requestId,
+    });
+    return { [LEGACY_ENVELOPE_EXTENSION_KEY]: json };
+  };
+}
+
 // ── Observation feed (gap 1 — see file header) ───────────────────────────────
 
 function buildObservations(): () => Promise<readonly ProtocolObservation[]> {
@@ -443,11 +510,17 @@ export async function buildOperatorComposition(
       : { secretForwardResolver: input.secretForwardResolver }),
     cancellationGraceMs: 30_000,
     heartbeatIntervalMs: 10_000,
-    // Bridge era only (Task 15, coordinator amendment 4 / D3 ratified; gap 3, file header): the
-    // hook is genuinely wired, but always returns no extension until a synchronous signer port
-    // and a claim-to-delivery workKind seam exist — see gap 3 above for why neither is
-    // fabricatable from this composition root today.
-    deliveryExtensions: () => ({}),
+    // Bridge era only (gap 3, file header — CLOSED by C7). Real when `legacyBridgeSigner` was
+    // supplied; the safe no-op it always was otherwise.
+    deliveryExtensions:
+      input.legacyBridgeSigner === undefined
+        ? () => ({})
+        : buildLegacyDeliveryExtensions({
+            stateRoot: input.stateRoot,
+            participant: input.safeAddress,
+            wiring,
+            sign: input.legacyBridgeSigner,
+          }),
   };
   const backend = new LocalTaskExecutionBackend(backendConfig);
 
@@ -478,6 +551,8 @@ export async function buildOperatorComposition(
     safeAddress: input.safeAddress,
     mechAddress: input.mechAddress,
     broadcaster,
+    noteAttemptWorkKind: (attempt, workKind, requestId) =>
+      backend.noteAttemptWorkKind(attempt, workKind, requestId),
     async close(): Promise<void> {
       await evidence.close();
       venue.close();

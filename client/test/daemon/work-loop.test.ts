@@ -264,6 +264,10 @@ function composition(hooks: CompositionHooks = {}): OperatorComposition {
     chain: BASE_SEPOLIA_TODAY,
     safeAddress: SAFE_ADDRESS,
     mechAddress: BASE_SEPOLIA_TODAY.mechMarketplace as `0x${string}`,
+    // C7 workKind seam (finding E24): a no-op fixture is enough here -- these tests exercise the
+    // ledger/pipeline ordering, not the legacy bridge. `composition-root.test.ts` covers the real
+    // wiring; `client/test/bridge/*` covers the seam producing a real Delivery.
+    noteAttemptWorkKind: () => undefined,
     close: async () => undefined,
   };
 }

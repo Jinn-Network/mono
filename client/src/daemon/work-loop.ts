@@ -235,7 +235,7 @@ export class WorkLoop {
     // 6. Drive the pipeline, with the deliver leg funneled through the settlement port so the
     // mech Deliver fact exists before settlement reads it.
     const { taskBytes, submissionBytes } = await this.config.readSealedDocuments(card);
-    const { ports, getDeliveryBytes } = this.buildPorts(idempotencyKey, admitted);
+    const { ports, getDeliveryBytes } = this.buildPorts(idempotencyKey, admitted, facts.workKind);
     const result = await runPipeline(
       { facts, taskBytes, submissionBytes },
       this.config.composition.pipelineConfig,
@@ -259,6 +259,7 @@ export class WorkLoop {
   private buildPorts(
     idempotencyKey: string,
     admitted: boolean,
+    workKind: string,
   ): { readonly ports: PipelinePorts; readonly getDeliveryBytes: () => Uint8Array | undefined } {
     const composition = this.config.composition;
     const base = composition.pipelinePorts;
@@ -282,13 +283,13 @@ export class WorkLoop {
         capabilityMatch: async () => ({ ok: true }),
         claimTask: async (input) => {
           const receipt = await base.claim.claimTask(input);
+          const attemptUri = deriveMarketplaceAttemptUri({
+            chainId: chain.chainId,
+            coordinator: chain.taskCoordinator,
+            taskId: input.taskId,
+            attemptIndex: receipt.attemptIndex,
+          });
           if (admitted) {
-            const attemptUri = deriveMarketplaceAttemptUri({
-              chainId: chain.chainId,
-              coordinator: chain.taskCoordinator,
-              taskId: input.taskId,
-              attemptIndex: receipt.attemptIndex,
-            });
             // 7. On claim.ok, observed through the wrapped claimTask port. `receipt.requestId` is
             // present only for today-generation claims (revised-generation claims never mint
             // one) -- carried through so `settlement-grade.ts`'s `checkDispatchBinding` can
@@ -299,6 +300,13 @@ export class WorkLoop {
               claimTxHash: receipt.txHash,
               requestId: receipt.requestId,
             });
+            // C7 workKind seam (finding E24): note it here, strictly before `backend.submit()` is
+            // ever called below -- `attemptUri` is deterministic (same derivation `claimAttempt`
+            // uses internally for this same claim), so it is already known. Gated on `admitted`
+            // like the ledger write above it — an unadmitted claim never reaches `submit()`
+            // either. The composition's own `noteAttemptWorkKind` is a no-op when no legacy-
+            // bridge signer was ever supplied to this composition.
+            composition.noteAttemptWorkKind(attemptUri, workKind, receipt.requestId);
           }
           return receipt;
         },

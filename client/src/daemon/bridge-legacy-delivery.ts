@@ -88,6 +88,14 @@ export function legacyRestorationResultFromDelivery(
  * use — this envelope is consumed by the legacy evaluator's `SignedEnvelopeSchema` (a shape
  * check, not an on-chain re-verification of task provenance), so a schema-valid placeholder does
  * not weaken the evaluator's actual correctness check, which reads `payload`.
+ *
+ * Cutover stage 1 close-out C7 (finding E24) closed part of this gap: `requestId` is now an
+ * optional input, honestly supplied by `composition-root.ts`'s `deliveryExtensions` hook from the
+ * C7 workKind seam (`LocalTaskExecutionBackend.noteAttemptWorkKind`) for today-generation claims.
+ * `onchainCreationTx`/`onchainCreationBlock` remain placeholders -- C7's seam carries an attempt's
+ * workKind and (today-generation) requestId, neither of which is the task's own on-chain creation
+ * tx/block; `AnnouncedSubmissionCard` (`packages/marketplace/pipeline/src/facts-mapper.ts`) carries
+ * no such field either, so this genuinely remains unreachable from the daemon's write scope.
  */
 export function buildLegacyExecutionEnvelope(input: {
   readonly solverType: string;
@@ -98,6 +106,8 @@ export function buildLegacyExecutionEnvelope(input: {
   readonly startedAt: string;
   readonly endedAt: string;
   readonly sign: (hash: `0x${string}`) => `0x${string}`;
+  /** Today-generation marketplace requestId, when honestly available (C7 workKind seam). */
+  readonly requestId?: `0x${string}`;
 }): { readonly json: string; readonly evidenceHash: `0x${string}` } {
   const payload = readPrimaryOutputPayload(input.outputsRoot, input.harvest);
   const generatedAt = Date.parse(input.endedAt);
@@ -117,7 +127,7 @@ export function buildLegacyExecutionEnvelope(input: {
       cid: outputsDigest,
       onchainCreationTx: '0x' as const,
       onchainCreationBlock: 0,
-      requestId: '0x' as const,
+      requestId: input.requestId ?? ('0x' as const),
     },
     participant: { safeAddress: input.participant, agentEoa: input.participant },
     window: { startTs: Number.isFinite(startTs) ? startTs : 0, endTs: Number.isFinite(endTs) ? endTs : 0 },

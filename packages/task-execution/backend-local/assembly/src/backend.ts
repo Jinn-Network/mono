@@ -525,6 +525,17 @@ export interface LocalTaskExecutionBackendConfig {
     readonly attempt: AttemptUri;
     readonly harvest: HarvestResult;
     readonly task: TaskSpecification;
+    /**
+     * The workKind noted for this attempt via `LocalTaskExecutionBackend.noteAttemptWorkKind`
+     * (cutover stage 1, C7 workKind seam / finding E24) -- `undefined` when the host never noted
+     * one for this attempt (including every caller that predates this field).
+     */
+    readonly workKind?: string;
+    /**
+     * The today-generation marketplace requestId noted alongside `workKind`, when the caller had
+     * one (absent for revised-generation attempts, which mint no requestId, or when never noted).
+     */
+    readonly requestId?: `0x${string}`;
   }) => Readonly<Record<string, JsonValue>>;
 }
 
@@ -584,6 +595,17 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   private readonly inflight = new Set<Promise<unknown>>();
   private readonly attemptTimers = new Map<AttemptUri, Set<NodeJS.Timeout>>();
   private readonly watchRegistry = new ObservationWatchRegistry();
+  /**
+   * Host-injected per-attempt bridge context (cutover stage 1, C7 workKind seam / finding E24),
+   * read once by `deliveryExtensions` at delivery-sealing time and then discarded. Additive:
+   * nothing in this class's own control flow ever populates this map -- a host that never calls
+   * `noteAttemptWorkKind` sees byte-identical `deliveryExtensions` input to before this map
+   * existed (`workKind`/`requestId` are simply absent from the input object).
+   */
+  private readonly attemptWorkKinds = new Map<
+    AttemptUri,
+    { readonly workKind: string; readonly requestId?: `0x${string}` }
+  >();
   private closed = false;
   private closeInvoked = false;
   private shutdownStarted = false;
@@ -905,6 +927,21 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     return failed === undefined
       ? { ready: true }
       : this.preflightUnavailable(failed.detail ?? "launcher probe failed");
+  }
+
+  /**
+   * Notes the workKind (and, for today-generation claims, the marketplace requestId) that will
+   * produce this attempt, so `deliveryExtensions` can read it back at delivery-sealing time
+   * (cutover stage 1, C7 workKind seam / finding E24). A two-party caller (e.g. `work-loop.ts`)
+   * knows `attempt` before it ever calls `submit()`, so this is safe to call first. Not part of
+   * the `TaskExecutionBackend` interface -- callers hold a concrete `LocalTaskExecutionBackend`
+   * reference, not the abstract type, to reach it.
+   */
+  noteAttemptWorkKind(attempt: AttemptUri, workKind: string, requestId?: `0x${string}`): void {
+    this.attemptWorkKinds.set(attempt, {
+      workKind,
+      ...(requestId === undefined ? {} : { requestId }),
+    });
   }
 
   async submit(
@@ -1591,7 +1628,16 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     }
     await this.invokeCompletionPhase("before-delivery-checkpoint");
     if (!this.workerMayContinue()) return;
-    const extensions = this.config.deliveryExtensions?.({ attempt, harvest, task: input.task }) ?? {};
+    // C7 workKind seam (finding E24): read once and discard -- a host-noted bridge context is
+    // relevant to exactly one delivery-sealing pass for its attempt.
+    const bridgeNote = this.attemptWorkKinds.get(attempt);
+    this.attemptWorkKinds.delete(attempt);
+    const extensions = this.config.deliveryExtensions?.({
+      attempt,
+      harvest,
+      task: input.task,
+      ...(bridgeNote === undefined ? {} : bridgeNote),
+    }) ?? {};
     for (const key of Object.keys(extensions)) {
       if (!/^[a-z][a-z0-9+.-]*:/iu.test(key)) {
         throw new Error("Delivery extension keys must be absolute URIs");
