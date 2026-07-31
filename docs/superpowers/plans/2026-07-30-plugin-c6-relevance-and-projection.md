@@ -5801,3 +5801,7 @@ via the forward link; attribution and verification surfaces must not claim L2/L3
 
 - [x] **C6-W1-1** — portal build list includes `evidence/derivation` + `evidence/trace-decode` (and required build-order deps) before typecheck
 - [x] **C6-W1-2** — README intro consistent: Capture/C5/C6 present; publication/MCP deferred; no L5/L23 contradictions
+
+### Acceptance
+
+**acceptance-complete** (2026-07-31) at exact head `15b0a595213600e1f0af4cf57deb3607331399df`. Scoped wave-2 rereview of C6-W1-1..2: **CLEAN**. PR comment: https://github.com/Jinn-Network/mono/pull/2346#issuecomment-5147747660. Named residuals (F15–F18, C6-P3, F9/F11/F12) deferred; do not block dependents.
