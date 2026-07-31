@@ -2,6 +2,7 @@
 
 import type {
   AdmissionCandidate,
+  AdmissionRefusalCode,
   AdmissionResult,
   DifferentialAdmissionReceiptV3,
 } from "@jinn-network/task-admission";
@@ -60,10 +61,15 @@ export interface WrittenPair {
   readonly receiptDigest: Sha256Digest;
 }
 
-/** An admission refusal: a first-class outcome, summarized and discarded (design §7.2). */
+/**
+ * An admission refusal: a first-class outcome, summarized and discarded (design §7.2).
+ *
+ * `code` keeps C3's closed refusal taxonomy rather than widening it to `string` — a consumer
+ * routes on these codes, so a value outside the union would be a contract change made silently.
+ */
 export interface RefusedCandidate {
   readonly candidateId: string;
-  readonly code: string;
+  readonly code: AdmissionRefusalCode;
 }
 
 export interface FailedCandidate {
@@ -130,6 +136,38 @@ function toAdmissionCandidate(
 }
 
 /**
+ * Every binding by which a receipt names the pair it is about, checked before that receipt is
+ * published and cited.
+ *
+ * The port is a foreign adapter owned by the composing application (program ruling R4) and may
+ * be remote, so its answer is data, not truth: a stale, swapped or buggy response would
+ * otherwise be written straight into `PoolEntry.receiptDigest` — the pinned field (R5) every
+ * downstream consumer joins on to claim this pair earned a receipt. Gold is checked separately
+ * and keeps its own category, because the stored gold, not the sealed pair, is what it binds to.
+ */
+function assertReceiptIsAboutThisPair(
+  receipt: DifferentialAdmissionReceiptV3,
+  task: SealedTask,
+  spec: SealedEvaluationSpec,
+  env: DerivationEnvironment,
+): void {
+  const bindings: readonly (readonly [string, string, string])[] = [
+    ["task.documentDigest", receipt.task.documentDigest, task.digest],
+    ["task.evaluationSpecDigest", receipt.task.evaluationSpecDigest, spec.digest],
+    ["environment.recordDigest", receipt.environment.recordDigest, env.recordDigest],
+  ];
+  for (const [field, received, expected] of bindings) {
+    if (!digestsEqual(received, expected)) {
+      throw new DerivationError(
+        "receipt-mismatch",
+        `receipt ${field} ${received} is not this pair's ${expected}, so the receipt is about `
+          + "something else and the pair does not get written.",
+      );
+    }
+  }
+}
+
+/**
  * Pipes a strategy's candidates through admission and writes the survivors to the pool as
  * sealed pairs.
  *
@@ -161,7 +199,7 @@ export async function runDerivation<TInputs>(
       });
 
       if ("refusal" in result) {
-        const code = String(result.refusal.code);
+        const { code } = result.refusal;
         refused.push({ candidateId: candidate.id, code });
         deps.logger?.candidateRefused({ candidateId: candidate.id, code });
         continue;
@@ -177,10 +215,11 @@ export async function runDerivation<TInputs>(
             + `${gold.goldPatchHash}.`,
         );
       }
+      assertReceiptIsAboutThisPair(receipt, task, spec, env);
 
       const { digest: receiptDigest } = await deps.admission.publishReceipt(receipt);
 
-      await deps.pool.put({
+      const recorded = await deps.pool.put({
         taskDigest: task.digest,
         taskBytes: task.bytes,
         evaluationSpecDigest: spec.digest,
@@ -203,7 +242,10 @@ export async function runDerivation<TInputs>(
         candidateId: candidate.id,
         taskDigest: task.digest,
         evaluationSpecDigest: spec.digest,
-        receiptDigest,
+        // What the pool RECORDED, not what this run published: re-putting an existing pair keeps
+        // the first writer's receipt (pool.ts's conflict key excludes it), so reporting
+        // `receiptDigest` here would name a receipt the entry does not cite.
+        receiptDigest: recorded.receiptDigest,
       });
       deps.logger?.pairWritten({ candidateId: candidate.id, taskDigest: task.digest });
     } catch (error) {

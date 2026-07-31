@@ -173,6 +173,16 @@ export interface StubAdmissionOptions {
   readonly refuse?: Record<string, string>;
   readonly goldHashOverride?: string;
   readonly throwOn?: string;
+  /**
+   * Rewrites the receipt's bindings to the pair. A port is a foreign adapter (program ruling
+   * R4) and may answer about something else — stale, swapped, or simply buggy — so the run
+   * must be testable against exactly that.
+   */
+  readonly receiptBindingOverrides?: {
+    readonly taskDocumentDigest?: string;
+    readonly evaluationSpecDigest?: string;
+    readonly environmentRecordDigest?: string;
+  };
 }
 
 export interface StubAdmissionPort extends AdmissionPort {
@@ -206,13 +216,16 @@ export function createStubAdmissionPort(options: StubAdmissionOptions = {}): Stu
       if (refusal !== undefined) {
         return { refusal: { code: refusal as AdmissionRefusalCode, detail: "scripted refusal" } };
       }
+      const bindings = options.receiptBindingOverrides;
       const receipt: DifferentialAdmissionReceiptV3 = {
         schemaVersion: ADMISSION_RECEIPT_SCHEMA_VERSION,
         admissionPolicyVersion: DIFFERENTIAL_ADMISSION_POLICY_V3.admissionPolicyVersion,
         issuer: "urn:jinn:test:stub-admission",
         task: {
-          documentDigest: request.candidate.taskDocumentDigest,
-          evaluationSpecDigest: documentDigest(request.candidate.evaluationSpecBytes),
+          documentDigest: (bindings?.taskDocumentDigest
+            ?? request.candidate.taskDocumentDigest) as `sha256:${string}`,
+          evaluationSpecDigest: (bindings?.evaluationSpecDigest
+            ?? documentDigest(request.candidate.evaluationSpecBytes)) as `sha256:${string}`,
           statementDigest: request.candidate.statementDigest,
           testMaterialDigests: [...request.candidate.testMaterialDigests],
           transitions: {
@@ -230,7 +243,8 @@ export function createStubAdmissionPort(options: StubAdmissionOptions = {}): Stu
           passToPass: [...request.candidate.transitions.passToPass],
         })),
         environment: {
-          recordDigest: environmentRecordDigest(request.environmentRecordBytes) as `sha256:${string}`,
+          recordDigest: (bindings?.environmentRecordDigest
+            ?? environmentRecordDigest(request.environmentRecordBytes)) as `sha256:${string}`,
           inlineMatch: { fields: ["image", "parser", "platform"], specKeyPresent: true },
         },
         evalSemanticsVersion: request.candidate.evalSemanticsVersion,

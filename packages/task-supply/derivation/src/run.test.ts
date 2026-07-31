@@ -130,6 +130,46 @@ describe("runDerivation", () => {
     expect(await deps.pool.list()).toHaveLength(0);
   });
 
+  it.each([
+    ["task document", { taskDocumentDigest: `sha256:${"a".repeat(64)}` }],
+    ["evaluation spec", { evaluationSpecDigest: `sha256:${"b".repeat(64)}` }],
+    ["environment record", { environmentRecordDigest: `sha256:${"c".repeat(64)}` }],
+  ])(
+    "refuses to cite a receipt that names another %s",
+    async (_what, receiptBindingOverrides) => {
+      const admission = createStubAdmissionPort({ receiptBindingOverrides });
+      const { deps } = await harness(admission);
+      const summary = await runDerivation(
+        deps,
+        importStrategy,
+        env,
+        fixtureImportInputs([buildFixtureRow()]),
+      );
+      expect(summary.written).toHaveLength(0);
+      expect(summary.failed[0]!.reason).toBe("receipt-mismatch");
+      expect(await deps.pool.list()).toHaveLength(0);
+      expect(admission.published).toHaveLength(0);
+    },
+  );
+
+  it("reports the receipt digest the pool actually recorded, not the one this run published", async () => {
+    const { deps, admission } = await harness();
+    const inputs = () => fixtureImportInputs([buildFixtureRow()]);
+    const first = await runDerivation(deps, importStrategy, env, inputs());
+    const second = await runDerivation(deps, importStrategy, env, inputs());
+
+    // The pool's conflict key excludes receiptDigest on purpose (pool.ts): a second admission
+    // is equally valid and the first writer's receipt is the one recorded. The summary must
+    // say what the pool holds, not what this run happened to publish.
+    expect(admission.published).toEqual([
+      first.written[0]!.receiptDigest,
+      expect.stringMatching(/^sha256:/),
+    ]);
+    const entry = await deps.pool.get(second.written[0]!.taskDigest);
+    expect(second.written[0]!.receiptDigest).toBe(entry!.receiptDigest);
+    expect(second.written[0]!.receiptDigest).toBe(first.written[0]!.receiptDigest);
+  });
+
   it("propagates a port failure instead of marking every candidate failed", async () => {
     const admission = createStubAdmissionPort({ throwOn: "acme__widget-1234" });
     const { deps } = await harness(admission);

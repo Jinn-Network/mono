@@ -40,16 +40,6 @@ export interface SealedTask {
  */
 function recordAlignedRow(candidate: Candidate, env: DerivationEnvironment): SweRebenchRow {
   const { record } = env;
-  if (record.image.reference === undefined) {
-    // §4.2 makes `reference` advisory and optional, but the family block's image descriptor
-    // needs a locator OR a digest — and a pull hint the record does not carry is not ours to
-    // invent. A record without one cannot produce a pair here; that is a record defect.
-    throw new DerivationError(
-      "environment-mismatch",
-      "the environment record declares no image.reference, so no image locator can be "
-        + "written into the EvaluationSpec without inventing one.",
-    );
-  }
   return {
     instance_id: candidate.provenance.upstream.instanceId,
     repo: record.source.repo,
@@ -58,9 +48,12 @@ function recordAlignedRow(candidate: Candidate, env: DerivationEnvironment): Swe
     language: candidate.language,
     image: {
       name: "environment-image",
-      // §4.2 requires `reference` to end with `@<manifestDigest>`; both forms are written
-      // so a consumer reading either the locator or the DigestSet resolves the same image.
-      uri: record.image.reference,
+      // The DigestSet is the identity and is always written. `reference` is an optional
+      // advisory pull hint (§4.2, required to end with `@<manifestDigest>`), so it is copied
+      // only when the record carries one — a record without it is well-formed, the descriptor
+      // still has a locator (protocol `resourceDescriptorHasLocator`), and C3's inline match
+      // resolves the manifest digest from the DigestSet. Nothing is invented either way.
+      ...(record.image.reference === undefined ? {} : { uri: record.image.reference }),
       digest: { sha256: toBareHex(record.image.manifestDigest, "record image.manifestDigest") },
     },
     testMaterial: candidate.testMaterial.map((material) => ({

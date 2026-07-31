@@ -7,6 +7,7 @@ import {
   sweRebenchRowToTaskAndSpec,
 } from "@jinn-network/task-execution-profiles";
 import { sealEnvironmentRecord } from "@jinn-network/environment-record";
+import { checkInlineEnvironmentMatch } from "@jinn-network/task-admission";
 import { sealTask } from "@jinn-network/task-execution-protocol";
 import { readEnvironmentRecordExtension } from "./environment-extension.js";
 import { buildCandidateEvaluationSpec, buildSealedTask } from "./seal-pair.js";
@@ -36,6 +37,26 @@ describe("sealed pair", () => {
       version: env.record.parser.version,
       digest: env.record.parser.digest,
     });
+  });
+
+  it("seals a pair from a record that declares no advisory image reference", () => {
+    const base = buildFixtureEnvironmentRecordBody();
+    // §4.2 makes `reference` an optional pull hint; `manifestDigest` is the identity. A record
+    // that omits the hint is well-formed, and the DigestSet alone satisfies the descriptor's
+    // locator rule (protocol `resourceDescriptorHasLocator`).
+    const env = environment({
+      image: { manifestDigest: base.image.manifestDigest, platform: base.image.platform },
+    });
+    const spec = buildCandidateEvaluationSpec(buildFixtureCandidate(), env);
+    const image = (spec.document.familyBlock as Record<string, unknown>)["image"] as {
+      digest: { sha256: string };
+    };
+
+    expect(image).not.toHaveProperty("uri");
+    expect(image.digest.sha256).toBe(base.image.manifestDigest.slice("sha256:".length));
+    // C3 resolves the manifest digest from the DigestSet when there is no reference to read.
+    expect(checkInlineEnvironmentMatch(env.record, spec.document, env.recordDigest))
+      .toEqual({ fields: ["image", "parser", "platform"], specKeyPresent: true });
   });
 
   it("overrides the mapper's hardcoded platform for a non-amd64 record", () => {
@@ -151,7 +172,12 @@ describe("sealed pair", () => {
     const spec = buildCandidateEvaluationSpec(candidate, env);
     const task = buildSealedTask(candidate, env, spec.digest);
     const gold = decoder.decode(candidate.goldPatch);
-    expect(decoder.decode(task.bytes)).not.toContain(gold);
-    expect(decoder.decode(spec.bytes)).not.toContain(gold);
+    // Base64 as well as plaintext: `testMaterial[].content` is the one channel by which patch
+    // material rides into a sealed spec at all, and it is base64.
+    const goldBase64 = Buffer.from(candidate.goldPatch).toString("base64");
+    for (const bytes of [task.bytes, spec.bytes]) {
+      expect(decoder.decode(bytes)).not.toContain(gold);
+      expect(decoder.decode(bytes)).not.toContain(goldBase64);
+    }
   });
 });

@@ -10,6 +10,8 @@ export type DerivationErrorCategory =
   | "invalid-extension"
   | "environment-mismatch"
   | "gold-mismatch"
+  /** The admission port answered about a different pair than the one it was asked about. */
+  | "receipt-mismatch"
   | "pool-conflict";
 
 export class DerivationError extends Error {
