@@ -70,6 +70,16 @@ import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { startApiServer } from '../../src/api/server.js';
 import type { SolverNetRegistry } from '../../src/solver-nets/registry.js';
 import type { Harness } from '../../src/harnesses/types.js';
+import { buildOperatorComposition, type OperatorComposition } from '../../src/daemon/composition-root.js';
+import type { JinnConfig } from '../../src/config.js';
+import { CONFIG_SHAPE_VERSION, type ExecutionWiringConfigEntry } from '../../src/config/shape-v2.js';
+import type { MarketplaceChainConfig } from '@jinn-network/marketplace-binding';
+import {
+  buildRepositoryWorkProfile,
+  buildEvaluationTaskProfile,
+  sealTaskProfile,
+} from '@jinn-network/task-execution-profiles';
+import type { ProfileStore } from '@jinn-network/task-execution-profiles';
 export { compileContracts, ANVIL_PRIVATE_KEYS };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -140,6 +150,13 @@ export interface TaskV3Env {
    * and assert that the daemon's settle tx incremented the counter.
    */
   activityCheckerAddress: `0x${string}`;
+  /**
+   * Locally-deployed TaskCoordinator address (Task 18). `MarketplaceChainConfig.taskCoordinator`
+   * must point at THIS locally-deployed contract, not the real Base Sepolia
+   * `BASE_SEPOLIA_TODAY.taskCoordinator` — this fixture runs on an Anvil fork of Base MAINNET, so
+   * the Sepolia address would resolve to unrelated (or empty) bytecode there.
+   */
+  coordinatorAddress: `0x${string}`;
 }
 
 export interface DaemonHarnessFixture {
@@ -356,6 +373,7 @@ export async function deployMinimalV3Stack(
     mockMechAddress: mockMech,
     mockMarketplaceAddress: marketplace,
     activityCheckerAddress: activityChecker,
+    coordinatorAddress: coordinator,
   };
 }
 
@@ -866,8 +884,28 @@ export async function startDaemon(
    *   `getResolution` call then hits the mock server instead of
    *   `gamma-api.polymarket.com`. Point it at a `MockPolymarketGammaServer`
    *   so the evaluator/verdict leg is deterministic and needs no network.
+   * - `enableComposition` (Task 18) — build a real `OperatorComposition` via
+   *   `buildOperatorComposition` and pass it on `DaemonConfig.composition`, exactly like
+   *   `main.ts`'s testnet branch. Requires `v3Env` (the composition's `MarketplaceChainConfig`
+   *   is built entirely from the locally-deployed V3 addresses — there is no equivalent
+   *   deployment to target on production Base mainnet, which is what `v3Env`-absent callers run
+   *   against). Defaults to `false` and is OPT-IN, not automatic, for one load-bearing reason:
+   *   `buildOperatorComposition` calls `setVenueBroadcaster(...)`, a single PROCESS-WIDE
+   *   singleton bound to exactly one Safe (`src/adapters/mech/safe.ts`'s "single-broadcaster
+   *   rule", cutover stage 1 design §6.1). `jinn-repo-loop.ts` / `jinn-repo-live-loop.ts` call
+   *   `startDaemon` TWICE in one process (two operators, op-a + op-b) — if this flag defaulted
+   *   to on, the second `startDaemon` call would silently rebind the module-level broadcaster to
+   *   op-b's Safe, and op-a's subsequent legacy Safe transactions (still very much in use — the
+   *   evaluation path, Task 16, is untouched) would then throw
+   *   "does not match the installed venue broadcaster's Safe". Opt-in keeps those two scripts
+   *   byte-for-byte unchanged; only `daemon-harness-cycle.ts` (this task's target, one operator
+   *   per process) sets it.
    */
-  opts?: { polymarketGammaBaseUrl?: string; instanceLabel?: string },
+  opts?: {
+    polymarketGammaBaseUrl?: string;
+    instanceLabel?: string;
+    enableComposition?: boolean;
+  },
   /**
    * Extra SolverType→harness-name dispatch entries merged into
    * `solverTypeHarnesses` on top of the prediction.v1 mapping derived from
@@ -1076,6 +1114,92 @@ export async function startDaemon(
   const { createClients } = await import('../../src/adapters/mech/safe.js');
   const agentClients = createClients(rpcUrl, operator.agentPrivateKey, base);
 
+  // 6.5 (Task 18). Build the stage-1 cutover composition root, mirroring main.ts's
+  //     testnet-only branch (main.ts §2164 "Stage-1 cutover composition root"). Gated on
+  //     `opts.enableComposition` — see that field's doc comment above for why this is opt-in
+  //     rather than automatic whenever `v3Env` is present.
+  //
+  //     `config` is a minimal `JinnConfig`-shaped fixture, not a fully-defaulted config
+  //     (`JinnConfigSchema.parse(...)` plus `loadConfig()`'s rpcUrl/engine post-processing would
+  //     be needed for that, and this rig never boots through the file-based config loader —
+  //     `startDaemon` builds every dependency explicitly, matching the rest of this file's
+  //     pattern). It is cast to `JinnConfig` because `buildOperatorComposition` only ever reads
+  //     `config.ipfsRegistryUrl` / `config.claudePath` / `config.codexPath` / `config.hermesPath`
+  //     / `config.executionWiring` / `config.claimPolicy` (verified against composition-root.ts)
+  //     — every field this fixture sets is real and exercises the real code path; the cast is
+  //     only standing in for the ~60 unrelated `JinnConfig` fields buildOperatorComposition never
+  //     touches.
+  //
+  //     `configShapeVersion: 2` / `executionWiring` / `claimPolicy` are the shape-v2 keys (Task
+  //     1, `src/config/shape-v2.ts`) the plan calls for. `executionWiring`'s single entry's
+  //     `legacyManifestDigest` is set to the SAME digest `postPredictionV1Task` computes
+  //     (`keccak256(toBytes('prediction.v1'))`) so `matchLegacyManifestDigest` (the bridge
+  //     predicate composition-root.ts's `buildClaimPredicate` builds for
+  //     `mode: 'match-legacy-manifest-digest'`) recognizes a legacy-bridged prediction.v1 card.
+  let composition: OperatorComposition | undefined;
+  if (opts?.enableComposition === true) {
+    if (!v3Env) {
+      throw new Error('startDaemon: opts.enableComposition requires v3Env (no local V3 stack to target)');
+    }
+    const PREDICTION_V1_LEGACY_MANIFEST_CID = 'prediction.v1';
+    const legacyManifestDigest = keccak256(toBytes(PREDICTION_V1_LEGACY_MANIFEST_CID));
+
+    const executionWiring: ExecutionWiringConfigEntry[] = [
+      {
+        workKind: 'prediction.v1',
+        harness: selectedHarnessName,
+        model: claudeModel,
+        plugins: [],
+        credentialRef: 'e2e-daemon-harness',
+        isolationPolicy: 'process',
+        legacyManifestDigest,
+      },
+    ];
+    const compositionConfig = {
+      configShapeVersion: CONFIG_SHAPE_VERSION,
+      claimPolicy: {
+        mode: 'match-legacy-manifest-digest' as const,
+        spendCapWei: '1000000000000000000',
+        aiUnitCap: 1000,
+      },
+      executionWiring,
+      ipfsRegistryUrl: resolvedIpfsRegistryUrl,
+      claudePath,
+      codexPath: process.env['JINN_CODEX_PATH'] ?? 'codex',
+      hermesPath: process.env['JINN_HERMES_PATH'] ?? 'hermes',
+    } as unknown as JinnConfig;
+
+    const profileDocuments = [buildRepositoryWorkProfile(), buildEvaluationTaskProfile()];
+    const profilesByDigest = new Map(profileDocuments.map((doc) => [sealTaskProfile(doc).digest, doc]));
+    const profileStore: ProfileStore = { get: (digest) => profilesByDigest.get(digest) };
+
+    // `taskCoordinator`/`activityChecker` MUST be the locally-deployed V3 addresses, not
+    // `BASE_SEPOLIA_TODAY`'s real Base Sepolia addresses — this fixture runs on an Anvil fork of
+    // Base MAINNET (chainId 8453; `spawnAnvilFork` forks with no `--chain-id` override), so a
+    // Sepolia address would resolve to unrelated bytecode there.
+    const chain: MarketplaceChainConfig = {
+      chainId: 8453,
+      taskCoordinator: v3Env.coordinatorAddress,
+      jinnRouter: v3Env.routerAddress,
+      mechMarketplace: v3Env.mockMarketplaceAddress,
+      activityChecker: v3Env.activityCheckerAddress,
+      generation: 'today',
+    };
+
+    composition = await buildOperatorComposition({
+      config: compositionConfig,
+      publicClient: agentClients.publicClient,
+      walletClient: agentClients.walletClient as unknown as WalletClient,
+      safeAddress: operator.safeAddress,
+      mechAddress: v3Env.mockMechAddress,
+      chain,
+      stateRoot: join(fixture.implStateRoot, `${label}-backend`),
+      evidenceRoot: join(fixture.implStateRoot, `${label}-evidence`),
+      venueStateDbPath: join(fixture.implStateRoot, `${label}-venue.db`),
+      profileStore,
+    });
+  }
+
   // 7. Wire packagingDeps, envelopeDeps, deliveryDeps (Task 5).
   //    - packagingDeps: operatorEndpoint + pricing config for artifact serving.
   //      No artifact donation in tests; donation.enabled = false.
@@ -1129,6 +1253,17 @@ export async function startDaemon(
     // apiToken: not passed because we injected apiServer with its own token above
     peers: [],
     creatorSafeAddress: operator.safeAddress,
+    // Step 6.5's composition (Task 18, opt-in via opts.enableComposition). `DaemonConfig.work` is
+    // deliberately NOT set: `WorkLoop` needs an `ArchiveSubscription` (projector-backed) and a
+    // `readSealedDocuments` port, and no production implementation of either exists anywhere in
+    // `client/src` today — the projector has no real `enrich`/log-source and
+    // `BaseVenueConfig.observations` is stubbed `async () => []` (composition-root.ts's own file
+    // header, gap 1 / Finding E20). `main.ts` itself does not set `config.work` either (see its
+    // "Task 13 owns starting the loops" comment) — so `composition` alone has no effect on which
+    // loops `Daemon` starts; it exists so `setVenueBroadcaster` runs before `daemon.start()`,
+    // which every Safe-executed transaction now requires regardless of which loops run
+    // (Finding E16, `src/adapters/mech/safe.ts`'s `executeSafeTransaction`).
+    ...(composition ? { composition } : {}),
     // subgraphUrl / nodeEndpoint / signer: omitted
     // rewardClaim / balanceTopup: omitted → those loops don't start
     restorationEngine: {
@@ -1197,6 +1332,12 @@ export async function startDaemon(
     // (ownsApiServer=false when config.apiServer is injected), so we
     // are responsible for closing it here.
     await preStartedApiServer.close().catch(() => {});
+    // composition.close() clears the venue broadcaster singleton (Finding E16) and closes the
+    // evidence runtime + venue sqlite handle — must run so a sibling daemon (or the next e2e
+    // process tick) doesn't inherit a broadcaster bound to this Safe.
+    if (composition) {
+      await composition.close().catch(() => {});
+    }
   };
 
   return { daemon, store, stop };

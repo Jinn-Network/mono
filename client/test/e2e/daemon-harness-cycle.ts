@@ -91,6 +91,11 @@ async function main(): Promise<void> {
       mockIpfs.baseUrl,  // ipfsGatewayUrl — for GET /ipfs/{cid} (task fetch)
       v3Env,
       mockIpfs.baseUrl,  // ipfsRegistryUrl — for POST /api/v0/add (envelope upload)
+      // Task 18: build the stage-1 cutover composition root (main.ts's testnet branch) so
+      // setVenueBroadcaster runs before daemon.start() — every Safe-executed transaction now
+      // requires it (Finding E16). Single-daemon-per-process here, so the single-broadcaster
+      // constraint that keeps this opt-in (see startDaemon's opts doc comment) doesn't bite.
+      { enableComposition: true },
     );
     try {
       console.log('daemon started — loops running');

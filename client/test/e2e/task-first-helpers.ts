@@ -2130,8 +2130,16 @@ export interface ForkSolverNetCreationResult {
    * Outcomes from the operator-join eligibility filter exercised against the
    * real chain-emitted task. Each label captures whether the engine accepted
    * or rejected the configured task/role pair.
+   *
+   * `restoration-retired` replaces the former `accept`/`reject-cid` pair
+   * (cutover stage 1, Task 16): `TaskEngine.canAcceptTask({taskRole:
+   * 'restoration', ...})` now unconditionally resolves `{ok: false, reason:
+   * 'solution path retired at cutover stage 1'}` before any SolverNet-join or
+   * CID check runs, so a fully-eligible joined task and a task whose CID was
+   * never joined both refuse for the same reason — the CID check is no
+   * longer reachable for the restoration role.
    */
-  filterAssertions: Array<'accept' | 'reject-cid' | 'reject-role'>;
+  filterAssertions: Array<'restoration-retired' | 'reject-role'>;
 }
 
 /**
@@ -2502,7 +2510,7 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
     //   - manifestResolver: reuses the registry client (cache hit, no IPFS)
     //   - implRegistry: a no-op stub so the manifest-backed validation can
     //     reach the canAttempt gate without dispatching real harnesses
-    const filterAssertions: Array<'accept' | 'reject-cid' | 'reject-role'> = [];
+    const filterAssertions: Array<'restoration-retired' | 'reject-role'> = [];
     const filterStoreDir = await mkdtemp(join(tmpdir(), 'jinn-solvernet-filter-e2e-'));
     let filterStore: Store | null = null;
     try {
@@ -2537,9 +2545,16 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
         },
       });
 
-      // 8a) Positive: build a Task object mirroring the real chain-emitted
-      // task. The on-chain record carries `manifestDigest` only; the runtime
-      // Task carries the off-chain CID (resolved by the watcher in production).
+      // 8a/8b) Cutover stage 1, Task 16: `TaskEngine.canAcceptTask({taskRole:
+      // 'restoration', ...})` now unconditionally resolves `{ok: false,
+      // reason: 'solution path retired at cutover stage 1'}` before any
+      // SolverNet-join or CID check runs (engine.ts canAcceptTask). This
+      // replaces the former accept/reject-cid pair (which distinguished a
+      // joined-CID task from an unjoined-CID one): both now refuse for the
+      // identical reason, because the CID check is no longer reachable for
+      // the restoration role. Both a fully-eligible joined task and a task
+      // whose CID was never joined are exercised below to prove the
+      // retirement fires unconditionally, ahead of that now-dead check.
       const acceptedTask: Task = {
         ...task,
         contractId: 'prediction',
@@ -2551,14 +2566,14 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
         task: acceptedTask,
       });
       assert(
-        acceptResult.ok === true,
-        `eligibility filter rejected the joined task: ${acceptResult.ok ? '<unreachable>' : acceptResult.reason}`,
+        acceptResult.ok === false,
+        'eligibility filter accepted a restoration task — the solution path should be retired',
       );
-      filterAssertions.push('accept');
+      assert(
+        acceptResult.reason === 'solution path retired at cutover stage 1',
+        `expected joined-task restoration refusal reason to be the retirement message, got: ${acceptResult.reason}`,
+      );
 
-      // 8b) Negative — different cid: synthesize a CID the operator did NOT
-      // join. The eligibility check short-circuits before the manifest
-      // resolver is consulted, so the unknown CID is fine.
       const unjoinedCid = 'bafyfake-unjoined-launcher-cid-not-in-config';
       const rejectCidTask: Task = {
         ...task,
@@ -2575,14 +2590,11 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
         'eligibility filter accepted a task whose manifestCid was not joined',
       );
       assert(
-        /has not joined that SolverNet/.test(rejectCidResult.reason),
-        `expected reject-cid reason to mention "has not joined that SolverNet", got: ${rejectCidResult.reason}`,
+        rejectCidResult.reason === 'solution path retired at cutover stage 1',
+        `expected unjoined-cid restoration refusal reason to be the retirement message ` +
+          `(the CID check is no longer reached), got: ${rejectCidResult.reason}`,
       );
-      assert(
-        rejectCidResult.reason.includes(unjoinedCid),
-        `expected reject-cid reason to include the un-joined cid '${unjoinedCid}', got: ${rejectCidResult.reason}`,
-      );
-      filterAssertions.push('reject-cid');
+      filterAssertions.push('restoration-retired');
 
       // 8c) Negative — same cid but evaluation role the operator did not
       // join. The on-chain task is the same one the launcher posted, but
