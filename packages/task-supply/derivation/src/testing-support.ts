@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { EnvironmentRecord } from "@jinn-network/environment-record";
+import {
+  sealEnvironmentRecord,
+  type EnvironmentRecord,
+} from "@jinn-network/environment-record";
 import type { Candidate } from "./candidate.js";
 import { documentDigest } from "./digest.js";
-import type { UpstreamRebenchRow } from "./strategies/import.js";
+import type { PoolEntry } from "./pool.js";
+import { buildCandidateEvaluationSpec, buildSealedTask } from "./seal-pair.js";
+import { computeSourceCommitment } from "./source-commitment.js";
+import { IMPORT_STRATEGY_ID, type UpstreamRebenchRow } from "./strategies/import.js";
+import { loadDerivationEnvironment, type DerivationEnvironment } from "./strategy.js";
 
 const IMAGE_MANIFEST = `sha256:${"1".repeat(64)}`;
 const PARSER_DIGEST = `sha256:${"2".repeat(64)}`;
@@ -101,5 +108,39 @@ export function buildFixtureRow(
     license: "Apache-2.0",
     timeout: 900,
     ...overrides,
+  };
+}
+
+/** The fixture environment, sealed and loaded — one source of truth for every suite. */
+export function buildFixtureEnvironment(): DerivationEnvironment {
+  return loadDerivationEnvironment(sealEnvironmentRecord(buildFixtureEnvironmentRecordBody()));
+}
+
+/**
+ * A pool entry built by actually sealing the fixture candidate against the fixture
+ * environment, with a fixed placeholder receipt digest — the pool does not care where a
+ * receipt digest came from, only that the entry cites one.
+ */
+export function buildFixturePoolEntry(overrides: { statement?: string } = {}): PoolEntry {
+  const env = buildFixtureEnvironment();
+  const candidate = buildFixtureCandidate(
+    overrides.statement === undefined ? {} : { statement: overrides.statement },
+  );
+  const spec = buildCandidateEvaluationSpec(candidate, env);
+  const task = buildSealedTask(candidate, env, spec.digest);
+  return {
+    taskDigest: task.digest,
+    taskBytes: task.bytes,
+    evaluationSpecDigest: spec.digest,
+    evaluationSpecBytes: spec.bytes,
+    receiptDigest: `sha256:${"7".repeat(64)}`,
+    environmentRecordDigest: env.recordDigest,
+    strategyId: IMPORT_STRATEGY_ID,
+    provenance: {
+      kind: candidate.provenance.kind,
+      sourceCommitment: computeSourceCommitment(candidate.provenance.upstream, candidate.statement),
+      upstream: candidate.provenance.upstream,
+    },
+    rights: { sourceLicense: candidate.rights.sourceLicense },
   };
 }

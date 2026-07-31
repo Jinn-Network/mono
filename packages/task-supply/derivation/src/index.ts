@@ -54,3 +54,18 @@ export type {
   RowRejection,
   UpstreamRebenchRow,
 } from "./strategies/import.js";
+export {
+  POOL_ENTRY_SCHEMA_VERSION,
+  PoolEntryManifestSchema,
+  assertEntryDigests,
+  parsePoolEntryManifest,
+  poolEntryManifestBytes,
+} from "./pool.js";
+export type {
+  PoolEntry,
+  PoolEntryProvenance,
+  PoolEntrySummary,
+  SupplyPool,
+} from "./pool.js";
+export { createFilesystemSupplyPool } from "./pool/filesystem.js";
+export type { FilesystemSupplyPoolOptions } from "./pool/filesystem.js";
