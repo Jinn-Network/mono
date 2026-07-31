@@ -62,9 +62,15 @@ import {
   type AnnouncedSubmissionCard,
   type PipelinePorts,
   type PipelineRunOutcome,
+  type SubmissionFacts,
 } from '@jinn-network/marketplace-pipeline';
 import { computeRawCodecCid, deriveMarketplaceAttemptUri } from '@jinn-network/marketplace-binding';
 import { deliverToMarketplace } from '@jinn-network/marketplace-venue-base';
+import {
+  documentDigest,
+  serializeCanonicalJson,
+  type DispatchContext,
+} from '@jinn-network/task-execution-protocol';
 import type { Store } from '../store/store.js';
 import type { EngagementLedger } from './engagement-ledger.js';
 import type { ClaimGate } from './claim-gate.js';
@@ -235,7 +241,7 @@ export class WorkLoop {
     // 6. Drive the pipeline, with the deliver leg funneled through the settlement port so the
     // mech Deliver fact exists before settlement reads it.
     const { taskBytes, submissionBytes } = await this.config.readSealedDocuments(card);
-    const { ports, getDeliveryBytes } = this.buildPorts(idempotencyKey, admitted, facts.workKind);
+    const { ports, getDeliveryBytes } = this.buildPorts(idempotencyKey, admitted, facts);
     const result = await runPipeline(
       { facts, taskBytes, submissionBytes },
       this.config.composition.pipelineConfig,
@@ -259,7 +265,7 @@ export class WorkLoop {
   private buildPorts(
     idempotencyKey: string,
     admitted: boolean,
-    workKind: string,
+    facts: SubmissionFacts,
   ): { readonly ports: PipelinePorts; readonly getDeliveryBytes: () => Uint8Array | undefined } {
     const composition = this.config.composition;
     const base = composition.pipelinePorts;
@@ -290,6 +296,30 @@ export class WorkLoop {
             attemptIndex: receipt.attemptIndex,
           });
           if (admitted) {
+            // Finding E35 (ruled, "seal at claim time; the engagement ledger is the home"):
+            // `claimAttempt` (packages/marketplace/binding/src/claim.ts) builds this exact
+            // dispatch-context document in memory and discards it -- this loop is the AUTHOR of
+            // that document (same taskDigest/submission/nonce this claim already carries, same
+            // deterministic attemptUri derivation `claimAttempt` uses internally), so it is
+            // reconstructed here byte-identically and sealed exactly once: I-JSON, JCS, sha256
+            // (TEP §9.1; `docs/superpowers/specs/2026-07-30-stack-design-principles.md` §5
+            // "Sealed once, forever"). The sealed bytes + digest are stored on this same ledger
+            // row (spec §4: the engagement ledger holds "which wiring entry served a claim" --
+            // operator-local claim-time decisions), which Contract 2 already covers as written
+            // strictly before broadcast for the row itself. `settlement-grade.ts`'s
+            // `checkDispatchBinding` and `composition-root.ts`'s dispatch-context resolver both
+            // read this sealed digest back rather than recomputing or fabricating one.
+            const dispatchContext: DispatchContext = {
+              taskDigest: facts.taskDigest,
+              submission: facts.submission,
+              nonce: facts.nonce,
+              attempt: attemptUri,
+            };
+            const dispatchContextBytes = serializeCanonicalJson(
+              dispatchContext as Parameters<typeof serializeCanonicalJson>[0],
+            );
+            const dispatchContextDigest = documentDigest(dispatchContextBytes);
+
             // 7. On claim.ok, observed through the wrapped claimTask port. `receipt.requestId` is
             // present only for today-generation claims (revised-generation claims never mint
             // one) -- carried through so `settlement-grade.ts`'s `checkDispatchBinding` can
@@ -299,6 +329,7 @@ export class WorkLoop {
               attemptUri,
               claimTxHash: receipt.txHash,
               requestId: receipt.requestId,
+              dispatchContext: { digest: dispatchContextDigest, bytes: dispatchContextBytes },
             });
             // C7 workKind seam (finding E24): note it here, strictly before `backend.submit()` is
             // ever called below -- `attemptUri` is deterministic (same derivation `claimAttempt`
@@ -306,7 +337,7 @@ export class WorkLoop {
             // like the ledger write above it — an unadmitted claim never reaches `submit()`
             // either. The composition's own `noteAttemptWorkKind` is a no-op when no legacy-
             // bridge signer was ever supplied to this composition.
-            composition.noteAttemptWorkKind(attemptUri, workKind, receipt.requestId);
+            composition.noteAttemptWorkKind(attemptUri, facts.workKind, receipt.requestId);
           }
           return receipt;
         },

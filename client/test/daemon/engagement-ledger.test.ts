@@ -248,4 +248,117 @@ describe('engagement ledger', () => {
       rmSync(`${path}-shm`, { force: true });
     });
   });
+
+  // Finding E35 (ruled): the work loop seals the dispatch-context document once, at claim time,
+  // into this same row -- bytes + digest, additive columns exactly like `request_id` (C1) above.
+  describe('dispatch-context seal (E35)', () => {
+    const DISPATCH_CONTEXT_DIGEST = `sha256:${'e'.repeat(64)}` as const;
+    const DISPATCH_CONTEXT_BYTES = new TextEncoder().encode(
+      '{"attempt":"urn:uuid:11111111-2222-3333-4444-555555555555","nonce":"nonce-1","submission":"urn:uuid:22222222-3333-4444-5555-666666666666","taskDigest":"sha256:aaaa"}',
+    );
+
+    it('is null before a claim lands and persists the sealed digest + bytes recorded at claim time', () => {
+      const led = ledger();
+      led.admitClaimIntent(INTENT);
+      const before = led.get(INTENT.idempotencyKey)!;
+      expect(before.dispatchContextDigest).toBeNull();
+      expect(before.dispatchContextBytes).toBeNull();
+
+      led.recordClaimed(INTENT.idempotencyKey, {
+        attemptIndex: 0,
+        attemptUri: 'urn:uuid:11111111-2222-3333-4444-555555555555',
+        claimTxHash: `0x${'c'.repeat(64)}`,
+        dispatchContext: { digest: DISPATCH_CONTEXT_DIGEST, bytes: DISPATCH_CONTEXT_BYTES },
+      });
+
+      const after = led.get(INTENT.idempotencyKey)!;
+      expect(after.dispatchContextDigest).toBe(DISPATCH_CONTEXT_DIGEST);
+      expect(after.dispatchContextBytes).toBe(Buffer.from(DISPATCH_CONTEXT_BYTES).toString('base64'));
+      // Round-trips back to the exact original bytes -- not just an opaque equal string.
+      expect(new Uint8Array(Buffer.from(after.dispatchContextBytes!, 'base64'))).toEqual(
+        DISPATCH_CONTEXT_BYTES,
+      );
+    });
+
+    it('leaves both columns null when the caller records a claim without sealing (back-compat)', () => {
+      const led = ledger();
+      led.admitClaimIntent(INTENT);
+      led.recordClaimed(INTENT.idempotencyKey, {
+        attemptIndex: 0,
+        attemptUri: 'urn:uuid:11111111-2222-3333-4444-555555555555',
+        claimTxHash: `0x${'c'.repeat(64)}`,
+      });
+      const row = led.get(INTENT.idempotencyKey)!;
+      expect(row.dispatchContextDigest).toBeNull();
+      expect(row.dispatchContextBytes).toBeNull();
+    });
+
+    it('ALTERs dispatch_context_digest/dispatch_context_bytes into a pre-existing on-disk table that predates these columns', () => {
+      // Same migration-proof shape as the request_id test above: build a database against a
+      // schema that has request_id but predates the dispatch-context columns, open it through
+      // `Store`, and confirm the migration adds both columns without dropping existing rows.
+      const legacySchema = `
+        CREATE TABLE IF NOT EXISTS engagement_ledger (
+          idempotency_key  TEXT PRIMARY KEY,
+          chain_id         INTEGER NOT NULL,
+          task_coordinator TEXT NOT NULL,
+          task_id          TEXT NOT NULL,
+          work_kind        TEXT NOT NULL,
+          wiring_json      TEXT NOT NULL,
+          attempt_index    INTEGER,
+          attempt_uri      TEXT,
+          claim_tx_hash    TEXT,
+          request_id       TEXT,
+          outcome          TEXT NOT NULL,
+          created_at       TEXT NOT NULL,
+          updated_at       TEXT NOT NULL
+        );
+      `;
+      expect(ENGAGEMENT_LEDGER_SCHEMA).not.toEqual(legacySchema);
+
+      const path = join(
+        tmpdir(),
+        `jinn-engagement-ledger-dispatch-context-migration-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+      );
+      const seeded = new Database(path);
+      seeded.exec(legacySchema);
+      seeded
+        .prepare(
+          `INSERT INTO engagement_ledger
+             (idempotency_key, chain_id, task_coordinator, task_id, work_kind, wiring_json,
+              outcome, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'intended', ?, ?)`,
+        )
+        .run(
+          INTENT.idempotencyKey,
+          INTENT.chainId,
+          INTENT.taskCoordinator,
+          INTENT.taskId.toString(),
+          INTENT.workKind,
+          JSON.stringify(WIRING),
+          '2026-07-31T00:00:00Z',
+          '2026-07-31T00:00:00Z',
+        );
+      seeded.close();
+
+      const migrated = new Store(path);
+      const led = new EngagementLedger(migrated);
+      const row = led.get(INTENT.idempotencyKey)!;
+      expect(row.dispatchContextDigest).toBeNull();
+      expect(row.dispatchContextBytes).toBeNull();
+
+      led.recordClaimed(INTENT.idempotencyKey, {
+        attemptIndex: 0,
+        attemptUri: 'urn:uuid:11111111-2222-3333-4444-555555555555',
+        claimTxHash: `0x${'c'.repeat(64)}`,
+        dispatchContext: { digest: DISPATCH_CONTEXT_DIGEST, bytes: DISPATCH_CONTEXT_BYTES },
+      });
+      expect(led.get(INTENT.idempotencyKey)!.dispatchContextDigest).toBe(DISPATCH_CONTEXT_DIGEST);
+
+      migrated.db.close();
+      rmSync(path, { force: true });
+      rmSync(`${path}-wal`, { force: true });
+      rmSync(`${path}-shm`, { force: true });
+    });
+  });
 });

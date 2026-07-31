@@ -608,6 +608,7 @@ export class Store {
     this.db.exec(PROJECTOR_OBSERVATIONS_SCHEMA);
     this.ensureArtifactsTaskColumns();
     this.ensureEngagementLedgerRequestIdColumn();
+    this.ensureEngagementLedgerDispatchContextColumns();
     this.ensureRewardClaimsTxIndex();
     this.ensureNetworkArtifactsPeerCatalogId();
     this.ensureErc8004AnchorGasColumns();
@@ -665,6 +666,23 @@ export class Store {
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS idx_engagement_ledger_request_id ON engagement_ledger (request_id)`,
     );
+  }
+
+  /**
+   * Older on-disk DBs predate `dispatch_context_digest`/`dispatch_context_bytes` on
+   * `engagement_ledger` (finding E35, ruled -- see `../daemon/engagement-ledger.ts`'s schema doc
+   * comment: the work loop seals the dispatch-context document once, at claim time, into this
+   * row).
+   */
+  private ensureEngagementLedgerDispatchContextColumns(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(engagement_ledger)`).all() as Array<{ name: string }>;
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has('dispatch_context_digest')) {
+      this.db.exec(`ALTER TABLE engagement_ledger ADD COLUMN dispatch_context_digest TEXT`);
+    }
+    if (!names.has('dispatch_context_bytes')) {
+      this.db.exec(`ALTER TABLE engagement_ledger ADD COLUMN dispatch_context_bytes TEXT`);
+    }
   }
 
   /** Older on-disk DBs predate `peer_catalog_id` on network_artifacts. */

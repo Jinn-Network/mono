@@ -38,8 +38,9 @@
  *
  *     CLOSED (finding E31 close-out): a genuine DSSE envelope is now produced, by
  *     `@jinn-network/task-execution-backend-local`'s `completeAttempt` -- seal the Delivery's
- *     bytes exactly once (unchanged), then DSSE-sign those EXACT sealed bytes (design §9.1
- *     seal-once; PRINCIPLES.md's "Legible" principle). The coordinator's ruling on this finding is
+ *     bytes exactly once (unchanged), then DSSE-sign those EXACT sealed bytes (TEP §9.1
+ *     seal-once; `docs/superpowers/specs/2026-07-30-stack-design-principles.md` §5 "Sealed once,
+ *     forever"). The coordinator's ruling on this finding is
  *     explicit that this is a CLEANER shape than an earlier proposal that would have embedded the
  *     signature as a reserved Delivery field (seal minus the field, sign, merge in, re-seal): an
  *     embedded field cannot cover its own bytes without that second seal pass, which IS
@@ -71,6 +72,18 @@
  *     accepts an `EngagementLedgerReader` with an OPTIONAL `getByRequestId` (structural, not a
  *     hard dependency on the concrete class) so a fake resolver remains a legal implementation for
  *     tests.
+ *
+ *     CLOSED (finding E35, ruled -- "seal at claim time; the engagement ledger is the home"): the
+ *     matching-row checks above proved this operator claimed *a* attempt for this identity, but
+ *     never actually compared `attempt.expectedDispatchContextDigest` (the digest
+ *     `pipeline.ts`'s `settleDelivery` call expects the settling delivery to answer for) against
+ *     anything -- a stale or wrong dispatch-context could still verify. `checkDispatchBinding` now
+ *     resolves the sealed digest `work-loop.ts` recorded on this same row at claim time
+ *     (`EngagementRow.dispatchContextDigest`, sealed once: I-JSON, JCS, sha256 -- TEP §9.1;
+ *     `docs/superpowers/specs/2026-07-30-stack-design-principles.md` §5 "Sealed once, forever")
+ *     and requires it to equal `attempt.expectedDispatchContextDigest` byte-for-byte. A row
+ *     claimed before this seal existed (digest `null`) reports `"failed"`, not `"verified"` --
+ *     absence of the seal is never treated as an implicit pass.
  *
  *  3. `evaluationSpecification` -- presence from the operator's own `ProfileStore`
  *     (`@jinn-network/task-execution-profiles`, already real and already wired into
@@ -182,9 +195,10 @@ function checkExecutorBinding(
     };
   }
 
-  // Seal-once (coordinator ruling, finding E31; PRINCIPLES.md's "Legible" principle): the signed
-  // payload must equal the settling delivery's own exact sealed bytes -- never re-sealed or
-  // re-canonicalized, here or in the producer (`backend.ts`'s `completeAttempt`).
+  // Seal-once (coordinator ruling, finding E31; TEP §9.1;
+  // `docs/superpowers/specs/2026-07-30-stack-design-principles.md` §5 "Sealed once, forever"):
+  // the signed payload must equal the settling delivery's own exact sealed bytes -- never
+  // re-sealed or re-canonicalized, here or in the producer (`backend.ts`'s `completeAttempt`).
   if (!bytesEqual(envelope.payloadBytes, deliveryBytes)) {
     return {
       status: 'invalid',
@@ -260,6 +274,24 @@ function checkDispatchBinding(
   }
   if (row.claimTxHash === null) {
     return { status: 'failed', detail: 'engagement-ledger row carries no claim transaction hash' };
+  }
+  // Finding E35 (ruled): resolve the sealed dispatch-context digest back from the ledger row
+  // itself -- `work-loop.ts`'s wrapped `claimTask` sealed it once, at claim time, into this same
+  // row -- and require it to equal what this settlement expects. A row that predates the seal
+  // (`dispatchContextDigest === null`) is not silently treated as a pass.
+  if (row.dispatchContextDigest === null) {
+    return {
+      status: 'failed',
+      detail: 'engagement-ledger row carries no sealed dispatch-context digest',
+    };
+  }
+  if (row.dispatchContextDigest !== attempt.expectedDispatchContextDigest) {
+    return {
+      status: 'failed',
+      detail:
+        `engagement-ledger row sealed dispatch-context digest ${row.dispatchContextDigest} `
+        + `does not match settling expectedDispatchContextDigest ${attempt.expectedDispatchContextDigest}`,
+    };
   }
   return { status: 'verified' };
 }

@@ -293,14 +293,18 @@ describe('buildOperatorComposition', () => {
       workKind: 'QmSolver',
       wiring: config.executionWiring[0] as never,
     });
+    // Finding E35: `dispatchBinding` now also compares the sealed digest, so the seeded row must
+    // carry one that matches this call's `expectedDispatchContextDigest`.
+    const dispatchContextDigest = `sha256:${'0'.repeat(64)}` as const;
     composition.engagementLedger.recordClaimed('k1', {
       attemptIndex: 0,
       attemptUri: 'urn:uuid:11111111-1111-4111-8111-111111111111',
       claimTxHash: '0xabc',
       requestId,
+      dispatchContext: { digest: dispatchContextDigest, bytes: new TextEncoder().encode('{"fixture":true}') },
     });
     const grade = await composition.pipelinePorts.settlement.verifySettlementGrade({
-      attempt: { requestId, expectedDispatchContextDigest: `sha256:${'0'.repeat(64)}` } as never,
+      attempt: { requestId, expectedDispatchContextDigest: dispatchContextDigest } as never,
       delivery: {} as never,
       deliveryBytes: new Uint8Array(),
       deliveryDigest: `sha256:${'0'.repeat(64)}`,
@@ -564,6 +568,89 @@ describe('buildResolveSubmissionBytes (last-mile: gap a, first half CLOSED)', ()
         taskId: 1n,
         generation: 'today',
       }),
+    ).resolves.toBeUndefined();
+  });
+});
+
+// Finding E35 (ruled): `resolveDispatchContext`'s second half CLOSED -- reads the sealed digest
+// `work-loop.ts` records on the engagement-ledger row at claim time, rather than reporting
+// unresolvable for every event.
+describe('buildEngagementLedgerDispatchContextPort (gap a, second half CLOSED, finding E35)', () => {
+  const CHAIN_ID = 84532;
+  const TASK_COORDINATOR = '0x3333333333333333333333333333333333333333' as const;
+  const WIRING_ENTRY = {
+    workKind: 'QmSolver',
+    harness: 'claude-code',
+    model: 'claude-haiku',
+    plugins: [],
+    credentialRef: 'cred-1',
+    isolationPolicy: 'process',
+  };
+
+  async function realLedger() {
+    const { EngagementLedger } = await import('../../src/daemon/engagement-ledger.js');
+    return new EngagementLedger(new Store(':memory:'));
+  }
+
+  it('resolves the sealed descriptor for a task this operator claimed', async () => {
+    const { buildEngagementLedgerDispatchContextPort } = await import('../../src/daemon/composition-root.js');
+    const ledger = await realLedger();
+    const idempotencyKey = `${CHAIN_ID}:${TASK_COORDINATOR}:1`;
+    ledger.admitClaimIntent({
+      idempotencyKey,
+      chainId: CHAIN_ID,
+      taskCoordinator: TASK_COORDINATOR,
+      taskId: 1n,
+      workKind: 'QmSolver',
+      wiring: WIRING_ENTRY,
+    });
+    const digest = `sha256:${'7'.repeat(64)}` as const;
+    ledger.recordClaimed(idempotencyKey, {
+      attemptIndex: 0,
+      attemptUri: 'urn:uuid:11111111-1111-4111-8111-111111111111',
+      claimTxHash: '0xabc',
+      dispatchContext: { digest, bytes: new TextEncoder().encode('{"fixture":true}') },
+    });
+
+    const resolveDispatchContext = buildEngagementLedgerDispatchContextPort(ledger);
+    const resolved = await resolveDispatchContext({
+      chainId: CHAIN_ID,
+      taskCoordinator: TASK_COORDINATOR,
+      taskId: 1n,
+    });
+
+    expect(resolved).toEqual({
+      uri: 'urn:jinn:marketplace:dispatch-context:urn:uuid:11111111-1111-4111-8111-111111111111',
+      digest: { sha256: '7'.repeat(64) },
+    });
+  });
+
+  it('fails closed when this operator never claimed the task', async () => {
+    const { buildEngagementLedgerDispatchContextPort } = await import('../../src/daemon/composition-root.js');
+    const ledger = await realLedger();
+    const resolveDispatchContext = buildEngagementLedgerDispatchContextPort(ledger);
+
+    await expect(
+      resolveDispatchContext({ chainId: CHAIN_ID, taskCoordinator: TASK_COORDINATOR, taskId: 999n }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('fails closed when the row predates the seal (admitted but never claimed)', async () => {
+    const { buildEngagementLedgerDispatchContextPort } = await import('../../src/daemon/composition-root.js');
+    const ledger = await realLedger();
+    const idempotencyKey = `${CHAIN_ID}:${TASK_COORDINATOR}:2`;
+    ledger.admitClaimIntent({
+      idempotencyKey,
+      chainId: CHAIN_ID,
+      taskCoordinator: TASK_COORDINATOR,
+      taskId: 2n,
+      workKind: 'QmSolver',
+      wiring: WIRING_ENTRY,
+    });
+    const resolveDispatchContext = buildEngagementLedgerDispatchContextPort(ledger);
+
+    await expect(
+      resolveDispatchContext({ chainId: CHAIN_ID, taskCoordinator: TASK_COORDINATOR, taskId: 2n }),
     ).resolves.toBeUndefined();
   });
 });

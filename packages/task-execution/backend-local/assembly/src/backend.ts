@@ -582,9 +582,10 @@ function asSubmissionUri(value: string): SubmissionUri {
 // ── Finding E31: real executor delivery signing ─────────────────────────────────────────────
 //
 // `completeAttempt` seals a Delivery's bytes exactly once (unchanged); when a delivery-signing
-// key is configured it then produces a DSSE envelope over those EXACT sealed bytes (design §9.1
-// seal-once; PRINCIPLES.md's "Legible" principle -- every claim must be exactly, independently
-// verifiable). The coordinator's ruling on this finding is explicit: no re-sealing, no
+// key is configured it then produces a DSSE envelope over those EXACT sealed bytes (TEP §9.1
+// seal-once; `docs/superpowers/specs/2026-07-30-stack-design-principles.md` §5 "Sealed once,
+// forever" -- canonicalize once at seal time, those bytes are the document forever). The
+// coordinator's ruling on this finding is explicit: no re-sealing, no
 // re-canonicalizing. An earlier proposal would have embedded the signature as a reserved Delivery
 // field (seal minus the field, sign, merge the signature in, seal again) -- rejected, because an
 // embedded field cannot cover its own bytes without that second seal pass, which IS

@@ -9,9 +9,11 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
+  documentDigest,
   sealDelivery,
   sealSubmission,
   sealTask,
+  serializeCanonicalJson,
   sha256Hex,
 } from '@jinn-network/task-execution-protocol';
 import {
@@ -354,6 +356,47 @@ describe('work loop', () => {
     await loop.tick();
     const key = `${BASE_SEPOLIA_TODAY.chainId}:${BASE_SEPOLIA_TODAY.taskCoordinator}:${TASK_ID.toString()}`;
     expect(ledger.get(key)!.requestId).toBe(REQUEST_ID);
+  });
+
+  // Finding E35 (ruled): the work loop seals the dispatch-context document once, at claim time,
+  // into the engagement-ledger row it already owns.
+  describe('dispatch-context seal (E35)', () => {
+    const key = `${BASE_SEPOLIA_TODAY.chainId}:${BASE_SEPOLIA_TODAY.taskCoordinator}:${TASK_ID.toString()}`;
+
+    // The exact document `claimAttempt` (packages/marketplace/binding/src/claim.ts) builds
+    // in-memory for this same claim -- taskDigest/submission/nonce from the card's facts, attempt
+    // from the same deterministic derivation this fixture's own `ATTEMPT_URI` uses.
+    function expectedDispatchContextBytes(): Uint8Array {
+      return serializeCanonicalJson({
+        taskDigest: TASK_DIGEST,
+        submission: SUBMISSION_URI,
+        nonce: NONCE,
+        attempt: ATTEMPT_URI,
+      });
+    }
+
+    it('persists the sealed dispatch-context digest and exact bytes on the ledger row', async () => {
+      const { loop, ledger } = build();
+      await loop.tick();
+      const row = ledger.get(key)!;
+      const expectedBytes = expectedDispatchContextBytes();
+      expect(row.dispatchContextDigest).toBe(documentDigest(expectedBytes));
+      expect(new Uint8Array(Buffer.from(row.dispatchContextBytes!, 'base64'))).toEqual(expectedBytes);
+    });
+
+    it('seals byte-stably: the same claim inputs always produce the same digest', async () => {
+      const first = build();
+      await first.loop.tick();
+      const firstDigest = first.ledger.get(key)!.dispatchContextDigest;
+
+      const second = build();
+      await second.loop.tick();
+      const secondDigest = second.ledger.get(key)!.dispatchContextDigest;
+
+      expect(firstDigest).not.toBeNull();
+      expect(firstDigest).toBe(secondDigest);
+      expect(firstDigest).toBe(documentDigest(expectedDispatchContextBytes()));
+    });
   });
 
   it('sends the mech Deliver leg before settlement reads its facts', async () => {

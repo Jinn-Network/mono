@@ -10,22 +10,37 @@ import type { Store } from '../store/store.js';
  * databases; `store.ts`'s `ensureEngagementLedgerRequestIdColumn` ALTERs it in additively for a
  * database created before this column existed (same `PRAGMA table_info` guard every other
  * migration in that file uses).
+ *
+ * `dispatch_context_digest` / `dispatch_context_bytes` (finding E35, ruled): the engagement
+ * ledger is where "which wiring entry served a claim" already lives (spec §4), and the
+ * dispatch-context document is authored by this same work-loop side of the two-party engagement
+ * at the moment it claims -- so it is sealed here, once, at claim time (I-JSON, JCS, sha256; TEP
+ * §9.1; `docs/superpowers/specs/2026-07-30-stack-design-principles.md` §5 "Sealed once,
+ * forever"). `dispatch_context_bytes` is the exact sealed bytes, base64-encoded for TEXT storage;
+ * `dispatch_context_digest` is `documentDigest(bytes)`. `work-loop.ts`'s wrapped `claimTask`
+ * seals and passes both to `recordClaimed`; `composition-root.ts`'s dispatch-context resolver and
+ * `settlement-grade.ts`'s `checkDispatchBinding` both read the digest back rather than
+ * recomputing or fabricating one. Present on `CREATE TABLE` for fresh databases; `store.ts`'s
+ * `ensureEngagementLedgerDispatchContextColumns` ALTERs them in additively for a database created
+ * before these columns existed (same `PRAGMA table_info` guard as `request_id`'s migration).
  */
 export const ENGAGEMENT_LEDGER_SCHEMA = `
 CREATE TABLE IF NOT EXISTS engagement_ledger (
-  idempotency_key  TEXT PRIMARY KEY,
-  chain_id         INTEGER NOT NULL,
-  task_coordinator TEXT NOT NULL,
-  task_id          TEXT NOT NULL,
-  work_kind        TEXT NOT NULL,
-  wiring_json      TEXT NOT NULL,
-  attempt_index    INTEGER,
-  attempt_uri      TEXT,
-  claim_tx_hash    TEXT,
-  request_id       TEXT,
-  outcome          TEXT NOT NULL,
-  created_at       TEXT NOT NULL,
-  updated_at       TEXT NOT NULL
+  idempotency_key         TEXT PRIMARY KEY,
+  chain_id                INTEGER NOT NULL,
+  task_coordinator        TEXT NOT NULL,
+  task_id                 TEXT NOT NULL,
+  work_kind               TEXT NOT NULL,
+  wiring_json             TEXT NOT NULL,
+  attempt_index           INTEGER,
+  attempt_uri             TEXT,
+  claim_tx_hash           TEXT,
+  request_id              TEXT,
+  dispatch_context_digest TEXT,
+  dispatch_context_bytes  TEXT,
+  outcome                 TEXT NOT NULL,
+  created_at              TEXT NOT NULL,
+  updated_at              TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_engagement_ledger_outcome ON engagement_ledger (outcome);
 CREATE INDEX IF NOT EXISTS idx_engagement_ledger_task ON engagement_ledger (chain_id, task_coordinator, task_id);
@@ -47,6 +62,11 @@ export interface EngagementRow {
   /** Today-generation marketplace requestId this row's claim landed under. `null` for
    * revised-generation attempts (which carry no requestId) and for rows not yet claimed. */
   readonly requestId: string | null;
+  /** Sealed dispatch-context digest (finding E35), `sha256:...`. `null` until claimed, or for a
+   * row claimed before this column existed. */
+  readonly dispatchContextDigest: `sha256:${string}` | null;
+  /** Sealed dispatch-context bytes (finding E35), base64-encoded. `null` alongside the digest. */
+  readonly dispatchContextBytes: string | null;
   readonly outcome: EngagementOutcome;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -55,7 +75,9 @@ export interface EngagementRow {
 interface RawRow {
   idempotency_key: string; chain_id: number; task_coordinator: string; task_id: string;
   work_kind: string; wiring_json: string; attempt_index: number | null; attempt_uri: string | null;
-  claim_tx_hash: string | null; request_id: string | null; outcome: EngagementOutcome;
+  claim_tx_hash: string | null; request_id: string | null;
+  dispatch_context_digest: string | null; dispatch_context_bytes: string | null;
+  outcome: EngagementOutcome;
   created_at: string; updated_at: string;
 }
 
@@ -71,6 +93,8 @@ function toRow(raw: RawRow): EngagementRow {
     attemptUri: raw.attempt_uri,
     claimTxHash: raw.claim_tx_hash,
     requestId: raw.request_id,
+    dispatchContextDigest: raw.dispatch_context_digest as `sha256:${string}` | null,
+    dispatchContextBytes: raw.dispatch_context_bytes,
     outcome: raw.outcome,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
@@ -120,12 +144,20 @@ export class EngagementLedger {
       /** Today-generation marketplace requestId, when the claim minted one (claim.ts's
        * `ClaimAttemptResult` -- absent for revised-generation attempts). */
       requestId?: string;
+      /**
+       * The dispatch-context document (TEP §9.3), sealed exactly once by the caller at claim
+       * time (finding E35, ruled) -- I-JSON, JCS, sha256; never re-sealed here. Absent only for
+       * callers that have not yet been updated to seal (kept optional so existing fixtures/tests
+       * that do not exercise dispatch-binding stay valid).
+       */
+      dispatchContext?: { readonly digest: `sha256:${string}`; readonly bytes: Uint8Array };
     },
   ): void {
     this.store.db
       .prepare(
         `UPDATE engagement_ledger
             SET attempt_index = ?, attempt_uri = ?, claim_tx_hash = ?, request_id = ?,
+                dispatch_context_digest = ?, dispatch_context_bytes = ?,
                 outcome = 'claimed', updated_at = ?
           WHERE idempotency_key = ?`,
       )
@@ -134,6 +166,10 @@ export class EngagementLedger {
         claim.attemptUri,
         claim.claimTxHash,
         claim.requestId ?? null,
+        claim.dispatchContext?.digest ?? null,
+        claim.dispatchContext === undefined
+          ? null
+          : Buffer.from(claim.dispatchContext.bytes).toString('base64'),
         new Date().toISOString(),
         idempotencyKey,
       );

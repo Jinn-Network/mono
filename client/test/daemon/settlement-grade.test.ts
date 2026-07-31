@@ -135,6 +135,11 @@ function engagementRow(overrides: Partial<EngagementRow> = {}): EngagementRow {
     attemptIndex: 3,
     attemptUri: 'urn:jinn:attempt:...',
     claimTxHash: '0xclaimtxhash',
+    // Finding E35: sealed at claim time, matches REVISED_ATTEMPT/TODAY_ATTEMPT's
+    // expectedDispatchContextDigest below by default -- individual tests override to prove the
+    // mismatch/absence cases fail.
+    dispatchContextDigest: DISPATCH_DIGEST,
+    dispatchContextBytes: null,
     outcome: 'claimed',
     createdAt: '2026-07-29T00:00:00Z',
     updatedAt: '2026-07-29T00:00:00Z',
@@ -315,6 +320,31 @@ describe('buildVerifySettlementGrade: dispatchBinding', () => {
     const verify = buildVerifySettlementGrade(buildInput({ engagementLedger: ledger }));
     const result = await verify(baseInput as Parameters<typeof verify>[0]);
     expect(result.dispatchBinding.status).toBe('failed');
+  });
+
+  // Finding E35 (ruled): dispatchBinding must actually compare the sealed digest, not just prove
+  // a row exists.
+  test('failed when the ledger row carries no sealed dispatch-context digest (pre-seal row)', async () => {
+    const key = `${BASE_SEPOLIA_TODAY.chainId}:${TASK_COORDINATOR}:7`;
+    const ledger = fakeEngagementLedger({ [key]: engagementRow({ dispatchContextDigest: null }) });
+    const verify = buildVerifySettlementGrade(buildInput({ engagementLedger: ledger }));
+    const result = await verify(baseInput as Parameters<typeof verify>[0]);
+    expect(result.dispatchBinding).toEqual({
+      status: 'failed',
+      detail: expect.stringContaining('no sealed dispatch-context digest') as unknown as string,
+    });
+  });
+
+  test('failed when the ledger row seals a different dispatch-context digest than this settlement expects', async () => {
+    const key = `${BASE_SEPOLIA_TODAY.chainId}:${TASK_COORDINATOR}:7`;
+    const wrongDigest = `sha256:${'9'.repeat(64)}` as const;
+    const ledger = fakeEngagementLedger({ [key]: engagementRow({ dispatchContextDigest: wrongDigest }) });
+    const verify = buildVerifySettlementGrade(buildInput({ engagementLedger: ledger }));
+    const result = await verify(baseInput as Parameters<typeof verify>[0]);
+    expect(result.dispatchBinding).toEqual({
+      status: 'failed',
+      detail: expect.stringContaining('does not match settling expectedDispatchContextDigest') as unknown as string,
+    });
   });
 
   test('verified when a matching, engaged, claimed ledger row exists', async () => {
@@ -509,6 +539,11 @@ describe('buildVerifySettlementGrade: dispatchBinding against the real Engagemen
       attemptUri: 'urn:jinn:attempt:...',
       claimTxHash: '0xclaimtxhash',
       requestId: overrides.requestId ?? REQUEST_ID,
+      // Finding E35: exercises the real seal-once round-trip through `EngagementLedger`, not a
+      // fake -- the bytes' own content is irrelevant to this check (only the digest is compared),
+      // so a fixed fixture payload is enough; DISPATCH_DIGEST is what TODAY_ATTEMPT/REVISED_ATTEMPT
+      // expect.
+      dispatchContext: { digest: DISPATCH_DIGEST, bytes: new TextEncoder().encode('{"fixture":true}') },
     });
     return led;
   }

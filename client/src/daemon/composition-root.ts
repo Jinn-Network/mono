@@ -43,25 +43,20 @@
  *     against the on-chain anchor is an independent second check regardless of what this port
  *     returns.
  *
- *     `resolveDispatchContext` STILL OPEN: no production path anywhere durably seals or persists
- *     a dispatch-context document (TEP §9.3) keyed by taskId in a way this composition -- or any
- *     OTHER reader, since the projector observes every operator's chain activity, not just this
- *     one -- can read back BEFORE the venue exists. `pipeline.ts`'s `claim.dispatchContext` is
- *     built entirely in-memory inside a single `runPipeline` call and never pinned/anchored
- *     anywhere; venue-base's own `submission_scopes` table -- the only production dispatch-context
- *     store found -- is keyed by revised-generation requester/idempotencyKey and is never
- *     populated for today-generation router/mech claims; this composition's own
- *     `engagement_ledger` (the one durable per-claim store it owns) records `attempt_uri`/
- *     `request_id`/`claim_tx_hash` but no dispatch-context digest or descriptor at all (see
- *     `engagement-ledger.ts`'s schema). Unlike the Submission gap, no bridge-synthesis function
- *     for this shape exists anywhere in the repo, and inventing one here would mean fabricating a
- *     `ResourceDescriptor` that points at a document nobody ever actually sealed -- exactly the
- *     fabrication this module's fail-closed contract forbids. Wired to always report unresolvable
- *     (`undefined`), which `createProjectorEnrich` already treats as a correct fail-closed drop
- *     (never fabricated, retried next tick). Practical consequence: every event still drops here,
- *     one step later than before -- `observations` stays empty in practice even though the STREAM
- *     machinery reading it, and now the Submission leg of it, are real (see (b) below for what
- *     that implies downstream).
+ *     `resolveDispatchContext` CLOSED (finding E35, ruled -- "seal at claim time; the engagement
+ *     ledger is the home"): `pipeline.ts`'s `claim.dispatchContext` is still built entirely
+ *     in-memory inside a single `runPipeline` call and never pinned/anchored anywhere by that
+ *     package, and venue-base's own `submission_scopes` table is still keyed by revised-generation
+ *     requester/idempotencyKey only -- but this composition's own `engagement_ledger` (the one
+ *     durable per-claim store it owns) is the ruled home for it: `work-loop.ts`'s wrapped
+ *     `claimTask` is the AUTHOR of that in-memory document (same taskDigest/submission/nonce, same
+ *     deterministic attemptUri derivation), so it reconstructs it byte-identically and seals it
+ *     exactly once, at claim time, into this same row (`dispatch_context_digest`/
+ *     `dispatch_context_bytes`, `engagement-ledger.ts`'s schema). `buildEngagementLedgerDispatch
+ *     ContextPort` below reads that sealed digest back rather than fabricating a
+ *     `ResourceDescriptor` for a document nobody sealed -- still `undefined` (fail-closed,
+ *     `createProjectorEnrich`'s documented "drop this event, retry next tick") for a task this
+ *     operator never claimed, or a row claimed before this seal existed.
  *  b. `verifyVerdictObservation` and `resolveRecord` for the `"delivery"` / `"evaluation-delivery"`
  *     roles (the announcement ports `projectAnnouncements` needs, `./projector-ports.js`):
  *     `verifyVerdictObservation`'s real form needs the SAME Phase-B binding-resolver backing
@@ -628,31 +623,38 @@ export function buildResolveSubmissionBytes(input: {
 }
 
 /**
- * New gap (a, file header — second half STILL OPEN): no production path anywhere durably seals
- * or persists a dispatch-context document (TEP §9.3) for a today-generation task in a way this
- * composition can read back — see the file header for the full accounting of every store checked
- * (`pipeline.ts`'s in-memory `claim.dispatchContext`, venue-base's revised-only
- * `submission_scopes`, this composition's own `engagement_ledger`) and why none of them qualify.
- * Unlike `resolveSubmissionBytes` above, no bridge-synthesis function for this shape exists
- * anywhere in the repo, and inventing one here would mean fabricating a `ResourceDescriptor` that
- * points at a document nobody ever actually sealed. Fails closed (`undefined`), which
- * `createProjectorEnrich` already treats as "drop this event, retry next tick" — never a
- * fabricated value. Logs the gap once, not once per event.
+ * Gap (a, file header — second half CLOSED, finding E35 ruled): `work-loop.ts`'s wrapped
+ * `claimTask` now seals the dispatch-context document (TEP §9.3) exactly once, at claim time —
+ * I-JSON, JCS, sha256 (TEP §9.1; `docs/superpowers/specs/2026-07-30-stack-design-principles.md`
+ * §5 "Sealed once, forever") — into the engagement ledger row it already owns (spec §4: the
+ * ledger holds "which wiring entry served a claim; operator-local decisions"; the dispatch
+ * context is exactly such a document, authored by this same work-loop side of the two-party
+ * engagement). This reads that sealed digest back rather than fabricating a `ResourceDescriptor`
+ * for a document nobody sealed — the URI names the sealed digest, matching the shape
+ * `observe-store.ts`'s stub already uses (`urn:jinn:marketplace:dispatch-context:<attempt>`).
+ * Still fails closed (`undefined`) when no row exists for this task identity, or the row predates
+ * the seal (claimed before this column existed, or never claimed at all) — `createProjectorEnrich`
+ * already treats `undefined` as "drop this event, retry next tick", and a later tick's `get()`
+ * will see the row once `work-loop.ts` claims it.
+ *
+ * Exported so `client/test/daemon/*` can drive this exact production resolver against a real
+ * `EngagementLedger`, matching the `buildResolveSubmissionBytes` precedent above.
  */
-function buildUnresolvedDispatchContextPort(
-  logger?: { warn(m: string): void },
+export function buildEngagementLedgerDispatchContextPort(
+  engagementLedger: EngagementLedger,
 ): ProjectorEnrichPorts['resolveDispatchContext'] {
-  let warned = false;
-  return async () => {
-    if (!warned) {
-      warned = true;
-      logger?.warn(
-        '[composition-root] no production dispatch-context resolver exists for today-generation '
-        + 'tasks yet (file header gap a, second half) — every projector event still drops here, '
-        + 'one step later than before resolveSubmissionBytes was wired',
-      );
+  return async ({ chainId, taskCoordinator, taskId }) => {
+    // Mirrors `work-loop.ts`'s private `idempotencyKeyFor` (and `settlement-grade.ts`'s own copy
+    // of the same key shape) -- `${chainId}:${taskCoordinator}:${taskId}`.
+    const idempotencyKey = `${chainId}:${taskCoordinator}:${taskId.toString()}`;
+    const row = engagementLedger.get(idempotencyKey);
+    if (row === undefined || row.dispatchContextDigest === null || row.attemptUri === null) {
+      return undefined;
     }
-    return undefined;
+    return {
+      uri: `urn:jinn:marketplace:dispatch-context:${row.attemptUri}`,
+      digest: { sha256: row.dispatchContextDigest.slice('sha256:'.length) },
+    };
   };
 }
 
@@ -710,6 +712,9 @@ function buildProjector(input: {
   readonly ipfsGatewayUrl: string;
   readonly store: Store;
   readonly pollIntervalMs: number;
+  /** Same instance `buildOperatorComposition` later wires into `verifySettlementGrade` — the
+   * dispatch-context resolver (finding E35) reads the exact rows `work-loop.ts` seals into. */
+  readonly engagementLedger: EngagementLedger;
   readonly logger?: { info(m: string): void; warn(m: string): void };
 }): {
   readonly projector: ProjectorLoop;
@@ -740,7 +745,7 @@ function buildProjector(input: {
     jinnRouter: input.chain.jinnRouter,
     fetchIpfsBytes,
   });
-  const resolveDispatchContext = buildUnresolvedDispatchContextPort(input.logger);
+  const resolveDispatchContext = buildEngagementLedgerDispatchContextPort(input.engagementLedger);
   const enrich = createProjectorEnrich({
     chain: input.chain,
     publicClient: input.publicClient,
@@ -820,6 +825,12 @@ export async function buildOperatorComposition(
   const fetchImpl = globalThis.fetch;
   const ipfsPin = createRegistryPinPort({ registryUrl: config.ipfsRegistryUrl, fetchImpl });
 
+  // C6: the real `verifySettlementGrade`, wired against this composition's own engagement ledger
+  // and profile store — replaces the deleted fail-closed stub (file header items 2, c). Built
+  // before `buildProjector` (finding E35): the projector's dispatch-context resolver reads back
+  // through this SAME ledger instance.
+  const engagementLedger = new EngagementLedger(input.store);
+
   // C8: the projector (log source + enrich + durable observations) is constructed BEFORE the
   // venue — `BaseVenueConfig.observations` below needs the already-built cursor store (finding
   // E4 / C3's own docstring).
@@ -831,12 +842,10 @@ export async function buildOperatorComposition(
     ipfsGatewayUrl: config.ipfsGatewayUrl,
     store: input.store,
     pollIntervalMs: input.projectorPollIntervalMs ?? 5000,
+    engagementLedger,
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
 
-  // C6: the real `verifySettlementGrade`, wired against this composition's own engagement ledger
-  // and profile store — replaces the deleted fail-closed stub (file header items 2, c).
-  const engagementLedger = new EngagementLedger(input.store);
   // Finding E31 close-out: verification checks against the REAL `input.deliverySigningKey`'s
   // keyid/public key when the host supplied one; the ephemeral per-boot identity (file header
   // gap c) is retained only as the inert fallback when it wasn't -- unreachable in that case,
