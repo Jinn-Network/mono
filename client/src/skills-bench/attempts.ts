@@ -14,7 +14,14 @@ export interface BenchOutcome {
 
 export interface BenchManifest {
   version: 'skills-bench-manifest.v1';
-  slateSha256: string;
+  /** Present for a --slate run; absent for a --task-set run (see
+   *  `taskSetSha256`). Exactly one of the two is set for any real manifest —
+   *  optional (not a union) so both paths share one `BenchManifest` shape
+   *  and `assertManifestCompatible`'s byte-exact JSON guard needs no change. */
+  slateSha256?: string;
+  /** Present for a --task-set run (`SkillTaskSetV1.sha256`); absent for a
+   *  --slate run. */
+  taskSetSha256?: string;
   /** Which slate half this run actually covers. Recorded by run-bench.ts at
    *  the moment the run starts (not hand-typed later) so render-receipts.ts
    *  can derive the receipt's slateHalf from the manifest instead of trusting

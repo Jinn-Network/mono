@@ -89,6 +89,16 @@ async function main(): Promise<void> {
     );
   }
   const slate = await loadSlate(args.slatePath);
+  // render-receipts.ts only renders slate-mode runs; a manifest with no
+  // slateSha256 (a --task-set run — attempts.ts's BenchManifest.slateSha256
+  // is optional so both modes share one manifest shape) is a plain misuse,
+  // not a hash mismatch, and gets a clearer message than "undefined".
+  if (!manifest.slateSha256) {
+    throw new Error(
+      `${join(args.runDir, 'bench-manifest.json')} has no slateSha256 — this looks like a --task-set ` +
+      `run, which render-receipts.ts does not yet support.`,
+    );
+  }
   if (slate.sha256 !== manifest.slateSha256) {
     throw new Error(
       `slate mismatch: ${args.slatePath} sha256=${slate.sha256} does not match ` +
