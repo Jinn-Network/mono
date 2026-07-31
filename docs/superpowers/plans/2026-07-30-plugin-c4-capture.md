@@ -5738,10 +5738,11 @@ that still fails escalates to the operator.
 ### Red / Green
 
 - **C4-W1-1 Red:** trust-core built after the evidence loop in `plugin-tree-ci.yml` (exact-head `da9f57d57`) — trajectory build fails `Cannot find module '@jinn-network/trust-core'`
-- **C4-W1-1 Green:** `0ea277a75f6fef7f4f95a02b3ab12abbb3eab442` — trust-core built before evidence loop; `yarn typecheck && yarn test` in `plugin/runtime`; `node --test .github/scripts/plugin-tree-package-inventory.test.mjs`; `node --test .github/scripts/plugin-tree-source-boundaries.test.mjs`; `node .github/scripts/plugin-tree-packed-types.test.mjs` pass
+- **C4-W1-1 Green:** `0ea277a75f6fef7f4f95a02b3ab12abbb3eab442` — trust-core built before evidence loop in `plugin-tree-ci.yml`; `yarn typecheck && yarn test` in `plugin/runtime` (256/256); `node --test .github/scripts/plugin-tree-package-inventory.test.mjs` (10/10); `node --test .github/scripts/plugin-tree-source-boundaries.test.mjs` (40/40)
 - **C4-W1-2 Red:** `identity.ts` hardcoded `TRAJECTORY_RECORD_IDENTIFIER_PROPERTY` string literal (exact-head `da9f57d57`)
 - **C4-W1-2 Green:** `0ea277a75f6fef7f4f95a02b3ab12abbb3eab442` — re-export from `@jinn-network/evidence-trajectory`; plugin/runtime gates pass
 - **C4-W1-3 Red:** surface test only grepped `createCaptureCapability`; default `bin` omits `captureSigner` (exact-head `da9f57d57`)
 - **C4-W1-3 Green:** `0ea277a75f6fef7f4f95a02b3ab12abbb3eab442` — F-C4-T13-2 in plan + README; surface test asserts signer gating; plugin/runtime gates pass
+- **packed-types note:** `node .github/scripts/plugin-tree-packed-types.test.mjs` fails locally on both exact-head `da9f57d57` and wave-2 HEAD (`@types/better-sqlite3` missing via catalog-sqlite hermetic consumer) — pre-existing, not introduced by this wave. Wave-2 HEAD: `f0c7b44c42142e1c922943dd7a90b9670bfb8efb`.
 
 Coordinator dispatches scoped wave-2 rereview of this wave only.
