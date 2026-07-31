@@ -2357,7 +2357,7 @@ git commit -m "feat(evidence-trajectory): publish the record JSON Schema with a 
 - Consumes: the finished package.
 - Produces: green guards and CI for `@jinn-network/evidence-trajectory`; the package is now safe for C2 and C4 to depend on.
 
-- [ ] **Step 1: Add the allowlist constants and the escape self-test**
+- [x] **Step 1: Add the allowlist constants and the escape self-test**
 
 In `.github/scripts/evidence-source-boundaries.test.mjs`, after the contribution constants block (line 292), add:
 
@@ -2439,7 +2439,7 @@ test('Trajectory boundary checks catch package, I/O, and ambient-network escapes
 });
 ```
 
-- [ ] **Step 2: Add the boundary block**
+- [x] **Step 2: Add the boundary block**
 
 Inside `test('evidence source boundaries remain one-way across the approved graph', …)`, after the contribution block (line 1324), add:
 
@@ -2524,12 +2524,12 @@ Inside `test('evidence source boundaries remain one-way across the approved grap
   );
 ```
 
-- [ ] **Step 3: Run the boundary guard**
+- [x] **Step 3: Run the boundary guard**
 
 Run: `node --test .github/scripts/evidence-source-boundaries.test.mjs`
 Expected: PASS.
 
-- [ ] **Step 4: Add the pack smoke script**
+- [x] **Step 4: Add the pack smoke script**
 
 Copy `packages/evidence/derivation/scripts/pack-smoke.mjs` to `packages/evidence/trajectory/scripts/pack-smoke.mjs` verbatim, then make exactly three substitutions: replace every occurrence of `@jinn-network/evidence-derivation` with `@jinn-network/evidence-trajectory`; replace `evidence-derivation` in the temp-directory prefix with `evidence-trajectory`; and replace the `REQUIRED_ENTRIES` array with:
 
@@ -2550,12 +2550,12 @@ const REQUIRED_ENTRIES = [
 
 keeping the derivation script's other assertions unchanged: no `*.test.*`, `.map`, or `/src/` entries leak; a root-only consumer installs without `vitest` present; `peerDependencies`/`peerDependenciesMeta` survive packing; the packed `./testing` kit runs under real vitest and `tsc`.
 
-- [ ] **Step 5: Run the pack smoke**
+- [x] **Step 5: Run the pack smoke**
 
 Run: `cd packages/evidence/trajectory && yarn build && yarn pack:smoke`
 Expected: PASS — tarball carries dist, schemas, and fixtures; nothing leaks.
 
-- [ ] **Step 6: Wire CI**
+- [x] **Step 6: Wire CI**
 
 In `.github/workflows/evidence-ci.yml`:
 
@@ -2610,7 +2610,7 @@ Add the job, modeled on `retrieval` (lines 271–318) but with `protocol` as its
 
 In the `verify` job: add `trajectory` to `needs`; add `TRAJECTORY: ${{ needs.trajectory.result }}` to the env block and `$TRAJECTORY` to the result loop; add `trajectory` to the dist-placement list at line 527.
 
-- [ ] **Step 7: Run the full local verification**
+- [x] **Step 7: Run the full local verification**
 
 Run:
 
@@ -2626,7 +2626,7 @@ node --test .github/scripts/evidence-package-inventory.test.mjs && node --test .
 
 Expected: every command PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/evidence/trajectory .github
@@ -2652,3 +2652,6 @@ Before C2 or C4 build on this package, one independent high-effort review checks
 - **2026-07-31 — Task 6 Zod 4 object-refine vs `BigInt` on invalid decimal strings (design-neutral Zod interop shim).** The plan's verbatim `SpanSchema` refine calls `BigInt(span.endTimeUnixNano) >= BigInt(span.startTimeUnixNano)` unconditionally. Under Zod 4, object-level refinements can run on raw input even when field validators would reject values such as `"12.5"`, so `safeParse` throws `SyntaxError: Cannot convert 12.5 to a BigInt` and the plan test "rejects non-decimal-string timestamps" cannot pass. Design intent is unchanged: invalid decimal strings remain field errors; time-order is checked only when both fields are valid unsigned decimal strings. **Approved disposition:** keep the historical Step 3 text; in implementation only, guard the refine — `DecimalUnsigned.safeParse` both times first, return `true` if either fails (field validators own the error), otherwise compare with `BigInt`. No schema shape or ordering rule changes. Landed in commit `3a08658ca`.
 - **2026-07-31 — Task 7 orphan-parent fixture typing (design-neutral test-fixture typing defect).** The plan's verbatim orphan-parent test assigns `orphan.spans[0]!.parentSpanId = "0".repeat(16)` after `record()` inferred `parentSpanId` as the literal `null`, which fails full `tsc --noEmit -p tsconfig.json`. Runtime intent is unchanged. **Approved disposition:** keep historical Step 1 text; in the test only, assign through a narrow unknown bridge such as `(orphan.spans[0] as unknown as { parentSpanId: string | null }).parentSpanId = "0".repeat(16)`. Production schema unchanged. Landed in commit `a36b55670`.
 - **2026-07-31 — Task 9 golden fixture encoding (plan generator vs digest-pin tests).** Task 9 Step 3's `emit()` writes all JSON via `JSON.stringify(..., null, 2)`, but Step 1's golden tests require `documentDigest(loadGoldenBytes(name))` to equal the `.sha256` pin and `parseTrajectory` to accept those bytes — which is only true when the golden files are the **canonical sealed bytes**, not pretty-printed JSON. **Approved disposition:** keep historical Step 3 text; in the generator only, emit `trajectory/{valid,minimal}.json` as `new TextDecoder().decode(sealTrajectory(document).bytes)` (and pin `.sha256` from the same seal). Invalid, equivalence, and adversarial documents may remain pretty-printed because tests only `safeParse` them as objects. Landed in commit `400ccb5f1`.
+- **2026-07-31 — Task 12 testing-region `node:fs` vs `node:fs/promises` (design-neutral guard-pattern alignment).** Step 2's verbatim boundary block forbids `TRAJECTORY_FORBIDDEN_PACKAGES` (which includes `node:fs`) on testing files. The inventory helper treats `node:fs/promises` as matching the `node:fs` prefix, so the testing region that legitimately imports `node:fs/promises` (fixtures.ts, schema-parity.test.ts) would fail. **Approved disposition:** keep historical Step 2 text; apply the same Contribution/Retrieval pattern already in this file — filter `node:fs` out of the testing-region forbidden list and assert testing files never import bare `node:fs`. Production still forbids both `node:fs` and `node:fs/promises`. Landed in commit `aa12c877e`.
+- **2026-07-31 — Task 12 pack-smoke consumer surface (mechanical adaptation beyond the three named substitutions).** Step 4 says copy derivation's `pack-smoke.mjs` with exactly three substitutions. A byte-faithful copy still asserts derivation exports; a passing trajectory smoke must assert trajectory public surface (`sealTrajectory`, `describeTrajectoryRecordConformance`, etc.). **Approved disposition:** keep the three named substitutions as the minimum; also retarget smoke consumers to trajectory exports. Not a design change. Landed in commit `aa12c877e`.
+- **2026-07-31 — Task 12 host note (not a plan defect): npm 10.9.8 + vitest 4.1.8 peer install in pack-smoke.** On this operator host (Homebrew Node 22 / npm 10.9.8), installing `vitest@4.1.8` into the pack-smoke consumer fails unless `NPM_CONFIG_LEGACY_PEER_DEPS=true`. Derivation's script has the same shape and no baked-in flag. **Proposed disposition:** treat as host/CI toolchain note; do not encode into the package unless CI reproduces it. Mechanical verify on this host used the env var; CI uses `actions/setup-node` Node 22 independently.
