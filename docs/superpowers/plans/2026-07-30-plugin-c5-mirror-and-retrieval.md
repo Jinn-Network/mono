@@ -1182,7 +1182,7 @@ Two custody-law points, both structural. **C1/C3:** `DsseChainVerifier` is an *i
 
 `jinn:corpus-producer` is a namespaced extension purpose, which `TrustPolicySchema` explicitly admits (`policy.ts:37-42`: the pattern is `/^[a-z][a-z0-9-]*:[A-Za-z0-9-]+$/`, and the comment reads *"Deployments extend under their own namespaces"*).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/corpus/admission.test.ts`:
 
@@ -1353,12 +1353,12 @@ describe("composition", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test src/corpus/admission.test.ts`
 Expected: FAIL — `Failed to resolve import "./admission.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/corpus/admission.ts`:
 
@@ -1537,12 +1537,12 @@ export function composeAdmission(...parts: readonly CorpusAdmission[]): CorpusAd
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test src/corpus/admission.test.ts && yarn typecheck`
 Expected: PASS (13 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src/corpus
