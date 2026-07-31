@@ -625,7 +625,7 @@ Two contract decisions carry the weight of program findings **F4** and **F5**:
 - **F4 — OTLP JSON fixes no attribute ordering**, so this profile fixes one: attributes sorted by key under C1's UTF-16 code-unit rule, unique keys, lowercase hex identifiers, decimal-string 64-bit fields. `sortAttributes` is the single place a decoder gets that right, so no decoder re-implements it and drifts.
 - **F5 — message content is not inlined.** A decoder emits structure, timings, tool identities, statuses and usage; a span points at the region of the digest-bound source it came from via `jinn.trajectory.source.ordinal`, and consumers resolve content there. `ADMITTED_ATTRIBUTE_KEYS` makes this mechanical rather than a matter of discipline: an attribute key outside C1's vocabulary is a contract violation, and the frozen parser's `message.content` / `tool.args` / `tool.result` keys are outside it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/contract.test.ts`:
 
@@ -725,12 +725,12 @@ describe("decoder contract", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trace-decode && yarn test`
 Expected: FAIL — `Failed to resolve import "./contract.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/contract.ts`:
 
@@ -893,12 +893,12 @@ export function sortAttributes(attributes: readonly Attribute[]): Attribute[] {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trace-decode && yarn test && yarn typecheck`
 Expected: PASS (9 new tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/evidence/trace-decode/src
