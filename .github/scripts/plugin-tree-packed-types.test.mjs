@@ -83,6 +83,10 @@ function assertExportMutationsFail() {
     [{ name: '@jinn-network/null-export', exports: { '.': null } }, /malformed/],
     [{ name: '@jinn-network/reordered', exports: { '.': { import: './dist/index.js', types: './dist/index.d.ts' } } }, /types before import/],
     [{ name: '@jinn-network/encoded', exports: { '.': { types: './dist/%2e%2e/x.d.ts', import: './dist/%2e%2e/x.js' } } }, /percent encoding/],
+    [{ name: '@jinn-network/string-target', exports: { '.': './dist/index.js' } }, /must be an object/],
+    [{ name: '@jinn-network/misleading-types', exports: { '.': { types: './dist/index.d.ts.js', import: './dist/index.js' } } }, /misleading extension|must end with \.d\.ts/],
+    [{ name: '@jinn-network/misleading-import', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js.d.ts' } } }, /misleading extension|must end with \.js/],
+    [{ name: '@jinn-network/hash-subpath', exports: { './foo#bar': { types: './dist/foo.d.ts', import: './dist/foo.js' } } }, /#/],
   ];
   for (const [manifest, pattern] of cases) {
     try {

@@ -210,11 +210,21 @@ export function validateExportSubpath(subpath, packageName) {
   if (subpath.includes('..') || subpath.includes('\\') || subpath.includes('%')) {
     throw new Error(`${packageName} exports subpath escapes package root: ${subpath}`);
   }
-  if (subpath.includes('*') || subpath.includes('?')) {
+  if (subpath.includes('*') || subpath.includes('?') || subpath.includes('#') || subpath.includes(':')) {
     throw new Error(`${packageName} exports wildcard/conditional pattern not supported: ${subpath}`);
   }
-  if (subpath.startsWith('./') && subpath.length <= 2) {
-    throw new Error(`${packageName} exports subpath "./" is malformed`);
+  if (/[\0-\x1f\x7f]/.test(subpath)) {
+    throw new Error(`${packageName} exports subpath contains control characters: ${subpath}`);
+  }
+  if (subpath.startsWith('./')) {
+    for (const segment of subpath.slice(2).split('/')) {
+      if (segment === '' || segment === '.') {
+        throw new Error(`${packageName} exports subpath contains malformed path segments: ${subpath}`);
+      }
+      if (segment === '..') {
+        throw new Error(`${packageName} exports subpath escapes package root: ${subpath}`);
+      }
+    }
   }
 }
 
@@ -257,6 +267,18 @@ function validateDistExportPath(relativePath, packageName, subpath, kind) {
   if (!relativePath.startsWith('./dist/')) {
     throw new Error(`${packageName} exports ${kind} for ${subpath} must start with ./dist/`);
   }
+  if (kind === 'types' && !relativePath.endsWith('.d.ts')) {
+    throw new Error(`${packageName} exports types for ${subpath} must end with .d.ts`);
+  }
+  if (kind === 'import' && !relativePath.endsWith('.js')) {
+    throw new Error(`${packageName} exports import for ${subpath} must end with .js`);
+  }
+  if (kind === 'types' && relativePath.endsWith('.d.ts.js')) {
+    throw new Error(`${packageName} exports types for ${subpath} has a misleading extension`);
+  }
+  if (kind === 'import' && relativePath.endsWith('.js.d.ts')) {
+    throw new Error(`${packageName} exports import for ${subpath} has a misleading extension`);
+  }
   for (const segment of relativePath.slice(2).split('/')) {
     if (segment === '..') {
       throw new Error(`${packageName} exports ${kind} for ${subpath} escapes dist/`);
@@ -270,8 +292,7 @@ function validateDistExportPath(relativePath, packageName, subpath, kind) {
 /** Validate one export target object — exact reviewed `types` then `import` shape only. */
 export function validateExportTarget(target, packageName, subpath) {
   if (typeof target === 'string') {
-    validateDistExportPath(target, packageName, subpath, 'target');
-    return { import: target, types: target };
+    throw new Error(`${packageName} exports entry ${subpath} must be an object with types and import`);
   }
   if (typeof target !== 'object' || target === null || Array.isArray(target)) {
     throw new Error(`${packageName} exports entry ${subpath} is malformed`);
@@ -309,8 +330,7 @@ export function derivePublicCodeEntrypoints(manifest) {
     return [{ subpath: '.', specifier: name, conditions: { import: importTarget, types: typesTarget } }];
   }
   if (typeof exportsField === 'string') {
-    validateDistExportPath(exportsField, name, '.', 'target');
-    return [{ subpath: '.', specifier: name, conditions: { import: exportsField, types: exportsField } }];
+    throw new Error(`${name} exports entry . must be an object with types and import`);
   }
   if (typeof exportsField !== 'object' || exportsField === null || Array.isArray(exportsField)) {
     throw new Error(`${name} has malformed exports field`);

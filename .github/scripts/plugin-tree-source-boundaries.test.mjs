@@ -141,7 +141,13 @@ test('the AST custody scanner catches process destructuring, module imports, ali
       'const g = globalThis;',
       'export const viaGlobal = g.process.env;',
     ].join('\n'));
-    assert.ok(violations.length >= 6);
+    assert.ok(violations.some((entry) => entry.includes('import node:process')));
+    assert.ok(violations.some((entry) => entry.includes('import process')));
+    assert.ok(violations.some((entry) => entry.includes('process.env')));
+    assert.ok(violations.some((entry) => entry.includes('process.stderr')));
+    assert.ok(
+      violations.some((entry) => entry.includes('process reference') || entry.includes('destructured process authority')),
+    );
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
@@ -765,6 +771,8 @@ test('R-C3-44 rejects every ambient process mutation shape in bin', () => {
 test('R-C3-50 lexical shadowing resolves bindings not identifier text', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-50-'));
   try {
+    mkdirSync(join(fixture, 'src'), { recursive: true });
+    writeFileSync(join(fixture, 'src', 'local-process.js'), 'export const env = { SAFE: "1" };\n');
     const safe = scanFixtureSource(fixture, 'shadow.ts', [
       'function localFetch() { const fetch = () => "local"; return fetch(); }',
       'function localEval() { const eval = () => "local"; return eval(); }',
@@ -786,6 +794,102 @@ test('R-C3-50 lexical shadowing resolves bindings not identifier text', () => {
     assert.ok(ambient.some((entry) => entry.includes('Intl')));
     assert.ok(ambient.some((entry) => entry.includes('process.env')));
   } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-51 rejects syntax-independent callable authority bypasses', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-51-'));
+  try {
+    for (const [name, content, needle] of [
+      ['reflect-fetch.ts', 'Reflect.get(globalThis, "fetch")();', 'network global alias call'],
+      ['reflect-fn.ts', 'Reflect.get(globalThis, "Function")("return 1");', 'dynamic evaluation alias call'],
+      ['comma-global.ts', 'export const leak = (0, globalThis).process.env.HOME;', 'process.env'],
+      ['fn-constructor.ts', 'Function.prototype.constructor("return 1")();', 'dynamic evaluation alias call'],
+      ['vm-default.ts', 'import vm from "node:vm"; vm.runInThisContext("1");', 'code-loading module node:vm'],
+      ['vm-named.ts', 'import { runInNewContext } from "node:vm"; runInNewContext("1");', 'code-loading module node:vm'],
+    ]) {
+      const violations = scanFixtureSource(fixture, name, content);
+      assert.ok(violations.some((entry) => entry.includes(needle)), `${name} must fail on ${needle}`);
+    }
+
+    const safe = scanFixtureSource(fixture, 'safe-reflect.ts', [
+      'const local = { secret: 1 };',
+      'export const ok = Reflect.get(local, "secret");',
+    ].join('\n'));
+    assert.deepEqual(safe, []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-52 rejects bin computed members, delete, and mutator aliases', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-52-'));
+  try {
+    for (const [name, content, needle] of [
+      ['argv-computed.ts', 'process.argv["push"]("--bad");', 'forbidden bin process.argv mutation'],
+      ['delete-argv.ts', 'delete process.argv[0];', 'forbidden bin process argv mutation'],
+      ['argv-alias.ts', 'const push = process.argv.push; push("--bad");', 'forbidden bin process alias call'],
+      ['argv-bind.ts', 'const bound = process.argv.push.bind(process.argv); bound("--bad");', 'forbidden bin process.bind'],
+    ]) {
+      const violations = scanFixtureSource(fixture, name, content, { isBinEntry: true });
+      assert.ok(violations.some((entry) => entry.includes(needle)), `${name} must fail on ${needle}`);
+    }
+
+    const allowed = scanFixtureSource(fixture, 'bin-read.ts', [
+      'process.argv.slice(2);',
+      'process.env.JINN_PLUGIN_HOME;',
+    ].join('\n'), { isBinEntry: true });
+    assert.deepEqual(allowed, []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-53 TypeChecker resolves lexical scope without identifier-text false positives', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-53-'));
+  try {
+    const afterLoop = scanFixtureSource(fixture, 'loop.ts', [
+      'for (let i = 0; i < 1; i++) { const fetch = () => "inner"; fetch(); }',
+      'export const ambient = fetch("https://example.com");',
+    ].join('\n'));
+    assert.ok(afterLoop.some((entry) => entry.includes('network global fetch')));
+
+    const blockShadow = scanFixtureSource(fixture, 'block.ts', [
+      '{ const eval = () => "local"; eval(); }',
+      'export const ambient = eval("1");',
+    ].join('\n'));
+    assert.ok(blockShadow.some((entry) => entry.includes('dynamic evaluation eval')));
+
+    const safe = scanFixtureSource(fixture, 'local.ts', [
+      'function localFetch() { const fetch = () => "local"; return fetch(); }',
+    ].join('\n'));
+    assert.deepEqual(safe.filter((entry) => entry.includes('network global fetch')), []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-54 rejects malformed export keys, string targets, and misleading extensions', () => {
+  for (const [subpath, pattern] of [
+    ['./foo#bar', /#/],
+    ['./https://host/path', /wildcard|:|malformed/],
+    ['././foo', /malformed/],
+    ['./dist//index.js', /malformed/],
+  ]) {
+    assert.throws(
+      () => derivePublicCodeEntrypoints({
+        name: '@jinn-network/bad-subpath',
+        exports: { [subpath]: { types: './dist/index.d.ts', import: './dist/index.js' } },
+      }),
+      pattern,
+    );
+  }
+  for (const [target, pattern] of [
+    ['./dist/index.js', /must be an object/],
+    [{ types: './dist/index.d.ts.js', import: './dist/index.js' }, /misleading extension|must end with \.d\.ts/],
+    [{ types: './dist/index.d.ts', import: './dist/index.js.d.ts' }, /misleading extension|must end with \.js/],
+  ]) {
+    assert.throws(
+      () => derivePublicCodeEntrypoints({
+        name: '@jinn-network/bad-target',
+        exports: { '.': target },
+      }),
+      pattern,
+    );
+  }
 });
 
 test('plugin tree source boundaries hold and the manifest matches the approved shape', () => {
