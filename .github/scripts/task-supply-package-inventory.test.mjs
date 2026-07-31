@@ -9,15 +9,19 @@ const DEPENDENCY_SECTIONS = [
   'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
 ];
 
-// C4 (derivation), C5 (posting), and C6 (curation) append their rows here as they land.
+// C5 (posting) and C6 (curation) append their rows here as they land.
 const TASK_SUPPLY_PACKAGES = [
   ['admission', '@jinn-network/task-admission'],
+  ['derivation', '@jinn-network/task-derivation'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/task-supply; map name -> absolute dir.
 const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+  ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
+  ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
+  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
 ]);
 
 // Admission consumes environments/record types + digests and trust-core's DSSE spine, and
@@ -26,6 +30,24 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['admission', {
     dependencies: ['@jinn-network/environment-record', '@jinn-network/trust-core'],
     devDependencies: [], optionalDependencies: [], peerDependencies: [],
+  }],
+  // derivation produces sealed Task + EvaluationSpec pairs, so it consumes the packages
+  // that OWN those two kinds' sealing (protocol, profiles) alongside the record type (C1)
+  // and the admission surface it pipes candidates through (C3). Planning Finding (a): the
+  // design's §3.3 diagram omits this tier-3 -> tier-2 edge; the edge is legal and the
+  // diagram amendment is proposed at the program review.
+  ['derivation', {
+    dependencies: [
+      '@jinn-network/environment-record',
+      '@jinn-network/task-admission',
+      '@jinn-network/task-execution-profiles',
+      '@jinn-network/task-execution-protocol',
+    ],
+    devDependencies: [], optionalDependencies: [], peerDependencies: [],
+    // Transitive portals: yarn resolves a portal dependency's OWN dependencies, and neither
+    // trust-core (via admission) nor evidence-protocol (via environments/record) is published.
+    // Declared here rather than as dependencies because derivation's source imports neither.
+    portalResolutions: ['@jinn-network/trust-core', '@jinn-network/evidence-protocol'],
   }],
 ]);
 
