@@ -152,6 +152,19 @@ export interface BuildCapabilityReportOptions {
    *  graded (passed !== null). Absent key = unknown. */
   triggerByKey: Map<string, boolean | null>;
   links: ReportLinks;
+  /** `BenchManifest.eligibleTaskIds` from THIS run (final-review round 2 fix
+   *  to I8) — the run-scoped source of truth for which tasks were actually
+   *  eligible to be measured, reflecting `screeningRespected`/
+   *  `--include-screened-out` for THIS run specifically. Pass the manifest's
+   *  field straight through (render-report.ts already loads the manifest).
+   *  Absent only for a manifest written before this field existed — see
+   *  `buildCapabilityReport`'s fallback. Never derive this from
+   *  `taskSet.screeningSummary.kept` alone: that is an AUTHORING-TIME
+   *  decision (screen-task-set.ts) that does not know whether THIS run
+   *  passed `--include-screened-out`, so it silently drops real outcomes for
+   *  a screened-out task an `--include-screened-out` run actually measured —
+   *  the exact regression this field closes. */
+  eligibleTaskIds?: string[];
 }
 
 export function buildCapabilityReport(opts: BuildCapabilityReportOptions): CapabilityReport {
@@ -177,15 +190,35 @@ export function buildCapabilityReport(opts: BuildCapabilityReportOptions): Capab
   // producing a gradeable patch (solveFailures, never appended to
   // attempts.jsonl) must still be visible in the public artifact, not
   // silently disappear while taskSetIdentity.taskCount still counts it.
-  // "Eligible" = screening.kept when the set has screening receipts (a
-  // screened-OUT task was never a candidate for this run and is already
-  // accounted for by taskSetIdentity's screening summary — it does not need
-  // its own row); every task when the set has never been screened (nothing
-  // to exclude). Matches buildPerTaskRows's own doc comment ("still included
+  //
+  // Round-2 fix: "eligible" MUST be run-scoped, not authoring-time-scoped.
+  // `opts.eligibleTaskIds` (BenchManifest.eligibleTaskIds) reflects what THIS
+  // run actually measured — including a screened-out task when this run
+  // passed `--include-screened-out` (selectTasksForMeasurement, run-bench.ts).
+  // Using `taskSet.screeningSummary.kept` alone (an authoring-time decision
+  // that predates and does not know about any particular run's flags) would
+  // silently drop a screened-out task's REAL outcomes from an
+  // `--include-screened-out` run — reintroducing the exact invisibility bug
+  // I8 was meant to close, just for that path.
+  //
+  // Precedence: manifest's `eligibleTaskIds` when present (the run-scoped
+  // truth); else, for a manifest written before this field existed, fall
+  // back to the union of screening.kept and every id with a logged outcome
+  // (covers both "normally screened" and "an old --include-screened-out run
+  // whose extra tasks have real outcomes" without the manifest's help); else
+  // (no screening receipts at all) every task counts as eligible — nothing
+  // to exclude. Matches buildPerTaskRows's own doc comment ("still included
   // with empty outcome arrays... renderer prints n/a").
-  const eligibleIds = opts.taskSet.screeningSummary
-    ? new Set(opts.taskSet.screeningSummary.kept)
-    : null;
+  const outcomeIds = new Set(
+    opts.outcomes
+      .filter((o) => o.arm === opts.baselineArm || o.arm === opts.treatmentArm)
+      .map((o) => o.instanceId),
+  );
+  const eligibleIds = opts.eligibleTaskIds
+    ? new Set(opts.eligibleTaskIds)
+    : opts.taskSet.screeningSummary
+      ? new Set([...opts.taskSet.screeningSummary.kept, ...outcomeIds])
+      : null;
   const taskIds = opts.taskSet.tasks
     .map((t) => t.id)
     .filter((id) => eligibleIds === null || eligibleIds.has(id));

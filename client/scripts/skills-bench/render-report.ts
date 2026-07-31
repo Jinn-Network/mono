@@ -226,6 +226,11 @@ async function main(): Promise<void> {
     },
     triggerByKey,
     links: { dataPaths, rerunCommand },
+    // Round-2 fix to I8: thread the run-scoped eligible set straight from
+    // this run's own manifest — never re-derive it from the task set's
+    // authoring-time screening.kept, which doesn't know about THIS run's
+    // --include-screened-out flag (see BuildCapabilityReportOptions' doc).
+    eligibleTaskIds: manifest.eligibleTaskIds,
   });
 
   const reportPath = join(args.outDir, 'report.md');

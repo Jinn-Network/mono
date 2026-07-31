@@ -159,6 +159,57 @@ describe('buildCapabilityReport', () => {
     expect(report.perTask.map((r) => r.taskId)).toEqual(['t1', 't2', 't3', 't4']);
   });
 
+  // ---------------------------------------------------------------------------
+  // I8 round 2 (final-review regression fix): eligibility must be RUN-scoped
+  // (the manifest's own eligibleTaskIds), never re-derived from the task
+  // set's authoring-time screening.kept alone — that field doesn't know
+  // whether THIS run passed --include-screened-out, so a screened-out task
+  // an --include-screened-out run actually measured must still get a row
+  // when its real outcomes exist, and a screened-out, never-run task must
+  // stay excluded when the manifest says so.
+  // ---------------------------------------------------------------------------
+
+  it('includes a screened-out task WITH real outcomes when the manifest eligibleTaskIds includes it (--include-screened-out run)', () => {
+    const withScreenedOutTask: SkillTaskSetV1 = {
+      ...taskSet,
+      tasks: [...taskSet.tasks, task('t4')], // t4 is in droppedNoHeadroom per taskSet's screeningSummary
+    };
+    const outcomesWithT4 = [...outcomes, o('t4', 'baseline', 0, true), o('t4', 'tdd', 0, false)];
+    const report = buildCapabilityReport({
+      ...baseOptions(),
+      taskSet: withScreenedOutTask,
+      outcomes: outcomesWithT4,
+      // this run's own manifest recorded t4 as eligible — an
+      // --include-screened-out run measured it despite screening.kept never
+      // having listed it.
+      eligibleTaskIds: ['t1', 't2', 't3', 't4'],
+    });
+    const t4 = report.perTask.find((r) => r.taskId === 't4');
+    expect(t4).toBeDefined();
+    expect(t4!.baseline).toEqual([{ repeat: 0, passed: true }]);
+    expect(t4!.treatment).toEqual([{ repeat: 0, passed: false, triggered: null }]);
+  });
+
+  it('excludes a screened-out task with no outcomes when the manifest eligibleTaskIds excludes it (normal screened run)', () => {
+    const withScreenedOutTask: SkillTaskSetV1 = {
+      ...taskSet,
+      tasks: [...taskSet.tasks, task('t4')], // present in the set, screened out, never run
+    };
+    const report = buildCapabilityReport({
+      ...baseOptions(),
+      taskSet: withScreenedOutTask,
+      eligibleTaskIds: ['t1', 't2', 't3'], // this run's manifest — t4 correctly excluded
+    });
+    expect(report.perTask.some((r) => r.taskId === 't4')).toBe(false);
+  });
+
+  it('prefers the manifest eligibleTaskIds over screeningSummary.kept even when they disagree', () => {
+    // screeningSummary.kept says t1/t2/t3 only; the manifest (this run) says
+    // t1/t2 only — the manifest must win.
+    const report = buildCapabilityReport({ ...baseOptions(), eligibleTaskIds: ['t1', 't2'] });
+    expect(report.perTask.map((r) => r.taskId)).toEqual(['t1', 't2']);
+  });
+
   it('composes the task-set identity from gradeability/screening summaries', () => {
     const report = buildCapabilityReport(baseOptions());
     expect(report.taskSetIdentity).toEqual({
