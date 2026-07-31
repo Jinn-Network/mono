@@ -89,6 +89,14 @@ export type {
 export { MARKETPLACE_MANIFEST_DIGEST_SENTINEL, encodeCreateTaskCalldata, postTask } from "./posting.js";
 export type { PostingPorts, PostingTerms, SafeBroadcastPort } from "./posting.js";
 
+// --- requester on-ramp defaults (supply design §8 D7; finding F2) ---
+export {
+  DEFAULT_POSTING_TERMS,
+  assertMaxClaimsAgreement,
+  postingEscrowValueWei,
+} from "./posting-defaults.js";
+export type { DefaultPostingTerms } from "./posting-defaults.js";
+
 // --- capabilities() with the attested run-pinning posture (§7, profiles §5.2; M2.4) ---
 export { MARKETPLACE_CORE_KEY_CLASSES, marketplaceCapabilities } from "./capabilities.js";
 
