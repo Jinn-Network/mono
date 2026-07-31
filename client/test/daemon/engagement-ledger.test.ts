@@ -1,6 +1,11 @@
+import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import Database from 'better-sqlite3';
 import { Store } from '../../src/store/store.js';
 import {
+  ENGAGEMENT_LEDGER_SCHEMA,
   EngagementLedger,
   reconcileEngagements,
   type EngagementRow,
@@ -107,5 +112,140 @@ describe('engagement ledger', () => {
       INTENT.idempotencyKey,
     ]);
     expect(warnings.join('\n')).toContain('unreleased attempt');
+  });
+
+  // Close-out C1: engagement ledger gains requestId correlation.
+  describe('requestId correlation (C1)', () => {
+    const REQUEST_ID = `0x${'a'.repeat(64)}`;
+
+    it('persists the requestId recorded at claim time and is null before a claim lands', () => {
+      const led = ledger();
+      led.admitClaimIntent(INTENT);
+      expect(led.get(INTENT.idempotencyKey)!.requestId).toBeNull();
+      led.recordClaimed(INTENT.idempotencyKey, {
+        attemptIndex: 0,
+        attemptUri: 'urn:uuid:11111111-2222-3333-4444-555555555555',
+        claimTxHash: `0x${'c'.repeat(64)}`,
+        requestId: REQUEST_ID,
+      });
+      expect(led.get(INTENT.idempotencyKey)!.requestId).toBe(REQUEST_ID);
+    });
+
+    it('leaves requestId null for a revised-generation claim (none minted)', () => {
+      const led = ledger();
+      led.admitClaimIntent(INTENT);
+      led.recordClaimed(INTENT.idempotencyKey, {
+        attemptIndex: 0,
+        attemptUri: 'urn:uuid:11111111-2222-3333-4444-555555555555',
+        claimTxHash: `0x${'c'.repeat(64)}`,
+      });
+      expect(led.get(INTENT.idempotencyKey)!.requestId).toBeNull();
+    });
+
+    it('resolves a row by requestId', () => {
+      const led = ledger();
+      led.admitClaimIntent(INTENT);
+      led.recordClaimed(INTENT.idempotencyKey, {
+        attemptIndex: 0,
+        attemptUri: 'urn:uuid:11111111-2222-3333-4444-555555555555',
+        claimTxHash: `0x${'c'.repeat(64)}`,
+        requestId: REQUEST_ID,
+      });
+      expect(led.getByRequestId(REQUEST_ID)?.idempotencyKey).toBe(INTENT.idempotencyKey);
+    });
+
+    it('returns undefined for a requestId no row carries', () => {
+      const led = ledger();
+      led.admitClaimIntent(INTENT);
+      expect(led.getByRequestId(REQUEST_ID)).toBeUndefined();
+    });
+
+    it('ALTERs request_id into a pre-existing on-disk table that predates this column', () => {
+      // Mirrors store.ts's own migration guard: build a database against the OLD schema (no
+      // request_id column) via the raw SQL literal minus that column, exactly like a database
+      // written before this migration existed, then open it through `Store` and confirm the
+      // migration adds the column without dropping existing rows.
+      const legacySchema = `
+        CREATE TABLE IF NOT EXISTS engagement_ledger (
+          idempotency_key  TEXT PRIMARY KEY,
+          chain_id         INTEGER NOT NULL,
+          task_coordinator TEXT NOT NULL,
+          task_id          TEXT NOT NULL,
+          work_kind        TEXT NOT NULL,
+          wiring_json      TEXT NOT NULL,
+          attempt_index    INTEGER,
+          attempt_uri      TEXT,
+          claim_tx_hash    TEXT,
+          outcome          TEXT NOT NULL,
+          created_at       TEXT NOT NULL,
+          updated_at       TEXT NOT NULL
+        );
+      `;
+      expect(ENGAGEMENT_LEDGER_SCHEMA).not.toEqual(legacySchema);
+      const raw = new Database(':memory:');
+      raw.exec(legacySchema);
+      raw
+        .prepare(
+          `INSERT INTO engagement_ledger
+             (idempotency_key, chain_id, task_coordinator, task_id, work_kind, wiring_json,
+              outcome, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'intended', ?, ?)`,
+        )
+        .run(
+          INTENT.idempotencyKey,
+          INTENT.chainId,
+          INTENT.taskCoordinator,
+          INTENT.taskId.toString(),
+          INTENT.workKind,
+          JSON.stringify(WIRING),
+          '2026-07-31T00:00:00Z',
+          '2026-07-31T00:00:00Z',
+        );
+      raw.close();
+
+      // `Store` doesn't take a pre-opened Database, so exercise the same migration path via a
+      // real on-disk file: write the legacy DB to disk, then open it through `Store`, whose
+      // constructor runs `ensureEngagementLedgerRequestIdColumn` before anything else touches it.
+      const path = join(
+        tmpdir(),
+        `jinn-engagement-ledger-migration-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+      );
+      const seeded = new Database(path);
+      seeded.exec(legacySchema);
+      seeded
+        .prepare(
+          `INSERT INTO engagement_ledger
+             (idempotency_key, chain_id, task_coordinator, task_id, work_kind, wiring_json,
+              outcome, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'intended', ?, ?)`,
+        )
+        .run(
+          INTENT.idempotencyKey,
+          INTENT.chainId,
+          INTENT.taskCoordinator,
+          INTENT.taskId.toString(),
+          INTENT.workKind,
+          JSON.stringify(WIRING),
+          '2026-07-31T00:00:00Z',
+          '2026-07-31T00:00:00Z',
+        );
+      seeded.close();
+
+      const migrated = new Store(path);
+      const led = new EngagementLedger(migrated);
+      const row = led.get(INTENT.idempotencyKey)!;
+      expect(row.requestId).toBeNull();
+      led.recordClaimed(INTENT.idempotencyKey, {
+        attemptIndex: 0,
+        attemptUri: 'urn:uuid:11111111-2222-3333-4444-555555555555',
+        claimTxHash: `0x${'c'.repeat(64)}`,
+        requestId: REQUEST_ID,
+      });
+      expect(led.getByRequestId(REQUEST_ID)?.idempotencyKey).toBe(INTENT.idempotencyKey);
+      migrated.db.close();
+      rmSync(path, { force: true });
+      rmSync(`${path}-wal`, { force: true });
+      rmSync(`${path}-shm`, { force: true });
+    });
   });
 });

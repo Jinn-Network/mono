@@ -54,17 +54,17 @@
  *     matching row is itself the proof "this operator's Safe is the party the venue engaged" --
  *     no additional on-chain read is needed.
  *
- *     Gap: `EngagementLedger`'s schema (`ENGAGEMENT_LEDGER_SCHEMA`, `./engagement-ledger.ts`) keys
- *     rows by `taskId`, which today-generation `SettlementAttempt`s do not carry (only
- *     `requestId` -- see `packages/marketplace/binding/src/settlement.ts`'s `SettlementAttempt`
- *     union). No requestId<->taskId correlation is persisted anywhere in the write scope of this
- *     task. `checkDispatchBinding` below therefore accepts an `EngagementLedgerReader` with an
- *     OPTIONAL `getByRequestId`; the real `EngagementLedger` class does not implement it, so
- *     today-generation dispatchBinding will report `"missing"` (never a fabricated `"verified"`)
- *     until a follow-up task adds that correlation (e.g. `work-loop.ts` already computes both
- *     `taskId` and `requestId` together at claim time -- `claimAttempt`'s return value -- and could
- *     persist the pair). This file's tests prove the logic is correct once that correlation
- *     exists, using a fake resolver.
+ *     CLOSED (cutover stage 1 close-out C1): `EngagementLedger`'s schema
+ *     (`ENGAGEMENT_LEDGER_SCHEMA`, `./engagement-ledger.ts`) now carries a `request_id` column
+ *     alongside `task_id`, populated at claim time by `work-loop.ts`'s wrapped `claimTask` from
+ *     `claimAttempt`'s return value (present for today-generation claims; absent for
+ *     revised-generation, which mints no requestId), and the real `EngagementLedger` class
+ *     implements `getByRequestId` for real (a plain `request_id` lookup, indexed). Today-
+ *     generation dispatchBinding therefore reports `"verified"` once a matching, engaged,
+ *     claimed row exists -- no longer permanently `"missing"`. `checkDispatchBinding` below still
+ *     accepts an `EngagementLedgerReader` with an OPTIONAL `getByRequestId` (structural, not a
+ *     hard dependency on the concrete class) so a fake resolver remains a legal implementation for
+ *     tests.
  *
  *  3. `evaluationSpecification` -- presence from the operator's own `ProfileStore`
  *     (`@jinn-network/task-execution-profiles`, already real and already wired into
@@ -115,9 +115,10 @@ const ExecutorBindingExtensionSchema = z.object({
 
 /**
  * Minimal reader surface `checkDispatchBinding` needs. `EngagementLedger` (`./engagement-ledger.
- * ts`) satisfies this structurally via its real `get()` -- `getByRequestId` is optional and, on
- * the real ledger, absent (see file header gap 2) until a follow-up task adds a requestId
- * correlation for today-generation attempts.
+ * ts`) satisfies this structurally via its real `get()` and (cutover stage 1 close-out C1) its
+ * real `getByRequestId()`. The method stays optional on this interface so a fake resolver
+ * (without it) remains a legal `EngagementLedgerReader` for tests exercising the revised-
+ * generation (`taskId`-keyed) path only.
  */
 export interface EngagementLedgerReader {
   get(idempotencyKey: string): EngagementRow | undefined;
@@ -245,7 +246,7 @@ function checkDispatchBinding(
       detail:
         attempt.taskId === undefined
           ? 'engagement ledger carries no requestId correlation for this today-generation '
-            + 'settlement identity (see settlement-grade.ts file header gap 2)'
+            + 'settlement identity'
           : `no engagement-ledger row for idempotency key ${idempotencyKeyFor(config, attempt.taskId)}`,
     };
   }

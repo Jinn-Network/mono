@@ -23,7 +23,8 @@ import {
 } from '@jinn-network/marketplace-binding';
 import { sealDelivery, sha256Hex } from '@jinn-network/task-execution-protocol';
 import type { TaskProfileDocument } from '@jinn-network/task-execution-profiles';
-import type { EngagementRow } from '../../src/daemon/engagement-ledger.js';
+import { Store } from '../../src/store/store.js';
+import { EngagementLedger, type EngagementRow } from '../../src/daemon/engagement-ledger.js';
 import {
   EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE,
   EXECUTOR_BINDING_EXTENSION_URI,
@@ -421,5 +422,83 @@ describe('settleDelivery (real binding path) via buildVerifySettlementGrade', ()
     const result = await settleDelivery(attempt, delivery, BASE_SEPOLIA_TODAY, ports);
 
     expect(result).toMatchObject({ settled: false, state: 'rejected', kind: 'evaluation-specification-mismatch' });
+  });
+});
+
+// ── C1 proof: the REAL EngagementLedger, not a fake ─────────────────────────────────────────
+//
+// Everything above proves `checkDispatchBinding`'s logic against a fake `EngagementLedgerReader`
+// supplying `getByRequestId`. This proves the real class (`../../src/daemon/engagement-ledger.js`)
+// now implements that correlation for real, end to end: `admitClaimIntent` + `recordClaimed` (the
+// same two calls `work-loop.ts` makes at claim time) populate a row a genuine
+// `buildVerifySettlementGrade` port resolves through the real `getByRequestId`.
+
+describe('buildVerifySettlementGrade: dispatchBinding against the real EngagementLedger (C1)', () => {
+  const WIRING = {
+    workKind: 'QmSolver',
+    harness: 'claude-code',
+    model: 'claude-haiku-4-5-20251001',
+    plugins: [],
+    credentialRef: 'claude-code-default',
+    isolationPolicy: 'process',
+    legacyManifestDigest: 'QmSolver',
+  };
+
+  function realLedgerWithClaimedRow(overrides: { requestId?: `0x${string}` } = {}): EngagementLedger {
+    const led = new EngagementLedger(new Store(':memory:'));
+    const idempotencyKey = `${BASE_SEPOLIA_TODAY.chainId}:${TASK_COORDINATOR}:7`;
+    led.admitClaimIntent({
+      idempotencyKey,
+      chainId: BASE_SEPOLIA_TODAY.chainId,
+      taskCoordinator: TASK_COORDINATOR,
+      taskId: 7n,
+      workKind: 'QmSolver',
+      wiring: WIRING,
+    });
+    led.recordClaimed(idempotencyKey, {
+      attemptIndex: 3,
+      attemptUri: 'urn:jinn:attempt:...',
+      claimTxHash: '0xclaimtxhash',
+      requestId: overrides.requestId ?? REQUEST_ID,
+    });
+    return led;
+  }
+
+  test('a today-generation claim recorded through the real ledger verifies dispatchBinding', async () => {
+    const verify = buildVerifySettlementGrade(buildInput({ engagementLedger: realLedgerWithClaimedRow() }));
+    const delivery = sealDelivery(baseDeliveryFields());
+    const result = await verify({
+      attempt: TODAY_ATTEMPT,
+      delivery: JSON.parse(new TextDecoder().decode(delivery)),
+      deliveryBytes: delivery,
+      deliveryDigest: `sha256:${sha256Hex(delivery)}`,
+      config: BASE_SEPOLIA_TODAY,
+    });
+    expect(result.dispatchBinding).toEqual({ status: 'verified' });
+  });
+
+  test('reports missing through the real ledger when no row carries this requestId', async () => {
+    const verify = buildVerifySettlementGrade(
+      buildInput({ engagementLedger: realLedgerWithClaimedRow({ requestId: `0x${'9'.repeat(64)}` }) }),
+    );
+    const delivery = sealDelivery(baseDeliveryFields());
+    const result = await verify({
+      attempt: TODAY_ATTEMPT,
+      delivery: JSON.parse(new TextDecoder().decode(delivery)),
+      deliveryBytes: delivery,
+      deliveryDigest: `sha256:${sha256Hex(delivery)}`,
+      config: BASE_SEPOLIA_TODAY,
+    });
+    expect(result.dispatchBinding.status).toBe('missing');
+  });
+
+  test('a today-mode solution delivery settles end-to-end against the real ledger (not a fake)', async () => {
+    const verify = buildVerifySettlementGrade(buildInput({ engagementLedger: realLedgerWithClaimedRow() }));
+    const delivery = makeSignedDelivery({});
+    const ports = makeSettlementPorts(delivery, verify);
+
+    const result = await settleDelivery(TODAY_ATTEMPT, delivery, BASE_SEPOLIA_TODAY, ports);
+
+    expect(result).toEqual({ settled: true, state: 'delivered' });
   });
 });

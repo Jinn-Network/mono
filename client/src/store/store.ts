@@ -607,6 +607,7 @@ export class Store {
     this.db.exec(PROJECTOR_CURSOR_SCHEMA);
     this.db.exec(PROJECTOR_OBSERVATIONS_SCHEMA);
     this.ensureArtifactsTaskColumns();
+    this.ensureEngagementLedgerRequestIdColumn();
     this.ensureRewardClaimsTxIndex();
     this.ensureNetworkArtifactsPeerCatalogId();
     this.ensureErc8004AnchorGasColumns();
@@ -650,6 +651,20 @@ export class Store {
       this.db.exec(`ALTER TABLE artifacts ADD COLUMN task_cid TEXT`);
     }
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts (task_id)`);
+  }
+
+  /**
+   * Older on-disk DBs predate `request_id` on `engagement_ledger` (cutover stage 1 close-out C1
+   * / finding E24 gap 2 -- see `../daemon/engagement-ledger.ts`'s schema doc comment).
+   */
+  private ensureEngagementLedgerRequestIdColumn(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(engagement_ledger)`).all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'request_id')) {
+      this.db.exec(`ALTER TABLE engagement_ledger ADD COLUMN request_id TEXT`);
+    }
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_engagement_ledger_request_id ON engagement_ledger (request_id)`,
+    );
   }
 
   /** Older on-disk DBs predate `peer_catalog_id` on network_artifacts. */

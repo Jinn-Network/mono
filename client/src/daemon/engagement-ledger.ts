@@ -1,6 +1,16 @@
 import type { ExecutionWiringEntry } from '@jinn-network/marketplace-pipeline';
 import type { Store } from '../store/store.js';
 
+/**
+ * `request_id` (C1 in the close-out addendum's "engagement ledger gains requestId correlation"
+ * deliverable): today-generation `SettlementAttempt`s carry only `requestId` (never `taskId`;
+ * see `packages/marketplace/binding/src/settlement.ts`), so `settlement-grade.ts`'s
+ * `checkDispatchBinding` needs a `requestId -> row` correlation to do anything but report
+ * `"missing"` for every today-generation settlement. Present on `CREATE TABLE` for fresh
+ * databases; `store.ts`'s `ensureEngagementLedgerRequestIdColumn` ALTERs it in additively for a
+ * database created before this column existed (same `PRAGMA table_info` guard every other
+ * migration in that file uses).
+ */
 export const ENGAGEMENT_LEDGER_SCHEMA = `
 CREATE TABLE IF NOT EXISTS engagement_ledger (
   idempotency_key  TEXT PRIMARY KEY,
@@ -12,6 +22,7 @@ CREATE TABLE IF NOT EXISTS engagement_ledger (
   attempt_index    INTEGER,
   attempt_uri      TEXT,
   claim_tx_hash    TEXT,
+  request_id       TEXT,
   outcome          TEXT NOT NULL,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
@@ -33,6 +44,9 @@ export interface EngagementRow {
   readonly attemptIndex: number | null;
   readonly attemptUri: string | null;
   readonly claimTxHash: string | null;
+  /** Today-generation marketplace requestId this row's claim landed under. `null` for
+   * revised-generation attempts (which carry no requestId) and for rows not yet claimed. */
+  readonly requestId: string | null;
   readonly outcome: EngagementOutcome;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -41,7 +55,8 @@ export interface EngagementRow {
 interface RawRow {
   idempotency_key: string; chain_id: number; task_coordinator: string; task_id: string;
   work_kind: string; wiring_json: string; attempt_index: number | null; attempt_uri: string | null;
-  claim_tx_hash: string | null; outcome: EngagementOutcome; created_at: string; updated_at: string;
+  claim_tx_hash: string | null; request_id: string | null; outcome: EngagementOutcome;
+  created_at: string; updated_at: string;
 }
 
 function toRow(raw: RawRow): EngagementRow {
@@ -55,6 +70,7 @@ function toRow(raw: RawRow): EngagementRow {
     attemptIndex: raw.attempt_index,
     attemptUri: raw.attempt_uri,
     claimTxHash: raw.claim_tx_hash,
+    requestId: raw.request_id,
     outcome: raw.outcome,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
@@ -97,15 +113,30 @@ export class EngagementLedger {
 
   recordClaimed(
     idempotencyKey: string,
-    claim: { attemptIndex: number; attemptUri: string; claimTxHash: string },
+    claim: {
+      attemptIndex: number;
+      attemptUri: string;
+      claimTxHash: string;
+      /** Today-generation marketplace requestId, when the claim minted one (claim.ts's
+       * `ClaimAttemptResult` -- absent for revised-generation attempts). */
+      requestId?: string;
+    },
   ): void {
     this.store.db
       .prepare(
         `UPDATE engagement_ledger
-            SET attempt_index = ?, attempt_uri = ?, claim_tx_hash = ?, outcome = 'claimed', updated_at = ?
+            SET attempt_index = ?, attempt_uri = ?, claim_tx_hash = ?, request_id = ?,
+                outcome = 'claimed', updated_at = ?
           WHERE idempotency_key = ?`,
       )
-      .run(claim.attemptIndex, claim.attemptUri, claim.claimTxHash, new Date().toISOString(), idempotencyKey);
+      .run(
+        claim.attemptIndex,
+        claim.attemptUri,
+        claim.claimTxHash,
+        claim.requestId ?? null,
+        new Date().toISOString(),
+        idempotencyKey,
+      );
   }
 
   recordOutcome(idempotencyKey: string, outcome: EngagementOutcome): void {
@@ -118,6 +149,19 @@ export class EngagementLedger {
     const raw = this.store.db
       .prepare(`SELECT * FROM engagement_ledger WHERE idempotency_key = ?`)
       .get(idempotencyKey) as RawRow | undefined;
+    return raw === undefined ? undefined : toRow(raw);
+  }
+
+  /**
+   * The today-generation correlation `settlement-grade.ts`'s `checkDispatchBinding` needs
+   * (`EngagementLedgerReader.getByRequestId`, cutover stage 1 close-out C1/E24 gap 2). `Hex` is
+   * typed as the bare template-literal shape (not imported from `viem`) so this module carries no
+   * viem dependency of its own; it is structurally identical to `viem`'s `Hex`.
+   */
+  getByRequestId(requestId: `0x${string}`): EngagementRow | undefined {
+    const raw = this.store.db
+      .prepare(`SELECT * FROM engagement_ledger WHERE request_id = ?`)
+      .get(requestId) as RawRow | undefined;
     return raw === undefined ? undefined : toRow(raw);
   }
 

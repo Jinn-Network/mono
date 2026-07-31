@@ -289,11 +289,15 @@ export class WorkLoop {
               taskId: input.taskId,
               attemptIndex: receipt.attemptIndex,
             });
-            // 7. On claim.ok, observed through the wrapped claimTask port.
+            // 7. On claim.ok, observed through the wrapped claimTask port. `receipt.requestId` is
+            // present only for today-generation claims (revised-generation claims never mint
+            // one) -- carried through so `settlement-grade.ts`'s `checkDispatchBinding` can
+            // correlate a today-generation settlement back to this row (C1 / finding E24 gap 2).
             this.config.ledger.recordClaimed(idempotencyKey, {
               attemptIndex: receipt.attemptIndex,
               attemptUri,
               claimTxHash: receipt.txHash,
+              requestId: receipt.requestId,
             });
           }
           return receipt;

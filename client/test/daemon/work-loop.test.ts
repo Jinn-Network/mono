@@ -342,6 +342,16 @@ describe('work loop', () => {
     expect(ledger.listUnreconciled().length).toBeLessThanOrEqual(1);
   });
 
+  // Close-out C1: the engagement ledger row gets the claim's requestId at claim time, so
+  // `settlement-grade.ts`'s dispatchBinding check can later correlate a today-generation
+  // settlement back to it.
+  it('persists the claim receipt requestId on the ledger row', async () => {
+    const { loop, ledger } = build();
+    await loop.tick();
+    const key = `${BASE_SEPOLIA_TODAY.chainId}:${BASE_SEPOLIA_TODAY.taskCoordinator}:${TASK_ID.toString()}`;
+    expect(ledger.get(key)!.requestId).toBe(REQUEST_ID);
+  });
+
   it('sends the mech Deliver leg before settlement reads its facts', async () => {
     const order: string[] = [];
     const { loop } = build({
