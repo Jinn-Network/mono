@@ -1087,7 +1087,7 @@ git commit -m "feat(plugin-runtime): packed public entrypoint canary for the plu
 - Consumes: the three guard scripts and the package scripts.
 - Produces: jobs `architecture`, `runtime`, `verify`; the artifact name `plugin-runtime-dist`.
 
-- [ ] **Step 1: Write the workflow**
+- [x] **Step 1: Write the workflow**
 
 Create `.github/workflows/plugin-tree-ci.yml`:
 
@@ -1194,7 +1194,7 @@ jobs:
         run: node .github/scripts/plugin-tree-packed-types.test.mjs
 ```
 
-- [ ] **Step 2: Verify the YAML parses and the job graph is what it claims**
+- [x] **Step 2: Verify the YAML parses and the job graph is what it claims**
 
 Run:
 ```bash
@@ -1202,12 +1202,12 @@ node -e "const {readFileSync}=require('node:fs');const s=readFileSync('.github/w
 ```
 Expected output: `architecture runtime verify`
 
-- [ ] **Step 3: Confirm the workflow name does not collide**
+- [x] **Step 3: Confirm the workflow name does not collide**
 
 Run: `ls .github/workflows/ | grep -c '^plugin' && ls .github/workflows/plugin*`
 Expected: `2`, then `.github/workflows/plugin-ci.yml` and `.github/workflows/plugin-tree-ci.yml` — two distinct files, the first still owning `packages/plugin`.
 
-- [ ] **Step 4: Run every command the workflow runs, locally**
+- [x] **Step 4: Run every command the workflow runs, locally**
 
 ```bash
 node --test .github/scripts/plugin-tree-package-inventory.test.mjs
@@ -1216,7 +1216,7 @@ node .github/scripts/plugin-tree-packed-types.test.mjs
 ```
 Expected: inventory `# pass 5 / # fail 0`; the package installs immutably (no lockfile drift), typechecks and builds; the canary prints its one-entrypoint line. (`yarn test` and `yarn pack:smoke` land in Tasks 5–10; the boundary guard's file-count floor is satisfied at Task 10.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .github/workflows/plugin-tree-ci.yml
@@ -3141,3 +3141,6 @@ Recorded per the designs-are-law rule (program §Global constraints). Each carri
 - **F-C3-10 — Task 2 frozen-trio fixture expected paths assumed the fixture directory was a direct child of `plugin/`.** `mkdtempSync(join(tree, '.plugin-tree-frozen-boundary-'))` creates `plugin/.plugin-tree-frozen-boundary-*`, so `localSpecifier` yields `../../packages/{core,layer,plugin}/src` and `../frozen/jinn_layer.py`, not `../packages/...` and `./frozen/...`. **Disposition applied:** the committed guard asserts the nested-relative paths. No topology change.
 
 - **F-C3-11 — Task 2 Steps 3–4's full-suite negative gate is masked by `MIN_SCANNED_FILES` until Task 10.** The production-boundary test asserts the file-count floor *before* `assertBoundary`, and at Task 2 the tree has one source file, so a deliberate frozen-trio import never reaches the boundary assertion in the full suite (failure message stays the floor). **Disposition applied:** (1) the dedicated frozen-trio fixture test still red-lines name/subpath/relative escapes; (2) Task 2 verified `assertBoundary` on the real violated `index.ts` and captured the expected findings; (3) re-run Steps 3–4's full-suite red→green as part of Task 10's green gate once ≥8 source files exist.
+
+- **F-C3-12 — Task 4 Step 2's job-name regex also matches `on.push`.** The one-liner `/^  ([a-z-]+):$/gm` matches both `push:` under `on:` and the three jobs, so the printed string is `push architecture runtime verify` rather than the plan's `architecture runtime verify`. **Disposition:** no YAML change; the three jobs exist and are correctly named. Treat the Step 2 expected string as jobs-only and ignore the trigger key match.
+
