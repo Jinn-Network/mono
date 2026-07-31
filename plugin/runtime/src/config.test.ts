@@ -19,6 +19,15 @@ describe("resolveRuntimeConfig", () => {
       indexPath: `${HOME}/index.sqlite`,
       mirrorStatePath: `${HOME}/mirror-state.json`,
       logLevel: "info",
+      mirrorCatalogPath: `${HOME}/mirror/catalog.sqlite`,
+      mirrorObjectsDirectory: `${HOME}/mirror/objects`,
+      mirrorLockPath: `${HOME}/mirror-sync.lock`,
+      corpus: {
+        sources: [],
+        maxEntriesPerSync: 500,
+        syncTimeoutMs: 30_000,
+        acknowledgeUnverifiedChain: false,
+      },
     });
   });
 

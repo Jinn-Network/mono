@@ -8,6 +8,69 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = join(packageRoot, "..", "..");
+
+// Cross-tree portal dependencies from plugin/runtime/package.json resolutions.
+// Packed in dependency order so the isolated consumer's npm install resolves
+// end-to-end without registry fetches for unpublished @jinn-network packages.
+const portals = [
+  {
+    name: "@jinn-network/trust-core",
+    root: join(repoRoot, "packages", "trust", "core"),
+    archive: "trust-core.tgz",
+  },
+  {
+    name: "@jinn-network/evidence-protocol",
+    root: join(repoRoot, "packages", "evidence", "protocol"),
+    archive: "evidence-protocol.tgz",
+  },
+  {
+    name: "@jinn-network/record-discovery-protocol",
+    root: join(repoRoot, "packages", "discovery", "protocol"),
+    archive: "record-discovery-protocol.tgz",
+  },
+  {
+    name: "@jinn-network/evidence-repository",
+    root: join(repoRoot, "packages", "evidence", "repository"),
+    archive: "evidence-repository.tgz",
+  },
+  {
+    name: "@jinn-network/execution-recorder",
+    root: join(repoRoot, "packages", "evidence", "execution-recorder"),
+    archive: "execution-recorder.tgz",
+  },
+  {
+    name: "@jinn-network/evidence-discovery",
+    root: join(repoRoot, "packages", "evidence", "discovery"),
+    archive: "evidence-discovery.tgz",
+  },
+  {
+    name: "@jinn-network/evidence-retrieval",
+    root: join(repoRoot, "packages", "evidence", "retrieval"),
+    archive: "evidence-retrieval.tgz",
+  },
+  {
+    name: "@jinn-network/evidence-catalog-sqlite",
+    root: join(repoRoot, "packages", "evidence", "catalog-sqlite"),
+    archive: "evidence-catalog-sqlite.tgz",
+  },
+  {
+    name: "@jinn-network/evidence-local-runtime",
+    root: join(repoRoot, "packages", "evidence", "local-runtime"),
+    archive: "evidence-local-runtime.tgz",
+  },
+  {
+    name: "@jinn-network/evidence-trajectory",
+    root: join(repoRoot, "packages", "evidence", "trajectory"),
+    archive: "evidence-trajectory.tgz",
+  },
+  {
+    name: "@jinn-network/record-discovery-client",
+    root: join(repoRoot, "packages", "discovery", "client"),
+    archive: "record-discovery-client.tgz",
+  },
+];
+
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-plugin-runtime-"));
 const archive = join(temporaryRoot, "plugin-runtime.tgz");
 const consumer = join(temporaryRoot, "consumer");
@@ -41,7 +104,18 @@ function output(command, args, options = {}) {
   });
 }
 
+async function packPortal(root, out) {
+  await run("corepack", ["yarn@4.13.0", "pack", "--out", out], { cwd: root });
+}
+
 try {
+  const portalArchives = new Map();
+  for (const portal of portals) {
+    const out = join(temporaryRoot, portal.archive);
+    await packPortal(portal.root, out);
+    portalArchives.set(portal.name, out);
+  }
+
   await run("corepack", ["yarn@4.13.0", "pack", "--out", archive], { cwd: packageRoot });
 
   const entries = (await output("tar", ["-tzf", archive])).split(/\r?\n/u).filter(Boolean);
@@ -68,12 +142,16 @@ try {
   }
 
   await mkdir(consumer);
+  const dependencies = Object.fromEntries(
+    portals.map((portal) => [portal.name, `file:${portalArchives.get(portal.name)}`]),
+  );
+  dependencies["@jinn-network/plugin-runtime"] = `file:${archive}`;
   await writeFile(
     join(consumer, "package.json"),
     JSON.stringify({
       private: true,
       type: "module",
-      dependencies: { "@jinn-network/plugin-runtime": `file:${archive}` },
+      dependencies,
     }),
   );
   await run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: consumer });

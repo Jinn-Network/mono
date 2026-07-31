@@ -16,6 +16,7 @@ export type { LogLevel, RuntimeLogger } from "./logger.js";
 export { createPluginRuntime } from "./runtime.js";
 export type { PluginRuntime, PluginRuntimeOptions } from "./runtime.js";
 export { RUNTIME_VERSION } from "./version.js";
+export * from "./corpus/index.js";
 
 // Capture
 export { ARCHIVE_BUSY_ERROR_CODE, withCaptureArchive } from "./capture/archive.js";

@@ -17,14 +17,19 @@ export const APPROVED_RUNTIME_DEPENDENCIES = Object.freeze({
   '@jinn-network/evidence-local-runtime': '0.1.0',
   '@jinn-network/evidence-protocol': '0.1.0',
   '@jinn-network/evidence-repository': '0.1.0',
+  '@jinn-network/evidence-retrieval': '0.1.0',
   '@jinn-network/evidence-trajectory': '0.1.0',
   '@jinn-network/execution-recorder': '0.1.0',
+  '@jinn-network/record-discovery-client': '0.1.0',
+  '@jinn-network/record-discovery-protocol': '0.1.0',
   '@jinn-network/trust-core': '0.1.0',
+  'better-sqlite3': '13.0.1',
   zod: '4.4.3',
 });
 
 /** Exact devDependency versions the guards version-control for plugin/runtime. */
 export const APPROVED_RUNTIME_DEV_DEPENDENCIES = Object.freeze({
+  '@types/better-sqlite3': '7.6.11',
   '@types/node': '22.20.1',
   typescript: '5.9.3',
   vitest: '4.1.10',
@@ -37,8 +42,11 @@ export const APPROVED_RUNTIME_RESOLUTIONS = Object.freeze({
   '@jinn-network/evidence-local-runtime': 'portal:../../packages/evidence/local-runtime',
   '@jinn-network/evidence-protocol': 'portal:../../packages/evidence/protocol',
   '@jinn-network/evidence-repository': 'portal:../../packages/evidence/repository',
+  '@jinn-network/evidence-retrieval': 'portal:../../packages/evidence/retrieval',
   '@jinn-network/evidence-trajectory': 'portal:../../packages/evidence/trajectory',
   '@jinn-network/execution-recorder': 'portal:../../packages/evidence/execution-recorder',
+  '@jinn-network/record-discovery-client': 'portal:../../packages/discovery/client',
+  '@jinn-network/record-discovery-protocol': 'portal:../../packages/discovery/protocol',
   '@jinn-network/trust-core': 'portal:../../packages/trust/core',
   vite: '6.4.3',
 });

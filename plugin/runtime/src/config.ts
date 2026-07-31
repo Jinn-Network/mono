@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { isAbsolute, join, normalize } from "node:path";
+import { isAbsolute, join, normalize, resolve } from "node:path";
 import { z } from "zod";
 
 import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "./errors.js";
@@ -18,6 +18,8 @@ export const RuntimeConfigFileSchema = z.strictObject({
   logLevel: LogLevelSchema.optional(),
   captureRetentionDays: z.number().int().positive().optional(),
   captureArchiveBusyTimeoutMs: z.number().int().positive().optional(),
+  /** C5 — opaque here; `resolveCorpusConfig` owns validation (file-only authority). */
+  corpus: z.unknown().optional(),
 });
 
 export type RuntimeConfigFile = z.infer<typeof RuntimeConfigFileSchema>;
@@ -48,6 +50,13 @@ export interface RuntimeConfig {
   readonly indexPath: string;
   readonly mirrorStatePath: string;
   readonly logLevel: LogLevel;
+  /** C5 — the public-corpus mirror's own catalog, separate from `catalogPath`. */
+  readonly mirrorCatalogPath: string;
+  /** C5 — the public-corpus mirror's own object store, separate from `archiveDirectory`. */
+  readonly mirrorObjectsDirectory: string;
+  /** C5 — the exclusive advisory lock guarding mirror sync (cross-plan contract 5). */
+  readonly mirrorLockPath: string;
+  readonly corpus: CorpusConfig;
 }
 
 export const ENVIRONMENT_KEYS = Object.freeze({
@@ -112,6 +121,113 @@ function parseLogLevel(value: string): LogLevel {
   return parsed.data;
 }
 
+// --- C5: public-corpus mirror -------------------------------------------
+//
+// The set of followed archives and the trust genesis anchor are FILE-ONLY.
+// C5 declares no environment key: "which archives may inject content into
+// this agent's context" is authority, and custody law C2 forbids acquiring
+// authority ambiently. An operator changes what is followed by editing the
+// config document, which is reviewable and diffable; an environment
+// variable is neither.
+
+/**
+ * A local copy of `SOURCE_NAME_GRAMMAR` from
+ * `@jinn-network/record-discovery-protocol/src/identifiers.ts`. Copied
+ * rather than imported so this module stays dependency-pure per C3's
+ * contract; `src/corpus/announcements.test.ts` asserts the two are equal,
+ * so a drift upstream fails the build rather than silently diverging.
+ */
+const SOURCE_NAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
+
+const SHA256_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
+
+const HttpsUrlSchema = z.string().refine(
+  (value) => {
+    try {
+      return new URL(value).protocol === "https:";
+    } catch {
+      return false;
+    }
+  },
+  { message: "must be an absolute https URL" },
+);
+
+const MirrorSourceConfigSchema = z.strictObject({
+  agent: z.string().min(1),
+  name: z.string().regex(SOURCE_NAME_PATTERN, "must match the record-discovery source-name grammar"),
+  servingRoot: HttpsUrlSchema,
+  archiveRootUrl: HttpsUrlSchema,
+  repositoryId: z.string().min(1),
+});
+
+const CorpusTrustConfigSchema = z.strictObject({
+  genesisDigest: z.string().regex(SHA256_DIGEST_PATTERN),
+  policyDirectory: z.string().min(1),
+  producerPurpose: z.string().min(1).default("jinn:corpus-producer"),
+});
+
+const CorpusConfigSchema = z.strictObject({
+  sources: z.array(MirrorSourceConfigSchema).default([]),
+  maxEntriesPerSync: z.number().int().positive().max(10_000).default(500),
+  syncTimeoutMs: z.number().int().positive().max(600_000).default(30_000),
+  /**
+   * Opt-in acknowledgement that this runtime mirrors without verifying
+   * announcement-chain signatures (C5 Finding F1). Default `false` means the
+   * mirror indexes nothing and says so in its health check — fail-closed.
+   */
+  acknowledgeUnverifiedChain: z.boolean().default(false),
+  trust: CorpusTrustConfigSchema.optional(),
+});
+
+export type MirrorSourceConfig = z.infer<typeof MirrorSourceConfigSchema>;
+export type CorpusTrustConfig = z.infer<typeof CorpusTrustConfigSchema>;
+export type CorpusConfig = z.infer<typeof CorpusConfigSchema>;
+
+function resolveCorpusConfig(file: unknown, homeDirectory: string): CorpusConfig {
+  const raw = (file as { readonly corpus?: unknown } | undefined)?.corpus;
+  const parsed = CorpusConfigSchema.safeParse(raw ?? {});
+  if (!parsed.success) {
+    throw new PluginRuntimeError(
+      RUNTIME_ERROR_CODES.configInvalid,
+      `corpus configuration is invalid: ${parsed.error.issues
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+        .join("; ")}`,
+    );
+  }
+
+  const byArchive = new Set<string>();
+  const byRepository = new Set<string>();
+  for (const source of parsed.data.sources) {
+    const archive = `${source.agent}/${source.name}`;
+    if (byArchive.has(archive)) {
+      throw new PluginRuntimeError(
+        RUNTIME_ERROR_CODES.configInvalid,
+        `corpus archive ${archive} is followed twice.`,
+      );
+    }
+    byArchive.add(archive);
+    if (byRepository.has(source.repositoryId)) {
+      throw new PluginRuntimeError(
+        RUNTIME_ERROR_CODES.configInvalid,
+        `corpus repository id ${source.repositoryId} is claimed by more than one archive.`,
+      );
+    }
+    byRepository.add(source.repositoryId);
+  }
+
+  return {
+    ...parsed.data,
+    ...(parsed.data.trust === undefined
+      ? {}
+      : {
+          trust: {
+            ...parsed.data.trust,
+            policyDirectory: resolve(homeDirectory, parsed.data.trust.policyDirectory),
+          },
+        }),
+  };
+}
+
 /**
  * Resolve the runtime's configuration. Precedence: defaults, then the configuration file,
  * then the environment. Pure — no filesystem, no clock, no ambient reads.
@@ -158,5 +274,9 @@ export function resolveRuntimeConfig(source: RuntimeConfigSource): RuntimeConfig
     indexPath: join(homeDirectory, "index.sqlite"),
     mirrorStatePath: join(homeDirectory, "mirror-state.json"),
     logLevel,
+    mirrorCatalogPath: join(homeDirectory, "mirror", "catalog.sqlite"),
+    mirrorObjectsDirectory: join(homeDirectory, "mirror", "objects"),
+    mirrorLockPath: join(homeDirectory, "mirror-sync.lock"),
+    corpus: resolveCorpusConfig(source.file, homeDirectory),
   });
 }
