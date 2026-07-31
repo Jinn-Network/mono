@@ -4325,7 +4325,7 @@ git commit -m "feat(plugin-runtime): validated exact-byte corpus retrieval that 
 
 Per C3's correction F-C3-8, `start()` does **cheap, contention-free setup only** — it opens no catalog and takes no lock. The three surfaces it builds are lazy: each opens the store per operation and closes it. `stop()` has nothing to release.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/corpus/capability.test.ts`:
 
@@ -4571,12 +4571,12 @@ describe("corpus capability", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test src/corpus/capability.test.ts`
 Expected: FAIL — `Failed to resolve import "./capability.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/corpus/capability.ts`:
 
@@ -4938,7 +4938,7 @@ export function createCorpusCapability(
 
 > `loggerOf` above is a placeholder. Replace it by capturing `context.log` into `Started` in `start()` (add `readonly log: RuntimeLogger` to the `Started` interface, set it from `context.log`, and return `state.log`). The test's `log()` spies are what verify it.
 
-- [ ] **Step 4: Capture the logger as noted, then write the barrel**
+- [x] **Step 4: Capture the logger as noted, then write the barrel**
 
 `src/corpus/index.ts`:
 
@@ -5043,12 +5043,12 @@ Append to `plugin/runtime/src/index.ts`:
 export * from "./corpus/index.js";
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test src/corpus/capability.test.ts && yarn typecheck`
 Expected: PASS (13 tests).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add plugin/runtime/src plugin/runtime/src/index.ts
