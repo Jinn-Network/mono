@@ -179,3 +179,132 @@ describe("verifyEnvironment — stable path", () => {
     )).rejects.toThrow(/Artifact store returned/u);
   });
 });
+
+describe("verifyEnvironment — negative attestations are first-class", () => {
+  const DIVERGENT: OutcomeSet = {
+    "tests/test_a.py::test_one": "pass",
+    "tests/test_b.py::test_two": "pass",
+  };
+
+  function deps(runtime: ContainerRuntime, artifactStore = memoryStore()) {
+    return { containerRuntime: runtime, artifactStore, signer, clock: fixedClock(), verifier: VERIFIER };
+  }
+
+  it("signs an unstable attestation when run 3 of 5 diverges", async () => {
+    const runtime = scriptedRuntime([OUTCOMES, OUTCOMES, DIVERGENT, OUTCOMES, OUTCOMES]);
+    const store = memoryStore();
+    const attestation = await verifyEnvironment(deps(runtime, store), stubRecord() as never);
+    const { predicate } = attestation.statement;
+
+    expect(predicate.result).toBe("unstable");
+    expect(predicate.failure?.stage).toBe("compare");
+    expect(predicate.failure?.reason).toBe("outcome-set-divergence");
+    expect(predicate.failure?.divergence?.referenceRunIndex).toBe(0);
+    expect(predicate.failure?.divergence?.divergentRuns).toEqual([{
+      index: 2,
+      outcomeSetDigest: outcomeSetDigest(DIVERGENT),
+      outcomes: {
+        name: "outcomes",
+        mediaType: "application/json",
+        digest: { sha256: outcomeSetDigest(DIVERGENT).slice("sha256:".length) },
+      },
+    }]);
+    // Both outcome sets are retrievable, so a third party can re-compare them.
+    expect(store.bytes.has(outcomeSetDigest(OUTCOMES))).toBe(true);
+    expect(store.bytes.has(outcomeSetDigest(DIVERGENT))).toBe(true);
+    expect(predicate.runs?.count).toBe(5);
+  });
+
+  it("signs an error attestation when the image has vanished", async () => {
+    const runtime: ContainerRuntime = {
+      async pullByDigest() {
+        throw new Error("manifest unknown");
+      },
+      async runContainer() {
+        throw new Error("unreachable");
+      },
+    };
+    const attestation = await verifyEnvironment(deps(runtime), stubRecord() as never);
+    const { predicate } = attestation.statement;
+
+    expect(predicate.result).toBe("error");
+    expect(predicate.failure).toEqual({
+      stage: "acquire",
+      reason: "image-unresolvable",
+      detail: "manifest unknown",
+    });
+    expect(predicate.runs).toBeUndefined();
+    expect(predicate.baseline).toBeUndefined();
+    expect(predicate.runtime).toEqual({ timeoutSeconds: 1800 });
+    expect(predicate.window.startedAt).toBe("2026-07-31T09:00:00.000Z");
+    expect(attestation.containerIds).toEqual([]);
+  });
+
+  it("signs an error attestation when the registry resolves a different digest", async () => {
+    const runtime: ContainerRuntime = {
+      async pullByDigest() {
+        return { resolvedManifestDigest: `sha256:${"9".repeat(64)}` as Sha256Digest };
+      },
+      async runContainer() {
+        throw new Error("unreachable");
+      },
+    };
+    const { predicate } = (await verifyEnvironment(deps(runtime), stubRecord() as never)).statement;
+    expect(predicate.result).toBe("error");
+    expect(predicate.failure?.reason).toBe("image-digest-mismatch");
+    expect(predicate.failure?.stage).toBe("acquire");
+  });
+
+  it("signs an error attestation for an install failure and for an empty outcome set", async () => {
+    const installFailure: ContainerRuntime = {
+      async pullByDigest(request) {
+        return { resolvedManifestDigest: request.manifestDigest };
+      },
+      async runContainer() {
+        return {
+          containerId: "container-0",
+          installExitCodes: [0, 127],
+          testExitCodes: [],
+          outcomes: {},
+          wallSeconds: 1,
+          timedOut: false,
+        };
+      },
+    };
+    const install = (await verifyEnvironment(deps(installFailure), stubRecord() as never)).statement;
+    expect(install.predicate.failure?.reason).toBe("install-command-failed");
+    expect(install.predicate.failure?.stage).toBe("install");
+
+    const emptyOutcomes: ContainerRuntime = {
+      async pullByDigest(request) {
+        return { resolvedManifestDigest: request.manifestDigest };
+      },
+      async runContainer() {
+        return {
+          containerId: "container-0",
+          installExitCodes: [],
+          testExitCodes: [0],
+          outcomes: {},
+          wallSeconds: 1,
+          timedOut: false,
+        };
+      },
+    };
+    const empty = (await verifyEnvironment(deps(emptyOutcomes), stubRecord() as never)).statement;
+    expect(empty.predicate.failure?.reason).toBe("parser-produced-no-outcomes");
+    expect(empty.predicate.failure?.stage).toBe("run");
+  });
+
+  it("never throws for an environment fact — every path returns a signed envelope", async () => {
+    for (const runtime of [
+      scriptedRuntime([OUTCOMES, DIVERGENT, OUTCOMES, OUTCOMES, OUTCOMES]),
+      {
+        async pullByDigest() { throw new Error("gone"); },
+        async runContainer() { throw new Error("unreachable"); },
+      } as ContainerRuntime,
+    ]) {
+      const attestation = await verifyEnvironment(deps(runtime), stubRecord() as never);
+      expect(parseDsseEnvelope(attestation.envelopeBytes).signatures).toHaveLength(1);
+    }
+  });
+});
