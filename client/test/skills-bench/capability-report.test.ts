@@ -5,10 +5,13 @@ import { join } from 'node:path';
 
 import { attemptKey, type BenchOutcome } from '../../src/skills-bench/attempts.js';
 import {
-  buildCapabilityReport, buildEmbedSnippet, deriveVerdictLine, renderBadgeSvg, renderCapabilityReportMd,
-  type BuildCapabilityReportOptions,
+  buildCapabilityReport, buildEmbedSnippet, buildReportFields, buildTaskSetIdentity, cohortRank,
+  deriveConcordant, deriveCostOverhead, deriveVerdictLine, renderBadgeSvg, renderCapabilityReportMd,
+  validateCohort, CohortValidationError,
+  type BuildCapabilityReportOptions, type Cohort, type CohortEntry,
 } from '../../src/skills-bench/capability-report.js';
-import type { ReceiptProfile } from '../../src/skills-bench/receipt.js';
+import type { ReceiptData, ReceiptProfile } from '../../src/skills-bench/receipt.js';
+import type { SkillPin } from '../../src/skills-bench/skill-pin.js';
 import type { SkillTaskSetV1, SkillTaskV1, TaskRequirement } from '../../src/skills-bench/task-set.js';
 
 function requirement(): TaskRequirement {
@@ -63,6 +66,17 @@ const profile: ReceiptProfile = {
   measuredOn: '2026-08-01',
 };
 
+const pin: SkillPin = {
+  name: 'tdd',
+  source: 'https://github.com/org/skills-repo',
+  commit: 'b'.repeat(40),
+  skillPath: 'skills/tdd',
+  sha256: 'c'.repeat(64),
+  license: 'MIT',
+  repoLicense: 'MIT License',
+  fetchedAt: '2026-08-01T00:00:00.000Z',
+};
+
 // t1: baseline failed, treatment resolved (improved), treatment triggered.
 // t2: baseline resolved, treatment failed (regressed), triggered UNKNOWN
 //     (no entry in triggerByKey — must never be read as "not triggered").
@@ -88,6 +102,7 @@ function baseOptions(): BuildCapabilityReportOptions {
     baselineArm: 'baseline',
     treatmentArm: 'tdd',
     profile,
+    pin,
     triggerByKey,
     links: { dataPaths: ['data/attempts.jsonl', 'data/bench-manifest.json', 'data/set.json'], rerunCommand: 'yarn tsx scripts/skills-bench/run-bench.ts --task-set ../bench/task-sets/tdd --model claude-haiku-4-5-20251001 --out <fresh-out-dir>' },
   };
@@ -404,5 +419,223 @@ describe('buildEmbedSnippet', () => {
     expect(snippet).toContain('jinn.receipt-sha256:');
     expect(snippet).toContain('jinn.measured-on: "2026-08-01"');
     expect(snippet).not.toContain('jinn.forked-from');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildReportFields — field-contract composition (design §2)
+// ---------------------------------------------------------------------------
+
+describe('buildReportFields', () => {
+  it('composes every field from its named source (pin, profile, taskSetIdentity, receipt)', () => {
+    const report = buildCapabilityReport(baseOptions());
+    const fields = buildReportFields({
+      pin, profile, taskSetIdentity: buildTaskSetIdentity(taskSet), receipt: report.receipt,
+    });
+    expect(fields.skill).toBe('tdd');
+    expect(fields.skillSha256).toBe(pin.sha256);
+    expect(fields.skillSource).toBe(`${pin.source}@${pin.commit}`);
+    expect(fields.license).toBe('MIT');
+    expect(fields.repoLicense).toBe('MIT License');
+    expect(fields.model).toBe(profile.model);
+    expect(fields.agent).toBe(profile.agent);
+    expect(fields.measuredOn).toBe('2026-08-01');
+    expect(fields.taskSetSha256).toBe(taskSet.sha256);
+    expect(fields.sourceKind).toBe('slate'); // profile.identityKind absent -> default
+    expect(fields.domain).toBe('python-testing');
+    expect(fields.taskCount).toBe(3);
+    expect(fields.gradeability).toEqual({ passing: 3, total: 3 });
+    expect(fields.screening).toEqual({ kept: 3, droppedNoHeadroom: 1, droppedUngradeable: 0 });
+    expect(fields.n).toBe(report.receipt.n);
+    expect(fields.excluded).toBe(report.receipt.excluded);
+    expect(fields.baseline).toEqual(report.receipt.baseline);
+    expect(fields.treatment).toEqual(report.receipt.treatment);
+    expect(fields.improved).toBe(report.receipt.paired.improved);
+    expect(fields.regressed).toBe(report.receipt.paired.regressed);
+    expect(fields.meanCostUsd).toEqual(report.receipt.meanCostUsd);
+    expect(fields.triggerRate).toEqual(report.receipt.triggerRate);
+  });
+
+  it('reads sourceKind from profile.identityKind when present, defaults to "slate" otherwise', () => {
+    const report = buildCapabilityReport(baseOptions());
+    const withKind = buildReportFields({
+      pin, profile: { ...profile, identityKind: 'task-set' },
+      taskSetIdentity: buildTaskSetIdentity(taskSet), receipt: report.receipt,
+    });
+    expect(withKind.sourceKind).toBe('task-set');
+  });
+
+  it('omits the screening field when the task set was never screened', () => {
+    const report = buildCapabilityReport(baseOptions());
+    const unscreenedIdentity = buildTaskSetIdentity({ ...taskSet, screeningSummary: undefined });
+    const fields = buildReportFields({ pin, profile, taskSetIdentity: unscreenedIdentity, receipt: report.receipt });
+    expect(fields.screening).toBeUndefined();
+  });
+
+  it('states discrimination provenance truthfully when screeningSummary is present — claims screening', () => {
+    const report = buildCapabilityReport(baseOptions());
+    expect(report.fields.discriminationProvenance).toMatch(/screened baseline-only/);
+    expect(report.fields.discriminationProvenance).toContain('kept 3');
+    expect(report.fields.discriminationProvenance).toMatch(/fails? .*unaided/);
+  });
+
+  it('never claims screening in discrimination provenance when screeningSummary is absent', () => {
+    const unscreened: SkillTaskSetV1 = { ...taskSet, screeningSummary: undefined };
+    const report = buildCapabilityReport({ ...baseOptions(), taskSet: unscreened });
+    expect(report.fields.discriminationProvenance).not.toMatch(/screened baseline-only/);
+    expect(report.fields.discriminationProvenance).toMatch(/has not been through/);
+  });
+});
+
+describe('buildCapabilityReport — fields and cohort passthrough', () => {
+  it('attaches a fully composed fields block, threading the new pin input through', () => {
+    const report = buildCapabilityReport(baseOptions());
+    expect(report.fields.skill).toBe('tdd');
+    expect(report.fields.skillSha256).toBe(pin.sha256);
+    expect(report.fields.skillSource).toBe(`${pin.source}@${pin.commit}`);
+  });
+
+  it('omits cohort when none was supplied (cohort assembly stays deferred)', () => {
+    const report = buildCapabilityReport(baseOptions());
+    expect(report.cohort).toBeUndefined();
+  });
+
+  it('passes a supplied cohort through unchanged — buildCapabilityReport never computes one', () => {
+    const cohort: Cohort = {
+      domain: 'python-testing',
+      entries: [
+        { skill: 'tdd', skillSha: pin.sha256, triggered: 8, total: 12, netTasks: 2, costRatio: 1.1, focal: true },
+      ],
+    };
+    const report = buildCapabilityReport({ ...baseOptions(), cohort });
+    expect(report.cohort).toEqual(cohort);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Derived-never-stored helpers
+// ---------------------------------------------------------------------------
+
+describe('deriveConcordant', () => {
+  it('reads bothPassed/bothFailed straight from PairedComparison — no concordant pairs in the base fixture', () => {
+    // t1 improved, t2 regressed, t3 excluded (ungradeable) — none of the base
+    // fixture's tasks are a both-arms-agreed pair.
+    const report = buildCapabilityReport(baseOptions());
+    expect(deriveConcordant(report.receipt)).toEqual({ bothPassed: 0, bothFailed: 0 });
+  });
+
+  it('counts a genuinely concordant pair correctly, both-passed and both-failed', () => {
+    const moreOutcomes: BenchOutcome[] = [
+      ...outcomes,
+      o('t5', 'baseline', 0, true), o('t5', 'tdd', 0, true), // both passed
+      o('t6', 'baseline', 0, false), o('t6', 'tdd', 0, false), // both failed
+    ];
+    const withMore: SkillTaskSetV1 = {
+      ...taskSet,
+      tasks: [...taskSet.tasks, task('t5'), task('t6')],
+      screeningSummary: { ...taskSet.screeningSummary!, kept: ['t1', 't2', 't3', 't5', 't6'], droppedNoHeadroom: [] },
+    };
+    const report = buildCapabilityReport({ ...baseOptions(), taskSet: withMore, outcomes: moreOutcomes });
+    expect(deriveConcordant(report.receipt)).toEqual({ bothPassed: 1, bothFailed: 1 });
+  });
+});
+
+function fakeReceipt(meanCostUsd: { baseline: number; treatment: number } | undefined): ReceiptData {
+  return {
+    profile,
+    baselineArm: 'baseline',
+    treatmentArm: 'tdd',
+    n: 0,
+    excluded: 0,
+    baseline: { passed: 0, scorable: 0, lo: 0, hi: 0 },
+    treatment: { passed: 0, scorable: 0, lo: 0, hi: 0 },
+    paired: { pairs: 0, improved: 0, regressed: 0, concordantPass: 0, concordantFail: 0, excluded: 0, pValue: 1, verdict: 'within-noise' },
+    meanCostUsd: meanCostUsd as unknown as { baseline: number; treatment: number },
+  };
+}
+
+describe('deriveCostOverhead', () => {
+  it('computes treatment/baseline - 1 when baseline is nonzero', () => {
+    expect(deriveCostOverhead(fakeReceipt({ baseline: 1, treatment: 1.5 }))).toBeCloseTo(0.5);
+  });
+
+  it('returns null, never Infinity, when baseline mean is zero', () => {
+    expect(deriveCostOverhead(fakeReceipt({ baseline: 0, treatment: 1.5 }))).toBeNull();
+  });
+
+  it('returns null, never a fabricated 0, when meanCostUsd is missing entirely', () => {
+    expect(deriveCostOverhead(fakeReceipt(undefined))).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cohort data model — validation and rank
+// ---------------------------------------------------------------------------
+
+function cohortEntry(over: Partial<CohortEntry> = {}): CohortEntry {
+  return { skill: 'tdd', skillSha: 'a'.repeat(64), triggered: 5, total: 10, netTasks: 1, costRatio: 1.0, focal: false, ...over };
+}
+
+describe('validateCohort', () => {
+  it('accepts a cohort with exactly one focal entry and unique skill names', () => {
+    const cohort: Cohort = {
+      domain: 'python-testing',
+      entries: [cohortEntry({ skill: 'tdd', focal: true }), cohortEntry({ skill: 'other-skill' })],
+    };
+    expect(() => validateCohort(cohort)).not.toThrow();
+  });
+
+  it('rejects an empty cohort', () => {
+    expect(() => validateCohort({ domain: 'python-testing', entries: [] })).toThrow(CohortValidationError);
+  });
+
+  it('rejects a cohort with no focal entry', () => {
+    const cohort: Cohort = {
+      domain: 'python-testing',
+      entries: [cohortEntry({ skill: 'a' }), cohortEntry({ skill: 'b' })],
+    };
+    expect(() => validateCohort(cohort)).toThrow(/no focal entry/);
+  });
+
+  it('rejects a cohort with more than one focal entry', () => {
+    const cohort: Cohort = {
+      domain: 'python-testing',
+      entries: [cohortEntry({ skill: 'a', focal: true }), cohortEntry({ skill: 'b', focal: true })],
+    };
+    expect(() => validateCohort(cohort)).toThrow(/2 focal entries/);
+  });
+
+  it('rejects a cohort with a duplicated skill name', () => {
+    const cohort: Cohort = {
+      domain: 'python-testing',
+      entries: [cohortEntry({ skill: 'tdd', focal: true }), cohortEntry({ skill: 'tdd' })],
+    };
+    expect(() => validateCohort(cohort)).toThrow(/duplicate skill/);
+  });
+});
+
+describe('cohortRank', () => {
+  it('ranks the focal entry by netTasks descending', () => {
+    const cohort: Cohort = {
+      domain: 'python-testing',
+      entries: [
+        cohortEntry({ skill: 'a', netTasks: 5 }),
+        cohortEntry({ skill: 'tdd', netTasks: 3, focal: true }),
+        cohortEntry({ skill: 'c', netTasks: 1 }),
+      ],
+    };
+    expect(cohortRank(cohort)).toEqual({ rank: 2, of: 3 });
+  });
+
+  it('gives tied entries the shared, better rank — a competition (1-2-2-4) ranking, not a dense one', () => {
+    const cohort: Cohort = {
+      domain: 'python-testing',
+      entries: [
+        cohortEntry({ skill: 'a', netTasks: 5 }),
+        cohortEntry({ skill: 'tdd', netTasks: 5, focal: true }), // tied for 1st with 'a'
+        cohortEntry({ skill: 'c', netTasks: 1 }),
+      ],
+    };
+    expect(cohortRank(cohort)).toEqual({ rank: 1, of: 3 });
   });
 });

@@ -38,6 +38,7 @@ import {
 } from '../../src/skills-bench/capability-report.js';
 import { detectSkillTrigger, findMismatchedSkillInvocations } from '../../src/skills-bench/trigger.js';
 import { attemptKey } from '../../src/skills-bench/attempts.js';
+import type { SkillPin } from '../../src/skills-bench/skill-pin.js';
 import { loadTaskSet } from '../../src/skills-bench/task-set.js';
 
 // client/scripts/skills-bench/render-report.ts -> client/scripts/skills-bench -> client/scripts -> client
@@ -203,12 +204,32 @@ async function main(): Promise<void> {
     `@ skillSha256=${treatmentArm.skillSha256 ?? 'n/a'}> ` +
     `--model ${manifest.model} --out <fresh-out-dir>`;
 
+  // A1 interim: `pin` is a new required input to `buildCapabilityReport`
+  // (design §2 field contract — capability-report.ts's `ReportFields`), but
+  // this CLI does not yet read a real `pin.json` — that `--pin <path>` wiring
+  // is a later work item (A5). Until then, synthesize the fields already on
+  // hand from this run's own args/manifest; license/repoLicense/skillPath are
+  // genuinely unknown at this call site and stay null/empty rather than
+  // fabricated until A5 replaces this with the real pin.json read.
+  const [pinSource, pinCommit] = (args.skillSource ?? '').split('@');
+  const pin: SkillPin = {
+    name: args.skill,
+    source: pinSource ?? '',
+    commit: pinCommit ?? '',
+    skillPath: '',
+    sha256: treatmentArm.skillSha256 ?? '',
+    license: null,
+    repoLicense: null,
+    fetchedAt: args.measuredOn,
+  };
+
   const report = buildCapabilityReport({
     skill: args.skill,
     outcomes,
     taskSet,
     baselineArm: baselineArm.name,
     treatmentArm: treatmentArm.name,
+    pin,
     profile: {
       model: manifest.model,
       agent: args.agent,

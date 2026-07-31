@@ -27,8 +27,9 @@ import { attemptKey, type BenchOutcome } from './attempts.js';
 import { buildJinnReceiptMetadata, quoteYamlScalar } from './frontmatter.js';
 import {
   buildReceipt, isLowTriggerRate, renderReceiptMd, summarizeTriggerRate,
-  type ReceiptData, type ReceiptProfile, type TriggerRate,
+  type ArmSummary, type ReceiptData, type ReceiptProfile, type TriggerRate,
 } from './receipt.js';
+import type { SkillPin } from './skill-pin.js';
 import { isTaskGradeabilityPassing, type SkillTaskSetV1 } from './task-set.js';
 
 // ---------------------------------------------------------------------------
@@ -121,6 +122,211 @@ export function buildTaskSetIdentity(taskSet: SkillTaskSetV1): TaskSetIdentitySu
 }
 
 // ---------------------------------------------------------------------------
+// Field contract (design §2 of
+// docs/superpowers/specs/2026-07-31-capability-report-artifact-design.md) —
+// one resolved object consumed by all three renderers (badge/card/report), so
+// no renderer re-derives a field from `ReceiptData`/`SkillPin`/
+// `TaskSetIdentitySummary` on its own and risks disagreeing with a sibling
+// renderer. Composition only — every value is read straight from an
+// already-computed source, never recomputed here.
+// ---------------------------------------------------------------------------
+
+export interface ReportFields {
+  skill: string;
+  skillSha256: string;
+  /** `${pin.source}@${pin.commit}` — pinned upstream provenance. */
+  skillSource: string;
+  license: string | null;
+  repoLicense: string | null;
+  model: string;
+  agent: string;
+  measuredOn: string;
+  taskSetSha256: string;
+  sourceKind: 'slate' | 'task-set';
+  domain: string;
+  taskCount: number;
+  gradeability: { passing: number; total: number };
+  /** Absent when the set has never been through the discrimination gate —
+   *  see `TaskSetIdentitySummary.screening`. */
+  screening?: { kept: number; droppedNoHeadroom: number; droppedUngradeable: number };
+  n: number;
+  excluded: number;
+  baseline: ArmSummary;
+  treatment: ArmSummary;
+  improved: number;
+  regressed: number;
+  meanCostUsd: { baseline: number; treatment: number };
+  /** Absent when no session-JSONL trigger data was captured for this run. */
+  triggerRate?: TriggerRate;
+  /** One sentence stating the task set's discrimination-gate provenance.
+   *  Truthful in both directions: when `screening` is present it states the
+   *  set was screened baseline-only (the agent fails these tasks unaided);
+   *  when absent it says screening was never run — an unscreened set must
+   *  never claim the screening guarantee it doesn't have. */
+  discriminationProvenance: string;
+}
+
+function buildDiscriminationProvenance(screening?: TaskSetIdentitySummary['screening']): string {
+  if (screening) {
+    const dropped = screening.droppedNoHeadroom + screening.droppedUngradeable;
+    return (
+      `This task set was screened baseline-only before measurement (kept ${screening.kept}, ` +
+      `dropped ${dropped} with no proven headroom) — every task here is one the agent fails unaided.`
+    );
+  }
+  return (
+    'This task set has not been through the baseline-only discrimination gate — some tasks may already ' +
+    'be solvable unaided, so headroom is not guaranteed.'
+  );
+}
+
+export interface BuildReportFieldsOptions {
+  pin: SkillPin;
+  profile: ReceiptProfile;
+  taskSetIdentity: TaskSetIdentitySummary;
+  receipt: ReceiptData;
+}
+
+/** Pure composition of `ReportFields` from already-computed sources (design
+ *  §2's field-contract table). Reuses `buildTaskSetIdentity`'s output rather
+ *  than re-deriving domain/taskCount/screening from a raw `SkillTaskSetV1`. */
+export function buildReportFields(opts: BuildReportFieldsOptions): ReportFields {
+  const { pin, profile, taskSetIdentity, receipt } = opts;
+  return {
+    skill: pin.name,
+    skillSha256: pin.sha256,
+    skillSource: `${pin.source}@${pin.commit}`,
+    license: pin.license,
+    repoLicense: pin.repoLicense,
+    model: profile.model,
+    agent: profile.agent,
+    measuredOn: profile.measuredOn,
+    taskSetSha256: profile.slateSha256,
+    sourceKind: profile.identityKind ?? 'slate',
+    domain: taskSetIdentity.domain,
+    taskCount: taskSetIdentity.taskCount,
+    gradeability: taskSetIdentity.gradeability,
+    ...(taskSetIdentity.screening ? { screening: taskSetIdentity.screening } : {}),
+    n: receipt.n,
+    excluded: receipt.excluded,
+    baseline: receipt.baseline,
+    treatment: receipt.treatment,
+    improved: receipt.paired.improved,
+    regressed: receipt.paired.regressed,
+    meanCostUsd: receipt.meanCostUsd,
+    ...(receipt.triggerRate ? { triggerRate: receipt.triggerRate } : {}),
+    discriminationProvenance: buildDiscriminationProvenance(taskSetIdentity.screening),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Derived-never-stored helpers (design §2: "concordant counts... and cost
+// overhead percentage" are always recomputed from ReceiptData, never
+// persisted as their own fields).
+// ---------------------------------------------------------------------------
+
+/** Both-arms-agreed outcome counts, split by whether the agreement was a pass
+ *  or a fail. `PairedComparison` (packages/core/src/paired.ts) already
+ *  carries this split unambiguously as `concordantPass`/`concordantFail` —
+ *  computed by `comparePaired` over exactly the scorable-in-both-arms pairs,
+ *  the same population `improved`/`regressed` are drawn from. No further
+ *  inference is possible or needed: this is a direct read, not a guess. */
+export function deriveConcordant(receipt: ReceiptData): { bothPassed: number; bothFailed: number } {
+  return { bothPassed: receipt.paired.concordantPass, bothFailed: receipt.paired.concordantFail };
+}
+
+/** Treatment/baseline mean-cost ratio minus one (design §2: "overhead = ratio
+ *  − 1"). `null` — never `Infinity`, never a fabricated `0` — when the
+ *  baseline mean is zero (no headroom to compute a ratio against) or either
+ *  mean is missing. */
+export function deriveCostOverhead(receipt: ReceiptData): number | null {
+  const baseline = receipt.meanCostUsd?.baseline;
+  const treatment = receipt.meanCostUsd?.treatment;
+  if (baseline == null || treatment == null || baseline === 0) return null;
+  return treatment / baseline - 1;
+}
+
+// ---------------------------------------------------------------------------
+// Cohort data model (design §2, §7-8; plan work item 1). Types only — cohort
+// ASSEMBLY (which skills belong in a niche, install-count sourcing) is
+// explicitly deferred; nothing here computes a cohort, only validates and
+// ranks one a caller already assembled.
+// ---------------------------------------------------------------------------
+
+export interface CohortInstalls {
+  count: number;
+  /** Where the count came from (e.g. a registry name/URL) — mandatory so an
+   *  unprovenanced install count is unrepresentable (design open question 1:
+   *  cite source+date, or drop the column entirely by omitting `installs`). */
+  source: string;
+  /** ISO date the count was observed. */
+  asOf: string;
+}
+
+export interface CohortEntry {
+  skill: string;
+  skillSha: string;
+  installs?: CohortInstalls;
+  triggered: number;
+  total: number;
+  netTasks: number;
+  costRatio: number;
+  /** Exactly one entry per `Cohort` may be `true` — the skill this report is
+   *  about. See `validateCohort`. */
+  focal: boolean;
+}
+
+export interface Cohort {
+  domain: string;
+  entries: CohortEntry[];
+}
+
+export class CohortValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CohortValidationError';
+  }
+}
+
+/** Fail-loud shape checks a renderer can rely on without re-checking: exactly
+ *  one focal entry, no duplicate skill names, at least one entry. Does not
+ *  assemble or fetch anything — the caller already built `cohort`. */
+export function validateCohort(cohort: Cohort): void {
+  if (cohort.entries.length === 0) {
+    throw new CohortValidationError(`cohort '${cohort.domain}' has no entries`);
+  }
+  const focal = cohort.entries.filter((e) => e.focal);
+  if (focal.length === 0) {
+    throw new CohortValidationError(`cohort '${cohort.domain}' has no focal entry`);
+  }
+  if (focal.length > 1) {
+    throw new CohortValidationError(
+      `cohort '${cohort.domain}' has ${focal.length} focal entries ` +
+      `(${focal.map((e) => e.skill).join(', ')}) — exactly one is required`,
+    );
+  }
+  const seen = new Set<string>();
+  for (const entry of cohort.entries) {
+    if (seen.has(entry.skill)) {
+      throw new CohortValidationError(`cohort '${cohort.domain}' has duplicate skill '${entry.skill}'`);
+    }
+    seen.add(entry.skill);
+  }
+}
+
+/** The focal entry's rank by `netTasks` descending, competition-style: ties
+ *  share the better (lower) rank number, and the next distinct value skips
+ *  the tied slots (e.g. two entries tied for 1st, next entry is 3rd of N).
+ *  Pure ranking only — renderers own how the number is phrased ("2nd of
+ *  6"). */
+export function cohortRank(cohort: Cohort): { rank: number; of: number } {
+  const focal = cohort.entries.find((e) => e.focal);
+  if (!focal) throw new CohortValidationError(`cohort '${cohort.domain}' has no focal entry`);
+  const rank = 1 + cohort.entries.filter((e) => e.netTasks > focal.netTasks).length;
+  return { rank, of: cohort.entries.length };
+}
+
+// ---------------------------------------------------------------------------
 // Composed report
 // ---------------------------------------------------------------------------
 
@@ -139,6 +345,12 @@ export interface CapabilityReport {
   perTask: PerTaskRow[];
   taskSetIdentity: TaskSetIdentitySummary;
   links: ReportLinks;
+  /** The resolved field contract (design §2) every renderer reads instead of
+   *  re-deriving its own copy of a field. */
+  fields: ReportFields;
+  /** Optional passthrough — cohort ASSEMBLY happens elsewhere (deferred);
+   *  this report only carries whatever cohort the caller already built. */
+  cohort?: Cohort;
 }
 
 export interface BuildCapabilityReportOptions {
@@ -148,10 +360,17 @@ export interface BuildCapabilityReportOptions {
   baselineArm: string;
   treatmentArm: string;
   profile: ReceiptProfile;
+  /** The measured skill's pin record — new input to the report pipeline
+   *  (design §2's `skill`/`skillSha256`/`skillSource`/`license`/
+   *  `repoLicense` fields all read from it). `render-report.ts` reads
+   *  `pin.json` and passes it straight through. */
+  pin: SkillPin;
   /** attemptKey(...) -> triggered, for treatment-arm attempts whose patch
    *  graded (passed !== null). Absent key = unknown. */
   triggerByKey: Map<string, boolean | null>;
   links: ReportLinks;
+  /** Optional passthrough — see `CapabilityReport.cohort`. */
+  cohort?: Cohort;
   /** `BenchManifest.eligibleTaskIds` from THIS run (final-review round 2 fix
    *  to I8) — the run-scoped source of truth for which tasks were actually
    *  eligible to be measured, reflecting `screeningRespected`/
@@ -223,13 +442,17 @@ export function buildCapabilityReport(opts: BuildCapabilityReportOptions): Capab
     .map((t) => t.id)
     .filter((id) => eligibleIds === null || eligibleIds.has(id));
   const perTask = buildPerTaskRows(opts.outcomes, taskIds, opts.baselineArm, opts.treatmentArm, opts.triggerByKey);
+  const taskSetIdentity = buildTaskSetIdentity(opts.taskSet);
+  const fields = buildReportFields({ pin: opts.pin, profile: opts.profile, taskSetIdentity, receipt });
 
   return {
     skill: opts.skill,
     receipt,
     perTask,
-    taskSetIdentity: buildTaskSetIdentity(opts.taskSet),
+    taskSetIdentity,
     links: opts.links,
+    fields,
+    ...(opts.cohort ? { cohort: opts.cohort } : {}),
   };
 }
 
