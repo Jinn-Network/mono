@@ -25,6 +25,9 @@ const LOG_LEVELS = new Set<LogLevel>(["silent", "error", "warn", "info", "debug"
 
 const DANGEROUS_FIELD_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
+const LOG_MAX_DEPTH = 64;
+const LOG_MAX_NODES = 10_000;
+
 type EmittedLevel = Exclude<LogLevel, "silent">;
 
 const RESERVED_FIELD_KEYS = new Set(["toJSON"]);
@@ -96,7 +99,16 @@ function normalizeLogValue(
   value: unknown,
   activePath: Set<object>,
   stripEnvelopeKeys: boolean,
+  depth: number,
+  budget: { remaining: number },
 ): unknown {
+  if (budget.remaining <= 0) {
+    logInvalid("log fields exceed the node budget");
+  }
+  budget.remaining -= 1;
+  if (depth > LOG_MAX_DEPTH) {
+    logInvalid("log fields exceed the maximum nesting depth");
+  }
   if (value === null) return null;
   const valueType = typeof value;
   if (valueType === "string" || valueType === "boolean") return value;
@@ -123,7 +135,7 @@ function normalizeLogValue(
         if (descriptor === undefined) {
           logInvalid("log fields cannot use sparse arrays");
         }
-        normalized.push(normalizeLogValue(descriptor.value, activePath, false));
+        normalized.push(normalizeLogValue(descriptor.value, activePath, false, depth + 1, budget));
       }
       return normalized;
     } finally {
@@ -163,7 +175,7 @@ function normalizeLogValue(
       if (!descriptor.enumerable) {
         logInvalid(`log field ${key} must be enumerable`);
       }
-      normalized[key] = normalizeLogValue(descriptor.value, activePath, false);
+      normalized[key] = normalizeLogValue(descriptor.value, activePath, false, depth + 1, budget);
     }
     return normalized;
   } finally {
@@ -173,10 +185,14 @@ function normalizeLogValue(
 
 export function normalizeLogFields(fields: unknown): Readonly<Record<string, unknown>> {
   if (fields === undefined) return Object.freeze({});
+  rejectIfProxy(fields, "log fields cannot use proxy values");
+  if (fields === null || typeof fields !== "object" || Array.isArray(fields)) {
+    logInvalid("log fields must be a plain object");
+  }
   if (!isPlainDataObject(fields)) {
     logInvalid("log fields must be a plain object");
   }
-  return Object.freeze(normalizeLogValue(fields, new Set(), true) as Record<string, unknown>);
+  return Object.freeze(normalizeLogValue(fields, new Set(), true, 0, { remaining: LOG_MAX_NODES }) as Record<string, unknown>);
 }
 
 /**

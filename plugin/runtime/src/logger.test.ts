@@ -293,4 +293,48 @@ describe("createLineLogger", () => {
     expect(() => createLineLogger("debug", write).debug("bad", { proxy })).toThrow(PluginRuntimeError);
     expect(lines).toEqual([]);
   });
+
+  test("R-C3-55 rejects top-level revoked proxy fields before Array.isArray", () => {
+    const { lines, write } = collect();
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    expect(() => createLineLogger("debug", write).debug("bad", proxy as unknown as Record<string, unknown>)).toThrow(
+      expect.objectContaining({ code: RUNTIME_ERROR_CODES.logInvalid }),
+    );
+    expect(lines).toEqual([]);
+  });
+
+  test("R-C3-55 rejects deep nesting beyond the depth budget without RangeError", () => {
+    const { lines, write } = collect();
+    let deep: Record<string, unknown> = { leaf: "ok" };
+    for (let index = 0; index < 65; index += 1) {
+      deep = { nested: deep };
+    }
+    expect(() => createLineLogger("debug", write).debug("bad", deep)).toThrow(
+      expect.objectContaining({ code: RUNTIME_ERROR_CODES.logInvalid }),
+    );
+    expect(lines).toEqual([]);
+  });
+
+  test("R-C3-55 rejects wide objects beyond the node budget", () => {
+    const { lines, write } = collect();
+    const wide: Record<string, unknown> = {};
+    for (let index = 0; index < 10_001; index += 1) {
+      wide[`k${index}`] = index;
+    }
+    expect(() => createLineLogger("debug", write).debug("bad", wide)).toThrow(
+      expect.objectContaining({ code: RUNTIME_ERROR_CODES.logInvalid }),
+    );
+    expect(lines).toEqual([]);
+  });
+
+  test("R-C3-55 accepts depth and node budgets at the boundary", () => {
+    const { lines, write } = collect();
+    let deep: Record<string, unknown> = { leaf: "ok" };
+    for (let index = 0; index < 63; index += 1) {
+      deep = { nested: deep };
+    }
+    createLineLogger("debug", write).debug("deep", deep);
+    expect(lines).toHaveLength(1);
+  });
 });

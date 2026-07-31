@@ -61,6 +61,20 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
   let state: RuntimeState = "idle";
   const activeCapabilities: RuntimeCapability[] = [];
   let pendingCleanup: RuntimeCapability[] = [];
+  const inFlightHealth = new Set<Promise<unknown>>();
+
+  const registerHealthOperation = <T>(operation: Promise<T>): Promise<T> => {
+    inFlightHealth.add(operation);
+    return operation.finally(() => {
+      inFlightHealth.delete(operation);
+    });
+  };
+
+  const drainInFlightHealth = async (): Promise<void> => {
+    while (inFlightHealth.size > 0) {
+      await Promise.allSettled([...inFlightHealth]);
+    }
+  };
 
   const stopTargetsInReverse = async (targets: readonly RuntimeCapability[]): Promise<readonly string[]> => {
     const failures: string[] = [];
@@ -172,24 +186,27 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
           "the runtime must be started before it can report health",
         );
       }
-      const checks: HealthCheck[] = [];
-      for (const capability of capabilities) {
-        if (capability.healthChecks === undefined) continue;
-        try {
-          checks.push(...normalizeHealthChecks(await capability.healthChecks()));
-        } catch (error) {
-          if (isHealthInvalidError(error)) {
-            throw error;
+
+      return registerHealthOperation((async () => {
+        const checks: HealthCheck[] = [];
+        for (const capability of capabilities) {
+          if (capability.healthChecks === undefined) continue;
+          try {
+            checks.push(...normalizeHealthChecks(await capability.healthChecks()));
+          } catch (error) {
+            if (isHealthInvalidError(error)) {
+              throw error;
+            }
+            checks.push({
+              name: capability.name,
+              ok: false,
+              detail: `the capability could not report its health: ${describeUnknownError(error)}`,
+              remedy: null,
+            });
           }
-          checks.push({
-            name: capability.name,
-            ok: false,
-            detail: `the capability could not report its health: ${describeUnknownError(error)}`,
-            remedy: null,
-          });
         }
-      }
-      return summarizeHealth(RUNTIME_VERSION, checks);
+        return summarizeHealth(RUNTIME_VERSION, checks);
+      })());
     },
 
     async stop(): Promise<void> {
@@ -201,10 +218,13 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
         );
       }
 
-      const targets = state === "cleanup-required"
+      const wasCleanupRequired = state === "cleanup-required";
+      state = "stopping";
+      await drainInFlightHealth();
+
+      const targets = wasCleanupRequired
         ? pendingCleanup.slice()
         : activeCapabilities.slice();
-      state = "stopping";
       const failures = await stopTargetsInReverse(targets);
 
       try {

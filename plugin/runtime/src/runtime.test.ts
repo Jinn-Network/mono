@@ -468,4 +468,71 @@ describe("createPluginRuntime", () => {
     await runtime.start();
     await runtime.stop();
   });
+
+  test("R-C3-56 stop waits for in-flight health before capability stops", async () => {
+    const events: string[] = [];
+    let releaseHealth!: () => void;
+    const healthGate = new Promise<void>((resolve) => {
+      releaseHealth = resolve;
+    });
+    const runtime = createPluginRuntime({
+      config,
+      capabilities: [{
+        name: "slow",
+        healthChecks: async () => {
+          events.push("health-enter");
+          await healthGate;
+          events.push("health-exit");
+          return [];
+        },
+        stop: async () => {
+          events.push("stop");
+        },
+      }],
+    });
+    await runtime.start();
+    const healthPromise = runtime.health();
+    await Promise.resolve();
+    const stopPromise = runtime.stop();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(events).toEqual(["health-enter"]);
+    releaseHealth();
+    await Promise.allSettled([healthPromise, stopPromise]);
+    expect(events).toEqual(["health-enter", "health-exit", "stop"]);
+  });
+
+  test("R-C3-56 rejects health after stop and concurrent stop is deterministic", async () => {
+    const runtime = createPluginRuntime({ config });
+    await runtime.start();
+    await runtime.stop();
+    await expect(runtime.health()).rejects.toMatchObject({ code: "runtime-not-started" });
+
+    let releaseHealth!: () => void;
+    const healthGate = new Promise<void>((resolve) => {
+      releaseHealth = resolve;
+    });
+    const events: string[] = [];
+    const busy = createPluginRuntime({
+      config,
+      capabilities: [{
+        name: "probe",
+        healthChecks: async () => {
+          events.push("health-enter");
+          await healthGate;
+          events.push("health-exit");
+          return [];
+        },
+        stop: async () => {
+          events.push("stop");
+        },
+      }],
+    });
+    await busy.start();
+    const healthPromise = busy.health();
+    await Promise.resolve();
+    const stopPromise = busy.stop();
+    releaseHealth();
+    await Promise.allSettled([healthPromise, stopPromise]);
+    expect(events.indexOf("health-exit")).toBeLessThan(events.indexOf("stop"));
+  });
 });
