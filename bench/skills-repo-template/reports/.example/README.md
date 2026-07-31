@@ -5,9 +5,10 @@ before any real report is committed. When the first real evaluation lands, this 
 it documents the shape new evaluations follow, it is never renamed into a real `<skill>@<sha>`
 directory.
 
-A real evaluation directory is named `reports/<skill>@<sha>/`, where `<skill>` is the skill's
-frontmatter `name` and `<sha>` is the short (8-character) form of its pinned upstream commit — for
-example `reports/tdd@a1b2c3d4/`. It is produced in one pass by
+A real evaluation directory is named `reports/<skill>@<sha>/`, where `<skill>` is the pinned skill's
+`name` (`pin.json`, which must equal the run's treatment-arm name) and `<sha>` is the short
+(8-character) form of its pinned upstream commit — for example `reports/tdd@a1b2c3d4/`. It is
+produced in one pass by
 `client/scripts/skills-bench/render-report.ts` and contains:
 
 ```

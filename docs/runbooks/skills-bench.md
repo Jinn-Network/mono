@@ -350,11 +350,12 @@ measured bytes on the report's scope section. `--pin <path>` must name the same 
 and card read from `pin.json` (design §2's field contract). `--cohort <path>` is optional (a JSON
 file matching the `Cohort` shape) and, when passed, also emits `rank-badge.svg` — the renderer
 refuses to emit a rank badge without the main badge alongside it, per design §3. `--narrative
-<path>` is optional (a JSON file with `{ pattern?: { text, evidence? }, changes?: string[] }`) and
-supplies the report's "Pattern worth testing" / "What we would change" sections — omit it and those
-sections are omitted, never invented. `--include-transcripts` copies full session transcripts into
-`data/` — leave it off by default (transcripts can embed the task repo's own content) unless you've
-reviewed them for anything sensitive.
+<path>` is optional (a JSON file with `{ pattern?: { text, evidence? }, changes?: string[],
+descriptionGap?: string }`, authored from `docs/templates/skills-eval-annex.md` — see §8) and
+supplies the report's "Pattern worth testing" / "What we would change" sections plus an addition to
+"Where it did not load" — omit it and those are omitted, never invented. `--include-transcripts`
+copies full session transcripts into `data/` — leave it off by default (transcripts can embed the
+task repo's own content) unless you've reviewed them for anything sensitive.
 
 The renderer refuses a dry-run manifest, a `--run`/`--task-set` pair whose sha256s disagree, and a
 `--base-url` pointing at a GitHub "blob" path (all three are integrity checks — if one fires, fix
@@ -390,10 +391,13 @@ read and passes this check.
 
 ---
 
-## 8. Private annex
+## 8. Narrative, diagnosis burn, and delivery
 
 Manual-first (spec §6: "no LLM-assisted annex authoring in the pilot") — a human reads the failing
-transcripts and writes the diagnosis, no automated tooling.
+transcripts and writes the diagnosis, no automated tooling. There is no private half of this step:
+the diagnosis becomes report content (spec §1.1, v0.3 — "Where it did not load" / "Pattern worth
+testing" / "What we would change"), and the report, card, and badge are public in the reports
+registry from the moment they are rendered and committed (spec §8).
 
 1. **List the working set:**
 
@@ -409,11 +413,17 @@ transcripts and writes the diagnosis, no automated tooling.
    each with its transcript path, session-JSONL path, and measured `triggered: yes/no/unknown`
    status.
 
-2. **Write the annex** from `docs/templates/skills-eval-annex.md`, reading only the transcripts the
-   working set names. Every failing/regressed attempt sorts into exactly one of three failure modes
-   (never triggered / triggered but vague / triggered and harmful — spec §2.5, §3.1 step 6); a
-   category with no attempts says so plainly rather than being omitted. Suggested edits are
-   diff-sized, one per finding, never a rewrite.
+2. **Write the narrative input** from `docs/templates/skills-eval-annex.md`, reading only the
+   transcripts the working set names. Every failing/regressed attempt sorts into exactly one of
+   three failure modes (never triggered / triggered but vague / triggered and harmful — spec §2.5);
+   a category with no attempts says so plainly rather than being omitted. Suggested edits are
+   diff-sized, one per finding, never a rewrite. Assemble the template's findings into the
+   `--narrative` JSON (`{ pattern?: { text, evidence? }, changes?: string[], descriptionGap? }`,
+   template §4) and **re-render** with §7's command, adding `--narrative <path>` and pointing at the
+   same `--out` — this is the version you commit to the registry in step 4. Skipping this is only
+   legitimate when the working set turned up nothing beyond what the trigger-rate diagnosis already
+   states; it is not legitimate to commit a report that omits sections you already have findings
+   for.
 
 3. **Burn the diagnosis tasks for this skill's lineage:**
 
@@ -430,10 +440,14 @@ transcripts and writes the diagnosis, no automated tooling.
    freshness check itself scopes by skill name across every recorded sha, not by this one sha alone
    — see `reeval-guard.ts`'s module doc.
 
-4. **Deliver privately, never publish alongside the report.** The outreach/delivery framing is not
-   yet decided (spec §8's open policy question — publish-without-consent vs. private-first window,
-   deferred to Ritsu/Oak); `docs/templates/skills-eval-delivery.md` is a reserved stub for that copy,
-   not yet written. Until that's resolved, deliver the annex file directly, out of band.
+4. **Commit to the reports registry, then deliver.** Copy the re-rendered `report.md`, `card.svg`,
+   `badge.svg`, `embed.md`, and `data/` into `Jinn-Network/skills-eval`'s
+   `reports/<skill>@<sha>/` (spec §4) and commit — the report, card, and badge are public from this
+   moment, independent of whether or when a delivery issue is opened (spec §8: decided
+   publish-without-consent, no private-first window). Delivery itself is opening a GitHub issue on
+   the skill's own repository using `bench/skills-repo-template/DELIVERY.md`; follow that template's
+   instructions exactly (paste anchor, before-posting checklist). Delivery is a human action —
+   nothing in the rig opens the issue for you.
 
 ---
 

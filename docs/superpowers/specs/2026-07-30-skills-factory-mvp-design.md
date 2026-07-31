@@ -99,7 +99,7 @@ delivered as (full specification:
 
 - **Report** (`report.md`) — narrative only, no repeated figures: the paired outcome stated in
   words, the trigger-rate diagnosis (did the skill actually load on these tasks, §2.5), any
-  conditional pattern (explicitly labelled hypothesis, not finding), at most three suggested edits,
+  conditional pattern (explicitly labeled hypothesis, not finding), at most three suggested edits,
   scope, and a rerun script. The failing-transcript diagnosis and suggested edits that v0.2 called
   the "private annex" are report content now — sections 5–7 of the linked design's §6 structure
   ("Where it did not load" / "Pattern worth testing" / "What we would change") — not a separate,
@@ -317,18 +317,24 @@ intervals are wide; the report says so.
 3. Screen with the discrimination gate (§2.4) — down to roughly a dozen tasks with proven headroom.
 4. Run the paired comparison on Haiku (§2.6): baseline (no skill) vs. with-skill, one arm each,
    across the screened task set.
-5. Render the public capability report: task set, trigger rate, paired deltas with intervals, cost
-   overhead, per-task table, raw data, rerun script (§4).
-6. Write the private annex from the failing transcripts: never-triggered / vague-guidance /
-   actively-harmful diagnosis, plus suggested edits — delivered to the author only, never published.
+5. Render the three pinned artifacts (§1.1, §4): `report.md` (narrative only), `card.svg` (the
+   figures — task count, paired deltas with intervals, cost overhead, honesty footer), and
+   `badge.svg`; the per-task table and raw data write to `data/`, not the report body.
+6. Diagnose the failing transcripts: never-triggered / vague-guidance / actively-harmful, plus
+   suggested edits — authored as the report's own "Where it did not load" / "Pattern worth testing"
+   / "What we would change" sections (§1.1), not a separate document. Commit the rendered artifacts
+   to the reports registry (§4); they are public from that moment.
 7. Offer re-evaluation: if the author revises the skill, measure the revision on a fresh,
    previously-unseen task set (or a held-back portion of the original ~20 candidates) — never on the
    tasks the diagnosis was derived from. This is the same information-boundary discipline v0.1's
    holdout ledger already enforced for forks, now keyed to `skill@sha` lineage instead of a
    candidate id: diagnosis tasks are burned for that lineage, fresh or held-back tasks serve the
    re-evaluation.
-8. A revision that measurably improves earns the badge (§4); a revision that does not is reported
-   honestly, and the offer to re-run again stands.
+8. Deliver by opening a GitHub issue on the author's own repository (`DELIVERY.md`, §4) — a human
+   action, not gated on step 6's commit. Every evaluation renders a badge, including a null result
+   (§1.1, §2.7): the badge reports what was measured, it does not certify that a revision helped. A
+   revision that measurably improves gets a fresh report and badge at its own `skill@sha`; a
+   revision that does not is reported just as honestly, and the offer to re-run again stands.
 
 ### 3.2 Pilot cohort
 
@@ -570,7 +576,13 @@ see `DELIVERY.md`'s closing section — not a policy gate on publication itself.
 This closes the question v0.2 deferred; it does not resolve the artifact design's own open
 questions, which remain open and are not restated here — see
 [`2026-07-31-capability-report-artifact-design.md`](2026-07-31-capability-report-artifact-design.md)
-§8 (installs-column provenance, cohort membership, the re-evaluation task-draw rule, and hosting).
+§8 (installs-column provenance, cohort membership, and the re-evaluation task-draw rule). Hosting
+(that design's §8 Q4) is narrowed, not open, by §4's decision above: serving model and immutability
+are settled by construction (static files in the `skills-eval` repo, raw-content or Pages URLs); only
+a future CNAME or service remains unscoped. That design's **§5 SVG endpoint family**
+(`GET /badge/…`, `GET /card/…`, `GET /r/…`) describes a hosted service that was decided against and
+does not exist — nothing in this repository serves those routes; every pointer at that design from
+this document scopes to §1–§4 and §6 for exactly this reason.
 
 ---
 

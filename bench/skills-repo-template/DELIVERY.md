@@ -26,7 +26,8 @@ not the number, per the null-variant framing in
 ```markdown
 [![jinn capability card: <skill>](<card-url>)](<report-url>)
 
-<paste report.md's body here, starting at "## Opener">
+<paste everything below report.md's `# ` title line here — the identity line and opener
+paragraph, then `## Result` onward>
 
 ---
 

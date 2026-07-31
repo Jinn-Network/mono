@@ -20,7 +20,7 @@ branch):
   the three metrics, a cohort line when one was measured, and the honesty footer. **The card is
   where the figures live.**
 - **`report.md`** — narrative only. It does not repeat the card's numbers; it states the paired
-  outcome in words, the trigger-rate diagnosis, any conditional pattern (labelled hypothesis, not
+  outcome in words, the trigger-rate diagnosis, any conditional pattern (labeled hypothesis, not
   finding), scope, and how to reproduce or request a re-evaluation.
 
 Both `badge.svg` and `card.svg` are self-contained images, not markup — GitHub issues strip HTML
@@ -33,8 +33,9 @@ it with the command `report.md` prints, or disagree with the task selection and 
 ## How to read one
 
 **Start with the card.** It carries every number: tasks solved (baseline versus with-skill), how
-often the skill loaded, and the cost overhead — each with the honesty caveat (`n=<n>, intervals
-overlap — direction, not proof`) on its face. Then read `report.md` for the narrative: what the
+often the skill loaded, and the cost overhead — with one honesty-caveat footer for the whole card
+(`n=<n>, intervals overlap — direction, not proof`), not a caveat per metric. Then read `report.md`
+for the narrative: what the
 paired outcome means in plain language, where the skill did or did not load, and what — if
 anything — a revision might change. The per-task table lives at `data/per-task.md`, not in the
 report body, so the narrative stays short while the run stays fully reproducible. `data/` also
@@ -42,9 +43,10 @@ holds the raw attempts log, run manifest, and task set the numbers were computed
 points at the code that computed them.
 
 **Trigger-rate honesty rule.** Every report distinguishes "the skill made no difference" from "the
-skill never loaded on these tasks." When the trigger rate is low, both the card and the report
-render **not exercised on this task set** — never *no effect*. A null result only reads as *no
-effect* when the trigger rate is high enough that the skill actually had its chance.
+skill never loaded on these tasks." When the trigger rate is low, the card's metric reads **not
+exercised** and the report states the same finding as a discoverability result, not a quality
+result — never *no effect*. A null result only reads as *no effect* when the trigger rate is high
+enough that the skill actually had its chance.
 
 **Immutability rule.** A revised skill gets a new resolved commit and therefore a new `<sha>` —
 never an update to an existing `reports/<skill>@<sha>/` directory. Nothing here is ever
