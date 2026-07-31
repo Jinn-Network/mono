@@ -43,6 +43,12 @@ function stubImpl(): Harness {
   };
 }
 
+// Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md Task 16):
+// canAcceptTask({ taskRole: 'restoration', ... }) is now always refused before the
+// manifest-scoped in-flight gate below runs (see test/daemon/solution-path-retired.test.ts).
+// The gate itself is role-agnostic and unchanged, so this suite (originally 'restoration')
+// now probes it via taskRole: 'evaluation', which still reaches runnableFailureReason's
+// in-flight check unmodified.
 function makeTask(opts: { id: string; manifestCid: string }): Task {
   return {
     id: opts.id,
@@ -51,7 +57,7 @@ function makeTask(opts: { id: string; manifestCid: string }): Task {
     contractId: 'swe-rebench-v2',
     contractVersion: 'v1',
     solverNetManifestCid: opts.manifestCid,
-    role: 'restoration',
+    role: 'evaluation',
   } as unknown as Task;
 }
 
@@ -63,7 +69,7 @@ function makeInput(opts: { requestId: string; manifestCid: string }): PersistedT
     onchainCreationTx: '0xdeadbeef',
     onchainCreationBlock: 1,
     solverType: ROUTING_KEY,
-    taskRole: 'restoration',
+    taskRole: 'evaluation',
     windowStartTs: now + 1_000,
     windowEndTs: now + 60_000,
     task: makeTask({ id: opts.requestId, manifestCid: opts.manifestCid }),
@@ -107,7 +113,7 @@ describe('TaskEngine — single-flight gate scoped by solverNetManifestCid', () 
     // key) must NOT be rejected — each SolverNet holds its own slot.
     const accept = await engine.canAcceptTask({
       solverType: ROUTING_KEY,
-      taskRole: 'restoration',
+      taskRole: 'evaluation',
       task: makeTask({ id: 'task-C1', manifestCid: MANIFEST_C }),
     });
 
@@ -122,13 +128,13 @@ describe('TaskEngine — single-flight gate scoped by solverNetManifestCid', () 
     // be rejected — the per-SolverNet single-flight slot is preserved.
     const accept = await engine.canAcceptTask({
       solverType: ROUTING_KEY,
-      taskRole: 'restoration',
+      taskRole: 'evaluation',
       task: makeTask({ id: 'task-A2', manifestCid: MANIFEST_A }),
     });
 
     expect(accept.ok).toBe(false);
     if (!accept.ok) {
-      expect(accept.reason).toMatch(/another swe-rebench-v2\.v1\/restoration task is already in flight/);
+      expect(accept.reason).toMatch(/another swe-rebench-v2\.v1\/evaluation task is already in flight/);
     }
   });
 
@@ -142,7 +148,7 @@ describe('TaskEngine — single-flight gate scoped by solverNetManifestCid', () 
 
     const accept = await engine.canAcceptTask({
       solverType: ROUTING_KEY,
-      taskRole: 'restoration',
+      taskRole: 'evaluation',
       task: makeTask({ id: 'task-C1', manifestCid: MANIFEST_C }),
     });
 
@@ -152,12 +158,12 @@ describe('TaskEngine — single-flight gate scoped by solverNetManifestCid', () 
     // rejected.
     const reject = await engine.canAcceptTask({
       solverType: ROUTING_KEY,
-      taskRole: 'restoration',
+      taskRole: 'evaluation',
       task: makeTask({ id: 'task-A2', manifestCid: MANIFEST_A }),
     });
     expect(reject.ok).toBe(false);
     if (!reject.ok) {
-      expect(reject.reason).toMatch(/another swe-rebench-v2\.v1\/restoration task is already in flight/);
+      expect(reject.reason).toMatch(/another swe-rebench-v2\.v1\/evaluation task is already in flight/);
     }
   });
 
@@ -173,7 +179,7 @@ describe('TaskEngine — single-flight gate scoped by solverNetManifestCid', () 
 
     const accept = await engine.canAcceptTask({
       solverType: ROUTING_KEY,
-      taskRole: 'restoration',
+      taskRole: 'evaluation',
       task: makeTask({ id: 'task-A2', manifestCid: MANIFEST_A }),
     });
 

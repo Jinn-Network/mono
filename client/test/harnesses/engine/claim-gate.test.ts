@@ -119,6 +119,11 @@ describe('TaskEngine.claim — impl gate', () => {
     expect(after.state).toBe(TaskRunState.CLAIMED);
   });
 
+  // Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md Task 16):
+  // canAcceptTask({ taskRole: 'restoration', ... }) is now always refused before this
+  // in-flight gate runs (see test/daemon/solution-path-retired.test.ts). The gate itself is
+  // unchanged and still reachable for taskRole: 'evaluation' — this probe moved there so the
+  // single-flight branch of runnableFailureReason stays covered.
   it('refuses to accept another task for the same solver type and role while one is in flight', async () => {
     const readyImpl = stubImpl({ isReady: async () => ({ ready: true }) });
     const engine = new TestEngine({
@@ -127,17 +132,19 @@ describe('TaskEngine.claim — impl gate', () => {
       implRegistry: { findFor: () => readyImpl },
     });
     const active = makeInput('active-task');
+    active.taskRole = 'evaluation';
+    active.task = { ...active.task, role: 'evaluation' };
     engine.db.insertDiscovered(active);
 
     const accept = await engine.canAcceptTask({
       solverType: 'portfolio.v0',
-      taskRole: 'restoration',
-      task: { id: 'next-task', description: 'test', solverType: 'portfolio.v0', role: 'restoration' },
+      taskRole: 'evaluation',
+      task: { id: 'next-task', description: 'test', solverType: 'portfolio.v0', role: 'evaluation' },
     });
 
     expect(accept).toEqual({
       ok: false,
-      reason: 'another portfolio.v0/restoration task is already in flight',
+      reason: 'another portfolio.v0/evaluation task is already in flight',
     });
   });
 
@@ -199,6 +206,12 @@ describe('TaskEngine.claim — impl gate', () => {
   // harness spawns child processes synchronously). The daemon already gates
   // claims O(1) against the cached HarnessReadinessRegistry immediately after
   // canAcceptTask returns, so canAcceptTask must NOT probe isReady() itself.
+  //
+  // Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
+  // Task 16): this suite uses taskRole: 'evaluation' — canAcceptTask({ taskRole:
+  // 'restoration' }) is now always refused before the skipReadinessProbe branch runs (see
+  // test/daemon/solution-path-retired.test.ts). skipReadinessProbe itself is unconditional
+  // and unchanged for evaluation.
   describe('canAcceptTask — issue #398 readiness probe', () => {
     it('does NOT invoke impl.isReady() (cached registry gates this downstream)', async () => {
       const isReady = vi.fn(async () => ({ ready: true }) as ReadyStatus);
@@ -210,8 +223,8 @@ describe('TaskEngine.claim — impl gate', () => {
 
       const accept = await engine.canAcceptTask({
         solverType: 'portfolio.v0',
-        taskRole: 'restoration',
-        task: { id: 'announced-task', description: 'test', solverType: 'portfolio.v0', role: 'restoration' },
+        taskRole: 'evaluation',
+        task: { id: 'announced-task', description: 'test', solverType: 'portfolio.v0', role: 'evaluation' },
       });
 
       expect(accept).toEqual({ ok: true });
@@ -235,8 +248,8 @@ describe('TaskEngine.claim — impl gate', () => {
 
       const accept = await engine.canAcceptTask({
         solverType: 'portfolio.v0',
-        taskRole: 'restoration',
-        task: { id: 'announced-task', description: 'test', solverType: 'portfolio.v0', role: 'restoration' },
+        taskRole: 'evaluation',
+        task: { id: 'announced-task', description: 'test', solverType: 'portfolio.v0', role: 'evaluation' },
       });
 
       expect(accept).toEqual({ ok: true });

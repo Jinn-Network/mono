@@ -144,6 +144,52 @@ function makePartialAbortHarness(started: ReturnType<typeof deferred<'started'>>
   };
 }
 
+// Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
+// Task 16): canAcceptTask({ taskRole: 'restoration', ... }) is now always refused
+// before the single-flight in-flight gate runs (see
+// test/daemon/solution-path-retired.test.ts). The gate itself
+// (TaskRunPersistence.hasInFlightFor, consulted from runnableFailureReason) is
+// unchanged, and restoration still reaches it through the surviving claim()
+// entry point (DISCOVERED -> CLAIMED). The seeded RUNNING row under test keeps
+// taskRole: 'restoration' (unrelated to canAcceptTask — it drives the real
+// runImpl/pack/deliver lifecycle), and this probe checks the SAME
+// {solverType, taskRole, manifestCid} gate bucket via claim() instead.
+class TestEngine extends TaskEngine {
+  async callClaim(intent: import('../../../src/harnesses/engine/persistence.js').PersistedTaskRun): Promise<void> {
+    return this.claim(intent);
+  }
+}
+
+async function probeSingleFlight(
+  engine: TestEngine,
+  store: Store,
+  probeRequestId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const persistence = new TaskRunPersistence(store.db);
+  const now = Date.now();
+  persistence.insertDiscovered({
+    requestId: probeRequestId,
+    taskCid: `bafy-${probeRequestId}`,
+    onchainCreationTx: '0xdeadbeefprobe000000000000000000000000',
+    onchainCreationBlock: 1,
+    solverType: ROUTING_KEY,
+    taskRole: 'restoration',
+    windowStartTs: now,
+    windowEndTs: now + 60_000,
+    task: makeTask(probeRequestId, now, now + 60_000),
+  });
+  try {
+    await engine.callClaim(persistence.getByRequestId(probeRequestId)!);
+    return { ok: true };
+  } catch (err) {
+    const row = persistence.getByRequestId(probeRequestId)!;
+    return {
+      ok: false,
+      reason: row.failureReason ?? (err instanceof Error ? err.message : String(err)),
+    };
+  }
+}
+
 function packagingOpts(store: Store, dir: string, impl: Harness): TaskEngineOptions {
   return {
     store,
@@ -264,7 +310,7 @@ describe('TaskEngine — windowEndTs abort terminalizes and releases single-flig
     // AC1–AC4: short real window; leave RUNNING; FAILED terminal; slot free; no watchdog.
     const started = deferred<'started'>();
     const impl = makeEmptyAbortHarness(started);
-    const engine = new TaskEngine({
+    const engine = new TestEngine({
       store,
       paths: {
         workingDirRoot: join(dir, 'work'),
@@ -279,11 +325,7 @@ describe('TaskEngine — windowEndTs abort terminalizes and releases single-flig
     seedRunning(persistence, requestId, impl.name, windowEndTs);
 
     // Slot occupied while RUNNING.
-    const blocked = await engine.canAcceptTask({
-      solverType: ROUTING_KEY,
-      taskRole: 'restoration',
-      task: makeTask('win-exp-empty-2', Date.now(), Date.now() + 60_000),
-    });
+    const blocked = await probeSingleFlight(engine, store, 'win-exp-empty-probe-1');
     expect(blocked.ok).toBe(false);
 
     const processPromise = engine.process(requestId).then(
@@ -313,11 +355,7 @@ describe('TaskEngine — windowEndTs abort terminalizes and releases single-flig
     expect(row.state).not.toBe(TaskRunState.RUNNING);
     expect(row.failureReason ?? '').toMatch(/no deliverable|empty/i);
 
-    const accept = await engine.canAcceptTask({
-      solverType: ROUTING_KEY,
-      taskRole: 'restoration',
-      task: makeTask('win-exp-empty-2', Date.now(), Date.now() + 60_000),
-    });
+    const accept = await probeSingleFlight(engine, store, 'win-exp-empty-probe-2');
     expect(accept).toEqual({ ok: true });
 
     assertNoWatchdogEvents(store);
@@ -326,7 +364,7 @@ describe('TaskEngine — windowEndTs abort terminalizes and releases single-flig
   it('valid partial Solution after window abort → COMPLETE and frees the SolverNet slot', async () => {
     const started = deferred<'started'>();
     const impl = makePartialAbortHarness(started);
-    const engine = new TaskEngine(packagingOpts(store, dir, impl));
+    const engine = new TestEngine(packagingOpts(store, dir, impl));
     const persistence = new TaskRunPersistence(store.db);
     const requestId = 'win-exp-partial-1';
     const windowEndTs = Date.now() + WINDOW_MS;
@@ -334,11 +372,7 @@ describe('TaskEngine — windowEndTs abort terminalizes and releases single-flig
     seedRunning(persistence, requestId, impl.name, windowEndTs);
 
     // Slot occupied while RUNNING (same gate keys as AC3 accept below).
-    const blocked = await engine.canAcceptTask({
-      solverType: ROUTING_KEY,
-      taskRole: 'restoration',
-      task: makeTask('win-exp-partial-2', Date.now(), Date.now() + 60_000),
-    });
+    const blocked = await probeSingleFlight(engine, store, 'win-exp-partial-probe-1');
     expect(blocked.ok).toBe(false);
 
     // Drive RUNNING → POST_SNAPSHOT via abort, then pack/deliver via ticks.
@@ -367,11 +401,7 @@ describe('TaskEngine — windowEndTs abort terminalizes and releases single-flig
         TaskRunState.RUNNING,
       ]).not.toContain(row.state);
 
-      const accept = await engine.canAcceptTask({
-        solverType: ROUTING_KEY,
-        taskRole: 'restoration',
-        task: makeTask('win-exp-partial-2', Date.now(), Date.now() + 60_000),
-      });
+      const accept = await probeSingleFlight(engine, store, 'win-exp-partial-probe-2');
       expect(accept).toEqual({ ok: true });
 
       assertNoWatchdogEvents(store);

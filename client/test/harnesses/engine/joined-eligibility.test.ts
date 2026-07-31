@@ -21,6 +21,7 @@ import {
   createMutableJoinedSolverNetsView,
   type JoinedSolverNetsView,
 } from '../../../src/harnesses/engine/engine.js';
+import type { PersistedTaskRun } from '../../../src/harnesses/engine/persistence.js';
 import type { Harness, Solution } from '../../../src/harnesses/types.js';
 import type { Task } from '../../../src/types/task.js';
 import {
@@ -64,10 +65,19 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
     rmSync(dir, { recursive: true, force: true });
   });
 
+  class TestEngine extends TaskEngine {
+    async callClaim(intent: PersistedTaskRun): Promise<void> {
+      return this.claim(intent);
+    }
+    get db(): import('../../../src/harnesses/engine/persistence.js').TaskRunPersistence {
+      return this.persistence;
+    }
+  }
+
   function makeEngine(opts: {
     joinedSolverNets?: JoinedSolverNetsView;
     canAttempt?: (task: Task) => Promise<{ ok: true } | { ok: false; reason: string }>;
-  } = {}): TaskEngine {
+  } = {}): TestEngine {
     const canAttempt = opts.canAttempt ?? (async () => ({ ok: true as const }));
     // Both launcher A and B share the same prediction.v1 contract, so the
     // manifest resolver must resolve both CIDs.
@@ -78,13 +88,53 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
       }),
       [SWE_REBENCH_CID]: buildSweRebenchV2ManifestStub(),
     });
-    return new TaskEngine({
+    return new TestEngine({
       store,
       paths: { workingDirRoot: join(dir, 'work'), implStateDirRoot: join(dir, 'impl-state') },
       implRegistry: { findFor: () => stubHarness({ canAttempt }) },
       manifestResolver,
       ...(opts.joinedSolverNets ? { joinedSolverNets: opts.joinedSolverNets } : {}),
     });
+  }
+
+  // Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
+  // Task 16): canAcceptTask({ taskRole: 'restoration', ... }) is now always refused
+  // before the joined-eligibility filter runs (see
+  // test/daemon/solution-path-retired.test.ts). The filter itself
+  // (TaskEngine.evaluateJoinedEligibility) is unchanged and role-agnostic, and stays
+  // live for restoration through the surviving claim() entry point (DISCOVERED →
+  // CLAIMED), which runs the identical runnableFailureReason check. This suite's
+  // restoration-role ('solver') probes now go through claim() instead of
+  // canAcceptTask so they keep exercising the real, still-load-bearing code path
+  // rather than the (now-constant) canAcceptTask(restoration) refusal.
+  let claimProbeSeq = 0;
+  async function acceptRestorationViaClaim(
+    engine: TestEngine,
+    task: Task,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const requestId = `${task.id ?? 'claim-probe'}-${++claimProbeSeq}`;
+    const now = Date.now();
+    engine.db.insertDiscovered({
+      requestId,
+      taskCid: `bafy-${requestId}`,
+      onchainCreationTx: `0x${'ab'.repeat(32)}`,
+      onchainCreationBlock: 1,
+      solverType: task.solverType,
+      taskRole: 'restoration',
+      windowStartTs: task.window?.startTs ?? now - 1_000,
+      windowEndTs: task.window?.endTs ?? now + 60_000,
+      task: { ...task, id: requestId },
+    });
+    try {
+      await engine.callClaim(engine.db.getByRequestId(requestId)!);
+      return { ok: true };
+    } catch (err) {
+      const row = engine.db.getByRequestId(requestId)!;
+      return {
+        ok: false,
+        reason: row.failureReason ?? (err instanceof Error ? err.message : String(err)),
+      };
+    }
   }
 
   describe('manifestCid present on task body (preferred path)', () => {
@@ -95,7 +145,7 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
       const engine = makeEngine({ joinedSolverNets: view });
       const task = makePredictionV1Task({ solverNetManifestCid: LAUNCHER_A_CID });
 
-      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      const accept = await acceptRestorationViaClaim(engine, task);
 
       expect(accept).toEqual({ ok: true });
     });
@@ -109,7 +159,7 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
       const engine = makeEngine({ joinedSolverNets: view });
       const task = makePredictionV1Task({ solverNetManifestCid: LAUNCHER_B_CID });
 
-      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      const accept = await acceptRestorationViaClaim(engine, task);
 
       expect(accept.ok).toBe(false);
       if (!accept.ok) {
@@ -158,7 +208,7 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
       const engine = makeEngine({ joinedSolverNets: view });
       const task = makePredictionV1Task({ solverNetManifestCid: LAUNCHER_A_CID });
 
-      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      const accept = await acceptRestorationViaClaim(engine, task);
 
       expect(accept.ok).toBe(false);
       if (!accept.ok) {
@@ -172,10 +222,10 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
       });
       const engine = makeEngine({ joinedSolverNets: view });
 
-      const restoration = await engine.canAcceptTask({
-        taskRole: 'restoration',
-        task: makePredictionV1Task({ solverNetManifestCid: LAUNCHER_A_CID }),
-      });
+      const restoration = await acceptRestorationViaClaim(
+        engine,
+        makePredictionV1Task({ solverNetManifestCid: LAUNCHER_A_CID }),
+      );
       expect(restoration).toEqual({ ok: true });
 
       const evaluation = await engine.canAcceptTask({
@@ -221,7 +271,7 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
         eligibility: {},
       };
 
-      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      const accept = await acceptRestorationViaClaim(engine, task);
 
       expect(accept).toEqual({ ok: true });
     });
@@ -231,7 +281,7 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
       const engine = makeEngine({ joinedSolverNets: view });
       const task = makePredictionV1Task({ solverNetManifestCid: LAUNCHER_A_CID });
 
-      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      const accept = await acceptRestorationViaClaim(engine, task);
 
       expect(accept.ok).toBe(false);
       if (!accept.ok) {
@@ -247,10 +297,10 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
       const engine = makeEngine({ joinedSolverNets: view });
 
       // Launcher A: solver role accepted.
-      const acceptA = await engine.canAcceptTask({
-        taskRole: 'restoration',
-        task: makePredictionV1Task({ solverNetManifestCid: LAUNCHER_A_CID }),
-      });
+      const acceptA = await acceptRestorationViaClaim(
+        engine,
+        makePredictionV1Task({ solverNetManifestCid: LAUNCHER_A_CID }),
+      );
       expect(acceptA).toEqual({ ok: true });
 
       // Launcher A: evaluator role rejected (not joined for evaluator on A).
@@ -277,10 +327,10 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
       expect(evalB).toEqual({ ok: true });
 
       // Launcher B: solver role rejected (not joined for solver on B).
-      const solveB = await engine.canAcceptTask({
-        taskRole: 'restoration',
-        task: makePredictionV1Task({ solverNetManifestCid: LAUNCHER_B_CID }),
-      });
+      const solveB = await acceptRestorationViaClaim(
+        engine,
+        makePredictionV1Task({ solverNetManifestCid: LAUNCHER_B_CID }),
+      );
       expect(solveB.ok).toBe(false);
       if (!solveB.ok) {
         expect(solveB.reason).toMatch(/did not opt into role 'solver'/);
@@ -310,7 +360,7 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
         contractVersion: 'v1',
       } as unknown as Task;
 
-      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      const accept = await acceptRestorationViaClaim(engine, task);
 
       expect(accept).toEqual({ ok: true });
     });
@@ -328,7 +378,7 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
         manifestDigest: otherDigest,
       } as unknown as Task;
 
-      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      const accept = await acceptRestorationViaClaim(engine, task);
 
       expect(accept.ok).toBe(false);
       if (!accept.ok) {
@@ -351,7 +401,7 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
         role: 'restoration',
       } as unknown as Task;
 
-      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      const accept = await acceptRestorationViaClaim(engine, task);
 
       expect(accept.ok).toBe(false);
       if (!accept.ok) {
@@ -372,7 +422,7 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
         description: 'health check',
       };
 
-      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      const accept = await acceptRestorationViaClaim(engine, task);
 
       expect(accept).toEqual({ ok: true });
     });
@@ -389,7 +439,7 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
       const engine = makeEngine({ joinedSolverNets: view });
       const task = makePredictionV1Task({ solverNetManifestCid: LAUNCHER_A_CID });
 
-      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      const accept = await acceptRestorationViaClaim(engine, task);
 
       expect(accept.ok).toBe(false);
       if (!accept.ok) {
@@ -402,7 +452,7 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
       const engine = makeEngine({ joinedSolverNets: view });
       const task: Task = { id: 'health-check', description: 'health check' };
 
-      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      const accept = await acceptRestorationViaClaim(engine, task);
 
       expect(accept).toEqual({ ok: true });
     });
@@ -412,12 +462,12 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
       const engine = makeEngine({ joinedSolverNets: view });
       const task = makePredictionV1Task({ solverNetManifestCid: LAUNCHER_A_CID });
 
-      const before = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      const before = await acceptRestorationViaClaim(engine, task);
       expect(before.ok).toBe(false);
 
       view.set(LAUNCHER_A_CID, { roles: ['solver'] });
 
-      const after = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      const after = await acceptRestorationViaClaim(engine, task);
       expect(after).toEqual({ ok: true });
     });
   });
@@ -429,7 +479,7 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
       const engine = makeEngine({});
       const task = makePredictionV1Task({ solverNetManifestCid: LAUNCHER_A_CID });
 
-      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      const accept = await acceptRestorationViaClaim(engine, task);
 
       // No filter → falls through to the legacy harness/manifest path,
       // which accepts the task (resolver stub + stub harness).
@@ -473,7 +523,7 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
       const engine = makeEngine({ joinedSolverNets: view, canAttempt });
       const task = makePredictionV1Task({ solverNetManifestCid: LAUNCHER_B_CID });
 
-      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+      const accept = await acceptRestorationViaClaim(engine, task);
 
       expect(accept.ok).toBe(false);
       // Eligibility short-circuit must run before the harness gate.

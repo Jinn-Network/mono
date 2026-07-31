@@ -81,9 +81,15 @@ describe('Daemon', () => {
     try {
       const beforeClaim = Date.now();
       const oldWindowStart = beforeClaim - 6 * 86_400_000;
+      // Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
+      // Task 16): _runEngineWatcherLoop now skips any announcement whose task.role
+      // isn't 'evaluation' before it reaches claimTask, so this task must carry
+      // role: 'evaluation' to still get claimed — the runStartedAt persistence
+      // behavior under test is unrelated to role.
       await adapter.postTask({
         id: 'old-window-fresh-claim',
         description: 'old window, newly claimed',
+        role: 'evaluation',
         window: { startTs: oldWindowStart, endTs: beforeClaim + 3_600_000 },
       });
 

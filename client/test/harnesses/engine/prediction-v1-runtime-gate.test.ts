@@ -61,6 +61,12 @@ describe('prediction.v1 runtime gate', () => {
     expect(harnesses.map((harness) => harness.name)).not.toContain('prediction-v0-evaluator');
   });
 
+  // Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
+  // Task 16): canAcceptTask({ taskRole: 'restoration', ... }) is now always refused
+  // before any of this file's checks run (see test/daemon/solution-path-retired.test.ts).
+  // `manifestBackedValidation` and the downstream harness/canAttempt gate it tests are
+  // role-agnostic (they don't branch on taskRole at all), so this whole file now probes
+  // them via taskRole: 'evaluation' — the identical code path, still reachable.
   it('rejects schema-invalid prediction.v1 Tasks before a harness attempt', async () => {
     const canAttempt = vi.fn(async () => ({ ok: true as const }));
     const engine = new TaskEngine({
@@ -76,7 +82,7 @@ describe('prediction.v1 runtime gate', () => {
 
     const accept = await engine.canAcceptTask({
       solverType: 'prediction.v1',
-      taskRole: 'restoration',
+      taskRole: 'evaluation',
       task,
     });
 
@@ -100,7 +106,7 @@ describe('prediction.v1 runtime gate', () => {
 
     const accept = await engine.canAcceptTask({
       solverType: 'prediction.v1',
-      taskRole: 'restoration',
+      taskRole: 'evaluation',
       task,
     });
 
@@ -131,7 +137,7 @@ describe('prediction.v1 runtime gate', () => {
       const resolver = makeStubManifestResolver();
       const canAttempt = vi.fn(async () => ({ ok: true as const }));
       const findFor = vi.fn((ctx: { solverType: string; role?: string }) => {
-        if (ctx.solverType === 'prediction.v1' && ctx.role === 'restoration') {
+        if (ctx.solverType === 'prediction.v1' && ctx.role === 'evaluation') {
           return stubHarness({ canAttempt });
         }
         return undefined;
@@ -147,7 +153,7 @@ describe('prediction.v1 runtime gate', () => {
       const accept = await engine.canAcceptTask({
         // Routing alias parameter intentionally left unset — the engine
         // should derive `prediction.v1` from `task.contractId/Version`.
-        taskRole: 'restoration',
+        taskRole: 'evaluation',
         task,
       });
 
@@ -158,7 +164,7 @@ describe('prediction.v1 runtime gate', () => {
       // Harness lookup keyed by `${contractId}.${contractVersion}`.
       expect(findFor).toHaveBeenCalledWith({
         solverType: 'prediction.v1',
-        role: 'restoration',
+        role: 'evaluation',
       });
       expect(canAttempt).toHaveBeenCalledWith(task);
     });
@@ -176,7 +182,7 @@ describe('prediction.v1 runtime gate', () => {
 
       const accept = await engine.canAcceptTask({
         solverType: 'prediction.v1',
-        taskRole: 'restoration',
+        taskRole: 'evaluation',
         task,
       });
 
@@ -194,7 +200,7 @@ describe('prediction.v1 runtime gate', () => {
       });
 
       const accept = await engine.canAcceptTask({
-        taskRole: 'restoration',
+        taskRole: 'evaluation',
         task,
       });
 
@@ -212,7 +218,7 @@ describe('prediction.v1 runtime gate', () => {
       } as unknown as Task;
 
       const accept = await engine.canAcceptTask({
-        taskRole: 'restoration',
+        taskRole: 'evaluation',
         task,
       });
 
@@ -231,7 +237,7 @@ describe('prediction.v1 runtime gate', () => {
 
       const accept = await engine.canAcceptTask({
         // No solverType either — this is the legacy health-check shape.
-        taskRole: 'restoration',
+        taskRole: 'evaluation',
         task,
       });
 

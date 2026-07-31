@@ -721,6 +721,18 @@ export class Daemon {
       if (this.engineStopped) break;
       if (!taskAnnouncement.taskId) continue;
 
+      // Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
+      // Task 16): the solution path retired — watchForTasks() is only supposed to yield
+      // evaluation announcements now. Loud-log and skip rather than silently drop, so a
+      // regression here (e.g. an adapter change that starts yielding restoration again) is
+      // visible instead of quietly starving the solution path further.
+      if (taskAnnouncement.task.role !== 'evaluation') {
+        console.warn(
+          `[engine-watcher] ignoring non-evaluation announcement ${taskAnnouncement.taskId} — the solution path retired at stage 1`,
+        );
+        continue;
+      }
+
       if (++scanned % YIELD_EVERY === 0) {
         // setImmediate schedules a macrotask: the event loop drains pending I/O
         // callbacks (HTTP requests) before resuming this loop.

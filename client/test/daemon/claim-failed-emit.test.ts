@@ -28,6 +28,12 @@ import type { RequestId, TaskRequest } from '../../src/types/index.js';
  * dedicated follow-up — see #639 — because it requires mocking the on-chain
  * claim plumbing. The daemon-harness e2e (`yarn e2e:daemon-harness`) exercises
  * it indirectly today.
+ *
+ * Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
+ * Task 16): the solution path retired — `_runEngineWatcherLoop` now skips any
+ * announcement whose task.role isn't 'evaluation' before it ever reaches
+ * canAcceptTask/claimTask. Both posted tasks below now carry role: 'evaluation'
+ * so the announcement still reaches the claim-failed emission path under test.
  */
 
 function tcMaxVerdictsRaceLoss(): SafeInnerRevertError {
@@ -98,6 +104,7 @@ describe('Daemon claim-failed emission', () => {
       const posted = await adapter.postTask({
         id: 'claim-failed-task-1',
         description: 'task whose claim is forced to fail',
+        role: 'evaluation',
       });
 
       // Wait for the paired structured event to land in the ring buffer.
@@ -159,6 +166,7 @@ describe('Daemon claim-failed emission', () => {
       await adapter.postTask({
         id: 'race-lost-eval-1',
         description: 'evaluation slot already taken',
+        role: 'evaluation',
       });
 
       const deadline = Date.now() + 2_000;

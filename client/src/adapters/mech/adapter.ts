@@ -1404,9 +1404,11 @@ export class MechAdapter implements ExecutionAdapter {
           yield announcement;
         }
 
-        for await (const announcement of this.discoverSubgraphRestorationTasks()) {
-          yield announcement;
-        }
+        // Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
+        // Task 16): the solution path retires — watchForTasks yields only evaluation
+        // announcements now. discoverSubgraphRestorationTasks() and the joined-manifest-digest
+        // filter below (the joinedSolverNets claim gate the retirement table names) are no
+        // longer called from here.
 
         const currentBlock = await this.publicClient.getBlockNumber();
         if (currentBlock > this.requestBlockCursor) {
@@ -1414,7 +1416,7 @@ export class MechAdapter implements ExecutionAdapter {
           const logs = await this.getRouterLogsInChunks(fromBlock, currentBlock);
 
           // #547: only evaluators ingest delivery-claimed logs into the
-          // pending-evaluation set. Restoration discovery below is unaffected.
+          // pending-evaluation set.
           if (this.evaluatorEnabled) {
             const submittedSolutions = decodeSolutionDeliveryClaimedLogs(logs);
             for (const solution of submittedSolutions) {
@@ -1422,35 +1424,11 @@ export class MechAdapter implements ExecutionAdapter {
             }
           }
 
-          const joinedManifestDigests = this.joinedManifestDigestSet();
+          // Retained: the evaluation provenance cross-check
+          // (canonicalTaskCreationForEvaluation) reads canonicalTaskCreationProvenance.
           const createdTasks = decodeTaskCreatedLogs(logs);
           for (const event of createdTasks) {
             this.rememberCanonicalTaskCreated(event);
-          }
-          for (const { taskId, taskCidDigest, manifestDigest, transactionHash, blockNumber } of createdTasks) {
-            if (!this.isDiscoveryTaskAllowed(taskId)) continue;
-            if (this.observedTasks.has(taskId)) continue;
-            if (joinedManifestDigests.size > 0 && !joinedManifestDigests.has(manifestDigest.toLowerCase())) continue;
-            try {
-              const claimable = await canClaimTask(
-                this.publicClient,
-                this.config.safeAddress,
-                this.config.routerAddress,
-                taskId,
-                this.config.mechContractAddress,
-              );
-              if (!claimable.ok) continue;
-              const announcement = await this.restorationAnnouncementFromDigest({
-                taskId,
-                taskCidDigest,
-                transactionHash,
-                blockNumber,
-              });
-              if (this.hasExpiredExecutionWindow(announcement)) continue;
-              yield announcement;
-            } catch (err) {
-              console.error(`[mech] Failed to parse task ${taskId}:`, err);
-            }
           }
           for await (const announcement of this.retryPendingEvaluationSolutions()) {
             yield announcement;

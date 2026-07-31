@@ -10,6 +10,13 @@
 // whose `solverNetManifestCid` matches a joined entry, and verifies the
 // claim path observes a not-ready harness and skips. The reverse path
 // (registry transitions to ready → claims resume) is also covered.
+//
+// Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
+// Task 16): the solution path retired — `_runEngineWatcherLoop` now skips any
+// announcement whose task.role isn't 'evaluation' before it ever reaches the
+// readiness gate this suite pins. Every posted task below now carries
+// `role: 'evaluation'` so the announcement still reaches the gate under test;
+// the gate itself is harness-agnostic and unchanged.
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -75,6 +82,7 @@ describe('Daemon — claim readiness gate', () => {
       id: 'task-not-ready',
       description: 'should be skipped',
       solverNetManifestCid: 'bafkrei.fake-cid',
+      role: 'evaluation',
     });
 
     // Give the engine-watcher loop a few ticks to observe the announcement.
@@ -113,6 +121,7 @@ describe('Daemon — claim readiness gate', () => {
       id: 'task-skip-1',
       description: 'first task — gate not ready',
       solverNetManifestCid: 'bafkrei.fake-cid',
+      role: 'evaluation',
     });
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(claimSpy).not.toHaveBeenCalled();
@@ -123,6 +132,7 @@ describe('Daemon — claim readiness gate', () => {
       id: 'task-claim-2',
       description: 'second task — gate ready',
       solverNetManifestCid: 'bafkrei.fake-cid',
+      role: 'evaluation',
     });
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(claimSpy).toHaveBeenCalled();
@@ -160,6 +170,7 @@ describe('Daemon — claim readiness gate', () => {
       id: 'task-codex-not-ready',
       description: 'codex SolverNet — gate not ready',
       solverNetManifestCid: 'bafkrei.codex-cid',
+      role: 'evaluation',
     });
     await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -197,6 +208,7 @@ describe('Daemon — claim readiness gate', () => {
       id: 'task-hermes-no-openrouter',
       description: 'hermes SolverNet — OpenRouter not connected',
       solverNetManifestCid: 'bafkrei.fake-cid',
+      role: 'evaluation',
     });
     await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -230,6 +242,7 @@ describe('Daemon — claim readiness gate', () => {
       id: 'task-log',
       description: 'gate skip with operator-visible reason',
       solverNetManifestCid: 'bafkrei.fake-cid',
+      role: 'evaluation',
     });
     await new Promise((resolve) => setTimeout(resolve, 50));
 
