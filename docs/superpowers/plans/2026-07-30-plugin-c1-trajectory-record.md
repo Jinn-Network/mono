@@ -3227,7 +3227,7 @@ required public case IDs (78 total); updated independent pin digest
 - [x] C1-R44 — close remaining public proxy/trap boundaries (preflight/port/identity/hash)
 - [x] C1-R45 — typed seal/verify callback failures and abort-priority cancellation
 - [x] C1-R46 — CI guard binds node-version to the setup-node step's own `with`
-- [ ] Restack onto latest `origin/integration/evidence-v1`; post-rebase gates; force-with-lease
+- [x] Restack onto latest `origin/integration/evidence-v1`; post-rebase gates; force-with-lease — onto `9f4925037` from merge-base `34a7b3cbd`; old head `48e53c873` → new head (post-rebase) recorded at push; 58/58 no conflicts; post-rebase trajectory 306 + pack 105 + guards 41
 
 ### Acceptance
 
