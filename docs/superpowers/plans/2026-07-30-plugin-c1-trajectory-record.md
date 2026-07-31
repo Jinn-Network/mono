@@ -3082,4 +3082,3 @@ counterexamples. Historical checkboxes remain authoritative for earlier waves.
 All eight rows move from pending to commit SHA + command evidence only after
 red→green verification. L4 remains external/`not-evaluated`. Preserve R9 Node
 22.23.1 / npm 11.19.0 pins; no workaround weakening.
-
