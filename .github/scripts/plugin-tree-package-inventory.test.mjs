@@ -1,42 +1,32 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { test } from 'node:test';
 
-const root = resolve(import.meta.dirname, '../..');
-const packageRoot = join(root, 'plugin');
-const DEPENDENCY_SECTIONS = [
-  'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
-];
+import {
+  APPROVED_RUNTIME_DEPENDENCIES,
+  APPROVED_RUNTIME_DEV_DEPENDENCIES,
+  DEPENDENCY_SECTIONS,
+  discoverPluginPackages,
+  exactVersionViolations,
+  pluginRoot,
+  readPackageManifest,
+  root,
+  unconsumedApprovedEntries,
+} from './plugin-tree-guard-common.mjs';
 
-// The tier-4 product tree (plugin reconciliation design §6.1, program §4). Every npm
-// package under plugin/ is declared here; the discovery test below proves the list is
-// complete rather than trusting it.
+const packageRoot = pluginRoot;
+const NON_NPM_DIRECTORIES = ['frozen', 'adapter-hermes'];
+
 const PLUGIN_PACKAGES = [
   ['runtime', '@jinn-network/plugin-runtime'],
 ];
 
-// Directories inside plugin/ that are deliberately NOT npm packages:
-//   frozen         — C0's relocated Hermes adapter (Python; frozen per spec §4.1)
-//   adapter-hermes — C7's clean-slate Hermes adapter (Python; mirrored, never published)
-// Both are asserted manifest-free rather than listed above. Absence is fine: this guard
-// must pass whether or not C0 or C7 has landed.
-const NON_NPM_DIRECTORIES = ['frozen', 'adapter-hermes'];
-
-// Cross-tree Jinn dependencies live outside plugin/; map name -> absolute directory so a
-// later component adding one only adds its JINN_DEPENDENCY_GRAPH row
-// (benchmarking-package-inventory.test.mjs precedent). Pre-seeded with the whole
-// composition table of design §6.1 plus the two packages C1 and C2 commission — an entry
-// here grants nothing on its own; the graph is what admits a dependency.
 const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
   ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
   ['@jinn-network/evidence-repository-ipfs', join(root, 'packages', 'evidence', 'repository-ipfs')],
   ['@jinn-network/evidence-catalog-sqlite', join(root, 'packages', 'evidence', 'catalog-sqlite')],
-  // Local Runtime re-exports `EvidenceCatalogReader` only as a type
-  // (packages/evidence/local-runtime/src/types.ts:4), and it is declared in Discovery
-  // (packages/evidence/discovery/src/catalog/types.ts). Any consumer of
-  // `LocalEvidenceRuntime.catalog` needs Discovery resolvable for tsc.
   ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
   ['@jinn-network/evidence-local-runtime', join(root, 'packages', 'evidence', 'local-runtime')],
   ['@jinn-network/evidence-retrieval', join(root, 'packages', 'evidence', 'retrieval')],
@@ -50,32 +40,11 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
 ]);
 
-// C3 wires no capability, so the runtime declares no Jinn dependency yet. C4/C5/C6/C7
-// each add their row here together with a matching portal: resolution.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['runtime', {
     dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [],
   }],
 ]);
-
-function readPackage(directory) {
-  const packageJson = join(packageRoot, directory, 'package.json');
-  assert.ok(existsSync(packageJson), `missing package manifest: ${packageJson}`);
-  return JSON.parse(readFileSync(packageJson, 'utf8'));
-}
-
-function packageManifests(directory) {
-  if (!existsSync(directory)) return [];
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    if (!entry.isDirectory() || entry.name === 'node_modules') return [];
-    const child = join(directory, entry.name);
-    const packageJson = join(child, 'package.json');
-    return [
-      ...(existsSync(packageJson) ? [packageJson] : []),
-      ...packageManifests(child),
-    ];
-  });
-}
 
 function jinnDependencyNames(manifest, section) {
   return Object.keys(manifest[section] ?? {})
@@ -89,9 +58,9 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), targetDir) || '.'}`;
 }
 
-test('the plugin tree inventory is explicit and derives cardinality from the live declaration', () => {
+test('the plugin tree inventory is explicit and derives cardinality from shared discovery', () => {
   for (const [directory, expectedName] of PLUGIN_PACKAGES) {
-    const manifest = readPackage(directory);
+    const manifest = readPackageManifest(directory);
     assert.equal(manifest.name, expectedName);
     assert.equal(
       manifest.repository?.directory,
@@ -99,17 +68,28 @@ test('the plugin tree inventory is explicit and derives cardinality from the liv
       `${expectedName} has a stale repository directory`,
     );
   }
-  const actual = packageManifests(packageRoot)
-    .map((packageJson) => [
-      relative(packageRoot, dirname(packageJson)),
-      JSON.parse(readFileSync(packageJson, 'utf8')).name,
-    ])
+  const actual = discoverPluginPackages()
+    .map((pkg) => [pkg.directory, pkg.name])
     .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
   assert.deepEqual(
     actual,
     [...PLUGIN_PACKAGES].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
     'every package.json under plugin/ must be a declared plugin-tree package',
   );
+});
+
+test('nested package discovery is visible to the inventory guard', () => {
+  const fixture = mkdtempSync(join(packageRoot, '.plugin-tree-nested-inventory-'));
+  try {
+    const nested = join(fixture, 'nested-pkg');
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(nested, 'package.json'), JSON.stringify({
+      name: '@jinn-network/nested-fixture',
+      version: '0.0.0',
+    }, null, 2));
+    const discovered = discoverPluginPackages().map((pkg) => pkg.directory);
+    assert.ok(discovered.some((directory) => directory.endsWith('nested-pkg')));
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
 test('the inventory guard itself contains no hardcoded package-cardinality assertion', () => {
@@ -121,18 +101,16 @@ test('the Python adapter directories carry no npm manifest', () => {
   for (const directory of NON_NPM_DIRECTORIES) {
     const candidate = join(packageRoot, directory);
     if (!existsSync(candidate)) continue;
-    assert.deepEqual(
-      packageManifests(candidate).map((path) => relative(root, path)),
-      [],
-      `plugin/${directory} is a Python directory (C0 frozen adapter / C7 clean-slate adapter); `
-        + 'it is mirrored, never npm-published, and must not grow a package manifest',
-    );
+    const manifests = discoverPluginPackages()
+      .filter((pkg) => pkg.absoluteDirectory.startsWith(candidate))
+      .map((pkg) => pkg.manifestPath);
+    assert.deepEqual(manifests, []);
   }
 });
 
 test('plugin tree Jinn dependencies and portal resolutions match the approved graph', () => {
   for (const [directory] of PLUGIN_PACKAGES) {
-    const manifest = readPackage(directory);
+    const manifest = readPackageManifest(directory);
     const approved = JINN_DEPENDENCY_GRAPH.get(directory);
     assert.ok(approved, `missing dependency graph entry for ${directory}`);
     for (const section of DEPENDENCY_SECTIONS) {
@@ -146,15 +124,53 @@ test('plugin tree Jinn dependencies and portal resolutions match the approved gr
       .filter((name) => name.startsWith('@jinn-network/')).sort();
     assert.deepEqual(resolved, declared, `${directory} has unmatched Jinn resolutions`);
     for (const dependencyName of declared) {
+      const siblingVersion = JSON.parse(readFileSync(join(SIBLING_TREE_DIRS.get(dependencyName), 'package.json'), 'utf8')).version;
+      assert.equal(manifest.dependencies?.[dependencyName] ?? manifest.devDependencies?.[dependencyName], siblingVersion,
+        `${directory} must declare the exact sibling version for ${dependencyName}`);
       assert.equal(resolutions[dependencyName], expectedPortal(directory, dependencyName),
         `${directory} must resolve ${dependencyName} through its matching portal`);
     }
   }
 });
 
+test('runtime dependency versions match the approved exact maps', () => {
+  const manifest = readPackageManifest('runtime');
+  assert.deepEqual(
+    exactVersionViolations(manifest, APPROVED_RUNTIME_DEPENDENCIES, 'dependencies'),
+    [],
+  );
+  assert.deepEqual(
+    exactVersionViolations(manifest, APPROVED_RUNTIME_DEV_DEPENDENCIES, 'devDependencies'),
+    [],
+  );
+  assert.deepEqual(
+    unconsumedApprovedEntries(manifest, APPROVED_RUNTIME_DEPENDENCIES, 'dependencies'),
+    [],
+  );
+  assert.deepEqual(
+    unconsumedApprovedEntries(manifest, APPROVED_RUNTIME_DEV_DEPENDENCIES, 'devDependencies'),
+    [],
+  );
+});
+
+test('dependency version probes reject wrong external, sibling, and portal forms', () => {
+  assert.deepEqual(
+    exactVersionViolations({ dependencies: { zod: '^4.4.3' } }, APPROVED_RUNTIME_DEPENDENCIES, 'dependencies'),
+    ['dependencies:zod=^4.4.3'],
+  );
+  assert.deepEqual(
+    exactVersionViolations({ dependencies: { zod: '4.4.2' } }, APPROVED_RUNTIME_DEPENDENCIES, 'dependencies'),
+    ['dependencies:zod=4.4.2'],
+  );
+  assert.deepEqual(
+    unconsumedApprovedEntries({ dependencies: {} }, APPROVED_RUNTIME_DEPENDENCIES, 'dependencies'),
+    ['dependencies:zod'],
+  );
+});
+
 test('every plugin tree package publishes with trusted-publisher provenance', () => {
   for (const [directory] of PLUGIN_PACKAGES) {
-    const manifest = readPackage(directory);
+    const manifest = readPackageManifest(directory);
     assert.deepEqual(
       manifest.publishConfig,
       { access: 'public', provenance: true },

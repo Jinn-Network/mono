@@ -1,48 +1,22 @@
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const treeRoot = join(root, 'plugin');
+import { discoverPluginPackages, pluginRoot, root } from './plugin-tree-guard-common.mjs';
+
+const treeRoot = pluginRoot;
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'jinn-plugin-tree-packed-types-'));
 const archivesRoot = join(temporaryRoot, 'archives');
 const consumerRoot = join(temporaryRoot, 'consumer');
 
-const packages = [
-  ['runtime', '@jinn-network/plugin-runtime'],
-];
-
-// Every npm package under plugin/ that the packed-types canary must compile against.
-// The discovery assertion below proves this list matches the live tree.
+const packages = discoverPluginPackages().map((pkg) => [pkg.directory, pkg.name]);
 const PACKED_TYPES_PACKAGES = packages.map(([directory]) => directory);
 
-function discoveredPluginPackageDirectories() {
-  if (!existsSync(treeRoot)) return [];
-  return readdirSync(treeRoot, { withFileTypes: true }).flatMap((entry) => {
-    if (!entry.isDirectory() || entry.name === 'node_modules') return [];
-    const child = join(treeRoot, entry.name);
-    return existsSync(join(child, 'package.json')) ? [entry.name] : [];
-  }).sort();
-}
+const codeEntrypoints = packages.map(([, name]) => name);
 
-const discovered = discoveredPluginPackageDirectories();
-if (JSON.stringify(discovered) !== JSON.stringify([...PACKED_TYPES_PACKAGES].sort())) {
-  throw new Error(
-    `every package.json under plugin/ must be listed in plugin-tree-packed-types packages `
-      + `(discovered ${JSON.stringify(discovered)}, declared ${JSON.stringify(PACKED_TYPES_PACKAGES)})`,
-  );
-}
-
-const codeEntrypoints = [
-  '@jinn-network/plugin-runtime',
-];
-
-// Cross-tree Jinn dependencies must be packed as file: deps so NodeNext resolves them
-// from the packed consumer (benchmarking-packed-types.test.mjs precedent). C3 declares
-// none; C4-C7 add rows here as they add dependencies.
 const CROSS_TREE_PACKAGES = [];
 
 function run(command, args, options = {}) {
@@ -75,6 +49,24 @@ async function packOne(directory, name) {
     throw new Error(`npm pack returned an unexpected result for ${name}`);
   }
   return join(archivesRoot, packed[0].filename);
+}
+
+const nestedFixture = mkdtempSync(join(treeRoot, '.plugin-tree-nested-packed-'));
+try {
+  const nested = join(nestedFixture, 'nested-pkg');
+  mkdirSync(join(nested, 'src'), { recursive: true });
+  await writeFile(join(nested, 'package.json'), JSON.stringify({
+    name: '@jinn-network/nested-packed-fixture',
+    version: '0.0.0',
+    type: 'module',
+    exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } },
+  }, null, 2));
+  const discovered = discoverPluginPackages().map((pkg) => pkg.directory);
+  if (!discovered.some((directory) => directory.endsWith('nested-pkg'))) {
+    throw new Error('nested fixture package must be discovered before packed-types validation');
+  }
+} finally {
+  rmSync(nestedFixture, { recursive: true, force: true });
 }
 
 try {
@@ -143,7 +135,7 @@ try {
   }
 
   console.log(
-    `Compiled a packed TypeScript consumer against ${codeEntrypoints.length} public code entrypoints across all ${packages.length} plugin tree packages.`,
+    `Compiled a packed TypeScript consumer against ${codeEntrypoints.length} public code entrypoints across all ${packages.length} plugin tree packages (${PACKED_TYPES_PACKAGES.join(', ')}).`,
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
