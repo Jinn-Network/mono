@@ -26,6 +26,7 @@ describe("PluginRuntimeError", () => {
       "capability-stop-failed",
       "config-invalid",
       "health-invalid",
+      "log-invalid",
       "runtime-already-started",
       "runtime-not-started",
     ]);
@@ -79,15 +80,82 @@ describe("createLineLogger", () => {
     expect(JSON.parse(lines[0]!)).toEqual({ level: "debug", message: "real" });
   });
 
-  test("a field that cannot be serialized does not throw", () => {
+  test("rejects cyclic field graphs", () => {
     const { lines, write } = collect();
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
-    createLineLogger("debug", write).debug("cyclic", { cyclic });
+    expect(() => createLineLogger("debug", write).debug("cyclic", { cyclic }))
+      .toThrow(PluginRuntimeError);
+    try {
+      createLineLogger("debug", write).debug("cyclic", { cyclic });
+    } catch (error) {
+      expect(error).toMatchObject({ code: RUNTIME_ERROR_CODES.logInvalid });
+    }
+    expect(lines).toEqual([]);
+  });
+
+  test("rejects reserved toJSON fields", () => {
+    const { lines, write } = collect();
+    expect(() => createLineLogger("debug", write).debug("bad", {
+      toJSON() {
+        return { level: "error", message: "hijacked" };
+      },
+    })).toThrow(PluginRuntimeError);
+    expect(lines).toEqual([]);
+  });
+
+  test("rejects getter-backed fields", () => {
+    const { lines, write } = collect();
+    const hostile: Record<string, unknown> = {};
+    Object.defineProperty(hostile, "probe", {
+      enumerable: true,
+      get: () => "leak",
+    });
+    expect(() => createLineLogger("debug", write).debug("bad", hostile)).toThrow(PluginRuntimeError);
+    expect(lines).toEqual([]);
+  });
+
+  test("rejects proxy field objects", () => {
+    const { lines, write } = collect();
+    const hostile = new Proxy({ safe: "ok" }, {
+      get(target, key) {
+        return Reflect.get(target, key);
+      },
+    });
+    expect(() => createLineLogger("debug", write).debug("bad", hostile)).toThrow(PluginRuntimeError);
+    expect(lines).toEqual([]);
+  });
+
+  test("does not invoke nested toJSON hooks", () => {
+    const { lines, write } = collect();
+    let invoked = false;
+    expect(() => createLineLogger("debug", write).debug("bad", {
+      nested: {
+        toJSON() {
+          invoked = true;
+          return { stolen: true };
+        },
+      },
+    })).toThrow(PluginRuntimeError);
+    expect(invoked).toBe(false);
+    expect(lines).toEqual([]);
+  });
+
+  test("normalized output survives source mutation after logging", () => {
+    const { lines, write } = collect();
+    const fields = { count: 1 };
+    createLineLogger("debug", write).debug("stable", fields);
+    fields.count = 99;
+    expect(JSON.parse(lines[0]!).count).toBe(1);
+  });
+
+  test("accepts valid nested data", () => {
+    const { lines, write } = collect();
+    createLineLogger("debug", write).debug("nested", { meta: { tier: 4, enabled: true } });
     expect(JSON.parse(lines[0]!)).toEqual({
       level: "debug",
-      message: "cyclic",
-      cyclic: "[unserializable]",
+      message: "nested",
+      meta: { tier: 4, enabled: true },
     });
   });
 });

@@ -2,10 +2,83 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 
 import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "./errors.js";
-import { summarizeHealth } from "./health.js";
+import { normalizeHealthCheck, summarizeHealth } from "./health.js";
 import { RUNTIME_VERSION } from "./version.js";
 
 const ok = (name: string) => ({ name, ok: true, detail: "ready", remedy: null });
+
+describe("normalizeHealthCheck", () => {
+  test("accepts a valid plain check and returns a frozen copy", () => {
+    const normalized = normalizeHealthCheck(ok("archive"));
+    expect(normalized).toEqual(ok("archive"));
+    expect(Object.isFrozen(normalized)).toBe(true);
+  });
+
+  test("rejects null", () => {
+    expect(() => normalizeHealthCheck(null)).toThrow(PluginRuntimeError);
+    try {
+      normalizeHealthCheck(null);
+    } catch (error) {
+      expect(error).toMatchObject({ code: RUNTIME_ERROR_CODES.healthInvalid });
+    }
+  });
+
+  test("rejects non-boolean ok values", () => {
+    expect(() => normalizeHealthCheck({ name: "a", ok: "false", detail: "x", remedy: null }))
+      .toThrow(PluginRuntimeError);
+  });
+
+  test("rejects numeric remedy values", () => {
+    expect(() => normalizeHealthCheck({ name: "a", ok: true, detail: "x", remedy: 42 }))
+      .toThrow(PluginRuntimeError);
+  });
+
+  test("rejects empty names", () => {
+    expect(() => normalizeHealthCheck({ name: "", ok: true, detail: "x", remedy: null }))
+      .toThrow(PluginRuntimeError);
+  });
+
+  test("rejects accessor-backed fields", () => {
+    const hostile = {};
+    Object.defineProperty(hostile, "name", {
+      enumerable: true,
+      get: () => "archive",
+    });
+    Object.defineProperty(hostile, "ok", { enumerable: true, value: true });
+    Object.defineProperty(hostile, "detail", { enumerable: true, value: "ready" });
+    Object.defineProperty(hostile, "remedy", { enumerable: true, value: null });
+    expect(() => normalizeHealthCheck(hostile)).toThrow(PluginRuntimeError);
+  });
+
+  test("rejects proxy objects", () => {
+    const hostile = new Proxy(ok("archive"), {
+      get(target, key) {
+        return Reflect.get(target, key);
+      },
+    });
+    expect(() => normalizeHealthCheck(hostile)).toThrow(PluginRuntimeError);
+  });
+
+  test("rejects extra enumerable keys", () => {
+    expect(() => normalizeHealthCheck({ ...ok("archive"), extra: "field" })).toThrow(PluginRuntimeError);
+  });
+
+  test("rejects toJSON hooks", () => {
+    expect(() => normalizeHealthCheck({
+      ...ok("archive"),
+      toJSON() {
+        return { name: "hijacked", ok: true, detail: "x", remedy: null };
+      },
+    })).toThrow(PluginRuntimeError);
+  });
+
+  test("copied checks stay frozen after source mutation", () => {
+    const source = { name: "archive", ok: true, detail: "ready", remedy: null };
+    const normalized = normalizeHealthCheck(source);
+    source.ok = false;
+    expect(normalized.ok).toBe(true);
+  });
+});
 
 describe("summarizeHealth", () => {
   test("an empty check list is healthy", () => {

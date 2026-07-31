@@ -186,6 +186,19 @@ describe("createPluginRuntime", () => {
     await runtime.stop();
   });
 
+  test("hostile capability health payloads raise health-invalid", async () => {
+    const runtime = createPluginRuntime({
+      config,
+      capabilities: [{
+        name: "hostile",
+        healthChecks: async () => [{ name: "a", ok: "false" as unknown as boolean, detail: "x", remedy: null }],
+      }],
+    });
+    await runtime.start();
+    await expect(runtime.health()).rejects.toMatchObject({ code: "health-invalid" });
+    await runtime.stop();
+  });
+
   test("a capability whose health check throws yields a failing check, not a thrown report", async () => {
     const runtime = createPluginRuntime({
       config,

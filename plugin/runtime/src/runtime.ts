@@ -3,7 +3,7 @@
 import type { CapabilityContext, RuntimeCapability } from "./capability.js";
 import type { RuntimeConfig } from "./config.js";
 import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "./errors.js";
-import { type HealthCheck, type HealthReport, summarizeHealth } from "./health.js";
+import { type HealthCheck, type HealthReport, normalizeHealthChecks, summarizeHealth } from "./health.js";
 import { type RuntimeLogger, createSilentLogger } from "./logger.js";
 import { RUNTIME_VERSION } from "./version.js";
 
@@ -102,8 +102,11 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
       for (const capability of capabilities) {
         if (capability.healthChecks === undefined) continue;
         try {
-          checks.push(...(await capability.healthChecks()));
+          checks.push(...normalizeHealthChecks(await capability.healthChecks()));
         } catch (error) {
+          if (error instanceof PluginRuntimeError && error.code === "health-invalid") {
+            throw error;
+          }
           checks.push({
             name: capability.name,
             ok: false,
