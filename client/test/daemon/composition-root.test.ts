@@ -329,6 +329,70 @@ describe('buildOperatorComposition', () => {
     store.close();
   });
 
+  it('advertises repository-work when wiring selects prediction-v1-baseline (E39 cycle 3)', async () => {
+    // E39 diagnose→fix cycle 3: the e2e wires harness: 'prediction-v1-baseline', but
+    // ALL_LAUNCHERS only listed claude-code/codex/hermes/cursor. buildLaunchers returned [],
+    // assembleCapabilities filtered provisioner profiles against an empty launcher set, and
+    // verifyPreclaim declined every card with profile-mismatch even after the URI fix.
+    createBaseVenueMock.mockReset().mockImplementation(() => stubVenue());
+    openOperatorEvidenceMock.mockReset().mockResolvedValue({
+      runtime: {},
+      ports: { repository: {}, catalog: {}, awaitIndexed: vi.fn() },
+      close: evidenceCloseMock,
+    });
+
+    const { buildOperatorComposition } = await import('../../src/daemon/composition-root.js');
+
+    const stateRoot = mkdtempSync(join(tmpdir(), 'jinn-composition-prediction-'));
+    const evidenceRoot = mkdtempSync(join(tmpdir(), 'jinn-composition-prediction-ev-'));
+    const config = {
+      ipfsRegistryUrl: 'https://registry.example',
+      rpcUrl: 'http://127.0.0.1:8545',
+      claudePath: 'claude',
+      executionWiring: [
+        {
+          workKind: 'prediction.v1',
+          harness: 'prediction-v1-baseline',
+          model: 'prediction-v1-baseline/consensus',
+          plugins: [],
+          credentialRef: 'e2e',
+          isolationPolicy: 'process',
+          legacyManifestDigest: '0x' + 'ab'.repeat(32),
+        },
+      ],
+      claimPolicy: { mode: 'match-legacy-manifest-digest' },
+    };
+    const store = new Store(':memory:');
+    const composition = await buildOperatorComposition({
+      config: config as never,
+      publicClient: { getBlock: async () => ({ number: 0n, hash: '0x' + '0'.repeat(64) }) } as never,
+      walletClient: { account: { address: '0x1111111111111111111111111111111111111111' } } as never,
+      safeAddress: '0x1111111111111111111111111111111111111111',
+      mechAddress: '0x2222222222222222222222222222222222222222',
+      chain: {
+        chainId: 84532,
+        taskCoordinator: '0x3333333333333333333333333333333333333333',
+        jinnRouter: '0x4444444444444444444444444444444444444444',
+        mechMarketplace: '0x5555555555555555555555555555555555555555',
+        activityChecker: '0x6666666666666666666666666666666666666666',
+        generation: 'today',
+      } as never,
+      stateRoot,
+      evidenceRoot,
+      venueStateDbPath: join(stateRoot, 'venue.db'),
+      profileStore: { get: () => undefined },
+      store,
+    });
+
+    const capabilities = await composition.backend.capabilities();
+    expect(capabilities.taskProfiles).toContain(
+      'https://jinn.network/task-profiles/repository-work/1.0',
+    );
+
+    await composition.close();
+    store.close();
+  });
+
   it('wires a supplied deliverySigningKey through to signedDeliveries (finding E31)', async () => {
     createBaseVenueMock.mockReset().mockImplementation(() => stubVenue());
     openOperatorEvidenceMock.mockReset().mockResolvedValue({

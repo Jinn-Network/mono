@@ -143,6 +143,7 @@ import {
   codexLauncher,
   cursorLauncher,
   hermesLauncher,
+  predictionV1BaselineLauncher,
   EVALUATION_TASK_PROFILE,
   REPOSITORY_WORK_PROFILE,
   type LauncherContract,
@@ -321,13 +322,25 @@ const ALL_LAUNCHERS: readonly LauncherContract[] = [
   codexLauncher,
   hermesLauncher,
   cursorLauncher,
+  predictionV1BaselineLauncher,
 ];
+
+/**
+ * Wiring `harness` values that are legacy HarnessImpl names (or aliases) mapped onto the
+ * LauncherContract `id` they correspond to. `hermes-agent` is the registered harness name in
+ * `client/src/harnesses/names.ts`; the launcher package id is simply `hermes`.
+ */
+const HARNESS_TO_LAUNCHER_ID: Readonly<Record<string, string>> = {
+  'hermes-agent': 'hermes',
+};
 
 /**
  * Executable path sources per launcher id. `cursor` has no dedicated `JinnConfig` field or
  * documented env var anywhere in the codebase (the plan's field-map table names only
  * `config.claudePath` / `JINN_CODEX_PATH` / `JINN_HERMES_PATH`) — `JINN_CURSOR_PATH` is this
  * composition root's own reasonable inference, following the same naming convention.
+ * `prediction-v1-baseline` is in-process Node (no separate binary); `process.execPath` is the
+ * deployment executable the supervisor will spawn via the launcher's `plan().argv`.
  */
 function resolveLauncherCommand(id: string, config: JinnConfig): string | undefined {
   switch (id) {
@@ -339,6 +352,8 @@ function resolveLauncherCommand(id: string, config: JinnConfig): string | undefi
       return config.hermesPath;
     case 'cursor':
       return process.env['JINN_CURSOR_PATH'];
+    case 'prediction-v1-baseline':
+      return process.execPath;
     default:
       return undefined;
   }
@@ -384,7 +399,9 @@ function buildVerifiedExecutable(command: string): VerifiedExecutable {
 }
 
 function buildLaunchers(wiring: readonly ExecutionWiringEntry[]): readonly LauncherContract[] {
-  const wanted = new Set(wiring.map((entry) => entry.harness));
+  const wanted = new Set(
+    wiring.map((entry) => HARNESS_TO_LAUNCHER_ID[entry.harness] ?? entry.harness),
+  );
   return ALL_LAUNCHERS.filter((launcher) => wanted.has(launcher.id));
 }
 

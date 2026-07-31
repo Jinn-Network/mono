@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeCodeLauncher, codexLauncher, cursorLauncher, hermesLauncher, interpretResult } from "./index.js";
+import { claudeCodeLauncher, codexLauncher, cursorLauncher, hermesLauncher, interpretResult, predictionV1BaselineLauncher } from "./index.js";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
 
@@ -8,7 +8,7 @@ const paths = { work: "/attempt/work", input: "/attempt/input", harnessState: "/
 const attempt = { attemptUri: "urn:uuid:00000000-0000-0000-0000-000000000001", nonce: "n", attemptNumber: 1 } as AttemptIdentity;
 
 describe("v1 launchers", () => {
-  for (const launcher of [claudeCodeLauncher, codexLauncher, hermesLauncher, cursorLauncher]) {
+  for (const launcher of [claudeCodeLauncher, codexLauncher, hermesLauncher, cursorLauncher, predictionV1BaselineLauncher]) {
     it(`${launcher.id} plans deterministically and hermetically`, () => {
       const first = launcher.plan(view, paths, attempt);
       process.env.OPENROUTER_API_KEY = "ambient-secret";
@@ -25,7 +25,7 @@ describe("v1 launchers", () => {
     expect(hermesLauncher.plan(view, paths, attempt).secretForwards).toEqual(
       hermesLauncher.capabilities().secretForwards,
     );
-    for (const launcher of [claudeCodeLauncher, codexLauncher, cursorLauncher]) {
+    for (const launcher of [claudeCodeLauncher, codexLauncher, cursorLauncher, predictionV1BaselineLauncher]) {
       expect(launcher.capabilities().secretForwards).toEqual([]);
       expect(launcher.plan(view, paths, attempt).secretForwards).toEqual([]);
     }

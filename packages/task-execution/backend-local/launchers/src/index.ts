@@ -14,6 +14,8 @@ export { hermesLauncher } from "./hermes.js";
 export { makeHermesLauncher } from "./hermes.js";
 export { cursorLauncher } from "./cursor.js";
 export { makeCursorLauncher } from "./cursor.js";
+export { predictionV1BaselineLauncher } from "./prediction-v1-baseline.js";
+export { makePredictionV1BaselineLauncher } from "./prediction-v1-baseline.js";
 export { interpretResult } from "./result.js";
 export {
   EVALUATION_LAUNCHER_ID,
