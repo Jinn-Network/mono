@@ -76,7 +76,9 @@ export {
   createInMemoryPostingIntentStore,
   recoverPostingIntents,
 } from "./broadcast-intent.js";
+export { createFilePostingIntentStore } from "./posting-intent-file-store.js";
 export type {
+  OwnedPostingIntentRecord,
   PostingIntent,
   PostingIntentClaim,
   PostingIntentKey,
