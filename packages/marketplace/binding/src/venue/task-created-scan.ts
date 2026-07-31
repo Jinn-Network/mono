@@ -13,10 +13,23 @@ import type { PostingIntent, PostingOutcome, ScanForOnChainMatch } from "../broa
 /** Blocks per `getLogs` window. Free Base endpoints cap the range (2k on several), so the scan windows. */
 export const DEFAULT_SCAN_BLOCK_RANGE = 2_000n;
 
+/**
+ * Allowance between the requester's wall clock (`intent.createdAt`) and the block clock, before a
+ * match is judged older than the intent. Fifteen minutes absorbs ordinary host drift without
+ * re-opening the window a same-Task re-post lives in.
+ */
+export const DEFAULT_CLAIM_SKEW_SECONDS = 900n;
+
 export interface AmbiguousMatchReport {
   readonly intent: PostingIntent;
   readonly adopted: PostingOutcome;
   readonly additionalMatches: number;
+}
+
+/** Matches that were dropped because they were mined before the intent was claimed (F-C5-7). */
+export interface StaleMatchReport {
+  readonly intent: PostingIntent;
+  readonly skipped: number;
 }
 
 export interface OnChainMatchScanConfig {
@@ -32,6 +45,10 @@ export interface OnChainMatchScanConfig {
    * adopted and the caller is told, rather than the scan picking one quietly.
    */
   readonly onAmbiguousMatch?: (report: AmbiguousMatchReport) => void;
+  /** Clock-skew allowance for the claim-time lower bound; omitted -> `DEFAULT_CLAIM_SKEW_SECONDS`. */
+  readonly claimSkewSeconds?: bigint;
+  /** Called when matches were found but every one predates the intent's claim time (F-C5-7). */
+  readonly onStaleMatch?: (report: StaleMatchReport) => void;
 }
 
 const TASK_CREATED_EVENT = (() => {
@@ -45,9 +62,23 @@ interface Match extends PostingOutcome {
   readonly logIndex: number;
 }
 
+/** The intent's claim time in whole seconds, or undefined when `createdAt` is not a parsable instant. */
+function claimedAtSeconds(intent: PostingIntent): bigint | undefined {
+  const parsed = Date.parse(intent.createdAt);
+  return Number.isNaN(parsed) ? undefined : BigInt(Math.floor(parsed / 1000));
+}
+
 /**
  * Builds the `ScanForOnChainMatch` port `recoverPostingIntents` calls. The viem client is a
  * parameter: this module never constructs a transport and never reads an RPC URL (custody law).
+ *
+ * A match must be at least as new as the intent that is looking for it (finding F-C5-7).
+ * `TaskCreated` carries no submission digest, so the key this scan can check on-chain is two of
+ * the intent's three legs; a requester re-posting the same Task under a second Submission would
+ * otherwise have the FIRST post adopted for the second intent -- one match, no ambiguity report,
+ * a taskId belonging to a different Submission, and a post that never happens. Bounding the scan
+ * below by the claim time (minus a skew allowance) is what the requester already knows at claim
+ * time and costs one `getBlock` per candidate.
  */
 export function scanForOnChainMatch(
   publicClient: PublicClient,
@@ -55,6 +86,8 @@ export function scanForOnChainMatch(
 ): ScanForOnChainMatch {
   const window = config.blockRange ?? DEFAULT_SCAN_BLOCK_RANGE;
   if (window <= 0n) throw new RangeError("blockRange must be a positive block count");
+  const skew = config.claimSkewSeconds ?? DEFAULT_CLAIM_SKEW_SECONDS;
+  if (skew < 0n) throw new RangeError("claimSkewSeconds must not be negative");
 
   return async (intent) => {
     const wanted = `0x${intent.taskCidDigest.slice("sha256:".length)}`.toLowerCase();
@@ -89,6 +122,29 @@ export function scanForOnChainMatch(
     }
 
     if (matches.length === 0) return null;
+
+    // The claim-time lower bound. An unparsable `createdAt` leaves the bound off rather than
+    // stranding a recoverable intent -- the store never writes one, so this is a foreign-record case.
+    const floor = claimedAtSeconds(intent);
+    if (floor !== undefined) {
+      const timestamps = new Map<bigint, bigint>();
+      const fresh: Match[] = [];
+      for (const candidate of matches) {
+        if (!timestamps.has(candidate.blockNumber)) {
+          // eslint-disable-next-line no-await-in-loop -- candidates are rare (usually one).
+          const block = await publicClient.getBlock({ blockNumber: candidate.blockNumber });
+          timestamps.set(candidate.blockNumber, block.timestamp);
+        }
+        if ((timestamps.get(candidate.blockNumber) ?? 0n) + skew >= floor) fresh.push(candidate);
+      }
+      if (fresh.length !== matches.length) {
+        config.onStaleMatch?.({ intent, skipped: matches.length - fresh.length });
+      }
+      if (fresh.length === 0) return null;
+      matches.length = 0;
+      matches.push(...fresh);
+    }
+
     matches.sort((left, right) => {
       if (left.blockNumber !== right.blockNumber) return left.blockNumber < right.blockNumber ? -1 : 1;
       return left.logIndex - right.logIndex;

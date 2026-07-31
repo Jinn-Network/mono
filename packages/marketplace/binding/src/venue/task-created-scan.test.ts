@@ -33,8 +33,14 @@ interface ScanLogQuery {
 }
 type GetLogsMock = Mock<(query: ScanLogQuery) => Promise<readonly ReturnType<typeof log>[]>>;
 
-function client(getLogs: GetLogsMock, head = 1_000n): PublicClient {
-  return { getLogs, getBlockNumber: vi.fn(async () => head) } as unknown as PublicClient;
+const CLAIMED_AT_SECONDS = BigInt(Math.floor(Date.parse(INTENT.createdAt) / 1000));
+
+function client(getLogs: GetLogsMock, head = 1_000n, timestamp = CLAIMED_AT_SECONDS): PublicClient {
+  return {
+    getLogs,
+    getBlockNumber: vi.fn(async () => head),
+    getBlock: vi.fn(async () => ({ timestamp })),
+  } as unknown as PublicClient;
 }
 
 describe("scanForOnChainMatch", () => {
@@ -50,6 +56,40 @@ describe("scanForOnChainMatch", () => {
 
   test("ignores a post by the same creator for a different task digest", async () => {
     const getLogs: GetLogsMock = vi.fn(async (_query: ScanLogQuery) => [log({ args: { creator: CREATOR, taskId: 9n, taskCidDigest: `0x${"f".repeat(64)}` } })]);
+    const scan = scanForOnChainMatch(client(getLogs), { chain: BASE_SEPOLIA_TODAY, fromBlock: 0n });
+    expect(await scan(INTENT)).toBeNull();
+  });
+
+  test("refuses a post mined before this intent was claimed (finding F-C5-7)", async () => {
+    // The same requester re-posting the same Task under a second Submission produces two intents
+    // whose (creator, taskCidDigest) legs are identical -- `TaskCreated` carries no submission
+    // digest. Without a lower bound the scan adopts the FIRST post for the SECOND intent, tells
+    // the poster it landed, and the second post never happens. The claim time is that bound.
+    const onStaleMatch = vi.fn();
+    const getLogs: GetLogsMock = vi.fn(async (_query: ScanLogQuery) => [log()]);
+    const scan = scanForOnChainMatch(client(getLogs, 1_000n, CLAIMED_AT_SECONDS - 86_400n), {
+      chain: BASE_SEPOLIA_TODAY, fromBlock: 0n, onStaleMatch,
+    });
+    expect(await scan(INTENT)).toBeNull();
+    expect(onStaleMatch).toHaveBeenCalledTimes(1);
+    expect(onStaleMatch.mock.calls[0]?.[0]).toMatchObject({ skipped: 1 });
+  });
+
+  test("tolerates clock skew between the requester's claim time and the block clock", async () => {
+    const getLogs: GetLogsMock = vi.fn(async (_query: ScanLogQuery) => [log()]);
+    const scan = scanForOnChainMatch(client(getLogs, 1_000n, CLAIMED_AT_SECONDS - 60n), {
+      chain: BASE_SEPOLIA_TODAY, fromBlock: 0n, claimSkewSeconds: 900n,
+    });
+    expect(await scan(INTENT)).toMatchObject({ taskId: 42n });
+  });
+
+  test("does not match a log whose digest carries an unexpected encoding", async () => {
+    // The intent's digest is `sha256:<hex>`; the log's is a bare `0x`-prefixed word. The
+    // conversion is the only place those two encodings meet, so a log echoing the intent's own
+    // encoding must NOT match -- otherwise a lenient comparison would look correct by accident.
+    const getLogs: GetLogsMock = vi.fn(async (_query: ScanLogQuery) => [
+      log({ args: { creator: CREATOR, taskId: 9n, taskCidDigest: INTENT.taskCidDigest } }),
+    ]);
     const scan = scanForOnChainMatch(client(getLogs), { chain: BASE_SEPOLIA_TODAY, fromBlock: 0n });
     expect(await scan(INTENT)).toBeNull();
   });
