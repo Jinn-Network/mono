@@ -929,7 +929,7 @@ git commit -m "feat(plugin-runtime): source-boundary guard refusing the frozen t
 - Consumes: the built `plugin/runtime/dist` from Task 1.
 - Produces: `packages`, `codeEntrypoints`, `CROSS_TREE_PACKAGES` — the three lists later components extend.
 
-- [ ] **Step 1: Write the canary**
+- [x] **Step 1: Write the canary**
 
 Create `.github/scripts/plugin-tree-packed-types.test.mjs`:
 
@@ -1064,12 +1064,12 @@ try {
 }
 ```
 
-- [ ] **Step 2: Build and run the canary**
+- [x] **Step 2: Build and run the canary**
 
 Run: `cd plugin/runtime && yarn build && cd - && node .github/scripts/plugin-tree-packed-types.test.mjs`
 Expected: `Compiled a packed TypeScript consumer against 1 public code entrypoints across all 1 plugin tree packages.`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .github/scripts/plugin-tree-packed-types.test.mjs
