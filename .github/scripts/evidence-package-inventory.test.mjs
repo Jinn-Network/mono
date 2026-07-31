@@ -70,6 +70,13 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   }],
   ['trace-decode', {
     dependencies: ['@jinn-network/evidence-trajectory'],
+    // Yarn 4 does not inherit portal resolutions from a portaled dependency (C2-F1).
+    // These entries are install-graph only: they MUST appear in package.json resolutions
+    // and MUST NOT appear in any dependency section. Task 10 still forbids importing them.
+    transitivePortalResolutions: [
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/trust-core',
+    ],
     devDependencies: [],
     optionalDependencies: [],
     peerDependencies: [],
@@ -144,10 +151,18 @@ test('evidence package Jinn dependencies and portal resolutions match the approv
     const declared = DEPENDENCY_SECTIONS.flatMap((section) => jinnDependencyNames(manifest, section)).sort();
     const resolutions = manifest.resolutions ?? {};
     const resolved = Object.keys(resolutions).filter((name) => name.startsWith('@jinn-network/')).sort();
-    assert.deepEqual(resolved, declared, `${directory} has unmatched Jinn resolutions`);
+    const transitive = [...(approved.transitivePortalResolutions ?? [])].sort();
+    assert.deepEqual(resolved, [...declared, ...transitive].sort(),
+      `${directory} has unmatched Jinn resolutions`);
     for (const dependencyName of declared) {
       assert.equal(resolutions[dependencyName], expectedPortal(directory, dependencyName),
         `${directory} must resolve ${dependencyName} through its matching portal`);
+    }
+    for (const dependencyName of transitive) {
+      assert.ok(!(declared.includes(dependencyName)),
+        `${directory} must not declare transitive portal ${dependencyName} as a dependency`);
+      assert.equal(resolutions[dependencyName], expectedPortal(directory, dependencyName),
+        `${directory} must resolve transitive ${dependencyName} through its matching portal`);
     }
   }
 });
