@@ -5563,6 +5563,11 @@ Proposed dispositions only. Do not edit the spec or the program plan.
   program's cross-plan contracts alongside the doctor's `{name, ok, detail, remedy}` shape.
   The coordinator has said it will carry it there; recorded here so C4's own compliance is
   reviewable.
+- **F-C4-T13-2 — capture capability registers only when `BinIo.captureSigner` /
+  `io.captureSigner` is injected.** `buildCapabilities` in `plugin/runtime/src/bin.ts` returns
+  an empty capability list when the signer is absent; the default `jinn-plugin-runtime` process
+  entry omits `captureSigner` by design until C7 injects the host adapter's signer at the
+  composition root. **Disposition:** accept; C7 wires the signer when the host adapter lands.
 - **F-C4-10 — `capture-stranded` needed a second arm, for the same reason C5's F10 needed
   one.** C7 relayed C5's finding that a check can propose a remedy which cannot possibly work,
   because the state it reports has a cause the check never distinguished. C5's instance was
@@ -5708,3 +5713,35 @@ list; assert it is accepted. Do not tighten the regex.
 need `node:fs/promises` and read-only `process.platform`. **Disposition:** file-scoped
 carve-out for `plugin/runtime/src/capture/**` production sources (Task 3 Step 2b); keep
 `process.env` and non-capture production FS bans intact.
+
+## 2026-07-31 wave-1 whole-component review resolution (wave 2 — final under cap)
+
+Exact head reviewed: `da9f57d57`. Base: `ec57b5a2f`. Independent wave-1 review. This is the
+**only** repair wave under the program two-wave cap. Probe-first; then green + full gates.
+After scoped wave-2 rereview, remaining Important/Minor residuals are deferred; Critical
+that still fails escalates to the operator.
+
+| ID | Severity | Exact probe | Violated law | Minimal disposition |
+| --- | --- | --- | --- | --- |
+| C4-W1-1 | Critical | Plugin Tree CI: trajectory build fails `Cannot find module '@jinn-network/trust-core'`; trust-core built after evidence loop | Exact-head Plugin Tree CI green; C1 trajectory depends on trust-core | Build `packages/trust/core` **before** `packages/evidence/trajectory` in `plugin-tree-ci.yml` portal build list |
+| C4-W1-2 | Important | `identity.ts` hardcodes forward-link IRI; C1 export is the authority | Derivation amendment — import `TRAJECTORY_RECORD_IDENTIFIER_PROPERTY` from `@jinn-network/evidence-trajectory` | Re-export from C1 in `identity.ts` (or assemble imports C1 directly); drop local string literal |
+| C4-W1-3 | Important | Default `bin` never injects `captureSigner` → no capture capability; surface test only greps string | Residual must be named; no silent capability claim | Record **F-C4-T13-2** in plan + README: capture registers only when `io.captureSigner` injected; default entry omits it until C7; tighten surface test |
+
+### Implementation checklist (wave 2)
+
+- [x] C4-W1-1 — trust-core before trajectory in Plugin Tree CI
+- [x] C4-W1-2 — import/re-export `TRAJECTORY_RECORD_IDENTIFIER_PROPERTY` from C1
+- [x] C4-W1-3 — name F-C4-T13-2 in plan + README; honest surface test
+
+### Acceptance
+
+### Red / Green
+
+- **C4-W1-1 Red:** trust-core built after the evidence loop in `plugin-tree-ci.yml` (exact-head `da9f57d57`) — trajectory build fails `Cannot find module '@jinn-network/trust-core'`
+- **C4-W1-1 Green:** `PLACEHOLDER_SHA` — trust-core built before evidence loop; `yarn typecheck && yarn test` in `plugin/runtime`; `node --test .github/scripts/plugin-tree-package-inventory.test.mjs`; `node --test .github/scripts/plugin-tree-source-boundaries.test.mjs`; `node .github/scripts/plugin-tree-packed-types.test.mjs` pass
+- **C4-W1-2 Red:** `identity.ts` hardcoded `TRAJECTORY_RECORD_IDENTIFIER_PROPERTY` string literal (exact-head `da9f57d57`)
+- **C4-W1-2 Green:** `PLACEHOLDER_SHA` — re-export from `@jinn-network/evidence-trajectory`; plugin/runtime gates pass
+- **C4-W1-3 Red:** surface test only grepped `createCaptureCapability`; default `bin` omits `captureSigner` (exact-head `da9f57d57`)
+- **C4-W1-3 Green:** `PLACEHOLDER_SHA` — F-C4-T13-2 in plan + README; surface test asserts signer gating; plugin/runtime gates pass
+
+Coordinator dispatches scoped wave-2 rereview of this wave only.

@@ -55,8 +55,30 @@ describe("public surface", () => {
     expect(readme).toContain("never open another");
   });
 
-  test("the runtime process registers the capture capability", async () => {
+  test("capture registers only when BinIo.captureSigner is injected (F-C4-T13-2)", async () => {
     const bin = await readFile(new URL("../bin.ts", import.meta.url), "utf8");
     expect(bin).toContain("createCaptureCapability");
+    expect(bin).toContain("captureSigner?: DsseSigner");
+    expect(bin).toMatch(/if \(captureSigner === undefined\)[\s\S]*return \[\]/);
+
+    const entryBlock = bin.slice(bin.indexOf("if (isProcessEntry())"));
+    expect(entryBlock).not.toContain("captureSigner:");
+
+    const { main } = await import("../bin.js");
+    const out: string[] = [];
+    const exit = await main(["health"], {}, {
+      writeOut: (line) => out.push(line),
+      writeErr: () => {},
+      homeDirectory: "/tmp/test-home",
+      untilShutdown: async () => {},
+    });
+    expect(exit).toBe(0);
+    expect(JSON.parse(out[0]!).checks).toEqual([]);
+  });
+
+  test("the README names F-C4-T13-2 captureSigner gating", async () => {
+    const readme = await readFile(new URL("../../README.md", import.meta.url), "utf8");
+    expect(readme).toContain("F-C4-T13-2");
+    expect(readme).toContain("captureSigner");
   });
 });
