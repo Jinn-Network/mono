@@ -95,3 +95,19 @@ test('a version that goes backwards is refused outright', () => {
     /packages\/trust\/core: candidate 0\.1\.0 is not ahead of the published 0\.2\.0/,
   );
 });
+
+test('re-publishing the exact published version is allowed when it adds no fixture (stable-lane recovery)', () => {
+  // Regression: a half-published stack-v0.1.0 release re-run via workflow_dispatch
+  // must not die on the packages already published at 0.1.0 -- runRegistryBaseline
+  // compares candidateVersion (0.1.0) against each already-published package's
+  // published.version (also 0.1.0), and re-publishing an identical version adds
+  // no fixture and protects nothing.
+  assert.doesNotThrow(() => assertMinorBump('0.1.0', '0.1.0', { label: 'packages/trust/core', added: [] }));
+});
+
+test('an identical version that somehow adds a fixture is still refused (no free minor bump)', () => {
+  assert.throws(
+    () => assertMinorBump('0.1.0', '0.1.0', { label: 'packages/trust/core', added: ['a.json'] }),
+    /packages\/trust\/core: 1 fixture added since 0\.1\.0 \(a\.json\); a fixture addition is at least a minor bump, but 0\.1\.0 keeps minor 1/,
+  );
+});

@@ -72,9 +72,17 @@ export function assertMinorBump(publishedVersion, candidateVersion, { label, add
   const candidate = parseSemver(candidateVersion, label);
   const publishedRank = [published.major, published.minor, published.patch];
   const candidateRank = [candidate.major, candidate.minor, candidate.patch];
+  const identical = candidateRank.every((value, index) => value === publishedRank[index]);
   const ahead = candidateRank.some((value, index) => value > publishedRank[index]
     && candidateRank.slice(0, index).every((earlier, i) => earlier === publishedRank[i]));
-  if (!ahead) {
+  // A candidate re-publishing the exact version already on the registry is the
+  // documented stable-lane recovery path (a failed multi-package publish is safe
+  // to re-run; docs/runbooks/stack-npm-publishing.md #Recovery). It adds no
+  // fixture and protects nothing, so the ahead-of-latest requirement does not
+  // apply here. This is not a bypass of the append-only half: compareFixtureManifests
+  // already ran against this same baseline and would have thrown on any digest
+  // mismatch or removal before assertMinorBump is ever reached.
+  if (!ahead && !identical) {
     throw new Error(`${label}: candidate ${candidateVersion} is not ahead of the published ${publishedVersion}`);
   }
   if (added.length === 0) return;
