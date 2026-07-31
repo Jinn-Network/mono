@@ -1700,7 +1700,7 @@ git commit -m "feat(evidence-trajectory): the package public surface"
 
 > Fixture-provenance rule (platform architecture §5): fixtures are derived from this specification and the in-tree generator — **never captured from a product run**.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/fixtures.test.ts`:
 
@@ -1756,12 +1756,12 @@ describe("fixtures", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trajectory && yarn test`
 Expected: FAIL — `Failed to resolve import "./fixtures.js"`.
 
-- [ ] **Step 3: Write the fixture generator**
+- [x] **Step 3: Write the fixture generator**
 
 `scripts/generate-fixtures.mjs`:
 
@@ -1960,12 +1960,12 @@ Add to `package.json` scripts:
     "check:fixtures": "yarn build && node scripts/generate-fixtures.mjs",
 ```
 
-- [ ] **Step 4: Generate the fixtures**
+- [x] **Step 4: Generate the fixtures**
 
 Run: `cd packages/evidence/trajectory && yarn generate:fixtures`
 Expected: `fixtures written`; the `fixtures/` tree exists.
 
-- [ ] **Step 5: Write the loaders**
+- [x] **Step 5: Write the loaders**
 
 `src/fixtures.ts`:
 
@@ -2063,12 +2063,12 @@ export async function readAdversarialJson(id: string, filename: string): Promise
 }
 ```
 
-- [ ] **Step 6: Run the test to verify it passes**
+- [x] **Step 6: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trajectory && yarn test && yarn typecheck`
 Expected: PASS (all fixture tests green).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/evidence/trajectory
