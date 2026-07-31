@@ -204,12 +204,23 @@ for f in sorted(glob.glob('*.json')):
 - **Resume works:** re-run the exact same command. It should print `no runnable attempts — every
   attempt key already present in attempts.jsonl (resumed).` and do no new solving or grading.
 
-**Apple Silicon / aarch64 hosts cannot complete this smoke.** The SWE-rebench eval images are
-amd64; under Docker Desktop emulation a grade routinely exceeds even a 20-minute
-`--grade-timeout-ms` and returns `ungradeable (eval_timeout)`. Solves, mounting, patch recovery,
-the durable attempts log, and cost capture all verify correctly on such a host — grading does not.
-Run the smoke on the same Linux amd64 host the wave will use; a `3/4 ungradeable` result on a Mac
-is a host limitation, not a rig defect, and it does **not** satisfy the grading criterion above.
+**Apple Silicon / aarch64 hosts: raise the timeout, they do work.** The SWE-rebench eval images are
+amd64 and run under Docker Desktop's Rosetta emulation (confirm `UseVirtualizationFrameworkRosetta`
+is on — without it, emulation is far slower). A grade that takes a few minutes natively took
+**17.3 minutes** emulated in a measured run, so the 10-minute default and even a 20-minute
+`--grade-timeout-ms` return spurious `ungradeable (eval_timeout)` results. Pass
+`--grade-timeout-ms 3600000` (60 min) on such a host. A timeout is indistinguishable from a genuinely
+ungradeable instance in the outcome log, so an under-set timeout silently destroys slate coverage.
+
+**Disk cycles hard during grading.** One emulated grade took free space from 42 GB to 21 GB before
+the runner's per-round prune reclaimed it. Keep `JINN_EVAL_DISK_FLOOR_GB` above the transient peak
+(~22-25 GB with ~50 GB free) so the run aborts cleanly rather than exhausting the disk — on macOS,
+disk exhaustion during a full slate has crashed the host. Run `docker system prune -af --volumes`
+before a wave.
+
+**Wave-scale feasibility is the real aarch64 limit, not correctness.** At ~17 min per grade, serial
+grading, wave 1's ~180 attempts is roughly 50 hours of grading alone. Use the Linux amd64 host for
+waves; an aarch64 machine is fine for smoke runs and for proving the pipeline.
 
 A slate instance that proves ungradeable in this smoke run must be removed from `slate.json` and
 the slate rebuilt (§3) **before** the freeze commit — this is the last gradeability check before
