@@ -378,7 +378,7 @@ git commit -m "feat(evidence-trace-decode): scaffold the decoder package and reg
 
 This task implements program finding **F3**. Three namings exist today and none of them meet: the launchers declare bare `envelopeFormat` strings (`launchers/src/contract.ts:34`), the frozen parsers declare bare `sourceFormat` strings, and `NativeTraceCapture.format.entityId` is an absolute IRI that `assembly/src/evidence-join.ts:180` hardcodes to the supervisor-facts format regardless of harness. This table is the single mapping; decoders key on the IRI and on nothing else.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/formats.test.ts`:
 
@@ -467,12 +467,12 @@ describe("format identity registry", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trace-decode && yarn test`
 Expected: FAIL — `Failed to resolve import "./formats.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/formats.ts`:
 
@@ -595,12 +595,12 @@ export function formatIriForLegacySourceFormat(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trace-decode && yarn test && yarn typecheck`
 Expected: PASS (8 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/evidence/trace-decode/src
