@@ -12,6 +12,7 @@ const DEPENDENCY_SECTIONS = [
 // C6 (curation) appends its row here as it lands.
 const TASK_SUPPLY_PACKAGES = [
   ['admission', '@jinn-network/task-admission'],
+  ['curation', '@jinn-network/task-curation'],
   ['derivation', '@jinn-network/task-derivation'],
   ['posting', '@jinn-network/task-posting'],
 ];
@@ -34,6 +35,12 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['admission', {
     dependencies: ['@jinn-network/environment-record', '@jinn-network/trust-core'],
     devDependencies: [], optionalDependencies: [], peerDependencies: [],
+  }],
+  // curation is a pure projection over verdict observations (design §9): it derives
+  // per-task pass rates and depends on NO Jinn package — an empty graph is the assertion
+  // that projection-never-record holds at the dependency layer too.
+  ['curation', {
+    dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [],
   }],
   // derivation produces sealed Task + EvaluationSpec pairs, so it consumes the packages
   // that OWN those two kinds' sealing (protocol, profiles) alongside the record type (C1)

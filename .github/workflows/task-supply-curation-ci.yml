@@ -1,0 +1,45 @@
+name: Task Supply Curation CI
+
+on:
+  pull_request:
+  push:
+    branches: [next]
+    paths:
+      - "packages/task-supply/curation/**"
+      - ".github/scripts/task-supply-curation-guards.test.mjs"
+      - ".github/workflows/task-supply-curation-ci.yml"
+      - "docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md"
+
+permissions:
+  contents: read
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify curation guards
+        run: node --test .github/scripts/task-supply-curation-guards.test.mjs
+
+  curation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Verify Task Curation
+        working-directory: packages/task-supply/curation
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
