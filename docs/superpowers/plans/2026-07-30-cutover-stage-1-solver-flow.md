@@ -4685,3 +4685,122 @@ in `main.ts`, which covers the daemon. It does **not** cover:
 
 Items 1 and 2 are in this stage's blast radius and are resolved at Task 12 or recorded there as
 carried gaps; item 3 needs a ruling.
+
+### E17 — the mech does not revert on an already-delivered request (Task 8, design corrected)
+
+Task 8's plan detects "already delivered" by regex-matching a thrown revert. The deployed
+contract does not throw: `MechMarketplace.deliverMarketplace` sees `requestInfo.deliveryMech !=
+address(0)`, **`continue`s**, emits `RevokeRequest` instead of `Deliver`, and the Safe
+transaction **succeeds**. `SafeBroadcastReceipt.alreadySettled` is populated only from a decoded
+inner revert, so it cannot observe this case either. The plan's design would therefore have
+reported `delivered: 'sent'` for a delivery that never landed — and today-mode settlement then
+fails downstream with `digest-divergence`, far from the cause. **Disposition:** the leg now
+decides from evidence rather than from an error string — it decodes the `Deliver` event out of
+the receipt logs and reports `already` when this request's event is absent, keeping
+`broadcaster.classify(error)` (venue-base's real signal) plus the regex as the thrown-revert
+fallback. Two tests were added beyond the plan's four to cover the no-throw path, because the
+plan's four could not fail on the real behavior.
+
+Secondary mismatch: `MECH_ABI` in `@jinn-network/marketplace-binding` exports only the `Deliver`
+**event**, not a `deliverToMarketplace` function entry as the plan's test assumes. A local
+function-ABI slice was defined, mirroring what `writers/settlement.ts` already does for the same
+reason.
+
+### E18 — `test/daemon` fails under parallel workers, and it is not this plan's doing
+
+Several daemon tests construct a `Daemon` with the default `apiPort` and race to bind
+`127.0.0.1:7331`; under vitest's parallel workers they fail with `EADDRINUSE`. Measured on this
+branch: `yarn vitest run test/daemon` **without** any Task 9 change fails 9 tests across 3 files;
+**with** Task 9 it fails 6 across 4 files; run with `--no-file-parallelism` the same set is
+**42 files / 275 tests, all green**. It is a pre-existing port-contention flake whose visible
+victims shift with file scheduling. Two consequences worth stating plainly: a full-suite run is
+**not** a trustworthy gate for `test/daemon` on this machine, and any executor comparing against
+a parallel full-suite baseline will chase ghosts — one did, and lost a session to it.
+**Disposition:** every `test/daemon` run in this stage uses `--no-file-parallelism`. The real fix
+(bind port 0, or give each test its own `apiPort`) is a follow-up `fix` issue, not cutover work.
+
+### E19 — the projection state contains bigints and was persisted with `JSON.stringify` (found in review, fixed)
+
+`MarketplaceProjectionState` carries `bigint` on every claim/delivery-derived record —
+`requestIdBindings[].taskId` / `.nonce` / `.deliveryRate`, `attemptEngagements[].taskId`,
+`evaluationEngagements`, `pendingMechDeliveries`. Task 9's cursor write used plain
+`JSON.stringify`, which throws `TypeError: Do not know how to serialize a BigInt` on all of
+them. An `AdmissibleTaskProjection` holds no bigints, so the loop and its tests ran clean over
+`TaskCreated` traffic and would have crashed **the first time anyone claimed an attempt** — the
+failure would have appeared in production, not in CI. Fixed with a tagged codec
+(`{"$bigint":"<decimal>"}`) in `projector-cursor.ts`, plus round-trip tests. The tag is a
+single-key object rather than a numeric-looking string on purpose: `sequenceBySourceSubject`
+holds 16-digit sequence strings that a "looks like a number" reviver would corrupt into bigints.
+
+### E20 — the projector has no production event source, and the venue's observe port is stubbed (**blocking for live traffic**)
+
+This is the largest gap in the stage and it is not a wiring detail. Three required host-injected
+dependencies have **no production implementation anywhere in the repository** — only the unit
+tests' fakes:
+
+1. **`ProjectorLoopConfig.enrich`** — resolves each decoded chain event's signed `submission`
+   identity, `taskDigest`, `effectiveDeadline` and `dispatchContext`, and recomputes delivery
+   correspondence for Mech-deliver facts. It needs IPFS-backed resolution plus digest
+   verification. It is a subsystem, not a function.
+2. **A production log source** for `ProjectorLoopConfig.logSource`'s `{fetchLogs, heads}` shape.
+   Note this shape is also **not** venue-base's `ChainLogSource`
+   (`poll` / `cursor` / `logsInRange` / `orphanedBlockHashes` / `close`), so the plan's Task 9
+   Consumes line naming `venue.logSource` was wrong in kind, not just in name.
+3. **`BaseVenueConfig.observations`** — venue-base's observe port wants every observation ever
+   projected. `ProjectorLoop.tick()` computes `transition.observations` and discards it, and
+   `state_json` persists only `MarketplaceProjectionState`, which has no observations field and
+   cannot be replayed into one without re-reducing the full admitted-event history.
+
+Consequence, stated without hedging: **`buildOperatorComposition` assembles a claim / settle /
+release path that type-checks and unit-tests green, but whose `venue.observe` / `lifecycle` /
+`finality` report "no Attempt" for every reference, because `observations` is stubbed to `async
+() => []`.** The composition root is not safe for live settlement traffic as it stands. The
+plan's own Task 12 test cannot catch this — it stubs `createBaseVenue` entirely.
+
+A fourth dependency is gapped for a different and more defensible reason:
+**`verifySettlementGrade`** composes `createBindingResolver` + `createChainFactResolver` as
+directed, but their `BindingStore` / `AnchorReadClient` backing infrastructure does not exist —
+that is Phase B.1 (verifiability tier activation), still forward-looking. It is wired
+**fail-closed**: every check reports `missing`, never silently `verified`. That is the correct
+posture and needs no fix, only a ruling that stage 1 ships with grade checks unavailable.
+
+**Disposition:** items 1–3 are a scoped follow-up ("the projector's production event source and
+enrichment") that must land before the testnet closed-loop gate in Task 19 can pass. They were
+not in any of this plan's nineteen tasks. Recording rather than improvising: inventing an
+IPFS-resolution subsystem inside a composition root is exactly the pattern this program retires.
+
+### E21 — `client` and the portal packages resolve different viem patch versions
+
+`client` pins `viem@^2.0.0` → `2.55.8`; every package under `packages/` is its own yarn project
+and resolves `2.55.10`. Both satisfy the range and are runtime-identical, but TypeScript treats
+the two `PublicClient` / `WalletClient` declarations as nominally distinct. Task 12 is the first
+client code to pass a live viem client across the portal boundary into `createBaseVenue`, so it
+is the first place this bites; it was worked around with a single `as never` cast at the call
+site. A cast at a composition boundary is precisely where a real type error would hide, so this
+should not stand. **Fix:** pin `viem` in client's `resolutions`, following the `better-sqlite3` /
+`ajv` precedent from E3, and drop the cast.
+
+### E22 — smaller Task 12 mismatches, all adapted
+
+- `SelectedProvisioner` and `LocalLauncherDeployment` are defined in the assembly package but not
+  re-exported from its `index.ts`; structurally-equivalent local types were used.
+- `ProfileStore` comes from `@jinn-network/task-execution-profiles`, not `-workspace`.
+- `venue.safe` carries no `safeAddress` field, so the composition root wraps it to satisfy the
+  `VenueBroadcaster` port's E5-mandated bound-Safe check.
+- `createRegistryPinPort` takes `{registryUrl, fetchImpl, timeoutMs?}` with `fetchImpl`
+  **required**, not the plan's `{addUrl}`.
+- `launcherDeployments` entries are `{executable: {path, digest}, probe()}`, not
+  `{executablePath, versionProbe}`.
+- `resolveCapabilityGrants(grants, config)` does not exist; implemented inline.
+- `config.maxConcurrentAttempts` does not exist on `JinnConfig`; the default of 4 always applies.
+- `WorkspaceKind` is `'dir' | 'worktree'`, not `'plain-dir' | 'git-worktree'`.
+- The build-meta module is `client/src/build-info.ts` (`buildInfo.implVersion`), not
+  `dist/build-meta`.
+- `LocalTaskExecutionBackendConfig` has two optional fields the plan's "every required field, no
+  gaps" table omits: `resolveTaskProfile?` and `cancellationKillPollCeilingMs?`. Both left unset.
+- **No `MarketplaceChainConfig` exists for Base mainnet** — `BASE_SEPOLIA_TODAY` is the only real
+  chain config in the repo, so `main.ts` gates composition construction on
+  `config.network === 'testnet'` and leaves `composition` undefined on mainnet. Stage 1 is a
+  testnet cutover, so this is consistent, but it is a constraint the plan never states.
+- `selectProvisioner`'s git-worktree branch needs per-call `referenceRepository` / `oid` that no
+  `JinnConfig` field carries; the composition root always builds the plain-directory provisioner.
