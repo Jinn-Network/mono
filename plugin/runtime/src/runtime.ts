@@ -5,6 +5,7 @@ import type { RuntimeConfig } from "./config.js";
 import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "./errors.js";
 import { type HealthCheck, type HealthReport, normalizeHealthChecks, summarizeHealth } from "./health.js";
 import { type RuntimeLogger, createSilentLogger } from "./logger.js";
+import { describeUnknownError } from "./safe-error.js";
 import { RUNTIME_VERSION } from "./version.js";
 
 export interface PluginRuntimeOptions {
@@ -19,10 +20,6 @@ export interface PluginRuntime {
   stop(): Promise<void>;
 }
 
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function assertUniqueNames(capabilities: readonly RuntimeCapability[]): void {
   const seen = new Set<string>();
   for (const capability of capabilities) {
@@ -33,6 +30,14 @@ function assertUniqueNames(capabilities: readonly RuntimeCapability[]): void {
       );
     }
     seen.add(capability.name);
+  }
+}
+
+function safeLogError(log: RuntimeLogger, message: string, fields: Record<string, unknown>): void {
+  try {
+    log.error(message, fields);
+  } catch {
+    // Diagnostic logging must never abort cleanup.
   }
 }
 
@@ -55,10 +60,10 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
       try {
         await capability.stop?.();
       } catch (error) {
-        failures.push(`${capability.name}: ${describe(error)}`);
-        log.error("capability failed to stop", {
+        failures.push(`${capability.name}: ${describeUnknownError(error)}`);
+        safeLogError(log, "capability failed to stop", {
           capability: capability.name,
-          reason: describe(error),
+          reason: describeUnknownError(error),
         });
       }
     }
@@ -81,7 +86,7 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
           await stopRunning();
           throw new PluginRuntimeError(
             RUNTIME_ERROR_CODES.capabilityStartFailed,
-            `capability ${capability.name} failed to start: ${describe(error)}`,
+            `capability ${capability.name} failed to start: ${describeUnknownError(error)}`,
             { cause: error },
           );
         }
@@ -110,7 +115,7 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
           checks.push({
             name: capability.name,
             ok: false,
-            detail: `the capability could not report its health: ${describe(error)}`,
+            detail: `the capability could not report its health: ${describeUnknownError(error)}`,
             remedy: null,
           });
         }
@@ -122,7 +127,11 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
       if (!started) return;
       const failures = await stopRunning();
       started = false;
-      log.debug("runtime stopped", {});
+      try {
+        log.debug("runtime stopped", {});
+      } catch {
+        // Diagnostic logging must never abort stop reporting.
+      }
       if (failures.length > 0) {
         throw new PluginRuntimeError(
           RUNTIME_ERROR_CODES.capabilityStopFailed,

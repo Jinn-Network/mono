@@ -37,6 +37,43 @@ function isPlainDataObject(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
+function isPlainDenseArray(value: unknown): value is unknown[] {
+  if (types.isProxy(value)) {
+    healthInvalid("health checks must not be a proxy array");
+  }
+  if (!Array.isArray(value)) {
+    healthInvalid("health checks must be an array");
+  }
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+  if (lengthDescriptor?.get !== undefined || lengthDescriptor?.set !== undefined) {
+    healthInvalid("health checks array must not use a length accessor");
+  }
+  const length = value.length;
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key === "symbol") {
+      healthInvalid("health checks array must not define symbol keys");
+    }
+    if (key === "length") continue;
+    const numeric = Number(key);
+    if (!Number.isInteger(numeric) || numeric < 0 || numeric >= length) {
+      healthInvalid("health checks array has non-index properties");
+    }
+  }
+  for (let index = 0; index < length; index += 1) {
+    if (!(index in value)) {
+      healthInvalid("health checks array must be dense");
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    if (descriptor?.get !== undefined || descriptor?.set !== undefined) {
+      healthInvalid("health checks array must not use index accessors");
+    }
+    if (descriptor !== undefined && !descriptor.enumerable) {
+      healthInvalid("health checks array indices must be enumerable");
+    }
+  }
+  return true;
+}
+
 function readOwnDataProperty(
   value: Record<string, unknown>,
   key: string,
@@ -96,8 +133,12 @@ export function normalizeHealthCheck(input: unknown): HealthCheck {
   });
 }
 
-export function normalizeHealthChecks(inputs: readonly unknown[]): readonly HealthCheck[] {
-  return Object.freeze(inputs.map((input) => normalizeHealthCheck(input)));
+export function normalizeHealthChecks(inputs: unknown): readonly HealthCheck[] {
+  if (!isPlainDenseArray(inputs)) {
+    healthInvalid("health checks must be an array");
+  }
+  const normalized = inputs.map((input) => normalizeHealthCheck(input));
+  return Object.freeze(normalized);
 }
 
 /** Fold contributed checks into one report. Order is preserved; names must be unique. */
@@ -108,17 +149,18 @@ export function summarizeHealth(
   const seen = new Set<string>();
   const normalizedChecks: HealthCheck[] = [];
   for (const check of checks) {
-    if (check.name.trim() === "") {
+    const normalized = normalizeHealthCheck(check);
+    if (normalized.name.trim() === "") {
       healthInvalid("a health check must have a name");
     }
-    if (check.detail.trim() === "") {
-      healthInvalid(`health check ${check.name} must have a detail`);
+    if (normalized.detail.trim() === "") {
+      healthInvalid(`health check ${normalized.name} must have a detail`);
     }
-    if (seen.has(check.name)) {
-      healthInvalid(`duplicate health check name: ${check.name}`);
+    if (seen.has(normalized.name)) {
+      healthInvalid(`duplicate health check name: ${normalized.name}`);
     }
-    seen.add(check.name);
-    normalizedChecks.push(Object.freeze({ ...check }));
+    seen.add(normalized.name);
+    normalizedChecks.push(Object.freeze({ ...normalized }));
   }
   return Object.freeze({
     ok: normalizedChecks.every((check) => check.ok),

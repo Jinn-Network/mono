@@ -40,7 +40,40 @@ function isPlainDataObject(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
-function normalizeLogValue(value: unknown, seen: WeakSet<object>): unknown {
+function isPlainDenseArray(value: unknown[]): void {
+  if (types.isProxy(value)) {
+    logInvalid("log fields cannot use proxy arrays");
+  }
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+  if (lengthDescriptor?.get !== undefined || lengthDescriptor?.set !== undefined) {
+    logInvalid("log fields cannot use array length accessors");
+  }
+  const length = value.length;
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key === "symbol") {
+      logInvalid("log fields cannot use symbol array keys");
+    }
+    if (key === "length") continue;
+    const numeric = Number(key);
+    if (!Number.isInteger(numeric) || numeric < 0 || numeric >= length) {
+      logInvalid("log fields cannot use augmented arrays");
+    }
+  }
+  for (let index = 0; index < length; index += 1) {
+    if (!(index in value)) {
+      logInvalid("log fields cannot use sparse arrays");
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    if (descriptor?.get !== undefined || descriptor?.set !== undefined) {
+      logInvalid("log fields cannot use index accessors");
+    }
+    if (descriptor !== undefined && !descriptor.enumerable) {
+      logInvalid("log fields cannot use non-enumerable indices");
+    }
+  }
+}
+
+function normalizeLogValue(value: unknown, activePath: Set<object>): unknown {
   if (value === null) return null;
   const valueType = typeof value;
   if (valueType === "string" || valueType === "boolean") return value;
@@ -54,14 +87,23 @@ function normalizeLogValue(value: unknown, seen: WeakSet<object>): unknown {
     logInvalid(`log fields cannot contain ${valueType}`);
   }
   if (Array.isArray(value)) {
-    const normalized: unknown[] = [];
-    for (let index = 0; index < value.length; index += 1) {
-      if (!(index in value)) {
-        logInvalid("log fields cannot use sparse arrays");
-      }
-      normalized.push(normalizeLogValue(value[index], seen));
+    if (types.isProxy(value)) {
+      logInvalid("log fields cannot use proxy arrays");
     }
-    return normalized;
+    isPlainDenseArray(value);
+    if (activePath.has(value)) {
+      logInvalid("log fields cannot contain cycles");
+    }
+    activePath.add(value);
+    const normalized: unknown[] = [];
+    try {
+      for (let index = 0; index < value.length; index += 1) {
+        normalized.push(normalizeLogValue(value[index], activePath));
+      }
+      return normalized;
+    } finally {
+      activePath.delete(value);
+    }
   }
   if (!isPlainDataObject(value)) {
     logInvalid("log fields must be plain objects");
@@ -69,26 +111,30 @@ function normalizeLogValue(value: unknown, seen: WeakSet<object>): unknown {
   if (Object.prototype.hasOwnProperty.call(value, "toJSON")) {
     logInvalid("log fields must not define toJSON");
   }
-  if (seen.has(value)) {
+  if (activePath.has(value)) {
     logInvalid("log fields cannot contain cycles");
   }
-  seen.add(value);
+  activePath.add(value);
   const normalized: Record<string, unknown> = {};
-  for (const key of Object.keys(value)) {
-    if (key === "level" || key === "message") continue;
-    if (RESERVED_FIELD_KEYS.has(key)) {
-      logInvalid(`log fields cannot use reserved key ${key}`);
+  try {
+    for (const key of Object.keys(value)) {
+      if (key === "level" || key === "message") continue;
+      if (RESERVED_FIELD_KEYS.has(key)) {
+        logInvalid(`log fields cannot use reserved key ${key}`);
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor?.get !== undefined || descriptor?.set !== undefined) {
+        logInvalid(`log fields must not use accessors for ${key}`);
+      }
+      if (descriptor !== undefined && !descriptor.enumerable) {
+        logInvalid(`log field ${key} must be enumerable`);
+      }
+      normalized[key] = normalizeLogValue(value[key], activePath);
     }
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (descriptor?.get !== undefined || descriptor?.set !== undefined) {
-      logInvalid(`log fields must not use accessors for ${key}`);
-    }
-    if (descriptor !== undefined && !descriptor.enumerable) {
-      logInvalid(`log field ${key} must be enumerable`);
-    }
-    normalized[key] = normalizeLogValue(value[key], seen);
+    return normalized;
+  } finally {
+    activePath.delete(value);
   }
-  return normalized;
 }
 
 export function normalizeLogFields(fields: unknown): Readonly<Record<string, unknown>> {
@@ -96,7 +142,7 @@ export function normalizeLogFields(fields: unknown): Readonly<Record<string, unk
   if (!isPlainDataObject(fields)) {
     logInvalid("log fields must be a plain object");
   }
-  return Object.freeze(normalizeLogValue(fields, new WeakSet()) as Record<string, unknown>);
+  return Object.freeze(normalizeLogValue(fields, new Set()) as Record<string, unknown>);
 }
 
 /**

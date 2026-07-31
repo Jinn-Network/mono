@@ -158,4 +158,50 @@ describe("createLineLogger", () => {
       meta: { tier: 4, enabled: true },
     });
   });
+
+  test("rejects proxy arrays without running index getters", () => {
+    const { lines, write } = collect();
+    let getterRuns = 0;
+    const hostile = new Proxy([1], {
+      get(target, key) {
+        if (key === "0") getterRuns += 1;
+        return Reflect.get(target, key);
+      },
+    });
+    expect(() => createLineLogger("debug", write).debug("bad", { hostile })).toThrow(PluginRuntimeError);
+    expect(getterRuns).toBe(0);
+    expect(lines).toEqual([]);
+  });
+
+  test("rejects sparse and augmented arrays", () => {
+    const { lines, write } = collect();
+    const sparse = [1, , 3];
+    expect(() => createLineLogger("debug", write).debug("sparse", { sparse })).toThrow(PluginRuntimeError);
+    const augmented = [1];
+    (augmented as unknown as Record<string, unknown>).extra = 2;
+    expect(() => createLineLogger("debug", write).debug("augmented", { augmented })).toThrow(PluginRuntimeError);
+    expect(lines).toEqual([]);
+  });
+
+  test("allows shared DAG objects as duplicated values", () => {
+    const { lines, write } = collect();
+    const shared = { tier: 4 };
+    createLineLogger("debug", write).debug("dag", { left: shared, right: shared });
+    expect(JSON.parse(lines[0]!)).toEqual({
+      level: "debug",
+      message: "dag",
+      left: { tier: 4 },
+      right: { tier: 4 },
+    });
+  });
+
+  test("rejects mutual object-array cycles", () => {
+    const { lines, write } = collect();
+    const objectCycle: Record<string, unknown> = {};
+    const arrayCycle: unknown[] = [];
+    objectCycle.child = arrayCycle;
+    arrayCycle.push(objectCycle);
+    expect(() => createLineLogger("debug", write).debug("cycle", { objectCycle })).toThrow(PluginRuntimeError);
+    expect(lines).toEqual([]);
+  });
 });

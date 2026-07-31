@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 
 import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "./errors.js";
-import { normalizeHealthCheck, summarizeHealth } from "./health.js";
+import { normalizeHealthCheck, normalizeHealthChecks, summarizeHealth } from "./health.js";
 import { RUNTIME_VERSION } from "./version.js";
 
 const ok = (name: string) => ({ name, ok: true, detail: "ready", remedy: null });
@@ -77,6 +77,34 @@ describe("normalizeHealthCheck", () => {
     const normalized = normalizeHealthCheck(source);
     source.ok = false;
     expect(normalized.ok).toBe(true);
+  });
+});
+
+describe("normalizeHealthChecks", () => {
+  test("rejects proxy arrays before iteration", () => {
+    const hostile = new Proxy([ok("archive")], {
+      get(target, key) {
+        return Reflect.get(target, key);
+      },
+    });
+    expect(() => normalizeHealthChecks(hostile)).toThrow(PluginRuntimeError);
+  });
+
+  test("rejects sparse arrays at the beginning, middle, and end", () => {
+    const sparse = [ok("a"), , ok("c")] as unknown[];
+    expect(() => normalizeHealthChecks(sparse)).toThrow(PluginRuntimeError);
+  });
+
+  test("rejects augmented arrays with extra string keys", () => {
+    const augmented = [ok("a")];
+    (augmented as unknown as Record<string, unknown>).extra = ok("b");
+    expect(() => normalizeHealthChecks(augmented)).toThrow(PluginRuntimeError);
+  });
+
+  test("accepts a dense plain array and freezes the result", () => {
+    const normalized = normalizeHealthChecks([ok("a"), ok("b")]);
+    expect(normalized).toHaveLength(2);
+    expect(Object.isFrozen(normalized)).toBe(true);
   });
 });
 

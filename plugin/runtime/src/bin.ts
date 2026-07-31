@@ -10,6 +10,7 @@ import { resolveRuntimeConfig } from "./config.js";
 import { PluginRuntimeError } from "./errors.js";
 import { createLineLogger } from "./logger.js";
 import { createPluginRuntime } from "./runtime.js";
+import { describeUnknownError } from "./safe-error.js";
 import { RUNTIME_VERSION } from "./version.js";
 
 const USAGE = [
@@ -64,7 +65,9 @@ export async function main(
     config = resolveRuntimeConfig({ env, homeDirectory: io.homeDirectory });
   } catch (error) {
     io.writeErr(
-      error instanceof PluginRuntimeError ? error.message : `configuration failed: ${String(error)}`,
+      error instanceof PluginRuntimeError
+        ? error.message
+        : `configuration failed: ${describeUnknownError(error)}`,
     );
     return 2;
   }

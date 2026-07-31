@@ -143,7 +143,12 @@ describe("createPluginRuntime", () => {
       config,
       capabilities: [
         capability("first"),
-        capability("bad", { stop: async () => { throw new Error("stuck"); } }),
+        capability("bad", {
+          stop: async () => {
+            events.push("stop:bad");
+            throw new Error("stuck");
+          },
+        }),
         capability("last"),
       ],
     });
@@ -154,8 +159,58 @@ describe("createPluginRuntime", () => {
       "start:bad",
       "start:last",
       "stop:last",
+      "stop:bad",
       "stop:first",
     ]);
+  });
+
+  test("hostile thrown values at start are normalized without running coercion hooks", async () => {
+    const hostile = {
+      toString() {
+        throw new Error("toString ran");
+      },
+    };
+    const runtime = createPluginRuntime({
+      config,
+      capabilities: [{ name: "bad", start: async () => { throw hostile; } }],
+    });
+    await expect(runtime.start()).rejects.toMatchObject({
+      code: "capability-start-failed",
+      message: expect.stringContaining("an unknown error occurred"),
+    });
+  });
+
+  test("logger failure during stop cleanup still attempts every capability stop", async () => {
+    const events: string[] = [];
+    const runtime = createPluginRuntime({
+      config,
+      capabilities: [
+        {
+          name: "first",
+          start: async () => { events.push("start:first"); },
+          stop: async () => {
+            events.push("stop:first");
+            throw new Error("first stuck");
+          },
+        },
+        {
+          name: "second",
+          start: async () => { events.push("start:second"); },
+          stop: async () => { events.push("stop:second"); },
+        },
+      ],
+      log: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {
+          throw new Error("logger failed");
+        },
+      },
+    });
+    await runtime.start();
+    await expect(runtime.stop()).rejects.toMatchObject({ code: "capability-stop-failed" });
+    expect(events).toEqual(["start:first", "start:second", "stop:second", "stop:first"]);
   });
 
   test("health folds every capability's checks in registration order", async () => {
