@@ -849,7 +849,7 @@ git commit -m "feat(plugin-runtime): capture staging paths with owner-only creat
 
 The feed is the seam C7's Hermes adapter satisfies. It is NDJSON so it can be appended to during a live session without rewriting, and so the **0-based line ordinal is a stable back-reference** from a trajectory span into the exact source line. Per program finding F5 the trajectory record inlines no message content; content lives here, in the digest-bound native trace, and spans point at it by ordinal.
 
-- [ ] **Step 1: Write the fixtures**
+- [x] **Step 1: Write the fixtures**
 
 `plugin/runtime/fixtures/capture/session.ndjson` (one JSON object per line, LF-terminated, final line ends with LF):
 
@@ -871,7 +871,7 @@ The feed is the seam C7's Hermes adapter satisfies. It is NDJSON so it can be ap
 {"type":"session-close","atUnixNano":"1785488401000000000","endedAt":"2026-07-30T09:00:01Z","outcome":"abandoned","summary":"(no summary)"}
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 `plugin/runtime/src/capture/feed.test.ts`:
 
@@ -1040,7 +1040,7 @@ describe("parseSessionFeed", () => {
 });
 ```
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [x] **Step 3: Run the test to verify it fails**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/feed.test.ts
@@ -1048,7 +1048,7 @@ cd plugin/runtime && yarn test src/capture/feed.test.ts
 
 Expected: FAIL — `Failed to resolve import "./identity.js"`.
 
-- [ ] **Step 4: Write the identity module**
+- [x] **Step 4: Write the identity module**
 
 `plugin/runtime/src/capture/identity.ts`:
 
@@ -1114,7 +1114,7 @@ export function executorIri(hostName: string): `${string}:${string}` {
 }
 ```
 
-- [ ] **Step 5: Write the feed module**
+- [x] **Step 5: Write the feed module**
 
 `plugin/runtime/src/capture/feed.ts`:
 
@@ -1329,7 +1329,7 @@ export function parseSessionFeed(bytes: Uint8Array): ParsedSessionFeed {
 }
 ```
 
-- [ ] **Step 6: Run the test to verify it passes**
+- [x] **Step 6: Run the test to verify it passes**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/feed.test.ts && yarn typecheck
@@ -1337,7 +1337,7 @@ cd plugin/runtime && yarn test src/capture/feed.test.ts && yarn typecheck
 
 Expected: PASS (17 tests).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add plugin/runtime/src plugin/runtime/fixtures
