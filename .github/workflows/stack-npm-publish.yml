@@ -27,12 +27,19 @@ permissions:
   checks: read
 
 concurrency:
-  # Deliberately branch-agnostic: the whole 45-package set republishes on every
-  # push regardless of which tree changed, so a push to integration/evidence-v1
-  # and a push to next must serialize, not race the same per-package canary
-  # dist-tag against each other (a cross-branch race spuriously trips
-  # verifyCoherentSet's dist-tag check with a benign, already-superseded tag).
-  group: stack-npm-publish
+  # Canary lane (push) is deliberately branch-agnostic: the whole 45-package
+  # set republishes on every push regardless of which tree changed, so a push
+  # to integration/evidence-v1 and a push to next must serialize, not race the
+  # same per-package canary dist-tag against each other (a cross-branch race
+  # spuriously trips verifyCoherentSet's dist-tag check with a benign,
+  # already-superseded tag). The stable lane (release / workflow_dispatch)
+  # gets its own group keyed by release tag, not the canary constant: GitHub
+  # cancels at most one *pending* run per concurrency group, so a shared group
+  # let an in-progress canary run's queued stable release get cancelled by the
+  # next ordinary canary push -- the two lanes have no reason to serialize
+  # with each other, since they publish different versions to different
+  # dist-tags and verifyCoherentSet checks each independently.
+  group: ${{ github.event_name == 'push' && 'stack-npm-publish-canary' || format('stack-npm-publish-stable-{0}', github.event.release.tag_name || inputs.release_tag) }}
   cancel-in-progress: false
 
 jobs:
@@ -90,6 +97,18 @@ jobs:
           fi
 
       - name: Verify the six platform tree CI workflows
+        # Known limited reach, per plan D7 (accepted, not a defect to fix here):
+        # (a) this step runs a minute or so into the job, while the six
+        # push-triggered tree CIs on the same commit are typically still
+        # in_progress -- a run with no *completed* conclusion at this sha is not
+        # treated as a failure, so an eventually-red canary can still publish;
+        # (b) all six tree workflows push-trigger on `next` only, so a base
+        # branch like integration/evidence-v1 has no run at the sha at all and
+        # the gate passes vacuously. Both conform to the stated contract ("no
+        # run at that sha is not a failure"); the stable lane carries no
+        # equivalent gate at all, also per plan. Tightening this to actually
+        # bite needs a workflow_run-triggered publish lane or a bounded wait
+        # for the six runs to conclude -- out of scope for this gate.
         if: steps.guard.outputs.present == 'true'
         uses: actions/github-script@v7
         env:

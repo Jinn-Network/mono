@@ -10,13 +10,28 @@ test('the canary lane triggers on both the integration branch and next', () => {
   assert.match(workflow, /branches:\s*\[integration\/evidence-v1, next\]/);
 });
 
-test('the concurrency group serializes across branches, not per-ref', () => {
-  // A per-ref group (stack-npm-publish-${{ github.ref }}) lets a push to
+test('the canary concurrency group serializes across branches, not per-ref', () => {
+  // A per-ref group (stack-npm-publish-canary-${{ github.ref }}) lets a push to
   // integration/evidence-v1 and a push to next run simultaneously; both
   // publish to the same per-package canary dist-tag and race, tripping
   // verifyCoherentSet's dist-tag check on a benign, already-superseded tag.
-  assert.match(workflow, /group: stack-npm-publish\n/);
-  assert.doesNotMatch(workflow, /group: stack-npm-publish-\$\{\{ github\.ref \}\}/);
+  assert.match(workflow, /'stack-npm-publish-canary'/);
+  assert.doesNotMatch(workflow, /stack-npm-publish-canary-\$\{\{ github\.ref \}\}/);
+});
+
+test('the stable lane gets its own concurrency group, separate from canary', () => {
+  // A single constant group let a long-running canary run occupy the group
+  // while a stable release queued behind it as pending; GitHub cancels at
+  // most one *pending* run per concurrency group, so the next ordinary
+  // canary push would cancel the queued stable release before it ever ran.
+  // The two lanes have no reason to serialize with each other -- they
+  // publish different versions to different dist-tags and
+  // verifyCoherentSet checks each independently.
+  assert.doesNotMatch(workflow, /group: stack-npm-publish\n/);
+  assert.match(
+    workflow,
+    /group: \$\{\{ github\.event_name == 'push' && 'stack-npm-publish-canary' \|\| format\('stack-npm-publish-stable-\{0\}', github\.event\.release\.tag_name \|\| inputs\.release_tag\) \}\}/,
+  );
 });
 
 test('the workflow carries the OIDC permissions trusted publishing needs', () => {
