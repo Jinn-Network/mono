@@ -2086,7 +2086,7 @@ git commit -m "feat(evidence-trajectory): golden, equivalence, and adversarial f
 - Consumes: fixtures (Task 9), schema (Task 7), sealing (Task 3).
 - Produces: `describeTrajectoryRecordConformance(): void` — the suite any producer or third-party implementation runs to prove it reproduces this record surface.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/kit.test.ts`:
 
@@ -2096,12 +2096,12 @@ import { describeTrajectoryRecordConformance } from "./testing.js";
 describeTrajectoryRecordConformance();
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trajectory && yarn test`
 Expected: FAIL — `Failed to resolve import "./testing.js"`.
 
-- [ ] **Step 3: Write the kit**
+- [x] **Step 3: Write the kit**
 
 `src/testing.ts`:
 
@@ -2204,12 +2204,12 @@ export function describeTrajectoryRecordConformance(): void {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trajectory && yarn test && yarn typecheck`
 Expected: PASS — the conformance suite runs green in-package.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/evidence/trajectory/src
