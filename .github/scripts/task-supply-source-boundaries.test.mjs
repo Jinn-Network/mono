@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'task-supply');
-const taskSupplyDirectories = ['admission', 'derivation', 'posting'];
+const taskSupplyDirectories = ['admission', 'curation', 'derivation', 'posting'];
 
 // The whole task-supply tree is forbidden the frozen trio, every evidence/discovery/marketplace
 // package, every task-execution package, and every chain/storage client. Admission additionally
@@ -385,6 +385,14 @@ test('task-supply source boundaries remain one-way across the approved graph', (
   assertBoundary(
     join(packages, 'admission', 'src'),
     [...TASK_SUPPLY_FOREIGN_PACKAGES, ...ADMISSION_FORBIDDEN_EXTRA],
+    FORBIDDEN_ROOTS,
+  );
+  // curation is a pure projection over verdict observations (design §9) and imports NO Jinn
+  // package at all, so it gets the whole foreign list with no carve-out -- the strictest boundary
+  // in the tree, and the one that keeps a projection from acquiring a record-shaped dependency.
+  assertBoundary(
+    join(packages, 'curation', 'src'),
+    TASK_SUPPLY_FOREIGN_PACKAGES,
     FORBIDDEN_ROOTS,
   );
   // derivation imports environments/record, task-admission (types only), and the two
