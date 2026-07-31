@@ -6946,3 +6946,18 @@ decided once rather than negotiated at integration.
 
 *Raised:* Task 7 implementation (2026-07-31).
 *Disposition:* build it (adapted in mcp/tools/capture.ts). Plan assumed `result.capture.digest`. Live C4 `SealedCapture` carries the execution evidence reference at `capture.record.digest`. `handleCaptureSeal` projects that field into the tool JSON `digest` key.
+
+**F-C7-T9-1 — MCP Client returns isError for unknown tools rather than rejecting.**
+
+*Raised:* Task 9 implementation (2026-07-31).
+*Disposition:* build it (test adapted). Calling an unregistered tool via the SDK Client yields `{ isError: true, content }` with "Tool … not found"; it does not reject the promise. Role gating remains registration-only.
+
+**F-C7-T10-1 — Plan assumed zero-arg createCorpusCapability and corpus.relevanceIndex().**
+
+*Raised:* Task 10 implementation (2026-07-31).
+*Disposition:* build it (adapted). Live C5 requires `{ transport, fs, dsseVerifier, readPolicyVersions }`. Relevance index opens via `openRelevanceIndex` in MCP `resolve()` from `config.indexPath`. `BinIo` gained optional corpus ports; absent ports → one-time residual + fail-closed `NO_LOCATION` retrieval + deny-public admission. Small spillover: `corpus.admission` getter for pickup admission bridging.
+
+**F-C7-T10-2 — F-C4-T13-2 captureSigner gating at serve --role session.**
+
+*Raised:* Task 10 implementation (2026-07-31).
+*Disposition:* build it. Session role requires `BinIo.captureSigner` or serve exits 1 naming F-C4-T13-2. Tools role needs no signer. Health never starts MCP stdio. Process entry still does not inject ambient signing authority.
