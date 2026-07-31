@@ -38,3 +38,26 @@ describe('splitSlate', () => {
     expect(hashSlate(tampered)).not.toBe(a.sha256);
   });
 });
+
+describe('hashSlate — excluded back-compat and coverage', () => {
+  it('an absent excluded array hashes identically to an explicit empty one', () => {
+    const a = splitSlate(candidates(40), { seed: 's1', feedbackSize: 15, holdoutSize: 15 });
+    const { sha256: _drop, ...withoutSha } = a;
+    const withExplicitEmpty = { ...withoutSha, excluded: [] };
+    expect(hashSlate(withExplicitEmpty)).toBe(a.sha256);
+  });
+
+  it('excluded is covered by the hash — adding an exclusion changes it', () => {
+    const a = splitSlate(candidates(40), { seed: 's1', feedbackSize: 15, holdoutSize: 15 });
+    const { sha256: _drop, ...withoutSha } = a;
+    const withExclusion = { ...withoutSha, excluded: [{ instance_id: 'fix-widget-0099', reason: 'ungradeable' }] };
+    expect(hashSlate(withExclusion)).not.toBe(a.sha256);
+  });
+
+  it('changing the reason on an excluded entry changes the hash', () => {
+    const base = { version: 'skills-bench-slate.v1' as const, seed: 's1', feedback: [], holdout: [] };
+    const withReasonA = { ...base, excluded: [{ instance_id: 'x', reason: 'reason-a' }] };
+    const withReasonB = { ...base, excluded: [{ instance_id: 'x', reason: 'reason-b' }] };
+    expect(hashSlate(withReasonA)).not.toBe(hashSlate(withReasonB));
+  });
+});

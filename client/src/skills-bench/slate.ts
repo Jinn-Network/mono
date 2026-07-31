@@ -13,11 +13,24 @@ export interface SplitOptions {
   holdoutSize: number;
 }
 
+/** An instance excluded from a slate by an operator (e.g. after
+ *  `sweep-gradeability.ts` finds it ungradeable), recorded for audit and
+ *  reproducibility rather than silently dropped. */
+export interface ExcludedCandidate {
+  instance_id: string;
+  reason: string;
+}
+
 export interface SkillsBenchSlate {
   version: 'skills-bench-slate.v1';
   seed: string;
   feedback: SlateCandidate[];
   holdout: SlateCandidate[];
+  /** Operator-driven exclusions (build-slate.ts --exclude-instances /
+   *  --exclude-file). Absent/empty is equivalent for hashing purposes — see
+   *  `hashSlate` — so pre-existing slate.json files (and the smoke2
+   *  manifest) keep their historical sha256. */
+  excluded?: ExcludedCandidate[];
   sha256: string;
 }
 
@@ -26,13 +39,25 @@ function rankKey(seed: string, id: string): string {
 }
 
 export function hashSlate(slate: Omit<SkillsBenchSlate, 'sha256'>): string {
-  const canonical = JSON.stringify({
+  const canonical: {
+    version: string;
+    seed: string;
+    feedback: string[];
+    holdout: string[];
+    excluded?: { instance_id: string; reason: string }[];
+  } = {
     version: slate.version,
     seed: slate.seed,
     feedback: slate.feedback.map((c) => c.instance_id),
     holdout: slate.holdout.map((c) => c.instance_id),
-  });
-  return createHash('sha256').update(canonical).digest('hex');
+  };
+  // Omit the key entirely when there is nothing to record, rather than
+  // serializing `excluded: []` — keeps the hash of an unexcluded slate
+  // byte-identical to how it hashed before this field existed.
+  if (slate.excluded && slate.excluded.length > 0) {
+    canonical.excluded = slate.excluded.map((e) => ({ instance_id: e.instance_id, reason: e.reason }));
+  }
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
 /**
