@@ -89,5 +89,55 @@ describe("published JSON Schema", () => {
     expect(comment).toContain("spanId");
     expect(comment).toContain("parentSpanId");
     expect(comment).not.toContain("completeness");
+    expect(comment).toContain("I-JSON safe integers");
+    expect(comment).toContain("AnyValue");
+  });
+
+  test("AJV and runtime agree on extension number and AnyValue law", async () => {
+    const ajv = new Ajv2020({ strict: false });
+    const validate = ajv.compile(await published());
+    const golden = (await loadGoldenJson("valid")) as Record<string, unknown>;
+    const source = golden["source"] as Record<string, unknown>;
+    const nativeTrace = source["nativeTrace"] as Record<string, unknown>;
+
+    const fractionalExtension = {
+      ...golden,
+      source: {
+        ...source,
+        nativeTrace: { ...nativeTrace, "network.jinn.note": 1.5 },
+      },
+    };
+    expect(validate(fractionalExtension)).toBe(false);
+    expect(TrajectoryRecordSchema.safeParse(fractionalExtension).success).toBe(false);
+
+    const unsafeInteger = {
+      ...golden,
+      source: {
+        ...source,
+        nativeTrace: { ...nativeTrace, "network.jinn.note": Number.MAX_SAFE_INTEGER + 1 },
+      },
+    };
+    expect(validate(unsafeInteger)).toBe(false);
+    expect(TrajectoryRecordSchema.safeParse(unsafeInteger).success).toBe(false);
+
+    const span = (golden["spans"] as Record<string, unknown>[])[0]!;
+    const emptyAnyValue = {
+      ...golden,
+      spans: [{ ...span, attributes: [{ key: "gen_ai.provider.name", value: {} }] }],
+    };
+    expect(validate(emptyAnyValue)).toBe(false);
+    expect(TrajectoryRecordSchema.safeParse(emptyAnyValue).success).toBe(false);
+
+    const dualAnyValue = {
+      ...golden,
+      spans: [
+        {
+          ...span,
+          attributes: [{ key: "gen_ai.provider.name", value: { stringValue: "x", intValue: "1" } }],
+        },
+      ],
+    };
+    expect(validate(dualAnyValue)).toBe(false);
+    expect(TrajectoryRecordSchema.safeParse(dualAnyValue).success).toBe(false);
   });
 });

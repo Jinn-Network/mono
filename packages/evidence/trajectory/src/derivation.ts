@@ -32,6 +32,7 @@ import {
 import { InvalidDocumentError } from "./sealing.js";
 import { parseTrajectory } from "./schema.js";
 import { preflightCanonicalInput } from "./preflight.js";
+import { snapshotBuildPort, snapshotSealPort, snapshotVerifyPort } from "./port-snapshot.js";
 import { type Timebase, TIMEBASES } from "./timebase.js";
 
 export class TrajectoryDerivationCancelledError extends Error {
@@ -274,18 +275,19 @@ function parseStatementBytes(payloadBytes: Uint8Array): TrajectoryDerivationStat
 export function buildTrajectoryDerivationStatement(
   input: BuildTrajectoryDerivationStatementInput,
 ): TrajectoryDerivationStatement {
-  preflightAttestationJson(input, "derivation statement input");
-  if (!input.producerId) invalidInput("producerId must be non-empty");
-  if (!isCalendarStrictRfc3339(input.derivedAt)) {
+  const port = snapshotBuildPort(input);
+  preflightAttestationJson(port, "derivation statement input");
+  if (!port.producerId) invalidInput("producerId must be non-empty");
+  if (!isCalendarStrictRfc3339(port.derivedAt)) {
     invalidInput("derivedAt must be calendar-strict RFC 3339");
   }
-  if (input.vocabularyProfile !== TRAJECTORY_VOCABULARY_PROFILE) {
+  if (port.vocabularyProfile !== TRAJECTORY_VOCABULARY_PROFILE) {
     invalidInput("vocabularyProfile must equal TRAJECTORY_VOCABULARY_PROFILE");
   }
 
-  const executionHex = toBareSha256Hex(input.executionDigest);
-  const trajectoryHex = toBareSha256Hex(input.trajectoryDigest);
-  const nativeTraceHex = toBareSha256Hex(input.nativeTraceDigest);
+  const executionHex = toBareSha256Hex(port.executionDigest);
+  const trajectoryHex = toBareSha256Hex(port.trajectoryDigest);
+  const nativeTraceHex = toBareSha256Hex(port.nativeTraceDigest);
 
   const statement: TrajectoryDerivationStatement = {
     _type: IN_TOTO_STATEMENT_TYPE,
@@ -298,8 +300,8 @@ export function buildTrajectoryDerivationStatement(
     ],
     predicateType: TRAJECTORY_DERIVATION_PREDICATE_TYPE,
     predicate: {
-      derivedAt: input.derivedAt,
-      producer: { id: input.producerId },
+      derivedAt: port.derivedAt,
+      producer: { id: port.producerId },
       trajectorySubject: TRAJECTORY_SUBJECT_NAME,
       execution: {
         name: "execution.json",
@@ -309,11 +311,11 @@ export function buildTrajectoryDerivationStatement(
         name: "native-trace.bin",
         digest: { sha256: nativeTraceHex },
       },
-      formatIri: input.formatIri,
-      decoderId: input.decoderId,
-      decoderVersion: input.decoderVersion,
-      vocabularyProfile: input.vocabularyProfile,
-      timebase: input.timebase,
+      formatIri: port.formatIri,
+      decoderId: port.decoderId,
+      decoderVersion: port.decoderVersion,
+      vocabularyProfile: port.vocabularyProfile as typeof TRAJECTORY_VOCABULARY_PROFILE,
+      timebase: port.timebase,
     },
   };
 
@@ -325,8 +327,9 @@ export function buildTrajectoryDerivationStatement(
 export async function sealTrajectoryDerivationAttestation(
   input: SealTrajectoryDerivationAttestationInput,
 ): Promise<SealedTrajectoryDerivationAttestation> {
-  preflightAttestationJson(input.statement, "derivation attestation statement");
-  const validated = TrajectoryDerivationStatementSchema.safeParse(input.statement);
+  const port = snapshotSealPort(input);
+  preflightAttestationJson(port.statement, "derivation attestation statement");
+  const validated = TrajectoryDerivationStatementSchema.safeParse(port.statement);
   if (!validated.success) invalidInput("statement failed structural validation");
   if (!isCalendarStrictRfc3339(validated.data.predicate.derivedAt)) {
     invalidInput("predicate.derivedAt must be calendar-strict RFC 3339");
@@ -335,8 +338,8 @@ export async function sealTrajectoryDerivationAttestation(
   const sealed = await sealSignedRecord({
     record: validated.data,
     payloadType: DSSE_PAYLOAD_TYPE,
-    signer: input.signer,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    signer: port.signer,
+    ...(port.signal === undefined ? {} : { signal: port.signal }),
   });
 
   return {
@@ -437,12 +440,13 @@ function l4NotEvaluated(): TrajectoryDerivationLayerOutcome {
 export async function verifyTrajectoryDerivationAttestation(
   input: VerifyTrajectoryDerivationAttestationInput,
 ): Promise<TrajectoryDerivationVerificationResult> {
+  const port = snapshotVerifyPort(input);
   const l4 = l4NotEvaluated();
   let statement: TrajectoryDerivationStatement | undefined;
 
   let parsedEnvelope;
   try {
-    parsedEnvelope = parseExactDsseEnvelope(input.envelopeBytes);
+    parsedEnvelope = parseExactDsseEnvelope(port.envelopeBytes);
   } catch (error) {
     const message = error instanceof Error ? error.message : "malformed DSSE envelope";
     return {
@@ -519,17 +523,17 @@ export async function verifyTrajectoryDerivationAttestation(
   const envelopeKeyIds = envelopeSignerKeyIds(parsedEnvelope.signatures);
   let authorityResult: TrajectoryDerivationAuthorityVerifierResult;
   try {
-    assertNotCancelled(input.signal);
-    const rawAuthorityResult = await input.verifyAuthority({
-      envelopeBytes: input.envelopeBytes,
+    assertNotCancelled(port.signal);
+    const rawAuthorityResult = await port.verifyAuthority({
+      envelopeBytes: port.envelopeBytes,
       payloadType: DSSE_PAYLOAD_TYPE,
       payloadBytes: parsedEnvelope.payloadBytes,
       preAuthEncoding,
       producerId: statement.predicate.producer.id,
       derivedAt: statement.predicate.derivedAt,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(port.signal === undefined ? {} : { signal: port.signal }),
     });
-    assertNotCancelled(input.signal);
+    assertNotCancelled(port.signal);
     const validated = validateAuthorityResult(rawAuthorityResult, envelopeKeyIds);
     if (!validated.ok) {
       return {
@@ -582,8 +586,8 @@ export async function verifyTrajectoryDerivationAttestation(
     };
   }
 
-  const executionDigest = documentDigest(input.executionRecordBytes);
-  const trajectoryDigest = documentDigest(input.trajectoryRecordBytes);
+  const executionDigest = documentDigest(port.executionRecordBytes);
+  const trajectoryDigest = documentDigest(port.trajectoryRecordBytes);
   const attestedExecution = `sha256:${statement.predicate.execution.digest.sha256}`;
   const attestedTrajectory = `sha256:${statement.subject[0].digest.sha256}`;
 
@@ -623,7 +627,7 @@ export async function verifyTrajectoryDerivationAttestation(
 
   let trajectory;
   try {
-    trajectory = parseTrajectory(input.trajectoryRecordBytes);
+    trajectory = parseTrajectory(port.trajectoryRecordBytes);
   } catch (error) {
     const message = error instanceof Error ? error.message : "trajectory record failed parsing";
     return {
@@ -667,7 +671,7 @@ export async function verifyTrajectoryDerivationAttestation(
   }
 
   const forwardLink = verifyForwardLink(
-    input.executionRecordBytes,
+    port.executionRecordBytes,
     predicate.nativeTrace.digest.sha256,
     trajectoryDigest,
   );
@@ -691,7 +695,7 @@ export async function verifyTrajectoryDerivationAttestation(
   return {
     ok: true,
     statement,
-    envelopeDigest: documentDigest(input.envelopeBytes),
+    envelopeDigest: documentDigest(port.envelopeBytes),
     layers: {
       l1: { status: "pass" },
       l2: { status: "pass" },

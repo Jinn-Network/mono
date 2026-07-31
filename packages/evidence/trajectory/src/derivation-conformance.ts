@@ -699,4 +699,92 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       if (!result.ok) expect(result.code).toBe("l2-authority-malformed");
     });
   });
+
+  describe("R18-R20 port, array, and schema-law probes", () => {
+    test("verify port accessor on envelopeBytes throws invalid-input without L1", async () => {
+      const verifyAuthority = vi.fn(async () =>
+        ({ verified: true as const, signerKeyIds: ["test-key"] }),
+      );
+      let getterCalls = 0;
+      const input: Record<string, unknown> = {
+        executionRecordBytes: new Uint8Array(),
+        trajectoryRecordBytes: new Uint8Array(),
+        verifyAuthority,
+      };
+      Object.defineProperty(input, "envelopeBytes", {
+        get: () => {
+          getterCalls += 1;
+          return new Uint8Array([1]);
+        },
+        enumerable: true,
+        configurable: true,
+      });
+      await expect(verifyTrajectoryDerivationAttestation(input as never)).rejects.toThrow(
+        InvalidDocumentError,
+      );
+      expect(verifyAuthority).not.toHaveBeenCalled();
+      expect(getterCalls).toBe(0);
+    });
+
+    test("sparse signerKeyIds fails L2 malformed", async () => {
+      const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
+      const sparse: string[] = Array.from({ length: 2 });
+      sparse[1] = "test-key";
+      const result = await verifyWith(sealed, trajectorySealed, executionBytes, {
+        verifyAuthority: async () => ({ verified: true, signerKeyIds: sparse }) as never,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe("l2-authority-malformed");
+    });
+
+    test("augmented signerKeyIds fails L2 malformed", async () => {
+      const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
+      const augmented = ["test-key"];
+      Object.defineProperty(augmented, "extra", { value: "x", enumerable: true });
+      const result = await verifyWith(sealed, trajectorySealed, executionBytes, {
+        verifyAuthority: async () => ({ verified: true, signerKeyIds: augmented }) as never,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe("l2-authority-malformed");
+    });
+
+    test("unknown statement field fails seal without calling signer", async () => {
+      const statement = buildTrajectoryDerivationStatement({
+        producerId: "producer-1",
+        executionDigest: `sha256:${"b".repeat(64)}`,
+        trajectoryDigest: `sha256:${"c".repeat(64)}`,
+        nativeTraceDigest: `sha256:${SOURCE_SHA}`,
+        formatIri: FORMAT_IRI,
+        decoderId: DECODER.decoderId,
+        decoderVersion: DECODER.decoderVersion,
+        vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
+        timebase: "synthetic-ordinal",
+        derivedAt: DERIVED_AT,
+      });
+      const withUnknown = { ...statement, forged: "bad" };
+      const signer = vi.fn(async () =>
+        [{ signature: new Uint8Array([1]), keyid: "test-key" }] as const,
+      );
+      await expect(
+        sealTrajectoryDerivationAttestation({ statement: withUnknown as never, signer }),
+      ).rejects.toThrow();
+      expect(signer).not.toHaveBeenCalled();
+    });
+
+    test("alternate payload escaping fails L1 without calling authority", async () => {
+      const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
+      const verifyAuthority = vi.fn(async () =>
+        ({ verified: true as const, signerKeyIds: ["test-key"] }),
+      );
+      const result = await verifyWith(sealed, trajectorySealed, executionBytes, {
+        envelopeBytes: mutatePayloadEncoding(sealed.envelopeBytes, (statement) =>
+          new TextEncoder().encode(JSON.stringify(statement, null, 2)),
+        ),
+        verifyAuthority,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe("l1-payload-noncanonical");
+      expect(verifyAuthority).not.toHaveBeenCalled();
+    });
+  });
 }

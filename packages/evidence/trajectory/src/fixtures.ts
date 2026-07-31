@@ -19,6 +19,20 @@ export interface AdversarialManifest {
 const fixtureRoot = resolve(fileURLToPath(new URL("../fixtures", import.meta.url)));
 
 const ENCODED_SEPARATOR = /%(?:2f|5c|2e%2e|%2e%2e)/iu;
+const SCHEME_PREFIX = /^[A-Za-z][A-Za-z0-9+.-]*:/u;
+const CONTROL_OR_NUL = /[\0-\x1f\x7f]/u;
+
+function rejectUriAuthorityPaths(relativePath: string): void {
+  if (CONTROL_OR_NUL.test(relativePath)) {
+    throw new Error("trajectory fixture paths must stay inside fixtures/");
+  }
+  if (SCHEME_PREFIX.test(relativePath)) {
+    throw new Error("trajectory fixture paths must stay inside fixtures/");
+  }
+  if (relativePath.startsWith("//") || relativePath.startsWith("\\\\")) {
+    throw new Error("trajectory fixture paths must stay inside fixtures/");
+  }
+}
 
 function decodeFixturePathSegments(relativePath: string): string {
   let decoded = relativePath;
@@ -35,6 +49,7 @@ function decodeFixturePathSegments(relativePath: string): string {
 }
 
 function rejectTraversalSegments(relativePath: string): void {
+  rejectUriAuthorityPaths(relativePath);
   if (relativePath.includes("\\")) {
     throw new Error("trajectory fixture paths must stay inside fixtures/");
   }
@@ -42,6 +57,7 @@ function rejectTraversalSegments(relativePath: string): void {
     throw new Error("trajectory fixture paths must stay inside fixtures/");
   }
   const decoded = decodeFixturePathSegments(relativePath);
+  rejectUriAuthorityPaths(decoded);
   if (decoded.includes("\\")) {
     throw new Error("trajectory fixture paths must stay inside fixtures/");
   }

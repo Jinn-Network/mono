@@ -187,23 +187,58 @@
                 },
                 "value": {
                   "type": "object",
-                  "properties": {
-                    "stringValue": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "stringValue"
+                      ],
+                      "properties": {
+                        "stringValue": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
                     },
-                    "boolValue": {
-                      "type": "boolean"
+                    {
+                      "type": "object",
+                      "required": [
+                        "boolValue"
+                      ],
+                      "properties": {
+                        "boolValue": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
                     },
-                    "intValue": {
-                      "type": "string",
-                      "pattern": "^-?(0|[1-9]\\d*)$"
+                    {
+                      "type": "object",
+                      "required": [
+                        "intValue"
+                      ],
+                      "properties": {
+                        "intValue": {
+                          "type": "string",
+                          "pattern": "^-?(0|[1-9]\\d*)$"
+                        }
+                      },
+                      "additionalProperties": false
                     },
-                    "doubleValue": {
-                      "type": "string",
-                      "pattern": "^-?\\d+(\\.\\d+)?$"
+                    {
+                      "type": "object",
+                      "required": [
+                        "doubleValue"
+                      ],
+                      "properties": {
+                        "doubleValue": {
+                          "type": "string",
+                          "pattern": "^-?\\d+(\\.\\d+)?$"
+                        }
+                      },
+                      "additionalProperties": false
                     }
-                  },
-                  "additionalProperties": false
+                  ]
                 }
               },
               "required": [
@@ -252,23 +287,58 @@
                       },
                       "value": {
                         "type": "object",
-                        "properties": {
-                          "stringValue": {
-                            "type": "string"
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "stringValue"
+                            ],
+                            "properties": {
+                              "stringValue": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
                           },
-                          "boolValue": {
-                            "type": "boolean"
+                          {
+                            "type": "object",
+                            "required": [
+                              "boolValue"
+                            ],
+                            "properties": {
+                              "boolValue": {
+                                "type": "boolean"
+                              }
+                            },
+                            "additionalProperties": false
                           },
-                          "intValue": {
-                            "type": "string",
-                            "pattern": "^-?(0|[1-9]\\d*)$"
+                          {
+                            "type": "object",
+                            "required": [
+                              "intValue"
+                            ],
+                            "properties": {
+                              "intValue": {
+                                "type": "string",
+                                "pattern": "^-?(0|[1-9]\\d*)$"
+                              }
+                            },
+                            "additionalProperties": false
                           },
-                          "doubleValue": {
-                            "type": "string",
-                            "pattern": "^-?\\d+(\\.\\d+)?$"
+                          {
+                            "type": "object",
+                            "required": [
+                              "doubleValue"
+                            ],
+                            "properties": {
+                              "doubleValue": {
+                                "type": "string",
+                                "pattern": "^-?\\d+(\\.\\d+)?$"
+                              }
+                            },
+                            "additionalProperties": false
                           }
-                        },
-                        "additionalProperties": false
+                        ]
                       }
                     },
                     "required": [
@@ -396,7 +466,9 @@
           "type": "string"
         },
         {
-          "type": "integer"
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
         },
         {
           "type": "boolean"
@@ -418,6 +490,60 @@
           "additionalProperties": {
             "$ref": "#/$defs/JsonExtensionValue"
           }
+        }
+      ]
+    },
+    "AnyValue": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "stringValue"
+          ],
+          "properties": {
+            "stringValue": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "boolValue"
+          ],
+          "properties": {
+            "boolValue": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "intValue"
+          ],
+          "properties": {
+            "intValue": {
+              "type": "string",
+              "pattern": "^-?(0|[1-9]\\d*)$"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "doubleValue"
+          ],
+          "properties": {
+            "doubleValue": {
+              "type": "string",
+              "pattern": "^-?\\d+(\\.\\d+)?$"
+            }
+          },
+          "additionalProperties": false
         }
       ]
     }
@@ -515,5 +641,5 @@
       }
     }
   ],
-  "$comment": "Structural validation only. Runtime refinements not expressible here: traceId must equal the value derived from source.nativeTrace.digest, formatIri, and derivation; each spanId must equal the value derived from traceId and its ordinal; parentSpanId must reference an earlier span in this record; attributes must be sorted by key and unique; source.execution is removed — execution binding is via derivation attestation and forward link."
+  "$comment": "Structural validation only. Runtime refinements not expressible here: traceId must equal the value derived from source.nativeTrace.digest, formatIri, and derivation; each spanId must equal the value derived from traceId and its ordinal; parentSpanId must reference an earlier span in this record; attributes must be sorted by key and unique; source.execution is removed — execution binding is via derivation attestation and forward link. JsonExtensionValue numbers are I-JSON safe integers only (±9007199254740991). AnyValue must carry exactly one OTLP variant (stringValue, boolValue, intValue, or doubleValue)."
 }

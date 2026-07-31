@@ -31,10 +31,10 @@ function parseSteps(jobBlock) {
   let current = null;
   for (const line of lines) {
     if (/^  [a-z0-9-]+:/.test(line)) break;
-    const nameMatch = line.match(/^      - name: (.+)$/);
-    if (nameMatch) {
+    if (/^      - /.test(line)) {
       if (current) steps.push(current);
-      current = { name: nameMatch[1], lines: [] };
+      const nameMatch = line.match(/^      - name: (.+)$/);
+      current = { name: nameMatch?.[1] ?? null, lines: [line.trimEnd()] };
       continue;
     }
     if (current && (line.startsWith('      ') || line.startsWith('        '))) {
@@ -43,6 +43,10 @@ function parseSteps(jobBlock) {
   }
   if (current) steps.push(current);
   return steps;
+}
+
+function stepRunsPackSmoke(step) {
+  return step.lines.some((line) => line.includes('pack:smoke'));
 }
 
 function parseJobs(source) {
@@ -90,7 +94,7 @@ export function validateEvidenceCiWorkflow(source) {
 
     const packSmokeIndexes = steps
       .map((step, index) => ({ step, index }))
-      .filter(({ step }) => step.lines.some((line) => line.includes('pack:smoke')));
+      .filter(({ step }) => stepRunsPackSmoke(step));
     assert.ok(packSmokeIndexes.length >= 1, `${jobId} must run pack:smoke`);
     for (const { index } of packSmokeIndexes) {
       assert.ok(
@@ -171,4 +175,36 @@ test('mutation: floating Node 22 fails', () => {
 test('mutation: legacy-peer-deps workaround fails', () => {
   const mutant = `${workflow}\n# legacy-peer-deps\n`;
   assert.throws(() => validateEvidenceCiWorkflow(mutant), /legacy-peer-deps/i);
+});
+
+test('mutation: anonymous one-line pack:smoke before npm pin fails', () => {
+  const mutant = workflow.replace(
+    /(  trajectory:[\s\S]*?      )- name: Install npm 11\.19\.0 for pack-smoke/,
+    '$1- run: yarn pack:smoke\n      - name: Install npm 11.19.0 for pack-smoke',
+  );
+  expectValidationFailure(mutant, /trajectory npm pin step must precede pack:smoke step/);
+});
+
+test('mutation: anonymous multiline pack:smoke before npm pin fails', () => {
+  const mutant = workflow.replace(
+    /(  trajectory:[\s\S]*?      )- name: Install npm 11\.19\.0 for pack-smoke/,
+    '$1- run: |\n          yarn pack:smoke\n      - name: Install npm 11.19.0 for pack-smoke',
+  );
+  expectValidationFailure(mutant, /trajectory npm pin step must precede pack:smoke step/);
+});
+
+test('mutation: unnamed npm step before pack:smoke fails', () => {
+  const mutant = workflow.replace(
+    '      - name: Install npm 11.19.0 for pack-smoke\n        run: |',
+    '      - run: |\n          npm install -g npm@11.19.0\n          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"\n          test "$(npm --version)" = "11.19.0"\n      - run: |',
+  );
+  expectValidationFailure(mutant, /must include the named npm install step/);
+});
+
+test('mutation: anonymous pack:smoke inserted before npm pin in trajectory job fails', () => {
+  const mutant = workflow.replace(
+    '  trajectory:\n    name: Evidence Trajectory\n    needs: [foundation]\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4',
+    '  trajectory:\n    name: Evidence Trajectory\n    needs: [foundation]\n    runs-on: ubuntu-latest\n    steps:\n      - run: yarn pack:smoke\n      - uses: actions/checkout@v4',
+  );
+  expectValidationFailure(mutant, /npm pin step must precede pack:smoke step at index 0/);
 });

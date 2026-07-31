@@ -2,6 +2,11 @@
 
 import { isProxy } from "node:util/types";
 
+import {
+  inspectDenseArrayDescriptors,
+  readDenseArrayElement,
+} from "./dense-array.js";
+
 type TrajectoryDerivationAuthorityVerifierResult =
   | { readonly verified: true; readonly signerKeyIds: readonly string[]; readonly detail?: string }
   | {
@@ -40,48 +45,17 @@ function readStringArray(
   path: string,
   allowEmptyStrings: boolean,
 ): readonly string[] | ValidationFailure {
-  if (!Array.isArray(value)) {
-    return fail(`${path} must be an array`);
-  }
-  if (isProxy(value)) {
-    return fail(`${path} must be a plain array`);
-  }
-  const seen = new WeakSet<object>();
-  if (seen.has(value)) {
-    return fail(`${path} must not be cyclic`);
-  }
-  seen.add(value);
-
-  let length = 0;
-  try {
-    const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
-    if (lengthDescriptor?.get !== undefined || lengthDescriptor?.set !== undefined) {
-      return fail(`${path}.length must be a data property`);
+  const inspected = inspectDenseArrayDescriptors(value, path);
+  if (!inspected.ok) {
+    if (inspected.undefinedElement) {
+      return fail(`${path} must be a dense array`);
     }
-    length = value.length;
-  } catch (cause) {
-    return fail(`${path} failed descriptor inspection: ${trapMessage(cause)}`);
+    return fail(inspected.message);
   }
 
   const entries: string[] = [];
-  for (let index = 0; index < length; index += 1) {
-    let descriptor: PropertyDescriptor | undefined;
-    try {
-      descriptor = Object.getOwnPropertyDescriptor(value, index);
-    } catch (cause) {
-      return fail(`${path}[${String(index)}] failed descriptor inspection: ${trapMessage(cause)}`);
-    }
-    if (descriptor === undefined) continue;
-    if (descriptor.get !== undefined || descriptor.set !== undefined) {
-      return fail(`${path}[${String(index)}] must be a data property`);
-    }
-    if (!Object.hasOwn(descriptor, "value")) {
-      return fail(`${path}[${String(index)}] must be a data property`);
-    }
-    if (!descriptor.enumerable) {
-      return fail(`${path}[${String(index)}] must be enumerable`);
-    }
-    const entry = descriptor.value;
+  for (let index = 0; index < inspected.length; index += 1) {
+    const entry = readDenseArrayElement(value as unknown[], index);
     if (typeof entry !== "string" || (!allowEmptyStrings && entry.length === 0)) {
       return fail(`${path} must contain only${allowEmptyStrings ? "" : " non-empty"} strings`);
     }

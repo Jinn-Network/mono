@@ -62,4 +62,49 @@ describe("trajectory fixture paths", () => {
       "/fixtures/adversarial-v1/nested-native-trace-key/document.json",
     );
   });
+
+  test("rejects http and https scheme prefixes", () => {
+    expect(() => trajectoryFixtureUrl("https://example.com/outside")).toThrow(
+      "trajectory fixture paths must stay inside fixtures/",
+    );
+    expect(() => trajectoryFixtureUrl("HTTP://example.com/outside")).toThrow(
+      "trajectory fixture paths must stay inside fixtures/",
+    );
+  });
+
+  test("rejects file and data schemes", () => {
+    expect(() => trajectoryFixtureUrl("file:///etc/passwd")).toThrow(
+      "trajectory fixture paths must stay inside fixtures/",
+    );
+    expect(() => trajectoryFixtureUrl("data:text/plain,hello")).toThrow(
+      "trajectory fixture paths must stay inside fixtures/",
+    );
+  });
+
+  test("rejects scheme-relative and backslash authority paths", () => {
+    expect(() => trajectoryFixtureUrl("//host/outside")).toThrow(
+      "trajectory fixture paths must stay inside fixtures/",
+    );
+    expect(() => trajectoryFixtureUrl("\\\\host\\outside")).toThrow(
+      "trajectory fixture paths must stay inside fixtures/",
+    );
+  });
+
+  test("rejects drive-style paths", () => {
+    expect(() => trajectoryFixtureUrl("C:/Windows/outside")).toThrow(
+      "trajectory fixture paths must stay inside fixtures/",
+    );
+  });
+
+  test("rejects encoded scheme revealed by decoding", () => {
+    expect(() => trajectoryFixtureUrl("https%3a//example.com/outside")).toThrow(
+      "trajectory fixture paths must stay inside fixtures/",
+    );
+  });
+
+  test("rejects nul and control characters", () => {
+    expect(() => trajectoryFixtureUrl("trajectory/valid\u0000.json")).toThrow(
+      "trajectory fixture paths must stay inside fixtures/",
+    );
+  });
 });

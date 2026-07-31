@@ -9,7 +9,13 @@ export function isNamespacedExtensionKey(key: string): boolean {
   return REVERSE_DNS_KEY_PATTERN.test(key) || ABSOLUTE_URI_KEY_PATTERN.test(key);
 }
 
-const JsonScalarSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+const IJsonSafeIntegerSchema = z
+  .number()
+  .refine((value) => Number.isInteger(value) && Number.isSafeInteger(value), {
+    message: "extension number must be an I-JSON safe integer",
+  });
+
+const JsonScalarSchema = z.union([z.string(), IJsonSafeIntegerSchema, z.boolean(), z.null()]);
 
 export type JsonExtensionValue =
   | string

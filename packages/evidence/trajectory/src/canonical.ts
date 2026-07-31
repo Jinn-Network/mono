@@ -51,6 +51,7 @@ function assertCanonicalizable(value: unknown, path: string): void {
     preflightCanonicalInput(value);
   } catch (error) {
     if (error instanceof UndefinedArrayElementError) throw error;
+    if (error instanceof NonIJsonNumberError) throw error;
     if (error instanceof UnsupportedCanonicalValueError) throw error;
     throw new UnsupportedCanonicalValueError(
       error instanceof Error ? error.message : "preflight failed",

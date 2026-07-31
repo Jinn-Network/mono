@@ -77,7 +77,7 @@ schema.$defs = {
   JsonExtensionValue: {
     anyOf: [
       { type: "string" },
-      { type: "integer" },
+      { type: "integer", minimum: -9007199254740991, maximum: 9007199254740991 },
       { type: "boolean" },
       { type: "null" },
       { type: "array", items: { $ref: "#/$defs/JsonExtensionValue" } },
@@ -88,7 +88,42 @@ schema.$defs = {
       },
     ],
   },
+  AnyValue: {
+    oneOf: [
+      { type: "object", required: ["stringValue"], properties: { stringValue: { type: "string" } }, additionalProperties: false },
+      { type: "object", required: ["boolValue"], properties: { boolValue: { type: "boolean" } }, additionalProperties: false },
+      { type: "object", required: ["intValue"], properties: { intValue: { type: "string", pattern: "^-?(0|[1-9]\\d*)$" } }, additionalProperties: false },
+      { type: "object", required: ["doubleValue"], properties: { doubleValue: { type: "string", pattern: "^-?\\d+(\\.\\d+)?$" } }, additionalProperties: false },
+    ],
+  },
 };
+
+function patchAnyValue(node) {
+  if (!node || typeof node !== "object") return;
+  if (
+    node.type === "object" &&
+    node.properties?.stringValue &&
+    node.properties?.boolValue &&
+    node.properties?.intValue &&
+    node.properties?.doubleValue &&
+    !node.oneOf
+  ) {
+    node.oneOf = [
+      { type: "object", required: ["stringValue"], properties: { stringValue: node.properties.stringValue }, additionalProperties: false },
+      { type: "object", required: ["boolValue"], properties: { boolValue: node.properties.boolValue }, additionalProperties: false },
+      { type: "object", required: ["intValue"], properties: { intValue: node.properties.intValue }, additionalProperties: false },
+      { type: "object", required: ["doubleValue"], properties: { doubleValue: node.properties.doubleValue }, additionalProperties: false },
+    ];
+    delete node.properties;
+    delete node.additionalProperties;
+  }
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) value.forEach(patchAnyValue);
+    else if (value && typeof value === "object") patchAnyValue(value);
+  }
+}
+
+patchAnyValue(schema);
 
 function patchExtensionSurface(node, coreKeys) {
   if (!node || typeof node !== "object" || node.type !== "object") return;
@@ -171,6 +206,8 @@ schema.$comment = [
   "parentSpanId must reference an earlier span in this record;",
   "attributes must be sorted by key and unique;",
   "source.execution is removed — execution binding is via derivation attestation and forward link.",
+  "JsonExtensionValue numbers are I-JSON safe integers only (±9007199254740991).",
+  "AnyValue must carry exactly one OTLP variant (stringValue, boolValue, intValue, or doubleValue).",
 ].join(" ");
 
 const target = join(root, "schemas", "trajectory.schema.json");
