@@ -1236,7 +1236,7 @@ git commit -m "feat(plugin-runtime): plugin tree CI workflow"
 
 `code` is deliberately a plain `string` rather than a closed union: C4–C7 add their own codes by construction, without editing a shared type and without forking the error base.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plugin/runtime/src/logger.test.ts`:
 
@@ -1335,12 +1335,12 @@ describe("createLineLogger", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test`
 Expected: FAIL — `Failed to resolve import "./errors.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `plugin/runtime/src/errors.ts`:
 
@@ -1448,12 +1448,12 @@ export function createSilentLogger(): RuntimeLogger {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test && yarn typecheck`
 Expected: PASS — 8 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src
