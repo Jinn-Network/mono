@@ -31,6 +31,47 @@ export interface GradeabilityReceipt {
   gradeLogDigest: string;
 }
 
+/**
+ * Discrimination-gate receipt (spec §2.4), written by screen-task-set.ts.
+ * A baseline-only (no skill) sweep over `attempts` repeats: `keep: true`
+ * means the baseline failed at least once (proven headroom for a skill to
+ * change the outcome); `keep: false` covers both "baseline passed every
+ * repeat" (no headroom) and "an attempt was ungradeable" (the task-set
+ * author's fail-loud signal — see `ScreeningSummary` below, which is where
+ * that distinction is recorded; the receipt shape itself is fixed to these
+ * five fields per spec).
+ *
+ * Deliberately excluded from `hashTaskSet` for the same reason as
+ * `GradeabilityReceipt`: it is a derived receipt produced AFTER hashing, so
+ * including it would mint a new set identity on every re-screen. Set
+ * membership does not change when a task is screened out — it stays in the
+ * file with `keep: false`, so the screen is auditable.
+ */
+export interface ScreeningReceipt {
+  baselinePasses: number;
+  attempts: number;
+  keep: boolean;
+  screenedAt: string;
+  model: string;
+}
+
+/** Set-level rollup of one screening pass, written alongside the per-task
+ *  receipts. Also excluded from `hashTaskSet` (same reasoning as above). */
+export interface ScreeningSummary {
+  screenedAt: string;
+  model: string;
+  repeats: number;
+  passThreshold: number;
+  kept: string[];
+  droppedNoHeadroom: string[];
+  /** Fail-loud listing (spec §2.4 discussion in the v0.2 plan): tasks that
+   *  passed the zero-inference gradeability gate but produced an ungradeable
+   *  outcome during the baseline solve sweep. Worth investigating — a
+   *  verifier that grades fine on the reference/empty patches but not on a
+   *  real agent transcript is a latent verifier bug. */
+  droppedUngradeable: string[];
+}
+
 export interface SkillTaskV1 {
   id: string;
   repo: string;
@@ -43,6 +84,7 @@ export interface SkillTaskV1 {
   referencePatchFile: string;
   timeoutMs?: number;
   gradeability?: GradeabilityReceipt;
+  screening?: ScreeningReceipt;
 }
 
 export interface SkillTaskSetV1 {
@@ -51,6 +93,7 @@ export interface SkillTaskSetV1 {
   domain: string;
   tasks: SkillTaskV1[];
   sha256: string;
+  screeningSummary?: ScreeningSummary;
 }
 
 export class TaskSetValidationError extends Error {
@@ -193,4 +236,176 @@ export function assertTaskSetGradeable(set: SkillTaskSetV1): void {
       `before any solve spend`,
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Discrimination gate (spec §2.4) — pure selection rule + set-level helpers.
+// The zero-inference solve/grade work that PRODUCES the outcomes below lives
+// in screen-task-set.ts (it drives run-bench.ts); everything here is pure so
+// the rule itself is unit-testable without Docker/claude.
+// ---------------------------------------------------------------------------
+
+/** Fraction of baseline repeats that may pass before a task is considered to
+ *  have no headroom. `1` (the default) matches the spec's literal rule:
+ *  KEEP unless the baseline passed EVERY repeat. A caller may tighten this
+ *  (e.g. `0.5`) to also drop tasks the baseline mostly-but-not-always
+ *  solves; loosening above `1` is not meaningful and is rejected. */
+export const DEFAULT_SCREENING_PASS_THRESHOLD = 1;
+
+export interface ScreeningDecision {
+  keep: boolean;
+  baselinePasses: number;
+  attempts: number;
+  /** True if any baseline attempt for this task graded as unscorable
+   *  (`passed === null`). Always forces `keep: false`, regardless of
+   *  `passThreshold` — an ungradeable baseline attempt is not a headroom
+   *  signal in either direction. */
+  ungradeable: boolean;
+}
+
+/**
+ * Selection rule (spec §2.4): given one task's baseline outcomes across
+ * `--repeats` attempts (`true`/`false` = graded pass/fail, `null` =
+ * ungradeable, matching `BenchOutcome.passed`'s convention):
+ *
+ * - any `null` outcome → `keep: false`, `ungradeable: true` (fail-loud —
+ *   the task passed the pre-solve gradeability gate but produced an
+ *   ungradeable result on a real attempt; investigate, don't silently drop)
+ * - otherwise, baseline pass rate `< passThreshold` → `keep: true`
+ *   (headroom exists)
+ * - otherwise (baseline passed at/above `passThreshold`, e.g. every repeat
+ *   at the default threshold of 1) → `keep: false` (no headroom)
+ */
+export function decideScreening(
+  outcomes: (boolean | null)[],
+  passThreshold: number = DEFAULT_SCREENING_PASS_THRESHOLD,
+): ScreeningDecision {
+  if (outcomes.length === 0) {
+    throw new TaskSetValidationError('decideScreening requires at least one baseline outcome');
+  }
+  if (!(passThreshold > 0) || passThreshold > 1) {
+    throw new TaskSetValidationError(`passThreshold must be in (0, 1], got ${passThreshold}`);
+  }
+  const ungradeable = outcomes.some((o) => o === null);
+  const attempts = outcomes.length;
+  const baselinePasses = outcomes.filter((o) => o === true).length;
+  const keep = !ungradeable && baselinePasses / attempts < passThreshold;
+  return { keep, baselinePasses, attempts, ungradeable };
+}
+
+/** Renders a `ScreeningDecision` into the on-disk receipt shape (spec §3
+ *  deliverable): exactly `{ baselinePasses, attempts, keep, screenedAt,
+ *  model }` — no `ungradeable` field, by design (see `ScreeningReceipt`'s
+ *  doc comment). */
+export function buildScreeningReceipt(
+  outcomes: (boolean | null)[],
+  opts: { model: string; passThreshold?: number; screenedAt?: string },
+): ScreeningReceipt {
+  const decision = decideScreening(outcomes, opts.passThreshold);
+  return {
+    baselinePasses: decision.baselinePasses,
+    attempts: decision.attempts,
+    keep: decision.keep,
+    screenedAt: opts.screenedAt ?? new Date().toISOString(),
+    model: opts.model,
+  };
+}
+
+export function isTaskScreenedKeep(task: Pick<SkillTaskV1, 'screening'>): boolean {
+  return task.screening?.keep === true;
+}
+
+/** Builds the set-level `ScreeningSummary` directly from the per-task
+ *  decisions (not by reverse-engineering the persisted receipts — a
+ *  dropped-and-ungradeable task can have the same `baselinePasses`/`attempts`
+ *  shape as a dropped-no-headroom task, so the `ungradeable` distinction
+ *  must come from the decision, not the receipt). */
+export function summarizeScreeningDecisions(
+  decisions: { taskId: string; decision: ScreeningDecision }[],
+  opts: { model: string; repeats: number; passThreshold?: number; screenedAt: string },
+): ScreeningSummary {
+  const kept: string[] = [];
+  const droppedNoHeadroom: string[] = [];
+  const droppedUngradeable: string[] = [];
+  for (const { taskId, decision } of decisions) {
+    if (decision.ungradeable) droppedUngradeable.push(taskId);
+    else if (decision.keep) kept.push(taskId);
+    else droppedNoHeadroom.push(taskId);
+  }
+  return {
+    screenedAt: opts.screenedAt,
+    model: opts.model,
+    repeats: opts.repeats,
+    passThreshold: opts.passThreshold ?? DEFAULT_SCREENING_PASS_THRESHOLD,
+    kept,
+    droppedNoHeadroom,
+    droppedUngradeable,
+  };
+}
+
+/** Applies computed screening receipts + the set-level summary onto a task
+ *  set, returning a new `SkillTaskSetV1`. Pure — the caller writes the
+ *  result to disk. Task-set membership is never changed: a dropped task
+ *  keeps its slot in `tasks`, just with `screening.keep === false`. */
+export function applyScreeningResults(
+  set: SkillTaskSetV1,
+  receipts: Map<string, ScreeningReceipt>,
+  summary: ScreeningSummary,
+): SkillTaskSetV1 {
+  return {
+    ...set,
+    tasks: set.tasks.map((t) => {
+      const receipt = receipts.get(t.id);
+      return receipt ? { ...t, screening: receipt } : t;
+    }),
+    screeningSummary: summary,
+  };
+}
+
+/**
+ * Measured (multi-arm) run-bench task filter (spec item 2 of the v0.2
+ * discrimination-gate work): only `screening.keep === true` tasks are
+ * eligible for a real paired run, with two escape hatches —
+ *
+ * - a task set that carries NO screening receipts at all (nobody has run
+ *   screen-task-set.ts against it yet) is not hard-blocked: screening is
+ *   strongly recommended (enforced by the runbook) but not required, so
+ *   this logs a one-line warning and returns every task unfiltered.
+ * - `includeScreenedOut: true` (run-bench.ts's `--include-screened-out`)
+ *   overrides the filter entirely, with a loud warning that the resulting
+ *   measurement is not interpretable per spec §2.4.
+ *
+ * Throws if screening receipts ARE present but every task was screened out
+ * and the caller did not pass `includeScreenedOut` — there would be nothing
+ * left to measure.
+ */
+export function selectTasksForMeasurement(
+  tasks: SkillTaskV1[],
+  opts: { includeScreenedOut: boolean; warn?: (message: string) => void },
+): SkillTaskV1[] {
+  const warn = opts.warn ?? ((message: string) => console.warn(message));
+  const anyScreened = tasks.some((t) => t.screening !== undefined);
+  if (!anyScreened) {
+    warn(
+      '[bench] task set carries no screening receipts — proceeding UNSCREENED. Screening (spec §2.4, ' +
+      'screen-task-set.ts) is strongly recommended and enforced by the runbook, but not hard-required here.',
+    );
+    return tasks;
+  }
+  if (opts.includeScreenedOut) {
+    warn(
+      `[bench] --include-screened-out set — running all ${tasks.length} task(s) regardless of the ` +
+      `discrimination gate. Screened-out tasks have no proven baseline headroom; any result on them is ` +
+      `NOT interpretable per spec §2.4.`,
+    );
+    return tasks;
+  }
+  const kept = tasks.filter((t) => isTaskScreenedKeep(t));
+  if (kept.length === 0) {
+    throw new Error(
+      'every task in this set was screened out (screening.keep === false) — nothing to measure; pass ' +
+      '--include-screened-out to override (not recommended) or screen a task set with proven headroom',
+    );
+  }
+  return kept;
 }

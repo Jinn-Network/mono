@@ -56,6 +56,13 @@
  * loud, before any solve spend, dry-run included. `--slate` and `--task-set`
  * are mutually exclusive; `--half`/`--candidate-id`/the holdout ledger are
  * slate-only concepts and do not apply to `--task-set` runs.
+ *
+ * A measured `--task-set` run also honors the discrimination gate (spec
+ * §2.4, `screen-task-set.ts`): only tasks with `screening.keep === true` are
+ * run, UNLESS the set carries no screening receipts at all (logs a one-line
+ * warning and runs unscreened — screening is recommended, not required) or
+ * `--include-screened-out` is passed (runs every task regardless of the
+ * gate, with a loud warning that the result is not interpretable per §2.4).
  */
 import { spawn } from 'node:child_process';
 import { cp, mkdir, rm, writeFile } from 'node:fs/promises';
@@ -75,7 +82,8 @@ import {
 } from '../../src/skills-bench/attempts.js';
 import { assertHoldoutUnused, recordHoldoutRun } from '../../src/skills-bench/holdout-guard.js';
 import {
-  loadTaskSet, assertTaskSetGradeable, type SkillTaskSetV1, type SkillTaskV1, type TaskRequirement,
+  loadTaskSet, assertTaskSetGradeable, selectTasksForMeasurement,
+  type SkillTaskSetV1, type SkillTaskV1, type TaskRequirement,
 } from '../../src/skills-bench/task-set.js';
 import { runCustomGrade, CustomGradeError } from '../../src/skills-bench/custom-grade.js';
 import {
@@ -125,6 +133,10 @@ interface BenchConfig {
    *  reusable across runs/--out dirs by design — see the module doc and
    *  docs/runbooks/skills-bench.md §1. */
   claudeConfigDir: string;
+  /** --task-set only: override the discrimination gate (spec §2.4) and run
+   *  EVERY task regardless of `screening.keep`. Loud warning — see
+   *  `selectTasksForMeasurement` (task-set.ts). Ignored in --slate mode. */
+  includeScreenedOut: boolean;
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-5';
@@ -147,6 +159,7 @@ function parseArgs(argv: string[]): BenchConfig {
     candidateId: undefined,
     forceHoldoutRerun: false,
     claudeConfigDir: join(repoRoot, 'bench', '.claude-bench-config'),
+    includeScreenedOut: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -172,6 +185,7 @@ function parseArgs(argv: string[]): BenchConfig {
       case '--candidate-id': cfg.candidateId = String(argv[++i]); break;
       case '--force-holdout-rerun': cfg.forceHoldoutRerun = true; break;
       case '--claude-config-dir': cfg.claudeConfigDir = resolve(String(argv[++i])); break;
+      case '--include-screened-out': cfg.includeScreenedOut = true; break;
       default: throw new Error(`unknown argument ${a}`);
     }
   }
@@ -842,11 +856,13 @@ async function runSlateMode(cfg: BenchConfig): Promise<void> {
 
 // ---------------------------------------------------------------------------
 // --task-set main body (mirrors runSlateMode above). Diverges from it in
-// three places: the zero-inference gradeability-gate refusal (before ANY
-// work, dry-run included), no holdout ledger (a `SkillTaskSetV1` has no
-// feedback/holdout split — `half` is fixed to 'feedback' in its manifest so
-// the field stays populated without implying a real split), and
-// runRealTaskSet/synthesizeTaskSetOutcome in place of the slate equivalents.
+// four places: the zero-inference gradeability-gate refusal (before ANY
+// work, dry-run included), the discrimination-gate task filter
+// (selectTasksForMeasurement — spec §2.4), no holdout ledger (a
+// `SkillTaskSetV1` has no feedback/holdout split — `half` is fixed to
+// 'feedback' in its manifest so the field stays populated without implying a
+// real split), and runRealTaskSet/synthesizeTaskSetOutcome in place of the
+// slate equivalents.
 // ---------------------------------------------------------------------------
 
 async function runTaskSetMode(cfg: BenchConfig): Promise<void> {
@@ -868,7 +884,12 @@ async function runTaskSetMode(cfg: BenchConfig): Promise<void> {
   };
   await assertManifestCompatible(join(cfg.outDir, 'bench-manifest.json'), manifest);
 
-  const tasks: SkillTaskSetV1['tasks'] = taskSet.tasks
+  // Discrimination gate (spec §2.4): a measured run only spends on tasks with
+  // proven baseline headroom, unless the set carries no screening receipts
+  // at all (screening is recommended, not hard-required) or the operator
+  // passes --include-screened-out (loud warning either way).
+  const screenedTasks = selectTasksForMeasurement(taskSet.tasks, { includeScreenedOut: cfg.includeScreenedOut });
+  const tasks: SkillTaskSetV1['tasks'] = screenedTasks
     .slice(0, Number.isFinite(cfg.maxInstances) ? cfg.maxInstances : undefined);
   const specs = buildTaskSetAttemptSpecs(tasks, arms, cfg.repeats);
 
