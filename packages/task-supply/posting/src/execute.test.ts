@@ -172,3 +172,49 @@ describe("executePosting", () => {
     expect(lines.map((line) => line.event)).toContain("posting.plan-surfaced");
   });
 });
+
+// Everything checkable about a plan is checkable before the first wei leaves. Raising a refusal
+// from inside the post loop means earlier entries are already posted and escrowed when it fires,
+// and the summary that would let the caller reconcile them is discarded with the throw.
+describe("executePosting pre-flight", () => {
+  test("validates every entry against the pool before spending on any of them", async () => {
+    const pool = [entry("1"), entry("2")];
+    const plan = planPosting(pool, POLICY);
+    // The gap is the entry the batch would reach SECOND, so an executor that checked as it went
+    // would already have posted and escrowed the first one.
+    const missing = plan.entries[1]!.taskDigest;
+    const { deps: d, postTask } = deps({
+      entries: new Map(pool.filter((item) => item.taskDigest !== missing)
+        .map((item) => [item.taskDigest, item])),
+    }, pool);
+
+    await expect(executePosting(d, plan)).rejects.toThrow(/not in the supplied pool/u);
+    expect(postTask).not.toHaveBeenCalled();
+  });
+
+  test("refuses a plan entry whose escrow is not the escrow its terms imply", async () => {
+    const pool = [entry("1")];
+    const planned = planPosting(pool, POLICY);
+    const understated = {
+      ...planned,
+      entries: [{ ...planned.entries[0]!, escrowValueWei: 1n }],
+      totalEscrowValueWei: 1n,
+    };
+    const { deps: d, postTask } = deps({}, pool);
+
+    await expect(executePosting(d, understated)).rejects.toThrow(/escrow/u);
+    expect(postTask).not.toHaveBeenCalled();
+  });
+
+  test("refuses a batch whose second entry cannot be sealed, before the first one is posted", async () => {
+    const plan = planPosting([entry("1"), entry("2")], POLICY);
+    const unsealable = plan.entries[1]!.taskDigest;
+    const pool = [entry("1"), entry("2")].map((item) => (item.taskDigest === unsealable
+      ? { ...item, evaluationSpecPublic: false }
+      : item));
+    const { deps: d, postTask } = deps({}, pool);
+
+    await expect(executePosting(d, plan)).rejects.toThrow(/public-specification/u);
+    expect(postTask).not.toHaveBeenCalled();
+  });
+});

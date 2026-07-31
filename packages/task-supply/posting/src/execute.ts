@@ -9,13 +9,14 @@
 // disguise: it is the marketplace binding's today, the work client's at its mint (README, F7).
 import {
   BroadcastUncertainError,
+  postingEscrowValueWei,
   type MarketplaceChainConfig,
   type PostingOutcome,
   type PostingPorts,
   type PostingTerms,
 } from "@jinn-network/marketplace-binding";
 import { buildDispatchSubmission } from "./dispatch-submission.js";
-import type { PostingPlan, PostingPoolEntry } from "./types.js";
+import type { PostingPlan, PostingPlanEntry, PostingPoolEntry } from "./types.js";
 
 /** The posting core's shape. Swapped, not wrapped, when the work client mints (F7). */
 export type PostTaskFn = (
@@ -102,6 +103,46 @@ function planFields(plan: PostingPlan): Record<string, string> {
   };
 }
 
+interface PreparedEntry {
+  readonly planEntry: PostingPlanEntry;
+  readonly entry: PostingPoolEntry;
+  readonly submissionBytes: Uint8Array;
+}
+
+/**
+ * Everything checkable about the batch, checked before the first wei leaves: the bytes for every
+ * planned digest are in hand, every entry's escrow is the escrow the plan's own terms imply, and
+ * every dispatch Submission seals. All three are pure, so a refusal raised from inside the post
+ * loop would only mean earlier entries were already posted and escrowed when it fired.
+ *
+ * The escrow re-derivation is the same class of check as the `maxClaims` gate one layer down:
+ * `postTask` computes the real `msg.value` from the terms and the sealed `attempts.maxTotal`, so a
+ * plan carrying an understated `escrowValueWei` would render, log, and total a number that is not
+ * what the chain is sent.
+ */
+function prepareBatch(deps: PostingDeps, plan: PostingPlan): readonly PreparedEntry[] {
+  const expectedEscrowValueWei = postingEscrowValueWei(plan.terms);
+  return plan.entries.map((planEntry) => {
+    const entry = deps.entries.get(planEntry.taskDigest);
+    if (entry === undefined) {
+      throw new PostingRefusedError(
+        "pool-entry-missing",
+        `planned entry ${planEntry.taskDigest} is not in the supplied pool -- refusing to post a `
+          + "batch whose bytes cannot be read",
+      );
+    }
+    if (planEntry.escrowValueWei !== expectedEscrowValueWei) {
+      throw new PostingRefusedError(
+        "escrow-disagrees-with-terms",
+        `planned entry ${planEntry.taskDigest} carries escrow ${planEntry.escrowValueWei} wei, but `
+          + `this plan's terms imply ${expectedEscrowValueWei} wei -- the surfaced total would not `
+          + "be what is sent",
+      );
+    }
+    return { planEntry, entry, submissionBytes: buildDispatchSubmission(entry, planEntry, plan) };
+  });
+}
+
 export async function executePosting(
   deps: PostingDeps,
   plan: PostingPlan,
@@ -123,21 +164,15 @@ export async function executePosting(
     deps.log.record({ event: "posting.approved", fields: planFields(plan) });
   }
 
+  // After the approval gate (a withheld plan is never inspected further) and before the first
+  // post: the whole batch is resolved and sealed, so a refusal cannot land mid-spend.
+  const prepared = prepareBatch(deps, plan);
+
   const posted: { taskDigest: `sha256:${string}`; taskId: bigint; txHash: `0x${string}` }[] = [];
   const uncertain: { taskDigest: `sha256:${string}`; detail: string }[] = [];
   let spentEscrowValueWei = 0n;
 
-  for (const planEntry of plan.entries) {
-    const entry = deps.entries.get(planEntry.taskDigest);
-    if (entry === undefined) {
-      throw new PostingRefusedError(
-        "pool-entry-missing",
-        `planned entry ${planEntry.taskDigest} is not in the supplied pool -- refusing to post a `
-          + "batch whose bytes cannot be read",
-      );
-    }
-    const submissionBytes = buildDispatchSubmission(entry, planEntry, plan);
-
+  for (const { planEntry, entry, submissionBytes } of prepared) {
     let outcome: PostingOutcome;
     try {
       // eslint-disable-next-line no-await-in-loop -- posts are sequential: one requester, one
