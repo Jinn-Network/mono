@@ -48,6 +48,40 @@ function scriptKindForPath(filePath, ts) {
   return null;
 }
 
+function unwrapExpression(expr, ts) {
+  let current = expr;
+  while (current) {
+    if (ts.isParenthesizedExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isAsExpression(current) || ts.isTypeAssertionExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isNonNullExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isSatisfiesExpression?.(current)) {
+      current = current.expression;
+      continue;
+    }
+    break;
+  }
+  return current;
+}
+
+function isModuleModule(specifier) {
+  const rootName = moduleRoot(specifier);
+  return rootName === 'node:module' || rootName === 'module'
+    || specifier.startsWith('node:module/') || specifier.startsWith('module/');
+}
+
+function isCodeLoadingUrl(specifier) {
+  return /^(data|file|https?):/i.test(specifier);
+}
+
 function normalizeModuleSpecifier(specifier) {
   if (specifier.startsWith('node:')) return specifier;
   const slash = specifier.indexOf('/');
@@ -143,42 +177,81 @@ class Scope {
   }
 }
 
+function resolveProcessRoot(expr, ts, scope) {
+  const unwrapped = unwrapExpression(expr, ts);
+  if (ts.isIdentifier(unwrapped)) {
+    if (scope.lookup(unwrapped.text) === AUTH.process) {
+      return { kind: 'process' };
+    }
+    return null;
+  }
+  if (ts.isPropertyAccessExpression(unwrapped)) {
+    const inner = unwrapExpression(unwrapped.expression, ts);
+    if (ts.isIdentifier(inner)) {
+      if ((inner.text === 'globalThis' || inner.text === 'global') && unwrapped.name.text === 'process') {
+        return { kind: 'process' };
+      }
+      const idAuth = scope.lookup(inner.text) ?? globalAuthForIdentifier(inner.text);
+      if (idAuth === AUTH.global && unwrapped.name.text === 'process') {
+        return { kind: 'process' };
+      }
+    }
+    if (ts.isIdentifier(inner) && inner.text === 'process') {
+      const member = unwrapped.name.text;
+      if (member === 'env') return { kind: 'env' };
+      if (member === 'argv') return { kind: 'argv' };
+      if (member === 'stdout') return { kind: 'stdout' };
+      if (member === 'stderr') return { kind: 'stderr' };
+      if (member === 'exitCode') return { kind: 'exitCode' };
+      if (member === 'once' || member === 'off') return { kind: member };
+    }
+  }
+  return null;
+}
+
 function authorityFromExpression(expr, ts, scope) {
-  if (ts.isIdentifier(expr)) {
-    return scope.lookup(expr.text) ?? AUTH.local;
+  const unwrapped = unwrapExpression(expr, ts);
+  if (ts.isIdentifier(unwrapped)) {
+    return scope.lookup(unwrapped.text) ?? AUTH.local;
   }
-  if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.expression)) {
-    const base = scope.lookup(expr.expression.text) ?? globalAuthForIdentifier(expr.expression.text);
-    if ((base === AUTH.global || expr.expression.text === 'globalThis' || expr.expression.text === 'global')
-      && expr.name.text === 'process') {
-      return AUTH.process;
+  if (ts.isPropertyAccessExpression(unwrapped)) {
+    const inner = unwrapExpression(unwrapped.expression, ts);
+    const member = unwrapped.name.text;
+    if (ts.isIdentifier(inner)) {
+      const idAuth = scope.lookup(inner.text) ?? globalAuthForIdentifier(inner.text);
+      if (idAuth === AUTH.global && member === 'process') return AUTH.process;
+      if (idAuth === AUTH.global && member === 'eval') return AUTH.eval;
+      if (idAuth === AUTH.global && member === 'Function') return AUTH.Function;
+      if (idAuth === AUTH.global && NETWORK_GLOBALS.has(member)) return AUTH[member];
     }
-    if (base === AUTH.global && expr.name.text === 'Function') return AUTH.Function;
-    if (base === AUTH.global && NETWORK_GLOBALS.has(expr.name.text)) return AUTH[expr.name.text];
-    if (expr.expression.text === 'Intl' || (base === AUTH.Intl)) return AUTH.Intl;
+    if (member === 'Intl' || (ts.isIdentifier(inner) && inner.text === 'Intl')) return AUTH.Intl;
+    if (LOCALE_MEMBER_APIS.has(member)) return AUTH.localeFn;
+    return AUTH.local;
   }
-  if (ts.isElementAccessExpression(expr) && ts.isIdentifier(expr.expression)) {
-    const base = scope.lookup(expr.expression.text) ?? globalAuthForIdentifier(expr.expression.text);
-    const key = literalString(expr.argumentExpression, ts);
-    if ((base === AUTH.global || expr.expression.text === 'globalThis' || expr.expression.text === 'global')
-      && key === 'process') {
-      return AUTH.process;
-    }
-    if (base === AUTH.global && key === 'eval') return AUTH.eval;
-    if (base === AUTH.global && key === 'Function') return AUTH.Function;
+  if (ts.isElementAccessExpression(unwrapped)) {
+    const baseAuth = authorityFromExpression(unwrapped.expression, ts, scope);
+    const key = literalString(unwrapped.argumentExpression, ts);
+    if (baseAuth === AUTH.global && key === 'process') return AUTH.process;
+    if (baseAuth === AUTH.global && key === 'eval') return AUTH.eval;
+    if (baseAuth === AUTH.global && key === 'Function') return AUTH.Function;
+    if (baseAuth === AUTH.global && key && NETWORK_GLOBALS.has(key)) return AUTH[key];
     if (key && LOCALE_MEMBER_APIS.has(key)) return AUTH.localeFn;
+    return AUTH.local;
   }
-  if (ts.isParenthesizedExpression(expr)) {
-    return authorityFromExpression(expr.expression, ts, scope);
+  if (ts.isBinaryExpression(unwrapped) && unwrapped.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+    return authorityFromExpression(unwrapped.right, ts, scope);
   }
-  if (ts.isBinaryExpression(expr) && expr.operatorToken.kind === ts.SyntaxKind.CommaToken) {
-    return authorityFromExpression(expr.right, ts, scope);
-  }
-  if (ts.isIdentifier(expr) && expr.text === 'Intl') return AUTH.Intl;
   return AUTH.local;
 }
 
-function bindPattern(pattern, auth, ts, scope) {
+function bindPattern(pattern, auth, ts, scope, ctx) {
+  if (ctx.isBinEntry && (auth === AUTH.process || auth === AUTH.global || auth === AUTH.require || auth === AUTH.eval)) {
+    ctx.add('forbidden bin process alias');
+    return;
+  }
+  if (!ctx.isBinEntry && auth === AUTH.process) {
+    ctx.add('destructured process authority');
+  }
   if (ts.isIdentifier(pattern)) {
     scope.declare(pattern.text, auth);
     return;
@@ -189,6 +262,10 @@ function bindPattern(pattern, auth, ts, scope) {
       const local = bindingNameText(element.name, ts);
       const property = element.propertyName ? bindingNameText(element.propertyName, ts) : local;
       if (!local) continue;
+      if (ctx.isBinEntry && auth === AUTH.process) {
+        ctx.add('forbidden bin process alias');
+        continue;
+      }
       if (auth === AUTH.process && property && BIN_ALLOWED_PROCESS_MEMBERS.has(property)) {
         scope.declare(local, AUTH.process);
       } else if (auth === AUTH.global && property === 'process') {
@@ -206,14 +283,26 @@ function bindPattern(pattern, auth, ts, scope) {
   }
 }
 
-function bindFromInitializer(name, initializer, ts, scope) {
-  const auth = authorityFromExpression(initializer, ts, scope);
+function bindFromInitializer(name, initializer, ts, scope, ctx) {
+  const unwrapped = unwrapExpression(initializer, ts);
+  let auth = authorityFromExpression(initializer, ts, scope);
+  if (ts.isCallExpression(unwrapped)) {
+    const callee = unwrapExpression(unwrapped.expression, ts);
+    if (ts.isIdentifier(callee) && callee.text === 'createRequire') {
+      ctx.add('code-loading createRequire');
+      auth = AUTH.require;
+    }
+  }
+  if (ctx.isBinEntry && (auth === AUTH.process || auth === AUTH.global || auth === AUTH.require || auth === AUTH.eval)) {
+    ctx.add('forbidden bin process alias');
+    return;
+  }
   if (ts.isIdentifier(name)) {
     scope.declare(name.text, auth);
     return;
   }
   if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
-    bindPattern(name, auth, ts, scope);
+    bindPattern(name, auth, ts, scope, ctx);
   }
 }
 
@@ -222,13 +311,50 @@ function isAllowedBinImport(specifier, node, ts) {
   const allowed = BIN_ALLOWED_IMPORTS.find((entry) => entry.module === specifier);
   if (!allowed || !ts.isImportDeclaration(node)) return false;
   const clause = node.importClause;
-  if (!clause?.namedBindings || !ts.isNamedImports(clause.namedBindings)) return false;
+  if (!clause || clause.isTypeOnly) return false;
+  if (clause.name) return false;
+  if (!clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) return false;
   const names = clause.namedBindings.elements.map((element) => element.name.text);
   return names.length === allowed.names.length
     && names.every((name) => allowed.names.includes(name))
     && clause.namedBindings.elements.every((element) =>
       (element.propertyName?.text ?? element.name.text) === element.name.text
       || allowed.names.includes(element.propertyName?.text ?? element.name.text));
+}
+
+function expressionContains(candidate, target, ts) {
+  if (candidate === target) return true;
+  if (ts.isPropertyAccessExpression(candidate)) {
+    return expressionContains(candidate.expression, target, ts);
+  }
+  if (ts.isElementAccessExpression(candidate)) {
+    return expressionContains(candidate.expression, target, ts);
+  }
+  return false;
+}
+
+function isBinProcessMutation(node, ts, member) {
+  if (!['env', 'argv'].includes(member)) return false;
+  let current = node.parent;
+  while (current) {
+    if (ts.isBinaryExpression(current)) {
+      const op = current.operatorToken.kind;
+      if ([
+        ts.SyntaxKind.EqualsToken,
+        ts.SyntaxKind.PlusEqualsToken,
+        ts.SyntaxKind.MinusEqualsToken,
+        ts.SyntaxKind.AsteriskEqualsToken,
+        ts.SyntaxKind.SlashEqualsToken,
+      ].includes(op) && expressionContains(current.left, node, ts)) {
+        return true;
+      }
+    }
+    if (ts.isDeleteExpression(current) && expressionContains(current.expression, node, ts)) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
 }
 
 function finalizeViolations(violations) {
@@ -300,10 +426,19 @@ function scanSourceFile(filePath, content, options) {
   }
 
   let scope = new Scope();
+  const ctx = { isBinEntry, add };
 
   function checkImportSpecifier(specifier, node) {
     if (specifier === null) {
       add('nonliteral dynamic import');
+      return;
+    }
+    if (isModuleModule(specifier)) {
+      add(`code-loading module ${specifier}`);
+      return;
+    }
+    if (isCodeLoadingUrl(specifier)) {
+      add(`code-loading url ${specifier.split(':')[0]}:`);
       return;
     }
     if (forbiddenPackages.some((forbidden) => packageSpecifierMatches(specifier, forbidden))) {
@@ -334,12 +469,25 @@ function scanSourceFile(filePath, content, options) {
 
   function reportProcessAccess(node, member, via = 'process') {
     if (isBinEntry) {
+      if (isBinProcessMutation(node, ts, member)) {
+        add(`forbidden bin process.${member} mutation`);
+        return;
+      }
       if (!isAllowedBinProcessUse(node, ts, member)) {
         add(`forbidden bin process.${member}`);
       }
       return;
     }
     add(`${via}.${member}`);
+  }
+
+  function visitStatementBody(body, currentScope) {
+    if (ts.isBlock(body)) {
+      visitNode(body, currentScope);
+      return;
+    }
+    const bodyScope = currentScope.child();
+    visitNode(body, bodyScope);
   }
 
   function checkKeyMaterial(name, context) {
@@ -350,6 +498,66 @@ function scanSourceFile(filePath, content, options) {
 
   function visitNode(node, currentScope) {
     scope = currentScope;
+
+    if (ts.isBlock(node)) {
+      const blockScope = currentScope.child();
+      for (const stmt of node.statements) {
+        visitNode(stmt, blockScope);
+      }
+      return;
+    }
+
+    if (ts.isCatchClause(node)) {
+      const catchScope = currentScope.child();
+      if (node.variableDeclaration) {
+        const { name, initializer } = node.variableDeclaration;
+        if (initializer) {
+          bindFromInitializer(name, initializer, ts, catchScope, ctx);
+        } else if (ts.isIdentifier(name)) {
+          catchScope.declare(name.text, AUTH.local);
+        }
+      }
+      visitNode(node.block, catchScope);
+      return;
+    }
+
+    if (ts.isIfStatement(node)) {
+      visitNode(node.expression, currentScope);
+      visitStatementBody(node.thenStatement, currentScope);
+      if (node.elseStatement) visitStatementBody(node.elseStatement, currentScope);
+      return;
+    }
+
+    if (ts.isWhileStatement(node) || ts.isDoStatement(node)) {
+      visitNode(node.expression, currentScope);
+      visitStatementBody(node.statement, currentScope);
+      return;
+    }
+
+    if (ts.isForStatement(node)) {
+      if (node.initializer) visitNode(node.initializer, currentScope);
+      if (node.condition) visitNode(node.condition, currentScope);
+      if (node.incrementor) visitNode(node.incrementor, currentScope);
+      visitStatementBody(node.statement, currentScope);
+      return;
+    }
+
+    if (ts.isForOfStatement(node) || ts.isForInStatement(node)) {
+      if (node.initializer) visitNode(node.initializer, currentScope);
+      visitNode(node.expression, currentScope);
+      visitStatementBody(node.statement, currentScope);
+      return;
+    }
+
+    if (ts.isSwitchStatement(node)) {
+      visitNode(node.expression, currentScope);
+      for (const switchCase of node.caseBlock.clauses) {
+        for (const element of switchCase.statements) {
+          visitNode(element, currentScope);
+        }
+      }
+      return;
+    }
 
     if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node)) {
       const fnScope = currentScope.child();
@@ -364,7 +572,7 @@ function scanSourceFile(filePath, content, options) {
               if (destructuredName) checkKeyMaterial(destructuredName, 'parameter');
             }
           }
-          bindPattern(param.name, AUTH.local, ts, fnScope);
+          bindPattern(param.name, AUTH.local, ts, fnScope, ctx);
         }
       }
       if (node.body) ts.forEachChild(node.body, (child) => visitNode(child, fnScope));
@@ -398,7 +606,7 @@ function scanSourceFile(filePath, content, options) {
 
     if (ts.isVariableDeclaration(node)) {
       if (node.name && node.initializer) {
-        bindFromInitializer(node.name, node.initializer, ts, currentScope);
+        bindFromInitializer(node.name, node.initializer, ts, currentScope, ctx);
       } else if (ts.isIdentifier(node.name)) {
         currentScope.declare(node.name.text, AUTH.local);
       }
@@ -406,16 +614,19 @@ function scanSourceFile(filePath, content, options) {
 
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
       if (ts.isObjectBindingPattern(node.left) || ts.isArrayBindingPattern(node.left)) {
-        bindPattern(node.left, authorityFromExpression(node.right, ts, currentScope), ts, currentScope);
+        bindPattern(node.left, authorityFromExpression(node.right, ts, currentScope), ts, currentScope, ctx);
       } else if (ts.isIdentifier(node.left)) {
         currentScope.declare(node.left.text, authorityFromExpression(node.right, ts, currentScope));
       }
     }
 
     if (ts.isCallExpression(node)) {
-      const callee = node.expression;
+      const callee = unwrapExpression(node.expression, ts);
       if (ts.isIdentifier(callee)) {
         const auth = currentScope.lookup(callee.text);
+        if (callee.text === 'createRequire') {
+          add('code-loading createRequire');
+        }
         if (auth === AUTH.require) {
           checkImportSpecifier(literalString(node.arguments[0], ts), node);
         }
@@ -442,17 +653,13 @@ function scanSourceFile(filePath, content, options) {
           }
         }
       }
-      if (ts.isElementAccessExpression(callee) && ts.isIdentifier(callee.expression)) {
-        const auth = currentScope.lookup(callee.expression.text);
+      if (ts.isElementAccessExpression(callee)) {
+        const auth = authorityFromExpression(callee.expression, ts, currentScope);
         if (auth === AUTH.eval || auth === AUTH.Function) add('dynamic evaluation alias call');
       }
-      if (ts.isParenthesizedExpression(callee) || (ts.isBinaryExpression(callee) && callee.operatorToken.kind === ts.SyntaxKind.CommaToken)) {
-        let inner = callee;
-        while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
-        if (ts.isBinaryExpression(inner) && inner.operatorToken.kind === ts.SyntaxKind.CommaToken) {
-          const rightAuth = authorityFromExpression(inner.right, ts, currentScope);
-          if (rightAuth === AUTH.eval || rightAuth === AUTH.Function) add('dynamic evaluation comma');
-        }
+      if (ts.isBinaryExpression(callee) && callee.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+        const rightAuth = authorityFromExpression(callee.right, ts, currentScope);
+        if (rightAuth === AUTH.eval || rightAuth === AUTH.Function) add('dynamic evaluation comma');
       }
     }
 
@@ -471,38 +678,72 @@ function scanSourceFile(filePath, content, options) {
     }
 
     if (ts.isPropertyAccessExpression(node)) {
-      const auth = authorityFromExpression(node.expression, ts, currentScope);
       const member = node.name.text;
-      if (auth === AUTH.process) {
+      const processRoot = resolveProcessRoot(node.expression, ts, currentScope);
+      if (processRoot?.kind === 'process') {
         reportProcessAccess(node, member);
-      } else if (auth === AUTH.global && member === 'process') {
-        reportProcessAccess(node, 'process', 'globalThis');
-      } else if (auth === AUTH.global && member === 'Function') {
-        add('globalThis.Function');
-      } else if (auth === AUTH.global && NETWORK_GLOBALS.has(member)) {
-        add(`network global ${member}`);
-      } else if (LOCALE_MEMBER_APIS.has(member)) {
-        add(`locale-sensitive ${member}`);
-      } else if (auth === AUTH.Intl) {
-        add('Intl alias');
-      } else if (auth === AUTH.localeFn) {
-        add('locale-sensitive aliased member');
-      } else if (auth === AUTH.console) {
-        add(`console ${member}`);
-      } else if (auth === AUTH.fetch || auth === AUTH.WebSocket || auth === AUTH.EventSource) {
-        add(`network global ${member}`);
-      }
-      if (ts.isIdentifier(node.expression) && node.expression.text === 'Intl') {
-        add('Intl');
+      } else if (processRoot?.kind === 'env') {
+        if (isBinEntry) {
+          if (isBinProcessMutation(node, ts, 'env')) {
+            add('forbidden bin process.env mutation');
+          }
+        } else {
+          add('process.env');
+        }
+      } else if ((processRoot?.kind === 'stdout' || processRoot?.kind === 'stderr') && member === 'write') {
+        if (isBinEntry) {
+          const parent = node.parent;
+          if (!ts.isCallExpression(parent) || parent.expression !== node) {
+            add(`forbidden bin process.${processRoot.kind}.write`);
+          }
+        } else {
+          add(`process.${processRoot.kind}`);
+        }
+      } else {
+        const auth = authorityFromExpression(node.expression, ts, currentScope);
+        if (auth === AUTH.global && member === 'Function') {
+          add('globalThis.Function');
+        } else if (auth === AUTH.global && member === 'eval') {
+          add('globalThis.eval');
+        } else if (auth === AUTH.global && NETWORK_GLOBALS.has(member)) {
+          add(`network global ${member}`);
+        } else if (LOCALE_MEMBER_APIS.has(member)) {
+          add(`locale-sensitive ${member}`);
+        } else if (auth === AUTH.Intl) {
+          add('Intl alias');
+        } else if (auth === AUTH.localeFn) {
+          add('locale-sensitive aliased member');
+        } else if (auth === AUTH.console) {
+          add(`console ${member}`);
+        } else if (auth === AUTH.fetch || auth === AUTH.WebSocket || auth === AUTH.EventSource) {
+          add(`network global ${member}`);
+        }
+        if (ts.isIdentifier(node.expression) && node.expression.text === 'Intl') {
+          add('Intl');
+        }
       }
     }
 
     if (ts.isElementAccessExpression(node)) {
+      const processRoot = resolveProcessRoot(node.expression, ts, currentScope);
+      if (processRoot?.kind === 'argv') {
+        if (!isBinEntry) add('process.argv');
+        return;
+      }
+      if (processRoot?.kind === 'env') {
+        if (isBinEntry) {
+          if (isBinProcessMutation(node, ts, 'env')) add('forbidden bin process.env mutation');
+        } else {
+          add('process.env');
+        }
+        return;
+      }
       const auth = authorityFromExpression(node.expression, ts, currentScope);
       const key = literalString(node.argumentExpression, ts);
-      if (auth === AUTH.process) {
-        if (key === null) add('dynamic computed process access');
-        else reportProcessAccess(node, key);
+      const numericIndex = ts.isNumericLiteral(node.argumentExpression);
+      if (processRoot?.kind === 'process') {
+        if (key === null && !numericIndex) add('dynamic computed process access');
+        else reportProcessAccess(node, key ?? String(node.argumentExpression.text));
       } else if (auth === AUTH.global && key === 'process') {
         add('globalThis.process bracket');
       } else if (auth === AUTH.global && (key === 'eval' || key === 'Function')) {

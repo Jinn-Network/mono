@@ -42,7 +42,7 @@ export const INSTALL_TIME_SECTIONS = Object.freeze([
 
 export const NON_NPM_DIRECTORIES = Object.freeze(['frozen', 'adapter-hermes']);
 
-/** Ephemeral guard self-test dirs under live plugin/ — skipped during default discovery. */
+/** Ephemeral guard self-test dir prefix — must never exist under live plugin/ during discovery. */
 export const GUARD_FIXTURE_DIR_PREFIX = '.plugin-tree-';
 
 /** Deterministic code-unit string compare — never localeCompare/Intl. */
@@ -123,6 +123,18 @@ function validatePackageTopology(packages) {
   return errors.sort(compareCodeUnit);
 }
 
+function assertLiveTreeHasNoGuardFixtureDirs(discoveryRoot) {
+  if (discoveryRoot !== pluginRoot || !existsSync(pluginRoot)) return;
+  for (const entry of readdirSync(pluginRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith(GUARD_FIXTURE_DIR_PREFIX)) {
+      throw new Error(
+        `ephemeral guard fixture directory must not exist under live plugin tree: ${entry.name}`,
+      );
+    }
+  }
+}
+
 /**
  * Recurse every directory under a plugin tree root, continue below discovered packages,
  * fail on symlinks and ambiguous topology.
@@ -130,9 +142,9 @@ function validatePackageTopology(packages) {
  * @param {{ root?: string }} [options]
  */
 export function discoverPluginPackages({ root: discoveryRoot = pluginRoot } = {}) {
+  assertLiveTreeHasNoGuardFixtureDirs(discoveryRoot);
   const packages = [];
   const topologyErrors = [];
-  const skipGuardFixtures = discoveryRoot === pluginRoot;
 
   function walk(directory, packagePath = '') {
     if (!existsSync(directory)) return;
@@ -143,7 +155,6 @@ export function discoverPluginPackages({ root: discoveryRoot = pluginRoot } = {}
     }
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       if (BUILD_ARTIFACTS.has(entry.name)) continue;
-      if (skipGuardFixtures && entry.name.startsWith(GUARD_FIXTURE_DIR_PREFIX)) continue;
       const child = join(directory, entry.name);
       const childPath = packagePath ? `${packagePath}/${entry.name}` : entry.name;
       if (entry.isSymbolicLink()) {
@@ -191,6 +202,56 @@ export function discoverPluginPackages({ root: discoveryRoot = pluginRoot } = {}
   return packages;
 }
 
+/** Validate one exports subpath key. */
+export function validateExportSubpath(subpath, packageName) {
+  if (subpath !== '.' && !subpath.startsWith('./')) {
+    throw new Error(`${packageName} exports subpath must be "." or "./…": ${subpath}`);
+  }
+  if (subpath.includes('..') || subpath.includes('\\') || subpath.includes('%')) {
+    throw new Error(`${packageName} exports subpath escapes package root: ${subpath}`);
+  }
+  if (subpath.includes('*') || subpath.includes('?')) {
+    throw new Error(`${packageName} exports wildcard/conditional pattern not supported: ${subpath}`);
+  }
+  if (subpath.startsWith('./') && subpath.length <= 2) {
+    throw new Error(`${packageName} exports subpath "./" is malformed`);
+  }
+}
+
+/** Validate one export target object — exact reviewed `types` + `import` shape only. */
+export function validateExportTarget(target, packageName, subpath) {
+  if (typeof target === 'string') {
+    validateRelativeExportPath(target, packageName, subpath);
+    return { import: target, types: target };
+  }
+  if (typeof target !== 'object' || target === null || Array.isArray(target)) {
+    throw new Error(`${packageName} exports entry ${subpath} is malformed`);
+  }
+  const keys = Object.keys(target);
+  const allowed = ['import', 'types'];
+  for (const key of keys) {
+    if (!allowed.includes(key)) {
+      throw new Error(`${packageName} exports entry ${subpath} has unsupported condition: ${key}`);
+    }
+  }
+  if (typeof target.types !== 'string' || typeof target.import !== 'string') {
+    throw new Error(`${packageName} exports entry ${subpath} requires string types and import`);
+  }
+  validateRelativeExportPath(target.import, packageName, subpath);
+  validateRelativeExportPath(target.types, packageName, subpath);
+  return { import: target.import, types: target.types };
+}
+
+function validateRelativeExportPath(relativePath, packageName, subpath) {
+  if (!relativePath.startsWith('./')) {
+    throw new Error(`${packageName} exports target for ${subpath} must be relative: ${relativePath}`);
+  }
+  const normalized = relativePath.replace(/\\/g, '/');
+  if (normalized.includes('..') || normalized.startsWith('/')) {
+    throw new Error(`${packageName} exports target escapes package root: ${relativePath}`);
+  }
+}
+
 /** Derive explicit public code entrypoints from package exports. Wildcards fail-closed. */
 export function derivePublicCodeEntrypoints(manifest) {
   const name = manifest.name;
@@ -199,35 +260,23 @@ export function derivePublicCodeEntrypoints(manifest) {
   }
   const exportsField = manifest.exports;
   if (exportsField === undefined) {
-    return [{ subpath: '.', specifier: name, conditions: manifest }];
+    return [{ subpath: '.', specifier: name, conditions: { import: manifest.main ?? './dist/index.js', types: manifest.types ?? './dist/index.d.ts' } }];
   }
   if (typeof exportsField === 'string') {
+    validateRelativeExportPath(exportsField, name, '.');
     return [{ subpath: '.', specifier: name, conditions: { import: exportsField, types: exportsField } }];
   }
-  if (typeof exportsField !== 'object' || exportsField === null) {
+  if (typeof exportsField !== 'object' || exportsField === null || Array.isArray(exportsField)) {
     throw new Error(`${name} has malformed exports field`);
   }
   const entrypoints = [];
   for (const [subpath, target] of Object.entries(exportsField)) {
-    if (subpath.includes('*') || subpath.includes('?')) {
-      throw new Error(`${name} exports wildcard/conditional pattern not supported: ${subpath}`);
-    }
-    if (typeof target === 'string') {
-      entrypoints.push({ subpath, specifier: subpath === '.' ? name : `${name}${subpath.slice(1)}`, conditions: { import: target, types: target } });
-      continue;
-    }
-    if (typeof target !== 'object' || target === null) {
-      throw new Error(`${name} exports entry ${subpath} is malformed`);
-    }
-    const importTarget = target.import ?? target.default;
-    const typesTarget = target.types;
-    if (importTarget === undefined && typesTarget === undefined) {
-      throw new Error(`${name} exports entry ${subpath} has no import/types code surface`);
-    }
+    validateExportSubpath(subpath, name);
+    const conditions = validateExportTarget(target, name, subpath);
     entrypoints.push({
       subpath,
       specifier: subpath === '.' ? name : `${name}${subpath.slice(1)}`,
-      conditions: target,
+      conditions,
     });
   }
   if (entrypoints.length === 0) {

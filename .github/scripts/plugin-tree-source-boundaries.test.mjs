@@ -522,6 +522,89 @@ test('R-C3-24 derives explicit public code entrypoints and rejects wildcards', (
   );
 });
 
+test('R-C3-29 catches wrapper bypasses, createRequire, data imports, block scope leak, and bin aliases', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-29-'));
+  try {
+    const violations = scanFixtureSource(fixture, 'bypass.ts', [
+      '(globalThis as typeof globalThis).process.env;',
+      'const runner = globalThis.eval;',
+      'runner("1");',
+      'import { createRequire } from "node:module";',
+      'const req = createRequire(import.meta.url);',
+      'req("node:fs");',
+      'await import("data:text/javascript,export%20const%20x%3D1");',
+    ].join('\n'));
+    assert.ok(violations.some((entry) => entry.includes('process.env')));
+    assert.ok(violations.some((entry) => entry.includes('globalThis.eval')));
+    assert.ok(violations.some((entry) => entry.includes('code-loading createRequire')));
+    assert.ok(violations.some((entry) => entry.includes('code-loading module node:module')));
+    assert.ok(violations.some((entry) => entry.includes('code-loading url data:')));
+
+    const blockLeak = scanFixtureSource(fixture, 'block-leak.ts', [
+      'export function probe() {',
+      '  { const process = { env: {} }; }',
+      '  return process.env;',
+      '}',
+    ].join('\n'));
+    assert.ok(blockLeak.some((entry) => entry.includes('process.env')));
+
+    const binAlias = scanFixtureSource(fixture, 'bin.ts', [
+      'const { env } = process;',
+      'env.JINN_PLUGIN_HOME;',
+    ].join('\n'), { isBinEntry: true });
+    assert.ok(binAlias.some((entry) => entry.includes('forbidden bin process alias')));
+
+    const binMutation = scanFixtureSource(fixture, 'bin-mut.ts', [
+      'process.env.FOO = "bar";',
+    ].join('\n'), { isBinEntry: true });
+    assert.ok(binMutation.some((entry) => entry.includes('forbidden bin process.env mutation')));
+
+    const binDefaultFs = scanFixtureSource(fixture, 'bin-fs.ts', [
+      'import fs from "node:fs";',
+      'fs.realpathSync(".");',
+    ].join('\n'), { isBinEntry: true });
+    assert.ok(binDefaultFs.some((entry) => entry.includes('node:fs')));
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-30 discovers .plugin-tree-* under temp roots and hidden sources fail custody', () => {
+  assert.doesNotThrow(() => discoverPluginPackages(), 'live plugin tree must not contain ephemeral guard fixture directories');
+
+  const tempRoot = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-30-temp-'));
+  try {
+    const hiddenPkg = join(tempRoot, '.plugin-tree-hidden');
+    mkdirSync(join(hiddenPkg, 'src'), { recursive: true });
+    writeFileSync(join(hiddenPkg, 'package.json'), JSON.stringify({
+      name: '@jinn-network/hidden-temp-fixture',
+      version: '0.0.0',
+    }, null, 2));
+    writeFileSync(join(hiddenPkg, 'src', 'index.ts'), 'process.env.LEAK;\n');
+    const discovered = discoverPluginPackages({ root: tempRoot });
+    assert.equal(discovered.length, 1);
+    assert.equal(discovered[0].name, '@jinn-network/hidden-temp-fixture');
+    assert.ok(!DECLARED_PLUGIN_PACKAGES.includes(discovered[0].directory));
+    const violations = scanProductionSources(discovered, scanOptions());
+    assert.ok(violations.some((entry) => entry.includes('process.env')));
+  } finally { rmSync(tempRoot, { recursive: true, force: true }); }
+});
+
+test('R-C3-31 rejects unsupported export shapes outside the reviewed contract', () => {
+  assert.throws(
+    () => derivePublicCodeEntrypoints({
+      name: '@jinn-network/outside',
+      exports: { '.': { types: '../outside.d.ts', import: '../outside.js' } },
+    }),
+    /relative/,
+  );
+  assert.throws(
+    () => derivePublicCodeEntrypoints({
+      name: '@jinn-network/condition',
+      exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js', require: './dist/index.cjs' } },
+    }),
+    /unsupported condition/,
+  );
+});
+
 test('plugin tree source boundaries hold and the manifest matches the approved shape', () => {
   const packages = discoverPluginPackages();
   const sourceFiles = packages.flatMap((pkg) => pkg.sourceFiles);
