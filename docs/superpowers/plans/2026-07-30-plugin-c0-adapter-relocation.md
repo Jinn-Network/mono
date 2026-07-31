@@ -843,7 +843,7 @@ This is the program plan §6 gate for C0, made runnable. It is stronger than a t
 
 The gate script is deliberately **not committed**: it pins a live external head and would rot. Its output goes in the PR description.
 
-- [ ] **Step 1: Write the gate script**
+- [x] **Step 1: Write the gate script**
 
 Create `/tmp/c0-mirror-gate.sh`:
 
@@ -893,7 +893,7 @@ test -z "$DIRTY"                    || { echo "FAIL: slim working tree dirty:" >
 echo "MIRROR BIT-IDENTITY GATE PASS  tree=$AFTER_TREE  head=$AFTER_HEAD"
 ```
 
-- [ ] **Step 2: Run the gate**
+- [x] **Step 2: Run the gate**
 
 Run: `bash /tmp/c0-mirror-gate.sh`
 
@@ -930,7 +930,7 @@ A canonical marker is exactly two lines — `source: Jinn-Network/mono@<40 hex>`
 
 A content diff that matches Task 1 Step 3's recorded delta is the base-ahead-of-`main` case (expected, not a C0 defect): record it in the PR description and fall back to the offline half — `git rev-parse HEAD:plugin/frozen` equals `BASELINE_TREE` (Task 2 Step 7). A content diff that does **not** match Task 1's is a freeze violation: stop and fix.
 
-- [ ] **Step 3: Run the offline half of the gate too, so the PR carries both**
+- [x] **Step 3: Run the offline half of the gate too, so the PR carries both**
 
 Run:
 
@@ -941,7 +941,7 @@ test "$(git rev-parse HEAD:plugin/frozen)" = "$(git rev-parse origin/integration
 
 Expected: `OFFLINE TREE IDENTITY PASS: 1073efeda203601ea99fa90f93a340e6dc377dd2`.
 
-- [ ] **Step 4: No commit**
+- [x] **Step 4: No commit**
 
 Nothing to commit — the gate is evidence, not code. Capture both outputs for the PR description.
 
