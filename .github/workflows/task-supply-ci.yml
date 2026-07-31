@@ -1,0 +1,98 @@
+name: Task Supply CI
+
+on:
+  pull_request:
+  push:
+    branches: [next]
+    paths:
+      - "packages/task-supply/**"
+      - "packages/environments/**"
+      - ".github/scripts/task-supply-*.test.mjs"
+      - ".github/workflows/task-supply-ci.yml"
+      - "docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md"
+
+permissions:
+  contents: read
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify package inventory and dependency graph
+        run: node --test .github/scripts/task-supply-package-inventory.test.mjs
+      - name: Verify source boundaries and canaries
+        run: node --test .github/scripts/task-supply-source-boundaries.test.mjs
+
+  admission:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependencies from source
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/environments/record && yarn install --immutable && yarn build)
+      - name: Verify Task Admission
+        working-directory: packages/task-supply/admission
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Admission distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-supply-admission-dist
+          path: packages/task-supply/admission/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    needs: [architecture, admission]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Task Supply CI stage to succeed
+        env:
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
+          ADMISSION_RESULT: ${{ needs.admission.result }}
+        run: |
+          for result in \
+            "$ARCHITECTURE_RESULT" \
+            "$ADMISSION_RESULT"; do
+            test "$result" = "success"
+          done
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore all package distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: task-supply-*-dist
+          path: .task-supply-dist
+      - name: Place package distributions
+        run: |
+          mkdir -p packages/task-supply/admission/dist
+          cp -R .task-supply-dist/task-supply-admission-dist/. packages/task-supply/admission/dist/
+      - name: Build cross-tree portal dependencies from source
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/environments/record && yarn install --immutable && yarn build)
+      - name: Compile packed public entrypoint consumers
+        run: node .github/scripts/task-supply-packed-types.test.mjs
