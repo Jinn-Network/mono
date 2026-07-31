@@ -2575,7 +2575,7 @@ So "direct multi-process access under locks" is not available at any price: a se
 2. **The hold is one bounded burst at session end**, not the session's lifetime. Nothing about a live session touches the archive: the adapter appends to a staging file, and the whole seal happens in one call. That is what keeps a session-scoped runtime pair (spec §6.2 — a host-spawned instance for tools and an adapter-spawned instance for hooks) from starving each other.
 3. **`ROOT_IN_USE` is a wait, not a failure**, up to `captureArchiveBusyTimeoutMs`. Beyond the budget it becomes `capture-archive-busy`, which the doctor renders as a real transient state with a remedy rather than a mystery.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plugin/runtime/src/capture/archive.test.ts`:
 
@@ -2700,7 +2700,7 @@ describe("withCaptureArchive", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/archive.test.ts
@@ -2708,7 +2708,7 @@ cd plugin/runtime && yarn test src/capture/archive.test.ts
 
 Expected: FAIL — `Failed to resolve import "./archive.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `plugin/runtime/src/capture/archive.ts`:
 
@@ -2818,7 +2818,7 @@ export async function withCaptureArchive<T>(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 cd plugin/runtime && yarn test src/capture/archive.test.ts && yarn typecheck
@@ -2826,7 +2826,7 @@ cd plugin/runtime && yarn test src/capture/archive.test.ts && yarn typecheck
 
 Expected: PASS (7 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src
