@@ -6,6 +6,7 @@ import {
   NonIJsonStringError,
   UndefinedArrayElementError,
   serializeCanonicalJson,
+  type JsonValue,
 } from "./canonical.js";
 
 const text = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
@@ -24,9 +25,8 @@ describe("canonical JSON", () => {
 
   test("skips undefined members but rejects undefined array elements", () => {
     expect(text(serializeCanonicalJson({ a: 1, b: undefined }))).toBe('{"a":1}');
-    expect(() => serializeCanonicalJson({ a: [1, undefined] })).toThrow(
-      UndefinedArrayElementError,
-    );
+    const invalid = { a: [1, undefined] } as unknown as JsonValue;
+    expect(() => serializeCanonicalJson(invalid)).toThrow(UndefinedArrayElementError);
   });
 
   test("rejects non-I-JSON numbers", () => {
