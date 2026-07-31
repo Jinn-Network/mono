@@ -2174,7 +2174,7 @@ git commit -m "feat(plugin-runtime): adapt discovery announcements to evidence a
 
 The mirroring repository is what makes the mirror a *mirror* rather than a proxy: `createEvidenceIndexer` fetches record bytes through the resolved repository in order to project them (`packages/evidence/discovery/src/indexer/index-announcement.ts` — resolve, `getRecord`, digest check, `validateAndProjectEvidenceRecord`, `putRecordProjection`), so routing that fetch through a local-first cache populates the object store as a side effect of indexing. A second read of the same record never touches the network.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/corpus/repositories.test.ts`:
 
@@ -2350,12 +2350,12 @@ describe("repository resolver", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test src/corpus/repositories.test.ts`
 Expected: FAIL — `Failed to resolve import "./repositories.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/corpus/repositories.ts`:
 
@@ -2561,12 +2561,12 @@ export function createCorpusRepositoryResolver(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test src/corpus/repositories.test.ts && yarn typecheck`
 Expected: PASS (11 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src/corpus
