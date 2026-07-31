@@ -308,7 +308,13 @@ describe('buildOperatorComposition', () => {
     });
     expect(grade.dispatchBinding.status).toBe('verified');
     expect(grade.evaluationSpecification.status).toBe('not-applicable');
-    expect(grade.executorBinding.status).toBe('missing'); // no delivery ever carries the extension yet
+    // Finding E31: no `deliverySigningKey` was supplied to this composition, so nothing was ever
+    // signed -- `getDeliverySignature` legitimately finds no envelope for this digest.
+    expect(grade.executorBinding.status).toBe('missing');
+
+    // Finding E31: `signedDeliveries` reflects reality -- `false` here because this composition
+    // was built with no `deliverySigningKey` (ending the old unconditional `true` lie).
+    expect(capabilities.signedDeliveries).toBe(false);
 
     // (e) close() closes the evidence runtime and both venue-state handles (finding: the
     // composition's own `openVenueState` handle for the projector's log source, plus
@@ -316,6 +322,69 @@ describe('buildOperatorComposition', () => {
     await composition.close();
     expect(evidenceCloseMock).toHaveBeenCalledTimes(1);
     expect(venueCloseMock).toHaveBeenCalledTimes(1);
+    store.close();
+  });
+
+  it('wires a supplied deliverySigningKey through to signedDeliveries (finding E31)', async () => {
+    createBaseVenueMock.mockReset().mockImplementation(() => stubVenue());
+    openOperatorEvidenceMock.mockReset().mockResolvedValue({
+      runtime: {},
+      ports: { repository: {}, catalog: {}, awaitIndexed: vi.fn() },
+      close: evidenceCloseMock,
+    });
+
+    const { buildOperatorComposition } = await import('../../src/daemon/composition-root.js');
+    const { generateKeyPairSync, sign: cryptoSign } = await import('node:crypto');
+
+    const stateRoot = mkdtempSync(join(tmpdir(), 'jinn-composition-state-signing-'));
+    const evidenceRoot = mkdtempSync(join(tmpdir(), 'jinn-composition-evidence-signing-'));
+    const config = {
+      ipfsRegistryUrl: 'https://registry.example',
+      rpcUrl: 'http://127.0.0.1:8545',
+      claudePath: 'claude',
+      codexPath: undefined,
+      hermesPath: undefined,
+      executionWiring: [],
+      claimPolicy: { mode: 'claim-nothing' },
+    };
+    const safeAddress = '0x1111111111111111111111111111111111111111' as const;
+    const mechAddress = '0x2222222222222222222222222222222222222222' as const;
+    const chain = {
+      chainId: 84532,
+      taskCoordinator: '0x3333333333333333333333333333333333333333',
+      jinnRouter: '0x4444444444444444444444444444444444444444',
+      mechMarketplace: '0x5555555555555555555555555555555555555555',
+      activityChecker: '0x6666666666666666666666666666666666666666',
+      generation: 'today',
+    };
+    const store = new Store(':memory:');
+    const publicClient = { getBlock: async () => ({ number: 0n, hash: '0x' + '0'.repeat(64) }) };
+    const keyPair = generateKeyPairSync('ed25519');
+
+    const composition = await buildOperatorComposition({
+      config: config as never,
+      publicClient: publicClient as never,
+      walletClient: { account: { address: safeAddress } } as never,
+      safeAddress,
+      mechAddress,
+      chain: chain as never,
+      stateRoot,
+      evidenceRoot,
+      venueStateDbPath: join(stateRoot, 'venue.db'),
+      profileStore: { get: () => undefined },
+      store,
+      deliverySigningKey: {
+        keyId: 'operator-executor-key',
+        publicKey: keyPair.publicKey,
+        sign: (payload: Uint8Array) => new Uint8Array(cryptoSign(null, payload, keyPair.privateKey)),
+      },
+    });
+
+    // Ending the lie: with a real key supplied, `signedDeliveries` reports `true`.
+    const capabilities = await composition.backend.capabilities();
+    expect(capabilities.signedDeliveries).toBe(true);
+
+    await composition.close();
     store.close();
   });
 });

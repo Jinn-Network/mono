@@ -231,6 +231,22 @@ export interface CompositionRootInput {
    */
   readonly legacyBridgeSigner?: (hash: `0x${string}`) => `0x${string}`;
   /**
+   * Real executor delivery-signing key (finding E31 close-out), host-supplied, keystore-derived
+   * the same way the operator's other trust keys are meant to be. Mirrors `legacyBridgeSigner`'s
+   * own shape and gap exactly: OPTIONAL, absent by default -- `main.ts` does not supply one today
+   * (out of this task's write scope) -- so `trustKeys.deliverySigningKey` stays unset,
+   * `deliverySigningKeyConfigured`/`signedDeliveries` correctly report `false`, and
+   * `completeAttempt` never signs (additive: byte-identical Delivery output either way). A
+   * follow-up task needs to give `main.ts` an actual key (e.g. deterministically derived from the
+   * operator's own wallet keystore, domain-separated from its secp256k1 signing use) to activate
+   * this in production.
+   */
+  readonly deliverySigningKey?: {
+    readonly keyId: string;
+    readonly publicKey: import('node:crypto').KeyObject;
+    sign(payload: Uint8Array): Uint8Array;
+  };
+  /**
    * C8: the daemon's shared SQLite `Store` — backs the projector's durable cursor/observations
    * (C5, `ProjectorCursorStore`) and the engagement ledger (C6). Required so this composition can
    * assemble a real `ProjectorLoop`/`ClaimGate`/`EngagementLedger` rather than stubs.
@@ -748,12 +764,24 @@ export async function buildOperatorComposition(
   // C6: the real `verifySettlementGrade`, wired against this composition's own engagement ledger
   // and profile store — replaces the deleted fail-closed stub (file header items 2, c).
   const engagementLedger = new EngagementLedger(input.store);
+  // Finding E31 close-out: verification checks against the REAL `input.deliverySigningKey`'s
+  // keyid/public key when the host supplied one; the ephemeral per-boot identity (file header
+  // gap c) is retained only as the inert fallback when it wasn't -- unreachable in that case,
+  // since nothing ever signs under it, so `checkExecutorBinding` legitimately keeps reporting
+  // `"missing"`, unchanged from before this finding.
   const executorKey = buildEphemeralExecutorKey();
+  // `getDeliverySignature` is bound to `backend` via this mutable slot: `verifySettlementGrade`
+  // is only ever CALLED later, at settlement time, well after `backend` is constructed below --
+  // but it must be BUILT here, before `backend` exists, because `venue` (constructed next) needs
+  // it. Assigned exactly once, immediately after `backend`'s construction, before any loop that
+  // could call `verifySettlementGrade` starts.
+  let backendForDeliverySignatures: LocalTaskExecutionBackend | undefined;
   const verifySettlementGrade = buildRealVerifySettlementGrade({
     profileStore: input.profileStore,
     engagementLedger,
-    executorKeyId: executorKey.keyId,
-    executorPublicKey: executorKey.publicKey,
+    executorKeyId: input.deliverySigningKey?.keyId ?? executorKey.keyId,
+    executorPublicKey: input.deliverySigningKey?.publicKey ?? executorKey.publicKey,
+    getDeliverySignature: (digest) => backendForDeliverySignatures?.getDeliverySignature(digest),
   });
 
   // `viem` is a direct `dependencies` entry of venue-base / binding / projector, and each
@@ -816,7 +844,15 @@ export async function buildOperatorComposition(
     // a field that was never added) — always the backend's own default.
     maxConcurrentAttempts: 4,
     recorderAvailability: 'always',
-    trustKeys: { observationSigningKeyConfigured: true, deliverySigningKeyConfigured: true },
+    trustKeys: {
+      observationSigningKeyConfigured: true,
+      // Finding E31: real key material, not a hardcoded claim. Absent (the default; `main.ts`
+      // does not supply `input.deliverySigningKey` today, mirroring `legacyBridgeSigner`'s own
+      // gap) means `completeAttempt` never signs and `deliverySigningKeyConfigured`/
+      // `signedDeliveries` correctly reports `false` -- ending the lie the old unconditional
+      // `true` told.
+      ...(input.deliverySigningKey === undefined ? {} : { deliverySigningKey: input.deliverySigningKey }),
+    },
     evidence: evidence.ports,
     capabilityGrants: buildCapabilityGrants,
     ...(input.secretForwardResolver === undefined
@@ -837,6 +873,9 @@ export async function buildOperatorComposition(
           }),
   };
   const backend = new LocalTaskExecutionBackend(backendConfig);
+  // Finding E31: completes the mutable slot `verifySettlementGrade` (built above, before
+  // `backend` existed) closes over.
+  backendForDeliverySignatures = backend;
 
   const pipelineConfig: PipelineConfig = {
     chain: input.chain,

@@ -108,6 +108,7 @@ import {
 import {
   assembleCapabilities,
   type CapabilityProvisionerConfig,
+  type DeliverySigningKey,
   type RecorderAvailability,
   type TrustKeyConfig,
 } from "./capabilities.js";
@@ -576,6 +577,72 @@ function asAttemptUri(value: string): AttemptUri {
 
 function asSubmissionUri(value: string): SubmissionUri {
   return value as SubmissionUri;
+}
+
+// ── Finding E31: real executor delivery signing ─────────────────────────────────────────────
+//
+// `completeAttempt` seals a Delivery's bytes exactly once (unchanged); when a delivery-signing
+// key is configured it then produces a DSSE envelope over those EXACT sealed bytes (design §9.1
+// seal-once; PRINCIPLES.md's "Legible" principle -- every claim must be exactly, independently
+// verifiable). The coordinator's ruling on this finding is explicit: no re-sealing, no
+// re-canonicalizing. An earlier proposal would have embedded the signature as a reserved Delivery
+// field (seal minus the field, sign, merge the signature in, seal again) -- rejected, because an
+// embedded field cannot cover its own bytes without that second seal pass, which IS
+// re-canonicalization. The envelope is therefore carried OUTSIDE the Delivery document entirely,
+// retrievable via `getDeliverySignature(digest)` keyed by the Delivery's own digest -- the only
+// identity `@jinn-network/marketplace-binding`'s `SettlementGradeVerificationInput` carries across
+// that package boundary (see `client/src/daemon/settlement-grade.ts`, the consumer this exists
+// for).
+
+/** The DSSE envelope's `payloadType` for the executor-binding signature (finding E31). Mirrors
+ * `client/src/daemon/settlement-grade.ts`'s `EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE` constant --
+ * duplicated, not imported, because this package has no dependency on the client or on
+ * `@jinn-network/trust-core` (see below); the two literals must stay byte-identical. */
+const EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE =
+  "application/vnd.jinn.marketplace.executor-binding.v1+json";
+
+/**
+ * DSSE v1 pre-authentication encoding (PAE) -- the bytes actually signed. Ported verbatim from
+ * `@jinn-network/trust-core`'s `dssePreAuthEncoding` (`packages/trust/core/src/dsse.ts`, itself
+ * ported from `packages/evidence/protocol/src/claims.ts`). This package has no dependency on
+ * trust-core -- adding one is a `package.json` edit outside this task's write scope -- so this
+ * four-line, spec-frozen byte layout is duplicated rather than imported, following the same
+ * cross-boundary-duplication precedent `settlement-grade.ts`'s own `idempotencyKeyFor` already
+ * uses. `client/test/daemon/settlement-grade.ts` proves this copy round-trips against the real
+ * trust-core functions.
+ */
+function dssePreAuthEncoding(payloadType: string, payloadBytes: Uint8Array): Uint8Array {
+  const typeBytes = new TextEncoder().encode(payloadType);
+  const head = new TextEncoder().encode(`DSSEv1 ${typeBytes.length} `);
+  const mid = new TextEncoder().encode(` ${payloadBytes.length} `);
+  const bytes = new Uint8Array(head.length + typeBytes.length + mid.length + payloadBytes.length);
+  let offset = 0;
+  for (const part of [head, typeBytes, mid, payloadBytes]) {
+    bytes.set(part, offset);
+    offset += part.length;
+  }
+  return bytes;
+}
+
+/**
+ * Signs the Delivery's own already-sealed bytes and wraps the result in a structurally-valid DSSE
+ * envelope (a JSON object `{payloadType, payload, signatures}`, matching
+ * `@jinn-network/trust-core`'s `DsseEnvelope` shape exactly, byte-for-byte JSON-compatible with
+ * `parseDsseEnvelope`). `deliveryBytes` is passed through untouched as the envelope's `payload` --
+ * seal-once: it is never re-encoded, re-ordered, or re-canonicalized here.
+ */
+function sealExecutorBindingEnvelope(
+  deliveryBytes: Uint8Array,
+  key: DeliverySigningKey,
+): Uint8Array {
+  const preAuthEncoding = dssePreAuthEncoding(EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE, deliveryBytes);
+  const signature = key.sign(preAuthEncoding);
+  const envelope = {
+    payloadType: EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE,
+    payload: Buffer.from(deliveryBytes).toString("base64"),
+    signatures: [{ keyid: key.keyId, sig: Buffer.from(signature).toString("base64") }],
+  };
+  return new TextEncoder().encode(JSON.stringify(envelope));
 }
 
 /**
@@ -1646,7 +1713,15 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     // Reserved keys win: `extensions` spreads first so no extension can shadow a canonical
     // Delivery field below.
     const deliveryBytes = sealDelivery({ ...extensions, protocol: "https://jinn.network/profiles/task-execution/1.0", attempt, task: documentDigest(input.taskBytes), outputs: harvest.manifest.map((artifact) => ({ name: artifact.path, ...(artifact.mediaType === undefined ? {} : { mediaType: artifact.mediaType }), digest: { sha256: String(artifact.sha256).replace(/^sha256:/u, "") } })), outcome: interpreted.outcome ?? "fulfilled", ...(receipt === undefined ? {} : { evidenceRecords: [receipt.record], executionIds: [receipt.executionId] }), createdAt: this.now() });
-    await this.recordDelivery(attempt, deliveryBytes);
+    // Finding E31: sign the Delivery's own already-sealed bytes exactly once, never re-seal --
+    // see the module-level comment above `sealExecutorBindingEnvelope`. Additive: with no
+    // delivery-signing key configured, `deliveryBytes` above is computed identically to before
+    // this finding, and no envelope is ever produced.
+    const deliverySigningKey = this.config.trustKeys?.deliverySigningKey;
+    const executorBindingEnvelope = deliverySigningKey === undefined
+      ? undefined
+      : sealExecutorBindingEnvelope(deliveryBytes, deliverySigningKey);
+    await this.recordDelivery(attempt, deliveryBytes, executorBindingEnvelope);
     this.appendTerminal(attempt, { state: "delivered", ...(interpreted.reasonCode === undefined ? {} : { detail: interpreted.reasonCode }) });
   }
 
@@ -2606,13 +2681,15 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   async recordDelivery(
     attempt: AttemptUri,
     deliveryBytes: Uint8Array,
+    executorBindingEnvelope?: Uint8Array,
   ): Promise<void> {
-    return this.trackInflight(this.recordDeliveryBytes(attempt, deliveryBytes));
+    return this.trackInflight(this.recordDeliveryBytes(attempt, deliveryBytes, executorBindingEnvelope));
   }
 
   private async recordDeliveryBytes(
     attempt: AttemptUri,
     deliveryBytes: Uint8Array,
+    executorBindingEnvelope?: Uint8Array,
   ): Promise<void> {
     this.assertWriter();
     const metadata = this.attempts.get(attempt);
@@ -2664,6 +2741,15 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         details: {
           digest: documentDigest(deliveryBytes),
           source: this.config.source,
+          // Finding E31: present only when a delivery-signing key was configured at seal time --
+          // absent leaves this event's `details` identical to before this finding (additive).
+          // Carried here (not a new journal event type, and not embedded in `deliveryBytes`
+          // itself) because `JOURNAL_EVENT_TYPES` is a frozen vocabulary
+          // (`@jinn-network/task-execution-supervisor`) this package does not own, and the
+          // envelope must never be part of the Delivery's own sealed bytes (seal-once).
+          ...(executorBindingEnvelope === undefined
+            ? {}
+            : { executorBindingEnvelope: Buffer.from(executorBindingEnvelope).toString("base64") }),
         },
       });
       this.config.faults?.afterDeliveryCheckpoint?.();
@@ -2695,6 +2781,27 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
 
   deliveryCheckpointPath(attempt: AttemptUri): string {
     return join(this.paths(attempt).meta, "delivery.sealed");
+  }
+
+  /**
+   * Looks up the DSSE executor-binding envelope produced when a Delivery was first sealed and
+   * signed (finding E31), keyed by the Delivery's own digest -- `SettlementGradeVerificationInput`
+   * (`@jinn-network/marketplace-binding`) carries no AttemptUri, only `deliveryDigest`, so digest
+   * is the only identity available across that package boundary (see
+   * `client/src/daemon/settlement-grade.ts`). Returns `undefined` when no delivery-signing key
+   * was configured at seal time (the additive default), or the digest is unknown to this backend.
+   * An explicit implementation seam, like `recordDelivery` -- not part of `TaskExecutionBackend`.
+   */
+  getDeliverySignature(digest: `sha256:${string}`): Uint8Array | undefined {
+    for (const attempt of this.attempts.keys()) {
+      const event = this.journal(attempt).read().find(
+        (candidate) => candidate.type === "delivery-checkpointed" && candidate.details["digest"] === digest,
+      );
+      if (event === undefined) continue;
+      const envelope = event.details["executorBindingEnvelope"];
+      return typeof envelope === "string" ? Uint8Array.from(Buffer.from(envelope, "base64")) : undefined;
+    }
+    return undefined;
   }
 
   close(): void {

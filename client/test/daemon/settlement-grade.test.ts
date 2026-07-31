@@ -1,7 +1,7 @@
 /**
- * `verifySettlementGrade` for real (cutover stage 1, close-out C6). Proof obligations (see
- * `../../src/daemon/settlement-grade.ts`'s file header for what each check does and does not
- * prove):
+ * `verifySettlementGrade` for real (cutover stage 1, close-out C6; executor-binding shape per
+ * finding E31 close-out). Proof obligations (see `../../src/daemon/settlement-grade.ts`'s file
+ * header for what each check does and does not prove):
  *
  *  - A today-mode solution delivery settles end-to-end via the real binding `settleDelivery`
  *    (not by eyeballing statuses).
@@ -10,9 +10,16 @@
  *  - `executorBinding`'s cryptographic signature check is genuine: a real Ed25519 keypair signs
  *    real DSSE envelopes via Node's built-in `crypto`, and flipping a signature byte flips the
  *    verification result.
+ *  - `executorBinding` sources its envelope from the injected `getDeliverySignature(digest)` port
+ *    (finding E31) rather than a Delivery extension field -- one describe block below drives a
+ *    REAL `LocalTaskExecutionBackend` end to end to prove the production envelope this port would
+ *    actually be backed by (`LocalTaskExecutionBackend.getDeliverySignature`) verifies here too.
  */
 import { generateKeyPairSync, sign as cryptoSign, type KeyObject } from 'node:crypto';
-import { describe, expect, test } from 'vitest';
+import { mkdtemp, rm, mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, test } from 'vitest';
 import { sealDsseEnvelope, dssePreAuthEncoding } from '@jinn-network/trust-core';
 import {
   BASE_SEPOLIA_TODAY,
@@ -21,13 +28,16 @@ import {
   type SettlementAttempt,
   type SettlementPorts,
 } from '@jinn-network/marketplace-binding';
-import { sealDelivery, sha256Hex } from '@jinn-network/task-execution-protocol';
+import { documentDigest, sealDelivery, sealSubmission, sealTask, sha256Hex } from '@jinn-network/task-execution-protocol';
 import type { TaskProfileDocument } from '@jinn-network/task-execution-profiles';
+import { buildRepositoryWorkProfile, sealTaskProfile, type ProfileStore } from '@jinn-network/task-execution-profiles';
+import { makeLocalTaskExecutionBackend } from '@jinn-network/task-execution-backend-local';
+import type { LauncherContract } from '@jinn-network/task-execution-launchers';
+import type { ProvisionerContract } from '@jinn-network/task-execution-workspace';
 import { Store } from '../../src/store/store.js';
 import { EngagementLedger, type EngagementRow } from '../../src/daemon/engagement-ledger.js';
 import {
   EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE,
-  EXECUTOR_BINDING_EXTENSION_URI,
   buildVerifySettlementGrade,
   type BuildVerifySettlementGradeInput,
   type EngagementLedgerReader,
@@ -51,11 +61,7 @@ function signPreAuth(privateKey: KeyObject, payloadType: string, payloadBytes: U
   return new Uint8Array(cryptoSign(null, preAuth, privateKey));
 }
 
-function base64(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('base64');
-}
-
-/** Builds a canonical Delivery document's fields (no executor-binding extension yet). */
+/** Builds a canonical Delivery document's fields. */
 function baseDeliveryFields() {
   return {
     protocol: 'https://jinn.network/profiles/task-execution/1.0',
@@ -70,33 +76,40 @@ function baseDeliveryFields() {
 }
 
 /**
- * Seals a Delivery carrying a genuine, verifiable executor-binding extension: signs the
- * delivery-minus-extension canonical bytes with `signerKeyPair`, under `keyid`, optionally with a
- * tampering hook to produce adversarial fixtures.
+ * Seals a genuine, verifiable executor-binding DSSE envelope over `deliveryBytes` -- signed by
+ * `signerKeyPair`, under `keyid`, optionally with a tampering hook to produce adversarial
+ * fixtures. Finding E31 close-out: the envelope is carried OUTSIDE the Delivery document (never
+ * embedded, never re-sealed -- seal-once), so this only ever returns the envelope bytes; callers
+ * wire them through `getDeliverySignature`, exactly as `composition-root.ts` wires the real
+ * `LocalTaskExecutionBackend.getDeliverySignature`.
  */
-function makeSignedDelivery(input: {
+function sealExecutorBindingEnvelope(deliveryBytes: Uint8Array, input: {
   readonly signerKeyPair?: { privateKey: KeyObject };
   readonly keyid?: string;
   readonly payloadType?: string;
   readonly tamperPayload?: (bytes: Uint8Array) => Uint8Array;
   readonly tamperSignature?: (sig: Uint8Array) => Uint8Array;
-}): Uint8Array {
-  const unsignedBytes = sealDelivery(baseDeliveryFields());
+} = {}): Uint8Array {
   const payloadType = input.payloadType ?? EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE;
   const signer = input.signerKeyPair ?? executorKeyPair;
   const keyid = input.keyid ?? EXECUTOR_KEY_ID;
-  let signature = signPreAuth(signer.privateKey, payloadType, unsignedBytes);
+  let signature = signPreAuth(signer.privateKey, payloadType, deliveryBytes);
   if (input.tamperSignature) signature = input.tamperSignature(signature);
-  const payloadBytes = input.tamperPayload ? input.tamperPayload(unsignedBytes) : unsignedBytes;
-  const envelopeBytes = sealDsseEnvelope({
-    payloadBytes,
-    payloadType,
-    signatures: [{ signature, keyid }],
-  });
-  return sealDelivery({
-    ...baseDeliveryFields(),
-    [EXECUTOR_BINDING_EXTENSION_URI]: { envelope: base64(envelopeBytes) },
-  });
+  const payloadBytes = input.tamperPayload ? input.tamperPayload(deliveryBytes) : deliveryBytes;
+  return sealDsseEnvelope({ payloadBytes, payloadType, signatures: [{ signature, keyid }] });
+}
+
+/** A `getDeliverySignature` port that answers only for one digest -- mirrors how the real
+ * backend's digest-keyed lookup behaves for a single produced Delivery. */
+function getDeliverySignatureFor(
+  digest: `sha256:${string}`,
+  envelope: Uint8Array,
+): (candidate: `sha256:${string}`) => Uint8Array | undefined {
+  return (candidate) => (candidate === digest ? envelope : undefined);
+}
+
+function digestOf(bytes: Uint8Array): `sha256:${string}` {
+  return `sha256:${sha256Hex(bytes)}`;
 }
 
 // ── Fakes for the other two checks ───────────────────────────────────────────────────────────
@@ -142,6 +155,7 @@ function buildInput(overrides: Partial<BuildVerifySettlementGradeInput> = {}): B
     engagementLedger: fakeEngagementLedger(),
     executorKeyId: EXECUTOR_KEY_ID,
     executorPublicKey: executorKeyPair.publicKey,
+    getDeliverySignature: () => undefined,
     ...overrides,
   };
 }
@@ -155,27 +169,29 @@ const REVISED_ATTEMPT: SettlementAttempt = {
 // ── Unit tests: each check in isolation ──────────────────────────────────────────────────────
 
 describe('buildVerifySettlementGrade: executorBinding', () => {
-  test('missing when the delivery carries no executor-binding extension', async () => {
+  test('missing when no executor-binding envelope was recorded for this digest', async () => {
     const verify = buildVerifySettlementGrade(buildInput());
     const delivery = sealDelivery(baseDeliveryFields());
     const result = await verify({
       attempt: REVISED_ATTEMPT,
       delivery: JSON.parse(new TextDecoder().decode(delivery)),
       deliveryBytes: delivery,
-      deliveryDigest: `sha256:${sha256Hex(delivery)}`,
+      deliveryDigest: digestOf(delivery),
       config: BASE_SEPOLIA_TODAY,
     });
     expect(result.executorBinding.status).toBe('missing');
   });
 
   test('invalid when the signature does not verify against the expected key', async () => {
-    const delivery = makeSignedDelivery({ signerKeyPair: otherKeyPair });
-    const verify = buildVerifySettlementGrade(buildInput());
+    const delivery = sealDelivery(baseDeliveryFields());
+    const digest = digestOf(delivery);
+    const envelope = sealExecutorBindingEnvelope(delivery, { signerKeyPair: otherKeyPair });
+    const verify = buildVerifySettlementGrade(buildInput({ getDeliverySignature: getDeliverySignatureFor(digest, envelope) }));
     const result = await verify({
       attempt: REVISED_ATTEMPT,
       delivery: JSON.parse(new TextDecoder().decode(delivery)),
       deliveryBytes: delivery,
-      deliveryDigest: `sha256:${sha256Hex(delivery)}`,
+      deliveryDigest: digest,
       config: BASE_SEPOLIA_TODAY,
     });
     expect(result.executorBinding).toEqual({
@@ -185,13 +201,15 @@ describe('buildVerifySettlementGrade: executorBinding', () => {
   });
 
   test('invalid when the envelope carries no signature under the expected keyid', async () => {
-    const delivery = makeSignedDelivery({ keyid: 'did:key:zSomeoneElsesKey' });
-    const verify = buildVerifySettlementGrade(buildInput());
+    const delivery = sealDelivery(baseDeliveryFields());
+    const digest = digestOf(delivery);
+    const envelope = sealExecutorBindingEnvelope(delivery, { keyid: 'did:key:zSomeoneElsesKey' });
+    const verify = buildVerifySettlementGrade(buildInput({ getDeliverySignature: getDeliverySignatureFor(digest, envelope) }));
     const result = await verify({
       attempt: REVISED_ATTEMPT,
       delivery: JSON.parse(new TextDecoder().decode(delivery)),
       deliveryBytes: delivery,
-      deliveryDigest: `sha256:${sha256Hex(delivery)}`,
+      deliveryDigest: digest,
       config: BASE_SEPOLIA_TODAY,
     });
     expect(result.executorBinding).toEqual({
@@ -201,47 +219,58 @@ describe('buildVerifySettlementGrade: executorBinding', () => {
   });
 
   test('invalid when a signature byte is flipped (genuine cryptographic check, not eyeballed)', async () => {
-    const delivery = makeSignedDelivery({
+    const delivery = sealDelivery(baseDeliveryFields());
+    const digest = digestOf(delivery);
+    const envelope = sealExecutorBindingEnvelope(delivery, {
       tamperSignature: (sig) => {
         const flipped = new Uint8Array(sig);
         flipped[0] = flipped[0]! ^ 0xff;
         return flipped;
       },
     });
-    const verify = buildVerifySettlementGrade(buildInput());
+    const verify = buildVerifySettlementGrade(buildInput({ getDeliverySignature: getDeliverySignatureFor(digest, envelope) }));
     const result = await verify({
       attempt: REVISED_ATTEMPT,
       delivery: JSON.parse(new TextDecoder().decode(delivery)),
       deliveryBytes: delivery,
-      deliveryDigest: `sha256:${sha256Hex(delivery)}`,
+      deliveryDigest: digest,
       config: BASE_SEPOLIA_TODAY,
     });
     expect(result.executorBinding.status).toBe('invalid');
   });
 
-  test('invalid when the signed payload was tampered (does not equal delivery-minus-extension bytes)', async () => {
-    const delivery = makeSignedDelivery({
+  test('invalid when the envelope payload is not the exact settling Delivery bytes (seal-once check)', async () => {
+    const delivery = sealDelivery(baseDeliveryFields());
+    const digest = digestOf(delivery);
+    // The envelope was genuinely signed, but over bytes OTHER than the settling delivery's own --
+    // exactly what a re-canonicalization / substitution attempt would look like.
+    const envelope = sealExecutorBindingEnvelope(delivery, {
       tamperPayload: (bytes) => new Uint8Array([...bytes, 0x20]),
     });
-    const verify = buildVerifySettlementGrade(buildInput());
+    const verify = buildVerifySettlementGrade(buildInput({ getDeliverySignature: getDeliverySignatureFor(digest, envelope) }));
     const result = await verify({
       attempt: REVISED_ATTEMPT,
       delivery: JSON.parse(new TextDecoder().decode(delivery)),
       deliveryBytes: delivery,
-      deliveryDigest: `sha256:${sha256Hex(delivery)}`,
+      deliveryDigest: digest,
       config: BASE_SEPOLIA_TODAY,
     });
-    expect(result.executorBinding.status).toBe('invalid');
+    expect(result.executorBinding).toEqual({
+      status: 'invalid',
+      detail: expect.stringContaining('not the exact settling Delivery bytes') as unknown as string,
+    });
   });
 
   test('verified when genuinely signed by the expected key over the exact delivery bytes', async () => {
-    const delivery = makeSignedDelivery({});
-    const verify = buildVerifySettlementGrade(buildInput());
+    const delivery = sealDelivery(baseDeliveryFields());
+    const digest = digestOf(delivery);
+    const envelope = sealExecutorBindingEnvelope(delivery);
+    const verify = buildVerifySettlementGrade(buildInput({ getDeliverySignature: getDeliverySignatureFor(digest, envelope) }));
     const result = await verify({
       attempt: REVISED_ATTEMPT,
       delivery: JSON.parse(new TextDecoder().decode(delivery)),
       deliveryBytes: delivery,
-      deliveryDigest: `sha256:${sha256Hex(delivery)}`,
+      deliveryDigest: digest,
       config: BASE_SEPOLIA_TODAY,
     });
     expect(result.executorBinding).toEqual({ status: 'verified' });
@@ -254,7 +283,7 @@ describe('buildVerifySettlementGrade: dispatchBinding', () => {
     attempt: REVISED_ATTEMPT,
     delivery: JSON.parse(new TextDecoder().decode(delivery)) as unknown,
     deliveryBytes: delivery,
-    deliveryDigest: `sha256:${sha256Hex(delivery)}` as const,
+    deliveryDigest: digestOf(delivery),
     config: BASE_SEPOLIA_TODAY,
   };
 
@@ -302,7 +331,7 @@ describe('buildVerifySettlementGrade: evaluationSpecification', () => {
   const baseCallInput = {
     delivery: JSON.parse(new TextDecoder().decode(delivery)) as unknown,
     deliveryBytes: delivery,
-    deliveryDigest: `sha256:${sha256Hex(delivery)}` as const,
+    deliveryDigest: digestOf(delivery),
     config: BASE_SEPOLIA_TODAY,
   };
 
@@ -352,7 +381,7 @@ function todayLedgerWithRow(row: Partial<EngagementRow> = {}): EngagementLedgerR
 }
 
 function makeSettlementPorts(delivery: Uint8Array, verify: SettlementPorts['verifySettlementGrade']): SettlementPorts {
-  const sha256Digest = `sha256:${sha256Hex(delivery)}` as const;
+  const sha256Digest = digestOf(delivery);
   return {
     pin: async () => undefined,
     verifySettlementGrade: verify,
@@ -369,11 +398,25 @@ function makeSettlementPorts(delivery: Uint8Array, verify: SettlementPorts['veri
   };
 }
 
+/** A validly signed delivery + the `getDeliverySignature` port that answers for it -- the
+ * common case for exercising dispatchBinding/evaluationSpecification in isolation. */
+function signedTodayDeliveryAndPorts(engagementLedger: EngagementLedgerReader): {
+  readonly delivery: Uint8Array;
+  readonly verify: SettlementPorts['verifySettlementGrade'];
+  readonly ports: SettlementPorts;
+} {
+  const delivery = sealDelivery(baseDeliveryFields());
+  const digest = digestOf(delivery);
+  const envelope = sealExecutorBindingEnvelope(delivery);
+  const verify = buildVerifySettlementGrade(
+    buildInput({ engagementLedger, getDeliverySignature: getDeliverySignatureFor(digest, envelope) }),
+  );
+  return { delivery, verify, ports: makeSettlementPorts(delivery, verify) };
+}
+
 describe('settleDelivery (real binding path) via buildVerifySettlementGrade', () => {
   test('a today-mode solution delivery settles end-to-end when every check holds', async () => {
-    const verify = buildVerifySettlementGrade(buildInput({ engagementLedger: todayLedgerWithRow() }));
-    const delivery = makeSignedDelivery({});
-    const ports = makeSettlementPorts(delivery, verify);
+    const { delivery, ports } = signedTodayDeliveryAndPorts(todayLedgerWithRow());
 
     const result = await settleDelivery(TODAY_ATTEMPT, delivery, BASE_SEPOLIA_TODAY, ports);
 
@@ -381,9 +424,7 @@ describe('settleDelivery (real binding path) via buildVerifySettlementGrade', ()
   });
 
   test('a solution delivery with no evaluation specification (not-applicable) still settles', async () => {
-    const verify = buildVerifySettlementGrade(buildInput({ engagementLedger: todayLedgerWithRow() }));
-    const delivery = makeSignedDelivery({});
-    const ports = makeSettlementPorts(delivery, verify);
+    const { delivery, ports } = signedTodayDeliveryAndPorts(todayLedgerWithRow());
     const attempt: SettlementAttempt = { ...TODAY_ATTEMPT, taskEvaluationDigest: undefined };
 
     const result = await settleDelivery(attempt, delivery, BASE_SEPOLIA_TODAY, ports);
@@ -392,8 +433,12 @@ describe('settleDelivery (real binding path) via buildVerifySettlementGrade', ()
   });
 
   test('rejects when executorBinding is invalid (tampered signature) -- executor-signature-invalid', async () => {
-    const verify = buildVerifySettlementGrade(buildInput({ engagementLedger: todayLedgerWithRow() }));
-    const delivery = makeSignedDelivery({ signerKeyPair: otherKeyPair });
+    const delivery = sealDelivery(baseDeliveryFields());
+    const digest = digestOf(delivery);
+    const envelope = sealExecutorBindingEnvelope(delivery, { signerKeyPair: otherKeyPair });
+    const verify = buildVerifySettlementGrade(
+      buildInput({ engagementLedger: todayLedgerWithRow(), getDeliverySignature: getDeliverySignatureFor(digest, envelope) }),
+    );
     const ports = makeSettlementPorts(delivery, verify);
 
     const result = await settleDelivery(TODAY_ATTEMPT, delivery, BASE_SEPOLIA_TODAY, ports);
@@ -402,9 +447,7 @@ describe('settleDelivery (real binding path) via buildVerifySettlementGrade', ()
   });
 
   test('rejects when dispatchBinding is missing (no engagement-ledger correlation) -- dispatch-binding-failed', async () => {
-    const verify = buildVerifySettlementGrade(buildInput({ engagementLedger: fakeEngagementLedger() }));
-    const delivery = makeSignedDelivery({});
-    const ports = makeSettlementPorts(delivery, verify);
+    const { delivery, ports } = signedTodayDeliveryAndPorts(fakeEngagementLedger());
 
     const result = await settleDelivery(TODAY_ATTEMPT, delivery, BASE_SEPOLIA_TODAY, ports);
 
@@ -412,10 +455,16 @@ describe('settleDelivery (real binding path) via buildVerifySettlementGrade', ()
   });
 
   test('rejects when evaluationSpecification is missing (digest set, not in profile store) -- evaluation-specification-mismatch', async () => {
+    const delivery = sealDelivery(baseDeliveryFields());
+    const digest = digestOf(delivery);
+    const envelope = sealExecutorBindingEnvelope(delivery);
     const verify = buildVerifySettlementGrade(
-      buildInput({ engagementLedger: todayLedgerWithRow(), profileStore: fakeProfileStore() }),
+      buildInput({
+        engagementLedger: todayLedgerWithRow(),
+        profileStore: fakeProfileStore(),
+        getDeliverySignature: getDeliverySignatureFor(digest, envelope),
+      }),
     );
-    const delivery = makeSignedDelivery({});
     const ports = makeSettlementPorts(delivery, verify);
     const attempt: SettlementAttempt = { ...TODAY_ATTEMPT, taskEvaluationDigest: EVALUATION_DIGEST };
 
@@ -471,7 +520,7 @@ describe('buildVerifySettlementGrade: dispatchBinding against the real Engagemen
       attempt: TODAY_ATTEMPT,
       delivery: JSON.parse(new TextDecoder().decode(delivery)),
       deliveryBytes: delivery,
-      deliveryDigest: `sha256:${sha256Hex(delivery)}`,
+      deliveryDigest: digestOf(delivery),
       config: BASE_SEPOLIA_TODAY,
     });
     expect(result.dispatchBinding).toEqual({ status: 'verified' });
@@ -486,19 +535,165 @@ describe('buildVerifySettlementGrade: dispatchBinding against the real Engagemen
       attempt: TODAY_ATTEMPT,
       delivery: JSON.parse(new TextDecoder().decode(delivery)),
       deliveryBytes: delivery,
-      deliveryDigest: `sha256:${sha256Hex(delivery)}`,
+      deliveryDigest: digestOf(delivery),
       config: BASE_SEPOLIA_TODAY,
     });
     expect(result.dispatchBinding.status).toBe('missing');
   });
 
   test('a today-mode solution delivery settles end-to-end against the real ledger (not a fake)', async () => {
-    const verify = buildVerifySettlementGrade(buildInput({ engagementLedger: realLedgerWithClaimedRow() }));
-    const delivery = makeSignedDelivery({});
-    const ports = makeSettlementPorts(delivery, verify);
+    const { delivery, ports } = signedTodayDeliveryAndPorts(realLedgerWithClaimedRow());
 
     const result = await settleDelivery(TODAY_ATTEMPT, delivery, BASE_SEPOLIA_TODAY, ports);
 
     expect(result).toEqual({ settled: true, state: 'delivered' });
+  });
+});
+
+// ── Finding E31: end-to-end against a REAL LocalTaskExecutionBackend ────────────────────────
+//
+// Everything above hand-builds envelopes via trust-core's `sealDsseEnvelope` directly. This
+// drives a REAL `LocalTaskExecutionBackend.completeAttempt` -> `getDeliverySignature` pass
+// (exactly as `composition-root.ts` wires `trustKeys.deliverySigningKey` and
+// `getDeliverySignature`), proving the production envelope this daemon would actually produce
+// verifies against this exact checker -- not just a hand-built fixture shaped like one.
+
+describe('executorBinding against a REAL LocalTaskExecutionBackend delivery (finding E31)', () => {
+  const roots: string[] = [];
+  afterEach(async () => {
+    await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  });
+
+  const profile = buildRepositoryWorkProfile();
+  const sealedProfile = sealTaskProfile(profile);
+  const backendProfileStore: ProfileStore = {
+    get(digest) {
+      return digest === sealedProfile.digest ? profile : undefined;
+    },
+  };
+
+  async function produceRealSignedDelivery(): Promise<{
+    readonly deliveryBytes: Uint8Array;
+    readonly digest: `sha256:${string}`;
+    readonly getDeliverySignature: (candidate: `sha256:${string}`) => Uint8Array | undefined;
+    readonly publicKey: KeyObject;
+  }> {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'jinn-settlement-grade-e31-'));
+    roots.push(stateRoot);
+    const keyPair = generateKeyPairSync('ed25519');
+
+    const task = sealTask({
+      protocol: 'https://jinn.network/profiles/task-execution/1.0',
+      profile: { uri: profile.profile, digest: { sha256: sealedProfile.digest.slice('sha256:'.length) } },
+      instructions: 'Capture this execution.',
+      outputs: [{ name: 'patch', mediaType: 'text/x-diff', required: true }],
+    });
+    const submissionUri = `urn:uuid:${crypto.randomUUID()}` as const;
+    const submission = sealSubmission({
+      protocol: 'https://jinn.network/profiles/task-execution/1.0',
+      submission: submissionUri,
+      task: { digest: { sha256: documentDigest(task).slice('sha256:'.length) } },
+      requester: 'urn:uuid:40000000-0000-4000-8000-000000000001',
+      idempotencyKey: crypto.randomUUID(),
+      nonce: crypto.randomUUID(),
+      deadline: '2099-01-01T00:00:00Z',
+    });
+
+    const launcher: LauncherContract = {
+      id: 'fixture',
+      capabilities: () => ({
+        taskProfiles: [profile.profile],
+        inputMediaTypes: ['application/json'],
+        outputMediaTypes: ['text/x-diff'],
+        structuredOutput: false,
+        resume: false,
+        interruptionBehaviorDefault: 'repeatable',
+        secretForwards: [],
+        runPinning: { keys: [] },
+      }),
+      plan(_view, paths) {
+        return {
+          argv: [process.execPath, '-e', 'process.exit(0)'],
+          env: {},
+          cwd: paths.work,
+          validExitCodes: [0],
+          resultContract: { envelopeFormat: 'fixture' },
+          interruptionBehavior: 'repeatable',
+        };
+      },
+    };
+    const provisioner: ProvisionerContract = {
+      workspaceKind: () => 'dir',
+      async setup(_view, paths) {
+        await Promise.all(Object.values(paths).map((path) => mkdir(path, { recursive: true })));
+      },
+      executionEnv: ({ env }) => ({ ...env }),
+      async harvest() {
+        return { manifest: [], omissions: ['patch'], integrityViolations: [] };
+      },
+    };
+
+    const backend = makeLocalTaskExecutionBackend({
+      stateRoot,
+      source: 'urn:jinn:operator:0xoperator',
+      executor: 'urn:jinn:operator-runtime:test',
+      profileStore: backendProfileStore,
+      launchers: [launcher],
+      provisioner: () => ({ id: 'fixture', contract: provisioner }),
+      provisionerCapabilities: {
+        taskProfiles: [profile.profile],
+        workspaceKinds: ['dir'],
+        inputMediaTypes: ['application/json'],
+        outputMediaTypes: ['text/x-diff'],
+        isolation: ['process'],
+      },
+      recorderAvailability: 'none',
+      // Exactly the shape `composition-root.ts` wires `input.deliverySigningKey` into.
+      trustKeys: {
+        deliverySigningKey: {
+          keyId: EXECUTOR_KEY_ID,
+          sign: (payload) => new Uint8Array(cryptoSign(null, payload, keyPair.privateKey)),
+        },
+      },
+    });
+
+    const ack = await backend.submit(task, submission);
+    if (!ack.accepted) throw new Error(`submit rejected: ${ack.error.message}`);
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const snapshot = await backend.observe(ack.submission);
+      if (snapshot.descriptor.derived.terminal) {
+        if (snapshot.descriptor.derived.state !== 'delivered') {
+          throw new Error(`attempt did not deliver: ${snapshot.descriptor.derived.state}`);
+        }
+        break;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    const snapshot = await backend.observe(ack.submission);
+    const [deliveryRef] = await backend.deliveries(snapshot.descriptor.attempt);
+    if (deliveryRef === undefined) throw new Error('expected exactly one delivery');
+    const deliveryBytes = await backend.fetchDelivery(deliveryRef);
+    const digest = documentDigest(deliveryBytes);
+    return {
+      deliveryBytes,
+      digest,
+      getDeliverySignature: (candidate) => backend.getDeliverySignature(candidate),
+      publicKey: keyPair.publicKey,
+    };
+  }
+
+  test('a delivery this daemon actually produced and signed verifies against checkExecutorBinding', async () => {
+    const { deliveryBytes, digest, getDeliverySignature, publicKey } = await produceRealSignedDelivery();
+    const verify = buildVerifySettlementGrade(
+      buildInput({ executorKeyId: EXECUTOR_KEY_ID, executorPublicKey: publicKey, getDeliverySignature }),
+    );
+    const result = await verify({
+      attempt: REVISED_ATTEMPT,
+      delivery: JSON.parse(new TextDecoder().decode(deliveryBytes)),
+      deliveryBytes,
+      deliveryDigest: digest,
+      config: BASE_SEPOLIA_TODAY,
+    });
+    expect(result.executorBinding).toEqual({ status: 'verified' });
   });
 });

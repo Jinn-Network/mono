@@ -1,3 +1,4 @@
+import { generateKeyPairSync, sign as cryptoSign, verify as cryptoVerify } from "node:crypto";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -75,6 +76,7 @@ function backend(
   repository: EvidenceRepository,
   onAwaitIndexed: () => void,
   deliveryExtensions?: LocalTaskExecutionBackendConfig["deliveryExtensions"],
+  trustKeys?: LocalTaskExecutionBackendConfig["trustKeys"],
 ): LocalTaskExecutionBackend {
   const launcher: LauncherContract = {
     id: "fixture",
@@ -135,6 +137,7 @@ function backend(
       },
     },
     ...(deliveryExtensions === undefined ? {} : { deliveryExtensions }),
+    ...(trustKeys === undefined ? {} : { trustKeys }),
   });
 }
 
@@ -323,5 +326,229 @@ describe("backend evidence capture posture (C3)", () => {
     expect(seen).toHaveLength(1);
     expect("workKind" in seen[0]!).toBe(false);
     expect("requestId" in seen[0]!).toBe(false);
+  });
+});
+
+// ── Finding E31: real executor delivery signing ──────────────────────────────────────────────
+//
+// `completeAttempt` seals the Delivery bytes exactly once (unchanged), then -- only when
+// `trustKeys.deliverySigningKey` is configured -- signs those EXACT sealed bytes into a DSSE
+// envelope carried OUTSIDE the Delivery document (never embedded, never re-sealed: seal-once,
+// per design §9.1 and PRINCIPLES.md's "Legible" principle -- every claim must be exactly,
+// independently verifiable; an embedded signature field cannot cover its own bytes without a
+// second seal pass, which is exactly the re-canonicalization seal-once forbids). The envelope is
+// retrievable via `getDeliverySignature(digest)`, keyed by the Delivery's own digest -- the only
+// identity `SettlementGradeVerificationInput` (`@jinn-network/marketplace-binding`) carries
+// across that package boundary (see `client/src/daemon/settlement-grade.ts`).
+
+/**
+ * Test-local, byte-for-byte port of `@jinn-network/trust-core`'s `dssePreAuthEncoding` (this
+ * package has no dependency on trust-core -- see `backend.ts`'s own copy for why, and
+ * `settlement-grade.ts`'s `idempotencyKeyFor` for the established cross-boundary-duplication
+ * precedent). Used here only to INDEPENDENTLY reconstruct what a genuine signer must have signed,
+ * so this test does not simply assert against the production code's own encoding.
+ */
+function dssePreAuthEncoding(payloadType: string, payloadBytes: Uint8Array): Uint8Array {
+  const typeBytes = new TextEncoder().encode(payloadType);
+  const head = new TextEncoder().encode(`DSSEv1 ${typeBytes.length} `);
+  const mid = new TextEncoder().encode(` ${payloadBytes.length} `);
+  const out = new Uint8Array(head.length + typeBytes.length + mid.length + payloadBytes.length);
+  let offset = 0;
+  for (const part of [head, typeBytes, mid, payloadBytes]) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
+function signingBackend(
+  root: string,
+  trustKeys?: LocalTaskExecutionBackendConfig["trustKeys"],
+): LocalTaskExecutionBackend {
+  const launcher: LauncherContract = {
+    id: "fixture",
+    capabilities: () => ({
+      taskProfiles: [profile.profile],
+      inputMediaTypes: ["application/json"],
+      outputMediaTypes: ["text/x-diff"],
+      structuredOutput: false,
+      resume: false,
+      interruptionBehaviorDefault: "repeatable",
+      secretForwards: [],
+      runPinning: { keys: [] },
+    }),
+    plan(_view, paths) {
+      return {
+        argv: [process.execPath, "-e", "process.exit(0)"],
+        env: {},
+        cwd: paths.work,
+        validExitCodes: [0],
+        resultContract: { envelopeFormat: "fixture" },
+        interruptionBehavior: "repeatable",
+      };
+    },
+  };
+  const provisioner: ProvisionerContract = {
+    workspaceKind: () => "dir",
+    async setup(_view, paths) {
+      await Promise.all(Object.values(paths).map((path) => mkdir(path, { recursive: true })));
+    },
+    executionEnv: ({ env }) => ({ ...env }),
+    async harvest() {
+      return { manifest: [], omissions: ["patch"], integrityViolations: [] };
+    },
+  };
+  return makeLocalTaskExecutionBackend({
+    stateRoot: root,
+    source: "urn:jinn:backend-local:signing-test",
+    executor: "https://jinn.network/software/fake-launcher",
+    profileStore,
+    launchers: [launcher],
+    provisioner: () => ({ id: "fixture", contract: provisioner }),
+    provisionerCapabilities: {
+      taskProfiles: [profile.profile],
+      workspaceKinds: ["dir"],
+      inputMediaTypes: ["application/json"],
+      outputMediaTypes: ["text/x-diff"],
+      isolation: ["process"],
+    },
+    // 'none' keeps this fixture free of evidence-capture's own nondeterminism (execution IDs) --
+    // irrelevant to what this describe block proves.
+    recorderAvailability: "none",
+    now: () => "2026-07-31T00:00:00.000Z",
+    ...(trustKeys === undefined ? {} : { trustKeys }),
+  });
+}
+
+describe("executor delivery signing (finding E31)", () => {
+  test("Delivery bytes are byte-identical whether or not a delivery-signing key is configured (additive)", async () => {
+    const keyPair = generateKeyPairSync("ed25519");
+    const trustKeys: LocalTaskExecutionBackendConfig["trustKeys"] = {
+      deliverySigningKey: {
+        keyId: "test-executor-key",
+        sign: (payload) => new Uint8Array(cryptoSign(null, payload, keyPair.privateKey)),
+      },
+    };
+    const task = sealTask({
+      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      profile: { uri: profile.profile, digest: { sha256: sealedProfile.digest.slice("sha256:".length) } },
+      instructions: "Capture this execution.",
+      outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
+    });
+    const taskDigest = documentDigest(task);
+    const submissionUri = `urn:uuid:${crypto.randomUUID()}` as const;
+    const nonce = crypto.randomUUID();
+    const submission = sealSubmission({
+      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      submission: submissionUri,
+      task: { digest: { sha256: taskDigest.slice("sha256:".length) } },
+      requester: "urn:uuid:20000000-0000-4000-8000-000000000003",
+      idempotencyKey: crypto.randomUUID(),
+      nonce,
+      deadline: "2099-01-01T00:00:00Z",
+    });
+    const attemptUri = `urn:uuid:${crypto.randomUUID()}` as const;
+
+    const unsigned = signingBackend(await stateRoot());
+    const signed = signingBackend(await stateRoot(), trustKeys);
+
+    for (const instance of [unsigned, signed]) {
+      const ack = await instance.submit(task, submission, {
+        attemptUri,
+        dispatchContext: { taskDigest, submission: submissionUri, nonce, attempt: attemptUri },
+      });
+      expect(ack.accepted).toBe(true);
+    }
+    await terminalSnapshot(unsigned, submissionUri);
+    await terminalSnapshot(signed, submissionUri);
+
+    const [unsignedRef] = await unsigned.deliveries(attemptUri);
+    const [signedRef] = await signed.deliveries(attemptUri);
+    expect(unsignedRef).toBeDefined();
+    expect(signedRef).toBeDefined();
+    const unsignedBytes = await unsigned.fetchDelivery(unsignedRef!);
+    const signedBytes = await signed.fetchDelivery(signedRef!);
+    expect(signedBytes).toEqual(unsignedBytes);
+  });
+
+  test("capabilities().signedDeliveries reflects whether a delivery-signing key is configured", async () => {
+    const keyPair = generateKeyPairSync("ed25519");
+    const unsigned = signingBackend(await stateRoot());
+    const signed = signingBackend(await stateRoot(), {
+      deliverySigningKey: {
+        keyId: "k",
+        sign: (payload) => new Uint8Array(cryptoSign(null, payload, keyPair.privateKey)),
+      },
+    });
+    expect((await unsigned.capabilities()).signedDeliveries).toBe(false);
+    expect((await signed.capabilities()).signedDeliveries).toBe(true);
+  });
+
+  test("getDeliverySignature is undefined when no delivery-signing key was configured", async () => {
+    const instance = signingBackend(await stateRoot());
+    const { task, submission } = documents();
+    const ack = await instance.submit(task, submission);
+    expect(ack.accepted).toBe(true);
+    if (!ack.accepted) throw new Error("unreachable");
+    const snapshot = await terminalSnapshot(instance, ack.submission);
+    const [ref] = await instance.deliveries(snapshot.descriptor.attempt);
+    const deliveryBytes = await instance.fetchDelivery(ref!);
+    expect(instance.getDeliverySignature(documentDigest(deliveryBytes))).toBeUndefined();
+  });
+
+  test("getDeliverySignature returns a genuine DSSE envelope over the exact sealed Delivery bytes", async () => {
+    const keyPair = generateKeyPairSync("ed25519");
+    const trustKeys: LocalTaskExecutionBackendConfig["trustKeys"] = {
+      deliverySigningKey: {
+        keyId: "test-executor-key",
+        sign: (payload) => new Uint8Array(cryptoSign(null, payload, keyPair.privateKey)),
+      },
+    };
+    const instance = signingBackend(await stateRoot(), trustKeys);
+    const { task, submission } = documents();
+    const ack = await instance.submit(task, submission);
+    expect(ack.accepted).toBe(true);
+    if (!ack.accepted) throw new Error("unreachable");
+    const snapshot = await terminalSnapshot(instance, ack.submission);
+    const [ref] = await instance.deliveries(snapshot.descriptor.attempt);
+    const deliveryBytes = await instance.fetchDelivery(ref!);
+    const digest = documentDigest(deliveryBytes);
+
+    const envelopeBytes = instance.getDeliverySignature(digest);
+    expect(envelopeBytes).toBeDefined();
+    const envelope = JSON.parse(new TextDecoder().decode(envelopeBytes!)) as {
+      payloadType: string;
+      payload: string;
+      signatures: readonly { keyid?: string; sig: string }[];
+    };
+    expect(envelope.payloadType).toBe("application/vnd.jinn.marketplace.executor-binding.v1+json");
+    const payloadBytes = Uint8Array.from(Buffer.from(envelope.payload, "base64"));
+    // Seal-once: the DSSE payload is the exact sealed Delivery bytes, never re-canonicalized.
+    expect(payloadBytes).toEqual(deliveryBytes);
+    expect(envelope.signatures).toHaveLength(1);
+    expect(envelope.signatures[0]!.keyid).toBe("test-executor-key");
+    const preAuthEncoding = dssePreAuthEncoding(envelope.payloadType, payloadBytes);
+    const sigBytes = Uint8Array.from(Buffer.from(envelope.signatures[0]!.sig, "base64"));
+    expect(cryptoVerify(null, preAuthEncoding, keyPair.publicKey, sigBytes)).toBe(true);
+
+    // No trace of the signature leaks into the Delivery document itself.
+    const parsed = JSON.parse(new TextDecoder().decode(deliveryBytes)) as Record<string, unknown>;
+    expect(Object.keys(parsed).some((key) => key.includes("executor-binding"))).toBe(false);
+  });
+
+  test("getDeliverySignature keys by digest -- an unknown digest returns undefined", async () => {
+    const keyPair = generateKeyPairSync("ed25519");
+    const instance = signingBackend(await stateRoot(), {
+      deliverySigningKey: {
+        keyId: "k",
+        sign: (payload) => new Uint8Array(cryptoSign(null, payload, keyPair.privateKey)),
+      },
+    });
+    const { task, submission } = documents();
+    const ack = await instance.submit(task, submission);
+    expect(ack.accepted).toBe(true);
+    if (!ack.accepted) throw new Error("unreachable");
+    await terminalSnapshot(instance, ack.submission);
+    expect(instance.getDeliverySignature(`sha256:${"0".repeat(64)}`)).toBeUndefined();
   });
 });

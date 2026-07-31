@@ -12,22 +12,20 @@
  * genuinely inspect the settling delivery, each implemented against real data this operator
  * already holds.
  *
- * SCOPE NOTE: the ruling's write scope is this file plus its test only -- `composition-root.ts`'s
- * own (still fail-closed) `buildVerifySettlementGrade` is deliberately left untouched. A follow-up
- * task must delete that local function and wire `venue.settlement.verifySettlementGrade` /
- * `pipelinePorts.settlement.verifySettlementGrade` to `buildVerifySettlementGrade` from this file
- * instead.
+ * SCOPE NOTE: `composition-root.ts` now wires this module's real `buildVerifySettlementGrade` for
+ * real (cutover stage 1 close-out C8) -- the stale fail-closed local stub this note used to
+ * describe is gone.
  *
  * WHAT EACH CHECK PROVES, AND WHAT IT DOES NOT (read before wiring):
  *
  *  1. `executorBinding` -- DSSE-structural verification (`@jinn-network/trust-core`'s
  *     `parseDsseEnvelope`/`dssePreAuthEncoding`) plus a genuine asymmetric-signature check (Node's
- *     built-in `crypto.verify`, Ed25519). The signed payload is `deliveryBytes` with the
- *     executor-binding extension key itself removed, re-sealed via `sealDelivery` -- an embedded
- *     signature cannot cover its own field (self-reference), so, exactly as a detached signature
- *     would, it binds everything else the settling `deliveryBytes` actually carry: outputs,
+ *     built-in `crypto.verify`, Ed25519). The signed payload is `verificationInput.deliveryBytes`
+ *     itself -- the settling Delivery's own exact sealed bytes, unmodified (this field's own type
+ *     comment already calls this out: "verifier implementations use these as the DSSE payload
+ *     identity"). It binds everything the settling `deliveryBytes` actually carry: outputs,
  *     outcome, evidenceRecords, and the exact digest of the Task it responds to. Tampering with
- *     any of those fields after signing changes the re-sealed bytes and invalidates the signature.
+ *     any of those fields after signing changes the digest and invalidates the lookup below.
  *     It proves the delivery was signed by the specific key this operator's composition declares
  *     as its own executor key -- a self-consistency / tamper-evidence bind, not third-party
  *     identity resolution. It deliberately does NOT call
@@ -38,13 +36,21 @@
  *     activation"). Proven not to gate today-mode settlement in this file's tests: the positive
  *     end-to-end test never supplies or touches a `BindingResolver`.
  *
- *     A second, narrower gap applies to the envelope itself: nothing produces this envelope yet.
- *     `LocalTaskExecutionBackendConfig.deliveryExtensions` (the hook that would attach it to a
- *     real Delivery) is still `() => ({})` per composition-root gap 3 / plan task C7 (needs a
- *     synchronous signer port; the operator's only signer today is an async viem `WalletClient`).
- *     Until C7 lands, `executorBinding` will legitimately report `"missing"` against every real
- *     delivery this daemon produces -- correctly, not as a hardcoded stub, because there is
- *     genuinely nothing to verify yet.
+ *     CLOSED (finding E31 close-out): a genuine DSSE envelope is now produced, by
+ *     `@jinn-network/task-execution-backend-local`'s `completeAttempt` -- seal the Delivery's
+ *     bytes exactly once (unchanged), then DSSE-sign those EXACT sealed bytes (design §9.1
+ *     seal-once; PRINCIPLES.md's "Legible" principle). The coordinator's ruling on this finding is
+ *     explicit that this is a CLEANER shape than an earlier proposal that would have embedded the
+ *     signature as a reserved Delivery field (seal minus the field, sign, merge in, re-seal): an
+ *     embedded field cannot cover its own bytes without that second seal pass, which IS
+ *     re-canonicalization. The envelope therefore never touches the Delivery document -- it is
+ *     carried OUTSIDE it, retrieved here via the injected `getDeliverySignature(digest)` port
+ *     (backed by `LocalTaskExecutionBackend.getDeliverySignature`), keyed by the Delivery's own
+ *     digest -- the only identity `SettlementGradeVerificationInput` carries across this package
+ *     boundary (no AttemptUri field exists on it). Legitimately reports `"missing"` when the host
+ *     configured no delivery-signing key (`composition-root.ts`'s `deliverySigningKey` input,
+ *     absent by default -- `main.ts` does not supply one yet, mirroring `legacyBridgeSigner`'s own
+ *     gap) or when this specific digest was never signed.
  *
  *  2. `dispatchBinding` -- proves this operator's own local engagement ledger
  *     (`./engagement-ledger.ts`) recorded a claim for this exact settlement identity: chain,
@@ -77,7 +83,6 @@
  */
 import { verify as cryptoVerify, type KeyObject } from 'node:crypto';
 import type { Hex } from 'viem';
-import { z } from 'zod';
 import { dssePreAuthEncoding, parseDsseEnvelope } from '@jinn-network/trust-core';
 import type {
   DispatchBindingCheck,
@@ -89,29 +94,16 @@ import type {
   SettlementGradeVerificationInput,
   SettlementPorts,
 } from '@jinn-network/marketplace-binding';
-import { sealDelivery, type DeliveryRecord } from '@jinn-network/task-execution-protocol';
 import type { ProfileStore } from '@jinn-network/task-execution-profiles';
 import type { EngagementOutcome, EngagementRow } from './engagement-ledger.js';
 
-/**
- * The namespaced Delivery extension (TEP §21.3) the executor-binding envelope is carried under,
- * once a future task's synchronous signer port populates
- * `LocalTaskExecutionBackendConfig.deliveryExtensions` (composition-root gap 3 / plan C7). Value
- * shape: `{ envelope: <base64 sealed DSSE envelope bytes> }`, whose payload is required (below) to
- * equal the delivery's own canonical bytes with this extension key removed (an embedded signature
- * cannot cover its own field).
- */
-export const EXECUTOR_BINDING_EXTENSION_URI =
-  'https://jinn.network/marketplace/extensions/executor-binding/1.0' as const;
-
 /** The DSSE envelope's required `payloadType`, matching the convention `named-checks.ts` already
- * uses for its own vendor media types (`SUBMISSION_DSSE_PAYLOAD_TYPE`, `VERDICT_DSSE_PAYLOAD_TYPE`). */
+ * uses for its own vendor media types (`SUBMISSION_DSSE_PAYLOAD_TYPE`, `VERDICT_DSSE_PAYLOAD_TYPE`).
+ * Mirrors `@jinn-network/task-execution-backend-local`'s own copy of this literal
+ * (`backend.ts`'s `EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE`) -- duplicated, not imported, because that
+ * package cannot depend on the client; the two literals must stay byte-identical. */
 export const EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE =
   'application/vnd.jinn.marketplace.executor-binding.v1+json' as const;
-
-const ExecutorBindingExtensionSchema = z.object({
-  envelope: z.string().min(1),
-});
 
 /**
  * Minimal reader surface `checkDispatchBinding` needs. `EngagementLedger` (`./engagement-ledger.
@@ -135,6 +127,14 @@ export interface BuildVerifySettlementGradeInput {
   readonly executorKeyId: string;
   /** The public-key counterpart of the operator's own delivery-signing key (Ed25519). */
   readonly executorPublicKey: KeyObject;
+  /**
+   * Reads a previously-produced DSSE executor-binding envelope back by the settling Delivery's
+   * own digest (finding E31 close-out). Backed by `LocalTaskExecutionBackend.getDeliverySignature`
+   * -- digest, not AttemptUri, is the only identity `SettlementGradeVerificationInput` carries
+   * across the `@jinn-network/marketplace-binding` package boundary. Returns `undefined` when no
+   * delivery-signing key was configured, or this digest was never signed.
+   */
+  readonly getDeliverySignature: (digest: `sha256:${string}`) => Uint8Array | undefined;
 }
 
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
@@ -156,27 +156,21 @@ function idempotencyKeyFor(config: MarketplaceChainConfig, taskId: bigint): stri
 
 /** Check 1 -- see file header. */
 function checkExecutorBinding(
-  delivery: DeliveryRecord,
-  input: Pick<BuildVerifySettlementGradeInput, 'executorKeyId' | 'executorPublicKey'>,
+  deliveryBytes: Uint8Array,
+  deliveryDigest: `sha256:${string}`,
+  input: Pick<BuildVerifySettlementGradeInput, 'executorKeyId' | 'executorPublicKey' | 'getDeliverySignature'>,
 ): ExecutorBindingCheck {
-  const raw = (delivery as Record<string, unknown>)[EXECUTOR_BINDING_EXTENSION_URI];
-  if (raw === undefined) {
+  const envelopeBytes = input.getDeliverySignature(deliveryDigest);
+  if (envelopeBytes === undefined) {
     return {
       status: 'missing',
-      detail: `Delivery carries no "${EXECUTOR_BINDING_EXTENSION_URI}" extension`,
-    };
-  }
-  const parsed = ExecutorBindingExtensionSchema.safeParse(raw);
-  if (!parsed.success) {
-    return {
-      status: 'invalid',
-      detail: `executor-binding extension failed schema validation: ${parsed.error.message}`,
+      detail: `no executor-binding envelope recorded for Delivery digest "${deliveryDigest}"`,
     };
   }
 
   let envelope: ReturnType<typeof parseDsseEnvelope>;
   try {
-    envelope = parseDsseEnvelope(decodeBase64(parsed.data.envelope));
+    envelope = parseDsseEnvelope(envelopeBytes);
   } catch (cause) {
     return { status: 'invalid', detail: `executor-binding envelope failed DSSE parsing: ${String(cause)}` };
   }
@@ -188,23 +182,13 @@ function checkExecutorBinding(
     };
   }
 
-  // An embedded signature cannot cover its own field, so the signed payload is deliveryBytes
-  // minus this extension, re-sealed -- everything else the settling delivery actually carries.
-  const { [EXECUTOR_BINDING_EXTENSION_URI]: _own, ...deliveryWithoutExtension } =
-    delivery as Record<string, unknown>;
-  let unsignedDeliveryBytes: Uint8Array;
-  try {
-    unsignedDeliveryBytes = sealDelivery(deliveryWithoutExtension);
-  } catch (cause) {
+  // Seal-once (coordinator ruling, finding E31; PRINCIPLES.md's "Legible" principle): the signed
+  // payload must equal the settling delivery's own exact sealed bytes -- never re-sealed or
+  // re-canonicalized, here or in the producer (`backend.ts`'s `completeAttempt`).
+  if (!bytesEqual(envelope.payloadBytes, deliveryBytes)) {
     return {
       status: 'invalid',
-      detail: `Delivery minus its executor-binding extension does not re-seal cleanly: ${String(cause)}`,
-    };
-  }
-  if (!bytesEqual(envelope.payloadBytes, unsignedDeliveryBytes)) {
-    return {
-      status: 'invalid',
-      detail: 'executor-binding envelope payload is not the exact delivery bytes (minus this extension)',
+      detail: 'executor-binding envelope payload is not the exact settling Delivery bytes',
     };
   }
 
@@ -299,11 +283,11 @@ function checkEvaluationSpecification(
 /**
  * Builds the real `verifySettlementGrade` port. Every check above is genuine: given real inputs
  * (a populated engagement ledger, a profile store carrying the referenced EvaluationSpec, and a
- * delivery genuinely carrying a validly-signed executor-binding extension) it reports `"verified"`
- * for the right reason: it inspected exactly that evidence and it held up. Given the same inputs
- * this composition wires today (empty ledger correlation for today-mode, no
- * `deliveryExtensions`-populated envelope yet), it reports `"missing"` -- also for the right
- * reason: the evidence genuinely is not there yet.
+ * delivery genuinely signed by a configured delivery-signing key) it reports `"verified"` for the
+ * right reason: it inspected exactly that evidence and it held up. Given the same inputs this
+ * composition wires by default (empty ledger correlation for today-mode, no
+ * `deliverySigningKey` configured), it reports `"missing"` -- also for the right reason: the
+ * evidence genuinely is not there yet.
  */
 export function buildVerifySettlementGrade(
   input: BuildVerifySettlementGradeInput,
@@ -311,7 +295,7 @@ export function buildVerifySettlementGrade(
   return async (
     verificationInput: SettlementGradeVerificationInput,
   ): Promise<SettlementGradeVerification> => ({
-    executorBinding: checkExecutorBinding(verificationInput.delivery, input),
+    executorBinding: checkExecutorBinding(verificationInput.deliveryBytes, verificationInput.deliveryDigest, input),
     dispatchBinding: checkDispatchBinding(verificationInput.attempt, verificationInput.config, input.engagementLedger),
     evaluationSpecification: checkEvaluationSpecification(verificationInput.attempt, input.profileStore),
   });

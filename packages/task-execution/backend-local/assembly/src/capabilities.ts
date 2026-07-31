@@ -16,9 +16,26 @@ export interface CapabilityProvisionerConfig {
   readonly isolation: readonly string[];
 }
 
+/**
+ * A real executor delivery-signing key (finding E31). `sign` returns a raw detached signature
+ * over exactly the bytes given -- `backend.ts`'s `completeAttempt` DSSE pre-authentication-
+ * encodes the already-sealed Delivery bytes before calling this; the key never sees, and never
+ * needs to know about, canonicalization.
+ */
+export interface DeliverySigningKey {
+  readonly keyId: string;
+  sign(payload: Uint8Array): Uint8Array;
+}
+
 export interface TrustKeyConfig {
   readonly observationSigningKeyConfigured?: boolean;
-  readonly deliverySigningKeyConfigured?: boolean;
+  /**
+   * Host-supplied executor delivery-signing key (finding E31), keystore-derived by the host the
+   * same way the operator's other trust keys are. Its mere PRESENCE is what `assembleCapabilities`
+   * reports as `signedDeliveries` below -- unlike the bare boolean this field replaces, a config
+   * author cannot claim signing capability without actually supplying key material.
+   */
+  readonly deliverySigningKey?: DeliverySigningKey;
 }
 
 export interface AssembleCapabilitiesInput {
@@ -77,7 +94,8 @@ export function assembleCapabilities(
     fetchArtifact: true,
     confidentialInputs: true,
     signedObservations: input.trustKeys.observationSigningKeyConfigured === true,
-    signedDeliveries: input.trustKeys.deliverySigningKeyConfigured === true,
+    // Finding E31: derived from real key presence, not a hardcoded flag -- see `TrustKeyConfig`.
+    signedDeliveries: input.trustKeys.deliverySigningKey !== undefined,
     evidenceCapture: input.recorderAvailability,
     deadlineEnforcement: input.custody?.ready ?? true,
     isolation: sortedUnique(input.provisioner.isolation),
