@@ -69,3 +69,6 @@ export type {
 } from "./pool.js";
 export { createFilesystemSupplyPool } from "./pool/filesystem.js";
 export type { FilesystemSupplyPoolOptions } from "./pool/filesystem.js";
+export type { GoldRef, GoldStore } from "./gold.js";
+export { GOLD_STORE_MARKER_FILE, createFilesystemGoldStore } from "./gold/filesystem.js";
+export type { FilesystemGoldStoreOptions } from "./gold/filesystem.js";
