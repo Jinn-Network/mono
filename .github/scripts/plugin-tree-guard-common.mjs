@@ -218,16 +218,78 @@ export function validateExportSubpath(subpath, packageName) {
   }
 }
 
-/** Validate one export target object — exact reviewed `types` + `import` shape only. */
+export function undeclaredInstallTimeDependencies(manifest, permittedPackages) {
+  return INSTALL_TIME_SECTIONS.flatMap((section) =>
+    Object.keys(manifest[section] ?? {})
+      .filter((dependency) => !permittedPackages.includes(dependency))
+      .map((dependency) => `${section}:${dependency}`),
+  ).sort(compareCodeUnit);
+}
+
+/** Production install-time dependencies must match the exact approved runtime map only. */
+export function undeclaredProductionDependencies(manifest) {
+  return ['dependencies', 'optionalDependencies', 'peerDependencies'].flatMap((section) =>
+    Object.keys(manifest[section] ?? {})
+      .filter((dependency) => !(dependency in APPROVED_RUNTIME_DEPENDENCIES))
+      .map((dependency) => `${section}:${dependency}`),
+  ).sort(compareCodeUnit);
+}
+
+function decodeExportPathBounded(relativePath) {
+  let current = relativePath;
+  for (let round = 0; round < 3; round += 1) {
+    if (!current.includes('%')) break;
+    try {
+      const decoded = decodeURIComponent(current);
+      if (decoded === current) break;
+      current = decoded;
+    } catch {
+      throw new Error('malformed percent encoding in export target');
+    }
+  }
+  return current;
+}
+
+function validateDistExportPath(relativePath, packageName, subpath, kind) {
+  if (typeof relativePath !== 'string' || !relativePath.startsWith('./')) {
+    throw new Error(`${packageName} exports ${kind} for ${subpath} must be relative: ${relativePath}`);
+  }
+  if (relativePath.includes('\\')) {
+    throw new Error(`${packageName} exports ${kind} for ${subpath} must not contain backslashes`);
+  }
+  const decoded = decodeExportPathBounded(relativePath).replace(/\\/g, '/');
+  if (/[\0-\x1f\x7f]/.test(decoded)) {
+    throw new Error(`${packageName} exports ${kind} for ${subpath} contains control characters`);
+  }
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(decoded) || decoded.includes('://')) {
+    throw new Error(`${packageName} exports ${kind} for ${subpath} must not use a URL`);
+  }
+  if (!decoded.startsWith('./dist/')) {
+    throw new Error(`${packageName} exports ${kind} for ${subpath} must start with ./dist/`);
+  }
+  for (const segment of decoded.slice(2).split('/')) {
+    if (segment === '..') {
+      throw new Error(`${packageName} exports ${kind} for ${subpath} escapes dist/`);
+    }
+    if (segment === '') {
+      throw new Error(`${packageName} exports ${kind} for ${subpath} contains encoded path separators`);
+    }
+  }
+}
+
+/** Validate one export target object — exact reviewed `types` then `import` shape only. */
 export function validateExportTarget(target, packageName, subpath) {
   if (typeof target === 'string') {
-    validateRelativeExportPath(target, packageName, subpath);
+    validateDistExportPath(target, packageName, subpath, 'target');
     return { import: target, types: target };
   }
   if (typeof target !== 'object' || target === null || Array.isArray(target)) {
     throw new Error(`${packageName} exports entry ${subpath} is malformed`);
   }
   const keys = Object.keys(target);
+  if (keys.length !== 2 || keys[0] !== 'types' || keys[1] !== 'import') {
+    throw new Error(`${packageName} exports entry ${subpath} must list types before import`);
+  }
   const allowed = ['import', 'types'];
   for (const key of keys) {
     if (!allowed.includes(key)) {
@@ -237,19 +299,9 @@ export function validateExportTarget(target, packageName, subpath) {
   if (typeof target.types !== 'string' || typeof target.import !== 'string') {
     throw new Error(`${packageName} exports entry ${subpath} requires string types and import`);
   }
-  validateRelativeExportPath(target.import, packageName, subpath);
-  validateRelativeExportPath(target.types, packageName, subpath);
+  validateDistExportPath(target.import, packageName, subpath, 'import');
+  validateDistExportPath(target.types, packageName, subpath, 'types');
   return { import: target.import, types: target.types };
-}
-
-function validateRelativeExportPath(relativePath, packageName, subpath) {
-  if (!relativePath.startsWith('./')) {
-    throw new Error(`${packageName} exports target for ${subpath} must be relative: ${relativePath}`);
-  }
-  const normalized = relativePath.replace(/\\/g, '/');
-  if (normalized.includes('..') || normalized.startsWith('/')) {
-    throw new Error(`${packageName} exports target escapes package root: ${relativePath}`);
-  }
 }
 
 /** Derive explicit public code entrypoints from package exports. Wildcards fail-closed. */
@@ -260,10 +312,14 @@ export function derivePublicCodeEntrypoints(manifest) {
   }
   const exportsField = manifest.exports;
   if (exportsField === undefined) {
-    return [{ subpath: '.', specifier: name, conditions: { import: manifest.main ?? './dist/index.js', types: manifest.types ?? './dist/index.d.ts' } }];
+    const importTarget = manifest.main ?? './dist/index.js';
+    const typesTarget = manifest.types ?? './dist/index.d.ts';
+    validateDistExportPath(importTarget, name, '.', 'import');
+    validateDistExportPath(typesTarget, name, '.', 'types');
+    return [{ subpath: '.', specifier: name, conditions: { import: importTarget, types: typesTarget } }];
   }
   if (typeof exportsField === 'string') {
-    validateRelativeExportPath(exportsField, name, '.');
+    validateDistExportPath(exportsField, name, '.', 'target');
     return [{ subpath: '.', specifier: name, conditions: { import: exportsField, types: exportsField } }];
   }
   if (typeof exportsField !== 'object' || exportsField === null || Array.isArray(exportsField)) {
@@ -322,14 +378,6 @@ export function undeclaredDependencies(manifest, approvedMap, section) {
     .filter((name) => !(name in approvedMap))
     .map((name) => `${section}:${name}`)
     .sort(compareCodeUnit);
-}
-
-export function undeclaredInstallTimeDependencies(manifest, permittedPackages) {
-  return INSTALL_TIME_SECTIONS.flatMap((section) =>
-    Object.keys(manifest[section] ?? {})
-      .filter((dependency) => !permittedPackages.includes(dependency))
-      .map((dependency) => `${section}:${dependency}`),
-  ).sort(compareCodeUnit);
 }
 
 export function unconsumedApprovedEntries(manifest, approvedMap, section) {

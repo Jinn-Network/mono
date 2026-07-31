@@ -13,6 +13,9 @@ const LOCALE_MEMBER_APIS = new Set([
 ]);
 const BIN_ALLOWED_PROCESS_MEMBERS = new Set(['argv', 'env', 'stdout', 'stderr', 'exitCode', 'once', 'off']);
 const BIN_ALLOWED_SIGNALS = new Set(['SIGINT', 'SIGTERM']);
+const BIN_MUTATING_METHODS = new Set([
+  'push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin',
+]);
 const BIN_ALLOWED_IMPORTS = [
   { module: 'node:fs', names: ['realpathSync'] },
   { module: 'node:os', names: ['homedir'] },
@@ -38,6 +41,8 @@ const AUTH = Object.freeze({
   Intl: 'Intl',
   localeFn: 'localeFn',
   console: 'console',
+  binEnv: 'binEnv',
+  binArgv: 'binArgv',
 });
 
 function scriptKindForPath(filePath, ts) {
@@ -209,6 +214,34 @@ function resolveProcessRoot(expr, ts, scope) {
   return null;
 }
 
+function resolveProcessEnvArgvRoot(expr, ts, scope) {
+  const unwrapped = unwrapExpression(expr, ts);
+  if (ts.isPropertyAccessExpression(unwrapped)) {
+    const processRoot = resolveProcessRoot(unwrapped, ts, scope);
+    if (processRoot?.kind === 'env' || processRoot?.kind === 'argv') {
+      return processRoot.kind;
+    }
+  }
+  return null;
+}
+
+function resolveEnvArgvMutationRoot(expr, ts, scope) {
+  const unwrapped = unwrapExpression(expr, ts);
+  if (ts.isPropertyAccessExpression(unwrapped) || ts.isElementAccessExpression(unwrapped)) {
+    const root = resolveProcessRoot(unwrapped.expression, ts, scope);
+    if (root?.kind === 'env' || root?.kind === 'argv') {
+      return root.kind;
+    }
+  }
+  return null;
+}
+
+function binEnvArgvLabel(auth) {
+  if (auth === AUTH.binEnv) return 'env';
+  if (auth === AUTH.binArgv) return 'argv';
+  return null;
+}
+
 function authorityFromExpression(expr, ts, scope) {
   const unwrapped = unwrapExpression(expr, ts);
   if (ts.isIdentifier(unwrapped)) {
@@ -286,6 +319,16 @@ function bindPattern(pattern, auth, ts, scope, ctx) {
 function bindFromInitializer(name, initializer, ts, scope, ctx) {
   const unwrapped = unwrapExpression(initializer, ts);
   let auth = authorityFromExpression(initializer, ts, scope);
+  const envArgvRoot = resolveProcessEnvArgvRoot(initializer, ts, scope);
+  if (ctx.isBinEntry && envArgvRoot) {
+    ctx.add(`forbidden bin process.${envArgvRoot} alias`);
+    if (ts.isIdentifier(name)) {
+      scope.declare(name.text, envArgvRoot === 'env' ? AUTH.binEnv : AUTH.binArgv);
+    } else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+      bindPattern(name, envArgvRoot === 'env' ? AUTH.binEnv : AUTH.binArgv, ts, scope, ctx);
+    }
+    return;
+  }
   if (ts.isCallExpression(unwrapped)) {
     const callee = unwrapExpression(unwrapped.expression, ts);
     if (ts.isIdentifier(callee) && callee.text === 'createRequire') {
@@ -329,6 +372,41 @@ function expressionContains(candidate, target, ts) {
   }
   if (ts.isElementAccessExpression(candidate)) {
     return expressionContains(candidate.expression, target, ts);
+  }
+  return false;
+}
+
+function isBinEnvArgvAliasMutation(node, ts, scope, member) {
+  const unwrapped = unwrapExpression(node, ts);
+  if (!ts.isPropertyAccessExpression(unwrapped) && !ts.isElementAccessExpression(unwrapped)) {
+    return false;
+  }
+  const base = unwrapExpression(unwrapped.expression, ts);
+  if (!ts.isIdentifier(base)) return false;
+  const label = binEnvArgvLabel(scope.lookup(base.text));
+  if (!label) return false;
+  if (member && BIN_MUTATING_METHODS.has(member)) return true;
+  let current = node.parent;
+  while (current) {
+    if (ts.isBinaryExpression(current)) {
+      const op = current.operatorToken.kind;
+      if ([
+        ts.SyntaxKind.EqualsToken,
+        ts.SyntaxKind.PlusEqualsToken,
+        ts.SyntaxKind.MinusEqualsToken,
+        ts.SyntaxKind.AsteriskEqualsToken,
+        ts.SyntaxKind.SlashEqualsToken,
+      ].includes(op) && expressionContains(current.left, node, ts)) {
+        return true;
+      }
+    }
+    if (ts.isDeleteExpression(current) && expressionContains(current.expression, node, ts)) {
+      return true;
+    }
+    if (ts.isPostfixUnaryExpression(current) || ts.isPrefixUnaryExpression(current)) {
+      if (expressionContains(current.operand, node, ts)) return true;
+    }
+    current = current.parent;
   }
   return false;
 }
@@ -559,9 +637,18 @@ function scanSourceFile(filePath, content, options) {
       return;
     }
 
-    if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node)) {
+    if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node)
+      || ts.isMethodDeclaration(node) || ts.isConstructorDeclaration(node)) {
       const fnScope = currentScope.child();
       for (const param of node.parameters ?? []) {
+        if (param.initializer) {
+          visitNode(param.initializer, currentScope);
+        }
+        if (ts.isObjectBindingPattern(param.name)) {
+          for (const element of param.name.elements ?? []) {
+            if (element.initializer) visitNode(element.initializer, currentScope);
+          }
+        }
         if (ts.isIdentifier(param.name)) {
           checkKeyMaterial(param.name.text, 'parameter');
           fnScope.declare(param.name.text, AUTH.local);
@@ -622,6 +709,21 @@ function scanSourceFile(filePath, content, options) {
 
     if (ts.isCallExpression(node)) {
       const callee = unwrapExpression(node.expression, ts);
+      if (ctx.isBinEntry && ts.isPropertyAccessExpression(callee)) {
+        const member = callee.name.text;
+        if (BIN_MUTATING_METHODS.has(member)) {
+          const envArgvRoot = resolveProcessEnvArgvRoot(callee.expression, ts, currentScope);
+          if (envArgvRoot) {
+            add(`forbidden bin process.${envArgvRoot} mutation`);
+          } else if (isBinEnvArgvAliasMutation(callee, ts, currentScope, member)) {
+            add(`forbidden bin process alias mutation`);
+          }
+        }
+      }
+      if (ctx.isBinEntry && ts.isIdentifier(callee)) {
+        const label = binEnvArgvLabel(currentScope.lookup(callee.text));
+        if (label) add(`forbidden bin process.${label} alias call`);
+      }
       if (ts.isIdentifier(callee)) {
         const auth = currentScope.lookup(callee.text);
         if (callee.text === 'createRequire') {
@@ -679,6 +781,16 @@ function scanSourceFile(filePath, content, options) {
 
     if (ts.isPropertyAccessExpression(node)) {
       const member = node.name.text;
+      if (ctx.isBinEntry && ts.isIdentifier(node.expression)) {
+        const aliasLabel = binEnvArgvLabel(currentScope.lookup(node.expression.text));
+        if (aliasLabel) {
+          if (isBinEnvArgvAliasMutation(node, ts, currentScope, member)) {
+            add(`forbidden bin process.${aliasLabel} alias mutation`);
+          } else if (member !== 'length') {
+            add(`forbidden bin process.${aliasLabel} alias use`);
+          }
+        }
+      }
       const processRoot = resolveProcessRoot(node.expression, ts, currentScope);
       if (processRoot?.kind === 'process') {
         reportProcessAccess(node, member);
@@ -752,6 +864,45 @@ function scanSourceFile(filePath, content, options) {
         add(`locale-sensitive ${key}`);
       } else if (auth === AUTH.global && key && NETWORK_GLOBALS.has(key)) {
         add(`network global ${key}`);
+      } else if (auth === AUTH.global && key === null && !numericIndex) {
+        add('dynamic computed global access');
+      }
+    }
+
+    if (ts.isTaggedTemplateExpression(node)) {
+      const tagAuth = authorityFromExpression(node.tag, ts, currentScope);
+      if (tagAuth === AUTH.eval || tagAuth === AUTH.Function) {
+        add('dynamic evaluation tagged template');
+      }
+      if (ts.isIdentifier(node.tag) && (node.tag.text === 'eval' || node.tag.text === 'Function')) {
+        add('dynamic evaluation tagged template');
+      }
+      if (ts.isPropertyAccessExpression(node.tag)) {
+        const member = node.tag.name.text;
+        const baseAuth = authorityFromExpression(node.tag.expression, ts, currentScope);
+        if (baseAuth === AUTH.global && (member === 'eval' || member === 'Function')) {
+          add('dynamic evaluation tagged template');
+        }
+      }
+      visitNode(node.tag, currentScope);
+      return;
+    }
+
+    if (ts.isPostfixUnaryExpression(node) || ts.isPrefixUnaryExpression(node)) {
+      if (ctx.isBinEntry) {
+        const operand = unwrapExpression(node.operand, ts);
+        const envArgvRoot = resolveEnvArgvMutationRoot(operand, ts, currentScope);
+        if (envArgvRoot) {
+          add(`forbidden bin process.${envArgvRoot} mutation`);
+        } else if (isBinEnvArgvAliasMutation(operand, ts, currentScope)) {
+          add('forbidden bin process alias mutation');
+        }
+      }
+    }
+
+    if (ts.isPropertySignature(node) || ts.isPropertyDeclaration(node) || ts.isMethodDeclaration(node)) {
+      if (node.name && ts.isComputedPropertyName(node.name)) {
+        visitNode(node.name.expression, currentScope);
       }
     }
 

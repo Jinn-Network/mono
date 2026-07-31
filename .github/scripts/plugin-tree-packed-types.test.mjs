@@ -65,22 +65,24 @@ async function packOne(directory, name) {
   return join(archivesRoot, packed[0].filename);
 }
 
-function assertTarballContains(tarPaths, relativePath) {
+function assertExactTarballEntry(tarPaths, relativePath) {
   const normalized = relativePath.replace(/^\.\//, '');
-  const found = tarPaths.some((entry) => entry.endsWith(`/${normalized}`) || entry === `package/${normalized}`);
-  if (!found) {
-    throw new Error(`packed tarball missing ${relativePath}`);
+  const expected = `package/${normalized}`;
+  if (!tarPaths.includes(expected)) {
+    throw new Error(`packed tarball missing exact entry ${expected}`);
   }
 }
 
 function assertExportMutationsFail() {
   const cases = [
-    [{ name: '@jinn-network/outside', exports: { '.': { types: '../outside.d.ts', import: '../outside.js' } } }, /relative/],
-    [{ name: '@jinn-network/condition', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js', require: './dist/index.cjs' } } }, /unsupported condition/],
+    [{ name: '@jinn-network/outside', exports: { '.': { types: '../outside.d.ts', import: '../outside.js' } } }, /relative|dist/],
+    [{ name: '@jinn-network/condition', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js', require: './dist/index.cjs' } } }, /types before import|unsupported condition/],
     [{ name: '@jinn-network/wildcard', exports: { './*': './dist/*.js' } }, /wildcard/],
     [{ name: '@jinn-network/escape', exports: { '../escape': './dist/index.js' } }, /subpath/],
-    [{ name: '@jinn-network/nested', exports: { '.': { import: { nested: true } } } }, /malformed|requires string types and import/],
+    [{ name: '@jinn-network/nested', exports: { '.': { import: { nested: true } } } }, /malformed|requires string types and import|types before import/],
     [{ name: '@jinn-network/null-export', exports: { '.': null } }, /malformed/],
+    [{ name: '@jinn-network/reordered', exports: { '.': { import: './dist/index.js', types: './dist/index.d.ts' } } }, /types before import/],
+    [{ name: '@jinn-network/encoded', exports: { '.': { types: './dist/%2e%2e/x.d.ts', import: './dist/%2e%2e/x.js' } } }, /dist/],
   ];
   for (const [manifest, pattern] of cases) {
     try {
@@ -97,8 +99,8 @@ function assertExportMutationsFail() {
 async function validatePackedSurface(archivePath, entrypoints) {
   const tarPaths = await listTarball(archivePath);
   for (const entrypoint of entrypoints) {
-    assertTarballContains(tarPaths, entrypoint.conditions.import);
-    assertTarballContains(tarPaths, entrypoint.conditions.types);
+    assertExactTarballEntry(tarPaths, entrypoint.conditions.import);
+    assertExactTarballEntry(tarPaths, entrypoint.conditions.types);
   }
 }
 

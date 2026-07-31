@@ -20,6 +20,7 @@ import {
   root,
   undeclaredDependencies,
   undeclaredInstallTimeDependencies,
+  undeclaredProductionDependencies,
   unconsumedApprovedEntries,
 } from './plugin-tree-guard-common.mjs';
 import { scanProductionSources } from './plugin-tree-ast-custody.mjs';
@@ -224,6 +225,33 @@ test('undeclared third-party runtime dependencies and malformed versions are rej
     ['dependencies:lodash'],
   );
   assert.deepEqual(
+    undeclaredRuntimeDependencies({ dependencies: { 'better-sqlite3': '12.0.0' } }),
+    ['dependencies:better-sqlite3'],
+  );
+  assert.deepEqual(
+    undeclaredRuntimeDependencies({ dependencies: { 'better-sqlite3': '^12.0.0' } }),
+    ['dependencies:better-sqlite3'],
+  );
+  assert.deepEqual(
+    undeclaredRuntimeDependencies({ optionalDependencies: { zod: '4.4.3' } }),
+    [],
+  );
+  assert.deepEqual(
+    undeclaredRuntimeDependencies({ optionalDependencies: { '@modelcontextprotocol/sdk': '1.0.0' } }),
+    ['optionalDependencies:@modelcontextprotocol/sdk'],
+  );
+  assert.deepEqual(
+    undeclaredRuntimeDependencies({ peerDependencies: { '@noble/hashes': '1.0.0' } }),
+    ['peerDependencies:@noble/hashes'],
+  );
+  for (const pkg of PERMITTED_PACKAGES.filter((name) => name !== 'zod')) {
+    assert.deepEqual(
+      undeclaredRuntimeDependencies({ dependencies: { [pkg]: '1.0.0' } }),
+      [`dependencies:${pkg}`],
+      `${pkg} must not pass production dependency allowlist via PERMITTED_PACKAGES`,
+    );
+  }
+  assert.deepEqual(
     exactVersionViolations({ dependencies: { zod: '^4.4.3' } }, APPROVED_RUNTIME_DEPENDENCIES, 'dependencies'),
     ['dependencies:zod=^4.4.3'],
   );
@@ -242,7 +270,7 @@ test('undeclared third-party runtime dependencies and malformed versions are rej
 });
 
 function undeclaredRuntimeDependencies(manifest) {
-  return undeclaredInstallTimeDependencies(manifest, PERMITTED_PACKAGES);
+  return undeclaredProductionDependencies(manifest);
 }
 
 test('every plugin-tree npm package is discovered recursively by the shared helper', () => {
@@ -594,15 +622,91 @@ test('R-C3-31 rejects unsupported export shapes outside the reviewed contract', 
       name: '@jinn-network/outside',
       exports: { '.': { types: '../outside.d.ts', import: '../outside.js' } },
     }),
-    /relative/,
+    /relative|dist/,
   );
   assert.throws(
     () => derivePublicCodeEntrypoints({
       name: '@jinn-network/condition',
       exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js', require: './dist/index.cjs' } },
     }),
-    /unsupported condition/,
+    /types before import|unsupported condition/,
   );
+});
+
+test('R-C3-36 catches parameter defaults, dynamic global access, and tagged templates', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-36-'));
+  try {
+    const violations = scanFixtureSource(fixture, 'authority.ts', [
+      'function f(x = process.env.HOME) { return x; }',
+      'const key = "fetch";',
+      'globalThis[key]("https://example.com");',
+      'Function`return process`;',
+      'const F = globalThis.Function;',
+      'F`return 1`;',
+    ].join('\n'));
+    assert.ok(violations.some((entry) => entry.includes('process.env')));
+    assert.ok(violations.some((entry) => entry.includes('dynamic computed global access')));
+    assert.ok(violations.some((entry) => entry.includes('dynamic evaluation tagged template')));
+
+    const shadowed = scanFixtureSource(fixture, 'shadow.ts', [
+      'function probe() {',
+      '  const globalThis = { fetch() {} };',
+      '  globalThis["fetch"]("local");',
+      '}',
+    ].join('\n'));
+    assert.deepEqual(shadowed, []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-37 bin env/argv direct-read-only rejects aliases and mutations', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-37-'));
+  try {
+    const allowed = scanFixtureSource(fixture, 'bin.ts', [
+      'process.env.JINN_PLUGIN_HOME;',
+      'process.argv.slice(2);',
+    ].join('\n'), { isBinEntry: true });
+    assert.deepEqual(allowed, []);
+
+    for (const [name, content, needle] of [
+      ['env-alias.ts', 'const env = process.env;\nenv.LEAK = "yes";', 'forbidden bin process.env alias'],
+      ['argv-push.ts', 'process.argv.push("--bad");', 'forbidden bin process.argv mutation'],
+      ['env-inc.ts', 'process.env.COUNT++;', 'forbidden bin process.env mutation'],
+    ]) {
+      const violations = scanFixtureSource(fixture, name, content, { isBinEntry: true });
+      assert.ok(violations.some((entry) => entry.includes(needle)), `${name} must fail on ${needle}`);
+    }
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-39 rejects reordered export conditions and encoded traversal targets', () => {
+  assert.throws(
+    () => derivePublicCodeEntrypoints({
+      name: '@jinn-network/reordered',
+      exports: { '.': { import: './dist/index.js', types: './dist/index.d.ts' } },
+    }),
+    /types before import/,
+  );
+  for (const [importTarget, expectPattern] of [
+    ['./dist/%2e%2e/outside.js', /escapes dist/],
+    ['./dist/%252e%252e/outside.js', /escapes dist/],
+    ['./dist/%2f/index.js', /encoded path separators/],
+    ['./dist/%5c/index.js', /encoded path separators|backslashes/],
+    ['./dist\\index.js', /backslashes/],
+    ['./outside.js', /dist/],
+  ]) {
+    assert.throws(
+      () => derivePublicCodeEntrypoints({
+        name: '@jinn-network/escape',
+        exports: {
+          '.': {
+            types: importTarget.replace('.js', '.d.ts'),
+            import: importTarget,
+          },
+        },
+      }),
+      expectPattern,
+    );
+  }
 });
 
 test('plugin tree source boundaries hold and the manifest matches the approved shape', () => {
@@ -620,6 +724,7 @@ test('plugin tree source boundaries hold and the manifest matches the approved s
   assert.ok(runtimePackage);
   const runtimeManifest = runtimePackage.manifest;
   assert.deepEqual(Object.keys(runtimeManifest.exports).sort(), ['.']);
+  assert.deepEqual(Object.keys(runtimeManifest.exports['.']), ['types', 'import']);
   assert.deepEqual(runtimeManifest.exports['.'], {
     types: './dist/index.d.ts',
     import: './dist/index.js',
