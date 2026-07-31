@@ -44,6 +44,8 @@ export {
 } from "./venue/safe-revert.js";
 export { SAFE_ABI, buildSafeSignature, executeSafeTransaction } from "./venue/safe.js";
 export type { SafeTransactionParams } from "./venue/safe.js";
+export { createEoaBroadcastPort } from "./venue/eoa-broadcast.js";
+export type { EoaBroadcastOptions } from "./venue/eoa-broadcast.js";
 export { JINN_ROUTER_V3_ABI } from "./abis/jinn-router-v3.js";
 export { JINN_ROUTER_V4_ABI } from "./abis/revised-contracts.js";
 export { TASK_COORDINATOR_ABI } from "./abis/task-coordinator.js";
