@@ -2838,7 +2838,7 @@ git commit -m "feat(plugin-runtime): per-operation corpus mirror store over a WA
 
 **The contract this task must satisfy literally:** `syncOnce` **never throws** and **never waits on the lock**. Every failure is a value in the returned outcome. That is what lets C7 fire it opportunistically at session start and post-pickup and simply drop the promise.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/corpus/mirror.test.ts`:
 
@@ -3087,7 +3087,7 @@ describe("mirror sync", () => {
 });
 ```
 
-- [ ] **Step 2: Add the shared fixture loader used by this and later suites**
+- [x] **Step 2: Add the shared fixture loader used by this and later suites**
 
 `src/corpus/testing-fixture.ts`:
 
@@ -3114,12 +3114,12 @@ export const executionEvidenceFixture = {
 
 Populate the fixture in Task 14 Step 1; until then this suite fails at fixture load, which is the expected red.
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [x] **Step 3: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test src/corpus/mirror.test.ts`
 Expected: FAIL — `Failed to resolve import "./mirror.js"`.
 
-- [ ] **Step 4: Write the implementation**
+- [x] **Step 4: Write the implementation**
 
 `src/corpus/mirror.ts`:
 
@@ -3363,12 +3363,12 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
 }
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test src/corpus/mirror.test.ts && yarn typecheck`
 Expected: PASS (11 tests) once Task 14's fixture exists. Until then this suite is red only on the fixture read; run it again at the end of Task 14.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add plugin/runtime/src/corpus
