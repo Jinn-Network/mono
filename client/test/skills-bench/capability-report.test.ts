@@ -7,8 +7,8 @@ import { attemptKey, type BenchOutcome } from '../../src/skills-bench/attempts.j
 import {
   assertRankBadgeAccompanied, buildCapabilityReport, buildEmbedSnippet, buildReportFields, buildTaskSetIdentity,
   cohortRank, deriveConcordant, deriveCostOverhead, deriveVerdictLine, renderBadgeSvg, renderCapabilityReportMd,
-  renderCohortRankBadgeSvg, validateCohort, CohortValidationError,
-  type BuildCapabilityReportOptions, type Cohort, type CohortEntry,
+  renderCohortRankBadgeSvg, renderPerTaskTableMd, validateCohort, CohortValidationError,
+  type BuildCapabilityReportOptions, type Cohort, type CohortEntry, type ReportNarrative,
 } from '../../src/skills-bench/capability-report.js';
 import type { ReceiptData, ReceiptProfile } from '../../src/skills-bench/receipt.js';
 import type { SkillPin } from '../../src/skills-bench/skill-pin.js';
@@ -258,35 +258,342 @@ describe('buildCapabilityReport', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// renderCapabilityReportMd — narrative-only report (design §6 of
+// docs/superpowers/specs/2026-07-31-capability-report-artifact-design.md).
+// The base fixture (`baseOptions`, via `buildCapabilityReport`) is itself a
+// null effect (net 0/2 paired tasks) with a HIGH trigger rate (1/1 known) —
+// it already exercises the "given its chance" null sub-case. The other
+// three sub-cases (effect found + high trigger, effect found + low trigger,
+// null + low trigger) get their own small fixtures below.
+// ---------------------------------------------------------------------------
+
+function pairedTaskSet(ids: string[]): SkillTaskSetV1 {
+  return {
+    ...taskSet,
+    tasks: ids.map((id) => task(id)),
+    screeningSummary: { ...taskSet.screeningSummary!, kept: ids, droppedNoHeadroom: [] },
+  };
+}
+
+function allTriggered(ids: string[], value: boolean | null): Map<string, boolean | null> {
+  return new Map(ids.map((id) => [attemptKey({ instanceId: id, arm: 'tdd', repeat: 0 }), value]));
+}
+
+/** Effect found, high trigger rate: ta/tb improved, tc concordant-pass, td
+ *  concordant-fail — net +2 across 4 paired tasks, all 4 attempts triggered. */
+function effectHighTriggerReport(over: Partial<BuildCapabilityReportOptions> = {}) {
+  const ids = ['ta', 'tb', 'tc', 'td'];
+  const outcomes: BenchOutcome[] = [
+    o('ta', 'baseline', 0, false), o('ta', 'tdd', 0, true),
+    o('tb', 'baseline', 0, false), o('tb', 'tdd', 0, true),
+    o('tc', 'baseline', 0, true), o('tc', 'tdd', 0, true),
+    o('td', 'baseline', 0, false), o('td', 'tdd', 0, false),
+  ];
+  return buildCapabilityReport({
+    ...baseOptions(), taskSet: pairedTaskSet(ids), outcomes, triggerByKey: allTriggered(ids, true), ...over,
+  });
+}
+
+/** Effect found (net +1), but a low (0%) trigger rate — the delta cannot be
+ *  attributed to the skill. */
+function effectLowTriggerReport(over: Partial<BuildCapabilityReportOptions> = {}) {
+  const ids = ['ta', 'tb'];
+  const outcomes: BenchOutcome[] = [
+    o('ta', 'baseline', 0, false), o('ta', 'tdd', 0, true),
+    o('tb', 'baseline', 0, true), o('tb', 'tdd', 0, true),
+  ];
+  return buildCapabilityReport({
+    ...baseOptions(), taskSet: pairedTaskSet(ids), outcomes, triggerByKey: allTriggered(ids, false), ...over,
+  });
+}
+
+/** Null effect (net 0), low (0%) trigger rate — the discoverability case. */
+function nullLowTriggerReport(over: Partial<BuildCapabilityReportOptions> = {}) {
+  const ids = ['ta', 'tb'];
+  const outcomes: BenchOutcome[] = [
+    o('ta', 'baseline', 0, false), o('ta', 'tdd', 0, true),
+    o('tb', 'baseline', 0, true), o('tb', 'tdd', 0, false),
+  ];
+  return buildCapabilityReport({
+    ...baseOptions(), taskSet: pairedTaskSet(ids), outcomes, triggerByKey: allTriggered(ids, false), ...over,
+  });
+}
+
+/** Nothing graded at all — every treatment attempt ungradeable, so
+ *  `triggerRate.total` is 0 (never fabricated as a rate). */
+function noSessionDataReport(over: Partial<BuildCapabilityReportOptions> = {}) {
+  const ids = ['ta'];
+  const outcomes: BenchOutcome[] = [o('ta', 'baseline', 0, true), o('ta', 'tdd', 0, null)];
+  return buildCapabilityReport({
+    ...baseOptions(), taskSet: pairedTaskSet(ids), outcomes, triggerByKey: new Map(), ...over,
+  });
+}
+
+function focalCohort(over: Partial<Cohort> = {}): Cohort {
+  return {
+    domain: 'python-testing',
+    entries: [
+      cohortEntry({ skill: 'tdd', focal: true, netTasks: 2 }),
+      cohortEntry({ skill: 'other-skill', netTasks: 1 }),
+    ],
+    ...over,
+  };
+}
+
 describe('renderCapabilityReportMd', () => {
-  it('renders the receipt block, per-task table (with the unknown-trigger row), task-set identity, and reproduce section', () => {
+  // -------------------------------------------------------------------------
+  // Section order — design §6's eleven sections, in order, for the effect
+  // case (with a cohort and a full narrative supplied so every optional
+  // section is present).
+  // -------------------------------------------------------------------------
+
+  it('renders all eleven sections in design §6 order for the effect case', () => {
+    const narrative: ReportNarrative = {
+      pattern: { text: 'Tasks with multi-file diffs seem to trigger the skill more often.', evidence: 'assistant#12: Skill(tdd) invoked after viewing 3 files' },
+      changes: ['Broaden the trigger description', 'Add a worked example for multi-file edits'],
+    };
+    const report = { ...effectHighTriggerReport(), cohort: focalCohort(), narrative };
+    const md = renderCapabilityReportMd(report);
+
+    const markers = [
+      '# tdd —',
+      'independent capability measurement',
+      '## Cohort',
+      '## Result',
+      '## Where it did not load',
+      '## Pattern worth testing',
+      '## What we would change',
+      '## Scope',
+      '## Reproduce',
+      '## Re-evaluation',
+      'Evaluated by [Jinn](https://jinn.network).',
+    ];
+    const indices = markers.map((m) => md.indexOf(m));
+    for (const idx of indices) expect(idx).toBeGreaterThanOrEqual(0);
+    for (let i = 1; i < indices.length; i++) expect(indices[i]).toBeGreaterThan(indices[i - 1]!);
+  });
+
+  // -------------------------------------------------------------------------
+  // Title
+  // -------------------------------------------------------------------------
+
+  it('leads the title with the effect, not a diagnosis, when a real net effect was measured', () => {
+    const md = renderCapabilityReportMd(effectHighTriggerReport());
+    expect(md).toContain('# tdd — net +2 tasks with skill loaded');
+  });
+
+  it('leads the title with cohort position when a cohort is supplied', () => {
+    const md = renderCapabilityReportMd({ ...effectHighTriggerReport(), cohort: focalCohort() });
+    expect(md.split('\n')[0]).toContain('1st of 2 in python-testing');
+  });
+
+  // -------------------------------------------------------------------------
+  // Null variant (§6.1) — the primary case. Title leads with the diagnosis,
+  // never the zero; base rate is cited; discoverability framing when
+  // trigger is low; "given its chance" framing when trigger is high.
+  // -------------------------------------------------------------------------
+
+  describe('null variant (§6.1)', () => {
+    it('leads the title with the diagnosis, not the zero, citing the measured trigger rate', () => {
+      const md = renderCapabilityReportMd(nullLowTriggerReport());
+      expect(md).toContain('# tdd — measured, no effect found (trigger rate 0/2)');
+      expect(md).not.toMatch(/# tdd — net 0/);
+    });
+
+    it('cites the base rate so a null reads as the normal result, not a verdict', () => {
+      const md = renderCapabilityReportMd(nullLowTriggerReport());
+      expect(md).toContain('SWE-Skills-Bench, 39 of 49');
+      expect(md).toContain('arXiv 2603.15401');
+    });
+
+    it('frames a low trigger rate as a discoverability result, not a quality result, in those words', () => {
+      const md = renderCapabilityReportMd(nullLowTriggerReport());
+      expect(md).toMatch(/discoverability result, not a quality result/);
+    });
+
+    it('says the skill was given its chance, unsoftened, when trigger rate is high and effect is null', () => {
+      // baseOptions() itself is net 0 with a 1/1 (100%) trigger rate.
+      const md = renderCapabilityReportMd(buildCapabilityReport(baseOptions()));
+      expect(md).toContain('# tdd — measured, no effect found (trigger rate 1/1)');
+      expect(md).toMatch(/given its chance here and did not change results/);
+    });
+
+    it('never fabricates a trigger reading when no session data was captured at all', () => {
+      const md = renderCapabilityReportMd(noSessionDataReport());
+      expect(md).toContain('# tdd — measured, no effect found (no session data)');
+      expect(md).toContain('No session data was captured to measure whether `tdd` loaded');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Result in words (§4) — paired outcome stated plainly, concordant counts
+  // from deriveConcordant, intervals shown.
+  // -------------------------------------------------------------------------
+
+  it('states the paired outcome in plain words using the concordant split, with intervals shown', () => {
+    const md = renderCapabilityReportMd(effectHighTriggerReport());
+    expect(md).toMatch(/solved 2 task\(s\) the baseline missed and missed 0 the baseline solved/);
+    expect(md).toMatch(/agreed on 1 pass and 1 fail/);
+    expect(md).toMatch(/95% Wilson \d+%-\d+%/);
+  });
+
+  // -------------------------------------------------------------------------
+  // Where it did not load (§5) — the trigger-rate diagnosis, gated on the
+  // measured rate only.
+  // -------------------------------------------------------------------------
+
+  it('reads the low trigger rate as not-attributable when an effect was measured but rarely triggered', () => {
+    const md = renderCapabilityReportMd(effectLowTriggerReport());
+    expect(md).toMatch(/too low a trigger rate to attribute the measured net \+1-task difference/);
+  });
+
+  it('reads a high trigger rate as supporting the measured effect', () => {
+    const md = renderCapabilityReportMd(effectHighTriggerReport());
+    expect(md).toMatch(/trigger rate is high enough that the measured effect can plausibly be attributed/);
+  });
+
+  // -------------------------------------------------------------------------
+  // Cohort table (§3) — omitted without a cohort; installs column only with
+  // provenance.
+  // -------------------------------------------------------------------------
+
+  it('omits the cohort section entirely when no cohort was supplied', () => {
+    const md = renderCapabilityReportMd(effectHighTriggerReport());
+    expect(md).not.toContain('## Cohort');
+  });
+
+  it('renders one row per cohort entry, bolding the focal skill, when a cohort is supplied', () => {
+    const md = renderCapabilityReportMd({ ...effectHighTriggerReport(), cohort: focalCohort() });
+    expect(md).toContain('## Cohort');
+    expect(md).toContain('| **tdd** |');
+    expect(md).toContain('| other-skill |');
+  });
+
+  it('omits the installs column when no cohort entry carries provenance', () => {
+    const md = renderCapabilityReportMd({ ...effectHighTriggerReport(), cohort: focalCohort() });
+    const cohortSection = md.slice(md.indexOf('## Cohort'), md.indexOf('## Result'));
+    expect(cohortSection).not.toContain('installs');
+  });
+
+  it('renders the installs column, with source and date, only for entries carrying provenance', () => {
+    const cohort: Cohort = {
+      domain: 'python-testing',
+      entries: [
+        cohortEntry({ skill: 'tdd', focal: true, netTasks: 2, installs: { count: 1200, source: 'npm', asOf: '2026-07-01' } }),
+        cohortEntry({ skill: 'other-skill', netTasks: 1 }),
+      ],
+    };
+    const md = renderCapabilityReportMd({ ...effectHighTriggerReport(), cohort });
+    const cohortSection = md.slice(md.indexOf('## Cohort'), md.indexOf('## Result'));
+    expect(cohortSection).toContain('| skill | installs | loaded on | net tasks | cost vs baseline |');
+    expect(cohortSection).toContain('1200 (npm, 2026-07-01)');
+    expect(cohortSection).toContain('| other-skill | — |');
+  });
+
+  // -------------------------------------------------------------------------
+  // Pattern worth testing (§6) / What we would change (§7) — caller-supplied
+  // only, never invented; pattern always labelled hypothesis.
+  // -------------------------------------------------------------------------
+
+  it('omits pattern and changes sections entirely when no narrative was supplied', () => {
+    const md = renderCapabilityReportMd(effectHighTriggerReport());
+    expect(md).not.toContain('## Pattern worth testing');
+    expect(md).not.toContain('## What we would change');
+  });
+
+  it('labels a supplied pattern as hypothesis, not finding, with its evidence', () => {
+    const narrative: ReportNarrative = {
+      pattern: { text: 'Multi-file tasks seem to trigger the skill more often.', evidence: 'assistant#12: Skill(tdd) invoked' },
+    };
+    const md = renderCapabilityReportMd({ ...effectHighTriggerReport(), narrative });
+    expect(md).toContain('## Pattern worth testing');
+    expect(md).toContain('**Hypothesis, not finding:** Multi-file tasks seem to trigger the skill more often.');
+    expect(md).toContain('> assistant#12: Skill(tdd) invoked');
+  });
+
+  it('renders at most three suggested changes, even when more are supplied', () => {
+    const narrative: ReportNarrative = { changes: ['edit one', 'edit two', 'edit three', 'edit four'] };
+    const md = renderCapabilityReportMd({ ...effectHighTriggerReport(), narrative });
+    expect(md).toContain('- edit one');
+    expect(md).toContain('- edit two');
+    expect(md).toContain('- edit three');
+    expect(md).not.toContain('edit four');
+  });
+
+  // -------------------------------------------------------------------------
+  // Scope (§8), Reproduce (§9), Re-evaluation (§10), Footer (§11)
+  // -------------------------------------------------------------------------
+
+  it('states scope — one model, one agent, n tasks, one domain — and what it does not tell you', () => {
+    const md = renderCapabilityReportMd(effectHighTriggerReport());
+    expect(md).toContain('one agent configuration — claude-code running claude-haiku-4-5-20251001');
+    expect(md).toContain('4 tasks in the python-testing domain');
+    expect(md).toMatch(/does not tell you how `tdd` performs on other domains/);
+  });
+
+  it('links the rerun command, the per-task table, and the raw data, inviting substitution', () => {
+    const md = renderCapabilityReportMd(effectHighTriggerReport());
+    expect(md).toContain('Rerun: `yarn tsx scripts/skills-bench/run-bench.ts');
+    expect(md).toContain('Per-task outcomes: `data/per-task.md`');
+    expect(md).toContain('Raw data: data/attempts.jsonl, data/bench-manifest.json, data/set.json');
+    expect(md).toMatch(/Substitute your own task set/);
+  });
+
+  it('offers re-evaluation on freshly drawn tasks not used to derive this diagnosis', () => {
+    const md = renderCapabilityReportMd(effectHighTriggerReport());
+    expect(md).toMatch(/we will re-measure it — on freshly drawn tasks not used to derive this diagnosis/);
+  });
+
+  it('ends with exactly the footer line and nothing further — no closing neutrality claim', () => {
+    const md = renderCapabilityReportMd(effectHighTriggerReport());
+    const trimmed = md.trimEnd();
+    expect(trimmed.endsWith('Evaluated by [Jinn](https://jinn.network).')).toBe(true);
+    expect(md).not.toMatch(/we don'?t (publish|sell)/i);
+    expect(md).not.toMatch(/we are neutral|no bias/i);
+  });
+
+  // -------------------------------------------------------------------------
+  // Claim discipline (design §7) — enforced across every scenario.
+  // -------------------------------------------------------------------------
+
+  it('never uses significance language, in any scenario', () => {
+    for (const report of [
+      effectHighTriggerReport(), effectLowTriggerReport(), nullLowTriggerReport(),
+      noSessionDataReport(), buildCapabilityReport(baseOptions()),
+    ]) {
+      expect(renderCapabilityReportMd(report)).not.toMatch(/significan/i);
+    }
+  });
+
+  it('no longer contains the full receipt figure block (renderReceiptMd\'s fenced ascii block)', () => {
     const md = renderCapabilityReportMd(buildCapabilityReport(baseOptions()));
-    expect(md).toContain('# tdd — capability report');
-    expect(md).toContain('skill:      tdd'); // reused renderReceiptMd block
+    expect(md).not.toContain('skill:      tdd');
+    expect(md).not.toMatch(/```\nskill:/);
+  });
+
+  it('does not embed the per-task table in the report body', () => {
+    const md = renderCapabilityReportMd(buildCapabilityReport(baseOptions()));
+    expect(md).not.toContain('| task | baseline | with skill | triggered |');
+    expect(md).not.toContain('| t1 | not resolved | resolved | yes |');
+  });
+});
+
+describe('renderPerTaskTableMd', () => {
+  it('renders the per-task outcome table as its own markdown document, separate from the report body', () => {
+    const report = buildCapabilityReport(baseOptions());
+    const md = renderPerTaskTableMd(report);
+    expect(md).toContain('# tdd — per-task outcomes');
     expect(md).toContain('| task | baseline | with skill | triggered |');
     expect(md).toContain('| t1 | not resolved | resolved | yes |');
     expect(md).toContain('| t2 | resolved | not resolved | unknown |');
     expect(md).toContain('| t3 | resolved | ungradeable | unknown |');
-    expect(md).toContain('domain:     python-testing');
-    expect(md).toContain('screening:  kept 3, dropped (no headroom) 1, dropped (ungradeable) 0');
-    expect(md).toContain(`sha256:     ${taskSet.sha256}`);
-    expect(md).toContain('rerun: yarn tsx scripts/skills-bench/run-bench.ts');
-    expect(md).toContain('data:  data/attempts.jsonl, data/bench-manifest.json, data/set.json');
-  });
-
-  it('renders "task set" vocabulary, never "slate", when the profile identityKind is task-set (I1)', () => {
-    const taskSetProfile: ReceiptProfile = { ...profile, identityKind: 'task-set' };
-    const report = buildCapabilityReport({ ...baseOptions(), profile: taskSetProfile });
-    const md = renderCapabilityReportMd(report);
-    expect(md).toContain(`measured:   ${report.receipt.n} paired tasks (task set ${taskSet.sha256.slice(0, 8)})`);
-    expect(md).toContain(`task set sha256: ${taskSet.sha256}`);
-    expect(md).not.toContain('slate');
   });
 
   it('renders a plain placeholder, never a broken table, when there are no per-task rows', () => {
     const emptySet: SkillTaskSetV1 = { ...taskSet, tasks: [] };
     const report = buildCapabilityReport({ ...baseOptions(), taskSet: emptySet, outcomes: [] });
-    const md = renderCapabilityReportMd(report);
+    const md = renderPerTaskTableMd(report);
     expect(md).toContain('_No per-task outcomes recorded._');
   });
 });

@@ -1,12 +1,14 @@
 /**
- * Capability report composition (spec §1 of
- * docs/superpowers/specs/2026-07-30-skills-factory-mvp-design.md, v0.2):
- * the public artifact a skill author receives — the paired receipt block
- * (§"packaging"), a per-task outcome table, the task-set identity (sha256,
- * domain, gradeability/screening summary), and a reproduce section (raw data
- * paths + the exact rerun command). Also the badge/embed distribution
- * artifacts (§4.1): a small self-contained SVG and a markdown snippet
- * carrying the repointed `jinn.*` metadata block for the author to paste.
+ * Capability report composition. The public artifact a skill author
+ * receives is three pieces, one identity (design §1 of
+ * docs/superpowers/specs/2026-07-31-capability-report-artifact-design.md):
+ * a badge (this module's `renderBadgeSvg`), a card (capability-card.ts — the
+ * card carries the numbers), and this module's `renderCapabilityReportMd` —
+ * the narrative report. Design §6: "the card carries the numbers; the
+ * report does not repeat them" — the report states the paired outcome in
+ * words, the trigger-rate diagnosis, scope, and reproduction steps, and
+ * links to `data/per-task.md` (`renderPerTaskTableMd`, rendered separately)
+ * rather than embedding the per-task table in its body.
  *
  * Every function here is pure — no filesystem, no network. The CLI
  * (scripts/skills-bench/render-report.ts) does all the I/O (loading the
@@ -26,7 +28,7 @@
 import { attemptKey, type BenchOutcome } from './attempts.js';
 import { buildJinnReceiptMetadata, quoteYamlScalar } from './frontmatter.js';
 import {
-  buildReceipt, isLowTriggerRate, renderReceiptMd, summarizeTriggerRate,
+  buildReceipt, isLowTriggerRate, summarizeTriggerRate,
   type ArmSummary, type ReceiptData, type ReceiptProfile, type TriggerRate,
 } from './receipt.js';
 import type { SkillPin } from './skill-pin.js';
@@ -337,6 +339,36 @@ export interface ReportLinks {
   dataPaths: string[];
   /** The exact command a reader runs to reproduce this measurement. */
   rerunCommand: string;
+  /** The report's own public URL (design §6 section 9), when the caller
+   *  already knows it (e.g. `--base-url`-derived, work item 5). Optional —
+   *  a render-time caller that hasn't resolved a public URL yet simply omits
+   *  the line rather than the renderer inventing one. */
+  reportUrl?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Narrative inputs (design §6 sections 6-7) — human-authored for now; the
+// renderer never invents a pattern or a suggested change. Absent entirely
+// when the caller has nothing to say, in which case those sections are
+// omitted rather than rendered empty (design §6: patterns are "explicitly
+// labelled as hypothesis, not finding").
+// ---------------------------------------------------------------------------
+
+export interface ReportNarrativePattern {
+  /** The hypothesis itself, in plain language. Never rendered without the
+   *  "hypothesis, not finding" label (design §6 section 6). */
+  text: string;
+  /** A transcript excerpt or other evidence supporting the hypothesis
+   *  (design §6: "with a transcript excerpt as evidence"). */
+  evidence?: string;
+}
+
+export interface ReportNarrative {
+  pattern?: ReportNarrativePattern;
+  /** At most three concrete edits (design §6 section 7); the renderer caps
+   *  display at three even if more are supplied, but never invents its
+   *  own. */
+  changes?: string[];
 }
 
 export interface CapabilityReport {
@@ -351,6 +383,10 @@ export interface CapabilityReport {
   /** Optional passthrough — cohort ASSEMBLY happens elsewhere (deferred);
    *  this report only carries whatever cohort the caller already built. */
   cohort?: Cohort;
+  /** Optional passthrough — see `ReportNarrative`'s doc comment. Never
+   *  computed here; a caller (human, for now) supplies it or the report's
+   *  §6/§7 sections are omitted. */
+  narrative?: ReportNarrative;
 }
 
 export interface BuildCapabilityReportOptions {
@@ -371,6 +407,8 @@ export interface BuildCapabilityReportOptions {
   links: ReportLinks;
   /** Optional passthrough — see `CapabilityReport.cohort`. */
   cohort?: Cohort;
+  /** Optional passthrough — see `CapabilityReport.narrative`. */
+  narrative?: ReportNarrative;
   /** `BenchManifest.eligibleTaskIds` from THIS run (final-review round 2 fix
    *  to I8) — the run-scoped source of truth for which tasks were actually
    *  eligible to be measured, reflecting `screeningRespected`/
@@ -453,6 +491,7 @@ export function buildCapabilityReport(opts: BuildCapabilityReportOptions): Capab
     links: opts.links,
     fields,
     ...(opts.cohort ? { cohort: opts.cohort } : {}),
+    ...(opts.narrative ? { narrative: opts.narrative } : {}),
   };
 }
 
@@ -484,45 +523,253 @@ function renderPerTaskTable(rows: PerTaskRow[]): string {
   return lines.join('\n');
 }
 
-function renderTaskSetIdentity(identity: TaskSetIdentitySummary): string {
-  const screeningLine = identity.screening
-    ? `screening:  kept ${identity.screening.kept}, dropped (no headroom) ${identity.screening.droppedNoHeadroom}, ` +
-      `dropped (ungradeable) ${identity.screening.droppedUngradeable}`
-    : 'screening:  not run';
-  return [
-    '```',
-    `domain:     ${identity.domain}`,
-    `tasks:      ${identity.taskCount} (gradeability ${identity.gradeability.passing}/${identity.gradeability.total} passing)`,
-    screeningLine,
-    `sha256:     ${identity.sha256}`,
-    '```',
-  ].join('\n');
+const formatPct = (x: number): string => `${(100 * x).toFixed(0)}%`;
+
+/** Focal cohort rank + ordinal suffix, or `null` without a cohort — shared
+ *  by the title (design §6 section 1: "cohort position/superlative belongs
+ *  here when a cohort exists") and the cohort table section. Caller must
+ *  validate the cohort first (`renderCapabilityReportMd` does, once, before
+ *  any cohort-dependent section runs). */
+function cohortSuperlative(cohort: Cohort | undefined): string | null {
+  if (!cohort) return null;
+  const { rank, of } = cohortRank(cohort);
+  return `${ordinal(rank)} of ${of} in ${cohort.domain}`;
 }
 
-/** The public capability report: the paired-receipt block first (reused
- *  verbatim from receipt.ts), then task-set identity, the per-task outcome
- *  table, and a reproduce section. */
+/** Section 1 (design §6): the most interesting TRUE finding, not the flat
+ *  number. Null-variant branch (§6.1 — the primary case, roughly 4 in 5
+ *  reports): leads with the diagnosis, never the zero. */
+function renderTitle(report: CapabilityReport): string {
+  const { skill, receipt, cohort } = report;
+  const netDelta = receipt.treatment.passed - receipt.baseline.passed;
+  const isNull = netDelta === 0;
+  const superlative = cohortSuperlative(cohort);
+  const suffix = superlative ? ` — ${superlative}` : '';
+  if (isNull) {
+    const rate = receipt.triggerRate;
+    const triggerText = !rate || rate.total === 0
+      ? 'no session data'
+      : `trigger rate ${rate.triggered}/${rate.total}`;
+    return `${skill} — measured, no effect found (${triggerText})${suffix}`;
+  }
+  const sign = netDelta > 0 ? '+' : '';
+  return `${skill} — net ${sign}${netDelta} tasks with skill loaded${suffix}`;
+}
+
+/** Section 2: one sentence — what was measured, that it is public and
+ *  reproducible, that nothing is asked of the author. */
+function renderOpener(fields: ReportFields): string {
+  return (
+    `This is an independent capability measurement of \`${fields.skill}\` on ${fields.n} paired tasks in the ` +
+    `${fields.domain} domain — public, reproducible from the data linked below, and nothing is asked of you.`
+  );
+}
+
+/** Section 3: one row per cohort skill (skill, installs, loaded on, net
+ *  tasks, cost vs baseline), focal bolded. Installs column renders only when
+ *  at least one entry carries provenance (design §6 section 3: "rendered
+ *  ONLY with provenance") — an entry without it shows an em dash, never a
+ *  bare count. Omitted entirely by the caller when `report.cohort` is
+ *  absent (design §6: "omitted entirely without a cohort"). */
+function renderCohortTable(cohort: Cohort): string {
+  const hasInstalls = cohort.entries.some((e) => e.installs);
+  const headers = ['skill', ...(hasInstalls ? ['installs'] : []), 'loaded on', 'net tasks', 'cost vs baseline'];
+  const lines = [`| ${headers.join(' | ')} |`, `| ${headers.map(() => '---').join(' | ')} |`];
+  for (const entry of cohort.entries) {
+    const skillCell = entry.focal ? `**${entry.skill}**` : entry.skill;
+    const installsCell = entry.installs
+      ? `${entry.installs.count} (${entry.installs.source}, ${entry.installs.asOf})`
+      : '—';
+    const loadedCell = `${entry.triggered}/${entry.total}`;
+    const netCell = `${entry.netTasks > 0 ? '+' : ''}${entry.netTasks}`;
+    const costPct = Math.round((entry.costRatio - 1) * 100);
+    const costCell = `${costPct > 0 ? '+' : ''}${costPct}%`;
+    const cells = [skillCell, ...(hasInstalls ? [installsCell] : []), loadedCell, netCell, costCell];
+    lines.push(`| ${cells.join(' | ')} |`);
+  }
+  return lines.join('\n');
+}
+
+/** Section 4: the paired outcome in plain language — never re-rendering the
+ *  card's full figure block. Intervals are still shown (design §7: "always
+ *  shown" wherever a figure appears) because the uncertainty statement needs
+ *  them; this is a different sentence from the card's numbers, not a
+ *  restatement of them. */
+function renderResult(report: CapabilityReport): string {
+  const { receipt, skill } = report;
+  const netDelta = receipt.treatment.passed - receipt.baseline.passed;
+  const isNull = netDelta === 0;
+  const sign = netDelta > 0 ? '+' : '';
+  const concordant = deriveConcordant(receipt);
+  const paragraphs: string[] = [
+    `With \`${skill}\` loaded, the agent solved ${receipt.paired.improved} task(s) the baseline missed and missed ` +
+    `${receipt.paired.regressed} the baseline solved — both arms agreed on ${concordant.bothPassed} pass and ` +
+    `${concordant.bothFailed} fail. Baseline resolved ${receipt.baseline.passed}/${receipt.baseline.scorable} tasks ` +
+    `(95% Wilson ${formatPct(receipt.baseline.lo)}-${formatPct(receipt.baseline.hi)}); with the skill, ` +
+    `${receipt.treatment.passed}/${receipt.treatment.scorable} ` +
+    `(95% Wilson ${formatPct(receipt.treatment.lo)}-${formatPct(receipt.treatment.hi)}) — ` +
+    `net ${sign}${netDelta} across ${receipt.n} paired tasks.`,
+  ];
+  if (isNull) {
+    paragraphs.push(
+      'This is a null result: no measured net effect. Most publicly measured skills show no pass-rate ' +
+      'improvement (SWE-Skills-Bench, 39 of 49; arXiv 2603.15401) — a null here is the normal outcome, not a ' +
+      'verdict. The next section explains where in the pipeline that null likely comes from.',
+    );
+  } else {
+    paragraphs.push(
+      'This is a small paired sample; the interval above is wide by construction and this reads as a ' +
+      'direction, not proof.',
+    );
+  }
+  return paragraphs.join('\n\n');
+}
+
+/** Section 5: the trigger-rate diagnosis, in the plain words the null
+ *  variant requires (design §6.1) — a low trigger rate is a discoverability
+ *  result, not a quality result; a high trigger rate with a null effect
+ *  means the skill was given its chance and did not change outcomes, stated
+ *  without softening. Trigger rate is read straight from `ReceiptData`,
+ *  never inferred (design §7: "trigger rate never inferred"). */
+function renderTriggerSection(report: CapabilityReport): string {
+  const { receipt, skill } = report;
+  const rate = receipt.triggerRate;
+  const netDelta = receipt.treatment.passed - receipt.baseline.passed;
+  const isNull = netDelta === 0;
+  if (!rate || rate.total === 0) {
+    return (
+      `No session data was captured to measure whether \`${skill}\` loaded during these runs — this reads as ` +
+      'not exercised on this task set, not as evidence about the skill either way.'
+    );
+  }
+  const low = isLowTriggerRate(rate);
+  const base =
+    `\`${skill}\` loaded on ${rate.triggered} of ${rate.total} solved+failed attempts` +
+    (rate.unknown > 0 ? ` (${rate.unknown} unknown — session not captured)` : '') + '.';
+  if (isNull && low) {
+    return (
+      `${base} The skill loaded on few tasks — this is a discoverability result, not a quality result: the ` +
+      'agent rarely found a reason to invoke it, so this run cannot speak to whether the skill helps when it ' +
+      'does load.'
+    );
+  }
+  if (isNull) {
+    return (
+      `${base} The skill loaded on most tasks and still made no difference to the outcome — it was given its ` +
+      'chance here and did not change results.'
+    );
+  }
+  if (low) {
+    const sign = netDelta > 0 ? '+' : '';
+    return (
+      `${base} That is too low a trigger rate to attribute the measured net ${sign}${netDelta}-task difference ` +
+      'to the skill — it reads as not exercised on this task set, not as evidence of an effect.'
+    );
+  }
+  return `${base} The trigger rate is high enough that the measured effect can plausibly be attributed to the skill.`;
+}
+
+/** Section 6: any conditional signal, explicitly labelled hypothesis, not
+ *  finding (design §6 section 6). Omitted entirely without a caller-supplied
+ *  pattern — nothing here computes one (plan work item 4: "never fabricate a
+ *  pattern"). */
+function renderPattern(narrative: ReportNarrative | undefined): string | null {
+  const pattern = narrative?.pattern;
+  if (!pattern) return null;
+  const lines = [`**Hypothesis, not finding:** ${pattern.text}`];
+  if (pattern.evidence) lines.push('', `> ${pattern.evidence}`);
+  return lines.join('\n');
+}
+
+/** Section 7: at most three concrete edits — again caller-supplied or
+ *  omitted, never invented by the renderer (design §6 section 7). */
+function renderChanges(narrative: ReportNarrative | undefined): string | null {
+  const changes = narrative?.changes;
+  if (!changes || changes.length === 0) return null;
+  return changes.slice(0, 3).map((c) => `- ${c}`).join('\n');
+}
+
+/** Section 8: one model, one agent, n tasks, one domain — and what it does
+ *  not tell you. */
+function renderScope(fields: ReportFields): string {
+  return (
+    `This measured one agent configuration — ${fields.agent} running ${fields.model} — on ${fields.n} tasks in ` +
+    `the ${fields.domain} domain, one pinned skill version. It does not tell you how \`${fields.skill}\` performs ` +
+    'on other domains, other agents, other models, or at a larger sample size.'
+  );
+}
+
+/** Section 9: the report's own URL (when known), the exact rerun command,
+ *  the per-task table's location, and the invitation to substitute a
+ *  reader's own task set. */
+function renderReproduce(report: CapabilityReport): string {
+  const lines: string[] = [];
+  if (report.links.reportUrl) lines.push(`Report: ${report.links.reportUrl}`);
+  lines.push(`Rerun: \`${report.links.rerunCommand}\``);
+  lines.push('Per-task outcomes: `data/per-task.md`');
+  lines.push(`Raw data: ${report.links.dataPaths.join(', ')}`);
+  lines.push('Substitute your own task set with the same command to check this against your own repository.');
+  return lines.join('\n\n');
+}
+
+/** Section 10: revise and reply; re-measured on freshly drawn tasks not used
+ *  to derive this diagnosis (design §6 section 10). */
+function renderReevalOffer(fields: ReportFields): string {
+  return (
+    `If you revise \`${fields.skill}\` in response to this, reply and we will re-measure it — on freshly drawn ` +
+    'tasks not used to derive this diagnosis, so the re-evaluation checks the change rather than fitting what ' +
+    'we already showed you.'
+  );
+}
+
+/** The public capability report (design §6): narrative only — the card
+ *  carries the figures (capability-card.ts), and this renderer never repeats
+ *  the receipt's full figure block. Eleven sections in order; §3 (cohort
+ *  table), §6 (pattern), and §7 (changes) are omitted entirely, rather than
+ *  rendered empty, when the caller supplied no cohort or narrative — the
+ *  renderer never invents a cohort, a pattern, or a change. The null variant
+ *  (§6.1 — the primary case, roughly 4 in 5 reports) is a content branch
+ *  inside the title, result, and trigger sections, not a separate
+ *  structure; §6.2 (degrading) stays deferred — a negative net delta falls
+ *  through the same generic branch as any other non-null effect, with no
+ *  degrading-specific language drafted. */
 export function renderCapabilityReportMd(report: CapabilityReport): string {
-  return [
-    `# ${report.skill} — capability report`,
-    '',
-    renderReceiptMd(report.receipt),
-    '## Task set',
-    '',
-    renderTaskSetIdentity(report.taskSetIdentity),
-    '',
-    '## Per-task outcomes',
-    '',
-    renderPerTaskTable(report.perTask),
-    '',
-    '## Reproduce',
-    '',
-    '```',
-    `rerun: ${report.links.rerunCommand}`,
-    `data:  ${report.links.dataPaths.join(', ')}`,
-    '```',
-    '',
-  ].join('\n');
+  if (report.cohort) validateCohort(report.cohort);
+
+  const sections: string[] = [`# ${renderTitle(report)}`, '', renderOpener(report.fields), ''];
+
+  if (report.cohort) {
+    sections.push('## Cohort', '', renderCohortTable(report.cohort), '');
+  }
+
+  sections.push('## Result', '', renderResult(report), '');
+  sections.push('## Where it did not load', '', renderTriggerSection(report), '');
+
+  const pattern = renderPattern(report.narrative);
+  if (pattern) sections.push('## Pattern worth testing', '', pattern, '');
+
+  const changes = renderChanges(report.narrative);
+  if (changes) sections.push('## What we would change', '', changes, '');
+
+  sections.push('## Scope', '', renderScope(report.fields), '');
+  sections.push('## Reproduce', '', renderReproduce(report), '');
+  sections.push('## Re-evaluation', '', renderReevalOffer(report.fields), '');
+
+  // Footer (design §6 section 11): exactly this one line, nothing further —
+  // no closing neutrality claim (design §6: a self-asserted neutrality claim
+  // is the unverifiable-assertion class this product exists to replace).
+  sections.push('Evaluated by [Jinn](https://jinn.network).', '');
+
+  return sections.join('\n');
+}
+
+/** The per-task outcome table as its own markdown file (plan work item 4:
+ *  "The per-task table moves into `data/` as a generated markdown file
+ *  rather than the report body"). `render-report.ts` (work item 5) writes
+ *  this to `data/per-task.md`; the report links to it (§9) rather than
+ *  containing it. */
+export function renderPerTaskTableMd(report: CapabilityReport): string {
+  return [`# ${report.skill} — per-task outcomes`, '', renderPerTaskTable(report.perTask), ''].join('\n');
 }
 
 /** A plain, non-judgmental one-line summary for the badge (§4.1: "the badge
