@@ -6976,3 +6976,13 @@ decided once rather than negotiated at integration.
 
 *Raised:* Task 19 implementation (2026-07-31).
 *Disposition:* blocking for Gate C7 until Task 20 session-host bridge. `bin.ts` process entry must not inject `captureSigner` (surface test). Adapter spawned `jinn-plugin-runtime serve --role session` which exits without a host-injected signer. Unit tests used FakeClient and did not catch this. Task 20 must add a separate session-host composition entry that injects a local-only signer and retarget `spawn_session_client`.
+
+**F-C7-T20-1 — Session-host composition entry injects local captureSigner (F-C4-T13-2).**
+
+*Raised / closed:* Task 20 (2026-08-01).
+*Disposition:* **built.** `bin.ts` process entry still never injects `captureSigner`. Separate host entry `jinn-plugin-runtime-session` (`session-host.ts`) loads/creates an owner-only Ed25519 key under `$JINN_PLUGIN_HOME/capture-signer/` via `loadOrCreateLocalCaptureSigner`, then calls `main(..., { captureSigner })`. Adapter `spawn_session_client` retargets to the sibling session bin. Gate C7 rehearsal green through seed → doctor → live corpus moment → disable/remove.
+
+*Residuals (do not block C7 close; for wave-1 / C8 awareness):*
+- Capture signer is **local rehearsal / machine custody**, not production HSM or OS keychain.
+- Live chat inherits host inference auth when present (not a CI guarantee).
+- Published-registry npm acquisition remains C8; rehearsal uses packed tarballs.
