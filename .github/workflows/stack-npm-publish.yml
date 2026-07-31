@@ -65,12 +65,23 @@ jobs:
         id: guard
         shell: bash
         run: |
-          set -euo pipefail
-          if node .github/scripts/publish-stack.mjs --mode canary --sha "${JINN_BUILD_COMMIT}" --dry-run; then
+          set +e
+          node .github/scripts/publish-stack.mjs --mode canary --sha "${JINN_BUILD_COMMIT}" --dry-run
+          status=$?
+          set -e
+          # Exit code 3 is publish-stack.mjs's dedicated signal for "zero platform
+          # packages discovered on this ref" (EMPTY_PACKAGE_SET_EXIT_CODE) — the only
+          # case this guard treats as absence. Every other non-zero exit (version skew,
+          # a dependency cycle, an invalid manifest) is a genuine planning failure and
+          # must fail this job, never be swallowed as "nothing to publish".
+          if [ "${status}" -eq 0 ]; then
             echo "present=true" >> "${GITHUB_OUTPUT}"
-          else
+          elif [ "${status}" -eq 3 ]; then
             echo "::notice::No platform package set on this ref; nothing to publish."
             echo "present=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::error::publish-stack.mjs failed to plan (exit ${status}); see the log above"
+            exit "${status}"
           fi
 
       - name: Verify the six platform tree CI workflows
@@ -224,11 +235,31 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
+      - name: Guard on an empty platform package set
+        id: guard
+        shell: bash
+        run: |
+          set +e
+          node .github/scripts/publish-stack.mjs --mode canary --sha "${GITHUB_SHA}" --dry-run
+          status=$?
+          set -e
+          if [ "${status}" -eq 0 ]; then
+            echo "present=true" >> "${GITHUB_OUTPUT}"
+          elif [ "${status}" -eq 3 ]; then
+            echo "::notice::No platform package set on this ref; nothing to register."
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::error::publish-stack.mjs failed to plan (exit ${status}); see the log above"
+            exit "${status}"
+          fi
       - name: Verify the publication surface
+        if: steps.guard.outputs.present == 'true'
         run: node --test .github/scripts/stack-publication-surface.test.mjs
       - name: Generate the registration list
+        if: steps.guard.outputs.present == 'true'
         run: node .github/scripts/stack-trusted-publishers.mjs --out "${RUNNER_TEMP}/registrations"
       - uses: actions/upload-artifact@v4
+        if: steps.guard.outputs.present == 'true'
         with:
           name: stack-trusted-publishers
           path: ${{ runner.temp }}/registrations
@@ -245,14 +276,34 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
+      - name: Guard on an empty platform package set
+        id: guard
+        shell: bash
+        run: |
+          set +e
+          node .github/scripts/publish-stack.mjs --mode canary --sha "${GITHUB_SHA}" --dry-run
+          status=$?
+          set -e
+          if [ "${status}" -eq 0 ]; then
+            echo "present=true" >> "${GITHUB_OUTPUT}"
+          elif [ "${status}" -eq 3 ]; then
+            echo "::notice::No platform package set on this ref; nothing to build a profile root from."
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::error::publish-stack.mjs failed to plan (exit ${status}); see the log above"
+            exit "${status}"
+          fi
       - name: Build the static profile root
+        if: steps.guard.outputs.present == 'true'
         run: node .github/scripts/build-profile-root.mjs --out "${RUNNER_TEMP}/profile-root" --commit "${GITHUB_SHA}"
       - name: Sign the profile manifest
+        if: steps.guard.outputs.present == 'true'
         env:
           JINN_PROFILE_MANIFEST_SIGNING_KEY: ${{ secrets.JINN_PROFILE_MANIFEST_SIGNING_KEY }}
           JINN_PROFILE_MANIFEST_KEY_ID: ${{ vars.JINN_PROFILE_MANIFEST_KEY_ID }}
         run: node .github/scripts/sign-profile-manifest.mjs --root "${RUNNER_TEMP}/profile-root"
       - uses: actions/upload-artifact@v4
+        if: steps.guard.outputs.present == 'true'
         with:
           name: jinn-profile-root
           path: ${{ runner.temp }}/profile-root

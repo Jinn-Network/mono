@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { packWave, publishWave, verifyCoherentSet } from './publish-stack-run.mjs';
+import { packWave, publishWave, registryDistTag, verifyCoherentSet } from './publish-stack-run.mjs';
 
 const SHA = 'c'.repeat(40);
 
@@ -131,23 +131,16 @@ test('packWave rejects a tarball whose packed identity disagrees with the plan',
   }
 });
 
-function registryExec(state) {
-  return (command, args) => {
-    if (args[0] === 'view') {
-      const [, spec, field] = args;
-      const record = state.get(spec);
-      if (!record) return { status: 1, stdout: '', stderr: 'npm error code E404\nnpm error 404 Not Found' };
-      if (field === 'dist.integrity') return { status: 0, stdout: JSON.stringify(record.integrity), stderr: '' };
-      return { status: 0, stdout: JSON.stringify(record.distTag), stderr: '' };
-    }
-    if (args[0] === 'publish') {
-      const spec = args.__spec;
-      state.set(spec, { integrity: args.__integrity, distTag: args[args.indexOf('--tag') + 1] });
-      return { status: 0, stdout: '', stderr: '' };
-    }
-    return { status: 0, stdout: '', stderr: '' };
-  };
-}
+test('registryDistTag treats empty stdout on a zero exit as "tag not set", not invalid JSON', () => {
+  // `npm view <published-package> dist-tags.<unset-tag> --json` exits 0 with empty stdout
+  // when the package exists but that dist-tag was never applied — a real, verified
+  // registry behavior distinct from E404 (package/version not found).
+  const actual = registryDistTag('@jinn-network/trust-core', 'canary', {
+    exec: () => ({ status: 0, stdout: '', stderr: '' }),
+    repoRoot: '/tmp',
+  });
+  assert.equal(actual, null);
+});
 
 test('publishWave skips an artifact already published with matching integrity', async () => {
   const artifacts = [{ name: '@jinn-network/trust-core', spec: '@jinn-network/trust-core@0.1.0', tarball: '/tmp/a.tgz', integrity: 'sha512-AAA' }];
@@ -204,6 +197,22 @@ test('publishWave aborts the whole wave when a preflight integrity disagrees', a
     /preflight integrity mismatch for @jinn-network\/trust-core@0\.1\.0: local sha512-AAA, registry sha512-DIFFERENT/,
   );
   assert.deepEqual(published, [], 'a preflight mismatch must abort before the first publish');
+});
+
+test('publishWave rejects an unset dist-tag with a clear message, not a JSON parse crash', async () => {
+  const artifacts = [{ name: '@jinn-network/trust-core', spec: '@jinn-network/trust-core@0.1.0', tarball: '/tmp/a.tgz', integrity: 'sha512-AAA' }];
+  await assert.rejects(
+    publishWave(artifacts, {
+      distTag: 'canary',
+      repoRoot: '/tmp',
+      exec: (command, args) => {
+        if (args[0] === 'view' && args[2] === 'dist.integrity') return { status: 0, stdout: '"sha512-AAA"', stderr: '' };
+        if (args[0] === 'view') return { status: 0, stdout: '', stderr: '' };
+        return { status: 0, stdout: '', stderr: '' };
+      },
+    }),
+    /preflight canary mismatch for @jinn-network\/trust-core: expected 0\.1\.0, got <missing>/,
+  );
 });
 
 test('publishWave rejects a dist-tag that did not move to this version', async () => {

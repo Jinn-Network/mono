@@ -81,8 +81,13 @@ function viewJson(args, { exec, npmCommand = 'npm', repoRoot, attempts = 1, dela
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const result = exec(npmCommand, args, repoRoot);
     if (result.status === 0) {
+      const stdout = result.stdout.trim();
+      // `npm view <published-package> dist-tags.<unset-tag> --json` exits 0 with empty
+      // stdout when the package exists but the field is unset — distinct from the
+      // package-not-found case (E404), but the same "nothing there" signal to the caller.
+      if (stdout === '') return null;
       try {
-        return JSON.parse(result.stdout);
+        return JSON.parse(stdout);
       } catch (error) {
         throw new Error(`registry returned invalid JSON for ${label}: ${error?.message ?? String(error)}`);
       }

@@ -40,8 +40,19 @@ export function parsePublishArgs(argv) {
   return parsed;
 }
 
+// Exit code reserved for "the platform package set is genuinely absent from this ref" —
+// the one case where the canary workflow's existence guard is meant to no-op instead of
+// failing the job. Every other planning failure (version skew, a dependency cycle, a
+// malformed manifest) throws a plain Error and must fail the job loudly.
+export const EMPTY_PACKAGE_SET_EXIT_CODE = 3;
+
+export class EmptyPackageSetError extends Error {}
+
 export function buildPublishPlan({ repoRoot, mode, sha, releaseTag }) {
   const packages = discoverStackPackages(repoRoot);
+  if (packages.length === 0) {
+    throw new EmptyPackageSetError('no platform packages found under the six stack roots');
+  }
   const baseVersions = new Set(packages.map((pkg) => pkg.manifest.version));
   if (baseVersions.size !== 1) {
     throw new Error(
@@ -82,7 +93,12 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       await runPublish(plan, args);
     }
   } catch (error) {
-    console.error(error?.message ?? String(error));
-    process.exitCode = 1;
+    if (error instanceof EmptyPackageSetError) {
+      console.log(error.message);
+      process.exitCode = EMPTY_PACKAGE_SET_EXIT_CODE;
+    } else {
+      console.error(error?.message ?? String(error));
+      process.exitCode = 1;
+    }
   }
 }

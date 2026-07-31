@@ -24,6 +24,28 @@ test('the existence guard runs before any publish step', () => {
   assert.ok(guardAt < publishAt, 'the existence guard must precede the publish step');
 });
 
+test('the existence guard distinguishes a genuinely empty package set from every other planning failure', () => {
+  const occurrences = workflow.split('name: Guard on an empty platform package set').length - 1;
+  assert.equal(occurrences, 3, 'the publish, registrations, and profile-root jobs must each guard on the package set');
+  // Every guard occurrence must branch on the dedicated empty-set exit code (3) and
+  // re-exit on any other non-zero status, rather than treating all failures as absence.
+  const guardBlockCount = (workflow.match(/elif \[ "\$\{status\}" -eq 3 \]/g) ?? []).length;
+  assert.equal(guardBlockCount, 3, 'every guard must special-case exit code 3, not swallow every non-zero exit as absence');
+  assert.doesNotMatch(workflow, /if node \.github\/scripts\/publish-stack\.mjs/, 'the guard must not conflate any non-zero exit with absence');
+});
+
+test('the registration and profile-root jobs are gated on the same presence signal as the publish job', () => {
+  const registrationsAt = workflow.indexOf('name: Trusted-publisher registration list');
+  const profileRootAt = workflow.indexOf('name: Profile root artifact');
+  assert.ok(registrationsAt > -1 && profileRootAt > -1);
+  const registrationsBlock = workflow.slice(registrationsAt, profileRootAt);
+  const profileRootBlock = workflow.slice(profileRootAt);
+  for (const block of [registrationsBlock, profileRootBlock]) {
+    assert.match(block, /name: Guard on an empty platform package set/);
+    assert.match(block, /if: steps\.guard\.outputs\.present == 'true'/);
+  }
+});
+
 test('the tree CI gate names all six platform CI workflows', () => {
   for (const name of ['Evidence CI', 'Trust CI', 'Task Execution CI', 'Record Discovery CI', 'Marketplace CI', 'Benchmarking CI']) {
     assert.ok(workflow.includes(name), `the tree CI gate must name "${name}"`);
