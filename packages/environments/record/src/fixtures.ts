@@ -15,6 +15,18 @@ export interface AdversarialManifest {
   readonly fixtures: readonly AdversarialManifestEntry[];
 }
 
+/**
+ * The published JSON Schema, read from this package's own `schemas/` directory. It lives
+ * here rather than in the parity test so that exactly ONE file in the package touches the
+ * filesystem — the source-boundary guard asserts that literally, and the custody story stays
+ * simple: one reader, and it only ever opens artifacts this package itself ships.
+ */
+export async function loadPublishedSchema(): Promise<Record<string, unknown>> {
+  return JSON.parse(
+    await readFile(new URL("../schemas/environment.schema.json", import.meta.url), "utf8"),
+  ) as Record<string, unknown>;
+}
+
 /** Resolves a path inside the fixture corpus shipped by this package. */
 export function environmentFixtureUrl(relativePath: string): URL {
   if (relativePath.startsWith("/") || relativePath.split("/").includes("..")) {

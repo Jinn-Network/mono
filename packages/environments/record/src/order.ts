@@ -1,5 +1,5 @@
 /**
- * Deterministic UTF-16 code-unit ordering.
+ * Locale-free UTF-16 code-unit ordering.
  *
  * `String.prototype.localeCompare` depends on the host locale and the bundled ICU data, so
  * it must never decide the order of anything that reaches canonical bytes. It is banned in

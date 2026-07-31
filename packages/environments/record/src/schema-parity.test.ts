@@ -1,13 +1,10 @@
-import { readFile } from "node:fs/promises";
-
 import Ajv2020 from "ajv/dist/2020.js";
 import { describe, expect, test } from "vitest";
 
-import { loadGoldenJson, loadInvalidJson } from "./fixtures.js";
+import { loadGoldenJson, loadInvalidJson, loadPublishedSchema } from "./fixtures.js";
 import { ENVIRONMENT_RECORD_SCHEMA_ID } from "./identifiers.js";
 
-const published = async (): Promise<Record<string, unknown>> =>
-  JSON.parse(await readFile(new URL("../schemas/environment.schema.json", import.meta.url), "utf8"));
+const published = loadPublishedSchema;
 
 const validator = async () => new Ajv2020({ strict: false }).compile(await published());
 

@@ -20,6 +20,10 @@ import {
 } from "./schema.js";
 
 const GOLDEN: readonly GoldenName[] = ["imported", "tier-1", "extension"];
+
+/** Field names a sealed record must not carry: staleness is derived, never stored (§4.3). */
+const ABSENT_MUTABLE_STATUS_KEYS = ["status", "health", "expiresAt", "verified"]; // not one may appear
+
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
 /**
@@ -67,7 +71,7 @@ export function describeEnvironmentRecordConformance(): void {
       test("the record declares a test scope and no mutable status", async () => {
         const record = parseEnvironmentRecord(await loadGoldenBytes(name));
         expect(record.invocations.test.length).toBeGreaterThan(0);
-        for (const key of ["status", "health", "expiresAt", "verified"]) {
+        for (const key of ABSENT_MUTABLE_STATUS_KEYS) {
           expect(Object.hasOwn(record, key), `${key} must not exist on a sealed record`).toBe(false);
         }
       });
