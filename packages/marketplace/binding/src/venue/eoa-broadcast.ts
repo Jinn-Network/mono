@@ -15,7 +15,7 @@
 // `input.safeAddress` is the creator of record, and this port CHECKS it against the wallet's own
 // account rather than assuming the caller got it right.
 import { TaskExecutionError } from "@jinn-network/task-execution-backend";
-import { decodeEventLog, type PublicClient, type WalletClient } from "viem";
+import { decodeEventLog, decodeFunctionData, type Hex, type PublicClient, type WalletClient } from "viem";
 import { JINN_ROUTER_V3_ABI } from "../abis/jinn-router-v3.js";
 import type { PostingOutcome } from "../broadcast-intent.js";
 import type { SafeBroadcastPort } from "../posting.js";
@@ -29,7 +29,27 @@ export interface EoaBroadcastOptions {
   readonly receiptTimeoutMs?: number;
 }
 
-function decodeTaskCreatedTaskId(receipt: TransactionReceipt, router: string): bigint | undefined {
+/**
+ * The task-digest anchor out of the `createTask` calldata about to be broadcast, or undefined when
+ * the calldata is not a `createTask` this ABI describes. The anchor is what makes the receipt
+ * decode subject-specific: without it, "the first `TaskCreated` from this address" is whatever the
+ * transaction happened to emit, and that taskId is what `resolve` writes into the WAL.
+ */
+function createTaskAnchor(data: Hex): Hex | undefined {
+  try {
+    const decoded = decodeFunctionData({ abi: JINN_ROUTER_V3_ABI, data });
+    return decoded.functionName === "createTask" ? decoded.args[0] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function decodeTaskCreatedTaskId(
+  receipt: TransactionReceipt,
+  router: string,
+  creator: string,
+  anchor: Hex | undefined,
+): bigint | undefined {
   for (const log of receipt.logs) {
     if (log.address.toLowerCase() !== router.toLowerCase()) continue;
     let decoded;
@@ -38,7 +58,14 @@ function decodeTaskCreatedTaskId(receipt: TransactionReceipt, router: string): b
     } catch {
       continue; // a router log this ABI does not describe is not an error, just not ours
     }
-    if (decoded.eventName === "TaskCreated") return decoded.args.taskId;
+    if (decoded.eventName !== "TaskCreated") continue;
+    if (decoded.args.creator?.toLowerCase() !== creator.toLowerCase()) continue;
+    // A calldata shape this ABI cannot decode carries no anchor to check against; the creator leg
+    // still holds, and the missing-event report below still fires if nothing matches.
+    if (anchor !== undefined && decoded.args.taskCidDigest?.toLowerCase() !== anchor.toLowerCase()) {
+      continue;
+    }
+    return decoded.args.taskId;
   }
   return undefined;
 }
@@ -93,12 +120,18 @@ export function createEoaBroadcastPort(
           throw new Error(`JinnRouterV3.createTask reverted (txHash=${hash})`);
         }
 
-        const taskId = decodeTaskCreatedTaskId(receipt, input.to);
+        const taskId = decodeTaskCreatedTaskId(
+          receipt,
+          input.to,
+          account.address,
+          createTaskAnchor(input.data),
+        );
         if (taskId === undefined) {
           throw new TaskExecutionError("protocol-violation", {
             detail:
-              `createTask succeeded but the router emitted no TaskCreated event (txHash=${hash}) `
-              + "-- the post cannot be keyed, so the intent stays unresolved for the recovery scan",
+              `createTask succeeded but the router emitted no TaskCreated event for this account and `
+              + `task anchor (txHash=${hash}) -- the post cannot be keyed, so the intent stays `
+              + "unresolved for the recovery scan",
           });
         }
         return { taskId, txHash: hash };
