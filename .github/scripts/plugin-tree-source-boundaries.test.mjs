@@ -251,7 +251,10 @@ test('undeclared third-party runtime dependencies and malformed versions are rej
     undeclaredRuntimeDependencies({ peerDependencies: { '@noble/hashes': '1.0.0' } }),
     ['peerDependencies:@noble/hashes'],
   );
-  for (const pkg of PERMITTED_PACKAGES.filter((name) => name !== 'zod')) {
+  const undeclaredPermittedPackages = PERMITTED_PACKAGES.filter(
+    (name) => name !== 'zod' && !(name in APPROVED_RUNTIME_DEPENDENCIES),
+  );
+  for (const pkg of undeclaredPermittedPackages) {
     assert.deepEqual(
       undeclaredRuntimeDependencies({ dependencies: { [pkg]: '1.0.0' } }),
       [`dependencies:${pkg}`],
