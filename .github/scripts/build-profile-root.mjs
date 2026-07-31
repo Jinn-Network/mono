@@ -83,6 +83,16 @@ export function buildProfileRoot({ repoRoot, outDir, commit }) {
       const absolute = join(repoRoot, pkg.directory, source);
       if (!existsSync(absolute) || !statSync(absolute).isDirectory()) continue;
       for (const file of walkFiles(absolute, source, [])) {
+        // A `.sha256` sidecar (e.g. profile.sha256 next to profile.json) is not itself
+        // a self-identifying document -- it names no $id/profile of its own. Its sibling
+        // document can be served at a declared-identifier path that differs from its
+        // on-disk directory (see declaredIdentifier below), which would otherwise strand
+        // the sidecar under the old directory-derived path while the document it digests
+        // moves elsewhere -- a verifier resolving the document and reaching for the
+        // conventional adjacent .sha256 would 404. manifest.json's per-document sha256
+        // field is the digest surface for every served document, sidecar or not, so the
+        // sidecar file itself is simply not part of the served profile root.
+        if (file.servedPath.endsWith('.sha256')) continue;
         const bytes = readFileSync(file.absolutePath);
         const servedPath = declaredIdentifier(file.servedPath, bytes) ?? file.servedPath;
         const claimed = claims.get(servedPath);

@@ -137,6 +137,45 @@ test('a record-discovery facts profile document is served at its declared "profi
   }
 });
 
+test('a .sha256 sidecar next to a remapped document is dropped from the profile root, not stranded at the old path', () => {
+  // Regression: profile.json remaps to its declared "profile" identifier
+  // (a different top-level path than its on-disk directory), but its sibling
+  // profile.sha256 names no identifier of its own and would otherwise stay
+  // behind at the pre-remap, directory-derived path -- a verifier resolving
+  // the remapped document and reaching for the conventional adjacent .sha256
+  // would 404. manifest.json's per-document sha256 field is the sole digest
+  // surface; the sidecar file itself is simply not served.
+  const root = mkdtempSync(join(tmpdir(), 'jinn-profile-root-'));
+  const packageDir = join(root, 'packages/task-execution/profiles');
+  mkdirSync(join(packageDir, 'profiles/task-profiles/repository-work/1.0'), { recursive: true });
+  writeFileSync(join(packageDir, 'package.json'), `${JSON.stringify({
+    name: '@jinn-network/task-execution-profiles',
+    version: '0.1.0',
+    publishConfig: { access: 'public' },
+    files: ['dist/', 'profiles/'],
+  }, null, 2)}\n`, 'utf8');
+  writeFileSync(
+    join(packageDir, 'profiles/task-profiles/repository-work/1.0/profile.json'),
+    JSON.stringify({ profile: 'https://jinn.network/task-profiles/repository-work/1.0' }),
+    'utf8',
+  );
+  writeFileSync(
+    join(packageDir, 'profiles/task-profiles/repository-work/1.0/profile.sha256'),
+    'sha256:829c28d91e324098739bcd6dfd3e32f7c6902efd737333c8f5659dc354a0475a',
+    'utf8',
+  );
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
+  try {
+    const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
+    assert.deepEqual(manifest.documents.map((d) => d.path), ['task-profiles/repository-work/1.0']);
+    assert.equal(existsSync(join(outDir, 'profiles/task-profiles/repository-work/1.0/profile.sha256')), false);
+    assert.equal(existsSync(join(outDir, 'task-profiles/repository-work/1.0.sha256')), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
 test('a fixture that reuses a "profile" value as test data is never treated as self-identifying', () => {
   const root = mkdtempSync(join(tmpdir(), 'jinn-profile-root-'));
   const packageDir = join(root, 'packages/task-execution/profiles');
