@@ -1251,7 +1251,7 @@ git commit -m "feat(evidence-trajectory): OTLP-shaped span schema with a fixed a
 - Consumes: `topLevelRecordSchema` (this task), `SpanSchema`/`SPAN_KIND`/`STATUS_CODE` (Task 6), `deriveTraceId`/`deriveSpanId` (Task 5), identifiers (Task 4), sealing (Task 3).
 - Produces: `TrajectoryRecordSchema`; `type TrajectoryRecord`; `parseTrajectory(bytes: Uint8Array): TrajectoryRecord`; `sealTrajectory(document: unknown): SealedRecord`; `topLevelRecordSchema<Shape>(shape)`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/schema.test.ts`:
 
@@ -1371,12 +1371,12 @@ describe("trajectory record schema", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trajectory && yarn test`
 Expected: FAIL — `Failed to resolve import "./schema.js"`.
 
-- [ ] **Step 3: Write the extension-key discipline**
+- [x] **Step 3: Write the extension-key discipline**
 
 `src/extensions.ts`:
 
@@ -1411,7 +1411,7 @@ export function topLevelRecordSchema<const Shape extends z.ZodRawShape>(shape: S
 }
 ```
 
-- [ ] **Step 4: Write the record schema**
+- [x] **Step 4: Write the record schema**
 
 `src/schema.ts`:
 
@@ -1538,12 +1538,12 @@ export function sealTrajectory(document: unknown): SealedRecord {
 }
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trajectory && yarn test && yarn typecheck`
 Expected: PASS (11 new tests).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/evidence/trajectory/src
