@@ -21,3 +21,9 @@ export {
   statementDigest,
 } from "./source-commitment.js";
 export type { UpstreamIdentity } from "./source-commitment.js";
+export {
+  ENVIRONMENT_RECORD_EXTENSION_KEY,
+  buildEnvironmentRecordExtension,
+  readEnvironmentRecordExtension,
+} from "./environment-extension.js";
+export type { EnvironmentRecordExtension } from "./environment-extension.js";
