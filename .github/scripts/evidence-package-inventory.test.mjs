@@ -25,6 +25,7 @@ const EVIDENCE_PACKAGES = [
   ['retrieval', '@jinn-network/evidence-retrieval'],
   ['contribution', '@jinn-network/evidence-contribution'],
   ['trajectory', '@jinn-network/evidence-trajectory'],
+  ['trace-decode', '@jinn-network/evidence-trace-decode'],
 ];
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -67,6 +68,12 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     optionalDependencies: [],
     peerDependencies: [],
   }],
+  ['trace-decode', {
+    dependencies: ['@jinn-network/evidence-trajectory'],
+    devDependencies: [],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
 ]);
 
 function readPackage(directory) {
@@ -101,8 +108,8 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;
 }
 
-test('the evidence package inventory is explicit and has fifteen manifests', () => {
-  assert.equal(EVIDENCE_PACKAGES.length, 15);
+test('the evidence package inventory is explicit and has sixteen manifests', () => {
+  assert.equal(EVIDENCE_PACKAGES.length, 16);
   for (const [directory, expectedName] of EVIDENCE_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);
@@ -146,7 +153,7 @@ test('evidence package Jinn dependencies and portal resolutions match the approv
 });
 
 test('testing entrypoints declare Vitest as an exact optional peer', () => {
-  for (const directory of ['derivation', 'retrieval', 'trajectory']) {
+  for (const directory of ['derivation', 'retrieval', 'trajectory', 'trace-decode']) {
     const manifest = readPackage(directory);
     assert.deepEqual(manifest.peerDependencies, { vitest: '^4.1.8' });
     assert.deepEqual(manifest.peerDependenciesMeta, {

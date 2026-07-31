@@ -1,0 +1,67 @@
+{
+  "name": "@jinn-network/evidence-trace-decode",
+  "version": "0.1.0",
+  "description": "Format-keyed decoders from digest-bound native-trace bytes to Trajectory record spans.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/evidence/trace-decode"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+    },
+    "./fixtures/*": "./fixtures/*"
+  },
+  "files": [
+    "dist/",
+    "fixtures/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "generate:fixtures": "yarn build && node scripts/generate-fixtures.mjs --write",
+    "check:fixtures": "yarn build && node scripts/generate-fixtures.mjs",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/evidence-trajectory": "0.1.0"
+  },
+  "peerDependencies": {
+    "vitest": "^4.1.8"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/evidence-trajectory": "portal:../trajectory",
+    "vite": "6.4.3"
+  }
+}

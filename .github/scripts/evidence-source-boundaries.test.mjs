@@ -10,7 +10,7 @@ const evidenceDirectories = [
   'protocol', 'repository', 'repository-oci', 'repository-ipfs', 'discovery',
   'catalog-sqlite', 'execution-recorder', 'attestation-issuer', 'derivation',
   'publication', 'local-runtime', 'execution-recorder-bridge', 'retrieval',
-  'contribution', 'trajectory',
+  'contribution', 'trajectory', 'trace-decode',
 ];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
