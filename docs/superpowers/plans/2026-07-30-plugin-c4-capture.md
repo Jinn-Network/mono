@@ -1370,9 +1370,7 @@ The span model, stated once so the tests read as assertions about a decision rat
 - **No message content anywhere** (program finding F5). Each span carries `jinn.trajectory.source.ordinal` — the 0-based line ordinal in the feed — and a consumer resolves the text from the digest-bound native trace. This is also what makes C6's index-time sensitivity exclusion tractable: it excludes by ordinal.
 - **Attributes are sorted by key** under `compareCodeUnitStrings` (program finding F4; C1's `SpanSchema` rejects any other order), which is what makes byte-for-byte determinism checkable.
 
-- [ ] **Step 1: Write the failing test**
-
-`plugin/runtime/src/capture/spans.test.ts`:
+- [x] **Step 1: Write the failing test**
 
 ```ts
 import { readFile } from "node:fs/promises";
@@ -1534,17 +1532,11 @@ describe("buildTrajectorySpans", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
-
-```bash
-cd plugin/runtime && yarn test src/capture/spans.test.ts
-```
+- [x] **Step 2: Run the test to verify it fails**
 
 Expected: FAIL — `Failed to resolve import "./spans.js"`.
 
-- [ ] **Step 3: Write the implementation**
-
-`plugin/runtime/src/capture/spans.ts`:
+- [x] **Step 3: Write the implementation**
 
 ```ts
 // SPDX-License-Identifier: Apache-2.0
@@ -1709,20 +1701,11 @@ export function buildTrajectorySpans(input: BuildTrajectorySpansInput): readonly
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
-
-```bash
-cd plugin/runtime && yarn test src/capture/spans.test.ts && yarn typecheck
-```
+- [x] **Step 4: Run the test to verify it passes**
 
 Expected: PASS (12 tests).
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add plugin/runtime/src
-git commit -m "feat(plugin-runtime): build trajectory spans from the live session feed"
-```
+- [x] **Step 5: Commit**
 
 ---
 
