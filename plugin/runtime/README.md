@@ -12,8 +12,10 @@ read. Capabilities register against a lifecycle (`start` / `health` / `stop`) an
 contribute health checks in the `{ name, ok, detail, remedy }` shape the host adapter's
 doctor renders.
 
-**stdout is reserved** for the MCP stdio transport. Every diagnostic goes to stderr; the
-only stdout write in this package is the `health` subcommand's single JSON line.
+**stdout contract:** `serve` writes nothing to stdout — stdout stays empty while the
+runtime waits for shutdown. The only deliberate stdout writes are the explicit CLI outputs
+`--version` (one version line) and `health` (one JSON report line). Every diagnostic goes
+to stderr.
 
 The binary is `jinn-plugin-runtime`. The host adapter acquires it by exact pin.
 
