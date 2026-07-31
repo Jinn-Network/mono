@@ -5388,3 +5388,52 @@ re-reads the task's `TaskCreated` log via `getTransactionReceipt` per card per t
 
 Stopping at this boundary deliberately: the diagnosis needs one instrumented run, and a guess
 dressed as a fix would be worth less than a precise handoff.
+
+## Execution findings (2026-07-31, leg H — E39 diagnose→fix)
+
+### E39 cycles 1–3 — silent claim refusal, then profile-mismatch, then missing launcher (fixed)
+
+Instrumenting `WorkLoop.tick` outcomes (cycle 0) named the silent refusals immediately:
+
+1. **workKind** — legacy cards carried the raw `legacyManifestDigest` as `workKind`; resolved
+   against wiring by digest before any gate reads it (`cc02426a9`).
+2. **profile URI** — `synthesizeLegacyFactsCard` hardcoded a stale
+   `.../profiles/task-execution/repository-work/1.0`; switched to
+   `REPOSITORY_WORK_PROFILE_URI` (`28e62bc33`).
+3. **missing launcher** — e2e wires `harness: 'prediction-v1-baseline'`, but `ALL_LAUNCHERS`
+   only listed claude-code/codex/hermes/cursor. `buildLaunchers` returned `[]`,
+   `assembleCapabilities` filtered to empty `taskProfiles`, and `verifyPreclaim` kept declining
+   `profile-mismatch`. Added `predictionV1BaselineLauncher`, registered it, and aliased
+   `hermes-agent` → `hermes`.
+
+**Effect:** claim gate opens, claim broadcasts, `TaskAttemptCreated` fires.
+
+### E40 — anvil-fork `finalized` never covers the claim (fixed)
+
+On Anvil forks the `finalized` tag stays at the fork point while `latest` advances. Venue-base
+only depth-fell-back when `finalized == latest`; the stuck-behind shape left every post-fork
+claim permanently unfinalizable (`awaitFinalized` hung until timeout). Depth fallback now also
+fires when `latest - finalized > depthFallback`. The e2e mines 121 blocks after claim so the
+default 120-block floor can cover it.
+
+### E41 — `pipeline:submit-rejected:invalid-document` (**precisely located, handoff**)
+
+Final gate state after E39/E40:
+
+```
+daemon claimed task: requestId=0x9a7a… tx=0x31fa…
+[work] unreleased attempt for task 1 …: submit-rejected did not release the venue reservation
+{"component":"work","msg":"1 announced card(s) this tick",
+ "cards":[{"reason":"pipeline:submit-rejected:invalid-document"}]}
+```
+
+`readSealedDocuments` fetches the legacy `SignedTaskV1` bytes for both task and submission
+digests. `LocalTaskExecutionBackend.decodeAndSealCheck` requires sealed TEP Task + Submission
+(`sealTask` / `sealSubmission` byte-identity). A `SignedTaskV1` fails that check, submit rejects,
+the ledger abandons (then `already-engaged` forever via `INSERT OR IGNORE` — secondary).
+
+This is the residual of E32: projector-side Submission synthesis exists; **backend-side sealed
+TEP documents for the work loop do not**. Synthesizing new TEP bytes would also change
+`documentDigest`, which diverges from the `facts.taskDigest` already claimed on chain — a
+protocol-bridge ruling is required, not a silent cast. Next session owns that ruling + the
+abandon/re-admit seam for pre-claim abandons.

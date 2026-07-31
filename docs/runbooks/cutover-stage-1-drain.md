@@ -2,24 +2,17 @@
 
 Contract 10. Run in order. Do not deploy with step 2 unfinished.
 
-> **Do not run this runbook yet.** The final leg (2026-07-31) discharged every ruling: the bridge
-> synthesizes a Submission for legacy-posted tasks (E32), deliveries are signed with a real
-> executor key (E31), and the e2e gate now runs the full bootstrap and drives the projector into
-> stage-1 code (E37). The loop still does not close, and what remains is two named blockers rather
-> than a diffuse gap:
+> **Do not run this runbook yet.** Leg H (2026-07-31) closed E39 (claim now fires) and E40
+> (anvil-fork finality). The loop still does not settle. The remaining named blocker:
 >
-> - **E35** — `ObservationProjectionContext.dispatchContext` has no honest source. Nothing seals or
->   pins the descriptor: the pipeline builds it in memory and discards it, venue-base's
->   `submission_scopes` is revised-generation-only, and the engagement ledger has no field for it.
->   Unlike the Submission, spec §10 licenses no synthesis for this shape. **Needs a ruling of the
->   same kind E32 got.**
-> - **E36** — restoration claiming has no live path. Task 16 correctly retired discovery from
->   `watchForTasks()`, but its replacement was never wired: `main.ts` hardcodes
->   `archive: { since: async () => [] }` and the e2e never constructs a `WorkLoop`. The old door is
->   shut and the new one was never hung.
+> - **E41** — `pipeline:submit-rejected:invalid-document`. `readSealedDocuments` hands the
+>   legacy `SignedTaskV1` bytes to `LocalTaskExecutionBackend.submit`, which requires sealed TEP
+>   Task + Submission. Projector-side Submission synthesis (E32) does not produce backend-valid
+>   sealed documents, and inventing new TEP bytes would diverge from the on-chain
+>   `facts.taskDigest` already claimed. Needs a bridge ruling of the same kind E32 got.
 >
-> See `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md`. Step 4's gate cannot pass
-> until both land. The runbook is settled and ready for when they do.
+> See `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md` (leg H). Step 4's gate
+> cannot pass until E41 lands. The runbook is settled and ready for when it does.
 
 ## 1. Stop claiming (previous canary, no new build)
 
