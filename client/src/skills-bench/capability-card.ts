@@ -19,9 +19,8 @@
  * re-derives a number from raw outcomes.
  */
 import {
-  cohortRank, deriveCostOverhead, escapeXml, validateCohort, type CapabilityReport,
+  cohortRank, deriveCostOverhead, escapeXml, ordinal, validateCohort, type CapabilityReport,
 } from './capability-report.js';
-import { isLowTriggerRate } from './receipt.js';
 
 // ---------------------------------------------------------------------------
 // Palette — identical to renderBadgeSvg's five approved hexes (design §4:
@@ -102,29 +101,6 @@ function dividerEl(y: number): string {
   return `<line x1="${PAD}" y1="${y}" x2="${WIDTH - PAD}" y2="${y}" stroke="${BORDER}" stroke-width="1"/>`;
 }
 
-function ordinal(n: number): string {
-  const rem100 = n % 100;
-  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
-  switch (n % 10) {
-    case 1: return `${n}st`;
-    case 2: return `${n}nd`;
-    case 3: return `${n}rd`;
-    default: return `${n}th`;
-  }
-}
-
-/** The card face's `<sha>` (design §1) is the short form of `pin.json.commit`
- *  — NOT `fields.skillSha256` (the vendored-bytes content hash; a different
- *  identity). `ReportFields` carries no separate raw-commit field, but
- *  `skillSource` is built exactly as `${pin.source}@${pin.commit}` (see
- *  `buildReportFields`), so the commit is recoverable as the substring after
- *  the final `@`. */
-function shortCommit(skillSource: string): string {
-  const at = skillSource.lastIndexOf('@');
-  const commit = at >= 0 ? skillSource.slice(at + 1) : skillSource;
-  return commit.slice(0, 8);
-}
-
 interface Metric {
   label: string;
   value: string;
@@ -132,19 +108,19 @@ interface Metric {
 }
 
 /** Metric 1 — tasks solved. **Honesty gating is mandatory here, not just on
- *  the badge**: `isLowTriggerRate` gates on the trigger rate alone (never on
- *  the delta itself — receipt.ts's own doc comment on why), so a treatment
- *  arm that barely triggered but still moved the resolve rate by chance
- *  never reads as a clean effect number. Tinted neutral in that case; tinted
- *  by sign otherwise. */
+ *  the badge**: gates on `presentation.effectClaimable` (D1 S1/I1 — computed
+ *  once in `buildCapabilityReport` from the trigger rate alone, treating a
+ *  MISSING rate exactly like a low one, never on the delta itself — see
+ *  `ReportPresentation`'s doc comment for why), so a treatment arm that
+ *  barely triggered — or has no trigger data at all — never reads as a clean
+ *  effect number. Tinted neutral in that case; tinted by sign otherwise. */
 function effectMetric(report: CapabilityReport): Metric {
-  const rate = report.receipt.triggerRate;
-  if (isLowTriggerRate(rate)) {
-    const value = !rate || rate.total === 0 ? 'no session data' : 'not exercised';
-    return { label: 'Tasks solved', value, fill: INK };
+  const { presentation } = report;
+  if (!presentation.effectClaimable) {
+    return { label: 'Tasks solved', value: presentation.effectCaveat, fill: INK };
   }
   const { baseline, treatment, n } = report.fields;
-  const delta = treatment.passed - baseline.passed;
+  const delta = presentation.netDelta;
   const fill = delta > 0 ? SUCCESS : delta < 0 ? DANGER : INK;
   return { label: 'Tasks solved', value: `${baseline.passed} → ${treatment.passed} of ${n}`, fill };
 }
@@ -173,8 +149,8 @@ function costMetric(report: CapabilityReport): Metric {
  *  in section order — identity, what was evaluated, three metrics, an
  *  optional cohort line, and the honesty-line footer. */
 export function renderCapabilityCardSvg(report: CapabilityReport): string {
-  const { fields, cohort } = report;
-  const sha = shortCommit(fields.skillSource);
+  const { fields, cohort, presentation } = report;
+  const sha = presentation.shortSha;
   const parts: string[] = [];
   let y = PAD;
 
@@ -189,12 +165,15 @@ export function renderCapabilityCardSvg(report: CapabilityReport): string {
   parts.push(dividerEl(y));
   y += 22;
 
-  // 2. What was evaluated — task count, domain, discrimination provenance
-  // (truthful in both directions — see buildDiscriminationProvenance), agent
-  // + model.
+  // 2. What was evaluated — MEASURED task count alongside the whole set
+  // (D1 I3: the whole-set `taskCount` alone is misleading whenever screening
+  // or a per-run exclusion means the measured population is smaller — a
+  // 12-task set that only measured 8 must not print a bare "12 tasks" beside
+  // a footer reading "n=8"), domain, discrimination provenance (truthful in
+  // both directions — see buildDiscriminationProvenance), agent + model.
   parts.push(textEl(PAD, y, 13, INK, 'What was evaluated', { weight: 600 }));
   y += 20;
-  parts.push(textEl(PAD, y, 12, INK, `${fields.taskCount} tasks · ${fields.domain}`, { opacity: 0.85 }));
+  parts.push(textEl(PAD, y, 12, INK, `${fields.n} of ${fields.taskCount} tasks · ${fields.domain}`, { opacity: 0.85 }));
   y += 18;
   for (const line of wrapText(fields.discriminationProvenance, 12)) {
     parts.push(textEl(PAD, y, 12, INK, line, { opacity: 0.85 }));

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { attemptKey, type BenchOutcome } from '../../src/skills-bench/attempts.js';
 import {
   assertRankBadgeAccompanied, buildCapabilityReport, buildEmbedSnippet, buildReportFields, buildTaskSetIdentity,
-  cohortRank, deriveConcordant, deriveCostOverhead, deriveVerdictLine, renderBadgeSvg, renderCapabilityReportMd,
+  cohortRank, deriveConcordant, deriveCostOverhead, renderBadgeSvg, renderCapabilityReportMd,
   renderCohortRankBadgeSvg, renderPerTaskTableMd, validateCohort, CohortValidationError,
   type BuildCapabilityReportOptions, type Cohort, type CohortEntry, type ReportNarrative,
 } from '../../src/skills-bench/capability-report.js';
@@ -375,6 +375,20 @@ describe('renderCapabilityReportMd', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Opener (§2) — D1 I7: the report body previously carried neither the
+  // skill's identity nor the measured date anywhere outside the `Report:`
+  // URL, so a copy-pasted excerpt lost both. `presentation.identity` is the
+  // one string every surface states (design §1: `<skill>@<sha>`).
+  // -------------------------------------------------------------------------
+
+  it('states <skill>@<sha> identity and the measured date in the opener (I7)', () => {
+    const report = effectHighTriggerReport();
+    const md = renderCapabilityReportMd(report);
+    expect(md).toContain(`\`${report.presentation.identity}\` · measured ${report.fields.measuredOn}`);
+    expect(report.presentation.identity).toBe('tdd@bbbbbbbb'); // pin.commit short form
+  });
+
+  // -------------------------------------------------------------------------
   // Title
   // -------------------------------------------------------------------------
 
@@ -386,6 +400,20 @@ describe('renderCapabilityReportMd', () => {
   it('leads the title with cohort position when a cohort is supplied', () => {
     const md = renderCapabilityReportMd({ ...effectHighTriggerReport(), cohort: focalCohort() });
     expect(md.split('\n')[0]).toContain('1st of 2 in python-testing');
+  });
+
+  // -------------------------------------------------------------------------
+  // D1 C1 — a non-null effect measured under a low trigger rate must NOT
+  // state the delta as a clean "net +N tasks with skill loaded" headline:
+  // the skill was not loaded on the tasks the delta came from, so that
+  // sentence is false on its plain-truth reading, not just unattributed.
+  // -------------------------------------------------------------------------
+
+  it('leads the title with "effect not attributable" — never the bare delta — when a real net effect was measured but the trigger rate is too low to claim it', () => {
+    const md = renderCapabilityReportMd(effectLowTriggerReport());
+    expect(md).toContain('# tdd — measured, effect not attributable (trigger rate 0/2)');
+    expect(md).not.toMatch(/# tdd — net \+1/);
+    expect(md).not.toContain('with skill loaded');
   });
 
   // -------------------------------------------------------------------------
@@ -438,6 +466,29 @@ describe('renderCapabilityReportMd', () => {
     expect(md).toMatch(/95% Wilson \d+%-\d+%/);
   });
 
+  // D1 I8: §4 no longer restates the card's own figures (the baseline/
+  // treatment resolve-count fractions and the "net ±N across N" clause) —
+  // it keeps only the concordant-pairs sentence and the Wilson intervals,
+  // which the card does not show.
+  it('drops the resolve-count restatement — the card carries those figures, not the report (I8)', () => {
+    const md = renderCapabilityReportMd(effectHighTriggerReport());
+    const resultSection = md.slice(md.indexOf('## Result'), md.indexOf('## Where it did not load'));
+    expect(resultSection).not.toMatch(/Baseline resolved/);
+    expect(resultSection).not.toMatch(/net \+2 across/);
+  });
+
+  // D1 C1: an unclaimable effect (low/unknown trigger rate) must state NO
+  // figure at all in §4 — it defers to §5, the same way the null branch
+  // hands over to §5, rather than the previous unconditional "net +1 across
+  // 2 paired tasks" that stated the number regardless of attributability.
+  it('defers to the trigger-rate diagnosis in §4 without stating any figure when the effect is not claimable (C1)', () => {
+    const md = renderCapabilityReportMd(effectLowTriggerReport());
+    const resultSection = md.slice(md.indexOf('## Result'), md.indexOf('## Where it did not load'));
+    expect(resultSection).toMatch(/not exercised enough on this task set/);
+    expect(resultSection).not.toContain('+1');
+    expect(resultSection).not.toContain('95% Wilson');
+  });
+
   // -------------------------------------------------------------------------
   // Where it did not load (§5) — the trigger-rate diagnosis, gated on the
   // measured rate only.
@@ -446,6 +497,23 @@ describe('renderCapabilityReportMd', () => {
   it('reads the low trigger rate as not-attributable when an effect was measured but rarely triggered', () => {
     const md = renderCapabilityReportMd(effectLowTriggerReport());
     expect(md).toMatch(/too low a trigger rate to attribute the measured net \+1-task difference/);
+  });
+
+  // D1 I5: design §6 section 5's "the specific description gap" — a human's
+  // diagnosis of why the skill's SKILL.md description didn't surface it.
+  // Never fabricated; appended to §5 only when supplied.
+  it('appends narrative.descriptionGap to §5 when supplied (I5)', () => {
+    const narrative: ReportNarrative = {
+      descriptionGap: 'The description never mentions Python, only "testing" generically.',
+    };
+    const md = renderCapabilityReportMd({ ...effectHighTriggerReport(), narrative });
+    const triggerSection = md.slice(md.indexOf('## Where it did not load'), md.indexOf('## Scope'));
+    expect(triggerSection).toContain('The description never mentions Python, only "testing" generically.');
+  });
+
+  it('never fabricates a description gap when narrative is absent (I5)', () => {
+    const md = renderCapabilityReportMd(effectHighTriggerReport());
+    expect(md).not.toMatch(/description never mentions|description gap/i);
   });
 
   it('reads a high trigger rate as supporting the measured effect', () => {
@@ -532,6 +600,21 @@ describe('renderCapabilityReportMd', () => {
     expect(md).toMatch(/does not tell you how `tdd` performs on other domains/);
   });
 
+  // D1 I9: "on 1 paired tasks"/"1 tasks" — no plural agreement for n === 1.
+  it('uses singular "task" wording when n === 1, in both the opener and scope (I9)', () => {
+    const ids = ['ta'];
+    const singleOutcomes: BenchOutcome[] = [o('ta', 'baseline', 0, false), o('ta', 'tdd', 0, true)];
+    const report = buildCapabilityReport({
+      ...baseOptions(), taskSet: pairedTaskSet(ids), outcomes: singleOutcomes, triggerByKey: allTriggered(ids, true),
+    });
+    const md = renderCapabilityReportMd(report);
+    expect(report.receipt.n).toBe(1);
+    expect(md).toContain('on 1 paired task in the');
+    expect(md).not.toContain('1 paired tasks');
+    expect(md).toContain('on 1 task in the python-testing domain');
+    expect(md).not.toMatch(/on 1 tasks in the/);
+  });
+
   it('links the rerun command, the per-task table, and the raw data, inviting substitution', () => {
     const md = renderCapabilityReportMd(effectHighTriggerReport());
     expect(md).toContain('Rerun: `yarn tsx scripts/skills-bench/run-bench.ts');
@@ -595,15 +678,6 @@ describe('renderPerTaskTableMd', () => {
     const report = buildCapabilityReport({ ...baseOptions(), taskSet: emptySet, outcomes: [] });
     const md = renderPerTaskTableMd(report);
     expect(md).toContain('_No per-task outcomes recorded._');
-  });
-});
-
-describe('deriveVerdictLine', () => {
-  it('renders a plain net-delta line with no pass/fail judgment language', () => {
-    const report = buildCapabilityReport(baseOptions());
-    const line = deriveVerdictLine(report.receipt);
-    expect(line).toMatch(/^net [+-]?\d+\/\d+ paired tasks vs\. baseline$/);
-    expect(line).not.toMatch(/pass|fail/i);
   });
 });
 
@@ -959,6 +1033,36 @@ describe('buildReportFields', () => {
     expect(report.fields.discriminationProvenance).not.toMatch(/screened baseline-only/);
     expect(report.fields.discriminationProvenance).toMatch(/has not been through/);
   });
+
+  // -------------------------------------------------------------------------
+  // D1 C2: a run that measured a screened-out task (`--include-screened-out`)
+  // must NOT assert "every task here is one the agent fails unaided" — the
+  // real run in the tree measured `schema-validate-optional-0001` (dropped by
+  // screening) alongside a baseline that resolved it, which is exactly the
+  // fabrication this branch closes. The signal is provable directly from
+  // this run's own data (measured task ids vs. screeningSummary.kept), never
+  // a trust in a boolean flag alone.
+  // -------------------------------------------------------------------------
+
+  it('states "screening overridden for this run" — never the screening guarantee — when this run measured a task screening had dropped (C2)', () => {
+    const withScreenedOutTask: SkillTaskSetV1 = { ...taskSet, tasks: [...taskSet.tasks, task('t4')] };
+    const outcomesWithT4 = [...outcomes, o('t4', 'baseline', 0, true), o('t4', 'tdd', 0, false)];
+    const report = buildCapabilityReport({
+      ...baseOptions(),
+      taskSet: withScreenedOutTask,
+      outcomes: outcomesWithT4,
+      eligibleTaskIds: ['t1', 't2', 't3', 't4'], // this run's manifest — t4 measured despite being dropped
+    });
+    expect(report.fields.discriminationProvenance).toMatch(/screening was overridden for this run/);
+    expect(report.fields.discriminationProvenance).toContain('1 measured task(s)');
+    expect(report.fields.discriminationProvenance).not.toMatch(/every task here is one the agent fails unaided/);
+  });
+
+  it('keeps the screening guarantee when this run measured only tasks screening kept (no override)', () => {
+    const report = buildCapabilityReport(baseOptions());
+    expect(report.fields.discriminationProvenance).toMatch(/every task here is one the agent fails unaided/);
+    expect(report.fields.discriminationProvenance).not.toMatch(/overridden/);
+  });
 });
 
 describe('buildCapabilityReport — fields and cohort passthrough', () => {
@@ -1085,6 +1189,72 @@ describe('validateCohort', () => {
       entries: [cohortEntry({ skill: 'tdd', focal: true }), cohortEntry({ skill: 'tdd' })],
     };
     expect(() => validateCohort(cohort)).toThrow(/duplicate skill/);
+  });
+
+  // -------------------------------------------------------------------------
+  // D1 I2: `--cohort` JSON is the only untyped boundary this data model has
+  // — a compile-time `CohortEntry` cast (`render-report.ts`'s `loadCohort`)
+  // guarantees nothing at runtime. These simulate the shapes an untyped JSON
+  // file can actually produce (missing/NaN fields), which the old checks
+  // (focal count, duplicates) never caught, and which used to render
+  // `5 (undefined, undefined)` / `NaN%` straight into the report.
+  // -------------------------------------------------------------------------
+
+  function untyped(entry: Partial<CohortEntry>): CohortEntry {
+    return entry as CohortEntry;
+  }
+
+  it('rejects an entry with a missing/NaN "triggered" or "total"', () => {
+    const cohort: Cohort = { domain: 'd', entries: [untyped({ skill: 'tdd', focal: true, netTasks: 1, costRatio: 1 })] };
+    expect(() => validateCohort(cohort)).toThrow(/missing\/NaN "triggered"\/"total"/);
+  });
+
+  it('rejects an entry with a missing "netTasks"', () => {
+    const cohort: Cohort = {
+      domain: 'd',
+      entries: [untyped({ skill: 'tdd', focal: true, triggered: 5, total: 10, costRatio: 1 })],
+    };
+    expect(() => validateCohort(cohort)).toThrow(/missing\/NaN "netTasks"/);
+  });
+
+  it('rejects an entry with a NaN "costRatio"', () => {
+    const cohort: Cohort = {
+      domain: 'd',
+      entries: [cohortEntry({ skill: 'tdd', focal: true, costRatio: NaN })],
+    };
+    expect(() => validateCohort(cohort)).toThrow(/missing\/NaN "costRatio"/);
+  });
+
+  it('rejects installs missing "source" — an unprovenanced install count is unrepresentable', () => {
+    const cohort: Cohort = {
+      domain: 'd',
+      entries: [untyped({ skill: 'tdd', focal: true, triggered: 5, total: 10, netTasks: 1, costRatio: 1, installs: { count: 5, source: '', asOf: '2026-01-01' } })],
+    };
+    expect(() => validateCohort(cohort)).toThrow(/installs" missing "source"/);
+  });
+
+  it('rejects installs missing "asOf"', () => {
+    const cohort: Cohort = {
+      domain: 'd',
+      entries: [untyped({ skill: 'tdd', focal: true, triggered: 5, total: 10, netTasks: 1, costRatio: 1, installs: { count: 5, source: 'npm', asOf: '' } })],
+    };
+    expect(() => validateCohort(cohort)).toThrow(/installs" missing "asOf"/);
+  });
+
+  it('rejects installs with a missing/NaN "count"', () => {
+    const cohort: Cohort = {
+      domain: 'd',
+      entries: [untyped({ skill: 'tdd', focal: true, triggered: 5, total: 10, netTasks: 1, costRatio: 1, installs: { count: NaN, source: 'npm', asOf: '2026-01-01' } })],
+    };
+    expect(() => validateCohort(cohort)).toThrow(/installs" with a missing\/NaN "count"/);
+  });
+
+  it('accepts an entry with fully-provenanced installs', () => {
+    const cohort: Cohort = {
+      domain: 'd',
+      entries: [cohortEntry({ skill: 'tdd', focal: true, installs: { count: 1200, source: 'npm', asOf: '2026-07-01' } })],
+    };
+    expect(() => validateCohort(cohort)).not.toThrow();
   });
 });
 

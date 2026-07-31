@@ -168,18 +168,37 @@ export interface ReportFields {
   discriminationProvenance: string;
 }
 
-function buildDiscriminationProvenance(screening?: TaskSetIdentitySummary['screening']): string {
-  if (screening) {
-    const dropped = screening.droppedNoHeadroom + screening.droppedUngradeable;
+/** D1 C2 fix: a third branch for "screening ran, but THIS run measured some
+ *  tasks screening had dropped" (`--include-screened-out`) — the previous
+ *  binary (screened / never-screened) asserted the screening guarantee even
+ *  for a run that deliberately overrode it, which is a fabrication: the
+ *  card/report shipped beside a baseline that resolved a task the sentence
+ *  claimed "the agent fails unaided." `overriddenCount` is the number of
+ *  THIS run's actually-measured tasks (see `buildCapabilityReport`'s
+ *  `taskIds`) that are NOT in the task set's own `screeningSummary.kept` —
+ *  a directly provable fact from the run's own data, not a trust in a
+ *  boolean flag that might be stale or absent on an older manifest. */
+function buildDiscriminationProvenance(
+  screening: TaskSetIdentitySummary['screening'] | undefined,
+  overriddenCount: number,
+): string {
+  if (!screening) {
     return (
-      `This task set was screened baseline-only before measurement (kept ${screening.kept}, ` +
-      `dropped ${dropped} with no proven headroom) — every task here is one the agent fails unaided.`
+      'This task set has not been through the baseline-only discrimination gate — some tasks may already ' +
+      'be solvable unaided, so headroom is not guaranteed.'
     );
   }
-  return (
-    'This task set has not been through the baseline-only discrimination gate — some tasks may already ' +
-    'be solvable unaided, so headroom is not guaranteed.'
-  );
+  const dropped = screening.droppedNoHeadroom + screening.droppedUngradeable;
+  const base =
+    `This task set was screened baseline-only before measurement (kept ${screening.kept}, ` +
+    `dropped ${dropped} with no proven headroom)`;
+  if (overriddenCount > 0) {
+    return (
+      `${base} — screening was overridden for this run: ${overriddenCount} measured task(s) were among ` +
+      'those dropped, so headroom is not guaranteed for those.'
+    );
+  }
+  return `${base} — every task here is one the agent fails unaided.`;
 }
 
 export interface BuildReportFieldsOptions {
@@ -187,13 +206,19 @@ export interface BuildReportFieldsOptions {
   profile: ReceiptProfile;
   taskSetIdentity: TaskSetIdentitySummary;
   receipt: ReceiptData;
+  /** D1 C2: count of THIS run's measured tasks that screening had dropped
+   *  (see `buildDiscriminationProvenance`'s doc comment) — defaults to 0 for
+   *  a caller (e.g. `buildReportFields`'s own unit tests) that doesn't
+   *  thread it through, which reproduces the pre-fix (screening-respected)
+   *  wording exactly. */
+  overriddenCount?: number;
 }
 
 /** Pure composition of `ReportFields` from already-computed sources (design
  *  §2's field-contract table). Reuses `buildTaskSetIdentity`'s output rather
  *  than re-deriving domain/taskCount/screening from a raw `SkillTaskSetV1`. */
 export function buildReportFields(opts: BuildReportFieldsOptions): ReportFields {
-  const { pin, profile, taskSetIdentity, receipt } = opts;
+  const { pin, profile, taskSetIdentity, receipt, overriddenCount = 0 } = opts;
   return {
     skill: pin.name,
     skillSha256: pin.sha256,
@@ -217,7 +242,7 @@ export function buildReportFields(opts: BuildReportFieldsOptions): ReportFields 
     regressed: receipt.paired.regressed,
     meanCostUsd: receipt.meanCostUsd,
     ...(receipt.triggerRate ? { triggerRate: receipt.triggerRate } : {}),
-    discriminationProvenance: buildDiscriminationProvenance(taskSetIdentity.screening),
+    discriminationProvenance: buildDiscriminationProvenance(taskSetIdentity.screening, overriddenCount),
   };
 }
 
@@ -293,6 +318,22 @@ export class CohortValidationError extends Error {
 /** Fail-loud shape checks a renderer can rely on without re-checking: exactly
  *  one focal entry, no duplicate skill names, at least one entry. Does not
  *  assemble or fetch anything — the caller already built `cohort`. */
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+/** D1 I2: `--cohort` JSON is the only untyped boundary this data model has —
+ *  a compile-time `CohortEntry` type guarantees nothing at runtime once a
+ *  caller casts parsed JSON to it (`render-report.ts`'s `loadCohort`). This
+ *  function is the ONE place that enforces the shape for real, so a
+ *  malformed entry (`{ installs: { count: 5 } }` with no `source`/`asOf`, a
+ *  missing/NaN `costRatio`) fails loud naming the bad entry instead of
+ *  rendering `5 (undefined, undefined)` or `NaN%` into the report's most-read
+ *  section. Callers must extend checks here rather than duplicating them. */
 export function validateCohort(cohort: Cohort): void {
   if (cohort.entries.length === 0) {
     throw new CohortValidationError(`cohort '${cohort.domain}' has no entries`);
@@ -309,10 +350,40 @@ export function validateCohort(cohort: Cohort): void {
   }
   const seen = new Set<string>();
   for (const entry of cohort.entries) {
+    if (!isNonEmptyString(entry.skill)) {
+      throw new CohortValidationError(`cohort '${cohort.domain}' has an entry with a missing/invalid "skill"`);
+    }
     if (seen.has(entry.skill)) {
       throw new CohortValidationError(`cohort '${cohort.domain}' has duplicate skill '${entry.skill}'`);
     }
     seen.add(entry.skill);
+    if (!isFiniteNumber(entry.triggered) || !isFiniteNumber(entry.total)) {
+      throw new CohortValidationError(
+        `cohort '${cohort.domain}' entry '${entry.skill}' has a missing/NaN "triggered"/"total"`,
+      );
+    }
+    if (!isFiniteNumber(entry.netTasks)) {
+      throw new CohortValidationError(`cohort '${cohort.domain}' entry '${entry.skill}' has a missing/NaN "netTasks"`);
+    }
+    if (!isFiniteNumber(entry.costRatio)) {
+      throw new CohortValidationError(`cohort '${cohort.domain}' entry '${entry.skill}' has a missing/NaN "costRatio"`);
+    }
+    if (entry.installs !== undefined) {
+      if (!isFiniteNumber(entry.installs.count)) {
+        throw new CohortValidationError(
+          `cohort '${cohort.domain}' entry '${entry.skill}' has "installs" with a missing/NaN "count"`,
+        );
+      }
+      if (!isNonEmptyString(entry.installs.source)) {
+        throw new CohortValidationError(
+          `cohort '${cohort.domain}' entry '${entry.skill}' has "installs" missing "source" — an unprovenanced ` +
+          'install count is unrepresentable',
+        );
+      }
+      if (!isNonEmptyString(entry.installs.asOf)) {
+        throw new CohortValidationError(`cohort '${cohort.domain}' entry '${entry.skill}' has "installs" missing "asOf"`);
+      }
+    }
   }
 }
 
@@ -369,6 +440,55 @@ export interface ReportNarrative {
    *  display at three even if more are supplied, but never invents its
    *  own. */
   changes?: string[];
+  /** D1 I5: design §6 section 5's "the specific `description` gap" — a
+   *  human's diagnosis of why the skill's SKILL.md `description:` didn't
+   *  surface it (e.g. "the description never mentions Python, only
+   *  JavaScript"). Never computed by the renderer (nothing here can read or
+   *  judge a skill's frontmatter); appended to §5 only when a caller
+   *  supplies it. */
+  descriptionGap?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Presentation decision (D1 review, S1 — the structural fix for C1/I1/(d)):
+// computed ONCE inside `buildCapabilityReport`. Before this, every renderer
+// (badge/card/report) re-read `triggerRate` and re-derived the net delta
+// independently — the exact mechanism by which the report came to leak a
+// clean effect number the badge and card correctly suppressed (C1), and by
+// which the card's `undefined`-triggerRate hole went uncaught while the
+// badge's own normalization stayed correct (I1). Every renderer below MUST
+// read `CapabilityReport.presentation` for these values rather than
+// recomputing them.
+// ---------------------------------------------------------------------------
+
+export interface ReportPresentation {
+  /** false when the measured trigger rate can't support reading the paired
+   *  delta as evidence about the skill: `isLowTriggerRate(triggerRate)` OR
+   *  `triggerRate` itself is `undefined` (D1 I1 / the upheld A3
+   *  adjudication — a MISSING rate is not evidence of a high one, so it must
+   *  gate exactly like a low one, never fall through to a clean number). */
+  effectClaimable: boolean;
+  /** Net paired delta (`receipt.treatment.passed - receipt.baseline.passed`),
+   *  computed once — never re-derived at a renderer call site. */
+  netDelta: number;
+  /** The not-exercised caveat text badge and card use verbatim in place of
+   *  the effect number when `!effectClaimable`: "no session data" when no
+   *  trigger data was captured at all (rate undefined or `total === 0`),
+   *  else "not exercised". */
+  effectCaveat: 'no session data' | 'not exercised';
+  /** "loads N/M" / "loads unknown" — the badge's own segment-3 phrasing,
+   *  computed once via the same `loadsSegmentText` the badge renders with. */
+  loadsText: string;
+  /** "+N% cost" / "-N% cost" / "cost unknown" — the badge's own segment-4
+   *  phrasing, computed once via the same `costSegmentText` the badge
+   *  renders with. */
+  costText: string;
+  /** Short (8-char) form of the pinned skill's resolved commit — the one
+   *  identity every surface states (design §1: `<skill>@<sha>`). Derived
+   *  once from `fields.skillSource`, not re-parsed by each renderer. */
+  shortSha: string;
+  /** `${skill}@${shortSha}` — read this, never recompute it (D1 I7/(b)). */
+  identity: string;
 }
 
 export interface CapabilityReport {
@@ -380,6 +500,8 @@ export interface CapabilityReport {
   /** The resolved field contract (design §2) every renderer reads instead of
    *  re-deriving its own copy of a field. */
   fields: ReportFields;
+  /** The resolved presentation decision (D1 S1) — see `ReportPresentation`. */
+  presentation: ReportPresentation;
   /** Optional passthrough — cohort ASSEMBLY happens elsewhere (deferred);
    *  this report only carries whatever cohort the caller already built. */
   cohort?: Cohort;
@@ -481,7 +603,17 @@ export function buildCapabilityReport(opts: BuildCapabilityReportOptions): Capab
     .filter((id) => eligibleIds === null || eligibleIds.has(id));
   const perTask = buildPerTaskRows(opts.outcomes, taskIds, opts.baselineArm, opts.treatmentArm, opts.triggerByKey);
   const taskSetIdentity = buildTaskSetIdentity(opts.taskSet);
-  const fields = buildReportFields({ pin: opts.pin, profile: opts.profile, taskSetIdentity, receipt });
+
+  // D1 C2: measured-but-screened-out tasks, provable directly from this
+  // run's own data (never trusting a boolean flag alone) — see
+  // `buildDiscriminationProvenance`'s doc comment.
+  const keptIds = new Set(opts.taskSet.screeningSummary?.kept ?? []);
+  const overriddenCount = opts.taskSet.screeningSummary
+    ? taskIds.filter((id) => !keptIds.has(id)).length
+    : 0;
+
+  const fields = buildReportFields({ pin: opts.pin, profile: opts.profile, taskSetIdentity, receipt, overriddenCount });
+  const presentation = buildPresentation(fields, receipt);
 
   return {
     skill: opts.skill,
@@ -490,9 +622,43 @@ export function buildCapabilityReport(opts: BuildCapabilityReportOptions): Capab
     taskSetIdentity,
     links: opts.links,
     fields,
+    presentation,
     ...(opts.cohort ? { cohort: opts.cohort } : {}),
     ...(opts.narrative ? { narrative: opts.narrative } : {}),
   };
+}
+
+/** D1 S1: the presentation decision, computed once — see `ReportPresentation`. */
+function buildPresentation(fields: ReportFields, receipt: ReceiptData): ReportPresentation {
+  const rate = receipt.triggerRate;
+  const netDelta = receipt.treatment.passed - receipt.baseline.passed;
+  const effectClaimable = rate !== undefined && !isLowTriggerRate(rate);
+  const effectCaveat: 'no session data' | 'not exercised' = !rate || rate.total === 0 ? 'no session data' : 'not exercised';
+  const normalizedRate: TriggerRate = rate ?? { triggered: 0, total: 0, unknown: 0 };
+  const shortSha = shortShaFromSource(fields.skillSource);
+  return {
+    effectClaimable,
+    netDelta,
+    effectCaveat,
+    loadsText: loadsSegmentText(normalizedRate),
+    costText: costSegmentText(deriveCostOverhead(receipt)),
+    shortSha,
+    identity: `${fields.skill}@${shortSha}`,
+  };
+}
+
+/** The card face's/report's `<sha>` (design §1) is the short form of
+ *  `pin.json.commit` — NOT `fields.skillSha256` (the vendored-bytes content
+ *  hash; a different identity). `ReportFields` carries no separate raw-commit
+ *  field, but `skillSource` is built exactly as `${pin.source}@${pin.commit}`
+ *  (see `buildReportFields`), so the commit is recoverable as the substring
+ *  after the final `@`. Single canonical derivation (D1 (b)/(d)) — callers
+ *  read `presentation.shortSha`/`presentation.identity` instead of
+ *  re-parsing `skillSource` themselves. */
+function shortShaFromSource(skillSource: string): string {
+  const at = skillSource.lastIndexOf('@');
+  const commit = at >= 0 ? skillSource.slice(at + 1) : skillSource;
+  return commit.slice(0, 8);
 }
 
 // ---------------------------------------------------------------------------
@@ -536,32 +702,52 @@ function cohortSuperlative(cohort: Cohort | undefined): string | null {
   return `${ordinal(rank)} of ${of} in ${cohort.domain}`;
 }
 
+/** "task"/"tasks" — D1 I9: `${fields.n} paired tasks` read "on 1 paired
+ *  tasks" for a single-task run. */
+function pluralize(n: number, singular: string, plural: string = `${singular}s`): string {
+  return n === 1 ? singular : plural;
+}
+
 /** Section 1 (design §6): the most interesting TRUE finding, not the flat
  *  number. Null-variant branch (§6.1 — the primary case, roughly 4 in 5
- *  reports): leads with the diagnosis, never the zero. */
+ *  reports): leads with the diagnosis, never the zero. D1 C1: a non-null
+ *  effect measured under a low/unknown trigger rate gets its OWN branch —
+ *  `presentation.effectClaimable` (never a locally re-derived check) gates
+ *  it — so the headline (the GitHub issue title, the most-quoted string in
+ *  the artifact) never states "net +3 tasks with skill loaded" when the
+ *  skill was not loaded on the tasks the delta came from. */
 function renderTitle(report: CapabilityReport): string {
-  const { skill, receipt, cohort } = report;
-  const netDelta = receipt.treatment.passed - receipt.baseline.passed;
+  const { skill, receipt, cohort, presentation } = report;
+  const { netDelta, effectClaimable } = presentation;
   const isNull = netDelta === 0;
   const superlative = cohortSuperlative(cohort);
   const suffix = superlative ? ` — ${superlative}` : '';
+  const rate = receipt.triggerRate;
+  const triggerText = !rate || rate.total === 0
+    ? 'no session data'
+    : `trigger rate ${rate.triggered}/${rate.total}`;
   if (isNull) {
-    const rate = receipt.triggerRate;
-    const triggerText = !rate || rate.total === 0
-      ? 'no session data'
-      : `trigger rate ${rate.triggered}/${rate.total}`;
     return `${skill} — measured, no effect found (${triggerText})${suffix}`;
+  }
+  if (!effectClaimable) {
+    return `${skill} — measured, effect not attributable (${triggerText})${suffix}`;
   }
   const sign = netDelta > 0 ? '+' : '';
   return `${skill} — net ${sign}${netDelta} tasks with skill loaded${suffix}`;
 }
 
-/** Section 2: one sentence — what was measured, that it is public and
- *  reproducible, that nothing is asked of the author. */
-function renderOpener(fields: ReportFields): string {
+/** Section 2: one sentence — the report's identity (`<skill>@<sha>`) and
+ *  measurement date (D1 I7 — the report body previously carried neither; a
+ *  copy-pasted excerpt loses both the version and the date), then what was
+ *  measured, that it is public and reproducible, that nothing is asked of
+ *  the author. */
+function renderOpener(report: CapabilityReport): string {
+  const { fields, presentation } = report;
   return (
-    `This is an independent capability measurement of \`${fields.skill}\` on ${fields.n} paired tasks in the ` +
-    `${fields.domain} domain — public, reproducible from the data linked below, and nothing is asked of you.`
+    `\`${presentation.identity}\` · measured ${fields.measuredOn}\n\n` +
+    `This is an independent capability measurement of \`${fields.skill}\` on ${fields.n} paired ` +
+    `${pluralize(fields.n, 'task')} in the ${fields.domain} domain — public, reproducible from the data ` +
+    'linked below, and nothing is asked of you.'
   );
 }
 
@@ -594,21 +780,39 @@ function renderCohortTable(cohort: Cohort): string {
  *  card's full figure block. Intervals are still shown (design §7: "always
  *  shown" wherever a figure appears) because the uncertainty statement needs
  *  them; this is a different sentence from the card's numbers, not a
- *  restatement of them. */
+ *  restatement of them.
+ *
+ *  D1 C1/I8: two fixes landed together here. (1) An unclaimable effect
+ *  (`!presentation.effectClaimable`, and non-null) gets its own branch that
+ *  states no figure at all — it defers to §5 for the trigger-rate diagnosis,
+ *  the same way the null branch hands over to §5 — instead of the previous
+ *  unconditional "net +3 across 12 paired tasks" that stated the number
+ *  regardless of whether it was attributable. (2) The claimable path drops
+ *  the resolve-count restatement (`Baseline resolved 3/12 ... with the
+ *  skill, 6/12 ...`) — that pair of fractions is exactly the card's "Tasks
+ *  solved" metric in prose (design §6: "the card holds the figures; here
+ *  state what the paired outcome means in plain language") — while keeping
+ *  the concordant-pairs sentence and the Wilson intervals, which the card
+ *  does not show. */
 function renderResult(report: CapabilityReport): string {
-  const { receipt, skill } = report;
-  const netDelta = receipt.treatment.passed - receipt.baseline.passed;
+  const { receipt, skill, presentation } = report;
+  const { netDelta, effectClaimable } = presentation;
   const isNull = netDelta === 0;
-  const sign = netDelta > 0 ? '+' : '';
   const concordant = deriveConcordant(receipt);
+
+  if (!effectClaimable && !isNull) {
+    return (
+      `\`${skill}\` was not exercised enough on this task set for the paired outcome to be read as evidence ` +
+      'about the skill — see the trigger-rate diagnosis below before treating any figure here as an effect.'
+    );
+  }
+
   const paragraphs: string[] = [
     `With \`${skill}\` loaded, the agent solved ${receipt.paired.improved} task(s) the baseline missed and missed ` +
     `${receipt.paired.regressed} the baseline solved — both arms agreed on ${concordant.bothPassed} pass and ` +
-    `${concordant.bothFailed} fail. Baseline resolved ${receipt.baseline.passed}/${receipt.baseline.scorable} tasks ` +
-    `(95% Wilson ${formatPct(receipt.baseline.lo)}-${formatPct(receipt.baseline.hi)}); with the skill, ` +
-    `${receipt.treatment.passed}/${receipt.treatment.scorable} ` +
-    `(95% Wilson ${formatPct(receipt.treatment.lo)}-${formatPct(receipt.treatment.hi)}) — ` +
-    `net ${sign}${netDelta} across ${receipt.n} paired tasks.`,
+    `${concordant.bothFailed} fail. Uncertainty: baseline 95% Wilson ${formatPct(receipt.baseline.lo)}-` +
+    `${formatPct(receipt.baseline.hi)}, with skill 95% Wilson ${formatPct(receipt.treatment.lo)}-` +
+    `${formatPct(receipt.treatment.hi)}.`,
   ];
   if (isNull) {
     paragraphs.push(
@@ -630,43 +834,49 @@ function renderResult(report: CapabilityReport): string {
  *  result, not a quality result; a high trigger rate with a null effect
  *  means the skill was given its chance and did not change outcomes, stated
  *  without softening. Trigger rate is read straight from `ReceiptData`,
- *  never inferred (design §7: "trigger rate never inferred"). */
+ *  never inferred (design §7: "trigger rate never inferred"). `low` reads
+ *  `!presentation.effectClaimable` rather than re-calling `isLowTriggerRate`
+ *  locally (D1 S1). D1 I5: appends `narrative.descriptionGap` — design §6
+ *  section 5's "the specific `description` gap" — when a human supplied
+ *  one; never fabricated here. */
 function renderTriggerSection(report: CapabilityReport): string {
-  const { receipt, skill } = report;
+  const { receipt, skill, presentation, narrative } = report;
   const rate = receipt.triggerRate;
-  const netDelta = receipt.treatment.passed - receipt.baseline.passed;
-  const isNull = netDelta === 0;
+  const isNull = presentation.netDelta === 0;
+  const gap = narrative?.descriptionGap;
+  const withGap = (text: string): string => (gap ? `${text}\n\n${gap}` : text);
   if (!rate || rate.total === 0) {
-    return (
+    return withGap(
       `No session data was captured to measure whether \`${skill}\` loaded during these runs — this reads as ` +
-      'not exercised on this task set, not as evidence about the skill either way.'
+      'not exercised on this task set, not as evidence about the skill either way.',
     );
   }
-  const low = isLowTriggerRate(rate);
+  const low = !presentation.effectClaimable;
   const base =
     `\`${skill}\` loaded on ${rate.triggered} of ${rate.total} solved+failed attempts` +
     (rate.unknown > 0 ? ` (${rate.unknown} unknown — session not captured)` : '') + '.';
   if (isNull && low) {
-    return (
+    return withGap(
       `${base} The skill loaded on few tasks — this is a discoverability result, not a quality result: the ` +
       'agent rarely found a reason to invoke it, so this run cannot speak to whether the skill helps when it ' +
-      'does load.'
+      'does load.',
     );
   }
   if (isNull) {
-    return (
+    return withGap(
       `${base} The skill loaded on most tasks and still made no difference to the outcome — it was given its ` +
-      'chance here and did not change results.'
+      'chance here and did not change results.',
     );
   }
   if (low) {
+    const { netDelta } = presentation;
     const sign = netDelta > 0 ? '+' : '';
-    return (
+    return withGap(
       `${base} That is too low a trigger rate to attribute the measured net ${sign}${netDelta}-task difference ` +
-      'to the skill — it reads as not exercised on this task set, not as evidence of an effect.'
+      'to the skill — it reads as not exercised on this task set, not as evidence of an effect.',
     );
   }
-  return `${base} The trigger rate is high enough that the measured effect can plausibly be attributed to the skill.`;
+  return withGap(`${base} The trigger rate is high enough that the measured effect can plausibly be attributed to the skill.`);
 }
 
 /** Section 6: any conditional signal, explicitly labelled hypothesis, not
@@ -693,9 +903,9 @@ function renderChanges(narrative: ReportNarrative | undefined): string | null {
  *  not tell you. */
 function renderScope(fields: ReportFields): string {
   return (
-    `This measured one agent configuration — ${fields.agent} running ${fields.model} — on ${fields.n} tasks in ` +
-    `the ${fields.domain} domain, one pinned skill version. It does not tell you how \`${fields.skill}\` performs ` +
-    'on other domains, other agents, other models, or at a larger sample size.'
+    `This measured one agent configuration — ${fields.agent} running ${fields.model} — on ${fields.n} ` +
+    `${pluralize(fields.n, 'task')} in the ${fields.domain} domain, one pinned skill version. It does not tell ` +
+    `you how \`${fields.skill}\` performs on other domains, other agents, other models, or at a larger sample size.`
   );
 }
 
@@ -736,7 +946,7 @@ function renderReevalOffer(fields: ReportFields): string {
 export function renderCapabilityReportMd(report: CapabilityReport): string {
   if (report.cohort) validateCohort(report.cohort);
 
-  const sections: string[] = [`# ${renderTitle(report)}`, '', renderOpener(report.fields), ''];
+  const sections: string[] = [`# ${renderTitle(report)}`, '', renderOpener(report), ''];
 
   if (report.cohort) {
     sections.push('## Cohort', '', renderCohortTable(report.cohort), '');
@@ -770,16 +980,6 @@ export function renderCapabilityReportMd(report: CapabilityReport): string {
  *  containing it. */
 export function renderPerTaskTableMd(report: CapabilityReport): string {
   return [`# ${report.skill} — per-task outcomes`, '', renderPerTaskTable(report.perTask), ''].join('\n');
-}
-
-/** A plain, non-judgmental one-line summary for the badge (§4.1: "the badge
- *  names the report, it does not grade") — net paired delta over N, nothing
- *  color-codeable. Derived from the same ReceiptData the report renders, so
- *  the badge can never disagree with the report it points at. */
-export function deriveVerdictLine(receipt: ReceiptData): string {
-  const delta = receipt.treatment.passed - receipt.baseline.passed;
-  const sign = delta > 0 ? '+' : '';
-  return `net ${sign}${delta}/${receipt.n} paired tasks vs. baseline`;
 }
 
 // ---------------------------------------------------------------------------
@@ -955,7 +1155,10 @@ export function renderBadgeSvg(opts: BadgeOptions): string {
 // Cohort rank badge (design §3) — ships only alongside the three-axis badge.
 // ---------------------------------------------------------------------------
 
-function ordinal(n: number): string {
+/** D1 (d): shared by every caller — `cohortSuperlative` above and
+ *  capability-card.ts's cohort-line rendering both import this one
+ *  implementation instead of each carrying their own copy. */
+export function ordinal(n: number): string {
   const rem100 = n % 100;
   if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
   switch (n % 10) {

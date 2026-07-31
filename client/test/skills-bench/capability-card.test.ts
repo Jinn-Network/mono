@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { renderCapabilityCardSvg } from '../../src/skills-bench/capability-card.js';
-import { buildCapabilityReport, type BuildCapabilityReportOptions, type Cohort } from '../../src/skills-bench/capability-report.js';
+import {
+  buildCapabilityReport, deriveCostOverhead, renderBadgeSvg, renderCapabilityReportMd,
+  type BuildCapabilityReportOptions, type CapabilityReport, type Cohort,
+} from '../../src/skills-bench/capability-report.js';
 import { attemptKey, type BenchOutcome } from '../../src/skills-bench/attempts.js';
 import type { ReceiptProfile } from '../../src/skills-bench/receipt.js';
 import type { SkillPin } from '../../src/skills-bench/skill-pin.js';
@@ -259,6 +262,24 @@ describe('renderCapabilityCardSvg', () => {
     expect(svg).toContain('claude-haiku-4-5-20251001');
   });
 
+  // D1 I3: the card previously printed the whole-set `taskCount` alone
+  // ("12 tasks"), which is misleading whenever the measured population is
+  // smaller than the set — a reader sees "12 tasks" on the face and "n=8" in
+  // the footer with nothing tying them together. The measured count must
+  // appear alongside the whole-set count.
+  it('renders the MEASURED task count alongside the whole-set count when they differ (I3)', () => {
+    const partialTaskSet: SkillTaskSetV1 = {
+      ...taskSet,
+      tasks: [...taskSet.tasks, task('t13')],
+      screeningSummary: { ...taskSet.screeningSummary!, droppedNoHeadroom: ['t13'] },
+    };
+    const report = buildCapabilityReport({ ...baseOptions(), taskSet: partialTaskSet });
+    expect(report.receipt.n).toBe(12);
+    expect(report.fields.taskCount).toBe(13);
+    const svg = renderCapabilityCardSvg(report);
+    expect(svg).toContain('12 of 13 tasks');
+  });
+
   it('states the discrimination provenance truthfully (screened set)', () => {
     const svg = renderCapabilityCardSvg(highTriggerReport());
     expect(svg).toContain('screened baseline-only');
@@ -314,6 +335,27 @@ describe('renderCapabilityCardSvg', () => {
   it('renders the loaded metric as "unknown" specifically (not a bare 0 of 0) when total is 0', () => {
     const svg = renderCapabilityCardSvg(noSessionDataReport());
     expect(svg).not.toContain('0 of 0');
+  });
+
+  // D1 I1/S1: the card previously called `isLowTriggerRate` on
+  // `report.receipt.triggerRate` directly, which returns `false` (not low)
+  // for an `undefined` rate — the guard fell through and rendered a clean
+  // "3 → 6 of 12" figure. `effectMetric` must now read
+  // `report.presentation.effectClaimable` ONLY (never re-derive it from
+  // `receipt.triggerRate` itself), so this is authoritative even for a
+  // hand-built report whose receipt disagrees with its own presentation —
+  // proving the card can no longer independently re-open the hole.
+  it('trusts presentation.effectClaimable, never receipt.triggerRate directly (I1)', () => {
+    const base = highTriggerReport();
+    const report: CapabilityReport = {
+      ...base,
+      receipt: { ...base.receipt, triggerRate: undefined },
+      presentation: { ...base.presentation, effectClaimable: false, effectCaveat: 'no session data' },
+    };
+    const svg = renderCapabilityCardSvg(report);
+    const cleanEffect = `${base.receipt.baseline.passed} → ${base.receipt.treatment.passed} of ${base.receipt.n}`;
+    expect(svg).toContain('no session data');
+    expect(svg).not.toContain(cleanEffect);
   });
 
   it('renders "unknown" for cost when deriveCostOverhead is null (zero baseline mean)', () => {
@@ -395,5 +437,48 @@ describe('renderCapabilityCardSvg', () => {
       expect(yValue).toBeLessThanOrEqual(height);
       expect(yValue).toBeGreaterThanOrEqual(0);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D1 S1: the structural fix. Before it, every surface (badge/card/report)
+// re-read `triggerRate` and re-derived the net delta independently — exactly
+// how the report came to leak a clean effect number the badge and card
+// correctly suppressed (C1). This test renders all three surfaces from ONE
+// low-trigger report and asserts none of them contains the bare effect
+// number — the "shaped hole" the D1 review named as the coverage gap no
+// existing test closed.
+// ---------------------------------------------------------------------------
+
+describe('D1 S1 — one report, three surfaces must agree on the honesty framing', () => {
+  it('never states a clean net-delta effect on badge, card, or report when the trigger rate is low', () => {
+    const report = lowTriggerReport();
+    const netDelta = report.receipt.treatment.passed - report.receipt.baseline.passed;
+    expect(netDelta).not.toBe(0); // sanity: a real, non-null effect exists to leak
+    expect(report.presentation.effectClaimable).toBe(false);
+
+    const badgeSvg = renderBadgeSvg({
+      skill: report.skill,
+      measuredOn: report.fields.measuredOn,
+      netDelta: report.presentation.netDelta,
+      triggerRate: report.receipt.triggerRate,
+      costOverhead: deriveCostOverhead(report.receipt),
+    });
+    const cardSvg = renderCapabilityCardSvg(report);
+    const reportMd = renderCapabilityReportMd(report);
+
+    const sign = netDelta > 0 ? '+' : '';
+    const cleanEffectPhrase = `net ${sign}${netDelta} tasks with skill loaded`;
+    const cleanDeltaTasks = `${sign}${netDelta} tasks`;
+    const cleanCardEffect = `${report.receipt.baseline.passed} → ${report.receipt.treatment.passed} of ${report.receipt.n}`;
+
+    for (const surface of [badgeSvg, cardSvg, reportMd]) {
+      expect(surface).not.toContain(cleanEffectPhrase);
+    }
+    expect(badgeSvg).not.toContain(cleanDeltaTasks);
+    expect(badgeSvg).toContain('not exercised');
+    expect(cardSvg).not.toContain(cleanCardEffect);
+    expect(cardSvg).toContain('not exercised');
+    expect(reportMd).toMatch(/measured, effect not attributable/);
   });
 });

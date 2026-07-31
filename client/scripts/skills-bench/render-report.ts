@@ -29,11 +29,19 @@
  * `name` must equal `--skill` — a mismatched pin puts the wrong identity on
  * every rendered artifact.
  *
+ * `--base-url` MUST be a raw-content base, never a GitHub "blob" URL (D1 I6):
+ * `https://github.com/<org>/<repo>/blob/<ref>` serves an HTML page for every
+ * path under it, not the image bytes, so a badge/card embedded through it is
+ * broken in every reader. Use `https://raw.githubusercontent.com/<org>/<repo>/<ref>`
+ * (or a GitHub Pages URL) instead — `main` rejects a `/blob/` base outright,
+ * naming the fix, since this is the one string an author is most likely to
+ * copy from a browser address bar.
+ *
  * Usage:
  *   yarn tsx scripts/skills-bench/render-report.ts \
  *     --run ../bench/runs/tdd-pilot --task-set ../bench/task-sets/tdd \
  *     --skill tdd --pin ../bench/skills-under-test/tdd/pin.json \
- *     --base-url https://github.com/Jinn-Network/skills-eval/blob/main \
+ *     --base-url https://raw.githubusercontent.com/Jinn-Network/skills-eval/main \
  *     [--out ../bench/runs/tdd-pilot/report] [--measured-on 2026-08-01] \
  *     [--agent claude-code] [--skill-source mattpocock/skills@abc123] \
  *     [--include-transcripts] [--cohort ../bench/cohorts/python-testing.json] \
@@ -120,24 +128,66 @@ async function loadManifest(runDir: string): Promise<BenchManifest> {
   return loadJson<BenchManifest>(join(runDir, 'bench-manifest.json'), 'bench-manifest.json');
 }
 
+/** D1 I4: validates every `SkillPin` field before casting, not just `name`/
+ *  `commit` — the earlier version cast straight through after checking two of
+ *  eight fields, so a pin.json predating a field (e.g. `repoLicense`, added
+ *  after `bench/skills-under-test/tdd/pin.json` was written) silently carried
+ *  `undefined` where the type declares `string | null`. Exported for direct
+ *  unit testing (no filesystem needed). */
+export function parsePinShape(raw: Partial<SkillPin>, path: string): SkillPin {
+  for (const key of ['name', 'source', 'commit', 'skillPath', 'sha256', 'fetchedAt'] as const) {
+    if (typeof raw[key] !== 'string' || !raw[key]) {
+      throw new Error(`--pin ${path} is missing "${key}" — not a valid pin.json`);
+    }
+  }
+  for (const key of ['license', 'repoLicense'] as const) {
+    if (raw[key] !== undefined && raw[key] !== null && typeof raw[key] !== 'string') {
+      throw new Error(`--pin ${path} "${key}" must be a string or null`);
+    }
+  }
+  return {
+    name: raw.name!,
+    source: raw.source!,
+    commit: raw.commit!,
+    skillPath: raw.skillPath!,
+    sha256: raw.sha256!,
+    fetchedAt: raw.fetchedAt!,
+    // Normalize an absent optional to `null` explicitly (design contract:
+    // `string | null`, never `undefined`) rather than leaking whatever the
+    // source JSON happened to omit.
+    license: raw.license ?? null,
+    repoLicense: raw.repoLicense ?? null,
+  };
+}
+
 /** Reads and validates `--pin`'s pin.json, then enforces the identity
  *  invariant (design §1): a pin naming a different skill than `--skill`
  *  would put the wrong identity on every artifact this CLI writes. */
 async function loadPin(path: string, skill: string): Promise<SkillPin> {
-  const pin = await loadJson<Partial<SkillPin>>(path, 'pin.json');
-  if (typeof pin.name !== 'string' || !pin.name) {
-    throw new Error(`--pin ${path} is missing "name" — not a valid pin.json`);
-  }
-  if (typeof pin.commit !== 'string' || !pin.commit) {
-    throw new Error(`--pin ${path} is missing "commit" — not a valid pin.json`);
-  }
+  const raw = await loadJson<Partial<SkillPin>>(path, 'pin.json');
+  const pin = parsePinShape(raw, path);
   if (pin.name !== skill) {
     throw new Error(
       `--pin ${path} names skill '${pin.name}', which does not match --skill '${skill}' — a mismatched pin ` +
       'puts the wrong identity on every rendered artifact. Pass the pin.json for the skill actually under test.',
     );
   }
-  return pin as SkillPin;
+  return pin;
+}
+
+/** D1 I6: refuses a GitHub "blob" `--base-url` outright — `blob` URLs serve
+ *  an HTML page, not the image bytes, so every badge/card embed built from
+ *  one is broken in every reader, and this is the one string an author is
+ *  most likely to copy straight from a browser address bar. Exported for
+ *  direct unit testing. */
+export function validateBaseUrl(baseUrl: string): void {
+  if (/^https?:\/\/github\.com\/[^/]+\/[^/]+\/blob\//i.test(baseUrl)) {
+    throw new Error(
+      `--base-url ${baseUrl} is a GitHub "blob" URL — GitHub serves blob URLs as an HTML page, not the raw ` +
+      'bytes, so every badge/card image embedded through it would be broken. Use a raw-content base instead: ' +
+      'https://raw.githubusercontent.com/<org>/<repo>/<ref> (or a GitHub Pages URL).',
+    );
+  }
 }
 
 /** Fail-loud shape check ahead of `validateCohort` (capability-report.ts),
@@ -223,6 +273,7 @@ async function computeTriggerByKey(
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  validateBaseUrl(args.baseUrl);
 
   const manifest = await loadManifest(args.runDir);
   if (manifest.dryRun) {
@@ -279,27 +330,39 @@ async function main(): Promise<void> {
   await copyFile(join(args.runDir, 'attempts.jsonl'), join(args.outDir, 'data', 'attempts.jsonl'));
   await copyFile(join(args.runDir, 'bench-manifest.json'), join(args.outDir, 'data', 'bench-manifest.json'));
   await copyFile(join(args.taskSetDir, 'set.json'), join(args.outDir, 'data', 'set.json'));
-  const dataPaths = ['data/attempts.jsonl', 'data/bench-manifest.json', 'data/set.json', 'data/per-task.md'];
+  // D1 I9: `data/per-task.md` is NOT listed here — `renderReproduce`
+  // (capability-report.ts) already gives it its own "Per-task outcomes:"
+  // line; including it again in `dataPaths` doubled it into "Raw data:" too.
+  const dataPaths = ['data/attempts.jsonl', 'data/bench-manifest.json', 'data/set.json'];
   if (args.includeTranscripts) {
     await cp(join(args.runDir, 'transcripts'), join(args.outDir, 'data', 'transcripts'), { recursive: true });
     dataPaths.push('data/transcripts/');
   }
 
+  // D1 I9: a `--task-set` outside the client tree (e.g. an e2e run against
+  // /tmp) produces a `relative()` path several `../` deep — technically
+  // correct but not a command a reader can usefully copy. Fall back to the
+  // absolute path whenever the relative form would climb out of the repo.
   const taskSetRelFromClient = relative(clientDir, args.taskSetDir);
+  const taskSetPathForCommand = taskSetRelFromClient.startsWith('..') ? args.taskSetDir : taskSetRelFromClient;
   // I4/nit: point at data/bench-manifest.json for arm reconstruction instead
   // of a bracketed arms-file placeholder with no source — the manifest's own
   // "arms" field (name + skillSha256 per arm) is the actual source of truth
   // for rebuilding the --arms JSON this run used.
   const rerunCommand =
-    `yarn tsx scripts/skills-bench/run-bench.ts --task-set ${taskSetRelFromClient} ` +
+    `yarn tsx scripts/skills-bench/run-bench.ts --task-set ${taskSetPathForCommand} ` +
     `--arms <rebuild from data/bench-manifest.json's "arms" field — treatment '${treatmentArm.name}' ` +
     `@ skillSha256=${treatmentArm.skillSha256 ?? 'n/a'}> ` +
     `--model ${manifest.model} --out <fresh-out-dir>`;
 
   // Identity (design §1): `<skill>@<sha>`, sha = short form of pin.commit
   // (the resolved upstream commit) — NOT `pin.sha256` (the vendored-bytes
-  // hash, a different identity; see capability-card.ts's shortCommit doc
-  // comment for the same distinction on the card face).
+  // hash, a different identity; see capability-report.ts's
+  // `shortShaFromSource`/`ReportPresentation.shortSha` doc comments for the
+  // same distinction on the card/report face). This derivation stays
+  // necessary here (unlike the card/report) because it feeds `links.reportUrl`
+  // etc., which must exist BEFORE `buildCapabilityReport` — and therefore
+  // before `report.presentation.shortSha` — can be computed.
   const shortSha = pin.commit.slice(0, 8);
   const baseUrl = args.baseUrl.replace(/\/+$/, '');
   const artifactRoot = `${baseUrl}/reports/${args.skill}@${shortSha}`;
@@ -353,7 +416,10 @@ async function main(): Promise<void> {
   await writeFile(badgePath, renderBadgeSvg({
     skill: args.skill,
     measuredOn: args.measuredOn,
-    netDelta: report.receipt.treatment.passed - report.receipt.baseline.passed,
+    // D1 (d): read the once-computed presentation value rather than
+    // re-deriving `treatment.passed - baseline.passed` at this call site —
+    // one of six places the delta used to be independently recomputed.
+    netDelta: report.presentation.netDelta,
     // C1: pass the trigger rate through so a low/unknown rate renders the
     // honesty caveat instead of the bare net delta — see BadgeOptions'
     // doc comment (capability-report.ts) for why this must never be
