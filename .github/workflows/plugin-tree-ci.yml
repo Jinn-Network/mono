@@ -9,6 +9,7 @@ on:
     branches: [next]
     paths:
       - "plugin/**"
+      - ".github/scripts/plugin-tree-*.mjs"
       - ".github/scripts/plugin-tree-*.test.mjs"
       - ".github/workflows/plugin-tree-ci.yml"
       - "docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md"

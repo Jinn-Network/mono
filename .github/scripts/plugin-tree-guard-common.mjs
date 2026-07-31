@@ -27,6 +27,12 @@ export const APPROVED_RUNTIME_RESOLUTIONS = Object.freeze({
   vite: '6.4.3',
 });
 
+/** Exact optionalDependency versions approved for C3 runtime (empty closed map). */
+export const APPROVED_RUNTIME_OPTIONAL_DEPENDENCIES = Object.freeze({});
+
+/** Exact peerDependency versions approved for C3 runtime (empty closed map). */
+export const APPROVED_RUNTIME_PEER_DEPENDENCIES = Object.freeze({});
+
 export const DEPENDENCY_SECTIONS = Object.freeze([
   'dependencies',
   'devDependencies',
@@ -70,7 +76,7 @@ function isTestFile(path) {
   return TEST_FILE.test(path);
 }
 
-function listSourceFiles(directory, topologyErrors, relativeDir) {
+function listSourceFiles(directory, topologyErrors, relativeDir, underSrc = false) {
   if (!existsSync(directory)) return [];
   const stat = lstatSync(directory);
   if (stat.isSymbolicLink()) {
@@ -81,7 +87,11 @@ function listSourceFiles(directory, topologyErrors, relativeDir) {
     return isSourceFile(directory) ? [directory] : [];
   }
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    if (BUILD_ARTIFACTS.has(entry.name)) return [];
+    if (underSrc) {
+      if (entry.name === 'node_modules') return [];
+    } else if (BUILD_ARTIFACTS.has(entry.name)) {
+      return [];
+    }
     const path = join(directory, entry.name);
     const childRel = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
     if (entry.isSymbolicLink()) {
@@ -89,7 +99,7 @@ function listSourceFiles(directory, topologyErrors, relativeDir) {
       return [];
     }
     return entry.isDirectory()
-      ? listSourceFiles(path, topologyErrors, childRel)
+      ? listSourceFiles(path, topologyErrors, childRel, underSrc || entry.name === 'src')
       : isSourceFile(entry.name) ? [path] : [];
   });
 }
@@ -172,7 +182,7 @@ export function discoverPluginPackages({ root: discoveryRoot = pluginRoot } = {}
         const manifest = readJson(manifestPath);
         const srcDir = join(child, 'src');
         const pkgTopologyErrors = [];
-        const sourceFiles = listSourceFiles(srcDir, pkgTopologyErrors, `${childPath}/src`);
+        const sourceFiles = listSourceFiles(srcDir, pkgTopologyErrors, `${childPath}/src`, true);
         const productionSourceFiles = sourceFiles.filter((file) => !isTestFile(file));
         packages.push({
           directory: childPath,
@@ -425,8 +435,18 @@ export function allApprovedMapsForRuntime() {
   return {
     dependencies: APPROVED_RUNTIME_DEPENDENCIES,
     devDependencies: APPROVED_RUNTIME_DEV_DEPENDENCIES,
-    optionalDependencies: {},
-    peerDependencies: {},
+    optionalDependencies: APPROVED_RUNTIME_OPTIONAL_DEPENDENCIES,
+    peerDependencies: APPROVED_RUNTIME_PEER_DEPENDENCIES,
     resolutions: APPROVED_RUNTIME_RESOLUTIONS,
   };
+}
+
+/** Bidirectional exact-version validation for every dependency section. */
+export function validateExactDependencySections(manifest) {
+  const maps = allApprovedMapsForRuntime();
+  return DEPENDENCY_SECTIONS.flatMap((section) => [
+    ...undeclaredDependencies(manifest, maps[section], section),
+    ...unconsumedApprovedEntries(manifest, maps[section], section),
+    ...exactVersionViolations(manifest, maps[section], section),
+  ]).sort(compareCodeUnit);
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -22,12 +22,13 @@ import {
   undeclaredInstallTimeDependencies,
   undeclaredProductionDependencies,
   unconsumedApprovedEntries,
+  validateExactDependencySections,
 } from './plugin-tree-guard-common.mjs';
 import { scanProductionSources } from './plugin-tree-ast-custody.mjs';
 
 const tree = pluginRoot;
 const DECLARED_PLUGIN_PACKAGES = ['runtime'];
-const MIN_SCANNED_FILES = 8;
+const MIN_SCANNED_FILES = 9;
 
 const FROZEN_TRIO = [
   '@jinn-network/core',
@@ -892,6 +893,78 @@ test('R-C3-54 rejects malformed export keys, string targets, and misleading exte
   }
 });
 
+test('R-C3-58 rejects indirect compiler-symbol authority bypasses', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-58-'));
+  try {
+    for (const [name, content, needle] of [
+      ['identity-return.ts', 'function id(x) { return x; } export const leak = id(globalThis.process);', 'forbidden ambient authority argument'],
+      ['reflect-alias.ts', 'const g = Reflect.get; export const leak = g(globalThis, "process").env.HOME;', 'forbidden ambient authority argument'],
+      ['fn-constructor.ts', 'export const leak = (() => {}).constructor("return 1")();', 'dynamic evaluation alias call'],
+      ['require-bracket-call.ts', 'export const fs = require["call"](null, "node:fs");', 'nonliteral dynamic import'],
+      ['reflect-apply-require.ts', 'export const fs = Reflect.apply(require, null, ["node:fs"]);', 'forbidden ambient authority argument'],
+      ['identity-pass.ts', 'function id(x) { return x; } id(process.env);', 'forbidden ambient authority argument'],
+    ]) {
+      const violations = scanFixtureSource(fixture, name, content);
+      assert.ok(violations.some((entry) => entry.includes(needle)), `${name} must fail on ${needle}: ${violations.join('; ')}`);
+    }
+
+    const safe = scanFixtureSource(fixture, 'safe-local.ts', [
+      'function local(x: string) { return x; }',
+      'export const ok = local("safe");',
+    ].join('\n'));
+    assert.deepEqual(safe, []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-59 rejects ambient authority arguments including typed main', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-59-'));
+  try {
+    const violations = scanFixtureSource(fixture, 'main-pass.ts', [
+      'function main(env: Record<string, string | undefined>) { Object.assign(env, { LEAK: "yes" }); }',
+      'main(process.env);',
+    ].join('\n'), { isBinEntry: true });
+    assert.ok(violations.some((entry) => entry.includes('forbidden ambient authority argument')));
+
+    const binSource = readFileSync(join(tree, 'runtime/src/bin.ts'), 'utf8');
+    assert.match(binSource, /readConfigEnvFromProcess/);
+    assert.doesNotMatch(binSource, /buildOwnedEnvSnapshot\(process\.env\)/);
+    assert.doesNotMatch(binSource, /main\(process\.argv\.slice\(2\),\s*process\.env/);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-60 scans src/dist and nested production paths', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-60-'));
+  try {
+    mkdirSync(join(fixture, 'nested-pkg', 'src', 'dist'), { recursive: true });
+    writeFileSync(join(fixture, 'nested-pkg', 'package.json'), JSON.stringify({
+      name: '@jinn-network/dist-scan-fixture',
+      version: '0.0.0',
+    }, null, 2));
+    writeFileSync(join(fixture, 'nested-pkg', 'src', 'dist', 'authority.ts'), 'export const leak = process.env.HOME;\n');
+    writeFileSync(join(fixture, 'nested-pkg', 'src', 'index.ts'), 'export const ok = 1;\n');
+    const discovered = discoverPluginPackages({ root: fixture });
+    assert.equal(discovered.length, 1);
+    assert.ok(discovered[0].productionSourceFiles.some((file) => file.endsWith('/src/dist/authority.ts')));
+    const violations = scanProductionSources(discovered, {
+      readFile: (filePath) => readFileSync(filePath, 'utf8'),
+      forbiddenPackages: [],
+      forbiddenRoots: [],
+    });
+    assert.ok(violations.some((entry) => entry.includes('process.env')));
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-64 guard implementation files match CI trigger pattern', () => {
+  const workflow = readFileSync(join(root, '.github/workflows/plugin-tree-ci.yml'), 'utf8');
+  assert.match(workflow, /\.github\/scripts\/plugin-tree-\*\.mjs/);
+  const guardFiles = readdirSync(join(root, '.github/scripts'))
+    .filter((name) => name.startsWith('plugin-tree-') && name.endsWith('.mjs') && !name.endsWith('.test.mjs'));
+  assert.ok(guardFiles.length >= 3);
+  for (const file of guardFiles) {
+    assert.match(file, /^plugin-tree-.*\.mjs$/);
+  }
+});
+
 test('plugin tree source boundaries hold and the manifest matches the approved shape', () => {
   const packages = discoverPluginPackages();
   const sourceFiles = packages.flatMap((pkg) => pkg.sourceFiles);
@@ -915,6 +988,7 @@ test('plugin tree source boundaries hold and the manifest matches the approved s
   assert.deepEqual(runtimeManifest.bin, { 'jinn-plugin-runtime': './dist/bin.js' });
   assert.deepEqual(runtimeManifest.files.sort(), ['README.md', 'dist/']);
   assert.deepEqual(undeclaredRuntimeDependencies(runtimeManifest), []);
+  assert.deepEqual(validateExactDependencySections(runtimeManifest), []);
   assert.deepEqual(
     exactVersionViolations(runtimeManifest, APPROVED_RUNTIME_DEPENDENCIES, 'dependencies'),
     [],

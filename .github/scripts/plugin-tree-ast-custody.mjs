@@ -24,7 +24,6 @@ const BIN_MUTATING_METHODS = new Set([
 ]);
 const BIN_OBJECT_MUTATORS = new Set(['assign', 'defineProperty', 'defineProperties', 'setPrototypeOf']);
 const BIN_REFLECT_MUTATORS = new Set(['set', 'defineProperty', 'deleteProperty', 'setPrototypeOf']);
-const BIN_ALLOWED_PROCESS_ARG_CALLEES = new Set(['main', 'resolveRuntimeConfig']);
 const BIN_ALLOWED_IMPORTS = [
   { module: 'node:fs', names: ['realpathSync'] },
   { module: 'node:os', names: ['homedir'] },
@@ -183,6 +182,10 @@ class Scope {
     }
     return globalAuthForIdentifier(name) ?? AUTH.local;
   }
+
+  returnAuthFor(node) {
+    return this.authCtx.returnAuthForIdentifier(node);
+  }
 }
 
 function resolveProcessRoot(expr, ts, scope) {
@@ -303,7 +306,10 @@ function authorityFromReflectGet(callExpr, ts, scope) {
 function authorityFromExpression(expr, ts, scope) {
   const unwrapped = unwrapExpression(expr, ts);
   if (ts.isIdentifier(unwrapped)) {
-    return scope.lookup(unwrapped.text, unwrapped);
+    const direct = scope.lookup(unwrapped.text, unwrapped);
+    if (direct !== AUTH.local) return direct;
+    const returnAuth = scope.returnAuthFor(unwrapped);
+    return returnAuth ?? direct;
   }
   if (ts.isCallExpression(unwrapped)) {
     const callee = unwrapExpression(unwrapped.expression, ts);
@@ -328,6 +334,10 @@ function authorityFromExpression(expr, ts, scope) {
     if (baseAuth === AUTH.process) {
       if (member === 'env' || member === 'argv') return AUTH.process;
     }
+    if (member === 'constructor') {
+      const base = unwrapExpression(unwrapped.expression, ts);
+      if (ts.isFunctionExpression(base) || ts.isArrowFunction(base)) return AUTH.Function;
+    }
     if (ts.isIdentifier(inner) && inner.text === 'Intl' && scope.lookup('Intl', inner) === AUTH.Intl) return AUTH.Intl;
     if (LOCALE_MEMBER_APIS.has(member)) return AUTH.localeFn;
     if (baseAuth === AUTH.Function && (member === 'prototype' || member === 'constructor')) return AUTH.Function;
@@ -342,6 +352,10 @@ function authorityFromExpression(expr, ts, scope) {
     const key = literalString(unwrapped.argumentExpression, ts);
     const memberAuth = key ? globalMemberAuth(baseAuth, key) : null;
     if (memberAuth) return memberAuth;
+    if (key === 'constructor') {
+      const base = unwrapExpression(unwrapped.expression, ts);
+      if (ts.isFunctionExpression(base) || ts.isArrowFunction(base)) return AUTH.Function;
+    }
     if (baseAuth === AUTH.global && key === null) return AUTH.global;
     if (key && LOCALE_MEMBER_APIS.has(key)) return AUTH.localeFn;
     return AUTH.local;
@@ -350,6 +364,41 @@ function authorityFromExpression(expr, ts, scope) {
     return authorityFromExpression(unwrapped.right, ts, scope);
   }
   return AUTH.local;
+}
+
+function inferFunctionReturnAuth(fnNode, ts, scope) {
+  const body = fnNode.body;
+  if (!body) return AUTH.local;
+  if (ts.isBlock(body)) {
+    for (const stmt of body.statements) {
+      if (ts.isReturnStatement(stmt) && stmt.expression) {
+        return authorityFromExpression(stmt.expression, ts, scope);
+      }
+    }
+    return AUTH.local;
+  }
+  return authorityFromExpression(body, ts, scope);
+}
+
+function isTransferableAmbientAuth(auth) {
+  return auth === AUTH.process || auth === AUTH.global || auth === AUTH.require
+    || auth === AUTH.eval || auth === AUTH.Function || auth === AUTH.fetch
+    || auth === AUTH.WebSocket || auth === AUTH.EventSource || auth === AUTH.vm
+    || auth === AUTH.binEnv || auth === AUTH.binArgv || auth === AUTH.binMutator;
+}
+
+function checkAmbientArgumentPassing(args, ts, scope, add) {
+  for (const arg of args ?? []) {
+    if (!arg) continue;
+    const auth = authorityFromExpression(arg, ts, scope);
+    if (isTransferableAmbientAuth(auth)) {
+      add('forbidden ambient authority argument');
+      continue;
+    }
+    if (resolveProcessRoot(arg, ts, scope)) {
+      add('forbidden ambient authority argument');
+    }
+  }
 }
 
 function bindPattern(pattern, auth, ts, scope, ctx) {
@@ -435,6 +484,10 @@ function bindFromInitializer(name, initializer, ts, scope, ctx) {
   }
   if (ts.isIdentifier(name)) {
     scope.declareNode(name, auth);
+    if (ts.isArrowFunction(unwrapped) || ts.isFunctionExpression(unwrapped)) {
+      const returnAuth = inferFunctionReturnAuth(unwrapped, ts, scope);
+      ctx.authCtx.setReturnAuthForNode(name, returnAuth);
+    }
     return;
   }
   if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
@@ -543,18 +596,8 @@ function checkBinMutatorCall(callee, args, ts, scope, add) {
   }
 }
 
-function checkBinProcessArgumentPassing(callee, args, ts, scope, add) {
-  let calleeName = null;
-  const unwrappedCallee = unwrapExpression(callee, ts);
-  if (ts.isIdentifier(unwrappedCallee)) calleeName = unwrappedCallee.text;
-  if (BIN_ALLOWED_PROCESS_ARG_CALLEES.has(calleeName ?? '')) return;
-  for (const arg of args) {
-    if (!arg) continue;
-    const root = resolveBinProcessMutationRoot(arg, ts, scope);
-    if (root === 'env' || root === 'argv' || root === 'process') {
-      add(`forbidden bin process ${root} argument`);
-    }
-  }
+function checkBinProcessArgumentPassing(_callee, args, ts, scope, add) {
+  checkAmbientArgumentPassing(args, ts, scope, add);
 }
 
 function predeclareStatement(_stmt, _scope, _ts, _ctx) {
@@ -819,7 +862,7 @@ function scanSourceFile(filePath, content, options) {
     if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node)
       || ts.isMethodDeclaration(node) || ts.isConstructorDeclaration(node)) {
       if (ts.isFunctionDeclaration(node) && node.name) {
-        currentScope.declare(node.name.text, AUTH.local);
+        currentScope.declareNode(node.name, AUTH.local);
       }
       const fnScope = currentScope.child();
       for (const param of node.parameters ?? []) {
@@ -843,6 +886,10 @@ function scanSourceFile(filePath, content, options) {
           }
           bindPattern(param.name, AUTH.local, ts, fnScope, ctx);
         }
+      }
+      const returnAuth = inferFunctionReturnAuth(node, ts, fnScope);
+      if (node.name && ts.isIdentifier(node.name)) {
+        ctx.authCtx.setReturnAuthForNode(node.name, returnAuth);
       }
       if (node.body) visitNode(node.body, fnScope);
       return;
@@ -898,6 +945,7 @@ function scanSourceFile(filePath, content, options) {
 
     if (ts.isCallExpression(node)) {
       const callee = unwrapExpression(node.expression, ts);
+      checkAmbientArgumentPassing(node.arguments ?? [], ts, currentScope, add);
       if (ctx.isBinEntry) {
         checkBinMutatorCall(callee, node.arguments ?? [], ts, currentScope, add);
         checkBinProcessArgumentPassing(callee, node.arguments ?? [], ts, currentScope, add);
@@ -973,6 +1021,21 @@ function scanSourceFile(filePath, content, options) {
       }
       if (ts.isPropertyAccessExpression(callee)) {
         const method = callee.name.text;
+        if (method === 'apply' || method === 'construct') {
+          const owner = unwrapExpression(callee.expression, ts);
+          if (ts.isIdentifier(owner) && owner.text === 'Reflect') {
+            const targetAuth = authorityFromExpression(node.arguments?.[0], ts, currentScope);
+            if (targetAuth === AUTH.eval || targetAuth === AUTH.Function) {
+              add('dynamic evaluation alias call');
+            }
+            if (targetAuth === AUTH.require) {
+              checkImportSpecifier(literalString(node.arguments?.[1], ts), node);
+            }
+            if (targetAuth === AUTH.fetch || targetAuth === AUTH.WebSocket || targetAuth === AUTH.EventSource) {
+              add('network global alias call');
+            }
+          }
+        }
         if (['call', 'apply', 'bind'].includes(method)) {
           const targetAuth = authorityFromExpression(callee.expression, ts, currentScope);
           if (targetAuth === AUTH.eval || targetAuth === AUTH.Function) {
@@ -1002,6 +1065,17 @@ function scanSourceFile(filePath, content, options) {
         checkImportSpecifier(literalString(node.arguments?.[0], ts), node);
       }
       if (ts.isElementAccessExpression(callee)) {
+        const method = memberNameFromAccess(callee, ts);
+        if (method && ['call', 'apply', 'bind'].includes(method)) {
+          const targetAuth = authorityFromExpression(callee.expression, ts, currentScope);
+          if (targetAuth === AUTH.eval || targetAuth === AUTH.Function) {
+            add(`dynamic evaluation ${method}`);
+          }
+          if (targetAuth === AUTH.require) {
+            const specIndex = method === 'apply' ? 1 : 0;
+            checkImportSpecifier(literalString(node.arguments?.[specIndex], ts), node);
+          }
+        }
         const auth = authorityFromExpression(callee.expression, ts, currentScope);
         if (auth === AUTH.eval || auth === AUTH.Function) add('dynamic evaluation alias call');
       }

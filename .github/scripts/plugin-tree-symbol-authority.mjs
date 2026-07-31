@@ -129,6 +129,8 @@ export class CustodyAuthorityContext {
     this.sourceFile = sourceFile;
     /** @type {Map<string, string>} */
     this.provenance = new Map();
+    /** @type {Map<string, string>} */
+    this.returnAuth = new Map();
   }
 
   resolveSymbol(symbol) {
@@ -164,6 +166,22 @@ export class CustodyAuthorityContext {
     if (!nameNode) return;
     const symbol = this.checker.getSymbolAtLocation(nameNode);
     if (symbol) this.setProvenanceForSymbol(symbol, auth);
+  }
+
+  setReturnAuthForNode(nameNode, auth) {
+    if (!nameNode || auth === AUTH.local) return;
+    const symbol = this.checker.getSymbolAtLocation(nameNode);
+    if (!symbol) return;
+    const key = this.symbolKey(this.resolveSymbol(symbol));
+    if (key) this.returnAuth.set(key, auth);
+  }
+
+  returnAuthForIdentifier(node) {
+    if (!this.ts.isIdentifier(node)) return null;
+    const symbol = this.checker.getSymbolAtLocation(node);
+    if (!symbol) return null;
+    const key = this.symbolKey(this.resolveSymbol(symbol));
+    return key ? this.returnAuth.get(key) ?? null : null;
   }
 
   hasLocalUserBinding(symbol, referenceNode) {

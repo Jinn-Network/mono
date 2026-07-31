@@ -18,6 +18,7 @@ import {
   root,
   undeclaredDependencies,
   unconsumedApprovedEntries,
+  validateExactDependencySections,
 } from './plugin-tree-guard-common.mjs';
 
 const packageRoot = pluginRoot;
@@ -217,6 +218,37 @@ test('dependency version probes reject wrong external, sibling, and portal forms
   assert.deepEqual(
     unconsumedApprovedEntries({ dependencies: {} }, APPROVED_RUNTIME_DEPENDENCIES, 'dependencies'),
     ['dependencies:zod'],
+  );
+});
+
+test('R-C3-63 rejects duplicate and ranged entries in every dependency section', () => {
+  const completeDev = {
+    '@types/node': '22.20.1',
+    typescript: '5.9.3',
+    vitest: '4.1.10',
+  };
+  assert.deepEqual(
+    validateExactDependencySections({
+      dependencies: { zod: '4.4.3' },
+      devDependencies: completeDev,
+      optionalDependencies: { zod: '4.4.3' },
+    }),
+    ['optionalDependencies:zod'],
+  );
+  assert.deepEqual(
+    validateExactDependencySections({
+      dependencies: { zod: '4.4.3' },
+      devDependencies: completeDev,
+      peerDependencies: { zod: '^4.4.3' },
+    }),
+    ['peerDependencies:zod'],
+  );
+  assert.deepEqual(
+    validateExactDependencySections({
+      dependencies: { zod: '^4.4.3' },
+      devDependencies: completeDev,
+    }),
+    ['dependencies:zod=^4.4.3'],
   );
 });
 
