@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'task-supply');
-const taskSupplyDirectories = ['admission', 'derivation'];
+const taskSupplyDirectories = ['admission', 'derivation', 'posting'];
 
 // The whole task-supply tree is forbidden the frozen trio, every evidence/discovery/marketplace
 // package, every task-execution package, and every chain/storage client. Admission additionally
@@ -84,6 +84,53 @@ function derivationForbiddenPackages(allowed) {
     ...TASK_SUPPLY_FOREIGN_PACKAGES.filter((forbidden) => forbidden !== '@jinn-network/task-execution-*'),
     ...stillForbidden,
     ...DERIVATION_FORBIDDEN_EXTRA,
+  ];
+}
+
+// posting is an application over the binding (design §3.3): it consumes `@jinn-network/
+// marketplace-binding` (the posting mechanics plus the D7 on-ramp adapters, supply plan finding
+// F7) and `@jinn-network/task-execution-protocol` (Submission sealing). It never imports
+// admission (it carries the receipt by digest and never re-decides admission), never the
+// environment tree (it reads no environment record), never a discovery or trust package (posting
+// signs nothing itself), and never a chain client of its own — every viem client reaches it
+// through the injected marketplace ports.
+const POSTING_MARKETPLACE_ALLOWED = ['@jinn-network/marketplace-binding'];
+const POSTING_TASK_EXECUTION_ALLOWED = ['@jinn-network/task-execution-protocol'];
+
+const POSTING_FORBIDDEN_EXTRA = [
+  '@jinn-network/task-admission',
+  '@jinn-network/task-curation',
+  '@jinn-network/trust-core',
+  '@jinn-network/trust-resolve',
+  '@jinn-network/trust-testing',
+];
+
+/**
+ * Read the member names of a package family off the tree, so a package added to that family
+ * later is banned by default rather than silently admitted by a stale literal list.
+ */
+function familyMembers(treeDirectory) {
+  const familyRoot = join(root, 'packages', treeDirectory);
+  if (!existsSync(familyRoot)) return [];
+  return readdirSync(familyRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && existsSync(join(familyRoot, entry.name, 'package.json')))
+    .map((entry) => JSON.parse(readFileSync(join(familyRoot, entry.name, 'package.json'), 'utf8')).name);
+}
+
+/**
+ * The tree-wide `@jinn-network/marketplace-*` and `@jinn-network/task-execution-*` wildcards,
+ * each replaced by an explicit ban on every family member NOT carved out for posting.
+ */
+function postingForbiddenPackages(
+  marketplaceAllowed = POSTING_MARKETPLACE_ALLOWED,
+  taskExecutionAllowed = POSTING_TASK_EXECUTION_ALLOWED,
+) {
+  const wildcards = ['@jinn-network/marketplace-*', '@jinn-network/task-execution-*'];
+  return [
+    ...TASK_SUPPLY_FOREIGN_PACKAGES.filter((forbidden) => !wildcards.includes(forbidden)),
+    ...familyMembers('marketplace').filter((name) => !marketplaceAllowed.includes(name)).sort(),
+    ...familyMembers('task-execution').filter((name) => !taskExecutionAllowed.includes(name)).sort(),
+    ...POSTING_FORBIDDEN_EXTRA,
   ];
 }
 
@@ -347,6 +394,54 @@ test('task-supply source boundaries remain one-way across the approved graph', (
     derivationForbiddenPackages(DERIVATION_TASK_EXECUTION_ALLOWED),
     FORBIDDEN_ROOTS,
   );
+  // posting imports the marketplace binding (posting mechanics + D7 on-ramp adapters), the
+  // protocol package that owns Submission sealing, and task-derivation for types only.
+  assertBoundary(
+    join(packages, 'posting', 'src'),
+    postingForbiddenPackages(),
+    // `packages/marketplace` is NOT a forbidden root for posting: the binding is its approved
+    // dependency. The relative-path bans on the legacy tree and the verification package hold.
+    FORBIDDEN_ROOTS.filter((forbiddenRoot) => forbiddenRoot !== join(root, 'packages', 'marketplace')),
+  );
+});
+
+test('posting\'s marketplace and task-execution carve-outs admit one package each and ban the rest', () => {
+  const forbidden = postingForbiddenPackages();
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-task-supply-posting-carveout-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'allowed.ts'), [
+      ...POSTING_MARKETPLACE_ALLOWED,
+      ...POSTING_TASK_EXECUTION_ALLOWED,
+      '@jinn-network/task-derivation',
+    ].map((name) => `import x from ${JSON.stringify(name)};`).join('\n'));
+    assert.deepEqual(forbiddenImports(source, forbidden), []);
+
+    const banned = [
+      ...familyMembers('marketplace').filter((name) => !POSTING_MARKETPLACE_ALLOWED.includes(name)),
+      ...familyMembers('task-execution').filter((name) => !POSTING_TASK_EXECUTION_ALLOWED.includes(name)),
+      ...POSTING_FORBIDDEN_EXTRA,
+      'viem',
+    ];
+    assert.ok(banned.length > POSTING_FORBIDDEN_EXTRA.length + 1, 'expected sibling family members to ban');
+    writeFileSync(join(source, 'banned.ts'),
+      banned.map((name) => `import y from ${JSON.stringify(name)};`).join('\n'));
+    assert.equal(forbiddenImports(join(source, 'banned.ts'), forbidden).length, banned.length);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('task-posting reaches task-derivation for types only (supply plan finding F-C5-5)', () => {
+  const production = files(join(packages, 'posting', 'src'))
+    .filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
+  const valueImports = production.flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    return [...source.matchAll(/^\s*import\s+(?!type\b)[^;]*?from\s+["']@jinn-network\/task-derivation["']/gmu)]
+      .map((match) => `${relative(root, file)} -> ${match[0].trim()}`);
+  });
+  assert.deepEqual(valueImports, [],
+    'posting may import @jinn-network/task-derivation with `import type` only: design §3.3 has no '
+      + 'runtime posting -> derivation edge');
 });
 
 test('derivation\'s task-execution carve-out admits exactly two packages and bans the rest', () => {
