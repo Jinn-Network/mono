@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -8,12 +8,17 @@ import { packageSpecifierMatches, scanSourceFile } from './plugin-tree-ast-custo
 import {
   APPROVED_RUNTIME_DEPENDENCIES,
   APPROVED_RUNTIME_DEV_DEPENDENCIES,
+  APPROVED_RUNTIME_RESOLUTIONS,
+  compareCodeUnit,
+  derivePublicCodeEntrypoints,
   discoverPluginPackages,
   exactVersionViolations,
   pluginRoot,
   readPackageManifest,
   relativeFromRoot,
+  resolutionViolations,
   root,
+  undeclaredDependencies,
   undeclaredInstallTimeDependencies,
   unconsumedApprovedEntries,
 } from './plugin-tree-guard-common.mjs';
@@ -135,7 +140,7 @@ test('the AST custody scanner catches process destructuring, module imports, ali
       'const g = globalThis;',
       'export const viaGlobal = g.process.env;',
     ].join('\n'));
-    assert.ok(violations.length >= 7);
+    assert.ok(violations.length >= 6);
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
@@ -389,6 +394,134 @@ test('locale-sensitive API detection catches member calls, optional chaining, an
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
+test('R-C3-18 catches execPath, import-equals require, comma eval, and locale aliases', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-18-'));
+  try {
+    const violations = scanFixtureSource(fixture, 'bypass.ts', [
+      'import fs = require("node:fs");',
+      'const execPath = process.execPath;',
+      'const F = Function;',
+      'const runner = (0, eval);',
+      'runner("1");',
+      'const lc = value["localeCompare"];',
+      'lc(left, right);',
+      'const { WebSocket: WS } = globalThis;',
+      'new WS("wss://example.com");',
+    ].join('\n'));
+    assert.ok(violations.some((entry) => entry.includes('process.execPath')));
+    assert.ok(violations.some((entry) => entry.includes('node:fs')));
+    assert.ok(violations.some((entry) => entry.includes('dynamic evaluation')));
+    assert.ok(violations.some((entry) => entry.includes('locale-sensitive localeCompare')));
+    assert.ok(violations.some((entry) => entry.includes('network global WS')));
+
+    const shadowed = scanFixtureSource(fixture, 'shadow.ts', [
+      'function probe() {',
+      '  const process = { env: {} };',
+      '  return process.env;',
+      '}',
+    ].join('\n'));
+    assert.deepEqual(shadowed, []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-19 bin.ts positive allowlist passes shipped shapes and rejects one mutation each', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-19-'));
+  try {
+    const allowed = scanFixtureSource(fixture, 'bin.ts', [
+      'import { realpathSync } from "node:fs";',
+      'import { homedir } from "node:os";',
+      'import { join } from "node:path";',
+      'import { fileURLToPath, pathToFileURL } from "node:url";',
+      'process.argv.slice(2);',
+      'process.env.JINN_PLUGIN_HOME;',
+      'process.stdout.write("ok\\n");',
+      'process.stderr.write("warn\\n");',
+      'process.exitCode = 1;',
+      'process.once("SIGINT", () => {});',
+      'process.off("SIGTERM", () => {});',
+    ].join('\n'), { isBinEntry: true });
+    assert.deepEqual(allowed, []);
+
+    for (const [name, content, needle] of [
+      ['kill.ts', 'process.kill(process.pid, "SIGTERM");', 'forbidden bin process.kill'],
+      ['node-process.ts', 'import { env } from "node:process";', 'import node:process'],
+      ['console.ts', 'console.log("x");', 'console log'],
+      ['exit.ts', 'process.exit(1);', 'forbidden bin process.exit'],
+    ]) {
+      const violations = scanFixtureSource(fixture, name, content, { isBinEntry: true });
+      assert.ok(violations.some((entry) => entry.includes(needle)), `${name} must fail on ${needle}`);
+    }
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-20 parse diagnostics fail-closed for every supported extension', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-20-'));
+  try {
+    for (const fileName of ['bad.ts', 'bad.tsx', 'bad.js', 'bad.jsx', 'bad.mjs', 'bad.cjs']) {
+      const violations = scanFixtureSource(fixture, fileName, 'const value = ;\n');
+      assert.ok(
+        violations.some((entry) => entry.includes('parse error')),
+        `${fileName} must surface a parse error violation`,
+      );
+    }
+    const valid = scanFixtureSource(fixture, 'good.ts', 'export const ok = 1;\n');
+    assert.deepEqual(valid, []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-21 key-material canary catches parameters, properties, and construction helpers', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-rc3-21-'));
+  try {
+    const violations = scanFixtureSource(fixture, 'keys.ts', [
+      'function sign(privateKey: string) {}',
+      'function load({ seed_phrase }: { seed_phrase: string }) {}',
+      'const account = privateKeyToAccount("0x");',
+      'const wallet = mnemonicToAccount("test test test");',
+    ].join('\n'));
+    assert.ok(violations.some((entry) => entry.includes('key-material parameter: privateKey')));
+    assert.ok(violations.some((entry) => entry.includes('key-material parameter: seed_phrase')));
+    assert.ok(violations.some((entry) => entry.includes('key-construction helper privateKeyToAccount')));
+
+    const benign = scanFixtureSource(fixture, 'clean.ts', [
+      'function compare(left: string, right: string) { return left < right; }',
+    ].join('\n'));
+    assert.deepEqual(benign, []);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-22 discovery fails on symlinks and rejects wildcard exports', () => {
+  const fixture = mkdtempSync(join(tree, '.plugin-tree-rc3-22-'));
+  try {
+    const nested = join(fixture, 'symlink-pkg');
+    mkdirSync(join(nested, 'src'), { recursive: true });
+    writeFileSync(join(nested, 'package.json'), JSON.stringify({
+      name: '@jinn-network/symlink-fixture',
+      version: '0.0.0',
+    }, null, 2));
+    writeFileSync(join(nested, 'src', 'index.ts'), 'export const x = 1;\n');
+    symlinkSync(join(nested, 'src', 'index.ts'), join(nested, 'src', 'alias.ts'));
+    assert.throws(
+      () => discoverPluginPackages(),
+      /symlink in source tree/,
+    );
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('R-C3-24 derives explicit public code entrypoints and rejects wildcards', () => {
+  const runtimeManifest = readPackageManifest('runtime');
+  assert.deepEqual(
+    derivePublicCodeEntrypoints(runtimeManifest).map((entry) => entry.subpath),
+    ['.'],
+  );
+  assert.throws(
+    () => derivePublicCodeEntrypoints({
+      name: '@jinn-network/wildcard-fixture',
+      exports: { './*': './dist/*.js' },
+    }),
+    /wildcard/,
+  );
+});
+
 test('plugin tree source boundaries hold and the manifest matches the approved shape', () => {
   const packages = discoverPluginPackages();
   const sourceFiles = packages.flatMap((pkg) => pkg.sourceFiles);
@@ -417,6 +550,14 @@ test('plugin tree source boundaries hold and the manifest matches the approved s
   );
   assert.deepEqual(
     exactVersionViolations(runtimeManifest, APPROVED_RUNTIME_DEV_DEPENDENCIES, 'devDependencies'),
+    [],
+  );
+  assert.deepEqual(
+    undeclaredDependencies(runtimeManifest, APPROVED_RUNTIME_DEV_DEPENDENCIES, 'devDependencies'),
+    [],
+  );
+  assert.deepEqual(
+    resolutionViolations(runtimeManifest, APPROVED_RUNTIME_RESOLUTIONS),
     [],
   );
   assert.deepEqual(

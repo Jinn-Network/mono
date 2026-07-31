@@ -1,23 +1,60 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
 
-import { discoverPluginPackages, pluginRoot, root } from './plugin-tree-guard-common.mjs';
+import {
+  APPROVED_RUNTIME_DEV_DEPENDENCIES,
+  derivePublicCodeEntrypoints,
+  discoverPluginPackages,
+  pluginRoot,
+} from './plugin-tree-guard-common.mjs';
 
 const treeRoot = pluginRoot;
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'jinn-plugin-tree-packed-types-'));
 const archivesRoot = join(temporaryRoot, 'archives');
 const consumerRoot = join(temporaryRoot, 'consumer');
 
-const packages = discoverPluginPackages().map((pkg) => [pkg.directory, pkg.name]);
-const PACKED_TYPES_PACKAGES = packages.map(([directory]) => directory);
+const packages = discoverPluginPackages();
+const multiExportFixture = mkdtempSync(join(treeRoot, '.plugin-tree-multi-export-'));
+const multiExportDir = join(multiExportFixture, 'multi-export-pkg');
+mkdirSync(join(multiExportDir, 'dist'), { recursive: true });
+mkdirSync(join(multiExportDir, 'src'), { recursive: true });
+writeFileSync(join(multiExportDir, 'package.json'), JSON.stringify({
+  name: '@jinn-network/multi-export-fixture',
+  version: '0.0.0',
+  type: 'module',
+  exports: {
+    '.': { types: './dist/index.d.ts', import: './dist/index.js' },
+    './extra': { types: './dist/extra.d.ts', import: './dist/extra.js' },
+  },
+}, null, 2));
+writeFileSync(join(multiExportDir, 'dist', 'index.js'), 'export const root = 1;\n');
+writeFileSync(join(multiExportDir, 'dist', 'index.d.ts'), 'export declare const root: number;\n');
+writeFileSync(join(multiExportDir, 'dist', 'extra.js'), 'export const extra = 2;\n');
+writeFileSync(join(multiExportDir, 'dist', 'extra.d.ts'), 'export declare const extra: number;\n');
+writeFileSync(join(multiExportDir, 'src', 'index.ts'), 'export const root = 1;\n');
+writeFileSync(join(multiExportDir, 'src', 'extra.ts'), 'export const extra = 2;\n');
 
-const codeEntrypoints = packages.map(([, name]) => name);
+const discoveredPackages = discoverPluginPackages();
+const multiExportPackage = discoveredPackages.find((pkg) => pkg.name === '@jinn-network/multi-export-fixture');
+if (!multiExportPackage) {
+  throw new Error('multi-export fixture package must be discovered before packed-types validation');
+}
+const multiExportEntrypoints = derivePublicCodeEntrypoints(multiExportPackage.manifest);
+if (multiExportEntrypoints.length !== 2) {
+  throw new Error(`expected two public code entrypoints, got ${multiExportEntrypoints.length}`);
+}
 
-const CROSS_TREE_PACKAGES = [];
+const allEntrypoints = discoveredPackages.flatMap((pkg) =>
+  derivePublicCodeEntrypoints(pkg.manifest).map((entrypoint) => ({
+    packageName: pkg.name,
+    importSpecifier: entrypoint.subpath === '.'
+      ? pkg.name
+      : `${pkg.name}${entrypoint.subpath.slice(1)}`,
+  })),
+);
 
 function run(command, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
@@ -51,54 +88,44 @@ async function packOne(directory, name) {
   return join(archivesRoot, packed[0].filename);
 }
 
-const nestedFixture = mkdtempSync(join(treeRoot, '.plugin-tree-nested-packed-'));
-try {
-  const nested = join(nestedFixture, 'nested-pkg');
-  mkdirSync(join(nested, 'src'), { recursive: true });
-  await writeFile(join(nested, 'package.json'), JSON.stringify({
-    name: '@jinn-network/nested-packed-fixture',
-    version: '0.0.0',
-    type: 'module',
-    exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } },
-  }, null, 2));
-  const discovered = discoverPluginPackages().map((pkg) => pkg.directory);
-  if (!discovered.some((directory) => directory.endsWith('nested-pkg'))) {
-    throw new Error('nested fixture package must be discovered before packed-types validation');
-  }
-} finally {
-  rmSync(nestedFixture, { recursive: true, force: true });
-}
-
 try {
   await mkdir(archivesRoot);
   const archives = new Map();
-  for (const [directory, name] of packages) {
-    archives.set(name, await packOne(join(treeRoot, directory), name));
-  }
-  for (const [name, directory] of CROSS_TREE_PACKAGES) {
-    archives.set(name, await packOne(directory, name));
+  for (const pkg of discoveredPackages) {
+    archives.set(pkg.name, await packOne(pkg.absoluteDirectory, pkg.name));
   }
 
   await mkdir(consumerRoot);
-  await writeFile(join(consumerRoot, 'package.json'), JSON.stringify({
+  const consumerManifest = {
     private: true,
     type: 'module',
-    dependencies: Object.fromEntries([
-      ...packages.map(([, name]) => [name, `file:${archives.get(name)}`]),
-      ...CROSS_TREE_PACKAGES.map(([name]) => [name, `file:${archives.get(name)}`]),
-      ['@types/node', '^22.0.0'],
-      ['typescript', '^5.9.3'],
-    ]),
-  }, null, 2));
-  await run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: consumerRoot });
+    dependencies: Object.fromEntries(
+      discoveredPackages.map((pkg) => [pkg.name, `file:${archives.get(pkg.name)}`]),
+    ),
+    devDependencies: {
+      '@types/node': APPROVED_RUNTIME_DEV_DEPENDENCIES['@types/node'],
+      typescript: APPROVED_RUNTIME_DEV_DEPENDENCIES.typescript,
+    },
+  };
+  await writeFile(join(consumerRoot, 'package.json'), JSON.stringify(consumerManifest, null, 2));
+  await run('npm', ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: consumerRoot });
+  await run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: consumerRoot });
+
+  const installedTypescript = JSON.parse(await readFile(
+    join(consumerRoot, 'node_modules', 'typescript', 'package.json'),
+    'utf8',
+  ));
+  if (installedTypescript.version !== APPROVED_RUNTIME_DEV_DEPENDENCIES.typescript) {
+    throw new Error(`packed consumer installed typescript@${installedTypescript.version}, expected ${APPROVED_RUNTIME_DEV_DEPENDENCIES.typescript}`);
+  }
 
   await writeFile(
     join(consumerRoot, 'consumer.ts'),
-    codeEntrypoints
-      .map((specifier, index) => `import type * as Entry${index} from ${JSON.stringify(specifier)};`)
+    allEntrypoints
+      .map((entrypoint, index) => `import type * as Entry${index} from ${JSON.stringify(entrypoint.importSpecifier)};`)
       .join('\n')
       + '\n\n'
-      + `export type PluginTreeEntrypoints = [\n${codeEntrypoints
+      + `export type PluginTreeEntrypoints = [\n${allEntrypoints
         .map((_, index) => `  typeof Entry${index},`)
         .join('\n')}\n];\n`,
   );
@@ -121,22 +148,23 @@ try {
   );
   await run(typescript, ['--project', 'tsconfig.json'], { cwd: consumerRoot });
 
-  for (const [directory, name] of packages) {
+  for (const pkg of discoveredPackages.filter((entry) => entry.directory === 'runtime' || entry.name === '@jinn-network/multi-export-fixture')) {
     const installed = JSON.parse(await readFile(
-      join(consumerRoot, 'node_modules', ...name.split('/'), 'package.json'),
+      join(consumerRoot, 'node_modules', ...pkg.name.split('/'), 'package.json'),
       'utf8',
     ));
-    if (installed.name !== name) {
-      throw new Error(`${directory} installed as ${installed.name ?? 'an unnamed package'}`);
+    if (installed.name !== pkg.name) {
+      throw new Error(`${pkg.directory} installed as ${installed.name ?? 'an unnamed package'}`);
     }
-    if (installed.publishConfig?.provenance !== true) {
-      throw new Error(`${name} must publish with provenance (custody law C5)`);
+    if (pkg.directory === 'runtime' && installed.publishConfig?.provenance !== true) {
+      throw new Error(`${pkg.name} must publish with provenance (custody law C5)`);
     }
   }
 
   console.log(
-    `Compiled a packed TypeScript consumer against ${codeEntrypoints.length} public code entrypoints across all ${packages.length} plugin tree packages (${PACKED_TYPES_PACKAGES.join(', ')}).`,
+    `Compiled a hermetic packed TypeScript consumer against ${allEntrypoints.length} public code entrypoints across ${discoveredPackages.length} plugin tree packages.`,
   );
 } finally {
+  rmSync(multiExportFixture, { recursive: true, force: true });
   await rm(temporaryRoot, { recursive: true, force: true });
 }

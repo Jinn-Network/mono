@@ -6,12 +6,16 @@ import { test } from 'node:test';
 import {
   APPROVED_RUNTIME_DEPENDENCIES,
   APPROVED_RUNTIME_DEV_DEPENDENCIES,
+  APPROVED_RUNTIME_RESOLUTIONS,
   DEPENDENCY_SECTIONS,
+  compareCodeUnit,
   discoverPluginPackages,
   exactVersionViolations,
   pluginRoot,
   readPackageManifest,
+  resolutionViolations,
   root,
+  undeclaredDependencies,
   unconsumedApprovedEntries,
 } from './plugin-tree-guard-common.mjs';
 
@@ -82,13 +86,24 @@ test('nested package discovery is visible to the inventory guard', () => {
   const fixture = mkdtempSync(join(packageRoot, '.plugin-tree-nested-inventory-'));
   try {
     const nested = join(fixture, 'nested-pkg');
-    mkdirSync(nested, { recursive: true });
+    mkdirSync(join(nested, 'src'), { recursive: true });
     writeFileSync(join(nested, 'package.json'), JSON.stringify({
       name: '@jinn-network/nested-fixture',
       version: '0.0.0',
     }, null, 2));
-    const discovered = discoverPluginPackages().map((pkg) => pkg.directory);
-    assert.ok(discovered.some((directory) => directory.endsWith('nested-pkg')));
+    writeFileSync(join(nested, 'src', 'index.ts'), 'export const probe = 1;\n');
+    const discovered = discoverPluginPackages()
+      .map((pkg) => [pkg.directory, pkg.name])
+      .sort(([leftDirectory], [rightDirectory]) =>
+        compareCodeUnit(leftDirectory, rightDirectory));
+    const declared = [...PLUGIN_PACKAGES].sort(([leftDirectory], [rightDirectory]) =>
+      compareCodeUnit(leftDirectory, rightDirectory));
+    assert.notDeepEqual(
+      discovered,
+      declared,
+      'undeclared nested package must diverge from declared inventory',
+    );
+    assert.ok(discovered.some(([directory]) => directory.endsWith('nested-pkg')));
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
@@ -144,12 +159,43 @@ test('runtime dependency versions match the approved exact maps', () => {
     [],
   );
   assert.deepEqual(
+    undeclaredDependencies(manifest, APPROVED_RUNTIME_DEV_DEPENDENCIES, 'devDependencies'),
+    [],
+  );
+  assert.deepEqual(
+    resolutionViolations(manifest, APPROVED_RUNTIME_RESOLUTIONS),
+    [],
+  );
+  assert.deepEqual(
     unconsumedApprovedEntries(manifest, APPROVED_RUNTIME_DEPENDENCIES, 'dependencies'),
     [],
   );
   assert.deepEqual(
     unconsumedApprovedEntries(manifest, APPROVED_RUNTIME_DEV_DEPENDENCIES, 'devDependencies'),
     [],
+  );
+});
+
+test('closed-world dependency and resolution maps reject undeclared and ranged entries', () => {
+  assert.deepEqual(
+    undeclaredDependencies({ devDependencies: { eslint: '9.0.0' } }, APPROVED_RUNTIME_DEV_DEPENDENCIES, 'devDependencies'),
+    ['devDependencies:eslint'],
+  );
+  assert.deepEqual(
+    exactVersionViolations({ devDependencies: { typescript: '^5.9.3' } }, APPROVED_RUNTIME_DEV_DEPENDENCIES, 'devDependencies'),
+    ['devDependencies:typescript=^5.9.3'],
+  );
+  assert.deepEqual(
+    resolutionViolations({ resolutions: { vite: '^6.4.3' } }, APPROVED_RUNTIME_RESOLUTIONS),
+    ['resolutions:vite=^6.4.3'],
+  );
+  assert.deepEqual(
+    resolutionViolations({ resolutions: {} }, APPROVED_RUNTIME_RESOLUTIONS),
+    ['resolutions:vite=<missing>'],
+  );
+  assert.deepEqual(
+    unconsumedApprovedEntries({ devDependencies: { typescript: '5.9.3' } }, APPROVED_RUNTIME_DEV_DEPENDENCIES, 'devDependencies'),
+    ['devDependencies:@types/node', 'devDependencies:vitest'],
   );
 });
 

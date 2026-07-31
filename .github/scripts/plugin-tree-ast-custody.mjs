@@ -1,32 +1,52 @@
 import { existsSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 
-import { loadRuntimeTypeScript, relativeFromRoot } from './plugin-tree-guard-common.mjs';
+import { compareCodeUnit, loadRuntimeTypeScript, relativeFromRoot } from './plugin-tree-guard-common.mjs';
 
 const NETWORK_MODULES = [
   'http', 'https', 'http2', 'net', 'tls', 'dgram', 'dns', 'undici',
 ];
-const NETWORK_GLOBALS = ['fetch', 'WebSocket', 'EventSource'];
-const LOCALE_MEMBER_APIS = [
-  'localeCompare',
-  'toLocaleUpperCase',
-  'toLocaleLowerCase',
-  'toLocaleString',
-  'toLocaleDateString',
-  'toLocaleTimeString',
-];
-const PROCESS_SURFACES = new Set([
-  'env', 'argv', 'stdin', 'stdout', 'stderr', 'exit', 'kill', 'chdir', 'cwd', 'title',
+const NETWORK_GLOBALS = new Set(['fetch', 'WebSocket', 'EventSource']);
+const LOCALE_MEMBER_APIS = new Set([
+  'localeCompare', 'toLocaleUpperCase', 'toLocaleLowerCase',
+  'toLocaleString', 'toLocaleDateString', 'toLocaleTimeString',
 ]);
-const PROCESS_MODULE_SPECS = new Set(['node:process', 'process']);
-const FORBIDDEN_FS_SPECS = new Set(['node:fs', 'fs']);
-const FORBIDDEN_CHILD_PROCESS_SPECS = new Set(['node:child_process', 'child_process']);
-const BIN_ALLOWED_FS = Object.freeze({
-  module: 'node:fs',
-  names: new Set(['realpathSync']),
+const BIN_ALLOWED_PROCESS_MEMBERS = new Set(['argv', 'env', 'stdout', 'stderr', 'exitCode', 'once', 'off']);
+const BIN_ALLOWED_SIGNALS = new Set(['SIGINT', 'SIGTERM']);
+const BIN_ALLOWED_IMPORTS = [
+  { module: 'node:fs', names: ['realpathSync'] },
+  { module: 'node:os', names: ['homedir'] },
+  { module: 'node:path', names: ['join'] },
+  { module: 'node:url', names: ['fileURLToPath', 'pathToFileURL'] },
+];
+const KEY_CONSTRUCTION_CALLEES = new Set([
+  'privateKeyToAccount', 'mnemonicToAccount', 'hdKeyToAccount', 'generatePrivateKey',
+]);
+const KEY_MATERIAL_NAME = /^(?:private[_-]?key|secret[_-]?key|mnemonic|seed[_-]?phrase|signer[_-]?key)$/i;
+const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
+
+const AUTH = Object.freeze({
+  local: 'local',
+  process: 'process',
+  global: 'global',
+  require: 'require',
+  eval: 'eval',
+  Function: 'Function',
+  fetch: 'fetch',
+  WebSocket: 'WebSocket',
+  EventSource: 'EventSource',
+  Intl: 'Intl',
+  localeFn: 'localeFn',
+  console: 'console',
 });
 
-const DYNAMIC_EVAL_NAMES = new Set(['eval', 'Function']);
+function scriptKindForPath(filePath, ts) {
+  if (filePath.endsWith('.tsx')) return ts.ScriptKind.TSX;
+  if (filePath.endsWith('.jsx')) return ts.ScriptKind.JSX;
+  if (filePath.endsWith('.js') || filePath.endsWith('.mjs') || filePath.endsWith('.cjs')) return ts.ScriptKind.JS;
+  if (filePath.endsWith('.ts')) return ts.ScriptKind.TS;
+  return null;
+}
 
 function normalizeModuleSpecifier(specifier) {
   if (specifier.startsWith('node:')) return specifier;
@@ -41,24 +61,24 @@ function moduleRoot(specifier) {
 function isNetworkModule(specifier) {
   const rootName = moduleRoot(specifier);
   return NETWORK_MODULES.some((name) =>
-    rootName === name || rootName === `node:${name}` || specifier === name || specifier.startsWith(`${name}/`) || specifier.startsWith(`node:${name}/`));
+    rootName === name || rootName === `node:${name}`
+    || specifier.startsWith(`${name}/`) || specifier.startsWith(`node:${name}/`));
 }
 
 function isForbiddenFs(specifier) {
   const rootName = moduleRoot(specifier);
-  return FORBIDDEN_FS_SPECS.has(rootName) || FORBIDDEN_FS_SPECS.has(specifier)
-    || specifier.startsWith('fs/') || specifier.startsWith('node:fs/');
+  return rootName === 'node:fs' || rootName === 'fs' || specifier.startsWith('node:fs/') || specifier.startsWith('fs/');
 }
 
 function isForbiddenChildProcess(specifier) {
   const rootName = moduleRoot(specifier);
-  return FORBIDDEN_CHILD_PROCESS_SPECS.has(rootName) || FORBIDDEN_CHILD_PROCESS_SPECS.has(specifier)
-    || specifier.startsWith('child_process/') || specifier.startsWith('node:child_process/');
+  return rootName === 'node:child_process' || rootName === 'child_process'
+    || specifier.startsWith('node:child_process/') || specifier.startsWith('child_process/');
 }
 
 function isProcessModule(specifier) {
   const rootName = moduleRoot(specifier);
-  return PROCESS_MODULE_SPECS.has(rootName) || PROCESS_MODULE_SPECS.has(specifier)
+  return rootName === 'node:process' || rootName === 'process'
     || specifier.startsWith('node:process/') || specifier.startsWith('process/');
 }
 
@@ -66,10 +86,6 @@ function insideForbiddenRoot(filePath, specifier, forbiddenRoots) {
   if (!specifier.startsWith('.')) return false;
   const resolved = resolve(dirname(filePath), specifier);
   return forbiddenRoots.some((forbiddenRoot) => {
-    if (!existsSync(forbiddenRoot)) {
-      const rel = relative(forbiddenRoot, resolved);
-      return rel === '' || (!rel.startsWith('..') && !rel.startsWith('/'));
-    }
     const rel = relative(forbiddenRoot, resolved);
     return rel === '' || (!rel.startsWith('..') && !rel.startsWith('/'));
   });
@@ -82,9 +98,8 @@ function packageSpecifierMatches(specifier, forbidden) {
 }
 
 function literalString(node, ts) {
-  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-    return node.text;
-  }
+  if (!node) return null;
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
   return null;
 }
 
@@ -94,145 +109,164 @@ function bindingNameText(name, ts) {
   return null;
 }
 
-class AliasTable {
-  constructor() {
-    this.kinds = new Map();
+function globalAuthForIdentifier(name) {
+  if (name === 'process') return AUTH.process;
+  if (name === 'globalThis' || name === 'global') return AUTH.global;
+  if (name === 'require') return AUTH.require;
+  if (name === 'eval') return AUTH.eval;
+  if (name === 'Function') return AUTH.Function;
+  if (name === 'fetch') return AUTH.fetch;
+  if (name === 'WebSocket') return AUTH.WebSocket;
+  if (name === 'EventSource') return AUTH.EventSource;
+  if (name === 'Intl') return AUTH.Intl;
+  if (name === 'console') return AUTH.console;
+  return null;
+}
+
+class Scope {
+  constructor(parent = null) {
+    this.parent = parent;
+    this.bindings = new Map();
   }
 
-  clone() {
-    const next = new AliasTable();
-    next.kinds = new Map(this.kinds);
-    return next;
+  child() {
+    return new Scope(this);
   }
 
-  set(name, kind) {
-    if (name) this.kinds.set(name, kind);
+  declare(name, auth) {
+    this.bindings.set(name, auth);
   }
 
-  get(name) {
-    return this.kinds.get(name);
+  lookup(name) {
+    if (this.bindings.has(name)) return this.bindings.get(name);
+    return this.parent ? this.parent.lookup(name) : globalAuthForIdentifier(name);
   }
 }
 
-function classifyRootIdentifier(name, aliases) {
-  if (name === 'process') return 'process';
-  if (name === 'globalThis' || name === 'global') return 'global';
-  const alias = aliases.get(name);
-  return alias ?? null;
-}
-
-function resolveAccessChain(expression, ts, aliases) {
-  const parts = [];
-  let current = expression;
-  while (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) {
-    if (ts.isPropertyAccessExpression(current)) {
-      parts.unshift(current.name.text);
-      current = current.expression;
-      continue;
+function authorityFromExpression(expr, ts, scope) {
+  if (ts.isIdentifier(expr)) {
+    return scope.lookup(expr.text) ?? AUTH.local;
+  }
+  if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.expression)) {
+    const base = scope.lookup(expr.expression.text) ?? globalAuthForIdentifier(expr.expression.text);
+    if ((base === AUTH.global || expr.expression.text === 'globalThis' || expr.expression.text === 'global')
+      && expr.name.text === 'process') {
+      return AUTH.process;
     }
-    const key = literalString(current.argumentExpression, ts);
-    if (key === null) return { dynamic: true, parts: [] };
-    parts.unshift(key);
-    current = current.expression;
+    if (base === AUTH.global && expr.name.text === 'Function') return AUTH.Function;
+    if (base === AUTH.global && NETWORK_GLOBALS.has(expr.name.text)) return AUTH[expr.name.text];
+    if (expr.expression.text === 'Intl' || (base === AUTH.Intl)) return AUTH.Intl;
   }
-
-  if (ts.isIdentifier(current)) {
-    return { root: current.text, rootKind: classifyRootIdentifier(current.text, aliases), parts };
-  }
-  if (ts.isPropertyAccessExpression(current) && ts.isIdentifier(current.expression)) {
-    const baseKind = classifyRootIdentifier(current.expression.text, aliases);
-    if (baseKind === 'global' && current.name.text === 'process') {
-      return { root: `${current.expression.text}.process`, rootKind: 'process', parts };
+  if (ts.isElementAccessExpression(expr) && ts.isIdentifier(expr.expression)) {
+    const base = scope.lookup(expr.expression.text) ?? globalAuthForIdentifier(expr.expression.text);
+    const key = literalString(expr.argumentExpression, ts);
+    if ((base === AUTH.global || expr.expression.text === 'globalThis' || expr.expression.text === 'global')
+      && key === 'process') {
+      return AUTH.process;
     }
+    if (base === AUTH.global && key === 'eval') return AUTH.eval;
+    if (base === AUTH.global && key === 'Function') return AUTH.Function;
+    if (key && LOCALE_MEMBER_APIS.has(key)) return AUTH.localeFn;
   }
-  return { unknown: true, parts: [] };
-}
-
-function isIntlAccess(chain) {
-  if (chain.rootKind === 'intl') return true;
-  if (chain.root === 'Intl' || chain.rootKind === 'global' && chain.parts[0] === 'Intl') return true;
-  if (chain.rootKind === 'global' && chain.parts.length >= 1 && chain.parts[0] === 'Intl') return true;
-  return chain.root === 'Intl' || (chain.rootKind === 'global' && chain.parts[0] === 'Intl');
-}
-
-function isLocaleMember(chain) {
-  const member = chain.parts?.[chain.parts.length - 1];
-  return member !== undefined && LOCALE_MEMBER_APIS.includes(member);
-}
-
-function isProcessSurface(chain) {
-  if (chain.rootKind !== 'process') return false;
-  const surface = chain.parts[0];
-  return surface !== undefined && PROCESS_SURFACES.has(surface);
-}
-
-function isNetworkGlobal(chain) {
-  if (!chain.parts) return false;
-  const head = chain.parts[0] ?? chain.root;
-  return head !== undefined && NETWORK_GLOBALS.includes(head);
-}
-
-function recordImportBindings(node, ts, aliases, moduleSpecifier) {
-  if (!ts.isImportDeclaration(node) && !ts.isImportEqualsDeclaration(node)) return;
-  const clause = node.importClause;
-  if (!clause) return;
-
-  if (clause.name) {
-    aliases.set(clause.name.text, moduleSpecifier === 'process' || moduleSpecifier === 'node:process'
-      ? 'process'
-      : moduleSpecifier === 'Intl' ? 'intl' : 'module');
+  if (ts.isParenthesizedExpression(expr)) {
+    return authorityFromExpression(expr.expression, ts, scope);
   }
+  if (ts.isBinaryExpression(expr) && expr.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+    return authorityFromExpression(expr.right, ts, scope);
+  }
+  if (ts.isIdentifier(expr) && expr.text === 'Intl') return AUTH.Intl;
+  return AUTH.local;
+}
 
-  if (!clause.namedBindings) return;
-
-  if (ts.isNamespaceImport(clause.namedBindings)) {
-    if (moduleSpecifier === 'process' || moduleSpecifier === 'node:process') {
-      aliases.set(clause.namedBindings.name.text, 'process');
-    } else if (moduleSpecifier === 'Intl') {
-      aliases.set(clause.namedBindings.name.text, 'intl');
-    }
+function bindPattern(pattern, auth, ts, scope) {
+  if (ts.isIdentifier(pattern)) {
+    scope.declare(pattern.text, auth);
     return;
   }
-
-  if (!ts.isNamedImports(clause.namedBindings)) return;
-  for (const element of clause.namedBindings.elements) {
-    const imported = element.propertyName?.text ?? element.name.text;
-    const local = element.name.text;
-    if (moduleSpecifier === 'process' || moduleSpecifier === 'node:process') {
-      if (PROCESS_SURFACES.has(imported) || imported === 'default') {
-        aliases.set(local, 'process-member');
-      }
-    }
-    if (moduleSpecifier === 'Intl' || imported === 'Intl') {
-      aliases.set(local, 'intl');
-    }
-  }
-}
-
-function visitBindingPattern(pattern, sourceExpr, ts, aliases) {
   if (ts.isObjectBindingPattern(pattern)) {
     for (const element of pattern.elements) {
       if (element.dotDotDotToken) continue;
-      const local = element.name.text;
+      const local = bindingNameText(element.name, ts);
       const property = element.propertyName ? bindingNameText(element.propertyName, ts) : local;
-      if (sourceExpr === 'process' && property && PROCESS_SURFACES.has(property)) {
-        aliases.set(local, 'process-member');
-      }
-      if (sourceExpr === 'global' && property === 'process') {
-        aliases.set(local, 'process');
+      if (!local) continue;
+      if (auth === AUTH.process && property && BIN_ALLOWED_PROCESS_MEMBERS.has(property)) {
+        scope.declare(local, AUTH.process);
+      } else if (auth === AUTH.global && property === 'process') {
+        scope.declare(local, AUTH.process);
+      } else if (auth === AUTH.process) {
+        scope.declare(local, AUTH.process);
+      } else if (NETWORK_GLOBALS.has(property ?? local)) {
+        scope.declare(local, AUTH[property ?? local]);
+      } else if (property && LOCALE_MEMBER_APIS.has(property)) {
+        scope.declare(local, AUTH.localeFn);
+      } else {
+        scope.declare(local, auth);
       }
     }
+  }
+}
+
+function bindFromInitializer(name, initializer, ts, scope) {
+  const auth = authorityFromExpression(initializer, ts, scope);
+  if (ts.isIdentifier(name)) {
+    scope.declare(name.text, auth);
     return;
   }
-  if (ts.isIdentifier(pattern) && sourceExpr === 'process') {
-    aliases.set(pattern.text, 'process');
+  if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+    bindPattern(name, auth, ts, scope);
   }
+}
+
+function isAllowedBinImport(specifier, node, ts) {
+  if (!specifier) return false;
+  const allowed = BIN_ALLOWED_IMPORTS.find((entry) => entry.module === specifier);
+  if (!allowed || !ts.isImportDeclaration(node)) return false;
+  const clause = node.importClause;
+  if (!clause?.namedBindings || !ts.isNamedImports(clause.namedBindings)) return false;
+  const names = clause.namedBindings.elements.map((element) => element.name.text);
+  return names.length === allowed.names.length
+    && names.every((name) => allowed.names.includes(name))
+    && clause.namedBindings.elements.every((element) =>
+      (element.propertyName?.text ?? element.name.text) === element.name.text
+      || allowed.names.includes(element.propertyName?.text ?? element.name.text));
+}
+
+function finalizeViolations(violations) {
+  return [...new Set(violations)].sort(compareCodeUnit);
+}
+
+function isAllowedBinProcessUse(node, ts, member) {
+  if (!BIN_ALLOWED_PROCESS_MEMBERS.has(member)) return false;
+  if (member === 'once' || member === 'off') {
+    const parent = node.parent;
+    if (!ts.isCallExpression(parent) || parent.expression !== node) return false;
+    const signal = literalString(parent.arguments[0], ts);
+    return signal !== null && BIN_ALLOWED_SIGNALS.has(signal);
+  }
+  if (member === 'stdout' || member === 'stderr') {
+    const parent = node.parent;
+    return ts.isPropertyAccessExpression(parent)
+      && parent.expression === node
+      && parent.name.text === 'write'
+      && ts.isCallExpression(parent.parent)
+      && parent.parent.expression === parent;
+  }
+  if (member === 'exitCode') {
+    let current = node.parent;
+    while (current) {
+      if (ts.isBinaryExpression(current) && current.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        return current.left === node || (ts.isPropertyAccessExpression(current.left) && current.left.name === node);
+      }
+      current = current.parent;
+    }
+    return false;
+  }
+  return member === 'argv' || member === 'env';
 }
 
 function scanSourceFile(filePath, content, options) {
   const ts = loadRuntimeTypeScript();
   const {
-    repoRoot,
     forbiddenPackages = [],
     forbiddenRoots = [],
     isBinEntry = false,
@@ -241,22 +275,37 @@ function scanSourceFile(filePath, content, options) {
   const violations = [];
   const add = (detail) => violations.push(`${label} -> ${detail}`);
 
-  const sourceFile = ts.createSourceFile(
-    filePath,
-    content,
-    ts.ScriptTarget.Latest,
-    true,
-    filePath.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-  );
+  const ext = SUPPORTED_EXTENSIONS.has('.' + filePath.split('.').pop())
+    ? `.${filePath.split('.').pop()}`
+    : null;
+  const supported = [...SUPPORTED_EXTENSIONS].some((suffix) => filePath.endsWith(suffix));
+  if (!supported) {
+    add(`unsupported production source extension`);
+    return finalizeViolations(violations);
+  }
 
-  const aliases = new AliasTable();
+  const scriptKind = scriptKindForPath(filePath, ts);
+  if (scriptKind === null) {
+    add('unsupported script kind');
+    return finalizeViolations(violations);
+  }
 
-  function checkImportSpecifier(specifier, node, { allowBinFs = false } = {}) {
+  const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true, scriptKind);
+  for (const diagnostic of sourceFile.parseDiagnostics ?? []) {
+    const pos = sourceFile.getLineAndCharacterOfPosition(diagnostic.start ?? 0);
+    add(`parse error ${pos.line + 1}:${pos.character + 1} TS${diagnostic.code}`);
+  }
+  if ((sourceFile.parseDiagnostics ?? []).length > 0) {
+    return finalizeViolations(violations);
+  }
+
+  let scope = new Scope();
+
+  function checkImportSpecifier(specifier, node) {
     if (specifier === null) {
       add('nonliteral dynamic import');
       return;
     }
-
     if (forbiddenPackages.some((forbidden) => packageSpecifierMatches(specifier, forbidden))) {
       add(specifier);
       return;
@@ -269,7 +318,7 @@ function scanSourceFile(filePath, content, options) {
       add(`network module ${specifier}`);
       return;
     }
-    if (isProcessModule(specifier) && !isBinEntry) {
+    if (isProcessModule(specifier)) {
       add(`import ${specifier}`);
       return;
     }
@@ -278,172 +327,244 @@ function scanSourceFile(filePath, content, options) {
       return;
     }
     if (isForbiddenFs(specifier)) {
-      if (allowBinFs && specifier === BIN_ALLOWED_FS.module && ts.isImportDeclaration(node)) {
-        const clause = node.importClause;
-        const invalid = !clause?.namedBindings || !ts.isNamedImports(clause.namedBindings)
-          || clause.namedBindings.elements.length !== 1
-          || clause.namedBindings.elements[0].name.text !== 'realpathSync'
-          || (clause.namedBindings.elements[0].propertyName?.text ?? 'realpathSync') !== 'realpathSync';
-        if (invalid) add(`forbidden fs import ${specifier}`);
-        return;
-      }
+      if (isBinEntry && isAllowedBinImport(specifier, node, ts)) return;
       add(specifier);
     }
   }
 
-  function visit(node) {
+  function reportProcessAccess(node, member, via = 'process') {
+    if (isBinEntry) {
+      if (!isAllowedBinProcessUse(node, ts, member)) {
+        add(`forbidden bin process.${member}`);
+      }
+      return;
+    }
+    add(`${via}.${member}`);
+  }
+
+  function checkKeyMaterial(name, context) {
+    if (KEY_MATERIAL_NAME.test(name)) {
+      add(`key-material ${context}: ${name}`);
+    }
+  }
+
+  function visitNode(node, currentScope) {
+    scope = currentScope;
+
+    if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node)) {
+      const fnScope = currentScope.child();
+      for (const param of node.parameters ?? []) {
+        if (ts.isIdentifier(param.name)) {
+          checkKeyMaterial(param.name.text, 'parameter');
+          fnScope.declare(param.name.text, AUTH.local);
+        } else {
+          if (ts.isObjectBindingPattern(param.name) || ts.isArrayBindingPattern(param.name)) {
+            for (const element of param.name.elements ?? []) {
+              const destructuredName = bindingNameText(element.name, ts);
+              if (destructuredName) checkKeyMaterial(destructuredName, 'parameter');
+            }
+          }
+          bindPattern(param.name, AUTH.local, ts, fnScope);
+        }
+      }
+      if (node.body) ts.forEachChild(node.body, (child) => visitNode(child, fnScope));
+      return;
+    }
+
     if (ts.isImportDeclaration(node) && node.moduleSpecifier) {
       const specifier = literalString(node.moduleSpecifier, ts);
-      checkImportSpecifier(specifier, node, { allowBinFs: isBinEntry });
-      if (specifier) recordImportBindings(node, ts, aliases, moduleRoot(specifier));
+      checkImportSpecifier(specifier, node);
+      if (specifier && ts.isImportDeclaration(node) && node.importClause?.namedBindings && ts.isNamedImports(node.importClause.namedBindings)) {
+        for (const element of node.importClause.namedBindings.elements) {
+          currentScope.declare(element.name.text, AUTH.local);
+        }
+      }
+      if (node.importClause?.name) currentScope.declare(node.importClause.name.text, AUTH.local);
+    }
+
+    if (ts.isImportEqualsDeclaration(node) && node.moduleReference && ts.isExternalModuleReference(node.moduleReference)) {
+      const specifier = literalString(node.moduleReference.expression, ts);
+      checkImportSpecifier(specifier, node);
+      if (node.name) currentScope.declare(node.name.text, AUTH.local);
     }
 
     if (ts.isExportDeclaration(node) && node.moduleSpecifier) {
-      const specifier = literalString(node.moduleSpecifier, ts);
-      checkImportSpecifier(specifier, node);
+      checkImportSpecifier(literalString(node.moduleSpecifier, ts), node);
     }
 
     if (ts.isImportCall?.(node) || node.kind === ts.SyntaxKind.ImportCall) {
-      const specifier = literalString(node.arguments?.[0], ts);
-      checkImportSpecifier(specifier, node);
+      checkImportSpecifier(literalString(node.arguments?.[0], ts), node);
+    }
+
+    if (ts.isVariableDeclaration(node)) {
+      if (node.name && node.initializer) {
+        bindFromInitializer(node.name, node.initializer, ts, currentScope);
+      } else if (ts.isIdentifier(node.name)) {
+        currentScope.declare(node.name.text, AUTH.local);
+      }
+    }
+
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      if (ts.isObjectBindingPattern(node.left) || ts.isArrayBindingPattern(node.left)) {
+        bindPattern(node.left, authorityFromExpression(node.right, ts, currentScope), ts, currentScope);
+      } else if (ts.isIdentifier(node.left)) {
+        currentScope.declare(node.left.text, authorityFromExpression(node.right, ts, currentScope));
+      }
     }
 
     if (ts.isCallExpression(node)) {
-      const calleeText = ts.isIdentifier(node.expression) ? node.expression.text : null;
-      if (calleeText === 'require' || calleeText === 'import') {
-        const specifier = node.arguments[0] ? literalString(node.arguments[0], ts) : null;
-        checkImportSpecifier(specifier, node);
-      }
-      if (calleeText && DYNAMIC_EVAL_NAMES.has(calleeText)) {
-        add(`dynamic evaluation ${calleeText}`);
-      }
-      const evalAlias = ts.isIdentifier(node.expression) ? aliases.get(node.expression.text) : null;
-      if (evalAlias === 'eval' || evalAlias === 'Function') {
-        add('dynamic evaluation alias');
-      }
-    }
-
-    if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'Function') {
-      add('dynamic evaluation Function');
-    }
-
-    if (ts.isVariableDeclaration(node) && node.initializer) {
-      if (ts.isIdentifier(node.initializer) && node.initializer.text === 'process') {
-        const local = ts.isIdentifier(node.name) ? node.name.text : null;
-        if (local) aliases.set(local, 'process');
-      }
-      if (ts.isIdentifier(node.initializer) && (node.initializer.text === 'globalThis' || node.initializer.text === 'global')) {
-        const local = ts.isIdentifier(node.name) ? node.name.text : null;
-        if (local) aliases.set(local, 'global');
-      }
-      if (ts.isPropertyAccessExpression(node.initializer)
-        && ts.isIdentifier(node.initializer.expression)
-        && (node.initializer.expression.text === 'globalThis' || node.initializer.expression.text === 'global')
-        && node.initializer.name.text === 'process'
-        && ts.isIdentifier(node.name)) {
-        aliases.set(node.name.text, 'process');
-      }
-      if (ts.isIdentifier(node.initializer) && node.initializer.text === 'Intl' && ts.isIdentifier(node.name)) {
-        aliases.set(node.name.text, 'intl');
-      }
-      if (ts.isObjectBindingPattern(node.name) && ts.isIdentifier(node.initializer)) {
-        const source = node.initializer.text === 'process' ? 'process'
-          : (node.initializer.text === 'globalThis' || node.initializer.text === 'global') ? 'global'
-            : node.initializer.text;
-        visitBindingPattern(node.name, source, ts, aliases);
-        if (aliases.get(node.initializer.text) === 'process') {
-          visitBindingPattern(node.name, 'process', ts, aliases);
+      const callee = node.expression;
+      if (ts.isIdentifier(callee)) {
+        const auth = currentScope.lookup(callee.text);
+        if (auth === AUTH.require) {
+          checkImportSpecifier(literalString(node.arguments[0], ts), node);
+        }
+        if (auth === AUTH.eval || auth === AUTH.Function || callee.text === 'eval' || callee.text === 'Function') {
+          add(`dynamic evaluation ${callee.text}`);
+        }
+        if (KEY_CONSTRUCTION_CALLEES.has(callee.text)) {
+          add(`key-construction helper ${callee.text}`);
+        }
+        if (auth === AUTH.fetch || auth === AUTH.WebSocket || auth === AUTH.EventSource
+          || NETWORK_GLOBALS.has(callee.text)) {
+          add(`network global ${callee.text}`);
+        }
+        if (auth === AUTH.localeFn) {
+          add('locale-sensitive aliased call');
         }
       }
-      if (ts.isObjectBindingPattern(node.name)
-        && ts.isPropertyAccessExpression(node.initializer)
-        && ts.isIdentifier(node.initializer.expression)
-        && (node.initializer.expression.text === 'globalThis' || node.initializer.expression.text === 'global')
-        && node.initializer.name.text === 'process') {
-        visitBindingPattern(node.name, 'process', ts, aliases);
+      if (ts.isPropertyAccessExpression(callee)) {
+        const method = callee.name.text;
+        if (['call', 'apply', 'bind'].includes(method)) {
+          const targetAuth = authorityFromExpression(callee.expression, ts, currentScope);
+          if (targetAuth === AUTH.eval || targetAuth === AUTH.Function) {
+            add(`dynamic evaluation ${method}`);
+          }
+        }
+      }
+      if (ts.isElementAccessExpression(callee) && ts.isIdentifier(callee.expression)) {
+        const auth = currentScope.lookup(callee.expression.text);
+        if (auth === AUTH.eval || auth === AUTH.Function) add('dynamic evaluation alias call');
+      }
+      if (ts.isParenthesizedExpression(callee) || (ts.isBinaryExpression(callee) && callee.operatorToken.kind === ts.SyntaxKind.CommaToken)) {
+        let inner = callee;
+        while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+        if (ts.isBinaryExpression(inner) && inner.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+          const rightAuth = authorityFromExpression(inner.right, ts, currentScope);
+          if (rightAuth === AUTH.eval || rightAuth === AUTH.Function) add('dynamic evaluation comma');
+        }
       }
     }
 
-    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
-      const chain = resolveAccessChain(node, ts, aliases);
-      if (chain.dynamic) {
-        const expr = node.expression;
-        const processRelated = (ts.isIdentifier(expr) && (classifyRootIdentifier(expr.text, aliases) === 'process' || aliases.get(expr.text) === 'process'))
-          || (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.expression)
-            && (expr.expression.text === 'globalThis' || expr.expression.text === 'global')
-            && expr.name.text === 'process');
-        if (!isBinEntry && processRelated) {
-          add('dynamic computed ambient access');
-        }
-      } else if (isProcessSurface(chain) && !isBinEntry) {
-        add(`process.${chain.parts[0]}`);
-      } else if (isLocaleMember(chain)) {
-        add(`locale-sensitive ${chain.parts[chain.parts.length - 1]}`);
-      } else if (isIntlAccess(chain)) {
+    if (ts.isNewExpression(node)) {
+      const auth = authorityFromExpression(node.expression, ts, currentScope);
+      if (auth === AUTH.Function || (ts.isIdentifier(node.expression) && node.expression.text === 'Function')) {
+        add('dynamic evaluation Function');
+      }
+      if (auth === AUTH.WebSocket || auth === AUTH.EventSource
+        || (ts.isIdentifier(node.expression) && NETWORK_GLOBALS.has(node.expression.text))) {
+        add(`network global ${ts.isIdentifier(node.expression) ? node.expression.text : 'constructor'}`);
+      }
+      if (auth === AUTH.Intl || (ts.isIdentifier(node.expression) && node.expression.text === 'Intl')) {
         add('Intl');
-      } else if (isNetworkGlobal(chain)) {
-        add(`network global ${chain.parts[0] ?? chain.root}`);
-      } else if (chain.rootKind === 'process-member' && !isBinEntry) {
-        add('process alias member');
-      }
-      if (!isBinEntry && chain.rootKind === 'global' && chain.parts[0] === 'process' && chain.parts[1] && PROCESS_SURFACES.has(chain.parts[1])) {
-        add(`globalThis.process.${chain.parts[1]}`);
       }
     }
 
-    if (ts.isIdentifier(node) && aliases.get(node.text) === 'process-member' && !isBinEntry) {
-      const parent = node.parent;
-      if (!ts.isPropertyAccessExpression(parent) && !ts.isElementAccessExpression(parent)) {
-        add('process destructured member');
-      }
-    }
-
-    if (ts.isIdentifier(node) && NETWORK_GLOBALS.includes(node.text)) {
-      const parent = node.parent;
-      if ((ts.isCallExpression(parent) && parent.expression === node)
-        || (ts.isNewExpression(parent) && parent.expression === node)) {
-        add(`network global ${node.text}`);
-      }
-    }
-
-    if (ts.isIdentifier(node) && node.text === 'Intl') {
-      add('Intl');
-    }
-
-    if (ts.isIdentifier(node) && aliases.get(node.text) === 'intl') {
-      const parent = node.parent;
-      if (ts.isPropertyAccessExpression(parent) || ts.isNewExpression(parent)) {
+    if (ts.isPropertyAccessExpression(node)) {
+      const auth = authorityFromExpression(node.expression, ts, currentScope);
+      const member = node.name.text;
+      if (auth === AUTH.process) {
+        reportProcessAccess(node, member);
+      } else if (auth === AUTH.global && member === 'process') {
+        reportProcessAccess(node, 'process', 'globalThis');
+      } else if (auth === AUTH.global && member === 'Function') {
+        add('globalThis.Function');
+      } else if (auth === AUTH.global && NETWORK_GLOBALS.has(member)) {
+        add(`network global ${member}`);
+      } else if (LOCALE_MEMBER_APIS.has(member)) {
+        add(`locale-sensitive ${member}`);
+      } else if (auth === AUTH.Intl) {
         add('Intl alias');
+      } else if (auth === AUTH.localeFn) {
+        add('locale-sensitive aliased member');
+      } else if (auth === AUTH.console) {
+        add(`console ${member}`);
+      } else if (auth === AUTH.fetch || auth === AUTH.WebSocket || auth === AUTH.EventSource) {
+        add(`network global ${member}`);
+      }
+      if (ts.isIdentifier(node.expression) && node.expression.text === 'Intl') {
+        add('Intl');
       }
     }
 
-    if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && aliases.get(node.expression.text) === 'process' && !isBinEntry) {
-      if (PROCESS_SURFACES.has(node.name.text)) {
-        add(`process alias ${node.name.text}`);
+    if (ts.isElementAccessExpression(node)) {
+      const auth = authorityFromExpression(node.expression, ts, currentScope);
+      const key = literalString(node.argumentExpression, ts);
+      if (auth === AUTH.process) {
+        if (key === null) add('dynamic computed process access');
+        else reportProcessAccess(node, key);
+      } else if (auth === AUTH.global && key === 'process') {
+        add('globalThis.process bracket');
+      } else if (auth === AUTH.global && (key === 'eval' || key === 'Function')) {
+        add(`globalThis.${key}`);
+      } else if (key && LOCALE_MEMBER_APIS.has(key)) {
+        add(`locale-sensitive ${key}`);
+      } else if (auth === AUTH.global && key && NETWORK_GLOBALS.has(key)) {
+        add(`network global ${key}`);
       }
     }
 
-    if (ts.isElementAccessExpression(node) && ts.isIdentifier(node.expression) && !isBinEntry) {
-      const processAlias = node.expression.text === 'process' || aliases.get(node.expression.text) === 'process';
-      if (processAlias) {
-        const key = literalString(node.argumentExpression, ts);
-        if (key && PROCESS_SURFACES.has(key)) add(`process alias ${key}`);
-        if (key === null) add('dynamic computed ambient access');
+    if (ts.isIdentifier(node)) {
+      const auth = currentScope.lookup(node.text);
+      if (auth === AUTH.process) {
+        const parent = node.parent;
+        if (!ts.isPropertyAccessExpression(parent) && !ts.isElementAccessExpression(parent)) {
+          if (!isBinEntry) add('process reference');
+        }
+      }
+      if (auth === AUTH.require && ts.isCallExpression(node.parent) && node.parent.expression === node) {
+        checkImportSpecifier(literalString(node.parent.arguments[0], ts), node.parent);
+      }
+      if (auth === AUTH.eval || auth === AUTH.Function) {
+        const parent = node.parent;
+        if (ts.isCallExpression(parent) || ts.isNewExpression(parent)) {
+          add(`dynamic evaluation alias ${node.text}`);
+        }
+      }
+      if (auth === AUTH.fetch || auth === AUTH.WebSocket || auth === AUTH.EventSource) {
+        const parent = node.parent;
+        if (ts.isCallExpression(parent) || ts.isNewExpression(parent)) {
+          add(`network global alias ${node.text}`);
+        }
+      }
+      if (auth === AUTH.localeFn && ts.isCallExpression(node.parent) && node.parent.expression === node) {
+        add('locale-sensitive aliased call');
+      }
+      if (node.text === 'Intl') add('Intl');
+      checkKeyMaterial(node.text, 'identifier');
+    }
+
+    if (ts.isPropertySignature(node) || ts.isPropertyDeclaration(node)) {
+      const propName = bindingNameText(node.name, ts);
+      if (propName) checkKeyMaterial(propName, 'property');
+    }
+
+    if (ts.isParameter(node)) {
+      if (ts.isIdentifier(node.name)) {
+        checkKeyMaterial(node.name.text, 'parameter');
+      } else if (ts.isObjectBindingPattern(node.name) || ts.isArrayBindingPattern(node.name)) {
+        for (const element of node.name.elements ?? []) {
+          const paramName = bindingNameText(element.name, ts);
+          if (paramName) checkKeyMaterial(paramName, 'parameter');
+        }
       }
     }
 
-    if (ts.isIdentifier(node) && node.text === 'console') {
-      const parent = node.parent;
-      if (ts.isPropertyAccessExpression(parent) && ['log', 'info', 'debug', 'table', 'dir'].includes(parent.name.text)) {
-        if (!isBinEntry) add(`console ${parent.name.text}`);
-      }
-    }
-
-    ts.forEachChild(node, visit);
+    ts.forEachChild(node, (child) => visitNode(child, currentScope));
   }
 
-  visit(sourceFile);
-  return violations.sort();
+  visitNode(sourceFile, scope);
+  return finalizeViolations(violations);
 }
 
 export function scanProductionSources(packages, scanOptions) {
@@ -453,9 +574,8 @@ export function scanProductionSources(packages, scanOptions) {
     return scanSourceFile(filePath, content, {
       ...scanOptions,
       isBinEntry,
-      repoRoot: scanOptions.repoRoot,
     });
-  })).sort();
+  })).sort(compareCodeUnit);
 }
 
 export {
