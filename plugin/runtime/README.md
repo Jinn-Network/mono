@@ -22,6 +22,10 @@ check list today; pack-smoke expects that. Use the library API directly until th
 
 Capture, publication, and MCP are not in this package yet.
 
+**Relevance and projection (C6).** Exported from the package root: `openRelevanceIndex`,
+`runPickup`, `projectContext`, `renderFencedBlock`, `rebuildIndex`, sensitivity
+classification, and corpus admission helpers. See the Relevance index section below.
+
 The runtime is a **capability container**. Configuration is typed and injected — the
 library never reads the ambient environment; only the binary does, and it passes what it
 read. Capabilities register against a lifecycle (`start` / `health` / `stop`) and
@@ -106,8 +110,8 @@ that leaves open, stated rather than hidden:
   passes and is then deleted; the doctor reports it if it happens.
 - **If your last session strands and you never open another, its feed stays staged.**
   Recovery runs at session start, and there is no background process to run it otherwise —
-  by design: nothing in this product runs when you are not working. The feed is on disk,
-  owner-only, and untouched; a later session picks it up whenever you next start one.
+by design: nothing in this product runs when you are not working. The feed is on disk,
+owner-only, and untouched; a later session picks it up whenever you next start one.
 
 ### One archive, one holder
 
@@ -115,3 +119,32 @@ The local evidence archive takes an **exclusive** lock. Capture therefore opens 
 the duration of one seal and closes it again, and never holds a handle across a session. A
 seal that finds the archive held waits, and after
 `JINN_PLUGIN_ARCHIVE_BUSY_TIMEOUT_MS` (10 s by default) reports `capture-archive-busy`.
+
+## Relevance index
+
+The runtime keeps a local full-text index at `config.indexPath` over both evidence planes:
+the operator's own archive and the mirrored public corpus. It is a **derived cache** — never
+announced, never sealed, never a source of truth — and it can be rebuilt from the planes at
+any time with `rebuildIndex`.
+
+Ranking is deliberately local. The record-discovery protocol forbids server-side ranking, so
+relevance is the product's own work: terms are derived from the session's first message and
+repository, and a record scores by *distinct* term coverage, so repeating a keyword earns
+nothing.
+
+**Tokenizer:** SQLite FTS5 `unicode61 remove_diacritics 2`, plus a product-side identifier
+expansion that splits camelCase into its parts. `unicode61` already splits on `_`, `.`, `-`,
+and `/`, so snake_case and path-shaped identifiers index correctly.
+
+**Known limitation — CJK.** `unicode61` does not segment CJK text: a run of ideographs
+becomes one token, so CJK sessions are captured and stored correctly but retrieve poorly.
+Adding the `trigram` tokenizer would fix this and is deliberately deferred: it is optional in
+some SQLite builds, it doubles the index, and its three-character minimum degrades short
+terms. Because the index is a rebuildable cache and its generation records which tokenizer
+built it, changing this later costs one rebuild.
+
+**Sensitivity exclusion.** Every excerpt is classified at index time with the
+`evidence/derivation` detector model. Material carrying high-confidence credential,
+key-shaped, or funds-controlling findings is excluded from the index, so it can never be
+ranked and never be projected. Secrets may exist in a sealed record; they do not come back
+through pickup.

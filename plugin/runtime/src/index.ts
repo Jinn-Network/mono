@@ -101,6 +101,83 @@ export {
 } from "./capture/trajectory.js";
 export type { BuiltTrajectory } from "./capture/trajectory.js";
 
+// C6 — relevance, sensitivity exclusion, and projection.
+export { PLANES, comparePlanes } from "./relevance/planes.js";
+export type { EvidencePlane } from "./relevance/planes.js";
+export {
+  STOPWORDS,
+  deriveRepositorySearchTerms,
+  deriveSearchTerms,
+  discriminatingTerms,
+} from "./relevance/terms.js";
+export {
+  MAX_BODY_CHARS,
+  MAX_EXCERPT_CHARS,
+  MAX_INDEXED_EXCERPTS,
+  MAX_SUMMARY_CHARS,
+  openRelevanceIndex,
+} from "./relevance/index-store.js";
+export type {
+  ExcerptLabel,
+  ExcludedExcerpt,
+  IndexReceipt,
+  IndexStats,
+  IndexableExcerpt,
+  IndexableRecord,
+  RelevanceIndex,
+  RelevanceIndexOptions,
+} from "./relevance/index-store.js";
+export {
+  BODY_TERM_WEIGHT,
+  DEFAULT_SEARCH_LIMIT,
+  RELEVANCE_FLOOR,
+  SUMMARY_TERM_WEIGHT,
+} from "./relevance/search.js";
+export type {
+  ProjectableExcerpt,
+  RankedCandidate,
+  RelevanceQuery,
+} from "./relevance/search.js";
+export {
+  DETECTOR_FAILURE_CLASS,
+  EXCLUDING_BANDS,
+  SENSITIVE_CLASSES,
+  createSensitivityClassifier,
+} from "./relevance/sensitivity.js";
+export type {
+  SensitivityClassifier,
+  SensitivityClassifierOptions,
+  SensitivityVerdict,
+} from "./relevance/sensitivity.js";
+export { createTraceSpanSource } from "./relevance/trace-decode-adapter.js";
+export type { TraceSpanRequest, TraceSpanSource } from "./relevance/trace-decode-adapter.js";
+export {
+  indexLocalPlane,
+  indexLocalRecord,
+  indexPublicPlane,
+  rebuildIndex,
+} from "./relevance/indexing.js";
+export type { IndexingDeps, IndexingReport } from "./relevance/indexing.js";
+export {
+  DEFAULT_PROJECTION_MAX_CHARS,
+  DEFAULT_PROJECTION_MAX_RECORDS,
+  PROVENANCE_PREAMBLE,
+  projectContext,
+  renderFencedBlock,
+} from "./projection/project.js";
+export type {
+  ProjectedExcerpt,
+  ProjectedRecord,
+  ProjectionBudget,
+  ProjectionResult,
+} from "./projection/project.js";
+export { FENCE_PREFIX, QUOTE_PREFIX, deriveFence, quoteBlock } from "./projection/fence.js";
+export { TRUNCATION_TAIL, truncateLineBoundary } from "./projection/truncate.js";
+export { runPickup } from "./pickup.js";
+export type { PickupDeps, PickupRequest } from "./pickup.js";
+export { createCorpusAdmissionFilter } from "./relevance/admission.js";
+export type { AdmissionFilter, CorpusAdmission } from "./relevance/admission.js";
+
 // `bin.ts` is deliberately NOT re-exported: it reads the ambient environment, installs
 // signal handlers, and runs on import as a process entry point. Re-exporting it would
 // pull all three into every consumer.
