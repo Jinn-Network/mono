@@ -1732,7 +1732,7 @@ git commit -m "feat(plugin-runtime): typed, injected configuration surface"
 
 The `{ name, ok, detail, remedy }` shape is the onboarding design's doctor contract, which the reconciliation spec §5 keeps as the experience bar and §9.3 extends with one phrasing: when a precondition is not fixable from this machine, the doctor must report a known-outage state rather than print a no-op remedy. That state is `remedy: null`, and it is a first-class value here rather than a convention C7 has to remember.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plugin/runtime/src/health.test.ts`:
 
@@ -1804,12 +1804,12 @@ describe("RUNTIME_VERSION", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test`
 Expected: FAIL — `Failed to resolve import "./health.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `plugin/runtime/src/version.ts`:
 
@@ -1873,12 +1873,12 @@ export function summarizeHealth(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test && yarn typecheck`
 Expected: PASS — 8 new tests (27 total).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src
