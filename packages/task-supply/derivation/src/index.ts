@@ -27,3 +27,17 @@ export {
   readEnvironmentRecordExtension,
 } from "./environment-extension.js";
 export type { EnvironmentRecordExtension } from "./environment-extension.js";
+export { SPDX_EXPRESSION_PATTERN, assertCandidate } from "./candidate.js";
+export type {
+  Candidate,
+  CandidateProvenance,
+  CandidateTestMaterial,
+  ProvenanceKind,
+} from "./candidate.js";
+export { loadDerivationEnvironment } from "./strategy.js";
+export type {
+  DerivationEnvironment,
+  DerivationLogger,
+  DerivationStrategy,
+  StrategyDeps,
+} from "./strategy.js";
