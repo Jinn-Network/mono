@@ -20,3 +20,12 @@ export const TRAJECTORY_MEDIA_TYPE =
  */
 export const TRAJECTORY_VOCABULARY_PROFILE =
   "https://jinn.network/profiles/trajectory-vocabulary/1.0" as const;
+
+export const TRAJECTORY_DERIVATION_PREDICATE_TYPE =
+  "https://jinn.network/attestations/trajectory-derivation/v1" as const;
+
+export const TRAJECTORY_SUBJECT_NAME = "trajectory.json" as const;
+
+/** C1 owns this IRI. Forward-link PropertyValue.value MUST be a repository digest. */
+export const TRAJECTORY_RECORD_IDENTIFIER_PROPERTY =
+  "https://jinn.network/schemes/trajectory-record-sha256" as const;

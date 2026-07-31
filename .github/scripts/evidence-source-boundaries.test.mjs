@@ -296,6 +296,7 @@ const CONTRIBUTION_FORBIDDEN_PACKAGES = [
 // and performs no I/O outside its fixture loaders in the testing region.
 const TRAJECTORY_ALLOWED_DEPENDENCIES = [
   '@jinn-network/evidence-protocol',
+  '@jinn-network/trust-core',
   '@noble/hashes',
   'zod',
 ];

@@ -7,10 +7,12 @@ import { SPAN_KIND, STATUS_CODE } from "./span.js";
 import { TrajectoryRecordSchema, parseTrajectory, sealTrajectory } from "./schema.js";
 
 const SOURCE_DIGEST = `sha256:${"a".repeat(64)}`;
+const FORMAT_IRI = "https://jinn.network/formats/claude-code-stream-json/v1";
 const DECODER = { decoderId: "claude-code-stream-json", decoderVersion: "1.0.0" };
 
 const traceId = deriveTraceId({
   sourceDigest: SOURCE_DIGEST,
+  formatIri: FORMAT_IRI,
   vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
   ...DECODER,
 });
@@ -23,12 +25,13 @@ const record = () => ({
       mediaType: "application/x-ndjson",
       digest: { sha256: "a".repeat(64) },
     },
-    formatIri: "https://jinn.network/formats/claude-code-stream-json/v1",
+    formatIri: FORMAT_IRI,
   },
   derivation: {
     ...DECODER,
     vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
   },
+  timebase: "synthetic-ordinal" as const,
   traceId,
   spans: [
     {
@@ -36,8 +39,8 @@ const record = () => ({
       parentSpanId: null,
       name: "chat anthropic/claude-opus-4.6",
       kind: SPAN_KIND.CLIENT,
-      startTimeUnixNano: "1000",
-      endTimeUnixNano: "2000",
+      startTimeUnixNano: "0",
+      endTimeUnixNano: "1",
       attributes: [{ key: "gen_ai.provider.name", value: { stringValue: "anthropic" } }],
       events: [],
       status: { code: STATUS_CODE.OK },
@@ -49,6 +52,24 @@ const record = () => ({
 describe("trajectory record schema", () => {
   test("accepts a well-formed record", () => {
     expect(TrajectoryRecordSchema.safeParse(record()).success).toBe(true);
+  });
+
+  test("rejects source.execution when present", () => {
+    const withExecution = {
+      ...record(),
+      source: {
+        ...record().source,
+        execution: {
+          digest: { sha256: "b".repeat(64) },
+        },
+      },
+    };
+    expect(TrajectoryRecordSchema.safeParse(withExecution).success).toBe(false);
+  });
+
+  test("requires timebase", () => {
+    const { timebase: _removed, ...withoutTimebase } = record();
+    expect(TrajectoryRecordSchema.safeParse(withoutTimebase).success).toBe(false);
   });
 
   test("rejects a forged trace id", () => {
@@ -88,6 +109,30 @@ describe("trajectory record schema", () => {
     ).toBe(true);
   });
 
+  test("rejects full completeness with skipped", () => {
+    expect(
+      TrajectoryRecordSchema.safeParse({
+        ...record(),
+        completeness: { decoded: "full", skipped: 1 },
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects partial completeness without skipped", () => {
+    expect(
+      TrajectoryRecordSchema.safeParse({ ...record(), completeness: { decoded: "partial" } })
+        .success,
+    ).toBe(false);
+  });
+
+  test("rejects message.content attribute", () => {
+    const withContent = record();
+    withContent.spans[0]!.attributes = [
+      { key: "message.content", value: { stringValue: "secret" } },
+    ];
+    expect(TrajectoryRecordSchema.safeParse(withContent).success).toBe(false);
+  });
+
   test("rejects an unknown protocol literal", () => {
     expect(
       TrajectoryRecordSchema.safeParse({ ...record(), protocol: "https://example.test/x" })
@@ -99,6 +144,12 @@ describe("trajectory record schema", () => {
     const sealed = sealTrajectory(record());
     expect(parseTrajectory(sealed.bytes).traceId).toBe(traceId);
     expect(sealTrajectory(record()).digest).toBe(sealed.digest);
+  });
+
+  test("namespaced extension survives seal and parse", () => {
+    const sealed = sealTrajectory({ ...record(), "network.jinn.note": "kept" });
+    const parsed = parseTrajectory(sealed.bytes);
+    expect((parsed as Record<string, unknown>)["network.jinn.note"]).toBe("kept");
   });
 
   test("sealing an invalid record throws InvalidDocumentError", () => {

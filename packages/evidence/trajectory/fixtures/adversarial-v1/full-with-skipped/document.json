@@ -72,6 +72,7 @@
     }
   ],
   "completeness": {
-    "decoded": "empty"
+    "decoded": "full",
+    "skipped": 1
   }
 }

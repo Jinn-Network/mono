@@ -11,6 +11,11 @@
       "expectedDisposition": "invalid-document"
     },
     {
+      "id": "full-with-skipped",
+      "description": "A full decode that illegally reports skipped source records.",
+      "expectedDisposition": "invalid-document"
+    },
+    {
       "id": "grafted-parent",
       "description": "A span whose parent identifier belongs to no earlier span in this record.",
       "expectedDisposition": "invalid-document"
@@ -18,6 +23,11 @@
     {
       "id": "substituted-source-digest",
       "description": "Spans copied verbatim onto a different source digest — the derived identifiers no longer agree.",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "message-content-attribute",
+      "description": "A span that inlines message content instead of referencing the source.",
       "expectedDisposition": "invalid-document"
     },
     {

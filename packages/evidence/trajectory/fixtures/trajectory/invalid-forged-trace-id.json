@@ -15,15 +15,16 @@
     "decoderVersion": "1.0.0",
     "vocabularyProfile": "https://jinn.network/profiles/trajectory-vocabulary/1.0"
   },
+  "timebase": "synthetic-ordinal",
   "traceId": "ffffffffffffffffffffffffffffffff",
   "spans": [
     {
-      "spanId": "d190c77eafa866f4",
+      "spanId": "fab180072eaae661",
       "parentSpanId": null,
       "name": "chat anthropic/claude-opus-4.6",
       "kind": 3,
-      "startTimeUnixNano": "1000",
-      "endTimeUnixNano": "2000",
+      "startTimeUnixNano": "0",
+      "endTimeUnixNano": "1",
       "attributes": [
         {
           "key": "gen_ai.provider.name",
@@ -44,12 +45,12 @@
       }
     },
     {
-      "spanId": "d71e294f4d4fbddb",
-      "parentSpanId": "d190c77eafa866f4",
+      "spanId": "d890422107454e52",
+      "parentSpanId": "fab180072eaae661",
       "name": "execute_tool read_file",
       "kind": 1,
-      "startTimeUnixNano": "2000",
-      "endTimeUnixNano": "3000",
+      "startTimeUnixNano": "1",
+      "endTimeUnixNano": "2",
       "attributes": [
         {
           "key": "gen_ai.tool.call.id",

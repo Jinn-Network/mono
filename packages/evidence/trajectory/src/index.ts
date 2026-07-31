@@ -6,14 +6,27 @@ export {
   TRAJECTORY_PROTOCOL,
   TRAJECTORY_RECORD_KIND,
   TRAJECTORY_VOCABULARY_PROFILE,
+  TRAJECTORY_DERIVATION_PREDICATE_TYPE,
+  TRAJECTORY_SUBJECT_NAME,
+  TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
 } from "./identifiers.js";
 export {
   GEN_AI_ATTRIBUTES,
   JINN_ATTRIBUTES,
   OPERATION_NAMES,
   VOCABULARY_UPSTREAM,
+  isAdmittedAttributeKey,
 } from "./vocabulary.js";
 export type { GenAiAttributeKey, JinnAttributeKey } from "./vocabulary.js";
+export { TIMEBASES } from "./timebase.js";
+export type { Timebase } from "./timebase.js";
+
+// Digest forms
+export {
+  toBareSha256Hex,
+  toRepositorySha256Digest,
+} from "./digests.js";
+export type { BareSha256Hex, RepositorySha256Digest } from "./digests.js";
 
 // Sealing primitives
 export { compareCodeUnitStrings } from "./order.js";
@@ -21,6 +34,7 @@ export {
   NonIJsonNumberError,
   NonIJsonStringError,
   UndefinedArrayElementError,
+  UnsupportedCanonicalValueError,
   serializeCanonicalJson,
 } from "./canonical.js";
 export type { JsonValue } from "./canonical.js";
@@ -51,3 +65,24 @@ export {
 export type { AnyValue, Attribute, Span, SpanEvent, SpanStatus } from "./span.js";
 export { TrajectoryRecordSchema, parseTrajectory, sealTrajectory } from "./schema.js";
 export type { TrajectoryRecord } from "./schema.js";
+
+// Derivation attestation
+export {
+  buildTrajectoryDerivationStatement,
+  sealTrajectoryDerivationAttestation,
+  verifyTrajectoryDerivationAttestation,
+} from "./derivation.js";
+export type {
+  BuildTrajectoryDerivationStatementInput,
+  SealedTrajectoryDerivationAttestation,
+  SealTrajectoryDerivationAttestationInput,
+  TrajectoryDerivationAuthorityVerifier,
+  TrajectoryDerivationAuthorityVerifierInput,
+  TrajectoryDerivationAuthorityVerifierResult,
+  TrajectoryDerivationLayerOutcome,
+  TrajectoryDerivationPredicate,
+  TrajectoryDerivationStatement,
+  TrajectoryDerivationVerificationLayers,
+  TrajectoryDerivationVerificationResult,
+  VerifyTrajectoryDerivationAttestationInput,
+} from "./derivation.js";

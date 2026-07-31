@@ -7,6 +7,7 @@ import { TRAJECTORY_PROTOCOL, TRAJECTORY_VOCABULARY_PROFILE } from "./identifier
 import { deriveSpanId, deriveTraceId } from "./identity.js";
 import { type SealedRecord, parseExactWithSchema, sealWithSchema } from "./sealing.js";
 import { SpanSchema } from "./span.js";
+import { TIMEBASES } from "./timebase.js";
 
 const LowercaseSha256Hex = z
   .string()
@@ -29,8 +30,6 @@ const SourceSchema = z.strictObject({
   nativeTrace: DigestBearingDescriptorSchema,
   /** What format those bytes are in — the decoder selection key. */
   formatIri: AbsoluteIri,
-  /** The execution evidence record this trace belongs to, when one exists. */
-  execution: DigestBearingDescriptorSchema.optional(),
 });
 
 const DerivationSchema = z.strictObject({
@@ -50,12 +49,14 @@ export const TrajectoryRecordSchema = topLevelRecordSchema({
   protocol: z.literal(TRAJECTORY_PROTOCOL),
   source: SourceSchema,
   derivation: DerivationSchema,
+  timebase: z.enum(TIMEBASES),
   traceId: z.string().regex(/^[0-9a-f]{32}$/),
   spans: z.array(SpanSchema),
   completeness: CompletenessSchema,
 }).superRefine((record, ctx) => {
   const expectedTraceId = deriveTraceId({
     sourceDigest: `sha256:${record.source.nativeTrace.digest.sha256}`,
+    formatIri: record.source.formatIri,
     decoderId: record.derivation.decoderId,
     decoderVersion: record.derivation.decoderVersion,
     vocabularyProfile: record.derivation.vocabularyProfile,
@@ -66,7 +67,7 @@ export const TrajectoryRecordSchema = topLevelRecordSchema({
       code: "custom",
       path: ["traceId"],
       message:
-        "traceId must equal the value derived from source.nativeTrace.digest and derivation",
+        "traceId must equal the value derived from source, formatIri, and derivation",
     });
     return;
   }
@@ -98,11 +99,21 @@ export const TrajectoryRecordSchema = topLevelRecordSchema({
       message: "an empty decode must carry no spans",
     });
   }
-  if (record.completeness.decoded === "partial" && record.completeness.skipped === undefined) {
+  if (record.completeness.decoded === "full" && record.completeness.skipped !== undefined) {
     ctx.addIssue({
       code: "custom",
       path: ["completeness", "skipped"],
-      message: "a partial decode must report how many source records were skipped",
+      message: "a full decode must not report skipped source records",
+    });
+  }
+  if (
+    record.completeness.decoded === "partial" &&
+    (record.completeness.skipped === undefined || record.completeness.skipped < 1)
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["completeness", "skipped"],
+      message: "a partial decode must report at least one skipped source record",
     });
   }
 });

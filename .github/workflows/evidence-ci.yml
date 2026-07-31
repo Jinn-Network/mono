@@ -337,6 +337,11 @@ jobs:
         with:
           name: evidence-protocol-dist
           path: packages/evidence/protocol/dist
+      - name: Build Trust Core distribution
+        working-directory: packages/trust/core
+        run: |
+          yarn install --immutable
+          yarn build
       - name: Install packed-smoke dependency toolchains
         run: (cd packages/evidence/protocol && yarn install --immutable)
       - name: Verify Evidence Trajectory
@@ -536,7 +541,7 @@ jobs:
           CONTRIBUTION_RESULT: ${{ needs.contribution.result }}
           CATALOG_SQLITE_RESULT: ${{ needs['catalog-sqlite'].result }}
           LOCAL_RUNTIME_RESULT: ${{ needs['local-runtime'].result }}
-          TRAJECTORY: ${{ needs.trajectory.result }}
+          TRAJECTORY_RESULT: ${{ needs.trajectory.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
@@ -548,7 +553,7 @@ jobs:
             "$CONTRIBUTION_RESULT" \
             "$CATALOG_SQLITE_RESULT" \
             "$LOCAL_RUNTIME_RESULT" \
-            "$TRAJECTORY"; do
+            "$TRAJECTORY_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4

@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { InvalidDocumentError } from "./sealing.js";
+
+/** Repository digest form — capture/repository APIs and forward-link PropertyValue.value */
+export type RepositorySha256Digest = `sha256:${string}`;
+
+/** ResourceDescriptor / in-toto digest.sha256 form — bare 64 lowercase hex */
+export type BareSha256Hex = string;
+
+const REPOSITORY_SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const BARE_SHA256_PATTERN = /^[0-9a-f]{64}$/;
+
+export function toBareSha256Hex(digest: RepositorySha256Digest): BareSha256Hex {
+  if (!REPOSITORY_SHA256_PATTERN.test(digest)) {
+    throw new InvalidDocumentError([
+      { path: "digest", message: "repository digest must match sha256:<64 lowercase hex>" },
+    ]);
+  }
+  return digest.slice("sha256:".length);
+}
+
+export function toRepositorySha256Digest(hex: BareSha256Hex): RepositorySha256Digest {
+  if (!BARE_SHA256_PATTERN.test(hex)) {
+    throw new InvalidDocumentError([
+      { path: "sha256", message: "bare sha256 must be exactly 64 lowercase hexadecimal digits" },
+    ]);
+  }
+  return `sha256:${hex}`;
+}

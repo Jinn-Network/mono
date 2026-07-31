@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export type GoldenName = "valid" | "minimal";
 
@@ -14,11 +16,27 @@ export interface AdversarialManifest {
   readonly fixtures: readonly AdversarialManifestEntry[];
 }
 
-/** Resolves a path inside the fixture corpus shipped by this package. */
-export function trajectoryFixtureUrl(relativePath: string): URL {
-  if (relativePath.startsWith("/") || relativePath.split("/").includes("..")) {
+const fixtureRoot = resolve(fileURLToPath(new URL("../fixtures", import.meta.url)));
+
+function assertContainedFixturePath(relativePath: string): void {
+  if (relativePath.startsWith("/")) {
     throw new Error("trajectory fixture paths must stay inside fixtures/");
   }
+  const segments = relativePath.split("/");
+  if (segments.includes("..")) {
+    throw new Error("trajectory fixture paths must stay inside fixtures/");
+  }
+  const resolved = resolve(fixtureRoot, relativePath);
+  const normalizedRoot = `${fixtureRoot}${fixtureRoot.endsWith("/") ? "" : "/"}`;
+  if (!resolved.startsWith(normalizedRoot) && resolved !== fixtureRoot) {
+    throw new Error("trajectory fixture paths must stay inside fixtures/");
+  }
+}
+
+/** Resolves a path inside the fixture corpus shipped by this package. */
+export function trajectoryFixtureUrl(relativePath: string): URL {
+  const decoded = decodeURIComponent(relativePath);
+  assertContainedFixturePath(decoded);
   return new URL(`../fixtures/${relativePath}`, import.meta.url);
 }
 

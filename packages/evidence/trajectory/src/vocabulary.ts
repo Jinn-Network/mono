@@ -12,9 +12,9 @@
  */
 export const VOCABULARY_UPSTREAM = Object.freeze({
   repository: "https://github.com/open-telemetry/semantic-conventions-genai",
-  /** Replace with the exact `main` commit read when this profile is next revised. */
-  commit: "0000000000000000000000000000000000000000",
-  snapshotDate: "2026-07-30",
+  /** Exact `main` commit from `git ls-remote` at profile revision time. */
+  commit: "c739977ae690961f36e435504e5c1febaef1f7f3",
+  snapshotDate: "2026-07-31",
   upstreamStability: "development",
 } as const);
 
@@ -55,3 +55,21 @@ export const OPERATION_NAMES = Object.freeze({
 
 export type GenAiAttributeKey = (typeof GEN_AI_ATTRIBUTES)[keyof typeof GEN_AI_ATTRIBUTES];
 export type JinnAttributeKey = (typeof JINN_ATTRIBUTES)[keyof typeof JINN_ATTRIBUTES];
+
+const ADMITTED_ATTRIBUTE_KEYS = new Set<string>([
+  ...Object.values(GEN_AI_ATTRIBUTES),
+  ...Object.values(JINN_ATTRIBUTES),
+]);
+
+/** Attribute keys rejected even if they resemble admitted vocabulary. */
+const REJECTED_ATTRIBUTE_KEYS = new Set([
+  "message.content",
+  "tool.args",
+  "tool.result",
+  "gen_ai.system",
+]);
+
+export function isAdmittedAttributeKey(key: string): boolean {
+  if (REJECTED_ATTRIBUTE_KEYS.has(key)) return false;
+  return ADMITTED_ATTRIBUTE_KEYS.has(key);
+}

@@ -27,15 +27,9 @@
       "endTimeUnixNano": "1",
       "attributes": [
         {
-          "key": "gen_ai.provider.name",
+          "key": "message.content",
           "value": {
-            "stringValue": "anthropic"
-          }
-        },
-        {
-          "key": "gen_ai.usage.input_tokens",
-          "value": {
-            "intValue": "1024"
+            "stringValue": "inline"
           }
         }
       ],
@@ -72,6 +66,6 @@
     }
   ],
   "completeness": {
-    "decoded": "empty"
+    "decoded": "full"
   }
 }

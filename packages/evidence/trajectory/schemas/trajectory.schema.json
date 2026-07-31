@@ -46,40 +46,6 @@
         "formatIri": {
           "type": "string",
           "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+$"
-        },
-        "execution": {
-          "type": "object",
-          "properties": {
-            "name": {
-              "type": "string",
-              "minLength": 1
-            },
-            "mediaType": {
-              "type": "string",
-              "minLength": 1
-            },
-            "uri": {
-              "type": "string",
-              "minLength": 1
-            },
-            "digest": {
-              "type": "object",
-              "properties": {
-                "sha256": {
-                  "type": "string",
-                  "pattern": "^[0-9a-f]{64}$"
-                }
-              },
-              "required": [
-                "sha256"
-              ],
-              "additionalProperties": {}
-            }
-          },
-          "required": [
-            "digest"
-          ],
-          "additionalProperties": {}
         }
       },
       "required": [
@@ -110,6 +76,13 @@
         "vocabularyProfile"
       ],
       "additionalProperties": false
+    },
+    "timebase": {
+      "type": "string",
+      "enum": [
+        "source-epoch-ns",
+        "synthetic-ordinal"
+      ]
     },
     "traceId": {
       "type": "string",
@@ -341,6 +314,7 @@
     "protocol",
     "source",
     "derivation",
+    "timebase",
     "traceId",
     "spans",
     "completeness"
@@ -355,6 +329,7 @@
           "protocol",
           "source",
           "derivation",
+          "timebase",
           "traceId",
           "spans",
           "completeness"

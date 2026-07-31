@@ -16,9 +16,11 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const packagesRoot = join(packageRoot, "..");
+const trustCoreRoot = join(packagesRoot, "..", "trust", "core");
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-evidence-trajectory-"));
 const protocolArchive = join(temporaryRoot, "evidence-protocol.tgz");
-const derivationArchive = join(temporaryRoot, "evidence-trajectory.tgz");
+const trustCoreArchive = join(temporaryRoot, "trust-core.tgz");
+const trajectoryArchive = join(temporaryRoot, "evidence-trajectory.tgz");
 const rootConsumer = join(temporaryRoot, "root-consumer");
 const testingConsumer = join(temporaryRoot, "testing-consumer");
 
@@ -72,6 +74,12 @@ function output(command, args, options = {}) {
 }
 
 try {
+  await run("corepack", ["yarn@4.13.0", "build"], { cwd: trustCoreRoot });
+  await run(
+    "corepack",
+    ["yarn@4.13.0", "pack", "--out", trustCoreArchive],
+    { cwd: trustCoreRoot },
+  );
   await run(
     "corepack",
     ["yarn@4.13.0", "pack", "--out", protocolArchive],
@@ -79,16 +87,16 @@ try {
   );
   await run(
     "corepack",
-    ["yarn@4.13.0", "pack", "--out", derivationArchive],
+    ["yarn@4.13.0", "pack", "--out", trajectoryArchive],
     { cwd: packageRoot },
   );
 
-  const entries = (await output("tar", ["-tzf", derivationArchive]))
+  const entries = (await output("tar", ["-tzf", trajectoryArchive]))
     .split(/\r?\n/u)
     .filter(Boolean);
   for (const required of REQUIRED_ENTRIES) {
     if (!entries.includes(required)) {
-      throw new Error(`packed derivation is missing ${required}`);
+      throw new Error(`packed trajectory is missing ${required}`);
     }
   }
   const leaked = entries.filter(
@@ -111,8 +119,9 @@ try {
       private: true,
       type: "module",
       dependencies: {
-        "@jinn-network/evidence-trajectory": `file:${derivationArchive}`,
+        "@jinn-network/evidence-trajectory": `file:${trajectoryArchive}`,
         "@jinn-network/evidence-protocol": `file:${protocolArchive}`,
+        "@jinn-network/trust-core": `file:${trustCoreArchive}`,
       },
     }),
   );
@@ -129,6 +138,7 @@ import * as root from "@jinn-network/evidence-trajectory";
 
 assert.equal(typeof root.sealTrajectory, "function");
 assert.equal(typeof root.parseTrajectory, "function");
+assert.equal(typeof root.verifyTrajectoryDerivationAttestation, "function");
 assert.equal(root.TRAJECTORY_RECORD_KIND, "https://jinn.network/records/trajectory/1.0");
 assert.equal("canonicalJsonBytes" in root, false);
 assert.equal("sha256Digest" in root, false);
@@ -160,6 +170,7 @@ assert.equal("sha256Digest" in root, false);
     vitest: { optional: true },
   });
   const forbiddenDependencies = [
+    "@jinn-network/attestation-issuer",
     "@huggingface/transformers",
     "@lmoe/gliner-onnx",
     "better-sqlite3",
@@ -170,9 +181,13 @@ assert.equal("sha256Digest" in root, false);
       dependency in (installedManifest.dependencies ?? {}) ||
       dependency in (installedManifest.optionalDependencies ?? {})
     ) {
-      throw new Error(`packed derivation includes forbidden ${dependency}`);
+      throw new Error(`packed trajectory includes forbidden ${dependency}`);
     }
   }
+  assert.ok(
+    "@jinn-network/trust-core" in (installedManifest.dependencies ?? {}),
+    "packed trajectory must depend on @jinn-network/trust-core",
+  );
 
   await mkdir(testingConsumer);
   await writeFile(
@@ -181,8 +196,9 @@ assert.equal("sha256Digest" in root, false);
       private: true,
       type: "module",
       dependencies: {
-        "@jinn-network/evidence-trajectory": `file:${derivationArchive}`,
+        "@jinn-network/evidence-trajectory": `file:${trajectoryArchive}`,
         "@jinn-network/evidence-protocol": `file:${protocolArchive}`,
+        "@jinn-network/trust-core": `file:${trustCoreArchive}`,
         typescript: "5.9.3",
         vite: "6.4.3",
         vitest: "4.1.8",
@@ -200,18 +216,15 @@ assert.equal("sha256Digest" in root, false);
         noEmit: true,
         types: ["vitest/globals"],
       },
-      include: ["smoke.test.ts"],
+      include: ["conformance.test.ts"],
     }),
   );
   await writeFile(
-    join(testingConsumer, "smoke.test.ts"),
+    join(testingConsumer, "conformance.test.ts"),
     `
-import { expect, test } from "vitest";
 import { describeTrajectoryRecordConformance } from "@jinn-network/evidence-trajectory/testing";
 
-test("packed testing entrypoint imports describeTrajectoryRecordConformance", () => {
-  expect(typeof describeTrajectoryRecordConformance).toBe("function");
-});
+describeTrajectoryRecordConformance();
 `,
   );
   await run(
@@ -226,11 +239,11 @@ test("packed testing entrypoint imports describeTrajectoryRecordConformance", ()
   );
   await run(
     "npm",
-    ["exec", "--", "vitest", "run", "smoke.test.ts"],
+    ["exec", "--", "vitest", "run", "conformance.test.ts"],
     { cwd: testingConsumer },
   );
   console.log(
-    "Packed derivation root isolation, /testing consumer, and archive boundary verified.",
+    "Packed trajectory root isolation, packed conformance kit, and archive boundary verified.",
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });

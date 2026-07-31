@@ -28,6 +28,8 @@ const packages = [
   ['trajectory', '@jinn-network/evidence-trajectory'],
 ];
 
+const trustCoreArchiveName = '@jinn-network/trust-core';
+
 const codeEntrypoints = [
   '@jinn-network/evidence-protocol',
   '@jinn-network/evidence-repository',
@@ -86,8 +88,20 @@ function run(command, args, options = {}) {
 }
 
 try {
+  await run("corepack", ["yarn@4.13.0", "build"], {
+    cwd: join(evidenceRoot, "..", "trust", "core"),
+  });
   await mkdir(archivesRoot);
   const archives = new Map();
+  const trustCorePacked = JSON.parse(await run(
+    'npm',
+    ['pack', '--ignore-scripts', '--json', '--pack-destination', archivesRoot],
+    { cwd: join(evidenceRoot, '..', 'trust', 'core') },
+  ));
+  if (trustCorePacked.length !== 1 || typeof trustCorePacked[0]?.filename !== 'string') {
+    throw new Error('npm pack returned an unexpected result for @jinn-network/trust-core');
+  }
+  archives.set(trustCoreArchiveName, join(archivesRoot, trustCorePacked[0].filename));
   for (const [directory, name] of packages) {
     const packed = JSON.parse(await run(
       'npm',
@@ -106,6 +120,7 @@ try {
     type: 'module',
     dependencies: Object.fromEntries([
       ...packages.map(([, name]) => [name, `file:${archives.get(name)}`]),
+      [trustCoreArchiveName, `file:${archives.get(trustCoreArchiveName)}`],
       ['@types/better-sqlite3', '7.6.13'],
       ['@types/node', '^22.0.0'],
       ['typescript', '^5.9.3'],

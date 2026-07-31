@@ -20,9 +20,11 @@ const {
 } = await import(join(root, "dist", "index.js"));
 
 const SOURCE_SHA = "a".repeat(64);
+const FORMAT_IRI = "https://jinn.network/formats/claude-code-stream-json/v1";
 const DECODER = { decoderId: "claude-code-stream-json", decoderVersion: "1.0.0" };
 const traceId = deriveTraceId({
   sourceDigest: `sha256:${SOURCE_SHA}`,
+  formatIri: FORMAT_IRI,
   vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
   ...DECODER,
 });
@@ -35,9 +37,10 @@ const base = () => ({
       mediaType: "application/x-ndjson",
       digest: { sha256: SOURCE_SHA },
     },
-    formatIri: "https://jinn.network/formats/claude-code-stream-json/v1",
+    formatIri: FORMAT_IRI,
   },
   derivation: { ...DECODER, vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE },
+  timebase: "synthetic-ordinal",
   traceId,
   spans: [],
   completeness: { decoded: "empty" },
@@ -48,8 +51,8 @@ const span = (ordinal, overrides = {}) => ({
   parentSpanId: null,
   name: "chat anthropic/claude-opus-4.6",
   kind: 3,
-  startTimeUnixNano: String(1000 + ordinal * 1000),
-  endTimeUnixNano: String(2000 + ordinal * 1000),
+  startTimeUnixNano: String(ordinal),
+  endTimeUnixNano: String(ordinal + 1),
   attributes: [
     { key: "gen_ai.provider.name", value: { stringValue: "anthropic" } },
     { key: "gen_ai.usage.input_tokens", value: { intValue: "1024" } },
@@ -104,6 +107,11 @@ const adversarial = {
     expectedDisposition: "invalid-document",
     document: () => ({ ...valid(), completeness: { decoded: "empty" } }),
   },
+  "full-with-skipped": {
+    description: "A full decode that illegally reports skipped source records.",
+    expectedDisposition: "invalid-document",
+    document: () => ({ ...valid(), completeness: { decoded: "full", skipped: 1 } }),
+  },
   "grafted-parent": {
     description: "A span whose parent identifier belongs to no earlier span in this record.",
     expectedDisposition: "invalid-document",
@@ -120,6 +128,17 @@ const adversarial = {
     document: () => {
       const document = valid();
       document.source.nativeTrace.digest.sha256 = "b".repeat(64);
+      return document;
+    },
+  },
+  "message-content-attribute": {
+    description: "A span that inlines message content instead of referencing the source.",
+    expectedDisposition: "invalid-document",
+    document: () => {
+      const document = valid();
+      document.spans[0].attributes = [
+        { key: "message.content", value: { stringValue: "inline" } },
+      ];
       return document;
     },
   },

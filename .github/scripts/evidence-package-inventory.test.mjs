@@ -62,7 +62,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     peerDependencies: [],
   }],
   ['trajectory', {
-    dependencies: ['@jinn-network/evidence-protocol'],
+    dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/trust-core'],
     devDependencies: [],
     optionalDependencies: [],
     peerDependencies: [],
@@ -93,6 +93,9 @@ function jinnDependencyNames(manifest, section) {
 }
 
 function expectedPortal(directory, dependencyName) {
+  if (dependencyName === '@jinn-network/trust-core') {
+    return 'portal:../../trust/core';
+  }
   const target = EVIDENCE_PACKAGES.find(([, name]) => name === dependencyName);
   assert.ok(target, `${directory} declares unknown Jinn dependency ${dependencyName}`);
   return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;

@@ -50,6 +50,7 @@
   },
   "dependencies": {
     "@jinn-network/evidence-protocol": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0",
     "@noble/hashes": "2.2.0",
     "zod": "4.4.3"
   },
@@ -70,6 +71,7 @@
   },
   "resolutions": {
     "@jinn-network/evidence-protocol": "portal:../protocol",
+    "@jinn-network/trust-core": "portal:../../trust/core",
     "vite": "6.4.3"
   }
 }

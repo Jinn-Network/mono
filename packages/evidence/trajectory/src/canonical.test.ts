@@ -5,6 +5,7 @@ import {
   NonIJsonNumberError,
   NonIJsonStringError,
   UndefinedArrayElementError,
+  UnsupportedCanonicalValueError,
   serializeCanonicalJson,
   type JsonValue,
 } from "./canonical.js";
@@ -39,6 +40,32 @@ describe("canonical JSON", () => {
 
   test("rejects lone surrogates", () => {
     expect(() => serializeCanonicalJson({ a: "\ud800" })).toThrow(NonIJsonStringError);
+  });
+
+  test("rejects unsupported runtime-hostile values", () => {
+    const cases: unknown[] = [
+      undefined,
+      1n,
+      () => {},
+      Symbol("x"),
+      new Date(),
+      new Map(),
+      new Set(),
+      new (class Example {})(),
+    ];
+    for (const value of cases) {
+      expect(() => serializeCanonicalJson(value as JsonValue)).toThrow(
+        UnsupportedCanonicalValueError,
+      );
+    }
+  });
+
+  test("rejects non-namespaced keys inside namespaced extension objects", () => {
+    expect(() =>
+      serializeCanonicalJson({
+        "network.jinn.note": { bad: 1 },
+      }),
+    ).toThrow(UnsupportedCanonicalValueError);
   });
 
   test("compareCodeUnitStrings is a total order without locale sensitivity", () => {

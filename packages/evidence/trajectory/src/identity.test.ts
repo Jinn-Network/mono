@@ -4,6 +4,7 @@ import { deriveSpanId, deriveTraceId } from "./identity.js";
 
 const input = {
   sourceDigest: "sha256:".concat("a".repeat(64)),
+  formatIri: "https://jinn.network/formats/claude-code-stream-json/v1",
   decoderId: "claude-code-stream-json",
   decoderVersion: "1.0.0",
   vocabularyProfile: "https://jinn.network/profiles/trajectory-vocabulary/1.0",
@@ -21,6 +22,7 @@ describe("identity derivation", () => {
   test("every input field changes the trace id", () => {
     const base = deriveTraceId(input);
     expect(deriveTraceId({ ...input, sourceDigest: `sha256:${"b".repeat(64)}` })).not.toBe(base);
+    expect(deriveTraceId({ ...input, formatIri: "https://example.test/other/v1" })).not.toBe(base);
     expect(deriveTraceId({ ...input, decoderId: "other" })).not.toBe(base);
     expect(deriveTraceId({ ...input, decoderVersion: "1.0.1" })).not.toBe(base);
     expect(deriveTraceId({ ...input, vocabularyProfile: "https://example.test/v2" })).not.toBe(base);

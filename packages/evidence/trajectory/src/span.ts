@@ -3,6 +3,7 @@
 import { z } from "zod";
 
 import { compareCodeUnitStrings } from "./order.js";
+import { isAdmittedAttributeKey } from "./vocabulary.js";
 
 /** OTLP `SpanKind` enum values; OTLP JSON encodes enums as integers. */
 export const SPAN_KIND = Object.freeze({
@@ -43,7 +44,9 @@ export const AnyValueSchema = z
   });
 
 export const AttributeSchema = z.strictObject({
-  key: z.string().min(1),
+  key: z.string().min(1).refine(isAdmittedAttributeKey, {
+    message: "attribute key is not admitted by the trajectory vocabulary profile",
+  }),
   value: AnyValueSchema,
 });
 
