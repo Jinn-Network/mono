@@ -88,6 +88,35 @@ export function poolEntryManifestBytes(summary: PoolEntrySummary): Uint8Array {
   });
 }
 
+/**
+ * The manifest fields that make two entries *the same claim*, with `receiptDigest` removed.
+ *
+ * A pair can be admitted more than once — a second run over the same rows re-runs admission
+ * and earns a second, equally valid receipt. That is not a conflict: the sealed pair is
+ * identical and the pool is addressed by it. What IS a conflict is a second entry at the same
+ * address claiming a different strategy, provenance or licence, none of which the Task digest
+ * commits to. So re-putting is idempotent on everything except which receipt got recorded
+ * first, and first writer wins there.
+ */
+export function poolEntryConflictKeyBytes(summary: PoolEntrySummary): Uint8Array {
+  return canonicalJsonBytes({
+    taskDigest: summary.taskDigest,
+    evaluationSpecDigest: summary.evaluationSpecDigest,
+    environmentRecordDigest: summary.environmentRecordDigest,
+    strategyId: summary.strategyId,
+    provenance: {
+      kind: summary.provenance.kind,
+      sourceCommitment: summary.provenance.sourceCommitment,
+      upstream: {
+        dataset: summary.provenance.upstream.dataset,
+        revision: summary.provenance.upstream.revision,
+        instanceId: summary.provenance.upstream.instanceId,
+      },
+    },
+    rights: { sourceLicense: summary.rights.sourceLicense },
+  });
+}
+
 export function parsePoolEntryManifest(bytes: Uint8Array): PoolEntrySummary {
   const parsed = PoolEntryManifestSchema.safeParse(
     JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),

@@ -1,15 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  environmentRecordDigest,
   sealEnvironmentRecord,
   type EnvironmentRecord,
 } from "@jinn-network/environment-record";
+import {
+  ADMISSION_RECEIPT_SCHEMA_VERSION,
+  DIFFERENTIAL_ADMISSION_POLICY_V3,
+  type AdmissionRefusalCode,
+  type DifferentialAdmissionReceiptV3,
+} from "@jinn-network/task-admission";
 import type { Candidate } from "./candidate.js";
 import { documentDigest } from "./digest.js";
 import type { PoolEntry } from "./pool.js";
+import type { AdmissionPort, AdmissionRequest } from "./run.js";
 import { buildCandidateEvaluationSpec, buildSealedTask } from "./seal-pair.js";
 import { computeSourceCommitment } from "./source-commitment.js";
-import { IMPORT_STRATEGY_ID, type UpstreamRebenchRow } from "./strategies/import.js";
+import {
+  IMPORT_STRATEGY_ID,
+  PERMISSIVE_LICENSE_ALLOWLIST,
+  type ImportStrategyInputs,
+  type UpstreamRebenchRow,
+} from "./strategies/import.js";
 import { loadDerivationEnvironment, type DerivationEnvironment } from "./strategy.js";
 
 const IMAGE_MANIFEST = `sha256:${"1".repeat(64)}`;
@@ -142,5 +155,93 @@ export function buildFixturePoolEntry(overrides: { statement?: string } = {}): P
       upstream: candidate.provenance.upstream,
     },
     rights: { sourceLicense: candidate.rights.sourceLicense },
+  };
+}
+
+/** The strategy inputs every suite uses against the fixture environment. */
+export function fixtureImportInputs(rows: UpstreamRebenchRow[]): ImportStrategyInputs {
+  return {
+    rows,
+    upstream: { dataset: "nebius/SWE-rebench", revision: "refs/convert/parquet-2026-05-01" },
+    defaultTimeoutSeconds: 900,
+    licensePolicy: { allow: PERMISSIVE_LICENSE_ALLOWLIST },
+  };
+}
+
+export interface StubAdmissionOptions {
+  /** candidate id -> refusal code. */
+  readonly refuse?: Record<string, string>;
+  readonly goldHashOverride?: string;
+  readonly throwOn?: string;
+}
+
+export interface StubAdmissionPort extends AdmissionPort {
+  readonly seen: AdmissionRequest[];
+  readonly published: string[];
+}
+
+function stubObservation() {
+  return { passed: ["keeps"], failed: [], passedMatch: true };
+}
+
+/**
+ * A scripted admission double. It performs no runs and proves nothing — it exists so this
+ * package's own behaviour (refusal handling, gold routing, pool writes) is testable without
+ * a container runtime. C3's kit is what tests admission.
+ */
+export function createStubAdmissionPort(options: StubAdmissionOptions = {}): StubAdmissionPort {
+  const seen: AdmissionRequest[] = [];
+  const published: string[] = [];
+  let counter = 0;
+
+  return {
+    seen,
+    published,
+    async admit(request: AdmissionRequest) {
+      seen.push(request);
+      if (options.throwOn !== undefined && request.candidateId === options.throwOn) {
+        throw new Error("admission port unavailable");
+      }
+      const refusal = options.refuse?.[request.candidateId];
+      if (refusal !== undefined) {
+        return { refusal: { code: refusal as AdmissionRefusalCode, detail: "scripted refusal" } };
+      }
+      const receipt: DifferentialAdmissionReceiptV3 = {
+        schemaVersion: ADMISSION_RECEIPT_SCHEMA_VERSION,
+        admissionPolicyVersion: DIFFERENTIAL_ADMISSION_POLICY_V3.admissionPolicyVersion,
+        issuer: "urn:jinn:test:stub-admission",
+        task: {
+          documentDigest: request.candidate.taskDocumentDigest,
+          evaluationSpecDigest: documentDigest(request.candidate.evaluationSpecBytes),
+          statementDigest: request.candidate.statementDigest,
+          testMaterialDigests: [...request.candidate.testMaterialDigests],
+          transitions: {
+            failToPass: [...request.candidate.transitions.failToPass],
+            passToPass: [...request.candidate.transitions.passToPass],
+          },
+        },
+        goldPatchHash: (options.goldHashOverride ?? request.candidate.goldPatchHash) as `sha256:${string}`,
+        testPaths: request.candidate.testPaths.map((testPath) => ({
+          testPath,
+          commandHash: `sha256:${"5".repeat(64)}` as const,
+          broken: [stubObservation(), stubObservation()],
+          fixed: [stubObservation(), stubObservation()],
+          failToPass: [...request.candidate.transitions.failToPass],
+          passToPass: [...request.candidate.transitions.passToPass],
+        })),
+        environment: {
+          recordDigest: environmentRecordDigest(request.environmentRecordBytes) as `sha256:${string}`,
+          inlineMatch: { fields: ["image", "parser", "platform"], specKeyPresent: true },
+        },
+        evalSemanticsVersion: request.candidate.evalSemanticsVersion,
+      };
+      return { receipt };
+    },
+    async publishReceipt() {
+      counter += 1;
+      const digest = `sha256:${String(counter).padStart(64, "0")}` as const;
+      published.push(digest);
+      return { digest };
+    },
   };
 }

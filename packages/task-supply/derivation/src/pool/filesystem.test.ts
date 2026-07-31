@@ -43,6 +43,27 @@ describe("filesystem supply pool", () => {
     expect(await store.list()).toHaveLength(1);
   });
 
+  it("is idempotent under a second, different receipt for the same pair", async () => {
+    const { dir, pool: store } = await pool();
+    const entry = buildFixturePoolEntry();
+    const first = await store.put(entry);
+    const second = await store.put({ ...entry, receiptDigest: `sha256:${"8".repeat(64)}` });
+
+    // A pair can be admitted twice and earn two valid receipts; that is not a conflict, and
+    // the first recorded receipt stands rather than being rewritten.
+    expect(await readdir(join(dir, "entries"))).toHaveLength(1);
+    expect(second.receiptDigest).toBe(first.receiptDigest);
+    expect((await store.get(entry.taskDigest))!.receiptDigest).toBe(entry.receiptDigest);
+  });
+
+  it("still refuses a second entry claiming a different strategy at the same address", async () => {
+    const { pool: store } = await pool();
+    const entry = buildFixturePoolEntry();
+    await store.put(entry);
+    await expect(store.put({ ...entry, strategyId: "some.other.strategy.v1" }))
+      .rejects.toThrow(DerivationError);
+  });
+
   it("refuses to overwrite a different body at the same address", async () => {
     const { dir, pool: store } = await pool();
     const entry = buildFixturePoolEntry();

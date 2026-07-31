@@ -8,6 +8,7 @@ import { DerivationError } from "../errors.js";
 import {
   assertEntryDigests,
   parsePoolEntryManifest,
+  poolEntryConflictKeyBytes,
   poolEntryManifestBytes,
   type PoolEntry,
   type PoolEntrySummary,
@@ -96,22 +97,30 @@ export function createFilesystemSupplyPool(options: FilesystemSupplyPoolOptions)
           await rm(staging, { recursive: true, force: true });
           throw error;
         }
-        // Address already taken: identical content is idempotent, different content is a
-        // conflict. A sealed pair is never rewritten (principles §5/§7).
+        // Address already taken: the same claim is idempotent, a different claim is a
+        // conflict. A sealed pair is never rewritten (principles §5/§7). "Same claim"
+        // deliberately excludes `receiptDigest` — see poolEntryConflictKeyBytes.
         await rm(staging, { recursive: true, force: true });
-        const existing = await readIfPresent(join(entriesRoot, address, TASK_FILE));
+        const existingTask = await readIfPresent(join(entriesRoot, address, TASK_FILE));
+        const existingSpec = await readIfPresent(join(entriesRoot, address, SPEC_FILE));
         const existingManifest = await readIfPresent(join(entriesRoot, address, MANIFEST_FILE));
         const identical =
-          existing !== undefined
+          existingTask !== undefined
+          && existingSpec !== undefined
           && existingManifest !== undefined
-          && bytesEqual(existing, entry.taskBytes)
-          && bytesEqual(existingManifest, manifestBytes);
+          && bytesEqual(existingTask, entry.taskBytes)
+          && bytesEqual(existingSpec, entry.evaluationSpecBytes)
+          && bytesEqual(
+            poolEntryConflictKeyBytes(parsePoolEntryManifest(existingManifest)),
+            poolEntryConflictKeyBytes(entry),
+          );
         if (!identical) {
           throw new DerivationError(
             "pool-conflict",
             `pool already holds a different body at ${entry.taskDigest}.`,
           );
         }
+        return parsePoolEntryManifest(existingManifest);
       }
 
       const { taskBytes: _taskBytes, evaluationSpecBytes: _specBytes, ...summary } = entry;

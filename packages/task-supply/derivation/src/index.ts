@@ -59,6 +59,7 @@ export {
   PoolEntryManifestSchema,
   assertEntryDigests,
   parsePoolEntryManifest,
+  poolEntryConflictKeyBytes,
   poolEntryManifestBytes,
 } from "./pool.js";
 export type {
@@ -72,3 +73,13 @@ export type { FilesystemSupplyPoolOptions } from "./pool/filesystem.js";
 export type { GoldRef, GoldStore } from "./gold.js";
 export { GOLD_STORE_MARKER_FILE, createFilesystemGoldStore } from "./gold/filesystem.js";
 export type { FilesystemGoldStoreOptions } from "./gold/filesystem.js";
+export { runDerivation } from "./run.js";
+export type {
+  AdmissionPort,
+  AdmissionRequest,
+  DerivationDeps,
+  FailedCandidate,
+  PoolWriteSummary,
+  RefusedCandidate,
+  WrittenPair,
+} from "./run.js";
