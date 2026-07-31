@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { RECORD_KINDS_SUBMISSION, type AnnouncedSubmissionCard } from '@jinn-network/marketplace-pipeline';
 import { documentDigest } from '@jinn-network/task-execution-protocol';
+import { REPOSITORY_WORK_PROFILE_URI } from '@jinn-network/task-execution-profiles';
 import type { HarvestResult } from '@jinn-network/task-execution-workspace';
 import { keccak256 } from 'viem';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
@@ -46,7 +47,14 @@ export function synthesizeLegacyFactsCard(anchored: {
       taskDigest,
       // A legacy-posted task carries no sealed Submission and therefore no profile URI; the
       // bridge names the repository-work profile the legacy harnesses always ran under.
-      taskProfileUri: 'https://jinn.network/profiles/task-execution/repository-work/1.0',
+      //
+      // E39 (diagnose→fix cycle 2): this used to hardcode a stale/misremembered URI
+      // ('.../profiles/task-execution/repository-work/1.0') that doesn't match the real
+      // `REPOSITORY_WORK_PROFILE_URI` every backend actually registers
+      // ('.../task-profiles/repository-work/1.0') -- `verifyPreclaim`'s
+      // `capabilities.taskProfiles.includes(facts.profileUri)` check never matched, so every
+      // legacy-bridged card was declined `profile-mismatch` regardless of backend capability.
+      taskProfileUri: REPOSITORY_WORK_PROFILE_URI,
       requirements: {},
     },
     chain: {
