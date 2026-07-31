@@ -65,7 +65,7 @@
  * gate, with a loud warning that the result is not interpretable per §2.4).
  */
 import { spawn } from 'node:child_process';
-import { cp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { cp, copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -75,6 +75,7 @@ import {
   buildClaudeArgs, mountSkill, unmountSkill, prepareBenchConfigDir, parseClaudeJson,
   authPreflightFailureMessage,
 } from '../../src/skills-bench/claude-solve.js';
+import { sessionJsonlPath } from '../../src/skills-bench/trigger.js';
 import type { SkillsBenchSlate, SlateCandidate } from '../../src/skills-bench/slate.js';
 import {
   appendAttempt, assertManifestCompatible, attemptKey, loadAttempts,
@@ -335,6 +336,36 @@ function compactProcessOutput(value: string, limit = 4000): string {
   return `${trimmed.slice(0, limit)}\n...[truncated ${trimmed.length - limit} chars]`;
 }
 
+/** Copies the solve's claude-code session JSONL next to the transcript, as
+ *  `<attemptKey>.session.jsonl` — the raw material trigger-rate extraction
+ *  (trigger.ts) parses to check whether the mounted skill actually loaded
+ *  during this attempt (never from asking the model). Best-effort only: a
+ *  missing/unresolvable session file is a loud warning, never fatal — it
+ *  must never block or fail an otherwise-successful attempt. Returns
+ *  whether the copy succeeded, recorded on the transcript JSON as
+ *  `sessionCaptured` so render-receipts.ts can count a miss as `unknown`
+ *  rather than silently folding it into "not triggered". */
+async function captureSessionJsonl(
+  benchCfgDir: string,
+  armDir: string,
+  sessionId: string | null,
+  transcriptsDir: string,
+  key: string,
+): Promise<boolean> {
+  if (!sessionId) {
+    console.warn(`[bench] WARNING: no sessionId parsed for ${key} — session JSONL not captured (trigger rate will read as unknown for this attempt)`);
+    return false;
+  }
+  try {
+    const src = sessionJsonlPath(benchCfgDir, armDir, sessionId);
+    await copyFile(src, join(transcriptsDir, `${key}.session.jsonl`));
+    return true;
+  } catch (err) {
+    console.warn(`[bench] WARNING: could not capture session JSONL for ${key} (${(err as Error).message}) — trigger rate will read as unknown for this attempt`);
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Grading (mirrors run-pilot.ts:361 gradeOne exactly)
 // ---------------------------------------------------------------------------
@@ -464,7 +495,8 @@ async function solveAndGrade(
 
     await mkdir(transcriptsDir, { recursive: true });
     const key = attemptKey({ instanceId: spec.candidate.instance_id, arm: spec.arm.name, repeat: spec.repeat });
-    await writeFile(join(transcriptsDir, `${key}.json`), `${JSON.stringify({ ...claudeResult, patch }, null, 2)}\n`);
+    const sessionCaptured = await captureSessionJsonl(benchCfgDir, armDir, claudeResult.sessionId, transcriptsDir, key);
+    await writeFile(join(transcriptsDir, `${key}.json`), `${JSON.stringify({ ...claudeResult, patch, sessionCaptured }, null, 2)}\n`);
 
     gradeQueue.push(async () => {
       // gradeAttempt already converts EvalCouldNotGradeError into passed=null
@@ -629,7 +661,8 @@ async function solveAndGradeTaskSet(
 
     await mkdir(transcriptsDir, { recursive: true });
     const key = attemptKey({ instanceId: spec.task.id, arm: spec.arm.name, repeat: spec.repeat });
-    await writeFile(join(transcriptsDir, `${key}.json`), `${JSON.stringify({ ...claudeResult, patch }, null, 2)}\n`);
+    const sessionCaptured = await captureSessionJsonl(benchCfgDir, armDir, claudeResult.sessionId, transcriptsDir, key);
+    await writeFile(join(transcriptsDir, `${key}.json`), `${JSON.stringify({ ...claudeResult, patch, sessionCaptured }, null, 2)}\n`);
 
     gradeQueue.push(async () => {
       try {

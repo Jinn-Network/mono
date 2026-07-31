@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildReceipt, renderReceiptMd } from '../../src/skills-bench/receipt.js';
+import { buildReceipt, renderReceiptMd, summarizeTriggerRate } from '../../src/skills-bench/receipt.js';
 import type { BenchOutcome } from '../../src/skills-bench/attempts.js';
 
 function o(id: string, arm: string, passed: boolean | null, costUsd = 0.1): BenchOutcome {
@@ -92,5 +92,106 @@ describe('renderReceiptMd', () => {
       buildReceipt(outcomes, { baselineArm: 'baseline', treatmentArm: 'tdd', profile }),
     );
     expect(md).not.toContain('skill bytes:');
+  });
+
+  it('omits the trigger line entirely when no triggerRate was supplied', () => {
+    const outcomes = [o('a', 'baseline', false), o('a', 'tdd', true)];
+    const md = renderReceiptMd(
+      buildReceipt(outcomes, { baselineArm: 'baseline', treatmentArm: 'tdd', profile }),
+    );
+    expect(md).not.toContain('trigger:');
+  });
+
+  it('renders the trigger: line with the known N/M count', () => {
+    const outcomes = [o('a', 'baseline', false), o('a', 'tdd', true), o('b', 'baseline', true), o('b', 'tdd', false)];
+    const md = renderReceiptMd(
+      buildReceipt(outcomes, {
+        baselineArm: 'baseline', treatmentArm: 'tdd', profile,
+        triggerRate: { triggered: 1, total: 2, unknown: 0 },
+      }),
+    );
+    expect(md).toContain('trigger:    skill loaded on 1/2 solved+failed attempts');
+    expect(md).not.toContain('unknown');
+  });
+
+  it('renders the unknown count explicitly rather than folding it into either bucket', () => {
+    const outcomes = [o('a', 'baseline', false), o('a', 'tdd', true)];
+    const md = renderReceiptMd(
+      buildReceipt(outcomes, {
+        baselineArm: 'baseline', treatmentArm: 'tdd', profile,
+        triggerRate: { triggered: 1, total: 2, unknown: 3 },
+      }),
+    );
+    expect(md).toContain('trigger:    skill loaded on 1/2 solved+failed attempts (3 unknown — session not captured)');
+  });
+
+  it('adds the "not exercised" caveat when net effect is 0 and trigger rate is under 50%', () => {
+    // baseline 1/2, treatment 1/2 -> net 0. Trigger rate 1/5 (20%) < 50%.
+    const outcomes = [
+      o('a', 'baseline', true), o('a', 'tdd', true),
+      o('b', 'baseline', false), o('b', 'tdd', false),
+    ];
+    const md = renderReceiptMd(
+      buildReceipt(outcomes, {
+        baselineArm: 'baseline', treatmentArm: 'tdd', profile,
+        triggerRate: { triggered: 1, total: 5, unknown: 0 },
+      }),
+    );
+    expect(md).toMatch(/not exercised on this task set/);
+  });
+
+  it('does NOT add the "not exercised" caveat when net effect is 0 but trigger rate is high (a real null, not an unexercised skill)', () => {
+    const outcomes = [
+      o('a', 'baseline', true), o('a', 'tdd', true),
+      o('b', 'baseline', false), o('b', 'tdd', false),
+    ];
+    const md = renderReceiptMd(
+      buildReceipt(outcomes, {
+        baselineArm: 'baseline', treatmentArm: 'tdd', profile,
+        triggerRate: { triggered: 4, total: 5, unknown: 0 },
+      }),
+    );
+    expect(md).not.toMatch(/not exercised on this task set/);
+  });
+
+  it('does NOT add the "not exercised" caveat when net effect is non-zero, regardless of trigger rate', () => {
+    const outcomes = [
+      o('a', 'baseline', false), o('a', 'tdd', true), // improved -> net +1
+      o('b', 'baseline', false), o('b', 'tdd', false),
+    ];
+    const md = renderReceiptMd(
+      buildReceipt(outcomes, {
+        baselineArm: 'baseline', treatmentArm: 'tdd', profile,
+        triggerRate: { triggered: 1, total: 5, unknown: 0 },
+      }),
+    );
+    expect(md).not.toMatch(/not exercised on this task set/);
+  });
+
+  it('does NOT add the "not exercised" caveat when there is no known trigger data (total 0)', () => {
+    const outcomes = [
+      o('a', 'baseline', true), o('a', 'tdd', true),
+      o('b', 'baseline', false), o('b', 'tdd', false),
+    ];
+    const md = renderReceiptMd(
+      buildReceipt(outcomes, {
+        baselineArm: 'baseline', treatmentArm: 'tdd', profile,
+        triggerRate: { triggered: 0, total: 0, unknown: 4 },
+      }),
+    );
+    expect(md).not.toMatch(/not exercised on this task set/);
+  });
+});
+
+describe('summarizeTriggerRate', () => {
+  it('counts triggered/total from known results and unknown separately, never folding unknown into either bucket', () => {
+    const r = summarizeTriggerRate([
+      { triggered: true }, { triggered: false }, { triggered: true }, { triggered: null }, { triggered: null },
+    ]);
+    expect(r).toEqual({ triggered: 2, total: 3, unknown: 2 });
+  });
+
+  it('returns all zeros for an empty result set', () => {
+    expect(summarizeTriggerRate([])).toEqual({ triggered: 0, total: 0, unknown: 0 });
   });
 });

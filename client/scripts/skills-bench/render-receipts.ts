@@ -24,9 +24,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
-import { loadAttempts, type BenchManifest, type BenchOutcome } from '../../src/skills-bench/attempts.js';
-import { buildReceipt, renderReceiptMd, type ReceiptData } from '../../src/skills-bench/receipt.js';
+import { attemptKey, loadAttempts, type BenchManifest, type BenchOutcome } from '../../src/skills-bench/attempts.js';
+import { buildReceipt, renderReceiptMd, summarizeTriggerRate, type ReceiptData, type TriggerRate } from '../../src/skills-bench/receipt.js';
 import type { SkillsBenchSlate } from '../../src/skills-bench/slate.js';
+import { detectSkillTrigger } from '../../src/skills-bench/trigger.js';
 
 interface Args {
   runDir: string;
@@ -68,6 +69,29 @@ async function loadManifest(runDir: string): Promise<BenchManifest> {
 async function loadSlate(slatePath: string): Promise<SkillsBenchSlate> {
   const raw = await readFile(slatePath, 'utf8');
   return JSON.parse(raw) as SkillsBenchSlate;
+}
+
+/** Reads the session JSONL copied by run-bench.ts (`<attemptKey>.session.jsonl`
+ *  under `<runDir>/transcripts/`) for every solved+failed (passed !== null)
+ *  attempt in this arm, and runs the trigger detector (trigger.ts) — never
+ *  the outcome's own pass/fail verdict — to determine whether the mounted
+ *  skill actually loaded. A missing/unreadable session file counts as
+ *  `unknown` (see run-bench.ts's `sessionCaptured` flag), never as
+ *  "triggered" or "not triggered". */
+async function computeTriggerRate(runDir: string, outcomes: BenchOutcome[], armName: string): Promise<TriggerRate> {
+  const transcriptsDir = join(runDir, 'transcripts');
+  const relevant = outcomes.filter((o) => o.arm === armName && o.passed !== null);
+  const results: Array<{ triggered: boolean | null }> = [];
+  for (const o of relevant) {
+    const key = attemptKey(o);
+    try {
+      const text = await readFile(join(transcriptsDir, `${key}.session.jsonl`), 'utf8');
+      results.push({ triggered: detectSkillTrigger(text, armName).triggered });
+    } catch {
+      results.push({ triggered: null });
+    }
+  }
+  return summarizeTriggerRate(results);
 }
 
 function summaryRow(arm: string, data: ReceiptData): string {
@@ -117,9 +141,11 @@ async function main(): Promise<void> {
 
   const rows: string[] = [];
   for (const arm of treatmentArms) {
+    const triggerRate = await computeTriggerRate(args.runDir, outcomes, arm.name);
     const data = buildReceipt(outcomes, {
       baselineArm: baselineArm.name,
       treatmentArm: arm.name,
+      triggerRate,
       profile: {
         model: manifest.model,
         agent: args.agent,
