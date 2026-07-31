@@ -2598,7 +2598,7 @@ git commit -m "feat(evidence-trace-decode): the claude-code-stream-json decoder"
 
 > **Fixture-provenance rule.** Every byte in `fixtures/` comes from the generator below, authored from the format's own documented shape. `client/fixtures/transcripts/claude-code/*.jsonl` and `packages/layer/test/fixtures/claude-code-stdout.fixture.jsonl` are read as reference for what the wire looks like and are **not** copied: the second is a real product run, and the first two carry paths and model identifiers from one. The synthetic cases below cover the same structural ground.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/claude-code-kit.test.ts`:
 
@@ -2706,12 +2706,12 @@ describe("end-to-end: bytes to a sealed record", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trace-decode && yarn test`
 Expected: FAIL — `Failed to resolve import "./fixtures.js"`.
 
-- [ ] **Step 3: Write the fixture generator**
+- [x] **Step 3: Write the fixture generator**
 
 `scripts/generate-fixtures.mjs`:
 
@@ -2887,7 +2887,7 @@ if (!write && drift.length > 0) {
 console.log(write ? "fixtures written" : "fixtures up to date");
 ```
 
-- [ ] **Step 4: Generate the corpus**
+- [x] **Step 4: Generate the corpus**
 
 Run: `cd packages/evidence/trace-decode && yarn generate:fixtures`
 Expected: `fixtures written`; `fixtures/claude-code-stream-json/manifest.json` and ten case directories exist.
@@ -2896,7 +2896,7 @@ Then read one generated `expected.json` and confirm by eye that no span carries 
 
 Run: `cat fixtures/claude-code-stream-json/cases/tool-loop/expected.json`
 
-- [ ] **Step 5: Write the loaders and re-export them from the testing entrypoint**
+- [x] **Step 5: Write the loaders and re-export them from the testing entrypoint**
 
 `src/fixtures.ts`:
 
@@ -2970,12 +2970,12 @@ export type {
 } from "./fixtures.js";
 ```
 
-- [ ] **Step 6: Run the test to verify it passes**
+- [x] **Step 6: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trace-decode && yarn test && yarn typecheck && yarn check:fixtures`
 Expected: PASS — the contract suite runs green a second time, now against the real decoder and the pinned corpus; `fixtures up to date`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/evidence/trace-decode
