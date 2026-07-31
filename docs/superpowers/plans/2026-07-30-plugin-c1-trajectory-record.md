@@ -3274,3 +3274,35 @@ restack only if advanced).
 
 All ten rows move from pending to commit SHA + exact red/green probe evidence only after
 red→green verification. L4 remains external/`not-evaluated`.
+
+## 2026-07-31 sixth exact-head whole-component review resolution
+
+Append-only after C1-R47–R56. Ratified law unchanged. Exact-probe-first: reproduce
+each reviewer probe RED before implementation; green exact probe + packed-public
+counterpart where required + full suite. Preserve two linkage modes, R24–R56 law,
+R9 toolchain pins, R15 hermetic packed-types, L4 external, no `legacy-peer-deps`.
+No check-off from broad tests alone. Base at review: `9f4925037` (fetch before push;
+restack only if advanced).
+
+| ID | Severity | Exact probe | Violated law | Minimal disposition | Red evidence | Green evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| C1-R57 | Important | Installed schema accepts uint64 max+1 `18446744073709551616` and int64 overflow `9464152666223001936` while runtime rejects; handwritten patterns overlap/miss prefixes | Generate exact OTLP decimal bounds algorithmically; prove differential parity | Delete handwritten bound regex fragments. Deterministic generator for canonical unsigned decimal `0..MAX` by length + lexicographic prefix branches (lower digit + arbitrary remainder; exact MAX; no leading zero except literal `0`). uint64 MAX `18446744073709551615`; int64 = nonnegative `0..9223372036854775807` + negative magnitude `1..9223372036854775808` with exact existing `-0` law. Generator output used by every timestamp/duration uint64 and every AnyValue int64; no alternate inline pattern. Differential regex/AJV vs BigInt oracle: min/max/±1; every prefix of each max with digit below/equal/above + zero/nine tails; lengths 0..max+several; leading-zero/sign; deterministic large random corpus. Recursively assert every relevant schema node refs/equals generated law. Installed tarball AJV reviewer values fail at span/event/all locations | [ ] | [ ] |
+| C1-R58 | Important | Revoked nested proxy raw from `Array.isArray`; Map own constructor getter executes; object with Proxy prototype traps through `instanceof` | Preflight container classification is proxy-first and constructor-free | Every object path: primitive/null → trap-free `isProxy` → exactly one guarded `Object.getPrototypeOf`; never `Array.isArray`/`instanceof`/Object methods first. Classify only by exact prototype identity (`Array.prototype`, `Object.prototype`/null, prohibited built-ins). Never read `.constructor`/constructor.name or invoke prototype chain. Custom/proxy direct prototype rejected without traversing it. Map/Set/Date fixed category text. Arrays only after exact `Array.prototype`; ordinary objects exact `Object.prototype` or null. Source+packed: revoked extension proxy, Map constructor getter count 0, proxy-prototype trap 0, custom prototypes, valid controls. Typed package error only | [ ] | [ ] |
+| C1-R59 | Important | Signer signature array and authority `signerKeyIds` custom-prototype arrays pass | Every dense array requires exact standard `Array.prototype` | `inspectDenseArray`/equivalents: proxy-first then guarded direct prototype exactly `Array.prototype`; reject subclass/custom/null prototype before length/descriptors. Exact own length + dense canonical indices/no extras retained; no array method/iteration. Uniform use for signer output, authority signer IDs, subjects, spans/events/extensions, port arrays, public conformance inputs. Source+packed: custom/subclass/null proto for signer and authority arrays + nested record arrays; no callback/trust-core raw | [ ] | [ ] |
+| C1-R60 | Important | Byte snapshot allowlist admits own names inherited from prototype (`slice`,`constructor`,`buffer`,`length`); augmented Uint8Array passes | Numeric elements only; every other own key rejected | After intrinsic exact ordinary Uint8Array/prototype/buffer validation, obtain intrinsic length; `Reflect.ownKeys` may contain **only** canonical numeric string indices `0..length-1` (no symbols/extra strings). Do not allow any prototype property name as own key. Each index = intrinsic typed-array element; no caller descriptors/accessors. Reject augmented own slice/constructor/buffer/length/toJSON/valueOf/iterator and arbitrary key. Intrinsic copy after closure. Tests: each reviewer key/getter count 0 or descriptor-only no getter; symbols; ordinary valid view | [ ] | [ ] |
+| C1-R61 | Important | `parseTrajectory` reads hostile own length and accepts augmented/SAB because `parseExactWithSchema` bypasses `snapshotByteView` | Public exact parsers snapshot hostile byte input once at entry | Every public parse/exact-byte entrypoint accepts unknown, immediately calls hardened `snapshotByteView` once, thereafter uses only owned private copy. No direct `.length`/iterator/buffer/decoder on caller view before snapshot. Augmented/subclass/proxy/revoked/SAB → typed reject. Canonical byte comparison uses private snapshot; post-call mutation cannot affect result. Enumerate all parse functions (Trajectory, statement, fixture/public helpers). Reviewer length getter count 0 (or rejected via own descriptor without invocation); SAB and augmented packed | [ ] | [ ] |
+| C1-R62 | Important | Second indented `name:` inside npm step is accepted | Workflow duplicate-key scanner recognizes every step mapping key position | Generic duplicate-key detection for YAML mappings in every parsed job, step, nested `with`. Recognize mapping keys whether they begin `-` sequence item or occur on later indented lines. Indentation/context stack + block-scalar state so `foo:` inside `run: \|` is not misparsed; real duplicate `name`/`uses`/`run`/`with`/`working-directory`/`if`/`env`/`shell`/`continue-on-error`/`timeout-minutes`/`node-version` etc. fails before semantic checks. Reject duplicate job IDs and nested with/env keys in guard scope. Preserve valid multiline YAML. Exact duplicate-step-name reviewer mutation + duplicates for every supported step key position; valid block scalar with colon-like lines; malformed indentation | [ ] | [ ] |
+
+### Implementation checklist (sixth exact-head whole-component)
+
+- [ ] C1-R57 — algorithmic OTLP decimal bounds generator + differential AJV/runtime parity
+- [ ] C1-R58 — proxy-first constructor-free preflight container classification
+- [ ] C1-R59 — dense arrays require exact `Array.prototype` everywhere
+- [ ] C1-R60 — byte snapshots: only numeric own keys `0..length-1`
+- [ ] C1-R61 — public exact parsers snapshot via `snapshotByteView` at entry
+- [ ] C1-R62 — CI duplicate-key scanner for every step mapping key position
+
+### Acceptance
+
+All six rows move from pending to commit SHA + exact red/green probe evidence only after
+red→green verification. L4 remains external/`not-evaluated`.
