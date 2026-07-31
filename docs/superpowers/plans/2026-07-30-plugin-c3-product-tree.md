@@ -3197,3 +3197,31 @@ Recorded per the coordinator's exact-head whole-component review for PR #2338. H
 - **R-C3-16 — normalize logger fields once (Important; IMPLEMENT).** Logger called `JSON.stringify` on caller fields; cycles became `[unserializable]` instead of typed failure; `toJSON` could run. **Demonstrated bypass:** cyclic graph, getter fields, nested `toJSON`, proxy fields. **Disposition applied:** `normalizeLogFields` with cycle/proxy/accessor/symbol/bigint/sparse-array rejection; added `log-invalid` to `RUNTIME_ERROR_CODES`; cycles now throw. **Red evidence:** cyclic test expected `[unserializable]`; hostile cases absent. **Green evidence:** logger vitest suite **14/14 pass** with `log-invalid` taxonomy.
 
 - **R-C3-17 — README/package description (Minor; IMPLEMENT).** READMEs and `package.json` description claimed capture/retrieval behavior not shipped in C3. **Disposition applied:** narrowed `plugin/README.md`, `plugin/runtime/README.md`, and runtime `description` to skeleton/lifecycle/configuration/health/logging scaffold; explicit no capture/retrieval/publication/MCP yet. **Red evidence:** manual review flagged overclaim copy. **Green evidence:** README/description diff matches disposition; no capability claims remain.
+
+---
+
+## 2026-07-31 second exact-head whole-component review resolution
+
+Recorded per the coordinator's second exact-head whole-component review for PR #2338. Historical task text above is unchanged.
+
+- **R-C3-18 — lexical-scope-aware AST custody (Important; IMPLEMENT).** Flat alias table missed assignment/destructuring dataflow, shadowing, `process.execPath`, aliased `eval`/`Function`/`require`, TS `import = require`, network/locale aliases. **Red evidence:** probe fixtures for `({ env } = process)`, `const p = globalThis["process"]`, `(0, eval)`, aliased `require`/`fetch`/`localeCompare` returned zero violations. **Green evidence:** see wave-2 commit SHAs in PR #2338 R-C3-18–28 return packet.
+
+- **R-C3-19 — exact positive bin.ts allowlist (Important; IMPLEMENT).** Synthetic `bin.ts` with `node:process`, `process.kill`, `console.log` passed with zero violations via broad `!isBinEntry` exemption. **Red evidence:** overreach synthetic bin fixtures returned `[]`. **Green evidence:** see wave-2 commit SHAs in PR #2338 R-C3-18–28 return packet.
+
+- **R-C3-20 — parse errors / ScriptKind fail-closed (Important; IMPLEMENT).** `const value = ;` and `.js` parsed as TS produced diagnostics but no boundary violation. **Red evidence:** syntax-error fixtures returned `[]`. **Green evidence:** see wave-2 commit SHAs in PR #2338 R-C3-18–28 return packet.
+
+- **R-C3-21 — key-material canary in AST (Important; IMPLEMENT).** `function sign(privateKey: string)` and construction helpers produced zero violations. **Red evidence:** key-material fixtures returned `[]`. **Green evidence:** see wave-2 commit SHAs in PR #2338 R-C3-18–28 return packet.
+
+- **R-C3-22 — recursive discovery + fail on ambiguous topology (Important; IMPLEMENT).** Discovery stopped at first manifest; nested-under-runtime undiscovered; symlinks/localeCompare sort accepted. **Red evidence:** nested/symlink/duplicate fixtures invisible or accepted. **Green evidence:** see wave-2 commit SHAs in PR #2338 R-C3-18–28 return packet.
+
+- **R-C3-23 — closed-world deps + hermetic packed verifier (Important; IMPLEMENT).** `eslint:^9` in devDependencies and ranged TS in packed consumer passed; resolutions unchecked. **Red evidence:** undeclared/ranged/resolution probes passed. **Green evidence:** see wave-2 commit SHAs in PR #2338 R-C3-18–28 return packet.
+
+- **R-C3-24 — enumerate every public code export (Important; IMPLEMENT).** Packed-types compiled only package root. **Red evidence:** subpath/wildcard mutation fixtures not exercised. **Green evidence:** see wave-2 commit SHAs in PR #2338 R-C3-18–28 return packet.
+
+- **R-C3-25 — health arrays descriptor-safe dense closure (Important; IMPLEMENT).** Proxy/sparse health-check arrays could pass `Array.isArray` then throw raw. **Red evidence:** proxy/sparse array probes failed pre-fix or threw raw TypeError. **Green evidence:** see wave-2 commit SHAs in PR #2338 R-C3-18–28 return packet.
+
+- **R-C3-26 — logger path-aware descriptor-safe recursion (Important; IMPLEMENT).** Cyclic arrays stack-overflowed; shared DAG falsely rejected; index getters ran. **Red evidence:** mutual-cycle/shared-DAG probes failed or threw RangeError. **Green evidence:** see wave-2 commit SHAs in PR #2338 R-C3-18–28 return packet.
+
+- **R-C3-27 — hostile thrown values + reverse cleanup (Important; IMPLEMENT).** `String(error)` in `describe()` and bin config catch invoked attacker `toString`; stop aborted early. **Red evidence:** hostile-throw proxy tests + multi-capability stop-order tests failed. **Green evidence:** see wave-2 commit SHAs in PR #2338 R-C3-18–28 return packet.
+
+- **R-C3-28 — README stdout contract (Minor; IMPLEMENT).** README did not state serve stdout is empty vs health/version explicit stdout. **Red evidence:** manual review. **Green evidence:** see wave-2 commit SHAs in PR #2338 R-C3-18–28 return packet.
