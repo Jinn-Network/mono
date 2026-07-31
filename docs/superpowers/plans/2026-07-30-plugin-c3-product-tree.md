@@ -3265,3 +3265,25 @@ Recorded per the coordinator's fourth exact-head whole-component review for PR #
 - **R-C3-41 — health proxy-first + exact version scalar (Important; IMPLEMENT).** Proxy `instanceof` traps; Array subclass `.map`; non-string `version`. **Red evidence:** health catch used raw `instanceof`; `normalizeHealthChecks` called `.map`; `summarizeHealth` accepted String wrapper version. **Green evidence:** `isHealthInvalidError` proxy-first; `health.test.ts` nonstandard prototype + version probes; `runtime.test.ts` proxy health-invalid → `getPrototypeOfRuns === 0`.
 
 - **R-C3-42 — logger threshold + dangerous keys (Important; IMPLEMENT).** `createLineLogger("verbose",…)` accepted; own enumerable `__proto__` silently lost. **Red evidence:** invalid level coerced to silent threshold; dangerous keys dropped via prototype setter. **Green evidence:** `logger.test.ts` → `rejects invalid log levels at construction`, `rejects dangerous object keys instead of silently dropping them` with `log-invalid`; valid level one-line JSON unchanged.
+
+---
+
+## 2026-07-31 fifth exact-head whole-component review resolution
+
+Recorded per the coordinator's fifth exact-head whole-component review for PR #2338. Historical task text above is unchanged.
+
+- **R-C3-43 — indirect ambient via reflection/sequence/call (Important; IMPLEMENT).** Zero-violation probes: `Reflect.get(globalThis,"process").env`, `(0, require)("node:fs")`, `require.call/apply`, `module.require`, `Function.prototype.call` chains. **Red evidence:** comma/`.call`/`.apply` wrappers and `Reflect.get` on ambient roots passed without authority attribution; safe local `Reflect.get(local, key)` false-positive risk. **Green evidence:** `ok - R-C3-43 rejects indirect ambient via reflection, sequence, and call wrappers`; safe local Reflect control → `[]`.
+
+- **R-C3-44 — every ambient process mutation in bin (Important; IMPLEMENT).** `??=`/`||=`, `Object.assign(process.env)`, `Reflect.set(process.argv|process,"env")`, argv mutators must fail; shipped `bin.ts` stays clean. **Red evidence:** assignment-operator expansion and mutator-call detection incomplete; `process.exitCode` false-positive. **Green evidence:** `ok - R-C3-44 rejects every ambient process mutation shape in bin`; integration scan `plugin/runtime/src/bin.ts` → `[]`.
+
+- **R-C3-45 — export targets reject encoding/query/fragment (Important; IMPLEMENT).** Strict law: no `%`, `?`, `#`, backslash, control chars; `./dist/` prefix + segment containment. **Red evidence:** bounded decode accepted quadruple-encoded traversal and query/hash suffixes. **Green evidence:** `ok - R-C3-39 rejects reordered export conditions and encoded traversal targets` (percent/query/hash probes); `plugin-tree-packed-types.test.mjs` encoded case → `/percent encoding/`.
+
+- **R-C3-46 — failed cleanup tracked; blocks restart (Important; IMPLEMENT).** Failed stop leaves capabilities tracked; `start()` blocked until cleanup retry in reverse order. **Red evidence:** stop failure returned to idle with active capability; restart double-started. **Green evidence:** `runtime.test.ts` → `R-C3-46 failed stop blocks restart until cleanup retry succeeds` (`starts=1` until cleanup), `R-C3-46 cleanup retries failed capabilities in reverse order`; `RUNTIME_ERROR_CODES.runtime-cleanup-required` in code-table test.
+
+- **R-C3-47 — unknown-error never instanceof on unknown (Important; IMPLEMENT).** Hostile proxy-prototype ordinary objects must not wedge cleanup. **Red evidence:** `instanceof` on unknown input; prototype-chain walks. **Green evidence:** `safe-error.test.ts` → `R-C3-47 never uses instanceof on unknown input` (`getPrototypeOfRuns === 0`); direct-prototype identity compare only.
+
+- **R-C3-48 — health proxy-first + exact own-key closure (Important; IMPLEMENT).** Revoked proxy, symbol keys, non-enumerable extras must fail closed. **Red evidence:** `Object.keys().sort()` accepted extras; proxy after `Array.isArray`. **Green evidence:** `health.test.ts` → `R-C3-48 rejects revoked proxy checks without raw TypeError`, `R-C3-48 rejects symbol and non-enumerable extra keys`.
+
+- **R-C3-49 — logger total and lossless-or-reject (Important; IMPLEMENT).** Nested `{level,message}` must round-trip; symbols/non-enumerable/revoked proxy rejected. **Red evidence:** nested field objects collapsed to `{}`; silent symbol drop. **Green evidence:** `logger.test.ts` → `R-C3-49 preserves nested level and message fields exactly`, `R-C3-49 rejects symbol and non-enumerable field keys`, `R-C3-49 rejects revoked proxy field objects`.
+
+- **R-C3-50 — lexical shadowing resolves bindings not text (Minor; IMPLEMENT).** Local `fetch`/`eval`/`Intl`/`process`/namespace imports must not flag ambient violations. **Red evidence:** identifier-text matching flagged shadowed locals; forbidden `import process` suppressed follow-on detections incorrectly. **Green evidence:** `ok - R-C3-50 lexical shadowing resolves bindings not identifier text`; ambient negative controls still fail.
