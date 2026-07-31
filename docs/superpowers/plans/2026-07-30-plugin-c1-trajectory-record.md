@@ -2981,3 +2981,38 @@ derivation attestation provides **attribution**. L4 replay provides **factual ve
 | F7 | Record-level DSSE skipped | Superseded | Trajectory derivation attestation (this correction) |
 | F8 | Hash chain superseded | Corrected claim | Whole-artifact digest for byte integrity; IDs ordering-only; DSSE attribution; L4 factual verification |
 | F9 | Timebase extension | Superseded | First-class `timebase` field |
+
+---
+
+## 2026-07-31 independent rereview findings resolution
+
+Append-only. Does not amend the operator-ratified dated law above. These are
+implementation / test / public-artifact defects against that law. Historical
+checkboxes and prior amendments remain authoritative for earlier waves.
+
+| ID | Severity | Finding | Disposition | Red→green test | Final evidence |
+| --- | --- | --- | --- | --- | --- |
+| C1-R1 | Critical | L1 used structural `parseDsseEnvelope`; undeclared top-level envelope members passed L1, invoked authority, and could succeed | Use trust-core `parseExactDsseEnvelope` (exact produced-envelope / round-trip bytes contract). L1 rejects undeclared envelope/signature members, duplicate JSON keys, non-canonical bytes/order/whitespace, malformed payload/base64, and any bytes not exactly the canonical producer envelope. Authority callback **not called** on any L1 failure. Do not invent a second DSSE parser. | Unknown top-level field; unknown signature field; duplicate key; non-canonical member ordering/whitespace; malformed encoding — each L1 fail, authority not called | [ ] pending implementation |
+| C1-R2 | Critical | L3 forward-link counted only already-correct links and could aggregate candidates across multiple matching File entities | Identify native-trace File entity/entities by attested sha256 + expected execution-record shape; require **exactly one** matching entity. On that entity collect **all** identifiers with `propertyID === TRAJECTORY_RECORD_IDENTIFIER_PROPERTY` regardless of value; require cardinality exactly one and value equals repository-form Trajectory subject digest. Wrong type, malformed value, missing, duplicate-correct, correct+wrong, duplicate entity, unrelated-entity-only each fail with deterministic L3 codes. Never aggregate across entities. | Each adversarial case named in disposition | [ ] pending implementation |
+| C1-R3 | Critical | L2 used truthiness (`verified: "false"` could pass); AbortError became ordinary `l2-authority-error` | Runtime-validate callback result as exact closed contract (plain non-proxy object; `verified` boolean; `signerKeyIds` exact string array; optional reason/diagnostics exact types; no accessors/unknown members). Malformed result = L2 fail, never success. Success path: `verified === true` only; `signerKeyIds` semantically compatible with exact parsed envelope key IDs (no invented IDs). Check cancellation before/after await; aborted signal or recognized abort/cancellation rethrows C1 typed cancellation; ordinary throws remain L2 fail report. | Malformed string/number/object/array/accessor/proxy outputs; forged signer IDs; callback false; normal throw; pre-abort; during-abort; AbortError | [ ] pending implementation |
+| C1-R4 | Important | Canonicalization via `Object.entries`/property reads executed getters; proxy traps escaped as untyped errors | Descriptor-based, cycle-aware preflight before schema parsing **and** before canonical serialization/sealing. Reject accessor descriptors without invoking; reject symbol keys, proxies, class/non-plain prototypes, cycles, unsupported values at every depth. Wrap reflective trap failures in typed canonicalization/invalid-document taxonomy. `util.types.isProxy` allowed (no I/O). Getter counter remains zero in tests. | Top-level/nested getter, setter, proxy ownKeys/getPrototypeOf/getOwnPropertyDescriptor trap, cycle, extension-slot | [ ] pending implementation |
+| C1-R5 | Important | Nested undeclared keys (e.g. `source.nativeTrace.bad`) passed via `z.looseObject`; limited direct canonical guard | Every core/nested schema object rejects arbitrary undeclared keys. Extension surfaces admit only explicit absolute-IRI/namespaced extension keys under law; recursively validate JsonValue. No unconstrained loose object. Adversarial cases at nativeTrace, source, derivation, completeness, span, event/link/status/attribute descriptor, attestation subject/predicate/producer/descriptors as applicable. Legitimate namespaced extension survives seal→parse→compare. | Nested undeclared-key adversarial suite + legitimate extension round-trip | [ ] pending implementation |
+| C1-R6 | Important | Published JSON Schema allowed any nonempty attribute key and understated runtime-only checks | Regenerate public schema to structurally constrain closed attribute vocabulary (reject `message.content`, `tool.args`, `tool.result`, `gen_ai.system`, arbitrary keys); encode expressible completeness/sha256/timebase/`source.execution`/nested-key restrictions; accurately enumerate unavoidable runtime refinements (no false "three checks only"). AJV-vs-runtime parity for closed-vocabulary + completeness adversarial cases + namespaced extensions. Update pins. | AJV parity suite for vocabulary/completeness/extension cases; regenerated schema pins | [ ] pending implementation |
+| C1-R7 | Important | Shipped kit covered only manifest/malformed JSON/happy attestation; "signed-but-unfaithful" kept faithful digest and asserted L3 failure | Expand shipped kit/fixtures: tail truncation, append, span-content substitution, whole-list fabrication, unsigned/unbound, malformed authority result, callback false, exact-envelope mutations, all L3 mismatch/cardinality/entity-confusion, nested-extension failures, legitimate extension round-trip. Construct true signed-but-unfaithful: mutate Trajectory, reseal bytes/digest, update sole subject + Execution forward link, sign exact statement → L1–L3 pass, L4 `not-evaluated`/`replay-required`. Pack smoke imports and runs expanded packed kit and every loaded fixture; no tautologies/skips. | Expanded kit matrix + corrected unfaithful construction; pack smoke all fixtures | [ ] pending implementation |
+| C1-R8 | Minor | F1 all-zero commit rejection not explicit in tests | Add test `VOCABULARY_UPSTREAM.commit !== "0".repeat(40)` in addition to regex/actual pin. Keep pinned upstream SHA/date unless intentionally refreshed via evidenced `git ls-remote`. | Explicit all-zero inequality assertion | [ ] pending implementation |
+
+### Implementation checklist (independent rereview)
+
+- [ ] C1-R1 — `parseExactDsseEnvelope` + L1 exact-envelope regressions; authority not called on L1 fail
+- [ ] C1-R2 — unambiguous single-entity forward-link cardinality + adversarial L3 suite
+- [ ] C1-R3 — closed authority-result validation, strict `verified === true`, typed cancellation, forged key-ID rejection
+- [ ] C1-R4 — descriptor preflight before parse and seal; getter counter zero; typed trap wrapping
+- [ ] C1-R5 — closed nested schemas + namespaced extension discipline + seal→parse→compare
+- [ ] C1-R6 — regenerate JSON Schema + AJV parity for vocabulary/completeness/extensions
+- [ ] C1-R7 — expand shipped kit/fixtures + correct signed-but-unfaithful + pack smoke coverage
+- [ ] C1-R8 — explicit all-zero `VOCABULARY_UPSTREAM.commit` rejection test
+
+### Acceptance
+
+All eight rows above move from pending to commit SHA + command evidence only after red→green
+verification on this branch. L4 remains external/`not-evaluated` from the verify API.
