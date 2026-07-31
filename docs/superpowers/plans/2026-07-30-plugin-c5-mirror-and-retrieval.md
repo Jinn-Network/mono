@@ -3392,7 +3392,7 @@ git commit -m "feat(plugin-runtime): the corpus mirror sync loop under a skip-if
 2. **Producer admission before anything is returned.** A trust-rejected record never appears in C6's enumeration, so C6 never has to filter (cross-plan contract 1). `excludedByTrust` makes a filtered empty page distinguishable from an honestly empty one.
 3. **No ranking.** Items come back in the catalog's own cursor order and are never reordered. `packages/discovery/client/src/query.ts:30` states the protocol rule — *"No ranking -- items are never locally reordered"* — and C5 inherits it; C6 is the layer allowed to rank.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/corpus/read.test.ts`:
 
@@ -3593,12 +3593,12 @@ describe("corpus reader — the C6 seam", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test src/corpus/read.test.ts`
 Expected: FAIL — `Failed to resolve import "./read.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/corpus/read.ts`:
 
@@ -3827,12 +3827,12 @@ export function createCorpusReader(options: CreateCorpusReaderOptions): CorpusRe
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test src/corpus/read.test.ts && yarn typecheck`
 Expected: PASS (14 tests) once Task 14's `seedMirror` helper exists.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/runtime/src/corpus
