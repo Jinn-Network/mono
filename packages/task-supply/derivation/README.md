@@ -42,6 +42,31 @@ serve the gold directory; the store writes a `DO-NOT-PUBLISH` marker into it.
 Three independent reasons the bytes cannot travel with a published pair: the pool's entry
 type has no gold field, the two stores are separate directories the pool holds no reference
 to, and the kit runs a recursive byte scan over the whole pool directory after a real run.
+The scan looks for the gold in plaintext **and** in base64, because base64 is the one
+encoding by which patch material rides into a sealed spec at all (`testMaterial[].content`).
+
+## The admission port's answer is data, not truth
+
+The port is a foreign adapter owned by the composing application and may be remote. Before
+a receipt is published and cited, `runDerivation` checks every binding by which that receipt
+names the pair it is supposed to be about: `goldPatchHash` against the stored gold
+(`gold-mismatch`), and `task.documentDigest`, `task.evaluationSpecDigest` and
+`environment.recordDigest` against the sealed pair and the record
+(`receipt-mismatch`). A stale, swapped or buggy response fails the pair instead of being
+written into `PoolEntry.receiptDigest`, which is the field every downstream consumer joins
+on to claim this pair earned a receipt.
+
+## Operational notes
+
+- **Crash residue.** Both stores publish by directory/file rename, so a process killed
+  mid-`put` leaves a `<pool>/.staging/<addr>.<suffix>/` directory or a
+  `<gold>/.<addr>.<suffix>` file behind. Neither is ever read: `get` and `list` see only
+  published entries, so residue is a disk-hygiene matter, not a correctness one. There is no
+  automatic sweep — delete the dot-prefixed leftovers when reclaiming space.
+- **`JINN_UPDATE_FIXTURES=1`.** Set in the environment, this turns the golden-fixture kit
+  (`src/kit/golden.test.ts`) from a byte-exactness check into a fixture rewriter. It exists
+  for `yarn fixtures:update`; exporting it in a shell where you then run `yarn test`
+  silently disarms the check. CI never sets it.
 
 ## `provenance.sourceCommitment` (this field's first writer)
 

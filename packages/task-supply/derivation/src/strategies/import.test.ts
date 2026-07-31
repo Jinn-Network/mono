@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { sealEnvironmentRecord } from "@jinn-network/environment-record";
 import { assertCandidate } from "../candidate.js";
+import { DerivationError } from "../errors.js";
 import { loadDerivationEnvironment } from "../strategy.js";
 import {
   IMPORT_STRATEGY_ID,
@@ -122,6 +123,30 @@ describe("import strategy (design §7.2, v1's only member)", () => {
     expect(withRowTimeout!.timeout).toBe(1800);
     const [withDefault] = await collect(inputs([buildFixtureRow({ timeout: undefined })]));
     expect(withDefault!.timeout).toBe(900);
+  });
+
+  it("refuses, once and up front, an upstream label the record's lineage contradicts", async () => {
+    const rows = [buildFixtureRow(), buildFixtureRow({ instance_id: "acme__widget-2" })];
+    const contradicted = {
+      ...inputs(rows),
+      upstream: { dataset: "someone/else", revision: "refs/other" },
+    };
+    await expect(collect(contradicted)).rejects.toThrow(DerivationError);
+    await expect(collect(contradicted)).rejects.toThrow(/lineage/);
+  });
+
+  it("imports against a record that carries no lineage at all", async () => {
+    const { lineage: _lineage, ...withoutLineage } = buildFixtureEnvironmentRecordBody();
+    const lineageless = loadDerivationEnvironment(sealEnvironmentRecord(withoutLineage as never));
+    const out = [];
+    for await (const candidate of importStrategy.derive(
+      {},
+      lineageless,
+      inputs([buildFixtureRow()]),
+    )) {
+      out.push(candidate);
+    }
+    expect(out).toHaveLength(1);
   });
 
   it("accepts an async row source as well as a sync one", async () => {

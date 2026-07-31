@@ -2,6 +2,7 @@
 
 import type { Candidate, CandidateTestMaterial } from "../candidate.js";
 import { documentDigest } from "../digest.js";
+import { DerivationError } from "../errors.js";
 import type { DerivationEnvironment, DerivationStrategy, StrategyDeps } from "../strategy.js";
 
 /**
@@ -107,6 +108,33 @@ export function assessRow(
   return { ok: true, sourceLicense: declared, timeout };
 }
 
+/**
+ * The caller says which upstream the rows came from, and that label is sealed permanently — into
+ * `provenance.sourceCommitment` and the payload's lineage — where nothing downstream can falsify
+ * it. When the record itself was written from an import it carries the same two fields, so the
+ * cheap check is available and is taken: a run-level precondition, evaluated once, so a
+ * mislabelled batch fails up front rather than producing N identically-wrong provenance claims.
+ *
+ * `lineage.upstream.keys` is deliberately NOT used as a membership gate: the design (§4.2) does
+ * not make it an exhaustive enumeration of the rows an environment covers, and reading it as one
+ * would reject rows the record never claimed to exclude.
+ */
+function assertUpstreamAgreesWithRecord(
+  env: DerivationEnvironment,
+  inputs: ImportStrategyInputs,
+): void {
+  const lineage = env.record.lineage?.upstream;
+  if (lineage === undefined) return;
+  if (lineage.dataset !== inputs.upstream.dataset || lineage.revision !== inputs.upstream.revision) {
+    throw new DerivationError(
+      "invalid-input",
+      `the caller labels these rows ${inputs.upstream.dataset}@${inputs.upstream.revision}, but the `
+        + `record's lineage records ${lineage.dataset}@${lineage.revision}; a provenance claim `
+        + "nothing downstream can falsify is not written from a contradiction.",
+    );
+  }
+}
+
 function testMaterialFrom(row: UpstreamRebenchRow): CandidateTestMaterial[] {
   const bytes = encoder.encode(row.test_patch);
   return [
@@ -128,6 +156,7 @@ function testMaterialFrom(row: UpstreamRebenchRow): CandidateTestMaterial[] {
 export const importStrategy: DerivationStrategy<ImportStrategyInputs> = {
   id: IMPORT_STRATEGY_ID,
   async *derive(deps: StrategyDeps, env: DerivationEnvironment, inputs: ImportStrategyInputs) {
+    assertUpstreamAgreesWithRecord(env, inputs);
     for await (const row of inputs.rows as AsyncIterable<UpstreamRebenchRow>) {
       const assessment = assessRow(row, env, inputs);
       if (!assessment.ok) {

@@ -42,6 +42,17 @@ describe("bounded claims", () => {
     }
   });
 
+  it("uses neither word in the published package description", async () => {
+    // The description ships to a registry page, where it is read with none of the README's
+    // context around it — so it gets the source rule, not the README's qualified one.
+    const manifest = JSON.parse(
+      await readFile(join(packageRoot, "package.json"), "utf8"),
+    ) as { description?: string };
+    const description = manifest.description ?? "";
+    expect(description.match(UNBOUNDED_DETERMINISM), "description claims determinism").toBeNull();
+    expect(description.match(UNBOUNDED_VERIFIED), "description claims verification").toBeNull();
+  });
+
   it("qualifies every use in the README", async () => {
     const readme = await readFile(join(packageRoot, "README.md"), "utf8");
     for (const line of readme.split("\n")) {

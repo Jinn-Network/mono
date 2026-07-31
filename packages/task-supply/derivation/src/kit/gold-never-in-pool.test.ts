@@ -50,6 +50,11 @@ describe("gold never enters the pool", () => {
       const text = await readFile(path, "utf8");
       for (const row of rows) {
         expect(text, `gold leaked into ${relative(root, path)}`).not.toContain(row.patch);
+        // The one channel by which patch material actually rides into a sealed spec is
+        // `testMaterial[].content`, which is base64 — a plaintext-only scan would miss a leak
+        // through exactly the encoding that carries patches today.
+        expect(text, `base64 gold leaked into ${relative(root, path)}`)
+          .not.toContain(Buffer.from(row.patch, "utf8").toString("base64"));
         for (const line of row.patch.split("\n").filter((l) => l.startsWith("+") && l.length > 3)) {
           expect(text, `gold line leaked into ${relative(root, path)}`).not.toContain(line);
         }
