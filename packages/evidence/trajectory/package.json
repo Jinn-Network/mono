@@ -39,7 +39,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.build.json",
     "test": "vitest run",
     "generate:schemas": "yarn build && node scripts/generate-schemas.mjs --write",
     "check:schemas": "yarn build && node scripts/generate-schemas.mjs --check",
