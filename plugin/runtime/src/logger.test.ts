@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "./errors.js";
-import { createLineLogger } from "./logger.js";
+import { createLineLogger, type LogLevel } from "./logger.js";
 
 const collect = () => {
   const lines: string[] = [];
@@ -22,6 +22,7 @@ describe("PluginRuntimeError", () => {
   test("the code table is frozen and covers the runtime lifecycle", () => {
     expect(Object.isFrozen(RUNTIME_ERROR_CODES)).toBe(true);
     expect(Object.values(RUNTIME_ERROR_CODES).sort()).toEqual([
+      "capability-configuration-invalid",
       "capability-start-failed",
       "capability-stop-failed",
       "config-invalid",
@@ -47,6 +48,22 @@ describe("PluginRuntimeError", () => {
 });
 
 describe("createLineLogger", () => {
+  test("rejects invalid log levels at construction", () => {
+    const { lines, write } = collect();
+    expect(() => createLineLogger("verbose" as LogLevel, write)).toThrow(PluginRuntimeError);
+    expect(() => createLineLogger("" as LogLevel, write)).toThrow(PluginRuntimeError);
+    expect(() => createLineLogger(new String("debug") as unknown as LogLevel, write)).toThrow(PluginRuntimeError);
+    expect(lines).toEqual([]);
+  });
+
+  test("rejects dangerous object keys instead of silently dropping them", () => {
+    const { lines, write } = collect();
+    for (const key of ["__proto__", "constructor", "prototype"]) {
+      expect(() => createLineLogger("debug", write).debug("bad", { [key]: "x" })).toThrow(PluginRuntimeError);
+    }
+    expect(lines).toEqual([]);
+  });
+
   test("writes one JSON line per record", () => {
     const { lines, write } = collect();
     createLineLogger("info", write).info("started", { capabilities: 0 });

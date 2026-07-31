@@ -21,6 +21,10 @@ const SEVERITY: Readonly<Record<LogLevel, number>> = Object.freeze({
   debug: 4,
 });
 
+const LOG_LEVELS = new Set<LogLevel>(["silent", "error", "warn", "info", "debug"]);
+
+const DANGEROUS_FIELD_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 type EmittedLevel = Exclude<LogLevel, "silent">;
 
 const RESERVED_FIELD_KEYS = new Set(["toJSON"]);
@@ -126,6 +130,9 @@ function normalizeLogValue(value: unknown, activePath: Set<object>): unknown {
   try {
     for (const key of Object.keys(value)) {
       if (key === "level" || key === "message") continue;
+      if (DANGEROUS_FIELD_KEYS.has(key)) {
+        logInvalid(`log fields cannot use dangerous key ${key}`);
+      }
       if (RESERVED_FIELD_KEYS.has(key)) {
         logInvalid(`log fields cannot use reserved key ${key}`);
       }
@@ -161,6 +168,9 @@ export function createLineLogger(
   level: LogLevel,
   write: (line: string) => void,
 ): RuntimeLogger {
+  if (typeof level !== "string" || !LOG_LEVELS.has(level)) {
+    logInvalid("log level must be one of silent, error, warn, info, debug");
+  }
   const threshold = SEVERITY[level];
 
   const emit = (

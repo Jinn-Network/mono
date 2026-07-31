@@ -79,8 +79,15 @@ describe("createPluginRuntime", () => {
       config,
       capabilities: [capability("same"), capability("same")],
     });
-    await expect(runtime.start()).rejects.toThrow(/duplicate capability/);
+    await expect(runtime.start()).rejects.toMatchObject({
+      code: "capability-configuration-invalid",
+      message: expect.stringContaining("duplicate capability"),
+    });
     expect(events).toEqual([]);
+    await expect(runtime.start()).rejects.toMatchObject({
+      code: "capability-configuration-invalid",
+    });
+    await runtime.stop();
   });
 
   test("a failing start unwinds the capabilities that already started", async () => {
@@ -293,6 +300,29 @@ describe("createPluginRuntime", () => {
     await expect(runtime.health()).rejects.toBeInstanceOf(PluginRuntimeError);
     await expect(runtime.start()).resolves.toBeUndefined();
     await expect(runtime.start()).rejects.toBeInstanceOf(PluginRuntimeError);
+    await runtime.stop();
+  });
+
+  test("proxy health-invalid throws from capability healthChecks are not rethrown via instanceof", async () => {
+    let getPrototypeOfRuns = 0;
+    const hostile = new Proxy(new PluginRuntimeError("health-invalid", "bad"), {
+      getPrototypeOf() {
+        getPrototypeOfRuns += 1;
+        return PluginRuntimeError.prototype;
+      },
+    });
+    const runtime = createPluginRuntime({
+      config,
+      capabilities: [{
+        name: "hostile",
+        healthChecks: async () => { throw hostile; },
+      }],
+    });
+    await runtime.start();
+    const report = await runtime.health();
+    expect(getPrototypeOfRuns).toBe(0);
+    expect(report.ok).toBe(false);
+    expect(report.checks[0]?.name).toBe("hostile");
     await runtime.stop();
   });
 

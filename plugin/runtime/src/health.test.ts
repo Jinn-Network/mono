@@ -205,6 +205,25 @@ describe("summarizeHealth", () => {
     expect(() => summarizeHealth("0.1.0", hostile)).toThrow(PluginRuntimeError);
     expect(getterRuns).toBe(0);
   });
+
+  test("rejects nonstandard array prototypes without running overridden map", () => {
+    let mapRuns = 0;
+    const hostile = [ok("a")];
+    Object.setPrototypeOf(hostile, {
+      map() {
+        mapRuns += 1;
+        return [];
+      },
+    });
+    expect(() => summarizeHealth("0.1.0", hostile)).toThrow(PluginRuntimeError);
+    expect(mapRuns).toBe(0);
+  });
+
+  test("rejects non-primitive version values", () => {
+    expect(() => summarizeHealth({ toString: () => "0.1.0" }, [])).toThrow(PluginRuntimeError);
+    expect(() => summarizeHealth(new String("0.1.0"), [])).toThrow(PluginRuntimeError);
+    expect(() => summarizeHealth("", [])).toThrow(PluginRuntimeError);
+  });
 });
 
 describe("RUNTIME_VERSION", () => {

@@ -44,6 +44,9 @@ function isPlainDenseArray(value: unknown): value is unknown[] {
   if (!Array.isArray(value)) {
     healthInvalid("health checks must be an array");
   }
+  if (Object.getPrototypeOf(value) !== Array.prototype) {
+    healthInvalid("health checks must use a standard array prototype");
+  }
   const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
   if (lengthDescriptor?.get !== undefined || lengthDescriptor?.set !== undefined) {
     healthInvalid("health checks array must not use a length accessor");
@@ -137,15 +140,30 @@ export function normalizeHealthChecks(inputs: unknown): readonly HealthCheck[] {
   if (!isPlainDenseArray(inputs)) {
     healthInvalid("health checks must be an array");
   }
-  const normalized = inputs.map((input) => normalizeHealthCheck(input));
+  const normalized: HealthCheck[] = [];
+  for (let index = 0; index < inputs.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(inputs, index);
+    if (descriptor === undefined) {
+      healthInvalid("health checks array must be dense");
+    }
+    normalized.push(normalizeHealthCheck(descriptor.value));
+  }
   return Object.freeze(normalized);
+}
+
+function validateVersionString(version: unknown): string {
+  if (typeof version !== "string" || version.length === 0) {
+    healthInvalid("health report version must be a non-empty primitive string");
+  }
+  return version;
 }
 
 /** Fold contributed checks into one report. Order is preserved; names must be unique. */
 export function summarizeHealth(
-  version: string,
+  version: unknown,
   checks: unknown,
 ): HealthReport {
+  const versionString = validateVersionString(version);
   const normalizedInputs = normalizeHealthChecks(checks);
   const seen = new Set<string>();
   const normalizedChecks: HealthCheck[] = [];
@@ -165,7 +183,7 @@ export function summarizeHealth(
   }
   return Object.freeze({
     ok: normalizedChecks.every((check) => check.ok),
-    version,
+    version: versionString,
     checks: Object.freeze(normalizedChecks),
   });
 }

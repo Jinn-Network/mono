@@ -27,6 +27,19 @@ function isPlainError(value: unknown): value is Error {
   return prototype === Error.prototype || prototype === null;
 }
 
+export function isHealthInvalidError(error: unknown): boolean {
+  if (types.isProxy(error)) {
+    return false;
+  }
+  if (!(error instanceof PluginRuntimeError)) {
+    return false;
+  }
+  if (Object.getPrototypeOf(error) !== PluginRuntimeError.prototype) {
+    return false;
+  }
+  return readOwnStringField(error, "code") === "health-invalid";
+}
+
 /**
  * Descriptor-safe normalization for unknown thrown values. Never calls String(),
  * toString, valueOf, toJSON, inspect, or arbitrary getters on hostile objects.

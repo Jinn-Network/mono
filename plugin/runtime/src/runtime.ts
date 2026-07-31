@@ -5,7 +5,7 @@ import type { RuntimeConfig } from "./config.js";
 import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "./errors.js";
 import { type HealthCheck, type HealthReport, normalizeHealthChecks, summarizeHealth } from "./health.js";
 import { type RuntimeLogger, createSilentLogger } from "./logger.js";
-import { describeUnknownError } from "./safe-error.js";
+import { describeUnknownError, isHealthInvalidError } from "./safe-error.js";
 import { RUNTIME_VERSION } from "./version.js";
 
 export interface PluginRuntimeOptions {
@@ -22,12 +22,18 @@ export interface PluginRuntime {
 
 type RuntimeState = "idle" | "starting" | "running" | "stopping";
 
-function assertUniqueNames(capabilities: readonly RuntimeCapability[]): void {
+function validateCapabilityConfiguration(capabilities: readonly RuntimeCapability[]): void {
   const seen = new Set<string>();
   for (const capability of capabilities) {
+    if (typeof capability.name !== "string" || capability.name.trim() === "") {
+      throw new PluginRuntimeError(
+        RUNTIME_ERROR_CODES.capabilityConfigurationInvalid,
+        "capability name must be a non-empty string",
+      );
+    }
     if (seen.has(capability.name)) {
       throw new PluginRuntimeError(
-        RUNTIME_ERROR_CODES.capabilityStartFailed,
+        RUNTIME_ERROR_CODES.capabilityConfigurationInvalid,
         `duplicate capability name: ${capability.name}`,
       );
     }
@@ -104,8 +110,8 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
         );
       }
 
+      validateCapabilityConfiguration(capabilities);
       state = "starting";
-      assertUniqueNames(capabilities);
 
       try {
         for (const capability of capabilities) {
@@ -145,7 +151,7 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
         try {
           checks.push(...normalizeHealthChecks(await capability.healthChecks()));
         } catch (error) {
-          if (error instanceof PluginRuntimeError && error.code === "health-invalid") {
+          if (isHealthInvalidError(error)) {
             throw error;
           }
           checks.push({
