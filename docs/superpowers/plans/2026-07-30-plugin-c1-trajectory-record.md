@@ -287,7 +287,7 @@ git commit -m "feat(evidence-trajectory): scaffold the trajectory record package
 - Consumes: nothing.
 - Produces: `compareCodeUnitStrings(left: string, right: string): number`; `serializeCanonicalJson(value: JsonValue): Uint8Array`; `type JsonValue`; error classes `NonIJsonNumberError`, `NonIJsonStringError`, `UndefinedArrayElementError`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/canonical.test.ts`:
 
@@ -343,12 +343,12 @@ describe("canonical JSON", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/evidence/trajectory && yarn test`
 Expected: FAIL — `Failed to resolve import "./order.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/order.ts`:
 
@@ -463,12 +463,12 @@ export function serializeCanonicalJson(value: JsonValue): Uint8Array {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd packages/evidence/trajectory && yarn test && yarn typecheck`
 Expected: PASS (6 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/evidence/trajectory/src
