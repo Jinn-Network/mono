@@ -135,7 +135,7 @@ Files this plan also edits (append-only): `src/config.ts`, `src/index.ts`, `pack
 
 **The deliberate hardening in this task:** the set of followed archives and the trust genesis anchor are **file-configured only, never environment-settable**. C3's precedence is defaults < `file` < `env`; C5 declares no env key at all, and Task 1's test proves that setting a plausibly-named variable has no effect. Environment is ambient; custody law C2 forbids acquiring authority ambiently, and "which archives may inject content into my agent's context" is authority.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src/corpus/config.test.ts`:
 
@@ -252,12 +252,12 @@ describe("corpus configuration", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test src/corpus/config.test.ts`
 Expected: FAIL — `config.corpus` is `undefined`, so the first assertion throws `TypeError: Cannot read properties of undefined (reading 'sources')`.
 
-- [ ] **Step 3: Append the C5 block to `src/config.ts`**
+- [x] **Step 3: Append the C5 block to `src/config.ts`**
 
 **First (finding C5-P1):** extend C3's `RuntimeConfigFileSchema` so a file document that
 carries `corpus` is not rejected by `z.strictObject` before corpus resolution runs.
@@ -406,12 +406,12 @@ and extend the object `resolveRuntimeConfig` returns with:
 
 Add `resolve` to the existing `node:path` import.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test src/corpus/config.test.ts && yarn typecheck`
 Expected: PASS (10 tests).
 
-- [ ] **Step 5: Declare the dependencies**
+- [x] **Step 5: Declare the dependencies**
 
 In `plugin/runtime/package.json`, extend `dependencies`:
 
@@ -443,7 +443,7 @@ and `resolutions`:
 Add `"@types/better-sqlite3": "7.6.11"` to `devDependencies` (**exact** pin — no `^`;
 C3 closed-world maps reject range specs; finding C5-P2).
 
-- [ ] **Step 6: Register the dependency graph and closed-world approved maps**
+- [x] **Step 6: Register the dependency graph and closed-world approved maps**
 
 In `.github/scripts/plugin-tree-package-inventory.test.mjs`, extend the `JINN_DEPENDENCY_GRAPH` row for `'runtime'` with the eight `@jinn-network/*` names above, keeping the array sorted.
 
@@ -455,7 +455,7 @@ In `.github/scripts/plugin-tree-package-inventory.test.mjs`, extend the `JINN_DE
 
 No allowlist edit is needed: C3's `SIBLING_TREE_DIRS` and `PERMITTED_PACKAGES` pre-seed all eight, including `@jinn-network/evidence-discovery` (added by C3 correction 2). **Name-collision caution for every later task:** `@jinn-network/evidence-discovery` (`packages/evidence/discovery` — the *catalog* contract) is a different package from the `@jinn-network/record-discovery-*` family (`packages/discovery/*` — the *announcement* protocol and client). The mirror reads from `record-discovery-client` and writes into a catalog typed by `evidence-discovery`.
 
-- [ ] **Step 7: Install and run both guards**
+- [x] **Step 7: Install and run both guards**
 
 ```bash
 cd plugin/runtime && yarn install && cd ../..
@@ -464,7 +464,7 @@ node --test .github/scripts/plugin-tree-source-boundaries.test.mjs
 ```
 Expected: both PASS.
 
-- [ ] **Step 8: Add the portal build steps to CI**
+- [x] **Step 8: Add the portal build steps to CI**
 
 In `.github/workflows/plugin-tree-ci.yml`, in the `runtime` job's "Build cross-tree portal dependencies from source" step, append one build per new portal dependency in dependency order (`trust/core`, `discovery/protocol`, `discovery/client`, `evidence/protocol`, `evidence/repository`, `evidence/discovery`, `evidence/catalog-sqlite`, `evidence/retrieval`):
 
@@ -476,7 +476,7 @@ In `.github/workflows/plugin-tree-ci.yml`, in the `runtime` job's "Build cross-t
           done
 ```
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add plugin/runtime/package.json plugin/runtime/yarn.lock plugin/runtime/src/config.ts \
