@@ -295,4 +295,90 @@ describe("createPluginRuntime", () => {
     await expect(runtime.start()).rejects.toBeInstanceOf(PluginRuntimeError);
     await runtime.stop();
   });
+
+  test("concurrent starts invoke capability start exactly once", async () => {
+    let startCount = 0;
+    let releaseStart!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const runtime = createPluginRuntime({
+      config,
+      capabilities: [{
+        name: "slow",
+        start: async () => {
+          startCount += 1;
+          await gate;
+        },
+      }],
+    });
+    const first = runtime.start();
+    await Promise.resolve();
+    await expect(runtime.start()).rejects.toMatchObject({ code: "runtime-busy" });
+    releaseStart();
+    await first;
+    expect(startCount).toBe(1);
+    await runtime.stop();
+  });
+
+  test("throwing startup logger rolls back so retry succeeds", async () => {
+    let debugAttempts = 0;
+    const runtime = createPluginRuntime({
+      config,
+      capabilities: [{ name: "one", start: async () => {} }],
+      log: {
+        debug: () => {
+          debugAttempts += 1;
+          if (debugAttempts === 1) throw new Error("logger failed");
+        },
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+      },
+    });
+    await expect(runtime.start()).rejects.toMatchObject({ code: "capability-start-failed" });
+    await runtime.start();
+    await runtime.stop();
+  });
+
+  test("start failure aggregates rollback stop failures", async () => {
+    const runtime = createPluginRuntime({
+      config,
+      capabilities: [
+        {
+          name: "first",
+          start: async () => {},
+          stop: async () => { throw new Error("stop-one"); },
+        },
+        {
+          name: "second",
+          start: async () => { throw new Error("start-two"); },
+        },
+      ],
+    });
+    await expect(runtime.start()).rejects.toMatchObject({
+      code: "capability-start-failed",
+      message: expect.stringMatching(/start-two.*rollback failures.*stop-one/s),
+    });
+  });
+
+  test("stop during start reports runtime-busy", async () => {
+    let releaseStart!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const runtime = createPluginRuntime({
+      config,
+      capabilities: [{
+        name: "slow",
+        start: async () => { await gate; },
+      }],
+    });
+    const starting = runtime.start();
+    await Promise.resolve();
+    await expect(runtime.stop()).rejects.toMatchObject({ code: "runtime-busy" });
+    releaseStart();
+    await starting;
+    await runtime.stop();
+  });
 });

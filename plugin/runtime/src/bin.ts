@@ -7,7 +7,6 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { resolveRuntimeConfig } from "./config.js";
-import { PluginRuntimeError } from "./errors.js";
 import { createLineLogger } from "./logger.js";
 import { createPluginRuntime } from "./runtime.js";
 import { describeUnknownError } from "./safe-error.js";
@@ -64,11 +63,7 @@ export async function main(
   try {
     config = resolveRuntimeConfig({ env, homeDirectory: io.homeDirectory });
   } catch (error) {
-    io.writeErr(
-      error instanceof PluginRuntimeError
-        ? error.message
-        : `configuration failed: ${describeUnknownError(error)}`,
-    );
+    io.writeErr(`configuration failed: ${describeUnknownError(error)}`);
     return 2;
   }
 

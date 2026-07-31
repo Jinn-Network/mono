@@ -176,6 +176,35 @@ describe("summarizeHealth", () => {
       expect(error).toMatchObject({ code: RUNTIME_ERROR_CODES.healthInvalid });
     }
   });
+
+  test("rejects hostile outer arrays with prototype-filled holes", () => {
+    const hostile = [ok("a")];
+    Object.defineProperty(hostile, 1, {
+      enumerable: true,
+      get() {
+        return ok("b");
+      },
+    });
+    Object.defineProperty(hostile, "length", { value: 2 });
+    expect(() => summarizeHealth("0.1.0", hostile)).toThrow(PluginRuntimeError);
+    try {
+      summarizeHealth("0.1.0", hostile);
+    } catch (error) {
+      expect(error).toMatchObject({ code: "health-invalid" });
+    }
+  });
+
+  test("rejects proxy outer arrays without invoking index getters", () => {
+    let getterRuns = 0;
+    const hostile = new Proxy([ok("a")], {
+      get(target, key) {
+        if (key === "0") getterRuns += 1;
+        return Reflect.get(target, key);
+      },
+    });
+    expect(() => summarizeHealth("0.1.0", hostile)).toThrow(PluginRuntimeError);
+    expect(getterRuns).toBe(0);
+  });
 });
 
 describe("RUNTIME_VERSION", () => {

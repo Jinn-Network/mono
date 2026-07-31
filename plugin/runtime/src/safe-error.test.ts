@@ -43,4 +43,33 @@ describe("describeUnknownError", () => {
   test("accepts string throws unchanged", () => {
     expect(describeUnknownError("configuration failed")).toBe("configuration failed");
   });
+
+  test("proxy values short-circuit before instanceof checks", () => {
+    const hostile = new Proxy(new PluginRuntimeError("config-invalid", "proxy message"), {
+      getPrototypeOf() {
+        throw new Error("getPrototypeOf ran");
+      },
+      get(_target, key) {
+        if (key === "message") throw new Error("message getter ran");
+        return Reflect.get(_target, key);
+      },
+    });
+    expect(describeUnknownError(hostile)).toBe("an unknown error occurred");
+  });
+
+  test("hostile PluginRuntimeError subclasses with accessor messages use fallback text", () => {
+    class HostileError extends PluginRuntimeError {
+      constructor() {
+        super("config-invalid", "safe");
+      }
+    }
+    const error = new HostileError();
+    Object.defineProperty(error, "message", {
+      enumerable: false,
+      get() {
+        throw new Error("message getter ran");
+      },
+    });
+    expect(describeUnknownError(error)).toBe("an unknown error occurred");
+  });
 });

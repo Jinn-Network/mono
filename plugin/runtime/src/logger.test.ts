@@ -28,6 +28,7 @@ describe("PluginRuntimeError", () => {
       "health-invalid",
       "log-invalid",
       "runtime-already-started",
+      "runtime-busy",
       "runtime-not-started",
     ]);
   });
@@ -202,6 +203,45 @@ describe("createLineLogger", () => {
     objectCycle.child = arrayCycle;
     arrayCycle.push(objectCycle);
     expect(() => createLineLogger("debug", write).debug("cycle", { objectCycle })).toThrow(PluginRuntimeError);
+    expect(lines).toEqual([]);
+  });
+
+  test("rejects non-primitive message values", () => {
+    const { lines, write } = collect();
+    expect(() => createLineLogger("debug", write).debug(new String("bad") as unknown as string)).toThrow(PluginRuntimeError);
+    expect(lines).toEqual([]);
+  });
+
+  test("rejects message hooks without invoking them", () => {
+    const { lines, write } = collect();
+    const hostile = {
+      toString() {
+        throw new Error("toString ran");
+      },
+      valueOf() {
+        throw new Error("valueOf ran");
+      },
+      [Symbol.toPrimitive]() {
+        throw new Error("primitive ran");
+      },
+    };
+    expect(() => createLineLogger("debug", write).debug(hostile as unknown as string)).toThrow(PluginRuntimeError);
+    expect(lines).toEqual([]);
+  });
+
+  test("rejects prototype-backed array fields without index lookup", () => {
+    const { lines, write } = collect();
+    let getterRuns = 0;
+    const hostile = [1];
+    Object.defineProperty(hostile, 0, {
+      enumerable: true,
+      get() {
+        getterRuns += 1;
+        return 1;
+      },
+    });
+    expect(() => createLineLogger("debug", write).debug("bad", { hostile })).toThrow(PluginRuntimeError);
+    expect(getterRuns).toBe(0);
     expect(lines).toEqual([]);
   });
 });

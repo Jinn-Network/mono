@@ -60,14 +60,14 @@ function isPlainDenseArray(value: unknown): value is unknown[] {
     }
   }
   for (let index = 0; index < length; index += 1) {
-    if (!(index in value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    if (descriptor === undefined) {
       healthInvalid("health checks array must be dense");
     }
-    const descriptor = Object.getOwnPropertyDescriptor(value, index);
-    if (descriptor?.get !== undefined || descriptor?.set !== undefined) {
+    if (descriptor.get !== undefined || descriptor.set !== undefined) {
       healthInvalid("health checks array must not use index accessors");
     }
-    if (descriptor !== undefined && !descriptor.enumerable) {
+    if (!descriptor.enumerable) {
       healthInvalid("health checks array indices must be enumerable");
     }
   }
@@ -144,11 +144,12 @@ export function normalizeHealthChecks(inputs: unknown): readonly HealthCheck[] {
 /** Fold contributed checks into one report. Order is preserved; names must be unique. */
 export function summarizeHealth(
   version: string,
-  checks: readonly HealthCheck[],
+  checks: unknown,
 ): HealthReport {
+  const normalizedInputs = normalizeHealthChecks(checks);
   const seen = new Set<string>();
   const normalizedChecks: HealthCheck[] = [];
-  for (const check of checks) {
+  for (const check of normalizedInputs) {
     const normalized = normalizeHealthCheck(check);
     if (normalized.name.trim() === "") {
       healthInvalid("a health check must have a name");

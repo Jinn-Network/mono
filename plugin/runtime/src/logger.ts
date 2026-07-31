@@ -60,14 +60,14 @@ function isPlainDenseArray(value: unknown[]): void {
     }
   }
   for (let index = 0; index < length; index += 1) {
-    if (!(index in value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    if (descriptor === undefined) {
       logInvalid("log fields cannot use sparse arrays");
     }
-    const descriptor = Object.getOwnPropertyDescriptor(value, index);
-    if (descriptor?.get !== undefined || descriptor?.set !== undefined) {
+    if (descriptor.get !== undefined || descriptor.set !== undefined) {
       logInvalid("log fields cannot use index accessors");
     }
-    if (descriptor !== undefined && !descriptor.enumerable) {
+    if (!descriptor.enumerable) {
       logInvalid("log fields cannot use non-enumerable indices");
     }
   }
@@ -98,7 +98,14 @@ function normalizeLogValue(value: unknown, activePath: Set<object>): unknown {
     const normalized: unknown[] = [];
     try {
       for (let index = 0; index < value.length; index += 1) {
-        normalized.push(normalizeLogValue(value[index], activePath));
+        const descriptor = Object.getOwnPropertyDescriptor(value, index);
+        if (descriptor === undefined) {
+          logInvalid("log fields cannot use sparse arrays");
+        }
+        if (descriptor.get !== undefined || descriptor.set !== undefined) {
+          logInvalid("log fields cannot use index accessors");
+        }
+        normalized.push(normalizeLogValue(descriptor.value, activePath));
       }
       return normalized;
     } finally {
@@ -161,6 +168,9 @@ export function createLineLogger(
     message: string,
     fields?: Readonly<Record<string, unknown>>,
   ): void => {
+    if (typeof message !== "string") {
+      logInvalid("log message must be a primitive string");
+    }
     if (SEVERITY[entryLevel] > threshold) return;
     const normalized = normalizeLogFields(fields);
     const record: Record<string, unknown> = { ...normalized };

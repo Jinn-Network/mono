@@ -20,6 +20,7 @@ export const RUNTIME_ERROR_CODES = Object.freeze({
   healthInvalid: "health-invalid",
   logInvalid: "log-invalid",
   runtimeAlreadyStarted: "runtime-already-started",
+  runtimeBusy: "runtime-busy",
   runtimeNotStarted: "runtime-not-started",
   capabilityStartFailed: "capability-start-failed",
   capabilityStopFailed: "capability-stop-failed",

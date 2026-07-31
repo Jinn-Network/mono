@@ -20,6 +20,8 @@ export interface PluginRuntime {
   stop(): Promise<void>;
 }
 
+type RuntimeState = "idle" | "starting" | "running" | "stopping";
+
 function assertUniqueNames(capabilities: readonly RuntimeCapability[]): void {
   const seen = new Set<string>();
   for (const capability of capabilities) {
@@ -50,7 +52,7 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
   const log = options.log ?? createSilentLogger();
   const context: CapabilityContext = { config: options.config, log };
 
-  let started = false;
+  let state: RuntimeState = "idle";
   const running: RuntimeCapability[] = [];
 
   const stopRunning = async (): Promise<readonly string[]> => {
@@ -70,34 +72,68 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
     return failures;
   };
 
+  const failStart = async (
+    capabilityName: string,
+    error: unknown,
+  ): Promise<never> => {
+    const rollbackFailures = await stopRunning();
+    state = "idle";
+    const parts = [`capability ${capabilityName} failed to start: ${describeUnknownError(error)}`];
+    if (rollbackFailures.length > 0) {
+      parts.push(`rollback failures: ${rollbackFailures.join("; ")}`);
+    }
+    throw new PluginRuntimeError(
+      RUNTIME_ERROR_CODES.capabilityStartFailed,
+      parts.join("; "),
+      { cause: error },
+    );
+  };
+
   return {
     async start(): Promise<void> {
-      if (started) {
+      if (state === "running") {
         throw new PluginRuntimeError(
           RUNTIME_ERROR_CODES.runtimeAlreadyStarted,
           "the runtime is already started",
         );
       }
-      assertUniqueNames(capabilities);
-      for (const capability of capabilities) {
-        try {
-          if (capability.start !== undefined) await capability.start(context);
-        } catch (error) {
-          await stopRunning();
-          throw new PluginRuntimeError(
-            RUNTIME_ERROR_CODES.capabilityStartFailed,
-            `capability ${capability.name} failed to start: ${describeUnknownError(error)}`,
-            { cause: error },
-          );
-        }
-        running.push(capability);
+      if (state === "starting" || state === "stopping") {
+        throw new PluginRuntimeError(
+          RUNTIME_ERROR_CODES.runtimeBusy,
+          "the runtime is busy with another lifecycle transition",
+        );
       }
-      started = true;
-      log.debug("runtime started", { capabilities: capabilities.length });
+
+      state = "starting";
+      assertUniqueNames(capabilities);
+
+      try {
+        for (const capability of capabilities) {
+          try {
+            if (capability.start !== undefined) await capability.start(context);
+          } catch (error) {
+            await failStart(capability.name, error);
+          }
+          running.push(capability);
+        }
+
+        try {
+          log.debug("runtime started", { capabilities: capabilities.length });
+        } catch (error) {
+          await failStart("runtime", error);
+        }
+
+        state = "running";
+      } catch (error) {
+        if (state === "starting") {
+          state = "idle";
+        }
+        throw error;
+      }
     },
 
     async health(): Promise<HealthReport> {
-      if (!started) {
+      if (state !== "running") {
         throw new PluginRuntimeError(
           RUNTIME_ERROR_CODES.runtimeNotStarted,
           "the runtime must be started before it can report health",
@@ -124,14 +160,24 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
     },
 
     async stop(): Promise<void> {
-      if (!started) return;
+      if (state === "idle") return;
+      if (state === "starting" || state === "stopping") {
+        throw new PluginRuntimeError(
+          RUNTIME_ERROR_CODES.runtimeBusy,
+          "the runtime is busy with another lifecycle transition",
+        );
+      }
+
+      state = "stopping";
       const failures = await stopRunning();
-      started = false;
+      state = "idle";
+
       try {
         log.debug("runtime stopped", {});
       } catch {
         // Diagnostic logging must never abort stop reporting.
       }
+
       if (failures.length > 0) {
         throw new PluginRuntimeError(
           RUNTIME_ERROR_CODES.capabilityStopFailed,
