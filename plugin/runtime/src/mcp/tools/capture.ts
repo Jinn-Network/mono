@@ -4,6 +4,8 @@ import { z } from "zod";
 
 import type { CaptureCapability } from "../../capture/capability.js";
 import { PluginRuntimeError } from "../../errors.js";
+import type { RuntimeLogger } from "../../logger.js";
+import { indexLocalRecord, type IndexingDeps } from "../../relevance/indexing.js";
 import { type ToolResponse, toolFailure, toolJson } from "../result.js";
 
 /**
@@ -45,6 +47,9 @@ export type CaptureAbandonArgs = z.infer<z.ZodObject<typeof captureAbandonInputS
 
 export interface CaptureToolDeps {
   readonly capture: CaptureCapability;
+  /** Post-seal relevance indexing — the archive lock is released before this runs. */
+  readonly sessionIndex?: IndexingDeps;
+  readonly log?: RuntimeLogger;
 }
 
 export const CAPTURE_OPEN_DESCRIPTION =
@@ -92,6 +97,16 @@ export async function handleCaptureSeal(
       ...(args.endedAt ? { endedAt: args.endedAt } : {}),
     });
     if (result.sealed) {
+      if (deps.sessionIndex) {
+        try {
+          await indexLocalRecord(deps.sessionIndex, result.capture.record);
+        } catch (error) {
+          // A sealed session the index could not absorb is a report, not a broken seal.
+          deps.log?.warn(
+            `capture indexed with errors: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
       return toolJson({ sealed: true, digest: result.capture.record.digest });
     }
     // An unsealable feed is a report, not a tool error: the adapter logs it and

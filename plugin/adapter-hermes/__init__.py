@@ -13,6 +13,7 @@ broken session.
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import threading
 from dataclasses import dataclass, field
@@ -366,7 +367,7 @@ def register(ctx) -> None:
     except runtime_pin.RuntimePinError as exc:
         logger.warning("jinn: runtime unavailable: %s", exc)
 
-    if resolution is not None:
+    if resolution is not None and os.environ.get("JINN_PLUGIN_SKIP_HOST_CONFIG_ENSURE") != "1":
         action = host_config.ensure_entry(resolution, paths.runtime_home())
         logger.debug("jinn: corpus tool registration %s", action)
 

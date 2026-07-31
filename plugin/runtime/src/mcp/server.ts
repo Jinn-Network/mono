@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { LocalEvidenceRuntime } from "@jinn-network/evidence-local-runtime";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { CaptureCapability } from "../capture/capability.js";
@@ -9,6 +10,7 @@ import type { HealthReport } from "../health.js";
 import type { RuntimeLogger } from "../logger.js";
 import type { AdmissionFilter } from "../relevance/admission.js";
 import type { RelevanceIndex, SensitivityClassifier } from "../relevance/index.js";
+import { createTraceSpanSource } from "../relevance/trace-decode-adapter.js";
 import { MCP_SERVER_NAME, MCP_SERVER_TITLE, type RuntimeRole, TOOL_NAMES } from "./identifiers.js";
 import {
   CAPTURE_ABANDON_DESCRIPTION,
@@ -49,9 +51,12 @@ export interface McpServerDeps {
   /** C6's classifier — the fetch path's enforcement point (Task 5). */
   readonly classifier: SensitivityClassifier;
   readonly admission: AdmissionFilter;
+  readonly archiveDirectory: string;
   readonly capture?: CaptureCapability;
   readonly mirror?: CorpusMirror;
   readonly log: RuntimeLogger;
+  /** Opens the local evidence archive for post-seal indexing. */
+  readonly openLocalRuntime: () => Promise<LocalEvidenceRuntime>;
   health(): Promise<HealthReport>;
 }
 
@@ -67,6 +72,12 @@ export function createMcpServer(deps: McpServerDeps): McpServer {
     title: MCP_SERVER_TITLE,
     version: deps.version,
   });
+  const spanSource = createTraceSpanSource();
+  const sessionIndex = {
+    index: deps.index,
+    spanSource,
+    openLocalRuntime: deps.openLocalRuntime,
+  };
 
   server.registerTool(
     TOOL_NAMES.corpusSearch,
@@ -136,7 +147,7 @@ export function createMcpServer(deps: McpServerDeps): McpServer {
   server.registerTool(
     TOOL_NAMES.captureSeal,
     { title: "Seal a capture session", description: CAPTURE_SEAL_DESCRIPTION, inputSchema: captureSealInputShape },
-    async (args) => handleCaptureSeal({ capture }, args),
+    async (args) => handleCaptureSeal({ capture, sessionIndex, log: deps.log }, args),
   );
 
   server.registerTool(

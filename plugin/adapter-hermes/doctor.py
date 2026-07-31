@@ -80,11 +80,40 @@ def check_plugin_build(directory: Optional[Path] = None) -> Dict[str, Any]:
         return _check("plugin-build", False, str(exc), UPDATE_REMEDY)
 
 
+def _probe_channel_when_install_absent(
+    directory: Path, pin: runtime_pin.RuntimePin
+) -> None:
+    """Distinguish a registry outage from an ordinary missing install.
+
+    When the installed manifest tree is gone, attempt acquisition once so npm's
+    E404 surfaces as ``ChannelOutageError``. If a manifest still exists (for
+    example the bin was moved aside), do not probe: ``ensure()`` would wipe a
+    valid tree and try the registry.
+    """
+    manifest = runtime_pin.installed_manifest_path(directory, pin)
+    if manifest.parent.exists():
+        return
+    if not paths.is_installed_plugin():
+        return
+    runtime_pin.ensure(directory)
+
+
 def check_runtime_pin() -> Dict[str, Any]:
-    """The pin file itself, read without a Node toolchain."""
+    """The pin file and the installed artifact it points at."""
+    directory = paths.plugin_dir()
     try:
-        pin = runtime_pin.read_pin()
+        pin = runtime_pin.read_pin(directory)
     except runtime_pin.RuntimePinError as exc:
+        return _check("runtime-pin", False, str(exc), UPDATE_REMEDY)
+    try:
+        runtime_pin.resolve(directory)
+    except runtime_pin.ChannelOutageError as exc:
+        return _check("runtime-pin", False, str(exc), None)
+    except runtime_pin.RuntimePinError as exc:
+        try:
+            _probe_channel_when_install_absent(directory, pin)
+        except runtime_pin.ChannelOutageError as outage:
+            return _check("runtime-pin", False, str(outage), None)
         return _check("runtime-pin", False, str(exc), UPDATE_REMEDY)
     return _check("runtime-pin", True, f"{pin.package}@{pin.version}")
 
@@ -103,13 +132,23 @@ def _client_for_checks() -> "mcp_client.McpClient":
 
 def check_runtime_available(client_factory: Optional[Callable[[], Any]] = None) -> Dict[str, Any]:
     """Start the pinned runtime, complete the handshake, and call ``health``."""
+    directory = paths.plugin_dir()
     try:
-        resolution = _resolve_runtime()
+        pin = runtime_pin.read_pin(directory)
+    except runtime_pin.RuntimePinError as exc:
+        return _check("runtime-available", False, str(exc), UPDATE_REMEDY)
+
+    try:
+        resolution = runtime_pin.resolve(directory)
     except runtime_pin.ChannelOutageError as exc:
         # Not fixable from this machine: printing an update command here would
         # send a user round a loop that cannot close (spec 9.3).
         return _check("runtime-available", False, str(exc), None)
     except runtime_pin.RuntimePinError as exc:
+        try:
+            _probe_channel_when_install_absent(directory, pin)
+        except runtime_pin.ChannelOutageError as outage:
+            return _check("runtime-available", False, str(outage), None)
         return _check("runtime-available", False, str(exc), UPDATE_REMEDY)
 
     factory = client_factory or _client_for_checks

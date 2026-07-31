@@ -49,6 +49,10 @@ function baseDeps(overrides: Partial<Parameters<typeof createMcpServer>[0]> = {}
     retrieval,
     classifier: allowAllClassifier,
     admission: allowAllAdmission,
+    archiveDirectory: "/tmp/archive",
+    openLocalRuntime: async () => {
+      throw new Error("openLocalRuntime is not used in this test");
+    },
     log,
     health,
     ...overrides,

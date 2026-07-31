@@ -366,6 +366,7 @@ __metadata:
     zod: "npm:4.4.3"
   bin:
     jinn-plugin-runtime: ./dist/bin.js
+    jinn-plugin-runtime-session: ./dist/session-host.js
   languageName: unknown
   linkType: soft
 

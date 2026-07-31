@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type { DsseChainVerifier, DsseSigner } from "@jinn-network/trust-core";
 import type { Transport } from "@jinn-network/record-discovery-client";
 import { createEvidenceRetrievalFailure } from "@jinn-network/evidence-retrieval";
+import { openLocalEvidenceRuntime } from "@jinn-network/evidence-local-runtime";
 
 import { createCaptureCapability } from "./capture/capability.js";
 import {
@@ -219,6 +220,9 @@ function buildServeCapabilities(
         retrieval,
         classifier,
         admission,
+        archiveDirectory: context.config.archiveDirectory,
+        openLocalRuntime: () =>
+          openLocalEvidenceRuntime({ rootDir: context.config.archiveDirectory }),
         ...(mirror === undefined ? {} : { mirror }),
         ...(capture === undefined ? {} : { capture }),
         health: runtimeHealth,

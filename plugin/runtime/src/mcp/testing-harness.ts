@@ -3,6 +3,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createEvidenceRetrievalFailure } from "@jinn-network/evidence-retrieval";
+import { openLocalEvidenceRuntime } from "@jinn-network/evidence-local-runtime";
 import type { DsseSigner } from "@jinn-network/trust-core";
 
 import { createCaptureCapability, type CaptureCapability } from "../capture/capability.js";
@@ -126,6 +127,8 @@ async function open(home: string, role: "tools" | "session"): Promise<TestRuntim
     retrieval: FAIL_CLOSED_RETRIEVAL,
     classifier: allowAllClassifier,
     admission: allowAllAdmission,
+    archiveDirectory: config.archiveDirectory,
+    openLocalRuntime: () => openLocalEvidenceRuntime({ rootDir: config.archiveDirectory }),
     ...(capture ? { capture } : {}),
     log,
     health: () => healthRuntime!.health(),

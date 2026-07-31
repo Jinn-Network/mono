@@ -87,29 +87,112 @@ def test_no_check_is_a_release_note(monkeypatch):
     assert "host-provider" not in names
 
 
-def test_a_channel_outage_reports_a_null_remedy_not_a_no_op_command(monkeypatch):
-    def explode():
-        raise runtime_pin.ChannelOutageError("npm cannot supply @jinn-network/plugin-runtime@0.1.0: E404")
+def test_a_channel_outage_reports_a_null_remedy_not_a_no_op_command(monkeypatch, tmp_path):
+    pin = runtime_pin.RuntimePin(
+        package="@jinn-network/plugin-runtime",
+        version="0.0.0-nonexistent",
+        bin_path="runtime/node_modules/.bin/jinn-plugin-runtime",
+    )
+    monkeypatch.setattr(doctor.paths, "plugin_dir", lambda: tmp_path)
+    monkeypatch.setattr(doctor.paths, "is_installed_plugin", lambda: True)
+    monkeypatch.setattr(runtime_pin, "read_pin", lambda directory=None: pin)
+    monkeypatch.setattr(
+        runtime_pin,
+        "resolve",
+        lambda directory=None: (_ for _ in ()).throw(
+            runtime_pin.RuntimePinError("not installed")
+        ),
+    )
 
-    monkeypatch.setattr(doctor, "_resolve_runtime", explode)
+    def ensure(directory=None, installer=None):
+        raise runtime_pin.ChannelOutageError(
+            "npm cannot supply @jinn-network/plugin-runtime@0.0.0-nonexistent: E404"
+        )
+
+    monkeypatch.setattr(runtime_pin, "ensure", ensure)
     check = doctor.check_runtime_available(client_factory=lambda: FakeClient())
     assert check["ok"] is False
     assert check["remedy"] is None
     assert "cannot supply" in check["detail"]
 
 
-def test_an_ordinary_pin_failure_keeps_an_actionable_remedy(monkeypatch):
-    def explode():
+def test_an_ordinary_pin_failure_keeps_an_actionable_remedy(monkeypatch, tmp_path):
+    (tmp_path / "runtime" / "node_modules" / "@jinn-network" / "plugin-runtime").mkdir(parents=True)
+    monkeypatch.setattr(doctor.paths, "plugin_dir", lambda: tmp_path)
+
+    def explode(directory=None):
         raise runtime_pin.RuntimePinError("pinned runtime version mismatch: expected 0.1.0")
 
-    monkeypatch.setattr(doctor, "_resolve_runtime", explode)
+    monkeypatch.setattr(runtime_pin, "resolve", explode)
     check = doctor.check_runtime_available(client_factory=lambda: FakeClient())
     assert check["ok"] is False
     assert check["remedy"] == "hermes plugins update jinn"
 
 
-def test_a_handshake_failure_surfaces_the_runtime_stderr(monkeypatch):
-    monkeypatch.setattr(doctor, "_resolve_runtime", lambda: _pinned())
+def test_a_pin_that_does_not_match_the_install_fails_before_spawn(monkeypatch, tmp_path):
+    (tmp_path / "runtime" / "node_modules" / "@jinn-network" / "plugin-runtime").mkdir(parents=True)
+    monkeypatch.setattr(doctor.paths, "plugin_dir", lambda: tmp_path)
+
+    def explode(directory=None):
+        raise runtime_pin.RuntimePinError("pinned runtime version mismatch: expected 0.1.0")
+
+    monkeypatch.setattr(runtime_pin, "resolve", explode)
+    check = doctor.check_runtime_pin()
+    assert check["ok"] is False
+    assert check["remedy"] == "hermes plugins update jinn"
+
+
+def test_a_missing_install_probes_the_channel_for_an_outage(monkeypatch, tmp_path):
+    pin = runtime_pin.RuntimePin(
+        package="@jinn-network/plugin-runtime",
+        version="0.0.0-nonexistent",
+        bin_path="runtime/node_modules/.bin/jinn-plugin-runtime",
+    )
+    monkeypatch.setattr(doctor.paths, "plugin_dir", lambda: tmp_path)
+    monkeypatch.setattr(doctor.paths, "is_installed_plugin", lambda: True)
+    monkeypatch.setattr(runtime_pin, "read_pin", lambda directory=None: pin)
+    monkeypatch.setattr(
+        runtime_pin,
+        "resolve",
+        lambda directory=None: (_ for _ in ()).throw(
+            runtime_pin.RuntimePinError("not installed")
+        ),
+    )
+
+    def ensure(directory=None, installer=None):
+        raise runtime_pin.ChannelOutageError(
+            "npm cannot supply @jinn-network/plugin-runtime@0.0.0-nonexistent: E404"
+        )
+
+    monkeypatch.setattr(runtime_pin, "ensure", ensure)
+    check = doctor.check_runtime_available(client_factory=lambda: FakeClient())
+    assert check["ok"] is False
+    assert check["remedy"] is None
+    assert "cannot supply" in check["detail"]
+
+
+def test_a_handshake_failure_surfaces_the_runtime_stderr(monkeypatch, tmp_path):
+    pin = runtime_pin.RuntimePin(
+        package="@jinn-network/plugin-runtime",
+        version="0.1.0",
+        bin_path="runtime/node_modules/.bin/jinn-plugin-runtime",
+    )
+    binary = tmp_path / pin.bin_path
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    binary.chmod(0o755)
+    manifest = runtime_pin.installed_manifest_path(tmp_path, pin)
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        json.dumps({"name": pin.package, "version": pin.version}),
+        encoding="utf-8",
+    )
+    (tmp_path / "runtime-pin.json").write_text(
+        json.dumps({"package": pin.package, "version": pin.version, "bin": pin.bin_path}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(doctor.paths, "plugin_dir", lambda: tmp_path)
+
     factory = lambda: FakeClient(error=mcp_client.McpClientError("start-failed", "runtime exited: cannot open catalog"))
     check = doctor.check_runtime_available(client_factory=factory)
     assert check["ok"] is False
@@ -119,6 +202,12 @@ def test_a_handshake_failure_surfaces_the_runtime_stderr(monkeypatch):
 
 def test_a_development_override_is_reported_as_such(monkeypatch, tmp_path):
     monkeypatch.setenv("JINN_PLUGIN_RUNTIME_BIN", str(tmp_path / "runtime"))
+    monkeypatch.setattr(doctor.paths, "plugin_dir", lambda: tmp_path)
+    monkeypatch.setattr(runtime_pin, "read_pin", lambda directory=None: runtime_pin.RuntimePin(
+        package="@jinn-network/plugin-runtime",
+        version="0.1.0",
+        bin_path="runtime/node_modules/.bin/jinn-plugin-runtime",
+    ))
     monkeypatch.setattr(doctor, "_client_for_checks", lambda: FakeClient())
     check = doctor.check_runtime_available(client_factory=lambda: FakeClient())
     assert "development override" in check["detail"]
