@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/plugin-runtime",
   "version": "0.1.0",
-  "description": "The Jinn Plugin runtime — host-side capture and federated retrieval over the evidence plane.",
+  "description": "Jinn Plugin runtime skeleton — lifecycle, configuration, health, and structured logging for later components to compose.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {
@@ -43,9 +43,9 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.8"
+    "@types/node": "22.20.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
   },
   "resolutions": {
     "vite": "6.4.3"
