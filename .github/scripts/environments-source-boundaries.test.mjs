@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'environments');
-const environmentDirectories = ['record'];
+const environmentDirectories = ['record', 'verification'];
 
 // `packages/environments/record` is tier 2: records and meaning, no behavior. It declares
 // ZERO Jinn runtime dependencies (design §3.3: zod + noble-class primitives only), so every
@@ -54,6 +54,54 @@ const RECORD_ALLOWED_DEV_DEPENDENCIES = [
   '@jinn-network/evidence-protocol', '@types/node', 'ajv', 'canonicalize', 'typescript', 'vitest',
 ];
 const RECORD_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+
+// `packages/environments/verification` is tier 3: it executes the K-run protocol and seals
+// the attestation. Design §3.3 gives it exactly two package edges — the record kind it
+// verifies, and trust/core for DSSE + JCS + hashing — so `@jinn-network/trust-*` is lifted
+// from the foreign list for this package only, and every other Jinn family stays banned.
+const VERIFICATION_ALLOWED_EXTERNALS = [
+  '@jinn-network/environment-record',
+  '@jinn-network/trust-core',
+  'zod',
+];
+const VERIFICATION_ALLOWED_DEPENDENCIES = [
+  '@jinn-network/environment-record',
+  '@jinn-network/trust-core',
+  'zod',
+];
+const VERIFICATION_ALLOWED_DEV_DEPENDENCIES = [
+  // `trust-resolve` is install-graph only (a portal's own resolutions do not apply, so
+  // `trust-testing`'s Jinn dependency is resolved from here). It stays in the foreign list
+  // below, so importing it from any file in this package still fails the guard.
+  '@jinn-network/trust-resolve',
+  '@jinn-network/trust-testing',
+  '@types/node',
+  'typescript',
+  'vitest',
+];
+const VERIFICATION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+// Only `trust-core` (production) and `trust-testing` (testing region) are admitted; the rest
+// of the trust family stays foreign for this tree.
+const VERIFICATION_FOREIGN_PACKAGES = [
+  ...ENVIRONMENTS_FOREIGN_PACKAGES.filter((entry) => entry !== '@jinn-network/trust-*'),
+  '@jinn-network/trust-resolve',
+];
+// Finding F-C2-5: the staged-state file store is this tree's only production
+// filesystem surface. Its directory is an argument, not ambient authority --
+// but the amendment is narrow on purpose, so a second fs import anywhere in
+// the tree still fails the guard.
+const FILESYSTEM_ALLOWED_SOURCES = [
+  'verification/src/staged-state-store.ts',
+  'verification/src/testing.ts',
+  // Three test files read from disk for reasons the suite cannot fake: the store's
+  // own test drives it against a real temporary directory, and the fixture-corpus
+  // and bounded-claims suites read this package's own shipped fixtures and source.
+  // They are named one by one so a new filesystem user still needs a deliberate
+  // edit here rather than inheriting a blanket test-region exemption.
+  'verification/src/staged-state-store.test.ts',
+  'verification/src/testing.test.ts',
+  'verification/src/bounded-claims.test.ts',
+];
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
 const ambientNetworkIdentifier = new RegExp(
@@ -349,6 +397,84 @@ test('environments source boundaries remain one-way across the approved graph', 
   assert.deepEqual(Object.keys(manifest.devDependencies ?? {}).sort(), RECORD_ALLOWED_DEV_DEPENDENCIES);
   assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), RECORD_ALLOWED_PEER_DEPENDENCIES);
   assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+});
+
+test('environment-verification takes exactly its two approved package edges', () => {
+  const verification = join(packages, 'verification');
+  const verificationSource = join(verification, 'src');
+  const testingEntry = join(verificationSource, 'testing.ts');
+  const testRegex = /\.test\.[cm]?[jt]sx?$/u;
+
+  const allFiles = files(verificationSource);
+  const testingFiles = allFiles.filter((file) => file === testingEntry || testRegex.test(file));
+  const productionFiles = allFiles.filter((file) => !testingFiles.includes(file));
+
+  // Production source: environment-record + trust-core + zod only. No vitest, no I/O module
+  // beyond the one carve-out below, no foreign tree by relative path.
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      productionFiles,
+      [...VERIFICATION_FOREIGN_PACKAGES, ...NODE_IO_MODULES, 'vitest'],
+      FORBIDDEN_ROOTS.filter((forbiddenRoot) => forbiddenRoot !== join(root, 'packages', 'trust')),
+    ).filter((finding) => !FILESYSTEM_ALLOWED_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`),
+    )),
+    [],
+    'environment-verification production source must take only its two approved package edges',
+  );
+
+  // Testing region: trust-testing is admitted for real deterministic keys; nothing else new.
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      testingFiles,
+      VERIFICATION_FOREIGN_PACKAGES,
+      FORBIDDEN_ROOTS.filter((forbiddenRoot) => forbiddenRoot !== join(root, 'packages', 'trust')),
+    ),
+    [],
+    'environment-verification testing files must not cross into foreign package roots',
+  );
+
+  // Finding F-C2-5: `node:fs/promises` is permitted in exactly two files across this package.
+  const fsUsers = forbiddenImportsInFiles(allFiles, NODE_IO_MODULES)
+    .filter((finding) => !FILESYSTEM_ALLOWED_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`),
+    ));
+  assert.deepEqual(fsUsers, [],
+    `only ${FILESYSTEM_ALLOWED_SOURCES.join(' and ')} may touch the filesystem, and only `
+    + 'through a directory supplied as an argument');
+  const fsCarveOutUses = forbiddenImportsInFiles(allFiles, NODE_IO_MODULES)
+    .filter((finding) => !finding.includes('node:fs/promises'));
+  assert.deepEqual(fsCarveOutUses, [],
+    'the filesystem carve-out covers node:fs/promises only; no other I/O module is admitted');
+
+  // The root entrypoint must not re-export the testing region.
+  assert.deepEqual(
+    forbiddenImportsInFiles([join(verificationSource, 'index.ts')], [], [testingEntry]),
+    [],
+    'the root entrypoint must not re-export testing.ts',
+  );
+
+  // Manifest shape.
+  const manifest = JSON.parse(readFileSync(join(verification, 'package.json'), 'utf8'));
+  assert.deepEqual(Object.keys(manifest.exports).sort(), ['.', './fixtures/*', './testing']);
+  assert.deepEqual(manifest.exports['.'],
+    { import: './dist/index.js', types: './dist/index.d.ts' });
+  assert.deepEqual(manifest.exports['./testing'],
+    { import: './dist/testing.js', types: './dist/testing.d.ts' });
+  assert.deepEqual(Object.keys(manifest.dependencies ?? {}).sort(), VERIFICATION_ALLOWED_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.devDependencies ?? {}).sort(), VERIFICATION_ALLOWED_DEV_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), VERIFICATION_ALLOWED_PEER_DEPENDENCIES);
+  assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+
+  // Every non-relative specifier in production source is one of the approved externals.
+  const externals = productionFiles.flatMap((file) => specifiers(readFileSync(file, 'utf8'))
+    .filter((specifier) => !specifier.startsWith('.') && !specifier.startsWith('node:')))
+    .map((specifier) => specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/'));
+  assert.deepEqual(
+    [...new Set(externals)].sort().filter((name) => !VERIFICATION_ALLOWED_EXTERNALS.includes(name)),
+    [],
+    'environment-verification production source imports an unapproved external package',
+  );
 });
 
 test('locale-sensitive API detection catches member calls, optional chaining, and Intl', () => {
