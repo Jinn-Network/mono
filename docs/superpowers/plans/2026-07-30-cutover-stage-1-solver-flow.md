@@ -5056,3 +5056,83 @@ the exact blocking line and the decoded revert.
 changes a signature C8 depends on). `C3 → C4 → C5` are strictly sequential. `C6` and `C7` are
 independent of the projector chain. `C8` needs C3–C5 and C2. `C9` runs last, but its **diagnosis**
 starts immediately and in parallel, because a dead gate changes what the leg can prove.
+
+## Execution findings (2026-07-31, close-out leg C1–C9)
+
+### E26 — pinning `viem` does not remove the portal cast; the dependency topology does (C1, partial)
+
+The version skew was real and is fixed: `client` resolved `viem@2.55.8` while every package under
+`packages/` resolved `2.55.10`, and both sides are now pinned to `2.55.10`. **That did not remove
+the cast**, and the reason matters more than the pin.
+
+`viem` is a direct `dependencies` entry of `marketplace-venue-base`, `-binding` and `-projector`,
+and each `packages/` tree is **its own yarn project**, so each installs a physically separate copy
+under its own `node_modules`. `portal:` does not dedup across project boundaries. TypeScript then
+compares those declarations **by identity, not by shape**, for viem's deeply recursive generics
+(`Client`, `Account`, `NonceManager.consume`, `ExtendableProtectedActions`), and reports
+*"two different types with this name exist, but they are unrelated"* for byte-identical types.
+
+Tested and rejected: a `paths` redirect in `client/tsconfig.json`
+(`"viem": ["./node_modules/viem"]`). It does not reach the portal packages' own `.d.ts`
+resolution, which resolves relative to their own location under `Node16`, so the portal side still
+binds its local copy. Error count went 1 → 2.
+
+**The real fix** is the pattern this repo already uses for portal-within-portal conflicts: make
+`viem` a **required peerDependency** (plus devDependency) of those packages so the consumer's copy
+is the one used. That is a dependency-topology change across three package manifests plus
+reinstalls — `refactor`-shaped, outside a close-out leg. Escalated rather than thinned.
+
+**Interim:** `as never` became `as unknown as Parameters<typeof createBaseVenue>[0]['publicClient']`.
+Equally permissive at that site, but it names what is being asserted instead of erasing it.
+
+### E27 — the e2e bootstrap revert is live Base-mainnet state, and it breaks real operator onboarding (**escalation, not a test bug**)
+
+`stOLAS stake()` reverts with selector **`0x14460f20`** = **`UnauthorizedMultisig(address)`**,
+argument `0xFbBEc0C8b13B38a9aC0499694A69a10204c5E2aB` — the `gnosisSafeSameAddressMultisig`
+constant in `client/src/earning/contracts.ts:208`.
+
+Root cause, read directly off mainnet with no Anvil in the picture:
+
+```
+cast call 0x3C1fF68f5aa342D296d4DEe4Bb1cACCA912D95fE "mapMultisigs(address)(bool)" \
+  0xFbBEc0C8b13B38a9aC0499694A69a10204c5E2aB --rpc-url https://mainnet.base.org
+→ false
+```
+
+`ServiceRegistryL2`'s whitelist of authorized multisig implementations currently returns **false**
+for the implementation the stOLAS distributor targets. The same calldata `eth_call`ed straight
+against `mainnet.base.org` reverts identically — **so this is not an Anvil artifact** (verdict (a)
+ruled out) — and `git diff $(git merge-base HEAD origin/next) HEAD -- client/src/earning/` is empty
+with the two relevant constants untouched since March/May, so it is **not a regression on this
+branch** either (verdict (b) ruled out). An Anvil trace confirms the mechanism: `stake()` creates
+the service, deploys a fresh Safe proxy, then calls `ServiceManager.deploy(serviceId, 0xFbBEc0…,
+…)`, and `ServiceRegistryL2.deploy()` early-exits at 6,676 gas. Preflight passes cleanly
+(`mapStakingProxyConfigs` non-zero, 98/100 staking slots free), so nothing catches it earlier.
+
+The multisig implementation is **chosen by the distributor contract**, not passed by the Jinn
+client — `stake()`'s ABI has no such parameter — so no config change in this repo can route around
+it.
+
+**This is not merely a blocked test.** `_daemon-harness-helpers.ts` forks `chain: 'base'`, so the
+same revert hits **any real operator attempting fresh stOLAS-mode bootstrap on Base mainnet right
+now**. Fixing it needs either the registry owner re-authorizing
+`mapMultisigs(0xFbBEc0…) = true`, or the stOLAS distributor
+(`0x40abf47B926181148000DbCC7c8DE76A3a61a66f`) being redeployed against a currently-authorized
+implementation. Both are outside this repository. **Escalate to the OLAS ecosystem owners.**
+
+### E28 — the process-global broadcaster is gone, and the old design was proven broken (C2)
+
+Ruled and done: `setVenueBroadcaster` / `clearVenueBroadcaster` / `getVenueBroadcaster` and the
+module-level variable are deleted. `executeSafeTransaction` takes the broadcaster explicitly;
+where a config/context object already flowed to a call site it became a field there instead of a
+parameter. A new `createDirectSafeBroadcaster` serves hosts with no composition root to borrow
+from (the CLI verbs, the hermetic gate).
+
+The E5 bound-Safe rejection, the `logicalTx` derivation, and the fence/hook semantics all survive
+unchanged; the "no broadcaster" failure is still loud, now per-call.
+
+Worth recording because it closes E16 items 1 and 3 with evidence rather than assertion: the
+two-daemons-one-process test was checked against a **reconstruction of the old module-global
+design**, where daemon A's first call succeeds, daemon B installing its broadcaster clobbers the
+shared slot, and daemon A's next call throws a Safe-mismatch error. That is the failure mode T2.2
+and `jinn-repo-loop.ts` would have hit in production.
