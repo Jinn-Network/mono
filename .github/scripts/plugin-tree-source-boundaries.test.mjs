@@ -454,4 +454,10 @@ test('plugin tree source boundaries hold and the manifest matches the approved s
       );
     }
   }
+  assert.deepEqual(
+    forbiddenImportsInFiles([join(runtimeSource, 'index.ts')], [], [binEntry]),
+    [],
+    'the runtime root entrypoint must not export bin.ts, which reads the ambient '
+      + 'environment, installs signal handlers, and executes on import',
+  );
 });
