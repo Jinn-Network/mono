@@ -276,6 +276,17 @@ describe("chain log source (design §7 ruling 2)", () => {
     expect(batch.finalizedCheckpoint.blockNumber).toBe(chain.latestBlockNumber() - 5n);
   });
 
+  test("a finalized tag stuck far behind latest (anvil-fork shape) also falls back to depth", async () => {
+    // Anvil forks leave `finalized` pinned at the fork point while `latest` advances with
+    // every `evm_mine`. Without the depth floor, claims mined after the fork never finalize.
+    const chain = buildScriptedChain();
+    chain.mine(10);
+    chain.setFinalized(2n);
+    chain.mine(50); // latest=60, finalized stuck at 2, depth=5 → lag 58 > 5
+    const batch = await source(chain, { startBlock: 0n, finalityDepthFallback: 5n }).poll();
+    expect(batch.finalizedCheckpoint.blockNumber).toBe(chain.latestBlockNumber() - 5n);
+  });
+
   test("a second source over the same state file resumes at the persisted cursor without re-scanning", async () => {
     const chain = buildScriptedChain();
     chain.mine(50);

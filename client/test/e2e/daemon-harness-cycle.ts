@@ -118,6 +118,13 @@ async function main(): Promise<void> {
       const claim = await waitForDaemonClaim(fixture, posted, operator, v3Env);
       console.log(`daemon claimed task: requestId=${claim.requestId} tx=${claim.txHash}`);
 
+      // Anvil forks leave the `finalized` tag stuck at the fork point. Venue-base's chain log
+      // source falls back to `latest - 120` in that shape (see chain-log-source.ts), so the
+      // claim is only finalizable once ≥120 blocks have been mined past it. Without this the
+      // work loop hangs in `awaitFinalized` for the e2e's entire delivery wait.
+      await anvilJsonRpc(fixture.anvil.rpcUrl, 'anvil_mine', ['0x79']); // 121 blocks
+      console.log('mined 121 blocks so anvil-fork finality depth can cover the claim');
+
       // Wait for the daemon to complete the full settlement loop:
       // harness runs → envelope assembled + uploaded → deliverToMarketplace on-chain.
       const delivered = await waitForDelivery(fixture, claim, v3Env, mockIpfs);

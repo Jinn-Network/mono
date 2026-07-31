@@ -118,12 +118,24 @@ export function createChainLogSource(input: {
     async poll(): Promise<ChainLogBatch> {
       const latest = await headAt("latest");
       const rawFinalized = await headAt("finalized");
-      // A provider serving a stale `finalized` tag equal to `latest` would let decision-grade
-      // compute run on unfinalized facts. Depth is the fallback, never the primary signal.
-      const finalized = rawFinalized.blockNumber >= latest.blockNumber && latest.blockNumber > depthFallback
+      // Two stale-tag shapes need the depth fallback, never the primary signal:
+      //   1. finalized == latest (OP-stack §7 note / lying providers) — decision-grade compute
+      //      must not run on unfinalized facts.
+      //   2. finalized lagging MORE than depthFallback behind latest — Anvil forks (and any
+      //      provider whose `finalized` tag does not advance with locally-mined blocks) leave
+      //      finalized stuck at the fork point forever; without the depth floor, every claim
+      //      mined after the fork is permanently unfinalizable and the work loop hangs in
+      //      `awaitFinalized` until its 900s timeout (E39 cycle 3 / anvil-fork gate).
+      const depthFloor = latest.blockNumber > depthFallback
+        ? latest.blockNumber - depthFallback
+        : 0n;
+      const useDepthFallback =
+        (rawFinalized.blockNumber >= latest.blockNumber && latest.blockNumber > depthFallback)
+        || (latest.blockNumber > rawFinalized.blockNumber + depthFallback);
+      const finalized = useDepthFallback
         ? {
-            blockNumber: latest.blockNumber - depthFallback,
-            blockHash: (await hashAt(latest.blockNumber - depthFallback)) ?? rawFinalized.blockHash,
+            blockNumber: depthFloor,
+            blockHash: (await hashAt(depthFloor)) ?? rawFinalized.blockHash,
           }
         : rawFinalized;
 
