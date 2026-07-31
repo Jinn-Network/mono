@@ -375,6 +375,7 @@ const TRACE_DECODE_FORBIDDEN_PACKAGES = [
   '@jinn-network/marketplace',
   '@jinn-network/plugin',
   '@jinn-network/sdk',
+  '@jinn-network/trust-core',
   'better-sqlite3',
   'hermes-agent',
   'kubo-rpc-client',
@@ -892,13 +893,14 @@ test('Trace Decode boundary checks catch package, I/O, and ambient-network escap
       'export * from "@jinn-network/evidence-protocol";',
       'await import("@jinn-network/core");',
       'require("@jinn-network/evidence-local-runtime");',
+      'import "@jinn-network/trust-core";',
       'import "node:fs";',
       'import "node:crypto";',
       'fetch;',
     ].join('\n'));
     assert.equal(
       forbiddenImports(source, TRACE_DECODE_FORBIDDEN_PACKAGES).length,
-      6,
+      7,
     );
     assert.equal(ambientNetworkUsesInFiles(files(source)).length, 1);
   } finally { rmSync(fixture, { recursive: true, force: true }); }

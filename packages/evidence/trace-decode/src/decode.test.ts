@@ -183,6 +183,28 @@ describe("decodeTrajectory", () => {
       DecoderContractError,
     );
   });
+
+  test("refuses partial decode with skipped: 0", () => {
+    const bad = () => result({ completeness: { decoded: "partial", skipped: 0 } });
+    expect(() => decodeTrajectory(registryFor(bad), FORMAT, input())).toThrow(
+      DecoderContractError,
+    );
+  });
+
+  test("refuses full decode with skipped set", () => {
+    const bad = () => result({ completeness: { decoded: "full", skipped: 1 } });
+    expect(() => decodeTrajectory(registryFor(bad), FORMAT, input())).toThrow(
+      DecoderContractError,
+    );
+  });
+
+  test('refuses timebase "source" (invalid; C1 uses source-epoch-ns)', () => {
+    const bad = () =>
+      result({ timebase: "source" as "synthetic-ordinal" });
+    expect(() => decodeTrajectory(registryFor(bad), FORMAT, input())).toThrow(
+      DecoderContractError,
+    );
+  });
 });
 
 describe("tryDecodeTrajectory", () => {

@@ -15,6 +15,7 @@ import {
   ADMITTED_ATTRIBUTE_KEYS,
   DecoderContractError,
   SourceDigestMismatchError,
+  TIMEBASES,
   UnsupportedFormatError,
 } from "./contract.js";
 import type {
@@ -139,8 +140,14 @@ function checkCompleteness(completeness: Completeness, spanCount: number): void 
   if (completeness.decoded === "empty" && spanCount > 0) {
     violations.push("an empty decode must carry no spans");
   }
-  if (completeness.decoded === "partial" && completeness.skipped === undefined) {
-    violations.push("a partial decode must report how many source records were skipped");
+  if (completeness.decoded === "full" && completeness.skipped !== undefined) {
+    violations.push("a full decode must not report skipped source records");
+  }
+  if (
+    completeness.decoded === "partial" &&
+    (completeness.skipped === undefined || completeness.skipped < 1)
+  ) {
+    violations.push("a partial decode must report at least one skipped source record");
   }
   if (
     completeness.skipped !== undefined &&
@@ -149,6 +156,14 @@ function checkCompleteness(completeness: Completeness, spanCount: number): void 
     violations.push("skipped must be a non-negative integer");
   }
   if (violations.length > 0) throw new DecoderContractError(violations);
+}
+
+function checkTimebase(timebase: Timebase): void {
+  if (!(TIMEBASES as readonly string[]).includes(timebase)) {
+    throw new DecoderContractError([
+      `timebase ${String(timebase)} is not one of ${TIMEBASES.join(", ")}`,
+    ]);
+  }
 }
 
 /**
@@ -175,6 +190,7 @@ export function decodeTrajectory(
   }
 
   const decoded = decoder.decode(input.bytes);
+  checkTimebase(decoded.timebase);
   const traceId = deriveTraceId({
     sourceDigest: `sha256:${actual}`,
     formatIri,

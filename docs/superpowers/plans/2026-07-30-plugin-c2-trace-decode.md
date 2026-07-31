@@ -3812,3 +3812,30 @@ consumer `DEPENDENCIES` only (not to trace-decode `package.json` dependencies). 
 `trace-decode` job builds trust-core and pins npm 11.19.0 / Node 22.23.1 to match the
 trajectory job. Also: exclude `trace-decode` from C1's trajectory-import forbid loop;
 allow `node:fs/promises` in the testing-file boundary filter (trajectory precedent).
+
+## 2026-07-31 wave-1 whole-component review resolution (wave 2 — final under cap)
+
+Exact head reviewed: `e68f2f4c2`. Base: `7672fc214`. Independent review
+([wave-1](04520767-b162-48e5-9c0c-c1f1830f7487)). This is the **only** repair wave under
+the program two-wave cap. Probe-first: red exact probe, then green + full gates. After
+this wave, remaining Important/Minor residuals (if any after scoped rereview) are deferred
+and do not block dependents; Critical that still fails escalates to the operator.
+
+| ID | Severity | Exact probe | Violated law | Minimal disposition | Red evidence | Green evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| C2-R1 | Critical | `node --test .github/scripts/evidence-ci-workflow.test.mjs` → unexpected ungoverned pack-smoke jobs; Evidence CI architecture red at head | Evidence CI pack-smoke governance; Task 10 CI pattern | Add `'trace-decode'` to `PACK_SMOKE_JOB_IDS` (and any twin roster/mutation lists). Re-run workflow test + Evidence architecture | [x] at `e68f2f4c2`: `PACK_SMOKE_JOB_IDS` omitted `trace-decode` while workflow job runs `pack:smoke` → `unexpected ungoverned pack-smoke jobs` | [x] `'trace-decode'` in `PACK_SMOKE_JOB_IDS` + `REQUIRED_SETUP_NODE_JOBS`; `node --test .github/scripts/evidence-ci-workflow.test.mjs` → 37/37 pass |
+| C2-R2 | Important | `partial`+`skipped:0`, `full`+`skipped:1`, `timebase:"source"` → DECODE_OK then SEAL_FAIL | Task 5 fail-closed on C1 completeness/timebase surface | Align `checkCompleteness` with C1 (`partial` ⇒ `skipped >= 1`; `full` ⇒ no `skipped`); reject `timebase` ∉ C1 `TIMEBASES` with `DecoderContractError`; regression tests | [x] at `e68f2f4c2`: `checkCompleteness` allowed `partial`+`skipped:0` and `full`+`skipped`; no timebase gate → DECODE_OK then C1 seal reject | [x] `checkCompleteness` + `checkTimebase`; `decode.test.ts` probes for `partial`+`skipped:0`, `full`+`skipped:1`, `timebase:"source"`; `yarn typecheck && yarn test` → 91/91 |
+| C2-R3 | Important | `TRACE_DECODE_FORBIDDEN_PACKAGES` has protocol, omits `trust-core`; portal resolution present | C2-F1 / Task 10 — transitive portals only; no trust-core import | Add `'@jinn-network/trust-core'` to `TRACE_DECODE_FORBIDDEN_PACKAGES` + boundary self-test expected count | [x] at `e68f2f4c2`: forbidden list omitted `@jinn-network/trust-core` | [x] `'@jinn-network/trust-core'` on list; self-test fixture + expected count `6`→`7`; `node --test .github/scripts/evidence-source-boundaries.test.mjs` → 15/15 |
+
+### Implementation checklist (wave 2)
+
+- [x] C2-R1 — register `trace-decode` in `PACK_SMOKE_JOB_IDS`
+- [x] C2-R2 — fail-closed completeness + timebase vs C1
+- [x] C2-R3 — forbid `trust-core` in Trace Decode boundary list
+
+### Acceptance
+
+Resolved at wave-2 repair commit (this section). Full gates green: typecheck, test (91),
+fixtures, pack-smoke, inventory (3/3), boundaries (15/15), evidence-ci-workflow (37/37).
+Coordinator then dispatches **scoped wave-2 rereview** of this wave only (not a third
+unbounded cycle).
