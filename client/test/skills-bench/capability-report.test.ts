@@ -871,7 +871,7 @@ describe('assertRankBadgeAccompanied', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildEmbedSnippet', () => {
-  it('contains the badge image link, the report URL, and the jinn.* metadata keys', async () => {
+  it('contains the badge and card image links, the report URL, and the jinn.* metadata keys', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'embed-'));
     const reportFilePath = join(dir, 'report.md');
     await writeFile(reportFilePath, 'report contents\n');
@@ -880,12 +880,15 @@ describe('buildEmbedSnippet', () => {
       skill: 'tdd',
       reportUrl: 'https://github.com/Jinn-Network/skills-eval/blob/main/reports/tdd@abc123/report.md',
       badgeUrl: 'https://github.com/Jinn-Network/skills-eval/blob/main/reports/tdd@abc123/badge.svg',
+      cardUrl: 'https://github.com/Jinn-Network/skills-eval/blob/main/reports/tdd@abc123/card.svg',
       measuredOn: '2026-08-01',
       reportFilePath,
     });
 
     expect(snippet).toContain('https://github.com/Jinn-Network/skills-eval/blob/main/reports/tdd@abc123/report.md');
     expect(snippet).toContain('https://github.com/Jinn-Network/skills-eval/blob/main/reports/tdd@abc123/badge.svg');
+    expect(snippet).toContain('https://github.com/Jinn-Network/skills-eval/blob/main/reports/tdd@abc123/card.svg');
+    expect(snippet).toContain('Paste this into your README');
     expect(snippet).toContain('jinn.receipt:');
     expect(snippet).toContain('jinn.receipt-sha256:');
     expect(snippet).toContain('jinn.measured-on: "2026-08-01"');

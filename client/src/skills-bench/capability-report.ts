@@ -1022,18 +1022,23 @@ export interface EmbedSnippetOptions {
   reportUrl: string;
   /** Public URL (or relative path, for a same-repo embed) of the badge SVG. */
   badgeUrl: string;
+  /** Public URL (or relative path) of the card SVG (design §1: "the card
+   *  must be embeddable by the author, not merely viewable" — the embed
+   *  snippet offers both, not badge alone). */
+  cardUrl: string;
   measuredOn: string;
   /** Local path of the rendered report.md — hashed to produce
    *  `jinn.receipt-sha256` via buildJinnReceiptMetadata. */
   reportFilePath: string;
 }
 
-/** The block an author pastes into their own repo: a markdown badge image
- *  linking to the report, and the `jinn.*` metadata (§4.1 — repointed at the
- *  public report, never a fork receipt; `jinn.forked-from` is never emitted
- *  here, per spec §4.1, "there is no fork, so there is nothing to attribute a
- *  fork to") ready to paste into the skill's own frontmatter `metadata:`
- *  block. */
+/** The block an author pastes into their own repo: two markdown image embeds
+ *  (badge, card — design §1, both link to the report) and the `jinn.*`
+ *  metadata (§4.1 — repointed at the public report, never a fork receipt;
+ *  `jinn.forked-from` is never emitted here, per spec §4.1, "there is no
+ *  fork, so there is nothing to attribute a fork to") ready to paste into the
+ *  skill's own frontmatter `metadata:` block. Exactly the three `jinn.*` keys
+ *  `buildJinnReceiptMetadata` already produces — no new metadata keys. */
 export async function buildEmbedSnippet(opts: EmbedSnippetOptions): Promise<string> {
   const metadata = await buildJinnReceiptMetadata({
     receiptUrl: opts.reportUrl,
@@ -1041,7 +1046,13 @@ export async function buildEmbedSnippet(opts: EmbedSnippetOptions): Promise<stri
     measuredOn: opts.measuredOn,
   });
   return [
-    `[![jinn capability report: ${opts.skill}](${opts.badgeUrl})](${opts.reportUrl})`,
+    'Paste this into your README:',
+    '',
+    `[![jinn capability badge: ${opts.skill}](${opts.badgeUrl})](${opts.reportUrl})`,
+    '',
+    'Or embed the full card:',
+    '',
+    `[![jinn capability card: ${opts.skill}](${opts.cardUrl})](${opts.reportUrl})`,
     '',
     `Capability report: ${opts.reportUrl}`,
     '',

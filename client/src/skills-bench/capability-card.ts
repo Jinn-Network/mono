@@ -238,9 +238,14 @@ export function renderCapabilityCardSvg(report: CapabilityReport): string {
 
   // 5. Footer — the honesty line and a text link to the full report (the
   // card is an image, so the link renders as text, not a hyperlink).
+  // `report.links.reportUrl` is the resolved public URL (render-report.ts's
+  // --base-url wiring); a caller that hasn't resolved one yet (e.g. a
+  // standalone unit test) falls back to the same relative path this footer
+  // rendered before that wiring existed.
   parts.push(textEl(PAD, y, 12, INK, `n=${fields.n}, intervals overlap — direction, not proof`, { opacity: 0.85 }));
   y += 18;
-  parts.push(textEl(PAD, y, 11, INK, `full report: reports/${fields.skill}@${sha}/report.md`, { opacity: 0.55 }));
+  const reportRef = report.links.reportUrl ?? `reports/${fields.skill}@${sha}/report.md`;
+  parts.push(textEl(PAD, y, 11, INK, `full report: ${reportRef}`, { opacity: 0.55 }));
   y += 14;
 
   const height = Math.ceil(y + PAD);

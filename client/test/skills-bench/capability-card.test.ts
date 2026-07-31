@@ -356,6 +356,19 @@ describe('renderCapabilityCardSvg', () => {
     expect(svg).not.toContain('href=');
   });
 
+  it('threads report.links.reportUrl into the footer when a caller has resolved one', () => {
+    const report = buildCapabilityReport({
+      ...baseOptions(),
+      links: {
+        ...baseOptions().links,
+        reportUrl: 'https://reports.example/reports/tdd@b2222222/report.md',
+      },
+    });
+    const svg = renderCapabilityCardSvg(report);
+    expect(svg).toContain('https://reports.example/reports/tdd@b2222222/report.md');
+    expect(svg).not.toContain('full report: reports/tdd@');
+  });
+
   // ---------------------------------------------------------------------------
   // XML escaping.
   // ---------------------------------------------------------------------------

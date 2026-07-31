@@ -1,11 +1,11 @@
 /**
- * Renders the public capability report (spec §1/§4 of
- * docs/superpowers/specs/2026-07-30-skills-factory-mvp-design.md, v0.2) for a
- * completed `--task-set` skills-bench run: `report.md`, `badge.svg`,
- * `embed.md`, and a `data/` directory carrying the raw run data a reader
- * needs to check the report's math (never the full transcripts, unless
- * explicitly opted in — session files can embed the task repo's own
- * content).
+ * Renders the public capability-report artifact (design §1/§5 of
+ * docs/superpowers/specs/2026-07-31-capability-report-artifact-design.md) for
+ * a completed `--task-set` skills-bench run: `report.md`, `card.svg`,
+ * `badge.svg`, an optional `rank-badge.svg`, `embed.md`, and a `data/`
+ * directory carrying the raw run data a reader needs to check the report's
+ * math (never the full transcripts, unless explicitly opted in — session
+ * files can embed the task repo's own content).
  *
  * This CLI is the --task-set counterpart of render-receipts.ts (which
  * renders slate-mode runs); it refuses a run dir whose manifest has no
@@ -21,20 +21,34 @@
  * (`findMismatchedSkillInvocations`) for the common failure shape (the model
  * invoked a Skill under a different name than this arm's).
  *
+ * Identity (design §1): every artifact is pinned to `<skill>@<sha>`, where
+ * `sha` is the short (8-char) form of `pin.json`'s resolved `commit` — NOT
+ * the vendored-bytes `sha256`. `--pin` is required so this identity, and the
+ * license/repoLicense/skillSource fields the report and card read from it,
+ * are read from the real pinned record rather than synthesized. `--pin`'s
+ * `name` must equal `--skill` — a mismatched pin puts the wrong identity on
+ * every rendered artifact.
+ *
  * Usage:
  *   yarn tsx scripts/skills-bench/render-report.ts \
  *     --run ../bench/runs/tdd-pilot --task-set ../bench/task-sets/tdd \
- *     --skill tdd --report-url https://github.com/Jinn-Network/skills-eval/blob/main/reports/tdd@<sha>/report.md \
+ *     --skill tdd --pin ../bench/skills-under-test/tdd/pin.json \
+ *     --base-url https://github.com/Jinn-Network/skills-eval/blob/main \
  *     [--out ../bench/runs/tdd-pilot/report] [--measured-on 2026-08-01] \
- *     [--agent claude-code] [--skill-source mattpocock/skills@abc123] [--include-transcripts]
+ *     [--agent claude-code] [--skill-source mattpocock/skills@abc123] \
+ *     [--include-transcripts] [--cohort ../bench/cohorts/python-testing.json] \
+ *     [--narrative ../bench/runs/tdd-pilot/narrative.json]
  */
 import { cp, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadAttempts, type BenchManifest } from '../../src/skills-bench/attempts.js';
+import { renderCapabilityCardSvg } from '../../src/skills-bench/capability-card.js';
 import {
-  buildCapabilityReport, buildEmbedSnippet, deriveCostOverhead, renderBadgeSvg, renderCapabilityReportMd,
+  assertRankBadgeAccompanied, buildCapabilityReport, buildEmbedSnippet, deriveCostOverhead, renderBadgeSvg,
+  renderCapabilityReportMd, renderCohortRankBadgeSvg, renderPerTaskTableMd, validateCohort,
+  type Cohort, type ReportNarrative,
 } from '../../src/skills-bench/capability-report.js';
 import { detectSkillTrigger, findMismatchedSkillInvocations } from '../../src/skills-bench/trigger.js';
 import { attemptKey } from '../../src/skills-bench/attempts.js';
@@ -48,12 +62,15 @@ interface Args {
   runDir: string;
   taskSetDir: string;
   skill: string;
-  reportUrl: string;
+  pinPath: string;
+  baseUrl: string;
   outDir: string;
   measuredOn: string;
   agent: string;
   skillSource: string | undefined;
   includeTranscripts: boolean;
+  cohortPath: string | undefined;
+  narrativePath: string | undefined;
 }
 
 function today(): string {
@@ -68,27 +85,98 @@ function parseArgs(argv: string[]): Args {
       case '--run': args.runDir = resolve(String(argv[++i])); break;
       case '--task-set': args.taskSetDir = resolve(String(argv[++i])); break;
       case '--skill': args.skill = String(argv[++i]); break;
-      case '--report-url': args.reportUrl = String(argv[++i]); break;
+      case '--pin': args.pinPath = resolve(String(argv[++i])); break;
+      case '--base-url': args.baseUrl = String(argv[++i]); break;
       case '--out': args.outDir = resolve(String(argv[++i])); break;
       case '--measured-on': args.measuredOn = String(argv[++i]); break;
       case '--agent': args.agent = String(argv[++i]); break;
       case '--skill-source': args.skillSource = String(argv[++i]); break;
       case '--include-transcripts': args.includeTranscripts = true; break;
+      case '--cohort': args.cohortPath = resolve(String(argv[++i])); break;
+      case '--narrative': args.narrativePath = resolve(String(argv[++i])); break;
       default: throw new Error(`unknown argument ${a}`);
     }
   }
   if (!args.runDir) throw new Error('--run is required');
   if (!args.taskSetDir) throw new Error('--task-set is required');
   if (!args.skill) throw new Error('--skill is required');
-  if (!args.reportUrl) throw new Error('--report-url is required');
+  if (!args.pinPath) throw new Error('--pin is required');
+  if (!args.baseUrl) throw new Error('--base-url is required');
   if (!args.outDir) args.outDir = join(args.runDir, 'report');
   if (!args.measuredOn) args.measuredOn = today();
   return args as Args;
 }
 
+async function loadJson<T>(path: string, label: string): Promise<T> {
+  const raw = await readFile(path, 'utf8');
+  try {
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    throw new Error(`${label} ${path} is not valid JSON: ${(err as Error).message}`);
+  }
+}
+
 async function loadManifest(runDir: string): Promise<BenchManifest> {
-  const raw = await readFile(join(runDir, 'bench-manifest.json'), 'utf8');
-  return JSON.parse(raw) as BenchManifest;
+  return loadJson<BenchManifest>(join(runDir, 'bench-manifest.json'), 'bench-manifest.json');
+}
+
+/** Reads and validates `--pin`'s pin.json, then enforces the identity
+ *  invariant (design §1): a pin naming a different skill than `--skill`
+ *  would put the wrong identity on every artifact this CLI writes. */
+async function loadPin(path: string, skill: string): Promise<SkillPin> {
+  const pin = await loadJson<Partial<SkillPin>>(path, 'pin.json');
+  if (typeof pin.name !== 'string' || !pin.name) {
+    throw new Error(`--pin ${path} is missing "name" — not a valid pin.json`);
+  }
+  if (typeof pin.commit !== 'string' || !pin.commit) {
+    throw new Error(`--pin ${path} is missing "commit" — not a valid pin.json`);
+  }
+  if (pin.name !== skill) {
+    throw new Error(
+      `--pin ${path} names skill '${pin.name}', which does not match --skill '${skill}' — a mismatched pin ` +
+      'puts the wrong identity on every rendered artifact. Pass the pin.json for the skill actually under test.',
+    );
+  }
+  return pin as SkillPin;
+}
+
+/** Fail-loud shape check ahead of `validateCohort` (capability-report.ts),
+ *  which assumes the `Cohort` shape already holds — a `--cohort` file that
+ *  isn't even shaped like one (e.g. missing "entries") should not surface as
+ *  an opaque "Cannot read properties of undefined". */
+async function loadCohort(path: string): Promise<Cohort> {
+  const parsed = await loadJson<Partial<Cohort>>(path, '--cohort');
+  if (typeof parsed.domain !== 'string' || !Array.isArray(parsed.entries)) {
+    throw new Error(
+      `--cohort ${path} does not match the Cohort shape ({ domain: string; entries: CohortEntry[] })`,
+    );
+  }
+  const cohort = parsed as Cohort;
+  validateCohort(cohort);
+  return cohort;
+}
+
+/** Fail-loud shape check for `--narrative` (design §6 sections 6-7's
+ *  human-authored annex content): `{ pattern?: { text, evidence? },
+ *  changes?: string[] }`. Absent file → absent narrative; a present but
+ *  malformed file is refused rather than silently dropped. */
+async function loadNarrative(path: string): Promise<ReportNarrative> {
+  const parsed = await loadJson<Partial<ReportNarrative>>(path, '--narrative');
+  if (parsed.pattern !== undefined) {
+    const pattern = parsed.pattern as Partial<ReportNarrative['pattern']> | undefined;
+    if (!pattern || typeof pattern.text !== 'string' || !pattern.text) {
+      throw new Error(`--narrative ${path} "pattern" must be { text: string; evidence?: string }`);
+    }
+    if (pattern.evidence !== undefined && typeof pattern.evidence !== 'string') {
+      throw new Error(`--narrative ${path} "pattern.evidence" must be a string`);
+    }
+  }
+  if (parsed.changes !== undefined) {
+    if (!Array.isArray(parsed.changes) || parsed.changes.some((c) => typeof c !== 'string')) {
+      throw new Error(`--narrative ${path} "changes" must be a string array`);
+    }
+  }
+  return parsed as ReportNarrative;
 }
 
 /** Reads `transcripts/<attemptKey>.session.jsonl` for every solved+failed
@@ -180,6 +268,10 @@ async function main(): Promise<void> {
     );
   }
 
+  const pin = await loadPin(args.pinPath, args.skill);
+  const cohort = args.cohortPath ? await loadCohort(args.cohortPath) : undefined;
+  const narrative = args.narrativePath ? await loadNarrative(args.narrativePath) : undefined;
+
   const outcomes = await loadAttempts(join(args.runDir, 'attempts.jsonl'));
   const triggerByKey = await computeTriggerByKey(args.runDir, outcomes, treatmentArm.name);
 
@@ -187,7 +279,7 @@ async function main(): Promise<void> {
   await copyFile(join(args.runDir, 'attempts.jsonl'), join(args.outDir, 'data', 'attempts.jsonl'));
   await copyFile(join(args.runDir, 'bench-manifest.json'), join(args.outDir, 'data', 'bench-manifest.json'));
   await copyFile(join(args.taskSetDir, 'set.json'), join(args.outDir, 'data', 'set.json'));
-  const dataPaths = ['data/attempts.jsonl', 'data/bench-manifest.json', 'data/set.json'];
+  const dataPaths = ['data/attempts.jsonl', 'data/bench-manifest.json', 'data/set.json', 'data/per-task.md'];
   if (args.includeTranscripts) {
     await cp(join(args.runDir, 'transcripts'), join(args.outDir, 'data', 'transcripts'), { recursive: true });
     dataPaths.push('data/transcripts/');
@@ -204,24 +296,17 @@ async function main(): Promise<void> {
     `@ skillSha256=${treatmentArm.skillSha256 ?? 'n/a'}> ` +
     `--model ${manifest.model} --out <fresh-out-dir>`;
 
-  // A1 interim: `pin` is a new required input to `buildCapabilityReport`
-  // (design §2 field contract — capability-report.ts's `ReportFields`), but
-  // this CLI does not yet read a real `pin.json` — that `--pin <path>` wiring
-  // is a later work item (A5). Until then, synthesize the fields already on
-  // hand from this run's own args/manifest; license/repoLicense/skillPath are
-  // genuinely unknown at this call site and stay null/empty rather than
-  // fabricated until A5 replaces this with the real pin.json read.
-  const [pinSource, pinCommit] = (args.skillSource ?? '').split('@');
-  const pin: SkillPin = {
-    name: args.skill,
-    source: pinSource ?? '',
-    commit: pinCommit ?? '',
-    skillPath: '',
-    sha256: treatmentArm.skillSha256 ?? '',
-    license: null,
-    repoLicense: null,
-    fetchedAt: args.measuredOn,
-  };
+  // Identity (design §1): `<skill>@<sha>`, sha = short form of pin.commit
+  // (the resolved upstream commit) — NOT `pin.sha256` (the vendored-bytes
+  // hash, a different identity; see capability-card.ts's shortCommit doc
+  // comment for the same distinction on the card face).
+  const shortSha = pin.commit.slice(0, 8);
+  const baseUrl = args.baseUrl.replace(/\/+$/, '');
+  const artifactRoot = `${baseUrl}/reports/${args.skill}@${shortSha}`;
+  const reportUrl = `${artifactRoot}/report.md`;
+  const badgeUrl = `${artifactRoot}/badge.svg`;
+  const cardUrl = `${artifactRoot}/card.svg`;
+  const rankBadgeUrl = `${artifactRoot}/rank-badge.svg`;
 
   const report = buildCapabilityReport({
     skill: args.skill,
@@ -246,17 +331,23 @@ async function main(): Promise<void> {
       skillSource: args.skillSource,
     },
     triggerByKey,
-    links: { dataPaths, rerunCommand },
+    links: { dataPaths, rerunCommand, reportUrl },
     // Round-2 fix to I8: thread the run-scoped eligible set straight from
     // this run's own manifest — never re-derive it from the task set's
     // authoring-time screening.kept, which doesn't know about THIS run's
     // --include-screened-out flag (see BuildCapabilityReportOptions' doc).
     eligibleTaskIds: manifest.eligibleTaskIds,
+    ...(cohort ? { cohort } : {}),
+    ...(narrative ? { narrative } : {}),
   });
 
   const reportPath = join(args.outDir, 'report.md');
   await writeFile(reportPath, renderCapabilityReportMd(report));
   console.log(`[render-report] wrote ${reportPath}`);
+
+  const cardPath = join(args.outDir, 'card.svg');
+  await writeFile(cardPath, renderCapabilityCardSvg(report));
+  console.log(`[render-report] wrote ${cardPath}`);
 
   const badgePath = join(args.outDir, 'badge.svg');
   await writeFile(badgePath, renderBadgeSvg({
@@ -272,16 +363,35 @@ async function main(): Promise<void> {
   }));
   console.log(`[render-report] wrote ${badgePath}`);
 
-  const badgeUrl = args.reportUrl.replace(/report\.md$/, 'badge.svg');
+  // Design §3: the rank badge may never be emitted without the three-axis
+  // badge alongside it — badge.svg above is always written on this path, so
+  // this call is always satisfied, but the assertion is the enforced
+  // invariant rather than relying on that ordering as an unstated convention.
+  if (report.cohort) {
+    assertRankBadgeAccompanied(true);
+    const rankBadgePath = join(args.outDir, 'rank-badge.svg');
+    await writeFile(rankBadgePath, renderCohortRankBadgeSvg(report.cohort, args.skill));
+    console.log(`[render-report] wrote ${rankBadgePath}`);
+  }
+
+  const perTaskPath = join(args.outDir, 'data', 'per-task.md');
+  await writeFile(perTaskPath, renderPerTaskTableMd(report));
+  console.log(`[render-report] wrote ${perTaskPath}`);
+
   const embedPath = join(args.outDir, 'embed.md');
   await writeFile(embedPath, await buildEmbedSnippet({
     skill: args.skill,
-    reportUrl: args.reportUrl,
+    reportUrl,
     badgeUrl,
+    cardUrl,
     measuredOn: args.measuredOn,
     reportFilePath: reportPath,
   }));
   console.log(`[render-report] wrote ${embedPath}`);
+
+  if (report.cohort) {
+    console.log(`[render-report] rank badge public URL: ${rankBadgeUrl}`);
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
