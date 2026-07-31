@@ -5,9 +5,9 @@ import { join } from 'node:path';
 
 import { attemptKey, type BenchOutcome } from '../../src/skills-bench/attempts.js';
 import {
-  buildCapabilityReport, buildEmbedSnippet, buildReportFields, buildTaskSetIdentity, cohortRank,
-  deriveConcordant, deriveCostOverhead, deriveVerdictLine, renderBadgeSvg, renderCapabilityReportMd,
-  validateCohort, CohortValidationError,
+  assertRankBadgeAccompanied, buildCapabilityReport, buildEmbedSnippet, buildReportFields, buildTaskSetIdentity,
+  cohortRank, deriveConcordant, deriveCostOverhead, deriveVerdictLine, renderBadgeSvg, renderCapabilityReportMd,
+  renderCohortRankBadgeSvg, validateCohort, CohortValidationError,
   type BuildCapabilityReportOptions, type Cohort, type CohortEntry,
 } from '../../src/skills-bench/capability-report.js';
 import type { ReceiptData, ReceiptProfile } from '../../src/skills-bench/receipt.js';
@@ -329,69 +329,233 @@ function assertWellFormedXmlTags(xml: string): void {
   expect(stack).toEqual([]);
 }
 
+// ---------------------------------------------------------------------------
+// Shared badge-hygiene assertions (design §3 + repo-wide non-negotiables):
+// no network-fetching refs, no emoji, no gradients, no letter grades, no
+// pass/fail wording. Applied to both the three-axis badge and the cohort
+// rank badge.
+// ---------------------------------------------------------------------------
+
+function assertNoExternalRefs(svg: string): void {
+  // Only the standard SVG xmlns namespace URI (a declaration, never a
+  // network fetch) and same-document "#id" refs are allowed.
+  expect(svg).not.toMatch(/<image/);
+  expect(svg).not.toMatch(/xlink:href/);
+  expect(svg).not.toMatch(/@import/);
+  expect(svg).not.toMatch(/url\(\s*['"]?https?:/);
+  expect(svg).not.toMatch(/<link/);
+}
+
+function assertNoBannedContent(svg: string): void {
+  expect(svg).not.toMatch(/\bpass\b|\bfail\b/i);
+  expect(svg).not.toMatch(/\bgrade\b/i);
+  expect(svg).not.toMatch(/gradient/i);
+  // eslint-disable-next-line no-misleading-character-class -- emoji ranges, intentional
+  expect(svg).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
+}
+
+const APPROVED_BADGE_HEXES = ['#ffffff', '#33415c', '#1b2430', '#527a70', '#934c4c'];
+
+function assertOnlyApprovedHexes(svg: string): void {
+  const found = svg.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [];
+  for (const hex of found) {
+    expect(APPROVED_BADGE_HEXES).toContain(hex.toLowerCase());
+  }
+}
+
 describe('renderBadgeSvg', () => {
-  it('is well-formed (balanced, single-root tags), contains the skill name, and has no external refs', () => {
-    const svg = renderBadgeSvg({ skill: 'tdd', verdictLine: 'net +2/12 paired tasks vs. baseline', measuredOn: '2026-08-01' });
+  function badge(over: Partial<Parameters<typeof renderBadgeSvg>[0]> = {}) {
+    return renderBadgeSvg({
+      skill: 'tdd', measuredOn: '2026-08-01', netDelta: 2,
+      triggerRate: { triggered: 9, total: 12, unknown: 0 }, costOverhead: 0.17,
+      ...over,
+    });
+  }
+
+  it('is well-formed, has no external refs, and contains all four segments', () => {
+    const svg = badge();
     assertWellFormedXmlTags(svg);
-    expect(svg).toContain('tdd');
-    expect(svg).toContain('2026-08-01');
-    // No image/font/import references off-document — only the standard SVG
-    // xmlns namespace URI (a declaration, never a network fetch) is allowed.
-    expect(svg).not.toMatch(/<image/);
-    expect(svg).not.toMatch(/xlink:href/);
-    expect(svg).not.toMatch(/@import/);
-    expect(svg).not.toMatch(/url\(\s*['"]?https?:/);
-    expect(svg).not.toMatch(/<link/);
+    assertNoExternalRefs(svg);
+    expect(svg).toContain('jinn');
+    expect(svg).toContain('+2 tasks');
+    expect(svg).toContain('loads 9/12');
+    expect(svg).toContain('+17% cost');
   });
 
-  it('never color-codes a pass/fail judgment — no red/green fill, no pass/fail wording', () => {
-    const svg = renderBadgeSvg({ skill: 'tdd', verdictLine: 'net +2/12 paired tasks vs. baseline', measuredOn: '2026-08-01' });
-    expect(svg).not.toMatch(/\bred\b|\bgreen\b|#[0-9a-f]{0,2}f{2}[0-9a-f]{0,2}00|\bpass\b|\bfail\b/i);
+  it('never uses emoji, gradients, letter grades, or pass/fail wording', () => {
+    assertNoBannedContent(badge());
   });
 
-  it('escapes XML-special characters in the skill name and verdict line', () => {
-    const svg = renderBadgeSvg({ skill: '<tdd & "co">', verdictLine: 'net +2/12', measuredOn: '2026-08-01' });
+  it('uses only the five approved hexes', () => {
+    assertOnlyApprovedHexes(badge());
+  });
+
+  it('mentions every segment in the aria-label', () => {
+    const svg = badge();
+    const label = svg.match(/aria-label="([^"]*)"/)?.[1] ?? '';
+    expect(label).toContain('tdd');
+    expect(label).toContain('+2 tasks');
+    expect(label).toContain('loads 9/12');
+    expect(label).toContain('+17% cost');
+  });
+
+  it('escapes XML-special characters in the skill name', () => {
+    const svg = badge({ skill: '<tdd & "co">' });
     assertWellFormedXmlTags(svg);
     expect(svg).toContain('&lt;tdd &amp; &quot;co&quot;&gt;');
   });
 
   // ---------------------------------------------------------------------------
-  // C1: the badge — the artifact that travels furthest — must carry the same
-  // trigger-honesty caveat renderReceiptMd applies to report.md, never a bare
-  // net delta when the trigger rate can't support reading it as evidence.
+  // Segment 2 tinting — success/danger/neutral by sign, approved hexes only.
   // ---------------------------------------------------------------------------
 
-  it('renders the "not exercised on this task set" caveat instead of the bare delta when trigger rate is low (C1)', () => {
-    const svg = renderBadgeSvg({
-      skill: 'tdd', verdictLine: 'net +2/12 paired tasks vs. baseline', measuredOn: '2026-08-01',
-      triggerRate: { triggered: 1, total: 5, unknown: 0 }, // 20% — low
-    });
-    expect(svg).toContain('not exercised on this task set');
-    expect(svg).not.toContain('net +2/12');
+  it('tints the effect segment success (vow-green) when the net delta is positive', () => {
+    const svg = badge({ netDelta: 2 });
+    expect(svg).toContain('fill="#527a70"');
+    expect(svg).not.toContain('fill="#934c4c"');
   });
 
-  it('renders "no session data" instead of the bare delta when triggerRate.total is 0 (C1)', () => {
-    const svg = renderBadgeSvg({
-      skill: 'tdd', verdictLine: 'net +2/12 paired tasks vs. baseline', measuredOn: '2026-08-01',
-      triggerRate: { triggered: 0, total: 0, unknown: 4 },
-    });
+  it('tints the effect segment danger (break-red) when the net delta is negative', () => {
+    const svg = badge({ netDelta: -3 });
+    expect(svg).toContain('-3 tasks');
+    expect(svg).toContain('fill="#934c4c"');
+    expect(svg).not.toContain('fill="#527a70"');
+  });
+
+  it('tints the effect segment neutral (ink) when the net delta is zero', () => {
+    const svg = badge({ netDelta: 0 });
+    expect(svg).toContain('0 tasks');
+    expect(svg).not.toContain('fill="#527a70"');
+    expect(svg).not.toContain('fill="#934c4c"');
+  });
+
+  // ---------------------------------------------------------------------------
+  // C1-class honesty invariant, carried forward into the segmented shape: a
+  // low-trigger badge must NEVER show a clean effect number — segment 2
+  // renders the not-exercised caveat instead, and segment 3 (loads) carries
+  // the concrete explanation.
+  // ---------------------------------------------------------------------------
+
+  it('renders the not-exercised caveat instead of the effect number when trigger rate is low', () => {
+    const svg = badge({ netDelta: 2, triggerRate: { triggered: 1, total: 12, unknown: 0 } }); // ~8%
+    expect(svg).toContain('not exercised');
+    expect(svg).toContain('loads 1/12');
+    expect(svg).not.toContain('+2 tasks');
+    expect(svg).not.toContain('fill="#527a70"');
+    expect(svg).not.toContain('fill="#934c4c"');
+  });
+
+  it('renders "no session data" for the effect segment and "loads unknown" for the loads segment when total is 0', () => {
+    const svg = badge({ netDelta: 2, triggerRate: { triggered: 0, total: 0, unknown: 4 } });
     expect(svg).toContain('no session data');
-    expect(svg).not.toContain('net +2/12');
+    expect(svg).toContain('loads unknown');
+    expect(svg).not.toContain('+2 tasks');
   });
 
-  it('renders the bare net-delta verdict line unchanged when trigger rate is normal (high) (C1)', () => {
-    const svg = renderBadgeSvg({
-      skill: 'tdd', verdictLine: 'net +2/12 paired tasks vs. baseline', measuredOn: '2026-08-01',
-      triggerRate: { triggered: 4, total: 5, unknown: 0 }, // 80% — normal
-    });
-    expect(svg).toContain('net +2/12 paired tasks vs. baseline');
-    expect(svg).not.toContain('not exercised on this task set');
+  it('treats a missing triggerRate the same as "no session data" — never a bare effect number', () => {
+    const svg = badge({ netDelta: 2, triggerRate: undefined });
+    expect(svg).toContain('no session data');
+    expect(svg).toContain('loads unknown');
+    expect(svg).not.toContain('+2 tasks');
+  });
+
+  it('renders the bare effect number unchanged when the trigger rate is normal (high)', () => {
+    const svg = badge({ netDelta: 2, triggerRate: { triggered: 9, total: 12, unknown: 0 } }); // 75%
+    expect(svg).toContain('+2 tasks');
+    expect(svg).toContain('loads 9/12');
+    expect(svg).not.toContain('not exercised');
     expect(svg).not.toContain('no session data');
   });
 
-  it('renders the bare net-delta verdict line unchanged when no triggerRate is supplied at all (back-compat)', () => {
-    const svg = renderBadgeSvg({ skill: 'tdd', verdictLine: 'net +2/12 paired tasks vs. baseline', measuredOn: '2026-08-01' });
-    expect(svg).toContain('net +2/12 paired tasks vs. baseline');
+  // ---------------------------------------------------------------------------
+  // Cost segment — exact, never fabricated.
+  // ---------------------------------------------------------------------------
+
+  it('renders a positive cost overhead as "+N% cost"', () => {
+    expect(badge({ costOverhead: 0.17 })).toContain('+17% cost');
+  });
+
+  it('renders a negative cost overhead as "-N% cost"', () => {
+    expect(badge({ costOverhead: -0.04 })).toContain('-4% cost');
+  });
+
+  it('renders "cost unknown" rather than a fabricated 0% when costOverhead is null', () => {
+    const svg = badge({ costOverhead: null });
+    expect(svg).toContain('cost unknown');
+    expect(svg).not.toContain('0% cost');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cohort rank badge
+// ---------------------------------------------------------------------------
+
+function rankCohort(over: Partial<Cohort> = {}): Cohort {
+  return {
+    domain: 'python-testing',
+    entries: [
+      cohortEntry({ skill: 'a', netTasks: 5 }),
+      cohortEntry({ skill: 'tdd', netTasks: 3, focal: true }),
+      cohortEntry({ skill: 'c', netTasks: 1 }),
+      cohortEntry({ skill: 'd', netTasks: 0 }),
+      cohortEntry({ skill: 'e', netTasks: -1 }),
+      cohortEntry({ skill: 'f', netTasks: -4 }),
+    ],
+    ...over,
+  };
+}
+
+describe('renderCohortRankBadgeSvg', () => {
+  it('renders `[ jinn · <domain> ][ <rank> of <of> ]`, well-formed and with no external refs', () => {
+    const svg = renderCohortRankBadgeSvg(rankCohort(), 'tdd');
+    assertWellFormedXmlTags(svg);
+    assertNoExternalRefs(svg);
+    assertNoBannedContent(svg);
+    assertOnlyApprovedHexes(svg);
+    expect(svg).toContain('jinn · python-testing');
+    expect(svg).toContain('2nd of 6');
+  });
+
+  it('mentions the skill, domain, and rank in the aria-label', () => {
+    const svg = renderCohortRankBadgeSvg(rankCohort(), 'tdd');
+    const label = svg.match(/aria-label="([^"]*)"/)?.[1] ?? '';
+    expect(label).toContain('tdd');
+    expect(label).toContain('python-testing');
+    expect(label).toContain('2nd of 6');
+  });
+
+  it.each([
+    [1, '1st'], [2, '2nd'], [3, '3rd'], [4, '4th'],
+    [11, '11th'], [12, '12th'], [13, '13th'],
+    [21, '21st'], [22, '22nd'], [23, '23rd'], [24, '24th'],
+    [101, '101st'], [111, '111th'],
+  ])('renders the correct ordinal suffix for rank %i (%s)', (rank, expected) => {
+    // Build a cohort whose focal entry lands at exactly `rank` by giving
+    // (rank - 1) distinct entries a strictly higher netTasks.
+    const entries: CohortEntry[] = [];
+    for (let i = 0; i < rank - 1; i++) entries.push(cohortEntry({ skill: `above-${i}`, netTasks: 1000 - i }));
+    entries.push(cohortEntry({ skill: 'focal-skill', netTasks: 0, focal: true }));
+    const svg = renderCohortRankBadgeSvg({ domain: 'd', entries }, 'focal-skill');
+    expect(svg).toContain(`${expected} of ${rank}`);
+  });
+
+  it('throws when focalSkill does not match the cohort\'s own focal entry', () => {
+    expect(() => renderCohortRankBadgeSvg(rankCohort(), 'not-the-focal-skill')).toThrow(CohortValidationError);
+  });
+
+  it('throws (via validateCohort) on a cohort with no focal entry', () => {
+    const cohort: Cohort = { domain: 'd', entries: [cohortEntry({ skill: 'a' }), cohortEntry({ skill: 'b' })] };
+    expect(() => renderCohortRankBadgeSvg(cohort, 'a')).toThrow(CohortValidationError);
+  });
+});
+
+describe('assertRankBadgeAccompanied', () => {
+  it('does not throw when the main badge is also being rendered', () => {
+    expect(() => assertRankBadgeAccompanied(true)).not.toThrow();
+  });
+
+  it('throws when the rank badge would be the only badge on the surface (design §3)', () => {
+    expect(() => assertRankBadgeAccompanied(false)).toThrow(/never be emitted without the three-axis badge/i);
   });
 });
 

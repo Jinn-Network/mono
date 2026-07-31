@@ -536,30 +536,30 @@ export function deriveVerdictLine(receipt: ReceiptData): string {
 }
 
 // ---------------------------------------------------------------------------
-// Badge SVG
+// Badge SVG (design §3 of
+// docs/superpowers/specs/2026-07-31-capability-report-artifact-design.md) —
+// variant C, the three-axis segmented badge:
+//
+//   [ jinn ][ +2 tasks ][ loads 9/12 ][ +17% cost ]
+//
+// Chosen over effect-only, cohort-rank-only, and letter grade because the
+// paired-effect number is the rig's LEAST reliable measurement at n≈12 (wide
+// interval, noisy), while trigger rate is a direct log observation and cost
+// overhead is exact — a badge leading with effect alone leads with the
+// weakest number. Segment 2 (effect) is tinted by sign; segments 1/3/4 stay
+// neutral.
 // ---------------------------------------------------------------------------
 
-export interface BadgeOptions {
-  skill: string;
-  /** Plain-text verdict, e.g. from `deriveVerdictLine` — never a pass/fail
-   *  judgment or a color. Only rendered when `triggerRate` reads as a normal
-   *  (non-low) rate — see `triggerRate` below (final-review C1). */
-  verdictLine: string;
-  measuredOn: string;
-  /** Final-review C1: the same `TriggerRate` the report's receipt block was
-   *  built from. When `isLowTriggerRate(triggerRate)` is true (low or
-   *  unknown trigger rate — the identical gate `renderReceiptMd` uses), the
-   *  badge's second line renders the trigger-honesty caveat INSTEAD OF
-   *  `verdictLine` — the badge travels furthest of any artifact this rig
-   *  produces (often the only thing a reader ever sees, per spec §1.1), so
-   *  it must never carry a bare net delta the report itself would refuse to
-   *  present as unqualified evidence. Absent/undefined reads as "not low"
-   *  (back-compat: a caller with no trigger data at all should still pass an
-   *  explicit `{ triggered: 0, total: 0, unknown: 0 }`-shaped rate to get the
-   *  caveat; omitting the field entirely is only for badges that genuinely
-   *  have no trigger concept, e.g. none exist yet in this rig). */
-  triggerRate?: TriggerRate;
-}
+// Hex values inlined from DESIGN.json's semantic ramps — SVG cannot consume
+// CSS custom properties across a `<img src>` embed context, so these five
+// are the only colors this module may use anywhere in a badge.
+const BADGE_PAPER = '#ffffff';
+const BADGE_BORDER = '#33415c';
+const BADGE_INK = '#1b2430';
+/** vow-green — segment 2 text color when the net paired delta is positive. */
+const BADGE_SUCCESS = '#527a70';
+/** break-red — segment 2 text color when the net paired delta is negative. */
+const BADGE_DANGER = '#934c4c';
 
 function escapeXml(value: string): string {
   return value
@@ -570,41 +570,199 @@ function escapeXml(value: string): string {
     .replace(/'/g, '&apos;');
 }
 
-/** The badge's second line (final-review C1): the plain net-delta verdict
- *  when the trigger rate is normal, or the trigger-honesty caveat instead of
- *  it when `isLowTriggerRate` says the rate is low or unknown — never both,
- *  never the bare delta alongside the caveat. Mirrors `renderReceiptMd`'s
- *  `lowTrigger` branch exactly (same gate, same two caveat strings) so the
- *  badge can never disagree with the report it points at. */
-function badgeLine2(opts: BadgeOptions): string {
-  if (isLowTriggerRate(opts.triggerRate)) {
-    const caveat = !opts.triggerRate || opts.triggerRate.total === 0
-      ? 'no session data'
-      : 'not exercised on this task set';
-    return `${caveat} - measured ${opts.measuredOn}`;
-  }
-  return `${opts.verdictLine} - measured ${opts.measuredOn}`;
+interface BadgeSegment {
+  text: string;
+  /** Tinting approach chosen (design §3 offers a choice: tint the segment
+   *  fill with a light ramp stop, or tint the text): this module tints the
+   *  TEXT color and keeps every segment's background paper-white. The five
+   *  approved hexes above are used exactly as given — no derived "lighter
+   *  ramp stop" is invented, and the background never varies, so there is
+   *  nothing here that could read as a red/green pass-fail fill. */
+  textFill: string;
 }
 
-/** A small, self-contained flat SVG badge: two text lines (what was measured
- *  and when) inside a bordered box. No external fonts, images, or refs — a
- *  generic `font-family` name only, never an `@font-face`/`url()`/`xlink:href`
- *  pointing off-document. Neutral styling throughout: no color-coded
- *  pass/fail fill, because the badge names the report, it does not grade
- *  (spec §4.1/§1.1). */
-export function renderBadgeSvg(opts: BadgeOptions): string {
-  const line1 = `jinn capability report: ${opts.skill}`;
-  const line2 = badgeLine2(opts);
+/** Assembles any left-to-right run of segments into one self-contained flat
+ *  SVG: a single bordered, softened-brutalist-radius box (`rx="4"`, matching
+ *  DESIGN.json's `--radius-1` chip token) with a vertical divider between
+ *  each segment and center-aligned monospace text. Shared by both
+ *  `renderBadgeSvg` and `renderCohortRankBadgeSvg` so the two badges can
+ *  never drift in markup shape. No external fonts, images, or refs — a
+ *  generic `font-family` name only, never `@font-face`/an external
+ *  `url()`/`xlink:href`. */
+function renderSegmentedBadgeSvg(segments: BadgeSegment[], ariaLabel: string): string {
   const charWidth = 6.2;
-  const width = Math.max(220, Math.ceil(Math.max(line1.length, line2.length) * charWidth) + 16);
-  const label = escapeXml(`${line1}; ${line2}`);
+  const padX = 8;
+  const height = 20;
+  const widths = segments.map((s) => Math.max(1, Math.ceil(s.text.length * charWidth)) + padX * 2);
+  const width = widths.reduce((a, b) => a + b, 0);
+
+  let x = 0;
+  const textEls: string[] = [];
+  const dividerEls: string[] = [];
+  segments.forEach((seg, i) => {
+    const w = widths[i]!;
+    textEls.push(
+      `<text x="${x + w / 2}" y="${height - 6}" font-family="monospace" font-size="11" ` +
+      `fill="${seg.textFill}" text-anchor="middle">${escapeXml(seg.text)}</text>`,
+    );
+    if (i > 0) {
+      dividerEls.push(`<line x1="${x}" y1="0" x2="${x}" y2="${height}" stroke="${BADGE_BORDER}" stroke-width="1"/>`);
+    }
+    x += w;
+  });
+
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="40" viewBox="0 0 ${width} 40" role="img" aria-label="${label}">`,
-    `<rect x="0.5" y="0.5" width="${width - 1}" height="39" rx="4" fill="#ffffff" stroke="#33415c" stroke-width="1"/>`,
-    `<text x="8" y="17" font-family="monospace" font-size="11" fill="#1b2430">${escapeXml(line1)}</text>`,
-    `<text x="8" y="31" font-family="monospace" font-size="11" fill="#1b2430">${escapeXml(line2)}</text>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" ` +
+    `role="img" aria-label="${escapeXml(ariaLabel)}">`,
+    `<rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="4" fill="${BADGE_PAPER}" ` +
+    `stroke="${BADGE_BORDER}" stroke-width="1"/>`,
+    ...dividerEls,
+    ...textEls,
     '</svg>',
   ].join('\n') + '\n';
+}
+
+export interface BadgeOptions {
+  skill: string;
+  measuredOn: string;
+  /** Net paired delta: `receipt.treatment.passed - receipt.baseline.passed`.
+   *  Design §3: the rig's least reliable number at n≈12 — segment 2, never
+   *  segment 1, and replaced outright by the low-trigger caveat below when
+   *  the trigger rate can't support reading it as evidence at all. */
+  netDelta: number;
+  /** The same `TriggerRate` the report's receipt block was built from.
+   *  `undefined` (no session-JSONL captured for this run at all) is
+   *  normalized internally to `{ triggered: 0, total: 0, unknown: 0 }` — the
+   *  identical "no session data" branch an explicit zero-total rate takes.
+   *  This deliberately drops the old two-line badge's back-compat allowance
+   *  of showing a bare effect number when no trigger data exists: the new
+   *  badge always renders a dedicated loads segment, so there is no reading
+   *  of "no data" for that segment that isn't itself the honest answer for
+   *  segment 2 too. */
+  triggerRate?: TriggerRate;
+  /** `deriveCostOverhead(receipt)`'s result, passed straight through — `null`
+   *  renders `cost unknown` rather than a fabricated `0`. */
+  costOverhead: number | null;
+}
+
+/** Segment 2's text + tint (design §3: "Segment 2 takes the success tint
+ *  when positive, the danger tint when negative, neutral at zero"), gated by
+ *  the identical `isLowTriggerRate` check `renderReceiptMd` uses so the badge
+ *  can never disagree with the report it points at. A low/unknown trigger
+ *  rate replaces the effect number with the not-exercised caveat outright —
+ *  this is the C1-class honesty invariant: a low-trigger badge must never
+ *  show a clean effect number, tinted or not. */
+function effectSegment(rate: TriggerRate, netDelta: number): BadgeSegment {
+  if (isLowTriggerRate(rate)) {
+    return { text: rate.total === 0 ? 'no session data' : 'not exercised', textFill: BADGE_INK };
+  }
+  if (netDelta > 0) return { text: `+${netDelta} tasks`, textFill: BADGE_SUCCESS };
+  if (netDelta < 0) return { text: `${netDelta} tasks`, textFill: BADGE_DANGER };
+  return { text: '0 tasks', textFill: BADGE_INK };
+}
+
+/** Segment 3, always present regardless of segment 2's low-trigger state —
+ *  when segment 2 shows the not-exercised caveat, this segment carries the
+ *  concrete explanation for it (`loads 1/12`, or `loads unknown` when no
+ *  session data was captured at all). */
+function loadsSegmentText(rate: TriggerRate): string {
+  return rate.total === 0 ? 'loads unknown' : `loads ${rate.triggered}/${rate.total}`;
+}
+
+/** Segment 4 — exact cost overhead, never fabricated. `null` (from
+ *  `deriveCostOverhead`, e.g. a zero/missing baseline mean) renders
+ *  `cost unknown` rather than a misleading `0% cost`. */
+function costSegmentText(costOverhead: number | null): string {
+  if (costOverhead === null) return 'cost unknown';
+  const pctValue = Math.round(costOverhead * 100);
+  const sign = pctValue > 0 ? '+' : '';
+  return `${sign}${pctValue}% cost`;
+}
+
+/** The three-axis capability badge (design §3, variant C):
+ *  `[ jinn ][ <effect|caveat> ][ loads x/n ][ <±cost>% cost ]`. Pure — no
+ *  filesystem, no network; every value is read straight from already-derived
+ *  inputs (`deriveCostOverhead`, `ReceiptData.triggerRate`), never recomputed
+ *  from a raw receipt here. */
+export function renderBadgeSvg(opts: BadgeOptions): string {
+  const rate: TriggerRate = opts.triggerRate ?? { triggered: 0, total: 0, unknown: 0 };
+  const effect = effectSegment(rate, opts.netDelta);
+  const loadsText = loadsSegmentText(rate);
+  const costText = costSegmentText(opts.costOverhead);
+
+  const segments: BadgeSegment[] = [
+    { text: 'jinn', textFill: BADGE_INK },
+    effect,
+    { text: loadsText, textFill: BADGE_INK },
+    { text: costText, textFill: BADGE_INK },
+  ];
+
+  const ariaLabel =
+    `jinn capability badge for ${opts.skill}, measured ${opts.measuredOn}: ` +
+    `${effect.text}, ${loadsText}, ${costText}`;
+
+  return renderSegmentedBadgeSvg(segments, ariaLabel);
+}
+
+// ---------------------------------------------------------------------------
+// Cohort rank badge (design §3) — ships only alongside the three-axis badge.
+// ---------------------------------------------------------------------------
+
+function ordinal(n: number): string {
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
+}
+
+/** `[ jinn · <domain> ][ <rank> of <of> ]` — design §3: "Rank is a
+ *  defensible ordinal claim even when magnitudes are noisy." Both segments
+ *  stay neutral (ink text on paper) — a rank has no sign to tint against.
+ *  `focalSkill` must match the cohort's own focal entry (`validateCohort`
+ *  runs first); this is a defensive check against rendering the wrong
+ *  cohort's rank badge for a given skill, not a way to select the entry.
+ *
+ *  IMPORTANT (design §3): this badge must NEVER be the only badge on a
+ *  surface — alone, "2nd of 6" hides whether second place means +2 or -5 net
+ *  tasks. Any caller assembling a delivery surface (README embed, issue
+ *  body, hosted page) MUST also render `renderBadgeSvg`'s three-axis badge
+ *  alongside this one, and should call `assertRankBadgeAccompanied` to
+ *  enforce that at the call site rather than relying on convention. */
+export function renderCohortRankBadgeSvg(cohort: Cohort, focalSkill: string): string {
+  validateCohort(cohort);
+  const focal = cohort.entries.find((e) => e.focal)!;
+  if (focal.skill !== focalSkill) {
+    throw new CohortValidationError(
+      `cohort '${cohort.domain}' focal entry is '${focal.skill}', not the requested '${focalSkill}'`,
+    );
+  }
+  const { rank, of } = cohortRank(cohort);
+  const rankText = `${ordinal(rank)} of ${of}`;
+  const segments: BadgeSegment[] = [
+    { text: `jinn · ${cohort.domain}`, textFill: BADGE_INK },
+    { text: rankText, textFill: BADGE_INK },
+  ];
+  const ariaLabel = `jinn cohort rank badge for ${focalSkill} in ${cohort.domain}: ${rankText}`;
+  return renderSegmentedBadgeSvg(segments, ariaLabel);
+}
+
+/** Design §3's "never alone" rule as an enforceable guard rather than a
+ *  convention: call this before emitting `renderCohortRankBadgeSvg`'s output
+ *  anywhere (a README embed snippet, an issue body, a hosted page), passing
+ *  whether the three-axis badge (`renderBadgeSvg`) is ALSO being rendered on
+ *  that same surface. Throws when it is not — a bare rank badge hides
+ *  whether "2nd of 6" means +2 net tasks or -5. */
+export function assertRankBadgeAccompanied(hasMainBadge: boolean): void {
+  if (!hasMainBadge) {
+    throw new Error(
+      'renderCohortRankBadgeSvg output may never be emitted without the three-axis badge ' +
+      '(renderBadgeSvg) alongside it, per design §3 — a bare rank hides what the rank magnitude means.',
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

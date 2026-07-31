@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 
 import { loadAttempts, type BenchManifest } from '../../src/skills-bench/attempts.js';
 import {
-  buildCapabilityReport, buildEmbedSnippet, deriveVerdictLine, renderBadgeSvg, renderCapabilityReportMd,
+  buildCapabilityReport, buildEmbedSnippet, deriveCostOverhead, renderBadgeSvg, renderCapabilityReportMd,
 } from '../../src/skills-bench/capability-report.js';
 import { detectSkillTrigger, findMismatchedSkillInvocations } from '../../src/skills-bench/trigger.js';
 import { attemptKey } from '../../src/skills-bench/attempts.js';
@@ -261,13 +261,14 @@ async function main(): Promise<void> {
   const badgePath = join(args.outDir, 'badge.svg');
   await writeFile(badgePath, renderBadgeSvg({
     skill: args.skill,
-    verdictLine: deriveVerdictLine(report.receipt),
     measuredOn: args.measuredOn,
+    netDelta: report.receipt.treatment.passed - report.receipt.baseline.passed,
     // C1: pass the trigger rate through so a low/unknown rate renders the
     // honesty caveat instead of the bare net delta — see BadgeOptions'
     // doc comment (capability-report.ts) for why this must never be
     // dropped on this path.
     triggerRate: report.receipt.triggerRate,
+    costOverhead: deriveCostOverhead(report.receipt),
   }));
   console.log(`[render-report] wrote ${badgePath}`);
 
