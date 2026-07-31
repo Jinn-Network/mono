@@ -1,8 +1,8 @@
 # @jinn-network/plugin-runtime
 
 The Jinn Plugin runtime: a capability container with typed configuration injection, health
-reporting, structured logging, and session capture. C5 adds corpus library surfaces on top of
-that scaffold; later components add publication, relevance, and MCP.
+reporting, structured logging, and session capture. C4 adds capture; C5 adds corpus library
+surfaces; C6 adds relevance and projection. Publication and MCP remain deferred.
 
 **Corpus library (C5).** Exported from the package root (`src/corpus/`, re-exported
 via `index.ts`): `createCorpusCapability` composes mirror, retrieval, reader, and health
@@ -19,8 +19,6 @@ deferred.
 **Binary wiring.** `bin.ts` / `jinn-plugin-runtime` still registers `capabilities: []`
 until a later wave wires corpus into the process. `health` therefore reports an empty
 check list today; pack-smoke expects that. Use the library API directly until then.
-
-Capture, publication, and MCP are not in this package yet.
 
 **Relevance and projection (C6).** Exported from the package root: `openRelevanceIndex`,
 `runPickup`, `projectContext`, `renderFencedBlock`, `rebuildIndex`, sensitivity

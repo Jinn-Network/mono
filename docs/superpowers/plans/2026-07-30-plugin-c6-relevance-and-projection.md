@@ -5791,3 +5791,13 @@ excerpts.
 **No local sidecar:** For historical or non-C4 records with no link file, treat derivation as
 **unattributed / unverified** — do not silently trust. Indexing may still use Trajectory spans
 via the forward link; attribution and verification surfaces must not claim L2/L3.
+
+## 2026-07-31 wave-1 whole-component review resolution (wave 2 — final under cap)
+
+| ID | Severity | Disposition |
+| --- | --- | --- |
+| **C6-W1-1** Critical | Add `evidence/derivation` and `evidence/trace-decode` (and any required build-order deps) to "Build cross-tree portal dependencies from source" in `.github/workflows/plugin-tree-ci.yml` **before** `yarn typecheck`. Exact-head CI fails with TS2307 for those modules; local green because `dist/` exists. |
+| **C6-W1-2** Important | Rewrite `plugin/runtime/README.md` intro so Capture/C5/C6 are present; publication/MCP remain deferred. Remove contradictions: L5 framing relevance as future; L23 denying Capture while Capture+Relevance sections exist. |
+
+- [x] **C6-W1-1** — portal build list includes `evidence/derivation` + `evidence/trace-decode` (and required build-order deps) before typecheck
+- [x] **C6-W1-2** — README intro consistent: Capture/C5/C6 present; publication/MCP deferred; no L5/L23 contradictions
