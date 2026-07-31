@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   hashTaskSet, loadTaskSet, validateTaskSet, isTaskGradeabilityPassing, assertTaskSetGradeable,
+  assertNoArmNameLeak,
   TaskSetValidationError,
   type SkillTaskSetV1, type SkillTaskV1, type TaskRequirement,
 } from '../../src/skills-bench/task-set.js';
@@ -205,5 +206,54 @@ describe('gradeability gate refusal', () => {
     };
     expect(() => assertTaskSetGradeable(set)).toThrow(/fix-widget-0002/);
     expect(() => assertTaskSetGradeable(set)).toThrow(/without a passing gradeability receipt/);
+  });
+});
+
+describe('assertNoArmNameLeak (I2)', () => {
+  it('passes when no arm name appears in any requirement part', () => {
+    const set: SkillTaskSetV1 = {
+      version: 'skill-task-set.v1', skill: 'tdd', domain: 'python',
+      tasks: [task()], sha256: 'x',
+    };
+    expect(() => assertNoArmNameLeak(set, ['baseline', 'tdd-plus'])).not.toThrow();
+  });
+
+  it('throws when a non-baseline arm name leaks into requirement text, case-insensitively', () => {
+    const set: SkillTaskSetV1 = {
+      version: 'skill-task-set.v1', skill: 'widget-fixer', domain: 'python',
+      tasks: [task({ requirement: requirement({ acceptance: 'Use TDD-Plus to write the failing test first.' }) })],
+      sha256: 'x',
+    };
+    expect(() => assertNoArmNameLeak(set, ['baseline', 'tdd-plus'])).toThrow(/names arm 'tdd-plus'/);
+  });
+
+  it('the literal arm name "baseline" is exempt — it is a rig convention, not a skill identity', () => {
+    const set: SkillTaskSetV1 = {
+      version: 'skill-task-set.v1', skill: 'widget-fixer', domain: 'python',
+      tasks: [task({ requirement: requirement({ background: 'Compare against the baseline behavior.' }) })],
+      sha256: 'x',
+    };
+    expect(() => assertNoArmNameLeak(set, ['baseline', 'tdd-plus'])).not.toThrow();
+  });
+
+  it('checks every task in the set, not just the first', () => {
+    const set: SkillTaskSetV1 = {
+      version: 'skill-task-set.v1', skill: 'widget-fixer', domain: 'python',
+      tasks: [
+        task({ id: 'fix-widget-0001' }),
+        task({ id: 'fix-widget-0002', requirement: requirement({ fileOps: 'Only touch files under src/, per tdd-plus.' }) }),
+      ],
+      sha256: 'x',
+    };
+    expect(() => assertNoArmNameLeak(set, ['baseline', 'tdd-plus'])).toThrow(/fix-widget-0002/);
+  });
+
+  it('is a no-op when the only arm name given is baseline (or none at all)', () => {
+    const set: SkillTaskSetV1 = {
+      version: 'skill-task-set.v1', skill: 'widget-fixer', domain: 'python',
+      tasks: [task()], sha256: 'x',
+    };
+    expect(() => assertNoArmNameLeak(set, ['baseline'])).not.toThrow();
+    expect(() => assertNoArmNameLeak(set, [])).not.toThrow();
   });
 });

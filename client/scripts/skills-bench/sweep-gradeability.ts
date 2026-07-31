@@ -159,9 +159,17 @@ export async function sweepGradeability(args: SweepArgs): Promise<GradeabilitySw
 
   for (const candidate of targets) {
     const existing = report.results[candidate.instance_id];
-    if (existing) {
+    // 'error' means the SWEEP ITSELF broke on this instance (docker/network/
+    // etc.) — it is not a verdict about the instance, unlike 'gradeable'/
+    // 'ungradeable', so it must never be cached as terminal: a resume
+    // re-attempts it instead of silently treating an infra hiccup as
+    // permanent (I3).
+    if (existing && existing.status !== 'error') {
       console.log(`[sweep-gradeability] skip ${candidate.instance_id} — already classified: ${existing.status}`);
       continue;
+    }
+    if (existing) {
+      console.log(`[sweep-gradeability] retrying ${candidate.instance_id} — previously errored (not a terminal verdict)`);
     }
     console.log(`[sweep-gradeability] grading empty patch for ${candidate.instance_id}...`);
     const started = now();

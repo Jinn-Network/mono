@@ -50,6 +50,43 @@ describe('manifest guard', () => {
     ).rejects.toThrow(/manifest mismatch/);
   });
 
+  it('binds a --task-set run to its screening decision: a screened run and an --include-screened-out run must not collide in the same --out dir (C1)', async () => {
+    const taskSetManifest: BenchManifest = {
+      version: 'skills-bench-manifest.v1', taskSetSha256: 'xyz', half: 'feedback', model: 'claude-sonnet-5',
+      arms: [{ name: 'baseline', skillSha256: null }, { name: 'tdd', skillSha256: 'def' }],
+    };
+    const screened: BenchManifest = { ...taskSetManifest, screeningRespected: true, eligibleTaskIds: ['task-a'] };
+    const includeScreenedOut: BenchManifest = {
+      ...taskSetManifest, screeningRespected: false, eligibleTaskIds: ['task-a', 'task-b'],
+    };
+
+    // Without screeningRespected/eligibleTaskIds bound into the manifest,
+    // `screened` and `includeScreenedOut` would be byte-identical (same
+    // taskSetSha256/half/model/arms) and assertManifestCompatible would
+    // silently accept the second run as a resume of the first, even though
+    // it measures a different task population. With the fields present, the
+    // guard correctly refuses the collision.
+    const file = join(await mkdtemp(join(tmpdir(), 'mf-screen-collide-')), 'bench-manifest.json');
+    await assertManifestCompatible(file, screened); // writes
+    await expect(assertManifestCompatible(file, includeScreenedOut)).rejects.toThrow(/manifest mismatch/);
+
+    // And the reverse order.
+    const file2 = join(await mkdtemp(join(tmpdir(), 'mf-screen-collide-rev-')), 'bench-manifest.json');
+    await assertManifestCompatible(file2, includeScreenedOut);
+    await expect(assertManifestCompatible(file2, screened)).rejects.toThrow(/manifest mismatch/);
+  });
+
+  it('accepts two --task-set runs with the same screening decision and eligible set', async () => {
+    const manifest: BenchManifest = {
+      version: 'skills-bench-manifest.v1', taskSetSha256: 'xyz', half: 'feedback', model: 'claude-sonnet-5',
+      arms: [{ name: 'baseline', skillSha256: null }, { name: 'tdd', skillSha256: 'def' }],
+      screeningRespected: true, eligibleTaskIds: ['task-a', 'task-b'],
+    };
+    const file = join(await mkdtemp(join(tmpdir(), 'mf-screen-same-')), 'bench-manifest.json');
+    await assertManifestCompatible(file, manifest);
+    await assertManifestCompatible(file, manifest); // identical → ok
+  });
+
   it('rejects a real manifest resuming a --out dir seeded by a dry run, and vice versa', async () => {
     const dryManifest: BenchManifest = { ...manifest, dryRun: true };
 

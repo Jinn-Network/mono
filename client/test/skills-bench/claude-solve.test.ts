@@ -27,15 +27,26 @@ describe('buildClaudeArgs', () => {
 });
 
 describe('mountSkill', () => {
-  it('copies the skill into <checkout>/.claude/skills/<name> without pin.json', async () => {
+  it('copies the skill into <checkout>/.claude/skills/<name> without pin.json, and reports both dirs as newly created', async () => {
     const checkout = await mkdtemp(join(tmpdir(), 'co-'));
     const skillDir = await mkdtemp(join(tmpdir(), 'skill-'));
     await writeFile(join(skillDir, 'SKILL.md'), '---\nname: tdd\ndescription: d\n---\nbody');
     await writeFile(join(skillDir, 'pin.json'), '{}');
-    const mounted = await mountSkill(checkout, skillDir, 'tdd');
-    expect(mounted).toBe(join(checkout, '.claude', 'skills', 'tdd'));
-    expect(existsSync(join(mounted, 'SKILL.md'))).toBe(true);
-    expect(existsSync(join(mounted, 'pin.json'))).toBe(false);
+    const handle = await mountSkill(checkout, skillDir, 'tdd');
+    expect(handle.mounted).toBe(join(checkout, '.claude', 'skills', 'tdd'));
+    expect(existsSync(join(handle.mounted, 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(handle.mounted, 'pin.json'))).toBe(false);
+    expect(handle.createdDirs).toEqual([join(checkout, '.claude'), join(checkout, '.claude', 'skills')]);
+  });
+
+  it('reports no createdDirs when .claude and .claude/skills already existed (e.g. a second skill mounted alongside one already there)', async () => {
+    const checkout = await mkdtemp(join(tmpdir(), 'co-preexist-'));
+    await mkdir(join(checkout, '.claude', 'skills', 'other'), { recursive: true });
+    await writeFile(join(checkout, '.claude', 'skills', 'other', 'SKILL.md'), 'other');
+    const skillDir = await mkdtemp(join(tmpdir(), 'skill-'));
+    await writeFile(join(skillDir, 'SKILL.md'), '---\nname: tdd\ndescription: d\n---\nbody');
+    const handle = await mountSkill(checkout, skillDir, 'tdd');
+    expect(handle.createdDirs).toEqual([]);
   });
 });
 
@@ -52,13 +63,13 @@ describe('unmountSkill', () => {
     const skillDir = await mkdtemp(join(tmpdir(), 'skill-'));
     await writeFile(join(skillDir, 'SKILL.md'), '---\nname: tdd\ndescription: d\n---\nbody');
     await writeFile(join(skillDir, 'pin.json'), '{}');
-    await mountSkill(checkout, skillDir, 'tdd');
+    const handle = await mountSkill(checkout, skillDir, 'tdd');
     expect(existsSync(join(checkout, '.claude', 'skills', 'tdd', 'SKILL.md'))).toBe(true);
 
     // simulate the agent editing a source file during the solve
     await writeFile(join(checkout, 'a.py'), 'print("after")\n');
 
-    await unmountSkill(checkout);
+    await unmountSkill(handle);
     expect(existsSync(join(checkout, '.claude'))).toBe(false);
 
     await exec('git', ['-C', checkout, 'add', '-A'], {});
@@ -69,6 +80,34 @@ describe('unmountSkill', () => {
 
     const { stdout: diff } = await exec('git', ['-C', checkout, 'diff', '--cached'], {});
     expect(diff).not.toContain('.claude/');
+  });
+
+  it('restores the checkout to its original state, not deleting .claude wholesale, when .claude pre-existed with TRACKED content (C2)', async () => {
+    const checkout = await mkdtemp(join(tmpdir(), 'co-tracked-'));
+    await exec('git', ['init', '-q'], { cwd: checkout });
+    await exec('git', ['-C', checkout, 'config', 'user.email', 't@t'], {});
+    await exec('git', ['-C', checkout, 'config', 'user.name', 't'], {});
+    await mkdir(join(checkout, '.claude'), { recursive: true });
+    await writeFile(join(checkout, '.claude', 'settings.json'), '{"tracked":true}\n');
+    await writeFile(join(checkout, 'a.py'), 'print("before")\n');
+    await exec('git', ['-C', checkout, 'add', '-A'], {});
+    await exec('git', ['-C', checkout, 'commit', '-q', '-m', 'init'], {});
+
+    const skillDir = await mkdtemp(join(tmpdir(), 'skill-'));
+    await writeFile(join(skillDir, 'SKILL.md'), '---\nname: tdd\ndescription: d\n---\nbody');
+    await writeFile(join(skillDir, 'pin.json'), '{}');
+    const handle = await mountSkill(checkout, skillDir, 'tdd');
+    // .claude pre-existed, .claude/skills did not.
+    expect(handle.createdDirs).toEqual([join(checkout, '.claude', 'skills')]);
+
+    await unmountSkill(handle);
+
+    // The tracked file survives untouched, and the mounted skill is gone.
+    expect(existsSync(join(checkout, '.claude', 'settings.json'))).toBe(true);
+    expect(existsSync(join(checkout, '.claude', 'skills'))).toBe(false);
+
+    const { stdout: status } = await exec('git', ['-C', checkout, 'status', '--porcelain'], {});
+    expect(status.trim()).toBe('');
   });
 });
 

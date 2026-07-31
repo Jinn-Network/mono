@@ -200,6 +200,35 @@ export function validateTaskSet(set: SkillTaskSetV1): void {
   }
 }
 
+/**
+ * Run-bench-side leak check, distinct from `validateTask`'s check above.
+ * `validateTask` only guards the task-set's own declared `skill` field — but
+ * a real run is driven by an `--arms` file whose treatment-arm `name` can
+ * differ from (or be additional to) `set.skill`. Fails loud, case-
+ * insensitive, same reasoning: an agent told to "use <armName>" measures
+ * instruction-following, not the skill. The literal arm name `baseline` is
+ * exempt (a rig convention, not a skill identity — "the baseline behavior"
+ * appearing in prose is not a leak).
+ */
+export function assertNoArmNameLeak(set: Pick<SkillTaskSetV1, 'tasks'>, armNames: string[]): void {
+  const names = [...new Set(armNames.map((n) => n.trim()).filter((n) => n && n.toLowerCase() !== 'baseline'))];
+  if (names.length === 0) return;
+  for (const task of set.tasks) {
+    for (const part of REQUIREMENT_PARTS) {
+      const text = task.requirement[part].toLowerCase();
+      for (const name of names) {
+        if (text.includes(name.toLowerCase())) {
+          throw new TaskSetValidationError(
+            `task ${task.id} requirement.${part} names arm '${name}' — the requirement must never name ` +
+            `a mounted skill's arm (spec §2.2): an agent told to "use ${name}" measures instruction-` +
+            `following, not the skill`,
+          );
+        }
+      }
+    }
+  }
+}
+
 /** Load `<dir>/set.json`, validate it (spec rules), and verify its declared
  *  `sha256` against a fresh hash of the referenced files — fail loud on any
  *  mismatch (set.json or a verifier/reference-patch file was edited without

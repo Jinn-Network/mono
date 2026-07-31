@@ -232,13 +232,20 @@ unscreened pool could just mean the pool could not have shown help either way.
 
 ### 2.5 Trigger rate as a first-class receipt field
 
-Every attempt's session transcript is parsed for skill-load evidence (attachment/skill events for
-the mounted skill's name), producing a per-attempt `triggered: true/false` and a per-arm trigger
-rate. This closes the largest interpretation gap in a paired null: without it, "the skill made no
-difference" and "the skill never loaded on these tasks" render identically. With it, a report
-distinguishes them explicitly — a null result with low trigger rate is stated as *not exercised on
-this task set*, never as *no effect* — and the private annex to the author starts from whichever one
-actually happened (a discoverability fix for the former, a content fix for the latter).
+Every attempt's session transcript is parsed for skill-load evidence: an `assistant` event whose
+`message.content` contains a `tool_use` block with `name: "Skill"` and `input.skill` matching the
+mounted skill's name (case-insensitively), downgraded to not-triggered only if every paired
+`tool_result` (matched by `tool_use_id`) comes back an error. The `skill_listing` attachment that
+opens every session is deliberately **not** treated as a signal — it reflects the skill's
+availability (mounted and discoverable), not its use, and it is present identically in both the
+baseline and treatment arms wherever a skill happens to be listed there, so substring-matching it
+would mark every treatment-arm attempt "triggered" regardless of whether the model ever invoked the
+skill. This produces a per-attempt `triggered: true/false` and a per-arm trigger rate. This closes
+the largest interpretation gap in a paired null: without it, "the skill made no difference" and "the
+skill never loaded on these tasks" render identically. With it, a report distinguishes them
+explicitly — a null result with low trigger rate is stated as *not exercised on this task set*, never
+as *no effect* — and the private annex to the author starts from whichever one actually happened (a
+discoverability fix for the former, a content fix for the latter).
 
 ### 2.6 Model profile
 

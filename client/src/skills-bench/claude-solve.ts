@@ -21,26 +21,60 @@ export function buildClaudeArgs(opts: { prompt: string; model: string; maxTurns:
   ];
 }
 
+/** Returned by `mountSkill`, consumed by `unmountSkill`. Records exactly
+ *  which ancestor directories mounting had to create so unmounting can prune
+ *  ONLY those — never a directory (or its contents, e.g. a tracked
+ *  `.claude/settings.json`) that predates this bench attempt. `createdDirs`
+ *  is in creation order (`.claude` before `.claude/skills`, when both were
+ *  created); `unmountSkill` removes them in reverse. */
+export interface SkillMountHandle {
+  /** The mounted skill dir: `<checkoutDir>/.claude/skills/<name>`. */
+  mounted: string;
+  /** Ancestor dirs that did NOT exist before this mount and so are safe to
+   *  prune entirely on unmount (empty when both `.claude` and
+   *  `.claude/skills` already existed in the checkout). */
+  createdDirs: string[];
+}
+
 /** Mount the pinned skill into the per-attempt checkout — the project-level
  *  location claude-code discovers skills from, so the treatment is exactly
  *  "this skill is installed in this workspace". pin.json is rig metadata, not
- *  part of the published skill, and must not ride along. */
-export async function mountSkill(checkoutDir: string, skillDir: string, name: string): Promise<string> {
-  const dest = join(checkoutDir, '.claude', 'skills', name);
+ *  part of the published skill, and must not ride along.
+ *
+ *  Records (before creating anything) whether `.claude` and `.claude/skills`
+ *  already existed in the checkout, so `unmountSkill` can restore the
+ *  checkout to its ORIGINAL state rather than deleting `.claude` wholesale —
+ *  a checkout with a tracked `.claude/settings.json` (or other pre-existing
+ *  content, or other mounted skills) must come back untouched, with only
+ *  this skill's mount removed (final-review C2). */
+export async function mountSkill(checkoutDir: string, skillDir: string, name: string): Promise<SkillMountHandle> {
+  const claudeDir = join(checkoutDir, '.claude');
+  const skillsDir = join(claudeDir, 'skills');
+  const dest = join(skillsDir, name);
+  const createdDirs: string[] = [];
+  if (!existsSync(claudeDir)) createdDirs.push(claudeDir);
+  if (!existsSync(skillsDir)) createdDirs.push(skillsDir);
   await mkdir(dest, { recursive: true });
   await cp(skillDir, dest, { recursive: true });
   await rm(join(dest, 'pin.json'), { force: true });
-  return dest;
+  return { mounted: dest, createdDirs };
 }
 
-/** Remove the mounted `.claude/` dir from the checkout. MUST run after the
- *  claude spawn completes and BEFORE `recoverPatch` — `recoverPatch` runs
- *  `git add -A` / `git diff --cached`, which stages untracked files by
- *  design, so a still-mounted skill would ride along as an added file in
- *  every treatment arm's graded patch (never in baseline's), a systematic,
- *  one-directional asymmetry between the arms being compared. */
-export async function unmountSkill(checkoutDir: string): Promise<void> {
-  await rm(join(checkoutDir, '.claude'), { recursive: true, force: true });
+/** Remove the mounted skill from the checkout, restoring the checkout's
+ *  original state rather than deleting `.claude/` wholesale: removes ONLY
+ *  `<checkout>/.claude/skills/<name>`, then prunes `.claude/skills` and
+ *  `.claude` in turn, each ONLY if `mountSkill` had to create it (recorded on
+ *  `handle.createdDirs`). MUST run after the claude spawn completes and
+ *  BEFORE `recoverPatch` — `recoverPatch` runs `git add -A` / `git diff
+ *  --cached`, which stages untracked files by design, so a still-mounted
+ *  skill would ride along as an added file in every treatment arm's graded
+ *  patch (never in baseline's), a systematic, one-directional asymmetry
+ *  between the arms being compared. */
+export async function unmountSkill(handle: SkillMountHandle): Promise<void> {
+  await rm(handle.mounted, { recursive: true, force: true });
+  for (const dir of [...handle.createdDirs].reverse()) {
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
 /** Isolated CLAUDE_CONFIG_DIR: auth travels, nothing else does. User-level

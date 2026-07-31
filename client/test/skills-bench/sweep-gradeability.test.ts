@@ -148,6 +148,36 @@ describe('sweepGradeability', () => {
     expect(resumed.results['inst-ungradeable']!.status).toBe('ungradeable');
   });
 
+  it('re-attempts an instance whose cached status is "error" on resume, but still skips gradeable/ungradeable ones (I3)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sweep-error-retry-'));
+    const reportPath = join(dir, 'gradeability-sweep.json');
+
+    const first = fakeRunner({
+      'inst-gradeable': async () => ({ passed_match: false, passed: [], failed: [], log: '', exitCode: 1 }),
+      'inst-ungradeable': async () => { throw new EvalCouldNotGradeError('conftest_import_error'); },
+      'inst-holdout': async () => { throw new Error('docker daemon unreachable'); }, // -> status 'error'
+    });
+    await sweepGradeability({ slate: slate(), reportPath, deps: { fetcher: fakeFetcher(), runner: first.runner } });
+
+    const onDiskFirst = JSON.parse(await readFile(reportPath, 'utf8')) as GradeabilitySweepReport;
+    expect(onDiskFirst.results['inst-holdout']!.status).toBe('error');
+
+    // Second run: the runner must NOT be re-invoked for the gradeable/
+    // ungradeable instances (terminal verdicts), but MUST be re-invoked for
+    // the errored one — this time it succeeds.
+    const second = fakeRunner({
+      'inst-gradeable': async () => { throw new Error('should not be re-invoked'); },
+      'inst-ungradeable': async () => { throw new Error('should not be re-invoked'); },
+      'inst-holdout': async () => ({ passed_match: false, passed: [], failed: [], log: '', exitCode: 1 }),
+    });
+    const resumed = await sweepGradeability({ slate: slate(), reportPath, deps: { fetcher: fakeFetcher(), runner: second.runner } });
+
+    expect(second.calls).toEqual(['inst-holdout']);
+    expect(resumed.results['inst-gradeable']!.status).toBe('gradeable');
+    expect(resumed.results['inst-ungradeable']!.status).toBe('ungradeable');
+    expect(resumed.results['inst-holdout']!.status).toBe('gradeable');
+  });
+
   it('only sweeps a requested subset via instanceIds, and throws on an unknown id', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'sweep-subset-'));
     const reportPath = join(dir, 'gradeability-sweep.json');

@@ -125,6 +125,18 @@ describe('renderReceiptMd', () => {
     expect(md).toContain('trigger:    skill loaded on 1/2 solved+failed attempts (3 unknown — session not captured)');
   });
 
+  it('never renders "skill loaded on 0/0 attempts" — an all-unknown sample renders the honest "unknown" form instead (I4)', () => {
+    const outcomes = [o('a', 'baseline', false), o('a', 'tdd', true)];
+    const md = renderReceiptMd(
+      buildReceipt(outcomes, {
+        baselineArm: 'baseline', treatmentArm: 'tdd', profile,
+        triggerRate: { triggered: 0, total: 0, unknown: 4 },
+      }),
+    );
+    expect(md).toContain('trigger:     unknown (no session data captured)');
+    expect(md).not.toMatch(/0\/0/);
+  });
+
   it('adds the "not exercised" caveat when net effect is 0 and trigger rate is under 50%', () => {
     // baseline 1/2, treatment 1/2 -> net 0. Trigger rate 1/5 (20%) < 50%.
     const outcomes = [
@@ -154,7 +166,10 @@ describe('renderReceiptMd', () => {
     expect(md).not.toMatch(/not exercised on this task set/);
   });
 
-  it('does NOT add the "not exercised" caveat when net effect is non-zero, regardless of trigger rate', () => {
+  it('adds the "not exercised" caveat AND an explicit attribution warning when net effect is NON-zero but trigger rate is low (I5)', () => {
+    // Pre-I5 this case rendered no caveat at all (gated on delta === 0) — a
+    // net-positive delta with a barely-triggered skill read as a real
+    // effect. The gate must fire on trigger rate alone.
     const outcomes = [
       o('a', 'baseline', false), o('a', 'tdd', true), // improved -> net +1
       o('b', 'baseline', false), o('b', 'tdd', false),
@@ -165,10 +180,12 @@ describe('renderReceiptMd', () => {
         triggerRate: { triggered: 1, total: 5, unknown: 0 },
       }),
     );
-    expect(md).not.toMatch(/not exercised on this task set/);
+    expect(md).toMatch(/not exercised on this task set/);
+    expect(md).toMatch(/net \+1-task difference was observed, but with a trigger rate this low/);
+    expect(md).toMatch(/cannot be attributed to the skill/);
   });
 
-  it('does NOT add the "not exercised" caveat when there is no known trigger data (total 0)', () => {
+  it('adds the "not exercised" caveat when there is no known trigger data at all (total 0) — unmeasured is not evidence of high (I5)', () => {
     const outcomes = [
       o('a', 'baseline', true), o('a', 'tdd', true),
       o('b', 'baseline', false), o('b', 'tdd', false),
@@ -179,7 +196,10 @@ describe('renderReceiptMd', () => {
         triggerRate: { triggered: 0, total: 0, unknown: 4 },
       }),
     );
-    expect(md).not.toMatch(/not exercised on this task set/);
+    expect(md).toMatch(/not exercised on this task set/);
+    expect(md).toMatch(/No session data was captured/);
+    // net effect is 0 here — nothing to attribute, so no attribution line.
+    expect(md).not.toMatch(/cannot be attributed to the skill/);
   });
 });
 

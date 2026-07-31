@@ -124,16 +124,18 @@ export function buildReceipt(
 const pct = (x: number): string => `${(100 * x).toFixed(0)}%`;
 
 /** Null-result honesty rule (spec §"a null result with a low trigger rate
- *  must render as 'not exercised on this task set', never as 'no effect'"):
- *  when the paired net effect is exactly zero AND the treatment arm's known
- *  trigger rate is under 50%, the skill barely ran during this measurement
- *  — a net-zero reading here says nothing about whether the skill helps,
- *  only that it mostly didn't fire. "Net effect ~0" is read literally as
- *  delta === 0 (an integer task count, not a continuous statistic) rather
- *  than a fuzzy tolerance band. */
-function needsNotExercisedCaveat(delta: number, triggerRate: TriggerRate | undefined): boolean {
-  if (delta !== 0) return false;
-  if (!triggerRate || triggerRate.total === 0) return false;
+ *  must render as 'not exercised on this task set', never as 'no effect'"),
+ *  I5 fix: this gates on the trigger rate ALONE, never on `delta === 0`. A
+ *  low-or-unknown trigger rate makes ANY reading from this run
+ *  uninterpretable as evidence about the skill — including a non-zero delta,
+ *  which the pre-fix version let through unchallenged (a treatment arm that
+ *  barely triggered but still moved the resolve rate by chance/noise would
+ *  otherwise read as a real effect). "Low" is under 50%; `total === 0` (no
+ *  known trigger data at all) is treated as low too — an unmeasured trigger
+ *  rate is not evidence of a high one. */
+function isLowTriggerRate(triggerRate: TriggerRate | undefined): boolean {
+  if (!triggerRate) return false;
+  if (triggerRate.total === 0) return true;
   return triggerRate.triggered / triggerRate.total < 0.5;
 }
 
@@ -141,6 +143,7 @@ export function renderReceiptMd(d: ReceiptData): string {
   const p = d.profile;
   const delta = d.treatment.passed - d.baseline.passed;
   const t = d.triggerRate;
+  const lowTrigger = isLowTriggerRate(t);
   return [
     '```',
     `skill:      ${d.treatmentArm}${p.forkedFrom ? `, forked from ${p.forkedFrom}` : ''}`,
@@ -152,11 +155,15 @@ export function renderReceiptMd(d: ReceiptData): string {
       `(95% Wilson ${pct(d.treatment.lo)}–${pct(d.treatment.hi)})`,
     `            net ${delta >= 0 ? '+' : ''}${delta} tasks ` +
       `(improved ${d.paired.improved}, regressed ${d.paired.regressed})`,
+    // I4: never render "skill loaded on 0/0 attempts" — total === 0 means no
+    // session data was captured at all, not a 0% trigger rate.
     ...(t
-      ? [
-        `trigger:    skill loaded on ${t.triggered}/${t.total} solved+failed attempts` +
-          (t.unknown > 0 ? ` (${t.unknown} unknown — session not captured)` : ''),
-      ]
+      ? t.total === 0
+        ? [`trigger:     unknown (no session data captured)`]
+        : [
+          `trigger:    skill loaded on ${t.triggered}/${t.total} solved+failed attempts` +
+            (t.unknown > 0 ? ` (${t.unknown} unknown — session not captured)` : ''),
+        ]
       : []),
     `cost:       mean per task — baseline $${d.meanCostUsd.baseline.toFixed(2)}, ` +
       `with skill $${d.meanCostUsd.treatment.toFixed(2)} (reported, never gates)`,
@@ -170,11 +177,20 @@ export function renderReceiptMd(d: ReceiptData): string {
     '',
     `This is a small paired sample; the intervals above are wide by construction and`,
     `no claim of a real effect is made. Reproduce it from the pinned slate and rig (see files).`,
-    ...(needsNotExercisedCaveat(delta, t)
+    ...(lowTrigger
       ? [
         '',
-        `The skill triggered on only ${t!.triggered}/${t!.total} attempts in this run — a net-zero ` +
-          `result here reads as **not exercised on this task set**, not as evidence the skill has no effect.`,
+        t!.total === 0
+          ? `No session data was captured to measure the skill's trigger rate in this run — this reads as ` +
+            `**not exercised on this task set**, not as evidence the skill has no effect.`
+          : `The skill triggered on only ${t!.triggered}/${t!.total} attempts in this run — this reads as ` +
+            `**not exercised on this task set**, not as evidence the skill has no effect.`,
+        ...(delta !== 0
+          ? [
+            `A net ${delta >= 0 ? '+' : ''}${delta}-task difference was observed, but with a trigger rate ` +
+              `this low it cannot be attributed to the skill.`,
+          ]
+          : []),
       ]
       : []),
     '',

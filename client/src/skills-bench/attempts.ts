@@ -30,6 +30,21 @@ export interface BenchManifest {
   half: 'feedback' | 'holdout' | 'both';
   model: string;
   arms: { name: string; skillSha256: string | null }[];
+  /** --task-set only: whether this run honored the discrimination gate (spec
+   *  §2.4) — `false` when `--include-screened-out` was passed. Absent for a
+   *  --slate run (no discrimination gate there). Binds the byte-exact
+   *  manifest guard to the screening decision: without this (and
+   *  `eligibleTaskIds` below), a screened run and an
+   *  `--include-screened-out` run against the same --out dir would render
+   *  byte-identical manifests despite measuring a different task population
+   *  (final-review C1) — `assertManifestCompatible` would silently accept
+   *  the second run as a resume of the first instead of refusing it. */
+  screeningRespected?: boolean;
+  /** --task-set only: sorted task ids actually eligible for measurement in
+   *  this run — the discrimination-gate selection (spec §2.4,
+   *  `selectTasksForMeasurement`) BEFORE any `--max-instances` slice. Absent
+   *  for a --slate run. */
+  eligibleTaskIds?: string[];
   /** Set only on a --dry-run manifest — the outcomes it guards are
    *  synthesized, not real solves/grades. render-receipts.ts refuses to
    *  render from a run dir carrying this flag, and the byte-exact manifest

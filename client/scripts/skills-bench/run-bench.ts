@@ -63,6 +63,11 @@
  * warning and runs unscreened — screening is recommended, not required) or
  * `--include-screened-out` is passed (runs every task regardless of the
  * gate, with a loud warning that the result is not interpretable per §2.4).
+ * The manifest binds this decision: `screeningRespected` (false under
+ * `--include-screened-out`) and `eligibleTaskIds` (the sorted set of task ids
+ * selected for measurement) are recorded alongside `taskSetSha256`, so the
+ * byte-exact manifest guard refuses to let a screened run and an
+ * `--include-screened-out` run collide in the same `--out` dir.
  */
 import { spawn } from 'node:child_process';
 import { cp, copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
@@ -83,7 +88,7 @@ import {
 } from '../../src/skills-bench/attempts.js';
 import { assertHoldoutUnused, recordHoldoutRun } from '../../src/skills-bench/holdout-guard.js';
 import {
-  loadTaskSet, assertTaskSetGradeable, selectTasksForMeasurement,
+  loadTaskSet, assertTaskSetGradeable, assertNoArmNameLeak, selectTasksForMeasurement,
   type SkillTaskSetV1, type SkillTaskV1, type TaskRequirement,
 } from '../../src/skills-bench/task-set.js';
 import { runCustomGrade, CustomGradeError } from '../../src/skills-bench/custom-grade.js';
@@ -407,13 +412,21 @@ async function gradeAttempt(cfg: BenchConfig, row: HfRow, patch: string): Promis
  *  directions; a `CustomGradeError` on a real solve attempt means THIS
  *  attempt's patch broke something (e.g. an unparseable diff), not that the
  *  task itself is broken. */
-async function gradeTaskAttempt(taskSetDir: string, task: SkillTaskV1, patch: string): Promise<boolean | null> {
+// Exported (run-bench.ts otherwise has no importable surface) purely so the
+// --grade-timeout-ms → runCustomGrade plumbing (I1) is unit-testable without
+// spawning Docker — see run-bench.test.ts, which mocks custom-grade.js.
+export async function gradeTaskAttempt(
+  taskSetDir: string, task: SkillTaskV1, patch: string, gradeTimeoutMs: number,
+): Promise<boolean | null> {
   if (!patch.trim()) {
     console.warn(`[bench]   empty patch for ${task.id} — agent produced no diff; scoring as not-resolved`);
     return false; // empty patch never resolves
   }
   try {
-    const result = await runCustomGrade({ task, taskSetDir, patch });
+    // I1: --grade-timeout-ms must reach runCustomGrade the same way it
+    // already reaches PythonEvalRunner in --slate mode (gradeAttempt above) —
+    // `task.timeoutMs`, if set, still wins inside runCustomGrade.
+    const result = await runCustomGrade({ task, taskSetDir, patch }, { timeoutMs: gradeTimeoutMs });
     return result.passed;
   } catch (err) {
     if (err instanceof CustomGradeError) {
@@ -474,7 +487,7 @@ async function solveAndGrade(
     console.log(`[bench] solving ${instance.instance_id} arm=${spec.arm.name} repeat=${spec.repeat}`);
     await rm(armDir, { recursive: true, force: true });
     await cp(baseDir, armDir, { recursive: true });
-    if (spec.arm.skillDir) await mountSkill(armDir, spec.arm.skillDir, spec.arm.name);
+    const mountHandle = spec.arm.skillDir ? await mountSkill(armDir, spec.arm.skillDir, spec.arm.name) : null;
 
     const prompt = buildPrompt(instance.problem_statement, instance.interface);
     const args = buildClaudeArgs({ prompt, model: cfg.model, maxTurns: cfg.maxTurns });
@@ -489,8 +502,10 @@ async function solveAndGrade(
     // Remove the mounted skill BEFORE recovering the patch — recoverPatch's
     // `git add -A` stages untracked files by design, and a still-mounted
     // skill would ship as an added file in every treatment arm's patch (see
-    // unmountSkill's doc comment / final-review.md C1).
-    if (spec.arm.skillDir) await unmountSkill(armDir);
+    // unmountSkill's doc comment / final-review.md C1). unmountSkill restores
+    // the checkout's original .claude state rather than deleting it wholesale
+    // (final-review C2).
+    if (mountHandle) await unmountSkill(mountHandle);
     const patch = await recoverPatch(run, armDir);
 
     await mkdir(transcriptsDir, { recursive: true });
@@ -642,7 +657,7 @@ async function solveAndGradeTaskSet(
     console.log(`[bench] solving ${spec.task.id} arm=${spec.arm.name} repeat=${spec.repeat}`);
     await rm(armDir, { recursive: true, force: true });
     await cp(baseDir, armDir, { recursive: true });
-    if (spec.arm.skillDir) await mountSkill(armDir, spec.arm.skillDir, spec.arm.name);
+    const mountHandle = spec.arm.skillDir ? await mountSkill(armDir, spec.arm.skillDir, spec.arm.name) : null;
 
     const prompt = buildTaskSetPrompt(spec.task.requirement);
     const args = buildClaudeArgs({ prompt, model: cfg.model, maxTurns: cfg.maxTurns });
@@ -656,7 +671,8 @@ async function solveAndGradeTaskSet(
     const claudeResult = parseClaudeJson(stdout);
     // Same ordering rule as solveAndGrade: unmount BEFORE recoverPatch's
     // `git add -A` so a still-mounted skill never rides along in the patch.
-    if (spec.arm.skillDir) await unmountSkill(armDir);
+    // unmountSkill restores the checkout's original .claude state (C2).
+    if (mountHandle) await unmountSkill(mountHandle);
     const patch = await recoverPatch(run, armDir);
 
     await mkdir(transcriptsDir, { recursive: true });
@@ -666,7 +682,7 @@ async function solveAndGradeTaskSet(
 
     gradeQueue.push(async () => {
       try {
-        const passed = await gradeTaskAttempt(taskSetDir, spec.task, patch);
+        const passed = await gradeTaskAttempt(taskSetDir, spec.task, patch, cfg.gradeTimeoutMs);
         const outcome: BenchOutcome = {
           instanceId: spec.task.id,
           arm: spec.arm.name,
@@ -907,21 +923,35 @@ async function runTaskSetMode(cfg: BenchConfig): Promise<void> {
   // configuration check, not a cost concern.
   assertTaskSetGradeable(taskSet);
 
+  // No-skill-name-leak check, extended to the mount name (I2): validateTask
+  // (task-set.ts) already guards `set.skill`, but the arms actually driving
+  // THIS run come from --arms and can name a treatment differently. Fail
+  // loud before any solve spend if any non-baseline arm name leaks into a
+  // task's requirement text.
+  assertNoArmNameLeak(taskSet, arms.map((arm) => arm.name));
+
+  // Discrimination gate (spec §2.4): a measured run only spends on tasks with
+  // proven baseline headroom, unless the set carries no screening receipts
+  // at all (screening is recommended, not hard-required) or the operator
+  // passes --include-screened-out (loud warning either way). Computed BEFORE
+  // the manifest is built: the manifest must bind which tasks were actually
+  // eligible for measurement, or a screened run and an
+  // --include-screened-out run against the same --out dir render
+  // byte-identical manifests and silently collide (final-review C1).
+  const screenedTasks = selectTasksForMeasurement(taskSet.tasks, { includeScreenedOut: cfg.includeScreenedOut });
+
   const manifest: BenchManifest = {
     version: 'skills-bench-manifest.v1',
     taskSetSha256: taskSet.sha256,
     half: 'feedback',
     model: cfg.model,
     arms: arms.map((arm) => ({ name: arm.name, skillSha256: arm.skillDir ? pinSha256(arm.skillDir) : null })),
+    screeningRespected: !cfg.includeScreenedOut,
+    eligibleTaskIds: screenedTasks.map((t) => t.id).sort(),
     ...(cfg.dryRun ? { dryRun: true as const } : {}),
   };
   await assertManifestCompatible(join(cfg.outDir, 'bench-manifest.json'), manifest);
 
-  // Discrimination gate (spec §2.4): a measured run only spends on tasks with
-  // proven baseline headroom, unless the set carries no screening receipts
-  // at all (screening is recommended, not hard-required) or the operator
-  // passes --include-screened-out (loud warning either way).
-  const screenedTasks = selectTasksForMeasurement(taskSet.tasks, { includeScreenedOut: cfg.includeScreenedOut });
   const tasks: SkillTaskSetV1['tasks'] = screenedTasks
     .slice(0, Number.isFinite(cfg.maxInstances) ? cfg.maxInstances : undefined);
   const specs = buildTaskSetAttemptSpecs(tasks, arms, cfg.repeats);
