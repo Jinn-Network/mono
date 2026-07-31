@@ -113,6 +113,16 @@ task set, not a draw from the generic swe-rebench pool (spec §2.2). Human-plus-
 roughly twenty candidate tasks per skill, expecting the discrimination gate (§5) to keep roughly a
 dozen.
 
+**Image contract (measured in the live e2e, 2026-07-31).** `custom-grade.ts` runs no install step
+of any kind. The task's `image` must therefore already contain `bash`, `git`, and `pytest`, and the
+target repo must be importable from a plain checkout: a flat package layout (no `src/` indirection)
+with no unbundled runtime dependencies, because `python -m pytest`'s cwd-prepend to `sys.path` is
+the only mechanism making the package importable inside the container. Zero-dependency libraries
+with flat layouts (the e2e used `keleshev/schema` on `python:3.11` + preinstalled pytest) satisfy
+this as-is; anything needing `pip install -e .` or a deps install needs that baked into the task's
+image at authoring time. The gradeability gate (§4) catches violations before any inference spend —
+a reference patch that cannot even import will fail direction (a) immediately.
+
 **On-disk layout**, one directory per skill under `../bench/task-sets/<skill>/`:
 
 ```
@@ -624,6 +634,17 @@ ungradeable instance in the outcome log, so an under-set timeout silently destro
 authored-task-set grade path (`custom-grade.ts`, §4–§9) defaults to a 10-minute cap too
 (`DEFAULT_CUSTOM_GRADE_TIMEOUT_MS`, overridable per-task via `timeoutMs` in `set.json` or via
 `--grade-timeout-ms`) — the same emulation cost applies if a task's `image` is amd64-only.
+
+**Empty-patch gradeable does not guarantee real-patch gradeable.** Measured discrepancy
+(2026-07-31): `zarr-developers__zarr-python-2629` graded a real solve as
+`ungradeable (conftest_import_error)` on both arms of a paired run, yet the gradeability sweep's
+EMPTY patch on the same instance completed a clean eval (5.5 min). The sweep proves the instance's
+environment can grade at all — necessary, zero-inference, run it before any spend — but a specific
+patch can still break test collection (an import the patch introduces, a moved module, a syntax
+error in an edited file pytest imports at collection time). Read a per-attempt `ungradeable` whose
+instance passed the sweep as a property of that ATTEMPT's patch, not of the instance: do not
+exclude the instance from the slate for it, and do not count it against the skill or the baseline —
+it stays `passed: null` and drops out of the paired comparison, which is the honest treatment.
 
 **Disk cycles hard during grading.** One emulated grade took free space from 42 GB to 21 GB before
 the runner's per-round prune reclaimed it. Keep `JINN_EVAL_DISK_FLOOR_GB` above the transient peak
