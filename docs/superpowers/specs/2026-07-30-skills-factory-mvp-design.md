@@ -1,10 +1,10 @@
 # Skills Factory MVP — Measured Skills on Public Registries
 
-- **Version:** 0.2
+- **Version:** 0.3
 - **Date:** 2026-07-31
 - **Author:** Ritsu (design session, Claude Fable 5)
 - **Shape:** `design` — output is this document; implementation planned separately
-- **Status:** v0.2 amendment approved in session (Ritsu + Oak, 2026-07-31); pending written review
+- **Status:** v0.3 amendment (Ritsu, 2026-07-31); pending written review
 - **Revision note (v0.2, 2026-07-31):** **author-first distribution; Jinn is neutral evaluation
   infrastructure, not a skill publisher.** Two findings invalidate wave 1 as designed. First, the
   benchmark wave 1 planned to run largely already exists, at a scale we could not match: **SWE-Skills-Bench**
@@ -45,6 +45,33 @@
   power at fixed N; (c) it matches what skills are economically for — cheap models doing more with
   guidance, not expensive models doing marginally better; (d) cost. Receipts stay scoped to this
   pinned profile; re-evaluating a winning skill on Sonnet is a later tier, not part of the pilot.
+- **Revision note (v0.3, 2026-07-31):** **presentation layer specified separately; public/private
+  split superseded; consent question decided.** The badge/card/report artifact this document calls
+  "the capability report" is now fully specified by
+  [`2026-07-31-capability-report-artifact-design.md`](2026-07-31-capability-report-artifact-design.md)
+  — read it as the presentation authority for every field, badge, card, and report-section detail;
+  this amendment does not restate its content and only reconciles this document against it. Two
+  decisions follow. First, v0.2's public-evaluation / private-annex split is **superseded**:
+  delivery is a GitHub issue on the author's own repository, which is public by construction, so
+  there is no private, unpublished half of the deliverable — the failing-transcript diagnosis and
+  suggested edits §1.1 (v0.2) called the "private annex" are now report content, sections 5–7 of
+  the linked design's §6 structure ("Where it did not load" / "Pattern worth testing" / "What we
+  would change"). Second, §8's consent question — v0.2 recorded it as explicitly deferred to
+  Ritsu/Oak — is **decided**: publish-without-consent. A report, its card, and its badge are public
+  in this repository from the moment they are rendered and committed, independent of whether or
+  when a delivery issue is opened on the author's repository; the private-first holding-window
+  option on the table in v0.2 §8 is not adopted, because there is no longer a private artifact for
+  a window to hold. §1 and §8 below are rewritten to reflect both decisions; §4's registry tree
+  gains `card.svg`, the optional `rank-badge.svg`, and `DELIVERY.md`. The product is now **three**
+  pinned artifacts per `skill@sha` — badge, card, report — not a report-plus-annex pair; see §1.1.
+  §2 (measurement method) is unaffected and is not touched by this amendment.
+
+  Sections outside §1, §4, and §8 (§3 step 6, §4.1, §5, §6, §7) still use "private annex" /
+  "delivered … never published" language written before this decision. That language is superseded
+  by this note and by §1/§8 below; this amendment updates the product definition, registry layout,
+  and open-question record directly rather than line-editing every downstream mention. Read any
+  remaining "annex" reference elsewhere in this document as historical — the same
+  diagnosis-and-suggested-edits content now lives in the public report, not a separate document.
 - **Parent design:** [`docs/superpowers/specs/2026-07-16-jinn-skill-factory-design.md`](2026-07-16-jinn-skill-factory-design.md)
   (v1.0, on `claude/jinn-skill-factory-design-1eaf45`) — remains the reference architecture for the
   protocol-native factory. This MVP reorders the roadmap (demand surface first, protocol later); it
@@ -64,40 +91,54 @@
 
 ### 1.1 What the product is
 
-**The capability report is the product.** Not the skill — the skill stays the author's, unforked,
-unmodified, living wherever it already lives (their repo, their registry listing). What Jinn
-produces and stands behind is the report:
+**Three pinned artifacts are the product — badge, card, report — one identity per `skill@sha`.**
+Not the skill: the skill stays the author's, unforked, unmodified, living wherever it already lives
+(their repo, their registry listing). What Jinn produces and stands behind is the evaluation,
+delivered as (full specification:
+[`2026-07-31-capability-report-artifact-design.md`](2026-07-31-capability-report-artifact-design.md)):
 
-- **Public evaluation** — a per-skill capability report: the domain-matched task set used (§2.2),
-  the trigger rate (did the skill actually load on these tasks, §2.5), paired resolve-rate deltas
-  against a no-skill baseline with their confidence intervals, cost overhead (per-token accounting is
-  future work — not yet captured by the rig), a per-task outcome table, the raw run data, and a
-  rerun script. Anyone can reproduce it or dispute the task selection.
-- **Private annex** — delivered to the author only, never published: failing-transcript diagnosis
-  (did the skill never trigger, trigger but give guidance too vague to act on, or trigger and
-  actively mislead the agent) and suggested edits. This is the optimization half of the work, and it
-  stays private deliberately — the report proves the number, the annex is how the author moves it.
-- **The badge/embed is the distribution artifact**, not a side effect. It repoints the existing
-  `jinn.*` frontmatter metadata block (§4.1) at the public report instead of at a fork receipt: the
-  same six-key-limited mechanism, the same non-normative-pointer discipline, a different referent. An
+- **Report** (`report.md`) — narrative only, no repeated figures: the paired outcome stated in
+  words, the trigger-rate diagnosis (did the skill actually load on these tasks, §2.5), any
+  conditional pattern (explicitly labelled hypothesis, not finding), at most three suggested edits,
+  scope, and a rerun script. The failing-transcript diagnosis and suggested edits that v0.2 called
+  the "private annex" are report content now — sections 5–7 of the linked design's §6 structure
+  ("Where it did not load" / "Pattern worth testing" / "What we would change") — not a separate,
+  unpublished document.
+- **Card** (`card.svg`) — carries every figure: task count and domain, the domain-matched task set
+  used (§2.2), the three metrics (tasks solved against a no-skill baseline with confidence
+  intervals, skill loaded `x of n`, cost overhead), a cohort line when a niche cohort was measured,
+  and the honesty footer. The card/report split is load-bearing: the card holds the numbers, the
+  report does not repeat them.
+- **Badge** (`badge.svg`) — the distribution artifact, not a side effect: a small, self-contained,
+  three-axis SVG meant for the author's own README. It repoints the existing `jinn.*` frontmatter
+  metadata block (§4.1) at the public report instead of at a fork receipt: the same
+  six-key-limited mechanism, the same non-normative-pointer discipline, a different referent. An
   author who embeds it is putting Jinn's evaluation in front of their own install base — that is the
   whole distribution model.
 - **Demand signals**: author embed rate (did they put the badge in their README) and re-evaluation
   requests (did they come back after revising) are what tell us the funnel is working — not registry
   rank, not install count of anything Jinn owns, because Jinn owns no skill.
 
+**Everything is public.** Delivery is a GitHub issue opened on the author's own repository, which
+is public by construction — v0.2's public-evaluation / private-annex split does not survive this
+decision (see the v0.3 revision note above and §8). The raw run data, per-task results, and rerun
+script sit in `data/` next to the report, so anyone can reproduce it or dispute the task selection.
+Neutrality is demonstrated through disclosed methodology and reproducibility, not through
+withholding anything from the author.
+
 **Jinn is not a skill publisher and does not fork.** v0.1's wave 2 fork-and-improve loop, its
 fork-candidate selection, and every place this document previously described publishing an
 installable skill under a Jinn-owned repo describe the dropped model; §3 replaces them with the
 per-skill pilot flow, and §4 replaces the fork-repo publishing surface with a reports registry.
 
-One sentence: **Jinn measures the skills authors already publish and hands each author a private
-path to a better number; the public report is the receipt, the badge is how it travels.**
+One sentence: **Jinn measures the skills authors already publish and hands each author three pinned
+artifacts — badge, card, report — that state what changed, what didn't, and why; the report is the
+narrative, the card is the receipt, the badge is how it travels.**
 
 ### 1.2 What the pilot ships
 
-For each pilot-cohort skill (§1.4): one public capability report and one private annex, delivered
-through the full flow in §3. No fork, no installable skill of Jinn's own — measurement and
+For each pilot-cohort skill (§1.4): one public capability report, card, and badge per `skill@sha`,
+delivered through the full flow in §3. No fork, no installable skill of Jinn's own — measurement and
 diagnosis only, plus the offer of one re-evaluation cycle if the author revises.
 
 ### 1.3 Where the report meets the ecosystem
@@ -131,8 +172,8 @@ A third pilot target is chosen at execution time from **SWE-Skills-Bench's own h
 deliberately re-measuring a skill the coarse cross-skill study already scored as zero-effect or
 actively harmful, on a narrower, better-matched task set, is the sharpest test of whether this
 method finds something theirs missed. A null on a null still tells that skill's author something
-usable (the annex can say "confirmed, not measured wrong"); a positive would be the pilot's headline
-finding.
+usable (the report can say "confirmed, not measured wrong"); a positive would be the pilot's
+headline finding.
 
 This replaces v0.1 §3's five-skill generic wave 1 (`tdd`, `grill-me`, `improve-codebase-architecture`,
 `vercel-react-best-practices`, `frontend-design`). The three dropped targets are frontend/React-domain
@@ -152,17 +193,18 @@ the same frame as every other Jinn artifact per CLAUDE.md §External Communicati
 agentic knowledge economy, and a capability report is the smallest complete unit of that economy —
 work (the paired runs) gets done, the evidence of it (the report and its data) stays open, and the
 next attempt (a revision, a re-evaluation) starts from it. Post-pilot upgrades remain in the v1.0
-design's territory: corpus evidence feeding the private annex (place to learn), a marketplace-scaled
-version of the pilot flow (place to do work), independently anchored reports.
+design's territory: corpus evidence feeding the report's diagnosis (place to learn), a
+marketplace-scaled version of the pilot flow (place to do work), independently anchored reports.
 
 ### 1.6 Success test
 
-Pilot done-when: at least one pilot-cohort skill has a public capability report (gradeability-gated,
-discrimination-screened, trigger rate reported) and a private annex delivered to its author; the
-report is reproducible from the repo alone; the reports-registry badge/embed snippet renders and is
-offered to the author. Whether the author embeds it, and whether they come back for
-re-evaluation, is the post-pilot observation phase (§5) — the pilot's job is to produce one honest,
-deliverable report end to end, not to prove the funnel converts on the first try.
+Pilot done-when: at least one pilot-cohort skill has a public capability report — badge, card, and
+report (gradeability-gated, discrimination-screened, trigger rate reported), delivered to its
+author per §3; the report is reproducible from the repo alone; the reports-registry badge/card
+embed snippet renders and is offered to the author. Whether the author embeds it, and whether they
+come back for re-evaluation, is the post-pilot observation phase (§5) — the pilot's job is to
+produce one honest, deliverable report end to end, not to prove the funnel converts on the first
+try.
 
 ---
 
@@ -317,23 +359,34 @@ wave 1 still pending.
 ## 4. Publishing surface
 
 One public GitHub repo, working name `Jinn-Network/skills-eval` (renamed from v0.1's
-`Jinn-Network/skills` — the old name implied a skill catalog; there is no catalog, only reports):
+`Jinn-Network/skills` — the old name implied a skill catalog; there is no catalog, only reports).
+What each artifact contains and how it is built is specified by
+[`2026-07-31-capability-report-artifact-design.md`](2026-07-31-capability-report-artifact-design.md)
+(§1 artifacts table, §2 field contract, §3 badge, §4 card, §6 report structure); this section states
+only the registry's file layout:
 
 ```
-reports/<skill>@<sha>/report.md     public capability report: task set, trigger rate, deltas, CI, per-task table
-reports/<skill>@<sha>/badge.svg     small self-contained SVG badge — the distribution artifact (§1.1)
-reports/<skill>@<sha>/embed.md      badge image + report link + jinn.* metadata block, ready to paste
-reports/<skill>@<sha>/data/         pinned task set (or slate subset), run manifest, raw per-task results, transcripts
-rig/                                the orchestration script — open, so reports are reproducible, not claimed
-README.md                          reports index (skill, sha, date, headline delta) — generated, never hand-written
+reports/<skill>@<sha>/report.md       narrative capability report — no figures (§1.1); links to data/
+reports/<skill>@<sha>/card.svg        the numbers — identity, three metrics, cohort line, honesty footer (§1.1)
+reports/<skill>@<sha>/badge.svg       small self-contained SVG badge — the distribution artifact (§1.1)
+reports/<skill>@<sha>/rank-badge.svg  optional — cohort rank, present only when a niche cohort was measured
+reports/<skill>@<sha>/embed.md        badge + card image embeds, report link, jinn.* metadata block, ready to paste
+reports/<skill>@<sha>/data/           pinned task set (or slate subset), run manifest, raw per-task results, per-task table
+rig/                                  the orchestration script — open, so reports are reproducible, not claimed
+README.md                            reports index (skill, sha, date, headline delta) — generated, never hand-written
+DELIVERY.md                          template for the GitHub-issue body used to deliver a report to its author
 ```
 
 A new measured sha for a skill gets a new report directory; nothing is overwritten, so a report and
 the skill version it measured stay permanently paired, and a stale badge (§4.1) is detectable by
 comparing `jinn.receipt-sha256` against the current report's hash.
 
-**No `skills/` directory, no forked skill code, ever.** The report is the only artifact Jinn
-publishes.
+Artifacts are served as static files — raw-content or GitHub Pages URLs resolve `badge.svg`,
+`card.svg`, and `report.md` directly. There is no service in front of them; `reports.jinn.network`
+is a possible future CNAME over the same static files, not a live endpoint today.
+
+**No `skills/` directory, no forked skill code, ever.** The report, its card, and its badge are the
+only artifacts Jinn publishes.
 
 ### 4.1 Packaging — repointing the existing jinn.* metadata at the report
 
@@ -350,22 +403,25 @@ name: <skill-name>
 description: <pure trigger text — what it does and when to use it, nothing else>
 license: <upstream license>
 metadata:
-  jinn.receipt: https://github.com/Jinn-Network/skills-eval/blob/main/reports/<skill>@<sha>/report.md
+  jinn.receipt: https://raw.githubusercontent.com/Jinn-Network/skills-eval/main/reports/<skill>@<sha>/report.md
   jinn.receipt-sha256: "<hash of the report file>"
   jinn.measured-on: "<date>"
   version: "<n>"
 ---
 ```
 
-`jinn.forked-from` is dropped from the block — there is no fork, so there is nothing to attribute a
-fork to. The author adds this block to their own skill's frontmatter and pastes an embed snippet
-(generated alongside the report) into their own README; both are their edit to their own repo, not
-Jinn's. The two binding consequences from v0.1 §5.1 still hold, unchanged:
+`jinn.receipt` is a raw-content URL, never a GitHub "blob" URL — a `/blob/` link serves an HTML
+page, not the file, and is the one string an author is most likely to copy from a browser address
+bar (`render-report.ts`'s `--base-url` refuses one outright for this reason). `jinn.forked-from` is
+dropped from the block — there is no fork, so there is nothing to attribute a fork to. The author
+adds this block to their own skill's frontmatter and pastes an embed snippet (generated alongside
+the report) into their own README; both are their edit to their own repo, not Jinn's. The two
+binding consequences from v0.1 §5.1 still hold, unchanged:
 
 1. **The `description` is an optimization target, not ad space.** "Never triggered" is one of the
-   three failure modes the annex reads out of transcripts (§3.1 step 6), and its fix *is* editing the
-   description. When a revision changes the description, the re-evaluation report must record that
-   as part of what was measured.
+   three failure modes the report's diagnosis reads out of transcripts (§3.1 step 6), and its fix
+   *is* editing the description. When a revision changes the description, the re-evaluation report
+   must record that as part of what was measured.
 2. **The standard has no verification, and no artifact may imply otherwise.** A `jinn.*` key is an
    assertion until the reader re-runs the rig — which is why the report and its data live in the open
    repo above, not just a claim in the metadata.
@@ -438,8 +494,8 @@ the scaling reference.
 - **No LLM-assisted annex authoring in the pilot.** The private annex is manual-first: a template
   plus a transcript-filter script listing failing-attempt session files for a human to read and
   diagnose, no automated diagnosis tooling.
-- **No default publish-without-consent.** See §8's open policy question — not resolved by this
-  amendment.
+- **Publish-without-consent is the decided model (v0.3).** Superseded from v0.2's placeholder
+  position — see §8 for the decision and its reasoning.
 
 ---
 
@@ -459,11 +515,11 @@ the scaling reference.
    negative report is exactly the input the private annex and the revise/re-evaluate loop are built
    to act on, and a pipeline that could only produce good news would not be measuring anything
    (carried forward from v0.1 risk 2's framing).
-3. **Author non-response.** Nothing compels an author to read the annex, revise the skill, or embed
+3. **Author non-response.** Nothing compels an author to read the report, revise the skill, or embed
    the badge — the report is a permissionless artifact handed to someone with no obligation to act
-   on it. Mitigation: reports remain useful on their own regardless of author action (the public half
-   is independently reproducible and citable even unembedded); whether to publish findings the author
-   never acts on is part of the open policy question (§8), not resolved here.
+   on it. Mitigation: reports remain useful on their own regardless of author action, and this is no
+   longer a mitigation-in-waiting — §8's decision means a report is public and independently
+   reproducible from the moment it is rendered, whether or not the author ever responds.
 4. **Verifier quality is the silent killer.** A weak or wrong verifier can pass a task that does not
    actually test the claimed behavior, or fail one that does — and unlike a solve-path bug, a bad
    verifier produces a plausible-looking, wrong number rather than a loud error. Mitigation: §2.3's
@@ -487,10 +543,10 @@ hypothetical, and folded into §3.4's reasoning for dropping generic wave 1), "d
 
 ---
 
-## 8. Open policy question (deferred to Ritsu/Oak)
+## 8. Consent and publication policy — decided (v0.3)
 
-Consent and publication policy for capability reports is **not resolved by this amendment**. Two
-shapes were discussed and neither is adopted:
+v0.2 recorded this as an explicitly deferred question, with two shapes on the table and neither
+adopted:
 
 - **Publish-without-consent** — measure and publish a public report for any skill on a public
   registry, whether or not the author asked for it or responds, since the skill itself is already
@@ -499,11 +555,22 @@ shapes were discussed and neither is adopted:
   a fixed window (giving the author time to revise before anything is public), and publish only after
   the window closes or the author opts in early.
 
-The recommendation on the table is **private-first**, on the reasoning that it matches the annex's
-own manual-first, non-adversarial posture and gives the funnel (§1.1) its best chance of landing as
-help rather than an ambush — but this is a recommendation, not a decision. The decision is explicitly
-deferred to Ritsu and Oak, and nothing in §1–§7 should be read as resolving it; §6 records "no
-default publish-without-consent" as the placeholder position until this is decided.
+**Decided 2026-07-31 (Ritsu + Oak), via the same call recorded in the 2026-07-31 artifact design's
+Supersedes note: publish-without-consent.** A report, its card, and its badge are public in the
+`skills-eval` repository (§4) from the moment they are rendered and committed — reproducible,
+citable, and disputable by anyone — independent of whether or when a delivery issue (`DELIVERY.md`)
+is opened on the author's own repository. The private-first window is **not adopted**: it was
+built to hold a private artifact (the annex) for a fixed period before anything went public, and
+that artifact no longer exists as a separate document — v0.2's public-evaluation/private-annex
+split is superseded (v0.3 revision note, header; §1.1), so there is nothing left for a window to
+hold back. Delivery timing (whether to open the issue immediately, or notify the author first as a
+courtesy before doing so) is a human, case-by-case judgment call for whoever delivers the report —
+see `DELIVERY.md`'s closing section — not a policy gate on publication itself.
+
+This closes the question v0.2 deferred; it does not resolve the artifact design's own open
+questions, which remain open and are not restated here — see
+[`2026-07-31-capability-report-artifact-design.md`](2026-07-31-capability-report-artifact-design.md)
+§8 (installs-column provenance, cohort membership, the re-evaluation task-draw rule, and hosting).
 
 ---
 
