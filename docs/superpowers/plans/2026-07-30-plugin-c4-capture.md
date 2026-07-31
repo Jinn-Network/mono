@@ -329,12 +329,14 @@ In `.github/scripts/plugin-tree-package-inventory.test.mjs`, replace the `runtim
 ```js
   ['runtime', {
     dependencies: [
+      '@jinn-network/evidence-catalog-sqlite',
       '@jinn-network/evidence-discovery',
       '@jinn-network/evidence-local-runtime',
       '@jinn-network/evidence-protocol',
       '@jinn-network/evidence-repository',
       '@jinn-network/evidence-trajectory',
       '@jinn-network/execution-recorder',
+      '@jinn-network/trust-core',
       'zod',
     ],
     devDependencies: ['@types/node', 'typescript', 'vitest'],
@@ -348,9 +350,11 @@ This is **not** the only guard edit: C3 R-C3-63/64 also enforce exact maps in
 extend those maps in Step 3b — updating only `JINN_DEPENDENCY_GRAPH` leaves source-
 boundaries red on `validateExactDependencySections` / undeclared deps / resolutions.
 
-C3 pre-seeds `SIBLING_TREE_DIRS` and `PERMITTED_PACKAGES` with all seven packages, including `@jinn-network/evidence-discovery` (added at C4's request, C3 finding F-C3-9): `LocalEvidenceRuntime.catalog` is typed `EvidenceCatalogReader`, which is *declared* in `@jinn-network/evidence-discovery` (`packages/evidence/discovery/src/catalog/types.ts:225`) and only re-exported as a type by local-runtime (`packages/evidence/local-runtime/src/types.ts:4`, `:103`), so without it `tsc` cannot resolve the catalog type.
+`evidence-catalog-sqlite` and `trust-core` are **install-graph** deps required by Yarn 4
+portal inheritance from `evidence-local-runtime` / `evidence-trajectory` (finding F-C4-2).
+They are not new public capture imports.
 
-> Name collision to keep straight: `@jinn-network/evidence-discovery` (the catalog contract, at `packages/evidence/discovery`) is a **different package** from the `@jinn-network/record-discovery-*` family (the announcement client, at `packages/discovery/*`) that C5 consumes. Both are permitted by the boundary guard.
+C3 pre-seeds `SIBLING_TREE_DIRS` and `PERMITTED_PACKAGES` with the stack packages, including `@jinn-network/evidence-discovery` (added at C4's request, C3 finding F-C3-9): `LocalEvidenceRuntime.catalog` is typed `EvidenceCatalogReader`, which is *declared* in `@jinn-network/evidence-discovery` (`packages/evidence/discovery/src/catalog/types.ts:225`) and only re-exported as a type by local-runtime (`packages/evidence/local-runtime/src/types.ts:4`, `:103`), so without it `tsc` cannot resolve the catalog type. Confirm `PERMITTED_PACKAGES` / `SIBLING_TREE_DIRS` already list `evidence-catalog-sqlite` and `trust-core` (C3 seeded them for trajectory/local-runtime); if a name is missing, add it in this same task.
 
 - [x] **Step 2: Run the guard to verify it fails**
 
@@ -366,31 +370,40 @@ In `plugin/runtime/package.json`, replace the `dependencies` and `resolutions` b
 
 ```json
   "dependencies": {
+    "@jinn-network/evidence-catalog-sqlite": "0.1.0",
     "@jinn-network/evidence-discovery": "0.1.0",
     "@jinn-network/evidence-local-runtime": "0.1.0",
     "@jinn-network/evidence-protocol": "0.1.0",
     "@jinn-network/evidence-repository": "0.1.0",
     "@jinn-network/evidence-trajectory": "0.1.0",
     "@jinn-network/execution-recorder": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0",
     "zod": "4.4.3"
   },
   "resolutions": {
+    "@jinn-network/evidence-catalog-sqlite": "portal:../../packages/evidence/catalog-sqlite",
     "@jinn-network/evidence-discovery": "portal:../../packages/evidence/discovery",
     "@jinn-network/evidence-local-runtime": "portal:../../packages/evidence/local-runtime",
     "@jinn-network/evidence-protocol": "portal:../../packages/evidence/protocol",
     "@jinn-network/evidence-repository": "portal:../../packages/evidence/repository",
     "@jinn-network/evidence-trajectory": "portal:../../packages/evidence/trajectory",
     "@jinn-network/execution-recorder": "portal:../../packages/evidence/execution-recorder",
+    "@jinn-network/trust-core": "portal:../../packages/trust/core",
     "vite": "6.4.3"
   }
 ```
 
+**(Finding F-C4-2.)** Yarn 4 does not inherit portal resolutions from portaled packages.
+`evidence-local-runtime` / `evidence-trajectory` pull `evidence-catalog-sqlite` and
+`trust-core`; those must be **direct** deps + portal resolutions here (install-graph only —
+production capture source still imports only the six named stack surfaces). Mirror the same
+names in `JINN_DEPENDENCY_GRAPH` and `APPROVED_RUNTIME_*` maps.
 - [x] **Step 3b: Extend the closed-world approved maps (finding C4-P1)**
 
 In `.github/scripts/plugin-tree-guard-common.mjs`:
 
-1. `APPROVED_RUNTIME_DEPENDENCIES` — keep `zod: '4.4.3'`; add each of the six `@jinn-network/*` packages at `'0.1.0'`.
-2. `APPROVED_RUNTIME_RESOLUTIONS` — keep `vite: '6.4.3'`; add the six `portal:../../packages/...` entries exactly as in `package.json` `resolutions` (omit the `vite` duplicate if already present).
+1. `APPROVED_RUNTIME_DEPENDENCIES` — keep `zod: '4.4.3'`; add each of the eight `@jinn-network/*` packages at `'0.1.0'` (six named stack surfaces plus `evidence-catalog-sqlite` and `trust-core` per F-C4-2).
+2. `APPROVED_RUNTIME_RESOLUTIONS` — keep `vite: '6.4.3'`; add the eight `portal:../../packages/...` entries exactly as in `package.json` `resolutions` (omit the `vite` duplicate if already present).
 3. `APPROVED_RUNTIME_DEV_DEPENDENCIES` — unchanged for C4 (no new types packages).
 
 - [x] **Step 4: Build the portal targets and install**
@@ -451,6 +464,8 @@ git commit -m "chore(plugin-runtime): declare the capture stack dependencies and
 **Files:**
 - Create: `plugin/runtime/src/capture/paths.ts`, `src/capture/paths.test.ts`
 - Modify: `plugin/runtime/src/config.ts`
+- Modify: `.github/scripts/plugin-tree-ast-custody.mjs` (F-C4-P3 carve-out)
+- Modify: `.github/scripts/plugin-tree-source-boundaries.test.mjs` (carve-out probes)
 
 **Interfaces:**
 - Consumes: `RuntimeConfig`, `PluginRuntimeError` (C3).
@@ -527,10 +542,11 @@ describe("capture paths", () => {
   });
 
   test("rejects a session id that could escape the staging tree", () => {
-    for (const candidate of ["", ".", "..", "a/b", "a\\b", "ab", "-lead", "A".repeat(129)]) {
+    for (const candidate of ["", ".", "..", "a/b", "a\\b", "-lead", "A".repeat(129)]) {
       expect(() => assertSafeSessionId(candidate)).toThrow(PluginRuntimeError);
     }
     expect(() => assertSafeSessionId("0f2c-91ab")).not.toThrow();
+    expect(() => assertSafeSessionId("ab")).not.toThrow(); // 2-char ids are valid (F-C4-P2)
   });
 
   test.skipIf(process.platform === "win32")(
@@ -597,6 +613,35 @@ cd plugin/runtime && yarn test src/capture/paths.test.ts
 ```
 
 Expected: FAIL — `Failed to resolve import "./paths.js"`.
+
+- [ ] **Step 2b: Capture FS/platform custody carve-out (finding F-C4-P3)**
+
+C3 forbids `node:fs*` and ambient `process` outside `src/bin.ts`. Capture staging is local
+filesystem work by design (owner-only mkdir/chmod, session feed I/O). Before landing
+`paths.ts`, carve a **file-scoped** exception for production sources under
+`plugin/runtime/src/capture/**` (not tests — tests already use Node APIs freely):
+
+In `.github/scripts/plugin-tree-ast-custody.mjs` / `scanProductionSources`:
+
+1. Detect `isCaptureProduction` when the absolute path contains `/src/capture/` or
+   `\src\capture\` and is a production source (already filtered by
+   `productionSourceFiles`).
+2. Pass `isCaptureProduction` into `scanSourceFile` options beside `isBinEntry`.
+3. When `isCaptureProduction`:
+   - Allow imports of `node:fs/promises` and `node:fs` (and their `fs`/`fs/promises`
+     aliases). Still forbid `node:child_process`, network modules, dynamic nonliteral
+     imports, `eval`/`Function`, and locale APIs.
+   - Allow **read-only** `process.platform` (and `process.platform === …` comparisons).
+   - Still forbid `process.env`, `process.argv`, `process.exit`/`kill`, process mutation,
+     and ambient process escape to unknown callees — same as non-bin law.
+4. Add red/green probes in `.github/scripts/plugin-tree-source-boundaries.test.mjs`:
+   - fixture under a capture-like path importing `node:fs/promises` + reading
+     `process.platform` → no violation
+   - same path using `process.env` → still violates
+   - non-capture production path importing `node:fs/promises` → still violates
+
+Do **not** broaden the carve-out to all of `plugin/runtime/src/`. Corpus (C5) gets its own
+disposition if needed.
 
 - [ ] **Step 3: Add the config fields**
 
@@ -748,14 +793,18 @@ export async function ensureOwnerOnlyFile(path: string): Promise<void> {
 
 ```bash
 cd plugin/runtime && yarn test src/capture/paths.test.ts && yarn typecheck
+node --test .github/scripts/plugin-tree-source-boundaries.test.mjs
 ```
 
-Expected: PASS (7 tests; the two permission tests skip on Windows).
+Expected: PASS (7 tests; the two permission tests skip on Windows); custody carve-out green;
+non-capture FS ban still red in its existing probes.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add plugin/runtime/src
+git add plugin/runtime/src \
+  .github/scripts/plugin-tree-ast-custody.mjs \
+  .github/scripts/plugin-tree-source-boundaries.test.mjs
 git commit -m "feat(plugin-runtime): capture staging paths with owner-only creation"
 ```
 
@@ -5654,5 +5703,25 @@ amended in place.
 leaves Task 2 red on `validateExactDependencySections` / undeclared production deps /
 portal `resolutionViolations`. **Disposition (applied in Task 2 Steps 3b and 7):** extend
 `APPROVED_RUNTIME_DEPENDENCIES` and `APPROVED_RUNTIME_RESOLUTIONS` in
-`plugin-tree-guard-common.mjs` with C4's six `@jinn-network/*` packages and portal entries;
+`plugin-tree-guard-common.mjs` with C4's `@jinn-network/*` packages and portal entries;
 include that file in the Task 2 commit list.
+
+## 2026-07-31 implementation-time findings (F-C4-2, F-C4-P2, F-C4-P3)
+
+Surfaced by the C4 sub-coordinator at Tasks 2–3. Ratified by the program coordinator;
+plan text above amended in place.
+
+**F-C4-2 — Yarn requires direct portal deps for transitive Jinn packages.** Same class as
+C2-F1: portal resolutions do not inherit. `evidence-catalog-sqlite` and `trust-core` must
+be direct deps + resolutions (already green on the branch). **Disposition:** keep them as
+install-graph deps; update Task 2 graph/maps/package.json lists; production capture source
+does not gain new public imports of those packages.
+
+**F-C4-P2 — `"ab"` vs session-id regex.** Plan test rejected `"ab"` while
+`/^[a-z0-9][a-z0-9-]{0,127}$/` accepts it. **Disposition:** drop `"ab"` from the reject
+list; assert it is accepted. Do not tighten the regex.
+
+**F-C4-P3 — C3 custody vs capture FS I/O.** Verbatim `paths.ts` (and later capture modules)
+need `node:fs/promises` and read-only `process.platform`. **Disposition:** file-scoped
+carve-out for `plugin/runtime/src/capture/**` production sources (Task 3 Step 2b); keep
+`process.env` and non-capture production FS bans intact.
