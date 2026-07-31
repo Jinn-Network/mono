@@ -1,6 +1,6 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { describe, it, expect, afterEach, beforeAll, vi } from 'vitest';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import solverNetsCommand from '../../src/cli/commands/solver-nets.js';
 import { makeCommandCtx } from '../_support/cli.js';
@@ -23,6 +23,22 @@ function seedValidatedPool(dir: string, entries: Record<string, { scorable: bool
     ),
   }));
 }
+
+/**
+ * `solver-nets` falls back to `~/.jinn-client/config.json` when no `--config` is passed, and
+ * hands that path to `loadConfig` as an EXPLICIT path — which throws when the file is absent.
+ * These tests exercise that fallback, so they used to pass only because the developer running
+ * them happened to have a real operator config in their home directory; on a clean machine
+ * they failed. Home is now isolated per worker (test/_support/isolate-home.ts), so the
+ * fallback config is seeded there deterministically instead.
+ */
+beforeAll(() => {
+  mkdirSync(join(homedir(), '.jinn-client'), { recursive: true });
+  writeFileSync(
+    join(homedir(), '.jinn-client', 'config.json'),
+    JSON.stringify({ network: 'testnet' }),
+  );
+});
 
 /** loadConfig reads process.env for JINN_SWE_REBENCH_V2_STATE_DIR (#1000). */
 function withSweStateDirEnv(dir: string): () => void {
