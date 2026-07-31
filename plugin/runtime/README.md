@@ -1,10 +1,27 @@
 # @jinn-network/plugin-runtime
 
 The Jinn Plugin runtime skeleton for C3: a small capability container with typed
-configuration injection, health reporting, and structured logging. Later components add
-capture, retrieval, corpus mirror, relevance, and MCP surfaces on top of this scaffold.
+configuration injection, health reporting, and structured logging. C5 adds corpus
+library surfaces on top of that scaffold; later components add capture, publication,
+relevance, and MCP.
 
-There is no capture, retrieval, publication, or MCP capability in this package yet.
+**Corpus library (C5).** Exported from the package root (`src/corpus/`, re-exported
+via `index.ts`): `createCorpusCapability` composes mirror, retrieval, reader, and health
+checks; lower-level entry points include `createCorpusMirror`, `createCorpusRetrieval`,
+`createCorpusReader`, `openCorpusMirrorStore` / `withCorpusMirrorStore`, plus admission
+and chain-verification helpers. See the corpus module exports for the full surface.
+
+**Finding F1 (chain verification).** This package ships no announcement-chain verification
+driver. Default posture is fail-closed: with `corpus.acknowledgeUnverifiedChain` left at
+its default (`false`), the mirror indexes nothing. Operators who accept an unverified
+posture set `corpus.acknowledgeUnverifiedChain: true` in config; driver wiring is
+deferred.
+
+**Binary wiring.** `bin.ts` / `jinn-plugin-runtime` still registers `capabilities: []`
+until a later wave wires corpus into the process. `health` therefore reports an empty
+check list today; pack-smoke expects that. Use the library API directly until then.
+
+Capture, publication, and MCP are not in this package yet.
 
 The runtime is a **capability container**. Configuration is typed and injected — the
 library never reads the ambient environment; only the binary does, and it passes what it

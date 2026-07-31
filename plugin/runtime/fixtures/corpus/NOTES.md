@@ -11,3 +11,5 @@ Regenerate with:
        execution-evidence.valid.json
 
 These fixtures are test-only and are not in the package's `files` list.
+This note is named `NOTES.md` (not `README.md`) because Yarn always
+includes nested `README*` files in tarballs regardless of `files`.

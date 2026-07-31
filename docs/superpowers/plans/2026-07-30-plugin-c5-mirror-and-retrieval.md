@@ -5060,7 +5060,7 @@ git commit -m "feat(plugin-runtime): expose the corpus as a runtime capability w
 ### Task 14: Fixtures, the end-to-end proof, and the guards
 
 **Files:**
-- Create: `plugin/runtime/fixtures/corpus/execution-evidence.valid.json`, `fixtures/corpus/README.md`
+- Create: `plugin/runtime/fixtures/corpus/execution-evidence.valid.json`, `fixtures/corpus/NOTES.md`
 - Modify: `plugin/runtime/src/corpus/testing-fixture.ts` (add `seedMirror`, `executionProjection`)
 - Create: `plugin/runtime/src/corpus/corpus.integration.test.ts`
 
@@ -5079,7 +5079,7 @@ ls packages/evidence/protocol/fixtures/
 Copy the conforming Execution Evidence golden fixture into
 `plugin/runtime/fixtures/corpus/execution-evidence.valid.json`, byte-for-byte. If the file name differs from what `ls` shows, use the actual one — the requirement is that this tree never authors a second copy of the record family's truth.
 
-Write `fixtures/corpus/README.md`:
+Write `fixtures/corpus/NOTES.md`:
 
 ```markdown
 # Corpus test fixtures
@@ -5609,4 +5609,30 @@ gates, open/update the PR targeting `plugin/c3-product-tree`, then await wave-1 
 
 **Repair task (coordinator-dispatched):** implement preferred disposition; prove
 `plugin-tree-source-boundaries` green; push PR.
+
+
+## 2026-07-31 wave-1 whole-component review resolution (wave 2 — final under cap)
+
+Wave-1 whole-component review against defect head `6f0ae7165`. This is the **only** repair wave under the two-wave review cap. Probe-first; fill Red/Green; checkboxes.
+
+| ID | Severity | Disposition |
+| --- | --- | --- |
+| **C5-W1-1** | Critical | Keep fixtures out of published tarball. CI `yarn pack:smoke` fails: `private/test material leaked into tarball: package/fixtures/corpus/README.md`. Yarn always includes nested READMEs; fixture README claimed fixtures aren't in `files` but still ships. Fix: rename/move nested README off always-included rules, or pack-ignore so `/fixtures/` never enters tarball. Prove `yarn pack:smoke` green. |
+| **C5-W1-2** | Important | Update `plugin/runtime/README.md` to honestly describe C5 library surfaces (`createCorpusCapability`, retrieval, mirror/store). Name F1 (no chain driver; unverified posture). Clarify `bin.ts` still registers `capabilities: []` until later wiring (pack-smoke expects empty health checks). Stop claiming there is no retrieval/corpus yet. |
+
+### C5-W1-1 — fixtures README leaks into tarball
+
+- [x] **Red:** `cd plugin/runtime && yarn pack:smoke` fails with `private/test material leaked into tarball: package/fixtures/corpus/README.md` (Yarn always-includes nested `README*`).
+- [x] **Green:** Nested fixture README renamed/moved or pack-ignored so `/fixtures/` never enters the tarball; `yarn pack:smoke` leak check passes; tarball still has `package/README.md`, `package/dist/*`, `package/package.json` and no `/fixtures/`.
+- [x] Gates: `yarn typecheck && yarn test && yarn pack:smoke` + plugin-tree inventory + source-boundaries green.
+
+Renamed `plugin/runtime/fixtures/corpus/README.md` → `NOTES.md` so Yarn's always-included `README*` rule no longer ships test fixtures. Red: `yarn pack:smoke` failed with `private/test material leaked into tarball: package/fixtures/corpus/README.md`. Green: `tar -tzf` on packed runtime shows no `/fixtures/` entries; pack leak guard passes. `pack:smoke` was then unblocked by packing all eight `@jinn-network/*` portal dependencies into temp `.tgz` archives and `file:`-mapping them on the isolated consumer `package.json` (latent failure masked by the README leak — consumer `npm install` had been 404ing unpublished portal packages). `yarn typecheck`, `yarn test`, and `yarn pack:smoke` pass locally; plugin-tree gates left for coordinator.
+
+### C5-W1-2 — runtime README honesty
+
+- [x] **Red:** `plugin/runtime/README.md` still claims there is no capture/retrieval/corpus capability and describes only the C3 skeleton.
+- [x] **Green:** README describes C5 library surfaces (`createCorpusCapability`, retrieval, mirror/store), names F1 (no chain driver; unverified posture), and clarifies `bin.ts` still registers `capabilities: []` until later wiring (pack-smoke empty health checks). Does not claim retrieval/corpus are absent.
+- [x] No behavior change required beyond docs; pack-smoke consumer still sees empty `capabilities: []` health checks.
+
+README now documents corpus exports (`createCorpusCapability`, mirror/retrieval/reader/store, admission/chain-verification helpers), F1 fail-closed default vs `acknowledgeUnverifiedChain`, and that the binary still passes `capabilities: []`.
 
