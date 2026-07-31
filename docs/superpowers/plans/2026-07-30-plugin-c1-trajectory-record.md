@@ -3191,4 +3191,3 @@ broad tests alone.
 
 All ten rows move from pending to commit SHA + exact red/green probe evidence only after
 red→green verification. L4 remains external/`not-evaluated`.
-
